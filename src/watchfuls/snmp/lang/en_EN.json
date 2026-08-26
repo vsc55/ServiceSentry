@@ -42,6 +42,7 @@
         "snmp_sampled": "SNMP: {} 📊 {} values",
         "snmp_sample_down": "SNMP: {} 💥 no data ({})",
         "snmp_state_bad": "SNMP: {} 💥 {}: {}",
+        "snmp_wan_down": "SNMP: {} 💥 no internet — {}: {}",
         "snmp_state_warn": "SNMP: {} ⚠ {}: {}",
         "snmp_step_resolve": "Resolving the device profiles",
         "snmp_step_read": "Reading the metrics",
@@ -76,6 +77,7 @@
             "measurement",
             "state"
         ],
+        "snmp_wan_down": ["device", "port", "state"],
         "snmp_state_warn": [
             "device",
             "measurement",

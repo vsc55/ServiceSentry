@@ -177,6 +177,94 @@ class TestAProportionIsNotALine:
                                   'field': 'mt_temp'}
 
 
+class TestTheHalvesAndThePair:
+    """Reported from the screen twice, and the two reports do not contradict each other.
+
+    First: a card set to "traffic in" drew both lines — which overrules the source somebody
+    chose in its own selector. Then, once the numbers had been checked: "sería bueno una que
+    tenga las dos".
+
+    So the pair is an option of its OWN rather than a change to either half. Which two series
+    belong in one picture, and what to call that picture, are the profile's word — the same one
+    the device's own page draws by.
+    """
+
+    def _charts(self, **values):
+        got = _run({'host.rt/metrics': _dev('SW02', **values)})
+        return {c['field']: c for c in got['entries'][0]['charts']}
+
+    def test_each_half_is_offered_on_its_own(self):
+        by = self._charts(if_total_in=1.2e7, if_total_out=1.3e7)
+        assert by['if_total_in']['series']['field'] == 'if_total_in'
+        assert not by['if_total_in'].get('with'), 'it would draw over the chosen source'
+        assert by['if_total_out']['series']['field'] == 'if_total_out'
+
+    def test_and_the_PAIR_is_offered_beside_them(self):
+        by = self._charts(if_total_in=1.2e7, if_total_out=1.3e7)
+        both = by['if_total_in+']
+        assert both['label'] == 'Tráfico (todos los puertos)', 'the profile names the picture'
+        assert [m['field'] for m in both['with']] == ['if_total_out']
+        assert both['series']['field'] == 'if_total_in', 'the pair leads with its first half'
+
+    def test_a_pair_whose_other_half_this_box_does_not_serve_is_not_one(self):
+        """A profile can declare a companion the device never answers, and an empty line with
+        a legend entry is a chart claiming a series that is not there."""
+        by = self._charts(if_total_in=1.2e7)
+        assert 'if_total_in+' not in by
+        assert 'if_total_in' in by
+
+    def test_and_a_figure_that_pairs_with_nothing_is_offered_once(self):
+        by = self._charts(mt_temp=62)
+        assert list(by) == ['mt_temp']
+
+
+class TestAPortSomebodyMarkedLeadsTheList:
+    """Asked for from the screen: the traffic and the state of the ports marked as watched,
+    up at the top with the CPU and the totals.
+
+    None of them is a headline of anything — the condition of a switch is its CPU and its fans,
+    not one of thirty cables — so they were eleven hundred entries down a list. But a marked
+    port is a port somebody is watching: that is what the mark MEANS.
+    """
+
+    def _charts(self, extra=None, watched=True):
+        row = {'_row': 'gigabitethernet16', 'if_hc_in': 395995.08, 'if_hc_out': 66507.24,
+               'if_oper': 1}
+        if watched:
+            row['_watched'] = True
+        status = {'host.sw/metrics': _dev('SW02', lks_cpu_1m=12),
+                  'host.sw/gi16': {'status': True, 'other_data': dict(row, **(extra or {}))}}
+        return _run(status)['entries'][0]['charts']
+
+    def test_its_readings_are_offered_at_all(self):
+        labels = [c['label'] for c in self._charts()]
+        assert 'Tráfico de entrada (64 bits) — gigabitethernet16' in labels
+        assert 'Estado operativo — gigabitethernet16' in labels
+
+    def test_and_they_LEAD_the_list(self):
+        """A measurement you asked to be told about is the one you look for."""
+        charts = self._charts()
+        assert 'gigabitethernet16' in charts[0]['label']
+        assert charts[-1]['label'] == 'CPU (último minuto)' or any(
+            'CPU' in c['label'] for c in charts)
+
+    def test_each_points_at_the_ROWS_series_and_not_the_devices(self):
+        charts = self._charts()
+        first = charts[0]
+        assert first['series']['key'] == 'host.sw/gi16'
+        assert first['field'] == 'host.sw/gi16|' + first['series']['field']
+
+    def test_a_port_nobody_marked_is_not_promoted(self):
+        """It is still reachable — every series the history holds is offered further down —
+        but a list of the ones that matter is only useful while it is short."""
+        labels = [c['label'] for c in self._charts(watched=False)]
+        assert not [x for x in labels if 'gigabitethernet16' in x]
+
+    def test_and_a_reading_no_profile_names_is_not_invented(self):
+        labels = [c['label'] for c in self._charts({'made_up_field': 7})]
+        assert not [x for x in labels if 'made_up' in x]
+
+
 class TestItIsWiredIn:
 
     def test_the_module_declares_the_widget(self):

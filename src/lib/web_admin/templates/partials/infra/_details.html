@@ -383,7 +383,8 @@ function _infraRowsPane(metrics) {
                     <span class="text-truncate">${esc(r.name)}</span>
                     <span class="ms-auto" data-watch-bell="${escAttr(r.key)}">${
                         _infraIsWatched((r.items[0] || {}).module, r.key)
-                            ? _infraWatchBell() : ''}</span>
+                            ? _infraWatchBell(_infraWatchRole((r.items[0] || {}).module, r.key))
+                            : ''}</span>
                 </button>`).join('')}</nav>
             <div style="flex:1 1 22rem;min-width:0">${_infraRowBody(open)}</div>
         </div>`;
@@ -392,8 +393,53 @@ function _infraRowsPane(metrics) {
 //: The bell on the rail, and the inside of the button in the body. Written once each because
 //: both are drawn TWICE — when the pane is built and again when the flag changes — and a
 //: second copy of a fragment is a second thing to keep in step.
-function _infraWatchBell() {
-    return `<i class="bi bi-bell-fill ss-fs-1" title="${escAttr(t('infra_watch_on'))}"></i>`;
+function _infraWatchBell(role) {
+    // The bell ALWAYS, and the role beside it. A role implies the mark — a port declared as
+    // the way out is a port being watched — so drawing the role INSTEAD said one true thing
+    // by hiding another: the rail stopped showing that anybody was watching it at all.
+    // Reported from the screen.
+    const spec = INFRA_WATCH_ROLES[role || ''];
+    const bell = `<i class="bi bi-bell-fill ss-fs-1"
+        title="${escAttr(t('infra_watch_on'))}"></i>`;
+    if (!spec) return bell;
+    return `<span class="d-inline-flex align-items-center gap-1">${bell}<i
+        class="bi ${escAttr(spec.icon)} ss-fs-1"
+        title="${escAttr(t(spec.label))}"></i></span>`;
+}
+
+/** "This port is the line to the street."
+ *
+ *  A role always implies the mark — a port declared as the way out is a port being watched,
+ *  and two separate switches would offer a state where the answer to "tell me when the
+ *  internet goes" is "no". So this sets both, and turning it off leaves the plain mark: it
+ *  says one thing less about the port, not that nobody is watching it.
+ */
+function _infraWanBtnHtml(mod, row) {
+    const spec = INFRA_WATCH_ROLES.wan;
+    const on = _infraWatchRole(mod, row) === 'wan';
+    return `<button id="infra-wan-btn" data-row="${escAttr(row)}"
+        class="btn btn-sm ${on ? spec.cls : 'btn-secondary'}"
+        onclick="_infraSetWatch(${jsStr(mod)},${jsStr(row)},true,${on ? "''" : "'wan'"})"
+        title="${escAttr(t(on ? 'infra_watch_wan_off_tt' : 'infra_watch_wan_on_tt'))}"
+        ><i class="bi ${escAttr(spec.icon)} me-1"></i>${esc(t(spec.label))}</button>`;
+}
+
+/** The watch button — and it is DISABLED while the row carries a role.
+ *
+ *  A role implies the mark, so turning the mark off would take the role with it: the port
+ *  would stop being the line to the street because somebody meant to stop being told about it,
+ *  and nothing would say so. Reported from the screen. Dropping the role first is one click
+ *  and it is the click that means what it says.
+ */
+function _infraWatchBtnHtml(mod, row) {
+    const on = _infraIsWatched(mod, row);
+    const role = _infraWatchRole(mod, row);
+    const tip = role ? t('infra_watch_locked_tt')
+                     : t(on ? 'infra_watch_off_tt' : 'infra_watch_on_tt');
+    return `<button id="infra-watch-btn" data-row="${escAttr(row)}"
+        class="btn btn-sm ${on ? 'btn-warning' : 'btn-secondary'}"${role ? ' disabled' : ''}
+        onclick="_infraSetWatch(${jsStr(mod)},${jsStr(row)},${on ? 'false' : 'true'})"
+        title="${escAttr(tip)}">${_infraWatchBtnInner(on)}</button>`;
 }
 
 function _infraWatchBtnInner(on) {
@@ -417,23 +463,22 @@ function _infraWatchPaint(mod, row) {
     // By comparison and not by selector: a row key is the name the device gave it, and
     // building a selector out of that is one apostrophe away from matching nothing. The rail
     // is a few dozen items.
+    const role = _infraWatchRole(mod, row);
     document.querySelectorAll('[data-watch-bell]').forEach(el => {
-        if (el.dataset.watchBell === row) el.innerHTML = on ? _infraWatchBell() : '';
+        if (el.dataset.watchBell === row) el.innerHTML = on ? _infraWatchBell(role) : '';
     });
     const btn = document.getElementById('infra-watch-btn');
     if (!btn || btn.dataset.row !== row) return;    // the body shows another port
-    btn.classList.toggle('btn-warning', on);
-    btn.classList.toggle('btn-secondary', !on);
-    btn.title = t(on ? 'infra_watch_off_tt' : 'infra_watch_on_tt');
-    // A FUNCTION and not an `onclick` attribute. `jsStr` HTML-escapes what it quotes,
-    // because everywhere else it is written INTO markup and the parser undoes that when it
-    // compiles the handler. `setAttribute` sets the value literally, so the handler read
-    // `_infraSetWatch(&quot;snmp&quot;,…)` — a syntax error, and the button stopped
-    // responding until something re-rendered it through the HTML path. Reported from the
-    // screen exactly that way: flag a port, then nothing happens until you switch ports and
-    // come back. Patching a live element has no markup in it, so it needs no quoting.
-    btn.onclick = () => _infraSetWatch(mod, row, !on);
-    btn.innerHTML = _infraWatchBtnInner(on);
+    // Through the one builder: whether it is disabled, what colour it is and what its click
+    // does are three answers to one question, and patching them one at a time is how they
+    // start disagreeing.
+    // Replaced through the one builder rather than patched attribute by attribute: whether it
+    // is disabled, what colour it is, what its tooltip says and what its click does are four
+    // answers to one question, and setting them one at a time is how they start disagreeing.
+    // It also settles an older trap — an `onclick` patched with `setAttribute` was written
+    // HTML-escaped and became a syntax error, so the button silently stopped responding until
+    // something re-rendered it through the markup path. Markup is the markup path.
+    btn.outerHTML = _infraWatchBtnHtml(mod, row);
 }
 
 /** Whether somebody has said this row is worth an alert.
@@ -444,18 +489,36 @@ function _infraWatchPaint(mod, row) {
  *  the cable is knowledge about THIS installation, so it is recorded against the machine and
  *  read back from the machine's own record. */
 function _infraIsWatched(module, row) {
-    const list = ((_infraDetail || {}).host || {}).watch || [];
-    return list.some(w => w && w.module === module && w.row === row);
+    return !!_infraWatchMark(module, row);
 }
+
+/** The mark itself, or null. Separate because a mark can now say WHAT the row is: `wan` is
+ *  the port a machine reaches the internet through, which no MIB answers — only whoever ran
+ *  the cable knows, which is the same reason the plain mark exists at all. */
+function _infraWatchMark(module, row) {
+    const list = ((_infraDetail || {}).host || {}).watch || [];
+    return list.find(w => w && w.module === module && w.row === row) || null;
+}
+
+function _infraWatchRole(module, row) {
+    return String((_infraWatchMark(module, row) || {}).role || '');
+}
+
+//: How a row wears the role it was given. One entry, because `wan` is the one that exists and
+//: every word here costs the core a behaviour — a mark that reads as a promise and does
+//: nothing is worse than no mark.
+const INFRA_WATCH_ROLES = {
+    wan: {icon: 'bi-globe2', label: 'infra_watch_wan', cls: 'btn-info'},
+};
 
 /** Say so, or stop saying so. The record comes back from the server rather than being
  *  patched here: what is on screen then IS what is stored, and a failed save leaves the
  *  button where it was instead of lying about it until the next refresh. */
-async function _infraSetWatch(module, row, on) {
+async function _infraSetWatch(module, row, on, role) {
     const uid = _infraHost;
     if (!uid) return;
     const r = await apiPost(`/api/v1/infra/hosts/${encodeURIComponent(uid)}/watch`,
-                            {module, row, on: !!on});
+                            {module, row, on: !!on, role: role || ''});
     // `apiPost` answers `{status, data}` — the payload is one level down. Read as `r.watch`
     // it was ALWAYS undefined, so every click replaced the list with an empty one: the bell
     // never appeared on the rail, the button never changed colour, and a flag set on another
@@ -472,6 +535,11 @@ async function _infraSetWatch(module, row, on) {
     if (_infraDetail && _infraDetail.host) _infraDetail.host.watch = said.watch;
     showToast(t(on ? 'infra_watch_added' : 'infra_watch_removed'), 'success');
     _infraWatchPaint(module, row);
+    // The role button is the other half of the same mark, so it has to follow — and it is
+    // repainted through the markup rather than patched, because which of the two states it is
+    // in decides its colour, its tooltip and what its click does.
+    const wanBtn = document.getElementById('infra-wan-btn');
+    if (wanBtn && wanBtn.dataset.row === row) wanBtn.outerHTML = _infraWanBtnHtml(module, row);
 }
 
 /** The state of a row on the rail, so which ports are down is readable without opening any.
@@ -520,11 +588,9 @@ function _infraRowBody(r) {
             <span class="fw-semibold ss-fs-5 text-truncate">${esc(r.name)}</span>
             ${r.group ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
                 >${esc(r.group)}</span>` : ''}
-            ${may && mod ? `<button id="infra-watch-btn" data-row="${escAttr(r.key)}"
-                class="btn btn-sm ${on ? 'btn-warning' : 'btn-secondary'} ms-auto"
-                onclick="_infraSetWatch(${jsStr(mod)},${jsStr(r.key)},${on ? 'false' : 'true'})"
-                title="${escAttr(t(on ? 'infra_watch_off_tt' : 'infra_watch_on_tt'))}"
-                >${_infraWatchBtnInner(on)}</button>` : ''}
+            ${may && mod ? `<span class="ms-auto d-flex gap-1">
+                ${_infraWanBtnHtml(mod, r.key)}
+                ${_infraWatchBtnHtml(mod, r.key)}</span>` : ''}
         </div>
         ${_infraRowFactsHtml(r.key)}
         ${tiles.length

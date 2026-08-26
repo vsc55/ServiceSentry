@@ -18,9 +18,9 @@ has registered, a machine that has never answered.
 from lib.core.infra import topology
 
 
-def _host(uid, name, address='', status='up', device_type='server'):
+def _host(uid, name, address='', status='up', device_type='server', watch=None):
     return {'uid': uid, 'name': name, 'address': address, 'status': status,
-            'device_type': device_type}
+            'device_type': device_type, 'watch': list(watch or ())}
 
 
 def _attrs(ip='', gateway='', row=''):
@@ -95,8 +95,39 @@ class TestTheEdgesSayWhatKindTheyAre:
             [_host('a', 'erebor'), _host('g', 'router')],
             {'a': _attrs('192.168.250.21/24', '192.168.250.254'),
              'g': _attrs('192.168.250.254/24')})
-        assert out['edges'] == [{'from': 'a', 'to': 'g',
-                                 'address': '192.168.250.254', 'kind': 'gateway'}]
+        assert out['edges'] == [{'from': 'a', 'to': 'g', 'address': '192.168.250.254',
+                                 # …and no port, because nobody declared one: the next hop
+                                 # says where it goes, only a mark says which cable.
+                                 'port': '', 'said': False, 'kind': 'gateway'}]
+
+    def test_a_port_somebody_DECLARED_is_the_way_out(self):
+        """No MIB answers which of thirty ports carries the office's line. It is knowledge
+        about the installation, written down where the rest of it is — and read here rather
+        than deduced, because the deduction is a different claim: a next hop is what the
+        routing table happens to say today."""
+        out = topology.build(
+            [_host('r', 'router', watch=[{'module': 'snmp', 'row': 'ether1', 'role': 'wan'}])],
+            {'r': _attrs('10.0.0.1/24', '10.0.0.254')})
+        assert out['nodes'][0]['wan'] == 'ether1'
+        assert out['edges'][0]['port'] == 'ether1'
+        assert out['edges'][0]['said'] is True
+
+    def test_and_it_is_drawn_even_where_the_device_states_no_next_hop(self):
+        """A switch states none — most of them do — so a machine carrying the line would have
+        contributed nothing to the picture while carrying it."""
+        out = topology.build(
+            [_host('s', 'sw', watch=[{'module': 'snmp', 'row': 'sfp1', 'role': 'wan'}])],
+            {'s': _attrs('10.0.0.2/24')})
+        assert [e['kind'] for e in out['edges']] == ['exit']
+        assert out['edges'][0]['port'] == 'sfp1'
+
+    def test_an_ordinary_mark_declares_nothing(self):
+        """`watch` says "tell me about this row". Only the role says what the row IS."""
+        out = topology.build(
+            [_host('r', 'router', watch=[{'module': 'snmp', 'row': 'ether1'}])],
+            {'r': _attrs('10.0.0.1/24', '10.0.0.254')})
+        assert out['nodes'][0]['wan'] == ''
+        assert out['edges'][0]['said'] is False
 
     def test_a_gateway_nobody_registered_is_drawn_as_the_outside(self):
         """Inventing a node for it would put a machine on the fleet that nobody is watching,

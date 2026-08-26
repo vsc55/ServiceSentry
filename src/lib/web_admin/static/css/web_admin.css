@@ -1437,13 +1437,38 @@ html.ss-nocss body { visibility: visible; }
     cursor: grab;
 }
 
-/* The panel that describes one cable. Opaque and over the drawing: it carries four controls
-   — both machines and both ports — and a translucent one sitting on a diagram is a set of
-   buttons you cannot read the labels of. */
+/* The panel that describes one cable or one machine. It stands over the drawing, so it is in
+   front of part of the thing it is describing — asked for from the screen the other way round:
+   let the picture through.
+   Opaque was a deliberate choice once, and the reason still holds: it carries four controls,
+   and a plain translucent panel is a set of buttons whose labels you cannot read against a
+   diagram. What makes translucency survivable is the BLUR — the picture reads as present and
+   behind, while the text keeps a flat ground to sit on. Where a browser has no backdrop filter
+   the colour alone still stands at .9 of the body, which is legible; it just shows less.
+   Paired with a switch that turns the panel off altogether (ssCanvasPanelToggle), because how
+   much of the picture somebody needs is not something this stylesheet can know. */
 .ss-infra-linkinfo {
-    background: var(--bs-body-bg);
+    background: rgba(var(--bs-body-bg-rgb), .78);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
 }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .ss-infra-linkinfo { background: rgba(var(--bs-body-bg-rgb), .9); }
+}
+/* .ss-passthru : a layer that floats OVER something you work in — a panel on a diagram, a
+   caption on a picture — and reads without taking the pointer away from it. The layer itself
+   is transparent to the pointer and only the controls inside it answer.
+   Reported from the screen: hovering a box on a map opens the panel that describes it, the
+   panel covers the bottom strip of the drawing, and a box that happens to be down there can
+   no longer be pressed or dragged — the panel about it is in the way of it. The hover is lost
+   the same way, so the panel flickered against its own box.
+   Generic and not per-panel: an overlay that describes what is underneath it is a shape, not
+   one screen. */
+.ss-passthru { pointer-events: none; }
+.ss-passthru button, .ss-passthru a, .ss-passthru input,
+.ss-passthru select, .ss-passthru textarea, .ss-passthru [onclick] { pointer-events: auto; }
+
 .ss-hover-accent > tbody > tr > * { transition: background-color .12s; }
 
 /* ── Notifications sub-tab nav-pills ───────────────────────────────── */

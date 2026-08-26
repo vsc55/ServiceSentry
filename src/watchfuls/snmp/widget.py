@@ -74,6 +74,60 @@ class SnmpWidget:
 
     # ── What every profile says is worth reading first ───────────────────────────────────
     @classmethod
+    def _named(cls, lang: str, var_dir: str = '') -> dict:
+        """``{field: {label, unit}}`` for EVERY measurement any installed profile names.
+
+        The headline map answers "what does this box say about itself"; this one answers "what
+        is this reading called". A port's traffic is not a headline of anything — no switch's
+        condition is one of its thirty ports — and it is exactly what somebody who marked that
+        port wants to look at.
+        """
+        cdir = _profiles.custom_dir(var_dir)
+        catalog = _profiles.catalog(custom=_profiles.load_dir(cdir) if cdir else None)
+        out: dict = {}
+        for prof in catalog.values():
+            for field, meta in _profiles.history_fields(prof, lang).items():
+                if field not in out:
+                    out[field] = {'label': meta.get('label') or field,
+                                  'unit': str(meta.get('unit') or '')}
+        return out
+
+    @classmethod
+    def _watched(cls, results: dict, named: dict) -> list:
+        """The measurements of the rows somebody MARKED, ready to chart.
+
+        A switch serves a row per port and none of them is a headline: the condition of a
+        switch is its CPU and its fans, not one of thirty cables. But a port somebody marked is
+        a port somebody is watching — that is what the mark MEANS — so its readings belong
+        where the headline ones are and not eleven hundred entries down a list.
+
+        The mark itself is the registry's and is recorded with the row (see the sampler): the
+        state a screen reads never opens the registry, so a fact about the row has to travel
+        with the row.
+        """
+        out = []
+        for key, res in sorted(results.items()):
+            data = res.get('other_data') if isinstance(res.get('other_data'), dict) else {}
+            if not data.get('_watched'):
+                continue
+            row = str(data.get('_row') or '')
+            role = str(data.get('_role') or '')
+            for field, value in data.items():
+                if not isinstance(value, (int, float)) or field not in named:
+                    continue
+                meta = named[field]
+                out.append({
+                    'field': f'{key}|{field}',      # the row's own series, not the device's
+                    'label': f'{meta["label"]} — {row}' if row else meta['label'],
+                    'unit':  meta['unit'], 'kind': 'line', 'role': role,
+                    'series': {'module': _MODULE, 'key': key, 'field': field},
+                })
+        # The line to the street first, then the rest of what somebody marked. Both are marks,
+        # and one of them is the one people open this to look at.
+        out.sort(key=lambda c: 0 if c['role'] == 'wan' else 1)
+        return out
+
+    @classmethod
     def _proportions(cls, lang: str, var_dir: str = '') -> dict:
         """``{field: {role, label, unit, source}}`` — the halves of a proportion.
 
@@ -102,6 +156,40 @@ class SnmpWidget:
                                   'source': str(meta.get('source_short')
                                                 or meta.get('source_label')
                                                 or meta.get('source') or '')}
+        return out
+
+    @classmethod
+    def _lines(cls, figures: list, dev: str, heads: dict) -> list:
+        """The line charts a device offers: one per figure, plus one per PAIR.
+
+        Reported from the screen twice, and the two reports are not in conflict. First: a card
+        set to "traffic in" drew both lines, which overrules the source somebody chose in its
+        own selector. Then: "sería bueno una que tenga las dos".
+
+        So the pair is an option of its own rather than a change to either half. Picking
+        "Tráfico de entrada" draws one line; picking "Tráfico (todos los puertos)" draws both.
+        The choice stays where it was made, and the pairing is the profile's word — the same
+        one the device's own page draws by (`chart_with`), under the name the profile gives
+        that picture (`chart_label`).
+        """
+        out = []
+        for f in figures:
+            if not f['plot']:
+                continue
+            series = {'module': _MODULE, 'key': f'{dev}/metrics', 'field': f['field']}
+            out.append({'field': f['field'], 'label': f['label'], 'unit': f['unit'],
+                        'kind': 'line', 'series': series})
+            if not f['with']:
+                continue
+            mates = [{'field': m, 'label': (heads.get(m) or {}).get('label') or m}
+                     for m in f['with']]
+            out.append({
+                # A `+` cannot appear in a metric key, so this names the pair and can never
+                # collide with either half of it.
+                'field': f'{f["field"]}+',
+                'label': f['both'] or ' / '.join([f['label']] + [m['label'] for m in mates]),
+                'unit':  f['unit'], 'kind': 'line', 'series': series, 'with': mates,
+            })
         return out
 
     @classmethod
@@ -163,7 +251,13 @@ class SnmpWidget:
                 if meta.get('headline') is True and field not in out:
                     out[field] = {'label': meta.get('label') or field,
                                   'unit': str(meta.get('unit') or ''),
-                                  'states': meta.get('states') or {}}
+                                  'states': meta.get('states') or {},
+                                  # The series the profile said belong in the SAME picture,
+                                  # and what to call that picture. Nobody looks at what a link
+                                  # received without looking at what it sent, and the profile
+                                  # has said so since it was written.
+                                  'with': [str(x) for x in (meta.get('chart_with') or [])],
+                                  'both': str(meta.get('chart_label') or '')}
         return out
 
     @classmethod
@@ -182,6 +276,8 @@ class SnmpWidget:
                 'label': meta['label'],
                 # A state answers with a WORD ("Normal", "Failed") and the MIB it came from is
                 # what says so; a figure answers with itself.
+                'with':  [f for f in meta.get('with') or () if f in (data or {})],
+                'both':  meta.get('both') or '',
                 'value': str((said or {}).get('label') or cls._fmt(value, meta['unit'])),
                 'state': cls._level(said),
                 'unit':  meta['unit'],
@@ -216,6 +312,7 @@ class SnmpWidget:
         """
         heads = cls._headline_fields(lang)
         pairs = cls._proportions(lang)
+        named = cls._named(lang)
         by_device: dict = {}
         for key, res in (status or {}).items():
             if not isinstance(res, dict):
@@ -226,6 +323,7 @@ class SnmpWidget:
             own = results.get(f'{dev}/metrics') or {}
             data = own.get('other_data') if isinstance(own.get('other_data'), dict) else {}
             figures = cls._figures(data, heads)
+            wan = cls._wan_of(results, named)
             counts = {'ok': 0, 'warn': 0, 'error': 0, 'total': 0}
             rows = []
             for key, res in sorted(results.items()):
@@ -246,17 +344,23 @@ class SnmpWidget:
                 'name':  cls._name_of(dev, own, items),
                 'state': cls._worst(counts),
                 'ok':    counts['error'] == 0 and counts['warn'] == 0,
-                'stats': [{'label': f['label'], 'value': f['value'], 'state': f['state']}
-                          for f in cls._one_per_kind(figures)],
+                # The line to the street leads, where there is one: a machine that carries
+                # the office's internet is read for that first and for its temperature second.
+                'stats': [{'label': f'{s["label"]} · {wan["row"]}', 'value': s['value'],
+                           'state': wan['state'] if wan['state'] != 'ok' else 'none'}
+                          for s in (wan.get('stats') or ())]
+                         + [{'label': f['label'], 'value': f['value'], 'state': f['state']}
+                            for f in cls._one_per_kind(figures)][:_CHIPS - len(
+                                wan.get('stats') or ())],
+                'wan': wan,
                 # …and WHERE each of those figures is kept, so a screen can draw its shape
                 # over time without knowing anything about SNMP. The coordinates are the ones
                 # the history already files it under, which is what makes this a chart of the
                 # same numbers and not of a second reading taken a different way.
-                'charts': [{'field': f['field'], 'label': f['label'], 'unit': f['unit'],
-                            'kind': 'line',
-                            'series': {'module': _MODULE, 'key': f'{dev}/metrics',
-                                       'field': f['field']}}
-                           for f in figures if f['plot']]
+                # Watched rows FIRST: they are there because somebody said so, and a
+                # measurement you asked to be told about is the one you look for.
+                'charts': cls._watched(results, named)
+                          + cls._lines(figures, dev, heads)
                           + cls._rings(results, dev, pairs),
                 'rows':  rows,
                 'counts': counts,
@@ -265,6 +369,32 @@ class SnmpWidget:
         for e in entries:
             agg[e['state']] = agg.get(e['state'], 0) + 1
         return {'entries': entries, 'aggregate': {'counts': agg}}
+
+    @classmethod
+    def _wan_of(cls, results: dict, named: dict) -> dict:
+        """The line to the street, as this device sees it — or ``{}``.
+
+        No MIB answers "which of these thirty ports goes to the internet": it is knowledge
+        about the installation, and the registry is where it was written down (a marked row
+        with the `wan` role). The sampler records it WITH the row, because the state a screen
+        reads never opens the registry.
+
+        What comes back is the port, how it is, and what is going through it — which is what a
+        line of a dashboard about the internet has to say.
+        """
+        for key, res in sorted(results.items()):
+            data = res.get('other_data') if isinstance(res.get('other_data'), dict) else {}
+            if str(data.get('_role') or '') != 'wan':
+                continue
+            stats = []
+            for field, value in data.items():
+                meta = named.get(field)
+                if meta and isinstance(value, (int, float)) and meta['unit'] == 'B/s':
+                    stats.append({'label': meta['label'], 'state': 'none',
+                                  'value': cls._fmt(value, meta['unit'])})
+            return {'row': str(data.get('_row') or key.split('/', 1)[-1]),
+                    'state': cls._state_of(res), 'stats': stats[:2]}
+        return {}
 
     @staticmethod
     def _one_per_kind(figures: list) -> list:

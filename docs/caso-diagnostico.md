@@ -19,6 +19,54 @@ Ordena las entradas de más reciente a más antigua.
 
 ---
 
+## Un mapa exportado salía con el texto negro y sin borde los equipos en mantenimiento
+
+**Fecha:** 2026-08-26 · **Área:** `partials/infra/_canvas.html::ssCanvasSvgOut`
+
+**Síntoma.** El PNG exportado del mapa de enlaces salía con **todos los nombres de máquina en
+negro** sobre fondo oscuro, ilegibles; y los equipos en mantenimiento aparecían **sin borde y
+con la banda lateral negra**, mientras en pantalla eran naranjas. Se reportó como dos fallos
+distintos, en dos mensajes distintos.
+
+**Diagnóstico.** Los dos síntomas comparten una forma sospechosa: *pintura indefinida*. Un
+`fill` sin valor válido cae a **negro**; un `stroke` sin valor válido cae a **`none`**. Es decir,
+las dos cosas que se veían — texto negro, borde ausente y banda negra — son lo que hace **una
+única propiedad que no se resuelve**, según el atributo donde se use. Eso descarta «el color se
+calculó mal» y apunta a «la declaración no llegó a existir».
+
+Leyendo el bloque `<style>` que se inyecta en el SVG exportado:
+
+```
+:root{--bs-body-bg:#141619;--bs-danger:#dc3545;--bs-border-color:#495057color:rgb(222,226,230)}
+```
+
+La última variable y `color` están **pegadas**.
+
+**Causa raíz.** Las variables se montaban con `names.map(...).join(';')`, que pone separadores
+**entre** elementos y no detrás del último. El `color:` que venía a continuación se concatenaba
+con el valor de la última variable: esa declaración quedaba inválida, y `color` **nunca se
+escribía**. Resultado: los nombres, que se dibujan con `fill="currentColor"`, sin `color` que
+resolver → negro; y la última variable usada en el dibujo — la del estado de mantenimiento —
+indefinida → `fill` negro y `stroke` ninguno.
+
+El arnés de node no lo vio porque comprobaba con `includes('--bs-danger:#dc3545')` y con
+`includes('color:rgb(...)')`: **una subcadena está igual de presente en una regla rota que en
+una que funciona**.
+
+**Solución.** Cada declaración **se termina a sí misma** (`` `${n}:${v};` `` y `join('')`), y una
+variable que este documento no sabe responder se **omite** en vez de escribirse vacía — `--x:`
+no es «sin valor», es un error de sintaxis que se lleva por delante a la siguiente. El arnés
+ahora **parsea** el bloque `:root{}` en pares y compara valores, en vez de buscar subcadenas.
+
+**Lección.** Dos consecuencias visuales que no se parecen en nada pueden ser **un solo defecto**
+cuando el mecanismo roto es una *ausencia*: lo que hace un valor que falta depende de dónde se
+use, no de por qué falta. Y al generar código —CSS, SQL, JSON— **el terminador va con cada
+elemento, no entre elementos**: `join(sep)` deja el último sin cerrar, y lo que se pegue después
+entra dentro de él. Un test que busca subcadenas en código generado no comprueba que ese código
+sea válido; hay que parsearlo.
+
+---
+
 ## SNMP tardaba un minuto en empezar, y era un MIB roto que nadie podía arreglar
 
 **Fecha:** 2026-08-24 · **Área:** `lib/core/snmp/mibs/admin.py::startup_compile_mibs`

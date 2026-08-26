@@ -635,6 +635,18 @@ function createViewState(storageKey, views, onSet) {
     return api;
 }
 
+/** Hand a blob to the browser as a file. Three sections were writing the same six lines —
+ *  history, audit, and now the maps — and six lines that revoke an object URL are six lines
+ *  that leak one the day somebody copies five of them. */
+function ssDownloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
 // ── Things several sections need, which is why they are here ────────────────
 // Each of these was defined inside whichever section wrote it first and then read from three
 // or four others — the same shape as a generic module runner living in the hosts domain. A
@@ -717,13 +729,32 @@ function _dayKeyLocal(dateLike) {
  *  setter (the module pages switch per page, so theirs is called with the page id). */
 function _viewSwitcher(views, cur, setter, ariaKey, arg) {
     const lead = (arg == null) ? '' : `${jsStr(arg)},`;
-    return `<div class="btn-group btn-group-sm flex-shrink-0" role="group" aria-label="${escAttr(t(ariaKey))}">
-        ${views.map(v => `
+    const html = views.map(v => `
             <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
                 onclick="${setter}(${lead}'${escAttr(v.id)}')"
                 title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
                 <i class="bi ${escAttr(v.icon)}"></i>
-            </button>`).join('')}
+            </button>`);
+    // A view may declare which KIND it is, and the run of buttons breaks where that changes.
+    // Seven icons welded into one strip say "these are seven of the same thing", and on the
+    // fleet they are not: five of them arrange a LIST of machines and two draw a picture of
+    // how they are connected — different questions, and reaching for the wrong one is a
+    // different screen, not a different sort. Reported from the screen.
+    //
+    // Declared and not named here: this helper draws the switcher for eight registries and
+    // knows what none of them are about. A registry that declares no kind is one group, which
+    // is what every other section still gets.
+    const groups = [];
+    views.forEach((v, i) => {
+        const fam = v.family || '';
+        const last = groups[groups.length - 1];
+        if (last && last.fam === fam) last.html.push(html[i]);
+        else groups.push({fam, html: [html[i]]});
+    });
+    return `<div class="d-flex align-items-center gap-2 flex-shrink-0"
+                 role="group" aria-label="${escAttr(t(ariaKey))}">
+        ${groups.map(g => `<div class="btn-group btn-group-sm" role="group">
+            ${g.html.join('')}</div>`).join('')}
     </div>`;
 }
 

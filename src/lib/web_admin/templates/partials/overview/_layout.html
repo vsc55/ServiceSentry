@@ -330,6 +330,21 @@ function _syncRemoteDashboard(me) {
 //: setting that survives a reload and is lost on the next machine, with nothing said.
 const _DW_INSTANCE_KEYS = ['sev', 'srvf', 'modf', 'mws', 'mwchart', 'mwlvl', 'mwfig', 'mwh'];
 
+/** The same settings, written back ONTO the element a render builds.
+ *
+ *  The other half of `_dwInstanceState`, and the half that was missing: the full render spelled
+ *  the attributes out one by one, so a key added to the list but not to that line was written
+ *  to the layout and never put back on the page. Everything that reads the DOM — which is every
+ *  control, and the next save — then saw nothing, and the setting was quietly lost on the first
+ *  full repaint. `mwchart` had been in that state before any of this; `mwfig` and `mwh` joined
+ *  it, and a chart configured to draw the traffic came back drawing a temperature.
+ */
+function _dwInstanceAttrs(item) {
+    return _DW_INSTANCE_KEYS
+        .filter(k => (item || {})[k])
+        .map(k => ` data-${k}="${escAttr(String(item[k]))}"`).join('');
+}
+
 function _dwInstanceState(el) {
     const out = {};
     for (const k of _DW_INSTANCE_KEYS) if (el.dataset[k]) out[k] = el.dataset[k];
@@ -498,6 +513,17 @@ function _dwSetModuleScope(sel) {
     if (!dw) return;
     if (sel.value === '') delete dw.dataset.mws; else dw.dataset.mws = sel.value;
     delete _dwChartPts[dw.dataset.wid];      // a different device is different points
+    // A chart's measurements belong to the device it is showing, so the list beside the device
+    // has to be rebuilt with it — and the pick written back, because the one this widget held
+    // may not be something the new machine measures. Left alone, the card drew the fallback
+    // while the control still named the old device's series.
+    if ((_dwModuleDef(dw.dataset.wid) || {}).view === 'chart') {
+        const wd = ((_lastOverviewData || {}).module_widgets || {})[
+            _dwModuleDef(dw.dataset.wid).module] || {};
+        const now = _dwMwPick(dw.dataset.wid, wd, null).chart;
+        if (now) dw.dataset.mwfig = now.field; else delete dw.dataset.mwfig;
+        _dwToolbarRefresh(dw.dataset.wid);
+    }
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwRefreshState(dw);                  // a different kind can be in a different state
@@ -535,16 +561,21 @@ function _dwSetModuleChart(cb) {
 function _dwSetModuleFigure(sel) { _dwSetChartOpt(sel, 'mwfig'); }
 function _dwSetModuleHours(sel)  { _dwSetChartOpt(sel, 'mwh'); }
 
-/** Redraw one widget's toolbar in place — for a control whose options arrive late.
+/** Redraw one widget's toolbar in place.
  *
- *  Only while the toolbar is on screen, which is edit mode: rebuilding a bar nobody is looking
- *  at is work for nothing, and the next time it IS drawn the answer will have arrived.
+ *  For a control whose options arrive late — and for one whose options DEPEND on another of
+ *  them: a chart's measurements are the chosen device's, so changing the device leaves the
+ *  list next to it describing a machine that is no longer being shown. Reported from the
+ *  screen.
+ *
+ *  Only if the bar is actually on the page: there is nothing to redraw otherwise, and the next
+ *  time it IS drawn it will be drawn from the current state.
  */
 function _dwToolbarRefresh(id) {
     const sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id;
     const dw = document.querySelector(`.dw[data-wid="${sel}"]`);
     const bar = dw && dw.querySelector('.dw-toolbar');
-    if (!bar || !_dwEditing) return;
+    if (!bar) return;
     bar.outerHTML = _dwToolbar(id, parseInt(dw.dataset.cols) || 2, dw.dataset.h || 'auto');
 }
 

@@ -280,13 +280,52 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
     def watch_key(module: str, row: str) -> str:
         return f'{str(module or "").strip()}\u0000{str(row or "").strip()}'
 
+    #: What a marked row can be said to BE, beyond "worth an alert".
+    #:
+    #: `wan` is the one that exists: the port a machine reaches the internet through. A port
+    #: somebody marked is a port they are watching; a port they marked as the LINE is one whose
+    #: loss is not an amber row on a switch, it is the office being offline — and no MIB says
+    #: which of thirty ports that is. Only whoever ran the cable knows, which is the same
+    #: reason the plain mark exists at all.
+    #:
+    #: A closed vocabulary, because every one of them costs the core a behaviour: a word it
+    #: passed through and ignored would be a mark that reads as a promise and does nothing.
+    WATCH_ROLES = ('wan',)
+
+    @classmethod
+    def watch_role(cls, raw) -> str:
+        """One role, or ``''`` — an ordinary mark."""
+        role = str(raw or '').strip().lower()
+        return role if role in cls.WATCH_ROLES else ''
+
     def watch(self, uid: str) -> set:
         """The rows of *uid* somebody has said are worth an alert, as comparison keys."""
         host = self.get(uid, decrypt=False) or {}
         return {self.watch_key(w.get('module'), w.get('row')) for w in host.get('watch') or ()}
 
-    def set_watch(self, uid: str, module: str, row: str, on: bool, *, actor: str = '') -> bool:
+    def watch_roles(self, uid: str) -> dict:
+        """``{comparison key: role}`` for the marked rows that say what they ARE.
+
+        Apart from :meth:`watch` because they answer different questions and one of them is
+        asked far more often: every cycle asks "is this row marked", and only the sampler that
+        found one asks "as what".
+        """
+        host = self.get(uid, decrypt=False) or {}
+        out = {}
+        for w in host.get('watch') or ():
+            role = self.watch_role((w or {}).get('role'))
+            if role:
+                out[self.watch_key(w.get('module'), w.get('row'))] = role
+        return out
+
+    def set_watch(self, uid: str, module: str, row: str, on: bool, *,
+                  role: str = '', actor: str = '') -> bool:
         """Mark one row of one machine as worth an alert, or stop.
+
+        *role* says what the row IS (see :data:`WATCH_ROLES`) — ``''`` is an ordinary mark. A
+        role always implies the mark: a port declared as the line out is a port being watched,
+        and offering the two as separate switches would be offering a state where the answer to
+        "tell me when the internet goes" is "no".
 
         Its OWN update and not a pass through :meth:`update`, which replaces the whole record:
         saying "tell me when this port goes down" would otherwise mean holding the machine's
@@ -303,7 +342,11 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
         kept = [w for w in host.get('watch') or ()
                 if self.watch_key(w.get('module'), w.get('row')) != want]
         if on:
-            kept.append({'module': mod, 'row': row})
+            entry = {'module': mod, 'row': row}
+            found = self.watch_role(role)
+            if found:
+                entry['role'] = found
+            kept.append(entry)
         try:
             with self._db.transaction():
                 self._db.execute(

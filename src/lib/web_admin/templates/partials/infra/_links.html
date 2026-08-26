@@ -136,12 +136,28 @@ function _infraLinkLayout(map) {
     // so everything downstream — the cables, the extent, the panel — is reading one set of
     // positions: a wire computed from the tier layout while the box is drawn somewhere else
     // is a line that ends in the air.
-    const ext = ssCanvasPlace(_LNK_SVG, Object.values(pos),
+    // The way out is a box on this picture, so it takes part in where the picture ENDS.
+    // Left out, dragging it below or left of everything put it outside the viewBox — clipped,
+    // and therefore impossible to grab again. Reported from the screen exactly that way: moved
+    // once, and then it would not move.
+    //
+    // Computed here and not at draw time, for the same reason as the rest: the cable, the
+    // extent and the panel all have to read ONE set of positions, or a wire is drawn to where
+    // a box is not.
+    const boxes = Object.values(pos);
+    const host = boxes.find(p => (p.node || {}).wan) || null;
+    const wan = host ? (ssCanvasMoved(_LNK_SVG)[_LNK_WAN]
+                        || {x: host.x + (_LNK.BOX_W - _LNK_WAN_W) / 2,
+                            y: host.y - _LNK.BOX_H - 34}) : null;
+    const ext = ssCanvasPlace(_LNK_SVG, boxes.concat(wan
+                                  ? [{uid: _LNK_WAN, x: wan.x, y: wan.y,
+                                      w: _LNK_WAN_W, h: _LNK.BOX_H - 8}]
+                                  : []),
                               {w: _LNK.BOX_W, h: _LNK.BOX_H},
                               {pad: _LNK.PAD, width: widest + _LNK.PAD,
                                height: y0 - _LNK.BOX_H + _LNK.PAD});
     return {
-        pos, edges, loose,
+        pos, edges, loose, wan, wanHost: host,
         x: ext.x, y: ext.y, width: ext.width, height: ext.height,
     };
 }
@@ -154,15 +170,20 @@ function _infraLinkClaim(e) {
     return e.confirmed ? 'both' : 'one';
 }
 
+//: How each kind of cable is drawn — as DATA and not as a string of attributes, because the
+//: same three answers are now drawn four ways: the cable itself, the sample beside the panel's
+//: heading, the legend under the picture, and the legend drawn into an exported one. Four
+//: copies of "a learned cable is a thin dashed grey line" is three that go stale.
 const _LNK_STROKE = {
-    both:    'stroke="var(--bs-success)" stroke-width="2.4"',
-    one:     'stroke="var(--bs-primary)" stroke-width="1.8"',
-    learned: 'stroke="var(--bs-secondary)" stroke-width="1.4" stroke-dasharray="5 4"',
+    both:    {stroke: 'var(--bs-success)',   width: 2.4, dash: ''},
+    one:     {stroke: 'var(--bs-primary)',   width: 1.8, dash: ''},
+    learned: {stroke: 'var(--bs-secondary)', width: 1.4, dash: '5 4'},
+    //: …and the line out, which is not a claim about a cable but is a line on this picture.
+    wan:     {stroke: 'var(--bs-info)',      width: 2,   dash: '5 3'},
 };
 
-/** The cables. Drawn as a curve from the right edge of one box to the left edge of the other
- *  — the tiers run left to right, so a horizontal exit is the one that does not cross a box
- *  it has nothing to do with. Same-tier links (two switches side by side) get a flatter one. */
+
+/** The cables between machines. */
 function _infraLinkWires(L) {
     const out = [];
     let idx = -1;
@@ -173,13 +194,9 @@ function _infraLinkWires(L) {
         // Left to right whichever way the edge was stored: an edge is a pair and not a
         // direction, and a wire drawn backwards would leave the box from the wrong side.
         const [l, r] = a.x <= b.x ? [a, b] : [b, a];
-        const x1 = l.x + _LNK.BOX_W, y1 = l.y + _LNK.BOX_H / 2;
-        const x2 = r.x,              y2 = r.y + _LNK.BOX_H / 2;
-        const dx = Math.max(28, (x2 - x1) / 2);
         const claim = _infraLinkClaim(e);
-        const pl = (e.ports || {})[l.uid] || '';
-        const pr = (e.ports || {})[r.uid] || '';
-        const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+        const d = ssCanvasCable({x: l.x, y: l.y, w: _LNK.BOX_W, h: _LNK.BOX_H},
+                                  {x: r.x, y: r.y, w: _LNK.BOX_W, h: _LNK.BOX_H});
         // Each port label sits near ITS OWN end, not both at the midpoint. Every cable
         // between the same two tiers crosses the same middle, so a midpoint label is three
         // names stacked in one ten-pixel channel — reported from the screen as a map you
@@ -199,12 +216,13 @@ function _infraLinkWires(L) {
         // A transparent fat stroke UNDER the visible one, because a 1.4-pixel dashed line is
         // not something anybody can hover on purpose.
         out.push(`<g data-edge="${idx}" class="ss-pointer"
+                     data-a="${escAttr(l.uid)}" data-b="${escAttr(r.uid)}"
                      onpointerenter="_infraLinkHover(${idx})"
                      onpointerleave="_infraLinkHover(null)"
                      onclick="event.stopPropagation();_infraLinkPin(${idx})">
             <title>${escAttr(`${l.node.name || l.uid} — ${r.node.name || r.uid}`)}</title>
             <path d="${d}" fill="none" stroke="transparent" stroke-width="14"></path>
-            <path d="${d}" fill="none" ${_LNK_STROKE[claim]}
+            <path d="${d}" fill="none" ${ssCanvasStroke(_LNK_STROKE[claim])}
                   ${_lnkOn() === idx ? 'stroke-width="4"' : ''}></path>
         </g>`);
     }
@@ -249,7 +267,26 @@ function _infraLinkBox(p, links) {
               fill="currentColor">${esc(_infraMapClip(p.node.name || p.uid, 19))}</text>
         <text x="${p.x + 36}" y="${p.y + 34}" font-size="10"
               fill="var(--bs-secondary-color)">${esc(tf('infra_link_count', links))}</text>
+        ${_infraLinkWanMark(p)}
     </g>`;
+}
+
+/** The machine the office reaches the internet through, marked on its box.
+ *
+ *  This map draws what is plugged into what; which of those cables is the LINE is the one
+ *  thing it cannot see — a switch port looks like any other port. It is knowledge about the
+ *  installation, written down where the rest of it is (a marked row with the `wan` role), and
+ *  a picture of the wiring that does not show the way out is a picture missing its first fact.
+ */
+function _infraLinkWanMark(p) {
+    const port = String((p.node || {}).wan || '');
+    if (!port) return '';
+    return `<g><title>${escAttr(tf('infra_link_wan', port))}</title>
+        <foreignObject x="${p.x + _LNK.BOX_W - 24}" y="${p.y + 6}" width="18" height="18">
+            <div xmlns="http://www.w3.org/1999/xhtml"
+                 style="font-size:13px;line-height:1;color:var(--bs-info)">
+                <i class="bi bi-globe2"></i></div>
+        </foreignObject></g>`;
 }
 
 //: The `<svg>` this map is drawn on. The window over it — pan, zoom, fit, and turning a
@@ -267,7 +304,14 @@ function _infraLinkDown(ev) {
     // "open this device" and "move this box" from being the same click.
     const box = ev.target.closest('g[data-node]');
     if (box) {
-        const at = (_infraLinkLayout(_infraMap || {}).pos || {})[box.dataset.node];
+        const L = _infraLinkLayout(_infraMap || {});
+        // The way out is not one of the machines, so it is not in the layout's map of them:
+        // it is one box, placed above whoever carries the line until somebody moves it.
+        // Without this it had no origin to drag FROM and simply did not move — reported from
+        // the screen, and the same trap the address map's cloud had.
+        const at = box.dataset.node === _LNK_WAN
+            ? _infraLinkWanAt(L)
+            : (L.pos || {})[box.dataset.node];
         if (ssCanvasDragStart(_LNK_SVG, ev, box.dataset.node, at)) return;
     }
     // Only a drag of the BACKGROUND pans. Starting one on a cable would mean the click that
@@ -293,7 +337,9 @@ function _infraLinkUp(ev) {
     // anything to save is a fact about the arrangement, not about the drawing.
     const open = ssCanvasDragEnd(_LNK_SVG, _infraLinkToolsPaint);
     ssCanvasPanEnd(ev);
-    if (open) infraOpen(open);
+    // The way out has no device page to open. A click that does nothing beats one that opens
+    // a page for something that is not a machine.
+    if (open && open !== _LNK_WAN) infraOpen(open);
 }
 
 /** Repaint the toolbar in place. Its own function because the two things that change it —
@@ -329,7 +375,104 @@ function _infraLinkContent(L) {
         degree[e.to] = (degree[e.to] || 0) + 1;
     }
     return _infraLinkWires(L)
+           + _infraLinkWanBox(L)
            + Object.values(L.pos).map(p => _infraLinkBox(p, degree[p.uid] || 0)).join('');
+}
+
+//: The id the way out goes by on this map, and how wide its box is. Its own name rather than a
+//: second mechanism: everything here is moved and read by an id, and `:` cannot occur in a uid.
+const _LNK_WAN = ':internet';
+const _LNK_WAN_W = 132;
+
+/** Where the way out sits — above the machine that carries it, or wherever it was dragged. */
+function _infraLinkWanAt(L) { return (L || {}).wan || null; }
+
+/** What the way out IS, read like any other box: which machine, down which port, to what —
+ *  and the cable that port is on, when this map knows one.
+ *
+ *  The port is the piece nothing else here can supply: a switch port looks like every other
+ *  switch port, so a picture of the wiring shows the line only because somebody said which
+ *  cable it is.
+ */
+function _infraLinkWanCard(L) {
+    const host = _infraLinkWanHost(L);
+    if (!host) return '';
+    const port = String(host.node.wan || '');
+    // The cable this map already knows about that port, if any: the way out usually leaves by
+    // a port with nothing of ours at the far end, and then there is no cable to show.
+    const i = (L.edges || []).findIndex(
+        e => (e.from === host.uid && e.fromPort === port)
+          || (e.to === host.uid && e.toPort === port));
+    const row = (icon, label, value) => (value
+        ? `<div class="d-flex align-items-baseline gap-2">
+               <i class="bi ${escAttr(icon)} text-muted ss-fs-2"></i>
+               <span class="text-muted ss-fs-3" style="min-width:6.5rem">${esc(label)}</span>
+               <span class="ss-fs-2">${value}</span>
+           </div>`
+        : '');
+    const code = v => `<code class="ss-fs-2">${esc(v)}</code>`;
+    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <i class="bi bi-globe2" style="color:var(--bs-info)"></i>
+            <span class="fw-semibold">${esc(t('infra_map_outside'))}</span>
+        </div>
+        <div class="d-flex flex-column gap-1">
+            ${row('bi-hdd-network', t('col_host_name'),
+                  `<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
+                       onclick="infraOpen(${jsStr(host.uid)})">${
+                       esc(host.node.name || host.uid)}</button>`)}
+            ${row('bi-globe2', t('infra_watch_wan'), code(port))}
+            ${row('bi-hdd-network', t('infra_link_public_ip'),
+                  ssPublicIp(host.node.addresses) ? code(ssPublicIp(host.node.addresses))
+                                                  : `<span class="text-muted">${
+                                                      esc(t('infra_link_no_public'))}</span>`)}
+            ${row('bi-signpost-2', t('infra_link_gateway'),
+                  host.node.gateway ? code(host.node.gateway) : '')}
+            ${row('bi-diagram-2', t('infra_link_networks'),
+                  (host.node.networks || []).map(code).join(' '))}
+            ${i >= 0 ? row('bi-plugin', t('infra_link_cables'),
+                           `<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
+                                onclick="_infraLinkPin(${i})">${esc(t('infra_link_open'))}</button>`)
+                     : ''}
+        </div>
+    </div>`;
+}
+
+/** The machine somebody declared the line out on, as it sits on this picture. */
+function _infraLinkWanHost(L) { return (L || {}).wanHost || null; }
+
+/** …and the box, plus the cable from it. Drawn only when somebody DECLARED one: this map
+ *  shows what is plugged into what, and which of those cables is the line is the one thing it
+ *  cannot see for itself. Deducing it from a next hop would be a different claim drawn as
+ *  this one. */
+function _infraLinkWanBox(L) {
+    const host = _infraLinkWanHost(L);
+    const at = _infraLinkWanAt(L);
+    if (!host || !at) return '';
+    const h = _LNK.BOX_H - 8;
+    // Through the same maker as every other cable here: which sides it leaves by is the same
+    // question, and answering it twice is how the line out ended up assuming the way out is
+    // always above — dragged below the machine it left downwards, looped back up and hooked
+    // into the top of a box it was underneath. Reported from the screen.
+    const d = ssCanvasCable({x: at.x, y: at.y, w: _LNK_WAN_W, h: h},
+                              {x: host.x, y: host.y, w: _LNK.BOX_W, h: _LNK.BOX_H});
+    return `<path data-a="${escAttr(_LNK_WAN)}" data-b="${escAttr(host.uid)}" d="${d}"
+                  fill="none" ${ssCanvasStroke(_LNK_STROKE.wan)}></path>
+        <g data-node="${escAttr(_LNK_WAN)}" class="ss-grab"
+           onpointerenter="_infraLinkNodeHover(${jsStr(_LNK_WAN)})"
+           onpointerleave="_infraLinkNodeHover('')">
+            <title>${escAttr(tf('infra_link_wan', host.node.wan))}</title>
+            <rect x="${at.x}" y="${at.y}" width="${_LNK_WAN_W}" height="${h}" rx="7"
+                  fill="var(--bs-body-bg)" stroke="var(--bs-info)" stroke-width="1.5"
+                  stroke-dasharray="4 3"></rect>
+            <foreignObject x="${at.x + 10}" y="${at.y + (h - 18) / 2}" width="18" height="18">
+                <div xmlns="http://www.w3.org/1999/xhtml"
+                     style="font-size:14px;line-height:1;color:var(--bs-info)">
+                    <i class="bi bi-globe2"></i></div>
+            </foreignObject>
+            <text x="${at.x + 34}" y="${at.y + h / 2 + 4}" font-size="12"
+                  fill="currentColor">${esc(t('infra_map_outside'))}</text>
+        </g>`;
 }
 
 /** Zoom in, out, and back to the whole thing. Buttons as well as the wheel: a trackpad
@@ -348,7 +491,7 @@ function _infraLinkTools() {
     // is sitting on the account with nothing to press to fetch it.
     const restorable = dirty && ssCanvasHasKept(_LNK_SVG);
     return `<div class="btn-group btn-group-sm">
-        ${ssCanvasTools(_LNK_SVG)}
+        ${ssCanvasTools(_LNK_SVG, 'link_map', '_infraLinkKeys')}
         ${dirty ? `<button class="btn btn-sm btn-primary" onclick="infraLinkKeep()"
                      title="${escAttr(t('infra_link_keep'))}"
                      ><i class="bi bi-save"></i></button>` : ''}
@@ -418,10 +561,23 @@ function _infraLinkMark() {
     const svg = _infraLinkSvg();
     if (!svg) return;
     const pick = _lnkOn();
+    // …and a machine under the pointer lights the cables that are ITS, with the rest stepped
+    // back. A box with eight cables in a rack of forty is a question the picture holds the
+    // answer to and cannot be read for: which of these lines is mine. Same as the address map,
+    // and by the same means — the lines say what they join, so nothing is redrawn under the
+    // pointer that is doing the asking.
+    const on = _lnkNode;
+    const mine = el => !!on && (el.dataset.a === on || el.dataset.b === on);
     svg.querySelectorAll('g[data-edge]').forEach(g => {
-        const on = pick !== null && +g.dataset.edge === pick;
+        const chosen = pick !== null && +g.dataset.edge === pick;
         const line = g.querySelectorAll('path')[1];
-        if (line) line.style.strokeWidth = on ? '4' : '';
+        if (line) line.style.strokeWidth = chosen || mine(g) ? '4' : '';
+        g.style.opacity = !on || mine(g) ? '' : '.1';
+    });
+    // The line out is a cable of that machine's too, and it is not one of the edges.
+    svg.querySelectorAll('path[data-a]').forEach(p => {
+        p.style.opacity = !on || mine(p) ? '' : '.1';
+        p.style.strokeWidth = mine(p) ? '3.5' : '';
     });
 }
 
@@ -543,10 +699,12 @@ function _infraLinkOnePort(uid, port, skip) {
  *  for, and having answered it the screen should be able to take you to either side — the
  *  machine, or the port itself. */
 function _infraLinkPanelHtml() {
+    if (!ssCanvasPanelOn()) return '';
     const L = _infraLinkLayout(_infraMap || {});
     // A box under the pointer wins over any cable: it is what is being pointed AT, and a
     // panel describing a cable while the hand is on a machine is a panel about the wrong
     // thing. A kept cable is still kept — it comes back the moment the box is left.
+    if (_lnkNode === _LNK_WAN) return _infraLinkWanCard(L);
     if (_lnkNode && L.pos[_lnkNode]) return _infraLinkNodeHtml(L, _lnkNode);
     const e = (L.edges || [])[_lnkOn()];
     if (!e) return '';
@@ -581,7 +739,7 @@ function _infraLinkPanelHtml() {
     return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
         <div class="d-flex align-items-center gap-2 mb-1">
             <svg width="26" height="8" aria-hidden="true"><line x1="1" y1="4" x2="25" y2="4"
-                 ${_LNK_STROKE[claim]}></line></svg>
+                 ${ssCanvasStroke(_LNK_STROKE[claim])}></line></svg>
             <span class="text-muted">${esc(t('infra_link_claim_' + claim))}</span>
             ${(e.bundle || 1) > 1
               ? `<span class="badge text-bg-primary fw-normal ss-fs-2"
@@ -621,8 +779,8 @@ function _infraLinksBody() {
     return `<div class="px-1 pb-2 ss-mapfill">
         ${_infraLinksNote(L)}
         ${links ? `<div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
-            <div id="infraLinkPanel" class="position-absolute" style="left:.5rem;bottom:.5rem;
-                 right:.5rem;z-index:2;pointer-events:auto">${_infraLinkPanelHtml()}</div>
+            <div id="infraLinkPanel" class="position-absolute ss-passthru"
+                 style="left:.5rem;bottom:.5rem;right:.5rem;z-index:2">${_infraLinkPanelHtml()}</div>
             <svg ${ssCanvasAttrs(_LNK_SVG, L)}
                  onwheel="ssCanvasWheel(${jsStr(_LNK_SVG)},event)"
                  onpointerdown="_infraLinkDown(event)"
@@ -648,7 +806,8 @@ function _infraLinksNote(L) {
     return `<div class="text-muted ss-fs-2 mb-2 d-flex align-items-center gap-2">
         <i class="bi bi-info-circle"></i>
         <span>${esc(n ? tf('infra_link_note', n, both) : t('infra_link_none'))}</span>
-        <span id="infraLinkTools" class="ms-auto">${_infraLinkTools()}</span>
+        ${ssCanvasPanelToggle('_infraLinkPaint')}
+        <span id="infraLinkTools">${_infraLinkTools()}</span>
         <button class="btn btn-sm btn-secondary" onclick="_infraMapRefresh()">
             <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
     </div>`;
@@ -668,13 +827,18 @@ function _infraLinksLoose(L) {
 /** Three strokes, three claims. The legend is not decoration here: the difference between a
  *  cable two devices agree on and a MAC a switch happened to learn is the difference between
  *  a fact and a good guess, and a picture that draws them alike is lying about which it has. */
+/** What each kind of cable MEANS, as data — see `_infraMapKeys`, same reason: it is drawn
+ *  under the picture and inside the exported one, and two copies of a stroke drift. */
+function _infraLinkKeys() {
+    return [['both', 'infra_link_claim_both'], ['one', 'infra_link_claim_one'],
+            ['learned', 'infra_link_claim_learned'], ['wan', 'infra_link_legend_wan']]
+        .map(([k, key]) => Object.assign({label: t(key)}, _LNK_STROKE[k]));
+}
+
 function _infraLinksLegend() {
-    const row = (claim, key) => `<span class="d-inline-flex align-items-center gap-1 me-3">
-        <svg width="26" height="8" aria-hidden="true"><line x1="1" y1="4" x2="25" y2="4"
-             ${_LNK_STROKE[claim]}></line></svg>${esc(t(key))}</span>`;
     return `<div class="text-muted ss-fs-2 mt-2">
-        ${row('both', 'infra_link_claim_both')}
-        ${row('one', 'infra_link_claim_one')}
-        ${row('learned', 'infra_link_claim_learned')}
+        ${_infraLinkKeys().map(k => `<span class="d-inline-flex align-items-center gap-1 me-3">
+        <svg width="26" height="8" aria-hidden="true"><line x1="1" y1="4" x2="25" y2="4"
+             ${ssCanvasStroke(k)}></line></svg>${esc(k.label)}</span>`).join('')}
     </div>`;
 }

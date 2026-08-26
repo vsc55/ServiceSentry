@@ -42,6 +42,7 @@
         "snmp_sampled": "SNMP: {} 📊 {} valores",
         "snmp_sample_down": "SNMP: {} 💥 sin datos ({})",
         "snmp_state_bad": "SNMP: {} 💥 {}: {}",
+        "snmp_wan_down": "SNMP: {} 💥 sin internet — {}: {}",
         "snmp_state_warn": "SNMP: {} ⚠ {}: {}",
         "snmp_step_resolve": "Resolviendo los perfiles del dispositivo",
         "snmp_step_read": "Leyendo las métricas",
@@ -76,6 +77,7 @@
             "medida",
             "estado"
         ],
+        "snmp_wan_down": ["dispositivo", "puerto", "estado"],
         "snmp_state_warn": [
             "dispositivo",
             "medida",

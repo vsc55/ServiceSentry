@@ -43,6 +43,7 @@ from lib.core.history import service as history_svc
 from lib.core.hosts import service as hosts_svc
 from lib.core.hosts.service import _checks_for_host
 from lib.core.hosts import profiles as host_profiles
+from lib.core.hosts import store as host_store_mod
 from lib.core.infra import jobs as infra_jobs
 from lib.core.infra import service as infra_svc
 from lib.core.infra import evidence as infra_evidence
@@ -235,12 +236,16 @@ def register(app, wa):
         if not module or not row:
             return jsonify({'error': wa._t('infra_watch_bad')}), 400
         on = bool(body.get('on'))
+        # …and what the row IS, when the screen says so. Checked against the store's own
+        # vocabulary rather than passed through: a word the core does not act on is a mark that
+        # reads as a promise and does nothing.
+        role = host_store_mod.HostsStore.watch_role(body.get('role'))
         actor = session.get('username', '')
-        if not store.set_watch(uid, module, row, on, actor=actor):
+        if not store.set_watch(uid, module, row, on, role=role, actor=actor):
             return jsonify({'error': wa._t('save_failed')}), 500
         wa._audit('infra_watch', detail={'host': record.get('name') or uid,
                                          'module': module, 'row': row,
-                                         'on': bool(on)})
+                                         'role': role, 'on': bool(on)})
         return jsonify({'ok': True, 'watch': (store.get(uid, decrypt=False) or {}).get('watch')})
 
     @app.route('/api/v1/infra/map', methods=['GET'])

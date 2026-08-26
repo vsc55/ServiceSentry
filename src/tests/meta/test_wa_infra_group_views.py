@@ -266,7 +266,11 @@ class TestTheLinkMap:
         strokes = src.split('_LNK_STROKE = {')[1].split('};')[0]
         for claim in ('both', 'one', 'learned'):
             assert claim in strokes, claim
-        assert 'dasharray' in strokes, 'the inference is drawn like a fact'
+        # The table is DATA now — the same three answers are drawn as the cable, as the sample
+        # beside the panel heading, and twice as a legend — so what is checked is the dash on
+        # the one that is an inference, not the word in an attribute string.
+        learned = strokes.split('learned:')[1].split('}')[0]
+        assert re.search(r"dash: '\d", learned), 'the inference is drawn like a fact'
         # …and every one of them is named on screen.
         for claim in ('both', 'one', 'learned'):
             assert f'infra_link_claim_{claim}' in src
@@ -455,9 +459,14 @@ class TestTheLinkMapCanBeMovedAround:
         calls = re.findall(r'localStorage\.\w+\(([^,)]*)', src)
         assert calls, 'the arrangement is not being kept at all'
         # `was` is the one key it reads and never writes: the arrangement somebody saved
-        # before this moved, carried forward under the key above.
-        assert set(x.strip() for x in calls) == {'_SS_POS_KEY', 'was'}, calls
-        assert re.findall(r'localStorage\.setItem\(([^,)]*)', src) == ['_SS_POS_KEY']
+        # before this moved, carried forward under the key above. And `ss_infra_panel` is
+        # whether the reading panel is shown at all — a preference about LOOKING, which is the
+        # same kind of thing as the arrangement and not the same kind as the window: somebody
+        # turned it off on purpose and it has to still be off tomorrow.
+        assert set(x.strip() for x in calls) == {
+            '_SS_POS_KEY', 'was', "'ss_infra_panel'"}, calls
+        assert (re.findall(r'localStorage\.setItem\(([^,)]*)', src)
+                == ['_SS_POS_KEY', "'ss_infra_panel'"])
         # …and the window itself is never in it: `_ssVB` is written by nothing that persists.
         assert '_ssVB' not in re.sub(r'^(?!.*localStorage).*$', '', src, flags=re.M)
         # Neither map keeps one of its own either.

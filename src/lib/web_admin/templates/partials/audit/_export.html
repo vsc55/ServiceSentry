@@ -48,13 +48,7 @@ function exportAudit(format) {
         mime = 'text/csv;charset=utf-8;';
         ext = 'csv';
     }
-    const blob = new Blob([content], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `audit_${ts}.${ext}`;
-    a.click();
-    URL.revokeObjectURL(url);
+    ssDownloadBlob(new Blob([content], { type: mime }), `audit_${ts}.${ext}`);
 }
 
 function _showAuditConfirm(msg, callback) {

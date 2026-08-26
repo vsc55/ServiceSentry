@@ -2744,10 +2744,11 @@ que la forma entera se comprueba con un doble que apunta lo que le pidieron.
 
 ## 39. BD — HostsStore
 
-**Archivo:** `tests/unit/test_hosts_store.py` — 35 tests
+**Archivo:** `tests/unit/test_hosts_store.py` — 39 tests
 
 | Test | Qué comprueba |
 |---|---|
+| `TestAMarkCanSayWhatTheRowIS::*` (4) | `watch` dice «avísame de esta fila»; un **rol** dice **qué es** la fila. `wan` es el que existe: ninguna MIB contesta cuál de treinta puertos lleva la línea a la calle — sólo lo sabe quien tiró el cable, que es la misma razón por la que existe la marca simple. El rol se guarda **junto a** la marca y ES una marca (un puerto declarado como salida es un puerto vigilado, y ofrecerlos por separado permitiría el estado «no, no me avises cuando se caiga internet»); una palabra sobre la que el núcleo no actúa **no se guarda** (una marca que se lee como promesa y no hace nada es peor que ninguna); una marca ordinaria no declara nada; y volver a marcar una fila **reemplaza** su rol |
 | `test_create_and_get_roundtrip` | Create and get roundtrip |
 | `test_create_requires_name` | Create requires name |
 | `test_duplicate_name_rejected` | Duplicate name rejected |
@@ -3767,7 +3768,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 94 tests
+**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 95 tests
 
 **Donde un perfil deja de ser una declaración y se vuelve una serie.** Un check produce un
 veredicto; esto produce una gráfica, y una gráfica pide cosas que un veredicto no. Dos de ellas
@@ -4162,7 +4163,7 @@ idénticas.
 
 ---
 
-**Archivo:** `watchfuls/snmp/tests/test_widget.py` — 18 tests
+**Archivo:** `watchfuls/snmp/tests/test_widget.py` — 27 tests
 
 El widget de Overview: **todos los aparatos que lee este módulo, en una tarjeta**. Pedido
 desde la pantalla, y lo interesante es lo que NO puede ser: SNMP no mide una cosa, mide lo
@@ -4175,6 +4176,8 @@ que su propio perfil marcó como las primeras que hay que leer (`headline`).
 |---|---|
 | `TestOneRowPerDevice::*` (10) | Cada aparato contesta con **su propio `headline`** y no con una medida elegida aquí; **una cifra de cada CLASE** (un RouterOS contesta cuatro temperaturas, y cuatro temperaturas en una fila son la misma pregunta cuatro veces mientras el tráfico se cae por el final); la que se queda es **la que el perfil declara primero** — por orden alfabético salía `mt_board_temp`, y el alfabeto de unas claves internas no es un dato sobre un switch—; una **enumeración contesta con su PALABRA** («1» → «Normal», con el color de la misma declaración); **un aviso no es un fallo**; los **mil cien puertos de un switch no viajan** (esto se reconstruye en cada refresco de un panel que alguien deja abierto: una fila por puerto no es un resumen, es el motivo por el que se cierra un panel) — lo que está mal sí viaja, y lo que está bien lo contestan las cifras; y **un aparato se llama como se llama A SÍ MISMO** —capturado en pantalla como `host.0598ae99-8ccf-4e67-…` cruzando una gráfica: el `name` con el que se emite un resultado vive en memoria un ciclo (`check_state` no tiene columna para él), así que el estado que se relee después trae la clave y nada más, y todas las pantallas reconstruyen el nombre desde la CONFIGURACIÓN, donde un aparato muestreado porque lo dice el REGISTRO no tiene entrada. Así que se pregunta: `sysName`, que contesta cualquier agente SNMP, archivado bajo un rol que el núcleo ya nombra— y, a falta de eso, la etiqueta de la configuración y, en último término, el uid sin su convención, porque un uid no es un nombre pero un hueco se lee como un aparato sin identidad; y sin nada registrado sale un widget vacío, no una excepción |
 | `TestAProportionIsNotALine::*` (5) | **Un almacén contesta con un TAMAÑO y una CANTIDAD USADA.** Dos números uno al lado del otro son aritmética que se le deja al lector cuando la respuesta es «83 %», y en el tiempo son dos líneas paralelas que no lee nadie. Pedido desde la pantalla: «uso de disco… eso igual es mejor queso». Un par `used`/`total` se convierte en **anillo**, nombrado por la COSA y la fila («Almacenamiento — /volume1», nunca «Almacenamiento (HOST-RESOURCES-MIB)»: la MIB es del catálogo, donde alguien elige un perfil, y aquí se está leyendo una máquina); uno por fila, que es donde viven; **media proporción no es una** (un tamaño sin usado, o una capacidad de cero, es un anillo sin pregunta detrás); y una LÍNEA sigue diciendo **dónde está su serie** —las coordenadas con las que el histórico ya la archiva, así que es una gráfica de los mismos números y no de una segunda lectura tomada por otro camino |
+| `TestTheHalvesAndThePair::*` (4) | Dos capturas de pantalla que **no se contradicen**. Primero: una tarjeta puesta en «Tráfico de entrada» dibujaba las dos líneas, que es pisar la fuente que alguien eligió en su propio selector. Después, ya comprobados los números: «sería bueno una que tenga las dos». Así que **la pareja es una opción propia**, no un cambio en ninguna de las mitades: cada mitad se ofrece sola y sin acompañantes, la pareja al lado con el nombre que el perfil le da a ESA imagen (`chart_label`, «Tráfico (todos los puertos)»), una pareja cuya otra mitad el aparato no sirve **no es una pareja** (una línea vacía con su leyenda es una gráfica reclamando una serie que no está), y una cifra que no empareja con nada se ofrece una sola vez |
+| `TestAPortSomebodyMarkedLeadsTheList::*` (5) | Pedido desde la pantalla: **el tráfico y el estado de los puertos marcados como vigilados, arriba** con la CPU y los totales. Ninguno de ellos es «cabecera» de nada —la condición de un switch es su CPU y sus ventiladores, no uno de treinta cables—, así que estaban mil cien entradas más abajo. Pero un puerto marcado es un puerto que alguien vigila: eso es lo que **significa** la marca. Se comprueba que sus lecturas se ofrecen, que **encabezan** la lista, que apuntan a la serie de la FILA y no a la del aparato, que un puerto sin marcar no se promociona (sigue estando, más abajo: una lista de lo que importa sólo sirve mientras sea corta) y que una lectura que ningún perfil nombra no se inventa |
 | `TestItIsWiredIn::*` (3) | Que el módulo **declara** el widget con selector (sin él no hay forma de abrir un aparato); que el hook está **en la clase que el núcleo pregunta** (un mixin escrito y no mezclado es un widget que sale vacío); y que el núcleo le pasa a cada módulo **su propia colección** — `list` es una convención y no una regla, este módulo llama `servers` a la suya, así que al hook le llegaba un diccionario vacío y el widget se quedaba sin nombres sin que nada fallara |
 
 ---
@@ -6849,7 +6852,7 @@ nada, así que la sección simplemente no se abre y no hay error que seguir.
 
 ## 121. Un widget de módulo, añadido varias veces y configurado por instancia
 
-**Archivo:** `tests/unit/test_overview_module_widget_instances.py` — 21 tests
+**Archivo:** `tests/unit/test_overview_module_widget_instances.py` — 22 tests
 **Archivo:** `tests/meta/test_overview_module_widget_instances.py` — 3 tests
 
 Una sola tarjeta no puede contestar «cómo va Microsoft 365»: esa pregunta son varias —cuánto
@@ -6877,6 +6880,7 @@ cajas correctas enseñando lo que no era** — el scope y el filtro se perdían 
 | `TestTheWidgetCanBeAddedMoreThanOnce::*` (×3) | La declaración `multi`, la regla que la hace valer, y que `mw_x:2` resuelva a su tipo |
 | `TestEachInstanceKeepsItsOwnSettings::test_every_setting_is_saved_per_instance` | **Una sola lista**, leída por todos los sitios que escriben un layout. Eran **tres copias** del mismo desplegado —el guardado local, el de la cuenta y el que relee un layout—, así que una clave añadida a dos de ellos era un ajuste que sobrevivía a un refresco y se perdía en la siguiente máquina, sin decir nada |
 | `TestEachInstanceKeepsItsOwnSettings::test_and_the_two_halves_of_that_list_agree` | La del navegador y la del servidor: una clave en una y no en la otra es un ajuste que funciona hasta que entras desde otro sitio |
+| `TestEachInstanceKeepsItsOwnSettings::test_and_they_survive_a_full_repaint` | **La cuarta copia, y la que de verdad perdía ajustes.** El repintado escribía los atributos de vuelta en el elemento **uno a uno**, así que una clave que estaba en la lista pero no en esa línea se guardaba en el layout y no volvía nunca a la página — y todo lo que lee del DOM (que es cada control, y el siguiente guardado) veía nada. `mwchart` llevaba así desde que se añadió; captura de pantalla: dos gráficas configuradas para el tráfico volvían dibujando una temperatura |
 | `TestEachInstanceKeepsItsOwnSettings::test_a_saved_default_layout_keeps_them` | **El fallo que cazó**: el default de la organización los perdía |
 | `TestEachInstanceKeepsItsOwnSettings::test_absent_settings_are_not_invented` | Ausente y vacío se leen igual, pero no en un diff de dos layouts |
 | `TestEachInstanceKeepsItsOwnSettings::test_junk_entries_are_still_dropped` | |
@@ -9141,7 +9145,7 @@ No se juzga cómo se ven, que ningún test puede. Se fijan las cuatro cosas que 
 
 ---
 
-**Archivo:** `tests/meta/test_wa_infra_section.py` — 110 tests
+**Archivo:** `tests/meta/test_wa_infra_section.py` — 141 tests
 
 El cableado que una **sección raíz** necesita para existir. No es un fichero: es una entrada en
 el registro de páginas (que es lo que le da URL, ruta, filtro por permiso y entrada en la barra
@@ -9286,7 +9290,7 @@ tráfico. La ficha completa está en [caso-diagnostico.md](caso-diagnostico.md).
 | `test_it_is_the_last_column_declared` | La regla que hace que la migración sea un `ADD COLUMN` y no una reconstrucción de la tabla |
 ## 170. Infraestructura — el mapa, y la raya que no puede cruzar
 
-**Archivo:** `tests/unit/test_infra_topology.py` — 69 tests
+**Archivo:** `tests/unit/test_infra_topology.py` — 72 tests
 
 Un dibujo de una red se lee como un dibujo de cables. Éste no lo es: se construye con las
 direcciones que declara cada máquina, el prefijo que va al lado de cada una, y el siguiente

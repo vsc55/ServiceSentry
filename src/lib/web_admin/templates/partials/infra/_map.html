@@ -166,7 +166,17 @@ function _infraMapLayout(map) {
 
     // …and where somebody PUT them, which beats where the tree would. Applied here and not at
     // draw time, so the lines are computed from the same positions the boxes are drawn at.
-    const ext = ssCanvasPlace(_NET_SVG, boxes, {w: _MAP.BOX_W, h: _MAP.BOX_H},
+    // The outside is a box on this picture, so it takes part in where the picture ENDS.
+    // Left out, dragging it above or left of everything put it outside the frame: on screen
+    // the letterboxing hid that, and the exported file — which has no letterboxing — came out
+    // with the cloud sliced off at the top. Reported from the screen with the picture.
+    // The same trap the cable map's way out had, on the other map.
+    const cloud = ssCanvasMoved(_NET_SVG)[_NET_CLOUD]
+        || {x: mid - _CLOUD_W / 2, y: _MAP.Y_CLOUD - 14};
+    const ext = ssCanvasPlace(_NET_SVG, boxes.concat([
+                                  {uid: _NET_CLOUD, x: cloud.x, y: cloud.y,
+                                   w: _CLOUD_W, h: _MAP.BOX_H - 8}]),
+                              {w: _MAP.BOX_W, h: _MAP.BOX_H},
                               {pad: _MAP.PAD, width: wide,
                                height: _MAP.Y_HOST + Math.max(1, ...cols.map(
                                    c => c.boxes.length)) * (_MAP.BOX_H + _MAP.HOST_GAP) + 16});
@@ -178,7 +188,7 @@ function _infraMapLayout(map) {
         .filter(e => e.kind === 'gateway' && at.has(e.from) && e.to && at.has(e.to))
         .map(e => ({from: e.from, to: e.to, address: e.address || ''}));
     return {
-        cols, gws, exits, at, home, boxes, mid, ways,
+        cols, gws, exits, at, home, boxes, mid, ways, cloud,
         // Networks the fleet declares and nobody lives in — counted, not drawn.
         folded: (map.networks || []).filter(n => !(n.members || []).length).length,
         soloCount: [...solo.values()].reduce((a, v) => a + v.length, 0),
@@ -201,8 +211,8 @@ function _infraMapBody() {
     return `<div class="px-1 pb-2 ss-mapfill">
         ${_infraMapNote(map, L)}
         <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
-            <div id="infraNetPanel" class="position-absolute" style="left:.5rem;bottom:.5rem;
-                 right:.5rem;z-index:2;pointer-events:auto">${_infraMapPanelHtml()}</div>
+            <div id="infraNetPanel" class="position-absolute ss-passthru"
+                 style="left:.5rem;bottom:.5rem;right:.5rem;z-index:2">${_infraMapPanelHtml()}</div>
             <svg ${ssCanvasAttrs(_NET_SVG, L)}
                  onwheel="ssCanvasWheel(${jsStr(_NET_SVG)},event)"
                  onpointerdown="_infraMapDown(event)"
@@ -243,6 +253,7 @@ function _infraMapRedraw() {
     svg.dataset.w = L.width;
     svg.dataset.h = L.height;
     svg.innerHTML = _infraMapDefs() + _infraMapContent(L);
+    _infraMapMark();
 }
 
 function _infraMapToolsPaint() {
@@ -264,7 +275,12 @@ function _infraMapWait() {
 function _infraMapDown(ev) {
     const box = ev.target.closest('g[data-open]');
     if (box) {
-        const at = (_infraMapLayout(_infraMap || {}).at || new Map()).get(box.dataset.open);
+        const L = _infraMapLayout(_infraMap || {});
+        // The outside is not in the layout's map of machines: it is one thing, drawn where the
+        // picture is widest, and its own place once somebody moves it.
+        const at = box.dataset.open === _NET_CLOUD
+            ? _infraMapCloudAt(L)
+            : (L.at || new Map()).get(box.dataset.open);
         if (ssCanvasDragStart(_NET_SVG, ev, box.dataset.open, at)) return;
     }
     ssCanvasPanStart(_NET_SVG, ev);
@@ -278,7 +294,9 @@ function _infraMapMove(ev) {
 function _infraMapUp(ev) {
     const open = ssCanvasDragEnd(_NET_SVG, _infraMapToolsPaint);
     ssCanvasPanEnd(ev);
-    if (open) infraOpen(open);
+    // The outside has no page to open. A click that does nothing is better than one that
+    // opens a device page for something that is not a device.
+    if (open && open !== _NET_CLOUD) infraOpen(open);
 }
 
 function _infraMapNote(map, L) {
@@ -292,7 +310,8 @@ function _infraMapNote(map, L) {
                 onclick="setInfraView('links')" title="${escAttr(t('infra_map_to_links_tt'))}"
                 ><i class="bi bi-hdd-network me-1"></i>${esc(tf('infra_map_to_links', wired))}
             </button>` : ''}
-        <span id="infraNetTools" class="ms-auto">${_infraMapTools()}</span>
+        ${ssCanvasPanelToggle('_infraMapPaint')}
+        <span id="infraNetTools">${_infraMapTools()}</span>
         <button class="btn btn-sm btn-secondary" onclick="_infraMapRefresh()">
             <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
     </div>`;
@@ -307,7 +326,7 @@ function _infraMapTools() {
     const arranged = Object.keys(ssCanvasMoved(_NET_SVG)).length > 0;
     const dirty = ssCanvasKeptDirty(_NET_SVG);
     return `<span class="btn-group btn-group-sm">
-        ${ssCanvasTools(_NET_SVG)}
+        ${ssCanvasTools(_NET_SVG, 'network_map', '_infraMapKeys')}
         ${dirty ? `<button class="btn btn-sm btn-primary" onclick="infraMapKeep()"
                      title="${escAttr(t('infra_link_keep'))}"
                      ><i class="bi bi-save"></i></button>` : ''}
@@ -399,29 +418,39 @@ function _infraMapClip(text, max) {
  */
 function _infraMapWires(L) {
     const out = [];
-    const bottom = _MAP.Y_NET + _MAP.NET_H;
-    // Curves and not elbows, now that a box may have been dragged anywhere: an orthogonal
-    // elbow assumes the thing below is below.
-    const wire = (x1, y1, x2, y2, style) => {
-        const d = Math.max(24, Math.abs(y2 - y1) / 2);
-        return `<path d="M ${x1} ${y1} C ${x1} ${y1 + d}, ${x2} ${y2 - d}, ${x2} ${y2}"
-                      fill="none" ${style}></path>`;
-    };
+    // Every line here joins two BOXES, and which sides it leaves by is `ssCanvasCable`'s
+    // answer — the same one the cable map gets. Written as endpoints, each of these had
+    // already decided the sides before it drew anything: the plate was always below the
+    // router, the machine always below its plate. Dragging ended that, and a machine moved
+    // above its own network got a line that left downwards and hooked back up into it.
+    // Each line carries WHICH TWO THINGS it joins. A machine on four networks is four lines
+    // leaving one box into a field of everybody else's, and the picture reported from the
+    // screen was a grey mesh nothing could be traced through: the answer to "where does THIS
+    // one go" is in the drawing, and reading it off is the part that fails. Named here, the
+    // lines of whatever is under the pointer can be lit without redrawing anything — which
+    // matters, because a redraw under a hovering pointer is a picture that flickers.
+    const wire = (a, b, style) =>
+        `<path data-a="${escAttr(a.id)}" data-b="${escAttr(b.id)}"
+               d="${ssCanvasCable(a, b)}" fill="none" ${style}></path>`;
     const plain = 'stroke="var(--bs-border-color)" stroke-width="1.5"';
+    // A machine, a network's plate and the outside, each as the box it is drawn as — and each
+    // under the name the rest of this map knows it by.
+    const mach = p => ({id: p.uid, x: p.x, y: p.y, w: _MAP.BOX_W, h: p.h || _MAP.BOX_H});
+    const plate = c => ({id: _netKey('net', c.net), x: c.x + 8, y: _MAP.Y_NET,
+                         w: _MAP.COL - 16, h: _MAP.NET_H});
 
+    // …from wherever the outside has been put.
+    const at = _infraMapCloudAt(L);
+    const cloud = {id: _NET_CLOUD, x: at.x, y: at.y, w: _CLOUD_W, h: _MAP.BOX_H - 8};
     for (const g of L.gws) {
-        if (L.exits.some(e => e.from === g.uid))
-            out.push(`<line x1="${L.mid}" y1="${_MAP.Y_CLOUD + 8}"
-                            x2="${g.x + _MAP.BOX_W / 2}" y2="${g.y}"
-                            stroke="var(--bs-primary)" stroke-width="2"></line>`);
+        if (L.exits.some(e => e.from === g.uid)) {
+            out.push(wire(cloud, mach(g), 'stroke="var(--bs-primary)" stroke-width="2"'));
+        }
     }
-    const src = L.gws.length ? L.gws[0] : null;
+    const src = L.gws.length ? mach(L.gws[0]) : cloud;
     for (const c of L.cols) {
-        const y1 = src ? src.y + (src.h || _MAP.BOX_H) : _MAP.Y_CLOUD + 10;
-        const x1 = src ? src.x + _MAP.BOX_W / 2 : L.mid;
-        out.push(wire(x1, y1, c.cx, _MAP.Y_NET, plain));
-        for (const b of c.boxes)
-            out.push(wire(c.cx, bottom, b.x + _MAP.BOX_W / 2, b.y, plain));
+        out.push(wire(src, plate(c), plain));
+        for (const b of c.boxes) out.push(wire(plate(c), mach(b), plain));
     }
 
     // A machine that is ALSO on another network, and only to plates that are on the picture:
@@ -430,12 +459,9 @@ function _infraMapWires(L) {
         const also = (b.node.networks || []).filter(
             net => net !== L.home.get(b.uid) && L.cols.some(c => c.net === net));
         for (const net of also) {
-            const c = L.cols.find(x => x.net === net);
-            out.push(`<path d="M ${b.x} ${b.y + _MAP.BOX_H / 2}
-                              C ${b.x - 40} ${b.y + _MAP.BOX_H / 2},
-                                ${c.cx} ${bottom + 40}, ${c.cx} ${bottom}"
-                            fill="none" stroke="var(--bs-secondary)" stroke-width="1"
-                            stroke-dasharray="3 3" opacity=".7"></path>`);
+            out.push(wire(mach(b), plate(L.cols.find(x => x.net === net)),
+                          'stroke="var(--bs-secondary)" stroke-width="1"'
+                          + ' stroke-dasharray="3 3" opacity=".7"'));
         }
     }
 
@@ -443,23 +469,54 @@ function _infraMapWires(L) {
     for (const w of L.ways || []) {
         const a = L.at.get(w.from), b = w.to ? L.at.get(w.to) : null;
         if (!a || !b || L.gws.length <= 1) continue;
-        out.push(`<path d="M ${a.x + _MAP.BOX_W / 2} ${a.y}
-                          C ${a.x + _MAP.BOX_W / 2} ${a.y - 40},
-                            ${b.x + _MAP.BOX_W / 2} ${b.y + 80},
-                            ${b.x + _MAP.BOX_W / 2} ${b.y + (b.h || _MAP.BOX_H)}"
-                        fill="none" stroke="var(--bs-primary)" stroke-width="1.5"
-                        marker-end="url(#ss-map-arrow)" opacity=".7"></path>`);
+        out.push(wire(mach(a), mach(b),
+                      'stroke="var(--bs-primary)" stroke-width="1.5"'
+                      + ' marker-end="url(#ss-map-arrow)" opacity=".7"'));
     }
     return out.join('');
 }
 
+//: The id the outside goes by. It is not a machine and has no uid, but every other thing on
+//: this picture is moved and read by one — so it gets a name of its own rather than a second
+//: mechanism. `:` cannot occur in a uid, so it can never be mistaken for one.
+const _NET_CLOUD = ':outside';
+
+//: …and it is drawn as a BOX, like everything else on the picture. It was a line of text, which
+//: is why it read as scenery rather than as a thing you could move or ask about.
+const _CLOUD_W = 120;
+
+/** WHERE the outside is — its own place once somebody moved it, and the top of the picture
+ *  until then.
+ *
+ *  One answer, because the box and the cables that reach it have to agree: they did not, and
+ *  dragging the cloud left its wires behind at the coordinate they were written with.
+ *  Reported from the screen.
+ */
+function _infraMapCloudAt(L) {
+    // Worked out by the layout, because the extent has to know about it too — one answer, read
+    // by the box, its wires, its card and the drag.
+    return (L || {}).cloud || {x: 0, y: 0};
+}
+
 /** What is outside. Drawn only when something actually said it sends traffic there — a fleet
- *  with no route off itself must not get a cloud implying one. */
+ *  with no route off itself must not get a cloud implying one.
+ *
+ *  A box like the rest: it can be dragged where the room is, and hovering it says what the
+ *  connection out actually IS. Reported from the screen — it was a line of text that could
+ *  not be moved and answered nothing. */
 function _infraMapCloud(L) {
     if (!L.exits.length) return '';
-    const seen = [...new Set(L.exits.map(e => e.address).filter(Boolean))];
-    return `<g><title>${escAttr(seen.join(', '))}</title>
-        <text x="${L.mid}" y="${_MAP.Y_CLOUD}" font-size="12.5" text-anchor="middle"
+    const p = _infraMapCloudAt(L);
+    const h = _MAP.BOX_H - 8;
+    return `<g data-open="${escAttr(_NET_CLOUD)}" class="ss-grab"
+               onpointerover="_infraMapHover('cloud','')"
+               onpointerout="_infraMapHover('','')">
+        <title>${escAttr(tf('infra_map_exits', L.exits.length))}</title>
+        <rect x="${p.x}" y="${p.y}" width="${_CLOUD_W}" height="${h}" rx="7"
+              fill="var(--bs-body-bg)" stroke="var(--bs-primary)" stroke-width="1.5"
+              stroke-dasharray="4 3"></rect>
+        <text x="${p.x + _CLOUD_W / 2}" y="${p.y + h / 2 + 4}" font-size="12.5"
+              text-anchor="middle"
               fill="var(--bs-secondary-color)">&#9729;&#160; ${esc(t('infra_map_outside'))}</text>
     </g>`;
 }
@@ -480,11 +537,50 @@ let _netHover = ['', ''];
 
 function _infraMapHover(kind, id) {
     _netHover = [String(kind || ''), String(id || '')];
+    _infraMapPaint();
+}
+
+/** The panel, and the lines it is about. Its own function because the switch that turns the
+ *  panel off has to repaint it and knows nothing else about this map. */
+function _infraMapPaint() {
     const box = document.getElementById('infraNetPanel');
     if (box) box.innerHTML = _infraMapPanelHtml();
+    _infraMapMark();
+}
+
+/** What the thing under the pointer is called ON THE LINES. One function because the name has
+ *  to be spelled the same where it is written and where it is looked for, and a network's is
+ *  not its own — a machine's uid and a subnet are two namespaces, and `192.168.1.0/24` could
+ *  in principle be a uid. */
+function _netKey(kind, id) {
+    if (kind === 'host') return String(id || '');
+    if (kind === 'net') return 'net:' + String(id || '');
+    if (kind === 'cloud') return _NET_CLOUD;
+    return '';
+}
+
+/** The lines of whatever is under the pointer, lit; everything else stepped back.
+ *
+ *  Not a redraw: the pointer is ON the box, and rebuilding the picture underneath it drops the
+ *  hover the moment it starts. So the lines are found by the names they carry and only their
+ *  style is touched.
+ *
+ *  Stepping the others BACK and not just thickening these: on a map where four networks each
+ *  hold a dozen machines, a slightly thicker line among two hundred is not something the eye
+ *  finds. What makes it readable is the two hundred going quiet. */
+function _infraMapMark() {
+    const svg = ssCanvasSvg(_NET_SVG);
+    if (!svg) return;
+    const on = _netKey(_netHover[0], _netHover[1]);
+    svg.querySelectorAll('path[data-a]').forEach(p => {
+        const mine = on && (p.dataset.a === on || p.dataset.b === on);
+        p.style.opacity = !on || mine ? '' : '.1';
+        p.style.strokeWidth = mine ? '2.5' : '';
+    });
 }
 
 function _infraMapPanelHtml() {
+    if (!ssCanvasPanelOn()) return '';
     const [kind, id] = _netHover;
     if (!kind || !_infraMap) return '';
     const L = _infraMapLayout(_infraMap);
@@ -495,6 +591,7 @@ function _infraMapPanelHtml() {
             extra: p.solo.length ? [t('infra_map_solo_of'), p.solo.join(', ')] : null,
         }) : '';
     }
+    if (kind === 'cloud') return _infraMapCloudCard(L);
     const s = L.cols.find(x => x.net === id);
     if (!s) return '';
     return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
@@ -515,6 +612,61 @@ function _infraMapPanelHtml() {
     </div>`;
 }
 
+/** What the way out actually is: which machine carries it, down which port, to what.
+ *
+ *  The cloud was a word with a tooltip of addresses. What somebody wants from it is the same
+ *  thing they want from a box — which machine, which cable, which address — and it is all
+ *  already on the edges that arrive here.
+ */
+function _infraMapCloudCard(L) {
+    const rows = (L.exits || []).map(e => {
+        const p = L.at.get(e.from);
+        const n = (p || {}).node || {};
+        // The address the machine says it sends traffic to, and the mask of the network it
+        // sends it FROM: a next hop with no network around it is half an answer.
+        const net = (n.networks || []).find(x => e.address && _netHolds(x, e.address))
+                 || (n.networks || [])[0] || '';
+        return {uid: e.from, name: n.name || e.from, kind: n.kind || '',
+                port: e.port || '', address: e.address || '', net, said: !!e.said,
+                // The address the world sees, which is neither the LAN address nor the LAN
+                // gateway — the two that were being shown.
+                public: ssPublicIp(n.addresses)};
+    });
+    if (!rows.length) return '';
+    const line = (r) => `<div class="d-flex align-items-baseline gap-2">
+        <button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
+            onclick="infraOpen(${jsStr(r.uid)})"><i class="bi ${
+            escAttr(hostTypeIcon(r.kind))} me-1"></i>${esc(r.name)}</button>
+        ${r.port ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+            ><i class="bi bi-globe2 me-1"></i>${esc(r.port)}</span>` : ''}
+        ${r.public ? `<code class="ss-fs-2">${esc(r.public)}</code>` : ''}
+        ${r.address ? `<span class="text-muted ss-fs-3"
+            title="${escAttr(t('infra_link_gateway'))}">&rarr; ${esc(r.address)}</span>` : ''}
+        ${r.net ? `<span class="text-muted ss-fs-3">${esc(r.net)}</span>` : ''}
+    </div>`;
+    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <i class="bi bi-cloud text-muted"></i>
+            <span class="fw-semibold">${esc(t('infra_map_outside'))}</span>
+            <span class="text-muted ss-fs-3">${esc(tf('infra_map_exits', rows.length))}</span>
+        </div>
+        <div class="d-flex flex-column gap-1">${rows.map(line).join('')}</div>
+        ${rows.some(r => r.said) ? '' : `<div class="text-muted ss-fs-3 mt-1">${
+            esc(t('infra_map_exit_guessed'))}</div>`}
+    </div>`;
+}
+
+/** Whether an address falls inside a network in CIDR form. Only to pick WHICH of a machine's
+ *  networks its next hop is on, so a wrong answer costs a line of context and never a claim. */
+function _netHolds(cidr, address) {
+    const [base, bits] = String(cidr || '').split('/');
+    const n = parseInt(bits, 10);
+    if (!base || !Number.isFinite(n)) return false;
+    const num = (ip) => String(ip).split('.').reduce((a, o) => (a << 8) + (parseInt(o, 10) || 0), 0);
+    const mask = n === 0 ? 0 : (-1 << (32 - n));
+    return (num(base) & mask) === (num(address) & mask);
+}
+
 /** The networks that are not on the picture, said out loud.
  *
  *  A router declares every route it has, and most of them lead somewhere with nothing the
@@ -530,18 +682,29 @@ function _infraMapFolded(L) {
         <i class="bi bi-signpost-split me-1"></i>${esc(bits.join(' · '))}</div>`;
 }
 
+/** What each kind of line on this map MEANS, as data.
+ *
+ *  Data because it is drawn twice now: under the picture on screen, and INSIDE the picture when
+ *  somebody takes it away — an exported map without it is a page of grey and blue lines whose
+ *  difference the reader has to guess. Written twice, the two would agree until the day a
+ *  stroke changed on one of them. */
+function _infraMapKeys() {
+    return [
+        {stroke: 'var(--bs-secondary)', width: 1.2, dash: '4 3',
+         label: t('infra_map_legend_net')},
+        {stroke: 'var(--bs-primary)', width: 1.5, dash: '',
+         label: t('infra_map_legend_gw')},
+        {stroke: 'var(--bs-primary)', width: 1.5, dash: '5 4',
+         label: t('infra_map_legend_exit')},
+    ];
+}
+
 function _infraMapLegend(map) {
     const lost = (map.unplaced || []).length;
     return `<div class="d-flex flex-wrap align-items-center gap-3 ss-fs-2 text-muted pt-2">
-        <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4"
-            stroke="var(--bs-secondary)" stroke-width="1.2" stroke-dasharray="4 3"/></svg>
-            ${esc(t('infra_map_legend_net'))}</span>
-        <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4"
-            stroke="var(--bs-primary)" stroke-width="1.5"/></svg>
-            ${esc(t('infra_map_legend_gw'))}</span>
-        <span><svg width="26" height="8"><line x1="0" y1="4" x2="26" y2="4"
-            stroke="var(--bs-primary)" stroke-width="1.5" stroke-dasharray="5 4"/></svg>
-            ${esc(t('infra_map_legend_exit'))}</span>
+        ${_infraMapKeys().map(k => `<span><svg width="26" height="8"
+            ><line x1="0" y1="4" x2="26" y2="4" ${ssCanvasStroke(k)}/></svg>
+            ${esc(k.label)}</span>`).join('')}
         ${lost ? `<span class="ms-auto"><i class="bi bi-question-circle me-1"></i>${
             esc(tf('infra_map_unplaced', lost))}</span>` : ''}
     </div>`;

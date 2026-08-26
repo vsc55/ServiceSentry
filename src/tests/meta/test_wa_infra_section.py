@@ -722,10 +722,13 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
 
     def test_the_wires_do_not_assume_a_box_is_where_it_was_generated(self):
         """They were orthogonal elbows — down, across, down — which is only readable while the
-        thing below IS below. A dragged box makes that false, so they are curves."""
+        thing below IS below. A dragged box makes that false, so they are curves; and curves
+        drawn between two BOXES, because the elbow's other assumption was surviving in them:
+        which side each end left by was still fixed at "the bottom of the upper one"."""
         wires = _fn(self._js(), '_infraMapWires')
         assert 'function _infraMapElbow(' not in self._js()
-        assert 'const wire = (x1, y1, x2, y2, style)' in wires
+        assert 'const wire = (a, b, style)' in wires
+        assert 'ssCanvasCable(a, b)' in wires
 
     def test_the_cables_are_not_drawn_twice(self):
         """They have a map of their own now. Two pictures of one cable are two things to keep
@@ -740,10 +743,13 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
         """Each is a different CLAIM — an address, a statement the device made, a way off the
         fleet. Flattening them into "connected" would be the picture saying more than the data
         does, which is the one thing a map must not do."""
-        legend = _fn(self._js(), '_infraMapLegend')
-        assert legend.count('<svg') == 3, 'the legend stopped matching the lines'
+        # The legend renders a declared list now, because it is drawn twice: under the
+        # picture, and inside an exported one where there is no "under the picture".
+        keys = _fn(self._js(), '_infraMapKeys')
+        assert keys.count('stroke:') == 3, 'the legend stopped matching the lines'
+        assert '_infraMapKeys()' in _fn(self._js(), '_infraMapLegend')
         for key in ('infra_map_legend_net', 'infra_map_legend_gw', 'infra_map_legend_exit'):
-            assert key in legend, key
+            assert key in keys, key
             for lang in ('es_ES', 'en_EN'):
                 assert f"'{key}'" in _read(os.path.join(
                     SRC, 'lib', 'i18n', 'lang', f'{lang}.py')), (key, lang)
@@ -893,20 +899,29 @@ class TestFlaggingARowShowsOnTheScreen:
         assert "btn.dataset.row !== row" in paint, (
             'the button is repainted for a row it is not showing')
 
-    def test_a_live_button_gets_a_function_and_not_an_attribute(self):
-        """`jsStr` HTML-ESCAPES what it quotes — everywhere else it is written into markup,
-        and the parser undoes that when it compiles the handler. `setAttribute` sets the value
-        literally, so the handler read `_infraSetWatch(&quot;snmp&quot;,...)`: a syntax error,
-        and the button stopped responding until something re-rendered it through the HTML
-        path. Reported from the screen exactly that way — flag a port, then nothing happens
-        until you switch ports and come back.
+    def test_the_button_is_rebuilt_from_its_markup_and_never_patched(self):
+        """The trap this replaces: `jsStr` HTML-ESCAPES what it quotes, because everywhere else
+        it is written INTO markup and the parser undoes that when it compiles the handler.
+        `setAttribute` sets the value literally, so a patched handler read
+        `_infraSetWatch(&quot;snmp&quot;,...)` — a syntax error, and the button stopped
+        responding until something re-rendered it through the HTML path.
 
-        Patching a live element has no markup in it, so it needs no quoting."""
-        paint = _fn(self._js(), '_infraWatchPaint')
-        assert 'btn.onclick =' in paint, 'the handler is installed as a string again'
-        assert "setAttribute('onclick'" not in paint
-        assert 'jsStr(' not in paint, (
-            'a value is being quoted for markup while patching a live element')
+        It goes through the HTML path now, which settles that and one more: whether the button
+        is DISABLED, what colour it is, what its tooltip says and what its click does are four
+        answers to one question — a row declared as the way out may not be un-watched, because
+        that would drop the role with it — and setting them one at a time is how they start
+        disagreeing.
+        """
+        js = self._js()
+        paint = _fn(js, '_infraWatchPaint')
+        assert 'btn.outerHTML = _infraWatchBtnHtml(' in paint, 'it is patched again'
+        assert 'btn.onclick =' not in paint and "setAttribute('onclick'" not in paint
+        # …and the one builder is what the pane draws with too, or the two disagree the first
+        # time somebody changes one of them.
+        assert '_infraWatchBtnHtml(mod, r.key)' in js
+        built = _fn(js, '_infraWatchBtnHtml')
+        assert "role ? ' disabled' : ''" in built, (
+            'a declared port can be un-watched, which drops the role with nothing said')
 
     def test_the_two_fragments_are_written_once(self):
         """Both are drawn twice — when the pane is built and again when the flag changes — and
@@ -1202,3 +1217,351 @@ class TestAMakersMarkFitsItsBox:
         head = card.split('const block = (title')[1].split('const facts')[0]
         assert 'hostBrandMarkHtml(brand' in head, 'the card draws no mark'
         assert 'title === (brand || {}).name' in head, 'the card writes the maker out twice'
+
+class TestThePanelDoesNotStandOnTheDrawing:
+    """A panel that describes what is under the pointer is drawn OVER the picture it describes,
+    which puts it between the reader and part of the thing they are pointing at.
+
+    Reported from the screen: a box that happens to sit in the bottom strip of a map could not
+    be pressed or dragged, because the panel about it was in the way of it — and the hover went
+    with it, so the panel flickered against its own box.
+
+    The layer is transparent to the pointer and only the controls inside it answer. Pinned here
+    rather than in the panels because it went back the other way once already: `pointer-events:
+    auto` was written on the wrapper on purpose, when the panel was the only thing there.
+    """
+
+    PANELS = (('_links.html', 'infraLinkPanel'), ('_map.html', 'infraNetPanel'))
+
+    def test_every_floating_panel_lets_the_pointer_through(self):
+        for name, pid in self.PANELS:
+            src = _read(os.path.join(INFRA, name))
+            div = src.split('id="%s"' % pid)[1].split('>')[0]
+            assert 'ss-passthru' in div, f'{pid} takes the pointer off the drawing'
+            assert 'pointer-events:auto' not in div.replace(' ', ''), \
+                f'{pid} puts the pointer back on itself'
+
+    def test_and_the_class_gives_its_own_controls_back(self):
+        """Transparent all the way down would be a panel whose buttons cannot be pressed."""
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        head = '.ss-passthru { pointer-events: none; }'
+        assert head in css
+        block = css.split(head)[1].split('}')[0]
+        for ctl in ('button', 'a', 'input', 'select', 'textarea', '[onclick]'):
+            assert '.ss-passthru %s' % ctl in block, f'a {ctl} inside it stays unreachable'
+        assert 'pointer-events: auto' in block
+
+
+class TestACableLeavesByTheSideFacingTheOtherEnd:
+    """Which sides a cable leaves by is a question about where the two boxes ARE, and every
+    line on both maps has to answer it the same way or the drawing looks broken rather than
+    varied.
+
+    It was answered separately by each kind of line and every answer was fixed: flank to flank
+    between machines, bottom to top for the way out, for a network's plate, for a machine
+    hanging off one. All of them held only while the boxes were where the layout first put
+    them. Two machines in one tier are already one above the other — that cable doubled back
+    behind both of them and read as a line appearing from underneath a box. A machine dragged
+    above its own network got a line that left downwards and hooked back up into it. Reported
+    from the screen once per map.
+
+    So the maker lives with the rest of what both pictures share, and nothing draws its own
+    corners.
+    """
+
+    #: Every function that puts a cable on either map.
+    DRAWS = (('_links.html', '_infraLinkWires'), ('_links.html', '_infraLinkWanBox'),
+             ('_map.html', '_infraMapWires'))
+
+    def _src(self, name):
+        return _strip_comments(_read(os.path.join(INFRA, name)))
+
+    def test_there_is_one_maker_of_cables_and_it_is_where_both_maps_are(self):
+        body = _fn(self._src('_canvas.html'), 'ssCanvasCable')
+        assert 'Math.abs(bx - ax) >= Math.abs(by - ay)' in body, \
+            'nothing decides between the flanks and the top'
+        assert 'a.x + a.w' in body and 'a.y + a.h' in body, \
+            'an end that never leaves by a far side has only half the sides'
+
+    def test_and_every_cable_on_both_maps_is_made_by_it(self):
+        for name, fn in self.DRAWS:
+            assert 'ssCanvasCable(' in _fn(self._src(name), fn), f'{fn} draws its own corners'
+
+    def test_and_none_of_them_writes_its_own_curve(self):
+        """A second `M x y C …` is the several-answers bug growing back."""
+        for name, fn in self.DRAWS:
+            assert 'C $' not in _fn(self._src(name), fn), f'{fn} spells a curve out again'
+
+    def test_and_it_is_given_boxes_and_not_endpoints(self):
+        """Which side to leave by cannot be worked out from a point: a caller that passes one
+        has already chosen the side, which is the thing being fixed."""
+        body = _fn(self._src('_map.html'), '_infraMapWires')
+        assert 'w: _MAP.BOX_W' in body and 'w: _MAP.COL - 16' in body, \
+            'the address map hands over points again'
+
+class TestWhatIsUnderThePointerLightsItsOwnLines:
+    """A machine on four networks is four lines leaving one box into a field of everybody
+    else's, and both maps reported the same screen: a mesh nothing can be traced through. The
+    answer to "where does THIS one go" is in the drawing and reading it off is what fails.
+
+    So each line carries the two things it joins, and whatever is under the pointer lights its
+    own. Two properties keep it working: nothing is REDRAWN to do it — a rebuild under a
+    hovering pointer drops the hover that asked — and a redraw for other reasons (a drag) puts
+    the lighting back, or the picture goes flat mid-gesture.
+    """
+
+    #: Every function that puts a line on either map.
+    DRAWS = (('_map.html', '_infraMapWires'), ('_links.html', '_infraLinkWires'),
+             ('_links.html', '_infraLinkWanBox'))
+    #: The marker of each map, and the paint it hangs off.
+    MARKS = (('_map.html', '_infraMapMark', '_infraMapPaint'),
+             ('_links.html', '_infraLinkMark', '_infraLinkPaint'))
+
+    def _fn(self, name, fn):
+        return _fn(_strip_comments(_read(os.path.join(INFRA, name))), fn)
+
+    def test_every_line_says_what_it_joins(self):
+        for name, fn in self.DRAWS:
+            body = self._fn(name, fn)
+            assert 'data-a=' in body and 'data-b=' in body, \
+                f'{fn} draws lines nothing can find again'
+
+    def test_and_a_network_is_not_named_the_way_a_machine_is(self):
+        """A uid and a subnet are two namespaces sharing one attribute, and nothing stops a
+        machine being called `192.168.1.0/24`."""
+        body = self._fn('_map.html', '_netKey')
+        assert "'net:'" in body, 'a network and a machine could answer to the same name'
+
+    def test_and_the_pointer_lights_them_without_redrawing(self):
+        for name, mark, paint in self.MARKS:
+            body = self._fn(name, mark)
+            assert 'dataset.a' in body and 'style.opacity' in body, \
+                f'{mark} lights nothing'
+            assert 'innerHTML' not in body, \
+                f'{mark} rebuilds the picture under the pointer that is asking'
+            assert mark + '()' in self._fn(name, paint), f'{paint} never lights anything'
+
+    def test_and_a_redraw_during_a_drag_puts_the_lighting_back(self):
+        for name, redraw, mark in (('_map.html', '_infraMapRedraw', '_infraMapMark'),
+                                   ('_links.html', '_infraLinkRedraw', '_infraLinkMark')):
+            assert mark + '()' in self._fn(name, redraw), \
+                f'{redraw} draws a picture that has forgotten what was lit'
+
+class TestThePictureIsTheReadersToUncover:
+    """The panel that reads whatever is under the pointer stands ON the drawing, so it is in
+    front of part of the thing it describes. Reported from the screen as "molesta".
+
+    Two answers, because how much of the picture somebody needs is not something this code can
+    know: it lets the drawing through, and it can be turned off outright.
+    """
+
+    def _css(self):
+        return _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+
+    def test_the_panel_lets_the_drawing_through(self):
+        rule = self._css().split('.ss-infra-linkinfo {')[1].split('}')[0]
+        assert 'rgba(var(--bs-body-bg-rgb)' in rule, 'it is opaque again'
+        assert 'backdrop-filter: blur' in rule, \
+            'translucent with no blur is a set of buttons whose labels sit on a diagram'
+
+    def test_and_a_browser_without_the_blur_still_gets_a_readable_one(self):
+        """The fallback is the whole reason translucency is safe here."""
+        css = self._css()
+        assert '@supports not ((backdrop-filter' in css
+        block = css.split('@supports not ((backdrop-filter')[1].split('}')[0]
+        assert '.ss-infra-linkinfo' in block
+
+    def test_and_it_can_be_turned_off_from_the_map_itself(self):
+        for name, paint in (('_map.html', '_infraMapPaint'),
+                            ('_links.html', '_infraLinkPaint')):
+            src = _strip_comments(_read(os.path.join(INFRA, name)))
+            assert 'ssCanvasPanelToggle(%r)' % paint in src.replace('"', "'"), \
+                f'{name} offers no way to put the panel away'
+
+    def test_and_asking_for_one_answers_nothing_when_it_is_off(self):
+        """The switch has to be read where the panel is BUILT. Read only where it is drawn,
+        every hover still assembles a card for a panel nobody can see."""
+        for name, fn in (('_map.html', '_infraMapPanelHtml'),
+                         ('_links.html', '_infraLinkPanelHtml')):
+            body = _fn(_strip_comments(_read(os.path.join(INFRA, name))), fn)
+            assert 'ssCanvasPanelOn()' in body, f'{fn} draws a panel that was switched off'
+
+    def test_and_it_is_one_preference_for_both_maps(self):
+        """Two switches for one decision is a screen somebody cannot put back: they turn it off
+        on the map they are on, switch view, and it is there again."""
+        src = _strip_comments(_read(os.path.join(INFRA, '_canvas.html')))
+        assert "'ss_infra_panel'" in src
+        for name in ('_map.html', '_links.html'):
+            own = _strip_comments(_read(os.path.join(INFRA, name)))
+            assert 'ss_infra_panel' not in own, f'{name} keeps a second copy of the answer'
+
+
+class TestTheSwitcherBreaksWhereTheQuestionDoes:
+    """Seven icons welded into one strip say "seven of the same thing". Five of them arrange a
+    LIST of machines and two draw a picture of how they are connected — reaching for the wrong
+    one is a different screen, not a different sort. Reported from the screen.
+
+    Declared by the registry, because the helper draws this control for eight sections and is
+    about none of them."""
+
+    def test_the_fleet_says_which_of_its_views_are_pictures(self):
+        src = _read(os.path.join(INFRA, '_views.html'))
+        fams = re.findall(r"id: '(\w+)'[^\n]*family: '(\w+)'", src)
+        assert dict(fams) == {'card': 'list', 'table': 'list', 'grouped': 'list',
+                              'rail': 'list', 'board': 'list',
+                              'map': 'map', 'links': 'map'}, fams
+
+    def test_and_the_switcher_breaks_on_it_rather_than_on_a_name(self):
+        body = _fn(_strip_comments(_read(os.path.join(TPL, 'partials', 'core', '_utils.html'))),
+                   '_viewSwitcher')
+        assert 'v.family' in body, 'the break is written into the shared helper'
+        for lit in ("'list'", "'map'"):
+            assert lit not in body, f'the shared switcher knows what a {lit} view is'
+
+class TestAMapCanLeaveThePanel:
+    """A map that exists only inside this screen is one nobody can put in a ticket or on a
+    wall. Asked for from the screen.
+
+    The hard part is not the drawing: an `<svg>` on a page is a picture PLUS the page. Its
+    colours are `var(--bs-primary)` and live on the document, its icons are a font the document
+    loaded, its faces are the body's. Serialised as it stands, what comes out is black text on
+    nothing with the device icons as empty squares — the export somebody sends once and never
+    again. So it carries what it was leaning on.
+    """
+
+    def _canvas(self):
+        return _strip_comments(_read(os.path.join(INFRA, '_canvas.html')))
+
+    def _out(self):
+        src = self._canvas()
+        return src[src.index('async function ssCanvasSvgOut'):
+                   src.index('async function ssCanvasExport')]
+
+    def test_the_colours_are_resolved_and_not_left_as_questions(self):
+        body = self._out()
+        assert 'getComputedStyle(document.documentElement)' in body
+        assert 'getPropertyValue' in body, 'a var() in a file nobody can answer is black text'
+
+    def test_the_icons_travel_with_it(self):
+        """Both halves: WHICH glyph a class stands for is in the stylesheet, and the glyph
+        itself is in a font file. An export missing either draws empty squares."""
+        src = self._canvas()
+        assert '_ssIconRules(' in src and '_ssIconFace(' in src
+        assert 'base64' in _fn(src, '_ssIconFace'), 'the font is linked, not carried'
+        assert '.woff2' in _fn(src, '_ssIconFace')
+
+    def test_and_only_the_icons_it_actually_holds(self):
+        """The whole file is ninety kilobytes of classes for icons that are not on the map."""
+        body = _fn(self._canvas(), '_ssIconRules')
+        assert 'for (const cls of classes)' in body, 'it ships the entire stylesheet'
+
+    def test_it_exports_the_whole_drawing_and_not_the_window(self):
+        """The window is where the reader is looking; an export is for somebody who is not
+        here."""
+        body = self._out()
+        assert 'svg.dataset.w' in body and 'ssCanvasWindow' not in body
+
+    def test_and_the_picture_does_nothing(self):
+        """The handlers name functions that do not exist outside this panel."""
+        assert "at.name.startsWith('on')" in self._out()
+
+    def test_and_it_has_a_ground(self):
+        """A PNG with none is a picture that is invisible on anything white."""
+        assert '--bs-body-bg' in self._out() and '<rect' in self._out()
+
+    def test_both_maps_offer_it(self):
+        for name, base in (('_map.html', 'network_map'), ('_links.html', 'link_map')):
+            src = _strip_comments(_read(os.path.join(INFRA, name)))
+            assert "ssCanvasTools(" in src and base in src, f'{name} cannot be taken away'
+
+    def test_and_the_file_is_handed_over_in_one_place(self):
+        """Three sections were writing the same six lines. Six lines that revoke an object URL
+        are six lines that leak one the day somebody copies five of them."""
+        tpl = os.path.join(TPL, 'partials')
+        users = []
+        for root, _dirs, files in os.walk(tpl):
+            for f in files:
+                if not f.endswith('.html'):
+                    continue
+                src = _read(os.path.join(root, f))
+                if 'URL.createObjectURL' in src:
+                    users.append(os.path.relpath(os.path.join(root, f), tpl))
+        assert users == [os.path.join('core', '_utils.html')], users
+
+class TestAnExportedMapIsStillReadable:
+    """Three things the first export got wrong, all of them the same mistake: the picture on
+    screen is leaning on the page, and what it leans on has to travel with it.
+
+    Reported from the screen with the file and the screen side by side.
+    """
+
+    def _canvas(self):
+        return _strip_comments(_read(os.path.join(INFRA, '_canvas.html')))
+
+    def _out(self):
+        src = self._canvas()
+        return src[src.index('async function ssCanvasSvgOut'):
+                   src.index('const _SS_LEG_H')]
+
+    def test_the_frame_is_what_is_drawn_and_not_what_the_layout_meant_to_draw(self):
+        """A box the layout does not know it has sits outside its extent. On screen the picture
+        is fitted into a wider element and the letterboxing quietly shows what is outside the
+        frame; an exported file has none, so the same picture came out sliced."""
+        body = self._out()
+        assert 'getBBox' in body, 'the export trusts arithmetic over the drawing'
+        assert 'Math.min(box.x' in body and 'Math.max(box.x' in body, \
+            'the frame is replaced rather than widened'
+
+    def test_and_every_declaration_it_writes_ends_itself(self):
+        """`join(';')` puts a separator BETWEEN declarations and none after the last, so
+        whatever is written next lands inside it: the last colour became garbage and `color`
+        was never written at all. What that looks like depends on where the missing value was
+        used — `fill` falls back to black, `stroke` to none — which is why one defect was
+        reported as two, black names and maintenance boxes with no border.
+
+        And a var this document cannot answer is skipped, not written empty: `--x:` is not "no
+        value", it is a parse error that takes its neighbour with it."""
+        body = self._out()
+        assert "`${n}:${v};`" in body, 'the declarations are separated instead of terminated'
+        assert '.filter(([, v]) => v)' in body, 'an unanswerable colour is written empty'
+        assert "join(';')" not in body
+
+    def test_and_the_ink_travels_with_it(self):
+        """Every name on both maps is `fill="currentColor"`, and `currentColor` is the PAGE's
+        colour — so the names came out in the browser's default instead of the panel's."""
+        body = self._out()
+        assert 'getComputedStyle(svg).color' in body
+        assert 'color:${ink}' in body, 'nothing answers currentColor in the file'
+
+    def test_and_what_the_lines_mean_travels_too(self):
+        """On screen the legend sits under the canvas, which is where it belongs. A file has no
+        "under the canvas": what leaves is a page of lines whose difference the reader has to
+        guess, and they cannot come back and ask."""
+        src = self._canvas()
+        assert '_ssLegend(' in src
+        body = _fn(src, '_ssLegend')
+        assert 'ssCanvasStroke(k)' in body, \
+            'the legend draws its own strokes and will drift from the lines'
+        assert 'box.h += _SS_LEG_H' in self._out(), \
+            'the band is drawn over the bottom of the picture instead of beside it'
+
+    def test_and_both_maps_declare_what_their_lines_mean(self):
+        for name, fn in (('_map.html', '_infraMapKeys'), ('_links.html', '_infraLinkKeys')):
+            src = _strip_comments(_read(os.path.join(INFRA, name)))
+            body = _fn(src, fn)
+            # A label, and a stroke — its own or the one the lines are drawn from.
+            assert 'label' in body, f'{fn} says nothing'
+            assert 'stroke' in body or '_LNK_STROKE' in body, \
+                f'{fn} draws no line beside what it says'
+            assert fn + '()' in src, f'{fn} is declared and read by nobody'
+
+    def test_and_a_kind_of_line_is_described_in_one_place(self):
+        """The same three answers are drawn as the cable, as the sample beside the panel
+        heading, and twice as a legend. Four copies of "a learned cable is a thin dashed grey
+        line" is three that go stale."""
+        src = _strip_comments(_read(os.path.join(INFRA, '_links.html')))
+        table = src.split('const _LNK_STROKE = {')[1].split('};')[0]
+        assert 'stroke:' in table and 'width:' in table and 'dash:' in table, \
+            'the table is a string of attributes again'
+        assert 'stroke-width' not in table, 'it draws instead of declaring'
+        assert src.count('ssCanvasStroke(') >= 3, 'somebody spelled a stroke out again'

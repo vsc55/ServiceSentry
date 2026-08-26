@@ -336,3 +336,46 @@ class TestWhatMattersOnThisMachine:
         db.execute("UPDATE hosts SET watch = ? WHERE uid = ?",
                    ('["gi3", {"module": "snmp"}, {"module": "snmp", "row": "gi4"}]', uid))
         assert s.get(uid)['watch'] == [{'module': 'snmp', 'row': 'gi4'}]
+
+
+class TestAMarkCanSayWhatTheRowIS:
+    """`watch` says "tell me about this row". A ROLE says what the row is.
+
+    `wan` is the one that exists: no MIB answers which of thirty ports carries the office's
+    line to the street — only whoever ran the cable knows, which is the same reason the plain
+    mark exists at all.
+    """
+
+    def _marked(self):
+        st, _db_ = _store()
+        st.create(_host('sw'))
+        return st, st.list()[0]['uid']
+
+    def test_a_role_is_stored_beside_the_mark(self):
+        st, uid = self._marked()
+        assert st.set_watch(uid, 'snmp', 'ether1', True, role='wan')
+        assert st.watch_roles(uid) == {st.watch_key('snmp', 'ether1'): 'wan'}
+        # …and it IS a mark: a port declared as the way out is a port being watched, and the
+        # two offered separately would allow "no, do not tell me when the internet goes".
+        assert st.watch_key('snmp', 'ether1') in st.watch(uid)
+
+    def test_a_word_the_core_does_not_act_on_is_not_stored(self):
+        """A mark that reads as a promise and does nothing is worse than no mark."""
+        from lib.core.hosts.store import HostsStore                   # noqa: PLC0415
+        assert HostsStore.watch_role('wan') == 'wan'
+        assert HostsStore.watch_role('WAN') == 'wan'
+        for bad in ('lan', '', None, 'wan ; drop', 42):
+            assert HostsStore.watch_role(bad) == ''
+
+    def test_an_ordinary_mark_declares_nothing(self):
+        st, uid = self._marked()
+        st.set_watch(uid, 'snmp', 'gi16', True)
+        assert st.watch_roles(uid) == {}
+        assert st.watch_key('snmp', 'gi16') in st.watch(uid)
+
+    def test_and_re_marking_a_row_replaces_its_role(self):
+        st, uid = self._marked()
+        st.set_watch(uid, 'snmp', 'ether1', True, role='wan')
+        st.set_watch(uid, 'snmp', 'ether1', True)          # marked again, plainly
+        assert st.watch_roles(uid) == {}, 'the old role survived the new mark'
+        assert st.watch_key('snmp', 'ether1') in st.watch(uid)

@@ -6,12 +6,7 @@ function _historyExportFilename(ext) {
     return base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').replace(/_+\./, '.') + '.' + ext;
 }
 
-function _historyDownload(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-}
+function _historyDownload(blob, filename) { ssDownloadBlob(blob, filename); }
 
 // Title for the exported image: "<series> — <metric> (<range>)".
 function _historyExportTitle() {

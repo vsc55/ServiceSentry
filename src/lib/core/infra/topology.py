@@ -181,6 +181,23 @@ def _split_private(networks: dict) -> None:
         net['private'] = any(len(v) > 1 for v in seen.values())
 
 
+def _wan_port(host: dict) -> str:
+    """The row of *host* somebody marked as the way out to the internet, or ``''``.
+
+    No MIB answers this. Which of thirty ports carries the office's line is knowledge about
+    the installation, so the registry is where it was written down — the same place, and for
+    the same reason, as "tell me when THIS port goes down".
+
+    Read here rather than deduced, because the deduction is a different claim: the next hop of
+    a default route is what the routing table happens to say today. A drawing that showed one
+    as the other would be asserting something nobody said.
+    """
+    for w in (host or {}).get('watch') or ():
+        if isinstance(w, dict) and str(w.get('role') or '') == 'wan' and w.get('row'):
+            return str(w['row'])
+    return ''
+
+
 def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dict:
     """The map: ``{'networks': [...], 'nodes': [...], 'edges': [...], 'unplaced': [...]}``.
 
@@ -269,7 +286,11 @@ def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dic
                 'kind': str(host.get('device_type') or host.get('kind') or ''),
                 'status': str(host.get('status') or ''),
                 'addresses': addrs, 'networks': sorted(set(nets)),
-                'gateway': str(facts.get('gateway') or '').split(',')[0].strip()}
+                'gateway': str(facts.get('gateway') or '').split(',')[0].strip(),
+                # …and the port somebody DECLARED as the way out, which is a different kind of
+                # statement from a next hop: a next hop is what the routing table happens to
+                # say today, and this is what the person who ran the cable says the line IS.
+                'wan': _wan_port(host)}
         nodes.append(node)
         for net in set(nets):
             networks[net]['members'].append(uid)
@@ -379,10 +400,21 @@ def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dic
     # contributes nothing rather than a guess.
     for node in nodes:
         gw = node['gateway']
+        # A DECLARED way out is drawn whether or not the device has a default route to go with
+        # it: somebody said this port is the line, and a machine that states no next hop —
+        # a switch, most of them — would otherwise contribute nothing while carrying it.
+        if node['wan'] and not (gw and not _ignored(gw)):
+            edges.append({'from': node['uid'], 'to': '', 'address': '',
+                          'port': node['wan'], 'kind': 'exit', 'said': True})
+            continue
         if not gw or _ignored(gw):
             continue
         target = by_address.get(gw)
         edges.append({'from': node['uid'], 'to': target or '', 'address': gw,
+                      # …and WHICH port it leaves by, when somebody declared one. The next hop
+                      # says where it goes; only the mark says which cable it goes down.
+                      'port': node['wan'],
+                      'said': bool(node['wan']),
                       # `gateway` when the far end is a machine the panel knows, `exit` when
                       # it is a router nobody added. Different claims, different drawings.
                       'kind': 'gateway' if target else 'exit'})

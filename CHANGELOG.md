@@ -8,6 +8,230 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.118] - 2026-08-26
+
+### Added
+- **Either map can be saved as a picture — PNG or SVG.** A map that exists only inside this
+  panel is one nobody can put in a ticket, an e-mail or on a wall. Asked for from the screen.
+
+  The drawing is the easy half. An `<svg>` on a page is a picture PLUS the page it is on: its
+  colours are `var(--bs-primary)` and live on the document, its icons are a font the document
+  loaded, its faces are the body's. Serialised as it stands, what comes out is black text on
+  nothing with every device icon an empty square — the export somebody sends once and never
+  again. So the file carries what the picture was leaning on: the colours resolved to what they
+  actually are, the rules for the icons that are actually in it, and the icon font itself
+  embedded. It reads the same on a machine that has never seen this panel.
+
+  It saves the WHOLE map and not the part on screen — the window is where the reader is looking
+  now, and an export is for somebody who is not here. The PNG comes out at twice the size, for
+  a picture that survives being pasted into a document. And it does nothing: an exported
+  drawing carries no handlers naming functions that only exist here.
+
+  Handing a file to the browser is one function now, in core. It was the same six lines in
+  history, in audit, and would have been a third copy here — six lines that revoke an object
+  URL are six lines that leak one the day somebody copies five of them.
+
+- **The list views and the maps are two groups of buttons, not one strip of seven.** Five of
+  them arrange a list of machines and two draw a picture of how those machines are connected;
+  welded together they read as seven of the same thing, and reaching for the wrong one is a
+  different screen rather than a different sort. Which kind a view is, is the registry's word —
+  the switcher is drawn for eight sections and is about none of them, so a section that says
+  nothing still gets the single strip it always had.
+
+- **The panel that reads the picture can be turned off, and lets the picture through when it
+  is not.** It floats over the drawing, which is what makes it useful — the reading of a
+  machine is not two hundred pixels wide — and it is also in front of part of the thing it
+  describes. Both answers are here because how much of the picture somebody needs is not
+  something this code can decide: a switch on the map itself, and a translucent ground.
+
+  Opaque was a deliberate choice once and the reason still stands — a plain translucent panel
+  is a set of buttons whose labels you cannot read against a diagram. What makes it survivable
+  is the blur behind it: the drawing reads as present and behind, while the text keeps a flat
+  ground. A browser without backdrop filters gets a nearly solid one instead of an illegible
+  one.
+
+  One preference for both maps, kept in the browser. Two switches for one decision is a screen
+  somebody cannot put back: turn it off here, change view, and it is there again.
+
+- **A port can be declared as the way out to the internet.** No MIB answers which of thirty
+  ports carries the office's line — it is knowledge about the installation, the same kind the
+  plain watch mark already holds — so it is written down the same way: a marked row that also
+  says WHAT it is. A role always implies the mark, because two separate switches would allow
+  the state "no, do not tell me when the internet goes"; the watch button is disabled while a
+  role is set, so turning it off cannot drop the role with nothing said.
+
+  It changes four things. Losing it is a FAILURE and not the amber a port down usually is —
+  "gi3: Down" is a row somebody has to recognise, "sin internet — gi3: Down" is the sentence
+  the person reading an alert at midnight needs. Its traffic and its state lead the chart
+  picker and the device's own chips. The cable map marks the machine that carries it, since
+  which of those cables is the LINE is the one thing that picture cannot see. And the address
+  map draws it as a declared way out rather than deducing one from a next hop — which is a
+  different claim, and is why a switch, stating no next hop, used to contribute nothing to the
+  picture while carrying the line.
+
+- **The outside is a box like the rest of them, on both maps.** It was a line of text on one
+  and absent from the other: it could not be moved, and hovering it gave a tooltip of addresses.
+  It is a card now — dragged where the room is, with its cable following it, which it did not:
+  the wire was written at the coordinate the cloud used to sit at, so moving the cloud left the
+  line behind. The cable map has one too, hanging off the machine that carries the line, because
+  which of those cables IS the line is the one thing that picture cannot see for itself.
+
+  Reading either says what the way out is: which machine, down which port, to what — and it
+  says when that was deduced from a next hop rather than declared.
+
+  Both are dragged like everything else on those pictures. Neither was at first, and for the
+  same reason each time: a drag needs to know where the box it is moving STARTS, and that is
+  looked up in the layout's map of machines — which the way out is not one of. It had no
+  origin, so it did not move. Dropping it opens nothing, because there is no device page
+  behind something that is not a device.
+
+  And on the cable map it moved once and then would not move again: a picture's SIZE is
+  computed from the boxes it holds, the way out was not one of them, and dropping it below
+  everything put it outside the viewBox — clipped, and therefore impossible to grab. It takes
+  part in the extent now.
+
+  Its cable leaves by whichever side the other end is on. Written as "out of the bottom, into
+  the top" it assumed the way out is always above, so dragging it under the machine drew a line
+  that left downwards, looped back up and hooked into the top of a box it was underneath.
+
+- **…and the address it shows is the one the world sees.** It was reading `10.x`. That is the
+  LAN address, and the next hop beside it is the LAN gateway: neither of them is the line to
+  the street. The public one was in the same list the device already reported and nothing was
+  picking it out. Which address that is is a fact about the address SPACE — RFC 1918, CGNAT,
+  link-local, loopback — and not a guess about which port it is on, which is why it can be
+  relied on. The next hop stays, as context, behind an arrow.
+
+- **A port somebody marked leads the measurement list.** Its traffic and its state, up with the
+  CPU and the totals rather than eleven hundred entries down a list of interfaces. None of them
+  is a headline of anything — the condition of a switch is its CPU and its fans, not one of
+  thirty cables — but a marked port is a port somebody is watching, and that is what the mark
+  MEANS.
+
+  The mark lives in the host registry, and the screens that read a sample never open it, so it
+  now travels WITH the row: a fact about a row that only the registry knows is unanswerable
+  from the recorded state, which is why the list could not be built before.
+
+### Fixed
+- **An exported map had black names, and machines in maintenance had no border.** Reported as
+  two faults; it was one, and one character.
+
+  The colours a drawing leans on are written into the exported file as a block of declarations,
+  and they were joined with a separator — which puts one BETWEEN declarations and none after the
+  last. Whatever came next landed inside it: the final colour became garbage and `color` was
+  never written at all. What a missing value then does is quiet and depends on where it is used
+  — `fill` falls back to black, `stroke` to none — so one defect surfaced as unreadable names in
+  one place and, in another, boxes with a black strip and no outline.
+
+  Every declaration terminates itself now, and a colour this page cannot answer for is left out
+  rather than written empty: `--x:` is not "no value", it is a parse error that takes its
+  neighbour with it.
+
+  The check that missed it was looking for substrings in generated CSS, and a substring sits in
+  a broken rule as happily as in a working one. It parses the block into pairs now.
+
+- **An exported map was sliced, and its names came out the wrong colour.** Both are the same
+  mistake in two places: a picture on a page leans on the page, and what it leans on has to
+  travel with it.
+
+  The frame came from the layout's own arithmetic, and a box the layout does not know it has —
+  the outside, dragged above everything — sits beyond it. On screen that never showed: the
+  picture is fitted into a wider element, and the letterboxing on the other axis quietly
+  reveals whatever is outside the frame. A file has no letterboxing. The export now asks the
+  drawing itself how big it is and widens the frame to fit, which no arithmetic can be wrong
+  about. The address map was also missing the outside from its extent, exactly as the cable map
+  was — fixed there too, so the fit on screen improves with it.
+
+  And every machine name is drawn `fill="currentColor"`, where `currentColor` is the PAGE's
+  colour. Nothing carried it, so the names fell back to the browser's default. It travels now,
+  like the rest of the colours.
+
+- **…and an exported map says what its lines mean.** On screen the legend sits under the
+  canvas, which is where it belongs — it is not part of the drawing. A file has no "under the
+  canvas": what left was a page of grey, green and blue lines whose difference the reader had
+  to guess, with nobody to ask. It is drawn into the picture now, in a band the picture makes
+  room for.
+
+  From the same `{stroke, width, dash}` the lines themselves are drawn from. Each kind of line
+  was being spelled out at every place it appeared — the line, the sample beside the panel
+  heading, the legend — and copies of "a learned cable is a thin dashed grey line" are copies
+  that go stale one at a time. The cable map's table is data now, the address map's is new, and
+  one helper turns either into the attributes that draw it.
+
+- **A cable leaves a box by the side that faces the other end.** Every kind of line on both
+  maps answered that question, each of them separately and each with a FIXED answer: flank to
+  flank between machines, bottom to top for the way out, for a network's plate, for a machine
+  hanging off one. All of them held only while the boxes were where the layout first put them.
+  Two machines in the same tier are already one above the other, so their cable left the right
+  flank, doubled back the full width of both boxes and came in at the far side — under them,
+  since wires are drawn beneath boxes, so on screen it did not read as a cable leaving a box at
+  all. A machine dragged above its own network got a line that left downwards and hooked back
+  up into it. Dragging makes any pair of positions possible, which turns all of that from an
+  edge case into most of the picture. Reported from the screen once per map.
+
+  Which pair of sides comes from which gap is the bigger, and there is now ONE maker of cables,
+  living where the rest of what both pictures share already lives. It takes boxes and not
+  endpoints, which is the point: a caller that hands over a point has already chosen the side.
+
+- **Whatever is under the pointer lights its own lines.** A machine on four networks is four
+  lines leaving one box into a field of everybody else's, and what both maps showed was a mesh
+  nothing could be traced through — the answer to "where does THIS one go" is in the drawing,
+  and reading it off is the part that fails. Reported from the screen with a picture of it.
+
+  Each line now carries the two things it joins, so hovering a machine lights its own and steps
+  the rest back. Stepping the others back is what does the work: a slightly thicker line among
+  two hundred is not something the eye finds; two hundred going quiet is. It works from either
+  end — a network lights everything on it, the outside lights the way out — and on the cable
+  map a machine lights its cables, the line to the internet among them.
+
+  Nothing is redrawn to do it. The pointer is ON the box, and rebuilding the picture underneath
+  it drops the hover that asked; a redraw for other reasons puts the lighting back, so it does
+  not go flat halfway through a drag.
+
+- **A panel describing what is under the pointer was in the way of it.** The panel that reads a
+  cable or a machine floats over the bottom strip of the drawing, and it was taking the pointer
+  — so a box that happened to sit down there could not be pressed or dragged, and its hover was
+  lost to the panel about it, which made the panel flicker against its own box. Reported from
+  the screen.
+
+  The layer is transparent to the pointer now and only the controls inside it answer, as a
+  generic class: an overlay that describes what is underneath it is a shape, not one screen.
+  Both maps had it.
+
+- **Changing the device left the measurement list describing the old one.** A chart's
+  measurements belong to the machine it is showing, and picking a device repainted the card
+  without rebuilding the control beside it — so the list still named the previous machine's
+  series, and the card quietly drew a fallback the control did not name. Reported from the
+  screen. The list is rebuilt with the device now and the pick written back, so the control and
+  the picture cannot disagree.
+
+- **A chart card draws the source it was given — and the PAIR is a source of its own.**
+  Reported from the screen twice, and the two reports do not contradict each other: a card set
+  to "traffic in" drew both lines, which overrules the source somebody chose in its own
+  selector; and then, once the numbers had been checked, one picture with both was the thing
+  worth having.
+
+  So the pair is offered beside the halves rather than replacing either. Picking "traffic in"
+  draws one line; picking "Tráfico (todos los puertos)" draws both. Which two series belong in
+  one picture, and what to call that picture, are the profile's word (`chart_with` /
+  `chart_label`) — the same one the device's own page has always drawn by. A pair whose other
+  half this box does not serve is not a pair: an empty line with a legend entry is a chart
+  claiming a series that is not there.
+
+- **A chart widget configured to draw the traffic came back drawing a temperature.** Reported
+  from the screen with two of them side by side: both selectors said what they had been set to
+  and both pictures said something else.
+
+  A widget instance's settings are written to the layout from the element and read back onto
+  the element by the render — and the render spelled the attributes out one by one. A key in
+  the list but not on that line was saved and then never put back on the page, so everything
+  that reads the DOM (which is every control, and the next save) saw nothing and the setting
+  was lost on the first full repaint. `mwchart` had been in that state since it was added;
+  `mwfig` and `mwh` joined it.
+
+  That line was the FOURTH copy of the same list. Three of them were collapsed into one in the
+  build before this and this was the one that was missed — so it is written through the same
+  list now, and a guard fails if any of them spells a key out again.
+
 ## [0.0.1+build.117] - 2026-08-25
 
 ### Changed

@@ -211,6 +211,7 @@ class SnmpSampler:
         # device: it is one small list and the alternative is a database round trip per
         # metric of every profile it carries.
         watched = self._watched_rows(server)
+        roles = self._watched_roles(server)
         silent = 0               # reads in a row that got no answer at all
         gave_up = False
         for _i, prof in enumerate(assigned, 1):
@@ -233,7 +234,8 @@ class SnmpSampler:
             for metric in prof.get('metrics') or ():
                 ok, err = self._sample_metric(metric, conn, now, state, rows, columns,
                                               source=str(prof.get('id') or ''), lang=lang,
-                                              sightings=sightings, watched=watched)
+                                              sightings=sightings, watched=watched,
+                                              roles=roles)
                 answered = answered or ok
                 if err:
                     # The metric's NAME and the error, kept apart. `metric['key']` is the
@@ -287,9 +289,8 @@ class SnmpSampler:
         `verdict` in the profile format — so the failure mode of an empty answer is the
         current behaviour and not a device that stops being checked.
         """
-        uid = str(server.get('host_uid') or server.get('_host_uid') or '').strip()
-        store = getattr(self._monitor, '_hosts_store', None) if self.is_monitor_exist else None
-        if not uid or store is None:
+        uid, store = self._watch_source(server)
+        if not store:
             return set()
         try:
             return store.watch(uid)
@@ -297,9 +298,36 @@ class SnmpSampler:
             self._debug(f'SNMP: watched rows not read: {exc}', DebugLevel.warning)
             return set()
 
+    def _watch_source(self, server: dict) -> tuple:
+        """``(host uid, registry)`` — or ``('', None)`` when this device has neither."""
+        uid = str(server.get('host_uid') or server.get('_host_uid') or '').strip()
+        store = getattr(self._monitor, '_hosts_store', None) if self.is_monitor_exist else None
+        return (uid, store) if uid and store is not None else ('', None)
+
+    def _watched_roles(self, server: dict) -> dict:
+        """``{row key: role}`` — what the marked rows of this machine were marked AS.
+
+        `wan` is the one that exists: no MIB says which of thirty ports is the line to the
+        street, and only whoever ran the cable knows. Its loss is not an amber row on a switch,
+        it is the office being offline — so the reading that is a warning on any other port is
+        a failure on this one, and it says which port in the message.
+
+        Empty on any failure, for the same reason the marks themselves are: a cycle that stops
+        because of a preference is worse than one that reports a little less.
+        """
+        uid, store = self._watch_source(server)
+        if not store:
+            return {}
+        try:
+            return store.watch_roles(uid)
+        except Exception as exc:      # pylint: disable=broad-except
+            self._debug(f'SNMP: watched roles not read: {exc}', DebugLevel.warning)
+            return {}
+
     def _sample_metric(self, metric: dict, conn: dict, now: float, state: dict, rows: dict,
                        columns: dict, source: str = '', lang: str = '',
-                       sightings: dict | None = None, watched: set | None = None) -> tuple:
+                       sightings: dict | None = None, watched: set | None = None,
+                       roles: dict | None = None) -> tuple:
         """Read one metric into *rows*. Returns ``(answered, error)``."""
         got, err = read_metric(metric, conn, self._snmp_get, self._snmp_walk_oid, columns)
         if err and not got:
@@ -357,12 +385,30 @@ class SnmpSampler:
         for r in got:
             # A quiet column judges only the rows that were named. The row key is what the
             # screen marked, which is the name the device gave it before any split.
+            marked = self._is_watched(watched, r['name'], r['key'])
+            role = self._role_of(roles, r['name'], r['key'])
             mine = states
             if quiet and states:
-                mine = states if self._is_watched(watched, r['name'], r['key']) else {}
+                mine = states if marked else {}
+            # A port declared as the line out loses the profile's leniency: `warn` on a port is
+            # "that cable is unplugged", which on THIS one is the office being offline.
+            if role == 'wan' and mine:
+                mine = {v: dict(spec, level='bad') for v, spec in mine.items()}
             self._store_value(rows, r['key'], r['name'], metric, r['raw'], now, state,
-                              factor=r['factor'], source=source, states=mine)
+                              factor=r['factor'], source=source, states=mine, marked=marked,
+                              role=role)
         return True, (err or None)
+
+    def _role_of(self, roles, *names) -> str:
+        """What this row was marked as, under whichever name it goes by — or ``''``."""
+        if not roles:
+            return ''
+        for n in names:
+            if n:
+                found = roles.get(self._hosts_watch_key(n))
+                if found:
+                    return found
+        return ''
 
     def _is_watched(self, watched, *names) -> bool:
         """Whether any of the names this row goes by was marked.
@@ -388,7 +434,8 @@ class SnmpSampler:
 
     def _store_value(self, rows: dict, row_key: str, row_name: str, metric: dict,
                      raw, now: float, state: dict, factor=1, source: str = '',
-                     states: dict | None = None) -> None:
+                     states: dict | None = None, marked: bool = False,
+                     role: str = '') -> None:
         """Put one reading where it belongs — a number in the series, a name beside it.
 
         *factor* is the per-row multiplier a ``scale_by`` column supplied. It is applied to the
@@ -403,6 +450,15 @@ class SnmpSampler:
         one silently overwrites the first. So the panel showed one machine's serial beside
         another machine's firmware, and WHICH survived depended on the order the profiles
         happened to be sampled in. Nothing was reported wrong; a fact was simply gone.
+
+        *marked* is whether somebody said THIS row is one that matters. It travels with the
+        row because it is a fact about the row and nothing that reads the recorded state can
+        work it out: the mark lives in the host registry, and the screens that read a sample
+        never open that. It already decided whether a quiet column judges; recorded, it also
+        lets a screen put the ports somebody is watching where they can be found.
+
+        *role* is what they marked it AS — `wan` for the port a machine reaches the internet
+        through. It travels for the same reason and answers a question no MIB does.
         """
         # A table the profile declared as being ABOUT the box (`of_device`) does not get a
         # row each: its readings fold into one fact on the device itself, in the order the
@@ -417,12 +473,16 @@ class SnmpSampler:
                 self._store_device_fact(rows, metric, text, source)
                 return
             row = rows.setdefault(row_key, {'name': row_name, 'values': {}, 'attrs': {},
-                                            'states': []})
+                                            'states': [], 'marked': marked, 'role': role})
+            row['marked'] = row.get('marked') or marked
+            row['role'] = row.get('role') or role
             bucket = row['attrs'].setdefault(source or '_', {})
             bucket[metric.get('role') or metric['key']] = text
             return
         row = rows.setdefault(row_key, {'name': row_name, 'values': {}, 'attrs': {},
-                                        'states': []})
+                                        'states': [], 'marked': marked, 'role': role})
+        row['marked'] = row.get('marked') or marked
+        row['role'] = row.get('role') or role
         prev = (state.get(row_key) or {}).get(metric['key'])
         value, new_state = _metrics.sample(metric, raw, prev, now)
         if new_state is not None:
@@ -504,6 +564,10 @@ class SnmpSampler:
                 data['_attrs'] = row['attrs']
             if row['name']:
                 data['_row'] = row['name']
+            if row.get('marked'):
+                data['_watched'] = True
+            if row.get('role'):
+                data['_role'] = row['role']
             # The verdict, and it comes from the PROFILE. A profile that has gone to the
             # trouble of saying which of a value's meanings are bad has said everything needed
             # to check the device — and until now that was thrown away: a NAS could answer
@@ -523,8 +587,13 @@ class SnmpSampler:
                 # `warning` and not a failure for a warn level: the panel already knows the
                 # difference — an amber state is not a machine that is down — and a pending
                 # DSM update must not paint a NAS red.
+                # A port declared as the line out says so IN the message. "gi3: Down" on a
+                # switch is a row somebody has to recognise; "sin internet — gi3: Down" is the
+                # sentence the person reading an alert at midnight actually needs.
+                wan = row.get('role') == 'wan'
                 self._emit(key, False,
-                           self._msg('snmp_state_bad' if bad else 'snmp_state_warn',
+                           self._msg('snmp_wan_down' if wan else
+                                     ('snmp_state_bad' if bad else 'snmp_state_warn'),
                                      name, worst['metric'], worst['label']),
                            data, name=name,
                            severity=None if bad else 'warning',

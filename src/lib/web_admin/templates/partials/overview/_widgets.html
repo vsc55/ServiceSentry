@@ -845,7 +845,11 @@ function _dwChartDraw(id, box) {
     const held = _dwChartPts[id];
     const canvas = box && box.querySelector('canvas');
     if (!held || !canvas) return;
-    _historyDraw(canvas, held.pts, held.chart.series.field, held.chart.unit, held.chart.label);
+    // Whatever THIS option is: one series, or the pair the module offers as an option of its
+    // own. Never a second line added to a card set to one of the halves — that overrules the
+    // source somebody chose in its own selector, which is how this was wrong the first time.
+    _historyDraw(canvas, held.pts, held.chart.series.field, held.chart.unit, held.chart.label,
+                 held.chart.with || []);
 }
 
 /** Watch a chart's box and redraw it when it changes size.

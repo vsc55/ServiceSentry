@@ -85,7 +85,12 @@ def fleet_row(host: dict) -> dict:
     # and that is not the same as "fine". The empty string travels as it is so the screen can
     # say "not watched" instead of painting a machine nobody is looking at as OK.
     out['status'] = str(host.get('status') or '')
-    out['watch'] = [w for w in (host.get('watch') or ())
+    out['watch'] = [{'module': w['module'], 'row': w['row'],
+                     # …and what the row was marked AS. Without it the screen can say a port
+                     # is watched and not that it is the line out, which is the whole point of
+                     # having said so.
+                     'role': str(w.get('role') or '')}
+                    for w in (host.get('watch') or ())
                     if isinstance(w, dict) and w.get('module') and w.get('row')]
     return out
 

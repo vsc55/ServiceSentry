@@ -60,6 +60,20 @@ class TestEachInstanceKeepsItsOwnSettings:
         assert src.count('..._dwInstanceState(el),') == 3, 'a copy of the spread came back'
         assert 'el.dataset.mws ?' not in src
 
+    def test_and_they_survive_a_full_repaint(self):
+        """The fourth copy, and the one that actually lost settings.
+
+        The render wrote the attributes back onto the element one by one, so a key in the list
+        but not on that line was saved to the layout and never put back on the page — and
+        everything that reads the DOM, which is every control and the next save, then saw
+        nothing. `mwchart` had been in that state all along; a chart widget configured to draw
+        the traffic came back drawing a temperature.
+        """
+        render = _strip_comments(_read(os.path.join(OV, '_render.html')))
+        assert '_dwInstanceAttrs(item)' in render, 'the layout is not written back'
+        for key in ('mws', 'mwlvl', 'mwchart', 'mwfig', 'mwh'):
+            assert f'item.{key} ?' not in render, f'{key} is spelled out again'
+
     def test_and_the_two_halves_of_that_list_agree(self):
         """The browser's and the server's. A key in one and not the other is a setting that
         works until you sign in somewhere else."""

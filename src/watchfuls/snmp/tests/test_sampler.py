@@ -1102,6 +1102,17 @@ class TestTheProfileIsTheVerdict:
         assert res['srv/gi1']['status'] is True, (
             'marking one port made every port on the switch report')
 
+    def test_a_marked_row_says_so_IN_the_row(self, env):
+        """The mark lives in the host registry and the screens that read a SAMPLE never open
+        it — so a fact about the row has to travel with the row, or "which of these thirty
+        ports did somebody ask to be told about" is unanswerable from the recorded state.
+
+        Asked for from the screen: the traffic and the state of the marked ports, up with the
+        CPU and the totals instead of eleven hundred entries down a list."""
+        res = self._switch(env, {'snmp' + chr(0) + 'gi3'})
+        assert res['srv/gi3']['other_data'].get('_watched') is True
+        assert '_watched' not in res['srv/gi1']['other_data'], 'nobody marked that one'
+
     def test_and_with_nothing_marked_the_switch_stays_quiet(self, env):
         res = self._switch(env, set())
         assert [r['status'] for r in (res['srv/gi1'], res['srv/gi3'])] == [True, True]

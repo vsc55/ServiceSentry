@@ -293,6 +293,329 @@ function ssCanvasPlace(id, boxes, size, base) {
     };
 }
 
+/** How a kind of line is drawn, as the attributes that draw it.
+ *
+ *  Both maps keep a table of `{stroke, width, dash}` per kind of line, and each kind is drawn
+ *  in three or four places: the line itself, the sample beside a panel heading, the legend
+ *  under the picture, and the legend inside an exported one. Written out at each of them, the
+ *  copies agree until the day one stroke changes. */
+function ssCanvasStroke(k) {
+    const s = k || {};
+    return `stroke="${escAttr(s.stroke || 'currentColor')}" stroke-width="${s.width || 1}"`
+        + (s.dash ? ` stroke-dasharray="${escAttr(s.dash)}"` : '');
+}
+
+// ── Taking the picture with you ────────────────────────────────────────────
+//
+// A map that exists only inside this panel is one nobody can put in a ticket, an e-mail or a
+// wall. Asked for from the screen.
+//
+// The hard part is not the drawing: it is that an `<svg>` on a page is not a picture, it is a
+// picture PLUS the page. Its colours are `var(--bs-primary)` and live on the document; its
+// icons are a font the document loaded; its faces are the body's. Serialise it as it stands
+// and what comes out is black text on nothing, with the device icons as empty squares — which
+// is exactly the export that gets sent to somebody once and never again.
+//
+// So the export carries what the picture was leaning on: the colours resolved to what they
+// actually are, the icon rules for the icons that are actually in it, and the font itself
+// embedded. It is then a file that reads the same on a machine that has never seen this panel.
+
+//: The icon font as a data URI, fetched once. A file, not a stylesheet rule: an exported SVG
+//: opened somewhere else cannot follow a relative URL back to this server, and one loaded into
+//: a canvas to make a PNG is not allowed to try.
+let _ssIconFont = null;
+//: …and the icon rules, which are the OTHER half — the glyph a class stands for is written in
+//: the stylesheet, not in the markup.
+let _ssIconCss = null;
+
+/** base64 of a byte array, in chunks: `String.fromCharCode(...bytes)` on a 120 kB font is an
+ *  argument list long enough to blow the stack. */
+function _ssB64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+}
+
+async function _ssIconFace() {
+    if (_ssIconFont !== null) return _ssIconFont;
+    _ssIconFont = '';
+    try {
+        const r = await fetch('/static/css/fonts/bootstrap-icons.woff2');
+        if (r.ok) {
+            const b64 = _ssB64(new Uint8Array(await r.arrayBuffer()));
+            _ssIconFont = "@font-face{font-family:'bootstrap-icons';font-style:normal;"
+                + `font-weight:400;src:url(data:font/woff2;base64,${b64}) format('woff2')}`;
+        }
+    } catch (_) { /* an export without icons beats no export */ }
+    return _ssIconFont;
+}
+
+/** The `content:` rules for JUST the icons this drawing uses. The whole file is ninety
+ *  kilobytes of classes for icons that are not in it. */
+async function _ssIconRules(classes) {
+    if (_ssIconCss === null) {
+        _ssIconCss = '';
+        try {
+            const r = await fetch('/static/css/bootstrap-icons.min.css');
+            if (r.ok) _ssIconCss = await r.text();
+        } catch (_) { /* as above */ }
+    }
+    const out = [];
+    for (const cls of classes) {
+        const m = _ssIconCss.match(new RegExp('\\.' + cls + '::before\\{[^}]*\\}'));
+        if (m) out.push(m[0]);
+    }
+    return out.join('');
+}
+
+/** The whole drawing — not the part somebody happens to be zoomed into — as a standalone SVG.
+ *
+ *  The WHOLE one on purpose: the window is where the reader is looking right now, and an export
+ *  is for somebody who is not here. `scale` only sets the pixel size the raster comes out at;
+ *  the coordinates are the drawing's own either way.
+ */
+async function ssCanvasSvgOut(id, scale, legend) {
+    const svg = ssCanvasSvg(id);
+    if (!svg) return '';
+    const box = {x: +svg.dataset.x || 0, y: +svg.dataset.y || 0,
+                 w: +svg.dataset.w || 0, h: +svg.dataset.h || 0};
+    // …widened to whatever is actually ON the drawing. The extent is what the LAYOUT worked
+    // out, and a box the layout does not know it has — the way out, dragged above everything —
+    // is outside it. On screen that never showed: the picture is fitted into a wider element,
+    // and the letterboxing on the other axis quietly reveals what sits outside the frame. An
+    // exported file has no letterboxing, so the same picture came out sliced. Reported from
+    // the screen with both versions side by side.
+    //
+    // `getBBox` is the drawing answering for itself, which no layout arithmetic can be wrong
+    // about: it covers every box, every label that hangs off one, and every curve that swings
+    // wide.
+    try {
+        const bb = svg.getBBox ? svg.getBBox() : null;
+        if (bb && bb.width && bb.height) {
+            const m = 12;
+            const x = Math.min(box.x, bb.x - m), y = Math.min(box.y, bb.y - m);
+            box.w = Math.max(box.x + box.w, bb.x + bb.width + m) - x;
+            box.h = Math.max(box.y + box.h, bb.y + bb.height + m) - y;
+            box.x = x; box.y = y;
+        }
+    } catch (_) { /* a drawing that cannot measure itself keeps the layout's frame */ }
+    if (!box.w || !box.h) return '';
+    // Room at the bottom for what the lines mean.
+    if (legend && legend.length) box.h += _SS_LEG_H;
+    const clone = svg.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.removeAttribute('style');
+    clone.removeAttribute('class');
+    // Handlers name functions that do not exist outside this panel. A picture does nothing.
+    clone.querySelectorAll('*').forEach(el => {
+        for (const at of [...el.attributes]) {
+            if (at.name.startsWith('on')) el.removeAttribute(at.name);
+        }
+    });
+    const inner = clone.innerHTML;
+    // Every colour it asked the document for, answered.
+    const css = getComputedStyle(document.documentElement);
+    const names = [...new Set((inner.match(/var\(--[\w-]+\)/g) || []).map(v => v.slice(4, -1)))];
+    // Every declaration ENDS itself, and one that has no answer is not written at all.
+    //
+    // Joined with a separator instead, the last one had no `;` after it and ran straight into
+    // whatever was written next — so that declaration was garbage, the one after it was never
+    // read, and the colour of the last var used in the drawing came out undefined. What an
+    // undefined paint does is quiet and different per attribute: `fill` falls back to BLACK,
+    // `stroke` to none. On the exported map the machines in maintenance had a black strip and
+    // no border at all, and every name was black, because `color` was the declaration that got
+    // eaten. Reported from the screen, twice, as two separate faults — one bug.
+    //
+    // And a var this document cannot answer for is skipped rather than written empty: `--x:`
+    // is not "no value", it is a parse error that takes its neighbour with it.
+    const vars = names.map(n => [n, css.getPropertyValue(n).trim()])
+        .filter(([, v]) => v)
+        .map(([n, v]) => `${n}:${v};`).join('');
+    const bg = css.getPropertyValue('--bs-body-bg').trim() || '#ffffff';
+    const face = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    // Every name on both maps is drawn `fill="currentColor"`, and `currentColor` is the page's
+    // `color` — one more thing the picture was leaning on and does not carry. Without it the
+    // export falls back to the browser's initial colour, which is why the device names came out
+    // a different colour from the ones on screen. Reported from the screen.
+    const ink = getComputedStyle(svg).color
+        || css.getPropertyValue('--bs-body-color').trim() || '#212529';
+    const icons = [...new Set((inner.match(/bi-[\w-]+/g) || []))];
+    const style = `<style>:root{${vars}color:${ink};}`
+        + `text,foreignObject,foreignObject *{font-family:${face}}`
+        + `[class*=" bi-"]::before,[class^=bi-]::before{`
+        + `display:inline-block;font-family:'bootstrap-icons';font-style:normal;`
+        + `font-weight:400;line-height:1;vertical-align:-.125em}`
+        + await _ssIconRules(icons) + await _ssIconFace() + '</style>';
+    // A ground, because a PNG with none is a picture that is invisible on anything white.
+    const rect = `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}"`
+        + ` fill="${bg}"></rect>`;
+    clone.innerHTML = style + rect + inner + _ssLegend(legend, box, ink);
+    clone.setAttribute('viewBox', `${box.x} ${box.y} ${box.w} ${box.h}`);
+    clone.setAttribute('width', Math.round(box.w * scale));
+    clone.setAttribute('height', Math.round(box.h * scale));
+    return new XMLSerializer().serializeToString(clone);
+}
+
+//: How tall the band under an exported picture is, when there is one.
+const _SS_LEG_H = 30;
+
+/** What each kind of line means, drawn INTO the picture.
+ *
+ *  On screen this sits under the canvas as HTML, which is where it belongs — it is not part of
+ *  the drawing and it should not take space from it. An exported file has no "under the
+ *  canvas": what leaves is a page of grey, green and blue lines whose difference the reader is
+ *  left to guess, and they cannot come back and ask. Asked for from the screen.
+ *
+ *  Drawn from the same `{stroke, width, dash}` the lines themselves are drawn from, so a legend
+ *  cannot come to disagree with the picture it is under.
+ */
+function _ssLegend(rows, box, ink) {
+    if (!rows || !rows.length) return '';
+    const y = box.y + box.h - _SS_LEG_H / 2;
+    let x = box.x + 16;
+    const out = [`<line x1="${box.x}" y1="${box.y + box.h - _SS_LEG_H}"`
+        + ` x2="${box.x + box.w}" y2="${box.y + box.h - _SS_LEG_H}"`
+        + ` stroke="${ink}" stroke-width="0.5" opacity=".25"></line>`];
+    for (const k of rows) {
+        out.push(`<line x1="${x}" y1="${y}" x2="${x + 26}" y2="${y}"
+                        ${ssCanvasStroke(k)}></line>`);
+        x += 32;
+        out.push(`<text x="${x}" y="${y + 4}" font-size="11.5" fill="${ink}"
+                        opacity=".75">${esc(k.label || '')}</text>`);
+        // No text measuring here: an <img> rendering an SVG is not a document that can be
+        // asked how wide a word came out. Six-tenths of the size per character over-estimates
+        // for prose, which spaces the keys out and never overlaps them.
+        x += String(k.label || '').length * 6.6 + 24;
+    }
+    return out.join('');
+}
+
+/** …and out as a file. `kind` is 'png' or 'svg': one to send somebody, one to keep editing. */
+async function ssCanvasExport(id, base, kind, keys) {
+    let out = '';
+    // By NAME, like the panel's repaint: this file draws for two maps and knows what neither
+    // of their lines mean.
+    const rows = (typeof window[keys] === 'function') ? window[keys]() : [];
+    try { out = await ssCanvasSvgOut(id, kind === 'png' ? 2 : 1, rows); }
+    catch (_) { out = ''; }
+    if (!out) { showToast(t('infra_export_failed'), 'danger'); return; }
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    const name = `${base}_${stamp}.${kind}`;
+    if (kind !== 'png') {
+        ssDownloadBlob(new Blob([out], {type: 'image/svg+xml;charset=utf-8'}), name);
+        showToast(tf('infra_export_done', name), 'success');
+        return;
+    }
+    // Through an <img>, which is the only thing that reads an SVG and can be drawn on a canvas.
+    // It refuses to fetch anything at all while doing it, which is why the font and the rules
+    // are inside the file rather than linked from it.
+    const img = new Image();
+    img.onload = () => {
+        const cv = document.createElement('canvas');
+        cv.width = img.width || 1;
+        cv.height = img.height || 1;
+        cv.getContext('2d').drawImage(img, 0, 0);
+        cv.toBlob(b => {
+            if (!b) { showToast(t('infra_export_failed'), 'danger'); return; }
+            ssDownloadBlob(b, name);
+            showToast(tf('infra_export_done', name), 'success');
+        }, 'image/png');
+    };
+    img.onerror = () => showToast(t('infra_export_failed'), 'danger');
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(out);
+}
+
+// ── The reading panel: whether it is there at all ──────────────────────────
+//
+// It floats over the drawing, which is the point of it — the reading of a machine is not two
+// hundred pixels wide — and it is also in front of part of the picture. Reported from the
+// screen: "molesta". Whose call that is depends on what somebody is doing, so it is theirs:
+// off, and the maps are only maps.
+//
+// One preference for both, kept in this browser. It is a decision about looking, not about
+// the fleet, and it belongs to the person and the screen they are at rather than the account.
+let _ssPanel = null;
+
+function ssCanvasPanelOn() {
+    if (_ssPanel === null) {
+        try { _ssPanel = localStorage.getItem('ss_infra_panel') !== '0'; }
+        catch (_) { _ssPanel = true; }
+    }
+    return _ssPanel;
+}
+
+/** Turn it on or off and repaint, by the name of whatever paints that map's panel — this file
+ *  draws for two pictures and names neither. */
+function ssCanvasPanelSet(on, paint) {
+    _ssPanel = !!on;
+    try { localStorage.setItem('ss_infra_panel', _ssPanel ? '1' : '0'); } catch (_) {}
+    const fn = window[paint];
+    if (fn) fn();
+}
+
+/** The switch itself, for a map's note row. */
+function ssCanvasPanelToggle(paint) {
+    const on = ssCanvasPanelOn();
+    const id = 'ssPanelSw-' + paint;
+    return `<div class="form-check form-switch mb-0 ms-auto d-flex align-items-center gap-2"
+                 title="${escAttr(t('infra_panel_show_tt'))}">
+        <input class="form-check-input mt-0" type="checkbox" role="switch"
+               id="${escAttr(id)}" ${on ? 'checked' : ''}
+               onchange="ssCanvasPanelSet(this.checked, ${jsStr(paint)})">
+        <label class="form-check-label" for="${escAttr(id)}"
+            >${esc(t('infra_panel_show'))}</label>
+    </div>`;
+}
+
+/** The path of a cable between two boxes, each given as `{x, y, w, h}`.
+ *
+ *  Every end leaves by the side that FACES the other one, and which pair of sides that is
+ *  comes from which gap is the bigger: mostly across → out of one flank and into the opposite
+ *  flank; mostly up or down → out of the top or the bottom.
+ *
+ *  Here, and not on either map, because every line on both of them asked the question and each
+ *  answered it separately with a FIXED answer — flank to flank between machines, bottom to top
+ *  for the way out, for a network's plate, for a machine hanging off one. Every one of those
+ *  held only while the boxes were where the layout first put them. Two machines in the same
+ *  tier are one above the other, so their cable left the right flank, doubled back the width of
+ *  both boxes and came in at the far side — under them, since wires are drawn beneath boxes, so
+ *  it did not read as a cable leaving a box at all. A machine dragged above its own network got
+ *  a line that left downwards and hooked back up into it. Dragging makes any pair of positions
+ *  possible, which turns all of that from an edge case into most of the picture.
+ *
+ *  Reported from the screen twice, once per map. One implementation, because a drawing whose
+ *  lines take their corners several ways looks broken rather than varied.
+ *
+ *  It takes BOXES and not endpoints on purpose: which side to leave by cannot be worked out
+ *  from a point, and every caller that passed points had already chosen a side by then.
+ */
+function ssCanvasCable(a, b) {
+    const ax = a.x + a.w / 2, ay = a.y + a.h / 2;
+    const bx = b.x + b.w / 2, by = b.y + b.h / 2;
+    let x1, y1, x2, y2, c1x, c1y, c2x, c2y;
+    if (Math.abs(bx - ax) >= Math.abs(by - ay)) {
+        const right = bx >= ax;
+        x1 = right ? a.x + a.w : a.x;
+        x2 = right ? b.x : b.x + b.w;
+        y1 = ay; y2 = by;
+        // The control points reach out ALONG the way the cable left, so it comes off the flank
+        // level and turns afterwards — a curve that starts diagonally reads as a cable pinned
+        // to the corner of the box.
+        const d = Math.max(28, Math.abs(x2 - x1) / 2) * (right ? 1 : -1);
+        c1x = x1 + d; c1y = y1; c2x = x2 - d; c2y = y2;
+    } else {
+        const down = by >= ay;
+        y1 = down ? a.y + a.h : a.y;
+        y2 = down ? b.y : b.y + b.h;
+        x1 = ax; x2 = bx;
+        const d = Math.max(24, Math.abs(y2 - y1) / 2) * (down ? 1 : -1);
+        c1x = x1; c1y = y1 + d; c2x = x2; c2y = y2 - d;
+    }
+    return `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
+}
+
 /** The window over one drawing, adopting the fitted one the first time anybody asks.
  *
  *  No entry means "drawn fitted" — the state a freshly opened map is in, and the one every
@@ -442,6 +765,31 @@ function ssCanvasAttrs(id, L) {
  *  *opts*: `{hint, cables, extra}` — the gesture the picture offers, its cable count where it
  *  has one, and one more row where a map has something of its own to add.
  */
+//: The address ranges that never appear on the internet: RFC 1918, the carrier-grade range,
+//: link-local, loopback and IPv6's own private prefixes. Not a guess about which port an
+//: address is on — a fact about the address SPACE, which is why it can be relied on.
+const _SS_PRIVATE = [
+    /^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./,
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,          // CGNAT, 100.64/10
+    /^169\.254\./, /^127\./, /^0\./,
+    /^f[cd][0-9a-f]{2}:/i, /^fe80:/i, /^::1$/,
+];
+
+function ssPrivateIp(ip) {
+    const a = String(ip || '').split('/')[0].trim();
+    return !a || _SS_PRIVATE.some(re => re.test(a));
+}
+
+/** The address a machine is reachable at from OUTSIDE, out of everything it claims.
+ *
+ *  Reported from the screen: the way out was reading `10.x`. That is the LAN address and the
+ *  next hop is the LAN gateway — neither of them is what the line to the street is. The public
+ *  one is in the same list the device already reported; nothing was picking it out.
+ */
+function ssPublicIp(addresses) {
+    return (addresses || []).find(a => !ssPrivateIp(a)) || '';
+}
+
 function ssHostCard(node, uid, opts) {
     const n = node || {};
     const o = opts || {};
@@ -479,6 +827,7 @@ function ssHostCard(node, uid, opts) {
                   (n.addresses || []).map(code).join(' ') || (h.address ? code(h.address) : ''))}
             ${row('bi-diagram-2', t('infra_link_networks'),
                   (n.networks || []).map(code).join(' '))}
+            ${row('bi-globe2', t('infra_watch_wan'), n.wan ? code(n.wan) : '')}
             ${row('bi-signpost-2', t('infra_link_gateway'), n.gateway ? code(n.gateway) : '')}
             ${row('bi-plugin', t('infra_link_cables'),
                   o.cables === undefined ? '' : String(o.cables))}
@@ -494,10 +843,21 @@ function ssHostCard(node, uid, opts) {
 
 /** Zoom in, out, and back to the whole thing. Buttons as well as the wheel: a trackpad pinch
  *  is not something every pointer can do, and "show me all of it" has no gesture. */
-function ssCanvasTools(id) {
+function ssCanvasTools(id, name, keys) {
     const btn = (fn, icon, key) => `<button class="btn btn-sm btn-secondary"
         onclick="${fn}" title="${escAttr(t(key))}"><i class="bi ${icon}"></i></button>`;
-    return `${btn(`ssCanvasZoom('${id}',1.25)`, 'bi-zoom-in', 'infra_link_zoom_in')}
-        ${btn(`ssCanvasZoom('${id}',1/1.25)`, 'bi-zoom-out', 'infra_link_zoom_out')}
-        ${btn(`ssCanvasFit('${id}')`, 'bi-aspect-ratio', 'infra_link_fit')}`;
+    const out = base => `ssCanvasExport('${id}',${jsStr(name || 'map')},'${base}',`
+        + `${jsStr(keys || '')})`;
+    // Two groups: three buttons change what you are LOOKING at and two take the picture away
+    // with you. Welded into one run they read as five of the same thing, which is the same
+    // thing that was wrong with the view switcher.
+    return `<span class="btn-group btn-group-sm me-2">
+            ${btn(`ssCanvasZoom('${id}',1.25)`, 'bi-zoom-in', 'infra_link_zoom_in')}
+            ${btn(`ssCanvasZoom('${id}',1/1.25)`, 'bi-zoom-out', 'infra_link_zoom_out')}
+            ${btn(`ssCanvasFit('${id}')`, 'bi-aspect-ratio', 'infra_link_fit')}
+        </span>
+        <span class="btn-group btn-group-sm">
+            ${btn(out('png'), 'bi-image', 'infra_export_png')}
+            ${btn(out('svg'), 'bi-filetype-svg', 'infra_export_svg')}
+        </span>`;
 }
