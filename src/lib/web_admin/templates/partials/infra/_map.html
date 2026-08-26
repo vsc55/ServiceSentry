@@ -123,6 +123,15 @@ function _infraMapLayout(map) {
     for (const s of shared)
         for (const uid of s.meeting)
             if (!home.has(uid)) home.set(uid, s.net);
+    // …and WHICH of its addresses put it there, which is the one to show on it. A machine with
+    // six addresses was labelled with whichever one it happened to report first — the plate it
+    // hangs from says 192.168.180.0/24 and the label read 172.17.0.1/16, and nothing on the
+    // picture said why. The server knew all along: it works this out to tell one machine's
+    // private range from another's, and used to throw it away in the same breath.
+    const claim = new Map();
+    for (const n of map.networks || [])
+        for (const [uid, addr] of Object.entries(n.claims || {}))
+            if (home.get(uid) === n.net) claim.set(uid, addr);
     const orphans = (map.nodes || []).filter(
         n => !routers.has(n.uid) && !home.has(n.uid)).map(n => n.uid);
 
@@ -143,6 +152,7 @@ function _infraMapLayout(map) {
             const b = {uid, node: byUid.get(uid) || {uid, name: uid},
                        x: x + (_MAP.COL - _MAP.BOX_W) / 2,
                        y: _MAP.Y_HOST + k * (_MAP.BOX_H + _MAP.HOST_GAP),
+                       addr: claim.get(uid) || '',
                        solo: solo.get(uid) || [], kind: 'host'};
             boxes.push(b);
             return b;
@@ -302,18 +312,21 @@ function _infraMapUp(ev) {
 function _infraMapNote(map, L) {
     const wired = (map.edges || []).filter(
         e => e.kind === 'lldp' || e.kind === 'port').length;
-    return `<div class="text-muted ss-fs-2 mb-2 d-flex align-items-center gap-2">
+    return `<div class="text-muted ss-fs-2 mb-2 ss-toolrow">
         <i class="bi bi-info-circle"></i>
-        <span>${esc(tf('infra_map_note2', L.cols.filter(c => c.net).length,
-                       L.boxes.length))}</span>
-        ${wired ? `<button class="btn btn-sm btn-secondary py-0 px-2"
-                onclick="setInfraView('links')" title="${escAttr(t('infra_map_to_links_tt'))}"
-                ><i class="bi bi-hdd-network me-1"></i>${esc(tf('infra_map_to_links', wired))}
-            </button>` : ''}
-        ${ssCanvasPanelToggle('_infraMapPaint')}
-        <span id="infraNetTools">${_infraMapTools()}</span>
-        <button class="btn btn-sm btn-secondary" onclick="_infraMapRefresh()">
-            <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+        <span class="ss-toolrow-text">${esc(tf('infra_map_note2',
+            L.cols.filter(c => c.net).length, L.boxes.length))}</span>
+        <div class="ss-toolrow-tools">
+            ${wired ? `<button class="btn btn-sm btn-secondary"
+                    onclick="setInfraView('links')"
+                    title="${escAttr(t('infra_map_to_links_tt'))}"
+                    ><i class="bi bi-hdd-network me-1"></i>${
+                    esc(tf('infra_map_to_links', wired))}</button>` : ''}
+            ${ssCanvasPanelToggle('_infraMapPaint')}
+            <span id="infraNetTools">${_infraMapTools()}</span>
+            <button class="btn btn-sm btn-secondary" onclick="_infraMapRefresh()">
+                <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+        </div>
     </div>`;
 }
 
@@ -365,6 +378,15 @@ function _infraMapNet(c) {
     </g>`;
 }
 
+/** The address to write on a box: the one that put it on the plate it hangs from, with the
+ *  prefix it was reported with. `claims` holds the address alone, because what it answers is
+ *  "which of these is on that network" — the prefix comes back from the list it came out of. */
+function _infraMapAddr(p) {
+    const all = (p.node || {}).addresses || [];
+    if (!p.addr) return all[0] || '';
+    return all.find(a => a === p.addr || a.startsWith(p.addr + '/')) || p.addr;
+}
+
 /** One machine. The colour is the status the fleet list already gives it, so a map and a card
  *  never disagree about whether something is down. */
 function _infraMapBox(p) {
@@ -372,7 +394,9 @@ function _infraMapBox(p) {
     const tone = hostStateColor(n.status);
     const gw = p.kind === 'gateway';
     const h = p.h || _MAP.BOX_H;
-    const addr = (n.addresses || [])[0] || '';
+    // The address that put it on the network it hangs from — not the first one it happens to
+    // report. A router hangs from nothing, so for one of those the first is all there is.
+    const addr = _infraMapAddr(p);
     return `<g class="ss-grab" data-open="${escAttr(p.uid)}"
              onpointerenter="_infraMapHover('host',${jsStr(p.uid)})"
              onpointerleave="_infraMapHover('','')">
@@ -416,41 +440,55 @@ function _infraMapClip(text, max) {
  *  Cables are not here. They have a map of their own, and two pictures of one cable are two
  *  things to keep in agreement.
  */
-function _infraMapWires(L) {
+//: How each kind of line on this map is drawn, and what it SAYS. Data, for the same reason the
+//: cable map's table is: the line, the legend under the picture, the legend inside an exported
+//: one, and now the card that reads one, all have to agree about what a dashed grey line is.
+const _MAP_LINE = {
+    exit:   {stroke: 'var(--bs-primary)',      width: 2,   dash: '',
+             label: 'infra_map_line_exit',   icon: 'bi-cloud'},
+    serves: {stroke: 'var(--bs-border-color)', width: 1.5, dash: '',
+             label: 'infra_map_line_serves', icon: 'bi-diagram-2'},
+    home:   {stroke: 'var(--bs-border-color)', width: 1.5, dash: '',
+             label: 'infra_map_line_home',   icon: 'bi-diagram-2'},
+    also:   {stroke: 'var(--bs-secondary)',    width: 1,   dash: '3 3', fade: '.7',
+             label: 'infra_map_line_also',   icon: 'bi-diagram-2'},
+    way:    {stroke: 'var(--bs-primary)',      width: 1.5, dash: '',    fade: '.7',
+             arrow: true,
+             label: 'infra_map_line_way',    icon: 'bi-signpost-2'},
+};
+
+/** Every line on this map, as what it JOINS and what it means — before any of it is drawn.
+ *
+ *  Data first because three things need the same list and must not each work it out: the
+ *  drawing, the lighting of one machine's lines, and the card that reads the line under the
+ *  pointer. Two of those would have had to re-derive "which line is this" from coordinates.
+ *
+ *  Every one joins two BOXES, and which sides it leaves by is `ssCanvasCable`'s answer — the
+ *  same one the cable map gets. Written as endpoints, each had already chosen its sides before
+ *  drawing anything: the plate was always below the router, the machine always below its plate.
+ *  Dragging ended that.
+ */
+function _infraMapLines(L) {
     const out = [];
-    // Every line here joins two BOXES, and which sides it leaves by is `ssCanvasCable`'s
-    // answer — the same one the cable map gets. Written as endpoints, each of these had
-    // already decided the sides before it drew anything: the plate was always below the
-    // router, the machine always below its plate. Dragging ended that, and a machine moved
-    // above its own network got a line that left downwards and hooked back up into it.
-    // Each line carries WHICH TWO THINGS it joins. A machine on four networks is four lines
-    // leaving one box into a field of everybody else's, and the picture reported from the
-    // screen was a grey mesh nothing could be traced through: the answer to "where does THIS
-    // one go" is in the drawing, and reading it off is the part that fails. Named here, the
-    // lines of whatever is under the pointer can be lit without redrawing anything — which
-    // matters, because a redraw under a hovering pointer is a picture that flickers.
-    const wire = (a, b, style) =>
-        `<path data-a="${escAttr(a.id)}" data-b="${escAttr(b.id)}"
-               d="${ssCanvasCable(a, b)}" fill="none" ${style}></path>`;
-    const plain = 'stroke="var(--bs-border-color)" stroke-width="1.5"';
     // A machine, a network's plate and the outside, each as the box it is drawn as — and each
     // under the name the rest of this map knows it by.
     const mach = p => ({id: p.uid, x: p.x, y: p.y, w: _MAP.BOX_W, h: p.h || _MAP.BOX_H});
     const plate = c => ({id: _netKey('net', c.net), x: c.x + 8, y: _MAP.Y_NET,
                          w: _MAP.COL - 16, h: _MAP.NET_H});
-
-    // …from wherever the outside has been put.
     const at = _infraMapCloudAt(L);
     const cloud = {id: _NET_CLOUD, x: at.x, y: at.y, w: _CLOUD_W, h: _MAP.BOX_H - 8};
+
+    // …from wherever the outside has been put.
     for (const g of L.gws) {
-        if (L.exits.some(e => e.from === g.uid)) {
-            out.push(wire(cloud, mach(g), 'stroke="var(--bs-primary)" stroke-width="2"'));
-        }
+        const e = (L.exits || []).find(x => x.from === g.uid);
+        if (e) out.push({kind: 'exit', a: cloud, b: mach(g), uid: g.uid, exit: e});
     }
-    const src = L.gws.length ? mach(L.gws[0]) : cloud;
+    const src = L.gws.length ? L.gws[0] : null;
     for (const c of L.cols) {
-        out.push(wire(src, plate(c), plain));
-        for (const b of c.boxes) out.push(wire(plate(c), mach(b), plain));
+        out.push({kind: 'serves', a: src ? mach(src) : cloud, b: plate(c),
+                  uid: src ? src.uid : '', net: c.net});
+        for (const b of c.boxes)
+            out.push({kind: 'home', a: plate(c), b: mach(b), uid: b.uid, net: c.net});
     }
 
     // A machine that is ALSO on another network, and only to plates that are on the picture:
@@ -458,22 +496,45 @@ function _infraMapWires(L) {
     for (const b of L.boxes) {
         const also = (b.node.networks || []).filter(
             net => net !== L.home.get(b.uid) && L.cols.some(c => c.net === net));
-        for (const net of also) {
-            out.push(wire(mach(b), plate(L.cols.find(x => x.net === net)),
-                          'stroke="var(--bs-secondary)" stroke-width="1"'
-                          + ' stroke-dasharray="3 3" opacity=".7"'));
-        }
+        for (const net of also)
+            out.push({kind: 'also', a: mach(b), b: plate(L.cols.find(x => x.net === net)),
+                      uid: b.uid, net});
     }
 
     // …and a machine pointing at its OWN way out, when there is more than one to point at.
     for (const w of L.ways || []) {
         const a = L.at.get(w.from), b = w.to ? L.at.get(w.to) : null;
         if (!a || !b || L.gws.length <= 1) continue;
-        out.push(wire(mach(a), mach(b),
-                      'stroke="var(--bs-primary)" stroke-width="1.5"'
-                      + ' marker-end="url(#ss-map-arrow)" opacity=".7"'));
+        out.push({kind: 'way', a: mach(a), b: mach(b), uid: w.from, to: w.to,
+                  address: w.address || ''});
     }
-    return out.join('');
+    return out;
+}
+
+/** …and those, drawn.
+ *
+ *  Each line carries WHICH TWO THINGS it joins, so the lines of whatever is under the pointer
+ *  can be lit without redrawing anything — a redraw under a hovering pointer is a picture that
+ *  flickers — and it carries WHICH LINE it is, so it can be read on its own.
+ *
+ *  A transparent fat stroke under the visible one, because a one-pixel dashed line is not
+ *  something anybody can put a pointer on deliberately. The same trick, and the same reason, as
+ *  the cable map.
+ */
+function _infraMapWires(L) {
+    return _infraMapLines(L).map((w, i) => {
+        const k = _MAP_LINE[w.kind] || {};
+        const d = ssCanvasCable(w.a, w.b);
+        return `<g data-a="${escAttr(w.a.id)}" data-b="${escAttr(w.b.id)}" data-w="${i}"
+                   class="ss-pointer" onpointerenter="_infraMapHover('wire','${i}')"
+                   onpointerleave="_infraMapHover('','')">
+            <title>${escAttr(t(k.label || ''))}</title>
+            <path d="${d}" fill="none" stroke="transparent" stroke-width="14"></path>
+            <path d="${d}" fill="none" ${ssCanvasStroke(k)}
+                  ${k.fade ? `opacity="${k.fade}"` : ''}
+                  ${k.arrow ? 'marker-end="url(#ss-map-arrow)"' : ''}></path>
+        </g>`;
+    }).join('');
 }
 
 //: The id the outside goes by. It is not a machine and has no uid, but every other thing on
@@ -484,6 +545,66 @@ const _NET_CLOUD = ':outside';
 //: …and it is drawn as a BOX, like everything else on the picture. It was a line of text, which
 //: is why it read as scenery rather than as a thing you could move or ask about.
 const _CLOUD_W = 120;
+
+/** One line, read.
+ *
+ *  A line on this map is a CLAIM, and which claim it is decides what is worth saying about it:
+ *  a machine on a network is answered by the address that put it there, a way out by the next
+ *  hop it points at. The picture can only show that they are different kinds of line; what each
+ *  kind means is the sentence under it.
+ */
+function _infraMapWireCard(L, i) {
+    const w = _infraMapLines(L)[i];
+    if (!w) return '';
+    const k = _MAP_LINE[w.kind] || {};
+    const box = uid => L.at.get(uid) || null;
+    const chip = (uid) => {
+        const p = box(uid);
+        const n = (p || {}).node || {};
+        return `<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
+                onclick="infraOpen(${jsStr(uid)})"><i class="bi ${
+                escAttr(hostTypeIcon(n.kind || ''))} me-1"></i>${
+                esc(n.name || uid)}</button>`;
+    };
+    const net = (cidr) => `<span class="badge bg-body-secondary text-body-secondary border
+        fw-normal"><i class="bi bi-diagram-2 me-1"></i>${
+        esc(cidr || t('infra_map_no_shared'))}</span>`;
+    const code = (v, title) => (v ? `<code class="ss-fs-2"${
+        title ? ` title="${escAttr(title)}"` : ''}>${esc(v)}</code>` : '');
+
+    let body = '';
+    if (w.kind === 'exit') {
+        const n = (box(w.uid) || {}).node || {};
+        const e = w.exit || {};
+        body = `${chip(w.uid)}
+            ${e.port ? `<span class="badge bg-body-secondary text-body-secondary border
+                fw-normal"><i class="bi bi-globe2 me-1"></i>${esc(e.port)}</span>` : ''}
+            ${code(ssPublicIp(n.addresses))}
+            ${e.address ? `<span class="text-muted ss-fs-3"
+                title="${escAttr(t('infra_link_gateway'))}">&rarr; ${
+                esc(e.address)}</span>` : ''}`;
+    } else if (w.kind === 'way') {
+        body = `${chip(w.uid)}<span class="text-muted">&rarr;</span>${chip(w.to)}
+            ${code(w.address, t('infra_link_gateway'))}`;
+    } else if (w.kind === 'serves') {
+        body = `${w.uid ? chip(w.uid) : ''}<span class="text-muted">&rarr;</span>${net(w.net)}`;
+    } else {
+        // The address that put this machine on THAT network, which is the whole point of the
+        // line: a machine with six addresses is on this plate because of exactly one of them.
+        const p = box(w.uid) || {};
+        const all = (p.node || {}).addresses || [];
+        const mine = w.net ? all.find(a => _netHolds(w.net, String(a).split('/')[0])) : '';
+        body = `${chip(w.uid)}${code(mine || _infraMapAddr(p))}${net(w.net)}`;
+    }
+    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <svg width="26" height="8" aria-hidden="true"><line x1="1" y1="4" x2="25" y2="4"
+                 ${ssCanvasStroke(k)}></line></svg>
+            <span class="text-muted">${esc(t(k.label || ''))}</span>
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">${body}</div>
+    </div>`;
+}
 
 /** WHERE the outside is — its own place once somebody moved it, and the top of the picture
  *  until then.
@@ -571,17 +692,25 @@ function _netKey(kind, id) {
 function _infraMapMark() {
     const svg = ssCanvasSvg(_NET_SVG);
     if (!svg) return;
-    const on = _netKey(_netHover[0], _netHover[1]);
-    svg.querySelectorAll('path[data-a]').forEach(p => {
-        const mine = on && (p.dataset.a === on || p.dataset.b === on);
-        p.style.opacity = !on || mine ? '' : '.1';
-        p.style.strokeWidth = mine ? '2.5' : '';
+    // One line, when the pointer is on a line; otherwise every line of whatever it is on.
+    const one = _netHover[0] === 'wire' ? String(_netHover[1]) : '';
+    const on = one ? '' : _netKey(_netHover[0], _netHover[1]);
+    svg.querySelectorAll('g[data-a]').forEach(g => {
+        const mine = one ? g.dataset.w === one
+                         : !!on && (g.dataset.a === on || g.dataset.b === on);
+        g.style.opacity = (!on && !one) || mine ? '' : '.1';
+        // The width goes on the VISIBLE path and not on the group: the group's is inherited,
+        // and an inherited property loses to the attribute the path carries itself — so a line
+        // marked that way stays exactly as thin as it was.
+        const line = g.querySelectorAll('path')[1];
+        if (line) line.style.strokeWidth = mine ? '2.5' : '';
     });
 }
 
 function _infraMapPanelHtml() {
     if (!ssCanvasPanelOn()) return '';
     const [kind, id] = _netHover;
+    if (kind === 'wire') return _infraMapWireCard(_infraMapLayout(_infraMap || {}), +id);
     if (!kind || !_infraMap) return '';
     const L = _infraMapLayout(_infraMap);
     if (kind === 'host') {

@@ -732,9 +732,19 @@ class TestABoxIsAlsoSomethingToREAD:
 
     def test_what_the_pointer_is_on_is_what_the_panel_shows(self):
         body = self._fn('_infraLinkPanelHtml')
-        assert 'if (_lnkNode && L.pos[_lnkNode]) return _infraLinkNodeHtml(' in body
+        assert 'if (auto && _lnkNode && L.pos[_lnkNode]) return _infraLinkNodeHtml(' in body
         # …and it is only ever a hover, so leaving gives back whatever was kept.
         assert "_lnkNode = ''" in self._src()
+
+    def test_and_switched_off_it_still_answers_a_question_that_was_ASKED(self):
+        """The switch is about the panel turning up on its own. Pressing a cable is somebody
+        asking, and refusing that would leave no way at all to find out what a cable is —
+        uncluttered by being unreadable."""
+        body = self._fn('_infraLinkPanelHtml')
+        assert 'if (!auto && _lnkPick === null) return' in body, \
+            'switching it off takes the answer away from the question too'
+        assert 'const on = auto ? _lnkOn() : _lnkPick;' in body, \
+            'with it off, the pointer passing over a cable still opens it'
 
     def test_a_field_the_device_did_not_answer_is_not_a_blank_row(self):
         """A card of empty labels reads as a machine that answered nothing, which is a

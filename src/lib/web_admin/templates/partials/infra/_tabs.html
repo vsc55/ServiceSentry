@@ -29,18 +29,25 @@ const _INFRA_TABS = [
     // First, because it is the question a device page is opened with. The other tabs answer
     // "show me everything"; this one answers "is this box all right".
     {id: 'details', label_key: 'infra_tab_details', icon: 'bi-speedometer2'},
-    {id: 'metrics', label_key: 'infra_tab_metrics', icon: 'bi-graph-up'},
-    {id: 'results', label_key: 'infra_tab_results', icon: 'bi-list-check'},
+    {id: 'metrics', label_key: 'infra_tab_metrics', icon: 'bi-graph-up',
+     perm: 'infra_metrics_view'},
+    {id: 'results', label_key: 'infra_tab_results', icon: 'bi-list-check',
+     perm: 'infra_results_view'},
     {id: 'logs',    label_key: 'infra_tab_logs',    icon: 'bi-card-text', perm: 'syslog_view'},
     // Last, and never the default: a thousand undifferentiated lines is the right answer to a
     // question nobody has asked yet. It is the tab you open when a number looks wrong on one
     // of the others and you need to know whether the problem is the device, the profile or
     // the screen.
-    {id: 'raw',     label_key: 'infra_tab_raw',     icon: 'bi-braces'},
+    {id: 'raw',     label_key: 'infra_tab_raw',     icon: 'bi-braces', perm: 'infra_raw_view'},
 ];
 
 /** The tabs this caller may see. A tab whose data they cannot fetch is a tab that opens on an
- *  error, so it is not offered. */
+ *  error, so it is not offered.
+ *
+ *  For `results` and `logs` this is the polite half of a real gate — the server does not send
+ *  the one and refuses the other. For `metrics` and `raw` it is the whole of it: what those two
+ *  draw is what Details is built from, so it arrives regardless (see the domain's manifest,
+ *  which says so out loud rather than leaving it to be discovered). */
 function _infraTabsFor() {
     const perms = new Set(currentUser.permissions || []);
     return _INFRA_TABS.filter(x => !x.perm || perms.has(x.perm));
@@ -49,7 +56,10 @@ const _INFRA_TAB_KEY = 'ss_infra_tab';
 let _infraTab = (() => {
     try {
         const v = localStorage.getItem(_INFRA_TAB_KEY);
-        return _INFRA_TABS.some(x => x.id === v) ? v : 'details';
+        // Against the tabs this caller MAY have, not against the list of them: what is
+        // remembered here outlives a permission being taken away, and a browser that opens
+        // straight onto a tab nobody may see is a page that starts on an error.
+        return _infraTabsFor().some(x => x.id === v) ? v : 'details';
     } catch (_) { return 'details'; }
 })();
 

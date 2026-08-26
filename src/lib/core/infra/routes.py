@@ -203,8 +203,12 @@ def register(app, wa):
         # What to call a module that groups nothing — its own name, out of its own lang
         # file, so the core still holds no string naming one.
         names = {mod: history_svc._pretty_name(wa._modules_dir, mod, lang) for mod in bound}
+        # `results` is the one thing on this page no other tab is built from, which is what
+        # makes withholding it possible at all: the measurements and the attributes below are
+        # what Details draws, so they go whatever the other tab flags say. A flag that looks
+        # like a wall and is a curtain is worse than none — see the domain manifest.
         return jsonify({'host':       infra_svc.fleet_row(record),
-                        'results':    results,
+                        'results':    results if 'infra_results_view' in perms else [],
                         'metrics':    infra_svc.metrics(results, fields, names),
                         'attributes': infra_svc.attributes(results, said)})
 

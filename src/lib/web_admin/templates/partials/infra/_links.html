@@ -699,19 +699,26 @@ function _infraLinkOnePort(uid, port, skip) {
  *  for, and having answered it the screen should be able to take you to either side — the
  *  machine, or the port itself. */
 function _infraLinkPanelHtml() {
-    if (!ssCanvasPanelOn()) return '';
+    // The switch is about the panel turning up ON ITS OWN. Pressing a cable is somebody asking
+    // for it, and answering "no" to a question that was actually asked would make the map
+    // unreadable rather than uncluttered: with it off there would be no way at all to find out
+    // what a cable is. So a KEPT cable still opens, and its × closes it again.
+    const auto = ssCanvasPanelOn();
+    if (!auto && _lnkPick === null) return '';
     const L = _infraLinkLayout(_infraMap || {});
     // A box under the pointer wins over any cable: it is what is being pointed AT, and a
     // panel describing a cable while the hand is on a machine is a panel about the wrong
     // thing. A kept cable is still kept — it comes back the moment the box is left.
-    if (_lnkNode === _LNK_WAN) return _infraLinkWanCard(L);
-    if (_lnkNode && L.pos[_lnkNode]) return _infraLinkNodeHtml(L, _lnkNode);
-    const e = (L.edges || [])[_lnkOn()];
+    if (auto && _lnkNode === _LNK_WAN) return _infraLinkWanCard(L);
+    if (auto && _lnkNode && L.pos[_lnkNode]) return _infraLinkNodeHtml(L, _lnkNode);
+    // …and with it off, the pointer passing over cables is not an answer to anything.
+    const on = auto ? _lnkOn() : _lnkPick;
+    const e = (L.edges || [])[on];
     if (!e) return '';
     // Only a KEPT panel gets a way to close it: an unkept one is gone the moment the pointer
     // leaves the cable, and an × on it is a button that cannot be reached to be pressed. What
     // goes there instead is the gesture that would make it stay.
-    const kept = _lnkPick !== null && _lnkPick === _lnkOn();
+    const kept = _lnkPick !== null && _lnkPick === on;
     const claim = _infraLinkClaim(e);
     // A ROW per end, and not two ends on one line with an arrow between them: the ports of
     // one side are as many as its cables, and a side that wraps mid-list next to a side that
@@ -803,13 +810,16 @@ function _infraLinksBody() {
 function _infraLinksNote(L) {
     const n = L.edges.length;
     const both = L.edges.filter(e => _infraLinkClaim(e) === 'both').length;
-    return `<div class="text-muted ss-fs-2 mb-2 d-flex align-items-center gap-2">
+    return `<div class="text-muted ss-fs-2 mb-2 ss-toolrow">
         <i class="bi bi-info-circle"></i>
-        <span>${esc(n ? tf('infra_link_note', n, both) : t('infra_link_none'))}</span>
-        ${ssCanvasPanelToggle('_infraLinkPaint')}
-        <span id="infraLinkTools">${_infraLinkTools()}</span>
-        <button class="btn btn-sm btn-secondary" onclick="_infraMapRefresh()">
-            <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+        <span class="ss-toolrow-text">${
+            esc(n ? tf('infra_link_note', n, both) : t('infra_link_none'))}</span>
+        <div class="ss-toolrow-tools">
+            ${ssCanvasPanelToggle('_infraLinkPaint')}
+            <span id="infraLinkTools">${_infraLinkTools()}</span>
+            <button class="btn btn-sm btn-secondary" onclick="_infraMapRefresh()">
+                <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+        </div>
     </div>`;
 }
 

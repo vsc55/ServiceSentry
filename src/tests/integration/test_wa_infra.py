@@ -146,12 +146,23 @@ class TestWhoMaySeeIt:
         modules for fresh numbers, or saying which row is worth an alert. None stores an
         address, a credential or a name.
 
-        The list is closed on purpose. It read `== ['infra_view', 'infra_collect']` and was
-        the first thing to notice `infra_watch` arriving, which is what a closed list is for —
-        a third flag has to be argued for here rather than appearing."""
+        The list is closed on purpose. It read `== ['infra_view', 'infra_collect']`, then
+        caught `infra_watch` arriving, then caught these three — which is what a closed list is
+        for: a flag has to be argued for here rather than appear.
+
+        The three tab flags are the argument that the device PAGE is not one read. `infra_view`
+        opens the fleet and Details, which is the question the page is opened with; the charts,
+        the table of every check's last word, and the unfiltered dump answer different ones and
+        are wanted by different people. Only `infra_results_view` withholds anything — its key
+        is the one no other tab is built from — and the manifest says so out loud, because a
+        flag that looks like a wall and is a curtain is worse than none.
+
+        `*_view` because `viewer` is strictly read-only and the invariant that says so is a
+        naming one (see test_wa_roles.py): every flag that role holds ends in `_view`."""
         from lib.core.infra.manifest import MODULE_PERMISSIONS
         flags = [p['flag'] for p in MODULE_PERMISSIONS['permissions']]
-        assert flags == ['infra_view', 'infra_collect', 'infra_watch']
+        assert flags == ['infra_view', 'infra_collect', 'infra_watch',
+                         'infra_metrics_view', 'infra_results_view', 'infra_raw_view']
         assert not any(f.endswith('_edit') or f.startswith('devices_') for f in flags), (
             'this section grew a permission over the registry, which has its own')
 

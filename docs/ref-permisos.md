@@ -86,7 +86,13 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `overview_edit` | Editar el layout propio |
 | | `overview_set_default` | Fijar el layout como default global |
 | | `overview_reset_factory` | Restaurar el layout de fábrica |
-| **Infraestructura** | `infra_view` | Ver el estado en vivo de las máquinas (sección `/infra`). No concede nada del registro: eso es `devices_view` / `devices_edit` |
+| **Infraestructura** | `infra_view` | Ver el estado en vivo de las máquinas (sección `/infra`) y la pestaña **Detalles**: qué es cada máquina y si está bien, que es la pregunta con la que se abre la página. No concede nada del registro: eso es `devices_view` / `devices_edit` |
+| | `infra_collect` | «Obtener datos ahora»: lanzar los checks de un dispositivo sin esperar al ciclo. **No** de `viewer` — cuesta un sondeo al aparato, puede tardar minutos y hace que los checks avisen de lo que encuentren |
+| | `infra_watch` | Decir que una fila concreta —un puerto, un disco— merece aviso, y si es la de internet. **No** de `viewer`: decide qué despierta a alguien |
+| | `infra_metrics_view` | La pestaña **Medidas** |
+| | `infra_results_view` | La pestaña **Últimos datos**. El único de los tres que retiene el dato: es lo único de la página que ninguna otra pestaña lee, así que sin la bandera el servidor no lo envía |
+| | `infra_raw_view` | La pestaña **Datos brutos**: todo lo que contestó el aparato, sin agrupar. **No** de `viewer` |
+| | | ⚠️ `infra_metrics_view` y `infra_raw_view` deciden **qué ofrece la pantalla**, no qué sabe: los hechos que dibujan son los mismos con los que se construye *Detalles*, así que llegan igual. Retenérselos a alguien que tiene `infra_view` exigiría vaciar *Detalles* también. Está dicho aquí y en `lib/core/infra/manifest.py` a propósito — un permiso que parece un muro y es una cortina es peor que no tenerlo |
 | **Sesiones** | `sessions_view` | Ver sesiones activas |
 | | `sessions_revoke` | Revocar sesiones |
 | **Segundo factor** | `mfa_reset_others` | Quitar el segundo factor de **otra** cuenta, con sus códigos de recuperación. **De nadie por defecto**, ni siquiera de `admin`: es el camino de vuelta de quien perdió el móvil *y* los códigos, y es también lo que haría alguien con `users_edit` para desarmar la protección antes de ir a por la contraseña. No existe el contrario —nadie puede **activar** el MFA de otro—, porque solo el dueño puede dar de alta un autenticador que tiene en la mano. Ver [explica-mfa.md](explica-mfa.md#quitar-el-factor-de-otra-cuenta) |

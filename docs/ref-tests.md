@@ -9119,7 +9119,7 @@ compilado?» se respondía leyendo las dos y comparando a ojo.
 
 ---
 
-**Archivo:** `tests/meta/test_wa_infra_group_views.py` — 78 tests
+**Archivo:** `tests/meta/test_wa_infra_group_views.py` — 79 tests
 
 Tres formas más de leer la misma flota. La lista contesta «qué máquina está en problemas» y las tarjetas la contestan desde el otro lado de la habitación; lo que ninguna contestaba es la pregunta que aparece cuando la flota deja de caber en la cabeza: **qué TIPO de cosa está en problemas**. Son tres porque son tres lecturas: la **agrupada** enseña todo y te pide que bajes, el **rail** enseña una cosa y te pide que elijas (con cuatro tipos gana la primera, con veinte el segundo, así que decide la flota), y el **tablero** no agrupa por tipo en absoluto — es triaje, una columna por estado.
 
@@ -9145,7 +9145,7 @@ No se juzga cómo se ven, que ningún test puede. Se fijan las cuatro cosas que 
 
 ---
 
-**Archivo:** `tests/meta/test_wa_infra_section.py` — 141 tests
+**Archivo:** `tests/meta/test_wa_infra_section.py` — 156 tests
 
 El cableado que una **sección raíz** necesita para existir. No es un fichero: es una entrada en
 el registro de páginas (que es lo que le da URL, ruta, filtro por permiso y entrada en la barra

@@ -725,10 +725,11 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
         thing below IS below. A dragged box makes that false, so they are curves; and curves
         drawn between two BOXES, because the elbow's other assumption was surviving in them:
         which side each end left by was still fixed at "the bottom of the upper one"."""
-        wires = _fn(self._js(), '_infraMapWires')
         assert 'function _infraMapElbow(' not in self._js()
-        assert 'const wire = (a, b, style)' in wires
-        assert 'ssCanvasCable(a, b)' in wires
+        # The line's two ends are BOXES, worked out in the list and turned into a path by the
+        # shared maker — one answer for both maps about which sides a cable leaves by.
+        assert 'a: cloud, b: mach(g)' in _fn(self._js(), '_infraMapLines')
+        assert 'ssCanvasCable(w.a, w.b)' in _fn(self._js(), '_infraMapWires')
 
     def test_the_cables_are_not_drawn_twice(self):
         """They have a map of their own now. Two pictures of one cable are two things to keep
@@ -1295,7 +1296,9 @@ class TestACableLeavesByTheSideFacingTheOtherEnd:
     def test_and_it_is_given_boxes_and_not_endpoints(self):
         """Which side to leave by cannot be worked out from a point: a caller that passes one
         has already chosen the side, which is the thing being fixed."""
-        body = _fn(self._src('_map.html'), '_infraMapWires')
+        # Worked out where the LIST of lines is built, which is what the drawing, the
+        # lighting and the card that reads one all read.
+        body = _fn(self._src('_map.html'), '_infraMapLines')
         assert 'w: _MAP.BOX_W' in body and 'w: _MAP.COL - 16' in body, \
             'the address map hands over points again'
 
@@ -1565,3 +1568,162 @@ class TestAnExportedMapIsStillReadable:
             'the table is a string of attributes again'
         assert 'stroke-width' not in table, 'it draws instead of declaring'
         assert src.count('ssCanvasStroke(') >= 3, 'somebody spelled a stroke out again'
+
+class TestAHeadingStripIsProseWithControlsAtTheEnd:
+    """A line of text with buttons after it is not a row of equal things. A plain flex row
+    shares the squeeze among all of them, so the sentence took two lines AND every button was
+    compressed until its label wrapped inside it — with space to spare beside them. Reported
+    from the screen.
+
+    Wrapping words is free; wrapping a button is not.
+    """
+
+    NOTES = (('_map.html', '_infraMapNote'), ('_links.html', '_infraLinksNote'))
+
+    def test_only_the_sentence_gives(self):
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        text = css.split('.ss-toolrow > .ss-toolrow-text {')[1].split('}')[0]
+        assert 'flex: 1 1' in text and 'min-width: 0' in text, \
+            'the text does not absorb the squeeze'
+        tools = css.split('.ss-toolrow-tools {')[1].split('}')[0]
+        assert 'flex-shrink: 0' in tools, 'the controls are compressed again'
+        assert 'white-space: nowrap' in tools, 'a label is free to wrap inside its button'
+
+    def test_and_the_controls_move_as_one(self):
+        """A cluster that drops to the next line together is a row of buttons; one that breaks
+        up is a broken row."""
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        row = css.split('.ss-toolrow {')[1].split('}')[0]
+        assert 'flex-wrap: wrap' in row
+        for name, fn in self.NOTES:
+            body = _fn(_strip_comments(_read(os.path.join(INFRA, name))), fn)
+            assert body.count('ss-toolrow-tools') == 1, \
+                f'{fn} scatters its controls across the row'
+
+    def test_and_both_strips_are_the_same_shape(self):
+        for name, fn in self.NOTES:
+            body = _fn(_strip_comments(_read(os.path.join(INFRA, name))), fn)
+            assert 'ss-toolrow' in body and 'ss-toolrow-text' in body, f'{fn} is a plain row'
+            assert 'd-flex align-items-center gap-2">' not in body, \
+                f'{fn} lays itself out again'
+
+class TestALineOnTheAddressMapIsSomethingToRead:
+    """A line here is a CLAIM, and there are five kinds of them: a way out, the router a
+    network uses, a machine's address on the plate it hangs from, an address on another one,
+    and a machine pointing at its own gateway. The picture can only show that they are
+    different; WHICH claim a particular line is was in the drawing and could not be asked.
+    """
+
+    def _js(self):
+        return _strip_comments(_read(os.path.join(INFRA, '_map.html')))
+
+    def test_the_lines_are_a_list_before_they_are_a_drawing(self):
+        """Three things need the same list — the drawing, the lighting of one machine's lines,
+        and the card that reads the one under the pointer. Two of them would otherwise have to
+        work out "which line is this" from coordinates."""
+        src = self._js()
+        assert '_infraMapLines(L)' in _fn(src, '_infraMapWires')
+        assert '_infraMapLines(L)' in _fn(src, '_infraMapWireCard')
+
+    def test_and_each_kind_says_what_it_means_in_one_place(self):
+        src = self._js()
+        table = src.split('const _MAP_LINE = {')[1].split('};')[0]
+        for kind in ('exit', 'serves', 'home', 'also', 'way'):
+            assert kind + ':' in table, kind
+            assert "infra_map_line_" in table
+        for lang in ('es_ES', 'en_EN'):
+            words = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', lang + '.py'))
+            for kind in ('exit', 'serves', 'home', 'also', 'way'):
+                assert "'infra_map_line_%s'" % kind in words, (kind, lang)
+
+    def test_and_a_hairline_can_be_pointed_at(self):
+        """A one-pixel dashed line is not something anybody hits on purpose. Same trick, and
+        same reason, as the cable map: a transparent fat stroke under the visible one."""
+        body = _fn(self._js(), '_infraMapWires')
+        assert 'stroke="transparent" stroke-width="14"' in body
+        assert "_infraMapHover('wire'" in body
+
+    def test_and_the_one_under_the_pointer_is_the_only_one_lit(self):
+        body = _fn(self._js(), '_infraMapMark')
+        assert "_netHover[0] === 'wire'" in body
+        assert "g.dataset.w === one" in body
+        # …and the width lands on the visible path, not on the group: inherited loses to the
+        # attribute the path carries itself, so a line marked that way stays as thin as it was.
+        assert "querySelectorAll('path')[1]" in body
+
+
+class TestTheAddressOnABoxIsTheOneThatPutItThere:
+    """A machine with six addresses hangs off ONE plate, and was labelled with whichever it
+    reported first — a different address, answering a question nobody asked, with nothing on
+    the picture to say why.
+
+    The server knew all along: it works out which address put each machine on each network in
+    order to tell one private range from another, and used to throw it away in the same breath.
+    """
+
+    def test_the_working_answer_is_published(self):
+        src = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'topology.py'))
+        assert "net.get('claims'" in src, 'the answer is consumed and dropped again'
+        assert "net.pop('claims'" not in src
+
+    def test_and_the_layout_keeps_which_one_is_this_plate_s(self):
+        body = _strip_comments(_read(os.path.join(INFRA, '_map.html')))
+        assert 'const claim = new Map();' in body
+        assert 'home.get(uid) === n.net' in body, \
+            'it takes any address the machine claims, on any network'
+
+    def test_and_the_box_reads_it_with_the_prefix_it_came_with(self):
+        """`claims` holds the address alone, because what it answers is "which of these is on
+        that network". The prefix comes back from the list it came out of."""
+        src = _strip_comments(_read(os.path.join(INFRA, '_map.html')))
+        body = _fn(src, '_infraMapAddr')
+        assert "startsWith(p.addr + '/')" in body
+        assert '_infraMapAddr(p)' in _fn(src, '_infraMapBox'), 'the box picks its own again'
+
+class TestTheDevicePageIsNotOneRead:
+    """`infra_view` opens the fleet and the Details tab — what a machine is and whether it is
+    all right. The other three tabs answer different questions and are wanted by different
+    people, so each carries a flag.
+
+    The part worth pinning is WHICH of them is a gate on the data. `results` is the one key no
+    other tab is built from, so the server can withhold it; the measurements and the attributes
+    are what Details draws, so they arrive whatever the other two flags say. A permission that
+    looks like a wall and is a curtain is worse than none, so both facts are written down.
+    """
+
+    def _tabs(self):
+        return _strip_comments(_read(os.path.join(INFRA, '_tabs.html')))
+
+    def test_every_tab_but_details_asks_for_something(self):
+        src = self._tabs()
+        table = src.split('const _INFRA_TABS = [')[1].split('];')[0]
+        rows = dict(re.findall(r"id: '(\w+)'[^\n]*(?:\n[^\n]*)?perm: '([\w.]+)'", table))
+        assert rows == {'metrics': 'infra_metrics_view', 'results': 'infra_results_view',
+                        'logs': 'syslog_view', 'raw': 'infra_raw_view'}, rows
+        assert "id: 'details'" in table and "perm" not in table.split("id: 'metrics'")[0], \
+            'Details asks for something beyond infra_view'
+
+    def test_and_the_domain_declares_them(self):
+        src = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'manifest.py'))
+        for flag, roles in (('infra_metrics_view', "('editor', 'viewer')"),
+                            ('infra_results_view', "('editor', 'viewer')"),
+                            ('infra_raw_view', "('editor',)")):
+            assert "{'flag': '%s', 'roles': %s}" % (flag, roles) in src, flag
+
+    def test_and_they_are_named_where_a_role_is_edited(self):
+        for lang in ('es_ES', 'en_EN'):
+            words = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', lang + '.py'))
+            for flag in ('infra_metrics_view', 'infra_results_view', 'infra_raw_view'):
+                # A label AND a description: the role editor shows both, and a flag with only
+                # one of them is a checkbox somebody ticks without knowing what it opens.
+                assert words.count("'%s':" % flag) >= 2, (flag, lang)
+
+    def test_and_the_one_that_can_be_withheld_is_withheld(self):
+        src = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
+        assert "'results':    results if 'infra_results_view' in perms else []" in src, \
+            'the tab is hidden and the data is sent anyway'
+
+    def test_and_a_remembered_tab_is_checked_against_what_this_caller_may_see(self):
+        """What the browser remembers outlives a permission being taken away."""
+        body = self._tabs().split('let _infraTab = ')[1].split('})();')[0]
+        assert '_infraTabsFor()' in body, 'it opens straight onto a tab nobody may see'

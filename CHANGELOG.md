@@ -8,6 +8,81 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.119] - 2026-08-26
+
+### Added
+- **The device page is not one read, so its tabs are not one permission.** `infra_view` opens
+  the fleet and *Details* — what a machine is and whether it is all right, which is the question
+  the page is opened with. The other three answer different ones and are wanted by different
+  people, so each has a flag of its own: `infra_metrics_view`, `infra_results_view` and
+  `infra_raw_view`. The first two go to `editor` and `viewer`, so nothing changes for anybody
+  today; the raw dump is `editor` only.
+
+  Only one of the three is a gate on the DATA, and that is stated rather than left to be
+  discovered. `results` is the one key no other tab is built from, so without its flag the
+  server does not send it. The measurements and the reported attributes are what *Details*
+  draws, so they arrive whatever the other two flags say — those decide what the screen OFFERS.
+  Withholding them from somebody who has `infra_view` would mean gutting *Details*, and
+  *Details* is the page. A permission that looks like a wall and is a curtain is worse than no
+  permission at all, because somebody grants it believing the first thing.
+
+  Named `*_view` because `viewer` is strictly read-only and the invariant that says so is a
+  NAMING one — every flag that role holds ends in `_view`, which is what makes "is this role
+  read-only" answerable by looking. `ipban_history_view` and `ipban_ban_view` are the same
+  shape.
+
+  A tab the browser remembers is now checked against what the caller may see, not against the
+  list of tabs: what is remembered outlives a permission being taken away, and a page that
+  opens straight onto a tab nobody may see is a page that starts on an error.
+
+  ("Collect now" already had `infra_collect`, and marking a row already had `infra_watch` —
+  both since they were built, gated in the UI and at the route.)
+
+- **A line on the address map can be read, and lights up when you point at it.** Every line
+  there is a CLAIM — a way out, the router a network uses, a machine's address on the plate it
+  hangs from, an address on another one, a machine pointing at its own gateway — and the picture
+  could only show that they were different, never which one a particular line was. Now pointing
+  at one lights it alone, steps the rest back, and reads it: which machine, which network, and
+  the address that ties them.
+
+  A one-pixel dashed line is not something anybody hits on purpose, so each carries a
+  transparent fat stroke to point at — the same trick, and the same reason, as the cable map.
+  And the lines are a LIST before they are a drawing: the picture, the lighting and the card
+  all read it, instead of two of them working out "which line is this" from coordinates.
+
+- **The panel switched off still answers a question that was ASKED.** On the cable map, pressing
+  a cable opens its panel even with the reading panel turned off. The switch is about the panel
+  turning up on its own; refusing an explicit press would leave no way at all to find out what a
+  cable is — uncluttered by being unreadable. Its × closes it again.
+
+### Fixed
+- **A machine with several addresses showed whichever it happened to report first.** It hangs
+  off one network on the map, and the address written on it was `addresses[0]` — on a machine
+  with six, a different address from the one that put it on that plate, with nothing on the
+  picture to say why.
+
+  The server knew all along. It works out which address put each machine on each network — to
+  tell one private `172.17.0.0/16` from another — and then dropped it before anybody could see
+  it, under a test asserting that it must not reach the payload: "nobody else's business, a
+  screen that found it there would start using it". A screen needed it and could not have it.
+  It is published now, and the box shows the address that belongs to the plate it hangs from,
+  with the prefix it was reported with.
+
+- **A heading strip put its buttons on two lines with room to spare beside them.** A plain flex
+  row shares the squeeze among everything in it, so the sentence took two lines AND every button
+  was compressed until its own label wrapped inside it. Reported from the screen.
+
+  Wrapping words is free and wrapping a button is not, so the sentence is now the only thing
+  that gives: it takes whatever room is left and shrinks to nothing, while the controls keep
+  their size and their labels on one line. If even that is not enough the whole cluster drops to
+  the next line together, which is a row of buttons rather than a broken one.
+
+  As a generic class, because it is the shape of a heading strip and not of one screen.
+
+- **…and the button beside it was a size of its own.** It carried its own tighter padding from
+  when it stood alone in a line of text. Gathered into a cluster with the zoom, the export and
+  the refresh, being the only short one is what you see. It is the same button as the rest now.
+
 ## [0.0.1+build.118] - 2026-08-26
 
 ### Added

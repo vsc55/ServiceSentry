@@ -513,11 +513,21 @@ class TestTwoMachinesCannotHoldOneAddress:
         assert flags['172.17.0.0/16'] is True
         assert flags['192.168.180.0/24'] is False
 
-    def test_the_working_key_does_not_reach_the_payload(self):
-        """`claims` is how the answer is worked out and is nobody else's business — a screen
-        that found it there would start using it."""
+    def test_the_address_that_put_a_machine_on_a_network_is_published(self):
+        """This was a working key, popped before the payload: "nobody else's business — a
+        screen that found it there would start using it".
+
+        A screen needed it and could not have it. The address map draws every machine hanging
+        off the network it shares with the others, and labelled it with its FIRST address —
+        which on a machine with six is a different address from the one that put it on that
+        plate, so the label answered a question nobody asked and nothing on the picture said
+        why. This is the only thing that can tell WHICH address did, and it was being worked
+        out and thrown away in the same breath.
+        """
         out = self._map(('a', '10.0.0.1/24'))
-        assert all('claims' not in n for n in out['networks'])
+        net = [n for n in out['networks'] if n['net'] == '10.0.0.0/24'][0]
+        assert net['claims'] == {'a': '10.0.0.1'}, (
+            'the map cannot say which address put a machine on this network')
 
 class TestTheEndTheReportDoesNotName:
     """One report, and BOTH ends of the cable.

@@ -174,7 +174,12 @@ def _split_private(networks: dict) -> None:
     six machines each with their own 172.17.0.0/16" is a fact about the fleet worth reading.
     """
     for net in networks.values():
-        claims = net.pop('claims', {}) or {}
+        # Read and NOT consumed. It was popped here — computed, used for this one question and
+        # thrown away before anybody else saw it — while the map drew each machine's FIRST
+        # address regardless of which network it was hanging from. The two are different
+        # addresses on any machine with more than one, and the label was then answering a
+        # question nobody asked.
+        claims = net.get('claims', {}) or {}
         seen: dict = {}
         for uid, addr in claims.items():
             seen.setdefault(addr, []).append(uid)

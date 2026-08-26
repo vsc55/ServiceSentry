@@ -1456,6 +1456,26 @@ html.ss-nocss body { visibility: visible; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .ss-infra-linkinfo { background: rgba(var(--bs-body-bg-rgb), .9); }
 }
+/* .ss-toolrow : a line of PROSE with controls at the end of it.
+   A plain flex row shares the squeeze out among everything in it, so the sentence takes two
+   lines AND every button is compressed until its label wraps inside it — reported from the
+   screen as buttons on two lines with space to spare beside them. Wrapping words is free and
+   wrapping a button is not, so the text is the only thing that gives: it takes the leftover
+   room and shrinks to nothing, while the controls keep their size and their labels on one
+   line. If even that is not enough the whole cluster drops to the next line TOGETHER, which
+   is a row of buttons rather than a broken one.
+   Generic on purpose: it is the shape of a heading strip, not of one screen. */
+.ss-toolrow { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.ss-toolrow > .ss-toolrow-text { flex: 1 1 14rem; min-width: 0; }
+.ss-toolrow-tools {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    flex-shrink: 0;
+    margin-left: auto;
+    white-space: nowrap;
+}
+
 /* .ss-passthru : a layer that floats OVER something you work in — a panel on a diagram, a
    caption on a picture — and reads without taking the pointer away from it. The layer itself
    is transparent to the pointer and only the controls inside it answer.

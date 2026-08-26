@@ -559,7 +559,9 @@ function ssCanvasPanelSet(on, paint) {
 function ssCanvasPanelToggle(paint) {
     const on = ssCanvasPanelOn();
     const id = 'ssPanelSw-' + paint;
-    return `<div class="form-check form-switch mb-0 ms-auto d-flex align-items-center gap-2"
+    // No `ms-auto` and no wrapping of its own words: it sits in a cluster that is already
+    // pushed to the end of the row, and a label that wraps is what turns one line into two.
+    return `<div class="form-check form-switch mb-0 d-flex align-items-center gap-2"
                  title="${escAttr(t('infra_panel_show_tt'))}">
         <input class="form-check-input mt-0" type="checkbox" role="switch"
                id="${escAttr(id)}" ${on ? 'checked' : ''}

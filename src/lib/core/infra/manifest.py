@@ -18,6 +18,25 @@ is a third act: it costs the device a poll, it can run for minutes, and it makes
 announce whatever they find. A viewer reading a wall screen must not be able to start it by
 leaning on a button, so it has a flag of its own rather than riding on ``infra_view``.
 
+**And the device page is not one read.** ``infra_view`` opens the fleet and the *Details* tab
+— what a machine is and whether it is all right, which is the question the page is opened with.
+The other three answer different ones and are wanted by different people, so each has a flag:
+the charts, the list of every check's last word, and the unfiltered dump of everything the
+device answered.
+
+Only one of those three is a real gate on the DATA, and the difference matters:
+
+* ``infra_results_view`` withholds the payload's ``results``. It is the one key no other tab reads,
+  so the server simply does not send it.
+* ``infra_metrics_view`` and ``infra_raw_view`` decide what the screen OFFERS. The facts behind them —
+  the measurements and the reported attributes — are the same ones *Details* is built from, so
+  they arrive whatever these two say. Withholding them from somebody who has ``infra_view``
+  would mean gutting *Details* as well, and *Details* is the page.
+
+That is written down here rather than left to be discovered: a permission that looks like a
+wall and is a curtain is worse than no permission at all, because somebody grants it believing
+the first thing.
+
 There is still no ``infra_edit``: nothing here writes a record of its own. Collecting writes
 through the modules, which is the same path the scheduler uses and the same permission model —
 what there is to CHANGE lives in the registry, behind the permissions the registry already has.
@@ -40,6 +59,17 @@ MODULE_PERMISSIONS = {
         # at it. NOT `devices_edit`: it stores no address, no credential and no name — the
         # registry stays behind its own permission.
         {'flag': 'infra_watch', 'roles': ('editor',)},
+        # The charts. Both roles, like `infra_view`: it is the same measurements the Details
+        # tab already draws, over time instead of at this instant.
+        {'flag': 'infra_metrics_view', 'roles': ('editor', 'viewer')},
+        # Every check's last word, in a table. Both roles, and a real gate: this is the one
+        # thing on the page no other tab reads, so without the flag it is not sent.
+        {'flag': 'infra_results_view', 'roles': ('editor', 'viewer')},
+        # Everything the device answered, undifferentiated — a thousand rows including every
+        # per-row fact the other tabs keep beside the row it belongs to. `editor` only: it is
+        # the tab you open when a number looks wrong, not the one somebody reads a wall screen
+        # from, and a viewer losing it loses no answer the other three do not give.
+        {'flag': 'infra_raw_view', 'roles': ('editor',)},
     ),
 }
 

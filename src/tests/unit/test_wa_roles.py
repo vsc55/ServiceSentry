@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_81_flags(self):
+    def test_permissions_tuple_has_84_flags(self):
         from lib.core.permissions import PERMISSIONS
-        assert len(PERMISSIONS) == 81
+        assert len(PERMISSIONS) == 84
 
     def test_permissions_are_unique(self):
         from lib.core.permissions import PERMISSIONS
@@ -62,6 +62,14 @@ class TestPermissionsConstants:
             'infra_view',
             'infra_collect',
             'infra_watch',
+            # …and the device page is not one read either. `infra_view` opens the fleet and
+            # the Details tab; the other three tabs answer different questions and are wanted
+            # by different people. Only the middle one is a gate on the DATA — the manifest
+            # says which and why, because a flag that looks like a wall and is a curtain is
+            # worse than none.
+            'infra_metrics_view',
+            'infra_results_view',
+            'infra_raw_view',
             'jobs_view',
             'mfa_reset_others',
             'checks_view', 'checks_run',
