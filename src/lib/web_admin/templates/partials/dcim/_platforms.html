@@ -1,0 +1,384 @@
+{# ================================================================
+   DCIM — las plataformas: con qué sale un equipo.
+
+   `platform` era una caja de texto dentro de cada plantilla. Veinte plantillas con una caja de
+   texto son «Debian 12», «debian 12», «Debian GNU/Linux 12» y «deb12» — y entonces «cuántas
+   máquinas hay que actualizar» no tiene una respuesta, tiene cuatro y ninguna está entera.
+
+   Aquí se dan de alta una vez y las plantillas apuntan a la fila. Renombrar «Debian 12» a
+   «Debian 12 (bookworm)» es editar un renglón, no buscar y reemplazar en veinte sitios.
+
+   **No es solo de dispositivos.** Una máquina virtual corre RouterOS igual que lo corre un
+   router de metal, y lo que se pregunta de las dos es lo mismo: qué versión y hasta cuándo tiene
+   parches. Por eso vive en el catálogo y no dentro de la plantilla — lo que apunte a ella
+   después apunta a la misma fila.
+
+   Se leen **sin permiso de gestión**: quien monta un rack tiene que poder elegir una, igual que
+   elige un modelo de chasis. Escribirlas es otra cosa y pide el permiso del catálogo.
+   ================================================================ #}
+
+//: Las plataformas, o `null` si todavía no se han pedido. `{rows, kinds}`.
+let _dcPlats = null;
+//: La que se está escribiendo o corrigiendo, o `null`. La misma ficha para las dos cosas.
+let _dcPlatForm = null;
+//: Lo que se busca. En memoria: son decenas, y una ida y vuelta por letra sería gastar la red
+//: en no hacer nada.
+let _dcPlatQ = '';
+//: Las marcadas para quitar. Un conjunto en una variable y no en las casillas: esta pantalla se
+//: redibuja entera, y lo que solo viva en el DOM se va con el redibujado siguiente — que aquí es
+//: el clic siguiente.
+let _dcPlatSel = new Set();
+//: Qué ramas están cerradas. Cerradas y no abiertas: recién llegado se quiere ver lo que hay, y
+//: un árbol que empieza todo plegado obliga a abrir cuatro cosas para leer lo mismo.
+let _dcPlatShut = new Set();
+
+/** Marcar o desmarcar una. */
+function _dcPlatPick(uid, si) {
+    if (si) _dcPlatSel.add(uid); else _dcPlatSel.delete(uid);
+    renderDcim();
+}
+
+/** Todas **las que se ven**, no todas las que hay. Marcar «todas» con un filtro puesto y que se
+ *  lleve por delante lo que el filtro escondía es la sorpresa que no se deshace. */
+function _dcPlatSelAll(si) {
+    const q = _dcPlatQ.trim().toLowerCase();
+    ((_dcPlats || {}).rows || [])
+        .filter(p => !q || _dcPlatLabel(p).toLowerCase().indexOf(q) >= 0)
+        .forEach(p => { if (si) _dcPlatSel.add(p.uid); else _dcPlatSel.delete(p.uid); });
+    renderDcim();
+}
+
+/** Quitar las marcadas. Una petición y no veintidós: quien marca veintidós no quiere veintidós
+ *  confirmaciones, y un borrado a medias por una conexión caída deja una lista que nadie sabe en
+ *  qué estado quedó.
+ *
+ *  Las que alguna plantilla nombre **no se van**, y se dice cuántas eran: borrarlas dejaría
+ *  plantillas diciendo «sale con» sin decir con qué, que es peor que no decirlo. */
+function _dcPlatDropMany() {
+    const uids = Array.from(_dcPlatSel);
+    if (!uids.length) return;
+    showConfirmModal(tf('dcim_plat_drop_many_q', uids.length), async () => {
+        const r = await _dcimSend('POST', '/api/v1/dcim/platforms/drop', {uids: uids});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger', 8000);
+        const d = r.data || {};
+        showToast(d.kept
+            ? tf('dcim_plat_dropped_kept', d.count || 0, d.kept)
+            : tf('dcim_plat_dropped', d.count || 0), d.kept ? 'warning' : 'success', 8000);
+        _dcPlatSel = new Set();
+        _dcPlatsLoad();
+    });
+}
+
+async function _dcPlatsLoad() {
+    const d = await apiGet('/api/v1/dcim/platforms') || {};
+    _dcPlats = {rows: d.platforms || [], kinds: d.kinds || [],
+                lifecycle: d.lifecycle || []};
+    renderDcim();
+}
+
+function _dcPlatsHtml() {
+    if (_dcPlats === null) {
+        _dcPlatsLoad();
+        return `<div class="text-center py-4"><div class="spinner-border spinner-border-sm">
+            </div></div>`;
+    }
+    const puede = _dcimMay('dcim_catalog_manage');
+    const q = _dcPlatQ.trim().toLowerCase();
+    const rows = (_dcPlats.rows || []).filter(
+        p => !q || _dcPlatLabel(p).toLowerCase().indexOf(q) >= 0);
+    return `<div class="ss-toolrow mb-2">
+            <input class="form-control form-control-sm" style="max-width:16rem"
+                   value="${escAttr(_dcPlatQ)}"
+                   placeholder="${escAttr(t('dcim_plat_filter'))}"
+                   oninput="_dcPlatQ=this.value;renderDcim()">
+            ${_dcPlatQ ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcPlatQ='';renderDcim()">${esc(t('clear'))}</button>` : ''}
+            ${puede ? `<button class="btn btn-sm btn-secondary" onclick="_dcPlatEdit(null)">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_plat_new'))}</button>` : ''}
+            <button class="btn btn-sm btn-secondary" onclick="_dcPlatsLoad()"
+                    title="${escAttr(t('refresh'))}"><i class="bi bi-arrow-clockwise"></i></button>
+            ${(puede && _dcPlatSel.size) ? `<button class="btn btn-sm btn-danger"
+                onclick="_dcPlatDropMany()">
+                <i class="bi bi-trash me-1"></i>${
+                esc(tf('dcim_plat_drop_n', _dcPlatSel.size))}</button>` : ''}
+            <span class="text-muted ss-fs-2 ss-toolrow-text">${esc(t('dcim_plat_intro'))}</span>
+        </div>
+        ${rows.length ? _dcPlatsTable(rows, puede)
+            : `<div class="text-muted ss-fs-2">${esc(t('dcim_plat_none'))}</div>`}`;
+}
+
+/** Cómo se agrupan: por fabricante y, dentro, por familia. Devuelve
+ *  `[[marca, [[familia, filas], …]], …]`, todo ordenado como se lee.
+ *
+ *  Aquí y no en el servidor porque lo que se agrupa es lo que se está viendo: con un filtro
+ *  puesto, una familia de la que no queda ninguna fila no es una rama vacía, es una rama que no
+ *  está. */
+function _dcPlatGroups(rows) {
+    const marcas = new Map();
+    (rows || []).forEach(p => {
+        const marca = String(p.brand || '');
+        // Sin familia agrupa consigo misma: una plataforma suelta sigue siendo una rama de una
+        // hoja, y meterla en un cajón «otras» la esconde entre las que sí lo son.
+        const familia = String(p.family || p.name || '');
+        if (!marcas.has(marca)) marcas.set(marca, new Map());
+        const fams = marcas.get(marca);
+        if (!fams.has(familia)) fams.set(familia, []);
+        fams.get(familia).push(p);
+    });
+    const porNombre = (a, b) => String(a[0]).toLowerCase()
+        .localeCompare(String(b[0]).toLowerCase());
+    return Array.from(marcas.entries())
+        // Las que no son de nadie, al final: no es un fabricante, es la ausencia de uno.
+        .sort((a, b) => (!a[0] ? 1 : !b[0] ? -1 : 0) || porNombre(a, b))
+        .map(([marca, fams]) => [marca, Array.from(fams.entries()).sort(porNombre)]);
+}
+
+/** Cómo se lee una fila DENTRO de su familia: `Windows 11 Pro` bajo `Windows 11` es «Pro».
+ *
+ *  Quitándole el prefijo y no guardando la edición aparte: guardarla sería guardar dos veces lo
+ *  mismo con la posibilidad de que discrepen, y el día que alguien renombre la familia la
+ *  edición guardada seguiría diciendo lo de antes. */
+function _dcPlatLeaf(p, familia) {
+    const nombre = String((p || {}).name || '');
+    const f = String(familia || '');
+    if (f && nombre.length > f.length && nombre.slice(0, f.length) === f)
+        return nombre.slice(f.length).trim() || nombre;
+    return nombre;
+}
+
+function _dcPlatsTable(rows, puede) {
+    // Hoy en ISO, que es como se guarda el fin de soporte: comparar dos cadenas ISO ordena
+    // igual que comparar dos fechas, y aquí lo único que hace falta es saber cuál ya pasó.
+    const hoy = new Date().toISOString().slice(0, 10);
+    const cols = puede ? 8 : 7;
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr>
+            ${puede ? `<th style="width:2rem"><input type="checkbox" class="form-check-input"
+                ${rows.length && rows.every(p => _dcPlatSel.has(p.uid)) ? 'checked' : ''}
+                onchange="_dcPlatSelAll(this.checked)"></th>` : ''}
+            <th>${esc(t('dcim_plat_name'))}</th>
+            <th>${esc(t('dcim_plat_kind'))}</th>
+            <th>${esc(_dcAttrName('launched'))}</th>
+            <th>${esc(_dcAttrName('end_of_security'))}</th>
+            <th>${esc(_dcAttrName('eol'))}</th>
+            <th class="text-end">${esc(t('dcim_plat_builds'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${_dcPlatGroups(rows).map(([marca, familias]) => {
+            const cerradaM = _dcPlatShut.has('m:' + marca);
+            return `<tr class="ss-rowlink" onclick="_dcPlatFold('m:'+${jsStr(marca)})">
+                <td colspan="${cols + 1}" class="fw-semibold bg-body-secondary">
+                    <i class="bi bi-chevron-${cerradaM ? 'right' : 'down'} me-1"></i>
+                    ${esc(marca || t('dcim_plat_no_brand'))}
+                    <span class="text-muted fw-normal ss-fs-1 ms-1">${
+                        esc(String(familias.reduce((n, f) => n + f[1].length, 0)))}</span></td>
+            </tr>` + (cerradaM ? '' : familias.map(([familia, filas]) => {
+                const clave = 'f:' + marca + '|' + familia;
+                const cerradaF = _dcPlatShut.has(clave);
+                return `<tr class="ss-rowlink" onclick="_dcPlatFold(${jsStr(clave)})">
+                    <td colspan="${cols + 1}" class="ss-fs-2">
+                        <span class="ms-3"><i class="bi bi-chevron-${
+                            cerradaF ? 'right' : 'down'} me-1"></i>${esc(familia)}</span>
+                        <span class="text-muted ss-fs-1 ms-1">${esc(String(filas.length))}</span>
+                    </td></tr>` + (cerradaF ? '' : filas.map(p => `<tr>
+                    ${puede ? `<td><input type="checkbox" class="form-check-input"
+                        ${_dcPlatSel.has(p.uid) ? 'checked' : ''}
+                        onchange="_dcPlatPick(${jsStr(p.uid)},this.checked)"></td>` : ''}
+                    <td class="ps-5">${esc(_dcPlatLeaf(p, familia))}
+                        ${p.description ? `<div class="text-muted ss-fs-1">${
+                            esc(p.description)}</div>` : ''}</td>
+                    <td class="ss-fs-2">${esc(_dcPlatKindName(p.kind))}</td>
+                    <td class="ss-fs-2 ss-tabular text-muted">${
+                        esc(String((p.extra || {}).launched || ''))}</td>
+                    <td class="ss-fs-2 ss-tabular">${_dcPlatDate(p, 'end_of_security', hoy)}</td>
+                    <td class="ss-fs-2 ss-tabular">${_dcPlatDate(p, 'eol', hoy)}</td>
+                    <td class="text-end ss-tabular">${esc(String(p.builds || 0))}</td>
+                    <td class="text-end">${puede ? `<div class="btn-group btn-group-sm">
+                        <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
+                            onclick="_dcPlatEdit(${jsStr(p.uid)})">
+                            <i class="bi bi-pencil"></i></button>
+                        <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+                            onclick="_dcPlatDrop(${jsStr(p.uid)},${jsStr(p.name || '')})">
+                            <i class="bi bi-trash"></i></button>
+                    </div>` : ''}</td>
+                </tr>`).join(''));
+            }).join(''));
+        }).join('')}</tbody>
+    </table></div>`;
+}
+
+/** Plegar o desplegar una rama. */
+function _dcPlatFold(clave) {
+    if (_dcPlatShut.has(clave)) _dcPlatShut.delete(clave); else _dcPlatShut.add(clave);
+    renderDcim();
+}
+
+/** Una fecha de su ciclo de vida, en rojo si ya pasó.
+ *
+ *  Las dos que se enseñan en la lista son las que deciden algo hoy: sin parches de seguridad, esa
+ *  máquina no debería seguir mirando a internet; sin soporte, lo que se rompa se arregla con lo
+ *  que haya. Las otras cuatro están en la ficha, que es donde se consultan. */
+function _dcPlatDate(p, campo, hoy) {
+    const v = String(((p || {}).extra || {})[campo] || '');
+    if (!v) return '';
+    return v <= hoy ? `<span class="badge bg-danger">${esc(v)}</span>` : esc(v);
+}
+
+/** Cómo se llama una clase de plataforma. Sin traducir sale la palabra tal cual, que es peor
+ *  que el nombre y mucho mejor que un hueco. */
+function _dcPlatKindName(k) {
+    const clave = `dcim_plat_kind_${String(k || '')}`;
+    const dicho = t(clave);
+    return dicho === clave ? String(k || '') : dicho;
+}
+
+// ── La ficha ────────────────────────────────────────────────────────────────────────────
+
+function _dcPlatEdit(uid) {
+    const fila = uid ? ((_dcPlats || {}).rows || []).find(p => String(p.uid) === String(uid))
+                     : null;
+    if (uid && !fila) return;
+    _dcPlatForm = fila ? Object.assign({}, fila) : {kind: 'os'};
+    _dcPlatFormDraw();
+}
+
+function _dcPlatFormDraw() {
+    const p = _dcPlatForm || {};
+    const campo = (k, etiqueta, tipo, pista) => `<label class="ss-fs-2 text-muted">
+        ${esc(etiqueta)}
+        <input class="form-control form-control-sm" type="${escAttr(tipo || 'text')}"
+               value="${escAttr(String(p[k] === undefined ? '' : p[k]))}"
+               ${pista ? `placeholder="${escAttr(pista)}"` : ''}
+               oninput="_dcPlatForm['${k}']=this.value"></label>`;
+    // Las marcas ya están pedidas si se ha mirado esa pestaña; si no, el desplegable sale con
+    // «ninguna» y basta — el fabricante de una plataforma es opcional a propósito: Debian no es
+    // de nadie que salga en una factura.
+    const marcas = ((_dcBrands || {}).rows) || [];
+    const html = `<div class="d-flex flex-column gap-2">
+        <div class="d-flex gap-2 flex-wrap">
+            ${campo('name', t('dcim_plat_name'), 'text', 'Windows 11 Pro')}
+            ${campo('family', t('dcim_plat_family'), 'text', 'Windows 11')}
+            ${campo('version', t('dcim_plat_version'), 'text', '24H2')}
+        </div>
+        <div class="text-muted ss-fs-1">${esc(t('dcim_plat_family_hint'))}</div>
+        ${campo('description', t('dcim_cat_desc'))}
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_plat_kind'))}
+                <select class="form-select form-select-sm" style="max-width:12rem"
+                        onchange="_dcPlatForm.kind=this.value">
+                    ${((_dcPlats || {}).kinds || []).map(k => `<option value="${escAttr(k)}"${
+                        String(p.kind || 'os') === k ? ' selected' : ''}>${
+                        esc(_dcPlatKindName(k))}</option>`).join('')}
+                </select></label>
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_cat_maker'))}
+                <select class="form-select form-select-sm" style="max-width:14rem"
+                        onchange="_dcPlatForm.brand_uid=this.value">
+                    <option value="">${esc(t('dcim_plat_no_brand'))}</option>
+                    ${marcas.map(m => `<option value="${escAttr(m.uid)}"${
+                        String(p.brand_uid || '') === String(m.uid) ? ' selected' : ''}>${
+                        esc(m.name || '')}</option>`).join('')}
+                </select></label>
+        </div>
+        ${_dcPlatLifeHtml(p)}
+        ${campo('url', t('dcim_brand_url'), 'url', 'https://')}
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_build_notes'))}
+            <textarea class="form-control form-control-sm" rows="3"
+                      oninput="_dcPlatForm.notes=this.value">${
+                esc(String(p.notes || ''))}</textarea></label>
+        <div class="text-muted ss-fs-1">${esc(t('dcim_plat_form_hint'))}</div>
+    </div>`;
+    showHtmlModal(p.uid ? String(p.name || '') : t('dcim_plat_new'), html, 'primary',
+                  `<button class="btn btn-primary" onclick="_dcPlatSave()">
+                     <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`);
+}
+
+/** Las fechas de su vida: **las mismas seis** que las de un modelo del catálogo, y sacadas del
+ *  mismo sitio —el grupo `lifecycle` del documento de perfiles—. Un sistema operativo deja de
+ *  recibir parches igual que un servidor deja de venderse, y dos listas serían dos que se
+ *  separan el día que alguien añada una fecha a una de ellas.
+ *
+ *  Escriben en `extra` y no en columnas por lo mismo: añadir la séptima es editar un JSON. */
+function _dcPlatLifeHtml(p) {
+    const campos = ((_dcPlats || {}).lifecycle) || [];
+    if (!campos.length) return '';
+    const e = (p.extra && typeof p.extra === 'object') ? p.extra : {};
+    return `<div class="fw-semibold ss-fs-2 mt-1">${esc(t('dcim_cat_lifecycle'))}</div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">${campos.map(c => {
+            // Ya marcado: la etiqueta lleva su ayuda dentro, así que no se vuelve a escapar.
+            const etiqueta = _dcAttrLabel(c.name);
+            return `<label class="ss-fs-2 text-muted">${etiqueta}
+                <input type="date" class="form-control form-control-sm" style="max-width:10rem"
+                       value="${escAttr(String(e[c.name] || ''))}"
+                       oninput="_dcPlatLifeSet(${jsStr(c.name)},this.value)"></label>`;
+        }).join('')}</div>`;
+}
+
+/** Apuntar una. La caja se crea al vuelo: una plataforma recién escrita no tiene `extra`, y
+ *  asignar dentro de `undefined` es el error que deja el formulario a medias sin decir nada. */
+function _dcPlatLifeSet(campo, valor) {
+    if (!_dcPlatForm) return;
+    if (!_dcPlatForm.extra || typeof _dcPlatForm.extra !== 'object') _dcPlatForm.extra = {};
+    _dcPlatForm.extra[campo] = valor;
+}
+
+async function _dcPlatSave() {
+    const p = _dcPlatForm || {};
+    const cuerpo = {name: p.name || '', version: p.version || '', kind: p.kind || 'os',
+                    family: p.family || '',
+                    brand_uid: p.brand_uid || '', description: p.description || '',
+                    extra: p.extra || {}, url: p.url || '', notes: p.notes || ''};
+    const r = p.uid
+        ? await _dcimSend('PUT', `/api/v1/dcim/platforms/${encodeURIComponent(p.uid)}`, cuerpo)
+        : await _dcimSend('POST', '/api/v1/dcim/platforms', cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    hideInfoModal();
+    showToast(t('saved'), 'success');
+    _dcPlatForm = null;
+    _dcPlatsLoad();
+}
+
+function _dcPlatDrop(uid, nombre) {
+    showConfirmModal(tf('dcim_plat_drop_q', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE',
+                                  `/api/v1/dcim/platforms/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger', 8000);
+        showToast(t('deleted'), 'success');
+        _dcPlatSel.delete(uid);
+        _dcPlatsLoad();
+    });
+}
+
+/** El desplegable de «sale con», para la ficha de una plantilla.
+ *
+ *  Las pide si no están: quien abre una plantilla no ha pasado necesariamente por la pestaña de
+ *  plataformas, y un desplegable vacío con una plataforma ya elegida enseñaría «ninguna» — que
+ *  es decir que no la tiene. */
+function _dcPlatSelect(valor, alCambiar, dis) {
+    if (_dcPlats === null) {
+        _dcPlatsLoad();
+        return `<span class="text-muted ss-fs-2">…</span>`;
+    }
+    const rows = (_dcPlats.rows || []);
+    return `<select class="form-select form-select-sm" style="max-width:16rem"${dis || ''}
+                    onchange="${alCambiar}">
+        <option value="">${esc(t('dcim_plat_none_pick'))}</option>
+        ${rows.map(p => `<option value="${escAttr(p.uid)}"${
+            String(valor || '') === String(p.uid) ? ' selected' : ''}>${
+            esc(_dcPlatLabel(p))}</option>`).join('')}
+    </select>`;
+}
+
+/** Cómo se lee una plataforma: el nombre y, si la tiene, la versión.
+ *
+ *  Con concatenación y no con una plantilla de cadena: esto construye TEXTO, no marcado, y quien
+ *  lo pinta lo escapa. Escrito con acentos graves se confunde con lo segundo. */
+function _dcPlatLabel(p) {
+    const v = String((p || {}).version || '');
+    return String((p || {}).name || '') + (v ? ' ' + v : '');
+}
+
+/** Cómo se llama la plataforma que una plantilla dice, para leerla fuera del desplegable. */
+function _dcPlatName(uid) {
+    const fila = ((_dcPlats || {}).rows || []).find(p => String(p.uid) === String(uid || ''));
+    return fila ? _dcPlatLabel(fila) : '';
+}

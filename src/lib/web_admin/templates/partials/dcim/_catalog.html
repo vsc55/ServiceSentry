@@ -1,0 +1,2589 @@
+{# ================================================================
+   DCIM — el catálogo de modelos, y de dónde sale.
+
+   Esta pantalla faltaba entera: el importador, el buscador y la sugerencia estaban construidos y
+   probados, y **no había forma de lanzarlos**. Una función que solo existe en la API es una
+   función que no existe.
+
+   **Dos cosas y dos pestañas.** Consultar el catálogo y llenarlo son trabajos distintos, de
+   momentos distintos: llenarlo se hace una vez cada varios meses, consultarlo cada vez que
+   alguien coloca un dispositivo. Puestos en la misma pantalla, el formulario de importar ocupa la
+   mitad de arriba todos los días para lo que se usa dos veces al año — y el que va a importar
+   tiene que distinguir entre tres formas de hacerlo mezcladas en la misma caja.
+
+   De dónde salen los datos: un repositorio con la forma de `netbox-community/devicetype-library`,
+   que es el que trae puesto y **el que se puede cambiar en la configuración** —hay quien mantiene
+   un fork con sus propios equipos, y hay salas que solo alcanzan un espejo interno—.
+
+   Y tres puertas para entrar, porque son tres situaciones distintas:
+
+   - **de GitHub**, que es lo que quiere casi todo el mundo y no exige nada de nadie;
+   - **subiendo un zip**, para la sala sin salida a internet — esto es una aplicación web, y
+     pedir una ruta del disco del servidor es pedirle a alguien un acceso que no tiene por qué
+     tener;
+   - **una carpeta del servidor**, para quien sí lo tiene y ya clonó el repositorio.
+   ================================================================ #}
+
+//: Lo que devolvió el catálogo, o `null` si no está abierto. `{rows, total, job}`.
+let _dcCat = null;
+//: Lo que se está buscando. Se conserva entre recargas porque casi siempre se afina.
+let _dcCatQ = '';
+//: Por qué fila va el listado. El catálogo son miles de modelos y la tabla enseña una página.
+let _dcCatOff = 0;
+//: Qué modelos están marcados para quitar. En una variable y no en las casillas porque la
+//: pantalla se redibuja entera — y cruza páginas: marcar diez, pasar de página, marcar diez más
+//: y quitar veinte es lo normal cuando lo que sobra es media importación.
+let _dcCatSel = new Set();
+//: El identificador del trabajo de importación en curso, si lo hay.
+let _dcCatJob = '';
+//: Qué pestaña está abierta: `list` o `import`. Consultar y llenar son trabajos de momentos
+//: distintos, y el formulario del segundo estorba todos los días al primero.
+let _dcCatTab = 'list';
+//: Y dentro de importar, de dónde: `github`, `upload` o `path`.
+let _dcCatFrom = 'github';
+//: Cómo se mira el catálogo: `makers` (la rejilla de fabricantes) o `list` (la tabla).
+//:
+//: Por fabricante de entrada, porque es como se llega: nadie viene preguntándose qué habrá en la
+//: fila mil doscientos, viene con una marca escrita en la chapa del dispositivo que tiene delante.
+let _dcCatView = 'makers';
+//: El fabricante al que se ha bajado, si hay uno. Va al servidor: acotar aquí sería traerse los
+//: ocho mil para enseñar cuarenta.
+let _dcCatMaker = '';
+//: Y la clase —switch, servidor, transceptor…—. También al servidor, y por lo mismo: filtrar
+//: aquí sería filtrar las doscientas filas de la página y llamarlo un filtro.
+let _dcCatKind = '';
+//: De qué FORMA: dispositivo, módulo, armario o componente. El filtro de primer nivel, porque
+//: nadie busca «un armario o un DIMM»: se viene sabiendo cuál de las cuatro cosas se quiere.
+let _dcCatTree = '';
+//: La marca a la que se ha entrado desde su pestaña, como FILA. Distinta de `_dcCatMaker`, que
+//: es el nombre escrito en el modelo: el uid sigue siendo cierto después de renombrarla, y es lo
+//: que hace que sus modelos no se pierdan el día que «HP» pase a ser «Hewlett Packard».
+let _dcCatBrand = '';
+let _dcCatBrandName = '';
+
+//: Si ya se leyó la dirección. Solo la PRIMERA vez: después mandan las variables, y volver a
+//: leerla reabriría la pestaña que alguien acaba de cerrar.
+let _dcCatUrlRead = false;
+
+//: Lo que se guarda en la dirección, y en qué variable vive cada cosa. Una tabla porque son seis
+//: y escribirlas a mano en los dos sentidos son dos listas que se separan en cuanto entre la
+//: séptima — que es como el filtro nuevo no sobrevive a F5 y nadie sabe por qué.
+const _DCCAT_URL = [
+    ['ctab', () => _dcCatTab, v => { _dcCatTab = v; }],
+    ['cview', () => _dcCatView, v => { _dcCatView = v; }],
+    ['tree', () => _dcCatTree, v => { _dcCatTree = v; }],
+    ['kind', () => _dcCatKind, v => { _dcCatKind = v; }],
+    ['maker', () => _dcCatMaker, v => { _dcCatMaker = v; }],
+    ['q', () => _dcCatQ, v => { _dcCatQ = v; }],
+];
+
+/** Dónde estaba quien recarga. Sin esto, F5 devolvía a la rejilla de marcas con los filtros
+ *  sueltos — y lo mismo el botón de atrás, y lo mismo abrir mañana el enlace que uno se guardó. */
+function _dcCatUrlLoad() {
+    if (_dcCatUrlRead) return;
+    _dcCatUrlRead = true;
+    try {
+        const q = new URLSearchParams(window.location.search);
+        _DCCAT_URL.forEach(([clave, , poner]) => {
+            const v = q.get(clave);
+            if (v !== null) poner(v);
+        });
+    } catch (e) { /* una dirección ilegible no impide abrir el catálogo */ }
+}
+
+/** Y al revés. Lo vacío se quita en vez de escribirse: una dirección con seis parámetros en
+ *  blanco no se puede leer de un vistazo, y es la que alguien pega en un chat. */
+function _dcCatUrlSave() {
+    try {
+        const url = new URL(window.location.href);
+        _DCCAT_URL.forEach(([clave, leer]) => {
+            const v = String(leer() || '');
+            if (v) url.searchParams.set(clave, v);
+            else url.searchParams.delete(clave);
+        });
+        window.history.replaceState({pane: 'tab-dcim'}, '', url);
+    } catch (e) { /* ídem: no vale fallar un dibujado por una dirección */ }
+}
+
+async function _dcCatOpen() {
+    _dcCatUrlLoad();
+    const q = _dcCatQ ? `&q=${encodeURIComponent(_dcCatQ)}` : '';
+    const m = _dcCatMaker ? `&maker=${encodeURIComponent(_dcCatMaker)}` : '';
+    const k = _dcCatKind ? `&kind=${encodeURIComponent(_dcCatKind)}` : '';
+    const a = _dcCatTree ? `&tree=${encodeURIComponent(_dcCatTree)}` : '';
+    const b = _dcCatBrand ? `&brand_uid=${encodeURIComponent(_dcCatBrand)}` : '';
+    const d = await apiGet(
+        `/api/v1/dcim/catalog?offset=${_dcCatOff}${q}${m}${k}${a}${b}`) || {};
+    // ¿Hay una importación en marcha? La respuesta es del SERVIDOR y no de la memoria de este
+    // navegador: F5 pierde el id del trabajo y nada más, y quien abra la pantalla en otro
+    // ordenador tiene que ver lo mismo.
+    const enMarcha = await apiGet('/api/v1/dcim/catalog/import') || {};
+    // Las marcas, una vez: las necesita la pestaña que las gestiona y también el formulario de
+    // un modelo, donde el fabricante se escribe a mano. Sugerirlas es lo que evita que «HP»
+    // entre como «H.P.» y acabe siendo otra marca — se juntan por slug, pero la de la ficha
+    // sería la mal escrita.
+    if (_dcBrands === null) {
+        const bs = await apiGet('/api/v1/dcim/brands') || {};
+        _dcBrands = {rows: bs.brands || []};
+    }
+    // El catálogo de conectores, que vive fuera de `_dcCat` porque lo usan las dos pantallas.
+    _dcConnsTake(d);
+    _dcCat = {rows: d.types || d.rows || [], total: d.total || 0, job: enMarcha.job || null,
+              offset: d.offset || 0, limit: d.limit || 200,
+              sources: d.sources || [],
+              kinds: d.kinds || [],
+              trees: d.trees || [],
+              tree_counts: d.tree_counts || [],
+              // El total del catálogo ENTERO, que no es el de la consulta: el botón «Todo»
+              // tiene que decir a cuántos vuelve, y con un filtro puesto `total` es otro número.
+              total_all: (d.tree_counts || []).reduce((a, x) => a + (x.count || 0), 0),
+              // El vocabulario de CADA árbol, servido: un DIMM no es «switch, servidor u otro»,
+              // y escribir las dos listas aquí sería tenerlas en dos sitios y verlas discrepar.
+              kinds_by_tree: d.kinds_by_tree || {},
+              // Qué se pregunta de un componente de cada clase. Se guardaba todo lo demás y esto
+              // no, así que el formulario pedía «elige el tipo» con el tipo ya elegido: una copia
+              // campo a campo es una lista que hay que acordarse de tocar, y no acordarse no da
+              // ningún error — da un hueco.
+              component_fields: d.component_fields || {},
+              component_common: d.component_common || [],
+              lifecycle_fields: d.lifecycle_fields || [],
+              component_size: d.component_size || {},
+              all_kinds: d.all_kinds || [],
+              power_types: d.power_types || [],
+              // Cuánto hay detrás de cada pestaña. Uno solo con número decía menos que
+              // ninguno: la que lo llevaba parecía la importante, y de las otras no se sabía si
+              // estaban vacías o si es que ahí no se cuenta.
+              counts: d.counts || {},
+              makers: d.makers || [],
+              library: d.library_url || ''};
+    _dcCatJob = (enMarcha.job || {}).id || '';
+    _dcCatUrlSave();
+    renderDcim();
+    if (_dcCatJob) _dcCatWatch();
+}
+
+/** Salir del catálogo se lleva sus parámetros: si no, volver a `/dcim/inventory` arrastraría
+ *  un `tree=component-types` que no significa nada allí y que reaparecería al volver. */
+function _dcCatUrlClear() {
+    try {
+        const url = new URL(window.location.href);
+        _DCCAT_URL.forEach(([clave]) => url.searchParams.delete(clave));
+        window.history.replaceState({pane: 'tab-dcim'}, '', url);
+    } catch (e) { /* ídem */ }
+}
+
+function _dcCatClose() {
+    _dcCatUrlClear();
+    // Al inventario, y apuntándolo: cerrar la caja y quedarse callado dejaba la URL diciendo
+    // `/dcim/catalog`, y el siguiente dibujado volvía a abrirlo.
+    _dcimGo('inventory');
+}
+
+function _dcCatGoTab(tab) {
+    _dcCatTab = tab;
+    _dcCatUrlSave();
+    renderDcim();
+}
+
+function _dcCatGoFrom(from) {
+    _dcCatFrom = from;
+    renderDcim();
+}
+
+/** Ir a otra página del listado. El desplazamiento va al servidor: recortar aquí sería traerse
+ *  los seis mil para enseñar doscientos. */
+function _dcCatPage(delta) {
+    const d = _dcCat || {};
+    _dcCatOff = Math.max(0, (d.offset || 0) + delta * (d.limit || 200));
+    _dcCatOpen();
+}
+
+/** Abrir el catálogo desde cero: sin fabricante, sin tipo, sin búsqueda y sin nada marcado.
+ *
+ *  Se llama después de importar y después de un borrado en bloque, que son los dos momentos en
+ *  que lo que hay debajo cambia entero. Un filtro puesto hace diez minutos sobrevive a eso y
+ *  esconde justo lo que se acaba de meter: la respuesta es correcta —enseña lo que se le pidió—
+ *  y ya no es lo que nadie quiere ver.
+ *
+ *  A la rejilla de marcas y no a la tabla, porque después de importar la pregunta es «¿qué ha
+ *  entrado?» y eso se contesta con los fabricantes, no con las doscientas primeras filas
+ *  alfabéticas. */
+function _dcCatFresh() {
+    _dcCatTab = 'list';
+    _dcCatView = 'makers';
+    _dcCatMaker = '';
+    _dcCatBrand = '';
+    _dcCatBrandName = '';
+    _dcCatKind = '';
+    _dcCatTree = '';
+    _dcCatQ = '';
+    _dcCatOff = 0;
+    _dcCatSel = new Set();
+    // Y las marcas: una importación da de alta las que traiga, y la lista guardada de hace diez
+    // minutos las esconde exactamente igual que un filtro viejo esconde los modelos nuevos.
+    _dcBrands = null;
+    // Y las plataformas, por lo mismo: traer los básicos da de alta veintiséis, y la lista
+    // guardada de antes las esconde enteras. Que esta enumeración haya que tocarla a mano es
+    // justo lo que hizo falta arreglar aquí una vez ya.
+    _dcPlats = null;
+    _dcCatOpen();
+}
+
+function _dcCatSearch() {
+    _dcCatOff = 0;                          // otra búsqueda es otra lista: se empieza por arriba
+    _dcCatOpen();
+}
+
+/** Mirar cómo va la importación. Se pregunta al servidor cada dos segundos mientras dure: no hay
+ *  total contra el que dividir —nadie sabe cuántos modelos tiene un archivo hasta leerlo— así que
+ *  lo que se enseña es una cuenta y no una barra. */
+async function _dcCatWatch() {
+    if (!_dcCatJob) return;
+    const j = await apiGet(`/api/v1/dcim/catalog/import/${encodeURIComponent(_dcCatJob)}`);
+    if (!j || j.error) { _dcCatJob = ''; return; }
+    if (_dcCat) _dcCat.job = j;
+    renderDcim();
+    if (j.done) {
+        _dcCatJob = '';
+        showToast(j.error ? (t(j.error) || j.error)
+                          : tf('dcim_cat_done', j.count || 0),
+                  j.error ? 'danger' : 'success');
+        // Se acabó de llenar: lo que quiere ver quien importó es lo que entró — y para eso
+        // hay que soltar los filtros de antes, que esconderían justo eso.
+        _dcCatFresh();
+        return;
+    }
+    setTimeout(_dcCatWatch, 1000);
+}
+
+function _dcCatHtml() {
+    const d = _dcCat || {};
+    const puede = _dcimMay('dcim_catalog_manage');
+    // Llenarlo es de quien puede importar; MIRAR las marcas, no. La dirección por la que se abre
+    // un ticket es justo lo que hace falta a las tres de la mañana, y esa es la hora a la que
+    // nadie tiene el permiso bueno — así que las dos primeras pestañas están siempre.
+    // Llenarlo es de quien puede importar; MIRAR los conectores tampoco: quien está cableando
+    // a las tres de la mañana necesita saber si el latiguillo es un C13 o un C19, y no tiene el
+    // permiso de gestionar el catálogo.
+    const tab = (puede || ['brands', 'platforms', 'conns'].indexOf(_dcCatTab) >= 0)
+        ? _dcCatTab : 'list';
+    const cuenta = d.counts || {};
+    return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad">
+        <div class="ss-toolrow mb-2">
+            <button class="btn btn-sm btn-secondary" onclick="_dcCatClose()">
+                <i class="bi bi-arrow-left me-1"></i>${esc(t('dcim_back'))}</button>
+            <span class="fw-semibold ss-fs-5">${esc(t('dcim_catalog'))}</span>
+            <span class="text-muted ss-fs-2 ss-toolrow-text">${
+                esc(tf('dcim_cat_note', d.total || 0))}</span>
+        </div>
+        <ul class="nav nav-tabs mb-3">
+            <li class="nav-item"><button class="nav-link${tab === 'brands' ? ' active' : ''}"
+                onclick="_dcCatGoTab('brands')">
+                <i class="bi bi-tags me-1"></i>${esc(t('dcim_cat_tab_brands'))}${
+                _dcTabN(cuenta.brands)}</button></li>
+            <li class="nav-item"><button class="nav-link${tab === 'list' ? ' active' : ''}"
+                onclick="_dcCatGoTab('list')">
+                <i class="bi bi-list-ul me-1"></i>${esc(t('dcim_cat_tab_list'))}${
+                _dcTabN(d.total)}</button></li>
+            <li class="nav-item"><button class="nav-link${
+                    tab === 'platforms' ? ' active' : ''}" onclick="_dcCatGoTab('platforms')">
+                <i class="bi bi-disc me-1"></i>${esc(t('dcim_cat_tab_platforms'))}${
+                _dcTabN(cuenta.platforms)}</button></li>
+            <li class="nav-item"><button class="nav-link${
+                    tab === 'conns' ? ' active' : ''}" onclick="_dcCatGoTab('conns')">
+                <i class="bi bi-plug me-1"></i>${esc(t('dcim_cat_tab_conns'))}${
+                _dcTabN(cuenta.connectors)}</button></li>
+            ${puede ? `<li class="nav-item"><button class="nav-link${
+                    tab === 'schemas' ? ' active' : ''}" onclick="_dcCatGoTab('schemas')">
+                <i class="bi bi-diagram-2 me-1"></i>${esc(t('dcim_cat_tab_schemas'))}${
+                _dcTabN(cuenta.schemas)}</button></li>
+            <li class="nav-item"><button class="nav-link${tab === 'import' ? ' active' : ''}"
+                onclick="_dcCatGoTab('import')">
+                <i class="bi bi-download me-1"></i>${esc(t('dcim_cat_tab_import'))}</button></li>`
+            : ''}
+        </ul>
+        ${tab === 'brands' ? _dcBrandsHtml()
+          : tab === 'conns' ? _dcConnsHtml()
+          : tab === 'platforms' ? _dcPlatsHtml()
+          : tab === 'schemas' ? _dcSchHtml()
+          : tab === 'import' ? _dcCatImportHtml(d.job) : _dcCatListHtml(d)}
+    </div>`;
+}
+
+// ── La pestaña de consultar ─────────────────────────────────────────────────────────────
+
+function _dcCatListHtml(d) {
+    const rows = d.rows || [];
+    const desde = (d.offset || 0) + 1;
+    const hasta = (d.offset || 0) + rows.length;
+    const porMarca = _dcCatView === 'makers' && !_dcCatMaker;
+    return `${_dcCatTreesHtml(d)}
+        <div class="ss-toolrow mb-2">
+            <div class="btn-group btn-group-sm" role="group">
+                <button class="btn ${porMarca ? 'btn-primary' : 'btn-secondary'}"
+                        onclick="_dcCatGoView('makers')" title="${escAttr(t('dcim_cat_by_maker'))}">
+                    <i class="bi bi-grid-3x3-gap"></i></button>
+                <button class="btn ${porMarca ? 'btn-secondary' : 'btn-primary'}"
+                        onclick="_dcCatGoView('list')" title="${escAttr(t('dcim_cat_as_list'))}">
+                    <i class="bi bi-list-ul"></i></button>
+            </div>
+            <input class="form-control form-control-sm" style="max-width:16rem"
+                   value="${escAttr(_dcCatQ)}"
+                   placeholder="${escAttr(porMarca ? t('dcim_cat_filter_maker')
+                                                   : t('dcim_cat_search'))}"
+                   oninput="_dcCatQ=this.value${porMarca ? ';_dcCatRedrawMakers()' : ''}"
+                   onkeydown="if(event.key==='Enter')_dcCatSearch()">
+            ${porMarca ? '' : `<button class="btn btn-sm btn-secondary" onclick="_dcCatSearch()">
+                <i class="bi bi-search"></i></button>`}
+            ${_dcCatQ ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcCatQ='';_dcCatSearch()">${esc(t('clear'))}</button>` : ''}
+            ${_dcCatMaker ? `<button class="btn btn-sm btn-primary"
+                    onclick="_dcCatGoView('makers')">
+                ${esc(_dcCatMaker)}<i class="bi bi-x-lg ms-1"></i></button>` : ''}
+            ${_dcCatBrand ? `<button class="btn btn-sm btn-primary"
+                    onclick="_dcCatBrand='';_dcCatBrandName='';_dcCatOff=0;_dcCatOpen()"
+                    title="${escAttr(t('dcim_cat_tab_brands'))}">
+                <i class="bi bi-tags me-1"></i>${esc(_dcCatBrandName)}
+                <i class="bi bi-x-lg ms-1"></i></button>` : ''}
+            <select class="form-select form-select-sm" style="max-width:12rem"
+                    onchange="_dcCatSetKind(this.value)">
+                <option value=""${_dcCatKind ? '' : ' selected'}>${
+                    esc(t('dcim_cat_any_kind'))}</option>
+                ${(d.kinds || []).map(k => `<option value="${escAttr(k.name)}"${
+                    _dcCatKind === k.name ? ' selected' : ''}>${
+                    esc(_dcCatKindName(k.name))} (${esc(String(k.count))})</option>`).join('')}
+            </select>
+            ${_dcCatToolsHtml(d, porMarca)}
+            <div class="ss-toolrow-tools">${porMarca ? '' : `
+                <span class="text-muted ss-fs-2 ss-tabular">${
+                    rows.length
+                        ? esc(tf('dcim_cat_showing', desde, hasta, d.total || 0)) : ''}</span>
+                <button class="btn btn-sm btn-secondary" ${d.offset ? '' : 'disabled'}
+                        onclick="_dcCatPage(-1)"><i class="bi bi-chevron-left"></i></button>
+                <button class="btn btn-sm btn-secondary" ${
+                    hasta < (d.total || 0) ? '' : 'disabled'}
+                        onclick="_dcCatPage(1)"><i class="bi bi-chevron-right"></i></button>`}
+            </div>
+        </div>
+        <div id="dccat-body">${porMarca ? _dcCatMakersHtml(d) : _dcCatTable(rows)}</div>`;
+}
+
+/** Los botones de la barra, en **tres grupos** y no en fila.
+ *
+ *  Eran siete seguidos, todos con texto y del mismo tamaño: para encontrar uno había que leerlos
+ *  todos, y los dos que borran estaban en medio de los otros cinco. Son tres cosas distintas —
+ *  escribir uno, hacer algo con lo marcado, y meter o sacar el catálogo entero— y separarlas es
+ *  lo que deja encontrar la que se busca sin leer.
+ *
+ *  Lo marcado va en un grupo **pegado**, que es lo que dice «estos cuatro van juntos» sin
+ *  escribirlo, y con el número donde estaba el texto: «Exportar 1» y «Quitar los marcados (1)»
+ *  dicen dos veces lo mismo y de las dos la que hace falta es la cifra. La palabra se va al
+ *  `title` — lo que se ahorra es sitio, no la palabra. */
+function _dcCatToolsHtml(d, porMarca) {
+    if (!_dcimMay('dcim_catalog_manage')) return '';
+    const n = _dcCatSel.size;
+    const marcar = porMarca ? '' : `<div class="btn-group btn-group-sm">
+        <button class="btn btn-secondary" onclick="_dcCatSelAll(true)"
+                title="${escAttr(t('dcim_cat_sel_all'))}"><i class="bi bi-check-all"></i></button>
+        ${n ? `<button class="btn btn-secondary" onclick="_dcCatSelAll(false)"
+                title="${escAttr(t('dcim_cat_sel_none'))}"><i class="bi bi-x-lg"></i></button>
+            <button class="btn btn-secondary"
+                onclick="_dcPortExport(Array.from(_dcCatSel), [])"
+                title="${escAttr(t('dcim_export'))}">
+                <i class="bi bi-download me-1"></i>${esc(String(n))}</button>
+            <button class="btn btn-danger" onclick="_dcCatDropSel()"
+                title="${escAttr(t('delete'))}">
+                <i class="bi bi-trash me-1"></i>${esc(String(n))}</button>` : ''}
+    </div>`;
+    return `<button class="btn btn-sm btn-secondary" onclick="_dcCatEdit(null)">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_cat_new'))}</button>
+        ${marcar}
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-secondary" onclick="_dcPortImport(_dcCatOpen)"
+                    title="${escAttr(t('dcim_import'))}"><i class="bi bi-upload"></i></button>
+            ${(d.sources || []).length ? `<button class="btn btn-warning"
+                    onclick="_dcCatEmptySrc()" title="${escAttr(t('dcim_cat_empty_src'))}">
+                <i class="bi bi-eraser"></i></button>` : ''}
+        </div>`;
+}
+
+/** Redibujar SOLO la rejilla, por lo mismo que la lista de fabricantes de GitHub: `renderDcim()`
+ *  reemplaza el hueco donde se está escribiendo y el cursor se va con él — se teclea una letra y
+ *  hay que volver a pinchar. */
+function _dcCatRedrawMakers() {
+    const caja = document.getElementById('dccat-body');
+    if (caja) caja.innerHTML = _dcCatMakersHtml(_dcCat || {});
+}
+
+/** Cambiar de vista. Al volver a los fabricantes se suelta el que estuviera elegido: si se
+ *  quedara puesto, la rejilla enseñaría trescientas marcas y la tabla de debajo una. */
+function _dcCatGoView(cual) {
+    _dcCatView = cual;
+    _dcCatOff = 0;
+    if (cual === 'makers') {
+        // El tipo se conserva: es lo que se estaba mirando, y perderlo al cambiar de vista
+        // obliga a volver a elegirlo para seguir con lo mismo.
+        _dcCatMaker = '';
+        _dcCatQ = '';
+        return _dcCatOpen();
+    }
+    renderDcim();
+}
+
+/** Bajar a un fabricante: la tabla, ya acotada. De trescientas cajas a las cuarenta de HPE. */
+function _dcCatPickMaker(nombre) {
+    _dcCatMaker = nombre;
+    _dcCatView = 'list';
+    _dcCatQ = '';
+    _dcCatOff = 0;
+    _dcCatOpen();
+}
+
+/** Los fabricantes que hay, con cuántos modelos tiene cada uno.
+ *
+ *  Se filtra AQUÍ y no en el servidor porque la lista entera ya vino con el listado —son
+ *  trescientos nombres, no ocho mil filas— y pedirla otra vez por cada letra tecleada sería una
+ *  ida y vuelta para recortar algo que ya está en memoria. */
+function _dcCatMakersHtml(d) {
+    const q = (_dcCatQ || '').trim().toLowerCase();
+    const todos = (d.makers || []).map(m => Array.isArray(m) ? {name: m[0], count: m[1]} : m);
+    const vs = q ? todos.filter(m => String(m.name || '').toLowerCase().includes(q)) : todos;
+    if (!todos.length)
+        return `<div class="text-muted small">${esc(t('dcim_cat_empty'))}</div>`;
+    if (!vs.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_no_maker'))}</div>`;
+    const cuantos = todos.reduce((a, m) => a + (m.count || 0), 0);
+    return `<div class="ss-fs-2 text-muted mb-2">${
+            esc(tf('dcim_cat_makers_note', vs.length, cuantos))}</div>
+        <div class="ss-piece-list">${vs.map(m => `<button
+            class="btn btn-secondary ss-piece" onclick="_dcCatPickMaker('${
+                escAttr(String(m.name || '').replace(/'/g, "\\'"))}')">
+            <i class="bi bi-tag"></i>
+            <span>${esc(m.name || '')}</span>
+            <small class="ss-tabular">${esc(String(m.count || 0))}</small>
+        </button>`).join('')}</div>`;
+}
+
+function _dcCatTable(rows) {
+    if (!rows.length)
+        return `<div class="text-muted small">${esc(t('dcim_cat_empty'))}</div>`;
+    // La U de un componente es siempre cero, y una columna que solo dice cero no es una columna.
+    // Lo que se lee de un DIMM es «32 GB», así que esa casilla enseña lo que sirve.
+    const esComp = _dcCatTree === 'component-types';
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr>
+            ${_dcimMay('dcim_catalog_manage') ? '<th style="width:2rem"></th>' : ''}
+            <th></th>
+            ${_dcCatMaker ? '' : `<th>${esc(t('dcim_cat_maker'))}</th>`}
+            <th>${esc(t('dcim_cat_model'))}</th>
+            <th class="text-end">${esc(esComp ? t('dcim_part_size') : 'U')}</th>
+            <th>${esc(t('dcim_role'))}</th>
+            <th>${esc(t('dcim_cat_ports'))}</th>
+            <th>${esc(t('dcim_cat_source'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${rows.map(r => {
+        return `<tr class="ss-rowlink" onclick="_dcCatShow('${escAttr(r.uid || '')}')">
+            ${_dcimMay('dcim_catalog_manage') ? `<td onclick="event.stopPropagation()">
+                <input type="checkbox" data-uid="${escAttr(r.uid || '')}"
+                       ${_dcCatSel.has(String(r.uid)) ? 'checked' : ''}
+                       onchange="_dcCatSelOne(this)"></td>` : ''}
+            <td style="width:2.5rem">${r.front_image
+                ? `<img src="${_dcimMediaUrl(r.front_image)}"
+                        alt="" style="height:1.2rem;max-width:2.4rem;object-fit:contain">`
+                : ''}</td>
+            ${_dcCatMaker ? '' : `<td class="ss-fs-2">${esc(r.manufacturer || '')}</td>`}
+            <td class="fw-semibold ss-fs-2">${esc(r.model || '')}${
+                _dcCatKindBadge(r)}</td>
+            <td class="text-end ss-tabular ss-fs-2">${
+                esc(esComp ? (r.size || '')
+                           : ((Number(r.u_tenths || 0)) / 10).toString())}</td>
+            <td class="ss-fs-2"><span class="badge bg-body-secondary
+                text-body-secondary border fw-normal">${
+                esc(_dcCatKindName(r.kind))}</span></td>
+            <td class="text-muted ss-fs-1">${esc(_dcCatPorts(r))}</td>
+            <td class="text-muted ss-fs-1">${esc(r.source || '')}</td>
+            <td class="text-end" style="width:7rem">${
+                _dcimMay('dcim_catalog_manage') ? `<div class="btn-group btn-group-sm"
+                    onclick="event.stopPropagation()">
+                    <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
+                        onclick="_dcCatRowEdit('${escAttr(r.uid || '')}', false)">
+                        <i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-secondary py-0 px-1"
+                        title="${escAttr(t('dcim_cat_clone'))}"
+                        onclick="_dcCatRowEdit('${escAttr(r.uid || '')}', true)">
+                        <i class="bi bi-files"></i></button>
+                    <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+                        onclick="_dcCatDrop('${escAttr(r.uid || '')}',
+                             '${escAttr((r.manufacturer || '') + ' ' + (r.model || ''))}')">
+                        <i class="bi bi-trash"></i></button>
+                </div>` : ''}</td>
+        </tr>`;
+    }).join('')}</tbody>
+    </table></div>`;
+}
+
+/** Qué ES esta fila: un dispositivo, un módulo o un armario.
+ *
+ *  Los tres son la misma forma con tres significados, y sin decirlo un armario de 42U entre
+ *  servidores parece un equipo de 42U. El dispositivo no lleva etiqueta porque es el caso de ocho de
+ *  cada diez filas y etiquetarlo sería ruido en todas ellas. */
+function _dcCatKindBadge(r) {
+    const arbol = String(r.tree || 'device-types');
+    if (arbol === 'device-types') return '';
+    // Por la misma función que todo lo demás. Escrita aparte, esta se quedó con dos de las tres
+    // formas el día que entró la cuarta, y un componente salía etiquetado como «módulo».
+    return ` <span class="badge bg-body-secondary text-body-secondary border fw-normal">${
+        esc(_dcCatTreeName(arbol))}</span>`;
+}
+
+/** La primera letra en mayúscula. Para lo que en el diccionario está en minúscula porque también
+ *  se usa dentro de una frase, y en una lista o en una insignia tiene que leerse como un nombre. */
+function _dcUp(s) {
+    const v = String(s || '');
+    return v ? v.charAt(0).toUpperCase() + v.slice(1) : v;
+}
+
+/** Cómo se llama una clase. La columna guarda el identificador y esto pone la palabra.
+ *
+ *  Los dispositivos comparten nombres con los papeles de un item colocado —un switch es un switch en
+ *  las dos pantallas— así que reutilizan sus textos en vez de tener unos propios que digan lo
+ *  mismo con otras palabras. Las tres que solo existen en el catálogo (armario, transceptor,
+ *  fuente…) tienen los suyos.
+ *
+ *  La regla que DECIDE la clase no está aquí: la calcula el servidor al importar y la guarda.
+ *  Estuvo escrita dos veces —una copia para el servidor y otra para esta pantalla— y las dos ya
+ *  discrepaban: la de aquí no sabía nada de módulos ni de armarios porque se escribió antes de
+ *  que existieran, así que media tabla salía sin tipo. */
+/** De cuál de los tres árboles de la biblioteca vino: dispositivo, módulo o armario.
+ *
+ *  No es lo mismo que la clase. «Switch» y «transceptor» son clases; que uno sea un dispositivo
+ *  entero y el otro algo que se mete en una bahía es de dónde vino, y en un alzado importa: lo
+ *  segundo no ocupa U. */
+function _dcCatTreeName(tree) {
+    const a = String(tree || 'device-types');
+    // Con mayúscula al mostrarse, y en minúscula en el diccionario: la palabra se usa también
+    // dentro de una frase —«es un módulo»— y guardarla capitalizada obligaría a bajarla allí,
+    // que es el mismo trabajo hecho al revés y en más sitios.
+    return _dcUp(a === 'rack-types' ? t('dcim_cat_is_rack')
+         : a === 'module-types' ? t('dcim_cat_is_module')
+         : a === 'component-types' ? t('dcim_cat_is_component')
+         : t('dcim_cat_is_device'));
+}
+
+function _dcCatKindName(kind) {
+    const k = String(kind || '');
+    if (!k) return t('dcim_cat_kind_unknown');
+    const propio = t('dcim_cat_kind_' + k);
+    if (propio && propio !== 'dcim_cat_kind_' + k) return propio;
+    // Las clases de un componente tienen su propio diccionario —son las de una PIEZA— y sin
+    // mirarlo, «memory» salía en pantalla como la clave sin traducir.
+    const pieza = t('dcim_kind_' + k);
+    if (pieza && pieza !== 'dcim_kind_' + k) return pieza;
+    return t('dcim_role_' + k);
+}
+
+/** Filtrar por clase. Va al servidor y vuelve a la primera página: la fila 400 de «todo» no es
+ *  la fila 400 de «switches», y quedarse donde se estaba deja la tabla vacía sin explicar por
+ *  qué. */
+function _dcCatSetKind(kind) {
+    _dcCatKind = kind || '';
+    _dcCatOff = 0;
+    _dcCatOpen();
+}
+
+//: El icono de cada forma. En una tabla y no en un `if`: son cuatro y van a ser cuatro, y la
+//: fila que se olvida en un encadenado de condiciones es siempre la última.
+const _DC_TREE_ICON = {
+    'device-types': 'bi-hdd-rack',
+    'module-types': 'bi-puzzle',
+    'rack-types': 'bi-building',
+    'component-types': 'bi-cpu',
+};
+
+/** Las cuatro formas del catálogo, con su cuenta y a la vista.
+ *
+ *  Estaban en un desplegable entre los filtros, y por eso los componentes «no estaban»: para
+ *  llegar a ellos había que saber que existía un filtro por forma, abrirlo y elegir. Una sección
+ *  a la que hay que llegar adivinando es una sección que no existe.
+ *
+ *  Primero en la barra porque es el orden en que se piensa: qué clase de cosa, de qué marca, y
+ *  luego cuál. */
+function _dcCatTreesHtml(d) {
+    const cuenta = (a) => ((d.tree_counts || []).find(x => x.name === a) || {}).count || 0;
+    const boton = (valor, etiqueta, icono, n) => `<button class="btn ${
+            _dcCatTree === valor ? 'btn-primary' : 'btn-secondary'}"
+            onclick="_dcCatSetTree('${escAttr(valor)}')">
+        ${icono ? `<i class="bi ${escAttr(icono)} me-1"></i>` : ''}${esc(etiqueta)}
+        <span class="ss-tabular ms-1">${esc(String(n))}</span></button>`;
+    return `<div class="btn-group btn-group-sm mb-2" role="group">
+        ${boton('', t('dcim_cat_all_trees'), 'bi-collection', d.total_all || 0)}
+        ${(d.trees || []).map(a => boton(a, _dcCatTreeName(a), _DC_TREE_ICON[a],
+                                         cuenta(a))).join('')}
+    </div>`;
+}
+
+/** Filtrar por forma. Se lleva la clase por delante a propósito: las clases de un componente y
+ *  las de un dispositivo son dos vocabularios distintos, y quedarse con «switch» puesto al pasar
+ *  a componentes dejaría la tabla vacía sin explicar por qué. */
+function _dcCatSetTree(tree) {
+    _dcCatTree = tree || '';
+    _dcCatKind = '';
+    _dcCatOff = 0;
+    // Si lo que queda cabe en una página, se enseña la TABLA y no la rejilla de marcas. La
+    // rejilla existe porque ocho mil filas no se leen; con cuarenta componentes es un paso de
+    // más para llegar a lo que ya cabía entero en la pantalla — y lo que se quiere hacer con
+    // ellos es verlos todos para clonar el que se parece.
+    const cuentas = (_dcCat || {}).tree_counts || [];
+    const n = (cuentas.find(x => x.name === _dcCatTree) || {}).count || 0;
+    if (_dcCatTree && n && n <= ((_dcCat || {}).limit || 200)) {
+        _dcCatView = 'list';
+        _dcCatMaker = '';
+    }
+    _dcCatOpen();
+}
+
+/** Cómo se llama una familia de puertos. El identificador es lo que escribe la biblioteca
+ *  —`power-outlets`— y no es una palabra que nadie tenga por qué leer en una pantalla.
+ *
+ *  Con la clave sin traducir como respaldo: la biblioteca puede traer una familia que este panel
+ *  todavía no conozca, y enseñar su identificador es peor que enseñar una palabra y mucho mejor
+ *  que enseñar un hueco. */
+function _dcPortName(fam) {
+    const clave = 'dcim_port_' + String(fam || '').replace(/-/g, '_');
+    const texto = t(clave);
+    return (texto && texto !== clave) ? texto : String(fam || '');
+}
+
+/** Los puertos, contados. Listarlos serían millones de filas que ninguna pantalla lee. */
+function _dcCatPorts(r) {
+    let p = r.ports;
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { p = {}; } }
+    return Object.entries(p || {}).map(([k, v]) =>
+        `${_dcPortName(k)}: ${
+            Object.values(v || {}).reduce((a, b) => a + Number(b || 0), 0)}`).join(' · ');
+}
+
+// ── La pestaña de llenar ────────────────────────────────────────────────────────────────
+
+/** De dónde importar: tres puertas, una abierta cada vez.
+ *
+ *  Antes estaban las tres en la misma caja, una debajo de otra, y había que deducir cuál se
+ *  estaba usando por cuál tenía algo escrito. */
+function _dcCatImportHtml(job) {
+    const corriendo = job && !job.done;
+    if (corriendo) return _dcCatProgressHtml(job);
+    const btn = (k, icono, texto) => `<button class="btn btn-sm ${
+        _dcCatFrom === k ? 'btn-primary' : 'btn-secondary'}" onclick="_dcCatGoFrom('${k}')">
+        <i class="bi ${icono} me-1"></i>${esc(texto)}</button>`;
+    return `<div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+            ${btn('github', 'bi-github', t('dcim_cat_from_github'))}
+            ${btn('upload', 'bi-upload', t('dcim_cat_from_upload'))}
+            ${btn('path', 'bi-folder2-open', t('dcim_cat_from_path'))}
+            <span class="ms-auto d-flex align-items-center gap-2">
+                <span class="text-muted ss-fs-1">${esc(t('dcim_cat_basics_hint'))}</span>
+                <button class="btn btn-sm btn-secondary" onclick="_dcCatBasics()">
+                    <i class="bi bi-box-seam me-1"></i>${esc(t('dcim_cat_basics'))}</button>
+            </span>
+        </div>
+        <div class="card"><div class="card-body py-3">${
+            _dcCatFrom === 'upload' ? _dcCatUploadHtml()
+            : _dcCatFrom === 'path' ? _dcCatPathHtml()
+            : _dcCatGithubHtml()}</div></div>`;
+}
+
+/** Cómo va la importación: una barra si hay denominador, una cuenta si no.
+ *
+ *  De un zip nadie sabe cuántos modelos trae hasta leerlo, y una barra que se inventa el total
+ *  miente sobre lo que falta — hace esperar de más y desconfiar después. De GitHub sí se sabe,
+ *  porque elegir los fabricantes ya dijo cuántos ficheros son.
+ *
+ *  Y la fase, porque son dos trabajos seguidos de duración muy distinta: sin decir cuál está en
+ *  marcha, la barra parece quedarse parada a la mitad. */
+function _dcCatProgressHtml(job) {
+    const total = Number(job.total || 0);
+    const hecho = Number(job.fetched || job.count || 0);
+    const fase = String(job.phase || '');
+    const pct = total > 0 ? Math.min(100, Math.round(hecho * 100 / total)) : 0;
+    // `codeload` manda el zip troceado y sin longitud —lo genera al vuelo, así que cuando
+    // empieza no sabe cuánto ocupará— y no hay denominador que pedirle. Inventar uno daría una
+    // barra que dice 78 % cuando va por la mitad, y un porcentaje falso es peor que ninguno: se
+    // descubre justo cuando queda lo peor. Los megas bajados sí son ciertos y se mueven.
+    const dice = fase === 'download' ? (total > 0
+                    ? tf('dcim_cat_ph_zip', hecho, total)
+                    : hecho > 0 ? tf('dcim_cat_ph_zip_mb', hecho)
+                    : t('dcim_cat_ph_zip0'))
+               : fase === 'images' ? tf('dcim_cat_ph_images', hecho, total)
+               : fase === 'saving' ? t('dcim_cat_ph_saving')
+               : fase === 'index' ? t('dcim_cat_ph_index')
+               : total > 0 ? tf('dcim_cat_ph_models', hecho, total)
+               : tf('dcim_cat_running', job.count || 0);
+    return `<div class="card"><div class="card-body py-3">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <div class="spinner-border spinner-border-sm"></div>
+            <span class="ss-fs-2">${esc(dice)}</span>
+            ${total > 0 ? `<span class="text-muted ss-fs-2 ss-tabular ms-auto">${pct}%</span>`
+                        : ''}
+        </div>
+        ${total > 0 ? `<div class="progress" style="height:.5rem">
+            <div class="progress-bar" style="width:${pct}%"></div></div>`
+            /* Sin total, una barra a rayas que se mueve: dice «esto sigue vivo», que es todo
+               lo que se puede decir con verdad cuando no se sabe cuánto falta. */
+            : `<div class="progress" style="height:.5rem">
+            <div class="progress-bar progress-bar-striped progress-bar-animated"
+                 style="width:100%"></div></div>`}
+    </div></div>`;
+}
+
+/** Meter los genéricos que vienen con el panel.
+ *
+ *  Para la primera tarde —hay un armario delante y hace falta una caja de 1U que se llame algo—
+ *  y para la sala sin salida a internet, donde esto es lo único que va a haber. Sin descarga y
+ *  sin barra: son treinta filas escritas en el código del panel.
+ *
+ *  Con confirmación porque reemplaza los suyos: quien haya tocado uno lo pierde, y eso hay que
+ *  decirlo antes y no después. */
+function _dcCatBasics() {
+    showConfirmModal(t('dcim_cat_basics_ask'), async () => {
+        const r = await _dcimSend('POST', '/api/v1/dcim/catalog/basics', {});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(tf('dcim_cat_done', (r.data || {}).count || 0), 'success');
+        _dcCatFresh();
+    });
+}
+
+// ── De GitHub ───────────────────────────────────────────────────────────────────────────
+//
+// Se enseña qué hay ANTES de traerlo. Son más de seis mil modelos de trescientos fabricantes, y
+// quien tiene equipos de cinco no quiere los otros doscientos noventa y cinco: importarlo todo
+// llena el buscador de ruido para siempre y eso no se deshace.
+
+//: Lo que devolvió el listado: `{vendors, url}`, o `null` si no se ha mirado.
+let _dcCatVendors = null;
+//: Qué fabricantes se van a traer. Un conjunto y no una lista: se marca y se desmarca.
+//:
+//: Y en una variable y no en las casillas, porque esta pantalla se redibuja entera: lo que solo
+//: viva en el DOM se va con el siguiente redibujado, que aquí es el clic siguiente.
+let _dcCatPick = new Set();
+//: La dirección tecleada, por lo mismo. Vacío significa «la configurada».
+let _dcCatUrl = '';
+//: Lo que se escribe para filtrar la lista de fabricantes. Trescientos nombres son muchos para
+//: buscar el propio con la vista.
+let _dcCatVQ = '';
+//: Con qué etiqueta entra lo que se traiga de GitHub. Aquí hace más falta que en las otras dos
+//: puertas: de un zip se importa una vez, y de GitHub se importa por tandas —hoy los switches, la
+//: semana que viene los SAI— que luego hay que poder deshacer por separado.
+let _dcCatSrcGh = 'library';
+
+function _dcCatGithubHtml() {
+    return `<div class="d-flex align-items-end gap-2 flex-wrap mb-2">
+            <label class="ss-fs-2 text-muted flex-grow-1">${esc(t('dcim_cat_url'))}
+                <input id="dccat-url" class="form-control form-control-sm"
+                       value="${escAttr(_dcCatUrl)}"
+                       placeholder="${escAttr((_dcCat || {}).library || t('dcim_cat_url_ph'))}"
+                       oninput="_dcCatUrl=this.value"
+                       onkeydown="if(event.key==='Enter')_dcCatBrowse()"></label>
+            <label class="ss-fs-2 text-muted" title="${escAttr(t('dcim_cat_source_help'))}">
+                ${esc(t('dcim_cat_source'))}
+                <input class="form-control form-control-sm" style="max-width:9rem"
+                       value="${escAttr(_dcCatSrcGh)}"
+                       oninput="_dcCatSrcGh=this.value"></label>
+            <button class="btn btn-sm btn-primary" onclick="_dcCatBrowse()">
+                <i class="bi bi-search me-1"></i>${esc(t('dcim_cat_browse'))}</button>
+        </div>
+        ${_dcCatVendors ? _dcCatVendorsHtml()
+            : `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_browse_first'))}</div>`}
+        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_cat_source_help'))}</div>`;
+}
+
+async function _dcCatBrowse() {
+    // Vacío significa «la configurada», que el servidor resuelve: no se manda la del hueco
+    // porque el hueco enseña esa misma y mandarla sería repetir lo que ya sabe.
+    _dcCatUrl = ((document.getElementById('dccat-url') || {}).value || '').trim();
+    const url = _dcCatUrl;
+    showToast(t('dcim_cat_browsing'), 'info');
+    const d = await apiGet(`/api/v1/dcim/catalog/browse${
+        url ? '?url=' + encodeURIComponent(url) : ''}`);
+    // `null` es la conexión o un error del panel; un cuerpo con `error` es GitHub diciendo que
+    // no. Son dos cosas y se dicen distinto: la primera no tiene motivo que enseñar, la segunda
+    // trae el suyo escrito y ponerle encima un «Error al guardar» sería taparlo.
+    if (!d) return showToast(t('dcim_cat_browse_failed'), 'danger');
+    if (d.error) {
+        // El motivo técnico va a la consola: quien tenga que abrir un tique lo tiene, y quien
+        // solo quiera importar un fabricante no ve un código HTTP en un aviso.
+        if (d.detail) console.error('[dcim] browse ->', d.detail);
+        return showToast(d.error, 'danger', 8000);
+    }
+    _dcCatVendors = d;
+    _dcCatPick = new Set();
+    _dcCatVQ = '';
+    renderDcim();
+}
+
+/** Los fabricantes que se pueden elegir ahora mismo: los que pasan el filtro escrito.
+ *
+ *  Se calcula en un sitio porque lo usan tres — la lista, «marcar todos» y la cuenta — y tres
+ *  copias de un filtro son tres formas de que «todos» signifique cosas distintas. */
+function _dcCatVisible() {
+    const vs = ((_dcCatVendors || {}).vendors) || [];
+    const q = _dcCatVQ.trim().toLowerCase();
+    return q ? vs.filter(v => String(v.name || '').toLowerCase().includes(q)) : vs;
+}
+
+/** Los fabricantes, con cuántos modelos trae cada uno. Se marcan los que se quieran.
+ *
+ *  Sin ninguno marcado el botón no importa nada: traerlo todo es una decisión que hay que
+ *  tomar a propósito, no la que sale de pulsar sin mirar. */
+function _dcCatVendorsHtml() {
+    const vs = _dcCatVisible();
+    const todos = ((_dcCatVendors || {}).vendors) || [];
+    if (!todos.length) return `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_none'))}</div>`;
+    return `<div>
+        <div class="ss-toolrow mb-2">
+            <span class="ss-fs-2 text-muted">${
+                esc(tf('dcim_cat_found', todos.length,
+                       todos.reduce((a, v) => a + (v.device_types || 0), 0)))}</span>
+            <input class="form-control form-control-sm" style="max-width:12rem"
+                   value="${escAttr(_dcCatVQ)}"
+                   placeholder="${escAttr(t('dcim_cat_filter_maker'))}"
+                   oninput="_dcCatVQ=this.value;_dcCatRedrawVendors()">
+            <div class="ss-toolrow-tools">
+                <button class="btn btn-sm btn-secondary" onclick="_dcCatPickAll(true)">
+                    ${esc(vs.length === todos.length ? t('dcim_cat_pick_all')
+                                                     : t('dcim_cat_pick_shown'))}</button>
+                <button class="btn btn-sm btn-secondary" onclick="_dcCatPickAll(false)">
+                    ${esc(t('dcim_cat_pick_none'))}</button>
+            </div>
+        </div>
+        <div id="dccat-vendors">${_dcCatVendorRows(vs)}</div>
+        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+            <button class="btn btn-sm btn-primary" onclick="_dcCatImportGithub()">
+                <i class="bi bi-download me-1"></i>${
+                esc(tf('dcim_cat_import_n', _dcCatPick.size))}</button>
+            <button class="btn btn-sm btn-warning" onclick="_dcCatImportAll()">
+                <i class="bi bi-cloud-arrow-down me-1"></i>${
+                esc(tf('dcim_cat_import_all',
+                       todos.reduce((a, v) => a + (v.device_types || 0)
+                                              + (v.module_types || 0), 0)))}</button>
+            <span class="text-muted ss-fs-1">${esc(t('dcim_cat_modules_hint'))}</span>
+        </div>
+        <div class="text-muted ss-fs-1 mt-1">${esc(t('dcim_cat_only_picked'))}</div>
+        <div class="text-muted ss-fs-1">${esc(t('dcim_cat_all_hint'))}</div>
+    </div>`;
+}
+
+function _dcCatVendorRows(vs) {
+    if (!vs.length) return `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_no_maker'))}</div>`;
+    return `<div class="ss-piece-list ss-piece-list-scroll">${vs.map((v, i) =>
+        `<label class="ss-piece">
+            <input type="checkbox" id="dccat-v-${i}" data-v="${escAttr(v.name)}"
+                   ${_dcCatPick.has(v.name) ? 'checked' : ''}
+                   onchange="_dcCatToggle(this)">
+            <span>${esc(v.name)}</span>
+            <small class="text-muted ss-tabular">${
+                esc([v.device_types || 0, v.module_types || 0, v.rack_types || 0]
+                    .filter(n => n).join(' + ') || '0')}</small>
+        </label>`).join('')}</div>`;
+}
+
+/** Redibujar SOLO la lista.
+ *
+ *  Escribir en el filtro con `renderDcim()` detrás reemplaza el hueco donde se está escribiendo,
+ *  y el cursor se va con él: se teclea una letra y hay que volver a pinchar. Es el mismo fallo
+ *  que dejaba caer el arrastre en el plano — redibujar de más se lleva por delante lo que el
+ *  navegador estaba haciendo. */
+function _dcCatRedrawVendors() {
+    const caja = document.getElementById('dccat-vendors');
+    if (caja) caja.innerHTML = _dcCatVendorRows(_dcCatVisible());
+}
+
+function _dcCatToggle(el) {
+    const v = el.dataset.v;
+    if (el.checked) _dcCatPick.add(v); else _dcCatPick.delete(v);
+    renderDcim();
+}
+
+/** Marcar o desmarcar de golpe — los que se están VIENDO, no los que hay.
+ *
+ *  Con un filtro escrito, «todos» solo puede significar lo que está a la vista: marcar los
+ *  trescientos cuando en pantalla hay cuatro sería marcar a ciegas doscientos noventa y seis. */
+function _dcCatPickAll(si) {
+    _dcCatVisible().forEach(v => {
+        if (si) _dcCatPick.add(v.name); else _dcCatPick.delete(v.name);
+    });
+    renderDcim();
+}
+
+async function _dcCatImportGithub() {
+    if (!_dcCatPick.size) return showToast(t('dcim_cat_pick_one'), 'warning');
+    const r = await _dcimSend('POST', '/api/v1/dcim/catalog/import', {
+        github: (_dcCatVendors || {}).url || '',
+        vendors: Array.from(_dcCatPick),
+        source: (_dcCatSrcGh || '').trim() || 'library',
+    });
+    if (!r.ok) return showToast(r.error || t('dcim_cat_browse_failed'), 'danger');
+    _dcCatJob = (r.data || {}).job || '';
+    _dcCatVendors = null;
+    _dcCatWatch();
+}
+
+/** Traerlo todo, bajándose el repositorio de una vez.
+ *
+ *  Para «todos» el archivo entero es lo barato: diez mil ochocientos ficheros de uno en uno son
+ *  tres cuartos de hora, y el mismo contenido en un zip baja en poco más de un minuto. Para tres
+ *  fabricantes es exactamente al revés, y por eso hay dos botones y no uno.
+ *
+ *  Con confirmación, y no por ceremonia: son ochocientos cincuenta megas de descarga y ocho mil
+ *  modelos en el buscador. Ninguna de las dos cosas se deshace pulsando otra vez. */
+function _dcCatImportAll() {
+    showConfirmModal(t('dcim_cat_import_all_ask'), async () => {
+        const r = await _dcimSend('POST', '/api/v1/dcim/catalog/import', {
+            github: (_dcCatVendors || {}).url || '',
+            all: true,
+            source: (_dcCatSrcGh || '').trim() || 'library',
+        });
+        if (!r.ok) return showToast(r.error || t('dcim_cat_browse_failed'), 'danger');
+        _dcCatJob = (r.data || {}).job || '';
+        _dcCatVendors = null;
+        _dcCatWatch();
+    });
+}
+
+// ── Subiendo un zip ─────────────────────────────────────────────────────────────────────
+//
+// Esto es una aplicación web. Pedir la ruta de un fichero del disco del servidor es pedirle a
+// quien administra el panel desde un navegador un acceso que no tiene por qué tener.
+
+function _dcCatUploadHtml() {
+    return `<div class="d-flex align-items-end gap-2 flex-wrap">
+            <label class="ss-fs-2 text-muted flex-grow-1">${esc(t('dcim_cat_zip'))}
+                <input id="dccat-file" type="file" accept=".zip,application/zip"
+                       class="form-control form-control-sm"></label>
+            <label class="ss-fs-2 text-muted" title="${escAttr(t('dcim_cat_source_help'))}">
+                ${esc(t('dcim_cat_source'))}
+                <input id="dccat-source-up" class="form-control form-control-sm"
+                       style="max-width:9rem" value="upload"></label>
+            <button class="btn btn-sm btn-primary" onclick="_dcCatUpload()">
+                <i class="bi bi-upload me-1"></i>${esc(t('dcim_cat_go'))}</button>
+        </div>
+        <div class="text-muted ss-fs-2 mt-2">${esc(t('dcim_cat_zip_hint'))}</div>
+        <div class="text-muted ss-fs-1 mt-1">${esc(t('dcim_cat_source_help'))}</div>`;
+}
+
+async function _dcCatUpload() {
+    const inp = document.getElementById('dccat-file');
+    const file = (inp && inp.files && inp.files[0]) || null;
+    if (!file) return showToast(t('dcim_cat_zip_pick'), 'warning');
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('source', (document.getElementById('dccat-source-up') || {}).value || 'library');
+    showToast(t('dcim_cat_uploading'), 'info');
+    // `fetch` a pelo y no `apiPost`: lo que va aquí es un formulario con un fichero dentro, y el
+    // envoltorio de JSON lo convertiría en la cadena "[object File]". El envoltorio global sigue
+    // poniendo el X-CSRF-Token, que es lo que hacía falta de él.
+    let r;
+    try {
+        r = await fetch('/api/v1/dcim/catalog/upload', {method: 'POST', body: fd});
+    } catch (e) {
+        return showToast(t('dcim_cat_browse_failed'), 'danger');
+    }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.error)
+        return showToast(d.error || `HTTP ${r.status}`, 'danger', 8000);
+    _dcCatJob = d.job || '';
+    if (inp) inp.value = '';
+    _dcCatWatch();
+}
+
+// ── Una carpeta del servidor ────────────────────────────────────────────────────────────
+
+//: La ruta tecleada. En una variable por lo mismo que la dirección: la pantalla se redibuja.
+let _dcCatPath = '';
+
+function _dcCatPathHtml() {
+    return `<div class="d-flex align-items-end gap-2 flex-wrap">
+            <label class="ss-fs-2 text-muted flex-grow-1">${esc(t('dcim_cat_path'))}
+                <input id="dccat-path" class="form-control form-control-sm"
+                       value="${escAttr(_dcCatPath)}"
+                       placeholder="${escAttr(t('dcim_cat_path_ph'))}"
+                       oninput="_dcCatPath=this.value"
+                       onkeydown="if(event.key==='Enter')_dcCatImport()"></label>
+            <label class="ss-fs-2 text-muted" title="${escAttr(t('dcim_cat_source_help'))}">
+                ${esc(t('dcim_cat_source'))}
+                <input id="dccat-source" class="form-control form-control-sm"
+                       style="max-width:9rem" value="library"></label>
+            <button class="btn btn-sm btn-primary" onclick="_dcCatImport()">
+                <i class="bi bi-play-fill me-1"></i>${esc(t('dcim_cat_go'))}</button>
+        </div>
+        <div class="text-muted ss-fs-2 mt-2">${esc(t('dcim_cat_hint'))}</div>
+        <div class="text-muted ss-fs-1 mt-1">${esc(t('dcim_cat_source_help'))}</div>`;
+}
+
+async function _dcCatImport() {
+    const val = (id) => (document.getElementById(id) || {}).value || '';
+    _dcCatPath = val('dccat-path');
+    const r = await _dcimSend('POST', '/api/v1/dcim/catalog/import',
+                              {path: _dcCatPath, source: val('dccat-source') || 'library'});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcCatJob = (r.data || {}).job || '';
+    _dcCatWatch();
+}
+
+
+// ── La ficha de un modelo ───────────────────────────────────────────────────────────────
+//
+// Una tabla de seis columnas no puede enseñar un modelo: los puertos van contados, las imágenes
+// no caben, y quedan fuera el número de parte, el flujo de aire, si es un chasis o va dentro de
+// uno, y de qué importación vino. Todo eso existía en la base de datos y no había forma de
+// verlo — que es la misma historia que esta pantalla entera.
+
+/** Si este modelo lo escribió alguien de esta casa, en vez de venir de una biblioteca. De ahí
+ *  cuelga que la fecha se llame «creado» y no «importado» — y `core`, los genéricos que vienen
+ *  dentro del panel, tampoco los importó nadie. */
+function _dcCatIsMine(r) {
+    const o = String((r || {}).source || '');
+    return o === 'manual' || o === 'core' || o === '';
+}
+
+/** Una fila de la ficha cuyo valor es una dirección. Escrita y no pulsable es una dirección
+ *  que hay que copiar a mano, que es justo el trabajo que evita tenerla guardada.
+ *
+ *  `rel="noopener noreferrer"`: la página del fabricante se abre en otra pestaña y no tiene por
+ *  qué poder tocar esta. */
+function _dcimEnlace(k, url) {
+    const v = String(url || '').trim();
+    if (!v) return '';
+    return `<tr><td class="text-muted" style="white-space:nowrap;width:1%">${esc(k)}</td>
+        <td><a href="${escAttr(v)}" target="_blank" rel="noopener noreferrer">${
+        esc(v)}</a></td></tr>`;
+}
+
+/** Una fila de la ficha: la etiqueta y el valor. Lo vacío no se enseña — una casilla que nadie
+ *  rellenó no es un dato, y una tabla de rayas esconde la fila que sí lo tiene.
+ *
+ *  Fuera de la función que la usa y con el nombre de los demás ayudantes de esta sección, para
+ *  que el guard de escapado pueda seguirla: aquí entra lo que teclea una persona —la descripción
+ *  de un modelo— y quien lo imprime tiene que ser comprobable. */
+function _dcimDato(k, v) {
+    return (v === '' || v === null || v === undefined) ? ''
+        : `<tr><td class="text-muted" style="white-space:nowrap;width:1%">${esc(k)}</td>
+           <td>${esc(String(v))}</td></tr>`;
+}
+
+async function _dcCatShow(uid) {
+    if (!uid) return;
+    const r = ((_dcCat || {}).rows || []).find(x => String(x.uid) === String(uid));
+    if (!r) return;
+    const img = (nombre, cara) => nombre
+        ? `<figure class="mb-2"><figcaption class="text-muted ss-fs-1 mb-1">${esc(cara)}</figcaption>
+           <img src="${_dcimMediaUrl(nombre)}" alt=""
+                class="img-fluid border rounded" style="max-height:9rem"></figure>`
+        : '';
+    const rol = _dcCatKindName(r.kind);
+    const puertos = _dcCatPortRows(r);
+    // Qué campos APLICAN a lo que es esto. Un DIMM no ocupa U, no tiene fondo y no se alimenta
+    // por su cuenta: enseñar esas tres filas con su valor por defecto es decir tres cosas falsas
+    // con la misma seguridad que las verdaderas.
+    const arbol = String(r.tree || 'device-types');
+    const esComponente = arbol === 'component-types';
+    const esModulo = arbol === 'module-types';
+    const ocupaU = !esComponente && !esModulo;          // un dispositivo o un armario
+    const enUnArmario = arbol === 'device-types';
+    const html = `<div class="row g-3">
+        <div class="col-12 col-md-5">${
+            img(r.front_image, t('dcim_cat_front')) + img(r.rear_image, t('dcim_cat_rear'))
+            || `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_no_image'))}</div>`}</div>
+        <div class="col-12 col-md-7">
+            <table class="table table-sm table-striped align-middle mb-2 ss-fs-3"><tbody>
+                ${_dcimDato(t('dcim_cat_maker'), r.manufacturer)}
+                ${_dcimDato(t('dcim_cat_model'), r.model)}
+                ${_dcimDato(t('dcim_cat_desc'), r.description)}
+                ${ocupaU ? _dcimDato('U', (Number(r.u_tenths || 0) / 10).toString()) : ''}
+                ${enUnArmario ? _dcimDato(t('dcim_cat_full_depth'),
+                       String(r.full_depth) === '0' ? t('no') : t('yes')) : ''}
+                ${(enUnArmario || esModulo) ? _dcimDato(t('dcim_cat_powered'),
+                       String(r.is_powered) === '0' ? t('no') : t('yes')) : ''}
+                ${r.power_type ? _dcimDato(_dcAttrName('power_type'),
+                                           _dcEnumName(r.power_type)) : ''}
+                ${esComponente ? _dcimDato(_dcCatSizeName(r.kind), r.size) : ''}
+                ${Number(r.kit_qty || 1) > 1
+                    ? _dcimDato(_dcAttrName('kit_qty'), r.kit_qty) : ''}
+                ${_dcimDato(t('dcim_cat_part_number'), r.part_number)}
+                ${_dcimEnlace(t('dcim_cat_product_url'), r.url)}
+                ${_dcimDato(t('dcim_cat_airflow'), _dcEnumName(r.airflow))}
+                ${enUnArmario ? _dcimDato(t('dcim_cat_subdevice'), r.subdevice) : ''}
+                ${_dcimDato(t('dcim_cat_kind'), _dcCatTreeName(r.tree))}
+                ${_dcimDato(t('dcim_role'), rol)}
+                ${_dcimDato(t('dcim_cat_source'), r.source)}
+                ${/* Un modelo escrito a mano no se importó: se creó. La misma fecha con la
+                      etiqueta equivocada es de las cosas que se leen mil veces y se corrigen
+                      ninguna, porque «casi» está bien. */
+                  _dcimDato(_dcCatIsMine(r) ? t('dcim_cat_created') : t('dcim_cat_imported'),
+                            r.imported_at)}
+                ${_dcimDato(t('dcim_cat_updated'),
+                            r.updated_at ? `${r.updated_at}${
+                                r.updated_by ? ' · ' + r.updated_by : ''}` : '')}
+                ${_dcimDato(t('dcim_cat_rev'), Number(r.rev || 0) > 1 ? r.rev : '')}
+                ${_dcimDato('slug', r.slug)}
+            </tbody></table>
+            ${puertos ? `<div class="fw-semibold ss-fs-2 mb-1">${esc(t('dcim_cat_ports'))}</div>
+                <table class="table table-sm align-middle mb-0 ss-fs-3"><tbody>${
+                puertos}</tbody></table>` : ''}
+            ${_dcCatLifeRows(r)}
+            ${_dcCatExtraRows(r)}
+        </div>
+    </div>`;
+    // El botón de quitar va en el PIE, donde esta interfaz guarda las confirmaciones. Suelto en
+    // el cuerpo quedaría flotando encima del que cierra, que es donde la vista lo busca.
+    //
+    // Y el pie recibe MARCADO, no una lista de objetos: el ayudante lo mete tal cual. Por eso el
+    // modelo se apunta en una variable en vez de viajar dentro de un `onclick` — meter un nombre
+    // de fabricante en una cadena dentro de un atributo son dos niveles de comillas y un modelo
+    // que se llame `3" rack` rompiéndolos.
+    _dcCatShown = r;
+    const acciones = _dcimMay('dcim_catalog_manage')
+        ? `<button class="btn btn-secondary" onclick="_dcCatCloneShown()">
+               <i class="bi bi-files me-1"></i>${esc(t('dcim_cat_clone'))}</button>
+           <button class="btn btn-secondary" onclick="_dcCatEditShown()">
+               <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>
+           <button class="btn btn-danger" onclick="_dcCatDropShown()">
+               <i class="bi bi-trash me-1"></i>${esc(t('delete'))}</button>`
+        : '';
+    showHtmlModal(`${r.manufacturer || ''} ${r.model || ''}`.trim(), html, 'primary', acciones);
+}
+
+//: El modelo cuya ficha está abierta, para que el botón del pie sepa cuál es sin llevarlo
+//: escrito dentro de un atributo.
+let _dcCatShown = null;
+
+function _dcCatDropShown() {
+    const r = _dcCatShown;
+    if (!r) return;
+    hideInfoModal();
+    _dcCatDrop(r.uid, `${r.manufacturer || ''} ${r.model || ''}`.trim());
+}
+
+/** Lo que solo tiene una forma: hoy, las medidas de un armario.
+ *
+ *  Sus medidas exteriores contestan si cabe donde se quiere poner y el peso máximo si aguanta lo
+ *  que se le va a meter — dos preguntas que se hacen ANTES de comprar y que el catálogo ya sabe
+ *  contestar. Se pintan tal como vienen y sin traducir las claves: son las de la biblioteca, y
+ *  un diccionario de nombres aquí sería un segundo sitio que se queda viejo. */
+function _dcCatExtraRows(r) {
+    const e = r.extra && typeof r.extra === 'object' ? r.extra : {};
+    // Lo vacío no se enseña: una casilla que nadie rellenó no es un dato, y una tabla llena de
+    // rayas hace que la fila que sí tiene valor se pierda entre ellas.
+    // Los que tienen bloque propio salen en el suyo. Sin esto, cada fecha aparecería dos
+    // veces: una con su rojo y otra sin él, tres renglones más abajo.
+    const aparte = new Set((((_dcCat || {}).lifecycle_fields) || []).map(c => c.name));
+    const claves = Object.keys(e).filter(
+        k => !aparte.has(k) && e[k] !== '' && e[k] !== null && e[k] !== undefined);
+    if (!claves.length) return '';
+    // De un armario son medidas; de un componente son sus atributos, y llamarlos «medidas»
+    // sería llamar medida a que un DIMM lleve ECC.
+    const titulo = String(r.tree || '') === 'component-types'
+        ? t('dcim_cat_attrs') : t('dcim_cat_measures');
+    return `<div class="fw-semibold ss-fs-2 mb-1 mt-2">${esc(titulo)}</div>
+        <table class="table table-sm align-middle mb-0 ss-fs-3"><tbody>${claves.map(k =>
+        `<tr><td class="text-muted" style="white-space:nowrap">${esc(_dcAttrName(k))}</td>
+             <td>${esc(_dcCatAttrVal(e[k]))}</td></tr>`).join('')}</tbody></table>`;
+}
+
+/** Un valor de atributo, legible. Un booleano guardado como `true` sale como «sí»: la palabra
+ *  que usa el resto de la ficha, y no la que usa el JSON. */
+function _dcCatAttrVal(v) {
+    if (v === true) return t('yes');
+    if (v === false) return t('no');
+    return _dcEnumName(v);
+}
+
+/** Los puertos, uno por fila y por tipo. En la tabla van sumados porque no cabe más; aquí sí
+ *  cabe, y lo que hace falta al colocar un dispositivo es cuántos SFP+ tiene, no cuántos puertos. */
+function _dcCatPortRows(r) {
+    let p = r.ports;
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { p = {}; } }
+    return Object.entries(p || {}).map(([familia, tipos]) =>
+        Object.entries(tipos || {}).map(([tipo, n]) =>
+            `<tr><td class="text-muted" style="white-space:nowrap">${
+                 esc(_dcPortName(familia))}</td>
+             <td title="${escAttr(tipo)}">${esc(_dcSpeedName(tipo))}</td>
+             <td class="text-end ss-tabular">${esc(String(n))}</td></tr>`).join('')).join('');
+}
+
+async function _dcCatDrop(uid, nombre) {
+    if (!uid) return;
+    showConfirmModal(tf('dcim_cat_drop_ask', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/catalog/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(t('deleted'), 'success');
+        _dcCatOpen();
+    });
+}
+
+
+// ── Quitar varios ───────────────────────────────────────────────────────────────────────
+//
+// Marcar cruza páginas a propósito: lo que sobra suele ser media importación, y obligar a
+// quitarla página a página sería obligar a hacer diez veces la misma confirmación.
+
+function _dcCatSelOne(el) {
+    const uid = String(el.dataset.uid || '');
+    if (el.checked) _dcCatSel.add(uid); else _dcCatSel.delete(uid);
+    renderDcim();
+}
+
+/** Marcar o desmarcar **la página**, que es lo que se está viendo.
+ *
+ *  «Todos» no puede significar los seis mil: nadie ha visto los otros cinco mil ochocientos, y
+ *  un botón que borra lo que no se ha mirado no es un atajo. Para eso está vaciar un origen,
+ *  que sí dice en voz alta cuántos son. */
+function _dcCatSelAll(si) {
+    ((_dcCat || {}).rows || []).forEach(r => {
+        if (si) _dcCatSel.add(String(r.uid)); else _dcCatSel.delete(String(r.uid));
+    });
+    renderDcim();
+}
+
+async function _dcCatDropSel() {
+    if (!_dcCatSel.size) return;
+    const cuantos = _dcCatSel.size;
+    showConfirmModal(tf('dcim_cat_drop_sel_ask', cuantos), async () => {
+        const r = await _dcimSend('POST', '/api/v1/dcim/catalog/drop',
+                                  {uids: Array.from(_dcCatSel)});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(tf('dcim_cat_dropped', (r.data || {}).count || 0), 'success');
+        _dcCatFresh();
+    });
+}
+
+/** Vaciar un origen entero: la unidad en la que ENTRARON, y por tanto en la que se van.
+ *
+ *  Se elige de una lista y no se teclea: equivocarse en una letra vacía cero modelos y no lo
+ *  dice nadie. Y la lista trae la cuenta, porque «vaciar library» y «vaciar seiscientos
+ *  modelos» son la misma orden dicha de dos maneras y solo una se piensa antes de aceptar. */
+function _dcCatEmptySrc() {
+    const fuentes = ((_dcCat || {}).sources) || [];
+    if (!fuentes.length) return;
+    const html = `<div class="ss-piece-list">${fuentes.map((f, i) =>
+        `<button class="btn btn-secondary ss-piece" onclick="_dcCatEmptyGo(${i})">
+            <i class="bi bi-eraser"></i><span>${esc(f.name || '')}</span>
+            <small class="ss-tabular">${esc(String(f.count || 0))}</small>
+        </button>`).join('')}</div>`;
+    showHtmlModal(t('dcim_cat_empty_src'), html, 'warning');
+}
+
+async function _dcCatEmptyGo(i) {
+    const f = (((_dcCat || {}).sources) || [])[i];
+    if (!f) return;
+    hideInfoModal();
+    showConfirmModal(tf('dcim_cat_empty_src_ask', f.name || '', f.count || 0), async () => {
+        const r = await _dcimSend('POST', '/api/v1/dcim/catalog/drop', {source: f.name});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(tf('dcim_cat_dropped', (r.data || {}).count || 0), 'success');
+        _dcCatFresh();
+    });
+}
+
+
+// ── Escribir un modelo, y corregir el que no se acertó ──────────────────────────────────
+//
+// La deducción mira los puertos, y una fuente declara un `power-ports` y nada más, igual que
+// media docena de cosas distintas. No hay regla que acierte ocho mil quinientos casos; quien
+// mira la fila lo sabe en un segundo. Lo que faltaba era poder decirlo.
+//
+// El mismo formulario para crear y para corregir: se diferencian en si hay una fila detrás, y
+// dos formularios casi iguales son dos sitios donde arreglar el mismo fallo.
+
+//: La fila que se está editando, o `null` si se está escribiendo una nueva.
+let _dcCatEditing = null;
+
+/** Editar o clonar desde la FILA, sin pasar por la ficha.
+ *
+ *  La fila tiene el `uid` y el formulario quiere el modelo entero, así que se busca en lo que ya
+ *  está cargado: es la misma lista que se está pintando, y volver a pedirla al servidor sería
+ *  una ida y vuelta para recuperar algo que está a la vista. */
+function _dcCatRowEdit(uid, clonar) {
+    const r = ((_dcCat || {}).rows || []).find(x => String(x.uid) === String(uid));
+    if (r) _dcCatEdit(r, clonar);
+}
+
+function _dcCatCloneShown() {
+    _dcCatEdit(_dcCatShown, true);
+}
+
+function _dcCatEditShown() {
+    // SIN cerrar antes: la ficha y el formulario son el mismo `#infoModal`, y pedirle que
+    // muestre uno mientras se esconde el otro es una orden que la animación se traga — el
+    // diálogo se va y no vuelve, sin ningún error. Cambiarle el contenido basta.
+    _dcCatEdit(_dcCatShown);
+}
+
+/** Abrir el formulario sobre una fila. Con *clonar*, se rellena con ella y NO se edita: lo que
+ *  sale de guardar es una fila nueva, y por eso `_dcCatEditing` se queda vacío — es lo único que
+ *  distingue un clon de una corrección, y confundirlos sería pisar el original. */
+function _dcCatEdit(r, clonar) {
+    _dcCatPreview = false;
+    _dcCatFormTab = 'data';
+    _dcCatCloneFrom = clonar && r ? r.uid : '';
+    _dcCatEditing = clonar ? null : r;
+    _dcCatForm = Object.assign({
+        manufacturer: '', model: '', slug: '', description: '', part_number: '',
+        // La forma que se está mirando, no siempre «dispositivo»: quien está en Componentes y
+        // pulsa «Nuevo» quiere un componente, y salir en el árbol de al lado obliga a corregirlo
+        // cada vez — o a no corregirlo, que es peor.
+        tree: _dcCatTree || 'device-types', kind: '', u: 1, is_powered: 1, full_depth: 1,
+        airflow: '', subdevice: '', size: '', url: '', kit_qty: 1, power_type: '',
+    }, r ? {
+        manufacturer: r.manufacturer || '', model: r.model || '', slug: r.slug || '',
+        description: r.description || '', part_number: r.part_number || '',
+        tree: r.tree || 'device-types', kind: r.kind || '',
+        u: (Number(r.u_tenths || 10)) / 10,
+        is_powered: String(r.is_powered) === '0' ? 0 : 1,
+        full_depth: String(r.full_depth) === '0' ? 0 : 1,
+        airflow: r.airflow || '', subdevice: r.subdevice || '', size: r.size || '',
+        url: r.url || '', kit_qty: Number(r.kit_qty || 1) || 1,
+        power_type: r.power_type || '',
+    } : {});
+    _dcCatFormPorts = _dcCatPortRowsOf(r);
+    _dcCatFormExtra = Object.assign({}, (r && r.extra) || {});
+    // El esquema que describe este árbol, si se ha traído alguno. Sin esquemas el formulario
+    // sigue funcionando con los campos de siempre: el panel no puede depender de que alguien
+    // haya pulsado un botón, ni de que haya internet.
+    if (clonar) {
+        // Con un sufijo, para que guardar sin tocar nada no deje dos filas con el mismo nombre
+        // — que es lo que convierte un catálogo en algo que hay que mirar dos veces.
+        _dcCatForm.model = `${_dcCatForm.model} ${t('dcim_cat_copy_suffix')}`.trim();
+        _dcCatForm.slug = '';
+    }
+    _dcCatSchema = _dcCatSchemaFor(_dcCatForm.tree);
+    if (_dcSch === null) _dcSchLoad();
+    _dcCatFormDraw();
+}
+
+//: El esquema con el que se está escribiendo, o `null` si no hay ninguno traído.
+let _dcCatSchema = null;
+//: Qué pestaña del formulario está abierta: `data` o `images`. Los datos se escriben una vez
+//: al crear el modelo; las imágenes se ponen el día que alguien pasa por la sala con el móvil.
+let _dcCatFormTab = 'data';
+//: De qué fila se está clonando, si se está clonando. Va al servidor para que copie sus
+//: imágenes: lo que el formulario tiene son los campos, y una imagen no es un campo.
+let _dcCatCloneFrom = '';
+//: Si lo que se está enseñando es una PRUEBA de un esquema. Entonces no hay dónde guardar: se
+//: abrió para ver qué campos salen, no para crear un modelo — y un botón de guardar en una
+//: prueba llena el catálogo de cacharros que nadie quería.
+let _dcCatPreview = false;
+
+/** Enseñar el formulario que sale de un esquema, sin escribir nada.
+ *
+ *  Una lista de campos no dice cómo se va a rellenar: si sobra alguno, si falta otro, si el que
+ *  se acaba de añadir sale donde se esperaba. El formulario contesta las tres de una vez. */
+function _dcSchPreview(uid) {
+    const e = ((_dcSch || {}).schemas || []).find(x => x.uid === uid);
+    if (!e) return;
+    _dcCatPreview = true;
+    _dcCatEditing = null;
+    _dcCatForm = {manufacturer: '', model: '', slug: '', description: '', part_number: '',
+                  tree: e.tree || 'device-types', kind: '', u: 1, is_powered: 1, full_depth: 1,
+                  airflow: '', subdevice: ''};
+    _dcCatFormPorts = [];
+    _dcCatFormExtra = {};
+    _dcCatSchema = e;
+    _dcCatFormDraw();
+}
+
+/** El esquema que describe un árbol: el propio antes que el de la biblioteca.
+ *
+ *  Antes el propio porque quien se escribió uno lo hizo para usarlo, y tener que elegirlo cada
+ *  vez sería tenerlo y no tenerlo. */
+function _dcCatSchemaFor(tree) {
+    const todos = ((_dcSch || {}).schemas) || [];
+    const suyos = todos.filter(e => String(e.tree || '') === String(tree || ''));
+    return suyos.find(e => e.source !== 'library') || suyos[0] || null;
+}
+
+//: Lo que hay escrito en el formulario. En una variable porque el diálogo se redibuja entero al
+//: cambiar de árbol —cambian los campos, no solo su valor— y lo que solo viva en el DOM se iría
+//: con ese redibujado, que es el gesto siguiente al de elegir «armario».
+let _dcCatForm = {};
+//: Los puertos que se están escribiendo, renglón a renglón: `[{fam, tipo, n}, …]`. Una lista y
+//: no un mapa por familia, porque un equipo tiene dos tomas `iec-60320-c14` **y** una
+//: `dc-terminal`, y en un mapa por familia eso no cabe sin perder una de las dos.
+let _dcCatFormPorts = [];
+let _dcCatFormExtra = {};
+
+//: Las familias de puerto que se cuentan. Las mismas que se guardan de la biblioteca: contadas
+//: por familia y no listadas una a una, que es lo que hace falta para una capacidad.
+const _DCCAT_PORTS = ['interfaces', 'power-ports', 'power-outlets', 'console-ports',
+                      'console-server-ports', 'front-ports', 'rear-ports', 'module-bays',
+                      'device-bays'];
+
+
+/** Los conectores que se sugieren en una familia. **Sugerencias y no una lista cerrada**: lo que
+ *  hay enchufado en una sala de verdad incluye cosas que no están en ninguna lista, y perder el
+ *  dato por no reconocerlo es peor que guardarlo tal cual.
+ *
+ *  Del **catálogo de conectores** que sirve el servidor, no de una constante aquí. Estaba aquí, y
+ *  este es el peor sitio: no se puede leer desde el servidor, no se puede corregir sin tocar una
+ *  plantilla, y quien sabe que falta el DisplayPort no va a encontrarla. Los identificadores son
+ *  los de la biblioteca, que es de donde vienen los importados: escribir otros haría que el mismo
+ *  conector se contara dos veces según quién lo tecleara. */
+function _dcConnsOf(fam) {
+    return _dcConns[String(fam || '')] || [];
+}
+
+//: Qué familia se está mirando en la pestaña de conectores. Vacío = todas: la primera pregunta
+//: es «¿qué conoce esto?» y la segunda «¿qué puedo poner aquí?», y solo la segunda filtra.
+let _dcConnFam = '';
+//: Lo que se busca, si se busca algo. Ciento y pico filas caben en una tabla y no en la cabeza.
+let _dcConnQ = '';
+
+/** Cuántos conectores conoce el panel, sin repetir: el mismo va en varias familias. */
+function _dcConnCount() {
+    const vistos = new Set();
+    Object.values(_dcConns).forEach(l => (l || []).forEach(c => vistos.add(String(c.id))));
+    return vistos.size;
+}
+
+/** Los conectores, para mirarlos.
+ *
+ *  Estaban servidos y sugeridos en las casillas, y en ningún sitio se podían ver. Un catálogo que
+ *  solo existe cuando ya estás escribiendo en la casilla que lo usa no es un catálogo, es un
+ *  autocompletado: la pregunta que hace falta contestar antes es «¿qué conectores conoce esto?»,
+ *  y sin pantalla no tiene dónde contestarse.
+ *
+ *  De solo lectura, como los esquemas que vienen con el panel: es un documento que viaja con la
+ *  aplicación. Por eso dice **dónde vive** — quien eche uno en falta tiene que saber que se
+ *  arregla editando un fichero y no abriendo un ticket. */
+function _dcConnsHtml() {
+    const fams = Object.keys(_dcConns);
+    if (!fams.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_conn_none'))}</div>`;
+    // Sin repetir: el mismo conector va en varias familias, y una tabla que lo enseñe tres veces
+    // hace creer que son tres.
+    const porId = new Map();
+    fams.forEach(f => (_dcConns[f] || []).forEach(c => {
+        const antes = porId.get(String(c.id));
+        if (antes) { antes.fams.push(f); return; }
+        porId.set(String(c.id), Object.assign({}, c, {fams: [f]}));
+    }));
+    const q = _dcConnQ.trim().toLowerCase();
+    const filas = Array.from(porId.values())
+        .filter(c => !_dcConnFam || c.fams.indexOf(_dcConnFam) >= 0)
+        .filter(c => !q || (String(c.id) + ' ' + String(c.name || '')).toLowerCase()
+                             .indexOf(q) >= 0);
+    return `<div class="ss-toolrow mb-2">
+            <input class="form-control form-control-sm" style="max-width:16rem"
+                   value="${escAttr(_dcConnQ)}" placeholder="${escAttr(t('search'))}"
+                   oninput="_dcConnQ=this.value;renderDcim()">
+            <select class="form-select form-select-sm" style="max-width:15rem"
+                    onchange="_dcConnFam=this.value;renderDcim()">
+                <option value="">${esc(t('dcim_conn_all_fams'))}</option>
+                ${_DCCAT_PORTS.filter(f => _dcConns[f]).map(f => `<option value="${escAttr(f)}"${
+                    _dcConnFam === f ? ' selected' : ''}>${
+                    esc(_dcPortName(f))}</option>`).join('')}
+            </select>
+            <span class="text-muted ss-fs-2 ss-toolrow-text">${
+                esc(tf('dcim_conn_count', filas.length))}</span>
+        </div>
+        ${filas.length ? `<div class="table-responsive">
+        <table class="table table-sm table-striped align-middle mb-0 ss-fs-3">
+        <thead><tr>
+            <th>${esc(t('dcim_conn_name'))}</th>
+            <th>${esc(t('dcim_conn_id'))}</th>
+            <th>${esc(t('dcim_conn_group'))}</th>
+            <th>${esc(t('dcim_cat_ports'))}</th>
+            <th>${esc(t('dcim_conn_note'))}</th>
+        </tr></thead>
+        <tbody>${filas.map(c => `<tr class="ss-rowlink"
+                onclick="_dcConnShow(${jsStr(c.id)})">
+            <td class="fw-semibold" style="white-space:nowrap">${
+                _dcConnIcon(c.id)} ${esc(c.name || c.id)}${
+                c.speed ? ` <span class="badge bg-body-secondary text-body-secondary border
+                    fw-normal">${esc(c.speed)}</span>` : ''}</td>
+            <td class="text-muted"><code>${esc(c.id)}</code></td>
+            <td class="ss-fs-2">${esc(_dcConnGroupName(c.group))}</td>
+            <td class="ss-fs-2 text-muted">${
+                esc(c.fams.map(f => _dcPortName(f)).join(' · '))}</td>
+            <td class="ss-fs-2 text-muted">${esc(c.note || '')}</td>
+        </tr>`).join('')}</tbody></table></div>`
+        : `<div class="text-muted ss-fs-2">${esc(t('dcim_conn_no_match'))}</div>`}
+        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_conn_hint'))}</div>`;
+}
+
+/** La ficha de un conector: el dibujo **en grande** y lo que se sabe de él.
+ *
+ *  En la tabla el dibujo mide lo que una letra, que basta para reconocer de un vistazo el que ya
+ *  se conoce. Para el que no se conoce hace falta lo contrario —verlo grande y leer qué es, en
+ *  qué casillas se ofrece y con quién se empareja— y eso no cabe en un renglón.
+ *
+ *  El **identificador destacado** y no escondido: es lo que se guarda en la ficha de un modelo y
+ *  lo que hay que teclear para que el mismo conector no se cuente dos veces. */
+function _dcConnShow(id) {
+    const c = _dcConn(id);
+    if (!c) return;
+    const dato = (etiqueta, valor) => valor
+        ? `<tr><td class="text-muted" style="white-space:nowrap">${esc(etiqueta)}</td>
+           <td>${valor}</td></tr>` : '';
+    const cuerpo = `<div class="d-flex gap-3 align-items-start flex-wrap mb-3">
+            <div class="border rounded p-3 bg-body-secondary">${
+                _dcConnIcon(c.id, 'ss-conn-big')}</div>
+            <div class="flex-grow-1">
+                <div class="fw-semibold ss-fs-4">${esc(c.name || c.id)}</div>
+                <div class="text-muted ss-fs-2">${esc(_dcConnGroupName(c.group))}</div>
+                ${c.note ? `<div class="ss-fs-2 mt-2">${esc(c.note)}</div>` : ''}
+            </div>
+        </div>
+        <table class="table table-sm align-middle mb-2 ss-fs-3"><tbody>
+            ${dato(t('dcim_conn_id'), `<code>${esc(c.id)}</code>`)}
+            ${dato(t('dcim_conn_group'), esc(_dcConnGroupName(c.group)))}
+            ${dato(t('dcim_cat_ports'),
+                   esc((c.families || []).map(f => _dcPortName(f)).join(' · ')))}
+            ${dato(t('dcim_cat_port_speed'), esc(c.speed || ''))}
+            ${dato(t('dcim_conn_pair'), esc(_dcConnPairName(c)))}
+        </tbody></table>
+        <div class="text-muted ss-fs-1">${esc(t('dcim_conn_one_hint'))}</div>`;
+    showHtmlModal(c.name || c.id, cuerpo, 'primary');
+}
+
+//: Con quién se empareja cada uno. La pregunta que se hace con el cable en la mano no es «¿qué
+//: es esto?» sino «¿qué le entra?», y la respuesta no está en ningún sitio del documento porque
+//: no es del conector: es de la pareja. Solo las que se confunden, que son las que importan.
+const _DC_CONN_PAIR = {
+    'iec-60320-c14': 'iec-60320-c13', 'iec-60320-c13': 'iec-60320-c14',
+    'iec-60320-c16': 'iec-60320-c15', 'iec-60320-c15': 'iec-60320-c16',
+    'iec-60320-c20': 'iec-60320-c19', 'iec-60320-c19': 'iec-60320-c20',
+    'iec-60320-c22': 'iec-60320-c21', 'iec-60320-c21': 'iec-60320-c22',
+    'iec-60320-c6': 'iec-60320-c5', 'iec-60320-c5': 'iec-60320-c6',
+    'iec-60320-c8': 'iec-60320-c7', 'iec-60320-c7': 'iec-60320-c8',
+    'cee-7-7': 'cee-7-3', 'cee-7-3': 'cee-7-7',
+    'nema-5-15p': 'nema-5-15r', 'nema-5-15r': 'nema-5-15p',
+    'nema-5-20p': 'nema-5-20r', 'nema-5-20r': 'nema-5-20p',
+    'nema-l6-30p': 'nema-l6-30r', 'nema-l6-30r': 'nema-l6-30p',
+};
+
+function _dcConnPairName(c) {
+    const pareja = _DC_CONN_PAIR[String((c || {}).id || '')];
+    if (!pareja) return '';
+    return _dcConnName(pareja) || pareja;
+}
+
+/** Cómo se llama un grupo. Sin traducción, el identificador: es peor leer «power-in» que
+ *  «entrada de corriente» y muchísimo peor no leer nada. */
+function _dcConnGroupName(grupo) {
+    const g = String(grupo || '');
+    if (!g) return '';
+    const clave = 'dcim_conn_group_' + g.replace(/-/g, '_');
+    const dicho = t(clave);
+    return (dicho && dicho !== clave) ? dicho : g;
+}
+
+/** Lo que se lee de un conector en la lista: su nombre, y **con qué distinguirlo del de al
+ *  lado**. Un `SFP+` junto a un `SFP28` se distinguen por lo que van, no por la letra; y una
+ *  casilla de puerto frontal ofrece cobre, fibra y vídeo a la vez, que en cuarenta
+ *  identificadores seguidos no se recorre — se elige el que más se parece. */
+function _dcConnLabel(c) {
+    const nombre = String((c || {}).name || (c || {}).id || '');
+    const veloz = String((c || {}).speed || '');
+    if (veloz) return nombre + ' — ' + veloz;
+    const grupo = String((c || {}).group || '');
+    const clave = 'dcim_conn_group_' + grupo.replace(/-/g, '_');
+    const dicho = grupo ? t(clave) : '';
+    return (dicho && dicho !== clave) ? nombre + ' — ' + dicho : nombre;
+}
+
+/** Por dónde se enchufa este modelo. Un renglón por familia y tipo: `2 × iec-60320-c14` y
+ *  `1 × dc-terminal` son dos renglones del mismo equipo, y en una casilla por familia no caben
+ *  los dos sin perder uno.
+ *
+ *  Se sigue **contando y no listando**: un switch de 48 bocas es un renglón que dice 48, no
+ *  cuarenta y ocho filas. Cinco mil modelos listados serían un millón de filas que nadie lee. */
+function _dcCatPortsBox() {
+    return `<div class="fw-semibold ss-fs-2 mt-1">${esc(t('dcim_cat_ports'))}</div>
+        ${_dcPortsBox(_dcCatFormPorts, '_dcCatPort')}`;
+}
+
+/** El editor, dado dónde vive lo que edita. *pre* es el prefijo de sus tres funciones —
+ *  `<pre>Add`, `<pre>Drop`, `<pre>Set`— porque el catálogo y una plantilla guardan en sitios
+ *  distintos y redibujan pantallas distintas. Dos editores de lo mismo acaban siendo dos que se
+ *  separan el día que alguien añade una familia a uno. */
+function _dcPortsBox(rows, pre, fams) {
+    fams = (fams && fams.length) ? fams : _DCCAT_PORTS;
+    // Con una sola familia no hay nada que elegir: cada una tiene su pestaña, y un desplegable
+    // de una opción en la pestaña que ya se llama así es una casilla que no pregunta nada.
+    const unaSola = fams.length === 1;
+    const filas = (rows || []).map((p, i) => ({p: p, i: i}))
+        .filter(r => fams.indexOf(r.p.fam) >= 0);
+    return `<div class="d-flex flex-column gap-2">
+        ${filas.length ? '' : `<div class="text-muted ss-fs-2">${
+            esc(t('dcim_cat_ports_empty'))}</div>`}
+        ${filas.map(({p, i}) => `
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+                ${unaSola ? '' : `<select class="form-select form-select-sm"
+                        style="flex:1 1 9rem;min-width:0;max-width:14rem"
+                        onchange="${pre}Set(${i},'fam',this.value)">
+                    ${fams.map(f => `<option value="${escAttr(f)}"${
+                        p.fam === f ? ' selected' : ''}>${
+                        esc(_dcPortName(f))}</option>`).join('')}
+                </select>`}
+                ${_dcConnIcon(p.tipo)}
+                ${_dcPortTypePick(p, i, pre)}
+                <div class="input-group input-group-sm" style="flex:0 0 7rem">
+                    <span class="input-group-text">×</span>
+                    <input type="number" min="1" class="form-control"
+                           value="${escAttr(String(p.n || 1))}"
+                           oninput="${pre}Set(${i},'n',this.value)">
+                </div>
+                <button class="btn btn-sm btn-danger" style="flex:0 0 auto"
+                        onclick="${pre}Drop(${i})"
+                        title="${escAttr(t('delete'))}"><i class="bi bi-trash"></i></button>
+            </div>`).join('')}
+        <div><button class="btn btn-sm btn-secondary"
+            onclick="${pre}Add(${jsStr(fams[0])})">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_cat_port_add'))}</button></div>
+        <div class="text-muted ss-fs-1">${esc(t('dcim_cat_ports_hint'))}</div>
+    </div>`;
+}
+
+//: Lo que vale la opción «otro» del desplegable. No es un tipo: es la petición de escribir uno,
+//: y por eso nunca llega a guardarse.
+//:
+//: Con dos puntos porque ningún identificador de conector los lleva —son minúsculas, cifras,
+//: puntos y guiones— y porque si alguna vez se escapara a la pantalla se leería como lo que
+//: es. Un carácter de control ahí sería invisible justo donde se vería.
+const _DC_PORT_OTHER = '::otro::';
+
+/** Qué conector es. **Del catálogo**, y que se vea que es del catálogo.
+ *
+ *  Era una caja de texto con un `<datalist>` detrás, y un `<datalist>` no se ve: la caja parece
+ *  un sitio donde teclear a mano y el catálogo de ciento veintiocho conectores no existe hasta
+ *  que alguien acierta las tres primeras letras.
+ *
+ *  Sigue **sin ser una lista cerrada** —lo que hay enchufado en una sala de verdad incluye cosas
+ *  que no están en ninguna lista— pero eso ahora es una opción que se elige, «otro», y no el
+ *  comportamiento por omisión de una casilla que no dice nada.
+ *
+ *  Y lo que ya está escrito y no reconoce **se queda**, con su propia opción: convertirlo en
+ *  «sin decir» al abrir el formulario sería borrar un dato por no tenerlo en una lista. */
+function _dcPortTypePick(p, i, pre) {
+    const valor = String(p.tipo || '');
+    const lista = _dcConnsOf(p.fam);
+    const conocido = lista.some(c => String(c.id) === valor);
+    // Escribiendo: la casilla de texto y el botón de volver a la lista. Manda la marca y no el
+    // valor — quien pidió escribir a mano sigue escribiendo aunque lo tecleado exista en el
+    // catálogo, que si no se le cierra la casilla a media palabra.
+    if (p.libre)
+        return `<input class="form-control form-control-sm"
+                   style="flex:2 1 10rem;min-width:0;max-width:16rem"
+                   autocomplete="off" placeholder="${escAttr(t('dcim_cat_port_type_free'))}"
+                   value="${escAttr(valor)}"
+                   oninput="${pre}Set(${i},'tipo',this.value)">
+            <button class="btn btn-sm btn-secondary" onclick="${pre}Free(${i},false)"
+                    title="${escAttr(t('dcim_cat_port_from_list'))}">
+                <i class="bi bi-list-ul"></i></button>`;
+    return `<select class="form-select form-select-sm"
+            style="flex:2 1 11rem;min-width:0;max-width:20rem"
+            onchange="${pre}Pick(${i},this.value)">
+        <option value=""${valor ? '' : ' selected'}>${esc(t('dcim_cat_unset'))}</option>
+        ${lista.map(c => `<option value="${escAttr(c.id)}"${
+            String(c.id) === valor ? ' selected' : ''}>${
+            esc(_dcConnLabel(c))}</option>`).join('')}
+        ${valor && !conocido ? `<option value="${escAttr(valor)}" selected>${
+            esc(valor)}</option>` : ''}
+        <option value="${escAttr(_DC_PORT_OTHER)}">${esc(t('dcim_cat_port_other'))}</option>
+    </select>`;
+}
+
+function _dcCatPortAdd(fam) {
+    _dcCatFormPorts.push({fam: fam || 'interfaces', tipo: '', n: 1});
+    _dcCatFormDraw();
+}
+
+function _dcCatPortDrop(i) {
+    _dcCatFormPorts.splice(i, 1);
+    _dcCatFormDraw();
+}
+
+/** Cambiar un renglón. Redibuja solo al cambiar la familia —porque cambia la lista de tipos que
+ *  se sugieren— y no al teclear, que perdería el cursor a cada letra. */
+/** Elegir un conector de la lista. Redibuja: elegir «otro» cambia la fila de desplegable a
+ *  casilla de texto, y sin redibujar el cambio no se vería. */
+function _dcCatPortPick(i, valor) {
+    const p = _dcCatFormPorts[i];
+    if (!p) return;
+    // «Otro» no es un valor: es la petición de escribir uno. Se guarda vacío y se marca la fila
+    // como libre, que es lo que la deja en modo texto aunque lo tecleado luego sí exista en el
+    // catálogo — quien pidió escribir a mano no quiere que se lo cierren a media palabra.
+    if (valor === _DC_PORT_OTHER) {
+        // Lo que ya había se queda si NO era del catálogo: elegir «otro» sobre algo escrito a
+        // mano es querer corregirlo, no volver a teclearlo entero. Sobre uno de la lista sí se
+        // borra, que ahí lo que se pide es otro distinto.
+        const lista = _dcConnsOf(p.fam);
+        if (lista.some(c => String(c.id) === String(p.tipo || ''))) p.tipo = '';
+        p.libre = true;
+    } else { p.tipo = String(valor); p.libre = false; }
+    _dcCatFormDraw();
+}
+
+/** Volver de la casilla de texto a la lista, o al revés. */
+function _dcCatPortFree(i, on) {
+    const p = _dcCatFormPorts[i];
+    if (!p) return;
+    p.libre = !!on;
+    _dcCatFormDraw();
+}
+
+function _dcCatPortSet(i, campo, valor) {
+    const p = _dcCatFormPorts[i];
+    if (!p) return;
+    p[campo] = campo === 'n' ? (Number(valor) || 0) : String(valor);
+    if (campo === 'fam') _dcCatFormDraw();
+}
+
+/** Los puertos de una fila, **renglón a renglón**: `[{fam, tipo, n}, …]`.
+ *
+ *  Lo guardado es `{familia: {tipo: n}}`, que es contar y no listar — un switch de 48 bocas es
+ *  un renglón que dice 48, no cuarenta y ocho filas. Lo que hacía falta recuperar es de qué
+ *  clase son: el formulario preguntaba solo cuántas y al guardar las aplastaba todas a «sin
+ *  decir», así que abrir un modelo de la biblioteca y guardarlo le borraba el tipo. */
+function _dcCatPortRowsOf(r) {
+    let p = (r || {}).ports;
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { p = {}; } }
+    const fuera = [];
+    Object.entries(p || {}).forEach(([fam, tipos]) =>
+        Object.entries(tipos || {}).forEach(([tipo, n]) => {
+            if (Number(n) > 0) fuera.push({fam: fam, tipo: String(tipo || ''), n: Number(n)});
+        }));
+    // Por familia y dentro por tipo, para que la lista no baile al reabrirla.
+    return fuera.sort((a, b) => _DCCAT_PORTS.indexOf(a.fam) - _DCCAT_PORTS.indexOf(b.fam)
+                             || a.tipo.localeCompare(b.tipo));
+}
+
+/** Los puertos de una fila, como una cuenta por familia. Lo guardado es `{familia: {tipo: n}}`
+ *  y aquí se suman los tipos: sirve para enseñar «4 interfaces» de un vistazo donde no cabe
+ *  más. */
+function _dcCatPortCounts(r) {
+    let p = (r || {}).ports;
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { p = {}; } }
+    const out = {};
+    Object.entries(p || {}).forEach(([familia, tipos]) => {
+        out[familia] = Object.values(tipos || {}).reduce((a, b) => a + Number(b || 0), 0);
+    });
+    return out;
+}
+
+/** Qué campos pide cada árbol. No es lo mismo para los tres: un armario no se alimenta ni tiene
+ *  bahías, y un módulo no ocupa U. Un formulario que pide el fondo de montaje de un transceptor
+ *  es un formulario que enseña a ignorar sus campos. */
+function _dcCatFormDraw() {
+    const f = _dcCatForm;
+    const d = _dcCat || {};
+    const esRack = f.tree === 'rack-types';
+    const esComponente = f.tree === 'component-types';
+    // Un componente no ocupa U ni tiene flujo de aire ni cabe en una bahía de armario: se pinta
+    // como un módulo, que es el formulario corto.
+    const esModulo = f.tree === 'module-types' || f.tree === 'component-types';
+    const txt = (k, etiqueta, extra = '') => `<label class="ss-fs-2 text-muted flex-grow-1">
+        ${esc(etiqueta)}
+        <input class="form-control form-control-sm" value="${escAttr(String(f[k] || ''))}"
+               oninput="_dcCatForm['${k}']=this.value" ${extra}></label>`;
+    const num = (k, etiqueta, extra = 'step="0.5" min="0"') => `<label class="ss-fs-2 text-muted">
+        ${esc(etiqueta)}
+        <input type="number" ${extra} class="form-control form-control-sm" style="max-width:7rem"
+               value="${escAttr(String(f[k] === undefined ? '' : f[k]))}"
+               oninput="_dcCatForm['${k}']=this.value"></label>`;
+    const check = (k, etiqueta) => `<label class="ss-fs-2 text-muted d-flex align-items-center
+            gap-1 mt-3">
+        <input type="checkbox" ${f[k] ? 'checked' : ''}
+               onchange="_dcCatForm['${k}']=this.checked?1:0">${esc(etiqueta)}</label>`;
+    const ex = (k, etiqueta, extra = '') => `<label class="ss-fs-2 text-muted">
+        ${esc(etiqueta)}
+        <input class="form-control form-control-sm" style="max-width:8rem"
+               value="${escAttr(String(_dcCatFormExtra[k] === undefined
+                                       ? '' : _dcCatFormExtra[k]))}"
+               oninput="_dcCatFormExtra['${k}']=this.value" ${extra}></label>`;
+
+    const conFila = !!(_dcCatEditing && _dcCatEditing.uid);
+    const pestanas = _dcCatPreview ? '' : `<ul class="nav nav-tabs mb-2">
+        <li class="nav-item"><button class="nav-link${
+            _dcCatFormTab === 'data' ? ' active' : ''}" onclick="_dcCatFormGo('data')">
+            ${esc(t('dcim_cat_tab_data'))}</button></li>
+        <li class="nav-item"><button class="nav-link${
+            _dcCatFormTab === 'images' ? ' active' : ''}" onclick="_dcCatFormGo('images')">
+            <i class="bi bi-image me-1"></i>${esc(t('dcim_cat_tab_images'))}</button></li>
+        ${conFila ? `<li class="nav-item"><button class="nav-link${
+            _dcCatFormTab === 'files' ? ' active' : ''}" onclick="_dcCatFormGo('files')">
+            <i class="bi bi-paperclip me-1"></i>${
+            esc(t('dcim_cat_tab_files'))}</button></li>
+        <li class="nav-item"><button class="nav-link${
+            _dcCatFormTab === 'history' ? ' active' : ''}" onclick="_dcCatFormGo('history')">
+            <i class="bi bi-clock-history me-1"></i>${
+            esc(t('dcim_cat_tab_history'))}</button></li>` : ''}
+    </ul>`;
+    if (!_dcCatPreview && _dcCatFormTab === 'images')
+        return _dcCatFormShow(pestanas + _dcCatImagesHtml(conFila));
+    if (!_dcCatPreview && _dcCatFormTab === 'history')
+        return _dcCatFormShow(pestanas + _dcCatHistHtml());
+    if (!_dcCatPreview && _dcCatFormTab === 'files')
+        return _dcCatFormShow(pestanas + _dcCatFilesHtml(conFila));
+    // Un `<datalist>` y no un desplegable: se escribe para filtrar, y una marca que esta
+    // instalación todavía no conoce se puede teclear entera — que es exactamente el caso de
+    // quien está dando de alta el armario que montó el electricista.
+    const marcas = ((_dcBrands || {}).rows || []);
+    const lista = marcas.length ? `<datalist id="dc-cat-brands">${marcas.map(
+        b => `<option value="${escAttr(b.name || '')}"></option>`).join('')}</datalist>` : '';
+    const html = `${pestanas}${lista}<div class="d-flex flex-column gap-2">
+        <div class="d-flex gap-2 flex-wrap">
+            ${txt('manufacturer', t('dcim_cat_maker'),
+                  marcas.length ? 'list="dc-cat-brands" autocomplete="off"' : '')}
+            ${txt('model', t('dcim_cat_model'))}
+        </div>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_cat_desc'))}
+            <textarea class="form-control form-control-sm" rows="3"
+                      oninput="_dcCatForm.description=this.value">${
+                esc(String(f.description || ''))}</textarea></label>
+        ${txt('url', t('dcim_cat_product_url'), 'type="url" placeholder="https://"')}
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_cat_kind'))}
+                <select class="form-select form-select-sm"
+                        onchange="_dcCatForm.tree=this.value;_dcCatSchema=_dcCatSchemaFor(this.value);_dcCatFormDraw()">
+                    ${(d.trees || ['device-types']).map(a => `<option value="${escAttr(a)}"${
+                        f.tree === a ? ' selected' : ''}>${
+                        esc(_dcCatTreeName(a))}</option>`).join('')}
+                </select></label>
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_role'))}
+                <select class="form-select form-select-sm"
+                        onchange="_dcCatForm.kind=this.value;_dcCatFormDraw()">
+                    <option value="">${esc(t('dcim_cat_kind_guess'))}</option>
+                    ${((d.kinds_by_tree || {})[f.tree] || d.all_kinds || []).map(
+                        k => `<option value="${escAttr(k)}"${
+                        f.kind === k ? ' selected' : ''}>${
+                        esc(_dcCatKindName(k))}</option>`).join('')}
+                </select></label>
+            ${esModulo ? '' : num('u', 'U')}
+            ${txt('part_number', t('dcim_cat_part_number'), 'style="max-width:12rem"')}
+            ${esComponente ? _dcCatCompCommon(d) : ''}
+        </div>
+        ${/* Un componente también se enchufa por algún sitio: un cargador tiene una entrada
+              de corriente y una salida de continua, y un adaptador USB-C a red tiene un USB-C
+              de entrada y una RJ-45 de salida. Estaba solo en la rama de los chasis, así que la
+              pregunta «¿qué latiguillo le hace falta a esto?» no tenía dónde contestarse. */
+          esComponente ? _dcCatCompFields(d, f) + _dcCatPortsBox()
+          : esRack ? _dcCatRackFields(ex, num) : `
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            ${check('is_powered', t('dcim_cat_powered'))}
+            ${f.is_powered ? `<label class="ss-fs-2 text-muted">${
+                    _dcAttrLabel('power_type')}
+                <select class="form-select form-select-sm" style="max-width:11rem"
+                        onchange="_dcCatForm.power_type=this.value">
+                    <option value="">${esc(t('dcim_cat_unset'))}</option>
+                    ${(d.power_types || []).map(v => `<option value="${escAttr(v)}"${
+                        f.power_type === v ? ' selected' : ''}>${
+                        esc(_dcEnumName(v))}</option>`).join('')}
+                </select></label>` : ''}
+            ${esModulo ? '' : check('full_depth', t('dcim_cat_full_depth'))}
+            ${esModulo ? '' : `<label class="ss-fs-2 text-muted">${esc(t('dcim_cat_airflow'))}
+                <select class="form-select form-select-sm" style="max-width:11rem"
+                        onchange="_dcCatForm.airflow=this.value">
+                    ${['', 'none', 'passive', 'front-to-rear', 'rear-to-front',
+                       'left-to-right', 'right-to-left',
+                       'side-to-rear'].map(a => `<option value="${escAttr(a)}"${
+                        f.airflow === a ? ' selected' : ''}>${
+                        esc(a ? _dcEnumName(a) : t('dcim_cat_unset'))}</option>`).join('')}
+                </select></label>`}
+            ${esModulo ? '' : `<label class="ss-fs-2 text-muted">${esc(t('dcim_cat_subdevice'))}
+                <select class="form-select form-select-sm" style="max-width:10rem"
+                        onchange="_dcCatForm.subdevice=this.value">
+                    ${['', 'parent', 'child'].map(a => `<option value="${escAttr(a)}"${
+                        f.subdevice === a ? ' selected' : ''}>${
+                        esc(a || t('dcim_cat_unset'))}</option>`).join('')}
+                </select></label>`}
+            ${ex('weight', t('dcim_cat_weight'), 'type="number" step="0.01" min="0"')}
+            ${ex('weight_unit', t('dcim_cat_weight_unit'))}
+        </div>
+        ${_dcCatPortsBox()}`}
+        ${_dcCatLifeFields()}
+        ${_dcCatSchemaFields()}
+        <div class="text-muted ss-fs-1">${esc(_dcCatPreview ? t('dcim_sch_preview_hint')
+                                              : _dcCatEditing ? t('dcim_cat_edit_hint')
+                                              : _dcCatCloneFrom ? t('dcim_cat_clone_hint')
+                                                                : t('dcim_cat_new_hint'))}</div>
+    </div>`;
+    _dcCatFormShow(html);
+}
+
+function _dcCatFormGo(tab) {
+    _dcCatFormTab = tab;
+    _dcCatFormDraw();
+}
+
+/** Abrir el diálogo del formulario. Un solo sitio para las dos pestañas: el título y el pie son
+ *  los mismos, y duplicarlos sería que una de las dos se quedara sin el botón de guardar el día
+ *  que alguien lo cambie. */
+function _dcCatFormShow(html) {
+    const f = _dcCatForm;
+    showHtmlModal(_dcCatPreview
+                    ? tf('dcim_sch_preview_of', (_dcCatSchema || {}).name || '')
+                    : _dcCatEditing
+                    ? `${f.manufacturer || ''} ${f.model || ''}`.trim()
+                    : _dcCatCloneFrom ? t('dcim_cat_cloning') : t('dcim_cat_new'),
+                  html, _dcCatPreview ? 'warning' : 'primary',
+                  // Sin botón de guardar en una prueba: se abrió para ver qué campos salen, y
+                  // guardar desde aquí llenaría el catálogo de cacharros que nadie quería.
+                  //
+                  // Ni en la pestaña de imágenes: ahí cada fichero se sube al soltarlo y ya está
+                  // guardado. Un «guardar» que no guarda nada de lo que se está viendo es un
+                  // botón que enseña a desconfiar del resto.
+                  // Ni en el historial: ahí no se escribe nada, se mira lo que ya pasó.
+                  // Ni en los adjuntos: cada fichero se sube al elegirlo, como las imágenes.
+                  _dcCatPreview || _dcCatFormTab === 'images'
+                                || _dcCatFormTab === 'files'
+                                || _dcCatFormTab === 'history' ? ''
+                  : `<button class="btn btn-primary" onclick="_dcCatEditSave()">
+                       <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`);
+}
+
+/** Las dos caras: la que hay, y el hueco para poner otra.
+ *
+ *  Cada fichero se sube al elegirlo y no al guardar el formulario: una imagen no es un campo del
+ *  modelo, es un fichero en el disco del servidor, y juntarlos haría que cancelar el formulario
+ *  tuviera que deshacer una escritura. */
+function _dcCatImagesHtml(conFila) {
+    if (!conFila)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_img_save_first'))}</div>`;
+    const r = _dcCatEditing;
+    const cara = (face, etiqueta) => {
+        const nombre = String(r[face + '_image'] || '');
+        return `<div class="col-12 col-md-6">
+            <div class="fw-semibold ss-fs-2 mb-1">${esc(etiqueta)}</div>
+            ${nombre ? `<img src="${_dcimMediaUrl(nombre)}" alt=""
+                    class="img-fluid border rounded mb-2" style="max-height:10rem">`
+                : `<div class="text-muted ss-fs-2 mb-2">${esc(t('dcim_cat_no_image'))}</div>`}
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+                <input type="file" accept="image/*" class="form-control form-control-sm"
+                       style="max-width:14rem"
+                       onchange="_dcCatImgUp('${escAttr(face)}', this)">
+                ${nombre ? `<button class="btn btn-sm btn-danger"
+                    onclick="_dcCatImgDrop('${escAttr(face)}')">
+                    <i class="bi bi-trash me-1"></i>${esc(t('delete'))}</button>` : ''}
+            </div>
+        </div>`;
+    };
+    return `<div class="row g-3">
+            ${cara('front', t('dcim_cat_front'))}
+            ${cara('rear', t('dcim_cat_rear'))}
+        </div>
+        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_cat_img_hint'))}</div>`;
+}
+
+async function _dcCatImgUp(face, inp) {
+    const file = (inp && inp.files && inp.files[0]) || null;
+    if (!file || !_dcCatEditing) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    // `fetch` a pelo: lo que va aquí es un formulario con un fichero dentro, y el envoltorio de
+    // JSON lo convertiría en la cadena "[object File]". El global sigue poniendo el CSRF.
+    let resp;
+    try {
+        resp = await fetch(`/api/v1/dcim/catalog/${encodeURIComponent(_dcCatEditing.uid)}` +
+                           `/image/${encodeURIComponent(face)}`, {method: 'POST', body: fd});
+    } catch (e) {
+        return showToast(t('save_failed'), 'danger');
+    }
+    const d = await resp.json().catch(() => ({}));
+    if (!resp.ok || d.error) return showToast(d.error || `HTTP ${resp.status}`, 'danger', 8000);
+    _dcCatEditing[face + '_image'] = d.image || '';
+    showToast(t('saved'), 'success');
+    _dcCatFormDraw();
+    _dcCatOpen();
+}
+
+async function _dcCatImgDrop(face) {
+    if (!_dcCatEditing) return;
+    const r = await _dcimSend('DELETE',
+        `/api/v1/dcim/catalog/${encodeURIComponent(_dcCatEditing.uid)}` +
+        `/image/${encodeURIComponent(face)}`);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcCatEditing[face + '_image'] = '';
+    showToast(t('deleted'), 'success');
+    _dcCatFormDraw();
+    _dcCatOpen();
+}
+
+/** Lo que solo tiene un armario, tal como lo nombra `schema/racktype.json`.
+ *
+ *  Sus medidas exteriores contestan si cabe donde se quiere poner y el peso máximo si aguanta lo
+ *  que se le va a meter: las dos preguntas que se hacen antes de comprar uno. */
+/** Lo que hay que saber de un componente, que no es lo mismo para un disco que para una CPU.
+ *
+ *  «Samsung PM9A3 · 1.92 TB» alcanza para reconocerlo en una lista y no para comprarlo: si es
+ *  M.2 o de 2,5", si va por NVMe o por SATA, y si la bahía libre lo admite. Eso es lo que se
+ *  mira antes de pedir el recambio.
+ *
+ *  Los campos los dice **el servidor** (`component_fields`): once clases con cuatro atributos
+ *  cada una, escritas aquí a mano, son la lista que nadie actualiza el día que entra la doceava.
+ *  Esta función solo sabe dibujar tres formas de control. */
+function _dcCatCompFields(d, f) {
+    if (!f.kind)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_attrs_pick_kind'))}</div>`;
+    return `<div class="fw-semibold ss-fs-2 mt-1">${esc(t('dcim_cat_attrs'))}</div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            ${_dcCatSizeBox(d, f)}
+            ${_dcCatKitBox()}
+            ${_dcCatFieldRow((d.component_fields || {})[f.kind] || [])}</div>`;
+}
+
+/** Una tira de campos, con las unidades pegadas a lo que miden.
+ *
+ *  Un campo marcado `unit_of` no sale por su cuenta: se dibuja dentro del control de su magnitud.
+ *  Sueltos ocupaban el doble, se iban a la línea de abajo y dejaban «Unidad de peso» flotando sin
+ *  nada al lado que dijera de qué — y sobre todo, son un solo dato. */
+/** Una fila de campos dichos por el documento de perfiles.
+ *
+ *  *donde* dice **dónde escriben**: `{col, extra}` son las dos expresiones JS que salen en los
+ *  `oninput`, y `{colBox, extraBox}` los objetos de los que se lee lo ya escrito. El catálogo es
+ *  el valor por omisión; una plantilla pasa el suyo, porque desde que copia del catálogo estos
+ *  datos son de ella y se corrigen ahí. Dos renderizadores de lo mismo acaban siendo dos que se
+ *  separan el día que alguien añada un tipo de campo a uno. */
+function _dcCatFieldRow(campos, donde) {
+    const unidad = {};
+    (campos || []).forEach(c => { if (c.unit_of) unidad[c.unit_of] = c; });
+    return (campos || []).filter(c => !c.unit_of)
+        .map(c => _dcCatCompField(c, unidad[c.name], donde)).join('');
+}
+
+//: Dónde escribe el formulario del catálogo. Aquí y no repartido por las llamadas: es lo que
+//: hace que pasar otro sea decir una cosa y no cuatro.
+function _dcCatWhere() {
+    return {col: '_dcCatForm', extra: '_dcCatFormExtra',
+            colBox: _dcCatForm, extraBox: _dcCatFormExtra};
+}
+
+/** La casilla de tamaño, **con el nombre que tiene en esa clase**.
+ *
+ *  La misma casilla es la capacidad de un disco, los gigas de un DIMM y los vatios de una fuente,
+ *  y una palabra que vale para las tres no informa de ninguna. El ejemplo enseña la unidad, que
+ *  es la forma de pedirla sin partir el campo en dos: en un número y una unidad aparte habría que
+ *  decidir si 4 TB son 4·10¹² o 4·2⁴⁰ —las dos respuestas están en algún albarán— y convertir
+ *  para enseñar lo que alguien ya escribió bien.
+ *
+ *  Y va entre los atributos porque es uno: de un SSD, lo primero que se mira. El peso, que lo
+ *  tienen todos, se fue con los datos generales — un atributo es lo que distingue a una clase de
+ *  otra, y algo que tienen todas no distingue nada. */
+function _dcCatSizeBox(d, f) {
+    const dicho = (d.component_size || {})[f.kind] || {};
+    // Solo donde el documento dice QUÉ es. De un disco es su capacidad y de una fuente sus
+    // vatios; de una CPU no es nada — «Tamaño» a secas era una casilla que no se sabe rellenar
+    // porque no pregunta nada. Se sigue enseñando si la fila ya trae algo escrito: esconder un
+    // dato que alguien puso es dejarlo dentro sin forma de verlo ni de quitarlo.
+    if (!dicho.label && !String(_dcCatForm.size || '').trim()) return '';
+    const etiqueta = dicho.label ? _dcAttrLabel(dicho.label) : esc(t('dcim_part_size'));
+    const unidades = dicho.units || [];
+    // Y tampoco si lo que ya hay escrito no es un número con su unidad: alguien puso «media
+    // altura» y meterlo en dos huecos numéricos lo perdería sin decirlo. Lo escrito manda sobre
+    // la forma de pedirlo.
+    const raro = String(_dcCatForm.size || '').trim()
+              && !/^[\d.,]+\s*\S*$/.test(String(_dcCatForm.size).trim());
+    if (!unidades.length || raro)
+        // Sin unidades es texto libre, que es lo que hace falta donde el tamaño no es una
+        // magnitud: «media altura», «doble ancho».
+        return `<label class="ss-fs-2 text-muted">${etiqueta}
+            <input class="form-control form-control-sm" style="max-width:10rem"
+                   value="${escAttr(String(_dcCatForm.size || ''))}"
+                   placeholder="${escAttr(dicho.hint || '')}"
+                   oninput="_dcCatForm.size=this.value"></label>`;
+    const partes = _dcCatSizeSplit(_dcCatForm.size, unidades);
+    return `<label class="ss-fs-2 text-muted">${etiqueta}
+        <div class="input-group input-group-sm" style="max-width:11rem">
+            <input class="form-control" type="number" step="any" min="0" id="dccat-size-n"
+                   value="${escAttr(partes.n)}" oninput="_dcCatSizeJoin()">
+            <select class="form-select" id="dccat-size-u" style="max-width:5.5rem"
+                    onchange="_dcCatSizeJoin()">
+                ${partes.opciones.map(u => `<option value="${escAttr(u)}"${
+                    partes.u === u ? ' selected' : ''}>${esc(u)}</option>`).join('')}
+            </select>
+        </div></label>`;
+}
+
+/** Cuántas piezas trae una unidad de lo que se compra.
+ *
+ *  Un kit de dos módulos se pide con un número de parte, llega en una caja y se factura como uno
+ *  — y ocupa dos zócalos. «Cuántos DIMM de 16 GB tengo» quiere la segunda cifra y «cuántos pedí»
+ *  quiere la primera, y con una sola casilla hay que elegir cuál se contesta mal. */
+function _dcCatKitBox() {
+    return `<label class="ss-fs-2 text-muted">${_dcAttrLabel('kit_qty')}
+        <input type="number" min="1" step="1" class="form-control form-control-sm"
+               style="max-width:8rem" value="${escAttr(String(_dcCatForm.kit_qty || 1))}"
+               oninput="_dcCatForm.kit_qty=Number(this.value)||1"></label>`;
+}
+
+/** Un desplegable de unidad, sin etiqueta propia: la lleva la magnitud a la que va pegado. */
+function _dcimUnitSelect(nombre, opciones, valor, donde) {
+    return `<select class="form-select" style="max-width:5rem"
+            onchange="${donde || '_dcCatFormExtra'}['${escAttr(nombre)}']=this.value">
+        <option value="">—</option>
+        ${(opciones || []).map(u => `<option value="${escAttr(u)}"${
+            String(valor || '') === String(u) ? ' selected' : ''}>${
+            esc(_dcEnumName(u))}</option>`).join('')}
+    </select>`;
+}
+
+/** «1.92 TB» partido en número y unidad para poder pintarlo en dos huecos.
+ *
+ *  Lo guardado sigue siendo la cadena entera: partirla de verdad obligaría a decidir si 4 TB son
+ *  4·10¹² o 4·2⁴⁰, y las dos respuestas están en algún albarán. Una unidad que no esté en la
+ *  lista se añade en vez de perderse — lo que alguien escribió antes vale, aunque el documento
+ *  ya no la ofrezca. */
+function _dcCatSizeSplit(texto, unidades) {
+    const m = String(texto || '').trim().match(/^([\d.,]+)\s*(.*)$/);
+    const n = m ? m[1] : '';
+    const u = m ? m[2].trim() : '';
+    const opciones = unidades.slice();
+    if (u && opciones.indexOf(u) < 0) opciones.unshift(u);
+    return {n, u: u || opciones[0] || '', opciones};
+}
+
+/** Los dos huecos, otra vez en una cadena. Sin número no hay tamaño: guardar «TB» a secas sería
+ *  guardar una unidad de nada. */
+function _dcCatSizeJoin() {
+    const n = (document.getElementById('dccat-size-n') || {}).value || '';
+    const u = (document.getElementById('dccat-size-u') || {}).value || '';
+    _dcCatForm.size = String(n).trim() ? `${String(n).trim()} ${u}`.trim() : '';
+}
+
+/** Cómo se llama el tamaño de un componente de esa clase, para leerlo fuera del formulario. */
+function _dcCatSizeName(kind) {
+    const dicho = ((_dcCat || {}).component_size || {})[String(kind || '')] || {};
+    return dicho.label ? _dcAttrName(dicho.label) : t('dcim_part_size');
+}
+
+/** Lo que dice todo componente: el peso. Con los datos generales y no bajo «Atributos», porque
+ *  un atributo es lo que distingue a una clase de otra. */
+function _dcCatCompCommon(d) {
+    // Menos los que tienen bloque propio: un campo agrupado sale DOS veces si aquí no se quita,
+    // y las dos casillas escriben en la misma clave — la segunda gana y parece que la primera
+    // no guarda.
+    return _dcCatFieldRow((d.component_common || []).filter(c => !c.group));
+}
+
+/** Las fechas de la vida de un modelo. De cualquiera: un servidor deja de venderse y deja de
+ *  recibir parches igual que un disco, así que este bloque no mira de qué árbol es.
+ *
+ *  Del documento de perfiles y no de una lista aquí, que es de lo que sirve tenerlo: añadir
+ *  «fin de venta en Europa» es editar un JSON. */
+function _dcCatLifeFields() {
+    const campos = ((_dcCat || {}).lifecycle_fields) || [];
+    if (!campos.length) return '';
+    return `<div class="fw-semibold ss-fs-2 mt-1">${esc(t('dcim_cat_lifecycle'))}</div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">${_dcCatFieldRow(campos)}</div>`;
+}
+
+/** Y en la ficha, con lo ya pasado en rojo.
+ *
+ *  Esa es la única razón de agruparlas: seis fechas en una tabla se leen igual que seis fechas
+ *  cualesquiera, y lo que hay que ver de un vistazo es cuál ya ocurrió. Un modelo sin parches
+ *  desde hace ocho meses y otro que los recibe hasta enero se distinguen en un carácter. */
+function _dcCatLifeRows(r) {
+    const campos = ((_dcCat || {}).lifecycle_fields) || [];
+    const e = r.extra && typeof r.extra === 'object' ? r.extra : {};
+    const puestas = campos.filter(c => e[c.name] !== '' && e[c.name] !== null
+                                       && e[c.name] !== undefined);
+    if (!puestas.length) return '';
+    // Hoy en ISO, que es como se guardan: comparar dos cadenas ISO ordena igual que comparar
+    // dos fechas, y no hay que construir una fecha por renglón para saberlo.
+    const hoy = new Date().toISOString().slice(0, 10);
+    return `<div class="fw-semibold ss-fs-2 mb-1 mt-2">${esc(t('dcim_cat_lifecycle'))}</div>
+        <table class="table table-sm align-middle mb-0 ss-fs-3"><tbody>${puestas.map(c => {
+            const v = String(e[c.name]);
+            const pasada = v <= hoy;
+            // Ya marcado: la etiqueta lleva su ayuda dentro, así que no se vuelve a escapar.
+            const etiqueta = _dcAttrLabel(c.name);
+            return `<tr><td class="text-muted" style="white-space:nowrap">${etiqueta}</td>
+                <td>${pasada ? `<span class="badge bg-danger">${esc(v)}</span>`
+                             : esc(v)}</td></tr>`;
+        }).join('')}</tbody></table>`;
+}
+
+function _dcCatCompField(c, unidad, sitio) {
+    sitio = sitio || _dcCatWhere();
+    const k = c.name;
+    // Ya marcado: la etiqueta lleva su ayuda dentro, así que no se vuelve a escapar.
+    const etiqueta = _dcAttrLabel(k);
+    // Un campo puede escribir en una COLUMNA del modelo en vez de en `extra`: la disipación de un
+    // componente es la misma columna que la de un servidor, y guardarla dos veces serían dos
+    // respuestas a la misma pregunta que pueden discrepar.
+    const donde = c.column ? sitio.col : sitio.extra;
+    const caja = (c.column ? sitio.colBox : sitio.extraBox) || {};
+    const valor = caja[k] === undefined ? '' : caja[k];
+    if (unidad) {
+        // La unidad puede vivir en otro sitio que la magnitud —una en columna y la otra en
+        // `extra`—, así que se resuelve aparte en vez de darse por hecha.
+        const uDonde = unidad.column ? sitio.col : sitio.extra;
+        const uCaja = (unidad.column ? sitio.colBox : sitio.extraBox) || {};
+        const uValor = uCaja[unidad.name];
+        return `<label class="ss-fs-2 text-muted">${etiqueta}
+            <div class="input-group input-group-sm" style="max-width:11rem">
+                <input class="form-control" type="number" step="any" min="0"
+                       value="${escAttr(String(valor))}"
+                       oninput="${donde}['${escAttr(k)}']=this.value">
+                ${_dcimUnitSelect(unidad.name, unidad.enum || [], uValor, uDonde)}
+            </div></label>`;
+    }
+    if (c.type === 'bool')
+        return `<label class="ss-fs-2 text-muted d-flex align-items-center gap-1 mt-3">
+            <input type="checkbox" ${valor ? 'checked' : ''}
+                   onchange="${donde}['${escAttr(k)}']=this.checked">${
+            etiqueta}</label>`;
+    if (c.type === 'enum')
+        return `<label class="ss-fs-2 text-muted">${etiqueta}
+            <select class="form-select form-select-sm" style="max-width:12rem"
+                    onchange="${donde}['${escAttr(k)}']=this.value">
+                <option value="">${esc(t('dcim_cat_unset'))}</option>
+                ${(c.enum || []).map(v => `<option value="${escAttr(v)}"${
+                    String(valor) === String(v) ? ' selected' : ''}>${
+                    esc(_dcEnumName(v))}</option>`).join('')}
+            </select></label>`;
+    return `<label class="ss-fs-2 text-muted">${etiqueta}
+        <input class="form-control form-control-sm" style="max-width:${
+                   c.type === 'date' ? '10rem' : '9rem'}"
+               type="${c.type === 'number' ? 'number' : c.type === 'date' ? 'date' : 'text'}"
+               ${c.type === 'number' ? 'step="any" min="0"' : ''}
+               value="${escAttr(String(valor))}"
+               oninput="${donde}['${escAttr(k)}']=this.value"></label>`;
+}
+
+//: Las columnas de la ficha ya tenían nombre en el formulario. El historial enseña las mismas,
+//: así que reutiliza esas etiquetas en vez de estrenar veinte claves que dirían lo mismo — y que
+//: se quedarían diciendo otra cosa el día que alguien afine una de las dos listas.
+const _DC_FIELD_KEY = {
+    manufacturer: 'dcim_cat_maker', model: 'dcim_cat_model', kind: 'dcim_role',
+    tree: 'dcim_cat_kind', size: 'dcim_part_size', description: 'dcim_cat_desc',
+    part_number: 'dcim_cat_part_number', u_tenths: 'dcim_u_size',
+    full_depth: 'dcim_cat_full_depth', is_powered: 'dcim_cat_powered',
+    airflow: 'dcim_cat_airflow', subdevice: 'dcim_cat_subdevice',
+    source: 'dcim_cat_source', front_image: 'dcim_cat_front', rear_image: 'dcim_cat_rear',
+    airflow: 'dcim_cat_airflow', url: 'dcim_cat_product_url',
+    ports: 'dcim_cat_ports', extra: 'dcim_cat_attrs',
+};
+
+/** Cómo se lee el valor de un desplegable.
+ *
+ *  `front-to-rear` es lo que escribe la biblioteca: un identificador, no una frase. Se traduce
+ *  por el valor, **con el crudo como respaldo** — que es lo que deja que `GB`, `M.2 2280` o
+ *  `AES-XTS-256` salgan tal cual sin una entrada de diccionario por cada uno: esos ya son la
+ *  palabra. */
+function _dcEnumName(v) {
+    const crudo = String(v === undefined || v === null ? '' : v);
+    if (!crudo) return crudo;
+    const clave = 'dcim_val_' + crudo.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    const texto = t(clave);
+    return (texto && texto !== clave) ? texto : crudo;
+}
+
+/** La etiqueta de un campo, con su ayuda si la tiene.
+ *
+ *  Con `title` y no con el globo de Bootstrap: este diálogo se redibuja cada vez que alguien toca
+ *  un desplegable, y un globo cuyo disparador desaparece a mitad se queda pegado en la pantalla.
+ *
+ *  Y solo donde hay algo que decir: un icono al lado de cada campo, diga algo o no, deja de
+ *  significar «aquí hay algo que leer». */
+function _dcAttrLabel(k) {
+    const texto = _dcAttrName(k);
+    const clave = 'dcim_attr_' + String(k || '').replace(/^(extra|ports)\./, '') + '_tt';
+    const ayuda = t(clave);
+    if (!ayuda || ayuda === clave) return esc(texto);
+    return `<span title="${escAttr(ayuda)}">${esc(texto)}
+        <i class="bi bi-info-circle text-muted ss-fs-1"></i></span>`;
+}
+
+/** Llevarse modelos y plantillas a otra instalación: **se navega, no se pide**.
+ *
+ *  La ruta contesta con cabecera de descarga, así que el navegador guarda el fichero y aquí no
+ *  hace falta ni leerlo ni componer un enlace de mentira. Lo que no se pueda leer sale vacío del
+ *  servidor y no de aquí: quien no ve el catálogo se lleva sus plantillas igual. */
+function _dcPortExport(tipos, plantillas) {
+    const q = [];
+    if ((tipos || []).length) q.push('types=' + encodeURIComponent(tipos.join(',')));
+    if ((plantillas || []).length) q.push('builds=' + encodeURIComponent(plantillas.join(',')));
+    if (!q.length) return showToast(t('dcim_port_nothing'), 'warning');
+    window.location = '/api/v1/dcim/export?' + q.join('&');
+}
+
+/** Y traerlos. El `<input type=file>` se crea al vuelo: uno escondido en el marcado es un trozo
+ *  de pantalla que solo existe para un clic al año.
+ *
+ *  Lo que cuenta el servidor se **dice entero** —cuántos entraron y cuántos ya estaban— porque
+ *  «importado» a secas sobre un fichero que no trajo nada nuevo se lee como que algo falló. */
+function _dcPortImport(luego) {
+    const caja = document.createElement('input');
+    caja.type = 'file';
+    caja.accept = '.json,application/json';
+    caja.onchange = () => {
+        const fichero = (caja.files || [])[0];
+        if (!fichero) return;
+        const lector = new FileReader();
+        lector.onload = async () => {
+            let doc = null;
+            try { doc = JSON.parse(String(lector.result || '')); }
+            catch (e) { return showToast(t('dcim_port_bad'), 'danger'); }
+            const r = await _dcimSend('POST', '/api/v1/dcim/import', doc);
+            if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+            showToast(tf('dcim_port_done', Number(r.types_new || 0),
+                         Number(r.builds_new || 0),
+                         Number(r.types_skipped || 0) + Number(r.builds_skipped || 0)),
+                      'success');
+            // Una plataforma que no existe aquí no se inventa, y por eso hay que decir cuál:
+            // la plantilla entró sin ella y nadie lo notaría hasta abrirla.
+            const faltan = r.platforms_missing || [];
+            if (faltan.length)
+                showToast(tf('dcim_port_no_plat', faltan.join(', ')), 'warning');
+            if (typeof luego === 'function') luego();
+        };
+        lector.readAsText(fichero);
+    };
+    caja.click();
+}
+
+/** El rótulo de un campo **escrito a mano**, con su ayuda si la tiene.
+ *
+ *  Hermano de `_dcAttrLabel`, que hace lo mismo con los campos que declara el documento de
+ *  perfiles: aquellos llevan su ⓘ desde el principio y los escritos en la plantilla no, así que
+ *  en el mismo formulario unos campos explican qué son y otros no — y los que no son justo los
+ *  que se rellenan el primer día sin tener el chasis delante.
+ *
+ *  Misma convención —la ayuda es `<clave>_tt`— y el icono **solo si existe**: uno al lado de cada
+ *  campo, diga algo o no, deja de significar «aquí hay algo que leer». */
+function _dcLabel(clave, kAyudaOtra) {
+    const texto = t(clave);
+    // La ayuda se puede pedir aparte porque el mismo rótulo significa cosas distintas en dos
+    // formularios: el «Fondo» de un armario es el de la caja entera y el de una plantilla es lo
+    // que ocupa dentro de ella. Un solo texto para los dos sería el de uno, mal, en el otro.
+    const kAyuda = kAyudaOtra || (clave + '_tt');
+    const ayuda = t(kAyuda);
+    if (!ayuda || ayuda === kAyuda) return esc(texto);
+    return `<span title="${escAttr(ayuda)}">${esc(texto)}
+        <i class="bi bi-info-circle text-muted ss-fs-1"></i></span>`;
+}
+
+/** Cómo se llama un atributo o una columna. Con la clave sin traducir como respaldo, por lo mismo
+ *  que los puertos: el servidor puede ofrecer uno que esta pantalla todavía no conozca. */
+function _dcAttrName(k) {
+    // `extra.interface` es la interfaz: el prefijo dice de qué columna salió y no es parte del
+    // nombre. Se quita aquí y no al calcular la diferencia, porque allí sí hace falta para que
+    // dos atributos de columnas distintas no se pisen.
+    const nombre = String(k || '').replace(/^(extra|ports)\./, '');
+    const clave = _DC_FIELD_KEY[nombre] || ('dcim_attr_' + nombre);
+    const texto = t(clave);
+    return (texto && texto !== clave) ? texto : nombre;
+}
+
+/** Lo que no es una foto de alzado. Pestaña propia y no dentro de «Imágenes» porque no se miran
+ *  igual: una imagen sale en el alzado y un manual se **baja**, casi siempre en otro momento.
+ *
+ *  La pantalla la pone `_files.html`, compartida con las plantillas: cuelgan cosas distintas y las
+ *  cuelgan igual. */
+function _dcCatFilesHtml(conFila) {
+    return _dcFilesHtml('type', conFila ? (_dcCatEditing || {}).uid || '' : '',
+                        _dcimMay('dcim_catalog_manage'), _dcCatFormDraw);
+}
+
+//: El historial de la ficha abierta: `{uid, rows}` o `null` si todavía no se ha pedido.
+let _dcCatHist = null;
+
+async function _dcCatHistLoad(uid) {
+    const d = await apiGet(`/api/v1/dcim/catalog/${encodeURIComponent(uid)}/history`) || {};
+    _dcCatHist = {uid, rows: d.history || []};
+    _dcCatFormDraw();
+}
+
+/** Qué decía esta ficha antes, y quién la cambió.
+ *
+ *  Un modelo del catálogo es un dato compartido: de él cuelgan las plantillas, las piezas
+ *  estampadas en veinte máquinas y la altura con la que se dibuja un alzado. La corrección que
+ *  rompe algo casi nunca se descubre el día que se hace. */
+function _dcCatHistHtml() {
+    const uid = (_dcCatEditing || {}).uid || '';
+    if (!uid) return '';
+    if (!_dcCatHist || _dcCatHist.uid !== uid) {
+        _dcCatHistLoad(uid);
+        return `<div class="text-center py-3"><div class="spinner-border spinner-border-sm">
+            </div></div>`;
+    }
+    const rows = _dcCatHist.rows || [];
+    if (!rows.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_hist_none'))}</div>`;
+    const puede = _dcimMay('dcim_catalog_manage');
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr>
+            <th>${esc(t('dcim_cat_hist_when'))}</th>
+            <th>${esc(t('dcim_cat_hist_who'))}</th>
+            <th>${esc(t('dcim_cat_hist_what'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${rows.map((h, i) => `<tr>
+            <td class="ss-fs-2 ss-tabular">${esc(_fmtDateTime(h.at) || h.at || '')}</td>
+            <td class="ss-fs-2">${esc(h.by || '—')}</td>
+            <td class="ss-fs-2">${_dcCatHistWhat(h)}</td>
+            <td class="text-end">${puede && i > 0 ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcCatRestore(${jsStr(h.uid)})">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>${
+                esc(t('dcim_cat_hist_undo'))}</button>` : ''}</td>
+        </tr>`).join('')}</tbody></table></div>
+        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_cat_hist_hint'))}</div>`;
+}
+
+/** Qué hizo ese cambio. La acción cuando no cambió ningún campo comparable —poner una imagen no
+ *  cambia ninguno— y si no, los campos con lo que decían y lo que pasaron a decir. */
+function _dcCatHistWhat(h) {
+    const cambios = Object.entries(h.changes || {});
+    if (!cambios.length)
+        return `<span class="badge bg-body-secondary text-body-secondary border fw-normal">${
+            esc(t('dcim_cat_hist_' + (h.action || 'edit')) || h.action || '')}</span>`;
+    return cambios.map(([campo, par]) => `<div><span class="text-muted">${
+        esc(_dcAttrName(campo))}</span>: <span class="text-decoration-line-through">${
+        esc(_dcCatHistVal(par[0]))}</span> → <span class="fw-semibold">${
+        esc(_dcCatHistVal(par[1]))}</span></div>`).join('');
+}
+
+function _dcCatHistVal(v) {
+    if (v === null || v === undefined || v === '') return '—';
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+}
+
+function _dcCatRestore(rev) {
+    const uid = (_dcCatEditing || {}).uid || '';
+    if (!uid) return;
+    showConfirmModal(t('dcim_cat_hist_restore_q'), async () => {
+        const r = await _dcimSend('POST',
+            `/api/v1/dcim/catalog/${encodeURIComponent(uid)}/restore`, {rev});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(t('saved'), 'success');
+        _dcCatHist = null;
+        hideInfoModal();
+        _dcCatOpen();
+    });
+}
+
+function _dcCatRackFields(ex, num) {
+    return `<div class="d-flex gap-2 flex-wrap align-items-end">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_cat_form_factor'))}
+                <select class="form-select form-select-sm" style="max-width:13rem"
+                        onchange="_dcCatFormExtra.form_factor=this.value">
+                    ${['4-post-cabinet', '4-post-frame', '2-post-frame', 'wall-frame',
+                       'wall-cabinet'].map(a => `<option value="${escAttr(a)}"${
+                        _dcCatFormExtra.form_factor === a ? ' selected' : ''}>${
+                        esc(a)}</option>`).join('')}
+                </select></label>
+            ${ex('width', t('dcim_cat_width_in'), 'type="number" min="0"')}
+            ${ex('starting_unit', t('dcim_cat_starting_unit'), 'type="number" min="0"')}
+        </div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            ${ex('outer_width', t('dcim_cat_outer_width'), 'type="number" min="0"')}
+            ${ex('outer_height', t('dcim_cat_outer_height'), 'type="number" min="0"')}
+            ${ex('outer_depth', t('dcim_cat_outer_depth'), 'type="number" min="0"')}
+            ${ex('outer_unit', t('dcim_cat_unit'))}
+        </div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            ${ex('mounting_depth', t('dcim_cat_mounting_depth'), 'type="number" min="0"')}
+            ${ex('max_weight', t('dcim_cat_max_weight'), 'type="number" min="0"')}
+            ${ex('weight', t('dcim_cat_weight'), 'type="number" step="0.01" min="0"')}
+            ${ex('weight_unit', t('dcim_cat_weight_unit'))}
+        </div>`;
+}
+
+
+/** Los campos que el esquema pide y el formulario no trae de fábrica.
+ *
+ *  Los de siempre —fabricante, modelo, U, puertos— ya están arriba: repetirlos sería pedirlos
+ *  dos veces. Lo que sale aquí es lo que el esquema añade, que es exactamente lo que hace que
+ *  traerlos sirva de algo — y lo que un esquema propio existe para pedir.
+ *
+ *  Todos van a `extra`, y se dice: un campo de ahí se guarda y se enseña, pero no se busca ni se
+ *  filtra por él, y quien añada uno esperando lo contrario se llevaría la sorpresa el día que
+ *  intente encontrar algo. */
+function _dcCatSchemaFields() {
+    const e = _dcCatSchema;
+    if (!e) return '';
+    // Lo que el formulario ya pide por su cuenta. Se nombra aquí y no se deduce: la lista de
+    // arriba es fija y corta, y adivinarla sería adivinar.
+    const yaEstan = ['manufacturer', 'model', 'slug', 'description', 'part_number', 'u_height',
+                     'is_full_depth', 'is_powered', 'airflow', 'subdevice_role',
+                     'form_factor', 'width', 'starting_unit', 'outer_width', 'outer_height',
+                     'outer_depth', 'outer_unit', 'mounting_depth', 'max_weight',
+                     'weight', 'weight_unit'];
+    const suyos = (e.fields || []).filter(c => c.target === 'extra'
+                                               && yaEstan.indexOf(c.name) < 0);
+    if (!suyos.length) return '';
+    return `<div class="fw-semibold ss-fs-2 mt-1">${esc(tf('dcim_cat_schema_extra', e.name))}</div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">${suyos.map(c => {
+        const v = _dcCatFormExtra[c.name];
+        const valor = v === undefined || v === null ? '' : String(v);
+        if ((c.enum || []).length) {
+            return `<label class="ss-fs-2 text-muted">${esc(c.name)}
+                <select class="form-select form-select-sm" style="max-width:12rem"
+                        onchange="_dcCatFormExtra['${escAttr(c.name)}']=this.value">
+                    <option value="">${esc(t('dcim_cat_unset'))}</option>
+                    ${c.enum.map(o => `<option value="${escAttr(o)}"${
+                        valor === o ? ' selected' : ''}>${esc(o)}</option>`).join('')}
+                </select></label>`;
+        }
+        const tipo = (c.type === 'integer' || c.type === 'number') ? 'number' : 'text';
+        if (c.type === 'boolean')
+            return `<label class="ss-fs-2 text-muted d-flex align-items-center gap-1 mt-3">
+                <input type="checkbox" ${valor && valor !== 'false' ? 'checked' : ''}
+                       onchange="_dcCatFormExtra['${escAttr(c.name)}']=this.checked">
+                ${esc(c.name)}</label>`;
+        return `<label class="ss-fs-2 text-muted">${esc(c.name)}${
+            c.required ? ' <span class="text-danger">*</span>' : ''}
+            <input type="${tipo}" class="form-control form-control-sm" style="max-width:11rem"
+                   value="${escAttr(valor)}"
+                   oninput="_dcCatFormExtra['${escAttr(c.name)}']=this.value"></label>`;
+    }).join('')}</div>`;
+}
+
+async function _dcCatEditSave() {
+    const f = _dcCatForm;
+    if (!String(f.manufacturer || '').trim() || !String(f.model || '').trim())
+        return showToast(t('dcim_catalog_need_name'), 'warning');
+    // Los puertos, de renglones a la forma que guarda la biblioteca: `{familia: {tipo: n}}`.
+    // Dos renglones de la misma familia y el mismo tipo se **suman** en vez de pisarse: quien
+    // escribe «2 c14» y luego «2 c14» más quiere cuatro, no dos.
+    const ports = {};
+    (_dcCatFormPorts || []).forEach(p => {
+        const v = Number(p.n || 0);
+        if (!(v > 0) || !p.fam) return;
+        const tipo = String(p.tipo || '').trim();
+        ports[p.fam] = ports[p.fam] || {};
+        ports[p.fam][tipo] = (ports[p.fam][tipo] || 0) + v;
+    });
+    // Y las medidas, sin los huecos que se dejaron vacíos: una medida en blanco no es un cero,
+    // es «no lo sé», y guardarla como cero diría que el armario mide nada de fondo.
+    const extra = {};
+    Object.entries(_dcCatFormExtra).forEach(([k, v]) => {
+        if (v === '' || v === null || v === undefined) return;
+        const n = Number(v);
+        extra[k] = (v !== true && v !== false && String(v).trim() !== '' && !isNaN(n)) ? n : v;
+    });
+    const cuerpo = {
+        manufacturer: f.manufacturer, model: f.model, slug: f.slug,
+        description: f.description, part_number: f.part_number,
+        tree: f.tree, kind: f.kind, size: f.size || '', url: f.url || '',
+        kit_qty: Number(f.kit_qty || 1) || 1, power_type: f.power_type || '',
+        u_height: f.tree === 'module-types' ? 0 : f.u,
+        is_powered: f.tree === 'rack-types' ? 0 : (f.is_powered ? 1 : 0),
+        full_depth: f.full_depth ? 1 : 0,
+        airflow: f.airflow, subdevice: f.subdevice,
+        ports: ports, extra: extra,
+    };
+    if (_dcCatCloneFrom) cuerpo.from = _dcCatCloneFrom;
+    const r = _dcCatEditing
+        ? await _dcimSend('PUT', `/api/v1/dcim/catalog/${
+            encodeURIComponent(_dcCatEditing.uid)}`, cuerpo)
+        : await _dcimSend('POST', '/api/v1/dcim/catalog', cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    hideInfoModal();
+    showToast(t('saved'), 'success');
+    _dcCatEditing = null;
+    _dcCatCloneFrom = '';
+    _dcCatOpen();
+}

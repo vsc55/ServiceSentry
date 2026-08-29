@@ -87,12 +87,21 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `overview_set_default` | Fijar el layout como default global |
 | | `overview_reset_factory` | Restaurar el layout de fábrica |
 | **Infraestructura** | `infra_view` | Ver el estado en vivo de las máquinas (sección `/infra`) y la pestaña **Detalles**: qué es cada máquina y si está bien, que es la pregunta con la que se abre la página. No concede nada del registro: eso es `devices_view` / `devices_edit` |
-| | `infra_collect` | «Obtener datos ahora»: lanzar los checks de un dispositivo sin esperar al ciclo. **No** de `viewer` — cuesta un sondeo al aparato, puede tardar minutos y hace que los checks avisen de lo que encuentren |
+| | `infra_collect` | «Obtener datos ahora»: lanzar los checks de un dispositivo sin esperar al ciclo. **No** de `viewer` — cuesta un sondeo al dispositivo, puede tardar minutos y hace que los checks avisen de lo que encuentren |
 | | `infra_watch` | Decir que una fila concreta —un puerto, un disco— merece aviso, y si es la de internet. **No** de `viewer`: decide qué despierta a alguien |
 | | `infra_metrics_view` | La pestaña **Medidas** |
 | | `infra_results_view` | La pestaña **Últimos datos**. El único de los tres que retiene el dato: es lo único de la página que ninguna otra pestaña lee, así que sin la bandera el servidor no lo envía |
-| | `infra_raw_view` | La pestaña **Datos brutos**: todo lo que contestó el aparato, sin agrupar. **No** de `viewer` |
+| | `infra_raw_view` | La pestaña **Datos brutos**: todo lo que contestó el dispositivo, sin agrupar. **No** de `viewer` |
 | | | ⚠️ `infra_metrics_view` y `infra_raw_view` deciden **qué ofrece la pantalla**, no qué sabe: los hechos que dibujan son los mismos con los que se construye *Detalles*, así que llegan igual. Retenérselos a alguien que tiene `infra_view` exigiría vaciar *Detalles* también. Está dicho aquí y en `lib/core/infra/manifest.py` a propósito — un permiso que parece un muro y es una cortina es peor que no tenerlo |
+| **Inventario físico** | `dcim_view` | Ver dónde está el equipamiento: sedes, salas, racks y qué ocupa cada U. No abre nada del registro — direcciones y credenciales siguen tras `devices_view` |
+| | `dcim_all_view` | Verlo **de todas las empresas**. Sin esta bandera solo se ven las cosas de las empresas concedidas una a una (`org.<uid>.view`), y de las demás solo que ocupan sitio |
+| | `dcim_edit` | Crear y mover sedes, salas, racks e items: ordenar el armario |
+| | `dcim_org_edit` | Crear empresas y decir de quién es cada cosa. **Sin rol por defecto, ni siquiera `editor`**: en un grupo decide qué se factura a qué sociedad y quién puede ver qué |
+| | `dcim_cable_edit` | Declarar y retirar cableado y etiquetas |
+| | `dcim_catalog_view` | Consultar el catálogo de modelos de equipo, y las **marcas** con lo que sabemos de ellas —web de soporte, número de contrato—. Se lee sin el permiso de gestión a propósito: esa dirección es la que hace falta a las tres de la mañana |
+| | `dcim_catalog_manage` | Importarlo o actualizarlo. **No** de `viewer`: trae miles de ficheros y reemplaza aquello con lo que se dibuja cada alzado |
+| | `dcim_build_edit` | Escribir las **plantillas**: qué es «un servidor de CPD» en esta casa, con su memoria, sus discos y sus tarjetas. Su propia bandera porque DECIDIR lo que se compra y COLOCAR una caja en un U los hacen personas distintas en momentos distintos, y con una sola quien monta un rack rescribe lo que compra la empresa. **Leerlas va con `dcim_view`**: hay que poder elegir una al colocar un equipo |
+| | | ⚠️ **El rack compartido.** Un armario con equipos de varias sociedades rompe que ver un sitio sea ver lo que hay dentro: el de la filial B ve el rack y ve que la U 12 está ocupada —si no, no puede planificar— y no ve de quién es ni cómo se llama. Un item ajeno se devuelve como posición y tamaño, y nada más. Ver [explica-dcim.md](explica-dcim.md#7-permisos) |
 | **Sesiones** | `sessions_view` | Ver sesiones activas |
 | | `sessions_revoke` | Revocar sesiones |
 | **Segundo factor** | `mfa_reset_others` | Quitar el segundo factor de **otra** cuenta, con sus códigos de recuperación. **De nadie por defecto**, ni siquiera de `admin`: es el camino de vuelta de quien perdió el móvil *y* los códigos, y es también lo que haría alguien con `users_edit` para desarmar la protección antes de ir a por la contraseña. No existe el contrario —nadie puede **activar** el MFA de otro—, porque solo el dueño puede dar de alta un autenticador que tiene en la mano. Ver [explica-mfa.md](explica-mfa.md#quitar-el-factor-de-otra-cuenta) |
@@ -137,6 +146,7 @@ Además de los flags globales, existen permisos **dinámicos** por recurso concr
 - `module.<nombre>.view|add|edit|delete` — restringe el acceso a un módulo concreto.
 - `server.<uid>.<acción>` — permiso por host (ver [explica-hosts.md](explica-hosts.md)).
 - `cluster.<uid>.<acción>` — permiso por cluster.
+- `org.<uid>.view` — **qué empresas ve** alguien en el inventario físico, para el rack que comparten varias sociedades de un grupo (ver [explica-dcim.md](explica-dcim.md#7-permisos)). **Solo `view`**, a diferencia de los tres de arriba: hoy solo se estrecha la lectura, y una clave para una acción que nadie ejecuta es una casilla que no concede nada y lo parece.
 
 > **Mueren con su recurso.** Borrar un host, quitar un módulo de la configuración o eliminar un
 > cluster **poda** sus claves de todos los roles personalizados, con entrada de auditoría

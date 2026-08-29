@@ -1,0 +1,369 @@
+{# ================================================================
+   The tree: companies, sites, rooms and the racks in each room.
+
+   Split out of `_render.html` because it is a sub-section and not a helper of one — the shell
+   keeps the state, the single form and the entry point; this owns everything drawn until
+   somebody opens a rack. A render file that keeps growing is a section hiding sub-sections
+   inside it, which is how another one here reached nine hundred lines with three.
+   ================================================================ #}
+
+// ── The tree ────────────────────────────────────────────────────────────────
+
+function _dcimTreeHtml() {
+    const sites = _dcimData.sites;
+    return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad">
+        ${_dcimToolbar()}
+        ${_dcimFormHtml('new', 'site', '', '')}
+        ${sites.length ? sites.map(_dcimSiteCard).join('')
+                       : `<div class="text-muted small">${esc(t('dcim_empty'))}</div>`}
+    </div>`;
+}
+
+function _dcimToolbar() {
+    const orgs = _dcimData.orgs;
+    return `<div class="ss-toolrow mb-3">
+        <i class="bi bi-info-circle text-muted"></i>
+        <span class="text-muted ss-fs-2 ss-toolrow-text">${
+            esc(tf('dcim_note', _dcimData.sites.length, orgs.length))}</span>
+        <div class="ss-toolrow-tools">
+            ${orgs.map(o => `<span class="badge bg-body-secondary text-body-secondary border
+                fw-normal" title="${escAttr(o.name || '')}"
+                >${esc(o.short || o.name || '')}</span>`).join('')}
+            {# Catálogo, fuentes y cuadro se fueron a la fila de secciones de arriba: son
+               sitios a los que se va, no cosas que se hacen sobre lo que hay en pantalla —y
+               aquí desaparecían en cuanto se abría un rack—. Lo que queda son actos. #}
+            ${_dcimMay('dcim_org_edit') ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcOrgsOpen()"><i class="bi bi-buildings me-1"></i>${
+                esc(t('dcim_orgs'))}</button>` : ''}
+            ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcimOpen('new','site','','')"><i class="bi bi-plus-lg me-1"></i>${
+                esc(t('dcim_new_site'))}</button>` : ''}
+            <button class="btn btn-sm btn-secondary" onclick="renderDcim()">
+                <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+        </div>
+    </div>`;
+}
+
+/** The three buttons every level has: add a child, edit me, delete me.
+ *
+ *  Written once because they are the same three everywhere, and a level that grows a fourth
+ *  copy of them is the one where "edit" quietly never arrives — which is what happened: three
+ *  levels had create and delete and none of them had edit. Reported from the screen. */
+function _dcimActions(kind, uid, name, childKind) {
+    if (!_dcimMay('dcim_edit')) return '';
+    const btn = (fn, icon, key) => `<button class="btn btn-sm btn-secondary py-0 px-2"
+        onclick="${fn}" title="${escAttr(t(key))}"><i class="bi ${icon}"></i></button>`;
+    return `<span class="btn-group btn-group-sm">
+        ${childKind ? btn(`_dcimOpen('new',${jsStr(childKind)},${jsStr(uid)},'')`,
+                          'bi-plus-lg', 'dcim_new_' + childKind) : ''}
+        ${btn(`_dcimOpen('edit',${jsStr(kind)},'',${jsStr(uid)})`, 'bi-pencil', 'edit')}
+        ${_dcimMay('dcim_org_edit') ? btn(
+            `_dcimOwnerAsk(${jsStr(kind)},${jsStr(uid)},${jsStr(name || '')})`,
+            'bi-building-check', 'dcim_owner') : ''}
+        ${btn(`_dcimDelete(${jsStr(kind)},${jsStr(uid)},${jsStr(name || '')})`,
+              'bi-trash3', 'delete')}
+    </span>`;
+}
+
+//: Las empresas mientras se editan, y cómo estaban al abrir el cuadro. Dos listas porque lo
+//: que se manda es la DIFERENCIA: una fila que nadie tocó no tiene por qué viajar, y un PUT por
+//: cada renglón cada vez que se pulsa guardar es ruido en el registro de auditoría de quien
+//: mañana quiera saber quién cambió el nombre de una sociedad.
+let _dcOrgsDraft = null;
+let _dcOrgsOrig = '';
+
+/** El cuadro de empresas: la lista, con lo que hay que decir de cada una.
+ *
+ *  Aquí y no en una sección propia: son tres campos que se escriben el primer día y casi nunca
+ *  más, y una pantalla entera para eso es una pantalla que sobra el resto del año. */
+function _dcOrgsOpen() {
+    if (!_dcimMay('dcim_org_edit')) return;
+    _dcOrgsDraft = (_dcimData.orgs || []).map(o => ({uid: o.uid, name: o.name || '',
+                                                     short: o.short || ''}));
+    _dcOrgsOrig = JSON.stringify(_dcOrgsDraft);
+    showHtmlModal(t('dcim_orgs'), `<div id="dcimOrgsBox">${_dcOrgsHtml()}</div>`, 'primary',
+                  `<button class="btn btn-primary" onclick="_dcOrgsSave()">
+                     <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`);
+}
+
+/** Redibujar solo el cuadro: `renderDcim()` pinta lo de detrás y no lo de dentro del diálogo,
+ *  así que sin esto se añadía una empresa y no aparecía el renglón. */
+function _dcOrgsDraw() {
+    const el = document.getElementById('dcimOrgsBox');
+    if (el) el.innerHTML = _dcOrgsHtml();
+}
+
+function _dcOrgsHtml() {
+    const filas = _dcOrgsDraft || [];
+    return `<div class="d-flex flex-column gap-2">
+        ${filas.length ? '' : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_orgs'))}</div>`}
+        ${filas.map((o, i) => `<div class="d-flex gap-2 align-items-center flex-wrap">
+            <input class="form-control form-control-sm"
+                   style="flex:2 1 12rem;min-width:0;max-width:20rem"
+                   placeholder="${escAttr(t('dcim_org_name'))}"
+                   value="${escAttr(o.name)}" oninput="_dcOrgsSet(${i},'name',this.value)">
+            <input class="form-control form-control-sm"
+                   style="flex:1 1 6rem;min-width:0;max-width:9rem"
+                   placeholder="${escAttr(t('dcim_org_short'))}"
+                   value="${escAttr(o.short)}" oninput="_dcOrgsSet(${i},'short',this.value)">
+            <button class="btn btn-sm btn-warning" style="flex:0 0 auto"
+                    onclick="_dcOrgsDrop(${i})" title="${escAttr(t('delete'))}">
+                <i class="bi bi-trash"></i></button>
+        </div>`).join('')}
+        <div><button class="btn btn-sm btn-secondary" onclick="_dcOrgsAdd()">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_org_new'))}</button></div>
+        <div class="text-muted ss-fs-1">${esc(t('dcim_orgs_hint'))}</div>
+    </div>`;
+}
+
+function _dcOrgsSet(i, campo, valor) {
+    const o = (_dcOrgsDraft || [])[i];
+    if (o) o[campo] = String(valor);
+}
+
+function _dcOrgsAdd() {
+    (_dcOrgsDraft = _dcOrgsDraft || []).push({uid: '', name: '', short: ''});
+    _dcOrgsDraw();
+}
+
+/** Borrar una empresa. **Se pregunta y se hace en el momento**, no al guardar: lo que cuelga de
+ *  ella deja de estar fichado, y eso no es un campo que se corrige — es una fila que desaparece
+ *  con todo lo que la nombraba. */
+function _dcOrgsDrop(i) {
+    const o = (_dcOrgsDraft || [])[i];
+    if (!o) return;
+    if (!o.uid) { _dcOrgsDraft.splice(i, 1); return _dcOrgsDraw(); }
+    showConfirmModal(tf('dcim_org_drop_q', o.name || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/orgs/${encodeURIComponent(o.uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcOrgsDraft.splice(i, 1);
+        _dcOrgsOrig = JSON.stringify(_dcOrgsDraft);
+        _dcOrgsDraw();
+        // `renderDcim()` vuelve a pedir sedes y empresas: es lo que refresca las chapas de la
+        // barra de detrás, que si no seguirían nombrando a la que se acaba de borrar.
+        renderDcim();
+    });
+}
+
+/** Qué hay que mandar: lo nuevo con POST, lo cambiado con PUT y **lo que nadie tocó, nada**.
+ *
+ *  Aparte del bucle que lo manda porque son dos cosas —decidir y hacer— y porque lo único que
+ *  aquí tiene miga es lo tercero: un PUT por renglón cada vez que se pulsa guardar llena el
+ *  registro de auditoría de cambios que no cambian nada, y el día que alguien busque quién
+ *  renombró una sociedad no lo va a encontrar entre el ruido.
+ *
+ *  Sin nombre no hay empresa: un renglón en blanco es uno que se añadió y no se rellenó, y
+ *  guardarlo sería una fila que no se reconoce en ningún desplegable. */
+function _dcOrgsPlan(borrador, antesJson) {
+    const antes = {};
+    JSON.parse(antesJson || '[]').forEach(o => { antes[o.uid] = o; });
+    const plan = [];
+    (borrador || []).forEach(o => {
+        const nombre = String(o.name || '').trim();
+        if (!nombre) return;
+        const cuerpo = {name: nombre, short: String(o.short || '')};
+        const viejo = antes[o.uid];
+        if (!o.uid) plan.push({metodo: 'POST', uid: '', cuerpo: cuerpo});
+        else if (!viejo || viejo.name !== nombre || String(viejo.short || '') !== cuerpo.short)
+            plan.push({metodo: 'PUT', uid: o.uid, cuerpo: cuerpo});
+    });
+    return plan;
+}
+
+async function _dcOrgsSave() {
+    for (const paso of _dcOrgsPlan(_dcOrgsDraft, _dcOrgsOrig)) {
+        const url = paso.uid ? `/api/v1/dcim/orgs/${encodeURIComponent(paso.uid)}`
+                             : '/api/v1/dcim/orgs';
+        const r = await _dcimSend(paso.metodo, url, paso.cuerpo);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    }
+    showToast(t('saved'), 'success');
+    hideInfoModal();
+    renderDcim();
+}
+
+/** Decir de qué empresa es algo.
+
+ *  Su propia bandera (`dcim_org_edit`, que ningún rol trae de serie) y, hasta ahora, ningún
+ *  botón: el eje del modelo del holding se podía escribir por la API y no desde la pantalla, que
+ *  es lo mismo que no poder escribirlo.
+ *
+ *  Se elige entre las empresas que este lector ve, más «de nadie» — que es un estado real y el
+ *  más común el primer día: un rack sin fichar no es un secreto, es uno que nadie ha fichado. */
+function _dcimOwnerAsk(kind, uid, name) {
+    const orgs = _dcimData.orgs || [];
+    // Sin ninguna, el aviso solo dice lo que ya se ve. A quien puede declararlas se le abre el
+    // cuadro donde se hace, que es lo que iba a buscar a continuación.
+    if (!orgs.length) {
+        showToast(t('dcim_no_orgs'), 'warning');
+        if (_dcimMay('dcim_org_edit')) _dcOrgsOpen();
+        return;
+    }
+    showConfirmModal(tf('dcim_owner_q', name || ''), async () => {
+        const sel = document.getElementById('dcim-owner-pick');
+        const r = await _dcimSend('POST', '/api/v1/dcim/owner',
+                                  {scope: kind, uid: uid, org_uid: sel ? sel.value : ''});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        renderDcim();
+    });
+    // El desplegable se mete DENTRO del modal que acaba de abrirse: el panel no tiene un modal
+    // con selector, y añadir uno sería un segundo sitio donde arreglar el foco y la tecla Enter.
+    const cuerpo = document.getElementById('confirmModalMsg');
+    if (!cuerpo) return;
+    const caja = document.createElement('div');
+    caja.className = 'mt-2';
+    const sel = document.createElement('select');
+    sel.id = 'dcim-owner-pick';
+    sel.className = 'form-select form-select-sm';
+    const nadie = document.createElement('option');
+    nadie.value = '';
+    nadie.textContent = t('dcim_owner_none');
+    sel.appendChild(nadie);
+    for (const o of orgs) {
+        const op = document.createElement('option');
+        op.value = o.uid;
+        op.textContent = o.name || o.uid;
+        sel.appendChild(op);
+    }
+    caja.appendChild(sel);
+    cuerpo.appendChild(caja);
+}
+
+function _dcimSiteCard(site) {
+    const rooms = site.rooms || [];
+    // Con id: el cuadro de mando lleva hasta aquí desde una tarjeta, y llevar a alguien a
+    // una pantalla sin llevarlo al sitio de la pantalla es dejarlo buscando otra vez.
+    return `<div class="card mb-3" id="dcim-site-${escAttr(site.uid)}">
+        <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-building text-muted"></i>
+            <span class="fw-semibold">${esc(site.name || site.uid)}</span>
+            ${_dcimOrgBadge(site.org_uid)}
+            ${_dcimRollBadge(site.roll)}
+            ${site.address ? `<span class="text-muted ss-fs-2">${esc(site.address)}</span>` : ''}
+            ${_dcimCoords(site)}
+            <span class="text-muted ss-fs-2 ms-auto">${esc(tf('dcim_rooms', rooms.length))}</span>
+            ${_dcimActions('site', site.uid, site.name, 'room')}
+        </div>
+        <div class="card-body py-2">
+            ${_dcimFormHtml('edit', 'site', '', site.uid)}
+            ${_dcimFormHtml('new', 'room', site.uid, '')}
+            ${rooms.length ? rooms.map(_dcimRoomRow).join('')
+                           : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_rooms'))}</div>`}
+        </div>
+    </div>`;
+}
+
+/** Where a site is, when somebody has said. Shown because it is the one field of a site nobody
+ *  can check by looking at the screen: a wrong name is obvious, a wrong latitude is not — and
+ *  it is what the map of sites will be drawn from. */
+function _dcimCoords(site) {
+    if (site.lat === null || site.lat === undefined
+        || site.lon === null || site.lon === undefined) return '';
+    // Seis decimales y no cuatro: cuatro son once metros —toda la sede— y quien lo leyera
+    // creería que el dato guardado es ese. Seis son once centímetros, que es donde deja de
+    // haber diferencia para señalar un edificio. Lo GUARDADO no se toca: la columna es REAL y
+    // se queda con los diecisiete dígitos que da un mapa, que es lo que vuelve al formulario.
+    const exacto = `${site.lat}, ${site.lon}`;
+    return `<span class="text-muted ss-fs-3 ss-tabular" title="${escAttr(exacto)}"
+        ><i class="bi bi-geo-alt me-1"></i>${esc(_dcimCoord(site.lat))}, ${
+        esc(_dcimCoord(site.lon))}</span>`;
+}
+
+/** Una coordenada como se lee, sin inventar decimales que no están ni esconder los que sí.
+ *
+ *  `toFixed` hace las dos cosas mal a la vez: recorta lo que sobra y rellena con ceros lo que
+ *  falta, así que un 41.5 pasa a ser un 41.500000 que parece medido. */
+function _dcimCoord(v) {
+    const n = Number(v);
+    if (!isFinite(n)) return '';
+    return String(Math.round(n * 1e6) / 1e6);
+}
+
+function _dcimRoomRow(room) {
+    const racks = room.rackList || [];
+    return `<div class="border-bottom py-1">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-door-open text-muted"></i>
+            <button class="btn btn-sm btn-secondary py-0 px-2"
+                    onclick="_dcimOpenPlan(${jsStr(room.uid)})"
+                    title="${escAttr(t('dcim_plan'))}"><i class="bi bi-map me-1"></i>${
+                    esc(room.name || room.uid)}</button>
+            ${_dcimRollBadge(room.roll)}
+            ${room.cooling ? `<span class="badge bg-body-secondary text-body-secondary border
+                fw-normal" title="${escAttr(t('dcim_cooling'))}"><i class="bi bi-snow me-1"></i>${
+                esc(t('dcim_cooling_' + room.cooling))}</span>` : ''}
+            ${_dcimOrgBadge(room.org_uid)}
+            <span class="text-muted ss-fs-2 ms-auto">${
+                esc(tf('dcim_racks', racks.length))}</span>
+            ${_dcimActions('room', room.uid, room.name, 'rack')}
+        </div>
+        ${_dcimFormHtml('edit', 'room', '', room.uid)}
+        ${_dcimFormHtml('new', 'rack', room.uid, '')}
+        ${racks.length ? `<div class="d-flex flex-wrap gap-2 py-2">${
+            racks.map(_dcimRackChip).join('')}</div>` : ''}
+        ${racks.map(r => _dcimFormHtml('edit', 'rack', '', r.uid)).join('')}
+    </div>`;
+}
+
+/** A rack, listed where it is.
+ *
+ *  It used to be behind a click on the room that opened a dialog — which hid the one thing
+ *  somebody scanning this page is looking for, and turned "which racks are in this room" from
+ *  an answer into a question. Reported from the screen. */
+function _dcimRackChip(rack) {
+    return `<span class="d-inline-flex align-items-center gap-1 border rounded px-2 py-1">
+        <i class="bi bi-hdd-rack text-muted"></i>
+        <button class="btn btn-sm btn-secondary py-0 px-2"
+                onclick="_dcimLoadRack(${jsStr(rack.uid)})">${
+                esc(rack.name || rack.uid)}</button>
+        <span class="text-muted ss-fs-3 ss-tabular">${esc(String(rack.u_height || ''))}U</span>
+        ${_dcimRollBadge(rack.roll)}
+        ${_dcimOrgBadge(rack.org_uid)}
+        ${_dcimActions('rack', rack.uid, rack.name, '')}
+    </span>`;
+}
+
+/** How whatever is under this is doing — the worst of it, and how many are in trouble.
+ *
+ *  Nothing when nothing under it has a state, and that is not the same as "fine": a rack of
+ *  patch panels is watched by nobody, and a green badge on it would be the drawing telling
+ *  somebody a thing it does not know. A wall of green is exactly what this section must not
+ *  produce, because a wall of green is what somebody glances at from the door.
+ *
+ *  The counts are already narrowed to what this caller may see (see `dcim/service.py`): a rack
+ *  saying "3 down" of which none are theirs would be an enumeration of somebody else's fleet
+ *  through the back door. */
+function _dcimRollBadge(roll) {
+    const r = roll || {};
+    if (!r.total) return '';
+    if (!r.state)
+        return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+            title="${escAttr(t('dcim_unwatched_tt'))}">${
+            esc(tf('dcim_unwatched_n', r.total))}</span>`;
+    const tone = {error: 'text-bg-danger', warning: 'text-bg-warning',
+                  ok: 'text-bg-success'}[r.state] || 'bg-body-secondary';
+    return `<span class="badge ${tone} fw-normal"
+        title="${escAttr(tf('dcim_roll_tt', r.total, r.unwatched || 0))}">${
+        r.bad ? esc(tf('dcim_roll_bad', r.bad, r.total)) : esc(tf('dcim_roll_ok', r.total))
+    }</span>`;
+}
+
+/** The company something belongs to, as a badge — or nothing.
+ *
+ *  Nothing, and not "unassigned": an unclaimed rack is not a mystery, it is one nobody has got
+ *  round to filing, which is the state of every installation on its first day. A badge saying
+ *  so on four hundred rows is noise that teaches nobody anything. */
+/** El nombre de una sociedad, para enseñarlo donde solo hay un uid. Aquí y no en cada pantalla
+ *  que lo necesite: son dos líneas y ya son tres las que las querían. */
+function _dcimOrgName(uid) {
+    const org = (_dcimData.orgs || []).find(o => o.uid === uid);
+    return org ? (org.name || org.uid) : String(uid || '');
+}
+
+function _dcimOrgBadge(uid) {
+    if (!uid) return '';
+    const org = (_dcimData.orgs || []).find(o => o.uid === uid);
+    if (!org) return '';
+    return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+        title="${escAttr(org.name || '')}">${esc(org.short || org.name || '')}</span>`;
+}

@@ -58,7 +58,7 @@ def archive_contents(var_dir: str, name: str, backup_dir: str = '') -> dict:
 
 def restore_backup(connector, var_dir: str, name: str, *, parts=None, tables=None,
                    config_dir: str = '', backup_dir: str = '', progress_cb=None,
-                   connectors=None) -> dict:
+                   connectors=None, dirs=None) -> dict:
     """Put an archive's contents back, table by table.
 
     *parts* narrows what is applied; None means everything the archive holds. A table is
@@ -162,7 +162,10 @@ def restore_backup(connector, var_dir: str, name: str, *, parts=None, tables=Non
             if only is not None:
                 by_part = [(pid, [t for t in tabs if t in only]) for pid, tabs in by_part]
                 by_part = [(pid, tabs) for pid, tabs in by_part if tabs]
-            file_parts = [mp for mp in _parts.module_parts() if mp['id'] in want]
+            # Every directory part, the core's own included — see `parts.dir_parts`. Asked
+            # for the modules' alone, a floor plan went into the archive and never came out
+            # of it, which is the worst shape a backup bug takes: it only shows at a restore.
+            file_parts = [mp for mp in _parts.dir_parts() if mp['id'] in want]
             cfg_step = 1 if ('config_file' in want and config_dir) else 0
             total = sum(len(t) for _pid, t in by_part) + cfg_step + len(file_parts)
             # Grouped by DATABASE, one transaction each: the system tables must land together
@@ -217,7 +220,7 @@ def restore_backup(connector, var_dir: str, name: str, *, parts=None, tables=Non
             for mp in file_parts:
                 _say(total, mp['id'])
                 n = _extract_tree(zf, names, f'{PARTS_PREFIX}/{mp["id"]}',
-                                  os.path.join(var_dir, *mp['dir'].split('/')))
+                                  _parts.part_dir(mp, var_dir, dirs))
                 files[mp['id']] = n
                 step = {'part': mp['id'], 'ok': n > 0, 'tables': 0, 'rows': n,
                         'error': '' if n else 'no files in the archive'}

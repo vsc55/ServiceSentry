@@ -48,6 +48,7 @@
 {% include "partials/backup/_profiles.html" %}
 {% include "partials/backup/_tasks.html" %}
 {% include "partials/backup/_picker.html" %}
+{% include "partials/dcim/_picker.html" %}
 {% include "partials/backup/_run.html" %}
 {% include "partials/backup/_detail.html" %}
 {% include "partials/backup/_restore.html" %}
@@ -170,6 +171,37 @@
 {% include "partials/infra/_map.html" %}
 {# After _map.html: the link map reads its loader, its cache and its drawing helpers. #}
 {% include "partials/infra/_links.html" %}
+{# ================================================================
+   Physical inventory (root, /dcim) — where the equipment is and whose it is.
+   Infrastructure answers "is this all right"; this answers "where do I walk".
+   ================================================================ #}
+{% include "partials/dcim/_render.html" %}
+{# Detrás de `_render.html`: el vocabulario con el que las tres pantallas de conectores leen una boca. #}
+{% include "partials/dcim/_conns.html" %}
+{% include "partials/dcim/_pieces.html" %}
+{% include "partials/dcim/_room3d.html" %}
+{% include "partials/dcim/_power.html" %}
+{% include "partials/dcim/_cables.html" %}
+{% include "partials/dcim/_fits.html" %}
+{% include "partials/dcim/_parts.html" %}
+{% include "partials/dcim/_files.html" %}
+{% include "partials/dcim/_brands.html" %}
+{% include "partials/dcim/_platforms.html" %}
+{% include "partials/dcim/_catalog.html" %}
+{% include "partials/dcim/_builds.html" %}
+{% include "partials/dcim/_schemas.html" %}
+{% include "partials/dcim/_sources.html" %}
+{% include "partials/dcim/_form.html" %}
+{% include "partials/dcim/_board.html" %}
+{% include "partials/dcim/_sitemap.html" %}
+{% include "partials/dcim/_tree.html" %}
+{% include "partials/dcim/_rack.html" %}
+{# After _rack.html: the elevation is what its view draws, and it reads the canvas that the
+   two maps already share — included above with them. #}
+{% include "partials/dcim/_elevation.html" %}
+{# The room from above. After the elevation, which it borrows `_dceClip` from — and after the
+   canvas, which both draw on. #}
+{% include "partials/dcim/_plan.html" %}
 {% include "partials/infra/_list.html" %}
 {# After _list.html: the grouping views read its cell renderer and column state. #}
 {% include "partials/infra/_group_views.html" %}

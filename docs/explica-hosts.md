@@ -33,7 +33,7 @@ clave / clave en línea) para que los módulos que necesitan **ejecutar comandos
 servidor (p.ej. `raid`) o **abrir un túnel** a través de él (p.ej. `datastore`) reutilicen las
 mismas credenciales definidas una vez en el host.
 
-### Qué es el aparato (`device_type`)
+### Qué es el dispositivo (`device_type`)
 
 El registro guarda servidores, pero también un NAS, un switch y un SAI — la sección se llamó
 «Servidores» mientras el catálogo SNMP de al lado traía perfiles de Mikrotik, Linksys y dos

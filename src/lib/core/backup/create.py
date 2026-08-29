@@ -61,7 +61,7 @@ def _add_tree(zf: zipfile.ZipFile, root: str, arc_prefix: str) -> int:
 def create_backup(connector, name: str, *, var_dir: str, config_dir: str,
                   parts, include_secrets: bool, actor: str = '',
                   app_version: str = '', engine: str = '', backup_dir: str = '',
-                  progress_cb=None, connectors=None) -> dict:
+                  progress_cb=None, connectors=None, dirs=None) -> dict:
     """Write ``<var_dir>/backups/<name>.zip`` and return its manifest.
 
     *parts* is whatever the caller asked for; the required ones are added whether or not it
@@ -176,12 +176,13 @@ def create_backup(connector, name: str, *, var_dir: str, config_dir: str,
                 steps.append({'part': 'config_file', 'ok': ok, 'tables': 0,
                               'rows': 1 if ok else 0,
                               'error': '' if ok else 'config.json not found'})
-            # Whatever the modules declared, by the same rule for each: their own directory
-            # under var_dir, into their own place in the archive. The core names none of them.
-            for mp in _parts.module_parts():
+            # Every directory part, by the same rule for each: its own directory under
+            # var_dir, into its own place in the archive. The core's own are in that list now
+            # too (floor plans) — and it still names no module, which is what matters.
+            for mp in _parts.dir_parts():
                 if mp['id'] not in want:
                     continue
-                n = _add_tree(zf, os.path.join(var_dir, *mp['dir'].split('/')),
+                n = _add_tree(zf, _parts.part_dir(mp, var_dir, dirs),
                               f'{PARTS_PREFIX}/{mp["id"]}')
                 manifest['files'][mp['id']] = n
                 steps.append({'part': mp['id'], 'ok': n > 0, 'tables': 0, 'rows': n,

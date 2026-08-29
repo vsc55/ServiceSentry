@@ -1,0 +1,457 @@
+{# ================================================================
+   DCIM — diseñar la sala: lo que hay en ella además de los racks.
+
+   **La distinción que decide todo esto**: un rack es un REGISTRO —tiene equipos dentro, tiene
+   estado en vivo, se abre y se entra— y una columna no. Una puerta, una mampara, un
+   climatizador, una bandeja o un pasillo confinado no los vigila nadie: existen para que el
+   plano se pueda leer y para poder planificar encima. «¿Cabe otra fila de racks?» no se contesta
+   sin saber dónde está la columna.
+
+   Por eso la paleta hace dos cosas distintas con la misma pinta: «Rack» crea un rack de verdad
+   —una fila en la base de datos, con sus U y su estado— y el resto crea piezas de la sala. Que
+   se parezcan al usarlas es lo correcto; que fuesen lo mismo por dentro no lo sería.
+
+   Del prototipo se traen la rejilla de baldosa, el imán, el giro, las capas y la referencia de
+   posición. Lo que NO se trae es guardar y abrir un fichero: aquí la base de datos es el
+   guardado, y un plano que vive en un `.json` del escritorio de alguien es un plano que la
+   siguiente persona no encuentra.
+   ================================================================ #}
+
+//: Lo que hay en la sala aparte de los racks, y el catálogo de tipos que mandó el servidor.
+//: `null` mientras no ha vuelto. Las medidas de fábrica de cada tipo las decide el servidor: una
+//: paleta con las suyas sería una segunda verdad sobre lo que mide una puerta.
+let _dcpFeat = null;
+//: Qué está seleccionado: `{kind: 'feature'|'rack', uid}` o `null`.
+let _dcpSel = null;
+//: Si el imán a la baldosa está puesto. Encendido: un rack a 3 mm de la baldosa es un rack que
+//: alguien va a tener que empujar el día que se dibuje la fila entera.
+let _dcpMagnet = true;
+//: Si se dibujan las bandejas y las etiquetas —lo que va por el aire—. Se apaga para mirar el
+//: suelo, que es lo que se mira cuando se está decidiendo dónde va algo.
+let _dcpAir = true;
+
+/** El tamaño de la baldosa de ESTA sala, en milímetros. 600 en casi todas partes y no en todas:
+ *  hay suelos de 500 y de 610, y un imán que da por hecho 600 mueve las cosas a donde no van. */
+function _dcpTile() {
+    return Number(((_dcimPlan || {}).room || {}).tile_mm) || 600;
+}
+
+/** Ajustar una medida al imán: a la baldosa, o a cinco centímetros cuando está quitado.
+ *  Nunca al milímetro libre — nadie coloca un rack con precisión de milímetro y el número
+ *  resultante sugiere una exactitud que no existe. */
+function _dcpSnap(mm) {
+    if (_dcpMagnet) {
+        const t = _dcpTile();
+        return Math.round(mm / t) * t;
+    }
+    return Math.round(mm / 50) * 50;
+}
+
+/** Cómo se llama una posición: «B7», que es como se da por teléfono.
+ *
+ *  Columnas en letras y filas en números, contadas en baldosas desde la esquina. No es
+ *  decoración: «el rack de la B7» lo entiende quien está dentro de la sala con el móvil en la
+ *  oreja, y «el rack en x=4200» no lo entiende nadie. */
+function _dcpTileRef(x, y) {
+    const t = _dcpTile();
+    const room = (_dcimPlan || {}).room || {};
+    const w = Number(room.width_mm) || 0, d = Number(room.depth_mm) || 0;
+    if (x < 0 || y < 0 || (w && x > w) || (d && y > d)) return '—';
+    let col = Math.floor(x / t), letras = '';
+    do {
+        letras = String.fromCharCode(65 + (col % 26)) + letras;
+        col = Math.floor(col / 26) - 1;
+    } while (col >= 0);
+    return letras + (Math.floor(y / t) + 1);
+}
+
+/** Traer lo que hay en la sala. Se pide con el plano, una vez. */
+async function _dcpLoadFeatures(roomUid) {
+    const d = await apiGet(`/api/v1/dcim/rooms/${encodeURIComponent(roomUid)}/features`);
+    _dcpFeat = d && d.kinds ? d : {features: [], kinds: {}, layers: ['floor', 'room', 'air']};
+}
+
+function _dcpKinds() { return (_dcpFeat || {}).kinds || {}; }
+function _dcpFeatures() { return (_dcpFeat || {}).features || []; }
+
+/** Cómo se pinta cada tipo. Aquí y no en el servidor: el servidor decide qué tipos EXISTEN y
+ *  cuánto miden —eso es el modelo— y de qué color se dibuja una puerta es de quien dibuja.
+ *
+ *  Los colores salen de las variables del tema, no de literales: esta pantalla se ve en claro y
+ *  en oscuro, y un plano con los grises de un tema sobre el fondo del otro no se lee. */
+const _DCP_LOOK = {
+    aisle:        {fill: 'var(--bs-primary-bg-subtle)', line: 'var(--bs-primary)', dash: '4 3'},
+    zone:         {fill: 'var(--bs-body-bg)', line: 'var(--bs-secondary-color)', dash: '3 3'},
+    column:       {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-body-color)', cross: true},
+    wall:         {fill: 'var(--bs-info-bg-subtle)', line: 'var(--bs-info)'},
+    door:         {fill: 'var(--bs-warning)', line: 'var(--bs-warning)', dark: true},
+    panel:        {fill: 'var(--bs-body-secondary-bg)', line: 'var(--bs-body-color)'},
+    ups:          {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-secondary-color)'},
+    crac:         {fill: 'var(--bs-info-bg-subtle)', line: 'var(--bs-info)'},
+    bench:        {fill: 'var(--bs-tertiary-bg)', line: 'var(--bs-secondary-color)'},
+    extinguisher: {fill: 'var(--bs-danger)', line: 'var(--bs-danger)', dark: true},
+    tray:         {fill: 'var(--bs-warning-bg-subtle)', line: 'var(--bs-warning)', dash: '6 3'},
+    label:        {fill: 'none', line: 'none'},
+};
+
+function _dcpLook(kind) {
+    return _DCP_LOOK[kind] || {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-body-color)'};
+}
+
+/** Una pieza vista desde arriba. */
+function _dcpFeature(f) {
+    const look = _dcpLook(f.kind);
+    const w = Number(f.width_mm || 600) * _DCP_SCALE;
+    const h = Number(f.depth_mm || 600) * _DCP_SCALE;
+    const x = Number(f.pos_x || 0) * _DCP_SCALE;
+    const y = Number(f.pos_y || 0) * _DCP_SCALE;
+    const rot = Number(f.rotation || 0);
+    const puesto = _dcpSel && _dcpSel.kind === 'feature' && _dcpSel.uid === f.uid;
+    const texto = f.label || (f.kind === 'label' ? t('dcim_kind_label') : '');
+    const tam = Math.min(5.6, Math.max(3.2, Math.min(w, h) * 0.42));
+    return `<g class="ss-grab" data-dcpf="${escAttr(f.uid)}"
+               transform="translate(${x},${y}) rotate(${rot} ${w / 2} ${h / 2})">
+        ${look.fill === 'none' ? '' : `<rect width="${w}" height="${h}" rx="1"
+            fill="${look.fill}" stroke="${look.line}" stroke-width="1.2"
+            ${look.dash ? `stroke-dasharray="${look.dash}"` : ''}
+            vector-effect="non-scaling-stroke"></rect>`}
+        ${look.cross ? `<line x1="0" y1="0" x2="${w}" y2="${h}" stroke="${look.line}"
+                stroke-width=".6" vector-effect="non-scaling-stroke"></line>
+            <line x1="${w}" y1="0" x2="0" y2="${h}" stroke="${look.line}"
+                stroke-width=".6" vector-effect="non-scaling-stroke"></line>` : ''}
+        ${texto ? `<text x="${w / 2}" y="${h / 2 + tam * 0.35}" text-anchor="middle"
+            font-size="${tam}" fill="${look.dark ? 'var(--bs-dark)' : 'var(--bs-body-color)'}"
+            style="pointer-events:none">${esc(texto)}</text>` : ''}
+        ${puesto ? `<rect x="-1" y="-1" width="${w + 2}" height="${h + 2}" fill="none"
+            stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
+            vector-effect="non-scaling-stroke"></rect>` : ''}
+    </g>`;
+}
+
+/** Todas las piezas, por capas y respetando el interruptor del aire. */
+function _dcpFeaturesSvg(capa) {
+    const kinds = _dcpKinds();
+    return _dcpFeatures()
+        .filter(f => ((kinds[f.kind] || {}).layer || 'room') === capa)
+        .filter(f => capa !== 'air' || _dcpAir)
+        .map(_dcpFeature).join('');
+}
+
+// ── La paleta y el panel de la pieza ─────────────────────────────────────────
+
+/** Lo que se puede poner en el plano. La primera entrada crea un RACK —una fila de verdad, con
+ *  sus U y su estado— y el resto piezas de la sala; que se usen igual está bien, que fueran lo
+ *  mismo por dentro no. */
+function _dcpPaletteHtml() {
+    if (!_dcimMay('dcim_edit')) return '';
+    const kinds = _dcpKinds();
+    const boton = (onclick, icono, texto, medida) =>
+        `<button class="btn btn-sm btn-secondary ss-piece" onclick="${onclick}">
+            <i class="bi ${icono}"></i><span>${esc(texto)}</span>
+            <small class="text-muted ss-tabular">${esc(medida)}</small></button>`;
+    const piezas = Object.keys(kinds).map(k => boton(
+        `_dcpAdd(${jsStr(k)})`, _DCP_ICON[k] || 'bi-square',
+        t('dcim_kind_' + k), `${kinds[k].w}×${kinds[k].d}`));
+    return `<div class="ss-piece-list">
+        ${boton('_dcpAddRack()', 'bi-hdd-rack', t('dcim_rack'), t('dcim_a_record'))}
+        ${piezas.join('')}
+    </div>`;
+}
+
+//: Un icono por tipo. Escrito uno a uno y no derivado del nombre: un icono que se adivina acaba
+//: siendo el cuadrado por defecto para la mitad del catálogo, y nadie se entera.
+const _DCP_ICON = {
+    aisle: 'bi-distribute-vertical', zone: 'bi-bounding-box', column: 'bi-x-diamond',
+    wall: 'bi-square-half', door: 'bi-door-open', panel: 'bi-lightning-charge',
+    ups: 'bi-battery-charging', crac: 'bi-snow', bench: 'bi-table',
+    extinguisher: 'bi-fire', tray: 'bi-bezier2', label: 'bi-tag',
+};
+
+/** Poner una pieza. Cae en el centro de lo que se está mirando y no en el origen: en el origen
+ *  se apila con las demás y hay que ir a buscarla. */
+async function _dcpAdd(kind) {
+    const room = (_dcimPlan || {}).room;
+    if (!room) return;
+    const v = ssCanvasWindow(_DCP_SVG) || {x: 0, y: 0, w: 4000, h: 3000};
+    const spec = _dcpKinds()[kind] || {w: 600, d: 600};
+    const cx = (v.x + v.w / 2) / _DCP_SCALE - spec.w / 2;
+    const cy = (v.y + v.h / 2) / _DCP_SCALE - spec.d / 2;
+    const r = await _dcimSend('POST', '/api/v1/dcim/features', {
+        room_uid: room.uid, kind,
+        pos_x: Math.max(0, _dcpSnap(cx)), pos_y: Math.max(0, _dcpSnap(cy)),
+    });
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcimOpenPlan(room.uid);
+}
+
+/** Y poner un RACK, que es lo mismo por fuera y un registro por dentro. */
+async function _dcpAddRack() {
+    const room = (_dcimPlan || {}).room;
+    if (!room) return;
+    const v = ssCanvasWindow(_DCP_SVG) || {x: 0, y: 0, w: 4000, h: 3000};
+    const r = await _dcimSend('POST', '/api/v1/dcim/racks', {
+        room_uid: room.uid, name: t('dcim_new_rack'), u_height: 42,
+        pos_x: Math.max(0, _dcpSnap((v.x + v.w / 2) / _DCP_SCALE - 300)),
+        pos_y: Math.max(0, _dcpSnap((v.y + v.h / 2) / _DCP_SCALE - 500)),
+    });
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcimOpenPlan(room.uid);
+}
+
+/** La pieza seleccionada, con sus medidas editables.
+ *
+ *  Los mismos campos que tiene la fila en la base de datos y ni uno más: un panel que enseña
+ *  «ancho» y guarda otra cosa es la clase de mentira que sale a los seis meses. */
+function _dcpSelectedHtml() {
+    if (!_dcpSel || _dcpSel.kind !== 'feature') return '';
+    const f = _dcpFeatures().find(x => x.uid === _dcpSel.uid);
+    if (!f) return '';
+    const campo = (name, label, paso) =>
+        `<label class="ss-fs-2 text-muted">${esc(t(label))}
+            <input class="form-control form-control-sm ss-tabular" type="number" step="${paso}"
+                   value="${escAttr(String(f[name] ?? 0))}"
+                   oninput="_dcpSet(${jsStr(f.uid)},${jsStr(name)},this.value)"></label>`;
+    return `<div class="d-flex align-items-end gap-2 flex-wrap p-2 rounded bg-body-secondary mb-2">
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_label'))}
+            <input class="form-control form-control-sm" value="${escAttr(f.label || '')}"
+                   style="max-width:12rem"
+                   oninput="_dcpSet(${jsStr(f.uid)},'label',this.value)"></label>
+        ${campo('pos_x', 'dcim_pos_x', 50)}
+        ${campo('pos_y', 'dcim_pos_y', 50)}
+        ${campo('width_mm', 'dcim_width_mm', 50)}
+        ${campo('depth_mm', 'dcim_depth_mm', 50)}
+        ${campo('rotation', 'dcim_rotation', 15)}
+        <button class="btn btn-sm btn-secondary" onclick="_dcpTurnFeature(${jsStr(f.uid)})">
+            <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('dcim_turn'))}</button>
+        <button class="btn btn-sm btn-warning" onclick="_dcpDropFeature(${jsStr(f.uid)})">
+            <i class="bi bi-trash me-1"></i>${esc(t('delete'))}</button>
+        <span class="text-muted ss-fs-2 ss-tabular ms-auto">${
+            esc(t('dcim_kind_' + f.kind))} · ${
+            esc(_dcpTileRef(Number(f.pos_x) + Number(f.width_mm) / 2,
+                            Number(f.pos_y) + Number(f.depth_mm) / 2))}</span>
+    </div>`;
+}
+
+//: Lo escrito en las cajas se guarda cuando se para de teclear. Guardar en cada tecla serían
+//: cuatro peticiones por «1200»; guardar al salir del campo pierde lo escrito si alguien
+//: arrastra la pieza sin salir de él.
+let _dcpSaveTimer = null;
+
+function _dcpSet(uid, campo, valor) {
+    const f = _dcpFeatures().find(x => x.uid === uid);
+    if (!f) return;
+    f[campo] = campo === 'label' ? valor : Number(valor);
+    _dcpRedraw();
+    clearTimeout(_dcpSaveTimer);
+    _dcpSaveTimer = setTimeout(() => _dcpSave(uid, {[campo]: f[campo]}), 400);
+}
+
+async function _dcpSave(uid, body) {
+    const r = await _dcimSend('PUT', `/api/v1/dcim/features/${encodeURIComponent(uid)}`, body);
+    if (!r.ok) showToast(r.error || t('save_failed'), 'danger');
+}
+
+async function _dcpTurnFeature(uid) {
+    const f = _dcpFeatures().find(x => x.uid === uid);
+    if (!f) return;
+    f.rotation = (Number(f.rotation || 0) + 90) % 360;
+    _dcpRedraw();
+    _dcpSave(uid, {rotation: f.rotation});
+    renderDcim();
+}
+
+/** Quitar una pieza del plano.
+ *
+ *  `showConfirmModal` recibe una FUNCIÓN y no devuelve promesa. Escrito con `await`, lo que se
+ *  esperaba era `undefined`, así que la comprobación siguiente salía siempre por la puerta de
+ *  «ha dicho que no» y no se borraba nada — sin error, sin aviso, y con el modal preguntando
+ *  igualmente. Un `await` sobre algo que no es una promesa es la clase de equivocación que no
+ *  falla: simplemente hace que el resto de la función no ocurra. */
+function _dcpDropFeature(uid) {
+    const f = _dcpFeatures().find(x => x.uid === uid);
+    if (!f) return;
+    showConfirmModal(tf('dcim_drop_piece_q', t('dcim_kind_' + f.kind)), async () => {
+        const r = await _dcimSend('DELETE',
+                                  `/api/v1/dcim/features/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcpSel = null;
+        _dcimOpenPlan(_dcimPlan.room.uid);
+    });
+}
+
+/** Los atajos, que es lo que separa colocar veinte racks de colocar veinte racks a mano.
+ *
+ *  Solo con algo seleccionado y solo fuera de un campo de texto: una `r` escrita en el nombre de
+ *  un rack no debe girar nada. */
+function _dcpKey(ev) {
+    if (!_dcimPlan || !_dcpSel || _dcpSel.kind !== 'feature') return;
+    const dentro = /^(INPUT|SELECT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '');
+    if (dentro) return;
+    const f = _dcpFeatures().find(x => x.uid === _dcpSel.uid);
+    if (!f) return;
+    const k = (ev.key || '').toLowerCase();
+    if (k === 'r') {
+        _dcpTurnFeature(f.uid);
+    } else if (ev.key === 'Delete') {
+        _dcpDropFeature(f.uid);
+    } else if (ev.key === 'Escape') {
+        _dcpSel = null;
+        renderDcim();
+    } else if (ev.key.startsWith && ev.key.startsWith('Arrow')) {
+        // Shift mueve una baldosa entera: es como se coloca una fila. Sin él, cien milímetros,
+        // que es como se corrige una fila ya colocada.
+        const d = ev.shiftKey ? _dcpTile() : 100;
+        if (ev.key === 'ArrowLeft') f.pos_x = Math.max(0, Number(f.pos_x) - d);
+        if (ev.key === 'ArrowRight') f.pos_x = Number(f.pos_x) + d;
+        if (ev.key === 'ArrowUp') f.pos_y = Math.max(0, Number(f.pos_y) - d);
+        if (ev.key === 'ArrowDown') f.pos_y = Number(f.pos_y) + d;
+        _dcpRedraw();
+        clearTimeout(_dcpSaveTimer);
+        _dcpSaveTimer = setTimeout(() => _dcpSave(f.uid, {pos_x: f.pos_x, pos_y: f.pos_y}), 400);
+    } else {
+        return;
+    }
+    ev.preventDefault();
+}
+
+// ── Llevarse el plano y traerlo de vuelta ────────────────────────────────────
+//
+// La base de datos sigue siendo el guardado. Esto resuelve lo que la base de datos no: mandarle
+// el diseño a alguien, guardar una versión antes de reorganizar, y montar una sala nueva
+// partiendo de otra que ya funciona.
+
+/** Lo que se lleva un fichero: la sala, sus racks y sus piezas.
+ *
+ *  De los racks van el NOMBRE y dónde están, y nada de lo que tienen dentro. Un plano describe
+ *  una sala; el inventario de un armario es otra cosa y viaja en la copia de seguridad. */
+function _dcpExportJson() {
+    const room = (_dcimPlan || {}).room || {};
+    return {
+        version: 1,
+        room: {name: room.name || '', width_mm: Number(room.width_mm) || 0,
+               depth_mm: Number(room.depth_mm) || 0, tile_mm: _dcpTile()},
+        racks: (_dcimPlan.racks || []).map(r => ({
+            name: r.name || '', pos_x: Number(r.pos_x) || 0, pos_y: Number(r.pos_y) || 0,
+            rotation: Number(r.rotation) || 0, u_height: Number(r.u_height) || 42,
+            width_mm: Number(r.width_mm) || 600, depth_mm: Number(r.depth_mm) || 1000,
+        })),
+        features: _dcpFeatures().map(f => ({
+            kind: f.kind, label: f.label || '',
+            pos_x: Number(f.pos_x) || 0, pos_y: Number(f.pos_y) || 0,
+            width_mm: Number(f.width_mm) || 0, depth_mm: Number(f.depth_mm) || 0,
+            rotation: Number(f.rotation) || 0,
+        })),
+    };
+}
+
+function _dcpExport() {
+    const room = (_dcimPlan || {}).room || {};
+    const texto = JSON.stringify(_dcpExportJson(), null, 2);
+    // El nombre de la sala en el fichero, no un genérico: quien se descargue tres planos tiene
+    // que poder distinguirlos sin abrirlos.
+    const limpio = String(room.name || 'sala').replace(/[^\w.-]+/g, '-').slice(0, 40);
+    // Por el ayudante compartido: seis líneas que entregan un fichero y revocan su URL son seis
+    // líneas que un día se copian cinco de seis y dejan una fuga.
+    ssDownloadBlob(new Blob([texto], {type: 'application/json'}), `plano-${limpio}.json`);
+}
+
+/** Traerlo. Se pregunta antes, y la pregunta dice exactamente qué se va a perder: reemplaza las
+ *  piezas, y los racks NO se borran — un rack tiene equipos dentro. */
+function _dcpImport(input) {
+    const file = (input.files || [])[0];
+    input.value = '';
+    if (!file || !_dcimPlan) return;
+    const lector = new FileReader();
+    lector.onload = () => {
+        let datos = null;
+        try {
+            datos = JSON.parse(String(lector.result || ''));
+        } catch (e) {
+            return showToast(t('dcim_import_not_a_plan'), 'danger');
+        }
+        showConfirmModal(t('dcim_import_q'), async () => {
+            const room = _dcimPlan.room;
+            const r = await _dcimSend(
+                'POST', `/api/v1/dcim/rooms/${encodeURIComponent(room.uid)}/import`, datos);
+            if (!r.ok) return showToast(r.error || t('dcim_import_not_a_plan'), 'danger');
+            const d = r.data || {};
+            showToast(tf('dcim_import_done', d.features || 0, d.racks_moved || 0,
+                         d.racks_new || 0, d.racks_kept || 0), 'success');
+            _dcpSel = null;
+            _dcimOpenPlan(room.uid);
+        });
+    };
+    lector.readAsText(file);
+}
+
+// ── Las filas de la sala ─────────────────────────────────────────────────────
+//
+// Se declaran aquí porque es aquí donde se ven: una fila es una forma de ordenar el plano, y
+// decidirla en otra pantalla obligaría a recordar cómo estaba puesto lo que se está mirando.
+
+/** Las filas, con a qué pasillo da cada cara — que es de donde sale el aviso del aire. */
+function _dcpRowsHtml() {
+    if (!_dcimMay('dcim_edit')) return '';
+    const filas = (_dcpFeat || {}).rows || [];
+    const sueltos = ((_dcpFeat || {}).loose || []).length;
+    return `<div class="ss-toolrow mb-2">
+        <span class="text-muted ss-fs-2">${esc(t('dcim_rows'))}</span>
+        ${filas.map(f => `<span class="badge bg-body-secondary text-body-secondary border
+            fw-normal d-inline-flex align-items-center gap-1">
+            ${esc(f.name || '—')}
+            <span class="ss-fs-1">${esc(tf('dcim_n_racks', f.racks || 0))}</span>
+            <a href="#" class="text-reset" title="${escAttr(t('dcim_row_aisles'))}"
+               onclick="event.preventDefault();_dcpRowEdit(${jsStr(f.uid)})">&#9998;</a>
+            <a href="#" class="text-reset"
+               onclick="event.preventDefault();_dcpRowDrop(${jsStr(f.uid)},${
+                   jsStr(f.name || '')})">&times;</a>
+        </span>`).join('')}
+        ${sueltos ? `<span class="text-muted ss-fs-1">${
+            esc(tf('dcim_loose_racks', sueltos))}</span>` : ''}
+        <div class="ss-toolrow-tools">
+            <button class="btn btn-sm btn-secondary" onclick="_dcpRowNew()">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_row'))}</button>
+        </div>
+    </div>`;
+}
+
+/** Crear una: solo pide el nombre. Los pasillos se dicen después, editándola — pedir cuatro
+    cosas para crear una fila hace que nadie cree ninguna. */
+async function _dcpRowNew() {
+    const room = (_dcimPlan || {}).room;
+    if (!room) return;
+    const cuantas = ((_dcpFeat || {}).rows || []).length;
+    const r = await _dcimSend('POST', '/api/v1/dcim/rows',
+                              {room_uid: room.uid,
+                               name: String.fromCharCode(65 + (cuantas % 26))});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcimOpenPlan(room.uid);
+}
+
+/** Decir a qué pasillo da cada cara. Es lo que convierte una fila en un dato sobre el aire y no
+    en una etiqueta: sin los dos nombres, el aviso de «está respirando lo que expulsa la de
+    enfrente» no se puede calcular. */
+function _dcpRowEdit(uid) {
+    const f = ((_dcpFeat || {}).rows || []).find(x => x.uid === uid);
+    if (!f) return;
+    // `showReasonModal` es el único modal con caja de texto que tiene el panel: se reutiliza
+    // en vez de inventar otro, que sería un segundo sitio donde arreglar el foco y el Enter.
+    showReasonModal(tf('dcim_row_aisles_of', f.name || ''), async (valor) => {
+        const partes = String(valor || '').split('/');
+        const r = await _dcimSend('PUT', `/api/v1/dcim/rows/${encodeURIComponent(uid)}`, {
+            name: (partes[0] || f.name || '').trim(),
+            front_aisle: (partes[1] || '').trim(),
+            rear_aisle: (partes[2] || '').trim(),
+        });
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcimOpenPlan(_dcimPlan.room.uid);
+    }, {placeholder: t('dcim_row_aisles_ph')});
+}
+
+function _dcpRowDrop(uid, nombre) {
+    showConfirmModal(tf('dcim_row_drop_q', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/rows/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcimOpenPlan(_dcimPlan.room.uid);
+    });
+}

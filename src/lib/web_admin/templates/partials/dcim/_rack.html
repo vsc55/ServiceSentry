@@ -1,0 +1,207 @@
+{# ================================================================
+   One rack: what is in it, and what is free.
+
+   The elevation is phase 1 (docs/explica-dcim.md) and will be drawn on the canvas the two maps
+   already share. What is here is the same facts in the form that needs no drawing — which is
+   also what a screen reader gets either way.
+
+   **A foreign item says that it occupies, and nothing else.** That is the API's contract
+   (`foreign: true`, position and size); what this file must not do is invent a name for one.
+   ================================================================ #}
+
+// ── One rack ────────────────────────────────────────────────────────────────
+
+async function _dcimLoadRack(uid) {
+    const data = await apiGet('/api/v1/dcim/racks/' + encodeURIComponent(uid));
+    if (!data || !data.rack) { _dcimRack = null; return renderDcim(); }
+    _dcimRack = data;
+    _dcimUrl();
+    return renderDcim();
+}
+
+function _dcimCloseRack() {
+    _dcimRack = null;
+    _dcimForm = null;
+    _dcimUrl();
+    renderDcim();
+}
+
+function _dcimRackHtml() {
+    const rack = _dcimRack.rack || {};
+    const items = _dcimRack.items || [];
+    const free = _dcimRack.free || {front: [], rear: []};
+    return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad">
+        <div class="ss-toolrow mb-3">
+            <button class="btn btn-sm btn-secondary" onclick="_dcimCloseRack()"
+                    title="${escAttr(_dcimPlan ? t('dcim_plan') : t('dcim_back'))}">
+                <i class="bi bi-arrow-left me-1"></i>${esc(t('dcim_back'))}</button>
+            <span class="fw-semibold ss-fs-5">${esc(rack.name || rack.uid)}</span>
+            ${_dcimOrgBadge(rack.org_uid)}
+            <span class="text-muted ss-fs-2 ss-toolrow-text">${
+                esc(tf('dcim_rack_note', Number(rack.u_height || 0), items.length))}</span>
+            <div class="ss-toolrow-tools">
+                ${_dcimRollBadge(_dcimRack.roll)}
+                <span class="badge bg-body-secondary text-body-secondary border fw-normal"
+                    title="${escAttr(t('dcim_free_tt'))}">${
+                    esc(tf('dcim_free', (free.front || []).length))}</span>
+                <button class="btn btn-sm ${_dcCables ? 'btn-warning' : 'btn-secondary'}"
+                        onclick="${_dcCables ? '_dcCablesClose()' : '_dcCablesOpen()'}"
+                        title="${escAttr(t('dcim_cables'))}">
+                    <i class="bi bi-ethernet"></i></button>
+                <button class="btn btn-sm ${_dcPower ? 'btn-warning' : 'btn-secondary'}"
+                        onclick="${_dcPower ? '_dcPowerClose()' : '_dcPowerOpen()'}"
+                        title="${escAttr(t('dcim_power'))}">
+                    <i class="bi bi-plug"></i></button>
+                ${_dcimActions('rack', rack.uid, rack.name, 'item')}
+            </div>
+        </div>
+        ${_dcParts ? _dcCompFormHtml('item') + _dcPartsHtml() : ''}
+        ${_dcCables ? _dcCableFormHtml() + _dcCablesHtml() : ''}
+        ${_dcPower ? _dcPowerHtml() : ''}
+        ${_dcimAccess(_dcimRack.access, rack)}
+        ${_dcimDepths(_dcimRack.depths, rack)}
+        ${_dcimFormHtml('edit', 'rack', '', rack.uid)}
+        ${_dcimFormHtml('new', 'item', rack.uid, '')}
+        ${_dcimElevation(rack, items)}
+        <div class="mt-3">${_dcimItemsTable(items)}</div>
+    </div>`;
+}
+
+/** Where this rack can be reached from — and what does not add up.
+ *
+ *  A cabinet bolted to a wall has no rear. Whatever is mounted on that face cannot be cabled,
+ *  swapped or switched off without taking the cabinet off the wall, and that is a contradiction
+ *  between two things somebody DECLARED: how you get in, and what is inside.
+ *
+ *  Said and not corrected — which of the two is wrong is known by whoever is standing in front
+ *  of it. Same rule as the depth sections that do not add up. */
+function _dcimAccess(warn, rack) {
+    const sides = String((rack || {}).access || 'front,rear,left,right')
+        .split(',').map(x => x.trim()).filter(Boolean);
+    const all = sides.length === 4;
+    const rows = warn || [];
+    if (all && !rows.length) return '';         // nada que decir: se llega por todas partes
+    return `<div class="d-flex align-items-center gap-2 flex-wrap mb-3 ss-fs-2">
+        <i class="bi bi-box-arrow-in-right text-muted"></i>
+        <span class="badge bg-body-secondary text-body-secondary border fw-normal"
+            title="${escAttr(t('dcim_access_tt'))}">${esc(t('dcim_access'))}:
+            ${esc(sides.map(s => t('dcim_side_' + s)).join(', '))}</span>
+        ${rows.map(w => `<span class="badge text-bg-warning fw-normal"
+            title="${escAttr(t('dcim_unreachable_tt'))}"><i class="bi bi-exclamation-triangle
+            me-1"></i>${esc(tf('dcim_unreachable', w.items,
+                               t('dcim_side_' + w.face)))}</span>`).join('')}
+    </div>`;
+}
+
+/** How deep the rack is, section by section — and whether the sections agree with the whole.
+ *
+ *  The number that decides whether a server fits is **between the posts**, not the cabinet's
+ *  depth: that is where its rails bolt on, and what is left behind the rear post is where its
+ *  cables go. A 1000 mm cabinet with the posts badly placed takes less than an 800 mm one with
+ *  them right, which is why all three sections are shown and not a single figure.
+ *
+ *  When the three do not add up to the declared depth, that is **said and not corrected**: what
+ *  somebody measured with a tape and what the sum says are two different things, and keeping
+ *  only the second discards the first. Same rule as the rest of this section. */
+function _dcimDepths(d, rack) {
+    const x = d || {};
+    if (!x.total && !x.mount) return '';
+    const chip = (key, mm, strong) => (mm ? `<span class="badge ${
+        strong ? 'text-bg-primary' : 'bg-body-secondary text-body-secondary border'
+        } fw-normal ss-tabular" title="${escAttr(t(key + '_tt'))}">${
+        esc(t(key))}: ${esc(String(mm))} mm</span>` : '');
+    return `<div class="d-flex align-items-center gap-2 flex-wrap mb-3 ss-fs-2">
+        <i class="bi bi-rulers text-muted"></i>
+        ${chip('dcim_width_mm', rack.width_mm)}
+        ${chip('dcim_depth_mm', x.total)}
+        ${chip('dcim_rail_front', x.front)}
+        ${chip('dcim_rail_depth', x.mount, true)}
+        ${chip('dcim_rail_rear', x.rear)}
+        ${x.mismatch ? `<span class="badge text-bg-warning fw-normal"
+            title="${escAttr(t('dcim_depth_mismatch_tt'))}">${
+            esc(tf('dcim_depth_mismatch', Math.abs(x.mismatch)))}</span>` : ''}
+    </div>`;
+}
+
+/** Whether one item fits where it is — when both numbers are known.
+ *
+ *  Nothing at all when either is missing. A "it fits" said without knowing the cabinet's depth
+ *  is worse than silence, because somebody buys with it. */
+function _dcimFitBadge(fit) {
+    const f = fit || {};
+    if (!f.known) return '';
+    if (f.fits)
+        return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+            title="${escAttr(tf('dcim_depth_spare', f.spare))}"><i class="bi bi-check2"></i>
+            </span>`;
+    return `<span class="badge text-bg-warning fw-normal" title="${escAttr(t(f.why))}"
+        ><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('dcim_depth_tight'))}</span>`;
+}
+
+/** What is in the rack, as a list. The elevation is phase 1 — this is the same facts in the
+ *  form that needs no drawing, and it is what a screen reader gets either way. */
+function _dcimItemsTable(items) {
+    if (!items.length)
+        return `<div class="text-muted small">${esc(t('dcim_rack_empty'))}</div>`;
+    // Por U, de arriba abajo, y **lo montado detrás de quien lo lleva**: una máquina sobre una
+    // bandeja no está en «otro U», está en ese — y ordenada solo por U saldría antes o después
+    // de la bandeja según el azar del identificador.
+    const sueltos = items.filter(i => !i.parent_uid)
+        .sort((a, b) => (b.u_start || 0) - (a.u_start || 0));
+    const rows = [];
+    sueltos.forEach(i => {
+        rows.push(i);
+        items.filter(h => String(h.parent_uid || '') === String(i.uid))
+             .sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')))
+             .forEach(h => rows.push(h));
+    });
+    // Y lo que cuelga de algo que no está en la lista —otro rack, o sin permiso— no se pierde.
+    const vistos = new Set(rows.map(i => i.uid));
+    items.filter(i => !vistos.has(i.uid)).forEach(i => rows.push(i));
+    return `<div class="table-responsive"><table class="table table-sm align-middle">
+        <thead><tr>
+            <th>${esc(t('dcim_u'))}</th><th>${esc(t('dcim_face'))}</th>
+            <th>${esc(t('dcim_what'))}</th><th>${esc(t('dcim_owner'))}</th>
+        </tr></thead>
+        <tbody>${rows.map(_dcimItemRow).join('')}</tbody>
+    </table></div>`;
+}
+
+function _dcimItemRow(item) {
+    const u = Number(item.u_start || 0);
+    const h = Number(item.u_height || 1);
+    let span = h > 1 ? u + '–' + (u + h - 1) : String(u);
+    // Qué trozo del U, cuando no es entero. `2/4` se lee de un vistazo y no ocupa una columna.
+    const de = Number(item.u_slots || 1);
+    if (de > 1) span += ' · ' + (item.u_slot || 1) + '/' + de;
+    // A foreign item says that it occupies, and nothing else. Not "hidden" and not "unknown
+    // device": it EXISTS and it takes those U, which is exactly the fact that makes a shared
+    // cabinet plannable and says nothing about whose it is.
+    if (item.foreign) {
+        return `<tr class="text-muted">
+            <td class="ss-tabular">${esc(span)}</td>
+            <td>${esc(t('dcim_face_' + (item.face || 'full')))}</td>
+            <td colspan="2"><i class="bi bi-lock me-1"></i>${esc(t('dcim_foreign'))}</td>
+        </tr>`;
+    }
+    return `<tr>
+        <td class="ss-tabular">${item.parent_uid
+            ? `<span class="text-muted">${esc(t('dcim_item_on'))}</span>` : esc(span)}</td>
+        <td>${esc(t('dcim_face_' + (item.face || 'full')))}</td>
+        <td${item.parent_uid ? ' class="ps-4"' : ''}>
+            ${item.state ? _infraStateBadge(item.state) + ' ' : ''}
+            ${_dcimFitBadge(item.depth)}
+            ${item.host_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2 me-1"
+                onclick="infraOpen(${jsStr(item.host_uid)})"
+                title="${escAttr(t('dcim_open_device'))}"><i class="bi bi-hdd"></i></button>` : ''}
+            ${esc(_dcimItemName(item))}
+            ${item.serial ? `<code class="text-muted ss-fs-3 ms-1">${
+                esc(item.serial)}</code>` : ''}
+            ${_dcimFormHtml('edit', 'item', '', item.uid)}
+        </td>
+        <td class="text-nowrap">
+            ${_dcimOrgBadge(item.org_uid)}
+            ${_dcimActions('item', item.uid, item.label, '')}
+        </td>
+    </tr>`;
+}

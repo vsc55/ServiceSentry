@@ -71,6 +71,7 @@ LANG = {
     'saved': 'Saved',
     'deleted': 'Deleted',
     'save_failed': 'Save failed',
+    'upload_too_big':              'The file is too large (maximum {} MB)',
     'invalid': 'Invalid',
     'add': 'Add',
     'clone': 'Clone',
@@ -759,6 +760,7 @@ LANG = {
     'backup_part_history': 'History',
     'backup_part_audit': 'Audit log',
     'backup_part_syslog': 'Syslog',
+    'backup_part_dcim_media':      'Floor plans (physical inventory)',
     'mod_view':            'View',
     'mod_view_split':      'List and detail',
     'mod_view_table':      'Table',
@@ -2115,6 +2117,22 @@ LANG = {
         'checks_run':            'Checks: Executed',
         'infra_collect':         'Infrastructure: Data Collected',
         'infra_watch':           'Infrastructure: Row watched',
+        'dcim_placed':                 'Inventory: equipment placed',
+        'dcim_removed':                'Inventory: equipment removed',
+        'dcim_owner_set':              'Inventory: owning company changed',
+        'dcim_catalog_browse':         'Inventory: model library browsed',
+        'dcim_catalog_drop':           'Inventory: catalogue model deleted',
+        'dcim_schema_save':          'Inventory: model schema fetched or written',
+        'dcim_build_save':           'Inventory: equipment template written',
+        'dcim_brand_save':           'Inventory: brand record written or retired',
+        'dcim_platform_save':        'Inventory: platform written or retired',
+        'dcim_profiles_save':            'Inventory: component profiles changed',
+        'dcim_build_drop':           'Inventory: equipment template retired',
+        'dcim_catalog_edit':         'Inventory: catalogue model written or corrected',
+        'dcim_catalog_import':         'Inventory: model catalogue imported',
+        'dcim_bypass':          'Inventory: UPS bypass',
+        'dcim_export':          'Inventory: models and templates exported',
+        'dcim_import':          'Inventory: models and templates imported',
         'infra_link_layout':     'Infrastructure: Link map arranged',
         'snmp_action':           'SNMP: Action',
         'watchful_action':       'Modules: Action',
@@ -2510,6 +2528,10 @@ LANG = {
     'mib_repos': 'GitHub MIB repositories',
     'mib_dirs': 'Extra MIB directories',
     'github_token': 'GitHub token for MIB imports',
+    'dcim_catalog_url': 'Device model library (GitHub repository)',
+    'dcim_media_dir': 'Physical inventory picture folder',
+    'dcim_map_tiles': 'Map tile server (XYZ template)',
+    'dcim_map_attribution': 'Map attribution',
     'backup_dir': 'Backup folder',
     'update_check_url': 'Update check URL',
     'backup_every_hours': 'Automatic backup every (hours)',
@@ -2694,6 +2716,10 @@ LANG = {
         'backup_auto_secrets': 'Automatic copies carry the encrypted credentials. On by default, unlike a hand-made copy where somebody is there to decide: an unattended copy with no credentials is discovered at restore time, the worst moment to discover anything.',
         'update_check_url': 'Where Diagnostics asks whether a newer release exists. Empty = the releases API of this repository. A field and not a constant so a fork — or an install that may only reach an internal mirror — points it elsewhere without a code change, and so the one address this panel is willing to contact is visible here. The check NEVER runs on its own: not at boot, not while a page paints. Only when the button is pressed, so a URL nobody clicks is already off.',
         'backup_dir': 'Where copies are written. Empty = "var/backups", beside the data it copies: that survives a human mistake and nothing else. Point it at a mount that is not this machine and the same button starts producing a backup worth the name. Read on every copy, so changing it needs no restart.',
+        'dcim_catalog_url': 'Where the device catalogue is fetched from: models with their ports, their height in U and their elevation pictures. Defaults to ‘netbox-community/devicetype-library’, which is what nearly everybody wants. Change it if you keep a fork with your own kit, or if this room reaches an internal mirror and never github.com. Any repository laid out the same way works: ‘device-types/<Vendor>/*.yaml’. The screen browses what a library holds before importing anything, so a wrong address costs a message and not a catalogue full of somebody else’s models.',
+        'dcim_media_dir': 'Where floor plans go, and later the catalogue\u2019s elevations. Empty = \'var/dcim_media\', beside the rest of the data. These are files somebody uploaded and the database keeps only their names, so they travel in the backup: move this folder and the backup follows it. Read on every upload, so changing it needs no restart.',
+        'dcim_map_tiles': 'XYZ template for the tile server, with {z}/{x}/{y} — e.g. https://tile.openstreetmap.org/{z}/{x}/{y}.png . EMPTY = no map: sites are boxes somebody arranges, which is the default. Turning it on makes EVERY viewer’s browser ask that server for thousands of images, and that server then knows where this organisation’s datacenters are; on an installation with no way out it will not load at all. Only img-src is opened, for that one origin, and never script-src: that is why this is tiles and not a provider SDK — loading a third party’s images tells them where your sites are, running their script hands them the page. If you use OpenStreetMap, read their tile usage policy first: it is a volunteer-funded service, not a CDN.',
+        'dcim_map_attribution': 'What is written in the corner of the map. OpenStreetMap’s licence requires the credit, and it is a field rather than a constant because the moment somebody points the template elsewhere a fixed credit names the wrong project — which is worse than none.',
         'web_admin|default_lang':               'Display language for the web panel.',
         'web_admin|default_dark_mode':          'Use the dark theme for the interface.',
         'web_admin|landing_page':       'Default page users land on after login: the admin panel or the public status page. Overridable per user and per group; the effective page is user → group → this default.',
@@ -3577,6 +3603,7 @@ LANG = {
     'cfg_desc_health':                    'Watching the internal services, and how close the certificates are to expiring.',
     'cfg_desc_maintenance':               'Actions that delete stored data: history, audit, syslog and bans.',
     'cfg_desc_backup':                    'Where backups are written.',
+    'cfg_desc_dcim':                      'Where the physical inventory’s plans and pictures are stored.',
     'cfg_desc_diagnostics':               'The one address this panel is willing to contact, and only when somebody presses the button.',
     'cfg_desc_monitoring':                'How often checks run, and when a service is declared down.',
     'cfg_desc_modules':                   'The defaults every module and its items inherit.',
@@ -3809,6 +3836,7 @@ LANG = {
     'cfg_card_maintenance': 'Maintenance',
     'cfg_card_diagnostics': 'Diagnostics',
     'cfg_card_backup': 'Backups',
+    'cfg_card_dcim': 'Physical inventory',
     'notif_settings': 'Notification settings',
     'tables_section':      'Tables',
     'connection_section':     'Connection',
@@ -3916,6 +3944,14 @@ LANG = {
     'infra_metrics_view':     'See a device\u2019s measurements',
     'infra_results_view':     'See what each check last said',
     'infra_raw_view':         'See a device\u2019s raw data',
+    'dcim_view':             'See the physical inventory',
+    'dcim_all_view':         'See every company’s inventory',
+    'dcim_edit':             'Place and move equipment',
+    'dcim_org_edit':         'Decide which company owns what',
+    'dcim_cable_edit':       'Declare cabling and labels',
+    'dcim_catalog_view':     'Read the model catalogue',
+    'dcim_catalog_manage':   'Import the model catalogue',
+    'dcim_build_edit':           'Define equipment templates',
     'jobs_view':       'See the jobs',
         'sessions_view':   'View sessions',
         'sessions_revoke': 'Revoke sessions',
@@ -4052,6 +4088,18 @@ LANG = {
     'infra_metrics_view':     'The Measurements tab: the same measurements Details already summarises, but all of them and over time. It adds no fact that “See the infrastructure” does not already carry — it decides what the screen offers, not what it knows.',
     'infra_results_view':     'The Latest data tab: a row per check with the last thing it returned. This one does withhold the data: it is the only thing on the page no other tab reads, so without the permission the server simply does not send it.',
     'infra_raw_view':         'The Raw data tab: everything the device answered, ungrouped and unfiltered — a thousand rows, including the per-row facts the other tabs keep beside the row they belong to. It is the tab you open when a number looks wrong, not the one somebody reads a wall screen from, which is why it is not granted to “viewer”. Like Measurements it decides what the screen offers: the same facts feed Details.',
+    'dcim_view':             'See where the equipment is: sites, rooms, racks and what fills each U, with the maps and the elevations. It is the read somebody does while walking, and it opens nothing of the registry — addresses and credentials stay behind “View devices”.',
+    'dcim_all_view':         'See the physical inventory of **every** company. Without this flag, somebody with “See the physical inventory” sees only the things of the companies granted to them one by one, and of the rest sees that they take up space and nothing else — no name, no model, no state. It is what makes a rack shared between a group’s companies usable.',
+    'dcim_edit':             'Create and move sites, rooms, racks and items: tidying the cabinet. It decides whose nothing is — that is “Decide which company owns what” — and it does not touch the device registry.',
+    'dcim_org_edit':         'Create companies and say who owns each site, room, rack or piece of equipment. **No role by default, not even “editor”**: in a group this decides what is billed to which company and who may see it, which is not the same authority as tidying a rack.',
+    'dcim_cable_edit':       'Declare which cable joins what to what, with its label. It is writing down what somebody did with their hands; the panel then checks it against what LLDP sees.',
+    'dcim_catalog_view':     'Read the catalogue of equipment models (height in U, depth, ports, power inlets). It is a reference book about equipment in general and says nothing about this installation.',
+    'dcim_catalog_manage':   'Import or update the model catalogue. It fetches several thousand files, runs for minutes and replaces what every elevation is drawn from — which is why it is not granted to “viewer”.',
+    'dcim_build_edit':
+        'Write the purchase standards: what "a datacenter server" means here, with '
+        'its memory, its disks and its cards. Its own flag because DECIDING what '
+        'gets bought and PUTTING a box in a U are done by different people, and '
+        'with a single flag whoever racks equipment rewrites what the company buys.',
         'sessions_view':   'View the list of active login sessions.',
         'sessions_revoke': 'Revoke active sessions, forcing re-login.',
         'mfa_reset_others': "Remove another account's two-factor authentication — the way "
@@ -4233,8 +4281,11 @@ LANG = {
     'perm_group_jobs': 'Jobs',
     'jobs_view': 'See the jobs',
     'landing_infra': 'Infrastructure',
+    'landing_dcim':                'Physical inventory',
+    'tab_dcim':                    'Inventory',
     'tab_infra': 'Infrastructure',
     'perm_group_infra': 'Infrastructure',
+    'perm_group_dcim':     'Physical inventory',
     'infra_view_fleet': 'Fleet',
     'infra_view_cards': 'Card view',
     'infra_view_table': 'Table view',
@@ -4303,6 +4354,1240 @@ LANG = {
     'infra_export_svg':      'Save as a drawing (SVG) — vector, and still editable',
     'infra_export_done':     'Saved as {}',
     'infra_export_failed':   'The map could not be saved. Nothing was written.',
+    'dcim_not_found':              'Not found',
+    'dcim_kind_unknown':       'No such kind of element.',
+    'dcim_part_kind_unknown':    'No such kind of component.',
+    'dcim_role_unknown':         'No such kind of device.',
+    'dcim_source_kind_unknown':    'No such kind of power source.',
+    'dcim_link_kind_unknown':      'No such kind of link.',
+    'dcim_link_two_sites':         'A link joins TWO different sites.',
+    'dcim_cable_kind_unknown':   'No such cable kind.',
+    'dcim_feed_unknown':       'No such power branch.',
+    'dcim_name_required':          'A name is required',
+    'dcim_bad_scope':              'That is not a scope things can belong to',
+    'dcim_bad_face':               'That is not a face of the rack',
+    'dcim_bad_unit':               'That is not a U position',
+    'dcim_no_room':                'It does not fit: those U are taken on that face',
+    'dcim_bad_slot':               'That part of the U does not exist',
+    'dcim_mount_nested':
+        'That is already mounted on something else: it cannot carry anything',
+    'dcim_mount_self':             'Something cannot be mounted on itself',
+    'dcim_mount_in_use':           'It carries mounted items; take them off first',
+    'dcim_item_slots':             'Parts of the U',
+    'dcim_item_slot':              'Which one it takes',
+    'dcim_item_slot_span':         'How many it takes',
+    'dcim_item_split':             'Split',
+    'dcim_split_width':            'Side by side',
+    'dcim_split_height':           'Stacked',
+    'dcim_item_parent':            'Mounted on',
+    'dcim_item_on':                '└ on it',
+    'dcim_item_parent_none':       'Nothing: bolted to the rack',
+    'dcim_item_mounted':           '{} mounted on it',
+    'dcim_catalog_path_required':  'A path or a zip is required',
+    'dcim_catalog_path_missing':   'There is nothing at that path',
+    'dcim_catalog_busy':           'An import is already running',
+    'dcim_catalog_no_yaml':        'PyYAML is missing: without it the model catalogue cannot be read. The rest of the inventory works as usual.',
+    'dcim_empty':              'No sites yet. The first one is created here; rooms and racks go inside it.',
+    'dcim_note':               '{} site(s) and {} company(ies). Where each piece of equipment is, and whose it is — which in a group are not the same question.',
+    'dcim_new_site':           'New site',
+    'dcim_site_name':          'Site name',
+    'dcim_rooms':              '{} room(s)',
+    'dcim_no_rooms':           'No rooms yet',
+    'dcim_racks':              '{} rack(s)',
+    'dcim_no_racks':           'No racks yet',
+    'dcim_racks_of_room':      'Racks in this room',
+    'dcim_back':               'Back',
+    'dcim_rack_note':          '{} U, holding {} thing(s)',
+    'dcim_rack_empty':         'The rack is empty',
+    'dcim_free':               '{} U free',
+    'dcim_free_tt':            'On the front face. Free space is shown in full even when the neighbours’ equipment is not: it says nothing about whose anything is, and it is what makes a shared cabinet plannable.',
+    'dcim_u':                  'U',
+    'dcim_face':               'Face',
+    'dcim_face_full':          'Full',
+    'dcim_face_front':         'Front',
+    'dcim_face_rear':          'Rear',
+    'dcim_what':               'What',
+    'dcim_owner':              'Company',
+    'dcim_foreign':            'Occupied — another company’s',
+    'dcim_open_device':        'Open the device',
+    'dcim_media_empty':            'No file was sent',
+    'dcim_media_too_big':          'The image is too large (2 MB maximum)',
+    'dcim_media_not_an_image':     'That is not an image. What is INSIDE the file is what is checked, not its extension: the extension is chosen by whoever uploads it.',
+    'dcim_media_no_dir':           'Nowhere to store it: the data directory is missing',
+    'dcim_media_write_failed':     'The file could not be written',
+    'dcim_media_unknown':          'That image does not exist',
+    'dcim_plan':             'Room plan',
+    'dcim_owner_none':           'Nobody (unclaimed)',
+    'dcim_owner_q':              'Which company owns ‘{}’? It is inherited inwards: whatever says nothing else belongs to it.',
+    'dcim_build_name_tt':
+        "The STANDARD's name, not the chassis's: \"Web server 2024\" is what somebody asks for, "
+        '"EliteDesk 800 G5" is what it is made of. The chassis name is already above, on the '
+        'model card.',
+    'dcim_build_platform_tt':
+        'What this configuration ships with: the system it is handed over running. Not what a '
+        'particular machine has installed today — that belongs to the machine, not the standard.',
+    'dcim_u_size_tt':
+        'How many rack units it takes. Fractions allowed: 0.5 for a half-U patch panel. Left '
+        "blank it takes the catalogue model's, so it is only filled in to correct it.",
+    'dcim_build_depth_tt':
+        'How far it reaches into the cabinet, in millimetres. Not the same as the "Depth" of a '
+        'cabinet, which is the whole box — and whether it fits is decided by the rail-to-rail '
+        'distance, not by this figure alone.',
+    'dcim_role_tt':
+        'What kind of device it is. It picks the icon and how it is drawn on the elevation, and '
+        'also whether it counts as "unwatched": a blanking plate or a patch panel is not expected '
+        'to answer, and counting them among the dead is what makes nobody read the warnings.',
+    'dcim_face_tt':
+        'Which face of the cabinet it shows on. A server takes its U from both — "full" — and two '
+        'half-depth boxes share one U, one at the front and one at the back.',
+    'dcim_cat_full_depth_tt':
+        'It takes the whole depth, so nothing fits behind it. Unticked, the same U will take '
+        'another box from the rear face.',
+    'dcim_port_bad':
+        'That file is not an export from this panel, or it is in a newer format.',
+    'dcim_port_done':            '{} models and {} templates are new. {} were already here.',
+    'dcim_port_no_plat':
+        'Platforms that do not exist here and were left unset: {}. Create them and import '
+        'again, or set them by hand on each template.',
+    'dcim_port_sel':             'Export {}',
+    'dcim_port_all':             'Export them all',
+    'dcim_port_nothing':         'Nothing ticked to export.',
+    'dcim_orgs':                 'Companies',
+    'dcim_org_new':              'Add a company',
+    'dcim_org_name':             'Name',
+    'dcim_org_short':            'Short form',
+    'dcim_org_drop_q':
+        'Delete "{}"? Anything filed under it is left unfiled.',
+    'dcim_orgs_hint':
+        'The short form is the one that fits on a badge and on an elevation, where a '
+        "company's legal name does not. Deleting a company deletes nothing of its own: "
+        'it stops saying whose things are.',
+    'dcim_no_orgs':              'No company has been declared yet.',
+    'dcim_link_provider':        'Carrier',
+    'dcim_link_circuit':         'Circuit ID',
+    'dcim_link_path':            'Path',
+    'dcim_rows':                 'Rows:',
+    'dcim_n_racks':              '{}',
+    'dcim_loose_racks':          '{} loose racks',
+    'dcim_row_aisles':           'Name / front aisle / rear aisle',
+    'dcim_row_aisles_of':        'Row ‘{}’ — name / front aisle / rear aisle',
+    'dcim_row_aisles_ph':        'B / Cold 1 / Hot 2',
+    'dcim_row_drop_q':           'Undo row ‘{}’? Its cabinets are left loose, not deleted.',
+    'dcim_sources':              'Panels and UPS',
+    'dcim_source':               'Source',
+    'dcim_sources_note':         '{} sources declared',
+    'dcim_source_kind':          'Kind',
+    'dcim_source_mains':         'Mains',
+    'dcim_source_panel':         'Panel',
+    'dcim_source_ups':           'UPS',
+    'dcim_source_generator':     'Generator',
+    'dcim_upstream':             'Fed by',
+    'dcim_upstream_self':        'A source cannot hang off itself.',
+    'dcim_upstream_loop':
+        'That source already hangs off this one: the chain would close on itself and '
+        'both would drop out of the tree.',
+    'dcim_upstream_none':        'Nothing (it is the start)',
+    'dcim_autonomy':             '{} min',
+    'dcim_autonomy_min':         'Minutes',
+    'dcim_bypassed':             'ON BYPASS',
+    'dcim_bypass_on':            'Throw bypass',
+    'dcim_bypass_off':           'Clear bypass',
+    'dcim_bypass_on_q':          'Throw the bypass on ‘{}’? From then on {} strips stop going through it: whatever hangs off them loses its UPS.',
+    'dcim_bypass_off_q':         'Clear the bypass on ‘{}’ and put the load back on the UPS?',
+    'dcim_source_clone':         'Clone with what hangs off it',
+    'dcim_source_clone_q':
+        'Clone "{}" and the {} sources hanging off it? The copy hangs where this one '
+        'does. The bypass is not copied — it is a manoeuvre in progress, not a way of '
+        'being wired — nor are the strips plugged into it.',
+    'dcim_source_cloned':        '{} sources written.',
+    'dcim_source_drop_q':        'Remove ‘{}’? What hung off it is left with nothing said about where it is fed from.',
+    'dcim_sources_ok':           'Every declared strip goes through the UPS it should.',
+    'dcim_sources_empty':        'No panel or UPS has been declared.',
+    'dcim_warn_on_bypass':       '{} is not going through any UPS right now, but it would go through ‘{}’ were it not for the bypass.',
+    'dcim_warn_same_ups':        '{} hang off the same UPS: two branches and a single point of failure.',
+    'dcim_catalog':              'Catalogue',
+    'dcim_cat_note':             '{} models',
+    'dcim_cat_search':           'Manufacturer or model…',
+    'dcim_cat_by_maker':         'By manufacturer',
+    'dcim_cat_as_list':          'Full list',
+    'dcim_cat_makers_note':      '{} manufacturers, {} models. Press one to see its own.',
+    'dcim_cat_import':           'Import models',
+    'dcim_cat_where':            'from whichever model library you have configured',
+    'dcim_cat_path':             'Folder or zip on the server',
+    'dcim_cat_path_ph':          '/path/to/clone/device-types  ·  /path/to/archive.zip',
+    'dcim_cat_source':           'Source label',
+    'dcim_cat_source_help':      'The name this import goes in under. Re-importing with the same label REPLACES what went in under it before and leaves the rest alone: that is how a downloaded library and a handful of hand-typed models for unpublished kit live side by side.',
+    'dcim_cat_go':               'Import',
+    'dcim_cat_running':          '{} models read…',
+    'dcim_cat_done':             '{} models imported',
+    'dcim_cat_empty':            'The catalogue is empty: import the library to start.',
+    'dcim_cat_maker':            'Manufacturer',
+    'dcim_cat_model':            'Model',
+    'dcim_cat_ports':            'Ports',
+    'dcim_cat_port_add':           'Add port',
+    'dcim_cat_tab_conns':          'Connectors',
+    'dcim_conn_name':              'Connector',
+    'dcim_conn_id':                'Identifier',
+    'dcim_conn_group':             'Kind',
+    'dcim_conn_note':              'What it is',
+    'dcim_cat_port_speed':         'Speed',
+    'dcim_conn_pair':              'Pairs with',
+    'dcim_conn_one_hint':
+        "The identifier is what gets stored on a model's record. It is the library's "
+        'on purpose: writing another one would have the same connector '
+        'counted twice depending on who typed it.',
+    'dcim_conn_version_hint':
+        'Raise it when saving: the higher of this and the one the panel ships wins. '
+        'Without raising it, a future update would take what was added with it.',
+    'dcim_conn_reset_q':
+        'Go back to the connector catalogue the panel ships? Whatever was saved here '
+        'is lost; what is already written on records is left alone.',
+    'dcim_conn_see':               'See them',
+    'dcim_conn_doc_note':
+        'This is where the options suggested when saying how something plugs in '
+        'come from. It ships with the panel and is not edited here: change it by '
+        'editing lib/core/dcim/data/connectors.json, which is re-read on save.',
+    'dcim_conn_doc_where':         'Spread across {} port families.',
+    'dcim_conn_all_fams':          'In any family',
+    'dcim_conn_count':             '{} connectors',
+    'dcim_conn_none':
+        'The connector catalogue could not be read. The boxes still accept whatever '
+        'is typed.',
+    'dcim_conn_no_match':          'No connector matches.',
+    'dcim_conn_hint':
+        'How each thing plugs in. This is a list of SUGGESTIONS: a port box accepts '
+        'anything, because what is actually plugged in in a real room includes '
+        'things that are on no list. The identifiers are the library\'s, so the same '
+        'connector is not counted twice depending on who typed it. It lives in '
+        'lib/core/dcim/data/connectors.json: adding one means editing that file.',
+    'dcim_conn_group_power_in':    'power inlet',
+    'dcim_conn_group_power_out':   'power outlet',
+    'dcim_conn_group_copper':      'copper',
+    'dcim_conn_group_fibre':       'fibre',
+    'dcim_conn_group_wireless':    'wireless',
+    'dcim_conn_group_console':     'console',
+    'dcim_conn_group_video':       'video',
+    'dcim_conn_group_bay':         'bay',
+    'dcim_cat_ports_empty':        'None yet.',
+    'dcim_cat_port_other':         'Other, I will type it…',
+    'dcim_cat_port_type_free':     'What it is called',
+    'dcim_cat_port_from_list':     'Pick it from the catalogue',
+    'dcim_cat_port_type':          'Type (1000base-t, iec-60320-c14…)',
+    'dcim_port_console-server-ports': 'Console server ports',
+    'dcim_cat_ports_hint':
+        'One line per family and type, with how many there are: they are counted, '
+        'not listed one by one. A 48-port switch is one line saying 48 — '
+        'forty-eight rows across five thousand models is a million nobody reads.',
+    'dcim_port_interfaces':            'Interfaces',
+    'dcim_port_power_ports':           'Power inlets',
+    'dcim_port_power_outlets':         'Power outlets',
+    'dcim_port_console_ports':         'Console ports',
+    'dcim_port_console_server_ports':  'Console server ports',
+    'dcim_port_front_ports':           'Front ports',
+    'dcim_port_rear_ports':            'Rear ports',
+    'dcim_port_module_bays':           'Module bays',
+    'dcim_port_device_bays':           'Device bays',
+    'dcim_port_inventory_items':       'Inventory items',
+    'dcim_cat_hint':             'A clone of the repository on the server disk, or a zip of it, also works — for installs with no way out to the internet. Elevation images are taken from ‘elevation-images’ when they sit beside it.',
+    'dcim_cat_url':              'From GitHub',
+    'dcim_cat_url_ph':           'https://github.com/netbox-community/devicetype-library',
+    'dcim_cat_browse':           'See what is there',
+    'dcim_cat_ph_index':         'Asking the repository…',
+    'dcim_cat_import_all':       'Bring everything ({} models)',
+    'dcim_cat_import_all_ask':   'Bring the whole repository? That is about 850 MB to download and over eight thousand models in the search box. For a few manufacturers, ticking them is faster.',
+    'dcim_cat_all_hint':         'Bringing everything downloads the repository in one go, which for “all of it” beats asking for ten thousand files; the archive is read and deleted.',
+    'dcim_cat_ph_zip':           'Downloading the repository… {} of {} MB',
+    'dcim_cat_ph_zip0':          'Downloading the repository…',
+    'dcim_cat_ph_zip_mb':        'Downloading the repository… {} MB',
+    'dcim_cat_ph_models':        'Downloading models… {} of {}',
+    'dcim_cat_ph_images':        'Downloading pictures… {} of {}',
+    'dcim_cat_ph_saving':        'Saving into the catalogue…',
+    'dcim_catalog_pick_none':    'You have not ticked any model',
+    'dcim_cat_sel_all':          'Select what is shown',
+    'dcim_cat_sel_none':         'Clear selection',
+    'dcim_cat_drop_sel':         'Drop the ticked ones ({})',
+    'dcim_cat_drop_sel_ask':     'Drop {} models from the catalogue? Their pictures go with them.',
+    'dcim_cat_empty_src':        'Empty a source',
+    'dcim_cat_empty_src_ask':    'Empty the whole “{}” source? That is {} models, with their pictures.',
+    'dcim_cat_dropped':          '{} models dropped',
+    'dcim_nav_tree':             'Inventory',
+    'dcim_cat_front':            'Front',
+    'dcim_cat_tab_data':         'Details',
+    'dcim_cat_tab_images':       'Pictures',
+    'dcim_cat_tab_files':          'Attachments',
+    'dcim_cat_file_kind':          'What it is',
+    'dcim_cat_file_name':          'File',
+    'dcim_cat_file_size':          'Size',
+    'dcim_cat_file_add':           'Add one',
+    'dcim_cat_file_get':           'Download',
+    'dcim_cat_file_manual':        'Manual',
+    'dcim_cat_file_datasheet':     'Datasheet',
+    'dcim_cat_file_firmware':      'Firmware',
+    'dcim_cat_file_warranty':      'Warranty',
+    'dcim_cat_file_other':         'Other',
+    'dcim_cat_files_none':         'This model has nothing attached.',
+    'dcim_cat_files_save_first':
+        'Save the model first and come back: an attachment is uploaded to the '
+        'server and it needs to know which model it hangs off.',
+    'dcim_cat_files_hint':
+        'Each file is saved the moment you pick it. They are always downloaded, '
+        'never opened inside the panel — which is why there is no allow-list of '
+        'types that would be wrong every week.',
+    'dcim_cat_file_drop_q':        'Remove "{}"? The file is deleted from disk.',
+    'dcim_cat_img_save_first':   'Save the model first and come back: a picture is uploaded to the server and it needs to know which model it belongs to.',
+    'dcim_cat_img_hint':         'Each picture is saved the moment you pick it, nothing else to press. A phone photo of the front will do: in an elevation it is recognised at a glance, which is what it is for.',
+    'dcim_cat_rear':             'Rear',
+    'dcim_cat_no_image':         'This model brings no pictures',
+    'dcim_cat_full_depth':       'Full depth',
+    'dcim_cat_powered':          'Powered',
+    'dcim_cat_part_number':      'Part number',
+    'dcim_cat_product_url':      'Product page',
+    'dcim_cat_airflow':          'Airflow',
+    'dcim_val_external_desktop':     'External adapter (desktop brick)',
+    'dcim_val_external_wall':        'Wall-plug adapter',
+    'dcim_val_din_rail':             'DIN rail',
+    'dcim_val_open_frame':           'Open frame',
+    'dcim_val_poe_injector':         'PoE injector',
+    'dcim_val_none':                 'None',
+    'dcim_val_desktop':                'Desktop',
+    'dcim_val_server':                 'Server',
+    'dcim_val_workstation':            'Workstation',
+    'dcim_val_mobile':                 'Mobile',
+    'dcim_val_embedded':               'Embedded',
+    'dcim_val_passive':              'Passive',
+    'dcim_val_front_to_rear':        'Front to rear',
+    'dcim_val_rear_to_front':        'Rear to front',
+    'dcim_val_left_to_right':        'Left to right',
+    'dcim_val_right_to_left':        'Right to left',
+    'dcim_val_side_to_rear':         'Side to rear',
+    'dcim_cat_subdevice':        'Chassis / housed',
+    'dcim_cat_kind':             'Kind',
+    'dcim_cat_is_device':        'device',
+    'dcim_cat_imported':         'Imported',
+    'dcim_cat_created':          'Created',
+    'dcim_cat_updated':          'Modified',
+    'dcim_cat_rev':              'Version',
+    'dcim_cat_drop_ask':         'Drop “{}” from the catalogue? Its pictures go with it.',
+    'dcim_cat_tab_list':         'Catalogue',
+    'dcim_cat_tab_brands':       'Brands',
+    'dcim_cat_tab_platforms':      'Platforms',
+    'dcim_plat_name':              'Platform',
+    'dcim_plat_version':           'Version',
+    'dcim_plat_kind':              'Class',
+    'dcim_plat_builds':            'Standards',
+    'dcim_plat_new':               'New platform',
+    'dcim_plat_drop_n':            'Remove {}',
+    'dcim_plat_drop_many_q':       'Remove {} platforms? The ones a standard names stay.',
+    'dcim_plat_dropped':           '{} removed',
+    'dcim_plat_dropped_kept':      '{} removed; {} stay because a standard names them',
+    'dcim_plat_none':              'No platforms yet',
+    'dcim_plat_none_pick':         'Not said',
+    'dcim_plat_no_brand':          'Nobody in particular',
+    'dcim_plat_filter':            'Filter platforms',
+    'dcim_plat_drop_q':            'Retire the platform "{}"?',
+    'dcim_plat_kind_os':           'Operating system',
+    'dcim_plat_kind_firmware':     'Firmware',
+    'dcim_plat_kind_hypervisor':   'Hypervisor',
+    'dcim_plat_kind_appliance':    'Appliance',
+    'dcim_plat_kind_other':        'Other',
+    'dcim_plat_intro':
+        'What a machine ships with, written once. A text box per standard ends up '
+        'as four spellings of "Debian 12", and then "how many machines need '
+        'updating" has no single answer.',
+    'dcim_plat_form_hint':
+        "The maker is optional: RouterOS is MikroTik's, but Debian belongs to "
+        'nobody who appears on an invoice. The version is kept apart from the '
+        'name so "how many Debians" and "how many are on 12" can both be asked '
+        'without splitting strings.',
+    'dcim_brand_new':            'New brand',
+    'dcim_brand_name':           'Name',
+    'dcim_brand_models':         'Models',
+    'dcim_brand_url':            'Website',
+    'dcim_brand_support':        'Support',
+    'dcim_brand_account':        'Account no.',
+    'dcim_brand_open':           'Open',
+    'dcim_brand_none':           'No brands yet.',
+    'dcim_brand_intro':
+        'They are created on their own when the catalogue is imported. What gets '
+        'typed here is what no library carries.',
+    'dcim_brand_form_hint':
+        'The support address is where a ticket is opened or a firmware downloaded — '
+        'not the same as the sales site, and the one needed at three in the '
+        'morning.',
+    'dcim_brand_drop_q':
+        'Retire the record for "{}"? Its catalogue models stay; what is lost is '
+        'what we wrote ourselves.',
+    'dcim_brand_name_taken':     'A name is needed, and one no other brand already has.',
+    'dcim_profiles_no_version':
+        'The document must carry a "version", higher than the current one.',
+    'dcim_brand_in_use':
+        'It still has models in the catalogue. While it does, the name would come '
+        'back on its own at the next start and the only thing lost would be what we '
+        'wrote ourselves.',
+    'dcim_platform_name_taken':    'There is already a platform with that name',
+    'dcim_platform_in_use':        'Some purchase standards ship with this platform',
+    'dcim_cat_tab_import':       'Import',
+    'dcim_cat_tab_schemas':      'Schemas',
+    'dcim_cat_tab_history':          'History',
+    'dcim_cat_hist_when':            'When',
+    'dcim_cat_hist_who':             'Who',
+    'dcim_cat_hist_what':            'What changed',
+    'dcim_cat_hist_undo':            'Go back to this',
+    'dcim_cat_hist_none':            'No recorded changes for this model yet.',
+    'dcim_cat_hist_restore_q':
+        'Go back to what this version said? Nothing in between is deleted: going '
+        'back is one more change, and it is recorded.',
+    'dcim_cat_hist_hint':
+        'The most recent changes to each model are kept. Importing the library '
+        'leaves no versions: it replaces the whole source, and what is kept here '
+        'is what somebody decided by hand.',
+    'dcim_cat_hist_create':          'Created',
+    'dcim_cat_hist_edit':            'Saved with no changes',
+    'dcim_cat_hist_image':           'Picture set',
+    'dcim_cat_hist_image_drop':      'Picture removed',
+    'dcim_cat_hist_restore':         'Reverted to an earlier version',
+    'dcim_cat_hist_part_add':        'Component added',
+    'dcim_cat_hist_part_edit':       'Component corrected',
+    'dcim_cat_hist_part_drop':       'Component removed',
+    'dcim_build_hist_hint':
+        'The last changes to this template are kept, with its components. Going '
+        'back to a version rewrites its data, NOT its components: the ones already '
+        'stamped onto the machines born here hang off those.',
+    'dcim_build_hist_restore_q':
+        'Go back to what this version said? Its components are left alone, and '
+        'nothing in between is deleted: going back is one more change, and it is '
+        'recorded.',
+    'dcim_cat_attrs':                'Attributes',
+    'dcim_cat_attrs_pick_kind':      'Pick the component type and its attributes will appear.',
+    'dcim_attr_capacity':            'Capacity',
+    'dcim_attr_power_type': 'Power',
+    'dcim_attr_power_type_tt':
+        'How it is fed. An internal supply is swapped without moving the machine; '
+        'an external brick has to travel with it and is bolted to nothing. And '
+        'PoE costs no strip outlet — the switch pays for it.',
+    'dcim_val_internal': 'Internal supply',
+    'dcim_val_external': 'External power supply',
+    'dcim_val_poe': 'PoE',
+    'dcim_build_sum_unpowered': 'Not powered',
+    'dcim_attr_link_speed': 'Link speed',
+    'dcim_attr_link_speed_tt':
+        "Each port's maximum, not the total of all of them. Anything below is "
+        'negotiated on its own, which is how a port is talked about: "a 1G port", '
+        'not "a 10/100/1000 port". In gigabits a 100 Mbps IP phone did not fit '
+        'without writing 0.1.',
+    'dcim_attr_kit_qty': 'Units per box',
+    'dcim_attr_kit_qty_tt':
+        'How many pieces one purchased unit brings. A two-module kit is ordered '
+        'under one part number and fills two sockets: "how many DIMMs have I got" '
+        'wants the second figure and "how many did I order" wants the first. One '
+        'for anything bought singly.',
+    'dcim_attr_module_type':           'Module type',
+    'dcim_attr_pc_rating':             'PC rating',
+    'dcim_attr_cl':                    'CAS latency (CL)',
+    'dcim_attr_timings':               'Timings',
+    'dcim_attr_ranks':                 'Ranks',
+    'dcim_attr_profile_xmp':           'Factory profile',
+    'dcim_attr_height':                'Height',
+    'dcim_attr_module_type_tt':
+        'How it talks to the controller. A server board demands RDIMM or LRDIMM '
+        'and a desktop board rejects them: it decides whether the module boots, '
+        'and you cannot tell by looking at it.',
+    'dcim_attr_pc_rating_tt':
+        'The other way speed is written, the one on many labels. It is the same '
+        'fact as MT/s in megabytes per second — MT/s times eight — so each option '
+        'carries both: pick by reading the module, whichever it says.',
+    'dcim_attr_cl_tt':
+        'How many cycles before the first word comes out. At equal speed, lower '
+        'is better — but a higher CL at more MT/s can still be faster in real '
+        'time.',
+    'dcim_attr_timings_tt':
+        'The whole series as the vendor writes it: "16-18-18-38". CL is only the '
+        'first of the four.',
+    'dcim_attr_ranks_tt':
+        'How many logical banks and how wide: `2Rx4`. A server caps how many '
+        'ranks it takes per channel, so two modules that fit may not be able to '
+        'go in together.',
+    'dcim_attr_profile_xmp_tt':
+        'The factory profile for running above its stock speed. Without enabling '
+        'it in the BIOS, the module runs slow.',
+    'dcim_attr_height_tt':
+        'A standard-height module **will not fit a 1U server**. This is what '
+        'makes a correct order arrive and be unmountable.',
+    'dcim_attr_airflow_tt':
+        'Which way it vents. "None" is a component that dissipates nothing; '
+        '"passive" is one that dissipates without a fan. Mixing two airflow '
+        'directions in one cabinet is the fault a floor plan never shows.',
+    'dcim_attr_launched_tt':
+        'When it reached the market. Tells you whether what you are buying '
+        'already has a successor.',
+    'dcim_attr_eol_tt':
+        'When vendor support ends. The last of the six, and the date you go '
+        'looking for when something fails five years in: past it, whatever '
+        'breaks is fixed with what is on the shelf.',
+    'dcim_attr_end_of_sale_tt':
+        'When the maker stops selling it. Nothing stops working that day: what '
+        'stops is being able to buy another one, and that decides whether the '
+        'spare is bought now or hunted down second-hand.',
+    'dcim_attr_end_of_maintenance_tt':
+        'When maintenance updates stop — the fixes that are not security ones. '
+        'From here on, what is broken stays broken.',
+    'dcim_attr_end_of_security_tt':
+        'When security patches stop. This is the date that decides whether that '
+        'box can still face the internet, which is why it turns red the day it '
+        'passes.',
+    'dcim_attr_last_contract_attach_tt':
+        'The last day support can be bought for the first time. After it, '
+        'coverage cannot be added to one that never had it — at any price.',
+    'dcim_attr_last_contract_renewal_tt':
+        'The last day an existing contract can be renewed. Renew before it, or '
+        'not at all: letting it lapse is usually final.',
+    'dcim_attr_weight_tt':
+        'What one unit weighs. Added up, it decides whether a cabinet takes what '
+        'you want to put in it.',
+    'dcim_attr_weight_unit_tt': 'Which unit the weight was written in.',
+    'dcim_attr_capacity_tt':
+        'How much it stores. Written with its unit, because "4 TB" is 4·10¹² or '
+        '4·2⁴⁰ depending who you ask, and both answers are on some delivery note.',
+    'dcim_attr_power_tt': 'The watts it delivers, not the ones it draws.',
+    'dcim_attr_form_factor_tt':
+        'The physical format: whether it fits where it has to go. Not the same as '
+        'how it talks to the controller.',
+    'dcim_attr_interface_tt':
+        'How it connects. An M.2 NVMe will not work in an M.2 SATA bay even '
+        'though it fits.',
+    'dcim_attr_interface_detail_tt':
+        'The exact wording from the datasheet: "PCIe Gen 4.0 x4, NVMe 1.3c". It '
+        'decides whether it runs at the speed it promises.',
+    'dcim_attr_rpm_tt': 'Revolutions per minute. Spinning disks only: leave blank on an SSD.',
+    'dcim_attr_endurance_tbw_tt':
+        'How many terabytes can be written before the vendor stops guaranteeing '
+        'it. The figure that separates a server SSD from a desktop one.',
+    'dcim_attr_nand_tt':
+        'Which cell type: TLC, QLC, MLC. It decides how much writing it survives.',
+    'dcim_attr_cache_tt': "The component's own buffer memory.",
+    'dcim_attr_encryption_tt':
+        'Whether it encrypts in hardware, and with what. A disk retired '
+        'unencrypted is a disk that has to be destroyed.',
+    'dcim_attr_ddr_tt': 'The generation. They do not mix: a board takes one and only one.',
+    'dcim_attr_speed_mts_tt':
+        'Megatransfers per second — the number after the dash in "DDR4-2666". Not '
+        'the same as the clock in MHz.',
+    'dcim_attr_ecc_tt':
+        'Whether it corrects single-bit errors on its own. Without it, a memory '
+        'error in a server is found by whatever it breaks.',
+    'dcim_attr_segment_tt':
+        'What it is meant for. A server part and a desktop part with the same '
+        'core count do not behave alike under sustained load.',
+    'dcim_attr_socket_tt': "The board's socket. The first thing that rules a CPU out.",
+    'dcim_attr_sockets_max_tt':
+        'How many of these one board takes. `1` is normal; `2` or more is what '
+        'makes a model a server part.',
+    'dcim_attr_cores_p_tt':
+        'The big cores, on CPUs that mix two kinds. They do the work that is '
+        'waited on.',
+    'dcim_attr_cores_e_tt':
+        'The small cores. They add up on parallel work and not on anything that '
+        'hangs off a single thread.',
+    'dcim_attr_base_ghz_tt':
+        'The clock it sustains with every core busy. The one to look at for a '
+        'server.',
+    'dcim_attr_turbo_ghz_tt':
+        'How high it goes briefly and with few cores busy. Not what it holds '
+        'under load.',
+    'dcim_attr_tdp_w_tt': 'Design power, what cooling is sized against.',
+    'dcim_attr_tdp_max_w_tt':
+        'What it actually draws in turbo. This is the number to add up when '
+        'sizing a power strip, not the design figure.',
+    'dcim_attr_lithography_tt':
+        'The process, as the vendor names it: "Intel 7", "TSMC 5 nm". A marketing '
+        'label, not a figure comparable between vendors.',
+    'dcim_attr_cache_l2_mb_tt': 'Second-level cache, across all cores.',
+    'dcim_attr_cache_l3_mb_tt':
+        'Shared cache. The one that shows most in databases and virtualisation.',
+    'dcim_attr_memory_type_tt':
+        'The memory it takes, with its top speed: "DDR5-4800". Fitting faster '
+        'memory does not make it faster.',
+    'dcim_attr_memory_channels_tt':
+        'How many channels it has. Filling only half leaves half the bandwidth '
+        'unused, and nothing reports that.',
+    'dcim_attr_memory_max_gb_tt':
+        'The memory ceiling. It decides how many virtual machines fit before the '
+        'server has to be replaced.',
+    'dcim_attr_igpu_tt':
+        'Whether graphics are built in. On a server with no card, it decides '
+        'whether there is a local console.',
+    'dcim_attr_igpu_model_tt': 'Which ones. Matters for the console and for what is accelerated.',
+    'dcim_attr_management_tt':
+        'Out-of-band management in the processor itself: power on, see the screen '
+        "and reinstall without being there. Not the same as the board's iDRAC or "
+        'iLO.',
+    'dcim_attr_pcie_gen_tt':
+        'Which PCIe generation it speaks. A newer card works, at the speed of the '
+        'older of the two.',
+    'dcim_attr_pcie_lanes_tt':
+        'How many lanes it offers. It decides how many fast cards fit at once, '
+        'and they run out sooner than you would think.',
+    'dcim_attr_ports_tt': 'How many ports the card has.',
+    'dcim_attr_connector_tt':
+        'What plugs in: RJ45 takes copper; SFP+ and its family take a transceiver '
+        'bought separately.',
+    'dcim_attr_wavelength_nm_tt': 'The wavelength. Both ends of a fibre have to match.',
+    'dcim_attr_distance_m_tt': 'How far it reaches, per the vendor. On used fibre, less.',
+    'dcim_attr_efficiency_tt':
+        '80 PLUS rating. It says how much current is lost as heat — which is what '
+        'then has to be cooled.',
+    'dcim_attr_memory_gb_tt': "The graphics card's own memory.",
+    'dcim_attr_voltage_v_tt':
+        'The voltage it runs at. On memory, mixing two voltages in one board is '
+        'the fault that shows up weeks later.',
+    'dcim_attr_cfm_tt': 'Cubic feet per minute: how much air it moves.',
+    'dcim_attr_segment':               'Segment',
+    'dcim_attr_sockets_max':           'CPUs per board',
+    'dcim_attr_cores_p':               'P-cores',
+    'dcim_attr_cores_e':               'E-cores',
+    'dcim_attr_turbo_ghz':             'Turbo clock (GHz)',
+    'dcim_attr_tdp_max_w':             'Turbo power (W)',
+    'dcim_attr_lithography':           'Lithography',
+    'dcim_attr_cache_l2_mb':           'L2 cache (MB)',
+    'dcim_attr_cache_l3_mb':           'L3 cache (MB)',
+    'dcim_attr_memory_type':           'Memory supported',
+    'dcim_attr_memory_channels':       'Memory channels',
+    'dcim_attr_memory_max_gb':         'Maximum memory (GB)',
+    'dcim_attr_igpu':                  'Integrated graphics',
+    'dcim_attr_igpu_model':            'Graphics model',
+    'dcim_attr_management':            'Out-of-band management',
+    'dcim_attr_pcie_gen':              'PCIe',
+    'dcim_attr_pcie_lanes':            'PCIe lanes',
+    'dcim_attr_launched':              'Launched',
+    'dcim_attr_eol':                   'End of support',
+    'dcim_cat_lifecycle':              'Lifecycle dates',
+    'dcim_attr_end_of_sale':           'End of sale',
+    'dcim_attr_end_of_maintenance':    'End of maintenance',
+    'dcim_attr_end_of_security':       'End of security updates',
+    'dcim_attr_last_contract_attach':  'Last support contract attach',
+    'dcim_attr_last_contract_renewal': 'Last support contract renewal',
+    'dcim_attr_power':               'Power',
+    'dcim_attr_form_factor':         'Form factor',
+    'dcim_attr_interface':           'Interface',
+    'dcim_attr_interface_detail':    'Interface (detail)',
+    'dcim_attr_nand':                'Storage memory',
+    'dcim_attr_cache':               'Cache',
+    'dcim_attr_encryption':          'Encryption',
+    'dcim_attr_rpm':                 'RPM',
+    'dcim_attr_endurance_tbw':       'Endurance (TBW)',
+    'dcim_attr_ddr':                 'Generation',
+    'dcim_attr_speed_mts':           'Speed (MT/s)',
+    'dcim_attr_ecc':                 'ECC',
+    'dcim_attr_socket':              'Socket',
+    'dcim_attr_cores':               'Cores',
+    'dcim_attr_threads':             'Threads',
+    'dcim_attr_base_ghz':            'Base clock (GHz)',
+    'dcim_attr_tdp_w':               'TDP (W)',
+    'dcim_attr_memory_gb':           'Memory (GB)',
+    'dcim_attr_ports':               'Ports',
+    'dcim_attr_connector':           'Connector',
+    'dcim_attr_efficiency':          'Efficiency',
+    'dcim_attr_wavelength_nm':       'Wavelength (nm)',
+    'dcim_attr_distance_m':          'Reach (m)',
+    'dcim_attr_voltage_v':           'Voltage (V)',
+    'dcim_attr_capacity_ah':         'Capacity (Ah)',
+    'dcim_attr_cfm':                 'Airflow (CFM)',
+    'dcim_attr_weight':              'Weight',
+    'dcim_attr_weight_unit':         'Weight unit',
+    'dcim_cat_schema_extra':     '“{}” fields',
+    'dcim_sch_note':             'What fields a model can have. Fetched from the library, and clonable for the things that are in no repository.',
+    'dcim_sch_fetch':            'Fetch from the library',
+    'dcim_sch_fetching':         'Reading the schemas…',
+    'dcim_sch_fetched':          '{} schemas fetched',
+    'dcim_sch_empty':            'None yet. Fetch them from the library to start.',
+    'dcim_prof_title':           'Component attributes',
+    'dcim_prof_add_field':         'Add field',
+    'dcim_prof_field':             'Field',
+    'dcim_prof_type':              'Type',
+    'dcim_prof_options':           'Options',
+    'dcim_prof_options_hint':      'comma separated',
+    'dcim_prof_no_fields':         'This class asks for nothing yet.',
+    'dcim_prof_size_label':        'Called',
+    'dcim_prof_size_empty':
+        'Blank: this class asks for no size. A CPU has none, and a box that asks '
+        'nothing cannot be filled in.',
+    'dcim_prof_size_note':
+        "The same box is a disk's capacity, a DIMM's gigabytes and a PSU's watts: "
+        'which is why it is named per class.',
+    'dcim_prof_size_hint':         'Example',
+    'dcim_prof_preview':           'Preview',
+    'dcim_prof_preview_of':        'This is how a {} will look',
+    'dcim_prof_preview_note':
+        'The fields are disabled: this shows the shape, it is not a place to '
+        'type.',
+    'dcim_prof_hist_none':
+        'Nobody has changed this document yet: the one shipped with the panel '
+        'still stands.',
+    'dcim_prof_version_col':       'Version',
+    'dcim_prof_compare':           'Compare with current',
+    'dcim_prof_diff':              'Differences against what stands now',
+    'dcim_prof_same':              'That version says exactly the same as the current one.',
+    'dcim_prof_version':         'version {}',
+    'dcim_prof_own':             'own',
+    'dcim_prof_reset':           'Back to the shipped one',
+    'dcim_prof_reset_q':
+        'Go back to the document that ships with the panel? The one saved here is '
+        'lost; models already written are not touched.',
+    'dcim_prof_note':
+        'What gets asked of a component of each class. It ships with the panel '
+        'and can be replaced by a newer one without a release: the higher '
+        '"version" wins.',
+    'dcim_prof_bad_json':        'That is not valid JSON.',
+    'dcim_prof_dropped':         'Saved, but this was dropped: {}',
+    'dcim_sch_fields':           '{} fields',
+    'dcim_sch_from':             'cloned from {}',
+    'dcim_sch_show':             'Show fields',
+    'dcim_sch_preview':          'See the form',
+    'dcim_sch_preview_of':       '“{}” form (preview)',
+    'dcim_sch_preview_hint':     'A preview: it shows which fields this schema would ask for and saves nothing.',
+    'dcim_sch_hide':             'Hide',
+    'dcim_sch_clone':            'Clone',
+    'dcim_sch_clone_ask':        'Cloning “{}”. What will the new one be called?',
+    'dcim_sch_name_ph':          'power-board',
+    'dcim_sch_drop_ask':         'Delete the “{}” schema? Models written with it are left alone.',
+    'dcim_sch_add_field':        'Add field',
+    'dcim_sch_field_ph':         'field_name',
+    'dcim_sch_field_dup':        'That field is already there',
+    'dcim_sch_extra_hint':       'New fields are kept as extra data: they show on the card, but you cannot search or filter by them.',
+    'dcim_sch_in_column':        'own column',
+    'dcim_sch_in_ports':         'port count',
+    'dcim_sch_in_extra':         'extra data',
+    'dcim_cat_from_github':      'From GitHub',
+    'dcim_cat_from_upload':      'Upload a zip',
+    'dcim_cat_from_path':        'Server folder',
+    'dcim_cat_browse_first':     'Press ‘See what is there’ to list the library’s manufacturers before importing anything.',
+    'dcim_cat_filter_maker':     'Filter manufacturer…',
+    'dcim_cat_pick_all':         'Select all',
+    'dcim_cat_pick_shown':       'Select what is shown',
+    'dcim_cat_pick_none':        'Clear selection',
+    'dcim_cat_no_maker':         'No manufacturer by that name',
+    'dcim_cat_showing':          'Showing {}–{} of {}',
+    'dcim_cat_is_module':        'module',
+    'dcim_cat_measures':         'Measurements',
+    'dcim_cat_is_rack':          'rack',
+    'dcim_cat_any_kind':         'Any type',
+    'dcim_cat_new':              'New model',
+    'dcim_cat_clone':            'Clone',
+    'dcim_cat_cloning':          'Clone model',
+    'dcim_cat_copy_suffix':      '(copy)',
+    'dcim_cat_clone_hint':       'This makes a new row with source “manual”: the original is left alone, and the pictures are copied so deleting one does not leave the other without them.',
+    'dcim_cat_desc':             'Description',
+    'dcim_cat_kind_guess':       'Work it out from the ports',
+    'dcim_cat_unset':            'Not said',
+    'dcim_cat_weight':           'Weight',
+    'dcim_cat_weight_unit':      'Weight unit',
+    'dcim_cat_form_factor':      'Form factor',
+    'dcim_cat_width_in':         'Width (inches)',
+    'dcim_cat_starting_unit':    'First U',
+    'dcim_cat_outer_width':      'Outer width',
+    'dcim_cat_outer_height':     'Outer height',
+    'dcim_cat_outer_depth':      'Outer depth',
+    'dcim_cat_unit':             'Unit',
+    'dcim_cat_mounting_depth':   'Mounting depth',
+    'dcim_cat_max_weight':       'Maximum weight',
+    'dcim_cat_new_hint':         'For what is in no library: the rack the electrician built, the shelf with its charger, the device from a maker that publishes nothing. No import will touch it.',
+    'dcim_cat_edit_hint':        'Correcting the type pins it: the next library import will refresh the rest of the entry and keep what you decided here.',
+    'dcim_cat_kind_unknown':     'Unclassified',
+    'dcim_cat_kind_rack':        'Rack',
+    'dcim_cat_kind_transceiver': 'Transceiver',
+    'dcim_cat_kind_psu':         'Power supply',
+    'dcim_cat_kind_nic':         'Network card',
+    'dcim_cat_kind_module':      'Module',
+    'dcim_cat_basics_ask':       'Bring in the basic catalogue? Generic racks, servers, switches, panels, power strips and shelves — enough to draw a rack with no internet — plus the platforms everyone types anyway (Windows, Debian, Ubuntu). It replaces the previous basics and leaves the rest alone; platforms are added, never overwritten.',
+    'dcim_cat_basics_hint':      'generics that ship with the panel, nothing to download',
+    'dcim_cat_basics':           'Bring the basics',
+    'dcim_cat_zip':              'Library zip archive',
+    'dcim_cat_zip_pick':         'Pick a zip file',
+    'dcim_cat_zip_hint':         'A zip of the model repository, with ‘device-types/<Vendor>/’ inside. It is read and discarded: what stays is the models, not the archive. 64 MB max — for the whole library with pictures, clone it and use the server folder.',
+    'dcim_cat_uploading':        'Uploading the archive…',
+    'dcim_catalog_upload_big':   'The archive is too large (64 MB max)',
+    'dcim_catalog_not_zip':      'That is not a zip archive',
+    'dcim_cat_browse_failed':    'The library could not be browsed',
+    'dcim_cat_only_picked':
+        'Only the ticked models and their pictures are downloaded, not the whole '
+        'repository. And only those manufacturers are replaced: whatever is already '
+        'here for the others stays.',
+    'dcim_cat_browsing':         'Downloading the library…',
+    'dcim_cat_found':            '{} manufacturers, {} models. Tick the ones you want.',
+    'dcim_cat_none':             'That library holds no models',
+    'dcim_cat_import_n':         'Bring the ticked ones ({})',
+    'dcim_cat_pick_one':         'Tick at least one manufacturer',
+    'dcim_cat_modules_hint':     'devices + modules + racks',
+    'dcim_catalog_bad_url':      'That address is not a GitHub repository',
+    'dcim_schema_need_name':     'The schema needs a name',
+    'dcim_schema_dup':           'There is already a schema by that name',
+    'dcim_schema_not_found':     'That library publishes no schemas',
+    'dcim_catalog_need_name':    'The manufacturer and the model are both required',
+    'dcim_catalog_not_found':    'There is nothing there: check the repository and the branch (the original uses ‘master’, many forks use ‘main’)',
+    'dcim_catalog_rate_limited': 'GitHub is rate-limiting. Try again in a while',
+    'dcim_catalog_truncated':    'That repository has too many files to list in one go',
+    'dcim_catalog_too_large':    'GitHub’s answer is too large',
+    'dcim_catalog_bad_json':     'GitHub answered something that cannot be read',
+    'dcim_catalog_too_many':     'You picked too many models at once. Import fewer manufacturers, or clone the repository and point at the folder',
+    'dcim_catalog_download_failed': 'The library could not be downloaded',
+    'dcim_catalog_bad_zip':      'The downloaded archive cannot be read',
+    'dcim_role':                 'Kind',
+    'dcim_role_':                'Not said',
+    'dcim_role_server':          'Server',
+    'dcim_role_switch':          'Switch',
+    'dcim_role_router':          'Router',
+    'dcim_role_firewall':        'Firewall',
+    'dcim_role_storage':         'Storage',
+    'dcim_role_patch_panel':     'Patch panel',
+    'dcim_role_fiber_panel':     'Fibre panel',
+    'dcim_role_ups':             'UPS',
+    'dcim_role_pdu':             'PDU',
+    'dcim_role_shelf':           'Shelf',
+    'dcim_role_kvm':             'KVM',
+    'dcim_role_console':         'Console',
+    'dcim_role_blank':           'Blanking plate',
+    'dcim_role_other':           'Other',
+    'dcim_parts':                'Components',
+    'dcim_part':                 'Component',
+    'dcim_part_slot':            'Slot',
+    'dcim_bay_name':               'Bay',
+    'dcim_bay_name_hint':          'SODIMM-1, SocketCPU, M.2_1…',
+    'dcim_bay_holds':              'What is in it',
+    'dcim_bay_empty':              'empty',
+    'dcim_bay_none':               'This template declares no bays.',
+    'dcim_bay_missing':
+        'The model said {} and {} are named so far. Once one is named this list is '
+        'what counts: name the rest, or the template will claim fewer bays than the '
+        'machine has.',
+    'dcim_bay_unnamed':
+        'The model says there are {}, but not what they are called. Name them to be '
+        'able to say what goes in each.',
+    'dcim_bay_add':                'Add a bay',
+    'dcim_bay_other':              'Other, I will type it…',
+    'dcim_bay_this_one':           'this same part',
+    'dcim_bay_n_of':               'Slots ({} of {})',
+    'dcim_bay_left':               '{} to go',
+    'dcim_bay_not_declared':       'The template does not declare this bay.',
+    'dcim_bay_many_hint':          'SODIMM-1, SODIMM-2',
+    'dcim_bay_from_list':          "Pick one of the template's bays",
+    'dcim_bay_hint':
+        'A bay is a PLACE, and of a place you ask which one: the DIMM goes in '
+        'SODIMM-1 or in SODIMM-2, and "two bays" does not say which holds the one '
+        'that is fitted. Each component says which slot it goes in, and they are '
+        'matched here by name.',
+    'dcim_bay_edit_hint':
+        "The name is the machine's own — the one silkscreened on the board and the "
+        'one the manual uses. The bay count comes from this list: it is not typed '
+        'separately, so the two cannot say different things.',
+    'dcim_signals_hint':
+        'What a lead can carry. It grows here: a missing signal is added and shows up in '
+        'every connector that ticks it.',
+    'dcim_gen_hint':
+        'The id is what a port stores, so correcting the name of a generation does not '
+        'unhook the ports that already had it.',
+    'dcim_port_volts':             'Voltage (V)',
+    'dcim_port_watts':             'Watts (W)',
+    'dcim_gen_unset':              'Generation not stated',
+    'dcim_gen':                    'Generation',
+    'dcim_signals':                'What it carries',
+    'dcim_build_tab_links':        'Connections',
+    'dcim_build_index':            'What is behind each tab',
+    'dcim_build_card_bays':        '{} of {} in use',
+    'dcim_bay_pre_front':          'Front',
+    'dcim_bay_pre_rear':           'Rear',
+    'dcim_bay_pre_power':          'Inlet',
+    'dcim_bay_pre_console':        'Console',
+    'dcim_bay_name_them':          'Name them',
+    'dcim_bay_seeded':
+        'The names come from the count, which was all there was: correct them with the '
+        "machine's own and delete the ones that do not exist.",
+    'dcim_bay_name_port':          'Port',
+    'dcim_bay_name_hint_port':     'Rear USB 1, HDMI, DC-IN…',
+    'dcim_bay_holds_port':         'What is plugged in',
+    'dcim_bay_empty_port':         'nothing',
+    'dcim_bay_none_port':          'This template declares no port of this kind.',
+    'dcim_bay_missing_port':
+        'The model said {} and {} are named so far. Once one is named this list is '
+        'what counts: name the rest, or the template will claim fewer ports than the '
+        'machine has.',
+    'dcim_bay_unnamed_port':
+        'The model says there are {}, but not what they are called. Name them to be '
+        'able to say what is plugged into each.',
+    'dcim_bay_add_port':           'Add a port',
+    'dcim_bay_name_them_port':     'Name them',
+    'dcim_bay_seeded_port':
+        'The names come from the count, which was all there was: correct them with the '
+        "machine's own and delete the ones that do not exist.",
+    'dcim_bay_hint_port':
+        'A port something hangs off is a PLACE too: the network adapter goes in the '
+        'rear USB, not in "one of the four". Each external item says which port it is '
+        'in, and they are matched here by name.',
+    'dcim_bay_edit_hint_port':
+        "The name is the machine's own — the one silkscreened on the case and the one "
+        'the manual uses. The port count comes from this list: it is not typed '
+        'separately, so the two cannot say different things.',
+    'dcim_part_port':              'Port',
+    'dcim_part_size':            'Size',
+    'dcim_part_qty':             'Qty',
+    'dcim_part_model':           'Model',
+    'dcim_part_brand':           'Brand',
+    'dcim_comp_search':          'Search for a component…',
+    'dcim_comp_manual':          'Not there: type it in',
+    'dcim_comp_grp_what':          'What it is',
+    'dcim_comp_grp_where':         'Where it goes',
+    'dcim_slot_none':              'Unassigned',
+    'dcim_comp_chosen':          'From the catalogue',
+    'dcim_comp_change':          'Change',
+    'dcim_comp_none_found':      'Nothing by that name in the component catalogue.',
+    'dcim_comp_hint':
+        'One SSD goes in twenty machines. Picking it from the catalogue is what '
+        'makes "how many have I got and where" answerable; typed by hand it is '
+        'eleven spellings of one name that cannot be counted together.',
+    'dcim_no_parts':             'No components recorded for this device.',
+    'dcim_part_drop_q':          'Remove ‘{}’ from this device’s inventory?',
+    'dcim_builds':               'Templates',
+    'dcim_build':                'Template',
+    'dcim_build_new':            'New template',
+    'dcim_build_intro':
+        'What actually gets bought. An R740 is a chassis; what is ordered twenty '
+        'times is that chassis with twelve DIMMs, eight disks and a controller — '
+        'and that is in no vendor catalogue, because nobody sells it.',
+    'dcim_build_none':           'No templates yet.',
+    'dcim_build_name':           'Name',
+    'dcim_build_name_hint':      'Ours: "Standard datacenter server 2024".',
+    'dcim_build_base':           'Base model',
+    'dcim_build_base_none':      'No catalogue model',
+    'dcim_build_base_why':
+        'The height, the depth and the type come from here: they are already '
+        'written in the catalogue, so there is no need to type them again.',
+    'dcim_build_base_pick':      'Pick from the catalogue',
+    'dcim_build_base_load':      'Load from the catalogue',
+    'dcim_build_no_image':       'no picture',
+    'dcim_build_image_add':      'Add a picture',
+    'dcim_build_image_change':   'Change the picture',
+    'dcim_build_image_drop_q':   'Take this picture off the template?',
+    'dcim_build_measures':       'Size and mounting',
+    'dcim_build_measures_hint':
+        'Copied from the catalogue model when it was picked, and it belongs to this '
+        'template from then on. '
+        'ever since. Correct them if the box in front of you does not measure that.',
+    'dcim_build_manual':         'With no catalogue model, this has to be said here',
+    'dcim_build_manual_hint':
+        'Which is what happens with the cabinet the electrician put together: it is '
+        'in no library and it still takes up room.',
+    'dcim_build_full_depth':     'full depth',
+    'dcim_build_half_depth':     'half depth',
+    'dcim_build_unset':          'not said',
+    'dcim_build_parts':          'Components',
+    'dcim_build_parts_note':
+        'What goes INSIDE the box: disks, memory, CPU, cards. Each in the bay it '
+        'belongs to.',
+    'dcim_build_outer':          'External items',
+    'dcim_build_outer_note':
+        'What hangs off the machine rather than living inside it: the USB-C to '
+        'Ethernet adapter, the power brick, the console lead. They are visible, they '
+        'go missing, and whoever moves the machine takes them — which is why they are '
+        'counted separately. They plug into a port, not into a bay.',
+    'dcim_build_ports_tab_hint':
+        'Ports and power inlets are edited on their own tabs.',
+    'dcim_build_platform':         'Platform',
+    'dcim_build_platform_hint':    'Debian 12, ESXi 8…',
+    'dcim_build_valid_from':       'In force from',
+    'dcim_build_valid_to':         'In force until',
+    'dcim_build_retired':          'retired',
+    'dcim_build_notes':            'Notes',
+    'dcim_build_share':            'How it shares the U',
+    'dcim_build_ports_none':       'This chassis declares no ports',
+    'dcim_build_ports_named':      'What each one is called',
+    'dcim_build_port_name':        'Name',
+    'dcim_build_ports_base':       'What the chassis comes with',
+    'dcim_build_ports_all':        'With what is fitted to it',
+    'dcim_build_takes':            'Takes up',
+    'dcim_build_takes_part':       '{}, taking {} of {} parts ({})',
+    'dcim_build_share_hint':
+        '1 of 1 is the whole U. Two for a 0.5U patch panel, eight for a Raspberry '
+        'tray. Which part each box takes is said when placing it, not here: one '
+        'goes on top and the other underneath.',
+    'dcim_build_validity':         'Template in force',
+    'dcim_build_life':             'Device lifecycle',
+    'dcim_plat_family':            'Family',
+    'dcim_build_validity_hint':
+        'From when and until when it is bought THIS way. These dates are OURS: the '
+        "device's own — released, out of patches — are further down.",
+    'dcim_plat_family_hint':
+        'What groups it: "Windows 11" gathers Pro, Home and Enterprise in the '
+        'list. The full name is what shows when picking it on a standard, because '
+        '"Pro" on its own would not say of what.',
+    'dcim_build_notes_hint':
+        'Why this chassis was chosen, what was tried and did not do, who the '
+        'price was agreed with. Today that lives in an email, and the email is '
+        'lost before the server is.',
+    'dcim_build_tab_data':         'Summary',
+    'dcim_build_sum':              'Makes a machine with',
+    'dcim_build_sum_ram':          '{} GB of RAM',
+    'dcim_build_sum_disk':         '{} TB raw',
+    'dcim_build_sum_cpu':          '{} CPUs',
+    'dcim_build_sum_cores':        '{} cores',
+    'dcim_build_sum_unknown':      '{} parts with nothing to count',
+    'dcim_build_items':          'Machines',
+    'dcim_build_items_of':       '{} machines came from this template',
+    'dcim_build_no_parts':       'This template carries nothing yet.',
+    'dcim_build_u_auto':         "The model's",
+    'dcim_build_clone':          'Clone',
+    'dcim_build_clone_q':        'Name for the copy of "{}"',
+    'dcim_build_drop_q':
+        'Retire the template "{}"? The machines that came from it stay as they are; '
+        'what is lost is being able to look up what it consisted of.',
+    'dcim_build_name_taken':     'A name is needed, and one no other template already has.',
+    'dcim_build_from':           'Built to "{}"',
+    'dcim_build_diff':           'Against its template',
+    'dcim_build_same':           'Carries exactly what its template said.',
+    'dcim_build_want':           'Said',
+    'dcim_build_have':           'Carries',
+    'dcim_build_pick':           'From a template',
+    'dcim_build_pick_none':      'No template',
+    'dcim_build_stamped':        '{} components copied from the template',
+    'dcim_cat_is_component':     'component',
+    'dcim_cat_all_trees':        'All',
+    'dcim_item_purchased':       'Purchased',
+    'dcim_item_warranty':        'Warranty until',
+    'dcim_item_supplier':        'Supplier',
+    'dcim_role_hint':            'The catalogue suggests: {}',
+    'dcim_kind_disk':            'Disk',
+    'dcim_kind_ssd':             'SSD',
+    'dcim_kind_memory':          'Memory',
+    'dcim_kind_cpu':             'CPU',
+    'dcim_kind_nic':             'Network card',
+    'dcim_kind_hba':             'HBA',
+    'dcim_kind_gpu':             'GPU',
+    'dcim_kind_psu':             'Power supply',
+    'dcim_kind_fan':             'Fan',
+    'dcim_kind_transceiver':     'Transceiver',
+    'dcim_kind_battery':         'Battery',
+    'dcim_kind_module':          'Module',
+    'dcim_kind_accessory':       'Accessory',
+    'dcim_kind_other':           'Other',
+    'dcim_passive_n':            '{} passive',
+    'dcim_row':                  'Row',
+    'dcim_warn_hot_intake':      'Row {} takes its intake from aisle ‘{}’, which is where row {} exhausts: it is breathing hot air.',
+    'dcim_fits':                 'Where does it fit?',
+    'dcim_fits_ask':             'Find room',
+    'dcim_fits_note':            '{} of {} racks can take it',
+    'dcim_branches':             'Branches',
+    'dcim_where':                'Where',
+    'dcim_fits_where':           'Gap',
+    'dcim_fits_why_not':         'Why not',
+    'dcim_fits_at':              'from U{} · run of {}',
+    'dcim_free_u':               '{} U free',
+    'dcim_why_no_room':          'no contiguous gap: the largest is {}U',
+    'dcim_why_no_outlets':       '{} branches with a free outlet, {} needed',
+    'dcim_why_no_watts':         'not enough headroom for {} W on branch {}',
+    'dcim_why_too_deep':         'too deep for the rack',
+    'dcim_why_no_cables':        'it fits, but {} mm short for the cables',
+    'dcim_links':                  'Links between sites',
+    'dcim_link':                 'Link',
+    'dcim_links_n':                '{} links',
+    'dcim_link_mpls':              'MPLS',
+    'dcim_link_ipsec':             'IPSEC',
+    'dcim_link_sdwan':             'SD-WAN',
+    'dcim_link_fiber':             'Dark fibre',
+    'dcim_link_internet':          'Internet',
+    'dcim_link_other':             'Other',
+    'dcim_warn_single_link':       '{} has a single link ({}): if it drops, it is cut off.',
+    'dcim_warn_same_path':         '{}: its {} links all share one path ({}). Two lines on the map, one path in the ground.',
+    'dcim_warn_same_provider':     '{}: its {} links are all from the same carrier ({}).',
+    'dcim_cables':                 'Cabling',
+    'dcim_cable':                  'Cable',
+    'dcim_port':                   'Port',
+    'dcim_cable_label':            'Label',
+    'dcim_cable_from':             'From',
+    'dcim_cable_to':               'To',
+    'dcim_cable_check':            'Check',
+    'dcim_cable_color':            'Colour',
+    'dcim_cable_seen':             'Matches',
+    'dcim_cable_unseen':           'Not seen',
+    'dcim_cable_other_port':       'Other port',
+    'dcim_cable_passive':          'Cannot be checked',
+    'dcim_cable_seen_tt':          'Declared, and the devices see it on those ports',
+    'dcim_cable_unseen_tt':        'Declared, and no device confirms it. Not necessarily a fault: there may be a patch panel between the two ends, which is passive and appears in no LLDP',
+    'dcim_cable_other_port_tt':    'Both ends are seen, but on different ports from the declared ones: either the label lies or somebody moved the patch lead',
+    'dcim_cable_passive_tt':       'One end answers to nothing —a patch panel, a socket— so nobody can confirm it',
+    'dcim_no_cables':              'No cable is declared in this rack.',
+    'dcim_undeclared':             'Links the devices see and nobody declared',
+    'dcim_bundle':                 '{} cables',
+    'dcim_cables_note':            '{} match · {} not seen · {} on another port · {} undeclared',
+    'dcim_cable_copper':           'copper',
+    'dcim_cable_fiber':            'fibre',
+    'dcim_cable_dac':              'DAC',
+    'dcim_cable_power':            'power',
+    'dcim_cable_console':          'console',
+    'dcim_cable_other':            'other',
+    'dcim_need_two_items':         'At least two devices are needed in the rack to declare a cable.',
+    'dcim_cable_same_item':        'A cable runs from one device to ANOTHER.',
+    'dcim_cable_drop_q':           'Remove cable ‘{}’?',
+    'dcim_power_by_org':         'Declared draw by company',
+    'dcim_n_items':              '{} devices',
+    'dcim_pdu_color':            'Strip colour',
+    'dcim_host_none':            'Not linked',
+    'dcim_host_tt':              'The Infrastructure machine this strip IS: linking it gives it state and lets what it measures sit beside what was declared',
+    'dcim_new_item_fed':         'New device, already plugged in',
+    'dcim_plug_into':            'Plug into',
+    'dcim_full':                 'full',
+    'dcim_power':                'Power',
+    'dcim_pdu':                  'Power strip',
+    'dcim_branch':               'Branch',
+    'dcim_branch_a':             'A',
+    'dcim_branch_b':             'B',
+    'dcim_branch_none':          'No branch',
+    'dcim_outlets_free':         'Free outlets',
+    'dcim_watts_said':           'Declared',
+    'dcim_load':                 'Load',
+    'dcim_no_pdus':              'No power strip has been declared in this rack.',
+    'dcim_no_capacity':          'No capacity declared',
+    'dcim_feeds':                'Fed by',
+    'dcim_unplugged':            'Not plugged in',
+    'dcim_plug_in':              'Plug in',
+    'dcim_pdu_monitored':        'This strip answers: it measures what it is giving',
+    'dcim_power_note':           '{} W declared · branch A {} W · branch B {} W',
+    'dcim_power_ok':             'Everything that draws power does so from both branches.',
+    'dcim_warn_single_branch':   '{} hangs off branch {} alone: if that branch drops, it goes dark.',
+    'dcim_warn_over_half':       '{} is at {} %: if its partner drops, this one cannot take both.',
+    'dcim_warn_one_branch_tt':   'One branch only: goes dark if that branch drops',
+    'dcim_no_free_outlet':       'No free outlet left in this rack.',
+    'dcim_pdu_drop_q':           'Remove ‘{}’? The cables hanging off it go too.',
+    'dcim_3d':                 '3D view',
+    'dcim_3d_hint':            'Drag to orbit · wheel to zoom · right button to pan',
+    'dcim_3d_no_webgl':        'This browser cannot draw in 3D. The floor plan still works.',
+    'dcim_import_not_a_plan':  'That file is not an exported plan.',
+    'dcim_export':             'Export',
+    'dcim_import':             'Import',
+    'dcim_import_q':           'Importing replaces ALL the room’s pieces. Racks are not deleted: the ones the file names are moved, and the rest stay where they are.',
+    'dcim_import_done':        '{} pieces · {} racks moved · {} new · {} untouched',
+    'dcim_kind_aisle':         'Contained aisle',
+    'dcim_kind_zone':          'Free zone',
+    'dcim_kind_column':        'Column',
+    'dcim_kind_wall':          'Partition',
+    'dcim_kind_door':          'Door',
+    'dcim_kind_panel':         'Electrical panel',
+    'dcim_kind_ups':           'UPS',
+    'dcim_kind_crac':          'Cooling unit',
+    'dcim_kind_bench':         'Workbench',
+    'dcim_kind_extinguisher':  'Extinguisher',
+    'dcim_kind_tray':          'Cable tray',
+    'dcim_kind_label':         'Label',
+    'dcim_a_record':           'a record',
+    'dcim_room_width':         'Room width (mm)',
+    'dcim_room_depth':         'Room depth (mm)',
+    'dcim_tile':               'Floor tile (mm)',
+    'dcim_magnet':             'Magnet',
+    'dcim_layer_air':          'Trays',
+    'dcim_label':              'Text',
+    'dcim_pos_x':              'X (mm)',
+    'dcim_pos_y':              'Y (mm)',
+    'dcim_rotation':           'Rotation °',
+    'dcim_drop_piece_q':       'Remove ‘{}’ from the plan?',
+    'dcim_plan_mm': 'Plan width (mm)',
+    'dcim_plan_upload': 'Upload plan',
+    'dcim_plan_replace': 'Replace plan',
+    'dcim_plan_drop': 'Remove plan',
+    'dcim_plan_drop_q': 'Remove this room\u2019s floor plan? The file is deleted.',
+    'dcim_plan_saved': 'Floor plan saved',
+    'dcim_plan_note':        '{} rack(s), seen from above. The coloured strip is the front.',
+    'dcim_plan_hint':        'Drag a rack to where it stands. The position is saved on the server: where a rack IS, is a fact about the room and not the view of whoever moved it, and the next person to open the plan needs the same answer.',
+    'dcim_open_rack':        'Open the rack',
+    'dcim_turn':             'Turn a quarter turn',
+    'dcim_access':                           'Access',
+    'dcim_access_tt':                        'Which sides this cabinet can be reached from. The fact is stored — which sides are reachable — and not a kind of rack: two identical ones, one in the middle of an aisle and one bolted to a wall, are not worked on the same way.',
+    'dcim_access_front,rear,left,right':     'All four sides',
+    'dcim_access_front,rear':                'Front and rear (between other racks)',
+    'dcim_access_front,rear,left':           'Front, rear and one flank',
+    'dcim_access_front,left':                'Front and one flank (against a wall)',
+    'dcim_access_front':                     'Front only (wall-mounted)',
+    'dcim_side_front':                       'front',
+    'dcim_side_rear':                        'rear',
+    'dcim_side_left':                        'left',
+    'dcim_side_right':                       'right',
+    'dcim_unreachable':                      '{} item(s) on the {} side, which cannot be reached',
+    'dcim_unreachable_tt':                   'There is equipment mounted on a face this cabinet does not let you reach: it cannot be cabled, swapped or switched off without taking the cabinet down. Nothing is corrected — which of the two is wrong is known by whoever is standing in front of it.',
+    'dcim_cooling':                          'Cooling',
+    'dcim_cooling_':                         'Not stated',
+    'dcim_cooling_none':                     'None',
+    'dcim_cooling_room':                     'Whole-room',
+    'dcim_cooling_cold_aisle':               'Cold aisle containment',
+    'dcim_cooling_hot_aisle':                'Hot aisle containment',
+    'dcim_cooling_in_row':                   'In-row',
+    'dcim_cooling_rear_door':                'Rear-door heat exchanger',
+    'dcim_cooling_split':                    'Wall split unit',
+    'dcim_host':               'Machine — type to find it',
+    'dcim_numbering':            'Numbering',
+    'dcim_numbering_0':          'U1 at the bottom',
+    'dcim_numbering_1':          'U1 at the top',
+    'dcim_width_mm':             'Width',
+    'dcim_width_mm_tt':          'Cabinet width in millimetres — 600 is usual, 800 when it carries side cable troughs.',
+    'dcim_depth_mm':             'Depth',
+    'dcim_depth_mm_tt':          'The cabinet’s total depth. **Not** what decides whether a server fits: the distance between the posts is.',
+    'dcim_rail_front':           'Front→post',
+    'dcim_rail_front_tt':        'Door to front post. Where the handles, the bezels and your fingers go.',
+    'dcim_rail_depth':           'Post→post',
+    'dcim_rail_depth_tt':        'Front post to rear post: **this is what decides whether a server fits**, because it is where its rails bolt on. A 1000 mm cabinet with the posts badly placed takes less than an 800 mm one with them right.',
+    'dcim_rail_rear':            'Post→back',
+    'dcim_rail_rear_tt':         'Rear post to the back of the cabinet. Where the cables go, and without it the rear door does not shut.',
+    'dcim_depth_mismatch':       '{} mm unaccounted for',
+    'dcim_depth_mismatch_tt':    'The three sections do not add up to the declared depth. Not corrected, on purpose: what somebody measured with a tape and what the sum says are two different things, and keeping the second discards the first.',
+    'dcim_item_depth':           'Equipment depth',
+    'dcim_depth_tight':          'Does not fit',
+    'dcim_depth_unknown':        'A measurement is missing: without the equipment’s depth or the distance between posts there is no answer.',
+    'dcim_depth_too_deep':       'Longer than the space available.',
+    'dcim_depth_no_cables':      'It goes in, but leaves no room for cables behind it.',
+    'dcim_depth_spare':          '{} mm to spare once the cables have their room',
+    'dcim_elevation':          'Rack elevation',
+    'dcim_unwatched':          'Nobody is watching it',
+    'dcim_unwatched_n':        '{} unwatched',
+    'dcim_unwatched_tt':       'Nothing in here has a check behind it. That is not the same as fine: nobody is looking — and a rack drawn green with nobody looking is exactly the lie this drawing prevents.',
+    'dcim_roll_ok':            '{} fine',
+    'dcim_roll_bad':           '{} of {} in trouble',
+    'dcim_roll_tt':            '{} devices in here, {} of them unwatched. Only what you may see is counted.',
+    'dcim_new':                'New',
+    'dcim_site':               'Site',
+    'dcim_room':               'Room',
+    'dcim_rack':               'Rack',
+    'dcim_item':               'Equipment',
+    'dcim_board':              'Board',
+    'dcim_map':               'Site map',
+    'dcim_map_hide':          'Hide map',
+    'dcim_board_note':         '{} sites · {} devices',
+    'dcim_board_tile':         '{} racks in {} rooms',
+    'dcim_board_trouble':      'What is failing',
+    'dcim_board_trouble_n':    '{} in total',
+    'dcim_board_capped':       'Showing {} of {}: the rest are in the inventory',
+    'dcim_board_all_well':     'Nothing is failing right now.',
+    'dcim_board_by_org':       'By company',
+    'dcim_board_ok':           'Well',
+    'dcim_board_bad':          'Failing',
+    'dcim_no_sites':           'No sites yet.',
+    'dcim_org':                'Company',
+    'dcim_unclaimed':          'Unassigned',
+    'dcim_state_error':        'Down',
+    'dcim_state_warning':      'Warning',
+    'dcim_state_ok':           'Well',
+    'dcim_state_unwatched':    'Unwatched',
+    'dcim_address':            'Address',
+    'dcim_lat':                'Latitude',
+    'dcim_lon':                'Longitude',
+    'dcim_timezone':           'Time zone',
+    'dcim_description':        'Description',
+    'dcim_serial':             'Serial',
+    'dcim_u_size':             'How many U',
+    'dcim_coords':             'Where it is — the map of sites will be drawn from this',
+    'dcim_new_room':           'New room',
+    'dcim_room_name':          'Room name',
+    'dcim_new_rack':           'New rack',
+    'dcim_rack_name':          'Rack name',
+    'dcim_u_height':           'Height in U',
+    'dcim_new_item':           'Place something',
+    'dcim_item_label':         'Label — what is written on the front',
+    'dcim_u_start':            'Starting U',
+    'dcim_delete_confirm':     'Delete “{}”? What is inside it is left with nowhere to be.',
     'infra_panel_show':      'Reading panel',
     'infra_panel_show_tt':   'The panel that describes whatever is under the pointer. It floats over the drawing, so it is also in front of part of it — turn it off when the picture is what you are reading.',
     'infra_map_line_exit':     'Its line out to the internet',

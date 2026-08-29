@@ -1,0 +1,54 @@
+{# ================================================================
+   DCIM — the folder behind the `dcim_media_dir` setting.
+
+   Its own partial, beside the backup one and built the same way: it hangs off FIELD_PICKERS,
+   a registry keyed by config path, because the field renderer draws two hundred fields and
+   must not learn that one of them is a folder.
+
+   What it adds to the box is the two things a path setting needs and a text input does not
+   have: a way to CHOOSE a folder instead of typing it, and — when it is left empty — the path
+   the empty box actually means.
+   ================================================================ #}
+
+// ── The pictures folder ──────────────────────────────────────────────────────
+FIELD_PICKERS['web_admin|dcim_media_dir'] = {
+    icon: 'bi-folder2-open',
+    title: 'backup_browse',
+    // `...a`: the panes that draw a field do not all call this with the same number of
+    // arguments — the host modal adds one — and an arrow that names them drops the rest in
+    // silence.
+    open: (...a) => _openDirPicker(...a),
+    // Filled in by the call below. Empty until then rather than a guess: writing
+    // `<var_dir>/dcim_media` as literal text would put a path on screen that may not be the
+    // one in use, and a wrong path shown with confidence is worse than none.
+    placeholder: '',
+};
+
+/** Ask the server which folder the pictures go to, and let the empty box say so.
+ *
+ *  "Empty means the default" is true and useless on its own: the default depends on where the
+ *  panel was installed, so the registry cannot hold it and the operator is left guessing. The
+ *  server is the only one that knows, so it is asked — once, at start-up, like the backup
+ *  folder is. */
+async function _dcimMediaDirPlaceholder() {
+    const fp = FIELD_PICKERS['web_admin|dcim_media_dir'];
+    if (!fp || fp.placeholder) return;
+    const res = await apiGet('/api/v1/dcim/media-dir');
+    if (!res || !res.configured) return;
+    fp.placeholder = res.configured;
+    // Only if the section is on screen, and only if nobody is mid-edit: repainting
+    // Configuration from under an admin who is typing into it would throw the edit away to
+    // add a placeholder.
+    const pane = document.getElementById('tab-config');
+    if (pane && pane.classList.contains('active')
+        && typeof renderConfig === 'function' && !_isDirty('config')) {
+        renderConfig();
+    }
+}
+
+// ── El servidor de teselas ───────────────────────────────────────────────────
+// Aquí no hay nada que explorar: solo una caja vacía que no dice qué forma tiene lo que espera.
+// Un registro que es SOLO un ejemplo — sin botón, porque no hay ningún sitio al que llevar.
+FIELD_PICKERS['web_admin|dcim_map_tiles'] = {
+    placeholder: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+};

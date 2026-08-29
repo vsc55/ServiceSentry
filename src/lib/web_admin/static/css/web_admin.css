@@ -1151,6 +1151,38 @@ html.ss-nocss body { visibility: visible; }
 .ss-fs-8 { font-size: 2rem; }
 .ss-fs-9 { font-size: 2.5rem; }
 .ss-pointer { cursor: pointer; }
+
+/* Una rejilla de bloques de datos que se reparte sola el ancho que haya: tantas columnas como
+   quepan de 17rem, y cada bloque **alto de lo que dice** — `align-items: start` es lo que evita
+   que un bloque de dos renglones se estire hasta la altura del de ocho y deje el hueco en blanco
+   que motivó esto. Genérica a propósito: el patrón «bloques que se adaptan» no es de esta
+   pantalla. */
+/* Una fila de árbol: la sangría con GUÍAS y no con espacio en blanco —una rayita por nivel dice
+   de quién cuelga— y una línea entre filas con realce al pasar por encima, que es lo que lleva el
+   ojo desde el nombre de la izquierda hasta sus botones de la derecha. Genérica: el primero que
+   la usa es el árbol de cuadros y SAI, y «una lista con jerarquía» no es suya. */
+.ss-treerow {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .35rem .25rem;
+}
+
+.ss-treerow + .ss-treerow { border-top: 1px solid var(--bs-border-color); }
+.ss-treerow:hover { background: var(--bs-tertiary-bg); }
+
+.ss-treeline {
+    flex: 0 0 1.25rem;
+    align-self: stretch;
+    border-left: 1px solid var(--bs-border-color);
+}
+
+.ss-grid-info {
+    display: grid;
+    gap: .5rem;
+    align-items: start;
+    grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+}
 /* A thing you can pick up and put down. Generic on purpose: the link map's boxes are the
    first, and "what does a draggable element look like" is not a fact about that map. */
 .ss-grab { cursor: grab; }
@@ -1456,6 +1488,11 @@ html.ss-nocss body { visibility: visible; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .ss-infra-linkinfo { background: rgba(var(--bs-body-bg-rgb), .9); }
 }
+/* .ss-tabular : digits that line up in a column. A U number, a port count, a byte figure —
+   anything read down a column rather than across a sentence. Proportional digits make 11 and 44
+   different widths, and a column of those cannot be scanned. */
+.ss-tabular { font-variant-numeric: tabular-nums; }
+
 /* .ss-toolrow : a line of PROSE with controls at the end of it.
    A plain flex row shares the squeeze out among everything in it, so the sentence takes two
    lines AND every button is compressed until its label wraps inside it — reported from the
@@ -2745,4 +2782,258 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
     font-weight: 600;
     line-height: 1;
     flex: 0 0 auto;
+}
+
+/* ── Rejilla de baldosas de resumen ─────────────────────────────────────────
+   Genérica y no del cuadro de mando: una fila de «esto de esto» con su estado es una forma que
+   ya piden tres pantallas. `auto-fill` con un mínimo, para que ocho sedes no salgan en ocho
+   columnas ilegibles ni dos ocupen la pantalla entera. */
+.ss-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+    gap: .75rem;
+}
+
+/* El borde lleva el estado, así que se ve sin leer — pero nunca solo el borde: la insignia de
+   dentro lo dice con palabras, porque un cuadro que solo se lee por el color no se lee de
+   todas las formas en que la gente lee. */
+.ss-tile {
+    border-width: 2px;
+    transition: transform .12s ease;
+}
+
+.ss-tile:hover,
+.ss-tile:focus-visible {
+    transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ss-tile { transition: none; }
+    .ss-tile:hover, .ss-tile:focus-visible { transform: none; }
+}
+
+/* Crédito del mapa. Obligatorio con OpenStreetMap y de sentido común con cualquier otro: quien
+   te presta las imágenes tiene derecho a que se sepa. Encima del dibujo y legible, no un gris
+   sobre gris que cumple el trámite sin cumplir la licencia. */
+.ss-map-credit {
+    position: absolute;
+    right: .25rem;
+    bottom: .25rem;
+    padding: .1rem .4rem;
+    font-size: .7rem;
+    line-height: 1.3;
+    color: var(--bs-body-color);
+    background: color-mix(in srgb, var(--bs-body-bg) 82%, transparent);
+    border-radius: .25rem;
+    pointer-events: none;
+}
+
+/* ── Paleta de piezas de un plano ───────────────────────────────────────────
+   Una rejilla de botones que se ajusta al ancho que haya: en una pantalla estrecha son dos
+   columnas y en una ancha seis, sin que nadie decida un número. */
+.ss-piece-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: .35rem;
+    margin-bottom: .75rem;
+}
+
+/* El botón lleva tres cosas en una línea: icono, nombre y de cuánto es de fábrica. La medida
+   importa al elegir —una mampara de 4 m no cabe donde una puerta— así que se ve antes de
+   pulsar y no después de colocarla. */
+.ss-piece {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    text-align: left;
+    overflow: hidden;
+}
+
+.ss-piece span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ss-piece small { margin-left: auto; flex: 0 0 auto; }
+
+/* Una muestra de color en línea: el color de un cable o de una rama, del tamaño del texto que
+   lleva al lado. Genérica porque ya la piden dos pantallas. */
+.ss-swatch {
+    display: inline-block;
+    width: .75em;
+    height: .75em;
+    border-radius: 2px;
+    border: 1px solid rgba(128, 128, 128, .4);
+    vertical-align: baseline;
+}
+
+/* La misma rejilla de piezas cuando lo que hay dentro no cabe en la pantalla: trescientos
+   fabricantes en una columna son trescientos scrolls de página. Se le pone techo a la lista y la
+   página sigue quieta.
+   El techo se mide en PANTALLA y no en rem: dieciocho rem son dieciocho rem tenga el monitor el
+   alto que tenga, y en uno grande dejaban la lista cortada con media pantalla vacía debajo.
+   `60vh` es siempre algo más de la mitad de lo que hay.
+   Y con `max-height` y no con `flex`, que fue el intento anterior: llenar el hueco exige
+   encadenar `display:flex; min-height:0` por todos los antepasados, la cadena pasa por una
+   tarjeta de Bootstrap, y donde se rompe la rejilla se queda sin altura contra la que calcular
+   — las filas se pisan y el scroll desaparece. */
+.ss-piece-list-scroll {
+    max-height: 60vh;
+    overflow-y: auto;
+    align-content: start;
+    margin-bottom: .5rem;
+}
+
+/* Una fila que se abre al pulsarla. Genérica: lo piden el catálogo de modelos y cualquier tabla
+   cuyo detalle no quepa en columnas. */
+.ss-rowlink { cursor: pointer; }
+.ss-rowlink:hover > td { background: var(--bs-secondary-bg); }
+
+/* Un hueco que todavía no se ha llenado: el marco de trazos dice «aquí falta algo» sin gastar
+   un color de aviso, que es para lo que va mal y no para lo que aún no se ha hecho. Genérica
+   porque la primera es la plantilla sin modelo base y no será la última. */
+.ss-dashed { border-style: dashed !important; }
+
+/* La foto de una cara de un chasis, **en un marco de tamaño fijo**. Sin él cada imagen sale a
+   su proporción: la frontal de un mini-PC es apaisada y la trasera casi cuadrada, así que las
+   dos caras del mismo equipo salían de tamaños distintos y una parecía más importante que la
+   otra. El marco iguala; `contain` mete la foto dentro sin recortarla ni deformarla, que es lo
+   único que no se puede hacer con la foto de un dispositivo — un chasis deformado ya no se
+   reconoce, que es para lo que está la foto.
+
+   Genérica y no de la plantilla: el catálogo enseña estas mismas dos caras. */
+/* Una opción marcada o no, con su nombre escrito. Genérica: la primera es «en qué bahías va este
+   componente» y no será la última — un conjunto que se elige marcando cabe igual con dos que con
+   dieciséis, y una fila de dieciséis desplegables no.
+
+   `.ss-off` es la que está pero no se puede tomar. Sale igual, porque esconderla dejaría sin
+   saber que existe; lo que dice por qué no se puede va en el `title`. */
+.ss-pick {
+    display: inline-flex;
+    align-items: center;
+    padding: .1rem .45rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 3px;
+    font-size: .85em;
+    line-height: 1.4;
+    color: var(--bs-body-color);
+    cursor: pointer;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.ss-pick:hover { border-color: var(--bs-primary); }
+
+.ss-pick.ss-on {
+    background: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: #fff;
+}
+
+.ss-pick.ss-off {
+    opacity: .45;
+    cursor: not-allowed;
+    text-decoration: line-through;
+}
+
+.ss-pick.ss-off:hover { border-color: var(--bs-border-color); }
+
+/* El foco del teclado se ve en el marco: la casilla está oculta, así que sin esto recorrerlas
+   con el tabulador es recorrerlas a ciegas. */
+.ss-pick:focus-within { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
+
+/* Una familia de puerto marcada o no, en el editor de conectores. Nueve por fila: en palabras no
+   caben en una celda, así que va el icono y el nombre se queda en el `title` y en el rótulo que
+   lee un lector de pantalla — lo que se ahorra es sitio, no la palabra.
+
+   Un `<label>` y no un botón: envuelve la casilla de verdad, así que el teclado la alcanza y el
+   navegador se encarga de marcarla. Lo que se esconde es la casilla, no lo que hace. */
+.ss-conn-fam {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 3px;
+    color: var(--bs-secondary-color);
+    cursor: pointer;
+    margin: 0;
+}
+
+.ss-conn-fam:hover { border-color: var(--bs-primary); }
+
+.ss-conn-fam.ss-on {
+    background: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: #fff;
+}
+
+/* El foco del teclado se ve en el marco: la casilla está oculta, así que sin esto tabular por
+   nueve familias es tabular a ciegas. */
+.ss-conn-fam:focus-within { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
+
+/* El número de lo que hay detrás de una pestaña.
+
+   Existe para decidir si merece la pena entrar, y para eso tiene que leerse SIN mirarlo: en
+   cuanto pesa más que el rótulo deja de acompañar al nombre y compite con él. Pequeño, de
+   esquina cerrada y del color del fondo — una píldora de color al lado de una palabra es un
+   aviso, y aquí no hay nada de lo que avisar.
+
+   `tabular-nums` porque son cifras en una fila de pestañas: sin ello un `128` y un `111` miden
+   distinto y la tira se mueve al cambiar de sección. */
+.ss-tab-n {
+    display: inline-block;
+    margin-left: .3rem;
+    padding: 0 .25rem;
+    border-radius: 2px;
+    font-size: .74em;
+    font-weight: 600;
+    line-height: 1.45;
+    /* Del color de la letra y no del fondo: `--bs-secondary-bg` está a un paso del fondo de la
+       página, y sobre la pestaña activa —que ES el fondo de la página— la chapa desaparecía. Un
+       porcentaje de la tinta funciona en los dos temas sin escribir dos paletas, y el primer
+       `background` queda de reserva para el navegador que no sepa mezclar. */
+    background: var(--bs-secondary-bg);
+    background: color-mix(in srgb, var(--bs-body-color) 16%, transparent);
+    color: var(--bs-body-color);
+    font-variant-numeric: tabular-nums;
+}
+
+/* La cara de un conector, al lado de su nombre. Alta como una mayúscula y sentada en la línea
+   base del texto: un icono que sobresale de su renglón parte la tabla en dos alturas.
+
+   El trazo lo pone `currentColor`, así que vale en los dos temas sin dibujarlo dos veces. Y
+   `flex:0 0 auto` porque una columna estrecha lo aplastaría antes que al texto, y un dibujo
+   aplastado deja de ser el conector que es. */
+.ss-conn {
+    width: 1.6em;
+    height: 1.07em;
+    vertical-align: -0.15em;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    opacity: .85;
+}
+
+/* El mismo dibujo, para mirarlo. En la tabla mide lo que una letra —basta para reconocer el que
+   ya se conoce— y aquí se agranda, que es lo que hace falta para el que no. Un solo dibujo y dos
+   tamaños: dos dibujos acabarían siendo dos que se separan. */
+.ss-conn-big {
+    width: 9rem;
+    height: 6rem;
+    vertical-align: baseline;
+    opacity: 1;
+    stroke-width: 0.9;
+}
+
+.ss-shot {
+    width: 14rem;
+    height: 6rem;
+    object-fit: contain;
+    background: var(--bs-body-bg);
 }

@@ -281,12 +281,24 @@ class TestAMachineInMaintenanceStillHasAPast:
         assert self._keys([self._series('snmp', f'host.{self.UID}/eth0')]) == live
 
     def test_and_the_two_screens_that_lost_the_device_ask_for_it(self):
+        """Los dos, estén donde estén.
+
+        Contado en el PAQUETE y no dentro de `routes.py`: el armado del mapa se mudó a
+        `service.py` cuando una segunda sección necesitó la misma topología, y una guarda que
+        cuenta apariciones en un fichero deja de guardar en cuanto el código que vigila se
+        mueve — en silencio, pasando. Lo que importa es que haya dos llamantes, no en qué
+        fichero están.
+        """
         import io as _io, os as _os                              # noqa: PLC0415
         root = _os.path.abspath(__file__).split(_os.sep + 'tests' + _os.sep)[0]
-        with _io.open(_os.path.join(root, 'lib', 'core', 'infra', 'routes.py'),
-                      encoding='utf-8') as fh:
-            routes = fh.read()
-        assert routes.count('host_recorded_keys(') == 2, (
+        infra = _os.path.join(root, 'lib', 'core', 'infra')
+        total = 0
+        for _name in sorted(_os.listdir(infra)):
+            if not _name.endswith('.py'):
+                continue
+            with _io.open(_os.path.join(infra, _name), encoding='utf-8') as fh:
+                total += fh.read().count('host_recorded_keys(')
+        assert total == 2, (
             'the device page and the map both lose a machine in maintenance without it')
 
 

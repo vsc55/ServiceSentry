@@ -8,6 +8,2289 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.120] - 2026-08-30
+
+### Added
+- **The model catalogue comes from GitHub, and it says what is there before it brings it.**
+  `netbox-community/devicetype-library` is what ships and **`web_admin|dcim_catalog_url` is what
+  decides**: some sites keep a fork with their own kit, and some rooms reach an internal mirror
+  and never github.com — a URL written into the code leaves both of them unable to use the
+  feature at all.
+
+  The repository is **850 MB**, because it carries an elevation picture per device. The first
+  attempt downloaded it as a zip, the way the MIB library does, and the size cap turned that into
+  a bare "Error" on screen. So it works the other way round: the **index** in one API request —
+  three megabytes of file names, one second — and from those names come the 300 manufacturers and
+  their exact counts without downloading a single model. Importing then asks only for the files
+  that were ticked, over **one connection** rather than one per file, which is the difference
+  between fifteen seconds for a manufacturer and a minute and a half.
+
+  Ticking is not a nicety. Four thousand models from three hundred vendors is a search box full
+  of noise forever, and that does not undo.
+
+- **A guessed class can be corrected, and the correction survives re-importing.**
+  `N9K-PAC-650W-B` is a power supply and the rule calls it "Other": the rule reads ports, and a
+  power supply declares one `power-ports` and nothing else — the same as half a dozen different
+  things. No rule is going to be right about 8500 models, and whoever is looking at the row knows
+  what it is in a second.
+
+  The trap is what happens next. `replace()` deletes a source's rows and inserts the new ones, so
+  the next library update would take forty corrections made in March with it — silently, months
+  later, when nobody remembers having made them. That is the difference between a feature that
+  works and one that lies. So a corrected class is flagged (`kind_set`) and **rescued by
+  normalised name** across the replace: what somebody decided is put back, while everything else
+  in the row keeps being refreshed from the repository, which is what it is for.
+
+- The hand-written model form follows the **library's own schemas**
+  (`schema/devicetype.json`, `moduletype.json`, `racktype.json`) instead of the six fields the
+  first version had. It changes with the tree, because the three are not the same thing: a rack
+  is not powered and has no bays, a module occupies no U, and a form that asks for a
+  transceiver's mounting depth teaches people to ignore its fields. Racks get form factor, outer
+  dimensions, mounting depth, first U and maximum weight; devices get airflow, chassis-or-housed,
+  weight and port counts by family — counted, never listed, the same as what is kept from the
+  library.
+- `description` is kept now (the three schemas carry it, and it was dropped): it is the line that
+  says what something is when the name does not — "APC NetShelter SX, 42U, 1991H x 600W x 1070D
+  mm" — and it is where the "42U" lives that somebody types when searching for a rack called
+  `AR3100`. The search looks there too.
+- **Fixed: "Edit" closed the model card and opened nothing.** Both dialogs are the same
+  `#infoModal`, so closing it to reopen it asks Bootstrap to show something mid-hide, and the
+  animation swallows the order — the card leaves and the form never arrives, with nothing
+  failing. Changing the open dialog's content is all it needed.
+
+- **A model's pictures can be put on by hand**, in their own tab of the edit dialog. The library
+  ships elevations for about 1200 models and none for the rest — and none, by definition, for
+  anything written by hand. An elevation with no picture is a grey box with a name in it: it reads,
+  and it is not recognised at a glance, which is what an elevation is for. A phone photo of the
+  front will do, and it is all there will ever be for the rack the electrician built.
+
+  Each file is saved the moment it is picked rather than when the form is saved: a picture is not
+  a field, it is a file on the server's disk, and joining the two would mean cancelling a form had
+  to undo a write. The one it replaces is deleted, or every change leaves a file nothing points at.
+  Type is decided by what is **inside** the file and the name is coined by the media store — an
+  extension is a claim by whoever uploaded it, and a name that arrived over the network does not
+  touch a filesystem.
+
+- Each catalogue row carries **edit, clone and delete**, not just the bin. It was backwards: fixing
+  a model's type and cloning one that is nearly right are things you do three times a minute after
+  an import, and deleting is the rare one — having only the rarest to hand, and the only one that
+  does not undo, is the worst of the available arrangements.
+
+- **Models can be cloned.** Almost none get written from scratch: what a room actually holds is
+  "like the R640 but with the other power supply", "the same switch with the fibre module in",
+  "this rack but 47U". Retyping twenty fields to change one is the work nobody does — it just
+  goes unrecorded and ends up as a note in something else's description.
+
+  The clone takes **its own copies of the pictures**, not the original's filenames. Two rows
+  pointing at one file is a time bomb: deleting either takes the file, and the other is left
+  showing a gap with nothing having failed — the same hole that was closed on re-import, and not
+  one to reopen to save a few kilobytes.
+
+- **Models can be written by hand** (`POST /api/v1/dcim/catalog`): the rack the electrician built,
+  the shelf with the mini-PC and its charger, the device from a maker that publishes nothing.
+  Source `manual`, so no import touches them — what somebody wrote *because* it exists in no
+  repository cannot vanish when the repository is updated. One form serves both writing and
+  correcting; two nearly identical forms are two places to fix the same bug.
+
+- `replace()` now computes `match_key` for every row rather than trusting the YAML parser to have
+  done it. Hand-written rows — the panel's own basics among them — were stored without one, so
+  they matched no device *and* there was nothing for a correction to be rescued by.
+
+- **What each model IS, worked out once and kept.** The Type column was blank for half the
+  table, and rightly: the guess only looked at network ports and power outlets, so a power supply
+  — a module with `power-ports: 1` and nothing else — matched no rule and came out with nothing.
+  Not even "module", which is what it is and was known the moment it was imported.
+
+  The rule was also written **twice**, once on the server (`service.role_hint`) and once in the
+  screen, and the two already disagreed: the screen's copy knew nothing about modules or racks
+  because it was written before they existed. Now it is worked out at import and stored in
+  `dc_type.kind`, and the screen reads it.
+
+  That does not contradict this domain's rule that it "proposes, never writes". What is never
+  written as fact is the role of a **placed** device (`dc_item.role`, decided by whoever places
+  it). This classifies the catalogue model — and storing it is what makes it possible to filter
+  8500 rows by "switch" without loading them all into a browser.
+
+  Existing catalogues classify themselves: `ADD COLUMN` cannot invent the value, and nobody
+  re-downloads 850 MB so a word appears in a column. It works offline because the rule reads the
+  ports and the tree, both already stored.
+
+- **A type filter on the catalogue**, populated from the whole catalogue rather than the current
+  page — a filter whose options change as you page is a filter nobody trusts. It applies to the
+  manufacturer grid too, which is where it earns most: "who makes switches" is asked before
+  knowing the make. And the grid **obeys** it — counts are of the models that pass the filter,
+  and makes with none drop out; a grid still counting a vendor's printers under "switch" would
+  say one thing and show another.
+
+- **The library holds three things, and now all three come in as what they are.** 6411 device
+  types, 1957 module types and 140 **rack types** — the same shape with three meanings, and until
+  now only devices were asked for by manufacturer. Worse, the whole-repository door swallowed
+  every `.yaml` it found and labelled it a device: the 1957 modules became things that occupy U in
+  an elevation, the 140 racks became 42U pieces of equipment, and the repository's own test
+  fixtures became models nobody put there. Nothing errored. `dc_type.tree` is now set by which
+  tree a file came from, and what sits outside the three is not a model.
+
+  A rack keeps what only a rack has — form factor, outer dimensions, mounting depth, maximum
+  weight — in one `extra` JSON column rather than eight new ones: it is data for 140 rows out of
+  8500, and eight empty columns would be paid for by all of them. Those measurements answer the
+  two questions asked before buying: does it fit where I want it, and does it hold what I am
+  putting in.
+
+- **Module pictures were never found, because they are somewhere else.** They live in
+  `module-images/` and are named after the **model**, not in `elevation-images/` after the slug —
+  and a module's YAML does not carry a `front_image` field at all, so asking it first (the right
+  thing for devices, which saves twelve thousand pointless lookups) meant never looking.
+
+- **A UPS is no longer classified as a power strip.** Both hand out power with the same signals
+  — outlets and no interfaces — so `ups` existed in the vocabulary, appeared in the filter, and
+  matched not one row in 8500. The only thing that separates them is the name, which is why I
+  refused to read names for devices: a word list is right more often and wrong in ways nobody
+  foresees. This one is deliberately narrow — it applies only where "power strip" had already been
+  decided, and only to `ups`/`sai` as a whole word. It finds 15 across APC, Eaton and Vertiv and
+  misses the ones named only by part number (`SMT750RMI1U`); widening it to catch those would mean
+  guessing at firewalls by brand next, and what comes out of here is shown as if it were known.
+- **A row that SAYS what it is now beats the guess.** `replace()` recomputed the class of every
+  row, so a panel generic declaring itself a UPS ended up as whatever the rule deduced. Guessing
+  is what you do when nobody has said; when somebody has, guessing is contradicting them. The
+  vocabulary stays closed — a class that exists only in one row would show in a filter nobody can
+  pick again.
+- The shipped generics gained a **1U UPS** and say what they are (router, firewall, storage,
+  fibre panel, KVM, blanking plate) instead of being deduced from ports they share with three
+  other things. And the shelves became **three** where there was one: cantilever (bolted to the
+  front posts only, not full depth), fixed four-post and sliding. That is not a naming detail —
+  `full_depth` decides whether a drawing puts it across the cabinet and whether what goes behind
+  it fits, and two identical full-depth shelves claim it always does.
+
+- **A basic catalogue ships with the panel** (`lib/core/dcim/basics.py`): generic racks in the
+  sizes that actually exist, servers, switches, routers, patch and fibre panels, power strips,
+  UPSs, shelves, blanking plates and a few modules. One button, nothing downloaded. It is for the
+  first afternoon — there is a rack in front of you and you need a 1U box with a name on it — and
+  for the room with no way out to the internet, where it is all there will ever be. Written here
+  rather than copied from the library: copying fourteen CC0 files starts maintaining somebody
+  else's catalogue inside this repository, and the day they fix a depth the copy keeps the old
+  one. They carry the ports that make the panel guess their role, and no pictures — a generic with
+  a photo is a photo of a device that is not that one.
+
+  Its own source label, so re-importing the library does not take them with it, or the other way
+  round.
+
+- **And "bring everything", which takes the other road.** Asking for files one at a time is
+  right for three manufacturers — two hundred files, fifteen seconds. For all three hundred it is
+  **10,800 files**, three quarters of an hour even over a reused connection, while the same
+  content as one archive downloads in a little over a minute. So both exist, and each is offered
+  for what it is good at; picking one for both cases means either fetching a gigabyte to import
+  one vendor, or spending forty-five minutes to import them all. The archive is read from its
+  index — nothing is ever extracted — and deleted afterwards, including when the read throws,
+  which is exactly when somebody is about to try again with the gigabyte still sitting there.
+
+- **Three ways in, because they are three situations.** From GitHub, which asks nothing of
+  anybody; **uploading a zip**, for the room with no way out to the internet — this is a web
+  application, and asking for a path on the server's disk asks for access the person
+  administering it from a browser need not have; and a server folder for whoever does have it and
+  has already cloned the repository. The import route decides **where it comes from first**: the
+  path check was written at the top from when there were only folders, and it ran before anything
+  looked at what was actually being asked — so importing from GitHub answered "the path or zip
+  archive is missing", a message that was correct about the door nobody was using.
+
+- **Dropping, which was the other missing half.** One model, the ticked ones, or a whole source.
+  Importing replaces an entire import, so undoing a wrong one meant re-importing the others to
+  make `replace` take it away — redoing the good work to undo the bad. Pictures go with the row:
+  nothing else points at them, and leaving them behind is a file nobody can reach in a folder
+  that grows for the life of the installation.
+
+- **The inventory's screens are now the section's views**, unfolded by the sidebar:
+  `/dcim/inventory`, `/dcim/board`, `/dcim/catalog`, `/dcim/sources`. They were buttons in the
+  tree's toolbar — which is where ACTS on what is on screen belong, not places you go — and
+  because that toolbar is the tree's, they vanished the moment somebody opened a rack. The panel
+  already had this mechanism for module sections; what was missing was using it. Each is now an
+  address that can be shared, bookmarked and chosen as a landing page.
+
+- **A model's card**, opened by clicking its row: both elevation pictures, ports broken down by
+  type instead of summed, part number, airflow, chassis-or-housed, which import it came from. All
+  of it was in the database and none of it had a way to be seen.
+
+- **`lib/providers/github.py` learned to look without fetching**: `list_tree` (the repository's
+  index in one API request) and `fetch_many` (many files over one connection, reopening it if the
+  server closes mid-way). Failures come back as **reasons and not codes** — a 404 is fixed by
+  writing the branch correctly and a 403 by waiting, and "could not download" makes you guess
+  which of the two it was.
+
+- **A brand was a string of text repeated eight and a half thousand times.** That is enough to
+  group a grid and enough for nothing else: nowhere to record where a ticket gets opened or under
+  which contract number, renaming "HP" to "Hewlett Packard Enterprise" was eight and a half
+  thousand `UPDATE`s, and two spellings of one name were two brands nobody could merge.
+
+  **Brands are now rows** (`dc_brand`), and the section reads in the order things actually exist
+  in: brand → catalogue model → template → rack item, which is also the order of the catalogue's
+  tabs. The identity is the **slug** — the normalised name — so `HP`, `H.P.` and `hp` are one
+  brand and re-importing the library does not create three hundred more. What is typed by hand is
+  only what no repository can know: the support address, the account number.
+
+  They are **created on import**, because nobody is going to type three hundred of them first;
+  existing catalogues get theirs on start-up without downloading anything, since the name is
+  already in every row. And a brand with models **cannot be retired** — not for referential
+  integrity, but because it would come back: the name is still written on every catalogue row and
+  the start-up pass would re-create it, so the only thing actually lost would be what we wrote
+  ourselves.
+
+- **The model form suggests the brand, names the port families and capitalises its labels.**
+  Three symptoms of one thing: what the library writes — `power-outlets`, `device-types` — is an
+  *identifier*, and a screen has to show a word. The manufacturer box now completes against the
+  brands already on file (still free text, because somebody is entering the cabinet the
+  electrician built), which is what stops "HP" from arriving as "H.P." and reaching the record
+  under the misspelling. Power **inlets** and power **outlets** are named apart, since the
+  difference between what a device eats and what it hands on is what separates a power strip from
+  a server.
+
+- The size box only appears **where the document says what it is**. On a disk it is capacity and
+  on a power supply it is watts; on a CPU it is nothing, and a box labelled "Size" that asks
+  nothing is a box nobody knows how to fill. It stays visible on a record that already has
+  something written there — hiding a value somebody entered leaves it inside with no way to see it
+  or clear it.
+
+- **Every field that does not explain itself now says what it is.** "Lithography", "Turbo
+  power", "Endurance (TBW)" are datasheet words, and whoever fills the record in is not always
+  whoever read the datasheet — a field whose name has to be looked up elsewhere gets left blank,
+  or worse, filled with something else. Forty-seven one-line explanations, each saying what the
+  word does not: what the figure is *for* is usually a better clue than its definition. Plain
+  `title` rather than a Bootstrap popover, because this dialog is redrawn on every dropdown change
+  and a popover whose trigger vanishes mid-flight stays stuck on the screen. Only where there is
+  something to say: a marker beside every field, saying something or not, stops meaning "there is
+  something to read here".
+
+- **A fitted component can be corrected, not just removed and re-added.** `PUT` on both kinds of
+  part was built and tested from the start and the row only carried a bin: a function that exists
+  only in the API is a function that does not exist. And the workaround loses whatever was not
+  being corrected — on a machine's part, that is the serial number. Same form as adding: creating
+  and correcting are the same act on different columns, and two forms asking for the same thing
+  are two places to fix everything.
+
+- **A kit of two modules is one thing bought and two things fitted** (`kit_qty`). It is ordered
+  under one part number, arrives in one box and is invoiced as one — and it fills two sockets.
+  "How many 16 GB DIMMs have I got" wants the second figure and "how many did I order" wants the
+  first, and with a single box you have to choose which one gets answered wrong.
+
+  It is not a memory thing: a box of fifty screws and a two-pack of patch leads are the same
+  shape. So it sits on the model as a column rather than as a document attribute, precisely
+  because the panel **multiplies by it** — and what gets multiplied cannot depend on nobody
+  renaming a key in a JSON file. It is stamped onto parts like everything else, so a machine that
+  says it carries two kits still says how many modules that is after somebody deletes the
+  catalogue model. Comparing a machine against its template now counts **pieces**: two kits of
+  two and four loose modules are the same memory fitted.
+
+- **A template says what machine comes out of it**, while it is being put together: the
+  gigabytes, the raw terabytes, the CPUs and their cores, the power supplies and the network
+  ports. Fifteen rows of parts do not answer "what machine is this" without adding them up by
+  hand, and that is the question the screen is opened with. Computed on the server because it
+  needs each part's catalogue record — a CPU's core count lives on its model, not on the part —
+  and because a sum two screens do on their own is two sums that end up disagreeing.
+
+  Each family with its own factor: memory is sold in powers of two and drives in powers of ten,
+  and one factor for both would leave half the totals matching no label anywhere. **What could not
+  be counted is stated**: a hand-typed part has no catalogue record, so its cores are unknown, and
+  a total three disks short that does not say so is worse than no total — it gets believed.
+
+- **The chassis counts too, and its power may not be inside.** A mini-PC has a network port on
+  the board and no card fitted: the summary reported only the card somebody added and said nothing
+  about the two built in — the catalogue has had them counted since day one and nothing was looking
+  at them. And its supply is an external brick: `is_powered` says *whether* it draws power and not
+  *how*, and that difference decides whether a strip outlet is needed or a wall socket — and
+  whether moving the machine means remembering to take something that is bolted to nothing
+  (`dc_type.power_type`: internal, external, PoE). "None" is not a value there: `is_powered` at
+  zero already says it, and holding it in two places would be two answers to one question.
+
+- **A network card does not always go inside.** Its interface list held only internal slots, which
+  assumes everything bolts to a board. A USB network adapter exists, is plugged into somebody's
+  laptop right now, and is exactly the thing nobody records and then nobody can find. USB-A,
+  USB-C, Thunderbolt, M.2 and Mini PCIe are there now — and Thunderbolt on the GPU too, because an
+  external one is a real thing.
+
+- **Link speed is a list, not a number of gigabits.** As a number it forced `0.1` for a 100 Mbps
+  port and `0.01` for a 10 — which nobody writes and nobody reads. And those ports are real: an IP
+  phone runs at 100, and every room has something fifteen years old running at 10. It is now the
+  standard rates, and **not the same list everywhere**: a network card speaks Ethernet and a
+  controller speaks SAS or Fibre Channel, so offering "100 Gbps" for an HBA is offering something
+  that does not exist. What is recorded is the maximum — anything below negotiates itself, which
+  is how a port is talked about.
+
+- **A memory module's record says whether it fits that board**: generation, form factor,
+  **module type**, speed and PC rating, **CAS latency** and the full timing string, **ranks**,
+  voltage, ECC, factory profile and **height**. Form factor and module type were one field and
+  are two axes — `DIMM` says how big the stick is, `RDIMM` says how it talks to the controller,
+  a server board demands the second and a desktop board rejects it — so one box meant choosing
+  which of the two questions to answer. Height is there because a standard module **will not fit
+  a 1U server**, and nothing else on the record says so: that is how a correct order arrives and
+  cannot be mounted.
+
+  The **PC rating is a closed list** of the thirty published designations, each carrying both
+  notations — `PC4-21300 · DDR4-2666` — so it is picked by reading whatever the label says and the
+  two boxes cannot end up disagreeing about one fact. Written out rather than computed: `PC4-21300`
+  looks like 2666 MT/s times eight, and deriving them that way produced four that **do not
+  exist** — the label says `PC2-4200` and the arithmetic gives 4264. The MT/s figures are already
+  rounded (533⅓, 1333⅓, 2133⅓) and the trade name was rounded again on its own, up in some cases
+  and down in others. No formula reproduces the published set; the source of truth is what is
+  printed on the module.
+
+- **A CPU's record says what you actually look at before buying one** — segment, socket and how
+  many per board, P-cores and E-cores (`cores` on its own stopped meaning anything the day a CPU
+  shipped eight big ones and sixteen small ones), base and turbo clock, both power figures,
+  lithography, L2 and L3, which memory it takes and how much, ECC, integrated graphics,
+  out-of-band management and PCIe generation and lanes.
+
+  And **every** component now carries a launch date and an end-of-life date. Those answer the two
+  questions asked at either end of a component's life — "is this still bought?" and "is this still
+  supported?" — and they are asked of a DIMM exactly as they are of a CPU, so they tell no class
+  from another and belong with the common fields, not with any one profile's attributes. The
+  document grew a `date` type for them, stored as ISO text for the same reason an item's warranty
+  is: three engines, three date types, and all that is ever done with it is ordering and
+  comparing.
+
+- **What can be downloaded again now lives apart from what cannot.** The media folder splits
+  into `library/` and `own/`, and a stored name carries its own in front. Twelve hundred elevation
+  pictures come back with one button; the phone photo of the cabinet the electrician put together
+  does not exist anywhere else — and they shared a folder, so looking at it did not tell you what
+  would be lost. It is the line the catalogue already draws with `source`, drawn on disk: from it
+  follows backing up what is ours without dragging 850 MB of library along. The prefix is optional
+  in the name pattern, so an existing installation's flat files keep working with nothing moved.
+
+- **The catalogue comes back where you left it after a reload.** The tab, the view, the shape, the
+  class, the manufacturer and the search go in the address — the section already did that for the
+  open rack and the dashboard, and inside the catalogue it did not: F5 dropped you back on the
+  manufacturer grid with every filter loose. The first tab is called *Catalogue* again: "Models"
+  sat two centimetres above a button reading "Modules", and two words a single letter apart at the
+  same height is not a misreading on the reader's part.
+
+- **A model carries its manuals** (`dc_file`): the manual, the datasheet, the firmware zip, the
+  warranty terms. Today those live in somebody's folder — or in a mail from three years ago — and
+  the day they are needed is a Tuesday at eleven at night with a card that will not boot.
+
+  **No allow-list of file types**, and that is a decision: what is useful here is open-ended — a
+  PDF, the `.docx` the distributor sent, a `.zip` of firmware — and a list is wrong every week,
+  after which whoever suffers it renames files to sneak them past. What makes that safe is **how
+  they come back out**: always as a download, `application/octet-stream` with `attachment` and
+  `nosniff`. The panel never renders an uploaded file, so an HTML or an SVG carrying script does
+  not run in this origin — the rule the media store already applied to SVG, here applied to
+  everything. The stored name is minted, the original is only a label, and the label is stripped
+  to ASCII before it goes near a header.
+
+  An **invoice does not go here**: a catalogue model is generic — the R740 manual covers all
+  twenty of them — and an invoice belongs to the one unit with a serial number. That will hang off
+  the inventory item, which is what the `scope` column is for.
+
+- **A catalogue model now keeps its history: what it used to say, and who changed it**
+  (`dc_rev`). A model is *shared* data — templates hang off it, parts stamped into twenty
+  machines came from it, an elevation is drawn from its height — so correcting one is not editing
+  a row, it is changing what others were already using. And the correction that breaks something
+  is almost never noticed the day it is made: it surfaces weeks later, when somebody says "this
+  used to say something else" and there is no way to know whether they are right.
+
+  The state **after** each change is kept, so the newest version is what stands now and each line
+  carries what that change did — the difference against the previous one, computed on read.
+  Going back to a version writes its values and is **one more change, not an undo**: if it erased
+  what came in between, the answer to "who left it like this" would depend on when you asked. An
+  import leaves no versions (it replaces the whole source with new uids, and would add eight
+  thousand rows per library update), and the audit line now names **which fields** were touched.
+
+- **What gets asked of a component of each class now lives in a JSON document, not in the code.**
+  "Samsung PM9A3 · 1.92 TB" is enough to recognise a disk in a list and not enough to buy one:
+  you need to know whether it is M.2 or 2.5", whether it runs NVMe or SATA, and whether the free
+  bay takes it. That differs per class, so it goes in `dc_type.extra` — and the *list of what to
+  ask* ships as `data/component_profiles.json`, which can be replaced without a release
+  (`dc_profile`). The **higher `version` wins**, so a shipped update beats a local patch and a
+  local patch stands until something newer is published. What gets dropped on save — a class that
+  does not exist, a control the screen cannot draw — is reported rather than silently discarded.
+
+  The weight sits with the **general** fields rather than under "Attributes": every component has
+  one, and an attribute is what tells one class from another — something they all have tells them
+  apart from nothing. And the size box is **named per class**, because the same box is a disk's
+  capacity, a DIMM's gigabytes and a power supply's watts; a word that covers all three informs
+  about none. It stays free text with an example showing the unit, which is how you ask for a
+  unit without splitting the field in two — and the box and its unit are drawn as **one control**,
+  because a number and its unit are one fact. Apart they took twice the room, wrapped onto the
+  next line, and left "Weight unit" floating with nothing beside it saying of what. What is
+  stored is still the whole string: deciding whether 4 TB is 4·10¹² or 4·2⁴⁰ is a question with
+  two answers, both on some delivery note. Which units each class offers is in the document too
+  (`unit_of`, `size.units`), and a class with none keeps a free-text box — which is what "half
+  height" needs. Enum values are translated too (`front-to-rear` is an identifier, not a phrase),
+  falling back to the raw value so `GB`, `M.2 2280` and `AES-XTS-256` stay as they are — those
+  already *are* the word.
+
+  The document is edited as a **form**, one class at a time, not as raw JSON: editing JSON by hand
+  is asking somebody not to misplace a comma in order to add a field, and whoever misplaces it
+  finds out on save. The JSON box stays behind its own button, because that is the short way to
+  paste in a document somebody sent. There is a **preview** — the form that will come out, with
+  its controls disabled, since it shows a shape and is not a place to type — and a **history with
+  a comparator**, on the same `dc_rev` table the catalogue uses: what this document says is what
+  everybody can type, so "who changed this?" is next month's question. The comparison is by class
+  and by field; two JSON dumps side by side cannot be asked what was added to the disks.
+
+  What is a closed list is now chosen rather than typed: the **CPU socket** (46 of them, Intel and
+  AMD, from Socket A to LGA 1851 and SP5, vendor-prefixed because forty-six bare names are not a
+  list anybody scans) and the **disk encryption** (AES-XTS-256 and the rest). Typed by hand those
+  are four spellings of one fact and no way to ask "which CPU fits this board", which is the only
+  question that field is ever asked. A missing one is now a document edit, not a release.
+
+  A model also carries its **product page** (`dc_type.url` — the datasheet, the firmware, the
+  manual, which no library publishes), a description written in a **text area** rather than a
+  one-line box, and the stamps a shared record needs: *created* rather than "imported" when
+  nobody imported it, *modified*, and which **version** it is on.
+
+### Fixed
+- **A template showed an airflow nobody could correct.** The document of profiles declares
+  what any chassis has — airflow, weight — and those fields were served to the catalogue screen
+  only. Since a template copies rather than reads, that data is its own, and its form did not
+  ask for it. One field renderer now serves both screens instead of two that would drift.
+
+- **A template's photos could only be changed by editing the model they came from** — the one
+  twenty other templates also hang off. They arrive copied, and copied means *theirs*: the
+  catalogue's is the bare chassis, and this one can be the machine as built. They also now sit
+  in a fixed frame, because each face rendered at its own proportions and the two faces of one
+  machine came out different sizes.
+
+- **The Platform column was filled in or blank depending on where you had been.** It names a
+  platform by `uid` and the list of platforms is fetched on first use — which a template's own
+  page did and the list did not. An empty cell does not read as "not loaded"; it reads as "has
+  none".
+
+- **"Change" and "Clear" sat on the chassis card.** Pulling the catalogue's data in is an action
+  of the record, so it belongs at the top with Save — and it is *Load from the catalogue*, not
+  "change", now that the data stops depending on the catalogue once copied. Clear emptied the
+  link and left the copy behind, which is half of something.
+
+- **The count beside a tab was grey small text**, read as part of the label, and Attachments had
+  none at all because the route never counted them — leaving the one tab whose contents you
+  cannot guess as the one that would not say. Both fixed; the first tab is now *Summary*, since
+  "what it carries" is the tab next to it.
+
+- **The photos, the size and the ports vanished from templates that already existed.** Nine
+  columns had just been added to `dc_build` so a template copies its chassis facts instead of
+  reading them live, and `ADD COLUMN` cannot invent a value: every template written before that
+  came back empty, so its screen showed a name and nothing else. Nobody reinstalls to get a fix,
+  and nobody re-picks the model of thirty templates to get a picture back.
+
+  `BuildStore.stamp_missing()` fills them from the catalogue model the first time the screen is
+  opened. **Holes only** — a value that is already there belongs to the template and may have
+  been corrected by hand, and an amnesty that overwrites corrections is worse than the bug it
+  fixes — and only while the model still exists, which is the whole point of having copied.
+
+- **A template could be read on four tabs and written on one.** Edit appeared only on the first
+  tab, so the button that adds a component never appeared at all and the ports could be looked
+  at but not corrected. A component does not need that mode — it saves itself, through its own
+  route — and now says so; ports do, and now have it where they are edited.
+
+- **"Mine is not like that" stopped being true.** It was a collapsed block for overriding what
+  the catalogue said, and the day a template started copying rather than reading, those became
+  its own measurements. Hiding them hid what the card next to them was already showing. It is
+  now *Size and mounting*, always open, with the values in the boxes instead of in placeholders.
+
+- **"Saved" over a column nobody could write.** Setting `interface = NVMe` on an SSD reported
+  success, the history said *no changes*, and reopening the model showed it unset. `update()`
+  copies writable fields from an allow-list, and `extra` and `ports` were not in it — not by
+  oversight but because they are JSON and need serialising, which the create path did separately
+  and the update path did not do at all. It had been that way from the start: **a rack's
+  measurements could never be corrected either**, only written once, and nobody had noticed
+  because they rarely are. An allow-list protects against what must not be written and says
+  nothing about what must — what is missing from it does not fail, it is ignored. Written up in
+  `docs/caso-diagnostico.md`.
+
+### Added
+- **A connector catalogue** — `lib/core/dcim/data/connectors.json`, around 130 of them: C13,
+  C14, C19, C20, schuko, DC input, USB-A/B/C, DisplayPort, HDMI, LC, SC, MPO, SFP+, QSFP28 and
+  the rest. `iec-60320-c19` is what the library says and "IEC C19" is what somebody says in a
+  room; a c19 and a c20 differ by one character and are two different things — twenty amps
+  rather than ten — so mixing them up means ordering the lead that will not fit.
+
+  **In a document, not in code**, like the profiles and the basics: the list of connectors that
+  exist in the world grows, and adding one cannot mean shipping a release. It used to be a
+  constant in the browser, which is the worst place for it — unreadable from the server,
+  uncorrectable without editing a template, and undiscoverable by the person who knows
+  DisplayPort is missing.
+
+  Each connector says **which families it is offered in**, which is what makes the list usable:
+  a C14 is a power inlet and never a network socket. It stays a suggestion and not a closed
+  list — what is actually plugged in in a real room includes things that are on no list, and
+  losing the fact because it was not recognised is worse than storing it as typed.
+
+  And each connector is **drawn**. A C13 and a C19 differ by one character and are ten amps and
+  twenty; the name only half fixes that, because "IEC C19" does not say what shape it is either.
+  A drawing does, and it is what gets compared against the socket in front of you. Forty drawings
+  rather than 128 — a C13 and a C15 are the same face with a different heat rating — in
+  `currentColor` so they work in both themes, and inlined into the page because `<use>` against
+  another document is not supported everywhere and an icon that appears in Firefox but not Chrome
+  is worse than none. Drawings and not photographs: a photo comes with its licence and its
+  background, and fetching them would be a network dependency in a section that exists partly for
+  rooms that have no network. A meta test ties the two files together, because a `<use>` pointing
+  at a symbol that is not there raises nothing — it just leaves a gap.
+
+  Clicking one **opens its record**: the drawing large, the identifier that gets stored, which
+  boxes it is offered in, its speed where it fixes one, and **what it pairs with** — a C19 goes
+  with a C20 and not with a C14, which is the question you actually have with the lead in your
+  hand.
+
+  The document also appears on the **Schemas** tab, which is where you go to see where the
+  vocabularies come from: the connectors tab answers "which ones are there", that one answers
+  "what decides which ones there are" — and it is where it can be **replaced without shipping a
+  release**, the same way the component-profile document can and on the same table: `dc_profile`
+  has carried a `name` column from the first day, for exactly the second document that would need
+  this. A form for adding the connector that is missing — which is what this is for nine times
+  out of ten — the whole JSON for anything else, a history of who changed it, and a way back to
+  the one that ships. **The higher version wins**, or you would have to choose between an
+  improved list never reaching whoever added a connector, and the added connector vanishing
+  without a word. What gets dropped is **said**: a family no screen draws, a repeated identifier,
+  a group that is not a group.
+
+  Both documents — attributes and connectors — are now edited **in a dialog** rather than
+  inside the tab. Fifteen fields per class and a hundred-odd connectors growing in the card
+  pushed everything above them off the screen, and with both editors open there were two
+  Save buttons with nothing to say which saved what. The three modes — form, JSON, history
+  — live inside the dialog, because they are three ways of looking at the same document.
+
+  **Preview no longer costs you what you typed.** It opened a second dialog, and both are the
+  same `#infoModal`, so it replaced the editor — and closing it left the page behind with the
+  unsaved draft gone and nothing said. It now opens below the form, in the same dialog.
+  Looking at something cannot cost you what you wrote.
+
+  **And the size row stopped borrowing a disk's examples.** On "Fan" it showed `capacity`,
+  `1.92 TB` and `GB, TB` in grey — that is not an empty box, it is a suggestion, and it was a
+  suggestion from another class. The row is always there because it is the only place to give
+  a size to a class that has none, and it now says what leaving it blank means.
+
+  **The dialog can be dragged bigger and maximised** — which this panel already knew how to do.
+  `.ss-modal-fit` was taking that away, correctly, back when this dialog was only ever "here is
+  some information": a box already exactly as tall as its six lines has nothing to enlarge but
+  its empty part. It carries forms now. The class is set per opener instead of once in the
+  markup, so the notice dialogs still size themselves and the one holding a form does not.
+
+  **And a connector's families stopped being a three-row dropdown per row.** A hundred-odd of
+  those pushed the table sideways until it scrolled — visible in the report as a horizontal
+  scrollbar. They are nine wrapping checkboxes now, drawn with each family's own icon: nine
+  words do not fit in a cell and nine icons do, and the word stays in the tooltip and in the
+  screen-reader label. What is saved is space, not the word.
+
+  **And a port's type is now picked from the connector catalogue, visibly.** It was a text box
+  with a `<datalist>` behind it, and a `<datalist>` is invisible: the box looks like somewhere
+  to type by hand, and the hundred-odd connectors do not exist until somebody guesses the first
+  three letters. It is a dropdown now, with each connector's name and drawing, plus **"other, I
+  will type it"** for what is not there — still not a closed list, but stepping outside it is
+  now a choice rather than the default behaviour of a box that says nothing.
+
+  A stored type the catalogue does not know **stays**, as its own option: turning it into "not
+  said" on opening the form would be deleting a fact for not being on a list. And the family
+  dropdown is gone where there is only one family — each has its own tab, so it was offering a
+  choice between one thing on the tab already named after it.
+
+- **A bay is a place, and places have names.** Module bays and device bays are now listed and
+  named one by one — `SODIMM-1`, `SocketCPU`, `M.2_1`, whatever is silkscreened on the board —
+  rather than counted. Of a bay you ask *which one*: "two module bays" does not say which holds
+  the DIMM that is fitted. The other families stay counted, because a template is not wired to
+  `gi7` — that belongs to the machine that comes out of it.
+
+  **And each component says which bay it goes in**, picked from the ones the template declares.
+  It was a text box, and a text box for naming a place that is already written down elsewhere
+  produces `SODIMM-1`, `sodimm 1` and `Sodimm1` for one slot — at which point "what is in
+  SODIMM-1" has no answer. They are matched on the normalised name, so what was typed before
+  still lines up, and typing something the template never declared is still allowed: a machine
+  can hold something where the standard did not say, and that is a fact about that machine.
+
+  The bay **count is derived from the list**. Two places to say how many bays there are are two
+  places that end up disagreeing, with the winner depending on which screen saved last.
+
+  Three bugs came straight out of that and one of them lost data: the editor was reading the
+  list through the filter that drops unnamed bays — right for reading, exactly wrong for
+  writing, so pressing Add showed nothing ever; an empty list with a count said "declares no
+  bays" while the tab beside it said 4; and deriving the count from an empty list derives zero,
+  so opening a template that said "4 bays" and saving anything at all left it with none.
+  Written up in `docs/caso-diagnostico.md`.
+
+  **A kit fills more than one slot.** `CT2K32G4S266M` is two modules bought together and fitted
+  in two different slots — that is what a kit is — and with one slot field, half of it had
+  nowhere to say where it is. How many it fills is what the screen already counts to show
+  `1 × 2 = 2`, and every slot it fills knows it holds it.
+
+  They are **ticked, not ordered**. One dropdown per unit claims module 1 goes in one slot
+  and module 2 in another, and that means nothing — the modules of a kit are identical, so
+  what a part fills is a set. Ticking also fits sixteen as easily as two, which a row of
+  sixteen dropdowns does not. It says how many are needed and how many are ticked, because
+  six of eight is a halfway state and not an error to prevent.
+
+- **What hangs off a machine is counted apart from what lives inside it** (`dc_part.mount`).
+  A DIMM goes in a slot on the board; the USB-C to Ethernet adapter and the power brick plug
+  into a port, are visible, go missing, and get taken by whoever moves the machine. Counting
+  them together leaves "five components" saying nothing about how much has to come off to
+  carry the box away, which is the question on moving day. Two tabs, one table — it is the same
+  part looked at by where it lives, and two tables would be two that drift apart.
+
+  Each offers **its own** slots: bays for what goes inside, ports — front, rear, power, console
+  — for what hangs off. Offering bays to a power brick is offering it places it does not fit.
+  A column rather than a new `kind`, because `kind` says *what it is* and this says *where it
+  is*: in one field you would have to invent `external_nic` the day somebody plugs in a USB
+  network adapter, which is the case that brought this up. It stamps onto the machine with
+  everything else.
+
+  **A port something hangs off gets asked "which one" too.** The adapter goes in *the rear USB*,
+  not in "one of the four USB" — so the four families you plug something into from outside
+  (front, rear, power inlets, console) are named one by one like bays. The rest stay counted:
+  nobody hangs anything off port 37 of a switch from a template.
+
+  **And saving a component leaves the record where it was.** Re-reading it returns to the first
+  tab — right on entry, exactly wrong on save — so whoever had just added an adapter landed on
+  Summary without navigating, with the list they were working on out of sight.
+
+  **And a slot that is taken is not offered.** It still appears — hiding it would leave you
+  unaware the slot exists — but it cannot be picked, and it says what is in it. That holds
+  against the part itself too: two modules in SODIMM-1 do not fit on the board.
+
+  It gets **its own tab in the catalogue**, with a search box and a family filter. A catalogue
+  that only exists once you are already typing in the box that uses it is not a catalogue, it is
+  an autocomplete: "which connectors does this know about" had nowhere to be answered. Read-only,
+  and it says where the file lives — somebody who finds one missing has to know it is fixed by
+  editing a JSON, not by opening a ticket. Readable with `dcim_view`, because whoever is patching
+  cables at three in the morning needs to know whether the lead is a C13 or a C19 and does not
+  hold the catalogue-management permission.
+
+- **Every catalogue tab shows how much is behind it**, not just one. With a single count, the
+  tab that has it looks like the important one and the others leave you unsure whether they are
+  empty or simply do not count. Served with the catalogue in one response: fetched per tab, the
+  number would appear or not depending on where you had been — the same bug the Platform column
+  had. The count chip itself got smaller and squarer, and took its colour from the ink rather
+  than from a background one step away from the page's own, where it vanished on the active tab.
+
+- **Ports are counted AND named.** They were counted and never listed, for a good reason: a
+  48-port switch is one line saying 48, not forty-eight rows, and 8500 models listed would be a
+  million rows nobody reads. That still holds — for the count. But it answers "is this switch
+  big enough", and the other question is "which socket am I looking at": `gi1` is what the
+  device's own configuration says and what goes on the patch lead's label. The library has
+  carried it in every YAML entry all along and it was being thrown away while counting.
+
+  So both are kept — `port_list` alongside `ports` — in a JSON column rather than rows, which is
+  what avoids the million rows without losing the name. Shown in panel order, because `gi10`
+  comes after `gi9` on the device and before it in the alphabet, and only while it still adds up
+  to the count: the names are what the library brought and the count can be corrected by hand,
+  so twenty-eight names beside a hand-edited "32" would be a list that is no longer this
+  machine's — and that does not fail, it gets believed.
+
+- **A port row showed a speed and not a type.** `1000base-t` and `1000base-x-sfp` both read
+  "1 Gbps", so a switch with twenty-eight copper and two fibre showed two identical-looking rows
+  with different numbers — which looks like a display bug and is the truth badly told.
+
+- **A template keeps its history.** Same table as the catalogue's (`dc_rev` has carried a
+  `scope` from the start, written for exactly this), because a template is a shared record for
+  the same reason a model is: twenty machines came out of it and it is the standard things are
+  bought against. Fitting a component counts as a change — "since when does it have eight
+  disks?" is the question this gets asked — and each version keeps what it consisted of.
+
+  Going back to a version does **not** rewrite the components. The version stores them so they
+  can be read, but restoring would delete and recreate a dozen rows with new `uid`s, and the
+  ones already stamped onto machines hang off those. It is one more change either way: nothing
+  in between is deleted, or the answer to "who left it like this" would depend on when you ask.
+
+- **One tab per port family on a template** — interfaces, power inlets, power outlets, console,
+  front, rear, module bays, device bays. Nine families in one drawer called "ports" meant
+  reading all nine to count two inlets, and somebody looking for a chassis's module bays is not
+  looking for "ports". Only the families that have something get a tab — an empty tab is
+  somewhere you go for nothing — and all of them appear while editing, or there is nowhere to
+  add the first port of a family that has none yet.
+
+- **The catalogue's four shapes are on screen** — devices, modules, racks, components — each
+  with its count, first in the toolbar. They were a dropdown among the filters, and that is why
+  the components "were not there": reaching them meant knowing a shape filter existed, opening it
+  and choosing. A section you have to guess your way to is a section that does not exist. Picking
+  one that fits on a page lands on the **table** rather than the manufacturer grid: that grid
+  exists because eight thousand rows cannot be read, and with forty components it is a step too
+  many to reach what already fitted on the screen — which is what you want when the job is to
+  look at them all and clone the one that is close.
+
+- **A component is picked from the catalogue, not typed.** An SSD does not belong to this
+  template or to this machine: it is a model that goes in twenty of them. Typed out at each site
+  it becomes eleven spellings of "Samsung PM9A3" that cannot be counted together — and counting
+  them together is the only question ever asked of this: how many have I got and where are they.
+
+  So component parts carry a **brand** of their own (`dc_part.brand`, `dc_build_part.brand`) and
+  component models carry a **size** (`dc_type.size`), and when a part names a catalogue model the
+  **server** fills brand, model and size from it. Resolved in one place on purpose: if each screen
+  copied them, two routes would write two different things about the same part, and the second
+  would take months to surface because it does not fail — it saves wrongly. The bay, the quantity
+  and the serial stay the part's own. Typing it by hand is still there for the disk that came out
+  of a drawer, but it has to be asked for.
+
+  One form for both places — the template's and the machine's. They ask for exactly the same
+  thing, and two of them would be two places to fix everything, with the forgotten one always
+  being the same.
+
+- **The template form now starts from the catalogue model instead of asking for what it already
+  knows.** It was asking for height, depth and face right next to a chassis that carries all
+  three: asking for a value that sits ten centimetres away on the same screen is asking somebody
+  to copy it by hand — and to get it wrong — and it opens the door to the template and the
+  catalogue disagreeing about the same box. The model goes first and what it knows is *shown*;
+  the manual measurements stay for the two real cases (the cabinet the electrician built, and the
+  box that does not measure what its datasheet says) but they are folded away until asked for.
+
+- **What a vendor sells is not what an organisation buys** — and that step was missing. A Dell
+  R740 is a chassis; what gets ordered twenty times over is that chassis *with* twelve DIMMs,
+  eight SSDs and a RAID card, which appears in no vendor's catalogue because nobody sells it. So
+  those twenty machines were typed out twenty times, and the day the standard moved to 64 GB
+  DIMMs nothing recorded which twenty were the old one.
+
+  **Templates** (`dc_build` + `dc_build_part`, section *Templates* in the menu) are that step: a
+  name of our own — "Standard datacenter server 2024" — over a catalogue model, with what it
+  carries. Creating a rack item from one brings the height, the depth, the face, the role and the
+  components in already; what is left to type is only what that box has and no other.
+
+  **They are stamped, not linked.** The parts are *copied* to the item and from that moment they
+  are its own. Read back through a link instead, the day somebody pulls a failed disk there would
+  be nowhere to say so, and editing the template would rewrite the record of twenty machines
+  nobody had touched. What survives is `dc_item.build_uid` — which template a machine was **born
+  of** — so "which twenty are the 2024 standard" has an answer even after three of them had their
+  disks changed. And the difference between what a machine carries and what its template said is
+  read as a **fact, not an error**, the same way declared cabling is read against what the
+  devices see.
+
+  Its own permission (`dcim_build_edit`), because deciding what the company buys and putting a
+  box in a U are done by different people; reading templates goes with `dcim_view`, since one has
+  to be pickable while racking equipment.
+
+- **Component models in the catalogue** (`tree='component-types'`): memory, disks, SSDs, CPUs,
+  network cards, HBA/RAID, GPUs, power supplies. No public library carries them — NetBox's module
+  types are line cards and transceivers, things that go in a bay — so they are written once and
+  reused for ever, which is what an own catalogue is for. In `dc_type` rather than a new table:
+  same shape, and the catalogue screen already groups by manufacturer, searches, filters, clones
+  and deletes. **The tree decides which vocabulary `kind` uses** — a DIMM is not "switch, server
+  or other", and offering it one of those would end with the DIMM offered in an elevation. The
+  catalogue gained a shape filter to go with it.
+
+- **Serial, purchase date, warranty end and supplier live on the item**, where they belong: no
+  model and no template can know them.
+
+### Changed
+- **The catalogue is entered by manufacturer, not at row 1 of 8361.** Eight thousand rows paged
+  two hundred at a time is not a list, it is an archive to walk through — and nobody arrives
+  wondering what is at row 1200: they arrive knowing the make, because it is printed on the box in
+  front of them. The default view is now a grid of manufacturers with their model counts; pressing
+  one drops into the table already narrowed (three hundred boxes down to HPE's forty), and the
+  full list is still one click away for searching by model, which is the other question and cannot
+  be answered with makes. One search box serves both views — two would be two boxes doing almost
+  the same thing and the doubt about which one applies.
+- "Tick this page" is now **"Select what is shown"**, and the manufacturer list says "Select all"
+  only when a filter is not hiding any. The old wording described the mechanism, using the word
+  most likely to be misread: "page" here is a 200-row slice of six thousand, and read quickly it
+  promises everything.
+- The whole-repository download reports **megabytes as they arrive**. `codeload` streams the zip
+  chunked and never sends a length — it builds the archive on the fly, so it does not know the
+  size when it starts — and there is no denominator to ask for. Inventing one (the API's repo
+  size, or last time's 850 MB) would give a bar reading 78% at the halfway point, and a false
+  percentage is worse than none: it is found out exactly when the worst of the wait is left.
+- The catalogue sorts **without regard to case**, said in the query rather than left to the
+  database. `ORDER BY manufacturer` sorts by character value — `Z` is 90 and `a` is 97 — so every
+  name starting lowercase landed after the whole of Z: `ghipsystems` and `i-PRO` at the end of 336
+  names, which is where nobody looks. Nothing failed; the list was sorted, just by a rule nobody
+  reads it with. And it is stated in the SQL because this runs on three engines with three
+  different defaults, and the order of a list cannot depend on where the panel is installed.
+- The paging strip belongs to the table and no longer shows over the manufacturer grid.
+- The catalogue listing reports **`total`** alongside the page it returns. Capped at 200 with no
+  count, a catalogue of six thousand showed two hundred as if they were all of them: whoever
+  looked for the model at row 1200 concluded it had not been imported. Paging and a manufacturer
+  filter come with it.
+- The "Source label" field says what it is for, and all three doors carry it — the GitHub one had
+  `library` wired in. `library` in a box explains nothing; re-importing under the same label
+  **replaces** what went in under it and leaves the rest alone, which is how a downloaded library
+  and a handful of hand-typed models live side by side. It matters most on the GitHub door: a zip
+  is imported once, a library is imported in rounds — the switches today, the UPSs next week —
+  and a round is the unit somebody later wants to undo on its own.
+- `docs/explica-dcim.md` carries a **phase 9** for the same work, with the one thing it asks for
+  and does not yet have: the reading that answers *what falls out of warranty this quarter*. The
+  columns are there; the screen is not.
+
+### Fixed
+- **After an import the catalogue opened with the old filters, hiding what had just arrived.**
+  The server was fine — the very next listing carried the new models, the makers and the kinds —
+  and what was stale was what the screen remembered: the manufacturer somebody had drilled into,
+  the type in the filter, whatever was left in the search box. Any one of the three is enough:
+  import 36 generics with a ten-minute-old "switch" filter set and the answer is correct and
+  contains not one of them. It now lands clean, on the manufacturer grid, because the question
+  after an import is "what came in" and that is answered by makers, not by the first two hundred
+  rows alphabetically. Bulk deletes land the same way, for the same reason.
+- **"Aparato" is gone from the Spanish text again** — 353 occurrences across the UI strings, the
+  docs and the Spanish comments. It had already been corrected once (build.107) and I reintroduced
+  it while writing the catalogue; the word in this panel is *dispositivo*, and a screen that uses
+  both makes them read as two different things. The English `device` stays exactly where it is:
+  in the code, in this file and in `device-types`, which are names and not prose.
+- **Eight thousand models imported, not one with a picture.** The whole-repository import
+  finished cleanly — 8361 models in 119 seconds, no error anywhere — and every elevation was
+  blank. GitHub serves a repository **wrapped** in a folder named after it and its branch, and an
+  elevation is looked up by the name the YAML implies, without that wrapper. Both names are
+  correct and neither is the other, so the lookup returned `None` — which here means "this model
+  has no picture", a perfectly legitimate answer for thousands of models. The failure disguised
+  itself as the normal case.
+
+  Stripping the wrapper in `read_zip` fixed nothing: the next full import returned zero pictures
+  again. `wrapper_of()` — the function that says which folder the wrapper is — returned an empty
+  string for **every** GitHub zip. It gives up as soon as it finds something at the root, which
+  is the right rule; but a GitHub zip carries, among its entries, the wrapper's **own directory
+  entry**, and read like the rest that is a one-part name, i.e. something at the root. The
+  wrapper prevented itself from being detected. It now looks at files only: a folder is not
+  something AT the root, it is the root. From the real archive: 8361 models, **0 with a picture
+  before and 1267 after**. This also fixes elevations for any uploaded zip, since an uploaded zip
+  is almost always one downloaded from GitHub — and the same detection is what the MIB library
+  uses. Written up in `docs/caso-diagnostico.md`.
+
+- **The import screen said "0 models read" for two minutes.** It was telling the truth: rows do
+  not leave `read_remote` until the end — there is a second pass for the pictures in between — so
+  anything counting what had been handed over counted zero for exactly as long as the work
+  lasted. A GitHub import now reports each file **as it is fetched**, with a real denominator
+  (picking the manufacturers already said how many files there are) and the phase it is in:
+  downloading models, downloading pictures, saving. A zip still gets a tally and a moving stripe,
+  because nobody knows how many models an archive holds until it has been read, and a bar that
+  invents its denominator lies about what is left.
+- **Browsing the library is audited, and its failure reaches the screen.** It answered a mute 400
+  and the panel said "Error al guardar" — neither saving nor an explanation. Reading is not
+  audited, but this is not reading: it is a request this server makes to somebody else's machine,
+  and it can end in "the hour's sixty requests are gone". The audit line carries the address, the
+  outcome and the exact reason; the response carries the reason in a **200 body**, because the
+  panel's GET wrapper discards the body of anything that is not 2xx — which is precisely how the
+  reason was being lost.
+- The guard that demands every screen be reachable by pressing something learned the second way
+  in — a view the registry declares and `_dcimGo` opens — and checks it end to end. Declaring a
+  view nothing opens is the same hole in another shape.
+
+- **A plan for the physical inventory, and the model underneath it.** Companies, datacenters,
+  rooms, racks with their U per face, power, labelled cabling and links between sites — what
+  NetBox holds, fed by what the probes already measure. The whole document is
+  `docs/explica-dcim.md`; the spine of it is that NetBox records INTENT and the probes record
+  FACT, and the value is neither of those on its own but the **disagreement between them**: a
+  cable declared to SW01 that LLDP says goes elsewhere, a rack of 14 devices of which 11 answer,
+  a power strip declared at 1.8 kW that the UPS measures at 2.4.
+
+- **The domain, its tables and its ownership model** (phase 0, first half). Six tables under
+  `lib/core/dcim/`, and the shape of them is the design:
+
+  - **Containment and ownership are two trees, not one.** A holding's IT department shares a
+    datacenter, a room and a rack between the group's companies — one cabinet holds 2U of one,
+    4U of another and a switch of the department's own. So a company contains nothing: ownership
+    is an attribute, said at whatever level somebody knows it, inherited downwards, innermost
+    wins. It lives in one `dc_owner` table rather than an `org_uid` column on five, because the
+    rule is one rule and five columns are five places to get it wrong — and because a VM, a VIP
+    or a machine on a desk are somebody's too and are in no rack.
+  - **A rack holds ITEMS, and some items are hosts** — never the reverse. A patch panel takes 1U
+    and answers to nothing; a blade chassis takes 7U and contains eight things that do. So
+    `hosts` is untouched and `dc_item.host_uid` is optional: either side survives the other being
+    deleted.
+  - **The face is part of the position.** A 1U device fills U 12 front and rear; a patch panel
+    may fill only the rear; two half-depth devices share a U from opposite sides. Without it
+    "is U 12 free" has no answer, and a rack that shows two things in one U is a drawing of a
+    cabinet that cannot exist — so it is refused before it is written, not detected later.
+
+- **…and who may see it, from the first commit rather than the fifth.** A shared rack breaks the
+  assumption that seeing a place means seeing what is in it: somebody from company B must see the
+  rack, must see that U 12 is taken — otherwise planning is impossible — and must not see whose
+  it is or what it is called. `org.<uid>.view` is minted per company the way `server.<uid>.view`
+  is minted per device, and a foreign item is returned as position and size and nothing else,
+  built by keeping a whitelist rather than dropping a blacklist: an un-updated whitelist leaves a
+  hole in a screen, an un-updated blacklist leaks a column, and only one of those is a security
+  bug.
+
+- **The catalogue of models, imported rather than packaged** (phase 0.4). The
+  netbox-community device-type library is several thousand CC0 YAML files with exactly what an
+  elevation and a power figure need. It arrives on demand from a directory or a zip — which is
+  also how an isolated install gets one — into `dc_type`, as a background job with its own row
+  on the Jobs screen.
+
+  A **subset** is kept, not the file: storing another project's schema whole would make every
+  reader here learn it. **Ports are counted, not listed** — a 48-port switch lists 48
+  interfaces, and five thousand models that way is a million rows nothing reads; "48 ×
+  1000base-t" is what gets drawn. Heights are stored in tenths of a U, because a handful of
+  models are 0.5U and an integer column rounds them onto each other. Re-importing replaces
+  **that source's** rows, so the models somebody typed for equipment nobody has published
+  survive — they are the ones that cannot be fetched again.
+
+  A zip is read by name and **never extracted**: an entry called `../../etc/anything` writes
+  outside the directory it was given, and the only reliable defence is to put nothing on a
+  disk. PyYAML is optional, like LDAP and the Teams bot: absent, this one feature says so and
+  the rest of the inventory works.
+
+- **The section's API, and every read narrowing** (phase 0.5). `/api/v1/dcim/*` — companies,
+  sites, rooms, racks, what fills each U, and the catalogue. Not "the listing narrows": every
+  read, because the section is about a PLACE and a place can hold several companies' equipment.
+  A write is checked against the owner of what is being CHANGED — moving somebody else's server
+  one U is still touching somebody else's server.
+
+  Making that work needed one thing the panel did not have: `org.<uid>.view` is a new kind of
+  per-instance permission key, and the catalogue silently DROPS keys it does not recognise. A
+  role saved with it came back without it, so the narrowing did not narrow — it only got in the
+  way. The file that decides "what counts as a permission" warned about exactly this in a
+  comment, and because it is defined once there was exactly one place to say it.
+
+- **…and a screen to see it on** (phase 0.5 closed). `/dcim`: companies, sites, rooms, racks,
+  and what fills each rack with what is free beside it. A site is created from the toolbar
+  itself rather than through a dialog — the panel has no text modal and adding one for typing a
+  name would be new machinery for the smallest case there is.
+
+  A foreign item is drawn as **occupied and nothing else**, which is the API's contract and not
+  this screen's politeness; a guard reads that branch and fails if a name, a serial or a host
+  ever appears in it. Free space is shown in full to everybody, because it says nothing about
+  whose anything is and is what makes a shared cabinet plannable.
+
+  What is NOT here yet is the elevation and the floor plan — phases 1 and 2. They will be drawn
+  on the canvas the two maps already share, which is why this screen invents no drawing of its
+  own.
+
+  Seven flags, and `dcim_org_edit` has no role by default — not even `editor`. Moving a device
+  between U is tidying a cabinet; moving it between companies is moving property, which in a
+  group decides both billing and who may see it.
+
+- **The rack, drawn — front and rear, coloured by what the probes already know** (phase 1).
+  This is the point of the section. A list answers "what is in this rack"; a drawing answers the
+  question somebody actually has at three in the morning — **where in the cabinet do I put my
+  hand** — and it answers it in the shape the cabinet has.
+
+  Both faces side by side rather than a toggle: a 1U server fills U 12 from both sides, a patch
+  panel may fill only the rear, and two half-depth devices share a U from opposite sides. One
+  face at a time makes the reader hold the other in their head, which is what they came here to
+  stop doing. The U numbering follows the rack's own direction, because getting that backwards
+  sends somebody to the other end of a cabinet.
+
+  On the canvas the two maps already share, so panning, zooming, fitting and **exporting to PNG
+  or SVG** are the same code — and a rack elevation is exactly the thing somebody wants to print
+  and take downstairs.
+
+- **…and the live state is laid over the inventory**, which is the join this whole section
+  exists for: the inventory says a device is in R3 at U 12, Infrastructure says it has not
+  answered since Thursday, and neither is useful alone.
+
+  The rule that decides everything: **an item with no host has no state, and no state is not
+  "fine"**. A rack full of patch panels must not come out green — nothing is watching a patch
+  panel — because a wall of green is what somebody glances at from the door. "In trouble" and
+  "unwatched" are counted separately: forty unwatched patch panels are no cause for anything,
+  forty unwatched SERVERS are a question.
+
+  And the counts follow visibility, at the leaves, so it rolls up on its own: a machine the
+  caller may not see contributes no state to its rack, and therefore none to the room or the
+  site. A rack reporting "3 down" of which none are theirs would be an enumeration of somebody
+  else's fleet through the back door — the same shape as the IDOR audit of 2026-05. Computed in
+  one pass over the containment and handed down; per node it is a read of the status file per
+  rack, on a screen opened with forty of them.
+
+- **A rack now says where its posts are, which is what decides whether a server fits.** Not the
+  cabinet's depth: a server's rails bolt on **between the posts**, and its cables live behind the
+  rear one — so a 1000 mm cabinet with the posts badly placed takes less than an 800 mm one with
+  them right. Three measurements are stored (door→post, post→post, post→back), an item may
+  declare its own depth, and the rack answers.
+
+  Three things it deliberately does not do. It does **not** force the sections to add up to the
+  declared depth — what somebody measured with a tape and what the sum says are two different
+  things, and keeping the second discards the first; where they disagree it says so. It does
+  **not** call a fit "fine" when it merely reaches the back: a chassis that leaves no room for
+  cables is one whose rear door does not shut, discovered with the equipment already mounted.
+  And with either measurement missing it answers **neither yes nor no** — a "it fits" said
+  without knowing the cabinet's depth is worse than silence, because somebody buys with it.
+
+  Width and depth are settable too, and so is **which way the rack is numbered**. That last one
+  is the interesting failure: the column existed from the first commit and the elevation already
+  honoured it — but it was in no form, so every rack was numbered from the bottom and the
+  drawing looked right, because that is the common case. A column nobody can write always holds
+  its default, and code that respects it looks like code that works. Reported from the screen.
+
+- **A site's time zone is picked from a list, filtered as you type**, instead of typed. Free
+  text is how four sites end up holding `Europe/Madrid`, `Madrid`, `CET` and `GMT+1`, and none
+  of the four can be used to work out what time it is there.
+
+  The list comes from the **server**, because the server is what will have to interpret the
+  stored value the day a screen shows a site's local time: offering names nothing here can
+  resolve produces records nobody can use.
+
+  It lives in `/api/v1/util/`, not in the inventory, and behind a session rather than a
+  permission. The first screen to want a time zone was a site's, and that is the worst possible
+  reason to decide where something lives — a scheduled report, a maintenance window and an
+  account will want the same list, and by then it would have been two endpoints, two permissions
+  and two ways of answering "there are none". Enumerating them needs no Flask either, so that
+  half is in `lib/util/timezones.py`, where the CLI and the services can reach it. But `zoneinfo` reads the system's tz database, and
+  there are two ordinary ways to have none — Windows without the `tzdata` package, and a
+  slimmed container — so an empty answer is returned **as an answer**, and the screen falls back
+  to the list the browser ships. Not authoritative, and far better than free text. With neither,
+  the field stays what it was.
+
+  It stays a text box with suggestions rather than becoming a dropdown: a zone this installation
+  does not know yet can still be pasted in, which beats losing the value.
+
+- **An item can be linked to its machine, which is what makes the elevation anything but
+  grey.** `host_uid` was a column from the first commit, the API accepted it and the live
+  colour read it — and it was in no form, so every rack drew grey. Third time this exact shape
+  turned up in this section: a column nobody can write always holds its default, and the code
+  that respects it looks like code that works. Here it left the roll-up — the section's whole
+  reason for existing — doing nothing at all.
+
+  The picker is its own route rather than Infrastructure's fleet listing, for two reasons that
+  pull the same way: that one is behind `infra_view`, which somebody who arranges cabinets need
+  not hold, and it returns the whole shape of a machine when four fields are wanted. A picker
+  that ships the fleet's status, tags and module counts costs what the fleet screen costs.
+
+  A machine is **chosen by its name and stored by its uid**, which is what to do with anything
+  that has both: the uid is not something anybody types, and the name changes. And an item with
+  no label of its own now reads as its machine — the label is what is written on the front and
+  often there is none, in which case thirty-six characters of uid help nobody.
+
+- **A rack says which sides it can be reached from, and points at what that makes
+  unreachable.** A cabinet bolted to a wall has no rear; one pushed against a wall has lost a
+  flank. Whatever is mounted on a face nobody can get to cannot be cabled, swapped or switched
+  off without taking the cabinet down.
+
+  What is stored is the **fact** — which sides are reachable — and not a kind of cabinet: two
+  identical racks, one in the middle of an aisle and one on a wall, are not worked on the same
+  way, and the difference is where they stand. The screen offers the usual arrangements as a
+  shortcut for filling it in; the shortcut is not what gets kept.
+
+  And it earns its place immediately: an item on an unreachable face is a contradiction between
+  two things somebody DECLARED — how you get in, and what is inside — which is the exact shape of
+  thing this section exists to find. It is said and not corrected; which of the two is wrong is
+  known by whoever is standing in front of it. Not said at all when nothing was declared:
+  unstated access means **every** side, because an inventory being entered for the first time
+  has hundreds of racks without it, and treating those as unreachable would fill the screen with
+  warnings about something nobody claimed.
+
+- **A room says how it is cooled** — whole-room, hot or cold aisle containment, in-row,
+  rear-door, a wall split, or nothing at all. Empty means **nobody has said**, which is not the
+  same as `none`: a comms cupboard with no cooling is a fact worth recording, and a room whose
+  cooling nobody wrote down is a question. Storing both the same way loses exactly the
+  difference somebody opens this screen to see.
+
+- **The room, seen from above** (phase 2). The elevation answers "where in the cabinet"; this
+  answers the question before it — **which cabinet, and where in the room**. Somebody told over
+  the phone that R7 is in trouble needs to know whether R7 is by the door or at the far end
+  behind the CRAC.
+
+  Racks are drawn to scale in millimetres with a one-metre grid, coloured by the worst thing
+  inside them, with the **front marked** — which is not decoration: which way a rack faces is
+  what decides which aisle is the cold one, and a plan that hides it cannot be used to reason
+  about air at all. Dragging puts one where it stands; a quarter-turn button turns it, because
+  rotating by dragging is a gesture nobody discovers and everybody triggers by accident.
+
+  **And a drop writes to the server.** This is the one place where the shared canvas's saved
+  arrangement is deliberately not used. On the two maps, where somebody dragged a box is *that
+  person's* reading of a diagram — kept in their browser and on their account, and rightly so,
+  because two people may want to read the same network differently. A rack is not a diagram: it
+  is three hundred kilos of steel standing in one place, the same place for everybody, and the
+  next person to open the plan must see where it actually is. Everything else about the canvas
+  is reused, including exporting the plan to PNG or SVG — which is what somebody prints and
+  sticks on the door of the room.
+
+  The position is stored in **millimetres**, not pixels: pixels would make the plan meaningless
+  the day the scale changes, and the scale is a decision about the drawing rather than about the
+  room.
+
+- **A folder for the inventory’s pictures, and a floor plan drawn behind the room.** A room
+  now carries the plan an architect sent, under the racks and to scale. The files live in a
+  folder of their own, the way the MIB library does, and it is **configurable the way the backup
+  folder is** — `web_admin|dcim_media_dir` / `SS_DCIM_MEDIA_DIR`, empty meaning
+  `<var_dir>/dcim_media`, with the folder browser on the field and the effective path shown in
+  the empty box, because "empty means the default" is useless when the default depends on where
+  the panel was installed.
+
+  Uploads are the one place in this section where the NAME is chosen by whoever uploads, which
+  is the shape the MIB catalogue’s path traversal had. So: the type is decided by what is
+  **inside** the file and never by its extension, the stored name is minted by the panel, the
+  size is capped before anything is read, nothing can be written outside the folder, and an
+  uploaded SVG is served as a download — it is a document that can carry script, and this
+  panel is not going to be the origin that runs it.
+
+  **It goes in the backup.** The record holds only a name, so a copy without the files restores
+  rooms whose plans are gone. The core had no directories of its own until now, so the loop that
+  copies the modules’ folders was generalised to every directory part — and a part whose
+  folder is configurable resolves to where it actually is, not to where it would be by default.
+  Copying the wrong folder and reporting success is a failure that only surfaces at a restore.
+
+  The plan is scaled by **one** number — how wide it is in the room — with the height following
+  from the picture itself: two numbers could disagree and stretch the drawing, which is lying
+  about distances in the one place somebody is going to measure them. Unscaled, it is drawn
+  faded, so nobody measures against a guess.
+
+- **`plan` cannot be written through the generic CRUD.** It is minted by the upload route; left
+  writable, a request could point a room at another room’s picture without uploading anything.
+  The generic writer now takes a list of minted columns off the payload — in the door that is
+  written once, rather than in each route.
+
+- **The board: what is failing, and how to get to it** (phase 3). The screen somebody opens when
+  something beeps. It is not a pretty summary of the inventory: what holds the middle of it is
+  not the totals but the list of what is wrong with its whole path — site › room › rack › U —
+  which is what one person reads down the phone while the other walks towards the cabinet. A row
+  opens that rack; a site tile opens the tree at that site.
+
+  Tiles say "11/14", not "78.6%": the first tells you how many to go and look at, the second
+  makes you do the arithmetic backwards to find out. What nobody watches is counted separately
+  rather than added to what is well — forty patch panels are not forty healthy servers.
+
+  **It narrows like everything else here, and that is the part worth testing.** A board is a
+  comfortable place to filter too little, because the screen looks perfect while showing data it
+  should not: a subsidiary’s board never mentions the department’s failure, in the list, in the
+  tiles or in the per-company breakdown. A site they may not see is not walked at all.
+
+  And the trouble list is capped at twenty with the cap SAID in the answer. A list shorter than
+  reality looks complete, and whoever reads it counts as handled what they never saw.
+
+- **One walk of the tree, not two.** The badges and the board need the same walk under the same
+  visibility rule, so it now lives in one function. Two copies of "may this reader see this" are
+  two places for that rule to drift, and the day they drifted the two screens would disagree
+  about the same fleet while both looked right.
+
+- **A map of the sites, with no tile provider.** A world map with tiles is a request to a third
+  party from somebody else’s browser, and this panel is self-hosted, deployed where there is no
+  way out, and restrictive about what its pages may fetch. So sites are boxes somebody arranges
+  on the shared canvas — panned, zoomed, framed and exported like every other drawing here — and
+  a site nobody has arranged is placed by projecting its coordinates, because starting them all
+  in a heap in one corner with the latitude right there throws away what somebody typed. Where a
+  site sits is written to the SERVER: it is a fact about the organisation, not the view of
+  whoever dragged it.
+- **Real map tiles on the site map — optional, and off by default.** OpenStreetMap, Carto, a tile
+  server of your own or an internal mirror: an XYZ template (`{z}/{x}/{y}`) in one setting. With
+  tiles on, the drawing IS the world — Web Mercator, verified against the tile servers’ own
+  formula — so a site sits exactly where its latitude says, and **dragging one writes its
+  coordinates**. That turns the map into the comfortable way to say where a site is: drag it onto
+  the building and it is said.
+
+  Off by default is a decision, not caution: turning it on makes every viewer’s browser ask a
+  third party for thousands of images, and that third party then knows where this organisation’s
+  datacenters are — and on an installation with no way out it would not load at all. Both maps
+  therefore keep working: with no tile server, sites stay boxes somebody arranges.
+
+  **The CSP opens `img-src` and nothing else**, for the one origin derived from the configured
+  template, and only when there is one. That is the reason this is tiles and not a provider’s
+  JavaScript SDK: loading a third party’s images tells them where your sites are; running their
+  script hands them the page. A template that is not a URL opens nothing — the answer to a
+  mistyped setting is a map that does not load, not a policy opened to something nobody parsed.
+  Attribution is a field rather than a constant, because OpenStreetMap’s licence requires the
+  credit and a fixed one names the wrong project the moment somebody points elsewhere.
+
+- **The shared canvas can say when its window moved.** What is drawn under a map depends on which
+  piece of it is being looked at, and that only changes in one place. Without the hook, the only
+  way to notice would be repainting the whole section on every mouse move — a picture that shakes
+  under the hand moving it.
+- **The room plan became a room DESIGNER.** A plan that only draws racks answers where the racks
+  are; it cannot answer the question people actually open it for, which is "does another row
+  fit". That needs the rest of the room: contained aisles, free zones, columns, partitions,
+  doors, electrical panels, UPS, cooling units, benches, extinguishers, cable trays and labels.
+
+  **They live in their own table, not among the items, and that is the whole design.** A rack is
+  a record — it holds equipment, it has live state, you open it and walk in. A column is not.
+  Filing them together because "they are all boxes" would make a room's device count include
+  extinguishers, force the state roll-up to learn to ignore doors, and have "unwatched devices"
+  return partitions. A table of its own costs twenty lines and avoids all three.
+
+  The grid is the room's **floor tile** — its own, because there are 500 and 610 mm floors and a
+  magnet that assumes 600 moves things to where they do not go — with the metre marked over it,
+  so both things anybody counts are countable and neither hides the other. Positions read as
+  "B7", which is what one person says down the phone while the other is standing in the room.
+
+  Three layers, taken from the model rather than from whoever draws: an aisle goes UNDER the
+  racks and a tray goes over them, and the other way round each hides exactly what you opened
+  the plan to see. Turn, nudge with the arrows (Shift = a whole tile), delete, and a properties
+  panel with the same fields the row has and not one more.
+
+  The room's own dimensions are edited **from the plan**, because that is where you find out you
+  need them — you are placing the third row and need to know if it reaches. A field that can
+  only be typed on another screen is a field nobody fills in.
+
+  A rack can now be placed straight from the plan, too: the palette's first entry makes a real
+  rack row and the rest make room furniture. Looking alike in use is right; being the same thing
+  underneath would not be.
+
+- **The permission for a room's furniture is asked of the ROOM.** A column belongs to nobody —
+  no company in the group bought it, it is simply there — so asking the piece would answer
+  "anybody", and anybody could rearrange the columns of a room they cannot even open.
+- **A room plan can be exported to a file and brought back.** The database is still the save —
+  a plan living on somebody's desktop is a plan the next person cannot find — but a file solves
+  what the database does not: sending a design to somebody, keeping a version before
+  reorganising, and starting a new room from one that already works.
+
+  **Importing never deletes a rack.** A rack is a record with equipment inside it; one the file
+  does not name stays exactly where it is. Wiping a room to match a file would throw away
+  somebody's inventory because a two-month-old JSON did not mention it, and nobody would find
+  out until they went looking for the cabinet. Racks are matched by NAME — what people call them
+  by — and only their placement is taken from the file. The pieces are replaced wholesale: they
+  hold nothing, and half an import mixed with what was there leaves a room that is neither. What
+  happened comes back counted, because an import that quietly did less than it looked like is an
+  import somebody trusts wrongly.
+
+- **A 3D view of the room, in the browser's own WebGL and with no library.** The prototype this
+  came from loaded three.js from a CDN, which cannot work here: this panel's content policy does
+  not run third-party script, and it is deployed where there is no way out — a `<script src>` to
+  a CDN is a screen that does not load and does not say why. Vendoring the library would have
+  been 600 KB of somebody else's code to draw boxes.
+
+  And a room is boxes. Floor, walls, racks at the height their U count implies, columns,
+  translucent partitions and trays hung from the ceiling — all the same cube with a different
+  size, place and colour. What that needs is a perspective matrix, a cube, and a fake light that
+  shades faces by which way they point. What the library gave away — procedural textures,
+  physical materials, shadows — is not what makes this useful. What does is the **live colour on
+  each rack's front**, and no library could have given that: it comes from the probes.
+- **Power (phase 4): where a rack eats from, and what goes dark when a branch drops.** The
+  question this exists for is not how many watts there are. A room with two UPS, two strips per
+  cabinet and dual-PSU kit everywhere is fine — until somebody plugs a server's second cable
+  into the strip next door because theirs was full. That cable throws no error, appears on no
+  graph, and is discovered on the day of the outage.
+
+  So a cable is a ROW, not a column on the device: a device with one row is exactly the finding.
+  Two cables into the same branch are not redundancy — counting cables they would look like it,
+  counting branches they do not. And a strip's load is measured against HALF its capacity,
+  because having two branches is worth nothing if one alone cannot carry both.
+
+  A device with no cable is not a warning: a patch panel does not draw power, and painting it as
+  a problem teaches people to ignore the screen — which is the most effective way to make a real
+  warning go unread. The warnings are sentences, not percentages: "SW-DEPT hangs off branch A
+  alone: if that branch drops, it goes dark."
+
+  A managed strip is also a HOST, so where one answers there are both halves — what somebody
+  declared and what it is giving — which is this domain's whole thesis applied to power.
+
+  **In a shared cabinet the strip's totals are everybody's** — free outlets and declared load,
+  because without them a subsidiary cannot tell whether another server fits, exactly like "U 12
+  is taken". Whose each cable is, is not. And a warning about somebody else's device is reported
+  to nobody else: they can neither fix it nor need to know it exists.
+- **Each power strip has a colour — blue and red by default — and can be linked to a machine.**
+  A cabinet is looked at from the door of the room, and blue and red tell each other apart from
+  there. A strip may carry its own colour: there are rooms with three feeds, and rooms where the
+  colour of each branch was decided long before this panel arrived — arguing with the label
+  stuck on the actual strip is an argument the panel loses. The default is resolved server-side,
+  in one place, because two places deciding what colour branch A is end up painting it two
+  different colours in two views of the same thing.
+
+  And a strip can be pointed at a machine in Infrastructure. A managed PDU is in the registry
+  like anything else that answers, and linking it is what turns an inventory row into live data:
+  from then on the strip has state, and what it measures can sit beside what somebody declared.
+
+- **A device can be created already plugged in.** Not a shortcut — the real order of things:
+  nobody racks a server and then, another day, decides where it plugs in. Making somebody
+  create it, close, find it in the list and plug it in leaves the screen half filled, with
+  devices that have no cables and nobody knowing whether they draw no power or whether nobody
+  wrote it down. Both branches come ticked, because the normal case is the redundant one.
+- **Cabling (phase 5): what was declared, against what the devices say they see.** This is where
+  the inventory stops being documentation. The panel already knew what devices report — LLDP,
+  forwarding tables — and knew nothing about what anybody DECLARED, so "the switch sees this
+  server on Gi1/0/7" was an isolated fact. With the label beside it, it becomes "and the record
+  says that port goes to panel B, so either the label lies or somebody moved the patch lead".
+
+  Four outcomes, and none of them is an error in the panel: **matches**, **not seen** (a
+  QUESTION — there may be a patch panel between the ends, which is passive and appears in no
+  LLDP), **other port** (the finding), and **undeclared** (somebody plugged in and did not write
+  it down). A cable with a passive end is not judged at all: a patch panel is a piece of metal
+  and nobody can confirm it, so marking it "not seen" would fill the screen with warnings that
+  can never be resolved — the quickest way to make people stop looking at it.
+
+  Both ends are ITEMS, not machines, for the same reason: requiring a machine would make
+  inexpressible exactly the cable that has to be documented by hand, because nothing else will
+  ever know it.
+
+  Declaring cabling is its own permission (`dcim_cable_edit`): moving a device between U and
+  saying where a cable runs are two jobs, often two people.
+
+- **The fleet map is built in one place now.** The cabling check needs the same topology the
+  infrastructure map is drawn from, so the thirty lines that gather it moved into
+  `infra.service.topology()` and the panel declares how to call it. Two copies would be two
+  screens telling different stories about the same fleet, and both would look right. The
+  language is passed in rather than read from the session, so that module stays Flask-free —
+  the suite has to survive an install without Flask.
+
+- **Declared draw per company, inside a shared cabinet.** In a group where the IT department
+  runs the room and bills for consumption, that is a line on an invoice. The owner arrives
+  already resolved from the caller, because a device inherits its owner from its rack and
+  walking that chain twice would be two copies of the rule — which is how two screens end up
+  disagreeing about who owns the same thing.
+- **Links between sites (phase 6): which site is on its own if one drops.** The same question as
+  power, one level up, and it breaks just as quietly — two circuits bought from two different
+  carriers that turn out to share a trench are two lines on the map and one path in the ground.
+  That is the redundancy discovered on the day a digger goes through.
+
+  A link joins two SITES, and optionally names the device terminating each end: a circuit has no
+  state — it is a contract — and the router terminating it does. With neither end linked, a link
+  is not shown as fine: it is shown as unwatched, which is what it is.
+
+  Only what somebody actually wrote gets judged. A warning derived from an empty field is an
+  invented warning, and those teach people to ignore the screen — which is how the real warning
+  goes unread. And a site with three links, two of them sharing a path, gets no warning: it still
+  has another way out, and saying otherwise would be a lie.
+
+  The `circuit_id` is the one column here that cannot be derived from anything else: it is what
+  you read down the phone at three in the morning, and without it a fault starts by hunting for
+  a two-year-old email.
+
+  Drawn on the site map, coloured by state and dashed for the ones that ride over something else
+  (IPSEC, SD-WAN, internet). Editing one needs permission on BOTH ends — asking for one would let
+  somebody draw lines to sites they cannot even open.
+- **Where does this fit (phase 7).** The screen somebody opens with a delivery note in their
+  hand: a 2U server, 800 mm deep, 350 W — where do I put it? Everything before it exists so this
+  can be answered.
+
+  **Free U are reported as contiguous RUNS, not as a count.** Twelve U scattered one at a time
+  through a cabinet take nothing 2U, and "12 free" is the answer that sends somebody carrying a
+  server to a rack it does not go into. A run is an answer: it says how much fits and from which
+  U.
+
+  **And the "why not" is half the value.** A filtered list of the racks that work leaves the
+  reader unable to tell whether the one next door was ruled out for space, for power or for
+  depth — and that is exactly what decides whether the fix is moving a device, ordering a strip,
+  or buying another cabinet. Three very different problems that look identical once filtered
+  out. The reasons come with their numbers, and they accumulate: fixing one and discovering the
+  next is two trips to the rack.
+
+  Two branches are required by default, because the normal case is the redundant one — a rack
+  that cannot give a dual-PSU server two branches is not a rack that server belongs in. With no
+  declared capacity nothing is ruled out on watts: that would be discarding a cabinet over an
+  empty field. And occupancy counts EVERYBODY: U 12 is taken even when what takes it belongs to
+  another company and the person asking cannot see what it is — they still need to know it will
+  not fit.
+
+  Among the racks that work, the tightest gap wins: putting a 1U into the run of twenty spends
+  the only place a chassis will later go.
+- **A device can be dragged from one U to another.** Until now it moved by editing it — open the
+  form, change a number, save — which works and is exactly the gesture nobody makes, because
+  arranging a cabinet is looking at the picture and saying "this goes here".
+
+  It snaps to the U while you drag, not on release: there are no half Us — a device is bolted to
+  a hole or it is not — and rounding on release would mean what you see during the drag is not
+  what gets saved. **The server decides whether it fits**: it already knows about faces and
+  overlaps, and already allows a device not to collide with itself when moving one U. Somebody
+  else's device cannot be dragged at all: being able to move it would be being able to
+  rearrange another company's cabinet without seeing it.
+- **Each site tile shows the local time there.** Not decoration: "it is four in the morning
+  there" is what decides whether you call now or wait, and it is the first question anybody asks
+  about a site that is not their own. The browser does the conversion — it knows how, without
+  asking anybody — and a zone it does not recognise leaves the tile alone rather than breaking
+  it: saying nothing is what it can say truthfully.
+- **The elevation shows what leaves each device.** A table of cables answers "what is declared";
+  the elevation answers "what comes out of THIS device", which is the question asked with a hand
+  on the cabinet — and until now it meant reading a table and translating it mentally onto the
+  row in front of you.
+
+  Marks, not cables: forty patch leads drawn into a cabinet are a tangle covering exactly what
+  you opened it to see. A dot per cable in its colour, a bar per branch in its strip's colour —
+  three things and no more: that there are cables, which colour, and whether power comes from
+  both branches. Nothing on somebody else's device: which colour their patch lead is, is also
+  theirs.
+
+- **The word "tile" meant two different things.** In a room plan a tile is the raised-floor tile
+  — 600 mm, the grid, the magnet, the positions people read down the phone. Calling a site card
+  on the board a "tile" as well put two meanings on one word inside one domain. The board's are
+  cards now, in the comments and the docs; the only tile left on screen is the floor one.
+- **A reader reaches a box either because they can see it, or because it holds something of
+  theirs.** Both halves, and neither alone works. With only the first, the holding case — the
+  one this whole section was designed around — had no screen at all: the IT department runs the
+  site, so the site is theirs, so a subsidiary owning 2U inside saw no sites, no rooms, no racks
+  and an empty board, with their own equipment unreachable unless somebody handed them a URL.
+  The most-tested part of the domain was out of reach of the people who need it.
+
+  Now they see the path to what is theirs — `DC Norte › Sala 1 › R3`, the site and room by name
+  — and nothing else of that site. Inside the rack, theirs in full and the neighbours' occupied
+  and anonymous. Said out loud: the department's site name and address become visible to a
+  company that has equipment there, which in practice they already know, because they go in and
+  touch it.
+
+  Computed in one place and used by the four screens that show boxes. Two versions of this rule
+  is exactly how the listing and the read-by-uid came to disagree.
+- **The catalogue's elevation images, which were there all along.** `front_image: true` in the
+  YAML is not an image — it is the CLAIM that one exists, and it does, in the same repository
+  next to the YAML. It was being read and thrown away. They are collected in the same pass now
+  and stored by the media store, which already knows the delicate parts: it decides what a file
+  IS by its contents, mints the name, caps the size before reading and never writes outside its
+  folder. Re-importing deletes the previous import's images — without that the folder grows for
+  the life of the installation with files nothing points at. Drawn BEHIND the name and the
+  colour, faded: the photo says what a thing is and the colour says how it is doing, and
+  covering that would turn an elevation into a catalogue.
+
+- **Rows of racks are declared, not inferred from racks happening to line up.** Inference fails
+  both ways: two racks aligned by chance look like a row, and a row with a gap stops looking
+  like one. And a row is not a label — which aisle each face gives onto hangs off it, and
+  crossing that between rows produces the warning a plan cannot give by looking at boxes:
+  **"row C takes its intake from the aisle where row A exhausts"**. The boxes are perfectly
+  aligned while that happens. A rack in no row is loose, not wrong — the comms cabinet in a
+  corner is in no row and never will be — and undoing a row does not undo its cabinets.
+
+- **The whole chain upstream of a power strip** (`dc_source`): mains, panels, UPS and
+  generators. The four installations that have to be expressible are really **three chains and
+  a switch** — `Panel → PDU`, `Panel → UPS → PDU`, `Panel → UPS → Panel → PDU`, and that last
+  one with the bypass thrown, which is **not a different installation but the same one with the
+  UPS taken out**. So the bypass is a mark on the node being skipped, not a second chain: two
+  chains would be two truths about the same copper and two things to remember to change.
+
+  The same chain is walked TWICE — as it is, and as it would be with no bypass thrown. That
+  answers "what do I lose if they throw it?" before anybody throws it, and it turns "this strip
+  does not go through a UPS" — which may be perfectly correct — into "it would, were it not for
+  the bypass". And it finds the other one: **both branches of a cabinet hanging off the same
+  UPS**. Two strips, two colours, and a single point of failure three metres higher up, which is
+  exactly what redundancy inside the cabinet hides.
+
+  Throwing or clearing a bypass is audited (`dcim_bypass`, warning severity). It is not editing
+  a field: it is an electrical operation that leaves everything below it unprotected, and who
+  did it and when is the first question asked when something goes dark three months later.
+- **What a device IS, and what it has inside** — the two things the inventory was missing.
+
+  **The kind.** Until now an item was "something occupying U", which forces every screen to
+  guess — and it guessed wrong where it hurts most. The panel already reasoned that "forty patch
+  panels are not forty unwatched servers", but had no way to know which ones were panels. A
+  cabinet of forty came out with forty unwatched and none of them were: it is not that nobody is
+  watching them, it is that **there is nothing to watch**. Forty impossible chores teach people
+  to skip the list, and the server that really is unwatched gets lost among them. Servers,
+  switches, routers, firewalls, storage, patch and fibre panels, UPS, PDUs, shelves, KVMs,
+  consoles and blanking plates — blanks included, because they are real inventory that shows up
+  on orders and are the first thing anybody forgets to record.
+
+  **The components.** Six disks, the memory, the two power supplies, the network card — and the
+  mini-PC's charger, which is not an elegant component and is exactly what has to be replaced
+  when it goes missing. A row per component and not a description field, because the question
+  people ask is "how many 4 TB disks do I have and in which machines", and a description cannot
+  be asked that. Quantity rather than a row per unit: nobody records the serial of each of six
+  identical disks, and demanding it guarantees none get recorded. Size as text, because "4 TB"
+  is already written correctly and storing bytes would mean deciding whether that is 4·10¹² or
+  4·2⁴⁰ — both answers are on some delivery note.
+
+  And devicetype-library seeds the first: a model with power outlets and no interfaces is a PDU,
+  one with front and rear ports and no power is a patch panel, one with device bays is a
+  chassis. It **suggests and does not write** — the library states no role anywhere, and a
+  deduction stored as though it were a fact is what this domain avoids everywhere else.
+### Fixed
+- **Five things were built, tested and had no button.** Reported as a question: "where do I
+  configure this? I cannot see it." It could not be seen because it was not there. The whole
+  catalogue — importer, search and suggestion — the panels and UPS, creating rows, links between
+  sites, and **saying who owns what** all had a model, routes and green tests, and no way in.
+  Components could be opened, by double-clicking a device: a gesture nobody discovers.
+
+  The tests cover the API, which is precisely the half that was there. Nothing checked the
+  other: that everything writable is reachable from a screen. And the work felt finished at
+  every step — model, service, route, test, documentation — because that list did not include
+  "and it can be used".
+
+  All five now have their screen, and a guard walks the section's write routes and requires a
+  template to call each one. It was written the same day and immediately found two more nobody
+  had noticed: the inter-site links and the ownership.
+
+  The guard took four attempts, and the first three passed over a screen that could not be
+  reached: "the name exists" was satisfied by its own definition; "it appears twice", by calling
+  itself; "another file names it" was backwards and failed screens that legitimately draw their
+  own button; "it is in a handler" was satisfied by the screen's own refresh button. What was
+  missing is the distinction: a VIEW is only reachable if something outside opens it — its own
+  buttons do not count, because you have to be inside already to press them — while an in-place
+  action just needs its button where it happens. Each version was checked by removing a button
+  on purpose; the first three kept saying yes. Recorded in `docs/caso-diagnostico.md`.
+- **A neighbour's device name leaked out of the far end of a cable.** A foreign device is drawn
+  occupied and anonymous but keeps its `uid` — the drawing needs it to place the U it takes. The
+  cabling reconciliation loads the devices at the OTHER end of each cable so it can name them,
+  and did it without asking again whether the reader may see them: declaring a cable to the
+  neighbour's uid handed back their label. The rule was applied on the screen that SHOWS devices
+  and not on the one that needs them in passing, which is how this class of leak always goes —
+  not through the front door, through the service entrance of another function that loaded the
+  same row for another purpose. Found by auditing the section route by route, not from a screen:
+  there is nothing to see.
+
+- **A rack the listing hides could be opened by writing its uid** — name, which company owns it,
+  free U, how much is inside. Fixing it with "the same rule as the listing" broke four tests of
+  the holding case, and rightly: the IT department runs the site, so the site is theirs, and
+  under that rule a subsidiary cannot open the rack holding their own 2U — which is precisely
+  what this section exists to allow. The rule that works is finer: **either you can see it, or
+  you have something in it.** Both halves matter and neither alone is right. Recorded in
+  `docs/caso-diagnostico.md`.
+- **Twenty-six messages reached the screen with their braces showing** — "{0} hangs off branch
+  {1} alone…". `tf()` substitutes empty `{}` in order and does not understand `{0}`. That is not
+  a distraction: `{0}` is exactly what anybody would write, because it is Python's format, it is
+  what this same panel's notification templates use (they are formatted server-side, where
+  numbering works), and it is what almost everything else uses. Two mechanisms with lookalike
+  syntax live in one repository and only one is right in each place.
+
+  Two of the strings also had their indices out of order, which could not simply be converted:
+  positionally they would read perfectly and say something false, which is worse than visible
+  braces. Those were rewritten so the order of the gaps is the order of the arguments.
+
+  A guard now checks only the keys that actually go through `tf` — collected from the templates
+  — and rejects `{N}` in them, leaving notification templates free to keep numbering. A second
+  one requires both languages to ask for the same number of values: a translation with one gap
+  too many eats an argument and shifts the rest, and both versions read fine. Recorded in
+  `docs/caso-diagnostico.md`.
+
+- **Nothing can be created inside somebody else's container.** Putting a room in a site is
+  writing to that site, and the generic create validated the name without ever looking at whose
+  the parent was: somebody scoped to their own company could create a room inside a site they
+  cannot even list — and from there a rack, and devices in it. No error, and nothing to see: what
+  they created showed up in another company's site, where its owner would find it one day with
+  no idea where it came from. Found by auditing the section route by route.
+- **The height-to-U inverse was one U out, and nothing showed it.** `_dceY` returns the TOP edge
+  of a U's row, so the centre of a row lands on `.5` and `Math.round` sends it to the next one.
+  A dragged server landed one U above where it was dropped — and the drawing confirmed the wrong
+  number, because it used the same value. Only somebody standing at the cabinet with a torch
+  would have noticed the documentation says one U and the screw is in another. Found by running
+  the two functions against each other across all 42 U in both numbering directions: all 84
+  checks failed. Recorded in `docs/caso-diagnostico.md` — when two functions are inverses, being
+  inverses is a property to execute, not to read.
+- **A guard that counted inside one file stopped guarding when the code moved.** It required
+  `host_recorded_keys(` to appear twice in `infra/routes.py` — the device page and the map, both
+  of which lose a machine in maintenance without it. Moving the map's assembly into
+  `service.py` left one. It failed loudly, which was luck: had somebody duplicated a call inside
+  the file while moving the other out, the count would read two again and the guard would pass
+  guarding nothing. It counts across the package now. Third time in this repository that a guard
+  aimed at a FILE stopped watching when code moved — the rule is in `docs/caso-diagnostico.md`:
+  a guard must point at the property, not at where it happens to be written today.
+- **Deleting a piece from a room plan asked, was confirmed, and deleted nothing.**
+  `showConfirmModal(message, callback)` takes a FUNCTION and returns nothing, so `const ok =
+  await showConfirmModal(...)` left `ok` undefined and the function returned through the "they
+  said no" door before deleting anything — no error, no request, no trace. Removing a room's
+  floor plan had the same line and was equally dead. Both now pass a function, and a guard
+  rejects awaiting it, storing its result, or passing anything but a function as the second
+  argument — verified by deliberately re-introducing the bug. Recorded in
+  `docs/caso-diagnostico.md`.
+
+- **Selecting a piece dropped the hand that was dragging it.** The click re-rendered the whole
+  section during `pointerdown`, which replaces the `<svg>` that had just captured the pointer.
+  Only the drawing is repainted now; the properties panel appears on release, when there is no
+  longer a hand on the picture.
+- **The room plan drew everything and showed nothing.** The frame mixed units: the plan is drawn
+  in drawing units — millimetres times the scale — and the frame's margin is written in
+  millimetres, like everything measured in this domain. The origin came out as the raw constant
+  and the size as the scaled one, giving a perfectly valid window sitting twenty metres away from
+  the drawing. Everything rendered, correctly and in place; nobody was looking at it. No error in
+  the console, and the only signal was the coordinate readout saying −18.45 m with the pointer in
+  the middle of the box — the one screen telling the truth. Recorded in `docs/caso-diagnostico.md`.
+- **The DCIM store named the tables it reconciled at start-up**, so a newly declared one was
+  simply not created — and forgetting did not fail at boot. It failed as "no such table" the
+  first time somebody used the new thing, which can be weeks later and in somebody else's
+  installation. The list is now derived from the stores that exist: a declaration you have to
+  repeat in two places is half a declaration.
+- **A site's coordinates were shown rounded to four decimals** — eleven metres, which is the
+  whole site — and read as if that were the stored value. The database never lost anything: the
+  column is REAL and keeps the seventeen digits a map hands out. It is the badge that rounded,
+  and a number rounded on the way to the screen and presented as the datum is the kind of lie
+  nobody checks, because there is no error to see. Six decimals now (eleven centimetres), with
+  the exact pair in the tooltip.
+
+- **Both coordinates can be pasted into one box.** A map gives them together, so typing one
+  half, deleting the comma and typing the other is work the panel can do. It could not before:
+  an `<input type=number>` DISCARDS text with a comma — `value` comes back empty — so the paste
+  was lost whole and the box went blank, saying nothing. Latitude and longitude are their own
+  field type now, written as text and stored as numbers, split as you type and again on save;
+  which one comes first is decided by the box it was pasted into. Anything that is not exactly
+  two numbers is left alone: guessing too much is worse than not guessing.
+- **The words guard approved three words that did not exist.** It only read the literal
+  `t('x')` form, so a key inside a ternary — `t(a ? 'x' : 'y')` — or one named as a field
+  table’s `label:` was invisible to it, and the screen would have shown the internal key name
+  to whoever had to read it. A guard that approves what it does not look at is worse than no
+  guard: it marks as reviewed what nobody reviewed. It now reads all three forms.
+- **Creating a site said it had failed, and it had not.** The screen read the answer as `r.ok`,
+  which `apiPost` does not return — it hands back `{status, data}` — so a create that worked was
+  announced as an error and only F5 said otherwise. Reported from the screen.
+
+  The route was also answering **201**, and nothing else in this panel does: every route
+  replies 200 and every client reads `status === 200`. Both are correct REST; a domain that
+  speaks differently is a domain whose clients each need a special case, and the one that does
+  not have it reads a success as a failure. They answer 200 now, like the rest.
+
+- **…and the section was a dead end.** Only "new site" existed: you could create one and then do
+  nothing with it — no rooms, no racks, nothing to put in them, and no way to delete a site
+  either. Reported from the screen.
+
+  Rooms, racks and items are created and deleted now, each where the thing itself appears. As
+  **one** mechanism rather than four: the four differ in a route and a field, which is data, and
+  four copies of "read the box, check the permission, refresh" is three places for the escaping
+  or the refresh to drift.
+
+- **Saving an edit said it had failed, and it had not** — the same mistake as the create, from
+  the other end. The panel's three write helpers answer in **two shapes**: `apiPost` and
+  `apiDelete` hand back `{status, data}`, and `apiPut` hands back the **body**, with its `ok`
+  and its `error` one level up. Read alike, a PUT that worked has no `status`, so every saved
+  site, room and rack was announced as an error. Reported from the screen.
+
+  That is the worst way to be wrong: the screen lies about something that already happened, and
+  only F5 says otherwise. So it is not fixed by patching the two call sites — the section reads
+  every write through **one** normaliser now, and a guard fails if anything calls a verb on its
+  own again. The core is untouched: `apiPut`'s shape is read by dozens of places, and changing
+  it is changing all of them.
+
+  What would have caught it is a test that drives the screen against the REAL shapes, which is
+  what now exists — it was written by breaking it again first, to check that it fails.
+
+- **…and the section is three files, not one.** A `_render.html` that keeps growing is a section
+  hiding sub-sections inside it — which is how another one here reached nine hundred lines with
+  three of them — and the size guard said so at 466 lines. It is now the shell (state, the one
+  form, the entry point), the tree, and one rack.
+
+  The guards moved with it: every one of them read `_render.html`, and a guard pointed at a file
+  stops looking the day that file is split — **silently**, because it keeps passing. They read
+  the whole section now, and the bundle check requires every sub-partial rather than the shell.
+
+- **…and edited, not only created and deleted.** Three levels had "new" and "delete" and none
+  of them had "edit" — a site's address, a rack's height and an item's U were writable once,
+  when the thing was created, and never again. Reported from the screen.
+
+  New and edit are now **one form**, because they are the same act on different columns: what
+  differs between a site, a room, a rack and an item is a route, the parent's column and a list
+  of fields, all of which is data. Eight hand-written forms would have been seven more places
+  for the escaping or the refresh to drift — which is exactly how three levels came to have no
+  edit at all.
+
+  A site's fields now include **where it is**: address, latitude, longitude and time zone. The
+  columns were there from the first commit and nothing could fill them; the map of sites (phase
+  3) is drawn from them, and a coordinate nobody can type is a map nobody can draw. An empty
+  number is left out of the payload rather than sent as zero — a site whose latitude nobody
+  knows must not end up on the equator.
+
+- **The racks of a room are listed in it.** They were behind a click on the room that opened a
+  dialog, which hid the one thing somebody scanning this page is looking for and turned "which
+  racks are in this room" from an answer into a question. Reported from the screen. They fit in
+  the tree — racks per room are tens at most and a row is four fields; their ITEMS do not, which
+  is why those are still fetched one rack at a time.
+
+- **A machine with several addresses showed whichever it happened to report first.** It hangs
+  off one network on the map, and the address written on it was `addresses[0]` — on a machine
+  with six, a different address from the one that put it on that plate, with nothing on the
+  picture to say why.
+
+  The server knew all along. It works out which address put each machine on each network — to
+  tell one private `172.17.0.0/16` from another — and then dropped it before anybody could see
+  it, under a test asserting that it must not reach the payload: "nobody else's business, a
+  screen that found it there would start using it". A screen needed it and could not have it.
+  It is published now, and the box shows the address that belongs to the plate it hangs from,
+  with the prefix it was reported with.
+
+- **A heading strip put its buttons on two lines with room to spare beside them.** A plain flex
+  row shares the squeeze among everything in it, so the sentence took two lines AND every button
+  was compressed until its own label wrapped inside it. Reported from the screen.
+
+  Wrapping words is free and wrapping a button is not, so the sentence is now the only thing
+  that gives: it takes whatever room is left and shrinks to nothing, while the controls keep
+  their size and their labels on one line. If even that is not enough the whole cluster drops to
+  the next line together, which is a row of buttons rather than a broken one.
+
+  As a generic class, because it is the shape of a heading strip and not of one screen.
+
+- **…and the button beside it was a size of its own.** It carried its own tighter padding from
+  when it stood alone in a line of text. Gathered into a cluster with the zoom, the export and
+  the refresh, being the only short one is what you see. It is the same button as the rest now.
+
+- **A purchase standard is more than a list of parts.** A template now carries `notes` — why that
+  chassis was chosen, what was tried and did not do, who the price was agreed with — a validity
+  range (`valid_from`/`valid_to`: "the 2024 one was bought from January to November"), the
+  platform it ships with, and **attachments of its own**: the quote, the tender, the photo of how
+  it ends up assembled. The attachment table was born with a `scope` column for exactly the
+  second thing that would need it, and this is it.
+
+  Cloning carries the notes and **not** the dates. The copy is made for next year, and inheriting
+  "bought until November 2024" would be born expired.
+
+- **Platforms are rows now** (`dc_platform`), not a text box per template. Twenty text boxes are
+  "Debian 12", "debian 12", "Debian GNU/Linux 12" and "deb12" — and then "how many machines need
+  updating" has no answer, it has four and none of them is whole. Same rule as brands: the slug
+  is the identity and the name is what you read, so renaming is one row and whatever pointed at
+  it still points.
+
+  Its own tab in the catalogue, read with `dcim_view` because whoever racks a machine has to be
+  able to *pick* one, written with `dcim_catalog_manage`. And not only for physical devices: a
+  virtual machine runs RouterOS the same way a metal router does, and asks the same questions.
+
+- **A model's lifecycle is six dates, not one.** End of sale, end of maintenance updates, end of
+  security updates, last support contract attach, last renewal, end of support — in their own
+  block, with **the ones already past in red**. That is the whole reason for grouping them: six
+  dates loose in a table read like any other six, and what has to be visible at a glance is which
+  one has already happened. A model with no security patches for eight months does not look
+  different from one covered until January if both print the same.
+
+  They live in the profile document, so adding "end of sale in Europe" is editing a JSON.
+### Fixed
+- **Importing three manufacturers deleted the other three hundred.** `replace()` cleared the
+  whole source and wrote the new rows back. For "fetch the library" that is right — a model that
+  is gone upstream is gone here — but the screen *makes* you tick manufacturers, and a partial
+  import asserts nothing about the ones you did not tick. Fetching Dell said, without saying it,
+  that HP and Cisco had ceased to exist.
+
+  The delete now reaches only the brands the incoming rows carry. Not the ones that were *asked
+  for*: ticking Dell and having no file come down — one in three thousand fails — is a failed
+  download, not a vendor that stopped publishing, and what licenses deleting an old model is its
+  replacement arriving. A full-library import still cleans up what is gone upstream, which is
+  what "full" means.
+
+- **The network port the machine comes with was not counted, and neither was its power brick.**
+  The YAML said both. `summary()` had known how to fold the chassis's ports in since day one;
+  what was missing was the route **asking for them** — the base-model field list said, in a
+  comment, that ports were surplus. They were, when that line was written. A field that is not
+  requested raises nothing: it produces a zero that looks like a datum, and a mini-PC with a port
+  on its board claimed to have only the card somebody added.
+
+  And how a device is fed is now deduced at import: a `dc-…` inlet is a brick outside the box, an
+  `iec-…` one is a supply inside, and `poe_mode: pd` with no inlets at all is a machine that eats
+  through the network cable — that one costs no outlet on the strip, the switch pays for it. A
+  one-off pass fills it in for what was already imported, from the port counts already stored, so
+  nobody re-downloads 850 MB for a column.
+
+- **A template's `platform` was a text box; it is a row now** (`platform_uid`), renamed in place
+  through `TableSpec.renames` so anything already typed survives.
+
+- **Port types are shown as speeds.** `1000base-t` is the name of a standard, not a figure: it
+  sat next to "2.5 Gbps" in the same line, two ways of saying the same kind of thing. It reads
+  "1 Gbps" now, with the exact standard kept in the `title` — `1000base-t` and `1000base-x` run
+  at the same speed over different media, which matters the day you buy the transceiver and not
+  while you are counting whether the box has enough sockets. Derived by rule rather than a
+  lookup table: the names are systematic, and a forty-row table is forty chances to be missing
+  the one you need today.
+
+- **The basics live in a JSON now** (`data/basics.json`), not in Python. They are data: the rack
+  sizes that actually get manufactured, the shapes every room repeats, the platforms everybody
+  types. Adding "Ubuntu 28.04 LTS" or the 45U cabinet cannot mean publishing a release, and
+  whoever knows what is missing is rarely whoever touches the code. The module fills in what
+  repeats — the generic maker, the slug, the tree — so the file says what distinguishes each row
+  and not the same thing ten times. A broken file yields zero basics rather than a section that
+  will not open.
+
+- **The seeded platforms carry their edition.** Windows 10 and 11 in Home, Pro, Enterprise,
+  Education, IoT Enterprise and Enterprise LTSC; Windows Server 2016, 2019, 2022 and 2025 in
+  Standard and Datacenter; Debian 11 to 13; Ubuntu 22.04, 24.04 and 26.04 LTS. The edition is not
+  a nicety — an Enterprise LTSC and a Pro do not update the same way and do not end on the same
+  day, so they are two platforms and not one with a footnote.
+
+  Still **no end-of-support dates**: a Windows Server's depends on the channel and a Debian's on
+  the flavour, and a date the panel invents is a date somebody will believe.
+
+- **Save sits in the header, next to Cancel.** At the foot of the form — under the chassis, the
+  record, the validity and the notes — it fell below the fold and landed against the components
+  block, where it reads as belonging to the components.
+
+- **A template copies from the catalogue and stops depending on it.** It used to read the model's
+  record live: the height, the ports, the photos and the dates came out of `dc_type` every time.
+  That leaves the template showing holes the day somebody retires that model — or re-imports the
+  library, which regenerates the `uid`s. Neither is a mistake nobody would make: the library gets
+  re-imported every few months and a model is retired because it stopped being sold.
+
+  It is the same rule that already governs a template and a machine, one step higher: **stamp,
+  don't link.** Choosing a base model means taking what it has; from then on what is in the
+  template is the template's, is corrected there, and the catalogue can vanish entirely.
+  `type_uid` stays and means what `dc_item.build_uid` means — which model it was *born of* —
+  useful for "which of my standards are EliteDesks" and not for reading anything from it.
+
+  Choosing a **different** model re-stamps, because keeping the previous chassis's ports on a new
+  chassis is worse than either. Saving the record with the same model does not, since undoing a
+  correction on every save is half of what copying is for.
+
+  The images are copied for real, under new names. Pointing at the catalogue's file is a time
+  bomb: deleting either one takes the file and the other is left showing a hole with nothing
+  having failed — the same gap already closed when cloning a model.
+
+- **So the ports and the lifecycle dates are edited on the template**, which is where somebody is
+  looking when they notice the datum is wrong. The port editor is the same one the catalogue uses,
+  told where to write: two editors of the same thing end up as two that drift apart.
+
+- **8 MiB was rejecting a file the app said it accepted.** Request bodies were capped at 8 MiB
+  while attachments declare 32 MB and the catalogue zip 64 MB, so a twenty-meg firmware died in
+  the framework before reaching the route that was going to take it: no check of ours ran, no
+  message, a bare 413. Two limits for one question are two answers, and the one that won was not
+  the one written where anybody would look for it.
+
+  The cap is now 80 MiB, and `MAX_FORM_MEMORY_SIZE` does the protecting the old comment claimed:
+  in a multipart body the files spool to disk and it is the non-file fields that are held whole
+  in memory. And a body over the cap answers in JSON saying how much fits, instead of Werkzeug's
+  HTML page reaching a screen that expected `{'error': …}`.
+
+- **Editing a catalogue model by hand erased its port types.** The form asked only *how many* of
+  each family, and saving flattened everything to `{'': 24}` — "twenty-four, of a class nobody
+  said". That was fine while "the type comes from the library and nobody types it", and it stopped
+  being fine on both ends: a model written by hand could never say its sockets are `1000base-t`,
+  and — worse — opening a library model and saving it **wiped the type it already had**, with no
+  warning and without touching that box.
+
+  Ports are now lines: family, type, how many, added and removed one at a time. Still **counting,
+  not listing** — a 48-port switch is one line that says 48, because forty-eight rows across five
+  thousand models is a million nobody reads. What comes back is *what kind* they are, and that two
+  different sockets of the same family (`iec-60320-c14` and `dc-terminal`) are two lines of the
+  same machine, which a single box per family could not hold.
+
+  Types are **suggested, not enforced**: what is plugged in in a real room includes things that
+  are on nobody's list, and losing the datum for not recognising it is worse than storing it as
+  typed. The names offered are the library's, so the same port is not counted twice depending on
+  who typed it.
+
+- **`console-server-ports` was missing** from the counted families — the box everything else's
+  console plugs into. There was nowhere to say a machine has sixteen.
+
+- **A template's record is tabs now, and the chassis shows both faces.** One column holding the
+  summary, the chassis, the record, the lifecycle and fifteen components is a screen you have to
+  scroll to find out what is on it. It splits into **Summary · Components · Ports · Files**, each
+  tab carrying the count of what is behind it — a number beside a tab says whether it is worth
+  opening, which an empty tab cannot say without being opened.
+
+  **Ports** is new and the data was already there: what the chassis comes with, and what it adds
+  up to once the cards are fitted. Both together, because the question is one — how many network
+  sockets will this machine have when it arrives — and split apart you have to add them in your
+  head, which is what this screen exists to avoid.
+
+  And the **rear** photo: the catalogue has carried it from the start and only the front was
+  shown. The back is where things plug in, so it is the face you look at when cabling.
+
+- **"1 U" was the wrong answer to the question the card asks.** With a template set to share its
+  U between two, the chassis card still read `1 U`. Not false — the chassis *is* 1U tall — but it
+  answers a different question: what you look at there is **how much room this costs in the
+  cabinet**, and since a U can be split those are two different things. It reads `1 U · 1/2` now,
+  and the record spells it out: "1 U, taking 1 of 2 parts (side by side)".
+
+  The list was computing the same thing down a second path and kept saying `1 U`. One function
+  now, not two, or the list and the record end up answering the same question differently.
+
+- **The record showed no platform.** Read mode has no dropdown, and the dropdown was the only
+  thing that ever asked for the platform list — so a template that has one showed the row blank,
+  which is worse than hiding it: it says there isn't one. And the record stopped repeating the
+  name, which was already above it twice, and leads with what the template takes up.
+
+- **A template's measurements block had fallen behind.** It was written when a U was a whole
+  number and one thing filled one U. Since then the catalogue measures in tenths — 0.5U chassis
+  exist — and a U can be shared. The template still asked "how many U" in whole numbers, so a
+  half-U patch panel standard could not be written down at all, which is exactly the case in
+  front of us.
+
+  `u_height` becomes `u_tenths`, the same unit the catalogue uses: one home for the height and
+  one unit for it. The block also asks **how it shares the U** — into how many parts and how many
+  it takes — because that belongs to the standard; *which* part each box takes does not, since
+  one goes on top and the other underneath, so that stays on the item. Creating a machine from
+  the template carries all of it.
+
+  A template that had a manual height typed in must have it entered again: those are tenths now,
+  and guessing which of the two a stored number meant would be making it up.
+
+- **The templates list reads like a list.** "Ships with" was the question, not the name of a
+  column — it says Platform. "Type" was blank on every row, because a template's role is almost
+  never typed by hand: it lives on the catalogue model, and the column only read what was typed;
+  a column that is always empty teaches you not to look at it. And it shows the chassis with its
+  **picture**: the elevation has had it since day one, and the list — where you actually choose
+  between templates — had none. The height reads `0,5 U` where the chassis is half a U, instead
+  of rounding it to 1.
+
+- **Saving a template said "saved" and stayed in the form.** The resets that put a record back
+  into read mode had been put in `_dcBuildNew` — the function next door — instead of in the one
+  that opens a saved template, which is where saving returns through. The result was a screen
+  that could not tell you whether what you were looking at was what got saved or what you had
+  been typing.
+
+  Opening a template also dropped `lifecycle` on the floor: the state object is copied field by
+  field, and what a route serves but nobody copies raises nothing — it leaves a hole. That is why
+  the chassis dates never appeared either. Both are now checked by the screen harness.
+
+- **Two things can share a U now.** The grid assumed **one item per U**, which leaves out half a
+  room: the 0.5U patch panel, the two mini PCs bolted into a 1U kit, the tray with eight
+  Raspberry Pis.
+
+  One mechanism for all three rather than three: an item says **into how many parts its U is
+  divided** (`u_slots`) and **which one it takes** (`u_slot`, plus `u_slot_span`). A number, not
+  an enum of top/bottom/left/right — how many parts is decided by whoever does the mounting, and
+  a list written into the code runs out on day one. `1` of `1` is the whole U, which is what
+  every row written before this already meant, so the columns arrive by `ADD COLUMN` and change
+  nothing.
+
+  Overlap is decided with **integers**, cross-multiplied: a third does not exist in floating
+  point, and two things that nearly fit is exactly the drawing that cannot exist. A half and a
+  quarter in the same U compare correctly.
+
+  `u_split` says which way it divides — side by side (two mini PCs, eight Pis) or stacked (two
+  0.5U panels). The grid does not care, since all it checks is whether the slice is free; the
+  **drawing** does, because it exists to look like what you see when you open the cabinet.
+
+- **And an item can be mounted on another** (`parent_uid`): the mini PCs on a shelf, where the
+  shelf pays for the U and they do not. It inherits the shelf's rack, U, height and face, so the
+  elevation and every count keep reading what they always read. One level only — a shelf on a
+  shelf is not a room — and **a carrier with things on it cannot be removed**, because that would
+  leave three machines hanging off a place that is gone, none of which holds a U of its own to
+  land on. The elevation shows the carrier with a `+3`, and the table lists them indented under
+  it.
+
+- **A saved profile document could make new panel fields disappear.** "Highest version wins" is
+  right for `kinds` — that is what somebody edits, and a local profile on 16 should stand until
+  the panel ships 17. But `common` is where the panel *adds*: the six lifecycle dates went in
+  there. Anyone who had saved a document with a higher number before they existed lost them —
+  with no error, no warning, and nothing tying the hole to that edit. A field that is in the code,
+  is served, and never appears.
+
+  `common` is now merged, with the saved document still winning field by field: whoever redefined
+  weight keeps theirs, and what the panel adds later arrives anyway. What is lost is the ability
+  to *delete* a common field by saving a document without it — a fair price for no installation
+  ever missing what ships.
+
+- **Seeding a platform set its class to "operating system" whatever the file said.** `ensure()`
+  creates the row with the default — `os` — and the seeding only filled holes, so `hypervisor`
+  never arrived: Proxmox and ESXi came in as server operating systems. A default **is** a hole:
+  it is what gets written when nobody said anything, exactly like an empty string. A new platform
+  is now created whole, and one that was already there gets its class corrected only while it
+  still holds the default.
+
+- **The basics file was read once per process.** Right for something that does not change while
+  the panel runs — the profile document does not — but this one does: it is edited to add a
+  platform or a rack size, which is the whole reason it left the code. Holding it in memory
+  forever turned "edit a JSON" into "edit a JSON and restart the panel", with the trap that the
+  second half is written nowhere and whoever edits believes it did not work. It now re-reads when
+  the file's timestamp or size changes.
+
+- **The basics speak both languages.** Everything in that file is **copied** into a row and stays
+  there, so a Spanish name in an English panel is not fixed by switching language afterwards —
+  it has to be seeded again. Any text in the file may now be a string or a `{"es_ES": …,
+  "en_EN": …}` map, resolved against the panel's language at seeding time. The generic model
+  names and every platform note carry both.
+
+  The **slug does not follow the language**: it comes from the default one. A slug that changed
+  with whoever pressed the button would mean seeding twice in two languages creates two
+  catalogues. It also stopped carrying parentheses, which are a character to escape at every
+  point a slug passes through — and not having to think about that is what a slug is for.
+
+- **The seeded platforms, gone over properly: 52 rows and the dates that are published.**
+  Windows Server back to 2012 R2, the IoT Enterprise LTSC rows (ten years, not five), Debian 10,
+  Ubuntu 20.04, Proxmox VE 6 through 9, ESXi 6.0 through 9.0, DSM 6.0 through 7.2.
+
+  And **two dates where a thing ends twice**, because almost everything does: `end_of_maintenance`
+  is when it stops receiving what is not security — Microsoft's mainstream support, VMware's
+  general support, Ubuntu's standard maintenance — and `eol` is the real end: extended support,
+  technical guidance, LTS, ESM. With one date you have to pick which of the two you are writing
+  down, and whoever reads it six months later cannot tell which you picked.
+
+  Thirty-five of the fifty-two carry an end of support. The seventeen that do not are the ones
+  where no single date exists: Windows 11's annual channel marks one per version, DSM marks one
+  per **model** and not per version, MikroTik publishes none, and the newest Proxmox and ESXi have
+  not had theirs announced yet. Every one of those says so in its notes — and a test enforces it,
+  so a row can never arrive with neither a date nor a reason.
+
+- **More seeded platforms, and not all of them are server operating systems.** RouterOS 6 and 7
+  (MikroTik, firmware), Proxmox VE 7 and 8 and VMware ESXi 6.7/7.0/8.0 (hypervisors), Synology
+  DSM 6.2 through 7.2 (appliance), Linksys factory firmware and OpenWrt. A router runs firmware,
+  a virtualisation node runs a hypervisor and a NAS runs its own thing; filing them all under
+  "operating system" would mean not being able to ask what there is of each.
+
+  Debian's versions now sit under a **Debian** brand, so they group in the tree the way Ubuntu
+  groups under Canonical. The brand stays optional on the model — there is firmware that belongs
+  to nobody with a name — but for these it is known.
+
+- **The platform tree grouped each row with itself.** "Windows 10 Education" appeared as a family
+  containing one leaf called "Windows 10 Education". The seeding wrote the record **only when
+  creating the row**, so anyone who had pressed the button before the `family` column existed had
+  twenty-six platforms without one, and the tree fell back to grouping by name.
+
+  The rule was written wrong, not thought wrong: what must not be overwritten is a value somebody
+  entered, and a hole is not a value. Seeding now fills what is empty — field by field, and inside
+  the dates one at a time, so a single hand-corrected date does not block the other five forever —
+  and touches nothing that already says something.
+
+- **A template's record is read first; editing is a mode.** It opened straight into a form. A
+  purchase standard is consulted far more often than it is corrected — "what did this ship with?",
+  "which disks did it carry?" — and an open form is a screen where any keystroke changes
+  something. It now opens as a record, with an Edit button; cancelling re-reads, so what was
+  typed and discarded is never left on screen looking saved.
+
+- **And the record shows the device's lifecycle**, which is what was actually being looked for.
+  The two dates a template had were the standard's own — from when and until when it is bought
+  this way — and whoever read "bought from" wanted the machine's: when the chassis launched, when
+  it stopped being sold, when the patches end. Those live on the catalogue record and were not
+  shown here at all. Now each block carries its own heading and neither is named like the other:
+  **Validity of the standard** (ours, editable) and **Device lifecycle** (the catalogue's,
+  read-only — it is corrected on the model, where the twenty machines already built from it hang
+  too).
+
+- **Platforms read as a tree**: manufacturer → family → edition. Twenty-six flat rows are
+  twenty-six flat rows, and at fifty none of them gets read. A single `family` column does it —
+  the leaf label is the name minus the family prefix, because storing the edition separately
+  would be storing the same thing twice with the chance of the two disagreeing. Only the list
+  groups: the picker on a template stays flat and shows the whole name, since "Pro" on its own
+  would not say of what.
+
+- **The seeded platforms carry the published lifecycle dates.** Windows 10's October 2025 end of
+  support, each Windows Server's mainstream and extended dates, Debian's security and LTS ends,
+  Ubuntu's standard and ESM ends. They are written **only when the row is created**, so pressing
+  the button again never undoes a date somebody corrected.
+
+  Where there is no single honest date, there is none: Windows 11's annual channel ends per
+  version — 23H2, 24H2 — and stamping one of those as the product's is exactly the date somebody
+  would believe. Those rows say so in their notes instead, and the LTSC rows, which do have one
+  date, carry it.
+
+- **The platform list did not notice the import.** Bringing in the basics registers twenty-six
+  platforms, and the tab kept showing the list it had fetched ten minutes earlier. The refresh
+  routine clears by hand what has to be fetched again, and platforms were not on that list —
+  the same trap as ever: a hand-written enumeration is one somebody has to remember to touch, and
+  forgetting gives no error, just a screen showing the past.
+
+  It also grew a refresh button, because this is the tab that stays open while another one
+  imports, and **multi-select with a bulk remove**: twenty-six seeded platforms and wanting to
+  keep four was twenty-two confirmations. The ones a purchase standard names are kept and counted
+  rather than failing the whole batch — refusing the lot over one would mean hunting for which,
+  and removing it would leave standards saying "ships with" and not saying what.
+
+- **A platform has a lifecycle too, and it is the same six dates.** `eol` was one loose column,
+  which leaves out exactly what you ask about a Windows: when it stopped being sold, when the
+  security patches stopped, how long extended support can still be bought. Those are the same six
+  questions a catalogue model answers, so they come from the same place — the profile document's
+  `lifecycle` group — and are stored the same way, in `extra`. Two homes for one date would be two
+  answers that can disagree, and adding a seventh would have to be done twice.
+
+- **The basics now bring platforms too.** A freshly installed panel has a rack in front of it and
+  no platforms at all, and the first ones anybody types are always the same five: Windows 10 and
+  11, Windows Server, Debian, Ubuntu. They come with their brand where there is one and **no
+  end-of-support dates** — a Windows Server's depends on the channel and a Debian's on the
+  flavour, and a date the panel invents is a date somebody will believe. They are **added, never
+  replaced**: pressing the button again cannot overwrite the date or the notes somebody wrote on
+  theirs.
+
+- **"Ladrón externo" was the wrong Spanish.** In Spain a *ladrón* is the adapter that multiplies
+  a socket; what hangs off a mini-PC's cable is an *alimentador externo* — an external power
+  supply. The old wording sent whoever read the record looking for a power strip.
+
+- **"Born of «X»" was wrong about what a machine is.** Devices are not born; they are assembled
+  to a standard. The string says so now.
+
+- **Four tabs claimed a count and showed nothing.** Turning front ports, rear ports, power inlets
+  and console ports from *counted* into *named places* left behind what was already counted: the
+  tab said "3" and the pane below it said nothing — not the list, because there are no names, and
+  not the count, because that tab no longer shows one. Two things that contradict each other, and
+  neither can be believed.
+
+  The count already says how many there are and of what; the only thing missing is what they are
+  called, which is the one thing the panel cannot know. So the editor now opens with the rows
+  already there — one per counted port, its type set, numbered — and what is left is to correct
+  the name against the machine. Seeding happens **once per family and only over an empty list**:
+  repeating it every repaint would make a deleted row come back on its own, and seeding over
+  typed rows would double them. Nothing is written until Save, cancelling re-reads, and the
+  derived count comes out identical to the one that went in.
+
+  The read view is no longer a dead end either: it says what is missing **and** offers the button
+  that does it, instead of pointing at an Edit control on another row that nothing connects to
+  naming ports.
+
+- **The Overview tab is now the card's index, and the port families moved down a level.** Eleven
+  tabs, and the first said nothing about the other ten: finding out whether any memory slots were
+  free, or what hangs off the outside, meant opening each tab and coming back. Overview now carries
+  a block per section with the line you would have gone in for — how many bays are in use, what
+  model is in each slot, what the counted ports are made of — and an arrow into it. A summary that
+  does not summarise the other tabs is just another tab; what it must add is what is **behind**
+  each one, not what it is called.
+
+  The blocks sit in a grid that shares out whatever width there is, each **as tall as what it
+  says**. The card's two tables used to run the full width for four rows of two words, and a
+  two-row block stretched to the height of an eight-row one left exactly the white space that made
+  the page scroll.
+
+  And "Interfaces", "Power inlets", "Front ports"… are one question with six rows, not six
+  questions: at the same level as "Components" they took two rows of tab strip before the card said
+  anything. Six fixed tabs remain — Overview · Components · External items · **Connections** ·
+  Attachments · History — with the families inside Connections, on a strip that only appears when
+  you are there. Pressing the group opens a family rather than a screen of its own: the one that
+  was open if you come back to it, the first one if you arrive fresh.
+
+  A tab's number is also never lower than the names behind it. The count is derived from the list
+  on save, so they normally agree; a row edited by hand can carry the list without the count, and
+  then the tab read zero beside four named bays. Of two figures that contradict each other, the one
+  worth showing is the one with the names behind it.
+
+- **Fixed: the delete button dropped to a line of its own** in the port editor. A `<select>` will
+  not shrink — its intrinsic minimum is its longest option, and "DC output — supplies power" is a
+  wide one — so inside a dialog the row overflowed, wrapped, and left the bin sitting alone with
+  the whole row empty beside it. `min-width: 0` is what lets them shrink; the `max-width` stays so
+  a two-word dropdown does not stretch across a wide screen. The named-port row got the same
+  treatment: it carries six controls and overflowed sooner.
+
+- **`dcim/routes.py` was 3571 lines — a third of the domain — and is now a package.** Split **by
+  subject, not by layer**: a room's routes, the power chain's, a cabinet's insides, the two
+  catalogue documents, brands and platforms, the templates, and the catalogue itself. Whoever comes
+  to touch one of those has no reason to walk through the other six, and each area now lists its
+  own endpoints in its own header — which the route-documentation guard checks per module, so the
+  split makes that guard sharper rather than looser.
+
+  A `storage/` folder holding the stores was considered first and turned down: it would have made
+  dcim the only domain shaped differently from the other 23 (so "where is the store?" would have
+  two answers), and it would have labelled as storage three files that are mostly not — `catalog.py`
+  carries 18 functions besides its store class, `profiles.py` twelve.
+
+  What made the split safe is not that it was read carefully: the **116 registered routes** were
+  fingerprinted from a live Flask app before and after — path, methods, endpoint and the permission
+  decorator on each — and the two are identical. What every area shares (the permission decorators
+  and the helpers used by two or more) is built once in `_context.py`; what only one area uses moved
+  with it.
+
+- **The catalogue's toolbar was seven text buttons in a row.** New model, select the visible ones,
+  clear the selection, export, delete the ticked ones, import, empty a source — same size, same
+  colour, one after another, so finding one meant reading them all, and the two that delete sat in
+  the middle of the other five. They are three different things and now look like three: writing
+  one (the only one that keeps its words), what is done **with what is ticked** (a joined group
+  that only appears when something is), and what goes in and out of the whole catalogue. The
+  selection buttons carry the count where the text was — "Export 1" and "Delete the ticked (1)" say
+  the same thing twice, and of the two it is the figure that is needed. The words move to the
+  `title`: what is saved is room, not the word.
+
+- **Models and templates can be taken to another install** (`lib/core/dcim/portable.py`, `GET
+  /api/v1/dcim/export` and `POST /api/v1/dcim/import`). The library re-imports in a minute; a
+  purchasing standard somebody wrote does not — it gets retyped, and whoever retypes it types it
+  differently. One envelope for both halves, not a file per table, because taking a template
+  usually means taking the models that explain it, and two files that must be imported in the right
+  order are an order somebody will get wrong.
+
+  **No `uid` anywhere.** An id belongs to the database that minted it and means nothing in the one
+  next door, so what travels is what a person recognises — manufacturer and model, the template's
+  name, the platform by its name — and that is what it is looked up by on arrival. It is the same
+  reason a template carries its measurements copied rather than a link to the catalogue: what is
+  copied survives the trip. Images do not travel: they are files on this disk, they weigh more than
+  everything else put together, and a model without its photo is still the model.
+
+  **Nothing is overwritten.** A model that is already here is skipped, and so is a template whose
+  name already exists — importing is bringing what is missing, not replacing what is there. What
+  was skipped is counted and reported, which is the difference between "it did nothing" and "you
+  already had it". A platform that does not exist here is **not invented**: it is named back, so it
+  can be created and the file imported again. Each half needs its own permission and the other half
+  still goes through, rather than the whole thing being refused.
+
+- **Half the fields in a form explained themselves and half did not.** The ones declared by the
+  profiles document have carried their ⓘ from the start, because `_dcAttrLabel` looks for
+  `dcim_attr_<field>_tt`; the ones written into the template are painted with `esc(t(key))`, where
+  nothing else fits. So the same form had fields that said what they were and fields that did not —
+  and the silent ones are exactly the ones somebody fills in on day one without the chassis in
+  front of them.
+
+  `_dcLabel(key)` is the same thing for those, with the same convention — the help is `<key>_tt`
+  and the icon appears **only if it exists**, which is what keeps one beside every field from
+  meaning nothing. Seven of them now say what the label cannot: that the name is the standard's and
+  not the chassis's, that the U size takes halves, what "face" decides, why full-depth matters.
+  Help can also be asked for **under another key**, because the same label means two things in two
+  forms: a cabinet's "Depth" is the whole box and a template's is what it takes up inside one.
+
+- **The companies could be read and not written, so there were none.** `dcim_org_edit` exists, the
+  four routes have been there from the start and the toolbar showed the companies as badges — but
+  there was nowhere to declare one. What that looks like from the screen is pressing "Company" on a
+  rack and being told "no company has been declared yet": true, and leading nowhere. An axis of the
+  model that can only be written through the API cannot be written.
+
+  A dialog with the list, which is what this needs: three fields, touched on the first day and
+  almost never again — a whole section for that is a screen that is in the way the rest of the
+  year. It saves as a **batch**: new rows with `POST`, changed ones with `PUT`, and rows nobody
+  touched do not travel, because a `PUT` per row on every save fills the audit trail with changes
+  that change nothing — and the day somebody looks for who renamed a company, they will not find it
+  in the noise. Deleting asks first and happens at once: what was filed under that company is left
+  unfiled, which is a row disappearing, not a field being corrected.
+
+  While wiring this, one design question came up and was answered: **one owner per thing, and
+  deliberately so.** "What if something belongs to several companies?" is answered by the level
+  below — the room belongs to whoever runs it and each rack to its company; the rack is the
+  provider's and each item its customer's. `docs/explica-dcim.md` now records that, along with the
+  two ways out that were looked at and turned down, so it reads as a decision rather than an
+  oversight.
+
+- **A power source could be declared and deleted, and nothing else.** Correcting a panel's name,
+  giving it the watts that were missing, or saying that the UPS actually hangs off the other panel
+  had nowhere to happen — and deleting the row to retype it takes the branch with it, because what
+  hung off it is left not saying what it hangs off. The pencil is there now, on the same form,
+  which saves with `PUT` instead of `POST`. The site is shown rather than asked when correcting:
+  changing it changes who may touch the row, so the route drops it — and a box that does not save
+  is worse than no box.
+
+  And it can be **cloned with everything hanging off it** (`POST …/sources/<uid>/clone`). A room
+  panel is not declared once: it is declared the same way in the next room, with its two UPSs and
+  four output panels behind it — fifteen rows by hand and four places to pick the wrong parent, an
+  error that raises nothing and just leaves a chain saying what is not so. Server-side rather than
+  fifteen calls from the screen: half way through the fifteenth, a network error leaves half a tree
+  written and nobody knows which half. The bypass does not travel with the copy (a manoeuvre in
+  progress is not a way of being wired), nor does the host that measures it, nor the strips plugged
+  into it — those hang off the source, they are not the source.
+
+  **Fixed: the bypass button said the opposite of what it did.** On a UPS with no bypass thrown it
+  read "Remove bypass", and the dialog that opened on pressing it asked "Throw the bypass on…?".
+  Both cannot be right, and the one that was right was the dialog — the label came out of one
+  conditional and the action out of another, and one of the two was inverted. They now come out of
+  the same variable, which is what makes them unable to disagree.
+
+  The tree itself reads as rows now: a rule between them with a hover highlight, so the eye crosses
+  from a name on the left to its buttons on the right; indent guides instead of blank space, which
+  say *whose* child a row is rather than just that it is one; and every button in the same group at
+  the right, the bypass included — a row with one button in the middle and two at the end is two
+  places to look.
+
+  Two holes showed up while wiring it, both of which made a row **vanish**. The tree is drawn from
+  the roots downwards, so a source whose parent does not exist is neither under the root nor under
+  anyone — it is not drawn, and its delete button goes with it. Same for a loop: A off B and B off
+  A leaves neither with a root, so both disappear at once and there is no way back from the screen.
+  `POST` and `PUT` now refuse a parent that does not exist, that is the row itself, or that already
+  hangs off it; the dropdown does not offer them either, because offering something only to reject
+  it wastes the trip.
+
+- **A power supply that lives outside the box now has a form factor.** ATX, SFX, CRPS and Flex ATX
+  are the shapes of one that bolts *inside* a chassis; a mini-PC's brick is none of them, so the
+  field stayed on "not stated" — which is the same as never having asked. Five more for what hangs
+  outside (desktop brick, wall-plug adapter, DIN rail, open frame, PoE injector) and the three
+  internal ones that were missing (ATX12VO, SFX-L, TFX). The new ones are stored as **ids** and
+  translated through `dcim_val_*`: the old ones are acronyms and ATX is ATX in both languages, but
+  "wall-plug adapter" is not. Efficiency also takes **DoE VI** and **CoC Tier 2** — what an
+  external adapter actually has printed on it; 80 PLUS belongs to computer supplies, and asking for
+  a label that brick cannot carry is asking for a blank.
+
+- **A component now says how it plugs in too.** The port editor lived only in the chassis branch,
+  so a power brick — which has a mains inlet and a DC output — or a USB-C-to-Ethernet adapter — a
+  USB-C in and an RJ-45 out — had nowhere to say so, and "what lead does this need?" could not be
+  answered from its own record. Input and output need no field of their own: the families already
+  say it — `power-ports` is what it takes and `power-outlets` is what it gives.
+
+- **A connector says the SHAPE; the generation and what it carries belong to the port.**
+  `1000base-t` and `usb-c` do not state the same kind of thing: the first is a signal with its
+  speed — the shape, an RJ-45, implied — and the second is a shape with no signal at all, inherited
+  as-is from the library. So a USB-C could only say it was a USB-C: not which generation (a 2.0 and
+  a 3.2 Gen 2 are the same socket at twenty times the speed) and not what it carries, when the same
+  lead does video, network and power. Two axes, and the vendor's spec sheet states both:
+  "1× USB 3.2 Gen 2 Type-C with DisplayPort 1.4".
+
+  The catalogue now declares, per connector, which **generations** fit that shape (`gens`) and
+  which **signals** it makes sense to carry; the named port picks one and ticks the others
+  (`gen`, `signals` inside `port_list`). One connector per combination — shape × generation ×
+  alt mode — would be hundreds of ids; two boxes on the port are two boxes. **The shape is still
+  the `type` and the count still counts shapes**: two USB-C are two USB-C even if one is Gen 2, so
+  not one stored value moved.
+
+  Signals are an **open vocabulary**, edited in the document itself — what is plugged in in a real
+  room includes things no list has. One that is not written there is kept and shown by its id, and
+  reported on save, because it is almost always a typo — and a typo that works is the one that
+  stays. Changing a port's shape drops what belonged to the old one: a `tb4` on a USB-A means
+  nothing.
+
+  A power inlet also says **how much it draws** (`volts`, `watts`) — the same reasoning: one C14
+  feeds a 65 W mini-PC and a 750 W supply, and what is recorded is the label on this machine. The
+  voltage is text, because a label reads `100-240` and picking one of the two would be inventing
+  it; the wattage is a number, because those are what get added up to answer what a rack asks for.
+  The boxes appear where power actually flows — a power connector that declares no signals (a C14,
+  a DC terminal) or one that does and has been ticked as supplying or taking power — rather than
+  by family, because the same question applies to the rear USB-C that charges the laptop.
+
+  The connector vocabulary moved to its own partial (`dcim/_conns.html`): how a socket is read —
+  its shape, its name, its speed, what it can carry, what it draws — is used by three screens, and
+  `_render.html` is where the section's *state* lives, not its dictionary.
+
+  `port_list` is also **sanitised at the door now, and at one door**: it went in exactly as the
+  browser sent it, which was ugly with two fields and is a free-for-all with four. Two sanitisers —
+  the catalogue's and the template's — would end up sanitising differently, and the bug would
+  depend on which way the row was saved.
+
+- **Deleting the last bay said "saved" and deleted nothing.** The count of a named family is
+  derived from its list, and an empty list derives zero — which would wipe what the model said in a
+  template nobody has named yet, so a guard kept the old count whenever the list was empty. That
+  guard was right while "empty" could only mean "nobody wrote it". Once a list can be emptied by
+  hand, "empty because nobody wrote it" and "empty because I just deleted it" compute identically,
+  and the guard answered both the same way: keep. Saving really did save; what was sent carried the
+  count intact, and with the count the seeded row came back on the next edit. The panel now records
+  which families were **touched** in this card — a touched one wins even at zero, an untouched one
+  keeps what the model said — and the editor stops claiming "the model says there is 1" the moment
+  the list is emptied.
+
+- **A port is not called a bay.** The named list serves both — a memory slot and the rear power
+  inlet are both a *place* — but the labels cannot: calling the rear USB a "bay" makes every
+  sentence need translating as it is read. Inner families keep the bay wording; the four outer
+  ones get their own (`dcim_bay_*_port`), and the component form's "Slot" box reads **Port** when
+  what is being fitted hangs off the outside.
+
+- **"USB-A 1" front and "USB-A 1" rear are two different ports with the same label.** Types repeat
+  across the faces, so numbering them per family produced four identical names in the one list
+  where somebody has to pick which port the adapter goes in. Two fixes, because they are two
+  faults: seeded names carry the face ("Front USB-A 1", "Rear USB-A 1"), and the picker is
+  **grouped by family** — which answers the question even when the names were typed by hand and
+  repeated.
+
+- **A grid of chips inside a form is not a field — it is another screen fitted inside one.**
+  Picking a port took three rows of chips in the middle of the component form, and it grows with
+  the machine: three ports on a mini-PC, twenty on a chassis. So the field is a field again — a
+  box holding what is chosen and a button that opens the picker — and the chips live in a dialog,
+  where there is room to say which face each port is on. Marking one closes nothing: every click
+  writes to the draft and redraws both the screen behind and the dialog itself.
+
+- **And the form now says where the part ends and the place begins.** Brand, model, size, slot,
+  quantity and the buttons all sat in one wrapping row, so the boundary between "what it is" and
+  "where it goes" depended on where the line happened to break that day. Two blocks with their own
+  heading and a rule between them.
+  Side by side, not stacked: there are four boxes in total, and three tiers spent three rows of
+  height with half the width empty. The rule says the same thing stood on end, and a narrow window
+  drops the columns under one another with their rule beside them.
+
 ## [0.0.1+build.119] - 2026-08-26
 
 ### Added

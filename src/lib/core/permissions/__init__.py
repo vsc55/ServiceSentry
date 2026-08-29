@@ -60,6 +60,14 @@ _SERVER_PERM_RE = re.compile(r'^server\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)
 # Per-cluster permission key (cluster.{uid}.{action}) — a cluster is a multi-bind
 # check identified by its item UID.
 _CLUSTER_PERM_RE = re.compile(r'^cluster\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
+# Per-company key (org.{uid}.view) — which companies' equipment somebody may see in the
+# physical inventory, for the rack a group's subsidiaries share.
+#
+# `view` and nothing else, unlike the three above. Those grant four actions because four exist;
+# here only the read is narrowed, and a key for an action nothing performs is a checkbox that
+# grants nothing and reads as though it does. The day an `org.<uid>.edit` means something, it
+# goes here with the code that honours it.
+_ORG_PERM_RE = re.compile(r'^org\.[a-zA-Z0-9_\-.]+\.view$')
 
 
 def is_module_perm(p: str) -> bool:
@@ -75,6 +83,11 @@ def is_server_perm(p: str) -> bool:
 def is_cluster_perm(p: str) -> bool:
     """Return True if *p* is a valid per-cluster permission key (cluster.{uid}.{action})."""
     return bool(_CLUSTER_PERM_RE.match(p))
+
+
+def is_org_perm(p: str) -> bool:
+    """Return True if *p* is a valid per-company permission key (org.{uid}.view)."""
+    return bool(_ORG_PERM_RE.match(p))
 
 
 # ── Built-in RBAC model ─────────────────────────────────────────────────────────────
@@ -150,7 +163,8 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
 # forgotten would silently DROP those keys instead of failing.
 def is_valid_perm(p: str) -> bool:
     """True if *p* is a known flag or a well-formed per-instance key."""
-    return p in PERMISSIONS or is_module_perm(p) or is_server_perm(p) or is_cluster_perm(p)
+    return (p in PERMISSIONS or is_module_perm(p) or is_server_perm(p)
+            or is_cluster_perm(p) or is_org_perm(p))
 
 
 def filter_valid_permissions(perms) -> list:

@@ -44,6 +44,41 @@ HOME_PAGES = (
      'standalone': {'pane': 'tab-infra', 'render': 'renderInfra',
                     'perm': 'infra_view', 'icon': 'bi-hdd-network',
                     'nav_label_key': 'tab_infra'}},
+    # Where the equipment IS, beside what it is DOING. Its own section rather than a tab of
+    # Infrastructure: that one answers "is this all right" and this one answers "where do I
+    # walk", and they are opened by different people at different moments.
+    {'id': 'dcim',     'url': '/dcim',     'label_key': 'landing_dcim',
+     'standalone': {'pane': 'tab-dcim', 'render': 'renderDcim',
+                    'perm': 'dcim_view', 'icon': 'bi-building',
+                    'nav_label_key': 'tab_dcim',
+                    # Four screens under one section, and the sidebar unfolds them. They were
+                    # buttons in the tree's toolbar — which is where ACTS on what is on screen
+                    # belong, not places you go — and worse, that toolbar is the tree's, so
+                    # they vanished the moment somebody opened a rack.
+                    #
+                    # `views` is the panel's own mechanism for exactly this and it was already
+                    # there for module sections. Using it rather than a row of pills inside the
+                    # pane is what makes `/dcim/catalog` an address: shareable, bookmarkable,
+                    # and choosable as a landing page.
+                    #
+                    # `kind`/`action` stay empty on purpose: they describe how the GENERIC
+                    # renderer draws a module's view, and this section ships its own renderer.
+                    'views': (
+                        {'slug': 'inventory', 'icon': 'bi-diagram-3', 'kind': '', 'action': '',
+                         'label_i18n': {'es_ES': 'Inventario', 'en_EN': 'Inventory'}},
+                        {'slug': 'board', 'icon': 'bi-speedometer2', 'kind': '', 'action': '',
+                         'label_i18n': {'es_ES': 'Cuadro de mando', 'en_EN': 'Dashboard'}},
+                        {'slug': 'catalog', 'icon': 'bi-journal-text', 'kind': '', 'action': '',
+                         'label_i18n': {'es_ES': 'Catálogo', 'en_EN': 'Catalogue'}},
+                        # Entre el catálogo y el inventario: lo que de verdad se compra. Al
+                        # lado del catálogo y no del inventario a propósito — se abre cuando se
+                        # decide qué se compra, no cuando se monta un armario.
+                        {'slug': 'builds', 'icon': 'bi-boxes', 'kind': '', 'action': '',
+                         'label_i18n': {'es_ES': 'Plantillas', 'en_EN': 'Templates'}},
+                        {'slug': 'sources', 'icon': 'bi-lightning-charge', 'kind': '',
+                         'action': '',
+                         'label_i18n': {'es_ES': 'Fuentes', 'en_EN': 'Sources'}},
+                    )}},
     {'id': 'history',  'url': '/history',  'label_key': 'landing_history',
      'standalone': {'pane': 'tab-history', 'render': 'renderHistory',
                     'perm': 'history_view', 'icon': 'bi-graph-up',

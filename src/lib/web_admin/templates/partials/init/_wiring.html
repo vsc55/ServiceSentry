@@ -144,6 +144,7 @@ document.getElementById('btn-tab-config')?.addEventListener('shown.bs.tab', () =
     // the field asks the server what it resolves to so the empty box can show it. Once per
     // session — it caches its own answer.
     if (typeof _backupDirPlaceholder === 'function') _backupDirPlaceholder();
+    if (typeof _dcimMediaDirPlaceholder === 'function') _dcimMediaDirPlaceholder();
 });
 document.getElementById('btn-tab-modules')?.addEventListener('shown.bs.tab', () => {
     if (!_isDirty('modules')) reloadModules(true);

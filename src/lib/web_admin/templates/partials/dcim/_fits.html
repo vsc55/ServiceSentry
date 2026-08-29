@@ -1,0 +1,112 @@
+{# ================================================================
+   DCIM — dónde cabe esto.
+
+   Lo que todo lo anterior hace posible, y la pantalla que alguien abre con un albarán en la mano:
+   llega un servidor de 2U, 800 mm de fondo y 350 W, ¿dónde lo meto?
+
+   **El «por qué no» es la mitad del valor.** Una lista de los armarios que valen deja a quien la
+   lee sin saber si el de al lado está descartado por falta de sitio, de corriente o de fondo — y
+   eso es justo lo que decide si la solución es mover un equipo, pedir una regleta o comprar otro
+   armario. Tres problemas muy distintos con la misma pinta en una lista filtrada.
+
+   Y las U libres se dicen como **tramos**, no como recuento: doce U sueltas por todo el armario
+   no admiten nada de 2U, y «12 libres» es la respuesta que manda a alguien con un servidor en las
+   manos hasta un sitio donde no entra.
+   ================================================================ #}
+
+//: Lo que devolvió `/fits`, o `null` si no se ha preguntado. La pregunta vive en la pantalla y
+//: no en la URL: es una consulta de un momento, no un sitio al que volver.
+let _dcFits = null;
+//: Lo que se está buscando sitio para. Se conserva entre preguntas porque casi siempre se ajusta
+//: un número y se vuelve a preguntar.
+let _dcNeed = {u: 1, depth: 0, watts: 0, branches: 2};
+
+function _dcFitsToggle() {
+    _dcFits = _dcFits ? null : {racks: []};
+    renderDcim();
+    if (_dcFits) _dcFitsAsk();
+}
+
+async function _dcFitsAsk() {
+    const q = new URLSearchParams({u: _dcNeed.u, depth: _dcNeed.depth,
+                                  watts: _dcNeed.watts, branches: _dcNeed.branches});
+    _dcFits = await apiGet(`/api/v1/dcim/fits?${q}`) || {racks: []};
+    renderDcim();
+}
+
+function _dcFitsSet(campo, valor) {
+    _dcNeed[campo] = Math.max(0, Number(valor) || 0);
+}
+
+function _dcFitsHtml() {
+    const d = _dcFits || {};
+    const filas = d.racks || [];
+    const valen = filas.filter(r => r.fits);
+    const campo = (id, label, valor, min) =>
+        `<label class="ss-fs-2 text-muted">${esc(t(label))}
+            <input class="form-control form-control-sm ss-tabular" type="number"
+                   min="${min}" value="${escAttr(String(valor))}" style="max-width:7rem"
+                   oninput="_dcFitsSet(${jsStr(id)},this.value)"
+                   onkeydown="if(event.key==='Enter')_dcFitsAsk()"></label>`;
+    return `<div class="card mb-3">
+        <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-box-seam"></i>
+            <span class="fw-semibold">${esc(t('dcim_fits'))}</span>
+            <span class="text-muted ss-fs-2">${
+                esc(tf('dcim_fits_note', valen.length, filas.length))}</span>
+            <button class="btn btn-sm btn-secondary ms-auto" onclick="_dcFitsToggle()">
+                <i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="card-body py-2">
+            <div class="d-flex align-items-end gap-2 flex-wrap mb-2">
+                ${campo('u', 'dcim_u_height', _dcNeed.u, 1)}
+                ${campo('depth', 'dcim_depth_mm', _dcNeed.depth, 0)}
+                ${campo('watts', 'dcim_watts_said', _dcNeed.watts, 0)}
+                ${campo('branches', 'dcim_branches', _dcNeed.branches, 0)}
+                <button class="btn btn-sm btn-primary" onclick="_dcFitsAsk()">
+                    <i class="bi bi-search me-1"></i>${esc(t('dcim_fits_ask'))}</button>
+            </div>
+            ${filas.length ? _dcFitsTable(filas)
+                : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_racks'))}</div>`}
+        </div>
+    </div>`;
+}
+
+function _dcFitsTable(filas) {
+    return `<div class="table-responsive"><table class="table table-sm mb-0 align-middle">
+        <thead><tr>
+            <th></th>
+            <th>${esc(t('dcim_rack'))}</th>
+            <th>${esc(t('dcim_where'))}</th>
+            <th>${esc(t('dcim_fits_where'))}</th>
+            <th>${esc(t('dcim_fits_why_not'))}</th>
+        </tr></thead>
+        <tbody>${filas.map(r => `<tr role="button"
+                onclick="_dcimBoardGoRack(${jsStr(r.uid)})">
+            <td style="width:1%"><i class="bi ${r.fits ? 'bi-check-circle text-success'
+                                                       : 'bi-dash-circle text-muted'}"></i></td>
+            <td class="fw-semibold">${esc(r.name)}</td>
+            <td class="text-muted ss-fs-2">${esc(r.site)} · ${esc(r.room)}</td>
+            <td class="ss-tabular ss-fs-2">${r.fits
+                ? esc(tf('dcim_fits_at', r.at_u, r.run))
+                : `<span class="text-muted">${esc(tf('dcim_free_u', r.free_u))}</span>`}</td>
+            <td class="ss-fs-2 text-warning-emphasis">${
+                r.reasons.map(_dcFitsWhy).map(esc).join(' · ')}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+/** Por qué no cabe, con la frase entera y el número que hace falta para arreglarlo.
+ *
+ *  «No hay sitio» no dice nada; «el mayor hueco seguido es de 1U» dice si hay que reordenar el
+ *  armario o buscar otro. Un motivo sin su número obliga a ir a mirar, que es el trabajo que
+ *  esta pantalla venía a ahorrar. */
+function _dcFitsWhy(r) {
+    if (r.why === 'no_room') return tf('dcim_why_no_room', r.best || 0);
+    if (r.why === 'no_outlets') return tf('dcim_why_no_outlets', r.have || 0, r.need || 0);
+    if (r.why === 'no_watts') return tf('dcim_why_no_watts', r.need || 0,
+                                        (r.branches || []).join(', ').toUpperCase());
+    if (r.why === 'dcim_depth_too_deep') return t('dcim_why_too_deep');
+    if (r.why === 'dcim_depth_no_cables') return tf('dcim_why_no_cables', -(r.spare || 0));
+    return t(r.why) || r.why;
+}

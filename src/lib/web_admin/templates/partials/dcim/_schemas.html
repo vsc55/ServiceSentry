@@ -1,0 +1,1134 @@
+{# ================================================================
+   DCIM — los esquemas: qué campos tiene un modelo.
+
+   El formulario de escribir un modelo llevaba **mi lista de campos**, escrita mirando unos
+   cuantos YAML. Funciona hasta que la biblioteca añade uno —o hasta que alguien tiene una clase
+   de cosa que aquí no existe— y entonces hay que tocar el código para poder teclear un dato.
+
+   El repositorio publica la lista exacta: `schema/devicetype.json`, `moduletype.json` y
+   `racktype.json`, con los tipos y los valores permitidos de cada campo. Traerlos es cambiar una
+   lista escrita a mano por el dato de quien manda sobre él — la misma idea que el registro de
+   configuración de este panel: *el esquema es el dato, la pantalla la presentación*.
+
+   Y clonarlos, que es la otra mitad. Una sala tiene un cuadro eléctrico, una caja de fibra, un
+   armario ignífugo de cintas: cosas que no están en ningún repositorio. Partir del que más se
+   les parezca y quitarle y ponerle campos es más corto que escribirlos todos — y mucho más corto
+   que meterlas como «otro» y apuntar el resto en la descripción.
+   ================================================================ #}
+
+//: Lo que devolvió `/schemas`, o `null` si no se ha pedido. `{schemas, columns, ports, trees}`.
+let _dcSch = null;
+//: El esquema abierto para mirarle los campos, si hay uno.
+let _dcSchOpen = '';
+async function _dcSchLoad() {
+    _dcSch = await apiGet('/api/v1/dcim/schemas') || {schemas: []};
+    renderDcim();
+}
+
+function _dcSchHtml() {
+    const d = _dcSch;
+    // Se pide una vez al abrir la pestaña. Aquí y no en `_dcCatOpen`: quien solo consulta el
+    // catálogo no necesita los esquemas, y pedirlos sería una ida y vuelta por cada visita.
+    if (d === null) {
+        _dcSchLoad();
+        return `<div class="text-muted small">${esc(t('loading'))}</div>`;
+    }
+    const puede = _dcimMay('dcim_catalog_manage');
+    const lista = d.schemas || [];
+    return `<div class="ss-toolrow mb-3">
+            <span class="text-muted ss-fs-2 ss-toolrow-text">${esc(t('dcim_sch_note'))}</span>
+            <div class="ss-toolrow-tools">
+                ${puede ? `<button class="btn btn-sm btn-primary" onclick="_dcSchFetch()">
+                    <i class="bi bi-github me-1"></i>${esc(t('dcim_sch_fetch'))}</button>` : ''}
+                <button class="btn btn-sm btn-secondary" onclick="_dcSchLoad()">
+                    <i class="bi bi-arrow-clockwise"></i></button>
+            </div>
+        </div>
+        ${!lista.length ? `<div class="text-muted small">${esc(t('dcim_sch_empty'))}</div>`
+            : `<div class="d-flex flex-column gap-2">${lista.map(e =>
+                _dcSchCard(e, puede)).join('')}</div>`}
+        ${_dcProfHtml(puede)}
+        ${_dcConnDocHtml()}`;
+}
+
+/** El catálogo de conectores, entre los documentos de los que salen las listas.
+ *
+ *  Aquí se mira **de dónde vienen** los vocabularios, y este era el que no estaba: se consultaba
+ *  en su pestaña, que contesta «¿cuáles hay?», y no «¿quién decide cuáles hay?». Quien abre
+ *  Esquemas viene a por lo segundo.
+ *
+ *  Sin botón de editar, y eso **se dice**: es el único de los tres que no se puede sustituir
+ *  desde el panel. Un botón que no está y no se explica se lee como un botón que falta. */
+/** El cuadro en el que se edita un documento, con sus modos arriba.
+ *
+ *  Uno para los dos —atributos y conectores— porque es el mismo diálogo sobre dos documentos que
+ *  se actualizan igual, y dos copias de esto acabarían siendo dos diálogos que se parecen.
+ *
+ *  *modos* son los botones de la fila de arriba: tres formas de mirar lo mismo, dentro del cuadro
+ *  y no fuera, porque hacer que cada una lo abra y lo cierre serían tres cuadros para una cosa.
+ */
+function _dcDocModal(titulo, modos, cuerpo) {
+    showHtmlModal(titulo, `<div class="d-flex gap-2 flex-wrap mb-3">${modos}</div>${cuerpo}`,
+                  'primary');
+}
+
+/** Un botón de modo del cuadro. Marcado el que se está mirando, que si no son tres botones que
+ *  no dicen dónde estás. */
+function _dcDocTab(activo, modo, icono, texto, fn) {
+    return `<button class="btn btn-sm ${activo ? 'btn-primary' : 'btn-secondary'}"
+            onclick="${fn}('${escAttr(modo)}')">
+        <i class="bi ${escAttr(icono)} me-1"></i>${esc(texto)}</button>`;
+}
+
+//: El documento de conectores: `{doc, packaged, stored, …}` o `null` mientras no se ha pedido.
+let _dcConnDoc = null;
+//: Qué se está haciendo con él: `null` (mirarlo), `form`, `json` o `history`.
+let _dcConnMode = null;
+//: La copia de trabajo mientras se edita. Una copia y no el documento en vigor: cancelar tiene
+//: que dejarlo como estaba, y editar el bueno haría que cancelar fuera imposible.
+let _dcConnDraftDoc = null;
+//: El JSON, mientras el editor de texto está abierto.
+let _dcConnDraft = '';
+//: El historial, cuando se pide.
+let _dcConnHist = null;
+
+async function _dcConnDocLoad() {
+    const d = await apiGet('/api/v1/dcim/connectors') || {};
+    _dcConnDoc = d;
+    _dcConnsTake(d);
+    renderDcim();
+    // Y el cuadro, si estaba abierto: lo que se acaba de guardar tiene que verse donde se
+    // guardó, no solo detrás.
+    if (_dcConnMode) _dcConnDraw();
+}
+
+function _dcConnDocHtml() {
+    if (_dcConnDoc === null) { _dcConnDocLoad(); return ''; }
+    const d = _dcConnDoc || {};
+    const doc = d.doc || {};
+    const n = (doc.connectors || []).length;
+    const propio = Number(d.stored || 0) > Number(d.packaged || 0);
+    const puede = _dcimMay('dcim_catalog_manage');
+    return `<div class="card mt-3">
+        <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-plug"></i>
+            <span class="fw-semibold">${esc(t('dcim_cat_tab_conns'))}</span>
+            <span class="badge bg-body-secondary text-body-secondary border fw-normal">${
+                esc(tf('dcim_prof_version', doc.version || 0))}</span>
+            <span class="badge bg-body-secondary text-body-secondary border fw-normal">${
+                esc(tf('dcim_conn_count', n))}</span>
+            ${propio ? `<span class="badge bg-body-secondary text-body-secondary border
+                fw-normal" title="${escAttr(String(d.stored_by || ''))}">${
+                esc(t('dcim_prof_own'))}</span>` : ''}
+            <div class="ms-auto d-flex gap-2 flex-wrap">
+                <button class="btn btn-sm btn-secondary" onclick="_dcCatGoTab('conns')">
+                    <i class="bi bi-list-ul me-1"></i>${esc(t('dcim_conn_see'))}</button>
+                ${puede ? `<button class="btn btn-sm btn-secondary"
+                    onclick="_dcConnGo('form')">
+                    <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>` : ''}
+                <button class="btn btn-sm btn-secondary" onclick="_dcConnGo('history')">
+                    <i class="bi bi-clock-history me-1"></i>${
+                    esc(t('dcim_cat_tab_history'))}</button>
+                ${puede && propio ? `<button class="btn btn-sm btn-warning"
+                    onclick="_dcConnReset()">${esc(t('dcim_prof_reset'))}</button>` : ''}
+            </div>
+        </div>
+        <div class="card-body py-2">
+            <div class="text-muted ss-fs-2 mb-2">${esc(t('dcim_conn_doc_note'))}</div>
+            ${_dcConnSummary()}
+        </div>
+    </div>`;
+}
+
+/** Dibujar el cuadro del catálogo de conectores en el modo que toque.
+ *
+ *  Se llama desde dentro del propio cuadro cada vez que algo cambia —una fila añadida, una
+ *  quitada— porque `renderDcim` redibuja la pantalla de detrás y no lo que está encima. */
+function _dcConnDraw() {
+    const modos = _dcimMay('dcim_catalog_manage')
+        ? _dcDocTab(_dcConnMode === 'form', 'form', 'bi-pencil', t('edit'), '_dcConnGo')
+          + _dcDocTab(_dcConnMode === 'json', 'json', 'bi-braces', 'JSON', '_dcConnGo')
+          + _dcDocTab(_dcConnMode === 'history', 'history', 'bi-clock-history',
+                      t('dcim_cat_tab_history'), '_dcConnGo')
+        : _dcDocTab(true, 'history', 'bi-clock-history', t('dcim_cat_tab_history'), '_dcConnGo');
+    _dcDocModal(t('dcim_cat_tab_conns'), modos,
+                _dcConnMode === 'form' ? _dcConnFormHtml()
+                : _dcConnMode === 'json' ? _dcConnJsonHtml()
+                : _dcConnHistHtml());
+}
+
+/** Lo que hay, sin abrir nada: cuántos por familia. La pregunta con la que se abre esta tarjeta
+ *  es «¿está el mío?», y a eso contesta la pestaña; aquí lo que se mira es si el documento tiene
+ *  la pinta que debería. */
+function _dcConnSummary() {
+    const fams = Object.keys(_dcConns);
+    if (!fams.length) return `<div class="text-muted ss-fs-2">${esc(t('dcim_conn_none'))}</div>`;
+    return `<div class="d-flex gap-1 flex-wrap">${fams.map(f =>
+            `<span class="badge bg-body-secondary text-body-secondary border fw-normal">${
+            esc(_dcPortName(f))} ${esc(String((_dcConns[f] || []).length))}</span>`).join('')}
+        </div>
+        <div class="text-muted ss-fs-1 mt-2">${esc(tf('dcim_conn_doc_where', fams.length))}</div>`;
+}
+
+/** Cambiar de modo. La copia de trabajo se hace **al entrar** y no al arrancar la pantalla: si
+ *  no, sería la copia de un documento que puede haber cambiado en otra pestaña mientras tanto. */
+function _dcConnGo(modo) {
+    // Pulsar el modo en el que ya se está **no cierra el cuadro**: dentro de él eso es volver a
+    // la pestaña de la que ya estás, y cerrarlo perdería lo escrito sin que nadie lo pidiera.
+    _dcConnMode = modo;
+    const doc = (_dcConnDoc || {}).doc || {};
+    if (modo === 'form') {
+        _dcConnDraftDoc = JSON.parse(JSON.stringify(doc));
+        _dcConnGens = null;
+    }
+    if (modo === 'json')
+        _dcConnDraft = JSON.stringify(doc, null, 2);
+    if (modo === 'history' && _dcConnHist === null) _dcConnHistLoad();
+    _dcConnDraw();
+}
+
+/** Cerrar el cuadro y olvidar lo que se estaba escribiendo. Cancelar tiene que dejar el
+ *  documento como estaba, y el borrador vivo sería el de la próxima vez que se abra. */
+function _dcConnClose() {
+    _dcConnMode = null;
+    _dcConnDraftDoc = null;
+    hideInfoModal();
+    renderDcim();
+}
+
+/** El formulario: **una fila por conector**, con lo que hay que decir de cada uno.
+ *
+ *  Lo que se hace aquí el noventa por ciento de las veces es añadir el que falta, y para eso una
+ *  fila vacía al final vale más que un diálogo. El JSON está al lado para lo demás.
+ *
+ *  La versión, arriba y a la vista: es lo único que decide si este documento gana al que viene
+ *  con el panel, y guardarlo sin subirla es guardar algo que no se va a usar. */
+function _dcConnFormHtml() {
+    const doc = _dcConnDraftDoc || {};
+    const filas = doc.connectors || [];
+    const grupos = (_dcConnDoc || {}).groups || [];
+    const familias = (_dcConnDoc || {}).families || [];
+    return `<div class="d-flex gap-2 align-items-end flex-wrap mb-2">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_prof_version_col'))}
+                <input type="number" min="1" class="form-control form-control-sm"
+                       style="max-width:8rem" value="${escAttr(String(doc.version || 1))}"
+                       oninput="_dcConnDraftDoc.version=Number(this.value)||0"></label>
+            <span class="text-muted ss-fs-1">${esc(t('dcim_conn_version_hint'))}</span>
+        </div>
+        ${_dcVocHtml(doc)}
+        <div class="table-responsive ss-piece-list-scroll">
+        <table class="table table-sm align-middle mb-2 ss-fs-3">
+        <thead><tr>
+            <th>${esc(t('dcim_conn_id'))}</th>
+            <th>${esc(t('dcim_conn_name'))}</th>
+            <th>${esc(t('dcim_conn_group'))}</th>
+            <th>${esc(t('dcim_cat_ports'))}</th>
+            <th>${esc(t('dcim_cat_port_speed'))}</th>
+            <th>${esc(t('dcim_gen'))}</th>
+            <th>${esc(t('dcim_signals'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${filas.map((c, i) => `<tr>
+            <td><input class="form-control form-control-sm font-monospace"
+                   style="min-width:11rem" value="${escAttr(String(c.id || ''))}"
+                   oninput="_dcConnSet(${i},'id',this.value)"></td>
+            <td><input class="form-control form-control-sm" style="min-width:9rem"
+                   value="${escAttr(_dcConnDraftName(c))}"
+                   oninput="_dcConnSet(${i},'name',this.value)"></td>
+            <td><select class="form-select form-select-sm" style="min-width:9rem"
+                    onchange="_dcConnSet(${i},'group',this.value)">
+                ${grupos.map(g => `<option value="${escAttr(g)}"${
+                    c.group === g ? ' selected' : ''}>${
+                    esc(_dcConnGroupName(g))}</option>`).join('')}
+                </select></td>
+            <td>${_dcConnFamsBox(i, c, familias)}</td>
+            <td><input class="form-control form-control-sm" style="max-width:7rem"
+                   value="${escAttr(String(c.speed || ''))}"
+                   oninput="_dcConnSet(${i},'speed',this.value)"></td>
+            <td><button class="btn btn-sm btn-secondary py-0 px-1"
+                    onclick="_dcGenOpen(${i})">${
+                esc(String((c.gens || []).length))}
+                <i class="bi bi-chevron-${_dcConnGens === i ? 'up' : 'down'} ms-1"></i></button></td>
+            <td>${_dcConnSigBox(i, c, doc)}</td>
+            <td class="text-end"><button class="btn btn-sm btn-danger py-0 px-1"
+                    title="${escAttr(t('delete'))}" onclick="_dcConnDrop(${i})">
+                <i class="bi bi-trash"></i></button></td>
+        </tr>
+        ${_dcConnGens === i ? `<tr><td colspan="8" class="bg-body-tertiary">${
+            _dcGensHtml(i, c)}</td></tr>` : ''}`).join('')}</tbody></table></div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-secondary" onclick="_dcConnAdd()">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_cat_port_add'))}</button>
+            <button class="btn btn-sm btn-primary" onclick="_dcConnSaveForm()">
+                <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+            <button class="btn btn-sm btn-secondary" onclick="_dcConnClose()">${
+                esc(t('cancel'))}</button>
+        </div>`;
+}
+
+//: Qué conector tiene abiertas sus generaciones. Uno y no todos: ciento veintiocho sub-tablas
+//: abiertas no es una tabla, es un listado.
+let _dcConnGens = null;
+
+function _dcGenOpen(i) {
+    _dcConnGens = (_dcConnGens === i) ? null : i;
+    _dcConnDraw();
+}
+
+/** El vocabulario de señales del documento: qué puede llevar un cable, con su nombre.
+ *
+ *  **Abierto**, que es lo que se pidió: lo que se enchufa en una sala de verdad incluye cosas que
+ *  no están en ninguna lista, y esta se amplía aquí y no publicando una versión del panel. */
+function _dcVocHtml(doc) {
+    const voc = doc.signals || [];
+    return `<div class="border rounded p-2 mb-2">
+        <div class="ss-fs-1 text-muted mb-1">${esc(t('dcim_signals'))}</div>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            ${voc.map((sg, k) => `<div class="input-group input-group-sm"
+                    style="max-width:19rem">
+                <input class="form-control font-monospace" style="max-width:8rem"
+                       value="${escAttr(String(sg.id || ''))}"
+                       oninput="_dcVocSet(${k},'id',this.value)">
+                <input class="form-control" value="${escAttr(_dcDocText(sg.name))}"
+                       oninput="_dcVocSet(${k},'name',this.value)">
+                <button class="btn btn-danger" title="${escAttr(t('delete'))}"
+                        onclick="_dcVocDrop(${k})"><i class="bi bi-trash"></i></button>
+            </div>`).join('')}
+            <button class="btn btn-sm btn-secondary" onclick="_dcVocAdd()">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_cat_port_add'))}</button>
+        </div>
+        <div class="text-muted ss-fs-1 mt-1">${esc(t('dcim_signals_hint'))}</div>
+    </div>`;
+}
+
+function _dcVocAdd() {
+    const doc = _dcConnDraftDoc || {};
+    doc.signals = doc.signals || [];
+    doc.signals.push({id: '', name: ''});
+    _dcConnDraw();
+}
+
+function _dcVocDrop(k) {
+    ((_dcConnDraftDoc || {}).signals || []).splice(k, 1);
+    _dcConnDraw();
+}
+
+function _dcVocSet(k, campo, valor) {
+    const sg = ((_dcConnDraftDoc || {}).signals || [])[k];
+    if (sg) _dcDocSetText(sg, campo, valor);
+}
+
+/** Qué señales puede llevar este conector: las del vocabulario, marcadas.
+ *
+ *  Marcadas y no escritas: escribirlas una a una en cada conector produce `power-out` en uno y
+ *  `powerout` en otro, y entonces son dos señales distintas que se leen igual. */
+function _dcConnSigBox(i, c, doc) {
+    const voc = (doc.signals || []).filter(x => String(x.id || '').trim());
+    if (!voc.length) return `<span class="text-muted ss-fs-1">—</span>`;
+    const puestas = (c.signals || []).map(String);
+    return `<div class="d-flex gap-1 flex-wrap">${voc.map(sg => {
+        const on = puestas.indexOf(String(sg.id)) >= 0;
+        return `<label class="ss-pick${on ? ' ss-on' : ''}">
+            <input type="checkbox" class="d-none"${on ? ' checked' : ''}
+                onchange="_dcConnSig(${i},${jsStr(sg.id)},this.checked)">${
+            esc(_dcDocText(sg.name) || String(sg.id))}</label>`;
+    }).join('')}</div>`;
+}
+
+function _dcConnSig(i, id, on) {
+    const c = ((_dcConnDraftDoc || {}).connectors || [])[i];
+    if (!c) return;
+    const voc = ((_dcConnDraftDoc || {}).signals || []).map(x => String(x.id || ''));
+    const puestas = (c.signals || []).map(String).filter(x => x !== String(id));
+    if (on) puestas.push(String(id));
+    // En el orden del vocabulario: dos conectores con las mismas señales tienen que escribirlas
+    // igual, o el documento cambia de un guardado a otro sin que cambie nada.
+    puestas.sort((a, b) => voc.indexOf(a) - voc.indexOf(b));
+    c.signals = puestas;
+    _dcConnDraw();
+}
+
+/** Las generaciones de un conector: `id`, cómo se llama y a cuánto va.
+ *
+ *  El `id` es lo que se guarda en el puerto, así que corregir el nombre de una generación no
+ *  puede desenganchar los puertos que ya la tenían — por eso son dos casillas y no una. */
+function _dcGensHtml(i, c) {
+    const gens = c.gens || [];
+    return `<div class="d-flex flex-column gap-1">
+        ${gens.map((g, j) => `<div class="d-flex gap-2 align-items-center flex-wrap">
+            <input class="form-control form-control-sm font-monospace" style="max-width:9rem"
+                   placeholder="usb3.2g2" value="${escAttr(String(g.id || ''))}"
+                   oninput="_dcGenSet(${i},${j},'id',this.value)">
+            <input class="form-control form-control-sm" style="max-width:17rem"
+                   placeholder="USB 3.2 Gen 2" value="${escAttr(_dcDocText(g.name))}"
+                   oninput="_dcGenSet(${i},${j},'name',this.value)">
+            <input class="form-control form-control-sm" style="max-width:8rem"
+                   placeholder="10 Gbps" value="${escAttr(String(g.speed || ''))}"
+                   oninput="_dcGenSet(${i},${j},'speed',this.value)">
+            <button class="btn btn-sm btn-danger" title="${escAttr(t('delete'))}"
+                    onclick="_dcGenDrop(${i},${j})"><i class="bi bi-trash"></i></button>
+        </div>`).join('')}
+        <div><button class="btn btn-sm btn-secondary" onclick="_dcGenAdd(${i})">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_cat_port_add'))}</button></div>
+        <div class="text-muted ss-fs-1">${esc(t('dcim_gen_hint'))}</div>
+    </div>`;
+}
+
+function _dcGenAdd(i) {
+    const c = ((_dcConnDraftDoc || {}).connectors || [])[i];
+    if (!c) return;
+    c.gens = c.gens || [];
+    c.gens.push({id: '', name: '', speed: ''});
+    _dcConnDraw();
+}
+
+function _dcGenDrop(i, j) {
+    const c = ((_dcConnDraftDoc || {}).connectors || [])[i];
+    if (c && c.gens) c.gens.splice(j, 1);
+    _dcConnDraw();
+}
+
+function _dcGenSet(i, j, campo, valor) {
+    const c = ((_dcConnDraftDoc || {}).connectors || [])[i];
+    const g = (c && c.gens) ? c.gens[j] : null;
+    if (g) _dcDocSetText(g, campo, valor);
+}
+
+/** Un texto del documento en el idioma en que se está escribiendo. */
+function _dcDocText(v) {
+    if (v && typeof v === 'object') return String(v[_dcConnLang()] || v[Object.keys(v)[0]] || '');
+    return String(v || '');
+}
+
+/** Y escribirlo **sin borrar el otro idioma**: guardar en castellano no puede llevarse el inglés
+ *  que esa fila ya tenía. */
+function _dcDocSetText(obj, campo, valor) {
+    if (campo === 'name' && obj.name && typeof obj.name === 'object') {
+        obj.name[_dcConnLang()] = String(valor);
+        return;
+    }
+    obj[campo] = String(valor);
+}
+
+/** El nombre de una fila del borrador, en el idioma en que se está mirando.
+ *
+ *  Puede venir como cadena o como `{es_ES, en_EN}` — el documento habla los dos idiomas. Se
+ *  edita el del idioma actual y se deja el otro donde estaba: guardar en castellano no puede
+ *  borrar el inglés de un conector que ya lo tenía. */
+function _dcConnDraftName(c) {
+    const v = (c || {}).name;
+    if (v && typeof v === 'object') return String(v[_dcConnLang()] || v[Object.keys(v)[0]] || '');
+    return String(v || '');
+}
+
+/** En qué idioma se está escribiendo. Del `<html lang>`, que lleva el código entero (`es_ES`):
+ *  el documento habla los dos y editar el nombre en castellano no puede borrar el inglés que ese
+ *  conector ya tenía. */
+function _dcConnLang() {
+    return String((document.documentElement || {}).lang || '') || 'es_ES';
+}
+
+function _dcConnSet(i, campo, valor) {
+    const c = ((_dcConnDraftDoc || {}).connectors || [])[i];
+    if (!c) return;
+    if (campo === 'name' && c.name && typeof c.name === 'object') {
+        c.name[_dcConnLang()] = String(valor);
+        return;
+    }
+    c[campo] = String(valor);
+}
+
+/** En qué familias se ofrece este conector: **nueve casillas que se pliegan**, no un
+ *  desplegable de tres renglones.
+ *
+ *  El desplegable medía tres líneas por fila, hubiera una familia marcada o nueve, y con ciento
+ *  y pico filas eso empuja la tabla a lo ancho hasta que sale por un lado. Las casillas ocupan
+ *  lo que hay y bajan solas cuando no caben.
+ *
+ *  Con el icono de la familia y no su nombre: nueve palabras no entran en una celda y nueve
+ *  iconos sí. El nombre sigue en el `title` y en el rótulo del lector de pantalla — lo que se
+ *  ahorra es sitio, no la palabra. */
+function _dcConnFamsBox(i, c, familias) {
+    const puestas = c.families || [];
+    return `<div class="d-flex gap-1 flex-wrap">${familias.map(f => {
+        const on = puestas.indexOf(f) >= 0;
+        const nombre = _dcPortName(f);
+        return `<label class="ss-conn-fam${on ? ' ss-on' : ''}"
+                title="${escAttr(nombre)}" aria-label="${escAttr(nombre)}">
+            <input type="checkbox" class="d-none"${on ? ' checked' : ''}
+                   onchange="_dcConnFamSet(${i},${jsStr(f)},this.checked)">
+            <i class="bi ${escAttr(_DC_PORT_ICON[f] || 'bi-ethernet')}"></i></label>`;
+    }).join('')}</div>`;
+}
+
+function _dcConnFamSet(i, fam, on) {
+    const c = ((_dcConnDraftDoc || {}).connectors || [])[i];
+    if (!c) return;
+    const fuera = (c.families || []).filter(f => f !== fam);
+    // El orden es el del documento y no el de los clics: dos conectores con las mismas familias
+    // tienen que decirlo igual, o el JSON cambia sin que cambie nada.
+    c.families = on ? _DCCAT_PORTS.filter(f => f === fam || fuera.indexOf(f) >= 0) : fuera;
+    _dcConnDraw();
+}
+
+function _dcConnAdd() {
+    const doc = _dcConnDraftDoc || {};
+    doc.connectors = doc.connectors || [];
+    doc.connectors.push({id: '', name: '', group: 'other', families: ['interfaces'],
+                         shape: 'other'});
+    _dcConnDraw();
+}
+
+function _dcConnDrop(i) {
+    ((_dcConnDraftDoc || {}).connectors || []).splice(i, 1);
+    _dcConnDraw();
+}
+
+async function _dcConnSaveForm() {
+    await _dcConnPut(_dcConnDraftDoc || {});
+}
+
+function _dcConnJsonHtml() {
+    return `<textarea class="form-control form-control-sm font-monospace" rows="16"
+                spellcheck="false"
+                oninput="_dcConnDraft=this.value">${esc(_dcConnDraft)}</textarea>
+        <div class="d-flex gap-2 mt-2">
+            <button class="btn btn-sm btn-primary" onclick="_dcConnSaveJson()">
+                <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+            <button class="btn btn-sm btn-secondary" onclick="_dcConnClose()">${
+                esc(t('cancel'))}</button>
+        </div>`;
+}
+
+async function _dcConnSaveJson() {
+    let doc;
+    try {
+        doc = JSON.parse(_dcConnDraft || '{}');
+    } catch (e) {
+        return showToast(t('dcim_prof_bad_json'), 'danger');
+    }
+    await _dcConnPut(doc);
+}
+
+/** Guardar, venga del formulario o del texto. Un solo sitio: lo que se descarta se dice igual
+ *  por los dos caminos, y dos copias de eso serían dos formas de callarlo. */
+async function _dcConnPut(doc) {
+    const r = await _dcimSend('PUT', '/api/v1/dcim/connectors', doc);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger', 8000);
+    const tirado = (r.data || {}).dropped || [];
+    showToast(tirado.length ? tf('dcim_prof_dropped', tirado.join(', ')) : t('saved'),
+              tirado.length ? 'warning' : 'success', tirado.length ? 8000 : 4000);
+    _dcConnMode = null;
+    _dcConnDraftDoc = null;
+    _dcConnHist = null;
+    hideInfoModal();
+    _dcConnDocLoad();
+}
+
+function _dcConnReset() {
+    showConfirmModal(t('dcim_conn_reset_q'), async () => {
+        const r = await _dcimSend('DELETE', '/api/v1/dcim/connectors');
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(t('saved'), 'success');
+        _dcConnMode = null;
+        _dcConnDraftDoc = null;
+        _dcConnHist = null;
+        hideInfoModal();
+        _dcConnDocLoad();
+    });
+}
+
+async function _dcConnHistLoad() {
+    const d = await apiGet('/api/v1/dcim/connectors/history') || {};
+    _dcConnHist = d.history || [];
+    if (_dcConnMode) _dcConnDraw();
+}
+
+/** Quién lo cambió y cuándo. Solo lo guardado aquí: el que viene con el panel no tiene historial
+ *  porque su historial son los commits, y vacío significa que nadie lo ha tocado. */
+function _dcConnHistHtml() {
+    if (_dcConnHist === null) return `<div class="text-muted ss-fs-2">${esc(t('loading'))}</div>`;
+    if (!_dcConnHist.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_prof_hist_none'))}</div>`;
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0 ss-fs-3">
+        <thead><tr>
+            <th>${esc(t('dcim_cat_hist_when'))}</th>
+            <th>${esc(t('dcim_cat_hist_who'))}</th>
+            <th>${esc(t('dcim_prof_version_col'))}</th>
+            <th class="text-end">${esc(t('dcim_conn_name'))}</th>
+        </tr></thead>
+        <tbody>${_dcConnHist.map(h => `<tr>
+            <td class="ss-tabular">${esc(_fmtDateTime(h.at) || h.at || '')}</td>
+            <td>${esc(h.by || '—')}</td>
+            <td class="ss-tabular">${esc(String(h.version || 0))}</td>
+            <td class="text-end ss-tabular">${esc(String(h.count || 0))}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+}
+
+//: Los perfiles de componente: `{doc, packaged, stored, stored_at, stored_by}` o `null`.
+let _dcProf = null;
+//: Qué se está haciendo con el documento: `null` (mirarlo), `form`, `json` o `history`.
+let _dcProfMode = null;
+//: La copia de trabajo mientras se edita con el formulario. Una copia y no el documento en vigor:
+//: cancelar tiene que dejarlo como estaba, y editar el bueno haría que cancelar fuera imposible.
+let _dcProfDoc = null;
+//: Qué clase se está editando. Una cada vez: quince clases con cinco campos en una pantalla son
+//: setenta y cinco filas para tocar una, y quien abre esto viene a por «los SSD».
+let _dcProfKind = 'ssd';
+//: El JSON, mientras el editor de texto está abierto.
+let _dcProfDraft = '';
+//: Si la muestra del formulario está desplegada. Debajo y no en otro cuadro: los dos son el
+//: mismo diálogo, así que el segundo tapaba al primero y cerrarlo se llevaba lo escrito sin
+//: decir nada. Mirar no puede costar lo escrito.
+let _dcProfPreviewOn = false;
+//: El historial y la comparación, cuando se piden.
+let _dcProfHist = null;
+let _dcProfDiff = null;
+
+async function _dcProfLoad() {
+    _dcProf = await apiGet('/api/v1/dcim/profiles') || {};
+    renderDcim();
+    // Y el cuadro, si estaba abierto: lo que se acaba de guardar tiene que verse donde se
+    // guardó, no solo detrás.
+    if (_dcProfMode) _dcProfDraw();
+}
+
+function _dcProfHtml(puede) {
+    if (_dcProf === null) { _dcProfLoad(); return ''; }
+    const d = _dcProf || {};
+    const propio = Number(d.stored || 0) > Number(d.packaged || 0);
+    return `<div class="card mt-3">
+        <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-cpu"></i>
+            <span class="fw-semibold">${esc(t('dcim_prof_title'))}</span>
+            <span class="badge bg-body-secondary text-body-secondary border fw-normal">${
+                esc(tf('dcim_prof_version', (d.doc || {}).version || 0))}</span>
+            ${propio ? `<span class="badge bg-body-secondary text-body-secondary border
+                fw-normal" title="${escAttr(String(d.stored_by || ''))}">${
+                esc(t('dcim_prof_own'))}</span>` : ''}
+            <div class="ms-auto d-flex gap-2 flex-wrap">
+                ${puede ? `<button class="btn btn-sm btn-secondary"
+                    onclick="_dcProfGo('form')">
+                    <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>` : ''}
+                <button class="btn btn-sm btn-secondary" onclick="_dcProfGo('history')">
+                    <i class="bi bi-clock-history me-1"></i>${
+                    esc(t('dcim_cat_tab_history'))}</button>
+                ${puede && propio ? `<button class="btn btn-sm btn-warning"
+                    onclick="_dcProfReset()">${esc(t('dcim_prof_reset'))}</button>` : ''}
+            </div>
+        </div>
+        <div class="card-body py-2">
+            <div class="text-muted ss-fs-2 mb-2">${esc(t('dcim_prof_note'))}</div>
+            ${_dcProfSummary(d)}
+        </div>
+    </div>`;
+}
+
+/** Dibujar el cuadro de los atributos en el modo que toque.
+ *
+ *  Se llama desde dentro del propio cuadro cada vez que algo cambia —otra clase elegida, un campo
+ *  añadido— porque `renderDcim` redibuja la pantalla de detrás y no lo que está encima. */
+function _dcProfDraw() {
+    const modos = _dcimMay('dcim_catalog_manage')
+        ? _dcDocTab(_dcProfMode === 'form', 'form', 'bi-pencil', t('edit'), '_dcProfGo')
+          + _dcDocTab(_dcProfMode === 'json', 'json', 'bi-braces', 'JSON', '_dcProfGo')
+          + _dcDocTab(_dcProfMode === 'history', 'history', 'bi-clock-history',
+                      t('dcim_cat_tab_history'), '_dcProfGo')
+        : _dcDocTab(true, 'history', 'bi-clock-history', t('dcim_cat_tab_history'), '_dcProfGo');
+    _dcDocModal(t('dcim_prof_title'), modos,
+                _dcProfMode === 'form' ? _dcProfFormHtml()
+                : _dcProfMode === 'json' ? _dcProfJsonHtml()
+                : _dcProfHistHtml());
+}
+
+/** Cambiar de modo. La copia de trabajo se hace **al entrar** y no al arrancar la pantalla: si no,
+ *  sería una copia de un documento que puede haber cambiado en otra pestaña mientras tanto. */
+function _dcProfGo(modo) {
+    // Pulsar el modo en el que ya se está **no cierra el cuadro**: dentro de él eso es volver a
+    // la pestaña de la que ya estás, y cerrarlo perdería lo escrito sin que nadie lo pidiera.
+    _dcProfMode = modo;
+    if (modo === 'form')
+        _dcProfDoc = JSON.parse(JSON.stringify((_dcProf || {}).doc || {}));
+    if (modo === 'json')
+        _dcProfDraft = JSON.stringify((_dcProf || {}).doc || {}, null, 2);
+    if (modo === 'history') { _dcProfHist = null; _dcProfDiff = null; }
+    _dcProfDraw();
+}
+
+/** Cerrar el cuadro y olvidar lo que se estaba escribiendo. Cancelar tiene que dejar el
+ *  documento como estaba, y el borrador vivo sería el de la próxima vez que se abra. */
+function _dcProfClose() {
+    _dcProfMode = null;
+    _dcProfDoc = null;
+    _dcProfPreviewOn = false;
+    hideInfoModal();
+    renderDcim();
+}
+
+/** Qué pide cada clase, en una línea por clase. Leerlo entero es abrir el editor; esto es para
+ *  contestar «¿de un disco me pregunta el formato?» sin tener que leer nada más. */
+function _dcProfSummary(d) {
+    const kinds = ((d.doc || {}).kinds) || {};
+    const nombres = Object.keys(kinds).sort();
+    if (!nombres.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_sch_empty'))}</div>`;
+    return `<div class="d-flex flex-column gap-1">${nombres.map(k => `<div class="ss-fs-2">
+        <span class="badge bg-body-secondary text-body-secondary border fw-normal me-1">${
+            esc(t('dcim_kind_' + k) || k)}</span>
+        <span class="text-muted">${esc((kinds[k] || []).map(
+            f => _dcAttrName(f.name)).join(' · '))}</span></div>`).join('')}</div>`;
+}
+
+// ── El editor, por clase ────────────────────────────────────────────────────────────────
+
+function _dcProfFormHtml() {
+    const doc = _dcProfDoc || {};
+    const clases = (_dcParts || {}).kinds || (_dcBuilds || {}).kinds
+                || Object.keys(doc.kinds || {}).sort();
+    const campos = (doc.kinds || {})[_dcProfKind] || [];
+    return `<div class="d-flex gap-2 align-items-end flex-wrap mb-2">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_part'))}
+                <select class="form-select form-select-sm" style="max-width:12rem"
+                        onchange="_dcProfKind=this.value;_dcProfDraw()">
+                    ${clases.map(k => `<option value="${escAttr(k)}"${
+                        _dcProfKind === k ? ' selected' : ''}>${
+                        esc(t('dcim_kind_' + k) || k)}</option>`).join('')}
+                </select></label>
+            <button class="btn btn-sm btn-secondary" onclick="_dcProfAdd()">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_prof_add_field'))}</button>
+            <button class="btn btn-sm ${
+                    _dcProfPreviewOn ? 'btn-primary' : 'btn-secondary'}"
+                    onclick="_dcProfPreviewOn=!_dcProfPreviewOn;_dcProfDraw()">
+                <i class="bi bi-eye me-1"></i>${esc(t('dcim_prof_preview'))}</button>
+        </div>
+        ${campos.length ? _dcProfFieldsTable(campos)
+            : `<div class="text-muted ss-fs-2 mb-2">${esc(t('dcim_prof_no_fields'))}</div>`}
+        ${_dcProfSizeHtml(doc)}
+        ${_dcProfPreviewOn ? _dcProfPreviewHtml() : ''}
+        <div class="d-flex gap-2 mt-2">
+            <button class="btn btn-sm btn-primary" onclick="_dcProfSaveForm()">
+                <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+            <button class="btn btn-sm btn-secondary" onclick="_dcProfClose()">${
+                esc(t('cancel'))}</button>
+        </div>`;
+}
+
+function _dcProfFieldsTable(campos) {
+    const caja = (i, k, ancho, extra) => `<input class="form-control form-control-sm"
+        style="max-width:${ancho}" ${extra || ''}
+        value="${escAttr(String(campos[i][k] === undefined ? '' : campos[i][k]))}"
+        oninput="_dcProfSet(${i}, '${escAttr(k)}', this.value)">`;
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr>
+            <th>${esc(t('dcim_prof_field'))}</th>
+            <th>${esc(t('dcim_prof_type'))}</th>
+            <th>${esc(t('dcim_prof_options'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${campos.map((c, i) => `<tr>
+            <td>${caja(i, 'name', '11rem')}
+                <div class="text-muted ss-fs-1">${esc(_dcAttrName(c.name))}</div></td>
+            <td><select class="form-select form-select-sm" style="max-width:8rem"
+                    onchange="_dcProfSet(${i}, 'type', this.value)">
+                ${['text', 'number', 'bool', 'date', 'enum'].map(
+                    v => `<option value="${escAttr(v)}"${
+                    c.type === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}
+                </select></td>
+            <td>${c.type === 'enum'
+                ? `<input class="form-control form-control-sm"
+                       value="${escAttr((c.enum || []).join(', '))}"
+                       placeholder="${escAttr(t('dcim_prof_options_hint'))}"
+                       oninput="_dcProfSetEnum(${i}, this.value)">`
+                : '<span class="text-muted ss-fs-2">—</span>'}</td>
+            <td class="text-end"><button class="btn btn-sm btn-danger py-0 px-1"
+                onclick="_dcProfDrop(${i})"><i class="bi bi-trash"></i></button></td>
+        </tr>`).join('')}</tbody></table></div>`;
+}
+
+/** Cómo se llama el tamaño de esta clase y en qué se escribe. Fuera de la tabla de campos porque
+ *  no es un campo: es la etiqueta de una columna que ya existe.
+ *
+ *  **Sale siempre y a veces está vacía**, y eso hay que decirlo: es el único sitio donde ponerle
+ *  tamaño a una clase que no lo tiene, así que esconderla donde no lo hay dejaría sin forma de
+ *  añadirlo. Vacía significa que esa clase **no pregunta tamaño** —de una CPU no es nada, y una
+ *  casilla que no pregunta nada no se sabe rellenar— y ahora la fila lo dice.
+ *
+ *  Y sin los ejemplos de un disco: en «Ventilador» ponía `capacity`, `1.92 TB` y `GB, TB` en
+ *  gris, que no es un hueco vacío sino una sugerencia — de otra clase. */
+function _dcProfSizeHtml(doc) {
+    const t0 = ((doc.size || {})[_dcProfKind]) || {};
+    const caja = (k, etiqueta, ancho, pista) => `<label class="ss-fs-2 text-muted">${esc(etiqueta)}
+        <input class="form-control form-control-sm" style="max-width:${ancho}"
+               value="${escAttr(String(t0[k] === undefined ? '' : t0[k]))}"
+               placeholder="${escAttr(pista || '')}"
+               oninput="_dcProfSetSize('${escAttr(k)}', this.value)"></label>`;
+    return `<div class="d-flex gap-2 flex-wrap align-items-end mt-2 p-2 rounded bg-body-secondary">
+        <span class="ss-fs-2 fw-semibold">${esc(t('dcim_part_size'))}</span>
+        ${caja('label', t('dcim_prof_size_label'), '10rem', '')}
+        ${caja('hint', t('dcim_prof_size_hint'), '9rem', '')}
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_prof_options'))}
+            <input class="form-control form-control-sm" style="max-width:12rem"
+                   value="${escAttr((t0.units || []).join(', '))}"
+                   oninput="_dcProfSetUnits(this.value)"></label>
+        <span class="text-muted ss-fs-1">${esc(t(t0.label ? 'dcim_prof_size_note'
+                                                          : 'dcim_prof_size_empty'))}</span>
+    </div>`;
+}
+
+function _dcProfCampos() {
+    const doc = _dcProfDoc || {};
+    doc.kinds = doc.kinds || {};
+    doc.kinds[_dcProfKind] = doc.kinds[_dcProfKind] || [];
+    return doc.kinds[_dcProfKind];
+}
+
+function _dcProfSet(i, k, v) {
+    const campos = _dcProfCampos();
+    if (!campos[i]) return;
+    campos[i][k] = v;
+    if (k === 'type') _dcProfDraw();            // el tipo decide si hay casilla de opciones
+}
+
+function _dcProfSetEnum(i, texto) {
+    const campos = _dcProfCampos();
+    if (campos[i]) campos[i].enum = String(texto || '').split(',')
+        .map(x => x.trim()).filter(Boolean);
+}
+
+function _dcProfSetSize(k, v) {
+    const doc = _dcProfDoc || {};
+    doc.size = doc.size || {};
+    doc.size[_dcProfKind] = doc.size[_dcProfKind] || {};
+    doc.size[_dcProfKind][k] = v;
+}
+
+function _dcProfSetUnits(texto) {
+    _dcProfSetSize('units', String(texto || '').split(',').map(x => x.trim()).filter(Boolean));
+}
+
+function _dcProfAdd() {
+    _dcProfCampos().push({name: '', type: 'text'});
+    _dcProfDraw();
+}
+
+function _dcProfDrop(i) {
+    _dcProfCampos().splice(i, 1);
+    _dcProfDraw();
+}
+
+/** El formulario que va a salir, antes de que salga.
+ *
+ *  Con los controles apagados: es una muestra de la FORMA y no un sitio donde escribir — uno
+ *  donde se pudiera teclear invitaría a rellenarlo, y lo tecleado no iría a ninguna parte. */
+function _dcProfPreviewHtml() {
+    const doc = _dcProfDoc || {};
+    const campos = (doc.kinds || {})[_dcProfKind] || [];
+    const tam = (doc.size || {})[_dcProfKind] || {};
+    const control = (c) => {
+        if (c.type === 'bool')
+            return `<input type="checkbox" disabled>`;
+        if (c.type === 'enum')
+            return `<select class="form-select form-select-sm" disabled style="max-width:12rem">
+                ${(c.enum || []).map(v => `<option>${esc(_dcEnumName(v))}</option>`).join('')}
+            </select>`;
+        return `<input class="form-control form-control-sm" disabled style="max-width:9rem"
+                    type="${c.type === 'number' ? 'number'
+                          : c.type === 'date' ? 'date' : 'text'}">`;
+    };
+    const html = `<div class="d-flex gap-2 flex-wrap align-items-end">
+            <label class="ss-fs-2 text-muted">${esc(
+                tam.label ? _dcAttrName(tam.label) : t('dcim_part_size'))}
+                <input class="form-control form-control-sm" disabled style="max-width:10rem"
+                       placeholder="${escAttr(tam.hint || '')}"></label>
+            ${campos.map(c => `<label class="ss-fs-2 text-muted">${esc(_dcAttrName(c.name))}
+                ${control(c)}</label>`).join('')}
+        </div>
+        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_prof_preview_note'))}</div>`;
+    return `<div class="mt-2 p-2 rounded border">
+        <div class="fw-semibold ss-fs-2 mb-2">${esc(tf('dcim_prof_preview_of',
+            t('dcim_kind_' + _dcProfKind) || _dcProfKind))}</div>
+        ${html}</div>`;
+}
+
+async function _dcProfSaveForm() {
+    const doc = _dcProfDoc || {};
+    // La versión sube sola: es lo único que decide cuál de los dos documentos manda, y pedirla a
+    // quien acaba de añadir un campo sería pedirle que se acuerde de una regla para que su cambio
+    // sirva de algo.
+    doc.version = Math.max(Number((((_dcProf || {}).doc) || {}).version || 0),
+                           Number((_dcProf || {}).packaged || 0)) + 1;
+    await _dcProfPut(doc);
+}
+
+// ── El JSON, para pegar uno entero ──────────────────────────────────────────────────────
+
+function _dcProfJsonHtml() {
+    return `<textarea class="form-control form-control-sm font-monospace" rows="16"
+                spellcheck="false"
+                oninput="_dcProfDraft=this.value">${esc(_dcProfDraft)}</textarea>
+        <div class="d-flex gap-2 mt-2">
+            <button class="btn btn-sm btn-primary" onclick="_dcProfSaveJson()">
+                <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+            <button class="btn btn-sm btn-secondary" onclick="_dcProfClose()">${
+                esc(t('cancel'))}</button>
+        </div>`;
+}
+
+async function _dcProfSaveJson() {
+    let doc;
+    try {
+        doc = JSON.parse(_dcProfDraft || '{}');
+    } catch (e) {
+        return showToast(t('dcim_prof_bad_json'), 'danger');
+    }
+    await _dcProfPut(doc);
+}
+
+/** Guardar, venga del formulario o del texto. Un solo sitio: lo que se descarta se dice igual por
+ *  los dos caminos, y dos copias de eso serían dos formas de callarlo. */
+async function _dcProfPut(doc) {
+    const r = await _dcimSend('PUT', '/api/v1/dcim/profiles', doc);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger', 8000);
+    const tirado = (r.data || {}).dropped || [];
+    showToast(tirado.length ? tf('dcim_prof_dropped', tirado.join(', ')) : t('saved'),
+              tirado.length ? 'warning' : 'success', tirado.length ? 8000 : 4000);
+    _dcProfMode = null;
+    _dcProfDoc = null;
+    _dcProf = null;
+    _dcProfHist = null;
+    // El cuadro se cierra al guardar: dejarlo abierto encima de lo ya guardado es no decir si lo
+    // que se ve es lo guardado o lo que se estaba escribiendo.
+    hideInfoModal();
+    // El catálogo vuelve a pedirse: los atributos del formulario salen de este documento.
+    _dcCatOpen();
+}
+
+function _dcProfReset() {
+    showConfirmModal(t('dcim_prof_reset_q'), async () => {
+        const r = await _dcimSend('DELETE', '/api/v1/dcim/profiles');
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(t('saved'), 'success');
+        _dcProfMode = null;
+        _dcProfDoc = null;
+        _dcProf = null;
+        _dcProfHist = null;
+        _dcCatOpen();
+    });
+}
+
+// ── Quién lo cambió, y contra qué ───────────────────────────────────────────────────────
+
+async function _dcProfHistLoad() {
+    const d = await apiGet('/api/v1/dcim/profiles/history') || {};
+    _dcProfHist = d.history || [];
+    if (_dcProfMode) _dcProfDraw();
+}
+
+function _dcProfHistHtml() {
+    if (_dcProfHist === null) {
+        _dcProfHistLoad();
+        return `<div class="text-center py-3"><div class="spinner-border spinner-border-sm">
+            </div></div>`;
+    }
+    if (!_dcProfHist.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_prof_hist_none'))}</div>`;
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+            <thead><tr>
+                <th>${esc(t('dcim_prof_version_col'))}</th>
+                <th>${esc(t('dcim_cat_hist_when'))}</th>
+                <th>${esc(t('dcim_cat_hist_who'))}</th>
+                <th></th>
+            </tr></thead>
+            <tbody>${_dcProfHist.map(h => `<tr>
+                <td class="ss-tabular">${esc(String(h.version || ''))}</td>
+                <td class="ss-fs-2 ss-tabular">${esc(_fmtDateTime(h.at) || h.at || '')}</td>
+                <td class="ss-fs-2">${esc(h.by || '—')}</td>
+                <td class="text-end"><button class="btn btn-sm btn-secondary"
+                    onclick="_dcProfCompare(${jsStr(h.uid)})">
+                    <i class="bi bi-arrow-left-right me-1"></i>${
+                    esc(t('dcim_prof_compare'))}</button></td>
+            </tr>`).join('')}</tbody></table></div>
+        ${_dcProfDiffHtml()}`;
+}
+
+/** Contra el documento EN VIGOR, que es la comparación que se hace: «¿qué le falta a esta
+ *  versión respecto de lo que hay?». Comparar dos viejas entre sí es una pregunta que casi nadie
+ *  se hace, y ofrecerla obligaría a elegir dos cosas antes de ver nada. */
+async function _dcProfCompare(uid) {
+    const d = await apiGet(`/api/v1/dcim/profiles/compare?a=${encodeURIComponent(uid)}`) || {};
+    _dcProfDiff = {uid, rows: d.diff || []};
+    if (_dcProfMode) _dcProfDraw();
+}
+
+function _dcProfDiffHtml() {
+    if (!_dcProfDiff) return '';
+    const filas = _dcProfDiff.rows || [];
+    if (!filas.length)
+        return `<div class="text-muted ss-fs-2 mt-2">${esc(t('dcim_prof_same'))}</div>`;
+    // Texto y no marcado: lo escapa quien lo pinta, tres líneas más abajo. Escrito con una
+    // plantilla parecería que sale a HTML desde aquí — y lo que sale a HTML desde aquí tendría
+    // que escaparse aquí.
+    const lado = (v) => {
+        if (v === null || v === undefined) return '—';
+        if (!v.type) return JSON.stringify(v);
+        const opciones = (v.enum || []).length ? ': ' + v.enum.join(', ') : '';
+        return _dcAttrName(v.name || '') + ' (' + v.type + opciones + ')';
+    };
+    return `<div class="mt-3"><div class="fw-semibold ss-fs-2 mb-1">${
+            esc(t('dcim_prof_diff'))}</div>
+        <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+            <thead><tr>
+                <th>${esc(t('dcim_part'))}</th>
+                <th>${esc(t('dcim_prof_field'))}</th>
+                <th>${esc(t('dcim_build_want'))}</th>
+                <th>${esc(t('dcim_build_have'))}</th>
+            </tr></thead>
+            <tbody>${filas.map(f => `<tr>
+                <td class="ss-fs-2">${esc(t('dcim_kind_' + f.where) || f.where)}</td>
+                <td class="ss-fs-2">${esc(_dcAttrName(f.name))}</td>
+                <td class="ss-fs-2 text-decoration-line-through">${esc(lado(f.before))}</td>
+                <td class="ss-fs-2 fw-semibold">${esc(lado(f.after))}</td>
+            </tr>`).join('')}</tbody></table></div></div>`;
+}
+
+/** Un esquema: de dónde vino, a qué describe y cuántos campos pide.
+ *
+ *  Los campos se enseñan al abrirlo y no siempre: veintidós filas por esquema son sesenta y seis
+ *  en una pantalla que se abre para elegir uno, y elegir no necesita leerlos. */
+function _dcSchCard(e, puede) {
+    const abierto = _dcSchOpen === e.uid;
+    const propio = String(e.source || '') !== 'library';
+    return `<div class="card"><div class="card-body py-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi ${propio ? 'bi-pencil-square' : 'bi-github'}"></i>
+            <span class="fw-semibold">${esc(e.name || '')}</span>
+            <span class="badge bg-body-secondary text-body-secondary border fw-normal">${
+                esc(_dcCatTreeName(e.tree))}</span>
+            <span class="text-muted ss-fs-2">${
+                esc(tf('dcim_sch_fields', (e.fields || []).length))}</span>
+            ${e.based_on ? `<span class="text-muted ss-fs-1">${
+                esc(tf('dcim_sch_from', e.based_on))}</span>` : ''}
+            <div class="ss-toolrow-tools">
+                <button class="btn btn-sm btn-secondary" onclick="_dcSchToggle('${
+                    escAttr(e.uid)}')">${esc(abierto ? t('dcim_sch_hide')
+                                                     : t('dcim_sch_show'))}</button>
+                <button class="btn btn-sm btn-secondary" onclick="_dcSchPreview('${
+                    escAttr(e.uid)}')" title="${escAttr(t('dcim_sch_preview_hint'))}">
+                    <i class="bi bi-eye me-1"></i>${esc(t('dcim_sch_preview'))}</button>
+                ${puede ? `<button class="btn btn-sm btn-secondary" onclick="_dcSchClone('${
+                    escAttr(e.uid)}')"><i class="bi bi-files me-1"></i>${
+                    esc(t('dcim_sch_clone'))}</button>` : ''}
+                ${puede && propio ? `<button class="btn btn-sm btn-danger" onclick="_dcSchDrop('${
+                    escAttr(e.uid)}','${escAttr(e.name)}')">
+                    <i class="bi bi-trash"></i></button>` : ''}
+            </div>
+        </div>
+        ${abierto ? _dcSchFields(e, puede) : ''}
+    </div></div>`;
+}
+
+/** Los campos de un esquema, con dónde acaba cada uno.
+ *
+ *  Decirlo importa: un campo que va a `extra` se guarda y se enseña, pero no se puede buscar ni
+ *  filtrar por él — y quien añada uno esperando lo contrario se llevaría la sorpresa el día que
+ *  intente encontrar algo por ahí. */
+function _dcSchFields(e, puede) {
+    const donde = {column: t('dcim_sch_in_column'), ports: t('dcim_sch_in_ports'),
+                   extra: t('dcim_sch_in_extra')};
+    return `<div class="table-responsive mt-2">
+        <table class="table table-sm align-middle mb-0 ss-fs-3"><tbody>${
+        (e.fields || []).map((c, i) => `<tr>
+            <td class="fw-semibold" style="white-space:nowrap">${esc(c.name)}${
+                c.required ? ` <span class="text-danger">*</span>` : ''}</td>
+            <td class="text-muted">${esc(c.type || '')}</td>
+            <td class="text-muted ss-fs-1">${esc(donde[c.target] || c.target || '')}</td>
+            <td class="text-muted ss-fs-1">${esc((c.enum || []).join(' · '))}</td>
+            <td class="text-end" style="width:2.5rem">${
+                puede && String(e.source) !== 'library'
+                    ? `<button class="btn btn-sm btn-danger py-0 px-1"
+                        onclick="_dcSchDropField('${escAttr(e.uid)}',${i})">
+                        <i class="bi bi-x-lg"></i></button>` : ''}</td>
+        </tr>`).join('')}</tbody></table>
+        ${puede && String(e.source) !== 'library' ? `
+        <div class="d-flex gap-2 align-items-end mt-2 flex-wrap">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_sch_add_field'))}
+                <input id="dcsch-new-${escAttr(e.uid)}" class="form-control form-control-sm"
+                       placeholder="${escAttr(t('dcim_sch_field_ph'))}"></label>
+            <button class="btn btn-sm btn-secondary" onclick="_dcSchAddField('${
+                escAttr(e.uid)}')"><i class="bi bi-plus-lg"></i></button>
+            <span class="text-muted ss-fs-1">${esc(t('dcim_sch_extra_hint'))}</span>
+        </div>` : ''}
+    </div>`;
+}
+
+function _dcSchToggle(uid) {
+    _dcSchOpen = _dcSchOpen === uid ? '' : uid;
+    renderDcim();
+}
+
+async function _dcSchFetch() {
+    showToast(t('dcim_sch_fetching'), 'info');
+    const r = await _dcimSend('POST', '/api/v1/dcim/schemas/fetch', {});
+    const d = r.data || {};
+    if (!r.ok || d.error) {
+        if (d.detail) console.error('[dcim] schemas ->', d.detail);
+        return showToast(d.error || r.error || t('save_failed'), 'danger', 8000);
+    }
+    showToast(tf('dcim_sch_fetched', d.count || 0), 'success');
+    _dcSchLoad();
+}
+
+/** Clonar: partir del que más se parezca en vez de escribir veintidós campos.
+ *
+ *  El nombre se pide antes de clonar y no después, porque clonar sobre el mismo nombre no es
+ *  clonar: es perder el original sin decirlo. */
+function _dcSchClone(uid) {
+    const e = ((_dcSch || {}).schemas || []).find(x => x.uid === uid);
+    if (!e) return;
+    showReasonModal(tf('dcim_sch_clone_ask', e.name || ''), async (nombre) => {
+        if (!String(nombre || '').trim())
+            return showToast(t('dcim_schema_need_name'), 'warning');
+        const r = await _dcimSend('POST', '/api/v1/dcim/schemas',
+                                  {name: nombre, from: uid, tree: e.tree});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(t('saved'), 'success');
+        _dcSchLoad();
+    }, {placeholder: t('dcim_sch_name_ph')});
+}
+
+function _dcSchDrop(uid, nombre) {
+    showConfirmModal(tf('dcim_sch_drop_ask', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/schemas/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(t('deleted'), 'success');
+        _dcSchLoad();
+    });
+}
+
+/** Añadir un campo a un esquema propio. Se manda el esquema ENTERO y no el campo suelto: el
+ *  servidor guarda documentos, y una ruta que añadiera un campo sería una segunda forma de
+ *  escribir lo mismo que acabaría discrepando de la primera. */
+async function _dcSchAddField(uid) {
+    const e = ((_dcSch || {}).schemas || []).find(x => x.uid === uid);
+    const caja = document.getElementById('dcsch-new-' + uid);
+    const nombre = ((caja || {}).value || '').trim();
+    if (!e || !nombre) return;
+    if ((e.fields || []).some(c => c.name === nombre))
+        return showToast(t('dcim_sch_field_dup'), 'warning');
+    await _dcSchSaveFields(e, (e.fields || []).concat([{name: nombre, type: 'string'}]));
+}
+
+async function _dcSchDropField(uid, i) {
+    const e = ((_dcSch || {}).schemas || []).find(x => x.uid === uid);
+    if (!e) return;
+    const campos = (e.fields || []).slice();
+    campos.splice(i, 1);
+    await _dcSchSaveFields(e, campos);
+}
+
+async function _dcSchSaveFields(e, campos) {
+    const r = await _dcimSend('POST', '/api/v1/dcim/schemas',
+                              {name: e.name, tree: e.tree, fields: campos});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcSchLoad();
+}

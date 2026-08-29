@@ -1,0 +1,1803 @@
+{# ================================================================
+   DCIM — las plantillas: lo que de verdad se compra.
+
+   El catálogo dice lo que un fabricante VENDE y el inventario dice qué caja hay en el U 12.
+   Entre los dos falta el escalón en el que se trabaja: un R740 es un chasis, y lo que se pide
+   veinte veces es ese chasis **con** doce DIMM, ocho discos y una controladora. Eso no figura en
+   el catálogo de nadie —no lo vende nadie— y sin esta pantalla se teclea veinte veces.
+
+   **Dos pantallas y no una.** La lista contesta «qué estándares hay» y la ficha contesta «de qué
+   consta este», que son dos preguntas de dos momentos: la primera al elegir con qué crear un
+   equipo, la segunda el día que cambian los discos. Puestas juntas, la ficha de quince
+   componentes ocupa la pantalla entera para lo que casi nunca se mira.
+
+   **El modelo base se BUSCA, no se elige de una lista.** El catálogo son ocho mil filas: un
+   desplegable con ocho mil opciones es una lista que no se puede recorrer y un buscador que no
+   se puede escribir. Lo mismo para el modelo de cada componente, contra el árbol de componentes.
+   ================================================================ #}
+
+//: La lista de plantillas, o `null` si la vista no está abierta. `{rows, roles, kinds, faces}`.
+let _dcBuilds = null;
+//: La que está abierta, si hay una: `{build, parts, items, mode}`. `mode: 'new'` es una que
+//: todavía no existe — la misma ficha, porque crear y editar son lo mismo sobre otras columnas.
+let _dcBuild = null;
+//: Qué pestaña de la ficha está abierta: `data` (lo que lleva) o `files` (sus papeles).
+let _dcBuildTab = 'data';
+//: Si la ficha abierta está en modo edición. Se lee mucho más de lo que se corrige —«¿con qué
+//: salía esto?», «¿qué discos llevaba?»— y un formulario abierto es una pantalla en la que
+//: cualquier tecla cambia algo. Una plantilla nueva empieza en edición, que es lo único que se
+//: puede hacer con ella.
+let _dcBuildEditing = false;
+//: El buscador de modelos del catálogo, mientras está abierto: `{target, tree, q, rows}`.
+//: `target` es `base` (el chasis de la plantilla) o `part` (el modelo de una pieza).
+let _dcBuildPick = null;
+
+async function _dcBuildsOpen() {
+    const d = await apiGet('/api/v1/dcim/builds') || {};
+    _dcBuilds = {rows: d.builds || [], roles: d.roles || [], kinds: d.part_kinds || [],
+                 faces: d.faces || []};
+    _dcBuild = null;
+    _dcBuildPick = null;
+    // Las plataformas, si nadie las ha pedido todavía: la columna las nombra por su `uid`, y sin
+    // la lista salía en blanco. En blanco al entrar y con nombre después de haber abierto una
+    // ficha —que sí las pedía—, o sea el mismo dato contestando dos cosas según por dónde se
+    // hubiera pasado. Y una casilla vacía no dice «no lo sé»: dice que no tiene.
+    if (_dcPlats === null) _dcPlatsLoad();
+    renderDcim();
+}
+
+function _dcBuildsClose() {
+    _dcimGo('inventory');
+}
+
+async function _dcBuildOpen(uid) {
+    const d = await apiGet(`/api/v1/dcim/builds/${encodeURIComponent(uid)}`);
+    if (!d || d.error) return showToast((d || {}).error || t('dcim_not_found'), 'warning');
+    // Campo a campo, y por eso hay que acordarse: lo que la ruta sirva y no se copie aquí no
+    // da ningún error — da un hueco. `lifecycle` es la lista de las seis fechas del chasis, y
+    // sin ella la ficha no enseñaba ninguna.
+    // Los conectores: esta pantalla se abre sin pasar por el catálogo, y un vocabulario que
+    // solo llega por un camino es una casilla que sugiere o no según por dónde se haya entrado.
+    _dcConnsTake(d);
+    _dcBuild = {build: d.build || {}, base: (d.build || {}).base || null,
+                parts: d.parts || [], items: d.items || 0, summary: d.summary || null,
+                lifecycle: d.lifecycle || [], part_kinds: d.part_kinds || [],
+                // Lo que se pregunta de cualquier chasis —ventilación, peso—, dicho por el
+                // documento de perfiles. Sin esto la ficha enseñaba una ventilación que no
+                // había forma de corregir: el dato es suyo desde que se copia.
+                fields: d.fields || [], power_types: d.power_types || [],
+                files: d.files || 0,
+                mode: 'edit'};
+    _dcBuildPick = null;
+    _dcCompDraft = null;
+    // Abrir una ficha es abrirla para LEERLA, y guardar vuelve por aquí: sin esto, después de
+    // guardar seguía en el formulario con el aviso de guardado encima, que es la pantalla que
+    // no dice si lo que se ve es lo guardado o lo que se estaba escribiendo.
+    _dcBuildTab = 'data';
+    _dcBuildEditing = false;
+    _dcFiles = null;
+    _dcBuildPorts = null;
+    _dcBaySeeded = {};
+    _dcBayTouched = {};
+    _dcBuildHist = null;
+    // Las plataformas, si nadie las ha pedido todavía. En modo lectura no hay desplegable que
+    // las pida, así que «Plataforma» salía en blanco en una plantilla que sí tiene una — que es
+    // peor que no enseñar la fila: dice que no tiene.
+    if (_dcPlats === null) _dcPlatsLoad();
+    renderDcim();
+}
+
+/** Una nueva: la misma ficha con la fila vacía. Sus componentes se ponen DESPUÉS de guardarla —
+ *  una pieza pertenece a una plantilla, y en una que todavía no existe no hay a qué pertenecer.
+ *  La ficha lo dice en vez de aceptarlas y guardarlas en algún sitio provisional. */
+function _dcBuildNew() {
+    // `extra` desde el principio: los campos del documento escriben dentro, y el que
+    // escribiera en un `undefined` se perdería sin decirlo.
+    _dcBuild = {build: {face: 'full', u_tenths: 0, depth_mm: 0, extra: {}}, base: null,
+                parts: [], items: 0, fields: [], power_types: [], mode: 'new'};
+    _dcBuildPick = null;
+    _dcCompDraft = null;
+    _dcBuildTab = 'data';
+    _dcBuildEditing = false;
+    _dcFiles = null;
+    // Los renglones de puertos también: son los de la plantilla que estuviera abierta, y una
+    // nueva heredándolos empieza con las bocas de otra sin que nada lo diga.
+    _dcBuildPorts = null;
+    renderDcim();
+}
+
+function _dcBuildBack() {
+    _dcBuild = null;
+    _dcBuildPick = null;
+    _dcBuildsOpen();
+}
+
+// ── La lista ────────────────────────────────────────────────────────────────────────────
+
+function _dcBuildsHtml() {
+    if (_dcBuild) return _dcBuildHtml();
+    const d = _dcBuilds || {};
+    const puede = _dcimMay('dcim_build_edit');
+    return `<div class="card ss-vfill">
+        <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-boxes"></i>
+            <span class="fw-semibold">${esc(t('dcim_builds'))}</span>
+            <span class="text-muted ss-fs-2">${esc(String((d.rows || []).length))}</span>
+            <div class="ms-auto d-flex gap-2">
+                ${(d.rows || []).length ? `<button class="btn btn-sm btn-secondary"
+                    onclick="_dcPortExport([], (_dcBuilds.rows || []).map(x => x.uid))"
+                    title="${escAttr(t('dcim_port_all'))}">
+                    <i class="bi bi-download"></i></button>` : ''}
+                ${puede ? `<button class="btn btn-sm btn-secondary"
+                    onclick="_dcPortImport(_dcBuildsOpen)" title="${escAttr(t('dcim_import'))}">
+                    <i class="bi bi-upload"></i></button>` : ''}
+                ${puede ? `<button class="btn btn-sm btn-primary" onclick="_dcBuildNew()">
+                    <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_build_new'))}</button>` : ''}
+                <button class="btn btn-sm btn-secondary" onclick="_dcBuildsClose()">
+                    <i class="bi bi-x-lg"></i></button>
+            </div>
+        </div>
+        <div class="card-body ss-vscroll">
+            <div class="text-muted ss-fs-2 mb-3">${esc(t('dcim_build_intro'))}</div>
+            ${(d.rows || []).length ? _dcBuildsTable(d.rows, puede)
+                : `<div class="text-muted ss-fs-2">${esc(t('dcim_build_none'))}</div>`}
+        </div>
+    </div>`;
+}
+
+function _dcBuildsTable(rows, puede) {
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr>
+            <th>${esc(t('dcim_build_name'))}</th>
+            <th>${esc(t('dcim_build_base'))}</th>
+            <th>${esc(t('dcim_role'))}</th>
+            <th>${esc(t('dcim_plat_name'))}</th>
+            <th class="text-end">U</th>
+            <th class="text-end">${esc(t('dcim_build_parts'))}</th>
+            <th class="text-end">${esc(t('dcim_build_items'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${rows.map(b => {
+            // Lo copiado vive en la fila desde que se estampa: `base` era leer en vivo la
+            // ficha del catálogo, y con el modelo retirado eso es un hueco.
+            const rol = String(b.role || '');
+            const decimas = Number(b.u_tenths || 0);
+            const sitio = _dcBuildSitio(decimas, b.u_slots, b.u_slot_span);
+            return `<tr class="ss-rowlink" onclick="_dcBuildOpen(${jsStr(b.uid)})">
+            <td class="fw-semibold">${esc(b.name || '')}
+                ${b.valid_to ? `<span class="badge bg-body-secondary text-body-secondary
+                    border fw-normal ms-1">${esc(t('dcim_build_retired'))}</span>` : ''}
+                ${b.description ? `<div class="text-muted ss-fs-1 fw-normal">${
+                    esc(b.description)}</div>` : ''}</td>
+            <td>${_dcBuildBaseCell(b)}</td>
+            <td class="ss-fs-2">${esc(rol ? t('dcim_role_' + rol) : '')}</td>
+            <td class="ss-fs-2">${esc(_dcPlatName(b.platform_uid))}</td>
+            <td class="text-end ss-tabular">${esc(decimas ? sitio
+                                                          : t('dcim_build_u_auto'))}</td>
+            <td class="text-end ss-tabular">${esc(String(b.parts || 0))}</td>
+            <td class="text-end ss-tabular">${esc(String(b.items || 0))}</td>
+            <td class="text-end">${puede ? `<div class="btn-group btn-group-sm"
+                onclick="event.stopPropagation()">
+                <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
+                    onclick="_dcBuildOpen(${jsStr(b.uid)})">
+                    <i class="bi bi-pencil"></i></button>
+                <button class="btn btn-secondary py-0 px-1"
+                    title="${escAttr(t('dcim_build_clone'))}"
+                    onclick="_dcBuildClone(${jsStr(b.uid)})">
+                    <i class="bi bi-files"></i></button>
+                <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+                    onclick="_dcBuildDrop(${jsStr(b.uid)},${jsStr(b.name || '')})">
+                    <i class="bi bi-trash"></i></button>
+            </div>` : ''}</td>
+        </tr>`;
+        }).join('')}</tbody>
+    </table></div>`;
+}
+
+/** El chasis de una fila: su foto y su nombre. Sin la foto no se distingue una plantilla de
+ *  otra en una lista, que es justo donde hay que elegir — y el alzado la tiene desde el primer
+ *  día, así que ya está guardada. */
+function _dcBuildBaseCell(b) {
+    const nombre = [(b || {}).manufacturer, (b || {}).model].filter(Boolean).join(' ');
+    if (!nombre)
+        return `<span class="text-muted ss-fs-2">${esc(t('dcim_build_u_auto'))}</span>`;
+    return `<div class="d-flex align-items-center gap-2">
+        ${b.front_image ? `<img src="${_dcimMediaUrl(b.front_image)}" alt=""
+            class="border rounded" style="height:1.6rem;max-width:5rem;object-fit:contain">` : ''}
+        <span class="ss-fs-2">${esc(nombre)}</span>
+    </div>`;
+}
+
+/** Lo que **ocupa** en el armario, que no es lo mismo que lo que mide.
+ *
+ *  La tarjeta decía «1 U» con la plantilla puesta a compartirlo entre dos. No era falso —el
+ *  chasis mide 1 U— pero contestaba a otra pregunta: lo que se mira ahí es cuánto sitio gasta
+ *  esto, y desde que un U se parte son dos cosas. */
+function _dcBuildFootprint(eff) {
+    return _dcBuildSitio(eff.tenths, eff.slots, eff.span);
+}
+
+/** Lo mismo a partir de los números sueltos, que es lo que hay en una fila de la lista: ahí no
+ *  existe `eff` —se calcula sobre la plantilla ABIERTA— y llamar a `_dcBuildU` a secas era
+ *  decir «1 U» de algo que ocupa la mitad. Una función y no dos, o la lista y la ficha acaban
+ *  contestando distinto a la misma pregunta. */
+function _dcBuildSitio(decimas, partes, toma) {
+    const alto = _dcBuildU(decimas);
+    const n = Math.max(1, Number(partes || 1));
+    if (n <= 1) return alto;
+    return `${alto} · ${Math.max(1, Math.min(n, Number(toma || 1)))}/${n}`;
+}
+
+/** Una altura en décimas, como se dice: `10` es «1 U» y `5` es «0,5 U». Con coma, que es como
+ *  se escribe aquí — y no `0.5`, que es como lo escribe una máquina. */
+function _dcBuildU(decimas) {
+    const u = Number(decimas || 0) / 10;
+    return (Number.isInteger(u) ? String(u) : u.toFixed(1).replace('.', ',')) + ' U';
+}
+
+// ── La ficha ────────────────────────────────────────────────────────────────────────────
+
+//: Las pestañas fijas de una plantilla, en el orden en que se preguntan: qué es, qué lleva,
+//: sus papeles y qué le ha pasado. Entre las dos primeras y las dos últimas van las familias de
+//: puerto, una cada una — eso lo arma `_dcBuildTabs`, que depende de lo que la plantilla tenga.
+const _DCBUILD_HEAD = [
+    {id: 'data',  label: 'dcim_build_tab_data',  icon: 'bi-card-list'},
+    {id: 'parts', label: 'dcim_build_parts',     icon: 'bi-cpu'},
+    // Lo que cuelga del equipo y no va dentro: el adaptador USB-C a red, el alimentador. Aparte
+    // porque «cinco componentes» no dice cuántos hay que desmontar para llevarse la caja, y esa
+    // es la pregunta del día de la mudanza.
+    {id: 'items', label: 'dcim_build_outer',     icon: 'bi-usb-plug'},
+];
+const _DCBUILD_TAIL = [
+    {id: 'files', label: 'dcim_cat_tab_files',   icon: 'bi-paperclip'},
+    {id: 'hist',  label: 'dcim_cat_tab_history', icon: 'bi-clock-history'},
+];
+
+//: Con qué se dibuja cada familia. Un icono por familia y no uno para todas: la tira tiene once
+//: pestañas y once iconos iguales son once adornos que no ayudan a encontrar ninguna.
+const _DC_PORT_ICON = {
+    'interfaces': 'bi-ethernet',
+    'power-ports': 'bi-plug',
+    'power-outlets': 'bi-outlet',
+    'console-ports': 'bi-terminal',
+    'console-server-ports': 'bi-hdd-network',
+    'front-ports': 'bi-box-arrow-in-right',
+    'rear-ports': 'bi-box-arrow-right',
+    'module-bays': 'bi-grid-3x2',
+    'device-bays': 'bi-boxes',
+};
+
+/** Las pestañas que toca enseñar.
+ *
+ *  Una por familia **que tenga algo**: una pestaña vacía es un sitio al que se entra para nada, y
+ *  ocho vacías esconden la que sí tiene. Y **todas mientras se escribe**, porque si no no hay
+ *  dónde añadir la primera boca de una familia que todavía no tiene ninguna.
+ *
+ *  La que está abierta se queda aunque se vacíe: quitar la última toma de una familia y que la
+ *  pestaña desaparezca bajo los pies deja a quien la quitó mirando otra pantalla sin haber
+ *  navegado. */
+//: El grupo que se traga las familias de puertos. **No es una pestaña**: es el sitio donde
+//: viven seis, y por eso al pulsarlo se abre una de ellas y no una pantalla suya.
+const _DCBUILD_LINKS = 'links';
+
+/** Las familias que toca enseñar: las que tienen algo, todas mientras se escribe, y la abierta
+ *  aunque se haya quedado vacía bajo los pies. */
+function _dcBuildFams(d, edita) {
+    const cuenta = _dcBuildTabCounts(d);
+    return _DCCAT_PORTS.filter(f => edita || cuenta[f] || _dcBuildTab === f);
+}
+
+function _dcBuildTabs(d, edita) {
+    const fams = _dcBuildFams(d, edita);
+    const grupo = fams.length
+        ? [{id: _DCBUILD_LINKS, label: 'dcim_build_tab_links', icon: 'bi-diagram-3'}] : [];
+    return _DCBUILD_HEAD.concat(grupo).concat(_DCBUILD_TAIL);
+}
+
+/** Cuánto hay detrás de cada pestaña. Un número al lado dice si merece la pena entrar, que es lo
+ *  que una pestaña vacía no puede decir sin abrirla. */
+function _dcBuildTabCounts(d) {
+    const cuenta = {parts: _dcPartsIn(d.parts).length,
+                    items: _dcPartsOut(d.parts).length,
+                    // Los papeles los cuenta el servidor al abrir la ficha: pedirlos aquí sería
+                    // pedirlos para contarlos, y un número que solo aparece después de entrar no
+                    // contesta la pregunta que hace un número en una pestaña.
+                    files: Number(d.files || 0)};
+    _DCCAT_PORTS.forEach(f => { cuenta[f] = _dcBuildPortCount(d, [f]); });
+    return cuenta;
+}
+
+function _dcBuildTabsHtml(d, edita) {
+    const cuenta = _dcBuildTabCounts(d);
+    const fams = _dcBuildFams(d, edita);
+    // Dentro del grupo: la de arriba se marca igual, porque estar en «Puertos traseros» es estar
+    // en Conexiones — una tira que se apaga entera al bajar un nivel deja sin saber dónde estás.
+    const dentro = fams.indexOf(_dcBuildTab) >= 0;
+    cuenta[_DCBUILD_LINKS] = fams.reduce((n, f) => n + (cuenta[f] || 0), 0);
+    const arriba = `<ul class="nav nav-tabs">${_dcBuildTabs(d, edita).map(p => {
+        const grupo = p.id === _DCBUILD_LINKS;
+        const activa = _dcBuildTab === p.id || (grupo && dentro);
+        // Pulsar el grupo abre una familia y no una pantalla propia: la que ya estuviera abierta
+        // si se vuelve a él, y la primera si se entra de nuevo.
+        const va = grupo ? (dentro ? _dcBuildTab : (fams[0] || '')) : p.id;
+        return `<li class="nav-item"><button class="nav-link${activa ? ' active' : ''}"
+            onclick="_dcBuildTab=${jsStr(va)};renderDcim()">
+            <i class="bi ${p.icon} me-1"></i>${esc(p.name || t(p.label))}${
+            // En una chapa y no en gris pequeño: el número está para decidir si merece la pena
+            // entrar, y del color del texto apagado se lee como parte del rótulo. La misma que
+            // en el catálogo, que son dos tiras de lo mismo.
+            _dcTabN(cuenta[p.id])}</button></li>`;
+    }).join('')}</ul>`;
+    const sub = dentro ? `<div class="d-flex gap-1 flex-wrap mt-2">${fams.map(f =>
+        `<button class="btn btn-sm btn-secondary${_dcBuildTab === f ? ' active' : ''}"
+                onclick="_dcBuildTab=${jsStr(f)};renderDcim()">
+            <i class="bi ${_DC_PORT_ICON[f] || 'bi-ethernet'} me-1"></i>${
+            esc(_dcPortName(f))}${_dcTabN(cuenta[f])}</button>`).join('')}</div>` : '';
+    return arriba + sub + '<div class="mb-3"></div>';
+}
+
+/** Cuántas bocas de estas familias trae el chasis, para el número de la pestaña. */
+function _dcBuildPortCount(d, fams) {
+    const b = d.build || {};
+    const p = _dcimPorts(b);
+    const familias = (fams && fams.length) ? fams : Object.keys(p);
+    let n = 0;
+    familias.forEach(fam => {
+        let cuenta = 0;
+        Object.values(p[fam] || {}).forEach(c => { cuenta += Number(c) || 0; });
+        // **Nunca menos de las que tienen nombre.** El recuento se deriva de la lista al guardar,
+        // así que normalmente coinciden; pero una fila tocada a mano o traída de antes puede
+        // llevar la lista sin el recuento, y entonces la pestaña decía cero al lado de cuatro
+        // bahías escritas. De dos cifras que se contradicen, la que se puede enseñar es la que
+        // tiene los nombres detrás.
+        if (_DC_PLACE_FAMS.indexOf(fam) >= 0)
+            cuenta = Math.max(cuenta, _dcBuildBays(b, fam).length);
+        n += cuenta;
+    });
+    return n;
+}
+
+/** Los puertos de una fila del catálogo, siempre como objeto. La columna guarda texto, y quien
+ *  la lea de la base de datos recibe una cadena — leerla como objeto da cero puertos sin decir
+ *  que no ha entendido nada. */
+function _dcimPorts(fila) {
+    let p = (fila || {}).ports;
+    if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { p = {}; } }
+    return p && typeof p === 'object' ? p : {};
+}
+
+/** Por dónde se enchufa: lo que trae el chasis de serie y lo que añade lo que se le pone.
+ *
+ *  Las dos cosas juntas porque la pregunta es una: cuántas bocas de red va a tener esta máquina
+ *  cuando llegue. Separadas obligan a sumarlas de cabeza, que es justo lo que esta pantalla
+ *  existe para no hacer. */
+//: Dónde va lo que vive DENTRO. De una bahía se pregunta **cuál** —el DIMM va en SODIMM-1 o en
+//: SODIMM-2— y un recuento no contesta eso.
+const _DC_BAY_FAMS = ['module-bays', 'device-bays'];
+
+//: Y por dónde se engancha lo que cuelga FUERA: el adaptador de red va en el USB de detrás, no
+//: en «uno de los cuatro USB». Definida en `_parts.html`, que es donde se usa para ofrecerlos.
+
+//: Las familias que se editan **con nombre**: las dos anteriores juntas. Las demás se cuentan —
+//: nadie cuelga nada de la boca 37 de un switch desde la plantilla, eso es de la máquina que
+//: salga de ella.
+//:
+//: Tres listas y no una porque son tres preguntas, y con una sola a un DIMM se le ofrecería el
+//: puerto frontal.
+const _DC_PLACE_FAMS = _DC_BAY_FAMS.concat(['front-ports', 'rear-ports', 'power-ports',
+                                            'console-ports']);
+
+/** Y cómo se llama cada una: **bahía** lo de dentro, **puerto** lo de fuera.
+ *
+ *  La lista con nombre es la misma para las dos, pero el rótulo no puede serlo: llamarle bahía
+ *  al USB trasero obliga a traducir cada frase mientras se lee. Un juego de textos por cada
+ *  cosa, con el mismo nombre de clave y el sufijo puesto aquí. */
+function _dcBayK(fam, k) { return _DC_BAY_FAMS.indexOf(fam) >= 0 ? k : k + '_port'; }
+
+//: La palabra corta de cada cara, para lo que se siembra del recuento.
+const _DC_PLACE_PRE = {'front-ports': 'dcim_bay_pre_front',
+                       'rear-ports': 'dcim_bay_pre_rear',
+                       'power-ports': 'dcim_bay_pre_power',
+                       'console-ports': 'dcim_bay_pre_console'};
+
+function _dcBayT(fam, k) { return t(_dcBayK(fam, k)); }
+
+function _dcBayTf(fam, k, ...args) { return tf(_dcBayK(fam, k), ...args); }
+
+//: Las familias que ya se sembraron en esta ficha. Sembrar es cosa de una vez: repetirlo a cada
+//: redibujado dejaría sin poder borrar un renglón —volvería solo— y la lista sería inamovible
+//: sin decir por qué.
+let _dcBaySeeded = {};
+
+//: Y cuáles se han **tocado** —sembrado, añadido, borrado, renombrado— en esta ficha. Es lo que
+//: separa «vacía porque nadie la escribió» de «vacía porque la he vaciado», que se calculan igual
+//: y no significan lo mismo: la primera conserva lo que dijo el modelo y la segunda es un cero
+//: que alguien ha querido.
+let _dcBayTouched = {};
+
+/** Los renglones que salen del RECUENTO, para ponerles nombre.
+ *
+ *  «Dos USB-A y un USB-C» ya dice cuántos hay y de qué son. Abrir el editor vacío obligaba a
+ *  teclear tres veces lo que ya estaba escrito y a acertar el tipo de cada uno; peor, quien
+ *  guardara sin teclear nada se quedaba igual que estaba, con un formulario que parecía lleno y
+ *  guardaba cero.
+ *
+ *  El número que se les pone es un orden, no un nombre: el del equipo se lo sabe quien lo tiene
+ *  delante, y por eso lo primero que se ve es el aviso de corregirlos. */
+function _dcBaySeed(b, fam) {
+    const tipos = (_dcimPorts(b) || {})[fam] || {};
+    // De qué cara es, dentro del nombre: los tipos se repiten entre las dos —dos USB-A delante y
+    // cuatro detrás— y numerarlos por familia da cuatro «USB-A 1» que nadie puede distinguir en
+    // la lista donde se elige. Las bahías no lo llevan: sus tipos ya son distintos y el nombre
+    // que acaba puesto es el de la placa.
+    const pre = _DC_PLACE_PRE[fam] ? t(_DC_PLACE_PRE[fam]) + ' ' : '';
+    const fuera = [];
+    Object.entries(tipos).forEach(([tipo, n]) => {
+        // Con tope: un documento raro que diga cuatro mil no llena la pantalla de renglones.
+        const cuantos = Math.min(Number(n) || 0, 64);
+        const como = tipo ? _dcSpeedName(tipo) : _dcBayT(fam, 'dcim_bay_name');
+        for (let i = 1; i <= cuantos; i++) fuera.push({name: pre + como + ' ' + i, type: tipo});
+    });
+    return fuera;
+}
+
+function _dcBuildPortsHtml(b, d, fams, edita) {
+    if (fams && fams.length === 1 && _DC_PLACE_FAMS.indexOf(fams[0]) >= 0)
+        return _dcBuildBaysHtml(b, d, fams[0], edita);
+    // Escribir es escribir la fila entera: el editor guarda las nueve familias juntas, y por eso
+    // enseña aquí solo las de esta pestaña pero al guardar no se lleva por delante las otras.
+    if (edita) return _dcPortsBox(_dcBuildPortRows(), '_dcBuildPort', fams);
+    const puertos = _dcimPorts(b);
+    const familias = Object.keys(puertos).filter(f => !fams || fams.indexOf(f) >= 0);
+    // El total con lo que se le pone es de las BOCAS DE RED: en la pestaña de las tomas de
+    // corriente o la de las bahías sería una tabla que habla de otra cosa.
+    const suma = (fams && fams.indexOf('interfaces') >= 0)
+        ? (((d.summary || {}).net) || []) : [];
+    if (!familias.length && !suma.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_build_ports_none'))}</div>`;
+    return `${familias.length ? `
+        <div class="fw-semibold ss-fs-2 mb-1">${esc(t('dcim_build_ports_base'))}</div>
+        <table class="table table-sm align-middle mb-3 ss-fs-3"><tbody>${
+            familias.map(fam => Object.entries(puertos[fam] || {}).map(([tipo, n]) => `
+                <tr><td class="text-muted" style="white-space:nowrap;width:1%">${
+                        esc(_dcPortName(fam))}</td>
+                    <td>${_dcPortType(tipo)}</td>
+                    <td class="text-end ss-tabular">${esc(String(n))}</td></tr>`).join('')
+            ).join('')}</tbody></table>` : ''}
+        ${_dcBuildPortListHtml(b, fams)}
+        ${suma.length ? `
+        <div class="fw-semibold ss-fs-2 mb-1">${esc(t('dcim_build_ports_all'))}</div>
+        <table class="table table-sm align-middle mb-0 ss-fs-3"><tbody>${
+            suma.map(n => `<tr>
+                <td class="text-muted" style="white-space:nowrap;width:1%">${
+                    esc(_dcPortName('interfaces'))}</td>
+                <td>${_dcPortType(n.speed)}</td>
+                <td class="text-end ss-tabular">${esc(String(n.ports))}</td></tr>`).join('')
+            }</tbody></table>` : ''}`;
+}
+
+//: Las pestañas cuyo contenido se guarda con la ficha, y por tanto llevan Editar y Guardar en
+//: la cabecera. Los componentes no están: cada uno se guarda solo en cuanto se acepta su
+//: formulario, y sus papeles tampoco — un fichero se sube y ya está subido.
+function _dcBuildWritable(tab) {
+    return tab === 'data' || _DCCAT_PORTS.indexOf(tab) >= 0;
+}
+
+/** Cómo se llama cada boca, en el orden que las tiene el equipo.
+ *
+ *  La otra tabla cuenta, y contar es lo que se mira para decidir si el switch sirve. Esta nombra,
+ *  que es lo que se mira con el latiguillo en la mano: `gi1` es lo que sale en la configuración
+ *  del equipo y lo que va escrito en la etiqueta. Las dos, porque son dos preguntas.
+ *
+ *  **En su orden y no ordenada**: `gi10` va después de `gi9` en el panel y antes en el
+ *  alfabeto, y una lista que no sale en el orden del frontal no sirve para encontrar la boca que
+ *  se está mirando.
+ *
+ *  Y solo mientras **cuadre con el recuento**: los nombres son los que trajo la biblioteca y el
+ *  recuento se puede corregir a mano. Enseñar veintiocho nombres al lado de un «32» corregido
+ *  sería enseñar una lista que ya no es de este equipo, y eso no da ningún error — se cree. */
+function _dcBuildPortListHtml(b, fams) {
+    let lista = (b || {}).port_list;
+    if (typeof lista === 'string') { try { lista = JSON.parse(lista); } catch (e) { lista = {}; } }
+    if (!lista || typeof lista !== 'object') return '';
+    const puertos = _dcimPorts(b);
+    const familias = Object.keys(lista).filter(f => (!fams || fams.indexOf(f) >= 0)
+        && (lista[f] || []).length === _dcPortSum(puertos[f]));
+    if (!familias.length) return '';
+    return `<div class="fw-semibold ss-fs-2 mb-1">${esc(t('dcim_build_ports_named'))}</div>
+        <table class="table table-sm table-striped align-middle mb-2 ss-fs-3">
+        <thead><tr><th>${esc(t('dcim_build_port_name'))}</th>
+            <th>${esc(t('dcim_cat_port_type'))}</th>
+            <th>${esc(t('dcim_cat_ports'))}</th></tr></thead>
+        <tbody>${familias.map(fam => (lista[fam] || []).map(p => `<tr>
+            <td class="fw-semibold" style="white-space:nowrap">${esc(p.name || '')}</td>
+            <td>${_dcPortType(p.type || '')}</td>
+            <td class="text-muted">${esc(_dcPortName(fam))}</td>
+        </tr>`).join('')).join('')}</tbody></table>`;
+}
+
+/** Cuántas bocas suma un `{tipo: n}`. */
+function _dcPortSum(tipos) {
+    let n = 0;
+    Object.values(tipos || {}).forEach(v => { n += Number(v) || 0; });
+    return n;
+}
+
+/** Un tipo de puerto: **cómo se lee y qué es**.
+ *
+ *  Solo la velocidad no basta: `1000base-t` y `1000base-x-sfp` se leen los dos «1 Gbps», así que
+ *  un switch con veintiocho de cobre y dos de fibra enseñaba dos renglones idénticos con números
+ *  distintos — que parece un fallo de la pantalla y es la verdad mal contada. Y el conector solo
+ *  tampoco: `2.5gbase-t` no se compara de un vistazo con «1 Gbps».
+ *
+ *  Al lado va el **nombre del catálogo** —`SFP`, `1000BASE-T`— y no el identificador, cuando el
+ *  catálogo lo reconoce: dicen lo mismo y uno se lee. */
+function _dcPortType(tipo) {
+    const t0 = String(tipo || '');
+    if (!t0) return `<span class="text-muted">${esc(t('dcim_cat_unset'))}</span>`;
+    const veloz = _dcSpeedName(t0);
+    const detalle = _dcConnName(t0) || t0;
+    const cara = _dcConnIcon(t0);
+    const texto = veloz !== detalle
+        ? `${esc(veloz)} <span class="text-muted ss-fs-1">${esc(detalle)}</span>`
+        : esc(veloz);
+    return cara ? `${cara} ${texto}` : texto;
+}
+
+/** Las bahías de una familia, **una a una y con nombre**, y qué lleva puesto cada una.
+ *
+ *  El nombre es el del equipo —`SODIMM-1`, `SocketCPU`, `M.2_1`— porque es el que está serigrafiado
+ *  en la placa y el que dice el manual. Sin él, «dos bahías de módulo» obliga a abrir la caja
+ *  para saber en cuál está el que hay puesto.
+ *
+ *  Y al lado, **qué componente va en cada una**: es lo que hace que la lista sirva de algo. Un
+ *  componente dice en qué hueco va (`slot`), y aquí se cruzan por el nombre — sin identificadores
+ *  de por medio, porque el nombre es lo que alguien lee en la placa y lo que ya escribía a mano
+ *  en esa casilla. */
+function _dcBuildBaysHtml(b, d, fam, edita) {
+    if (edita) return _dcBuildBaysEdit(b, fam);
+    const bahias = _dcBuildBays(b, fam);
+    if (!bahias.length) {
+        // Sin nombres pero con recuento no es «no hay ninguna»: es que el modelo dijo cuántas y
+        // no cómo se llaman. Decir lo primero contradice al número de la pestaña de al lado, y
+        // de dos cosas que se contradicen no se cree ninguna.
+        const n = _dcBuildPortCount({build: b}, [fam]);
+        const dice = n ? _dcBayTf(fam, 'dcim_bay_unnamed', n) : _dcBayT(fam, 'dcim_bay_none');
+        // Y con qué hacerlo, que decir lo que falta sin ofrecer el camino es un callejón: el
+        // botón de editar está arriba y en otra fila, y nada dice que sea ahí donde se nombran.
+        const boton = (n && _dcimMay('dcim_build_edit'))
+            ? `<button class="btn btn-sm btn-secondary" onclick="_dcBuildWrite()">
+                <i class="bi bi-input-cursor-text me-1"></i>${
+                esc(_dcBayT(fam, 'dcim_bay_name_them'))}</button>` : '';
+        return `<div class="d-flex flex-column gap-2 align-items-start">
+            <div class="text-muted ss-fs-2">${esc(dice)}</div>${boton}</div>`;
+    }
+    const dentro = _dcBuildBySlot(d.parts || []);
+    return `<div class="table-responsive"><table class="table table-sm table-striped
+        align-middle mb-0 ss-fs-3">
+        <thead><tr>
+            <th>${esc(_dcBayT(fam, 'dcim_bay_name'))}</th>
+            <th>${esc(t('dcim_cat_port_type'))}</th>
+            <th>${esc(_dcBayT(fam, 'dcim_bay_holds'))}</th>
+        </tr></thead>
+        <tbody>${bahias.map(x => {
+            const puestos = dentro[_dcBaySlug(x.name)] || [];
+            return `<tr>
+                <td class="fw-semibold" style="white-space:nowrap">${esc(x.name)}</td>
+                <td>${_dcPortCell(x)}</td>
+                <td class="ss-fs-2">${puestos.length
+                    ? puestos.map(p => `<span class="badge bg-body-secondary
+                        text-body-secondary border fw-normal me-1">${
+                        esc([p.brand, p.model].filter(Boolean).join(' ')
+                            || t('dcim_kind_' + p.kind) || p.kind)}${
+                        p.size ? ' · ' + esc(p.size) : ''}</span>`).join('')
+                    : `<span class="text-muted">${
+                        esc(_dcBayT(fam, 'dcim_bay_empty'))}</span>`}</td>
+            </tr>`;
+        }).join('')}</tbody></table></div>
+        <div class="text-muted ss-fs-1 mt-2">${
+            esc(_dcBayT(fam, 'dcim_bay_hint'))}</div>`;
+}
+
+/** Un puerto, leído: la forma, su generación y lo que lleva.
+ *
+ *  Los tres en la misma celda y no en tres columnas: son la misma respuesta a «qué es esta boca»,
+ *  y tres columnas dejarían dos vacías en las ocho familias que no tienen ni generaciones ni
+ *  señales. */
+function _dcPortCell(x) {
+    const base = x.type ? _dcPortType(x.type) : '';
+    const g = _dcGen(x.type, x.gen);
+    const dicho = g ? (g.speed ? (g.name + ' · ' + g.speed) : String(g.name || ''))
+                    : String(x.gen || '');
+    const luz = _dcPortPower(x);
+    const pie = [dicho, luz].filter(Boolean).join(' · ');
+    const gen = pie ? `<div class="ss-fs-1 text-muted">${esc(pie)}</div>` : '';
+    const sig = (x.signals || []).map(s => `<span class="badge bg-body-secondary
+        text-body-secondary border fw-normal me-1 ss-fs-1">${
+        esc(_dcSignalName(s))}</span>`).join('');
+    return `${base}${gen}${sig ? `<div class="mt-1">${sig}</div>` : ''}`;
+}
+
+/** Las bahías de una familia, de la lista con nombre de la plantilla. */
+function _dcBuildBays(b, fam) {
+    let lista = (b || {}).port_list;
+    if (typeof lista === 'string') { try { lista = JSON.parse(lista); } catch (e) { lista = {}; } }
+    return ((lista || {})[fam] || []).filter(x => x && x.name);
+}
+
+/** Los componentes por hueco. Por **nombre normalizado**: quien escribió `sodimm 1` y quien
+ *  escribió `SODIMM-1` están hablando de la misma ranura, y una tabla que los separe deja la
+ *  bahía diciendo que está vacía con un DIMM dentro. */
+function _dcBuildBySlot(parts) {
+    const fuera = {};
+    (parts || []).forEach(p => {
+        // TODOS sus huecos, no el primero: un kit de dos módulos ocupa dos ranuras, y cruzar
+        // solo por el primero dejaría la segunda diciendo que está vacía con medio kit dentro.
+        _dcSlotsOf(p).forEach(nombre => {
+            const k = _dcBaySlug(nombre);
+            if (k) (fuera[k] = fuera[k] || []).push(p);
+        });
+    });
+    return fuera;
+}
+
+function _dcBaySlug(nombre) {
+    return String(nombre || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/** Y el editor: una fila por bahía, con su nombre y de qué es.
+ *
+ *  El recuento sale de aquí y no se teclea aparte: dos sitios donde decir cuántas hay son dos
+ *  que acaban discrepando, y el que gane depende de por dónde se guardó. */
+function _dcBuildBaysEdit(b, fam) {
+    // En CRUDO, sin filtrar las que no tienen nombre: una recién añadida no lo tiene todavía, y
+    // el filtro que sirve para leerlas la tiraba antes de que nadie pudiera teclearlo — se
+    // pulsaba «Añadir» y no pasaba nada, para siempre.
+    const bahias = _dcBayList(fam);
+    // Sembrado del recuento la primera vez que se entra: lo que dijo el modelo son estos
+    // renglones, no una pantalla en blanco. Solo si no hay ninguno —sembrar sobre lo escrito
+    // sería duplicarlo— y solo una vez, que si no no habría forma de borrar ninguno.
+    if (!bahias.length && !_dcBaySeeded[fam]) {
+        _dcBaySeeded[fam] = true;
+        _dcBayTouched[fam] = true;
+        _dcBaySeed(b, fam).forEach(x => bahias.push(x));
+    }
+    const sembrado = !!_dcBaySeeded[fam] && bahias.length > 0;
+    const tipos = _dcConnsOf(fam);
+    // Lo que decía el modelo, contra lo que se lleva nombrado. En cuanto hay un nombre la lista
+    // manda, y eso sin avisar es una trampa: nombrar una de cuatro dejaría la plantilla diciendo
+    // que tiene una bahía, y nadie ha quitado tres ranuras de la placa. No hay número que
+    // inventar —el panel no sabe cómo se llaman las otras tres— pero sí se puede decir.
+    const conNombre = bahias.filter(x => x && String(x.name || '').trim()).length;
+    // Lo que decía el modelo deja de contar en cuanto se ha vaciado la lista a mano: seguir
+    // diciendo «el modelo dice que hay 1» justo después de borrar esa una es contradecir lo que
+    // se acaba de hacer, y hace dudar de si se ha hecho.
+    const decia = (_dcBayTouched[fam] && !bahias.length)
+        ? 0 : _dcBuildPortCount({build: b}, [fam]);
+    const falta = conNombre > 0 && decia > conNombre;
+    const aviso = falta
+        ? `<div class="alert alert-warning py-1 px-2 mb-0 ss-fs-2">${
+            esc(_dcBayTf(fam, 'dcim_bay_missing', decia, conNombre))}</div>`
+        : (sembrado ? `<div class="alert alert-info py-1 px-2 mb-0 ss-fs-2">${
+            esc(_dcBayT(fam, 'dcim_bay_seeded'))}</div>` : '');
+    const vacio = bahias.length ? '' : `<div class="text-muted ss-fs-2">${
+        esc(decia ? _dcBayTf(fam, 'dcim_bay_unnamed', decia)
+                  : _dcBayT(fam, 'dcim_bay_none'))}</div>`;
+    return `<div class="d-flex flex-column gap-2">
+        ${aviso}
+        ${vacio}
+        ${bahias.map((x, i) => _dcBayRowHtml(fam, x, i, tipos)).join('')}
+        <div><button class="btn btn-sm btn-secondary" onclick="_dcBayAdd(${jsStr(fam)})">
+            <i class="bi bi-plus-lg me-1"></i>${
+            esc(_dcBayT(fam, 'dcim_bay_add'))}</button></div>
+        <div class="text-muted ss-fs-1">${esc(_dcBayT(fam, 'dcim_bay_edit_hint'))}</div>
+    </div>`;
+}
+
+/** Un renglón del editor: nombre, forma, **generación** y **qué lleva**.
+ *
+ *  Las dos últimas son del puerto y no del catálogo, y esa es toda la idea: `usb-c` es la forma
+ *  —lo que dice el modelo— y «3.2 Gen 2 con DisplayPort» es lo que tiene ESTA boca de ESTA
+ *  máquina. Ponerlas en el catálogo obligaría a un conector por combinación, que son cientos.
+ *
+ *  Solo salen donde el conector dice que caben: un C14 no tiene generaciones ni lleva vídeo, y
+ *  ofrecer las casillas vacías en las nueve familias sería no haber ordenado nada. */
+function _dcBayRowHtml(fam, x, i, tipos) {
+    const gens = (_dcConn(x.type) || {}).gens || [];
+    const otra = x.gen && !gens.some(g => String(g.id) === String(x.gen));
+    const genOpts = gens.map(g => {
+        const puesta = String(g.id) === String(x.gen || '');
+        // Concatenado y no interpolado: un nombre interpolado dentro de un literal es lo que
+        // el guarda de escapado persigue, y tiene razón aunque aquí el resultado sí pase
+        // por `esc()` — un guarda que hay que ir comprobando a mano no sirve de nada.
+        const rotulo = g.speed ? (g.name + ' — ' + g.speed) : String(g.name || g.id);
+        return `<option value="${escAttr(g.id)}"${puesta ? ' selected' : ''}>${
+            esc(rotulo)}</option>`;
+    }).join('');
+    const genBox = gens.length ? `<select class="form-select form-select-sm"
+                style="flex:1 1 10rem;min-width:0;max-width:17rem"
+                onchange="_dcBaySet(${jsStr(fam)},${i},'gen',this.value)">
+            <option value=""${x.gen ? '' : ' selected'}>${esc(t('dcim_gen_unset'))}</option>
+            ${genOpts}
+            ${otra ? `<option value="${escAttr(x.gen)}" selected>${esc(x.gen)}</option>` : ''}
+        </select>` : '';
+    const puestas = (x.signals || []).map(String);
+    const sig = _dcSignalsFor(x.type, puestas);
+    const sigBox = sig.length ? `<div class="d-flex gap-1 flex-wrap">${sig.map(s => {
+        const on = puestas.indexOf(s) >= 0;
+        return `<label class="ss-pick${on ? ' ss-on' : ''}">
+            <input type="checkbox" class="d-none"${on ? ' checked' : ''}
+                onchange="_dcBaySig(${jsStr(fam)},${i},${jsStr(s)},this.checked)">${
+            esc(_dcSignalName(s))}</label>`;
+    }).join('')}</div>` : '';
+    // El voltaje y los vatios, donde por el puerto pase corriente. Detrás de las señales
+    // porque marcarlas es lo que hace aparecer las casillas en un USB.
+    const luz = _dcPortPowers(x) ? `<input class="form-control form-control-sm"
+                style="max-width:8rem" placeholder="${escAttr(t('dcim_port_volts'))}"
+                value="${escAttr(String(x.volts || ''))}"
+                oninput="_dcBaySet(${jsStr(fam)},${i},'volts',this.value)">
+            <input type="number" min="0" class="form-control form-control-sm"
+                style="max-width:7rem" placeholder="${escAttr(t('dcim_port_watts'))}"
+                value="${escAttr(String(x.watts || ''))}"
+                oninput="_dcBaySet(${jsStr(fam)},${i},'watts',this.value)">` : '';
+    const suelto = x.type && !tipos.some(c => String(c.id) === String(x.type))
+        ? `<option value="${escAttr(x.type)}" selected>${esc(x.type)}</option>` : '';
+    return `<div class="d-flex gap-2 align-items-center flex-wrap">
+        <input class="form-control form-control-sm"
+               style="flex:1 1 8rem;min-width:0;max-width:14rem"
+               placeholder="${escAttr(_dcBayT(fam, 'dcim_bay_name_hint'))}"
+               value="${escAttr(x.name || '')}"
+               oninput="_dcBaySet(${jsStr(fam)},${i},'name',this.value)">
+        <select class="form-select form-select-sm"
+                style="flex:1 1 10rem;min-width:0;max-width:18rem"
+                onchange="_dcBaySet(${jsStr(fam)},${i},'type',this.value)">
+            <option value=""${x.type ? '' : ' selected'}>${esc(t('dcim_cat_unset'))}</option>
+            ${tipos.map(c => `<option value="${escAttr(c.id)}"${
+                String(c.id) === String(x.type || '') ? ' selected' : ''}>${
+                esc(_dcConnLabel(c))}</option>`).join('')}
+            ${suelto}
+        </select>
+        ${genBox}
+        ${sigBox}
+        ${luz}
+        <button class="btn btn-sm btn-danger" style="flex:0 0 auto"
+                onclick="_dcBayDrop(${jsStr(fam)},${i})"
+                title="${escAttr(t('delete'))}"><i class="bi bi-trash"></i></button>
+    </div>`;
+}
+
+/** Marcar o desmarcar una señal de un puerto. */
+function _dcBaySig(fam, i, sig, on) {
+    const x = _dcBayList(fam)[i];
+    if (!x) return;
+    _dcBayTouched[fam] = true;
+    const puestas = (x.signals || []).map(String).filter(s => s !== String(sig));
+    if (on) puestas.push(String(sig));
+    // En el orden del CATÁLOGO y no en el de los clics: dos puertos iguales tienen que decirlo
+    // igual, o la ficha cambia sin que cambie nada.
+    const orden = _dcSignalsFor(x.type, puestas);
+    puestas.sort((a, b) => orden.indexOf(a) - orden.indexOf(b));
+    x.signals = puestas;
+    // Repintar: marcar «alimenta» es lo que hace aparecer el voltaje y los vatios, y sin esto
+    // aparecerían la próxima vez que algo redibujara — que es como no aparecer.
+    renderDcim();
+}
+
+/** La lista de esta familia, creada al vuelo si no la había: asignar dentro de un `undefined`
+ *  deja el formulario a medias sin decir nada. */
+function _dcBayList(fam) {
+    const b = ((_dcBuild || {}).build) || {};
+    if (typeof b.port_list === 'string') {
+        try { b.port_list = JSON.parse(b.port_list); } catch (e) { b.port_list = {}; }
+    }
+    if (!b.port_list || typeof b.port_list !== 'object') b.port_list = {};
+    if (!Array.isArray(b.port_list[fam])) b.port_list[fam] = [];
+    return b.port_list[fam];
+}
+
+function _dcBaySet(fam, i, campo, valor) {
+    const x = _dcBayList(fam)[i];
+    if (!x) return;
+    _dcBayTouched[fam] = true;
+    x[campo] = String(valor);
+    // Cambiar la forma se lleva lo que era de la forma vieja: un `tb4` en un USB-A no significa
+    // nada, y dejarlo puesto es guardar una generación que ese conector no tiene. Las señales se
+    // quedan solo si la forma nueva también las lleva.
+    if (campo === 'type') {
+        delete x.gen;
+        const caben = ((_dcConn(x.type) || {}).signals || []).map(String);
+        x.signals = (x.signals || []).map(String).filter(s => caben.indexOf(s) >= 0);
+        if (!x.signals.length) delete x.signals;
+        // Y los vatios de una boca que ya no lleva corriente: guardar «90 W» en un puerto de
+        // consola es guardar una cifra que alguien sumará.
+        if (!_dcPortPowers(x)) { delete x.volts; delete x.watts; }
+    }
+    // Solo al cambiar el tipo: al teclear el nombre se perdería el cursor a cada letra.
+    if (campo === 'type') renderDcim();
+}
+
+function _dcBayAdd(fam) {
+    _dcBayTouched[fam] = true;
+    _dcBayList(fam).push({name: '', type: ''});
+    renderDcim();
+}
+
+function _dcBayDrop(fam, i) {
+    _dcBayTouched[fam] = true;
+    _dcBayList(fam).splice(i, 1);
+    renderDcim();
+}
+
+function _dcBuildHtml() {
+    const d = _dcBuild || {};
+    const b = d.build || {};
+    const puede = _dcimMay('dcim_build_edit');
+    const nueva = d.mode === 'new';
+    // Una recién creada no tiene nada que leer: lo único que se puede hacer con ella es
+    // escribirla, así que entra directamente en edición.
+    const edita = nueva || (puede && _dcBuildEditing);
+    return `<div class="card ss-vfill">
+        <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+            <button class="btn btn-sm btn-secondary" onclick="_dcBuildBack()">
+                <i class="bi bi-arrow-left"></i></button>
+            <i class="bi bi-boxes"></i>
+            <span class="fw-semibold">${esc(nueva ? t('dcim_build_new') : (b.name || ''))}</span>
+            ${d.items ? `<span class="badge bg-body-secondary text-body-secondary border
+                fw-normal">${esc(tf('dcim_build_items_of', d.items))}</span>` : ''}
+            ${(puede && _dcBuildWritable(_dcBuildTab))
+                ? `<div class="ms-auto d-flex gap-2">${
+                edita ? `${_dcBuildTab === 'data' ? `<button class="btn btn-sm btn-secondary"
+                            onclick="_dcBuildPickOpen('base','device-types')">
+                            <i class="bi bi-download me-1"></i>${
+                            esc(t('dcim_build_base_load'))}</button>` : ''}
+                        <button class="btn btn-sm btn-primary" onclick="_dcBuildSave()">
+                            <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+                        ${nueva ? '' : `<button class="btn btn-sm btn-secondary"
+                            onclick="_dcBuildRead()">
+                            <i class="bi bi-x-lg me-1"></i>${esc(t('cancel'))}</button>`}`
+                      : `<button class="btn btn-sm btn-secondary" onclick="_dcBuildWrite()">
+                        <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>`}
+            </div>` : ''}
+        </div>
+        <div class="card-body ss-vscroll">
+            ${nueva ? '' : _dcBuildTabsHtml(d, edita)}
+            ${nueva ? _dcBuildFormHtml(b, puede)
+              : _dcBuildTab === 'files' ? _dcFilesHtml('build', b.uid, puede)
+              // Un componente se guarda solo, con su propia llamada: pedir «editar» antes de
+              // poder añadir uno era esconder el botón detrás de un modo que no hace falta.
+              : _dcBuildTab === 'parts' ? _dcBuildPartsHtml(_dcPartsIn(d.parts), puede, '')
+              : _dcBuildTab === 'items'
+                ? _dcBuildPartsHtml(_dcPartsOut(d.parts), puede, 'external')
+              : _dcBuildTab === 'hist' ? _dcBuildHistHtml(b)
+              : _DCCAT_PORTS.indexOf(_dcBuildTab) >= 0
+                ? _dcBuildPortsHtml(b, d, [_dcBuildTab], edita)
+              : `${_dcBuildSummaryHtml(d.summary)}
+                 ${edita ? _dcBuildFormHtml(b, puede) : _dcBuildReadHtml(b, d)}`}
+        </div>
+    </div>`;
+}
+
+//: Los puertos que se están escribiendo, renglón a renglón. Se arman al abrir el formulario y
+//: se vuelcan al guardar: el estado vive en un sitio, no en el DOM, porque esta pantalla se
+//: redibuja entera a cada tecla y lo que solo esté en una casilla se va con el redibujado.
+let _dcBuildPorts = null;
+
+function _dcBuildPortRows() {
+    if (_dcBuildPorts === null)
+        _dcBuildPorts = _dcCatPortRowsOf(((_dcBuild || {}).build) || {});
+    return _dcBuildPorts;
+}
+
+function _dcBuildPortAdd(fam) {
+    _dcBuildPortRows().push({fam: fam || 'interfaces', tipo: '', n: 1});
+    renderDcim();
+}
+
+function _dcBuildPortDrop(i) {
+    _dcBuildPortRows().splice(i, 1);
+    renderDcim();
+}
+
+/** Elegir un conector de la lista. Redibuja: elegir «otro» cambia la fila de desplegable a
+ *  casilla de texto, y sin redibujar el cambio no se vería. */
+function _dcBuildPortPick(i, valor) {
+    const p = _dcBuildPortRows()[i];
+    if (!p) return;
+    // «Otro» no es un valor: es la petición de escribir uno. Se guarda vacío y se marca la fila
+    // como libre, que es lo que la deja en modo texto aunque lo tecleado luego sí exista en el
+    // catálogo — quien pidió escribir a mano no quiere que se lo cierren a media palabra.
+    if (valor === _DC_PORT_OTHER) {
+        // Lo que ya había se queda si NO era del catálogo: elegir «otro» sobre algo escrito a
+        // mano es querer corregirlo, no volver a teclearlo entero. Sobre uno de la lista sí se
+        // borra, que ahí lo que se pide es otro distinto.
+        const lista = _dcConnsOf(p.fam);
+        if (lista.some(c => String(c.id) === String(p.tipo || ''))) p.tipo = '';
+        p.libre = true;
+    } else { p.tipo = String(valor); p.libre = false; }
+    renderDcim();
+}
+
+/** Volver de la casilla de texto a la lista, o al revés. */
+function _dcBuildPortFree(i, on) {
+    const p = _dcBuildPortRows()[i];
+    if (!p) return;
+    p.libre = !!on;
+    renderDcim();
+}
+
+function _dcBuildPortSet(i, campo, valor) {
+    const p = _dcBuildPortRows()[i];
+    if (!p) return;
+    p[campo] = campo === 'n' ? (Number(valor) || 0) : String(valor);
+    if (campo === 'fam') renderDcim();
+}
+
+/** Las seis fechas de la vida del equipo, **en la plantilla**: se copiaron del catálogo al
+ *  elegir el modelo y desde entonces son suyas, así que se corrigen donde se están mirando.
+ *
+ *  Escriben en `extra`, igual que en el catálogo, y la lista de campos sale del mismo documento
+ *  de perfiles — dos listas serían dos que se separan. */
+function _dcBuildLifeFields(b) {
+    const campos = ((_dcBuild || {}).lifecycle) || [];
+    if (!campos.length) return '';
+    // El mismo renderizador que el catálogo y que los campos de arriba: eran tres copias de
+    // «dibuja una casilla de este tipo», y la que no se tocara se quedaría sin el día que
+    // alguien añada un tipo al documento.
+    return `<div class="fw-semibold ss-fs-2 mt-1">${esc(t('dcim_build_life'))}</div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">${
+            _dcCatFieldRow(campos, _dcBuildWhere())}</div>`;
+}
+
+/** Entrar y salir del modo edición. Salir **relee**: lo que hay en pantalla se ha estado
+ *  tocando, y dejarlo ahí después de cancelar sería enseñar como guardado lo que se descartó. */
+function _dcBuildWrite() {
+    _dcBuildEditing = true;
+    renderDcim();
+}
+
+async function _dcBuildRead() {
+    _dcBuildEditing = false;
+    const donde = _dcBuildTab;
+    await _dcBuildOpen(((_dcBuild || {}).build || {}).uid || '');
+    if (donde !== _dcBuildTab) { _dcBuildTab = donde; renderDcim(); }
+}
+
+/** La ficha, para leerla. Lo que hay, sin cajas donde escribirlo.
+ *
+ *  Tres bloques y no uno, porque son tres preguntas que se confundían: **el chasis** (lo que dice
+ *  el catálogo), **el estándar** (lo nuestro: con qué sale, desde cuándo se pide así) y **el
+ *  ciclo de vida del dispositivo** (del catálogo otra vez, y lo que de verdad se buscaba cuando
+ *  se miraba «se compra desde»). */
+function _dcBuildReadHtml(b, d) {
+    const eff = _dcBuildEff(b);
+    // El nombre NO: está en la cabecera de la ficha y en la tarjeta del chasis, y repetirlo por
+    // tercera vez empuja hacia abajo lo que sí hay que leer.
+    return `${_dcBuildBaseHtml(b, false)}
+        ${_dcBuildInfoHtml(b, d, eff)}`;
+}
+
+/** El resumen, en bloques que **ocupan lo que dicen**.
+ *
+ *  Antes eran dos tablas al 100% de ancho para cuatro renglones de dos palabras, y una fila de
+ *  tarjetas grandes que repetían el nombre y el número que la tira de pestañas ya llevaba. La
+ *  pantalla bajaba y bajaba con la mitad derecha en blanco.
+ *
+ *  Ahora es una rejilla que reparte el ancho: cada bloque se pone al lado del anterior mientras
+ *  quepa. Y lo que dice cada uno es lo que **no** está arriba — cuántas bahías están ocupadas,
+ *  qué modelo hay en cada hueco, de qué son los puertos contados — con una flecha para entrar. */
+function _dcBuildInfoHtml(b, d, eff) {
+    const bloques = [];
+    const ficha = [
+        _dcInfoRow(t('dcim_cat_desc'), esc(b.description || '')),
+        eff.tenths ? _dcInfoRow(t('dcim_build_takes'), esc(_dcBuildTakes(eff))) : '',
+        _dcInfoRow(t('dcim_build_platform'), esc(_dcPlatName(b.platform_uid) || '')),
+        _dcInfoRow(t('dcim_role'), esc(eff.role ? t('dcim_role_' + eff.role) : '')),
+        (b.valid_from || b.valid_to)
+            ? _dcInfoRow(t('dcim_build_validity'),
+                         esc([b.valid_from || '…', b.valid_to || '…'].join(' → '))) : '',
+        _dcInfoRow(t('dcim_build_notes'), esc(b.notes || '')),
+    ].join('');
+    if (ficha) bloques.push(_dcInfoBlock(t('dcim_build_tab_data'), 'bi-card-list', '', 0, ficha));
+    bloques.push(_dcBuildLifeHtml(b, d.lifecycle || []));
+    // Las conexiones en UN bloque y no en seis tarjetas: es una pregunta con seis renglones.
+    const puertos = _DCCAT_PORTS.map(fam => {
+        const n = _dcBuildPortCount(d, [fam]);
+        if (!n) return '';
+        return _dcInfoRow(_dcPortName(fam),
+                          esc(String(n) + ' · ' + _dcBuildFamLine(b, d, fam)));
+    }).join('');
+    if (puertos)
+        bloques.push(_dcInfoBlock(t('dcim_build_tab_links'), 'bi-diagram-3',
+                                  _dcBuildFams(d, false)[0] || '',
+                                  _dcBuildPortCount(d, _DCCAT_PORTS), puertos));
+    const dentro = _dcPartsIn(d.parts || []);
+    const colgando = _dcPartsOut(d.parts || []);
+    if (dentro.length)
+        bloques.push(_dcInfoBlock(t('dcim_build_parts'), 'bi-cpu', 'parts', dentro.length,
+                                  _dcBuildPartRows(dentro)));
+    if (colgando.length)
+        bloques.push(_dcInfoBlock(t('dcim_build_outer'), 'bi-usb-plug', 'items', colgando.length,
+                                  _dcBuildPartRows(colgando)));
+    const puestos = bloques.filter(Boolean);
+    if (!puestos.length) return '';
+    return `<div class="ss-grid-info mb-3">${puestos.join('')}</div>`;
+}
+
+/** Un bloque: su título, cuántos hay y por dónde se entra. Sin flecha si no hay pestaña detrás
+ *  —la ficha del chasis es esta misma pantalla— que una flecha que no lleva a ningún sitio es
+ *  peor que ninguna. */
+function _dcInfoBlock(titulo, icono, tab, n, filas) {
+    if (!filas) return '';
+    const ir = tab ? `<button class="btn btn-sm btn-secondary py-0 px-1 ms-auto"
+            title="${escAttr(titulo)}" onclick="_dcBuildTab=${jsStr(tab)};renderDcim()">
+        <i class="bi bi-arrow-right"></i></button>` : '';
+    return `<div class="border rounded p-2">
+        <div class="d-flex align-items-center gap-2">
+            <i class="bi ${icono} text-muted"></i>
+            <span class="fw-semibold ss-fs-3">${esc(titulo)}</span>${_dcTabN(n)}
+            ${ir}
+        </div>
+        ${filas}
+    </div>`;
+}
+
+/** Un renglón `clave · valor`. **El valor llega ya compuesto**: unos son texto y otros una chapa
+ *  de fecha vencida, y escaparlo aquí obligaría a elegir uno de los dos. Quien llama escapa. */
+function _dcInfoRow(k, html) {
+    if (!html && html !== 0) return '';
+    return `<div class="d-flex gap-2 justify-content-between align-items-baseline ss-fs-2
+                        border-top pt-1 mt-1">
+        <span class="text-muted" style="white-space:nowrap">${esc(k)}</span>
+        <span class="text-end">${html}</span></div>`;
+}
+
+/** Lo que lleva puesto, pieza a pieza: la clase a la izquierda y la marca, el modelo y el hueco
+ *  a la derecha. La clase sola —«2 memoria»— no dice si esos dos módulos son los que hay que
+ *  comprar iguales. */
+function _dcBuildPartRows(parts) {
+    const cabe = (parts || []).slice(0, 8);
+    const filas = cabe.map(p => {
+        const quien = [p.brand, p.model].filter(Boolean).join(' ');
+        const donde = String(p.slot || '');
+        const dicho = [quien || t('dcim_bay_empty'), p.size, donde].filter(Boolean).join(' · ');
+        return _dcInfoRow(t('dcim_kind_' + p.kind) || p.kind, esc(dicho));
+    }).join('');
+    const mas = (parts || []).length - cabe.length;
+    return filas + (mas > 0 ? _dcInfoRow('', esc('… +' + mas)) : '');
+}
+
+/** La línea de una familia de puertos: lo que contesta sin entrar.
+/** La línea de una familia de puertos: lo que contesta sin entrar.
+ *
+ *  De una bahía, **cuántas están ocupadas** — que es lo que se pregunta antes de comprar memoria.
+ *  De un puerto con nombre, sus nombres. Y de uno contado, de qué son: «2 × USB-A · 1 × USB-C». */
+function _dcBuildFamLine(b, d, fam) {
+    const lista = _dcBuildBays(b, fam);
+    if (lista.length && _DC_BAY_FAMS.indexOf(fam) >= 0) {
+        const puesto = _dcBuildBySlot(d.parts || []);
+        const llenas = lista.filter(x => (puesto[_dcBaySlug(x.name)] || []).length).length;
+        return tf('dcim_build_card_bays', llenas, lista.length);
+    }
+    if (lista.length) {
+        const nombres = lista.slice(0, 5).map(x => x.name).join(' · ');
+        return lista.length > 5 ? nombres + ' …' : nombres;
+    }
+    const tipos = _dcimPorts(b)[fam] || {};
+    return Object.entries(tipos)
+        .map(([k, n]) => n + ' × ' + (k ? _dcSpeedName(k) : t('dcim_cat_unset'))).join(' · ');
+}
+
+/** Lo que ocupa, en palabras y no en una fracción: en la ficha hay sitio para decirlo entero,
+ *  y «1 U · 1/2» al lado de una chapa se lee y en una tabla se adivina. */
+function _dcBuildTakes(eff) {
+    const alto = _dcBuildU(eff.tenths);
+    if (!eff.slots || eff.slots <= 1) return alto;
+    return tf('dcim_build_takes_part', alto, eff.span, eff.slots,
+              t('dcim_split_' + eff.split).toLowerCase());
+}
+
+/** El ciclo de vida **del dispositivo**, leído de su ficha del catálogo.
+ *
+ *  Esto es lo que faltaba y lo que se buscaba: cuándo salió el chasis, cuándo dejó de venderse,
+ *  cuándo se le acaban los parches. No es del estándar de compra —esas son las otras dos fechas,
+ *  las nuestras— y confundirlas era fácil porque las dos son fechas y las dos están aquí. Ahora
+ *  cada bloque lleva su título y ninguno se llama como el otro.
+ *
+ *  De solo lectura a propósito: se corrigen en la ficha del modelo, que es de donde cuelgan
+ *  también las veinte máquinas que ya salieron de él. */
+function _dcBuildLifeHtml(b, campos) {
+    campos = campos || [];
+    const e = (b && b.extra && typeof b.extra === 'object') ? b.extra : {};
+    const puestas = campos.filter(c => e[c.name]);
+    if (!puestas.length) return '';
+    const hoy = new Date().toISOString().slice(0, 10);
+    const filas = puestas.map(c => {
+        const v = String(e[c.name]);
+        const dicho = v <= hoy ? `<span class="badge bg-danger">${esc(v)}</span>` : esc(v);
+        // La etiqueta ya viene marcada —lleva su ayuda dentro— así que va sin volver a escapar.
+        // En una variable y no en el hueco: el guarda de escapado persigue los campos tecleados
+        // interpolados a pelo, y tiene razón — el nombre de un campo no es uno, pero un guarda
+        // que hay que ir comprobando a mano no sirve de nada.
+        const etiqueta = _dcAttrLabel(c.name);
+        return `<div class="d-flex gap-2 justify-content-between align-items-baseline ss-fs-2
+                            border-top pt-1 mt-1">
+            <span class="text-muted" style="white-space:nowrap">${etiqueta}</span>
+            <span class="text-end">${dicho}</span></div>`;
+    }).join('');
+    return _dcInfoBlock(t('dcim_build_life'), 'bi-calendar-event', '', 0, filas);
+}
+
+/** El formulario. **El modelo base primero**, porque es la decisión de la que cuelga todo lo
+ *  demás: la altura, el fondo y la clase están escritas en el catálogo, y preguntarlas otra vez
+ *  aquí es pedir que se copien a mano —y que se copien mal— además de abrir la puerta a que la
+ *  plantilla y el catálogo digan dos cosas distintas del mismo chasis. */
+/** Qué máquina sale de esta plantilla. Las cuentas que si no hay que hacer a mano leyendo
+ *  quince renglones — y que son la pregunta con la que se abre esta pantalla.
+ *
+ *  Lo que no se ha podido contar **se dice**: una pieza escrita a mano no tiene ficha de catálogo
+ *  y sus núcleos no se conocen. Un total al que le faltan tres discos y no lo dice es peor que no
+ *  dar el total, porque se cree. */
+function _dcBuildSummaryHtml(sum) {
+    if (!sum) return '';
+    const chapa = (texto, aviso, detalle) => `<span class="badge ${
+        aviso ? 'bg-warning-subtle text-warning-emphasis' : 'bg-body-secondary text-body-secondary'
+        } border fw-normal"${detalle ? ` title="${escAttr(detalle)}"` : ''}>${
+        esc(texto)}</span>`;
+    const trozos = [];
+    if (sum.memory_gb) trozos.push(chapa(tf('dcim_build_sum_ram', sum.memory_gb)));
+    if (sum.storage_tb) trozos.push(chapa(tf('dcim_build_sum_disk', sum.storage_tb)));
+    if (sum.cpus) trozos.push(chapa(tf('dcim_build_sum_cpu', sum.cpus)));
+    if (sum.cores) trozos.push(chapa(tf('dcim_build_sum_cores', sum.cores)));
+    (sum.psu || []).forEach(p => trozos.push(chapa(p.qty + ' × ' + p.size)));
+    // Por dónde come el chasis. Un alimentador externo no es una fuente que se pida aparte, y
+    // si hace falta una toma en la regleta o un enchufe en la pared.
+    if (sum.power_type) trozos.push(chapa(_dcEnumName(sum.power_type)));
+    else if (sum.powered === false) trozos.push(chapa(t('dcim_build_sum_unpowered')));
+    // La velocidad y no el nombre de la norma: es lo que se compara con la chapa de al lado,
+    // y `1000base-t` junto a «2,5 Gbps» son dos formas de decir lo mismo en la misma línea. El
+    // nombre exacto se queda en el `title`, que es donde vive el detalle que hace falta a veces.
+    (sum.net || []).forEach(n => trozos.push(
+        chapa(n.ports + ' × ' + _dcSpeedName(n.speed), false, n.speed)));
+    if (sum.unknown) trozos.push(chapa(tf('dcim_build_sum_unknown', sum.unknown), true));
+    if (!trozos.length) return '';
+    return `<div class="d-flex gap-1 flex-wrap align-items-center mb-3">
+        <span class="ss-fs-2 text-muted me-1">${esc(t('dcim_build_sum'))}</span>
+        ${trozos.join('')}</div>`;
+}
+
+function _dcBuildFormHtml(b, puede) {
+    const dis = puede ? '' : ' disabled';
+    const nueva = ((_dcBuild || {}).mode === 'new');
+    const set = (k) => `oninput="_dcBuild.build['${k}']=this.value"`;
+    return `<div class="d-flex flex-column gap-3 mb-3">
+        ${_dcBuildBaseHtml(b, puede)}
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            <label class="ss-fs-2 text-muted flex-grow-1" style="max-width:24rem">
+                ${_dcLabel('dcim_build_name')}
+                <input id="dcb-name" class="form-control form-control-sm"${dis}
+                       value="${escAttr(b.name || '')}" ${set('name')}
+                       placeholder="${escAttr(t('dcim_build_name_hint'))}"></label>
+            <label class="ss-fs-2 text-muted flex-grow-1">${esc(t('dcim_cat_desc'))}
+                <input class="form-control form-control-sm"${dis}
+                       value="${escAttr(b.description || '')}" ${set('description')}></label>
+        </div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            <label class="ss-fs-2 text-muted">
+                ${_dcLabel('dcim_build_platform')}
+                ${_dcPlatSelect(b.platform_uid,
+                                '_dcBuild.build.platform_uid=this.value', dis)}</label>
+        </div>
+        <div class="fw-semibold ss-fs-2 mt-1">${esc(t('dcim_build_validity'))}</div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_build_valid_from'))}
+                <input type="date" class="form-control form-control-sm"${dis}
+                       style="max-width:10rem"
+                       value="${escAttr(b.valid_from || '')}" ${set('valid_from')}></label>
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_build_valid_to'))}
+                <input type="date" class="form-control form-control-sm"${dis}
+                       style="max-width:10rem"
+                       value="${escAttr(b.valid_to || '')}" ${set('valid_to')}></label>
+            <span class="text-muted ss-fs-1">${esc(t('dcim_build_validity_hint'))}</span>
+        </div>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_build_notes'))}
+            <textarea class="form-control form-control-sm" rows="3"${dis}
+                      placeholder="${escAttr(t('dcim_build_notes_hint'))}"
+                      oninput="_dcBuild.build.notes=this.value">${
+                esc(String(b.notes || ''))}</textarea></label>
+        ${_dcBuildMeasuresHtml(b, puede)}
+        ${puede ? _dcBuildLifeFields(b) : ''}
+        ${nueva ? '' : `<div class="text-muted ss-fs-1">${
+            esc(t('dcim_build_ports_tab_hint'))}</div>`}
+    </div>`;
+}
+
+/** Lo que vale de verdad para cada medida, y de dónde sale.
+ *
+ *  Una sola función porque la respuesta la usan dos sitios —lo que se enseña y lo que se copia a
+ *  un equipo— y dos copias de esta regla acabarían discrepando el día que alguien toque una. */
+/** Dónde escribe lo que se teclea en esta ficha, para el renderizador de campos que comparte
+ *  con el catálogo. Una columna va a la fila; lo demás, a `extra`. */
+function _dcBuildWhere() {
+    const b = ((_dcBuild || {}).build) || {};
+    if (!b.extra || typeof b.extra !== 'object') b.extra = {};
+    return {col: '_dcBuild.build', extra: '_dcBuild.build.extra',
+            colBox: b, extraBox: b.extra};
+}
+
+function _dcBuildEff(b) {
+    // De la PLANTILLA y no del catálogo: lo que dice el modelo se copió al elegirlo, y desde
+    // entonces lo que manda es lo que hay aquí — el modelo puede haberse retirado.
+    const decimas = Number(b.u_tenths || 0);
+    const partes = Math.max(1, Number(b.u_slots || 1));
+    const toma = Math.max(1, Math.min(partes, Number(b.u_slot_span || 1)));
+    return {
+        slots: partes,
+        span: toma,
+        split: String(b.u_split || 'width'),
+        // En décimas, como el catálogo: hay chasis de 0,5 U y en enteros no se pueden decir.
+        tenths: decimas,
+        u: decimas / 10,
+        role: String(b.role || ''),
+        depth: Number(b.depth_mm || 0),
+        // El catálogo no dice milímetros, solo si el modelo es de fondo completo. Es menos de lo
+        // que parece y es lo que hay: fingir un número sería inventarse una medida.
+        deep: String(b.full_depth) === '0' ? false : true,
+    };
+}
+
+/** Las dos caras del chasis. **Las dos**, porque por detrás es por donde se enchufa: es la que
+ *  se mira cuando hay que cablear, y el catálogo la trae desde el primer día.
+ *
+ *  Cada una con su rótulo: dos fotos seguidas sin decir cuál es cuál son dos fotos que hay que
+ *  reconocer, y un mini-PC se parece bastante a sí mismo por los dos lados. */
+function _dcBuildFotos(b, puede) {
+    // Con qué cambiarlas: llegan copiadas del catálogo, y copiadas quiere decir SUYAS. La del
+    // catálogo es la del chasis desnudo; la de aquí puede ser la del equipo montado, con sus
+    // tarjetas y su etiqueta. Sin esto la única forma de corregir una era corregir el modelo del
+    // que salió — que es de donde cuelgan también las otras veinte plantillas.
+    const una = (nombre, cara) => `<figure class="mb-0 d-flex flex-column gap-1">
+        <figcaption class="text-muted ss-fs-1">${esc(t('dcim_cat_' + cara))}</figcaption>
+        ${nombre ? `<img src="${_dcimMediaUrl(nombre)}" alt=""
+             class="border rounded ss-shot">`
+         : `<div class="border rounded ss-dashed ss-shot d-flex align-items-center
+                        justify-content-center text-muted ss-fs-1">${
+                esc(t('dcim_build_no_image'))}</div>`}
+        ${puede ? `<div class="d-flex gap-1">
+            <label class="btn btn-sm btn-secondary mb-0">
+                <i class="bi bi-upload me-1"></i>${esc(t(nombre ? 'dcim_build_image_change'
+                                                                : 'dcim_build_image_add'))}
+                <input type="file" accept="image/*" class="d-none"
+                       onchange="_dcBuildImageUp(${jsStr(cara)}, this.files[0])"></label>
+            ${nombre ? `<button class="btn btn-sm btn-danger"
+                onclick="_dcBuildImageDrop(${jsStr(cara)})" title="${escAttr(t('delete'))}">
+                <i class="bi bi-trash"></i></button>` : ''}
+        </div>` : ''}</figure>`;
+    if (!puede && !b.front_image && !b.rear_image) return '';
+    return `<div class="d-flex gap-3 flex-wrap">${
+        una(b.front_image, 'front') + una(b.rear_image, 'rear')}</div>`;
+}
+
+/** Subir la foto de una cara. Se guarda al soltarla y no al guardar la ficha: es un fichero, no
+ *  un campo, y un «guardar» que además sube ficheros deja a medias lo que falle de los dos. */
+async function _dcBuildImageUp(cara, fichero) {
+    const uid = ((_dcBuild || {}).build || {}).uid || '';
+    if (!uid || !fichero) return;
+    const fd = new FormData();
+    fd.append('file', fichero);
+    // `fetch` a pelo: lo que va aquí es un formulario con un fichero dentro, y el envoltorio de
+    // JSON lo convertiría en la cadena "[object File]". El global sigue poniendo el CSRF.
+    let resp;
+    try {
+        resp = await fetch(`/api/v1/dcim/builds/${encodeURIComponent(uid)}` +
+                           `/image/${encodeURIComponent(cara)}`, {method: 'POST', body: fd});
+    } catch (e) {
+        return showToast(t('save_failed'), 'danger');
+    }
+    const d = await resp.json().catch(() => ({}));
+    if (!resp.ok || d.error) return showToast(d.error || `HTTP ${resp.status}`, 'danger', 8000);
+    _dcBuild.build[cara + '_image'] = d.image || '';
+    showToast(t('saved'), 'success');
+    renderDcim();
+}
+
+function _dcBuildImageDrop(cara) {
+    const uid = ((_dcBuild || {}).build || {}).uid || '';
+    if (!uid) return;
+    showConfirmModal(t('dcim_build_image_drop_q'), async () => {
+        const r = await _dcimSend('DELETE',
+            `/api/v1/dcim/builds/${encodeURIComponent(uid)}/image/${encodeURIComponent(cara)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcBuild.build[cara + '_image'] = '';
+        renderDcim();
+    });
+}
+
+/** El chasis del catálogo: lo primero, y lo que se enseña de él.
+ *
+ *  Se busca, no se elige de una lista: son ocho mil filas, y un desplegable de ocho mil opciones
+ *  no se recorre ni se escribe. */
+function _dcBuildBaseHtml(b, puede) {
+    const eff = _dcBuildEff(b);
+    // Lo que se enseña es lo COPIADO, no lo que diga hoy el catálogo: una plantilla escrita
+    // sobre un modelo retirado sigue sabiendo de qué chasis es.
+    const base = {name: [b.manufacturer, b.model].filter(Boolean).join(' '),
+                  uid: b.type_uid || '', description: ''};
+    if (!base.name) {
+        return `<div class="p-3 rounded border ss-dashed d-flex gap-3 align-items-center
+                            flex-wrap">
+            <i class="bi bi-journal-text ss-fs-4 text-muted"></i>
+            <div class="flex-grow-1">
+                <div class="fw-semibold">${esc(t('dcim_build_base_none'))}</div>
+                <div class="text-muted ss-fs-2">${esc(t('dcim_build_base_why'))}</div>
+            </div>
+            ${puede ? `<button class="btn btn-sm btn-primary"
+                onclick="_dcBuildPickOpen('base','device-types')">
+                <i class="bi bi-search me-1"></i>${esc(t('dcim_build_base_pick'))}</button>` : ''}
+            ${_dcBuildPickHtml('base')}
+            ${/* También sin modelo: el armario que montó el electricista no está en ninguna
+                  biblioteca y sigue teniendo un aspecto que se reconoce de un vistazo. */
+              _dcBuildFotos(b, puede && !!b.uid)}
+        </div>`;
+    }
+    const dato = (txt) => `<span class="badge bg-body-secondary text-body-secondary border
+        fw-normal">${esc(txt)}</span>`;
+    return `<div class="p-3 rounded border d-flex gap-3 align-items-center flex-wrap">
+        ${_dcBuildFotos(b, puede && !!b.uid)}
+        <div class="flex-grow-1">
+            <div class="fw-semibold">${esc(base.name || '')}</div>
+            <div class="d-flex gap-1 flex-wrap mt-1">
+                ${eff.tenths ? dato(_dcBuildFootprint(eff)) : ''}
+                ${eff.deep === null ? '' : dato(t(eff.deep ? 'dcim_build_full_depth'
+                                                           : 'dcim_build_half_depth'))}
+                ${eff.role ? dato(t('dcim_role_' + eff.role)) : ''}
+                ${b.airflow ? dato(_dcEnumName(b.airflow)) : ''}
+                ${b.power_type ? dato(_dcEnumName(b.power_type)) : ''}
+            </div>
+            ${base.description ? `<div class="text-muted ss-fs-1 mt-1">${
+                esc(base.description)}</div>` : ''}
+        </div>
+        ${_dcBuildPickHtml('base')}
+    </div>`;
+}
+
+/** Cuánto mide y cómo se monta. **Datos de la plantilla**, no una excepción que se despliega.
+ *
+ *  Era un bloque escondido detrás de «mi equipo no es así», y eso lo dejó de ser el día que la
+ *  plantilla pasó a copiar del catálogo en vez de leerlo en vivo: ya no son cuatro casillas
+ *  vacías que contradicen a un modelo, son las medidas de este chasis, traídas al elegirlo y
+ *  guardadas aquí. Esconderlas era esconder lo que la ficha de al lado está enseñando.
+ *
+ *  Se pueden corregir por dos casos reales: el armario que montó el electricista, que no está en
+ *  ninguna biblioteca, y la caja que no mide lo que dice su ficha. */
+function _dcBuildMeasuresHtml(b, puede) {
+    const conModelo = !!(b.manufacturer || b.model);
+    const dis = puede ? '' : ' disabled';
+    const eff = _dcBuildEff(b);
+    const roles = (_dcBuilds || {}).roles || [];
+    const faces = (_dcBuilds || {}).faces || ['full'];
+    return `<div class="p-3 rounded bg-body-secondary d-flex flex-column gap-2">
+        <div class="ss-fs-2 fw-semibold">${esc(t('dcim_build_measures'))}</div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            <label class="ss-fs-2 text-muted">${_dcLabel('dcim_u_size')}
+                <input type="number" min="0" step="0.5" class="form-control form-control-sm"${dis}
+                       style="max-width:7rem" value="${escAttr(
+                           b.u_tenths ? String(Number(b.u_tenths) / 10) : '')}"
+                       placeholder="${escAttr(t('dcim_build_unset'))}"
+                       oninput="_dcBuild.build.u_tenths=Math.round((Number(this.value)||0)*10)"
+                       ></label>
+            <label class="ss-fs-2 text-muted">${_dcLabel('dcim_depth_mm', 'dcim_build_depth_tt')}
+                <input type="number" min="0" class="form-control form-control-sm"${dis}
+                       style="max-width:8rem" value="${escAttr(String(b.depth_mm || ''))}"
+                       placeholder="${escAttr(t('dcim_build_unset'))}"
+                       oninput="_dcBuild.build.depth_mm=Number(this.value)||0"></label>
+            <label class="ss-fs-2 text-muted">${_dcLabel('dcim_role')}
+                <select class="form-select form-select-sm" style="max-width:13rem"${dis}
+                        onchange="_dcBuild.build.role=this.value">
+                    <option value="">${esc(t('dcim_build_unset'))}</option>
+                    ${roles.map(r => `<option value="${escAttr(r)}"${
+                        b.role === r ? ' selected' : ''}>${
+                        esc(t('dcim_role_' + r))}</option>`).join('')}
+                </select></label>
+            <label class="ss-fs-2 text-muted">${_dcLabel('dcim_face')}
+                <select class="form-select form-select-sm" style="max-width:10rem"${dis}
+                        onchange="_dcBuild.build.face=this.value">
+                    ${faces.map(f => `<option value="${escAttr(f)}"${
+                        (b.face || 'full') === f ? ' selected' : ''}>${
+                        esc(t('dcim_face_' + f))}</option>`).join('')}
+                </select></label>
+        </div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            <label class="ss-fs-2 text-muted d-flex align-items-center gap-1 mt-3">
+                <input type="checkbox"${dis} ${String(b.full_depth) === '0' ? '' : 'checked'}
+                       onchange="_dcBuild.build.full_depth=this.checked?1:0">${
+                _dcLabel('dcim_cat_full_depth')}</label>
+            <label class="ss-fs-2 text-muted">${_dcAttrLabel('power_type')}
+                <select class="form-select form-select-sm" style="max-width:11rem"${dis}
+                        onchange="_dcBuild.build.power_type=this.value">
+                    <option value="">${esc(t('dcim_cat_unset'))}</option>
+                    ${(((_dcBuild || {}).power_types) || []).map(v =>
+                        `<option value="${escAttr(v)}"${
+                        b.power_type === v ? ' selected' : ''}>${
+                        esc(_dcEnumName(v))}</option>`).join('')}
+                </select></label>
+            ${/* Lo que el DOCUMENTO dice que tiene cualquier chasis —la ventilación, el peso—,
+                  con el mismo renderizador que el catálogo. Estaban servidos allí y no aquí, así
+                  que una plantilla enseñaba una ventilación que no había forma de corregir. */
+              _dcCatFieldRow(((_dcBuild || {}).fields) || [], _dcBuildWhere())}
+        </div>
+        <div class="fw-semibold ss-fs-2 mt-1">${esc(t('dcim_build_share'))}</div>
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_item_slots'))}
+                <input type="number" min="1" class="form-control form-control-sm"${dis}
+                       style="max-width:7rem"
+                       value="${escAttr(String(Number(b.u_slots || 1)))}"
+                       oninput="_dcBuild.build.u_slots=Number(this.value)||1"></label>
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_item_slot_span'))}
+                <input type="number" min="1" class="form-control form-control-sm"${dis}
+                       style="max-width:7rem"
+                       value="${escAttr(String(Number(b.u_slot_span || 1)))}"
+                       oninput="_dcBuild.build.u_slot_span=Number(this.value)||1"></label>
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_item_split'))}
+                <select class="form-select form-select-sm" style="max-width:11rem"${dis}
+                        onchange="_dcBuild.build.u_split=this.value">
+                    ${['width', 'height'].map(v => `<option value="${escAttr(v)}"${
+                        String(b.u_split || 'width') === v ? ' selected' : ''}>${
+                        esc(t('dcim_split_' + v))}</option>`).join('')}
+                </select></label>
+            <span class="text-muted ss-fs-1">${esc(t('dcim_build_share_hint'))}</span>
+        </div>
+        <div class="text-muted ss-fs-1">${esc(t(conModelo ? 'dcim_build_measures_hint'
+                                                          : 'dcim_build_manual_hint'))}</div>
+    </div>`;
+}
+
+/** Los puertos, de renglones a la forma que se guarda. Dos renglones iguales se **suman**:
+ *  quien escribe «2 c14» y luego «2 c14» más quiere cuatro, no dos.
+ *
+ *  Las familias de bahía no salen de aquí: las cuenta `_dcBayCounts` a partir de su lista con
+ *  nombre, porque dos sitios donde decir cuántas hay son dos que acaban discrepando. */
+function _dcBuildPortsOut() {
+    const b = ((_dcBuild || {}).build) || {};
+    const fuera = {};
+    if (_dcBuildPorts === null) {
+        Object.entries(_dcimPorts(b)).forEach(([fam, tipos]) => {
+            if (_DC_PLACE_FAMS.indexOf(fam) < 0) fuera[fam] = tipos;
+        });
+    } else {
+        _dcBuildPorts.forEach(p => {
+            const v = Number(p.n || 0);
+            if (!(v > 0) || !p.fam || _DC_PLACE_FAMS.indexOf(p.fam) >= 0) return;
+            const tipo = String(p.tipo || '').trim();
+            fuera[p.fam] = fuera[p.fam] || {};
+            fuera[p.fam][tipo] = (fuera[p.fam][tipo] || 0) + v;
+        });
+    }
+    return Object.assign(fuera, _dcBayCounts(b));
+}
+
+/** Cuántas bahías hay de cada tipo, **contadas de la lista**. Es lo que hace que el recuento y
+ *  la lista no puedan decir dos cosas: solo hay un sitio donde se escribe. */
+function _dcBayCounts(b) {
+    const fuera = {};
+    const antes = _dcimPorts(b);
+    _DC_PLACE_FAMS.forEach(fam => {
+        const bahias = _dcBuildBays(b, fam);
+        if (!bahias.length) {
+            // Sin lista no hay nada que derivar, y derivar cero de la nada es borrar lo que
+            // dijo el modelo: una plantilla con «4 bahías» y sin nombres se quedaba sin ninguna
+            // al guardar cualquier otra cosa. Se queda lo que había —salvo que se haya vaciado
+            // aquí, que entonces el cero es la respuesta y no la falta de una.
+            if (antes[fam] && !_dcBayTouched[fam]) fuera[fam] = antes[fam];
+            return;
+        }
+        fuera[fam] = {};
+        bahias.forEach(x => {
+            const tipo = String(x.type || '').trim();
+            fuera[fam][tipo] = (fuera[fam][tipo] || 0) + 1;
+        });
+    });
+    return fuera;
+}
+
+/** La lista con nombre, tal y como se guarda: sin renglones sin nombre, que es una bahía que no
+ *  se puede nombrar y por tanto no sirve para lo único que hace falta — decir cuál. */
+function _dcBayListOut(b) {
+    let lista = (b || {}).port_list;
+    if (typeof lista === 'string') { try { lista = JSON.parse(lista); } catch (e) { lista = {}; } }
+    const fuera = {};
+    Object.entries(lista || {}).forEach(([fam, xs]) => {
+        // **Campo a campo, y por eso hay que acordarse**: esta función se escribió cuando un
+        // puerto era un nombre y una forma, y lo que no se copie aquí no da ningún error — se
+        // guarda bien todo lo demás, la pantalla dice «guardado», y al volver a abrir el dato
+        // no está. Un campo que se escribe y no se lleva es peor que uno que no se puede
+        // escribir: el segundo se ve.
+        const limpio = (xs || []).filter(x => x && String(x.name || '').trim())
+            .map(x => {
+                const uno = {name: String(x.name).trim(), type: String(x.type || '')};
+                if (x.gen) uno.gen = String(x.gen);
+                if ((x.signals || []).length) uno.signals = x.signals.map(String);
+                if (String(x.volts || '').trim()) uno.volts = String(x.volts).trim();
+                if (Number(x.watts || 0) > 0) uno.watts = Number(x.watts);
+                return uno;
+            });
+        if (limpio.length) fuera[fam] = limpio;
+    });
+    return fuera;
+}
+
+async function _dcBuildSave() {
+    const d = _dcBuild || {};
+    const b = d.build || {};
+    const cuerpo = {name: b.name || '', role: b.role || '', face: b.face || 'full',
+                    u_tenths: b.u_tenths || 0, depth_mm: b.depth_mm || 0,
+                    u_slots: b.u_slots || 1, u_slot_span: b.u_slot_span || 1,
+                    u_split: b.u_split || 'width',
+                    manufacturer: b.manufacturer || '', model: b.model || '',
+                    airflow: b.airflow || '', power_type: b.power_type || '',
+                    full_depth: String(b.full_depth) === '0' ? 0 : 1,
+                    extra: b.extra || {}, ports: _dcBuildPortsOut(),
+                    port_list: _dcBayListOut(b),
+                    type_uid: b.type_uid || '', description: b.description || '',
+                    notes: b.notes || '', platform_uid: b.platform_uid || '',
+                    valid_from: b.valid_from || '', valid_to: b.valid_to || ''};
+    const r = d.mode === 'new'
+        ? await _dcimSend('POST', '/api/v1/dcim/builds', cuerpo)
+        : await _dcimSend('PUT', `/api/v1/dcim/builds/${encodeURIComponent(b.uid)}`, cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    showToast(t('saved'), 'success');
+    // Recién creada se abre su ficha: lo siguiente que quiere quien la escribió es ponerle los
+    // componentes, y volver a la lista sería obligarle a buscarla para entrar otra vez.
+    if (d.mode === 'new') return _dcBuildOpen((r.data || {}).uid || '');
+    // Releer devuelve a la primera pestaña, y desde las otras eso es perder de vista lo que se
+    // acaba de guardar: quien estaba en las tomas de corriente quiere verlas guardadas.
+    const donde = _dcBuildTab;
+    await _dcBuildOpen(b.uid);
+    if (donde !== _dcBuildTab) { _dcBuildTab = donde; renderDcim(); }
+}
+
+/** Clonar. Sin preguntar el nombre: la copia se abre en su ficha con uno puesto y editable,
+ *  que es exactamente donde alguien lo iba a escribir — y donde va a cambiar los discos, que es
+ *  para lo que se clona. */
+async function _dcBuildClone(uid) {
+    const r = await _dcimSend('POST', '/api/v1/dcim/builds', {from: uid});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcBuildOpen((r.data || {}).uid || '');
+}
+
+function _dcBuildDrop(uid, nombre) {
+    showConfirmModal(tf('dcim_build_drop_q', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/builds/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcBuild = null;
+        _dcBuildsOpen();
+    });
+}
+
+// ── Lo que lleva puesto ─────────────────────────────────────────────────────────────────
+
+//: Lo que va dentro de la caja, y lo que cuelga de ella. Dos vistas de la misma lista: `mount`
+//: dice dónde vive cada pieza, y `''` es dentro — que es lo que eran todas las que ya había.
+function _dcPartsIn(parts) {
+    return (parts || []).filter(p => String(p.mount || '') !== 'external');
+}
+
+function _dcPartsOut(parts) {
+    return (parts || []).filter(p => String(p.mount || '') === 'external');
+}
+
+/** La tabla de piezas, para las dos pestañas. *donde* es el `mount` que tendrá la que se añada
+ *  desde aquí: una tabla y no dos, porque es la misma pieza mirada por dónde vive y dos tablas
+ *  serían dos que se separan el día que alguien añada una columna a una. */
+function _dcBuildPartsHtml(parts, puede, donde) {
+    const fuera = donde === 'external';
+    return `<div class="card">
+        <div class="card-header py-2 d-flex align-items-center gap-2">
+            <i class="bi ${fuera ? 'bi-usb-plug' : 'bi-cpu'}"></i>
+            <span class="fw-semibold">${esc(t(fuera ? 'dcim_build_outer'
+                                                    : 'dcim_build_parts'))}</span>
+            ${puede ? `<button class="btn btn-sm btn-secondary ms-auto"
+                onclick="_dcCompStart('build', ${jsStr(donde || '')})">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_part'))}</button>` : ''}
+        </div>
+        <div class="card-body py-2">
+            <div class="text-muted ss-fs-2 mb-2">${esc(t(fuera ? 'dcim_build_outer_note'
+                                                               : 'dcim_build_parts_note'))}</div>
+            ${puede ? _dcCompFormHtml('build') : ''}
+            ${parts.length ? `<div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                <thead><tr>
+                    <th>${esc(t('dcim_part'))}</th>
+                    <th>${esc(t(fuera ? 'dcim_part_port' : 'dcim_part_slot'))}</th>
+                    <th>${esc(t('dcim_part_brand'))}</th>
+                    <th>${esc(t('dcim_part_model'))}</th>
+                    <th>${esc(t('dcim_part_size'))}</th>
+                    <th class="text-end">${esc(t('dcim_part_qty'))}</th>
+                    <th></th>
+                </tr></thead>
+                <tbody>${parts.map(p => `<tr>
+                    <td class="fw-semibold">${esc(t('dcim_kind_' + p.kind) || p.kind)}</td>
+                    <td class="ss-fs-2">${esc(p.slot || '')}</td>
+                    <td class="ss-fs-2">${esc(p.brand || '')}</td>
+                    <td class="ss-fs-2">${esc(p.model || '')}${
+                        p.type_uid ? ' <i class="bi bi-journal-text text-muted ss-fs-1"'
+                                     + ` title="${escAttr(t('dcim_comp_chosen'))}"></i>` : ''}</td>
+                    <td class="ss-fs-2 ss-tabular">${esc(p.size || '')}</td>
+                    <td class="text-end ss-tabular">${esc(_dcPartQty(p))}</td>
+                    <td class="text-end">${puede ? `<div class="btn-group btn-group-sm">
+                        <button class="btn btn-secondary py-0 px-1"
+                            title="${escAttr(t('edit'))}"
+                            onclick="_dcCompEditFrom('build', ${jsStr(p.uid)})">
+                            <i class="bi bi-pencil"></i></button>
+                        <button class="btn btn-danger py-0 px-1"
+                            title="${escAttr(t('delete'))}"
+                            onclick="_dcBuildPartDrop(${jsStr(p.uid)},${jsStr(
+                                t('dcim_kind_' + p.kind) || p.kind)})">
+                            <i class="bi bi-trash"></i></button>
+                    </div>` : ''}</td>
+                </tr>`).join('')}</tbody></table></div>`
+                : `<div class="text-muted ss-fs-2">${esc(t('dcim_build_no_parts'))}</div>`}
+        </div>
+    </div>`;
+}
+
+//: El historial de la plantilla abierta: `{uid, rows}`. Con el `uid` dentro porque la ficha se
+//: redibuja entera y hay que poder saber si lo cargado es de ESTA — sin eso, abrir otra enseña el
+//: historial de la anterior hasta que llegue el suyo, que es peor que enseñar un hueco.
+let _dcBuildHist = null;
+
+async function _dcBuildHistLoad(uid) {
+    const d = await apiGet(`/api/v1/dcim/builds/${encodeURIComponent(uid)}/history`) || {};
+    _dcBuildHist = {uid, rows: d.history || []};
+    renderDcim();
+}
+
+/** Qué decía esta plantilla antes, y quién la cambió.
+ *
+ *  Una plantilla es un dato **compartido**: de ella salieron veinte máquinas y es el estándar con
+ *  el que se compra. La corrección que rompe algo no se descubre el día que se hace — se
+ *  descubre cuando alguien dice «esto antes llevaba ocho discos».
+ *
+ *  Pinta con las funciones del catálogo porque es la misma tabla leyendo la misma forma de fila:
+ *  dos copias se separarían el día que alguien afine cómo se lee un cambio. */
+function _dcBuildHistHtml(b) {
+    const uid = (b || {}).uid || '';
+    if (!uid) return '';
+    if (!_dcBuildHist || _dcBuildHist.uid !== uid) {
+        _dcBuildHistLoad(uid);
+        return `<div class="text-center py-3"><div class="spinner-border spinner-border-sm">
+            </div></div>`;
+    }
+    const rows = _dcBuildHist.rows || [];
+    if (!rows.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_hist_none'))}</div>`;
+    const puede = _dcimMay('dcim_build_edit');
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr>
+            <th>${esc(t('dcim_cat_hist_when'))}</th>
+            <th>${esc(t('dcim_cat_hist_who'))}</th>
+            <th>${esc(t('dcim_cat_hist_what'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${rows.map((h, i) => `<tr>
+            <td class="ss-fs-2 ss-tabular">${esc(_fmtDateTime(h.at) || h.at || '')}</td>
+            <td class="ss-fs-2">${esc(h.by || '—')}</td>
+            <td class="ss-fs-2">${_dcCatHistWhat(h)}</td>
+            <td class="text-end">${puede && i > 0 ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcBuildRestore(${jsStr(h.uid)})">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>${
+                esc(t('dcim_cat_hist_undo'))}</button>` : ''}</td>
+        </tr>`).join('')}</tbody></table></div>
+        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_build_hist_hint'))}</div>`;
+}
+
+function _dcBuildRestore(rev) {
+    const uid = ((_dcBuild || {}).build || {}).uid || '';
+    if (!uid) return;
+    showConfirmModal(t('dcim_build_hist_restore_q'), async () => {
+        const r = await _dcimSend('POST',
+            `/api/v1/dcim/builds/${encodeURIComponent(uid)}/restore`, {rev});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(t('saved'), 'success');
+        _dcBuildHist = null;
+        const donde = _dcBuildTab;
+        await _dcBuildOpen(uid);
+        if (donde !== _dcBuildTab) { _dcBuildTab = donde; renderDcim(); }
+    });
+}
+
+/** Volver a abrir la ficha **dejándola donde estaba**.
+ *
+ *  Releerla la devuelve a la primera pestaña, y eso es lo correcto al entrar y lo contrario de
+ *  lo que hace falta al guardar: quien acaba de añadir un adaptador en «Elementos externos» se
+ *  encontraba en «Resumen» sin haber navegado, y con la lista que venía de tocar fuera de la
+ *  vista. */
+async function _dcBuildReopen(uid) {
+    const donde = _dcBuildTab;
+    await _dcBuildOpen(uid || ((_dcBuild || {}).build || {}).uid || '');
+    if (donde && donde !== _dcBuildTab) { _dcBuildTab = donde; renderDcim(); }
+}
+
+function _dcBuildPartDrop(uid, nombre) {
+    showConfirmModal(tf('dcim_part_drop_q', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE',
+            `/api/v1/dcim/build-parts/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcBuildReopen();
+    });
+}
+
+// ── El buscador de modelos ──────────────────────────────────────────────────────────────
+
+function _dcBuildPickOpen(target, tree) {
+    _dcBuildPick = (_dcBuildPick && _dcBuildPick.target === target)
+        ? null : {target, tree, q: '', rows: []};
+    renderDcim();
+}
+
+function _dcBuildPickHtml(target) {
+    const p = _dcBuildPick;
+    if (!p || p.target !== target) return '';
+    return `<div class="w-100 p-2 rounded border">
+        <div class="d-flex gap-2 align-items-center mb-2">
+            <input class="form-control form-control-sm" style="max-width:18rem"
+                   value="${escAttr(p.q)}" placeholder="${escAttr(t('dcim_cat_search'))}"
+                   oninput="_dcBuildPick.q=this.value"
+                   onkeydown="if(event.key==='Enter')_dcBuildPickGo()">
+            <button class="btn btn-sm btn-secondary" onclick="_dcBuildPickGo()">
+                <i class="bi bi-search"></i></button>
+            <button class="btn btn-sm btn-secondary"
+                    onclick="_dcBuildPick=null;renderDcim()">${esc(t('cancel'))}</button>
+        </div>
+        ${(p.rows || []).length ? `<div class="d-flex flex-column gap-1">${
+            p.rows.slice(0, 20).map(r => `<button class="btn btn-sm btn-secondary text-start"
+                onclick="_dcBuildPickTake(${jsStr(r.uid)},${jsStr(
+                    ((r.manufacturer || '') + ' ' + (r.model || '')).trim())})">
+                ${esc(((r.manufacturer || '') + ' ' + (r.model || '')).trim())}
+                ${r.description ? `<span class="text-muted ss-fs-1"> — ${
+                    esc(r.description)}</span>` : ''}</button>`).join('')}</div>` : ''}
+    </div>`;
+}
+
+async function _dcBuildPickGo() {
+    const p = _dcBuildPick;
+    if (!p) return;
+    const d = await apiGet(`/api/v1/dcim/catalog?tree=${encodeURIComponent(p.tree)}`
+                           + `&q=${encodeURIComponent(p.q || '')}`) || {};
+    p.rows = d.types || [];
+    renderDcim();
+}
+
+/** Tomar el chasis elegido. El NOMBRE se queda en la pantalla y no en la tabla: en la tabla va
+ *  el identificador, que es lo que sigue siendo cierto el día que alguien corrija el modelo. */
+function _dcBuildPickTake(uid, nombre) {
+    const p = _dcBuildPick || {};
+    if (!_dcBuild) return;
+    _dcBuild.build.type_uid = uid;
+    _dcBuild.build.type_name = nombre;
+    // **Se copia, no se enlaza.** La fila entera está aquí —es la que se acaba de elegir— así
+    // que lo suyo pasa a ser de la plantilla en el momento de elegirla: la altura, el fondo, la
+    // ventilación, los puertos y las fechas. Desde ahora se corrigen aquí, y el catálogo puede
+    // retirar ese modelo sin dejar la plantilla enseñando huecos.
+    //
+    // El servidor vuelve a hacerlo al guardar —es quien copia las imágenes, que son ficheros—
+    // pero se hace también aquí para que el formulario enseñe ya lo que se acaba de traer en
+    // vez de quedarse en blanco hasta el siguiente guardado.
+    const fila = (p.rows || []).find(r => String(r.uid) === String(uid)) || {};
+    const b = _dcBuild.build;
+    b.manufacturer = fila.manufacturer || '';
+    b.model = fila.model || '';
+    b.u_tenths = Number(fila.u_tenths || 0);
+    b.full_depth = String(fila.full_depth) === '0' ? 0 : 1;
+    b.airflow = fila.airflow || '';
+    b.power_type = fila.power_type || '';
+    b.ports = _dcimPorts(fila);
+    b.port_list = (fila.port_list && typeof fila.port_list === 'object') ? fila.port_list : {};
+    b.extra = (fila.extra && typeof fila.extra === 'object') ? Object.assign({}, fila.extra)
+                                                             : {};
+    const roles = (_dcBuilds || {}).roles || [];
+    if (!b.role && roles.indexOf(String(fila.kind || '')) >= 0) b.role = String(fila.kind);
+    _dcBuildPorts = null;
+    _dcBuild.base = fila.uid ? Object.assign({}, fila, {name: nombre}) : null;
+    _dcBuildPick = null;
+    renderDcim();
+}

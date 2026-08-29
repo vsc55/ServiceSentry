@@ -456,15 +456,15 @@ nombre. El módulo entonces sólo lo *nombra*: `{"key": "ssh", "address_field": 
 `fields`. Un protocolo propio del módulo sigue escribiendo los suyos.
 
 **Y ese dueño decide en qué formulario se edita.** Un protocolo del core es la conexión
-**del aparato** —su puerto, la identidad con la que contesta— y se edita en la pestaña
+**del dispositivo** —su puerto, la identidad con la que contesta— y se edita en la pestaña
 *General* del dispositivo, en una tarjeta plegable por protocolo, junto a la de SSH. Uno
-declarado por un módulo es una conversación que **ese módulo** mantiene con el aparato y se
+declarado por un módulo es una conversación que **ese módulo** mantiene con el dispositivo y se
 queda con él, en *Monitorización*. La marca es `builtin`, que ya viaja con cada perfil en el
 catálogo, así que ninguna de las dos pantallas nombra un protocolo y uno nuevo del core
 aparece solo. La regla se escribió una vez como `proto !== 'ssh'` —la misma regla con el
 nombre de un protocolo dentro— y dejó de ser cierta en silencio el día que SNMP pasó al core:
 su editor siguió dibujándose bajo el módulo mientras lo que editaba ya era propiedad del
-aparato. Guardado en `tests/meta/test_snmp_profiles_screen.py`.
+dispositivo. Guardado en `tests/meta/test_snmp_profiles_screen.py`.
 
 Y como `__host_profile__` sólo dice qué hereda un check **atado** —no pinta nada en el
 formulario de uno sin atar—, una colección que necesite la conexión inline (el caso «IP
@@ -571,7 +571,7 @@ Lo que un módulo grafica se declara en su `schema.json` (`__history__.fields`: 
 y unidad de cada valor), y eso basta mientras la respuesta sea la misma en todas las
 instalaciones. Deja de bastar en cuanto depende de datos que aporta la instalación: el módulo
 SNMP graba **lo que declaren sus perfiles de dispositivo**, y alguno lo escribió alguien para el
-aparato de su rack después de publicarse esta versión. Un schema no puede nombrar un campo que
+dispositivo de su rack después de publicarse esta versión. Un schema no puede nombrar un campo que
 no existía cuando se escribió.
 
 **Descriptor** (en `watchfuls/<m>/__init__.py`): una función

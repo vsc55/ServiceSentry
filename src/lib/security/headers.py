@@ -16,7 +16,7 @@ _CSP_HEAD = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data:; font-src 'self' data:; "
+    "img-src 'self' data:{img}; font-src 'self' data:; "
     "connect-src 'self'; "
 )
 _CSP_TAIL = "base-uri 'self'; form-action 'self'; object-src 'none'"
@@ -25,14 +25,25 @@ _CSP_TAIL = "base-uri 'self'; form-action 'self'; object-src 'none'"
 # and discovered at startup — not hardcoded here.
 
 
-def build_csp(frame_ancestors=None) -> str:
-    """Build the CSP. ``frame_ancestors`` (a list of origins) opens ``frame-ancestors``
-    to ``'self'`` + those origins; empty/None keeps framing fully blocked (``'none'``)."""
+def build_csp(frame_ancestors=None, img_origins=None) -> str:
+    """Build the CSP.
+
+    ``frame_ancestors`` (a list of origins) opens ``frame-ancestors`` to ``'self'`` + those
+    origins; empty/None keeps framing fully blocked (``'none'``).
+
+    ``img_origins`` opens ``img-src`` to those origins and NOTHING ELSE — it exists for map
+    tiles, which are thousands of images from somewhere else and cannot be had any other way.
+    Two properties are deliberate: it never touches ``script-src`` (loading a third party's
+    images tells them where your sites are; running their script hands them the page), and it
+    is empty unless somebody configured a tile server, so an installation with no way out keeps
+    exactly the policy it had.
+    """
     if frame_ancestors:
         fa = "frame-ancestors 'self' " + ' '.join(frame_ancestors)
     else:
         fa = "frame-ancestors 'none'"
-    return f"{_CSP_HEAD}{fa}; {_CSP_TAIL}"
+    img = ''.join(' ' + o for o in (img_origins or ()) if o)
+    return f"{_CSP_HEAD.format(img=img)}{fa}; {_CSP_TAIL}"
 
 
 _CSP = build_csp()   # default (framing blocked) — module constant
@@ -48,7 +59,7 @@ SECURITY_HEADERS: dict[str, str] = {
 }
 
 
-def apply_security_headers(response, *, frame_ancestors=None):
+def apply_security_headers(response, *, frame_ancestors=None, img_origins=None):
     """Add the defense-in-depth security headers to *response* (in place).
 
     Uses ``setdefault`` so a value already set upstream (proxy) wins.  When
@@ -58,8 +69,9 @@ def apply_security_headers(response, *, frame_ancestors=None):
     that set its own CSP is left untouched."""
     for name, value in SECURITY_HEADERS.items():
         response.headers.setdefault(name, value)
-    if frame_ancestors and response.headers.get('Content-Security-Policy') == _CSP:
-        response.headers['Content-Security-Policy'] = build_csp(frame_ancestors)
+    if (frame_ancestors or img_origins) \
+            and response.headers.get('Content-Security-Policy') == _CSP:
+        response.headers['Content-Security-Policy'] = build_csp(frame_ancestors, img_origins)
     # Whenever the effective CSP allows framing (the global allowlist above OR a route
     # that set its own frame-ancestors, e.g. the Teams tab), X-Frame-Options — which
     # can only say DENY/SAMEORIGIN — must not be left blocking it.

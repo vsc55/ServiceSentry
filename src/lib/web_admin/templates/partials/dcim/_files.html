@@ -1,0 +1,140 @@
+{# ================================================================
+   DCIM — los adjuntos: lo que no es una foto de alzado.
+
+   El manual, la hoja de características, el zip del firmware — y de una plantilla, la oferta, el
+   pliego, la foto de cómo queda montada.
+
+   **Uno solo para los dos sitios.** Un modelo del catálogo y un estándar de compra cuelgan cosas
+   distintas y las cuelgan igual: elegir de qué es, subir, bajar, quitar. Dos pantallas que hacen
+   lo mismo son dos sitios donde arreglar cada cosa, y la que se olvida es siempre la misma.
+
+   **Las imágenes se ven.** Una foto de cómo queda montado el armario no se abre: se mira, y
+   obligar a descargarla para eso convierte lo útil en un trámite. El resto se baja — que es lo
+   que hace seguro no tener lista blanca de tipos: el panel no renderiza nunca un fichero subido,
+   y una miniatura la pinta el navegador desde una respuesta que va marcada como descarga.
+   ================================================================ #}
+
+//: Los adjuntos de lo que se está mirando: `{scope, uid, rows, kinds, max}` o `null`.
+let _dcFiles = null;
+//: De qué clase se va a subir el siguiente. Se recuerda entre subidas: quien cuelga el manual
+//: suele colgar después la hoja, y volver a «otro» cada vez es un clic de más en el único sitio
+//: donde se hacen varios seguidos.
+let _dcFileKind = 'manual';
+
+/** Dónde viven los de cada cosa. Una tabla y no un `if`: son dos y van a ser tres el día que un
+ *  equipo del inventario quiera su albarán, y esa fila se añade aquí y en ningún otro sitio. */
+const _DCFILE_URL = {
+    type: (uid) => `/api/v1/dcim/catalog/${encodeURIComponent(uid)}/files`,
+    build: (uid) => `/api/v1/dcim/builds/${encodeURIComponent(uid)}/files`,
+};
+
+async function _dcFilesLoad(scope, uid, repintar) {
+    const d = await apiGet(_DCFILE_URL[scope](uid)) || {};
+    _dcFiles = {scope, uid, rows: d.files || [], kinds: d.kinds || [], max: d.max_bytes || 0};
+    (repintar || renderDcim)();
+}
+
+/** La lista y el hueco para subir. *puede* es quien manda aquí: leerlos y colgarlos no piden lo
+ *  mismo, y el permiso lo decide quien llama porque no es el mismo en los dos sitios. */
+function _dcFilesHtml(scope, uid, puede, repintar) {
+    if (!uid)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_files_save_first'))}</div>`;
+    if (!_dcFiles || _dcFiles.uid !== uid || _dcFiles.scope !== scope) {
+        _dcFilesLoad(scope, uid, repintar);
+        return `<div class="text-center py-3"><div class="spinner-border spinner-border-sm">
+            </div></div>`;
+    }
+    const d = _dcFiles;
+    return `${puede ? `<div class="d-flex gap-2 align-items-end flex-wrap mb-3">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_cat_file_kind'))}
+                <select class="form-select form-select-sm" style="max-width:12rem"
+                        onchange="_dcFileKind=this.value">
+                    ${(d.kinds || []).map(k => `<option value="${escAttr(k)}"${
+                        _dcFileKind === k ? ' selected' : ''}>${
+                        esc(t('dcim_cat_file_' + k))}</option>`).join('')}
+                </select></label>
+            <label class="ss-fs-2 text-muted flex-grow-1" style="max-width:20rem">
+                ${esc(t('dcim_cat_file_add'))}
+                <input type="file" class="form-control form-control-sm"
+                       onchange="_dcFileUp(this)"></label>
+        </div>` : ''}
+        ${(d.rows || []).length ? _dcFilesTable(d.rows, puede)
+            : `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_files_none'))}</div>`}
+        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_cat_files_hint'))}</div>`;
+}
+
+function _dcFilesTable(rows, puede) {
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr>
+            <th></th>
+            <th>${esc(t('dcim_cat_file_kind'))}</th>
+            <th>${esc(t('dcim_cat_file_name'))}</th>
+            <th class="text-end">${esc(t('dcim_cat_file_size'))}</th>
+            <th>${esc(t('dcim_cat_hist_when'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${rows.map(f => `<tr>
+            <td style="width:3rem">${_dcFileThumb(f)}</td>
+            <td><span class="badge bg-body-secondary text-body-secondary border fw-normal">${
+                esc(t('dcim_cat_file_' + f.kind) || f.kind)}</span></td>
+            <td class="ss-fs-2">${esc(f.label || '')}</td>
+            <td class="text-end ss-fs-2 ss-tabular">${esc(fmtBytes(f.size))}</td>
+            <td class="ss-fs-2 ss-tabular text-muted">${
+                esc(_fmtDateTime(f.created_at) || '')}</td>
+            <td class="text-end"><div class="btn-group btn-group-sm">
+                <a class="btn btn-secondary py-0 px-1"
+                   href="/api/v1/dcim/files/${encodeURIComponent(f.uid)}"
+                   title="${escAttr(t('dcim_cat_file_get'))}">
+                   <i class="bi bi-download"></i></a>
+                ${puede ? `<button class="btn btn-danger py-0 px-1"
+                    onclick="_dcFileDrop(${jsStr(f.uid)},${jsStr(f.label || '')})">
+                    <i class="bi bi-trash"></i></button>` : ''}
+            </div></td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+/** La miniatura de lo que es una imagen. Una foto de cómo queda montado un armario no se abre:
+ *  se mira, y obligar a descargarla para eso convierte lo útil en un trámite.
+ *
+ *  Por la extensión de lo que se llamaba, que aquí es una pista y no una afirmación: si el
+ *  fichero no fuera una imagen, el navegador no pinta nada y queda un hueco. Lo que no puede
+ *  pasar —que se ejecute— no depende de esto: la respuesta va marcada como descarga y con
+ *  `nosniff`, así que un HTML disfrazado de `.png` no se renderiza aunque se le apunte. */
+function _dcFileThumb(f) {
+    if (!/\.(png|jpe?g|gif|webp|bmp)$/i.test(String(f.label || ''))) return '';
+    return `<img src="/api/v1/dcim/files/${encodeURIComponent(f.uid)}" alt=""
+        class="border rounded" style="height:2rem;max-width:3rem;object-fit:contain">`;
+}
+
+async function _dcFileUp(inp) {
+    const file = (inp && inp.files && inp.files[0]) || null;
+    if (!file || !_dcFiles) return;
+    const {scope, uid} = _dcFiles;
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('kind', _dcFileKind);
+    // `fetch` a pelo: lo que va aquí es un formulario con un fichero dentro, y el envoltorio de
+    // JSON lo convertiría en la cadena "[object File]". El global sigue poniendo el CSRF.
+    let resp;
+    try {
+        resp = await fetch(_DCFILE_URL[scope](uid), {method: 'POST', body: fd});
+    } catch (e) {
+        return showToast(t('save_failed'), 'danger');
+    }
+    const d = await resp.json().catch(() => ({}));
+    if (!resp.ok || d.error) return showToast(d.error || `HTTP ${resp.status}`, 'danger', 8000);
+    showToast(t('saved'), 'success');
+    _dcFiles = null;
+    renderDcim();
+}
+
+function _dcFileDrop(uid, nombre) {
+    showConfirmModal(tf('dcim_cat_file_drop_q', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/files/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(t('deleted'), 'success');
+        _dcFiles = null;
+        renderDcim();
+    });
+}

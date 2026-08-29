@@ -34,6 +34,31 @@ class _EmbedMixin:
         self._embed_profiles = (*self._embed_profiles, prof)
         self._recompute_frame_ancestors()
 
+    def _image_origins(self) -> list:
+        """Los orígenes de los que esta instalación puede cargar imágenes. Hoy: el de las
+        teselas, si hay mapa.
+
+        Sacado de la plantilla configurada y no escrito en ninguna parte: un comodín o un host
+        fijo en el código serían un agujero que sigue abierto el día que nadie usa el mapa. Sin
+        plantilla no devuelve nada, y entonces la política queda exactamente como estaba.
+
+        Se lee del atributo y no del fichero: el ajuste ya está reflejado ahí y esto se llama en
+        CADA respuesta.
+        """
+        tpl = str(getattr(self, '_DCIM_MAP_TILES', '') or '').strip()
+        if not tpl:
+            return []
+        try:
+            from urllib.parse import urlsplit                        # noqa: PLC0415
+            parts = urlsplit(tpl)
+            if parts.scheme in ('http', 'https') and parts.netloc:
+                # El ORIGEN, no la URL: una tesela es `.../{z}/{x}/{y}.png` y la directiva
+                # tiene que cubrir el millón de rutas que hay debajo, no una.
+                return [f'{parts.scheme}://{parts.netloc}']
+        except Exception:                                # pylint: disable=broad-except
+            pass
+        return []
+
     def _recompute_frame_ancestors(self) -> None:
         """Rebuild the iframe allowlist: admin-configured origins + every registered embed
         profile whose flag attr is currently on. Cheap, called on config change / at startup."""

@@ -1,0 +1,206 @@
+{# ================================================================
+   DCIM — el cableado declarado, contra lo que los dispositivos ven.
+
+   Aquí el inventario deja de ser documentación. Un cable declarado no vale por sí solo: vale
+   porque con él tenemos las **dos mitades**. «El switch ve a este servidor por la Gi1/0/7» es un
+   hecho suelto; con la etiqueta al lado es «y lo declarado dice que ese puerto va al panel B, así
+   que o la etiqueta miente o alguien movió el latiguillo».
+
+   Cuatro estados, y ninguno es un error del panel:
+
+   * **coincide** — lo aburrido, que es lo que se quiere;
+   * **no se ve** — una PREGUNTA: entre los dos extremos puede haber un panel pasivo, que no
+     aparece en ningún LLDP porque es un trozo de metal;
+   * **otro puerto** — casi siempre alguien que movió el latiguillo y no cambió la etiqueta;
+   * **sin declarar** — casi siempre alguien que enchufó y no lo apuntó.
+
+   Que «no se ve» NO sea rojo es una decisión, no un despiste: pintar de rojo lo que no se puede
+   confirmar llena la pantalla de avisos irresolubles, y una pantalla así se deja de mirar.
+   ================================================================ #}
+
+//: Lo que devolvió `/cables`, o `null` mientras no se ha abierto. Se pide aparte del armario
+//: porque construir el mapa de la flota es caro y casi nadie abre un rack para eso.
+let _dcCables = null;
+
+async function _dcCablesOpen() {
+    const rack = (_dcimRack || {}).rack;
+    if (!rack) return;
+    _dcCables = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}/cables`) || {};
+    renderDcim();
+}
+
+function _dcCablesClose() {
+    _dcCables = null;
+    renderDcim();
+}
+
+//: Cómo se lee cada estado. Escrito clave a clave y no concatenando el estado a un prefijo: una
+//: clave construida así no la ve ni un `grep` ni el guardián de palabras.
+function _dcSeenWord(seen) {
+    if (seen === 'seen') return t('dcim_cable_seen');
+    if (seen === 'unseen') return t('dcim_cable_unseen');
+    if (seen === 'other_port') return t('dcim_cable_other_port');
+    return t('dcim_cable_passive');
+}
+
+function _dcSeenTone(seen) {
+    if (seen === 'seen') return 'success';
+    if (seen === 'other_port') return 'danger';
+    // «No se ve» va en gris y no en rojo: puede haber un panel pasivo en medio, y pintar de
+    // rojo lo que no se puede confirmar llena la pantalla de avisos que nadie puede resolver.
+    return 'secondary';
+}
+
+function _dcCablesHtml() {
+    const d = _dcCables || {};
+    const c = d.counts || {};
+    return `<div class="card mb-3">
+        <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-ethernet"></i>
+            <span class="fw-semibold">${esc(t('dcim_cables'))}</span>
+            <span class="text-muted ss-fs-2 ss-tabular">${
+                esc(tf('dcim_cables_note', c.seen || 0, c.unseen || 0,
+                       c.other_port || 0, c.undeclared || 0))}</span>
+            <div class="ms-auto d-flex gap-2">
+                ${_dcimMay('dcim_cable_edit') ? `<button class="btn btn-sm btn-secondary"
+                        onclick="_dcCableNew()"><i class="bi bi-plus-lg me-1"></i>${
+                        esc(t('dcim_cable'))}</button>` : ''}
+                <button class="btn btn-sm btn-secondary" onclick="_dcCablesClose()">
+                    <i class="bi bi-x-lg"></i></button>
+            </div>
+        </div>
+        <div class="card-body py-2">
+            ${_dcCableTable(d.cables || [])}
+            ${_dcUndeclared(d.undeclared || [])}
+        </div>
+    </div>`;
+}
+
+function _dcCableTable(cables) {
+    if (!cables.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_no_cables'))}</div>`;
+    const puede = _dcimMay('dcim_cable_edit');
+    return `<div class="table-responsive"><table class="table table-sm mb-0 align-middle">
+        <thead><tr>
+            <th>${esc(t('dcim_cable_label'))}</th>
+            <th>${esc(t('dcim_cable_from'))}</th>
+            <th>${esc(t('dcim_cable_to'))}</th>
+            <th>${esc(t('dcim_cable_check'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${cables.map(c => `<tr>
+            <td>${c.color ? `<span class="ss-swatch me-1"
+                    style="background:${escAttr(c.color)}"></span>` : ''}<span
+                class="fw-semibold">${esc(c.label || '—')}</span>
+                <span class="text-muted ss-fs-1 ms-1">${esc(t('dcim_cable_' + c.kind) || '')}</span></td>
+            <td class="ss-fs-2">${esc(c.a_label || '—')}${
+                c.a_port ? ` <span class="text-muted ss-tabular">${esc(c.a_port)}</span>` : ''}</td>
+            <td class="ss-fs-2">${esc(c.b_label || '—')}${
+                c.b_port ? ` <span class="text-muted ss-tabular">${esc(c.b_port)}</span>` : ''}</td>
+            <td><span class="badge text-bg-${_dcSeenTone(c.seen)} fw-normal"
+                    title="${escAttr(_dcSeenTip(c))}">${esc(_dcSeenWord(c.seen))}</span>${
+                c.ports_seen && c.ports_seen.length
+                    ? ` <span class="text-muted ss-fs-1 ss-tabular">${
+                        esc(c.ports_seen.join(', '))}</span>` : ''}</td>
+            <td class="text-end">${puede ? `<button class="btn btn-sm btn-warning"
+                onclick="_dcCableDrop(${jsStr(c.uid)},${jsStr(c.label || '')})"
+                ><i class="bi bi-trash"></i></button>` : ''}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+/** Por qué está en ese estado, dicho entero. Un estado que hay que interpretar no informa: dice
+ *  que pasa algo y deja el trabajo donde estaba. */
+function _dcSeenTip(c) {
+    if (c.seen === 'seen') return t('dcim_cable_seen_tt');
+    if (c.seen === 'other_port') return t('dcim_cable_other_port_tt');
+    if (c.seen === 'passive') return t('dcim_cable_passive_tt');
+    return t('dcim_cable_unseen_tt');
+}
+
+/** Y lo que se ve sin que nadie lo haya declarado — que casi siempre es trabajo pendiente:
+ *  alguien enchufó y no lo apuntó. Solo entre máquinas que están en un armario: un enlace al
+ *  portátil de alguien no es cableado de sala y llenaría la lista de ruido. */
+function _dcUndeclared(filas) {
+    if (!filas.length) return '';
+    return `<div class="mt-3">
+        <div class="ss-fs-2 text-muted mb-1">
+            <i class="bi bi-question-circle me-1"></i>${esc(t('dcim_undeclared'))}</div>
+        <table class="table table-sm mb-0 align-middle"><tbody>${filas.map(f => `<tr>
+            <td class="ss-fs-2">${esc(_dcimHostName(f.from))}</td>
+            <td class="ss-fs-2">${esc(_dcimHostName(f.to))}</td>
+            <td class="text-muted ss-fs-1 ss-tabular">${
+                esc(Object.values(f.ports || {}).flat().join(', '))}</td>
+            <td class="text-end">${f.bundle > 1 ? `<span class="badge bg-body-secondary
+                text-body-secondary border fw-normal">${
+                esc(tf('dcim_bundle', f.bundle))}</span>` : ''}</td>
+        </tr>`).join('')}</tbody></table>
+    </div>`;
+}
+
+// ── Escribir ─────────────────────────────────────────────────────────────────
+
+/** Declarar un cable entre dos equipos de este armario.
+ *
+ *  Los dos extremos se eligen de lo que hay dentro, que es el caso normal y el único que se
+ *  puede ofrecer sin una pantalla de buscar por toda la sala. Un cable que sale del armario se
+ *  declara desde el otro extremo o cambiando el destino después. */
+function _dcCableNew() {
+    const items = ((_dcimRack || {}).items || []);
+    if (items.length < 2) return showToast(t('dcim_need_two_items'), 'warning');
+    _dcNewCable = !_dcNewCable;
+    renderDcim();
+}
+
+//: Si el formulario de cable nuevo está abierto.
+let _dcNewCable = false;
+
+function _dcCableFormHtml() {
+    if (!_dcNewCable || !_dcimMay('dcim_cable_edit')) return '';
+    const items = ((_dcimRack || {}).items || []);
+    const opciones = (id) => `<select id="${id}" class="form-select form-select-sm"
+            style="max-width:12rem">${items.map(i =>
+        `<option value="${escAttr(i.uid)}">${esc(_dcimItemName(i))}</option>`).join('')}</select>`;
+    return `<div class="d-flex align-items-end gap-2 flex-wrap p-2 rounded bg-body-secondary mb-2">
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_from'))}${opciones('dcc-a')}</label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_port'))}
+            <input id="dcc-ap" class="form-control form-control-sm ss-tabular"
+                   style="max-width:8rem"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_to'))}${opciones('dcc-b')}</label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_port'))}
+            <input id="dcc-bp" class="form-control form-control-sm ss-tabular"
+                   style="max-width:8rem"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_label'))}
+            <input id="dcc-l" class="form-control form-control-sm" style="max-width:9rem"
+                   onkeydown="if(event.key==='Enter')_dcCableSave()"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_color'))}
+            <input id="dcc-c" type="color" value="#3b82f6"
+                   class="form-control form-control-sm form-control-color"></label>
+        <button class="btn btn-sm btn-primary" onclick="_dcCableSave()">
+            <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+        <button class="btn btn-sm btn-secondary" onclick="_dcNewCable=false;renderDcim()">
+            ${esc(t('cancel'))}</button>
+    </div>`;
+}
+
+async function _dcCableSave() {
+    const val = (id) => (document.getElementById(id) || {}).value || '';
+    if (val('dcc-a') === val('dcc-b'))
+        return showToast(t('dcim_cable_same_item'), 'warning');
+    const r = await _dcimSend('POST', '/api/v1/dcim/cables', {
+        a_item: val('dcc-a'), a_port: val('dcc-ap'),
+        b_item: val('dcc-b'), b_port: val('dcc-bp'),
+        label: val('dcc-l'), color: val('dcc-c'),
+    });
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcNewCable = false;
+    _dcCablesOpen();
+}
+
+function _dcCableDrop(uid, label) {
+    showConfirmModal(tf('dcim_cable_drop_q', label || '—'), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/cables/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcCablesOpen();
+    });
+}

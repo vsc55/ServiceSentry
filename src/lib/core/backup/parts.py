@@ -15,6 +15,8 @@ Imports nothing from its siblings: it names tables, it does not open archives.
 
 from __future__ import annotations
 
+import os
+
 
 # Engine bookkeeping. Never dumped, never restored: they describe the storage, not the install,
 # and writing SQLite's own statistics into a MySQL restore is at best noise.
@@ -40,11 +42,45 @@ PARTS: tuple = (
     # says so in no way an operator notices until a restore comes back empty.
     {'id': 'syslog', 'kind': 'db', 'tables': ('syslog', 'syslog_drops'), 'db': 'syslog',
      'default': False, 'required': False, 'label_key': 'backup_part_syslog'},
+    # A directory of the CORE's own — the first one. Floor plans are files somebody uploaded,
+    # and the database holds only their names: a copy without them restores rooms whose plans
+    # are gone. On by default because they are small and irreplaceable, which is the pair of
+    # properties that decides this.
+    {'id': 'dcim_media', 'kind': 'dir', 'dir': 'dcim_media',
+     'default': True, 'required': False, 'label_key': 'backup_part_dcim_media'},
 )
 
 PART_IDS: tuple = tuple(p['id'] for p in PARTS)
 _CLAIMED_TABLES: frozenset = frozenset(
     t for p in PARTS if p['kind'] == 'db' and p['tables'] for t in p['tables'])
+
+
+def dir_parts() -> list:
+    """Every part that is a DIRECTORY under ``var_dir`` — the core's own, then the modules'.
+
+    One list because the two are copied and restored identically: a folder in, a folder out.
+    The loops that do it used to ask for the modules' alone, which was right while the core had
+    no directories of its own and stopped being right the day it did — and it would have failed
+    the way this domain's failures do, by simply not copying something and saying nothing.
+    """
+    core = [{'id': p['id'], 'dir': p['dir'], 'default': p['default'],
+             'label_i18n': {}, 'label_key': p['label_key']}
+            for p in PARTS if p.get('kind') == 'dir']
+    return core + module_parts()
+
+
+def part_dir(part: dict, var_dir: str, dirs=None) -> str:
+    """Dónde vive de verdad la carpeta de una parte.
+
+    Casi siempre `<var_dir>/<lo declarado>`, que es lo que vale para todo lo de un módulo. Pero
+    una parte del núcleo puede ser **configurable** —la de los planos lo es— y entonces resolver
+    contra `var_dir` copiaría la carpeta por defecto, vacía, y lo diría como un éxito. Un fallo
+    de copia que solo se ve en una restauración es el peor que hay.
+    """
+    override = str((dirs or {}).get(part.get('id')) or '').strip()
+    if override:
+        return override
+    return os.path.join(var_dir, *str(part.get('dir') or '').split('/'))
 
 
 def module_parts() -> list:

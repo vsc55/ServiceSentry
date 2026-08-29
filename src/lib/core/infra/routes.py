@@ -252,6 +252,21 @@ def register(app, wa):
                                          'role': role, 'on': bool(on)})
         return jsonify({'ok': True, 'watch': (store.get(uid, decrypt=False) or {}).get('watch')})
 
+    def _topology(lang=''):
+        """Cómo se arma el mapa de esta flota, con los ayudantes que dependen de la sesión.
+
+        Envuelto aquí y DECLARADO en el panel (`wa._infra_topology`) porque otra sección lo
+        necesita: la reconciliación del cableado contrasta lo declarado con lo que los dispositivos
+        ven, y eso es este mismo mapa. Copiarlo allí serían dos formas de armarlo y, el día que
+        una cambie, dos pantallas contando cosas distintas de la misma flota.
+
+        Se declara en vez de que la otra sección importe estas rutas: el núcleo no nombra a sus
+        secciones, y una sección que importa las rutas de otra las ata para siempre.
+        """
+        return infra_svc.topology(wa, _visible, _checks_for_host, _said_sources, lang)
+
+    wa._infra_topology = _topology
+
     @app.route('/api/v1/infra/map', methods=['GET'])
     @infra_view_req
     def api_infra_map():
@@ -267,73 +282,10 @@ def register(app, wa):
         the machines running an agent for it answer. Every edge says how it was arrived at so
         the screen can draw the difference instead of flattening it.
         """
-        store = getattr(wa, '_hosts_store', None)
-        if store is None:
-            return jsonify({'networks': [], 'nodes': [], 'edges': [], 'unplaced': []})
-        hosts = store.list(decrypt=False)
-        status_seed = wa._read_check_status()
-        bound_mods = hosts_svc._host_bound_modules(wa)
-        hosts_svc.enrich_hosts(
-            hosts, hosts_svc._host_statuses(wa), bound_mods,
-            infra_svc.fleet_identity(status_seed, hosts, _said_sources(bound_mods)))
-        hosts = _visible(hosts, set(wa._get_session_permissions() or []))
-        # Read ONCE for the whole fleet and not once per machine: the state table and the
-        # history index are the two expensive reads on this path, and a map of forty machines
-        # would be forty of each.
-        status_raw = wa._read_check_status()
-        hist_by_mod: dict = {}
-        # …and flat, for the other question this same read answers: WHICH machines the history
-        # remembers at all. A machine in maintenance has its live keys pruned, so without this
-        # it falls off the map entirely — the same disappearance the device page had.
-        every_series: list = []
-        hist_store = getattr(wa, '_history', None)
-        if hist_store is not None:
-            try:
-                every_series = list(hist_store.get_index())
-                for series in every_series:
-                    hist_by_mod.setdefault(series.get('module'), []).append(series)
-            except Exception:                       # pylint: disable=broad-except
-                pass                                # a map is not worth failing the page for
-        lang = session.get('lang') or wa._DEFAULT_LANG
-        meta_cache: dict = {}
-        attrs_by_host: dict = {}
-        for host in hosts:
-            uid = str(host.get('uid') or '')
-            bound: dict = {}
-            for (bare, _coll), items in _checks_for_host(wa, uid).items():
-                for key, item in items.items():
-                    bound.setdefault(bare, {})[key] = str((item or {}).get('label') or '').strip()
-            # A device sampled through the registry has no item to be bound BY, and its
-            # addresses are exactly what places it on the map.
-            sampled = (hosts_svc.host_sampled_keys(status_raw, uid)
-                       or hosts_svc.host_recorded_keys(every_series, uid))
-            for bare, keys in sampled.items():
-                for key in keys:
-                    bound.setdefault(bare, {}).setdefault(key, '')
-            for mod in bound:
-                if mod not in meta_cache:
-                    meta_cache[mod] = history_svc.history_meta(
-                        wa._modules_dir, mod, lang, wa._var_dir or '')
-            results = hosts_svc.build_host_status(bound, status_raw, hist_by_mod)
-            fields = {mod: (meta_cache.get(mod) or {}).get('fields') or {} for mod in bound}
-            # …and what to CALL each thing that answered, which a profile of pure identity
-            # facts can only say here: it charts nothing, so it is in no field map.
-            named = {mod: (meta_cache.get(mod) or {}).get('sources') or {} for mod in bound}
-            attrs_by_host[uid] = infra_svc.attributes(
-                results, infra_svc.sources_of(fields, named))
-        # What devices SAW, which is what places a machine on a switch port when it speaks
-        # no LLDP. Its own store because a forwarding table is hundreds of volatile rows that
-        # are not checks (see lib/core/infra/evidence.py); read here in one go for every kind.
-        evidence: dict = {}
-        db = getattr(wa, '_db_connector', None) or getattr(wa, '_db', None)
-        if db is not None:
-            try:
-                store = infra_evidence.EvidenceStore(db)
-                for kind in ('fdb', 'bridgeport', 'ifname', 'arp'):
-                    evidence[kind] = store.by_device(kind)
-            except Exception:                       # pylint: disable=broad-except
-                evidence = {}                       # a map without the ports beats no map
-        return jsonify(infra_topology.build(hosts, attrs_by_host, evidence))
+        # Armado en `infra.service` y no aquí: la sección de cableado necesita el MISMO
+        # mapa para contrastar lo declarado con lo que los dispositivos ven, y dos copias de
+        # cómo se arma serían dos pantallas contando cosas distintas de la misma flota.
+        return jsonify(_topology(session.get('lang') or wa._DEFAULT_LANG))
 
     @app.route('/api/v1/infra/map-layout', methods=['GET', 'PUT'])
     @infra_view_req

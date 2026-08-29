@@ -47,6 +47,44 @@ class _StoresMixin:
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
+        # Where the equipment IS and whose it is — the other axis of the same fleet. Its own
+        # store rather than columns on `hosts`, because most of what fills a rack answers to
+        # nothing: a patch panel, a blanking plate, a switched-off server still bolted in.
+        from lib.core.dcim.store import DcimStore  # noqa: PLC0415
+        from lib.core.dcim.catalog import CatalogStore  # noqa: PLC0415
+        from lib.core.dcim.schemas import SchemaStore  # noqa: PLC0415
+        self._dcim_store = DcimStore(self._db_connector)
+        self._dcim_catalog = CatalogStore(self._db_connector)
+        # Qué campos tiene un modelo, dicho por quien publica la biblioteca — y clonable, para
+        # las cosas de una sala que no están en ningún repositorio.
+        self._dcim_schemas = SchemaStore(self._db_connector)
+        # Y lo que de verdad se compra, que no está en el catálogo de ningún fabricante: un R740
+        # con doce DIMM, ocho SSD y una controladora. De aquí salen los equipos del inventario
+        # con sus piezas ya puestas, y lo único que queda por teclear es el número de serie.
+        from lib.core.dcim.builds import BuildStore  # noqa: PLC0415
+        self._dcim_builds = BuildStore(self._db_connector)
+        # Qué se pregunta de un componente de cada clase. Viene en un JSON con el panel y se
+        # puede sustituir por uno más nuevo guardado aquí — que es lo que permite añadir el
+        # formato de una tarjeta sin publicar una versión.
+        from lib.core.dcim.profiles import ProfileStore  # noqa: PLC0415
+        self._dcim_profiles = ProfileStore(self._db_connector)
+        # Por dónde se enchufa cada cosa. El mismo almacén y la misma tabla: `dc_profile` lleva
+        # un `name` desde el primer día precisamente para el segundo documento que quisiera
+        # poder actualizarse sin publicar una versión, y este es ese. Lo único suyo es cómo se
+        # limpia lo que entra, porque un catálogo de conectores no tiene clases ni atributos.
+        from lib.core.dcim import connectors as dcim_connectors  # noqa: PLC0415
+        self._dcim_conns = ProfileStore(self._db_connector, norm=dcim_connectors.normalise,
+                                        scope=dcim_connectors.SCOPE)
+        # Lo que no es una foto: el manual, la hoja de características, el zip del firmware. Hoy
+        # eso vive en la carpeta de alguien, y el día que hace falta es un martes a las once.
+        from lib.core.dcim.files import FileStore  # noqa: PLC0415
+        self._dcim_files = FileStore(self._db_connector)
+        # Con qué sale un equipo — Debian, RouterOS, ESXi—, escrito UNA vez. En una caja de
+        # texto por plantilla acaban siendo cuatro formas de escribir lo mismo, y entonces
+        # «cuántas máquinas hay que actualizar» no tiene respuesta. Y no es solo de un
+        # dispositivo físico: una máquina virtual corre lo mismo y pregunta lo mismo.
+        from lib.core.dcim.platforms import PlatformStore  # noqa: PLC0415
+        self._dcim_platforms = PlatformStore(self._db_connector)
         # What the panel does in the background, after it has done it. The package is handed
         # the connector rather than going looking for one: a job finishes inside a worker
         # thread that has no web admin, no request and no handle of its own, and threading one

@@ -24,7 +24,7 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **44 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **67 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -39,7 +39,8 @@ Hay **44 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Configuración | `config`, `module_config`, `module_config_items` |
 | Activos / secretos | `credentials`, `hosts` |
 | Auditoría / historial / estado | `audit`, `history`, `check_state`, `job_history` (qué hizo cada trabajo en segundo plano, después de hacerlo) |
-| Infraestructura | `net_evidence` (lo que cada aparato ha *visto*: tabla de reenvío y caché ARP) |
+| Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
+| Inventario físico (DCIM) | `dc_org`, `dc_owner` (de quién es cada cosa), `dc_site`, `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_pdu` y `dc_feed` (de qué come cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
@@ -481,7 +482,7 @@ config.json (solo lectura/arranque) → BD (editable).
 | uid | TEXT | no | — | PK |
 | name | TEXT | no | `''` | UNIQUE |
 | address | TEXT | no | `''` | |
-| kind | TEXT | no | `'none'` | Cómo ejecuta el panel comandos en el aparato: `none` (ninguno — el defecto, y la respuesta para equipo que sólo se lee por SNMP), `local` (en la máquina del panel) o `remote` (por SSH, con la conexión de `profiles['ssh']`). No es lo que el aparato **es** (`device_type`) ni los protocolos que contesta (`profiles`) |
+| kind | TEXT | no | `'none'` | Cómo ejecuta el panel comandos en el dispositivo: `none` (ninguno — el defecto, y la respuesta para equipo que sólo se lee por SNMP), `local` (en la máquina del panel) o `remote` (por SSH, con la conexión de `profiles['ssh']`). No es lo que el dispositivo **es** (`device_type`) ni los protocolos que contesta (`profiles`) |
 | os | TEXT | no | `'auto'` | |
 | maintenance | INTEGER | no | `0` | |
 | virtual | INTEGER | no | `0` | (reservada, entrecomillada) |
@@ -606,13 +607,13 @@ Restricción única: `(module, key, metric)`. Sin índices secundarios.
 > para una tabla que crece de una en una. Dos límites, porque contestan preguntas distintas:
 > cuántos se guardan (`jobs_history_keep`) y hasta dónde atrás (`jobs_history_days`).
 
-### `net_evidence` — lo que un aparato ha visto (no lo que un check ha encontrado)
+### `net_evidence` — lo que un dispositivo ha visto (no lo que un check ha encontrado)
 
 [lib/core/infra/evidence.py:38](../src/lib/core/infra/evidence.py#L38)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
-| uid | TEXT | no | — | el aparato que lo VIO |
+| uid | TEXT | no | — | el dispositivo que lo VIO |
 | kind | TEXT | no | — | qué clase de avistamiento (`fdb`, `bridgeport`, `ifname`, `arp`) |
 | key | TEXT | no | — | lo visto (una MAC, una dirección) |
 | value | TEXT | sí | — | dónde se vio (un puerto, una MAC) |
@@ -625,17 +626,742 @@ Restricción única: `(uid, kind, key)`. Índice: `idx_net_evidence_kind(kind, k
 > `check_state` por cuatro motivos a la vez: son **muchas** (una fila por MAC aprendida, miles
 > en un switch), son **volátiles** (caducan en minutos, así que se crearían y podarían cada
 > ciclo), **nadie las quiere como checks** («la MAC aa:bb ya no está en el puerto 8» no es una
-> alerta, es alguien yendo a una reunión) y sólo valen algo **cruzadas** entre aparatos. Se
-> guarda sólo la foto actual, **reemplazada entera** por aparato y clase: que una entrada
+> alerta, es alguien yendo a una reunión) y sólo valen algo **cruzadas** entre dispositivos. Se
+> guarda sólo la foto actual, **reemplazada entera** por dispositivo y clase: que una entrada
 > desaparezca es información —una MAC que caducó es una máquina que ya no está en ese puerto—
 > y fusionar dejaría el mapa dibujando un cable que se desenchufó la semana pasada.
 >
 > Quién la escribe es el **módulo**, y qué cuenta como avistamiento lo dice el **perfil**
 > (`"evidence": "<clase>"` en una métrica): el núcleo no sabe qué es una tabla de reenvío.
 
+
+---
+
+## Inventario físico (DCIM)
+
+Dónde está el equipamiento y de quién es. **Dos árboles, no uno**: `dc_site` → `dc_room` →
+`dc_rack` → `dc_item` es la contención, estrictamente anidada; `dc_org` + `dc_owner` es la
+pertenencia, que no contiene nada. Ver [explica-dcim.md](explica-dcim.md).
+
+### `dc_org` — empresa
+
+[lib/core/dcim/store.py](../src/lib/core/dcim/store.py)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| name | TEXT | no | `''` | único |
+| short | TEXT | no | `''` | forma corta para insignias y alzados |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+### `dc_owner` — de quién es cada cosa
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| scope | TEXT | no | — | `site` \| `room` \| `rack` \| `item` \| `host` |
+| uid | TEXT | no | — | lo que pertenece a alguien |
+| org_uid | TEXT | no | — | la empresa |
+| set_at | TEXT | no | `''` | cuándo se dijo |
+| set_by | TEXT | no | `''` | quién lo dijo |
+
+Único: `(scope, uid)`. Índice: `idx_dc_owner_org(org_uid)`.
+
+> **Una fila por pertenencia DICHA**, nunca por pertenencia heredada. La regla —dila donde
+> quieras, se hereda hacia abajo, la más concreta manda— es una sola, y escrita como una columna
+> `org_uid` en cinco tablas son cinco implementaciones de ella. Guardar lo heredado sería además
+> una mentira que sobrevive al día en que alguien mueve un rack de sala.
+>
+> `scope` incluye `host`, que **no es una tabla de este dominio**: una VM, un VIP o una máquina
+> encima de una mesa también son de alguien y no están en ningún rack.
+
+### `dc_site` — datacenter o sede
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| name | TEXT | no | `''` | único |
+| address | TEXT | no | `''` | |
+| lat | REAL | sí | — | dónde está; se guarda aunque no se dibuje |
+| lon | REAL | sí | — | |
+| timezone | TEXT | no | `''` | |
+| operator_uid | TEXT | no | `''` | **quién lo opera**, que no es de quién es lo de dentro |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+| pos_x | REAL | sí | — | dónde cae en el **mapa de sedes** (no en la Tierra): el mapa no usa teselas, así que las sedes son cajas que alguien coloca. NULL = nadie la ha colocado, y entonces se sitúa proyectando `lat`/`lon` |
+| pos_y | REAL | sí | — | |
+
+### `dc_room` — sala
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| site_uid | TEXT | no | — | índice `idx_dc_room_site` |
+| name | TEXT | no | `''` | |
+| plan | TEXT | no | `''` | **nombre** del plano en el almacén de medios, nunca una ruta |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+| cooling | TEXT | no | `''` | cómo se enfría; vacío = **nadie lo ha dicho**, que no es `none` |
+| plan_mm | INTEGER | no | `0` | ancho del plano **en la sala**, en mm; el alto sale de la proporción de la imagen. 0 = sin escalar |
+| width_mm | INTEGER | no | `0` | cuánto mide la sala; 0 = nadie lo ha dicho y el plano se encuadra a lo que hay |
+| depth_mm | INTEGER | no | `0` | |
+| tile_mm | INTEGER | no | `600` | la baldosa del suelo técnico. Es un dato de la sala y no una constante —hay suelos de 500 y de 610— y de ahí salen el imán del editor y los nombres de posición («B7»), que es como se dan por teléfono |
+
+### `dc_rack` — rack
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| room_uid | TEXT | no | — | índice `idx_dc_rack_room` |
+| name | TEXT | no | `''` | |
+| u_height | INTEGER | no | `42` | |
+| width_mm | INTEGER | no | `600` | milímetros, que es como se venden |
+| depth_mm | INTEGER | no | `1000` | |
+| pos_x | REAL | no | `0` | dónde está en el plano de la sala |
+| pos_y | REAL | no | `0` | |
+| rotation | INTEGER | no | `0` | hacia dónde mira |
+| desc_units | INTEGER | no | `0` | 1 = numerado de arriba abajo |
+| rail_front_mm | INTEGER | no | `0` | de la puerta al mástil delantero |
+| rail_depth_mm | INTEGER | no | `0` | **entre mástiles** — lo que decide si un servidor entra |
+| rail_rear_mm | INTEGER | no | `0` | del mástil trasero al fondo: por ahí salen los cables |
+| access | TEXT | no | `'front,rear,left,right'` | **por qué lados se llega**; un armario de pared no tiene trasera |
+| row_uid | TEXT | no | `''` | a qué fila pertenece. Vacío = suelto, que es un estado real: el armario de comunicaciones de un rincón no está en ninguna fila y nunca lo estará |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+> La posición en el plano vive **aquí** y no en la disposición guardada del navegador: dónde
+> ESTÁ un rack es un hecho de la sala, y el siguiente que abra el plano necesita la misma
+> respuesta.
+>
+> **El acceso se guarda como el HECHO** —qué lados son accesibles— y no como un tipo de
+> armario: dos racks iguales, uno en medio de un pasillo y otro colgado en la pared, no se
+> manejan igual, y la diferencia es dónde están. La pantalla ofrece las colocaciones corrientes
+> como atajo para rellenarlo. Lo no dicho es **todo accesible** y no nada: un inventario que se
+> está entrando tiene cientos de racks sin este dato, y tratarlos como inaccesibles llenaría la
+> pantalla de avisos sobre algo que nadie ha afirmado.
+>
+> **Los tres tramos de profundidad no se obligan a sumar `depth_mm`.** Lo que decide si un
+> servidor entra no es el fondo del armario sino `rail_depth_mm` —donde se atornillan sus
+> raíles— más lo que quede detrás para los cables: un armario de 1000 con los mástiles mal
+> puestos admite menos que uno de 800 bien puestos. Cuando la suma no cuadra con el fondo
+> declarado, el panel lo **dice** y no lo corrige: lo que alguien midió con un metro y lo que
+> dice la suma son dos cosas, y quedarse con la segunda pierde la primera.
+
+### `dc_row` — una fila de racks
+
+Una fila **se declara**, no se deduce de que los racks caigan alineados: eso falla de las dos
+formas —dos racks alineados por casualidad parecen una fila, y una fila con un hueco deja de
+parecerlo—. Y no es una etiqueta: de ella cuelga a qué pasillo da cada cara, que es lo que decide
+si el aire caliente de una fila entra en la aspiración de la de enfrente. Eso no se deduce de la
+orientación de los racks —dos filas enfrentadas comparten pasillo frío porque alguien lo diseñó
+así— y por eso se dice.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| room_uid | TEXT | no | — | la sala; índice |
+| name | TEXT | no | `''` | «la fila B», que es como se dice por teléfono |
+| front_aisle | TEXT | no | `''` | de qué pasillo aspira |
+| rear_aisle | TEXT | no | `''` | a cuál descarga. Cruzar los dos entre filas da el aviso de «está respirando lo que expulsa la de enfrente», que no se ve mirando el plano: las cajas están perfectamente alineadas |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+### `dc_link` — un enlace entre dos sedes
+
+La misma pregunta que la potencia, un nivel arriba: **si se cae este enlace, ¿qué sede se queda
+sola?** Y se rompe igual de callada — dos circuitos contratados a dos operadores distintos que
+resultan ir por la misma zanja son dos líneas en el mapa y un solo camino en el suelo.
+
+Los extremos son **sedes**, y opcionalmente el equipo que lo termina en cada punta: un circuito no
+tiene estado —es un contrato— y el router que lo termina sí. Sin ninguna punta enlazada, el enlace
+no sale ni bien ni mal: sale sin vigilar, que es lo que es.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| a_site | TEXT | no | — | una punta; índice |
+| b_site | TEXT | no | — | la otra; índice |
+| a_item | TEXT | no | `''` | el equipo que lo termina, si se sabe: es lo único que le da estado |
+| b_item | TEXT | no | `''` | |
+| kind | TEXT | no | `'ipsec'` | uno de `LINK_KINDS`. Importa para la redundancia de verdad: dos VPN sobre la misma línea de internet no son dos caminos |
+| provider | TEXT | no | `''` | quién lo vende |
+| circuit_id | TEXT | no | `''` | **la referencia que hay que decir por teléfono a las tres de la mañana**. Es lo único de esta tabla que no se puede deducir de ninguna otra parte |
+| bandwidth_mbps | INTEGER | no | `0` | |
+| path | TEXT | no | `''` | por dónde va físicamente, cuando alguien lo sabe. De aquí sale el aviso de «dos operadores, una zanja» |
+| label | TEXT | no | `''` | |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+### `dc_cable` — un cable de red declarado
+
+Lo que alguien **dijo** que hay enchufado. No es documentación: es la mitad que faltaba. El panel
+ya sabía lo que los dispositivos dicen ver (LLDP, tablas de reenvío) y no sabía nada de lo declarado,
+así que «el switch ve a este servidor por la Gi1/0/7» era un hecho suelto. Con la etiqueta al lado
+pasa a ser «y lo declarado dice que ese puerto va al panel B, así que o la etiqueta miente o
+alguien movió el latiguillo».
+
+**Los dos extremos son `dc_item`, no máquinas.** Un panel de parcheo no contesta a nada y es donde
+acaba la mitad de los cables de una sala: exigir una máquina haría inexpresable justo el cable que
+se documenta a mano, porque nadie más lo va a saber.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| a_item | TEXT | no | — | un extremo; índice |
+| a_port | TEXT | no | `''` | el puerto declarado en ese extremo |
+| b_item | TEXT | no | — | el otro extremo; índice |
+| b_port | TEXT | no | `''` | |
+| kind | TEXT | no | `'copper'` | uno de `CABLE_KINDS`. Un latiguillo de cobre y una fibra monomodo no se cambian igual ni se piden igual, y en la caja de repuestos hay de uno y no del otro |
+| label | TEXT | no | `''` | lo que pone en la etiqueta, que es con lo que trabaja quien está allí con una linterna. Se repite, se borra y se equivoca — y aun así es el dato |
+| color | TEXT | no | `''` | |
+| length_mm | INTEGER | no | `0` | |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+### `dc_source` — lo que hay aguas arriba de una regleta
+
+Acometidas, cuadros, SAI y grupos. Las cuatro instalaciones que hay que poder decir son en
+realidad **tres cadenas y un interruptor**:
+
+```text
+Cuadro → PDU
+Cuadro → SAI → PDU
+Cuadro → SAI → Cuadro → PDU        …y esa misma con el bypass echado: Cuadro → PDU
+```
+
+La última no es una instalación distinta: es la anterior **con el SAI fuera**. Por eso el bypass
+no es otra cadena sino una marca en el nodo que se salta — modelarlas como dos obligaría a
+mantener dos verdades sobre el mismo cobre y a acordarse de cambiar las dos. Y por eso la misma
+cadena se puede recorrer dos veces, con el bypass y sin él, que es lo que contesta **«¿qué pierdo
+si lo echan?» antes de que lo echen**.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| site_uid | TEXT | no | `''` | la sede, no la sala: un cuadro general alimenta varias salas, y atarlo a una obligaría a inventar una copia por sala; índice |
+| name | TEXT | no | `''` | |
+| kind | TEXT | no | `'panel'` | uno de `SOURCE_KINDS`: `mains`, `panel`, `ups`, `generator` |
+| upstream_uid | TEXT | no | `''` | quién lo alimenta a él. Vacío = principio de la cadena, que es lo que es una acometida |
+| bypass | INTEGER | no | `0` | **si ahora mismo se le está saltando**. Lo lleva el nodo que se salta (el SAI) aunque el interruptor esté en el cuadro, que es lo normal |
+| bypass_at | TEXT | no | `''` | dónde está físicamente ese interruptor, para que la etiqueta cuadre con lo que hay en la pared |
+| capacity_w | INTEGER | no | `0` | |
+| autonomy_min | INTEGER | no | `0` | minutos de batería. Sin ellos un SAI es un nombre; con ellos es «tengo ocho minutos para apagar cuarenta máquinas» |
+| host_uid | TEXT | no | `''` | la máquina, si el SAI contesta: dice si está en batería AHORA |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+### `dc_pdu` — una regleta
+
+De qué come un armario. **Una PDU gestionada es además un host**: contesta por SNMP y dice
+cuántos amperios está dando ahora, así que cuando lo es tenemos las dos mitades —lo declarado y
+lo medido— y el desacuerdo entre ellas es la razón de que esto exista.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| rack_uid | TEXT | no | — | el armario; índice |
+| name | TEXT | no | `''` | |
+| feed | TEXT | no | `'a'` | la rama: `a`, `b` o `none`. Decide qué se apaga cuando cae un SAI, y por eso es columna y no una etiqueta dentro del nombre |
+| outlets | INTEGER | no | `0` | cuántas tomas tiene; de aquí sale «cuántas quedan» |
+| capacity_w | INTEGER | no | `0` | lo que aguanta: el límite del que hay que quedarse lejos, no el objetivo |
+| host_uid | TEXT | no | `''` | la máquina, si la regleta contesta |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+| color | TEXT | no | `''` | de qué color se pinta. Vacío = el de su rama (`FEED_COLORS`: A azul, B rojo). Existe porque hay salas con tres alimentaciones y salas donde el color de cada rama estaba decidido antes de que llegara este panel — y discutir con la etiqueta pegada en la regleta de verdad es una discusión que el panel pierde |
+| source_uid | TEXT | no | `''` | de qué cuadro o SAI cuelga. Vacío = nadie lo ha dicho, que es distinto de que no tenga: media sala técnica cuelga de un cuadro que nadie documentó |
+
+### `dc_feed` — un cable de alimentación
+
+Este equipo come de esta regleta. **Una fila por cable y no una columna en el equipo**, porque un
+equipo con una sola fila es justo el hallazgo: tiene dos fuentes y solo una está enchufada, o las
+dos cuelgan de la misma rama.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| item_uid | TEXT | no | — | el equipo; índice |
+| pdu_uid | TEXT | no | — | la regleta; índice |
+| outlet | INTEGER | no | `0` | la toma. 0 = «en esa regleta, no sé en cuál», que es lo que alguien sabe mirando una foto — obligarle a inventarse un número sería peor dato que ninguno |
+| watts_said | INTEGER | no | `0` | lo que **alguien dijo** que consume por este cable. La placa dice el máximo que puede pedir, no lo que pide; se compara con lo medido sin corregir ninguno |
+| label | TEXT | no | `''` | etiqueta del cable |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+### `dc_feature` — lo que hay en la sala que no es un rack
+
+Columnas, puertas, mamparas, climatizadores, cuadros, bandejas, pasillos confinados. **Tabla
+propia y no `dc_item`**: nada las vigila y no contienen nada, así que meterlas con los equipos
+haría que el recuento de una sala incluyera extintores, que el vuelco de estado tuviera que
+aprender a ignorar puertas, y que «equipos sin vigilar» devolviera mamparas. Existen para que el
+plano se pueda leer y planificar: «¿cabe otra fila?» no se contesta sin saber dónde está la
+columna.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| room_uid | TEXT | no | — | la sala; índice |
+| kind | TEXT | no | `''` | uno de `FEATURE_KINDS`, cerrado y validado al escribir |
+| label | TEXT | no | `''` | |
+| pos_x | REAL | no | `0` | milímetros, como un rack — que es lo que deja dibujar las dos cosas en el mismo plano sin convertir nada |
+| pos_y | REAL | no | `0` | |
+| width_mm | INTEGER | no | `600` | |
+| depth_mm | INTEGER | no | `600` | |
+| rotation | INTEGER | no | `0` | grados |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+### `dc_item` — lo que ocupa una U
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| rack_uid | TEXT | no | — | índice `idx_dc_item_rack` |
+| u_start | INTEGER | no | `1` | la U más baja que ocupa |
+| u_height | INTEGER | no | `1` | cuántas ocupa |
+| face | TEXT | no | `'full'` | `full` \| `front` \| `rear` |
+| host_uid | TEXT | no | `''` | el dispositivo del registro, **si lo hay**; índice `idx_dc_item_host` |
+| type_uid | TEXT | no | `''` | el modelo del catálogo, si se ha casado |
+| label | TEXT | no | `''` | lo que está rotulado por delante, que es lo que se lee con una linterna |
+| serial | TEXT | no | `''` | |
+| asset | TEXT | no | `''` | el número que le puso el inventario contable |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+| depth_mm | INTEGER | no | `0` | su fondo; el catálogo no lo sabe (sólo si es de profundidad completa) |
+| role | TEXT | no | `''` | qué CLASE de dispositivo es (`ITEM_ROLES`: servidor, switch, router, cortafuegos, cabina, panel de parcheo, panel de fibra, SAI, regleta, bandeja, KVM, consola, tapa ciega, otro). Vacío = nadie lo ha dicho, que es una pregunta; `other` es una respuesta. De aquí cuelga que un panel de parcheo deje de contarse como «sin vigilar»: no es que nadie lo mire, es que no hay nada que mirar |
+| build_uid | TEXT | no | `''` | de qué **plantilla nació** (`dc_build`); índice `idx_dc_item_build`. No es lo que lleva hoy: las piezas se copian al crearlo y desde ese momento son suyas. Es lo que contesta «cuáles son los veinte del estándar de 2024» aunque a tres les hayan cambiado los discos |
+| purchased_at | TEXT | no | `''` | fecha ISO. Lo que solo tiene ESTA caja: ningún modelo ni plantilla puede saberlo |
+| warranty_until | TEXT | no | `''` | fecha ISO. Sin ella, «qué se queda sin garantía este trimestre» no tiene dónde contestarse. Texto y no fecha nativa: son tres motores con tres tipos, y lo único que se hace con esto es ordenarlo y compararlo, que en ISO es lo mismo |
+| supplier | TEXT | no | `''` | a quién se le compró |
+| u_slots | INTEGER | no | `1` | en cuántas partes se divide el U que ocupa. `1` es el U entero, que es lo que vale todo lo que se escribió antes de que un U pudiera partirse — así que esta columna llega por `ADD COLUMN` y no cambia ni una fila. Un **número** y no un enum de «arriba \| abajo \| izquierda \| derecha»: en cuántas se parte lo decide quien monta, dos para un patch panel de 0,5 U y ocho para una bandeja de Raspberry, y una lista escrita aquí se queda corta el primer día |
+| u_slot | INTEGER | no | `1` | cuál de esas partes toma, empezando en 1 |
+| u_slot_span | INTEGER | no | `1` | cuántas partes seguidas toma. Dos cosas en un U se pisan o no comparando fracciones **con enteros** (`fits`), porque un tercio no existe en coma flotante y dos que casi encajan es exactamente el dibujo que no puede existir |
+| u_split | TEXT | no | `'width'` | por dónde se parte: `width` (uno al lado del otro — dos mini PC, ocho Raspberry) o `height` (uno encima del otro — dos patch panel de 0,5 U). A la rejilla le da igual, porque lo que comprueba es si el trozo está libre; al **dibujo** no, que existe para parecerse a lo que se ve al abrir el armario |
+| parent_uid | TEXT | no | `''` | montado **en** otro elemento (los mini PC sobre una bandeja); índice `idx_dc_item_parent`. El que lo lleva ocupa el U y el montado **no**, porque ese U ya está pagado — y hereda su rack, su U, su altura y su cara, para que el alzado y los recuentos sigan leyendo lo mismo sin saber que esto va montado. Un solo nivel: una bandeja sobre una bandeja no es una sala. Y **no se retira lo que lleva algo encima**, porque quitarlo dejaría tres máquinas colgando de un sitio que ya no está |
+
+> **Un rack contiene items, y algunos items son hosts** — nunca al revés. Un panel de parcheo
+> ocupa 1U y no es un host; una tapa ciega no es nada; un chasis de blades ocupa 7U y contiene
+> ocho cosas que sí lo son; un servidor apagado sigue ocupando su U. Por eso `host_uid` es
+> opcional y la tabla `hosts` no se toca: cada lado sobrevive a que borren el otro.
+>
+> **La cara es parte de la posición.** Un equipo de 1U llena la U 12 por delante *y* por detrás;
+> un panel de parcheo puede llenar solo la trasera; dos equipos de media profundidad comparten
+> una U por caras opuestas. Sin eso, «¿está libre la U 12?» no tiene respuesta.
+
+
+### `dc_part` — un componente dentro de un equipo
+
+Seis discos, la memoria, las dos fuentes, la tarjeta de red — y el cargador del mini-PC que vive
+en una bandeja, que no es un componente elegante y es exactamente lo que hay que reponer cuando
+desaparece.
+
+**Una fila por componente y no un campo de descripción**, porque la pregunta que se hace no es
+«qué lleva este servidor» sino «cuántos discos de 4 TB tengo y en qué máquinas» — y eso a una
+descripción no se le puede preguntar.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| item_uid | TEXT | no | — | el equipo; índice |
+| kind | TEXT | no | `'other'` | uno de `PART_KINDS`: disco, SSD, memoria, CPU, tarjeta de red, HBA, GPU, fuente, ventilador, transceptor, batería, módulo, **accesorio** y otro |
+| slot | TEXT | no | `''` | cómo se llama en la máquina: «bahía 3», «DIMM A1», «PSU 2» — lo que hay que decirle a quien está delante con un destornillador |
+| model | TEXT | no | `''` | |
+| serial | TEXT | no | `''` | |
+| size | TEXT | no | `''` | como **texto**: «4 TB», «32 GB», «750 W». En bytes habría que decidir si 4 TB son 4·10¹² o 4·2⁴⁰ —las dos respuestas están en algún albarán— y convertir para enseñar lo que alguien ya escribió bien |
+| qty | INTEGER | no | `1` | seis discos idénticos son **una fila con un seis**: nadie apunta el número de serie de cada uno, y obligar a ello garantiza que no se apunte ninguno |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+| type_uid | TEXT | no | `''` | el modelo del catálogo, cuando alguien lo dijo. Opcional a propósito: el disco que salió del cajón no está en ningún catálogo y sigue siendo un disco. Lo que da es poder preguntar «cuántos KSM32RD8/32 hay puestos» sin depender de que las once formas de escribir el mismo modelo coincidan |
+| brand | TEXT | no | `''` | la MARCA, aparte del modelo. «Samsung PM9A3» en una sola casilla son once formas de escribir lo mismo que no se pueden contar juntas — y contar juntas es la única pregunta que se le hace a esto. Como texto y no como `brand_uid`, igual que `dc_type.manufacturer`: el vínculo bueno lo tiene el modelo del catálogo, que es a quien apunta `type_uid` |
+| kit_qty | INTEGER | no | `1` | cuántas piezas trae una unidad de lo que se compró. Estampada como lo demás: una máquina que dice llevar dos kits sigue diciendo cuántos módulos son aunque alguien borre el modelo del catálogo |
+| mount | TEXT | no | `''` | dentro de la caja o **colgando de ella**. `''` = dentro, que es lo que eran todas las que ya había: una columna nueva no puede inventarse el valor. Aparte de `kind` porque son dos preguntas —`kind` dice **qué es** (un disco, una fuente, un adaptador) y esto **dónde está**— y en un solo campo habría que inventar `nic_externa` el día que alguien enchufe una tarjeta de red por USB, que es el caso que trajo esto. Lo de dentro va en una bahía; lo que cuelga, enchufado a un puerto que se ve. Se estampa al equipo con lo demás: el día de la mudanza, lo externo es justo lo que hay que acordarse de meter en la caja |
+
+### `dc_build` — una plantilla: lo que de verdad se compra
+
+[lib/core/dcim/builds.py](../src/lib/core/dcim/builds.py)
+
+El catálogo dice **lo que un fabricante vende** y el inventario dice **qué caja hay en el U 12**.
+Entre los dos falta el escalón en el que se trabaja: un R740 es un chasis, y lo que se pide veinte
+veces es ese chasis *con* doce DIMM, ocho SSD y una controladora. Eso no figura en el catálogo de
+nadie —no lo vende nadie— y sin esta tabla se teclea veinte veces.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| name | TEXT | no | `''` | **único**, índice `idx_dc_build_name`. Un nombre nuestro —«Servidor CPD estándar 2024»— y no el del fabricante: eso es lo que dice una factura. Dos con el mismo nombre son dos estándares que nadie distingue en el desplegable donde se eligen |
+| type_uid | TEXT | no | `''` | el chasis, en `dc_type`. Opcional: exigirlo obligaría a inventarse una fila de catálogo para poder describir lo que ya se tiene |
+| role | TEXT | no | `''` | uno de `ITEM_ROLES`; se copia al equipo, que es donde decide si cuenta como «sin vigilar» o no tiene nada que vigilar |
+| u_tenths | INTEGER | no | `0` | la altura en **décimas de U**, como `dc_type.u_tenths`: hay chasis de 0,5 U y en unidades enteras no se pueden escribir. `0` = **la del modelo del catálogo**, que es lo normal: un R740 mide lo que mide se le ponga lo que se le ponga |
+| depth_mm | INTEGER | no | `0` | |
+| face | TEXT | no | `'full'` | |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+| notes | TEXT | no | `''` | lo que no cabe en un renglón: por qué se eligió ese chasis, qué se probó y no valía, con quién se negoció el precio. Hoy eso vive en un correo, y el correo se pierde antes que el servidor |
+| valid_from | TEXT | no | `''` | desde cuándo se compra así. Un estándar tiene vigencia: sin estas dos fechas, «¿esto todavía se pide?» solo lo sabe quien estaba |
+| valid_to | TEXT | no | `''` | hasta cuándo. Puesta, la plantilla sale marcada como retirada en la lista — y no se borra: los equipos que salieron de ella siguen existiendo |
+| platform_uid | TEXT | no | `''` | con qué sale, en `dc_platform`. Una fila y no texto: cuatro formas de escribir «Debian 12» son cuatro respuestas a una pregunta que solo tiene una. Renombrada en `TableSpec` desde `platform`, que fue una caja de texto mientras se escribía esto |
+| u_slots | INTEGER | no | `1` | en cuántas partes se divide el U que ocupa esto. Dos para un patch panel de 0,5 U, ocho para una bandeja de Raspberry. Es del **estándar**; lo que no lo es —*cuál* de las partes toma cada caja, una arriba y otra abajo— vive en `dc_item` |
+| u_slot_span | INTEGER | no | `1` | cuántas de esas partes toma |
+| u_split | TEXT | no | `'width'` | por dónde se parte: `width` o `height`. Se copia al equipo al crearlo desde la plantilla |
+| manufacturer | TEXT | no | `''` | **copiado** del modelo del catálogo al elegirlo |
+| model | TEXT | no | `''` | idem |
+| full_depth | INTEGER | no | `1` | idem |
+| airflow | TEXT | no | `''` | idem |
+| power_type | TEXT | no | `''` | idem |
+| ports | TEXT | no | `'{}'` | los puertos, `{familia: {tipo: n}}`, copiados y **editables aquí** |
+| port_list | TEXT | no | `'{}'` | y **cómo se llama cada una**: `{familia: [{name, type, gen, signals, volts, watts}, …]}`, en el orden que las tiene el equipo. `type` es la **forma** —`usb-c`—, `gen` cuál de las generaciones que ese conector declara es la de esta boca —`usb3.2g2`, que además fija su velocidad—, `signals` **qué lleva** —datos, DisplayPort, corriente— y `volts`/`watts` **cuánto come por ahí**, donde pase corriente: el voltaje como texto porque una etiqueta pone `100-240` y elegir una de las dos sería inventárselo, y los vatios como número porque son los que se suman para saber qué pide un armario. Los dos últimos son del puerto y no del modelo, porque un conector por combinación serían cientos. Copiado igual. La pantalla solo lo enseña mientras cuadre con el recuento — los nombres son los que trajo la biblioteca y el recuento se puede corregir a mano, y enseñar veintiocho nombres al lado de un «32» sería enseñar una lista que ya no es de este equipo |
+| extra | TEXT | no | `'{}'` | lo que no cabe en columnas, empezando por las seis fechas de la vida del equipo |
+| front_image | TEXT | no | `''` | copiada **de verdad**, con nombre nuevo: apuntar al fichero del catálogo es una bomba de relojería —borrar cualquiera de los dos se lleva el fichero y el otro enseña un hueco sin que nada haya fallado— |
+| rear_image | TEXT | no | `''` | idem |
+
+> **Lo copiado se rellena solo una vez, y solo donde falta.** Las nueve columnas de arriba
+> son nuevas, y `ADD COLUMN` no puede inventarse el valor: las plantillas escritas antes las
+> traían vacías, y la ficha dejó de enseñar las fotos, las medidas y los puertos el día que
+> dejó de leerlas en vivo del catálogo. `BuildStore.stamp_missing()` las rellena desde el
+> modelo la primera vez que alguien abre la pantalla — **solo los huecos**, porque lo que ya
+> tiene valor puede haberse corregido a mano, y solo si el modelo sigue existiendo.
+
+> **Se estampa, no se enlaza.** Al crear un equipo desde una plantilla, sus piezas se **copian** a
+> `dc_part` y desde ese momento son suyas. Si el equipo las leyera de la plantilla, el día que
+> alguien saca un disco averiado no habría dónde decirlo, y editar el estándar reescribiría la
+> ficha de veinte máquinas que nadie ha tocado. Que una máquina se separe de su plantilla no es un
+> error que haya que impedir: es un hecho sobre esa máquina, y `builds.compare()` existe para
+> poder leerlo.
+>
+> Lo único que sobrevive del vínculo es `dc_item.build_uid`: de qué plantilla **nació**. Sin él,
+> «cuáles son los veinte del estándar de 2024» no tiene respuesta.
+>
+> **Retirarla no toca los equipos**, ni siquiera les quita el vínculo: nacieron de esto, y eso
+> siguió siendo verdad después de que alguien retirara el estándar. Lo que se pierde es poder
+> mirar de qué constaba, y por eso la pantalla dice cuántos hay antes de preguntar.
+
+### `dc_build_part` — lo que una plantilla lleva puesto
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| build_uid | TEXT | no | — | la plantilla; índice `idx_dc_build_part_build` |
+| kind | TEXT | no | `'other'` | uno de `PART_KINDS`, **los mismos que `dc_part`** |
+| slot | TEXT | no | `''` | |
+| type_uid | TEXT | no | `''` | el modelo del catálogo, cuando lo hay: con él la plantilla dice «este DIMM» y no «32 GB», que es la diferencia entre poder pedir el recambio y tener que buscarlo |
+| model | TEXT | no | `''` | |
+| size | TEXT | no | `''` | |
+| qty | INTEGER | no | `1` | |
+| description | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+| brand | TEXT | no | `''` | la marca, por lo mismo que en `dc_part`: la misma forma, porque estampar es copiar |
+| kit_qty | INTEGER | no | `1` | cuántas piezas trae una unidad de lo que se compró. Estampada como lo demás: una máquina que dice llevar dos kits sigue diciendo cuántos módulos son aunque alguien borre el modelo del catálogo |
+| mount | TEXT | no | `''` | dentro de la caja o **colgando de ella**. `''` = dentro, que es lo que eran todas las que ya había: una columna nueva no puede inventarse el valor. Aparte de `kind` porque son dos preguntas —`kind` dice **qué es** (un disco, una fuente, un adaptador) y esto **dónde está**— y en un solo campo habría que inventar `nic_externa` el día que alguien enchufe una tarjeta de red por USB, que es el caso que trajo esto. Lo de dentro va en una bahía; lo que cuelga, enchufado a un puerto que se ve. Se estampa al equipo con lo demás: el día de la mudanza, lo externo es justo lo que hay que acordarse de meter en la caja |
+
+> **La misma forma que `dc_part` a propósito**: crear un equipo desde una plantilla es copiarlas.
+> Lo que NO se copia es el número de serie — es lo único que tiene esa unidad y ninguna otra, y
+> heredarlo serían veinte máquinas con el mismo, que es peor que ninguno.
+
+### `dc_brand` — las marcas
+
+[lib/core/dcim/brands.py](../src/lib/core/dcim/brands.py)
+
+Hasta aquí una marca era **una cadena de texto repetida ocho mil quinientas veces**. Eso alcanza
+para agrupar una rejilla y para nada más: no hay dónde apuntar por dónde se abre un ticket, ni el
+número de contrato; renombrar «HP» a «Hewlett Packard Enterprise» son ocho mil quinientos
+`UPDATE`; y dos formas de escribir el mismo nombre son dos marcas que nadie puede juntar.
+
+Con esta tabla el orden queda como es de verdad:
+
+    marca → modelo del catálogo (`dc_type`) → plantilla (`dc_build`) → equipo (`dc_item`)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| name | TEXT | no | `''` | **único**. Lo que se lee, y lo que cambia |
+| slug | TEXT | no | `''` | índice **único** `idx_dc_brand_slug`. El nombre normalizado —minúsculas, sin puntuación— y **la identidad de verdad**: `HP`, `H.P.` y `hp` son la misma, y la biblioteca los escribe de las tres formas según quién subiera el fichero. Sin esto, reimportar crea una marca nueva cada vez que alguien pone un punto donde no lo había |
+| description | TEXT | no | `''` | |
+| url | TEXT | no | `''` | la web comercial |
+| support_url | TEXT | no | `''` | **por dónde se abre un ticket o se baja un firmware**, que no es la misma y es la que hace falta a las tres de la mañana |
+| account | TEXT | no | `''` | el número de cliente o de contrato: lo primero que piden por teléfono |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+> **Se dan de alta solas al importar.** Nadie va a teclear trescientas marcas antes de traerse la
+> biblioteca — y si hubiera que hacerlo, no se haría. `CatalogStore` las crea por slug según
+> aparecen, y `backfill_brands()` da de alta las de lo que ya estaba importado: `ADD COLUMN` no
+> puede inventarse el valor, así que sin ese repaso quien ya tenía el catálogo vería la pantalla
+> de marcas vacía sobre ocho mil quinientos modelos.
+>
+> **Y no se borra una que tenga modelos** — no por integridad referencial, sino porque volvería:
+> el nombre sigue escrito en cada fila de `dc_type` y el repaso del arranque la daría de alta
+> otra vez. Lo único que se habría perdido es la web de soporte y el número de cliente, que es
+> justo lo que no se puede volver a descargar.
+
+### `dc_platform` — con qué sale un equipo
+
+[lib/core/dcim/platforms.py](../src/lib/core/dcim/platforms.py)
+
+«Sale con» era una caja de texto dentro de cada plantilla. Veinte plantillas con una caja de
+texto son «Debian 12», «debian 12», «Debian GNU/Linux 12» y «deb12» — y entonces «cuántas
+máquinas hay que actualizar» no tiene una respuesta: tiene cuatro y ninguna está entera.
+
+Misma regla que las marcas: **el slug es la identidad y el nombre es lo que se lee**. Renombrar
+«Debian 12» a «Debian 12 (bookworm)» es editar una fila, y las plantillas que apuntaban a ella
+siguen apuntando.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| name | TEXT | no | `''` | **único**. Lo que se lee |
+| slug | TEXT | no | `''` | índice **único** `idx_dc_platform_slug`. El nombre normalizado: lo que impide que «Debian 12» y «debian  12» acaben siendo dos plataformas que nadie puede juntar |
+| brand_uid | TEXT | no | `''` | de quién es, **cuando es de alguien** (`dc_brand`). Opcional a propósito: RouterOS es de MikroTik, pero Debian no es de nadie que salga en una factura, y obligar a rellenarlo sería obligar a inventárselo |
+| kind | TEXT | no | `'os'` | uno de `KINDS`: `os`, `firmware`, `hypervisor`, `appliance`, `other`. Separa lo que se instala en una máquina de lo que **es** la máquina |
+| version | TEXT | no | `''` | aparte del nombre, para poder preguntar «cuántas Debian hay» y «cuántas van por la 12» sin partir cadenas |
+| family | TEXT | no | `''` | lo que **agrupa** la lista: `Windows 11` junta a Pro, Home y Enterprise, y así se lee en árbol —fabricante → familia → edición— en vez de en veintiséis renglones planos. Una columna y no dos: la hoja se calcula quitándole el prefijo al nombre, y guardar la edición aparte sería guardar dos veces lo mismo con la posibilidad de que discrepen. El desplegable de una plantilla sigue plano y con el nombre entero, porque ahí «Pro» a secas no diría de qué |
+| description | TEXT | no | `''` | |
+| extra | TEXT | no | `'{}'` | las fechas de su vida, en JSON: **las mismas seis** que las de un modelo del catálogo —fin de venta, fin de mantenimiento, fin de parches de seguridad, última alta de soporte, última renovación, fin de soporte— y sacadas del mismo sitio, el grupo `lifecycle` del documento de perfiles. Un sistema operativo deja de recibir parches igual que un servidor deja de venderse, y dos listas serían dos que se separan. En JSON y no en columnas porque añadir la séptima tiene que ser editar ese documento y no una migración. Las pasadas salen en rojo |
+| url | TEXT | no | `''` | |
+| notes | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+> **No es solo de dispositivos físicos.** Una máquina virtual corre RouterOS igual que lo corre
+> un router de metal, y lo que se pregunta de las dos es lo mismo: qué versión y hasta cuándo
+> tiene parches. Por eso la plataforma es una tabla del catálogo y no una columna de la
+> plantilla: lo que apunte a ella después apunta a la misma fila.
+>
+> **Se lee sin permiso de gestión** y se escribe con `dcim_catalog_manage`: quien monta un rack
+> tiene que poder elegir una, igual que elige un modelo de chasis.
+>
+> **Y no se retira una que alguna plantilla nombre.** Una plantilla que dice «sale con» y no dice
+> con qué es peor que una que no lo dice, porque parece que se sabe.
+
+### `dc_type` — catálogo de modelos
+
+[lib/core/dcim/catalog.py](../src/lib/core/dcim/catalog.py)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| manufacturer | TEXT | no | `''` | índice `idx_dc_type_maker` |
+| model | TEXT | no | `''` | |
+| slug | TEXT | no | `''` | el del fichero de origen |
+| u_tenths | INTEGER | no | `10` | altura en **décimas** de U: hay modelos de 0,5U |
+| full_depth | INTEGER | no | `1` | |
+| part_number | TEXT | no | `''` | |
+| airflow | TEXT | no | `''` | |
+| subdevice | TEXT | no | `''` | `parent` \| `child`: un chasis de blades y sus blades |
+| is_powered | INTEGER | no | `1` | |
+| front_image | TEXT | no | `''` | |
+| rear_image | TEXT | no | `''` | |
+| ports | TEXT | no | `'{}'` | JSON: **cuentas por tipo**, no la lista |
+| port_list | TEXT | no | `'{}'` | y **cómo se llama cada una**: `{familia: [{name, type, gen, signals, volts, watts}, …]}`, en el orden que las tiene el equipo — todo menos `name` y `type` opcional, que la biblioteca no lo trae. Son dos preguntas distintas: contar decide si el switch sirve, nombrar es lo que se mira con el latiguillo en la mano —`gi1` es lo que dice la configuración del equipo y lo que va en la etiqueta—. La biblioteca lo trae desde el primer día y se estaba tirando al contar. En una columna JSON y no en filas, que es lo que evita el millón de filas sin perder el nombre; con tope de `PORT_LIST_MAX` entradas por familia, y lo que se pierde al llegar es el detalle, nunca el recuento |
+| source | TEXT | no | `''` | de qué importación vino |
+| imported_at | TEXT | no | `''` | |
+| match_key | TEXT | no | `''` | índice `idx_dc_type_match`; nombre normalizado |
+| tree | TEXT | no | `'device-types'` | `device-types` \| `module-types` \| `rack-types` \| `component-types`: un dispositivo, un **módulo** (una tarjeta de línea, un transceptor), un **armario** o un **componente** (memoria, discos, CPU, tarjetas). La misma forma con cuatro significados: sin esta columna un transceptor ocupa U en un alzado y un armario de 42U figura como un equipo de 42U. **El árbol decide qué vocabulario se aplica a `kind`**: `PART_KINDS` para un componente —un DIMM no es «switch, servidor u otro»— y `KINDS` para los demás. Los tres primeros se importan de la biblioteca; el cuarto no viene de ninguna —los `module-types` de NetBox son tarjetas de línea y transceptores, no memoria ni discos— así que se escribe a mano una vez y se reutiliza siempre |
+| extra | TEXT | no | `'{}'` | JSON con lo que **solo** tiene una forma: de un armario, sus medidas exteriores, el fondo de montaje y el peso que aguanta. Una columna y no ocho, porque son datos de 140 filas de 8500 y ocho columnas vacías las pagarían todas |
+| kind | TEXT | no | `''` | Qué clase de cosa es —`switch`, `pdu`, `rack`, `transceiver`, `psu`…—, deducido **al importar** de los puertos y del árbol. Lo que este dominio no escribe como un hecho es el papel de un dispositivo COLOCADO (`dc_item.role`, que decide quien lo coloca); esto clasifica el modelo del catálogo, y guardarlo es lo que permite filtrar 8500 filas por «switch» sin traérselas todas |
+| kind_set | INTEGER | no | `0` | Si la clase la decidió **una persona**. Sin esta marca no hay forma de distinguir lo deducido de lo corregido, y reimportar la biblioteca obligaría a elegir entre perder todas las correcciones o no actualizar nunca lo deducido: al reemplazar un origen, las clases marcadas se rescatan por `match_key` y se vuelven a poner |
+| description | TEXT | no | `''` | La línea que explica qué es cuando el nombre no lo dice —«APC NetShelter SX, 42U, 1991H x 600W x 1070D mm»—. La traen los tres esquemas de la biblioteca, y es donde está el «42U» que alguien escribe en el buscador de un armario que se llama `AR3100`: por eso la búsqueda mira también aquí |
+| brand_uid | TEXT | no | `''` | la marca, como **fila** (`dc_brand`); índice `idx_dc_type_brand_uid`. La columna `manufacturer` se queda: es lo que dijo el fichero de origen y lo que sigue siendo cierto si alguien retira la ficha de la marca — un modelo no deja de ser de Dell porque nadie quiera guardar el teléfono de Dell |
+| size | TEXT | no | `''` | el TAMAÑO, que solo tienen los componentes: «32 GB», «1.92 TB», «750 W». Columna y no una clave dentro de `extra` —donde están las medidas de un armario— porque no es lo mismo: aquello son ocho campos de 140 filas, y esto es **el campo que se lee en cada renglón** de lo que más se teclea a mano; dentro de un JSON no se ordena, no se busca y no se enseña sin desenvolverlo. Como texto, por lo mismo que en `dc_part` |
+| url | TEXT | no | `''` | la **página del producto**: la hoja de características, el firmware, el manual. No la trae ninguna biblioteca y es lo primero que se busca cuando hay que saber si una tarjeta entra en un chasis. La marca tiene la suya, comercial y de soporte; esta es la de ESTE modelo, que es otra cosa |
+| updated_at | TEXT | no | `''` | cuándo se tocó por última vez |
+| updated_by | TEXT | no | `''` | y quién |
+| rev | INTEGER | no | `1` | por qué **versión** va. El historial (`dc_rev`) las tiene una a una; esto es el resumen que quiere una ficha —cuándo y cuántas— sin abrirlo. Columnas y no una consulta al historial porque la lista enseña doscientas filas, y contar versiones de doscientas fichas para pintar dos casillas sería pagar el resumen a precio del detalle |
+| kit_qty | INTEGER | no | `1` | cuántas piezas trae **una** de estas. Un kit de dos módulos se compra como uno y se monta como dos; una caja de cincuenta tornillos, igual. «Cuántos DIMM de 16 GB tengo» quiere la segunda cifra y «cuántos pedí» quiere la primera, y con una sola casilla hay que elegir cuál se contesta mal. Columna y no atributo del documento porque el panel **multiplica por ella**, y lo que se multiplica no puede depender de que nadie renombre una clave en un JSON |
+| power_type | TEXT | no | `''` | por dónde come: `internal` \| `external` \| `poe`. `is_powered` dice **si** come y no dice cómo, y la diferencia entre una fuente dentro y un alimentador externo decide si hace falta una toma en la regleta o un enchufe en la pared — y si al mover el equipo hay que acordarse de llevarse algo que no está atornillado. `none` no es un valor de aquí: eso lo dice `is_powered` en cero, y tenerlo en dos sitios serían dos respuestas a la misma pregunta |
+
+> **Se importa, no se empaqueta.** El origen es
+> [devicetype-library](https://github.com/netbox-community/devicetype-library) (CC0-1.0), varios
+> miles de YAML. Traerlo dentro convertiría cada release del panel en una release del catálogo
+> de otro; llega bajo demanda desde GitHub, como la biblioteca de MIBs y por el mismo proveedor
+> compartido — y también desde un directorio o un zip, que es lo que resuelve la instalación
+> sin salida a internet. El repositorio es configurable (`web_admin|dcim_catalog_url`): el de
+> NetBox viene puesto, pero un fork propio o un espejo interno valen igual.
+>
+> **Se guarda un subconjunto**, no el fichero: guardarlo entero sería guardar el esquema de otro
+> proyecto y obligar a cada lector de aquí a conocerlo.
+>
+> **Y los puertos se cuentan, no se listan.** Un switch de 48 puertos lista 48 interfaces; cinco
+> mil modelos así son un millón de filas que ninguna pantalla lee. Lo que quiere un alzado es
+> «48 × 1000base-t, 4 × sfp+».
+>
+> `u_tenths` en décimas por un puñado de modelos de 0,5U: una columna de enteros los redondearía
+> unos sobre otros.
+>
+> **`source` permite reimportar sin arrasar.** Un panel puede tener la biblioteca *y* cuatro
+> modelos que alguien tecleó para equipo que nadie ha publicado: vaciar la tabla se llevaría por
+> delante justo los que no se pueden volver a bajar.
+
 ---
 
 ## Notificaciones
+
+### `dc_rev` — qué decía una ficha antes, y quién la cambió
+
+[lib/core/dcim/revisions.py](../src/lib/core/dcim/revisions.py)
+
+Un modelo del catálogo es un dato **compartido**: de él cuelgan las plantillas, las piezas
+estampadas en veinte máquinas y la altura con la que se dibuja un alzado. **Y una plantilla lo
+es igual**: de ella salieron veinte equipos y es el estándar con el que se compra. Corregir
+cualquiera de las dos no es editar una fila, es cambiar lo que otros ya usaban — y la corrección que rompe algo casi nunca se
+descubre el día que se hace, sino semanas después, cuando alguien dice «esto antes ponía otra
+cosa» y no hay forma de saber si tiene razón.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| scope | TEXT | no | `'type'` | de qué clase de cosa es la versión: `type` (un modelo del catálogo), **`build`** (una plantilla) o el documento de perfiles. Una tabla por cada una serían tres almacenes haciendo estas mismas cuatro cosas. Misma forma que `dc_owner` |
+| ref_uid | TEXT | no | — | la ficha; índice `idx_dc_rev_ref` con `scope` y `seq` |
+| at | TEXT | no | `''` | |
+| seq | INTEGER | no | `0` | **el orden**, que no lo puede dar la fecha: este proyecto guarda segundos, y dos cambios del mismo segundo se ordenarían al azar — que es como una versión aparece antes que la que la produjo y la diferencia sale del revés. Un contador por ficha lo resuelve y no depende del reloj de nadie |
+| by | TEXT | no | `''` | **quién** |
+| action | TEXT | no | `'edit'` | `create` \| `edit` \| `image` \| `image_drop` \| `restore`, y en una plantilla también `part_add` \| `part_edit` \| `part_drop`. Aparte de la diferencia, porque poner una imagen o un disco no cambia ningún campo comparable y sin esto sería un renglón vacío |
+| data | TEXT | no | `'{}'` | la ficha entera **como quedó**, en JSON |
+
+> **Se guarda el estado DESPUÉS de cada cambio**, no el de antes. Así la última versión es lo que
+> hay ahora y la lista se lee sola: cada renglón trae lo que ese cambio hizo —la diferencia con el
+> anterior, calculada al leer— y volver a una versión es escribir sus valores. Guardando el estado
+> previo haría falta traer la fila actual desde fuera para poder leer el último cambio.
+>
+> **Una importación no deja versiones.** Reemplaza el origen entero —miles de filas, con uid
+> nuevos— así que un historial por uid no sobreviviría de todas formas, y guardarlo haría crecer
+> la tabla en ocho mil renglones cada vez que alguien actualiza la biblioteca. Se versiona lo que
+> alguien decidió a mano, que es lo que nadie puede volver a descargar.
+>
+> **Y se poda** a las últimas `KEEP` (30) por ficha: sin tope, esta tabla crece durante toda la
+> vida de la instalación por una función que casi nadie mira.
+
+### `dc_file` — los adjuntos de una ficha
+
+[lib/core/dcim/files.py](../src/lib/core/dcim/files.py)
+
+El manual, la hoja de características, el fichero de firmware, el PDF de la garantía. Hoy eso vive
+en la carpeta de alguien —o en un correo de hace tres años— y el día que hace falta es un martes a
+las once de la noche con una tarjeta que no arranca.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| scope | TEXT | no | `'type'` | de qué clase de cosa cuelga. Hoy solo `type`; la columna existe porque lo siguiente que va a querer adjuntos es un equipo del inventario —su albarán, su certificado— y una segunda tabla sería un segundo almacén igual. Misma forma que `dc_rev` |
+| ref_uid | TEXT | no | — | la ficha; índice `idx_dc_file_ref` con `scope` |
+| kind | TEXT | no | `'other'` | `manual` \| `datasheet` \| `firmware` \| `warranty` \| `other`. Corto a propósito: es para poder mirar «el manual» entre nueve ficheros, no para clasificar. Lo que **no** está es la factura, y es la misma línea que separa las dos capas: un modelo es genérico —el manual del R740 vale para los veinte que hay— y una factura es de UNA unidad, la que tiene número de serie. Eso colgará del equipo del inventario, que es para lo que está `scope` |
+| label | TEXT | no | `''` | cómo se llamaba. Una **etiqueta que se enseña, no una ruta**: la del disco la acuña el panel |
+| stored | TEXT | no | `''` | el nombre acuñado, en el almacén de medios. Con extensión `.bin` a propósito: si llevara la de verdad, un servidor mal configurado delante podría decidir servirlo por su cuenta, y esa decisión no es suya |
+| size | INTEGER | no | `0` | |
+| created_at | TEXT | no | `''` | auditoría |
+| created_by | TEXT | no | `''` | auditoría |
+
+> **No hay lista blanca de tipos, y es una decisión.** Lo útil aquí es abierto: un PDF, el `.docx`
+> que mandó el distribuidor, un `.zip` con el firmware. Una lista se queda corta cada semana y
+> quien la sufre acaba renombrando ficheros para colarlos, que es peor que no tenerla.
+>
+> Lo que hace que eso sea seguro es **cómo salen**: siempre como descarga, con
+> `application/octet-stream`, `Content-Disposition: attachment` y `nosniff`. El panel no renderiza
+> nunca un fichero subido, así que un HTML o un SVG con guion dentro no se ejecuta en este origen
+> — la misma regla que ya se aplicaba a los SVG del almacén de imágenes, aquí llevada a todo. Y el
+> nombre que se ofrece en la cabecera va saneado a ASCII: lo que llegó por la red no decide cómo
+> se escribe una cabecera.
+>
+> Borrar un modelo se lleva sus adjuntos, o quedarían ficheros en el disco a los que no apunta
+>
+> Y **clonar un modelo los copia**, ficheros incluidos, como ya hacía con las imágenes: dos
+> fichas apuntando al mismo fichero significa que borrar cualquiera de las dos deja a la otra
+> sin manual sin que nada haya fallado. Contar cuántas fichas usan un fichero sería un
+> mecanismo entero cuyo fallo se paga perdiendo el documento; duplicar unos megas de un PDF
+> que se clona dos veces al año, no.
+>
+> **Y viven separados de lo que trajo una importación.** La carpeta de medios tiene dos
+> subcarpetas —`library/` y `own/`— y el nombre guardado lleva la suya delante. Es la misma
+> línea que el catálogo traza con `source`: mil doscientas imágenes de alzado se vuelven a
+> bajar con un botón y la foto del armario que montó el electricista no está en ningún otro
+> sitio. De ahí cuelga poder guardar lo propio sin arrastrar ochocientos megas, y mirar la
+> carpeta y saber qué se perdería. El prefijo es **opcional en el patrón del nombre**, así
+> que los ficheros planos de una instalación anterior se siguen leyendo sin mover nada.
+> nadie — el mismo agujero que se tapó con las imágenes al reimportar.
+
+### `dc_profile` — qué se pregunta de un componente de cada clase
+
+[lib/core/dcim/profiles.py](../src/lib/core/dcim/profiles.py) · el documento que viene con el
+panel: [data/component_profiles.json](../src/lib/core/dcim/data/component_profiles.json)
+
+«Samsung PM9A3 · 1.92 TB» alcanza para reconocer un disco en una lista y no para comprarlo: hace
+falta saber si es M.2 o de 2,5", si va por NVMe o por SATA, y si la bahía libre lo admite. Eso
+cambia con cada clase —una CPU tiene zócalo y núcleos, un transceptor tiene alcance— así que no
+cabe en columnas; va en `dc_type.extra`, la misma columna JSON que las medidas de un armario.
+
+**Y la lista de qué preguntar tampoco cabe en el código.** Once clases con cuatro atributos
+escritas en un `.py` son una lista que hay que publicar una release para tocar, y quien sabe qué
+formato tiene la tarjeta nueva casi nunca es quien toca el código.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| name | TEXT | no | — | PK. Hoy solo `component`; con nombre y no una tabla de una fila, porque el siguiente documento que alguien quiera poder actualizar sin una release no tiene por qué estrenar tabla |
+| version | INTEGER | no | `0` | |
+| body | TEXT | no | `'{}'` | el documento, en JSON: `version`, `kinds` (los atributos de cada clase), `common` (lo que dicen todas — el peso) y `size` (cómo se llama la casilla de tamaño en cada clase, con un ejemplo). Lo común va **aparte de los atributos** porque un atributo es lo que distingue a una clase de otra, y algo que tienen todas no distingue nada; y el tamaño se etiqueta por clase porque la misma casilla es la capacidad de un disco, los gigas de un DIMM y los vatios de una fuente |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+> **Manda la versión más alta** entre el documento que viene con el panel y el guardado aquí. El
+> número es justo para eso: una actualización que publique la 3 supera a un parche local que iba
+> por la 2, y un parche que va por la 4 sigue en pie hasta que se publique la 5. Sin el número
+> habría que elegir entre que una mejora publicada no llegue nunca a quien tocó algo una vez, o
+> que un parche desaparezca sin aviso.
+>
+> **Y en la base de datos y no en un fichero del disco** por lo mismo que el catálogo de perfiles
+> SNMP: un despliegue con contenedor web y contenedor de trabajos comparte la base y no el disco,
+> y esto viaja además en la copia de seguridad.
+>
+> Se limpia **al leer** y no solo al escribir —clases que no existen, controles que la pantalla
+> no sabe dibujar— porque también se lee el que viene con el panel: una comprobación que solo
+> corre en la puerta de entrada no protege del fichero que llega por la otra. Lo que se descarta
+> al guardar se dice, en vez de dejar media pantalla sin atributos sin que nadie se entere.
+
+### `dc_schema` — qué campos puede tener un modelo
+
+[lib/core/dcim/schemas.py](../src/lib/core/dcim/schemas.py)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| name | TEXT | no | `''` | índice `idx_dc_schema_name`; **es la identidad**: volver a traer la biblioteca actualiza los tres, no añade tres más |
+| tree | TEXT | no | `'device-types'` | a qué describe. Vacío en uno propio que no quiera parecerse a ninguno de los tres |
+| source | TEXT | no | `'manual'` | `library` se sobrescribe al volver a traerlo; `manual` no lo toca ninguna descarga |
+| based_on | TEXT | no | `''` | de cuál se clonó, para poder decirlo. No es una dependencia: borrar el original no deja al clon cojo |
+| fields | TEXT | no | `'[]'` | JSON: `[{name, type, enum, required, target}]`. `target` dice dónde acaba el valor —una columna de `dc_type`, la cuenta de puertos o `extra`— y se decide en **un** sitio, porque tres pantallas decidiéndolo son tres formas de guardar lo mismo en sitios distintos |
+| imported_at | TEXT | no | `''` | |
+
+> **Un esquema no es una tabla.** Los campos que el panel sabe guardar en una columna van a su columna; el resto va a `dc_type.extra`. Un esquema capaz de crear columnas sería un esquema capaz de romper la base de datos desde un formulario — y el destino de cada campo lo decide el servidor, nunca la petición.
+
+> **De dónde salen.** `schema/devicetype.json`, `schema/moduletype.json` y `schema/racktype.json` de la biblioteca configurada, más `schema/generated_schema.json`, que es donde viven las listas de valores compartidas: sin seguir esos `$ref`, la unidad de peso se pediría como texto libre y alguien escribiría «kilos» donde el importador espera `kg`.
 
 ### `webhooks` — webhooks salientes
 [lib/core/notify/webhook/store.py:28](../src/lib/core/notify/webhook/store.py#L28)

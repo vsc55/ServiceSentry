@@ -1,0 +1,368 @@
+{# ================================================================
+   DCIM — la potencia de un armario.
+
+   **La pregunta que justifica esta pantalla no es cuántos vatios hay.** Es: *si se cae la rama
+   A, ¿qué se apaga?* Por eso lo primero que se ve no son los totales sino los avisos, y por eso
+   un equipo alimentado por una sola rama sale marcado aunque todo lo demás esté perfecto.
+
+   Un armario con dos SAI, dos regletas y equipos de dos fuentes está bien — hasta que alguien
+   enchufa el segundo cable de un servidor en la regleta de al lado porque la suya estaba llena.
+   Ese cable no da ningún error, no aparece en ninguna gráfica, y se descubre el día del corte.
+   ================================================================ #}
+
+//: Lo que devolvió `/power`, o `null` mientras no se ha abierto. Se pide al abrir la pestaña y
+//: no con el armario: la mayoría de las veces que alguien abre un rack es para mirar qué hay
+//: dentro, no de qué come.
+let _dcPower = null;
+
+async function _dcPowerOpen() {
+    const rack = (_dcimRack || {}).rack;
+    if (!rack) return;
+    _dcPower = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}/power`) || {};
+    renderDcim();
+}
+
+function _dcPowerClose() {
+    _dcPower = null;
+    renderDcim();
+}
+
+function _dcPowerHtml() {
+    const p = _dcPower || {};
+    return `<div class="card mb-3">
+        <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-plug"></i>
+            <span class="fw-semibold">${esc(t('dcim_power'))}</span>
+            <span class="text-muted ss-fs-2 ss-tabular">${
+                esc(tf('dcim_power_note', p.watts_said || 0,
+                       (p.by_branch || {}).a || 0, (p.by_branch || {}).b || 0))}</span>
+            <div class="ms-auto d-flex gap-2">
+                ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary"
+                        onclick="_dcPduNew()"><i class="bi bi-plus-lg me-1"></i>${
+                        esc(t('dcim_pdu'))}</button>` : ''}
+                <button class="btn btn-sm btn-secondary" onclick="_dcPowerClose()">
+                    <i class="bi bi-x-lg"></i></button>
+            </div>
+        </div>
+        <div class="card-body py-2">
+            ${_dcPowerWarnings(p.warnings || [])}
+            ${_dcPowerNewItem(p.pdus || [])}
+            ${_dcPduTable(p.pdus || [])}
+            ${_dcPowerItems(p.items || [], p.pdus || [])}
+            ${_dcPowerByOrg(p.by_org || [])}
+        </div>
+    </div>`;
+}
+
+//: Si el formulario de «equipo nuevo» está abierto. Cerrado por defecto: esta pantalla se abre
+//: casi siempre para MIRAR de dónde come algo, y un formulario permanentemente abierto es una
+//: fila de cajas que hay que saltarse cada vez.
+let _dcNewItem = false;
+
+/** Crear un equipo y enchufarlo de una vez.
+ *
+ *  No es un atajo, es el orden real: nadie mete un servidor en un armario y otro día decide de
+ *  dónde lo enchufa — lo enchufa mientras lo está metiendo. Obligar a crear, cerrar, buscar en la
+ *  lista y enchufar deja la pantalla rellena a medias, con equipos sin cables que nadie sabe si
+ *  es que no comen o es que nadie lo apuntó.
+ *
+ *  Las dos ramas vienen marcadas porque lo normal es lo redundante. Lo raro es un cable solo, y
+ *  lo raro se desmarca a mano. */
+function _dcPowerNewItem(pdus) {
+    if (!_dcimMay('dcim_edit')) return '';
+    if (!_dcNewItem)
+        return `<button class="btn btn-sm btn-secondary mb-2" onclick="_dcNewItem=true;renderDcim()">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_new_item_fed'))}</button>`;
+    if (!pdus.length)
+        return `<div class="text-muted ss-fs-2 mb-2">${esc(t('dcim_no_pdus'))}</div>`;
+    return `<div class="d-flex align-items-end gap-2 flex-wrap p-2 rounded bg-body-secondary mb-2">
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_label'))}
+            <input class="form-control form-control-sm" id="dcni-label" style="max-width:12rem"
+                   placeholder="${escAttr(t('dcim_item'))}"
+                   onkeydown="if(event.key==='Enter')_dcNewItemSave()"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_u_start'))}
+            <input class="form-control form-control-sm ss-tabular" id="dcni-u" type="number"
+                   min="1" value="1" style="max-width:6rem"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_u_height'))}
+            <input class="form-control form-control-sm ss-tabular" id="dcni-h" type="number"
+                   min="1" value="1" style="max-width:6rem"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_watts_said'))}
+            <input class="form-control form-control-sm ss-tabular" id="dcni-w" type="number"
+                   min="0" value="0" style="max-width:7rem"></label>
+        <div>
+            <div class="ss-fs-2 text-muted">${esc(t('dcim_plug_into'))}</div>
+            <div class="d-flex gap-2 flex-wrap">${pdus.map((p, i) => `<label
+                class="badge fw-normal d-flex align-items-center gap-1"
+                style="background:${escAttr(p.color)};color:#fff;cursor:pointer">
+                <input type="checkbox" id="dcni-p-${i}" data-pdu="${escAttr(p.uid)}"
+                       ${p.free > 0 ? 'checked' : 'disabled'}>
+                ${esc(p.name)}${p.free > 0 ? '' : ' · ' + esc(t('dcim_full'))}</label>`).join('')}
+            </div>
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="_dcNewItemSave()">
+            <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+        <button class="btn btn-sm btn-secondary" onclick="_dcNewItem=false;renderDcim()">
+            ${esc(t('cancel'))}</button>
+    </div>`;
+}
+
+/** Guardarlo: primero el equipo, y después un cable por cada regleta marcada.
+ *
+ *  Si el equipo no se crea no se enchufa nada — un cable a un equipo que no existe es una fila
+ *  que no se puede ni ver ni borrar. Y si falla un cable se dice, pero no se deshace el equipo:
+ *  ya está en el armario, y borrarlo por no poder enchufarlo sería perder lo que sí se hizo. */
+async function _dcNewItemSave() {
+    const rack = (_dcimRack || {}).rack;
+    if (!rack) return;
+    const val = (id) => (document.getElementById(id) || {}).value || '';
+    const r = await _dcimSend('POST', '/api/v1/dcim/items', {
+        rack_uid: rack.uid,
+        label: val('dcni-label'),
+        u_start: Number(val('dcni-u')) || 1,
+        u_height: Number(val('dcni-h')) || 1,
+    });
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    const uid = (r.data || {}).uid;
+    const watts = Number(val('dcni-w')) || 0;
+    const marcadas = Array.from(document.querySelectorAll('[id^=dcni-p-]'))
+        .filter(el => el.checked).map(el => el.dataset.pdu);
+    for (const pdu of marcadas) {
+        const f = await _dcimSend('POST', '/api/v1/dcim/feeds',
+                                  {item_uid: uid, pdu_uid: pdu, watts_said: watts});
+        if (!f.ok) showToast(f.error || t('save_failed'), 'danger');
+    }
+    _dcNewItem = false;
+    // El armario también: acaba de entrar un equipo, y el alzado de al lado lo tiene que
+    // enseñar. Recargar solo la potencia dejaría las dos vistas contando cosas distintas.
+    await _dcimLoadRack(rack.uid);
+    _dcPowerOpen();
+}
+
+/** Cuánto gasta cada sociedad en este armario.
+
+ *  En un holding donde el departamento opera la sala y factura por consumo, esto es una línea
+ *  de una factura. Solo aparece si hay más de una: en un armario de una sola sociedad es una
+ *  tabla de una fila que no contesta a nada.
+ *
+ *  Y cuenta solo lo visible, como todo lo demás: la filial ve su propia línea, que es
+ *  exactamente lo que puede comprobar. */
+function _dcPowerByOrg(porOrg) {
+    const reales = porOrg.filter(o => o.uid);
+    if (reales.length < 2) return '';
+    return `<div class="mt-2"><div class="ss-fs-2 text-muted mb-1">${
+        esc(t('dcim_power_by_org'))}</div>
+        <table class="table table-sm mb-0 align-middle"><tbody>${porOrg.map(o => `<tr>
+            <td>${o.uid ? esc(_dcimOrgName(o.uid))
+                        : `<span class="text-muted">${esc(t('dcim_unclaimed'))}</span>`}</td>
+            <td class="text-end text-muted ss-fs-2">${esc(tf('dcim_n_items', o.items))}</td>
+            <td class="text-end ss-tabular" style="width:7rem">${
+                esc(String(o.watts_said))} W</td>
+        </tr>`).join('')}</tbody></table></div>`;
+}
+
+/** Lo que hay que arreglar, arriba y con la frase entera.
+ *
+ *  «Una sola rama» no es un porcentaje ni un color: es una frase que dice qué equipo y qué pasa
+ *  si cae esa rama. Un aviso que hay que interpretar es un aviso que se ignora. */
+function _dcPowerWarnings(avisos) {
+    if (!avisos.length)
+        return `<div class="text-success ss-fs-2 mb-2">
+            <i class="bi bi-check-circle me-1"></i>${esc(t('dcim_power_ok'))}</div>`;
+    return `<div class="mb-2">${avisos.map(w => {
+        const texto = w.kind === 'single_branch'
+            ? tf('dcim_warn_single_branch', w.label || t('dcim_item'),
+                 w.branch ? w.branch.toUpperCase() : '—')
+            : tf('dcim_warn_over_half', w.label || '', Math.round((w.load || 0) * 100));
+        return `<div class="ss-fs-2 text-warning-emphasis">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc(texto)}</div>`;
+    }).join('')}</div>`;
+}
+
+/** Las regletas: rama, tomas libres y cuánto se ha declarado de lo que aguantan.
+ *
+ *  La carga se mide contra **la mitad** y no contra el total: tener dos ramas no sirve de nada
+ *  si una sola no puede con las dos. Por eso la barra se pone ámbar pasado el 45 % y no pasado
+ *  el 90 — al 90 la redundancia hace tiempo que no existe. */
+function _dcPduTable(pdus) {
+    if (!pdus.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_no_pdus'))}</div>`;
+    return `<div class="table-responsive mb-2"><table class="table table-sm mb-0 align-middle">
+        <thead><tr>
+            <th>${esc(t('dcim_pdu'))}</th>
+            <th>${esc(t('dcim_branch'))}</th>
+            <th class="text-end">${esc(t('dcim_outlets_free'))}</th>
+            <th class="text-end">${esc(t('dcim_watts_said'))}</th>
+            <th style="width:9rem">${esc(t('dcim_load'))}</th>
+            <th>${esc(t('dcim_host'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${pdus.map(_dcPduRow).join('')}</tbody>
+    </table></div>`;
+}
+
+function _dcPduRow(p) {
+    const carga = p.load === null || p.load === undefined ? null : p.load;
+    const tono = carga === null ? 'secondary'
+               : carga > 0.9 ? 'danger' : carga > 0.45 ? 'warning' : 'success';
+    return `<tr>
+        <td class="fw-semibold">${esc(p.name)}${
+            p.host_uid ? ` <i class="bi bi-broadcast text-muted ss-fs-1"
+                title="${escAttr(t('dcim_pdu_monitored'))}"></i>` : ''}</td>
+        <td><span class="d-inline-flex align-items-center gap-2">
+            <span class="badge fw-normal" style="background:${escAttr(p.color)};color:#fff"
+                >${esc(_dcBranchWord(p.feed))}</span>
+            ${_dcimMay('dcim_edit') ? `<input type="color" class="form-control form-control-sm
+                    form-control-color" value="${escAttr(p.color)}"
+                    title="${escAttr(t('dcim_pdu_color'))}"
+                    onchange="_dcPduColorSet(${jsStr(p.uid)},this.value)">` : ''}
+        </span></td>
+        <td class="text-end ss-tabular">${esc(String(p.free))}<span
+            class="text-muted">/${esc(String(p.outlets))}</span></td>
+        <td class="text-end ss-tabular">${esc(String(p.watts_said))} W</td>
+        <td>${carga === null ? `<span class="text-muted ss-fs-2">${esc(t('dcim_no_capacity'))}</span>`
+            : `<div class="progress" style="height:.5rem" role="progressbar"
+                    aria-valuenow="${Math.round(carga * 100)}" aria-valuemin="0"
+                    aria-valuemax="100" title="${escAttr(Math.round(carga * 100) + '%')}">
+                <div class="progress-bar bg-${tono}"
+                     style="width:${Math.min(100, Math.round(carga * 100))}%"></div>
+            </div>`}</td>
+        <td>${_dcPduHostCell(p)}</td>
+        <td class="text-end">${_dcimMay('dcim_edit') ? `<button
+            class="btn btn-sm btn-warning" onclick="_dcPduDrop(${jsStr(p.uid)},${
+                jsStr(p.name)})"><i class="bi bi-trash"></i></button>` : ''}</td>
+    </tr>`;
+}
+
+/** A qué máquina de **Infraestructura** corresponde esta regleta.
+ *
+ *  Una PDU gestionada está en el registro de máquinas como cualquier otra cosa que conteste, y
+ *  enlazarla es lo que convierte una fila de inventario en un dato vivo: a partir de ahí la
+ *  regleta tiene estado, y lo que mide se puede poner al lado de lo que alguien declaró.
+ *
+ *  Se elige por NOMBRE y se guarda por uid, que es lo que hay que hacer con cualquier cosa que
+ *  tenga las dos: el uid no se teclea y el nombre cambia. La lista es la misma que ofrece el
+ *  formulario de un equipo —`/api/v1/dcim/hosts`, ya cargada— y está estrechada por el registro,
+ *  así que aquí no se ofrece ninguna máquina que este lector no pueda ver de todas formas. */
+function _dcPduHostCell(p) {
+    if (!_dcimMay('dcim_edit'))
+        return p.host_uid
+            ? `<span class="ss-fs-2">${esc(_dcimHostName(p.host_uid))}</span>` : '';
+    const lista = (_dcimHosts || []).length ? ' list="dcim-hosts" autocomplete="off"' : '';
+    return `${_dcimDatalist('hosts')}
+        <input class="form-control form-control-sm" style="max-width:11rem"${lista}
+               value="${escAttr(p.host_uid || '')}"
+               placeholder="${escAttr(t('dcim_host_none'))}"
+               title="${escAttr(p.host_uid ? _dcimHostName(p.host_uid) : t('dcim_host_tt'))}"
+               onchange="_dcPduHost(${jsStr(p.uid)},this.value)">`;
+}
+
+async function _dcPduHost(uid, host) {
+    const r = await _dcimSend('PUT', `/api/v1/dcim/pdus/${encodeURIComponent(uid)}`,
+                              {host_uid: String(host || '').trim()});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcPowerOpen();
+}
+
+/** La rama, con palabra. Escrita clave a clave y no concatenando: una clave construida así no
+ *  la ve ni un `grep` ni el guardián de palabras. */
+function _dcBranchWord(feed) {
+    if (feed === 'a') return t('dcim_branch_a');
+    if (feed === 'b') return t('dcim_branch_b');
+    return t('dcim_branch_none');
+}
+
+/** Y de qué come cada equipo. Un equipo sin cables no sale en rojo: un panel de parcheo no come,
+ *  y pintarlo como un problema enseña a la gente a ignorar esta pantalla. */
+function _dcPowerItems(items, pdus) {
+    if (!items.length) return '';
+    const puede = _dcimMay('dcim_edit');
+    return `<div class="table-responsive"><table class="table table-sm mb-0 align-middle">
+        <thead><tr>
+            <th>${esc(t('dcim_item'))}</th>
+            <th>${esc(t('dcim_feeds'))}</th>
+            <th class="text-end">${esc(t('dcim_watts_said'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${items.map(it => `<tr>
+            <td><span class="text-muted ss-tabular ss-fs-2 me-1">U${
+                esc(String(it.u_start || ''))}</span>${
+                esc(it.label || t('dcim_item'))}</td>
+            <td>${it.feeds.length ? it.feeds.map(f => `<span
+                class="badge fw-normal me-1"
+                style="background:${escAttr(_dcPduColor(f.pdu_uid, pdus))};color:#fff"
+                >${esc(f.pdu)}${
+                    f.outlet ? '·' + esc(String(f.outlet)) : ''}${
+                    puede ? ` <a href="#" class="text-reset"
+                        onclick="event.preventDefault();_dcFeedDrop(${jsStr(f.uid || '')})"
+                        >×</a>` : ''}</span>`).join('')
+                : `<span class="text-muted ss-fs-2">${esc(t('dcim_unplugged'))}</span>`}
+                ${it.branches.length === 1 ? `<i class="bi bi-exclamation-triangle
+                    text-warning ms-1" title="${escAttr(t('dcim_warn_one_branch_tt'))}"></i>` : ''}
+            </td>
+            <td class="text-end ss-tabular">${esc(String(it.watts_said))} W</td>
+            <td class="text-end">${puede && pdus.length ? `<button
+                class="btn btn-sm btn-secondary" onclick="_dcFeedNew(${jsStr(it.uid)})"
+                title="${escAttr(t('dcim_plug_in'))}"><i class="bi bi-plug"></i></button>` : ''}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+// ── Escribir ─────────────────────────────────────────────────────────────────
+
+/** El color de una regleta, buscándola por uid. Del servidor y no calculado aquí: dos sitios
+ *  decidiendo de qué color va la rama A acaban pintándola de dos colores en dos vistas. */
+function _dcPduColor(uid, pdus) {
+    const p = (pdus || []).find(x => x.uid === uid);
+    return (p && p.color) || '#6c757d';
+}
+
+async function _dcPduColorSet(uid, color) {
+    const r = await _dcimSend('PUT', `/api/v1/dcim/pdus/${encodeURIComponent(uid)}`, {color});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcPowerOpen();
+}
+
+async function _dcPduNew() {
+    const rack = (_dcimRack || {}).rack;
+    if (!rack) return;
+    // La rama se alterna sola: la primera regleta de un armario es la A y la segunda la B, que
+    // es como se montan. Se puede cambiar después, y así no hay que elegir para empezar.
+    const cuantas = (_dcPower.pdus || []).length;
+    const r = await _dcimSend('POST', '/api/v1/dcim/pdus', {
+        rack_uid: rack.uid, feed: cuantas % 2 ? 'b' : 'a',
+        name: `PDU-${cuantas % 2 ? 'B' : 'A'}${cuantas > 1 ? Math.floor(cuantas / 2) + 1 : ''}`,
+        outlets: 24,
+    });
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcPowerOpen();
+}
+
+function _dcPduDrop(uid, nombre) {
+    showConfirmModal(tf('dcim_pdu_drop_q', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/pdus/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcPowerOpen();
+    });
+}
+
+/** Enchufar un equipo. Va a la primera regleta con toma libre de la rama que le FALTA — que es
+ *  lo que alguien iba a hacer de todos modos, y es la elección que evita el fallo que esta
+ *  pantalla existe para cazar. */
+async function _dcFeedNew(itemUid) {
+    const it = (_dcPower.items || []).find(x => x.uid === itemUid) || {};
+    const tiene = new Set(it.branches || []);
+    const libres = (_dcPower.pdus || []).filter(p => p.free > 0);
+    const quiere = libres.find(p => !tiene.has(p.feed)) || libres[0];
+    if (!quiere) return showToast(t('dcim_no_free_outlet'), 'warning');
+    const r = await _dcimSend('POST', '/api/v1/dcim/feeds',
+                              {item_uid: itemUid, pdu_uid: quiere.uid});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcPowerOpen();
+}
+
+async function _dcFeedDrop(uid) {
+    if (!uid) return;
+    const r = await _dcimSend('DELETE', `/api/v1/dcim/feeds/${encodeURIComponent(uid)}`);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcPowerOpen();
+}

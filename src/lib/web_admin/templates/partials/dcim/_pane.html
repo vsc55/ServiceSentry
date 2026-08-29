@@ -1,0 +1,27 @@
+{#
+   Physical inventory: the markup of its tab pane.
+
+   Infrastructure answers "is this all right"; this one answers "where do I walk". They are
+   opened by different people at different moments, so they are different sections rather than
+   two tabs of one — and this one is where somebody plans, which is not a thing done while
+   watching a wall screen.
+
+   Full-bleed like the rest: the inventory fills the pane edge to edge instead of floating in a
+   card, because what will live here is a floor plan and a rack elevation.
+#}
+{# Las caras de los conectores. Incrustadas y una sola vez: `<use>` contra otro documento no
+   lo soportan todos los navegadores, y un icono que sale en Firefox y no en Chrome es peor que
+   no tenerlo. #}
+{% include "partials/dcim/_conn_shapes.html" %}
+<div class="tab-pane fade ss-fullbleed ss-fullbleed-top{% if standalone == 'dcim' %} show active{% endif %}" id="tab-dcim">
+    {# `ss-vfill`: the flex chain that gives a section the height of the work area runs
+       pane -> container -> card. Broken here, an elevation draws at the height of its own
+       rows and leaves the rest of the screen empty below it. #}
+    <div id="dcim-container" class="ss-vfill">
+        {% if not standalone %}   {# see #overview-container #}
+        <div class="text-center py-4">
+            <div class="spinner-border spinner-border-sm"></div>
+        </div>
+        {% endif %}
+    </div>
+</div>

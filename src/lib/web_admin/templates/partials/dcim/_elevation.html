@@ -1,0 +1,362 @@
+{# ================================================================
+   The rack, drawn: front and rear, U by U, coloured by what the probes already know.
+
+   This is the point of the whole section. A list of items answers "what is in this rack"; a
+   drawing answers the question somebody actually has at three in the morning, which is **where
+   in the cabinet do I put my hand** — and it answers it in the shape the cabinet has, so what
+   is read on the screen matches what is seen with a torch.
+
+   **Both faces, side by side.** Not a toggle: a 1U server fills U 12 from both sides, a patch
+   panel may fill only the rear, and two half-depth devices share a U from opposite sides. A
+   drawing that shows one face at a time makes the reader hold the other one in their head,
+   which is the thing they came here to stop doing.
+
+   **On the shared canvas** (`infra/_canvas.html`), so panning, zooming, fitting and — the one
+   that pays for itself immediately — **exporting to PNG or SVG** are the same code the two maps
+   use. A rack elevation is exactly the thing somebody wants to print and take downstairs.
+
+   **Colour is the fleet's own.** `hostStateColor` and nothing of this file's invention: a rack
+   and the machine list disagreeing about whether a server is in trouble would be two screens
+   arguing in front of the person who has to decide.
+
+   And the one that is not decoration: **an item with no host has no colour**. Not green. Most
+   of what fills a rack answers to nothing, and a wall of green is precisely the lie this
+   drawing exists to prevent.
+   ================================================================ #}
+
+//: The id this drawing goes by on the shared canvas, and its geometry. Millimetres are not
+//: used: a rack is drawn in U, which is the unit the thing itself is built and labelled in.
+const _DCE_SVG = 'dcimElevSvg';
+const _DCE = {
+    U: 22,              // one rack unit, in pixels
+    W: 300,             // the width of one face
+    GAP: 64,            // between front and rear — room for the U numbers of both
+    PAD: 16,
+    TOP: 30,            // the face's caption
+};
+
+function _dcimElevSvg() { return ssCanvasSvg(_DCE_SVG); }
+
+//: El arrastre en curso: `{uid, u, size, face, from, moved}`. `u` es la U que se está enseñando
+//: ahora mismo, que ya está redondeada: lo que se ve durante el arrastre es lo que se guardará.
+let _dceDrag = null;
+
+/** Qué U hay a esta altura del dibujo. La inversa de `_dceY`, y por eso tiene que preguntar lo
+ *  mismo: un armario numerado de arriba abajo cuenta al revés, y equivocarse aquí manda un
+ *  servidor al otro extremo del armario. */
+function _dceUAt(rack, y) {
+    const h = Number(rack.u_height || 0);
+    // `floor` y no `round`: `_dceY` devuelve el BORDE SUPERIOR de la fila, así que el centro
+    // de una U cae en `.5` y redondear lo manda a la fila de al lado. Con `round`, todo lo que
+    // se arrastraba caía una U por encima de donde se soltó — sin ningún error que ver, solo
+    // un armario mal dibujado que alguien se creería.
+    const fromTop = Math.floor((y - _DCE.TOP) / _DCE.U);
+    const u = Number(rack.desc_units) ? fromTop + 1 : h - fromTop;
+    return Math.max(1, Math.min(h, u));
+}
+
+function _dceDown(ev) {
+    const caja = ev.target.closest('g[data-dce]');
+    if (!caja || !_dcimMay('dcim_edit')) return;
+    const item = ((_dcimRack || {}).items || []).find(i => i.uid === caja.dataset.dce);
+    // Lo ajeno se dibuja ocupando y anónimo: poder arrastrarlo sería poder reorganizar el
+    // armario de otro sin verlo.
+    if (!item || item.foreign) return;
+    const p = ssCanvasPoint(_DCE_SVG, ev);
+    if (!p) return;
+    _dceDrag = {uid: item.uid, u: Number(item.u_start || 1),
+                origen: Number(item.u_start || 1),
+                size: Math.max(1, Number(item.u_height || 1)),
+                from: p, moved: false};
+    ev.currentTarget.setPointerCapture?.(ev.pointerId);
+}
+
+function _dceMove(ev) {
+    if (!_dceDrag) return;
+    const rack = (_dcimRack || {}).rack;
+    const p = ssCanvasPoint(_DCE_SVG, ev);
+    if (!rack || !p) return;
+    // A la U más cercana, ya: no hay medias U —un equipo va atornillado a un agujero o no va— y
+    // redondear al soltar haría que lo que se ve durante el arrastre no fuese lo que se guarda.
+    const u = Math.max(1, Math.min(Number(rack.u_height || 1) - _dceDrag.size + 1,
+                                   _dceUAt(rack, p.y)));
+    if (u === _dceDrag.u) return;
+    _dceDrag.u = u;
+    _dceDrag.moved = true;
+    const item = ((_dcimRack || {}).items || []).find(i => i.uid === _dceDrag.uid);
+    if (item) {
+        item.u_start = u;
+        _dceRedraw();
+    }
+}
+
+async function _dceUp(ev) {
+    const drag = _dceDrag;
+    _dceDrag = null;
+    if (!drag || !drag.moved) return;
+    const item = ((_dcimRack || {}).items || []).find(i => i.uid === drag.uid);
+    if (!item) return;
+    // El servidor decide si cabe: sabe de caras y de solapes, y ya contempla que un equipo no
+    // choca consigo mismo al moverse una U. El dibujo puede enseñarlo donde vaya el ratón; lo
+    // que vale es lo que acepte la escritura.
+    const r = await _dcimSend('PUT', `/api/v1/dcim/items/${encodeURIComponent(item.uid)}`,
+                              {u_start: drag.u});
+    if (!r.ok) {
+        showToast(r.error || t('dcim_no_room'), 'warning');
+        item.u_start = drag.origen;                 // devolverlo a donde estaba de verdad
+        _dceRedraw();
+        return;
+    }
+    // Y recargar: mover uno cambia los huecos libres, y la barra de arriba los cuenta.
+    _dcimLoadRack((_dcimRack.rack || {}).uid);
+}
+
+/** Repintar solo el dibujo mientras se arrastra: volver a montar la sección entera en cada
+ *  movimiento del ratón sustituye el `<svg>` que tiene capturado el puntero, y con él se va la
+ *  mano que está arrastrando. */
+function _dceRedraw() {
+    const svg = ssCanvasSvg(_DCE_SVG);
+    const rack = (_dcimRack || {}).rack;
+    if (svg && rack) svg.innerHTML = _dceContent(rack, (_dcimRack || {}).items || []);
+}
+
+/** Where a U sits, top-down. Racks number from the bottom (U 1 at the floor) unless somebody
+ *  said otherwise, and getting that backwards sends a person to the other end of a cabinet at
+ *  three in the morning — which is why it is a column on the rack and not an assumption. */
+/** El acceso a lo que lleva dentro. Un botón y no solo el doble clic: un gesto que nadie
+ *  descubre es una función que no existe — y esta se descubrió preguntando dónde se configuraba.
+ *
+ *  Solo si la fila es lo bastante alta para que quepa sin taparlo todo: en 1U el nombre es lo que
+ *  hay que leer, y el doble clic sigue estando para quien ya lo sepa. */
+function _dcePartsBtn(item, x, y, h) {
+    if (h < _DCE.U * 1.5) return '';
+    return `<g class="ss-pointer" onclick="event.stopPropagation();_dcPartsOpen(${
+                jsStr(item.uid)})">
+        <title>${escAttr(t('dcim_parts'))}</title>
+        <rect x="${x + _DCE.W - 26}" y="${y + h - 16}" width="18" height="12" rx="3"
+              fill="var(--bs-body-bg)" stroke="var(--bs-border-color)"></rect>
+        <text x="${x + _DCE.W - 17}" y="${y + h - 7}" text-anchor="middle" font-size="8"
+              fill="var(--bs-secondary-color)">&#9881;</text>
+    </g>`;
+}
+
+/** La foto del modelo, cuando el catálogo la trajo.
+
+ *  Detrás del nombre y del color, no en vez de ellos: la foto dice QUÉ es —un servidor de dos
+ *  fuentes se distingue de un panel de parcheo de un vistazo— y el color dice CÓMO está, que es
+ *  lo que se venía a mirar. Una foto que tapara el estado convertiría el alzado en un catálogo.
+ *
+ *  Atenuada por lo mismo: es fondo. Y estirada al hueco entero sin conservar proporciones a
+ *  propósito — un equipo de 1U ocupa una fila y la foto tiene que ocupar esa fila, aunque la
+ *  imagen de la biblioteca venga con otro margen. */
+function _dceFoto(item, face, x, y, h) {
+    const nombre = ((item.images || {})[face === 'rear' ? 'rear' : 'front']) || '';
+    if (!nombre) return '';
+    return `<image href="${_dcimMediaUrl(nombre)}"
+                   x="${x + 3}" y="${y + 2}" width="${_DCE.W - 6}" height="${h - 4}"
+                   preserveAspectRatio="none" opacity=".55"></image>`;
+}
+
+/** Lo que sale de un equipo, como marcas y no como cables.
+ *
+ *  Un armario de cuarenta equipos con sus latiguillos dibujados es una maraña que tapa lo que se
+ *  venía a mirar. Estas marcas dicen tres cosas y ninguna más: que hay cables, de qué color, y si
+ *  la corriente viene de las dos ramas — que es lo que se puede comprobar de un vistazo y lo que
+ *  alguien va a buscar con la mano en el armario.
+ *
+ *  Solo cuando la pestaña que va con ellas está abierta. Quien abre un armario para ver qué hay
+ *  dentro no quiere el cableado encima; quien lo abre para el cableado, sí. */
+function _dceMarks(item, x, y, h) {
+    const marcas = [];
+    // Los cables de red: un punto por cable, con su color, pegados al borde derecho.
+    const cables = ((_dcCables || {}).cables || []).filter(
+        c => c.a_item === item.uid || c.b_item === item.uid);
+    cables.slice(0, 6).forEach((c, i) => {
+        marcas.push(`<circle cx="${x + _DCE.W - 12 - i * 9}" cy="${y + h / 2}" r="3"
+            fill="${escAttr(c.color || 'var(--bs-secondary-color)')}"
+            stroke="var(--bs-body-bg)" stroke-width="1"><title>${
+            escAttr((c.label || '') + (c.seen === 'other_port'
+                ? ' · ' + t('dcim_cable_other_port') : ''))}</title></circle>`);
+    });
+    // Y la corriente: una barra por rama, del color de su regleta. Dos barras es lo normal; una
+    // sola es el hallazgo, y aquí se ve sin tener que abrir nada.
+    const luz = ((_dcPower || {}).items || []).find(p => p.uid === item.uid);
+    ((luz || {}).feeds || []).slice(0, 4).forEach((f, i) => {
+        const color = _dcPduColor(f.pdu_uid, (_dcPower || {}).pdus || []);
+        marcas.push(`<rect x="${x + 8 + i * 6}" y="${y + h - 5}" width="4" height="3" rx="1"
+            fill="${escAttr(color)}"><title>${escAttr(f.pdu)}</title></rect>`);
+    });
+    return marcas.join('');
+}
+
+function _dceY(rack, u) {
+    const h = Number(rack.u_height || 0);
+    const fromTop = Number(rack.desc_units) ? (u - 1) : (h - u);
+    return _DCE.TOP + fromTop * _DCE.U;
+}
+
+function _dceFaceX(face) {
+    return _DCE.PAD + (face === 'rear' ? _DCE.W + _DCE.GAP : 0);
+}
+
+/** The whole drawing: two faces, their U rails, and what is bolted into them. */
+function _dcimElevation(rack, items) {
+    const h = Number(rack.u_height || 0);
+    if (!h) return '';
+    const height = _DCE.TOP + h * _DCE.U + _DCE.PAD;
+    const width = _DCE.PAD * 2 + _DCE.W * 2 + _DCE.GAP;
+    const L = {x: 0, y: 0, width, height};
+    return `<div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
+        <div id="dcimElevPanel" class="position-absolute ss-passthru"
+             style="left:.5rem;bottom:.5rem;right:.5rem;z-index:2"></div>
+        <svg ${ssCanvasAttrs(_DCE_SVG, L)}
+             onwheel="ssCanvasWheel(${jsStr(_DCE_SVG)},event)"
+             onpointerdown="_dceDown(event)" onpointermove="_dceMove(event)"
+             onpointerup="_dceUp(event)" onpointercancel="_dceUp(event)"
+             onpointerleave="_dceUp(event)"
+             aria-label="${escAttr(t('dcim_elevation'))}">
+            ${_dceContent(rack, items)}
+        </svg>
+    </div>`;
+}
+
+function _dceContent(rack, items) {
+    return ['front', 'rear'].map(face => _dceFace(rack, items, face)).join('');
+}
+
+/** One face: its caption, its U numbers, and the empty rails behind everything. */
+function _dceFace(rack, items, face) {
+    const h = Number(rack.u_height || 0);
+    const x = _dceFaceX(face);
+    const rails = [];
+    for (let u = 1; u <= h; u++) {
+        const y = _dceY(rack, u);
+        rails.push(`<rect x="${x}" y="${y}" width="${_DCE.W}" height="${_DCE.U}"
+                          fill="var(--bs-body-bg)" stroke="var(--bs-border-color)"
+                          stroke-width="0.5"></rect>
+            <text x="${x - 6}" y="${y + _DCE.U / 2 + 4}" font-size="9" text-anchor="end"
+                  fill="var(--bs-secondary-color)">${u}</text>`);
+    }
+    // The items of this face, drawn after the rails so they sit on them. `full` is on both:
+    // that is what `full` MEANS, and drawing it on one is a cabinet that reads as half empty
+    // from behind.
+    const mine = (items || []).filter(i => {
+        // Lo montado en otra cosa no se dibuja aparte: hereda el sitio de quien lo lleva y
+        // saldría justo encima. Se cuenta en el bloque de la bandeja y se lee en la tabla.
+        if (i.parent_uid) return false;
+        const f = String(i.face || 'full');
+        return f === 'full' || f === face;
+    });
+    return `<g>
+        <text x="${x}" y="${_DCE.TOP - 12}" font-size="11" font-weight="600"
+              fill="var(--bs-secondary-color)">${esc(t('dcim_face_' + face))}</text>
+        ${rails.join('')}
+        ${mine.map(i => _dceItem(rack, i, face)).join('')}
+    </g>`;
+}
+
+/** One thing bolted into the rack.
+ *
+ *  Its colour is the fleet's (`hostStateColor`) and its ABSENCE of colour is the point: an item
+ *  with no host gets the muted surface, which is what "nobody is watching this" looks like
+ *  everywhere else in the panel. */
+function _dceItem(rack, item, face) {
+    const u = Number(item.u_start || 1);
+    const size = Math.max(1, Number(item.u_height || 1));
+    const ancho = _DCE.W;
+    // Qué trozo del U ocupa, si es que no lo ocupa entero. `1` de `1` es lo de siempre.
+    const de = Math.max(1, Number(item.u_slots || 1));
+    const cual = Math.min(de, Math.max(1, Number(item.u_slot || 1)));
+    const toma = Math.max(1, Math.min(de - cual + 1, Number(item.u_slot_span || 1)));
+    const aLoAncho = String(item.u_split || 'width') !== 'height';
+    const x = _dceFaceX(face) + (aLoAncho ? (cual - 1) * ancho / de : 0);
+    // The top of the block is the top U it occupies, which depends on which way the rack is
+    // numbered — the same question as `_dceY`, asked for the far end.
+    const arriba = Math.min(_dceY(rack, u), _dceY(rack, u + size - 1));
+    const alto = size * _DCE.U;
+    const y = arriba + (aLoAncho ? 0 : (cual - 1) * alto / de);
+    const h = aLoAncho ? alto : alto * toma / de;
+    const w = aLoAncho ? ancho * toma / de : ancho;
+    const tone = item.foreign ? 'var(--bs-secondary-bg)' : hostStateColor(item.state || '');
+    // Lo que lleva encima, dicho en el bloque: es lo que explica por qué un U «lleno» tiene
+    // tres máquinas dentro, y sin decirlo la bandeja parece una caja vacía atornillada.
+    const llevados = ((_dcimRack || {}).items || [])
+        .filter(i => String(i.parent_uid || '') === String(item.uid)).length;
+    const name = _dcimItemName(item) + (llevados ? ` (+${llevados})` : '');
+    return `<g class="ss-pointer" data-dce="${escAttr(item.uid)}"
+               onpointerenter="_dceHover(${jsStr(item.uid)})"
+               onpointerleave="_dceHover('')"
+               ${item.foreign ? '' : `onclick="_dcimOpen('edit','item','',${
+                    jsStr(item.uid)})"`}
+               ${item.foreign ? '' : `ondblclick="event.stopPropagation();_dcPartsOpen(${
+                    jsStr(item.uid)})"`}>
+        <!-- Un botón, no solo el doble clic: un gesto que nadie descubre es una función que no
+             existe, y esto se descubrió justo así — preguntando dónde se configuraba. -->
+        <title>${escAttr(name)}</title>
+        <rect x="${x + 2}" y="${y + 1}" width="${w - 4}" height="${h - 2}" rx="3"
+              fill="var(--bs-tertiary-bg)" stroke="${tone}" stroke-width="1.5"></rect>
+        ${_dceFoto(item, face, x, y, h)}
+        <rect x="${x + 2}" y="${y + 1}" width="4" height="${h - 2}" rx="2"
+              fill="${tone}"></rect>
+        <text x="${x + 14}" y="${y + h / 2 + 4}" font-size="11"
+              fill="${item.foreign ? 'var(--bs-secondary-color)' : 'currentColor'}"
+              >${esc(_dceClip(name, Math.max(6, Math.round(34 * w / ancho))))}</text>
+        ${item.foreign ? `<text x="${x + w - 10}" y="${y + h / 2 + 4}" font-size="10"
+              text-anchor="end" fill="var(--bs-secondary-color)">&#128274;</text>`
+            : _dceMarks(item, x, y, h) + _dcePartsBtn(item, x, y, h)}
+    </g>`;
+}
+
+function _dceClip(s, n) {
+    s = String(s || '');
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+//: What the pointer is on. Hover only: there is nothing to keep open here — the thing under
+//: the pointer IS the answer, and clicking one opens its form.
+let _dceOn = '';
+
+function _dceHover(uid) {
+    _dceOn = String(uid || '');
+    const box = document.getElementById('dcimElevPanel');
+    if (box) box.innerHTML = _dceCard();
+    const svg = _dcimElevSvg();
+    if (!svg) return;
+    // Marked in place rather than redrawn: the pointer is ON the box, and rebuilding the
+    // drawing underneath it drops the hover that asked. Same rule as both maps.
+    svg.querySelectorAll('g[data-dce]').forEach(g => {
+        g.style.opacity = (!_dceOn || g.dataset.dce === _dceOn) ? '' : '.35';
+    });
+}
+
+/** Reading one item — what it is, whose it is, and what it is doing. */
+function _dceCard() {
+    if (!_dceOn || !_dcimRack) return '';
+    const item = (_dcimRack.items || []).find(i => i.uid === _dceOn);
+    if (!item) return '';
+    if (item.foreign)
+        return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+            <i class="bi bi-lock me-1"></i>${esc(t('dcim_foreign'))}
+            <span class="text-muted ms-2">${esc(_dceSpan(item))}</span>
+        </div>`;
+    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="fw-semibold">${esc(_dcimItemName(item))}</span>
+            ${item.state ? _infraStateBadge(item.state) : `<span class="text-muted ss-fs-3">${
+                esc(t('dcim_unwatched'))}</span>`}
+            ${_dcimOrgBadge(item.org_uid)}
+            <span class="text-muted ss-fs-3">${esc(_dceSpan(item))}</span>
+            ${item.serial ? `<code class="ss-fs-3">${esc(item.serial)}</code>` : ''}
+            ${item.host_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2"
+                onclick="infraOpen(${jsStr(item.host_uid)})">${
+                esc(t('dcim_open_device'))}</button>` : ''}
+        </div>
+    </div>`;
+}
+
+function _dceSpan(item) {
+    const u = Number(item.u_start || 0);
+    const h = Number(item.u_height || 1);
+    return (h > 1 ? u + '–' + (u + h - 1) : String(u)) + 'U · '
+           + t('dcim_face_' + (item.face || 'full'));
+}

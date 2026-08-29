@@ -260,3 +260,42 @@ class TestAPickerForwardsWhatItWasGiven:
         found = [p for p in self._sources()
                  if 'FIELD_PICKERS[' in io.open(p, encoding='utf-8-sig', errors='replace').read()]
         assert len(found) >= 2, f'the picker registrations are not being scanned: {found}'
+
+
+class TestElModalDeConfirmacionRecibeUnaFuncion:
+    """`showConfirmModal(mensaje, callback)` **no devuelve una promesa**.
+
+    Escribirlo como `const ok = await showConfirmModal(msg, t('delete'))` compila, abre el modal
+    y no falla nunca — pero `ok` es `undefined`, así que la comprobación siguiente sale por la
+    puerta de «ha dicho que no» y **todo lo que venía después no ocurre**. Salió a la pantalla
+    como «eliminar no funciona»: el modal preguntaba, el usuario confirmaba, y no pasaba nada.
+
+    Un `await` sobre algo que no es una promesa es la equivocación que no falla: no rompe, no
+    avisa, solo hace que el resto de la función no exista. Por eso se vigila desde fuera.
+    """
+
+    def _js(self):
+        for path, texto in sorted(_all_template_text().items()):
+            yield os.path.relpath(path, TPL), texto
+
+    def test_nadie_espera_su_resultado(self):
+        malos = [rel for rel, js in self._js()
+                 if re.search(r'await\s+showConfirmModal', js)]
+        assert not malos, f'`await showConfirmModal` no devuelve nada: {malos}'
+
+    def test_ni_lo_guarda(self):
+        malos = [rel for rel, js in self._js()
+                 if re.search(r'=\s*showConfirmModal\s*\(', js)]
+        assert not malos, f'`showConfirmModal` no devuelve nada que guardar: {malos}'
+
+    def test_el_segundo_argumento_es_una_funcion(self):
+        """Un texto donde va la función es un modal cuyo botón de aceptar no hace nada."""
+        malos = []
+        for rel, js in self._js():
+            # La DECLARACIÓN también dice `showConfirmModal(msg, callback…` y no es una
+            # llamada: se mira solo lo que no viene precedido de `function`.
+            for llamada in re.findall(r'(?<!function )showConfirmModal\(([^;]{0,200})', js):
+                resto = llamada.split(',', 1)[1] if ',' in llamada else ''
+                if resto and not re.search(r'(\(\s*\)|function|=>|\w+\s*\))', resto[:60]):
+                    malos.append((rel, llamada[:60]))
+        assert not malos, malos

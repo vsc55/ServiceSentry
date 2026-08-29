@@ -1,0 +1,354 @@
+{# ================================================================
+   DCIM — the one form on this screen: what each kind IS, as fields.
+
+   Its own partial because the shell has a size limit and this is a piece in its own
+   right: a table of what a site, a room, a rack and an item are made of, the boxes
+   drawn from it, what is read back out of them, and the two verbs that write it.
+
+   A table and not eight forms: creating and editing four kinds is the same act on
+   different columns, and eight copies of "read the boxes, check the permission,
+   refresh" are seven places for the escaping or the refresh to drift.
+   ================================================================ #}
+
+//: What each kind IS, as fields. A table and not eight forms: creating and editing a site, a
+//: room, a rack and an item are the same act on different columns, and eight copies of "read
+//: the boxes, check the permission, refresh" are seven places for the escaping or the refresh
+//: to drift. What differs is data — a route, the parent's column, the fields.
+const _DCIM_KIND = {
+    site: {url: 'sites', parent: '', title: 'dcim_site', fields: [
+        {name: 'name', label: 'dcim_site_name', w: '16rem'},
+        {name: 'address', label: 'dcim_address', w: '18rem'},
+        // Kept whether or not anything draws them yet: where a datacenter IS, is a fact about
+        // it, and the map that will use them deliberately depends on no tile provider.
+        // `coord` y no `number`: de un mapa se copian las dos coordenadas juntas, y un
+        // `<input type=number>` DESCARTA un texto con coma —`value` sale vacío— así que el
+        // pegado se perdería entero sin decir nada. `pairs` dice a qué campo va la segunda.
+        {name: 'lat', label: 'dcim_lat', type: 'coord', pairs: 'lon', w: '11rem'},
+        {name: 'lon', label: 'dcim_lon', type: 'coord', pairs: 'lat', w: '11rem'},
+        // Escribir y filtrar, no elegir de una lista de seiscientas ni teclear a pelo.
+        // Texto libre es como se acaba con `Europe/Madrid`, `Madrid`, `CET` y `GMT+1` en cuatro
+        // sedes, y ninguna de las cuatro sirve para calcular una hora.
+        {name: 'timezone', label: 'dcim_timezone', list: 'zones', w: '14rem'},
+    ]},
+    room: {url: 'rooms', parent: 'site_uid', title: 'dcim_room', fields: [
+        {name: 'name', label: 'dcim_room_name', w: '16rem'},
+        // Cómo se enfría. Vacío es «nadie lo ha dicho», que **no** es lo mismo que `none`: un
+        // armario de comunicaciones sin refrigeración es un hecho que merece constar, y una
+        // sala cuya refrigeración nadie escribió es una pregunta.
+        {name: 'cooling', label: 'dcim_cooling',
+         choices: ['', 'none', 'room', 'cold_aisle', 'hot_aisle', 'in_row', 'rear_door',
+                   'split'],
+         prefix: 'dcim_cooling_', w: '15rem'},
+        // How wide the floor plan is IN THE ROOM. The height follows from the picture: two
+        // numbers could disagree and stretch the drawing, which is lying about distances in
+        // the one place somebody is going to measure them. 0 = nobody has scaled it.
+        {name: 'plan_mm', label: 'dcim_plan_mm', type: 'number', w: '10rem'},
+        {name: 'description', label: 'dcim_description', w: '18rem'},
+    ]},
+    rack: {url: 'racks', parent: 'room_uid', title: 'dcim_rack', fields: [
+        {name: 'name', label: 'dcim_rack_name', w: '12rem'},
+        // A qué fila pertenece. Vacío = suelto, que es un estado real: el armario de
+        // comunicaciones de un rincón no está en ninguna fila y nunca lo estará.
+        {name: 'row_uid', label: 'dcim_row', list: 'rows', w: '10rem'},
+        {name: 'u_height', label: 'dcim_u_height', type: 'number', min: 1, value: 42, w: '7rem'},
+        // Qué U es la de arriba. Existía como columna y el alzado ya la respetaba, pero no
+        // había forma de decirlo — así que todo rack era de abajo arriba y parecía correcto,
+        // porque ese es el caso común.
+        {name: 'desc_units', label: 'dcim_numbering', type: 'number', min: 0,
+         choices: ['0', '1'], prefix: 'dcim_numbering_', w: '11rem'},
+        {name: 'width_mm', label: 'dcim_width_mm', type: 'number', min: 1, value: 600,
+         w: '7rem'},
+        {name: 'depth_mm', label: 'dcim_depth_mm', type: 'number', min: 1, value: 1000,
+         w: '7rem'},
+        // Los mástiles. Lo que decide si un servidor entra no es el fondo del armario sino la
+        // distancia ENTRE mástiles —donde se atornillan sus raíles— y lo que queda detrás del
+        // trasero para los cables.
+        {name: 'rail_front_mm', label: 'dcim_rail_front', type: 'number', min: 0, w: '7rem'},
+        {name: 'rail_depth_mm', label: 'dcim_rail_depth', type: 'number', min: 0, w: '7rem'},
+        {name: 'rail_rear_mm', label: 'dcim_rail_rear', type: 'number', min: 0, w: '7rem'},
+        // Por dónde se llega. Las opciones son las colocaciones corrientes, y lo que se guarda
+        // es el HECHO —qué lados son accesibles—: dos racks iguales, uno en medio de un pasillo
+        // y otro colgado en la pared, no se manejan igual, y la diferencia es dónde están.
+        {name: 'access', label: 'dcim_access',
+         choices: ['front,rear,left,right', 'front,rear', 'front,rear,left', 'front,left',
+                   'front'],
+         prefix: 'dcim_access_', w: '17rem'},
+        {name: 'description', label: 'dcim_description', w: '14rem'},
+    ]},
+    item: {url: 'items', parent: 'rack_uid', title: 'dcim_item', fields: [
+        {name: 'label', label: 'dcim_item_label', w: '14rem'},
+        // QUÉ es. De aquí cuelga que un panel de parcheo deje de contarse como «sin
+        // vigilar»: no es que nadie lo mire, es que no hay nada que mirar. Vacío = nadie lo
+        // ha dicho, que es una pregunta; `other` es una respuesta.
+        {name: 'role', label: 'dcim_role',
+         choices: ['', 'server', 'switch', 'router', 'firewall', 'storage', 'patch_panel',
+                   'fiber_panel', 'ups', 'pdu', 'shelf', 'kvm', 'console', 'blank', 'other'],
+         prefix: 'dcim_role_', w: '11rem'},
+        {name: 'u_start', label: 'dcim_u_start', type: 'number', min: 1, value: 1, w: '6rem'},
+        {name: 'u_height', label: 'dcim_u_size', type: 'number', min: 1, value: 1, w: '6rem'},
+        // En cuántas partes se divide ese U y cuál se toma. `1` de `1` es el U entero, que es lo
+        // que vale todo lo que ya estaba. El número lo decide quien monta: dos para un patch
+        // panel de 0,5 U, ocho para la bandeja de Raspberry — y por eso es un número y no una
+        // lista de «arriba / abajo / izquierda / derecha», que se queda corta el primer día.
+        {name: 'u_slots', label: 'dcim_item_slots', type: 'number', min: 1, value: 1,
+         w: '6rem'},
+        {name: 'u_slot', label: 'dcim_item_slot', type: 'number', min: 1, value: 1, w: '6rem'},
+        {name: 'u_slot_span', label: 'dcim_item_slot_span', type: 'number', min: 1, value: 1,
+         w: '6rem'},
+        // Por dónde se parte: dos patch panel de 0,5 U van uno ENCIMA del otro y dos mini PC
+        // uno AL LADO del otro. A la rejilla le da igual; al dibujo no.
+        {name: 'u_split', label: 'dcim_item_split', choices: ['width', 'height'],
+         prefix: 'dcim_split_', value: 'width', w: '9rem'},
+        // O encima de otra cosa: los mini PC sobre una bandeja. Entonces no ocupa U —lo paga
+        // ella— y hereda dónde está.
+        {name: 'parent_uid', label: 'dcim_item_parent', list: 'mounts', w: '14rem'},
+        {name: 'face', label: 'dcim_face', choices: ['full', 'front', 'rear'],
+         prefix: 'dcim_face_', w: '8rem'},
+        // Su fondo, que el catálogo no sabe: devicetype-library dice si un modelo es de
+        // profundidad completa y nunca cuántos milímetros. Sin él el rack sigue diciendo lo que
+        // TIENE, que es lo que quiere saber quien está delante con una caja en la mano.
+        {name: 'depth_mm', label: 'dcim_item_depth', type: 'number', min: 0, w: '7rem'},
+        // **La máquina**, que es lo que hace que el alzado tenga color. La columna existía
+        // desde el primer commit, la API la aceptaba y el vuelco de estado la leía — y no
+        // estaba en el formulario, así que el rack entero salía gris. Tercera vez que aparece
+        // esta misma forma de fallo en esta sección: una columna que nadie puede escribir vale
+        // siempre su valor por defecto, y el código que la respeta parece que funciona.
+        {name: 'host_uid', label: 'dcim_host', list: 'hosts', w: '16rem'},
+        {name: 'serial', label: 'dcim_serial', w: '10rem'},
+        // **De qué plantilla nace.** Solo al crear: elegirla estampa sus componentes en el
+        // equipo, y eso ocurre una vez. Ofrecerla al editar diría que se puede cambiar de qué
+        // nació algo que ya nació — y o no hace nada, o vuelve a copiar quince piezas encima
+        // de las que alguien ya corrigió.
+        {name: 'build_uid', label: 'dcim_build_pick', list: 'builds', w: '15rem',
+         newOnly: true},
+        // Y lo que solo tiene ESTA caja: ningún modelo ni plantilla puede saberlo, y sin ello
+        // «qué se queda sin garantía este trimestre» no tiene dónde contestarse.
+        {name: 'purchased_at', label: 'dcim_item_purchased', type: 'date', w: '9rem'},
+        {name: 'warranty_until', label: 'dcim_item_warranty', type: 'date', w: '9rem'},
+        {name: 'supplier', label: 'dcim_item_supplier', w: '10rem'},
+    ]},
+};
+
+/** The form, where the thing itself appears — and nowhere else. */
+function _dcimFormHtml(mode, kind, parent, uid) {
+    const f = _dcimForm;
+    if (!f || f.mode !== mode || f.kind !== kind || f.parent !== (parent || '')
+        || f.uid !== (uid || '')) return '';
+    const spec = _DCIM_KIND[kind];
+    const row = f.row || {};
+    const box = (fld, i) => {
+        const has = row[fld.name] !== undefined && row[fld.name] !== null && row[fld.name] !== '';
+        const val = has ? row[fld.name] : (fld.value !== undefined ? fld.value : '');
+        if (fld.choices)
+            // El prefijo lo dice el campo: escrito a mano, la primera elección que no fuese una
+            // cara del rack habría salido con el nombre de una.
+            return `<select id="dcim-f-${i}" class="form-select form-select-sm"
+                        style="max-width:${fld.w}" title="${escAttr(t(fld.label))}">
+                ${fld.choices.map(c => `<option value="${escAttr(c)}"${
+                    String(val) === String(c) ? ' selected' : ''}>${
+                    esc(t((fld.prefix || '') + c))}</option>`).join('')}
+            </select>`;
+        // Un campo con lista es texto CON sugerencias, no un desplegable: se escribe para
+        // filtrar y se puede pegar una zona que esta instalación no conozca todavía — que es
+        // mejor que perder el dato. Sin lista que ofrecer, es un campo de texto y ya está.
+        const list = _dcimListId(fld);
+        return `<input id="dcim-f-${i}" class="form-control form-control-sm${
+                    fld.type === 'number' || fld.type === 'coord' ? ' ss-tabular' : ''}"
+                    ${list ? `list="${list}" autocomplete="off"` : ''}
+                    ${fld.pairs ? `oninput="_dcimSplitCoords(this, ${i}, ${jsStr(kind)})"` : ''}
+                    style="max-width:${fld.w}" type="${
+                        escAttr(fld.type === 'coord' ? 'text' : (fld.type || 'text'))}"
+                    ${fld.min ? `min="${fld.min}"` : ''}
+                    ${fld.step ? `step="${escAttr(fld.step)}"` : ''}
+                    value="${escAttr(String(val))}"
+                    placeholder="${escAttr(t(fld.label))}" title="${escAttr(t(fld.label))}"
+                    onkeydown="if(event.key==='Enter')_dcimSave();
+                               if(event.key==='Escape')_dcimClose()">`;
+    };
+    // Un `<datalist>` por lista y no por campo: son cientos de opciones, y una copia por
+    // campo serían cientos por cada uno.
+    // De las claves de la tabla y no de una lista escrita aquí: una enumeración a mano es una
+    // que hay que acordarse de tocar al añadir la quinta, y no acordarse no da ningún error —
+    // da un campo con sugerencias que no sugiere nada.
+    const lists = Object.keys(_DCIM_LISTS)
+        .filter(k => spec.fields.some(f => f.list === k))
+        .map(_dcimDatalist).join('');
+    return `<div class="d-flex align-items-center gap-2 flex-wrap my-2 p-2 rounded
+                        bg-body-secondary">${lists}
+        <span class="text-muted ss-fs-2">${esc(t(mode === 'new' ? 'dcim_new' : 'edit'))}
+            · ${esc(t(spec.title))}</span>
+        ${spec.fields.map((fld, i) =>
+            (fld.newOnly && mode !== 'new') ? '' : box(fld, i)).join('')}
+        <button class="btn btn-sm btn-primary" onclick="_dcimSave()">${esc(t('save'))}</button>
+        <button class="btn btn-sm btn-secondary" onclick="_dcimClose()">${
+            esc(t('cancel'))}</button>
+    </div>`;
+}
+
+//: Lo que ofrece cada lista, y con qué se ve cada opción. Una tabla porque las dos listas se
+//: dibujan igual y lo que cambia es de dónde salen y qué se enseña — que es dato.
+const _DCIM_LISTS = {
+    zones: {id: 'dcim-zones', rows: () => _dcimZones || [],
+            value: z => z, label: () => ''},
+    // Una máquina se ELIGE por su nombre y se GUARDA por su uid, que es lo que hay que hacer
+    // con cualquier cosa que tenga las dos: el uid no se teclea y el nombre cambia.
+    // Las filas de la sala abierta. Se ELIGEN por nombre y se guardan por uid, como las
+    // máquinas: el uid no se teclea y el nombre cambia.
+    rows: {id: 'dcim-rows', rows: () => ((_dcpFeat || {}).rows || []),
+           value: f => f.uid, label: f => f.name || f.uid},
+    hosts: {id: 'dcim-hosts', rows: () => _dcimHosts || [],
+            value: h => h.uid, label: h => [h.name, h.address].filter(Boolean).join(' · ')},
+    // Las plantillas. Se ELIGEN por nombre y se guardan por uid, como las máquinas y las filas.
+    builds: {id: 'dcim-builds', rows: () => _dcimBuildOpts || [],
+             value: b => b.uid, label: b => b.name || b.uid},
+    // Sobre qué se puede montar algo: lo que ya hay en ESTE rack y no va montado a su vez. Dos
+    // niveles serían una bandeja sobre una bandeja, que no es una sala.
+    mounts: {id: 'dcim-mounts',
+             rows: () => (((_dcimRack || {}).items) || []).filter(i => !i.parent_uid),
+             value: i => i.uid,
+             label: i => [i.label || i.uid, 'U' + (i.u_start || '')].join(' · ')},
+};
+
+/** El id de la lista de un campo, o '' si no hay nada que ofrecer.
+ *
+ *  Vacío y no una lista vacía: un desplegable sin opciones es un campo que parece roto, y este
+ *  panel puede quedarse sin zonas (sin `tzdata`) o sin máquinas visibles (un rol acotado). */
+function _dcimListId(fld) {
+    const spec = _DCIM_LISTS[fld.list];
+    return (spec && spec.rows().length) ? spec.id : '';
+}
+
+function _dcimDatalist(kind) {
+    const spec = _DCIM_LISTS[kind];
+    const rows = spec.rows();
+    if (!rows.length) return '';
+    return `<datalist id="${spec.id}">${rows.map(r =>
+        `<option value="${escAttr(spec.value(r))}">${esc(spec.label(r))}</option>`
+    ).join('')}</datalist>`;
+}
+
+/** El nombre de una máquina, para enseñarlo donde solo hay un uid. */
+function _dcimHostName(uid) {
+    const h = (_dcimHosts || []).find(x => x.uid === uid);
+    return h ? (h.name || h.uid) : String(uid || '');
+}
+
+/** Cómo se lee un item: lo rotulado, si no el nombre de su máquina, si no su uid.
+ *
+ *  En ese orden y no en otro. La etiqueta es lo que está escrito por delante y es lo que
+ *  alguien lee con una linterna; cuando no la hay —que es lo normal el primer día— el nombre
+ *  de la máquina es lo que se busca, y treinta y seis caracteres de uid no son nada.
+ *
+ *  Una función y no tres copias: el alzado, la tabla y la tarjeta dicen el mismo nombre, y tres
+ *  copias es que uno de los tres se quede con el uid. */
+function _dcimItemName(item) {
+    const i = item || {};
+    if (i.foreign) return t('dcim_foreign');
+    return i.label || (i.host_uid ? _dcimHostName(i.host_uid) : '') || i.uid || '';
+}
+
+function _dcimClose() {
+    _dcimForm = null;
+    renderDcim();
+}
+
+/** Las dos coordenadas de un pegado, o `null` si eso no es un par.
+
+ *  Un mapa las da juntas —«41.532379203457616, 0.42055910010995645»— y separarlas a mano es
+ *  trabajo que el panel puede hacer. Se exige que sean DOS números y nada más: un texto que
+ *  casi lo parece se deja en paz, porque adivinar de más es peor que no adivinar. */
+function _dcimCoordPair(raw) {
+    const partes = String(raw || '').trim().split(/[;\s]*[,;]\s*|\s+/).filter(x => x !== '');
+    if (partes.length !== 2) return null;
+    const nums = partes.map(x => Number(x));
+    if (nums.some(n => !isFinite(n))) return null;
+    return nums;
+}
+
+/** Repartir el par mientras se escribe, para que la pantalla no diga una cosa y se guarde otra.
+
+ *  Hacerlo solo al guardar funcionaría, pero durante un rato la caja de la latitud enseñaría
+ *  las dos coordenadas: la pantalla estaría diciendo algo que no es lo que hay. */
+function _dcimSplitCoords(el, idx, kind) {
+    const spec = _DCIM_KIND[kind];
+    if (!spec) return;
+    const fld = spec.fields[idx];
+    const par = fld && fld.pairs ? _dcimCoordPair(el.value) : null;
+    if (!par) return;
+    const otro = spec.fields.findIndex(f => f.name === fld.pairs);
+    const caja = otro >= 0 ? document.getElementById('dcim-f-' + otro) : null;
+    if (!caja) return;
+    // El orden lo manda el campo donde se pegó: en la latitud, «lat, lon»; en la longitud,
+    // «lon, lat». Quien pega en una caja está diciendo qué es lo primero que pega.
+    el.value = String(par[0]);
+    caja.value = String(par[1]);
+}
+
+async function _dcimSave() {
+    if (!_dcimForm) return;
+    const mode = _dcimForm.mode, kind = _dcimForm.kind;
+    const parent = _dcimForm.parent, uid = _dcimForm.uid;
+    const spec = _DCIM_KIND[kind];
+    const body = {};
+    spec.fields.forEach((fld, i) => {
+        const el = document.getElementById('dcim-f-' + i);
+        if (!el) return;
+        const raw = String(el.value || '').trim();
+        if (fld.type === 'number' || fld.type === 'coord') {
+            // An empty number is not zero — a site whose latitude nobody knows must not end up
+            // on the equator. Left out entirely, the column keeps whatever it had.
+            //
+            // Y una coordenada puede traer las DOS pegadas de un mapa: si la de al lado no se
+            // ha repartido ya al escribir, se reparte aquí. Guardar «41.5, 0.4» como número
+            // daría 41.5 y tiraría la otra mitad en silencio, que es el peor sitio donde
+            // perder un dato.
+            const par = fld.pairs ? _dcimCoordPair(raw) : null;
+            if (par) {
+                body[fld.name] = par[0];
+                body[fld.pairs] = par[1];
+            } else if (raw !== '') {
+                body[fld.name] = Number(String(raw).replace(',', '.'));
+            }
+        } else {
+            body[fld.name] = raw;
+        }
+    });
+    if (mode === 'new' && !body[spec.fields[0].name]) return;
+    if (spec.parent && mode === 'new') body[spec.parent] = parent;
+    // `status === 200`, which is what every route in this panel answers. Reading it as `r.ok`
+    // — which `apiPost` does not return — announced a site that HAD been created as a failure,
+    // and only F5 said otherwise. Reported from the screen.
+    const r = mode === 'new'
+        ? await _dcimSend('POST', '/api/v1/dcim/' + spec.url, body)
+        : await _dcimSend('PUT', '/api/v1/dcim/' + spec.url + '/' + encodeURIComponent(uid),
+                          body);
+    if (r.ok) {
+        _dcimForm = null;
+        // Cuántos componentes entraron con él. Sin decirlo, estampar quince piezas se ve
+        // exactamente igual que no estampar ninguna — y la primera vez que alguien lo prueba,
+        // esa es justo la duda.
+        const copiadas = Number((r.data || {}).parts || 0);
+        showToast(copiadas ? tf('dcim_build_stamped', copiadas) : t('saved'), 'success');
+        const rack = (_dcimRack || {}).rack;
+        if (rack && (kind === 'item' || uid === rack.uid)) return _dcimLoadRack(rack.uid);
+        return renderDcim();
+    }
+    showToast(r.error || t('save_failed'), 'danger');
+}
+
+/** Delete, with the panel's own confirmation — never the browser's. */
+function _dcimDelete(kind, uid, name) {
+    const spec = _DCIM_KIND[kind];
+    showConfirmModal(tf('dcim_delete_confirm', name || uid), async () => {
+        const r = await _dcimSend('DELETE',
+                                  '/api/v1/dcim/' + spec.url + '/' + encodeURIComponent(uid));
+        if (r.ok) {
+            showToast(t('deleted'), 'success');
+            const rack = (_dcimRack || {}).rack;
+            if (kind === 'item' && rack) return _dcimLoadRack(rack.uid);
+            if (kind === 'rack' && rack && rack.uid === uid) { _dcimRack = null; _dcimUrl(); }
+            return renderDcim();
+        }
+        showToast(r.error || t('delete_error'), 'danger');
+    });
+}
