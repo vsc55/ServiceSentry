@@ -9268,7 +9268,7 @@ renderiza la página de verdad y mira.
 
 ## 168. Un menú se abre donde cabe, no donde está su padre
 
-**Archivo:** `tests/meta/test_wa_sidebar_flyout.py` — 6 tests
+**Archivo:** `tests/meta/test_wa_sidebar_flyout.py` — 9 tests
 
 Una sección de la barra lateral con más de una vista abre un desplegable a su derecha. Es
 `position: fixed` a propósito —la barra recorta su desbordamiento, y un menú dibujado dentro de

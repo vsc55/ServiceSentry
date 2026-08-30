@@ -14,6 +14,10 @@ function _toggleSidebar() {
     if (!layout) return;
     if (_sbIsMobile()) { layout.classList.toggle('ss-open'); return; }
     const mini = layout.classList.toggle('ss-mini');
+    // Lo que estuviera abierto se cierra: la columna cambia de ancho en .15s y un menú colocado
+    // contra el borde de antes se queda flotando en medio de la página mientras dura. Cerrarlo
+    // es más honesto que recolocarlo a mitad de una animación.
+    document.querySelectorAll('.ss-sb-flywrap.ss-fly-open').forEach(_closeFlyout);
     try { localStorage.setItem(_SB_MINI_KEY, mini ? '1' : '0'); } catch (e) { /* ignore */ }
 }
 function _openSidebar()  { document.getElementById('ss-layout')?.classList.add('ss-open'); }
@@ -236,10 +240,16 @@ function _placeFlyout(wrap) {
         fly.style.maxHeight = (vh - gap * 2) + 'px';
         fly.style.overflowY = 'auto';
     }
+    // Pegado al CARRIL y no al borde de su fila. Con la barra desplegada es lo mismo —la fila
+    // ocupa la columna entera— pero plegada la fila mide lo que mide su contenido, que es un
+    // icono: el menú se abría a mitad de camino, con un hueco a la izquierda por el que se veía
+    // la página. El menú es de la barra, así que sale de donde acaba la barra.
+    const carril = document.getElementById('ss-sidebar');
+    const rc = carril ? carril.getBoundingClientRect() : null;
     // The same on the other axis, for the mirrored sidebar or a narrow window: past the right
     // edge the menu opens to the LEFT of its item instead of off-screen.
-    let left = r.right;
-    if (left + w + gap > vw) left = Math.max(gap, r.left - w);
+    let left = rc ? rc.right : r.right;
+    if (left + w + gap > vw) left = Math.max(gap, (rc ? rc.left : r.left) - w);
     fly.style.top = top + 'px';
     fly.style.left = left + 'px';
 }
@@ -248,12 +258,45 @@ function _placeFlyout(wrap) {
 // the class and leaving a menu visible with no pointer on it (which overlapped neighbours).
 function _openFlyout(wrap) {
     document.querySelectorAll('.ss-sb-flywrap.ss-fly-open').forEach(w => {
-        if (w !== wrap) w.classList.remove('ss-fly-open');
+        if (w !== wrap) _closeFlyout(w);
     });
     wrap.classList.add('ss-fly-open');
+    // El globo del navegador, fuera mientras el menú está abierto. En modo icono el `title` es
+    // lo único que dice cómo se llama la fila, así que no se puede quitar del marcado — pero con
+    // el menú abierto lo dice el menú, y el globo se planta encima tapando la primera entrada.
+    const jefe = wrap.querySelector('.ss-sb-item');
+    if (jefe && jefe.title) {
+        jefe.dataset.ssTitle = jefe.title;
+        jefe.removeAttribute('title');
+    }
     _placeFlyout(wrap);
 }
-function _closeFlyout(wrap) { wrap.classList.remove('ss-fly-open'); }
+function _closeFlyout(wrap) {
+    wrap.classList.remove('ss-fly-open');
+    const jefe = wrap.querySelector('.ss-sb-item');
+    if (jefe && jefe.dataset.ssTitle) {
+        jefe.title = jefe.dataset.ssTitle;
+        delete jefe.dataset.ssTitle;
+    }
+}
+
+//: El menú abierto, si hay alguno. Se coloca **una vez, al abrirlo**, así que lo que mueva la
+//: fila de debajo —plegar la barra, cambiar el tamaño de la ventana, rodar la rueda sobre una
+//: lista de secciones larga— lo dejaba flotando donde estaba, apuntando a una fila que ya no
+//: está ahí.
+function _flyoutOpen() {
+    return document.querySelector('.ss-sb-flywrap.ss-fly-open');
+}
+
+function _replaceFlyout() {
+    const abierto = _flyoutOpen();
+    if (abierto) _placeFlyout(abierto);
+}
+
+window.addEventListener('resize', _replaceFlyout);
+// En la lista de secciones y no en la ventana: la barra tiene su propio desplazamiento, y la
+// página de detrás no mueve el carril.
+document.querySelector('.ss-sb-nav')?.addEventListener('scroll', _replaceFlyout);
 document.querySelectorAll('.ss-sb-flywrap').forEach(wrap => {
     // Moving onto the flyout does NOT fire mouseleave (it is a DOM child of the wrap); only
     // leaving the whole parent+flyout does, which then closes it so it can't overlap another.

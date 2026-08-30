@@ -8,6 +8,30 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.121] - 2026-08-30
+
+### Fixed
+- **The sidebar's section menu hung off its own row, not off the rail.** With the sidebar open a
+  row is as wide as the column, so the two are the same place; collapsed to icons a row is as wide
+  as one icon, and the menu opened half way across the rail with a gap to its left showing the page
+  underneath. The menu belongs to the sidebar, so it now starts where the sidebar ends — one
+  measurement that is right in both states.
+
+- **And the browser's own tooltip planted itself on top of it.** In icon-only mode the `title` is
+  the only thing naming a row, so it cannot come out of the markup — but while the menu is open the
+  menu names it, and the tooltip covered the first entry with the same word. It is taken off on
+  open and put back on close.
+
+- **A menu that was open did not follow what moved underneath it.** It is placed once, when it
+  opens, so collapsing the sidebar, resizing the window or scrolling a long section list left it
+  floating over the page pointing at nothing. It is placed again on resize and on the rail's own
+  scroll, and collapsing the sidebar closes it — the column changes width over .15s, and closing is
+  more honest than re-placing it half way through an animation.
+
+  Its guard pinned the literal `r.left - w` rather than the rule, so it failed when the rule was
+  followed better. It now checks that the rail is what gets measured, and covers the two new
+  behaviours.
+
 ## [0.0.1+build.120] - 2026-08-30
 
 ### Added
