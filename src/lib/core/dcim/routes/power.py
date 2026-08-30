@@ -25,8 +25,16 @@ from flask import jsonify, request, session
 
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
-from lib.core.dcim.store import FEED_COLORS, FEEDS, LINK_KINDS, SOURCE_KINDS
+from lib.core.dcim.store import (CABLE_CATEGORIES, CABLE_KINDS, FEED_COLORS, FEEDS,
+                                 LINK_KINDS, ROLES_MUDOS, SOURCE_KINDS)
 from lib.core.dcim.routes._common import _without
+
+
+#: Cuántos paneles seguidos se atraviesan buscando el otro extremo de un camino. Tres son un
+#: panel de sala, uno de rack y el latiguillo — más que eso no es una instalación, es un dato
+#: torcido, y un recorrido sin tope convierte un ciclo declarado por error en una consulta que no
+#: termina.
+_PATH_HOPS = 3
 
 
 def register(app, wa, C):
@@ -41,6 +49,49 @@ def register(app, wa, C):
             return store, None
         ok = C.may_write(store, store.owners_map(), C.seen(), 'rack', rack['uid'])
         return store, (rack if ok else False)
+
+    def _loop_bad(a_item, b_item, a_port, b_port):
+        """Por qué ese cable NO puede ir de un equipo a sí mismo, o `''` si puede.
+
+        Un **puente** es un cable de verdad: un latiguillo corto de la boca 25 a la 17 del mismo
+        panel de parcheo es lo más normal del mundo, y se rechazaba de plano con «un cable va de
+        un equipo a OTRO» — cierto para dos servidores y falso para un panel, que es media sala.
+
+        Lo que no puede ser es un cable de una boca a ella misma, ni uno que dice unir un equipo
+        consigo mismo sin decir por dónde: eso no describe nada que se pueda ir a mirar.
+        """
+        a, b = str(a_item or ''), str(b_item or '')
+        if not a or a != b:
+            return ''
+        pa, pb = str(a_port or '').strip(), str(b_port or '').strip()
+        if not pa or not pb or pa == pb:
+            return wa._t('dcim_cable_same_item')
+        return ''
+
+    def _outlet_bad(pdu_uid, outlet, mine=''):
+        """Por qué ese cable NO puede ir en esa toma, o `''` si puede.
+
+        Dos cosas, y las dos son imposibles delante del armario: una toma que la regleta no
+        tiene, y una toma con otro cable ya dentro. Guardarlas deja un inventario que dice algo
+        que no se puede ver, y lo peor de un dato así es que se descubre desenchufando.
+
+        El **0 pasa siempre**: es «en esa regleta, no sé en cuál», que es lo que alguien sabe
+        mirando una foto, y obligarle a inventarse un número sería peor dato que ninguno.
+        """
+        store = C.store()
+        n = int(outlet or 0)
+        if n <= 0 or not store:
+            return ''
+        pdu = store.pdus.get(str(pdu_uid or '')) or {}
+        tomas = int(pdu.get('outlets') or 0)
+        # Sin tomas declaradas no se juzga: nadie ha dicho cuántas tiene, así que ningún número
+        # se sale de una cuenta que no existe.
+        if tomas and n > tomas:
+            return wa._t('dcim_outlet_out_of_range')
+        for cable in store.feeds_of([str(pdu_uid or '')]):
+            if int(cable.get('outlet') or 0) == n and str(cable.get('uid') or '') != str(mine):
+                return wa._t('dcim_outlet_taken')
+        return ''
 
     @app.route('/api/v1/dcim/sources', methods=['GET'])
     @C.view_req
@@ -267,10 +318,19 @@ def register(app, wa, C):
         mios = [it for it in store.items_of(uid)
                 if dcim_owners.may_see(duenos.get(it['uid'], ''), allowed)]
         out = dcim_svc.power_of_rack(pdus, feeds, mios, C.states(), duenos)
-        out['feeds'] = FEEDS
+        # Las ramas que existen, con su nombre de siempre. Se llamaba `feeds`, que es también
+        # como se llaman los CABLES de esta pantalla, y el contador de la pestaña lo leía como
+        # tal: decía «3» —las tres ramas, `a`, `b` y ninguna— en un armario sin un solo cable
+        # declarado. Un número que sale de una lista de otra cosa no da ningún error: da una
+        # cifra creíble, y ésa es la peor.
+        out['feed_kinds'] = list(FEEDS)
         # Los colores por defecto viajan con la respuesta: la pantalla no tiene por qué
         # llevar una segunda copia de qué color es la rama A.
         out['feed_colors'] = FEED_COLORS
+        # Los que no llevan enchufe, dichos por el servidor y no copiados en la pantalla: la
+        # misma razón que los colores de las ramas, y la misma lista que ya decide quién no
+        # figura entre los «sin vigilar».
+        out['quiet_roles'] = list(ROLES_MUDOS)
         return jsonify(out)
 
     def _power_crud(kind, part, dueno, guard=None):
@@ -298,6 +358,18 @@ def register(app, wa, C):
                 return jsonify({'error': wa._t('access_denied')}), 403
             if kind == 'pdus' and str(data.get('feed') or 'a') not in FEEDS:
                 return jsonify({'error': wa._t('dcim_feed_unknown')}), 400
+            # Y un cable de un equipo a sí mismo sólo vale como PUENTE: de una boca a otra. La
+            # regla vivía sólo en el navegador, que es lo mismo que no vivir en ninguna parte —
+            # la escritura entra por la API con o sin pantalla delante.
+            if kind == 'cables':
+                malo = _loop_bad(data.get('a_item'), data.get('b_item'),
+                                 data.get('a_port'), data.get('b_port'))
+                if malo:
+                    return jsonify({'error': malo}), 400
+            if kind == 'feeds':
+                malo = _outlet_bad(data.get('pdu_uid'), data.get('outlet'))
+                if malo:
+                    return jsonify({'error': malo}), 400
             return jsonify({'uid': getattr(store, part).create(data, actor=C.actor())})
 
         @app.route(f'/api/v1/dcim/{kind}/<uid>', methods=['PUT'],
@@ -315,6 +387,13 @@ def register(app, wa, C):
                                                                  'pdu_uid'))
             if 'feed' in data and str(data['feed']) not in FEEDS:
                 return jsonify({'error': wa._t('dcim_feed_unknown')}), 400
+            # Con la regleta de la FILA y no la del cuerpo: `pdu_uid` no se puede cambiar por
+            # aquí —está en la lista de lo que se quita—, así que comprobar la del cuerpo sería
+            # comprobar una toma de una regleta a la que el cable no se va a mover.
+            if kind == 'feeds' and 'outlet' in data:
+                malo = _outlet_bad(row.get('pdu_uid'), data.get('outlet'), uid)
+                if malo:
+                    return jsonify({'error': malo}), 400
             getattr(store, part).update(uid, data, actor=C.actor())
             return jsonify({'ok': True})
 
@@ -384,29 +463,85 @@ def register(app, wa, C):
         # dato que un armario compartido existe para no dar. Las fugas de esta clase no salen por
         # la pantalla que enseña la cosa, sino por otra que la necesita de paso y no repite la
         # pregunta.
-        otros = {c[lado] for c in cables for lado in ('a_item', 'b_item')}
-        otros -= {it['uid'] for it in mios}
-        vecinos = []
-        for u in otros:
-            it = store.items.get(u)
-            if not it:
-                continue
-            if dcim_owners.may_see(C.owner_of(store, said, 'item', u), allowed):
-                vecinos.append(it)
-            else:
-                # Existe y ocupa, y nada más — la misma respuesta que da el armario compartido.
-                vecinos.append(dcim_owners.opaque(it))
+        #
+        # Y **se sigue por los paneles**, aunque estén en otro armario, que es donde suelen
+        # estar: en una sala de verdad los paneles viven en el rack de patcheo y no en el del
+        # servidor. Un enlace que atraviesa un panel son tres cables declarados y un camino, y
+        # sin los tramos de más allá el camino se corta justo donde empieza a hacer falta.
+        #
+        # Sólo por lo PASIVO y sólo por lo que este lector ve: atravesar un switch sería
+        # inventarse un cable, y atravesar algo ajeno sería confirmar un camino a través de algo
+        # que no se puede ni mirar. Un equipo ajeno llega sin rol —`opaque` no lo trae— así que
+        # el recorrido se para en él por sí solo.
+        vistos = {it['uid'] for it in mios}
+        vecinos, frontera, vueltas = [], True, 0
+        while frontera and vueltas < _PATH_HOPS:
+            vueltas += 1
+            frontera = []
+            otros = {c[lado] for c in cables for lado in ('a_item', 'b_item')} - vistos
+            for u in otros:
+                vistos.add(u)
+                it = store.items.get(u)
+                if not it:
+                    continue
+                if dcim_owners.may_see(C.owner_of(store, said, 'item', u), allowed):
+                    vecinos.append(it)
+                    # Un panel no termina un camino: lo continúa. Se le piden sus cables para
+                    # poder llegar al otro lado.
+                    if str(it.get('role') or '') in ROLES_MUDOS:
+                        frontera.append(it['uid'])
+                else:
+                    # Existe y ocupa, y nada más — la misma respuesta que da el armario
+                    # compartido. Y no se atraviesa.
+                    vecinos.append(dcim_owners.opaque(it))
+            if frontera:
+                ya = {str(c.get('uid') or '') for c in cables}
+                cables += [c for c in store.cables_of(frontera)
+                           if str(c.get('uid') or '') not in ya]
         # El MISMO mapa que dibuja infraestructura, pedido por lo que el panel declara. Sin
         # él se sigue: lo declarado se lee igual, y una pantalla que no abre porque una sonda no
         # ha contestado es peor que una que dice menos.
+        #
+        # **Sin la evidencia**: de todo el mapa aquí sólo se leen los enlaces `lldp` —lo que dos
+        # dispositivos dicen verse el uno al otro— y armarlo entero incluye leer enteras las
+        # cuatro tablas de lo que cada equipo ha visto pasar, la de MAC entre ellas. Se leían y
+        # se tiraban, y eso era la espera de esta pestaña: una pregunta sobre UN armario pagando
+        # el inventario de direcciones de la flota.
+        # **Y sólo si se pide.** Lo declarado se lee de la base y está en milisegundos; el
+        # contraste hay que armarlo recorriendo la flota entera, y esperarlo para poder pintar la
+        # primera fila deja la pestaña en blanco un rato largo por un dato que ocupa la última
+        # columna. Se piden en dos veces, y mientras tanto la pantalla dice que está comprobando
+        # en vez de decir que no se ve nada.
+        # Las categorías viajan con la respuesta, como los colores de las ramas: la pantalla no
+        # tiene por qué llevar una segunda copia de qué es una Cat 6A.
+        # Y el nombre del armario de cada punta, que es la mitad de una dirección: «PP-A 25»
+        # no dice dónde hay que ir, y un camino sale del armario abierto casi siempre.
+        #
+        # Sólo de lo que este lector ve. Un equipo ajeno llega opaco a propósito —existe y
+        # ocupa, nada más— y decir en qué armario está sería decir qué hay en la sala de otro
+        # por la puerta de al lado, que es la forma en que se escapan estas cosas.
+        nombres_rack = {}
+        for it in mios + vecinos:
+            if it.get('foreign'):
+                continue
+            ru = str(it.get('rack_uid') or '')
+            if ru and ru not in nombres_rack:
+                nombres_rack[ru] = str((store.racks.get(ru) or {}).get('name') or '')
+            it['rack_name'] = nombres_rack.get(ru, '')
+        # Y de qué puede ser un cable, por lo mismo: la pantalla lleva una lista corta de
+        # respaldo para no dibujar un desplegable vacío, pero la que manda es ésta.
+        cats = {'categories': CABLE_CATEGORIES, 'kinds': list(CABLE_KINDS)}
+        if not request.args.get('check'):
+            return jsonify(dict(dcim_svc.cable_check(cables, mios + vecinos), **cats))
         edges = []
         armar = getattr(wa, '_infra_topology', None)
         if callable(armar):
             try:
-                edges = (armar(session.get('lang') or wa._DEFAULT_LANG).get('edges') or [])
+                edges = (armar(session.get('lang') or wa._DEFAULT_LANG,
+                               evidence=False).get('edges') or [])
             except Exception:                       # pylint: disable=broad-except
                 edges = []
-        return jsonify(dcim_svc.cable_check(cables, mios + vecinos, edges))
+        return jsonify(dict(dcim_svc.cable_check(cables, mios + vecinos, edges), **cats))
 
     _power_crud('cables', 'cables',
                 lambda st, row: ((st.items.get(str((row or {}).get('a_item') or '')) or {})

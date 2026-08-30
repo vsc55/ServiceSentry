@@ -821,6 +821,57 @@ class TestSiSeCaeUnaRamaQueSeApaga:
         assert r['by_branch']['a'] == 300 and r['by_branch']['b'] == 500
         assert r['watts_said'] == 800
 
+    def test_cada_regleta_dice_de_que_equipo_es(self, store):
+        """Sin ese dato, la pantalla que ofrece «cuál es la regleta» no sabe cuáles están ya
+        declaradas: ofrece la misma otra vez y la segunda crea una regleta duplicada del mismo
+        cacharro, con sus tomas contadas dos veces."""
+        from lib.core.dcim import service
+        r = service.power_of_rack([{'uid': 'a', 'name': 'X', 'feed': 'a', 'outlets': 8,
+                                    'item_uid': 'i9'},
+                                   {'uid': 'b', 'name': 'Y', 'feed': 'b', 'outlets': 8}],
+                                  [], [])
+        assert r['pdus'][0]['item_uid'] == 'i9'
+        # Y la que no es ningún equipo lo dice vacío, no lo omite: una clave que unas veces
+        # está y otras no obliga a quien lee a saber cuál de los dos casos tiene delante.
+        assert r['pdus'][1]['item_uid'] == ''
+
+    def test_una_regleta_declarada_no_se_pide_a_si_misma_un_enchufe(self, store):
+        """Es la que DA los enchufes. Contarla entre lo que come la deja para siempre en la
+        lista de «sin enchufar», que es la lista que esta pantalla existe para vaciar."""
+        from lib.core.dcim import service
+        r = service.power_of_rack([{'uid': 'a', 'name': 'X', 'feed': 'a', 'outlets': 8,
+                                    'item_uid': 'i9'}],
+                                  [], [{'uid': 'i9', 'label': 'Regleta', 'role': 'pdu'},
+                                       {'uid': 'i1', 'label': 'Servidor'}])
+        assert [i['uid'] for i in r['items']] == ['i1']
+        # Y tampoco figura entre las que faltan por declarar: ya lo está.
+        assert r['undeclared_pdus'] == []
+
+    def test_la_regleta_colocada_y_sin_declarar_se_dice(self, store):
+        from lib.core.dcim import service
+        r = service.power_of_rack([], [], [{'uid': 'i9', 'label': 'Regleta', 'role': 'pdu',
+                                            'u_start': 5}])
+        assert [x['uid'] for x in r['undeclared_pdus']] == ['i9']
+        assert r['undeclared_pdus'][0]['u_start'] == 5
+
+    def test_se_dice_CUALES_tomas_estan_ocupadas(self, store):
+        """Y no sólo cuántas. Sin esto, elegir toma es teclear un número a ciegas y descubrir el
+        choque —dos cables en la misma toma, que es físicamente imposible— el día que alguien va
+        a desenchufar uno y se encuentra dos."""
+        from lib.core.dcim import service
+        r = service.power_of_rack(
+            [{'uid': 'a', 'name': 'A', 'feed': 'a', 'outlets': 8}],
+            [{'uid': 'c1', 'item_uid': 'i1', 'pdu_uid': 'a', 'outlet': 3},
+             {'uid': 'c2', 'item_uid': 'i2', 'pdu_uid': 'a', 'outlet': 1},
+             # El 0 es «en esa regleta, no sé en cuál»: no ocupa ninguna, y contarlo dejaría la
+             # toma 0 pintada como ocupada en una regleta cuya primera toma es la 1.
+             {'uid': 'c3', 'item_uid': 'i3', 'pdu_uid': 'a', 'outlet': 0}],
+            [{'uid': 'i1'}, {'uid': 'i2'}, {'uid': 'i3'}])
+        assert r['pdus'][0]['outlets_used'] == [1, 3]
+        # Y las tomas libres se siguen contando por CABLES, no por tomas nombradas: tres cables
+        # ocupan tres tomas aunque de uno no se sepa cuál.
+        assert r['pdus'][0]['free'] == 5
+
     def test_el_cable_vuelve_con_su_uid(self, store):
         """Sin él la pantalla puede enseñar de qué come un equipo y no puede desenchufarlo, que
         es la mitad de para lo que se abre."""
@@ -1438,3 +1489,329 @@ class TestElCatalogoSugiereQueEsCadaModelo:
         con uno de los dos es un fallo que aparece al pasar de un test a la pantalla."""
         from lib.core.dcim import service
         assert service.role_hint({'ports': '{"power-outlets": {"c13": 8}}'}) == 'pdu'
+
+
+class TestUnPanelKeystoneSeCompraVacio:
+    """Un panel keystone son N huecos y lo que se les mete lo decide quien lo monta: dos paneles
+    del mismo modelo llevan cosas distintas. Así que lo que lleva no puede salir del modelo — es
+    de cada panel, que es donde ya viven las piezas de un equipo.
+    """
+
+    def test_hay_una_clase_para_lo_que_puebla_un_hueco(self):
+        """`accessory` valía para guardarlo y no para preguntarle nada: mezclado con los raíles
+        y los cargadores, «qué hay puesto en el hueco 7» no tiene a quién preguntárselo."""
+        from lib.core.dcim.store import PART_KINDS
+        assert 'jack' in PART_KINDS
+
+    def test_y_es_tambien_una_clase_del_catalogo_de_componentes(self):
+        """De un modelo de componente sale una pieza: si el catálogo no puede tener modelos de
+        conector, cada panel tiene que teclear la marca y el modelo de sus veinticuatro."""
+        from lib.core.dcim import catalog
+        assert 'jack' in catalog.kinds_for(catalog.COMPONENT_TREE)
+
+
+class TestUnEnlaceVistoVieneListoParaDeclararlo:
+    """El descubrimiento propone; lo que manda es lo apuntado. Pero un enlace que sólo se puede
+    mirar obliga a copiarlo a mano de la fila de arriba, que es la forma más segura de que nadie
+    lo copie — y de que el que se copie lleve una errata.
+    """
+
+    def _edges(self):
+        return [{'kind': 'lldp', 'from': 'h1', 'to': 'h2',
+                 'ports': {'h1': 'eno1', 'h2': ['gi9']}}]
+
+    def test_trae_los_dos_equipos_y_las_dos_bocas(self):
+        from lib.core.dcim import service
+        r = service.cable_check([], [{'uid': 'i1', 'host_uid': 'h1'},
+                                     {'uid': 'i2', 'host_uid': 'h2'}], self._edges())
+        f = r['undeclared'][0]
+        assert {f['a_item'], f['b_item']} == {'i1', 'i2'}
+        assert {f['a_port'], f['b_port']} == {'eno1', 'gi9'}
+
+    def test_y_no_se_inventa_una_boca_cuando_el_lado_dijo_varias(self):
+        """Un agregado de cuatro enlaces dice cuatro nombres por lado, y elegir el primero
+        escribiría un cable en una boca que nadie ha dicho que sea ésa."""
+        from lib.core.dcim import service
+        edges = [{'kind': 'lldp', 'from': 'h1', 'to': 'h2',
+                  'ports': {'h1': ['eth1', 'eth2'], 'h2': 'gi9'}}]
+        f = service.cable_check([], [{'uid': 'i1', 'host_uid': 'h1'},
+                                     {'uid': 'i2', 'host_uid': 'h2'}], edges)['undeclared'][0]
+        por_lado = {f['a_item']: f['a_port'], f['b_item']: f['b_port']}
+        assert por_lado['i1'] == '' and por_lado['i2'] == 'gi9'
+
+    def test_lo_declarado_deja_de_ser_una_sugerencia(self):
+        """Y ésa es la razón de no escribirlo solo: si el panel apuntara lo que ve, lo visto y lo
+        declarado serían lo mismo y el contraste no podría decir nunca «esto se movió»."""
+        from lib.core.dcim import service
+        r = service.cable_check([{'uid': 'c1', 'a_item': 'i1', 'b_item': 'i2',
+                                  'a_port': 'eno1', 'b_port': 'gi9'}],
+                                [{'uid': 'i1', 'host_uid': 'h1'},
+                                 {'uid': 'i2', 'host_uid': 'h2'}], self._edges())
+        assert r['undeclared'] == []
+        assert r['cables'][0]['seen'] == 'seen'
+
+    def test_y_si_alguien_mueve_el_latiguillo_se_dice(self):
+        from lib.core.dcim import service
+        r = service.cable_check([{'uid': 'c1', 'a_item': 'i1', 'b_item': 'i2',
+                                  'a_port': 'eno1', 'b_port': 'gi9'}],
+                                [{'uid': 'i1', 'host_uid': 'h1'},
+                                 {'uid': 'i2', 'host_uid': 'h2'}],
+                                [{'kind': 'lldp', 'from': 'h1', 'to': 'h2',
+                                  'ports': {'h1': 'eno7', 'h2': 'gi22'}}])
+        assert r['cables'][0]['seen'] == 'other_port'
+        assert r['cables'][0]['ports_seen'] == ['eno7', 'gi22']
+
+
+class TestUnaFilaQueSonCuatroCablesLoDice:
+    """Un agregado de cuatro puertos entre el router y el switch es UN cable declarado y CUATRO
+    latiguillos. La fila decía «coincide» sin bocas y sin número: el día que se caiga uno de los
+    cuatro, la pantalla que existe para contarlo sigue en verde.
+    """
+
+    def _check(self, bundle=4):
+        from lib.core.dcim import service
+        return service.cable_check(
+            [{'uid': 'c1', 'a_item': 'i1', 'b_item': 'i2'}],
+            [{'uid': 'i1', 'host_uid': 'h1'}, {'uid': 'i2', 'host_uid': 'h2'}],
+            [{'kind': 'lldp', 'from': 'h1', 'to': 'h2', 'bundle': bundle,
+              'ports': {'h1': ['gi25', 'gi26'], 'h2': ['ether11', 'ether12']}}])
+
+    def test_cuantos_enlaces_hay_detras(self):
+        assert self._check()['cables'][0]['bundle'] == 4
+
+    def test_y_uno_solo_sigue_siendo_uno(self):
+        assert self._check(1)['cables'][0]['bundle'] == 1
+
+    def test_las_bocas_vistas_estan_aunque_cuadren(self):
+        """Sin ellas, la ficha de un agregado no tiene de dónde sacar de qué cuatro puertos
+        habla — y era el caso que más hay que mirar."""
+        f = self._check()['cables'][0]
+        assert f['seen'] == 'seen'
+        assert f['ports_seen'] == ['ether11', 'ether12', 'gi25', 'gi26']
+
+
+class TestElCableadoNoPagaElMapaEntero:
+    """La reconciliación usa **sólo** los enlaces `lldp`. Armar el mapa entero incluye leer las
+    cuatro tablas de lo que cada equipo ha visto pasar —la de MAC la primera, sin cota— y se
+    leían y se tiraban en cada apertura de la pestaña: una pregunta sobre UN armario pagando el
+    inventario de direcciones de la flota.
+    """
+
+    def test_solo_mira_los_enlaces_lldp(self):
+        from lib.core.dcim import service
+        items = [{'uid': 'i1', 'host_uid': 'h1'}, {'uid': 'i2', 'host_uid': 'h2'}]
+        # Un enlace deducido de una tabla de puertos NO es un enlace declarable: nadie lo ha
+        # visto verse, se ha inferido de por dónde pasó una MAC.
+        r = service.cable_check([], items, [{'kind': 'port', 'from': 'h1', 'to': 'h2',
+                                             'ports': {'h1': 'gi1'}}])
+        assert r['undeclared'] == []
+
+    def test_y_el_mapa_deja_pedirlo_sin_ella(self):
+        from lib.core.infra import service as infra_svc
+        assert 'fdb' in infra_svc.EVIDENCE_KINDS
+        import inspect
+        firma = inspect.signature(infra_svc.topology)
+        assert 'evidence_kinds' in firma.parameters,             'volver a leer las cuatro tablas es otra vez obligatorio'
+        assert firma.parameters['evidence_kinds'].default == infra_svc.EVIDENCE_KINDS,             'el mapa deja de leerlas por defecto, que es lo contrario de lo que hacía falta'
+
+
+class TestNoPreguntadoNoEsNoSeVe:
+    """La lista rápida —la que sale mientras el mapa de la flota se arma— saldría entera diciendo
+    «no se ve» si el contraste tratara «sin preguntar» y «preguntado y nada» como lo mismo. Y eso
+    es un veredicto, de los peores: manda a buscar un cable que está bien porque todavía nadie ha
+    mirado.
+    """
+
+    def _cables(self):
+        return [{'uid': 'c1', 'a_item': 'i1', 'b_item': 'i2'}]
+
+    def _items(self):
+        return [{'uid': 'i1', 'host_uid': 'h1', 'label': 'A'},
+                {'uid': 'i2', 'host_uid': 'h2', 'label': 'B'}]
+
+    def test_sin_preguntar_ninguna_fila_lleva_veredicto(self):
+        from lib.core.dcim import service
+        r = service.cable_check(self._cables(), self._items())
+        assert r['checked'] is False
+        assert all('seen' not in c for c in r['cables'])
+        assert r['counts'] == {} and r['undeclared'] == []
+
+    def test_pero_las_filas_estan_y_con_su_nombre(self):
+        """Es lo único que se pide de esa primera vuelta: que la tabla se pueda pintar."""
+        from lib.core.dcim import service
+        r = service.cable_check(self._cables(), self._items())
+        assert [c['a_label'] for c in r['cables']] == ['A']
+        assert [c['b_label'] for c in r['cables']] == ['B']
+
+    def test_y_preguntado_sin_ver_nada_si_lleva_veredicto(self):
+        from lib.core.dcim import service
+        r = service.cable_check(self._cables(), self._items(), [])
+        assert r['checked'] is True
+        assert r['cables'][0]['seen'] == 'unseen'
+
+
+class TestUnEnlacePorPanelDeParcheo:
+    """Son **tres cables y un camino**: el latiguillo al panel, el enlace fijo entre paneles y el
+    latiguillo al switch. Los tres se declaran, ninguno se puede confirmar solo —un panel es un
+    trozo de metal— y el enlace que ven los dos extremos salía como «sin declarar» estando
+    declarado en tres tramos: la lista de trabajo pendiente incluía trabajo ya hecho.
+    """
+
+    def _via(self, rol_medio='patch_panel'):
+        return ([{'uid': 'srv', 'host_uid': 'h1', 'role': 'server', 'label': 'SRV'},
+                 {'uid': 'pa', 'role': rol_medio, 'label': 'PP-A'},
+                 {'uid': 'pb', 'role': rol_medio, 'label': 'PP-B'},
+                 {'uid': 'sw', 'host_uid': 'h2', 'role': 'switch', 'label': 'SW'}],
+                [{'uid': 'c1', 'a_item': 'srv', 'a_port': 'eno1', 'b_item': 'pa'},
+                 {'uid': 'c2', 'a_item': 'pa', 'b_item': 'pb'},
+                 {'uid': 'c3', 'a_item': 'pb', 'b_item': 'sw', 'b_port': 'gi1'}],
+                [{'kind': 'lldp', 'from': 'h1', 'to': 'h2',
+                  'ports': {'h1': 'eno1', 'h2': 'gi1'}}])
+
+    def test_el_camino_explica_el_enlace(self):
+        from lib.core.dcim import service
+        items, cables, edges = self._via()
+        r = service.cable_check(cables, items, edges)
+        assert r['undeclared'] == [], 'lo declarado en tres tramos sigue saliendo como pendiente'
+
+    def test_y_los_tres_tramos_quedan_confirmados(self):
+        """Ninguno podía confirmarse solo; el camino sí, y entonces se dice."""
+        from lib.core.dcim import service
+        items, cables, edges = self._via()
+        r = service.cable_check(cables, items, edges)
+        assert {c['seen'] for c in r['cables']} == {'via'}
+        assert r['counts']['via'] == 3
+
+    def test_sin_que_nadie_los_vea_siguen_siendo_pasivos(self):
+        """Un panel sin nadie que confirme el camino no es un fallo: es que nadie puede mirarlo.
+        Marcarlo en rojo llenaría la pantalla de avisos imposibles de resolver."""
+        from lib.core.dcim import service
+        items, cables, _edges = self._via()
+        r = service.cable_check(cables, items, [])
+        assert {c['seen'] for c in r['cables']} == {'passive'}
+
+    def test_no_se_atraviesa_un_switch(self):
+        """Dos máquinas enchufadas al mismo switch no están enchufadas entre sí, y decir que sí
+        sería inventarse un cable que nadie ha puesto."""
+        from lib.core.dcim import service
+        items, cables, edges = self._via(rol_medio='switch')
+        r = service.cable_check(cables, items, edges)
+        assert [x['from'] for x in r['undeclared']],             'el camino atraviesa un switch: se inventa un enlace'
+
+    def test_ni_un_equipo_ajeno(self):
+        """No se puede confirmar un camino a través de algo que no se puede ni mirar."""
+        from lib.core.dcim import service
+        items, cables, edges = self._via()
+        items = [dict(i, role='', foreign=True) if i['uid'] == 'pa' else i for i in items]
+        r = service.cable_check(cables, items, edges)
+        assert r['undeclared'], 'el camino atraviesa un equipo ajeno'
+
+    def test_y_un_ciclo_declarado_por_error_no_lo_cuelga(self):
+        from lib.core.dcim import service
+        items = [{'uid': 'srv', 'host_uid': 'h1', 'role': 'server'},
+                 {'uid': 'pa', 'role': 'patch_panel'}, {'uid': 'pb', 'role': 'patch_panel'}]
+        cables = [{'uid': 'c1', 'a_item': 'srv', 'b_item': 'pa'},
+                  {'uid': 'c2', 'a_item': 'pa', 'b_item': 'pb'},
+                  {'uid': 'c3', 'a_item': 'pb', 'b_item': 'pa'}]
+        assert service.cable_check(cables, items, [])['counts']['passive'] == 3
+
+
+class TestUnPuenteEnElMismoPanel:
+    """Un latiguillo corto de la boca 25 a la 17 del mismo panel es lo más normal del mundo, y se
+    rechazaba de plano con «un cable va de un equipo a OTRO» — cierto para dos servidores y falso
+    para un panel, que es media sala.
+    """
+
+    def _items(self):
+        return [{'uid': 'srv', 'host_uid': 'h1', 'role': 'server'},
+                {'uid': 'pp', 'role': 'patch_panel'},
+                {'uid': 'sw', 'host_uid': 'h2', 'role': 'switch'}]
+
+    def _edges(self):
+        return [{'kind': 'lldp', 'from': 'h1', 'to': 'h2',
+                 'ports': {'h1': 'eno1', 'h2': 'gi1'}}]
+
+    def _cables(self, con_puente=True):
+        fuera = [{'uid': 'c1', 'a_item': 'srv', 'a_port': 'eno1',
+                  'b_item': 'pp', 'b_port': '25'},
+                 {'uid': 'c3', 'a_item': 'pp', 'a_port': '17',
+                  'b_item': 'sw', 'b_port': 'gi1'}]
+        if con_puente:
+            fuera.append({'uid': 'j', 'a_item': 'pp', 'a_port': '25',
+                          'b_item': 'pp', 'b_port': '17'})
+        return fuera
+
+    def test_el_puente_completa_el_camino(self):
+        from lib.core.dcim import service
+        r = service.cable_check(self._cables(), self._items(), self._edges())
+        assert r['undeclared'] == []
+        assert {c['seen'] for c in r['cables']} == {'via'}
+
+    def test_y_sin_el_no_hay_camino(self):
+        """Se anda por BOCAS: lo que entra por la 25 sale por la 25, no por la 17. Andar por el
+        panel entero daría por explicado cualquier par de cables que lo tocaran, y entonces
+        «confirmado» dejaría de querer decir nada."""
+        from lib.core.dcim import service
+        r = service.cable_check(self._cables(con_puente=False), self._items(), self._edges())
+        assert len(r['undeclared']) == 1
+        assert {c['seen'] for c in r['cables']} == {'passive'}
+
+    def test_sin_bocas_escritas_se_vuelve_a_lo_de_antes(self):
+        """Todas las bocas de un panel son la misma cuando nadie las apuntó: menos preciso, que
+        es exactamente lo que se sabe."""
+        from lib.core.dcim import service
+        cables = [{'uid': 'c1', 'a_item': 'srv', 'a_port': 'eno1', 'b_item': 'pp'},
+                  {'uid': 'c3', 'a_item': 'pp', 'b_item': 'sw', 'b_port': 'gi1'}]
+        r = service.cable_check(cables, self._items(), self._edges())
+        assert r['undeclared'] == []
+
+
+class TestLaTrazaDelEnlace:
+    """«Por el panel» sin decir por CUÁL ni por qué boca obliga a reconstruirlo a mano cable a
+    cable, que es tanto trabajo como ir a mirarlo — y es la pregunta que se hace delante del
+    armario con el latiguillo en la mano.
+    """
+
+    def _todo(self):
+        items = [{'uid': 'srv', 'host_uid': 'h1', 'role': 'server', 'label': 'SRV'},
+                 {'uid': 'pa', 'role': 'patch_panel', 'label': 'PP-A'},
+                 {'uid': 'pb', 'role': 'patch_panel', 'label': 'PP-B'},
+                 {'uid': 'sw', 'host_uid': 'h2', 'role': 'switch', 'label': 'SW'}]
+        cables = [{'uid': 'c1', 'a_item': 'srv', 'a_port': 'eno1',
+                   'b_item': 'pa', 'b_port': '25'},
+                  {'uid': 'j', 'a_item': 'pa', 'a_port': '25', 'b_item': 'pa', 'b_port': '17'},
+                  # Declarado al revés a propósito: un cable se apunta desde el extremo que se
+                  # tenía delante, y la mitad de un camino está escrita en el otro sentido.
+                  {'uid': 'c2', 'a_item': 'pb', 'a_port': '3', 'b_item': 'pa', 'b_port': '17'},
+                  {'uid': 'c3', 'a_item': 'pb', 'a_port': '3', 'b_item': 'sw', 'b_port': 'gi1'}]
+        edges = [{'kind': 'lldp', 'from': 'h1', 'to': 'h2',
+                  'ports': {'h1': 'eno1', 'h2': 'gi1'}}]
+        from lib.core.dcim import service
+        return service.cable_check(cables, items, edges)
+
+    def test_el_camino_viaja_entero_y_en_orden(self):
+        r = self._todo()
+        assert len(r['paths']) == 1
+        pasos = [(l['a_item'], l['a_port'], l['b_item'], l['b_port'])
+                 for l in r['paths'][0]['legs']]
+        assert pasos == [('srv', 'eno1', 'pa', '25'), ('pa', '25', 'pa', '17'),
+                         ('pa', '17', 'pb', '3'), ('pb', '3', 'sw', 'gi1')]
+
+    def test_orientado_hacia_donde_se_recorre(self):
+        """`c2` está declarado de PB a PA y en el camino se anda de PA a PB: una traza que va
+        «SRV → PP» y luego «SW → PP» no se puede leer."""
+        r = self._todo()
+        c2 = [l for l in r['paths'][0]['legs'] if l['cable'] == 'c2'][0]
+        assert (c2['a_item'], c2['b_item']) == ('pa', 'pb')
+
+    def test_con_el_nombre_de_cada_punta(self):
+        """Un camino que pasa por el panel del armario de al lado nombra equipos que la pantalla
+        no tiene delante."""
+        r = self._todo()
+        primero = r['paths'][0]['legs'][0]
+        assert primero['a_label'] == 'SRV' and primero['b_label'] == 'PP-A'
+        assert primero['b_role'] == 'patch_panel'
+
+    def test_y_cada_tramo_sabe_de_que_camino_es(self):
+        r = self._todo()
+        assert all(c.get('paths') == [0] for c in r['cables'])

@@ -5,6 +5,143 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## Una guarda que comprobaba el sufijo y no la clave
+
+**Síntoma.** En la ficha de un equipo del armario, la casilla «Modelo» enseña
+`e9c94c5a-257c-4c94-a9b3…` en vez del nombre del modelo. La lista de equipos, dos centímetros
+más abajo, enseña el nombre correctamente. Nada da error.
+
+**Diagnóstico.** La casilla es una de las que *enseñan el nombre y guardan el identificador*, y
+lee el nombre por convención — `<campo>_name`:
+
+```js
+const nombre = String(row[fld.name + '_name'] || '');   // type_uid → type_uid_name
+```
+
+El armario, en cambio, manda el nombre del modelo como **`type_name`**, junto a `type_uid`. Y
+eso es lo correcto: es un nombre *por modelo*, no uno por campo, así que el mismo modelo se
+llama igual lo lea quien lo lea. La convención se queda corta, `row['type_uid_name']` es
+`undefined`, y la casilla cae al respaldo — que es el identificador.
+
+**Lo que lo tapó** fue su propia guarda:
+
+```python
+assert '_name' in cuerpo, 'la casilla vuelve a enseñar el identificador'
+```
+
+`'_name' in "…row[fld.name + '_name']…"` es cierto. Lo es leyendo la clave buena y lo es leyendo
+la mala: la guarda comprobaba que *aparece un trozo de nombre de clave*, no que sea **la** clave.
+Estuvo en verde todo el tiempo que la casilla estuvo enseñando el uid.
+
+**Causa raíz.** Dos sitios decidiendo por su cuenta dónde está escrito el nombre —el servidor al
+mandarlo y la pantalla al leerlo— sin nada que los obligue a coincidir. Un campo leído de una
+clave que no existe no falla: vale su valor por defecto, y el código que respeta ese valor por
+defecto parece que funciona. Es la misma forma que ya había salido cuatro veces en esta sección
+(una columna que nadie escribe, un parámetro que nadie pasa, un `role` que nadie rellena).
+
+**Solución.** El campo **declara** dónde está su nombre (`nameKey: 'type_name'`), una sola
+función lo lee y lo escribe (`_dcimPickName`), y la guarda comprueba lo que importa: que toda
+clave declarada sea una que el armario manda de verdad (`item['type_name']` en la ruta). Con la
+clave mala puesta a mano, la guarda ahora falla.
+
+**Lección.** Una guarda que busca una **subcadena** de un nombre no comprueba el nombre. Si lo
+que puede estar mal es *cuál* de dos claves parecidas se usa, `in` sobre el sufijo que comparten
+las da las dos por buenas. Y cuando dos lados tienen que coincidir en un nombre, lo que se
+comprueba es la coincidencia — que uno lo declare y el otro lo mande— no que cada uno por
+separado mencione algo parecido.
+
+## Un comentario dejó la sección de inventario en blanco
+
+**Síntoma.** La pantalla de inventario se queda en el spinner y no pasa nada. En la consola del
+navegador, una sola línea: `Uncaught SyntaxError: unexpected token: identifier`, apuntando a un
+punto del guion servido. Ninguna pantalla más falla — pero es que el guion es **uno solo**, así
+que en realidad lo que estaba muerto era el panel entero desde esa línea en adelante.
+
+**Diagnóstico.** El punto que señalaba el navegador era un comentario HTML:
+
+```js
+return `<g>
+    ${mine.map(i => _dceItem(rack, i, face)).join('')}
+    <!-- Lo montado, DESPUÉS y como hermano: dentro del `<g>` de su bandeja, salir de él
+         hacia la bandeja no volvería a encender la bandeja —`pointerenter` no burbujea— … -->
+    ${mine.map(i => _dceKids(rack, i, face)).join('')}
+</g>`;
+```
+
+Un comentario HTML dentro de una plantilla de cadena es texto, y como texto es inofensivo. Los
+**acentos graves** que lleva dentro no lo son: el primero cierra la plantilla, y a partir de ahí
+el navegador está leyendo código donde hay marcado. De ahí el «identificador inesperado», que es
+lo que parece `de` cuando lo que había alrededor era una cadena.
+
+Lo escribí para citar lo que el comentario nombraba —`` `<g>` ``, `` `pointerenter` ``— que es
+la costumbre en el resto del fichero. En un comentario de JavaScript no pasa nada; dentro de la
+cadena, sí.
+
+**Causa raíz.** Un comentario no puede romper nada, y por eso no se mira. Ninguna guarda de las
+que hay lo revisa —varias ignoran la prosa **a propósito**, para no señalar el texto que explica
+por qué algo está bien— y **nada de la suite ejecuta el guion**: los cinco mil tests siguieron en
+verde con el panel sin arrancar. El único que lo habría visto es un navegador, y de esos no hay
+en la suite.
+
+**Solución.** Fuera los acentos graves del comentario HTML, y lo que tenían que explicar se dijo
+en un comentario de JavaScript, que vive fuera de la cadena. Y una guarda en
+`test_wa_partials_convention.py`: dentro de un partial, **un comentario HTML no lleva acentos
+graves**.
+
+Para encontrarlo, lo que valió fue **servir la página y mirarla**: un test que pide `/dcim` con
+el cliente de pruebas, se guarda el HTML, saca el `<script>` más largo y se lo pasa a
+`node --check` —traduciendo antes `?.` y `??`, que el node de esta máquina no habla— hasta que
+dijo que no había error. Eso es reproducible en dos minutos y merece la pena la próxima vez.
+
+**Lección.** En un fichero donde el marcado se construye con plantillas de cadena, **el
+delimitador de la cadena no puede aparecer en ningún sitio del marcado**, ni siquiera donde «no
+se ejecuta». Es la segunda vez que un acento grave o un `${…}` escrito dentro de un comentario
+muerde en esta sección; la primera la cazó la guarda de escapado por casualidad.
+
+## La copia se llevaba la carpeta de planos vacía si alguien la había movido
+
+**Síntoma.** Ninguno, que es el problema. Con `web_admin|dcim_media_dir` apuntando a otro disco,
+la copia terminaba con la parte `dcim_media` en `no files found` y el veredicto en `partial` —
+indistinguible de «esta instalación no tiene planos». Lo que había de verdad —planos de sala,
+imágenes del catálogo, manuales y firmware adjuntos— no estaba en el zip. Y una restauración
+habría dejado los que sí llevara en `<var_dir>/dcim_media`, que es la carpeta que el panel ya no
+mira.
+
+**Diagnóstico.** `part_dir()` sabía resolver el ajuste desde el primer día: recibe un `dirs` y,
+si la parte tiene entrada ahí, esa gana sobre `<var_dir>/<lo declarado>`. Su propio docstring
+avisaba del caso con estas palabras: *«resolver contra `var_dir` copiaría la carpeta por
+defecto, vacía, y lo diría como un éxito»*.
+
+`dirs` llegaba hasta ahí desde la firma de `create_backup` y de `restore_backup`. Y **nadie lo
+rellenaba nunca**: ni `jobs.py` (el botón, la restauración), ni `runner.py` (las copias
+programadas), ni un solo test. `grep -rn "dirs=" lib/ tests/` sin la definición no daba ni una
+línea. El parámetro estaba escrito, documentado y muerto.
+
+Nada falla cuando se pasa un opcional de menos. La rama del override era código inalcanzable
+que se leía como una funcionalidad que existe.
+
+**Causa raíz.** Un ajuste tiene **dos mitades**: quien sabe usarlo y quien sabe que está puesto.
+Aquí se escribió la primera —la difícil, la que decide— y se dio el trabajo por hecho. La
+segunda es una línea aburrida en tres sitios y no se escribió en ninguno. Como la mitad
+existente estaba bien probada, el fallo no se parecía a un olvido sino a una funcionalidad
+terminada.
+
+**Solución.** `parts.configured_dirs(holder)` recorre `PARTS` y devuelve `{parte: ruta}` para
+las que declaran `dir_attr` y lo tienen puesto de verdad; las tres llamadas —copia a mano, copia
+programada y restauración— se lo pasan. La declaración vive **en el catálogo de partes** y no en
+el punto de llamada, así que la siguiente carpeta configurable es una clave más y no una rama
+más.
+
+Los tests van por donde iba el fallo: cuatro funcionales sobre `create_backup`/`restore_backup`
+con la carpeta fuera de `var_dir` (y un señuelo dentro, para que copiar la de por defecto se
+note), y tres que llaman a lo que llama el botón —`start_manual`, `start_restore`, `_run_task`—
+y miran qué `dirs` recibió. Quitando cualquiera de las tres líneas, cae su test.
+
+**Lección.** Un parámetro opcional que nadie pasa no da error: da una funcionalidad que solo
+existe en la firma. Cuando se añade un ajuste, **el test que vale es el del extremo que lo
+consume**, no el de la función que sabría usarlo — y el aviso escrito en un docstring no es una
+guarda, es una nota que alguien puede leer un año tarde.
+
 ## Borrar la última bahía decía «guardado» y no borraba nada
 
 **Síntoma.** Una plantilla con una bahía de dispositivo. Se borra la fila, se pulsa Guardar, sale

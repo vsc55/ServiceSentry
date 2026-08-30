@@ -88,9 +88,14 @@ function showToast(msg, type = 'success', delay = 3000) {
  *  it, and the one that carries a form drops it and gets the machinery this panel already has —
  *  drag the corner, maximise from the header, and the size remembered per dialog.
  */
-function _infoModalFit(fit) {
+function _infoModalSize(size) {
     const dlg = document.querySelector('#infoModal .modal-dialog');
-    if (dlg) dlg.classList.toggle('ss-modal-fit', fit !== false);
+    if (!dlg) return;
+    // Las dos con `toggle`, siempre: abrir un diálogo ancho y luego uno normal tiene que
+    // devolverlo a su sitio. Un modal compartido que se queda con el tamaño del anterior es la
+    // misma clase de fallo que el hueco del pie heredando sus botones.
+    dlg.classList.toggle('ss-modal-fit', size === 'fit');
+    dlg.classList.toggle('ss-modal-wide', size === 'wide');
 }
 
 /** Put the caller's action buttons in the FOOTER and show `#infoModal`.
@@ -106,7 +111,17 @@ function _infoModalFit(fit) {
 function _infoModalOpen(actions) {
     const slot = document.getElementById('infoModalActions');
     if (slot) slot.innerHTML = actions || '';
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('infoModal')).show();
+    // La talla la decide el PIE, no quien manda el botón. «Cerrar» está en el marcado y es
+    // `btn-sm`; de los seis sitios que mandan una acción, cuatro la mandaban sin talla y dos
+    // con ella — así que el par salía descuadrado, uno más alto que el otro, según de dónde
+    // viniera. Ninguno de los seis tiene por qué saber de qué talla es un botón de este pie.
+    if (slot) slot.querySelectorAll('.btn').forEach(b => b.classList.add('btn-sm'));
+    const el = document.getElementById('infoModal');
+    bootstrap.Modal.getOrCreateInstance(el).show();
+    // Y el botón de maximizar, que depende de lo que se acaba de decidir arriba. `show` no lo
+    // decide por sí solo: Bootstrap no lo emite sobre un modal que YA está abierto, y este es el
+    // que pasa de una ficha a un formulario sin cerrarse en medio.
+    if (typeof _modalMaxSync === 'function') _modalMaxSync(el);
 }
 
 // ──────────────────────────── Generic info modal ──────────────────
@@ -130,7 +145,7 @@ function showInfoModal(title, data, lead, variant) {
             ? `<table class="table table-sm table-striped align-middle mb-0 ss-fs-3"><tbody>${rows}</tbody></table>`
             : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
     document.getElementById('infoModalBody').innerHTML = body;
-    _infoModalFit(true);
+    _infoModalSize('fit');
     _infoModalOpen();
 }
 
@@ -159,7 +174,7 @@ function showLinksModal(title, items, lead) {
         + (rows
             ? `<table class="table table-sm table-striped align-middle mb-0 ss-fs-3"><tbody>${rows}</tbody></table>`
             : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
-    _infoModalFit(true);
+    _infoModalSize('fit');
     _infoModalOpen();
 }
 
@@ -199,7 +214,7 @@ function showTableModal(title, columns, rows, lead, variant) {
                  class="table table-sm table-striped align-middle mb-0 ss-fs-3"
                  >${head}<tbody>${body}</tbody></table></div>`
             : `<p class="text-muted mb-0">${esc(t('no_items') || 'No data')}</p>`);
-    _infoModalFit(true);
+    _infoModalSize('fit');
     _infoModalOpen();
 }
 
@@ -217,13 +232,24 @@ function showTableModal(title, columns, rows, lead, variant) {
 // `actions` is the same bargain for the FOOTER: buttons that go beside Close, so the dialog's
 // confirm sits where every other dialog in the panel keeps one instead of floating in the body
 // above it.
-function showHtmlModal(title, html, variant, actions) {
+//
+// `size` es lo tercero, y es UNA pregunta con tres respuestas en vez de dos interruptores que
+// se pueden contradecir:
+//
+//   * sin decir nada — el de siempre: se estira, se maximiza, y mide lo que un `modal-lg`;
+//   * `'fit'` — una FICHA de solo lectura, que es lo que es: no tiene nada que enseñar de más, y
+//     ofrecer maximizarla es ofrecer estirar el mismo contenido dentro de más hueco vacío;
+//   * `'wide'` — una TABLA de las anchas. La del documento de conectores tiene diez columnas: en
+//     los 800px de un `modal-lg` ya no se aplasta, pero se desplaza — y editar diez columnas
+//     mirando por una ranura no es mejor que tenerlas apretadas.
+//
+// Quien compone el cuerpo es el único que sabe cuál de las tres trae.
+function showHtmlModal(title, html, variant, actions, size) {
     document.getElementById('infoModalTitle').textContent = title || '';
     const cls = ['success', 'warning', 'danger', 'primary'].includes(variant) ? variant : 'primary';
     document.getElementById('infoModalBody').innerHTML =
         `<div class="ss-modal-${cls}">${html || ''}</div>`;
-    // Quien compone el cuerpo trae formularios y tablas: este se estira y se maximiza.
-    _infoModalFit(false);
+    _infoModalSize(size);
     _infoModalOpen(actions);
 }
 

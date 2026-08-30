@@ -148,7 +148,6 @@ async function _dcCatOpen() {
               component_common: d.component_common || [],
               lifecycle_fields: d.lifecycle_fields || [],
               component_size: d.component_size || {},
-              all_kinds: d.all_kinds || [],
               power_types: d.power_types || [],
               // Cuánto hay detrás de cada pestaña. Uno solo con número decía menos que
               // ninguno: la que lo llevaba parecía la importante, y de las otras no se sabía si
@@ -1482,6 +1481,9 @@ function _dcConnsHtml() {
                     _dcConnFam === f ? ' selected' : ''}>${
                     esc(_dcPortName(f))}</option>`).join('')}
             </select>
+            ${_dcimMay('dcim_catalog_manage') ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcConnEditOpen('')"><i class="bi bi-plus-lg me-1"></i>${
+                esc(t('dcim_conn_new'))}</button>` : ''}
             <span class="text-muted ss-fs-2 ss-toolrow-text">${
                 esc(tf('dcim_conn_count', filas.length))}</span>
         </div>
@@ -1501,7 +1503,7 @@ function _dcConnsHtml() {
                 c.speed ? ` <span class="badge bg-body-secondary text-body-secondary border
                     fw-normal">${esc(c.speed)}</span>` : ''}</td>
             <td class="text-muted"><code>${esc(c.id)}</code></td>
-            <td class="ss-fs-2">${esc(_dcConnGroupName(c.group))}</td>
+            <td class="ss-fs-2 ss-nowrap">${esc(_dcConnGroupName(c.group))}</td>
             <td class="ss-fs-2 text-muted">${
                 esc(c.fams.map(f => _dcPortName(f)).join(' · '))}</td>
             <td class="ss-fs-2 text-muted">${esc(c.note || '')}</td>
@@ -1525,8 +1527,11 @@ function _dcConnShow(id) {
         ? `<tr><td class="text-muted" style="white-space:nowrap">${esc(etiqueta)}</td>
            <td>${valor}</td></tr>` : '';
     const cuerpo = `<div class="d-flex gap-3 align-items-start flex-wrap mb-3">
-            <div class="border rounded p-3 bg-body-secondary">${
-                _dcConnIcon(c.id, 'ss-conn-big')}</div>
+            <div>
+                <div class="border rounded p-3 bg-body-secondary text-center">${
+                    _dcConnIcon(c.id, 'ss-conn-big')}</div>
+                ${_dcConnPhotoBox(c)}
+            </div>
             <div class="flex-grow-1">
                 <div class="fw-semibold ss-fs-4">${esc(c.name || c.id)}</div>
                 <div class="text-muted ss-fs-2">${esc(_dcConnGroupName(c.group))}</div>
@@ -1542,7 +1547,64 @@ function _dcConnShow(id) {
             ${dato(t('dcim_conn_pair'), esc(_dcConnPairName(c)))}
         </tbody></table>
         <div class="text-muted ss-fs-1">${esc(t('dcim_conn_one_hint'))}</div>`;
-    showHtmlModal(c.name || c.id, cuerpo, 'primary');
+    // Sin maximizar —es una ficha, no crece— y con la puerta al editor donde se estaba mirando.
+    // Estaba solo en la tarjeta de la pantalla de esquemas, que es donde no iba a buscarla nadie
+    // que quisiera corregir un conector: se mira aquí, así que se corrige desde aquí.
+    const acciones = _dcimMay('dcim_catalog_manage')
+        ? `<button class="btn btn-secondary" onclick="_dcConnEditOpen(${jsStr(c.id)})">
+             <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>`
+        : '';
+    showHtmlModal(c.name || c.id, cuerpo, 'primary', acciones, 'fit');
+}
+
+/** Poner o quitar la foto de un conector, desde su propia ficha.
+ *
+ *  Aquí y no en el formulario del documento a propósito: la foto **no es un campo del borrador**,
+ *  es un fichero en el disco del servidor, y la ruta que la guarda escribe el documento entero
+ *  para dejar constancia de a quién pertenece. Hacerlo con un borrador abierto lo dejaría atrás
+ *  de una versión, y lo siguiente que se guardara desde el formulario ganaría o perdería según
+ *  qué número llevara — que es la clase de fallo que se descubre semanas después.
+ *
+ *  Aquí no hay borrador: se mira una ficha, se cambia la foto, y se vuelve a mirar. */
+function _dcConnPhotoBox(c) {
+    if (!_dcimMay('dcim_catalog_manage')) return '';
+    return `<div class="d-flex gap-2 align-items-center flex-wrap mt-2">
+        <input type="file" accept="image/*" class="form-control form-control-sm"
+               style="max-width:13rem" onchange="_dcConnImgUp(${jsStr(c.id)},this)">
+        ${c.image ? `<button class="btn btn-sm btn-danger"
+            onclick="_dcConnImgDrop(${jsStr(c.id)})">
+            <i class="bi bi-trash me-1"></i>${esc(t('delete'))}</button>` : ''}
+    </div>`;
+}
+
+async function _dcConnImgUp(id, inp) {
+    const file = (inp && inp.files && inp.files[0]) || null;
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    // `fetch` a pelo: lo que va aquí es un formulario con un fichero dentro, y el envoltorio de
+    // JSON lo convertiría en la cadena "[object File]". El global sigue poniendo el CSRF.
+    let resp;
+    try {
+        resp = await fetch(`/api/v1/dcim/connectors/${encodeURIComponent(id)}/image`,
+                           {method: 'POST', body: fd});
+    } catch (e) {
+        return showToast(t('save_failed'), 'danger');
+    }
+    const d = await resp.json().catch(() => ({}));
+    if (!resp.ok || d.error) return showToast(d.error || `HTTP ${resp.status}`, 'danger', 8000);
+    showToast(t('saved'), 'success');
+    await _dcConnDocLoad();
+    _dcConnShow(id);
+}
+
+async function _dcConnImgDrop(id) {
+    const r = await _dcimSend('DELETE',
+        `/api/v1/dcim/connectors/${encodeURIComponent(id)}/image`);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    showToast(t('deleted'), 'success');
+    await _dcConnDocLoad();
+    _dcConnShow(id);
 }
 
 //: Con quién se empareja cada uno. La pregunta que se hace con el cable en la mano no es «¿qué
@@ -1850,19 +1912,27 @@ function _dcCatFormDraw() {
                         f.tree === a ? ' selected' : ''}>${
                         esc(_dcCatTreeName(a))}</option>`).join('')}
                 </select></label>
+${/* Sin clases que ofrecer, ninguna casilla: un armario no es «un switch o un panel de
+              parcheo» —eso son las cosas que van DENTRO— y el desplegable las ofrecía igual
+              porque caía al respaldo de «todas». Dos casillas seguidas rotuladas «Tipo», y la
+              segunda dejando elegir algo imposible, es cómo un panel de parcheo acaba escrito
+              como un modelo de armario: quien lo escribe no describe mal su armario, se ha
+              equivocado de rama, y esa casilla era lo único que se lo podía decir. */
+          ((d.kinds_by_tree || {})[f.tree] || []).length ? `
             <label class="ss-fs-2 text-muted">${esc(t('dcim_role'))}
                 <select class="form-select form-select-sm"
                         onchange="_dcCatForm.kind=this.value;_dcCatFormDraw()">
                     <option value="">${esc(t('dcim_cat_kind_guess'))}</option>
-                    ${((d.kinds_by_tree || {})[f.tree] || d.all_kinds || []).map(
+                    ${((d.kinds_by_tree || {})[f.tree] || []).map(
                         k => `<option value="${escAttr(k)}"${
                         f.kind === k ? ' selected' : ''}>${
                         esc(_dcCatKindName(k))}</option>`).join('')}
-                </select></label>
+                </select></label>` : ''}
             ${esModulo ? '' : num('u', 'U')}
             ${txt('part_number', t('dcim_cat_part_number'), 'style="max-width:12rem"')}
             ${esComponente ? _dcCatCompCommon(d) : ''}
         </div>
+        ${_dcCatTreeMismatch(f)}
         ${/* Un componente también se enchufa por algún sitio: un cargador tiene una entrada
               de corriente y una salida de continua, y un adaptador USB-C a red tiene un USB-C
               de entrada y una RJ-45 de salida. Estaba solo en la rama de los chasis, así que la
@@ -2464,6 +2534,35 @@ function _dcCatRestore(rev) {
     });
 }
 
+/** Una ficha guardada en la rama de los armarios que dice ser otra cosa.
+ *
+ *  Pasó, y sin una sola señal: dos casillas seguidas rotuladas «Tipo» —la rama del catálogo y el
+ *  rol— y la segunda ofreciendo «panel de parcheo» aunque la primera dijera «Armario», porque
+ *  caía al respaldo de «todas las clases». El resultado es un panel de parcheo escrito como
+ *  modelo de armario: no sale al buscar un modelo para colocar en un rack, y no tiene dónde
+ *  declarar sus puertos, porque la ficha de un armario no pregunta por puertos.
+ *
+ *  Que la casilla ya no exista arregla las de mañana y no las de ayer. Esto son las de ayer: se
+ *  dice qué pasa y se mueve de un clic, en vez de dejar a alguien buscando por qué su panel no
+ *  aparece en una lista donde no está. */
+function _dcCatTreeMismatch(f) {
+    if (String(f.tree || '') !== 'rack-types' || !String(f.kind || '')) return '';
+    return `<div class="alert alert-warning py-2 px-3 mb-0 ss-fs-2">
+        <i class="bi bi-exclamation-triangle me-1"></i>${
+            esc(tf('dcim_cat_tree_mismatch', _dcCatKindName(f.kind)))}
+        <div class="mt-2"><button class="btn btn-sm btn-warning" onclick="_dcCatTreeFix()">
+            ${esc(tf('dcim_cat_tree_move', _dcCatTreeName('device-types')))}</button></div>
+    </div>`;
+}
+
+/** Moverla a los dispositivos. El rol se queda: es lo que alguien ya dijo que era, y era lo
+ *  único de la ficha que estaba bien. */
+function _dcCatTreeFix() {
+    _dcCatForm.tree = 'device-types';
+    _dcCatSchema = _dcCatSchemaFor('device-types');
+    _dcCatFormDraw();
+}
+
 function _dcCatRackFields(ex, num) {
     return `<div class="d-flex gap-2 flex-wrap align-items-end">
             <label class="ss-fs-2 text-muted">${esc(t('dcim_cat_form_factor'))}
@@ -2472,7 +2571,7 @@ function _dcCatRackFields(ex, num) {
                     ${['4-post-cabinet', '4-post-frame', '2-post-frame', 'wall-frame',
                        'wall-cabinet'].map(a => `<option value="${escAttr(a)}"${
                         _dcCatFormExtra.form_factor === a ? ' selected' : ''}>${
-                        esc(a)}</option>`).join('')}
+                        esc(_dcEnumName(a))}</option>`).join('')}
                 </select></label>
             ${ex('width', t('dcim_cat_width_in'), 'type="number" min="0"')}
             ${ex('starting_unit', t('dcim_cat_starting_unit'), 'type="number" min="0"')}

@@ -358,3 +358,112 @@ class TestLaGeneracionYLoQueLleva:
         usb = {c['id']: c for c in connectors.packaged()['connectors']}['usb-c']
         assert len(usb['gens']) >= 6
         assert 'thunderbolt' in usb['signals']
+
+
+class _Store:
+    """Un almacén de mentira: lo único que `effective` le pide es el documento guardado."""
+
+    def __init__(self, body):
+        self._body = body
+
+    def get(self, name=''):
+        return {'body': self._body}
+
+
+class TestLaFotoDeUnConector:
+    """Los ciento y pico que vienen con el panel llevan dibujo —uno por FORMA, porque una C13 y
+    una C15 son la misma boca— y al que alguien añada no se le parece ninguno: nadie va a
+    escribir un SVG para la regleta de su rack. Puede traer una foto en su lugar.
+
+    Lo que se guarda es un NOMBRE del almacén de medios, comprobado con la regla de ese almacén
+    y no con una copia de ella: un nombre que no acuñó él no es un fichero de este disco, y
+    aceptarlo aquí sería dejar que un documento decida qué ruta se lee después — que es
+    exactamente la forma que tenía el fallo del catálogo de MIB.
+    """
+
+    #: Un nombre de los que acuña el almacén, con su subcarpeta.
+    BUENO = 'own/abcd1234-1111-2222-3333-444455556666.png'
+
+    def _doc(self, **extra):
+        c = {'id': 'regleta', 'families': ['power-outlets']}
+        c.update(extra)
+        return {'version': 1, 'connectors': [c]}
+
+    def test_un_nombre_del_almacen_se_queda(self):
+        fila = connectors.normalise(self._doc(image=self.BUENO))['connectors'][0]
+        assert fila['image'] == self.BUENO
+
+    def test_y_una_ruta_no(self):
+        """`../../etc/passwd` no es un nombre: es una ruta, y la única defensa que funciona es
+        que no pueda llegar a construirse una."""
+        for malo in ('../../etc/passwd', 'own/x.png', '/tmp/foto.png', 'foto.exe'):
+            fila = connectors.normalise(self._doc(image=malo))['connectors'][0]
+            assert 'image' not in fila, malo
+
+    def test_lo_que_se_tira_se_dice(self):
+        """Descartarla en silencio deja el conector con el dibujo genérico, que se lee como «no
+        tiene foto» y no como «la que pusiste no vale»."""
+        assert any('image' in p for p in connectors.problems(self._doc(image='../x.png')))
+        assert not connectors.problems(self._doc(image=self.BUENO))
+
+    def test_llega_a_la_pantalla(self):
+        """Guardada y no servida es una foto que no se ve, que es lo mismo que no tenerla."""
+        # Con versión que GANE a la del panel: si no, el efectivo es el de dentro y lo que se
+        # estaría comprobando es que el fichero del repositorio no trae fotos.
+        doc = self._doc(image=self.BUENO)
+        doc['version'] = connectors.next_version()
+        filas = connectors.all('es_ES', _Store(doc))
+        assert filas[0]['image'] == self.BUENO
+
+
+class TestPonerlaYQuitarla:
+    """`with_image` escribe en UN conector del documento y devuelve la que había: hay que
+    borrarla del disco, y sólo quien sustituye sabe cuál era."""
+
+    def _doc(self):
+        return {'version': 4, 'connectors': [
+            {'id': 'a', 'families': ['interfaces'], 'image': 'own/vieja.png'},
+            {'id': 'b', 'families': ['interfaces']}]}
+
+    def test_pone_la_nueva_y_devuelve_la_vieja(self):
+        doc, vieja = connectors.with_image(self._doc(), 'a', 'own/nueva.png')
+        assert vieja == 'own/vieja.png'
+        assert doc['connectors'][0]['image'] == 'own/nueva.png'
+        # Y no toca al de al lado.
+        assert 'image' not in doc['connectors'][1]
+
+    def test_quitarla_borra_la_clave_y_no_la_deja_vacia(self):
+        """Un `"image": ""` afirma que ese conector tiene una foto que no se ve."""
+        doc, vieja = connectors.with_image(self._doc(), 'a', '')
+        assert vieja == 'own/vieja.png' and 'image' not in doc['connectors'][0]
+
+    def test_no_toca_el_documento_que_recibe(self):
+        """Escribir sobre el que está en vigor dejaría la memoria de este proceso diciendo algo
+        que la base de datos no dice todavía — y si el guardado falla, para siempre."""
+        original = self._doc()
+        connectors.with_image(original, 'a', 'own/nueva.png')
+        assert original['connectors'][0]['image'] == 'own/vieja.png'
+
+    def test_uno_que_no_esta_se_contesta_con_nada(self):
+        """Y no creando la fila: guardar la foto de un conector que no existe deja un fichero
+        huérfano y una respuesta que dice que fue bien."""
+        doc, vieja = connectors.with_image(self._doc(), 'no-existe', 'own/x.png')
+        assert doc is None and vieja == ''
+
+
+class TestLaVersionQueDeVerdadMANDA:
+    """Una más que la MAYOR de las dos que compiten, no una más que la guardada.
+
+    Con la del panel por delante —una actualización que publicó la 3 sobre un parche local que
+    iba por la 2— sumarle uno a la guardada da otra vez 3, que no gana: el cambio se guarda, se
+    dice que sí, y no se aplica.
+    """
+
+    def test_supera_a_la_del_panel(self):
+        dentro = int(connectors.packaged().get('version') or 0)
+        assert connectors.next_version() == dentro + 1
+        assert connectors.next_version(_Store({'version': dentro - 1})) == dentro + 1
+
+    def test_y_a_la_guardada_cuando_es_ella_la_que_manda(self):
+        dentro = int(connectors.packaged().get('version') or 0)
+        assert connectors.next_version(_Store({'version': dentro + 40})) == dentro + 41

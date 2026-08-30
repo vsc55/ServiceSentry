@@ -68,8 +68,11 @@ function _dcSchHtml() {
  *  y no fuera, porque hacer que cada una lo abra y lo cierre serían tres cuadros para una cosa.
  */
 function _dcDocModal(titulo, modos, cuerpo) {
+    // Ancho de serie: lo que lleva dentro es la tabla del documento, y son diez columnas. En un
+    // `modal-lg` cabían desplazándose, que es correcto y se edita fatal — la ranura por la que
+    // se mira es más estrecha que la fila que se está tocando.
     showHtmlModal(titulo, `<div class="d-flex gap-2 flex-wrap mb-3">${modos}</div>${cuerpo}`,
-                  'primary');
+                  'primary', '', 'wide');
 }
 
 /** Un botón de modo del cuadro. Marcado el que se está mirando, que si no son tres botones que
@@ -91,6 +94,17 @@ let _dcConnDraftDoc = null;
 let _dcConnDraft = '';
 //: El historial, cuando se pide.
 let _dcConnHist = null;
+//: Qué se filtra en el formulario. Vacío = todo. **`null` = solo lo que aún no tiene
+//: identificador**, que es lo que se acaba de añadir: quien pulsó «nuevo conector» no ha pedido
+//: ver los otros ciento veintiocho, y una tabla de ciento veintinueve filas con la suya al final
+//: es no haberle contestado.
+//:
+//: Un estado y no una cadena centinela: «solo los nuevos» no es un texto que nadie pueda teclear
+//: —lo sería, y el día que alguien busque justo esa palabra la tabla haría algo que no se
+//: explica.
+let _dcConnEditQ = '';
+//: Las formas que el panel sabe dibujar, leídas del propio SVG la primera vez que hagan falta.
+let _DC_CONN_SHAPES = null;
 
 async function _dcConnDocLoad() {
     const d = await apiGet('/api/v1/dcim/connectors') || {};
@@ -179,12 +193,28 @@ function _dcConnGo(modo) {
     const doc = (_dcConnDoc || {}).doc || {};
     if (modo === 'form') {
         _dcConnDraftDoc = JSON.parse(JSON.stringify(doc));
-        _dcConnGens = null;
+        _dcConnDetail = null;
     }
     if (modo === 'json')
         _dcConnDraft = JSON.stringify(doc, null, 2);
     if (modo === 'history' && _dcConnHist === null) _dcConnHistLoad();
     _dcConnDraw();
+}
+
+/** Abrir el editor **desde la lista de conectores**, mirando al que se venía mirando.
+ *
+ *  Sólo se llegaba desde la tarjeta de esta pantalla, y quien descubre que falta un conector no
+ *  lo descubre aquí: lo descubre en la lista, buscando el suyo. La lista remataba diciendo que
+ *  esto se corrige editando `connectors.json` — que fue verdad y llevaba tiempo sin serlo.
+ *
+ *  Sin identificador es «uno nuevo»: se añade la fila **ya** y se deja la tabla enseñando sólo
+ *  esa. Con identificador, filtrada por él, que en ciento y pico filas es la diferencia entre
+ *  editar el tuyo y buscarlo. */
+async function _dcConnEditOpen(id) {
+    if (_dcConnDoc === null) await _dcConnDocLoad();
+    _dcConnEditQ = id ? String(id) : null;
+    _dcConnGo('form');
+    if (!id) _dcConnAdd();
 }
 
 /** Cerrar el cuadro y olvidar lo que se estaba escribiendo. Cancelar tiene que dejar el
@@ -205,10 +235,31 @@ function _dcConnClose() {
  *  con el panel, y guardarlo sin subirla es guardar algo que no se va a usar. */
 function _dcConnFormHtml() {
     const doc = _dcConnDraftDoc || {};
-    const filas = doc.connectors || [];
     const grupos = (_dcConnDoc || {}).groups || [];
     const familias = (_dcConnDoc || {}).families || [];
+    // Con su POSICIÓN dentro del documento y no la de la lista pintada: todo lo que se escribe
+    // aquí escribe en `doc.connectors[i]`, y con un filtro puesto el número de la fila que se ve
+    // deja de ser ese. Renumerar sería editar el conector de al lado sin decirlo.
+    const soloNuevos = _dcConnEditQ === null;
+    const q = String(_dcConnEditQ || '').trim().toLowerCase();
+    const filas = (doc.connectors || []).map((c, i) => ({c: c, i: i})).filter(({c}) => {
+        // Uno a medio escribir NUNCA se esconde: una fila que no se ve es una fila que no se
+        // puede terminar, y la que se acaba de añadir todavía no tiene por dónde encontrarse.
+        const nuevo = !String(c.id || '').trim();
+        if (soloNuevos) return nuevo;
+        if (!q) return true;
+        return nuevo || (String(c.id || '') + ' ' + _dcConnDraftName(c))
+            .toLowerCase().indexOf(q) >= 0;
+    });
     return `<div class="d-flex gap-2 align-items-end flex-wrap mb-2">
+            <input class="form-control form-control-sm" style="max-width:14rem"
+                   value="${escAttr(String(_dcConnEditQ || ''))}"
+                   placeholder="${escAttr(t('search'))}"
+                   oninput="_dcConnEditQ=this.value;_dcConnDraw()">
+            ${(soloNuevos || q) ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcConnEditQ='';_dcConnDraw()">${esc(t('clear'))}</button>` : ''}
+        </div>
+        <div class="d-flex gap-2 align-items-end flex-wrap mb-2">
             <label class="ss-fs-2 text-muted">${esc(t('dcim_prof_version_col'))}
                 <input type="number" min="1" class="form-control form-control-sm"
                        style="max-width:8rem" value="${escAttr(String(doc.version || 1))}"
@@ -222,40 +273,33 @@ function _dcConnFormHtml() {
             <th>${esc(t('dcim_conn_id'))}</th>
             <th>${esc(t('dcim_conn_name'))}</th>
             <th>${esc(t('dcim_conn_group'))}</th>
+            <th>${esc(t('dcim_conn_shape'))}</th>
             <th>${esc(t('dcim_cat_ports'))}</th>
-            <th>${esc(t('dcim_cat_port_speed'))}</th>
-            <th>${esc(t('dcim_gen'))}</th>
-            <th>${esc(t('dcim_signals'))}</th>
+            <th></th>
             <th></th>
         </tr></thead>
-        <tbody>${filas.map((c, i) => `<tr>
+        <tbody>${filas.map(({c, i}) => `<tr>
             <td><input class="form-control form-control-sm font-monospace"
-                   style="min-width:11rem" value="${escAttr(String(c.id || ''))}"
+                   style="min-width:9rem" value="${escAttr(String(c.id || ''))}"
                    oninput="_dcConnSet(${i},'id',this.value)"></td>
-            <td><input class="form-control form-control-sm" style="min-width:9rem"
+            <td><input class="form-control form-control-sm" style="min-width:8rem"
                    value="${escAttr(_dcConnDraftName(c))}"
                    oninput="_dcConnSet(${i},'name',this.value)"></td>
-            <td><select class="form-select form-select-sm" style="min-width:9rem"
+            <td><select class="form-select form-select-sm" style="min-width:8rem"
                     onchange="_dcConnSet(${i},'group',this.value)">
                 ${grupos.map(g => `<option value="${escAttr(g)}"${
                     c.group === g ? ' selected' : ''}>${
                     esc(_dcConnGroupName(g))}</option>`).join('')}
                 </select></td>
+            <td>${_dcConnShapeBox(i, c)}</td>
             <td>${_dcConnFamsBox(i, c, familias)}</td>
-            <td><input class="form-control form-control-sm" style="max-width:7rem"
-                   value="${escAttr(String(c.speed || ''))}"
-                   oninput="_dcConnSet(${i},'speed',this.value)"></td>
-            <td><button class="btn btn-sm btn-secondary py-0 px-1"
-                    onclick="_dcGenOpen(${i})">${
-                esc(String((c.gens || []).length))}
-                <i class="bi bi-chevron-${_dcConnGens === i ? 'up' : 'down'} ms-1"></i></button></td>
-            <td>${_dcConnSigBox(i, c, doc)}</td>
+            <td>${_dcConnMoreBtn(i, c)}</td>
             <td class="text-end"><button class="btn btn-sm btn-danger py-0 px-1"
                     title="${escAttr(t('delete'))}" onclick="_dcConnDrop(${i})">
                 <i class="bi bi-trash"></i></button></td>
         </tr>
-        ${_dcConnGens === i ? `<tr><td colspan="8" class="bg-body-tertiary">${
-            _dcGensHtml(i, c)}</td></tr>` : ''}`).join('')}</tbody></table></div>
+        ${_dcConnDetail === i ? `<tr><td colspan="7" class="bg-body-tertiary">${
+            _dcConnDetailHtml(i, c, doc)}</td></tr>` : ''}`).join('')}</tbody></table></div>
         <div class="d-flex gap-2">
             <button class="btn btn-sm btn-secondary" onclick="_dcConnAdd()">
                 <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_cat_port_add'))}</button>
@@ -266,13 +310,60 @@ function _dcConnFormHtml() {
         </div>`;
 }
 
-//: Qué conector tiene abiertas sus generaciones. Uno y no todos: ciento veintiocho sub-tablas
+//: Qué conector tiene abierta su letra pequeña. Uno y no todos: ciento veintiocho sub-tablas
 //: abiertas no es una tabla, es un listado.
-let _dcConnGens = null;
+let _dcConnDetail = null;
 
-function _dcGenOpen(i) {
-    _dcConnGens = (_dcConnGens === i) ? null : i;
+function _dcConnDetailOpen(i) {
+    _dcConnDetail = (_dcConnDetail === i) ? null : i;
     _dcConnDraw();
+}
+
+/** El botón que abre la letra pequeña, diciendo **si hay**.
+ *
+ *  Si hay, y no cuánta. Llevaba un número, y un número que suma una velocidad, tres generaciones,
+ *  dos señales y una nota no cuenta nada: «1» no dice qué de las cuatro cosas es, y «6» tampoco.
+ *  Un recuento sólo significa algo cuando lo que cuenta es de una clase — «3 plantillas» sí,
+ *  «3 cosas distintas» no.
+ *
+ *  Lo que sí hace falta, y es lo único que la fila plegada puede contestar, es un bit: cuáles de
+ *  los ciento veintiocho tienen algo dentro. Sin él hay que abrirlos todos para saberlo. */
+function _dcConnMoreBtn(i, c) {
+    const hay = (c.gens || []).length || (c.signals || []).length
+        || String(c.speed || '').trim() || _dcDocText(c.note).trim();
+    return `<button class="btn btn-sm btn-secondary py-0 px-1 ss-nowrap"
+            title="${escAttr(t('dcim_conn_more'))}" onclick="_dcConnDetailOpen(${i})">
+        ${hay ? '<i class="bi bi-circle-fill ss-fs-1 me-1"></i>' : ''}<i class="bi bi-chevron-${
+            _dcConnDetail === i ? 'up' : 'down'}"></i></button>`;
+}
+
+/** Lo que no cabe en una fila, y no porque falte sitio: **porque no es lo mismo**.
+ *
+ *  Diez columnas de formulario no entran en ningún diálogo —se probó, y lo que salía era una
+ *  barra de desplazamiento debajo de una fila más ancha que la ventana— pero el arreglo no es
+ *  hacer el cuadro más ancho hasta que quepan. Es que la fila conteste a **qué es este
+ *  conector** —cómo se llama, de qué tipo, qué cara tiene y en qué casillas se ofrece— y que la
+ *  letra pequeña esté donde se lee la letra pequeña: a cuánto va, qué generaciones caben, qué
+ *  puede llevar y qué es esto.
+ *
+ *  De los ciento veintiocho, casi ninguno tiene nada de lo segundo. */
+function _dcConnDetailHtml(i, c, doc) {
+    return `<div class="d-flex flex-column gap-2">
+        <div class="d-flex gap-3 flex-wrap align-items-start">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_cat_port_speed'))}
+                <input class="form-control form-control-sm" style="max-width:8rem"
+                       placeholder="10 Gbps" value="${escAttr(String(c.speed || ''))}"
+                       oninput="_dcConnSet(${i},'speed',this.value)"></label>
+            <div class="ss-fs-2 text-muted">${esc(t('dcim_signals'))}
+                ${_dcConnSigBox(i, c, doc)}</div>
+        </div>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_conn_note'))}
+            <input class="form-control form-control-sm" style="min-width:22rem"
+                   value="${escAttr(_dcDocText(c.note))}"
+                   oninput="_dcConnNoteSet(${i},this.value)"></label>
+        <div class="ss-fs-2 text-muted">${esc(t('dcim_gen'))}</div>
+        ${_dcGensHtml(i, c)}
+    </div>`;
 }
 
 /** El vocabulario de señales del documento: qué puede llevar un cable, con su nombre.
@@ -326,7 +417,7 @@ function _dcConnSigBox(i, c, doc) {
     const voc = (doc.signals || []).filter(x => String(x.id || '').trim());
     if (!voc.length) return `<span class="text-muted ss-fs-1">—</span>`;
     const puestas = (c.signals || []).map(String);
-    return `<div class="d-flex gap-1 flex-wrap">${voc.map(sg => {
+    return `<div class="d-flex gap-1 flex-wrap" style="min-width:11rem">${voc.map(sg => {
         const on = puestas.indexOf(String(sg.id)) >= 0;
         return `<label class="ss-pick${on ? ' ss-on' : ''}">
             <input type="checkbox" class="d-none"${on ? ' checked' : ''}
@@ -403,8 +494,11 @@ function _dcDocText(v) {
 /** Y escribirlo **sin borrar el otro idioma**: guardar en castellano no puede llevarse el inglés
  *  que esa fila ya tenía. */
 function _dcDocSetText(obj, campo, valor) {
-    if (campo === 'name' && obj.name && typeof obj.name === 'object') {
-        obj.name[_dcConnLang()] = String(valor);
+    // Cualquier campo que YA venga en los dos idiomas, no sólo el nombre: la nota de un conector
+    // del panel viene traducida, y escribirla en castellano se llevaba por delante el inglés
+    // convirtiendo el objeto en una cadena. El campo que llega como cadena sigue siéndolo.
+    if (obj[campo] && typeof obj[campo] === 'object') {
+        obj[campo][_dcConnLang()] = String(valor);
         return;
     }
     obj[campo] = String(valor);
@@ -450,7 +544,7 @@ function _dcConnSet(i, campo, valor) {
  *  ahorra es sitio, no la palabra. */
 function _dcConnFamsBox(i, c, familias) {
     const puestas = c.families || [];
-    return `<div class="d-flex gap-1 flex-wrap">${familias.map(f => {
+    return `<div class="d-flex gap-1 flex-wrap" style="width:9.4rem">${familias.map(f => {
         const on = puestas.indexOf(f) >= 0;
         const nombre = _dcPortName(f);
         return `<label class="ss-conn-fam${on ? ' ss-on' : ''}"
@@ -469,6 +563,47 @@ function _dcConnFamSet(i, fam, on) {
     // tienen que decirlo igual, o el JSON cambia sin que cambie nada.
     c.families = on ? _DCCAT_PORTS.filter(f => f === fam || fuera.indexOf(f) >= 0) : fuera;
     _dcConnDraw();
+}
+
+/** Qué cara tiene: **las formas que el panel sabe dibujar de verdad**, no una lista escrita
+ *  aquí al lado.
+ *
+ *  Salen del propio `<svg>` de `_conn_shapes.html`, que es el único sitio donde están. Una lista
+ *  copiada sería una segunda verdad: el día que alguien dibuje una forma nueva, la copia no la
+ *  ofrecería — y el día que borre una, la ofrecería y el `<use>` dejaría un hueco sin dar ningún
+ *  error, que es exactamente lo que ya guarda una prueba de este repositorio.
+ *
+ *  Se lee una vez: los símbolos están incrustados en la página y no cambian mientras esté
+ *  abierta. */
+function _dcConnShapes() {
+    if (_DC_CONN_SHAPES) return _DC_CONN_SHAPES;
+    _DC_CONN_SHAPES = Array.from(
+        document.querySelectorAll('[data-ss-conn-shapes] symbol'))
+        .map(sym => String(sym.id || '').replace(/^cx-/, ''))
+        .filter(Boolean).sort();
+    return _DC_CONN_SHAPES;
+}
+
+/** El desplegable de la forma, con el dibujo al lado: la lista dice `c14` y `clover`, que no son
+ *  nombres de nada — lo que dice cuál es cuál es verlo. */
+function _dcConnShapeBox(i, c) {
+    const puesta = String(c.shape || 'other');
+    const formas = _dcConnShapes();
+    return `<div class="d-flex gap-1 align-items-center">
+        <svg class="ss-conn" viewBox="0 0 24 16" aria-hidden="true"><use
+            href="#cx-${escAttr(puesta)}"></use></svg>
+        <select class="form-select form-select-sm font-monospace" style="min-width:8rem"
+                onchange="_dcConnSet(${i},'shape',this.value)">
+            ${formas.map(f => `<option value="${escAttr(f)}"${
+                f === puesta ? ' selected' : ''}>${esc(f)}</option>`).join('')}
+        </select></div>`;
+}
+
+/** La nota: **qué es esto**, en una frase. Es la columna que la lista enseña al final y la que
+ *  contesta «¿y esto para qué era?», y hasta ahora sólo se podía escribir en el JSON. */
+function _dcConnNoteSet(i, valor) {
+    const c = ((_dcConnDraftDoc || {}).connectors || [])[i];
+    if (c) _dcDocSetText(c, 'note', valor);
 }
 
 function _dcConnAdd() {

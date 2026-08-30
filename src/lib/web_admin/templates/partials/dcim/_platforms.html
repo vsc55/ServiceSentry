@@ -180,8 +180,10 @@ function _dcPlatsTable(rows, puede) {
                         <span class="ms-3"><i class="bi bi-chevron-${
                             cerradaF ? 'right' : 'down'} me-1"></i>${esc(familia)}</span>
                         <span class="text-muted ss-fs-1 ms-1">${esc(String(filas.length))}</span>
-                    </td></tr>` + (cerradaF ? '' : filas.map(p => `<tr>
-                    ${puede ? `<td><input type="checkbox" class="form-check-input"
+                    </td></tr>` + (cerradaF ? '' : filas.map(p => `<tr class="ss-rowlink"
+                        onclick="_dcPlatInfo(${jsStr(p.uid)})">
+                    ${puede ? `<td onclick="event.stopPropagation()">
+                        <input type="checkbox" class="form-check-input"
                         ${_dcPlatSel.has(p.uid) ? 'checked' : ''}
                         onchange="_dcPlatPick(${jsStr(p.uid)},this.checked)"></td>` : ''}
                     <td class="ps-5">${esc(_dcPlatLeaf(p, familia))}
@@ -193,7 +195,8 @@ function _dcPlatsTable(rows, puede) {
                     <td class="ss-fs-2 ss-tabular">${_dcPlatDate(p, 'end_of_security', hoy)}</td>
                     <td class="ss-fs-2 ss-tabular">${_dcPlatDate(p, 'eol', hoy)}</td>
                     <td class="text-end ss-tabular">${esc(String(p.builds || 0))}</td>
-                    <td class="text-end">${puede ? `<div class="btn-group btn-group-sm">
+                    <td class="text-end">${puede ? `<div class="btn-group btn-group-sm"
+                            onclick="event.stopPropagation()">
                         <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
                             onclick="_dcPlatEdit(${jsStr(p.uid)})">
                             <i class="bi bi-pencil"></i></button>
@@ -232,7 +235,79 @@ function _dcPlatKindName(k) {
     return dicho === clave ? String(k || '') : dicho;
 }
 
-// ── La ficha ────────────────────────────────────────────────────────────────────────────
+
+// ── La ficha, de solo lectura ───────────────────────────────────────────────────────────
+
+/** Lo que hay escrito de una plataforma, al pulsar su línea.
+ *
+ *  La tabla enseña cinco columnas porque son las que se comparan de un vistazo: cuándo salió,
+ *  cuándo se le acaban los parches, cuándo se acaba el soporte. Lo demás —la familia, el
+ *  fabricante, la descripción, las otras cuatro fechas, los comentarios, quién la tocó por
+ *  última vez— estaba solo dentro del formulario, y **abrir el formulario para leer es la forma
+ *  de cambiar algo sin querer**: se entra a mirar, se roza una fecha y se guarda.
+ *
+ *  Así que mirar y escribir son dos cosas distintas y se abren distinto. Del mirar se pasa al
+ *  escribir con un botón, que es el orden en el que ocurre de verdad.
+ */
+function _dcPlatInfo(uid) {
+    const p = ((_dcPlats || {}).rows || []).find(x => String(x.uid) === String(uid || ''));
+    if (!p) return;
+    const acciones = _dcimMay('dcim_catalog_manage')
+        ? `<button class="btn btn-secondary" onclick="_dcPlatEdit(${jsStr(p.uid)})">
+             <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>`
+        : '';
+    // Y sin maximizar: una ficha de solo lectura es lo que es, y estirarla solo aumenta el
+    // hueco vacío de alrededor.
+    showHtmlModal(_dcPlatLabel(p), _dcPlatInfoHtml(p), 'primary', acciones, 'fit');
+}
+
+/** El cuerpo de la ficha: bloques, y solo los que tienen algo dentro.
+ *
+ *  Un bloque «Comentarios» vacío no dice que no los tenga, dice que hay que leerlo para
+ *  averiguarlo — y con cinco bloques así la ficha ocupa el doble y responde lo mismo.
+ *
+ *  Las fechas las pinta `_dcBuildLifeHtml`, que es la que ya sabía hacerlo para un modelo del
+ *  catálogo. Un sistema operativo deja de recibir parches igual que un servidor deja de
+ *  venderse: dos funciones serían dos que se separan el día que una de las dos cambie de color.
+ */
+function _dcPlatInfoHtml(p) {
+    const bloques = [];
+    const ficha = [
+        _dcInfoRow(t('dcim_plat_name'), esc(String(p.name || ''))),
+        _dcInfoRow(t('dcim_plat_family'), esc(String(p.family || ''))),
+        _dcInfoRow(t('dcim_plat_version'), esc(String(p.version || ''))),
+        _dcInfoRow(t('dcim_plat_kind'), esc(_dcPlatKindName(p.kind))),
+        // Sin fabricante se dice que no lo tiene, y no se deja el hueco: en una plataforma es
+        // una respuesta —Debian no es de nadie que salga en una factura— y no un olvido.
+        _dcInfoRow(t('dcim_cat_maker'),
+                   esc(String(p.brand || '') || t('dcim_plat_no_brand'))),
+        _dcInfoRow(t('dcim_cat_desc'), esc(String(p.description || ''))),
+        p.url ? _dcInfoRow(t('dcim_brand_url'),
+            `<a href="${escAttr(String(p.url))}" target="_blank" rel="noopener noreferrer">${
+                esc(t('dcim_brand_open'))}</a>`) : '',
+    ].join('');
+    bloques.push(_dcInfoBlock(t('dcim_plat_block_what'), 'bi-disc', '', 0, ficha));
+    bloques.push(_dcBuildLifeHtml(p, (_dcPlats || {}).lifecycle, t('dcim_cat_lifecycle')));
+    // Cuántas plantillas la nombran es lo que decide si se puede retirar, así que el cero se
+    // dice con palabras en vez de con un cero: «ninguna» es la respuesta a esa pregunta.
+    bloques.push(_dcInfoBlock(t('dcim_plat_block_use'), 'bi-diagram-3', '', 0,
+        _dcInfoRow(t('dcim_plat_builds'), Number(p.builds || 0)
+            ? esc(String(p.builds)) : `<span class="text-muted">${
+                esc(t('dcim_plat_unused'))}</span>`)));
+    if (String(p.notes || '').trim())
+        bloques.push(_dcInfoBlock(t('dcim_build_notes'), 'bi-chat-left-text', '', 0,
+            `<div class="ss-fs-2 ss-prewrap border-top pt-1 mt-1">${
+                esc(String(p.notes))}</div>`));
+    const registro = [
+        _dcInfoRow(t('col_created'), esc(String(p.created_at || ''))),
+        _dcInfoRow(t('dcim_plat_updated'), esc(String(p.updated_at || ''))),
+        _dcInfoRow(t('col_user'), esc(String(p.updated_by || ''))),
+    ].join('');
+    bloques.push(_dcInfoBlock(t('dcim_plat_block_log'), 'bi-clock-history', '', 0, registro));
+    return `<div class="ss-grid-info">${bloques.filter(Boolean).join('')}</div>`;
+}
+
+// ── El formulario ───────────────────────────────────────────────────────────────────────
 
 function _dcPlatEdit(uid) {
     const fila = uid ? ((_dcPlats || {}).rows || []).find(p => String(p.uid) === String(uid))

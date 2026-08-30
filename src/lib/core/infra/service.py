@@ -851,7 +851,14 @@ def metrics(results: list, fields_by_module: dict, names: dict | None = None) ->
     out.sort(key=lambda m: (m['module'], str(m['item'] or ''), m['label']))
     return out
 
-def topology(wa, visible, checks_for_host, said_sources, lang: str = '') -> dict:
+#: Lo que un dispositivo puede haber VISTO, y que sirve para colocar una máquina en el puerto
+#: de un switch cuando ella no habla LLDP. Son tablas grandes —una tabla MAC son todas las
+#: direcciones que ese switch ha visto pasar— y se leen enteras.
+EVIDENCE_KINDS = ('fdb', 'bridgeport', 'ifname', 'arp')
+
+
+def topology(wa, visible, checks_for_host, said_sources, lang: str = '',
+             evidence_kinds=EVIDENCE_KINDS) -> dict:
     """El mapa de la flota: redes, nodos y enlaces, tal como se puede saber sin preguntar.
 
     Aquí y no en la ruta porque lo necesitan dos pantallas: el mapa de infraestructura y la
@@ -874,16 +881,19 @@ def topology(wa, visible, checks_for_host, said_sources, lang: str = '') -> dict
     if store is None:
         return {'networks': [], 'nodes': [], 'edges': [], 'unplaced': []}
     hosts = store.list(decrypt=False)
-    status_seed = wa._read_check_status()
+    # **Una sola vez.** El comentario de doce líneas más abajo dice que la tabla de estado es
+    # una de las dos lecturas caras de este camino y que por eso se hace para toda la flota de
+    # golpe — y se hacía dos veces, con dos nombres, a doce líneas de distancia. No da ningún
+    # error: da una pantalla que tarda el doble de lo que su propio comentario explica.
+    status_raw = wa._read_check_status()
     bound_mods = hosts_svc._host_bound_modules(wa)
     hosts_svc.enrich_hosts(
         hosts, hosts_svc._host_statuses(wa), bound_mods,
-        fleet_identity(status_seed, hosts, said_sources(bound_mods)))
+        fleet_identity(status_raw, hosts, said_sources(bound_mods)))
     hosts = visible(hosts, set(wa._get_session_permissions() or []))
     # Read ONCE for the whole fleet and not once per machine: the state table and the
     # history index are the two expensive reads on this path, and a map of forty machines
     # would be forty of each.
-    status_raw = wa._read_check_status()
     hist_by_mod: dict = {}
     # …and flat, for the other question this same read answers: WHICH machines the history
     # remembers at all. A machine in maintenance has its live keys pruned, so without this
@@ -930,12 +940,18 @@ def topology(wa, visible, checks_for_host, said_sources, lang: str = '') -> dict
     # What devices SAW, which is what places a machine on a switch port when it speaks
     # no LLDP. Its own store because a forwarding table is hundreds of volatile rows that
     # are not checks (see lib/core/infra/evidence.py); read here in one go for every kind.
+    #
+    # **Y sólo si quien pide el mapa las necesita.** La reconciliación del cableado usa
+    # únicamente los enlaces LLDP —lo que dos dispositivos dicen verse el uno al otro— y pagaba
+    # igualmente la lectura entera de las cuatro: cuatro tablas sin cota, la de MAC la primera,
+    # leídas y tiradas a la basura en cada apertura de la pestaña. Nadie lo notaba en el mapa,
+    # que las usa; se notaba en la pestaña que no.
     evidence: dict = {}
     db = getattr(wa, '_db_connector', None) or getattr(wa, '_db', None)
-    if db is not None:
+    if db is not None and evidence_kinds:
         try:
             store = infra_evidence.EvidenceStore(db)
-            for kind in ('fdb', 'bridgeport', 'ifname', 'arp'):
+            for kind in evidence_kinds:
                 evidence[kind] = store.by_device(kind)
         except Exception:                       # pylint: disable=broad-except
             evidence = {}                       # a map without the ports beats no map

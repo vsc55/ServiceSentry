@@ -441,11 +441,22 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
         cap = int(p.get('capacity_w') or 0)
         filas.append({
             'uid': p['uid'], 'name': nombre_de[str(p['uid'])],
+            # De qué equipo del armario es, cuando lo es. Va en la respuesta porque la pantalla
+            # tiene que saber cuáles de los equipos colocados están YA declarados para no
+            # ofrecerlos otra vez: sin esto, la lista de «cuál es la regleta» ofrece la misma
+            # dos veces y la segunda crea una regleta duplicada del mismo cacharro.
+            'item_uid': str(p.get('item_uid') or ''),
             'feed': str(p.get('feed') or 'none'),
             'outlets': int(p.get('outlets') or 0),
             # Las tomas OCUPADAS son los cables, no los equipos: un equipo con dos cables en la
             # misma regleta ocupa dos tomas, y contar equipos diría que queda una de más.
             'used': len(mios),
+            # CUÁLES están ocupadas, y no sólo cuántas. Sin esto, elegir toma es teclear un
+            # número a ciegas y descubrir el choque —dos cables en la misma toma, que es
+            # físicamente imposible— el día que alguien va a desenchufar uno y encuentra dos.
+            # El 0 no cuenta: es «en esa regleta, no sé en cuál», y no ocupa ninguna.
+            'outlets_used': sorted({int(f.get('outlet') or 0) for f in mios
+                                    if int(f.get('outlet') or 0) > 0}),
             'free': max(0, int(p.get('outlets') or 0) - len(mios)),
             'watts_said': declarado,
             'capacity_w': cap,
@@ -458,9 +469,16 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
             'state': item_state({'host_uid': p.get('host_uid')}, statuses or {}),
         })
 
+    # Las regletas que YA están declaradas como tales: su equipo no es un consumidor. Una
+    # regleta no se enchufa a sí misma, y listarla entre lo que come es pedirle un enchufe a lo
+    # que da los enchufes.
+    es_regleta = {str(p.get('item_uid') or '') for p in (pdus or ()) if p.get('item_uid')}
+
     # Y por equipo: de qué ramas come. Aquí es donde sale el hallazgo.
     por_equipo, avisos = [], []
     for it in (items or ()):
+        if str(it.get('uid') or '') in es_regleta:
+            continue
         uid = str(it.get('uid') or '')
         cables = por_item.get(uid, [])
         ramas = sorted({rama_de.get(str(c.get('pdu_uid') or ''), 'none') for c in cables})
@@ -477,6 +495,7 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
                        'watts_said': int(c.get('watts_said') or 0)} for c in cables],
             'branches': [b for b in ramas if b != 'none'],
             'watts_said': sum(int(c.get('watts_said') or 0) for c in cables),
+            'role': str(it.get('role') or ''),
         }
         por_equipo.append(fila)
         if not cables:
@@ -494,6 +513,20 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
             avisos.append({'kind': 'over_half', 'pdu': fila['uid'], 'label': fila['name'],
                            'load': fila['load']})
 
+    # Las regletas que están COLOCADAS y no declaradas. Una regleta que ocupa un U es un equipo
+    # del armario; una regleta donde se enchufa es una fila con ramas y tomas. Son la misma cosa
+    # vista desde dos sitios, y hasta que alguien las une el panel no puede ofrecer como enchufe
+    # la que se acaba de colocar — que es exactamente lo que espera quien acaba de colocarla.
+    #
+    # No se unen solas: declarar una regleta es decir de qué rama cuelga y cuántas tomas tiene, y
+    # eso no está en el catálogo ni lo puede adivinar nadie. Lo que sí se puede es no dejar que
+    # pase desapercibido.
+    sin_declarar = [{'uid': str(it.get('uid') or ''),
+                     'label': str(it.get('label') or ''),
+                     'u_start': it.get('u_start')}
+                    for it in (items or ())
+                    if str(it.get('role') or '') == 'pdu' and str(it.get('uid') or '') not in es_regleta]
+
     # Y por sociedad, que en un holding es una línea de factura: el departamento opera la sala
     # y cobra por consumo. Solo cuenta lo que quien mira puede ver —los equipos ya vienen
     # filtrados— así que la filial ve su propia línea y nada más, que es lo que puede comprobar.
@@ -505,6 +538,7 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
         tally['items'] += 1
 
     return {'pdus': filas, 'items': por_equipo, 'warnings': avisos,
+            'undeclared_pdus': sin_declarar,
             'watts_said': sum(f['watts_said'] for f in filas),
             'by_branch': {b: sum(f['watts_said'] for f in filas if f['feed'] == b)
                           for b in ('a', 'b', 'none')},
@@ -529,7 +563,94 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
 #   lo dice. Eso sí suele ser trabajo pendiente: alguien enchufó y no lo apuntó.
 
 
-def cable_check(cables, items, edges) -> dict:
+def _through_passive(cables, items) -> dict:
+    """``{(máquina, máquina): [tramo, …]}`` — caminos que pasan SÓLO por equipos pasivos.
+
+    Cada tramo es ``{'cable', 'a_item', 'a_port', 'b_item', 'b_port'}`` **en el sentido en que se
+    recorre**, del origen al destino. En ese sentido y no en el que se guardó: un cable se
+    declara desde el extremo que se tenía delante, así que la mitad de los tramos de un camino
+    están escritos al revés — y una traza que va «SRV → PP» y luego «SW → PP» no se puede leer.
+
+    Un enlace que atraviesa un panel de parcheo son **tres cables y un camino**: el latiguillo
+    del servidor al panel, el enlace fijo entre los dos paneles, y el latiguillo del otro panel
+    al switch. Los tres se declaran por separado, porque los tres son cables que alguien puede
+    desenchufar — y ninguno de los tres se puede confirmar solo, porque un panel es un trozo de
+    metal que no habla.
+
+    Lo que sí se puede confirmar es el CAMINO. El servidor y el switch se ven por LLDP a través
+    del panel, y sin esto ese enlace salía como «sin declarar» estando declarado en tres tramos:
+    la lista de trabajo pendiente incluía trabajo ya hecho, que es la forma más rápida de que
+    nadie vuelva a mirarla.
+
+    **Se anda por BOCAS y no por equipos.** Un panel de veinticuatro posiciones no es un nudo
+    donde todo lo que entra sale por cualquier sitio: lo que entra por la 12 sale por la 12, que
+    es la misma posición vista por el otro lado. Andar por el panel entero daría por explicado
+    cualquier par de cables que lo tocaran, y entonces «confirmado» dejaría de querer decir nada.
+
+    Y por eso un **puente** —un latiguillo de la boca 25 a la 17 del mismo panel— encaja sin
+    ninguna regla nueva: es un cable como los demás, y andando por bocas lleva de una posición a
+    la otra igual que cualquier otro tramo.
+
+    Sin bocas escritas, todas las de un panel son la misma —`('panel', '')`— y el camino vuelve
+    a ser el de antes: menos preciso, que es exactamente lo que se sabe cuando nadie las apuntó.
+
+    **Sólo a través de pasivos.** Atravesar un switch sería inventarse un cable: dos máquinas
+    enchufadas al mismo switch no están enchufadas entre sí. Y un equipo del que nadie ha dicho
+    el rol —o uno ajeno, que llega sin él— tampoco se atraviesa: no se puede confirmar un camino
+    a través de algo que no se puede ni mirar.
+    """
+    host_de = {str(i.get('uid') or ''): str(i.get('host_uid') or '') for i in (items or ())}
+    pasa = {str(i.get('uid') or ''): (str(i.get('role') or '') in ROLES_MUDOS
+                                      and not i.get('foreign'))
+            for i in (items or ())}
+    # Qué cables tocan cada boca, y a qué boca llevan.
+    en_boca: dict = {}
+    for c in (cables or ()):
+        a = (str(c.get('a_item') or ''), str(c.get('a_port') or '').strip())
+        b = (str(c.get('b_item') or ''), str(c.get('b_port') or '').strip())
+        if not a[0] or not b[0]:
+            continue
+        uid = str(c.get('uid') or '')
+        en_boca.setdefault(a, []).append((uid, a, b))
+        en_boca.setdefault(b, []).append((uid, b, a))
+
+    def _tramo(uid, desde, hacia):
+        return {'cable': uid, 'a_item': desde[0], 'a_port': desde[1],
+                'b_item': hacia[0], 'b_port': hacia[1]}
+
+    out: dict = {}
+    for origen, ha in host_de.items():
+        if not ha:
+            continue
+        # En anchura desde todas las bocas de la máquina, con el camino RECORRIDO a cuestas: lo
+        # que se marca al final son los tramos, porque es cada uno el que queda confirmado por
+        # formar parte de un camino que alguien ve entero.
+        cola = [(hacia, [_tramo(uid, desde, hacia)], 0)
+                for boca, salidas in en_boca.items() if boca[0] == origen
+                for uid, desde, hacia in salidas]
+        visitado = set()
+        while cola:
+            boca, camino, saltos = cola.pop(0)
+            if boca in visitado:
+                continue
+            visitado.add(boca)
+            hb = host_de.get(boca[0], '')
+            if hb:
+                # Un cable directo entre dos máquinas ya lo casa la comprobación de siempre; lo
+                # que aquí interesa es lo que pasa POR algo.
+                if saltos and ha != hb:
+                    out.setdefault(tuple(sorted((ha, hb))), list(camino))
+                continue
+            if not pasa.get(boca[0]):
+                continue                       # ni un switch ni algo sin rol: no se atraviesa
+            usados = {t['cable'] for t in camino}
+            for uid, desde, hacia in en_boca.get(boca, ()):
+                if uid not in usados:
+                    cola.append((hacia, camino + [_tramo(uid, desde, hacia)], saltos + 1))
+    return out
+
+
+def cable_check(cables, items, edges=None) -> dict:
     """Lo declarado contra lo que los dispositivos dicen ver.
 
     ``{'cables': [...], 'undeclared': [...], 'counts': {...}}``.
@@ -545,7 +666,25 @@ def cable_check(cables, items, edges) -> dict:
     """
     host_de = {str(i.get('uid') or ''): str(i.get('host_uid') or '') for i in (items or ())}
     nombre_de = {str(i.get('uid') or ''): (i.get('label') or '') for i in (items or ())}
-
+    rol_de = {str(i.get('uid') or ''): str(i.get('role') or '') for i in (items or ())}
+    # Dónde está cada punta. Un camino sale del armario abierto —el panel vive en el de
+    # patcheo— así que «PP-A 25» no dice dónde hay que ir: hacen falta el armario y la U, que
+    # es la dirección con la que alguien camina hasta allí.
+    sitio_de = {str(i.get('uid') or ''): {'rack': str(i.get('rack_name') or ''),
+                                          'rack_uid': str(i.get('rack_uid') or ''),
+                                          'u': i.get('u_start')}
+                for i in (items or ())}
+    etiqueta = [dict(c,
+                     a_label=nombre_de.get(str(c.get('a_item') or ''), ''),
+                     b_label=nombre_de.get(str(c.get('b_item') or ''), ''))
+                for c in (cables or ())]
+    # `None` es **no se ha preguntado**; `[]` es «se ha preguntado y no se ve nada». No es una
+    # sutileza: sin esa diferencia, la lista rápida —la que sale mientras el mapa de la flota se
+    # arma— saldría entera diciendo «no se ve», que es un veredicto, y de los peores: manda a
+    # buscar un cable que está bien porque todavía nadie ha mirado. Es la misma forma de fallo
+    # que un 403 contado como «el dispositivo no ha dicho nada».
+    if edges is None:
+        return {'cables': etiqueta, 'undeclared': [], 'counts': {}, 'checked': False}
     # Lo que se ve, indexado por el par de máquinas. El par va ordenado porque estar enchufados
     # es simétrico: quién es «el primero» no es un hecho del cable.
     visto = {}
@@ -555,7 +694,39 @@ def cable_check(cables, items, edges) -> dict:
         par = tuple(sorted((str(e.get('from') or ''), str(e.get('to') or ''))))
         visto[par] = e
 
+    # Los caminos que pasan por un panel, ANTES de juzgar nada. Un enlace explicado por tres
+    # tramos declarados no está sin declarar, y cada uno de esos tramos queda confirmado por el
+    # camino aunque él solo no pudiera confirmarse nunca.
+    caminos = _through_passive(cables, items)
     filas, casados = [], set()
+    # Casados por el camino: el par se ve y hay tramos declarados que lo explican. Y el camino
+    # entero viaja con la respuesta: «pasa por un panel» sin decir por CUÁL ni por qué boca
+    # obliga a reconstruirlo a mano cable a cable, que es la pregunta que se hace delante del
+    # armario con el latiguillo en la mano.
+    por_camino: dict = {}
+    trazas = []
+    for par, tramos in sorted(caminos.items()):
+        if par not in visto:
+            continue
+        casados.add(par)
+        i = len(trazas)
+        # Con el NOMBRE de cada punta pegado al tramo. Un camino que pasa por el panel del
+        # armario de al lado nombra equipos que la pantalla no tiene delante —sólo tiene los de
+        # su armario— así que sin esto la traza sale llena de identificadores, que es lo que se
+        # arregló ya en cuatro sitios de esta misma sección. Con el rol además del rótulo: la
+        # mitad de los paneles no está rotulada, y «Panel de parcheo» dice más que ocho letras
+        # de un uid.
+        trazas.append({'ends': list(par),
+                       'legs': [dict(t,
+                                     a_label=nombre_de.get(t['a_item'], ''),
+                                     a_role=rol_de.get(t['a_item'], ''),
+                                     a_at=sitio_de.get(t['a_item'], {}),
+                                     b_label=nombre_de.get(t['b_item'], ''),
+                                     b_role=rol_de.get(t['b_item'], ''),
+                                     b_at=sitio_de.get(t['b_item'], {}))
+                                for t in tramos]})
+        for t in tramos:
+            por_camino.setdefault(t['cable'], []).append(i)
     for c in (cables or ()):
         a, b = str(c.get('a_item') or ''), str(c.get('b_item') or '')
         ha, hb = host_de.get(a, ''), host_de.get(b, '')
@@ -563,9 +734,15 @@ def cable_check(cables, items, edges) -> dict:
         fila['a_label'] = nombre_de.get(a, '')
         fila['b_label'] = nombre_de.get(b, '')
         if not ha or not hb:
-            # Un extremo pasivo. No se juzga: nadie puede confirmarlo, y decir «no se ve» de un
-            # panel de parcheo es un aviso que no se puede resolver nunca.
-            fila['seen'] = 'passive'
+            # Un extremo pasivo. Él solo no lo puede confirmar nadie —un panel es un trozo de
+            # metal— pero el CAMINO del que forma parte sí, y entonces se dice: es la diferencia
+            # entre «esto no se puede comprobar» y «esto está comprobado».
+            suyos = por_camino.get(str(c.get('uid') or ''), ())
+            fila['seen'] = 'via' if suyos else 'passive'
+            if suyos:
+                fila['via'] = len(suyos)
+                # De qué caminos forma parte, para poder enseñarlos enteros desde su ficha.
+                fila['paths'] = list(suyos)
             filas.append(fila)
             continue
         par = tuple(sorted((ha, hb)))
@@ -575,6 +752,11 @@ def cable_check(cables, items, edges) -> dict:
         else:
             casados.add(par)
             fila['seen'] = 'seen'
+            # De cuántos enlaces habla esta fila. Un agregado de cuatro puertos entre el router y
+            # el switch es UN cable declarado y CUATRO latiguillos, y la fila decía «coincide» sin
+            # dar ninguna pista de eso: el día que se caiga uno de los cuatro, la pantalla que
+            # existe para contarlo sigue en verde.
+            fila['bundle'] = int(arista.get('bundle') or 1)
             # Y si los puertos que dijo el dispositivo no incluyen los declarados, se dice: es el
             # caso de «alguien movió el latiguillo y no cambió la etiqueta», que es exactamente
             # lo que esta pantalla existe para encontrar.
@@ -583,26 +765,59 @@ def cable_check(cables, items, edges) -> dict:
                       for p in (lado if isinstance(lado, (list, tuple)) else [lado])}
             declarados = {str(c.get('a_port') or '').lower(),
                           str(c.get('b_port') or '').lower()} - {''}
+            # Las bocas que los dispositivos nombran, **siempre** y no sólo cuando no cuadran:
+            # es lo único que puede decir de qué cuatro puertos habla un agregado, y la ficha del
+            # cable no tiene otro sitio de donde sacarlo. La tabla las enseña sólo cuando
+            # contradicen a lo declarado, que es cuando significan algo de un vistazo.
+            fila['ports_seen'] = sorted(dichos)
             if declarados and dichos and not (declarados & dichos):
                 fila['seen'] = 'other_port'
-                fila['ports_seen'] = sorted(dichos)
         filas.append(fila)
 
     # Y al revés: lo que se ve y nadie declaró. Solo entre máquinas que están en un armario —un
     # enlace a un portátil de alguien no es cableado de sala y llenaría la lista de ruido.
     en_rack = {h for h in host_de.values() if h}
+    # De vuelta: de qué EQUIPO es cada máquina. Sin esto, un enlace descubierto sólo se puede
+    # mirar — un cable se declara entre dos equipos del armario, no entre dos máquinas, y
+    # traducir uno en otro en la pantalla sería una segunda copia de este mismo diccionario.
+    #
+    # El primero que aparezca: una máquina puede estar enganchada a dos equipos si alguien se
+    # equivocó, y elegir el primero es tan bueno como cualquiera cuando ya hay un error escrito.
+    item_de: dict = {}
+    for uid_item, host in host_de.items():
+        if host:
+            item_de.setdefault(host, uid_item)
     sin_declarar = []
     for par, arista in visto.items():
         if par in casados or not (par[0] in en_rack and par[1] in en_rack):
             continue
+        puertos = arista.get('ports') or {}
+
+        def _boca(host, _p=puertos):
+            """El nombre de puerto que ese lado dijo, si dijo uno solo que valga."""
+            v = _p.get(host)
+            if isinstance(v, (list, tuple)):
+                v = v[0] if len(v) == 1 else ''
+            return str(v or '')
+
         sin_declarar.append({'from': par[0], 'to': par[1],
-                             'ports': arista.get('ports') or {},
+                             'ports': puertos,
+                             # Listo para declararlo de un clic. **Una propuesta**: lo que manda
+                             # es lo que alguien apunta, y el descubrimiento sirve para no
+                             # teclearlo y para avisar cuando deja de coincidir. Rellenar la
+                             # ficha a mano copiando de la fila de arriba es la forma más
+                             # segura de que nadie la rellene.
+                             'a_item': item_de.get(par[0], ''),
+                             'b_item': item_de.get(par[1], ''),
+                             'a_port': _boca(par[0]),
+                             'b_port': _boca(par[1]),
                              'bundle': arista.get('bundle') or 1})
 
     cuenta = {estado: len([f for f in filas if f['seen'] == estado])
-              for estado in ('seen', 'unseen', 'other_port', 'passive')}
+              for estado in ('seen', 'unseen', 'other_port', 'passive', 'via')}
     cuenta['undeclared'] = len(sin_declarar)
-    return {'cables': filas, 'undeclared': sin_declarar, 'counts': cuenta}
+    return {'cables': filas, 'undeclared': sin_declarar, 'counts': cuenta, 'checked': True,
+            'paths': trazas}
 
 
 # ══ Los enlaces entre sedes ═════════════════════════════════════════════════════════════

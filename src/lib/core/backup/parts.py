@@ -46,7 +46,13 @@ PARTS: tuple = (
     # and the database holds only their names: a copy without them restores rooms whose plans
     # are gone. On by default because they are small and irreplaceable, which is the pair of
     # properties that decides this.
-    {'id': 'dcim_media', 'kind': 'dir', 'dir': 'dcim_media',
+    #
+    # `dir_attr` is what makes the setting `web_admin|dcim_media_dir` reach this far: the
+    # folder can be moved to another disk, and a copy that resolved `dcim_media` against
+    # `var_dir` anyway would archive the empty default. Named here rather than at the call
+    # site so the next configurable folder is one key, not another branch — see
+    # `configured_dirs`.
+    {'id': 'dcim_media', 'kind': 'dir', 'dir': 'dcim_media', 'dir_attr': '_DCIM_MEDIA_DIR',
      'default': True, 'required': False, 'label_key': 'backup_part_dcim_media'},
 )
 
@@ -67,6 +73,33 @@ def dir_parts() -> list:
              'label_i18n': {}, 'label_key': p['label_key']}
             for p in PARTS if p.get('kind') == 'dir']
     return core + module_parts()
+
+
+def configured_dirs(holder) -> dict:
+    """``{part_id: path}`` for every core part whose folder has been MOVED.
+
+    The other half of :func:`part_dir`, which has always known how to honour an override and
+    was never given one: `dirs` reached `create_backup` and `restore_backup` as a parameter
+    nobody filled in, so an install with `web_admin|dcim_media_dir` set copied
+    `<var_dir>/dcim_media` — the default folder, empty — and a restore would have put the
+    floor plans back into a directory the panel does not read.
+
+    *holder* is whatever object carries the resolved settings (the web admin), read by the
+    attribute the part declares. Only the ones actually set are returned: an empty setting
+    means "the default", and `part_dir` already knows what that is.
+
+    Reading it on every call and not once at start-up is the same rule the setting itself
+    follows — moving the folder must not need a restart.
+    """
+    out: dict = {}
+    for p in PARTS:
+        attr = p.get('dir_attr')
+        if not attr:
+            continue
+        path = str(getattr(holder, attr, '') or '').strip()
+        if path:
+            out[p['id']] = path
+    return out
 
 
 def part_dir(part: dict, var_dir: str, dirs=None) -> str:

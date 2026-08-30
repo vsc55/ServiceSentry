@@ -13,7 +13,6 @@ function _dcimTreeHtml() {
     const sites = _dcimData.sites;
     return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad">
         ${_dcimToolbar()}
-        ${_dcimFormHtml('new', 'site', '', '')}
         ${sites.length ? sites.map(_dcimSiteCard).join('')
                        : `<div class="text-muted small">${esc(t('dcim_empty'))}</div>`}
     </div>`;
@@ -245,8 +244,6 @@ function _dcimSiteCard(site) {
             ${_dcimActions('site', site.uid, site.name, 'room')}
         </div>
         <div class="card-body py-2">
-            ${_dcimFormHtml('edit', 'site', '', site.uid)}
-            ${_dcimFormHtml('new', 'room', site.uid, '')}
             ${rooms.length ? rooms.map(_dcimRoomRow).join('')
                            : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_rooms'))}</div>`}
         </div>
@@ -297,11 +294,8 @@ function _dcimRoomRow(room) {
                 esc(tf('dcim_racks', racks.length))}</span>
             ${_dcimActions('room', room.uid, room.name, 'rack')}
         </div>
-        ${_dcimFormHtml('edit', 'room', '', room.uid)}
-        ${_dcimFormHtml('new', 'rack', room.uid, '')}
         ${racks.length ? `<div class="d-flex flex-wrap gap-2 py-2">${
             racks.map(_dcimRackChip).join('')}</div>` : ''}
-        ${racks.map(r => _dcimFormHtml('edit', 'rack', '', r.uid)).join('')}
     </div>`;
 }
 

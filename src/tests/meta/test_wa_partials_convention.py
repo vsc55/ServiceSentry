@@ -299,3 +299,31 @@ class TestElModalDeConfirmacionRecibeUnaFuncion:
                 if resto and not re.search(r'(\(\s*\)|function|=>|\w+\s*\))', resto[:60]):
                     malos.append((rel, llamada[:60]))
         assert not malos, malos
+
+
+class TestUnComentarioNoPuedeCerrarUnaCadena:
+    """Un acento grave dentro de un `<!-- … -->` **cierra la plantilla de cadena que lo rodea**.
+
+    Reportado desde la pantalla como «sale el spinner y nada»: un comentario HTML escrito dentro
+    del `return \`…\`` de una función de dibujo llevaba `` `<g>` `` y `` `pointerenter` `` para
+    citar lo que nombraban. El navegador leyó el primero como el final de la cadena y el resto de
+    la función como código — `SyntaxError`, el guion entero muerto, y la sección en blanco.
+
+    Un comentario no puede romper nada, y por eso no se mira: ahí está la trampa. No lo ve
+    ningún guardián de los que hay —la prosa se ignora a propósito en casi todos— y **nada de la
+    suite ejecuta el guion**, así que los cinco mil tests siguen en verde.
+
+    La regla es corta: dentro de un partial, un comentario HTML no lleva acentos graves. Para
+    citar código está el comentario de JavaScript, que vive fuera de la cadena.
+    """
+
+    def test_ningun_comentario_html_lleva_un_acento_grave(self):
+        malos = []
+        for rel in _partials():
+            src = io.open(os.path.join(TPL, rel), encoding='utf-8').read()
+            for com in re.findall(r'<!--.*?-->', src, re.S):
+                if '`' in com:
+                    malos.append(f'{rel}: {" ".join(com.split())[:70]}')
+        assert not malos, (
+            'un acento grave en un comentario HTML cierra la plantilla de cadena que lo rodea '
+            f'y mata el guion entero — usa un comentario de JavaScript: {malos}')

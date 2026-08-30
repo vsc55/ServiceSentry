@@ -4374,6 +4374,15 @@ LANG = {
     'dcim_mount_self':             'Something cannot be mounted on itself',
     'dcim_mount_in_use':           'It carries mounted items; take them off first',
     'dcim_item_slots':             'Parts of the U',
+    'dcim_item_slots_tt':
+        'How many parts the space is divided into. Two for two half-U patch panels, '
+        'eight for a Raspberry shelf. On a device MOUNTED on another, the parts are the '
+        "shelf's and not the U's: it is what says whether the two mini PCs sit side by "
+        'side or one takes the whole shelf.',
+    'dcim_item_slot_tt':
+        'Which of those parts it takes — on a shelf, counting from the left. If not all '
+        'of the mounted devices say, the drawing shares the shelf evenly in their order, '
+        'and writes nothing down: the day you say, what you say wins.',
     'dcim_item_slot':              'Which one it takes',
     'dcim_item_slot_span':         'How many it takes',
     'dcim_item_split':             'Split',
@@ -4407,6 +4416,20 @@ LANG = {
     'dcim_face_front':         'Front',
     'dcim_face_rear':          'Rear',
     'dcim_what':               'What',
+    'dcim_items':              'Devices',
+    'dcim_hist_what':            'What happened',
+    'dcim_hist_none':
+        'This rack has no history yet. A version is kept every time something moves, arrives '
+        'or leaves — the ones from before this exist nowhere, because nobody kept them.',
+    'dcim_hist_first':           'The history starts here',
+    'dcim_hist_same':            'Nothing changed between those two',
+    'dcim_hist_between':         'From {} to {}',
+    'dcim_hist_hint':
+        'Each row is how the rack was left after one change, and what it says is the difference '
+        'with the row below. Tick two to compare them with each other, even if they are not '
+        'consecutive. Cabling and power are not included: they have their own screen.',
+    'dcim_elev_wide':          'Grow the rack, list underneath',
+    'dcim_elev_narrow':        'Give the list its place back',
     'dcim_owner':              'Company',
     'dcim_foreign':            'Occupied — another company’s',
     'dcim_open_device':        'Open the device',
@@ -4560,14 +4583,18 @@ LANG = {
         'things that are on no list. The identifiers are the library\'s, so the same '
         'connector is not counted twice depending on who typed it. It lives in '
         'lib/core/dcim/data/connectors.json: adding one means editing that file.',
-    'dcim_conn_group_power_in':    'power inlet',
-    'dcim_conn_group_power_out':   'power outlet',
-    'dcim_conn_group_copper':      'copper',
-    'dcim_conn_group_fibre':       'fibre',
-    'dcim_conn_group_wireless':    'wireless',
-    'dcim_conn_group_console':     'console',
-    'dcim_conn_group_video':       'video',
-    'dcim_conn_group_bay':         'bay',
+    'dcim_conn_new':               'New connector',
+    'dcim_conn_shape':             'Shape',
+    'dcim_conn_more':              'The fine print: speed, generations, what it carries and what it is',
+    'dcim_conn_group_power_in':    'Power inlet',
+    'dcim_conn_group_power_out':   'Power outlet',
+    'dcim_conn_group_copper':      'Copper',
+    'dcim_conn_group_fibre':       'Fibre',
+    'dcim_conn_group_wireless':    'Wireless',
+    'dcim_conn_group_console':     'Console',
+    'dcim_conn_group_video':       'Video',
+    'dcim_conn_group_bay':         'Bay',
+    'dcim_conn_group_other':       'Other',
     'dcim_cat_ports_empty':        'None yet.',
     'dcim_cat_port_other':         'Other, I will type it…',
     'dcim_cat_port_type_free':     'What it is called',
@@ -4643,6 +4670,11 @@ LANG = {
     'dcim_cat_part_number':      'Part number',
     'dcim_cat_product_url':      'Product page',
     'dcim_cat_airflow':          'Airflow',
+    'dcim_val_4_post_cabinet':       'Four-post enclosed cabinet',
+    'dcim_val_4_post_frame':         'Four-post open frame',
+    'dcim_val_2_post_frame':         'Two-post open frame',
+    'dcim_val_wall_frame':           'Wall-mounted frame',
+    'dcim_val_wall_cabinet':         'Wall-mounted cabinet',
     'dcim_val_external_desktop':     'External adapter (desktop brick)',
     'dcim_val_external_wall':        'Wall-plug adapter',
     'dcim_val_din_rail':             'DIN rail',
@@ -4661,7 +4693,12 @@ LANG = {
     'dcim_val_right_to_left':        'Right to left',
     'dcim_val_side_to_rear':         'Side to rear',
     'dcim_cat_subdevice':        'Chassis / housed',
-    'dcim_cat_kind':             'Kind',
+    'dcim_cat_kind':             'What it is',
+    'dcim_cat_tree_mismatch':
+        'This record is stored as a RACK model and says it is a ‘{}’, which is one of the '
+        'things that go inside one. There it does not turn up when picking a model to place in '
+        'a rack, and it has nowhere to declare its ports.',
+    'dcim_cat_tree_move':        'Move it to ‘{}’',
     'dcim_cat_is_device':        'device',
     'dcim_cat_imported':         'Imported',
     'dcim_cat_created':          'Created',
@@ -4699,6 +4736,11 @@ LANG = {
         'nobody who appears on an invoice. The version is kept apart from the '
         'name so "how many Debians" and "how many are on 12" can both be asked '
         'without splitting strings.',
+    'dcim_plat_block_what':        'What it is',
+    'dcim_plat_block_use':         'Where it is used',
+    'dcim_plat_block_log':         'Record',
+    'dcim_plat_updated':           'Updated',
+    'dcim_plat_unused':            'No template names it',
     'dcim_brand_new':            'New brand',
     'dcim_brand_name':           'Name',
     'dcim_brand_models':         'Models',
@@ -5226,6 +5268,7 @@ LANG = {
         "The name is the machine's own — the one silkscreened on the case and the one "
         'the manual uses. The port count comes from this list: it is not typed '
         'separately, so the two cannot say different things.',
+    'dcim_part_hole':            'Hole',
     'dcim_part_port':              'Port',
     'dcim_part_size':            'Size',
     'dcim_part_qty':             'Qty',
@@ -5349,6 +5392,37 @@ LANG = {
     'dcim_build_stamped':        '{} components copied from the template',
     'dcim_cat_is_component':     'component',
     'dcim_cat_all_trees':        'All',
+    'dcim_item_asset':           'Asset tag',
+    'dcim_item_asset_col':       'Asset',
+    'dcim_item_warranty_col':    'Warranty',
+    'dcim_item_asset_tt':
+        'The label you put on it, not the maker\'s: the serial number is theirs and this '
+        'one is your accounting\'s. Both, because both get searched for.',
+    'dcim_pick_none':            'Not set',
+    'dcim_cat_search_hint':
+        'Type part of the maker or the model and press search. The catalogue is '
+        'thousands of rows: that is why it is searched rather than offered whole.',
+    'dcim_cat_no_match':         'No catalogue model says that',
+    'dcim_said_ask':             'Ask the device',
+    'dcim_said_pick':            'What the device said',
+    'dcim_said_failed':
+        'The device could not be asked. Most likely your account cannot see that '
+        'machine; the exact status is in the browser console.',
+    'dcim_said_but':
+        'This device has not said its serial number, but it did say: {}. Its SNMP '
+        'profile is matching and that one datum is missing — on a Linux or Proxmox it '
+        'comes from an "extend" directive in snmpd.conf (.1.3.6.1.4.1.2021.7890.4), '
+        'and product_serial is only readable by root.',
+    'dcim_said_nothing':
+        'This device has said NOTHING about itself. Either none of its SNMP profiles '
+        'has matched yet, or it has not been read: collect its data and try again.',
+    'dcim_said_none':
+        'The device has not said any serial number. The ones that do are those with '
+        'an SNMP profile that publishes it — MikroTik, APC, Linksys, Synology and '
+        'anything serving ENTITY-MIB — and it has to have been read at least once.',
+    'dcim_said_no_host':
+        'Bind a device under "Machine" first: the serial number is its to tell.',
+    'dcim_need_field':           '«{}» is missing',
     'dcim_item_purchased':       'Purchased',
     'dcim_item_warranty':        'Warranty until',
     'dcim_item_supplier':        'Supplier',
@@ -5362,6 +5436,7 @@ LANG = {
     'dcim_kind_gpu':             'GPU',
     'dcim_kind_psu':             'Power supply',
     'dcim_kind_fan':             'Fan',
+    'dcim_kind_jack':            'Panel jack',
     'dcim_kind_transceiver':     'Transceiver',
     'dcim_kind_battery':         'Battery',
     'dcim_kind_module':          'Module',
@@ -5415,7 +5490,48 @@ LANG = {
     'dcim_no_cables':              'No cable is declared in this rack.',
     'dcim_undeclared':             'Links the devices see and nobody declared',
     'dcim_bundle':                 '{} cables',
-    'dcim_cables_note':            '{} match · {} not seen · {} on another port · {} undeclared',
+    'dcim_cables_note':            '{} match · {} via panel · {} not seen · {} on another port · {} undeclared',
+    'dcim_cables_checking':        'Checking against what the devices see…',
+    'dcim_cable_show_ports':       'Show ports',
+    'dcim_cable_via':              'Via the panel',
+    'dcim_cable_via_tt':
+        'This leg cannot be confirmed on its own — a patch panel is a piece of metal — but the '
+        'two ends of the path it belongs to see each other, so the whole path is confirmed.',
+    'dcim_cable_split':            'Put a panel in the middle',
+    'dcim_cable_split_note':
+        'This cable runs from ‘{}’ to ‘{}’. Pick what sits in between — a patch panel, almost '
+        'always — and the link becomes two legs. For two panels, repeat on the remaining leg.',
+    'dcim_cable_split_mid':        'In the middle',
+    'dcim_cable_split_find':       'Find the panel by its label…',
+    'dcim_cable_cat':              'Category',
+    'dcim_cable_len':              'Metres',
+    'dcim_cable_len_bad':          'That is not a number of metres. Write 0.25 or 0,25.',
+    'dcim_cable_len_m':            '{} m',
+    'dcim_val_cat5e':              'Cat 5e',
+    'dcim_val_cat6':               'Cat 6',
+    'dcim_val_cat6a':              'Cat 6A',
+    'dcim_val_cat7':               'Cat 7',
+    'dcim_val_cat8':               'Cat 8',
+    'dcim_val_om1':                'OM1',
+    'dcim_val_om2':                'OM2',
+    'dcim_val_om3':                'OM3',
+    'dcim_val_om4':                'OM4',
+    'dcim_val_om5':                'OM5',
+    'dcim_val_os1':                'OS1 (single-mode)',
+    'dcim_val_os2':                'OS2 (single-mode)',
+    'dcim_val_dac_passive':        'Passive',
+    'dcim_val_dac_active':         'Active',
+    'dcim_cable_kind':             'What it is',
+    'dcim_cable_ports_seen':       'Ports the devices name',
+    'dcim_cable_path_total':       'It runs {} end to end.',
+    'dcim_cable_path_at_least':    'It runs at least {}: {} legs are still unmeasured.',
+    'dcim_cable_path_unmeasured':  'No leg has a length recorded ({} in all).',
+    'dcim_cable_path':             'Where it runs',
+    'dcim_cable_bundle':           'Links behind this row',
+    'dcim_cable_bundle_tt':
+        'The devices see several links between these two, so this row stands for more than one '
+        'lead. Declaring them separately is what lets you tell which one dropped.',
+    'dcim_port_unsaid':            'not said',
     'dcim_cable_copper':           'copper',
     'dcim_cable_fiber':            'fibre',
     'dcim_cable_dac':              'DAC',
@@ -5423,7 +5539,8 @@ LANG = {
     'dcim_cable_console':          'console',
     'dcim_cable_other':            'other',
     'dcim_need_two_items':         'At least two devices are needed in the rack to declare a cable.',
-    'dcim_cable_same_item':        'A cable runs from one device to ANOTHER.',
+    'dcim_cable_same_item':
+        'A jumper on one device runs from one port to ANOTHER: name both, and make them differ.',
     'dcim_cable_drop_q':           'Remove cable ‘{}’?',
     'dcim_power_by_org':         'Declared draw by company',
     'dcim_n_items':              '{} devices',
@@ -5445,15 +5562,43 @@ LANG = {
     'dcim_no_pdus':              'No power strip has been declared in this rack.',
     'dcim_no_capacity':          'No capacity declared',
     'dcim_feeds':                'Fed by',
+    'dcim_no_plug':              'Takes no plug',
+    'dcim_pdu_which':            'Which one is the strip?',
+    'dcim_pdu_which_note':
+        'Pick the device in this rack that IS the strip. Declaring it means saying which branch '
+        'it hangs off and how many outlets it has, and the catalogue does not know that — but '
+        'its name and its place are already written and need not be typed again.',
+    'dcim_pdu_not_placed':       'Not placed: bolted to the side rails',
+    'dcim_pdu_undeclared':
+        'There is a power strip placed in this rack that is not declared as one yet, so '
+        'nothing can be plugged into it. Declaring it means saying which branch it hangs '
+        'off and how many outlets it has — the catalogue does not know that:',
+    'dcim_outlet_move':          'Move to another outlet',
+    'dcim_outlet_unknown':       'Not sure which',
+    'dcim_outlet_note':
+        'Pick the outlet. ‘Not sure which’ is an answer: it records that this device draws '
+        'from that strip without inventing a number nobody has looked at.',
+    'dcim_outlets_n_free':       '{} of {} free',
+    'dcim_outlet_taken':         'That outlet already has a cable in it.',
+    'dcim_outlet_out_of_range':  'That strip does not have that outlet.',
+    'dcim_no_plug_list':         'These take no plug, so they are not in the list: {}.',
+    'dcim_undeclared_add':       'Declare it',
+    'dcim_undeclared_add_tt':
+        'Records this link as a declared cable, with both ends and the ports the devices named. '
+        'From then on discovery is there to check it: if somebody moves the patch lead, this tab '
+        'says so.',
+    'dcim_undeclared_added':     'Cable declared.',
     'dcim_unplugged':            'Not plugged in',
     'dcim_plug_in':              'Plug in',
     'dcim_pdu_monitored':        'This strip answers: it measures what it is giving',
     'dcim_power_note':           '{} W declared · branch A {} W · branch B {} W',
     'dcim_power_ok':             'Everything that draws power does so from both branches.',
+    'dcim_warn_single_branch_n':
+        '{} devices hang off branch {} alone: if that branch drops, they go dark. {}',
+    'dcim_and_more':             ' and {} more',
     'dcim_warn_single_branch':   '{} hangs off branch {} alone: if that branch drops, it goes dark.',
     'dcim_warn_over_half':       '{} is at {} %: if its partner drops, this one cannot take both.',
     'dcim_warn_one_branch_tt':   'One branch only: goes dark if that branch drops',
-    'dcim_no_free_outlet':       'No free outlet left in this rack.',
     'dcim_pdu_drop_q':           'Remove ‘{}’? The cables hanging off it go too.',
     'dcim_3d':                 '3D view',
     'dcim_3d_hint':            'Drag to orbit · wheel to zoom · right button to pan',
@@ -5518,8 +5663,17 @@ LANG = {
     'dcim_cooling_in_row':                   'In-row',
     'dcim_cooling_rear_door':                'Rear-door heat exchanger',
     'dcim_cooling_split':                    'Wall split unit',
-    'dcim_host':               'Machine — type to find it',
+    'dcim_host':               'Machine',
+    'dcim_item_host_tt':
+        'The monitored device this item IS. It is where the elevation gets its colour from '
+        '— a cabinet with nothing bound is drawn all grey — and it is what the serial '
+        'number can be asked of.',
     'dcim_numbering':            'Numbering',
+    'dcim_attr_desc_units':      'Descending numbering',
+    'dcim_attr_desc_units_tt':
+        'U 1 at the very top, counting downwards — the opposite of the usual. The rails say '
+        'which it is: without this, the elevation draws at U 5 what is bolted into the one its '
+        'owner calls 5, and they are not the same U.',
     'dcim_numbering_0':          'U1 at the bottom',
     'dcim_numbering_1':          'U1 at the top',
     'dcim_width_mm':             'Width',

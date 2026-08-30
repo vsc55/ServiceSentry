@@ -290,9 +290,18 @@ def kinds_for(tree: str) -> tuple:
     ocupan U, y ofrecer una de ellas para un componente acabaría ofreciendo el componente en un
     alzado. Las de un componente son las mismas que puede tener una pieza puesta en un equipo
     (``dc_part.kind``) — a propósito, porque de un modelo de componente sale una pieza.
+
+    Y un ARMARIO no tiene ninguna: las clases de :data:`KINDS` son las de las cosas que van
+    DENTRO de un armario, y ofrecérselas a un armario deja escribir «armario que es un panel de
+    parcheo». Eso no es un dato raro, es un dato imposible — y el que lo escribe no está
+    describiendo su armario: se ha equivocado de rama y esa casilla es lo único que se lo podía
+    decir. Un armario ya declara su forma en `form_factor`, que es lo que aquí sería la clase.
     """
     from lib.core.dcim.store import PART_KINDS     # noqa: PLC0415  (mismo paquete)
-    return PART_KINDS if str(tree or '') == COMPONENT_TREE else KINDS
+    arbol = str(tree or '')
+    if arbol == COMPONENT_TREE:
+        return PART_KINDS
+    return () if arbol == 'rack-types' else KINDS
 
 
 #: Lo que dice el nombre de un componente, cuando nadie ha dicho la clase. Un componente no

@@ -12,6 +12,8 @@ Rutas:
     GET     /api/v1/dcim/connectors
     PUT     /api/v1/dcim/connectors
     DELETE  /api/v1/dcim/connectors
+    POST    /api/v1/dcim/connectors/<cid>/image
+    DELETE  /api/v1/dcim/connectors/<cid>/image
     GET     /api/v1/dcim/connectors/history
     GET     /api/v1/dcim/profiles
     PUT     /api/v1/dcim/profiles
@@ -25,6 +27,7 @@ from __future__ import annotations
 from flask import jsonify, request
 
 from lib.core.dcim import connectors as dcim_connectors
+from lib.core.dcim import media as dcim_media
 from lib.core.dcim import profiles as dcim_profiles
 
 
@@ -186,6 +189,70 @@ def register(app, wa, C):
         wa._audit('dcim_profiles_save', detail={'action': 'drop', 'doc': 'connectors'})
         return jsonify({'ok': True,
                         'version': int(dcim_connectors.packaged().get('version') or 0)})
+
+    @app.route('/api/v1/dcim/connectors/<cid>/image', methods=['POST'])
+    @C.catalog_manage_req
+    def api_dcim_connector_image(cid):
+        """Ponerle una foto a un conector.
+
+        Los que vienen con el panel llevan dibujo —uno por FORMA, en `_conn_shapes.html`— y el
+        que alguien añada no lleva ninguno: nadie va a escribir un SVG para la regleta que tiene
+        en su rack, y sin nada al lado del nombre esa fila se lee como incompleta justo entre
+        ciento y pico que sí lo tienen.
+
+        Aquí y no en dos pasos —subir el fichero y luego guardar el documento— porque entre los
+        dos hay un hueco: quien cierre el cuadro después del primero deja un fichero en la
+        carpeta al que no apunta nadie, y nada vuelve a mirarlo nunca.
+
+        El tipo lo decide lo que hay DENTRO del fichero y el nombre lo acuña el almacén de
+        medios, igual que la imagen de un modelo: una extensión es una afirmación de quien sube,
+        y un nombre llegado por la red no toca este disco.
+        """
+        store = C.conns()
+        if store is None:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        up = (request.files or {}).get('file')
+        blob = up.read(dcim_media.MAX_BYTES + 1) if up is not None \
+            else request.data[:dcim_media.MAX_BYTES + 1]
+        nombre, err = dcim_media.save(wa._var_dir or '', blob, C.media_dir())
+        if err:
+            return jsonify({'error': wa._t(err)}), 400
+        doc, vieja = dcim_connectors.with_image(
+            dcim_connectors.effective(store), cid, nombre)
+        if doc is None:
+            # El conector no está en el documento: guardar la foto de algo que no existe deja
+            # un fichero huérfano y una respuesta que dice que fue bien.
+            dcim_media.forget(wa._var_dir or '', nombre, C.media_dir())
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        doc['version'] = dcim_connectors.next_version(store)
+        version = store.save(doc, name=dcim_connectors.NAME, actor=C.actor())
+        # La que sustituye se va, o cada cambio deja un fichero al que no apunta nadie y la
+        # carpeta crece durante toda la vida de la instalación.
+        if vieja and vieja != nombre:
+            dcim_media.forget(wa._var_dir or '', vieja, C.media_dir())
+        wa._audit('dcim_profiles_save',
+                  detail={'action': 'image', 'doc': 'connectors', 'connector': cid,
+                          'version': version})
+        return jsonify({'image': nombre, 'version': version})
+
+    @app.route('/api/v1/dcim/connectors/<cid>/image', methods=['DELETE'])
+    @C.catalog_manage_req
+    def api_dcim_connector_image_drop(cid):
+        """Quitársela y volver al dibujo de su forma."""
+        store = C.conns()
+        if store is None:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        doc, vieja = dcim_connectors.with_image(
+            dcim_connectors.effective(store), cid, '')
+        if doc is None or not vieja:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        doc['version'] = dcim_connectors.next_version(store)
+        version = store.save(doc, name=dcim_connectors.NAME, actor=C.actor())
+        dcim_media.forget(wa._var_dir or '', vieja, C.media_dir())
+        wa._audit('dcim_profiles_save',
+                  detail={'action': 'image_drop', 'doc': 'connectors', 'connector': cid,
+                          'version': version})
+        return jsonify({'ok': True, 'version': version})
 
     @app.route('/api/v1/dcim/connectors/history', methods=['GET'])
     @C.catalog_view_req

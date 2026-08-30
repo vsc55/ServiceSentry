@@ -1473,3 +1473,27 @@ class TestLosPuertosSeCuentanYSeNombran:
                             'port_list': {'interfaces': [{'name': 'gi1',
                                                           'type': '1000base-t'}]}})
         assert store.get(uid)['port_list']['interfaces'][0]['name'] == 'gi1'
+
+
+class TestUnArmarioNoEsUnPanelDeParcheo:
+    """Las clases de `KINDS` son las de las cosas que van DENTRO de un armario. Ofrecérselas a un
+    armario deja escribir «armario que es un panel de parcheo», que no es un dato raro sino uno
+    imposible — y quien lo escribe no está describiendo su armario: se ha equivocado de rama, y
+    esa casilla era lo único que se lo podía decir.
+    """
+
+    def test_la_rama_de_los_armarios_no_ofrece_ninguna(self):
+        from lib.core.dcim import catalog
+        assert catalog.kinds_for('rack-types') == ()
+
+    def test_pero_las_demas_siguen_teniendo_la_suya(self):
+        from lib.core.dcim import catalog
+        from lib.core.dcim.store import PART_KINDS
+        assert catalog.kinds_for('device-types') == catalog.KINDS
+        assert catalog.kinds_for('module-types') == catalog.KINDS
+        assert catalog.kinds_for(catalog.COMPONENT_TREE) == PART_KINDS
+
+    def test_un_armario_ya_dice_su_forma_por_otro_sitio(self):
+        """`form_factor` es lo que aquí sería la clase, y está donde debe."""
+        from lib.core.dcim import catalog
+        assert 'form_factor' in catalog._RACK_FIELDS

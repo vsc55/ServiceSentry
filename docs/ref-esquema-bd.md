@@ -826,11 +826,12 @@ se documenta a mano, porque nadie más lo va a saber.
 | kind | TEXT | no | `'copper'` | uno de `CABLE_KINDS`. Un latiguillo de cobre y una fibra monomodo no se cambian igual ni se piden igual, y en la caja de repuestos hay de uno y no del otro |
 | label | TEXT | no | `''` | lo que pone en la etiqueta, que es con lo que trabaja quien está allí con una linterna. Se repite, se borra y se equivoca — y aun así es el dato |
 | color | TEXT | no | `''` | |
-| length_mm | INTEGER | no | `0` | |
+| length_mm | INTEGER | no | `0` | cuánto mide, en milímetros. La pantalla pregunta metros con un decimal: nadie mide un latiguillo en milímetros y todo el mundo lo compra en metros |
 | description | TEXT | no | `''` | |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
+| category | TEXT | no | `''` | de qué categoría, que no es lo mismo que de qué está hecho: `kind` dice cobre o fibra y esto dice Cat 6A o OM4. Decide si un enlace de 10 Gb va a funcionar, y dos latiguillos de categorías distintas son indistinguibles a un metro. Abierto: lo que no esté en `CABLE_CATEGORIES` se puede escribir igual |
 
 ### `dc_source` — lo que hay aguas arriba de una regleta
 
@@ -887,6 +888,7 @@ lo medido— y el desacuerdo entre ellas es la razón de que esto exista.
 | updated_by | TEXT | no | `''` | auditoría |
 | color | TEXT | no | `''` | de qué color se pinta. Vacío = el de su rama (`FEED_COLORS`: A azul, B rojo). Existe porque hay salas con tres alimentaciones y salas donde el color de cada rama estaba decidido antes de que llegara este panel — y discutir con la etiqueta pegada en la regleta de verdad es una discusión que el panel pierde |
 | source_uid | TEXT | no | `''` | de qué cuadro o SAI cuelga. Vacío = nadie lo ha dicho, que es distinto de que no tenga: media sala técnica cuelga de un cuadro que nadie documentó |
+| item_uid | TEXT | no | `''` | qué equipo del armario ES, cuando ocupa uno. Vacío es lo normal: la mayoría van atornilladas al lateral y no ocupan U — por eso una regleta puede existir sin equipo. Cuando sí ocupa, son la misma cosa descrita dos veces, y sin este enlace el panel pedía declararla dos veces y luego la contaba entre los equipos «sin enchufar» |
 
 ### `dc_feed` — un cable de alimentación
 

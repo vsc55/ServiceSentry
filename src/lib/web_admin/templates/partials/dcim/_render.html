@@ -56,6 +56,23 @@ function _dcimMediaUrl(nombre) {
         .map(encodeURIComponent).join('/');
 }
 
+/** Ir a la ficha de la máquina que un equipo tiene enganchada.
+ *
+ *  `infraOpen` a secas **no hacía nada visible**, y no porque fallara: escribe dentro de
+ *  `#infra-container`, que existe siempre —los paneles de todas las secciones están en el DOM
+ *  desde el primer momento— pero vive en la pestaña de infraestructura. Así que el clic
+ *  navegaba de verdad, cambiaba la URL y pintaba la máquina… en una pantalla que no se estaba
+ *  mirando. Un botón que hace su trabajo fuera de la vista es indistinguible de uno roto.
+ *
+ *  Se cambia de sección y luego se abre, que es lo que el botón dice que hace. En este orden:
+ *  la pestaña, al activarse, redibuja infraestructura, y ese redibujado respeta la máquina
+ *  abierta — al revés, el redibujado de la pestaña llegaría después y enseñaría la flota. */
+function _dcimOpenHost(uid) {
+    if (!uid) return;
+    if (typeof _navTab === 'function') _navTab('#tab-infra');
+    if (typeof infraOpen === 'function') infraOpen(uid);
+}
+
 function _dcimMay(flag) {
     return new Set(currentUser.permissions || []).has(flag);
 }
@@ -83,6 +100,24 @@ async function _dcimSend(method, url, body) {
     // normalizador sería volver a tener dos formas de leer una respuesta en esta pantalla.
     return {ok: !bad && !data.error, error: String(data.error || ''), data};
 }
+
+//: Volver a esta sección vuelve a pedir el armario que estuviera abierto.
+//:
+//: El estado de cada equipo —el verde y el ámbar del alzado— viaja con la carga del armario, y
+//: `renderDcim` dibuja lo que ya tiene: se recogen datos de una máquina en Infraestructura, se
+//: vuelve aquí, y el aviso sigue puesto hasta un F5. Y un F5 es lo que hace la gente cuando una
+//: pantalla no se entera, que es lo mismo que decir que la pantalla no funciona.
+//:
+//: En `shown.bs.tab` y no dentro de `renderDcim`, que se llama en cada redibujado de la propia
+//: sección: pedir el armario cada vez que se pulsa una pestaña interna sería una petición por
+//: clic. Aquí se sabe que se viene de FUERA, que es cuando puede haber cambiado algo.
+document.addEventListener('shown.bs.tab', ev => {
+    const dest = (ev.target || {}).getAttribute
+        ? ev.target.getAttribute('data-bs-target') : '';
+    if (dest !== '#tab-dcim') return;
+    const rack = (_dcimRack || {}).rack;
+    if (rack) _dcimLoadRack(rack.uid);
+});
 
 async function renderDcim() {
     const pane = document.getElementById('dcim-container');
@@ -198,7 +233,10 @@ function _dcimOpen(mode, kind, parent, uid) {
               && _dcimForm.parent === (parent || '') && _dcimForm.uid === (uid || '');
     _dcimForm = same ? null : {mode, kind, parent: parent || '', uid: uid || '',
                                row: uid ? _dcimFind(kind, uid) : {}};
-    renderDcim();
+    // El cuadro y no la pantalla: el formulario ya no se incrusta entre las tarjetas —eran
+    // dieciocho cajas en crudo empujando hacia abajo lo que se estaba mirando— así que
+    // redibujar el fondo no lo dibuja a él.
+    _dcimFormDraw();
 }
 
 /** The row being edited, out of what is already on screen — no second fetch for data the
@@ -288,7 +326,27 @@ function _dcimGo(donde) {
  *
  *  Aquí y no en cada tira, que son dos —el catálogo y la ficha de una plantilla— y acabarían
  *  siendo dos números con dos aspectos. */
+//: Cómo se dibuja una tabla del panel de un armario. **Una constante y no seis copias**: las
+//: cuatro pestañas son cuatro listas del mismo armario, se leen una detrás de otra y se miran
+//: juntas, así que una que salga a otro tamaño no parece otra tabla — parece otra pantalla. Y
+//: pasaba: la de equipos iba a `ss-fs-3` y las de alimentación y cableado al tamaño de fábrica,
+//: con lo que los rótulos de la primera se partían en dos líneas donde a la otra le sobraba
+//: sitio.
+//:
+//: Aquí y no en la hoja de estilos porque no es una decisión de aspecto que se pueda cambiar
+//: sola: es qué clases lleva un `<table>` de esta sección, y el sitio donde se decide una vez.
+const _DC_TBL = 'table table-sm align-middle ss-fs-3 mb-0';
+
 function _dcTabN(n) {
     const v = Number(n || 0);
     return v ? ` <span class="ss-tab-n">${esc(String(v))}</span>` : '';
+}
+
+/** Y lo que está pendiente en esa pestaña, en ámbar y aparte de lo que ya está hecho.
+ *
+ *  Aparte y no sumado: «tres cables» y «tres enlaces que nadie ha apuntado» son dos cosas, y
+ *  sumarlas daría un seis que no es ninguna de las dos. */
+function _dcTabWarn(n) {
+    const v = Number(n || 0);
+    return v ? ` <span class="ss-tab-n text-bg-warning">${esc(String(v))}</span>` : '';
 }

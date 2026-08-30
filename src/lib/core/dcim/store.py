@@ -30,6 +30,7 @@ elevation of a real rack is wrong within a week, and "is this U free" has no ans
 
 from __future__ import annotations
 
+from lib.core.dcim.revisions import RevisionStore
 from lib.core.uids import new_uid
 from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
@@ -60,8 +61,14 @@ ROLES_MUDOS = ('patch_panel', 'fiber_panel', 'shelf', 'blank')
 #: De qué puede ser un componente. `accessory` es el cargador del mini-PC, el latiguillo corto que
 #: vive con él, el kit de raíles — cosas que no son elegantes y son exactamente las que faltan
 #: cuando alguien las necesita.
+#:
+#: `jack` es lo que PUEBLA un hueco: el módulo keystone de un panel, el acoplador LC de uno de
+#: fibra. No es «lo de dentro» —no es una ranura de la placa— ni «lo que cuelga» —no está
+#: enchufado por fuera—, y sin una clase propia había que meterlo en `accessory` y perder la
+#: única pregunta que se le hace: qué hay puesto en el hueco 7. Un panel keystone se compra
+#: VACÍO, así que lo que lleva no puede salir del modelo: es de cada panel.
 PART_KINDS = ('disk', 'ssd', 'memory', 'cpu', 'nic', 'hba', 'gpu', 'psu', 'fan',
-              'transceiver', 'battery', 'module', 'accessory', 'other')
+              'transceiver', 'jack', 'battery', 'module', 'accessory', 'other')
 
 #: The sides of a rack somebody can reach. Stored as the FACT — which sides are reachable — and
 #: not as a kind of cabinet: two identical racks, one in the middle of an aisle and one bolted to
@@ -294,6 +301,18 @@ _PDU = TableSpec(
         # arriba de esta regleta es una pregunta sin respuesta — que es distinto de que no
         # tenga: media sala técnica cuelga de un cuadro que nadie ha documentado.
         Column('source_uid', 'TEXT', nullable=False, default="''"),
+        # Y qué equipo del armario ES, cuando ocupa uno. Vacío es lo normal: la mayoría de las
+        # regletas son verticales, van atornilladas al lateral y no ocupan U — por eso una
+        # regleta puede existir sin equipo y por eso esto no es la misma tabla.
+        #
+        # Pero muchas sí ocupan, y entonces son UNA cosa descrita dos veces: una fila que dice
+        # dónde está y otra que dice cuántas tomas tiene. Sin este enlace, el panel pedía
+        # declararla dos veces y luego la contaba entre los equipos «sin enchufar» — pidiéndole
+        # un enchufe a la regleta.
+        #
+        # Última columna: una que falta sólo se puede añadir con ADD COLUMN si va al final, que
+        # es como una base que ya existe recibe ésta sin migración.
+        Column('item_uid', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_pdu_rack', ('rack_uid',)),),
 )
@@ -326,6 +345,23 @@ _POWER = TableSpec(
 #: De qué es un cable. No es decoración: un latiguillo de cobre y una fibra monomodo no se
 #: cambian igual ni se piden igual, y en la caja de repuestos hay de uno y no del otro.
 CABLE_KINDS = ('copper', 'fiber', 'dac', 'power', 'console', 'other')
+
+#: Y de qué categoría, que depende de de qué está hecho: las de cobre no valen para una fibra.
+#: Servido con la respuesta y no escrito en la pantalla, como los colores de las ramas: una
+#: segunda copia es la que se queda sin la categoría que se añada mañana.
+#:
+#: Abierto por abajo: lo que no esté en la lista se puede escribir igual. Una instalación con
+#: cable de un fabricante que llama a lo suyo de otra manera no puede quedarse sin poder
+#: apuntarlo, y una lista cerrada obliga a mentir o a dejarlo en blanco.
+CABLE_CATEGORIES = {
+    'copper': ('cat5e', 'cat6', 'cat6a', 'cat7', 'cat8'),
+    'fiber': ('om1', 'om2', 'om3', 'om4', 'om5', 'os1', 'os2'),
+    # Con su prefijo: `passive` a secas ya es una palabra de esta sección —el flujo de aire
+    # de un chasis— y el traductor de valores va por el valor, así que un DAC pasivo y un
+    # chasis de refrigeración pasiva acabarían compartiendo palabra. Comparten letras y no
+    # significado, que es la peor clase de colisión: no falla, traduce mal.
+    'dac': ('dac-passive', 'dac-active'),
+}
 
 #: De qué clase es un enlace entre sedes. Importa para la redundancia de verdad: dos VPN sobre
 #: la misma línea de internet no son dos caminos, y el mapa tiene que poder decirlo.
@@ -407,6 +443,13 @@ _CABLE = TableSpec(
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),
+        # De qué CATEGORÍA es, que no es lo mismo que de qué está hecho: `kind` dice cobre o
+        # fibra y esto dice Cat 6A o OM4. La diferencia decide si un enlace de 10 Gb va a
+        # funcionar, y es lo que hay que mirar en la caja de repuestos antes de bajar al armario
+        # — un latiguillo de Cat 5e y uno de Cat 6A son indistinguibles a un metro.
+        #
+        # La última, para que aparecer sobre una tabla llena sea un `ADD COLUMN`.
+        Column('category', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_cable_a', ('a_item',)),
              Index('idx_dc_cable_b', ('b_item',))),
@@ -821,6 +864,10 @@ class DcimStore:
         self.rows = Rows(db, _ROW)
         self.sources = Rows(db, _SOURCE)
         self.parts = Rows(db, _PART)
+        # Las versiones de un armario: cómo estaba y qué le pasó. Sobre la misma tabla que ya
+        # guarda las de un modelo del catálogo y las de una plantilla — su `scope` nació para
+        # esto, y una tabla por cada cosa con historial serían cuatro almacenes iguales.
+        self.revs = RevisionStore(db)
         self._bootstrap()
 
     def _bootstrap(self) -> None:

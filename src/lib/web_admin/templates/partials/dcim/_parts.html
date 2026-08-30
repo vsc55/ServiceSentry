@@ -22,39 +22,44 @@ async function _dcPartsOpen(itemUid) {
     const d = await apiGet(`/api/v1/dcim/items/${encodeURIComponent(itemUid)}/parts`);
     if (!d || d.error) return showToast((d || {}).error || t('dcim_not_found'), 'warning');
     _dcParts = {item: itemUid, parts: d.parts || [], kinds: d.kinds || [],
+                // Los huecos que declara su modelo del catálogo, con la forma de una plantilla:
+                // un panel de parcheo no nace de ninguna —no tiene estándar que estampar— así
+                // que sin esto nunca había de dónde elegir en cuál va cada conector.
+                model: d.model || null,
                 build: d.build || null, diff: d.diff || []};
+    // Y se enseña: la pestaña de componentes sólo existe mientras hay un equipo abierto, así que
+    // pedirla sin ir a ella sería cargar una lista que no se ve.
+    _dcRackTab = 'parts';
     renderDcim();
 }
 
 function _dcPartsClose() {
     _dcParts = null;
+    // Su pestaña se va con ella: dejarla marcada dejaría el panel enseñando un hueco.
+    if (_dcRackTab === 'parts') _dcRackTab = 'items';
     renderDcim();
 }
 
+/** Lo que lleva un equipo. Dentro de su pestaña — pero esta sí dice **de cuál**: la pestaña se
+ *  llama «Componentes» y los componentes son de una caja concreta, así que sin su nombre la
+ *  lista no dice de qué está hablando. */
 function _dcPartsHtml() {
     const d = _dcParts || {};
     const item = ((_dcimRack || {}).items || []).find(i => i.uid === d.item) || {};
     const puede = _dcimMay('dcim_edit');
-    return `<div class="card mb-3">
-        <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
-            <i class="bi bi-cpu"></i>
-            <span class="fw-semibold">${esc(t('dcim_parts'))}</span>
-            <span class="text-muted ss-fs-2">${esc(_dcimItemName(item))}</span>
+    return `<div class="ss-toolrow mb-2">
+            <span class="fw-semibold ss-fs-3">${esc(_dcimItemName(item))}</span>
             ${_dcRoleHint(item)}
-            <div class="ms-auto d-flex gap-2">
-                ${puede ? `<button class="btn btn-sm btn-secondary"
-                    onclick="_dcCompStart('item')">
-                    <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_part'))}</button>` : ''}
-                <button class="btn btn-sm btn-secondary" onclick="_dcPartsClose()">
-                    <i class="bi bi-x-lg"></i></button>
-            </div>
+            <span class="ss-toolrow-text"></span>
+            ${puede ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcCompStart('item')">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_part'))}</button>` : ''}
+            <button class="btn btn-sm btn-secondary" onclick="_dcPartsClose()"
+                    title="${escAttr(t('close'))}"><i class="bi bi-x-lg"></i></button>
         </div>
-        <div class="card-body py-2">${
-            (d.parts || []).length ? _dcPartsTable(d.parts, puede)
-                : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_parts'))}</div>`}
-            ${_dcPartsDiffHtml(d)}
-        </div>
-    </div>`;
+        ${(d.parts || []).length ? _dcPartsTable(d.parts, puede)
+            : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_parts'))}</div>`}
+        ${_dcPartsDiffHtml(d)}`;
 }
 
 /** Lo que lleva contra lo que su plantilla decía.
@@ -299,9 +304,13 @@ function _dcCompFieldsHtml(d, where, elegido, kinds) {
                 onclick="_dcCompDraft.searching=true;renderDcim()">
                 ${esc(t('dcim_comp_change'))}</button>
         </div></div>`;
+    // Y se REDIBUJA: la clase decide de qué lista salen los huecos —un conector de panel va en
+    // el frente y un DIMM en una ranura— así que cambiarla sin repintar deja la mitad derecha
+    // del formulario contestando a la clase anterior. El borrador guarda lo tecleado, así que
+    // repintar no pierde nada.
     const aMano = `<label class="ss-fs-2 text-muted">${esc(t('dcim_part'))}
             <select class="form-select form-select-sm" style="max-width:11rem"
-                    onchange="_dcCompDraft.kind=this.value">${
+                    onchange="_dcCompDraft.kind=this.value;renderDcim()">${
                 kinds.map(k => `<option value="${escAttr(k)}"${
                     d.kind === k ? ' selected' : ''}>${
                     esc(t('dcim_kind_' + k) || k)}</option>`).join('')}</select></label>
@@ -394,8 +403,12 @@ function _dcSlotTaken(salvo) {
  *  Es la misma pregunta —cuál— pero no la misma palabra, y la de dentro no sirve para lo de
  *  fuera: nadie llama «hueco» al USB de detrás. */
 function _dcSlotWord() {
-    return t(String((_dcCompDraft || {}).mount || '') === 'external'
-        ? 'dcim_part_port' : 'dcim_part_slot');
+    const d = _dcCompDraft || {};
+    // Un keystone no va «en un puerto» ni «en una bahía»: va en un HUECO del panel, que es como
+    // lo llama quien lo monta. La palabra sale de la clase antes que del montaje, porque la
+    // clase es más concreta.
+    if (_DC_KIND_FAMS[String(d.kind || '')]) return t('dcim_part_hole');
+    return t(String(d.mount || '') === 'external' ? 'dcim_part_port' : 'dcim_part_slot');
 }
 
 function _dcCompSlotBox() {
@@ -556,6 +569,14 @@ function _dcCompSlotToggle(nombre, on) {
 //: detrás, y las tomas de corriente — un alimentador va a una toma y no a una ranura de memoria.
 const _DC_OUTER_FAMS = ['front-ports', 'rear-ports', 'power-ports', 'console-ports'];
 
+//: De qué familia son los huecos de una clase de pieza, cuando su clase lo decide sola.
+//:
+//: Un conector de panel va en un hueco del frente o del trasero y en ningún otro sitio. No es
+//: «lo de dentro» ni «lo que cuelga», que son las dos listas de siempre, así que sin esto habría
+//: que mentir en `mount` —decir que va por fuera— para que le ofrecieran su sitio. Una tabla y
+//: no un `if`: la siguiente clase con sitio propio se añade aquí y no en tres condiciones.
+const _DC_KIND_FAMS = {jack: ['front-ports', 'rear-ports']};
+
 /** Dónde puede ir lo que se está editando: **las bahías si va dentro, los puertos si cuelga**.
  *
  *  Son dos listas distintas y no una filtrada, porque son dos preguntas: un DIMM va en una
@@ -565,17 +586,35 @@ const _DC_OUTER_FAMS = ['front-ports', 'rear-ports', 'power-ports', 'console-por
  *  Vacío si no hay plantilla abierta —esto también sale en la ficha de un equipo— o si no
  *  declaró ninguno con nombre. */
 function _dcCompSlots() {
-    const b = ((_dcBuild || {}).build) || null;
+    // De la plantilla si hay una abierta, y si no del MODELO del equipo. Es la misma pregunta
+    // —qué huecos tiene esto— contestada por quien la sepa, y mirando solo la plantilla se
+    // quedaba sin contestar justo donde más falta hace: un panel de parcheo no nace de ninguna
+    // plantilla —no tiene estándar de compra ni componentes que estampar— así que en su ficha
+    // nunca había lista y siempre había que teclear el nombre del hueco.
+    const b = ((_dcBuild || {}).build) || ((_dcParts || {}).model) || null;
     if (!b || typeof _dcBuildBays !== 'function') return [];
-    const fuera = String((_dcCompDraft || {}).mount || '') === 'external';
-    const fams = fuera ? _DC_OUTER_FAMS : (_DC_BAY_FAMS || []);
+    const d = _dcCompDraft || {};
+    const fuera = String(d.mount || '') === 'external';
+    const fams = _DC_KIND_FAMS[String(d.kind || '')]
+        || (fuera ? _DC_OUTER_FAMS : (_DC_BAY_FAMS || []));
     // Con su familia pegada: un nombre suelto no dice de qué cara es, y «USB-A 1» delante y
     // «USB-A 1» detrás son dos puertos distintos con el mismo rótulo.
     let lista = [];
     fams.forEach(fam => {
-        _dcBuildBays(b, fam).forEach(x => lista.push({name: x.name, type: x.type, fam: fam,
-                                                      gen: x.gen, signals: x.signals,
-                                                      volts: x.volts, watts: x.watts}));
+        // Nombrados si el modelo los nombró, y NUMERADOS a partir del recuento si solo dijo
+        // cuántos. «Tiene veinticuatro huecos y no sé cómo se llaman» no es «no tiene ninguno»,
+        // y era lo segundo lo que pasaba: un panel escrito a mano dice el número —eso es lo que
+        // pide el formulario del catálogo— y no los nombres, así que se quedaba sin lista y con
+        // una caja de texto, que es de donde salen tres nombres para el mismo hueco.
+        //
+        // Con los mismos nombres que siembra el editor de plantillas, y por la misma función:
+        // dos que numeren igual acaban numerando distinto, y entonces el hueco 7 de la
+        // plantilla y el 7 del equipo dejan de ser el mismo.
+        let bahias = _dcBuildBays(b, fam);
+        if (!bahias.length && typeof _dcBaySeed === 'function') bahias = _dcBaySeed(b, fam);
+        bahias.forEach(x => lista.push({name: x.name, type: x.type, fam: fam,
+                                        gen: x.gen, signals: x.signals,
+                                        volts: x.volts, watts: x.watts}));
     });
     return lista;
 }

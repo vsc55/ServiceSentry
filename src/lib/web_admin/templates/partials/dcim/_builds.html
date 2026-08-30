@@ -1104,8 +1104,13 @@ function _dcBuildTakes(eff) {
  *  cada bloque lleva su título y ninguno se llama como el otro.
  *
  *  De solo lectura a propósito: se corrigen en la ficha del modelo, que es de donde cuelgan
- *  también las veinte máquinas que ya salieron de él. */
-function _dcBuildLifeHtml(b, campos) {
+ *  también las veinte máquinas que ya salieron de él.
+ *
+ *  *titulo* existe porque una plataforma tiene las MISMAS seis fechas y se leen igual —una en
+ *  rojo es una que ya pasó— pero no se llaman lo mismo: «ciclo de vida del dispositivo» dicho
+ *  de un Debian 12 nombra al dispositivo equivocado. Lo único que cambia entre las dos es el
+ *  rótulo, así que lo único que se parametriza es el rótulo. */
+function _dcBuildLifeHtml(b, campos, titulo) {
     campos = campos || [];
     const e = (b && b.extra && typeof b.extra === 'object') ? b.extra : {};
     const puestas = campos.filter(c => e[c.name]);
@@ -1124,7 +1129,7 @@ function _dcBuildLifeHtml(b, campos) {
             <span class="text-muted" style="white-space:nowrap">${etiqueta}</span>
             <span class="text-end">${dicho}</span></div>`;
     }).join('');
-    return _dcInfoBlock(t('dcim_build_life'), 'bi-calendar-event', '', 0, filas);
+    return _dcInfoBlock(titulo || t('dcim_build_life'), 'bi-calendar-event', '', 0, filas);
 }
 
 /** El formulario. **El modelo base primero**, porque es la decisión de la que cuelga todo lo

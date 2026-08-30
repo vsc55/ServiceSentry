@@ -18,40 +18,32 @@ let _dcPower = null;
 async function _dcPowerOpen() {
     const rack = (_dcimRack || {}).rack;
     if (!rack) return;
+    // El hueco primero y la petición después: ver el sitio vacío con su esqueleto es saber que
+    // se pulsó; no ver nada es creer que no.
+    _dcPower = {loading: true};
+    renderDcim();
     _dcPower = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}/power`) || {};
     renderDcim();
 }
 
-function _dcPowerClose() {
-    _dcPower = null;
-    renderDcim();
-}
-
+/** De dónde come cada cosa. Dentro de su pestaña, que ya la nombra y ya la cierra. */
 function _dcPowerHtml() {
     const p = _dcPower || {};
-    return `<div class="card mb-3">
-        <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
-            <i class="bi bi-plug"></i>
-            <span class="fw-semibold">${esc(t('dcim_power'))}</span>
-            <span class="text-muted ss-fs-2 ss-tabular">${
+    if (p.loading) return _dcRackSkeleton(5);
+    return `<div class="ss-toolrow mb-2">
+            <span class="text-muted ss-fs-2 ss-tabular ss-toolrow-text">${
                 esc(tf('dcim_power_note', p.watts_said || 0,
                        (p.by_branch || {}).a || 0, (p.by_branch || {}).b || 0))}</span>
-            <div class="ms-auto d-flex gap-2">
-                ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary"
-                        onclick="_dcPduNew()"><i class="bi bi-plus-lg me-1"></i>${
-                        esc(t('dcim_pdu'))}</button>` : ''}
-                <button class="btn btn-sm btn-secondary" onclick="_dcPowerClose()">
-                    <i class="bi bi-x-lg"></i></button>
-            </div>
+            ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary"
+                    onclick="_dcPduNew()"><i class="bi bi-plus-lg me-1"></i>${
+                    esc(t('dcim_pdu'))}</button>` : ''}
         </div>
-        <div class="card-body py-2">
-            ${_dcPowerWarnings(p.warnings || [])}
-            ${_dcPowerNewItem(p.pdus || [])}
-            ${_dcPduTable(p.pdus || [])}
-            ${_dcPowerItems(p.items || [], p.pdus || [])}
-            ${_dcPowerByOrg(p.by_org || [])}
-        </div>
-    </div>`;
+        ${_dcPowerWarnings(p.warnings || [])}
+        ${_dcPduUndeclared(p.undeclared_pdus || [])}
+        ${_dcPowerNewItem(p.pdus || [])}
+        ${_dcPduTable(p.pdus || [])}
+        ${_dcPowerItems(p.items || [], p.pdus || [])}
+        ${_dcPowerByOrg(p.by_org || [])}`;
 }
 
 //: Si el formulario de «equipo nuevo» está abierto. Cerrado por defecto: esta pantalla se abre
@@ -151,7 +143,7 @@ function _dcPowerByOrg(porOrg) {
     if (reales.length < 2) return '';
     return `<div class="mt-2"><div class="ss-fs-2 text-muted mb-1">${
         esc(t('dcim_power_by_org'))}</div>
-        <table class="table table-sm mb-0 align-middle"><tbody>${porOrg.map(o => `<tr>
+        <table class="${_DC_TBL}"><tbody>${porOrg.map(o => `<tr>
             <td>${o.uid ? esc(_dcimOrgName(o.uid))
                         : `<span class="text-muted">${esc(t('dcim_unclaimed'))}</span>`}</td>
             <td class="text-end text-muted ss-fs-2">${esc(tf('dcim_n_items', o.items))}</td>
@@ -168,14 +160,57 @@ function _dcPowerWarnings(avisos) {
     if (!avisos.length)
         return `<div class="text-success ss-fs-2 mb-2">
             <i class="bi bi-check-circle me-1"></i>${esc(t('dcim_power_ok'))}</div>`;
-    return `<div class="mb-2">${avisos.map(w => {
-        const texto = w.kind === 'single_branch'
-            ? tf('dcim_warn_single_branch', w.label || t('dcim_item'),
-                 w.branch ? w.branch.toUpperCase() : '—')
-            : tf('dcim_warn_over_half', w.label || '', Math.round((w.load || 0) * 100));
-        return `<div class="ss-fs-2 text-warning-emphasis">
-            <i class="bi bi-exclamation-triangle me-1"></i>${esc(texto)}</div>`;
-    }).join('')}</div>`;
+    // **Agrupados por rama.** Seis equipos colgando de la rama A son seis renglones idénticos
+    // salvo el nombre, y lo que dicen es UN hecho: de esa rama cuelga todo. Media pantalla para
+    // repetir seis veces la misma frase, encima justo encima de la tabla que se venía a mirar —
+    // y una lista de avisos que hay que saltarse deja de leerse, que es lo contrario de para lo
+    // que está.
+    //
+    // Los de carga NO se agrupan: cada uno es una regleta distinta con su porcentaje, y juntar
+    // dos cifras que no son la misma sólo se puede hacer perdiendo las dos.
+    const solas = {};
+    const otros = [];
+    (avisos || []).forEach(w => {
+        if (w.kind !== 'single_branch') return otros.push(w);
+        const rama = String(w.branch || '');
+        (solas[rama] = solas[rama] || []).push(_dcimNameOf(w.item, w));
+    });
+    const porRama = Object.keys(solas).sort().map(rama => {
+        const quienes = solas[rama];
+        const cual = rama ? rama.toUpperCase() : '—';
+        return _dcWarnLine(quienes.length === 1
+            ? tf('dcim_warn_single_branch', quienes[0], cual)
+            : tf('dcim_warn_single_branch_n', quienes.length, cual, _dcNames(quienes)));
+    });
+    // Compuestos ANTES y no dentro de la plantilla, igual que los de rama: la guarda que
+    // comprueba el escapado lee las interpolaciones una a una, y una que recorre una lista no
+    // le deja ver por dónde sale el nombre. Tiene razón en quejarse — mejor no darle motivo.
+    const porCarga = otros.map(w => _dcWarnLine(
+        tf('dcim_warn_over_half', w.label || '', Math.round((w.load || 0) * 100))));
+    return `<div class="mb-2">${porRama.join('')}${porCarga.join('')}</div>`;
+}
+
+/** Un renglón de aviso. **Con nombre propio y no una flecha local**: la guarda que comprueba
+ *  que lo escrito por una persona sale escapado lee las interpolaciones y reconoce a los
+ *  ayudantes de esta sección por el nombre. Una flecha anónima la deja sin poder saber si el
+ *  nombre de un equipo pasa por `esc` — y en ese caso lo correcto es que la guarda se queje. */
+function _dcWarnLine(texto) {
+    return `<div class="ss-fs-2 text-warning-emphasis">
+        <i class="bi bi-exclamation-triangle me-1"></i>${esc(texto)}</div>`;
+}
+
+//: Cuántos nombres caben en una frase antes de dejar de ser una frase.
+const _DC_NAMES_MAX = 6;
+
+/** Unos cuantos nombres y, si son muchos, cuántos quedan.
+ *
+ *  El número entero va delante en la frase, así que aquí no hace falta repetirlo; lo que hace
+ *  falta es no convertir un aviso en una lista de cuarenta nombres que nadie lee, y no dejar
+ *  creer que los que salen son todos. */
+function _dcNames(nombres) {
+    const n = (nombres || []);
+    if (n.length <= _DC_NAMES_MAX) return n.join(', ');
+    return n.slice(0, _DC_NAMES_MAX).join(', ') + tf('dcim_and_more', n.length - _DC_NAMES_MAX);
 }
 
 /** Las regletas: rama, tomas libres y cuánto se ha declarado de lo que aguantan.
@@ -186,8 +221,11 @@ function _dcPowerWarnings(avisos) {
 function _dcPduTable(pdus) {
     if (!pdus.length)
         return `<div class="text-muted ss-fs-2">${esc(t('dcim_no_pdus'))}</div>`;
-    return `<div class="table-responsive mb-2"><table class="table table-sm mb-0 align-middle">
-        <thead><tr>
+    // Los rótulos, sin partir: «Tomas libres» en dos líneas hace que la fila mida dos, y con
+    // dos tablas una encima de otra eso es lo que hacía que esta pestaña pareciera de otra
+    // pantalla. Cabe: la columna la ensancha el rótulo y las cifras son cortas.
+    return `<div class="table-responsive mb-2"><table class="${_DC_TBL}">
+        <thead><tr class="ss-nowrap">
             <th>${esc(t('dcim_pdu'))}</th>
             <th>${esc(t('dcim_branch'))}</th>
             <th class="text-end">${esc(t('dcim_outlets_free'))}</th>
@@ -273,38 +311,78 @@ function _dcBranchWord(feed) {
 
 /** Y de qué come cada equipo. Un equipo sin cables no sale en rojo: un panel de parcheo no come,
  *  y pintarlo como un problema enseña a la gente a ignorar esta pantalla. */
+/** Si esto no lleva enchufe: una bandeja, un panel de parcheo, una tapa ciega.
+ *
+ *  «Sin enchufar» dicho de una bandeja es un deber imposible, y una lista con deberes imposibles
+ *  es una lista que se aprende a no leer. El servidor ya lo sabía —se salta el aviso de rama
+ *  única para estos mismos, «no es un fallo: un panel de parcheo no come»— y la pantalla no tenía
+ *  con qué saberlo.
+ *
+ *  Sigue pudiéndose enchufar: hay paneles de parcheo con PoE, y quitar el botón sería decidir que
+ *  no existen. Lo que cambia es la frase, que es lo que estaba acusando. */
+function _dcPowerQuiet(it) {
+    return (((_dcPower || {}).quiet_roles) || []).indexOf(String((it || {}).role || '')) >= 0;
+}
+
 function _dcPowerItems(items, pdus) {
     if (!items.length) return '';
     const puede = _dcimMay('dcim_edit');
-    return `<div class="table-responsive"><table class="table table-sm mb-0 align-middle">
-        <thead><tr>
+    // Una bandeja no se enchufa. Salía en la tabla diciendo «No lleva enchufe» y con su botón
+    // de enchufar al lado, que es una respuesta y su contraria en la misma fila. Fuera de la
+    // tabla, y **dicho aparte**: la misma regla que el recuento de un armario, que cuenta los
+    // pasivos por separado en vez de esconderlos. Esconder es lo que hace dudar de una lista.
+    //
+    // Salvo que alguien le haya declarado un cable: eso es un hecho escrito, y una fila que no
+    // se dibuja es un cable que no se puede ni ver ni quitar.
+    const mudos = items.filter(it => _dcPowerQuiet(it) && !it.feeds.length);
+    const filas = items.filter(it => mudos.indexOf(it) < 0);
+    if (!filas.length) return _dcPowerQuietNote(mudos);
+    return `<div class="table-responsive"><table class="${_DC_TBL}">
+        <thead><tr class="ss-nowrap">
             <th>${esc(t('dcim_item'))}</th>
             <th>${esc(t('dcim_feeds'))}</th>
             <th class="text-end">${esc(t('dcim_watts_said'))}</th>
             <th></th>
         </tr></thead>
-        <tbody>${items.map(it => `<tr>
+        <tbody>${filas.map(it => `<tr>
             <td><span class="text-muted ss-tabular ss-fs-2 me-1">U${
                 esc(String(it.u_start || ''))}</span>${
-                esc(it.label || t('dcim_item'))}</td>
+                esc(_dcimNameOf(it.uid, it))}</td>
             <td>${it.feeds.length ? it.feeds.map(f => `<span
                 class="badge fw-normal me-1"
                 style="background:${escAttr(_dcPduColor(f.pdu_uid, pdus))};color:#fff"
-                >${esc(f.pdu)}${
-                    f.outlet ? '·' + esc(String(f.outlet)) : ''}${
+                >${puede ? `<a href="#" class="text-reset"
+                        onclick="event.preventDefault();_dcFeedMove(${jsStr(f.uid || '')},${
+                            jsStr(f.pdu_uid || '')},${Number(f.outlet || 0)})"
+                        title="${escAttr(t('dcim_outlet_move'))}">${esc(f.pdu)}${
+                        f.outlet ? '·' + esc(String(f.outlet)) : ''}</a>`
+                    : `${esc(f.pdu)}${f.outlet ? '·' + esc(String(f.outlet)) : ''}`}${
                     puede ? ` <a href="#" class="text-reset"
                         onclick="event.preventDefault();_dcFeedDrop(${jsStr(f.uid || '')})"
                         >×</a>` : ''}</span>`).join('')
-                : `<span class="text-muted ss-fs-2">${esc(t('dcim_unplugged'))}</span>`}
+                : `<span class="text-muted ss-fs-2">${
+                    esc(t('dcim_unplugged'))}</span>`}
                 ${it.branches.length === 1 ? `<i class="bi bi-exclamation-triangle
                     text-warning ms-1" title="${escAttr(t('dcim_warn_one_branch_tt'))}"></i>` : ''}
             </td>
             <td class="text-end ss-tabular">${esc(String(it.watts_said))} W</td>
-            <td class="text-end">${puede && pdus.length ? `<button
+            <td class="text-end">${puede && pdus.length && !_dcPowerQuiet(it) ? `<button
                 class="btn btn-sm btn-secondary" onclick="_dcFeedNew(${jsStr(it.uid)})"
                 title="${escAttr(t('dcim_plug_in'))}"><i class="bi bi-plug"></i></button>` : ''}</td>
         </tr>`).join('')}</tbody>
-    </table></div>`;
+    </table></div>${_dcPowerQuietNote(mudos)}`;
+}
+
+/** Lo que no lleva enchufe, dicho en una línea en vez de en una fila por cabeza.
+ *
+ *  Dicho y no escondido: un armario con cuatro paneles de parcheo y una bandeja tiene cinco
+ *  cosas dentro que nunca van a aparecer en esta pantalla, y no decirlo deja a quien cuenta
+ *  filas preguntándose si falta algo. Es la misma decisión que el recuento de un armario, que
+ *  saca los pasivos de «sin vigilar» y los cuenta aparte. */
+function _dcPowerQuietNote(mudos) {
+    if (!mudos.length) return '';
+    return `<div class="text-muted ss-fs-2 mt-2">${esc(tf('dcim_no_plug_list',
+        mudos.map(it => _dcimNameOf(it.uid, it)).join(', ')))}</div>`;
 }
 
 // ── Escribir ─────────────────────────────────────────────────────────────────
@@ -322,7 +400,94 @@ async function _dcPduColorSet(uid, color) {
     _dcPowerOpen();
 }
 
-async function _dcPduNew() {
+/** Las regletas que están COLOCADAS y no declaradas, con el botón que las declara.
+ *
+ *  Una regleta que ocupa un U es un equipo del armario; una regleta donde se enchufa es una fila
+ *  con ramas y tomas. Son la misma cosa vista desde dos sitios, y hasta que alguien las une el
+ *  panel no puede ofrecer como enchufe la que se acaba de colocar — que es justo lo que espera
+ *  quien acaba de colocarla, y lo que no pasaba.
+ *
+ *  No se unen solas: declarar una regleta es decir de qué rama cuelga y cuántas tomas tiene, y
+ *  eso no está en el catálogo ni lo puede adivinar nadie. Lo que sí se puede es no dejar que
+ *  pase desapercibido, y que unirlas cueste un clic en vez de rellenar un formulario que repite
+ *  un nombre que ya está escrito una fila más arriba. */
+function _dcPduUndeclared(filas) {
+    if (!filas.length || !_dcimMay('dcim_edit')) return '';
+    return `<div class="alert alert-secondary py-2 px-3 mb-2 ss-fs-2">
+        <i class="bi bi-plug me-1"></i>${esc(t('dcim_pdu_undeclared'))}
+        <div class="d-flex gap-2 flex-wrap mt-2">${filas.map(f =>
+            `<button class="btn btn-sm btn-secondary"
+                     onclick="_dcPduFromItem(${jsStr(f.uid)},${jsStr(f.label || '')})">
+                <i class="bi bi-plus-lg me-1"></i>${
+                esc(_dcimNameOf(f.uid, f) + (f.u_start ? ` · U${f.u_start}` : ''))}
+            </button>`).join('')}</div>
+    </div>`;
+}
+
+/** Declarar como regleta el equipo que ya está colocado.
+ *
+ *  Con SU nombre y no con `PDU-A`: el equipo ya se llama de alguna manera, y ponerle otro deja
+ *  el mismo cacharro con dos nombres en dos pestañas del mismo armario. La rama se alterna como
+ *  en el botón de al lado —la primera es la A y la segunda la B, que es como se montan— y se
+ *  cambia después. */
+async function _dcPduFromItem(itemUid, nombre) {
+    hideInfoModal();
+    const rack = (_dcimRack || {}).rack;
+    if (!rack) return;
+    const cuantas = (_dcPower.pdus || []).length;
+    const r = await _dcimSend('POST', '/api/v1/dcim/pdus', {
+        rack_uid: rack.uid, item_uid: itemUid,
+        feed: cuantas % 2 ? 'b' : 'a',
+        name: nombre || `PDU-${cuantas % 2 ? 'B' : 'A'}`,
+        outlets: 8,
+    });
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcPowerOpen();
+}
+
+/** «+ Regleta»: **cuál de ellas**, y no una nueva a ciegas.
+ *
+ *  Este botón acuñaba `PDU-A` sin preguntar, y ahí estaba la razón de que la regleta que alguien
+ *  acababa de colocar en el armario no apareciera nunca como sitio donde enchufar: la regleta que
+ *  se COLOCA y la regleta que DA TOMAS son dos filas distintas, y no había ni una pantalla desde
+ *  la que juntarlas. Quien lo intentaba veía aparecer una «PDU-A» que no era la suya, la borraba,
+ *  y volvía a intentarlo por donde mismo.
+ *
+ *  Se elige de lo que YA está colocado, sin depender de que nadie haya dicho que es una regleta:
+ *  el aviso de arriba sí mira el rol, y un rol vacío —que es como nace todo lo que se coloca
+ *  desde el catálogo— lo deja mudo. Una lista de la que se elige no necesita adivinar nada.
+ *
+ *  La última opción es la regleta que no ocupa U, la atornillada al lateral: es la mitad de los
+ *  casos y la única que de verdad no tiene ningún equipo al que apuntar. */
+function _dcPduNew() {
+    const puestas = (_dcPower.pdus || []).map(p => String(p.item_uid || '')).filter(Boolean);
+    // Lo ajeno no: un armario compartido enseña que el U está ocupado y nada más, y declarar
+    // como regleta propia el equipo del vecino sería escribir sobre su inventario.
+    const libres = (((_dcimRack || {}).items) || [])
+        .filter(i => !i.foreign && !puestas.includes(String(i.uid || '')))
+        .sort((a, b) => ((String(b.role || '') === 'pdu') - (String(a.role || '') === 'pdu'))
+                        || ((a.u_start || 0) - (b.u_start || 0)));
+    // Un armario vacío no tiene nada que elegir, y preguntar en una lista de cero opciones es
+    // un paso de más para llegar a lo único que se puede hacer.
+    if (!libres.length) return _dcPduPlain();
+    showHtmlModal(t('dcim_pdu_which'), `<div class="d-flex flex-column gap-2">
+        <div class="text-muted ss-fs-2">${esc(t('dcim_pdu_which_note'))}</div>
+        <div class="d-flex flex-column gap-1">${libres.map(i =>
+            `<button class="btn btn-sm btn-secondary text-start"
+                     onclick="_dcPduFromItem(${jsStr(i.uid)},${jsStr(_dcimItemName(i))})">
+                ${esc(_dcimItemName(i))}
+                <span class="text-muted ss-fs-1 ms-1">${esc(
+                    [i.u_start ? 'U' + i.u_start : '',
+                     i.role ? t('dcim_role_' + i.role) : ''].filter(Boolean).join(' · '))}</span>
+            </button>`).join('')}</div>
+        <button class="btn btn-sm btn-secondary text-start" onclick="_dcPduPlain()">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_pdu_not_placed'))}</button>
+    </div>`, 'primary', '', 'fit');
+}
+
+/** La regleta que no está colocada: la atornillada al lateral, que no ocupa ningún U. */
+async function _dcPduPlain() {
+    hideInfoModal();
     const rack = (_dcimRack || {}).rack;
     if (!rack) return;
     // La rama se alterna sola: la primera regleta de un armario es la A y la segunda la B, que
@@ -348,14 +513,88 @@ function _dcPduDrop(uid, nombre) {
 /** Enchufar un equipo. Va a la primera regleta con toma libre de la rama que le FALTA — que es
  *  lo que alguien iba a hacer de todos modos, y es la elección que evita el fallo que esta
  *  pantalla existe para cazar. */
-async function _dcFeedNew(itemUid) {
-    const it = (_dcPower.items || []).find(x => x.uid === itemUid) || {};
+//: El cable que se está enchufando o moviendo: `{item, uid, pdu, outlet}`. Sin `uid`, uno nuevo.
+let _dcFeedPick = null;
+
+/** Enchufar un equipo: a qué regleta **y en qué toma**.
+ *
+ *  Esto iba a la primera regleta con toma libre de la rama que le faltaba y no decía en cuál.
+ *  La columna `outlet` existía desde el primer commit, la API la aceptaba, `power_of_rack` la
+ *  devolvía y la tabla la pintaba —«PDU-A·7»—, y **ningún camino la escribía nunca**: valía
+ *  siempre 0, que es «en esa regleta, no sé en cuál». Quinta vez que aparece esta forma en esta
+ *  sección, y siempre igual de silenciosa: el código que respeta el valor por defecto parece
+ *  que funciona.
+ *
+ *  La rama que le FALTA sigue viniendo primero —es lo que alguien iba a hacer de todos modos—
+ *  pero ofrecida, no decidida a sus espaldas. Y «no sé en cuál» sigue siendo una respuesta que
+ *  se puede dar: obligar a inventarse un número es cambiar un hueco por un dato falso. */
+function _dcFeedNew(itemUid) {
+    if (!(_dcPower.pdus || []).length) return showToast(t('dcim_no_pdus'), 'warning');
+    _dcFeedPick = {item: itemUid, uid: '', pdu: '', outlet: 0};
+    _dcFeedPickDraw();
+}
+
+/** Cambiar de toma un cable que ya está. Sin quitarlo y volverlo a poner, que se lleva por
+ *  delante lo que alguien declaró que consume — y en la MISMA regleta: pasar un cable de una
+ *  regleta a otra es desenchufarlo, y eso ya tiene su botón al lado. */
+function _dcFeedMove(uid, pduUid, outlet) {
+    _dcFeedPick = {item: '', uid: uid, pdu: pduUid, outlet: Number(outlet || 0)};
+    _dcFeedPickDraw();
+}
+
+function _dcFeedPickDraw() {
+    const p = _dcFeedPick || {};
+    const it = (_dcPower.items || []).find(x => x.uid === p.item) || {};
     const tiene = new Set(it.branches || []);
-    const libres = (_dcPower.pdus || []).filter(p => p.free > 0);
-    const quiere = libres.find(p => !tiene.has(p.feed)) || libres[0];
-    if (!quiere) return showToast(t('dcim_no_free_outlet'), 'warning');
-    const r = await _dcimSend('POST', '/api/v1/dcim/feeds',
-                              {item_uid: itemUid, pdu_uid: quiere.uid});
+    // La rama que le falta, primero. Un orden y no una elección hecha: la otra sigue estando.
+    const pdus = (_dcPower.pdus || [])
+        .filter(x => !p.pdu || x.uid === p.pdu)
+        .slice().sort((a, b) => (tiene.has(a.feed) ? 1 : 0) - (tiene.has(b.feed) ? 1 : 0));
+    showHtmlModal(t(p.uid ? 'dcim_outlet_move' : 'dcim_plug_in'),
+        `<div class="d-flex flex-column gap-3">
+        <div class="text-muted ss-fs-2">${esc(t('dcim_outlet_note'))}</div>
+        ${pdus.map(pdu => _dcFeedPduHtml(pdu, p)).join('')}
+    </div>`, 'primary', '', 'fit');
+}
+
+/** Una regleta con sus tomas: las ocupadas no se pueden pulsar. */
+function _dcFeedPduHtml(pdu, p) {
+    const usadas = pdu.outlets_used || [];
+    const n = Number(pdu.outlets || 0);
+    const tomas = [];
+    for (let o = 1; o <= n; o++) {
+        // La suya propia no cuenta como ocupada: mover un cable a donde ya está no es un choque,
+        // y apagar ese botón haría creer que la toma es de otro.
+        const ocupada = usadas.indexOf(o) >= 0 && !(p.uid && o === p.outlet);
+        tomas.push(`<button class="btn btn-sm btn-secondary ss-tabular${
+            p.uid && o === p.outlet ? ' active' : ''}" ${ocupada ? 'disabled' : ''}
+            onclick="_dcFeedPut(${jsStr(pdu.uid)},${o})">${o}</button>`);
+    }
+    return `<div>
+        <div class="ss-fs-2 mb-1"><span class="badge fw-normal"
+            style="background:${escAttr(pdu.color || '#6c757d')};color:#fff">${
+            esc(pdu.name)}</span>
+            <span class="text-muted ms-1">${esc(tf('dcim_outlets_n_free', pdu.free, n))}</span>
+        </div>
+        <div class="d-flex flex-wrap gap-1">${tomas.join('')}
+            <button class="btn btn-sm btn-secondary"
+                onclick="_dcFeedPut(${jsStr(pdu.uid)},0)">${
+                esc(t('dcim_outlet_unknown'))}</button></div>
+    </div>`;
+}
+
+async function _dcFeedPut(pduUid, outlet) {
+    hideInfoModal();
+    const p = _dcFeedPick || {};
+    const r = p.uid
+        ? await _dcimSend('PUT', `/api/v1/dcim/feeds/${encodeURIComponent(p.uid)}`,
+                          {outlet: outlet})
+        : await _dcimSend('POST', '/api/v1/dcim/feeds',
+                          {item_uid: p.item, pdu_uid: pduUid, outlet: outlet});
+    _dcFeedPick = null;
+    // El error del servidor y no uno propio: «esa toma ya tiene un cable» lo sabe él, que es
+    // quien mira los demás cables de la regleta, y repetir aquí esa comprobación sería una
+    // segunda copia de la regla que un día dirá otra cosa.
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
     _dcPowerOpen();
 }

@@ -22,6 +22,7 @@ from lib.core.dcim import builds as dcim_builds
 from lib.core.dcim import catalog as dcim_catalog
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import profiles as dcim_profiles
+from lib.core.dcim import rackrev as dcim_rackrev
 from lib.core.dcim import service as dcim_svc
 from lib.core.dcim.store import PART_KINDS
 
@@ -238,11 +239,76 @@ def build(app, wa):
                 fuera[campo] = build[campo]
         fuera['build_uid'] = build['uid']
         return fuera
+    def _snap(rack_uid: str, action: str = 'edit') -> None:
+        """Guardar cómo queda el armario **después** de un cambio.
+
+        Una foto por cambio contesta las dos preguntas que se le hacen a un armario con un año
+        de vida: cómo estaba en marzo (la foto) y qué le pasó (la diferencia con la anterior).
+        Al revés no funciona: de una lista de acontecimientos no se reconstruye un estado sin
+        reproducirlos todos, y basta que falte uno para que la reconstrucción mienta sin decirlo.
+
+        **Después y no antes**, como el historial del catálogo y por lo mismo: así la última
+        versión es lo que hay ahora y la lista se lee sola.
+
+        Se llama al final de cada escritura que toca el armario o lo que hay dentro. Que no se
+        olvide ninguna no se deja a la memoria: hay una prueba que recorre las rutas y lo exige.
+        """
+        store = _store()
+        rack = store.racks.get(str(rack_uid or '')) if store else None
+        if not rack:
+            return
+        foto = dcim_rackrev.snapshot(rack, store.items_of(str(rack_uid or '')))
+        historial = store.revs.history(str(rack_uid or ''), scope=dcim_rackrev.SCOPE)
+        # Una escritura que no cambió nada no es una versión. Un formulario manda la ficha
+        # entera cada vez que se pulsa guardar, y doce renglones idénticos no dicen qué pasó:
+        # dicen que alguien pulsó un botón.
+        if historial and dcim_rackrev.same((historial[0].get('data') or {}), foto):
+            return
+        store.revs.keep(str(rack_uid or ''), foto, action=str(action or 'edit'),
+                        actor=_actor(), scope=dcim_rackrev.SCOPE)
+
+    def _from_type_item(data: dict) -> dict:
+        """Lo que un EQUIPO toma de su modelo del catálogo al colocarlo.
+
+        No todo lo que se pone en un armario nace de una plantilla. Una tapa ciega, una regleta,
+        una bandeja y un panel de parcheo no tienen estándar de compra ni componentes que
+        estampar: son un modelo del catálogo y una U. Obligar a inventarse una plantilla para
+        cada uno es pedir que se declare un estándar de una tapa.
+
+        Lo que el modelo sabe y quien coloca no ha dicho: **cuánto mide**. Es el dato del que
+        depende que quepa, y el único que la biblioteca trae de verdad — de un modelo no se sabe
+        el fondo en milímetros («full depth» no es una medida) ni para qué se va a usar.
+
+        Al revés que la plantilla y por lo mismo: lo tecleado manda. Quien acaba de medir la caja
+        con un metro sabe más que la biblioteca.
+        """
+        fuera = dict(data or {})
+        uid = str(fuera.get('type_uid') or '').strip()
+        if not uid:
+            return fuera
+        cat = getattr(wa, '_dcim_catalog', None)
+        modelo = cat.get(uid) if cat else None
+        if not modelo:
+            # Un modelo que no existe no es un modelo: guardar el identificador dejaría un
+            # equipo afirmando ser algo que no está, y eso no da ningún error al escribirlo.
+            fuera.pop('type_uid', None)
+            return fuera
+        if not fuera.get('u_height'):
+            # En décimas, y el armario cuenta U enteros: uno de 0,5 U ocupa **un** U y comparte
+            # sus dos mitades, que es lo que de verdad pasa. Hacia arriba, porque hacia abajo
+            # daría cero y una caja que ocupa cero U es una que el dibujo no pinta.
+            decimas = int(modelo.get('u_tenths') or 0)
+            if decimas:
+                fuera['u_height'] = max(1, -(-decimas // 10))
+        return fuera
+
     def _files():
         return getattr(wa, '_dcim_files', None)
 
     return SimpleNamespace(
         actor=_actor,
+        from_type_item=_from_type_item,
+        snap=_snap,
         store=_store,
         perms=_perms,
         seen=_seen,

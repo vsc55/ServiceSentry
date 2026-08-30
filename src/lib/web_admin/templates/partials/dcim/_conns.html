@@ -134,10 +134,19 @@ function _dcConn(tipo) {
  *  Nada si el conector no está en el catálogo: un enchufe genérico al lado de algo que alguien
  *  tecleó afirmaría saber qué forma tiene, y no se sabe.
  *
+ *  **La foto manda sobre el dibujo** donde la hay. Los dibujos son uno por FORMA —una C13 y una
+ *  C15 son la misma boca— y eso vale para los ciento y pico que vienen con el panel; al que
+ *  alguien añada no se le parece ninguno, y nadie va a escribir un SVG para la regleta de su
+ *  rack. Una foto suya dice más que el enchufe genérico, que era lo único que había.
+ *
  *  `aria-hidden` porque al lado va siempre el nombre: leído en voz alta sería decirlo dos veces,
  *  y la segunda peor. */
 function _dcConnIcon(tipo, clase) {
-    const forma = String((_dcConn(tipo) || {}).shape || '');
+    const c = _dcConn(tipo) || {};
+    if (c.image)
+        return `<img class="ss-conn ss-conn-img${clase ? ' ' + clase : ''}" alt=""
+            aria-hidden="true" src="${escAttr(_dcimMediaUrl(c.image))}">`;
+    const forma = String(c.shape || '');
     if (!forma) return '';
     return `<svg class="ss-conn${clase ? ' ' + clase : ''}" viewBox="0 0 24 16"
         aria-hidden="true"><use href="#cx-${escAttr(forma)}"></use></svg>`;

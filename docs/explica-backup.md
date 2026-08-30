@@ -58,6 +58,7 @@ aparece en los tres sin tocar nada más.
 | `history` | tablas | sistema | ❌ | `history`, `check_state` |
 | `audit` | tablas | sistema | ❌ | `audit` |
 | `syslog` | tablas | **syslog** | ❌ | `syslog`, `syslog_drops` |
+| `dcim_media` | carpeta | — | ✅ | Los ficheros del inventario: planos de sala, imágenes del catálogo y los adjuntos (manuales, firmware) |
 | *(las que declare un módulo)* | ficheros | — | según declare | p. ej. los MIB del módulo SNMP |
 
 ### La regla de `core` está invertida a propósito
@@ -68,6 +69,30 @@ mañana —incluidas las que los módulos crean en ejecución vía
 en vez de quedarse fuera en silencio.
 
 > Una copia que se salta lo que no reconoció es de esos fallos que se descubren una sola vez.
+
+### La primera carpeta del núcleo, y que se puede mover
+
+Las **23 tablas del inventario** (`dc_*`) entran por esa misma regla invertida: nadie las
+reclama, luego son de `core`, que es obligatoria. Pero de un plano de sala la base de datos
+guarda **solo el nombre** — el fichero está en el disco, y una copia sin él restaura salas cuyo
+plano ya no existe. De ahí `dcim_media`, la primera parte de tipo carpeta que no es de un
+módulo. Marcada por defecto porque esos ficheros son pequeños e irreemplazables, que es la
+pareja de propiedades que lo decide.
+
+Esa carpeta **se puede mover** (`web_admin|dcim_media_dir` / `SS_DCIM_MEDIA_DIR`): veinte salas
+de planos y alzados son megas de verdad, y el disco de la base de datos no tiene por qué ser
+donde alguien los quiere. Quien arranca la copia —el botón, la tarea programada y la
+restauración— resuelve el ajuste con `parts.configured_dirs()` y se lo pasa a `create_backup`
+/ `restore_backup`; sin ese paso se archivaría la carpeta por defecto, vacía, y una restauración
+dejaría los planos en un directorio que el panel no lee.
+
+> Con el ajuste vacío se usa `<var_dir>/dcim_media`, que es lo que `part_dir()` ya sabe: solo
+> viaja lo que de verdad está puesto.
+
+Hoy la parte se lleva la carpeta **entera**, y ahí dentro conviven lo propio (`own/`: la foto
+del armario, el manual que mandó el distribuidor) y lo importado (`library/`: cientos de
+imágenes de alzado que se vuelven a bajar con un botón). Separarlas —guardar lo insustituible
+sin arrastrar la biblioteca— está pendiente.
 
 ### Un módulo aporta la suya
 
@@ -99,6 +124,7 @@ copia-20260811-210233.zip
 ├── files/
 │   ├── config.json           ← el FICHERO de arranque (parte `config_file`)
 │   └── parts/
+│       ├── dcim_media/…      ← planos, imágenes y adjuntos (parte `dcim_media`)
 │       └── mibs/…            ← los ficheros de un módulo (parte `mibs`)
 └── manifest.json             ← escrito el ÚLTIMO, a propósito
 

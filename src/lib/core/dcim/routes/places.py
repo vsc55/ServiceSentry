@@ -182,6 +182,12 @@ def register(app, wa, C):
                 return jsonify({'error': wa._t('access_denied')}), 403
             getattr(store, part).update(
                 uid, _without(request.get_json(silent=True) or {}, minted), actor=C.actor())
+            # Y su foto, si lo editado ES un armario: renombrarlo o cambiarle la altura mueve de
+            # sitio a todo lo que hay dentro, y eso es parte de su historia. Aquí y no en cada
+            # llamada porque este CRUD es uno para cuatro cosas — la condición es el precio de
+            # que sea uno.
+            if scope == 'rack':
+                C.snap(uid, 'rack_edit')
             return jsonify({'ok': True})
 
         @app.route(f'/api/v1/dcim/{kind}/<uid>', methods=['DELETE'],

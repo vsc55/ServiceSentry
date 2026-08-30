@@ -499,3 +499,33 @@ class TestARowHoverThatPaintsTheWholeTable:
         grey = css.split('.ss-hover-rows {')[1].split('}')[0]
         accent = css.split('.ss-hover-accent {')[1].split('}')[0]
         assert grey.strip() != accent.strip()
+
+
+class TestElAnchoDeUnModalNoSaleDeLaVariableDeBootstrap:
+    """Reportado desde la pantalla como «sigue saliendo el scroll»: se le pidió a un diálogo que
+    fuera más ancho, la regla se escribió, se guardó, y el cuadro salió exactamente igual.
+
+    Bootstrap dimensiona con `--bs-modal-width` sobre `.modal-dialog`. **Este panel se salta ese
+    mecanismo entero**: `.modal-lg { width: fit-content }` y `.modal-lg > .modal-content
+    { width: 800px }`, para que el diálogo pueda arrastrarse más grande — así que quien mide es
+    `.modal-content` y la variable no la lee nadie.
+
+    Una regla que apunta al mecanismo que ya no manda no falla: no hace nada, y no hay nada en la
+    pantalla que diga por qué. Es la clase de trampa que solo se ve sabiendo las dos mitades, y
+    por eso está escrita aquí.
+    """
+
+    def test_nadie_dimensiona_un_modal_con_la_variable_muerta(self):
+        css = _read(CSS)
+        malas = [ln.strip() for ln in css.splitlines()
+                 if '--bs-modal-width' in ln and not ln.lstrip().startswith(('*', '/*'))]
+        assert not malas, (
+            'esto no hace nada: el ancho de un modal de este panel lo pone '
+            f'`.modal-content`, no `--bs-modal-width` — {malas}')
+
+    def test_y_el_mecanismo_que_si_manda_sigue_siendo_ese(self):
+        """La otra mitad. El día que este panel vuelva al de Bootstrap, la regla de arriba pasa a
+        estar al revés — y una guarda que prohíbe lo correcto es peor que ninguna."""
+        css = _read(CSS)
+        assert re.search(r'\.modal-lg\s*>\s*\.modal-content\s*\{[^}]*width:', css), \
+            'el ancho ya no lo pone `.modal-content`: revisa la guarda de arriba'

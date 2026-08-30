@@ -1384,13 +1384,24 @@ class TestElCableadoDeclarado:
         assert fila['a_label'] == 'SW-CORE' and fila['b_label'] == 'DB03-NOMINAS'
 
     def test_sin_sondas_la_pantalla_abre_igual(self, client, fleet):
-        """Lo declarado se lee aunque no haya nada con lo que contrastarlo."""
+        """Lo declarado se lee aunque no haya nada con lo que contrastarlo.
+
+        Con `check=1`: el contraste se pide aparte desde que esperarlo dejaba la pestaña en
+        blanco, y sin pedirlo no hay recuentos porque no se ha mirado nada.
+        """
+        _login(client)
+        client.post('/api/v1/dcim/cables',
+                    json={'a_item': fleet['mine'], 'b_item': fleet['theirs']})
+        d = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}/cables?check=1').get_json()
+        assert len(d['cables']) == 1
+        assert d['counts']['undeclared'] == 0
+
+    def test_y_la_primera_vuelta_trae_las_filas_sin_recuentos(self, client, fleet):
         _login(client)
         client.post('/api/v1/dcim/cables',
                     json={'a_item': fleet['mine'], 'b_item': fleet['theirs']})
         d = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}/cables').get_json()
-        assert len(d['cables']) == 1
-        assert d['counts']['undeclared'] == 0
+        assert len(d['cables']) == 1 and d['counts'] == {} and d['checked'] is False
 
     def test_un_cable_del_vecino_no_es_suyo_que_reconciliar(self, admin, client, fleet):
         """Solo los equipos que este lector ve aportan cables: uno ajeno no es suyo, y su
@@ -3866,3 +3877,955 @@ class TestLlevarseModelosYPlantillas:
         assert r.get_json()['problems']
         assert 'X' not in [b['name'] for b in
                            client.get('/api/v1/dcim/builds').get_json()['builds']]
+
+
+class TestLaFotoDeUnConector:
+    """Los conectores no son filas: son un DOCUMENTO, y la foto de uno se guarda escribiendo el
+    documento entero con una versión más alta. Por eso la sube el servidor en un solo paso.
+
+    En dos —subir el fichero y luego guardar el documento— hay un hueco: quien cierre el cuadro
+    después del primero deja un fichero en la carpeta al que no apunta nadie, y nada vuelve a
+    mirarlo nunca.
+    """
+
+    def _png(self):
+        return b'\x89PNG\r\n\x1a\n' + b'0' * 32
+
+    def _un_conector(self, client, cid='regleta'):
+        """Uno propio, guardado: la ruta escribe DENTRO del documento en vigor."""
+        from lib.core.dcim import connectors as conns
+        doc = {'version': conns.next_version(),
+               'connectors': [{'id': cid, 'name': 'Regleta del taller',
+                               'families': ['power-outlets'], 'group': 'power-out'}]}
+        assert client.put('/api/v1/dcim/connectors', json=doc).status_code == 200
+        return cid
+
+    def test_subirla_la_guarda_dentro_del_documento(self, admin, client):
+        _login(client)
+        cid = self._un_conector(client)
+        r = client.post(f'/api/v1/dcim/connectors/{cid}/image',
+                        data={'file': (io.BytesIO(self._png()), 'foto.png')},
+                        content_type='multipart/form-data')
+        assert r.status_code == 200, r.get_json()
+        nombre = r.get_json()['image']
+        d = client.get('/api/v1/dcim/connectors').get_json()
+        fila = next(c for c in d['doc']['connectors'] if c['id'] == cid)
+        assert fila['image'] == nombre
+        # Y llega a la pantalla, que es lo único que hace que se vea.
+        pintado = next(c for c in d['connectors']['power-outlets'] if c['id'] == cid)
+        assert pintado['image'] == nombre
+
+    def test_la_version_sube_por_encima_de_la_del_panel(self, admin, client):
+        """Guardar con una que no gana es guardar algo que no se aplica, y decir que sí."""
+        _login(client)
+        cid = self._un_conector(client)
+        antes = client.get('/api/v1/dcim/connectors').get_json()
+        client.post(f'/api/v1/dcim/connectors/{cid}/image',
+                    data={'file': (io.BytesIO(self._png()), 'f.png')},
+                    content_type='multipart/form-data')
+        d = client.get('/api/v1/dcim/connectors').get_json()
+        assert d['doc']['version'] > antes['doc']['version']
+        assert d['doc']['version'] > d['packaged']
+
+    def test_la_que_sustituye_se_borra_del_disco(self, admin, client):
+        """Sin eso, cada cambio deja un fichero al que no apunta nadie y la carpeta crece durante
+        toda la vida de la instalación."""
+        _login(client)
+        from lib.core.dcim import media
+        var = admin._var_dir or ''                             # noqa: SLF001
+        cid = self._un_conector(client)
+        for _ in range(2):
+            client.post(f'/api/v1/dcim/connectors/{cid}/image',
+                        data={'file': (io.BytesIO(self._png()), 'f.png')},
+                        content_type='multipart/form-data')
+        d = client.get('/api/v1/dcim/connectors').get_json()
+        fila = next(c for c in d['doc']['connectors'] if c['id'] == cid)
+        assert media.every(var) == [fila['image']]
+
+    def test_quitarla_la_borra_y_devuelve_el_dibujo(self, admin, client):
+        _login(client)
+        from lib.core.dcim import media
+        var = admin._var_dir or ''                             # noqa: SLF001
+        cid = self._un_conector(client)
+        client.post(f'/api/v1/dcim/connectors/{cid}/image',
+                    data={'file': (io.BytesIO(self._png()), 'f.png')},
+                    content_type='multipart/form-data')
+        assert client.delete(f'/api/v1/dcim/connectors/{cid}/image').status_code == 200
+        d = client.get('/api/v1/dcim/connectors').get_json()
+        fila = next(c for c in d['doc']['connectors'] if c['id'] == cid)
+        assert 'image' not in fila and media.every(var) == []
+
+    def test_uno_que_no_esta_no_deja_el_fichero_puesto(self, admin, client):
+        """Responder 404 y quedarse la foto es la peor mitad de las dos: nada apunta a ella y
+        nadie la va a encontrar para borrarla."""
+        _login(client)
+        from lib.core.dcim import media
+        var = admin._var_dir or ''                             # noqa: SLF001
+        self._un_conector(client)
+        r = client.post('/api/v1/dcim/connectors/no-existe/image',
+                        data={'file': (io.BytesIO(self._png()), 'f.png')},
+                        content_type='multipart/form-data')
+        assert r.status_code == 404
+        assert media.every(var) == []
+
+    def test_lo_que_no_es_una_imagen_no_entra(self, admin, client):
+        """El tipo lo decide lo que hay DENTRO: una extensión es una afirmación de quien sube."""
+        _login(client)
+        cid = self._un_conector(client)
+        r = client.post(f'/api/v1/dcim/connectors/{cid}/image',
+                        data={'file': (io.BytesIO(b'no soy una imagen'), 'foto.png')},
+                        content_type='multipart/form-data')
+        assert r.status_code == 400
+
+
+class TestLoQueVaSobreUnaBandeja:
+    """Dos mini PC sobre una bandeja se reparten su hueco con **los mismos cuatro campos** que
+    dividen un U — `u_slots`, `u_slot`, `u_slot_span`, `u_split`— aplicados al hueco del padre.
+    Ya estaban en la ficha y ya se guardaban; lo que no había era quien los mirase.
+
+    Mientras no se dibujaban daba igual que dos dijeran lo mismo. Desde que se dibujan, eso son
+    dos cajas superpuestas — y un alzado que miente es peor que uno que no dice nada.
+    """
+
+    def _bandeja(self, client, rack):
+        return client.post('/api/v1/dcim/items',
+                           json={'rack_uid': rack, 'u_start': 4, 'label': 'Bandeja',
+                                 'role': 'shelf'}).get_json()['uid']
+
+    def _rack(self, client):
+        sede = client.post('/api/v1/dcim/sites', json={'name': 'Sede bandeja'}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'Sala'}).get_json()['uid']
+        return client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'RK', 'u_height': 10}).get_json()['uid']
+
+    def test_dos_mitades_caben(self, admin, client):
+        _login(client)
+        rack = self._rack(client)
+        padre = self._bandeja(client, rack)
+        for cual in (1, 2):
+            r = client.post('/api/v1/dcim/items',
+                            json={'parent_uid': padre, 'label': f'PC{cual}',
+                                  'u_slots': 2, 'u_slot': cual})
+            assert r.status_code == 200, (cual, r.get_json())
+
+    def test_dos_veces_la_misma_mitad_no(self, admin, client):
+        """Se guardaban las dos sin mirar. Ahora son dos cajas en el mismo sitio del dibujo, y
+        eso hay que decirlo cuando se pide, no dejarlo pintado."""
+        _login(client)
+        rack = self._rack(client)
+        padre = self._bandeja(client, rack)
+        client.post('/api/v1/dcim/items',
+                    json={'parent_uid': padre, 'label': 'PC1', 'u_slots': 2, 'u_slot': 1})
+        r = client.post('/api/v1/dcim/items',
+                        json={'parent_uid': padre, 'label': 'PC2', 'u_slots': 2, 'u_slot': 1})
+        assert r.status_code == 400
+
+    def test_medios_distintos_tambien_se_pisan(self, admin, client):
+        """`1 de 2` y `2 de 3` no comparten ningún número y ocupan el mismo trozo de bandeja: en
+        fracciones se ve, y contando «cuál de cuántas» no."""
+        _login(client)
+        rack = self._rack(client)
+        padre = self._bandeja(client, rack)
+        client.post('/api/v1/dcim/items',
+                    json={'parent_uid': padre, 'label': 'PC1', 'u_slots': 2, 'u_slot': 1})
+        r = client.post('/api/v1/dcim/items',
+                        json={'parent_uid': padre, 'label': 'PC2', 'u_slots': 3, 'u_slot': 1})
+        assert r.status_code == 400
+
+    def test_quien_no_dice_nada_no_choca_con_nadie(self, admin, client):
+        """No está reclamando media bandeja: está dejando que se reparta."""
+        _login(client)
+        rack = self._rack(client)
+        padre = self._bandeja(client, rack)
+        client.post('/api/v1/dcim/items',
+                    json={'parent_uid': padre, 'label': 'PC1', 'u_slots': 2, 'u_slot': 1})
+        for n in (2, 3):
+            r = client.post('/api/v1/dcim/items',
+                            json={'parent_uid': padre, 'label': f'PC{n}'})
+            assert r.status_code == 200, r.get_json()
+
+    def test_un_trozo_que_no_existe_se_rechaza(self, admin, client):
+        _login(client)
+        rack = self._rack(client)
+        padre = self._bandeja(client, rack)
+        r = client.post('/api/v1/dcim/items',
+                        json={'parent_uid': padre, 'label': 'PC', 'u_slots': 2, 'u_slot': 3})
+        assert r.status_code == 400
+
+    def test_moverlo_no_choca_consigo_mismo(self, admin, client):
+        """Editar el que ya está sin cambiarle el hueco es lo más normal del mundo, y contra su
+        propia fila daría «ocupado»."""
+        _login(client)
+        rack = self._rack(client)
+        padre = self._bandeja(client, rack)
+        uid = client.post('/api/v1/dcim/items',
+                          json={'parent_uid': padre, 'label': 'PC1',
+                                'u_slots': 2, 'u_slot': 1}).get_json()['uid']
+        r = client.put(f'/api/v1/dcim/items/{uid}', json={'label': 'PC1 bis'})
+        assert r.status_code == 200, r.get_json()
+
+    def test_y_el_hijo_llega_con_su_foto_al_dibujo(self, admin, client):
+        """El alzado lo pinta dentro de la bandeja, y para eso necesita lo mismo que cualquier
+        otro equipo: su modelo del catálogo y, con él, su imagen."""
+        _login(client)
+        rack = self._rack(client)
+        padre = self._bandeja(client, rack)
+        client.post('/api/v1/dcim/items', json={'parent_uid': padre, 'label': 'PC1'})
+        d = client.get(f'/api/v1/dcim/racks/{rack}').get_json()
+        hijo = next(i for i in d['items'] if i.get('parent_uid') == padre)
+        assert 'images' in hijo, 'un montado llega sin su foto y sale sin dibujo'
+
+
+class TestElHistorialDeUnArmario:
+    """Una foto por cambio contesta las dos preguntas que se le hacen a un armario con un año de
+    vida: cómo estaba en marzo, y qué le pasó. De una lista de acontecimientos no se reconstruye
+    un estado sin reproducirlos todos, y basta que falte uno para que mienta sin decirlo.
+
+    Por eso lo que se comprueba aquí no es que la ruta conteste: es que **ninguna escritura se
+    olvide de dejar su foto**.
+    """
+
+    def _rack(self, client, nombre='RK-hist'):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        return client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+
+    def _hist(self, client, rack):
+        return client.get(f'/api/v1/dcim/racks/{rack}/history').get_json()['history']
+
+    def test_colocar_mover_y_retirar_dejan_su_foto(self, admin, client):
+        _login(client)
+        rack = self._rack(client)
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 3,
+                                'label': 'SW01'}).get_json()['uid']
+        client.put(f'/api/v1/dcim/items/{uid}', json={'u_start': 2})
+        client.delete(f'/api/v1/dcim/items/{uid}')
+        acciones = [f['action'] for f in self._hist(client, rack)]
+        assert acciones == ['remove', 'move', 'place'], acciones
+
+    def test_y_dice_QUE_paso_en_cada_una(self, admin, client):
+        _login(client)
+        rack = self._rack(client, 'RK-que')
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 3,
+                                'label': 'SW01'}).get_json()['uid']
+        client.put(f'/api/v1/dcim/items/{uid}', json={'u_start': 2})
+        hist = self._hist(client, rack)
+        movido = hist[0]['changed']
+        assert len(movido) == 1, movido
+        assert movido[0]['field'] == 'u_start' and movido[0]['to'] == 2
+
+    def test_editar_el_armario_tambien(self, admin, client):
+        """Renombrarlo mueve de sitio a todo lo que hay dentro: es parte de su historia."""
+        _login(client)
+        rack = self._rack(client, 'RK-nombre')
+        client.post('/api/v1/dcim/items', json={'rack_uid': rack, 'u_start': 1, 'label': 'X'})
+        client.put(f'/api/v1/dcim/racks/{rack}', json={'name': 'RK-nuevo'})
+        hist = self._hist(client, rack)
+        assert hist[0]['action'] == 'rack_edit'
+        assert any(c['kind'] == 'rack' and c['field'] == 'name' for c in hist[0]['changed'])
+
+    def test_guardar_sin_cambiar_nada_no_es_una_version(self, admin, client):
+        """Un formulario manda la ficha entera cada vez que se pulsa guardar, y doce renglones
+        idénticos no dicen qué pasó: dicen que alguien pulsó un botón."""
+        _login(client)
+        rack = self._rack(client, 'RK-igual')
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 1,
+                                'label': 'X'}).get_json()['uid']
+        antes = len(self._hist(client, rack))
+        for _ in range(3):
+            client.put(f'/api/v1/dcim/items/{uid}', json={'label': 'X'})
+        assert len(self._hist(client, rack)) == antes
+
+    def test_mudarse_de_armario_deja_foto_en_LOS_DOS(self, admin, client):
+        """Para el de origen ese equipo se fue; para el de destino, llegó. Guardar sólo el de
+        destino deja al primero enseñando una máquina que ya no está."""
+        _login(client)
+        a = self._rack(client, 'RK-a')
+        b = self._rack(client, 'RK-b')
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': a, 'u_start': 1,
+                                'label': 'X'}).get_json()['uid']
+        n_a = len(self._hist(client, a))
+        client.put(f'/api/v1/dcim/items/{uid}', json={'rack_uid': b, 'u_start': 1})
+        assert len(self._hist(client, a)) == n_a + 1, 'el de origen no se enteró'
+        assert self._hist(client, b), 'el de destino tampoco'
+
+    def test_la_primera_version_no_inventa_seis_llegadas(self, admin, client):
+        """No tiene anterior contra la que compararse. Decir «llegaron seis equipos» sería
+        cierto y no sería lo que pasó: lo que pasó es que el armario empezó a guardarse."""
+        _login(client)
+        rack = self._rack(client, 'RK-primera')
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'u_start': 1, 'label': 'X'})
+        assert self._hist(client, rack)[-1]['changed'] == []
+
+    def test_un_armario_que_no_existe_no_tiene_historial(self, admin, client):
+        _login(client)
+        assert client.get('/api/v1/dcim/racks/no-existe/history').status_code == 404
+
+
+class TestColocarAlgoDelCatalogoSinPlantilla:
+    """La mitad de lo que se pone en un armario no tiene estándar de compra: una tapa ciega, una
+    regleta, una bandeja, un panel de parcheo. Obligar a declarar una plantilla para poder
+    colocar una tapa es pedir el estándar de una tapa.
+
+    Con el modelo basta, y de él sale lo único que la biblioteca sabe de verdad: **cuánto mide**
+    — el dato del que depende que quepa.
+    """
+
+    def _rack(self, client, nombre='RK-cat'):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        return client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 20}).get_json()['uid']
+
+    def test_la_altura_sale_del_modelo(self, admin, client):
+        _login(client)
+        cat = admin._dcim_catalog                              # noqa: SLF001
+        tipo = cat.create({'manufacturer': 'Generico', 'model': 'Bandeja 2U',
+                           'u_tenths': 20})
+        rack = self._rack(client)
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 1, 'label': 'Bandeja',
+                                'type_uid': tipo}).get_json()['uid']
+        fila = admin._dcim_store.items.get(uid)                # noqa: SLF001
+        assert fila['u_height'] == 2, fila
+
+    def test_media_U_ocupa_UNA(self, admin, client):
+        """Un panel de 0,5 U ocupa un U y comparte sus dos mitades. Hacia abajo daría cero, y
+        una caja que ocupa cero U es una que el dibujo no pinta."""
+        _login(client)
+        cat = admin._dcim_catalog                              # noqa: SLF001
+        tipo = cat.create({'manufacturer': 'Generico', 'model': 'Panel medio',
+                           'u_tenths': 5})
+        rack = self._rack(client, 'RK-medio')
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 1, 'type_uid': tipo}
+                          ).get_json()['uid']
+        assert admin._dcim_store.items.get(uid)['u_height'] == 1   # noqa: SLF001
+
+    def test_lo_tecleado_manda_sobre_el_catalogo(self, admin, client):
+        """Quien acaba de medir la caja con un metro sabe más que la biblioteca."""
+        _login(client)
+        cat = admin._dcim_catalog                              # noqa: SLF001
+        tipo = cat.create({'manufacturer': 'Generico', 'model': 'X', 'u_tenths': 20})
+        rack = self._rack(client, 'RK-manda')
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 1, 'u_height': 3,
+                                'type_uid': tipo}).get_json()['uid']
+        assert admin._dcim_store.items.get(uid)['u_height'] == 3   # noqa: SLF001
+
+    def test_un_modelo_que_no_existe_no_se_guarda(self, admin, client):
+        """Guardar el identificador dejaría un equipo afirmando ser algo que no está, y eso no
+        da ningún error al escribirlo."""
+        _login(client)
+        rack = self._rack(client, 'RK-fantasma')
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 1,
+                                'type_uid': 'no-existe'}).get_json()['uid']
+        assert admin._dcim_store.items.get(uid)['type_uid'] == ''  # noqa: SLF001
+
+    def test_y_el_armario_dice_como_se_llama_ese_modelo(self, admin, client):
+        """Sin el nombre, la ficha sólo puede enseñar el identificador — treinta y seis
+        caracteres que no dicen nada."""
+        _login(client)
+        cat = admin._dcim_catalog                              # noqa: SLF001
+        tipo = cat.create({'manufacturer': 'Generico', 'model': 'Regleta 8'})
+        rack = self._rack(client, 'RK-nombre-tipo')
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'u_start': 1, 'type_uid': tipo})
+        d = client.get(f'/api/v1/dcim/racks/{rack}').get_json()
+        assert d['items'][0]['type_name'] == 'Generico Regleta 8'
+
+
+class TestEnQueTomaEstaEnchufado:
+    """La columna `outlet` existía desde el primer commit, la API la aceptaba, la respuesta la
+    devolvía y la tabla la pintaba — y ningún camino la escribía nunca. Quinta vez que sale esta
+    forma en esta sección: una columna que nadie puede escribir vale siempre su valor por
+    defecto, y el código que la respeta parece que funciona.
+    """
+
+    def _armario(self, client, nombre):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+        pdu = client.post('/api/v1/dcim/pdus',
+                          json={'rack_uid': rack, 'name': 'PDU-A', 'feed': 'a',
+                                'outlets': 4}).get_json()['uid']
+        item = client.post('/api/v1/dcim/items',
+                           json={'rack_uid': rack, 'u_start': 1,
+                                 'label': 'SRV'}).get_json()['uid']
+        return rack, pdu, item
+
+    def test_la_toma_se_guarda_y_vuelve(self, admin, client):
+        _login(client)
+        rack, pdu, item = self._armario(client, 'RK-toma')
+        r = client.post('/api/v1/dcim/feeds',
+                        json={'item_uid': item, 'pdu_uid': pdu, 'outlet': 3})
+        assert r.status_code == 200, r.get_json()
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert d['items'][0]['feeds'][0]['outlet'] == 3
+        assert d['pdus'][0]['outlets_used'] == [3]
+
+    def test_dos_cables_en_la_misma_toma_no(self, admin, client):
+        """Es físicamente imposible, y un inventario que lo dice se descubre desenchufando."""
+        _login(client)
+        rack, pdu, item = self._armario(client, 'RK-toma2')
+        otro = client.post('/api/v1/dcim/items',
+                           json={'rack_uid': rack, 'u_start': 2,
+                                 'label': 'SRV2'}).get_json()['uid']
+        client.post('/api/v1/dcim/feeds', json={'item_uid': item, 'pdu_uid': pdu, 'outlet': 2})
+        r = client.post('/api/v1/dcim/feeds', json={'item_uid': otro, 'pdu_uid': pdu,
+                                                    'outlet': 2})
+        assert r.status_code == 400, r.get_json()
+
+    def test_una_toma_que_la_regleta_no_tiene_tampoco(self, admin, client):
+        _login(client)
+        rack, pdu, item = self._armario(client, 'RK-toma3')
+        r = client.post('/api/v1/dcim/feeds',
+                        json={'item_uid': item, 'pdu_uid': pdu, 'outlet': 9})
+        assert r.status_code == 400, r.get_json()
+
+    def test_no_saber_en_cual_sigue_siendo_una_respuesta(self, admin, client):
+        """Es lo que alguien sabe mirando la foto de un armario, y obligarle a inventarse un
+        número sería peor dato que ninguno."""
+        _login(client)
+        rack, pdu, item = self._armario(client, 'RK-toma4')
+        r = client.post('/api/v1/dcim/feeds', json={'item_uid': item, 'pdu_uid': pdu})
+        assert r.status_code == 200, r.get_json()
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert d['pdus'][0]['outlets_used'] == []
+        # Pero la toma sigue ocupada: hay un cable dentro aunque nadie sepa en cuál.
+        assert d['pdus'][0]['free'] == 3
+
+    def test_un_cable_se_cambia_de_toma_sin_perder_lo_declarado(self, admin, client):
+        """Quitarlo y volverlo a poner se lleva por delante lo que alguien declaró que
+        consume."""
+        _login(client)
+        rack, pdu, item = self._armario(client, 'RK-toma5')
+        cable = client.post('/api/v1/dcim/feeds',
+                            json={'item_uid': item, 'pdu_uid': pdu, 'outlet': 1,
+                                  'watts_said': 250}).get_json()['uid']
+        r = client.put(f'/api/v1/dcim/feeds/{cable}', json={'outlet': 4})
+        assert r.status_code == 200, r.get_json()
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert d['items'][0]['feeds'][0]['outlet'] == 4
+        assert d['items'][0]['feeds'][0]['watts_said'] == 250
+
+    def test_y_no_se_le_puede_mover_encima_de_otro(self, admin, client):
+        _login(client)
+        rack, pdu, item = self._armario(client, 'RK-toma6')
+        otro = client.post('/api/v1/dcim/items',
+                           json={'rack_uid': rack, 'u_start': 2,
+                                 'label': 'SRV2'}).get_json()['uid']
+        cable = client.post('/api/v1/dcim/feeds',
+                            json={'item_uid': item, 'pdu_uid': pdu,
+                                  'outlet': 1}).get_json()['uid']
+        client.post('/api/v1/dcim/feeds', json={'item_uid': otro, 'pdu_uid': pdu, 'outlet': 2})
+        r = client.put(f'/api/v1/dcim/feeds/{cable}', json={'outlet': 2})
+        assert r.status_code == 400, r.get_json()
+        # Y dejarlo donde está no es un choque consigo mismo.
+        assert client.put(f'/api/v1/dcim/feeds/{cable}', json={'outlet': 1}).status_code == 200
+
+
+class TestUnaRegletaColocadaSePuedeDeclarar:
+    """Una regleta que ocupa un U es un equipo del armario; una regleta donde se enchufa es una
+    fila con ramas y tomas. Son la misma cosa vista desde dos sitios, y hasta que alguien las une
+    el panel no ofrece como enchufe la que se acaba de colocar — que es lo que espera quien acaba
+    de colocarla.
+    """
+
+    def _rack(self, client, nombre='RK-pdu'):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        return client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 20}).get_json()['uid']
+
+    def _regleta(self, client, rack, u=5):
+        return client.post('/api/v1/dcim/items',
+                           json={'rack_uid': rack, 'u_start': u, 'label': 'Regleta',
+                                 'role': 'pdu'}).get_json()['uid']
+
+    def test_el_armario_dice_que_esta_sin_declarar(self, admin, client):
+        _login(client)
+        rack = self._rack(client)
+        uid = self._regleta(client, rack)
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert [x['uid'] for x in d['undeclared_pdus']] == [uid], d['undeclared_pdus']
+
+    def test_y_deja_de_decirlo_al_declararla(self, admin, client):
+        _login(client)
+        rack = self._rack(client, 'RK-pdu2')
+        uid = self._regleta(client, rack)
+        r = client.post('/api/v1/dcim/pdus',
+                        json={'rack_uid': rack, 'item_uid': uid, 'name': 'Regleta',
+                              'feed': 'a', 'outlets': 8})
+        assert r.status_code == 200, r.get_json()
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert d['undeclared_pdus'] == []
+        assert [p['name'] for p in d['pdus']] == ['Regleta']
+
+    def test_el_enlace_vuelve_en_la_respuesta(self, admin, client):
+        """Guardado y **devuelto**. La pantalla que ofrece «cuál es la regleta» descarta las que
+        ya lo están mirando este campo: sin él ofrece la misma otra vez, y la segunda crea una
+        regleta duplicada del mismo cacharro con sus tomas contadas dos veces.
+
+        Un campo que se escribe y no vuelve es la forma de fallo que lleva toda esta sección
+        repitiéndose: nada da error, y el que lo lee ve siempre el valor por defecto.
+        """
+        _login(client)
+        rack = self._rack(client, 'RK-pdu-link')
+        uid = self._regleta(client, rack)
+        client.post('/api/v1/dcim/pdus',
+                    json={'rack_uid': rack, 'item_uid': uid, 'name': 'R', 'feed': 'a',
+                          'outlets': 8})
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert [p['item_uid'] for p in d['pdus']] == [uid], d['pdus']
+
+    def test_una_regleta_sin_rol_tambien_se_puede_declarar(self, admin, client):
+        """Lo que se coloca desde el catálogo nace SIN rol —nadie ha dicho todavía qué es— y por
+        eso el aviso de arriba no lo ve. La lista de la que se elige no puede depender de que
+        alguien haya contestado antes la pregunta que se está haciendo ahora."""
+        _login(client)
+        rack = self._rack(client, 'RK-pdu-sinrol')
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 3,
+                                'label': 'Regleta'}).get_json()['uid']
+        r = client.post('/api/v1/dcim/pdus',
+                        json={'rack_uid': rack, 'item_uid': uid, 'name': 'Regleta',
+                              'feed': 'a', 'outlets': 8})
+        assert r.status_code == 200, r.get_json()
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert [p['item_uid'] for p in d['pdus']] == [uid]
+        # Y deja de contarse entre lo que come, que es lo que hacía por el simple hecho de no
+        # tener rol: una regleta pidiéndose un enchufe a sí misma.
+        assert uid not in [x['uid'] for x in d['items']]
+
+    def test_una_regleta_declarada_no_es_un_consumidor(self, admin, client):
+        """No se enchufa a sí misma, y listarla entre lo que come es pedirle un enchufe a lo que
+        da los enchufes."""
+        _login(client)
+        rack = self._rack(client, 'RK-pdu3')
+        uid = self._regleta(client, rack)
+        client.post('/api/v1/dcim/pdus',
+                    json={'rack_uid': rack, 'item_uid': uid, 'name': 'R', 'feed': 'a',
+                          'outlets': 8})
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert uid not in [x['uid'] for x in d['items']]
+
+    def test_una_regleta_que_no_ocupa_U_sigue_pudiendo_existir(self, admin, client):
+        """La mayoría van atornilladas al lateral. Por eso `item_uid` puede ir vacío y por eso
+        no son la misma tabla."""
+        _login(client)
+        rack = self._rack(client, 'RK-pdu4')
+        r = client.post('/api/v1/dcim/pdus',
+                        json={'rack_uid': rack, 'name': 'Vertical', 'feed': 'b', 'outlets': 24})
+        assert r.status_code == 200
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert [p['name'] for p in d['pdus']] == ['Vertical']
+
+    def test_y_los_equipos_dicen_de_que_clase_son(self, admin, client):
+        """De ahí sale que a una bandeja no se le pida un enchufe."""
+        _login(client)
+        rack = self._rack(client, 'RK-clase')
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'u_start': 1, 'label': 'Bandeja',
+                          'role': 'shelf'})
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert d['items'][0]['role'] == 'shelf'
+        assert 'shelf' in d['quiet_roles']
+
+
+class TestLosHuecosDeUnPanelSalenDeSuModelo:
+    """La pantalla solo sabía mirar la plantilla, y un panel de parcheo no nace de ninguna: no
+    tiene estándar de compra ni componentes que estampar, se coloca directamente desde el
+    catálogo. Así que en su ficha nunca había lista de huecos y siempre había que teclear el
+    nombre — y de ahí salen `hueco 7`, `Hueco-7` y `7` para el mismo sitio.
+    """
+
+    def _panel(self, client, nombre='RK-keystone'):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+        tipo = client.post('/api/v1/dcim/catalog', json={
+            'tree': 'device-types', 'manufacturer': 'Generico', 'model': 'KS-24',
+            'u': 1, 'ports': {'front-ports': {'8p8c': 24}}}).get_json().get('uid')
+        item = client.post('/api/v1/dcim/items',
+                           json={'rack_uid': rack, 'u_start': 1, 'label': 'Panel',
+                                 'role': 'patch_panel',
+                                 'type_uid': tipo or ''}).get_json()['uid']
+        return item, tipo
+
+    def test_el_modelo_viaja_con_las_piezas(self, admin, client):
+        _login(client)
+        item, tipo = self._panel(client)
+        if not tipo:
+            pytest.skip('esta instalación no deja escribir en el catálogo')
+        d = client.get(f'/api/v1/dcim/items/{item}/parts').get_json()
+        assert (d.get('model') or {}).get('uid') == tipo, d.get('model')
+        assert (d['model']['ports'] or {}).get('front-ports'),             'el modelo llega sin sus huecos, así que no hay de dónde elegir'
+
+    def test_y_sin_modelo_no_se_inventa_uno(self, admin, client):
+        """Un equipo sin modelo casado no tiene huecos declarados, y decir que tiene cero sería
+        distinto de no saberlo."""
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': 'RK-ks2'}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'RK-ks2',
+                                 'u_height': 10}).get_json()['uid']
+        item = client.post('/api/v1/dcim/items',
+                           json={'rack_uid': rack, 'u_start': 1,
+                                 'label': 'X'}).get_json()['uid']
+        d = client.get(f'/api/v1/dcim/items/{item}/parts').get_json()
+        assert 'model' not in d or d['model'] is None
+
+    def test_un_conector_se_guarda_en_su_hueco(self, admin, client):
+        _login(client)
+        item, _tipo = self._panel(client, 'RK-ks3')
+        r = client.post('/api/v1/dcim/parts',
+                        json={'item_uid': item, 'kind': 'jack', 'slot': 'RJ45 7',
+                              'brand': 'Digitus', 'model': 'Keystone cat6'})
+        assert r.status_code == 200, r.get_json()
+        d = client.get(f'/api/v1/dcim/items/{item}/parts').get_json()
+        puesto = [p for p in d['parts'] if p['kind'] == 'jack']
+        assert len(puesto) == 1 and puesto[0]['slot'] == 'RJ45 7'
+
+
+class TestLasPestanasDicenLoQueTienenSinAbrirlas:
+    """Un número que sólo aparece después de entrar no contesta la pregunta para la que está
+    —¿hay algo ahí?— y la contesta al revés: una pestaña sin número parece una vacía.
+    """
+
+    def test_el_armario_trae_los_recuentos(self, admin, client):
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': 'RK-cnt'}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'RK-cnt',
+                                 'u_height': 10}).get_json()['uid']
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1, 'label': 'A'}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2, 'label': 'B'}).get_json()['uid']
+        pdu = client.post('/api/v1/dcim/pdus',
+                          json={'rack_uid': rack, 'name': 'P', 'feed': 'a',
+                                'outlets': 8}).get_json()['uid']
+        client.post('/api/v1/dcim/cables', json={'a_item': a, 'b_item': b})
+        client.post('/api/v1/dcim/feeds', json={'item_uid': a, 'pdu_uid': pdu, 'outlet': 1})
+        d = client.get(f'/api/v1/dcim/racks/{rack}').get_json()
+        c = d.get('counts') or {}
+        assert c.get('cables') == 1, c
+        assert c.get('power') == 1, c
+        # El historial se escribe solo al colocar cosas, así que aquí ya hay varias fotos.
+        assert c.get('hist', 0) >= 1, c
+
+    def test_y_la_alimentacion_ya_no_cuenta_las_ramas(self, admin, client):
+        """`feeds` en la respuesta eran las tres RAMAS —`a`, `b` y ninguna— y el contador las
+        leía como cables: un armario sin un solo cable declarado enseñaba un «3»."""
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': 'RK-cnt2'}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'RK-cnt2',
+                                 'u_height': 10}).get_json()['uid']
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert 'feeds' not in d, 'la clave que el contador confundía sigue ahí'
+        assert d.get('feed_kinds'), 'las ramas ya no viajan con su nombre nuevo'
+        assert (client.get(f'/api/v1/dcim/racks/{rack}').get_json()
+                .get('counts', {}).get('power') == 0)
+
+
+class TestElCableadoSePideEnDosVeces:
+    """Lo declarado se lee de la base y está en milisegundos; el contraste hay que armarlo
+    recorriendo la flota entera. Esperarlo para poder pintar la primera fila dejaba la pestaña en
+    blanco por un dato que ocupa la última columna.
+    """
+
+    def _rack(self, client, nombre):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1, 'label': 'A'}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2, 'label': 'B'}).get_json()['uid']
+        client.post('/api/v1/dcim/cables', json={'a_item': a, 'b_item': b, 'label': 'L1'})
+        return rack
+
+    def test_la_primera_trae_las_filas_y_ningun_veredicto(self, admin, client):
+        _login(client)
+        rack = self._rack(client, 'RK-cbl2')
+        d = client.get(f'/api/v1/dcim/racks/{rack}/cables').get_json()
+        assert d['checked'] is False
+        assert [c['label'] for c in d['cables']] == ['L1']
+        assert all('seen' not in c for c in d['cables']),             'la lista rápida reparte veredictos sin haber mirado'
+
+    def test_y_la_segunda_los_trae(self, admin, client):
+        _login(client)
+        rack = self._rack(client, 'RK-cbl3')
+        d = client.get(f'/api/v1/dcim/racks/{rack}/cables?check=1').get_json()
+        assert d['checked'] is True
+        assert d['cables'][0].get('seen')
+
+
+class TestElPanelPuedeEstarEnOtroArmario:
+    """En una sala de verdad los paneles viven en el rack de patcheo y no en el del servidor: sin
+    los tramos de más allá, el camino se corta justo donde empieza a hacer falta.
+    """
+
+    def test_los_cables_del_panel_vecino_entran_en_la_respuesta(self, admin, client):
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': 'RK-pp'}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        r1 = client.post('/api/v1/dcim/racks',
+                         json={'room_uid': sala, 'name': 'R1', 'u_height': 10}).get_json()['uid']
+        r2 = client.post('/api/v1/dcim/racks',
+                         json={'room_uid': sala, 'name': 'R2', 'u_height': 10}).get_json()['uid']
+        srv = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': r1, 'u_start': 1, 'label': 'SRV',
+                                'role': 'server'}).get_json()['uid']
+        # El panel y el switch, en el armario de AL LADO.
+        pp = client.post('/api/v1/dcim/items',
+                         json={'rack_uid': r2, 'u_start': 1, 'label': 'PP',
+                               'role': 'patch_panel'}).get_json()['uid']
+        sw = client.post('/api/v1/dcim/items',
+                         json={'rack_uid': r2, 'u_start': 2, 'label': 'SW',
+                               'role': 'switch'}).get_json()['uid']
+        client.post('/api/v1/dcim/cables', json={'a_item': srv, 'b_item': pp, 'label': 'L1'})
+        client.post('/api/v1/dcim/cables', json={'a_item': pp, 'b_item': sw, 'label': 'L2'})
+        # Desde el armario del servidor se ven los DOS tramos: el suyo y el que sale del panel.
+        d = client.get(f'/api/v1/dcim/racks/{r1}/cables?check=1').get_json()
+        assert sorted(c['label'] for c in d['cables']) == ['L1', 'L2'],             'el tramo de más allá del panel no entra, así que el camino se corta'
+
+
+class TestMeterUnPanelEnMedioDeUnCable:
+    """Los enlaces se apuntan primero de punta a punta —«el servidor va al switch», que es lo que
+    uno sabe— y los paneles aparecen después. Sin poder partir el cable, corregirlo es borrarlo y
+    escribir tres: se pierden la etiqueta, el color y las dos bocas, así que no se corrige.
+    """
+
+    def _sala(self, client, nombre):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        return client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+
+    def test_se_busca_un_equipo_por_su_etiqueta(self, admin, client):
+        _login(client)
+        rack = self._sala(client, 'RK-find')
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'u_start': 1, 'label': 'PP-SALA-A',
+                          'role': 'patch_panel'})
+        d = client.get('/api/v1/dcim/items?q=pp-sala').get_json()
+        assert [i['label'] for i in d['items']] == ['PP-SALA-A']
+        # Y dice DÓNDE está: «PP-A» a secas no distingue dos paneles de dos armarios.
+        assert d['items'][0]['rack'] == 'RK-find'
+
+    def test_y_no_sale_lo_que_no_se_puede_ver(self, admin, client, fleet):
+        """Esto ofrece dónde escribir, y ofrecer algo ajeno es ofrecer escribir en su
+        inventario. Ni siquiera opaco: un armario compartido dibuja lo ajeno porque ocupa un U,
+        y aquí no se dibuja nada — se elige.
+        """
+        c = _as(admin, 'busca-b', ['dcim_view', f'org.{fleet["b"]}.view'])
+        uids = [i['uid'] for i in c.get('/api/v1/dcim/items').get_json()['items']]
+        assert fleet['theirs'] in uids, 'lo suyo tampoco sale'
+        assert fleet['mine'] not in uids, 'sale el equipo del vecino'
+
+    def test_el_cable_se_parte_en_dos_tramos(self, admin, client):
+        _login(client)
+        rack = self._sala(client, 'RK-split')
+        srv = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 1, 'label': 'SRV',
+                                'role': 'server'}).get_json()['uid']
+        sw = client.post('/api/v1/dcim/items',
+                         json={'rack_uid': rack, 'u_start': 2, 'label': 'SW',
+                               'role': 'switch'}).get_json()['uid']
+        pp = client.post('/api/v1/dcim/items',
+                         json={'rack_uid': rack, 'u_start': 3, 'label': 'PP',
+                               'role': 'patch_panel'}).get_json()['uid']
+        cable = client.post('/api/v1/dcim/cables',
+                            json={'a_item': srv, 'a_port': 'eno1', 'b_item': sw,
+                                  'b_port': 'gi1', 'label': 'L1'}).get_json()['uid']
+        # Lo que hace la pantalla: primero el tramo nuevo, después mover el viejo.
+        client.post('/api/v1/dcim/cables',
+                    json={'a_item': pp, 'a_port': '12', 'b_item': sw, 'b_port': 'gi1'})
+        r = client.put(f'/api/v1/dcim/cables/{cable}', json={'b_item': pp, 'b_port': '12'})
+        assert r.status_code == 200, r.get_json()
+        d = client.get(f'/api/v1/dcim/racks/{rack}/cables?check=1').get_json()
+        assert len(d['cables']) == 2
+        # El de siempre se queda con su etiqueta y su boca: es lo que se perdía al borrarlo.
+        viejo = [c for c in d['cables'] if c['uid'] == cable][0]
+        assert viejo['label'] == 'L1' and viejo['a_port'] == 'eno1'
+        assert viejo['b_item'] == pp
+
+
+class TestLaBusquedaDeEquiposSabeNombrarlos:
+    """La mitad de lo que hay en un armario no está rotulado —una tapa, una bandeja, un panel
+    recién puesto— y la búsqueda devolvía sólo la etiqueta: la pantalla caía al identificador,
+    que es justo lo que su función de nombrar existe para no enseñar. Sexta vez que sale esta
+    forma en esta sección.
+    """
+
+    def _rack(self, client, nombre='RK-nom'):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        return client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+
+    def test_cada_fila_trae_con_que_nombrarse(self, admin, client):
+        _login(client)
+        rack = self._rack(client)
+        tipo = client.post('/api/v1/dcim/catalog', json={
+            'tree': 'device-types', 'manufacturer': 'Generico', 'model': 'Regleta 8',
+            'u': 1}).get_json().get('uid')
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'u_start': 7, 'role': 'pdu',
+                          'type_uid': tipo or ''})
+        fila = [i for i in client.get('/api/v1/dcim/items').get_json()['items']
+                if i['rack'] == 'RK-nom'][0]
+        assert fila['label'] == '', 'la prueba deja de probar lo que probaba'
+        assert fila['type_name'] == 'Generico Regleta 8'
+        assert fila['role'] == 'pdu'
+        assert 'host_uid' in fila
+
+    def test_y_se_puede_buscar_por_el_modelo(self, admin, client):
+        """De lo que no está rotulado, el modelo es lo único que alguien sabe."""
+        _login(client)
+        rack = self._rack(client, 'RK-nom2')
+        tipo = client.post('/api/v1/dcim/catalog', json={
+            'tree': 'device-types', 'manufacturer': 'Digitus', 'model': 'DN-91424',
+            'u': 1}).get_json().get('uid')
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'u_start': 2, 'role': 'patch_panel',
+                          'type_uid': tipo or ''})
+        d = client.get('/api/v1/dcim/items?q=dn-914').get_json()
+        assert [i['type_name'] for i in d['items']] == ['Digitus DN-91424']
+
+
+class TestUnPuenteSeGuarda:
+    """La regla «un cable va de un equipo a OTRO» vivía sólo en el navegador, que es lo mismo que
+    no vivir en ninguna parte: la escritura entra por la API con o sin pantalla delante.
+    """
+
+    def _panel(self, client, nombre='RK-puente'):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+        return client.post('/api/v1/dcim/items',
+                           json={'rack_uid': rack, 'u_start': 1, 'label': 'PP',
+                                 'role': 'patch_panel'}).get_json()['uid']
+
+    def test_de_una_boca_a_otra_del_mismo_panel(self, admin, client):
+        _login(client)
+        pp = self._panel(client)
+        r = client.post('/api/v1/dcim/cables',
+                        json={'a_item': pp, 'a_port': '25', 'b_item': pp, 'b_port': '17'})
+        assert r.status_code == 200, r.get_json()
+
+    def test_pero_no_de_una_boca_a_ella_misma(self, admin, client):
+        _login(client)
+        pp = self._panel(client, 'RK-puente2')
+        r = client.post('/api/v1/dcim/cables',
+                        json={'a_item': pp, 'a_port': '25', 'b_item': pp, 'b_port': '25'})
+        assert r.status_code == 400, r.get_json()
+
+    def test_ni_sin_decir_por_donde(self, admin, client):
+        """«Este equipo se une consigo mismo» no describe nada que se pueda ir a mirar."""
+        _login(client)
+        pp = self._panel(client, 'RK-puente3')
+        r = client.post('/api/v1/dcim/cables', json={'a_item': pp, 'b_item': pp})
+        assert r.status_code == 400, r.get_json()
+
+
+class TestUnCableEsInventario:
+    """`length_mm` y `description` existían desde el primer commit y **ningún camino las
+    escribía**: valían siempre su valor por defecto. Y de qué categoría es —Cat 6A, OM4— no se
+    podía decir en ninguna parte, que es el dato que decide si un enlace de 10 Gb va a funcionar.
+    """
+
+    def _dos(self, client, nombre):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1, 'label': 'A'}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2, 'label': 'B'}).get_json()['uid']
+        return rack, a, b
+
+    def test_se_guarda_categoria_metros_y_nota(self, admin, client):
+        _login(client)
+        rack, a, b = self._dos(client, 'RK-inv')
+        r = client.post('/api/v1/dcim/cables',
+                        json={'a_item': a, 'b_item': b, 'label': 'C-014',
+                              'kind': 'copper', 'category': 'cat6a',
+                              'length_mm': 3000, 'description': 'por la bandeja de arriba'})
+        assert r.status_code == 200, r.get_json()
+        c = client.get(f'/api/v1/dcim/racks/{rack}/cables').get_json()['cables'][0]
+        assert c['label'] == 'C-014' and c['category'] == 'cat6a'
+        assert c['length_mm'] == 3000
+        assert c['description'] == 'por la bandeja de arriba'
+
+    def test_y_las_categorias_viajan_con_la_respuesta(self, admin, client):
+        """Como los colores de las ramas: una segunda copia en la pantalla es la que se queda sin
+        la categoría que se añada mañana."""
+        _login(client)
+        rack, _a, _b = self._dos(client, 'RK-inv2')
+        d = client.get(f'/api/v1/dcim/racks/{rack}/cables').get_json()
+        assert 'cat6a' in (d['categories'] or {}).get('copper', [])
+        assert 'om4' in (d['categories'] or {}).get('fiber', [])
+        assert 'copper' in (d['kinds'] or [])
+
+    def test_cada_parada_del_camino_dice_donde_esta(self, admin, client):
+        """«PP-A 25» no dice adónde hay que ir: un camino sale del armario abierto casi
+        siempre."""
+        _login(client)
+        rack, srv, sw = self._dos(client, 'RK-donde')
+        pp = client.post('/api/v1/dcim/items',
+                         json={'rack_uid': rack, 'u_start': 5, 'label': 'PP',
+                               'role': 'patch_panel'}).get_json()['uid']
+        client.post('/api/v1/dcim/cables',
+                    json={'a_item': srv, 'a_port': 'eno1', 'b_item': pp, 'b_port': '25'})
+        client.post('/api/v1/dcim/cables',
+                    json={'a_item': pp, 'a_port': '25', 'b_item': sw, 'b_port': 'gi1'})
+        d = client.get(f'/api/v1/dcim/racks/{rack}/cables?check=1').get_json()
+        # Sin sondas no hay camino confirmado, pero las puntas de cada tramo saben dónde están:
+        # es lo mismo que se pinta cuando sí lo hay.
+        assert d['checked'] is True
+        c = [x for x in d['cables'] if x['b_item'] == pp][0]
+        assert c['b_item'] == pp

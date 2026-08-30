@@ -15,6 +15,8 @@ Rutas:
     DELETE  /api/v1/dcim/items/<uid>
     GET     /api/v1/dcim/items/<uid>/parts
     GET     /api/v1/dcim/media-dir
+    GET     /api/v1/dcim/racks/<uid>/history
+    GET     /api/v1/dcim/said
     POST    /api/v1/dcim/parts
     PUT     /api/v1/dcim/parts/<uid>
     DELETE  /api/v1/dcim/parts/<uid>
@@ -30,6 +32,7 @@ from lib.core.dcim import builds as dcim_builds
 from lib.core.dcim import catalog as dcim_catalog
 from lib.core.dcim import media as dcim_media
 from lib.core.dcim import owners as dcim_owners
+from lib.core.dcim import rackrev as dcim_rackrev
 from lib.core.dcim import service as dcim_svc
 from lib.core.dcim.store import FACES, ITEM_ROLES, LINK_KINDS, PART_KINDS
 from lib.core.dcim.routes._common import _num, _without
@@ -183,6 +186,21 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('access_denied')}), 403
         salida = {'parts': store.parts_of([uid]), 'kinds': list(PART_KINDS),
                   'component_tree': dcim_catalog.COMPONENT_TREE}
+        # Los huecos que declara su MODELO. Son lo que hace que «en cuál va» se pueda ELEGIR en
+        # vez de teclear, y sin ellos el mismo hueco acaba escrito de tres maneras —`hueco 7`,
+        # `Hueco-7`, `7`— y entonces «qué hay en el 7» no tiene respuesta.
+        #
+        # Hacía falta aquí porque la pantalla solo sabía mirar la plantilla, y un panel de
+        # parcheo no nace de ninguna: no tiene estándar de compra que estampar, se coloca
+        # directamente desde el catálogo. Se manda con la forma de una plantilla —`ports` y
+        # `port_list`— para que lo lea el mismo código: dos lectores de lo mismo se separan.
+        modelo = str(item.get('type_uid') or '')
+        cat = getattr(wa, '_dcim_catalog', None)
+        fila = (cat.get(modelo) if (modelo and cat and hasattr(cat, 'get')) else None) or None
+        if fila:
+            salida['model'] = {'uid': str(fila.get('uid') or modelo),
+                               'ports': fila.get('ports') or {},
+                               'port_list': fila.get('port_list') or {}}
         # Y lo que su plantilla decía, si nació de una. Ninguna de las dos partes es «el error»:
         # que una máquina se separe de su estándar es un hecho sobre esa máquina —le cambiaron
         # los discos— y la diferencia ES el dato, igual que en el contraste de cableado.
@@ -333,26 +351,48 @@ def register(app, wa, C):
         # porque el alzado ya recibe los items: pedir el catálogo aparte para pintar cuarenta
         # cajas sería una petición para saber si hay una foto.
         cat = getattr(wa, '_dcim_catalog', None)
-        fotos = {}
+        fotos, nombres = {}, {}
         for item in items:
             tipo = str(item.get('type_uid') or '')
             if tipo and cat and tipo not in fotos:
                 fila = cat.get(tipo) if hasattr(cat, 'get') else None
                 fotos[tipo] = {'front': str((fila or {}).get('front_image') or ''),
                                'rear': str((fila or {}).get('rear_image') or '')}
+                nombres[tipo] = ' '.join(
+                    x for x in (str((fila or {}).get('manufacturer') or ''),
+                                str((fila or {}).get('model') or '')) if x)
         for item in items:
             if not item.get('foreign'):
                 item['depth'] = dcim_svc.fits_depth(rack, item.get('depth_mm'))
                 # …y de un equipo ajeno tampoco sale su foto: la foto dice el modelo, y el
                 # modelo es de las cosas que un armario compartido no cuenta.
                 item['images'] = fotos.get(str(item.get('type_uid') or '')) or {}
+                # Y cómo se LLAMA ese modelo. La ficha lo tiene que enseñar, y sin el nombre
+                # sólo puede enseñar el identificador — treinta y seis caracteres que no dicen
+                # nada, que es lo que ya pasaba con las plantillas.
+                item['type_name'] = nombres.get(str(item.get('type_uid') or ''), '')
                 # Y qué CREE el catálogo que es, cuando nadie lo ha dicho. Propone, no
                 # escribe: la biblioteca no trae el rol y esto se deduce de los puertos.
                 if not str(item.get('role') or '') and cat:
                     tipo = cat.get(str(item.get('type_uid') or '')) if item.get('type_uid') \
                         else None
                     item['role_hint'] = dcim_svc.role_hint(tipo)
+        # Cuántas filas hay detrás de cada pestaña. **Aquí y no al abrir cada una**: un número
+        # que sólo aparece después de entrar no contesta la pregunta para la que está —¿hay algo
+        # ahí?— y la contesta al revés, porque una pestaña sin número parece una pestaña vacía.
+        # Es la misma decisión que los recuentos de las pestañas del catálogo.
+        #
+        # Contando lo que este lector VE, como todo lo demás: los cables de sus equipos y las
+        # regletas de este armario.
+        mios = [it['uid'] for it in items if not it.get('foreign')]
         return jsonify({'rack': dict(rack, org_uid=C.owner_of(store, said, 'rack', uid)),
+                        'counts': {
+                            'cables': len(store.cables_of(mios) or ()),
+                            'power': len(store.feeds_of(
+                                [p['uid'] for p in store.pdus_of(uid)]) or ()),
+                            'hist': len(store.revs.history(
+                                uid, scope=dcim_rackrev.SCOPE) or ()),
+                        },
                         'items': items,
                         'depths': dcim_svc.rack_depths(rack),
                         # Lo que no cuadra entre por dónde se entra y lo que hay montado. Se
@@ -363,6 +403,57 @@ def register(app, wa, C):
                         'roll': dcim_svc.rack_roll(items, statuses)})
 
     # ── What is in a rack ─────────────────────────────────────────────────────
+
+    def _slot_ok(data) -> str:
+        """Que el trozo pedido exista dentro de su reparto. Vacío si está bien.
+
+        Aparte porque lo preguntan los dos caminos —lo que se atornilla al armario y lo que se
+        monta sobre una bandeja— y son la misma regla sobre el mismo campo: `3 de 2` no es un
+        sitio ni en un U ni en una bandeja.
+        """
+        try:
+            de = max(1, int(data.get('u_slots') or 1))
+            cual = int(data.get('u_slot') or 1)
+            cuantos = max(1, int(data.get('u_slot_span') or 1))
+        except (TypeError, ValueError):
+            return 'dcim_bad_unit'
+        if cual < 1 or cual > de or cual - 1 + cuantos > de:
+            return 'dcim_bad_slot'
+        if str(data.get('u_split') or 'width') not in ('width', 'height'):
+            return 'dcim_bad_slot'
+        return ''
+
+    def _span(fila) -> tuple:
+        """El trozo que toma una fila, **como fracción**: ``(desde, hasta)`` entre 0 y 1.
+
+        En fracciones y no en «cuál de cuántas» porque los hermanos no tienen por qué contar
+        igual: uno puede repartir la bandeja en dos y el siguiente en tres, y `1 de 2` y `2 de 3`
+        se pisan aunque no compartan ningún número. Comparadas en la misma escala, se ve.
+        """
+        de = max(1, int(fila.get('u_slots') or 1))
+        cual = min(de, max(1, int(fila.get('u_slot') or 1)))
+        cuantos = max(1, min(de - cual + 1, int(fila.get('u_slot_span') or 1)))
+        return ((cual - 1) / de, (cual - 1 + cuantos) / de)
+
+    def _mount_busy(store, padre_uid, data, ignore) -> bool:
+        """Si el trozo de bandeja que se pide ya lo tiene otro.
+
+        Solo entre los que lo DICEN. Quien no dice nada no está reclamando media bandeja: está
+        dejando que se reparta, y el dibujo los reparte a partes iguales — o lo dicen todos, o
+        lo reparte el dibujo. Una fila que no lo dice no puede chocar con nada.
+        """
+        if int(data.get('u_slots') or 1) <= 1:
+            return False
+        desde, hasta = _span(data)
+        for otro in (store.children_of(padre_uid) or ()):
+            if str(otro.get('uid')) == str(ignore or ''):
+                continue
+            if int(otro.get('u_slots') or 1) <= 1:
+                continue
+            a, b = _span(otro)
+            if desde < b and a < hasta:
+                return True
+        return False
 
     def _place(store, data, *, ignore='') -> tuple:
         """Validate a placement. Returns ``(rack_uid, error_key)``.
@@ -386,6 +477,16 @@ def register(app, wa, C):
             # mismo que siempre sin saber que esto va montado.
             for campo in ('rack_uid', 'u_start', 'u_height', 'face'):
                 data[campo] = padre.get(campo)
+            # **Y qué trozo de la bandeja toma.** Los mismos cuatro campos que dividen un U,
+            # aplicados al hueco del padre: ya estaban en la ficha y ya se guardaban, y hasta
+            # aquí se guardaban SIN MIRARLOS — dos mini PC podían decir los dos «1 de 2» y nadie
+            # se quejaba. Mientras no se dibujaban daba igual; desde que se dibujan, eso son dos
+            # cajas superpuestas, y un alzado que miente es peor que uno que no dice nada.
+            err = _slot_ok(data)
+            if err:
+                return '', err
+            if _mount_busy(store, padre_uid, data, ignore):
+                return '', 'dcim_no_room'
             return str(padre.get('rack_uid') or ''), ''
         rack_uid = str(data.get('rack_uid') or '')
         if not store.racks.get(rack_uid):
@@ -407,14 +508,172 @@ def register(app, wa, C):
             cuantos = max(1, int(data.get('u_slot_span') or 1))
         except (TypeError, ValueError):
             return '', 'dcim_bad_unit'
-        if cual < 1 or cual > de or cual - 1 + cuantos > de:
-            return '', 'dcim_bad_slot'
-        if str(data.get('u_split') or 'width') not in ('width', 'height'):
-            return '', 'dcim_bad_slot'
+        err = _slot_ok(data)
+        if err:
+            return '', err
         if not store.fits(rack_uid, u_start, u_height, face, ignore=ignore,
                           slot={'u_slots': de, 'u_slot': cual, 'u_slot_span': cuantos}):
             return '', 'dcim_no_room'
         return rack_uid, ''
+
+    @app.route('/api/v1/dcim/said', methods=['GET'])
+    @C.edit_req
+    def api_dcim_said():
+        """Lo que un dispositivo ha DICHO de sí mismo, para ofrecerlo en la ficha de un equipo.
+
+        Hoy sólo el número de serie, que es lo que a nadie le apetece copiar de una pegatina
+        detrás de un rack. Sale de `reported_facts`, que es el canal por el que la pantalla de
+        infraestructura ya lee «quién lo hizo» y «qué modelo es»: un rol, un valor y quién lo
+        dijo — y descartando lo que viene con `_row`, para que el número de serie de un disco de
+        un Synology no se confunda con el de la caja.
+
+        **Nada aquí escribe.** El panel ofrece y una persona acepta, igual que con el modelo que
+        sugiere el catálogo: un número de serie puesto solo es un número que nadie ha comprobado
+        y que a partir de ese momento parece comprobado.
+
+        Varios valores no es un error: un switch apilado tiene varios chasis y por tanto varios
+        números, y la respuesta los lleva todos para que se elija — quedarse con el primero sería
+        decidir por su cuenta cuál de los tres armarios es «el» equipo.
+
+        **Y viaja TODO lo que el dispositivo contó, no sólo lo que se pregunta.** «No ha dicho
+        número de serie» tiene dos causas que se ven igual y se arreglan en sitios distintos: un
+        perfil que ni siquiera se enganchó —no ha dicho nada de nada— y uno que sí, pero al que
+        le falta esa directiva `extend`. La lista de lo que sí dijo separa las dos sin tener que
+        abrir otra pantalla, que es lo que costó la primera vez que pasó.
+        """
+        from lib.core.hosts.resolve import reported_facts        # noqa: PLC0415
+        uid = str(request.args.get('host') or '').strip()
+        if not uid:
+            return jsonify({'said': {}})
+        store = getattr(wa, '_hosts_store', None)
+        if store is None or not store.get(uid, decrypt=False):
+            return jsonify({'error': wa._t('host_not_found')}), 404
+        # Con el permiso de la MÁQUINA además del del inventario: lo que se devuelve es lo que
+        # un dispositivo contó de sí mismo, y quien no puede abrir su ficha tampoco puede
+        # sacárselo por aquí. La misma regla que el listado del registro, dicha igual.
+        perms = set(wa._get_session_permissions() or [])
+        if 'devices_view' not in perms and f'server.{uid}.view' not in perms:
+            return jsonify({'error': wa._t('access_denied')}), 403
+        hechos = reported_facts(wa._read_check_status(), uid)
+        return jsonify({'said': hechos})
+
+    @app.route('/api/v1/dcim/racks/<uid>/history', methods=['GET'])
+    @C.view_req
+    def api_dcim_rack_history(uid):
+        """Cómo estaba este armario y qué le pasó.
+
+        Las dos preguntas de una tabla: cada versión es la foto —«cómo estaba en marzo»— y su
+        diferencia con la anterior es el acontecimiento —«quién movió el switch»—. Calculada
+        aquí y no en la pantalla porque es la misma cuenta que hace la comparación de dos
+        versiones cualesquiera, y dos implementaciones de «qué cambió» serían libres de no estar
+        de acuerdo sobre si mover un equipo es un cambio o dos.
+
+        La foto entera viaja con cada renglón: son catorce campos por equipo y treinta versiones
+        como mucho, y es lo que permite comparar dos cualesquiera sin una segunda petición por
+        cada par que a alguien se le ocurra mirar.
+        """
+        store = C.store()
+        rack = store.racks.get(uid) if store else None
+        if not rack:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if not dcim_owners.may_see(C.owner_of(store, store.owners_map(), 'rack', uid),
+                                   C.seen()):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        filas = store.revs.history(uid, scope=dcim_rackrev.SCOPE)
+        fuera = []
+        for i, f in enumerate(filas):
+            # Contra la SIGUIENTE de la lista, que es la anterior en el tiempo: `history`
+            # devuelve de la más nueva a la más vieja.
+            #
+            # Y la más vieja **no se compara contra nada**: la diferencia contra el vacío diría
+            # que llegaron seis equipos y que el armario se llamó, que es cierto y no es lo que
+            # pasó — lo que pasó es que aquí empezó a guardarse. Un historial que se inventa un
+            # primer día enseña un acontecimiento que nadie vivió.
+            ultima = i + 1 >= len(filas)
+            previa = {} if ultima else (filas[i + 1].get('data') or {})
+            fuera.append({'uid': f['uid'], 'at': f['at'], 'by': f['by'],
+                          'action': f.get('action') or '',
+                          'items': len((f.get('data') or {}).get('items') or ()),
+                          'changed': [] if ultima
+                                     else dcim_rackrev.compare(previa, f.get('data') or {}),
+                          'data': f.get('data') or {}})
+        return jsonify({'history': fuera})
+
+    #: Cuántos equipos devuelve una búsqueda. Treinta es una lista que se lee; doscientas es
+    #: un desplegable disfrazado, y quien busca «PP» en una sala grande no quiere doscientas.
+    _FIND_MAX = 30
+
+    @app.route('/api/v1/dcim/items', methods=['GET'])
+    @C.view_req
+    def api_dcim_items_find():
+        """Buscar un equipo por su nombre, en cualquier armario que este lector pueda ver.
+
+        Hace falta para meter un panel en medio de un cable que ya está declarado: **el panel
+        casi nunca está en el armario del servidor** —vive en el de patcheo— así que una lista
+        acotada al armario abierto deja fuera justo el caso normal.
+
+        Se busca por lo que alguien lee: la etiqueta **y el modelo**. La mitad de lo que hay en
+        un armario no está rotulado —una tapa, una bandeja, un panel recién puesto— y de eso lo
+        único que se sabe es de qué modelo es. El identificador no se teclea, y buscar por él
+        sería ofrecer buscar por lo que nadie sabe de memoria.
+
+        Y **cada fila vuelve con lo que hace falta para nombrarla**: la etiqueta, la máquina, el
+        modelo y el rol. La pantalla nombra un equipo con una sola función, y esa función necesita
+        los cuatro; mandar sólo la etiqueta la deja cayendo al identificador, que es exactamente
+        lo que esa función existe para no enseñar. Sexta vez que sale esta forma en esta sección:
+        un dato que no viaja vale su valor por defecto, y el respaldo parece que funciona.
+
+        Narrowed like everything else: un equipo que este lector no puede ver no sale, ni
+        siquiera opaco — esto no dibuja un armario compartido, ofrece dónde escribir, y ofrecer
+        algo ajeno como sitio donde escribir es ofrecer escribir en su inventario.
+        """
+        store = C.store()
+        if not store:
+            return jsonify({'items': []})
+        q = str(request.args.get('q') or '').strip().lower()
+        rol = str(request.args.get('role') or '').strip()
+        said, allowed = store.owners_map(), C.seen()
+        # Los nombres de los armarios, para poder decir DÓNDE está cada uno: «PP-A» a secas no
+        # distingue el panel de la sala del panel del rack de al lado.
+        racks = {r['uid']: r for s in store.sites.list()
+                 for sala in store.rooms_of(s['uid'])
+                 for r in store.racks_of(sala['uid'])}
+        cat = getattr(wa, '_dcim_catalog', None)
+        nombres: dict = {}
+
+        def _modelo(tipo):
+            """Cómo se llama ese modelo del catálogo. Cacheado: veinte equipos del mismo
+            modelo son una lectura, no veinte."""
+            tipo = str(tipo or '')
+            if not tipo or not cat or not hasattr(cat, 'get'):
+                return ''
+            if tipo not in nombres:
+                fila = cat.get(tipo) or {}
+                nombres[tipo] = ' '.join(x for x in (str(fila.get('manufacturer') or ''),
+                                                     str(fila.get('model') or '')) if x)
+            return nombres[tipo]
+
+        fuera = []
+        for fila in store.items.list():
+            if rol and str(fila.get('role') or '') != rol:
+                continue
+            etiqueta = str(fila.get('label') or '')
+            modelo = _modelo(fila.get('type_uid'))
+            if q and q not in etiqueta.lower() and q not in modelo.lower():
+                continue
+            if not dcim_owners.may_see(C.owner_of(store, said, 'item', fila['uid']), allowed):
+                continue
+            rack = racks.get(str(fila.get('rack_uid') or '')) or {}
+            fuera.append({'uid': fila['uid'], 'label': etiqueta,
+                          'type_name': modelo,
+                          'host_uid': str(fila.get('host_uid') or ''),
+                          'role': str(fila.get('role') or ''),
+                          'u_start': fila.get('u_start'),
+                          'rack_uid': str(fila.get('rack_uid') or ''),
+                          'rack': str(rack.get('name') or '')})
+            if len(fuera) >= _FIND_MAX:
+                break
+        return jsonify({'items': fuera, 'capped': len(fuera) >= _FIND_MAX})
 
     @app.route('/api/v1/dcim/items', methods=['POST'])
     @C.edit_req
@@ -433,6 +692,11 @@ def register(app, wa, C):
             # una máquina afirmando haber nacido de algo que no está, y eso no da ningún error
             # el día que se escribe — solo una ficha que no cuadra meses después.
             data = _without(data, ('build_uid',))
+        # Y del catálogo, DESPUÉS de la plantilla: una plantilla ya dice de qué modelo sale, así
+        # que lo que queda por resolver aquí es el caso en que se eligió un modelo a pelo — una
+        # tapa, una regleta, una bandeja. Cosas que no tienen estándar de compra y que hasta
+        # ahora obligaban a inventarse una plantilla para poder colocarlas.
+        data = C.from_type_item(data)
         rack_uid, err = _place(store, data)
         if err:
             return jsonify({'error': wa._t(err)}), 400 if err != 'dcim_not_found' else 404
@@ -452,6 +716,7 @@ def register(app, wa, C):
                                          'u': data.get('u_start'),
                                          'build': (plantilla or {}).get('name', ''),
                                          'parts': piezas})
+        C.snap(rack_uid, 'place')
         return jsonify({'uid': uid, 'parts': piezas})
 
     @app.route('/api/v1/dcim/items/<uid>', methods=['PUT'])
@@ -486,6 +751,14 @@ def register(app, wa, C):
                 if campo in merged:
                     data[campo] = merged[campo]
         store.items.update(uid, data, actor=C.actor())
+        # De los DOS armarios cuando cambia de uno a otro: para el de origen, ese equipo se fue;
+        # para el de destino, llegó. Guardar sólo el de destino dejaría el primero enseñando una
+        # máquina que ya no está, que es exactamente lo que un historial no puede hacer.
+        antes = str(item.get('rack_uid') or '')
+        ahora = str((store.items.get(uid) or {}).get('rack_uid') or '')
+        C.snap(antes, 'move' if moving else 'edit')
+        if ahora and ahora != antes:
+            C.snap(ahora, 'move')
         return jsonify({'ok': True})
 
     @app.route('/api/v1/dcim/items/<uid>', methods=['DELETE'])
@@ -503,9 +776,12 @@ def register(app, wa, C):
         if encima:
             return jsonify({'error': wa._t('dcim_mount_in_use'),
                             'mounted': len(encima)}), 400
+        # De qué armario era, ANTES de borrarlo: después ya no hay a quién preguntárselo.
+        era = str((store.items.get(uid) or {}).get('rack_uid') or '')
         store.items.delete(uid)
         store.forget_scope('item', uid)
         wa._audit('dcim_removed', detail={'item': uid})
+        C.snap(era, 'remove')
         return jsonify({'ok': True})
 
     # Referenciadas para que un analizador no las dé por muertas: Flask se las

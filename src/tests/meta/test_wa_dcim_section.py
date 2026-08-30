@@ -16,6 +16,8 @@ import io
 import os
 import re
 
+from tests.helpers import _fn, _strip_comments
+
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 TPL = os.path.join(SRC, 'lib', 'web_admin', 'templates')
 DCIM = os.path.join(TPL, 'partials', 'dcim')
@@ -115,10 +117,15 @@ class TestLaPantallaRespetaLasConvencionesDelPanel:
                 continue
             if 'esc(' in expr or 'escAttr(' in expr or 'jsStr(' in expr:
                 continue
-            # Un campo que se PASA a un ayudante de este mismo fichero no se está imprimiendo:
+            # Un campo que se PASA a un ayudante de esta misma sección no se está imprimiendo:
             # lo escapa quien lo pinte, y a ese lo comprueba esta misma regla. Lo que hay que
             # perseguir es el que sale directo a la plantilla.
-            if re.match(r'^_dcim\w+\([^()]*(?:\([^()]*\)[^()]*)*\)$', expr.strip()):
+            #
+            # `_dc\w+` y no `_dcim\w+`: se escribió cuando los ayudantes de esta sección se
+            # llamaban todos `_dcim*`, y el día que uno se llamó `_dcLabel` la guarda señaló el
+            # fichero que estaba bien. Lo que la exención dice es «esto se lo pasa a un ayudante
+            # de aquí», y ese prefijo lo cumplen los dos.
+            if re.match(r'^_dc\w+\([^()]*(?:\([^()]*\)[^()]*)*\)$', expr.strip()):
                 continue
             malas.append(expr.strip()[:60])
         assert not malas, f'campos escritos por alguien, sin escapar: {malas}'
@@ -474,9 +481,14 @@ class TestLaInversaDeLaAlturaEsExacta:
 
     def test_y_pregunta_lo_mismo_que_la_ida_sobre_la_numeracion(self):
         """Un armario numerado de arriba abajo cuenta al revés. Que una de las dos lo mire y la
-        otra no manda el servidor al otro extremo."""
-        for nombre in ('_dceY', '_dceUAt'):
-            assert 'desc_units' in self._fn(nombre), nombre
+        otra no manda el servidor al otro extremo.
+
+        Las dos lo preguntan por la MISMA pareja de funciones y no cada una por su cuenta: la
+        regla dejó de estar copiada el día que la tabla de equipos se puso a ordenar por ella,
+        porque una tercera copia son tres que se separan.
+        """
+        assert '_dcimUFromTop(' in self._fn('_dceY')
+        assert '_dcimUAtRow(' in self._fn('_dceUAt')
 
     def test_lo_de_fuera_del_armario_se_recorta(self):
         """Soltar por encima del armario tiene que dar la U 1 o la última, no una que no
@@ -627,3 +639,1550 @@ class TestTodoLoQueSeEscribeTieneDondeEscribirse:
         faltan += [abre for abre in ('_dcimOwnerAsk', '_dcimLinkNew', '_dcpRowNew')
                    if abre not in aqui]
         assert not faltan, f'no hay nada que pulsar para llegar a estas: {faltan}'
+
+
+class TestMirarUnaPlataformaNoEsEditarla:
+    """La tabla enseña cinco columnas y la ficha tiene quince campos, así que para leer los otros
+    diez había que abrir el formulario — y **abrir el formulario para leer es la forma de cambiar
+    algo sin querer**: se entra a mirar, se roza una fecha y se guarda.
+
+    Ahora la línea abre una ficha de solo lectura y del mirar se pasa al escribir con un botón,
+    que es el orden en el que ocurre de verdad. Lo que se vigila es que siga siendo de solo
+    lectura: un campo colado ahí no daría error, daría un formulario que nadie sabe que lo es.
+    """
+
+    def _plats(self):
+        return _read(os.path.join(DCIM, '_platforms.html'))
+
+    def test_la_linea_entera_abre_la_ficha(self):
+        src = self._plats()
+        assert 'function _dcPlatInfo(' in src, 'la ficha no está escrita'
+        assert 'ss-rowlink' in src and '_dcPlatInfo(' in src, \
+            'la fila no se puede pulsar, que es justo lo que se pedía'
+
+    def test_lo_que_dentro_de_la_linea_hace_otra_cosa_no_la_abre(self):
+        """Marcar para retirar y borrar ocurren DENTRO de la fila. Sin cortar la propagación, un
+        clic en la papelera abre además la ficha de lo que se acaba de mandar borrar — y el modal
+        de confirmación queda debajo de una ficha que nadie pidió."""
+        # Dentro de la FUNCIÓN que dibuja la tabla: fuera de ella los dos nombres vuelven a
+        # aparecer —son sus propias definiciones— y una guarda que mire el fichero entero se
+        # daría por satisfecha con el trozo equivocado.
+        tabla = _fn(self._plats(), '_dcPlatsTable')
+        marca = tabla.split('_dcPlatPick(')[0]
+        assert "event.stopPropagation()" in marca[-400:], \
+            'marcar una plataforma abre además su ficha'
+        borra = tabla.split('_dcPlatDrop(')[0]
+        assert "event.stopPropagation()" in borra[-700:], \
+            'los botones de la fila abren además su ficha'
+
+    def test_la_ficha_no_puede_escribir(self):
+        """De solo lectura de verdad y no por convenio: un `<input>` que se cuele aquí escribe
+        en `_dcPlatForm`, que es el borrador del formulario — y lo siguiente que se guarde se
+        lleva por delante lo que se tocó mirando."""
+        cuerpo = _fn(self._plats(), '_dcPlatInfoHtml')
+        malos = [x for x in ('<input', '<select', '<textarea', 'oninput=', 'onchange=',
+                             '_dcPlatForm')
+                 if x in cuerpo]
+        assert not malos, f'la ficha de lectura escribe: {malos}'
+
+
+class TestUnConectorSePuedeAnadirDesdeDondeSeEchaerdeMenos:
+    """La lista de conectores era de solo lectura y remataba diciendo que para añadir uno hay que
+    editar `connectors.json`. El editor existía —en la tarjeta de la pantalla de esquemas— y
+    quien descubre que le falta el suyo no lo descubre ahí: lo descubre en la lista, buscándolo.
+
+    Y al que se añade no se le parece ningún dibujo: los que trae el panel son uno por FORMA, y
+    nadie va a escribir un SVG para la regleta de su rack. Por eso puede llevar una foto.
+    """
+
+    def _js(self):
+        return _section()
+
+    def test_desde_la_lista_se_llega_al_editor(self):
+        js = self._js()
+        assert 'function _dcConnEditOpen(' in js, 'el editor no tiene puerta propia'
+        # Llamado desde un MANEJADOR y no en cualquier parte: su propia definición satisfaría
+        # una comprobación de presencia, que es el error que esta sección ya cometió dos veces.
+        manejadores = ' '.join(re.findall(r'on\w+="([^"]*)"', js))
+        assert '_dcConnEditOpen(' in manejadores, 'no hay nada que pulsar para llegar'
+
+    def test_la_foto_manda_sobre_el_dibujo(self):
+        """Al revés no sirve de nada: el conector que alguien añadió tiene forma `other`, que
+        dibuja el enchufe genérico — y el genérico taparía siempre a la foto."""
+        cuerpo = _fn(self._js(), '_dcConnIcon')
+        i_img, i_forma = cuerpo.find('c.image'), cuerpo.find('c.shape')
+        assert 0 <= i_img < i_forma, 'el dibujo genérico tapa la foto que alguien subió'
+
+    def test_las_formas_salen_del_svg_y_no_de_una_lista_copiada(self):
+        """Una lista escrita al lado sería una segunda verdad: no ofrecería la forma que alguien
+        dibuje mañana, y ofrecería la que se borre — dejando un `<use>` que no da ningún error y
+        sí un hueco."""
+        cuerpo = _fn(self._js(), '_dcConnShapes')
+        assert 'data-ss-conn-shapes' in cuerpo, 'las formas ya no salen del propio SVG'
+
+
+class TestUnFiltroNoPuedeRenumerarLasFilas:
+    """El formulario del documento escribe en `doc.connectors[i]`. Con un filtro puesto, el
+    número de la fila que se ve deja de ser ese: renumerar sería editar el conector de al lado
+    sin decirlo, en un formulario de ciento y pico filas donde nadie lo notaría.
+
+    Y una fila a medio escribir no se esconde nunca: la que no se ve es la que no se puede
+    terminar, y la recién añadida todavía no tiene id por el que encontrarse.
+    """
+
+    def _form(self):
+        return _fn(_read(os.path.join(DCIM, '_schemas.html')), '_dcConnFormHtml')
+
+    def test_cada_fila_lleva_su_posicion_en_el_documento(self):
+        cuerpo = self._form()
+        assert 'map((c, i) => ({c: c, i: i}))' in cuerpo, \
+            'las filas ya no llevan su índice real'
+        assert 'filas.map(({c, i})' in cuerpo, \
+            'el índice vuelve a ser el de la lista pintada, no el del documento'
+
+    def test_la_fila_dice_QUE_ES_y_no_lo_dice_todo(self):
+        """Diez columnas de formulario no entran en ningún diálogo. Se probó a ensancharlo y lo
+        que salió fue una barra de desplazamiento debajo de una fila más ancha que la ventana —
+        y ensanchar hasta que quepan es perseguir el ancho de la pantalla de otro.
+
+        La fila contesta **qué es este conector**: cómo se llama, de qué tipo, qué cara tiene y
+        en qué casillas se ofrece. La letra pequeña —a cuánto va, qué generaciones caben, qué
+        puede llevar, qué es— se pliega, que es donde se lee la letra pequeña. De los ciento
+        veintiocho, casi ninguno tiene nada de lo segundo."""
+        cuerpo = self._form()
+        for fuera in ("'speed'", '_dcConnSigBox', '_dcConnNoteSet'):
+            assert fuera not in cuerpo, \
+                f'{fuera} vuelve a estar en la fila: la tabla no cabe otra vez'
+        assert '_dcConnMoreBtn(' in cuerpo, 'no hay por dónde abrir la letra pequeña'
+        detalle = _fn(_read(os.path.join(DCIM, '_schemas.html')), '_dcConnDetailHtml')
+        for dentro in ("'speed'", '_dcConnSigBox', '_dcConnNoteSet', '_dcGensHtml'):
+            assert dentro in detalle, f'{dentro} no está en ninguno de los dos sitios'
+
+    def test_el_galon_dice_SI_hay_letra_pequena_y_no_cuanta(self):
+        """Un galón mudo obliga a abrir los ciento veintiocho para saber cuáles tienen algo
+        dentro. Pero **un número tampoco lo dice**: llevaba uno, y un número que suma una
+        velocidad, tres generaciones, dos señales y una nota no cuenta nada — «1» no dice cuál de
+        las cuatro cosas es, y «6» tampoco. Un recuento significa algo cuando lo que cuenta es de
+        una clase.
+
+        Lo único que una fila plegada puede contestar es un bit, y ese sí hace falta."""
+        cuerpo = _fn(_read(os.path.join(DCIM, '_schemas.html')), '_dcConnMoreBtn')
+        assert 'c.gens' in cuerpo and 'c.signals' in cuerpo, 'el galón no mira nada'
+        # Sobre lo que SE PINTA y no sobre cómo se calcula: prohibir un `+` sería fijar la
+        # expresión en vez de la regla, y esta sección ya sabe lo que cuesta eso.
+        assert 'esc(String(' not in cuerpo, 'el galón vuelve a imprimir un número'
+        assert '||' in cuerpo, 'ya no es un bit: alguna de las cuatro dejó de contar'
+
+    def test_lo_que_no_tiene_identificador_no_se_esconde(self):
+        cuerpo = self._form()
+        assert 'const nuevo = !String(c.id' in cuerpo and 'return nuevo ||' in cuerpo, \
+            'un conector a medio escribir puede quedar fuera del filtro'
+
+
+class TestUnaColumnaQueNadiePuedeEscribir:
+    """La forma de fallo que esta sección lleva repetida CUATRO veces.
+
+    `host_uid` existía desde el primer commit, la API la aceptaba y el vuelco de estado la leía —
+    y no había campo, así que el rack entero salía gris y el código que la respeta parecía
+    funcionar. Luego `asset` y `description`: dos columnas de `dc_item` que se guardan, se
+    devuelven y valían siempre su valor por defecto porque ningún formulario las escribía.
+
+    Una columna que nadie puede rellenar no da ningún error. Da un dato que siempre vale lo
+    mismo, y eso se lee como «aquí no hay nada que poner».
+    """
+
+    #: Lo que NO es de nadie que esté delante de un formulario, y por qué.
+    FUERA = {
+        'uid',                      # lo acuña el panel
+        'rack_uid',                 # dónde se está creando, no un campo
+        'type_uid',                 # lo estampa la plantilla o el catálogo
+        'created_at', 'updated_at', 'updated_by',   # el registro, no el equipo
+    }
+
+    def _columnas(self):
+        """Las de `dc_item`, leídas de su propio `TableSpec`."""
+        src = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'store.py'))
+        i = src.index('_ITEM = TableSpec(')
+        return set(re.findall(r"Column\('(\w+)'", src[i:src.index('\n)', i)]))
+
+    def _campos(self):
+        js = _read(os.path.join(DCIM, '_form.html'))
+        i = js.index("    item: {url: 'items'")
+        return set(re.findall(r"name: '(\w+)'", js[i:js.index(']},', i)]))
+
+    def test_todo_lo_que_tiene_un_equipo_se_puede_escribir(self):
+        cols, campos = self._columnas(), self._campos()
+        assert cols, 'no se encontraron las columnas: la guarda mira donde no es'
+        faltan = cols - campos - self.FUERA
+        assert not faltan, (
+            'columnas de dc_item que se guardan y que ningún campo escribe — valen siempre su '
+            f'valor por defecto y nadie se entera: {sorted(faltan)}')
+
+    def test_y_no_se_pide_lo_que_no_es_del_equipo(self):
+        """La otra mitad: un campo que escriba `updated_by` deja que alguien firme por otro."""
+        sobran = self._campos() & {'uid', 'created_at', 'updated_at', 'updated_by'}
+        assert not sobran, f'el formulario escribe el registro: {sorted(sobran)}'
+
+
+class TestGuardarDicePorQueNoGuarda:
+    """Se colocaba un equipo con su número de serie, su plantilla y su fecha de compra, se
+    pulsaba Guardar, y **no pasaba nada**: ni error, ni fila, ni pista.
+
+    `if (mode === 'new' && !body[spec.fields[0].name]) return;` — el primer campo del tipo, que
+    en un equipo es la etiqueta, y la etiqueta es lo que casi nadie rellena el primer día. La
+    guarda era correcta para una sede (una sede sin nombre no es una sede) y estaba escrita sobre
+    «el primero de la lista», que es una posición y no una regla.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_form.html'))
+
+    def test_lo_obligatorio_lo_declara_el_campo_y_no_su_posicion(self):
+        js = self._js()
+        assert 'req: true' in js, 'ya no se declara qué es obligatorio'
+        assert 'spec.fields[0]' not in js, \
+            'vuelve a ser «el primero de la lista», que es una posición y no una regla'
+
+    def test_y_un_equipo_no_tiene_ninguno(self):
+        """Una caja ciega que ocupa un U es un dato de pleno derecho, y no tiene nombre."""
+        i = self._js().index("    item: {url: 'items'")
+        assert 'req: true' not in self._js()[i:self._js().index(']},', i)], \
+            'un equipo vuelve a exigir un campo que casi nadie rellena el primer día'
+
+    def test_negarse_sin_decirlo_ya_no_se_puede(self):
+        cuerpo = _fn(self._js(), '_dcimSave')
+        assert 'dcim_need_field' in cuerpo, 'guardar vuelve a no hacer nada y no decir nada'
+
+
+class TestUnaListaCerradaSeEligeYNoSeTeclea:
+    """Elegir una plantilla dejaba **el uid escrito en la caja**: treinta y seis caracteres que
+    no dicen nada, y quien lo veía no podía saber si había elegido bien.
+
+    Era un `<input list=…>`, que está bien para una zona horaria —se teclea, se filtra, y una que
+    esta instalación no conozca se puede pegar igual— y no para una plantilla ni para la bandeja
+    de al lado. Lo que se ve es el nombre; lo que se guarda sigue siendo el uid.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_form.html'))
+
+    def test_las_cerradas_son_un_desplegable(self):
+        js = self._js()
+        assert 'pick: true' in js and 'function _dcimPickHtml(' in js
+        # Y que se LLAME: escrita y no usada es una función que no existe, y el uid vuelve a la
+        # caja sin que nada falle.
+        assert '_dcimPickHtml(' in _fn(js, '_dcimFieldHtml'),             'el desplegable está escrito y no se usa: la caja vuelve a enseñar el uid'
+        # Y la abierta sigue siéndolo: las zonas horarias son cientos y se pegan de fuera.
+        i = js.index("    zones: {")
+        assert 'pick' not in js[i:js.index('},', i)], \
+            'las zonas horarias dejaron de poder pegarse'
+
+    def test_lo_que_ya_tenia_y_no_esta_en_la_lista_no_se_pierde(self):
+        """Un equipo enganchado a una máquina que este rol no puede ver se guardaría
+        desenganchado por el solo hecho de abrir su ficha, y sin un error ni una pista."""
+        cuerpo = _fn(self._js(), '_dcimPickHtml')
+        assert 'conocido' in cuerpo, 'un valor que no está en la lista se pierde al guardar'
+
+
+class TestElFormularioNoSeIncrustaEntreLasTarjetas:
+    """Eran dieciocho cajas en crudo, del ancho que cupiera, diciendo qué eran sólo en su
+    `placeholder` — que desaparece en cuanto se escribe. Con cuatro campos pasa; con dieciocho lo
+    que se ve es una fila de huecos y hay que contar posiciones.
+
+    Y empujaba hacia abajo lo que se estaba mirando, que es justo lo que se venía a editar."""
+
+    def test_va_en_el_cuadro_compartido(self):
+        js = _read(os.path.join(DCIM, '_form.html'))
+        assert 'showHtmlModal(' in _fn(js, '_dcimFormDraw'), 'el formulario no abre en un cuadro'
+
+    def test_y_ya_no_se_pinta_dentro_de_ninguna_pantalla(self):
+        assert '_dcimFormHtml' not in _section(), \
+            'el formulario vuelve a incrustarse entre las tarjetas'
+
+    def test_cada_caja_lleva_su_rotulo(self):
+        """El `placeholder` no es un rótulo: se va en cuanto hay algo escrito, que es justo
+        cuando hace falta saber qué es esa casilla."""
+        cuerpo = _fn(_read(os.path.join(DCIM, '_form.html')), '_dcimFormBody')
+        assert '_dcLabel(' in cuerpo, 'las cajas vuelven a no decir qué son'
+
+
+class TestElArmarioNoSePierdeDeVista:
+    """El alzado y sus listas, uno al lado del otro.
+
+    Las cuatro listas de un rack —lo que hay dentro, cómo está cableado, de dónde come, qué lleva
+    una de esas cajas— se insertaban **encima** del dibujo y lo empujaban hacia abajo: se pulsaba
+    un botón y lo que estabas mirando se movía. Y bajar a la lista dejaba el armario fuera de la
+    pantalla, que es justo cuando hace falta, porque un cable va de una U a otra.
+    """
+
+    def _rack(self):
+        return _read(os.path.join(DCIM, '_rack.html'))
+
+    def test_el_dibujo_y_las_listas_van_en_columnas(self):
+        cuerpo = _fn(self._rack(), '_dcimRackHtml')
+        assert 'ss-rack-grid' in cuerpo and '_dcRackPanelHtml(' in cuerpo, \
+            'las listas vuelven a apilarse debajo del dibujo'
+
+    def test_las_cuatro_listas_son_pestanas_de_la_misma_caja(self):
+        cuerpo = _fn(self._rack(), '_dcRackPanelHtml')
+        for tab in ("'items'", "'cables'", "'power'", "'parts'"):
+            assert tab in cuerpo, f'falta la pestaña {tab}'
+
+    def test_el_alto_del_alzado_sale_del_armario_y_el_ancho_del_hueco(self):
+        """Dos mitades de la misma regla.
+
+        El ALTO no puede salir del panel: `.ss-infra-canvas` es `flex: 1 1 auto` —correcto para
+        los dos mapas, que ocupan lo que haya— y aquí dejaba un dibujo de ciento cincuenta
+        píxeles en medio de medio metro de negro. Se declara la proporción y el navegador saca
+        la altura del ancho que le toque.
+
+        Y el ANCHO es todo el que haya: es lo que se viene a mirar, y un U se lee mejor cuanto
+        más grande. Pedir los píxeles exactos del dibujo arreglaba la miniatura y dejaba el aire
+        al otro lado, que es el mismo hueco desaprovechado en otro sitio."""
+        # Sin los comentarios: el que explica el cambio NOMBRA la clase que se dejó de usar, y
+        # una guarda que lee la prosa señala justo el texto que cuenta por qué está bien.
+        cuerpo = _strip_comments(_fn(_read(os.path.join(DCIM, '_elevation.html')),
+                                     '_dcimElevation'))
+        assert 'aspect-ratio' in cuerpo, 'el alto del alzado vuelve a salir del panel'
+        assert 'ss-infra-canvas' not in cuerpo, 'vuelve a usar el lienzo que se estira'
+        assert 'width:100%' in cuerpo, 'el alzado deja de quedarse con el hueco libre'
+
+    def test_un_dibujo_distinto_no_hereda_la_ventana_del_anterior(self):
+        """La ventana de zoom vive en el lienzo compartido y **no se borra sola**: abrir un
+        armario de 5 U detrás de uno de 42 le aplicaba al pequeño la ventana del grande, y salía
+        diminuto en una esquina. `ssCanvasReset` existe justo para esto —«un redibujado que
+        cambia lo que HAY que mirar»— y el alzado era el único de los tres lienzos que no la
+        llamaba nunca."""
+        cuerpo = _strip_comments(_fn(_read(os.path.join(DCIM, '_elevation.html')),
+                                     '_dcimElevation'))
+        assert 'ssCanvasReset(' in cuerpo, 'el zoom del armario anterior se aplica al siguiente'
+
+    def test_y_hay_forma_de_volver_del_zoom(self):
+        """Sin el botón de «ver el armario entero», una rueda de más deja el dibujo en una
+        esquina y no hay gesto para deshacerlo."""
+        js = _read(os.path.join(DCIM, '_elevation.html'))
+        assert 'ssCanvasTools(' in _fn(js, '_dceTools'), 'el alzado se queda sin sus botones'
+        # En una barra ENCIMA del dibujo. No en la del armario —allí estaban entre los que
+        # crean y borran cosas, que es donde nadie los busca— y tampoco flotando sobre el
+        # lienzo, donde tapaban parte de lo que manejan y se peleaban con la tarjeta de la lupa
+        # por la misma esquina.
+        cuerpo = _fn(js, '_dcimElevation')
+        assert '_dceTools(' in cuerpo, 'los botones del zoom salen del dibujo sobre el que actúan'
+        assert 'ss-toolrow' in cuerpo, 'los botones vuelven a flotar encima del dibujo'
+
+    def test_lo_cargado_es_de_ESE_armario(self):
+        """Abrir otro rack con el cableado del anterior puesto enseñaría los cables de uno bajo
+        el nombre del otro, y no lo diría: una tabla de cables no lleva escrito de qué rack es."""
+        cuerpo = _fn(self._rack(), '_dcimLoadRack')
+        for x in ('_dcCables = null', '_dcPower = null', '_dcParts = null'):
+            assert x in cuerpo, f'al cambiar de armario se conserva {x.split()[0]}'
+
+
+class TestElArmarioSeAgrandaCuandoHaceFalta:
+    """Un armario de 42 U con las dos caras y las fotos de sus alzados pide todo el ancho que
+    haya; uno de 5 no. El reparto de siempre es el bueno para casi todo y no para ese rato.
+
+    Un botón y no una regla automática: quién necesita mirar el armario de cerca lo sabe él, y
+    una pantalla que se recoloca sola es una pantalla que se mueve mientras la miras."""
+
+    def test_hay_por_donde_pedirlo(self):
+        js = _read(os.path.join(DCIM, '_elevation.html'))
+        assert 'function _dceWideToggle(' in js, 'no se puede agrandar el armario'
+        assert '_dceWideToggle()' in _fn(js, '_dcimElevation'), 'no hay nada que pulsar'
+
+    def test_y_TAPA_la_tabla_en_vez_de_moverla(self):
+        """La diferencia entre apartar algo y taparlo: lo primero obliga a devolverlo a su sitio
+        para volver a donde estabas. Se pide sitio para mirar un armario un rato, no una pantalla
+        distinta.
+
+        Y el panel deja de desplazarse mientras tanto, que es lo que hace que `inset: 0` sea
+        exactamente lo que se ve: sobre un contenedor con desplazamiento sería el alto de TODO su
+        contenido, y el dibujo saldría tan alto como la tabla que está tapando."""
+        assert '_dceWide' in _fn(_read(os.path.join(DCIM, '_rack.html')), '_dcimRackHtml'), \
+            'el botón está y no cambia nada'
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '.ss-elev-over' in css, 'la capa que pasa a primer plano no existe'
+        bloque = css[css.index('.ss-elev-over {'):css.index('.ss-elev-over {') + 260]
+        assert 'position: absolute' in bloque and 'inset: 0' in bloque, \
+            'vuelve a empujar la tabla en vez de taparla'
+        assert '.ss-rack-pane.ss-rack-over' in css, \
+            'el panel sigue desplazándose debajo, así que `inset: 0` no es lo que se ve'
+
+    def test_agrandar_reencuadra(self):
+        """La ventana de zoom se calculó para el ancho de antes: dejarla puesta enseña el mismo
+        trozo en un hueco del doble, que es no haber agrandado nada."""
+        cuerpo = _fn(_read(os.path.join(DCIM, '_elevation.html')), '_dceWideToggle')
+        assert 'ssCanvasReset(' in cuerpo, 'se agranda el hueco y el dibujo se queda igual'
+
+class TestUnBotonQueTardaTieneQueDecirloYa:
+    """Se pulsaba Cableado y no pasaba nada hasta que contestaba el servidor: `await` primero y
+    redibujado después, así que entre el clic y la respuesta la pantalla no cambiaba. Un botón que
+    no hace nada es un botón que se vuelve a pulsar — este panel ya lo aprendió con el explorador
+    de carpetas de las copias de seguridad.
+    """
+
+    def test_el_hueco_se_dibuja_antes_de_pedir_nada(self):
+        for rel, fn in (('_cables.html', '_dcCablesOpen'), ('_power.html', '_dcPowerOpen')):
+            cuerpo = _fn(_read(os.path.join(DCIM, rel)), fn)
+            i_pinta = cuerpo.find('renderDcim()')
+            i_pide = cuerpo.find('await apiGet')
+            assert 0 <= i_pinta < i_pide, \
+                f'{fn} vuelve a esperar al servidor antes de enseñar nada'
+            assert 'loading: true' in cuerpo, f'{fn} no marca que está cargando'
+
+    def test_y_lo_que_se_ve_es_la_forma_de_lo_que_viene(self):
+        """Una rueda dice «espera»; unas filas grises dicen «aquí van filas», que además es
+        cierto y evita el salto de cuando llegan."""
+        js = _read(os.path.join(DCIM, '_cables.html'))
+        assert 'function _dcRackSkeleton(' in js
+        assert 'loading' in _fn(js, '_dcCablesHtml'), 'la pestaña no dibuja el esqueleto'
+
+
+class TestLaTablaDiceLoQueElDibujoNoPuede:
+    """Cuatro columnas —U, cara, nombre y empresa— que son lo mismo que el alzado de al lado con
+    menos. Lo que una tabla puede decir y un dibujo no es lo que sólo tiene ESA caja: su número de
+    serie, el de inventario y hasta cuándo tiene garantía. Los tres estaban guardados y no se
+    veían en ninguna parte."""
+
+    def test_estan_las_columnas_que_solo_tiene_una_caja(self):
+        cuerpo = _fn(_read(os.path.join(DCIM, '_rack.html')), '_dcimItemsTable')
+        for k in ('dcim_serial', 'dcim_item_asset', 'dcim_item_warranty'):
+            assert k in cuerpo, f'la tabla vuelve a callarse {k}'
+
+    def test_y_las_ocho_de_la_propuesta(self):
+        """Estuvieron un rato en seis, con la cara y la empresa metidas junto al nombre porque
+        no cabían. Una columna dice lo que una insignia pegada a un nombre no: se puede recorrer
+        con la vista, que es para lo que se mira una lista de veinte equipos."""
+        cuerpo = _fn(_read(os.path.join(DCIM, '_rack.html')), '_dcimItemsTable')
+        for k in ('dcim_u', 'dcim_face', 'dcim_what', 'dcim_serial',
+                  'dcim_item_asset_col', 'dcim_item_warranty_col', 'dcim_owner'):
+            assert k in cuerpo, f'falta la columna {k}'
+
+    def test_un_hueco_se_dice_con_una_raya(self):
+        """Tres celdas vacías seguidas en una fila de ocho se leen como una tabla mal
+        dibujada. Una raya dice «aquí no hay nada», que es un dato."""
+        assert 'function _dcimDash(' in _read(os.path.join(DCIM, '_rack.html'))
+
+    def test_una_garantia_vencida_se_ve(self):
+        """Escrita en gris entre otras diez es una fecha que nadie mira."""
+        cuerpo = _fn(_read(os.path.join(DCIM, '_rack.html')), '_dcimWarranty')
+        assert 'bg-danger' in cuerpo, 'una garantía vencida ya no se distingue'
+
+
+class TestElDibujoYLaListaSenalanLoMismo:
+    """El alzado dice **dónde está** y la tabla **qué es**: son la misma cosa contada dos veces,
+    y hasta ahora no se miraban. Señalar un equipo en el dibujo obligaba a buscar su renglón a
+    mano, y al revés igual — con veinte equipos eso es contar líneas.
+
+    Las dos direcciones, porque las dos preguntas son reales: «¿dónde está este?» se hace en la
+    lista y «¿qué es esto?» en el armario.
+    """
+
+    def _elev(self):
+        return _read(os.path.join(DCIM, '_elevation.html'))
+
+    def test_del_dibujo_a_la_lista(self):
+        cuerpo = _fn(self._elev(), '_dceHover')
+        assert "tr[data-dci]" in cuerpo, 'señalar en el dibujo ya no enciende su fila'
+
+    def test_de_la_lista_al_dibujo(self):
+        js = self._elev()
+        assert 'function _dceHoverFromList(' in js, 'no hay por dónde señalar desde la lista'
+        filas = _read(os.path.join(DCIM, '_rack.html'))
+        assert 'data-dci=' in filas and '_dceHoverFromList(' in filas, \
+            'las filas de la tabla no dicen de qué caja son'
+
+    def test_la_tarjeta_esta_FUERA_del_dibujo(self):
+        """Dos intentos de meterla dentro y los dos tapaban una U.
+
+        Primero pegada al borde de abajo, que ocultaba la última; luego saltando al extremo
+        contrario, que ocultaba la primera. El error era la premisa: **dentro de un armario
+        dibujado no hay sitio libre**, porque el armario ocupa el dibujo entero. Va debajo, con
+        su hueco reservado — apareciendo sólo al señalar algo, el dibujo daría un salto cada vez
+        que el ratón entra y sale de una caja."""
+        js = self._elev()
+        cuerpo = _fn(js, '_dcimElevation')
+        i_svg = cuerpo.find('</svg>')
+        i_caja = cuerpo.find('dcimElevPanel')
+        assert 0 <= i_svg < i_caja, 'la tarjeta vuelve a estar encima del dibujo'
+        assert 'position-absolute' not in cuerpo[i_caja:i_caja + 120], \
+            'la tarjeta vuelve a flotar sobre el armario'
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert 'min-height' in css[css.index('.ss-elev-info'):css.index('.ss-elev-info') + 200], \
+            'sin hueco reservado, el dibujo salta cada vez que el ratón entra en una caja'
+
+
+class TestLoQueVaSobreUnaBandejaSeDibuja:
+    """«Bandeja (+2)» era lo que se podía decir sin sitio: un recuento no enseña cuál de los dos
+    mini PC está en aviso, que es justo lo que se viene a mirar a un alzado.
+
+    Se dibujan dentro, con los mismos cuatro campos que dividen un U aplicados al hueco del
+    padre. Estaban en la ficha y se guardaban desde el primer día; lo que faltaba era leerlos.
+    """
+
+    def _elev(self):
+        return _read(os.path.join(DCIM, '_elevation.html'))
+
+    def test_se_dibujan_dentro_de_su_bandeja(self):
+        js = self._elev()
+        assert 'function _dceKids(' in js, 'lo montado vuelve a no dibujarse'
+        assert '_dceKids(' in _fn(js, '_dceFace'), 'está escrito y no se llama'
+
+    def test_y_como_HERMANOS_del_que_los_lleva(self):
+        """Dentro del `<g>` de la bandeja, salir de un mini PC hacia ella no volvería a
+        encenderla —`pointerenter` no burbujea— y la tarjeta se quedaría vacía con el ratón
+        todavía encima de algo."""
+        cuerpo = _fn(self._elev(), '_dceFace')
+        i_padres = cuerpo.find('_dceItem(rack, i, face)')
+        i_hijos = cuerpo.find('_dceKids(rack, i, face)')
+        assert 0 <= i_padres < i_hijos, 'lo montado se pinta debajo de lo que lo lleva'
+
+    def test_el_rectangulo_se_calcula_UNA_vez(self):
+        """Hace falta dos veces —para pintar la caja y para saber dentro de qué hueco van los
+        que se montan encima— y dos cuentas serían dos que se separan el día que alguien toque
+        el reparto de un U."""
+        js = self._elev()
+        assert 'function _dceRect(' in js
+        for quien in ('_dceItem', '_dceKids'):
+            assert '_dceRect(' in _fn(js, quien), f'{quien} calcula el rectángulo por su cuenta'
+
+    def test_la_bandeja_no_se_queda_sin_nombre(self):
+        """Los que van encima la taparían entera, y el armario tendría una caja sin rótulo."""
+        assert 'function _dceGut(' in self._elev(), 'no se reserva sitio para el nombre'
+
+    def test_y_las_cajas_miden_contra_SU_ancho(self):
+        """`_DCE.W` es el ancho de la CARA. Escrito cuando todo ocupaba el U entero, y desde que
+        algo puede tomar media U el engranaje y las marcas se dibujaban fuera de su caja —
+        encima de la de al lado, que es un botón que abre lo que no parece."""
+        js = _strip_comments(self._elev())
+        for fn in ('_dcePartsBtn', '_dceMarks', '_dceFoto'):
+            assert '_DCE.W' not in _fn(js, fn), f'{fn} vuelve a medir contra la cara entera'
+
+
+class TestUnErrorNoEsUnaRespuesta:
+    """`apiGet` devuelve `null` ante cualquier respuesta que no sea un 200, así que un 403 —el
+    usuario no puede ver esa máquina— llegaba al botón del número de serie como un objeto vacío y
+    salía por pantalla como «el dispositivo no ha dicho ningún número de serie».
+
+    Un error contado como respuesta es la peor forma de fallar: manda a mirar la configuración
+    del equipo cuando el problema estaba en el permiso. Es la misma forma que esta sección lleva
+    todo el mes tropezando — una guarda que se niega sin decirlo, un parámetro que nadie pasa,
+    un botón que trabaja fuera de la vista.
+    """
+
+    def test_una_peticion_que_falla_lo_dice(self):
+        cuerpo = _fn(_read(os.path.join(DCIM, '_form.html')), '_dcimSaidAsk')
+        assert 'dcim_said_failed' in cuerpo,             'un fallo de la petición vuelve a contarse como «no ha dicho nada»'
+        i_null = cuerpo.find('if (!d)')
+        # Contra el caso VACÍO y no contra cualquier mensaje: el de «engancha una máquina»
+        # va antes a propósito, que es una comprobación que no necesita pedir nada.
+        i_vacio = cuerpo.find('dcim_said_but')
+        assert 0 <= i_null < i_vacio, 'se mira el contenido antes de si hubo respuesta'
+
+    def test_y_no_haber_dicho_ESO_no_es_no_haber_dicho_NADA(self):
+        """Dos causas que se ven igual y se arreglan en sitios distintos: un perfil que ni
+        siquiera se enganchó, y uno que sí pero al que le falta esa directiva. La lista de lo que
+        el dispositivo SÍ contó separa las dos sin abrir otra pantalla."""
+        cuerpo = _fn(_read(os.path.join(DCIM, '_form.html')), '_dcimSaidAsk')
+        assert 'dcim_said_but' in cuerpo and 'dcim_said_nothing' in cuerpo,             'las dos causas vuelven a contarse con la misma frase'
+
+
+class TestElArmarioSeEnteraDeLoQuePasaFuera:
+    """El estado de cada equipo —el verde y el ámbar del alzado— viaja con la carga del armario.
+    Se recogen datos de una máquina en Infraestructura, se vuelve aquí, y el aviso sigue puesto
+    hasta un F5 — y un F5 es lo que hace la gente cuando una pantalla no se entera, que es lo
+    mismo que decir que no funciona.
+    """
+
+    def test_hay_boton_para_pedirlo(self):
+        js = _read(os.path.join(DCIM, '_rack.html'))
+        assert 'function _dcimReloadRack(' in js, 'no se puede refrescar el armario'
+        assert '_dcimReloadRack()' in _fn(js, '_dcimRackHtml'), 'no hay nada que pulsar'
+
+    def test_y_volver_a_la_seccion_tambien_lo_pide(self):
+        """En `shown.bs.tab` y no dentro de `renderDcim`, que se llama en cada redibujado de la
+        propia sección: pedir el armario en cada clic de una pestaña interna sería una petición
+        por clic. Ahí se sabe que se viene de fuera, que es cuando puede haber cambiado algo."""
+        js = _read(os.path.join(DCIM, '_render.html'))
+        assert "shown.bs.tab" in js and "'#tab-dcim'" in js,             'volver a la sección ya no vuelve a pedir el armario'
+
+
+class TestNingunaEscrituraSeOlvidaDeSuFoto:
+    """El historial de un armario es una foto por cambio, y su valor entero depende de que no
+    falte ninguna: la lista se lee como acontecimientos —la diferencia entre dos fotos— así que
+    una escritura sin foto no deja un hueco, **mezcla dos cambios en un renglón** y lo atribuye a
+    quien hizo el segundo.
+
+    Y no se nota. Un historial al que le falta un paso sigue leyéndose bien, sólo que cuenta otra
+    cosa. Por eso no se deja a la memoria de quien añada la siguiente ruta.
+    """
+
+    def _racks(self):
+        return _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'routes', 'racks.py'))
+
+    def test_colocar_mover_y_retirar_dejan_la_suya(self):
+        js = self._racks()
+        for fn in ('api_dcim_item_create', 'api_dcim_item_update', 'api_dcim_item_delete'):
+            i = js.index(f'def {fn}(')
+            j = js.find('\n    @app.route', i)
+            assert 'C.snap(' in js[i:j if j > 0 else len(js)], \
+                f'{fn} escribe y no deja foto: su cambio se contará junto al siguiente'
+
+    def test_editar_el_armario_tambien(self):
+        """Renombrarlo o cambiarle la altura mueve de sitio a todo lo que hay dentro."""
+        crud = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'routes', 'places.py'))
+        assert "C.snap(uid, 'rack_edit')" in crud, 'editar el armario no deja foto'
+
+    def test_mudarse_deja_foto_en_los_DOS(self):
+        """Para el de origen ese equipo se fue; para el de destino, llegó."""
+        js = self._racks()
+        i = js.index('def api_dcim_item_update(')
+        j = js.find('\n    @app.route', i)
+        cuerpo = js[i:j if j > 0 else len(js)]
+        assert cuerpo.count('C.snap(') >= 2, \
+            'mudar un equipo de armario deja al de origen enseñando lo que ya no está'
+
+
+class TestLaHistoriaSeLeeEnUnaPestana:
+    """Dos preguntas y una sola tabla: cada versión es la foto y su diferencia con la anterior es
+    el acontecimiento. Guardando sólo lo segundo no se reconstruye lo primero sin reproducirlo
+    todo, y basta que falte un renglón para que la reconstrucción mienta sin decirlo."""
+
+    def test_hay_pestana_y_pide_lo_suyo(self):
+        rack = _read(os.path.join(DCIM, '_rack.html'))
+        assert "'hist'" in _fn(rack, '_dcRackPanelHtml'), 'no hay pestaña de historial'
+        assert 'function _dcHistLoad(' in _read(os.path.join(DCIM, '_rackrev.html'))
+
+    def test_el_historial_es_de_ESE_armario(self):
+        """Abrir otro con el historial del anterior puesto enseñaría los movimientos de uno bajo
+        el nombre del otro — y una lista de versiones no lleva escrito de qué rack es."""
+        assert '_dcHist = null' in _fn(_read(os.path.join(DCIM, '_rack.html')),
+                                       '_dcimLoadRack'), \
+            'al cambiar de armario se conserva el historial del anterior'
+
+    def test_dos_versiones_se_comparan_de_vieja_a_nueva(self):
+        """Marcadas en el orden que sea: una diferencia leída al revés dice que se retiró lo que
+        se puso."""
+        cuerpo = _fn(_read(os.path.join(DCIM, '_rackrev.html')), '_dcHistDiffHtml')
+        assert 'sort(' in cuerpo, 'la comparación depende del orden en que se marcaron'
+
+
+class TestNoTodoLoQueSeColocaTienePlantilla:
+    """Una tapa ciega, una regleta, una bandeja y un panel de parcheo no tienen estándar de
+    compra ni componentes que estampar. Sólo se podía colocar algo naciendo de una plantilla, y
+    declarar una plantilla para poner una tapa es pedir el estándar de una tapa.
+    """
+
+    def _form(self):
+        return _read(os.path.join(DCIM, '_form.html'))
+
+    def test_se_puede_elegir_un_modelo_del_catalogo(self):
+        js = self._form()
+        i = js.index("    item: {url: 'items'")
+        assert "'type_uid'" in js[i:js.index(']},', i)],             'para colocar una tapa hay que declararle una plantilla otra vez'
+
+    def test_se_BUSCA_y_no_se_ofrece_entero(self):
+        """El catálogo son miles de filas. Un desplegable de miles no es un desplegable, y un
+        campo de texto con el identificador son treinta y seis caracteres que no dicen nada."""
+        js = self._form()
+        assert 'function _dcimPickOpen(' in js and "pick: 'type'" in js
+        assert 'dcim/catalog?tree=' in _fn(js, '_dcimPickGo'), 'ya no busca en el catálogo'
+
+    def test_la_casilla_enseña_el_nombre_y_guarda_el_uid(self):
+        cuerpo = _fn(self._form(), '_dcimPickBox')
+        assert "type=\"hidden\"" in cuerpo, 'el identificador ya no viaja como lo espera guardar'
+        assert '_dcimPickName(' in cuerpo, 'la casilla vuelve a enseñar el identificador'
+
+    def test_quien_escribe_el_nombre_y_quien_lo_lee_miran_la_misma_clave(self):
+        """Este guardián decía `'_name' in cuerpo` y con eso daba por buena la casilla que se
+        pasó semanas enseñando el identificador: leía `type_uid_name` —la convención— cuando el
+        armario manda `type_name`, y `'_name' in …` es cierto en los dos casos. Comprobar que
+        aparece un trozo de nombre de clave no es comprobar que sea LA clave.
+        """
+        js = self._form()
+        assert 'function _dcimPickName(' in js, 'vuelve a haber dos sitios decidiendo dónde'
+        # Y quien lo escribe al elegir del catálogo, en la misma: si uno escribe donde el otro
+        # no mira, elegir un modelo lo deja elegido y la caja sigue con lo de antes.
+        assert 'fld.nameKey' in _fn(js, '_dcimPickTake'),             'al elegir se escribe el nombre donde la casilla no lo busca'
+
+    def test_la_clave_declarada_es_una_que_el_armario_manda(self):
+        """`nameKey: 'X'` con una X que nadie manda no da ningún error: da una casilla con el
+        identificador dentro, que es justo lo que esta casilla existe para no enseñar."""
+        js = self._form()
+        claves = re.findall(r"nameKey:\s*'([a-z_]+)'", js)
+        assert claves, 'ya no se declara ninguna clave de nombre'
+        rutas = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'routes', 'racks.py'))
+        for k in claves:
+            assert f"item['{k}']" in rutas, f'nadie manda {k}: la casilla enseñará el uid'
+
+    def test_y_buscar_no_borra_lo_tecleado(self):
+        """El buscador y el formulario son el mismo cuadro: enseñar uno borra el marcado del
+        otro, y con él las ocho casillas que se llevaban escritas."""
+        assert '_dcimFormSnap()' in _fn(self._form(), '_dcimPickOpen'),             'buscar un modelo vacía el formulario'
+
+
+class TestLaRegletaSeEligeYNoSeAcuna:
+    """«+ Regleta» acuñaba `PDU-A` sin preguntar, y ahí estaba la razón de que la regleta que
+    alguien acababa de colocar en el armario no apareciera nunca como sitio donde enchufar: la
+    regleta que se COLOCA y la regleta que DA TOMAS son dos filas distintas, y no había ni una
+    pantalla desde la que juntarlas.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_power.html'))
+
+    def test_el_boton_pregunta_cual(self):
+        cuerpo = _fn(self._js(), '_dcPduNew')
+        assert 'showHtmlModal(' in cuerpo, 'el botón vuelve a acuñar una regleta sin preguntar'
+        assert '_dcPduFromItem(' in cuerpo, 'de la lista no se puede elegir un equipo colocado'
+
+    def test_se_elige_de_lo_colocado_sin_mirar_el_rol(self):
+        """El aviso de arriba sí mira el rol, y un rol vacío —que es como nace todo lo que se
+        coloca desde el catálogo— lo deja mudo. La lista de la que se elige no puede depender de
+        que alguien haya dicho antes lo que se está preguntando ahora."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcPduNew'))
+        assert '_dcimRack' in cuerpo and 'items' in cuerpo,             'la lista ya no sale de lo que está colocado en el armario'
+        # El TAMIZ, y sólo él: `.sort` puede mirar el rol —poner las regletas declaradas
+        # arriba es ordenar, no excluir— y el primer trozo de esta guarda decía `.split(…)[1]`
+        # sobre el primer `.filter(` que apareciera, que era otro. Una guarda que recorta por
+        # donde no es da por buena cualquier cosa; es la trampa de la ficha de al lado.
+        i = cuerpo.index('const libres')
+        tamiz = cuerpo[cuerpo.index('.filter(', i):cuerpo.index('.sort(', i)]
+        assert 'role' not in tamiz,             'volver a tamizar por rol deja fuera lo que se acaba de colocar, que nace sin él'
+
+    def test_no_se_ofrece_dos_veces_la_misma(self):
+        """Sin saber cuáles están ya declaradas, la lista ofrece la misma otra vez y la segunda
+        crea una regleta duplicada del mismo cacharro."""
+        assert 'item_uid' in _fn(self._js(), '_dcPduNew'),             'la lista no sabe cuáles están ya declaradas'
+        svc = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'service.py'))
+        assert "'item_uid': str(p.get('item_uid') or '')" in svc,             'la respuesta no dice de qué equipo es cada regleta'
+
+    def test_lo_ajeno_no_se_declara(self):
+        """Un armario compartido enseña que el U está ocupado y nada más: declarar como regleta
+        propia el equipo del vecino sería escribir sobre su inventario."""
+        assert 'foreign' in _fn(self._js(), '_dcPduNew'), 'se ofrece el equipo del vecino'
+
+    def test_queda_la_que_no_ocupa_ningun_U(self):
+        """La atornillada al lateral es la mitad de los casos y la única que de verdad no tiene
+        ningún equipo al que apuntar."""
+        js = self._js()
+        assert 'function _dcPduPlain(' in js or 'async function _dcPduPlain(' in js,             'la regleta que no está colocada ya no se puede declarar'
+        assert '_dcPduPlain()' in _fn(js, '_dcPduNew'), 'esa opción no está en el cuadro'
+
+    def test_elegir_cierra_el_cuadro(self):
+        """El cuadro y el resto de la sección se dibujan en sitios distintos: repintar el fondo
+        deja el cuadro delante, y lo elegido pasa a estar hecho detrás de una lista que sigue
+        pidiendo que se elija."""
+        for fn in ('_dcPduFromItem', '_dcPduPlain'):
+            assert 'hideInfoModal()' in _fn(self._js(), fn), f'{fn} deja el cuadro abierto'
+
+
+class TestNingunDesplegableEnsenaUnIdentificador:
+    """Cuarta vez en esta sección que un desplegable acaba enseñando treinta y seis caracteres
+    que no dicen nada. La regla es la misma en los cuatro sitios: cómo se lee un item lo dice
+    UNA función, y quien la copia se queda fuera el día que esa función mejora.
+    """
+
+    #: Dónde se nombra un equipo del armario, y en qué función de cada fichero.
+    NOMBRAN = (('_power.html', ('_dcPowerItems', '_dcPowerWarnings', '_dcPduUndeclared',
+                                '_dcPduNew')),
+               ('_cables.html', ('_dcCableTable',)))
+
+    def test_ninguna_pestana_se_conforma_con_el_rotulo(self):
+        """`label` es lo que está rotulado por delante, y está vacío en la mitad de lo que hay
+        dentro de un armario: tapas, bandejas, regletas y cualquier cosa colocada el primer día.
+        Tres filas seguidas diciendo «Equipo» no distinguen tres equipos, que es exactamente
+        para lo que se abre esa tabla — y el navegador tenía el nombre entero delante.
+        """
+        for fichero, funciones in self.NOMBRAN:
+            js = _read(os.path.join(DCIM, fichero))
+            for fn in funciones:
+                cuerpo = _strip_comments(_fn(js, fn))
+                assert '_dcimNameOf(' in cuerpo or '_dcimItemName(' in cuerpo,                     f'{fichero}:{fn} nombra un equipo por su cuenta'
+
+    def test_y_no_queda_ningun_respaldo_a_Equipo(self):
+        """El respaldo que tapaba el fallo: «Equipo» parece un nombre, así que la fila no se ve
+        rota — se ve repetida."""
+        for fichero, _ in self.NOMBRAN:
+            js = _strip_comments(_read(os.path.join(DCIM, fichero)))
+            assert "label || t('dcim_item')" not in js, f'{fichero} vuelve al respaldo genérico'
+            assert "_label || '—'" not in js, f'{fichero} deja un extremo sin nombre'
+
+    def test_el_nombre_sale_de_un_solo_sitio(self):
+        """`_dcimNameOf` busca la fila del armario y la nombra con `_dcimItemName`. Dos pasos y
+        una función: quien copie sólo el primero se queda con el `label` otra vez."""
+        js = _read(os.path.join(DCIM, '_form.html'))
+        cuerpo = _fn(js, '_dcimNameOf')
+        assert '_dcimItemName(' in cuerpo, 'nombra sin usar la función que nombra'
+        assert '_dcimRack' in cuerpo, 'no busca la fila del armario abierto'
+
+    def test_sobre_que_va_montado_se_lee_con_la_funcion_de_siempre(self):
+        # Sin la prosa: el comentario que explica la regla nombra justo lo que la guarda
+        # prohíbe, y una guarda que lee su propia explicación falla por tenerla.
+        js = _strip_comments(_read(os.path.join(DCIM, '_form.html')))
+        i = js.index('mounts: {')
+        trozo = js[i:js.index('};', i)]
+        assert '_dcimItemName(i)' in trozo,             'el desplegable vuelve a enseñar el uid de lo que no está rotulado'
+        assert 'i.label || i.uid' not in trozo, 'vuelve a haber una copia de esa regla'
+
+
+class TestLoQueNoLlevaEnchufeNoPideUno:
+    """La bandeja salía en la tabla de alimentación diciendo «No lleva enchufe» y con el botón de
+    enchufar al lado: una respuesta y su contraria en la misma fila.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_power.html'))
+
+    def test_no_se_le_ofrece_enchufar(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcPowerItems'))
+        i = cuerpo.index('_dcFeedNew(')
+        # La condición que decide si se pinta el botón, no una mención cualquiera del rol.
+        cond = cuerpo[cuerpo.rindex('${', 0, i):i]
+        assert '_dcPowerQuiet(it)' in cond, 'se le sigue ofreciendo un enchufe a una bandeja'
+
+    def test_ni_ocupa_una_fila_para_decir_que_no(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcPowerItems'))
+        assert 'const mudos' in cuerpo and 'filas.map(' in cuerpo,             'la tabla vuelve a recorrer todos los equipos'
+
+    def test_pero_no_se_esconde(self):
+        """Esconder es lo que hace dudar de una lista: quien cuenta filas se queda preguntando
+        si falta algo. Es la misma decisión que el recuento de un armario, que saca los pasivos
+        de «sin vigilar» y los cuenta aparte."""
+        js = self._js()
+        assert 'function _dcPowerQuietNote(' in js, 'lo que no lleva enchufe desaparece sin más'
+        assert 'dcim_no_plug_list' in js, 'no se dice cuáles son'
+
+    def test_salvo_que_alguien_le_haya_declarado_un_cable(self):
+        """Eso es un hecho escrito, y una fila que no se dibuja es un cable que no se puede ni
+        ver ni quitar."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcPowerItems'))
+        i = cuerpo.index('const mudos')
+        assert 'feeds.length' in cuerpo[i:cuerpo.index('\n', i) + 200],             'una bandeja con un cable declarado se queda sin fila donde quitarlo'
+
+
+class TestEnQueTomaSeEnchufa:
+    """`outlet` existía desde el primer commit, la API la aceptaba y la tabla la pintaba, y
+    ningún camino la escribía nunca: valía siempre 0, que es «no sé en cuál».
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_power.html'))
+
+    def test_enchufar_pregunta_la_toma(self):
+        js = self._js()
+        cuerpo = _strip_comments(_fn(js, '_dcFeedNew'))
+        assert '_dcFeedPickDraw()' in cuerpo, 'vuelve a enchufar sin decir dónde'
+        assert 'showHtmlModal(' in _fn(js, '_dcFeedPickDraw')
+
+    def test_y_la_manda(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcFeedPut'))
+        assert 'outlet' in cuerpo, 'la toma elegida no llega al servidor'
+
+    def test_las_ocupadas_no_se_pueden_pulsar(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcFeedPduHtml'))
+        assert 'outlets_used' in cuerpo, 'no se sabe cuáles están ocupadas'
+        assert 'disabled' in cuerpo, 'se puede elegir una toma que ya tiene un cable'
+
+    def test_no_saber_en_cual_sigue_siendo_elegible(self):
+        """Obligar a inventarse un número es cambiar un hueco por un dato falso."""
+        assert 'dcim_outlet_unknown' in _fn(self._js(), '_dcFeedPduHtml'),             'ya no se puede decir «no sé en cuál»'
+
+    def test_el_choque_lo_dice_el_servidor(self):
+        """Repetir aquí la comprobación sería una segunda copia de la regla, y un día una de
+        las dos dirá otra cosa."""
+        rutas = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'routes', 'power.py'))
+        assert 'def _outlet_bad(' in rutas, 'el servidor acepta dos cables en la misma toma'
+        for clave in ('dcim_outlet_taken', 'dcim_outlet_out_of_range'):
+            assert clave in rutas, f'{clave} no se usa'
+
+    def test_y_se_puede_corregir_despues(self):
+        """Sin quitar el cable y volverlo a poner, que se lleva por delante lo declarado."""
+        js = self._js()
+        assert 'function _dcFeedMove(' in js, 'una toma mal puesta se queda mal puesta'
+        assert "'PUT'" in _fn(js, '_dcFeedPut'), 'cambiar de toma vuelve a crear un cable'
+
+
+class TestLaFichaNoOfreceLoImposible:
+    """Dos casillas seguidas rotuladas «Tipo» —la rama del catálogo y el rol— y la segunda
+    ofreciendo «panel de parcheo» aunque la primera dijera «Armario», porque caía al respaldo de
+    «todas las clases». Así es como un panel de parcheo acaba escrito como modelo de armario: sin
+    salir al buscar un modelo para un rack, y sin dónde declarar sus puertos.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_catalog.html'))
+
+    def test_sin_clases_que_ofrecer_no_hay_casilla(self):
+        js = _strip_comments(self._js())
+        i = js.index("_dcCatForm.kind=this.value")
+        trozo = js[js.rindex('${', 0, i) - 400:i]
+        assert 'kinds_by_tree' in trozo and '.length ?' in trozo,             'la casilla del rol se dibuja siempre'
+
+    def test_y_no_cae_al_respaldo_de_todas(self):
+        """`d.all_kinds` es la lista entera: cayendo a ella, el árbol deja de decidir nada y la
+        casilla vuelve a ofrecer un panel de parcheo para un armario."""
+        assert 'all_kinds' not in _strip_comments(self._js()),             'el respaldo que hacía que el árbol no decidiera nada vuelve a estar a mano'
+
+    def test_una_ficha_ya_guardada_en_la_rama_mala_lo_dice(self):
+        """Que la casilla ya no exista arregla las de mañana y no las de ayer, y a las de ayer
+        no les queda ni la casilla donde se veía el error."""
+        js = self._js()
+        assert 'function _dcCatTreeMismatch(' in js, 'una ficha mal guardada no dice nada'
+        cuerpo = _strip_comments(_fn(js, '_dcCatTreeMismatch'))
+        assert "'rack-types'" in cuerpo and 'f.kind' in cuerpo
+        assert '_dcCatTreeFix()' in cuerpo, 'lo dice y no deja arreglarlo'
+
+    def test_y_moverla_no_pierde_el_rol(self):
+        """Es lo que alguien ya dijo que era, y era lo único de la ficha que estaba bien."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCatTreeFix'))
+        assert 'kind' not in cuerpo, 'mover la ficha borra lo único que estaba bien'
+        assert "tree = 'device-types'" in cuerpo
+
+
+class TestNingunDesplegableEnsenaUnIdentificadorDeLaBiblioteca:
+    """`4-post-frame` es lo que escribe NetBox: un identificador, no una frase. El panel tiene
+    desde hace tiempo un traductor de valores con el crudo como respaldo, y esta lista era la
+    única que se saltaba el paso — así que la forma de un armario salía en inglés y con guiones
+    en medio de un formulario en castellano.
+    """
+
+    def test_la_forma_de_un_armario_se_traduce(self):
+        cuerpo = _strip_comments(_fn(_read(os.path.join(DCIM, '_catalog.html')),
+                                     '_dcCatRackFields'))
+        assert '_dcEnumName(a)' in cuerpo, 'la forma vuelve a salir como la escribió NetBox'
+
+    def test_y_hay_una_palabra_para_cada_una(self):
+        """Un traductor con respaldo no falla: deja pasar el crudo, que es exactamente lo que
+        hacía. Lo que se comprueba es que la palabra exista."""
+        js = _read(os.path.join(DCIM, '_catalog.html'))
+        i = js.index('_dcCatFormExtra.form_factor')
+        formas = re.findall(r"'([0-9a-z-]+(?:-frame|-cabinet))'", js[i:i + 700])
+        assert formas, 'ya no se ofrecen formas'
+        es = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', 'es_ES.py'))
+        en = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', 'en_EN.py'))
+        for f in formas:
+            clave = "'dcim_val_" + f.replace('-', '_') + "'"
+            assert clave in es and clave in en, f'{f} sale sin traducir'
+
+    def test_la_casilla_de_la_numeracion_tiene_nombre(self):
+        """Salía como `desc_units` —el nombre de la columna— en un formulario donde todo lo
+        demás está en castellano."""
+        es = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', 'es_ES.py'))
+        en = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', 'en_EN.py'))
+        for texto in (es, en):
+            assert "'dcim_attr_desc_units'" in texto
+
+    def test_las_dos_casillas_seguidas_no_se_llaman_igual(self):
+        """La rama del catálogo y el rol estaban las dos rotuladas «Tipo», una al lado de la
+        otra. Un rótulo que no distingue es un rótulo que no dice nada."""
+        es = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', 'es_ES.py'))
+        rama = re.search(r"'dcim_cat_kind':\s*'([^']+)'", es)
+        rol = re.search(r"'dcim_role':\s*'([^']+)'", es)
+        assert rama and rol and rama.group(1) != rol.group(1),             'las dos casillas del catálogo vuelven a llamarse igual'
+
+
+class TestCadaHuecoDelPanelLlevaSuConector:
+    """Un panel keystone se compra vacío: los huecos son del modelo y lo que se les mete es de
+    cada panel. Poder decir qué hay en el hueco 7 es la única pregunta que se le hace a esto.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_parts.html'))
+
+    def test_los_huecos_salen_tambien_del_modelo_del_equipo(self):
+        """Miraba solo la plantilla, y un panel de parcheo no nace de ninguna."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCompSlots'))
+        assert '_dcParts' in cuerpo and 'model' in cuerpo,             'la ficha de un equipo vuelve a quedarse sin lista de huecos'
+
+    def test_y_si_el_modelo_solo_dijo_cuantos_se_numeran(self):
+        """«Tiene veinticuatro y no sé cómo se llaman» no es «no tiene ninguno», y era lo segundo
+        lo que pasaba con un panel escrito a mano."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCompSlots'))
+        assert '_dcBaySeed(' in cuerpo, 'un modelo que solo dice el número se queda sin lista'
+
+    def test_con_los_mismos_nombres_que_la_plantilla(self):
+        """Dos que numeren igual acaban numerando distinto, y entonces el hueco 7 de la
+        plantilla y el 7 del equipo dejan de ser el mismo."""
+        js = _strip_comments(self._js())
+        assert '_dcBaySeed' in js and 'function _dcBaySeed' not in js,             'la pantalla de los componentes numera los huecos por su cuenta'
+
+    def test_un_conector_de_panel_tiene_su_propia_lista_de_sitios(self):
+        """No es «lo de dentro» —no es una ranura de la placa— ni «lo que cuelga» —no está
+        enchufado por fuera—. Sin una lista propia habría que mentir en `mount`."""
+        js = self._js()
+        assert '_DC_KIND_FAMS' in js, 'un conector de panel vuelve a no tener dónde ir'
+        i = js.index('const _DC_KIND_FAMS')
+        assert 'jack' in js[i:i + 200] and 'front-ports' in js[i:i + 200]
+
+    def test_cambiar_la_clase_repinta_el_formulario(self):
+        """La clase decide de qué lista salen los huecos, así que cambiarla sin repintar deja la
+        mitad derecha del formulario contestando a la clase anterior."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCompFieldsHtml'))
+        i = cuerpo.index('_dcCompDraft.kind=this.value')
+        assert 'renderDcim()' in cuerpo[i:i + 60],             'cambiar la clase deja los huecos de la clase de antes'
+
+    def test_y_el_hueco_se_llama_hueco(self):
+        """Nadie llama «puerto» ni «bahía» a donde entra un keystone."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcSlotWord'))
+        assert 'dcim_part_hole' in cuerpo
+        assert '_DC_KIND_FAMS' in cuerpo, 'la palabra no sale de la clase'
+
+
+class TestLaTablaYElDibujoLeenEnElMismoSentido:
+    """Un armario puede numerar del suelo al techo —lo normal— o al revés, y eso va serigrafiado
+    en el mástil. La tabla ordenaba «de la U más alta a la más baja», que sólo coincide con el
+    dibujo en el primer caso: en uno numerado al revés el dibujo bajaba del 1 al 6 y la tabla del
+    6 al 1, las dos hablando del mismo armario y ninguna equivocada por su cuenta.
+    """
+
+    def test_la_tabla_ordena_por_donde_cae_en_el_dibujo(self):
+        cuerpo = _strip_comments(_fn(_read(os.path.join(DCIM, '_rack.html')),
+                                     '_dcimItemsTable'))
+        assert '_dcimUFromTop(' in cuerpo,             'la tabla vuelve a ordenar por número de U y no por sitio'
+        assert '(b.u_start || 0) - (a.u_start || 0)' not in cuerpo,             'vuelve a haber una copia de la regla de numeración'
+
+    def test_la_regla_de_la_numeracion_esta_en_un_solo_sitio(self):
+        """Tres copias son tres que se separan, y separarse aquí es que soltar algo en el 3 lo
+        escriba en el 4."""
+        js = _strip_comments(_read(os.path.join(DCIM, '_elevation.html')))
+        assert 'function _dcimUFromTop(' in js and 'function _dcimUAtRow(' in js
+        # El sentido se lee dentro de esas dos y en ninguna otra: fuera de ellas, `desc_units`
+        # sólo puede aparecer como el nombre de un campo, nunca decidiendo hacia dónde se cuenta.
+        dentro = _fn(js, '_dcimUFromTop') + _fn(js, '_dcimUAtRow')
+        assert js.count('desc_units') == dentro.count('desc_units'),             'alguien vuelve a decidir por su cuenta hacia dónde numera un armario'
+
+    def test_y_el_dibujo_la_usa_por_los_dos_lados(self):
+        """`_dceY` coloca y `_dceUAt` lee dónde se soltó algo: son la misma regla del derecho y
+        del revés, y la que se quede sin tocar es la que descuadra el arrastre."""
+        js = _read(os.path.join(DCIM, '_elevation.html'))
+        assert '_dcimUFromTop(rack, u)' in _fn(js, '_dceY')
+        assert '_dcimUAtRow(rack, fromTop)' in _fn(js, '_dceUAt')
+
+
+class TestUnaPestanaSinNumeroPareceVacia:
+    """Los recuentos salían de los datos de cada pestaña, así que estaban en blanco hasta que
+    alguien entraba — y el de alimentación, cuando por fin aparecía, contaba las tres ramas
+    porque la respuesta traía una clave `feeds` que no eran cables.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_rack.html'))
+
+    def test_los_numeros_salen_del_armario_hasta_que_la_pestana_los_diga(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcRackPanelHtml'))
+        assert 'counts' in cuerpo, 'las pestañas vuelven a estar en blanco hasta abrirlas'
+        for clave in ('n.cables', 'n.power', 'n.hist'):
+            assert clave in cuerpo, f'{clave} no se usa'
+
+    def test_la_alimentacion_cuenta_cables_y_no_ramas(self):
+        js = self._js()
+        assert '_dcPower.feeds' not in _strip_comments(js),             'el contador vuelve a leer las ramas como si fueran cables'
+        assert 'function _dcPowerN(' in js
+        assert 'it.feeds' in _fn(js, '_dcPowerN'), 'no cuenta los cables de cada equipo'
+
+    def test_el_cableado_dice_lo_que_falta_por_apuntar(self):
+        """Sin esto, un armario con tres enlaces por apuntar y ninguno apuntado enseña una
+        pestaña sin número, que es lo mismo que enseña uno terminado."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcRackPanelHtml'))
+        assert 'undeclared' in cuerpo, 'lo que falta por declarar no se ve desde la pestaña'
+        assert 'function _dcTabWarn(' in _read(os.path.join(DCIM, '_render.html'))
+
+
+class TestElDescubrimientoProponeYNoDecide:
+    """Lo que manda es lo apuntado. Si el panel escribiera lo que ve, lo visto y lo declarado
+    serían la misma cifra y el contraste —la única razón de esa pestaña— no podría decir nunca
+    «esto se movió», porque se habría movido también lo declarado.
+    """
+
+    def test_hay_un_boton_que_lo_declara(self):
+        js = _read(os.path.join(DCIM, '_cables.html'))
+        assert 'function _dcCableFromSeen(' in js, 'un enlace visto sólo se puede mirar'
+        assert '_dcCableFromSeen(' in _fn(js, '_dcUndeclared'), 'el botón no está en la fila'
+
+    def test_y_entra_por_la_misma_puerta_que_el_formulario(self):
+        """Un cable declarado desde ahí y otro escrito a mano tienen que ser la misma fila, o el
+        contraste compararía dos cosas distintas."""
+        js = _read(os.path.join(DCIM, '_cables.html'))
+        assert "'/api/v1/dcim/cables'" in _fn(js, '_dcCableFromSeen')
+        assert "'/api/v1/dcim/cables'" in _fn(js, '_dcCableSave')
+
+    def test_pero_nada_lo_escribe_solo(self):
+        """Ni un camino que declare lo visto sin que nadie lo pulse."""
+        svc = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'service.py'))
+        i = svc.index('def cable_check(')
+        cuerpo = svc[i:svc.index(chr(10) + 'def ', i + 1)]
+        assert '.create(' not in cuerpo and 'store' not in cuerpo,             'el contraste escribe, y entonces deja de ser un contraste'
+        # Y la pantalla lo declara sólo con un clic: nada lo llama al pintar.
+        js = _read(os.path.join(DCIM, '_cables.html'))
+        assert '_dcCableFromSeen(' not in _fn(js, '_dcCablesHtml'),             'la pantalla declara enlaces al dibujarse'
+
+
+class TestLaFichaDeUnCable:
+    """Cuatro columnas contestan «¿cuadra?» y poco más. Un agregado de cuatro puertos salía como
+    «Router01 — SW01 · Coincide», sin bocas y sin número, que es justo el que más hay que mirar.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_cables.html'))
+
+    def test_la_fila_se_pulsa(self):
+        js = self._js()
+        assert 'function _dcCableInfo(' in js, 'una fila de cable no lleva a ninguna parte'
+        cuerpo = _strip_comments(_fn(js, '_dcCableTable'))
+        assert '_dcCableInfo(' in cuerpo and 'ss-rowlink' in cuerpo,             'la fila no se puede pulsar, o no lo parece'
+
+    def test_y_el_boton_de_borrar_no_abre_la_ficha(self):
+        """Un clic que hace dos cosas hace la que no era."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCableTable'))
+        i = cuerpo.index('_dcCableDrop(')
+        assert 'event.stopPropagation()' in cuerpo[max(0, i - 120):i],             'borrar un cable abre además su ficha'
+
+    def test_la_ficha_enseña_lo_declarado_y_lo_visto(self):
+        """Lo declarado es lo que tiene que haber y lo visto es lo que hay ahora: enseñar sólo
+        una convertiría esta pantalla en la otra."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCableInfo'))
+        for clave in ('a_port', 'b_port', 'ports_seen', 'bundle'):
+            assert clave in cuerpo, f'la ficha no dice {clave}'
+
+    def test_y_la_fila_avisa_de_que_son_varios(self):
+        """Sin abrir nada: un renglón que parece un cable y son cuatro no se distingue de uno
+        que es uno."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCableTable'))
+        assert 'c.bundle' in cuerpo, 'un agregado sigue pareciendo un solo latiguillo'
+
+
+class TestPorDetrasElOrdenSeInvierte:
+    """Un armario visto por la espalda tiene la izquierda donde tenía la derecha. Los dos mini PC
+    de una bandeja salían en el mismo orden en las dos caras, y eso no es una preferencia de
+    dibujo: quien va con un destornillador a la parte de atrás encuentra el primero a la derecha,
+    y un alzado que dice lo contrario le hace desenchufar el que no era.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_elevation.html'))
+
+    def test_hay_una_sola_funcion_que_da_la_vuelta(self):
+        """Lo horizontal se reparte en dos sitios —el trozo de U de una caja y el sitio de lo que
+        va montado dentro— y el que se quedara sin dar la vuelta dibujaría media bandeja al revés
+        que la otra media."""
+        assert 'function _dceFlipX(' in self._js()
+
+    def test_y_la_usan_TODOS_los_repartos_horizontales(self):
+        """Uno por uno y no «en algún sitio de la función». `_dceKidRect` tiene tres salidas —dos
+        reparten a lo ancho y una a lo alto— y comprobar que la vuelta aparece *alguna vez*
+        daba por buena la que dibuja los dos mini PC de una bandeja sin darla, que es
+        exactamente la que se rompió."""
+        js = self._js()
+        assert '_dceFlipX(' in _strip_comments(_fn(js, '_dceRect')),             '_dceRect dibuja por detrás en el mismo sitio que por delante'
+        cuerpo = _strip_comments(_fn(js, '_dceKidRect'))
+        salidas = [x for x in cuerpo.split('return ')[1:]]
+        assert len(salidas) == 3, f'cambiaron las salidas de _dceKidRect: {len(salidas)}'
+        sin_vuelta = [x for x in salidas if not x.startswith('flip(')]
+        assert len(sin_vuelta) == 1, 'una salida horizontal se quedó sin dar la vuelta'
+        # Y la única que puede quedarse sin ella es la que reparte a lo ALTO.
+        assert 'dentro.h / de' in sin_vuelta[0]
+
+    def test_lo_montado_sabe_por_que_cara_se_mira(self):
+        """Sin la cara, la función que da la vuelta no puede darla."""
+        js = self._js()
+        assert 'function _dceKidRect(caja, item, hermanos, gut, face)' in js
+        assert 'gut, face)' in _strip_comments(_fn(js, '_dceKids'))
+
+    def test_pero_en_vertical_no_se_toca(self):
+        """La U 5 es la U 5 por delante y por detrás: el número está serigrafiado en los dos
+        mástiles. Dar la vuelta a lo vertical movería un equipo de U al rodear el armario."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dceFlipX'))
+        assert '.y' not in cuerpo and 'h:' not in cuerpo,             'la vuelta toca también lo vertical'
+        # Y el reparto a lo alto de una bandeja tampoco: arriba sigue siendo arriba.
+        kid = _strip_comments(_fn(self._js(), '_dceKidRect'))
+        i = kid.index("'height'")
+        # Hasta el final de ESE return y no un trozo a ojo: el siguiente sí lleva la vuelta, y
+        # una ventana generosa se la come y da por rota una guarda que estaba bien.
+        assert 'flip(' not in kid[i:kid.index('};', i)],             'lo repartido a lo alto se da la vuelta'
+
+    def test_solo_por_detras(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dceFlipX'))
+        assert "face !== 'rear'" in cuerpo, 'el frontal también sale al revés'
+
+
+class TestLasBocasSoloDondeDicenAlgo:
+    """En una fila que cuadra, las bocas que dicen los dispositivos son las mismas que ya están
+    dos columnas a la izquierda: sólo alargan el renglón, y en un agregado son ocho nombres
+    largos que empujan el resto de la tabla.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_cables.html'))
+
+    def test_apagadas_por_defecto(self):
+        js = self._js()
+        assert 'let _dcCablePorts = false;' in js, 'vuelven a salir siempre'
+
+    def test_pero_se_pueden_encender(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCablesHtml'))
+        assert '_dcCablePorts=this.checked' in cuerpo, 'no hay forma de verlas'
+        assert 'dcim_cable_show_ports' in cuerpo
+
+    def test_y_cuando_NO_cuadran_salen_igual(self):
+        """Ahí son la respuesta a «¿entonces dónde está enchufado?», que es la única pregunta
+        que esa fila deja abierta."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCableTable'))
+        i = cuerpo.index('ports_seen')
+        assert "other_port" in cuerpo[max(0, i - 160):i + 80],             'apagar el interruptor esconde también las que no cuadran'
+
+
+class TestElMapaDeLaFlotaSeLeeUnaVez:
+    """El comentario de esa función dice que la tabla de estado es una de las dos lecturas caras
+    del camino y que por eso se hace para toda la flota de golpe — y se hacía dos veces, con dos
+    nombres, a doce líneas de distancia. No da ningún error: da una pantalla que tarda el doble
+    de lo que su propio comentario explica.
+    """
+
+    def test_la_tabla_de_estado_se_lee_una_sola_vez(self):
+        svc = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'service.py'))
+        i = svc.index('def topology(')
+        # Hasta la siguiente función o hasta el final: `topology` es hoy la última del
+        # fichero, y buscar un `def` que no está deja la guarda reventando en vez de
+        # comprobando.
+        j = svc.find(chr(10) + 'def ', i + 1)
+        cuerpo = _strip_comments(svc[i:] if j < 0 else svc[i:j])
+        assert cuerpo.count('_read_check_status()') == 1,             'el mapa vuelve a leer la tabla de estado dos veces'
+
+
+class TestLasCuatroListasDelArmarioSeDibujanIgual:
+    """Son cuatro listas del mismo armario, se leen una detrás de otra y se miran juntas: una que
+    salga a otro tamaño no parece otra tabla, parece otra pantalla. Y la de equipos iba a
+    `ss-fs-3` mientras alimentación y cableado iban al tamaño de fábrica.
+    """
+
+    #: Los ficheros que dibujan una tabla del panel de un armario.
+    TABLAS = ('_rack.html', '_cables.html', '_power.html')
+
+    def test_hay_una_constante_y_no_seis_copias(self):
+        assert 'const _DC_TBL =' in _read(os.path.join(DCIM, '_render.html'))
+
+    def test_y_ninguna_tabla_del_panel_se_dibuja_por_su_cuenta(self):
+        for fichero in self.TABLAS:
+            js = _strip_comments(_read(os.path.join(DCIM, fichero)))
+            for linea in js.split(chr(10)):
+                if 'class="table ' not in linea:
+                    continue
+                # La ficha de un cable vive en un cuadro y no en el panel: ahí manda el cuadro.
+                assert 'ss-fs-2' in linea, f'{fichero}: una tabla con clases propias: {linea.strip()[:70]}'
+
+    def test_los_rotulos_de_las_regletas_no_se_parten(self):
+        """«Tomas libres» en dos líneas hace que la fila mida dos, y con dos tablas una encima de
+        otra eso es lo que hacía que la pestaña pareciera de otra pantalla."""
+        cuerpo = _strip_comments(_fn(_read(os.path.join(DCIM, '_power.html')), '_dcPduTable'))
+        assert 'ss-nowrap' in cuerpo
+
+
+class TestLaPestanaDeCableadoNoPagaElMapaEntero:
+    """De todo el mapa, aquí sólo se leen los enlaces `lldp`. Armarlo entero incluye leer enteras
+    las cuatro tablas de lo que cada equipo ha visto pasar, la de MAC entre ellas — se leían y se
+    tiraban, y eso era la espera de esta pestaña.
+    """
+
+    def test_lo_pide_sin_la_evidencia(self):
+        rutas = _strip_comments(_read(os.path.join(SRC, 'lib', 'core', 'dcim', 'routes',
+                                                   'power.py')))
+        i = rutas.index('_infra_topology')
+        assert 'evidence=False' in rutas[i:i + 400],             'el cableado vuelve a pedir el mapa entero'
+
+    def test_y_el_mapa_las_sigue_leyendo_para_quien_las_usa(self):
+        """El mapa de infraestructura coloca una máquina en el puerto de un switch con ellas:
+        quitarlas de ahí sería arreglar una pantalla rompiendo otra."""
+        rutas = _strip_comments(_read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py')))
+        assert 'evidence=True' in rutas, 'el mapa se queda sin la evidencia por defecto'
+
+
+class TestLaTablaDeCablesSaleAntesQueSuContraste:
+    """Esperar al mapa de la flota para poder pintar la primera fila deja la pestaña en blanco por
+    un dato que ocupa la última columna.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_cables.html'))
+
+    def test_se_pide_en_dos_veces(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCablesOpen'))
+        assert cuerpo.count('apiGet(') == 2, 'vuelve a pedirse todo de una vez'
+        assert "'?check=1'" in cuerpo or '?check=1' in cuerpo
+
+    def test_y_lo_declarado_se_pinta_en_medio(self):
+        """Sin ese redibujado, las dos peticiones se ven como una sola espera más larga."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCablesOpen'))
+        i = cuerpo.index('?check=1')
+        assert cuerpo[:i].count('renderDcim()') >= 2,             'la tabla no se dibuja hasta que llega el contraste'
+
+    def test_no_se_pega_el_contraste_de_otro_armario(self):
+        """Entre las dos peticiones se puede haber cambiado de armario."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCablesOpen'))
+        assert 'ahora.uid !== rack.uid' in cuerpo, 'el contraste puede caer sobre otro armario'
+
+    def test_mientras_llega_dice_que_esta_comprobando(self):
+        """Y no «no se ve», que es un veredicto sin haber mirado."""
+        js = self._js()
+        assert 'dcim_cables_checking' in _strip_comments(_fn(js, '_dcCableTable')),             'una fila sin comprobar finge un veredicto'
+        assert 'dcim_cables_checking' in _strip_comments(_fn(js, '_dcCablesHtml'))
+
+
+class TestSeisVecesElMismoAvisoEsUno:
+    """Seis equipos colgando de la rama A son seis renglones idénticos salvo el nombre, y lo que
+    dicen es UN hecho: de esa rama cuelga todo. Media pantalla para repetir seis veces la misma
+    frase, justo encima de la tabla que se venía a mirar — y una lista de avisos que hay que
+    saltarse deja de leerse, que es lo contrario de para lo que está.
+    """
+
+    def _fn(self):
+        return _strip_comments(_fn(_read(os.path.join(DCIM, '_power.html')),
+                                   '_dcPowerWarnings'))
+
+    def test_los_de_una_sola_rama_se_agrupan(self):
+        cuerpo = self._fn()
+        assert 'dcim_warn_single_branch_n' in cuerpo, 'vuelve a haber un renglón por equipo'
+
+    def test_por_rama_y_no_todos_juntos(self):
+        """Colgar solo de la A y colgar solo de la B no es el mismo aviso: se apagan con cortes
+        distintos, y juntarlos diría que se apagan a la vez."""
+        cuerpo = self._fn()
+        assert 'solas[rama]' in cuerpo
+
+    def test_uno_solo_sigue_hablando_en_singular(self):
+        cuerpo = self._fn()
+        assert "quienes.length === 1" in cuerpo,             'un equipo solo sale en plural, o con una lista de uno'
+
+    def test_pero_las_cargas_no_se_agrupan(self):
+        """Cada una es una regleta distinta con su porcentaje, y juntar dos cifras que no son la
+        misma sólo se puede hacer perdiendo las dos."""
+        cuerpo = self._fn()
+        assert 'dcim_warn_over_half' in cuerpo and 'otros' in cuerpo
+
+    def test_y_una_lista_larga_no_se_come_la_pantalla(self):
+        """Que es de lo que iba todo esto."""
+        js = _read(os.path.join(DCIM, '_power.html'))
+        assert 'function _dcNames(' in js
+        cuerpo = _strip_comments(_fn(js, '_dcNames'))
+        assert '_DC_NAMES_MAX' in cuerpo and 'dcim_and_more' in cuerpo,             'una lista de cuarenta nombres vuelve a salir entera'
+
+
+class TestUnCableSePuedePartir:
+    """Los enlaces se apuntan primero de punta a punta y los paneles aparecen después. Sin partir
+    el cable, corregirlo es borrarlo y escribir tres: se pierden la etiqueta, el color y las dos
+    bocas, así que no se corrige y el inventario se queda diciendo que hay un latiguillo donde
+    hay tres.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_cables.html'))
+
+    def test_se_llega_desde_la_ficha_del_cable(self):
+        js = self._js()
+        assert 'function _dcCableSplit(' in js
+        assert '_dcCableSplit(' in _strip_comments(_fn(js, '_dcCableInfo')),             'partir un cable no se puede pedir desde ninguna parte'
+
+    def test_el_panel_se_busca_en_cualquier_armario(self):
+        """Casi nunca está en el armario del servidor: vive en el de patcheo."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcSplitGo'))
+        assert '/api/v1/dcim/items?q=' in cuerpo,             'sólo se puede elegir un panel del armario abierto'
+
+    def test_primero_el_tramo_nuevo_y_despues_se_mueve_el_viejo(self):
+        """Al revés, un fallo a mitad deja el enlace acabando en el panel y sin salida: un cable
+        a ninguna parte que nadie sabría que hay que arreglar."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcSplitSave'))
+        assert cuerpo.index("'POST'") < cuerpo.index("'PUT'"),             'se mueve el cable antes de tener dónde seguir'
+
+    def test_y_el_de_siempre_conserva_lo_suyo(self):
+        """Repartir la etiqueta entre los dos daría dos cables llamados igual, que en una lista
+        de cables es lo mismo que no llamarse."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcSplitSave'))
+        i = cuerpo.index("'PUT'")
+        assert 'label' not in cuerpo[i:], 'mover el cable le cambia la etiqueta'
+        assert 'b_item' in cuerpo[i:] and 'a_port' not in cuerpo[i:],             'mover el cable toca el extremo que no se movía'
+
+
+class TestLaBusquedaDelPanelNoEnsenaIdentificadores:
+    """`r.label || r.uid` deja treinta y seis caracteres donde tenía que ir «Generico Regleta 8»
+    o «Bandeja». La misma copia de la regla que ya se quitó del desplegable de «va montado en».
+    """
+
+    def test_se_nombra_con_la_funcion_de_siempre(self):
+        cuerpo = _strip_comments(_fn(_read(os.path.join(DCIM, '_cables.html')), '_dcSplitDraw'))
+        assert '_dcimItemName(r)' in cuerpo, 'la lista vuelve a enseñar el identificador'
+        assert 'r.label || r.uid' not in cuerpo, 'vuelve a haber una copia de esa regla'
+
+    def test_y_el_servidor_manda_los_cuatro_datos_que_hacen_falta(self):
+        """Esa función mira etiqueta, máquina, modelo y rol: mandar sólo la etiqueta la deja
+        cayendo al identificador igual."""
+        rutas = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'routes', 'racks.py'))
+        i = rutas.index('def api_dcim_items_find(')
+        cuerpo = rutas[i:rutas.index('@app.route', i)]
+        for clave in ("'label'", "'type_name'", "'host_uid'", "'role'"):
+            assert clave in cuerpo, f'la búsqueda no manda {clave}'
+
+
+class TestLaFichaEnsenaPorDondePasa:
+    """La fila dice «Por el panel» y ahí se acaba: cuál de los cuatro paneles de la sala, y en
+    cuál de sus veinticuatro posiciones, había que reconstruirlo a mano cable a cable.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_cables.html'))
+
+    def test_la_ficha_pinta_el_camino(self):
+        js = self._js()
+        assert 'function _dcPathHtml(' in js
+        assert '_dcPathHtml' in _strip_comments(_fn(js, '_dcCableInfo')),             'la ficha no enseña por dónde pasa'
+
+    def test_y_marca_el_tramo_que_se_esta_mirando(self):
+        """Un camino de cuatro tramos, sin saber cuál se tiene abierto, obliga a compararlos uno
+        a uno."""
+        js = self._js()
+        assert 'abierto' in _strip_comments(_fn(js, '_dcPathHtml'))
+        cuerpo = _strip_comments(_fn(js, '_dcPathLegHtml'))
+        assert 'l.cable' in cuerpo and 'ss-path-mine' in cuerpo
+
+    def test_con_los_nombres_que_manda_el_servidor(self):
+        """La pantalla sólo tiene los equipos de SU armario, y un camino sale del armario."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcPathHtml'))
+        assert 'l.a_label' in cuerpo and 'l.b_label' in cuerpo,             'la traza vuelve a enseñar identificadores fuera del armario abierto'
+
+
+class TestUnCableSeInventaria:
+    """`length_mm` y `description` existían desde el primer commit y ningún camino las escribía.
+    Séptima vez que sale esta forma en esta sección: una columna que nadie puede escribir vale
+    siempre su valor por defecto, y el código que la respeta parece que funciona.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_cables.html'))
+
+    def test_el_alta_pregunta_lo_que_hay_que_saber_de_un_cable(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCableSave'))
+        for campo in ('category', 'length_mm', 'description', 'kind'):
+            assert campo in cuerpo, f'{campo} no se manda al guardar'
+
+    def test_los_metros_se_piden_en_metros(self):
+        """Nadie mide un latiguillo en milímetros y todo el mundo lo compra en metros. La
+        conversión vive en UN sitio: dos copias son dos que se separan, y la que se quede sin el
+        cambio guardará metros en una columna de milímetros."""
+        js = self._js()
+        assert '* 1000' in _strip_comments(_fn(js, '_dcMetresIn'))
+        for fn in ('_dcCableSave', '_dcCableEdSave'):
+            assert '_dcMetresIn(' in _strip_comments(_fn(js, fn)), fn
+
+    def test_y_se_pueden_escribir_con_coma(self):
+        """En un navegador en castellano lo natural es teclear `0,2`, y con `type=number` eso
+        llega vacío según el navegador: el cable se guardaba midiendo cero sin decir nada."""
+        js = self._js()
+        cuerpo = _strip_comments(_fn(js, '_dcMetresIn'))
+        assert "replace(',', '.')" in cuerpo, 'la coma vuelve a perder lo tecleado'
+        assert 'type="number"' not in _strip_comments(_fn(js, '_dcCableFormHtml')),             'el campo de los metros vuelve a ser numérico, que no acepta coma'
+
+    def test_y_lo_que_no_es_un_numero_se_dice(self):
+        """Cero es una longitud y «no se sabe» es otra cosa: guardar 0 en silencio pierde lo
+        que alguien acababa de escribir."""
+        js = self._js()
+        assert ': null' in _strip_comments(_fn(js, '_dcMetresIn'))
+        for fn in ('_dcCableSave', '_dcCableEdSave'):
+            assert 'dcim_cable_len_bad' in _strip_comments(_fn(js, fn)), fn
+
+    def test_la_categoria_depende_de_de_que_es_el_cable(self):
+        """Un Cat 6A no es una categoría de fibra ni un OM4 una de cobre, y ofrecer las diez
+        juntas es ofrecer equivocarse."""
+        js = self._js()
+        cuerpo = _strip_comments(_fn(js, '_dcCatBox'))
+        assert 'categories || {})[kind]' in cuerpo, 'la lista deja de depender del tipo'
+        # Y las dos pantallas que la usan le pasan el suyo: una caja que se lo mirara ella sola
+        # ofrecería categorías de fibra en el alta de un cobre de la otra.
+        assert "_dcCatBox('dcc-cat', _dcCableKind" in js
+        assert "_dcCatBox('dce-cat', _dcCableEdKind" in js
+
+    def test_y_se_puede_escribir_una_que_no_esté(self):
+        """Un fabricante que llame a lo suyo de otra manera no puede quedarse sin apuntarlo: la
+        diferencia entre sugerir y obligar."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCatBox'))
+        assert 'datalist' in cuerpo and '<select' not in cuerpo
+
+
+class TestElCaminoSeDibuja:
+    """Una lista de tramos repite cada parada dos veces —final de uno y principio del siguiente—
+    y leerla obliga a emparejarlas de cabeza, que es el trabajo que el dibujo existe para
+    ahorrar.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_cables.html'))
+
+    def test_se_dibujan_paradas_y_no_tramos_sueltos(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcPathHtml'))
+        assert 'paradas' in cuerpo and '_dcPathStopHtml(' in cuerpo
+
+    def test_cada_parada_dice_donde_esta(self):
+        """Con el armario y la U: «PP-A 25» no dice adónde hay que ir."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcPathStopHtml'))
+        assert 'x.at.rack' in cuerpo and 'x.at.u' in cuerpo
+        svc = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'service.py'))
+        assert 'sitio_de' in svc, 'el servidor no manda dónde está cada punta'
+
+    def test_y_de_lo_ajeno_no_se_dice_donde(self):
+        """Un equipo ajeno llega opaco a propósito, y decir en qué armario está sería decir qué
+        hay en la sala de otro por la puerta de al lado."""
+        rutas = _strip_comments(_read(os.path.join(SRC, 'lib', 'core', 'dcim', 'routes',
+                                                   'power.py')))
+        i = rutas.index('nombres_rack')
+        assert "foreign" in rutas[i:i + 400], 'el armario de un equipo ajeno se cuenta igual'
+
+    def test_el_tramo_dice_con_que_se_distingue_de_otro_igual(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcPathLegHtml'))
+        assert 'c.label' in cuerpo and 'c.category' in cuerpo and 'length_mm' in cuerpo
+
+
+class TestElCaminoDiceCuantoMide:
+    """Es la cifra que se busca al mirar un camino: si el enlace entero pasa de los cien metros
+    de cobre, da igual lo bien declarado que esté — y eso no se ve mirando tres tramos por
+    separado.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_cables.html'))
+
+    def test_se_suman_los_tramos(self):
+        js = self._js()
+        assert 'function _dcPathTotalHtml(' in js
+        assert '_dcPathTotalHtml(' in _strip_comments(_fn(js, '_dcPathHtml'))
+
+    def test_y_se_dice_cuantos_faltan_por_medir(self):
+        """Sumar sólo los medidos y enseñarlo como el total es la peor forma de contestar: un
+        camino de cuatro tramos con uno medido diría «0,25 m» y quien lo lea se lo cree."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcPathTotalHtml'))
+        assert 'faltan' in cuerpo
+        assert 'dcim_cable_path_at_least' in cuerpo and 'dcim_cable_path_total' in cuerpo
+
+
+class TestUnCableSeCorrige:
+    """Un cable se podía dar de alta y borrar, y nada más: la categoría, los metros y la nota se
+    preguntaban una vez y ahí se acababa. Pero un cable se apunta con prisa —se está montando— y
+    sus datos se completan después, con el metro en la mano.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_cables.html'))
+
+    def test_la_ficha_se_puede_editar(self):
+        js = self._js()
+        assert 'function _dcCableEditDraw(' in js
+        assert '_dcCableEd=true' in _strip_comments(_fn(js, '_dcCableInfo')),             'no hay por dónde entrar a corregir un cable'
+
+    def test_y_guarda_lo_que_se_corrige(self):
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCableEdSave'))
+        for campo in ('label', 'category', 'length_mm', 'description', 'a_port', 'b_port'):
+            assert campo in cuerpo, f'{campo} no se guarda al corregir'
+
+    def test_pero_no_deja_mover_las_puntas(self):
+        """Mover una punta es otra operación —«meter un panel en medio»— y ofrecerla mezclada con
+        la etiqueta y los metros invita a rehacer el cableado creyendo que se corrige una
+        errata."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcCableEdSave'))
+        assert 'a_item' not in cuerpo and 'b_item' not in cuerpo

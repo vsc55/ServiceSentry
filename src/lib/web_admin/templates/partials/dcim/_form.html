@@ -16,7 +16,7 @@
 //: to drift. What differs is data — a route, the parent's column, the fields.
 const _DCIM_KIND = {
     site: {url: 'sites', parent: '', title: 'dcim_site', fields: [
-        {name: 'name', label: 'dcim_site_name', w: '16rem'},
+        {name: 'name', label: 'dcim_site_name', w: '16rem', req: true},
         {name: 'address', label: 'dcim_address', w: '18rem'},
         // Kept whether or not anything draws them yet: where a datacenter IS, is a fact about
         // it, and the map that will use them deliberately depends on no tile provider.
@@ -31,7 +31,7 @@ const _DCIM_KIND = {
         {name: 'timezone', label: 'dcim_timezone', list: 'zones', w: '14rem'},
     ]},
     room: {url: 'rooms', parent: 'site_uid', title: 'dcim_room', fields: [
-        {name: 'name', label: 'dcim_room_name', w: '16rem'},
+        {name: 'name', label: 'dcim_room_name', w: '16rem', req: true},
         // Cómo se enfría. Vacío es «nadie lo ha dicho», que **no** es lo mismo que `none`: un
         // armario de comunicaciones sin refrigeración es un hecho que merece constar, y una
         // sala cuya refrigeración nadie escribió es una pregunta.
@@ -46,7 +46,7 @@ const _DCIM_KIND = {
         {name: 'description', label: 'dcim_description', w: '18rem'},
     ]},
     rack: {url: 'racks', parent: 'room_uid', title: 'dcim_rack', fields: [
-        {name: 'name', label: 'dcim_rack_name', w: '12rem'},
+        {name: 'name', label: 'dcim_rack_name', w: '12rem', req: true},
         // A qué fila pertenece. Vacío = suelto, que es un estado real: el armario de
         // comunicaciones de un rincón no está en ninguna fila y nunca lo estará.
         {name: 'row_uid', label: 'dcim_row', list: 'rows', w: '10rem'},
@@ -113,57 +113,72 @@ const _DCIM_KIND = {
         // estaba en el formulario, así que el rack entero salía gris. Tercera vez que aparece
         // esta misma forma de fallo en esta sección: una columna que nadie puede escribir vale
         // siempre su valor por defecto, y el código que la respeta parece que funciona.
-        {name: 'host_uid', label: 'dcim_host', list: 'hosts', w: '16rem'},
-        {name: 'serial', label: 'dcim_serial', w: '10rem'},
+        {name: 'host_uid', label: 'dcim_host', tt: 'dcim_item_host_tt',
+         list: 'hosts', w: '16rem'},
+        // Y con un botón que se lo pregunta al dispositivo: un número de serie está en una
+        // pegatina detrás del rack, y el equipo lo dice por SNMP si su perfil lo publica.
+        {name: 'serial', label: 'dcim_serial', w: '10rem', said: 'serial'},
         // **De qué plantilla nace.** Solo al crear: elegirla estampa sus componentes en el
         // equipo, y eso ocurre una vez. Ofrecerla al editar diría que se puede cambiar de qué
         // nació algo que ya nació — y o no hace nada, o vuelve a copiar quince piezas encima
         // de las que alguien ya corrigió.
         {name: 'build_uid', label: 'dcim_build_pick', list: 'builds', w: '15rem',
          newOnly: true},
+        // **O directamente un modelo del catálogo**, que es la mitad de lo que se pone en un
+        // armario: una tapa ciega, una regleta, una bandeja, un panel de parcheo. Nada de eso
+        // tiene estándar de compra ni componentes que estampar, y obligar a declarar una
+        // plantilla para colocar una tapa es pedir el estándar de una tapa.
+        //
+        // Se BUSCA y no se elige de una lista: el catálogo son miles de filas, y un desplegable
+        // de miles no es un desplegable. Editable después de crear, al revés que la plantilla:
+        // esto no estampa nada — es de qué modelo ES, y eso se corrige.
+        //
+        // El nombre del modelo llega en `type_name` —uno por modelo, no uno por campo— así que
+        // hay que decirlo: la convención sola buscaba `type_uid_name`, que no existe, y la caja
+        // se quedaba enseñando el identificador que existe para no enseñar.
+        {name: 'type_uid', label: 'dcim_cat_model', pick: 'type', nameKey: 'type_name',
+         w: '18rem'},
         // Y lo que solo tiene ESTA caja: ningún modelo ni plantilla puede saberlo, y sin ello
         // «qué se queda sin garantía este trimestre» no tiene dónde contestarse.
         {name: 'purchased_at', label: 'dcim_item_purchased', type: 'date', w: '9rem'},
         {name: 'warranty_until', label: 'dcim_item_warranty', type: 'date', w: '9rem'},
         {name: 'supplier', label: 'dcim_item_supplier', w: '10rem'},
+        // El número de inventario y lo que haya que decir de ESTA caja. Las dos columnas
+        // existían desde el primer día, la API las guardaba y **ningún campo las escribía**:
+        // valían siempre su valor por defecto, y el código que las respeta parece que funciona.
+        // Cuarta vez que sale esta misma forma de fallo en esta sección.
+        {name: 'asset', label: 'dcim_item_asset', w: '10rem'},
+        {name: 'description', label: 'dcim_description', w: '16rem'},
     ]},
 };
 
-/** The form, where the thing itself appears — and nowhere else. */
-function _dcimFormHtml(mode, kind, parent, uid) {
+/** El formulario, **en un cuadro y con rótulos**.
+ *
+ *  Era una barra: dieciocho cajas seguidas, en crudo, del ancho que cupiera, y cada una diciendo
+ *  qué era sólo en su `placeholder` — que desaparece en cuanto se escribe. Con cuatro campos
+ *  pasa; con dieciocho, y tres de ellos números de una sola cifra, lo que se ve es una fila de
+ *  huecos y hay que contar posiciones para saber cuál es cuál.
+ *
+ *  Cada caja lleva su rótulo encima y su ayuda al lado cuando la tiene (`_dcLabel`, el mismo del
+ *  catálogo), y el conjunto va en el cuadro compartido: se abre sobre lo que se estaba mirando,
+ *  se cierra con Escape y no empuja la pantalla de debajo hacia abajo. */
+function _dcimFormBody() {
     const f = _dcimForm;
-    if (!f || f.mode !== mode || f.kind !== kind || f.parent !== (parent || '')
-        || f.uid !== (uid || '')) return '';
-    const spec = _DCIM_KIND[kind];
+    if (!f) return '';
+    const spec = _DCIM_KIND[f.kind];
     const row = f.row || {};
-    const box = (fld, i) => {
+    const caja = (fld, i) => {
         const has = row[fld.name] !== undefined && row[fld.name] !== null && row[fld.name] !== '';
         const val = has ? row[fld.name] : (fld.value !== undefined ? fld.value : '');
-        if (fld.choices)
-            // El prefijo lo dice el campo: escrito a mano, la primera elección que no fuese una
-            // cara del rack habría salido con el nombre de una.
-            return `<select id="dcim-f-${i}" class="form-select form-select-sm"
-                        style="max-width:${fld.w}" title="${escAttr(t(fld.label))}">
-                ${fld.choices.map(c => `<option value="${escAttr(c)}"${
-                    String(val) === String(c) ? ' selected' : ''}>${
-                    esc(t((fld.prefix || '') + c))}</option>`).join('')}
-            </select>`;
-        // Un campo con lista es texto CON sugerencias, no un desplegable: se escribe para
-        // filtrar y se puede pegar una zona que esta instalación no conozca todavía — que es
-        // mejor que perder el dato. Sin lista que ofrecer, es un campo de texto y ya está.
-        const list = _dcimListId(fld);
-        return `<input id="dcim-f-${i}" class="form-control form-control-sm${
-                    fld.type === 'number' || fld.type === 'coord' ? ' ss-tabular' : ''}"
-                    ${list ? `list="${list}" autocomplete="off"` : ''}
-                    ${fld.pairs ? `oninput="_dcimSplitCoords(this, ${i}, ${jsStr(kind)})"` : ''}
-                    style="max-width:${fld.w}" type="${
-                        escAttr(fld.type === 'coord' ? 'text' : (fld.type || 'text'))}"
-                    ${fld.min ? `min="${fld.min}"` : ''}
-                    ${fld.step ? `step="${escAttr(fld.step)}"` : ''}
-                    value="${escAttr(String(val))}"
-                    placeholder="${escAttr(t(fld.label))}" title="${escAttr(t(fld.label))}"
-                    onkeydown="if(event.key==='Enter')_dcimSave();
-                               if(event.key==='Escape')_dcimClose()">`;
+        const caja = fld.pick ? _dcimPickBox(fld, i, val, row)
+                              : _dcimFieldHtml(fld, i, val, f.kind);
+        return `<label class="ss-fs-2 text-muted">${_dcLabel(fld.label, fld.tt)}${
+            fld.req ? ' <span class="text-danger">*</span>' : ''}
+            ${fld.said ? `<div class="input-group input-group-sm">${caja}
+                <button class="btn btn-secondary" type="button"
+                        title="${escAttr(t('dcim_said_ask'))}"
+                        onclick="_dcimSaidAsk(${i},${jsStr(fld.said)})">
+                    <i class="bi bi-magic"></i></button></div>` : caja}</label>`;
     };
     // Un `<datalist>` por lista y no por campo: son cientos de opciones, y una copia por
     // campo serían cientos por cada uno.
@@ -171,18 +186,251 @@ function _dcimFormHtml(mode, kind, parent, uid) {
     // que hay que acordarse de tocar al añadir la quinta, y no acordarse no da ningún error —
     // da un campo con sugerencias que no sugiere nada.
     const lists = Object.keys(_DCIM_LISTS)
-        .filter(k => spec.fields.some(f => f.list === k))
+        .filter(k => spec.fields.some(x => x.list === k))
         .map(_dcimDatalist).join('');
-    return `<div class="d-flex align-items-center gap-2 flex-wrap my-2 p-2 rounded
-                        bg-body-secondary">${lists}
-        <span class="text-muted ss-fs-2">${esc(t(mode === 'new' ? 'dcim_new' : 'edit'))}
-            · ${esc(t(spec.title))}</span>
+    return `${lists}<div class="d-flex flex-wrap gap-3 align-items-end">
         ${spec.fields.map((fld, i) =>
-            (fld.newOnly && mode !== 'new') ? '' : box(fld, i)).join('')}
-        <button class="btn btn-sm btn-primary" onclick="_dcimSave()">${esc(t('save'))}</button>
-        <button class="btn btn-sm btn-secondary" onclick="_dcimClose()">${
-            esc(t('cancel'))}</button>
+            (fld.newOnly && f.mode !== 'new') ? '' : caja(fld, i)).join('')}
     </div>`;
+}
+
+/** La caja de un campo: un desplegable de opciones, uno de una lista cerrada, o un cuadro de
+ *  texto con sugerencias. */
+function _dcimFieldHtml(fld, i, val, kind) {
+    if (fld.choices)
+        // El prefijo lo dice el campo: escrito a mano, la primera elección que no fuese una
+        // cara del rack habría salido con el nombre de una.
+        return `<select id="dcim-f-${i}" class="form-select form-select-sm"
+                    style="max-width:${fld.w}">
+            ${fld.choices.map(c => `<option value="${escAttr(c)}"${
+                String(val) === String(c) ? ' selected' : ''}>${
+                esc(t((fld.prefix || '') + c))}</option>`).join('')}
+        </select>`;
+    // Una lista CERRADA se elige de un desplegable: lo que se ve es el nombre y lo que se guarda
+    // es el uid. Una ABIERTA —las zonas horarias— sigue siendo texto con sugerencias, que es lo
+    // que permite pegar una que esta instalación no conozca todavía en vez de perder el dato.
+    const spec = _DCIM_LISTS[fld.list];
+    if (spec && spec.pick) return _dcimPickHtml(fld, i, val);
+    const list = _dcimListId(fld);
+    return `<input id="dcim-f-${i}" class="form-control form-control-sm${
+                fld.type === 'number' || fld.type === 'coord' ? ' ss-tabular' : ''}"
+                ${list ? `list="${list}" autocomplete="off"` : ''}
+                ${fld.pairs ? `oninput="_dcimSplitCoords(this, ${i}, ${jsStr(kind)})"` : ''}
+                style="max-width:${fld.w}" type="${
+                    escAttr(fld.type === 'coord' ? 'text' : (fld.type || 'text'))}"
+                ${fld.min ? `min="${fld.min}"` : ''}
+                ${fld.step ? `step="${escAttr(fld.step)}"` : ''}
+                value="${escAttr(String(val))}"
+                onkeydown="if(event.key==='Enter')_dcimSave();">`;
+}
+
+/** Una caja que enseña el NOMBRE y guarda el identificador, con un botón que busca.
+ *
+ *  Ni un desplegable ni un campo de texto: el catálogo son miles de filas —un desplegable de
+ *  miles no es un desplegable— y el identificador escrito a pelo son treinta y seis caracteres
+ *  que no dicen nada. Se busca, se elige, y en la casilla queda el nombre.
+ *
+ *  El identificador viaja en un `hidden` con el id que espera quien guarda, así que el guardado
+ *  no tiene que saber que este campo se rellena de otra manera. */
+function _dcimPickBox(fld, i, val, row) {
+    const nombre = _dcimPickName(fld, row);
+    return `<div class="input-group input-group-sm" style="max-width:${fld.w}">
+        <input type="hidden" id="dcim-f-${i}" value="${escAttr(String(val || ''))}">
+        <input class="form-control" readonly
+               value="${escAttr(nombre || (val ? String(val) : ''))}"
+               placeholder="${escAttr(t('dcim_pick_none'))}">
+        ${val ? `<button class="btn btn-secondary" type="button"
+                    title="${escAttr(t('clear'))}"
+                    onclick="_dcimPickTake(${i},'','')">
+                <i class="bi bi-x-lg"></i></button>` : ''}
+        <button class="btn btn-secondary" type="button"
+                title="${escAttr(t('dcim_cat_search'))}"
+                onclick="_dcimPickOpen(${i})">
+            <i class="bi bi-search"></i></button>
+    </div>`;
+}
+
+/** Dónde está escrito el NOMBRE de lo que guarda una caja de estas.
+ *
+ *  `<campo>_name` por convención, y **declarado** cuando no coincide. El armario manda el nombre
+ *  del modelo en `type_name` junto a `type_uid`: es un nombre por modelo y no uno por campo, que
+ *  es lo correcto —el mismo modelo se nombra igual lo lea quien lo lea— y deja la convención
+ *  corta. Buscar `type_uid_name` no daba ningún error: daba una caja con el identificador
+ *  dentro, que es exactamente lo que esta caja existe para no enseñar.
+ *
+ *  Una función y no dos lecturas sueltas: quien la escribe y quien la lee tienen que estar de
+ *  acuerdo sobre dónde, y dos sitios decidiéndolo por su cuenta es que un día no lo estén. */
+function _dcimPickName(fld, row) {
+    return String((row || {})[(fld || {}).nameKey || ((fld || {}).name + '_name')] || '');
+}
+
+//: Lo que se está buscando en el catálogo desde una ficha: `{idx, q, rows}`.
+let _dcimPick = null;
+
+/** Buscar un modelo del catálogo. Lo tecleado se guarda antes, como con el número de serie: el
+ *  buscador y el formulario son el mismo cuadro, así que enseñar uno borra el marcado del otro. */
+async function _dcimPickOpen(idx) {
+    _dcimFormSnap();
+    _dcimPick = {idx: idx, q: '', rows: null};
+    _dcimPickDraw();
+}
+
+async function _dcimPickGo() {
+    const p = _dcimPick;
+    if (!p) return;
+    p.rows = null;
+    _dcimPickDraw();
+    const d = await apiGet('/api/v1/dcim/catalog?tree=device-types'
+                           + `&q=${encodeURIComponent(p.q || '')}`) || {};
+    p.rows = d.types || [];
+    _dcimPickDraw();
+}
+
+function _dcimPickDraw() {
+    const p = _dcimPick || {};
+    const filas = p.rows;
+    showHtmlModal(t('dcim_cat_model'), `<div class="d-flex flex-column gap-2">
+        <div class="ss-toolrow">
+            <input class="form-control form-control-sm" style="max-width:20rem" autofocus
+                   value="${escAttr(p.q || '')}"
+                   placeholder="${escAttr(t('dcim_cat_search'))}"
+                   oninput="_dcimPick.q=this.value"
+                   onkeydown="if(event.key===\'Enter\')_dcimPickGo()">
+            <button class="btn btn-sm btn-secondary" onclick="_dcimPickGo()">
+                <i class="bi bi-search"></i></button>
+        </div>
+        ${filas === null ? `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_search_hint'))}</div>`
+          : filas.length ? `<div class="d-flex flex-column gap-1">${
+            filas.slice(0, 30).map(r => `<button class="btn btn-sm btn-secondary text-start"
+                onclick="_dcimPickTake(${p.idx},${jsStr(r.uid)},${jsStr(_dcimTypeName(r))})">
+                ${esc(_dcimTypeName(r))}
+                <span class="text-muted ss-fs-1 ms-1">${
+                    esc(_dcimTypeNote(r))}</span></button>`).join('')}</div>`
+          : `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_no_match'))}</div>`}
+    </div>`, 'primary', '', 'fit');
+}
+
+function _dcimTypeName(r) {
+    return [String((r || {}).manufacturer || ''), String((r || {}).model || '')]
+        .filter(Boolean).join(' ');
+}
+
+/** Lo que distingue dos modelos parecidos en una lista: cuánto mide y de dónde salió. */
+function _dcimTypeNote(r) {
+    const u = Number((r || {}).u_tenths || 0);
+    return [u ? `${u / 10} U` : '', String((r || {}).part_number || '')]
+        .filter(Boolean).join(' · ');
+}
+
+/** Tomar el modelo elegido. El NOMBRE se queda en la pantalla y el identificador en la casilla:
+ *  en la tabla va el segundo, que es lo que sigue siendo cierto el día que alguien corrija el
+ *  nombre del modelo. */
+function _dcimPickTake(idx, uid, nombre) {
+    _dcimPick = null;
+    if (!_dcimForm) return;
+    const spec = _DCIM_KIND[_dcimForm.kind];
+    const fld = spec.fields[idx];
+    const row = (_dcimForm.row = _dcimForm.row || {});
+    if (fld) {
+        row[fld.name] = String(uid || '');
+        // En la MISMA clave de la que lee la caja: si uno escribe donde el otro no mira, elegir
+        // un modelo lo deja elegido y la casilla sigue enseñando el identificador anterior.
+        row[fld.nameKey || (fld.name + '_name')] = String(nombre || '');
+    }
+    _dcimFormDraw();
+}
+
+/** Preguntarle al dispositivo lo que sabe de sí mismo, y **ofrecerlo**.
+ *
+ *  Un número de serie está en una pegatina detrás de un rack, y el equipo lo dice por SNMP si su
+ *  perfil lo publica — el rol `serial`, que ya recogen los perfiles de MikroTik, APC, Linksys,
+ *  Synology y el estándar de ENTITY-MIB.
+ *
+ *  **Ofrece, no escribe.** La misma regla que la sugerencia de modelo del catálogo: un número
+ *  puesto solo es un número que nadie ha comprobado y que a partir de ese momento parece
+ *  comprobado. Con uno se rellena la casilla y se dice; con varios —un switch apilado tiene
+ *  varios chasis— se enseñan y se elige, porque quedarse con el primero sería decidir por su
+ *  cuenta cuál de los tres es «el» equipo. */
+async function _dcimSaidAsk(idx, rol) {
+    const spec = _DCIM_KIND[(_dcimForm || {}).kind];
+    const host = _dcimSaidHost(spec);
+    if (!host) return showToast(t('dcim_said_no_host'), 'warning', 6000);
+    // Lo tecleado, guardado ANTES de abrir nada: el cuadro de las opciones y el formulario son
+    // el mismo modal, así que enseñar el primero borra el marcado del segundo — y con él las
+    // ocho casillas que se llevaban escritas. Un formulario que se vacía por preguntar algo es
+    // peor que no poder preguntarlo.
+    _dcimFormSnap();
+    const d = await apiGet(`/api/v1/dcim/said?host=${encodeURIComponent(host)}`);
+    // `apiGet` devuelve `null` ante cualquier respuesta que no sea un 200, así que un 403 —el
+    // usuario no puede ver esa máquina— llegaba aquí como un `{}` y salía por pantalla como «el
+    // dispositivo no ha dicho ningún número de serie». Un error contado como respuesta es la
+    // peor forma de fallar: manda a mirar la configuración del equipo cuando el problema estaba
+    // en el permiso, y esta sección lleva todo el mes tropezando con esa misma forma.
+    if (!d) return showToast(t('dcim_said_failed'), 'danger', 8000);
+    const dichos = ((d.said || {})[rol] || []).filter(x => String((x || {}).value || '').trim());
+    if (!dichos.length) {
+        // Qué SÍ contó. «No ha dicho el número de serie» tiene dos causas que se ven igual: un
+        // perfil que ni se enganchó y uno que sí pero sin esa directiva. Enseñar lo que hay
+        // separa las dos, y en la primera basta con leer que no hay nada.
+        const otros = Object.keys(d.said || {}).filter(k => (d.said[k] || []).length);
+        return showToast(otros.length ? tf('dcim_said_but', otros.join(', '))
+                                      : t('dcim_said_nothing'), 'warning', 12000);
+    }
+    if (dichos.length === 1) return _dcimSaidPut(idx, dichos[0].value);
+    showHtmlModal(t('dcim_said_pick'),
+        `<div class="d-flex flex-column gap-2">${dichos.map(x =>
+            `<button class="btn btn-secondary text-start"
+                     onclick="_dcimSaidPut(${idx},${jsStr(x.value)})">
+                <span class="ss-tabular">${esc(x.value)}</span>
+                <span class="text-muted ss-fs-2 ms-2">${esc(x.source || '')}</span>
+            </button>`).join('')}</div>`, 'primary', '', 'fit');
+}
+
+/** Lo que hay tecleado ahora mismo, guardado en el borrador.
+ *
+ *  El formulario es **sin estado**: las casillas se leen del DOM al guardar, que es lo correcto
+ *  y deja de serlo en cuanto algo redibuja el modal en medio. Esto lo recoge antes. */
+function _dcimFormSnap() {
+    const spec = _DCIM_KIND[(_dcimForm || {}).kind];
+    if (!spec || !_dcimForm) return;
+    const row = (_dcimForm.row = _dcimForm.row || {});
+    spec.fields.forEach((fld, i) => {
+        const caja = document.getElementById('dcim-f-' + i);
+        if (caja) row[fld.name] = caja.value;
+    });
+}
+
+/** Qué máquina hay elegida AHORA en el formulario, que no tiene por qué ser la guardada: se
+ *  engancha el dispositivo y se le pregunta el número en el mismo rato, sin guardar en medio. */
+function _dcimSaidHost(spec) {
+    const i = (spec || {}).fields.findIndex(f => f.name === 'host_uid');
+    const caja = i >= 0 ? document.getElementById('dcim-f-' + i) : null;
+    return caja ? String(caja.value || '').trim() : '';
+}
+
+/** Poner lo elegido en su casilla. Y cerrar el cuadro de las opciones **sin cerrar el
+ *  formulario**: los dos viven en el mismo modal, así que volver a dibujarlo es lo que devuelve
+ *  el formulario a la pantalla con la casilla ya puesta. */
+function _dcimSaidPut(idx, valor) {
+    const caja = document.getElementById('dcim-f-' + idx);
+    if (caja) caja.value = String(valor || '');
+    if (!_dcimForm) return;
+    const guardado = (_dcimForm.row = _dcimForm.row || {});
+    const spec = _DCIM_KIND[_dcimForm.kind];
+    const fld = spec.fields[idx];
+    if (fld) guardado[fld.name] = String(valor || '');
+    _dcimFormDraw();
+}
+
+/** Dibujar el cuadro, o cerrarlo si ya no hay formulario. */
+function _dcimFormDraw() {
+    const f = _dcimForm;
+    if (!f) return hideInfoModal();
+    const spec = _DCIM_KIND[f.kind];
+    showHtmlModal(`${t(f.mode === 'new' ? 'dcim_new' : 'edit')} · ${t(spec.title)}`,
+        _dcimFormBody(), 'primary',
+        `<button class="btn btn-primary" onclick="_dcimSave()">
+            <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`);
 }
 
 //: Lo que ofrece cada lista, y con qué se ve cada opción. Una tabla porque las dos listas se
@@ -194,20 +442,51 @@ const _DCIM_LISTS = {
     // con cualquier cosa que tenga las dos: el uid no se teclea y el nombre cambia.
     // Las filas de la sala abierta. Se ELIGEN por nombre y se guardan por uid, como las
     // máquinas: el uid no se teclea y el nombre cambia.
-    rows: {id: 'dcim-rows', rows: () => ((_dcpFeat || {}).rows || []),
+    rows: {id: 'dcim-rows', rows: () => ((_dcpFeat || {}).rows || []), pick: true,
            value: f => f.uid, label: f => f.name || f.uid},
-    hosts: {id: 'dcim-hosts', rows: () => _dcimHosts || [],
+    hosts: {id: 'dcim-hosts', rows: () => _dcimHosts || [], pick: true,
             value: h => h.uid, label: h => [h.name, h.address].filter(Boolean).join(' · ')},
     // Las plantillas. Se ELIGEN por nombre y se guardan por uid, como las máquinas y las filas.
-    builds: {id: 'dcim-builds', rows: () => _dcimBuildOpts || [],
+    builds: {id: 'dcim-builds', rows: () => _dcimBuildOpts || [], pick: true,
              value: b => b.uid, label: b => b.name || b.uid},
     // Sobre qué se puede montar algo: lo que ya hay en ESTE rack y no va montado a su vez. Dos
     // niveles serían una bandeja sobre una bandeja, que no es una sala.
-    mounts: {id: 'dcim-mounts',
+    mounts: {id: 'dcim-mounts', pick: true,
              rows: () => (((_dcimRack || {}).items) || []).filter(i => !i.parent_uid),
              value: i => i.uid,
-             label: i => [i.label || i.uid, 'U' + (i.u_start || '')].join(' · ')},
+             // Con `_dcimItemName` y no con `i.label || i.uid`: una bandeja sin rotular —que es
+             // lo normal, porque lo que se rotula es lo que se busca con una linterna— salía en
+             // el desplegable como treinta y seis caracteres de identificador. Justo la cuarta
+             // copia de «cómo se lee un item» contra la que avisa el comentario de esa función.
+             label: i => [_dcimItemName(i), 'U' + (i.u_start || '')].join(' · ')},
 };
+
+/** Un desplegable de una lista CERRADA: se ve el nombre y se guarda el uid.
+ *
+ *  Era un campo de texto con sugerencias, y eso está bien para una zona horaria —se teclea, se
+ *  filtra, y una que esta instalación no conozca se puede pegar igual— pero no para una
+ *  plantilla o para la bandeja de al lado: elegir una del desplegable dejaba **el uid escrito
+ *  en la caja**, treinta y seis caracteres que no dicen nada, y quien lo veía no podía saber si
+ *  había elegido bien.
+ *
+ *  El valor que ya tiene y que NO está en la lista se conserva como una opción más. Sin eso, un
+ *  equipo enganchado a una máquina que este rol no puede ver se guardaría desenganchado por el
+ *  simple hecho de haber abierto su ficha — y no habría ni un error ni una pista. */
+function _dcimPickHtml(fld, i, val) {
+    const spec = _DCIM_LISTS[fld.list];
+    const rows = spec.rows();
+    const puesto = String(val || '');
+    const conocido = rows.some(r => String(spec.value(r)) === puesto);
+    return `<select id="dcim-f-${i}" class="form-select form-select-sm"
+                style="max-width:${fld.w}">
+        <option value="">${esc(t('dcim_pick_none'))}</option>
+        ${(puesto && !conocido) ? `<option value="${escAttr(puesto)}" selected>${
+            esc(puesto)}</option>` : ''}
+        ${rows.map(r => `<option value="${escAttr(spec.value(r))}"${
+            String(spec.value(r)) === puesto ? ' selected' : ''}>${
+            esc(spec.label(r))}</option>`).join('')}
+    </select>`;
+}
 
 /** El id de la lista de un campo, o '' si no hay nada que ofrecer.
  *
@@ -227,6 +506,25 @@ function _dcimDatalist(kind) {
     ).join('')}</datalist>`;
 }
 
+/** Cómo se llama el equipo `uid` del armario que está abierto.
+ *
+ *  Las pestañas de alimentación y de cableado traen del servidor un `label` y nada más —lo que
+ *  está rotulado por delante— y eso está vacío en la mitad de lo que hay dentro de un armario:
+ *  tapas, bandejas, regletas, y cualquier cosa colocada el primer día. Tres filas seguidas
+ *  diciendo «Equipo» no distinguen tres equipos, que es justo para lo que se abre esa tabla.
+ *
+ *  El nombre entero ya lo sabe el navegador: los items del armario están delante, con su
+ *  modelo, su máquina y su rol. Sólo faltaba preguntárselo por el mismo sitio que la lista y el
+ *  alzado, en vez de que cada pestaña se conforme con el trozo que le llegó.
+ *
+ *  Con la fila como respaldo: un equipo ajeno no está en la lista propia, y de él lo único que
+ *  puede decirse es lo que ya viene dicho. */
+function _dcimNameOf(uid, fila) {
+    const it = (((_dcimRack || {}).items) || [])
+        .find(i => String(i.uid || '') === String(uid || ''));
+    return _dcimItemName(it || fila || {});
+}
+
 /** El nombre de una máquina, para enseñarlo donde solo hay un uid. */
 function _dcimHostName(uid) {
     const h = (_dcimHosts || []).find(x => x.uid === uid);
@@ -244,11 +542,25 @@ function _dcimHostName(uid) {
 function _dcimItemName(item) {
     const i = item || {};
     if (i.foreign) return t('dcim_foreign');
-    return i.label || (i.host_uid ? _dcimHostName(i.host_uid) : '') || i.uid || '';
+    // Y antes del identificador, **de qué modelo es** y **qué clase de cosa es**. Esta función ya
+    // decía que treinta y seis caracteres de uid no son nada, y aun así acababa en ellos porque
+    // no había nada mejor: sólo se podía colocar algo naciendo de una plantilla, y una plantilla
+    // tiene nombre. Desde que se puede colocar un modelo del catálogo a pelo —una tapa, una
+    // regleta— lo normal es no rotularla, y la fila salía con un uid por nombre.
+    //
+    // «Generico Regleta 8» es lo que alguien reconoce; «Bandeja» es lo que queda cuando nadie
+    // dijo ni el modelo. Y el uid, recortado: como último recurso sirve para distinguir dos
+    // filas, que es lo único que hace, y entero se come la columna.
+    return i.label
+        || (i.host_uid ? _dcimHostName(i.host_uid) : '')
+        || String(i.type_name || '')
+        || (i.role ? t('dcim_role_' + i.role) : '')
+        || String(i.uid || '').slice(0, 8);
 }
 
 function _dcimClose() {
     _dcimForm = null;
+    hideInfoModal();
     renderDcim();
 }
 
@@ -313,7 +625,25 @@ async function _dcimSave() {
             body[fld.name] = raw;
         }
     });
-    if (mode === 'new' && !body[spec.fields[0].name]) return;
+    // Lo que falta se DICE, y se dice CUÁL. Esto era `return` a secas sobre el primer campo
+    // del tipo, y en un equipo el primer campo es la etiqueta — que casi nunca se rellena el
+    // primer día: se colocaba una máquina con su serie, su plantilla y su fecha de compra, se
+    // pulsaba Guardar, y no pasaba nada. Ni error, ni fila, ni pista. Reportado desde la
+    // pantalla, y es el mismo fallo que esta sección lleva persiguiendo todo el mes: una guarda
+    // que se niega sin decirlo.
+    //
+    // Y **obligatorio lo es quien lo declara**, no quien salga primero en la lista: un equipo no
+    // tiene ningún campo obligatorio —una caja ciega que ocupa un U es un dato de pleno
+    // derecho— y una sede sin nombre no es una sede.
+    const falta = spec.fields.find((fld, i) => fld.req
+        && !String((document.getElementById('dcim-f-' + i) || {}).value || '').trim());
+    if (falta) {
+        showToast(tf('dcim_need_field', t(falta.label)), 'warning');
+        const caja = document.getElementById(
+            'dcim-f-' + spec.fields.findIndex(x => x.name === falta.name));
+        if (caja) caja.focus();
+        return;
+    }
     if (spec.parent && mode === 'new') body[spec.parent] = parent;
     // `status === 200`, which is what every route in this panel answers. Reading it as `r.ok`
     // — which `apiPost` does not return — announced a site that HAD been created as a failure,
@@ -324,6 +654,7 @@ async function _dcimSave() {
                           body);
     if (r.ok) {
         _dcimForm = null;
+        hideInfoModal();
         // Cuántos componentes entraron con él. Sin decirlo, estampar quince piezas se ve
         // exactamente igual que no estampar ninguna — y la primera vez que alguien lo prueba,
         // esa es justo la duda.

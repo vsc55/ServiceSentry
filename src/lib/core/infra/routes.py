@@ -252,7 +252,7 @@ def register(app, wa):
                                          'role': role, 'on': bool(on)})
         return jsonify({'ok': True, 'watch': (store.get(uid, decrypt=False) or {}).get('watch')})
 
-    def _topology(lang=''):
+    def _topology(lang='', evidence=True):
         """Cómo se arma el mapa de esta flota, con los ayudantes que dependen de la sesión.
 
         Envuelto aquí y DECLARADO en el panel (`wa._infra_topology`) porque otra sección lo
@@ -262,8 +262,14 @@ def register(app, wa):
 
         Se declara en vez de que la otra sección importe estas rutas: el núcleo no nombra a sus
         secciones, y una sección que importa las rutas de otra las ata para siempre.
+
+        *evidence* es lo que un dispositivo ha VISTO —tablas MAC, tablas ARP—, que coloca una
+        máquina en el puerto de un switch cuando ella no habla LLDP. Son tablas sin cota y se
+        leen enteras, y quien sólo quiere los enlaces LLDP no tiene por qué pagarlas: pedirlo
+        aparte es lo que separa «el mapa» de «lo que dos dispositivos dicen verse».
         """
-        return infra_svc.topology(wa, _visible, _checks_for_host, _said_sources, lang)
+        return infra_svc.topology(wa, _visible, _checks_for_host, _said_sources, lang,
+                                  evidence_kinds=(infra_svc.EVIDENCE_KINDS if evidence else ()))
 
     wa._infra_topology = _topology
 

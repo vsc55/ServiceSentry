@@ -15,6 +15,7 @@ came back) only exist against something that really stores.
 Flask-free: the service takes a connector and paths and answers with data.
 """
 
+import io
 import json
 import os
 import zipfile
@@ -24,9 +25,11 @@ import pytest
 from lib.core.backup import archive as bk_archive
 from lib.core.backup import create as bk_create
 from lib.core.backup import folders as bk_folders
+from lib.core.backup import jobs as bk_jobs
 from lib.core.backup import locks as bk_locks
 from lib.core.backup import parts as bk_parts
 from lib.core.backup import restore as bk_restore
+from lib.core.backup import runner as bk_runner
 from lib.core.backup import verify as bk_verify
 from lib.core.backup import service as svc
 from lib.db.sqlite import SQLiteConnector
@@ -831,3 +834,158 @@ class TestSyslogInADatabaseOfItsOwn:
                                       include_secrets=True,
                                       connectors={'syslog': side})
         assert res['ok'] and 'hosts' in res['manifest']['tables']
+
+
+class TestAFolderThatWasMoved:
+    """`web_admin|dcim_media_dir` puts the pictures on another disk, and the copy has to follow.
+
+    `part_dir` always knew how to honour an override and nobody ever gave it one: `dirs` was a
+    parameter on `create_backup` and `restore_backup` that no call site filled in. An install
+    with the setting on copied `<var_dir>/dcim_media` — the default folder, empty — and a
+    restore would have unpacked the floor plans into a directory the panel does not read.
+
+    The worst shape a backup bug takes: it says nothing until somebody restores.
+    """
+
+    class _WA:
+        """Lo justo que la parte necesita de quien tiene la configuracion."""
+
+        def __init__(self, media=''):
+            self._DCIM_MEDIA_DIR = media
+
+    def _con(self, tmp_path):
+        con = SQLiteConnector(str(tmp_path / 'd.db'))
+        con.reconcile_table(_spec('hosts', ['uid']))
+        con.execute("INSERT INTO hosts (uid) VALUES ('h1')")
+        con.commit()
+        return con
+
+    def _moved(self, tmp_path):
+        """La carpeta configurada, FUERA de `var_dir` — que es el caso entero."""
+        fuera = tmp_path / 'otro-disco' / 'planos'
+        os.makedirs(str(fuera))
+        io.open(str(fuera / 'sala2.png'), 'w', encoding='utf-8').write('plano')
+        return fuera
+
+    def test_only_a_setting_that_is_set_travels(self):
+        """Vacio significa «la de por defecto», y `part_dir` ya sabe cual es. Mandarla igual
+        seria decir dos veces lo mismo y una de ellas podria quedarse atras."""
+        assert bk_parts.configured_dirs(self._WA()) == {}
+        assert bk_parts.configured_dirs(self._WA('   ')) == {}
+        assert bk_parts.configured_dirs(self._WA('/srv/planos')) == {'dcim_media': '/srv/planos'}
+
+    def test_the_copy_holds_the_moved_folder_and_not_the_default(self, tmp_path):
+        var = tmp_path / 'var'
+        senuelo = var / 'dcim_media'
+        os.makedirs(str(senuelo))
+        io.open(str(senuelo / 'viejo.png'), 'w', encoding='utf-8').write('x')
+        fuera = self._moved(tmp_path)
+        con = self._con(tmp_path)
+        res = bk_create.create_backup(con, 'copia', var_dir=str(var), config_dir=str(tmp_path),
+                                      parts=['core', 'dcim_media'], include_secrets=True,
+                                      dirs={'dcim_media': str(fuera)})
+        assert res['ok'], res
+        with zipfile.ZipFile(str(var / 'backups' / 'copia.zip')) as zf:
+            names = zf.namelist()
+        assert 'files/parts/dcim_media/sala2.png' in names, names
+        assert 'files/parts/dcim_media/viejo.png' not in names
+        con.close()
+
+    def test_a_restore_puts_them_back_where_the_setting_points(self, tmp_path):
+        """Y no en la de por defecto: devolver el fichero a una carpeta que nadie lee es la
+        mitad mala del fallo — la copia parece buena y el plano sigue perdido."""
+        var = tmp_path / 'var'
+        fuera = self._moved(tmp_path)
+        con = self._con(tmp_path)
+        bk_create.create_backup(con, 'copia', var_dir=str(var), config_dir=str(tmp_path),
+                                parts=['core', 'dcim_media'], include_secrets=True,
+                                dirs={'dcim_media': str(fuera)})
+        os.remove(str(fuera / 'sala2.png'))
+        out = bk_restore.restore_backup(con, str(var), 'copia', config_dir=str(tmp_path),
+                                        dirs={'dcim_media': str(fuera)})
+        assert out['ok'], out
+        assert io.open(str(fuera / 'sala2.png'), encoding='utf-8').read() == 'plano'
+        assert not os.path.exists(str(var / 'dcim_media' / 'sala2.png'))
+        con.close()
+
+    def test_a_moved_folder_that_is_empty_still_marks_its_part(self, tmp_path):
+        """Lo mismo que cualquier otra carpeta vacia. Lo que NO puede pasar es que una carpeta
+        llena se cuente como vacia por haberla buscado donde ya no esta."""
+        con = self._con(tmp_path)
+        res = bk_create.create_backup(con, 'copia', var_dir=str(tmp_path / 'var'),
+                                      config_dir=str(tmp_path),
+                                      parts=['core', 'dcim_media'], include_secrets=True,
+                                      dirs={'dcim_media': str(tmp_path / 'no-hay-nada')})
+        paso = next(s for s in res['manifest']['steps'] if s['part'] == 'dcim_media')
+        assert not paso['ok'] and res['manifest']['status'] == 'partial'
+        con.close()
+
+
+class TestTheJobsSayWhereTheFolderIs:
+    """La otra mitad: que quien arranca el trabajo se lo cuente.
+
+    El fallo no estaba en `create_backup` —sabia recibirlo— sino en que nadie se lo daba. Se
+    comprueba llamando a lo que llama el boton, no leyendo el fuente: un parametro que se
+    escribe y no se pasa es exactamente lo que nadie vio.
+    """
+
+    class _Jobs(bk_jobs._JobsMixin):
+        """El mixin con lo minimo debajo y sin hilo: lo que se mira es que se pide, no cuanto
+        tarda."""
+
+        def __init__(self, wa):
+            self._wa = wa
+
+        def _start_job(self, label, work, manual=False, kind='backup'):
+            work({'error': ''})
+            return 'sync'
+
+    class _WA:
+        _DCIM_MEDIA_DIR = '/srv/planos'
+        _var_dir = ''
+        _config_dir = ''
+        _db_connector = None
+
+        def _audit_write(self, *a, **kw):
+            pass
+
+    def _spy(self, monkeypatch, mod, name):
+        visto = {}
+
+        def _fake(*a, **kw):
+            visto.update(kw)
+            return {'ok': True, 'manifest': {'status': 'ok', 'steps': []},
+                    'tables': {}, 'skipped': {}, 'steps': []}
+
+        monkeypatch.setattr(mod, name, _fake)
+        return visto
+
+    def test_a_hand_made_copy_carries_the_setting(self, monkeypatch):
+        visto = self._spy(monkeypatch, bk_jobs._create, 'create_backup')
+        self._Jobs(self._WA()).start_manual('copia', ['core'], True, 'admin', '::1')
+        assert visto['dirs'] == {'dcim_media': '/srv/planos'}
+
+    def test_a_scheduled_copy_carries_it_too(self, monkeypatch):
+        """La que mas importa de las tres: nadie esta delante mirando el resultado, asi que una
+        copia nocturna que archiva la carpeta equivocada lo hace todas las noches."""
+        visto = self._spy(monkeypatch, bk_runner._create, 'create_backup')
+
+        class _Runner(bk_runner.BackupRunner):
+            def __init__(self, wa):
+                self._wa = wa
+
+            def _prune_task(self, *a, **kw):
+                pass
+
+        wa = self._WA()
+        wa._audit_auto = lambda *a, **kw: None
+        _Runner(wa)._run_task({'name': 'nocturna', 'parts': ['core']}, 0.0, '', '',
+                             {'created': [], 'pruned': []})
+        assert visto['dirs'] == {'dcim_media': '/srv/planos'}
+
+    def test_a_restore_carries_it_too(self, monkeypatch):
+        """Y con mas motivo: una copia mal hecha se repite, una restauracion mal puesta deja los
+        ficheros en una carpeta que el panel no mira."""
+        visto = self._spy(monkeypatch, bk_jobs._restore, 'restore_backup')
+        self._Jobs(self._WA()).start_restore('copia', ['core'], 'admin', '::1')
+        assert visto['dirs'] == {'dcim_media': '/srv/planos'}

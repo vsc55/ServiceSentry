@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import os
 
+from lib.core.dcim import media
 from lib.i18n import DEFAULT_LANG
 
 #: El fichero. Al lado del de perfiles y del de básicos, y por la misma razón: es dato, se revisa
@@ -180,6 +181,16 @@ def normalise(doc) -> dict:
                 fila[campo] = str(v).strip()
         if str(c.get('speed') or '').strip():
             fila['speed'] = str(c['speed']).strip()
+        # La imagen, si la tiene. Un conector que alguien añade no tiene dibujo —los que vienen
+        # con el panel los trae `_conn_shapes.html`, y nadie va a escribir un SVG para su
+        # regleta— así que puede traer una foto en su lugar.
+        #
+        # Se comprueba con la MISMA regla que el almacén de medios, importada y no copiada: un
+        # nombre que no acuñó él no es un fichero de este disco, y aceptarlo aquí sería dejar
+        # que un documento decida qué ruta se lee después.
+        img = str(c.get('image') or '').strip()
+        if img and media.is_name(img):
+            fila['image'] = img
         gens = _gens(c.get('gens'))
         if gens:
             fila['gens'] = gens
@@ -298,7 +309,52 @@ def problems(doc) -> list:
                           if str(x or '').strip() and str(x) not in vocabulario})
         if sueltas:
             fuera.append(f'{ident}: signals outside the vocabulary: {", ".join(sueltas)}')
+        # Una imagen que no es un nombre del almacén se descarta en silencio y el conector sale
+        # con el dibujo genérico — que se lee como «este no tiene foto» y no como «la foto que
+        # pusiste no vale».
+        img = str(c.get('image') or '').strip()
+        if img and not media.is_name(img):
+            fuera.append(f'{ident}: image is not a stored name')
     return fuera
+
+
+def next_version(store=None) -> int:
+    """La versión que hay que ponerle a un documento para que MANDE.
+
+    Una más que la mayor de las dos que compiten, y no una más que la guardada: con la del panel
+    por delante —una actualización que publicó la 3 sobre un parche local que iba por la 2—
+    sumarle uno a la guardada da otra vez 3, que no gana, y el guardado se aplica sin efecto y
+    sin decir nada.
+
+    Aquí y no en cada sitio que guarda: son tres —el formulario, el JSON y las dos rutas de la
+    imagen— y la regla es una.
+    """
+    return max(int(packaged().get('version') or 0),
+               int(effective(store).get('version') or 0)) + 1
+
+
+def with_image(doc, ident: str, name: str) -> tuple:
+    """El documento con la imagen de UN conector puesta (o quitada), y la que tenía antes.
+
+    Una función sobre el documento y no un método del almacén: lo que se guarda es el documento
+    entero —es como se guarda esto— y quien la llama ya lo tiene leído. Devuelve la anterior
+    porque hay que borrarla del disco, y solo quien sustituye sabe cuál era.
+
+    Sin tocar la versión: subirla es cosa de quien guarda, y hacerlo aquí obligaría a esta
+    función a saber qué hay guardado.
+    """
+    ident = str(ident or '').strip()
+    fuera = json.loads(json.dumps(doc or {}))
+    vieja = ''
+    for c in (fuera.get('connectors') or ()):
+        if isinstance(c, dict) and str(c.get('id') or '').strip() == ident:
+            vieja = str(c.get('image') or '')
+            if name:
+                c['image'] = str(name)
+            else:
+                c.pop('image', None)
+            return fuera, vieja
+    return None, ''
 
 
 def all(lang: str = '', store=None) -> list[dict]:          # noqa: A001
@@ -331,6 +387,10 @@ def all(lang: str = '', store=None) -> list[dict]:          # noqa: A001
             fila['speed'] = str(c['speed'])
         if c.get('note'):
             fila['note'] = _text(c.get('note'), lang)
+        # Su foto, cuando la tiene. La pantalla la prefiere al dibujo: uno que alguien subió es
+        # de SU conector, y el dibujo es el de la forma que más se le parecía.
+        if c.get('image'):
+            fila['image'] = str(c['image'])
         # La generación y lo que lleva: del conector salen las que CABEN, y cuál de ellas es la
         # de un puerto lo dice el puerto. Aquí es un vocabulario, no un dato del equipo.
         gens = []

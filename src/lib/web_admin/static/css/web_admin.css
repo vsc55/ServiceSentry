@@ -2890,6 +2890,11 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .ss-rowlink { cursor: pointer; }
 .ss-rowlink:hover > td { background: var(--bs-secondary-bg); }
 
+/* Un texto escrito a mano: los saltos de línea que puso quien lo escribió son parte de lo que
+   dijo. Genérica porque los comentarios de una plataforma son los primeros y no serán los
+   últimos — una nota de un rack se lee igual. */
+.ss-prewrap { white-space: pre-wrap; }
+
 /* Un hueco que todavía no se ha llenado: el marco de trazos dice «aquí falta algo» sin gastar
    un color de aviso, que es para lo que va mal y no para lo que aún no se ha hecho. Genérica
    porque la primera es la plantilla sin modelo base y no será la última. */
@@ -3020,6 +3025,142 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
     opacity: .85;
 }
 
+/* Un diálogo para una TABLA de las anchas. `modal-lg` son 800px, que le sobran a un volcado
+   clave/valor y le faltan a diez columnas con un campo en cada una.
+
+   **Sobre `.modal-content` y no sobre `--bs-modal-width`.** Esa variable es de Bootstrap y aquí
+   no la lee nadie: este panel se salta ese mecanismo entero unos cientos de líneas más arriba
+   —`.modal-lg { width: fit-content }` y `.modal-lg > .modal-content { width: 800px }`, para que
+   el diálogo pueda arrastrarse más grande— así que ponerla dejaba el cuadro exactamente igual
+   de ancho y sin decir por qué. Una regla que apunta al mecanismo que ya no manda no falla:
+   simplemente no hace nada.
+
+   Con `min()` y no con un ancho fijo: en una pantalla estrecha un valor fijo deja el diálogo
+   saliéndose por los lados, que es peor que la ranura que se venía a quitar. Y sigue siendo
+   `modal-lg`, así que conserva el asa de redimensionar y el botón de maximizar. */
+.ss-modal-wide > .modal-content { width: min(96vw, 66rem); }
+
+/* El armario a un lado y el trabajo al otro. Las cuatro listas de un rack —lo que hay dentro,
+   cómo está cableado, de dónde come, qué lleva una caja— se insertaban ENCIMA del dibujo y lo
+   empujaban hacia abajo: se pulsaba un botón y lo que estabas mirando se movía. Al lado, el
+   armario no se pierde de vista mientras se trabaja en una de sus listas — que es justo cuando
+   hace falta, porque un cable va de una U a otra.
+
+   `align-items:start` para que la caja de la derecha mida lo que mida su contenido en vez de
+   estirarse hasta la altura del dibujo de un rack de 42 U. */
+.ss-rack-grid {
+    display: grid;
+    /* El hueco libre es del DIBUJO. Es lo que se viene a mirar, y cuanto más grande mejor se
+       lee; el panel de listas es texto y con veinticuatro caracteres de ancho ya dice lo que
+       tiene que decir. Al revés —el dibujo pidiendo lo justo y el panel quedándose el resto—
+       dejaba un alzado pequeño al lado de una tabla con la mitad de las celdas vacías. */
+    grid-template-columns: minmax(0, 42rem) minmax(28rem, 1fr);
+    gap: .75rem;
+    align-items: start;
+}
+
+/* Lo que dice el equipo señalado: **debajo del dibujo**, con su hueco reservado. Dentro no
+   cabe — el armario ocupa el dibujo entero, así que esté donde esté tapa una U— y apareciendo
+   sólo cuando hay algo señalado daría un salto cada vez que el ratón entra y sale de una caja. */
+.ss-elev-info {
+    min-height: 2.4rem;
+    padding-top: .35rem;
+}
+
+/* Mirar un armario de cerca durante un rato: pasa a primer plano y ocupa lo visible. **Sin mover
+   la tabla**, que es la diferencia entre apartar algo y taparlo: lo primero obliga a devolverlo
+   a su sitio para volver a donde estabas.
+
+   El panel deja de desplazarse mientras tanto, y eso es lo que hace que `inset: 0` sea
+   exactamente lo que se ve: sobre un contenedor que se desplaza sería el alto de TODO lo que
+   hay dentro, y el dibujo saldría tan alto como la tabla que está tapando. */
+.ss-rack-pane { position: relative; }
+.ss-rack-pane.ss-rack-over { overflow: hidden; }
+
+.ss-elev-over {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    background: var(--bs-body-bg);
+    padding: .75rem 1rem;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Y ahí el dibujo se queda con lo que sobre, en vez de con su proporción: es justo lo que se
+   ha pedido al agrandarlo. */
+.ss-elev-over .ss-canvas-fit { flex: 1 1 auto; min-height: 0; }
+
+/* Por debajo de esto las dos columnas no caben sin que las dos queden mal: se apilan, que es
+   el layout de antes hecho a propósito y no por accidente. */
+@media (max-width: 68rem) {
+    .ss-rack-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.ss-rack-panel { min-width: 0; }
+
+/* Un lienzo que mide lo que mide su dibujo. `.ss-infra-canvas` es `flex: 1 1 auto` —correcto
+   para los dos mapas, que ocupan lo que haya— y aquí sobraba: quien declara la proporción es
+   quien pinta, y de ahí sale la altura sin medir nada. */
+.ss-canvas-fit {
+    flex: 0 0 auto;
+    background: var(--bs-body-bg);
+    cursor: grab;
+}
+
+/* La forma de lo que viene, mientras viene. Una rueda dice «espera»; unas filas grises dicen
+   «aquí van filas», que además es cierto y evita el salto de cuando llegan. */
+.ss-skel {
+    height: 1.15rem;
+    border-radius: 4px;
+    background: linear-gradient(90deg,
+        var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 37%, var(--bs-secondary-bg) 63%);
+    background-size: 400% 100%;
+    animation: ss-skel-slide 1.4s ease-in-out infinite;
+}
+.ss-skel:nth-child(2) { width: 82%; }
+.ss-skel:nth-child(3) { width: 64%; }
+.ss-skel:nth-child(4) { width: 74%; }
+.ss-skel:nth-child(5) { width: 58%; }
+
+@keyframes ss-skel-slide {
+    0%   { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ss-skel { animation: none; }
+}
+
+/* Lo señalado en la otra pantalla. El dibujo dice dónde está y la tabla qué es, y son la
+   misma cosa contada dos veces: pasar por una tiene que encender la otra, o hay que buscar a
+   mano en la segunda lo que se acaba de señalar en la primera.
+
+   Genérica porque el par dibujo/lista se repite: el alzado y sus equipos hoy, el plano y sus
+   armarios en cuanto se pida. `!important` porque compite con el rayado de `table-striped`,
+   que es lo que pinta el fondo de las filas pares. */
+.ss-hl > td { background: var(--bs-primary-bg-subtle) !important; }
+
+/* Una columna que ocupa lo suyo y ni un píxel más. `width: 1%` es como se le dice a una tabla
+   «esta celda mide lo que mide su contenido»: el resto del ancho se lo reparten las que no lo
+   piden, que es lo que hace que la columna del nombre crezca y los botones se queden pegados a
+   la derecha en vez de flotando en medio de una celda vacía. */
+.ss-hug { width: 1%; }
+
+/* Un rótulo no se parte. «Entrada de corriente» debajo de «Tipo» es una etiqueta de columna, y
+   partida en dos renglones dobla el alto de todas las filas de la tabla sin decir nada más.
+   Genérica porque el sitio donde hace falta es cualquier celda que lleve un rótulo. */
+.ss-nowrap { white-space: nowrap; }
+
+/* Una foto donde iba el dibujo. Los ciento y pico que vienen con el panel llevan dibujo —uno
+   por forma— y el que alguien añada lleva la suya: la caja es la misma, y `contain` es lo que
+   impide que una foto apaisada salga estirada dentro de ella. */
+.ss-conn-img {
+    object-fit: contain;
+    stroke: none;
+    opacity: 1;
+}
+
 /* El mismo dibujo, para mirarlo. En la tabla mide lo que una letra —basta para reconocer el que
    ya se conoce— y aquí se agranda, que es lo que hace falta para el que no. Un solo dibujo y dos
    tamaños: dos dibujos acabarían siendo dos que se separan. */
@@ -3037,3 +3178,18 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
     object-fit: contain;
     background: var(--bs-body-bg);
 }
+
+/* La traza de un enlace: una cadena de paradas con el cable dibujado en medio.
+   Genérica y no por id, como el resto: es «una cadena de pasos», y la siguiente que haga falta
+   —el camino de la corriente desde la acometida— es la misma forma. */
+.ss-path { display: flex; flex-direction: column; }
+.ss-path-stop { display: flex; align-items: center; gap: .4rem; }
+.ss-path-dot { width: .5rem; height: .5rem; border-radius: 50%; flex: 0 0 auto;
+               background: var(--bs-secondary-color); }
+.ss-path-end { background: var(--bs-primary); width: .65rem; height: .65rem; }
+.ss-path-leg { display: flex; align-items: center; gap: .4rem; margin-left: .2rem;
+               padding: .1rem 0; }
+.ss-path-line { width: .16rem; height: 1.1rem; border-radius: .08rem; flex: 0 0 auto;
+                margin-left: .1rem; }
+.ss-path-mine .ss-path-line { height: 1.4rem; width: .28rem; }
+.ss-path-mine { font-weight: 600; }
