@@ -29,6 +29,7 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from lib.core.dcim import owners                                    # noqa: E402
+from lib.core.dcim import service                                   # noqa: E402
 from lib.core.dcim.store import DcimStore                           # noqa: E402
 from lib.db import get_connector                                    # noqa: E402
 
@@ -1815,3 +1816,270 @@ class TestLaTrazaDelEnlace:
     def test_y_cada_tramo_sabe_de_que_camino_es(self):
         r = self._todo()
         assert all(c.get('paths') == [0] for c in r['cables'])
+
+
+class TestUnCableDeCorrienteEsUnCable:
+    """`dc_feed` decía de qué toma cuelga y cuántos vatios se declararon, y nada más — como si el
+    latiguillo no existiera. Y existe: se compra, se guarda en una caja, se rompe y hay que
+    sustituirlo, y la pregunta de la caja de repuestos es la misma que en datos.
+    """
+
+    def test_lo_que_se_guarda_vuelve(self):
+        from lib.core.dcim import service
+        r = service.power_of_rack(
+            [{'uid': 'a', 'name': 'A', 'feed': 'a', 'outlets': 8}],
+            [{'uid': 'c1', 'item_uid': 'i1', 'pdu_uid': 'a', 'outlet': 3,
+              'label': 'P-07', 'asset': 'INV-991', 'category': 'c13-c14',
+              'length_mm': 500, 'description': 'por detrás', 'watts_said': 250}],
+            [{'uid': 'i1', 'label': 'SRV'}])
+        f = r['items'][0]['feeds'][0]
+        assert f['label'] == 'P-07' and f['asset'] == 'INV-991'
+        assert f['category'] == 'c13-c14' and f['length_mm'] == 500
+        assert f['description'] == 'por detrás' and f['watts_said'] == 250
+
+    def test_y_lo_que_no_se_dijo_vuelve_vacio_y_no_ausente(self):
+        """Una clave que unas veces está y otras no obliga a quien lee a saber cuál de los dos
+        casos tiene delante."""
+        from lib.core.dcim import service
+        r = service.power_of_rack(
+            [{'uid': 'a', 'name': 'A', 'feed': 'a', 'outlets': 8}],
+            [{'uid': 'c1', 'item_uid': 'i1', 'pdu_uid': 'a'}],
+            [{'uid': 'i1'}])
+        f = r['items'][0]['feeds'][0]
+        for k in ('label', 'asset', 'category', 'description'):
+            assert f[k] == '', k
+        assert f['length_mm'] == 0
+
+    def test_las_dos_tablas_llaman_igual_a_lo_mismo(self):
+        """Dos tablas que guardan lo mismo con nombres distintos son dos pantallas que se
+        escriben dos veces."""
+        from lib.core.dcim.store import SCHEMAS
+        cols = {t.name: {c.name for c in t.columns} for t in SCHEMAS}
+        comun = {'asset', 'category', 'length_mm', 'description', 'label'}
+        assert comun <= cols['dc_cable'], comun - cols['dc_cable']
+        assert comun <= cols['dc_feed'], comun - cols['dc_feed']
+
+
+class TestBuscarEnLaBaseYNoEnMemoria:
+    """Traer la tabla entera para quedarse con treinta filas construye un diccionario por fila de
+    toda la instalación y luego lo tira. En una sala pequeña no se nota, que es exactamente lo
+    que hace que se escriba así y se descubra tarde.
+    """
+
+    def test_el_texto_se_busca_sin_distinguir_mayusculas(self):
+        """MySQL no distingue por defecto, SQLite sí y PostgreSQL depende del idioma del
+        sistema: un buscador que encuentra «SW01» escribiendo `sw` en una instalación y no en
+        otra es el mismo panel comportándose de dos maneras según dónde esté instalado."""
+        from lib.core.dcim.store import like_clause
+        sql, params = like_clause(('label',), 'SW01')
+        assert 'LOWER(label) LIKE ?' in sql
+        assert params == ('%sw01%',)
+
+    def test_los_comodines_del_LIKE_se_escapan(self):
+        """`_` y `%` son caracteres que alguien puede teclear. Sin escaparlos, teclear `_`
+        encuentra cualquier cosa y teclear `%` las encuentra todas — un buscador que ignora lo
+        que se le pide es peor que uno que no encuentra nada, porque contesta."""
+        from lib.core.dcim.store import like_clause
+        _sql, params = like_clause(('label',), 'PP_1%')
+        assert params == ('%pp\\_1\\%%',)
+
+    def test_sin_texto_no_hay_condicion(self):
+        """Una condición vacía que se cuela en un `WHERE` es un error de sintaxis; una que dice
+        `LIKE '%%'` es una tabla entera con otro nombre."""
+        from lib.core.dcim.store import like_clause
+        assert like_clause(('label',), '   ') == ('', ())
+        assert like_clause((), 'x') == ('', ())
+
+
+class TestRecorrerSinTraerloTodo:
+    """Quién puede ver qué sale de una cadena de pertenencia que no está en ninguna columna, así
+    que ese filtro no puede ir al `WHERE`. Lo que sí puede es no traerse la tabla entera para
+    aplicarlo.
+    """
+
+    def _leer(self, total):
+        filas = [{'uid': f'i{n}', 'n': n} for n in range(total)]
+        return lambda lim, off: filas[off:off + lim]
+
+    def test_devuelve_las_primeras_que_pasan(self):
+        from lib.core.dcim.routes._common import scan_pages
+        r = scan_pages(self._leer(1000), lambda f: f['n'] % 10 == 0, 5)
+        assert [f['n'] for f in r['rows'][:5]] == [0, 10, 20, 30, 40]
+
+    def test_un_trozo_se_termina_siempre(self):
+        """Parar a mitad y seguir en el siguiente dejaría fuera para siempre las filas que
+        quedaban detrás en ése: el próximo salto empieza donde acabó el trozo."""
+        from lib.core.dcim.routes._common import scan_pages, SCAN_CHUNK
+        r = scan_pages(self._leer(1000), lambda f: True, 3)
+        assert r['next_offset'] == SCAN_CHUNK
+        assert len(r['rows']) == SCAN_CHUNK
+
+    def test_y_se_dice_cuando_se_acaba_el_presupuesto(self):
+        """«Se acabó el presupuesto» y «hay más» son dos cosas distintas, y sólo una es un
+        problema de quien mira."""
+        from lib.core.dcim.routes._common import scan_pages
+        # Nadie pasa: se recorre el presupuesto entero y se dice que quedó cortado.
+        r = scan_pages(self._leer(100000), lambda f: False, 5)
+        assert r['rows'] == [] and r['capped'] is True
+
+    def test_una_tabla_que_se_acaba_no_esta_recortada(self):
+        from lib.core.dcim.routes._common import scan_pages
+        r = scan_pages(self._leer(10), lambda f: True, 100)
+        assert len(r['rows']) == 10 and r['capped'] is False
+
+
+class TestLaTiradaDeUnCable:
+    """**Un enlace que atraviesa un panel son tres cables y una tirada.**
+
+    La ficha de uno de los tres enseñaba ese cable solo —«del panel A boca 12 al panel B boca
+    12»—, que no dice de dónde viene ni a dónde va. La pregunta que se hace delante del armario
+    con el latiguillo en la mano es la otra: de qué tirada forma parte esto y en qué posición.
+
+    Y es un hecho **declarado**: el camino que dibuja la pestaña de un armario sale de cruzar lo
+    escrito con lo que los dispositivos ven, así que una tirada que nadie confirma —dos paneles y
+    un latiguillo, sin LLDP de por medio— no salía en ninguna parte estando declarada entera.
+    """
+
+    ITEMS = [{'uid': 'srv', 'host_uid': 'h-srv', 'role': 'server', 'label': 'SRV01'},
+             {'uid': 'ppA', 'role': 'patch_panel', 'label': 'PP-A'},
+             {'uid': 'ppB', 'role': 'patch_panel', 'label': 'PP-B'},
+             {'uid': 'sw', 'host_uid': 'h-sw', 'role': 'switch', 'label': 'SW01'}]
+    CABLES = [{'uid': 'c1', 'a_item': 'srv', 'a_port': 'eth0', 'b_item': 'ppA', 'b_port': '12'},
+              {'uid': 'c2', 'a_item': 'ppB', 'a_port': '12', 'b_item': 'ppA', 'b_port': '12'},
+              {'uid': 'c3', 'a_item': 'sw', 'a_port': 'Gi1/0/7', 'b_item': 'ppB',
+               'b_port': '12'}]
+
+    def _uids(self, r):
+        return [t['cable'] for t in (r or {}).get('legs') or ()]
+
+    def test_los_tres_tramos_en_orden(self):
+        r = service.run_of('c2', self.CABLES, self.ITEMS)
+        assert self._uids(r) == ['c1', 'c2', 'c3']
+        assert r['ends'] == ['srv', 'sw']
+
+    def test_desde_cualquiera_de_ellos_es_la_misma(self):
+        """Sin esto el sentido lo decidía por cuál se hubiera preguntado: la ficha del latiguillo
+        la enseñaba «servidor → switch» y la del troncal al revés. Es la misma tirada, y dos
+        dibujos distintos de lo mismo hacen dudar de si son dos."""
+        cual = [service.run_of(u, self.CABLES, self.ITEMS) for u in ('c1', 'c2', 'c3')]
+        assert [self._uids(r) for r in cual] == [['c1', 'c2', 'c3']] * 3
+
+    def test_orientada_hacia_donde_se_recorre(self):
+        """Un cable se declara desde el extremo que se tenía delante, así que la mitad de los
+        tramos están escritos al revés: `c2` se guardó de ppB a ppA y la tirada lo recorre al
+        contrario."""
+        legs = service.run_of('c1', self.CABLES, self.ITEMS)['legs']
+        assert [(t['a_item'], t['b_item']) for t in legs] == [
+            ('srv', 'ppA'), ('ppA', 'ppB'), ('ppB', 'sw')]
+
+    def test_se_anda_por_bocas_y_no_por_paneles(self):
+        """Un panel de veinticuatro posiciones no es un nudo donde todo lo que entra sale por
+        cualquier sitio: lo que entra por la 12 sale por la 12. Otro cable en la 13 del mismo
+        panel no es la misma tirada."""
+        mas = self.CABLES + [{'uid': 'x1', 'a_item': 'ppA', 'a_port': '13',
+                              'b_item': 'srv', 'b_port': 'eth1'}]
+        assert self._uids(service.run_of('c1', mas, self.ITEMS)) == ['c1', 'c2', 'c3']
+
+    def test_no_se_atraviesa_lo_que_no_es_un_panel(self):
+        """Atravesar un switch sería inventarse un cable: dos máquinas enchufadas al mismo switch
+        no están enchufadas entre sí."""
+        mas = self.CABLES + [{'uid': 'x2', 'a_item': 'sw', 'a_port': 'Gi1/0/7',
+                              'b_item': 'srv', 'b_port': 'eth9'}]
+        assert self._uids(service.run_of('c1', mas, self.ITEMS)) == ['c1', 'c2', 'c3']
+
+    def test_ni_lo_ajeno(self):
+        """Un equipo de otra sociedad llega opaco —existe y ocupa, nada más— y no se puede
+        afirmar un camino a través de algo que no se puede ni mirar."""
+        items = [dict(i, foreign=True, role='') if i['uid'] == 'ppB' else i for i in self.ITEMS]
+        assert self._uids(service.run_of('c1', self.CABLES, items)) == ['c1', 'c2']
+
+    def test_un_cable_suelto_es_su_propia_tirada(self):
+        solo = [{'uid': 'z', 'a_item': 'srv', 'a_port': 'eth3', 'b_item': 'sw', 'b_port': 'Gi2'}]
+        assert self._uids(service.run_of('z', solo, self.ITEMS)) == ['z']
+
+    def test_un_cable_que_no_esta_no_tiene_tirada(self):
+        assert service.run_of('nada', self.CABLES, self.ITEMS) == {}
+
+    def test_una_boca_con_dos_salidas_para_el_paseo(self):
+        """Eso no es una tirada, es un dato torcido: de una boca de un panel salen el latiguillo
+        y el troncal, no tres cables. Elegir uno de los dos sería dibujar un camino que nadie ha
+        declarado."""
+        lio = self.CABLES + [{'uid': 'c4', 'a_item': 'ppA', 'a_port': '12',
+                              'b_item': 'ppB', 'b_port': '12'}]
+        assert self._uids(service.run_of('c1', lio, self.ITEMS)) == ['c1']
+
+    def test_un_bucle_declarado_no_cuelga_el_paseo(self):
+        """Un panel puenteado consigo mismo en redondo: sin tope, el paseo no termina."""
+        aro = [{'uid': f'a{i}', 'a_item': 'ppA', 'a_port': str(i),
+                'b_item': 'ppA', 'b_port': str(i + 1)} for i in range(20)]
+        assert len(service.run_of('a0', aro, self.ITEMS)['legs']) <= 8
+
+    def test_cada_tramo_lleva_lo_suyo_del_cable(self):
+        """La pantalla lo sacaba de la lista que tenía cargada, y desde la sección de cableado
+        esa lista no existe: la tirada salía sin etiquetas, sin metros y sin colores — casi todo
+        lo que distingue un tramo del de al lado."""
+        cables = [dict(c, label='L-' + c['uid'], length_mm=250, color='#abc', kind='copper')
+                  for c in self.CABLES]
+        legs = service.with_cable(service.run_of('c1', cables, self.ITEMS)['legs'], cables)
+        assert [t['label'] for t in legs] == ['L-c1', 'L-c2', 'L-c3']
+        assert all(t['length_mm'] == 250 and t['color'] == '#abc' for t in legs)
+
+    def test_y_el_nombre_y_el_sitio_de_cada_parada(self):
+        """Una tirada que pasa por el panel del armario de al lado nombra equipos que la pantalla
+        no tiene delante: sin esto sale llena de identificadores."""
+        items = [dict(i, rack_name='RK1', rack_uid='r1', u_start=7) for i in self.ITEMS]
+        legs = service.label_legs(service.run_of('c1', self.CABLES, items)['legs'], items)
+        assert legs[0]['a_label'] == 'SRV01' and legs[0]['b_role'] == 'patch_panel'
+        assert legs[0]['b_at'] == {'rack': 'RK1', 'rack_uid': 'r1', 'u': 7}
+
+
+class TestLoQueYaSeUsa:
+    """Ofrecer lo que la casa ya usa, en vez de una lista escrita a mano.
+
+    Los colores de latiguillo de una instalación son cinco, y elegirlos de una rueda de dieciséis
+    millones la deja con nueve azules que no son el mismo azul. La lista sale de los datos: es la
+    única que no se queda vieja.
+    """
+
+    def _cables(self, store, *colores):
+        for c in colores:
+            store.cables.create({'a_item': 'a', 'b_item': 'b', 'color': c})
+
+    def test_del_mas_usado_al_menos(self, store):
+        """Es el orden en que se elige: el color que hay en cuarenta cables es el que va a llevar
+        el cuarenta y uno. Alfabéticamente serían códigos hexadecimales ordenados por su primera
+        letra, que no significa nada."""
+        self._cables(store, '#f00', '#00f', '#00f', '#00f', '#0f0', '#0f0')
+        assert store.cables.in_use('color') == ['#00f', '#0f0', '#f00']
+
+    def test_lo_vacio_no_es_un_valor(self, store):
+        """«Nadie lo ha dicho» le pasa a cuarenta cables y no es un color que ofrecer."""
+        self._cables(store, '', '', '#f00')
+        assert store.cables.in_use('color') == ['#f00']
+
+    def test_con_tope(self, store):
+        """Una instalación tiene cinco o seis; un desplegable con cuarenta códigos hexadecimales
+        no es una ayuda, es otra rueda."""
+        self._cables(store, '#1', '#2', '#2', '#3', '#3', '#3')
+        assert store.cables.in_use('color', 2) == ['#3', '#2']
+
+    def test_los_colores_se_cuentan_entre_TODAS_las_tablas(self, store):
+        """Un latiguillo rojo y un cable de corriente rojo son el mismo rojo. Contándolos por
+        separado, el rojo de veinte cables de datos y el de veinte de corriente saldrían como dos
+        colores de veinte en vez de uno de cuarenta — y el que la casa más usa no saldría el
+        primero, que es lo único que se le pide a esta lista."""
+        self._cables(store, '#00f', '#00f', '#f00')
+        for _ in range(3):
+            store.feeds.create({'item_uid': 'x', 'pdu_uid': 'p', 'color': '#f00'})
+        assert store.colors_used() == ['#f00', '#00f']
+
+    def test_y_un_empate_no_baila(self, store):
+        """Dos colores empatados a tres cables tienen que salir siempre en el mismo orden, o la
+        lista cambia entre dos aperturas sin que nadie haya tocado nada."""
+        self._cables(store, '#bbb', '#aaa')
+        assert store.colors_used() == ['#aaa', '#bbb']
+
+    def test_y_una_columna_que_esa_tabla_no_tiene_no_es_un_error(self, store):
+        """La misma pregunta se le puede hacer a cualquier tabla, y la que no la lleva contesta
+        que no tiene ninguno — que es la verdad, no un fallo."""
+        assert store.items.in_use('color') == []

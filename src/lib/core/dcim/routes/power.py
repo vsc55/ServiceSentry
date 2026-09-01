@@ -10,6 +10,8 @@ Rutas:
     POST    /api/v1/dcim/links
     PUT     /api/v1/dcim/links/<uid>
     DELETE  /api/v1/dcim/links/<uid>
+    GET     /api/v1/dcim/cables
+    GET     /api/v1/dcim/cables/<uid>/run
     GET     /api/v1/dcim/racks/<uid>/cables
     GET     /api/v1/dcim/racks/<uid>/power
     GET     /api/v1/dcim/sources
@@ -25,10 +27,16 @@ from flask import jsonify, request, session
 
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
-from lib.core.dcim.store import (CABLE_CATEGORIES, CABLE_KINDS, FEED_COLORS, FEEDS,
-                                 LINK_KINDS, ROLES_MUDOS, SOURCE_KINDS)
-from lib.core.dcim.routes._common import _without
+from lib.core.dcim.store import (CABLE_CATEGORIES, CABLE_COLORS, CABLE_KINDS,
+                                 FEED_CATEGORIES, FEED_COLORS,
+                                 FEEDS, LINK_KINDS, ROLES_MUDOS, SOURCE_KINDS)
+from lib.core.dcim import store as dcim_store
+from lib.core.dcim.routes._common import _without, scan_pages
 
+
+#: Cuántos colores ya usados se ofrecen. Una instalación tiene cinco o seis; un desplegable con
+#: cuarenta entradas de código hexadecimal no es una ayuda, es otra rueda.
+_COLORS_USED_MAX = 24
 
 #: Cuántos paneles seguidos se atraviesan buscando el otro extremo de un camino. Tres son un
 #: panel de sala, uno de rack y el latiguillo — más que eso no es una instalación, es un dato
@@ -331,6 +339,9 @@ def register(app, wa, C):
         # misma razón que los colores de las ramas, y la misma lista que ya decide quién no
         # figura entre los «sin vigilar».
         out['quiet_roles'] = list(ROLES_MUDOS)
+        # Y de qué par de conectores puede ser un cable de corriente, por lo mismo que los
+        # colores: la pantalla no lleva una segunda copia de qué es un C13 a C14.
+        out['categories'] = list(FEED_CATEGORIES)
         return jsonify(out)
 
     def _power_crud(kind, part, dueno, guard=None):
@@ -370,7 +381,11 @@ def register(app, wa, C):
                 malo = _outlet_bad(data.get('pdu_uid'), data.get('outlet'))
                 if malo:
                     return jsonify({'error': malo}), 400
-            return jsonify({'uid': getattr(store, part).create(data, actor=C.actor())})
+            err = C.asset(part, data)
+            if err:
+                return jsonify({'error': wa._t(err)}), 400
+            return jsonify({'uid': getattr(store, part).create(data, actor=C.actor()),
+                            'asset': str(data.get('asset') or '')})
 
         @app.route(f'/api/v1/dcim/{kind}/<uid>', methods=['PUT'],
                    endpoint=f'api_dcim_{kind}_edit')
@@ -394,8 +409,11 @@ def register(app, wa, C):
                 malo = _outlet_bad(row.get('pdu_uid'), data.get('outlet'), uid)
                 if malo:
                     return jsonify({'error': malo}), 400
+            err = C.asset(part, data, uid)
+            if err:
+                return jsonify({'error': wa._t(err)}), 400
             getattr(store, part).update(uid, data, actor=C.actor())
-            return jsonify({'ok': True})
+            return jsonify({'ok': True, 'asset': str(data.get('asset') or '')})
 
         @app.route(f'/api/v1/dcim/{kind}/<uid>', methods=['DELETE'],
                    endpoint=f'api_dcim_{kind}_del')
@@ -430,6 +448,222 @@ def register(app, wa, C):
     # server on Gi1/0/7" is an isolated fact; with the label beside it, it becomes "and what was
     # declared says that port goes to panel B, so either the label lies or somebody moved the
     # patch lead".
+
+    #: Cuántos cables devuelve una búsqueda. Doscientos no se leen; lo que se hace con una
+    #: lista de doscientos es afinar la búsqueda, y para eso hay que saber que está recortada.
+    _WIRE_MAX = 200
+
+    #: Cuántos identificadores entran en un `IN` al buscar por el nombre de un extremo. Con más
+    #: de quinientos coincidiendo, lo que hay que afinar es la búsqueda: un `IN` de ocho mil no
+    #: es una consulta, es otro problema.
+    _NAMES_MAX = 500
+
+    def _items_matching(q: str) -> list:
+        """Los equipos cuya etiqueta —o el nombre de cuyo armario— contiene *q*.
+
+        Buscar un cable por el nombre de lo que hay en sus puntas es lo normal —«el latiguillo de
+        SW01»— y ese nombre está en otra tabla. Se resuelve antes a identificadores para poder
+        preguntar por ellos: dejarlo para después obligaría a traerse los cables de toda la
+        instalación sólo para mirarles el nombre a las puntas.
+        """
+        store = C.store()
+        if not q or not store:
+            return []
+        sql, params = dcim_store.like_clause(('label',), q)
+        uids = [r['uid'] for r in store.items.list(sql, params, limit=_NAMES_MAX)]
+        # Y por el nombre del ARMARIO, que es como se busca «los cables del RK-04». Los armarios
+        # son pocos: se resuelven a una lista y se pregunta por sus equipos.
+        rsql, rparams = dcim_store.like_clause(('name',), q)
+        racks = [r['uid'] for r in store.racks.list(rsql, rparams, limit=_NAMES_MAX)]
+        if racks and len(uids) < _NAMES_MAX:
+            marcas = ', '.join('?' for _ in racks)
+            uids += [r['uid'] for r in store.items.list(
+                f'rack_uid IN ({marcas})', tuple(racks), limit=_NAMES_MAX - len(uids))]
+        return list(dict.fromkeys(uids))[:_NAMES_MAX]
+
+    def _pdus_matching(q: str) -> list:
+        """Las regletas cuyo nombre —o el de cuyo armario— contiene *q*. La otra punta de un
+        cable de corriente es una regleta, no un equipo."""
+        store = C.store()
+        if not q or not store:
+            return []
+        sql, params = dcim_store.like_clause(('name',), q)
+        uids = [r['uid'] for r in store.pdus.list(sql, params, limit=_NAMES_MAX)]
+        rsql, rparams = dcim_store.like_clause(('name',), q)
+        racks = [r['uid'] for r in store.racks.list(rsql, rparams, limit=_NAMES_MAX)]
+        if racks and len(uids) < _NAMES_MAX:
+            marcas = ', '.join('?' for _ in racks)
+            uids += [r['uid'] for r in store.pdus.list(
+                f'rack_uid IN ({marcas})', tuple(racks), limit=_NAMES_MAX - len(uids))]
+        return list(dict.fromkeys(uids))[:_NAMES_MAX]
+
+    @app.route('/api/v1/dcim/cables', methods=['GET'])
+    @C.view_req
+    def api_dcim_cables_all():
+        """Todos los cables que este lector puede ver, para buscarlos.
+
+        **Sin pasar por un armario.** El cableado se veía dentro de un rack, así que «¿dónde está
+        el cable C-014?» y «¿cuántos latiguillos de Cat 6A hay puestos?» no tenían dónde
+        preguntarse: había que saber el armario ANTES de poder buscar, que es lo contrario de
+        buscar.
+
+        Aquí no hay contraste con lo que ven los dispositivos, y no por ahorrar: contrastar es
+        una pregunta sobre un armario —qué se ve DESDE aquí— y armar el mapa de la flota para
+        listar cables de seis salas sería pagar el mapa seis veces por un dato que esta pantalla
+        no usa. El contraste sigue estando donde significa algo, que es dentro del rack.
+
+        **Los dos: los de red y los de corriente.** Son la misma pregunta —dónde está este
+        cable, cuántos de esta clase hay puestos— y viven en dos tablas por dónde acaban, no por
+        lo que son. Dos listas obligarían a buscar dos veces lo mismo y a acordarse de cuál de
+        las dos mirar, que es de lo que se venía huyendo.
+
+        Se busca por lo que alguien lee: etiqueta, número de inventario, boca y el nombre de los
+        dos extremos. Y se estrecha como todo lo demás — un cable entre dos equipos ajenos no es
+        de este lector, y de uno con un extremo ajeno se dice lo que del extremo se puede decir.
+        """
+        store = C.store()
+        if not store:
+            return jsonify({'cables': []})
+        q = str(request.args.get('q') or '').strip().lower()
+        kind = str(request.args.get('kind') or '').strip()
+        cat = str(request.args.get('category') or '').strip()
+        said, allowed = store.owners_map(), C.seen()
+        # Los equipos una vez, y de ahí sale todo: quién ve qué, cómo se llama cada extremo y en
+        # qué armario está. Preguntar por cable serían dos lecturas por fila.
+        items = {it['uid']: it for it in store.items.list()}
+        racks = {r['uid']: r for s in store.sites.list()
+                 for sala in store.rooms_of(s['uid'])
+                 for r in store.racks_of(sala['uid'])}
+        visible: dict = {}
+
+        def _puedo(uid):
+            uid = str(uid or '')
+            if uid not in visible:
+                visible[uid] = bool(items.get(uid)) and dcim_owners.may_see(
+                    C.owner_of(store, said, 'item', uid), allowed)
+            return visible[uid]
+
+        def _punta(uid):
+            """Cómo se llama y dónde está una punta — o nada, si es de otro."""
+            it = items.get(str(uid or '')) or {}
+            if not _puedo(uid):
+                return {'label': '', 'role': '', 'rack': '', 'foreign': True}
+            r = racks.get(str(it.get('rack_uid') or '')) or {}
+            return {'label': str(it.get('label') or ''), 'role': str(it.get('role') or ''),
+                    'rack': str(r.get('name') or ''), 'rack_uid': str(it.get('rack_uid') or ''),
+                    'u': it.get('u_start'), 'foreign': False}
+
+        # ── Lo que la BASE puede filtrar, filtrado en la base ────────────────────────
+        #
+        # Esto recorría las dos tablas enteras y construía un diccionario por cable de toda la
+        # instalación para quedarse con doscientos. En una sala pequeña no se nota, que es
+        # exactamente lo que hace que se escriba así y se descubra tarde.
+        #
+        # Buscar por el NOMBRE de un extremo también va a la base: el nombre está en otra tabla,
+        # así que se resuelve antes a una lista de identificadores y se pregunta por ellos —el
+        # mismo camino que la búsqueda de equipos por modelo—. Dejarlo para después obligaría a
+        # traerse los cables de toda la instalación para mirarles el nombre a las puntas, que es
+        # justo de lo que se venía huyendo.
+        tocan = _items_matching(q)
+        regletas = _pdus_matching(q)
+
+        def _o_extremos(sql_q, p_q, cols):
+            """El `OR` de los extremos, si hay a quién nombrar. Uno para las dos tablas: sólo
+            cambia cómo se llaman sus columnas de extremo."""
+            trozos, params = [sql_q] if sql_q else [], list(p_q)
+            for col, uids in cols:
+                if not uids:
+                    continue
+                trozos.append(f'{col} IN (' + ', '.join('?' for _ in uids) + ')')
+                params.extend(uids)
+            if not trozos:
+                return '', ()
+            return '(' + ' OR '.join(trozos) + ')', tuple(params)
+
+        def _donde(sobre_cable: bool):
+            """`(where, params)` para una de las dos tablas, o `(None, ())` si no aplica."""
+            cond, params = [], []
+            if kind:
+                if sobre_cable:
+                    cond.append('kind = ?')
+                    params.append(kind)
+                elif kind != 'power':
+                    return None, ()          # un cable de corriente sólo es de esa clase
+            if cat:
+                cond.append('category = ?')
+                params.append(cat)
+            if q:
+                cols = ('label', 'asset', 'a_port', 'b_port') if sobre_cable \
+                    else ('label', 'asset')
+                sql_q, p_q = dcim_store.like_clause(cols, q)
+                extremos = ([('a_item', tocan), ('b_item', tocan)] if sobre_cable
+                            else [('item_uid', tocan), ('pdu_uid', regletas)])
+                sql_q, p_q = _o_extremos(sql_q, p_q, extremos)
+                if not sql_q:
+                    return None, ()          # se buscó algo y no lo tiene nadie
+                cond.append(sql_q)
+                params.extend(p_q)
+            return ' AND '.join(cond), tuple(params)
+
+        # Lo único que la base NO puede: quién puede ver qué sale de una cadena de pertenencia
+        # que no está en ninguna columna, y escribirla en SQL sería tener la regla en dos sitios.
+        fuera, recortado = [], False
+        w_c, p_c = _donde(True)
+        if w_c is not None:
+            pag = scan_pages(
+                lambda lim, off: store.cables.list(w_c, p_c, limit=lim, offset=off),
+                lambda c: (_puedo(str(c.get('a_item') or ''))
+                           or _puedo(str(c.get('b_item') or ''))),
+                _WIRE_MAX, 0)
+            recortado = pag['capped']
+            for c in pag['rows']:
+                fuera.append(dict(c, wire='data',
+                                  a_at=_punta(str(c.get('a_item') or '')),
+                                  b_at=_punta(str(c.get('b_item') or ''))))
+
+        # Y los de CORRIENTE. Acaban en una regleta y no en otro equipo, así que viven en otra
+        # tabla; pero la pregunta es la misma, y dos listas obligarían a buscar dos veces.
+        #
+        # La regleta hace de segunda punta: tiene nombre y está en un armario, que es lo que se
+        # necesita de una punta. Su «boca» es el número de toma.
+        w_f, p_f = _donde(False)
+        if w_f is not None and len(fuera) < _WIRE_MAX:
+            pdus = {p['uid']: p for p in store.pdus.list()}
+            pag = scan_pages(
+                lambda lim, off: store.feeds.list(w_f, p_f, limit=lim, offset=off),
+                lambda f: _puedo(str(f.get('item_uid') or '')),
+                _WIRE_MAX - len(fuera), 0)
+            recortado = recortado or pag['capped']
+            for f in pag['rows']:
+                pdu = pdus.get(str(f.get('pdu_uid') or '')) or {}
+                rack = racks.get(str(pdu.get('rack_uid') or '')) or {}
+                fuera.append(dict(f, wire='power', kind='power',
+                                  a_port=str(f.get('a_port') or ''),
+                                  b_port=(str(f.get('outlet') or '')
+                                          if int(f.get('outlet') or 0) else ''),
+                                  # El color del CABLE es suyo, y el de la rama es de la
+                                  # regleta: pisar el primero con el segundo dejaba la ficha
+                                  # enseñando el color de la rama como si fuera el del
+                                  # latiguillo — y guardándolo encima al corregir cualquier
+                                  # otra cosa. La lista pinta el del cable y, si no lo tiene,
+                                  # el de su rama.
+                                  branch_color=str(pdu.get('color') or ''),
+                                  a_at=_punta(str(f.get('item_uid') or '')),
+                                  b_at={'label': str(pdu.get('name') or ''), 'role': 'pdu',
+                                        'rack': str(rack.get('name') or ''),
+                                        'rack_uid': str(pdu.get('rack_uid') or ''),
+                                        'foreign': False}))
+
+        # Las categorías de las dos, en el mismo diccionario: la pantalla ofrece las que valen
+        # para lo que se está filtrando, y para eso tienen que llegar juntas.
+        cats = dict(CABLE_CATEGORIES, power=list(FEED_CATEGORIES))
+        return jsonify({'cables': fuera[:_WIRE_MAX], 'capped': recortado,
+                        'colors': [list(x) for x in CABLE_COLORS],
+                        'colors_used': store.colors_used(_COLORS_USED_MAX),
+                        # `power` ya está en la lista: un cable de corriente entre dos
+                        # equipos se puede declarar como cable de datos de clase `power`,
+                        # y añadirlo otra vez daría dos opciones iguales en el filtro.
+                        'kinds': list(CABLE_KINDS), 'categories': cats})
 
     @app.route('/api/v1/dcim/racks/<uid>/cables', methods=['GET'])
     @C.view_req
@@ -530,7 +764,15 @@ def register(app, wa, C):
             it['rack_name'] = nombres_rack.get(ru, '')
         # Y de qué puede ser un cable, por lo mismo: la pantalla lleva una lista corta de
         # respaldo para no dibujar un desplegable vacío, pero la que manda es ésta.
-        cats = {'categories': CABLE_CATEGORIES, 'kinds': list(CABLE_KINDS)}
+        cats = {'categories': CABLE_CATEGORIES, 'kinds': list(CABLE_KINDS),
+                # Los colores con los que se compra un latiguillo, dichos por el servidor: la
+                # pantalla no lleva una segunda copia, igual que con las categorías.
+                'colors': [list(x) for x in CABLE_COLORS],
+                # Y los que **ya están puestos** en esta instalación, del más usado al menos. Es
+                # la lista que de verdad se elige: el azul que hay en cuarenta cables es el que
+                # va a llevar el cuarenta y uno, y buscarlo en la rueda a ojo deja nueve azules
+                # que no son el mismo azul.
+                'colors_used': store.colors_used(_COLORS_USED_MAX)}
         if not request.args.get('check'):
             return jsonify(dict(dcim_svc.cable_check(cables, mios + vecinos), **cats))
         edges = []
@@ -542,6 +784,106 @@ def register(app, wa, C):
             except Exception:                       # pylint: disable=broad-except
                 edges = []
         return jsonify(dict(dcim_svc.cable_check(cables, mios + vecinos, edges), **cats))
+
+    @app.route('/api/v1/dcim/cables/<uid>/run', methods=['GET'])
+    @C.view_req
+    def api_dcim_cable_run(uid):
+        """De qué **tirada** forma parte este cable: sus tramos en orden, de punta a punta.
+
+        Un enlace que atraviesa un panel son tres cables y una tirada, y la ficha de uno de los
+        tres enseñaba ese cable solo —«del panel A boca 12 al panel B boca 12»—, que no dice de
+        dónde viene ni a dónde va. La pregunta que se hace delante del armario con el latiguillo
+        en la mano es la otra.
+
+        **Por cable y no con la lista**, que es lo que la hace barata: la pestaña de un armario
+        trae los caminos de todos porque ya ha reunido la instalación entera para contrastar; una
+        búsqueda de cables no reúne nada, y calcularle la tirada a doscientas filas para enseñar
+        una sería pagar doscientas veces lo que se mira una.
+
+        Y **de lo declarado**, sin contraste: una tirada es un hecho escrito, y el camino que
+        dibuja la otra pestaña sale de cruzarlo con lo que los dispositivos ven — así que una
+        tirada que nadie confirma, que es media instalación, no salía en ninguna parte estando
+        declarada entera.
+        """
+        store = C.store()
+        cable = store.cables.get(str(uid or '')) if store else None
+        if not cable:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        said, allowed = store.owners_map(), C.seen()
+
+        def _visible(item_uid):
+            return dcim_owners.may_see(C.owner_of(store, said, 'item', str(item_uid or '')),
+                                       allowed)
+
+        # Se pide permiso sobre los DOS extremos: un cable se ve si se ven las dos cosas que une,
+        # y con uno solo bastaría declarar un cable hacia lo ajeno para que la tirada lo nombrara.
+        if not (_visible(cable.get('a_item')) and _visible(cable.get('b_item'))):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        # Se reúne SÓLO el vecindario: los dos extremos, y de ahí hacia fuera atravesando lo
+        # pasivo. Un panel no termina una tirada, la continúa — pero se para en lo que no se
+        # puede mirar, igual que el recorrido de la pestaña del armario.
+        cables, items, vistos = list(store.cables_of([str(cable.get('a_item') or ''),
+                                                      str(cable.get('b_item') or '')])), [], set()
+        frontera = [str(cable.get('a_item') or ''), str(cable.get('b_item') or '')]
+        vueltas = 0
+        while frontera and vueltas <= _PATH_HOPS:
+            vueltas += 1
+            siguiente = []
+            for u in frontera:
+                if not u or u in vistos:
+                    continue
+                vistos.add(u)
+                it = store.items.get(u)
+                if not it:
+                    continue
+                if not _visible(u):
+                    items.append(dcim_owners.opaque(it))   # existe y ocupa, y nada más
+                    continue
+                items.append(it)
+                if str(it.get('role') or '') in ROLES_MUDOS:
+                    # Los cables de este panel, y **las dos puntas de todos ellos**: lo que hace
+                    # falta seguir no son los cables nuevos sino los equipos nuevos. Empujando
+                    # sólo las puntas de los que se acababan de añadir, preguntar por el tramo
+                    # de en medio no llegaba nunca al servidor ni al switch —sus cables ya
+                    # estaban en la lista desde el principio— y la tirada salía con las dos
+                    # puntas sin nombre.
+                    suyos = store.cables_of([u])
+                    ya = {str(x.get('uid') or '') for x in cables}
+                    cables += [c for c in suyos if str(c.get('uid') or '') not in ya]
+                    siguiente += [str(c.get(lado) or '')
+                                  for c in suyos for lado in ('a_item', 'b_item')]
+            frontera = [u for u in siguiente if u not in vistos]
+        # El nombre del armario de cada punta, que es la mitad de una dirección: «PP-A 25» no
+        # dice dónde hay que ir. De lo ajeno no: decir en qué armario está sería contar qué hay
+        # en la sala de otro por la puerta de al lado.
+        nombres = {}
+        for it in items:
+            if it.get('foreign'):
+                continue
+            ru = str(it.get('rack_uid') or '')
+            if ru and ru not in nombres:
+                nombres[ru] = str((store.racks.get(ru) or {}).get('name') or '')
+            it['rack_name'] = nombres.get(ru, '')
+        # Y cómo se llama la máquina de cada punta, cuando la punta no está rotulada — que es lo
+        # normal: nadie rotula un servidor que ya tiene nombre. Sin esto las dos puntas de la
+        # tirada salían con su boca y nada más. Con la regla del REGISTRO, que es de quien es el
+        # dato: quien no puede ver una máquina tampoco ve su nombre por esta puerta.
+        hosts = getattr(wa, '_hosts_store', None)
+        if hosts is not None:
+            perms = C.perms()
+            de_maquina = {}
+            for h in hosts.list(decrypt=False) or ():
+                hu = str(h.get('uid') or '')
+                if 'devices_view' in perms or f'server.{hu}.view' in perms:
+                    de_maquina[hu] = str(h.get('name') or '')
+            for it in items:
+                if not it.get('foreign') and it.get('host_uid'):
+                    it['host_name'] = de_maquina.get(str(it.get('host_uid')), '')
+        tirada = dcim_svc.run_of(uid, cables, items)
+        if tirada:
+            tirada['legs'] = dcim_svc.with_cable(
+                dcim_svc.label_legs(tirada.get('legs'), items), cables)
+        return jsonify({'path': tirada})
 
     _power_crud('cables', 'cables',
                 lambda st, row: ((st.items.get(str((row or {}).get('a_item') or '')) or {})

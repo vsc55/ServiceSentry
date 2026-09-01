@@ -13,6 +13,7 @@ Rutas:
     POST    /api/v1/dcim/items
     PUT     /api/v1/dcim/items/<uid>
     DELETE  /api/v1/dcim/items/<uid>
+    GET     /api/v1/dcim/items
     GET     /api/v1/dcim/items/<uid>/parts
     GET     /api/v1/dcim/media-dir
     GET     /api/v1/dcim/racks/<uid>/history
@@ -34,8 +35,9 @@ from lib.core.dcim import media as dcim_media
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import rackrev as dcim_rackrev
 from lib.core.dcim import service as dcim_svc
-from lib.core.dcim.store import FACES, ITEM_ROLES, LINK_KINDS, PART_KINDS
-from lib.core.dcim.routes._common import _num, _without
+from lib.core.dcim import store as dcim_store
+from lib.core.dcim.store import FACES, ITEM_ROLES, LINK_KINDS, PART_KINDS, PLACEMENTS
+from lib.core.dcim.routes._common import _num, _without, scan_pages
 
 
 def register(app, wa, C):
@@ -475,7 +477,10 @@ def register(app, wa, C):
                 return '', 'dcim_mount_self'
             # Hereda dónde está. Así el alzado, los listados y los recuentos siguen leyendo lo
             # mismo que siempre sin saber que esto va montado.
-            for campo in ('rack_uid', 'u_start', 'u_height', 'face'):
+            # Y cómo está puesto: lo que va encima de una bandeja que está en el suelo al
+            # lado del armario está también al lado del armario. Heredarlo es lo que hace que
+            # el alzado no dibuje media bandeja.
+            for campo in ('rack_uid', 'u_start', 'u_height', 'face', 'placement'):
                 data[campo] = padre.get(campo)
             # **Y qué trozo de la bandeja toma.** Los mismos cuatro campos que dividen un U,
             # aplicados al hueco del padre: ya estaban en la ficha y ya se guardaban, y hasta
@@ -491,13 +496,32 @@ def register(app, wa, C):
         rack_uid = str(data.get('rack_uid') or '')
         if not store.racks.get(rack_uid):
             return '', 'dcim_not_found'
+        # **Y cómo está puesto.** Casi todo se atornilla a los mástiles; lo que no —un SAI en el
+        # suelo al lado, un cuadro en la pared, la regleta del lateral— está en el armario para
+        # todo lo demás y no tiene U que comprobar. Preguntarle si cabe sería preguntarle por un
+        # sitio que no ocupa, y la respuesta sería «no» en un armario lleno: un SAI en el suelo
+        # no deja de caber porque el armario esté lleno.
+        puesto = str(data.get('placement') or 'u')
+        if puesto not in PLACEMENTS:
+            return '', 'dcim_placement_unknown'
         face = str(data.get('face') or 'full')
         if face not in FACES:
             return '', 'dcim_bad_face'
-        # El rol, si viene: uno inventado es una caja que ninguna pantalla sabe contar, y de él
-        # cuelga que algo deje de figurar como «sin vigilar».
         if str(data.get('role') or '') and str(data['role']) not in ITEM_ROLES:
             return '', 'dcim_role_unknown'
+        if puesto != 'u':
+            # **Y sin U guardada.** La ficha ya no la pregunta, pero un equipo que se mueve de
+            # los mástiles al suelo conserva la que tenía, y una lista que lee `u_start` la
+            # enseña tan tranquila: «SAI · U1» en un armario donde no está. Un valor que dejó de
+            # significar algo y se queda escrito es peor que uno que falta, porque se lee.
+            #
+            # Aquí y no en la pantalla: quien decide qué ocupa es quien tiene que dejarlo dicho.
+            data['u_start'] = 0
+            data['u_height'] = 0
+            return rack_uid, ''
+        # El rol se comprueba arriba, antes de decidir si esto ocupa U: uno inventado es una
+        # caja que ninguna pantalla sabe contar, y de él cuelga que algo deje de figurar como
+        # «sin vigilar» — valga donde valga.
         try:
             u_start = int(data.get('u_start') or 0)
             u_height = int(data.get('u_height') or 1)
@@ -599,9 +623,40 @@ def register(app, wa, C):
                           'data': f.get('data') or {}})
         return jsonify({'history': fuera})
 
-    #: Cuántos equipos devuelve una búsqueda. Treinta es una lista que se lee; doscientas es
-    #: un desplegable disfrazado, y quien busca «PP» en una sala grande no quiere doscientas.
+    #: Cuántos equipos devuelve una búsqueda cuando nadie dice cuántos. Treinta es una lista
+    #: que se lee; doscientas es un desplegable disfrazado, y quien busca «PP» en una sala
+    #: grande no quiere doscientas.
     _FIND_MAX = 30
+
+    #: Y el tope de verdad, para la pantalla que los lista todos. Doscientas filas se miran; con
+    #: más, lo que se hace no es leerlas sino afinar la búsqueda — y para eso hay que saber que
+    #: está recortada, que es lo que dice `capped`.
+    _FIND_TOP = 200
+
+    def _types_matching(q: str) -> list:
+        """Los modelos del catálogo cuyo nombre contiene *q*, para poder buscar equipos por él.
+
+        La mitad de lo que hay en un armario no está rotulado y de eso lo único que se sabe es de
+        qué modelo es. El modelo vive en otra tabla, así que se resuelve antes a una lista de
+        identificadores: un `JOIN` diría lo mismo, pero el catálogo es su propio almacén y
+        atravesarlo desde aquí sería que esta ruta supiera cómo está guardado.
+
+        Acotada: un `IN` de ocho mil identificadores no es una consulta, es otro problema.
+        """
+        cat = getattr(wa, '_dcim_catalog', None)
+        if not q or cat is None or not hasattr(cat, 'list'):
+            return []
+        sql, params = dcim_store.like_clause(('manufacturer', 'model'), q)
+        if not sql:
+            return []
+        try:
+            return [r['uid'] for r in cat.list(sql, params, limit=_TYPES_MAX)]
+        except Exception:                       # pylint: disable=broad-except
+            return []                           # buscar por etiqueta sigue funcionando
+
+    #: Cuántos modelos como mucho entran en la búsqueda por nombre de modelo. Con más de
+    #: doscientos coincidiendo, lo que hay que afinar es la búsqueda.
+    _TYPES_MAX = 200
 
     @app.route('/api/v1/dcim/items', methods=['GET'])
     @C.view_req
@@ -632,12 +687,53 @@ def register(app, wa, C):
             return jsonify({'items': []})
         q = str(request.args.get('q') or '').strip().lower()
         rol = str(request.args.get('role') or '').strip()
+        sede = str(request.args.get('site') or '').strip()
+        empresa = str(request.args.get('org') or '').strip()
+        cuantos = max(1, min(_FIND_TOP, int(_num(request.args.get('limit') or _FIND_MAX))))
         said, allowed = store.owners_map(), C.seen()
-        # Los nombres de los armarios, para poder decir DÓNDE está cada uno: «PP-A» a secas no
-        # distingue el panel de la sala del panel del rack de al lado.
-        racks = {r['uid']: r for s in store.sites.list()
-                 for sala in store.rooms_of(s['uid'])
-                 for r in store.racks_of(sala['uid'])}
+        # Dónde está cada uno, entero: «PP-A» a secas no distingue el panel de la sala del panel
+        # del rack de al lado, y «qué servidores hay en esta sede» necesita subir hasta la sede.
+        # Se arma una vez y de ahí salen las tres respuestas — armario, sala y sede.
+        racks, sede_de = {}, {}
+        for sitio in store.sites.list():
+            for sala in store.rooms_of(sitio['uid']):
+                for r in store.racks_of(sala['uid']):
+                    racks[r['uid']] = dict(r, room_name=str(sala.get('name') or ''),
+                                           site_uid=sitio['uid'],
+                                           site_name=str(sitio.get('name') or ''))
+                    sede_de[r['uid']] = sitio['uid']
+        # ── Lo que la BASE puede filtrar, filtrado en la base ─────────────────────────
+        #
+        # Esto recorría la tabla entera y construía un diccionario por equipo de toda la
+        # instalación para quedarse con treinta. En una sala pequeña no se nota, que es
+        # exactamente lo que hace que se escriba así y se descubra tarde.
+        #
+        # El texto se busca en la etiqueta **y en el modelo**, y el modelo está en otra tabla:
+        # se resuelve antes a una lista de identificadores y se pregunta por ellos. Acotada, que
+        # un `IN` de ocho mil no es una consulta sino un problema distinto.
+        cond, params = [], []
+        if rol:
+            cond.append('role = ?')
+            params.append(rol)
+        if sede:
+            # Los armarios de esa sede, resueltos antes: la sede de un equipo es la de su
+            # armario y eso no está en su fila. Un `IN` vacío es «ninguno», que es la respuesta
+            # correcta a una sede sin armarios — y no «todos», que es lo que saldría de no
+            # poner condición.
+            de_esa = [u for u, s_uid in sede_de.items() if s_uid == sede]
+            marcas = ', '.join('?' for _ in de_esa) or 'NULL'
+            cond.append(f'rack_uid IN ({marcas})')
+            params.extend(de_esa)
+        if q:
+            sql_q, p_q = dcim_store.like_clause(('label',), q)
+            tipos = _types_matching(q)
+            if tipos:
+                marcas = ', '.join('?' for _ in tipos)
+                sql_q = f'({sql_q} OR type_uid IN ({marcas}))'
+                p_q = tuple(p_q) + tuple(tipos)
+            cond.append(sql_q)
+            params.extend(p_q)
+        where = ' AND '.join(cond)
         cat = getattr(wa, '_dcim_catalog', None)
         nombres: dict = {}
 
@@ -653,27 +749,50 @@ def register(app, wa, C):
                                                      str(fila.get('model') or '')) if x)
             return nombres[tipo]
 
+        # Lo único que la base NO puede: quién puede ver qué sale de una cadena de
+        # pertenencia que no está en ninguna columna, y escribirla en SQL sería tener la regla
+        # en dos sitios. Por eso se recorre a trozos en vez de traerlo todo.
+        pag = scan_pages(
+            lambda lim, off: store.items.list(where, tuple(params), limit=lim, offset=off),
+            lambda f: dcim_owners.may_see(C.owner_of(store, said, 'item', f['uid']), allowed),
+            cuantos, int(_num(request.args.get('offset') or 0)))
+        estados = C.states()
         fuera = []
-        for fila in store.items.list():
-            if rol and str(fila.get('role') or '') != rol:
-                continue
-            etiqueta = str(fila.get('label') or '')
-            modelo = _modelo(fila.get('type_uid'))
-            if q and q not in etiqueta.lower() and q not in modelo.lower():
-                continue
-            if not dcim_owners.may_see(C.owner_of(store, said, 'item', fila['uid']), allowed):
-                continue
+        for fila in pag['rows'][:cuantos]:
             rack = racks.get(str(fila.get('rack_uid') or '')) or {}
-            fuera.append({'uid': fila['uid'], 'label': etiqueta,
-                          'type_name': modelo,
+            dueno = C.owner_of(store, said, 'item', fila['uid'])
+            # La empresa se filtra AQUÍ y no en el `WHERE`: un equipo hereda la de su armario
+            # cuando no dice la suya, y esa herencia no está en ninguna columna. Escribirla en
+            # SQL sería tener la regla en dos sitios, que es como dos pantallas acaban
+            # discrepando sobre de quién es lo mismo.
+            if empresa and str(dueno or '') != empresa:
+                continue
+            fuera.append({'uid': fila['uid'], 'label': str(fila.get('label') or ''),
+                          'type_name': _modelo(fila.get('type_uid')),
                           'host_uid': str(fila.get('host_uid') or ''),
                           'role': str(fila.get('role') or ''),
                           'u_start': fila.get('u_start'),
+                          'u_height': fila.get('u_height'),
+                          'serial': str(fila.get('serial') or ''),
+                          'asset': str(fila.get('asset') or ''),
+                          'purchased_at': str(fila.get('purchased_at') or ''),
+                          'warranty_until': str(fila.get('warranty_until') or ''),
+                          'supplier': str(fila.get('supplier') or ''),
+                          'org_uid': str(dueno or ''),
+                          # Su estado, que es lo que hace que esta lista sirva para algo más que
+                          # contar: sin él es un inventario, y con él es «qué de lo que tengo
+                          # está mal». Vacío cuando no hay máquina enganchada, que NO es «bien».
+                          'state': dcim_svc.item_state(fila, estados),
                           'rack_uid': str(fila.get('rack_uid') or ''),
-                          'rack': str(rack.get('name') or '')})
-            if len(fuera) >= _FIND_MAX:
-                break
-        return jsonify({'items': fuera, 'capped': len(fuera) >= _FIND_MAX})
+                          'rack': str(rack.get('name') or ''),
+                          'room': str(rack.get('room_name') or ''),
+                          'site_uid': str(rack.get('site_uid') or ''),
+                          'site': str(rack.get('site_name') or '')})
+        return jsonify({'items': fuera, 'capped': pag['capped'],
+                        'next_offset': pag['next_offset'],
+                        'roles': list(ITEM_ROLES),
+                        'sites': [{'uid': x['uid'], 'name': str(x.get('name') or '')}
+                                  for x in store.sites.list()]})
 
     @app.route('/api/v1/dcim/items', methods=['POST'])
     @C.edit_req
@@ -702,6 +821,9 @@ def register(app, wa, C):
             return jsonify({'error': wa._t(err)}), 400 if err != 'dcim_not_found' else 404
         if not C.may_write(store, store.owners_map(), C.seen(), 'rack', rack_uid):
             return jsonify({'error': wa._t('access_denied')}), 403
+        err = C.asset('items', data)
+        if err:
+            return jsonify({'error': wa._t(err)}), 400
         uid = store.items.create(data, actor=C.actor())
         # Las piezas se COPIAN, no se leen de la plantilla. Desde este momento son suyas: el día
         # que alguien saca un disco averiado hay dónde decirlo, y editar la plantilla no
@@ -717,7 +839,8 @@ def register(app, wa, C):
                                          'build': (plantilla or {}).get('name', ''),
                                          'parts': piezas})
         C.snap(rack_uid, 'place')
-        return jsonify({'uid': uid, 'parts': piezas})
+        return jsonify({'uid': uid, 'parts': piezas,
+                        'asset': str(data.get('asset') or '')})
 
     @app.route('/api/v1/dcim/items/<uid>', methods=['PUT'])
     @C.edit_req
@@ -734,8 +857,11 @@ def register(app, wa, C):
         # sería reescribir el origen de una máquina sin tocar ni una de sus piezas — una fila
         # que afirma algo que no pasó, y encima difícil de descubrir.
         data = _without(request.get_json(silent=True) or {}, ('build_uid',))
+        # Cambiar CÓMO está puesto es moverlo: pasar de los mástiles al suelo es dejar de
+        # ocupar una U, y sin contarlo entre lo que mueve, la comprobación no corría y el equipo
+        # se quedaba con la U que tenía — un SAI al lado del armario listado en la U 1.
         moving = {'rack_uid', 'u_start', 'u_height', 'face', 'u_slots', 'u_slot',
-                  'u_slot_span', 'u_split', 'parent_uid'} & set(data)
+                  'u_slot_span', 'u_split', 'parent_uid', 'placement'} & set(data)
         if moving:
             # Lo que lleva algo encima no puede pasar a ir montado: sería una bandeja sobre una
             # bandeja, y lo que hay encima de ella se quedaría colgando de un nivel que no
@@ -750,6 +876,9 @@ def register(app, wa, C):
             for campo in ('rack_uid', 'u_start', 'u_height', 'face'):
                 if campo in merged:
                     data[campo] = merged[campo]
+        err = C.asset('items', data, uid)
+        if err:
+            return jsonify({'error': wa._t(err)}), 400
         store.items.update(uid, data, actor=C.actor())
         # De los DOS armarios cuando cambia de uno a otro: para el de origen, ese equipo se fue;
         # para el de destino, llegó. Guardar sólo el de destino dejaría el primero enseñando una
@@ -759,7 +888,7 @@ def register(app, wa, C):
         C.snap(antes, 'move' if moving else 'edit')
         if ahora and ahora != antes:
             C.snap(ahora, 'move')
-        return jsonify({'ok': True})
+        return jsonify({'ok': True, 'asset': str(data.get('asset') or '')})
 
     @app.route('/api/v1/dcim/items/<uid>', methods=['DELETE'])
     @C.edit_req

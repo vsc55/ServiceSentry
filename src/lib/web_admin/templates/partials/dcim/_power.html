@@ -12,7 +12,7 @@
 
 //: Lo que devolvió `/power`, o `null` mientras no se ha abierto. Se pide al abrir la pestaña y
 //: no con el armario: la mayoría de las veces que alguien abre un rack es para mirar qué hay
-//: dentro, no de qué come.
+//: dentro, no de qué se alimenta.
 let _dcPower = null;
 
 async function _dcPowerOpen() {
@@ -320,6 +320,17 @@ function _dcBranchWord(feed) {
  *
  *  Sigue pudiéndose enchufar: hay paneles de parcheo con PoE, y quitar el botón sería decidir que
  *  no existen. Lo que cambia es la frase, que es lo que estaba acusando. */
+/** Los números de inventario de los cables de un equipo, **uno por cable**.
+ *
+ *  Un equipo con dos fuentes tiene dos latiguillos, cada uno con el suyo, y una casilla con uno
+ *  solo diría que el otro no está inventariado. En el mismo orden que las chapas de al lado, que
+ *  es lo que permite leer las dos columnas juntas. */
+function _dcFeedAssets(it) {
+    const f = (it || {}).feeds || [];
+    if (!f.length) return esc('—');
+    return f.map(x => `<div>${esc(x.asset || '—')}</div>`).join('');
+}
+
 function _dcPowerQuiet(it) {
     return (((_dcPower || {}).quiet_roles) || []).indexOf(String((it || {}).role || '')) >= 0;
 }
@@ -341,6 +352,10 @@ function _dcPowerItems(items, pdus) {
         <thead><tr class="ss-nowrap">
             <th>${esc(t('dcim_item'))}</th>
             <th>${esc(t('dcim_feeds'))}</th>
+            ${/* Uno por cable y en el mismo orden que las chapas de al lado: un equipo con dos
+                  fuentes tiene DOS latiguillos, cada uno con su número, y una casilla con uno
+                  solo diría que el otro no está inventariado. */''}
+            <th class="ss-hug">${esc(t('dcim_item_asset_col'))}</th>
             <th class="text-end">${esc(t('dcim_watts_said'))}</th>
             <th></th>
         </tr></thead>
@@ -352,9 +367,8 @@ function _dcPowerItems(items, pdus) {
                 class="badge fw-normal me-1"
                 style="background:${escAttr(_dcPduColor(f.pdu_uid, pdus))};color:#fff"
                 >${puede ? `<a href="#" class="text-reset"
-                        onclick="event.preventDefault();_dcFeedMove(${jsStr(f.uid || '')},${
-                            jsStr(f.pdu_uid || '')},${Number(f.outlet || 0)})"
-                        title="${escAttr(t('dcim_outlet_move'))}">${esc(f.pdu)}${
+                        onclick="event.preventDefault();_dcFeedInfo(${jsStr(f.uid || '')})"
+                        title="${escAttr(t('dcim_feed'))}">${esc(f.pdu)}${
                         f.outlet ? '·' + esc(String(f.outlet)) : ''}</a>`
                     : `${esc(f.pdu)}${f.outlet ? '·' + esc(String(f.outlet)) : ''}`}${
                     puede ? ` <a href="#" class="text-reset"
@@ -365,6 +379,7 @@ function _dcPowerItems(items, pdus) {
                 ${it.branches.length === 1 ? `<i class="bi bi-exclamation-triangle
                     text-warning ms-1" title="${escAttr(t('dcim_warn_one_branch_tt'))}"></i>` : ''}
             </td>
+            <td class="ss-fs-2 ss-tabular ss-nowrap">${_dcFeedAssets(it)}</td>
             <td class="text-end ss-tabular">${esc(String(it.watts_said))} W</td>
             <td class="text-end">${puede && pdus.length && !_dcPowerQuiet(it) ? `<button
                 class="btn btn-sm btn-secondary" onclick="_dcFeedNew(${jsStr(it.uid)})"
@@ -434,7 +449,7 @@ async function _dcPduFromItem(itemUid, nombre) {
     hideInfoModal();
     const rack = (_dcimRack || {}).rack;
     if (!rack) return;
-    const cuantas = (_dcPower.pdus || []).length;
+    const cuantas = ((_dcPower || {}).pdus || []).length;
     const r = await _dcimSend('POST', '/api/v1/dcim/pdus', {
         rack_uid: rack.uid, item_uid: itemUid,
         feed: cuantas % 2 ? 'b' : 'a',
@@ -460,7 +475,7 @@ async function _dcPduFromItem(itemUid, nombre) {
  *  La última opción es la regleta que no ocupa U, la atornillada al lateral: es la mitad de los
  *  casos y la única que de verdad no tiene ningún equipo al que apuntar. */
 function _dcPduNew() {
-    const puestas = (_dcPower.pdus || []).map(p => String(p.item_uid || '')).filter(Boolean);
+    const puestas = ((_dcPower || {}).pdus || []).map(p => String(p.item_uid || '')).filter(Boolean);
     // Lo ajeno no: un armario compartido enseña que el U está ocupado y nada más, y declarar
     // como regleta propia el equipo del vecino sería escribir sobre su inventario.
     const libres = (((_dcimRack || {}).items) || [])
@@ -492,7 +507,7 @@ async function _dcPduPlain() {
     if (!rack) return;
     // La rama se alterna sola: la primera regleta de un armario es la A y la segunda la B, que
     // es como se montan. Se puede cambiar después, y así no hay que elegir para empezar.
-    const cuantas = (_dcPower.pdus || []).length;
+    const cuantas = ((_dcPower || {}).pdus || []).length;
     const r = await _dcimSend('POST', '/api/v1/dcim/pdus', {
         rack_uid: rack.uid, feed: cuantas % 2 ? 'b' : 'a',
         name: `PDU-${cuantas % 2 ? 'B' : 'A'}${cuantas > 1 ? Math.floor(cuantas / 2) + 1 : ''}`,
@@ -513,6 +528,170 @@ function _dcPduDrop(uid, nombre) {
 /** Enchufar un equipo. Va a la primera regleta con toma libre de la rama que le FALTA — que es
  *  lo que alguien iba a hacer de todos modos, y es la elección que evita el fallo que esta
  *  pantalla existe para cazar. */
+/** Todos los cables de corriente del armario, buscados por uid.
+ *
+ *  La respuesta los da por equipo —es como se leen— y una ficha se abre por su uid. Un índice y
+ *  no un recorrido en cada sitio que lo necesite: son tres, y el tercero se olvidaría de mirar
+ *  en algún sitio. */
+function _dcFeedOf(uid) {
+    for (const it of ((_dcPower || {}).items || []))
+        for (const f of (it.feeds || []))
+            if (String(f.uid) === String(uid)) return f;
+    // Y en la lista del cableado de la sala, que trae los mismos campos con los mismos nombres:
+    // a la misma ficha se llega desde dos pantallas, y dos fichas del mismo cable serían dos
+    // formas de escribir lo mismo.
+    return ((_dcWire || {}).rows || []).find(x => String(x.uid) === String(uid)) || null;
+}
+
+//: Si la ficha del cable de corriente abierta está en modo corrección.
+let _dcFeedEd = false;
+
+/** La ficha de un cable de CORRIENTE.
+ *
+ *  Esta fila decía de qué toma cuelga y cuántos vatios se declararon, y nada más — como si el
+ *  latiguillo no existiera. Y existe: se compra, se guarda en una caja, se rompe y hay que
+ *  sustituirlo, y la pregunta de la caja de repuestos es la misma que en datos: qué hay que
+ *  llevarse. Ahora tiene lo mismo que su hermano de datos, con los mismos nombres.
+ *
+ *  Y los tres botones donde se llega a ellos: corregirlo, cambiarlo de toma y desenchufarlo eran
+ *  tres cosas escondidas en la misma chapa, o en ninguna parte. */
+function _dcFeedInfo(uid, editar) {
+    const f = _dcFeedOf(uid);
+    if (!f) return;
+    _dcFeedOpen = String(uid);
+    // De qué lista se vino, para volver a ella al guardar: recargar la otra deja lo corregido
+    // fuera de la vista, y una corrección que no se ve parece una que no se ha guardado.
+    _dcFeedFrom = ((_dcPower || {}).items || []).some(
+        x => (x.feeds || []).some(y => String(y.uid) === String(uid))) ? 'rack' : 'wire';
+    // De ESTA apertura y no del panel: ver el comentario de `_dcCableInfo`, que es el mismo
+    // fallo y por eso se arregla igual — cerrar sin guardar dejaba encendido el modo corrección
+    // y la siguiente fila abría el formulario de otro cable.
+    _dcFeedEd = !!editar;
+    if (!editar) _dcFeedCatFree = false;
+    if (editar) return _dcFeedEditDraw(f);
+    const fila = (rot, valor) => `<tr>
+        <td class="text-muted ss-nowrap ss-hug pe-3">${esc(rot)}</td>
+        <td>${valor}</td></tr>`;
+    showHtmlModal(t('dcim_feed'), `<table class="table table-sm mb-0 align-middle ss-fs-2">
+        <tbody>
+        ${fila(t('dcim_cable_label'), esc(f.label || '—'))}
+        ${fila(t('dcim_item_asset'), esc(f.asset || '—'))}
+        ${fila(t('dcim_plug_into'), `${esc(f.pdu || (f.b_at || {}).label || '')}${f.outlet
+            ? ` <span class="ss-tabular">${esc(String(f.outlet))}</span>`
+            : ` <span class="text-muted">${esc(t('dcim_outlet_unknown'))}</span>`}`)}
+        ${fila(t('dcim_cable_cat'), f.category ? esc(_dcEnumName(f.category)) : '—')}
+        ${fila(t('dcim_cable_len'), Number(f.length_mm || 0)
+            ? `<span class="ss-tabular">${esc(_dcMetres(f.length_mm))}</span>` : '—')}
+        ${fila(t('dcim_cable_color'), f.color
+            ? `<span class="ss-dot" style="background:${escAttr(f.color)}"></span>
+               <span class="text-muted ss-tabular ss-fs-2">${esc(f.color)}</span>` : '—')}
+        ${fila(t('dcim_feed_watts'), Number(f.watts_said || 0)
+            ? `<span class="ss-tabular">${esc(String(f.watts_said))} W</span>` : '—')}
+        ${fila(t('dcim_description'), esc(f.description || '—'))}
+        </tbody></table>`, 'primary',
+        _dcimMay('dcim_edit')
+            ? `<button class="btn btn-secondary" onclick="_dcFeedInfo(${jsStr(uid)},true)">
+                <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>
+               <button class="btn btn-secondary" onclick="_dcFeedMove(${jsStr(uid)},${
+                    jsStr(f.pdu_uid || '')},${Number(f.outlet || 0)})">
+                <i class="bi bi-plug me-1"></i>${esc(t('dcim_outlet_move'))}</button>` : '',
+        'fit');
+}
+
+//: Cuál es el cable de corriente abierto, y de qué lista se llegó a él.
+let _dcFeedOpen = '';
+let _dcFeedFrom = 'rack';
+
+/** El formulario de un cable de corriente, **repartido como el de datos**: rejilla con rótulos
+ *  de grupo en vez de seis casillas en una fila que se envuelve con el ancho puesto a ojo en
+ *  cada una. Son dos pantallas que hacen lo mismo y se llegan a parecer o no según quién las
+ *  tocara la última — y la que se queda atrás es la que parece rota. */
+function _dcFeedEditDraw(f) {
+    showHtmlModal(t('dcim_feed'), `<div>
+        <div class="ss-zone-h"><span>${esc(t('dcim_cable_what'))}</span><i></i></div>
+        <div class="ss-fgrid">
+            ${_dcFeedBox('dcf-l', t('dcim_cable_label'), f.label, '', t('dcim_cable_label_tt'))}
+            ${_dcFeedBox('dcf-as', t('dcim_item_asset'), f.asset, '', t('dcim_asset_tt'))}
+            ${_dcFeedCatBox(f.category)}
+            ${_dcFeedBox('dcf-m', t('dcim_cable_len'),
+                         Number(f.length_mm || 0) ? _dcMetresNum(f.length_mm) : '',
+                         'inputmode="decimal" placeholder="0,25" class="form-control ' +
+                         'form-control-sm ss-tabular"', t('dcim_cable_len_tt'))}
+            ${_dcColorBox('dcf-c', f.color)}
+        </div>
+        <div class="ss-zone-h mt-3"><span>${esc(t('dcim_feed_eats'))}</span><i></i></div>
+        <div class="ss-fgrid">
+            ${_dcFeedBox('dcf-w', t('dcim_feed_watts'), f.watts_said || '',
+                         'inputmode="numeric" class="form-control form-control-sm ss-tabular"',
+                         t('dcim_feed_watts_tt'))}
+        </div>
+        <div class="mt-3"><label class="ss-fs-2 text-muted d-block">${
+            esc(t('dcim_description'))}
+            <textarea id="dcf-d" class="form-control form-control-sm" rows="2"
+            >${esc(String(f.description || ''))}</textarea></label></div>
+    </div>`, 'primary',
+        `<button class="btn btn-primary" onclick="_dcFeedEdSave()">
+            <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`, 'wide');
+}
+
+//: Si la categoría de un cable de corriente se está escribiendo a mano.
+let _dcFeedCatFree = false;
+
+/** El par de conectores, **de la lista o el que sea** — lo mismo que la categoría de un cable de
+ *  datos, y por lo mismo: un `<datalist>` no enseña que haya nada que elegir. */
+function _dcFeedCatBox(valor) {
+    const lista = ((_dcPower || {}).categories || (_dcCableVocab().cats || {}).power || []);
+    const rot = esc(t('dcim_cable_cat'));
+    if (!lista.length || _dcFeedCatFree || (valor && lista.indexOf(valor) < 0)) {
+        return `<label class="ss-fs-2 text-muted d-block">${rot}
+            <input id="dcf-cat" class="form-control form-control-sm"
+                   value="${escAttr(String(valor || ''))}"
+                   onkeydown="if(event.key==='Enter')_dcFeedEdSave()"></label>`;
+    }
+    return `<label class="ss-fs-2 text-muted d-block">${rot}
+        <select id="dcf-cat" class="form-select form-select-sm"
+                onchange="if(this.value==='*'){_dcFeedCatFree=true;_dcFeedInfo(_dcFeedOpen,true);}">
+            <option value=""${valor ? '' : ' selected'}>${esc(t('dcim_pick_none'))}</option>
+            ${lista.map(x => `<option value="${escAttr(x)}"${
+                String(valor || '') === x ? ' selected' : ''}>${esc(_dcEnumName(x))}</option>`
+            ).join('')}
+            <option value="*">${esc(t('dcim_cable_cat_other'))}</option>
+        </select></label>`;
+}
+
+/** Una casilla de la corrección, con nombre propio: la guarda del escapado reconoce a los
+ *  ayudantes de esta sección por el nombre, y una flecha anónima la deja sin poder saber si la
+ *  etiqueta de un cable pasa por `escAttr`. */
+function _dcFeedBox(id, rot, valor, extra, ayuda) {
+    // Sin ancho propio: lo reparte la rejilla, como en el de datos.
+    return `<label class="ss-fs-2 text-muted d-block">${_dcHelp(rot, ayuda)}
+        <input id="${escAttr(id)}" class="form-control form-control-sm" ${extra || ''}
+               value="${escAttr(String(valor === undefined || valor === null ? '' : valor))}"
+               onkeydown="if(event.key==='Enter')_dcFeedEdSave()"></label>`;
+}
+
+async function _dcFeedEdSave() {
+    const val = (id) => (document.getElementById(id) || {}).value || '';
+    if (!_dcFeedOpen) return;
+    // Los metros por el mismo camino que los de datos: con coma o con punto, y lo que no es un
+    // número se dice en vez de guardarse como cero.
+    const mm = _dcMetresIn(val('dcf-m'));
+    if (mm === null) return showToast(t('dcim_cable_len_bad'), 'warning');
+    const r = await _dcimSend('PUT',
+        `/api/v1/dcim/feeds/${encodeURIComponent(_dcFeedOpen)}`, {
+            label: val('dcf-l'), asset: val('dcf-as'), category: val('dcf-cat'),
+            length_mm: mm, watts_said: Number(val('dcf-w')) || 0,
+            color: val('dcf-c'),
+            description: val('dcf-d'),
+        });
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcAssetSaid(val('dcf-as'), r);
+    _dcFeedEd = false;
+    hideInfoModal();
+    if (_dcFeedFrom === 'wire') return _dcWireReload();
+    _dcPowerOpen();
+}
+
 //: El cable que se está enchufando o moviendo: `{item, uid, pdu, outlet}`. Sin `uid`, uno nuevo.
 let _dcFeedPick = null;
 
@@ -529,25 +708,60 @@ let _dcFeedPick = null;
  *  pero ofrecida, no decidida a sus espaldas. Y «no sé en cuál» sigue siendo una respuesta que
  *  se puede dar: obligar a inventarse un número es cambiar un hueco por un dato falso. */
 function _dcFeedNew(itemUid) {
-    if (!(_dcPower.pdus || []).length) return showToast(t('dcim_no_pdus'), 'warning');
+    if (!((_dcPower || {}).pdus || []).length) return showToast(t('dcim_no_pdus'), 'warning');
+    // Desde la pestaña de un armario, que es de donde se enchufa: sus regletas son las de aquí.
+    _dcOutlets = _dcPower;
     _dcFeedPick = {item: itemUid, uid: '', pdu: '', outlet: 0};
     _dcFeedPickDraw();
+}
+
+//: Con qué se dibuja el elector de tomas: las regletas de UN armario y las tomas que ya tienen
+//: algo. En la pestaña de un armario está cargado desde que se abrió; desde la sección de
+//: cableado no hay armario abierto, y `_dcPower` vale `null`.
+//:
+//: Aparte de `_dcPower` a propósito: ése es el estado de la pestaña de un armario y pisarlo con
+//: el de otro dejaría esa pantalla contando las tomas de una sala en la que no está.
+let _dcOutlets = null;
+
+/** Deja en `_dcOutlets` las regletas del armario de esta regleta. `false` si no se pudo.
+ *
+ *  Es la cuarta pantalla con la misma forma de fallo: leer el estado de la pestaña de un armario
+ *  desde una pantalla donde no hay ninguno abierto. `_dcPower.items` sobre `null` reventaba antes
+ *  de dibujar nada y el botón «Cambiar de toma» no hacía **nada** — ni ventana, ni aviso. */
+async function _dcOutletsLoad(pduUid) {
+    const suyas = ((_dcPower || {}).pdus || []);
+    if (suyas.some(x => String(x.uid) === String(pduUid))) {
+        _dcOutlets = _dcPower;
+        return true;
+    }
+    // El armario es el de la REGLETA y no el del equipo: un equipo puede comer de la regleta del
+    // armario de al lado, y las tomas que hay que enseñar son las de ella.
+    const f = _dcFeedOf(_dcFeedOpen) || {};
+    const rack = String((f.b_at || {}).rack_uid || f.rack_uid || '');
+    if (!rack) return (showToast(t('dcim_not_found'), 'warning'), false);
+    const d = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(rack)}/power`);
+    if (!d) return (showToast(t('save_failed'), 'danger'), false);
+    _dcOutlets = d;
+    return true;
 }
 
 /** Cambiar de toma un cable que ya está. Sin quitarlo y volverlo a poner, que se lleva por
  *  delante lo que alguien declaró que consume — y en la MISMA regleta: pasar un cable de una
  *  regleta a otra es desenchufarlo, y eso ya tiene su botón al lado. */
-function _dcFeedMove(uid, pduUid, outlet) {
+async function _dcFeedMove(uid, pduUid, outlet) {
+    _dcFeedEd = false;
     _dcFeedPick = {item: '', uid: uid, pdu: pduUid, outlet: Number(outlet || 0)};
+    if (!await _dcOutletsLoad(pduUid)) return;
     _dcFeedPickDraw();
 }
 
 function _dcFeedPickDraw() {
     const p = _dcFeedPick || {};
-    const it = (_dcPower.items || []).find(x => x.uid === p.item) || {};
+    const donde = _dcOutlets || {};
+    const it = (donde.items || []).find(x => x.uid === p.item) || {};
     const tiene = new Set(it.branches || []);
     // La rama que le falta, primero. Un orden y no una elección hecha: la otra sigue estando.
-    const pdus = (_dcPower.pdus || [])
+    const pdus = (donde.pdus || [])
         .filter(x => !p.pdu || x.uid === p.pdu)
         .slice().sort((a, b) => (tiene.has(a.feed) ? 1 : 0) - (tiene.has(b.feed) ? 1 : 0));
     showHtmlModal(t(p.uid ? 'dcim_outlet_move' : 'dcim_plug_in'),

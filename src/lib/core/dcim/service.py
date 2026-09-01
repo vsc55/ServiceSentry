@@ -487,11 +487,21 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
             'u_start': it.get('u_start'), 'host_uid': str(it.get('host_uid') or ''),
             # Con el uid del CABLE: sin él, la pantalla puede enseñar de qué come un equipo
             # y no puede desenchufarlo, que es la mitad de para lo que se abre.
+            # Con lo que hace de un cable de corriente una cosa inventariada, no sólo un
+            # vínculo: su etiqueta, su número, de qué par de conectores es, cuánto mide y qué
+            # haya que decir de él. Se guardaba y no volvía, que es la misma forma de fallo
+            # que llevamos toda la semana persiguiendo — un dato que no viaja vale su valor
+            # por defecto en la pantalla, y el respaldo parece que funciona.
             'feeds': [{'uid': str(c.get('uid') or ''),
                        'pdu': nombre_de.get(str(c.get('pdu_uid') or ''), ''),
                        'pdu_uid': str(c.get('pdu_uid') or ''),
                        'branch': rama_de.get(str(c.get('pdu_uid') or ''), 'none'),
                        'outlet': int(c.get('outlet') or 0),
+                       'label': str(c.get('label') or ''),
+                       'asset': str(c.get('asset') or ''),
+                       'category': str(c.get('category') or ''),
+                       'length_mm': int(c.get('length_mm') or 0),
+                       'description': str(c.get('description') or ''),
                        'watts_said': int(c.get('watts_said') or 0)} for c in cables],
             'branches': [b for b in ramas if b != 'none'],
             'watts_said': sum(int(c.get('watts_said') or 0) for c in cables),
@@ -563,6 +573,178 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
 #   lo dice. Eso sí suele ser trabajo pendiente: alguien enchufó y no lo apuntó.
 
 
+#: Cuántos tramos como mucho tiene una tirada. Ocho son un latiguillo, dos troncales de sala,
+#: dos paneles de armario y sitio de sobra: más que eso no es una instalación, es un bucle
+#: declarado por error, y un paseo sin tope sobre un bucle no termina.
+_RUN_MAX = 8
+
+
+def _port_map(cables) -> dict:
+    """``{(equipo, boca): [(cable, desde, hacia), …]}`` — qué cables tocan cada boca.
+
+    **Por BOCAS y no por equipos.** Un panel de veinticuatro posiciones no es un nudo donde todo
+    lo que entra sale por cualquier sitio: lo que entra por la 12 sale por la 12, que es la misma
+    posición vista por el otro lado. Andar por el panel entero daría por explicado cualquier par
+    de cables que lo tocaran.
+
+    Sin bocas escritas, todas las de un equipo son la misma —``('panel', '')``— y lo que sale es
+    menos preciso, que es exactamente lo que se sabe cuando nadie las apuntó.
+
+    En un sitio porque lo andan dos: el que confirma un enlace a través de un panel y el que
+    contesta «¿de qué tirada es este cable?». Dos copias del mismo índice serían dos ideas de por
+    dónde se puede pasar, y la segunda se separaría en el primer arreglo.
+    """
+    out: dict = {}
+    for c in (cables or ()):
+        a = (str(c.get('a_item') or ''), str(c.get('a_port') or '').strip())
+        b = (str(c.get('b_item') or ''), str(c.get('b_port') or '').strip())
+        if not a[0] or not b[0]:
+            continue
+        uid = str(c.get('uid') or '')
+        out.setdefault(a, []).append((uid, a, b))
+        out.setdefault(b, []).append((uid, b, a))
+    return out
+
+
+def _passable(items) -> dict:
+    """``{equipo: si se puede atravesar}``.
+
+    Atravesar un switch sería inventarse un cable: dos máquinas enchufadas al mismo switch no
+    están enchufadas entre sí. Y un equipo del que nadie ha dicho el rol —o uno ajeno, que llega
+    sin él— tampoco se atraviesa: no se puede afirmar un camino a través de algo que no se puede
+    ni mirar.
+    """
+    return {str(i.get('uid') or ''): (str(i.get('role') or '') in ROLES_MUDOS
+                                      and not i.get('foreign'))
+            for i in (items or ())}
+
+
+def _leg(uid, desde, hacia) -> dict:
+    """Un tramo **en el sentido en que se recorre**, del origen al destino.
+
+    En ese sentido y no en el que se guardó: un cable se declara desde el extremo que se tenía
+    delante, así que la mitad de los tramos de una tirada están escritos al revés — y una traza
+    que va «SRV → PP» y luego «SW → PP» no se puede leer.
+    """
+    return {'cable': uid, 'a_item': desde[0], 'a_port': desde[1],
+            'b_item': hacia[0], 'b_port': hacia[1]}
+
+
+#: Lo que un tramo lleva DEL CABLE que es. La pantalla lo sacaba de la lista que tenía cargada
+#: —la de la pestaña del armario— y desde la sección de cableado esa lista no existe: la tirada
+#: salía sin etiquetas, sin metros y sin colores, que es casi todo lo que distingue un tramo del
+#: de al lado. Viaja con el tramo y se acabó la búsqueda.
+_LEG_FIELDS = ('label', 'asset', 'kind', 'category', 'length_mm', 'color')
+
+
+def with_cable(legs, cables) -> list:
+    """Los tramos con lo que hay que saber del cable de cada uno pegado."""
+    de = {str(c.get('uid') or ''): c for c in (cables or ())}
+    return [dict(t, **{k: (de.get(t['cable'], {}) or {}).get(k) for k in _LEG_FIELDS})
+            for t in (legs or ())]
+
+
+def label_legs(legs, items) -> list:
+    """Los tramos con el NOMBRE, el ROL y el SITIO de cada punta pegados.
+
+    Una tirada que pasa por el panel del armario de al lado nombra equipos que la pantalla no
+    tiene delante —sólo tiene los de su lista—, así que sin esto sale llena de identificadores,
+    que es lo que ya se arregló en cuatro sitios de esta sección. Con el rol además del rótulo:
+    la mitad de los paneles no está rotulada, y «Panel de parcheo» dice más que ocho letras de un
+    uid. Y con el armario y la U, que es la dirección con la que alguien camina hasta allí.
+    """
+    # **Cómo se llama**, en el mismo orden que en todas las listas: lo rotulado, si no la
+    # máquina, si no el modelo. Con la etiqueta sola, las dos puntas de una tirada salían con la
+    # boca y nada más —«gigabitethernet11»— porque lo normal es no rotular un servidor que ya
+    # tiene nombre de máquina. Quien llama pone `host_name` si puede resolverlo; donde no, la
+    # pantalla lo completa con lo que tiene cargado.
+    nombre = {str(i.get('uid') or ''): (i.get('label') or i.get('host_name')
+                                        or i.get('type_name') or '')
+              for i in (items or ())}
+    rol = {str(i.get('uid') or ''): str(i.get('role') or '') for i in (items or ())}
+    sitio = {str(i.get('uid') or ''): {'rack': str(i.get('rack_name') or ''),
+                                       'rack_uid': str(i.get('rack_uid') or ''),
+                                       'u': i.get('u_start')}
+             for i in (items or ())}
+    return [dict(t,
+                 a_label=nombre.get(t['a_item'], ''), a_role=rol.get(t['a_item'], ''),
+                 a_at=sitio.get(t['a_item'], {}),
+                 b_label=nombre.get(t['b_item'], ''), b_role=rol.get(t['b_item'], ''),
+                 b_at=sitio.get(t['b_item'], {}))
+            for t in (legs or ())]
+
+
+def run_of(cable_uid, cables, items) -> dict:
+    """``{'ends': [equipo, equipo], 'legs': [tramo, …]}`` — **la tirada de este cable**.
+
+    Un enlace que atraviesa un panel son tres cables y una tirada, y la ficha de uno de los tres
+    enseñaba ese cable solo: «del panel A boca 12 al panel B boca 12», que no dice de dónde viene
+    ni a dónde va. La pregunta que se hace delante del armario con el latiguillo en la mano es la
+    otra — de qué tirada forma parte esto y en qué posición está—, y para contestarla había que
+    ir cable a cable reconstruyéndola de cabeza.
+
+    **Es un hecho DECLARADO, no una confirmación.** El camino que dibuja la pestaña de un armario
+    sale de cruzar lo declarado con lo que los dispositivos ven, así que una tirada que nadie
+    confirma —dos paneles y un latiguillo, sin LLDP de por medio— no salía en ninguna parte
+    aunque estuviera escrita entera. Esto se lee sólo de lo declarado: contesta también donde no
+    hay nada que confirmar, que es media instalación.
+
+    Se anda hacia los dos lados desde el cable, y **se para en lo que no es un panel**: un equipo
+    de verdad termina la tirada, y también la termina una boca donde no sigue nada. Si de una
+    boca salen dos cables además del que llega, se para ahí: eso no es una tirada, es un dato
+    torcido, y elegir uno de los dos sería dibujar un camino que nadie ha declarado.
+    """
+    uid = str(cable_uid or '')
+    cual = next((c for c in (cables or ()) if str(c.get('uid') or '') == uid), None)
+    if not cual:
+        return {}
+    en_boca, pasa = _port_map(cables), _passable(items)
+    a = (str(cual.get('a_item') or ''), str(cual.get('a_port') or '').strip())
+    b = (str(cual.get('b_item') or ''), str(cual.get('b_port') or '').strip())
+    if not a[0] or not b[0]:
+        return {}
+    legs = [_leg(uid, a, b)]
+
+    def _sigue(boca, usados):
+        """El único cable que continúa por esa boca, o `None`."""
+        if not pasa.get(boca[0]):
+            return None
+        otros = [x for x in en_boca.get(boca, ()) if x[0] not in usados]
+        return otros[0] if len(otros) == 1 else None
+
+    # Hacia delante, y luego hacia atrás dándole la vuelta a cada tramo: una tirada se lee de
+    # punta a punta, y una lista que empieza por el medio obliga a ordenarla de cabeza.
+    for adelante in (True, False):
+        # Con tope: una tirada de más de esto no es una instalación, es un bucle declarado por
+        # error — y un paseo sin tope sobre un bucle no termina.
+        while len(legs) < _RUN_MAX:
+            punta = (legs[-1]['b_item'], legs[-1]['b_port']) if adelante \
+                else (legs[0]['a_item'], legs[0]['a_port'])
+            paso = _sigue(punta, {t['cable'] for t in legs})
+            if not paso:
+                break
+            otro_uid, desde, hacia = paso
+            if adelante:
+                legs.append(_leg(otro_uid, desde, hacia))
+            else:
+                legs.insert(0, _leg(otro_uid, hacia, desde))
+    # **La misma tirada se lee igual desde cualquiera de sus tramos.** Sin esto, el sentido lo
+    # decidía por qué cable se hubiera preguntado: la ficha del latiguillo la enseñaba
+    # «servidor → switch» y la del troncal «switch → servidor». Es la misma tirada, y dos
+    # dibujos distintos de lo mismo hacen dudar de si son dos.
+    #
+    # Primero el extremo que ES una máquina cuando sólo uno lo es —una tirada se lee desde donde
+    # hay algo que mirar— y, cuando eso no decide, por identificador: hace falta una regla
+    # estable, y cualquiera vale mientras sea siempre la misma.
+    host_de = {str(i.get('uid') or ''): str(i.get('host_uid') or '') for i in (items or ())}
+    ini, fin = legs[0]['a_item'], legs[-1]['b_item']
+    mio, suyo = bool(host_de.get(ini)), bool(host_de.get(fin))
+    if (suyo and not mio) or (mio == suyo and fin < ini):
+        legs = [{'cable': t['cable'], 'a_item': t['b_item'], 'a_port': t['b_port'],
+                 'b_item': t['a_item'], 'b_port': t['a_port']} for t in reversed(legs)]
+    return {'ends': [legs[0]['a_item'], legs[-1]['b_item']], 'legs': legs}
+
+
 def _through_passive(cables, items) -> dict:
     """``{(máquina, máquina): [tramo, …]}`` — caminos que pasan SÓLO por equipos pasivos.
 
@@ -600,24 +782,8 @@ def _through_passive(cables, items) -> dict:
     a través de algo que no se puede ni mirar.
     """
     host_de = {str(i.get('uid') or ''): str(i.get('host_uid') or '') for i in (items or ())}
-    pasa = {str(i.get('uid') or ''): (str(i.get('role') or '') in ROLES_MUDOS
-                                      and not i.get('foreign'))
-            for i in (items or ())}
-    # Qué cables tocan cada boca, y a qué boca llevan.
-    en_boca: dict = {}
-    for c in (cables or ()):
-        a = (str(c.get('a_item') or ''), str(c.get('a_port') or '').strip())
-        b = (str(c.get('b_item') or ''), str(c.get('b_port') or '').strip())
-        if not a[0] or not b[0]:
-            continue
-        uid = str(c.get('uid') or '')
-        en_boca.setdefault(a, []).append((uid, a, b))
-        en_boca.setdefault(b, []).append((uid, b, a))
-
-    def _tramo(uid, desde, hacia):
-        return {'cable': uid, 'a_item': desde[0], 'a_port': desde[1],
-                'b_item': hacia[0], 'b_port': hacia[1]}
-
+    pasa = _passable(items)
+    en_boca = _port_map(cables)
     out: dict = {}
     for origen, ha in host_de.items():
         if not ha:
@@ -625,7 +791,7 @@ def _through_passive(cables, items) -> dict:
         # En anchura desde todas las bocas de la máquina, con el camino RECORRIDO a cuestas: lo
         # que se marca al final son los tramos, porque es cada uno el que queda confirmado por
         # formar parte de un camino que alguien ve entero.
-        cola = [(hacia, [_tramo(uid, desde, hacia)], 0)
+        cola = [(hacia, [_leg(uid, desde, hacia)], 0)
                 for boca, salidas in en_boca.items() if boca[0] == origen
                 for uid, desde, hacia in salidas]
         visitado = set()
@@ -646,7 +812,7 @@ def _through_passive(cables, items) -> dict:
             usados = {t['cable'] for t in camino}
             for uid, desde, hacia in en_boca.get(boca, ()):
                 if uid not in usados:
-                    cola.append((hacia, camino + [_tramo(uid, desde, hacia)], saltos + 1))
+                    cola.append((hacia, camino + [_leg(uid, desde, hacia)], saltos + 1))
     return out
 
 
@@ -717,14 +883,7 @@ def cable_check(cables, items, edges=None) -> dict:
         # mitad de los paneles no está rotulada, y «Panel de parcheo» dice más que ocho letras
         # de un uid.
         trazas.append({'ends': list(par),
-                       'legs': [dict(t,
-                                     a_label=nombre_de.get(t['a_item'], ''),
-                                     a_role=rol_de.get(t['a_item'], ''),
-                                     a_at=sitio_de.get(t['a_item'], {}),
-                                     b_label=nombre_de.get(t['b_item'], ''),
-                                     b_role=rol_de.get(t['b_item'], ''),
-                                     b_at=sitio_de.get(t['b_item'], {}))
-                                for t in tramos]})
+                       'legs': with_cable(label_legs(tramos, items), cables)})
         for t in tramos:
             por_camino.setdefault(t['cable'], []).append(i)
     for c in (cables or ()):

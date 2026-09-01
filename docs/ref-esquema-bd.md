@@ -40,7 +40,7 @@ Hay **67 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Activos / secretos | `credentials`, `hosts` |
 | Auditoría / historial / estado | `audit`, `history`, `check_state`, `job_history` (qué hizo cada trabajo en segundo plano, después de hacerlo) |
 | Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
-| Inventario físico (DCIM) | `dc_org`, `dc_owner` (de quién es cada cosa), `dc_site`, `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_pdu` y `dc_feed` (de qué come cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
+| Inventario físico (DCIM) | `dc_org`, `dc_owner` (de quién es cada cosa), `dc_site`, `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
@@ -736,6 +736,7 @@ pertenencia, que no contiene nada. Ver [explica-dcim.md](explica-dcim.md).
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
+| asset | TEXT | no | `''` | su número de inventario. El mueble también se compra, y es el que sale por más dinero en el albarán |
 
 > La posición en el plano vive **aquí** y no en la disposición guardada del navegador: dónde
 > ESTÁ un rack es un hecho de la sala, y el siguiente que abra el plano necesita la misma
@@ -832,6 +833,7 @@ se documenta a mano, porque nadie más lo va a saber.
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
 | category | TEXT | no | `''` | de qué categoría, que no es lo mismo que de qué está hecho: `kind` dice cobre o fibra y esto dice Cat 6A o OM4. Decide si un enlace de 10 Gb va a funcionar, y dos latiguillos de categorías distintas son indistinguibles a un metro. Abierto: lo que no esté en `CABLE_CATEGORIES` se puede escribir igual |
+| asset | TEXT | no | `''` | el número de INVENTARIO, que no es la etiqueta: `label` es lo que está rotulado en el cable —se repite, se borra y se equivoca, y aun así es con lo que trabaja quien está allí con una linterna— y esto lo pone la casa, es único y es con lo que se cuenta. Meter los dos en una casilla obliga a elegir cuál se pierde |
 
 ### `dc_source` — lo que hay aguas arriba de una regleta
 
@@ -869,7 +871,7 @@ si lo echan?» antes de que lo echen**.
 
 ### `dc_pdu` — una regleta
 
-De qué come un armario. **Una PDU gestionada es además un host**: contesta por SNMP y dice
+De qué se alimenta un armario. **Una PDU gestionada es además un host**: contesta por SNMP y dice
 cuántos amperios está dando ahora, así que cuando lo es tenemos las dos mitades —lo declarado y
 lo medido— y el desacuerdo entre ellas es la razón de que esto exista.
 
@@ -892,7 +894,7 @@ lo medido— y el desacuerdo entre ellas es la razón de que esto exista.
 
 ### `dc_feed` — un cable de alimentación
 
-Este equipo come de esta regleta. **Una fila por cable y no una columna en el equipo**, porque un
+Este equipo se alimenta de esta regleta. **Una fila por cable y no una columna en el equipo**, porque un
 equipo con una sola fila es justo el hallazgo: tiene dos fuentes y solo una está enchufada, o las
 dos cuelgan de la misma rama.
 
@@ -907,6 +909,11 @@ dos cuelgan de la misma rama.
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
+| asset | TEXT | no | `''` | su número de inventario. **Un cable de corriente es un cable**: se compra, se guarda en una caja, se rompe y hay que sustituirlo. Esta fila decía de qué toma cuelga y cuántos vatios se declararon, como si el latiguillo no existiera |
+| category | TEXT | no | `''` | el par de conectores: `c13-c14` va de un equipo a una regleta y `c19-c20` alimenta lo que pide dieciséis amperios. Es lo que hay que mirar en la caja antes de bajar al armario. Abierto, como el de datos, con `FEED_CATEGORIES` de sugerencia |
+| length_mm | INTEGER | no | `0` | cuánto mide, en milímetros; la pantalla lo pregunta en metros, con coma o con punto |
+| description | TEXT | no | `''` | lo que haya que decir de ESE cable |
+| color | TEXT | no | `''` | de qué color es la funda, como su hermano de datos: es con lo que se encuentra en un mazo de treinta detrás de un armario. **No es el de su rama** —ése es de la regleta— y meterlos en el mismo campo hacía que la ficha enseñara uno por otro |
 
 ### `dc_feature` — lo que hay en la sala que no es un rack
 
@@ -945,7 +952,7 @@ columna.
 | type_uid | TEXT | no | `''` | el modelo del catálogo, si se ha casado |
 | label | TEXT | no | `''` | lo que está rotulado por delante, que es lo que se lee con una linterna |
 | serial | TEXT | no | `''` | |
-| asset | TEXT | no | `''` | el número que le puso el inventario contable |
+| asset | TEXT | no | `''` | el número que le puso el inventario contable. **Único entre todas las tablas que lo llevan** (`dc_item`, `dc_rack`, `dc_cable`, `dc_feed`): en el albarán hay una lista, no cuatro. Y escrito con comodín —`INV-?`, `INV-???`— lo resuelve el servidor al guardar, no la pantalla |
 | description | TEXT | no | `''` | |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
@@ -961,6 +968,7 @@ columna.
 | u_slot_span | INTEGER | no | `1` | cuántas partes seguidas toma. Dos cosas en un U se pisan o no comparando fracciones **con enteros** (`fits`), porque un tercio no existe en coma flotante y dos que casi encajan es exactamente el dibujo que no puede existir |
 | u_split | TEXT | no | `'width'` | por dónde se parte: `width` (uno al lado del otro — dos mini PC, ocho Raspberry) o `height` (uno encima del otro — dos patch panel de 0,5 U). A la rejilla le da igual, porque lo que comprueba es si el trozo está libre; al **dibujo** no, que existe para parecerse a lo que se ve al abrir el armario |
 | parent_uid | TEXT | no | `''` | montado **en** otro elemento (los mini PC sobre una bandeja); índice `idx_dc_item_parent`. El que lo lleva ocupa el U y el montado **no**, porque ese U ya está pagado — y hereda su rack, su U, su altura y su cara, para que el alzado y los recuentos sigan leyendo lo mismo sin saber que esto va montado. Un solo nivel: una bandeja sobre una bandeja no es una sala. Y **no se retira lo que lleva algo encima**, porque quitarlo dejaría tres máquinas colgando de un sitio que ya no está |
+| placement | TEXT | no | `'u'` | cómo está puesto: uno de `PLACEMENTS`. `u` se atornilla a los mástiles y ocupa `u_start`..`u_height`; `side` está en el armario sin ocupar U (la regleta del lateral, la bandeja colgada) y `near`, al lado (el SAI en el suelo, el cuadro en la pared). Lo que no ocupa U sigue estando EN el armario para todo lo demás —se alimenta, se cablea, tiene estado— y por eso no entra en la ocupación ni en el alzado |
 
 > **Un rack contiene items, y algunos items son hosts** — nunca al revés. Un panel de parcheo
 > ocupa 1U y no es un host; una tapa ciega no es nada; un chasis de blades ocupa 7U y contiene
@@ -1037,7 +1045,7 @@ nadie —no lo vende nadie— y sin esta tabla se teclea veinte veces.
 | airflow | TEXT | no | `''` | idem |
 | power_type | TEXT | no | `''` | idem |
 | ports | TEXT | no | `'{}'` | los puertos, `{familia: {tipo: n}}`, copiados y **editables aquí** |
-| port_list | TEXT | no | `'{}'` | y **cómo se llama cada una**: `{familia: [{name, type, gen, signals, volts, watts}, …]}`, en el orden que las tiene el equipo. `type` es la **forma** —`usb-c`—, `gen` cuál de las generaciones que ese conector declara es la de esta boca —`usb3.2g2`, que además fija su velocidad—, `signals` **qué lleva** —datos, DisplayPort, corriente— y `volts`/`watts` **cuánto come por ahí**, donde pase corriente: el voltaje como texto porque una etiqueta pone `100-240` y elegir una de las dos sería inventárselo, y los vatios como número porque son los que se suman para saber qué pide un armario. Los dos últimos son del puerto y no del modelo, porque un conector por combinación serían cientos. Copiado igual. La pantalla solo lo enseña mientras cuadre con el recuento — los nombres son los que trajo la biblioteca y el recuento se puede corregir a mano, y enseñar veintiocho nombres al lado de un «32» sería enseñar una lista que ya no es de este equipo |
+| port_list | TEXT | no | `'{}'` | y **cómo se llama cada una**: `{familia: [{name, type, gen, signals, volts, watts}, …]}`, en el orden que las tiene el equipo. `type` es la **forma** —`usb-c`—, `gen` cuál de las generaciones que ese conector declara es la de esta boca —`usb3.2g2`, que además fija su velocidad—, `signals` **qué lleva** —datos, DisplayPort, corriente— y `volts`/`watts` **cuánto consume por ahí**, donde pase corriente: el voltaje como texto porque una etiqueta pone `100-240` y elegir una de las dos sería inventárselo, y los vatios como número porque son los que se suman para saber qué pide un armario. Los dos últimos son del puerto y no del modelo, porque un conector por combinación serían cientos. Copiado igual. La pantalla solo lo enseña mientras cuadre con el recuento — los nombres son los que trajo la biblioteca y el recuento se puede corregir a mano, y enseñar veintiocho nombres al lado de un «32» sería enseñar una lista que ya no es de este equipo |
 | extra | TEXT | no | `'{}'` | lo que no cabe en columnas, empezando por las seis fechas de la vida del equipo |
 | front_image | TEXT | no | `''` | copiada **de verdad**, con nombre nuevo: apuntar al fichero del catálogo es una bomba de relojería —borrar cualquiera de los dos se lleva el fichero y el otro enseña un hueco sin que nada haya fallado— |
 | rear_image | TEXT | no | `''` | idem |
@@ -1199,7 +1207,7 @@ siguen apuntando.
 | updated_by | TEXT | no | `''` | y quién |
 | rev | INTEGER | no | `1` | por qué **versión** va. El historial (`dc_rev`) las tiene una a una; esto es el resumen que quiere una ficha —cuándo y cuántas— sin abrirlo. Columnas y no una consulta al historial porque la lista enseña doscientas filas, y contar versiones de doscientas fichas para pintar dos casillas sería pagar el resumen a precio del detalle |
 | kit_qty | INTEGER | no | `1` | cuántas piezas trae **una** de estas. Un kit de dos módulos se compra como uno y se monta como dos; una caja de cincuenta tornillos, igual. «Cuántos DIMM de 16 GB tengo» quiere la segunda cifra y «cuántos pedí» quiere la primera, y con una sola casilla hay que elegir cuál se contesta mal. Columna y no atributo del documento porque el panel **multiplica por ella**, y lo que se multiplica no puede depender de que nadie renombre una clave en un JSON |
-| power_type | TEXT | no | `''` | por dónde come: `internal` \| `external` \| `poe`. `is_powered` dice **si** come y no dice cómo, y la diferencia entre una fuente dentro y un alimentador externo decide si hace falta una toma en la regleta o un enchufe en la pared — y si al mover el equipo hay que acordarse de llevarse algo que no está atornillado. `none` no es un valor de aquí: eso lo dice `is_powered` en cero, y tenerlo en dos sitios serían dos respuestas a la misma pregunta |
+| power_type | TEXT | no | `''` | por dónde se alimenta: `internal` \| `external` \| `poe`. `is_powered` dice **si** consume y no dice cómo, y la diferencia entre una fuente dentro y un alimentador externo decide si hace falta una toma en la regleta o un enchufe en la pared — y si al mover el equipo hay que acordarse de llevarse algo que no está atornillado. `none` no es un valor de aquí: eso lo dice `is_powered` en cero, y tenerlo en dos sitios serían dos respuestas a la misma pregunta |
 
 > **Se importa, no se empaqueta.** El origen es
 > [devicetype-library](https://github.com/netbox-community/devicetype-library) (CC0-1.0), varios

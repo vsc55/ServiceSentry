@@ -3193,3 +3193,93 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
                 margin-left: .1rem; }
 .ss-path-mine .ss-path-line { height: 1.4rem; width: .28rem; }
 .ss-path-mine { font-weight: 600; }
+
+/* Un punto de estado, del tamaño de una letra: acompaña a un nombre sin competir con él.
+   Nunca va solo — el color dice lo mismo que la palabra de al lado, y sin ella no se lee en
+   blanco y negro ni con una deficiencia de color. */
+.ss-dot { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%;
+          flex: 0 0 auto; vertical-align: middle; }
+
+/* La cabecera de un grupo dentro de una tabla. Pegada arriba al desplazar: un montón de
+   cuarenta filas deja de decir de qué montón es en cuanto se pasa de la primera pantalla,
+   y entonces agrupar no sirve de nada. */
+.ss-lt-group > td { position: sticky; top: 0; z-index: 2;
+                    background: var(--bs-secondary-bg); font-weight: 600;
+                    border-top: 1px solid var(--bs-border-color); }
+.ss-lt-gn { font-family: var(--bs-font-monospace); font-size: .75em; font-weight: 400;
+            color: var(--bs-secondary-color); border: 1px solid var(--bs-border-color);
+            border-radius: .25rem; padding: 0 .3rem; margin-left: .4rem; }
+
+/* La fila de recuentos: contesta «de qué tengo y cuánto» y filtra la tabla de abajo.
+
+   **Cajas cortas y no franjas estiradas.** Con `1fr` cada recuento se comía un tercio de la
+   pantalla cuando había tres montones, y una caja de cuarenta centímetros para decir «6» no se
+   lee mejor: se lee peor, porque el número y su palabra quedan a un palmo de distancia. Con un
+   tope de ancho se quedan del tamaño de lo que dicen y el hueco sobrante se queda sobrante, que
+   es lo que tiene que pasar. */
+.ss-tiles { display: grid; gap: .4rem; padding: .5rem .55rem;
+            grid-template-columns: repeat(auto-fill, minmax(8rem, 13rem));
+            border-bottom: 1px solid var(--bs-border-color); }
+.ss-tile { display: grid; gap: .1rem; text-align: left; cursor: pointer;
+           border: 1px solid var(--bs-border-color); border-radius: .35rem;
+           background: var(--bs-body-bg); color: inherit; padding: .4rem .5rem; }
+.ss-tile:hover { background: var(--bs-tertiary-bg); }
+.ss-tile-on { border-color: var(--bs-primary); background: var(--bs-tertiary-bg); }
+.ss-tile-k { display: flex; align-items: center; gap: .3rem; font-size: .72rem;
+             color: var(--bs-secondary-color); }
+.ss-tile-v { font-family: var(--bs-font-monospace); font-size: 1.15rem; line-height: 1.1;
+             font-weight: 500; }
+
+/* El rótulo de una zona de un formulario: una palabra pequeña y una raya que llega hasta el
+   borde. Pequeña a propósito — nombra un grupo, no compite con los rótulos de las casillas que
+   hay debajo, que son los que se leen para rellenar. */
+.ss-zone-h { display: flex; align-items: center; gap: .5rem; margin-bottom: .4rem; }
+.ss-zone-h > span { font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+                    color: var(--bs-secondary-color); font-weight: 600; }
+.ss-zone-h > i { flex: 1; height: 1px; background: var(--bs-border-color); }
+
+/* Una ficha a dos columnas: a la izquierda lo que es, a la derecha por dónde pasa. En una sola
+   en cuanto la ventana no da para dos — una tirada de cuatro paradas con nombre de armario y U
+   no cabe en media pantalla de portátil, y partirla en dos líneas por parada la hace ilegible.
+   Las dos con `minmax(0, …)`: sin él, una parada con un nombre largo estira su columna y se
+   come la otra en vez de recortarse. */
+.ss-cable-two { display: grid; gap: 1.25rem; align-items: start;
+                grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 62rem) {
+    .ss-cable-two { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+}
+
+/* Meter un panel por esta punta. Pequeño y al final del renglón: es una acción de ESA parada y
+   tiene que leerse como parte de ella, no como un botón del cuadro. Sólo se ve al pasar por
+   encima de su parada — dos de éstos siempre visibles compiten con lo que hay que leer, que es
+   por dónde pasa el cable. Visible al recibir el foco, o con el teclado no habría forma. */
+.ss-path-add { padding: 0 .35rem; line-height: 1.2; opacity: 0; transition: opacity .12s; }
+.ss-path-stop:hover .ss-path-add,
+.ss-path-add:focus-visible { opacity: 1; }
+
+/* Las casillas de un formulario en rejilla, no en una fila que se envuelve. Con `auto-fit` y un
+   mínimo: caben las que quepan y las demás bajan enteras, en vez de partirse el grupo por donde
+   acabe el ancho de la ventana. `minmax(0, …)` para que un rótulo largo no estire su columna y
+   se coma la de al lado. */
+.ss-fgrid { display: grid; gap: .5rem .75rem;
+            grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr)); }
+.ss-fgrid > label { margin: 0; min-width: 0; }
+
+/* Muestras de color para elegir una. Cuadradas y pegadas, que es como se lee un muestrario; la
+   puesta con un anillo por fuera —y no por dentro— para que no cambie de tamaño al elegirla, que
+   es lo que hace bailar la fila entera. El borde tenue existe por el blanco: sin él, un cuadro
+   blanco sobre fondo claro no es un cuadro. */
+.ss-chips { display: flex; flex-wrap: wrap; gap: .2rem; margin-top: .15rem; }
+.ss-chip { width: 1.15rem; height: 1.15rem; padding: 0; border-radius: .2rem;
+           border: 1px solid var(--bs-border-color); cursor: pointer; }
+.ss-chip-on { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
+.ss-chip:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
+
+/* «Sin color»: una muestra vacía con una raya, que es como se dice «ninguno» en un muestrario.
+   Y la muestra plana del botón, que enseña lo elegido y no se pulsa por su cuenta. */
+.ss-chip-none { background: var(--bs-body-bg);
+                background-image: linear-gradient(to top right, transparent calc(50% - 1px),
+                                  var(--bs-danger) calc(50% - 1px), var(--bs-danger) calc(50% + 1px),
+                                  transparent calc(50% + 1px)); }
+.ss-chip-flat { display: inline-block; vertical-align: -.2rem; margin-right: .35rem;
+                pointer-events: none; }

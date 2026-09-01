@@ -4359,6 +4359,63 @@ LANG = {
     'dcim_not_found':              'No existe',
     'dcim_kind_unknown':       'Ese tipo de elemento no existe.',
     'dcim_part_kind_unknown':    'Esa clase de componente no existe.',
+    'dcim_placement_unknown':    'Esa forma de estar puesto no existe.',
+    'dcim_place_u':              'Atornillado a los mástiles',
+    'dcim_place_side':           'En el armario, sin ocupar U',
+    'dcim_place_near':           'Al lado del armario',
+    'dcim_place_col_u':          'En U',
+    'dcim_place_col_side':       'Sin U',
+    'dcim_place_col_near':       'Al lado',
+    'dcim_z_what':               'Qué es',
+    'dcim_z_where':              'Dónde va',
+    'dcim_z_split':              'Comparte el U con otra cosa',
+    'dcim_z_split_tt':
+        'Dos paneles de media U, dos mini PC uno al lado del otro, ocho Raspberry en una '
+        'bandeja: cuando en un mismo U cabe más de una cosa, hay que decir en cuántos trozos se '
+        'parte y cuál toma cada una.',
+    'dcim_z_buy':                'De dónde salió',
+    'dcim_z_more':               'Fondo, proveedor y descripción',
+    'dcim_item_label_tt':
+        'Lo que está rotulado por delante, que es lo que alguien lee con una linterna a las tres '
+        'de la mañana. Puede quedarse en blanco: entonces se le llama por su máquina o por su '
+        'modelo.',
+    'dcim_cat_model_tt':
+        'De qué modelo del catálogo es. De él salen la altura y la foto del alzado, y con él se '
+        'puede preguntar cuántos de éstos hay puestos sin depender de cómo lo escribió cada uno.',
+    'dcim_build_pick_tt':
+        'De qué plantilla nace: al crearlo se le estampan sus componentes. Sólo al crear — '
+        'ofrecerlo después diría que se puede cambiar de qué nació algo que ya nació.',
+    'dcim_u_start_tt':
+        'La U de abajo del equipo, la que está serigrafiada en el mástil. Si el armario numera '
+        'al revés, esta casilla habla en los números del armario.',
+    'dcim_item_parent_tt':
+        'Sobre qué cosa del armario va montado: los mini PC de una bandeja, por ejemplo. '
+        'Entonces no ocupa U propia —la paga la bandeja— y hereda dónde está.',
+    'dcim_item_slot_span_tt':
+        'Cuántos trozos seguidos ocupa. Un panel que toma la mitad izquierda de un U partido en '
+        'cuatro empieza en el 1 y toma 2.',
+    'dcim_item_split_tt':
+        'Si los trozos van uno al lado del otro o uno encima del otro. Dos paneles de media U se '
+        'apilan; dos mini PC se ponen en paralelo.',
+    'dcim_serial_tt':
+        'El del fabricante, el de la pegatina de detrás. Con el botón de al lado se le puede '
+        'preguntar al propio dispositivo, si su perfil SNMP lo publica.',
+    'dcim_item_purchased_tt':     'Cuándo se compró. Ningún catálogo lo sabe: es de ESTA caja.',
+    'dcim_item_warranty_tt':
+        'Hasta cuándo tiene cobertura. Es de donde sale «qué se queda sin garantía este '
+        'trimestre», que sin esta casilla no tiene dónde contestarse.',
+    'dcim_item_depth_tt':
+        'Cuánto mide de fondo, en milímetros. Sirve para saber si cabe: el catálogo dice si un '
+        'modelo es de profundidad completa y nunca cuántos milímetros son.',
+    'dcim_item_supplier_tt':      'A quién se le compró, para volver a pedirlo o reclamar.',
+    'dcim_description_tt':        'Lo que haya que decir de ESTA caja y no quepa en ningún campo.',
+    'dcim_item_place':           'Cómo está puesto',
+    'dcim_item_place_tt':
+        'Casi todo se atornilla a los mástiles y ocupa un número de U. Lo que no —un SAI en el '
+        'suelo al lado, un cuadro en la pared, una regleta atornillada al lateral— está en el '
+        'armario para todo lo demás: se alimenta, se cablea y hay que ir a mirarlo. Lo único '
+        'que no hace es quitarle el sitio a nada.',
+    'dcim_elev_beside':          'Sin ocupar U:',
     'dcim_role_unknown':         'Esa clase de dispositivo no existe.',
     'dcim_source_kind_unknown':    'Esa clase de fuente no existe.',
     'dcim_link_kind_unknown':      'Esa clase de enlace no existe.',
@@ -4412,6 +4469,7 @@ LANG = {
     'dcim_free':               '{} U libres',
     'dcim_free_tt':            'Por la cara frontal. El hueco libre se ve entero aunque los equipos del vecino no: no dice de quién es nada, y es lo que hace planificable un armario compartido.',
     'dcim_u':                  'U',
+    'dcim_elev_names':           'Escribir los nombres en las cajas',
     'dcim_face':               'Cara',
     'dcim_face_full':          'Completa',
     'dcim_face_front':         'Frontal',
@@ -4808,7 +4866,7 @@ LANG = {
     'dcim_attr_capacity':            'Capacidad',
     'dcim_attr_power_type': 'Alimentación',
     'dcim_attr_power_type_tt':
-        'Por dónde come. Una fuente dentro se cambia sin mover el equipo; un '
+        'Por dónde se alimenta. Una fuente dentro se cambia sin mover el equipo; un '
         'alimentador externo hay que llevárselo al mudarlo y no está atornillado a '
         'nada. Y PoE no gasta toma de regleta: la gasta el switch.',
     'dcim_val_internal': 'Fuente interna',
@@ -5402,15 +5460,28 @@ LANG = {
     'dcim_build_stamped':        '{} componentes copiados de la plantilla',
     'dcim_cat_is_component':     'componente',
     'dcim_cat_all_trees':        'Todo',
+    'dcim_cable_this':             'este',
+    'dcim_cable_check_rack':
+        'El contraste con lo que ven los dispositivos se hace en la pestaña «Cableado» de su armario: es una pregunta sobre un armario, y aquí hay cables de toda la instalación.',
+    'dcim_asset_minted':         'Guardado con el número {}',
+    'dcim_asset_tt':
+        'El número que le pone la casa: no es la etiqueta —eso es lo que está rotulado en la '
+        'caja— ni el de serie, que es del fabricante. Es único entre TODO lo inventariado: '
+        'equipos, armarios y cables comparten numeración. Escribe «INV-?» y se pone el '
+        'siguiente; «INV-???» hace lo mismo a tres cifras (INV-046). Vale cualquier principio: '
+        'RACK-?, CBL-??…',
+    'dcim_asset_taken':
+        'Ese número de inventario ya lo lleva otra cosa. Es único entre todo lo inventariado: '
+        'equipos, armarios y cables comparten la misma numeración.',
+    'dcim_asset_ask_many':
+        'Sólo puede haber un grupo de interrogantes: «INV-?» o «INV-???», no los dos en el '
+        'mismo número. Con dos grupos no se sabe cuál hay que numerar.',
     'dcim_item_asset':           'Nº de inventario',
     # El mismo dato con dos rótulos: uno para un campo de formulario, donde hay sitio para
     # decirlo entero, y otro para una cabecera de columna, donde «Nº de inventario» se
     # parte en tres líneas y hace que cada fila de la tabla mida lo que tres.
     'dcim_item_asset_col':       'Inventario',
     'dcim_item_warranty_col':    'Garantía',
-    'dcim_item_asset_tt':
-        'La etiqueta que le pusiste tú, no la del fabricante: el número de serie es suyo '
-        'y este es el de tu contabilidad. Los dos, porque los dos se buscan.',
     'dcim_pick_none':            'Sin decir',
     'dcim_cat_search_hint':
         'Escribe parte del fabricante o del modelo y pulsa buscar. El catálogo son '
@@ -5492,6 +5563,28 @@ LANG = {
     'dcim_cable_from':             'Desde',
     'dcim_cable_to':               'Hasta',
     'dcim_cable_check':            'Contraste',
+    'dcim_cable_what':             'Qué cable es',
+    'dcim_cable_where':            'Por qué bocas va',
+    'dcim_cable_label_tt':
+        'Lo que está rotulado en el propio cable, que es lo que se lee con una linterna a las '
+        'tres de la mañana. Se repite, se borra y se equivoca — para contar está el número de '
+        'inventario, que es otra casilla.',
+    'dcim_cable_len_tt':
+        'Cuánto mide, en metros. Con coma o con punto, y los latiguillos son cortos: 0,25 es un '
+        'valor normal. De aquí sale lo que mide una tirada entera de punta a punta, que es lo '
+        'que decide si un enlace de cobre se pasa de los cien metros.',
+    'dcim_cable_color_tt':
+        'De qué color es la funda. Sirve para encontrarlo en un mazo de treinta y para respetar '
+        'el código de la casa — amarillo lo que sale fuera, rojo lo que no se toca.',
+    'dcim_cable_port_tt':
+        'La boca de ese extremo, tal como la nombra el dispositivo: «Gi1/0/7», «eth0», o el '
+        'número de la posición si es un panel. Es con lo que se contrasta contra lo que los '
+        'dispositivos dicen ver.',
+    'dcim_cable_cat_other':        'Otra…',
+    'dcim_cable_color_none':       'Sin color',
+    'dcim_cable_color_other':      'Otro color',
+    'dcim_cable_color_used':       'Ya en uso',
+    'dcim_cable_color_usual':      'Corrientes',
     'dcim_cable_color':            'Color',
     'dcim_cable_seen':             'Coincide',
     'dcim_cable_unseen':           'No se ve',
@@ -5518,7 +5611,66 @@ LANG = {
         'siempre— y el enlace pasa a ser dos tramos. Para dos paneles, repite la operación '
         'sobre el tramo que queda.',
     'dcim_cable_split_mid':        'En medio',
+    'dcim_cable_split_here_tt':
+        'Meter un panel de parcheo por esta punta. Este cable se queda con este lado —con su '
+        'etiqueta, su número de inventario y sus metros— y el tramo que va del panel al otro '
+        'extremo nace nuevo.',
+    'dcim_cable_split_side':       'El cable de ahora se queda con',
+    'dcim_cable_split_side_tt':
+        'Cuál de los dos tramos ES el cable que ya tienes. Se queda con su etiqueta, su número '
+        'de inventario, sus metros y su categoría; el otro tramo nace en blanco. Elige el lado '
+        'del latiguillo que de verdad sigue existiendo: con la elección al revés quedan dos '
+        'cables bien declarados y uno de los dos miente.',
+    'dcim_cable_split_port_tt':
+        'La posición del panel por la que pasa. La misma por los dos lados: lo que entra por la '
+        '12 sale por la 12, que es la misma posición vista por detrás.',
     'dcim_cable_split_find':       'Buscar el panel por su etiqueta…',
+    'dcim_feed':                   'Cable de corriente',
+    'dcim_feed_eats':              'Cuánto consume',
+    'dcim_feed_watts_tt':
+        'Lo que ALGUIEN DIJO que consume por este cable. La placa de un servidor dice el máximo '
+        'que puede pedir, que no es lo que pide: se guarda lo escrito y se compara con lo que '
+        'mida la regleta, sin corregir ninguno de los dos.',
+    'dcim_feed_watts':             'Vatios declarados',
+    'dcim_dev_v_plain':            'Tabla',
+    'dcim_dev_v_grouped':          'Tabla agrupada',
+    'dcim_dev_v_tiles':            'Recuentos',
+    'dcim_wire_by_kind':           'Tipo',
+    'dcim_wire_by_category':       'Categoría',
+    'dcim_wire_by_rack':           'Armario',
+    'dcim_dev_by_state':           'Estado',
+    'dcim_dev_by_role':            'Función',
+    'dcim_dev_by_site':            'Sede',
+    'dcim_dev_by_org':             'Empresa',
+    'dcim_dev_v_state':            'Estado',
+    'dcim_dev_st_ok':              'Bien',
+    'dcim_dev_st_warning':         'En aviso',
+    'dcim_dev_st_error':           'Mal',
+    'dcim_dev_st_unwatched':       'Sin vigilar',
+    'dcim_dev_st_quiet':           'No hay nada que vigilar',
+    'dcim_dev_no_role':            'Sin función',
+    'dcim_dev_no_site':            'Sin sede',
+    'dcim_dev_no_rack':            'Sin armario',
+    'dcim_dev_find':               'Buscar por nombre, serie, inventario, modelo o armario…',
+    'dcim_dev_none':               'Ningún equipo responde a esa búsqueda.',
+    'dcim_dev_capped':
+        'La lista está recortada. Afina la búsqueda: con doscientas filas delante, lo que se '
+        'hace no es leerlas.',
+    'dcim_dev_w_expired':          'Garantía caducada',
+    'dcim_dev_w_soon':             'Caduca en 90 días',
+    'dcim_dev_w_none':             'Sin garantía apuntada',
+    'dcim_wire_no_cat':            'Sin categoría',
+    'dcim_wire_no_rack':           'Sin armario',
+    'dcim_wire_lane_partial':      '{} sin medir, así que hay más',
+    'dcim_wire_find':              'Buscar por etiqueta, inventario, boca o equipo…',
+    'dcim_wire_any_kind':          'De cualquier tipo',
+    'dcim_wire_any_cat':           'De cualquier categoría',
+    'dcim_wire_n':                 '{} cables',
+    'dcim_wire_none':              'Ningún cable declarado responde a esa búsqueda.',
+    'dcim_wire_capped_short':      'Lista recortada',
+    'dcim_wire_capped':
+        'La lista está recortada. Afina la búsqueda: con doscientas filas delante, lo que se '
+        'hace no es leerlas.',
     'dcim_cable_cat':              'Categoría',
     'dcim_cable_len':              'Metros',
     'dcim_cable_len_bad':          'Los metros no son un número. Se escribe 0,25 o 0.25.',
@@ -5537,20 +5689,29 @@ LANG = {
     'dcim_val_os2':                'OS2 (monomodo)',
     'dcim_val_dac_passive':        'Pasivo',
     'dcim_val_dac_active':         'Activo',
-    'dcim_cable_kind':             'De qué es',
+    'dcim_cable_kind':             'Tipo de cable',
+    # Y su versión corta para una cabecera de columna, como el número de inventario:
+    # «Tipo de cable» en una columna de una tabla se parte en dos líneas y hace que cada
+    # fila mida lo que dos.
+    'dcim_cable_kind_col':         'Tipo',
+    'dcim_cable_kind_tt':
+        'Qué clase de cable es. **No es de qué está hecho**: un cable de corriente '
+        'también es de cobre, y una consola también. Es lo que hay que pedir para '
+        'sustituirlo — un latiguillo de cobre, una fibra, un DAC, un cable de corriente '
+        'o uno de consola— y de ahí salen las categorías que se ofrecen debajo.',
     'dcim_cable_ports_seen':       'Bocas que dicen los dispositivos',
     'dcim_cable_path_total':       'Mide {} de punta a punta.',
     'dcim_cable_path_at_least':    'Mide al menos {}: quedan {} tramos sin medir.',
     'dcim_cable_path_unmeasured':  'Ningún tramo tiene la medida puesta ({} en total).',
-    'dcim_cable_path':             'Por dónde pasa',
+    'dcim_cable_path':             'Tirada completa',
     'dcim_cable_bundle':           'Enlaces detrás de esta fila',
     'dcim_cable_bundle_tt':
         'Los dispositivos ven varios enlaces entre estos dos, así que esta fila representa más '
         'de un latiguillo. Declararlos por separado es lo que permite saber cuál se ha caído.',
     'dcim_port_unsaid':            'sin decir',
-    'dcim_cable_copper':           'cobre',
-    'dcim_cable_fiber':            'fibra',
-    'dcim_cable_dac':              'DAC',
+    'dcim_cable_copper':           'red (cobre)',
+    'dcim_cable_fiber':            'red (fibra)',
+    'dcim_cable_dac':              'red (DAC)',
     'dcim_cable_power':            'corriente',
     'dcim_cable_console':          'consola',
     'dcim_cable_other':            'otro',
@@ -5593,7 +5754,7 @@ LANG = {
     'dcim_outlet_unknown':       'No sé en cuál',
     'dcim_outlet_note':
         'Elige la toma. «No sé en cuál» es una respuesta: deja constancia de que ese equipo '
-        'come de esa regleta sin inventarse un número que nadie ha mirado.',
+        'se alimenta de esa regleta sin inventarse un número que nadie ha mirado.',
     'dcim_outlets_n_free':       '{} de {} libres',
     'dcim_outlet_taken':         'Esa toma ya tiene un cable.',
     'dcim_outlet_out_of_range':  'Esa regleta no tiene esa toma.',

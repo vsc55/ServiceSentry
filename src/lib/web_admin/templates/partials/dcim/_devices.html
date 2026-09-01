@@ -1,0 +1,391 @@
+{# ================================================================
+   Los equipos, FUERA de su armario.
+
+   La lista de equipos vive dentro de su rack, así que «qué servidores hay en esta sede» y «qué
+   se queda sin garantía este trimestre» obligaban a abrir armario por armario. El dato ya
+   estaba: era la pantalla la que faltaba.
+
+   Es la misma forma que el cableado —búsqueda en la base, tabla compartida, carriles— y a
+   propósito: dos listas de la misma sección que se comportan distinto son dos cosas que
+   aprender por la cara.
+   ================================================================ #}
+
+//: Lo que hay en la pantalla: las filas y con qué se puede filtrar. Como en el cableado, el
+//: orden, las columnas y la paginación los lleva la tabla compartida.
+let _dcDev = null;
+
+async function _dcDevOpen() {
+    _dcimMark('devices');
+    _dcDev = _dcDev || {rows: null};
+    _dcDev.rows = null;
+    renderDcim();
+}
+
+/** Volver a pedir la lista, **sin redibujar la sección**.
+ *
+ *  `renderDcim` reescribe el panel entero: tira el contenedor de la tabla, la barra de filtros y
+ *  todo lo demás, y lo vuelve a construir. Eso hace falta al ENTRAR en la vista —el hueco tiene
+ *  que existir antes de que la tabla pueda escribir en él— y es exactamente lo que no hace falta
+ *  al pulsar «Actualizar»: la pantalla ya está montada y lo único que ha cambiado son las filas.
+ *
+ *  El parpadeo era eso. Y no era sólo feo: al reconstruir la barra de filtros se pierde el foco
+ *  y la posición del cursor, así que actualizar mientras se tiene algo escrito era perder dónde
+ *  se estaba escribiendo.
+ *
+ *  La tabla compartida ya sabe repintarse sola en su contenedor, y deja la barra en su sitio a
+ *  propósito — por esta misma razón. */
+function _dcDevReload() {
+    if (!_dcDev) return _dcDevOpen();
+    _dcDev.rows = null;
+    renderDcDev();
+}
+
+async function _dcDevLoad() {
+    const d = await apiGet('/api/v1/dcim/items?limit=200') || {};
+    _dcDev = {rows: d.items || [], capped: !!d.capped,
+              roles: d.roles || [], sites: d.sites || []};
+    return _dcDev;
+}
+
+//: Las cuatro maquetas propuestas, montadas para poder elegir viéndolas con los datos de
+//: verdad. **El criterio de agrupación es aparte**: por qué se agrupa y cómo se dibuja son dos
+//: preguntas, y mezclarlas daría dieciséis vistas para contestar cuatro cosas.
+const DCDEV_VIEWS = [
+    {id: 'table', label_key: 'dcim_dev_v_plain', icon: 'bi-list-ul', render: null,
+     mode: 'table'},
+    {id: 'grouped', label_key: 'dcim_dev_v_grouped', icon: 'bi-table', render: null,
+     mode: 'table'},
+    {id: 'tiles', label_key: 'dcim_dev_v_tiles', icon: 'bi-bar-chart-steps', render: null,
+     mode: 'table'},
+];
+
+//: Por qué se agrupa. `''` es «sin agrupar», que sólo tiene sentido en la tabla pelada.
+const DCDEV_GROUPS = ['state', 'role', 'site', 'org'];
+let _dcdBy = 'role';
+function setDcDevBy(k) {
+    _dcdBy = String(k || 'role');
+    if (typeof _persistTableConfig === 'function') _persistTableConfig();
+    renderDcDev();
+}
+
+/** En qué grupo cae un equipo, según el criterio elegido. Uno solo para las cuatro maquetas:
+ *  cuatro copias serían cuatro que se separan, y lo que se separaría es en qué montón está
+ *  cada cosa — que es lo único que las cuatro tienen en común. */
+function _dcDevGroupOf(i) {
+    if (_dcdBy === 'state') return _dcDevState(i);
+    if (_dcdBy === 'site') return String((i || {}).site || '');
+    if (_dcdBy === 'org') return String((i || {}).org_uid || '');
+    return String((i || {}).role || '');
+}
+
+function _dcDevGroupName(k) {
+    if (_dcdBy === 'state') return _dcDevStateName(k);
+    if (_dcdBy === 'site') return k || t('dcim_dev_no_site');
+    if (_dcdBy === 'org') return k ? _dcimOrgName(k) : t('dcim_unclaimed');
+    return k ? t('dcim_role_' + k) : t('dcim_dev_no_role');
+}
+
+/** El orden de los montones. Por gravedad cuando se agrupa por estado —de peor a mejor, que es
+ *  el mismo orden con el que un armario decide cuál de dos máquinas está en más apuros— y por
+ *  nombre en todo lo demás. */
+function _dcDevGroupRank(k) {
+    if (_dcdBy === 'state') return _DCD_STATE_ORDER.indexOf(k);
+    return _dcDevGroupName(k);
+}
+
+/** El selector de «agrupar por», al lado del de maqueta. */
+function _dcDevBySwitcher() {
+    return `<span class="btn-group btn-group-sm ms-2">${DCDEV_GROUPS.map(k =>
+        `<button class="btn btn-sm ${_dcdBy === k ? 'btn-primary' : 'btn-secondary'}"
+                 onclick="setDcDevBy(${jsStr(k)})">${esc(t('dcim_dev_by_' + k))}</button>`
+        ).join('')}</span>`;
+}
+
+const _dcdView = createViewState('ss_dcdev_view', DCDEV_VIEWS, () => {
+    if (typeof _persistTableConfig === 'function') _persistTableConfig();
+    renderDcDev();
+});
+function setDcDevView(id) { _dcdView.set(id); }
+
+//: En qué orden se leen los montones de estado: **lo peor primero**. Es el mismo orden con el
+//: que un armario decide cuál de dos máquinas está en más apuros, y por el que se ordena la
+//: flota — tres sitios diciendo lo mismo tienen que decirlo igual.
+//:
+//: `mudo` va al final y aparte: un panel de parcheo no contesta porque no hay nada que
+//: preguntarle, y meterlo entre los desatendidos llena la pantalla de deberes imposibles. Es la
+//: misma decisión que ya toma el recuento de un armario con sus pasivos.
+const _DCD_STATE_ORDER = ['error', 'warning', 'ok', '', 'mudo'];
+
+//: Los que no llevan nada que vigilar. Copiada aquí y no pedida al servidor porque esta pantalla
+//: no pide un armario: es la misma lista que `ROLES_MUDOS`, y una guarda comprueba que no se
+//: separen.
+const _DC_QUIET_ROLES = ['patch_panel', 'fiber_panel', 'shelf', 'blank'];
+
+/** En qué carril de ESTADO va un equipo. `''` es **sin vigilar**, que no es «bien»: un equipo
+ *  sin máquina enganchada no está correcto, está sin mirar — y esa distinción es la mitad de
+ *  para lo que sirve esta pantalla. */
+function _dcDevState(i) {
+    const st = String((i || {}).state || '');
+    if (st) return st;
+    // Lo que no contesta POR NATURALEZA no está desatendido: no es que nadie lo mire, es que no
+    // hay nada que mirar.
+    return _DC_QUIET_ROLES.indexOf(String((i || {}).role || '')) >= 0 ? 'mudo' : '';
+}
+
+function _dcDevStateName(k) {
+    if (k === 'mudo') return t('dcim_dev_st_quiet');
+    if (!k) return t('dcim_dev_st_unwatched');
+    return t('dcim_dev_st_' + k);
+}
+
+/** Ir al equipo: **a su armario, con él marcado**. Una ficha aquí sería una tercera forma de
+ *  mirar lo mismo; lo que se quiere al pulsar es verlo en su sitio, que es donde está todo lo
+ *  demás que hace falta para trabajar con él. */
+function _dcDevGo(uid) {
+    const fila = ((_dcDev || {}).rows || []).find(x => String(x.uid) === String(uid));
+    if (!fila || !fila.rack_uid) return;
+    _dcDev = null;
+    _dcimMark('inventory');
+    _dcimLoadRack(fila.rack_uid);
+}
+
+/** El orden de los montones, que es el mismo en la tabla agrupada y en los recuentos: uno
+ *  solo, o cambiar de maqueta cambiaría de qué va primero sin que nadie lo haya pedido. */
+function _dcDevGroupOrder(a, b) {
+    const ra = _dcDevGroupRank(a[0]);
+    const rb = _dcDevGroupRank(b[0]);
+    if (typeof ra === 'number' && typeof rb === 'number') return ra - rb;
+    return String(ra).localeCompare(String(rb));
+}
+
+const _DCD_COLS = [
+    {id: 'name', label: () => t('dcim_item'), sortKey: 'name', always: true},
+    {id: 'state', label: () => t('dcim_dev_v_state'), sortKey: 'state'},
+    {id: 'role', label: () => t('dcim_role'), sortKey: 'role'},
+    {id: 'model', label: () => t('dcim_cat_model'), sortKey: 'model'},
+    {id: 'serial', label: () => t('dcim_serial'), sortKey: 'serial'},
+    {id: 'asset', label: () => t('dcim_item_asset_col'), sortKey: 'asset'},
+    {id: 'warranty', label: () => t('dcim_item_warranty'), sortKey: 'warranty'},
+    {id: 'where', label: () => t('dcim_rack'), sortKey: 'where'},
+    {id: 'site', label: () => t('dcim_site'), sortKey: 'site'},
+    {id: 'org', label: () => t('dcim_org'), sortKey: 'org'},
+];
+const _DCD_DEFAULT_COLS = new Set(['role', 'model', 'serial', 'warranty', 'where', 'site']);
+
+let _dcdVisibleCols = null;
+let _dcdColOrder = null;
+let _dcdPage = 1;
+let _dcdPageSize = null;
+let _dcdSort = 'name';
+let _dcdSortDir = 'asc';
+let _dcdCurrentPage = [];
+
+function _dcdSortValue(i, key) {
+    // Por gravedad y no por la palabra: ordenar «error, ok, sin vigilar, warning» alfabéticamente
+    // pone lo que está mal en medio de lo que está bien.
+    if (key === 'state') return _DCD_STATE_ORDER.indexOf(_dcDevState(i));
+    if (key === 'name') return _dcimItemName(i);
+    if (key === 'model') return String(i.type_name || '');
+    if (key === 'where') return `${i.rack || ''} ${String(i.u_start || 0).padStart(3, '0')}`;
+    if (key === 'warranty') return String(i.warranty_until || '');
+    if (key === 'org') return _dcimOrgName(i.org_uid || '');
+    return String(i[key] || '');
+}
+
+/** Una celda, con su `<td>`. Fuera de la declaración porque son nueve. */
+function _dcdCell(i, id) {
+    if (id === 'name') return `<td><span class="ss-dot me-1" style="background:${
+            escAttr(hostStateColor(i.state || ''))}"></span><span
+        class="fw-semibold">${esc(_dcimItemName(i))}</span></td>`;
+    if (id === 'state') return `<td class="ss-fs-2">${
+        esc(_dcDevStateName(_dcDevState(i)))}</td>`;
+    if (id === 'role') return `<td class="ss-fs-2">${
+        esc(i.role ? t('dcim_role_' + i.role) : '—')}</td>`;
+    if (id === 'model') return `<td class="ss-fs-2">${esc(i.type_name || '—')}</td>`;
+    if (id === 'serial') return `<td class="ss-fs-2 ss-tabular">${esc(i.serial || '—')}</td>`;
+    if (id === 'asset') return `<td class="ss-fs-2 ss-tabular">${esc(i.asset || '—')}</td>`;
+    // La garantía CADUCADA en rojo, que es la única razón de mirar esta columna: una fecha
+    // escrita en gris entre otras diez es una fecha que nadie ve.
+    if (id === 'warranty') return `<td class="ss-fs-2 ss-tabular">${
+        _dcimWarranty(i.warranty_until)}</td>`;
+    if (id === 'where') return `<td class="ss-fs-2">${esc(i.rack || '—')}${
+        i.u_start ? ` <span class="text-muted ss-tabular">U${esc(String(i.u_start))}</span>`
+                  : ''}</td>`;
+    if (id === 'site') return `<td class="ss-fs-2">${esc(i.site || '—')}</td>`;
+    if (id === 'org') return `<td class="ss-fs-2">${
+        esc(i.org_uid ? _dcimOrgName(i.org_uid) : t('dcim_unclaimed'))}</td>`;
+    return '<td></td>';
+}
+
+createListTable({
+    key: 'dcdev', containerId: 'dcdev-container', tableId: 'dcdev-table',
+    accent: 'blue', icon: 'bi-hdd-stack', title: () => t('dcim_items'),
+    columns: _DCD_COLS, defaultVisible: _DCD_DEFAULT_COLS,
+    persist: true, clearLabelKey: 'dcim_items',
+    // Las tres son la MISMA tabla: lo que cambia es si se agrupa y si lleva recuentos
+    // encima. No hay un segundo cuerpo que dibujar, y por eso no hay `cardsBody`.
+    persistExtra: () => ({view: _dcdView.id(), by: _dcdBy}),
+    applyExtra: cfg => {
+        _dcdView.apply(cfg && cfg.view);
+        if (cfg && cfg.by) _dcdBy = String(cfg.by);
+    },
+    // **C — La tabla, con cabeceras de grupo.** Ningún dibujo nuevo: la misma tabla ordenada
+    // por el montón, con un renglón de cabecera pegado arriba. Agrupar deja de ser otra
+    // pantalla y pasa a ser otra forma de ordenar — y las columnas, el orden, las columnas
+    // escondibles y la paginación siguen siendo las de siempre.
+    //
+    // `null` cuando la maqueta no agrupa: es lo que la tabla compartida entiende por «esta no
+    // agrupa», y con `''` se agruparía en un montón sin nombre que no existe.
+    groupOf: (i) => (_dcdView.is('grouped') ? _dcDevGroupOf(i || {}) : null),
+    groupRank: (k) => _dcDevGroupRank(k),
+    groupLabel: (k) => esc(_dcDevGroupName(k)),
+    // **D — Recuentos y tabla.** Dos preguntas, dos sitios: arriba «de qué tengo y cuánto»,
+    // debajo la tabla de siempre. Pulsar un recuento la filtra, así que se pasa de mirar a
+    // trabajar sin cambiar de pantalla.
+    beforeBody: (ctx, filas) => (_dcdView.is('tiles') ? _dcDevTilesHtml(filas) : ''),
+    prepare: async () => {
+        if (!_dcDev || _dcDev.rows === null) await _dcDevLoad();
+        return {d: _dcDev || {}};
+    },
+    rows: (ctx) => (ctx.d.rows || []),
+    rowKey: (i) => String(i.uid || ''),
+    filters: {
+        fields: (ctx) => [
+            {key: 'q', label: () => t('dcim_item'), type: 'search', grow: true,
+             placeholder: () => t('dcim_dev_find')},
+            {key: 'role', label: () => t('dcim_role'), type: 'select', minWidth: '150px',
+             options: () => [{value: '', label: t('all')}].concat(
+                 (ctx.d.roles || []).filter(Boolean)
+                     .map(r => ({value: r, label: t('dcim_role_' + r)})))},
+            {key: 'site', label: () => t('dcim_site'), type: 'select', minWidth: '150px',
+             options: () => [{value: '', label: t('all')}].concat(
+                 (ctx.d.sites || []).map(x => ({value: x.name, label: x.name})))},
+            // «Qué se queda sin cobertura este trimestre» es la pregunta que ya tenía dónde
+            // contestarse y no se contestaba: el dato estaba guardado y no había forma de
+            // preguntarle a la lista entera.
+            // Y por estado, que en la tabla no se puede mirar de otra manera: los carriles
+            // lo enseñan, pero quien está en la tabla quiere quedarse con los que fallan sin
+            // cambiar de vista.
+            {key: 'state', label: () => t('dcim_dev_v_state'), type: 'select',
+             minWidth: '150px',
+             options: () => [{value: '', label: t('all')}].concat(
+                 _DCD_STATE_ORDER.map(k => ({value: k || 'none',
+                                             label: _dcDevStateName(k)})))},
+            {key: 'warranty', label: () => t('dcim_item_warranty'), type: 'select',
+             minWidth: '150px',
+             options: () => [{value: '', label: t('all')},
+                             {value: 'expired', label: t('dcim_dev_w_expired')},
+                             {value: 'soon', label: t('dcim_dev_w_soon')},
+                             {value: 'none', label: t('dcim_dev_w_none')}]},
+        ],
+        // El recuento pulsado esconde filas aunque la barra esté vacía, y sin esto la tabla
+        // compartida se salta `match` por no haber nada escrito: se pulsaría un recuento y no
+        // pasaría nada, en silencio.
+        always: () => _dcdView.is('tiles') && _dcdPick !== null,
+        match: (i, f) => {
+            const q = (f.q || '').toLowerCase();
+            if (f.role && String(i.role || '') !== f.role) return false;
+            if (f.site && String(i.site || '') !== f.site) return false;
+            // Lo que se pulsa arriba en D filtra abajo. Va en `match` y no en un filtro
+            // aparte porque es un filtro: dos caminos que esconden filas son dos sitios donde
+            // buscar por qué falta una.
+            if (_dcdView.is('tiles') && _dcdPick !== null
+                && _dcDevGroupOf(i) !== _dcdPick) return false;
+            if (f.state && _dcDevState(i) !== (f.state === 'none' ? '' : f.state))
+                return false;
+            if (f.warranty && !_dcDevWarrantyIs(i, f.warranty)) return false;
+            if (!q) return true;
+            return [_dcimItemName(i), i.serial, i.asset, i.type_name, i.rack, i.site]
+                .some(x => String(x || '').toLowerCase().includes(q));
+        },
+    },
+    sortValue: (i, key) => _dcdSortValue(i, key),
+    rowAttrs: (i) => ` class="ss-rowlink" onclick="_dcDevGo(${jsStr(i.uid)})"`,
+    cell: (i, id) => _dcdCell(i, id),
+    headerLead: (ctx) => _dcdView.switcher('setDcDevView')
+        + (_dcdView.is('table') ? '' : _dcDevBySwitcher())
+        + _dcDevCappedHtml(ctx),
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="_dcDevReload()"
+            title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${
+            esc(t('refresh'))}</button>`,
+    emptyState: () => `<div class="text-center py-5 text-muted">
+            <i class="bi bi-hdd-stack ss-empty-icon"></i>
+            <span>${esc(t('dcim_dev_none'))}</span></div>`,
+    state: {
+        visible: {get: () => _dcdVisibleCols, set: v => { _dcdVisibleCols = v; }},
+        order: {get: () => _dcdColOrder, set: v => { _dcdColOrder = v; }},
+        page: {get: () => _dcdPage, set: v => { _dcdPage = v; }},
+        pageSize: {get: () => _dcdPageSize, set: v => { _dcdPageSize = v; }},
+        sort: {get: () => _dcdSort, set: v => { _dcdSort = v; }},
+        sortDir: {get: () => _dcdSortDir, set: v => { _dcdSortDir = v; }},
+        currentPage: {get: () => _dcdCurrentPage, set: v => { _dcdCurrentPage = v; }},
+    },
+    globalPrefix: {
+        render: 'renderDcDev', goPage: '_goDcDevPage', changePageSize: '_changeDcDevPageSize',
+        sort: '_sortDcDev', toggleCol: '_dcdToggleCol', resetCols: '_resetDcdCols',
+        saveOrder: '_dcdSaveColOrder', initFeatures: '_initDcdTableFeatures',
+    },
+});
+
+/** Si la garantía de un equipo cae en el grupo pedido.
+ *
+ *  «Sin fecha» es un grupo y no un hueco: un equipo sin garantía apuntada es exactamente lo que
+ *  hay que mirar antes de contestar «qué se queda sin cobertura», y esconderlo deja la respuesta
+ *  corta y creíble. */
+function _dcDevWarrantyIs(i, cual) {
+    const s = String(i.warranty_until || '');
+    if (cual === 'none') return !s;
+    if (!s) return false;
+    const hoy = new Date().toISOString().slice(0, 10);
+    if (cual === 'expired') return s <= hoy;
+    // «Pronto» son noventa días, que es el trimestre de la pregunta que se hace con esto.
+    const limite = new Date(Date.now() + 90 * 864e5).toISOString().slice(0, 10);
+    return s > hoy && s <= limite;
+}
+
+/** Los recuentos de D, sobre TODAS las filas filtradas y no sobre la página: un recuento que
+ *  cambia al pasar de página es peor que no contar.
+ *
+ *  Con su palabra y no sólo su color, también cuando se agrupa por estado: un recuento en rojo
+ *  sin la palabra «Mal» al lado se lee mal en una pantalla en blanco y negro, y no se lee de
+ *  ninguna manera con una deficiencia de color. */
+function _dcDevTilesHtml(filas) {
+    const cuenta = new Map();
+    (filas || []).forEach(i => {
+        const k = _dcDevGroupOf(i);
+        cuenta.set(k, (cuenta.get(k) || 0) + 1);
+    });
+    const orden = [...cuenta.entries()].sort(_dcDevGroupOrder);
+    if (!orden.length) return '';
+    return `<div class="ss-tiles">${orden.map(([k, n]) => `<button
+        class="ss-tile${_dcdPick === k ? ' ss-tile-on' : ''}"
+        onclick="_dcDevPick(${jsStr(k)})">
+        <span class="ss-tile-k">${_dcdBy === 'state'
+            ? `<span class="ss-dot" style="background:${
+                escAttr(hostStateColor(k === 'mudo' ? '' : k))};${
+                k === 'mudo' ? 'opacity:.4' : ''}"></span>` : ''}${
+            esc(_dcDevGroupName(k))}</span>
+        <span class="ss-tile-v">${esc(String(n))}</span>
+    </button>`).join('')}</div>`;
+}
+
+//: Qué recuento está pulsado en D. Aquí y no en la barra de filtros porque es de la maqueta:
+//: cambiar de maqueta lo suelta, y dejarlo puesto escondería filas en una pantalla que ya no
+//: tiene dónde decir que están escondidas.
+let _dcdPick = null;
+
+function _dcDevPick(k) {
+    _dcdPick = (_dcdPick === k) ? null : k;
+    renderDcDev();
+}
+
+function _dcDevCappedHtml(ctx) {
+    return ((ctx || {}).d || {}).capped
+        ? `<span class="badge text-bg-warning fw-normal ms-2"
+                 title="${escAttr(t('dcim_dev_capped'))}">${
+            esc(t('dcim_wire_capped_short'))}</span>` : '';
+}
+
+function _dcDevHtml() {
+    return `<div id="dcdev-container" class="ss-vfill"></div>`;
+}

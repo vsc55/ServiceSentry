@@ -2429,7 +2429,17 @@ function _dcLabel(clave, kAyudaOtra) {
     // que ocupa dentro de ella. Un solo texto para los dos sería el de uno, mal, en el otro.
     const kAyuda = kAyudaOtra || (clave + '_tt');
     const ayuda = t(kAyuda);
-    if (!ayuda || ayuda === kAyuda) return esc(texto);
+    return _dcHelp(texto, (!ayuda || ayuda === kAyuda) ? '' : ayuda);
+}
+
+/** Un rótulo YA TRADUCIDO con su ayuda al lado.
+ *
+ *  Aparte de `_dcLabel` porque no todo rótulo viene de una clave: los cuadros de los modales de
+ *  cableado y alimentación reciben el texto hecho. Sin esto, ponerles ayuda era copiar aquí el
+ *  `<span title>` y el icono — y la copia es la que se queda sin el cambio del día que el icono
+ *  deje de ser un interrogante. */
+function _dcHelp(texto, ayuda) {
+    if (!ayuda) return esc(texto);
     return `<span title="${escAttr(ayuda)}">${esc(texto)}
         <i class="bi bi-info-circle text-muted ss-fs-1"></i></span>`;
 }

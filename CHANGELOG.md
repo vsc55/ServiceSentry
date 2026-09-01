@@ -8,6 +8,372 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.123] - 2026-09-01
+
+### Added
+
+- **Being in a rack without taking a U** — the question behind five separate cases: a UPS on
+  the floor beside it, a board on the wall, a fibre tray hanging, a strip bolted to the side
+  rails. `dc_item.placement` takes three values — `u` (the old behaviour and the default), `side`
+  and `near` — and one check decides: what is not `u` stays out of the occupancy map and out of
+  the elevation. It is still *in* the rack for everything else: it draws power, it is cabled, it
+  has state and you have to walk to it. The only thing it does not do is take space — a UPS on
+  the floor does not stop fitting because the rack is full, and asking whether it fits would be
+  asking about a place it does not occupy.
+
+  **The device record is laid out in zones** — What it is, Where it goes, Shares its U, Where it
+  came from, and anything else worth saying. The boxes sat in one wrapping row, so the groups were
+  made by the width of the window: "Machine" ended up next to "Depth" because that is where it
+  fitted, and half a hand narrower they were two others. A group whose members change when you
+  stretch the dialog is not a group. What is rare is folded away — splitting a U happens in one
+  installation in twenty, and depth, supplier and description get filled in a month later if at
+  all — taking it from seventeen boxes to thirteen; but anything already filled in unfolds by
+  itself, because hiding a written value is worse than showing an empty box. A zone with no boxes
+  is not drawn at all, heading included. And every field has help now: one of seventeen had it,
+  and the ones that needed it most were the least guessable.
+
+  **A field that means nothing is not asked.** The record still wanted the U of a UPS standing
+  on the floor, and the answer was 1 because the box came with a 1 in it: a question asked out of
+  context does not come back empty, it comes back with its default — a lie in the shape of a
+  fact. Every field declares `when` and one function decides. Nor is anything asked that has
+  already been said elsewhere: picking a template or a catalogue model states the height, and
+  asking again is asking someone to confirm a number they have not looked at. Fields others
+  depend on redraw the record when they change, or choosing "beside the rack" left the U boxes on
+  screen asking about a place the previous answer had just made meaningless. Changing how
+  something is placed *is* moving it, so it goes through the same check and loses its U.
+
+  In the list it sits **after all the U rows, in its own zone**. Sorted among them it landed
+  between U 1 and U 2, and that is not a badly sorted list: it is a list saying the UPS is there.
+  The column says "beside", but in a table the order is read before the column.
+
+  The elevation does not draw it and names it underneath: putting it in U 1 rather than leave it
+  out would draw a cabinet that does not exist, and dropping it silently would turn it into
+  something to remember. Anything mounted on it inherits the placement, or half a shelf would be
+  drawn. With this, the side-rail strip stops being a special case: it is a rack item that takes
+  no U and is declared as a strip like any other.
+
+- **A cable's inventory number, apart from its label.** `label` is what is printed on the cable
+  itself — it repeats, comes off and gets things wrong, and is still what the person standing
+  there with a torch works from — while `asset` is assigned by the company, is unique, and is what
+  you count with. Putting both in one field forces a choice about which one to lose.
+
+- **A power cable is a cable.** `dc_feed` recorded which outlet it hangs off and how many watts
+  were declared, and nothing else, as though the lead did not exist. It does: it is bought, kept
+  in a box, breaks and has to be replaced, and the spares-box question is the same one as for
+  data. It gains `asset`, `category`, `length_mm` and `description` — the same names its data
+  sibling uses, because two tables storing the same thing under different names are two screens
+  written twice. Its category is the connector pair (`c13-c14`, `c19-c20`…), which is what you
+  check in the box before walking down to the rack, and it is open-ended like the data one.
+
+  It also has a record now: look at it, correct it, move it to another outlet, unplug it. Those
+  were four things hidden behind one badge or nowhere at all, and its details were asked once, at
+  the moment of plugging it in — in a hurry, which is when one plugs things in.
+
+- **The two searches filter in the database, not in memory.** Items and cables both walked the
+  whole table and built a dict per row of the entire installation to keep thirty or two hundred.
+  In a small room it does not show, which is exactly what makes it get written that way and found
+  late. Text, role, kind and category go into the `WHERE`; searching by the *name of an end* or
+  its rack does too — the name lives in another table, so it is resolved first to a bounded list
+  of ids, the same route the model search already took. `LOWER(...)` is stated in the query rather
+  than left to the engine (MySQL is case-insensitive by default, SQLite is not, PostgreSQL
+  depends on the locale) and `LIKE` wildcards are escaped: without that, typing `_` matches
+  anything and `%` matches everything — a search that ignores what it was asked is worse than one
+  that finds nothing, because it answers.
+
+  The one thing that cannot go into the `WHERE` is who may see what: it comes from an ownership
+  chain that is in no column, and writing it in SQL would put the rule in two places. So the scan
+  runs in bounded chunks with a budget, always finishing a chunk — stopping mid-chunk would drop
+  whatever was behind it for good — and `capped` means "the budget ran out", not "there is more".
+
+- **"Refresh" no longer repaints the whole section.** `renderDcim` rewrites the entire pane —
+  it throws away the table's container, the filter bar and everything else — which is what is
+  needed when *entering* a view and exactly what is not needed to fetch some rows again. That was
+  the flicker, and with it went the filter bar's focus: refreshing with something typed lost where
+  you were typing.
+
+- **Devices have a screen of their own** (`/dcim/devices`). The device list lived inside its
+  rack, so "what servers are at this site" and "what falls out of warranty this quarter" meant
+  opening rack after rack. The data was already there; the screen was not. Each row says where it
+  is in full — rack, room and site, two levels above its own record — and carries what only that
+  box has: serial, asset number, warranty and supplier. Filters by role, site, company and
+  warranty (expired, expiring within ninety days, none recorded); "none recorded" is a group
+  rather than a gap, because it is exactly what has to be looked at before answering the
+  question, and hiding it makes the answer short and credible. Company is filtered outside the
+  `WHERE`: a device inherits its rack's when it states none, and that inheritance is in no column.
+
+  A CSS guard came out of this: every `ss-` class the section's templates use must have a rule
+  in `web_admin.css`. Clearing out the discarded layouts took `.ss-dot` with it — the state dot's
+  markup was still perfect and a `<span>` with no size is nought by nought, so it was painted
+  flawlessly nowhere. Same silent shape as a column nobody writes, in another language.
+
+  The grouped views are **three layouts, the same in Devices and Cabling**: the plain table, the
+  table *grouped* (with the group's header pinned at the top and its count) and a row of counts
+  above the table that filters it when clicked. Four were prototyped and three kept; what was not
+  kept was removed. Why you group and how it is drawn are two separate controls — merging them
+  would be nine views to answer three questions. Grouping is sorting by the group first, with the
+  clicked column still deciding the order inside it, and the group header repeats at the top of
+  each page: a group continuing onto the next page would start without one and its rows would
+  look like they belonged to whatever came before. Counts are taken over every filtered row
+  rather than the page, because a count that changes as you page is worse than no count.
+
+  Lanes also group **by state** — down, warning, all right, not watched — which is the question
+  that makes this list more than a count. Worst first rather than biggest first: grouped by state
+  the big lane is the healthy one, and sorting by size puts what is broken at the end of the row.
+  "Not watched" is a lane of its own and is not "all right": a device with no machine attached is
+  not correct, it is unlooked-at. What does not answer *by nature* — a patch panel, a shelf — sits
+  apart, because filing it under unwatched fills the screen with impossible chores, which is the
+  fastest way to make people stop reading it. State is also a column and a filter, sorted by
+  severity: alphabetically, "error, ok, unwatched, warning" puts the broken ones in the middle of
+  the healthy ones.
+
+  Lanes group by role, site or company — six lane views now counting cabling's, from one shared
+  function, since two copies drift the day one of them gains something. Clicking a row opens the
+  device *in its rack* rather than a record of its own: a third way of looking at the same thing
+  does not help, and what you want on click is to see it where it lives.
+
+- **Cabling has a screen of its own** (`/dcim/wiring`). Inside a rack the question is "what
+  comes out of here"; the other two — "where is cable C-014" and "how many Cat 6A leads are
+  fitted" — required knowing the rack *before* being able to search, which is the opposite of
+  searching. Searchable by label, asset number, port and endpoint name, filtered by kind and
+  category, with each end stating where it is (rack and U); a foreign end says nothing more than
+  that it is foreign.
+
+  It carries **both kinds**: data cables and power leads. They are the same question — where is
+  this cable, how many of this grade are fitted — and they live in two tables because of what
+  they end in, not what they are; two lists would mean searching twice and remembering which one
+  to look at. A strip stands in as the second end: it has a name and sits in a rack, which is all
+  an end has to have, and its port is the outlet number. The screen uses the panel's shared table
+  (`createListTable`), the same one Users and Groups use, so filters, sorting, hideable columns
+  and paging behave exactly as they do everywhere else.
+
+  It also has **lane views**, which answer the other question — the purchasing one: *what have I
+  got fitted, and how much*. Forty copper and two fibre is visible without counting; in a table
+  sorted by kind you add it up in your head. Grouped by kind, by category or by rack, from one
+  function — they are the same screen with a different criterion, and writing them three times
+  would leave two without whatever fix the first one gets. A room cable appears in *both* racks.
+  Lanes count the whole list rather than the page, because a board counting twenty-five of a
+  hundred and twenty answers its only question wrongly and with a credible figure; a lane's metres
+  say how many legs are unmeasured, which is where next year's order comes from.
+
+  It runs no comparison against what the devices see, and not to save work: comparing is a
+  question about one rack, and building the fleet map to list cables across six rooms would pay
+  for it six times over for something this screen does not use. The record is the same one the
+  rack tab opens, with the same editing — two records for one cable would be two ways of writing
+  the same thing, and the second would take months to notice — and saving returns to whichever
+  list you came from. The list is capped at two hundred and says so.
+
+- **The inventory number is a column in both lists**, not only a field in the record: it is what
+  you count with, and counting means reading a whole list. In the power tab there is one per
+  cable, in the same order as the badges — a device with two supplies has two leads.
+
+- **A record's mode belongs to that opening, not to the panel.** It was a variable switched on by
+  the Edit button and only switched off on save: closing the dialog without saving left it on, and
+  the next row anyone clicked opened another cable's *form* instead of its record. No error and no
+  blank screen — the wrong window, which looks like the right one, and nothing but F5 fixed it.
+
+- **The elevation can be seen without labels**, from a button. With ten boxes and their names on
+  top what gets lost is the drawing — where the gaps are, what takes half a U, what is mounted on
+  what — and a picture for a slide does not want the company's names on it. On by default, and it
+  does not touch the framing: the drawing is the same size with or without the lettering.
+
+- **An inventory number is unique across everything inventoried, and `INV-?` fills in the next
+  one.** The number is what you count with — how many there are, which were bought together,
+  which one is due for replacement — and it was neither unique nor filled in for you. Two rules,
+  both there for the same reason: **a repeated inventory number produces no error on the day it
+  is written.** It surfaces months later, when two records claim to be the same thing and there
+  is no telling which of the two labels is wrong.
+
+  Unique across **all** the tables that carry one — devices, racks, data cables and power leads —
+  and not within each table. INV-45 is INV-45 whether it is a server or a patch lead: the
+  delivery note, the insurer's schedule and the spares box hold one list, not four. Checked in
+  one place for the five doors that write one, because the uniqueness belongs to none of them and
+  to all of them at once; a check per door is four places for it to be forgotten. And the tables
+  that carry a number are **discovered** by asking each one whether it has the column: a
+  hand-written list is one you have to remember to touch the day another table carries one, and
+  forgetting produces no error — it produces a duplicate.
+
+  Typing **`INV-?`** stores the next number, and `INV-???` the same number written to three
+  digits (`INV-046`) — the width is asked for with the question marks themselves, and any
+  beginning works: `RACK-?`, `CBL-??`. Whoever numbers a whole cabinet types a number that has
+  already been decided forty times over, and the time they get it wrong nobody says so. Padding
+  is *how it is written and not what it is*, so `INV-045` and `INV-45` are both 45 and changing
+  width does not restart the count; it is a minimum and not a cap, because with two question
+  marks you still have to be able to number the hundred and first. The next one is **the highest
+  plus one, never a gap**: if 20 was written off, 20 does not come back — its label is still in a
+  drawer and the history still names it, and recycling it makes two things one to anybody reading
+  an old sheet of paper.
+
+  Resolved **by the server on save**, not by the screen: two people numbering at once from two
+  screens would both be shown the same "next". The response says which number it ended up with,
+  because whoever typed `INV-?` cannot see the result until they go and look for it in the list —
+  and that trip is exactly the one this field exists to save. It resolves **after** the permission
+  check: spending a number on a request that ends in a 403 leaves a gap in the count nobody can
+  explain. Two groups of question marks are refused rather than guessed at — `INV-?-?` is not one
+  ambiguous pattern, it is two patterns, and choosing for whoever wrote it would store a number
+  they did not ask for, which looks reasonable and so is never found out.
+
+- **A rack carries an inventory number too.** The device, the data cable and the power lead had
+  one; the cabinet holding them did not — the line that costs the most on the delivery note, and
+  the first thing the insurer asks about.
+
+- **The whole run a cable belongs to, in its record, with the one you are looking at marked.**
+  A link that crosses a patch panel is three cables and one run, and the record of one of the
+  three showed that cable alone — "panel A port 12 to panel B port 12" — which says neither where
+  it comes from nor where it goes. Standing in front of the cabinet with the patch lead in your
+  hand, that is the only question you have.
+
+  It is a **declared** fact, not a confirmation. The path the rack tab draws comes from crossing
+  what is written with what the devices report seeing, so a run nobody confirms — two panels and
+  a patch lead, no LLDP anywhere near it — appeared nowhere despite being written down in full.
+  That is half an installation.
+
+  Asked **per cable and when the record opens** (`/cables/<uid>/run`), not with the list:
+  computing it for the two hundred rows of a search would pay two hundred times over for what is
+  looked at once. The record is drawn before it arrives — waiting would leave the dialog blank
+  for something that sits at the bottom.
+
+  The walk goes **by ports**: what enters port 12 leaves by port 12, so another cable in port 13
+  of the same panel is not the same run. It stops at anything that is not a panel, at anything
+  somebody else owns, and at a port with two ways out — that is not a run, it is bad data, and
+  picking one of the two would draw a path nobody declared. And it **reads the same from any of
+  its legs**: without that, the direction was decided by which one you asked about — the patch
+  lead's record showed "server → switch" and the trunk's showed the reverse, and two different
+  drawings of one thing make you wonder whether they are two.
+
+  Each leg carries **its own** label, inventory number, category, length and colour rather than
+  looking them up in the loaded list, which only one of the two screens has.
+
+- **The cable record is laid out in two columns** when there is a run to show: what the cable is
+  on the left, where it runs on the right. Stacked, it left half the dialog blank and pushed the
+  run below the fold — the thing you opened the record for. With no run, one column: an empty
+  column beside is not a layout, it is a hole.
+
+### Fixed
+
+- **The cable record says what is missing, too.** A cable with no inventory number and no length
+  came up with three rows and no hint that anything was absent: empty boxes were not drawn, so
+  the record said "this is what there is about this cable" when it meant "this is all anybody has
+  written down". A gap is a fact, and it is exactly the one you go and fill in. The colour comes
+  with a swatch beside its code.
+
+- **The cable form is laid out like the record**: a grid under group headings — "What cable it
+  is", "Which ports it runs between" — instead of eight boxes in one wrapping row, each with a
+  width guessed by hand. Same fix as the device record and for the same reason: a group whose
+  members change when you stretch the dialog is not a group. And the run is on the right while
+  you edit, which is when it is needed — the length goes in after you have seen the three legs,
+  and the port is checked by looking at the panel.
+
+- **The cable form's own controls.** The description is a textarea — what goes in it is "the
+  lead runs behind the cabinet and only just reaches", and on one line that is typed blind. The
+  category is a real dropdown instead of a `<datalist>`, which never showed there was anything to
+  choose: the box looked identical to an empty one, so the categories were there and nobody saw
+  them, and "cat6" ended up typed by hand with its typo and a different capital each time. It
+  stays open at the bottom — the last option hands back a text box, and a category already
+  written that is not on the list is not lost. And the colour can be picked **from the ones there
+  are**: a sixteen-million-colour wheel leaves an installation with nine blues that are not the
+  same blue, so the usual jacket colours are served by the server (`CABLE_COLORS`) the way the
+  categories and the branch colours already are — a second copy on the screen is the one that
+  misses the colour added tomorrow — with the wheel still beside it for anything else. Both write
+  into the same box.
+
+- **"Move to another outlet" did nothing when the record came from the Cabling section** — the
+  fourth screen with the same shape of fault. The outlet picker read `_dcPower`, which is the rack
+  tab's state and is `null` there, so it threw before drawing anything: no dialog, no message. The
+  strips are now fetched when they are not already loaded — those of the STRIP's rack, not the
+  device's, because a device can eat from the cabinet next door — and kept in their own state:
+  overwriting `_dcPower` would leave the rack tab counting the outlets of a room it is not in.
+
+- **A power lead's record reads like a data cable's**: the same rows even when empty, the same
+  grid under group headings, a multi-line description and the connector pair in a dropdown you can
+  see. They are two screens doing the same thing: they resemble each other or not depending on who
+  touched which last, and the one left behind is the one that looks broken.
+
+  And **the colours already in use come first**, which is what actually gets picked: if this
+  room's blue is one particular blue that forty cables carry, the forty-first has to be THAT one.
+  The server counts them over the table, most-used first — a list written into the screen is the
+  one that does not know which colours this house uses — with the usual ones below for an
+  installation that is just starting. A colour that is both appears once, under "already in use".
+
+  They are picked from **swatches in a dropdown of our own**, not from a list of codes. A
+  `<select>` with each option painted in its colour is what the standard says and what two
+  browsers in three do; the third ignores an `<option>`'s background and leaves `#3b82f6`
+  stacked one under the other — reading hex codes is not picking a colour. In a dropdown
+  rather than loose under the field, because what takes the most room is what gets touched
+  least. The swatches sit outside the `<label>` — a button inside a field's label hands its
+  click to the field, so pressing one would open the system wheel on top — and they write
+  into the wheel's own box, which is what gets saved, without redrawing the form.
+
+- **A power lead has a colour too** (`dc_feed.color`). What the cabling list painted was its
+  BRANCH's colour, put in the same field: the record showed it as if it were the lead's, and
+  correcting anything else saved it over the top. The branch colour now travels separately and
+  the list paints the cable's own, falling back to its branch. The used-colour list is counted
+  across every table that carries one — a red patch lead and a red power lead are the same red,
+  and counting them apart would show two colours of twenty instead of one of forty.
+
+- **The cabling list keeps the whole response.** It copied field by field, so the used colours
+  arrived from the server and were dropped on the spot: the dropdown came up empty on that screen
+  and full on the one beside it — the same data, two behaviours, and neither raised anything.
+
+- **No colour is a value.** An `<input type="color">` has no empty state — it always holds a
+  colour — so a cable with no declared colour came up painted the factory blue with no way
+  back to "none". A field that cannot be blank turns "nobody has said" into an answer nobody
+  gave. What is saved is now a hidden box (the wheel cannot store empty and the list cannot
+  store a colour that is not in it), and "no colour" is one more swatch.
+
+- **A cable's type does not say what it is made of.** The column was headed "What it is" and
+  read "copper" on some rows and "power" on others: two different axes crammed into one word,
+  and the word chosen was from the axis that only applies to network cables — a power lead is
+  copper too. It now says what kind of cable it is, which is what you would order to replace
+  it, and the network ones add the medium in brackets: a copper patch lead and a fibre are
+  not substitutes for one another.
+- **A declared size is not offered to be undone.** A `wide` dialog already measures what it
+  should, so it no longer carries the maximize button: all that added was empty height under
+  what you came to read. The same rule `fit` dialogs already had.
+
+- **The record is executed by a test now** (`test_wa_cable_record.py`). Nothing else in the suite
+  runs the panel's script: the guards read the source, so a read of `null` on a path no test walks
+  is only ever seen by a browser — which is how three faults in this one dialog got in on the same
+  day. The page is fetched, the big `<script>` pulled out the way the syntax check does it, and
+  loaded into `node` with a stub DOM; then the record is opened *from the Cabling section*, which
+  is where every one of them was hiding.
+
+- **Inserting a panel mid-cable now says which side.** The cable that already exists always kept
+  end A, silently, and half the time the lead that really survives is the other one: you put a
+  room panel between the server and the switch, and the cable in your hand — already labelled —
+  is the one on the switch side. Chosen the wrong way round, its label, its inventory number and
+  its length end up on the wrong leg, with no error anywhere: two well-declared cables, one of
+  which lies. The dialog now asks, and shows the arithmetic done — both legs with the names
+  filled in and "this one" marked on the one that already exists.
+
+  It also had the same fault as Edit: it read the rack tab's list, so from the Cabling section
+  the note came up with no names and saving did nothing at all.
+
+- **"Edit" on a cable record did nothing when the record was opened from the Cabling section.**
+  The record is deliberately one for both screens — two records for one cable would be two ways
+  of writing the same thing, and the second would take months to notice — but its kind dropdown
+  read `_dcCables`, which is the *rack tab's* payload and is `null` until somebody opens a rack.
+  Entering `/dcim/wiring` directly, the read threw a `TypeError` before anything was drawn, and
+  the exception died in the `onclick` handler: no window, no message, a dead button. Reported
+  from the screen.
+
+  Found by **running** it, not by reading it: the page was fetched from the test client, the big
+  `<script>` pulled out the way `test_wa_bundle_syntax.py` does it, and loaded into `node` with a
+  stub DOM. With `_dcCables` set the record opens; with it `null` the `TypeError` arrives with a
+  line number.
+
+  The second half of the same fault sat beside it: both lists carry the same server constants
+  under **different names** (`categories` and `cats`), so even a guarded read would have offered
+  an empty list on one of the two screens without saying so. Now one function answers what a
+  cable may be from whichever list is open, and a guard checks that nothing the record draws
+  names `_dcCables` again — not that the read is guarded, which `(_dcCables || {})` would also
+  satisfy while silently offering nothing, but that it goes through the function that knows to
+  look in both.
+
+- **The record no longer promises a contrast where there is none.** In the Cabling section it
+  said "Checking against what the devices see…" forever: that section does no contrast on
+  purpose — it is a question about one rack — so the wait never ended. It now says where that
+  check is made.
+
 ## [0.0.1+build.122] - 2026-08-31
 
 ### Added

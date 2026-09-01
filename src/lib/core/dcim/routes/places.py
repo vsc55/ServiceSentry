@@ -168,8 +168,17 @@ def register(app, wa, C):
                     return jsonify({'error': wa._t('dcim_not_found')}), 404
                 if not C.may_write(store, store.owners_map(), C.seen(), p_scope, p_uid):
                     return jsonify({'error': wa._t('access_denied')}), 403
+            # El número de inventario, resuelto y comprobado: `RACK-?` se convierte aquí en el
+            # siguiente, y uno repetido no llega a escribirse. Después del permiso a propósito —
+            # gastar un número de la numeración en una petición que va a acabar en 403 deja un
+            # hueco en la cuenta que nadie sabe explicar.
+            err = C.asset(part, data)
+            if err:
+                return jsonify({'error': wa._t(err)}), 400
             uid = getattr(store, part).create(data, actor=C.actor())
-            return jsonify({'uid': uid})
+            # Y con qué número se quedó, para lo que lleve número: quien escribe `RACK-?` no
+            # puede verlo hasta ir a buscarlo a la lista.
+            return jsonify({'uid': uid, 'asset': str(data.get('asset') or '')})
 
         @app.route(f'/api/v1/dcim/{kind}/<uid>', methods=['PUT'],
                    endpoint=f'api_dcim_{kind}_edit')
@@ -180,8 +189,13 @@ def register(app, wa, C):
                 return jsonify({'error': wa._t('dcim_not_found')}), 404
             if not C.may_write(store, store.owners_map(), C.seen(), scope, uid):
                 return jsonify({'error': wa._t('access_denied')}), 403
-            getattr(store, part).update(
-                uid, _without(request.get_json(silent=True) or {}, minted), actor=C.actor())
+            data = _without(request.get_json(silent=True) or {}, minted)
+            # Con el uid, que es lo que hace que guardar una ficha sin tocarle el número no
+            # falle por chocar consigo misma.
+            err = C.asset(part, data, uid)
+            if err:
+                return jsonify({'error': wa._t(err)}), 400
+            getattr(store, part).update(uid, data, actor=C.actor())
             # Y su foto, si lo editado ES un armario: renombrarlo o cambiarle la altura mueve de
             # sitio a todo lo que hay dentro, y eso es parte de su historia. Aquí y no en cada
             # llamada porque este CRUD es uno para cuatro cosas — la condición es el precio de

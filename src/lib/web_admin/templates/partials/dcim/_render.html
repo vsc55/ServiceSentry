@@ -171,6 +171,8 @@ async function renderDcim() {
     pane.innerHTML = (
                      _dcCat ? _dcCatHtml()
                    : _dcBuilds ? _dcBuildsHtml()
+                   : _dcWire ? _dcWireHtml()
+                   : _dcDev ? _dcDevHtml()
                    : _dcSrc ? _dcSrcHtml()
                    : _dcimBoard ? _dcimBoardHtml()
                    : _dcimRack ? _dcimRackHtml()
@@ -179,6 +181,11 @@ async function renderDcim() {
     // Las teselas y las chinchetas se dibujan DESPUÉS de que el navegador tenga el SVG
     // puesto: las dos necesitan saber cuántos píxeles mide en pantalla, y antes de estar en el
     // documento eso es cero — que da un mapa vacío sin ningún error que ver.
+    // La lista del cableado la dibuja la tabla compartida en SU contenedor, y un contenedor que
+    // todavía no está en el documento no existe: por eso se le avisa aquí y no al componer el
+    // HTML. La misma razón que el lienzo y el visor 3D de las dos líneas de abajo.
+    if (_dcWire && typeof renderDcWire === 'function') renderDcWire();
+    if (_dcDev && typeof renderDcDev === 'function') renderDcDev();
     if (typeof _dcimMapMounted === 'function') _dcimMapMounted();
     // Y el visor 3D, por lo mismo: un `<canvas>` que todavía no está en el documento mide
     // cero píxeles, y WebGL sobre cero píxeles es una pantalla negra sin ningún error.
@@ -274,6 +281,8 @@ function _dcimFind(kind, uid) {
 function _dcimViewWanted() {
     const quiere = (typeof _sbPageView === 'function') ? _sbPageView('dcim') : '';
     const donde = _dcCat ? 'catalog' : _dcBuilds ? 'builds'
+                : _dcWire ? 'wiring'
+                : _dcDev ? 'devices'
                 : _dcSrc ? 'sources' : _dcimBoard ? 'board' : 'inventory';
     if (!quiere || quiere === donde) return false;
     _dcimGo(quiere);
@@ -303,8 +312,12 @@ function _dcimGo(donde) {
     _dcBuilds = null;
     _dcBuild = null;
     _dcSrc = null;
+    _dcWire = null;
+    _dcDev = null;
     _dcimBoard = null;
     if (donde === 'catalog') return _dcCatOpen();
+    if (donde === 'wiring') return _dcWireOpen();
+    if (donde === 'devices') return _dcDevOpen();
     if (donde === 'builds') return _dcBuildsOpen();
     if (donde === 'sources') return _dcSrcOpen();
     if (donde === 'board') return _dcimOpenBoard();

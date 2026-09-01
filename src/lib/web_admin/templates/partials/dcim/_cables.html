@@ -148,6 +148,10 @@ function _dcCableTable(cables) {
     return `<div class="table-responsive"><table class="${_DC_TBL}">
         <thead><tr>
             <th>${esc(t('dcim_cable_label'))}</th>
+            ${/* El número de inventario, en columna y no sólo dentro de la ficha: es con lo
+                  que se cuenta, y contar es mirar una lista entera. Metido en la ficha, para
+                  saber cuántos INV-22xx hay puestos había que abrir uno por uno. */''}
+            <th class="ss-hug">${esc(t('dcim_item_asset_col'))}</th>
             <th>${esc(t('dcim_cable_from'))}</th>
             <th>${esc(t('dcim_cable_to'))}</th>
             <th>${esc(t('dcim_cable_check'))}</th>
@@ -165,6 +169,7 @@ function _dcCableTable(cables) {
                 Number(c.bundle || 1) > 1 ? ` <span class="badge bg-body-secondary
                     text-body-secondary border fw-normal">${
                     esc(tf('dcim_bundle', c.bundle))}</span>` : ''}</td>
+            <td class="ss-fs-2 ss-tabular ss-nowrap">${esc(c.asset || '—')}</td>
             <td class="ss-fs-2">${esc(_dcimNameOf(c.a_item, {label: c.a_label}))}${
                 c.a_port ? ` <span class="text-muted ss-tabular">${esc(c.a_port)}</span>` : ''}</td>
             <td class="ss-fs-2">${esc(_dcimNameOf(c.b_item, {label: c.b_label}))}${
@@ -199,55 +204,168 @@ function _dcCableTable(cables) {
  *
  *  Y con **las dos versiones a la vista**: lo declarado es lo que tiene que haber y lo visto es
  *  lo que hay ahora. Enseñar sólo una convertiría esta pantalla en la otra. */
-function _dcCableInfo(uid) {
-    const c = ((_dcCables || {}).cables || []).find(x => String(x.uid) === String(uid));
+//: Qué cable está abierto, y desde qué lista se llegó a él. Aquí y no en `_dcCables` porque a
+//: la misma ficha se llega desde dos pantallas —el armario y el cableado de la sala— y una de
+//: las dos no tiene armario abierto. Y guardar tiene que volver a la lista de la que se vino:
+//: recargar la otra deja lo corregido fuera de la vista y parece que no se ha guardado.
+let _dcCableOpen = '';
+let _dcCableFrom = 'rack';
+
+/** El cable `uid`, venga de la lista que venga.
+ *
+ *  Dos listas y una sola ficha: dos fichas del mismo cable serían dos formas de escribir lo
+ *  mismo, y la segunda tardaría meses en descubrirse. */
+function _dcCableOf(uid) {
+    const u = String(uid || '');
+    return ((_dcCables || {}).cables || []).find(x => String(x.uid) === u)
+        || ((_dcWire || {}).rows || []).find(x => String(x.uid) === u)
+        || null;
+}
+
+//: La tirada del cable que se está mirando: `{uid, path}`. Se pide **por cable y al abrir la
+//: ficha**, no con la lista: calcularla para las doscientas filas de una búsqueda sería pagar
+//: doscientas veces lo que se mira una.
+let _dcRun = null;
+
+/** Pedir de qué tirada es este cable, y volver a dibujar la ficha cuando llegue.
+ *
+ *  La ficha se dibuja ANTES, con lo que ya se tiene: esperar a la tirada para poder enseñar la
+ *  etiqueta y los metros dejaría la ventana en blanco por un dato que va abajo del todo. Es la
+ *  misma decisión que el contraste de la pestaña del armario. */
+async function _dcRunLoad(uid) {
+    const d = await apiGet(`/api/v1/dcim/cables/${encodeURIComponent(uid)}/run`);
+    // Y sólo si se sigue mirando el mismo: entre la petición y la respuesta se puede haber
+    // cerrado la ficha o abierto otra, y pegar la tirada del anterior sobre la de al lado es
+    // peor que no enseñarla.
+    if (String(_dcCableOpen || '') !== String(uid)) return;
+    _dcRun = {uid: String(uid), path: (d || {}).path || null};
+    if (!_dcCableEd) _dcCableInfo(uid);
+}
+
+/** La tirada — **también la de un solo tramo**.
+ *
+ *  Se dibujaba sólo con dos o más, porque con uno «no hay nada que contar»: sus dos puntas están
+ *  en los renglones de al lado. Y no lo estaban. Esos renglones dicen la boca y el nombre, y el
+ *  nombre salía vacío en cuanto la ficha se abría desde la sección de cableado —lo trae la lista
+ *  del armario y allí no hay armario abierto—, así que un cable directo se quedaba con dos
+ *  renglones que ponían «sin decir» y nada más.
+ *
+ *  El dibujo, en cambio, se pinta con lo que trae la propia tirada: nombre, boca, armario y U de
+ *  las dos puntas. Con un tramo dice menos que con tres, y lo que dice es lo que hacía falta. */
+function _dcRunHtml(uid) {
+    const p = (_dcRun && _dcRun.uid === String(uid)) ? _dcRun.path : null;
+    if (!p || !(p.legs || []).length) return '';
+    return _dcPathHtml(p);
+}
+
+/** Cómo se llama una punta de un cable, **venga la fila de la lista que venga**.
+ *
+ *  La del armario trae el nombre en `a_label`; la de la sección de cableado, en `a_at.label`.
+ *  Leyendo sólo el primero, los dos renglones de la ficha, la nota de partir y el dibujo de cómo
+ *  queda salían con la boca y ni un nombre — cuatro sitios con la misma media lectura, que es la
+ *  señal de que la regla tenía que estar en uno. */
+function _dcEndName(c, lado) {
+    const fila = c || {}, at = fila[lado + '_at'] || {};
+    return _dcimNameOf(fila[lado + '_item'],
+                       {label: fila[lado + '_label'] || at.label || '', role: at.role || ''});
+}
+
+function _dcCableInfo(uid, editar) {
+    // **De ESTA apertura y no del panel.** Era una variable que se encendía al pulsar «Editar» y
+    // sólo se apagaba al guardar: cerrando el cuadro sin guardar se quedaba encendida, y la
+    // siguiente fila que alguien pulsara abría el formulario de otro cable en vez de su ficha.
+    // Ni un error ni una pantalla en blanco — la ventana equivocada, que además parece la buena,
+    // y no se arreglaba más que con F5.
+    //
+    // Un parámetro y no un estado: el modo es de la apertura, y quien abre lo sabe.
+    _dcCableEd = !!editar;
+    // La categoría vuelve a su desplegable en cada apertura: dejarla suelta sería que la
+    // siguiente ficha heredara una decisión que se tomó sobre otro cable.
+    if (!editar) _dcCatFree = false;
+    const c = _dcCableOf(uid);
     if (!c) return;
     // Cuál se está mirando, para poder marcarlo dentro de su camino. En el estado y no en un
     // parámetro que haya que ir pasando: lo pinta una función que se llama desde un `map`.
-    _dcCables.open = String(uid);
-    // Sembrado de lo que el cable ES, y sólo al ENTRAR en la corrección: sembrarlo en cada
-    // dibujado devolvería el desplegable a su valor guardado en cuanto alguien lo cambiara,
-    // que es un campo que no se deja cambiar sin decir por qué.
-    if (!_dcCableEd) _dcCableEdKind = String(c.kind || 'copper');
+    _dcCableOpen = String(uid);
+    _dcCableFrom = ((_dcCables || {}).cables || []).some(x => String(x.uid) === String(uid))
+        ? 'rack' : 'wire';
+    // El camino se pinta con lo que trae la pestaña de un armario: fuera de ella no hay
+    // contraste, así que tampoco hay camino que enseñar.
+    if (_dcCables) _dcCables.open = String(uid);
+    // La tirada de ESTE cable, si no se tiene ya. Una vez por ficha abierta: volver a pedirla al
+    // redibujar sería una petición por cada tecla del formulario de corrección.
+    if (!_dcRun || _dcRun.uid !== String(uid)) {
+        _dcRun = null;
+        _dcRunLoad(uid);
+    }
+    // Sembrado de lo que el cable ES mientras se está MIRANDO, no mientras se corrige:
+    // sembrarlo en cada dibujado devolvería el desplegable a su valor guardado en cuanto
+    // alguien lo cambiara, que es un campo que no se deja cambiar sin decir por qué.
+    if (!editar) _dcCableEdKind = String(c.kind || 'copper');
     const vistas = (c.ports_seen || []);
     const fila = (rot, valor) => `<tr>
         <td class="text-muted ss-nowrap ss-hug pe-3">${esc(rot)}</td>
         <td>${valor}</td></tr>`;
-    const punta = (item, label, port) => `${esc(_dcimNameOf(item, {label: label}))}${
+    // Con `at` además de la etiqueta: el nombre de una punta lo trae la lista del armario en
+    // `a_label` y la de la sección de cableado en `a_at.label`, y leyendo sólo el primero estos
+    // dos renglones salían con la boca y nada más — «sin decir», dos veces, y ni un nombre.
+    const punta = (lado, port) => `${esc(_dcEndName(c, lado))}${
         port ? ` <span class="text-muted ss-tabular">${esc(port)}</span>`
              : ` <span class="text-muted ss-fs-2">${esc(t('dcim_port_unsaid'))}</span>`}`;
-    if (_dcCableEd) return _dcCableEditDraw(c);
-    showHtmlModal(t('dcim_cable'), `<table class="table table-sm mb-0 align-middle ss-fs-2">
+    // **A dos columnas cuando hay tirada que enseñar.** Los datos del cable son una lista corta
+    // de renglones cortos y la tirada es alta y estrecha: uno debajo del otro dejaban media
+    // ventana en blanco a la derecha y obligaban a bajar para ver por dónde pasa, que es lo que
+    // se ha venido a mirar. Sin tirada no hay dos columnas: una columna vacía al lado no es un
+    // diseño, es un hueco.
+    //
+    // El formulario recibe la misma: corregir un cable mirando por dónde pasa es lo que se hace
+    // —los metros se ponen después de haber visto los tres tramos—, y el cuadro apretado de
+    // ocho casillas en fila no dejaba sitio ni para eso.
+    const tirada = _dcRunHtml(uid);
+    if (editar) return _dcCableEditDraw(c, tirada);
+    showHtmlModal(t('dcim_cable'), `<div class="${tirada ? 'ss-cable-two' : ''}">
+        <div><table class="table table-sm mb-0 align-middle ss-fs-2">
         <tbody>
         ${fila(t('dcim_cable_label'), esc(c.label || '—'))}
+        ${fila(t('dcim_item_asset'), esc(c.asset || '—'))}
         ${fila(t('dcim_cable_kind'), esc([t('dcim_cable_' + c.kind) || c.kind || '',
             c.category ? _dcEnumName(c.category) : ''].filter(Boolean).join(' · ')))}
-        ${Number(c.length_mm || 0) ? fila(t('dcim_cable_len'),
-            `<span class="ss-tabular">${esc(_dcMetres(c.length_mm))}</span>`) : ''}
-        ${c.description ? fila(t('dcim_description'), esc(c.description)) : ''}
-        ${fila(t('dcim_cable_from'), punta(c.a_item, c.a_label, c.a_port))}
-        ${fila(t('dcim_cable_to'), punta(c.b_item, c.b_label, c.b_port))}
+        ${fila(t('dcim_cable_len'), Number(c.length_mm || 0)
+            ? `<span class="ss-tabular">${esc(_dcMetres(c.length_mm))}</span>` : '—')}
+        ${fila(t('dcim_cable_color'), c.color
+            ? `<span class="ss-dot" style="background:${escAttr(c.color)}"></span>
+               <span class="text-muted ss-tabular ss-fs-2">${esc(c.color)}</span>` : '—')}
+        ${fila(t('dcim_description'), esc(c.description || '—'))}
+        ${tirada ? '' : `${fila(t('dcim_cable_from'), punta('a', c.a_port))}
+            ${fila(t('dcim_cable_to'), punta('b', c.b_port))}`}
         ${c.seen ? fila(t('dcim_cable_check'), `<span class="badge text-bg-${_dcSeenTone(c.seen)}
             fw-normal">${esc(_dcSeenWord(c.seen))}</span>
             <div class="text-muted ss-fs-2 mt-1">${esc(_dcSeenTip(c))}</div>`)
+          // «Comprobando» sólo donde se está comprobando. En la sección de cableado no hay
+          // contraste a propósito —es una pregunta sobre UN armario— así que ese texto se
+          // quedaba puesto para siempre, prometiendo una respuesta que no venía. Un cartel de
+          // «espere» que no acaba es peor que decir dónde se mira.
           : fila(t('dcim_cable_check'),
-                 `<span class="text-muted">${esc(t('dcim_cables_checking'))}</span>`)}
+                 `<span class="text-muted">${esc(t(_dcCableFrom === 'wire'
+                     ? 'dcim_cable_check_rack' : 'dcim_cables_checking'))}</span>`)}
         ${vistas.length ? fila(t('dcim_cable_ports_seen'),
             `<span class="ss-tabular">${esc(vistas.join(', '))}</span>`) : ''}
-        ${(c.paths || []).length ? fila(t('dcim_cable_path'),
-            (c.paths || []).map(_dcPathHtml).join('')) : ''}
         ${Number(c.bundle || 1) > 1 ? fila(t('dcim_cable_bundle'),
             `<span class="ss-tabular">${esc(String(c.bundle))}</span>
              <div class="text-muted ss-fs-2 mt-1">${esc(t('dcim_cable_bundle_tt'))}</div>`) : ''}
-        </tbody></table>`, 'primary',
+        </tbody></table></div>
+        ${tirada ? `<div><div class="ss-zone-h"><span>${esc(t('dcim_cable_path'))}</span>
+            <i></i></div>${tirada}</div>` : ''}
+    </div>`, 'primary',
         _dcimMay('dcim_cable_edit')
-            ? `<button class="btn btn-secondary" onclick="_dcCableEd=true;_dcCableInfo(${
-                    jsStr(c.uid)})">
+            ? `<button class="btn btn-secondary" onclick="_dcCableInfo(${
+                    jsStr(c.uid)},true)">
                 <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>
-               ${(c.a_item && c.b_item)
+               ${(c.a_item && c.b_item && !tirada)
                  ? `<button class="btn btn-secondary" onclick="_dcCableSplit(${jsStr(c.uid)})">
                     <i class="bi bi-sign-intersection me-1"></i>${
-                    esc(t('dcim_cable_split'))}</button>` : ''}` : '', 'fit');
+                    esc(t('dcim_cable_split'))}</button>` : ''}` : '',
+        tirada ? 'wide' : 'fit');
 }
 
 //: Si la ficha abierta está en modo corrección.
@@ -266,33 +384,195 @@ let _dcCableEd = false;
  *  comprueba que lo escrito por una persona sale escapado lee las interpolaciones y reconoce a
  *  los ayudantes de esta sección por el nombre. Una flecha anónima la deja sin poder saber si la
  *  etiqueta de un cable pasa por `escAttr` — y ahí lo correcto es que se queje. */
-function _dcEdBox(id, rot, valor, extra) {
-    return `<label class="ss-fs-2 text-muted">${esc(rot)}
-        <input id="${escAttr(id)}" class="form-control form-control-sm"
-               style="max-width:11rem" ${extra || ''}
+function _dcEdBox(id, rot, valor, extra, ayuda) {
+    // Sin ancho propio: **lo reparte la rejilla**. Cada casilla llevaba su `max-width` puesto a
+    // ojo, así que ocho de ellas envueltas en una fila daban tres arriba, dos abajo y un hueco —
+    // un formulario cuyo orden lo decidía el ancho de la ventana.
+    return `<label class="ss-fs-2 text-muted d-block">${_dcHelp(rot, ayuda)}
+        <input id="${escAttr(id)}" class="form-control form-control-sm" ${extra || ''}
                value="${escAttr(String(valor === undefined || valor === null ? '' : valor))}"
                onkeydown="if(event.key==='Enter')_dcCableEdSave()"></label>`;
 }
 
-function _dcCableEditDraw(c) {
-    showHtmlModal(t('dcim_cable'), `<div class="d-flex gap-2 flex-wrap align-items-end">
-        ${_dcEdBox('dce-l', t('dcim_cable_label'), c.label)}
-        <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_kind'))}
-            <select id="dce-k" class="form-select form-select-sm" style="max-width:8rem"
-                    onchange="_dcCableEdKind=this.value;_dcCableInfo(${jsStr(c.uid)})">${
-                (_dcCables.kinds || _DC_CABLE_KINDS).map(k => `<option value="${escAttr(k)}"${
-                    _dcCableEdKind === k ? ' selected' : ''}>${
-                    esc(t('dcim_cable_' + k) || k)}</option>`).join('')}</select></label>
-        ${_dcCatBox('dce-cat', _dcCableEdKind, c.category, '_dcCableEdSave()')}
-        ${_dcEdBox('dce-m', t('dcim_cable_len'),
-               Number(c.length_mm || 0) ? _dcMetresNum(c.length_mm) : '',
-               'inputmode="decimal" placeholder="0,25" class="ss-tabular"')}
-        <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_color'))}
-            <input id="dce-c" type="color" value="${escAttr(c.color || '#3b82f6')}"
-                   class="form-control form-control-sm form-control-color"></label>
-        ${_dcEdBox('dce-ap', t('dcim_cable_from') + ' · ' + t('dcim_port'), c.a_port)}
-        ${_dcEdBox('dce-bp', t('dcim_cable_to') + ' · ' + t('dcim_port'), c.b_port)}
-        ${_dcEdBox('dce-d', t('dcim_description'), c.description)}
+/** El formulario, **repartido como la ficha**: las casillas a la izquierda y la tirada a la
+ *  derecha, y las casillas en una rejilla con rótulos en vez de en una fila que se envuelve.
+ *
+ *  Eran ocho casillas en una sola fila con `flex-wrap`, cada una con su ancho puesto a ojo: los
+ *  grupos los hacía el ancho de la ventana —«Metros» acababa al lado de «Color» porque ahí cupo—
+ *  y con la ventana medio palmo más estrecha eran otros dos. El mismo arreglo que ya se hizo en
+ *  la ficha de un equipo, por el mismo motivo.
+ *
+ *  Y **con la tirada delante mientras se corrige**, que es cuando hace falta: los metros se
+ *  ponen después de haber visto los tres tramos, y la boca se comprueba mirando el panel. */
+/** Una casilla de VARIAS líneas. Lo que se escribe aquí es «el latiguillo pasa por detrás del
+ *  armario y llega justo», no una palabra: en un renglón de una línea eso se escribe a ciegas,
+ *  viendo los últimos cuarenta caracteres. Sin `Enter` para guardar, por lo mismo — en un texto
+ *  de varias líneas, `Enter` es un salto de línea y no un botón. */
+function _dcEdArea(id, rot, valor, ayuda) {
+    return `<label class="ss-fs-2 text-muted d-block">${_dcHelp(rot, ayuda)}
+        <textarea id="${escAttr(id)}" class="form-control form-control-sm" rows="2"
+        >${esc(String(valor === undefined || valor === null ? '' : valor))}</textarea></label>`;
+}
+
+/** El color de la funda: **el que ya se usa, uno corriente, o el que sea**.
+ *
+ *  Tres cosas en ese orden y no por capricho. Lo que de verdad se elige es **lo que ya está
+ *  puesto**: si el azul de esta sala es un azul concreto que llevan cuarenta cables, el cuarenta
+ *  y uno tiene que ser ESE, y buscarlo en la rueda a ojo es cómo una instalación acaba con nueve
+ *  azules que no son el mismo. Los usados los cuenta el servidor, del más puesto al menos.
+ *
+ *  Debajo, los corrientes —los colores con los que se compra un latiguillo—, para la instalación
+ *  que empieza y todavía no ha usado ninguno. Y la rueda sigue al lado, porque hay cables de
+ *  colores que no están en ninguna lista.
+ *
+ *  Los tres escriben en la MISMA casilla: el desplegable mueve la rueda, y lo que se guarda es
+ *  siempre lo que diga la rueda. Dos controles que guardaran cada uno lo suyo serían dos valores
+ *  para un campo, y el que gana sería el que se tocó el último — que no se ve.
+ *
+ *  Un color usado que además es de los corrientes sale **una vez**: en «usados», que es donde se
+ *  va a buscar. La misma entrada dos veces en un desplegable hace dudar de si son dos. */
+function _dcColorBox(id, valor) {
+    const v = _dcCableVocab();
+    const usados = (v.used || []).map(String).slice(0, _DC_COLOR_CHIPS);
+    const puestos = new Set(usados.map(x => x.toLowerCase()));
+    const corrientes = (v.colors || []).map(([, hex]) => String(hex))
+        .filter(hex => !puestos.has(hex.toLowerCase())).slice(0, _DC_COLOR_CHIPS);
+    // **Lo que se guarda es una casilla escondida, no la rueda.** Un `<input type="color">` no
+    // tiene estado vacío: siempre vale un color, así que un cable sin color declarado salía
+    // pintado de azul —el que la rueda trae de fábrica— y no había manera de volver a «ninguno».
+    // Un campo que no puede estar en blanco convierte «nadie lo ha dicho» en una respuesta que
+    // nadie dio.
+    //
+    // Con la rueda DENTRO del desplegable, que es donde va: es una opción más —«otro color»—
+    // junto a los que ya se usan y los corrientes, y no el control principal. Antes era el
+    // control y la lista un añadido, que es al revés de como se elige.
+    return `<div>
+        <label class="ss-fs-2 text-muted d-block">${
+            _dcLabel('dcim_cable_color', 'dcim_cable_color_tt')}</label>
+        <div class="dropdown">
+            <input type="hidden" id="${escAttr(id)}" value="${escAttr(String(valor || ''))}">
+            <button class="btn btn-sm btn-secondary dropdown-toggle w-100 text-start"
+                    type="button" id="${escAttr(id)}-btn" data-bs-toggle="dropdown"
+                    data-bs-auto-close="outside" aria-expanded="false">${
+                _dcColorFaceHtml(valor)}</button>
+            <div class="dropdown-menu p-2">
+                <div class="ss-chips">${_dcChipHtml(id, '', valor)}</div>
+                ${_dcChipsHtml(id, 'dcim_cable_color_used', usados, valor)}
+                ${_dcChipsHtml(id, 'dcim_cable_color_usual', corrientes, valor)}
+                <div class="ss-fs-1 text-muted mt-2">${esc(t('dcim_cable_color_other'))}</div>
+                <input type="color" class="form-control form-control-sm form-control-color"
+                       value="${escAttr(valor || '#3b82f6')}"
+                       oninput="_dcColorSet(${jsStr(id)},this.value)">
+            </div>
+        </div>
+    </div>`;
+}
+
+/** La cara del botón: la muestra del color puesto y su código, o «sin color».
+ *
+ *  Aparte porque se vuelve a pintar al elegir, y volver a dibujar el formulario entero para
+ *  cambiar un cuadrado tiraría lo tecleado en las otras ocho casillas. */
+function _dcColorFaceHtml(valor) {
+    const hex = String(valor || '');
+    return `<span class="ss-chip ss-chip-flat${hex ? '' : ' ss-chip-none'}"${
+        hex ? ` style="background:${escAttr(hex)}"` : ''}></span>
+        <span class="ss-tabular ss-fs-2">${esc(hex || t('dcim_cable_color_none'))}</span>`;
+}
+
+//: Cuántas muestras de cada grupo. Una instalación usa cinco o seis colores; con treinta y seis
+//: cuadraditos delante, elegir vuelve a ser buscar.
+const _DC_COLOR_CHIPS = 12;
+
+/** Una muestra. La vacía —«sin color»— es una más y no un caso aparte: quitarle el color a un
+ *  cable es elegir, y la única forma de hacerlo sin esto era no haberlo puesto nunca. */
+function _dcChipHtml(id, hex, valor) {
+    const puesto = String(valor || '').toLowerCase() === String(hex || '').toLowerCase();
+    const rot = hex || t('dcim_cable_color_none');
+    return `<button type="button" class="ss-chip${hex ? '' : ' ss-chip-none'}${
+        puesto ? ' ss-chip-on' : ''}"${hex ? ` style="background:${escAttr(hex)}"` : ''}
+        title="${escAttr(rot)}" aria-label="${escAttr(rot)}"
+        onclick="_dcColorSet(${jsStr(id)},${jsStr(String(hex))},this)"></button>`;
+}
+
+/** Una fila de muestras con su rótulo, o nada si no hay ninguna.
+ *
+ *  **Muestras y no una lista de códigos.** Estaba hecho con un `<select>` y cada opción pintada
+ *  de su color, que es lo que dice el estándar y lo que hacen dos navegadores de tres: el
+ *  tercero —y es el que se usa aquí— ignora el fondo de un `<option>` y deja una lista de
+ *  `#3b82f6` uno debajo de otro. Elegir un color leyendo códigos hexadecimales no es elegir un
+ *  color. Con botones el color se ve en todos, y el código se queda en el `title`.
+ *
+ *  Fuera del `<label>` a propósito: un botón dentro de la etiqueta de un campo le pasa el clic
+ *  al campo, así que pulsar una muestra abriría la rueda del sistema encima. */
+function _dcChipsHtml(id, clave, colores, valor) {
+    if (!colores.length) return '';
+    return `<div class="ss-fs-1 text-muted mt-1">${esc(t(clave))}</div>
+        <div class="ss-chips">${
+            colores.map(hex => _dcChipHtml(id, hex, valor)).join('')}</div>`;
+}
+
+/** Elegir un color —o ninguno— desde una muestra o desde la rueda.
+ *
+ *  Se escribe en la casilla escondida, que es la que se guarda: la rueda no puede guardar «sin
+ *  color» y la lista no puede guardar uno que no esté en ella, así que ninguna de las dos es el
+ *  valor. Tener el valor en una tercera casilla es lo que permite que las dos escriban sin
+ *  pisarse y que exista el vacío.
+ *
+ *  Y se repinta a mano **sin redibujar el formulario**: redibujarlo tiraría lo tecleado en las
+ *  otras casillas, que es exactamente lo que nadie espera al pulsar un color. */
+function _dcColorSet(id, hex, boton) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = String(hex || '');
+    const cara = document.getElementById(id + '-btn');
+    if (cara) cara.innerHTML = _dcColorFaceHtml(el.value);
+    const raiz = el.parentNode;
+    if (raiz && raiz.querySelectorAll) {
+        raiz.querySelectorAll('.ss-chip').forEach(b => b.classList.toggle(
+            'ss-chip-on', b.hasAttribute('title')
+                && String(b.title || '').toLowerCase()
+                   === String(el.value || t('dcim_cable_color_none')).toLowerCase()));
+    }
+    // Se cierra sólo al elegir una MUESTRA. Arrastrando por la rueda llegan diez `input` por
+    // segundo, y cerrar en el primero deja el color a medio elegir.
+    const abre = boton && raiz && raiz.querySelector('[data-bs-toggle="dropdown"]');
+    if (abre && window.bootstrap) bootstrap.Dropdown.getOrCreateInstance(abre).hide();
+}
+
+function _dcCableEditDraw(c, tirada) {
+    showHtmlModal(t('dcim_cable'), `<div class="${tirada ? 'ss-cable-two' : ''}">
+        <div>
+        <div class="ss-zone-h"><span>${esc(t('dcim_cable_what'))}</span><i></i></div>
+        <div class="ss-fgrid">
+            ${_dcEdBox('dce-l', t('dcim_cable_label'), c.label, '', t('dcim_cable_label_tt'))}
+            ${_dcEdBox('dce-as', t('dcim_item_asset'), c.asset, '', t('dcim_asset_tt'))}
+            <label class="ss-fs-2 text-muted d-block">${
+                _dcLabel('dcim_cable_kind', 'dcim_cable_kind_tt')}
+                <select id="dce-k" class="form-select form-select-sm"
+                        onchange="_dcCableEdKind=this.value;_dcCableInfo(${
+                            jsStr(c.uid)},true)">${
+                    _dcCableVocab().kinds.map(k => `<option value="${escAttr(k)}"${
+                        _dcCableEdKind === k ? ' selected' : ''}>${
+                        esc(t('dcim_cable_' + k) || k)}</option>`).join('')}</select></label>
+                ${_dcCatBox('dce-cat', _dcCableEdKind, c.category, '_dcCableEdSave()',
+                            '_dcCableInfo(_dcCableOpen,true);')}
+            ${_dcEdBox('dce-m', t('dcim_cable_len'),
+                   Number(c.length_mm || 0) ? _dcMetresNum(c.length_mm) : '',
+                   'inputmode="decimal" placeholder="0,25" class="form-control ' +
+                   'form-control-sm ss-tabular"', t('dcim_cable_len_tt'))}
+            ${_dcColorBox('dce-c', c.color)}
+        </div>
+        <div class="ss-zone-h mt-3"><span>${esc(t('dcim_cable_where'))}</span><i></i></div>
+        <div class="ss-fgrid">
+            ${_dcEdBox('dce-ap', _dcEndName(c, 'a') + ' · ' + t('dcim_port'), c.a_port, '',
+                       t('dcim_cable_port_tt'))}
+            ${_dcEdBox('dce-bp', _dcEndName(c, 'b') + ' · ' + t('dcim_port'), c.b_port, '',
+                       t('dcim_cable_port_tt'))}
+        </div>
+        <div class="mt-3">${_dcEdArea('dce-d', t('dcim_description'), c.description)}</div>
+        </div>
+        ${tirada ? `<div><div class="ss-zone-h"><span>${esc(t('dcim_cable_path'))}</span>
+            <i></i></div>${tirada}</div>` : ''}
     </div>`, 'primary',
         `<button class="btn btn-primary" onclick="_dcCableEdSave()">
             <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`, 'wide');
@@ -303,19 +583,24 @@ let _dcCableEdKind = 'copper';
 
 async function _dcCableEdSave() {
     const val = (id) => (document.getElementById(id) || {}).value || '';
-    const uid = String((_dcCables || {}).open || '');
+    const uid = _dcCableOpen;
     if (!uid) return;
     const mm = _dcMetresIn(val('dce-m'));
     if (mm === null) return showToast(t('dcim_cable_len_bad'), 'warning');
     const r = await _dcimSend('PUT', `/api/v1/dcim/cables/${encodeURIComponent(uid)}`, {
-        label: val('dce-l'), kind: _dcCableEdKind, category: val('dce-cat'),
+        label: val('dce-l'), asset: val('dce-as'),
+        kind: _dcCableEdKind, category: val('dce-cat'),
         length_mm: mm,
         color: val('dce-c'), a_port: val('dce-ap'), b_port: val('dce-bp'),
         description: val('dce-d'),
     });
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcAssetSaid(val('dce-as'), r);
     _dcCableEd = false;
     hideInfoModal();
+    // A la lista de la que se vino: recargar la otra deja lo corregido fuera de la vista, y una
+    // corrección que no se ve parece una corrección que no se ha guardado.
+    if (_dcCableFrom === 'wire') return _dcWireReload();
     _dcCablesOpen();
 }
 
@@ -337,9 +622,47 @@ let _dcSplit = null;
  *  **El cable de siempre se queda con el lado A** —su etiqueta, su color, su boca— y el tramo
  *  nuevo es el que va del panel al lado B. Repartir la etiqueta entre los dos daría dos cables
  *  llamados igual, que en una lista de cables es lo mismo que no llamarse. */
-function _dcCableSplit(uid) {
-    _dcSplit = {uid: uid, q: '', rows: null, pick: null, port: ''};
+/** Meter un panel **por esta punta**: la que se pulsa es la que se queda con el cable de ahora.
+ *
+ *  Qué punta es «la A» lo decide la fila del cable y no el dibujo: la tirada se recorre de punta
+ *  a punta y la mitad de los tramos están guardados al revés, así que el primer sitio del dibujo
+ *  puede ser perfectamente el `b_item` de la fila. Traducirlo aquí y no en el dibujo es tenerlo
+ *  en un sitio. */
+function _dcCableSplitAt(uid, itemUid) {
+    const c = _dcCableOf(uid) || {};
+    _dcCableSplit(uid, String(c.a_item || '') === String(itemUid || '') ? 'a' : 'b');
+}
+
+function _dcCableSplit(uid, side) {
+    // `side` es **de qué lado se queda el cable que ya existe**. `'a'` es lo de siempre, que es
+    // lo que se venía haciendo sin decirlo.
+    _dcSplit = {uid: uid, q: '', rows: null, pick: null, port: '', side: side || 'a'};
     _dcSplitDraw();
+}
+
+/** Cómo queda la cosa: los dos tramos, y **cuál de los dos es el cable que ya está**.
+ *
+ *  La operación no decía por qué lado metía el panel. El cable existente —con su etiqueta, su
+ *  número de inventario, sus metros y su categoría— se quedaba SIEMPRE con el extremo A, y en la
+ *  mitad de los casos el latiguillo que de verdad sobrevive es el otro: se mete un panel de sala
+ *  entre el servidor y el switch, y el cable que uno tiene en la mano y ya está etiquetado es el
+ *  del lado del switch. Con la elección al revés, esos datos acaban en el tramo equivocado — y
+ *  no da ningún error: quedan dos cables bien declarados y uno de los dos miente.
+ *
+ *  Se enseña la cuenta hecha en vez de un rótulo que la explique: «A — PP · 12» y «PP · 12 — B»,
+ *  con «este» donde va el que ya existe. Una frase que describe lo que va a pasar hay que
+ *  traducirla; dos renglones con los nombres puestos se leen. */
+function _dcSplitLegsHtml(c, p) {
+    const boca = (x) => x ? `<span class="text-muted ss-tabular ss-fs-1">${esc(x)}</span>` : '';
+    const medio = `${esc(p.pick.label)} ${boca(p.port)}`;
+    const este = `<span class="badge text-bg-primary fw-normal ss-fs-1">${
+        esc(t('dcim_cable_this'))}</span>`;
+    const tramo = (izq, der, mio) => `<div class="ss-path-stop">
+        ${izq} <span class="text-muted">→</span> ${der} ${mio ? este : ''}</div>`;
+    return `<div class="ss-fs-2">
+        ${tramo(esc(_dcEndName(c, 'a')) + ' ' + boca(c.a_port), medio, p.side === 'a')}
+        ${tramo(medio, esc(_dcEndName(c, 'b')) + ' ' + boca(c.b_port), p.side === 'b')}
+    </div>`;
 }
 
 async function _dcSplitGo() {
@@ -361,24 +684,34 @@ function _dcSplitTake(uid, label) {
 function _dcSplitDraw() {
     const p = _dcSplit || {};
     const filas = p.rows;
-    const c = ((_dcCables || {}).cables || []).find(x => String(x.uid) === String(p.uid)) || {};
+    // Por la función que mira en las DOS listas: desde la sección de cableado, `_dcCables` es
+    // `null` y esto se quedaba con un cable vacío — la nota salía sin nombres y guardar no hacía
+    // nada, en silencio. El mismo fallo que tenía «Editar» al lado.
+    const c = _dcCableOf(p.uid) || {};
     showHtmlModal(t('dcim_cable_split'), `<div class="d-flex flex-column gap-2">
         <div class="text-muted ss-fs-2">${esc(tf('dcim_cable_split_note',
-            _dcimNameOf(c.a_item, {label: c.a_label}),
-            _dcimNameOf(c.b_item, {label: c.b_label})))}</div>
+            _dcEndName(c, 'a'), _dcEndName(c, 'b')))}</div>
         ${p.pick ? `<div class="d-flex gap-2 align-items-end flex-wrap">
             <div><div class="ss-fs-1 text-muted">${esc(t('dcim_cable_split_mid'))}</div>
                 <span class="fw-semibold">${esc(p.pick.label)}</span></div>
             <button class="btn btn-sm btn-secondary" onclick="_dcSplit.pick=null;_dcSplitDraw()">
                 ${esc(t('dcim_comp_change'))}</button>
-            <label class="ss-fs-2 text-muted">${esc(t('dcim_port'))}
+            <label class="ss-fs-2 text-muted">${_dcLabel('dcim_port', 'dcim_cable_split_port_tt')}
                 <input class="form-control form-control-sm" style="max-width:8rem"
                        value="${escAttr(String(p.port || ''))}"
                        oninput="_dcSplit.port=this.value"
                        onkeydown="if(event.key==='Enter')_dcSplitSave()"></label>
+            <label class="ss-fs-2 text-muted">${
+                _dcLabel('dcim_cable_split_side', 'dcim_cable_split_side_tt')}
+                <select class="form-select form-select-sm" style="max-width:14rem"
+                        onchange="_dcSplit.side=this.value;_dcSplitDraw()">
+                    ${['a', 'b'].map(k => `<option value="${k}"${p.side === k ? ' selected' : ''
+                        }>${esc(_dcEndName(c, k))}</option>`
+                    ).join('')}</select></label>
             <button class="btn btn-sm btn-primary" onclick="_dcSplitSave()">
                 <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
-        </div>` : `<div class="ss-toolrow">
+        </div>
+        ${_dcSplitLegsHtml(c, p)}` : `<div class="ss-toolrow">
             <input class="form-control form-control-sm" style="max-width:18rem" autofocus
                    value="${escAttr(p.q || '')}"
                    placeholder="${escAttr(t('dcim_cable_split_find'))}"
@@ -412,19 +745,26 @@ function _dcSplitDraw() {
 async function _dcSplitSave() {
     const p = _dcSplit;
     if (!p || !p.pick) return;
-    const c = ((_dcCables || {}).cables || []).find(x => String(x.uid) === String(p.uid));
+    const c = _dcCableOf(p.uid);
     if (!c) return;
-    const nuevo = await _dcimSend('POST', '/api/v1/dcim/cables', {
-        a_item: p.pick.uid, a_port: p.port || '',
-        b_item: c.b_item, b_port: c.b_port || '',
-        kind: c.kind || '', color: c.color || '',
-    });
+    // El tramo NUEVO es el del lado que NO se queda el cable existente, y el existente cambia
+    // la punta de ese mismo lado. Escritos así y no al revés: si el nuevo falla —una boca
+    // ocupada, un permiso— el cable de antes sigue entero, y lo que se ve es un error en vez de
+    // un enlace partido a la mitad.
+    const suelta = p.side === 'a' ? 'b' : 'a';
+    const nuevo = await _dcimSend('POST', '/api/v1/dcim/cables', suelta === 'b'
+        ? {a_item: p.pick.uid, a_port: p.port || '',
+           b_item: c.b_item, b_port: c.b_port || '', kind: c.kind || '', color: c.color || ''}
+        : {a_item: c.a_item, a_port: c.a_port || '',
+           b_item: p.pick.uid, b_port: p.port || '', kind: c.kind || '', color: c.color || ''});
     if (!nuevo.ok) return showToast(nuevo.error || t('save_failed'), 'danger');
     const movido = await _dcimSend('PUT', `/api/v1/dcim/cables/${encodeURIComponent(p.uid)}`,
-                                   {b_item: p.pick.uid, b_port: p.port || ''});
+        suelta === 'b' ? {b_item: p.pick.uid, b_port: p.port || ''}
+                       : {a_item: p.pick.uid, a_port: p.port || ''});
     if (!movido.ok) return showToast(movido.error || t('save_failed'), 'danger');
     _dcSplit = null;
     hideInfoModal();
+    if (_dcCableFrom === 'wire') return _dcWireReload();
     _dcCablesOpen();
 }
 
@@ -442,24 +782,34 @@ async function _dcSplitSave() {
  *
  *  El tramo que se está mirando va **resaltado**: un camino de cuatro tramos, sin saber cuál de
  *  los cuatro es el que se tiene abierto, obliga a compararlos uno a uno. */
-function _dcPathHtml(idx) {
-    const p = ((_dcCables || {}).paths || [])[idx];
+function _dcPathHtml(p) {
     if (!p) return '';
-    const abierto = String((_dcCables || {}).open || '');
+    const abierto = String(_dcCableOpen || '');
     // Las PARADAS y no los tramos: un camino se lee como una cadena de sitios —del servidor al
     // panel, del panel al panel, del panel al switch— y una lista de tramos repite cada parada
     // dos veces, una como final de uno y otra como principio del siguiente. Leerlo obliga a
     // emparejarlas de cabeza, que es justo el trabajo que este dibujo existe para ahorrar.
+    const legs = p.legs || [];
     const paradas = [];
-    (p.legs || []).forEach((l, i) => {
+    legs.forEach((l, i) => {
         if (!i) paradas.push({item: l.a_item, port: l.a_port, label: l.a_label,
-                              role: l.a_role, at: l.a_at || {}, por: null});
+                              role: l.a_role, at: l.a_at || {}, por: null, tras: l});
         paradas.push({item: l.b_item, port: l.b_port, label: l.b_label,
-                      role: l.b_role, at: l.b_at || {}, por: l});
+                      role: l.b_role, at: l.b_at || {}, por: l, tras: legs[i + 1] || null});
     });
+    // **Meter un panel se pide desde la punta**, no desde un botón al pie. Es la misma decisión
+    // que el desplegable «el cable de ahora se queda con», dicha donde se ve: se pulsa la punta
+    // por la que ese cable sigue siendo el que se tiene en la mano, y ya está contestado. Un
+    // botón al pie obliga a traducir «lado A» a «el extremo del switch» mirando arriba.
+    //
+    // Sólo en las dos puntas DEL CABLE ABIERTO: en una tirada de tres tramos, las de los otros
+    // dos son sus puntas, no las de éste, y meterles un panel sería partir otro cable.
+    const mia = (x) => (x.por && String(x.por.cable) === abierto)
+        || (x.tras && String(x.tras.cable) === abierto);
     return `${_dcPathTotalHtml(p)}<div class="ss-path">${paradas.map((x, i) =>
         `${x.por ? _dcPathLegHtml(x.por, abierto) : ''}
-         ${_dcPathStopHtml(x, i === 0 || i === paradas.length - 1)}`).join('')}</div>`;
+         ${_dcPathStopHtml(x, i === 0 || i === paradas.length - 1, mia(x) ? abierto : '')}`
+    ).join('')}</div>`;
 }
 
 /** Cuánto mide el enlace **de punta a punta**, que es la suma de sus tramos.
@@ -476,10 +826,12 @@ function _dcPathTotalHtml(p) {
     const legs = p.legs || [];
     let mm = 0;
     let faltan = 0;
+    // Los metros son del TRAMO y no se buscan en ninguna lista: la ficha se abre desde dos
+    // pantallas y sólo una tiene lista cargada. Buscarlos allí daba una tirada sin etiquetas,
+    // sin metros y sin colores desde la otra — es decir, sin nada que distinga un tramo del
+    // siguiente.
     legs.forEach(l => {
-        const c = ((_dcCables || {}).cables || [])
-            .find(x => String(x.uid) === String(l.cable)) || {};
-        const n = Number(c.length_mm || 0);
+        const n = Number(l.length_mm || 0);
         if (n > 0) mm += n; else faltan += 1;
     });
     if (!mm && faltan) return `<div class="text-muted ss-fs-2 mb-1">${
@@ -495,7 +847,7 @@ function _dcPathTotalHtml(p) {
  *  casi siempre —los paneles viven en el de patcheo— y «PP-A 25» no dice adónde hay que ir.
  *
  *  Las dos puntas en negrita: son las máquinas, y el resto es por dónde pasa. */
-function _dcPathStopHtml(x, punta) {
+function _dcPathStopHtml(x, punta, parteDe) {
     const donde = [x.at.rack ? x.at.rack : '', x.at.u ? 'U' + x.at.u : '']
         .filter(Boolean).join(' · ');
     return `<div class="ss-path-stop">
@@ -504,6 +856,10 @@ function _dcPathStopHtml(x, punta) {
             esc(_dcimNameOf(x.item, {label: x.label, role: x.role}))}</span>
         ${x.port ? `<span class="text-muted ss-tabular ss-fs-2">${esc(x.port)}</span>` : ''}
         ${donde ? `<span class="text-muted ss-fs-1">${esc(donde)}</span>` : ''}
+        ${parteDe && _dcimMay('dcim_cable_edit') ? `<button class="btn btn-sm btn-secondary
+            ss-path-add" title="${escAttr(t('dcim_cable_split_here_tt'))}"
+            onclick="_dcCableSplitAt(${jsStr(parteDe)},${jsStr(String(x.item || ''))})">
+            <i class="bi bi-sign-intersection"></i></button>` : ''}
     </div>`;
 }
 
@@ -512,15 +868,16 @@ function _dcPathStopHtml(x, punta) {
  *  El que se está mirando va marcado: un camino de cuatro tramos, sin saber cuál de los cuatro
  *  se tiene abierto, obliga a compararlos uno a uno. */
 function _dcPathLegHtml(l, abierto) {
-    const c = ((_dcCables || {}).cables || []).find(x => String(x.uid) === String(l.cable)) || {};
     const suyo = String(l.cable) === String(abierto);
-    const dice = [c.label || '', c.category ? _dcEnumName(c.category) : '',
-                  Number(c.length_mm || 0) ? _dcMetres(c.length_mm) : ''].filter(Boolean);
+    const dice = [l.label || '', l.asset || '', l.category ? _dcEnumName(l.category) : '',
+                  Number(l.length_mm || 0) ? _dcMetres(l.length_mm) : ''].filter(Boolean);
     return `<div class="ss-path-leg${suyo ? ' ss-path-mine' : ''}">
         <span class="ss-path-line" style="background:${
-            escAttr(c.color || 'var(--bs-secondary-color)')}"></span>
-        <span class="text-muted ss-fs-1">${esc(dice.join(' · ')
-            || (t('dcim_cable_' + (c.kind || 'other')) || ''))}</span>
+            escAttr(l.color || 'var(--bs-secondary-color)')}"></span>
+        <span class="${suyo ? 'fw-semibold' : 'text-muted'} ss-fs-1">${esc(dice.join(' · ')
+            || (t('dcim_cable_' + (l.kind || 'other')) || ''))}</span>
+        ${suyo ? `<span class="badge text-bg-primary fw-normal ss-fs-1">${
+            esc(t('dcim_cable_this'))}</span>` : ''}
     </div>`;
 }
 
@@ -610,6 +967,29 @@ let _dcCableKind = 'copper';
 //: desplegable vacío es un campo que parece roto.
 const _DC_CABLE_KINDS = ['copper', 'fiber', 'dac', 'power', 'console', 'other'];
 
+/** De qué puede ser un cable —tipos y categorías—, **venga de la lista que venga**.
+ *
+ *  La ficha es UNA para las dos pantallas —el cableado de un armario y la sección de cableado—
+ *  y su vocabulario lo leía de `_dcCables`, que es de la primera. En la sección vale `null`
+ *  porque allí no se ha abierto ningún armario: pulsar «Editar» reventaba con un TypeError
+ *  antes de dibujar nada, así que no salía ni la ventana ni un aviso. Nada. La misma forma de
+ *  siempre — una pantalla que lee un global que sólo la otra rellena.
+ *
+ *  Y las dos lo traían con NOMBRES distintos (`categories` y `cats`), que es la segunda mitad
+ *  del mismo fallo: dos nombres para el mismo dato son dos sitios donde uno se queda vacío.
+ *
+ *  De la que se está mirando primero: las dos traen lo mismo —son constantes del servidor— pero
+ *  preferir la abierta es lo que hace que esto siga siendo cierto si algún día dejan de serlo. */
+function _dcCableVocab() {
+    const armario = _dcCables || null, seccion = _dcWire || null;
+    const de = (_dcCableFrom === 'wire' ? (seccion || armario)
+                                        : (armario || seccion)) || {};
+    return {kinds: de.kinds || _DC_CABLE_KINDS,
+            cats: de.categories || de.cats || {},
+            colors: de.colors || [],
+            used: de.colors_used || []};
+}
+
 /** La categoría, con las que valen para ESE tipo de cable.
  *
  *  Un Cat 6A no es una categoría de fibra ni un OM4 una de cobre, y ofrecer las diez juntas es
@@ -619,17 +999,37 @@ const _DC_CABLE_KINDS = ['copper', 'fiber', 'dac', 'power', 'console', 'other'];
  *  Y **abierta por abajo**: un fabricante que llame a lo suyo de otra manera no puede quedarse
  *  sin poder apuntarlo. Con `<datalist>` y no con un desplegable, que es la diferencia entre
  *  sugerir y obligar. */
-function _dcCatBox(id, kind, valor, guardar) {
-    const lista = ((_dcCables || {}).categories || {})[kind] || [];
-    return `<label class="ss-fs-2 text-muted">${esc(t('dcim_cable_cat'))}
-        ${lista.length ? `<datalist id="${escAttr(id)}-list">${lista.map(
-            c => `<option value="${escAttr(c)}">${esc(_dcEnumName(c))}</option>`).join('')}
-        </datalist>` : ''}
-        <input id="${escAttr(id)}" class="form-control form-control-sm" style="max-width:7rem"
-               value="${escAttr(String(valor || ''))}"
-               ${lista.length ? `list="${escAttr(id)}-list" autocomplete="off"` : ''}
-               onkeydown="if(event.key==='Enter')${escAttr(guardar)}"></label>`;
+function _dcCatBox(id, kind, valor, guardar, redibuja) {
+    const lista = (_dcCableVocab().cats || {})[kind] || [];
+    // **Un desplegable de verdad**, no una lista que sólo aparece si a alguien se le ocurre
+    // teclear. `<datalist>` no enseña que haya nada que elegir: la casilla se ve igual que una
+    // vacía, así que las categorías estaban ahí y nadie las veía — «cat6» acababa escrito a
+    // mano, con sus erratas y su mayúscula distinta cada vez.
+    //
+    // Y sigue **abierta por abajo**: la última opción devuelve la casilla de escribir, para el
+    // fabricante que llame a lo suyo de otra manera. Lo que no cabe es obligar a elegir de una
+    // lista que puede quedarse corta.
+    const suelto = _dcCatFree || (valor && !lista.includes(valor));
+    if (!lista.length || suelto) {
+        return `<label class="ss-fs-2 text-muted d-block">${esc(t('dcim_cable_cat'))}
+            <input id="${escAttr(id)}" class="form-control form-control-sm" autofocus
+                   value="${escAttr(String(valor || ''))}"
+                   onkeydown="if(event.key==='Enter')${escAttr(guardar)}"></label>`;
+    }
+    return `<label class="ss-fs-2 text-muted d-block">${esc(t('dcim_cable_cat'))}
+        <select id="${escAttr(id)}" class="form-select form-select-sm"
+                onchange="if(this.value==='*'){_dcCatFree=true;${escAttr(redibuja || '')}}">
+            <option value=""${valor ? '' : ' selected'}>${esc(t('dcim_pick_none'))}</option>
+            ${lista.map(x => `<option value="${escAttr(x)}"${
+                String(valor || '') === x ? ' selected' : ''}>${esc(_dcEnumName(x))}</option>`
+            ).join('')}
+            <option value="*">${esc(t('dcim_cable_cat_other'))}</option>
+        </select></label>`;
 }
+
+//: Si la categoría se está escribiendo a mano. De la apertura y no del panel, como el modo de la
+//: ficha: se apaga al abrir una, o la siguiente heredaría la casilla suelta de la anterior.
+let _dcCatFree = false;
 
 //: Si el formulario de cable nuevo está abierto.
 let _dcNewCable = false;
@@ -652,16 +1052,19 @@ function _dcCableFormHtml() {
         <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_label'))}
             <input id="dcc-l" class="form-control form-control-sm" style="max-width:9rem"
                    onkeydown="if(event.key==='Enter')_dcCableSave()"></label>
+        <label class="ss-fs-2 text-muted">${_dcLabel('dcim_item_asset', 'dcim_asset_tt')}
+            <input id="dcc-as" class="form-control form-control-sm" style="max-width:9rem"
+                   onkeydown="if(event.key==='Enter')_dcCableSave()"></label>
         <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_color'))}
             <input id="dcc-c" type="color" value="#3b82f6"
                    class="form-control form-control-sm form-control-color"></label>
         <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_kind'))}
             <select id="dcc-k" class="form-select form-select-sm" style="max-width:8rem"
                     onchange="_dcCableKind=this.value;renderDcim()">${
-                (_dcCables.kinds || _DC_CABLE_KINDS).map(k => `<option value="${escAttr(k)}"${
+                _dcCableVocab().kinds.map(k => `<option value="${escAttr(k)}"${
                     _dcCableKind === k ? ' selected' : ''}>${
                     esc(t('dcim_cable_' + k) || k)}</option>`).join('')}</select></label>
-        ${_dcCatBox('dcc-cat', _dcCableKind, '', '_dcCableSave()')}
+        ${_dcCatBox('dcc-cat', _dcCableKind, '', '_dcCableSave()', 'renderDcim();')}
         <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_len'))}
             <input id="dcc-m" inputmode="decimal" placeholder="0,25"
                    class="form-control form-control-sm ss-tabular" style="max-width:6rem"></label>
@@ -692,12 +1095,13 @@ async function _dcCableSave() {
     const r = await _dcimSend('POST', '/api/v1/dcim/cables', {
         a_item: val('dcc-a'), a_port: val('dcc-ap'),
         b_item: val('dcc-b'), b_port: val('dcc-bp'),
-        label: val('dcc-l'), color: val('dcc-c'),
+        label: val('dcc-l'), asset: val('dcc-as'), color: val('dcc-c'),
         kind: _dcCableKind, category: val('dcc-cat'),
         length_mm: mm,
         description: val('dcc-d'),
     });
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcAssetSaid(val('dcc-as'), r);
     _dcNewCable = false;
     _dcCablesOpen();
 }
@@ -708,4 +1112,340 @@ function _dcCableDrop(uid, label) {
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
         _dcCablesOpen();
     });
+}
+
+
+{# ================================================================
+   El cableado FUERA de su armario.
+
+   Dentro de un rack se contesta «qué sale de aquí». Aquí se contestan las otras dos, que no
+   tenían dónde preguntarse: **dónde está el cable C-014** y **cuántos latiguillos de Cat 6A hay
+   puestos**. Las dos obligaban a saber el armario antes de poder buscar, que es lo contrario de
+   buscar.
+
+   Sin contraste con lo que ven los dispositivos, y no por ahorrar: contrastar es una pregunta
+   sobre UN armario —qué se ve desde aquí— y armar el mapa de la flota para listar cables de seis
+   salas sería pagarlo seis veces por un dato que esta pantalla no usa. El contraste sigue donde
+   significa algo.
+   ================================================================ #}
+
+//: Lo que hay en la pantalla del cableado: las filas y si venían recortadas. Los filtros, el
+//: orden, las columnas y la paginación NO viven aquí — los lleva la tabla compartida, que es la
+//: misma de Usuarios, Grupos y las demás listas del panel. Una lista con su propio buscador y su
+//: propia paginación es una lista que se comporta distinto que las otras diez sin ninguna razón.
+let _dcWire = null;
+
+async function _dcWireOpen() {
+    _dcimMark('wiring');
+    _dcWire = _dcWire || {rows: null};
+    _dcWire.rows = null;
+    renderDcim();
+}
+
+/** Volver a pedir la lista, **sin redibujar la sección**.
+ *
+ *  `renderDcim` reescribe el panel entero: tira el contenedor de la tabla, la barra de filtros y
+ *  todo lo demás, y lo vuelve a construir. Eso hace falta al ENTRAR en la vista —el hueco tiene
+ *  que existir antes de que la tabla pueda escribir en él— y es exactamente lo que no hace falta
+ *  al pulsar «Actualizar»: la pantalla ya está montada y lo único que ha cambiado son las filas.
+ *
+ *  El parpadeo era eso. Y no era sólo feo: al reconstruir la barra de filtros se pierde el foco
+ *  y la posición del cursor, así que actualizar mientras se tiene algo escrito era perder dónde
+ *  se estaba escribiendo.
+ *
+ *  La tabla compartida ya sabe repintarse sola en su contenedor, y deja la barra en su sitio a
+ *  propósito — por esta misma razón. */
+function _dcWireReload() {
+    if (!_dcWire) return _dcWireOpen();
+    _dcWire.rows = null;
+    renderDcWire();
+}
+
+/** Pedir los cables. **Todos**, y el filtrado en la tabla: son los cables que este lector puede
+ *  ver de una instalación, no un catálogo de miles, y hacer un viaje al servidor por cada letra
+ *  tecleada es una lista que va a tirones. La respuesta ya viene recortada por arriba. */
+async function _dcWireLoad() {
+    const d = await apiGet('/api/v1/dcim/cables') || {};
+    // **Se guarda la respuesta entera** y sólo se renombra lo que aquí se llama de otra manera.
+    // Copiando campo a campo, lo que el servidor añada mañana se tira hoy: los colores ya usados
+    // viajaban en la respuesta, esta línea se quedaba con cuatro claves, y el desplegable salía
+    // vacío en esta pantalla y lleno en la de al lado — el mismo dato, dos comportamientos.
+    _dcWire = Object.assign({}, d, {
+        rows: d.cables || [], capped: !!d.capped,
+        kinds: d.kinds || _DC_CABLE_KINDS, cats: d.categories || {}});
+    return _dcWire;
+}
+
+/** Una punta, con su nombre y **dónde está**: es media respuesta a «dónde está este cable», y
+ *  la mitad que hace falta para ir a mirarlo. */
+function _dcWireEnd(at, port) {
+    const a = at || {};
+    if (a.foreign) return `<span class="text-muted">${esc(t('dcim_foreign'))}</span>`;
+    const donde = [a.rack || '', a.u ? 'U' + a.u : ''].filter(Boolean).join(' · ');
+    return `${esc(_dcimItemName({label: a.label, role: a.role}))}${
+        port ? ` <span class="text-muted ss-tabular">${esc(port)}</span>` : ''}${
+        donde ? `<div class="text-muted ss-fs-1">${esc(donde)}</div>` : ''}`;
+}
+
+/** La ficha del cable de una fila, **la que sea**: un cable de red y uno de corriente se buscan
+ *  igual y se miran distinto — uno acaba en otro equipo y el otro en una toma. */
+function _dcWireInfo(uid) {
+    const c = ((_dcWire || {}).rows || []).find(x => String(x.uid) === String(uid)) || {};
+    if (c.wire === 'power') return _dcFeedInfo(uid);
+    _dcCableInfo(uid);
+}
+
+//: Las tres maquetas, las mismas que en Equipos: dos listas de la misma sección que se
+//: comportan distinto son dos cosas que aprender por la cara.
+const DCWIRE_VIEWS = [
+    {id: 'table', label_key: 'dcim_dev_v_plain', icon: 'bi-list-ul', render: null,
+     mode: 'table'},
+    {id: 'grouped', label_key: 'dcim_dev_v_grouped', icon: 'bi-table', render: null,
+     mode: 'table'},
+    {id: 'tiles', label_key: 'dcim_dev_v_tiles', icon: 'bi-bar-chart-steps', render: null,
+     mode: 'table'},
+];
+
+//: Por qué se agrupa un cable. Por **tipo** es «de qué tengo montado», por **categoría** la
+//: pregunta fina de compras —cuántos Cat 6A— y por **armario** dónde está el trabajo.
+const DCWIRE_GROUPS = ['kind', 'category', 'rack'];
+let _dcwBy = 'kind';
+function setDcWireBy(k) {
+    _dcwBy = String(k || 'kind');
+    if (typeof _persistTableConfig === 'function') _persistTableConfig();
+    renderDcWire();
+}
+
+const _dcwView = createViewState('ss_dcwire_view', DCWIRE_VIEWS, () => {
+    if (typeof _persistTableConfig === 'function') _persistTableConfig();
+    renderDcWire();
+});
+function setDcWireView(id) { _dcwView.set(id); }
+
+/** En qué montón cae un cable. **Por el armario de su punta A**, cuando se agrupa por armario:
+ *  un cable de sala está en dos, y ponerlo en los dos lo contaría dos veces — que en un recuento
+ *  de «cuántos hay» es exactamente la cifra que no se puede dar. Se cuenta por donde empieza. */
+function _dcWireGroupOf(c) {
+    if (_dcwBy === 'category') return String((c || {}).category || '');
+    if (_dcwBy === 'rack') return String(((c || {}).a_at || {}).rack || '');
+    return String((c || {}).kind || '');
+}
+
+function _dcWireGroupName(k) {
+    if (_dcwBy === 'category') return k ? _dcEnumName(k) : t('dcim_wire_no_cat');
+    if (_dcwBy === 'rack') return k || t('dcim_wire_no_rack');
+    return t('dcim_cable_' + k) || k || t('dcim_wire_no_cat');
+}
+
+function _dcWireGroupOrder(a, b) {
+    return String(_dcWireGroupName(a[0])).localeCompare(String(_dcWireGroupName(b[0])));
+}
+
+function _dcWireBySwitcher() {
+    return `<span class="btn-group btn-group-sm ms-2">${DCWIRE_GROUPS.map(k =>
+        `<button class="btn btn-sm ${_dcwBy === k ? 'btn-primary' : 'btn-secondary'}"
+                 onclick="setDcWireBy(${jsStr(k)})">${esc(t('dcim_wire_by_' + k))}</button>`
+        ).join('')}</span>`;
+}
+
+/** Los recuentos, sobre TODAS las filas filtradas y no sobre la página: un recuento que cambia
+ *  al pasar de página es peor que no contar.
+ *
+ *  Con los metros al lado, que es lo que hace de esto una pregunta de compras y no un censo — y
+ *  diciendo cuántos tramos no están medidos, porque sumar sólo los medidos daría una cifra corta
+ *  y creíble, que es de donde sale el pedido del año que viene. */
+function _dcWireTilesHtml(filas) {
+    const grupos = new Map();
+    (filas || []).forEach(c => {
+        const k = _dcWireGroupOf(c);
+        if (!grupos.has(k)) grupos.set(k, []);
+        grupos.get(k).push(c);
+    });
+    const orden = [...grupos.entries()].sort(_dcWireGroupOrder);
+    if (!orden.length) return '';
+    return `<div class="ss-tiles">${orden.map(([k, cables]) => {
+        let mm = 0;
+        let faltan = 0;
+        cables.forEach(c => {
+            const n = Number(c.length_mm || 0);
+            if (n > 0) mm += n; else faltan += 1;
+        });
+        return `<button class="ss-tile${_dcwPick === k ? ' ss-tile-on' : ''}"
+            onclick="_dcWirePick(${jsStr(k)})">
+            <span class="ss-tile-k">${esc(_dcWireGroupName(k))}</span>
+            <span class="ss-tile-v">${esc(String(cables.length))}</span>
+            ${mm ? `<span class="text-muted ss-fs-1 ss-tabular"
+                title="${escAttr(faltan ? tf('dcim_wire_lane_partial', faltan) : '')}">${
+                esc(_dcMetres(mm))}${faltan ? '+' : ''}</span>` : ''}
+        </button>`;
+    }).join('')}</div>`;
+}
+
+//: Qué recuento está pulsado. De la maqueta y no de la barra de filtros: cambiar de maqueta lo
+//: suelta, y dejarlo puesto escondería filas en una pantalla que ya no tiene dónde decirlo.
+let _dcwPick = null;
+
+function _dcWirePick(k) {
+    _dcwPick = (_dcwPick === k) ? null : k;
+    renderDcWire();
+}
+
+//: Las columnas. Declaradas como en las demás listas del panel, para que se puedan esconder,
+//: reordenar y ensanchar igual que allí.
+const _DCW_COLS = [
+    {id: 'label', label: () => t('dcim_cable_label'), sortKey: 'label', always: true},
+    {id: 'asset', label: () => t('dcim_item_asset_col'), sortKey: 'asset'},
+    {id: 'kind', label: () => t('dcim_cable_kind_col'), sortKey: 'kind'},
+    {id: 'a', label: () => t('dcim_cable_from'), sortKey: 'a'},
+    {id: 'b', label: () => t('dcim_cable_to'), sortKey: 'b'},
+    {id: 'len', label: () => t('dcim_cable_len'), sortKey: 'len', resizable: false},
+];
+const _DCW_DEFAULT_COLS = new Set(['asset', 'kind', 'a', 'b', 'len']);
+
+let _dcwVisibleCols = null;
+let _dcwColOrder = null;
+let _dcwPage = 1;
+let _dcwPageSize = null;
+let _dcwSort = 'label';
+let _dcwSortDir = 'asc';
+let _dcwCurrentPage = [];
+
+/** Con qué se ordena cada columna. Por el nombre del extremo y no por su uid: se ordena por lo
+ *  que se lee, que es lo único que alguien puede predecir mirando la tabla. */
+function _dcwSortValue(c, key) {
+    if (key === 'a') return String((c.a_at || {}).label || '');
+    if (key === 'b') return String((c.b_at || {}).label || '');
+    if (key === 'len') return Number(c.length_mm || 0);
+    if (key === 'kind') return String(c.kind || '');
+    return String(c[key] || '');
+}
+
+createListTable({
+    key: 'dcwire', containerId: 'dcwire-container', tableId: 'dcwire-table',
+    accent: 'blue', icon: 'bi-ethernet', title: () => t('dcim_cables'),
+    columns: _DCW_COLS, defaultVisible: _DCW_DEFAULT_COLS,
+    thClass: {len: 'text-end ss-th-narrow'},
+    // Las tres son la MISMA tabla: lo que cambia es si se agrupa y si lleva recuentos encima.
+    bodyMode: () => _dcwView.mode(),
+    persistExtra: () => ({view: _dcwView.id(), by: _dcwBy}),
+    applyExtra: cfg => {
+        _dcwView.apply(cfg && cfg.view);
+        if (cfg && cfg.by) _dcwBy = String(cfg.by);
+    },
+    groupOf: (c) => (_dcwView.is('grouped') ? _dcWireGroupOf(c || {}) : null),
+    groupLabel: (k) => esc(_dcWireGroupName(k)),
+    beforeBody: (ctx, filas) => (_dcwView.is('tiles') ? _dcWireTilesHtml(filas) : ''),
+    persist: true, clearLabelKey: 'dcim_cables',
+    // Se piden al abrir y se filtran aquí: son los cables de una instalación, no un catálogo de
+    // miles, y un viaje al servidor por cada letra tecleada es una lista que va a tirones.
+    prepare: async () => {
+        if (!_dcWire || _dcWire.rows === null) await _dcWireLoad();
+        return {d: _dcWire || {}};
+    },
+    rows: (ctx) => (ctx.d.rows || []),
+    filters: {
+        fields: (ctx) => [
+            {key: 'q', label: () => t('dcim_cable_label'), type: 'search', grow: true,
+             placeholder: () => t('dcim_wire_find')},
+            {key: 'kind', label: () => t('dcim_cable_kind'), type: 'select', minWidth: '150px',
+             options: () => [{value: '', label: t('all')}].concat(
+                 (ctx.d.kinds || []).map(k => ({value: k, label: t('dcim_cable_' + k) || k})))},
+            {key: 'cat', label: () => t('dcim_cable_cat'), type: 'select', minWidth: '150px',
+             // Las de TODAS las clases juntas: filtrar por categoría sin haber elegido antes de
+             // qué es el cable es lo normal —«cuántos Cat 6A hay»— y obligar a elegir primero
+             // sería pedir que se sepa la respuesta para poder preguntar.
+             options: () => [{value: '', label: t('all')}].concat(
+                 [].concat(...Object.values(ctx.d.cats || {}))
+                   .map(c => ({value: c, label: _dcEnumName(c)})))},
+        ],
+        // El recuento pulsado esconde filas aunque la barra esté vacía, y sin esto la tabla
+        // compartida se salta `match` por no haber nada escrito: se pulsaría y no pasaría nada.
+        always: () => _dcwView.is('tiles') && _dcwPick !== null,
+        match: (c, f) => {
+            const q = (f.q || '').toLowerCase();
+            if (_dcwView.is('tiles') && _dcwPick !== null
+                && _dcWireGroupOf(c) !== _dcwPick) return false;
+            if (f.kind && String(c.kind || '') !== f.kind) return false;
+            if (f.cat && String(c.category || '') !== f.cat) return false;
+            if (!q) return true;
+            return [c.label, c.asset, c.a_port, c.b_port,
+                    (c.a_at || {}).label, (c.b_at || {}).label,
+                    (c.a_at || {}).rack, (c.b_at || {}).rack]
+                .some(x => String(x || '').toLowerCase().includes(q));
+        },
+    },
+    rowKey: (c) => String(c.uid || ''),
+    sortValue: (c, key) => _dcwSortValue(c, key),
+    rowAttrs: (c) => ` class="ss-rowlink" onclick="_dcWireInfo(${jsStr(c.uid)})"`,
+    // Cada celda devuelve su `<td>` entero, que es lo que espera la tabla compartida: así una
+    // columna puede decidir su propia alineación sin que la tabla tenga que saber de cuál se
+    // trata.
+    cell: (c, id) => _dcwCell(c, id),
+    // Que la lista viene recortada se dice EN LA CABECERA y no en un banner sobre la tabla: es
+    // una condición de lo que se está mirando, como el número de filtros activos, y una lista
+    // más corta que la realidad parece completa.
+    headerLead: (ctx) => _dcwView.switcher('setDcWireView')
+        + (_dcwView.is('table') ? '' : _dcWireBySwitcher())
+        + _dcWireCappedHtml(ctx),
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="_dcWireReload()"
+            title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${
+            esc(t('refresh'))}</button>`,
+    emptyState: () => `<div class="text-center py-5 text-muted">
+            <i class="bi bi-ethernet ss-empty-icon"></i>
+            <span>${esc(t('dcim_wire_none'))}</span></div>`,
+    state: {
+        visible: {get: () => _dcwVisibleCols, set: v => { _dcwVisibleCols = v; }},
+        order: {get: () => _dcwColOrder, set: v => { _dcwColOrder = v; }},
+        page: {get: () => _dcwPage, set: v => { _dcwPage = v; }},
+        pageSize: {get: () => _dcwPageSize, set: v => { _dcwPageSize = v; }},
+        sort: {get: () => _dcwSort, set: v => { _dcwSort = v; }},
+        sortDir: {get: () => _dcwSortDir, set: v => { _dcwSortDir = v; }},
+        currentPage: {get: () => _dcwCurrentPage, set: v => { _dcwCurrentPage = v; }},
+    },
+    globalPrefix: {
+        render: 'renderDcWire', goPage: '_goDcWirePage', changePageSize: '_changeDcWirePageSize',
+        sort: '_sortDcWire', toggleCol: '_dcwToggleCol', resetCols: '_resetDcwCols',
+        saveOrder: '_dcwSaveColOrder', initFeatures: '_initDcwTableFeatures',
+    },
+});
+
+/** Que la lista viene recortada, dicho en la cabecera y no en un banner sobre la tabla: es una
+ *  condición de lo que se está mirando, como el número de filtros activos, y una lista más corta
+ *  que la realidad parece completa. */
+function _dcWireCappedHtml(ctx) {
+    return ((ctx || {}).d || {}).capped
+        ? `<span class="badge text-bg-warning fw-normal ms-2"
+                 title="${escAttr(t('dcim_wire_capped'))}">${
+            esc(t('dcim_wire_capped_short'))}</span>` : '';
+}
+
+/** Una celda, con su `<td>`. Fuera de la declaración de la tabla porque son seis y en línea
+ *  ocupan más que todo lo demás junto. */
+function _dcwCell(c, id) {
+    // El del CABLE y, si no lo tiene, el de su rama: un cable de corriente sin color declarado
+    // se sigue leyendo por la rama de la que come, que es lo que se pintaba antes de que un
+    // cable de corriente pudiera tener el suyo.
+    const tinta = c.color || c.branch_color || '';
+    if (id === 'label') return `<td>${tinta ? `<span class="ss-swatch me-1"
+            style="background:${escAttr(tinta)}"></span>` : ''}<span
+        class="fw-semibold">${esc(c.label || '—')}</span></td>`;
+    if (id === 'asset') return `<td class="ss-tabular ss-fs-2">${esc(c.asset || '—')}</td>`;
+    if (id === 'kind') return `<td class="ss-fs-2">${
+        esc([t('dcim_cable_' + c.kind) || c.kind || '',
+             c.category ? _dcEnumName(c.category) : ''].filter(Boolean).join(' · '))}</td>`;
+    if (id === 'a') return `<td class="ss-fs-2">${_dcWireEnd(c.a_at, c.a_port)}</td>`;
+    if (id === 'b') return `<td class="ss-fs-2">${_dcWireEnd(c.b_at, c.b_port)}</td>`;
+    if (id === 'len') return `<td class="text-end ss-tabular ss-fs-2">${
+        Number(c.length_mm || 0) ? esc(_dcMetres(c.length_mm)) : esc('—')}</td>`;
+    return '<td></td>';
+}
+
+/** El hueco donde la tabla compartida se dibuja.
+ *
+ *  La tabla escribe en su contenedor por su cuenta, así que aquí sólo se pone el sitio y se le
+ *  avisa cuando ya está en el documento — igual que el lienzo del alzado y el visor 3D, y por la
+ *  misma razón: antes de estar puesto, un contenedor no existe.
+ */
+function _dcWireHtml() {
+    return `<div id="dcwire-container" class="ss-vfill"></div>`;
 }

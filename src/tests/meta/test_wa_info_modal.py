@@ -315,6 +315,14 @@ class TestUnaFichaQueNoCreceNoOfreceCrecer:
         assert 'modal-max-btn' in cuerpo and 'remove()' in cuerpo, \
             'un modal que no puede estirarse conserva el botón de maximizar'
 
+    def test_y_una_talla_declarada_no_se_ofrece_deshacer(self):
+        """Ni `fit` ni `wide`. Una talla que el que abre ha declarado es una decisión, y un botón
+        para maximizar es ofrecer que no valga: `ss-modal-wide` ya mide 96vw como mucho, así que
+        lo único que añade es alto vacío debajo de lo que se ha venido a leer."""
+        cuerpo = _strip_comments(_fn(_read(BEHAVIORS), '_modalResizable'))
+        for clase in ('ss-modal-fit', 'ss-modal-wide'):
+            assert f"contains('{clase}')" in cuerpo, clase
+
     def test_y_se_vuelve_a_mirar_en_CADA_apertura(self):
         """`show.bs.modal` no basta: Bootstrap no lo emite sobre un modal que YA está abierto, y
         `#infoModal` es justo el que pasa de una ficha a un formulario sin cerrarse en medio.

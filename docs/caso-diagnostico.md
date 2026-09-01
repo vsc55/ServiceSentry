@@ -5,6 +5,105 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## Una ficha para dos listas leyendo el global que sólo rellena una
+
+**Síntoma.** En la sección de Cableado (`/dcim/wiring`) se pulsa una fila, sale la ficha del
+cable, se pulsa «Editar» y **no pasa nada**. Ni la ventana de corrección, ni un aviso, ni un
+error en pantalla: el botón parece muerto. Desde la pestaña «Cableado» de un armario, el mismo
+botón funciona.
+
+**Diagnóstico.** La ficha de un cable es **una sola** para las dos pantallas — se hizo así a
+propósito: dos fichas del mismo cable serían dos formas de escribir lo mismo y la segunda
+tardaría meses en descubrirse. Pero su desplegable de tipo se dibujaba con:
+
+```js
+(_dcCables.kinds || _DC_CABLE_KINDS).map(...)
+```
+
+`_dcCables` es lo que devolvió `/racks/<uid>/cables`, y vale `null` hasta que alguien abre la
+pestaña de un armario. Entrando directamente en la sección de cableado nunca se abre, así que la
+lectura lanza un `TypeError` **antes de dibujar nada**. La excepción sube por el manejador
+`onclick` y muere en la consola: para quien mira, el botón no hizo nada.
+
+No se veía leyendo, porque el `|| _DC_CABLE_KINDS` de al lado tiene toda la pinta de ser la
+guarda — y lo es, pero del contenido, no del contenedor. Se localizó **ejecutando**: se pidió la
+página al `test_client`, se sacó el `<script>` grande —lo mismo que hace
+`test_wa_bundle_syntax.py`— y se cargó en `node` con un DOM de mentira. Con `_dcCables` puesto,
+la ficha abre; con `_dcCables = null` y el cable en `_dcWire.rows`, sale el `TypeError` con su
+número de línea.
+
+**Causa raíz.** Dos pantallas comparten una pieza y la pieza lee **el estado de una de ellas**.
+Mientras sólo existió la primera, leerlo era leer «el estado»; en cuanto hubo una segunda, esa
+lectura pasó a ser una suposición sobre por dónde se ha entrado — y las suposiciones sobre por
+dónde se ha entrado no dan error el día que se escriben.
+
+La segunda mitad del mismo fallo estaba al lado: las dos listas traen el mismo dato del servidor
+con **nombres distintos** (`categories` en una, `cats` en la otra), así que aunque la lectura
+hubiera estado guardada habría devuelto una lista vacía en una de las dos, sin decirlo.
+
+**Solución.** Una función que contesta de qué puede ser un cable mirando **la lista que se está
+mirando**, con las dos formas del nombre normalizadas (`_dcCableVocab`), y la ficha pasando por
+ella. Y una guarda que comprueba que nada de lo que dibuja la ficha —`_dcCableEditDraw`,
+`_dcCatBox`, `_dcCableFormHtml`— vuelva a nombrar `_dcCables`: no que esté guardado —
+`(_dcCables || {})` también lo estaría y ofrecería una lista vacía en silencio— sino que pase por
+la función que sabe mirar en las dos.
+
+De paso salió otro de la misma familia: la ficha decía «Comprobando con lo que ven los
+dispositivos…» también en la sección de cableado, donde no hay contraste a propósito. Un cartel
+de espera que no acaba nunca.
+
+Y un tercero, en el botón de al lado: **«Meter un panel en medio» buscaba el cable en la misma
+lista**, así que desde la sección de cableado la nota salía sin nombres y guardar no hacía nada
+—`if (!c) return`, en silencio—. Tres sitios, un mismo global: por eso lo que se comprueba ahora
+no es cada uno, sino que **ninguna** de las funciones de la ficha lo nombre.
+
+**Lección.** Cuando una pieza pasa a servir a dos pantallas, lo que hay que buscar no son sus
+funciones: son **los globales que lee**. Cada uno es una pregunta —«¿quién rellena esto?»— y si
+la respuesta es «la otra pantalla», ya está el fallo escrito.
+
+Y: la suite lee el fuente y no lo ejecuta, así que esta clase de error —una lectura sobre `null`
+en un camino que ninguna prueba recorre— sólo la ve un navegador. Sacar el guion del panel y
+cargarlo en `node` con cuatro objetos de mentira cuesta media hora y convierte «no pasa nada» en
+un número de línea.
+
+## Una clase de CSS borrada deja el marcado pintando en ninguna parte
+
+**Síntoma.** En la fila de recuentos de Equipos, el punto de color que acompaña a «Bien» o «Sin
+vigilar» deja de verse. La palabra está, el número está, y donde iba el punto no hay nada — ni un
+hueco, ni un cuadrado sin color: nada.
+
+**Diagnóstico.** El marcado seguía siendo el correcto:
+
+```js
+<span class="ss-dot" style="background:${escAttr(hostStateColor(k))}"></span>
+```
+
+Lo que faltaba era la regla. `.ss-dot` daba el tamaño y la forma —`width`, `height`,
+`border-radius`— y un `<span>` sin ellas mide **cero por cero**: un fondo de color sobre una caja
+sin superficie. El navegador lo pinta perfectamente y no se ve.
+
+Se había ido al limpiar: al quitar dos maquetas descartadas se cortó el bloque de CSS de los
+carriles «de aquí hasta la siguiente sección», y `.ss-dot` estaba dentro de ese tramo aunque no
+tuviera nada que ver con ellos.
+
+**Causa raíz.** Es la forma de siempre en otro idioma. Lo que se escribe y no se lleva vale su
+valor por defecto, y **el valor por defecto de una clase que no existe es «nada»**. Ninguna
+herramienta se queja: no es un error de sintaxis en el CSS —la regla no está—, ni un error en el
+JavaScript —la clase se escribe igual—, ni lo ve una prueba, porque ninguna ejecuta el guion ni
+carga la hoja de estilos.
+
+Y borrar por rango es especialmente propenso a esto: lo que se corta se elige por dónde está, no
+por qué es.
+
+**Solución.** La regla, de vuelta. Y una guarda que recoge todas las clases `ss-` que usan las
+plantillas de la sección y comprueba que cada una tenga al menos una regla en `web_admin.css`.
+Con `.ss-dot` quitada a mano, falla.
+
+**Lección.** Una clase usada y no definida es un fallo silencioso con la misma forma que una
+columna que nadie escribe o un campo que no viaja. Donde hay dos ficheros que tienen que estar de
+acuerdo —el que nombra y el que define— hace falta algo que compruebe el acuerdo; que cada uno
+por separado sea correcto no dice nada.
+
 ## Una guarda que comprobaba el sufijo y no la clave
 
 **Síntoma.** En la ficha de un equipo del armario, la casilla «Modelo» enseña

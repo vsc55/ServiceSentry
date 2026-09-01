@@ -75,6 +75,17 @@ HOME_PAGES = (
                         # decide qué se compra, no cuando se monta un armario.
                         {'slug': 'builds', 'icon': 'bi-boxes', 'kind': '', 'action': '',
                          'label_i18n': {'es_ES': 'Plantillas', 'en_EN': 'Templates'}},
+                        # El cableado, fuera de su armario. Dentro de un rack se contesta
+                        # «qué sale de aquí»; aquí se contesta «dónde está el cable C-014» y
+                        # «cuántos latiguillos de Cat 6A hay puestos», que obligaban a saber el
+                        # armario ANTES de poder buscar — lo contrario de buscar.
+                        # Los equipos, fuera de su armario. La misma idea que el cableado
+                        # un nivel más abajo: «qué servidores hay en esta sede» y «qué se queda
+                        # sin garantía este trimestre» obligaban a abrir armario por armario.
+                        {'slug': 'devices', 'icon': 'bi-hdd-stack', 'kind': '', 'action': '',
+                         'label_i18n': {'es_ES': 'Equipos', 'en_EN': 'Devices'}},
+                        {'slug': 'wiring', 'icon': 'bi-ethernet', 'kind': '', 'action': '',
+                         'label_i18n': {'es_ES': 'Cableado', 'en_EN': 'Cabling'}},
                         {'slug': 'sources', 'icon': 'bi-lightning-charge', 'kind': '',
                          'action': '',
                          'label_i18n': {'es_ES': 'Fuentes', 'en_EN': 'Sources'}},

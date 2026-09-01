@@ -63,9 +63,39 @@ function _dceWideToggle() {
  *  Envuelto aquí y no llamado a pelo desde la barra para que el nombre del armario —que lo
  *  teclea alguien— no viaje interpolado en una plantilla. Acaba en un `jsStr` dentro del lienzo,
  *  pero la guarda de escapado no puede saberlo desde aquí, y tiene razón en no fiarse. */
+//: Si el alzado escribe el nombre dentro de cada caja. **Encendido**, que es lo normal: un
+//: armario sin rótulos no dice qué hay dentro.
+//:
+//: Apagado sirve para lo contrario, que también hace falta: ver la FORMA. Con diez cajas y sus
+//: nombres encima, lo que se pierde es el dibujo — dónde quedan los huecos, qué ocupa media U,
+//: qué hay montado sobre qué. Y para llevarse la foto a una presentación, donde los nombres de
+//: la casa no pintan nada.
+let _dceNames = true;
+
+function _dceNamesToggle() {
+    _dceNames = !_dceNames;
+    // `renderDcim` y no sólo el dibujo: el propio botón cambia de color al encenderse, y
+    // repintar el SVG lo dejaría apagado sobre un armario con rótulos. **Sin `ssCanvasReset`**,
+    // al revés que el de agrandar: aquí el dibujo mide lo mismo, y devolver el encuadre a su
+    // sitio movería lo que se está mirando por quitar unas letras.
+    renderDcim();
+}
+
+/** Los botones del dibujo. Los de siempre —zoom, encuadre, exportar— y el de los rótulos, que
+ *  es de esta pantalla y no del lienzo: un mapa de sedes no tiene cajas que rotular. */
 function _dceTools(rack) {
     const r = rack || {};
-    return ssCanvasTools(_DCE_SVG, 'rack-' + String(r.name || r.uid || ''), '');
+    // Compuestos ANTES de la plantilla: la guarda que comprueba el escapado lee las
+    // interpolaciones una a una, y una que además nombra un campo escrito por alguien no le
+    // deja ver por dónde sale. Tiene razón en quejarse — mejor no darle motivo.
+    const lienzo = ssCanvasTools(_DCE_SVG, 'rack-' + String(r.name || r.uid || ''), '');
+    return `${lienzo}
+        <span class="btn-group btn-group-sm ms-2">
+            <button class="btn btn-sm ${_dceNames ? 'btn-primary' : 'btn-secondary'}"
+                    onclick="_dceNamesToggle()"
+                    title="${escAttr(t('dcim_elev_names'))}">
+                <i class="bi bi-tag"></i></button>
+        </span>`;
 }
 
 //: El arrastre en curso: `{uid, u, size, face, from, moved}`. `u` es la U que se está enseñando
@@ -329,7 +359,8 @@ function _dcimElevation(rack, items) {
          Con su hueco reservado aunque no haya nada señalado: si apareciera y desapareciera, el
          dibujo daría un salto de dos centímetros cada vez que el ratón entra y sale de una caja,
          que es la clase de temblor que hace imposible apuntar. -->
-    <div id="dcimElevPanel" class="ss-elev-info"></div>`;
+    <div id="dcimElevPanel" class="ss-elev-info"></div>
+    ${_dceBesideHtml(items)}`;
 }
 
 function _dceContent(rack, items) {
@@ -337,6 +368,30 @@ function _dceContent(rack, items) {
 }
 
 /** One face: its caption, its U numbers, and the empty rails behind everything. */
+/** Lo que está en el armario **sin ocupar U**, dicho debajo del dibujo.
+ *
+ *  Dicho y no escondido, que es la misma decisión de siempre: un SAI en el suelo al lado, un
+ *  cuadro en la pared o la regleta del lateral no tienen U donde dibujarse, y desaparecer del
+ *  alzado los convertiría en cosas que hay que recordar. Esconder es lo que hace dudar de un
+ *  dibujo — quien cuenta cajas se queda preguntando si falta algo.
+ *
+ *  Con su nombre y pulsables, como cualquier otra caja: lo único que no tienen es sitio en la
+ *  rejilla. */
+function _dceBesideHtml(items) {
+    const fuera = (items || []).filter(
+        i => !i.parent_uid && String(i.placement || 'u') !== 'u');
+    if (!fuera.length) return '';
+    return `<div class="ss-fs-2 text-muted mt-1">
+        <i class="bi bi-box-arrow-right me-1"></i>${esc(t('dcim_elev_beside'))}
+        ${fuera.map(i => `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1"
+                onclick="_dcimOpen('edit','item','',${jsStr(i.uid)})"
+                title="${escAttr(t('dcim_place_' + String(i.placement || 'u')))}">
+            <span class="ss-dot me-1" style="background:${
+                escAttr(hostStateColor(i.state || ''))}"></span>${
+            esc(_dcimItemName(i))}</button>`).join('')}
+    </div>`;
+}
+
 function _dceFace(rack, items, face) {
     const h = Number(rack.u_height || 0);
     const x = _dceFaceX(face);
@@ -356,6 +411,10 @@ function _dceFace(rack, items, face) {
         // Lo montado en otra cosa no se dibuja aparte: hereda el sitio de quien lo lleva y
         // saldría justo encima. Se cuenta en el bloque de la bandeja y se lee en la tabla.
         if (i.parent_uid) return false;
+        // Y lo que no se atornilla a los mástiles tampoco: no tiene U donde dibujarlo. Ponerlo
+        // en la U 1 por no dejarlo fuera sería dibujar un armario que no existe — un SAI en el
+        // suelo no está en la U 1, y un alzado que miente es peor que uno que dice menos.
+        if (String(i.placement || 'u') !== 'u') return false;
         const f = String(i.face || 'full');
         return f === 'full' || f === face;
     });
@@ -462,9 +521,9 @@ function _dceItem(rack, item, face) {
         ${kids.length ? '' : _dceFoto(item, face, x, y, w, h)}
         <rect x="${x + 2}" y="${y + 1}" width="4" height="${h - 2}" rx="2"
               fill="${tone}"></rect>
-        <text x="${x + 14}" y="${y + h / 2 + 4}" font-size="11"
+        ${_dceNames ? `<text x="${x + 14}" y="${y + h / 2 + 4}" font-size="11"
               fill="${item.foreign ? 'var(--bs-secondary-color)' : 'currentColor'}"
-              >${esc(_dceClip(name, Math.max(6, Math.round(34 * rotulo / _DCE.W))))}</text>
+              >${esc(_dceClip(name, Math.max(6, Math.round(34 * rotulo / _DCE.W))))}</text>` : ''}
         ${item.foreign ? `<text x="${x + w - 10}" y="${y + h / 2 + 4}" font-size="10"
               text-anchor="end" fill="var(--bs-secondary-color)">&#128274;</text>`
             : _dceMarks(item, x, y, rotulo, h) + _dcePartsBtn(item, x, y, rotulo, h)}
@@ -530,9 +589,9 @@ function _dceKids(rack, padre, face) {
             ${_dceFoto(kid, face, r.x + 1, r.y - 2, r.w - 2, r.h + 4)}
             <rect x="${r.x + 1}" y="${r.y}" width="3" height="${r.h}" rx="1.5"
                   fill="${tone}"></rect>
-            <text x="${r.x + 9}" y="${r.y + r.h / 2 + 3.5}" font-size="9.5"
+            ${_dceNames ? `<text x="${r.x + 9}" y="${r.y + r.h / 2 + 3.5}" font-size="9.5"
                   fill="currentColor">${
-                esc(_dceClip(name, Math.max(3, Math.round(r.w / 6))))}</text>
+                esc(_dceClip(name, Math.max(3, Math.round(r.w / 6))))}</text>` : ''}
         </g>`;
     }).join('');
 }

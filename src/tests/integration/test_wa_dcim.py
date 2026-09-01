@@ -4829,3 +4829,712 @@ class TestUnCableEsInventario:
         assert d['checked'] is True
         c = [x for x in d['cables'] if x['b_item'] == pp][0]
         assert c['b_item'] == pp
+
+
+class TestElInventarioDeLosCables:
+    """El número de inventario no es la etiqueta, y un cable de corriente es un cable."""
+
+    def _rack(self, client, nombre):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        return client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+
+    def test_un_cable_de_datos_tiene_numero_ademas_de_etiqueta(self, admin, client):
+        _login(client)
+        rack = self._rack(client, 'RK-inv3')
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1, 'label': 'A'}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2, 'label': 'B'}).get_json()['uid']
+        client.post('/api/v1/dcim/cables',
+                    json={'a_item': a, 'b_item': b, 'label': 'C-014', 'asset': 'INV-2211'})
+        c = client.get(f'/api/v1/dcim/racks/{rack}/cables').get_json()['cables'][0]
+        # Los dos, y distintos: meterlos en una casilla obliga a elegir cuál se pierde.
+        assert c['label'] == 'C-014' and c['asset'] == 'INV-2211'
+
+    def test_y_el_de_corriente_tambien(self, admin, client):
+        _login(client)
+        rack = self._rack(client, 'RK-inv4')
+        it = client.post('/api/v1/dcim/items',
+                         json={'rack_uid': rack, 'u_start': 1, 'label': 'A'}).get_json()['uid']
+        pdu = client.post('/api/v1/dcim/pdus',
+                          json={'rack_uid': rack, 'name': 'P', 'feed': 'a',
+                                'outlets': 8}).get_json()['uid']
+        r = client.post('/api/v1/dcim/feeds',
+                        json={'item_uid': it, 'pdu_uid': pdu, 'outlet': 1,
+                              'label': 'P-07', 'asset': 'INV-991', 'category': 'c13-c14',
+                              'length_mm': 500, 'description': 'por detrás'})
+        assert r.status_code == 200, r.get_json()
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        f = d['items'][0]['feeds'][0]
+        assert f['asset'] == 'INV-991' and f['category'] == 'c13-c14'
+        assert f['length_mm'] == 500 and f['label'] == 'P-07'
+
+    def test_y_se_puede_corregir_despues(self, admin, client):
+        """Un cable se apunta con prisa —se está montando— y se completa después."""
+        _login(client)
+        rack = self._rack(client, 'RK-inv5')
+        it = client.post('/api/v1/dcim/items',
+                         json={'rack_uid': rack, 'u_start': 1, 'label': 'A'}).get_json()['uid']
+        pdu = client.post('/api/v1/dcim/pdus',
+                          json={'rack_uid': rack, 'name': 'P', 'feed': 'a',
+                                'outlets': 8}).get_json()['uid']
+        cable = client.post('/api/v1/dcim/feeds',
+                            json={'item_uid': it, 'pdu_uid': pdu,
+                                  'outlet': 1}).get_json()['uid']
+        r = client.put(f'/api/v1/dcim/feeds/{cable}',
+                       json={'asset': 'INV-992', 'length_mm': 250, 'category': 'c19-c20'})
+        assert r.status_code == 200, r.get_json()
+        f = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()['items'][0]['feeds'][0]
+        assert f['asset'] == 'INV-992' and f['length_mm'] == 250
+        # Y sin perder dónde está enchufado, que es lo que se perdía borrando y reescribiendo.
+        assert f['outlet'] == 1
+
+    def test_las_categorias_de_corriente_viajan_con_la_respuesta(self, admin, client):
+        _login(client)
+        rack = self._rack(client, 'RK-inv6')
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert 'c13-c14' in (d.get('categories') or [])
+
+
+class TestElCableadoFueraDeSuArmario:
+    """«¿Dónde está el cable C-014?» y «¿cuántos latiguillos de Cat 6A hay puestos?» obligaban a
+    saber el armario ANTES de poder buscar, que es lo contrario de buscar.
+    """
+
+    def _dos(self, client, nombre, **cable):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1, 'label': 'A'}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2, 'label': 'B'}).get_json()['uid']
+        client.post('/api/v1/dcim/cables', json=dict({'a_item': a, 'b_item': b}, **cable))
+        return rack
+
+    def test_se_busca_sin_decir_el_armario(self, admin, client):
+        _login(client)
+        self._dos(client, 'RK-w1', label='C-014', asset='INV-77', category='cat6a',
+                  kind='copper')
+        d = client.get('/api/v1/dcim/cables?q=c-014').get_json()
+        assert [c['label'] for c in d['cables']] == ['C-014']
+        # Y dice DÓNDE está, que es la otra mitad de la respuesta.
+        assert d['cables'][0]['a_at']['rack'] == 'RK-w1'
+
+    def test_tambien_por_numero_de_inventario(self, admin, client):
+        _login(client)
+        self._dos(client, 'RK-w2', label='X', asset='INV-4242')
+        d = client.get('/api/v1/dcim/cables?q=inv-4242').get_json()
+        assert [c['asset'] for c in d['cables']] == ['INV-4242']
+
+    def test_y_se_filtra_por_categoria(self, admin, client):
+        """«Cuántos latiguillos de Cat 6A hay puestos» es una pregunta de compras, no de un
+        armario."""
+        _login(client)
+        self._dos(client, 'RK-w3', label='SEIS', category='cat6a')
+        self._dos(client, 'RK-w4', label='CINCO', category='cat5e')
+        d = client.get('/api/v1/dcim/cables?category=cat6a').get_json()
+        etiquetas = [c['label'] for c in d['cables']]
+        assert 'SEIS' in etiquetas and 'CINCO' not in etiquetas
+
+    def test_un_cable_entre_dos_ajenos_no_sale(self, admin, client, fleet):
+        """Se estrecha como todo lo demás."""
+        _login(client)
+        client.post('/api/v1/dcim/cables',
+                    json={'a_item': fleet['mine'], 'b_item': fleet['theirs'], 'label': 'MIXTO'})
+        c = _as(admin, 'wire-b', ['dcim_view', f'org.{fleet["b"]}.view'])
+        d = c.get('/api/v1/dcim/cables').get_json()
+        # El suyo sale —un extremo es suyo— y del otro extremo no se dice nada.
+        fila = [x for x in d['cables'] if x['label'] == 'MIXTO']
+        assert len(fila) == 1
+        assert fila[0]['a_at']['foreign'] is True and fila[0]['b_at']['foreign'] is False
+
+    def test_y_esta_pantalla_no_contrasta(self, admin, client):
+        """Contrastar es una pregunta sobre UN armario: armar el mapa de la flota para listar
+        cables de seis salas sería pagarlo seis veces por un dato que no se usa."""
+        _login(client)
+        self._dos(client, 'RK-w5', label='Z')
+        d = client.get('/api/v1/dcim/cables').get_json()
+        assert all('seen' not in c for c in d['cables'])
+
+
+class TestLaListaLlevaLosDosCables:
+    """Un cable de red y uno de corriente son la misma pregunta —dónde está, cuántos de esta
+    clase hay puestos— y viven en dos tablas por dónde acaban, no por lo que son. Dos listas
+    obligarían a buscar dos veces lo mismo y a acordarse de cuál mirar.
+    """
+
+    def test_salen_los_de_red_y_los_de_corriente(self, admin, client):
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': 'RK-w9'}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'RK-w9',
+                                 'u_height': 10}).get_json()['uid']
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1, 'label': 'A'}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2, 'label': 'B'}).get_json()['uid']
+        pdu = client.post('/api/v1/dcim/pdus',
+                          json={'rack_uid': rack, 'name': 'PDU-A', 'feed': 'a',
+                                'outlets': 8}).get_json()['uid']
+        client.post('/api/v1/dcim/cables', json={'a_item': a, 'b_item': b, 'label': 'RED-1'})
+        client.post('/api/v1/dcim/feeds', json={'item_uid': a, 'pdu_uid': pdu, 'outlet': 3,
+                                                'label': 'LUZ-1'})
+        d = client.get('/api/v1/dcim/cables').get_json()
+        clases = {c['label']: c['wire'] for c in d['cables']}
+        assert clases.get('RED-1') == 'data' and clases.get('LUZ-1') == 'power'
+        # Y la regleta hace de segunda punta: tiene nombre y está en un armario, que es lo que
+        # se necesita de una punta. Su «boca» es el número de toma.
+        luz = [c for c in d['cables'] if c['label'] == 'LUZ-1'][0]
+        assert luz['b_at']['label'] == 'PDU-A' and luz['b_at']['rack'] == 'RK-w9'
+        assert luz['b_port'] == '3'
+
+    def test_y_las_categorias_de_los_dos_viajan_juntas(self, admin, client):
+        """La pantalla ofrece las que valen para lo que se está filtrando, y para eso tienen que
+        llegar juntas."""
+        _login(client)
+        d = client.get('/api/v1/dcim/cables').get_json()
+        cats = d['categories'] or {}
+        assert 'cat6a' in (cats.get('copper') or [])
+        assert 'c13-c14' in (cats.get('power') or [])
+
+
+class TestBuscarPorElNombreDeUnExtremo:
+    """Buscar un cable por lo que hay en sus puntas —«el latiguillo de SW01»— es lo normal, y ese
+    nombre está en otra tabla: se resuelve antes a identificadores para poder preguntar por
+    ellos, en vez de traerse los cables de toda la instalación para mirarles las puntas.
+    """
+
+    def _sala(self, client, nombre):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1,
+                              'label': 'SW-NUCLEO'}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2,
+                              'label': 'SRV-99'}).get_json()['uid']
+        client.post('/api/v1/dcim/cables', json={'a_item': a, 'b_item': b, 'label': 'X-1'})
+        return rack
+
+    def test_por_el_nombre_del_equipo(self, admin, client):
+        _login(client)
+        self._sala(client, 'RK-nom-a')
+        d = client.get('/api/v1/dcim/cables?q=sw-nucleo').get_json()
+        assert [c['label'] for c in d['cables']] == ['X-1']
+
+    def test_y_por_el_nombre_del_armario(self, admin, client):
+        _login(client)
+        self._sala(client, 'RK-nom-b')
+        d = client.get('/api/v1/dcim/cables?q=rk-nom-b').get_json()
+        assert [c['label'] for c in d['cables']] == ['X-1']
+
+    def test_lo_que_no_esta_no_sale(self, admin, client):
+        """Se buscó algo y no lo tiene nadie: cero filas, no todas."""
+        _login(client)
+        self._sala(client, 'RK-nom-c')
+        assert client.get('/api/v1/dcim/cables?q=zzz-no-existe').get_json()['cables'] == []
+
+    def test_un_guion_bajo_no_es_un_comodin(self, admin, client):
+        """Sin escaparlo, `_` encuentra cualquier cosa: un buscador que ignora lo que se le pide
+        contesta, que es peor que no encontrar nada."""
+        _login(client)
+        self._sala(client, 'RK-nom-d')
+        assert client.get('/api/v1/dcim/cables?q=x_1').get_json()['cables'] == []
+
+    def test_los_equipos_se_buscan_igual(self, admin, client):
+        _login(client)
+        self._sala(client, 'RK-nom-e')
+        d = client.get('/api/v1/dcim/items?q=srv-9').get_json()
+        assert 'SRV-99' in [i['label'] for i in d['items']]
+        assert client.get('/api/v1/dcim/items?q=srv_9').get_json()['items'] == []
+
+
+class TestLosEquiposFueraDeSuArmario:
+    """La lista de equipos vive dentro de su rack, así que «qué servidores hay en esta sede» y
+    «qué se queda sin garantía este trimestre» obligaban a abrir armario por armario. El dato ya
+    estaba: era la pantalla la que faltaba.
+    """
+
+    def _sala(self, client, nombre, **item):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 10}).get_json()['uid']
+        uid = client.post('/api/v1/dcim/items',
+                          json=dict({'rack_uid': rack, 'u_start': 1}, **item)).get_json()['uid']
+        return sede, rack, uid
+
+    def test_cada_equipo_dice_donde_esta_del_todo(self, admin, client):
+        """Hasta la SEDE: «qué servidores hay en esta sede» sube dos niveles por encima del
+        armario, y eso no está en la fila del equipo."""
+        _login(client)
+        self._sala(client, 'DC-uno', label='SRV-A', role='server')
+        fila = [i for i in client.get('/api/v1/dcim/items?limit=200').get_json()['items']
+                if i['label'] == 'SRV-A'][0]
+        assert fila['rack'] == 'DC-uno' and fila['site'] == 'DC-uno'
+        assert fila['role'] == 'server'
+
+    def test_trae_lo_que_solo_tiene_ESA_caja(self, admin, client):
+        """El número de serie, el de inventario y la garantía: sin ellos la lista es un
+        recuento, y «qué se queda sin cobertura» no tiene dónde contestarse."""
+        _login(client)
+        self._sala(client, 'DC-dos', label='SRV-B', serial='SN-1', asset='INV-1',
+                   warranty_until='2030-01-01', supplier='Casa')
+        fila = [i for i in client.get('/api/v1/dcim/items?limit=200').get_json()['items']
+                if i['label'] == 'SRV-B'][0]
+        assert fila['serial'] == 'SN-1' and fila['asset'] == 'INV-1'
+        assert fila['warranty_until'] == '2030-01-01' and fila['supplier'] == 'Casa'
+
+    def test_se_filtra_por_sede(self, admin, client):
+        _login(client)
+        sede, _r, _u = self._sala(client, 'DC-tres', label='AQUI')
+        self._sala(client, 'DC-cuatro', label='ALLI')
+        d = client.get(f'/api/v1/dcim/items?limit=200&site={sede}').get_json()
+        etiquetas = [i['label'] for i in d['items']]
+        assert 'AQUI' in etiquetas and 'ALLI' not in etiquetas
+
+    def test_una_sede_sin_armarios_da_cero_y_no_todos(self, admin, client):
+        """Un `IN` vacío es «ninguno». Sin condición saldrían todos, que es la respuesta
+        contraria y creíble."""
+        _login(client)
+        vacia = client.post('/api/v1/dcim/sites', json={'name': 'DC-vacia'}).get_json()['uid']
+        self._sala(client, 'DC-cinco', label='ALGO')
+        d = client.get(f'/api/v1/dcim/items?limit=200&site={vacia}').get_json()
+        assert d['items'] == []
+
+    def test_y_el_tope_no_lo_decide_quien_llama(self, admin, client):
+        """`limit` se acota: una URL escrita a mano no puede pedir la instalación entera."""
+        _login(client)
+        self._sala(client, 'DC-seis', label='UNO')
+        d = client.get('/api/v1/dcim/items?limit=99999').get_json()
+        assert len(d['items']) <= 200
+
+
+class TestEstarEnUnArmarioSinOcuparU:
+    """Un SAI en el suelo al lado, un cuadro en la pared, una regleta atornillada al lateral:
+    ocupan sitio, se alimentan, se cablean y hay que ir a mirarlos, y lo único que no tienen es
+    U. **Una sola decisión y no cinco casos particulares.**
+    """
+
+    def _rack(self, client, nombre, alto=2):
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        return client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': alto}).get_json()['uid']
+
+    def test_cabe_en_un_armario_lleno(self, admin, client):
+        """Un SAI en el suelo no deja de caber porque el armario esté lleno: preguntarle si cabe
+        sería preguntarle por un sitio que no ocupa."""
+        _login(client)
+        rack = self._rack(client, 'RK-al-lado', alto=1)
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'u_start': 1, 'u_height': 1, 'label': 'LLENO'})
+        r = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'label': 'SAI', 'role': 'ups',
+                              'placement': 'near'})
+        assert r.status_code == 200, r.get_json()
+
+    def test_y_no_le_quita_el_sitio_a_nada(self, admin, client):
+        _login(client)
+        rack = self._rack(client, 'RK-al-lado2', alto=4)
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'label': 'SAI', 'placement': 'near'})
+        d = client.get(f'/api/v1/dcim/racks/{rack}').get_json()
+        # Las cuatro U siguen libres: lo que no ocupa, no ocupa.
+        assert d['free']['count'] == 4
+
+    def test_pero_sigue_estando_EN_el_armario(self, admin, client):
+        """Se alimenta, se cablea y hay que ir a mirarlo: lo único que no hace es quitar sitio.
+        Sacarlo de la lista lo convertiría en algo que hay que recordar."""
+        _login(client)
+        rack = self._rack(client, 'RK-al-lado3', alto=4)
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'label': 'SAI',
+                                'placement': 'near'}).get_json()['uid']
+        d = client.get(f'/api/v1/dcim/racks/{rack}').get_json()
+        assert uid in [i['uid'] for i in d['items']]
+        assert [i['placement'] for i in d['items'] if i['uid'] == uid] == ['near']
+
+    def test_una_forma_de_estar_puesto_que_no_existe_se_rechaza(self, admin, client):
+        _login(client)
+        rack = self._rack(client, 'RK-al-lado4')
+        r = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'label': 'X', 'placement': 'flotando'})
+        assert r.status_code == 400, r.get_json()
+
+    def test_lo_de_siempre_sigue_ocupando(self, admin, client):
+        """`u` es el valor por defecto: todo lo escrito antes de esta columna se atornilló a los
+        mástiles, que es lo que de verdad hizo."""
+        _login(client)
+        rack = self._rack(client, 'RK-al-lado5', alto=1)
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'u_start': 1, 'u_height': 1, 'label': 'A'})
+        r = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1, 'u_height': 1, 'label': 'B'})
+        assert r.status_code == 400, 'dos cosas en el mismo U dejaron de chocar'
+
+    def test_lo_montado_encima_hereda_como_esta_puesto(self, admin, client):
+        """Lo que va sobre una bandeja que está al lado del armario está también al lado: si no
+        lo heredara, el alzado dibujaría media bandeja."""
+        _login(client)
+        rack = self._rack(client, 'RK-al-lado6', alto=4)
+        bandeja = client.post('/api/v1/dcim/items',
+                              json={'rack_uid': rack, 'label': 'Bandeja', 'role': 'shelf',
+                                    'placement': 'near'}).get_json()['uid']
+        hijo = client.post('/api/v1/dcim/items',
+                           json={'rack_uid': rack, 'label': 'MiniPC',
+                                 'parent_uid': bandeja}).get_json()['uid']
+        d = client.get(f'/api/v1/dcim/racks/{rack}').get_json()
+        assert [i['placement'] for i in d['items'] if i['uid'] == hijo] == ['near']
+
+    def test_y_una_regleta_del_lateral_es_el_MISMO_caso(self, admin, client):
+        """Existía como regleta y no como equipo, que es un caso particular con nombre propio.
+        Con `side` es un equipo del armario que no ocupa U, y se puede declarar como regleta."""
+        _login(client)
+        rack = self._rack(client, 'RK-al-lado7', alto=2)
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'label': 'Regleta lateral', 'role': 'pdu',
+                                'placement': 'side'}).get_json()['uid']
+        r = client.post('/api/v1/dcim/pdus',
+                        json={'rack_uid': rack, 'item_uid': uid, 'name': 'Regleta lateral',
+                              'feed': 'a', 'outlets': 8})
+        assert r.status_code == 200, r.get_json()
+        d = client.get(f'/api/v1/dcim/racks/{rack}/power').get_json()
+        assert [p['item_uid'] for p in d['pdus']] == [uid]
+        # Y las dos U siguen libres.
+        assert client.get(f'/api/v1/dcim/racks/{rack}').get_json()['free']['count'] == 2
+
+
+class TestMoverAlgoFueraDeLosMastilesLeQuitaLaU:
+    """Un equipo que se mueve de los mástiles al suelo conservaba la U que tenía, y una lista que
+    lee `u_start` la enseña tan tranquila: «SAI · U1» en un armario donde no está.
+    """
+
+    def test_al_moverlo_deja_de_tener_U(self, admin, client):
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': 'RK-mv'}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'RK-mv',
+                                 'u_height': 4}).get_json()['uid']
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 2, 'u_height': 2,
+                                'label': 'SAI'}).get_json()['uid']
+        r = client.put(f'/api/v1/dcim/items/{uid}', json={'placement': 'near'})
+        assert r.status_code == 200, r.get_json()
+        fila = [i for i in client.get(f'/api/v1/dcim/racks/{rack}').get_json()['items']
+                if i['uid'] == uid][0]
+        assert fila['u_start'] == 0 and fila['u_height'] == 0
+        # Y las cuatro U vuelven a estar libres.
+        assert client.get(f'/api/v1/dcim/racks/{rack}').get_json()['free']['count'] == 4
+
+    def test_y_al_volver_a_los_mastiles_hay_que_decir_donde(self, admin, client):
+        """Cero no es una U: volver a atornillarlo es volver a decir a qué altura."""
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': 'RK-mv2'}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'RK-mv2',
+                                 'u_height': 4}).get_json()['uid']
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'label': 'SAI',
+                                'placement': 'near'}).get_json()['uid']
+        # Sin decir la U, no cabe en ninguna: se rechaza en vez de colarlo en la 1.
+        assert client.put(f'/api/v1/dcim/items/{uid}',
+                          json={'placement': 'u'}).status_code == 400
+        assert client.put(f'/api/v1/dcim/items/{uid}',
+                          json={'placement': 'u', 'u_start': 3,
+                                'u_height': 1}).status_code == 200
+
+
+class TestElNumeroDeInventarioLoPoneElPanel:
+    """Único entre TODO lo inventariado, y el siguiente no se teclea.
+
+    Quien numera un armario entero escribe cuarenta veces un número que ya está decidido, y la
+    vez que se equivoca no lo dice nadie: el duplicado aparece meses después, cuando dos fichas
+    dicen ser la misma cosa. Por eso lo resuelve el servidor y no la pantalla — dos personas
+    numerando a la vez desde dos pantallas verían las dos el mismo «siguiente».
+    """
+
+    def _rack(self, client, nombre):
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        return client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre,
+                                 'u_height': 42}).get_json()['uid']
+
+    def test_el_comodin_se_convierte_en_el_siguiente(self, admin, client):
+        rack = self._rack(client, 'INV-a')
+        uno = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 1, 'asset': 'INV-?'})
+        dos = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 2, 'asset': 'INV-?'})
+        assert uno.get_json()['asset'] == 'INV-1'
+        assert dos.get_json()['asset'] == 'INV-2'
+
+    def test_y_con_tres_se_rellena_a_tres_cifras(self, admin, client):
+        rack = self._rack(client, 'INV-b')
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'u_start': 1, 'asset': 'INV-45'})
+        r = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2, 'asset': 'INV-???'})
+        assert r.get_json()['asset'] == 'INV-046'
+
+    def test_lo_que_se_guarda_es_lo_que_se_devuelve(self, admin, client):
+        """El panel lo dice en un aviso, y decir uno y guardar otro sería peor que callarse."""
+        rack = self._rack(client, 'INV-c')
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 1,
+                                'asset': 'INV-?'}).get_json()['uid']
+        fila = [i for i in client.get(f'/api/v1/dcim/racks/{rack}').get_json()['items']
+                if i['uid'] == uid][0]
+        assert fila['asset'] == 'INV-1'
+
+    def test_un_numero_repetido_no_llega_a_escribirse(self, admin, client):
+        rack = self._rack(client, 'INV-d')
+        client.post('/api/v1/dcim/items',
+                    json={'rack_uid': rack, 'u_start': 1, 'asset': 'INV-9'})
+        r = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2, 'asset': 'inv-9'})
+        assert r.status_code == 400
+
+    def test_ni_aunque_sea_de_otra_clase_de_cosa(self, admin, client):
+        """En el albarán hay UNA lista: un latiguillo y un servidor no pueden ser el 45."""
+        rack = self._rack(client, 'INV-e')
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1,
+                              'asset': 'INV-45'}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2}).get_json()['uid']
+        choca = client.post('/api/v1/dcim/cables',
+                            json={'a_item': a, 'b_item': b, 'a_port': '1', 'b_port': '2',
+                                  'asset': 'INV-45'})
+        assert choca.status_code == 400
+        sigue = client.post('/api/v1/dcim/cables',
+                            json={'a_item': a, 'b_item': b, 'a_port': '3', 'b_port': '4',
+                                  'asset': 'INV-?'})
+        assert sigue.get_json()['asset'] == 'INV-46'
+
+    def test_el_armario_tambien_lleva_numero(self, admin, client):
+        """Lo llevaban el equipo y los dos cables, y el mueble que los sostiene no."""
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': 'INV-f'}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        client.post('/api/v1/dcim/racks', json={'room_uid': sala, 'name': 'R1',
+                                                'asset': 'RACK-7'})
+        r = client.post('/api/v1/dcim/racks', json={'room_uid': sala, 'name': 'R2',
+                                                    'asset': 'RACK-?'})
+        assert r.status_code == 200
+        racks = client.get('/api/v1/dcim/sites').get_json()['sites'][0]['rooms'][0]['rackList']
+        assert sorted(x['asset'] for x in racks) == ['RACK-7', 'RACK-8']
+
+    def test_editar_sin_tocar_el_numero_no_choca_consigo_misma(self, admin, client):
+        rack = self._rack(client, 'INV-g')
+        uid = client.post('/api/v1/dcim/items',
+                          json={'rack_uid': rack, 'u_start': 1,
+                                'asset': 'INV-3'}).get_json()['uid']
+        r = client.put(f'/api/v1/dcim/items/{uid}', json={'asset': 'INV-3', 'label': 'SW'})
+        assert r.status_code == 200
+
+    def test_dos_grupos_de_interrogantes_se_rechazan(self, admin, client):
+        rack = self._rack(client, 'INV-h')
+        r = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1, 'asset': 'INV-?-?'})
+        assert r.status_code == 400
+
+    def test_una_peticion_que_acaba_en_403_no_gasta_un_numero(self, admin, client):
+        """Gastar uno de la numeración en algo que no se va a escribir deja un hueco en la
+        cuenta que nadie sabe explicar — y encima se lo gasta el que no puede escribir."""
+        rack = self._rack(client, 'INV-i')
+        org = client.post('/api/v1/dcim/orgs', json={'name': 'Ajena'}).get_json()['uid']
+        client.post('/api/v1/dcim/owner', json={'scope': 'rack', 'uid': rack, 'org_uid': org})
+        otro = _as(admin, 'sinrack', ['dcim_view', 'dcim_edit'])
+        assert otro.post('/api/v1/dcim/items',
+                         json={'rack_uid': rack, 'u_start': 5,
+                               'asset': 'INV-?'}).status_code == 403
+        r = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 6, 'asset': 'INV-?'})
+        assert r.get_json()['asset'] == 'INV-1'
+
+    def test_tambien_al_corregir_una_ficha_ya_escrita(self, admin, client):
+        """Las tres puertas de edición, no sólo las de alta: un número se teclea mal las más de
+        las veces corrigiendo, que es cuando ya no se está mirando la lista."""
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': 'INV-j'}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'R1', 'u_height': 42,
+                                 'asset': 'INV-1'}).get_json()['uid']
+        otro = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'R2'}).get_json()['uid']
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1, 'asset': 'INV-2'}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2}).get_json()['uid']
+        cable = client.post('/api/v1/dcim/cables',
+                            json={'a_item': a, 'b_item': b, 'a_port': '1',
+                                  'b_port': '2'}).get_json()['uid']
+        # Un armario, un equipo y un cable, cada uno por su puerta.
+        assert client.put(f'/api/v1/dcim/racks/{otro}',
+                          json={'asset': 'INV-2'}).status_code == 400
+        assert client.put(f'/api/v1/dcim/items/{b}',
+                          json={'asset': 'INV-1'}).status_code == 400
+        assert client.put(f'/api/v1/dcim/cables/{cable}',
+                          json={'asset': 'inv-2'}).status_code == 400
+        # Y el comodín también sirve corrigiendo: 1 y 2 puestos, el siguiente es el 3.
+        r = client.put(f'/api/v1/dcim/cables/{cable}', json={'asset': 'INV-?'})
+        assert r.get_json()['asset'] == 'INV-3'
+
+
+class TestLaTiradaEnteraDeUnCable:
+    """De qué tirada forma parte un cable, preguntado por la ficha desde las dos pantallas."""
+
+    def _sala(self, client, nombre):
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        return sede, sala
+
+    def _tirada(self, client, rack, rack2=None):
+        """SRV → PP-A · 12 → PP-B · 12 → SW, con los paneles donde se diga."""
+        otro = rack2 or rack
+        def _pon(rk, u, **mas):
+            return client.post('/api/v1/dcim/items',
+                               json=dict({'rack_uid': rk, 'u_start': u}, **mas)).get_json()['uid']
+        srv = _pon(rack, 1, label='SRV01', role='server')
+        ppa = _pon(rack, 2, label='PP-A', role='patch_panel')
+        ppb = _pon(otro, 3, label='PP-B', role='patch_panel')
+        sw = _pon(otro, 4, label='SW01', role='switch')
+        c = []
+        for a, ap, b, bp in ((srv, 'eth0', ppa, '12'), (ppb, '12', ppa, '12'),
+                             (sw, 'Gi1/0/7', ppb, '12')):
+            c.append(client.post('/api/v1/dcim/cables',
+                                 json={'a_item': a, 'a_port': ap, 'b_item': b,
+                                       'b_port': bp}).get_json()['uid'])
+        return {'srv': srv, 'ppa': ppa, 'ppb': ppb, 'sw': sw, 'c': c}
+
+    def test_los_tres_tramos_desde_el_de_en_medio(self, admin, client):
+        _, sala = self._sala(client, 'RUN-a')
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'R1'}).get_json()['uid']
+        t = self._tirada(client, rack)
+        r = client.get(f'/api/v1/dcim/cables/{t["c"][1]}/run')
+        assert r.status_code == 200
+        legs = r.get_json()['path']['legs']
+        # En orden, de punta a punta. Por cuál de las dos puntas empieza es cosa suya —lo que
+        # importa y lo mira el test de la unidad es que sea SIEMPRE la misma— y aquí los
+        # identificadores los pone la base, así que no se puede predecir cuál gana.
+        assert [x['cable'] for x in legs] in (t['c'], list(reversed(t['c'])))
+        # Con el nombre de cada parada, que es lo que se lee: sin ellos son identificadores.
+        assert {legs[0]['a_label'], legs[-1]['b_label']} == {'SRV01', 'SW01'}
+
+    def test_aunque_los_paneles_esten_en_otro_armario(self, admin, client):
+        """En una sala de verdad los paneles viven en el rack de patcheo y no en el del
+        servidor: una tirada que se parara en el armario abierto se cortaría justo donde empieza
+        a hacer falta."""
+        _, sala = self._sala(client, 'RUN-b')
+        r1 = client.post('/api/v1/dcim/racks',
+                         json={'room_uid': sala, 'name': 'R1'}).get_json()['uid']
+        r2 = client.post('/api/v1/dcim/racks',
+                         json={'room_uid': sala, 'name': 'R2'}).get_json()['uid']
+        t = self._tirada(client, r1, r2)
+        legs = client.get(f'/api/v1/dcim/cables/{t["c"][0]}/run').get_json()['path']['legs']
+        assert [x['cable'] for x in legs] in (t['c'], list(reversed(t['c'])))
+        # Y el ARMARIO de cada parada, que es la otra mitad de la dirección: «PP-B 12» no dice
+        # adónde hay que ir.
+        assert {x['b_at'].get('rack') for x in legs} == {'R1', 'R2'}
+
+    def test_sin_contraste_ninguno(self, admin, client):
+        """Una tirada es un hecho declarado. Antes sólo salía cruzada con lo que los
+        dispositivos ven, así que la que nadie confirma —media instalación— no salía."""
+        _, sala = self._sala(client, 'RUN-c')
+        rack = client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': 'R1'}).get_json()['uid']
+        t = self._tirada(client, rack)
+        # Nadie ha visto nada por LLDP y la tirada está entera igualmente.
+        assert len(client.get(f'/api/v1/dcim/cables/{t["c"][2]}/run')
+                   .get_json()['path']['legs']) == 3
+
+    def test_un_cable_que_no_existe(self, admin, client):
+        _login(client)
+        assert client.get('/api/v1/dcim/cables/no-existe/run').status_code == 404
+
+    def test_y_no_se_cuenta_la_tirada_de_lo_ajeno(self, admin, client, fleet):
+        """Un cable se ve si se ven las dos cosas que une: con permiso sobre una sola bastaría
+        declarar un cable hacia lo ajeno para que la tirada lo nombrara."""
+        cable = client.post('/api/v1/dcim/cables',
+                            json={'a_item': fleet['mine'], 'a_port': '1',
+                                  'b_item': fleet['theirs'], 'b_port': '2'}).get_json()['uid']
+        otro = _as(admin, 'sinfilial', ['dcim_view', 'dcim_org_view'])
+        assert otro.get(f'/api/v1/dcim/cables/{cable}/run').status_code == 403
+
+
+class TestLosColoresQueYaSeUsan:
+    """Lo que de verdad se elige al declarar un cable es **el color que ya está puesto**: si el
+    azul de esta sala es un azul concreto que llevan cuarenta cables, el cuarenta y uno tiene que
+    ser ése. Buscarlo en la rueda a ojo es cómo una instalación acaba con nueve azules que no son
+    el mismo azul.
+
+    Los cuenta el servidor sobre la tabla y viajan con las dos listas: una lista escrita en la
+    pantalla es la que no sabe qué colores usa esta casa.
+    """
+
+    def _rack(self, client, nombre):
+        _login(client)
+        sede = client.post('/api/v1/dcim/sites', json={'name': nombre}).get_json()['uid']
+        sala = client.post('/api/v1/dcim/rooms',
+                           json={'site_uid': sede, 'name': 'S'}).get_json()['uid']
+        return client.post('/api/v1/dcim/racks',
+                           json={'room_uid': sala, 'name': nombre}).get_json()['uid']
+
+    def test_viajan_con_las_dos_listas_y_del_mas_usado_al_menos(self, admin, client):
+        rack = self._rack(client, 'COL-a')
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2}).get_json()['uid']
+        for i, color in enumerate(('#1e88e5', '#1e88e5', '#e53935')):
+            client.post('/api/v1/dcim/cables',
+                        json={'a_item': a, 'b_item': b, 'a_port': f'a{i}', 'b_port': f'b{i}',
+                              'color': color})
+        # La de la sección de cableado y la de la pestaña de un armario: la ficha es una para las
+        # dos, así que las dos tienen que poder ofrecer lo mismo.
+        for url in ('/api/v1/dcim/cables', f'/api/v1/dcim/racks/{rack}/cables?check=1'):
+            usados = client.get(url).get_json()['colors_used']
+            assert usados[:2] == ['#1e88e5', '#e53935'], url
+
+    def test_y_lo_vacio_no_es_un_color(self, admin, client):
+        """«Nadie lo ha dicho» le pasa a cuarenta cables y no es un color que ofrecer."""
+        rack = self._rack(client, 'COL-b')
+        a = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 1}).get_json()['uid']
+        b = client.post('/api/v1/dcim/items',
+                        json={'rack_uid': rack, 'u_start': 2}).get_json()['uid']
+        client.post('/api/v1/dcim/cables',
+                    json={'a_item': a, 'b_item': b, 'a_port': '1', 'b_port': '2', 'color': ''})
+        assert client.get('/api/v1/dcim/cables').get_json()['colors_used'] == []

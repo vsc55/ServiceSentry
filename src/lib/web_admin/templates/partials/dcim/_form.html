@@ -47,6 +47,9 @@ const _DCIM_KIND = {
     ]},
     rack: {url: 'racks', parent: 'room_uid', title: 'dcim_rack', fields: [
         {name: 'name', label: 'dcim_rack_name', w: '12rem', req: true},
+        // El mueble también se compra, y es el que sale por más dinero en el albarán. Lo
+        // llevaban el equipo y los dos cables, y lo que los sostiene no.
+        {name: 'asset', label: 'dcim_item_asset', tt: 'dcim_asset_tt', w: '10rem'},
         // A qué fila pertenece. Vacío = suelto, que es un estado real: el armario de
         // comunicaciones de un rincón no está en ninguna fila y nunca lo estará.
         {name: 'row_uid', label: 'dcim_row', list: 'rows', w: '10rem'},
@@ -76,54 +79,75 @@ const _DCIM_KIND = {
         {name: 'description', label: 'dcim_description', w: '14rem'},
     ]},
     item: {url: 'items', parent: 'rack_uid', title: 'dcim_item', fields: [
-        {name: 'label', label: 'dcim_item_label', w: '14rem'},
+        {name: 'label', zone: 'what', tt: 'dcim_item_label_tt', label: 'dcim_item_label', w: '14rem'},
         // QUÉ es. De aquí cuelga que un panel de parcheo deje de contarse como «sin
         // vigilar»: no es que nadie lo mire, es que no hay nada que mirar. Vacío = nadie lo
         // ha dicho, que es una pregunta; `other` es una respuesta.
-        {name: 'role', label: 'dcim_role',
+        {name: 'role', zone: 'what', tt: 'dcim_role_tt', label: 'dcim_role',
          choices: ['', 'server', 'switch', 'router', 'firewall', 'storage', 'patch_panel',
                    'fiber_panel', 'ups', 'pdu', 'shelf', 'kvm', 'console', 'blank', 'other'],
          prefix: 'dcim_role_', w: '11rem'},
-        {name: 'u_start', label: 'dcim_u_start', type: 'number', min: 1, value: 1, w: '6rem'},
-        {name: 'u_height', label: 'dcim_u_size', type: 'number', min: 1, value: 1, w: '6rem'},
+        // **Cómo está puesto**, antes que los U: es lo que decide si los U significan algo.
+        // Casi todo se atornilla a los mástiles; lo que no —un SAI en el suelo al lado, un
+        // cuadro en la pared, una regleta atornillada al lateral— está en el armario para todo
+        // lo demás y no tiene U.
+        {name: 'placement', zone: 'where', label: 'dcim_item_place', tt: 'dcim_item_place_tt',
+         choices: ['u', 'side', 'near'], prefix: 'dcim_place_', value: 'u', w: '15rem',
+         drives: true},
+        // El U y el alto: sólo de lo que se atornilla a los mástiles y no va montado sobre
+        // otra cosa. Lo montado hereda el sitio del que lo lleva, y lo que no ocupa U no tiene
+        // ninguno del que hablar.
+        {name: 'u_start', zone: 'where', tt: 'dcim_u_start_tt', label: 'dcim_u_start', type: 'number', min: 1, value: 1, w: '6rem',
+         when: _dcimTakesU},
+        // Y el alto lo dice la plantilla o el modelo del catálogo cuando hay uno: volver a
+        // preguntarlo es pedir que alguien confirme un número que no ha mirado.
+        {name: 'u_height', zone: 'where', tt: 'dcim_u_size_tt', label: 'dcim_u_size', type: 'number', min: 1, value: 1, w: '6rem',
+         when: (r, f) => _dcimTakesU(r, f) && !r.build_uid && !r.type_uid},
         // En cuántas partes se divide ese U y cuál se toma. `1` de `1` es el U entero, que es lo
         // que vale todo lo que ya estaba. El número lo decide quien monta: dos para un patch
         // panel de 0,5 U, ocho para la bandeja de Raspberry — y por eso es un número y no una
         // lista de «arriba / abajo / izquierda / derecha», que se queda corta el primer día.
-        {name: 'u_slots', label: 'dcim_item_slots', type: 'number', min: 1, value: 1,
-         w: '6rem'},
-        {name: 'u_slot', label: 'dcim_item_slot', type: 'number', min: 1, value: 1, w: '6rem'},
-        {name: 'u_slot_span', label: 'dcim_item_slot_span', type: 'number', min: 1, value: 1,
-         w: '6rem'},
+        // En cuántos trozos se parte SU hueco y cuál toma. Vale para lo que ocupa un U y
+        // también para lo que va montado sobre una bandeja —ahí el hueco es el de la bandeja—,
+        // y no vale para nada de lo que está al lado del armario.
+        {name: 'u_slots', zone: 'split', tt: 'dcim_item_slots_tt', label: 'dcim_item_slots', type: 'number', min: 1, value: 1,
+         w: '6rem', when: _dcimSplits},
+        {name: 'u_slot', zone: 'split', tt: 'dcim_item_slot_tt', label: 'dcim_item_slot', type: 'number', min: 1, value: 1, w: '6rem',
+         when: _dcimSplits},
+        {name: 'u_slot_span', zone: 'split', tt: 'dcim_item_slot_span_tt', label: 'dcim_item_slot_span', type: 'number', min: 1, value: 1,
+         w: '6rem', when: _dcimSplits},
         // Por dónde se parte: dos patch panel de 0,5 U van uno ENCIMA del otro y dos mini PC
         // uno AL LADO del otro. A la rejilla le da igual; al dibujo no.
-        {name: 'u_split', label: 'dcim_item_split', choices: ['width', 'height'],
-         prefix: 'dcim_split_', value: 'width', w: '9rem'},
+        {name: 'u_split', zone: 'split', tt: 'dcim_item_split_tt', label: 'dcim_item_split', choices: ['width', 'height'],
+         prefix: 'dcim_split_', value: 'width', w: '9rem', when: _dcimSplits},
         // O encima de otra cosa: los mini PC sobre una bandeja. Entonces no ocupa U —lo paga
         // ella— y hereda dónde está.
-        {name: 'parent_uid', label: 'dcim_item_parent', list: 'mounts', w: '14rem'},
-        {name: 'face', label: 'dcim_face', choices: ['full', 'front', 'rear'],
-         prefix: 'dcim_face_', w: '8rem'},
+        {name: 'parent_uid', zone: 'where', tt: 'dcim_item_parent_tt', label: 'dcim_item_parent', list: 'mounts', w: '14rem',
+         drives: true},
+        // Por qué cara asoma: sólo tiene sentido dentro de la rejilla. Un SAI en el suelo no
+        // asoma por ninguna, y lo montado sobre una bandeja asoma por la de la bandeja.
+        {name: 'face', zone: 'where', tt: 'dcim_face_tt', label: 'dcim_face', choices: ['full', 'front', 'rear'],
+         prefix: 'dcim_face_', w: '8rem', when: _dcimTakesU},
         // Su fondo, que el catálogo no sabe: devicetype-library dice si un modelo es de
         // profundidad completa y nunca cuántos milímetros. Sin él el rack sigue diciendo lo que
         // TIENE, que es lo que quiere saber quien está delante con una caja en la mano.
-        {name: 'depth_mm', label: 'dcim_item_depth', type: 'number', min: 0, w: '7rem'},
+        {name: 'depth_mm', zone: 'more', tt: 'dcim_item_depth_tt', label: 'dcim_item_depth', type: 'number', min: 0, w: '7rem'},
         // **La máquina**, que es lo que hace que el alzado tenga color. La columna existía
         // desde el primer commit, la API la aceptaba y el vuelco de estado la leía — y no
         // estaba en el formulario, así que el rack entero salía gris. Tercera vez que aparece
         // esta misma forma de fallo en esta sección: una columna que nadie puede escribir vale
         // siempre su valor por defecto, y el código que la respeta parece que funciona.
-        {name: 'host_uid', label: 'dcim_host', tt: 'dcim_item_host_tt',
+        {name: 'host_uid', zone: 'what', label: 'dcim_host', tt: 'dcim_item_host_tt',
          list: 'hosts', w: '16rem'},
         // Y con un botón que se lo pregunta al dispositivo: un número de serie está en una
         // pegatina detrás del rack, y el equipo lo dice por SNMP si su perfil lo publica.
-        {name: 'serial', label: 'dcim_serial', w: '10rem', said: 'serial'},
+        {name: 'serial', zone: 'buy', tt: 'dcim_serial_tt', label: 'dcim_serial', w: '10rem', said: 'serial'},
         // **De qué plantilla nace.** Solo al crear: elegirla estampa sus componentes en el
         // equipo, y eso ocurre una vez. Ofrecerla al editar diría que se puede cambiar de qué
         // nació algo que ya nació — y o no hace nada, o vuelve a copiar quince piezas encima
         // de las que alguien ya corrigió.
-        {name: 'build_uid', label: 'dcim_build_pick', list: 'builds', w: '15rem',
-         newOnly: true},
+        {name: 'build_uid', zone: 'what', tt: 'dcim_build_pick_tt', label: 'dcim_build_pick', list: 'builds', w: '15rem',
+         newOnly: true, drives: true},
         // **O directamente un modelo del catálogo**, que es la mitad de lo que se pone en un
         // armario: una tapa ciega, una regleta, una bandeja, un panel de parcheo. Nada de eso
         // tiene estándar de compra ni componentes que estampar, y obligar a declarar una
@@ -136,21 +160,146 @@ const _DCIM_KIND = {
         // El nombre del modelo llega en `type_name` —uno por modelo, no uno por campo— así que
         // hay que decirlo: la convención sola buscaba `type_uid_name`, que no existe, y la caja
         // se quedaba enseñando el identificador que existe para no enseñar.
-        {name: 'type_uid', label: 'dcim_cat_model', pick: 'type', nameKey: 'type_name',
+        {name: 'type_uid', zone: 'what', tt: 'dcim_cat_model_tt', label: 'dcim_cat_model', pick: 'type', nameKey: 'type_name',
          w: '18rem'},
         // Y lo que solo tiene ESTA caja: ningún modelo ni plantilla puede saberlo, y sin ello
         // «qué se queda sin garantía este trimestre» no tiene dónde contestarse.
-        {name: 'purchased_at', label: 'dcim_item_purchased', type: 'date', w: '9rem'},
-        {name: 'warranty_until', label: 'dcim_item_warranty', type: 'date', w: '9rem'},
-        {name: 'supplier', label: 'dcim_item_supplier', w: '10rem'},
+        {name: 'purchased_at', zone: 'buy', tt: 'dcim_item_purchased_tt', label: 'dcim_item_purchased', type: 'date', w: '9rem'},
+        {name: 'warranty_until', zone: 'buy', tt: 'dcim_item_warranty_tt', label: 'dcim_item_warranty', type: 'date', w: '9rem'},
+        {name: 'supplier', zone: 'more', tt: 'dcim_item_supplier_tt', label: 'dcim_item_supplier', w: '10rem'},
         // El número de inventario y lo que haya que decir de ESTA caja. Las dos columnas
         // existían desde el primer día, la API las guardaba y **ningún campo las escribía**:
         // valían siempre su valor por defecto, y el código que las respeta parece que funciona.
         // Cuarta vez que sale esta misma forma de fallo en esta sección.
-        {name: 'asset', label: 'dcim_item_asset', w: '10rem'},
-        {name: 'description', label: 'dcim_description', w: '16rem'},
+        {name: 'asset', zone: 'buy', tt: 'dcim_asset_tt', label: 'dcim_item_asset', w: '10rem'},
+        {name: 'description', zone: 'more', tt: 'dcim_description_tt', label: 'dcim_description', w: '16rem'},
     ]},
 };
+
+/** Lo que hace un campo del que CUELGAN otros: guardar lo tecleado y volver a dibujar.
+ *
+ *  Sin esto, elegir «al lado del armario» dejaba las casillas de U en pantalla hasta que algo
+ *  redibujara por otro motivo: la ficha seguía preguntando por un sitio que la respuesta anterior
+ *  acababa de dejar sin sentido. Con `_dcimFormSnap` delante porque redibujar lee del borrador y
+ *  lo tecleado vive en el DOM hasta que alguien lo recoge.
+ *
+ *  Se declara con `drives: true` y no se adivina: qué campo cambia lo que se pregunta es una
+ *  decisión, y deducirla de que alguien tenga un `when` que lo nombre sería adivinar bien casi
+ *  siempre. */
+const _DCIM_DRIVE = 'onchange="_dcimFormSnap();_dcimFormDraw()"';
+
+/** Si esto ocupa un U del que se pueda hablar: se atornilla a los mástiles y no va montado
+ *  sobre otra cosa. Lo montado hereda el sitio del que lo lleva. */
+function _dcimTakesU(row) {
+    return String((row || {}).placement || 'u') === 'u' && !(row || {}).parent_uid;
+}
+
+/** Si tiene un hueco que se pueda partir: el suyo si ocupa U, o el de la bandeja que lo lleva. */
+function _dcimSplits(row) {
+    const r = row || {};
+    return String(r.placement || 'u') === 'u' || !!r.parent_uid;
+}
+
+/** Si esta ficha pregunta este campo, con lo que ya lleva contestado delante.
+ *
+ *  **Un campo que no significa nada no se pregunta.** Un SAI en el suelo al lado del armario
+ *  seguía teniendo que decir en qué U está, y la respuesta era 1 porque la casilla venía con un
+ *  1 puesto — así que la tabla lo enseñaba en la U 1 de un armario donde no está. Un dato que se
+ *  pide sin sentido no sale vacío: sale con su valor por defecto, y el valor por defecto de una
+ *  pregunta que no venía a cuento es una mentira con formato de dato.
+ *
+ *  Y no se pide lo que ya se ha dicho por otro sitio: elegir una plantilla o un modelo del
+ *  catálogo dice cuánto mide, y volver a preguntarlo es pedir que alguien confirme un número que
+ *  no ha mirado — o que lo contradiga sin enterarse.
+ *
+ *  Una función y no diez `if` repartidos: quién pregunta qué es una sola regla, y repartida sería
+ *  la casilla que alguien se deja puesta.
+ *
+ *  Lo que no se dibuja **no se manda**, así que la columna se queda con lo que tenía. Lo que
+ *  deja de tener sentido lo pone a cero el servidor, que es quien decide qué ocupa. */
+function _dcimAsks(fld, form, row) {
+    if (fld.newOnly && form.mode !== 'new') return false;
+    return !fld.when || fld.when(row || {}, form);
+}
+
+//: **Las zonas de una ficha**, en el orden en que se leen. Las casillas iban en una sola fila
+//: que se envuelve, así que los grupos los hacía el ancho de la ventana: «Máquina» acababa al
+//: lado de «Fondo del equipo» porque ahí cupo, y con la ventana medio palmo más estrecha eran
+//: otros dos. Un grupo que cambia de miembros al estirar el cuadro no es un grupo.
+//:
+//: Sólo el equipo las declara: es el único con diecisiete casillas. Una sede tiene cuatro, y
+//: cinco rótulos para ordenar cuatro cosas es peor que ninguno.
+//:
+//: `fold` es lo que hace falta en un caso de cada veinte y no se enseña hasta que se pide. Con
+//: `open`, que dice cuándo **ya está contestado**: esconder un dato escrito es peor que enseñar
+//: uno vacío, porque el que está escrito no se puede ni corregir ni descubrir.
+const _DCIM_ZONES = {
+    item: [
+        {id: 'what', label: 'dcim_z_what'},
+        {id: 'where', label: 'dcim_z_where'},
+        // Partir un U es de una instalación de cada veinte: cuatro casillas de un dígito que no
+        // significan nada para quien está colocando un servidor.
+        {id: 'split', label: 'dcim_z_split', fold: 'check',
+         open: r => Number(r.u_slots || 1) > 1},
+        {id: 'buy', label: 'dcim_z_buy'},
+        // Se rellenan un mes después, si es que se rellenan.
+        {id: 'more', label: 'dcim_z_more', fold: 'link',
+         open: r => !!(Number(r.depth_mm || 0) || r.supplier || r.description)},
+    ],
+};
+
+/** Si una zona plegable está abierta: porque alguien la abrió, o porque ya lleva algo dentro. */
+function _dcimZoneOn(z, form, row) {
+    if (!z.fold) return true;
+    const abiertas = (form.open = form.open || {});
+    if (abiertas[z.id] !== undefined) return !!abiertas[z.id];
+    return !!(z.open && z.open(row || {}));
+}
+
+function _dcimZoneToggle(id) {
+    if (!_dcimForm) return;
+    _dcimFormSnap();
+    const z = (_DCIM_ZONES[_dcimForm.kind] || []).find(x => x.id === id);
+    const ahora = z ? _dcimZoneOn(z, _dcimForm, _dcimForm.row || {}) : false;
+    (_dcimForm.open = _dcimForm.open || {})[id] = !ahora;
+    _dcimFormDraw();
+}
+
+/** Una zona: su rótulo, su raya y sus casillas.
+ *
+ *  **Una zona sin casillas no se dibuja**, ni siquiera su rótulo: en un SAI que está en el suelo
+ *  no hay ningún U que partir, y un título sobre un hueco vacío es una promesa incumplida — deja
+ *  a quien lo lee buscando el campo que no está. */
+function _dcimZoneHtml(z, spec, form, row, caja, primera) {
+    // Un campo sin zona cae en la PRIMERA declarada, que se pasa por parámetro: leerla del
+    // primer campo de la lista sería una posición haciendo de regla — el mismo fallo que ya
+    // tuvo «lo obligatorio es lo primero».
+    const dentro = spec.fields
+        .map((fld, i) => ({fld, i}))
+        .filter(x => (x.fld.zone || primera) === z.id && _dcimAsks(x.fld, form, row));
+    if (!dentro.length) return '';
+    const abierta = _dcimZoneOn(z, form, row);
+    const cuerpo = abierta ? `<div class="d-flex flex-wrap gap-3 align-items-end">
+        ${dentro.map(x => caja(x.fld, x.i)).join('')}</div>` : '';
+    if (!z.fold) return `<div class="mb-3">
+        <div class="ss-zone-h"><span>${esc(t(z.label))}</span><i></i></div>
+        ${cuerpo}</div>`;
+    // Plegada de dos maneras, según lo que sea: una PREGUNTA cuando el pliegue significa algo
+    // —«¿comparte el U?» es un hecho del equipo— y un enlace cuando sólo es «hay más». Un
+    // interruptor donde no hay nada que decidir se lee como un ajuste que no existe.
+    if (z.fold === 'check') return `<div class="mb-3">
+        <label class="form-check form-switch ss-fs-2 mb-0">
+            <input class="form-check-input" type="checkbox"${abierta ? ' checked' : ''}
+                   onchange="_dcimZoneToggle(${jsStr(z.id)})">
+            <span class="form-check-label">${_dcLabel(z.label, z.label + '_tt')}</span>
+        </label>
+        ${abierta ? `<div class="mt-2">${cuerpo}</div>` : ''}</div>`;
+    return `<div class="mb-3">
+        <button class="btn btn-sm btn-secondary" onclick="_dcimZoneToggle(${jsStr(z.id)})">
+            <i class="bi bi-chevron-${abierta ? 'down' : 'right'} me-1"></i>${
+            esc(t(z.label))}</button>
+        ${abierta ? `<div class="mt-2">${cuerpo}</div>` : ''}</div>`;
+}
 
 /** El formulario, **en un cuadro y con rótulos**.
  *
@@ -188,10 +337,14 @@ function _dcimFormBody() {
     const lists = Object.keys(_DCIM_LISTS)
         .filter(k => spec.fields.some(x => x.list === k))
         .map(_dcimDatalist).join('');
-    return `${lists}<div class="d-flex flex-wrap gap-3 align-items-end">
-        ${spec.fields.map((fld, i) =>
-            (fld.newOnly && f.mode !== 'new') ? '' : caja(fld, i)).join('')}
+    const zonas = _DCIM_ZONES[f.kind];
+    // Sin zonas declaradas, como siempre: una sede tiene cuatro casillas y partirlas en grupos
+    // sería poner cinco rótulos para ordenar cuatro cosas.
+    if (!zonas) return `${lists}<div class="d-flex flex-wrap gap-3 align-items-end">
+        ${spec.fields.map((fld, i) => _dcimAsks(fld, f, row) ? caja(fld, i) : '').join('')}
     </div>`;
+    return lists + zonas.map(
+        z => _dcimZoneHtml(z, spec, f, row, caja, zonas[0].id)).join('');
 }
 
 /** La caja de un campo: un desplegable de opciones, uno de una lista cerrada, o un cuadro de
@@ -201,7 +354,7 @@ function _dcimFieldHtml(fld, i, val, kind) {
         // El prefijo lo dice el campo: escrito a mano, la primera elección que no fuese una
         // cara del rack habría salido con el nombre de una.
         return `<select id="dcim-f-${i}" class="form-select form-select-sm"
-                    style="max-width:${fld.w}">
+                    style="max-width:${fld.w}" ${fld.drives ? _DCIM_DRIVE : ''}>
             ${fld.choices.map(c => `<option value="${escAttr(c)}"${
                 String(val) === String(c) ? ' selected' : ''}>${
                 esc(t((fld.prefix || '') + c))}</option>`).join('')}
@@ -478,7 +631,7 @@ function _dcimPickHtml(fld, i, val) {
     const puesto = String(val || '');
     const conocido = rows.some(r => String(spec.value(r)) === puesto);
     return `<select id="dcim-f-${i}" class="form-select form-select-sm"
-                style="max-width:${fld.w}">
+                style="max-width:${fld.w}" ${fld.drives ? _DCIM_DRIVE : ''}>
         <option value="">${esc(t('dcim_pick_none'))}</option>
         ${(puesto && !conocido) ? `<option value="${escAttr(puesto)}" selected>${
             esc(puesto)}</option>` : ''}
@@ -596,6 +749,18 @@ function _dcimSplitCoords(el, idx, kind) {
     caja.value = String(par[1]);
 }
 
+/** Con qué número se quedó, cuando lo pidió con un comodín. Devuelve si lo ha dicho.
+ *
+ *  Quien escribe `INV-?` no puede ver el resultado hasta que va a buscarlo a la lista, y ese
+ *  viaje es justo el que este campo existe para ahorrar. Sólo cuando lo pidió: repetirle el
+ *  número que acaba de teclear él es ruido, y el ruido se aprende a ignorar. */
+function _dcAssetSaid(pedido, r) {
+    const puesto = String(((r || {}).data || {}).asset || '');
+    if (!puesto || String(pedido || '').indexOf('?') < 0) return false;
+    showToast(tf('dcim_asset_minted', puesto), 'success');
+    return true;
+}
+
 async function _dcimSave() {
     if (!_dcimForm) return;
     const mode = _dcimForm.mode, kind = _dcimForm.kind;
@@ -659,7 +824,10 @@ async function _dcimSave() {
         // exactamente igual que no estampar ninguna — y la primera vez que alguien lo prueba,
         // esa es justo la duda.
         const copiadas = Number((r.data || {}).parts || 0);
-        showToast(copiadas ? tf('dcim_build_stamped', copiadas) : t('saved'), 'success');
+        // El número minado gana al recuento de piezas: es lo que se acaba de pedir, y lo otro
+        // se ve en la ficha. Dos avisos a la vez se pisan y no se lee ninguno.
+        if (!_dcAssetSaid(body.asset, r))
+            showToast(copiadas ? tf('dcim_build_stamped', copiadas) : t('saved'), 'success');
         const rack = (_dcimRack || {}).rack;
         if (rack && (kind === 'item' || uid === rack.uid)) return _dcimLoadRack(rack.uid);
         return renderDcim();

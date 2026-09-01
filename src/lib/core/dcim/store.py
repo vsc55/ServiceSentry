@@ -30,6 +30,7 @@ elevation of a real rack is wrong within a week, and "is this U free" has no ans
 
 from __future__ import annotations
 
+from lib.core.dcim import assets as dcim_assets
 from lib.core.dcim.revisions import RevisionStore
 from lib.core.uids import new_uid
 from lib.db import BaseConnector
@@ -57,6 +58,20 @@ ITEM_ROLES = ('server', 'switch', 'router', 'firewall', 'storage', 'patch_panel'
 #: Los que no contestan porque no tienen a qué: no es que estén sin vigilar, es que no hay nada
 #: que vigilar. Contarlos entre los desatendidos llena la pantalla de deberes imposibles.
 ROLES_MUDOS = ('patch_panel', 'fiber_panel', 'shelf', 'blank')
+
+#: **Cómo está puesto algo en un armario.** Casi todo se atornilla a los mástiles y ocupa un
+#: número de U; el resto no, y hasta ahora no cabía en el modelo — un SAI en el suelo al lado, un
+#: cuadro en la pared, una regleta atornillada al lateral. Todo eso ocupa sitio, se alimenta, se
+#: cablea y hay que ir a mirarlo, y lo único que no tiene es U.
+#:
+#: **Una sola decisión y no cinco casos particulares.** La regleta del lateral ya existía como
+#: regleta y no como equipo, que es un caso particular con nombre propio; en cuanto hay un
+#: segundo —el SAI— la pregunta de verdad se ve: qué significa estar en un armario sin ocupar U.
+#: Se contesta una vez y valen los cinco.
+#:
+#: `u` es lo de siempre y es el valor por defecto: todo lo escrito antes de esta columna se
+#: atornilló a los mástiles, que es lo que de verdad hizo.
+PLACEMENTS = ('u', 'side', 'near')
 
 #: De qué puede ser un componente. `accessory` es el cargador del mini-PC, el latiguillo corto que
 #: vive con él, el kit de raíles — cosas que no son elegantes y son exactamente las que faltan
@@ -337,6 +352,21 @@ _POWER = TableSpec(
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),
+        # **Un cable de corriente es un cable.** Esta fila decía de qué toma cuelga y cuántos
+        # vatios se declararon, y nada más — como si el latiguillo no existiera. Y existe: se
+        # compra, se guarda en una caja, se rompe y hay que sustituirlo, y la pregunta de la
+        # caja de repuestos es la misma que en datos: qué hay que llevarse.
+        #
+        # Las cuatro que ya tiene su hermano de datos, con los mismos nombres: dos tablas que
+        # guardan lo mismo con nombres distintos son dos pantallas que se escriben dos veces.
+        Column('asset',    'TEXT', nullable=False, default="''"),
+        Column('category', 'TEXT', nullable=False, default="''"),
+        Column('length_mm', 'INTEGER', nullable=False, default='0'),
+        Column('description', 'TEXT', nullable=False, default="''"),
+        # De qué color es la funda, como su hermano de datos y por lo mismo: es con lo que se
+        # encuentra en un mazo de treinta detrás de un armario. La última, para que aparecer
+        # sobre una tabla llena sea un `ADD COLUMN`.
+        Column('color',    'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_feed_item', ('item_uid',)),
              Index('idx_dc_feed_pdu', ('pdu_uid',))),
@@ -353,6 +383,15 @@ CABLE_KINDS = ('copper', 'fiber', 'dac', 'power', 'console', 'other')
 #: Abierto por abajo: lo que no esté en la lista se puede escribir igual. Una instalación con
 #: cable de un fabricante que llama a lo suyo de otra manera no puede quedarse sin poder
 #: apuntarlo, y una lista cerrada obliga a mentir o a dejarlo en blanco.
+#: Y de qué categoría es un cable de CORRIENTE, que es el par de conectores que lleva: un C13
+#: a C14 va de un equipo a una regleta y un C19 a C20 alimenta lo que pide dieciséis amperios.
+#: Es lo que hay que mirar en la caja antes de bajar al armario, igual que la categoría de un
+#: latiguillo de datos — y por eso vive al lado y se sirve igual.
+#:
+#: Abierta por abajo como la otra: una instalación con tomas de otro país no puede quedarse sin
+#: poder apuntarlo.
+FEED_CATEGORIES = ('c13-c14', 'c19-c20', 'c13-c20', 'c13-schuko', 'c19-schuko', 'iec-lock')
+
 CABLE_CATEGORIES = {
     'copper': ('cat5e', 'cat6', 'cat6a', 'cat7', 'cat8'),
     'fiber': ('om1', 'om2', 'om3', 'om4', 'om5', 'os1', 'os2'),
@@ -362,6 +401,22 @@ CABLE_CATEGORIES = {
     # significado, que es la peor clase de colisión: no falla, traduce mal.
     'dac': ('dac-passive', 'dac-active'),
 }
+
+#: De qué COLOR es un latiguillo, con los que se compran. El color de un cable no es decoración:
+#: es con lo que se encuentra en un mazo de treinta y con lo que se respeta el código de la casa
+#: —amarillo lo que sale fuera, rojo lo que no se toca—, y elegirlo de una rueda de dieciséis
+#: millones deja la instalación con nueve azules que no son el mismo azul.
+#:
+#: Aquí y no en la pantalla, como las categorías y como los colores de las ramas: una segunda
+#: copia es la que se queda sin el color que se añada mañana. Y **abierto por abajo**: el que
+#: quiera un color que no está lo escribe con la rueda de siempre, que sigue al lado.
+#:
+#: El nombre es una CLAVE y no un texto: se traduce donde se enseña. Un desplegable con «yellow»
+#: en un panel en castellano es la mitad de una traducción.
+CABLE_COLORS = (('black', '#111827'), ('white', '#f9fafb'), ('grey', '#6b7280'),
+                ('blue', '#2563eb'), ('red', '#dc2626'), ('green', '#16a34a'),
+                ('yellow', '#eab308'), ('orange', '#f97316'), ('purple', '#a855f7'),
+                ('cyan', '#06b6d4'), ('pink', '#ec4899'), ('brown', '#92400e'))
 
 #: De qué clase es un enlace entre sedes. Importa para la redundancia de verdad: dos VPN sobre
 #: la misma línea de internet no son dos caminos, y el mapa tiene que poder decirlo.
@@ -448,8 +503,15 @@ _CABLE = TableSpec(
         # funcionar, y es lo que hay que mirar en la caja de repuestos antes de bajar al armario
         # — un latiguillo de Cat 5e y uno de Cat 6A son indistinguibles a un metro.
         #
-        # La última, para que aparecer sobre una tabla llena sea un `ADD COLUMN`.
         Column('category', 'TEXT', nullable=False, default="''"),
+        # El número de INVENTARIO, que no es la etiqueta. `label` es lo que está rotulado en el
+        # propio cable: se repite, se borra, se equivoca — y aun así es con lo que trabaja quien
+        # está allí con una linterna. Esto lo pone la casa, es único y es con lo que se
+        # estandariza: cuántos hay, cuáles se compraron juntos, cuál toca sustituir. Meter los
+        # dos en una casilla obliga a elegir cuál de los dos se pierde.
+        #
+        # Las últimas, para que aparecer sobre una tabla llena sea un `ADD COLUMN`.
+        Column('asset', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_cable_a', ('a_item',)),
              Index('idx_dc_cable_b', ('b_item',))),
@@ -572,6 +634,11 @@ _RACK = TableSpec(
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),
+        # Un armario también se compra. Lo llevaban el equipo, el cable de datos y el de
+        # corriente, y el mueble que los sostiene no — que es el que sale por más dinero en el
+        # albarán y el que la aseguradora pregunta primero. La última, para que aparecer sobre
+        # una tabla llena sea un `ADD COLUMN`.
+        Column('asset', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_rack_room', ('room_uid',)),),
 )
@@ -643,6 +710,17 @@ _ITEM = TableSpec(
         # Montado EN otro elemento: los mini PC sobre una bandeja, la tarjeta en un chasis. El
         # que lo lleva ocupa el U; el montado no, porque ese U ya está pagado.
         Column('parent_uid', 'TEXT', nullable=False, default="''"),
+        # **Cómo está puesto**: uno de `PLACEMENTS`. `u` —lo de siempre— se atornilla a los
+        # mástiles y ocupa `u_start`..`u_height`; `side` está dentro del armario sin ocupar U
+        # (la regleta del lateral, la bandeja de fibra colgada) y `near`, al lado (el SAI en el
+        # suelo, el cuadro en la pared).
+        #
+        # Lo que no ocupa U sigue estando EN el armario para todo lo demás: se alimenta, se
+        # cablea, tiene estado y hay que ir a mirarlo. Lo único que no hace es quitarle el sitio
+        # a nada — y por eso no entra en la ocupación ni en el alzado.
+        #
+        # La última, para que aparecer sobre una tabla llena sea un `ADD COLUMN`.
+        Column('placement', 'TEXT', nullable=False, default="'u'"),
     ),
     indexes=(Index('idx_dc_item_rack', ('rack_uid',)),
              Index('idx_dc_item_host', ('host_uid',)),
@@ -734,6 +812,50 @@ def clean_port_list(value) -> dict:
     return fuera
 
 
+#: El carácter con el que se escapa un `%` o un `_` dentro de una búsqueda. Una barra invertida
+#: es lo que entienden los tres motores con `ESCAPE`, y hace falta: sin ella, teclear `_` en el
+#: buscador encuentra cualquier cosa y teclear `%` las encuentra todas — un buscador que ignora
+#: lo que se le pide es peor que uno que no encuentra nada, porque contesta.
+LIKE_ESC = '\\'
+
+
+def like_esc(texto: str) -> str:
+    """Un texto tecleado, listo para ir DENTRO de un patrón de `LIKE`.
+
+    Aparte de `like_clause` porque no todo lo que se busca se busca por el medio: un número de
+    inventario se busca por el principio —`INV-%`— y escapar en dos sitios es tener un sitio
+    donde no se escapa.
+    """
+    t = str(texto or '')
+    return (t.replace(LIKE_ESC, LIKE_ESC * 2)
+             .replace('%', LIKE_ESC + '%').replace('_', LIKE_ESC + '_'))
+
+
+def like_clause(cols, texto: str) -> tuple:
+    """``(sql, params)`` para «alguna de estas columnas contiene esto», o ``('', ())``.
+
+    En la BASE y no en memoria. Traer la tabla entera para filtrarla en Python construye un
+    diccionario por fila de toda la instalación y tira casi todos: el motor sabe hacer esto sin
+    materializar nada, y es literalmente para lo que está.
+
+    `LOWER(...)` en los dos lados y dicho aquí, no dejado al motor: MySQL no distingue mayúsculas
+    por defecto, SQLite sí y PostgreSQL depende del idioma del sistema. Un buscador que encuentra
+    «SW01» escribiendo `sw` en una instalación y no en otra es el mismo panel comportándose de
+    dos maneras según dónde esté instalado.
+
+    **Sin índice que valga**, y se dice: un `%texto%` no puede usar un índice de texto en ningún
+    motor — el índice ordena por el principio y esto busca por el medio. Lo que se gana es no
+    construir la instalación entera en memoria, que es otra cosa y es la que importaba.
+    """
+    t = str(texto or '').strip().lower()
+    if not t or not cols:
+        return '', ()
+    # Los comodines del propio `LIKE`, escapados: son caracteres que alguien puede teclear.
+    patron = f'%{like_esc(t)}%'
+    trozos = [f"LOWER({c}) LIKE ? ESCAPE '{LIKE_ESC}'" for c in cols]
+    return '(' + ' OR '.join(trozos) + ')', tuple([patron] * len(cols))
+
+
 def _slot_of(item) -> tuple:
     """En qué trozo del U está esto: ``(desde, hasta, de_cuántos)``, en enteros.
 
@@ -764,6 +886,21 @@ def _overlap(a: tuple, b: tuple) -> bool:
     return a0 * bn < b1 * an and b0 * an < a1 * bn
 
 
+def rank(cuenta: dict, limit: int = 0) -> list:
+    """Los valores de ``{valor: cuántos}``, **del más usado al menos**.
+
+    Del más usado primero porque es el orden en que se elige: el color que hay en cuarenta cables
+    es el que va a llevar el cuarenta y uno. Alfabéticamente serían códigos hexadecimales
+    ordenados por su primera letra, que no significa nada.
+
+    Y con el valor como segundo criterio: dos colores empatados a tres cables tienen que salir
+    siempre en el mismo orden, o la lista baila entre dos aperturas sin que nadie haya tocado
+    nada — que es peor que un orden discutible.
+    """
+    fuera = sorted((cuenta or {}).items(), key=lambda kv: (-kv[1], str(kv[0])))
+    return [k for k, _ in (fuera[:limit] if limit else fuera)]
+
+
 class Rows(BaseStore):
     """One table's worth of ordinary bookkeeping.
 
@@ -785,13 +922,71 @@ class Rows(BaseStore):
     def bootstrap(self) -> None:
         self._db.reconcile_table(self._spec)
 
+    def has(self, col: str) -> bool:
+        """Si esta tabla lleva esta columna.
+
+        Para que quien recorre el almacén DESCUBRA cuáles llevan número de inventario en vez de
+        traer una lista escrita a mano. Una lista es algo que hay que acordarse de tocar el día
+        que una tabla más lo lleve, y no acordarse no da ningún error: da un número repetido.
+        """
+        return str(col or '') in self._cols
+
+    def counts(self, col: str) -> dict:
+        """``{valor: cuántos}`` — lo que esa columna tiene puesto, sin los vacíos.
+
+        En la BASE, agrupando: traerse la tabla entera para contar cinco valores distintos
+        construye un diccionario por fila de toda la instalación y los tira todos menos cinco.
+
+        Los NÚMEROS y no sólo los valores porque hay quien tiene que sumar los de dos tablas: un
+        latiguillo rojo y un cable de corriente rojo son el mismo rojo, y dos listas ordenadas no
+        se pueden mezclar sin volver a contar.
+        """
+        if not self.has(col):
+            return {}
+        sql = (f"SELECT {col}, COUNT(*) AS n FROM {self._sql_table} "
+               f"WHERE {col} <> '' GROUP BY {col}")
+        return {r[0]: int(r[1] or 0) for r in (self._db.fetchall(sql) or ()) if r and r[0]}
+
+    def in_use(self, col: str, limit: int = 0) -> list:
+        """Los valores que ya tiene esa columna, **del más usado al menos**.
+
+        Para poder ofrecer lo que la casa ya usa en vez de una lista escrita a mano: los colores
+        de latiguillo de una instalación son cinco, y elegirlos de una rueda de dieciséis
+        millones la deja con nueve azules que no son el mismo azul.
+
+        Del más usado primero porque es el orden en que se elige: el color que hay en cuarenta
+        cables es el que va a llevar el cuarenta y uno. Alfabéticamente serían códigos
+        hexadecimales ordenados por su primera letra, que no significa nada.
+
+        En la BASE, agrupando: traerse la tabla entera para contar cinco valores distintos
+        construye un diccionario por fila de toda la instalación y los tira todos menos cinco.
+        """
+        return rank(self.counts(col), limit)
+
     def _row(self, row) -> dict:
         return {name: row[i] for i, name in enumerate(self._cols)}
 
-    def list(self, where: str = '', params: tuple = ()) -> list[dict]:
+    def list(self, where: str = '', params: tuple = (),
+             limit: int = 0, offset: int = 0) -> list[dict]:
+        """Las filas que cumplan *where*, opcionalmente **de** *offset* y **hasta** *limit*.
+
+        El tope es de la consulta y no del que llama: traer la tabla entera para quedarse con
+        treinta filas construye un diccionario por fila de toda la instalación y luego lo tira.
+        En una sala pequeña no se nota; es exactamente el trabajo que no se nota hasta que hay
+        una sala grande, que es cuando ya está escrito en cuatro sitios.
+
+        `ORDER BY uid` cuando se pagina, y sólo entonces: sin un orden, «las treinta siguientes»
+        no significa nada —dos motores pueden devolver las mismas filas en distinto orden— y
+        paginar sobre eso repite unas y se salta otras. Por `uid` y no por un campo con sentido
+        porque es el único que existe en todas estas tablas y es único: un orden estable es lo
+        que hace que la página dos sea la página dos.
+        """
         sql = f'SELECT {", ".join(self._cols)} FROM {self._sql_table}'
         if where:
             sql += f' WHERE {where}'
+        if limit or offset:
+            sql += ' ORDER BY uid'
+            sql += f' LIMIT {int(limit) if limit else -1} OFFSET {int(offset)}'
         return [self._row(r) for r in (self._db.fetchall(sql, params) or ())]
 
     def get(self, uid: str) -> dict | None:
@@ -881,6 +1076,103 @@ class DcimStore:
         for part in vars(self).values():
             if isinstance(part, Rows):
                 part.bootstrap()
+
+    # ── El número de inventario, que es único entre TODO lo inventariado ──────
+    #
+    # Aquí y no en cada pantalla que escribe: un número es único entre todas estas tablas —
+    # INV-45 es INV-45 tanto si es un servidor como si es un latiguillo— y esta es la única
+    # pieza que las tiene todas delante. La regla de qué significa `INV-?` vive en
+    # `lib.core.dcim.assets`, que no sabe qué es una base de datos; lo de aquí es ir a
+    # buscarle los números que ya están dados.
+
+    def asset_parts(self) -> list:
+        """Los almacenes que llevan número de inventario, **descubiertos**.
+
+        Preguntándole a cada tabla si tiene la columna, en vez de una lista escrita a mano: una
+        lista hay que acordarse de tocarla el día que una tabla más lo lleve, y no acordarse no
+        da ningún error — da un número repetido, meses después, cuando dos fichas dicen ser la
+        misma cosa.
+        """
+        return [p for p in vars(self).values()
+                if isinstance(p, Rows) and p.has(dcim_assets.ASSET_COL)]
+
+    def colors_used(self, limit: int = 0) -> list:
+        """Los colores que ya están puestos, **de todas las tablas que llevan uno**.
+
+        Un latiguillo rojo y un cable de corriente rojo son el mismo rojo, y lo que se quiere al
+        declarar el siguiente es el color que usa esta casa — no el que usa esta tabla. Contando
+        por separado, el rojo de veinte cables de datos y el de veinte de corriente saldrían como
+        dos colores de veinte en vez de uno de cuarenta.
+
+        Descubiertas como las del número de inventario, preguntándole a cada tabla si tiene la
+        columna: una lista escrita a mano es la que se queda sin la tabla que la lleve mañana.
+        """
+        cuenta: dict = {}
+        for part in vars(self).values():
+            if isinstance(part, Rows):
+                for valor, n in part.counts('color').items():
+                    cuenta[valor] = cuenta.get(valor, 0) + n
+        return rank(cuenta, limit)
+
+    def asset_owner(self, value, skip: str = '') -> str:
+        """El uid de lo que YA lleva este número, o ``''``.
+
+        *skip* es la propia fila cuando se está editando: guardar una ficha sin tocarle el
+        número no puede fallar por chocar consigo misma.
+
+        Vacío no es un duplicado. Un número en blanco es «nadie lo ha dicho», y de eso puede
+        haber cuarenta.
+        """
+        v = dcim_assets.norm(value)
+        if not v:
+            return ''
+        col = dcim_assets.ASSET_COL
+        for part in self.asset_parts():
+            for row in part.list(f'LOWER({col}) = ?', (v,)):
+                uid = str(row.get('uid') or '')
+                if uid and uid != str(skip or ''):
+                    return uid
+        return ''
+
+    def assets_like(self, before: str, after: str) -> list:
+        """Los números ya dados que empiezan y acaban así, de todas las tablas.
+
+        Acotado en la BASE y por el principio: `INV-%` sí puede usar un índice —lo que no puede
+        es un `%texto%`— y lo que se trae son los de esa numeración y no el inventario entero.
+        """
+        col = dcim_assets.ASSET_COL
+        patron = f'{like_esc(before)}%{like_esc(after)}'.lower()
+        sql = f"LOWER({col}) LIKE ? ESCAPE '{LIKE_ESC}'"
+        fuera = []
+        for part in self.asset_parts():
+            fuera += [str(r.get(col) or '') for r in part.list(sql, (patron,))]
+        return fuera
+
+    def mint_asset(self, value, skip: str = '') -> tuple:
+        """``(el número que se guarda, la clave del error)``.
+
+        Las dos preguntas de golpe porque son la misma escritura: resolver `INV-?` contra lo que
+        hay y comprobar que lo que sale no lo lleva ya otro. Separarlas dejaría un hueco entre
+        las dos por el que cabe justo el caso que esto viene a impedir.
+
+        **No es atómico, y se dice.** Dos escrituras simultáneas al milisegundo pueden minar el
+        mismo número: entre leer los que hay y escribir el nuevo no hay ningún cerrojo, y no lo
+        hay porque la unicidad cruza cuatro tablas y ninguna restricción de la base abarca eso —
+        y una columna `UNIQUE` por tabla chocaría con los cuarenta que están en blanco, que son
+        legítimos. Lo que sí cierra es el caso real, que no es la simultaneidad: es que dos
+        personas numeren el mismo armario esta tarde y ninguna mire la lista.
+        """
+        malo = dcim_assets.bad(value)
+        if malo:
+            return str(value or '').strip(), malo
+        trozo = dcim_assets.asks(value)
+        if trozo:
+            value, _ = dcim_assets.resolve(value, self.assets_like(trozo[0], trozo[2]))
+        else:
+            value = str(value or '').strip()
+        if value and self.asset_owner(value, skip):
+            return value, 'dcim_asset_taken'
+        return value, ''
 
     # ── The containment chain, read downwards ─────────────────────────────────
 
@@ -1037,7 +1329,8 @@ class DcimStore:
         —dice quién manda en ese U, que es lo que dibuja el alzado y lo que cuenta un resumen—
         pero ya no alcanza para decidir si cabe otro.
 
-        Lo montado en otro elemento **no ocupa**: ese U lo paga quien lo lleva.
+        Lo montado en otro elemento **no ocupa**: ese U lo paga quien lo lleva. Y lo que no va
+        atornillado a los mástiles tampoco: no tiene U que ocupar.
         """
         rack = self.racks.get(rack_uid) or {}
         height = int(rack.get('u_height') or 0)
@@ -1046,6 +1339,11 @@ class DcimStore:
         for item in self.items_of(rack_uid):
             if str(item.get('parent_uid') or ''):
                 continue                        # va montado: su U ya lo paga otro
+            # Y lo que no va atornillado a los mástiles no ocupa ninguno: un SAI en el suelo al
+            # lado del armario está en el armario para todo lo demás —se alimenta, se cablea,
+            # hay que ir a mirarlo— y no le quita el sitio a nada.
+            if str(item.get('placement') or 'u') != 'u':
+                continue
             faces = ('front', 'rear') if str(item.get('face') or 'full') == 'full' \
                 else (str(item.get('face')),)
             start = int(item.get('u_start') or 1)

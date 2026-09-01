@@ -275,18 +275,34 @@ function _dcimItemsTable(items) {
     // U», está en ese — y ordenada solo por U saldría antes o después de la bandeja según el
     // azar del identificador.
     const rack = ((_dcimRack || {}).rack) || {};
-    const sueltos = items.filter(i => !i.parent_uid)
+    const sueltos = items.filter(i => !i.parent_uid);
+    // **Lo que no ocupa U va después de todas, en su zona.** Ordenado con lo demás caía entre
+    // dos U —un SAI del suelo entre la 1 y la 2— y eso no es una lista mal ordenada: es una
+    // lista que dice que el SAI está ahí. La columna dice «Al lado», sí, pero el ORDEN dice
+    // otra cosa, y en una tabla el orden se lee antes que la columna.
+    //
+    // Y en su zona en vez de fuera de la tabla: son equipos del armario, se alimentan y se
+    // cablean. Sacarlos sería la misma equivocación por el otro lado.
+    const enU = sueltos.filter(i => String(i.placement || 'u') === 'u')
         .sort((a, b) => _dcimUFromTop(rack, a.u_start || 0)
                         - _dcimUFromTop(rack, b.u_start || 0));
-    const rows = [];
-    sueltos.forEach(i => {
-        rows.push(i);
-        items.filter(h => String(h.parent_uid || '') === String(i.uid))
-             .sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')))
-             .forEach(h => rows.push(h));
-    });
+    // Entre ellos, por nombre: no tienen altura por la que ordenarse, y el azar del
+    // identificador cambiaría el orden entre dos recargas de lo mismo.
+    const fuera = sueltos.filter(i => String(i.placement || 'u') !== 'u')
+        .sort((a, b) => String(_dcimItemName(a)).localeCompare(String(_dcimItemName(b))));
+    const conHijos = (lista, dentro) => {
+        lista.forEach(i => {
+            dentro.push(i);
+            items.filter(h => String(h.parent_uid || '') === String(i.uid))
+                 .sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')))
+                 .forEach(h => dentro.push(h));
+        });
+        return dentro;
+    };
+    const rows = conHijos(enU, []);
+    const rowsFuera = conHijos(fuera, []);
     // Y lo que cuelga de algo que no está en la lista —otro rack, o sin permiso— no se pierde.
-    const vistos = new Set(rows.map(i => i.uid));
+    const vistos = new Set(rows.concat(rowsFuera).map(i => i.uid));
     items.filter(i => !vistos.has(i.uid)).forEach(i => rows.push(i));
     // Lo que una tabla puede decir y un alzado no es lo que sólo tiene ESA caja: su número de
     // serie, el de inventario y hasta cuándo tiene garantía. Sin ellas, «qué se queda sin
@@ -308,17 +324,28 @@ function _dcimItemsTable(items) {
             <th class="ss-nowrap ss-hug">${esc(t('dcim_owner'))}</th>
             <th class="ss-hug"></th>
         </tr></thead>
-        <tbody>${rows.map(_dcimItemRow).join('')}</tbody>
+        <tbody>${rows.map(_dcimItemRow).join('')}${
+            rowsFuera.length ? `<tr class="ss-lt-group"><td colspan="8">${
+                esc(t('dcim_elev_beside'))}<span class="ss-lt-gn">${
+                esc(String(rowsFuera.length))}</span></td></tr>
+            ${rowsFuera.map(_dcimItemRow).join('')}` : ''}</tbody>
     </table></div>`;
 }
 
 function _dcimItemRow(item) {
     const u = Number(item.u_start || 0);
     const h = Number(item.u_height || 1);
-    let span = h > 1 ? u + '–' + (u + h - 1) : String(u);
+    // **Lo que no ocupa U no se inventa una.** Un SAI en el suelo salía como «U1» porque la
+    // columna valía 1, y una fila que dice un número que nadie ha escrito es peor que una que
+    // no dice nada: alguien va a la U 1 a buscarlo.
+    let span = String(item.placement || 'u') !== 'u'
+        ? t('dcim_place_col_' + item.placement)
+        : (h > 1 ? u + '–' + (u + h - 1) : String(u));
     // Qué trozo del U, cuando no es entero. `2/4` se lee de un vistazo y no ocupa una columna.
     const de = Number(item.u_slots || 1);
-    if (de > 1) span += ' · ' + (item.u_slot || 1) + '/' + de;
+    if (de > 1 && String(item.placement || 'u') === 'u') {
+        span += ' · ' + (item.u_slot || 1) + '/' + de;
+    }
     // A foreign item says that it occupies, and nothing else. Not "hidden" and not "unknown
     // device": it EXISTS and it takes those U, which is exactly the fact that makes a shared
     // cabinet plannable and says nothing about whose it is.

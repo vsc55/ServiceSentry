@@ -18,6 +18,7 @@ from flask import request, session
 
 from lib.core.hosts import service as hosts_svc
 
+from lib.core.dcim import assets as dcim_assets
 from lib.core.dcim import builds as dcim_builds
 from lib.core.dcim import catalog as dcim_catalog
 from lib.core.dcim import owners as dcim_owners
@@ -302,6 +303,28 @@ def build(app, wa):
                 fuera['u_height'] = max(1, -(-decimas // 10))
         return fuera
 
+    def _asset(part, data, skip: str = '') -> str:
+        """Deja el número de inventario RESUELTO en *data*, y devuelve el error o ``''``.
+
+        En un ayudante compartido porque lo escriben cinco puertas —el armario, el equipo, la
+        regleta, el cable de datos y el de corriente— y la unicidad de un número no es de
+        ninguna de ellas: es de todas a la vez. Comprobarla en cada una es tener cuatro sitios
+        donde puede quedarse sin comprobar, y el que se olvida no da ningún error el día que se
+        escribe.
+
+        *part* es el almacén al que va la fila, y con él esto **no hace nada** donde no hay
+        número que llevar: una sede y una sala pasan por el mismo CRUD que un armario, y minarle
+        un número a algo que no tiene la columna sería gastar uno de la numeración en una fila
+        que no lo va a guardar.
+        """
+        store = _store()
+        rows = getattr(store, str(part or ''), None) if store else None
+        col = dcim_assets.ASSET_COL
+        if rows is None or not rows.has(col) or col not in (data or {}):
+            return ''
+        data[col], err = store.mint_asset(data[col], skip)
+        return err
+
     def _files():
         return getattr(wa, '_dcim_files', None)
 
@@ -327,6 +350,7 @@ def build(app, wa):
         build_wanted=_build_wanted,
         from_build=_from_build,
         files=_files,
+        asset=_asset,
         view_req=dcim_view_req,
         edit_req=dcim_edit_req,
         cable_req=dcim_cable_req,

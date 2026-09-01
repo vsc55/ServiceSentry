@@ -619,14 +619,14 @@ de la información que habrá cuando toque.
       rama**. Dos cables a la misma rama NO son redundancia —contando cables lo parecerían—, y
       la carga se mide contra la **mitad** de la capacidad, porque tener dos ramas no sirve de
       nada si una sola no puede con las dos
-- [x] Un equipo sin enchufar no es un aviso: un panel de parcheo no come, y pintarlo como un
+- [x] Un equipo sin enchufar no es un aviso: un panel de parcheo no consume, y pintarlo como un
       problema enseña a la gente a ignorar la pantalla — que es la forma más eficaz de que un
       aviso de verdad no se lea
 - [x] En un armario compartido: los **totales** de una regleta son de todos (sin ellos la filial
       no puede planificar), de quién es cada cable no, y el aviso sobre el equipo del vecino no
       se le cuenta a nadie más
 - [x] La pantalla, dentro del rack: avisos arriba con la frase entera —un aviso que hay que
-      interpretar es un aviso que se ignora—, regletas con su barra, y de qué come cada equipo
+      interpretar es un aviso que se ignora—, regletas con su barra, y de qué se alimenta cada equipo
 - [x] Enchufar propone la rama que le **falta** al equipo, que es la elección que evita el fallo
       que todo esto existe para cazar
 - [ ] Contraste con lo que mide la PDU gestionada *(el modelo ya lo permite: falta leer el
@@ -675,7 +675,7 @@ de la información que habrá cuando toque.
       está modelado y mejor. `dc_feed` ES el cable eléctrico aguas abajo (equipo ↔ regleta ↔
       toma ↔ vatios) y la cadena aguas arriba lo cubre desde el cuadro. Un cable de tipo
       `power` en `dc_cable` sería una **segunda tabla contestando lo mismo**, y este dominio ya
-      sabe cómo acaba eso: dos sitios donde decir de qué come un equipo, y el día que discrepen
+      sabe cómo acaba eso: dos sitios donde decir de qué se alimenta un equipo, y el día que discrepen
       las dos pantallas parecerán correctas
 **Fase 6 — Entre sedes**
 
@@ -914,10 +914,10 @@ anterior.*
       desde el principio; lo que faltaba era que la ruta los **pidiera** — la lista de campos del
       modelo base decía, en un comentario, que los puertos sobraban. Un campo que no se pide no
       da ningún error: da un cero que parece un dato, y el mini-PC con su puerto en la placa
-      decía tener solo la tarjeta que alguien le añadió. Y **por dónde come** se deduce ahora del
+      decía tener solo la tarjeta que alguien le añadió. Y **por dónde se alimenta** se deduce ahora del
       YAML (`power-ports` de continua = alimentador externo, de pared = fuente dentro,
       `poe_mode: pd`
-      sin tomas = come por el cable de red), con un repaso que lo rellena en lo ya importado sin
+      sin tomas = se alimenta por el cable de red), con un repaso que lo rellena en lo ya importado sin
       volver a descargar nada
 - [x] **Las fechas de una vida son seis, no una.** Fin de venta, fin de mantenimiento, fin de
       parches de seguridad, última alta de soporte, última renovación y fin de soporte, en su
@@ -1608,8 +1608,8 @@ anterior.*
       de continua— o un adaptador USB-C a red —un USB-C de entrada y una RJ-45 de salida— no
       tenían dónde decirlo, y la pregunta «¿qué latiguillo le hace falta a esto?» no se podía
       contestar desde su ficha. Entrada y salida no necesitan campo propio: las familias ya lo
-      dicen —`power-ports` es lo que come y `power-outlets` lo que da
-- [x] Y **cuánto come por esa toma** (`volts`, `watts`), del puerto y por lo mismo: una C14
+      dicen —`power-ports` es lo que consume y `power-outlets` lo que da
+- [x] Y **cuánto consume por esa toma** (`volts`, `watts`), del puerto y por lo mismo: una C14
       alimenta un mini-PC de 65 W y una fuente de 750, y lo que se guarda es la etiqueta de esta
       máquina. El voltaje es texto —la etiqueta pone `100-240`, un rango, y quedarse con una de
       las dos sería inventárselo— y los vatios un número, que son los que se suman para
@@ -1684,27 +1684,343 @@ Lo que está pedido y todavía no está. Aquí y no en `ref-pendiente.md` porque
 sección y se entienden con lo de arriba delante; cuando alguna empiece, su ficha se escribe en
 el bloque de su fase.
 
-- [ ] **Número de inventario para un cable, aparte de su etiqueta.** Hoy sólo hay `label`, que es
-      lo que está rotulado en el propio cable — se repite, se borra y se equivoca, y aun así es
-      con lo que trabaja quien está allí con una linterna. Un número de inventario es otra cosa:
-      lo pone la casa, es único y sirve para estandarizar. Mezclar los dos en una casilla obliga
-      a elegir cuál de los dos se pierde
-- [ ] **Inventariar también los cables de corriente**, en Alimentación. Un cable de un equipo a
-      una regleta es un cable como los de datos —tiene su tipo, su largo y su etiqueta— y hoy
-      `dc_feed` sólo guarda de qué toma cuelga y cuántos vatios se declararon. La pregunta que no
-      tiene dónde contestarse es la misma que en datos: qué hay que llevarse en la caja para
-      sustituirlo
-- [ ] **Una sección de cableado propia**, para buscar y gestionar sin pasar por un armario. Hoy
-      el cableado se ve dentro de un rack, así que «¿dónde está el cable C-014?» y «¿cuántos
-      latiguillos de Cat 6A hay puestos?» no tienen dónde preguntarse: hay que saber el armario
-      antes de poder buscar, que es lo contrario de buscar
-- [ ] **Una sección con todos los equipos enracados**, la misma idea un nivel más abajo: la lista
-      de equipos vive dentro de su armario, y «qué servidores hay en esta sede» o «qué se queda
-      sin garantía este trimestre» obligan a abrir armario por armario. El dato ya está — es la
-      pantalla la que falta
-- [ ] **Colocar en un rack lo que no va dentro de él**: un SAI en el suelo al lado, un cuadro en
-      la pared, una bandeja de fibra colgada. Ocupan sitio, se alimentan, se cablean y hay que ir
-      a mirarlos, pero no tienen U — y todo lo que hoy se coloca la tiene. Es lo mismo que ya
-      pasa con la regleta atornillada al lateral, que existe como regleta y no como equipo:
-      probablemente sea **una sola decisión** —qué significa «estar en un armario sin ocupar
-      U»— y no cinco casos particulares
+- [x] **Número de inventario para un cable, aparte de su etiqueta.** `label` es lo que está
+      rotulado en el propio cable —se repite, se borra y se equivoca, y aun así es con lo que
+      trabaja quien está allí con una linterna— y `asset` lo pone la casa, es único y sirve para
+      contar. Mezclarlos en una casilla obliga a elegir cuál de los dos se pierde
+- [x] **Un cable de corriente es un cable.** `dc_feed` decía de qué toma cuelga y cuántos vatios
+      se declararon, y nada más, como si el latiguillo no existiera. Existe: se compra, se guarda
+      en una caja, se rompe y hay que sustituirlo. Gana `asset`, `category`, `length_mm` y
+      `description` — **los mismos nombres que su hermano de datos**, porque dos tablas que
+      guardan lo mismo con nombres distintos son dos pantallas que se escriben dos veces
+- [x] Su categoría es el **par de conectores** (`c13-c14`, `c19-c20`…), que es lo que hay que
+      mirar en la caja antes de bajar al armario. Abierta como la de datos: una instalación con
+      tomas de otro país no puede quedarse sin poder apuntarlo
+- [x] Y **tiene ficha**: mirarlo, corregirlo, cambiarlo de toma y desenchufarlo. Antes eran
+      cuatro cosas escondidas en la misma chapa o en ninguna parte, y sus datos se preguntaban
+      una vez al enchufarlo — con prisa, que es cuando se enchufa
+- [x] El número de inventario sale también **en columna**, en las dos listas: es con lo que se
+      cuenta, y contar es mirar una lista entera. Metido sólo en la ficha, saber cuántos INV-22xx
+      hay puestos obligaba a abrirlos uno por uno. En alimentación va **uno por cable**, en el
+      mismo orden que las chapas: un equipo con dos fuentes tiene dos latiguillos
+- [x] Y el modo de una ficha es **de esa apertura**, no del panel. Era una variable que se
+      encendía al pulsar «Editar» y sólo se apagaba al guardar: cerrando el cuadro sin guardar se
+      quedaba encendida, y la siguiente fila que alguien pulsara abría el formulario de otro cable
+      en vez de su ficha. Ni un error ni una pantalla en blanco — la ventana equivocada, que
+      además parece la buena, y no se arreglaba más que con F5
+- [x] **El alzado se puede ver sin rótulos**, con un botón. Con diez cajas y sus nombres encima
+      lo que se pierde es el dibujo —dónde quedan los huecos, qué ocupa media U, qué hay montado
+      sobre qué— y una foto para una presentación no lleva los nombres de la casa. Encendido por
+      defecto, que es lo normal, y sin tocar el encuadre: el dibujo mide lo mismo con letras y sin
+      ellas
+- [x] **El cableado, fuera de su armario** (`/dcim/wiring`). Dentro de un rack se contesta «qué
+      sale de aquí»; las otras dos —«dónde está el cable C-014» y «cuántos latiguillos de Cat 6A
+      hay puestos»— obligaban a saber el armario ANTES de poder buscar, que es lo contrario de
+      buscar. Se busca por etiqueta, número de inventario, boca y nombre de los extremos, con
+      filtro por tipo y por categoría
+- [x] Cada punta dice **dónde está** —armario y U—, que es la otra mitad de «dónde está este
+      cable». De una punta ajena no: se estrecha como todo lo demás
+- [x] **Sin contraste**, y no por ahorrar: contrastar es una pregunta sobre UN armario —qué se ve
+      desde aquí— y armar el mapa de la flota para listar cables de seis salas sería pagarlo seis
+      veces por un dato que esta pantalla no usa
+- [x] Y **la misma ficha** que dentro del armario, con la misma corrección: dos fichas del mismo
+      cable serían dos formas de escribir lo mismo, y la segunda tardaría meses en descubrirse.
+      Guardar vuelve a la lista de la que se vino — recargar la otra deja lo corregido fuera de
+      la vista, y una corrección que no se ve parece una que no se ha guardado
+- [x] Están los **dos**: los de red y los de corriente. Son la misma pregunta y viven en dos
+      tablas por dónde acaban, no por lo que son — dos listas obligarían a buscar dos veces lo
+      mismo y a acordarse de cuál mirar. La regleta hace de segunda punta: tiene nombre y está en
+      un armario, que es lo que se necesita de una punta, y su «boca» es el número de toma
+- [x] Con **la tabla compartida del panel** (`createListTable`), la misma de Usuarios y Grupos:
+      filtros, orden, columnas escondibles y paginación. Una lista con su propio buscador y su
+      propia paginación se comporta distinto que las otras diez sin ninguna razón
+- [x] Y **en carriles**, que contestan la otra pregunta —la de compras—: *de qué tengo montado y
+      cuánto*. Cuarenta de cobre y dos de fibra se ve sin contar; en una tabla ordenada por tipo
+      hay que ir sumando de cabeza. Por **tipo**, por **categoría** y por **armario**
+- [x] Tres agrupaciones y **una función**: son la misma pantalla con otro criterio, y escribirlas
+      tres veces sería que dos se quedaran sin el arreglo que reciba la primera. Un cable de sala
+      sale en los **dos** armarios — meterlo sólo en el primero dejaría la mitad de los
+      latiguillos fuera del carril de su destino
+- [x] Los carriles cuentan la lista **entera** y no la página (`mode: 'summary'`): un tablero que
+      cuenta veinticinco de ciento veinte contesta mal a lo único que se le pregunta, y encima con
+      una cifra creíble. Y los metros de un carril dicen **cuántos faltan por medir**, que es de
+      donde sale el pedido del año que viene
+- [x] **Se busca en la base, no en memoria.** Las dos búsquedas —equipos y cables— recorrían la
+      tabla entera y construían un diccionario por fila de toda la instalación para quedarse con
+      treinta o con doscientas. En una sala pequeña no se nota, que es exactamente lo que hace
+      que se escriba así y se descubra tarde
+- [x] El texto, el rol, la clase y la categoría van al `WHERE`. Buscar por el **nombre de un
+      extremo** o de su armario también: el nombre está en otra tabla, así que se resuelve antes
+      a una lista acotada de identificadores y se pregunta por ellos — el mismo camino que la
+      búsqueda de equipos por modelo
+- [x] `LOWER(...)` dicho en la consulta y no dejado al motor: MySQL no distingue mayúsculas por
+      defecto, SQLite sí y PostgreSQL depende del idioma del sistema. Y los comodines del `LIKE`
+      **escapados**: sin eso, teclear `_` encuentra cualquier cosa y `%` las encuentra todas —
+      un buscador que ignora lo que se le pide es peor que uno que no encuentra nada, porque
+      contesta
+- [x] Lo único que se queda fuera del `WHERE` es **quién puede ver qué**: sale de una cadena de
+      pertenencia que no está en ninguna columna, y escribirla en SQL sería tener la regla en dos
+      sitios. Por eso se recorre **a trozos** (`scan_pages`) con un presupuesto, y un trozo se
+      termina siempre — parar a mitad dejaría fuera para siempre lo que quedaba detrás en él
+- [x] Y `capped` es «se acabó el presupuesto», no «hay más»: son dos cosas y sólo una es un
+      problema de quien mira
+- [x] La lista está **recortada a doscientos y lo dice**: una lista más corta que la realidad
+      parece completa, y con doscientas filas delante lo que se hace no es leerlas
+- [x] **Los equipos, fuera de su armario** (`/dcim/devices`). La lista de equipos vivía dentro
+      de su rack, así que «qué servidores hay en esta sede» y «qué se queda sin garantía este
+      trimestre» obligaban a abrir armario por armario. El dato ya estaba: era la pantalla la que
+      faltaba
+- [x] Cada equipo dice **dónde está del todo** —armario, sala y sede—, que sube dos niveles por
+      encima de su fila; y trae **lo que sólo tiene esa caja**: serie, inventario, garantía y
+      proveedor. Sin ellos la lista es un recuento
+- [x] Filtros por función, sede, empresa y **garantía** —caducada, caduca en 90 días, sin fecha—.
+      «Sin fecha» es un grupo y no un hueco: es justo lo que hay que mirar antes de contestar
+      «qué se queda sin cobertura», y esconderlo deja la respuesta corta y creíble
+- [x] La empresa se filtra **fuera del `WHERE`**: un equipo hereda la de su armario cuando no
+      dice la suya, y esa herencia no está en ninguna columna — escribirla en SQL sería tener la
+      regla en dos sitios
+- [x] **Tres maquetas y no carriles**, iguales en Equipos y en Cableado: la tabla pelada, la
+      tabla **agrupada** (con la cabecera del montón pegada arriba y su recuento) y una fila de
+      **recuentos** encima de la tabla que la filtra al pulsarlos. Se probaron cuatro y se
+      eligieron tres; lo que no se eligió se quitó — código que no se dibuja es código que nadie
+      mantiene
+- [x] **Por qué se agrupa y cómo se dibuja son dos preguntas**, y van en dos controles: mezclarlas
+      daría nueve vistas para contestar tres cosas. Equipos agrupa por estado, función, sede o
+      empresa; el cableado por tipo, categoría o armario
+- [x] Agrupar es **ordenar primero por el montón**, con la columna pulsada mandando dentro. La
+      cabecera se repite al pasar de página: un montón que sigue en la siguiente empezaría sin
+      ella y sus filas parecerían del montón que fuera
+- [x] Los recuentos cuentan **todas las filas filtradas** y no la página — un recuento que cambia
+      al pasar de página es peor que no contar — y llevan su palabra además de su color
+- [x] Y **por estado**: mal, en aviso, bien, sin vigilar. Es la pregunta que hace que esta
+      lista sirva para algo más que contar. **Lo peor primero** y no por tamaño: agrupado por
+      estado el carril gordo es el de lo que está bien, y ordenarlo por tamaño deja lo que está
+      mal al final de la fila — el mismo orden con el que un armario decide cuál de dos máquinas
+      está en más apuros
+- [x] «Sin vigilar» es un carril propio y **no es «bien»**: un equipo sin máquina enganchada no
+      está correcto, está sin mirar. Y lo que no contesta **por naturaleza** —un panel, una
+      bandeja— va aparte: meterlo entre los desatendidos llena la pantalla de deberes imposibles,
+      que es la forma más rápida de que nadie vuelva a mirarla. La misma decisión que ya toma el
+      recuento de un armario, y una guarda comprueba que las dos listas de roles mudos no se
+      separen
+- [x] También como **columna y como filtro**, ordenada por gravedad: alfabéticamente, «error, ok,
+      sin vigilar, warning» pone lo que está mal en medio de lo que está bien
+- [x] Y carriles **por función, por sede y por empresa**. Seis vistas en total con las del
+      cableado, y **una sola función** que agrupa y cuenta (`_ssLanes`): dos copias son dos que
+      se separan el día que a una se le añade algo
+- [x] Y **«Actualizar» no redibuja la sección**: `renderDcim` reescribe el panel entero —tira
+      el contenedor de la tabla, la barra de filtros y todo lo demás—, que es lo que hace falta
+      al ENTRAR en la vista y justo lo que no hace falta para volver a pedir unas filas. El
+      parpadeo era eso, y con él se perdía el foco de la barra: actualizar con algo escrito era
+      perder dónde se estaba escribiendo
+- [x] Pulsar una fila lleva **al equipo en su armario**, no a una ficha: una tercera forma de
+      mirar lo mismo no ayuda, y lo que se quiere al pulsar es verlo en su sitio
+- [x] **Estar en un armario sin ocupar U**, que era la pregunta detrás de los cinco casos: un
+      SAI en el suelo al lado, un cuadro en la pared, una bandeja de fibra colgada, la regleta
+      atornillada al lateral. `dc_item.placement` con tres valores —`u` (lo de siempre y el valor
+      por defecto), `side` y `near`— y **una sola comprobación** decide: lo que no es `u` no entra
+      en la ocupación ni en el alzado
+- [x] **La ficha de un equipo va por zonas**: «Qué es», «Dónde va», «Comparte el U», «De dónde
+      salió» y lo que haya que decir. Las casillas iban en una fila que se envuelve, así que los
+      grupos los hacía el ancho de la ventana — «Máquina» acababa junto a «Fondo del equipo»
+      porque ahí cupo, y medio palmo más estrecha eran otros dos. Un grupo que cambia de miembros
+      al estirar el cuadro no es un grupo
+- [x] Y **lo raro va plegado**: partir un U es de una instalación de cada veinte, y el fondo, el
+      proveedor y la descripción se rellenan un mes después si es que se rellenan. De diecisiete
+      casillas a trece. Pero **lo que ya está relleno se despliega solo**: esconder un dato
+      escrito es peor que enseñar uno vacío, porque el escrito no se puede ni corregir ni
+      descubrir
+- [x] Una zona **sin casillas no se dibuja**, ni su rótulo: en un SAI que está en el suelo no hay
+      ningún U que partir, y un título sobre un hueco vacío deja buscando el campo que no está
+- [x] Y **ayuda en todas**. De diecisiete campos la tenía uno, y los que más falta hacían eran
+      justo los que peor se adivinan: «Cuántas toma», «Se parte», «Fondo del equipo». Un campo
+      que no dice para qué es sólo lo rellena quien escribió el modelo
+- [x] Sólo el equipo declara zonas: una sede tiene cuatro casillas, y cinco rótulos para ordenar
+      cuatro cosas es peor que ninguno
+- [x] **Un campo que no significa nada no se pregunta.** La ficha seguía pidiendo la U de un
+      SAI que está en el suelo, y la respuesta era 1 porque la casilla venía con un 1 puesto: un
+      dato pedido sin sentido no sale vacío, sale con su valor por defecto — una mentira con
+      formato de dato. Cada campo declara `when` y hay **una función** que decide, no diez `if`
+- [x] Tampoco se pide lo que ya se dijo por otro sitio: elegir una plantilla o un modelo del
+      catálogo dice cuánto mide, y volver a preguntarlo es pedir que alguien confirme un número
+      que no ha mirado — o que lo contradiga sin enterarse
+- [x] Y los campos de los que **cuelgan otros** (`drives`) redibujan la ficha al cambiar: sin
+      eso, elegir «al lado del armario» dejaba las casillas de U en pantalla, preguntando por un
+      sitio que la respuesta anterior acababa de dejar sin sentido
+- [x] Cambiar cómo está puesto **es moverlo**, así que pasa por la misma comprobación y le quita
+      la U: sin contarlo entre lo que mueve, el equipo se quedaba con la que tenía
+- [x] Y en la lista va **después de todas las U, en su zona**. Ordenado con lo demás caía entre
+      la U 1 y la U 2, y eso no es una lista mal ordenada: es una lista que dice que el SAI está
+      ahí — la columna dice «Al lado», pero en una tabla **el orden se lee antes que la columna**
+- [x] Y sigue estando **en** el armario para todo lo demás: se alimenta, se cablea, tiene estado
+      y hay que ir a mirarlo. Lo único que no hace es quitarle el sitio a nada — un SAI en el
+      suelo no deja de caber porque el armario esté lleno, y preguntarle si cabe sería
+      preguntarle por un sitio que no ocupa
+- [x] El alzado **no lo dibuja y lo nombra debajo**. Ponerlo en la U 1 por no dejarlo fuera sería
+      dibujar un armario que no existe; sacarlo sin más lo convertiría en algo que hay que
+      recordar. Es la misma decisión que la bandeja que no lleva enchufe
+- [x] Lo montado encima **hereda cómo está puesto**: lo que va sobre una bandeja que está al lado
+      del armario está también al lado, y sin heredarlo el alzado dibujaría media bandeja
+- [x] Con esto, **la regleta del lateral deja de ser un caso particular**: es un equipo del
+      armario que no ocupa U y que se declara como regleta igual que cualquier otra
+- [x] **El número de inventario es único entre TODO lo inventariado**, no dentro de su tabla.
+      INV-45 es INV-45 tanto si es un servidor como si es un latiguillo: en el albarán, en la
+      hoja de la aseguradora y en la caja de repuestos hay una lista, no cuatro. Comprobarlo
+      por tabla dejaría dos cosas distintas con el mismo número y ningún error el día que se
+      escribe — el duplicado aparece meses después, cuando dos fichas dicen ser la misma cosa
+- [x] Y **el armario también lo lleva**. Lo tenían el equipo, el cable de datos y el de
+      corriente, y el mueble que los sostiene no: el que sale por más dinero en el albarán y
+      el primero que pregunta la aseguradora
+- [x] **`INV-?` es el siguiente.** Quien numera un armario entero teclea cuarenta veces un
+      número que ya está decidido, y la vez que se equivoca no lo dice nadie. Con `INV-???` el
+      mismo número escrito a tres cifras (`INV-046`): el ancho se pide con los propios
+      interrogantes, y vale cualquier principio — `RACK-?`, `CBL-??`
+- [x] El relleno es **cómo se escribe y no qué es**: `INV-045` y `INV-45` son el 45, así que
+      una instalación que empezó sin ceros y siguió con ellos no reinicia la cuenta. Y es un
+      mínimo y no un tope — con dos interrogantes hay que poder numerar el ciento uno
+- [x] El siguiente es **el mayor más uno, nunca un hueco**. Si el 20 se dio de baja, el 20 no
+      vuelve: su etiqueta sigue en un cajón y el historial sigue nombrándolo, y reciclarlo
+      convierte dos cosas en una a los ojos de cualquiera que mire un papel viejo
+- [x] Lo resuelve **el servidor al guardar**, no la pantalla: dos personas numerando a la vez
+      desde dos pantallas verían las dos el mismo «siguiente». Y devuelve con qué número se
+      quedó — quien escribe `INV-?` no puede verlo hasta ir a buscarlo a la lista, y ese viaje
+      es justo el que este campo existe para ahorrar
+- [x] En **un solo sitio** para las cinco puertas que lo escriben (armario, equipo, regleta y
+      los dos cables): la unicidad no es de ninguna de ellas, es de todas a la vez, y una
+      comprobación por puerta son cuatro sitios donde puede quedarse sin comprobar. Y **después
+      del permiso**: gastar un número en una petición que va a acabar en 403 deja un hueco en
+      la cuenta que nadie sabe explicar
+- [x] Las tablas que lo llevan **se descubren** preguntándole a cada una si tiene la columna.
+      Una lista escrita a mano hay que acordarse de tocarla el día que una más lo lleve, y no
+      acordarse no da ningún error: da un número repetido
+- [x] Dos grupos de interrogantes **se rechazan**: `INV-?-?` no es un patrón ambiguo, son dos
+      patrones, y elegir por quien lo escribió guardaría un número que no pidió — que encima
+      parece razonable y por eso no se descubre
+- [x] **La tirada entera en la ficha de un cable**, y con el que se está mirando marcado.
+      Un enlace que atraviesa un panel son tres cables y una tirada, y la ficha de uno de los
+      tres enseñaba ese cable solo —«del panel A boca 12 al panel B boca 12»—, que no dice de
+      dónde viene ni a dónde va. La pregunta que se hace delante del armario con el
+      latiguillo en la mano es justo la otra
+- [x] Es un hecho **declarado**, no una confirmación. El camino que dibujaba la pestaña de un
+      armario salía de cruzar lo escrito con lo que los dispositivos ven, así que una tirada
+      que nadie confirma —dos paneles y un latiguillo, sin LLDP de por medio— no salía en
+      ninguna parte estando declarada entera. Eso es media instalación
+- [x] **Por cable y al abrir la ficha** (`/cables/<uid>/run`), no con la lista: calcularla
+      para las doscientas filas de una búsqueda sería pagar doscientas veces lo que se mira
+      una. Y la ficha se dibuja antes de que llegue — esperarla dejaría la ventana en blanco
+      por un dato que va abajo del todo
+- [x] Se anda **por bocas**: lo que entra por la 12 sale por la 12, y otro cable en la 13 del
+      mismo panel no es la misma tirada. Se para en lo que no es un panel, en lo ajeno y en
+      una boca de la que salen dos cables — eso no es una tirada, es un dato torcido, y
+      elegir uno de los dos sería dibujar un camino que nadie ha declarado
+- [x] Y **se lee igual desde cualquiera de sus tramos**: sin eso, el sentido lo decidía por
+      cuál se hubiera preguntado —la ficha del latiguillo la enseñaba «servidor → switch» y
+      la del troncal al revés—, y dos dibujos distintos de lo mismo hacen dudar de si son dos
+- [x] Cada tramo lleva **lo suyo**: etiqueta, inventario, categoría, metros y color viajan con
+      él en vez de buscarse en la lista cargada, que sólo existe en una de las dos pantallas
+- [x] La ficha va **a dos columnas** cuando hay tirada: a la izquierda lo que el cable es, a
+      la derecha por dónde pasa. Uno debajo del otro dejaba media ventana en blanco y obligaba
+      a bajar para ver lo que se había venido a mirar. Sin tirada, una sola — una columna
+      vacía al lado no es un diseño, es un hueco
+- [x] **La ficha de un cable es una para dos pantallas, y leía el global de una de ellas.**
+      Abierta desde la sección de cableado, «Editar» reventaba con un TypeError antes de
+      dibujar nada: ni ventana, ni aviso, nada. Ficha en `caso-diagnostico.md`
+- [x] Y **meter un panel en medio dice por qué lado**. El cable que ya existe se quedaba
+      siempre con el extremo A, sin decirlo, y en la mitad de los casos el latiguillo que de
+      verdad sobrevive es el otro: se mete un panel de sala entre el servidor y el switch y
+      el que uno tiene en la mano, ya etiquetado, es el del lado del switch. Con la elección
+      al revés su etiqueta, su inventario y sus metros acaban en el tramo equivocado — y no
+      da ningún error: quedan dos cables bien declarados y uno de los dos miente
+- [x] Con **la cuenta hecha delante**: los dos tramos con los nombres puestos y «este» donde
+      va el que ya existe. Una frase que describa lo que va a pasar hay que leerla dos veces
+- [x] Y esa operación tenía el mismo fallo que «Editar»: leía la lista del armario, así que
+      desde la sección de cableado la nota salía sin nombres y guardar no hacía nada
+- [x] **Un cable directo también tiene tirada.** Se dibujaba sólo con dos tramos o más,
+      porque con uno «sus dos puntas están en los renglones de al lado» — y no lo estaban:
+      esos renglones sacaban el nombre de la lista del armario, así que desde la sección de
+      cableado un cable directo se quedaba con dos «sin decir» y ni un nombre. El dibujo se
+      pinta con lo que trae la propia tirada: nombre, boca, armario y U de las dos puntas
+- [x] Y cuando hay dibujo, las puntas **no se dicen dos veces**: los dos renglones repetían
+      peor —sin el sitio— lo que el dibujo ya da
+- [x] Cómo se llama una punta se resuelve en **una función** (`_dcEndName`): la lista del
+      armario lo trae en `a_label` y la de cableado en `a_at.label`, y había cuatro sitios
+      leyendo sólo el primero — la ficha, la nota de partir, el desplegable del lado y el
+      dibujo de cómo queda. Cuatro medias lecturas iguales son la señal de que la regla
+      tenía que estar en un sitio
+- [x] **El panel se mete desde la punta**, no desde un botón al pie: se pulsa la punta por la
+      que ese cable sigue siendo el que se tiene en la mano y el lado queda contestado. Es la
+      misma decisión que el desplegable, dicha donde se ve — un botón al pie obliga a
+      traducir «lado A» a «el extremo del switch» mirando hacia arriba. Sólo en las dos
+      puntas del cable abierto: las de los otros tramos son de otros cables
+- [x] Y **una talla declarada no se ofrece deshacer**: un modal `wide` ya mide lo que tiene
+      que medir, así que pierde el botón de maximizar — lo único que añadía era alto vacío
+      debajo de lo que se ha venido a leer. La misma regla que ya tenían los `fit`
+- [x] **La ficha dice también lo que falta.** Un cable sin número de inventario y sin metros
+      salía con tres renglones y ni una pista de que le faltaran: las casillas vacías no se
+      dibujaban, así que la ficha decía «esto es lo que hay de este cable» cuando lo que
+      quería decir era «esto es lo único que alguien ha escrito». Un hueco es un dato, y es
+      justo el que hay que ir a rellenar. Con el color como muestra, además del código
+- [x] Y **el formulario se reparte como la ficha**: rejilla con rótulos de grupo —«Qué cable
+      es», «Por qué bocas va»— en vez de ocho casillas en una fila que se envuelve con el
+      ancho puesto a ojo en cada una. Es el mismo arreglo que la ficha de un equipo y por el
+      mismo motivo: un grupo que cambia de miembros al estirar el cuadro no es un grupo
+- [x] Con **la tirada delante mientras se corrige**, que es cuando hace falta: los metros se
+      ponen después de haber visto los tres tramos y la boca se comprueba mirando el panel
+- [x] La **descripción** es de varias líneas: lo que se escribe ahí es «el latiguillo pasa
+      por detrás del armario y llega justo», y en un renglón eso se teclea a ciegas
+- [x] La **categoría es un desplegable de verdad**, no un `<datalist>`: ése no enseña que
+      haya nada que elegir —la casilla se ve igual que una vacía—, así que las categorías
+      estaban ahí y nadie las veía, y «cat6» acababa escrito a mano con su errata y su
+      mayúscula distinta cada vez. Sigue abierta por abajo: la última opción devuelve la
+      casilla de escribir, y una categoría rara que ya estaba escrita no se pierde
+- [x] Y **el color se puede elegir de los que hay**: la rueda de dieciséis millones deja la
+      instalación con nueve azules que no son el mismo azul. Los corrientes los dice el
+      servidor (`CABLE_COLORS`), como las categorías y como los colores de las ramas — una
+      segunda copia en la pantalla es la que se queda sin el color que se añada mañana—, y
+      la rueda sigue al lado para el que no esté. Los dos escriben en la misma casilla
+- [x] Y **primero los que ya se usan**, que es lo que de verdad se elige: si el azul de esta
+      sala es un azul concreto que llevan cuarenta cables, el cuarenta y uno tiene que ser
+      ÉSE. Los cuenta el servidor sobre la tabla, del más puesto al menos —una lista escrita
+      a mano es la que no sabe qué colores usa esta casa— y debajo van los corrientes, para
+      la instalación que empieza. Uno que sea las dos cosas sale una vez, en «ya en uso»
+- [x] Se eligen de **muestras en un desplegable propio**, no de una lista de códigos. Un
+      `<select>` con cada opción pintada de su color es lo que dice el estándar y lo que
+      hacen dos navegadores de tres: el tercero ignora el fondo de un `<option>` y deja
+      `#3b82f6` uno debajo de otro — leer códigos hexadecimales no es elegir un color. Y en
+      un desplegable y no sueltas debajo, porque lo que más ocupa es lo que menos se toca
+- [x] **Sin color es un valor.** Un `<input type="color"` no tiene estado vacío: siempre
+      vale un color, así que un cable sin color declarado salía pintado del azul de fábrica
+      y no había forma de volver a «ninguno». Lo que se guarda es una casilla escondida —la
+      rueda no puede guardar el vacío y la lista no puede guardar un color que no esté en
+      ella—, y «sin color» es una muestra más
+- [x] Y **el tipo de un cable no dice de qué está hecho**. La columna se llamaba «De qué es»
+      y ponía «cobre» en unas filas y «corriente» en otras: son dos ejes metidos en una
+      palabra, y la elegida era la del eje que sólo vale para los de red. Ahora dice qué
+      clase de cable es —lo que hay que pedir para sustituirlo— y los de red dicen además de
+      qué, entre paréntesis: un latiguillo de cobre y una fibra no se sustituyen el uno por
+      el otro
+- [x] Las muestras van **fuera del `<label>`**: un botón dentro de la etiqueta de un campo le
+      pasa el clic al campo, así que pulsar una abriría la rueda del sistema encima. Y
+      escriben en la casilla de la rueda, que es la que se guarda, sin redibujar el
+      formulario — redibujarlo tiraría lo tecleado en las otras casillas
+- [x] Y **de todas las tablas que llevan color**: un latiguillo rojo y un cable de corriente
+      rojo son el mismo rojo. Contados por separado, el rojo de veinte de datos y el de
+      veinte de corriente saldrían como dos colores de veinte en vez de uno de cuarenta
+- [x] **Un cable de corriente también tiene color** (`dc_feed.color`). Lo que la lista
+      pintaba era el de su RAMA, metido en el mismo campo: la ficha lo enseñaba como si fuera
+      el del latiguillo, y corregir cualquier otra cosa lo guardaba encima. Ahora la rama
+      viaja aparte y la lista pinta el del cable o, si no tiene, el de su rama
+- [x] Y **la lista de cableado se queda con la respuesta entera**. Copiaba campo a campo, así
+      que los colores ya usados llegaban del servidor y se tiraban ahí mismo: el desplegable
+      salía vacío en esa pantalla y lleno en la de al lado — el mismo dato, dos
+      comportamientos, y ninguno de los dos daba un error
+- [x] **«Cambiar de toma» no hacía nada desde la sección de cableado**: cuarta pantalla con
+      la misma forma de fallo. El elector de tomas leía `_dcPower` —el estado de la pestaña
+      de un armario— y allí vale `null`. Ahora las regletas se piden si no se tienen, las del
+      armario de la REGLETA y no las del equipo, y en su propio estado: pisar `_dcPower`
+      dejaría la pestaña de un armario contando las tomas de una sala en la que no está
+- [x] Y **la ficha de un cable de corriente se lee como la de datos**: los mismos renglones
+      aunque estén vacíos, la misma rejilla con rótulos de grupo, la descripción de varias
+      líneas y el par de conectores en un desplegable que se ve. Son dos pantallas que hacen
+      lo mismo: se parecen o no según quién las tocara la última, y la que se queda atrás es
+      la que parece rota
