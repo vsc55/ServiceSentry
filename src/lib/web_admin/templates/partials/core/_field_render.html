@@ -108,13 +108,22 @@ function _fieldPickerTitle(fp) {
 function _fieldPickerBtn(fp, pathStr, value, locked) {
     if (!fp || locked) return '';
     const cur = jsStr(String(value == null ? '' : value));
+    // A registration may be ONLY a placeholder: some settings have nothing to browse and still
+    // have a default that only exists at run time, or an example worth showing in the empty box.
+    // Drawing a button for one of those gives a control that throws when pressed.
+    if (!fp.open) return (fp.actions || []).length ? _fieldPickerActions(fp, pathStr, cur) : '';
     const own = `<button class="btn btn-secondary" type="button"
                 onclick="_fieldPickerFor(${jsStr(pathStr)}).open(${jsStr(pathStr)},${cur})"
                 title="${escAttr(_fieldPickerTitle(fp))}"><i class="bi ${escAttr(fp.icon)}"></i></button>`;
-    const extra = (fp.actions || []).map((a, i) => `<button class="btn btn-secondary" type="button"
+    return own + _fieldPickerActions(fp, pathStr, cur);
+}
+
+/** Lo que cuelga de un campo además de su selector. Aparte porque un registro puede traer estas
+ *  y no traer selector. */
+function _fieldPickerActions(fp, pathStr, cur) {
+    return (fp.actions || []).map((a, i) => `<button class="btn btn-secondary" type="button"
                 onclick="_fieldPickerFor(${jsStr(pathStr)}).actions[${i}].run(${jsStr(pathStr)},${cur},this)"
                 title="${escAttr(_fieldPickerTitle(a))}"><i class="bi ${escAttr(a.icon)}"></i></button>`).join('');
-    return own + extra;
 }
 
 function renderField(key, value, pathStr, target = 'modules') {

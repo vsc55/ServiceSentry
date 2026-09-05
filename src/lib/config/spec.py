@@ -166,6 +166,50 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # that on dependency lookups alone. A token raises it to 5000; a secret, so it is
     # encrypted at rest and masked on the way out (see secret_manager.ENCRYPT_KEYS).
     Cfg('snmp|github_token', str, '', card='snmp_library', env='SS_SNMP_GITHUB_TOKEN'),
+    Cfg('web_admin|dcim_map_tiles', str, '', attr='_DCIM_MAP_TILES',
+        # The tile server for the site map, as an XYZ template — `{z}/{x}/{y}`. EMPTY MEANS OFF,
+        # and off is the default on purpose: turning it on makes every viewer's browser ask a
+        # third party for thousands of images, and that third party then knows where this
+        # organisation's datacenters are. That is a decision for whoever deploys the panel.
+        #
+        # A template and not a provider name, because the same three lines then serve
+        # OpenStreetMap, Carto, a tile server of your own and an internal mirror — and because
+        # the alternative, a provider's JavaScript SDK, would mean opening `script-src` to
+        # somebody else's code. Loading a third party's images tells them where your sites are;
+        # running their script hands them the page.
+        #
+        # Suggested: https://tile.openstreetmap.org/{z}/{x}/{y}.png — and read their tile usage
+        # policy first: it is a volunteer-funded service, not a CDN.
+        env='SS_DCIM_MAP_TILES', card='dcim'),
+    Cfg('web_admin|dcim_map_attribution', str,
+        '© OpenStreetMap contributors', attr='_DCIM_MAP_ATTRIBUTION',
+        # What has to be SAID when the tiles are drawn. Its own field because it is a different
+        # question from where they come from, and because OpenStreetMap's licence requires the
+        # credit — a fixed string would stop being true the moment somebody points the template
+        # somewhere else, and a credit that names the wrong project is worse than none.
+        env='SS_DCIM_MAP_ATTRIBUTION', card='dcim'),
+    Cfg('web_admin|dcim_catalog_url', str,
+        'https://github.com/netbox-community/devicetype-library', attr='_DCIM_CATALOG_URL',
+        # Where the device catalogue is fetched from. NetBox's library is what nearly everybody
+        # wants — four thousand models with their ports, heights and elevation pictures — so it
+        # is what ships. But `nearly` is not `all`: some sites keep a fork with their own kit,
+        # and some rooms reach an internal mirror and never github.com. A URL written into the
+        # code would leave both of them unable to use the feature at all.
+        #
+        # Any GitHub repository laid out the same way works: `device-types/<Vendor>/*.yaml`.
+        # It is browsed before it is imported, so a wrong address costs a message and not a
+        # catalogue full of somebody else's models.
+        env='SS_DCIM_CATALOG_URL', card='dcim'),
+    Cfg('web_admin|dcim_media_dir', str, '', attr='_DCIM_MEDIA_DIR',
+        # Where the physical inventory's pictures go — floor plans today, the catalogue's
+        # elevations later. Empty means `<var_dir>/dcim_media`, which is the sane default and
+        # not somewhere to leave it closed: twenty rooms of plans and elevations are real
+        # megabytes, and the disk the database lives on need not be where somebody wants them.
+        #
+        # Read at every call rather than cached, like the backup folder and for the same
+        # reason: moving it must not need a restart, and an operator who moves it mid-day
+        # would otherwise write the next upload to the old path and not find it there.
+        env='SS_DCIM_MEDIA_DIR', card='dcim'),
     Cfg('web_admin|backup_dir', str, '', attr='_BACKUP_DIR',
         # Where copies are written. Empty means `<var_dir>/backups`, which is the sane
         # default and the wrong place to leave it: a copy on the same disk as the data it

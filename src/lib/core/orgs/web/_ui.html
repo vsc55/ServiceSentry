@@ -1,0 +1,391 @@
+{# ================================================================
+   Las empresas: quiénes son, y qué tiene fichado cada una.
+
+   La pertenencia es el otro eje de todo lo que el panel guarda. La contención dice **dónde**
+   está algo —sede, sala, armario, U— y la pertenencia dice **de quién es**; son dos árboles y no
+   uno, porque un holding comparte datacenter, sala y armario entre las sociedades del grupo.
+
+   Esta pantalla nació dentro del inventario, que es donde se hizo la pregunta por primera vez.
+   Era un accidente de calendario: la misma sociedad que paga el armario tiene usuarios en el
+   directorio, licencias en Microsoft 365 y una factura de un proveedor de nube, y un registro
+   que vive dentro de una sección es un registro que las demás no pueden usar sin nombrarla.
+
+   Así que es del core y tiene dirección propia, y lo que se ficha —el `scope`— lo declara quien
+   lo posee: aquí no hay escrita ninguna lista de qué puede ser de una empresa. La que se pinta
+   viene con los datos, así que el día que un módulo declare el suyo, sale.
+
+   ── Y es una tabla del panel, no una tabla de esta pantalla ─────────────────────────────
+   Empezó siendo tres disposiciones escritas a mano —una tabla, unas tarjetas y una ficha— con su
+   propio cambiador, su propia edición dentro de la fila y su propio marcado de lo obligatorio.
+   Funcionaba, y estaba mal: este panel tiene UNA tabla de entidad (`createListTable`) que ya trae
+   el esqueleto de tarjeta, la cabecera, el filtro, la paginación, las columnas ordenables,
+   redimensionables y elegibles —recordadas por usuario—, la selección y la columna de acciones.
+   Una lista que se salta eso se ve distinta de las otras diez y no aprende nada de lo que se
+   arregle en ellas.
+
+   Lo que esta pantalla pone es lo suyo: sus columnas, cómo se pinta cada celda, sus acciones y de
+   dónde salen los datos. Editar va en un cuadro (`web/_modals.html`), como un grupo, un rol o una
+   credencial — y la ficha se fue con eso: era una forma de dar sitio a la descripción, y un
+   cuadro le da más.
+   ================================================================ #}
+
+//: Lo que trajo el servidor la última vez. Las empresas Y los ámbitos que alguien declara, que
+//: es lo que permite contar «3 armarios» sin que esta pantalla sepa qué es un armario.
+let _orgsData = {orgs: [], scopes: [], loaded: false};
+
+//: La empresa que se está corrigiendo en el cuadro. `uid` vacío es un alta.
+let _orgDraft = null;
+
+// El estado que la tabla compartida lleva por fuera, para que la persistencia por usuario y las
+// manos que lo leen por su nombre lo sigan encontrando donde lo buscan.
+let _orgsVisibleCols = null;
+let _orgsColOrder = null;
+let _orgsPage = 1;
+let _orgsPageSize = null;
+let _orgsSort = 'name';
+let _orgsSortDir = 'asc';
+let _orgsCurrentPage = [];
+
+//: Los campos sin los que no hay empresa: el nombre es cómo se la llama, y la abreviatura es lo
+//: que cabe en una chapa y en un alzado, donde el nombre legal no entra. Se DECLARAN `required`
+//: en el cuadro, y de marcarlas en rojo mientras estén vacías se encarga el panel entero
+//: (`ssReqMark`): una regla escrita dos veces son dos reglas.
+const _ORGS_REQ = ['name', 'short'];
+
+function _orgsMay(flag) {
+    return new Set(currentUser.permissions || []).has(flag);
+}
+
+// ── Las columnas ────────────────────────────────────────────────────────────────────────
+
+const _ORG_COLS = [
+    _META_COL.uid,
+    {id: 'name',        label: () => t('orgs_name'),  sortKey: 'name',        always: true},
+    {id: 'short',       label: () => t('orgs_short'), sortKey: 'short'},
+    {id: 'description', label: () => t('orgs_desc'),  sortKey: 'description'},
+    // Por CUÁNTAS cosas tiene fichadas y no por el texto de las chapas: ordenar «3 sedes» y
+    // «2 armarios» alfabéticamente ordena por la primera letra del ámbito, que no dice nada.
+    {id: 'owns',        label: () => t('orgs_owns'),  sortKey: 'owns'},
+    ..._META_TAIL,
+];
+const _ORGS_DEFAULT_COLS = new Set(['short', 'description', 'owns']);
+
+const ORG_VIEWS = [
+    {id: 'table',  label_key: 'view_table',      icon: 'bi-table',                 render: null,              mode: 'table'},
+    {id: 'card',   label_key: 'view_cards',      icon: 'bi-grid-3x3-gap',          render: '_orgsCardsBody',  mode: 'cards'},
+    // La ficha: la lista a un lado y una sociedad al otro. `summary` y no `cards` porque recibe
+    // TODAS las filas y no la página — media docena de empresas no se pagina, y una ficha que
+    // sólo pudiera abrir las de la página actual sería una lista con un tope escondido.
+    {id: 'record', label_key: 'orgs_view_split', icon: 'bi-layout-sidebar-inset',  render: '_orgsRecordBody', mode: 'summary'},
+];
+const _orgView = createViewState('ss_orgs_view', ORG_VIEWS, () => {
+    if (typeof _persistTableConfig === 'function') _persistTableConfig();
+    renderOrgs();
+});
+function setOrgsView(id) { _orgView.set(id); }
+
+// ── Lo que cada empresa tiene fichado ───────────────────────────────────────────────────
+//
+// Lo DICHO y no lo heredado: una sede de la filial B con cuarenta equipos dentro cuenta como una
+// sede. Los equipos no lo dicen, lo heredan, y contarlos sería contar la misma propiedad cuarenta
+// veces — el árbol del inventario ya enseña la herencia; aquí están las decisiones que alguien
+// tomó, que son las que se pueden cambiar. Y es lo que hace que borrar una no sea a ciegas.
+//
+// Los ámbitos salen de lo que declara cada paquete y no de una lista escrita aquí: el día que un
+// módulo fiche buzones, esto los cuenta sin que nadie toque esta pantalla.
+
+function _orgsChipsHtml(o) {
+    const said = (o || {}).said || {};
+    return (_orgsData.scopes || [])
+        .filter(s => Number(said[s.scope] || 0))
+        .map(s => `<span class="badge bg-body-secondary text-body-secondary border fw-normal">
+            ${esc(String(said[s.scope]))} ${esc(t(s.label_key || s.scope))}</span>`)
+        .join('');
+}
+
+function _orgsTotal(o) {
+    const said = (o || {}).said || {};
+    return Object.keys(said).reduce((n, k) => n + Number(said[k] || 0), 0);
+}
+
+// ── La tabla, que es la del panel ───────────────────────────────────────────────────────
+
+/** Los dos botones de una fila: corregirla y quitarla. Compartidos por la tabla y las tarjetas
+ *  porque son los mismos — una tarjeta sin papelera sería la misma lista con una acción menos
+ *  según cómo se esté mirando. */
+function _orgsRowActions(o, ctx) {
+    if (!ctx.puede) return '';
+    return `<button class="btn btn-sm btn-primary py-0 px-1 me-1" title="${escAttr(t('edit'))}"
+                onclick="_orgModalOpen(${jsStr(o.uid)})"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete_tt'))}"
+                onclick="_orgsDrop(${jsStr(o.uid)})"><i class="bi bi-trash3"></i></button>`;
+}
+
+function _orgsCardsBody(filas, ctx) {
+    return _cardGrid((filas || []).map(o => _entityCard({
+        icon: 'bi-buildings', accentClass: 'teal',
+        title: `<span class="fw-semibold ss-fs-4">${esc(o.name || '')}</span>`,
+        badges: o.short ? ` <span class="badge bg-body-secondary text-body-secondary border
+            fw-normal">${esc(o.short)}</span>` : '',
+        subtitle: o.description ? esc(o.description) : '',
+        chips: _orgsChipsHtml(o)
+            || `<span class="text-muted ss-fs-1">${esc(t('orgs_owns_none'))}</span>`,
+        actions: _orgsRowActions(o, ctx),
+    })).join(''));
+}
+
+/** La ficha: la lista a la izquierda y la sociedad abierta a la derecha.
+ *
+ *  Es la que **da sitio a lo largo** — una descripción de tres renglones no cabe en una celda ni
+ *  en una tarjeta— y la que aguanta que mañana una empresa tenga un CIF, un contacto y un centro
+ *  de coste. De LEER: corregir sigue siendo el mismo cuadro que en las otras dos, porque un
+ *  formulario que sólo existe en una vista es un formulario que se arregla en un sitio y se queda
+ *  viejo en los otros dos.
+ *
+ *  Quién está abierta vive en `_orgsPick`; si lo que había ya no está —se borró, o el filtro lo
+ *  dejó fuera—, se abre la primera, que es lo que se está mirando. */
+let _orgsPick = '';
+
+function _orgsOpen(uid) {
+    _orgsPick = String(uid || '');
+    renderOrgs();
+}
+
+function _orgsRecordBody(filas, ctx) {
+    const todas = filas || [];
+    if (!todas.length) return '';
+    const o = todas.find(x => String(x.uid) === _orgsPick) || todas[0];
+    const lista = todas.map(f => `<button class="list-group-item list-group-item-action
+            d-flex align-items-center gap-2 ${f.uid === o.uid ? 'active' : ''}"
+            onclick="_orgsOpen(${jsStr(f.uid)})">
+        <i class="bi bi-buildings"></i>
+        <span class="flex-grow-1 text-truncate">${esc(f.name || '')}</span>
+        ${f.short ? `<span class="badge bg-body-secondary text-body-secondary border
+            fw-normal">${esc(f.short)}</span>` : ''}
+        <span class="text-muted ss-fs-1">${esc(String(_orgsTotal(f)))}</span>
+    </button>`).join('');
+    const dato = (rotulo, valor) => `<div class="col-12">
+        <label class="form-label ss-fs-2 text-muted mb-1">${esc(rotulo)}</label>
+        <div class="py-1">${valor ? esc(valor) : '<span class="text-muted">&mdash;</span>'}</div>
+    </div>`;
+    return `<div class="d-flex gap-3 align-items-start flex-wrap p-3">
+        <div class="list-group" style="flex:1 1 16rem;max-width:24rem">${lista}</div>
+        <div class="flex-grow-1 border rounded-3 p-3" style="min-width:18rem;
+                    background:var(--bs-tertiary-bg)">
+            <div class="d-flex align-items-center gap-2 mb-3">
+                <span class="fw-semibold ss-fs-4 flex-grow-1">${esc(o.name || '')}</span>
+                ${o.short ? `<span class="badge bg-body-secondary text-body-secondary border
+                    fw-normal">${esc(o.short)}</span>` : ''}
+                ${_orgsRowActions(o, ctx)}
+            </div>
+            <div class="row g-3">
+                ${dato(t('orgs_desc'), o.description || '')}
+                <div class="col-12">
+                    <label class="form-label ss-fs-2 text-muted mb-1">${esc(t('orgs_owns'))}</label>
+                    <div class="d-flex flex-wrap gap-1">${_orgsChipsHtml(o)
+                        || `<span class="text-muted ss-fs-1">${esc(t('orgs_owns_none'))}</span>`}</div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+createListTable({
+    key: 'orgs', containerId: 'orgs-list-container', tableId: 'orgs-table',
+    accent: 'teal', icon: 'bi-buildings', title: () => t('orgs_title'),
+    columns: _ORG_COLS, defaultVisible: _ORGS_DEFAULT_COLS,
+    thClass: {owns: 'ss-th-narrow'},
+    persist: true, clearLabelKey: 'orgs_title',
+    // Se piden al abrir y se filtran aquí: son las sociedades de un grupo, media docena, no un
+    // catálogo de miles — un viaje al servidor por cada letra tecleada es una lista a tirones.
+    filters: {
+        fields: [
+            {key: 'q', label: () => t('orgs_name'), type: 'search', grow: true,
+             placeholder: () => t('orgs_filter_ph')},
+        ],
+        match: (o, f) => {
+            const q = String(f.q || '').toLowerCase();
+            return !q || `${o.name || ''} ${o.short || ''} ${o.description || ''}`
+                .toLowerCase().includes(q);
+        },
+    },
+    prepare: async () => {
+        if (!_orgsData.loaded) await _orgsLoad();
+        return {puede: _orgsMay('orgs_edit')};
+    },
+    rows: () => (_orgsData.orgs || []),
+    rowKey: o => o.uid,
+    record: o => o,
+    uidOf: o => o.uid,
+    sortValue: (o, key) => (key === 'owns' ? _orgsTotal(o) : String(o[key] || '').toLowerCase()),
+    cell: (o, colId) => {
+        switch (colId) {
+            case 'name':
+                return `<td class="text-nowrap fw-semibold">${esc(o.name || '')}</td>`;
+            case 'short':
+                return `<td>${o.short ? `<span class="badge bg-body-secondary
+                    text-body-secondary border fw-normal">${esc(o.short)}</span>` : ''}</td>`;
+            case 'description':
+                return `<td class="text-muted small text-truncate ss-td-ellipsis"
+                    title="${escAttr(o.description || '')}">${esc(o.description || '—')}</td>`;
+            case 'owns': {
+                const chips = _orgsChipsHtml(o);
+                return `<td style="line-height:1.9">${chips
+                    || `<span class="text-muted small">${esc(t('orgs_owns_none'))}</span>`}</td>`;
+            }
+            default: return '<td></td>';
+        }
+    },
+    actions: (o, ctx) => _orgsRowActions(o, ctx),
+    actionsVisible: ctx => ctx.puede,
+    bodyMode: () => _orgView.mode(),
+    showChooser: mode => mode === 'table',
+    // El cuerpo de la vista abierta, despachado POR NOMBRE por el registro: son tres, y
+    // dos de ellas no son tarjetas.
+    cardsBody: (filas, ctx, todas) => _orgView.body(filas, ctx, todas),
+    headerLead: () => _orgView.switcher('setOrgsView'),
+    persistExtra: () => ({view: _orgView.id()}),
+    applyExtra: cfg => _orgView.apply(cfg && cfg.view),
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="_orgsReload()"
+        title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${
+        esc(t('refresh'))}</button>`,
+    headerButtons: ctx => ctx.puede
+        ? `<button class="btn btn-sm btn-success ms-1" onclick="_orgModalOpen('')">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('orgs_new'))}</button>` : '',
+    emptyState: () => `<div class="text-center py-5 text-muted">
+        <i class="bi bi-buildings ss-empty-icon"></i><span>${esc(t('orgs_none'))}</span></div>`,
+    state: {
+        visible:  {get: () => _orgsVisibleCols, set: s => { _orgsVisibleCols = s; }},
+        order:    {get: () => _orgsColOrder,    set: o => { _orgsColOrder = o; }},
+        page:     {get: () => _orgsPage,        set: p => { _orgsPage = p; }},
+        pageSize: {get: () => _orgsPageSize,    set: v => { _orgsPageSize = v; }},
+        sort:     {get: () => _orgsSort,        set: v => { _orgsSort = v; }},
+        sortDir:  {get: () => _orgsSortDir,     set: v => { _orgsSortDir = v; }},
+        currentPage: {get: () => _orgsCurrentPage, set: a => { _orgsCurrentPage = a; }},
+    },
+    globalPrefix: {
+        render: 'renderOrgs', goPage: '_goOrgsPage', changePageSize: '_changeOrgsPageSize',
+        sort: '_sortOrgs', toggleCol: '_orgsToggleCol', resetCols: '_resetOrgsCols',
+        saveOrder: '_orgsSaveOrder', initFeatures: '_initOrgsTableFeatures',
+    },
+});
+
+// ── Los datos ───────────────────────────────────────────────────────────────────────────
+
+async function _orgsLoad() {
+    const d = await apiGet('/api/v1/orgs');
+    if (!d) return;                       // la conexión, no la pantalla: el aviso ya está puesto
+    _orgsData = {orgs: d.orgs || [], scopes: d.scopes || [], loaded: true};
+}
+
+/** Volver a pedirlo todo. Después de cada escritura, que es cuando puede haber cambiado algo — y
+ *  es lo que refresca los recuentos, que si no seguirían contando lo de la que se acaba de
+ *  borrar. */
+async function _orgsReload() {
+    _orgsData.loaded = false;
+    await renderOrgs();
+}
+
+/** La página. El armazón es un contenedor y nada más: la tarjeta, la cabecera, el filtro y la
+ *  paginación los pone la tabla compartida, que es de lo que se trataba. */
+async function renderOrgsPage() {
+    const spec = (window.SS_STANDALONE_PAGES || [])
+        .find(p => p.render === 'renderOrgsPage') || {};
+    const caja = document.getElementById((spec.id || 'orgs') + '-container');
+    if (!caja) return;
+    if (!caja.querySelector('#orgs-list-container')) {
+        caja.innerHTML = '<div id="orgs-list-container" class="ss-vfill"></div>';
+    }
+    await renderOrgs();
+}
+
+// ── El cuadro ───────────────────────────────────────────────────────────────────────────
+
+/** Abrirlo: con `uid` vacío es un alta.
+ *
+ *  Lo que se corrige es una COPIA, y la lista no se toca hasta que el servidor contesta que sí:
+ *  cerrar con la cruz tiene que dejarla como estaba, y con la fila editada en vivo no habría a
+ *  qué volver. */
+function _orgModalOpen(uid) {
+    const o = (_orgsData.orgs || []).find(x => String(x.uid) === String(uid || '')) || {};
+    _orgDraft = {uid: o.uid || '', name: o.name || '', short: o.short || '',
+                 description: o.description || ''};
+    const nuevo = !_orgDraft.uid;
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set('omName', _orgDraft.name);
+    set('omShort', _orgDraft.short);
+    set('omDescription', _orgDraft.description);
+    const tit = document.getElementById('orgModalTitle');
+    if (tit) tit.textContent = t(nuevo ? 'orgs_new' : 'edit');
+    const err = document.getElementById('orgModalError');
+    if (err) err.textContent = '';
+    // Lo que tiene fichado, que es la mitad de la pregunta al mirar una: sólo si tiene algo — un
+    // alta no tiene nada todavía.
+    const chips = _orgsChipsHtml(o);
+    document.getElementById('omOwnsRow')?.classList.toggle('d-none', !chips);
+    const caja = document.getElementById('omOwns');
+    if (caja) caja.innerHTML = chips;
+    // Y lo obligatorio, marcado de entrada: en un alta las dos cajas nacen vacías. Lo pinta el
+    // marcador del panel, que es el mismo para todas las pantallas.
+    if (typeof ssMarkRequired === 'function') ssMarkRequired(document.getElementById('orgModal'));
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('orgModal')).show();
+}
+
+/** Qué hay que mandar, o `null` si nadie tocó nada.
+ *
+ *  Aparte de quien lo manda porque son dos cosas —decidir y hacer— y porque lo que aquí tiene
+ *  miga es lo tercero: guardar algo que no cambió escribe una línea de auditoría que no dice
+ *  nada, y el día que alguien busque quién renombró una sociedad no la va a encontrar entre el
+ *  ruido. */
+function _orgChange(borrador, antes) {
+    const nombre = String((borrador || {}).name || '').trim();
+    const corta = String((borrador || {}).short || '').trim();
+    if (!nombre || !corta) return null;
+    const cuerpo = {name: nombre, short: corta,
+                    description: String(borrador.description || '')};
+    if (!borrador.uid) return {metodo: 'POST', uid: '', cuerpo: cuerpo};
+    const viejo = antes || {};
+    if (String(viejo.name || '') === nombre && String(viejo.short || '') === corta
+        && String(viejo.description || '') === cuerpo.description) return null;
+    return {metodo: 'PUT', uid: borrador.uid, cuerpo: cuerpo};
+}
+
+async function _orgModalSave() {
+    const val = id => String((document.getElementById(id) || {}).value || '');
+    const err = document.getElementById('orgModalError');
+    const borrador = {uid: (_orgDraft || {}).uid || '', name: val('omName'),
+                      short: val('omShort'), description: val('omDescription')};
+    for (const [campo, id, clave] of [['name', 'omName', 'orgs_name_required'],
+                                      ['short', 'omShort', 'orgs_short_required']]) {
+        if (String(borrador[campo]).trim()) continue;
+        if (err) err.textContent = t(clave);
+        document.getElementById(id)?.focus();
+        return;
+    }
+    const antes = (_orgsData.orgs || []).find(x => String(x.uid) === String(borrador.uid));
+    const paso = _orgChange(borrador, antes);
+    if (paso) {
+        const url = paso.uid ? `/api/v1/orgs/${encodeURIComponent(paso.uid)}` : '/api/v1/orgs';
+        const r = await apiSend(paso.metodo, url, paso.cuerpo);
+        // Un nombre repetido se contesta AQUÍ, en el cuadro y con palabras, en vez de cerrarlo y
+        // dejar un aviso suelto sobre una lista que no ha cambiado.
+        if (!r.ok) {
+            if (err) err.textContent = r.error || t('save_failed');
+            return;
+        }
+        showToast(t('saved'), 'success');
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('orgModal')).hide();
+    _orgsReload();
+}
+
+/** Borrar una empresa. **Se pregunta**: lo que cuelga de ella deja de estar fichado, y eso no es
+ *  un campo que se corrige — es una fila que desaparece con todo lo que la nombraba. */
+function _orgsDrop(uid) {
+    const o = (_orgsData.orgs || []).find(x => String(x.uid) === String(uid)) || {};
+    showConfirmModal(tf('orgs_drop_q', o.name || ''), async () => {
+        const r = await apiSend('DELETE', `/api/v1/orgs/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _orgsReload();
+    });
+}

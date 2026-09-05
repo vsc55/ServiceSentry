@@ -82,6 +82,7 @@ core— y por eso declaran en `schema.json` (datos puros), recogidos por el pipe
 | `EMBEDDED_SERVICE` / `STANDALONE` | servicio de fondo | §3 |
 | `CONFIG_ACTIONS` | botones en una sección de config | §7b |
 | `GROUP_SOURCES` | origen de grupos de directorio de una sección | §7c |
+| `ORG_SCOPES` | lo que de ese paquete puede ser de una empresa | §5b |
 | `NOTIFY_EVENTS` | eventos notificables | §10 |
 
 > **Regla:** para añadir un mecanismo nuevo **no** copies un escáner ni inventes un nombre de
@@ -456,15 +457,15 @@ nombre. El módulo entonces sólo lo *nombra*: `{"key": "ssh", "address_field": 
 `fields`. Un protocolo propio del módulo sigue escribiendo los suyos.
 
 **Y ese dueño decide en qué formulario se edita.** Un protocolo del core es la conexión
-**del aparato** —su puerto, la identidad con la que contesta— y se edita en la pestaña
+**del dispositivo** —su puerto, la identidad con la que contesta— y se edita en la pestaña
 *General* del dispositivo, en una tarjeta plegable por protocolo, junto a la de SSH. Uno
-declarado por un módulo es una conversación que **ese módulo** mantiene con el aparato y se
+declarado por un módulo es una conversación que **ese módulo** mantiene con el dispositivo y se
 queda con él, en *Monitorización*. La marca es `builtin`, que ya viaja con cada perfil en el
 catálogo, así que ninguna de las dos pantallas nombra un protocolo y uno nuevo del core
 aparece solo. La regla se escribió una vez como `proto !== 'ssh'` —la misma regla con el
 nombre de un protocolo dentro— y dejó de ser cierta en silencio el día que SNMP pasó al core:
 su editor siguió dibujándose bajo el módulo mientras lo que editaba ya era propiedad del
-aparato. Guardado en `tests/meta/test_snmp_profiles_screen.py`.
+dispositivo. Guardado en `tests/meta/test_snmp_profiles_screen.py`.
 
 Y como `__host_profile__` sólo dice qué hereda un check **atado** —no pinta nada en el
 formulario de uno sin atar—, una colección que necesite la conexión inline (el caso «IP
@@ -488,6 +489,40 @@ flowchart TB
   sus metadatos (tipo, opciones, secret, i18n).
 - **Dónde acaban:** los formularios de la sección Servers y la resolución host-céntrica de checks.
   Ver [ref-modulos.md](ref-modulos.md) y [ref-schema-json.md](ref-schema-json.md).
+
+---
+
+## 5b. Lo que puede ser de una empresa (`ORG_SCOPES`)
+
+La pertenencia —de quién es cada cosa— la guarda el core en una sola tabla (`org_owner`, ver
+[ref-esquema-bd.md](ref-esquema-bd.md)), y esa tabla abarca ámbitos que viven en tablas que el
+core no conoce: un armario, una máquina, y mañana un buzón o una suscripción. Por eso la lista de
+ámbitos válidos **no está escrita en el core**: una lista ahí sería una que hay que editar cada
+vez que un paquete aprende a poseer algo, que es exactamente el core nombrando un dominio.
+
+**Descriptor** (en el `manifest.py` del paquete):
+
+```python
+from .owners import chain as _chain          # cómo se sube por SU contención
+
+ORG_SCOPES = (
+    {'scope': 'rack', 'label_key': 'orgs_scope_rack', 'chain': _chain},
+    {'scope': 'item', 'label_key': 'orgs_scope_item', 'chain': _chain},
+)
+```
+
+| Campo | Qué es |
+| --- | --- |
+| `scope` | cómo se llama el ámbito en la tabla. Único entre todos los paquetes; el primero que lo declara se lo queda |
+| `label_key` | clave del catálogo del **core** con la que se pinta («3 armarios»). Es UI del core —la pantalla de empresas—, así que las palabras son suyas |
+| `chain` | opcional: `fn(wa, scope, uid) -> [(scope, uid), …]` de dentro hacia fuera. Es lo que hace posible heredar. **Sin ella**, el ámbito contesta consigo mismo, que es la respuesta honesta para algo sin contenedor: es de quien se dijo, y de nadie si no se dijo |
+
+**Qué se gana con declararlo:** el extremo `/api/v1/orgs/owner` ficha ese ámbito sin conocerlo, la
+pantalla de empresas cuenta lo que cada sociedad tiene de él, y `lib.core.orgs.owners` resuelve
+«de quién es esto y puedo verlo» —incluida la respuesta *opaca*, que es la que evita enumerar la
+flota de otro— sin que el paquete escriba una consulta.
+
+**Dónde acaba:** `lib/core/orgs/scopes.py`, que es el único que hace el `scan`.
 
 ---
 
@@ -571,7 +606,7 @@ Lo que un módulo grafica se declara en su `schema.json` (`__history__.fields`: 
 y unidad de cada valor), y eso basta mientras la respuesta sea la misma en todas las
 instalaciones. Deja de bastar en cuanto depende de datos que aporta la instalación: el módulo
 SNMP graba **lo que declaren sus perfiles de dispositivo**, y alguno lo escribió alguien para el
-aparato de su rack después de publicarse esta versión. Un schema no puede nombrar un campo que
+dispositivo de su rack después de publicarse esta versión. Un schema no puede nombrar un campo que
 no existía cuando se escribió.
 
 **Descriptor** (en `watchfuls/<m>/__init__.py`): una función

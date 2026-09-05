@@ -205,7 +205,7 @@ host. Dibujar una VM enchufada a `gi11` sería más falso, no más preciso.
   El panel ya sabe qué máquina es un hipervisor y qué nodos declara —el módulo Proxmox lo
   recoge— así que el dato existe; lo que no está decidido es si eso es un dibujo mejor o una
   jerarquía que estorba en un mapa de cables.
-- **Decir por qué un aparato no tiene enlace LLDP.** Es la tercera vez que la pregunta llega a
+- **Decir por qué un dispositivo no tiene enlace LLDP.** Es la tercera vez que la pregunta llega a
   mano: «se le preguntó por vecinos y no contestó» es un estado que el panel conoce (perfil
   asignado, tabla vacía) y no enseña en ninguna parte.
 - **La heurística de puerto de Netdisco.** `_port_edges` descarta un puerto si hay más de una

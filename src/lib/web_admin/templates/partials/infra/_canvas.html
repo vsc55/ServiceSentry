@@ -637,11 +637,23 @@ function ssCanvasWindow(id) {
  *
  *  The attribute and not a re-render: a drag is a stream of events, and rebuilding the SVG on
  *  each one is a picture that stutters under the hand holding it. */
+//: Quién quiere enterarse de que una ventana se ha movido, por lienzo. Un solo apuntado por
+//: id: lo que se dibuja debajo de un mapa —hoy las teselas— depende de QUÉ TROZO se está
+//: mirando, y eso solo cambia aquí. Sin esto, la única forma de enterarse sería repintar la
+//: pantalla entera en cada movimiento del ratón, que es una imagen que tiembla bajo la mano.
+const _ssOnApply = {};
+
+/** Avisarme cuando esta ventana cambie. `null` lo quita. */
+function ssCanvasOnApply(id, fn) {
+    if (fn) _ssOnApply[id] = fn; else delete _ssOnApply[id];
+}
+
 function ssCanvasApply(id) {
     const svg = ssCanvasSvg(id);
     const v = _ssVB[id];
     if (!svg || !v) return;
     svg.setAttribute('viewBox', `${v.x} ${v.y} ${v.w} ${v.h}`);
+    try { _ssOnApply[id] && _ssOnApply[id](v); } catch (e) { /* un dibujo de más no rompe el de debajo */ }
 }
 
 /** The whole drawing, centred — which is also the state it opens in.

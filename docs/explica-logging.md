@@ -54,7 +54,7 @@ De menor a mayor prioridad — cada capa sobreescribe la anterior:
    string a enabled+nivel; `'off'`/`''`/`'none'`/`'false'` deshabilita. Valores aceptados:
    `off, debug, info, warning, error`.
 2. **CLI** `--log-level` / **env** `SS_LOG_LEVEL` — en el arranque web sobreescribe la config
-   ([main.py:180](../src/main.py#L180), [app.py:589](../src/lib/web_admin/app.py#L589)).
+   ([main.py:180](../src/main.py#L180), [app.py:637](../src/lib/web_admin/app.py#L637)).
 3. El **scheduler re-aplica** `global|log_level` en cada ciclo, de modo que un cambio en vivo
    surte efecto sin reiniciar ([manager.py:286](../src/lib/services/monitoring/manager.py#L286)).
 

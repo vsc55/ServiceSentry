@@ -38,6 +38,7 @@ import time
 
 from lib import __version__
 from lib.core.backup import create as _create
+from lib.core.backup import parts as _parts
 from lib.core.backup import schedule as _sched
 from lib.core.backup import service as _svc
 from lib.core.backup.archive import _log
@@ -185,6 +186,7 @@ class BackupRunner(_JobsMixin):
             include_secrets=bool(task.get('secrets', True)),
             actor=f'(schedule: {task.get("name") or "?"})', app_version=__version__,
             progress_cb=progress_cb, connectors=_connectors(wa),
+            dirs=_parts.configured_dirs(wa),
             engine=str(getattr(wa._db_connector, 'driver', '') or ''),
         )
         if not res.get('ok'):

@@ -1,0 +1,668 @@
+{# ================================================================
+   The rack, drawn: front and rear, U by U, coloured by what the probes already know.
+
+   This is the point of the whole section. A list of items answers "what is in this rack"; a
+   drawing answers the question somebody actually has at three in the morning, which is **where
+   in the cabinet do I put my hand** — and it answers it in the shape the cabinet has, so what
+   is read on the screen matches what is seen with a torch.
+
+   **Both faces, side by side.** Not a toggle: a 1U server fills U 12 from both sides, a patch
+   panel may fill only the rear, and two half-depth devices share a U from opposite sides. A
+   drawing that shows one face at a time makes the reader hold the other one in their head,
+   which is the thing they came here to stop doing.
+
+   **On the shared canvas** (`infra/_canvas.html`), so panning, zooming, fitting and — the one
+   that pays for itself immediately — **exporting to PNG or SVG** are the same code the two maps
+   use. A rack elevation is exactly the thing somebody wants to print and take downstairs.
+
+   **Colour is the fleet's own.** `hostStateColor` and nothing of this file's invention: a rack
+   and the machine list disagreeing about whether a server is in trouble would be two screens
+   arguing in front of the person who has to decide.
+
+   And the one that is not decoration: **an item with no host has no colour**. Not green. Most
+   of what fills a rack answers to nothing, and a wall of green is precisely the lie this
+   drawing exists to prevent.
+   ================================================================ #}
+
+//: The id this drawing goes by on the shared canvas, and its geometry. Millimetres are not
+//: used: a rack is drawn in U, which is the unit the thing itself is built and labelled in.
+const _DCE_SVG = 'dcimElevSvg';
+const _DCE = {
+    U: 22,              // one rack unit, in pixels
+    W: 300,             // the width of one face
+    GAP: 64,            // between front and rear — room for the U numbers of both
+    PAD: 16,
+    TOP: 30,            // the face's caption
+};
+
+function _dcimElevSvg() { return ssCanvasSvg(_DCE_SVG); }
+
+//: Si el armario se ha quedado con la pantalla entera. Un armario de 42 U con dos caras y las
+//: fotos de los alzados pide todo el ancho que haya, y uno de 5 no; el reparto de siempre es el
+//: bueno para casi todo y no para ese rato. Un botón y no una regla automática: quién necesita
+//: mirar el armario de cerca lo sabe él, y una pantalla que se recoloca sola es una pantalla que
+//: se mueve mientras la miras.
+let _dceWide = false;
+
+function _dceWideToggle() {
+    _dceWide = !_dceWide;
+    // La ventana de zoom se calculó para el ancho de antes: dejarla puesta enseña el mismo
+    // trozo en un hueco del doble, que es no haber agrandado nada.
+    ssCanvasReset(_DCE_SVG);
+    renderDcim();
+}
+
+/** Los botones del lienzo para este dibujo: acercar, alejar, **ver el armario entero** y
+ *  llevárselo en PNG o SVG. Los mismos que los dos mapas, que es lo que hace que un alzado se
+ *  pueda imprimir y bajar a la sala.
+ *
+ *  «Ver el armario entero» es el que faltaba y el que se echaba en falta: la ventana de zoom la
+ *  guarda el lienzo compartido y no se borra sola, así que una rueda de más dejaba el dibujo en
+ *  una esquina sin forma de volver.
+ *
+ *  Envuelto aquí y no llamado a pelo desde la barra para que el nombre del armario —que lo
+ *  teclea alguien— no viaje interpolado en una plantilla. Acaba en un `jsStr` dentro del lienzo,
+ *  pero la guarda de escapado no puede saberlo desde aquí, y tiene razón en no fiarse. */
+//: Si el alzado escribe el nombre dentro de cada caja. **Encendido**, que es lo normal: un
+//: armario sin rótulos no dice qué hay dentro.
+//:
+//: Apagado sirve para lo contrario, que también hace falta: ver la FORMA. Con diez cajas y sus
+//: nombres encima, lo que se pierde es el dibujo — dónde quedan los huecos, qué ocupa media U,
+//: qué hay montado sobre qué. Y para llevarse la foto a una presentación, donde los nombres de
+//: la casa no pintan nada.
+let _dceNames = true;
+
+function _dceNamesToggle() {
+    _dceNames = !_dceNames;
+    // `renderDcim` y no sólo el dibujo: el propio botón cambia de color al encenderse, y
+    // repintar el SVG lo dejaría apagado sobre un armario con rótulos. **Sin `ssCanvasReset`**,
+    // al revés que el de agrandar: aquí el dibujo mide lo mismo, y devolver el encuadre a su
+    // sitio movería lo que se está mirando por quitar unas letras.
+    renderDcim();
+}
+
+/** Los botones del dibujo. Los de siempre —zoom, encuadre, exportar— y el de los rótulos, que
+ *  es de esta pantalla y no del lienzo: un mapa de sedes no tiene cajas que rotular. */
+function _dceTools(rack) {
+    const r = rack || {};
+    // Compuestos ANTES de la plantilla: la guarda que comprueba el escapado lee las
+    // interpolaciones una a una, y una que además nombra un campo escrito por alguien no le
+    // deja ver por dónde sale. Tiene razón en quejarse — mejor no darle motivo.
+    const lienzo = ssCanvasTools(_DCE_SVG, 'rack-' + String(r.name || r.uid || ''), '');
+    return `${lienzo}
+        <span class="btn-group btn-group-sm ms-2">
+            <button class="btn btn-sm ${_dceNames ? 'btn-primary' : 'btn-secondary'}"
+                    onclick="_dceNamesToggle()"
+                    title="${escAttr(t('dcim_elev_names'))}">
+                <i class="bi bi-tag"></i></button>
+        </span>`;
+}
+
+//: El arrastre en curso: `{uid, u, size, face, from, moved}`. `u` es la U que se está enseñando
+//: ahora mismo, que ya está redondeada: lo que se ve durante el arrastre es lo que se guardará.
+let _dceDrag = null;
+
+/** Qué U hay a esta altura del dibujo. La inversa de `_dceY`, y por eso tiene que preguntar lo
+ *  mismo: un armario numerado de arriba abajo cuenta al revés, y equivocarse aquí manda un
+ *  servidor al otro extremo del armario. */
+function _dceUAt(rack, y) {
+    const h = Number(rack.u_height || 0);
+    // `floor` y no `round`: `_dceY` devuelve el BORDE SUPERIOR de la fila, así que el centro
+    // de una U cae en `.5` y redondear lo manda a la fila de al lado. Con `round`, todo lo que
+    // se arrastraba caía una U por encima de donde se soltó — sin ningún error que ver, solo
+    // un armario mal dibujado que alguien se creería.
+    const fromTop = Math.floor((y - _DCE.TOP) / _DCE.U);
+    return Math.max(1, Math.min(h, _dcimUAtRow(rack, fromTop)));
+}
+
+function _dceDown(ev) {
+    const caja = ev.target.closest('g[data-dce]');
+    if (!caja || !_dcimMay('dcim_edit')) return;
+    const item = ((_dcimRack || {}).items || []).find(i => i.uid === caja.dataset.dce);
+    // Lo ajeno se dibuja ocupando y anónimo: poder arrastrarlo sería poder reorganizar el
+    // armario de otro sin verlo.
+    if (!item || item.foreign) return;
+    const p = ssCanvasPoint(_DCE_SVG, ev);
+    if (!p) return;
+    _dceDrag = {uid: item.uid, u: Number(item.u_start || 1),
+                origen: Number(item.u_start || 1),
+                size: Math.max(1, Number(item.u_height || 1)),
+                from: p, moved: false};
+    ev.currentTarget.setPointerCapture?.(ev.pointerId);
+}
+
+function _dceMove(ev) {
+    if (!_dceDrag) return;
+    const rack = (_dcimRack || {}).rack;
+    const p = ssCanvasPoint(_DCE_SVG, ev);
+    if (!rack || !p) return;
+    // A la U más cercana, ya: no hay medias U —un equipo va atornillado a un agujero o no va— y
+    // redondear al soltar haría que lo que se ve durante el arrastre no fuese lo que se guarda.
+    const u = Math.max(1, Math.min(Number(rack.u_height || 1) - _dceDrag.size + 1,
+                                   _dceUAt(rack, p.y)));
+    if (u === _dceDrag.u) return;
+    _dceDrag.u = u;
+    _dceDrag.moved = true;
+    const item = ((_dcimRack || {}).items || []).find(i => i.uid === _dceDrag.uid);
+    if (item) {
+        item.u_start = u;
+        _dceRedraw();
+    }
+}
+
+async function _dceUp(ev) {
+    const drag = _dceDrag;
+    _dceDrag = null;
+    if (!drag || !drag.moved) return;
+    const item = ((_dcimRack || {}).items || []).find(i => i.uid === drag.uid);
+    if (!item) return;
+    // El servidor decide si cabe: sabe de caras y de solapes, y ya contempla que un equipo no
+    // choca consigo mismo al moverse una U. El dibujo puede enseñarlo donde vaya el ratón; lo
+    // que vale es lo que acepte la escritura.
+    const r = await _dcimSend('PUT', `/api/v1/dcim/items/${encodeURIComponent(item.uid)}`,
+                              {u_start: drag.u});
+    if (!r.ok) {
+        showToast(r.error || t('dcim_no_room'), 'warning');
+        item.u_start = drag.origen;                 // devolverlo a donde estaba de verdad
+        _dceRedraw();
+        return;
+    }
+    // Y recargar: mover uno cambia los huecos libres, y la barra de arriba los cuenta.
+    _dcimLoadRack((_dcimRack.rack || {}).uid);
+}
+
+/** Repintar solo el dibujo mientras se arrastra: volver a montar la sección entera en cada
+ *  movimiento del ratón sustituye el `<svg>` que tiene capturado el puntero, y con él se va la
+ *  mano que está arrastrando. */
+function _dceRedraw() {
+    const svg = ssCanvasSvg(_DCE_SVG);
+    const rack = (_dcimRack || {}).rack;
+    if (svg && rack) svg.innerHTML = _dceContent(rack, (_dcimRack || {}).items || []);
+}
+
+/** Where a U sits, top-down. Racks number from the bottom (U 1 at the floor) unless somebody
+ *  said otherwise, and getting that backwards sends a person to the other end of a cabinet at
+ *  three in the morning — which is why it is a column on the rack and not an assumption. */
+/** El acceso a lo que lleva dentro. Un botón y no solo el doble clic: un gesto que nadie
+ *  descubre es una función que no existe — y esta se descubrió preguntando dónde se configuraba.
+ *
+ *  Solo si la fila es lo bastante alta para que quepa sin taparlo todo: en 1U el nombre es lo que
+ *  hay que leer, y el doble clic sigue estando para quien ya lo sepa. */
+function _dcePartsBtn(item, x, y, w, h) {
+    if (h < _DCE.U * 1.5) return '';
+    // Contra el ancho de SU caja y no contra el de la cara. Se escribió cuando todo ocupaba el
+    // U entero, y desde que un equipo puede tomar media U el engranaje se dibujaba fuera de la
+    // caja a la que pertenece — encima de la de al lado, que es un botón que abre lo que no
+    // parece.
+    return `<g class="ss-pointer" onclick="event.stopPropagation();_dcPartsOpen(${
+                jsStr(item.uid)})">
+        <title>${escAttr(t('dcim_parts'))}</title>
+        <rect x="${x + w - 26}" y="${y + h - 16}" width="18" height="12" rx="3"
+              fill="var(--bs-body-bg)" stroke="var(--bs-border-color)"></rect>
+        <text x="${x + w - 17}" y="${y + h - 7}" text-anchor="middle" font-size="8"
+              fill="var(--bs-secondary-color)">&#9881;</text>
+    </g>`;
+}
+
+/** La foto del modelo, cuando el catálogo la trajo.
+
+ *  Detrás del nombre y del color, no en vez de ellos: la foto dice QUÉ es —un servidor de dos
+ *  fuentes se distingue de un panel de parcheo de un vistazo— y el color dice CÓMO está, que es
+ *  lo que se venía a mirar. Una foto que tapara el estado convertiría el alzado en un catálogo.
+ *
+ *  Atenuada por lo mismo: es fondo. Y estirada al hueco entero sin conservar proporciones a
+ *  propósito — un equipo de 1U ocupa una fila y la foto tiene que ocupar esa fila, aunque la
+ *  imagen de la biblioteca venga con otro margen. */
+function _dceFoto(item, face, x, y, w, h) {
+    const nombre = ((item.images || {})[face === 'rear' ? 'rear' : 'front']) || '';
+    if (!nombre) return '';
+    return `<image href="${_dcimMediaUrl(nombre)}"
+                   x="${x + 3}" y="${y + 2}" width="${w - 6}" height="${h - 4}"
+                   preserveAspectRatio="none" opacity=".55"></image>`;
+}
+
+/** Lo que sale de un equipo, como marcas y no como cables.
+ *
+ *  Un armario de cuarenta equipos con sus latiguillos dibujados es una maraña que tapa lo que se
+ *  venía a mirar. Estas marcas dicen tres cosas y ninguna más: que hay cables, de qué color, y si
+ *  la corriente viene de las dos ramas — que es lo que se puede comprobar de un vistazo y lo que
+ *  alguien va a buscar con la mano en el armario.
+ *
+ *  Solo cuando la pestaña que va con ellas está abierta. Quien abre un armario para ver qué hay
+ *  dentro no quiere el cableado encima; quien lo abre para el cableado, sí. */
+function _dceMarks(item, x, y, w, h) {
+    const marcas = [];
+    // Los cables de red: un punto por cable, con su color, pegados al borde derecho.
+    const cables = ((_dcCables || {}).cables || []).filter(
+        c => c.a_item === item.uid || c.b_item === item.uid);
+    cables.slice(0, 6).forEach((c, i) => {
+        marcas.push(`<circle cx="${x + w - 12 - i * 9}" cy="${y + h / 2}" r="3"
+            fill="${escAttr(c.color || 'var(--bs-secondary-color)')}"
+            stroke="var(--bs-body-bg)" stroke-width="1"><title>${
+            escAttr((c.label || '') + (c.seen === 'other_port'
+                ? ' · ' + t('dcim_cable_other_port') : ''))}</title></circle>`);
+    });
+    // Y la corriente: una barra por rama, del color de su regleta. Dos barras es lo normal; una
+    // sola es el hallazgo, y aquí se ve sin tener que abrir nada.
+    const luz = ((_dcPower || {}).items || []).find(p => p.uid === item.uid);
+    ((luz || {}).feeds || []).slice(0, 4).forEach((f, i) => {
+        const color = _dcPduColor(f.pdu_uid, (_dcPower || {}).pdus || []);
+        marcas.push(`<rect x="${x + 8 + i * 6}" y="${y + h - 5}" width="4" height="3" rx="1"
+            fill="${escAttr(color)}"><title>${escAttr(f.pdu)}</title></rect>`);
+    });
+    return marcas.join('');
+}
+
+/** Cuántas filas por debajo del borde de arriba cae la U *u*, y su inversa.
+ *
+ *  **La regla de la numeración vive aquí y en ningún otro sitio.** Un armario puede numerar del
+ *  suelo al techo —lo normal— o al revés, y eso no es una preferencia: está serigrafiado en el
+ *  mástil y decide qué U es la que alguien está mirando. Quien lo dibuja, quien lee dónde se
+ *  soltó algo y quien ordena la lista tienen que estar de acuerdo, y tres copias de la misma
+ *  regla son tres que se separan.
+ *
+ *  Separarse aquí significa exactamente lo que pasó: el dibujo bajando del 1 al 6 y la tabla
+ *  del 6 al 1, las dos hablando del mismo armario y ninguna de las dos equivocada por su
+ *  cuenta. Lo que no se puede es leerlas juntas, que es para lo que están una al lado de otra.
+ *
+ *  Las dos son la misma regla del derecho y del revés, y por eso van pegadas: la que se quede
+ *  sin tocar el día que esto cambie es la que hace que soltar algo en el 3 lo escriba en el 4.
+ */
+function _dcimUFromTop(rack, u) {
+    const h = Number((rack || {}).u_height || 0);
+    return Number((rack || {}).desc_units) ? (Number(u) - 1) : (h - Number(u));
+}
+
+function _dcimUAtRow(rack, fromTop) {
+    const h = Number((rack || {}).u_height || 0);
+    return Number((rack || {}).desc_units) ? fromTop + 1 : h - fromTop;
+}
+
+function _dceY(rack, u) {
+    return _DCE.TOP + _dcimUFromTop(rack, u) * _DCE.U;
+}
+
+function _dceFaceX(face) {
+    return _DCE.PAD + (face === 'rear' ? _DCE.W + _DCE.GAP : 0);
+}
+
+/** The whole drawing: two faces, their U rails, and what is bolted into them.
+ *
+ *  Lo montado se pinta DESPUÉS de las bandejas y como HERMANO suyo, no dentro de su grupo:
+ *  `pointerenter` no burbujea, así que salir de un mini PC hacia la bandeja que lo lleva no
+ *  volvería a encenderla y la tarjeta se quedaría vacía con el ratón todavía encima de algo. */
+//: Qué dibujo hay puesto: `alto×ancho` del último que se pintó. La ventana de zoom vive en el
+//: lienzo compartido y **no se borra sola**, así que abrir un armario de 5 U detrás de uno de 42
+//: aplicaba al pequeño la ventana del grande: el dibujo salía diminuto en una esquina con la
+//: mitad de la caja vacía. Y una vez movida la rueda no había forma de volver.
+//:
+//: `ssCanvasReset` existe justo para esto —«un redibujado que cambia lo que HAY que mirar»— y el
+//: alzado era el único de los tres lienzos que no la llamaba nunca.
+let _dceLast = '';
+
+function _dcimElevation(rack, items) {
+    const h = Number(rack.u_height || 0);
+    if (!h) return '';
+    const height = _DCE.TOP + h * _DCE.U + _DCE.PAD;
+    const width = _DCE.PAD * 2 + _DCE.W * 2 + _DCE.GAP;
+    const firma = `${width}x${height}`;
+    if (firma !== _dceLast) {
+        _dceLast = firma;
+        ssCanvasReset(_DCE_SVG);
+    }
+    const L = {x: 0, y: 0, width, height};
+    // **A la proporción del dibujo y no estirándose con el panel.** `.ss-infra-canvas` es
+    // `flex: 1 1 auto`, que es lo correcto para los dos mapas —ocupan lo que haya— y era lo
+    // peor aquí: el dibujo de un armario de 5 U mide ciento cincuenta píxeles y la caja crecía
+    // hasta el borde de la pantalla, así que el alzado salía pequeño en medio de medio metro de
+    // negro.
+    //
+    // Con `aspect-ratio` y no con una altura calculada: el ancho lo decide la columna y esto no
+    // lo sabe. Declarada la proporción, el navegador saca la altura del ancho que le toque, y
+    // sale exacta a cualquier tamaño sin medir nada.
+    // **Al tamaño en el que está dibujado.** Un U mide 22 px y los nombres están escritos para
+    // esa altura; metido en una columna de 480 px, el dibujo entero se escala a 0,69 y lo que se
+    // lee con lupa no es un alzado, es una miniatura. Se pide el ancho que necesita y la columna
+    // se lo da; `max-width` es la salida cuando la pantalla no llega, que entonces sí encoge.
+    // **A todo el hueco.** Antes pedía exactamente los píxeles en los que está dibujado, que
+    // arreglaba la miniatura y dejaba el aire al otro lado. Lo que hay que hacer con el sitio
+    // libre es dárselo al dibujo: `width:100%` con la proporción declarada crece hasta donde
+    // llegue la columna y el U se lee mejor cuanto más grande, que es justo lo contrario del
+    // problema de antes.
+    // Los botones, en una barra ENCIMA del dibujo y no flotando dentro. Actúan sobre este
+    // lienzo y sobre ningún otro —por eso no están en la barra del armario, entre los que crean
+    // y borran cosas—, pero puestos encima del dibujo tapaban parte de él y competían con la
+    // tarjeta de la lupa por la misma esquina. Una barra es su sitio: manda sobre lo que hay
+    // debajo y no le quita nada.
+    return `<div class="ss-toolrow mb-1">
+        ${_dceTools(rack)}
+        <button class="btn btn-sm ${_dceWide ? 'btn-warning' : 'btn-secondary'}"
+                onclick="_dceWideToggle()"
+                title="${escAttr(t(_dceWide ? 'dcim_elev_narrow' : 'dcim_elev_wide'))}">
+            <i class="bi bi-arrows-angle-${_dceWide ? 'contract' : 'expand'}"></i></button>
+    </div>
+    <div class="border rounded-3 overflow-hidden ss-canvas-fit position-relative"
+         style="width:100%${_dceWide ? '' : `;aspect-ratio:${width}/${height}`}">
+        <svg ${ssCanvasAttrs(_DCE_SVG, L)}
+             onwheel="ssCanvasWheel(${jsStr(_DCE_SVG)},event)"
+             onpointerdown="_dceDown(event)" onpointermove="_dceMove(event)"
+             onpointerup="_dceUp(event)" onpointercancel="_dceUp(event)"
+             onpointerleave="_dceUp(event)"
+             aria-label="${escAttr(t('dcim_elevation'))}">
+            ${_dceContent(rack, items)}
+        </svg>
+    </div>
+    <!-- Lo que dice el equipo señalado, **fuera del dibujo**. Estaba flotando dentro y tapaba
+         una U — se probó a saltar al otro extremo y lo que hacía era tapar otra: no hay sitio
+         libre dentro de un armario dibujado, porque el armario ocupa el dibujo entero.
+
+         Con su hueco reservado aunque no haya nada señalado: si apareciera y desapareciera, el
+         dibujo daría un salto de dos centímetros cada vez que el ratón entra y sale de una caja,
+         que es la clase de temblor que hace imposible apuntar. -->
+    <div id="dcimElevPanel" class="ss-elev-info"></div>
+    ${_dceBesideHtml(items)}`;
+}
+
+function _dceContent(rack, items) {
+    return ['front', 'rear'].map(face => _dceFace(rack, items, face)).join('');
+}
+
+/** One face: its caption, its U numbers, and the empty rails behind everything. */
+/** Lo que está en el armario **sin ocupar U**, dicho debajo del dibujo.
+ *
+ *  Dicho y no escondido, que es la misma decisión de siempre: un SAI en el suelo al lado, un
+ *  cuadro en la pared o la regleta del lateral no tienen U donde dibujarse, y desaparecer del
+ *  alzado los convertiría en cosas que hay que recordar. Esconder es lo que hace dudar de un
+ *  dibujo — quien cuenta cajas se queda preguntando si falta algo.
+ *
+ *  Con su nombre y pulsables, como cualquier otra caja: lo único que no tienen es sitio en la
+ *  rejilla. */
+function _dceBesideHtml(items) {
+    const fuera = (items || []).filter(
+        i => !i.parent_uid && String(i.placement || 'u') !== 'u');
+    if (!fuera.length) return '';
+    return `<div class="ss-fs-2 text-muted mt-1">
+        <i class="bi bi-box-arrow-right me-1"></i>${esc(t('dcim_elev_beside'))}
+        ${fuera.map(i => `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1"
+                onclick="_dcimOpen('edit','item','',${jsStr(i.uid)})"
+                title="${escAttr(t('dcim_place_' + String(i.placement || 'u')))}">
+            <span class="ss-dot me-1" style="background:${
+                escAttr(hostStateColor(i.state || ''))}"></span>${
+            esc(_dcimItemName(i))}</button>`).join('')}
+    </div>`;
+}
+
+function _dceFace(rack, items, face) {
+    const h = Number(rack.u_height || 0);
+    const x = _dceFaceX(face);
+    const rails = [];
+    for (let u = 1; u <= h; u++) {
+        const y = _dceY(rack, u);
+        rails.push(`<rect x="${x}" y="${y}" width="${_DCE.W}" height="${_DCE.U}"
+                          fill="var(--bs-body-bg)" stroke="var(--bs-border-color)"
+                          stroke-width="0.5"></rect>
+            <text x="${x - 6}" y="${y + _DCE.U / 2 + 4}" font-size="9" text-anchor="end"
+                  fill="var(--bs-secondary-color)">${u}</text>`);
+    }
+    // The items of this face, drawn after the rails so they sit on them. `full` is on both:
+    // that is what `full` MEANS, and drawing it on one is a cabinet that reads as half empty
+    // from behind.
+    const mine = (items || []).filter(i => {
+        // Lo montado en otra cosa no se dibuja aparte: hereda el sitio de quien lo lleva y
+        // saldría justo encima. Se cuenta en el bloque de la bandeja y se lee en la tabla.
+        if (i.parent_uid) return false;
+        // Y lo que no se atornilla a los mástiles tampoco: no tiene U donde dibujarlo. Ponerlo
+        // en la U 1 por no dejarlo fuera sería dibujar un armario que no existe — un SAI en el
+        // suelo no está en la U 1, y un alzado que miente es peor que uno que dice menos.
+        if (String(i.placement || 'u') !== 'u') return false;
+        const f = String(i.face || 'full');
+        return f === 'full' || f === face;
+    });
+    return `<g>
+        <text x="${x}" y="${_DCE.TOP - 12}" font-size="11" font-weight="600"
+              fill="var(--bs-secondary-color)">${esc(t('dcim_face_' + face))}</text>
+        ${rails.join('')}
+        ${mine.map(i => _dceItem(rack, i, face)).join('')}
+        ${mine.map(i => _dceKids(rack, i, face)).join('')}
+    </g>`;
+}
+
+/** One thing bolted into the rack.
+ *
+ *  Its colour is the fleet's (`hostStateColor`) and its ABSENCE of colour is the point: an item
+ *  with no host gets the muted surface, which is what "nobody is watching this" looks like
+ *  everywhere else in the panel. */
+/** El rectángulo de una caja en el dibujo: dónde empieza y cuánto ocupa.
+ *
+ *  Aparte del pintado porque hace falta **dos veces**: para pintar la caja y para saber dentro
+ *  de qué hueco van los que se montan encima de ella. Calculado dos veces serían dos que se
+ *  separan el día que alguien toque el reparto de un U. */
+/** La misma caja, vista por la espalda.
+ *
+ *  **Un armario visto por detrás tiene la izquierda donde tenía la derecha.** Los dos mini PC de
+ *  una bandeja salían en el mismo orden en las dos caras, y eso no es una preferencia de dibujo:
+ *  quien va con un destornillador a la parte de atrás encuentra el primero a la derecha, y un
+ *  alzado que dice lo contrario le hace desenchufar el que no era. Lo mismo con dos equipos de
+ *  media anchura compartiendo un U.
+ *
+ *  **En vertical no se toca**: la U 5 es la U 5 por delante y por detrás, porque el número está
+ *  serigrafiado en los dos mástiles. Sólo se da la vuelta a lo horizontal, que es lo que cambia
+ *  al rodear el armario.
+ *
+ *  Una función y no la vuelta metida en cada cálculo: lo horizontal se reparte en dos sitios —el
+ *  trozo de U que ocupa una caja y el sitio que ocupa lo que va montado dentro de ella— y el que
+ *  se quedara sin dar la vuelta sería el que dibuja media bandeja al revés que la otra media. */
+function _dceFlipX(face, x0, ancho, r) {
+    if (face !== 'rear') return r;
+    return Object.assign({}, r, {x: 2 * x0 + ancho - (r.x + r.w)});
+}
+
+function _dceRect(rack, item, face) {
+    const u = Number(item.u_start || 1);
+    const size = Math.max(1, Number(item.u_height || 1));
+    const ancho = _DCE.W;
+    // Qué trozo del U ocupa, si es que no lo ocupa entero. `1` de `1` es lo de siempre.
+    const de = Math.max(1, Number(item.u_slots || 1));
+    const cual = Math.min(de, Math.max(1, Number(item.u_slot || 1)));
+    const toma = Math.max(1, Math.min(de - cual + 1, Number(item.u_slot_span || 1)));
+    const aLoAncho = String(item.u_split || 'width') !== 'height';
+    // The top of the block is the top U it occupies, which depends on which way the rack is
+    // numbered — the same question as `_dceY`, asked for the far end.
+    const arriba = Math.min(_dceY(rack, u), _dceY(rack, u + size - 1));
+    const alto = size * _DCE.U;
+    // Dada la vuelta si se está mirando por detrás, dentro de su propia cara.
+    return _dceFlipX(face, _dceFaceX(face), ancho, {
+        x: _dceFaceX(face) + (aLoAncho ? (cual - 1) * ancho / de : 0),
+        y: arriba + (aLoAncho ? 0 : (cual - 1) * alto / de),
+        w: aLoAncho ? ancho * toma / de : ancho,
+        h: aLoAncho ? alto : alto * toma / de,
+    });
+}
+
+/** Lo que va montado en esta caja, en el orden en que se lee. */
+function _dceKidsOf(item) {
+    return ((_dcimRack || {}).items || [])
+        .filter(i => String(i.parent_uid || '') === String((item || {}).uid))
+        .sort((a, b) => String(_dcimItemName(a)).localeCompare(String(_dcimItemName(b))));
+}
+
+//: Cuánto se le reserva a la bandeja para su propio nombre cuando lleva cosas encima. Sin ese
+//: hueco, los que van montados la tapan entera y el armario tiene una caja sin nombre.
+const _DCE_GUT = 78;
+
+function _dceGut(w, kids) {
+    return kids.length ? Math.min(_DCE_GUT, w * 0.34) : 0;
+}
+
+function _dceItem(rack, item, face) {
+    const caja = _dceRect(rack, item, face);
+    const x = caja.x, y = caja.y, w = caja.w, h = caja.h;
+    const tone = item.foreign ? 'var(--bs-secondary-bg)' : hostStateColor(item.state || '');
+    const kids = item.foreign ? [] : _dceKidsOf(item);
+    // Lo que lleva encima ya no se dice con un `(+2)`: se DIBUJA. El recuento era lo que se
+    // podía hacer sin sitio, y una bandeja con dos mini PC contados no enseña cuál de los dos
+    // está en aviso — que es justo lo que se viene a mirar. Lo que se reserva es la izquierda,
+    // para que la bandeja no se quede sin su propio nombre.
+    const gut = _dceGut(w, kids);
+    const rotulo = gut || w;
+    const name = _dcimItemName(item);
+    return `<g class="ss-pointer" data-dce="${escAttr(item.uid)}"
+               onpointerenter="_dceHover(${jsStr(item.uid)})"
+               onpointerleave="_dceHover('')"
+               ${item.foreign ? '' : `onclick="_dcimOpen('edit','item','',${
+                    jsStr(item.uid)})"`}
+               ${item.foreign ? '' : `ondblclick="event.stopPropagation();_dcPartsOpen(${
+                    jsStr(item.uid)})"`}>
+        <!-- Un botón, no solo el doble clic: un gesto que nadie descubre es una función que no
+             existe, y esto se descubrió justo así — preguntando dónde se configuraba. -->
+        <title>${escAttr(name)}</title>
+        <rect x="${x + 2}" y="${y + 1}" width="${w - 4}" height="${h - 2}" rx="3"
+              fill="var(--bs-tertiary-bg)" stroke="${tone}" stroke-width="1.5"></rect>
+        ${kids.length ? '' : _dceFoto(item, face, x, y, w, h)}
+        <rect x="${x + 2}" y="${y + 1}" width="4" height="${h - 2}" rx="2"
+              fill="${tone}"></rect>
+        ${_dceNames ? `<text x="${x + 14}" y="${y + h / 2 + 4}" font-size="11"
+              fill="${item.foreign ? 'var(--bs-secondary-color)' : 'currentColor'}"
+              >${esc(_dceClip(name, Math.max(6, Math.round(34 * rotulo / _DCE.W))))}</text>` : ''}
+        ${item.foreign ? `<text x="${x + w - 10}" y="${y + h / 2 + 4}" font-size="10"
+              text-anchor="end" fill="var(--bs-secondary-color)">&#128274;</text>`
+            : _dceMarks(item, x, y, rotulo, h) + _dcePartsBtn(item, x, y, rotulo, h)}
+    </g>`;
+}
+
+/** Dónde cae cada cosa montada dentro de la caja que la lleva.
+ *
+ *  **Con los mismos cuatro campos que dividen un U** —`u_slots`, `u_slot`, `u_slot_span` y
+ *  `u_split`— aplicados al hueco de la bandeja en vez de al del armario. Ya estaban en la ficha
+ *  y ya se guardaban: lo único que faltaba era leerlos.
+ *
+ *  **O lo dicen todos, o lo reparte el dibujo.** El reparto es de la BANDEJA y no de una caja:
+ *  con uno que diga «la mitad derecha» y otro que no diga nada, el segundo valdría «entera» y
+ *  saldría encima del primero. Cuando no lo dicen todos, se reparten a partes iguales en su
+ *  orden — que no se escribe en ningún sitio: el día que alguien lo diga, manda lo que diga. */
+function _dceKidRect(caja, item, hermanos, gut, face) {
+    // El hueco del nombre de la bandeja se queda a la izquierda en las dos caras: es un sitio
+    // donde escribir, no una posición en el armario, y darle la vuelta sólo movería el rótulo.
+    const dentro = {x: caja.x + gut, y: caja.y + 2,
+                    w: caja.w - gut - 3, h: caja.h - 4};
+    // Lo que se reparte es lo de dentro, y por detrás se reparte al revés: el primero por
+    // delante es el último por detrás.
+    const flip = (r) => _dceFlipX(face, dentro.x, dentro.w, r);
+    const todos = hermanos.every(k => Number(k.u_slots || 1) > 1);
+    if (!todos) {
+        const i = Math.max(0, hermanos.findIndex(k => k.uid === item.uid));
+        const parte = dentro.w / hermanos.length;
+        return flip({x: dentro.x + i * parte, y: dentro.y, w: parte, h: dentro.h});
+    }
+    const de = Math.max(1, Number(item.u_slots || 1));
+    const cual = Math.min(de, Math.max(1, Number(item.u_slot || 1)));
+    const toma = Math.max(1, Math.min(de - cual + 1, Number(item.u_slot_span || 1)));
+    // Repartido a lo ALTO no cambia: arriba sigue siendo arriba se mire por donde se mire.
+    if (String(item.u_split || 'width') === 'height')
+        return {x: dentro.x, y: dentro.y + (cual - 1) * dentro.h / de,
+                w: dentro.w, h: dentro.h * toma / de};
+    return flip({x: dentro.x + (cual - 1) * dentro.w / de, y: dentro.y,
+                 w: dentro.w * toma / de, h: dentro.h});
+}
+
+/** Los que van montados en esta caja, dibujados DENTRO de ella.
+ *
+ *  Cada uno con su color de estado y su foto si el catálogo la trae: una bandeja con dos mini PC
+ *  y uno en aviso tiene que enseñar cuál, que es lo que un recuento nunca podrá decir. */
+function _dceKids(rack, padre, face) {
+    const kids = _dceKidsOf(padre);
+    if (!kids.length) return '';
+    const caja = _dceRect(rack, padre, face);
+    const gut = _dceGut(caja.w, kids);
+    return kids.map(kid => {
+        const r = _dceKidRect(caja, kid, kids, gut, face);
+        const tone = hostStateColor(kid.state || '');
+        const name = _dcimItemName(kid);
+        return `<g class="ss-pointer" data-dce="${escAttr(kid.uid)}"
+                   onpointerenter="_dceHover(${jsStr(kid.uid)})"
+                   onpointerleave="_dceHover('')"
+                   onclick="_dcimOpen('edit','item','',${jsStr(kid.uid)})"
+                   ondblclick="event.stopPropagation();_dcPartsOpen(${jsStr(kid.uid)})">
+            <title>${escAttr(name)}</title>
+            <rect x="${r.x + 1}" y="${r.y}" width="${r.w - 2}" height="${r.h}" rx="2"
+                  fill="var(--bs-body-bg)" stroke="${tone}"></rect>
+            ${_dceFoto(kid, face, r.x + 1, r.y - 2, r.w - 2, r.h + 4)}
+            <rect x="${r.x + 1}" y="${r.y}" width="3" height="${r.h}" rx="1.5"
+                  fill="${tone}"></rect>
+            ${_dceNames ? `<text x="${r.x + 9}" y="${r.y + r.h / 2 + 3.5}" font-size="9.5"
+                  fill="currentColor">${
+                esc(_dceClip(name, Math.max(3, Math.round(r.w / 6))))}</text>` : ''}
+        </g>`;
+    }).join('');
+}
+
+function _dceClip(s, n) {
+    s = String(s || '');
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+//: What the pointer is on. Hover only: there is nothing to keep open here — the thing under
+//: the pointer IS the answer, and clicking one opens its form.
+let _dceOn = '';
+
+function _dceHover(uid) {
+    _dceOn = String(uid || '');
+    const box = document.getElementById('dcimElevPanel');
+    if (box) {
+        box.innerHTML = _dceCard();
+    }
+    // Y la fila de la lista, marcada. El dibujo dice DÓNDE está y la tabla QUÉ es, y son la
+    // misma cosa contada dos veces: sin unirlas hay que buscar a mano en una lo que se acaba de
+    // señalar en la otra, que con veinte equipos es contar renglones.
+    document.querySelectorAll('tr[data-dci]').forEach(tr => {
+        tr.classList.toggle('ss-hl', !!_dceOn && tr.dataset.dci === _dceOn);
+    });
+    const svg = _dcimElevSvg();
+    if (!svg) return;
+    // Marked in place rather than redrawn: the pointer is ON the box, and rebuilding the
+    // drawing underneath it drops the hover that asked. Same rule as both maps.
+    svg.querySelectorAll('g[data-dce]').forEach(g => {
+        g.style.opacity = (!_dceOn || g.dataset.dce === _dceOn) ? '' : '.35';
+    });
+}
+
+/** Señalar un equipo desde FUERA del dibujo — desde su fila en la lista.
+ *
+ *  Al revés que el `pointerenter` del `<g>`, y por eso existe: pasar por un renglón de la tabla
+ *  tiene que encender la U que le toca, o la lista y el dibujo son dos pantallas que hablan del
+ *  mismo armario sin mirarse. */
+function _dceHoverFromList(uid) {
+    if (document.getElementById('dcimElevPanel')) _dceHover(uid);
+}
+
+/** Reading one item — what it is, whose it is, and what it is doing. */
+function _dceCard() {
+    if (!_dceOn || !_dcimRack) return '';
+    const item = (_dcimRack.items || []).find(i => i.uid === _dceOn);
+    if (!item) return '';
+    if (item.foreign)
+        return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+            <i class="bi bi-lock me-1"></i>${esc(t('dcim_foreign'))}
+            <span class="text-muted ms-2">${esc(_dceSpan(item))}</span>
+        </div>`;
+    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="fw-semibold">${esc(_dcimItemName(item))}</span>
+            ${item.state ? _infraStateBadge(item.state) : `<span class="text-muted ss-fs-3">${
+                esc(t('dcim_unwatched'))}</span>`}
+            ${_dcimOrgBadge(item.org_uid)}
+            <span class="text-muted ss-fs-3">${esc(_dceSpan(item))}</span>
+            ${item.serial ? `<code class="ss-fs-3">${esc(item.serial)}</code>` : ''}
+            ${item.host_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2"
+                onclick="_dcimOpenHost(${jsStr(item.host_uid)})">${
+                esc(t('dcim_open_device'))}</button>` : ''}
+        </div>
+    </div>`;
+}
+
+function _dceSpan(item) {
+    const u = Number(item.u_start || 0);
+    const h = Number(item.u_height || 1);
+    return (h > 1 ? u + '–' + (u + h - 1) : String(u)) + 'U · '
+           + t('dcim_face_' + (item.face || 'full'));
+}

@@ -88,6 +88,7 @@ CARDS: tuple[dict, ...] = (
     # that makes the copies is not the place to say where they land — that is a deployment
     # decision, made once, by whoever knows which mounts exist.
     {'tab': 'general', 'id': 'backup', 'title_key': 'cfg_card_backup', 'icon': 'bi-archive'},
+    {'tab': 'general', 'id': 'dcim', 'title_key': 'cfg_card_dcim', 'icon': 'bi-building'},
     # One field: where Diagnostics asks about new releases. A card of its own so the single
     # address this panel is willing to contact is visible to whoever is deciding whether it may
     # reach the internet at all — buried among the backup settings, that is a decision nobody

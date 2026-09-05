@@ -303,7 +303,7 @@ function _atkNewForUser(preset) {
         </div>
         <div class="mb-2">
             <label class="form-label small fw-semibold">${esc(t('api_token_col_name'))}</label>
-            <input type="text" class="form-control form-control-sm" id="accTokName" maxlength="64"
+            <input type="text" class="form-control form-control-sm" id="accTokName" required maxlength="64"
                    value="${escAttr(_atkPreset.name || '')}"
                    placeholder="${escAttr(t('api_token_name_ph'))}">
         </div>

@@ -260,3 +260,70 @@ class TestAPickerForwardsWhatItWasGiven:
         found = [p for p in self._sources()
                  if 'FIELD_PICKERS[' in io.open(p, encoding='utf-8-sig', errors='replace').read()]
         assert len(found) >= 2, f'the picker registrations are not being scanned: {found}'
+
+
+class TestElModalDeConfirmacionRecibeUnaFuncion:
+    """`showConfirmModal(mensaje, callback)` **no devuelve una promesa**.
+
+    Escribirlo como `const ok = await showConfirmModal(msg, t('delete'))` compila, abre el modal
+    y no falla nunca — pero `ok` es `undefined`, así que la comprobación siguiente sale por la
+    puerta de «ha dicho que no» y **todo lo que venía después no ocurre**. Salió a la pantalla
+    como «eliminar no funciona»: el modal preguntaba, el usuario confirmaba, y no pasaba nada.
+
+    Un `await` sobre algo que no es una promesa es la equivocación que no falla: no rompe, no
+    avisa, solo hace que el resto de la función no exista. Por eso se vigila desde fuera.
+    """
+
+    def _js(self):
+        for path, texto in sorted(_all_template_text().items()):
+            yield os.path.relpath(path, TPL), texto
+
+    def test_nadie_espera_su_resultado(self):
+        malos = [rel for rel, js in self._js()
+                 if re.search(r'await\s+showConfirmModal', js)]
+        assert not malos, f'`await showConfirmModal` no devuelve nada: {malos}'
+
+    def test_ni_lo_guarda(self):
+        malos = [rel for rel, js in self._js()
+                 if re.search(r'=\s*showConfirmModal\s*\(', js)]
+        assert not malos, f'`showConfirmModal` no devuelve nada que guardar: {malos}'
+
+    def test_el_segundo_argumento_es_una_funcion(self):
+        """Un texto donde va la función es un modal cuyo botón de aceptar no hace nada."""
+        malos = []
+        for rel, js in self._js():
+            # La DECLARACIÓN también dice `showConfirmModal(msg, callback…` y no es una
+            # llamada: se mira solo lo que no viene precedido de `function`.
+            for llamada in re.findall(r'(?<!function )showConfirmModal\(([^;]{0,200})', js):
+                resto = llamada.split(',', 1)[1] if ',' in llamada else ''
+                if resto and not re.search(r'(\(\s*\)|function|=>|\w+\s*\))', resto[:60]):
+                    malos.append((rel, llamada[:60]))
+        assert not malos, malos
+
+
+class TestUnComentarioNoPuedeCerrarUnaCadena:
+    """Un acento grave dentro de un `<!-- … -->` **cierra la plantilla de cadena que lo rodea**.
+
+    Reportado desde la pantalla como «sale el spinner y nada»: un comentario HTML escrito dentro
+    del `return \`…\`` de una función de dibujo llevaba `` `<g>` `` y `` `pointerenter` `` para
+    citar lo que nombraban. El navegador leyó el primero como el final de la cadena y el resto de
+    la función como código — `SyntaxError`, el guion entero muerto, y la sección en blanco.
+
+    Un comentario no puede romper nada, y por eso no se mira: ahí está la trampa. No lo ve
+    ningún guardián de los que hay —la prosa se ignora a propósito en casi todos— y **nada de la
+    suite ejecuta el guion**, así que los cinco mil tests siguen en verde.
+
+    La regla es corta: dentro de un partial, un comentario HTML no lleva acentos graves. Para
+    citar código está el comentario de JavaScript, que vive fuera de la cadena.
+    """
+
+    def test_ningun_comentario_html_lleva_un_acento_grave(self):
+        malos = []
+        for rel in _partials():
+            src = io.open(os.path.join(TPL, rel), encoding='utf-8').read()
+            for com in re.findall(r'<!--.*?-->', src, re.S):
+                if '`' in com:
+                    malos.append(f'{rel}: {" ".join(com.split())[:70]}')
+        assert not malos, (
+            'un acento grave en un comentario HTML cierra la plantilla de cadena que lo rodea '
+            f'y mata el guion entero — usa un comentario de JavaScript: {malos}')

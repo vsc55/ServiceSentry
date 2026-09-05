@@ -5,6 +5,771 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## Una ficha para dos listas leyendo el global que sólo rellena una
+
+**Síntoma.** En la sección de Cableado (`/dcim/wiring`) se pulsa una fila, sale la ficha del
+cable, se pulsa «Editar» y **no pasa nada**. Ni la ventana de corrección, ni un aviso, ni un
+error en pantalla: el botón parece muerto. Desde la pestaña «Cableado» de un armario, el mismo
+botón funciona.
+
+**Diagnóstico.** La ficha de un cable es **una sola** para las dos pantallas — se hizo así a
+propósito: dos fichas del mismo cable serían dos formas de escribir lo mismo y la segunda
+tardaría meses en descubrirse. Pero su desplegable de tipo se dibujaba con:
+
+```js
+(_dcCables.kinds || _DC_CABLE_KINDS).map(...)
+```
+
+`_dcCables` es lo que devolvió `/racks/<uid>/cables`, y vale `null` hasta que alguien abre la
+pestaña de un armario. Entrando directamente en la sección de cableado nunca se abre, así que la
+lectura lanza un `TypeError` **antes de dibujar nada**. La excepción sube por el manejador
+`onclick` y muere en la consola: para quien mira, el botón no hizo nada.
+
+No se veía leyendo, porque el `|| _DC_CABLE_KINDS` de al lado tiene toda la pinta de ser la
+guarda — y lo es, pero del contenido, no del contenedor. Se localizó **ejecutando**: se pidió la
+página al `test_client`, se sacó el `<script>` grande —lo mismo que hace
+`test_wa_bundle_syntax.py`— y se cargó en `node` con un DOM de mentira. Con `_dcCables` puesto,
+la ficha abre; con `_dcCables = null` y el cable en `_dcWire.rows`, sale el `TypeError` con su
+número de línea.
+
+**Causa raíz.** Dos pantallas comparten una pieza y la pieza lee **el estado de una de ellas**.
+Mientras sólo existió la primera, leerlo era leer «el estado»; en cuanto hubo una segunda, esa
+lectura pasó a ser una suposición sobre por dónde se ha entrado — y las suposiciones sobre por
+dónde se ha entrado no dan error el día que se escriben.
+
+La segunda mitad del mismo fallo estaba al lado: las dos listas traen el mismo dato del servidor
+con **nombres distintos** (`categories` en una, `cats` en la otra), así que aunque la lectura
+hubiera estado guardada habría devuelto una lista vacía en una de las dos, sin decirlo.
+
+**Solución.** Una función que contesta de qué puede ser un cable mirando **la lista que se está
+mirando**, con las dos formas del nombre normalizadas (`_dcCableVocab`), y la ficha pasando por
+ella. Y una guarda que comprueba que nada de lo que dibuja la ficha —`_dcCableEditDraw`,
+`_dcCatBox`, `_dcCableFormHtml`— vuelva a nombrar `_dcCables`: no que esté guardado —
+`(_dcCables || {})` también lo estaría y ofrecería una lista vacía en silencio— sino que pase por
+la función que sabe mirar en las dos.
+
+De paso salió otro de la misma familia: la ficha decía «Comprobando con lo que ven los
+dispositivos…» también en la sección de cableado, donde no hay contraste a propósito. Un cartel
+de espera que no acaba nunca.
+
+Y un tercero, en el botón de al lado: **«Meter un panel en medio» buscaba el cable en la misma
+lista**, así que desde la sección de cableado la nota salía sin nombres y guardar no hacía nada
+—`if (!c) return`, en silencio—. Tres sitios, un mismo global: por eso lo que se comprueba ahora
+no es cada uno, sino que **ninguna** de las funciones de la ficha lo nombre.
+
+**Lección.** Cuando una pieza pasa a servir a dos pantallas, lo que hay que buscar no son sus
+funciones: son **los globales que lee**. Cada uno es una pregunta —«¿quién rellena esto?»— y si
+la respuesta es «la otra pantalla», ya está el fallo escrito.
+
+Y: la suite lee el fuente y no lo ejecuta, así que esta clase de error —una lectura sobre `null`
+en un camino que ninguna prueba recorre— sólo la ve un navegador. Sacar el guion del panel y
+cargarlo en `node` con cuatro objetos de mentira cuesta media hora y convierte «no pasa nada» en
+un número de línea.
+
+## Una clase de CSS borrada deja el marcado pintando en ninguna parte
+
+**Síntoma.** En la fila de recuentos de Equipos, el punto de color que acompaña a «Bien» o «Sin
+vigilar» deja de verse. La palabra está, el número está, y donde iba el punto no hay nada — ni un
+hueco, ni un cuadrado sin color: nada.
+
+**Diagnóstico.** El marcado seguía siendo el correcto:
+
+```js
+<span class="ss-dot" style="background:${escAttr(hostStateColor(k))}"></span>
+```
+
+Lo que faltaba era la regla. `.ss-dot` daba el tamaño y la forma —`width`, `height`,
+`border-radius`— y un `<span>` sin ellas mide **cero por cero**: un fondo de color sobre una caja
+sin superficie. El navegador lo pinta perfectamente y no se ve.
+
+Se había ido al limpiar: al quitar dos maquetas descartadas se cortó el bloque de CSS de los
+carriles «de aquí hasta la siguiente sección», y `.ss-dot` estaba dentro de ese tramo aunque no
+tuviera nada que ver con ellos.
+
+**Causa raíz.** Es la forma de siempre en otro idioma. Lo que se escribe y no se lleva vale su
+valor por defecto, y **el valor por defecto de una clase que no existe es «nada»**. Ninguna
+herramienta se queja: no es un error de sintaxis en el CSS —la regla no está—, ni un error en el
+JavaScript —la clase se escribe igual—, ni lo ve una prueba, porque ninguna ejecuta el guion ni
+carga la hoja de estilos.
+
+Y borrar por rango es especialmente propenso a esto: lo que se corta se elige por dónde está, no
+por qué es.
+
+**Solución.** La regla, de vuelta. Y una guarda que recoge todas las clases `ss-` que usan las
+plantillas de la sección y comprueba que cada una tenga al menos una regla en `web_admin.css`.
+Con `.ss-dot` quitada a mano, falla.
+
+**Lección.** Una clase usada y no definida es un fallo silencioso con la misma forma que una
+columna que nadie escribe o un campo que no viaja. Donde hay dos ficheros que tienen que estar de
+acuerdo —el que nombra y el que define— hace falta algo que compruebe el acuerdo; que cada uno
+por separado sea correcto no dice nada.
+
+## Una guarda que comprobaba el sufijo y no la clave
+
+**Síntoma.** En la ficha de un equipo del armario, la casilla «Modelo» enseña
+`e9c94c5a-257c-4c94-a9b3…` en vez del nombre del modelo. La lista de equipos, dos centímetros
+más abajo, enseña el nombre correctamente. Nada da error.
+
+**Diagnóstico.** La casilla es una de las que *enseñan el nombre y guardan el identificador*, y
+lee el nombre por convención — `<campo>_name`:
+
+```js
+const nombre = String(row[fld.name + '_name'] || '');   // type_uid → type_uid_name
+```
+
+El armario, en cambio, manda el nombre del modelo como **`type_name`**, junto a `type_uid`. Y
+eso es lo correcto: es un nombre *por modelo*, no uno por campo, así que el mismo modelo se
+llama igual lo lea quien lo lea. La convención se queda corta, `row['type_uid_name']` es
+`undefined`, y la casilla cae al respaldo — que es el identificador.
+
+**Lo que lo tapó** fue su propia guarda:
+
+```python
+assert '_name' in cuerpo, 'la casilla vuelve a enseñar el identificador'
+```
+
+`'_name' in "…row[fld.name + '_name']…"` es cierto. Lo es leyendo la clave buena y lo es leyendo
+la mala: la guarda comprobaba que *aparece un trozo de nombre de clave*, no que sea **la** clave.
+Estuvo en verde todo el tiempo que la casilla estuvo enseñando el uid.
+
+**Causa raíz.** Dos sitios decidiendo por su cuenta dónde está escrito el nombre —el servidor al
+mandarlo y la pantalla al leerlo— sin nada que los obligue a coincidir. Un campo leído de una
+clave que no existe no falla: vale su valor por defecto, y el código que respeta ese valor por
+defecto parece que funciona. Es la misma forma que ya había salido cuatro veces en esta sección
+(una columna que nadie escribe, un parámetro que nadie pasa, un `role` que nadie rellena).
+
+**Solución.** El campo **declara** dónde está su nombre (`nameKey: 'type_name'`), una sola
+función lo lee y lo escribe (`_dcimPickName`), y la guarda comprueba lo que importa: que toda
+clave declarada sea una que el armario manda de verdad (`item['type_name']` en la ruta). Con la
+clave mala puesta a mano, la guarda ahora falla.
+
+**Lección.** Una guarda que busca una **subcadena** de un nombre no comprueba el nombre. Si lo
+que puede estar mal es *cuál* de dos claves parecidas se usa, `in` sobre el sufijo que comparten
+las da las dos por buenas. Y cuando dos lados tienen que coincidir en un nombre, lo que se
+comprueba es la coincidencia — que uno lo declare y el otro lo mande— no que cada uno por
+separado mencione algo parecido.
+
+## Un comentario dejó la sección de inventario en blanco
+
+**Síntoma.** La pantalla de inventario se queda en el spinner y no pasa nada. En la consola del
+navegador, una sola línea: `Uncaught SyntaxError: unexpected token: identifier`, apuntando a un
+punto del guion servido. Ninguna pantalla más falla — pero es que el guion es **uno solo**, así
+que en realidad lo que estaba muerto era el panel entero desde esa línea en adelante.
+
+**Diagnóstico.** El punto que señalaba el navegador era un comentario HTML:
+
+```js
+return `<g>
+    ${mine.map(i => _dceItem(rack, i, face)).join('')}
+    <!-- Lo montado, DESPUÉS y como hermano: dentro del `<g>` de su bandeja, salir de él
+         hacia la bandeja no volvería a encender la bandeja —`pointerenter` no burbujea— … -->
+    ${mine.map(i => _dceKids(rack, i, face)).join('')}
+</g>`;
+```
+
+Un comentario HTML dentro de una plantilla de cadena es texto, y como texto es inofensivo. Los
+**acentos graves** que lleva dentro no lo son: el primero cierra la plantilla, y a partir de ahí
+el navegador está leyendo código donde hay marcado. De ahí el «identificador inesperado», que es
+lo que parece `de` cuando lo que había alrededor era una cadena.
+
+Lo escribí para citar lo que el comentario nombraba —`` `<g>` ``, `` `pointerenter` ``— que es
+la costumbre en el resto del fichero. En un comentario de JavaScript no pasa nada; dentro de la
+cadena, sí.
+
+**Causa raíz.** Un comentario no puede romper nada, y por eso no se mira. Ninguna guarda de las
+que hay lo revisa —varias ignoran la prosa **a propósito**, para no señalar el texto que explica
+por qué algo está bien— y **nada de la suite ejecuta el guion**: los cinco mil tests siguieron en
+verde con el panel sin arrancar. El único que lo habría visto es un navegador, y de esos no hay
+en la suite.
+
+**Solución.** Fuera los acentos graves del comentario HTML, y lo que tenían que explicar se dijo
+en un comentario de JavaScript, que vive fuera de la cadena. Y una guarda en
+`test_wa_partials_convention.py`: dentro de un partial, **un comentario HTML no lleva acentos
+graves**.
+
+Para encontrarlo, lo que valió fue **servir la página y mirarla**: un test que pide `/dcim` con
+el cliente de pruebas, se guarda el HTML, saca el `<script>` más largo y se lo pasa a
+`node --check` —traduciendo antes `?.` y `??`, que el node de esta máquina no habla— hasta que
+dijo que no había error. Eso es reproducible en dos minutos y merece la pena la próxima vez.
+
+**Lección.** En un fichero donde el marcado se construye con plantillas de cadena, **el
+delimitador de la cadena no puede aparecer en ningún sitio del marcado**, ni siquiera donde «no
+se ejecuta». Es la segunda vez que un acento grave o un `${…}` escrito dentro de un comentario
+muerde en esta sección; la primera la cazó la guarda de escapado por casualidad.
+
+## La copia se llevaba la carpeta de planos vacía si alguien la había movido
+
+**Síntoma.** Ninguno, que es el problema. Con `web_admin|dcim_media_dir` apuntando a otro disco,
+la copia terminaba con la parte `dcim_media` en `no files found` y el veredicto en `partial` —
+indistinguible de «esta instalación no tiene planos». Lo que había de verdad —planos de sala,
+imágenes del catálogo, manuales y firmware adjuntos— no estaba en el zip. Y una restauración
+habría dejado los que sí llevara en `<var_dir>/dcim_media`, que es la carpeta que el panel ya no
+mira.
+
+**Diagnóstico.** `part_dir()` sabía resolver el ajuste desde el primer día: recibe un `dirs` y,
+si la parte tiene entrada ahí, esa gana sobre `<var_dir>/<lo declarado>`. Su propio docstring
+avisaba del caso con estas palabras: *«resolver contra `var_dir` copiaría la carpeta por
+defecto, vacía, y lo diría como un éxito»*.
+
+`dirs` llegaba hasta ahí desde la firma de `create_backup` y de `restore_backup`. Y **nadie lo
+rellenaba nunca**: ni `jobs.py` (el botón, la restauración), ni `runner.py` (las copias
+programadas), ni un solo test. `grep -rn "dirs=" lib/ tests/` sin la definición no daba ni una
+línea. El parámetro estaba escrito, documentado y muerto.
+
+Nada falla cuando se pasa un opcional de menos. La rama del override era código inalcanzable
+que se leía como una funcionalidad que existe.
+
+**Causa raíz.** Un ajuste tiene **dos mitades**: quien sabe usarlo y quien sabe que está puesto.
+Aquí se escribió la primera —la difícil, la que decide— y se dio el trabajo por hecho. La
+segunda es una línea aburrida en tres sitios y no se escribió en ninguno. Como la mitad
+existente estaba bien probada, el fallo no se parecía a un olvido sino a una funcionalidad
+terminada.
+
+**Solución.** `parts.configured_dirs(holder)` recorre `PARTS` y devuelve `{parte: ruta}` para
+las que declaran `dir_attr` y lo tienen puesto de verdad; las tres llamadas —copia a mano, copia
+programada y restauración— se lo pasan. La declaración vive **en el catálogo de partes** y no en
+el punto de llamada, así que la siguiente carpeta configurable es una clave más y no una rama
+más.
+
+Los tests van por donde iba el fallo: cuatro funcionales sobre `create_backup`/`restore_backup`
+con la carpeta fuera de `var_dir` (y un señuelo dentro, para que copiar la de por defecto se
+note), y tres que llaman a lo que llama el botón —`start_manual`, `start_restore`, `_run_task`—
+y miran qué `dirs` recibió. Quitando cualquiera de las tres líneas, cae su test.
+
+**Lección.** Un parámetro opcional que nadie pasa no da error: da una funcionalidad que solo
+existe en la firma. Cuando se añade un ajuste, **el test que vale es el del extremo que lo
+consume**, no el de la función que sabría usarlo — y el aviso escrito en un docstring no es una
+guarda, es una nota que alguien puede leer un año tarde.
+
+## Borrar la última bahía decía «guardado» y no borraba nada
+
+**Síntoma.** Una plantilla con una bahía de dispositivo. Se borra la fila, se pulsa Guardar, sale
+«guardado correctamente» — y la pestaña sigue diciendo 1 y el panel sigue pidiendo que se le ponga
+nombre. Se vuelve a entrar a editar y la fila está otra vez ahí, así que hay que borrarla de nuevo,
+y de nuevo. La bahía no se podía borrar nunca.
+
+**Diagnóstico.** El recuento de una familia con nombre se **deriva** de la lista, y de una lista
+vacía se deriva cero. Eso borraría lo que dijo el modelo en una plantilla que nadie ha nombrado
+todavía —el fallo que ya costó una ficha en este mismo documento— así que había una guarda: sin
+lista, se queda el recuento que había.
+
+La guarda era correcta mientras «vacía» solo pudiera significar una cosa: que nadie la había
+escrito. Deja de serlo en cuanto se puede vaciar a mano. Entonces «vacía porque nadie la escribió»
+y «vacía porque acabo de borrarla» se calculan exactamente igual, y la guarda contesta lo mismo a
+las dos: conservar. Guardar guardaba de verdad —el mensaje no mentía— pero lo que se mandaba
+llevaba el recuento intacto, y con el recuento volvía la fila sembrada al entrar otra vez.
+
+**Causa raíz.** Una protección contra el borrado accidental que no sabe distinguirlo del
+deliberado. La información que faltaba no estaba en el dato: estaba en lo que había hecho quien
+miraba la pantalla.
+
+**Solución.** Se apunta qué familias se han **tocado** en esta ficha —sembrado, añadido, borrado,
+renombrado—. Una familia tocada manda aunque quede a cero, porque ese cero lo ha querido alguien;
+una que nadie ha abierto conserva lo que dijo el modelo. Y el editor deja de decir «el modelo dice
+que hay 1» en cuanto se vacía la lista: contradecir lo que se acaba de hacer hace dudar de si se ha
+hecho.
+
+**Lección.** Una guarda que protege un dato de desaparecer sin querer se convierte en un muro
+cuando no puede distinguir el «sin querer» del «queriendo». Antes de conservar un valor porque el
+nuevo parece vacío, hay que preguntarse si alguien ha podido vaciarlo a propósito — y si la
+respuesta es sí, el estado que falta no está en el dato, está en lo que hizo quien lo dejó así.
+
+## Cuatro pestañas decían que había puertos y no enseñaban ninguno
+
+**Síntoma.** En la ficha de una plantilla, las pestañas «Tomas de entrada», «Puertos frontales»,
+«Puertos traseros» y «Bahías de dispositivo» llevaban su número —3, 6, 1— y debajo no había nada.
+«Bahías de módulo» sí enseñaba las suyas. Ni error, ni tabla vacía: una línea de texto y fin.
+
+**Diagnóstico.** La línea de texto era correcta: *«el modelo dice que hay 3, pero no cómo se
+llaman»*. El problema es que era todo lo que había.
+
+Esas cuatro familias acababan de pasar de **contadas** a **con nombre**, porque a un puerto por el
+que cuelga algo también se le pregunta cuál: el adaptador va en el USB de detrás, no en «uno de los
+cuatro». La pestaña dejó entonces de enseñar el recuento —ahora enseña la lista— y de lo que ya
+estaba contado no se hizo nada. En la base de datos se ve entero: `ports` con `{"front-ports":
+{"usb-a": 2, "usb-c": 1}}` y `port_list` con `module-bays` y nada más, que son las que alguien
+había nombrado a mano.
+
+Así que la pestaña decía 3 arriba y nada debajo, y de dos cosas que se contradicen no se cree
+ninguna. Y la salida —«ponles nombre»— estaba detrás de un botón «Editar» de otra fila que nada
+relacionaba con nombrar puertos; quien lo encontraba se topaba con un editor vacío al que había
+que teclearle tres veces lo que ya estaba escrito, acertando además el tipo de cada uno. Peor: si
+guardaba sin teclear nada se quedaba exactamente igual que estaba, porque un renglón sin nombre no
+se guarda. Un formulario que parece lleno y guarda cero.
+
+**Causa raíz.** Cambiar cómo se dice un dato sin migrar lo que ya estaba dicho de la otra forma.
+El recuento no era un dato menos válido: era el mismo dato con menos detalle, y tenía dentro casi
+todo lo que la forma nueva necesita — cuántos hay y de qué son. Lo único que le falta es el
+nombre, que es justo lo único que el panel no puede saber.
+
+**Solución.** El editor **siembra los renglones del recuento**: uno por puerto contado, con su
+tipo puesto y numerado, y lo que queda es corregirle el nombre contra el equipo. Se siembra una
+vez por familia y solo sobre lista vacía — repetirlo a cada redibujado dejaría sin poder borrar un
+renglón, porque volvería solo, y sembrar sobre lo escrito lo duplicaría. Nada se escribe hasta
+guardar, cancelar relee de la base de datos, y el recuento que se deriva de lo sembrado sale
+idéntico al que entró. Un aviso dice de dónde salen esos nombres, que son un orden y no un nombre.
+
+Y la vista de lectura deja de ser un callejón: dice lo que falta **y** ofrece el botón de hacerlo.
+
+**Lección.** Cuando un dato cambia de forma —de contado a nombrado, de un campo a una lista—, lo
+ya guardado en la forma vieja no desaparece: se queda donde estaba, sin que nada lo lea. La
+pregunta no es si la forma nueva es mejor, sino qué se hace con lo que hay medido en la vieja; y
+la respuesta casi nunca es «nada», porque casi siempre contiene la mayor parte de la nueva. La
+señal de que falta esa migración es una pantalla que se contradice consigo misma: un número arriba
+y un vacío debajo.
+
+## Guardar una plantilla se llevaba las bahías que el catálogo había traído
+
+**Síntoma.** En la pestaña «Bahías de módulo» de una plantilla, el número de la pestaña decía 4 y
+la lista salía vacía. Al pulsar «Añadir bahía» no aparecía ninguna fila — ni una, ni pulsando
+diez veces. Lo mismo en «Bahías de dispositivo» con 2.
+
+**Diagnóstico.** Tres cosas distintas que se veían como una.
+
+`_dcBuildBays()` filtra las bahías sin nombre. Es lo correcto para **leer** —una bahía que no se
+puede nombrar no sirve para lo único que hace falta, decir cuál— y es exactamente lo contrario de
+lo que hace falta para **escribir**: una recién añadida no tiene nombre todavía, así que el filtro
+la tiraba antes de que nadie pudiera teclearlo. Añadir funcionaba; enseñar lo añadido, no.
+
+El número y la lista no se contradecían: el número viene del recuento que trajo la biblioteca y la
+lista estaba vacía porque ese modelo del catálogo no traía nombres. Lo que faltaba era decirlo,
+en vez de un «esta plantilla no declara ninguna bahía» que contradice al número de al lado.
+
+Y el tercero, que no se veía: el recuento de una familia de bahía había pasado a **derivarse** de
+la lista, y de una lista vacía se deriva cero. Abrir una plantilla que decía «4 bahías» y guardar
+cualquier otra cosa —el nombre, una nota— la dejaba sin ninguna.
+
+**Causa raíz.** Una función con dos usos que piden lo contrario, y una regla —«la lista manda»—
+aplicada también donde no hay lista. Derivar un dato de otro es correcto mientras el otro exista;
+donde no existe, derivar es borrar.
+
+**Solución.** El editor lee la lista **en crudo**, que es lo que ya devolvía `_dcBayList()`. La
+lista vacía con recuento lo explica. Y el recuento derivado solo sustituye al de una familia
+**cuando esa familia tiene lista**: donde no la hay, se queda lo que había.
+
+Queda un filo que no es un fallo y por eso se dice en pantalla: en cuanto una bahía tiene nombre,
+la lista manda. Nombrar una de cuatro dejaría la plantilla diciendo que tiene una, así que el
+editor avisa mientras se edita, que es cuando se puede arreglar. No hay número que inventar — el
+panel no sabe cómo se llaman las otras tres.
+
+**Lección.** Un filtro que sirve para leer casi nunca sirve para escribir: leer quiere lo que está
+completo y escribir quiere lo que está a medias. Y antes de derivar un dato de otro, hay que
+contestar qué pasa cuando el otro está vacío — porque «cero» y «no lo sé» se calculan igual y no
+significan lo mismo.
+
+## Importar un fabricante del catálogo borraba los otros trescientos
+
+**Síntoma.** Traerse una marca nueva de la biblioteca dejaba el catálogo con esa marca y nada
+más. No se añadía: se sustituía. Y sin ningún error — la pantalla decía «importados 42 modelos»,
+que era verdad.
+
+**Diagnóstico.** `CatalogStore.replace(source, rows)` hace lo que su nombre dice: borra las filas
+de esa fuente y escribe las nuevas. Eso es **correcto** para lo que se escribió, que era
+«bájate la biblioteca entera»: un modelo que arriba ya no está aquí tampoco.
+
+Lo que cambió debajo fue la pantalla. Bajarse el repositorio completo son ochocientos cincuenta
+megas y ocho mil modelos, así que la importación pasó a obligar a **marcar fabricantes** — y
+`jobs.py` siguió llamando a la misma función con la misma fuente. Nadie tocó `replace()`; se
+quedó contestando una pregunta que ya no era la que se le hacía.
+
+**Causa raíz.** El alcance del borrado estaba atado a la **fuente** (`library`) y no a **lo que
+la importación afirmaba**. Una importación parcial no dice nada sobre los fabricantes que no
+lleva, y leer ese silencio como «han dejado de existir» es la inversión exacta del error: se
+trata la ausencia de dato como un dato.
+
+**Solución.** `replace(..., partial=True)` y `scope_of(rows)`. Con `partial`, el borrado no sale
+de las marcas que **traen las filas que han llegado**; sin él, la fuente entera, como siempre.
+
+Y una decisión que el primer intento tuvo mal: el alcance no son los fabricantes **pedidos** sino
+los **llegados**. Pedir Dell y que no baje ni un fichero —de tres mil, alguno se cae— es una
+descarga fallida, no un fabricante que ha dejado de publicar; lo que autoriza a borrar un modelo
+viejo es que haya llegado su sustituto. Lo cazó el test que escribí para afirmar lo contrario.
+
+**Lección.** Cuando una función destructiva recibe *menos* de lo que solía recibir, el peligro no
+es que falle: es que siga funcionando. `replace` seguía siendo correcta línea por línea; lo que
+había cambiado era el significado de su primer argumento en boca de quien la llamaba. Al añadir
+una forma parcial de una operación que ya existía en forma total, el alcance del borrado tiene
+que viajar **con la llamada**, no deducirse de un parámetro que quiere decir otra cosa.
+
+Y el corolario: en un borrado, «no lo mencionan» nunca significa «bórralo».
+
+## Dos funciones borradas, y la pestaña de al lado también deja de abrirse
+
+**Síntoma.** El modal de editar un modelo del catálogo deja de abrirse. Y la pestaña de esquemas
+sale vacía. Dos pantallas distintas, en dos ficheros distintos, rotas a la vez.
+
+**Diagnóstico.** No hay nada en el servidor: las peticiones contestan. La consola del navegador
+tenía la respuesta entera —`_dcSchLoad is not defined`— y la explicación de por qué son dos: el
+panel sirve los parciales de la sección **en un solo guion**, así que un error al evaluarlo corta
+todo lo que venga detrás, no solo la parte que falta.
+
+Antes, la misma tarde, el mismo síntoma con otra causa: `async is not defined`.
+
+**Causa raíz.** Las dos veces, una edición mía sobre el texto del fichero. La primera insertó una
+función delante de `async function _dcCatShow` usando el ancla `function _dcCatShow`, así que el
+`async` se quedó suelto delante del comentario de la nueva:
+
+```js
+async /** Una fila de la ficha… */
+function _dcimDato(k, v) { … }
+```
+
+La segunda reescribió un bloque delimitándolo por dos marcas, y entre ellas habían quedado
+`_dcSchLoad` y `_dcSchHtml` — que seguían llamándose desde tres sitios.
+
+**Y `node --check` dio las dos por buenas**, con razón: un `async` suelto es un identificador
+válido (la separación automática de sentencias lo permite) y llamar a una función que no existe es
+un error de ejecución, no de sintaxis. Un comprobador mira un fichero; esto se rompió en el
+conjunto.
+
+**Solución.** Dos guardas en `tests/meta/test_wa_dcim_section.py`, sobre el guion de la sección
+entera:
+
+```python
+escritas = set(re.findall(r'function\s+(_dc\w+)\s*\(', js))
+escritas |= set(re.findall(r'(?:const|let|var)\s+(_dc\w+)\s*=', js))
+llamadas = set(re.findall(r'(_dc\w+)\s*\(', js))
+assert not sorted(llamadas - escritas)
+```
+
+y otra que persigue el `async` que no encabeza ninguna función. Comprobadas rompiendo el código a
+propósito antes de darlas por buenas.
+
+**Lección.** Editar código por sustitución de texto se equivoca de formas que el compilador no
+ve, y las dos de este día tienen la misma firma: **la pantalla se queda en blanco y no hay ningún
+error donde uno mira**. Cuando el fallo está en el conjunto —una función que se llama y no está,
+una palabra clave que se quedó sin su función— la comprobación tiene que ser del conjunto. Y un
+banco de pruebas que **ejecute** cada pantalla con datos de mentira encuentra en dos segundos lo
+que abriendo el navegador cuesta una vuelta entera.
+
+## «Guardado» sobre una columna que nadie podía escribir
+
+**Síntoma.** Se le pone `interfaz = NVMe` a un SSD del catálogo y la pantalla dice **Guardado**.
+El historial de esa ficha dice **sin cambios**. Al volver a abrirla, sigue sin definir. La
+petición devolvió 200 y no hay un error en ninguna parte.
+
+**Diagnóstico.** El camino se recorrió al revés, desde la base de datos: la columna `extra`
+seguía valiendo `{}`. Así que el `UPDATE` nunca la incluyó — y el historial, que compara la fila
+antes y después, decía la verdad: no había cambiado nada.
+
+**Causa raíz.** `CatalogStore.update()` copia lo que puede escribirse desde una lista blanca,
+`_EDITABLE`, y `extra` y `ports` **no están en ella** — no por olvido, sino porque son JSON y hay
+que serializarlos, mientras que esa lista se copia en crudo. `create()` los trataba aparte, con
+su `json.dumps`; `update()` no los trataba en absoluto. Nada falla: los campos que sí están en la
+lista se guardan, la función devuelve `True`, y la pantalla dice lo que le contestaron.
+
+Lo llevaba desde el principio. **Las medidas de un armario tampoco se podían corregir** — solo
+escribir la primera vez— y nadie lo había notado porque casi nunca se corrigen.
+
+**Solución.** Tratarlos en `update()` como los trata `create()`, y decir por qué están fuera de
+la lista blanca:
+
+```python
+values = {c: fields[c] for c in self._EDITABLE if c in fields}
+import json
+for campo in ('ports', 'extra'):
+    if isinstance(fields.get(campo), dict):
+        values[campo] = json.dumps(fields[campo], sort_keys=True)
+```
+
+**Lección.** Una lista blanca protege de lo que no debe escribirse y **calla sobre lo que sí**:
+lo que falta en ella no da error, da un campo que se ignora. La firma de este fallo es «guardado»
+seguido de nada, y el sitio donde buscarlo es la diferencia entre el camino de crear y el de
+corregir — si uno trata un campo aparte y el otro no lo nombra, ese campo solo se puede escribir
+una vez.
+
+Y lo que lo hizo visible fue el historial. Un cambio que dice **«sin cambios»** justo después de
+guardar es la única señal que había, y no existía hasta esa misma tarde.
+
+## Ocho mil modelos importados y ninguno con imagen
+
+**Síntoma.** Una importación del catálogo entero termina bien: 8361 modelos en 119 segundos, sin
+un solo error en el registro, sin un aviso en pantalla. Y **ninguno trae imagen de alzado**. La
+misma biblioteca importada por fabricantes sí las traía.
+
+**Diagnóstico.** No había nada que diagnosticar en el camino del error, porque no hubo error. Lo
+que se comparó fueron los dos caminos: el que pide los ficheros de uno en uno y el que se baja el
+zip. El primero llama a `gh.member_inner()` sobre cada nombre; el segundo indexaba el archivo por
+`i.filename` tal cual.
+
+**Causa raíz — y hay dos, una detrás de otra.** GitHub sirve un repositorio **envuelto** en una
+carpeta que lleva su nombre y su rama: `devicetype-library-master/device-types/HP/DL380.yaml`. Y
+una imagen se busca por el nombre que el YAML implica, `elevation-images/HP/dl380.front.png`, sin
+envoltorio. Los dos nombres son correctos y no son el mismo, así que `dentro.get(rel.lower())`
+devolvía `None` — y `None` aquí significa «este modelo no trae imagen», que es una respuesta
+perfectamente legítima para miles de modelos de la biblioteca. El fallo se disfrazó del caso
+normal.
+
+Quitar el envoltorio al indexar arregló… nada: la segunda importación completa volvió a dar cero
+imágenes. Porque `wrapper_of()` —la función que dice cuál es la carpeta envoltorio— **devolvía
+cadena vacía para todo zip de GitHub**. Se rinde en cuanto encuentra algo en la raíz, que es la
+regla correcta: si hay un fichero suelto arriba, el archivo tiene estructura propia y no hay
+envoltorio que quitar. Pero un zip de GitHub incluye, entre sus entradas, la **entrada de
+directorio del propio envoltorio**: `devicetype-library-master/`. Leída como se leían todas, es
+un nombre de un solo trozo — o sea, «algo en la raíz».
+
+**El envoltorio impedía detectarse a sí mismo.**
+
+**Solución.** Dos, en el orden en que se encontraron:
+
+```python
+# 1. `read_zip` indexa por el nombre SIN envoltorio, como ya hacía el camino remoto.
+envoltorio = gh.wrapper_of(zf.infolist())
+dentro = {gh.member_inner(i, envoltorio).lower(): i for i in zf.infolist() if not i.is_dir()}
+
+# 2. Y `wrapper_of` mira solo los FICHEROS: una carpeta no es algo EN la raíz, es la raíz.
+if crudo.endswith('/') or getattr(m, 'is_dir', lambda: False)():
+    continue
+```
+
+Del archivo real: 8361 modelos, **0 con imagen** antes y **1267 después**.
+
+Y los tests que no lo cazaron construían el zip a mano *sin* envoltorio y *sin* entradas de
+directorio — la forma que nunca llega de GitHub. Ahora hay uno de cada.
+
+**Lección.** Tres, y la tercera es la que más costó.
+
+Cuando dos caminos producen lo mismo, el segundo hereda los tropiezos del primero **solo si
+comparte el código**, no si repite la idea: `member_inner` existía para esto y el camino del zip
+no lo llamaba.
+
+**Un dato de prueba más limpio que el real es un test que prueba un caso que no ocurre.** El zip
+de mentira no traía entradas de directorio porque escribirlas es trabajo extra; el de verdad las
+trae siempre. Ahí vivía el fallo.
+
+Y la que importa: **arreglar la primera causa y no volver a medir es dar por cerrado lo que
+sigue roto**. La primera corrección era correcta y necesaria, pasó su test nuevo, y el resultado
+sobre el archivo real siguió siendo cero. Lo que encontró la segunda causa fue volver a contar —
+no leer el código otra vez.
+
+## Cinco funciones construidas, probadas y sin ningún botón
+
+**Síntoma.** Una pregunta: «¿dónde se configura esto? No lo veo».
+
+**Diagnóstico.** No se veía porque no estaba. El catálogo entero —importador, buscador y
+sugerencia—, los cuadros y SAI, crear filas, los enlaces entre sedes y **decir de quién es cada
+cosa** tenían modelo, rutas y tests en verde, y ni un botón. Los componentes sí se podían abrir:
+con doble clic sobre un equipo, que es un gesto que nadie descubre.
+
+**Causa raíz.** Los tests prueban la API, que es exactamente la mitad que sí estaba. Nada
+comprobaba la otra: que a cada cosa que se puede escribir se llegue desde una pantalla. Y el
+trabajo se sentía terminado en cada paso —modelo, servicio, ruta, test, documentación— porque
+esa lista no incluía «y se puede usar».
+
+**Solución.** Las cinco pantallas, y una guarda que recorre las rutas de escritura de la sección
+y exige que alguna plantilla las llame. La escribió el mismo día y encontró dos más de las que
+nadie se había dado cuenta: los enlaces entre sedes y la pertenencia.
+
+**La guarda costó cuatro intentos, y los tres primeros aprobaban una pantalla inalcanzable:**
+
+1. «que el nombre exista» — lo satisfacía su propia definición;
+2. «que aparezca dos veces» — llamándose a sí misma al terminar una importación;
+3. «que la nombre otro fichero» — al revés: marcaba como fallo las pantallas que definen y
+   pintan su propio botón, que sí son alcanzables;
+4. «que esté en un manejador» — lo satisfacía el botón de recargar **de la propia pantalla**.
+
+Lo que faltaba distinguir: a una **vista** solo se entra desde otra —sus propios botones no
+cuentan, porque para pulsarlos ya hay que estar dentro— mientras que a una **acción en sitio** le
+basta su botón donde ocurre. Cada versión se comprobó quitando el botón a propósito; las tres
+primeras siguieron diciendo que sí.
+
+**Lección.** «Construido, probado y documentado» no es «terminado»: falta «y se puede usar», y es
+la única de las cuatro que ningún test miraba. Y la segunda, más incómoda: **una guarda que se da
+por buena sin verla fallar no vale nada**. Cuatro versiones seguidas de esta pasaron sobre una
+pantalla que no existía, y las cuatro se leían perfectamente razonables.
+
+## El nombre del vecino salía por el otro extremo de un cable
+
+**Síntoma.** Ninguno. Salió de auditar la sección ruta por ruta después de construirla, no de una
+pantalla: nadie lo había visto porque no hay nada que ver — la respuesta es correcta y contiene un
+campo de más.
+
+**Diagnóstico.** Un equipo de otra sociedad se dibuja «ocupando y anónimo», pero **conserva su
+`uid`**: sin él el dibujo no podría colocar la U que ocupa. Ese uid es la puerta.
+
+La reconciliación de cableado necesita los equipos del OTRO extremo de cada cable para poder
+nombrarlos —una fila que dice «va a 4f2a-…» no la lee nadie— y los cargaba con `store.items.get()`
+sin repetir la pregunta de si quien mira puede verlos. Declarar un cable hacia el uid del vecino y
+abrir la pantalla devolvía su etiqueta.
+
+**Causa raíz.** La regla de visibilidad estaba aplicada en la pantalla que ENSEÑA los equipos y no
+en la que los necesita **de paso**. Es la forma habitual de esta clase de fuga: no sale por la
+puerta principal, sale por la de servicio de otra función que cargó lo mismo para otra cosa.
+
+**Solución.** El otro extremo pasa por la misma puerta: visible se nombra, no visible se devuelve
+opaco —existe y ocupa, y nada más—, que es exactamente lo que ya responde el armario compartido.
+
+En el mismo barrido apareció el hermano de este: **leer un armario por uid no comprobaba nada**,
+así que uno que el listado escondía se abría escribiendo su identificador —nombre, sociedad, U
+libres y cuánto tiene dentro—. Arreglarlo con «la misma regla que el listado» rompió cuatro tests
+del caso del holding, y con razón: el departamento opera la sede, la sede es suya, y con esa regla
+la filial no puede abrir el rack donde tiene sus 2U — que es justo lo que la sección existe para
+permitir. La regla que vale es más fina: **o lo ves, o tienes algo dentro**.
+
+**Lección.** Cuando un objeto se puede identificar sin poder verse —y aquí hay que poder, porque
+el dibujo necesita el uid para colocar la caja— la comprobación no puede estar en una pantalla:
+tiene que estar en cada sitio que carga esa fila. Y al cerrar un agujero, si la corrección rompe
+tests que codifican un caso de negocio, **el caso de negocio suele tener razón**: la regla no era
+demasiado laxa, era demasiado tosca.
+
+## Veintiséis textos salían con las llaves literales: «{0} cuelga solo de la rama {1}»
+
+**Síntoma.** Reportado desde la pantalla: varios mensajes del inventario físico aparecían con los
+marcadores sin sustituir. No un texto sin traducir —eso se reconoce— sino una frase a medio hacer,
+que parece el panel roto en general.
+
+**Diagnóstico.** `tf(clave, …valores)` es una línea:
+
+```js
+function tf(k, ...a) { let s = t(k); a.forEach(v => { s = s.replace('{}', v); }); return s; }
+```
+
+Sustituye `{}` **vacías y por orden**. No entiende `{0}`.
+
+**Causa raíz.** Escribí veintiséis cadenas con índices de una tacada. Y no es una distracción
+cualquiera: `{0}` es exactamente lo que uno escribiría, porque es el formato de Python, el de las
+plantillas de notificación **de este mismo panel** —que sí los numeran, porque las formatea el
+servidor— y el de casi todo lo demás. Las dos formas conviven en el repositorio y solo una vale
+en cada sitio.
+
+Dos de las cadenas tenían además los índices fuera de orden (`{0} … {2} … {1}`). Esas no se podían
+convertir sin más: con sustitución posicional se leerían perfectamente y dirían algo falso, que es
+peor que las llaves a la vista.
+
+**Solución.** Convertidas a `{}`, y las dos desordenadas reescritas para que el orden de los huecos
+sea el de los argumentos. Y una guarda que mira **solo las claves que de verdad pasan por `tf`** —
+sacadas de las plantillas— y rechaza `{N}` en ellas; las de notificación se siguen pudiendo numerar
+porque las formatea otro mecanismo. Va con una segunda que exige el mismo número de huecos en los
+dos idiomas: una traducción con un hueco de más se come un argumento y desplaza el resto, y las
+dos versiones se leen bien. Comprobada reintroduciendo el fallo: con él, dos tests fallan.
+
+**Lección.** Cuando dos mecanismos del mismo repositorio usan sintaxis parecidas para lo mismo, la
+equivocación no es un descuido: es lo que va a pasar. Y no la caza ninguna revisión, porque el
+código equivocado se lee bien. Lo que la caza es una guarda que sepa **cuál de los dos mecanismos**
+usa cada cadena — que es un dato que está en el código y que nadie estaba mirando.
+
+## Arrastrar un servidor lo dejaba una U por encima de donde se soltó
+
+**Síntoma.** Ninguno visible. El equipo se soltaba en la U 12 y quedaba dibujado en la 12, se
+guardaba, y todo parecía correcto — porque la función que decidía la U y la que dibujaba usaban
+el mismo número equivocado.
+
+**Diagnóstico.** Salió de comprobar la aritmética antes de creérsela: se ejecutó `_dceUAt` —la que
+convierte una altura del dibujo en una U— contra `_dceY` —la que hace lo contrario— para las 42 U
+y en los dos sentidos de numeración. Las 84 comprobaciones fallaron, todas por exactamente una U.
+
+**Causa raíz.** `_dceY` devuelve el **borde superior** de la fila de una U. El centro de esa fila
+cae, por tanto, en `fromTop + 0.5`, y `Math.round(x.5)` redondea **hacia arriba**: a la fila
+siguiente. Con la numeración invertida el error iba en sentido contrario, así que tampoco se
+compensaba.
+
+Lo que lo hacía invisible es que el dibujo usaba el mismo valor: se veía en la U 13 porque estaba
+en la 13. Solo alguien delante del armario, con una linterna, habría notado que la documentación
+dice una U y el tornillo está en otra.
+
+**Solución.** `Math.floor`. Y una guarda que exige `floor` y rechaza `round` en esa función, con
+la explicación al lado — porque leyendo el código las dos parecen igual de razonables.
+
+**Lección.** Cuando dos funciones son inversas, **serlo es una propiedad que hay que ejecutar**,
+no que leer: las dos se leen bien por separado y el error solo aparece al componerlas. Y el fallo
+no daba pantalla en blanco ni excepción, que es lo que lo hace peligroso: producía un número
+plausible que el dibujo confirmaba. La regla práctica: si una función convierte de A a B y otra de
+B a A, la comprobación es recorrer todo A y exigir la identidad — no un caso de ejemplo, que es
+justo el que se elige entre los que funcionan.
+
+## Una guarda que contaba dentro de un fichero dejó de guardar al mover el código
+
+**Síntoma.** Sacar el armado del mapa de infraestructura de su ruta a `infra/service.py` —para
+que la reconciliación del cableado usara el MISMO mapa— tiró un test que no hablaba ni de mapas
+ni de cableado: «the device page and the map both lose a machine in maintenance without it».
+
+**Diagnóstico.** El test contaba cuántas veces aparecía `host_recorded_keys(` **dentro de**
+`lib/core/infra/routes.py`, y exigía dos: la página de un dispositivo y el mapa. Al mudarse una
+de las dos, el fichero pasó a tener una.
+
+**Causa raíz.** La guarda estaba escrita contra un FICHERO y lo que protege es una propiedad del
+código: que las dos pantallas pidan las claves del histórico, porque sin ellas una máquina en
+mantenimiento desaparece de las dos. En qué fichero viven esos dos llamantes no era parte de la
+propiedad, y sin embargo era la mitad de la comprobación.
+
+Aquí falló ruidosamente y eso fue **suerte**: la mudanza dejó el recuento por debajo. Si hubiera
+movido las dos llamadas juntas, el recuento habría bajado a cero y la guarda habría seguido
+fallando; pero si alguien duplica una llamada dentro del fichero mientras mueve la otra fuera, el
+recuento vuelve a dar dos y la guarda pasa **sin vigilar nada**.
+
+**Solución.** Contar en el PAQUETE `lib/core/infra/`, que es donde vive la propiedad. Lo que
+importa es que existan dos llamantes, no en qué fichero están.
+
+**Lección.** Es la tercera vez en este repositorio que una guarda apuntada a un fichero deja de
+mirar cuando el código se mueve —antes con `_render.html` al partirse y con el guardián de
+palabras que solo veía `t('x')` literal—. La regla que sale de las tres: **una guarda tiene que
+apuntar a la propiedad, no al sitio donde hoy está escrita**. Si al leerla hay que saber en qué
+fichero vive algo, la guarda tiene una dependencia que nadie declaró y que el primer refactor
+rompe — a veces fallando, que es lo bueno, y a veces pasando.
+
+## «Eliminar» preguntaba, se confirmaba, y no borraba nada
+
+**Síntoma.** Quitar una pieza del plano de sala no hacía nada. El modal de confirmación aparecía,
+el botón de aceptar respondía, el modal se cerraba — y la pieza seguía ahí. Sin error en la
+consola, sin petición al servidor, sin aviso.
+
+**Diagnóstico.** No había ninguna petición en la red, así que el problema estaba antes de
+llamar. El código era:
+
+```js
+const ok = await showConfirmModal(mensaje, t('delete'));
+if (!ok) return;
+```
+
+**Causa raíz.** `showConfirmModal(mensaje, callback)` recibe una **función** y no devuelve nada.
+`await undefined` es `undefined`, así que `ok` era siempre falso y la función salía por la puerta
+de «ha dicho que no» **antes** de borrar. De paso, el texto que se pasaba en el lugar del callback
+convertía el botón de aceptar en un botón que no hacía nada.
+
+Lo mismo estaba escrito en quitar el plano de una sala, que tampoco funcionaba y nadie había
+probado todavía.
+
+**Solución.** Pasar la función: `showConfirmModal(mensaje, async () => { … })`. Y una guarda en
+`test_wa_partials_convention.py` que rechaza `await showConfirmModal`, guardar su resultado, y un
+segundo argumento que no sea una función. Comprobada reintroduciendo el fallo a propósito: con él
+falla, sin él pasa.
+
+**Lección.** Un `await` sobre algo que no es una promesa **no falla**: devuelve el valor tal cual
+y hace que el resto de la función no ocurra. Es la peor forma de equivocarse con una API porque no
+deja rastro — ni excepción, ni petición, ni registro. Cuando en un mismo proyecto conviven
+ayudantes con promesa y ayudantes con callback, la forma de cada uno tiene que estar vigilada
+desde fuera; leerlo no basta, porque las dos versiones se leen igual de bien.
+
+## El plano de sala salía en blanco, con todo dibujado dentro
+
+**Síntoma.** Se crea un rack en una sala, el servidor lo guarda, la cabecera dice «1 rack(s)» —y
+el lienzo está completamente vacío—. Ni rejilla, ni contorno de sala, ni rack. Ningún error en la
+consola. La lectura de posición bajo el puntero marcaba **−18,45 m**, con el ratón dentro del
+recuadro.
+
+**Diagnóstico.** Esa lectura negativa era la única pista real: si el puntero está en el centro del
+lienzo y el panel dice que está a dieciocho metros a la izquierda del origen, lo que está mal no
+es lo que se dibuja sino **dónde se está mirando**. El `viewBox` salía `-400 -400 96 72`.
+
+**Causa raíz.** El marco mezclaba dos unidades. El plano se dibuja en unidades de dibujo
+—milímetros multiplicados por la escala, 0,02— y el margen del marco (`_DCP.PAD`) está escrito en
+milímetros, como todo lo que en este dominio se mide. El origen salía de la constante en crudo
+(−400) y el tamaño escalado (96): una ventana perfectamente válida colocada a veinte metros de
+donde estaba el dibujo. El dibujo salía entero, correcto y en su sitio; simplemente nadie lo
+estaba mirando.
+
+**Solución.** Escalar el margen como todo lo demás: `x: -_DCP.PAD * _DCP_SCALE`, y el tamaño
+como `maxX * _DCP_SCALE + pad * 2`. Comprobado ejecutando la función con un rack en el origen,
+una pieza lejos y el contorno de la sala, y verificando que las tres caen **dentro** del marco.
+Queda una guarda en `test_wa_dcim_section.py` que rechaza el origen sin escalar.
+
+**Lección.** Dos números en unidades distintas no se distinguen leyendo: los dos son números, y
+la operación que los mezcla no falla. Cuando una magnitud tiene dos representaciones —milímetros
+del mundo y unidades del dibujo— el sitio donde se convierte tiene que ser uno solo, y todo lo que
+salga de una función tiene que estar en la misma. Y la señal a la que hacer caso era la lectura de
+coordenadas: el panel estaba diciendo la verdad sobre dónde miraba, y era la única pantalla que
+lo decía.
+
 ## Cómo añadir una entrada
 
 Cada bug es una sección `##` con esta estructura fija:
@@ -321,7 +1086,7 @@ walk  1061,4 ms/llamada   (40 filas, loopback)
 ```
 
 Un segundo por lectura **contra un agente en la misma máquina que contesta al instante**. Nada
-de eso era la red ni el aparato. Se contaron las llamadas que hace un ciclo:
+de eso era la red ni el dispositivo. Se contaron las llamadas que hace un ciclo:
 
 ```text
 TOTAL catálogo: gets 180 · walks 130 · columnas únicas 38  →  348 lecturas
@@ -376,12 +1141,12 @@ walk    29,8 ms/llamada   (era 1061,4)
 348 lecturas: 5,9 s       (era 365 s)
 ```
 
-Compartir un motor entre aparatos era el riesgo que había que descartar, porque el fallo sería
+Compartir un motor entre dispositivos era el riesgo que había que descartar, porque el fallo sería
 **una respuesta atribuida a la máquina equivocada**, que no se parece a un error. Con dos
 agentes locales contestando valores deliberadamente distintos, ocho hilos y cuarenta walks
 concurrentes: ninguna respuesta llegó del equipo que no era. Es además el uso para el que pysnmp
 está escrito — su datastore de configuración local configura por destino, y la sincronía de
-tiempo de v3 se descubre por aparato y **caduca a los 300 s**, así que un equipo que se reinicia
+tiempo de v3 se descubre por dispositivo y **caduca a los 300 s**, así que un equipo que se reinicia
 se vuelve a descubrir en vez de quedarse fuera.
 
 **Lección.** Un coste de **construcción** disfrazado de coste de operación no aparece en ningún
@@ -406,7 +1171,7 @@ no. Ni una línea, ni un error, ni una entrada en el log.
 al switch— y el módulo muestreó a los otros dos. O sea: el módulo se ejecutó y decidió no
 mirarlo.
 
-Un aparato entra en el muestreo por dos caminos, y la clave es cómo se reparten:
+Un dispositivo entra en el muestreo por dos caminos, y la clave es cómo se reparten:
 
 ```python
 _uid = str(srv.get('host_uid') or '').strip()
@@ -433,17 +1198,17 @@ que nadie prueba: un item que solo lleva comprobaciones.
 
 Hay una decisión deliberada al lado que confunde el asunto y hay que respetar: `bound` se llena
 **antes** de mirar si el item está activo, porque un item desactivado sigue hablando por su host
-—alguien apagó ese aparato, y resucitarlo desde el registro sería una actualización deshaciendo
+—alguien apagó ese dispositivo, y resucitarlo desde el registro sería una actualización deshaciendo
 una decisión en silencio—. Pero eso es sobre una decisión que alguien tomó; un item **sin
 perfiles** no es una decisión sobre el muestreo, es la ausencia de una.
 
 **Solución.** `if _uid and self.profiles_of(srv)`. Un item reclama a su host cuando lo
 muestrearía, activo o no. Y como desde fuera esto se ve como un botón que no hace nada, el
-módulo dice ahora por su nombre qué aparatos no va a muestrear, en una línea de la lista.
+módulo dice ahora por su nombre qué dispositivos no va a muestrear, en una línea de la lista.
 
 **Lección.** Dos condiciones que casi siempre coinciden acaban usándose la una por la otra, y el
-día que divergen no falla nada: se deja de hacer algo. Aquí el sospechoso era el aparato —lo
-normal es que un switch conteste raro— y el aparato contestaba perfectamente; lo que había que
+día que divergen no falla nada: se deja de hacer algo. Aquí el sospechoso era el dispositivo —lo
+normal es que un switch conteste raro— y el dispositivo contestaba perfectamente; lo que había que
 mirar era **quién decidió no preguntarle**. Cuando un dispositivo no aparece en una lista, la
 pregunta no es qué contesta, sino qué conjunto lo excluyó.
 

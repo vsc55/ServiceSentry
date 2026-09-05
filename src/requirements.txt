@@ -40,3 +40,6 @@ PyJWT[crypto]>=2.8
 pysnmp>=6.0
 # Optional: SNMP MIB compilation (enables auto-compile of .mib files for SNMP discovery)
 pysmi>=1.1
+# Optional: importing the device-type catalogue (netbox-community/devicetype-library, CC0).
+# Absent → the importer says so and the rest of the physical inventory works without it.
+PyYAML>=6.0

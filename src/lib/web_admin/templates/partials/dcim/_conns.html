@@ -1,0 +1,183 @@
+{# ================================================================
+   El vocabulario de los conectores: cómo se lee una boca.
+
+   Qué forma tiene, cómo se llama, a qué velocidad va, qué puede llevar dentro y cuánto come por
+   ahí. **Aquí y no en la pantalla que lo usa** porque lo usan tres —el catálogo, la ficha de una
+   plantilla y el formulario de lo que se enchufa a ella— y la que lo tuviera sería la única que
+   sabe leer un `iec-60320-c19`.
+
+   Lo que vive aquí es el DICCIONARIO y no el dato del equipo: el conector dice qué generaciones
+   caben en esa forma y qué señales tiene sentido que lleve; cuál de ellas es la de una boca
+   concreta lo dice el puerto, en `port_list`.
+   ================================================================ #}
+/** La velocidad que dice un nombre de norma: `1000base-t` → `1 Gbps`, `100base-tx` → `100 Mbps`.
+ *
+ *  Vacío si no la dice, y entonces quien pinta enseña el nombre tal cual — que es lo correcto
+ *  para `ieee802.11ac` y para la norma que salga el año que viene.
+ *
+ *  Por regla y no por tabla: los nombres son sistemáticos, y una tabla de cuarenta entradas es
+ *  cuarenta oportunidades de que falte justo la que hoy hace falta. */
+function _dcSpeedOf(tipo) {
+    const s = String(tipo || '').trim().toLowerCase();
+    let mbps = 0;
+    let m = s.match(/^(\d+(?:\.\d+)?)g(?:base|e\b)/);
+    if (m) mbps = parseFloat(m[1]) * 1000;
+    else {
+        m = s.match(/^(\d+)base/);
+        if (m) mbps = parseInt(m[1], 10);
+    }
+    if (!mbps) return '';
+    // En gigabits a partir de mil, que es como se dice: nadie llama «10000 Mbps» a un diez.
+    // El `parseFloat` quita el cero de «2.50» sin dejar «2.5» donde se escribe «2,5»: eso lo
+    // decide el idioma y no esta función, que devuelve el número tal cual se teclea aquí.
+    return mbps >= 1000 ? `${parseFloat((mbps / 1000).toFixed(2))} Gbps` : `${mbps} Mbps`;
+}
+
+//: Los conectores que el servidor ofrece, por familia: `{familia: [{id, name, group, speed}]}`.
+//: Vive aquí y no en la pantalla del catálogo porque lo usan las dos —el catálogo y las
+//: plantillas—, y la que lo tuviera sería la única que sabe leer un `iec-60320-c19`.
+//:
+//: `{}` mientras no llegue: una casilla que no sugiere nada sigue aceptando lo que se teclee, que
+//: es lo que hace que este catálogo pueda faltar sin romper nada.
+let _dcConns = {};
+
+/** Guardar lo que sirva una respuesta, si lo trae. Se llama desde las dos pantallas: la que se
+ *  abra primero lo deja puesto para la otra. */
+function _dcConnsTake(d) {
+    const c = (d || {}).connectors;
+    if (c && typeof c === 'object' && !Array.isArray(c)) _dcConns = c;
+    // Y el vocabulario de señales, en la misma llamada: lo que se guarda en un puerto es un
+    // identificador, y sin la lista que lo nombra la pantalla enseña `power-out` a quien quiere
+    // leer «alimenta».
+    if (Array.isArray((d || {}).signals)) _dcSignals = d.signals;
+}
+
+//: Qué puede llevar un cable, con su nombre: `[{id, name}, …]`. Abierto —se escribe en el
+//: documento— y por eso lo que no esté aquí se enseña por su identificador en vez de perderse.
+let _dcSignals = [];
+
+/** Cómo se llama una señal, o el identificador tal cual si no está en el vocabulario. */
+function _dcSignalName(id) {
+    const k = String(id || '').trim();
+    if (!k) return '';
+    const hit = _dcSignals.find(s => String(s.id) === k);
+    return (hit && hit.name) ? String(hit.name) : k;
+}
+
+/** Las señales que caben en un puerto: **las que declara su conector**, más las que ya tenga.
+ *
+ *  Las que ya tenga aunque el conector no las declare: alguien pudo marcarlas antes de que se
+ *  corrigiera el catálogo, y una casilla que desaparece con la marca puesta borra el dato al
+ *  siguiente guardado sin decirlo.
+ */
+function _dcSignalsFor(tipo, puestas) {
+    const fuera = ((_dcConn(tipo) || {}).signals || []).map(String);
+    (puestas || []).forEach(x => { if (fuera.indexOf(String(x)) < 0) fuera.push(String(x)); });
+    return fuera;
+}
+
+/** Si por este puerto pasa corriente, que es cuando preguntar voltaje y vatios significa algo.
+ *
+ *  Dos caminos porque son dos casos: un conector **de corriente que no declara señales** —una
+ *  C14, un borne de continua— no hace otra cosa, así que siempre; y uno que sí las declara —un
+ *  USB— solo cuando alguien haya dicho que esa boca alimenta o se alimenta. Sin lo segundo, las
+ *  casillas saldrían en los cuatro USB frontales de cualquier máquina, que es preguntar por algo
+ *  que casi nadie va a contestar.
+ *
+ *  Mirar solo la familia no vale: la misma pregunta la tiene un USB-C trasero que carga el
+ *  portátil, y ese no está en «tomas de entrada». */
+function _dcPortPowers(x) {
+    const c = _dcConn((x || {}).type) || {};
+    const grupo = String(c.group || '');
+    const corriente = grupo === 'power-in' || grupo === 'power-out';
+    if (corriente && !(c.signals || []).length) return true;
+    const puestas = ((x || {}).signals || []).map(String);
+    return puestas.indexOf('power-in') >= 0 || puestas.indexOf('power-out') >= 0;
+}
+
+/** Cuánto come o cuánto da, dicho como se lee: `19,5 V · 90 W`. Vacío si no se dijo. */
+function _dcPortPower(x) {
+    const v = String((x || {}).volts || '').trim();
+    const w = Number((x || {}).watts || 0);
+    return [v ? v + ' V' : '', w > 0 ? w + ' W' : ''].filter(Boolean).join(' · ');
+}
+
+/** La generación de un puerto, tal y como la declara su conector, o `null`. */
+function _dcGen(tipo, gen) {
+    const k = String(gen || '').trim();
+    if (!k) return null;
+    return ((_dcConn(tipo) || {}).gens || []).find(g => String(g.id) === k) || null;
+}
+
+/** La ficha de un conector del catálogo, o `null`.
+ *
+ *  Recorriendo las familias porque un conector está en las que esté y no hay índice por
+ *  identificador: son ciento y pico filas y esto se llama al pintar un renglón, no un millón. */
+function _dcConn(tipo) {
+    const id = String(tipo || '').trim();
+    if (!id) return null;
+    for (const fam of Object.keys(_dcConns)) {
+        const hit = (_dcConns[fam] || []).find(c => String(c.id) === id);
+        if (hit) return hit;
+    }
+    return null;
+}
+
+
+/** El dibujo de un conector: un `<svg>` que apunta al símbolo de su forma.
+ *
+ *  Una C13 y una C19 se distinguen en un carácter y son dos cosas distintas —diez amperios y
+ *  veinte—, y quien las confunde pide el latiguillo que no entra. El nombre no arregla eso del
+ *  todo: «IEC C19» tampoco dice qué forma tiene. El dibujo sí, y es lo que se compara con la
+ *  boca que se tiene delante.
+ *
+ *  Nada si el conector no está en el catálogo: un enchufe genérico al lado de algo que alguien
+ *  tecleó afirmaría saber qué forma tiene, y no se sabe.
+ *
+ *  **La foto manda sobre el dibujo** donde la hay. Los dibujos son uno por FORMA —una C13 y una
+ *  C15 son la misma boca— y eso vale para los ciento y pico que vienen con el panel; al que
+ *  alguien añada no se le parece ninguno, y nadie va a escribir un SVG para la regleta de su
+ *  rack. Una foto suya dice más que el enchufe genérico, que era lo único que había.
+ *
+ *  `aria-hidden` porque al lado va siempre el nombre: leído en voz alta sería decirlo dos veces,
+ *  y la segunda peor. */
+function _dcConnIcon(tipo, clase) {
+    const c = _dcConn(tipo) || {};
+    if (c.image)
+        return `<img class="ss-conn ss-conn-img${clase ? ' ' + clase : ''}" alt=""
+            aria-hidden="true" src="${escAttr(_dcimMediaUrl(c.image))}">`;
+    const forma = String(c.shape || '');
+    if (!forma) return '';
+    return `<svg class="ss-conn${clase ? ' ' + clase : ''}" viewBox="0 0 24 16"
+        aria-hidden="true"><use href="#cx-${escAttr(forma)}"></use></svg>`;
+}
+
+/** Cómo se llama este conector, o `''` si no está en el catálogo.
+ *
+ *  Vacío y no el identificador: quien pinta decide qué enseñar cuando no se reconoce, y lo que
+ *  se enseña entonces es lo que se tecleó — un dato que alguien puso, no un hueco. */
+function _dcConnName(tipo) {
+    return String((_dcConn(tipo) || {}).name || '');
+}
+
+/** Cómo se enseña un tipo de puerto, en una sola palabra.
+ *
+ *  **La velocidad manda donde la hay**: `1000base-t` y «2,5 Gbps» son dos formas de decir lo
+ *  mismo en la misma línea, y la que se compara de un vistazo es la segunda. Donde el conector no
+ *  va a ninguna velocidad —una C19, un DisplayPort, una bahía— manda su nombre, que es lo que
+ *  dice alguien en una sala: `iec-60320-c19` es lo que dice la biblioteca y nadie más.
+ *
+ *  Y si no lo reconoce ninguno de los dos, lo tecleado tal cual: es un dato que alguien puso. */
+function _dcSpeedName(tipo) {
+    const c = _dcConn(tipo);
+    return String((c || {}).speed || '') || _dcSpeedOf(tipo)
+        || String((c || {}).name || '') || String(tipo || '');
+}
+
+/** Y la de un puerto concreto, que puede saber más que su conector: un USB-C no va a ninguna
+ *  velocidad —eso depende de qué haya detrás— pero **este** USB-C es un 3.2 Gen 2 y va a diez
+ *  gigas. La generación manda donde la hay; donde no, se lee como se leía. */
+function _dcPortSpeed(x) {
+    const g = _dcGen((x || {}).type, (x || {}).gen);
+    return (g && g.speed) ? String(g.speed) : _dcSpeedName((x || {}).type);
+}

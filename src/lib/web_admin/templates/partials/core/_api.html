@@ -182,3 +182,30 @@ async function apiDelete(url) {
         return null;                /* the fetch wrapper flags the connection-lost overlay */
     }
 }
+
+/** Write something, and know whether it worked — whatever the verb.
+ *
+ *  The three helpers above answer in three shapes: `apiPost` and `apiDelete` return
+ *  `{status, data}` while `apiPut` returns **the body**, with its `ok` and its `error` one
+ *  level up. Reading them all the same way makes a write that WORKED look like a failure —
+ *  which happened twice running on the inventory screen, first with the POST and then with the
+ *  PUT, and both times the data had been saved: the screen lying about something that already
+ *  happened is the worst way to be wrong.
+ *
+ *  Normalised once, here, so no screen has the chance again. It was written inside the
+ *  inventory and stayed there while it was one section's business; it stopped being that the
+ *  moment a second screen needed to write — a copy of this in the companies page would be two
+ *  places to fix the day a fourth answer shape turns up.
+ *
+ *  The body comes back too: almost nobody looks at it — a write that goes well has nothing to
+ *  say — but an import does have to report what it did, and pulling that out from outside the
+ *  normaliser would mean two ways of reading a response again. */
+async function apiSend(method, url, body) {
+    const raw = method === 'PUT' ? await apiPut(url, body)
+              : method === 'DELETE' ? await apiDelete(url)
+              : await apiPost(url, body);
+    if (!raw) return {ok: false, error: ''};              // the connection, not the request
+    const data = (raw.data !== undefined) ? (raw.data || {}) : raw;
+    const bad = raw.status !== undefined && raw.status !== 200;
+    return {ok: !bad && !data.error, error: String(data.error || ''), data};
+}

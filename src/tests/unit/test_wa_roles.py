@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_84_flags(self):
+    def test_permissions_tuple_has_93_flags(self):
         from lib.core.permissions import PERMISSIONS
-        assert len(PERMISSIONS) == 84
+        assert len(PERMISSIONS) == 93
 
     def test_permissions_are_unique(self):
         from lib.core.permissions import PERMISSIONS
@@ -70,6 +70,15 @@ class TestPermissionsConstants:
             'infra_metrics_view',
             'infra_results_view',
             'infra_raw_view',
+            # Where the equipment IS — one axis of the fleet.
+            'dcim_view', 'dcim_edit', 'dcim_cable_edit',
+            'dcim_catalog_view', 'dcim_catalog_manage', 'dcim_build_edit',
+            # …and whose it is, which is the other and is NOT the inventory's: the same company
+            # that pays for the cabinet has users in the directory and licences in Microsoft
+            # 365. `orgs_edit` is apart from every `_edit` because moving a device between U is
+            # tidying a cabinet and moving it between companies is moving property, which in a
+            # group decides both billing and who may see it (lib/core/orgs/manifest.py).
+            'orgs_view', 'orgs_all_view', 'orgs_edit',
             'jobs_view',
             'mfa_reset_others',
             'checks_view', 'checks_run',

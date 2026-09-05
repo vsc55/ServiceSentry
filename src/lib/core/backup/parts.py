@@ -15,6 +15,8 @@ Imports nothing from its siblings: it names tables, it does not open archives.
 
 from __future__ import annotations
 
+import os
+
 
 # Engine bookkeeping. Never dumped, never restored: they describe the storage, not the install,
 # and writing SQLite's own statistics into a MySQL restore is at best noise.
@@ -40,11 +42,78 @@ PARTS: tuple = (
     # says so in no way an operator notices until a restore comes back empty.
     {'id': 'syslog', 'kind': 'db', 'tables': ('syslog', 'syslog_drops'), 'db': 'syslog',
      'default': False, 'required': False, 'label_key': 'backup_part_syslog'},
+    # A directory of the CORE's own — the first one. Floor plans are files somebody uploaded,
+    # and the database holds only their names: a copy without them restores rooms whose plans
+    # are gone. On by default because they are small and irreplaceable, which is the pair of
+    # properties that decides this.
+    #
+    # `dir_attr` is what makes the setting `web_admin|dcim_media_dir` reach this far: the
+    # folder can be moved to another disk, and a copy that resolved `dcim_media` against
+    # `var_dir` anyway would archive the empty default. Named here rather than at the call
+    # site so the next configurable folder is one key, not another branch — see
+    # `configured_dirs`.
+    {'id': 'dcim_media', 'kind': 'dir', 'dir': 'dcim_media', 'dir_attr': '_DCIM_MEDIA_DIR',
+     'default': True, 'required': False, 'label_key': 'backup_part_dcim_media'},
 )
 
 PART_IDS: tuple = tuple(p['id'] for p in PARTS)
 _CLAIMED_TABLES: frozenset = frozenset(
     t for p in PARTS if p['kind'] == 'db' and p['tables'] for t in p['tables'])
+
+
+def dir_parts() -> list:
+    """Every part that is a DIRECTORY under ``var_dir`` — the core's own, then the modules'.
+
+    One list because the two are copied and restored identically: a folder in, a folder out.
+    The loops that do it used to ask for the modules' alone, which was right while the core had
+    no directories of its own and stopped being right the day it did — and it would have failed
+    the way this domain's failures do, by simply not copying something and saying nothing.
+    """
+    core = [{'id': p['id'], 'dir': p['dir'], 'default': p['default'],
+             'label_i18n': {}, 'label_key': p['label_key']}
+            for p in PARTS if p.get('kind') == 'dir']
+    return core + module_parts()
+
+
+def configured_dirs(holder) -> dict:
+    """``{part_id: path}`` for every core part whose folder has been MOVED.
+
+    The other half of :func:`part_dir`, which has always known how to honour an override and
+    was never given one: `dirs` reached `create_backup` and `restore_backup` as a parameter
+    nobody filled in, so an install with `web_admin|dcim_media_dir` set copied
+    `<var_dir>/dcim_media` — the default folder, empty — and a restore would have put the
+    floor plans back into a directory the panel does not read.
+
+    *holder* is whatever object carries the resolved settings (the web admin), read by the
+    attribute the part declares. Only the ones actually set are returned: an empty setting
+    means "the default", and `part_dir` already knows what that is.
+
+    Reading it on every call and not once at start-up is the same rule the setting itself
+    follows — moving the folder must not need a restart.
+    """
+    out: dict = {}
+    for p in PARTS:
+        attr = p.get('dir_attr')
+        if not attr:
+            continue
+        path = str(getattr(holder, attr, '') or '').strip()
+        if path:
+            out[p['id']] = path
+    return out
+
+
+def part_dir(part: dict, var_dir: str, dirs=None) -> str:
+    """Dónde vive de verdad la carpeta de una parte.
+
+    Casi siempre `<var_dir>/<lo declarado>`, que es lo que vale para todo lo de un módulo. Pero
+    una parte del núcleo puede ser **configurable** —la de los planos lo es— y entonces resolver
+    contra `var_dir` copiaría la carpeta por defecto, vacía, y lo diría como un éxito. Un fallo
+    de copia que solo se ve en una restauración es el peor que hay.
+    """
+    override = str((dirs or {}).get(part.get('id')) or '').strip()
+    if override:
+        return override
+    return os.path.join(var_dir, *str(part.get('dir') or '').split('/'))
 
 
 def module_parts() -> list:

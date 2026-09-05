@@ -1,0 +1,354 @@
+{# ================================================================
+   Physical inventory (root, /dcim) — where the equipment is, and whose it is.
+
+   The registry says what a device is and how to reach it; Infrastructure says whether it is all
+   right. This one answers the question neither of them can: **where do I walk**, and — in a
+   group that shares a datacenter — **whose is that**.
+
+   What is drawn here today is the tree: companies, sites, rooms and their racks, with what is
+   in each rack and what is free. The elevation and the floor plan come next (phases 1 and 2 of
+   docs/explica-dcim.md), and they will be drawn on the shared canvas the two maps already use —
+   which is why nothing here invents a drawing of its own.
+
+   **A foreign item is drawn occupied and anonymous.** That is not a nicety of this screen, it is
+   the contract the API already applies (`foreign: true`, position and size and nothing else);
+   what this file must not do is invent a name for one, or count it among what it reports.
+   ================================================================ #}
+
+//: What is on screen. The open rack lives in the URL, so a reload — and a link somebody pastes
+//: to a colleague — lands where it was.
+let _dcimData = {sites: [], orgs: []};
+//: Las zonas horarias, pedidas una vez. `null` = todavía no; `[]` = no hay ninguna en ninguna
+//: de las dos fuentes, y entonces el campo vuelve a ser texto libre en vez de un desplegable
+//: vacío que no deja escribir nada.
+let _dcimZones = null;
+//: Las máquinas a las que se puede enlazar un item, pedidas una vez. Mismo trato que las zonas:
+//: `null` = todavía no, `[]` = ninguna que este lector pueda ver — y entonces el campo no se
+//: ofrece, en vez de ofrecer una lista vacía.
+let _dcimHosts = null;
+//: Las plantillas, para poder elegir una al crear un equipo. Mismo trato: `null` = todavía no,
+//: `[]` = no hay ninguna, y entonces el campo no se ofrece en vez de ofrecer una lista vacía.
+let _dcimBuildOpts = null;
+let _dcimRack = null;                       // the rack open, with its items and free U
+let _dcimUrlRead = false;
+//: La sala que la URL pedía, si pedía alguna. Se abre DESPUÉS de tener el árbol, porque un
+//: plano necesita saber de qué sala es y eso llega con él.
+let _dcimUrlRoom = '';
+//: Si la URL pedía el cuadro. Como la sala: se abre DESPUÉS de tener el árbol, porque volver
+//: de él es volver al árbol y ese tiene que existir.
+let _dcimUrlBoard = false;
+const _DCIM_URL_RACK = 'rack';
+const _DCIM_URL_ROOM = 'room';
+//: El cuadro de mando en la dirección. Es la pantalla que alguien pega en un chat a las tres de
+//: la mañana, y una URL que no lo recuerda convierte ese mensaje en «abre el inventario y dale
+//: al botón de arriba».
+const _DCIM_URL_VIEW = 'view';
+
+//: The one form on this screen: `{mode, kind, parent, uid, row}`. One at a time on purpose —
+//: two open forms are two places to type and no clue which one Enter is going to save.
+let _dcimForm = null;
+
+/** La dirección de un fichero guardado. Codificada **por trozos**: desde que el nombre lleva su
+ *  subcarpeta hay una barra dentro, y `encodeURIComponent` la convertiría en `%2F` — que algunos
+ *  servidores delante rechazan de plano. La barra tiene que viajar como barra. */
+function _dcimMediaUrl(nombre) {
+    return '/api/v1/dcim/media/' + String(nombre || '').split('/')
+        .map(encodeURIComponent).join('/');
+}
+
+/** Ir a la ficha de la máquina que un equipo tiene enganchada.
+ *
+ *  `infraOpen` a secas **no hacía nada visible**, y no porque fallara: escribe dentro de
+ *  `#infra-container`, que existe siempre —los paneles de todas las secciones están en el DOM
+ *  desde el primer momento— pero vive en la pestaña de infraestructura. Así que el clic
+ *  navegaba de verdad, cambiaba la URL y pintaba la máquina… en una pantalla que no se estaba
+ *  mirando. Un botón que hace su trabajo fuera de la vista es indistinguible de uno roto.
+ *
+ *  Se cambia de sección y luego se abre, que es lo que el botón dice que hace. En este orden:
+ *  la pestaña, al activarse, redibuja infraestructura, y ese redibujado respeta la máquina
+ *  abierta — al revés, el redibujado de la pestaña llegaría después y enseñaría la flota. */
+function _dcimOpenHost(uid) {
+    if (!uid) return;
+    if (typeof _navTab === 'function') _navTab('#tab-infra');
+    if (typeof infraOpen === 'function') infraOpen(uid);
+}
+
+function _dcimMay(flag) {
+    return new Set(currentUser.permissions || []).has(flag);
+}
+
+/** Escribir algo, y saber si salió bien — sin importar el verbo.
+ *
+ *  El normalizador está en `partials/core/_api.html` (`apiSend`): se escribió aquí, y dejó de
+ *  ser cosa de esta sección en cuanto una segunda pantalla tuvo que escribir. El nombre corto
+ *  se queda porque lo usan sesenta llamadas de esta sección y son sesenta llamadas correctas.
+ *
+ *  Una función y no `const _dcimSend = apiSend`: todo esto acaba en UN script concatenado, y
+ *  un `const` se evalúa en su sitio — si este trozo entrara antes que `_api.html`, sería un
+ *  ReferenceError al cargar la página entera. Así se resuelve al llamar. */
+async function _dcimSend(metodo, url, cuerpo) {
+    return apiSend(metodo, url, cuerpo);
+}
+
+//: Volver a esta sección vuelve a pedir el armario que estuviera abierto.
+//:
+//: El estado de cada equipo —el verde y el ámbar del alzado— viaja con la carga del armario, y
+//: `renderDcim` dibuja lo que ya tiene: se recogen datos de una máquina en Infraestructura, se
+//: vuelve aquí, y el aviso sigue puesto hasta un F5. Y un F5 es lo que hace la gente cuando una
+//: pantalla no se entera, que es lo mismo que decir que la pantalla no funciona.
+//:
+//: En `shown.bs.tab` y no dentro de `renderDcim`, que se llama en cada redibujado de la propia
+//: sección: pedir el armario cada vez que se pulsa una pestaña interna sería una petición por
+//: clic. Aquí se sabe que se viene de FUERA, que es cuando puede haber cambiado algo.
+document.addEventListener('shown.bs.tab', ev => {
+    const dest = (ev.target || {}).getAttribute
+        ? ev.target.getAttribute('data-bs-target') : '';
+    if (dest !== '#tab-dcim') return;
+    const rack = (_dcimRack || {}).rack;
+    if (rack) _dcimLoadRack(rack.uid);
+});
+
+async function renderDcim() {
+    const pane = document.getElementById('dcim-container');
+    if (!pane) return;
+    // Only on the FIRST render: after that the variables are the answer, and re-reading the URL
+    // would reopen a rack somebody had just closed.
+    if (!_dcimUrlRead) {
+        _dcimUrlRead = true;
+        try {
+            const q = new URLSearchParams(window.location.search);
+            const rack = q.get(_DCIM_URL_RACK) || '';
+            if (rack) {
+                const data = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(rack)}`);
+                if (data && data.rack) _dcimRack = data;
+            }
+            _dcimUrlRoom = q.get(_DCIM_URL_ROOM) || '';
+            if (q.get(_DCIM_URL_VIEW) === 'board') _dcimUrlBoard = true;
+        } catch (_) { /* ignore */ }
+    }
+    // A `/dcim/catalog` se llega sin pulsar nada: pegando la dirección o volviendo con el
+    // botón de atrás. Así que la vista pedida se mira en CADA dibujado y no solo al pulsar en
+    // el menú — y si es otra, se abre y se para: abrirla vuelve a dibujar, y seguir sería
+    // pintar dos pantallas, la segunda encima de la primera.
+    if (_dcimViewWanted()) return;
+    if (_dcimZones === null) _dcimZones = await _dcimLoadZones();
+    if (_dcimHosts === null) {
+        const d = await apiGet('/api/v1/dcim/hosts');
+        _dcimHosts = (d || {}).hosts || [];
+    }
+    if (_dcimBuildOpts === null) {
+        const d = await apiGet('/api/v1/dcim/builds');
+        _dcimBuildOpts = (d || {}).builds || [];
+    }
+    const [sites, orgs] = await Promise.all([
+        apiGet('/api/v1/dcim/sites'), apiGet('/api/v1/dcim/orgs')]);
+    _dcimData = {sites: (sites || {}).sites || [], orgs: (orgs || {}).orgs || []};
+    // Tres vistas y un solo sitio donde se elige: el rack manda sobre el plano y el plano
+    // sobre el árbol, porque es el orden en que se entra — nadie abre un rack sin haber pasado
+    // por su sala, salvo por una URL, que es justo el caso que hay que respetar.
+    if (_dcimUrlBoard) {
+        _dcimUrlBoard = false;
+        if (!_dcimRack) return _dcimOpenBoard();
+    }
+    if (_dcimUrlRoom) {
+        const want = _dcimUrlRoom;
+        _dcimUrlRoom = '';
+        if (!_dcimRack && _dcimFindRoom(want)) return _dcimOpenPlan(want);
+    }
+    // El cuadro manda sobre todo lo demás: se abre para ir a un sitio, y si hay uno abierto
+    // es que todavía no se ha ido.
+    pane.innerHTML = (
+                     _dcCat ? _dcCatHtml()
+                   : _dcBuilds ? _dcBuildsHtml()
+                   : _dcWire ? _dcWireHtml()
+                   : _dcDev ? _dcDevHtml()
+                   : _dcSrc ? _dcSrcHtml()
+                   : _dcimBoard ? _dcimBoardHtml()
+                   : _dcimRack ? _dcimRackHtml()
+                   : _dcimPlan ? _dcimPlanHtml()
+                   : _dcimTreeHtml());
+    // Las teselas y las chinchetas se dibujan DESPUÉS de que el navegador tenga el SVG
+    // puesto: las dos necesitan saber cuántos píxeles mide en pantalla, y antes de estar en el
+    // documento eso es cero — que da un mapa vacío sin ningún error que ver.
+    // La lista del cableado la dibuja la tabla compartida en SU contenedor, y un contenedor que
+    // todavía no está en el documento no existe: por eso se le avisa aquí y no al componer el
+    // HTML. La misma razón que el lienzo y el visor 3D de las dos líneas de abajo.
+    if (_dcWire && typeof renderDcWire === 'function') renderDcWire();
+    if (_dcDev && typeof renderDcDev === 'function') renderDcDev();
+    if (typeof _dcimMapMounted === 'function') _dcimMapMounted();
+    // Y el visor 3D, por lo mismo: un `<canvas>` que todavía no está en el documento mide
+    // cero píxeles, y WebGL sobre cero píxeles es una pantalla negra sin ningún error.
+    if (typeof _dc3dMount === 'function') _dc3dMount();
+    const first = document.getElementById('dcim-f-0');
+    if (first) first.focus();
+}
+
+/** The time zones to offer: the server's, or the browser's, or none.
+ *
+ *  The server's first — it is what will have to interpret the value the day a screen shows a
+ *  site's local time, and a name it cannot resolve is a record nobody can use. But
+ *  `zoneinfo` reads the system's tz database and there are two ordinary ways to have none
+ *  (Windows without `tzdata`, a slimmed container), so the browser's own list is the fallback:
+ *  not authoritative, and far better than free text.
+ *
+ *  Asked once. The list is six hundred names that do not change while somebody is looking at a
+ *  screen. */
+async function _dcimLoadZones() {
+    const data = await apiGet('/api/v1/util/timezones');
+    const zones = (data || {}).zones || [];
+    if (zones.length) return zones;
+    try {
+        return Intl.supportedValuesOf('timeZone') || [];
+    } catch (_) {
+        return [];                              // ni una ni otra: el campo sigue siendo libre
+    }
+}
+
+/** Where the reader is, in the URL. Same rule the fleet follows: what is on screen is a fact
+ *  about this tab, and a pasted link should land on it. */
+function _dcimUrl() {
+    try {
+        const url = new URL(window.location.href);
+        const rack = (_dcimRack || {}).rack && _dcimRack.rack.uid;
+        if (rack) url.searchParams.set(_DCIM_URL_RACK, rack);
+        else url.searchParams.delete(_DCIM_URL_RACK);
+        const room = (_dcimPlan || {}).room && _dcimPlan.room.uid;
+        if (room && !rack) url.searchParams.set(_DCIM_URL_ROOM, room);
+        else url.searchParams.delete(_DCIM_URL_ROOM);
+        window.history.replaceState({}, '', url);
+        if (_dcimBoard) url.searchParams.set(_DCIM_URL_VIEW, 'board');
+        else url.searchParams.delete(_DCIM_URL_VIEW);
+    } catch (_) { /* a URL that cannot be written is not worth failing a render for */ }
+}
+
+// ── The one form: new and edit are the same thing on different columns ──────
+
+/** Open the form — or close it, if it was already open on this exact thing. */
+function _dcimOpen(mode, kind, parent, uid) {
+    const same = _dcimForm && _dcimForm.mode === mode && _dcimForm.kind === kind
+              && _dcimForm.parent === (parent || '') && _dcimForm.uid === (uid || '');
+    _dcimForm = same ? null : {mode, kind, parent: parent || '', uid: uid || '',
+                               row: uid ? _dcimFind(kind, uid) : {}};
+    // El cuadro y no la pantalla: el formulario ya no se incrusta entre las tarjetas —eran
+    // dieciocho cajas en crudo empujando hacia abajo lo que se estaba mirando— así que
+    // redibujar el fondo no lo dibuja a él.
+    _dcimFormDraw();
+}
+
+/** The row being edited, out of what is already on screen — no second fetch for data the
+ *  browser is holding, and no chance of the form and the list disagreeing about it. */
+function _dcimFind(kind, uid) {
+    if (kind === 'site') return (_dcimData.sites || []).find(s => s.uid === uid) || {};
+    if (kind === 'room') {
+        for (const s of _dcimData.sites || [])
+            for (const r of s.rooms || []) if (r.uid === uid) return r;
+        return {};
+    }
+    if (kind === 'rack') {
+        for (const s of _dcimData.sites || [])
+            for (const r of s.rooms || [])
+                for (const k of r.rackList || []) if (k.uid === uid) return k;
+        return (_dcimRack && _dcimRack.rack && _dcimRack.rack.uid === uid)
+               ? _dcimRack.rack : {};
+    }
+    return ((_dcimRack || {}).items || []).find(i => i.uid === uid) || {};
+}
+
+
+// ── Las vistas de esta sección ──────────────────────────────────────────────────────────
+//
+// El menú de la izquierda despliega las cuatro y cada una tiene su dirección. Aquí solo se
+// obedece: cuál está pedida lo dice la URL —o lo último que se eligió—, y esta función la abre.
+//
+// Se llama en cada dibujado y no solo al pulsar en el menú, porque a `/dcim/catalog` se puede
+// llegar sin pulsar nada: pegando la dirección, o volviendo con el botón de atrás.
+
+/** Abrir la vista que la URL pide, si no es la que ya está abierta.
+ *
+ *  Devuelve `true` si ha empezado a abrir otra — quien llame debe parar, porque abrirla vuelve
+ *  a dibujar y seguir sería dibujar dos veces la misma pantalla, la segunda encima. */
+function _dcimViewWanted() {
+    const quiere = (typeof _sbPageView === 'function') ? _sbPageView('dcim') : '';
+    const donde = _dcCat ? 'catalog' : _dcBuilds ? 'builds'
+                : _dcWire ? 'wiring'
+                : _dcDev ? 'devices'
+                : _dcSrc ? 'sources' : _dcimBoard ? 'board' : 'inventory';
+    if (!quiere || quiere === donde) return false;
+    _dcimGo(quiere);
+    return true;
+}
+
+/** Apuntar en el menú qué vista está abierta, sin dibujar.
+ *
+ *  Salir de una vista es cambiar de vista: sin esto, «Volver» cerraba el catálogo y el siguiente
+ *  dibujado lo reabría, porque la URL seguía diciendo `/dcim/catalog` y el menú manda. */
+function _dcimMark(slug) {
+    try {
+        localStorage.setItem('ss_active_view_dcim', slug);
+    } catch (e) { /* un navegador sin almacén sigue navegando: solo no lo recuerda */ }
+    const url = '/dcim/' + slug;
+    if (window.location.pathname !== url && window.location.pathname.startsWith('/dcim'))
+        history.replaceState({pane: 'tab-dcim'}, '', url);
+    if (typeof _sbHighlightSub === 'function') _sbHighlightSub('#view-dcim-' + slug);
+}
+
+/** Ir a una vista. Cerrar las otras es parte de ir: son excluyentes y quien elige qué dibujar
+ *  mira las cuatro variables, así que dejar una puesta sería llegar a otro sitio. */
+function _dcimGo(donde) {
+    _dcimMark(donde);
+    _dcCat = null;
+    _dcCatJob = '';
+    _dcBuilds = null;
+    _dcBuild = null;
+    _dcSrc = null;
+    _dcWire = null;
+    _dcDev = null;
+    _dcimBoard = null;
+    if (donde === 'catalog') return _dcCatOpen();
+    if (donde === 'wiring') return _dcWireOpen();
+    if (donde === 'devices') return _dcDevOpen();
+    if (donde === 'builds') return _dcBuildsOpen();
+    if (donde === 'sources') return _dcSrcOpen();
+    if (donde === 'board') return _dcimOpenBoard();
+    // Al inventario se vuelve del todo: si se quedara el rack abierto, «Inventario» llevaría al
+    // rack, que es donde ya se estaba.
+    _dcimRack = null;
+    _dcimPlan = null;
+    renderDcim();
+}
+
+/** El número de lo que hay detrás de una pestaña.
+ *
+ *  Existe para decidir si merece la pena entrar, y para eso tiene que **leerse sin mirarlo**: en
+ *  cuanto pesa más que el rótulo deja de acompañar al nombre y compite con él. Por eso es
+ *  pequeño, de esquina cerrada y del color del fondo — una píldora de color al lado de una
+ *  palabra es un aviso, y aquí no hay nada de lo que avisar.
+ *
+ *  Vacío en el cero: «0» y «no hay nada» dicen lo mismo, y lo segundo no ocupa sitio.
+ *
+ *  Aquí y no en cada tira, que son dos —el catálogo y la ficha de una plantilla— y acabarían
+ *  siendo dos números con dos aspectos. */
+//: Cómo se dibuja una tabla del panel de un armario. **Una constante y no seis copias**: las
+//: cuatro pestañas son cuatro listas del mismo armario, se leen una detrás de otra y se miran
+//: juntas, así que una que salga a otro tamaño no parece otra tabla — parece otra pantalla. Y
+//: pasaba: la de equipos iba a `ss-fs-3` y las de alimentación y cableado al tamaño de fábrica,
+//: con lo que los rótulos de la primera se partían en dos líneas donde a la otra le sobraba
+//: sitio.
+//:
+//: Aquí y no en la hoja de estilos porque no es una decisión de aspecto que se pueda cambiar
+//: sola: es qué clases lleva un `<table>` de esta sección, y el sitio donde se decide una vez.
+const _DC_TBL = 'table table-sm align-middle ss-fs-3 mb-0';
+
+function _dcTabN(n) {
+    const v = Number(n || 0);
+    return v ? ` <span class="ss-tab-n">${esc(String(v))}</span>` : '';
+}
+
+/** Y lo que está pendiente en esa pestaña, en ámbar y aparte de lo que ya está hecho.
+ *
+ *  Aparte y no sumado: «tres cables» y «tres enlaces que nadie ha apuntado» son dos cosas, y
+ *  sumarlas daría un seis que no es ninguna de las dos. */
+function _dcTabWarn(n) {
+    const v = Number(n || 0);
+    return v ? ` <span class="ss-tab-n text-bg-warning">${esc(String(v))}</span>` : '';
+}

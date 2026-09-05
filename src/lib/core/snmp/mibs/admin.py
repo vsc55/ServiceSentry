@@ -38,6 +38,29 @@ from lib.core.snmp.mibs import catalog as _mib_catalog
 from lib.core.snmp.mibs import versions as _mib_versions
 from lib.core.snmp.mibs import lint as _mib_lint
 from lib.core.snmp.client import _HAS_PYSNMP
+from lib.providers import github as _gh
+
+# ── El proveedor de GitHub, compartido ────────────────────────────────────────
+#
+# Traerse un repositorio como un zip lo hace también el catálogo de modelos del inventario
+# físico. La parte difícil —caché con revalidación, progreso, tope de tamaño, no extraer
+# nunca nada— vive ahora en un solo sitio; lo que sabe de MIB se queda aquí.
+#
+# Con alias y no reescribiendo ochocientas líneas: lo que ha cambiado es de dónde viene
+# cada función, no cómo se llama en los sitios que ya la usaban.
+_parse_github_folder = _gh.parse_folder
+_github_zip = _gh.zip_url
+_cache_slot = _gh._cache_slot                       # noqa: SLF001
+_prune_archive_cache = _gh.prune_cache
+_download_archive = _gh.download
+_member_inner = _gh.member_inner
+_archive_wrapper = _gh.wrapper_of
+
+
+def _archive_cache_dir(var_dir: str) -> str:
+    """La caché de esta biblioteca, al lado de ella y no mezclada con la de otro."""
+    return _gh.cache_dir_for(var_dir, 'snmp_mibs')
+
 
 # Optional dependency: pysmi is needed to COMPILE raw ASN.1, not to read an already
 # compiled MIB - which is why it is a partial dependency and not a missing one.
@@ -250,173 +273,9 @@ def _safe_mib_relpath(name: str, kind: str = 'raw') -> str | None:
     return '/'.join(parts)
 
 
-def _archive_cache_dir(var_dir: str) -> str:
-    """Where a downloaded archive is kept between uses. Beside the library, not inside it."""
-    return os.path.join(var_dir, 'snmp_mibs', _ARCHIVE_CACHE) if var_dir else ''
-
-
-def _cache_slot(cache_dir: str, url: str):
-    """``(zip_path, etag_path)`` for *url*, or ``('', '')`` with no cache."""
-    if not cache_dir:
-        return '', ''
-    key = hashlib.sha1(url.encode('utf-8', 'replace')).hexdigest()[:16]
-    return os.path.join(cache_dir, key + '.zip'), os.path.join(cache_dir, key + '.etag')
-
-
-def _prune_archive_cache(cache_dir: str, keep: int = 2, max_age_days: int = 7) -> None:
-    """Keep the last few archives and nothing old.
-
-    A cached archive is 86 MB of somebody's disk; keeping every one ever downloaded is a
-    cache that only grows. Two is the flow this exists for — compare, then import — with room
-    for a second source in between.
-    """
-    if not cache_dir or not os.path.isdir(cache_dir):
-        return
-    try:
-        names = os.listdir(cache_dir)
-        # A download that died half way leaves its `.part`. Anything older than an hour is
-        # not somebody's download in flight, it is somebody's crash.
-        stale = time.time() - 3600
-        for f in names:
-            p = os.path.join(cache_dir, f)
-            if f.endswith('.part') and os.path.getmtime(p) < stale:
-                _rm_quiet(p)
-        zips = [os.path.join(cache_dir, f) for f in names if f.endswith('.zip')]
-        zips.sort(key=lambda p: os.path.getmtime(p), reverse=True)
-        cutoff = time.time() - max_age_days * 86400
-        for i, p in enumerate(zips):
-            if i < keep and os.path.getmtime(p) >= cutoff:
-                continue
-            _rm_quiet(p)
-            _rm_quiet(p[:-4] + '.etag')
-    except OSError:
-        pass
-
-
-def _download_archive(url: str, max_bytes: int, on_progress=None, cache_dir: str = '',
-                      fresh: bool = False):
-    """Stream *url* to a file. Returns ``(path, '')`` or ``(None, message)``.
-
-    **Kept and revalidated.** Comparing an archive and then importing it is the same 86 MB
-    twice, and pressing Compare first is exactly what the panel asks you to do — the second
-    download answers a question the first one already answered. So the file is kept beside the
-    library with the ETag the server gave it, and every use asks the server whether that copy
-    is still current: a 304 costs one request and no megabytes, and a server that does not do
-    conditional requests simply sends the file again, which is what happened before.
-
-    *fresh* asks for the file itself and not for an opinion about it: no conditional
-    request, and whatever comes back replaces what was there. Reusing is the right default —
-    the server is asked every time and a changed archive downloads by itself — but "ask
-    again" and "fetch it again" are different requests, and only one of them can be made by
-    pressing the same button twice.
-
-    Returns ``(path, message, from_cache)``. The path may be the cached copy — the caller
-    prunes the cache, it does not delete what it was handed — and *from_cache* is what lets
-    the report say why it was instant.
-
-    To a file and not to memory, because the thing this exists for is a whole-repository zip
-    of tens of megabytes — and because :class:`zipfile.ZipFile` wants to seek, which is what a
-    file gives it for free.
-
-    *on_progress* is called with ``(bytes_so_far, bytes_total)`` once per chunk. It is the
-    only thing that can be said honestly while this runs: 86 MB over somebody's line is a
-    minute of a button that otherwise looks stuck. ``bytes_total`` is 0 when the server sends
-    no ``Content-Length`` — a bar with no end is still a bar that is moving.
-    """
-    import tempfile           # noqa: PLC0415
-    import urllib.error       # noqa: PLC0415
-    import urllib.request     # noqa: PLC0415
-
-    cached, etag_path = _cache_slot(cache_dir, url)
-    etag = ''
-    if fresh:
-        _rm_quiet(cached)
-        _rm_quiet(etag_path)
-    elif cached and os.path.isfile(cached) and os.path.isfile(etag_path):
-        try:
-            with io.open(etag_path, encoding='utf-8') as fh:
-                etag = fh.read().strip()
-        except OSError:
-            etag = ''
-
-    # IN the cache directory, and this is not a detail: `os.replace` cannot move a file
-    # across volumes on Windows, and the system temp is on C: while somebody's data directory
-    # is on D:. Every download went to C:, every rename failed, the failure was swallowed as
-    # "then keep the temp file" — so nothing was ever cached, every use downloaded again, and
-    # each one left 86 MB behind. Born on the destination volume, the rename is a rename.
-    if cache_dir:
-        try:
-            os.makedirs(cache_dir, exist_ok=True)
-        except OSError:
-            cache_dir, cached, etag_path = '', '', ''
-    fd, path = tempfile.mkstemp(prefix='ss-mib-archive-', suffix='.part',
-                                dir=cache_dir or None)
-    total = 0
-    _last_etag = ''
-    try:
-        headers = {'User-Agent': APP_NAME}
-        if etag:
-            headers['If-None-Match'] = etag
-        req = urllib.request.Request(url, headers=headers)
-        # The file object FIRST, so the descriptor is adopted before anything can raise.
-        # Opened inside the same `with` as the request, it is never adopted at all when the
-        # request throws — and an unclosed handle on Windows is a file that cannot be
-        # deleted, which is how a 304 (an exception, in urllib) left its empty `.part`.
-        with os.fdopen(fd, 'wb') as out, urllib.request.urlopen(req, timeout=180) as r:
-            # Defensively: a response without headers is not a reason to lose the
-            # download, it is a reason to have no total.
-            try:
-                _h = getattr(r, 'headers', None) or {}
-                expected = int(_h.get('Content-Length') or 0)
-                _last_etag = _h.get('ETag') or ''
-            except (AttributeError, TypeError, ValueError):
-                expected = 0
-            while True:
-                chunk = r.read(1 << 20)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > max_bytes:
-                    # Out of the loop rather than out of the function: the temp file is still
-                    # open here, and on Windows a delete under an open handle fails — which
-                    # is how a refused download used to leave its half behind.
-                    break
-                out.write(chunk)
-                if on_progress is not None:
-                    on_progress(total, expected)
-    except urllib.error.HTTPError as exc:
-        _rm_quiet(path)
-        # 304: the copy on disk IS the answer. Anything else is a failure like any other.
-        if exc.code == 304 and cached and os.path.isfile(cached):
-            return cached, '', True
-        return None, str(exc), False
-    except Exception as exc:   # pylint: disable=broad-except
-        _rm_quiet(path)
-        return None, str(exc), False
-    if total > max_bytes:
-        _rm_quiet(path)
-        return None, 'Archive too large', False
-    if not cached:
-        return path, '', False
-    # Into the cache with the tag that identifies it, so the next use can ask instead of
-    # downloading. A cache that cannot be revalidated is a guess with a disk cost.
-    try:
-        os.replace(path, cached)
-        new_etag = str(_last_etag or '').strip()
-        if new_etag:
-            with io.open(etag_path, 'w', encoding='utf-8') as fh:
-                fh.write(new_etag)
-        else:
-            _rm_quiet(etag_path)
-        return cached, '', False
-    except OSError:
-        # Could not be filed. The file is still the answer to THIS call — the caller deletes
-        # it, having been handed something that is not in the cache.
-        return path, '', False
-
-
-# How much of a file is enough to see what it is. A licence banner is fifty lines; a
-# readme says what it is in the first three.
+#: Cuánto se enseña de un fichero al comparar: ochenta líneas u ocho kilobytes, lo que
+#: llegue antes. No es «un trozo»: es lo que cabe en una pantalla sin hacer scroll, que es
+#: donde alguien decide si eso es el MIB que esperaba.
 _PREVIEW_LINES = 80
 _PREVIEW_BYTES = 8192
 
@@ -485,49 +344,6 @@ def _import_source_path(src: dict) -> str:
     """The repository path a source's ``folder`` points at, or ``''``."""
     parsed = _parse_github_folder(str(src.get('folder') or ''))
     return str(parsed[3] or '').strip('/') if parsed else ''
-
-
-def _github_zip(url: str) -> tuple:
-    """A GitHub folder URL as ``(zip url, path inside the repo)``, or ``(None, '')``.
-
-    ``codeload`` serves the repository as one file and is not the API: it costs no request
-    against the sixty an hour, which is the whole reason to prefer it for a repository whose
-    folders would cost four hundred.
-    """
-    parsed = _parse_github_folder(url)
-    if not parsed:
-        return None, ''
-    owner, repo, branch, path = parsed
-    branch = branch or 'master'
-    return (f'https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{branch}',
-            str(path or '').strip('/'))
-
-
-def _member_inner(member, strip: str = '') -> str:
-    """A zip member's path with the wrapper folder removed, using forward slashes."""
-    inner = str(getattr(member, 'filename', '')).replace('\\', '/').strip('/')
-    if strip and (inner == strip or inner.startswith(strip + '/')):
-        inner = inner[len(strip):].strip('/')
-    return inner
-
-
-def _archive_wrapper(members) -> str:
-    """The single top-level directory every member sits under, or ``''``.
-
-    Archives are usually packed with one wrapper folder — Synology's is called "MIB files" —
-    and it belongs to the packaging, not to the layout. Keeping it buries every MIB one level
-    deeper for no reason, and the day the vendor renames it, the next import lands beside the
-    old one instead of updating it.
-
-    Only when ALL of them share it: a mixed archive has real structure and it is kept whole.
-    """
-    tops = set()
-    for m in members:
-        head = str(getattr(m, 'filename', '')).replace('\\', '/').strip('/').split('/')
-        if len(head) < 2:
-            return ''            # something sits at the root: there is no wrapper
-        tops.add(head[0])
-    return tops.pop() if len(tops) == 1 else ''
 
 
 def _safe_archive_subdir(name: str) -> str:
@@ -711,8 +527,6 @@ def _load_mib_sources(directory: str = _MIB_SOURCES_DIR) -> list[dict]:
 
 
 # GitHub folder-URL parsers.
-_GH_TREE_RE = re.compile(r'^https?://github\.com/([^/]+)/([^/]+)/tree/([^/]+)(?:/(.+?))?/?$')
-_GH_ROOT_RE = re.compile(r'^https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$')
 
 # The furniture EVERY repository has, whoever publishes it: a readme, a licence, a makefile.
 # This is knowledge about git, not about any vendor — which is why it lives here and the names
@@ -727,35 +541,6 @@ _GH_SKIP_NAMES = frozenset({
     'readme', 'license', 'licence', 'copying', 'makefile', 'changelog',
     'authors', 'contributors', 'notice', 'todo', 'index', 'manifest',
 })
-
-
-def _parse_github_folder(url: str):
-    """Parse a GitHub folder URL → (owner, repo, branch, path) or None.
-
-    Accepts ``.../tree/<branch>/<path>``, ``.../tree/<branch>`` and bare
-    ``github.com/<owner>/<repo>`` (root of the default branch).
-    """
-    m = _GH_TREE_RE.match(url.strip())
-    if m:
-        return m.group(1), m.group(2), m.group(3), (m.group(4) or '')
-    m = _GH_ROOT_RE.match(url.strip())
-    if m:
-        return m.group(1), m.group(2), '', ''
-    return None
-
-
-# What a MIB says about itself. Every other rule here is a guess about a NAME; this one
-# reads the file — and a name is exactly what the offenders are good at: net-snmp's `mibs/`
-# folder ships `nodemap`, `rfclist`, `ianalist`, `mibfetch` and `smistrip`, none of which is a
-# MIB and all of which look like one from outside.
-#
-# Asked of the parser that already answers it, rather than with a second regex of its own.
-# The second regex was wrong in a way only real files show: it read the RAW text, so
-# `NAME`, a comment, and then `DEFINITIONS ::= BEGIN` on the next line did not match — and
-# ASN.1 does not care where a comment falls between two tokens. LibreNMS ships several
-# written that way (FROGFOOT-RESOURCES-MIB, ADIC-INTELLIGENT-STORAGE-MIB), and every import
-# quietly refused them as "not a MIB" while the panel's own module-name reader, which blanks
-# comments first, read their names perfectly well.
 
 
 def _is_mib_source(text: str) -> bool:

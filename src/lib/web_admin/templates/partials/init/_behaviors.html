@@ -82,7 +82,12 @@ document.addEventListener('hidden.bs.modal', function(e) {
  *  bigger. Both halves live here so the CSS and the header controls cannot disagree about
  *  which dialogs are resizable. */
 function _modalResizable(dlg) {
+    // Ni `fit` ni `wide`: **una talla que el que abre ha declarado es una decisión**, y ofrecer
+    // un botón para deshacerla es ofrecer que no valga. `ss-modal-wide` ya mide lo que tiene que
+    // medir —96vw como mucho, 66rem si la pantalla da— así que el botón de maximizar sólo añade
+    // alto vacío debajo de lo que se ha venido a leer. Reportado desde la ficha de un cable.
     return !!dlg && !dlg.classList.contains('ss-modal-fit')
+        && !dlg.classList.contains('ss-modal-wide')
         && (dlg.classList.contains('modal-lg') || dlg.classList.contains('modal-xl'));
 }
 
@@ -151,6 +156,54 @@ document.addEventListener('hide.bs.modal', function(e) {
     else delete _modalSizeMem[e.target.id];   // back to default → don't store noise
     _persistModalConfig();                    // persist per-user (debounced), separate from table layout
 });
+/** Poner o quitar el botón de maximizar de un modal, según pueda estirarse o no. Devuelve el
+ *  botón, o `null` si ese diálogo no lleva.
+ *
+ *  Aparte del `show.bs.modal` porque hay un modal que **cambia de opinión sin volver a abrirse**:
+ *  `#infoModal` lo comparten cuatro aperturas, y pasar de una ficha —que no se estira— a un
+ *  formulario —que sí— no dispara `show`, que Bootstrap no emite sobre uno que ya está abierto.
+ *  Mirándolo sólo ahí salían las dos mitades del mismo despiste: la ficha se quedaba con el botón
+ *  que no le toca, y el formulario abierto encima de ella se quedaba sin el que sí. */
+function _modalMaxSync(modalEl) {
+    const dlg     = modalEl && modalEl.querySelector('.modal-dialog');
+    const content = modalEl && modalEl.querySelector('.modal-content');
+    const header  = modalEl && modalEl.querySelector('.modal-header');
+    if (!header) return null;
+    if (!_modalResizable(dlg) || !content) {
+        header.querySelector('.modal-max-btn')?.remove();
+        return null;
+    }
+    let maxBtn = header.querySelector('.modal-max-btn');
+    if (maxBtn) return maxBtn;
+    maxBtn = document.createElement('button');
+    maxBtn.type = 'button';
+    maxBtn.className = 'modal-max-btn btn p-0 border-0 bg-transparent text-reset me-2 lh-1';
+    // Push the group (maximize + close) to the right and sit flush before the
+    // X: maximize takes the auto margin, the close button drops its own.
+    maxBtn.style.marginLeft = 'auto';
+    maxBtn.style.fontSize = '1.05rem';
+    maxBtn.title = (typeof t === 'function' ? t('modal_maximize') : '') || 'Maximize';
+    maxBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
+    const _toggleMax = () => {
+        const on = maxBtn.dataset.max === '1';
+        maxBtn.dataset.max = on ? '0' : '1';               // set state first: the resize
+        if (!on) dlg.style.transform = '';                 // clamp observer skips while maximized
+        content.style.width  = on ? '' : '95vw';
+        content.style.height = on ? '' : '95vh';
+        maxBtn.querySelector('i').className = on ? 'bi bi-arrows-fullscreen' : 'bi bi-fullscreen-exit';
+    };
+    maxBtn.addEventListener('click', _toggleMax);
+    // Double-click the title bar to maximize / restore (ignore controls).
+    header.addEventListener('dblclick', ev => {
+        if (ev.target.closest('button, a, input, select, textarea, .btn-close')) return;
+        _toggleMax();
+    });
+    const closeBtn = header.querySelector('.btn-close');
+    if (closeBtn) { closeBtn.style.marginLeft = '0'; header.insertBefore(maxBtn, closeBtn); }
+    else header.appendChild(maxBtn);
+    return maxBtn;
+}
+
 document.addEventListener('show.bs.modal', function(e) {
     const dlg     = e.target.querySelector('.modal-dialog');
     const content = e.target.querySelector('.modal-content');
@@ -164,37 +217,8 @@ document.addEventListener('show.bs.modal', function(e) {
     // Maximize toggle (resizable dialogs only): a header icon next to the X that
     // grows the dialog to ~95% of the work area, and back. Injected once per modal;
     // its state + size are restored from the last time this modal was open.
-    const _resizable = _modalResizable(dlg);
-    if (_resizable && header && content) {
-        let maxBtn = header.querySelector('.modal-max-btn');
-        if (!maxBtn) {
-            maxBtn = document.createElement('button');
-            maxBtn.type = 'button';
-            maxBtn.className = 'modal-max-btn btn p-0 border-0 bg-transparent text-reset me-2 lh-1';
-            // Push the group (maximize + close) to the right and sit flush before the
-            // X: maximize takes the auto margin, the close button drops its own.
-            maxBtn.style.marginLeft = 'auto';
-            maxBtn.style.fontSize = '1.05rem';
-            maxBtn.title = (typeof t === 'function' ? t('modal_maximize') : '') || 'Maximize';
-            maxBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
-            const _toggleMax = () => {
-                const on = maxBtn.dataset.max === '1';
-                maxBtn.dataset.max = on ? '0' : '1';               // set state first: the resize
-                if (!on) dlg.style.transform = '';                 // clamp observer skips while maximized
-                content.style.width  = on ? '' : '95vw';
-                content.style.height = on ? '' : '95vh';
-                maxBtn.querySelector('i').className = on ? 'bi bi-arrows-fullscreen' : 'bi bi-fullscreen-exit';
-            };
-            maxBtn.addEventListener('click', _toggleMax);
-            // Double-click the title bar to maximize / restore (ignore controls).
-            header.addEventListener('dblclick', ev => {
-                if (ev.target.closest('button, a, input, select, textarea, .btn-close')) return;
-                _toggleMax();
-            });
-            const closeBtn = header.querySelector('.btn-close');
-            if (closeBtn) { closeBtn.style.marginLeft = '0'; header.insertBefore(maxBtn, closeBtn); }
-            else header.appendChild(maxBtn);
-        }
+    const maxBtn = _modalMaxSync(e.target);
+    if (maxBtn && content) {
         // Restore the last maximized state + size for this modal (set the max flag
         // first so the clamp observer skips the restored maximized size).
         const _wasMax = !!(_mem && _mem.max);

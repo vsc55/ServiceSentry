@@ -1,0 +1,575 @@
+{# ================================================================
+   The room, seen from above: where each rack stands, and how it is doing.
+
+   The elevation answers "where in the cabinet"; this one answers the question before it —
+   **which cabinet, and where in the room**. Somebody told over the phone that R7 is in trouble
+   needs to know whether R7 is by the door or at the far end behind the CRAC.
+
+   **Where a rack stands is a fact about the ROOM**, and that is why this drawing does not use
+   the canvas's saved arrangement the way the two maps do. On those, where somebody dragged a
+   box is *that person's* view of a diagram — kept in their browser and on their account, and
+   rightly so, because two people may want to read the same network differently. A rack is not a
+   diagram: it is three hundred kilos of steel standing in one place, the same place for
+   everybody, and the next person to open the plan must see where it actually is. So a drop is a
+   **write to the server** (`pos_x`, `pos_y`), not a note in a browser.
+
+   Everything else is the shared canvas: panning, zooming, fitting, and exporting the plan to
+   PNG or SVG — which is the thing somebody prints and sticks on the door of the room.
+
+   Scale: millimetres, straight. A rack is 600 × 1000 mm and a room is a few thousand across, so
+   a millimetre is a fraction of a pixel and the drawing is scaled once, here, rather than every
+   figure being converted at the point of use.
+   ================================================================ #}
+
+//: The id this drawing goes by on the shared canvas, and how millimetres become pixels.
+const _DCP_SVG = 'dcimPlanSvg';
+//: 20 px per metre: a 600 mm rack is 12 px wide, which is small — and the canvas zooms, which
+//: is exactly what it is for. A scale that made one room comfortable would make another
+//: unreadable, and the room that is 4 m across and the one that is 40 are both ordinary.
+const _DCP_SCALE = 0.02;
+const _DCP = {PAD: 400, GRID: 1000};        // millimetres
+
+//: Which room's plan is open, and the racks on it. Its own state and not `_dcimRack`'s: a plan
+//: is a room, and the rack view is one rack.
+let _dcimPlan = null;
+//: The drag in flight: `{uid, from, at}` in the drawing's own millimetres.
+let _dcpDrag = null;
+
+function _dcimPlanSvg() { return ssCanvasSvg(_DCP_SVG); }
+
+/** Fetch the floor plan, embedded and with its own proportions.
+ *
+ *  Embedded rather than by URL because this drawing gets EXPORTED: an SVG drawn inside an
+ *  `<img>` cannot fetch external resources, so an `href` at the API would come out blank in the
+ *  PNG and say nothing about it. And the ratio is read from the picture itself because that is
+ *  the one source that cannot disagree with the file.
+ *
+ *  Failing is not an error to show: it is a room with no plan, which is the ordinary state. */
+async function _dcpLoadPlan(room) {
+    const name = (room || {}).plan || '';
+    if (!name) return;
+    try {
+        const resp = await fetch(`${_dcimMediaUrl(name)}`,
+                                 {credentials: 'same-origin'});
+        if (!resp.ok) return;
+        const blob = await resp.blob();
+        const data = await new Promise(ok => {
+            const fr = new FileReader();
+            fr.onload = () => ok(String(fr.result || ''));
+            fr.onerror = () => ok('');
+            fr.readAsDataURL(blob);
+        });
+        if (!data) return;
+        const ratio = await new Promise(ok => {
+            const img = new Image();
+            img.onload = () => ok(img.naturalWidth ? img.naturalHeight / img.naturalWidth : 0);
+            img.onerror = () => ok(0);
+            img.src = data;
+        });
+        if (_dcimPlan && _dcimPlan.room && _dcimPlan.room.uid === room.uid)
+            _dcimPlan.image = {data, ratio: ratio || 0.7};
+    } catch (e) { /* a room with no plan is the ordinary state */ }
+}
+
+/** Upload one. The server decides what it is by looking INSIDE the file — an extension is
+ *  a claim by whoever uploaded it, and the first bytes of a PNG are not. */
+async function _dcpUpload(input) {
+    const file = (input.files || [])[0];
+    input.value = '';
+    if (!file || !_dcimPlan) return;
+    const room = _dcimPlan.room;
+    const body = new FormData();
+    body.append('file', file);
+    const resp = await fetch(`/api/v1/dcim/rooms/${encodeURIComponent(room.uid)}/plan`,
+                             {method: 'POST', body, credentials: 'same-origin'});
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) { showToast(data.error || t('error'), 'danger'); return; }
+    room.plan = data.plan || '';
+    _dcimPlan.image = null;
+    await _dcpLoadPlan(room);
+    showToast(t('dcim_plan_saved'), 'success');
+    renderDcim();
+}
+
+/** Take it away — the FILE goes, not just the reference to it. A record cleared while the
+ *  file stays is a folder that grows for the life of the installation. */
+function _dcpDropPlan() {
+    if (!_dcimPlan) return;
+    const room = _dcimPlan.room;
+    // Una FUNCIÓN, no un `await`: `showConfirmModal` no devuelve promesa, así que esperarla
+    // daba `undefined` y todo lo de después no ocurría nunca.
+    showConfirmModal(t('dcim_plan_drop_q'), async () => {
+        const resp = await fetch(`/api/v1/dcim/rooms/${encodeURIComponent(room.uid)}/plan`,
+                                 {method: 'DELETE', credentials: 'same-origin'});
+        if (!resp.ok) { showToast(t('error'), 'danger'); return; }
+        room.plan = '';
+        _dcimPlan.image = null;
+        renderDcim();
+    });
+}
+
+/** Escuchar el teclado solo mientras el plano está abierto.
+ *
+ *  Un oyente que se queda vivo después de cerrar borraría piezas de una sala que ya no está en
+ *  pantalla — y quien pulsó Supr estaría mirando otra cosa. Se pone y se quita en los dos
+ *  sitios que abren y cierran, que son los dos únicos que hay. */
+function _dcpListen(on) {
+    document.removeEventListener('keydown', _dcpKey);
+    if (on) document.addEventListener('keydown', _dcpKey);
+}
+
+async function _dcimOpenPlan(roomUid) {
+    const data = await apiGet(`/api/v1/dcim/racks?room=${encodeURIComponent(roomUid)}`);
+    const room = _dcimFindRoom(roomUid);
+    if (!room) return;
+    _dcimPlan = {room, racks: (data || {}).racks || []};
+    await Promise.all([_dcpLoadPlan(room), _dcpLoadFeatures(roomUid)]);
+    _dcpListen(true);
+    _dcimRack = null;
+    _dcimForm = null;
+    _dcimUrl();
+    renderDcim();
+}
+
+function _dcimFindRoom(uid) {
+    for (const s of _dcimData.sites || [])
+        for (const r of s.rooms || []) if (r.uid === uid) return r;
+    return null;
+}
+
+function _dcimClosePlan() {
+    _dcpListen(false);
+    if (typeof _dc3dStop === 'function') _dc3dStop();
+    _dcimPlan = null;
+    _dcpFeat = null;
+    _dcpSel = null;
+    _dcimUrl();
+    renderDcim();
+}
+
+// ── The drawing ─────────────────────────────────────────────────────────────
+
+function _dcimPlanHtml() {
+    const room = _dcimPlan.room || {};
+    const racks = _dcimPlan.racks || [];
+    const box = _dcpExtent(racks);
+    return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad">
+        <div class="ss-toolrow mb-3">
+            <button class="btn btn-sm btn-secondary" onclick="_dcimClosePlan()">
+                <i class="bi bi-arrow-left me-1"></i>${esc(t('dcim_back'))}</button>
+            <span class="fw-semibold ss-fs-5">${esc(room.name || room.uid)}</span>
+            ${_dcimRollBadge(room.roll)}
+            <span class="text-muted ss-fs-2 ss-toolrow-text">${
+                esc(tf('dcim_plan_note', racks.length))}</span>
+            <div class="ss-toolrow-tools">
+                <!-- The native file input is a transparent, system-bordered control, which is
+                     the one shape this panel does not use. So it is hidden behind a solid
+                     button that opens it. -->
+                <input type="file" id="dcpPlanFile" class="d-none"
+                       accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+                       onchange="_dcpUpload(this)">
+                <button class="btn btn-sm btn-secondary"
+                        onclick="document.getElementById('dcpPlanFile').click()">
+                    <i class="bi bi-image me-1"></i>${
+                        esc(t(room.plan ? 'dcim_plan_replace' : 'dcim_plan_upload'))}</button>
+                ${room.plan ? `<button class="btn btn-sm btn-warning"
+                        onclick="_dcpDropPlan()">
+                    <i class="bi bi-trash me-1"></i>${esc(t('dcim_plan_drop'))}</button>` : ''}
+                <input type="file" id="dcpImportFile" class="d-none"
+                       accept=".json,application/json" onchange="_dcpImport(this)">
+                <button class="btn btn-sm ${_dc3d ? 'btn-warning' : 'btn-secondary'}"
+                        onclick="_dcimToggle3d()" title="${escAttr(t('dcim_3d'))}">
+                    <i class="bi bi-box"></i></button>
+                <button class="btn btn-sm btn-secondary" onclick="_dcpExport()"
+                        title="${escAttr(t('dcim_export'))}">
+                    <i class="bi bi-filetype-json"></i></button>
+                ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary"
+                        onclick="document.getElementById('dcpImportFile').click()"
+                        title="${escAttr(t('dcim_import'))}">
+                    <i class="bi bi-upload"></i></button>` : ''}
+                ${ssCanvasTools(_DCP_SVG, 'room_plan')}
+            </div>
+        </div>
+        ${_dc3d ? _dc3dHtml() : ''}
+        ${_dcpRowsHtml()}
+        ${_dcpRowWarnings()}
+        ${_dcpDesignBar(room)}
+        ${_dcpPaletteHtml()}
+        ${_dcpSelectedHtml()}
+        ${`<div class="border rounded-3 overflow-hidden ss-infra-canvas
+                                      position-relative">
+            <div id="dcimPlanPanel" class="position-absolute ss-passthru"
+                 style="left:.5rem;bottom:.5rem;right:.5rem;z-index:2"></div>
+            <svg ${ssCanvasAttrs(_DCP_SVG, box)}
+                 onwheel="ssCanvasWheel(${jsStr(_DCP_SVG)},event)"
+                 onpointerdown="_dcpDown(event)" onpointermove="_dcpMove(event)"
+                 onpointerup="_dcpUp(event)" onpointercancel="_dcpUp(event)"
+                 onpointerleave="_dcpUp(event)"
+                 aria-label="${escAttr(t('dcim_plan'))}">
+                ${_dcpContent(racks)}
+            </svg>
+        </div>`}
+        <div class="text-muted ss-fs-3 mt-2">${esc(t('dcim_plan_hint'))}</div>
+    </div>`;
+}
+
+/** Lo que no cuadra entre las filas declaradas, dicho con la frase entera.
+
+ *  Es EL error de una sala mal ordenada y no se ve mirando el plano: las cajas están
+ *  perfectamente alineadas y una fila está respirando lo que expulsa otra. Un plano no lo puede
+ *  deducir de la orientación de los racks — dos filas enfrentadas comparten pasillo frío porque
+ *  alguien lo diseñó así— y por eso los pasillos se declaran. */
+function _dcpRowWarnings() {
+    const avisos = ((_dcpFeat || {}).warnings || []);
+    if (!avisos.length) return '';
+    return `<div class="mb-2">${avisos.map(w => `<div class="ss-fs-2 text-warning-emphasis">
+        <i class="bi bi-thermometer-sun me-1"></i>${
+            esc(tf('dcim_warn_hot_intake', w.label, w.aisle, w.other))}</div>`).join('')}</div>`;
+}
+
+/** Lo que hace falta para DISEÑAR la sala, separado de lo que hace falta para mirarla.
+ *
+ *  Las medidas de la sala están aquí y no en el formulario de la sala porque es aquí donde se
+ *  descubre que hacen falta: se está colocando la tercera fila y hay que saber si llega. Un dato
+ *  que solo se puede escribir en otra pantalla es un dato que nadie escribe.
+ *
+ *  El imán y la capa aérea son de la sesión, no de la sala: son cómo estoy mirando yo ahora
+ *  mismo, y guardarlos le cambiaría la vista al siguiente que abra el plano. */
+function _dcpDesignBar(room) {
+    if (!_dcimMay('dcim_edit')) return '';
+    const medida = (name, label) =>
+        `<label class="ss-fs-2 text-muted">${esc(t(label))}
+            <input class="form-control form-control-sm ss-tabular" type="number" step="100"
+                   min="0" style="max-width:7rem" value="${escAttr(String(room[name] || 0))}"
+                   oninput="_dcpRoomSet(${jsStr(name)},this.value)"></label>`;
+    return `<div class="ss-toolrow mb-2">
+        ${medida('width_mm', 'dcim_room_width')}
+        ${medida('depth_mm', 'dcim_room_depth')}
+        ${medida('tile_mm', 'dcim_tile')}
+        <div class="ss-toolrow-tools">
+            <span class="text-muted ss-fs-2 ss-tabular me-1" id="dcp-readout">—</span>
+            <button class="btn btn-sm ${_dcpMagnet ? 'btn-warning' : 'btn-secondary'}"
+                    onclick="_dcpMagnet=!_dcpMagnet;renderDcim()">
+                <i class="bi bi-magnet me-1"></i>${esc(t('dcim_magnet'))}</button>
+            <button class="btn btn-sm ${_dcpAir ? 'btn-warning' : 'btn-secondary'}"
+                    onclick="_dcpAir=!_dcpAir;renderDcim()">
+                <i class="bi bi-bezier2 me-1"></i>${esc(t('dcim_layer_air'))}</button>
+        </div>
+    </div>`;
+}
+
+//: Las medidas de la sala se guardan cuando se para de teclear, como las de una pieza: en cada
+//: tecla serían cinco peticiones por «13000».
+let _dcpRoomTimer = null;
+
+function _dcpRoomSet(campo, valor) {
+    const room = (_dcimPlan || {}).room;
+    if (!room) return;
+    room[campo] = Number(valor) || 0;
+    _dcpRedraw();
+    clearTimeout(_dcpRoomTimer);
+    _dcpRoomTimer = setTimeout(async () => {
+        const r = await _dcimSend('PUT', `/api/v1/dcim/rooms/${encodeURIComponent(room.uid)}`,
+                                  {[campo]: room[campo]});
+        if (!r.ok) showToast(r.error || t('save_failed'), 'danger');
+    }, 500);
+}
+
+/** How big the picture is: whatever the racks cover, plus room to drag them outwards.
+ *
+ *  Computed from the boxes the drawing HOLDS — the trap both maps hit, twice, was a picture
+ *  whose size did not count one of its boxes, so dropping it outside the frame put it where it
+ *  could no longer be grabbed. */
+function _dcpExtent(racks) {
+    let maxX = 4000, maxY = 3000;               // a small room, so an empty plan is not a dot
+    // The plan picture is one more box. Not counting it is exactly the trap that had both
+    // maps exporting cut off: a frame that does not know about one of its own drawings.
+    const img = (_dcimPlan || {}).image;
+    const planMm = Number(((_dcimPlan || {}).room || {}).plan_mm || 0);
+    if (img && planMm > 0) {
+        maxX = Math.max(maxX, planMm);
+        maxY = Math.max(maxY, planMm * (img.ratio || 0.7));
+    }
+    for (const r of racks) {
+        maxX = Math.max(maxX, Number(r.pos_x || 0) + Number(r.width_mm || 600));
+        maxY = Math.max(maxY, Number(r.pos_y || 0) + Number(r.depth_mm || 1000));
+    }
+    // Las piezas y la sala son cajas más. La trampa que este panel pisó dos veces fue un marco
+    // que no contaba una de sus cajas: soltarla fuera la dejaba donde ya no se podía agarrar.
+    for (const f of (typeof _dcpFeatures === 'function' ? _dcpFeatures() : [])) {
+        maxX = Math.max(maxX, Number(f.pos_x || 0) + Number(f.width_mm || 0));
+        maxY = Math.max(maxY, Number(f.pos_y || 0) + Number(f.depth_mm || 0));
+    }
+    const sala = (_dcimPlan || {}).room || {};
+    maxX = Math.max(maxX, Number(sala.width_mm) || 0);
+    maxY = Math.max(maxY, Number(sala.depth_mm) || 0);
+    // TODO EN LAS MISMAS UNIDADES. El margen está en milímetros como todo lo que se mide aquí,
+    // pero el marco se expresa en unidades del DIBUJO —milímetros por la escala— y mezclarlos
+    // ponía la ventana en (-400,-400) con un tamaño de 96×72: mirando a un sitio donde no hay
+    // nada. El dibujo salía entero y en su sitio, y la pantalla salía en blanco.
+    const pad = _DCP.PAD * _DCP_SCALE;
+    return {x: -pad, y: -pad,
+            width: maxX * _DCP_SCALE + pad * 2,
+            height: maxY * _DCP_SCALE + pad * 2};
+}
+
+function _dcpContent(racks) {
+    // El orden ES el dibujo: la imagen de fondo, la rejilla, lo que va por el suelo, la sala,
+    // los racks, y por último lo que va por el aire. Pintar una bandeja debajo de un rack la
+    // esconde justo donde hace falta mirarla.
+    return _dcpPlanImage(racks) + _dcpGrid(racks) + _dcpRoomOutline()
+         + _dcpFeaturesSvg('floor') + _dcpFeaturesSvg('room')
+         + racks.map(_dcpRack).join('')
+         + _dcpFeaturesSvg('air');
+}
+
+/** El contorno de la sala y sus cotas, si alguien dijo cuánto mide.
+ *
+ *  Si no lo dijo no se inventa: una sala dibujada con las medidas de lo que hay dentro parece
+ *  medida y no lo está, y alguien la usará para decidir si cabe otra fila. */
+function _dcpRoomOutline() {
+    const room = (_dcimPlan || {}).room || {};
+    const w = Number(room.width_mm) || 0, d = Number(room.depth_mm) || 0;
+    if (!w || !d) return '';
+    const W = w * _DCP_SCALE, D = d * _DCP_SCALE;
+    const cota = (x, y, texto, giro) => `<text x="${x}" y="${y}" text-anchor="middle"
+        font-size="6" fill="var(--bs-secondary-color)"
+        ${giro ? `transform="rotate(-90 ${x} ${y})"` : ''}>${esc(texto)}</text>`;
+    return `<rect x="0" y="0" width="${W}" height="${D}" fill="none"
+                  stroke="var(--bs-body-color)" stroke-width="2"
+                  vector-effect="non-scaling-stroke"></rect>
+        ${cota(W / 2, -5, (w / 1000).toFixed(2) + ' m', false)}
+        ${cota(-6, D / 2, (d / 1000).toFixed(2) + ' m', true)}`;
+}
+
+/** The room's floor plan, under the grid and under the racks.
+ *
+ *  Scaled by `plan_mm` — how wide it is in the room — with the height following from the
+ *  picture's proportions. With no scale it is drawn the width of the DRAWING, which is a guess:
+ *  it is faded so nobody measures against it believing it is to scale. */
+function _dcpPlanImage(racks) {
+    const img = (_dcimPlan || {}).image;
+    if (!img || !img.data) return '';
+    const box = _dcpExtent(racks);
+    const scaled = Number((_dcimPlan.room || {}).plan_mm || 0) > 0;
+    const wmm = scaled ? Number(_dcimPlan.room.plan_mm) : box.width / _DCP_SCALE;
+    const w = wmm * _DCP_SCALE;
+    return `<image href="${escAttr(img.data)}" x="0" y="0" width="${w}"
+                   height="${w * img.ratio}" opacity="${scaled ? '.85' : '.45'}"
+                   preserveAspectRatio="xMinYMin meet"></image>`;
+}
+
+/** La rejilla: la BALDOSA de esta sala, con el metro marcado por encima.
+ *
+ *  Un plano de sala técnica se lee en baldosas —«el rack de la B7»— así que la rejilla fina es
+ *  la baldosa. Pero una rejilla de solo baldosas hace perder la escala en cuanto la sala es
+ *  grande, así que cada metro lleva una línea más fuerte: las dos cosas que alguien necesita
+ *  contar, y ninguna de las dos tapa a la otra. */
+function _dcpGrid(racks) {
+    const box = _dcpExtent(racks);
+    const tile = _dcpTile();
+    const linea = (x1, y1, x2, y2, fuerte) =>
+        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+               stroke="var(--bs-border-color)" stroke-width="${fuerte ? 0.6 : 0.3}"
+               opacity="${fuerte ? '.85' : '.45'}"></line>`;
+    const out = [];
+    const hasta = (box.x + box.width) / _DCP_SCALE;
+    const abajo = (box.y + box.height) / _DCP_SCALE;
+    for (let mm = 0; mm <= hasta; mm += tile)
+        out.push(linea(mm * _DCP_SCALE, box.y, mm * _DCP_SCALE, box.y + box.height,
+                       Math.round(mm) % 1000 === 0));
+    for (let mm = 0; mm <= abajo; mm += tile)
+        out.push(linea(box.x, mm * _DCP_SCALE, box.x + box.width, mm * _DCP_SCALE,
+                       Math.round(mm) % 1000 === 0));
+    return out.join('');
+}
+
+/** One rack from above: its footprint, which way it faces, and how it is doing.
+ *
+ *  The FRONT is marked, and it is not decoration: which way a rack faces is what decides which
+ *  aisle is the cold one, and a plan that does not show it cannot be used to reason about air
+ *  at all. */
+function _dcpRack(rack) {
+    const w = Number(rack.width_mm || 600) * _DCP_SCALE;
+    const d = Number(rack.depth_mm || 1000) * _DCP_SCALE;
+    const x = Number(rack.pos_x || 0) * _DCP_SCALE;
+    const y = Number(rack.pos_y || 0) * _DCP_SCALE;
+    const rot = Number(rack.rotation || 0);
+    const roll = rack.roll || {};
+    const tone = roll.state ? hostStateColor(roll.state) : 'var(--bs-secondary-bg)';
+    return `<g class="ss-grab" data-dcp="${escAttr(rack.uid)}"
+               transform="rotate(${rot} ${x + w / 2} ${y + d / 2})"
+               onpointerenter="_dcpHover(${jsStr(rack.uid)})"
+               onpointerleave="_dcpHover('')">
+        <title>${escAttr(rack.name || rack.uid)}</title>
+        <rect x="${x}" y="${y}" width="${w}" height="${d}" rx="1"
+              fill="var(--bs-tertiary-bg)" stroke="${tone}" stroke-width="1.5"></rect>
+        <rect x="${x}" y="${y}" width="${w}" height="${Math.max(1.5, d * 0.08)}"
+              fill="${tone}"></rect>
+        <text x="${x + w / 2}" y="${y + d / 2 + 3}" font-size="7" text-anchor="middle"
+              fill="currentColor">${esc(_dceClip(rack.name || '', 10))}</text>
+    </g>`;
+}
+
+// ── Moving one, which writes to the server ──────────────────────────────────
+
+function _dcpDown(ev) {
+    // Una pieza de la sala: se coge igual que un rack, y por eso el arrastre es uno solo. Lo
+    // que cambia es a qué tabla va lo que se suelte, y eso lo decide `_dcpUp`.
+    const pieza = ev.target.closest('g[data-dcpf]');
+    if (pieza && _dcimMay('dcim_edit')) {
+        const f = _dcpFeatures().find(x => x.uid === pieza.dataset.dcpf);
+        const p = ssCanvasPoint(_DCP_SVG, ev);
+        if (f && p) {
+            _dcpSel = {kind: 'feature', uid: f.uid};
+            _dcpDrag = {uid: f.uid, what: 'feature', moved: false, from: p,
+                        at: {x: Number(f.pos_x || 0), y: Number(f.pos_y || 0)}};
+            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+            // Solo el DIBUJO, no la pantalla: repintar la sección entera aquí sustituye el
+            // `<svg>` que acaba de capturar el puntero, y con él se va la mano que está
+            // arrastrando. El panel de la pieza aparece al soltar, en `_dcpUp`.
+            _dcpRedraw();
+            return;
+        }
+    }
+    const box = ev.target.closest('g[data-dcp]');
+    if (box && _dcimMay('dcim_edit')) {
+        const rack = (_dcimPlan.racks || []).find(r => r.uid === box.dataset.dcp);
+        const p = ssCanvasPoint(_DCP_SVG, ev);
+        if (rack && p) {
+            _dcpDrag = {uid: rack.uid, moved: false, from: p,
+                        at: {x: Number(rack.pos_x || 0), y: Number(rack.pos_y || 0)}};
+            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+            return;
+        }
+    }
+    ssCanvasPanStart(_DCP_SVG, ev);
+}
+
+function _dcpMove(ev) {
+    // La posición bajo el puntero, siempre: es lo que se lee en la barra mientras se coloca, y
+    // «B7» es lo que alguien dirá por teléfono cuando esté dentro de la sala.
+    const bajo = ssCanvasPoint(_DCP_SVG, ev);
+    if (bajo && !_dcpDrag) _dcpReadout(bajo.x / _DCP_SCALE, bajo.y / _DCP_SCALE);
+
+    if (_dcpDrag && _dcpDrag.what === 'feature') {
+        const p = ssCanvasPoint(_DCP_SVG, ev);
+        const f = _dcpFeatures().find(x => x.uid === _dcpDrag.uid);
+        if (!p || !f) return;
+        f.pos_x = Math.max(0, _dcpSnap(_dcpDrag.at.x + (p.x - _dcpDrag.from.x) / _DCP_SCALE));
+        f.pos_y = Math.max(0, _dcpSnap(_dcpDrag.at.y + (p.y - _dcpDrag.from.y) / _DCP_SCALE));
+        _dcpDrag.moved = true;
+        _dcpReadout(f.pos_x + Number(f.width_mm) / 2, f.pos_y + Number(f.depth_mm) / 2);
+        _dcpRedraw();
+        return;
+    }
+    if (_dcpDrag) {
+        const p = ssCanvasPoint(_DCP_SVG, ev);
+        if (!p) return;
+        const rack = (_dcimPlan.racks || []).find(r => r.uid === _dcpDrag.uid);
+        if (!rack) return;
+        // Back to millimetres: the drawing is in scaled units and the RECORD is in the units
+        // the room is measured in. Storing pixels would make the plan unreadable the day the
+        // scale changes, and the scale is a decision about drawing, not about the room.
+        rack.pos_x = Math.max(0, _dcpSnap(_dcpDrag.at.x + (p.x - _dcpDrag.from.x) / _DCP_SCALE));
+        rack.pos_y = Math.max(0, _dcpSnap(_dcpDrag.at.y + (p.y - _dcpDrag.from.y) / _DCP_SCALE));
+        _dcpDrag.moved = true;
+        _dcpReadout(rack.pos_x + Number(rack.width_mm || 600) / 2,
+                    rack.pos_y + Number(rack.depth_mm || 1000) / 2);
+        _dcpRedraw();
+        return;
+    }
+    ssCanvasPanMove(_DCP_SVG, ev);
+}
+
+async function _dcpUp(ev) {
+    const drag = _dcpDrag;
+    _dcpDrag = null;
+    ssCanvasPanEnd(ev);
+    if (!drag) return;
+    if (drag.what === 'feature') {
+        const f = _dcpFeatures().find(x => x.uid === drag.uid);
+        if (!f) return;
+        // Una pulsación que no viajó es una selección: AHORA se puede repintar la pantalla,
+        // porque ya no hay ninguna mano encima del dibujo, y así aparece el panel de la pieza.
+        if (!drag.moved) return renderDcim();
+        return _dcpSave(f.uid, {pos_x: f.pos_x, pos_y: f.pos_y});
+    }
+    const rack = (_dcimPlan.racks || []).find(r => r.uid === drag.uid);
+    if (!rack) return;
+    if (!drag.moved) return _dcimLoadRack(rack.uid);     // a press that did not travel = open it
+    // …and where it ended up goes to the SERVER. Not the browser's arrangement store: a rack
+    // stands in one place for everybody, and the next person to open this plan must see where
+    // it actually is.
+    const r = await _dcimSend('PUT', `/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}`,
+                              {pos_x: rack.pos_x, pos_y: rack.pos_y});
+    if (!r.ok) {
+        showToast(r.error || t('save_failed'), 'danger');
+        return _dcimOpenPlan(_dcimPlan.room.uid);        // put it back where the server has it
+    }
+}
+
+/** Turn a rack a quarter turn. Its own control and not a drag gesture: rotating by dragging is
+ *  a gesture nobody discovers and everybody triggers by accident. */
+async function _dcpTurn(uid) {
+    const rack = (_dcimPlan.racks || []).find(r => r.uid === uid);
+    if (!rack) return;
+    const rot = (Number(rack.rotation || 0) + 90) % 360;
+    const r = await _dcimSend('PUT', `/api/v1/dcim/racks/${encodeURIComponent(uid)}`,
+                              {rotation: rot});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    rack.rotation = rot;
+    _dcpRedraw();
+    _dcpHover(uid);
+}
+
+/** Qué hay bajo el puntero, en baldosa y en metros.
+ *
+ *  Se escribe en el elemento y no repintando la barra: esto corre en cada movimiento del ratón,
+ *  y volver a montar la fila de botones sesenta veces por segundo hace que los botones parpadeen
+ *  bajo la mano que los va a pulsar. */
+function _dcpReadout(mmX, mmY) {
+    const el = document.getElementById('dcp-readout');
+    if (!el) return;
+    el.textContent = `${_dcpTileRef(mmX, mmY)} · ${(mmX / 1000).toFixed(2)}, ${
+        (mmY / 1000).toFixed(2)} m`;
+}
+
+/** Repintar solo el dibujo mientras se arrastra, leaving the picture itself alone — the `<svg>` holds the
+ *  pointer capture the drag is running on, and replacing it drops the hand off the rack. */
+function _dcpRedraw() {
+    const svg = _dcimPlanSvg();
+    if (!svg || !_dcimPlan) return;
+    svg.innerHTML = _dcpContent(_dcimPlan.racks || []);
+}
+
+//: What the pointer is on.
+let _dcpOn = '';
+
+function _dcpHover(uid) {
+    _dcpOn = String(uid || '');
+    const box = document.getElementById('dcimPlanPanel');
+    if (box) box.innerHTML = _dcpCard();
+}
+
+/** Reading one rack from the plan: how it is doing, and the two things you can do to it. */
+function _dcpCard() {
+    if (!_dcpOn || !_dcimPlan) return '';
+    const rack = (_dcimPlan.racks || []).find(r => r.uid === _dcpOn);
+    if (!rack) return '';
+    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-hdd-rack text-muted"></i>
+            <span class="fw-semibold">${esc(rack.name || rack.uid)}</span>
+            ${_dcimRollBadge(rack.roll)}
+            ${_dcimOrgBadge(rack.org_uid)}
+            <span class="text-muted ss-fs-3 ss-tabular">${esc(String(rack.u_height || ''))}U ·
+                ${esc(String(rack.width_mm || 600))}×${esc(String(rack.depth_mm || 1000))} mm</span>
+            <button class="btn btn-sm btn-secondary py-0 px-2"
+                onclick="_dcimLoadRack(${jsStr(rack.uid)})">${esc(t('dcim_open_rack'))}</button>
+            ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary py-0 px-2"
+                onclick="_dcpTurn(${jsStr(rack.uid)})" title="${escAttr(t('dcim_turn'))}"
+                ><i class="bi bi-arrow-clockwise"></i></button>` : ''}
+        </div>
+    </div>`;
+}

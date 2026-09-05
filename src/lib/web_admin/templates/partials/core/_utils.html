@@ -1049,3 +1049,70 @@ function fmtBytes(n) {
     while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
     return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
 }
+
+
+// ── Lo obligatorio se ve, y se ve mientras se teclea ─────────────────────────────────────
+//
+// El panel ya sabía qué campos no se pueden dejar en blanco: cada formulario lo comprueba al
+// guardar y suelta un aviso. Pero eso lo dice **después de pulsar**, cuando el renglón ya se dio
+// por terminado, y sin señalar en cuál de las ocho cajas falta.
+//
+// Aquí se pinta ANTES: una caja obligatoria vacía se marca en rojo. La regla es la misma en todo
+// el panel y está escrita una vez, así que el formulario que se escriba mañana la tiene con sólo
+// declarar `required` en su caja — que es el atributo de HTML de toda la vida, no un invento de
+// esta casa.
+//
+// Dos mitades, porque hay dos momentos en los que una caja puede quedarse vacía:
+//
+// * **al dibujarse** — un alta nace vacía, y ahí se ve de entrada qué hay que rellenar;
+// * **al teclear** — vaciar a mano el nombre de algo que ya existía. Esta es la que faltaba, y
+//   no se arregla redibujando: redibujar mientras alguien escribe le quita el cursor de debajo
+//   de los dedos. Se toca la clase del propio elemento y nada más.
+
+/** Marcar (o desmarcar) UNA caja obligatoria según esté vacía. */
+function ssReqMark(el) {
+    if (!el || !el.classList) return;
+    // `select` con opción vacía incluido; una casilla no se marca — su "vacío" es un estado
+    // legítimo y pintarlo en rojo diría que hay que marcarla, que es otra cosa.
+    if (el.type === 'checkbox' || el.type === 'radio') return;
+    el.classList.toggle('is-invalid', !String(el.value || '').trim());
+}
+
+/** Todas las de un trozo recién puesto en el documento. */
+function ssMarkRequired(root) {
+    const donde = root || document;
+    if (!donde.querySelectorAll) return;
+    donde.querySelectorAll('[required]').forEach(ssReqMark);
+}
+
+// Mientras se teclea: **delegado**, uno para todo el panel. Un `oninput` por caja serían
+// trescientos sitios donde acordarse, y el que se olvide no da ningún error: da una caja que no
+// avisa, que es indistinguible de una que no es obligatoria.
+// En la fase de BURBUJA y no en la de captura, a propósito: media docena de cajas de este panel
+// llevan un `oninput="this.classList.remove('is-invalid')"` de cuando la marca sólo servía para
+// señalar un guardado rechazado. Capturando, esto pintaría primero y esa línea lo borraría
+// después — la marca no saldría, y no habría nada que mirar para saber por qué.
+document.addEventListener('input', ev => {
+    const el = ev.target;
+    if (el && el.hasAttribute && el.hasAttribute('required')) ssReqMark(el);
+});
+document.addEventListener('change', ev => {
+    const el = ev.target;
+    if (el && el.hasAttribute && el.hasAttribute('required')) ssReqMark(el);
+});
+
+// Y al dibujarse: casi todo en este panel se pinta metiendo HTML en un contenedor, y no hay un
+// solo sitio por el que pase todo. Un observador lo ve igual —lo que se busca es lo que ENTRA en
+// el documento— y de paso vale para lo que se escriba mañana sin tener que acordarse de llamar a
+// nada. Sólo mira los nodos añadidos, así que no recorre el documento entero.
+if (typeof MutationObserver === 'function') {
+    new MutationObserver(muts => {
+        for (const m of muts) {
+            for (const n of (m.addedNodes || [])) {
+                if (!n || n.nodeType !== 1) continue;
+                if (n.hasAttribute && n.hasAttribute('required')) ssReqMark(n);
+                ssMarkRequired(n);
+            }
+        }
+    }).observe(document.documentElement, {childList: true, subtree: true});
+}

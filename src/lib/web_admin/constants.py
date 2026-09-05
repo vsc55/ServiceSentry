@@ -44,6 +44,66 @@ HOME_PAGES = (
      'standalone': {'pane': 'tab-infra', 'render': 'renderInfra',
                     'perm': 'infra_view', 'icon': 'bi-hdd-network',
                     'nav_label_key': 'tab_infra'}},
+    # Where the equipment IS, beside what it is DOING. Its own section rather than a tab of
+    # Infrastructure: that one answers "is this all right" and this one answers "where do I
+    # walk", and they are opened by different people at different moments.
+    {'id': 'dcim',     'url': '/dcim',     'label_key': 'landing_dcim',
+     'standalone': {'pane': 'tab-dcim', 'render': 'renderDcim',
+                    'perm': 'dcim_view', 'icon': 'bi-building',
+                    'nav_label_key': 'tab_dcim',
+                    # Four screens under one section, and the sidebar unfolds them. They were
+                    # buttons in the tree's toolbar — which is where ACTS on what is on screen
+                    # belong, not places you go — and worse, that toolbar is the tree's, so
+                    # they vanished the moment somebody opened a rack.
+                    #
+                    # `views` is the panel's own mechanism for exactly this and it was already
+                    # there for module sections. Using it rather than a row of pills inside the
+                    # pane is what makes `/dcim/catalog` an address: shareable, bookmarkable,
+                    # and choosable as a landing page.
+                    #
+                    # `kind`/`action` stay empty on purpose: they describe how the GENERIC
+                    # renderer draws a module's view, and this section ships its own renderer.
+                    #
+                    # Y `label_key` y no `label_i18n`: **la misma regla que el título de una
+                    # sección**. Una vista del CORE nombra una clave del catálogo del core;
+                    # una de un MÓDULO trae sus textos, porque ningún texto del core puede
+                    # nombrar un módulo. Estaban escritas aquí en castellano y en inglés —la
+                    # convención de los módulos usada donde no toca—, así que dos idiomas
+                    # vivían dentro de un `.py`, fuera del alcance de los ficheros de idioma,
+                    # y traducir la sección a un tercero pedía tocar código.
+                    'views': (
+                        {'slug': 'inventory', 'icon': 'bi-diagram-3', 'kind': '', 'action': '',
+                         'label_key': 'tab_dcim_inventory'},
+                        {'slug': 'board', 'icon': 'bi-speedometer2', 'kind': '', 'action': '',
+                         'label_key': 'tab_dcim_board'},
+                        {'slug': 'catalog', 'icon': 'bi-journal-text', 'kind': '', 'action': '',
+                         'label_key': 'tab_dcim_catalog'},
+                        # Entre el catálogo y el inventario: lo que de verdad se compra. Al
+                        # lado del catálogo y no del inventario a propósito — se abre cuando se
+                        # decide qué se compra, no cuando se monta un armario.
+                        {'slug': 'builds', 'icon': 'bi-boxes', 'kind': '', 'action': '',
+                         'label_key': 'tab_dcim_builds'},
+                        # El cableado, fuera de su armario. Dentro de un rack se contesta
+                        # «qué sale de aquí»; aquí se contesta «dónde está el cable C-014» y
+                        # «cuántos latiguillos de Cat 6A hay puestos», que obligaban a saber el
+                        # armario ANTES de poder buscar — lo contrario de buscar.
+                        # Los equipos, fuera de su armario. La misma idea que el cableado
+                        # un nivel más abajo: «qué servidores hay en esta sede» y «qué se queda
+                        # sin garantía este trimestre» obligaban a abrir armario por armario.
+                        {'slug': 'devices', 'icon': 'bi-hdd-stack', 'kind': '', 'action': '',
+                         'label_key': 'tab_dcim_devices'},
+                        {'slug': 'wiring', 'icon': 'bi-ethernet', 'kind': '', 'action': '',
+                         'label_key': 'tab_dcim_wiring'},
+                        {'slug': 'sources', 'icon': 'bi-lightning-charge', 'kind': '',
+                         'action': '',
+                         'label_key': 'tab_dcim_sources'},
+                        # Las empresas estuvieron aquí una versión: la pertenencia es el otro
+                        # árbol de esta sección, así que parecía suya. No lo es —la misma
+                        # sociedad que paga el armario tiene usuarios en el directorio y
+                        # licencias en Microsoft 365—, y un registro que vive dentro de una
+                        # sección es uno que las demás no pueden usar sin nombrarla. Ahora es
+                        # del core y se declara sola (`lib/core/orgs/manifest.py::PAGE`).
+                    )}},
     {'id': 'history',  'url': '/history',  'label_key': 'landing_history',
      'standalone': {'pane': 'tab-history', 'render': 'renderHistory',
                     'perm': 'history_view', 'icon': 'bi-graph-up',

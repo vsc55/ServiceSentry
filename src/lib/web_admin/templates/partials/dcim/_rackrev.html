@@ -1,0 +1,194 @@
+{# ================================================================
+   DCIM — la historia de un armario: cómo estaba y qué le pasó.
+
+   Dos preguntas y una sola tabla. Cada versión es la **foto** del armario después de un cambio
+   —«cómo estaba en marzo»— y su diferencia con la anterior es el **acontecimiento** —«quién
+   movió el switch»—. Guardando sólo lo segundo no se puede reconstruir lo primero sin
+   reproducirlo todo, y basta que falte un renglón para que la reconstrucción mienta sin decirlo.
+
+   La lista se lee como una bitácora; abriendo dos se comparan. Lo que no entra es el cableado ni
+   la alimentación: tienen sus propias pantallas, y meterlos aquí haría que enchufar un latiguillo
+   generase una versión — un historial donde nueve de cada diez renglones son ruido es uno que
+   nadie abre.
+   ================================================================ #}
+
+//: Las versiones del armario abierto, o `null` mientras no se han pedido.
+let _dcHist = null;
+//: Las dos que se están comparando, por uid. Vacío = se lee como bitácora.
+let _dcHistPick = [];
+
+async function _dcHistLoad() {
+    const rack = (_dcimRack || {}).rack;
+    if (!rack) return;
+    _dcHist = {loading: true};
+    renderDcim();
+    const d = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}/history`);
+    _dcHist = {rows: (d || {}).history || []};
+    renderDcim();
+}
+
+/** Marcar o desmarcar una versión para comparar. **Dos como mucho**: comparar tres no es una
+ *  comparación, es tres, y la pantalla tendría que elegir cuál enseña. Al marcar la tercera se
+ *  suelta la más antigua, que es lo que quiere quien va avanzando por la lista. */
+function _dcHistPickToggle(uid) {
+    const i = _dcHistPick.indexOf(uid);
+    if (i >= 0) _dcHistPick.splice(i, 1);
+    else _dcHistPick = [..._dcHistPick, uid].slice(-2);
+    renderDcim();
+}
+
+function _dcHistHtml() {
+    if (_dcHist === null) { _dcHistLoad(); return _dcRackSkeleton(4); }
+    if (_dcHist.loading) return _dcRackSkeleton(4);
+    const filas = _dcHist.rows || [];
+    if (!filas.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('dcim_hist_none'))}</div>`;
+    const dos = _dcHistPick.length === 2;
+    return `${dos ? _dcHistDiffHtml(filas) : ''}
+        <div class="table-responsive"><table class="table table-sm align-middle mb-0 ss-fs-3">
+        <thead><tr>
+            <th class="ss-hug"></th>
+            <th class="ss-nowrap">${esc(t('dcim_cat_hist_when'))}</th>
+            <th class="ss-nowrap">${esc(t('dcim_cat_hist_who'))}</th>
+            <th class="ss-nowrap ss-hug">${esc(t('dcim_items'))}</th>
+            <th>${esc(t('dcim_hist_what'))}</th>
+        </tr></thead>
+        <tbody>${filas.map(f => `<tr>
+            <td class="ss-hug"><input type="checkbox" class="form-check-input"
+                ${_dcHistPick.indexOf(f.uid) >= 0 ? 'checked' : ''}
+                onchange="_dcHistPickToggle(${jsStr(f.uid)})"></td>
+            <td class="ss-tabular ss-nowrap">${esc(String(f.at || ''))}</td>
+            <td class="ss-nowrap">${esc(String(f.by || ''))}</td>
+            <td class="ss-tabular ss-hug">${esc(String(f.items || 0))}</td>
+            <td>${_dcHistChanges(f)}</td>
+        </tr>`).join('')}</tbody></table></div>
+        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_hist_hint'))}</div>`;
+}
+
+/** Lo que hizo un cambio, en un renglón.
+ *
+ *  La PRIMERA versión no tiene anterior contra la que compararse: su diferencia saldría como
+ *  «llegaron seis equipos», que es cierto y no es lo que pasó — lo que pasó es que el armario
+ *  empezó a guardarse. Se dice así. */
+function _dcHistChanges(f) {
+    const cambios = f.changed || [];
+    if (!cambios.length)
+        return `<span class="text-muted">${esc(t('dcim_hist_first'))}</span>`;
+    return cambios.slice(0, 6).map(_dcHistOne).join(' ')
+        + (cambios.length > 6 ? ` <span class="text-muted">… +${
+            esc(String(cambios.length - 6))}</span>` : '');
+}
+
+/** Un cambio, con su color: lo que llegó, lo que se fue y lo que cambió de valor.
+ *
+ *  El nombre del campo se traduce con el mismo diccionario que rotula el formulario, no con uno
+ *  propio: `u_start` se llama «U inicial» en la ficha y tiene que llamarse igual aquí, o son dos
+ *  pantallas hablando del mismo dato con dos palabras. */
+function _dcHistOne(c) {
+    const quien = esc(String(c.label || '') || t('dcim_item'));
+    if (c.kind === 'add')
+        return `<span class="badge bg-success-subtle text-success-emphasis border fw-normal"
+            >+ ${quien} · ${esc(_dcHistWhere(c.to))}</span>`;
+    if (c.kind === 'drop')
+        return `<span class="badge bg-danger-subtle text-danger-emphasis border fw-normal"
+            >− ${quien} · ${esc(_dcHistWhere(c.from))}</span>`;
+    const campo = esc(_dcHistField(c.field));
+    const de = esc(_dcHistVal(c.from)), a = esc(_dcHistVal(c.to));
+    if (c.kind === 'rack')
+        return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+            >${campo}: ${de} → ${a}</span>`;
+    return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+        >${quien} · ${campo}: ${de} → ${a}</span>`;
+}
+
+/** `mounted` no es un sitio, es «encima de otra cosa»: sale traducido y lo demás tal cual, que
+ *  ya viene escrito como se lee (`U4`, `U4–U6`). */
+function _dcHistWhere(v) {
+    return String(v || '') === 'mounted' ? t('dcim_item_on') : String(v || '');
+}
+
+function _dcHistVal(v) {
+    const s = String(v === null || v === undefined ? '' : v).trim();
+    return s || '—';
+}
+
+/** Cómo se llama un campo, con el rótulo del formulario. */
+function _dcHistField(k) {
+    const clave = _DC_HIST_FIELD[String(k || '')] || '';
+    const dicho = clave ? t(clave) : '';
+    return (dicho && dicho !== clave) ? dicho : String(k || '');
+}
+
+//: De un campo de la foto a la clave con la que se rotula en el formulario. Escrito y no
+//: derivado porque los dos nombres no coinciden —`name` es el del armario y `label` el del
+//: equipo— y adivinarlo sería acertar en unos y poner el identificador en los otros.
+const _DC_HIST_FIELD = {
+    label: 'dcim_item_label', u_start: 'dcim_u_start', u_height: 'dcim_u_size',
+    face: 'dcim_face', role: 'dcim_role', serial: 'dcim_serial',
+    asset: 'dcim_item_asset', host_uid: 'dcim_host', parent_uid: 'dcim_item_parent',
+    u_slots: 'dcim_item_slots', u_slot: 'dcim_item_slot',
+    u_slot_span: 'dcim_item_slot_span', u_split: 'dcim_item_split',
+    name: 'dcim_rack_name', desc_units: 'dcim_numbering', width_mm: 'dcim_width_mm',
+    depth_mm: 'dcim_depth_mm', room_uid: 'dcim_room',
+};
+
+/** Dos versiones cualesquiera, comparadas.
+ *
+ *  Contra la de al lado sale de la propia lista; contra una de hace seis meses, no — y esa es la
+ *  pregunta que se hace cuando algo lleva roto desde que nadie sabe. Se calcula aquí con la misma
+ *  función que usa el servidor para cada renglón: dos implementaciones de «qué cambió» serían
+ *  libres de no estar de acuerdo sobre si mover un equipo es un cambio o dos. */
+function _dcHistDiffHtml(filas) {
+    const dos = _dcHistPick.map(u => filas.find(f => f.uid === u)).filter(Boolean);
+    if (dos.length !== 2) return '';
+    // De la más vieja a la más nueva, se hayan marcado en el orden que se hayan marcado: una
+    // diferencia leída al revés dice que se retiró lo que se puso.
+    dos.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    const cambios = _dcRevCompare(dos[0].data || {}, dos[1].data || {});
+    return `<div class="card mb-2"><div class="card-body py-2">
+        <div class="ss-fs-2 text-muted mb-1">${esc(tf('dcim_hist_between',
+            String(dos[0].at || ''), String(dos[1].at || '')))}</div>
+        ${cambios.length ? `<div class="d-flex gap-1 flex-wrap">${
+            cambios.map(_dcHistOne).join('')}</div>`
+            : `<div class="ss-fs-2">${esc(t('dcim_hist_same'))}</div>`}
+    </div></div>`;
+}
+
+/** Qué cambió entre dos fotos. **La misma regla que el servidor**, escrita una vez aquí porque
+ *  comparar dos versiones cualesquiera ocurre en el navegador y pedirle al servidor una petición
+ *  por cada par que a alguien se le ocurra mirar sería una petición por clic.
+ *
+ *  Un equipo que se mueve no es uno que se va y otro que llega: es el mismo, y contarlo como dos
+ *  convierte «moví el switch una U» en dos líneas que no se entienden juntas. Por eso se casan
+ *  por identificador y no por posición. */
+function _dcRevCompare(antes, ahora) {
+    const idx = f => Object.fromEntries(((f || {}).items || []).map(i => [String(i.uid), i]));
+    const a = idx(antes), b = idx(ahora);
+    const fuera = [];
+    ['name', 'u_height', 'desc_units', 'width_mm', 'depth_mm', 'room_uid'].forEach(k => {
+        if ((antes || {})[k] !== (ahora || {})[k])
+            fuera.push({kind: 'rack', field: k, from: (antes || {})[k], to: (ahora || {})[k]});
+    });
+    Object.keys(b).forEach(uid => {
+        if (!a[uid]) fuera.push({kind: 'add', label: b[uid].label, to: _dcRevWhere(b[uid])});
+    });
+    Object.keys(a).forEach(uid => {
+        if (!b[uid]) fuera.push({kind: 'drop', label: a[uid].label, from: _dcRevWhere(a[uid])});
+    });
+    Object.keys(b).forEach(uid => {
+        if (!a[uid]) return;
+        Object.keys(b[uid]).forEach(k => {
+            if (k !== 'uid' && a[uid][k] !== b[uid][k])
+                fuera.push({kind: 'edit', label: b[uid].label || a[uid].label,
+                            field: k, from: a[uid][k], to: b[uid][k]});
+        });
+    });
+    return fuera;
+}
+
+function _dcRevWhere(it) {
+    if (String((it || {}).parent_uid || '')) return 'mounted';
+    const u = Number((it || {}).u_start || 0);
+    const alto = Math.max(1, Number((it || {}).u_height || 1));
+    return alto === 1 ? `U${u}` : `U${u}–U${u + alto - 1}`;
+}

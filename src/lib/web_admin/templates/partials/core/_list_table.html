@@ -227,7 +227,22 @@ function createListTable(spec) {
             setFilterBarCount(fbKey, n);
         }
         const dir = st.sortDir.get();
+        // Agrupar es ORDENAR primero por el grupo. Ordenar dentro del grupo sigue siendo lo que
+        // diga la columna pulsada: agrupar no es cambiar de pregunta, es contestar la misma por
+        // montones. `groupRank` deja que una tabla ordene sus grupos por algo que no es su
+        // nombre —el estado va de peor a mejor y no de la A a la Z— y sin él «error, ok, sin
+        // vigilar, warning» pondría lo que está mal en medio de lo que está bien.
+        const agrupa = spec.groupOf ? spec.groupOf(null, ctx, true) !== null : false;
         rows.sort((a, b) => {
+            if (agrupa) {
+                const ga = spec.groupRank ? spec.groupRank(spec.groupOf(a, ctx), ctx)
+                                          : String(spec.groupOf(a, ctx));
+                const gb = spec.groupRank ? spec.groupRank(spec.groupOf(b, ctx), ctx)
+                                          : String(spec.groupOf(b, ctx));
+                const g = (typeof ga === 'number' && typeof gb === 'number')
+                    ? (ga - gb) : String(ga).localeCompare(String(gb));
+                if (g) return g;
+            }
             const va = spec.sortValue(a, st.sort.get(), ctx), vb = spec.sortValue(b, st.sort.get(), ctx);
             const cmp = (typeof va === 'number' && typeof vb === 'number') ? (va - vb) : String(va).localeCompare(String(vb));
             return dir === 'asc' ? cmp : -cmp;
@@ -243,6 +258,9 @@ function createListTable(spec) {
         // at all" — and counted over one page that number changes as you page through, which
         // is worse than not counting. So the factory hands it everything and stops claiming
         // there are pages.
+        // Lo que una tabla quiera poner ENTRE su cabecera y su cuerpo: una fila de recuentos,
+        // un aviso. Fuera del cuerpo a propósito — el cuerpo se repinta al ordenar y al paginar,
+        // y lo de arriba no tiene por qué parpadear con ello.
         const mode = spec.bodyMode ? spec.bodyMode(ctx) : 'table';
         const summary = mode === 'summary';
         const showChooser = spec.showChooser ? spec.showChooser(mode) : true;
@@ -337,7 +355,29 @@ function createListTable(spec) {
         ${thRow}
         ${actionsOn ? `<th class="ss-th ss-th-actions">${spec.actionsLabel ? spec.actionsLabel() : t('col_actions')}</th>` : ''}
     </tr></thead><tbody>`;
+            // Cuántos hay en cada grupo, contado sobre TODAS las filas filtradas y no sobre
+            // la página: un recuento que cambia al pasar de página es peor que no contar.
+            const porGrupo = {};
+            if (agrupa) rows.forEach(r => {
+                const g = String(spec.groupOf(r, ctx));
+                porGrupo[g] = (porGrupo[g] || 0) + 1;
+            });
+            let grupoActual = null;
+            const anchoFila = orderedCols.length + (selectable ? 1 : 0) + (actionsOn ? 1 : 0);
             for (const row of pageRows) {
+                if (agrupa) {
+                    const g = String(spec.groupOf(row, ctx));
+                    if (g !== grupoActual) {
+                        grupoActual = g;
+                        // Se emite también al principio de cada página: un grupo que sigue en la
+                        // página siguiente empieza sin cabecera y sus filas parecen del grupo
+                        // que fuera. Repetirla no estorba y no repetirla engaña.
+                        h += `<tr class="ss-lt-group"><td colspan="${anchoFila}">${
+                            spec.groupLabel ? spec.groupLabel(g, ctx) : esc(g)}
+                            <span class="ss-lt-gn">${esc(String(porGrupo[g] || 0))}</span>
+                        </td></tr>`;
+                    }
+                }
                 const k = spec.rowKey(row);
                 const cells = orderedCols.map(co => {
                     // Shared metadata cells (uid/created_at/updated_at/updated_by) render
@@ -366,6 +406,7 @@ function createListTable(spec) {
         ${accentDiv}
         ${headerHtml}
         ${band('top')}
+        ${spec.beforeBody ? (spec.beforeBody(ctx, rows) || '') : ''}
         <div class="ss-vscroll">${h}</div>
         ${band('bottom')}
     </div>`;

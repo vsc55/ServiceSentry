@@ -1,0 +1,53 @@
+{# ================================================================
+   El cuadro de una empresa: alta y edición.
+
+   En un cuadro y no en la propia fila, que es como se edita todo lo demás en este panel — un
+   grupo, un rol, una credencial, una máquina. Una fila que se convierte en cajas de texto tiene
+   el ancho de su columna, y aquí hay una descripción que no cabe en ninguna; y hace falta una
+   forma de decir «déjalo como estaba» que no sea acordarse de lo que había escrito.
+   ================================================================ #}
+<div class="modal fade" id="orgModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'&&event.target.tagName!=='TEXTAREA'){event.preventDefault();document.getElementById('btnOrgModalOk').click();}">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-buildings me-1"></i><span id="orgModalTitle">{{ i18n.orgs_new }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2">
+                    <div class="col-sm-7">
+                        <label class="form-label small fw-semibold">{{ i18n.orgs_name }}</label>
+                        <input type="text" class="form-control form-control-sm" id="omName" required
+                               autocomplete="off" maxlength="120">
+                    </div>
+                    <div class="col-sm-5">
+                        <label class="form-label small fw-semibold">{{ i18n.orgs_short }}</label>
+                        <input type="text" class="form-control form-control-sm" id="omShort" required
+                               autocomplete="off" maxlength="12">
+                    </div>
+                </div>
+                {# La abreviatura es lo que cabe en una chapa y en un alzado, donde el nombre legal
+                   de una sociedad no entra. Por eso las dos son obligatorias — y por eso lo dicen
+                   antes de guardar: el marcador del panel las pinta mientras estén vacías. #}
+                <div class="form-text mb-2">{{ i18n.orgs_hint }}</div>
+                <div class="mb-1">
+                    <label class="form-label small fw-semibold">{{ i18n.orgs_desc }}</label>
+                    <textarea class="form-control form-control-sm" id="omDescription" rows="3"
+                              style="resize:vertical"></textarea>
+                </div>
+                <div class="mb-1 d-none" id="omOwnsRow">
+                    <label class="form-label small text-muted mb-1">{{ i18n.orgs_owns }}</label>
+                    <div class="d-flex flex-wrap gap-1" id="omOwns"></div>
+                </div>
+                <div class="text-danger small mt-2" id="orgModalError"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnOrgModalOk"
+                        onclick="_orgModalSave()"><i class="bi bi-check-lg me-1"></i>{{ i18n.save }}</button>
+            </div>
+        </div>
+    </div>
+</div>

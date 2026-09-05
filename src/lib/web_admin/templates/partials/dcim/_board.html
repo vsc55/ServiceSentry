@@ -1,0 +1,348 @@
+{# ================================================================
+   DCIM — el cuadro de mando: qué va mal y **por dónde se llega**.
+
+   La pantalla que se abre cuando algo pita. No es un resumen bonito del inventario: es la
+   respuesta a «¿dónde voy?», y por eso lo que ocupa el centro no son los totales sino la lista
+   de lo que está mal con su camino entero —sede › sala › rack › U—, que es lo que una persona
+   lee en voz alta por teléfono mientras la otra camina hacia el armario.
+
+   Los totales están arriba y son pequeños a propósito. Un número grande y rojo no dice a dónde
+   ir; en una pantalla que se mira con prisa, el sitio de honor es para lo accionable.
+   ================================================================ #}
+
+//: Lo que devolvió el cuadro, o `null` mientras no ha vuelto. Su propio estado y no parte de
+//: `_dcimData`: el árbol y el cuadro se piden por separado porque se miran por separado, y
+//: pedir los dos siempre haría que abrir el inventario costase el recorrido entero de la flota.
+let _dcimBoard = null;
+
+/** Abrir el cuadro. Se pide cada vez: es una foto del estado AHORA, y una guardada de hace
+ *  cinco minutos es exactamente la que hace que alguien vaya a un armario donde ya no pasa
+ *  nada — o peor, que no vaya a uno donde sí. */
+async function _dcimOpenBoard() {
+    _dcimBoard = await apiGet('/api/v1/dcim/board') || {};
+    _dcimRack = null;
+    _dcimPlan = null;
+    _dcimForm = null;
+    _dcimUrl();
+    renderDcim();
+}
+
+function _dcimCloseBoard() {
+    // Al inventario, y apuntándolo: la URL manda al dibujar, así que cerrar y callarse haría
+    // que el siguiente dibujado volviera a abrir el cuadro.
+    _dcimUrl();
+    _dcimGo('inventory');
+}
+
+/** El estado, con palabras.
+ *
+ *  Escrito clave a clave y no concatenando el estado al final de un prefijo, que sería más
+ *  corto: una clave construida así no la ve NADIE —ni el guardián de palabras ni un `grep`—
+ *  y estas cuatro llegaron a la pantalla sin existir en ningún idioma exactamente por eso.
+ *  Lo que no se puede buscar no se puede mantener. */
+function _dcimStateWord(state) {
+    if (state === 'error') return t('dcim_state_error');
+    if (state === 'warning') return t('dcim_state_warning');
+    if (state === 'ok') return t('dcim_state_ok');
+    return t('dcim_state_unwatched');
+}
+
+function _dcimBoardHtml() {
+    const b = _dcimBoard || {};
+    const tot = b.totals || {};
+    const trouble = b.trouble || [];
+    return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad">
+        <div class="ss-toolrow mb-3">
+            <button class="btn btn-sm btn-secondary" onclick="_dcimCloseBoard()">
+                <i class="bi bi-arrow-left me-1"></i>${esc(t('dcim_back'))}</button>
+            <span class="fw-semibold ss-fs-5">${esc(t('dcim_board'))}</span>
+            <span class="text-muted ss-fs-2 ss-toolrow-text">${
+                esc(tf('dcim_board_note', tot.sites || 0, tot.total || 0))}</span>
+            <div class="ss-toolrow-tools">
+                <button class="btn btn-sm ${_dcFits ? 'btn-warning' : 'btn-secondary'}"
+                        onclick="_dcFitsToggle()">
+                    <i class="bi bi-box-seam me-1"></i>${esc(t('dcim_fits'))}</button>
+                <button class="btn btn-sm btn-secondary" onclick="_dcimToggleMap()">
+                    <i class="bi bi-map me-1"></i>${esc(t(_dcimMap ? 'dcim_map_hide'
+                                                                  : 'dcim_map'))}</button>
+                ${_dcimMap ? ssCanvasTools(_DCM_SVG, 'dcim_sitemap') : ''}
+                <button class="btn btn-sm btn-secondary" onclick="_dcimOpenBoard()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
+            </div>
+        </div>
+        ${_dcFits ? _dcFitsHtml() : ''}
+        ${_dcimMap ? _dcimMapHtml(b.sites || []) : ''}
+        ${_dcimBoardTiles(b.sites || [])}
+        ${_dcimBoardTrouble(b)}
+        ${_dcimBoardLinks(b)}
+        ${_dcimBoardOrgs(b.orgs || [])}
+    </div>`;
+}
+
+/** Una tarjeta por sede: cuántas de sus cosas están bien, de cuántas, y cómo está la sede.
+ *
+ *  «Bien de total» y no un porcentaje: 11/14 dice cuántas hay que mirar, y un 78,6 % obliga a
+ *  hacer la cuenta al revés para saberlo. Y el estado va además en una insignia con palabra,
+ *  no solo en el color: un cuadro que solo se lee por el color no se lee de todas las formas
+ *  en que la gente lee. */
+function _dcimBoardTiles(sites) {
+    if (!sites.length)
+        return `<div class="text-muted small">${esc(t('dcim_no_sites'))}</div>`;
+    return `<div class="ss-tiles mb-3">${sites.map(s => {
+        const tone = {error: 'danger', warning: 'warning', ok: 'success'}[s.state] || 'secondary';
+        return `<div class="card ss-tile border-${tone}"
+                     role="button" tabindex="0"
+                     onclick="_dcimBoardGoSite(${jsStr(s.uid)})"
+                     onkeydown="if(event.key==='Enter')_dcimBoardGoSite(${jsStr(s.uid)})">
+            <div class="card-body py-2 px-3">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="fw-semibold text-truncate" title="${escAttr(s.name)}">${
+                        esc(s.name)}</span>
+                    <span class="badge text-bg-${tone} fw-normal ms-auto">${
+                        esc(_dcimStateWord(s.state))}</span>
+                </div>
+                <div class="ss-tabular ss-fs-6 mt-1">${esc(String(s.ok))}<span
+                    class="text-muted ss-fs-4">/${esc(String(s.total))}</span></div>
+                <div class="text-muted ss-fs-2">${
+                    esc(tf('dcim_board_tile', s.racks || 0, s.rooms || 0))}${
+                    s.unwatched ? ' · ' + esc(tf('dcim_unwatched_n', s.unwatched)) : ''}</div>
+                ${_dcimLocalTime(s)}
+            </div>
+        </div>`;
+    }).join('')}</div>`;
+}
+
+/** La hora local de una sede, cuando alguien dijo su zona.
+
+ *  No es adorno: «son las cuatro de la mañana allí» es lo que decide si se llama ahora o se
+ *  espera, y es la primera pregunta al mirar una sede que no es la de uno.
+ *
+ *  La convierte el NAVEGADOR, que sabe hacerlo sin preguntar a nadie. Y una zona que este
+ *  navegador no conozca —una instalación vieja, un nombre retirado— no rompe la tarjeta: se
+ *  calla, que es lo que puede decir con verdad. */
+function _dcimLocalTime(site) {
+    const tz = String(site.timezone || '').trim();
+    if (!tz) return '';
+    let hora = '';
+    try {
+        hora = new Date().toLocaleTimeString(undefined, {
+            timeZone: tz, hour: '2-digit', minute: '2-digit'});
+    } catch (e) {
+        return '';
+    }
+    return `<div class="text-muted ss-fs-1 ss-tabular" title="${escAttr(tz)}">
+        <i class="bi bi-clock me-1"></i>${esc(hora)}</div>`;
+}
+
+/** Lo que está mal, con el camino entero hasta ello.
+ *
+ *  Esta lista es la pantalla. Un cuadro que dice «3 incidencias» y hay que ir a buscarlas
+ *  obliga a hacer el trabajo que venía a ahorrar; una fila que dice «DC Norte › Sala 1 › R3 ›
+ *  U12 · DB03» se puede leer por teléfono mientras el otro camina.
+ *
+ *  Y si se ha recortado, **se dice**: una lista más corta que la realidad parece completa, y
+ *  quien la lee da por resuelto lo que ni siquiera ha visto. */
+function _dcimBoardTrouble(b) {
+    const rows = b.trouble || [];
+    if (!rows.length)
+        return `<div class="alert alert-success py-2 ss-fs-2 mb-3">
+            <i class="bi bi-check-circle me-1"></i>${esc(t('dcim_board_all_well'))}</div>`;
+    return `<div class="card mb-3">
+        <div class="card-header py-2 d-flex align-items-center gap-2">
+            <i class="bi bi-exclamation-triangle text-danger"></i>
+            <span class="fw-semibold">${esc(t('dcim_board_trouble'))}</span>
+            <span class="text-muted ss-fs-2">${
+                esc(tf('dcim_board_trouble_n', b.trouble_total || rows.length))}</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 align-middle">
+                <tbody>${rows.map(_dcimTroubleRow).join('')}</tbody>
+            </table>
+        </div>
+        ${b.capped ? `<div class="card-footer py-1 text-muted ss-fs-2">${
+            esc(tf('dcim_board_capped', rows.length, b.trouble_total || 0))}</div>` : ''}
+    </div>`;
+}
+
+function _dcimTroubleRow(r) {
+    const tone = r.state === 'warning' ? 'warning' : 'danger';
+    return `<tr role="button" onclick="_dcimBoardGoRack(${jsStr(r.rack_uid)})">
+        <td style="width:1%"><span class="badge text-bg-${tone} fw-normal">${
+            esc(_dcimStateWord(r.state))}</span></td>
+        <td class="fw-semibold">${esc(r.name || r.host_uid || t('dcim_item'))}</td>
+        <td class="text-muted ss-fs-2">${esc(r.site)} <i class="bi bi-chevron-right ss-fs-1"></i>
+            ${esc(r.room)} <i class="bi bi-chevron-right ss-fs-1"></i> ${esc(r.rack)}</td>
+        <td class="text-muted ss-fs-2 ss-tabular" style="width:1%">${
+            r.u ? esc('U' + r.u) : ''}${
+            r.face && r.face !== 'full' ? ' · ' + esc(t('dcim_face_' + r.face)) : ''}</td>
+    </tr>`;
+}
+
+/** Los enlaces entre sedes, y qué sede se queda sola si uno cae.
+
+ *  La misma pregunta que la potencia, un nivel arriba — y se rompe igual de callada: dos
+ *  circuitos de dos operadores que van por la misma zanja son dos líneas en el mapa y un solo
+ *  camino en el suelo.
+ *
+ *  Los avisos son frases enteras, como los de potencia: «Este se queda incomunicada si cae
+ *  MPLS-3» dice qué hacer; una insignia ámbar no dice nada. */
+function _dcimBoardLinks(b) {
+    const enlaces = b.links || [];
+    const avisos = (b.warnings || []).filter(w => String(w.kind || '').match(
+        /^(single_link|same_path|same_provider)$/));
+    if (!enlaces.length && !avisos.length) return '';
+    return `<div class="card mb-3">
+        <div class="card-header py-2 d-flex align-items-center gap-2">
+            <i class="bi bi-diagram-3"></i>
+            <span class="fw-semibold">${esc(t('dcim_links'))}</span>
+            <span class="text-muted ss-fs-2">${esc(tf('dcim_links_n', enlaces.length))}</span>
+            ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary ms-auto"
+                onclick="_dcimLinkNew()"><i class="bi bi-plus-lg me-1"></i>${
+                esc(t('dcim_link'))}</button>` : ''}
+        </div>
+        <div class="card-body py-2">
+            ${_dcimLinkFormHtml()}
+            ${avisos.map(w => `<div class="ss-fs-2 text-warning-emphasis">
+                <i class="bi bi-exclamation-triangle me-1"></i>${
+                    esc(_dcimLinkWarn(w))}</div>`).join('')}
+            ${enlaces.length ? `<div class="table-responsive mt-2">
+                <table class="table table-sm mb-0 align-middle"><tbody>${
+                enlaces.map(_dcimLinkRow).join('')}</tbody></table></div>` : ''}
+        </div>
+    </div>`;
+}
+
+function _dcimLinkWarn(w) {
+    if (w.kind === 'single_link') return tf('dcim_warn_single_link', w.label, w.link || '');
+    // El ORDEN de los argumentos es el de los huecos: `tf` sustituye `{}` por orden, así que
+    // cambiar la frase sin cambiar esto pone cada valor en el sitio del siguiente — y la frase
+    // se sigue leyendo bien, diciendo algo falso.
+    if (w.kind === 'same_path') return tf('dcim_warn_same_path', w.label, w.count, w.value);
+    return tf('dcim_warn_same_provider', w.label, w.count, w.value);
+}
+
+function _dcimLinkRow(l) {
+    const tone = {error: 'danger', warning: 'warning', ok: 'success'}[l.state] || 'secondary';
+    return `<tr>
+        <td class="fw-semibold">${esc(l.label || l.circuit_id || '—')}</td>
+        <td class="ss-fs-2">${esc(l.a_name)} — ${esc(l.b_name)}</td>
+        <td class="ss-fs-2 text-muted">${esc(t('dcim_link_' + l.kind) || l.kind)}${
+            l.provider ? ' · ' + esc(l.provider) : ''}${
+            l.bandwidth_mbps ? ' · ' + esc(String(l.bandwidth_mbps)) + ' Mbps' : ''}</td>
+        <td class="text-end"><span class="badge text-bg-${tone} fw-normal">${
+            esc(_dcimStateWord(l.state))}</span></td>
+    </tr>`;
+}
+
+/** El desglose por empresa, que en un holding es la pregunta de quién tiene el problema.
+ *
+ *  Solo si hay más de una: en una instalación de una sola sociedad es una tabla de una fila
+ *  que no responde a nada. Y lo no reclamado sale como tal —no como «sin empresa»— porque en
+ *  el primer día de toda instalación eso es casi todo. */
+function _dcimBoardOrgs(orgs) {
+    const real = orgs.filter(o => o.uid);
+    if (real.length < 2) return '';
+    return `<div class="card">
+        <div class="card-header py-2 fw-semibold">${esc(t('dcim_board_by_org'))}</div>
+        <div class="table-responsive"><table class="table table-sm mb-0 align-middle">
+            <thead><tr>
+                <th>${esc(t('dcim_org'))}</th>
+                <th class="text-end">${esc(t('dcim_board_ok'))}</th>
+                <th class="text-end">${esc(t('dcim_board_bad'))}</th>
+                <th class="text-end">${esc(t('dcim_unwatched'))}</th>
+            </tr></thead>
+            <tbody>${orgs.map(o => `<tr>
+                <td>${o.uid ? esc(o.name || o.uid)
+                            : `<span class="text-muted">${esc(t('dcim_unclaimed'))}</span>`}</td>
+                <td class="text-end ss-tabular">${
+                    esc(String(o.total - o.bad - o.unwatched))}</td>
+                <td class="text-end ss-tabular${o.bad ? ' text-danger fw-semibold' : ''}">${
+                    esc(String(o.bad))}</td>
+                <td class="text-end ss-tabular text-muted">${esc(String(o.unwatched))}</td>
+            </tr>`).join('')}</tbody>
+        </table></div>
+    </div>`;
+}
+
+/** Ir al armario donde está el problema — que es el punto entero de esta pantalla. */
+async function _dcimBoardGoRack(uid) {
+    const data = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(uid)}`);
+    if (!data || !data.rack) { showToast(t('dcim_not_found'), 'warning'); return; }
+    _dcimMark('inventory');         // un rack es inventario, y la URL tiene que decirlo
+    _dcimBoard = null;
+    _dcimRack = data;
+    _dcimUrl();
+    renderDcim();
+}
+
+/** Y desde una tarjeta, a la sede: el árbol abierto por donde hay que mirar. */
+function _dcimBoardGoSite(uid) {
+    _dcimMark('inventory');         // una sede es inventario, y la URL tiene que decirlo
+    _dcimBoard = null;
+    renderDcim();
+    // Después de pintar: el árbol no existe hasta que se pinta, y desplazarse a un elemento
+    // que todavía no está es no desplazarse a ninguna parte y no decir nada.
+    setTimeout(() => {
+        const el = document.getElementById('dcim-site-' + uid);
+        if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }, 0);
+}
+
+
+//: Si el formulario de enlace nuevo está abierto. Hasta ahora los enlaces se podían dibujar y
+//: no declarar: el modelo, las rutas, los avisos y las líneas del mapa estaban, y ningún botón.
+let _dcimNewLink = false;
+
+function _dcimLinkNew() {
+    _dcimNewLink = !_dcimNewLink;
+    renderDcim();
+}
+
+/** Pide lo que hace falta para que los avisos sirvan.
+ *
+ *  El operador y el camino no son adorno: son los dos campos de los que sale «dos líneas en el
+ *  mapa y un solo camino en el suelo». Sin ellos el enlace se guarda igual y no se juzga —que es
+ *  lo correcto, porque un aviso sacado de un campo vacío es un aviso inventado— pero entonces la
+ *  pantalla no puede avisar de nada. */
+function _dcimLinkFormHtml() {
+    if (!_dcimNewLink || !_dcimMay('dcim_edit')) return '';
+    const sedes = ((_dcimBoard || {}).sites || []);
+    if (sedes.length < 2)
+        return `<div class="text-muted ss-fs-2 mb-2">${esc(t('dcim_link_two_sites'))}</div>`;
+    const sel = (id) => `<select id="${id}" class="form-select form-select-sm"
+            style="max-width:11rem">${sedes.map(x =>
+        `<option value="${escAttr(x.uid)}">${esc(x.name)}</option>`).join('')}</select>`;
+    const clases = ((_dcimBoard || {}).link_kinds || ['mpls', 'ipsec', 'sdwan']);
+    const campo = (id, label, ancho) =>
+        `<label class="ss-fs-2 text-muted">${esc(t(label))}
+            <input id="${id}" class="form-control form-control-sm" style="max-width:${ancho}"
+                   onkeydown="if(event.key==='Enter')_dcimLinkSave()"></label>`;
+    return `<div class="d-flex align-items-end gap-2 flex-wrap p-2 rounded bg-body-secondary mb-2">
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_from'))}${sel('dcl-a')}</label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_to'))}${sel('dcl-b')}</label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_source_kind'))}
+            <select id="dcl-kind" class="form-select form-select-sm" style="max-width:9rem">${
+            clases.map(k => `<option value="${escAttr(k)}">${
+                esc(t('dcim_link_' + k) || k)}</option>`).join('')}</select></label>
+        ${campo('dcl-label', 'dcim_cable_label', '9rem')}
+        ${campo('dcl-prov', 'dcim_link_provider', '9rem')}
+        ${campo('dcl-circ', 'dcim_link_circuit', '9rem')}
+        ${campo('dcl-path', 'dcim_link_path', '9rem')}
+        <button class="btn btn-sm btn-primary" onclick="_dcimLinkSave()">
+            <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+        <button class="btn btn-sm btn-secondary" onclick="_dcimNewLink=false;renderDcim()">
+            ${esc(t('cancel'))}</button>
+    </div>`;
+}
+
+async function _dcimLinkSave() {
+    const val = (id) => (document.getElementById(id) || {}).value || '';
+    const r = await _dcimSend('POST', '/api/v1/dcim/links', {
+        a_site: val('dcl-a'), b_site: val('dcl-b'), kind: val('dcl-kind'),
+        label: val('dcl-label'), provider: val('dcl-prov'),
+        circuit_id: val('dcl-circ'), path: val('dcl-path'),
+    });
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcimNewLink = false;
+    _dcimOpenBoard();
+}

@@ -31,6 +31,7 @@ TPL = os.path.join(SRC, 'lib', 'web_admin', 'templates')
 TOAST = os.path.join(TPL, 'partials', 'core', '_toast.html')
 DIALOGS = os.path.join(TPL, 'partials', 'modals', '_dialogs.html')
 MFA = os.path.join(TPL, 'partials', 'account', '_mfa.html')
+BEHAVIORS = os.path.join(TPL, 'partials', 'init', '_behaviors.html')
 
 # The four helpers that drive `#infoModal`.
 _OPENERS = ('showInfoModal', 'showLinksModal', 'showTableModal', 'showHtmlModal')
@@ -243,3 +244,91 @@ class TestARefusalIsShownWhereItHappened:
             assert "showToast(t('mfa_bad_code')" not in body, \
                 f'{name} reports a refusal away from the field again'
             assert '_accMfaFieldError(' in body, name
+
+
+class TestElPieDecideLaTallaDeSusBotones:
+    """«Cerrar» está en el marcado y es `btn-sm`. La acción la manda quien abre el diálogo, y de
+    los seis sitios que mandan una, cuatro la mandaban sin talla y dos con ella — así que el par
+    salía descuadrado, uno más alto que el otro, según de dónde viniera.
+
+    Se normaliza en la puerta común y no pidiéndoselo a los seis: una convención que hay que
+    recordar en cada sitio es una convención que se rompe en el séptimo.
+    """
+
+    def test_la_accion_se_iguala_a_cerrar(self):
+        body = _fn(_strip_comments(_read(TOAST)), '_infoModalOpen')
+        assert 'btn-sm' in body, \
+            'el pie ya no iguala la talla: el par vuelve a salir descuadrado'
+
+    def test_y_cerrar_sigue_siendo_esa_talla(self):
+        """La otra mitad del par. Si el marcado cambia de talla, igualar contra `btn-sm` deja de
+        igualar nada y el descuadre vuelve por el otro lado."""
+        src = _read(DIALOGS)
+        pie = src[src.index('modal-footer'):]
+        pie = pie[:pie.index('infoModalActions')]
+        assert 'btn-sm' in pie, 'Cerrar cambió de talla y la acción se iguala contra la vieja'
+
+
+class TestUnaFichaQueNoCreceNoOfreceCrecer:
+    """`showHtmlModal` se estira y se maximiza porque casi siempre trae un formulario o una
+    tabla. Una ficha de SOLO LECTURA no: no tiene nada que enseñar de más, y maximizarla estira
+    el mismo contenido dentro de más hueco vacío.
+
+    Lo que lo decide es `ss-modal-fit`, y el botón de maximizar lo inyecta el comportamiento
+    compartido **una vez por modal**. Un mismo modal que se abre estirable y luego no —
+    `#infoModal` es literalmente eso— se quedaba con el botón puesto: un botón de maximizar en
+    un diálogo que no se puede maximizar no hace nada al pulsarlo, que es la peor clase de botón.
+    """
+
+    def test_quien_compone_el_cuerpo_dice_de_que_tamano_es(self):
+        """UNA pregunta con tres respuestas y no dos interruptores que se pueden contradecir:
+        «encogido» y «ancho» no pueden ser ciertos a la vez, y con dos booleanos sí."""
+        src = _strip_comments(_read(TOAST))
+        assert 'function showHtmlModal(title, html, variant, actions, size)' in src, \
+            'ya no se puede pedir un tamaño de diálogo'
+        assert '_infoModalSize(size)' in _fn(src, 'showHtmlModal'), \
+            'el tamaño que se pide no llega a ninguna parte'
+
+    def test_las_tres_respuestas_estan(self):
+        cuerpo = _fn(_strip_comments(_read(TOAST)), '_infoModalSize')
+        assert "size === 'fit'" in cuerpo, 'una ficha vuelve a ofrecer maximizarse'
+        assert "size === 'wide'" in cuerpo, 'una tabla ancha vuelve a mirarse por una ranura'
+
+    def test_y_sin_decir_nada_es_el_de_siempre(self):
+        """Los que ya lo usaban traen formularios: la tercera respuesta —no decir nada— tiene que
+        seguir significando lo de antes, o esto arregla dos pantallas y cambia cinco."""
+        cuerpo = _fn(_strip_comments(_read(TOAST)), '_infoModalSize')
+        # `undefined` no es ninguna de las dos comparaciones, así que no se pone ninguna clase.
+        assert '_infoModalFit(' not in _read(TOAST), 'quedan dos funciones decidiendo lo mismo'
+
+    def test_el_tamano_del_anterior_no_se_queda_puesto(self):
+        """Un modal compartido que hereda el tamaño del que se cerró es la misma clase de fallo
+        que el hueco del pie heredando sus botones: por eso las dos clases se ponen y se quitan
+        siempre, no solo se ponen."""
+        cuerpo = _fn(_strip_comments(_read(TOAST)), '_infoModalSize')
+        assert cuerpo.count('classList.toggle(') == 2, \
+            'alguna de las dos clases se pone sin quitarse'
+
+    def test_el_boton_de_maximizar_se_va_cuando_el_dialogo_deja_de_poder(self):
+        cuerpo = _fn(_strip_comments(_read(BEHAVIORS)), '_modalMaxSync')
+        assert '_modalResizable(' in cuerpo, 'ya no mira si el diálogo puede estirarse'
+        assert 'modal-max-btn' in cuerpo and 'remove()' in cuerpo, \
+            'un modal que no puede estirarse conserva el botón de maximizar'
+
+    def test_y_una_talla_declarada_no_se_ofrece_deshacer(self):
+        """Ni `fit` ni `wide`. Una talla que el que abre ha declarado es una decisión, y un botón
+        para maximizar es ofrecer que no valga: `ss-modal-wide` ya mide 96vw como mucho, así que
+        lo único que añade es alto vacío debajo de lo que se ha venido a leer."""
+        cuerpo = _strip_comments(_fn(_read(BEHAVIORS), '_modalResizable'))
+        for clase in ('ss-modal-fit', 'ss-modal-wide'):
+            assert f"contains('{clase}')" in cuerpo, clase
+
+    def test_y_se_vuelve_a_mirar_en_CADA_apertura(self):
+        """`show.bs.modal` no basta: Bootstrap no lo emite sobre un modal que YA está abierto, y
+        `#infoModal` es justo el que pasa de una ficha a un formulario sin cerrarse en medio.
+
+        Mirándolo sólo ahí salían las dos mitades del mismo despiste — la ficha con el botón que
+        no le toca, y el formulario de encima sin el que sí. Arreglada una, la otra apareció el
+        mismo día."""
+        assert '_modalMaxSync(' in _fn(_strip_comments(_read(TOAST)), '_infoModalOpen'), \
+            'un formulario abierto sobre una ficha se queda sin el botón de maximizar'

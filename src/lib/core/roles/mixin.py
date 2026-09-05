@@ -13,6 +13,12 @@ _LEGACY_PERM_RENAME = {
     'cluster_add':    'clusters_add',
     'cluster_edit':   'clusters_edit',
     'cluster_delete': 'clusters_delete',
+
+    # Companies left the inventory for the core: the same company that pays for the cabinet
+    # has users in the directory and licences in Microsoft 365, and two flags named after one
+    # section could not say that. A role that held the old ones keeps what it was granted.
+    'dcim_all_view':  'orgs_all_view',
+    'dcim_org_edit':  'orgs_edit',
 }
 
 
