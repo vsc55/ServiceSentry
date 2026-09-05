@@ -173,6 +173,7 @@ async function renderDcim() {
                    : _dcBuilds ? _dcBuildsHtml()
                    : _dcWire ? _dcWireHtml()
                    : _dcDev ? _dcDevHtml()
+                   : _dcOrgs ? _dcOrgsHtml()
                    : _dcSrc ? _dcSrcHtml()
                    : _dcimBoard ? _dcimBoardHtml()
                    : _dcimRack ? _dcimRackHtml()
@@ -283,6 +284,7 @@ function _dcimViewWanted() {
     const donde = _dcCat ? 'catalog' : _dcBuilds ? 'builds'
                 : _dcWire ? 'wiring'
                 : _dcDev ? 'devices'
+                : _dcOrgs ? 'orgs'
                 : _dcSrc ? 'sources' : _dcimBoard ? 'board' : 'inventory';
     if (!quiere || quiere === donde) return false;
     _dcimGo(quiere);
@@ -314,12 +316,14 @@ function _dcimGo(donde) {
     _dcSrc = null;
     _dcWire = null;
     _dcDev = null;
+    _dcOrgs = null;
     _dcimBoard = null;
     if (donde === 'catalog') return _dcCatOpen();
     if (donde === 'wiring') return _dcWireOpen();
     if (donde === 'devices') return _dcDevOpen();
     if (donde === 'builds') return _dcBuildsOpen();
     if (donde === 'sources') return _dcSrcOpen();
+    if (donde === 'orgs') return _dcOrgsOpen();
     if (donde === 'board') return _dcimOpenBoard();
     // Al inventario se vuelve del todo: si se quedara el rack abierto, «Inventario» llevaría al
     // rack, que es donde ya se estaba.

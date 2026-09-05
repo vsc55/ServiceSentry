@@ -63,18 +63,26 @@ HOME_PAGES = (
                     #
                     # `kind`/`action` stay empty on purpose: they describe how the GENERIC
                     # renderer draws a module's view, and this section ships its own renderer.
+                    #
+                    # Y `label_key` y no `label_i18n`: **la misma regla que el título de una
+                    # sección**. Una vista del CORE nombra una clave del catálogo del core;
+                    # una de un MÓDULO trae sus textos, porque ningún texto del core puede
+                    # nombrar un módulo. Estaban escritas aquí en castellano y en inglés —la
+                    # convención de los módulos usada donde no toca—, así que dos idiomas
+                    # vivían dentro de un `.py`, fuera del alcance de los ficheros de idioma,
+                    # y traducir la sección a un tercero pedía tocar código.
                     'views': (
                         {'slug': 'inventory', 'icon': 'bi-diagram-3', 'kind': '', 'action': '',
-                         'label_i18n': {'es_ES': 'Inventario', 'en_EN': 'Inventory'}},
+                         'label_key': 'tab_dcim_inventory'},
                         {'slug': 'board', 'icon': 'bi-speedometer2', 'kind': '', 'action': '',
-                         'label_i18n': {'es_ES': 'Cuadro de mando', 'en_EN': 'Dashboard'}},
+                         'label_key': 'tab_dcim_board'},
                         {'slug': 'catalog', 'icon': 'bi-journal-text', 'kind': '', 'action': '',
-                         'label_i18n': {'es_ES': 'Catálogo', 'en_EN': 'Catalogue'}},
+                         'label_key': 'tab_dcim_catalog'},
                         # Entre el catálogo y el inventario: lo que de verdad se compra. Al
                         # lado del catálogo y no del inventario a propósito — se abre cuando se
                         # decide qué se compra, no cuando se monta un armario.
                         {'slug': 'builds', 'icon': 'bi-boxes', 'kind': '', 'action': '',
-                         'label_i18n': {'es_ES': 'Plantillas', 'en_EN': 'Templates'}},
+                         'label_key': 'tab_dcim_builds'},
                         # El cableado, fuera de su armario. Dentro de un rack se contesta
                         # «qué sale de aquí»; aquí se contesta «dónde está el cable C-014» y
                         # «cuántos latiguillos de Cat 6A hay puestos», que obligaban a saber el
@@ -83,12 +91,22 @@ HOME_PAGES = (
                         # un nivel más abajo: «qué servidores hay en esta sede» y «qué se queda
                         # sin garantía este trimestre» obligaban a abrir armario por armario.
                         {'slug': 'devices', 'icon': 'bi-hdd-stack', 'kind': '', 'action': '',
-                         'label_i18n': {'es_ES': 'Equipos', 'en_EN': 'Devices'}},
+                         'label_key': 'tab_dcim_devices'},
                         {'slug': 'wiring', 'icon': 'bi-ethernet', 'kind': '', 'action': '',
-                         'label_i18n': {'es_ES': 'Cableado', 'en_EN': 'Cabling'}},
+                         'label_key': 'tab_dcim_wiring'},
                         {'slug': 'sources', 'icon': 'bi-lightning-charge', 'kind': '',
                          'action': '',
-                         'label_i18n': {'es_ES': 'Fuentes', 'en_EN': 'Sources'}},
+                         'label_key': 'tab_dcim_sources'},
+                        # Las empresas, que son el otro árbol de esta sección: la contención
+                        # dice dónde está algo y la pertenencia de quién es. Era un botón en la
+                        # barra del ÁRBOL —la misma equivocación que ya se corrigió con el
+                        # catálogo y las plantillas—, así que sólo existía estando en Inventario
+                        # y desaparecía en cuanto alguien abría un armario.
+                        #
+                        # La última: se escribe el primer día y casi nunca más, y lo que se abre
+                        # cada mañana va antes.
+                        {'slug': 'orgs', 'icon': 'bi-buildings', 'kind': '', 'action': '',
+                         'label_key': 'tab_dcim_orgs'},
                     )}},
     {'id': 'history',  'url': '/history',  'label_key': 'landing_history',
      'standalone': {'pane': 'tab-history', 'render': 'renderHistory',

@@ -70,16 +70,26 @@ def _panel_tabs(wa, lang: str) -> list:
 def _view_specs(page: dict, lang: str) -> list:
     """A section's views, with each label resolved for this language.
 
-    Same rule as the section title: the text comes from the MODULE's lang file, so the
-    core ships no string naming a module's view. A view with no translation falls back to
-    English and then to its own slug — an untranslated menu entry beats a blank one.
+    **The same two conventions as a page's own title**, and for the same reason
+    (:func:`page_label`): a CORE view points at a key in the core catalog, and a MODULE view
+    carries its own translations because no core string may name a module.
+
+    Core views were carrying `label_i18n` with the words written in — the module convention used
+    where it does not apply. That left Spanish and English inside a `.py`, out of reach of the
+    language files, so translating a core section into a third language meant editing code.
+    Reported from the screen.
+
+    A view with no translation falls back to English and then to its own slug — an untranslated
+    menu entry beats a blank one.
     """
     out = []
     for v in (page.get('standalone', {}).get('views') or []):
         texts = v.get('label_i18n') or {}
+        clave = v.get('label_key') or ''
+        label = page_label({'label_key': clave}, lang) if clave else (
+            texts.get(lang) or texts.get('en_EN') or v['slug'])
         out.append({'slug': v['slug'], 'icon': v['icon'], 'kind': v['kind'],
-                    'action': v['action'],
-                    'label': texts.get(lang) or texts.get('en_EN') or v['slug']})
+                    'action': v['action'], 'label': label})
     return out
 
 

@@ -8,6 +8,51 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.124] - 2026-09-05
+
+### Changed
+
+- **Companies are a place, not a button.** Containment says WHERE something is — site, room,
+  rack, U — and ownership says WHOSE it is: two trees, and the second one had its screen hidden
+  behind a button on the *tree's* toolbar. That toolbar belongs to the tree, so the button only
+  existed while you were in Inventory and vanished the moment somebody opened a rack — the same
+  mistake already corrected for the catalogue and the templates, which were also *places you go*
+  dressed up as acts.
+
+  The screen is the same one — the same compact editor, the same save-the-difference — so what
+  changes is that it has an address (`/dcim/orgs`), an entry in the section's submenu and no way
+  to hide. Last in the menu: it is written on the first day and almost never again, and what you
+  open every morning comes first.
+
+  With one thing a dialog could not give: **what each company has on its name**. From the tree you
+  ask "whose is this rack?"; from here, "what belongs to this company?" — and without it, deleting
+  one is pressing blind, because what was hers stops being on anybody's name and nobody knew how
+  much that was. What is counted is what was SAID and not what is inherited: a site of subsidiary
+  B with forty devices inside counts as one site, because the devices do not say it, they inherit
+  it — counting them would be counting the same decision forty times.
+
+  Anybody who can see the inventory can read the list; writing still needs `dcim_org_edit`, which
+  no role carries by default. The tree already shows the company badges to every reader, so hiding
+  the list would hide what is already on screen — and a menu entry that leads to a 403 is worse
+  than no entry.
+
+### Fixed
+
+- **Core view labels were written into the code.** The rule was already stated in
+  `constants.py`: a CORE page points at a key in the core catalogue, and a MODULE page carries
+  its own translations because no core string may name a module. What was missing was anything
+  that checked it — so the inventory section's views carried `label_i18n` with the Spanish and
+  the English written in, the module convention used where it does not apply. That put two
+  languages inside a `.py`, out of reach of the language files: untranslatable to a third
+  language without editing code, invisible to any translation pass, and free to drift from
+  `es_ES.py` without anything failing. Reported from the screen.
+
+  The eight views now name `tab_dcim_*` keys, `_view_specs` resolves either convention the way
+  `page_label` already did, and a new guard (`test_i18n_no_text_in_code.py`) refuses a
+  hand-written `{'es_ES': …, 'en_EN': …}` map anywhere in the panel's code, Spanish left loose in
+  a string outside docstrings, and the same in the templates. Two Spanish `RuntimeError` messages
+  in the Entra ID provisioning went with it — those reach the screen through `str(exc)`.
+
 ## [0.0.1+build.123] - 2026-09-01
 
 ### Added

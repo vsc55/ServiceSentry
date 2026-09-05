@@ -42,6 +42,22 @@ def register(app, wa, C):
     @app.route('/api/v1/dcim/orgs', methods=['GET'])
     @C.view_req
     def api_dcim_orgs():
+        """Las empresas, con **qué tiene dicho cada una**.
+
+        El recuento no es adorno: es la otra mitad de la pregunta que esta pantalla contesta.
+        Desde el árbol se pregunta «¿de quién es este armario?»; desde aquí, «¿qué es de esta
+        sociedad?» — y sin eso, borrar una es pulsar a ciegas: lo que era suyo deja de estar
+        fichado y nadie sabía cuánto era.
+
+        Lo DICHO y no lo heredado. Una sede de la filial B con cuarenta equipos dentro cuenta
+        como una sede: los equipos no lo dicen, lo heredan, y contarlos sería contar la misma
+        propiedad cuarenta veces. El árbol ya enseña la herencia; esta pantalla enseña las
+        decisiones que alguien tomó, que son las que se pueden cambiar.
+
+        Una lectura de `dc_owner` para todas, no una por empresa: son media docena de sociedades
+        y una consulta por cada una es la forma de que una pantalla de seis renglones haga seis
+        viajes.
+        """
         store = C.store()
         if store is None:
             return jsonify({'orgs': []})
@@ -49,7 +65,12 @@ def register(app, wa, C):
         rows = store.orgs.list()
         if allowed is not None:
             rows = [r for r in rows if r['uid'] in allowed]
-        return jsonify({'orgs': rows})
+        dicho: dict = {}
+        for (scope, _uid), org in store.owners_map().items():
+            if org:
+                dicho.setdefault(org, {})[scope] = dicho.setdefault(org, {}).get(scope, 0) + 1
+        return jsonify({'orgs': [dict(r, said=dicho.get(str(r.get('uid') or ''), {}))
+                                 for r in rows]})
 
     @app.route('/api/v1/dcim/orgs', methods=['POST'])
     @C.org_edit_req

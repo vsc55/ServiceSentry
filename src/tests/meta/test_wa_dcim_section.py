@@ -282,6 +282,65 @@ class TestLasPalabrasExisten:
             missing = sorted(k for k in keys if f"'{k}'" not in words)
             assert not missing, (lang, missing)
 
+class TestLasEmpresasSonUnSitioYNoUnBoton:
+    """La contención dice **dónde** está algo y la pertenencia **de quién es**: dos árboles, y el
+    segundo tenía su pantalla escondida en un botón de la barra del ÁRBOL.
+
+    Esa barra es del árbol, así que el botón sólo existía estando en Inventario y desaparecía en
+    cuanto alguien abría un armario — la misma equivocación que ya se corrigió con el catálogo y
+    las plantillas, que también eran sitios a los que se va disfrazados de actos.
+    """
+
+    def _js(self):
+        return _read(os.path.join(DCIM, '_orgs.html'))
+
+    def test_tiene_su_entrada_en_el_menu(self):
+        src = _read(CONSTANTS)
+        assert "'slug': 'orgs'" in src, 'las empresas no son un sitio al que se pueda ir'
+        # Y la última: se escribe el primer día y casi nunca más, y lo que se abre cada mañana
+        # va antes.
+        assert src.index("'slug': 'orgs'") > src.index("'slug': 'inventory'")
+
+    def test_y_ya_no_es_un_boton_de_la_barra_del_arbol(self):
+        """Un botón ahí es un acto sobre lo que hay en pantalla. Ir a un sitio no lo es, y
+        además se lo llevaba por delante abrir un armario."""
+        arbol = _read(os.path.join(DCIM, '_tree.html'))
+        assert '_dcOrgsOpen()' not in _fn(arbol, '_dcimTreeHtml'),             'vuelve a esconderse en la barra del árbol'
+
+    def test_y_la_vista_se_abre_y_se_cierra_como_las_demas(self):
+        """Quien dibuja mira estas variables para saber qué pintar: una que no se apague al ir a
+        otra vista es llegar aquí queriendo ir a otro sitio."""
+        render = _read(os.path.join(DCIM, '_render.html'))
+        assert '_dcOrgs = null' in _strip_comments(_fn(render, '_dcimGo')), 'no se cierra'
+        assert "'orgs'" in _strip_comments(_fn(render, '_dcimViewWanted')),             'la dirección /dcim/orgs no lleva aquí'
+        assert '_dcOrgsHtml()' in render, 'la vista no se dibuja en ninguna parte'
+        assert "_dcimMark('orgs')" in _strip_comments(_fn(self._js(), '_dcOrgsOpen'))
+
+    def test_y_dice_que_tiene_dicho_cada_una(self):
+        """Es la otra mitad de la pregunta: desde el árbol se pregunta de quién es un armario, y
+        desde aquí qué es de una sociedad. Sin eso, borrar una es pulsar a ciegas — lo que era
+        suyo deja de estar fichado y nadie sabía cuánto era."""
+        assert '_dcOrgsSaidHtml(' in _strip_comments(_fn(self._js(), '_dcOrgsListHtml')),             'la lista deja de decir qué tiene cada una'
+        rutas = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'routes', 'places.py'))
+        assert "'said'" in rutas or 'said=' in rutas, 'el servidor no cuenta lo fichado'
+
+    def test_y_quien_no_puede_editarlas_las_ve(self):
+        """El árbol ya enseña las chapas de las sociedades a cualquiera que vea el inventario:
+        esconderle la lista sería esconder lo que ya está a la vista, y una entrada de menú que
+        lleva a un 403 es peor que no estar. Lo que se estrecha es escribir."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcOrgsListHtml'))
+        assert "_dcimMay('dcim_org_edit')" in cuerpo, 'cualquiera puede escribirlas'
+        assert 'puede ?' in cuerpo, 'la lista es la misma se pueda escribir o no'
+
+    def test_y_lo_que_nadie_toco_no_viaja(self):
+        """Un PUT por renglón cada vez que se pulsa guardar llena el registro de auditoría de
+        cambios que no cambian nada, y el día que alguien busque quién renombró una sociedad no
+        lo va a encontrar entre el ruido."""
+        cuerpo = _strip_comments(_fn(self._js(), '_dcOrgsPlan'))
+        assert 'viejo.name !== nombre' in cuerpo, 'vuelve a mandarse todo'
+        assert 'if (!nombre) return' in cuerpo, 'una empresa sin nombre se guarda'
+
+
 class TestLosTresVerbosSeLeenEnUnSoloSitio:
     """`apiPost` y `apiDelete` devuelven `{status, data}`; `apiPut` devuelve **el cuerpo**, con
     su `ok` y su `error` un nivel más arriba.

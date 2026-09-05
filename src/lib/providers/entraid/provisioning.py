@@ -31,7 +31,7 @@ def resource_sp(access_token: str, resource_app_id: str) -> dict:
         raise RuntimeError(graph_error(r))
     val = r.json().get('value') or []
     if not val:
-        raise RuntimeError(f'API no encontrada en el tenant: {resource_app_id}')
+        raise RuntimeError(f'API not found in this tenant: {resource_app_id}')
     return val[0]
 
 # Microsoft Teams first-party client app ids, preauthorized for SSO so a Teams tab
@@ -123,13 +123,13 @@ def provision_entra_app(access_token: str, tenant_id: str, resources: list, *,
         missing = ([n for n in role_names if n not in role_ids]
                    + [n for n in scope_names if n not in scope_ids])
         if missing:
-            raise RuntimeError('Permisos no encontrados: ' + ', '.join(missing))
+            raise RuntimeError('permissions not found: ' + ', '.join(missing))
         access = ([{'id': i, 'type': 'Role'} for i in role_ids.values()]
                   + [{'id': i, 'type': 'Scope'} for i in scope_ids.values()])
         rra.append({'resourceAppId': res_app, 'resourceAccess': access})
         consent.append((sp.get('id'), list(role_ids.values()), list(scope_ids.keys())))
     if not rra:
-        raise RuntimeError('No hay permisos declarados para la aplicación.')
+        raise RuntimeError('no permissions declared for the application')
     # 1) create the application declaring the required permissions (+ optional
     #    SSO-style properties: web reply URLs and the groups claim).
     app_body = {'displayName': app_name, 'signInAudience': 'AzureADMyOrg',

@@ -5538,3 +5538,38 @@ class TestLosColoresQueYaSeUsan:
         client.post('/api/v1/dcim/cables',
                     json={'a_item': a, 'b_item': b, 'a_port': '1', 'b_port': '2', 'color': ''})
         assert client.get('/api/v1/dcim/cables').get_json()['colors_used'] == []
+
+
+class TestUnaEmpresaDiceQueTieneFichado:
+    """Desde el árbol se pregunta «¿de quién es este armario?»; desde la pantalla de empresas,
+    «¿qué es de esta sociedad?». Sin el recuento, borrar una es pulsar a ciegas: lo que era suyo
+    deja de estar fichado y nadie sabía cuánto era.
+    """
+
+    def test_cuenta_lo_dicho_y_no_lo_heredado(self, admin, client, fleet):
+        """Una sede de la filial B con cuarenta equipos dentro cuenta como UNA sede: los equipos
+        no lo dicen, lo heredan, y contarlos sería contar la misma propiedad cuarenta veces."""
+        orgs = {o['uid']: o for o in client.get('/api/v1/dcim/orgs').get_json()['orgs']}
+        # El departamento de IT tiene dicha la sede; la filial, un equipo dentro del rack.
+        assert orgs[fleet['it']]['said'] == {'site': 1}
+        assert orgs[fleet['b']]['said'] == {'item': 1}
+
+    def test_y_una_sin_nada_lo_dice_con_un_hueco(self, admin, client):
+        _login(client)
+        uid = client.post('/api/v1/dcim/orgs', json={'name': 'Recién creada'}).get_json()['uid']
+        orgs = {o['uid']: o for o in client.get('/api/v1/dcim/orgs').get_json()['orgs']}
+        assert orgs[uid]['said'] == {}
+
+    def test_y_borrarla_deja_lo_suyo_sin_fichar(self, admin, client, fleet):
+        """No es un campo que se corrige: es una fila que desaparece con todo lo que la
+        nombraba. Se hace, y el recuento de al lado deja de contarlo."""
+        assert client.delete(f'/api/v1/dcim/orgs/{fleet["b"]}').status_code == 200
+        uids = [o['uid'] for o in client.get('/api/v1/dcim/orgs').get_json()['orgs']]
+        assert fleet['b'] not in uids
+        # Y el equipo que era suyo sigue estando: lo que se borró es lo DICHO, así que vuelve a
+        # heredar de su sede. «Sin dueño» no es lo mismo que «hereda», y aquí lo correcto es lo
+        # segundo — la fila que decía «esto es de la filial B» ya no existe.
+        fila = [i for i in client.get(f'/api/v1/dcim/racks/{fleet["rack"]}').get_json()['items']
+                if i['uid'] == fleet['theirs']][0]
+        assert fila.get('org_uid') != fleet['b']
+        assert fila.get('org_uid') == fleet['it']

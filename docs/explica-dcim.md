@@ -1993,6 +1993,22 @@ el bloque de su fase.
       y no había forma de volver a «ninguno». Lo que se guarda es una casilla escondida —la
       rueda no puede guardar el vacío y la lista no puede guardar un color que no esté en
       ella—, y «sin color» es una muestra más
+- [x] **Las empresas son un sitio, no un botón.** La contención dice dónde está algo y la
+      pertenencia de quién es: dos árboles, y el segundo tenía su pantalla escondida en un
+      botón de la barra del ÁRBOL — que es del árbol, así que sólo existía estando en
+      Inventario y desaparecía al abrir un armario. La misma equivocación que ya se corrigió
+      con el catálogo y las plantillas. Ahora es una vista (`/dcim/orgs`), la última del
+      submenú: se escribe el primer día y casi nunca más
+- [x] La pantalla es la MISMA —el mismo editor compacto y el mismo guardado por
+      diferencias—, con una cosa que un cuadro no podía dar: **qué tiene dicho cada una**.
+      Desde el árbol se pregunta de quién es un armario; desde aquí, qué es de una sociedad
+- [x] Se cuenta lo **dicho** y no lo heredado: una sede de la filial B con cuarenta equipos
+      dentro cuenta como una sede — los equipos no lo dicen, lo heredan, y contarlos sería
+      contar la misma decisión cuarenta veces
+- [x] Y **quien no puede editarlas las ve**: el árbol ya enseña las chapas de las sociedades
+      a cualquiera que vea el inventario, así que esconder la lista sería esconder lo que ya
+      está a la vista. Lo que se estrecha es escribir (`dcim_org_edit`, que ningún rol trae
+      de serie)
 - [x] Y **el tipo de un cable no dice de qué está hecho**. La columna se llamaba «De qué es»
       y ponía «cobre» en unas filas y «corriente» en otras: son dos ejes metidos en una
       palabra, y la elegida era la del eje que sólo vale para los de red. Ahora dice qué

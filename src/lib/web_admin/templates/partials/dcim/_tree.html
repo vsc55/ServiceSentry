@@ -31,9 +31,6 @@ function _dcimToolbar() {
             {# Catálogo, fuentes y cuadro se fueron a la fila de secciones de arriba: son
                sitios a los que se va, no cosas que se hacen sobre lo que hay en pantalla —y
                aquí desaparecían en cuanto se abría un rack—. Lo que queda son actos. #}
-            ${_dcimMay('dcim_org_edit') ? `<button class="btn btn-sm btn-secondary"
-                onclick="_dcOrgsOpen()"><i class="bi bi-buildings me-1"></i>${
-                esc(t('dcim_orgs'))}</button>` : ''}
             ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary"
                 onclick="_dcimOpen('new','site','','')"><i class="bi bi-plus-lg me-1"></i>${
                 esc(t('dcim_new_site'))}</button>` : ''}
@@ -62,123 +59,6 @@ function _dcimActions(kind, uid, name, childKind) {
         ${btn(`_dcimDelete(${jsStr(kind)},${jsStr(uid)},${jsStr(name || '')})`,
               'bi-trash3', 'delete')}
     </span>`;
-}
-
-//: Las empresas mientras se editan, y cómo estaban al abrir el cuadro. Dos listas porque lo
-//: que se manda es la DIFERENCIA: una fila que nadie tocó no tiene por qué viajar, y un PUT por
-//: cada renglón cada vez que se pulsa guardar es ruido en el registro de auditoría de quien
-//: mañana quiera saber quién cambió el nombre de una sociedad.
-let _dcOrgsDraft = null;
-let _dcOrgsOrig = '';
-
-/** El cuadro de empresas: la lista, con lo que hay que decir de cada una.
- *
- *  Aquí y no en una sección propia: son tres campos que se escriben el primer día y casi nunca
- *  más, y una pantalla entera para eso es una pantalla que sobra el resto del año. */
-function _dcOrgsOpen() {
-    if (!_dcimMay('dcim_org_edit')) return;
-    _dcOrgsDraft = (_dcimData.orgs || []).map(o => ({uid: o.uid, name: o.name || '',
-                                                     short: o.short || ''}));
-    _dcOrgsOrig = JSON.stringify(_dcOrgsDraft);
-    showHtmlModal(t('dcim_orgs'), `<div id="dcimOrgsBox">${_dcOrgsHtml()}</div>`, 'primary',
-                  `<button class="btn btn-primary" onclick="_dcOrgsSave()">
-                     <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`);
-}
-
-/** Redibujar solo el cuadro: `renderDcim()` pinta lo de detrás y no lo de dentro del diálogo,
- *  así que sin esto se añadía una empresa y no aparecía el renglón. */
-function _dcOrgsDraw() {
-    const el = document.getElementById('dcimOrgsBox');
-    if (el) el.innerHTML = _dcOrgsHtml();
-}
-
-function _dcOrgsHtml() {
-    const filas = _dcOrgsDraft || [];
-    return `<div class="d-flex flex-column gap-2">
-        ${filas.length ? '' : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_orgs'))}</div>`}
-        ${filas.map((o, i) => `<div class="d-flex gap-2 align-items-center flex-wrap">
-            <input class="form-control form-control-sm"
-                   style="flex:2 1 12rem;min-width:0;max-width:20rem"
-                   placeholder="${escAttr(t('dcim_org_name'))}"
-                   value="${escAttr(o.name)}" oninput="_dcOrgsSet(${i},'name',this.value)">
-            <input class="form-control form-control-sm"
-                   style="flex:1 1 6rem;min-width:0;max-width:9rem"
-                   placeholder="${escAttr(t('dcim_org_short'))}"
-                   value="${escAttr(o.short)}" oninput="_dcOrgsSet(${i},'short',this.value)">
-            <button class="btn btn-sm btn-warning" style="flex:0 0 auto"
-                    onclick="_dcOrgsDrop(${i})" title="${escAttr(t('delete'))}">
-                <i class="bi bi-trash"></i></button>
-        </div>`).join('')}
-        <div><button class="btn btn-sm btn-secondary" onclick="_dcOrgsAdd()">
-            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_org_new'))}</button></div>
-        <div class="text-muted ss-fs-1">${esc(t('dcim_orgs_hint'))}</div>
-    </div>`;
-}
-
-function _dcOrgsSet(i, campo, valor) {
-    const o = (_dcOrgsDraft || [])[i];
-    if (o) o[campo] = String(valor);
-}
-
-function _dcOrgsAdd() {
-    (_dcOrgsDraft = _dcOrgsDraft || []).push({uid: '', name: '', short: ''});
-    _dcOrgsDraw();
-}
-
-/** Borrar una empresa. **Se pregunta y se hace en el momento**, no al guardar: lo que cuelga de
- *  ella deja de estar fichado, y eso no es un campo que se corrige — es una fila que desaparece
- *  con todo lo que la nombraba. */
-function _dcOrgsDrop(i) {
-    const o = (_dcOrgsDraft || [])[i];
-    if (!o) return;
-    if (!o.uid) { _dcOrgsDraft.splice(i, 1); return _dcOrgsDraw(); }
-    showConfirmModal(tf('dcim_org_drop_q', o.name || ''), async () => {
-        const r = await _dcimSend('DELETE', `/api/v1/dcim/orgs/${encodeURIComponent(o.uid)}`);
-        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-        _dcOrgsDraft.splice(i, 1);
-        _dcOrgsOrig = JSON.stringify(_dcOrgsDraft);
-        _dcOrgsDraw();
-        // `renderDcim()` vuelve a pedir sedes y empresas: es lo que refresca las chapas de la
-        // barra de detrás, que si no seguirían nombrando a la que se acaba de borrar.
-        renderDcim();
-    });
-}
-
-/** Qué hay que mandar: lo nuevo con POST, lo cambiado con PUT y **lo que nadie tocó, nada**.
- *
- *  Aparte del bucle que lo manda porque son dos cosas —decidir y hacer— y porque lo único que
- *  aquí tiene miga es lo tercero: un PUT por renglón cada vez que se pulsa guardar llena el
- *  registro de auditoría de cambios que no cambian nada, y el día que alguien busque quién
- *  renombró una sociedad no lo va a encontrar entre el ruido.
- *
- *  Sin nombre no hay empresa: un renglón en blanco es uno que se añadió y no se rellenó, y
- *  guardarlo sería una fila que no se reconoce en ningún desplegable. */
-function _dcOrgsPlan(borrador, antesJson) {
-    const antes = {};
-    JSON.parse(antesJson || '[]').forEach(o => { antes[o.uid] = o; });
-    const plan = [];
-    (borrador || []).forEach(o => {
-        const nombre = String(o.name || '').trim();
-        if (!nombre) return;
-        const cuerpo = {name: nombre, short: String(o.short || '')};
-        const viejo = antes[o.uid];
-        if (!o.uid) plan.push({metodo: 'POST', uid: '', cuerpo: cuerpo});
-        else if (!viejo || viejo.name !== nombre || String(viejo.short || '') !== cuerpo.short)
-            plan.push({metodo: 'PUT', uid: o.uid, cuerpo: cuerpo});
-    });
-    return plan;
-}
-
-async function _dcOrgsSave() {
-    for (const paso of _dcOrgsPlan(_dcOrgsDraft, _dcOrgsOrig)) {
-        const url = paso.uid ? `/api/v1/dcim/orgs/${encodeURIComponent(paso.uid)}`
-                             : '/api/v1/dcim/orgs';
-        const r = await _dcimSend(paso.metodo, url, paso.cuerpo);
-        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    }
-    showToast(t('saved'), 'success');
-    hideInfoModal();
-    renderDcim();
 }
 
 /** Decir de qué empresa es algo.
