@@ -351,6 +351,21 @@ Sólo lectura: la sección muestra **qué están haciendo** las máquinas; lo qu
 | GET | `/api/v1/infra/hosts` | `infra_view` | La flota: una fila por máquina, **peor primero**, con su estado y cuánto de ella se vigila. Proyección en lista blanca: los `profiles` (credencial de cada protocolo) no viajan |
 | GET | `/api/v1/infra/hosts/<uid>` | `infra_view` | Una máquina: lo que devolvió cada check (`results`) y los números que su módulo **declaró** como medida (`metrics`), cada uno con etiqueta, unidad y las coordenadas de su serie |
 
+## Empresas — [lib/core/orgs/routes.py](../src/lib/core/orgs/routes.py)
+
+De quién es cada cosa. Estuvo dentro del inventario físico, que es donde se hizo la pregunta por
+primera vez; es del core desde build.125, porque la misma sociedad que paga el armario tiene
+usuarios en el directorio y licencias en Microsoft 365, y un registro que vive dentro de una
+sección es uno que las demás no pueden usar sin nombrarla.
+
+| Método | Ruta | Permiso | Descripción |
+|---|---|---|---|
+| GET | `/api/v1/orgs` | `orgs_view` | Las empresas que quien llama puede ver, con `said` —**qué tiene dicho cada una**, por ámbito— y con `scopes`, la lista de **lo que puede ser de una empresa**. Lo DICHO y no lo heredado: una sede con cuarenta equipos dentro cuenta como una sede, porque los equipos no lo dicen, lo heredan. Y estrechada: quien tiene concedida una sociedad ve esa, no la lista de filiales del grupo |
+| POST | `/api/v1/orgs` | `orgs_edit` | Crear una |
+| PUT | `/api/v1/orgs/<uid>` | `orgs_edit` | Renombrarla, o corregir su abreviatura o su descripción |
+| DELETE | `/api/v1/orgs/<uid>` | `orgs_edit` | Borrarla, **y toda pertenencia que la nombraba** — si no, el resolutor devuelve un uid que ya no se puede buscar. Lo que era suyo no se borra: vuelve a estar sin fichar |
+| POST | `/api/v1/orgs/owner` | `orgs_edit` | Decir de quién es algo (`scope` + `uid` + `org_uid`). Con `org_uid` vacío **deja de decirse**, que es volver a heredar y no es lo mismo que «de nadie». El `scope` vale si **alguien lo declara** (`ORG_SCOPES` en su `manifest.py`): hoy `site`, `room`, `rack` e `item` del inventario y `host` del registro de máquinas — el día que un módulo fiche buzones, este mismo extremo los ficha |
+
 ## Inventario físico (DCIM) — [lib/core/dcim/routes/](../src/lib/core/dcim/routes/)
 
 > Un paquete y no un fichero: eran 3571 líneas, un tercio del dominio. Repartidas **por asunto y no por capa** — `places` (sedes, salas, racks), `power` (la cadena eléctrica), `racks` (un armario por dentro), `docs` (los dos documentos del catálogo), `library` (marcas y plataformas), `builds` (las plantillas) y `catalog` (el catálogo y su importación)—, cada una con sus rutas dichas en su propia cabecera. Lo que comparten —los permisos y los ayudantes que usa más de una— se arma una vez en `_context.py`.
@@ -370,11 +385,7 @@ Dónde está el equipamiento y de quién es. Ver [explica-dcim.md](explica-dcim.
 |---|---|---|---|
 | GET | `/api/v1/dcim/export` | `dcim_view` (+ `dcim_catalog_view` para los modelos) | Un **fichero** con los modelos (`?types=`) y las plantillas (`?builds=`) que se pidan, separados por comas. Con cabecera de descarga: lo que se ha pedido es llevárselo, y verlo en pantalla obliga a copiarlo a mano. Cada mitad exige su permiso de lectura y se calla si no lo hay, en vez de negar el fichero entero. Sin `uid` ninguno —un identificador es de la base que lo acuñó— y **sin imágenes**, que pesan más que todo lo demás junto |
 | POST | `/api/v1/dcim/import` | `dcim_catalog_manage` y/o `dcim_build_edit` | Traer lo que falte de un sobre. **Nada se pisa**: un modelo que ya está —mismo fabricante y modelo— se salta, y una plantilla cuyo nombre ya existe también; lo saltado se cuenta y se devuelve, que es la diferencia entre «no ha hecho nada» y «ya lo tenías». Primero los modelos y después las plantillas, para que la que llegue detrás encuentre el chasis del que habla. Una plataforma que aquí no exista **no se inventa**: se devuelve en `platforms_missing` |
-| GET | `/api/v1/dcim/orgs` | `dcim_view` | Las empresas que quien llama puede ver, con `said`: **qué tiene dicho cada una** por ámbito (`{site, room, rack, item}`). Lo DICHO y no lo heredado — una sede con cuarenta equipos dentro cuenta como una sede, porque los equipos no lo dicen, lo heredan—. Es la otra mitad de la pregunta: desde el árbol se pregunta de quién es un armario, y desde aquí qué es de una sociedad |
-| POST | `/api/v1/dcim/orgs` | `dcim_org_edit` | Crear una |
-| PUT | `/api/v1/dcim/orgs/<uid>` | `dcim_org_edit` | Renombrarla |
-| DELETE | `/api/v1/dcim/orgs/<uid>` | `dcim_org_edit` | Borrarla, **y toda pertenencia que la nombraba** — si no, el resolutor devuelve un uid que ya no se puede buscar |
-| POST | `/api/v1/dcim/owner` | `dcim_org_edit` | Decir de quién es algo (`scope` + `uid` + `org_uid`). Con `org_uid` vacío **deja de decirse**, que es volver a heredar y no es lo mismo que «de nadie» |
+| GET | `/api/v1/dcim/orgs` | `dcim_view` | Las empresas que quien llama puede ver, por su nombre: es lo que hace falta para pintar la chapa de un armario y para el desplegable con el que se ficha. **El registro en sí es del core** (`/api/v1/orgs`) — crear, renombrar y borrar una sociedad no es una operación del inventario, porque la misma sociedad tiene usuarios en el directorio |
 | GET | `/api/v1/dcim/sites` | `dcim_view` | Las sedes, con sus salas y cuántos racks tiene cada una |
 | POST · PUT · DELETE | `/api/v1/dcim/sites[/<uid>]` | `dcim_edit` | Alta, edición y baja |
 | POST · PUT · DELETE | `/api/v1/dcim/rooms[/<uid>]` | `dcim_edit` | Ídem para salas |

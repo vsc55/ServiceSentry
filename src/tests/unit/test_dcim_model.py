@@ -203,29 +203,10 @@ class TestDeQuienEsCadaCosa:
 # ══ Y quién puede ver qué, que es donde se cuela una fuga ═══════════════════════════════
 
 class TestElRackCompartidoEsElCasoDuro:
-
-    def test_quien_lo_tiene_todo_lo_ve_todo(self):
-        assert owners.visible_orgs({'dcim_all_view'}) is None
-        assert owners.may_see('cualquiera', None) is True
-
-    def test_sin_ninguna_empresa_no_es_lo_mismo_que_sin_acceso(self):
-        """`None` y `set()` son respuestas distintas a propósito: la segunda es alguien a quien
-        se le dio la sección y ninguna empresa, que debe ver salas y racks con todo opaco — no
-        un error. Tratarlo como «sin acceso» deja fuera justo a quien se inventó el ámbito."""
-        allowed = owners.visible_orgs({'dcim_view'})
-        assert allowed == set()
-        assert owners.may_see('org-a', allowed) is False
-
-    def test_el_ambito_por_empresa_se_lee_de_los_permisos(self):
-        allowed = owners.visible_orgs({'dcim_view', 'org.org-a.view', 'server.h1.view'})
-        assert allowed == {'org-a'}
-        assert owners.may_see('org-a', allowed) is True
-        assert owners.may_see('org-b', allowed) is False
-
-    def test_lo_que_nadie_reclama_lo_ve_cualquiera(self):
-        """Un rack sin dueño no es un secreto: es uno que nadie ha archivado todavía, que es el
-        estado de toda instalación el primer día."""
-        assert owners.may_see('', {'org-a'}) is True
+    """Las reglas —quien lo ve todo, quien tiene una empresa concedida, lo que nadie reclama—
+    se comprueban donde viven ahora, que es el registro de empresas del core
+    (`tests/unit/test_orgs_model.py`). Lo que se queda aquí es lo único que es de un armario:
+    que de un equipo ajeno solo sobreviva que existe y que ocupa."""
 
     def test_un_item_ajeno_ocupa_y_no_dice_nada_mas(self):
         item = {'uid': 'i1', 'rack_uid': 'r1', 'u_start': 12, 'u_height': 2, 'face': 'full',
@@ -256,12 +237,16 @@ class TestLasBanderasDelDominio:
     """La lista está cerrada a propósito: una bandera nueva hay que argumentarla aquí, no
     aparecer. Es lo que hizo la de infraestructura tres veces seguidas."""
 
-    def test_son_estas_ocho(self):
+    def test_son_estas_seis(self):
+        """Fueron ocho. Las dos que faltan —ver lo de todas las empresas y decidir de quién es
+        cada cosa— no eran de esta sección: la misma sociedad que paga el armario tiene usuarios
+        en el directorio, así que viven en `lib.core.orgs` y se llaman `orgs_*`."""
         from lib.core.dcim.manifest import MODULE_PERMISSIONS
         flags = [p['flag'] for p in MODULE_PERMISSIONS['permissions']]
-        assert flags == ['dcim_view', 'dcim_all_view', 'dcim_edit', 'dcim_org_edit',
+        assert flags == ['dcim_view', 'dcim_edit',
                          'dcim_cable_edit', 'dcim_catalog_view', 'dcim_catalog_manage',
                          'dcim_build_edit']
+        assert not any(f.startswith('orgs_') for f in flags), 'una bandera del core aquí'
 
     def test_y_ninguna_toca_el_registro_de_dispositivos(self):
         """Este dominio guarda lo que la gente sabe. No alcanza a un aparato, no alerta, y no
@@ -274,11 +259,13 @@ class TestLasBanderasDelDominio:
         """En un grupo esto decide qué se le factura a qué sociedad y quién puede ver qué, que
         no es la misma autoridad que ordenar un armario."""
         from lib.core.dcim.manifest import MODULE_PERMISSIONS
+        from lib.core.orgs.manifest import MODULE_PERMISSIONS as ORG_PERMS
         roles = {p['flag']: p['roles'] for p in MODULE_PERMISSIONS['permissions']}
-        assert roles['dcim_org_edit'] == ()
+        org_roles = {p['flag']: p['roles'] for p in ORG_PERMS['permissions']}
+        assert org_roles['orgs_edit'] == ()
         assert 'viewer' not in roles['dcim_edit']
         # …y lo que es una lectura sí llega a quien solo mira.
-        assert 'viewer' in roles['dcim_view'] and 'viewer' in roles['dcim_all_view']
+        assert 'viewer' in roles['dcim_view'] and 'viewer' in org_roles['orgs_all_view']
 
     def test_nada_se_declara_para_la_auditoria_sin_que_alguien_lo_escriba(self):
         """La podredumbre que más dura: una declaración de un evento que nadie emite, porque

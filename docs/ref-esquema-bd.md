@@ -40,7 +40,8 @@ Hay **67 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Activos / secretos | `credentials`, `hosts` |
 | Auditoría / historial / estado | `audit`, `history`, `check_state`, `job_history` (qué hizo cada trabajo en segundo plano, después de hacerlo) |
 | Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
-| Inventario físico (DCIM) | `dc_org`, `dc_owner` (de quién es cada cosa), `dc_site`, `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
+| Empresas | `org` (las sociedades del grupo), `org_owner` (de quién es cada cosa, en cualquier ámbito que un paquete declare) |
+| Inventario físico (DCIM) | `dc_site`, `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
@@ -637,45 +638,61 @@ Restricción única: `(uid, kind, key)`. Índice: `idx_net_evidence_kind(kind, k
 
 ---
 
-## Inventario físico (DCIM)
+## Empresas
 
-Dónde está el equipamiento y de quién es. **Dos árboles, no uno**: `dc_site` → `dc_room` →
-`dc_rack` → `dc_item` es la contención, estrictamente anidada; `dc_org` + `dc_owner` es la
-pertenencia, que no contiene nada. Ver [explica-dcim.md](explica-dcim.md).
+De quién es cada cosa. **No es un contenedor**: un holding comparte datacenter, sala y armario
+entre las sociedades del grupo, así que la pertenencia se dice al nivel que alguien la sepa y se
+hereda hacia dentro, ganando lo más concreto.
 
-### `dc_org` — empresa
+Estuvo dentro del inventario físico (`dc_org` y `dc_owner`), que es donde se hizo la pregunta por
+primera vez. Es del core desde build.125: la misma sociedad que paga el armario tiene usuarios en
+el directorio y licencias en Microsoft 365, y un registro que vive dentro de una sección es uno
+que las demás no pueden usar sin nombrarla. Las filas viejas se **adoptan** al arrancar: se
+copian a las tablas nuevas si estas están vacías, y las viejas se quedan donde están.
 
-[lib/core/dcim/store.py](../src/lib/core/dcim/store.py)
+### `org` — empresa
+
+[lib/core/orgs/store.py](../src/lib/core/orgs/store.py)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
 | uid | TEXT | no | — | PK |
 | name | TEXT | no | `''` | único |
-| short | TEXT | no | `''` | forma corta para insignias y alzados |
+| short | TEXT | no | `''` | forma corta para insignias y alzados. **Obligatoria y única** —comparada sin mayúsculas ni espacios— y comprobada en la ruta: dos chapas iguales en un alzado compartido no dicen de quién es el armario. Sin índice único, porque las filas adoptadas del inventario pueden traerla vacía |
 | description | TEXT | no | `''` | |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
 
-### `dc_owner` — de quién es cada cosa
+### `org_owner` — de quién es cada cosa
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
-| scope | TEXT | no | — | `site` \| `room` \| `rack` \| `item` \| `host` |
+| scope | TEXT | no | — | lo que **declare** un paquete: hoy `site` \| `room` \| `rack` \| `item` (inventario) y `host` (registro de máquinas) |
 | uid | TEXT | no | — | lo que pertenece a alguien |
 | org_uid | TEXT | no | — | la empresa |
 | set_at | TEXT | no | `''` | cuándo se dijo |
 | set_by | TEXT | no | `''` | quién lo dijo |
 
-Único: `(scope, uid)`. Índice: `idx_dc_owner_org(org_uid)`.
+Único: `(scope, uid)`. Índice: `idx_org_owner_org(org_uid)`.
 
 > **Una fila por pertenencia DICHA**, nunca por pertenencia heredada. La regla —dila donde
-> quieras, se hereda hacia abajo, la más concreta manda— es una sola, y escrita como una columna
-> `org_uid` en cinco tablas son cinco implementaciones de ella. Guardar lo heredado sería además
-> una mentira que sobrevive al día en que alguien mueve un rack de sala.
+> quieras, se hereda hacia dentro, la más concreta manda— es una sola, y escrita como una columna
+> `org_uid` en cada tabla que puede ser de alguien son n implementaciones de ella. Guardar lo
+> heredado sería además una mentira que sobrevive al día en que alguien mueve un rack de sala.
 >
-> `scope` incluye `host`, que **no es una tabla de este dominio**: una VM, un VIP o una máquina
-> encima de una mesa también son de alguien y no están en ningún rack.
+> **El `scope` no lo decide esta tabla.** Lo declara quien posee la cosa (`ORG_SCOPES` en su
+> `manifest.py`), así que `org_owner` abarca tablas que este paquete no conoce — y el día que un
+> módulo fiche buzones no hay que tocar el core para que se pueda.
+
+---
+
+## Inventario físico (DCIM)
+
+Dónde está el equipamiento. **Dos árboles, no uno**: `dc_site` → `dc_room` → `dc_rack` →
+`dc_item` es la contención, estrictamente anidada; la pertenencia —de quién es cada cosa— no
+contiene nada y vive en [Empresas](#empresas), porque la misma sociedad que paga el armario tiene
+usuarios en el directorio. Ver [explica-dcim.md](explica-dcim.md).
 
 ### `dc_site` — datacenter o sede
 
@@ -1249,7 +1266,7 @@ cosa» y no hay forma de saber si tiene razón.
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
 | uid | TEXT | no | — | PK |
-| scope | TEXT | no | `'type'` | de qué clase de cosa es la versión: `type` (un modelo del catálogo), **`build`** (una plantilla) o el documento de perfiles. Una tabla por cada una serían tres almacenes haciendo estas mismas cuatro cosas. Misma forma que `dc_owner` |
+| scope | TEXT | no | `'type'` | de qué clase de cosa es la versión: `type` (un modelo del catálogo), **`build`** (una plantilla) o el documento de perfiles. Una tabla por cada una serían tres almacenes haciendo estas mismas cuatro cosas. Misma forma que `org_owner` |
 | ref_uid | TEXT | no | — | la ficha; índice `idx_dc_rev_ref` con `scope` y `seq` |
 | at | TEXT | no | `''` | |
 | seq | INTEGER | no | `0` | **el orden**, que no lo puede dar la fecha: este proyecto guarda segundos, y dos cambios del mismo segundo se ordenarían al azar — que es como una versión aparece antes que la que la produjo y la diferencia sale del revés. Un contador por ficha lo resuelve y no depende del reloj de nadie |

@@ -282,63 +282,38 @@ class TestLasPalabrasExisten:
             missing = sorted(k for k in keys if f"'{k}'" not in words)
             assert not missing, (lang, missing)
 
-class TestLasEmpresasSonUnSitioYNoUnBoton:
+class TestLasEmpresasYaNoVivenAqui:
     """La contención dice **dónde** está algo y la pertenencia **de quién es**: dos árboles, y el
-    segundo tenía su pantalla escondida en un botón de la barra del ÁRBOL.
+    segundo tuvo su pantalla aquí dos versiones — primero en un botón de la barra del árbol y
+    luego como una vista más de la sección.
 
-    Esa barra es del árbol, así que el botón sólo existía estando en Inventario y desaparecía en
-    cuanto alguien abría un armario — la misma equivocación que ya se corrigió con el catálogo y
-    las plantillas, que también eran sitios a los que se va disfrazados de actos.
+    Las dos veces por lo mismo: es donde se hizo la pregunta por primera vez. Pero la sociedad
+    que paga el armario tiene usuarios en el directorio y licencias en Microsoft 365, y un
+    registro que vive dentro de una sección es uno que las demás no pueden usar sin nombrarla.
+    Ahora es del core (`lib/core/orgs`), y lo que se vigila aquí es que no vuelva.
     """
 
-    def _js(self):
-        return _read(os.path.join(DCIM, '_orgs.html'))
+    def test_la_seccion_no_dibuja_ninguna_empresa(self):
+        """Ni la pantalla ni la variable que decidía si se pintaba: una vista a medio quitar es
+        una entrada de menú que lleva a una pantalla en blanco."""
+        for fichero in sorted(os.listdir(DCIM)):
+            js = _read(os.path.join(DCIM, fichero))
+            assert '_dcOrgs' not in js, f'{fichero} sigue dibujando las empresas'
+        assert "'slug': 'orgs'" not in _read(CONSTANTS), 'la vista sigue en el registro'
 
-    def test_tiene_su_entrada_en_el_menu(self):
-        src = _read(CONSTANTS)
-        assert "'slug': 'orgs'" in src, 'las empresas no son un sitio al que se pueda ir'
-        # Y la última: se escribe el primer día y casi nunca más, y lo que se abre cada mañana
-        # va antes.
-        assert src.index("'slug': 'orgs'") > src.index("'slug': 'inventory'")
-
-    def test_y_ya_no_es_un_boton_de_la_barra_del_arbol(self):
-        """Un botón ahí es un acto sobre lo que hay en pantalla. Ir a un sitio no lo es, y
-        además se lo llevaba por delante abrir un armario."""
+    def test_pero_sigue_sabiendo_de_quien_es_cada_cosa(self):
+        """Quitar la pantalla no es quitar la pertenencia: sin las chapas, un armario compartido
+        entre sociedades vuelve a ser un armario del que no se sabe nada."""
         arbol = _read(os.path.join(DCIM, '_tree.html'))
-        assert '_dcOrgsOpen()' not in _fn(arbol, '_dcimTreeHtml'),             'vuelve a esconderse en la barra del árbol'
+        assert '_dcimOwnerAsk(' in arbol, 'no se puede fichar nada desde el árbol'
+        assert "'/api/v1/orgs/owner'" in arbol, 'escribe donde ya no hay nadie escuchando'
+        assert "_dcimMay('orgs_edit')" in arbol, 'la bandera del core no es la que se mira'
 
-    def test_y_la_vista_se_abre_y_se_cierra_como_las_demas(self):
-        """Quien dibuja mira estas variables para saber qué pintar: una que no se apague al ir a
-        otra vista es llegar aquí queriendo ir a otro sitio."""
-        render = _read(os.path.join(DCIM, '_render.html'))
-        assert '_dcOrgs = null' in _strip_comments(_fn(render, '_dcimGo')), 'no se cierra'
-        assert "'orgs'" in _strip_comments(_fn(render, '_dcimViewWanted')),             'la dirección /dcim/orgs no lleva aquí'
-        assert '_dcOrgsHtml()' in render, 'la vista no se dibuja en ninguna parte'
-        assert "_dcimMark('orgs')" in _strip_comments(_fn(self._js(), '_dcOrgsOpen'))
-
-    def test_y_dice_que_tiene_dicho_cada_una(self):
-        """Es la otra mitad de la pregunta: desde el árbol se pregunta de quién es un armario, y
-        desde aquí qué es de una sociedad. Sin eso, borrar una es pulsar a ciegas — lo que era
-        suyo deja de estar fichado y nadie sabía cuánto era."""
-        assert '_dcOrgsSaidHtml(' in _strip_comments(_fn(self._js(), '_dcOrgsListHtml')),             'la lista deja de decir qué tiene cada una'
-        rutas = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'routes', 'places.py'))
-        assert "'said'" in rutas or 'said=' in rutas, 'el servidor no cuenta lo fichado'
-
-    def test_y_quien_no_puede_editarlas_las_ve(self):
-        """El árbol ya enseña las chapas de las sociedades a cualquiera que vea el inventario:
-        esconderle la lista sería esconder lo que ya está a la vista, y una entrada de menú que
-        lleva a un 403 es peor que no estar. Lo que se estrecha es escribir."""
-        cuerpo = _strip_comments(_fn(self._js(), '_dcOrgsListHtml'))
-        assert "_dcimMay('dcim_org_edit')" in cuerpo, 'cualquiera puede escribirlas'
-        assert 'puede ?' in cuerpo, 'la lista es la misma se pueda escribir o no'
-
-    def test_y_lo_que_nadie_toco_no_viaja(self):
-        """Un PUT por renglón cada vez que se pulsa guardar llena el registro de auditoría de
-        cambios que no cambian nada, y el día que alguien busque quién renombró una sociedad no
-        lo va a encontrar entre el ruido."""
-        cuerpo = _strip_comments(_fn(self._js(), '_dcOrgsPlan'))
-        assert 'viejo.name !== nombre' in cuerpo, 'vuelve a mandarse todo'
-        assert 'if (!nombre) return' in cuerpo, 'una empresa sin nombre se guarda'
+    def test_y_lleva_a_la_seccion_de_verdad_cuando_no_hay_ninguna(self):
+        """A quien puede declararlas se le lleva a donde se hace. Navegando y no dibujando: la
+        pantalla es de otra sección, y dibujarla aquí la pintaría dentro del inventario."""
+        cuerpo = _strip_comments(_fn(_read(os.path.join(DCIM, '_tree.html')), '_dcimOwnerAsk'))
+        assert "_navTab('#tab-orgs')" in cuerpo, 'el aviso no lleva a ninguna parte'
 
 
 class TestLosTresVerbosSeLeenEnUnSoloSitio:
@@ -350,23 +325,31 @@ class TestLosTresVerbosSeLeenEnUnSoloSitio:
     las dos veces. Es la peor forma de equivocarse: la pantalla miente sobre algo que ya ocurrió,
     y solo un F5 la desmiente.
 
-    El núcleo no se toca —el contrato de `apiPut` lo leen decenas de sitios— así que se
-    normaliza una vez aquí, y esto vigila que siga siendo una.
+    El normalizador se escribió aquí y ya no es de aquí: en cuanto una segunda pantalla tuvo que
+    escribir, una copia habrían sido dos sitios donde arreglar la próxima forma de contestar. Es
+    `apiSend`, en `partials/core/_api.html`, y esta sección lo llama por su nombre corto.
     """
 
     def _js(self):
         return _section()
 
-    def test_hay_un_normalizador(self):
-        body = self._js().split('async function _dcimSend(')[1].split('\n}')[0]
-        assert 'apiPut(' in body and 'apiPost(' in body and 'apiDelete(' in body
-        assert 'raw.data !== undefined' in body, 'no distingue las dos formas'
+    def test_hay_un_normalizador_y_esta_en_el_nucleo(self):
+        api = _read(os.path.join(TPL, 'partials', 'core', '_api.html'))
+        cuerpo = api.split('async function apiSend(')[1].split('\n}')[0]
+        assert 'apiPut(' in cuerpo and 'apiPost(' in cuerpo and 'apiDelete(' in cuerpo
+        assert 'raw.data !== undefined' in cuerpo, 'no distingue las dos formas'
+
+    def test_y_esta_seccion_lo_llama_en_vez_de_copiarlo(self):
+        """Y como función, no como `const`: todo esto acaba en UN script concatenado, así que un
+        `const` que se evalúe antes que `_api.html` seria un ReferenceError al cargar."""
+        cuerpo = self._js().split('async function _dcimSend(')[1].split('\n}')[0]
+        assert 'apiSend(' in cuerpo, 'vuelve a haber una copia del normalizador'
+        assert 'raw.data' not in cuerpo, 'la copia sigue ahí'
 
     def test_y_nadie_llama_a_los_verbos_por_su_cuenta(self):
         """Una llamada suelta es la ocasión de volver a leerla mal."""
         js = self._js()
-        fuera = js.split('async function _dcimSend(')[0] + \
-            js.split('async function _dcimSend(')[1].split('\n}', 1)[1]
+        fuera = js.split('async function _dcimSend(')[0] +             js.split('async function _dcimSend(')[1].split('\n}', 1)[1]
         for verbo in ('apiPost(', 'apiPut(', 'apiDelete('):
             assert verbo not in fuera, f'{verbo} se llama fuera del normalizador'
 

@@ -32,15 +32,21 @@ from __future__ import annotations
 
 from lib.core.dcim import assets as dcim_assets
 from lib.core.dcim.revisions import RevisionStore
-from lib.core.uids import new_uid
+from lib.core.orgs.store import OrgsStore
 from lib.db import BaseConnector
+# El apaño de cinco métodos por tabla, que vivía aquí y ya no: lo mismo hace falta para las
+# empresas, que son del core. `rank` se reexporta a propósito — `lib.core.dcim.builds` lo
+# importa de este módulo, que es de donde salió.
+from lib.db.rows import Rows, rank              # noqa: F401
 from lib.db.schema import Column, Index, TableSpec
 from lib.db.store_base import BaseStore
 
 # ── What a thing can be, for the ownership table and for the item's face ─────────────────
-#: The scopes ownership can be declared on. The four containment levels, plus `host` for the
-#: things that are somebody's and are in no rack — a VM, a VIP, a machine on a desk.
-OWNER_SCOPES = ('site', 'room', 'rack', 'item', 'host')
+#: The scopes ownership can be declared on HERE: the four containment levels. `host` used to be
+#: in this tuple and is not any more — a machine on a desk belongs to somebody without this
+#: domain being involved, so `lib.core.hosts` declares it, which is the whole point of the
+#: scopes being declared instead of listed.
+OWNER_SCOPES = ('site', 'room', 'rack', 'item')
 
 #: Which side of the rack an item occupies. `full` is the common case (a server fills its U
 #: from both sides); the other two are what makes a real elevation possible.
@@ -95,37 +101,11 @@ SIDES = ('front', 'rear', 'left', 'right')
 #: as `none`, and the difference matters when reading a room that runs hot.
 COOLING = ('', 'none', 'room', 'cold_aisle', 'hot_aisle', 'in_row', 'rear_door', 'split')
 
-_ORG = TableSpec(
-    name='dc_org',
-    columns=(
-        Column('uid',         'TEXT', primary_key=True),
-        Column('name',        'TEXT', nullable=False, default="''", unique=True),
-        # A short form for badges and elevations, where the full legal name of a company does
-        # not fit in a box 200 pixels wide.
-        Column('short',       'TEXT', nullable=False, default="''"),
-        Column('description', 'TEXT', nullable=False, default="''"),
-        Column('created_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_by',  'TEXT', nullable=False, default="''"),
-    ),
-    indexes=(Index('idx_dc_org_name', ('name',)),),
-)
-
-_OWNER = TableSpec(
-    name='dc_owner',
-    columns=(
-        # One row per ownership somebody DECLARED. Everything else is inherited, and inherited
-        # ownership is never written down — the day somebody re-parents a rack, a stored copy
-        # of what it used to inherit is a lie that outlives the move.
-        Column('scope',   'TEXT', nullable=False),      # one of OWNER_SCOPES
-        Column('uid',     'TEXT', nullable=False),      # the thing that belongs to somebody
-        Column('org_uid', 'TEXT', nullable=False),
-        Column('set_at',  'TEXT', nullable=False, default="''"),
-        Column('set_by',  'TEXT', nullable=False, default="''"),
-    ),
-    indexes=(Index('idx_dc_owner_scope', ('scope', 'uid'), unique=True),
-             Index('idx_dc_owner_org', ('org_uid',))),
-)
+# `dc_org` y `dc_owner` estaban aqui y ya no: las empresas son del core
+# (`lib.core.orgs`), porque la misma sociedad que paga el armario tiene usuarios en el
+# directorio y licencias en Microsoft 365. Lo que queda de ellas en este fichero es el atajo
+# de `DcimStore`, que sigue contestando `store.orgs` y `store.owners_map()` para no cambiar
+# cuarenta llamadas que estan bien escritas.
 
 _SITE = TableSpec(
     name='dc_site',
@@ -728,7 +708,7 @@ _ITEM = TableSpec(
              Index('idx_dc_item_build', ('build_uid',))),
 )
 
-SCHEMAS = (_ORG, _OWNER, _SITE, _ROOM, _RACK, _ITEM, _FEATURE, _PDU, _POWER, _CABLE,
+SCHEMAS = (_SITE, _ROOM, _RACK, _ITEM, _FEATURE, _PDU, _POWER, _CABLE,
            _LINK, _ROW, _SOURCE, _PART)
 
 
@@ -886,155 +866,6 @@ def _overlap(a: tuple, b: tuple) -> bool:
     return a0 * bn < b1 * an and b0 * an < a1 * bn
 
 
-def rank(cuenta: dict, limit: int = 0) -> list:
-    """Los valores de ``{valor: cuántos}``, **del más usado al menos**.
-
-    Del más usado primero porque es el orden en que se elige: el color que hay en cuarenta cables
-    es el que va a llevar el cuarenta y uno. Alfabéticamente serían códigos hexadecimales
-    ordenados por su primera letra, que no significa nada.
-
-    Y con el valor como segundo criterio: dos colores empatados a tres cables tienen que salir
-    siempre en el mismo orden, o la lista baila entre dos aperturas sin que nadie haya tocado
-    nada — que es peor que un orden discutible.
-    """
-    fuera = sorted((cuenta or {}).items(), key=lambda kv: (-kv[1], str(kv[0])))
-    return [k for k, _ in (fuera[:limit] if limit else fuera)]
-
-
-class Rows(BaseStore):
-    """One table's worth of ordinary bookkeeping.
-
-    Six tables that differ in their columns and not at all in what is done to them: list, get,
-    create, update, delete. Written out six times that is five copies of "how a row becomes a
-    dict" — and the copy somebody forgets to update is the one that silently drops a column.
-
-    Public rather than private because :mod:`lib.core.dcim.builds` keeps its two tables the same
-    way. Two more copies of the same five methods, in another file, would be the exact thing
-    this class exists to stop — and one behind a leading underscore is a copy waiting to happen.
-    """
-
-    def __init__(self, db: BaseConnector, spec: TableSpec) -> None:
-        super().__init__(db)
-        self._spec = spec
-        self._TABLE = spec.name
-        self._cols = tuple(c.name for c in spec.columns)
-
-    def bootstrap(self) -> None:
-        self._db.reconcile_table(self._spec)
-
-    def has(self, col: str) -> bool:
-        """Si esta tabla lleva esta columna.
-
-        Para que quien recorre el almacén DESCUBRA cuáles llevan número de inventario en vez de
-        traer una lista escrita a mano. Una lista es algo que hay que acordarse de tocar el día
-        que una tabla más lo lleve, y no acordarse no da ningún error: da un número repetido.
-        """
-        return str(col or '') in self._cols
-
-    def counts(self, col: str) -> dict:
-        """``{valor: cuántos}`` — lo que esa columna tiene puesto, sin los vacíos.
-
-        En la BASE, agrupando: traerse la tabla entera para contar cinco valores distintos
-        construye un diccionario por fila de toda la instalación y los tira todos menos cinco.
-
-        Los NÚMEROS y no sólo los valores porque hay quien tiene que sumar los de dos tablas: un
-        latiguillo rojo y un cable de corriente rojo son el mismo rojo, y dos listas ordenadas no
-        se pueden mezclar sin volver a contar.
-        """
-        if not self.has(col):
-            return {}
-        sql = (f"SELECT {col}, COUNT(*) AS n FROM {self._sql_table} "
-               f"WHERE {col} <> '' GROUP BY {col}")
-        return {r[0]: int(r[1] or 0) for r in (self._db.fetchall(sql) or ()) if r and r[0]}
-
-    def in_use(self, col: str, limit: int = 0) -> list:
-        """Los valores que ya tiene esa columna, **del más usado al menos**.
-
-        Para poder ofrecer lo que la casa ya usa en vez de una lista escrita a mano: los colores
-        de latiguillo de una instalación son cinco, y elegirlos de una rueda de dieciséis
-        millones la deja con nueve azules que no son el mismo azul.
-
-        Del más usado primero porque es el orden en que se elige: el color que hay en cuarenta
-        cables es el que va a llevar el cuarenta y uno. Alfabéticamente serían códigos
-        hexadecimales ordenados por su primera letra, que no significa nada.
-
-        En la BASE, agrupando: traerse la tabla entera para contar cinco valores distintos
-        construye un diccionario por fila de toda la instalación y los tira todos menos cinco.
-        """
-        return rank(self.counts(col), limit)
-
-    def _row(self, row) -> dict:
-        return {name: row[i] for i, name in enumerate(self._cols)}
-
-    def list(self, where: str = '', params: tuple = (),
-             limit: int = 0, offset: int = 0) -> list[dict]:
-        """Las filas que cumplan *where*, opcionalmente **de** *offset* y **hasta** *limit*.
-
-        El tope es de la consulta y no del que llama: traer la tabla entera para quedarse con
-        treinta filas construye un diccionario por fila de toda la instalación y luego lo tira.
-        En una sala pequeña no se nota; es exactamente el trabajo que no se nota hasta que hay
-        una sala grande, que es cuando ya está escrito en cuatro sitios.
-
-        `ORDER BY uid` cuando se pagina, y sólo entonces: sin un orden, «las treinta siguientes»
-        no significa nada —dos motores pueden devolver las mismas filas en distinto orden— y
-        paginar sobre eso repite unas y se salta otras. Por `uid` y no por un campo con sentido
-        porque es el único que existe en todas estas tablas y es único: un orden estable es lo
-        que hace que la página dos sea la página dos.
-        """
-        sql = f'SELECT {", ".join(self._cols)} FROM {self._sql_table}'
-        if where:
-            sql += f' WHERE {where}'
-        if limit or offset:
-            sql += ' ORDER BY uid'
-            sql += f' LIMIT {int(limit) if limit else -1} OFFSET {int(offset)}'
-        return [self._row(r) for r in (self._db.fetchall(sql, params) or ())]
-
-    def get(self, uid: str) -> dict | None:
-        rows = self.list('uid = ?', (str(uid or ''),))
-        return rows[0] if rows else None
-
-    def create(self, data: dict, *, actor: str = '') -> str:
-        uid = str(data.get('uid') or new_uid())
-        values = dict(data)
-        values.update({'uid': uid, 'created_at': BaseStore._now(), 'updated_at': BaseStore._now(),
-                       'updated_by': str(actor or '')})
-        cols = [c for c in self._cols if c in values]
-        self._db.execute(
-            f'INSERT INTO {self._sql_table} ({", ".join(cols)}) '
-            f'VALUES ({", ".join("?" for _ in cols)})',
-            tuple(values[c] for c in cols))
-        self._db.commit()
-        self._stamp()
-        return uid
-
-    def update(self, uid: str, data: dict, *, actor: str = '') -> bool:
-        values = {k: v for k, v in (data or {}).items()
-                  if k in self._cols and k not in ('uid', 'created_at')}
-        if not values:
-            return False
-        values['updated_at'] = BaseStore._now()
-        values['updated_by'] = str(actor or '')
-        cols = list(values)
-        self._db.execute(
-            f'UPDATE {self._sql_table} SET {", ".join(f"{c} = ?" for c in cols)} WHERE uid = ?',
-            tuple(values[c] for c in cols) + (str(uid or ''),))
-        self._db.commit()
-        self._stamp()
-        return True
-
-    def delete(self, uid: str) -> bool:
-        self._db.execute(f'DELETE FROM {self._sql_table} WHERE uid = ?', (str(uid or ''),))
-        self._db.commit()
-        self._stamp()
-        return True
-
-    def _stamp(self) -> None:
-        try:
-            self.stamp()
-        except Exception:                       # pylint: disable=broad-except
-            pass                                # freshness is a hint, never a write barrier
-
-
 class DcimStore:
     """The physical inventory: the containment chain, and who owns what.
 
@@ -1045,8 +876,13 @@ class DcimStore:
 
     def __init__(self, db: BaseConnector) -> None:
         self._db = db
-        self.orgs = Rows(db, _ORG)
-        self.owners = Rows(db, _OWNER)
+        # Las empresas y lo que se dijo de cada cosa, que ya no son de este paquete. Se traen
+        # aqui porque casi toda pantalla de inventario pregunta las dos cosas a la vez —donde
+        # esta algo y de quien es— y hacer que cada una sostenga dos almacenes seria repartir
+        # el trabajo de juntarlos entre cuarenta sitios.
+        self._orgs = OrgsStore(db)
+        self.orgs = self._orgs.orgs
+        self.owners = self._orgs.owners
         self.sites = Rows(db, _SITE)
         self.rooms = Rows(db, _ROOM)
         self.racks = Rows(db, _RACK)
@@ -1408,8 +1244,7 @@ class DcimStore:
     # ── Ownership: what was SAID. The inheritance is in owners.py ─────────────
 
     def owner_said(self, scope: str, uid: str) -> str:
-        rows = self.owners.list('scope = ? AND uid = ?', (str(scope or ''), str(uid or '')))
-        return str(rows[0]['org_uid']) if rows else ''
+        return self._orgs.said_of(scope, uid)
 
     def owners_map(self) -> dict:
         """Every declared ownership, as ``{(scope, uid): org_uid}``.
@@ -1417,34 +1252,11 @@ class DcimStore:
         One read for the whole picture, because the resolver runs per node and a query per node
         is the shape that makes a room of forty racks take a second to draw.
         """
-        return {(str(r['scope']), str(r['uid'])): str(r['org_uid'])
-                for r in self.owners.list()}
+        return self._orgs.said()
 
     def set_owner(self, scope: str, uid: str, org_uid: str, *, actor: str = '') -> bool:
-        """Say who owns something — or, with an empty *org_uid*, stop saying.
-
-        Clearing is not "owned by nobody": it is back to inheriting, which is a different state
-        and the one somebody wants when a rack stops being an exception.
-        """
-        scope, uid = str(scope or ''), str(uid or '')
-        if scope not in OWNER_SCOPES or not uid:
-            return False
-        self._db.execute('DELETE FROM dc_owner WHERE scope = ? AND uid = ?', (scope, uid))
-        if str(org_uid or ''):
-            self._db.execute(
-                'INSERT INTO dc_owner (scope, uid, org_uid, set_at, set_by) '
-                'VALUES (?, ?, ?, ?, ?)',
-                (scope, uid, str(org_uid), BaseStore._now(), str(actor or '')))
-        self._db.commit()
-        self.owners._stamp()                    # noqa: SLF001  (its own table's stamp)
-        return True
+        return self._orgs.set_owner(scope, uid, org_uid, actor=actor)
 
     def forget_scope(self, scope: str, uid: str) -> None:
-        """Drop the ownership rows of something being deleted.
+        self._orgs.forget_scope(scope, uid)
 
-        Not a foreign key: the ownership table deliberately spans scopes that live in different
-        tables — and one of them, `host`, is not this domain's table at all.
-        """
-        self._db.execute('DELETE FROM dc_owner WHERE scope = ? AND uid = ?',
-                         (str(scope or ''), str(uid or '')))
-        self._db.commit()

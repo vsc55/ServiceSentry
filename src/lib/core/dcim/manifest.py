@@ -10,9 +10,11 @@ addresses, bound credentials, the buttons that change them. Somebody who needs t
 room and find the failing box needs none of that, and the person who plans capacity needs even
 less: how many U are free is a fact about a cabinet, not about a machine.
 
-**Moving a device is not changing whose it is.** ``dcim_edit`` reorders the cabinet;
-``dcim_org_edit`` moves a piece of property between companies. In a group that means billing,
-and it means who can see it — which is why the two are separate flags rather than one "edit".
+**Moving a device is not changing whose it is.** ``dcim_edit`` reorders the cabinet; deciding
+whose a piece of property is belongs to the company registry, and its flag lives there
+(``orgs_edit``, in :mod:`lib.core.orgs.manifest`) — in a group that decides billing and who may
+see what, which is not the same authority as tidying a rack, and it is not this section's
+authority either: the same decision files a host, a mailbox and a subscription.
 
 **And a shared rack is why ownership has a scope of its own.** A cabinet holding equipment of
 several companies breaks the assumption that seeing a place means seeing what is in it: somebody
@@ -32,18 +34,9 @@ MODULE_PERMISSIONS = {
         # The inventory, the elevations and the maps. Both roles, like `infra_view`: knowing
         # which rack a machine is in is a read, and it is the read somebody does while walking.
         {'flag': 'dcim_view', 'roles': ('editor', 'viewer')},
-        # …and every company's things, rather than only those of the companies granted one by
-        # one. Both roles by default, so nothing narrows on the day this lands: a role is
-        # narrowed by NOT holding this and holding `org.<uid>.view` instead, which is opt-in
-        # and visible in the role editor rather than implied by an absence.
-        {'flag': 'dcim_all_view', 'roles': ('editor', 'viewer')},
         # Create and move sites, rooms, racks and items. `editor`: it is a decision about the
         # installation, and a wrong one puts a 2U device in a U that has not got the room.
         {'flag': 'dcim_edit', 'roles': ('editor',)},
-        # …and whose each thing is. Its own flag on purpose — see the docstring. No role by
-        # default, not even `editor`: in a group this decides what gets billed to whom and who
-        # is allowed to see it, which is not the same authority as tidying a cabinet.
-        {'flag': 'dcim_org_edit', 'roles': ()},
         # Declare and retire cabling and its labels. `editor`, like moving equipment: it is the
         # same act of recording what somebody did with their hands.
         {'flag': 'dcim_cable_edit', 'roles': ('editor',)},
@@ -57,7 +50,7 @@ MODULE_PERMISSIONS = {
         # porque DECIDIR lo que se compra y COLOCAR una caja en un U los hacen personas distintas
         # en momentos distintos, y con una sola quien monta un rack rescribe lo que compra la
         # empresa. `editor` de salida: es una decisión técnica, no una de dinero como
-        # `dcim_org_edit` — lo que importa es que se pueda quitar sin quitar nada más.
+        # `orgs_edit` — lo que importa es que se pueda quitar sin quitar nada más.
         {'flag': 'dcim_build_edit', 'roles': ('editor',)},
     ),
 }
@@ -76,9 +69,6 @@ AUDIT_EVENTS = [
     # entered for the first time.
     {'key': 'dcim_placed', 'severity': 'muted'},
     {'key': 'dcim_removed', 'severity': 'info'},
-    # Whose things are. Louder than either: this line is the answer to "since when was that
-    # ours", and it is the one somebody goes looking for months later.
-    {'key': 'dcim_owner_set', 'severity': 'info'},
     # Asking a GitHub library what it holds. Reading does not get audited, but this is not
     # reading: it is a request this server makes to somebody else's machine, and it can end in
     # "the hour's sixty requests are gone" or "that branch is not there". The line carries the
@@ -139,6 +129,7 @@ from .profiles import SCHEMA as _PROFILES      # noqa: E402
 from .revisions import SCHEMA as _REVS          # noqa: E402
 from .brands import SCHEMA as _BRANDS          # noqa: E402
 from .schemas import SCHEMA as _SCHEMAS        # noqa: E402
+from .store import OWNER_SCOPES as _OWNER_SCOPES   # noqa: E402
 from .store import SCHEMAS as _INVENTORY       # noqa: E402
 
 DB_TABLES = (list(_INVENTORY) + list(_BUILDS)
@@ -148,3 +139,18 @@ DB_TABLES = (list(_INVENTORY) + list(_BUILDS)
 # (lib/core/jobs). Declared rather than reached into: a core that imported four job
 # registries by name would have to be edited to learn about a fifth.
 from .jobs import live as BACKGROUND_JOBS      # noqa: E402,F401  (a descriptor)
+
+
+# ── What of this package can belong to a company ─────────────────────────────────────────
+#
+# Declared rather than listed in the core: the ownership table spans scopes that live in tables
+# `lib.core.orgs` has never heard of, so a list there would be one the core edits every time a
+# package learns to own something — the core naming a domain.
+#
+# The four containment levels, and `host` for the things that are somebody's and are in no rack
+# — a VM, a VIP, a machine on a desk. All four resolve through the same walk, because they are
+# the same chain read from different heights.
+from .owners import chain as _chain             # noqa: E402
+
+ORG_SCOPES = tuple({'scope': s, 'label_key': f'orgs_scope_{s}', 'chain': _chain}
+                   for s in _OWNER_SCOPES)

@@ -201,7 +201,7 @@ function showWebhookModal(id) {
         <div class="row mb-2 align-items-start">
           <label class="col-sm-3 col-form-label col-form-label-sm fw-semibold">${esc(_whl('webhook_url'))} <span class="text-danger">*</span>${hi('url').icon}</label>
           <div class="col-sm-9">
-            <input type="url" id="whUrl" class="form-control form-control-sm"
+            <input type="url" id="whUrl" class="form-control form-control-sm" required
               value="${escAttr(wh?.url || '')}" placeholder="https://hooks.example.com/notify"
               oninput="this.classList.remove('is-invalid')">
             <div class="invalid-feedback"></div>

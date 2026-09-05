@@ -167,7 +167,7 @@ function _renderHostModalBody() {
     const general = `<div class="row g-3">
         <div class="col-sm-6">
             <label class="form-label small fw-semibold">${esc(t('host_name'))}</label>
-            <input type="text" class="form-control form-control-sm" id="hmName"
+            <input type="text" class="form-control form-control-sm" id="hmName" required
                    value="${escAttr(d.name)}" oninput="_hostDraft.name=this.value">
         </div>
         <div class="col-sm-6">

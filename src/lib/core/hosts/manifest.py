@@ -124,3 +124,14 @@ AUDIT_EVENTS = [
     {'key': 'host_updated', 'severity': 'info'},
     {'key': 'hosts_migrated', 'severity': 'info'},
 ]
+
+
+# ── What of this package can belong to a company ─────────────────────────────────────────
+#
+# A machine belongs to somebody whether or not it is bolted into a rack: a VM, a VIP, a laptop
+# on a desk. The scope lived in the inventory's list of owner scopes, which said that a host
+# with no rack was the inventory's business — it is not; the registry is here.
+#
+# No `chain`: a host has no container to inherit from. It belongs to whoever was told about it,
+# and to nobody otherwise — which is the honest answer and the one every screen already draws.
+ORG_SCOPES = ({'scope': 'host', 'label_key': 'orgs_scope_host'},)

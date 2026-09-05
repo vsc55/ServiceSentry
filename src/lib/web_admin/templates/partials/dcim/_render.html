@@ -79,26 +79,15 @@ function _dcimMay(flag) {
 
 /** Escribir algo, y saber si salió bien — sin importar el verbo.
  *
- *  Los tres ayudantes del panel contestan de tres formas: `apiPost` y `apiDelete` devuelven
- *  `{status, data}` y `apiPut` devuelve **el cuerpo**, con su `ok` y su `error` un nivel más
- *  arriba. Leerlos todos igual hace que una escritura correcta parezca un fallo — pasó dos
- *  veces seguidas en esta pantalla, primero con el POST y luego con el PUT, y las dos veces el
- *  dato SÍ se había guardado, que es la peor forma de equivocarse: la pantalla miente sobre
- *  algo que ya ocurrió.
+ *  El normalizador está en `partials/core/_api.html` (`apiSend`): se escribió aquí, y dejó de
+ *  ser cosa de esta sección en cuanto una segunda pantalla tuvo que escribir. El nombre corto
+ *  se queda porque lo usan sesenta llamadas de esta sección y son sesenta llamadas correctas.
  *
- *  Aquí se normalizan, una vez, y ningún sitio de esta sección vuelve a tener la ocasión. */
-async function _dcimSend(method, url, body) {
-    const raw = method === 'PUT' ? await apiPut(url, body)
-              : method === 'DELETE' ? await apiDelete(url)
-              : await apiPost(url, body);
-    if (!raw) return {ok: false, error: ''};              // la conexión, no la petición
-    // `{status, data}` de POST y DELETE; el cuerpo pelado de PUT.
-    const data = (raw.data !== undefined) ? (raw.data || {}) : raw;
-    const bad = raw.status !== undefined && raw.status !== 200;
-    // El cuerpo también: casi nadie lo mira —una escritura que sale bien no tiene nada que
-    // contar— pero una importación sí tiene que decir qué hizo, y sacarlo por fuera del
-    // normalizador sería volver a tener dos formas de leer una respuesta en esta pantalla.
-    return {ok: !bad && !data.error, error: String(data.error || ''), data};
+ *  Una función y no `const _dcimSend = apiSend`: todo esto acaba en UN script concatenado, y
+ *  un `const` se evalúa en su sitio — si este trozo entrara antes que `_api.html`, sería un
+ *  ReferenceError al cargar la página entera. Así se resuelve al llamar. */
+async function _dcimSend(metodo, url, cuerpo) {
+    return apiSend(metodo, url, cuerpo);
 }
 
 //: Volver a esta sección vuelve a pedir el armario que estuviera abierto.
@@ -173,7 +162,6 @@ async function renderDcim() {
                    : _dcBuilds ? _dcBuildsHtml()
                    : _dcWire ? _dcWireHtml()
                    : _dcDev ? _dcDevHtml()
-                   : _dcOrgs ? _dcOrgsHtml()
                    : _dcSrc ? _dcSrcHtml()
                    : _dcimBoard ? _dcimBoardHtml()
                    : _dcimRack ? _dcimRackHtml()
@@ -284,7 +272,6 @@ function _dcimViewWanted() {
     const donde = _dcCat ? 'catalog' : _dcBuilds ? 'builds'
                 : _dcWire ? 'wiring'
                 : _dcDev ? 'devices'
-                : _dcOrgs ? 'orgs'
                 : _dcSrc ? 'sources' : _dcimBoard ? 'board' : 'inventory';
     if (!quiere || quiere === donde) return false;
     _dcimGo(quiere);
@@ -316,14 +303,12 @@ function _dcimGo(donde) {
     _dcSrc = null;
     _dcWire = null;
     _dcDev = null;
-    _dcOrgs = null;
     _dcimBoard = null;
     if (donde === 'catalog') return _dcCatOpen();
     if (donde === 'wiring') return _dcWireOpen();
     if (donde === 'devices') return _dcDevOpen();
     if (donde === 'builds') return _dcBuildsOpen();
     if (donde === 'sources') return _dcSrcOpen();
-    if (donde === 'orgs') return _dcOrgsOpen();
     if (donde === 'board') return _dcimOpenBoard();
     // Al inventario se vuelve del todo: si se quedara el rack abierto, «Inventario» llevaría al
     // rack, que es donde ya se estaba.

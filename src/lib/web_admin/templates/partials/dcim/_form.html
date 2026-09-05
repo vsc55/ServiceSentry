@@ -354,7 +354,8 @@ function _dcimFieldHtml(fld, i, val, kind) {
         // El prefijo lo dice el campo: escrito a mano, la primera elección que no fuese una
         // cara del rack habría salido con el nombre de una.
         return `<select id="dcim-f-${i}" class="form-select form-select-sm"
-                    style="max-width:${fld.w}" ${fld.drives ? _DCIM_DRIVE : ''}>
+                    style="max-width:${fld.w}"${fld.req ? ' required' : ''} ${
+                    fld.drives ? _DCIM_DRIVE : ''}>
             ${fld.choices.map(c => `<option value="${escAttr(c)}"${
                 String(val) === String(c) ? ' selected' : ''}>${
                 esc(t((fld.prefix || '') + c))}</option>`).join('')}
@@ -367,6 +368,7 @@ function _dcimFieldHtml(fld, i, val, kind) {
     const list = _dcimListId(fld);
     return `<input id="dcim-f-${i}" class="form-control form-control-sm${
                 fld.type === 'number' || fld.type === 'coord' ? ' ss-tabular' : ''}"
+                ${fld.req ? 'required' : ''}
                 ${list ? `list="${list}" autocomplete="off"` : ''}
                 ${fld.pairs ? `oninput="_dcimSplitCoords(this, ${i}, ${jsStr(kind)})"` : ''}
                 style="max-width:${fld.w}" type="${

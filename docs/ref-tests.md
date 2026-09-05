@@ -5202,6 +5202,47 @@ Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>
 
 ---
 
+**El registro de empresas del core: su API, sus permisos y de dónde vino.** La pertenencia es el
+otro eje de todo lo que el panel guarda, y vivía dentro del inventario físico — que es donde se
+hizo la pregunta por primera vez, y un accidente de calendario: la misma sociedad que paga el
+armario tiene usuarios en el directorio y licencias en Microsoft 365. Se comprueba lo que el
+traslado tiene que seguir cumpliendo: que se ficha **cualquier ámbito que alguien declare y
+ninguno más** —un armario del inventario y una máquina del registro, que son de dos paquetes
+distintos, y una errata rechazada en vez de escrita como una fila que nada volverá a leer—; que
+**leer el registro y decidir de quién es cada cosa son dos autoridades distintas**, y que ninguna
+de las dos es «ver el inventario» —la sección conserva su lectura corta, la de los nombres, porque
+sin ella no hay chapa que pintar ni desplegable con el que fichar un armario—; que quien tiene una
+empresa concedida **ve esa** y no la lista de sociedades del grupo, y que quien no tiene ninguna ve
+una lista vacía y no un 403; que borrar una **deja lo suyo sin fichar** en vez de llevárselo, y que
+tanto eso como fichar algo dejan su línea de auditoría; y que una instalación que venía con
+`dc_org`/`dc_owner` **se las encuentra donde ahora se buscan**, copiadas y no renombradas, sin
+pisar lo que ya hubiera. Y que **dos sociedades no se llamen igual, dicho con palabras**: el índice
+único de `org.name` contesta con un `IntegrityError`, que le llega a una persona como un 500 con
+una traza encima de la pantalla — salió así al teclear dos veces la misma empresa. Se comprueba en
+el alta y en el renombrado, sin distinguir mayúsculas ni espacios, también para la abreviatura
+—dos chapas iguales en un alzado no dicen de quién es el armario—, dejando que muchas no tengan
+ninguna, y sin que guardarse a sí misma cuente como repetirse.
+
+**Archivo:** `tests/integration/test_wa_orgs.py` — 23 tests
+
+---
+
+**La pantalla de empresas, ejecutada.** Un guardián que lee el fuente dice que la función está
+escrita; no dice que dibuje. Así que se carga el guion en `node` con un DOM de mentira y se llama a
+lo que la pantalla pone de su parte — que es poco a propósito, porque la lista es **la tabla del
+panel**: las tarjetas, las chapas de lo fichado por ámbito, los dos botones de una fila y qué se
+manda al guardar. Se comprueba que las tarjetas dibujen y lleven la descripción y las siglas, que
+no pinten en crudo lo que alguien escribió, y que usen la tarjeta compartida en vez de una suya;
+que un ámbito sin nada no invente una chapa; que el lápiz abra el cuadro y la papelera pregunte, y
+que quien no puede escribir no vea ninguno de los dos —un botón que lleva a un 403 es peor que no
+estar—; que lo que nadie tocó no mande nada, lo cambiado vaya con PUT y lo nuevo con POST sin
+espacios de sobra, y que sin nombre o sin abreviatura no se guarde. Y que el marcado de lo
+obligatorio sea **del panel**: esta pantalla tuvo el suyo una tarde, y lo que le toca es declarar.
+
+**Archivo:** `tests/integration/test_wa_orgs_page.py` — 19 tests
+
+---
+
 **Archivo:** `tests/integration/test_wa_bundle_syntax.py` — 2 tests
 
 **El guion que se sirve, ¿es JavaScript?** Parece una pregunta tonta y costó una sección en
@@ -9238,6 +9279,48 @@ No se juzga cómo se ven, que ningún test puede. Se fijan las cuatro cosas que 
 
 ---
 
+**La sección de empresas: su cableado, y que su lista sea la tabla del panel.** Una sección no es
+un fichero: es una entrada en un registro —que le da URL, ruta, puerta de permiso y sitio en la
+barra—, un panel donde dibujarse, su JavaScript en el guion y una función cuyo nombre el registro
+nombra; las cuatro fallan en silencio. Aquí se comprueba que la declare **su propio paquete**
+(`PAGE` en su manifiesto, con su permiso y su sección de idioma) y que dibuje en el contenedor que
+le den en vez de escribir el id a mano. Y la otra mitad: que la lista sea `createListTable` y no
+una tabla escrita a mano —ni un `<table>` suelto en el fichero—, que declare lo que una tabla
+declara, que traiga las cuatro columnas de siempre del sitio donde están escritas una vez, que se
+recuerde por usuario y se pueda nombrar en Personalización, que el cambiador de vista sea el
+compartido, y que el filtro filtre en el navegador y no con un viaje por letra tecleada. Más que
+corregir vaya en un cuadro —con las dos cajas sin las que no hay empresa declaradas `required` y
+la descripción no—, que no toque la lista hasta que el servidor conteste, que un nombre repetido se
+cuente dentro del cuadro, y que las filas **no** miren la bandera de escritura: si la mirasen,
+quien sólo puede leer vería una lista vacía.
+
+**Archivo:** `tests/meta/test_wa_orgs_page.py` — 17 tests
+
+---
+
+**Lo obligatorio se ve, y se ve antes de pulsar guardar.** El panel siempre supo qué campos no se
+pueden dejar en blanco —cada formulario lo comprueba al guardar y suelta un aviso—, pero eso lo
+dice **después de pulsar**, cuando el renglón ya se dio por terminado, y sin señalar en cuál de las
+ocho cajas falta. La regla es una y está escrita una vez: una caja declarada `required` se marca en
+rojo mientras esté vacía. Se vigilan dos cosas distintas. Que el mecanismo siga siendo **uno y
+genérico**: que marque por estar vacía y no por otra cosa (con `trim`, o una caja con espacios
+contaría como llena), que una casilla no se marque —su vacío es un estado legítimo—, que se entere
+de lo que se teclea **sin que ninguna pantalla lo llame** y de lo que se dibuja **mirando sólo lo
+que entra en el documento**, que escuche en burbuja y no en captura —media docena de cajas llevan
+un `oninput` que quita esa misma clase, de cuando sólo señalaba un guardado rechazado, y capturando
+la marca no llegaría a verse—, y que **ninguna pantalla se escriba la suya**, porque dos reglas son
+una que se queda vieja. Y que lo que el panel YA se niega a guardar vacío **siga declarándose**:
+usuario, grupo, rol, host, evento, webhook, canal de Teams, token, lista blanca, credencial y las
+empresas, mirando la etiqueta de esa caja y no el fichero entero —que diría que sí en cuanto
+cualquier otra lo lleve—, más que el inventario lo saque de su registro (`req: true`) en vez de
+declararlo campo a campo. Dos de estas guardas nacieron laxas y se apretaron comprobándolas por
+mutación: buscar el nombre `MutationObserver` daba por bueno un `if (false && …)`, y leer 400
+caracteres tras una escucha daba por buena la de al lado.
+
+**Archivo:** `tests/meta/test_wa_required_fields.py` — 9 tests
+
+---
+
 **Archivo:** `tests/meta/test_wa_dcim_section.py` — 290 tests
 
 El cableado que hace que la sección `/dcim` exista —registro de páginas, pane, bundle, la función que el registro nombra y las rutas— más las convenciones que se rompen sin que nada falle: nada de diálogos del navegador, nada de botones transparentes, lo que teclea una persona sale escapado, y **lo ajeno no se dibuja con nombre**. Y que **dónde está un rack no es la vista de nadie**: soltarlo escribe en el servidor, no en la disposición guardada del navegador, y un rechazo lo devuelve a donde el servidor lo tiene. Y **las coordenadas**: que no son campos numéricos —un `<input type=number>` descarta un texto con coma, así que un pegado de «41.53, 0.42» se perdería entero y la caja se quedaría en blanco—, que cada una sabe cuál es la otra, que el par se reparte al escribir y también al guardar, que un texto que no es un par se deja en paz, y que la insignia no las redondea a cuatro decimales: son once metros, o sea toda la sede, presentados como el dato guardado. Y **que el marco del plano no mezcle unidades**: el origen en milímetros con el tamaño en unidades de dibujo daba una ventana válida mirando a veinte metros de donde estaba el dibujo —todo pintado y la pantalla en blanco, sin un error en la consola—; y que el marco cuente todo lo que se dibuja, que es la trampa que este panel ha pisado tres veces. Y **que el visor 3D no pide nada a fuera**: ni CDN ni librería empotrada, WebGL del propio navegador, con una frase cuando no lo hay —una pantalla negra sin explicación es peor— y soltando el contexto al cerrar, porque un navegador aguanta unos pocos y deja el undécimo en negro sin ningún error. Y que lo exportado no lleva lo que hay DENTRO de un rack: un plano describe una sala. Y que **la inversa de la altura es exacta**: `_dceUAt` y `_dceY` tienen que ser inversas de verdad o arrastrar un servidor lo deja una U por encima —sin ningún error, con el dibujo confirmando el número equivocado—; escrito con `round` fallaban las 84 comprobaciones, porque el centro de una fila cae en `.5`. Y que lo ajeno no se arrastra: moverlo sería reorganizar el armario de otra sociedad sin verlo. Y que **el alzado dice qué sale de cada equipo** con marcas y no con cables —cuarenta latiguillos dibujados son una maraña que tapa lo que se venía a mirar—, sacadas de lo ya cargado y no de una petición por fila, acotadas para que no tapen el nombre, y **sin marcas en lo ajeno**: de qué color es el latiguillo de otra sociedad también es un dato suyo. Y —la que encontró cuatro pantallas que faltaban— que **todo lo que se escribe tiene donde escribirse**: cada verbo de escritura de la sección tiene que aparecer en alguna plantilla, porque una ruta que solo existe en la API es una función que no existe. Los tests no lo ven porque prueban la API, que es justo la mitad que sí estaba. Y **que toda función que se llama esté escrita**, más que ningún `async` se quede colgando: los dos fallos que un comprobador de sintaxis da por buenos y que dejan la pantalla en blanco — reescribiendo un bloque me llevé por delante dos funciones que seguían llamándose desde tres sitios, y al insertar otra delante de un `async function` quedó un `async` suelto que el navegador leyó como una variable que no existe. Los dos rompieron el guion entero, no solo su parte. Y que **mirar una plataforma no sea editarla**: la tabla enseña cinco columnas de quince campos, así que para leer los otros diez había que abrir el formulario — y abrir el formulario para leer es la forma de cambiar algo sin querer. La línea abre una ficha de solo lectura (y se vigila que lo siga siendo: un `<input>` colado ahí escribiría en el borrador del formulario), marcar y borrar cortan la propagación para no abrirla, y del mirar se pasa al escribir con un botón. Y que **un conector se pueda añadir desde donde se echa en falta**: la lista llevaba al editor por ninguna parte y remataba diciendo que se edita un fichero del disco; ahora tiene su botón, la ficha lleva al formulario, la foto que alguien suba manda sobre el dibujo genérico —al revés no serviría de nada: el conector añadido tiene forma `other`, que es justo el genérico—, las formas que se ofrecen salen del propio SVG en vez de una lista copiada, y **un filtro no puede renumerar las filas**: el formulario escribe en `doc.connectors[i]`, así que filtrar sin conservar el índice real editaría el conector de al lado sin decirlo. Y **el historial de un armario**: una foto por cambio contesta las dos preguntas que se le hacen —cómo estaba en marzo y qué le pasó— porque de una lista de acontecimientos no se reconstruye un estado sin reproducirlos todos; se vigila que **ninguna escritura se olvide de dejar la suya**, porque una que falte no deja un hueco: mezcla dos cambios en un renglón y se lo atribuye a quien hizo el segundo, y eso se lee perfectamente bien contando otra cosa. Y que **la fila diga qué es y no lo diga todo**: diez columnas de formulario no entran en ningún diálogo, y ensancharlo hasta que quepan es perseguir el ancho de la pantalla de otro — la fila contesta cómo se llama, de qué tipo, qué cara tiene y en qué casillas se ofrece, y la letra pequeña (velocidad, generaciones, qué lleva, qué es) se pliega, con el galón diciendo **si hay** para no tener que abrir los ciento veintiocho — si hay y no cuánta: un número que suma una velocidad, tres generaciones, dos señales y una nota no cuenta nada, porque «1» no dice cuál de las cuatro cosas es. Y **el formulario de inventario**: que ninguna columna de `dc_item` se quede sin campo que la escriba (`host_uid` primero, `asset` y `description` después: se guardan, se devuelven, y valían siempre su valor por defecto), que lo obligatorio lo declare el campo y no su posición en la lista, que guardar diga por qué no guarda, que una lista cerrada se elija de un desplegable en vez de dejar un uid escrito en la caja, que un valor que no está en esa lista no se pierda al abrir la ficha, y que el formulario abra en un cuadro con rótulos en vez de incrustarse entre las tarjetas. Y **la pantalla de un armario**: que el dibujo y sus cuatro listas vayan en columnas y no apilados —insertadas encima, cada botón movía lo que estabas mirando—, que el alzado mida lo que mide el armario (`aspect-ratio`, no `flex:1 1 auto`: cinco U son ciento cincuenta píxeles y la caja crecía hasta el borde), que lo cargado se olvide al cambiar de rack —los cables de uno bajo el nombre del otro no lo diría nadie—, que un botón que tarda **dibuje su hueco antes de pedir nada**, y que la tabla diga lo que el dibujo no puede: serie, inventario y garantía, con la vencida en rojo. Y el alzado: **a su tamaño** (un U mide 22 px y los nombres están escritos para esa altura; encogido a la mitad es una miniatura que se lee con lupa), que **un dibujo distinto no herede la ventana de zoom del anterior** —vive en el lienzo compartido y no se borra sola: un armario de 5 U abierto detrás de uno de 42 salía diminuto en una esquina— y que haya **botón para volver**, porque una rueda de más no tiene gesto que la deshaga —y dentro del propio dibujo, que es sobre lo que actúan—. Y que **el dibujo y la lista señalen lo mismo**: uno dice dónde está y la otra qué es, y sin unirlos hay que buscar a mano en el segundo lo que se acaba de señalar en el primero; más que la tarjeta de la lupa se aparte cuando describe la última U, porque pegada al borde de abajo tapaba justo lo que estaba explicando — y colocada **midiendo la pantalla**, que es lo único que sigue siendo cierto con el zoom puesto: la U que se ve abajo del todo no es la que tiene la coordenada más grande. Y que el armario **se pueda agrandar** sobre la lista cuando hace falta, reencuadrando al hacerlo: el mismo trozo en un hueco del doble es no haber agrandado nada. Y **lo que va sobre una bandeja se dibuja dentro de ella**: «Bandeja (+2)» era lo que se podía decir sin sitio, y un recuento no enseña cuál de los dos mini PC está en aviso. Se comprueba que se pinten como hermanos y no dentro del `<g>` de la bandeja (`pointerenter` no burbujea, así que salir de un mini PC hacia ella dejaría la tarjeta vacía con el ratón encima de algo), que el rectángulo se calcule una sola vez, que la bandeja conserve sitio para su nombre, y que las cajas midan contra SU ancho y no contra el de la cara — desde que algo puede tomar media U, `_DCE.W` dibujaba el engranaje encima de la caja de al lado.
@@ -9321,6 +9404,24 @@ renderiza la página de verdad y mira.
 | `test_a_module_tab_is_sorted_among_the_core_ones` | **Mezclada antes de ordenar**, no añadida después: una sección de módulo clavada al final se lee como un añadido, y de dónde viene una entrada no es lo que busca quien recorre un menú. Dicho sin depender del idioma — su posición entre las etiquetas es la que le da la ordenación, caiga donde caiga en español o en inglés |
 | `test_a_section_in_the_panel_lists_its_views` | `__page__.views` le daba desplegable a una sección de primer nivel y no a una del panel de System: misma declaración, mismo mecanismo, otra rama de la barra lateral — así que una sección que se mudaba al panel perdía sus vistas en silencio. Las vistas son de la **sección**; dónde la dibuja la barra lateral no es propiedad de nada. Y van marcadas como cualquier otro sub-elemento (`data-subtab="#view-<id>-<slug>"`), porque el resaltado único y la miga de pan ya leen eso, y un segundo mecanismo para el mismo trabajo es como acaban dos discrepando. La sección conserva además **su URL** (`/module/snmp`), que es lo que hace que el enlace copiado nombre una vista y no `?tab=` |
 | `test_a_section_with_its_own_renderer_draws_its_own_views` | Cambiar de vista llamaba al renderizador genérico del núcleo — que pinta la disposición del núcleo desde `page_data`— encima de una página que ya había declarado que se dibuja sola. El núcleo pone el panel, la URL y qué vista nombra la URL; lo que va dentro nunca fue su mitad |
+
+---
+
+**Las empresas: quién ve qué, y qué puede ser de quién.** Sin base de datos y sin aplicación: aquí
+sólo hay aritmética de conjuntos y una lista de ámbitos declarados. El caso duro es el contenedor
+compartido —un armario con equipos de varias sociedades rompe que ver un sitio sea ver lo que hay
+dentro—, y de él salen las tres respuestas por cosa: visible, opaca, ausente. Se fija que quien
+tiene la bandera de todas no se estreche, que **«ninguna empresa» y «sin acceso» sean respuestas
+distintas** (a quien se le dio una sección y ninguna empresa le toca ver los contenedores con todo
+opaco, no un error), que el ámbito por empresa se lea de los permisos sin que se cuele el de una
+máquina por tener la misma forma, y que lo que nadie reclama lo vea cualquiera. Más la herencia:
+gana lo más cercano, se hereda si nadie lo dijo de cerca, y una cadena rota termina en vez de
+estallar. Y el registro de ámbitos: que **los declaren los paquetes y no el core** —los cuatro de
+la contención el inventario, la máquina el registro de máquinas—, que ninguno llegue sin clave de
+texto, que lo que nadie declara no se pueda fichar, y que un `host` conteste consigo mismo, que es
+lo que hace que algo sin contenedor resuelva igual que lo demás.
+
+**Archivo:** `tests/unit/test_orgs_model.py` — 18 tests
 
 ---
 

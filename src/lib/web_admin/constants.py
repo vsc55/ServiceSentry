@@ -97,16 +97,12 @@ HOME_PAGES = (
                         {'slug': 'sources', 'icon': 'bi-lightning-charge', 'kind': '',
                          'action': '',
                          'label_key': 'tab_dcim_sources'},
-                        # Las empresas, que son el otro árbol de esta sección: la contención
-                        # dice dónde está algo y la pertenencia de quién es. Era un botón en la
-                        # barra del ÁRBOL —la misma equivocación que ya se corrigió con el
-                        # catálogo y las plantillas—, así que sólo existía estando en Inventario
-                        # y desaparecía en cuanto alguien abría un armario.
-                        #
-                        # La última: se escribe el primer día y casi nunca más, y lo que se abre
-                        # cada mañana va antes.
-                        {'slug': 'orgs', 'icon': 'bi-buildings', 'kind': '', 'action': '',
-                         'label_key': 'tab_dcim_orgs'},
+                        # Las empresas estuvieron aquí una versión: la pertenencia es el otro
+                        # árbol de esta sección, así que parecía suya. No lo es —la misma
+                        # sociedad que paga el armario tiene usuarios en el directorio y
+                        # licencias en Microsoft 365—, y un registro que vive dentro de una
+                        # sección es uno que las demás no pueden usar sin nombrarla. Ahora es
+                        # del core y se declara sola (`lib/core/orgs/manifest.py::PAGE`).
                     )}},
     {'id': 'history',  'url': '/history',  'label_key': 'landing_history',
      'standalone': {'pane': 'tab-history', 'render': 'renderHistory',

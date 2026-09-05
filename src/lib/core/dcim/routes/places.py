@@ -12,10 +12,6 @@ Rutas:
     DELETE  /api/v1/dcim/features/<uid>
     GET     /api/v1/dcim/media/<path:name>
     GET     /api/v1/dcim/orgs
-    POST    /api/v1/dcim/orgs
-    PUT     /api/v1/dcim/orgs/<uid>
-    DELETE  /api/v1/dcim/orgs/<uid>
-    POST    /api/v1/dcim/owner
     GET     /api/v1/dcim/rooms/<uid>/features
     POST    /api/v1/dcim/rooms/<uid>/import
     POST    /api/v1/dcim/rooms/<uid>/plan
@@ -33,7 +29,7 @@ from flask import jsonify, request
 from lib.core.dcim import media as dcim_media
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
-from lib.core.dcim.store import FEATURE_KINDS, FEATURE_LAYERS, OWNER_SCOPES
+from lib.core.dcim.store import FEATURE_KINDS, FEATURE_LAYERS
 from lib.core.dcim.routes._common import _num, _without
 
 
@@ -42,21 +38,16 @@ def register(app, wa, C):
     @app.route('/api/v1/dcim/orgs', methods=['GET'])
     @C.view_req
     def api_dcim_orgs():
-        """Las empresas, con **qué tiene dicho cada una**.
+        """The companies, by name, for the screens of this section.
 
-        El recuento no es adorno: es la otra mitad de la pregunta que esta pantalla contesta.
-        Desde el árbol se pregunta «¿de quién es este armario?»; desde aquí, «¿qué es de esta
-        sociedad?» — y sin eso, borrar una es pulsar a ciegas: lo que era suyo deja de estar
-        fichado y nadie sabía cuánto era.
+        A READ and nothing else: creating, renaming and removing them is `/api/v1/orgs`, which
+        is the core's, because the same company that pays for the cabinet has users in the
+        directory and licences in Microsoft 365. What is left here is the half this section
+        cannot draw without — the badge on a rack and the dropdown that files one — and it goes
+        with `dcim_view`, or opening a room would need a permission about companies.
 
-        Lo DICHO y no lo heredado. Una sede de la filial B con cuarenta equipos dentro cuenta
-        como una sede: los equipos no lo dicen, lo heredan, y contarlos sería contar la misma
-        propiedad cuarenta veces. El árbol ya enseña la herencia; esta pantalla enseña las
-        decisiones que alguien tomó, que son las que se pueden cambiar.
-
-        Una lectura de `dc_owner` para todas, no una por empresa: son media docena de sociedades
-        y una consulta por cada una es la forma de que una pantalla de seis renglones haga seis
-        viajes.
+        Narrowed to what the caller may see: somebody holding one company's scope and not the
+        fleet gets that company, not the group's list of subsidiaries.
         """
         store = C.store()
         if store is None:
@@ -65,65 +56,8 @@ def register(app, wa, C):
         rows = store.orgs.list()
         if allowed is not None:
             rows = [r for r in rows if r['uid'] in allowed]
-        dicho: dict = {}
-        for (scope, _uid), org in store.owners_map().items():
-            if org:
-                dicho.setdefault(org, {})[scope] = dicho.setdefault(org, {}).get(scope, 0) + 1
-        return jsonify({'orgs': [dict(r, said=dicho.get(str(r.get('uid') or ''), {}))
+        return jsonify({'orgs': [{'uid': r['uid'], 'name': r['name'], 'short': r['short']}
                                  for r in rows]})
-
-    @app.route('/api/v1/dcim/orgs', methods=['POST'])
-    @C.org_edit_req
-    def api_dcim_org_create():
-        store = C.store()
-        data = request.get_json(silent=True) or {}
-        name = str(data.get('name') or '').strip()
-        if not name:
-            return jsonify({'error': wa._t('dcim_name_required')}), 400
-        uid = store.orgs.create({'name': name, 'short': str(data.get('short') or '').strip(),
-                                 'description': str(data.get('description') or '')},
-                                actor=C.actor())
-        return jsonify({'uid': uid})
-
-    @app.route('/api/v1/dcim/orgs/<uid>', methods=['PUT'])
-    @C.org_edit_req
-    def api_dcim_org_update(uid):
-        store = C.store()
-        if not store.orgs.get(uid):
-            return jsonify({'error': wa._t('dcim_not_found')}), 404
-        store.orgs.update(uid, request.get_json(silent=True) or {}, actor=C.actor())
-        return jsonify({'ok': True})
-
-    @app.route('/api/v1/dcim/orgs/<uid>', methods=['DELETE'])
-    @C.org_edit_req
-    def api_dcim_org_delete(uid):
-        store = C.store()
-        # …and every ownership that named it, or the rows outlive the company and the resolver
-        # returns a uid nothing can be looked up by.
-        for (scope, thing), org in list(store.owners_map().items()):
-            if org == uid:
-                store.set_owner(scope, thing, '')
-        store.orgs.delete(uid)
-        return jsonify({'ok': True})
-
-    @app.route('/api/v1/dcim/owner', methods=['POST'])
-    @C.org_edit_req
-    def api_dcim_set_owner():
-        """Say whose something is. An empty ``org_uid`` stops saying, which is back to
-        inheriting — a different state from "owned by nobody"."""
-        store = C.store()
-        data = request.get_json(silent=True) or {}
-        scope = str(data.get('scope') or '')
-        uid = str(data.get('uid') or '')
-        if scope not in OWNER_SCOPES or not uid:
-            return jsonify({'error': wa._t('dcim_bad_scope')}), 400
-        org = str(data.get('org_uid') or '')
-        if org and not store.orgs.get(org):
-            return jsonify({'error': wa._t('dcim_not_found')}), 404
-        store.set_owner(scope, uid, org, actor=C.actor())
-        wa._audit('dcim_owner_set', detail={'scope': scope, 'uid': uid,
-                                            'org': org, 'cleared': not org})
-        return jsonify({'ok': True})
 
     # ── Sites, rooms, racks ───────────────────────────────────────────────────
 
@@ -563,4 +497,4 @@ def register(app, wa, C):
 
     # Referenciadas para que un analizador no las dé por muertas: Flask se las
     # queda por su ruta.
-    _ = (api_dcim_orgs, api_dcim_org_create, api_dcim_org_update,)
+    _ = (api_dcim_orgs,)

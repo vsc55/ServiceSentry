@@ -47,6 +47,11 @@ class _StoresMixin:
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
+        # Whose everything is, and who the companies are. Before the inventory on purpose:
+        # the inventory reads this one, and a store that builds its own copy of a table another
+        # store owns is two stores writing the same rows.
+        from lib.core.orgs.store import OrgsStore  # noqa: PLC0415
+        self._orgs_store = OrgsStore(self._db_connector)
         # Where the equipment IS and whose it is — the other axis of the same fleet. Its own
         # store rather than columns on `hosts`, because most of what fills a rack answers to
         # nothing: a patch panel, a blanking plate, a switched-off server still bolted in.

@@ -53,14 +53,14 @@ def _as(admin, username, perms):
 def fleet(client):
     """El caso del holding: un rack del departamento de IT con 2U de una filial dentro."""
     _login(client)
-    it = client.post('/api/v1/dcim/orgs', json={'name': 'IT del grupo'}).get_json()['uid']
-    b = client.post('/api/v1/dcim/orgs', json={'name': 'Filial B'}).get_json()['uid']
+    it = client.post('/api/v1/orgs', json={'name': 'IT del grupo', 'short': 'IT'}).get_json()['uid']
+    b = client.post('/api/v1/orgs', json={'name': 'Filial B', 'short': 'FB'}).get_json()['uid']
     site = client.post('/api/v1/dcim/sites', json={'name': 'DC Norte'}).get_json()['uid']
     room = client.post('/api/v1/dcim/rooms',
                        json={'site_uid': site, 'name': 'Sala 1'}).get_json()['uid']
     rack = client.post('/api/v1/dcim/racks',
                        json={'room_uid': room, 'name': 'R3', 'u_height': 42}).get_json()['uid']
-    client.post('/api/v1/dcim/owner', json={'scope': 'site', 'uid': site, 'org_uid': it})
+    client.post('/api/v1/orgs/owner', json={'scope': 'site', 'uid': site, 'org_uid': it})
     mine = client.post('/api/v1/dcim/items',
                        json={'rack_uid': rack, 'u_start': 1, 'u_height': 1,
                              'label': 'SW-CORE', 'host_uid': 'h-sw'}).get_json()['uid']
@@ -68,7 +68,7 @@ def fleet(client):
                          json={'rack_uid': rack, 'u_start': 12, 'u_height': 2,
                                'label': 'DB03-NOMINAS', 'serial': 'SECRETO-1',
                                'host_uid': 'h-db03'}).get_json()['uid']
-    client.post('/api/v1/dcim/owner', json={'scope': 'item', 'uid': theirs, 'org_uid': b})
+    client.post('/api/v1/orgs/owner', json={'scope': 'item', 'uid': theirs, 'org_uid': b})
     return {'it': it, 'b': b, 'site': site, 'room': room, 'rack': rack,
             'mine': mine, 'theirs': theirs}
 
@@ -84,8 +84,8 @@ class TestHaceFaltaSesionYPermiso:
 
     def test_decir_de_quien_es_algo_es_otra_bandera(self, admin, fleet):
         """Mover un equipo de U es ordenar el armario; cambiar de quién es, mover propiedad."""
-        c = _as(admin, 'ordenanza', ['dcim_view', 'dcim_all_view', 'dcim_edit'])
-        r = c.post('/api/v1/dcim/owner',
+        c = _as(admin, 'ordenanza', ['dcim_view', 'orgs_all_view', 'dcim_edit'])
+        r = c.post('/api/v1/orgs/owner',
                    json={'scope': 'rack', 'uid': fleet['rack'], 'org_uid': fleet['b']})
         assert r.status_code == 403
 
@@ -140,6 +140,11 @@ class TestElRackCompartido:
                      json={'label': 'DB03'}).status_code == 200
 
     def test_y_solo_ve_su_empresa_en_la_lista(self, admin, fleet):
+        """La lista de la SECCIÓN, que va con `dcim_view` porque sin ella no hay chapa que
+        pintar ni desplegable con el que fichar un armario. El registro en sí es del core y
+        pide `orgs_view`; lo que las dos comparten es el estrechamiento, que es lo que se
+        vigila aquí: quien tiene una empresa concedida ve esa empresa, no la lista de
+        sociedades del grupo."""
         orgs = self._b(admin, fleet).get('/api/v1/dcim/orgs').get_json()['orgs']
         assert [o['uid'] for o in orgs] == [fleet['b']]
 
@@ -200,19 +205,19 @@ class TestLaPertenencia:
         assert by_uid[fleet['theirs']]['org_uid'] == fleet['b']    # dicho en el item
 
     def test_dejar_de_decirlo_devuelve_a_lo_heredado(self, client, fleet):
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'item', 'uid': fleet['theirs'], 'org_uid': ''})
         items = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}').get_json()['items']
         assert {i['uid']: i for i in items}[fleet['theirs']]['org_uid'] == fleet['it']
 
     def test_borrar_una_empresa_no_deja_pertenencias_colgando(self, client, fleet):
         """Si no, el resolutor devuelve un uid que no se puede buscar en ninguna parte."""
-        assert client.delete(f'/api/v1/dcim/orgs/{fleet["b"]}').status_code == 200
+        assert client.delete(f'/api/v1/orgs/{fleet["b"]}').status_code == 200
         items = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}').get_json()['items']
         assert {i['uid']: i for i in items}[fleet['theirs']]['org_uid'] == fleet['it']
 
     def test_un_ambito_inventado_se_rechaza(self, client, fleet):
-        r = client.post('/api/v1/dcim/owner',
+        r = client.post('/api/v1/orgs/owner',
                         json={'scope': 'planeta', 'uid': 'marte', 'org_uid': fleet['b']})
         assert r.status_code == 400
 
@@ -783,7 +788,7 @@ class TestEnlazarUnItemConSuMaquina:
         """Se estrecha con la regla del REGISTRO, porque lo que se ofrece son sus fichas."""
         _login(client)
         self._host(client)
-        c = _as(admin, 'sin-registro', ['dcim_view', 'dcim_all_view'])
+        c = _as(admin, 'sin-registro', ['dcim_view', 'orgs_all_view'])
         assert c.get('/api/v1/dcim/hosts').get_json()['hosts'] == []
 
     def test_y_enlazado_el_item_lo_devuelve(self, client, fleet):
@@ -896,7 +901,7 @@ class TestElPlanoDeLaSala:
         assert int(sala['plan_mm']) == 8000
 
     def test_subir_es_editar_y_hace_falta_la_bandera(self, admin, fleet):
-        c = _as(admin, 'mirona', ['dcim_view', 'dcim_all_view'])
+        c = _as(admin, 'mirona', ['dcim_view', 'orgs_all_view'])
         r = c.post(f'/api/v1/dcim/rooms/{fleet["room"]}/plan',
                    data={'file': (io.BytesIO(self.PNG), 'p.png')},
                    content_type='multipart/form-data')
@@ -930,7 +935,7 @@ class TestLaCajaVaciaDiceAQueEquivale:
     def test_es_la_pantalla_de_configuracion_la_que_pregunta(self, admin, fleet):
         """Es una ruta del disco del servidor: la pide quien puede cambiarla, no quien puede
         ver el inventario."""
-        c = _as(admin, 'inventarista', ['dcim_view', 'dcim_all_view', 'dcim_edit'])
+        c = _as(admin, 'inventarista', ['dcim_view', 'orgs_all_view', 'dcim_edit'])
         assert c.get('/api/v1/dcim/media-dir').status_code == 403
 
 
@@ -970,7 +975,7 @@ class TestElCuadroDeMando:
         _login(client)
         # Otra sede del departamento donde la filial no tiene nada.
         ajena = client.post('/api/v1/dcim/sites', json={'name': 'DC Ajeno'}).get_json()['uid']
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'site', 'uid': ajena, 'org_uid': fleet['it']})
         c = _as(admin, 'solo-filial', ['dcim_view', f'org.{fleet["b"]}.view'])
         b = c.get('/api/v1/dcim/board').get_json()
@@ -1075,13 +1080,13 @@ class TestDisenarLaSala:
         sí. Lo que decide es quién puede tocar la sala donde está."""
         _login(client)
         it = fleet['it']
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'room', 'uid': fleet['room'], 'org_uid': it})
         c = _as(admin, 'de-la-filial', ['dcim_view', 'dcim_edit', f'org.{fleet["b"]}.view'])
         assert self._pieza(c, fleet['room']).status_code == 403
 
     def test_mirar_es_otra_bandeja_que_editar(self, admin, fleet):
-        c = _as(admin, 'mirona-sala', ['dcim_view', 'dcim_all_view'])
+        c = _as(admin, 'mirona-sala', ['dcim_view', 'orgs_all_view'])
         assert c.get(f'/api/v1/dcim/rooms/{fleet["room"]}/features').status_code == 200
         assert self._pieza(c, fleet['room']).status_code == 403
 
@@ -1189,7 +1194,7 @@ class TestLlevarseElPlanoYTraerlo:
 
     def test_importar_es_editar_la_sala(self, admin, client, fleet):
         _login(client)
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'room', 'uid': fleet['room'], 'org_uid': fleet['it']})
         c = _as(admin, 'ajena', ['dcim_view', 'dcim_edit', f'org.{fleet["b"]}.view'])
         r = c.post(f'/api/v1/dcim/rooms/{fleet["room"]}/import', json=self._plano())
@@ -1221,7 +1226,7 @@ class TestLaPotenciaEnUnArmarioCompartido:
         suyo = c.post('/api/v1/dcim/items',
                       json={'rack_uid': rack, 'u_start': 1,
                             'label': 'SW-DEPT'}).get_json()['uid']
-        c.post('/api/v1/dcim/owner',
+        c.post('/api/v1/orgs/owner',
                json={'scope': 'item', 'uid': suyo, 'org_uid': fleet['it']})
         return rack, suyo
 
@@ -1295,7 +1300,7 @@ class TestLaPotenciaEnUnArmarioCompartido:
     def test_enchufar_es_editar_el_armario(self, admin, client, fleet):
         _login(client)
         a, _ = self._pdus(client, fleet['rack'])
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'rack', 'uid': fleet['rack'], 'org_uid': fleet['it']})
         c = _as(admin, 'filial-luz4', ['dcim_view', 'dcim_edit', f'org.{fleet["b"]}.view'])
         r = c.post('/api/v1/dcim/feeds', json={'item_uid': fleet['theirs'], 'pdu_uid': a})
@@ -1419,7 +1424,7 @@ class TestElCableadoDeclarado:
                            json={'rack_uid': rack, 'u_start': 2,
                                  'label': 'DB-DEPT'}).get_json()['uid']
         for uid in (suyo, otro):
-            client.post('/api/v1/dcim/owner',
+            client.post('/api/v1/orgs/owner',
                         json={'scope': 'item', 'uid': uid, 'org_uid': fleet['it']})
         client.post('/api/v1/dcim/cables',
                     json={'a_item': suyo, 'b_item': otro, 'label': 'SECRETA-1'})
@@ -1432,7 +1437,7 @@ class TestElCableadoDeclarado:
         """Tocar el cableado es una bandera aparte de ordenar el armario: mover un equipo de U
         y decir por dónde va un cable son dos trabajos y dos personas."""
         _login(client)
-        c = _as(admin, 'solo-ordena', ['dcim_view', 'dcim_all_view', 'dcim_edit'])
+        c = _as(admin, 'solo-ordena', ['dcim_view', 'orgs_all_view', 'dcim_edit'])
         r = c.post('/api/v1/dcim/cables',
                    json={'a_item': fleet['mine'], 'b_item': fleet['theirs']})
         assert r.status_code == 403
@@ -1471,7 +1476,7 @@ class TestLosEnlacesEntreSedes:
         """El mapa dibuja líneas entre cajas: una línea a una caja que no está sale al vacío."""
         _login(client)
         otra = self._otra(client)
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'site', 'uid': otra, 'org_uid': fleet['it']})
         client.post('/api/v1/dcim/links', json={'a_site': fleet['site'], 'b_site': otra})
         c = _as(admin, 've-una-sola', ['dcim_view'])
@@ -1494,7 +1499,7 @@ class TestLosEnlacesEntreSedes:
     def test_hace_falta_poder_editar_LAS_DOS(self, admin, client, fleet):
         _login(client)
         otra = self._otra(client, 'DC Ajeno')
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'site', 'uid': otra, 'org_uid': fleet['it']})
         c = _as(admin, 'media-punta', ['dcim_view', 'dcim_edit', f'org.{fleet["b"]}.view'])
         r = c.post('/api/v1/dcim/links', json={'a_site': fleet['site'], 'b_site': otra})
@@ -1548,7 +1553,7 @@ class TestDondeCabeEsto:
         ajeno = client.post('/api/v1/dcim/items',
                             json={'rack_uid': rack, 'u_start': 2,
                                   'u_height': 2}).get_json()['uid']
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'item', 'uid': ajeno, 'org_uid': fleet['it']})
         d = c.get('/api/v1/dcim/fits?u=3&branches=0').get_json()
         fila = [r for r in d['racks'] if r['uid'] == rack][0]
@@ -1620,7 +1625,7 @@ class TestNoSeCreaDentroDeLoAjeno:
     def _ajena(self, client, fleet):
         """Una sede del departamento, que la filial no puede ni ver."""
         site = client.post('/api/v1/dcim/sites', json={'name': 'DC del IT'}).get_json()['uid']
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'site', 'uid': site, 'org_uid': fleet['it']})
         room = client.post('/api/v1/dcim/rooms',
                            json={'site_uid': site, 'name': 'Sala IT'}).get_json()['uid']
@@ -1659,7 +1664,7 @@ class TestNoSeCreaDentroDeLoAjeno:
     def test_y_en_lo_propio_tambien(self, admin, client, fleet):
         _login(client)
         site = client.post('/api/v1/dcim/sites', json={'name': 'DC Filial'}).get_json()['uid']
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'site', 'uid': site, 'org_uid': fleet['b']})
         c = _as(admin, 'dueno-filial', ['dcim_view', 'dcim_edit', f'org.{fleet["b"]}.view'])
         assert c.post('/api/v1/dcim/rooms',
@@ -1689,7 +1694,7 @@ class TestElNombreDelVecinoNoSaleNiPorLaPuertaDeAtras:
         del_it = client.post('/api/v1/dcim/items',
                              json={'rack_uid': rack, 'u_start': 20,
                                    'label': 'NOMINAS-DB'}).get_json()['uid']
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'item', 'uid': del_it, 'org_uid': fleet['it']})
 
         c = _as(admin, 'curiosa', ['dcim_view', 'dcim_edit', 'dcim_cable_edit',
@@ -1727,7 +1732,7 @@ class TestUnRackQueElListadoEsconde:
                            json={'site_uid': site, 'name': 'S'}).get_json()['uid']
         rack = client.post('/api/v1/dcim/racks',
                            json={'room_uid': room, 'name': 'SECRETO-1'}).get_json()['uid']
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'site', 'uid': site, 'org_uid': fleet['it']})
         return rack
 
@@ -1759,7 +1764,7 @@ class TestUnRackQueElListadoEsconde:
         ajeno = client.post('/api/v1/dcim/items',
                             json={'rack_uid': rack, 'u_start': 5,
                                   'label': 'NO-MIRAR'}).get_json()['uid']
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'item', 'uid': ajeno, 'org_uid': fleet['it']})
         c = _as(admin, 'comparte', ['dcim_view', f'org.{fleet["b"]}.view'])
         d = c.get(f'/api/v1/dcim/racks/{rack}').get_json()
@@ -1802,7 +1807,7 @@ class TestLasFilasDeUnaSala:
 
     def test_declararlas_es_ordenar_la_sala(self, admin, client, fleet):
         _login(client)
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'room', 'uid': fleet['room'], 'org_uid': fleet['it']})
         c = _as(admin, 'sin-sala', ['dcim_view', 'dcim_edit', f'org.{fleet["b"]}.view'])
         r = c.post('/api/v1/dcim/rows', json={'room_uid': fleet['room'], 'name': 'X'})
@@ -1977,7 +1982,7 @@ class TestLaCadenaElectricaAguasArriba:
 
     def test_declararla_es_editar_la_sede(self, admin, client, fleet):
         _login(client)
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'site', 'uid': fleet['site'], 'org_uid': fleet['it']})
         c = _as(admin, 'sin-sede-luz', ['dcim_view', 'dcim_edit', f'org.{fleet["b"]}.view'])
         r = c.post('/api/v1/dcim/sources',
@@ -2023,7 +2028,7 @@ class TestLoQueLlevaDentroUnEquipo:
         _login(client)
         client.post('/api/v1/dcim/parts',
                     json={'item_uid': fleet['mine'], 'kind': 'disk', 'serial': 'SECRETO-9'})
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'item', 'uid': fleet['mine'], 'org_uid': fleet['it']})
         c = _as(admin, 'curiosa-partes', ['dcim_view', f'org.{fleet["b"]}.view'])
         r = c.get(f'/api/v1/dcim/items/{fleet["mine"]}/parts')
@@ -2032,7 +2037,7 @@ class TestLoQueLlevaDentroUnEquipo:
 
     def test_ni_se_le_pueden_meter(self, admin, client, fleet):
         _login(client)
-        client.post('/api/v1/dcim/owner',
+        client.post('/api/v1/orgs/owner',
                     json={'scope': 'item', 'uid': fleet['mine'], 'org_uid': fleet['it']})
         c = _as(admin, 'mete-partes', ['dcim_view', 'dcim_edit', f'org.{fleet["b"]}.view'])
         r = c.post('/api/v1/dcim/parts', json={'item_uid': fleet['mine'], 'kind': 'disk'})
@@ -5369,8 +5374,8 @@ class TestElNumeroDeInventarioLoPoneElPanel:
         """Gastar uno de la numeración en algo que no se va a escribir deja un hueco en la
         cuenta que nadie sabe explicar — y encima se lo gasta el que no puede escribir."""
         rack = self._rack(client, 'INV-i')
-        org = client.post('/api/v1/dcim/orgs', json={'name': 'Ajena'}).get_json()['uid']
-        client.post('/api/v1/dcim/owner', json={'scope': 'rack', 'uid': rack, 'org_uid': org})
+        org = client.post('/api/v1/orgs', json={'name': 'Ajena', 'short': 'AJ'}).get_json()['uid']
+        client.post('/api/v1/orgs/owner', json={'scope': 'rack', 'uid': rack, 'org_uid': org})
         otro = _as(admin, 'sinrack', ['dcim_view', 'dcim_edit'])
         assert otro.post('/api/v1/dcim/items',
                          json={'rack_uid': rack, 'u_start': 5,
@@ -5549,22 +5554,22 @@ class TestUnaEmpresaDiceQueTieneFichado:
     def test_cuenta_lo_dicho_y_no_lo_heredado(self, admin, client, fleet):
         """Una sede de la filial B con cuarenta equipos dentro cuenta como UNA sede: los equipos
         no lo dicen, lo heredan, y contarlos sería contar la misma propiedad cuarenta veces."""
-        orgs = {o['uid']: o for o in client.get('/api/v1/dcim/orgs').get_json()['orgs']}
+        orgs = {o['uid']: o for o in client.get('/api/v1/orgs').get_json()['orgs']}
         # El departamento de IT tiene dicha la sede; la filial, un equipo dentro del rack.
         assert orgs[fleet['it']]['said'] == {'site': 1}
         assert orgs[fleet['b']]['said'] == {'item': 1}
 
     def test_y_una_sin_nada_lo_dice_con_un_hueco(self, admin, client):
         _login(client)
-        uid = client.post('/api/v1/dcim/orgs', json={'name': 'Recién creada'}).get_json()['uid']
-        orgs = {o['uid']: o for o in client.get('/api/v1/dcim/orgs').get_json()['orgs']}
+        uid = client.post('/api/v1/orgs', json={'name': 'Recién creada', 'short': 'RC'}).get_json()['uid']
+        orgs = {o['uid']: o for o in client.get('/api/v1/orgs').get_json()['orgs']}
         assert orgs[uid]['said'] == {}
 
     def test_y_borrarla_deja_lo_suyo_sin_fichar(self, admin, client, fleet):
         """No es un campo que se corrige: es una fila que desaparece con todo lo que la
         nombraba. Se hace, y el recuento de al lado deja de contarlo."""
-        assert client.delete(f'/api/v1/dcim/orgs/{fleet["b"]}').status_code == 200
-        uids = [o['uid'] for o in client.get('/api/v1/dcim/orgs').get_json()['orgs']]
+        assert client.delete(f'/api/v1/orgs/{fleet["b"]}').status_code == 200
+        uids = [o['uid'] for o in client.get('/api/v1/orgs').get_json()['orgs']]
         assert fleet['b'] not in uids
         # Y el equipo que era suyo sigue estando: lo que se borró es lo DICHO, así que vuelve a
         # heredar de su sede. «Sin dueño» no es lo mismo que «hereda», y aquí lo correcto es lo

@@ -73,7 +73,7 @@ rack. Lo que no se diga se **hereda del contenedor**, y lo que se diga en un ite
 lo heredado**. Un rack sin dueño declarado dentro de una sala de la empresa A es de la empresa
 A; un item dentro de ese rack que diga «empresa B» es de la B, y ya está.
 
-**Un dueño por cosa, y decidido así** (`dc_owner` lleva índice único por `(ámbito, uid)`). «¿Y si
+**Un dueño por cosa, y decidido así** (`org_owner` lleva índice único por `(ámbito, uid)`). «¿Y si
 algo es de varias empresas?» se contesta **por el nivel de abajo**, que es como funciona de verdad
 un armario compartido: la sala es del que la opera y cada rack es de su empresa; el rack es del
 proveedor y cada equipo es de su cliente. Los cinco ámbitos —sede, sala, rack, item y host— llegan
@@ -118,8 +118,7 @@ Nombres provisionales; el prefijo `dc_` mantiene el espacio propio en la BD comp
 
 | Tabla | Qué guarda | Notas |
 | --- | --- | --- |
-| `dc_org` | Empresa / cliente / sociedad del grupo | **No contiene nada.** Es a quién pertenecen las cosas |
-| `dc_owner` | Quién es dueño de qué | `(ámbito, uid) → org_uid`. Una fila por pertenencia *dicha*; el resto se hereda |
+| `org` · `org_owner` | Quién es cada sociedad, y de quién es cada cosa | **Del core**, no de esta sección: la misma sociedad que paga el armario tiene usuarios en el directorio. Ver `lib/core/orgs` |
 | `dc_site` | Datacenter, sede, armario en una oficina | Dirección, coordenadas, zona horaria, **operador** |
 | `dc_room` | Sala, planta, CPD pequeño | `site_uid`, plano de fondo opcional, rejilla |
 | `dc_rack` | Rack | `room_uid`, altura en U, ancho, profundidad, posición y giro en el plano, numeración ascendente o descendente |
@@ -129,12 +128,17 @@ Nombres provisionales; el prefijo `dc_` mantiene el espacio propio en la BD comp
 | `dc_cable` | Cable físico con sus dos extremos | Etiqueta, tipo, longitud, color; extremo = (item, puerto) o (item, toma) |
 | `dc_link` | Enlace entre sedes | SD-WAN, IPSEC, MPLS, fibra oscura; declarado, y contrastado con lo medido |
 
-**Por qué `dc_owner` es una tabla y no una columna en cada sitio.** La regla —«dilo donde
+**Por qué la pertenencia es una tabla y no una columna en cada sitio.** La regla —«dilo donde
 quieras, hereda hacia abajo, el más concreto manda»— es una sola, y escrita como una columna
 `org_uid` en cinco tablas son cinco sitios donde implementarla y cinco donde equivocarse. En una
 tabla aparte hay **un** resolutor: se sube por la cadena física hasta encontrar la primera
 pertenencia dicha. Además admite ámbitos que no están en la cadena —un host suelto, una VM, un
 VIP— que también son de alguien y no están en ningún rack.
+
+Y por eso **no es de esta sección**: desde build.125 vive en `lib/core/orgs`, con la tabla `org`
+y `org_owner`. Esta sección DECLARA sus cuatro ámbitos (`ORG_SCOPES` en su `manifest.py`) y sigue
+resolviendo por su cadena; lo que ya no hace es ser dueña del registro, que es lo que impedía que
+el directorio o Microsoft 365 agruparan nada por sociedad.
 
 **La cara importa.** Un equipo de 1U ocupa la U 12 por delante *y* por detrás; un panel de
 parcheo puede ocupar solo la cara trasera; dos equipos de media profundidad pueden compartir la
@@ -324,12 +328,12 @@ Un dominio, un grupo de permisos, con la regla de nombre que ya rige: **todo lo 
 | --- | --- |
 | `dcim_view` | Ver el inventario, los mapas y los alzados |
 | `dcim_edit` | Crear y mover sedes, salas, racks e items |
-| `dcim_org_edit` | Crear empresas y decidir de quién es cada cosa |
+| `orgs_edit` (del core) | Crear empresas y decidir de quién es cada cosa |
 | `dcim_cable_edit` | Declarar y retirar cableado y etiquetas |
 | `dcim_catalog_view` | Consultar el catálogo de modelos |
 | `dcim_catalog_manage` | Importar y actualizar el catálogo |
 
-`dcim_org_edit` va aparte de `dcim_edit` a propósito: mover un equipo de U es ordenar el
+`orgs_edit` va aparte de `dcim_edit` a propósito: mover un equipo de U es ordenar el
 armario, y cambiar de quién es ese equipo es mover una pertenencia entre sociedades. Lo segundo
 tiene consecuencias de facturación y de quién lo ve.
 
@@ -384,7 +388,7 @@ la anterior a medias.
 
 | # | Fase | Entrega | Depende de |
 | --- | --- | --- | --- |
-| **0** | **Modelo, pertenencia y catálogo** | Tablas, stores, permisos, **empresas con `dc_owner` y el ámbito `org.<uid>.view`**, importación de devicetype-library con su trabajo de fondo. Sin mapas: listas y formularios | — |
+| **0** | **Modelo, pertenencia y catálogo** | Tablas, stores, permisos, **empresas con `org_owner` y el ámbito `org.<uid>.view`**, importación de devicetype-library con su trabajo de fondo. Sin mapas: listas y formularios | — |
 | **1** | **Racks** | Alzado frontal y trasero, colocación de items, enlace opcional a host, color en vivo, ocupación de U, **y el item ajeno dibujado ocupado y anónimo** | 0 |
 | **2** | **Salas** | Plano con racks vistos desde arriba, imagen de fondo, agregación de estado sala→rack | 1 |
 | **3** | **Sedes y cuadro de mando** | Geografía, esquema de sedes, y el desglose **por sitio y por empresa** con el camino hasta el fallo | 2 |
@@ -447,7 +451,7 @@ escrito. Un punto a medias se queda sin marcar aunque el fichero exista.
 **0.1 El dominio existe**
 
 - [x] `lib/core/dcim/__init__.py` con la explicación de qué contiene el paquete
-- [x] `manifest.py`: permisos (`dcim_view`, `dcim_all_view`, `dcim_edit`, `dcim_org_edit`, `dcim_cable_edit`,
+- [x] `manifest.py`: permisos (`dcim_view`, `dcim_edit`, `dcim_cable_edit`,
       `dcim_catalog_view`, `dcim_catalog_manage`) y eventos de auditoría
 - [x] Las banderas salen en el catálogo (`PERMISSIONS`) y tienen nombre y descripción en los
       dos idiomas
@@ -455,8 +459,8 @@ escrito. Un punto a medias se queda sin marcar aunque el fichero exista.
 
 **0.2 Las tablas**
 
-- [x] `store.py`: `dc_org`, `dc_site`, `dc_room`, `dc_rack`, `dc_item`
-- [x] `dc_owner` — la pertenencia dicha, con su ámbito y su uid
+- [x] `store.py`: `dc_site`, `dc_room`, `dc_rack`, `dc_item`
+- [x] la pertenencia dicha, con su ámbito y su uid (hoy `org_owner`, del core)
 - [x] Alta/baja/modificación por entidad, con columnas de auditoría
 - [x] Reconciliación al arranque, como el resto de los stores
 - [x] Un rack no admite dos items solapados en la misma U y la misma cara
@@ -2007,7 +2011,7 @@ el bloque de su fase.
       contar la misma decisión cuarenta veces
 - [x] Y **quien no puede editarlas las ve**: el árbol ya enseña las chapas de las sociedades
       a cualquiera que vea el inventario, así que esconder la lista sería esconder lo que ya
-      está a la vista. Lo que se estrecha es escribir (`dcim_org_edit`, que ningún rol trae
+      está a la vista. Lo que se estrecha es escribir (`orgs_edit`, que ningún rol trae
       de serie)
 - [x] Y **el tipo de un cable no dice de qué está hecho**. La columna se llamaba «De qué es»
       y ponía «cobre» en unas filas y «corriente» en otras: son dos ejes metidos en una

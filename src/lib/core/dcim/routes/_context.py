@@ -35,7 +35,6 @@ def build(app, wa):
     # Tocar el cableado es su propia bandera: mover un equipo de U y decir por dónde va un
     # cable son dos trabajos, muchas veces de dos personas.
     dcim_cable_req = wa._perm_required('dcim_cable_edit')
-    dcim_org_edit_req = wa._perm_required('dcim_org_edit')
     dcim_catalog_view_req = wa._perm_required('dcim_catalog_view')
     dcim_catalog_manage_req = wa._perm_required('dcim_catalog_manage')
     # Decidir el estándar de compra no es colocar una caja en un U: lo hacen personas distintas
@@ -354,7 +353,6 @@ def build(app, wa):
         view_req=dcim_view_req,
         edit_req=dcim_edit_req,
         cable_req=dcim_cable_req,
-        org_edit_req=dcim_org_edit_req,
         catalog_view_req=dcim_catalog_view_req,
         catalog_manage_req=dcim_catalog_manage_req,
         build_req=dcim_build_req,

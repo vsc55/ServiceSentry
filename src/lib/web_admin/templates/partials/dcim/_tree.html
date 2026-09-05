@@ -53,7 +53,7 @@ function _dcimActions(kind, uid, name, childKind) {
         ${childKind ? btn(`_dcimOpen('new',${jsStr(childKind)},${jsStr(uid)},'')`,
                           'bi-plus-lg', 'dcim_new_' + childKind) : ''}
         ${btn(`_dcimOpen('edit',${jsStr(kind)},'',${jsStr(uid)})`, 'bi-pencil', 'edit')}
-        ${_dcimMay('dcim_org_edit') ? btn(
+        ${_dcimMay('orgs_edit') ? btn(
             `_dcimOwnerAsk(${jsStr(kind)},${jsStr(uid)},${jsStr(name || '')})`,
             'bi-building-check', 'dcim_owner') : ''}
         ${btn(`_dcimDelete(${jsStr(kind)},${jsStr(uid)},${jsStr(name || '')})`,
@@ -63,9 +63,10 @@ function _dcimActions(kind, uid, name, childKind) {
 
 /** Decir de qué empresa es algo.
 
- *  Su propia bandera (`dcim_org_edit`, que ningún rol trae de serie) y, hasta ahora, ningún
- *  botón: el eje del modelo del holding se podía escribir por la API y no desde la pantalla, que
- *  es lo mismo que no poder escribirlo.
+ *  Su propia bandera (`orgs_edit`, que ningún rol trae de serie) y, hasta ahora, ningún botón:
+ *  el eje del modelo del holding se podía escribir por la API y no desde la pantalla, que es lo
+ *  mismo que no poder escribirlo. La bandera es del core y no de esta sección: la misma decisión
+ *  ficha un armario, una máquina y —el día que se declare— un buzón.
  *
  *  Se elige entre las empresas que este lector ve, más «de nadie» — que es un estado real y el
  *  más común el primer día: un rack sin fichar no es un secreto, es uno que nadie ha fichado. */
@@ -74,13 +75,16 @@ function _dcimOwnerAsk(kind, uid, name) {
     // Sin ninguna, el aviso solo dice lo que ya se ve. A quien puede declararlas se le abre el
     // cuadro donde se hace, que es lo que iba a buscar a continuación.
     if (!orgs.length) {
-        showToast(t('dcim_no_orgs'), 'warning');
-        if (_dcimMay('dcim_org_edit')) _dcOrgsOpen();
+        showToast(t('orgs_none'), 'warning');
+        // A quien puede declararlas se le lleva a donde se hace, que es lo que iba a buscar a
+        // continuación. Es otra sección —el registro es del core— así que se navega, no se
+        // dibuja: dibujar aquí pintaría las empresas dentro del inventario.
+        if (_dcimMay('orgs_edit') && typeof _navTab === 'function') _navTab('#tab-orgs');
         return;
     }
     showConfirmModal(tf('dcim_owner_q', name || ''), async () => {
         const sel = document.getElementById('dcim-owner-pick');
-        const r = await _dcimSend('POST', '/api/v1/dcim/owner',
+        const r = await _dcimSend('POST', '/api/v1/orgs/owner',
                                   {scope: kind, uid: uid, org_uid: sel ? sel.value : ''});
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
         renderDcim();

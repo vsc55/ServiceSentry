@@ -93,10 +93,12 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 | | `infra_results_view` | La pestaña **Últimos datos**. El único de los tres que retiene el dato: es lo único de la página que ninguna otra pestaña lee, así que sin la bandera el servidor no lo envía |
 | | `infra_raw_view` | La pestaña **Datos brutos**: todo lo que contestó el dispositivo, sin agrupar. **No** de `viewer` |
 | | | ⚠️ `infra_metrics_view` y `infra_raw_view` deciden **qué ofrece la pantalla**, no qué sabe: los hechos que dibujan son los mismos con los que se construye *Detalles*, así que llegan igual. Retenérselos a alguien que tiene `infra_view` exigiría vaciar *Detalles* también. Está dicho aquí y en `lib/core/infra/manifest.py` a propósito — un permiso que parece un muro y es una cortina es peor que no tenerlo |
+| **Empresas** | `orgs_view` | Ver el registro de empresas del grupo y qué tiene fichado cada una. Es la lista que se elige al decir de quién es un armario o una máquina |
+| | `orgs_all_view` | Ver las cosas de **todas** las empresas, en cualquier sección. Sin esta bandera solo se ven las de las empresas concedidas una a una (`org.<uid>.view`), y de las demás solo que ocupan sitio |
+| | `orgs_edit` | Crear empresas y decir de quién es cada cosa —una sede, un armario, un equipo, una máquina—. **Sin rol por defecto, ni siquiera `editor`**: en un grupo decide qué se factura a qué sociedad y quién puede ver qué |
+| | | Se llamaban `dcim_all_view` y `dcim_org_edit`. Salieron del inventario porque la misma sociedad que paga el armario tiene usuarios en el directorio y licencias en Microsoft 365; un rol que tuviera concedidas las viejas conserva lo suyo (`_LEGACY_PERM_RENAME`) |
 | **Inventario físico** | `dcim_view` | Ver dónde está el equipamiento: sedes, salas, racks y qué ocupa cada U. No abre nada del registro — direcciones y credenciales siguen tras `devices_view` |
-| | `dcim_all_view` | Verlo **de todas las empresas**. Sin esta bandera solo se ven las cosas de las empresas concedidas una a una (`org.<uid>.view`), y de las demás solo que ocupan sitio |
 | | `dcim_edit` | Crear y mover sedes, salas, racks e items: ordenar el armario |
-| | `dcim_org_edit` | Crear empresas y decir de quién es cada cosa. **Sin rol por defecto, ni siquiera `editor`**: en un grupo decide qué se factura a qué sociedad y quién puede ver qué |
 | | `dcim_cable_edit` | Declarar y retirar cableado y etiquetas |
 | | `dcim_catalog_view` | Consultar el catálogo de modelos de equipo, y las **marcas** con lo que sabemos de ellas —web de soporte, número de contrato—. Se lee sin el permiso de gestión a propósito: esa dirección es la que hace falta a las tres de la mañana |
 | | `dcim_catalog_manage` | Importarlo o actualizarlo. **No** de `viewer`: trae miles de ficheros y reemplaza aquello con lo que se dibuja cada alzado |

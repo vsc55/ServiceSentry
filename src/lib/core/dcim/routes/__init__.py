@@ -4,11 +4,8 @@
 
     GET    /api/v1/dcim/export                take models and templates to another install
     POST   /api/v1/dcim/import                …and bring them in here
-    GET    /api/v1/dcim/orgs                  every company
-    POST   /api/v1/dcim/orgs                  create one
-    PUT    /api/v1/dcim/orgs/<uid>            rename one
-    DELETE /api/v1/dcim/orgs/<uid>            remove one
-    POST   /api/v1/dcim/owner                 say whose something is (or stop saying)
+    GET    /api/v1/dcim/orgs                  the companies, by name, for the badges and the
+                                              dropdown (the registry itself is /api/v1/orgs)
     GET    /api/v1/dcim/sites                 the sites, their rooms and each room's racks
     POST   /api/v1/dcim/sites                 …and the same four verbs for
     PUT    /api/v1/dcim/sites/<uid>              rooms and racks

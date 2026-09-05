@@ -25,6 +25,9 @@ registered; every listed file's own header lists its exact per-endpoint routes.
     credentials      /api/v1/credentials*
     history          /api/v1/history*
     hosts            /api/v1/hosts*             (perm group 'servers')
+    orgs             /api/v1/orgs*              (the companies, and what belongs to
+                                                each — read by the inventory, the
+                                                directory and whoever owns anything)
     dcim             /api/v1/dcim*              (where the equipment is and whose it is —
                                                 sites, rooms, racks, what fills each U, and
                                                 the imported model catalogue)
@@ -101,6 +104,7 @@ from lib.core.config.routes import register as _config
 from lib.core.hosts.routes import register as _hosts
 from lib.core.snmp.routes import register as _snmp
 from lib.core.infra.routes import register as _infra
+from lib.core.orgs.routes import register as _orgs
 from lib.core.dcim.routes import register as _dcim
 from lib.core.jobs.routes import register as _jobs
 from lib.core.credentials.routes import register as _credentials
@@ -132,6 +136,7 @@ def register_all(app, wa):
     _hosts(app, wa)
     _snmp(app, wa)
     _infra(app, wa)
+    _orgs(app, wa)
     _dcim(app, wa)
     _jobs(app, wa)
     _credentials(app, wa)

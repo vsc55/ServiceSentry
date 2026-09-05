@@ -8,6 +8,112 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.125] - 2026-09-05
+
+### Changed
+
+- **A company is not a fact about a rack.** The registry of companies, and with it the rule for
+  whose everything is, lived inside the physical inventory — which is where the question was
+  first asked, and an accident of chronology. The same company that pays for the cabinet has
+  users in the directory, licences in Microsoft 365 and a bill from a cloud provider, and a
+  registry that lives inside one section is a registry the other sections cannot use without
+  naming it. It is `lib/core/orgs` now: tables `org` and `org_owner`, its own page, its own API.
+
+  **What can belong to a company is declared, not listed.** The ownership table spans scopes
+  whose tables the core has never heard of, so a list in the core would be one the core edits
+  every time a package learns to own something. A package declares `ORG_SCOPES` in its manifest
+  — the inventory declares site, room, rack and item with the walk up its own containment; the
+  host registry declares `host`, which used to sit in the inventory's list and never was its
+  business. The endpoint files a scope it does not know, the screen counts what each company has
+  of it, and the resolver answers "whose is this, and may I see it" — including the *opaque*
+  answer that stops one company's fleet being enumerated through the back door — without the
+  declaring package writing a query.
+
+  `dcim_all_view` and `dcim_org_edit` are `orgs_all_view` and `orgs_edit`; a stored role that
+  held the old ones keeps what it was granted. Rows in `dc_org`/`dc_owner` are **adopted** at
+  startup: copied into the new tables while those are empty, and the old ones left where they
+  are — a copy is idempotent, works the same on three engines, and is what makes this reversible.
+
+- **The companies screen is one of the panel’s lists, not a list of its own.** It started as
+  three hand-written layouts — a table, cards and a master-detail record — with their own view
+  switcher, their own editing inside the row and their own marking of required fields. It worked,
+  and it was wrong: this panel has ONE entity table (`createListTable`) that already brings the
+  card shell, the header, the filter bar, pagination, sortable, resizable and choosable columns
+  remembered per user, and the actions column. A list that skips that looks unlike the other ten
+  and learns nothing from what gets fixed in them.
+
+  What the screen contributes is its own: its columns — including the four metadata ones every
+  list shares — how each cell is painted, its two row actions, and where the data comes from.
+  Three views through the shared switcher — table, cards and the record, the one with the list on
+  one side and a company on the other, which is what gives a three-line description room and what
+  survives the day a company grows a tax number, a contact and a cost centre. The record is a
+  registered view like any other (`mode: 'summary'`, so it sees every filtered row rather than the
+  current page): a view that could only open what the current page holds would be a list with a
+  hidden ceiling. Editing is a dialog now,
+  like a group, a role or a credential: what is corrected is a copy, and the list is not touched
+  until the server says yes — closing with the cross has to leave it as it was. A duplicate name
+  is answered inside the dialog rather than by closing it and dropping a message over a list that
+  did not change.
+
+- **Reading a response is normalised once, for everyone.** `apiPost` and `apiDelete` answer
+  `{status, data}` and `apiPut` answers the body; reading them the same way makes a write that
+  WORKED look like a failure — which reached the screen twice running, both times with the data
+  already saved. The normaliser was written inside the inventory and stopped being one section's
+  business the moment a second screen had to write: it is `apiSend`, in the shared API helpers.
+
+- **A required field says so before the save button, everywhere.** The panel always knew which
+  fields cannot be left blank: every form checks on save and shows a message. But that speaks
+  **after** the press, when the row has already been mentally finished, and it does not say which
+  of the eight boxes is missing.
+
+  One rule, written once (`ssReqMark`): a control declared `required` is marked while it is empty
+  — when it is drawn and while it is typed. Screens contribute the declaration and nothing else,
+  with the plain HTML attribute. Typing is caught by one delegated listener rather than three
+  hundred `oninput` attributes, and drawing by a `MutationObserver` watching only what enters the
+  document, so a form written next month gets this by declaring it. The listeners are on the
+  bubble phase on purpose: half a dozen boxes carry an `oninput` that clears that same class, from
+  when it only flagged a rejected save, and capturing would paint first and be erased after.
+
+  Declared where the panel already refuses to save: user, group, role, host, event, webhook,
+  Teams channel, API token, whitelist entry, credential, and the companies. The inventory takes it
+  from its own registry — its fields already say `req: true` — rather than one by one.
+
+- `Rows` — the five methods every plain table repeats — moved from the inventory's store to
+  `lib/db/rows.py`, because a core package importing them out of the inventory would be the core
+  depending on a domain to know how to write a row.
+
+### Fixed
+
+- **Two companies with the same name answered with a stack trace.** `org.name` carries a unique
+  index — the backstop — and an index does not answer in words: what it produces is an
+  `IntegrityError`, which reached the person typing as an HTTP 500 with a Werkzeug traceback
+  across the screen. Reported from the screen, on the second attempt at the same company.
+
+  **And the short form is required now.** It is what goes on a badge and on an elevation, where
+  the legal name of a company does not fit; without one, those places show a gap — and a gap on
+  the elevation of a cabinet shared between companies is exactly the question the elevation was
+  drawn to answer. Required on create and whenever it is sent, not on a PUT that does not mention
+  it: asking there would be asking somebody to confirm a field they are not looking at.
+
+  Both required fields are marked **while they are empty**, in all three layouts and through one
+  function: saying it after the save button is saying it late, and the message does not say which
+  box is missing. Marking it in one layout and not the others would be the same screen saying two
+  different things about the same field depending on how it is being looked at.
+
+  Marked **as it is typed**, too, and not only when the row is drawn: the table deliberately
+  does not redraw while somebody writes — redrawing loses the cursor — so emptying the name of a
+  company that already existed painted nothing, and the warning arrived at the save button. A
+  brand-new row did light up, because that one is drawn empty, which is what made it look like it
+  worked. Reported from the screen.
+
+  Checked before writing, and separately for the short form: two companies with one name are one
+  company typed twice, and two with the same short form put a badge on an elevation that does not
+  say whose the cabinet is — which is the only thing a short form is for. Compared stripped and
+  case-folded, because "Amixalan" and "amixalan " are two rows and one company; an empty short
+  form is never a collision, since not having one is the normal case. The unique index stays as
+  what it is, a backstop: another request fits between the check and the INSERT, and that one is
+  answered with the same sentence instead of the trace.
+
 ## [0.0.1+build.124] - 2026-09-05
 
 ### Changed
