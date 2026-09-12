@@ -105,6 +105,7 @@ from lib.core.hosts.routes import register as _hosts
 from lib.core.snmp.routes import register as _snmp
 from lib.core.infra.routes import register as _infra
 from lib.core.orgs.routes import register as _orgs
+from lib.providers.freshservice.routes import register as _freshservice
 from lib.core.dcim.routes import register as _dcim
 from lib.core.jobs.routes import register as _jobs
 from lib.core.credentials.routes import register as _credentials
@@ -137,6 +138,7 @@ def register_all(app, wa):
     _snmp(app, wa)
     _infra(app, wa)
     _orgs(app, wa)
+    _freshservice(app, wa)
     _dcim(app, wa)
     _jobs(app, wa)
     _credentials(app, wa)

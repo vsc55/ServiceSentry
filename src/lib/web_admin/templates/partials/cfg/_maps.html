@@ -1,0 +1,220 @@
+{# ================================================================
+   Probar el mapa, y contar QUÉ pasó.
+
+   Un mapa que no sale no dice nada por su cuenta: el navegador se traga una imagen que no carga,
+   la política de contenido bloquea en silencio, y una clave sin permiso contesta un 403 que no
+   ve nadie. Todo el rato es el mismo cuadro vacío y no hay por dónde empezar — que es
+   exactamente con lo que se topa quien acaba de pegar una clave de Google.
+
+   Así que esto enseña **la cadena entera, paso a paso**, con el detalle en crudo de lo que
+   contestó el otro extremo. Ese detalle no se traduce: no es texto de este panel, es la
+   respuesta de quien sirve las imágenes, y traducirla sería cambiársela.
+   ================================================================ #}
+
+/** Probar el mapa configurado. El cuadro se abre al pulsar y espera dentro: pedir y abrir al
+ *  contestar hace que el botón parezca muerto y se pulse tres veces. */
+async function mapTest() {
+    _mapOpen(`<div class="d-flex align-items-center gap-2 text-muted">
+        <span class="spinner-border spinner-border-sm"></span>${esc(t('map_testing'))}</div>`);
+    // Olvidar dónde estaba mirando la prueba anterior: puede ser otro proveedor, y heredar su
+    // ventana sería enseñar el trozo de un mapa que ya no es el que se está probando.
+    ssCanvasReset(_MAP_CANVAS);
+    let r = null;
+    try {
+        // Lo que se está mirando, sin guardar: `configData` es el estado del formulario, y
+        // probar lo guardado mientras alguien cambia el proveedor contesta siempre lo mismo.
+        const wa = (typeof configData !== 'undefined' && configData.web_admin) || {};
+        const enviar = {};
+        for (const k of ['dcim_map_provider', 'dcim_map_tiles', 'dcim_map_attribution',
+                         'dcim_map_google_key', 'dcim_map_google_type', 'dcim_map_max_zoom'])
+            if (wa[k] !== undefined && wa[k] !== null) enviar[k] = wa[k];
+        r = await apiSend('POST', '/api/v1/config/map/test', {web_admin: enviar});
+    } catch (e) { r = null; }
+    // El dibujo necesita la plantilla y el tope aparte del informe: se engancha a la rueda
+    // DESPUÉS de estar puesto, y para entonces el HTML ya es una cadena que nadie puede leer.
+    const d = (r && r.data) || {};
+    // Por el panel y no directo: ver `_mapPreview`. La plantilla de verdad ya sale en el
+    // informe, que es donde hace falta leerla.
+    _mapFill(_mapReport(r), (r && r.ok) ? d.preview : '', d.zmax);
+}
+
+/** Abrir el sobre. **Una función con nombre y no dos líneas dentro de `mapTest`**, porque es
+ *  justo donde estuvo el fallo y porque así se puede probar sin red: `mapTest` es asíncrona y lo
+ *  que se rompió es esta decisión, que no lo es.
+ *
+ *  `apiSend` devuelve un SOBRE —`{ok, error, data}`— y el informe va dentro, en `data`. Leído
+ *  como si el sobre fuese la carta salía el peor informe posible: la cabecera en verde —porque
+ *  el sobre no traía error— y todos los pasos en rojo debajo, porque ninguno de sus campos
+ *  estaba ahí. Reportado desde la pantalla: «esto es confuso, ¿error u ok?». */
+function _mapReport(r) {
+    if (!r) return _mapTestHtml({}, 'connection_error');
+    return _mapTestHtml(r.data || {}, r.ok ? '' : (r.error || 'connection_error'));
+}
+
+function _mapOpen(html) {
+    const cuerpo = document.getElementById('mapTestBody');
+    if (cuerpo) cuerpo.innerHTML = html;
+    const el = document.getElementById('mapTestModal');
+    if (el && window.bootstrap) bootstrap.Modal.getOrCreateInstance(el).show();
+}
+
+function _mapFill(html, tpl, zmax) {
+    const cuerpo = document.getElementById('mapTestBody');
+    if (cuerpo) cuerpo.innerHTML = html;
+    // Después de ponerlo: hasta que no está en la pantalla no se puede medir ni engancharle
+    // nada. `ssCanvasReset` antes de cada prueba porque el mapa es OTRO: dejar la ventana de la
+    // prueba anterior sería enseñar el trozo que alguien miró de un proveedor distinto.
+    if (tpl) {
+        const svg = ssCanvasSvg(_MAP_CANVAS);
+        if (svg) svg.dataset.zoomInZmax = zmax || '';
+        _mapPreviewMounted(tpl);
+    } else {
+        ssCanvasOnApply(_MAP_CANVAS, null);
+    }
+}
+
+//: Dónde se centra el trozo de mapa de la prueba. Un sitio concreto y reconocible, y no las
+//: sedes de esta casa: la prueba se hace a menudo ANTES de que haya ninguna con coordenadas, y
+//: un mapa centrado en el golfo de Guinea no demuestra nada. Si sale una ciudad que se reconoce,
+//: las imágenes están llegando — que es justo lo que un informe en verde no termina de decir.
+const _MAP_DEMO = {lat: 42.8125, lon: -1.6458, z: 12};   // Pamplona
+
+//: El lienzo del mapa de la prueba. El mismo mecanismo que los otros dos mapas del panel: la
+//: rueda acerca, se arrastra para mover y dos pulsaciones vuelven. Probar un mapa sin poder
+//: moverlo es mirar una foto — y lo que se quiere saber es si el mapa FUNCIONA, que incluye si
+//: llegan las teselas de los niveles a los que se va a mirar de verdad.
+const _MAP_CANVAS = 'map-preview';
+
+//: Lo que ocupa el dibujo, en píxeles del nivel 12. Grande a propósito: un recorte de tarjeta no
+//: deja reconocer una ciudad, y reconocerla es toda la prueba.
+const _MAP_PREVIEW = {w: 820, h: 380};
+
+/** Un trozo de mapa de verdad, pedido por el NAVEGADOR y que se puede recorrer.
+ *
+ *  Es la mitad que el servidor no puede comprobar por mucho que se traiga una tesela: quien
+ *  tiene que poder traerlas es el navegador de quien mira, y lo que se lo impide —la política de
+ *  contenido— no deja el menor rastro en la página. Si el informe dice que la tesela llegó y
+ *  aquí sale un rectángulo vacío, es eso, y se ve sin deducir nada. */
+function _mapPreview(tpl, credito, zmax) {
+    if (!String(tpl || '').trim()) return '';
+    const p = ssGeoProject(_MAP_DEMO.lat, _MAP_DEMO.lon);
+    const w = _MAP_PREVIEW.w, h = _MAP_PREVIEW.h;
+    const box = {x: p.x - w / 2, y: p.y - h / 2, width: w, height: h};
+    const g = jsStr(_MAP_CANVAS);
+    // El cuadro se puede estirar (`ss-resize-v`): con un mapa dentro, cuánto sitio merece
+    // depende de lo que se esté mirando, y eso no lo puede decidir esto.
+    return `<div class="rounded-2 overflow-hidden border position-relative mb-3 ss-resize-v"
+                 style="height:${h}px;background:var(--bs-tertiary-bg)">
+        <svg ${ssCanvasAttrs(_MAP_CANVAS, box)}
+             data-zoom-in="${ssGeoZoomIn(w, w, zmax)}" data-zoom-out="3"
+             onwheel="ssCanvasWheel(${g},event)"
+             onpointerdown="ssCanvasPanStart(${g},event)"
+             onpointermove="ssCanvasPanMove(${g},event)"
+             onpointerup="ssCanvasPanEnd(event)"
+             onpointercancel="ssCanvasPanEnd(event)"
+             onpointerleave="ssCanvasPanEnd(event)"
+             ondblclick="ssCanvasFit(${g})">
+            <g class="map-preview-tiles">${ssGeoTiles(tpl, {x: box.x, y: box.y, w: w, h: h},
+                                                     _MAP_DEMO.z, _MAP_TILE_CAP)}</g>
+            <g class="map-preview-pin">${_mapPin(p, 1)}</g>
+        </svg>
+        ${credito ? `<div class="ss-map-credit">${esc(credito)}</div>` : ''}
+    </div>`;
+}
+
+//: Cuántas teselas como mucho. Menos que en una pantalla completa: esto es un cuadro, y se
+//: repinta en cada rueda.
+const _MAP_TILE_CAP = 40;
+
+/** Enganchar el dibujo a la rueda y al arrastre, ya puesto en la pantalla.
+ *
+ *  Se vuelve a apuntar cada vez que se dibuja el informe: el `<svg>` es otro, y el apuntado
+ *  viejo pintaría en un nodo que ya no está en ninguna pantalla. Y la chincheta se queda quieta
+ *  en su sitio del mundo — es un punto de la Tierra, no una marca de la pantalla. */
+function _mapPreviewMounted(tpl) {
+    if (!String(tpl || '').trim()) return;
+    ssCanvasOnApply(_MAP_CANVAS, (v) => {
+        const svg = ssCanvasSvg(_MAP_CANVAS);
+        if (!svg) return;
+        const ancho = svg.clientWidth || _MAP_PREVIEW.w;
+        const teselas = svg.querySelector('.map-preview-tiles');
+        if (teselas)
+            teselas.innerHTML = ssGeoTiles(tpl, {x: v.x, y: v.y, w: v.w, h: v.h},
+                                           ssGeoZoom(ancho / v.w, svg.dataset.zoomInZmax),
+                                           _MAP_TILE_CAP);
+        // Y el punto, que también hay que volver a dibujar: está en coordenadas del MUNDO, así
+        // que con un radio fijo crece al acercarse hasta tapar la ciudad. Reportado desde la
+        // pantalla, con la chincheta del tamaño de una manzana — el mismo fallo que ya tuvo el
+        // mapa de la sección, y por la misma razón.
+        const pin = svg.querySelector('.map-preview-pin');
+        if (pin) pin.innerHTML = _mapPin(ssGeoProject(_MAP_DEMO.lat, _MAP_DEMO.lon), v.w / ancho);
+    });
+    ssCanvasApply(_MAP_CANVAS);
+}
+
+/** El punto de la ciudad de la prueba, del tamaño que toca. *k* es cuánto hay que agrandar lo
+ *  dibujado para que se siga viendo igual: unidades del dibujo por píxel de pantalla. */
+function _mapPin(p, k) {
+    return `<circle cx="${p.x}" cy="${p.y}" r="${5 * k}" fill="var(--bs-danger)"
+                    stroke="var(--bs-body-bg)" stroke-width="${2 * k}"></circle>`;
+}
+
+/** Un renglón del informe: qué se comprobó y cómo salió. */
+function _mapStep(ok, titulo, detalle) {
+    const icono = ok === null ? 'bi-dash-circle text-muted'
+        : (ok ? 'bi-check-circle-fill text-success' : 'bi-x-circle-fill text-danger');
+    return `<div class="d-flex gap-2 align-items-start mb-2">
+        <i class="bi ${icono} mt-1"></i>
+        <div><div>${esc(titulo)}</div>${detalle
+            ? `<div class="text-muted ss-fs-2 text-break">${esc(detalle)}</div>` : ''}</div>
+    </div>`;
+}
+
+/** El informe. *fallo* es lo que se rompió ANTES de llegar al servidor —la conexión, un
+ *  permiso—; lo que se rompió dentro viene en el propio informe.
+ *
+ *  La cabecera sale de LOS MISMOS datos que los pasos, y por eso no puede contradecirlos: decir
+ *  «funciona» encima de tres cruces rojas es peor que no decir nada, porque quien lo lee ya no
+ *  sabe a cuál de las dos mitades hacer caso. */
+function _mapTestHtml(r, fallo) {
+    r = r || {};
+    const prov = String(r.provider || '');
+    const tesela = r.tile || {};
+    // Bien es que se haya recorrido la cadena ENTERA: hay proveedor, no hubo error, y la tesela
+    // llegó. Sin lo tercero no se ha probado nada — que es lo que decía aquel verde.
+    const clave = String(fallo || r.error || '');
+    const bien = !clave && !!prov && tesela.ok === true;
+    let h = `<div class="alert alert-${bien ? 'success' : 'danger'} mb-3">
+        <i class="bi bi-${bien ? 'check-circle' : 'exclamation-triangle'} me-1"></i>${
+        esc(t(clave || (bien ? 'map_ok' : 'map_err_unknown')))}</div>`;
+    // El detalle EN CRUDO, que es donde está la respuesta: «403 API not enabled», «getaddrinfo
+    // failed», «This API project is not authorized». Sin él, un aviso rojo es otro cuadro vacío.
+    if (r.detail)
+        h += `<pre class="ss-fs-2 p-2 rounded-2 mb-3 text-break"
+                 style="background:var(--bs-tertiary-bg);white-space:pre-wrap">${
+            esc(r.detail)}</pre>`;
+    // El dibujo antes que los renglones: es lo que se mira primero, y muchas veces lo único
+    // que hace falta mirar.
+    h += _mapPreview(r.preview, r.attribution, r.zmax);
+    // Y si lo probado no es lo guardado, se dice: este cuadro pide las imágenes POR EL PANEL,
+    // así que enseña un mapa que las demás pantallas todavía no pueden pedir. Sin esta línea,
+    // «aquí funciona y en el inventario no» es un misterio; con ella son dos pasos que faltan.
+    // El nombre del guardado lo dice el SERVIDOR, que es quien tiene el catálogo. Componerlo
+    // aquí con el identificador es lo que sacó «dcim_map_provider_ign_pnoa» a la pantalla en
+    // medio de una frase: el del IGN se llama `ign_pnoa` y su rótulo es `…_ign`.
+    if (prov && r.saved_provider !== undefined && r.saved_provider !== prov)
+        h += `<div class="alert alert-warning py-2 ss-fs-2 mb-3">
+            <i class="bi bi-info-circle me-1"></i>${esc(tf('map_not_saved',
+                t(r.saved_label_key || 'dcim_map_provider_off')))}</div>`;
+    h += _mapStep(!!prov, t('map_step_provider'), prov ? `${prov} · ${t('map_step_zmax')} ${r.zmax}` : '');
+    if (prov === 'google')
+        h += _mapStep(!!r.session, t('map_step_session'), '');
+    h += _mapStep(tesela.ok === undefined ? null : !!tesela.ok, t('map_step_tile'),
+                  tesela.status ? `${tesela.status} · ${tesela.type || '—'} · ${
+                      tesela.bytes || 0} B` : '');
+    // El origen no se «prueba»: se dice, porque es la mitad que falla sin dejar rastro. Si el
+    // servidor trae la tesela y el navegador no la pinta, es esto.
+    h += _mapStep(null, t('map_step_origin'), r.origin || '—');
+    if (r.attribution) h += _mapStep(null, t('map_step_credit'), r.attribution);
+    return h;
+}

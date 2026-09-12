@@ -13,11 +13,17 @@ the whole install in one file, so whoever may fetch it holds the install. Restor
 the copy says owns it.
 """
 
+import datetime
+import json
 import os
+import shutil
+import subprocess
+import zipfile
 
 import pytest
 
 from tests.conftest import _login
+from tests.helpers import node_run, panel_bundle
 
 pytestmark = pytest.mark.usefixtures('client')
 
@@ -76,6 +82,24 @@ class TestTheListAndItsCatalogue:
     def test_an_install_with_no_copies_answers_with_none(self, client):
         _login(client)
         assert client.get('/api/v1/backups').get_json()['backups'] == []
+
+    def test_la_lista_dice_de_donde_sale_la_clave_de_los_secretos(self, client, monkeypatch):
+        """La copia **no** lleva la clave que descifra los secretos, y eso es deliberado: un
+        fichero con los secretos y con su llave dentro entrega la instalación entera. Pero
+        entonces hay que guardarla aparte, y el aviso nombraba sólo `SS_SECRET_KEY` — la forma
+        que NO usa la instalación por defecto. Sin esa variable la clave es un fichero en la
+        carpeta de configuración y nadie decía que hubiera que salvarlo.
+        """
+        _login(client)
+        key = client.get('/api/v1/backups').get_json()['key']
+        assert key['source'] == 'file'
+        assert key['path'].endswith('.flask_secret'), key['path']
+
+        # Y con la variable puesta no hay fichero que guardar: la clave la pone el operador en
+        # cada proceso, y decirle dónde está sería ruido sobre algo que administra él.
+        monkeypatch.setenv('SS_SECRET_KEY', 'a' * 64)
+        key = client.get('/api/v1/backups').get_json()['key']
+        assert key['source'] == 'env' and not key['path']
 
 
 class TestTheRoundTrip:
@@ -1111,3 +1135,283 @@ class TestARetentionProfileIsFollowedNotCopied:
         assert client.get('/api/v1/backups/profiles').status_code == 200
         assert client.put('/api/v1/backups/profiles', json={'name': 'X'}).status_code == 403
         assert client.delete('/api/v1/backups/profiles/x').status_code == 403
+
+
+def _node():
+    n = shutil.which('node')
+    if not n:
+        return None
+    try:
+        out = subprocess.run([n, '--version'], capture_output=True, text=True, timeout=20)
+        return n if int((out.stdout or '').strip().lstrip('v').split('.')[0]) >= 16 else None
+    except Exception:                                    # pragma: no cover - sin node
+        return None
+
+
+@pytest.mark.skipif(not _node(), reason='no node >= 16 on PATH')
+class TestElAvisoDeLaClaveSeDibuja:
+    """Que el dato llegue no basta: quien tiene que leerlo es una persona en un diálogo."""
+
+    def test_solo_aparece_cuando_la_clave_es_un_fichero(self, client):
+        _login(client)
+        paquete = panel_bundle(client)
+        out = node_run(paquete, """
+            __out = {};
+            _bkKey = {source: 'file', path: '/etc/ss/.flask_secret'};
+            __out.fichero = _bkKeyNote('backup_key_file');
+            _bkKey = {source: 'env', path: ''};
+            __out.entorno = _bkKeyNote('backup_key_file');
+            _bkKey = {};
+            __out.nada = _bkKeyNote('backup_key_file');
+        """)
+        assert '/etc/ss/.flask_secret' in out['fichero'], 'el aviso no dice dónde está'
+        assert 'alert-warning' in out['fichero']
+        # Con la variable puesta la clave la administra el operador: repetírselo es ruido.
+        assert out['entorno'] == '' and out['nada'] == ''
+
+
+@pytest.mark.skipif(not _node(), reason='no node >= 16 on PATH')
+class TestBorrarVariasDeUnaVez:
+    """Elegir varias copias y llevárselas juntas.
+
+    Se dibuja la lista de verdad en node y se leen las casillas, en vez de mirar el fuente:
+    quién puede marcar qué es una regla con tres casos —sin permiso, con candado, y el resto— y
+    los tres se ven en el HTML o no se ven en ninguna parte.
+    """
+
+    #: Tres copias, una con candado, y un contenedor donde pintarlas.
+    _LISTA = """
+        currentUser = {permissions: %s};
+        _backups = [{name: 'a', mtime: 1, size_h: '1 KB', tables: {}, parts: [], locked: false},
+                    {name: 'b', mtime: 2, size_h: '2 KB', tables: {}, parts: [], locked: true},
+                    {name: 'c', mtime: 3, size_h: '3 KB', tables: {}, parts: [], locked: false}];
+        _backupView = 'all';
+        _bkSel.clear();
+        const cont = document.createElement('div');
+        cont.id = 'backup-container';
+        document.body.appendChild(cont);
+        _renderBackupPane(cont);
+    """
+
+    def _pinta(self, client, permisos="['backup_delete']", luego=''):
+        """Pintar la lista, hacer algo, y volver a pintarla para leer el resultado.
+
+        Se lee de `cont` y no buscando el id: el DOM de mentira del arnés no devuelve el mismo
+        nodo en cada `getElementById`, así que una lectura por id ve un elemento distinto del
+        que se acaba de escribir — media hora de creer que la barra no se dibujaba.
+        """
+        return node_run(panel_bundle(client), '__out = {};' + (self._LISTA % permisos) + luego + """
+            _renderBackupPane(cont);
+            __out.html = cont.innerHTML;
+            __out.sel = [..._bkSel].join(',');
+        """)
+
+    def test_hay_una_casilla_por_copia(self, client):
+        _login(client)
+        assert self._pinta(client)['html'].count('bkSelectOne') == 3
+
+    def test_la_bloqueada_no_se_puede_marcar(self, client):
+        """Su botón de borrar ya está desactivado; una casilla que se dejara marcar llevaría a
+        un diálogo que promete borrar tres y borra dos.
+
+        Se mira **antes** de repintar: el repintado también poda la selección, así que leerla
+        después comprueba la poda y no lo que hace «todas» — y con «todas» rota seguía en
+        verde. Se vio mutándola. Las dos guardas se prueban, cada una donde está.
+        """
+        _login(client)
+        out = node_run(panel_bundle(client), '__out = {};'
+                       + (self._LISTA % "['backup_delete']") + """
+            // Sin repintar: `bkSelectAll` termina repintando, y el repintado poda — así que
+            // con la pintura puesta se comprueba la poda y nunca el filtro de «todas», que
+            // seguía en verde con el filtro quitado. Cada guarda se prueba sola.
+            const _pintaDeVerdad = _renderBackupPane;
+            _renderBackupPane = () => {};
+            bkSelectAll(true);
+            __out.justoDespues = [..._bkSel].join(',');
+            _renderBackupPane = _pintaDeVerdad;
+            _renderBackupPane(cont);
+            __out.trasRepintar = [..._bkSel].join(',');
+            __out.html = cont.innerHTML;
+        """)
+        assert out['justoDespues'] == 'a,c', '«todas» se lleva también la bloqueada'
+        assert out['trasRepintar'] == 'a,c'
+        # Y su casilla sale desactivada, que es lo que lo dice en la pantalla.
+        # `jsStr` escapa las comillas para el atributo: el nombre sale como `&quot;b&quot;`.
+        fila = out['html'].split('bkSelectOne(&quot;b&quot;')[1][:200]
+        assert 'disabled' in fila, 'la copia con candado se puede marcar'
+
+    def test_y_una_seleccion_heredada_pierde_la_bloqueada_al_repintar(self, client):
+        """La segunda guarda, por su cuenta: un candado puesto desde otra pestaña —o por la
+        retención— tiene que sacarla del montón en el siguiente repintado."""
+        _login(client)
+        out = self._pinta(client, luego="_bkSel.add('a'); _bkSel.add('b');")
+        assert out['sel'] == 'a', out['sel']
+
+    def test_sin_permiso_no_se_ensena_con_que_elegir(self, client):
+        """Una columna de casillas que no lleva a ninguna acción enseña algo que no se puede
+        hacer."""
+        _login(client)
+        out = self._pinta(client, permisos="['backup_view']")
+        assert 'bkSelectOne' not in out['html']
+        assert 'bkSelectAll' not in out['html']
+
+    def test_la_barra_aparece_al_elegir_y_dice_cuantas(self, client):
+        _login(client)
+        vacia = self._pinta(client)
+        assert 'bkDeleteSelected' not in vacia['html'], 'la barra ocupa sitio sin nada elegido'
+        llena = self._pinta(client, luego="bkSelectOne('a', true); bkSelectOne('c', true);")
+        assert 'bkDeleteSelected' in llena['html']
+        assert '2' in llena['html'].split('bkDeleteSelected')[0][-400:]
+
+    def test_una_sola_se_borra_por_su_nombre(self, client):
+        """Con una elegida, «se eliminarán 1 copias» es peor que el diálogo de siempre, que
+        dice cuál. Es además el mismo texto que sale por el botón de la fila."""
+        _login(client)
+        out = node_run(panel_bundle(client), '__out = {};'
+                       + (self._LISTA % "['backup_delete']") + """
+            __out.dicho = '';
+            showConfirmModal = (msg) => { __out.dicho = msg; };
+            bkSelectOne('a', true);
+            bkDeleteSelected();
+        """)
+        assert 'a' in out['dicho'] and '1' not in out['dicho'], out['dicho']
+
+    def test_y_la_seleccion_no_arrastra_lo_que_ya_no_esta(self, client):
+        """La lista se repinta sola mientras corre una copia. Un nombre que se quedara dentro
+        mandaría a borrar un fichero que otro acaba de llevarse."""
+        _login(client)
+        out = self._pinta(client, luego="bkSelectAll(true);"
+                                        " _backups = _backups.filter(b => b.name !== 'c');")
+        assert out['sel'] == 'a', out['sel']
+
+
+class TestLaFilaDeCopiasDiceCuandoTocaLaSiguiente:
+    """Reportado desde la pantalla: «Copias programadas» en ámbar con «Atrasado 41 min»,
+    con la pantalla de al lado enseñando tres copias recién hechas.
+
+    La lista de temporizadores calcula la próxima vuelta como «última vuelta + cada cuánto», y
+    para este temporizador esas dos cifras miden cosas distintas: el hilo despierta cada diez
+    minutos pero toma el arriendo **sólo cuando hay trabajo**, así que su marca es la última
+    copia. Con una programación horaria o diaria, la suma queda siempre en el pasado.
+
+    Así que este paquete declara su propia `next_run`. Se comprueba contra la declaración de
+    verdad —no contra `normalise`, que ya tiene la suya en `tests/unit`— porque lo que se perdió
+    una vez fue precisamente la línea que la pone.
+    """
+
+    def _tarea(self, admin, **kw):
+        doc = {'name': 'cada-hora', 'enabled': True, 'every_hours': 1,
+               'parts': ['core'], 'secrets': True, 'keep': 7}
+        doc.update(kw)
+        admin._backup_tasks_store.upsert(doc)
+
+    def test_la_declara_y_mira_al_futuro(self, admin):
+        import time                                              # noqa: PLC0415
+        from lib.core.backup import timers as bt                 # noqa: PLC0415
+        self._tarea(admin)
+        [fila] = bt.live(admin)
+        assert 'next_run' in fila, 'la línea que la declara se ha perdido'
+        # Sin copia ninguna todavía le toca YA, que es la misma regla que sigue `is_due`: la
+        # instalación que nunca ha copiado es la que más lo necesita.
+        assert fila['next_run'] >= time.time() - 5
+
+    def test_y_con_una_copia_reciente_apunta_a_la_hora_siguiente(self, admin, tmp_path):
+        """El caso de la captura, montado: copia horaria hecha hace un rato."""
+        import time                                              # noqa: PLC0415
+        from lib.core.backup import timers as bt                 # noqa: PLC0415
+        from lib.core.backup import schedule as sched            # noqa: PLC0415
+        self._tarea(admin)
+        # Una copia automática de esta tarea, con su nombre: es de donde sale «la última».
+        carpeta = os.path.join(admin._var_dir, 'backups')
+        os.makedirs(carpeta, exist_ok=True)
+        ahora = time.time()
+        nombre = sched.auto_name(datetime.datetime.fromtimestamp(ahora - 51 * 60), 'cada-hora')
+        ruta = os.path.join(carpeta, nombre + '.zip')
+        with zipfile.ZipFile(ruta, 'w') as z:
+            z.writestr('manifest.json', json.dumps({'format': 1, 'name': nombre,
+                                                    'parts': ['core'], 'status': 'ok'}))
+        os.utime(ruta, (ahora - 51 * 60, ahora - 51 * 60))
+        [fila] = bt.live(admin)
+        falta = fila['next_run'] - ahora
+        assert 0 < falta <= 10 * 60, f'quedan {falta / 60:.1f} min para la siguiente'
+
+    def test_el_cada_es_el_de_la_programacion_y_no_el_del_hilo(self, admin):
+        """La otra mitad del mismo fallo, reportada después: «cada 10 min» junto a «siguiente:
+        ahora» son dos relojes en una fila, y quien la lee no puede saber qué va a pasar. Peor,
+        la barra de avance se dibuja sobre `every`: diez minutos contra una cuenta atrás de una
+        hora se llenaba y se quedaba llena.
+
+        El tic sigue estando —explica por qué una copia que tocaba a y cuarto se hace a y
+        veinte— pero bajo el nombre, no en la columna del periodo.
+        """
+        from lib.core.backup import timers as bt                 # noqa: PLC0415
+        self._tarea(admin, every_hours=1)
+        [fila] = bt.live(admin)
+        assert fila['every'] == 3600, f"«cada» sigue siendo el tic: {fila['every']}"
+        assert '10' in fila['detail'], 'el tic no se dice en ninguna parte'
+
+    def test_y_una_diaria_por_calendario_dice_un_dia(self, admin):
+        """Por calendario no hay `every_hours` que leer: el periodo es la distancia entre la
+        ventana que pasó y la siguiente."""
+        from lib.core.backup import timers as bt                 # noqa: PLC0415
+        admin._backup_tasks_store.upsert({'name': 'diaria', 'enabled': True,
+                                          'mode': 'calendar', 'days': [], 'at': '03:00',
+                                          'parts': ['core'], 'keep': 7})
+        [fila] = bt.live(admin)
+        assert fila['every'] == 86400, fila['every']
+
+    def test_y_declara_con_que_precision_puede_cumplir(self, admin):
+        """Una vuelta del hilo. La regla por defecto —medio periodo— serían treinta minutos de
+        silencio sobre una copia horaria que no se está tomando."""
+        from lib.core.backup import timers as bt                 # noqa: PLC0415
+        from lib.core.backup.runner import TICK_SECONDS          # noqa: PLC0415
+        self._tarea(admin, every_hours=1)
+        [fila] = bt.live(admin)
+        assert fila['slack'] == TICK_SECONDS, fila.get('slack')
+
+    def test_sin_tareas_no_hay_proxima_que_dar(self, admin):
+        from lib.core.backup import timers as bt                 # noqa: PLC0415
+        [fila] = bt.live(admin)
+        assert fila['enabled'] is False
+        assert not fila['next_run'], 'un hilo sin nada que hacer no tiene «siguiente»'
+
+
+class TestLaPrimeraVueltaNoTardaUnTicEntero:
+    """Un proceso que se reinicia más a menudo que su propio intervalo no copiaba **nunca**.
+
+    El hilo esperaba una vuelta completa —diez minutos— antes de la primera, por una razón
+    buena mal dimensionada: no correr durante el arranque, mientras se están montando las
+    tiendas. Pero eso significa que cada reinicio pone el contador a cero, y un panel que se
+    reinicia cada pocos minutos —un contenedor en bucle de fallos, o uno sobre el que alguien
+    está trabajando— deja de tomar copias sin decir nada. La única señal es una carpeta cuyo
+    fichero más nuevo se va haciendo viejo.
+
+    Encontrado así: la pantalla decía que la siguiente copia tocaba «ahora» y seguía
+    diciéndolo; a la 01:33 la copia de la 01:13 no estaba, y el archivo más reciente en disco
+    era de la noche anterior.
+    """
+
+    def test_la_primera_vuelta_llega_en_segundos(self, admin, monkeypatch):
+        import threading                                         # noqa: PLC0415
+        from lib.core.backup import runner as run_mod            # noqa: PLC0415
+
+        monkeypatch.setattr(run_mod, 'FIRST_TICK_SECONDS', 0.01)
+        # Un tic que tarda una vuelta entera dejaría esto colgado: el `wait` del final es el que
+        # de verdad se quiere probar que NO está antes.
+        monkeypatch.setattr(run_mod, 'TICK_SECONDS', 30)
+        vueltas = threading.Event()
+        r = run_mod.BackupRunner(admin)
+        monkeypatch.setattr(type(r), 'tick', lambda self, *a, **k: vueltas.set() or {})
+        r.start()
+        try:
+            assert vueltas.wait(5), 'el hilo no dio una vuelta en cinco segundos'
+        finally:
+            r.stop()
+
+    def test_y_el_margen_sigue_protegiendo_el_arranque(self):
+        """No es cero: correr mientras se montan las tiendas es lo que esa espera evitaba, y
+        eso no ha dejado de ser verdad. Un minuto le sobra al arranque y no le cuesta nada a un
+        proceso que se reinicia."""
+        from lib.core.backup import runner as run_mod            # noqa: PLC0415
+        assert 0 < run_mod.FIRST_TICK_SECONDS <= 120
+        assert run_mod.FIRST_TICK_SECONDS < run_mod.TICK_SECONDS

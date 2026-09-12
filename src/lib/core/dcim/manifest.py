@@ -117,6 +117,38 @@ AUDIT_EVENTS = [
 ]
 
 
+# ── Lo que este paquete pone en el panel de control ──────────────────────────────────────
+#
+# Un mapa, y no otro recuento. Las demás tarjetas dicen QUÉ está mal; esta dice DÓNDE, que es
+# una pregunta que no contesta ninguna otra y la que decide a quién se llama de madrugada: no es
+# lo mismo que lo caído esté en la nave de al lado que en el CPD que está a cuatro horas.
+#
+# `kind: 'map'` es del panel, no de este dominio: dibuja puntos con coordenadas y un estado, y
+# cualquier paquete que tenga cosas con latitud puede pedirlo diciendo lo mismo.
+from .overview_widget import sites_map        # noqa: E402
+
+OVERVIEW_WIDGETS = [
+    {'id': 'dcim_sites', 'icon': 'bi-geo-alt', 'label_key': 'overview_dcim_sites',
+     # Ancha y alta de salida, y redimensionable: un mapa encogido a una tarjeta de recuento no
+     # se puede leer, y cuánto sitio merece depende de cuántas sedes haya —una casa con dos no
+     # quiere media pantalla de mapa—.
+     'cols': 4, 'h': 320, 'has_h': True, 'order': 175,
+     'perms': {'any': ['dcim_view']}, 'nav': {'tab': '#tab-dcim'},
+     'content': sites_map,
+     'view': {'kind': 'map', 'icon': 'bi-geo-alt-fill', 'title_key': 'overview_dcim_sites',
+              'accent': 'teal', 'data_url': '/api/v1/overview/widget/dcim_sites',
+              'empty_key': 'overview_dcim_sites_none',
+              # Adónde lleva pulsar una chincheta. Lo dice quien trae los puntos y no el panel:
+              # un mapa de sedes va a la sede del inventario, y el que mañana traiga otra cosa
+              # irá a otro sitio. Misma regla que un módulo nombrando su propia acción.
+              'pin_nav': 'dcimGoSite',
+              # Y con qué palabras se dice lo que un punto contiene. «Tres armarios en dos
+              # salas» es vocabulario de esta sección: escrito en el panel, el siguiente
+              # paquete con cosas situadas heredaría una frase sobre armarios.
+              'count_key': 'dcim_board_tile'}},
+]
+
+
 # ── Tables this package keeps in the shared database ─────────────────────────────────────
 #
 # Declared for the sake of STARTUP. Each store reconciles its own table when it is built, but

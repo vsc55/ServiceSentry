@@ -90,6 +90,30 @@ class TestWhenThereIsNoLiveValue:
         rows = build_host_status(BOUND, _live(**{'srv-uid/eth0': {'if_in': 1}}), hist)
         assert len(rows) == 1 and rows[0]['source'] == 'live'
 
+    def test_and_a_dead_series_of_a_LIVE_item_is_not_its_state_either(self):
+        """Not the same thing, and it was the one that got through. `ram_swap` files nothing
+        under its own key: it files `<item>_ram` and `<item>_swap`. So the bare `<item>` key
+        never has a live value — and where an old series of it was left in the history, two
+        failed samples from hours earlier with no data at all, the fallback served them as the
+        state of NOW. The machine read red on its own page with both its measurements green
+        beside it, while the fleet listing called it fine. Measured on the screen.
+
+        The fallback is for the real case — a host in maintenance whose live records were
+        pruned. If the item is talking, there is nothing to fall back to."""
+        hist = {'snmp': [{'key': 'srv-uid', 'last_status': False, 'last_data': {},
+                          'last_ts': 1788690526.0}]}
+        rows = build_host_status(BOUND, _live(**{'srv-uid_ram': {'used': 41}}), hist)
+        assert [(r['key'], r['source'], r['level']) for r in rows] == [
+            ('srv-uid_ram', 'live', 'ok')], rows
+
+    def test_but_a_dead_series_is_still_shown_when_nothing_is_live(self):
+        """Which is the whole point of the fallback: a machine in maintenance has no live
+        records left, and an empty page reads as one that never reported."""
+        hist = {'snmp': [{'key': 'srv-uid', 'last_status': False, 'last_data': {},
+                          'last_ts': 1788690526.0}]}
+        rows = build_host_status(BOUND, {}, hist)
+        assert [(r['key'], r['source']) for r in rows] == [('srv-uid', 'history')]
+
 
 class TestWhatTheRowIsCalled:
 

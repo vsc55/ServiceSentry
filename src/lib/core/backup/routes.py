@@ -81,6 +81,9 @@ def register(app, wa):
             # What this install is, so the restore dialog can say which way the jump goes
             # instead of showing a build number the operator has to compare in their head.
             'version': __version__,
+            # De dónde sale la clave que descifra los secretos, porque el aviso no puede ser
+            # el mismo en los dos casos. Ver `key_source`.
+            'key': backup_svc.key_source(wa),
         })
 
     @app.route('/api/v1/backups/browse', methods=['GET'])

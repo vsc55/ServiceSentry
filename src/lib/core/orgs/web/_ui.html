@@ -31,7 +31,7 @@
 
 //: Lo que trajo el servidor la última vez. Las empresas Y los ámbitos que alguien declara, que
 //: es lo que permite contar «3 armarios» sin que esta pantalla sepa qué es un armario.
-let _orgsData = {orgs: [], scopes: [], loaded: false};
+let _orgsData = {orgs: [], scopes: [], sources: [], loaded: false};
 
 //: La empresa que se está corrigiendo en el cuadro. `uid` vacío es un alta.
 let _orgDraft = null;
@@ -66,9 +66,13 @@ const _ORG_COLS = [
     // Por CUÁNTAS cosas tiene fichadas y no por el texto de las chapas: ordenar «3 sedes» y
     // «2 armarios» alfabéticamente ordena por la primera letra del ámbito, que no dice nada.
     {id: 'owns',        label: () => t('orgs_owns'),  sortKey: 'owns'},
+    // De dónde vino. Visible de salida: en cuanto una lista mezcla lo tecleado aquí con lo
+    // traído de fuera, «¿por qué me ha cambiado el nombre de esta sola?» es la primera pregunta
+    // — y la respuesta es que a esa la corrige el origen en cada importación.
+    {id: 'source',      label: () => t('orgs_source'), sortKey: 'source'},
     ..._META_TAIL,
 ];
-const _ORGS_DEFAULT_COLS = new Set(['short', 'description', 'owns']);
+const _ORGS_DEFAULT_COLS = new Set(['short', 'description', 'owns', 'source']);
 
 const ORG_VIEWS = [
     {id: 'table',  label_key: 'view_table',      icon: 'bi-table',                 render: null,              mode: 'table'},
@@ -103,6 +107,25 @@ function _orgsChipsHtml(o) {
         .join('');
 }
 
+/** La chapa de dónde vino una empresa, o nada si la tecleó una persona.
+ *
+ *  El nombre y el icono los pone quien la trae (`ORG_SOURCES` en su manifiesto): aquí no hay
+ *  escrito el nombre de ningún proveedor. Un origen que ya no declara nadie —se quitó el
+ *  paquete— se enseña con su identificador tal cual, que sigue diciendo de dónde vino.
+ *
+ *  El aviso dice lo que importa: esa fila la corrige el origen en la próxima importación, así
+ *  que corregirle el nombre a mano aquí dura hasta entonces. */
+function _orgsSourceHtml(o) {
+    const id = String((o || {}).source || '');
+    if (!id) return '';
+    const spec = (_orgsData.sources || []).find(s => s.id === id) || {};
+    const nombre = spec.label_key ? t(spec.label_key) : id;
+    const icono = spec.icon || 'bi-box-arrow-in-down';
+    return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+        title="${escAttr(tf('orgs_source_tt', nombre, o.external_id || ''))}">
+        <i class="bi ${escAttr(icono)} me-1"></i>${esc(nombre)}</span>`;
+}
+
 function _orgsTotal(o) {
     const said = (o || {}).said || {};
     return Object.keys(said).reduce((n, k) => n + Number(said[k] || 0), 0);
@@ -125,8 +148,8 @@ function _orgsCardsBody(filas, ctx) {
     return _cardGrid((filas || []).map(o => _entityCard({
         icon: 'bi-buildings', accentClass: 'teal',
         title: `<span class="fw-semibold ss-fs-4">${esc(o.name || '')}</span>`,
-        badges: o.short ? ` <span class="badge bg-body-secondary text-body-secondary border
-            fw-normal">${esc(o.short)}</span>` : '',
+        badges: `${o.short ? ` <span class="badge bg-body-secondary text-body-secondary border
+            fw-normal">${esc(o.short)}</span>` : ''} ${_orgsSourceHtml(o)}`,
         subtitle: o.description ? esc(o.description) : '',
         chips: _orgsChipsHtml(o)
             || `<span class="text-muted ss-fs-1">${esc(t('orgs_owns_none'))}</span>`,
@@ -176,6 +199,7 @@ function _orgsRecordBody(filas, ctx) {
                 <span class="fw-semibold ss-fs-4 flex-grow-1">${esc(o.name || '')}</span>
                 ${o.short ? `<span class="badge bg-body-secondary text-body-secondary border
                     fw-normal">${esc(o.short)}</span>` : ''}
+                ${_orgsSourceHtml(o)}
                 ${_orgsRowActions(o, ctx)}
             </div>
             <div class="row g-3">
@@ -233,6 +257,11 @@ createListTable({
                 return `<td style="line-height:1.9">${chips
                     || `<span class="text-muted small">${esc(t('orgs_owns_none'))}</span>`}</td>`;
             }
+            case 'source': {
+                const chapa = _orgsSourceHtml(o);
+                return `<td class="text-nowrap">${chapa
+                    || `<span class="text-muted small">${esc(t('orgs_source_here'))}</span>`}</td>`;
+            }
             default: return '<td></td>';
         }
     },
@@ -275,7 +304,8 @@ createListTable({
 async function _orgsLoad() {
     const d = await apiGet('/api/v1/orgs');
     if (!d) return;                       // la conexión, no la pantalla: el aviso ya está puesto
-    _orgsData = {orgs: d.orgs || [], scopes: d.scopes || [], loaded: true};
+    _orgsData = {orgs: d.orgs || [], scopes: d.scopes || [],
+                 sources: d.sources || [], loaded: true};
 }
 
 /** Volver a pedirlo todo. Después de cada escritura, que es cuando puede haber cambiado algo — y
@@ -325,6 +355,37 @@ function _orgModalOpen(uid) {
     document.getElementById('omOwnsRow')?.classList.toggle('d-none', !chips);
     const caja = document.getElementById('omOwns');
     if (caja) caja.innerHTML = chips;
+    // De dónde vino, y lo que eso implica. Su nombre, su abreviatura y su descripción los
+    // mantiene el origen: se corrigen desde allí en cada importación, así que **aquí no se
+    // tocan**. Un campo que se puede escribir y se revierte solo es peor que uno que no se
+    // puede — el trabajo se pierde sin que nada lo diga, y al día siguiente.
+    const fuente = _orgsSourceHtml(o);
+    const mantenida = !!(o.source && !nuevo);
+    document.getElementById('omSourceRow')?.classList.toggle('d-none', !fuente);
+    const cajaF = document.getElementById('omSource');
+    if (cajaF) cajaF.innerHTML = fuente;
+    for (const id of ['omName', 'omShort', 'omDescription']) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.readOnly = mantenida;
+        el.classList.toggle('bg-body-secondary', mantenida);
+    }
+    // El aviso dice QUIÉN la mantiene y qué hacer si hay que escribirla: una caja bloqueada sin
+    // explicación es una pantalla rota.
+    const aviso = document.getElementById('omManaged');
+    if (aviso) {
+        aviso.classList.toggle('d-none', !mantenida);
+        const spec = (_orgsData.sources || []).find(s => s.id === o.source) || {};
+        aviso.innerHTML = mantenida
+            ? `${esc(tf('orgs_managed', spec.label_key ? t(spec.label_key) : o.source))}
+               ${_orgsMay('orgs_edit') ? `<button class="btn btn-sm btn-secondary mt-2"
+                    onclick="_orgsUnlink(${jsStr(o.uid)}, ${jsStr(o.name || '')})">
+                    <i class="bi bi-link-45deg me-1"></i>${esc(t('orgs_unlink'))}</button>` : ''}`
+            : '';
+    }
+    // Guardar tampoco se ofrece: no hay nada que guardar de lo que se está mirando.
+    const ok = document.getElementById('btnOrgModalOk');
+    if (ok) ok.classList.toggle('d-none', mantenida);
     // Y lo obligatorio, marcado de entrada: en un alta las dos cajas nacen vacías. Lo pinta el
     // marcador del panel, que es el mismo para todas las pantallas.
     if (typeof ssMarkRequired === 'function') ssMarkRequired(document.getElementById('orgModal'));
@@ -386,6 +447,20 @@ function _orgsDrop(uid) {
     showConfirmModal(tf('orgs_drop_q', o.name || ''), async () => {
         const r = await apiSend('DELETE', `/api/v1/orgs/${encodeURIComponent(uid)}`);
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _orgsReload();
+    });
+}
+
+/** Soltar una empresa de su origen: vuelve a ser de esta casa y a poder escribirse.
+ *
+ *  Hace falta una salida. Sin ella, quitar el proveedor —o dejar de usarlo— deja filas que nadie
+ *  mantiene y que nadie puede corregir: sólo se podrían borrar, y de una sociedad cuelgan
+ *  armarios y máquinas. Se pregunta, porque deja de actualizarse sola y eso no se ve. */
+function _orgsUnlink(uid, nombre) {
+    showConfirmModal(tf('orgs_unlink_q', nombre || ''), async () => {
+        const r = await apiSend('DELETE', `/api/v1/orgs/${encodeURIComponent(uid)}/source`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('orgModal')).hide();
         _orgsReload();
     });
 }

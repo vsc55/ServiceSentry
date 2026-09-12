@@ -52,6 +52,10 @@ _PERDONADAS = {
     # Traducirlo cambiaría lo que ya está guardado según quién mire, que es lo contrario de un
     # dato. Si algún día se traduce, lo que se traduce es cómo se PINTA, no lo que se guarda.
     ('lib/core/dcim/basics.py', 'Genérico'),
+    # La atribución de un proveedor de mapas es un CRÉDITO, no texto de este panel: nombra a
+    # quien hizo las imágenes, su licencia lo exige, y es el mismo en todos los idiomas. Uno
+    # traducido nombraría a otro. Está en castellano porque el organismo se llama así.
+    ('lib/maps/catalog.py', '© Instituto Geográfico Nacional de España'),
 }
 
 

@@ -59,6 +59,20 @@ def _section():
                      for f in sorted(os.listdir(DCIM)) if f.endswith('.html'))
 
 
+def _store_src() -> str:
+    """El fuente del almacén del inventario, esté repartido como esté.
+
+    Era un fichero y es un paquete de nueve: las doce tablas de un dominio físico no se leen
+    igual apiladas en mil trescientas líneas. Estas guardas preguntan por lo que el almacén
+    **declara** —una columna, una constante, una función— y no por dónde está escrito, así que
+    leen el paquete entero. El día que una declaración cambie de fichero, la guarda no se
+    entera, que es exactamente lo que tiene que pasar.
+    """
+    base = os.path.join(SRC, 'lib', 'core', 'dcim', 'store')
+    return chr(10).join(_read(os.path.join(base, f))
+                        for f in sorted(os.listdir(base)) if f.endswith('.py'))
+
+
 class TestLaSeccionEstaCableadaDePuntaAPunta:
 
     def test_esta_en_el_registro_de_paginas(self):
@@ -877,7 +891,7 @@ class TestUnaColumnaQueNadiePuedeEscribir:
 
     def _columnas(self):
         """Las de `dc_item`, leídas de su propio `TableSpec`."""
-        src = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'store.py'))
+        src = _store_src()
         i = src.index('_ITEM = TableSpec(')
         return set(re.findall(r"Column\('(\w+)'", src[i:src.index('\n)', i)]))
 
@@ -2196,7 +2210,7 @@ class TestUnCableSePuedePartir:
         # Y de TODAS las tablas que llevan color: un latiguillo rojo y un cable de corriente rojo
         # son el mismo rojo, y contarlos por separado daría dos colores de veinte en vez de uno
         # de cuarenta.
-        assert 'def colors_used(' in _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'store.py'))
+        assert 'def colors_used(' in _store_src()
 
     def test_el_tipo_de_un_cable_no_dice_de_que_esta_hecho(self):
         """La columna se llamaba «De qué es» y ponía «cobre» en unas filas y «corriente» en
@@ -2281,7 +2295,7 @@ class TestUnCableSePuedePartir:
     def test_y_un_cable_de_corriente_tambien_tiene_color(self):
         """Es con lo que se encuentra en un mazo de treinta detrás de un armario, y eso no
         depende de por dónde acabe el cable."""
-        esquema = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'store.py'))
+        esquema = _store_src()
         feed = esquema.split("name='dc_feed'")[1].split('indexes=')[0]
         assert "Column('color'" in feed, 'la tabla no lo guarda'
         js = _read(os.path.join(DCIM, '_power.html'))
@@ -2924,7 +2938,7 @@ class TestLosEquiposPorEstado:
         js = self._js()
         i = js.index('_DC_QUIET_ROLES = [')
         en_pantalla = set(re.findall(r"'([a-z_]+)'", js[i:js.index(']', i)]))
-        store = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'store.py'))
+        store = _store_src()
         j = store.index('ROLES_MUDOS = (')
         en_nucleo = set(re.findall(r"'([a-z_]+)'", store[j:store.index(')', j)]))
         assert en_pantalla == en_nucleo, (en_pantalla, en_nucleo)
@@ -3021,7 +3035,7 @@ class TestLoQueNoOcupaUSeDiceIgual:
     def test_y_es_UNA_decision_y_no_cinco_casos(self):
         """La regleta del lateral ya existía como caso particular con nombre propio; en cuanto
         hay un segundo, la pregunta de verdad se ve — y se contesta una vez."""
-        store = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'store.py'))
+        store = _store_src()
         assert 'PLACEMENTS = ' in store
         i = store.index('PLACEMENTS = (')
         vals = set(re.findall(r"'([a-z]+)'", store[i:store.index(')', i)]))

@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~9.075 tests** (9070 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-01). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~9.686 tests** (10.793 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-12). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -652,6 +652,168 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 
 ---
 
+**Una fila por serie, no por muestra.** Medido sobre una instalación real: SNMP era el **83 %** de
+las filas del histórico y, de los 217 bytes que ocupaba una de sus muestras, **11 eran la medida**
+— 54 la clave reescrita entera cada vez y el resto identidad que no cambia nunca más los nombres
+de los campos, repetidos ([explica-snmp.md](explica-snmp.md)). Ahora la clave, el módulo y la
+identidad viven en la serie, una vez, y la muestra guarda un entero y sus números.
+
+La migración que llevó una base de la forma vieja a ésta **ya no está en el código**: se ejecutó,
+y un camino que sólo puede correr una vez y ya corrió es código muerto que hay que seguir
+manteniendo. Lo que se comprueba aquí es la forma de ahora, que es lo que sí se puede romper
+mañana: que una serie se cree la primera vez y se encuentre después, que **dos filas de la misma
+serie sean imposibles** —lo impide la base y no el código, porque el panel y el monitor pueden
+verla por primera vez a la vez—, que una ya resuelta no se vuelva a preguntar, que cada muestra
+nazca apuntando a la suya; que lo que se escribe sea **sólo la medida** y la identidad viva en la
+serie, que quien lee siga viendo lo de siempre (la ficha de identidad de una máquina en
+mantenimiento sale del historial), que una muestra vieja mande sobre la serie porque su copia es
+la que era verdad ese día, y que la identidad se reescriba **sólo cuando cambia**; que se lea por
+serie sin que **leer cree** —una gráfica de algo que nunca se midió no deja una serie fantasma—,
+que borrar una serie se lleve su identidad y olvide las cachés, que el filtro por módulo pase por
+la serie; y que estén los índices que se leen y no vuelva el que indexaba una columna vacía.
+
+**Archivo:** `tests/unit/test_history_series.py` — 35 tests
+
+---
+
+## 9a-quater. Trabajos — Lo que se mueve por detrás
+
+**Archivo:** `tests/unit/test_jobs_timers.py` — 36 tests
+
+**Archivo:** `tests/integration/test_wa_jobs_render.py` — 22 tests
+
+**Una función que falta no es un error de sintaxis.** `node --check` dice si el navegador puede
+*analizar* el guion, no si funciona: una llamada a algo que no existe analiza perfectamente y
+revienta al primer clic. Partiendo `partials/jobs/_render.html` en dos se quedaron por el camino
+**`_jobsEvery` y `_jobsRefreshCall`**, y la segunda la encontró el usuario con la sección en
+blanco y un `ReferenceError` en la consola.
+
+Así que esto la **ejecuta**: carga el paquete del panel en `node` contra un DOM de mentira y
+dibuja las tres pestañas. Sujeta además lo que sólo se ve mirando la pantalla — que la cuenta
+atrás sea un reloj (`1:04`) y no una frase que se reescribe entera a cada tic, que el intervalo
+diga «cada 30 min» y no «hace 30 min», que un cron *sin efecto* no se pinte igual que uno
+*detenido*, y que «dónde corre» tenga tres respuestas y no dos.
+
+Y una segunda familia, reportada tres veces desde la pantalla con la maqueta al lado: **una clase
+que el marcado nombra y ninguna regla recoge**. La tabla se dibujaba entera —sin marco, sin banda
+de cabecera y con los colores de los distintivos de Bootstrap en vez de los suyos—, que es un
+fallo que no se ve leyendo la plantilla, no lo puede ver `node --check` y tampoco lo ve un test
+que sólo mira el HTML. Así que se comprueban las dos mitades: que el marcado pide las piezas y
+que la hoja de estilos **las define**, fichas de color incluidas, en los **dos** temas.
+
+**«Atrasado» sobre algo que va en hora.** La lista calcula la próxima vuelta como
+«última vuelta + cada cuánto». Es verdad para los que despiertan, hacen su vuelta y
+renuevan el arriendo — y falso para el de las copias, que toma el arriendo **sólo cuando
+hay trabajo**: su marca es la última copia, y sumarle el tic de diez minutos da un
+instante que, con una programación horaria o diaria, queda siempre en el pasado. Ahora un
+temporizador puede declarar su propia `next_run` y ése la declara: cuándo le toca a la
+primera de sus tareas, que lo sabe la programación y no el tic.
+
+Y «cada» con ella, por lo mismo: «cada 10 min» junto a «siguiente: ahora» son dos
+relojes en una fila, y la barra de avance —dibujada sobre `every`— se llenaba y se quedaba
+llena. `due_span` da el periodo de la tarea que toca: el intervalo, o para una de calendario
+la distancia entre la ventana que pasó y la siguiente —tres días o cuatro para «lunes y
+jueves», que es la verdad de ese calendario y no un promedio que no ocurre nunca—. El tic
+sigue estando, bajo el nombre, donde explica por qué una copia que tocaba a y cuarto se hace
+a y veinte.
+
+Y de tirar de ese hilo salió el fallo de verdad: **un proceso que se reinicia más a menudo
+que su propio tic no tomaba ninguna copia**. El hilo esperaba una vuelta entera antes de la
+primera —para no correr durante el arranque— y cada reinicio ponía ese contador a cero. La
+única señal era una carpeta cuyo fichero más nuevo se iba haciendo viejo. Ahora la primera
+vuelta llega en un minuto, y un temporizador puede declarar con qué precisión cumple
+(`slack`) para que la pantalla no se calle media hora sobre una copia horaria que no se
+está tomando.
+
+Y la cabecera de la sección, que se quedó quieta cuando pasó de una lista a tres: el título decía
+«Trabajos» y sus dos contadores mientras mirabas Temporizadores. Ahora sigue a la pestaña, y hay
+guarda de que las cifras no se cuelan de una a otra.
+
+*(Una de estas guardas nació vacua y se vio mutando: comprobaba que «1 atrasado» no sale en
+plural leyendo la salida del arnés, que habla **inglés**, donde «overdue» es la misma palabra en
+singular y en plural. Pasaba igual con la rama del singular borrada. Ahora escribe dos palabras
+que se distinguen en `I18N` antes de dibujar. Una prueba sobre un plural sólo prueba algo en un
+idioma que lo tenga.)*
+
+
+Once hilos corren detrás de este panel y **ninguno aparecía en ninguna pantalla**. En una sola
+máquina eso es sólo opacidad; en contenedores es una pregunta real sin forma de hacerla: con tres
+réplicas web, ¿cuál está tomando las copias?, ¿cuál contrasta el cableado? La respuesta estaba
+escrita en `service_leader` —quién lo sostiene, en qué host, hasta cuándo— y no la enseñaba nadie.
+
+La lista de trabajos no servía: `BACKGROUND_JOBS` describe **trabajo en curso**, con `started`,
+`done`/`total` y un final. Un temporizador duerme el 99 % del tiempo y no tiene un total del que
+ser una fracción; meterlo ahí serían cinco filas permanentes en «ejecutando» que nunca avanzan,
+arruinando la pantalla que existe para ver qué se está haciendo ahora. Por eso es un descriptor
+hermano, `BACKGROUND_TIMERS`, recogido igual: un paquete nuevo aparece **declarándolo**, no
+editando la pantalla — y una prueba lee el árbol de sintaxis del colector para comprobar que no
+nombra ningún paquete.
+
+Las tres cosas que sujetan estas pruebas son las que no se ven leyendo el código: que «cuándo
+corrió» salga del **arriendo** y no de la memoria del proceso —en una réplica que no es la líder
+la memoria vale cero, y eso se lee como «no ha corrido nunca» en vez de como «no lo corro yo»—;
+que **sin arriendo** no sea lo mismo que **con arriendo y sin dueño**, porque uno corre en todas
+las réplicas y el otro no corre en ninguna; y que «atrasado» tenga media vuelta de margen, porque
+un hilo que duerme 600 s no despierta a los 600 exactos y una lista que se pone ámbar por dos
+segundos de deriva se deja de mirar en una semana.
+
+---
+
+## 9a-ter. Inventario — Avisar de que movieron un latiguillo
+
+**Archivo:** `tests/unit/test_cable_scan.py` — 23 tests
+
+El panel ya sabía que alguien había movido un latiguillo: `cable_check` contrasta lo declarado
+contra lo que los dispositivos ven por LLDP y marca `other_port` cuando los puertos que nombran
+no son los escritos. Lo que no hacía era **decirlo** — sólo aparecía si alguien abría la pestaña
+de cableado y pulsaba Contraste, que para un armario que se toca dos veces al año es lo mismo que
+no saberlo.
+
+Estas pruebas no sujetan la detección, que ya estaba probada, sino las tres cosas que hacen que
+un aviso automático sirva en vez de estorbar: que **no escriba** en el inventario (el
+descubrimiento propone, y la guarda lo comprueba por el árbol de sintaxis, no por el texto —el
+docstring del módulo nombra `dc_cable` justo al explicar la regla—), que **no se repita** más de
+lo pedido y que el contador sobreviva a un cambio de proceso, y que **vuelva a avisar** cuando la
+cosa cambia otra vez.
+
+La política de repetición son dos números que dan cinco comportamientos, y hay una prueba por
+cada uno: no avisar, decirlo una vez, repetir cada X para siempre, repetir cada X un número de
+veces, y que un hallazgo que **cambia** mande sobre el tope gastado.
+
+---
+
+## 9a-bis. Historial — Una fila por valor medido
+
+**Archivos:** `tests/unit/test_history_values.py`, `tests/unit/test_history_facts.py`
+
+Las medidas dejan de ser un documento JSON por muestra y pasan a ser filas. **El motivo no es
+velocidad**: leer una serie cuesta 8 ms de las dos formas —16 con la nueva, de hecho— y eso es
+todo lo que el panel hacía. El motivo es lo que no se podía escribir con un documento: «qué
+interfaces se están degradando», «los diez discos más calientes», una alerta sobre una media
+móvil. Medido sobre 30 días de una instalación real: 1.264 ms → 97, y 915 ms → 1.
+
+`test_history_values.py` no toca la base: son funciones puras sobre valores. Un JSON lleva el
+tipo escrito dentro y una columna no, así que cada valor guarda una marca de una letra, y estas
+pruebas sujetan que la marca diga la verdad — que un booleano no vuelva como `1`, que `10` no
+vuelva como `10.0`, que un campo presente y vacío no se confunda con uno ausente, que una lista
+siga siendo una lista, y que un entero de 64 bits no pierda un dígito al pasar por un REAL
+(2⁵³ es el límite; SNMP manda contadores que lo cruzan). Los **21.092 valores reales** de la
+instalación se pasaron uno a uno por `encode`/`decode` y volvieron idénticos, con su tipo.
+
+`test_history_facts.py` sí: el diccionario de campos (un nombre se escribe una vez, dos procesos
+no crean dos), que la identidad —lo que empieza por `_`— no llegue a las medidas, que una muestra
+pueda no medir nada, que podar se lleve las medidas y no el diccionario, que **leer no cree** un
+campo fantasma, y las cuatro preguntas de flota con sus listas blancas. Y el paso de una
+instalación que se actualiza: una base con la forma vieja, abierta con el almacén nuevo, tiene
+que devolver lo mismo, retirar la columna `data` sólo cuando no queda ni un documento dentro, y
+no retirarla si hay una muestra sin serie — cuyas medidas no tienen dónde ir.
+
+**Archivo:** `tests/unit/test_history_values.py` — 15 tests
+
+**Archivo:** `tests/unit/test_history_facts.py` — 31 tests
+
+---
+
 ## 9b. Monitor — Campos de historial en caliente
 
 **Archivo:** `tests/unit/test_history_latest.py` — 8 tests
@@ -694,7 +856,7 @@ nombrar un campo que no existía cuando se escribió.
 
 ## 9c. Hosts — Qué resultados son de esta máquina
 
-**Archivo:** `tests/unit/test_hosts_status_rows.py` — 18 tests
+**Archivo:** `tests/unit/test_hosts_status_rows.py` — 20 tests
 
 Un módulo graba resultados con claves suyas; un host sabe qué **items** tiene enlazados. Todo lo
 que enseñan «Últimos datos» e Infraestructura sale de emparejar lo uno con lo otro, y equivocarse
@@ -2525,7 +2687,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 35. Core — Registro central de config (spec)
 
-**Archivo:** `tests/unit/test_config_spec.py` — 39 tests
+**Archivo:** `tests/unit/test_config_spec.py` — 46 tests
 **Archivo:** `tests/meta/test_config_spec.py` — 2 tests
 
 | Test | Qué comprueba |
@@ -4521,6 +4683,23 @@ los contenedores en los que el panel **no** se está ejecutando.
 
 ---
 
+**Una época en segundos no es enero de 1970.** `new Date(numero)` cuenta milisegundos, y media
+aplicación guarda **segundos**: el estado de cada comprobación y cada muestra del historial
+llevan un `ts` de época en segundos con decimales. Pasado tal cual al formateador, una fecha de
+2026 salía como **1970-01-21** en toda la columna «Última actividad» de la ficha de una máquina
+—y en la vista de tarjetas, donde sólo se multiplicaba la del historial y no la del estado vivo—.
+No rompe nada y no se ve leyendo el fuente: la función existe, no revienta y devuelve una fecha
+perfectamente formateada, de hace cincuenta y seis años. Así que esto **ejecuta** el formateador
+con los tres números que le llegan de verdad —segundos, milisegundos y una fecha ISO— y mira lo
+que sale: que el año es el bueno en los dos números, que las dos formas dan **el mismo instante**
+y no dos fechas parecidas, que volver a multiplicar los milisegundos mandaría la fecha al año
+58.000, y que lo que no es una fecha sigue devolviéndose tal cual —el texto crudo deja ver que
+algo va mal; un «NaN-NaN-NaN» no dice nada—.
+
+**Archivo:** `tests/integration/test_wa_fmt_datetime.py` — 7 tests
+
+---
+
 ## 79. Panel Web — SCIM 2.0 (aprovisionamiento)
 
 **Archivo:** `tests/integration/test_wa_scim.py` — 19 tests
@@ -5202,6 +5381,113 @@ Los destinatarios se escriben como tokens (`email` | `user:<uid>` | `group:<uid>
 
 ---
 
+**El contrato de la API de Freshservice, escrito una vez y comprobado aquí.** `api.py` no sabe
+qué es un departamento: sabe cómo se llama a esa API, cómo contesta, cómo pagina, cómo falla y
+cómo escribe las horas — que es lo que hace que traer agentes o activos mañana sea una función de
+dos líneas, y lo que se rompe aquí se rompe para todo lo que venga después. Sin red: se le dan
+respuestas de mentira con las cabeceras que ellos publican. Se fija la dirección con su versión,
+que sólo va por HTTPS y sólo por un dominio suyo —«works only via Freshservice domains and not
+via custom CNAMEs», que es un fallo que se investiga por el lado que no es—, que el dominio se
+pueda teclear de seis maneras, y que la clave vaya de usuario con una `X` de contraseña. El sobre
+se abre **por su nombre**, así un cuerpo inesperado da un fallo con nombre en vez de convertirse
+en una lista vacía que parece una casa sin departamentos. La paginación, con sus tres frenos: la
+cabecera `link` mientras quede algo —y con un caso donde SÓLO ella puede decidir, exactamente cien
+en una página, que es el que faltaba y por cuya falta se podía borrar la comprobación entera—, la
+página a medias por si un proxy se comiera la cabecera, y el tope de página 500 que piden ellos.
+El tiempo: su formato UTC, los ocho de entrada, y que sin zona se asuma UTC como dicen. El cupo,
+leído de sus cuatro cabeceras y en números, con los segundos de espera de un 429 — «vuelve en 43
+segundos» es una frase y «error» no. Y los siete códigos a siete claves distintas, con el
+`description` y los `errors` de su cuerpo en el detalle.
+
+**Archivo:** `tests/unit/test_freshservice_api.py` — 27 tests
+
+---
+
+**Qué se hace con lo que llega de Freshservice, sin red y sin base de datos.** Todo lo que puede
+equivocarse de una importación está en el emparejamiento, y eso se prueba con dos listas y ningún
+servidor. Se empareja **por el identificador de allí, nunca por el nombre** —renombrar una
+sociedad allí crearía aquí una segunda y dejaría la primera huérfana—; **lo que tecleó una
+persona no se duplica**, se adopta cuando el nombre coincide; **lo que no cambió no viaja**; y lo
+que se importó un día y ya no llega **se cuenta y no se borra**, porque un departamento desaparece
+del origen tanto por una reorganización como por un filtro mal puesto. Más la abreviatura, que
+allí no existe y aquí es obligatoria: iniciales cuando hay varias palabras, sin acentos —una chapa
+se graba en una etiquetadora—, nunca más larga de lo que cabe, y desempatada con un número porque
+dos chapas iguales en un armario compartido no dicen de quién es cada equipo. Y **sus fechas no
+son nuestras fechas**: llegan en el mismo formato que escribe este panel, y precisamente por eso
+no se copian — «modificado» diría unas veces cuándo se tocó aquí y otras cuándo se tocó allí. Más
+elegir qué se trae y emparejar a mano lo que el panel no puede deducir, con sus dos negativas: una
+empresa no puede estar atada a dos departamentos, y un rechazo no es lo mismo que no haber elegido
+una fila.
+
+**Archivo:** `tests/unit/test_freshservice_plan.py` — 33 tests
+
+---
+
+**Traer las empresas: las tres rutas, con la red de mentira.** De mentira la red y nada más — la
+aplicación, el almacén y las filas que quedan son de verdad; lo que se sustituye es el cliente
+HTTP, porque una prueba que llama a Freshservice falla el día que se cae, el día que caduca una
+clave y el día que alguien la ejecuta en un tren. Se comprueba que **mirar y aplicar sean dos
+cosas** y que aplicar vuelva a pedir la lista —entre mirar y aceptar pasa un rato—, que se pueda
+volver a importar sin duplicar, que lo tecleado aquí se adopte, que lo que ya no está no se borre
+y se nombre, que cada fallo de la API se cuente con **su** nombre —cuatro frases distintas, sin
+mirar el texto, que depende del idioma—, y que todo esté tras `orgs_edit`. Más la prueba de
+conexión, que además lee su página de estado: lo que trae sale en la respuesta, el cupo que queda
+también, y **que no se pueda leer no estropea la prueba** — una clave perfecta dando error por un
+módulo que esa casa no ha contratado sería mandar a mirar donde no es. Y el dominio propio, que su
+API no atiende: se dice antes de gastar una llamada y el mensaje nombra el que se tecleó.
+
+**Archivo:** `tests/integration/test_wa_freshservice.py` — 31 tests
+
+---
+
+**La tabla de la importación, ejecutada.** Aquí se escondieron dos fallos que ningún guardián que
+lea el fuente puede ver, y los encontró una persona mirando la pantalla: una empresa que llevaba
+meses atada salía con «crear una nueva» en su desplegable —lo que la fila decía y lo que iba a
+hacer eran cosas distintas—, y la columna de la descripción enseñaba el nombre viejo, así que la
+fila parecía traerse los datos de aquí. Se comprueba que la fila atada salga con **su** empresa
+elegida, que no se le ofrezca crear otra, que se pueda cambiar a otra de aquí pero **no** a una
+que ya es de otro departamento, y que elegir la que el plan ya traía no cuente como emparejar a
+mano. Que lo que se va a perder se enseñe **tachado y en su columna**, y que lo que no cambia no
+se tache. Más el filtro —nombre, abreviatura y descripción, las tres a la vez—, que «todas» actúe
+sobre lo que se ve y no sobre lo que esconde el filtro, que de serie sólo se marque **lo que ya
+está vinculado y ha cambiado** —cincuenta y nueve departamentos no son cincuenta y nueve
+sociedades de las que aquí se quiera saber nada—, y que las vinculadas vayan primero, con su
+recuento y sin separador cuando no hay dos grupos.
+
+**Archivo:** `tests/integration/test_wa_freshservice_ui.py` — 23 tests
+
+---
+
+**Que todo lo que dice el proveedor esté en los ficheros de idioma.** La guarda general caza el
+castellano por sus acentos; el inglés no se distingue de un identificador, así que aquí se
+comprueba al revés: que cada clave que el paquete nombra exista **en los dos idiomas** —los
+errores, las palabras de la pantalla, los dos botones, sus campos de configuración y sus dos
+líneas de auditoría— y que **ningún error se construya con una frase dentro**, por AST: la clave
+es lo que se traduce, y el detalle es lo que dijo el otro extremo, que no es texto de este panel.
+Más que el cuadro se abra **al pulsar** y espere dentro —pedir y abrir al contestar hace que el
+botón se pulse tres veces—, con una frase que dice qué se está haciendo, que un fallo se cuente
+dentro del cuadro ya abierto, y que mientras escribe el botón no se deje pulsar dos veces ni se
+quede muerto.
+
+**Archivo:** `tests/meta/test_wa_freshservice_provider.py` — 10 tests
+
+---
+
+**Un secreto de la configuración se guarda cifrado y se sigue pudiendo escribir.** Son dos listas
+—lo que se cifra y enmascara, y lo que la PANTALLA sabe que es un secreto— y hay que estar en las
+dos: estar sólo en la primera no da ningún error, el valor llega como `null`, no encaja en ninguna
+rama del dibujante y **la caja desaparece**. Quien acaba de guardar su clave abre la configuración
+y ya no tiene dónde volver a escribirla. Salió con la de Freshservice, reportado desde la
+pantalla, y al mirarlo apareció que el token de GitHub llevaba igual desde que se cifró. Y detrás
+venía el segundo, del mismo `null`: «puesto» y «sin poner» se escriben igual, así que una clave
+guardada contaba como intacta —ni marcada, ni en el recuento, y fuera al filtrar por «sólo lo
+modificado»—. Se vigila la lista, la rama que los dibuja, y **el orden** de las dos reglas, que es
+el arreglo entero: la del secreto tiene que decidir antes que la del vacío.
+
+**Archivo:** `tests/meta/test_wa_config_secrets.py` — 6 tests
+
+---
+
 **El registro de empresas del core: su API, sus permisos y de dónde vino.** La pertenencia es el
 otro eje de todo lo que el panel guarda, y vivía dentro del inventario físico — que es donde se
 hizo la pregunta por primera vez, y un accidente de calendario: la misma sociedad que paga el
@@ -5223,7 +5509,7 @@ el alta y en el renombrado, sin distinguir mayúsculas ni espacios, también par
 —dos chapas iguales en un alzado no dicen de quién es el armario—, dejando que muchas no tengan
 ninguna, y sin que guardarse a sí misma cuente como repetirse.
 
-**Archivo:** `tests/integration/test_wa_orgs.py` — 23 tests
+**Archivo:** `tests/integration/test_wa_orgs.py` — 33 tests
 
 ---
 
@@ -5239,7 +5525,180 @@ estar—; que lo que nadie tocó no mande nada, lo cambiado vaya con PUT y lo nu
 espacios de sobra, y que sin nombre o sin abreviatura no se guarde. Y que el marcado de lo
 obligatorio sea **del panel**: esta pantalla tuvo el suyo una tarde, y lo que le toca es declarar.
 
-**Archivo:** `tests/integration/test_wa_orgs_page.py` — 19 tests
+**Archivo:** `tests/integration/test_wa_orgs_page.py` — 24 tests
+
+---
+
+**Probar el mapa: la única pantalla que puede decir POR QUÉ no sale.** Un mapa que no dibuja no
+se queja: el navegador se traga una imagen que no carga, la política de contenido bloquea en
+silencio y una clave sin permiso recibe un 403 que no ve nadie — las tres se ven igual, el mismo
+cuadro vacío. La ruta recorre la cadena entera y devuelve **cada paso por separado**: qué
+proveedor sale de la configuración y hasta qué nivel llega, si Google concede sesión, si desde
+ESTE servidor se puede traer una tesela —lo que separa «no hay salida a internet» de «la clave no
+vale»— y qué origen tiene que abrir la cabecera de seguridad, que es la mitad que falla sin dejar
+rastro. Con el detalle **en crudo** de lo que contestó el otro extremo, que no se traduce porque
+no es texto de este panel. De mentira la red y nada más. Y dos cosas que no son de dibujo: la
+sesión se pide **nueva** —probar contra la guardada diría que todo va bien con una clave recién
+cambiada— y esto pide `config_edit`, porque llama a un tercero desde el servidor.
+
+**Archivo:** `tests/integration/test_wa_map_test.py` — 31 tests
+
+---
+
+**Y ese informe, dibujado.** Salió a la pantalla diciendo dos cosas a la vez: «El mapa funciona»
+en verde y, debajo, el proveedor con una cruz roja y los demás pasos en blanco. La causa no se ve
+leyendo: `apiSend` devuelve un **sobre** —`{ok, error, data}`— y lo que hay que dibujar va dentro;
+leído como si el sobre fuese la carta, la cabecera miraba un error vacío y los pasos miraban
+campos que no estaban ahí. Cada mitad hacía exactamente lo que decía su código, y la prueba de la
+ruta pasaba porque la ruta estaba bien. Se ejercita **abrir el sobre** —una función con nombre, y
+no dos líneas dentro de una asíncrona— con lo que de verdad le llega, y se exige que la cabecera
+salga de los MISMOS datos que los pasos: un informe vacío no es un mapa que funciona, y sin la
+tesela no se ha probado nada.
+
+**Archivo:** `tests/integration/test_wa_map_test_ui.py` — 16 tests
+
+---
+
+**Con qué se dibuja un mapa: el catálogo, y la puerta de Google.** Sin red y sin panel. Lo que se
+comprueba es lo que decide si un mapa sale, y las tres formas que tiene de no salir sin decir
+nada: que el proveedor elegido no sea el que se dibuja; que la instalación que ya tenía su
+plantilla escrita se quede sin mapa al actualizar —nadie tocó su configuración, se apagó sola—; y
+que Google conteste con una dirección que no vale, con lo que se ven sesenta imágenes rotas en
+vez de un mapa apagado, que es lo único que se entiende. Se exige que cada proveedor traiga sus
+tres marcas `{z}/{x}/{y}` y **su crédito** —la licencia de OpenStreetMap lo pide, y uno que nombra
+al proyecto equivocado es peor que ninguno—, que un nombre desconocido no acabe en un mapa
+adivinado y que todo lo que ofrece el desplegable se sepa dibujar. Del origen para la política de
+contenido —la mitad silenciosa: sin él el navegador bloquea cada tesela y no dice nada— se
+comprueba que sea el origen y no la dirección, que lleve el puerto de un espejo interno, y que lo
+que no se puede leer **no abra nada**. Y de Google: que la dirección lleve sesión y clave, que la
+sesión se pida **una vez y no por pestaña**, que cambiar la clave tire la que había —si no,
+cambiarla «no haría nada» durante dos semanas—, que una a punto de caducar no se dé por buena,
+que sin clave no se llame a nadie, que una respuesta sin sesión sea un error con nombre y con el
+detalle de quien contestó, que la clave no se guarde para saber si cambió (se guarda su huella),
+y que el origen salga **sin hablar con ellos**, porque la cabecera de seguridad se calcula en
+cada respuesta.
+
+**Archivo:** `tests/unit/test_maps_catalog.py` — 37 tests
+
+---
+
+**Un ajuste que dice reflejarse en un atributo, se refleja.** El registro permite que un campo
+declare `attr=` —«el valor de esto vive además en ese atributo del panel», que es de donde lo leen
+las pantallas que no van a abrir la configuración en cada petición—. Los enteros y los
+interruptores tenían su pasada genérica; **las cadenas no**, así que cada una había que escribirla
+a mano y las que nadie escribió no llegaban a ninguna parte. Y eso no falla en ningún sitio: la
+pantalla acepta el valor, lo guarda, al volver está escrito, y quien lo lee recibe una cadena
+vacía **para siempre** —ni reiniciando, porque ese atributo solo lo ponía el camino de las
+variables de entorno—. Así estaban cinco: el servidor de teselas del mapa y su atribución, la
+dirección del catálogo, la carpeta de imágenes y la de copias. Se descubrió porque alguien
+configuró el mapa con la plantilla de OpenStreetMap y el mapa siguió saliendo vacío. La prueba
+recorre **el registro** y no una lista escrita a mano —el día que entre la sexta cadena, el
+guardián ya está—, exige que ningún tipo con atributo se quede sin pasada, y luego lo sigue de
+extremo a extremo con el mapa: guardar por la ruta de verdad, que el widget y el cuadro del
+inventario lo reciban **sin reiniciar**, y que la política de contenido deje pedir esas imágenes
+—la mitad silenciosa: sin eso el navegador bloquea cada tesela y no dice nada, y el mapa sale
+vacío exactamente igual que si no estuviera configurado— abriendo el **origen** y solo para
+imágenes, nunca para un guion.
+
+**Archivo:** `tests/integration/test_wa_config_attrs.py` — 8 tests
+
+---
+
+**El mapa de sedes de la sección, ejecutado.** Tres cosas que se veían mal a la vez en la misma
+pantalla, y las tres eran la misma: el encuadre no tenía la forma del hueco donde se dibuja. El
+mapa no llenaba su sitio —`meet` encaja el dibujo entero dentro, así que un encuadre cuadrado en
+un hueco apaisado sale como una columna en medio con dos bandas vacías—; las cajas de las sedes
+salían **ilegibles**, porque con el encuadre más alto que el hueco la escala real la manda la
+altura y se calculaba del ancho; y no se podía acercar, porque el tope de fábrica del lienzo es
+el de un plano de sala y desde medio continente ocho veces no llega ni a una ciudad. Ninguna de
+las tres se ve leyendo el fuente: las funciones existen, no revientan y devuelven números
+perfectamente creíbles. Se comprueba que el encuadre tome la proporción del hueco, que ninguna
+sede se quede fuera al hacerlo —estirando y nunca encogiendo, que encoger es esconder una sede—,
+que sin haber medido todavía siga habiendo encuadre, que la escala salga del lado que no cabe y
+tenga suelo, y que se pueda acercar hasta donde el dibujo dice y lo diga en su marcado.
+
+Y **qué caja se lee cuando dos se solapan**, que con sedes en la misma ciudad es siempre. En un
+dibujo no hay «encima»: manda el orden, así que la que decía «caído» la tapaba la de al lado, que
+está bien —se esconde justo lo que se venía a ver— y cuál ganaba dependía del orden en que
+estuvieran guardadas. Se comprueba que las cajas salgan de mejor a peor, que eso valga también
+para el **primer dibujo** —el orden vivía solo en el repintado, así que hasta que alguien tocaba
+el mapa mandaba el azar—, que la señalada desde la lista pase por delante de todas, y que la que
+tiene algo mal se pinte de su color y lleve **un símbolo** además del color. Y que la caja sea
+**opaca**: llevaba un 95 %, y ese 5 % dejaba pasar el rótulo de la de detrás — sobre un mapa
+oscuro se leía entero, escrito encima del de la sede caída.
+
+Y **cuántos rótulos caben**, que era el fondo del asunto. Un rótulo mide ciento noventa píxeles y
+una comarca entera cabe en uno: cinco sedes de la misma ciudad pintaban cinco rótulos en el mismo
+sitio, y no se leía ninguno —tampoco el de arriba, porque los de debajo asoman por los bordes—.
+Se comprueba que de una pila solo lleve rótulo una, que sea **la que está peor**, que señalar una
+tapada le dé el sitio a ella, que la que se queda sin él siga diciendo cuál es y siga siendo
+pulsable, que las sedes que no se pisan lo conserven —lo que no puede romperse al arreglar lo
+otro— y que sin mapa no se reparta nada, porque ahí las cajas van en rejilla y quitar un rótulo
+sería quitar la sede.
+
+**Archivo:** `tests/integration/test_wa_dcim_sitemap.py` — 38 tests
+
+---
+
+**El mapa del panel de control, dibujado.** Un mapa falla de una manera que ninguna otra tarjeta
+puede fallar: **poniendo una cosa en el sitio de al lado**. No revienta, no sale vacío, no da un
+error — sale un mapa perfectamente creíble con una sede a doscientos kilómetros de donde está, y
+uno que sitúa mal por poco es peor que uno que no sitúa, porque el primero se cree. Así que esto
+ejecuta el dibujante con cuatro sedes muy separadas delante y mira el marcado. Que **ninguna se
+quede fuera del encuadre** —la trampa que los dos mapas de infraestructura ya pisaron: un marco
+que no cuenta una de sus cajas la deja donde no hay nada que mirar—, que una sola sede no dé un
+encuadre de tamaño cero ni un zoom de calle donde no se distingue el país, y que el marco tenga
+la forma de la tarjeta estirándose y nunca encogiendo. Que lo que va mal lleve **su nombre
+escrito** y lo que va bien no —quince rótulos en una tarjeta se pisan y no se lee ninguno—, que
+cada estado lleve su color y que lo que nadie vigila no salga verde. Que una chincheta mida lo
+mismo esté donde esté, que sin servidor de teselas **no se pida ni una imagen a nadie** y se
+diga que no lo hay, que con él no se pidan más de las que caben —pedido con el mundo entero
+delante, porque con el encuadre de la tarjeta el tope no llega a decidir nada— y que cruzar el
+antimeridiano no pida una columna negativa. Y lo que el dibujo no puede decir, dicho: las sedes
+**sin coordenadas se cuentan**, porque una que desaparece del mapa parece una que está bien. Más
+la mitad del servidor: que el (0, 0) no cuente como coordenada —es lo que deja un formulario
+vacío—, que las teselas viajen con los datos y estén apagadas de fábrica, y que esto pida el
+permiso del inventario y no el del panel de control.
+
+Y **qué dice el punto que falla**, que es lo que se le pedía a esta tarjeta y no daba. Un nombre
+dice dónde ir y no dice a qué se va: si son dos máquinas de trece o son las trece, si es un aviso
+o está caída — y eso decide si se llama a alguien de madrugada. Ahora lleva rótulo con el estado,
+el recuento y los armarios **cuando la vista dice con qué palabra contarlos**, porque el recuento
+es del dominio que trae los puntos y no de este fichero. Se comprueba **dentro del rótulo** y no
+en el marcado entero: el nombre y el estado salen también en el `<title>` de la chincheta, y
+buscarlos ahí daba por buena una versión que había perdido el renglón — se vio mutando la
+función. Lo que va bien sigue sin rótulo, el suelo de la caja es un color **sólido** y no un
+tinte (la trampa de `-bg-subtle`, en `caso-diagnostico.md`), y dos sedes juntas son un rótulo y
+no dos encima.
+
+Más el **resumen**: cuántas hay de cada estado, encima del mapa. El dibujo contesta «dónde» y no
+contesta «cuántas» —dos puntos rojos en la misma ciudad son un punto rojo, y a ojo se cuenta
+mal—, así que se cuentan **todas** las sedes y no las dibujadas: una sin coordenadas no sale en
+el mapa, y no salir no es estar bien. Los cuatro estados siempre, incluido el que vale cero
+—«ninguna caída» es la respuesta que más se viene a buscar y deducirla de una ausencia es lo que
+no se puede pedir— y cada uno con **su signo**, distinto de los otros tres: un punto de color no
+se lee de todas las formas en que la gente lee.
+
+**Archivo:** `tests/integration/test_wa_overview_map.py` — 73 tests
+
+---
+
+**Que la tarjeta de mapa sea del panel y que haya UNA proyección.** Dos reglas que se rompen sin
+que nada falle. La primera: el panel de control dibuja mapas y no sabe de inventarios —se le dan
+cosas con latitud, longitud y un estado—, así que en cuanto una línea suya nombra al inventario,
+el siguiente paquete con cosas situadas no puede usarla sin editar el núcleo. Ya pasó al
+escribirla: decía «sin vigilar» con la palabra del inventario. Se comprueba por función, y que
+las palabras que usa sean las del panel y estén **escritas enteras** y no compuestas, que es como
+cuatro claves llegaron a la pantalla sin existir en ningún idioma. La segunda: dos copias de la
+aritmética de Web Mercator son dos mapas que pueden discrepar sobre dónde está el mismo edificio,
+y la discrepancia no daría ningún error — daría una chincheta en la calle de al lado; se persigue
+por su huella (el corte en la latitud 85,05 y la medida del mundo) y se exige que los dos mapas
+pregunten al mismo sitio, incluido si el (0, 0) cuenta como coordenada. Más que la dirección de
+los datos lleve el identificador del widget y que el servidor sepa servirla: declarar el
+proveedor con un nombre que el descubridor no mira deja una tarjeta girando para siempre, que es
+un fallo que parece lentitud.
+
+**Archivo:** `tests/meta/test_wa_overview_map.py` — 23 tests
 
 ---
 
@@ -8084,10 +8543,10 @@ cuando otra réplica no puede leer un secreto.
 
 ## 146. Copias de seguridad: hacer una, y volver a ponerla
 
-**Archivo:** `tests/unit/test_backup_service.py` — 85 tests
+**Archivo:** `tests/unit/test_backup_service.py` — 87 tests
 **Archivo:** `tests/unit/test_backup_module_parts.py` — 19 tests
-**Archivo:** `tests/unit/test_backup_schedule.py` — 54 tests
-**Archivo:** `tests/integration/test_wa_backup.py` — 87 tests
+**Archivo:** `tests/unit/test_backup_schedule.py` — 64 tests
+**Archivo:** `tests/integration/test_wa_backup.py` — 104 tests
 **Archivo:** `tests/unit/test_wa_backup_ui.py` — 126 tests
 
 Una copia es un **zip de JSON**, no un volcado del fichero de base de datos. El panel corre sobre
@@ -8114,7 +8573,9 @@ almacena de verdad.
 | `TestItSaysWhatItIsDoingOnTheLog::*` (4) | Copia y restauración quedan **en el log del panel** (inicio, resultado, motivo del rechazo, y en warning lo que no se pudo aplicar) |
 | `TestARestoreTicksOffTheSameChecklist::*` (6) | La restauración informa **una entrada por parte** como la copia: filas y tablas, no-ok con el primer motivo, y viaja mientras corre |
 | `TestTheScheduleAndTheVerifyHaveTheirOwnGrants::*` (5) | `backup_schedule` y `backup_verify` son permisos propios: las rutas de tareas y de verificación los piden, «ejecutar ahora» sigue siendo `backup_create`, y los botones siguen los mismos flags |
-| `TestSyslogInADatabaseOfItsOwn::*` (7) | Con `syslog_db\|enabled` las tablas de syslog viven en OTRA base: la copia la alcanza, la restauración las devuelve ahí, `core` no se contamina, y cada base lleva su propia transacción |
+| `TestSyslogInADatabaseOfItsOwn::*` (9) | Con `syslog_db\|enabled` las tablas de syslog viven en OTRA base: la copia la alcanza, la restauración las devuelve ahí, `core` no se contamina, y cada base lleva su propia transacción. **Y la copia dice cuándo no pudo llegar**: con ese servidor caído la parte volvía con cero tablas y el manifiesto decía `ok`, indistinguible de una instalación que nunca tuvo una tabla de syslog. Ahora es `ok=False` con su motivo y `status: partial` — pero **cero tablas sin motivo sigue siendo un éxito**, que es lo que evita un hallazgo rojo en toda instalación que no usa esa función. La prueba que existía para el caso no lo probaba: hacía «inalcanzable» la segunda base con `close()`, y el conector de SQLite vuelve a abrir a la primera pregunta |
+| `TestBorrarVariasDeUnaVez::*` (7) | Elegir varias copias y llevárselas juntas, con la lista **dibujada de verdad** en node: una casilla por copia, ninguna sin el permiso de borrar, la bloqueada fuera de «todas» —su fila ya tiene el botón desactivado, y una cabecera que la metiera prometería borrar tres y borraría dos—, la barra sin ocupar sitio mientras no hay nada elegido, una sola copia por su nombre, y la selección podada de lo que ya no está en la lista |
+| `TestElAvisoDeLaClaveSeDibuja::*` (1) · `test_la_lista_dice_de_donde_sale_la_clave…` | La copia **no** lleva la clave que descifra sus secretos —a propósito: un fichero con los secretos y su llave dentro entrega la instalación entera— y el aviso nombraba sólo `SS_SECRET_KEY`, la forma que la instalación por defecto **no** usa. El servidor dice en cuál de los dos modos está y el diálogo nombra el fichero cuando lo es |
 | `TestPuttingItBack::test_a_column_the_schema_dropped_does_not_sink_the_restore` | La copia a la que se recurre es antigua: rechazarla por un esquema que avanzó la haría inútil justo cuando importa |
 | `TestPuttingItBack::test_a_newer_format_is_refused_not_half_applied` | Un formato futuro se rechaza entero |
 | `TestTheNameIsAFilename::*` (3) | El nombre se usa como fichero y viaja en la URL: lo que no encaja en el patrón no puede ser un nombre, y así `..` no entra en ninguna ruta |
@@ -8150,7 +8611,7 @@ almacena de verdad.
 
 ## 147. Copias automáticas: cuándo toca una, y cuáles se van
 
-**Archivo:** `tests/unit/test_backup_schedule.py` — 54 tests
+**Archivo:** `tests/unit/test_backup_schedule.py` — 64 tests
 
 Un **intervalo**, no una hora del día, y la diferencia es todo el diseño: un panel apagado a las
 03:00 tiene que hacer su copia diaria al volver a las 09:00. «Cuánto hace de la última» sigue
@@ -8297,9 +8758,9 @@ librería de imagen sería un test que se salta justo en la máquina donde impor
 
 ## 151. Diagnóstico: qué es esta instalación, y las dos formas de mentir sobre ello
 
-**Archivo:** `tests/unit/test_diagnostics_collect.py` — 52 tests
+**Archivo:** `tests/unit/test_diagnostics_collect.py` — 56 tests
 **Archivo:** `tests/unit/test_diagnostics_advisories.py` — 73 tests
-**Archivo:** `tests/integration/test_wa_diagnostics.py` — 40 tests
+**Archivo:** `tests/integration/test_wa_diagnostics.py` — 42 tests
 
 Las preguntas que responde son las de un hilo de soporte, en ese orden: qué versión es, sobre
 qué corre, dónde escribe y qué falta. Todas se podían contestar antes —leyendo un log, abriendo
@@ -8325,7 +8786,8 @@ importan más que cualquier campo suelto:
 | `TestDependenciesAreReadFromTheLock::*` (7) | Se lee del **lock** y no de `pip freeze`; ausente y versión distinta son veredictos separados, «más nueva» no es un veredicto, los problemas van primero, comentarios/flags/marcadores de entorno no son paquetes, la **barra de continuación** de `pip-compile --generate-hashes` no forma parte de la versión, y contra el lock real no puede salir «todo difiere» |
 | `TestTheRestOfTheEnvironment::*` (10) | Lo que el lock **no** fija y aun así corre aquí. Se reportó «todas las dependencias con 0 CVE»: era cierto de los cuarenta y un paquetes del lock, y `pip`, `setuptools` y `pytest` sumaban cinco avisos sin que nadie los preguntara — un aviso no distingue si el paquete estaba fijado. Deliberadamente **no** es un cuarto estado de `dependencies`: no son desviación y no hay nada que reconciliar, y meterlos en la misma lista reportaría una instalación correcta como cincuenta problemas. Cubre que las dos listas no se solapan, que las filas tienen la **misma forma** (una sola lista que consumir), que `charset-normalizer` y `charset_normalizer` son un solo paquete (PEP 503, o un paquete fijado sale como no fijado), que cada distribución aparece una vez (dos `site-packages` en la ruta) y que sin lock no revienta |
 | `TestOptionalFeaturesExplainWhatIsSwitchedOff::*` (3) | Cada entrada nombra su módulo y **qué enciende**, con etiqueta en los dos idiomas: el panel donde nunca aparece el botón de SSO casi nunca está mal configurado |
-| `TestStorageAsksTheOsAndWritesNothing::*` (3) | Existencia, permiso de escritura y sitio libre — preguntando al SO, sin crear nada en el directorio que alguien está mirando porque se comporta raro |
+| `TestStorageAsksTheOsAndWritesNothing::*` (7) | Existencia, permiso de escritura y sitio libre — preguntando al SO, sin crear nada en el directorio que alguien está mirando porque se comporta raro. Y las tres formas de dar una alarma falsa: una carpeta **que aún no se ha usado** no falta (casi todas se crean al guardar la primera cosa, y la de las copias no existe hasta la primera copia), una de **sólo lectura** no es un hallazgo por no poder escribirse —en un contenedor es lo deseable—, y **el hueco libre se mide una vez por disco**: la misma barra repetida en cinco filas entierra el caso que importa, una carpeta movida a un disco propio |
+| `TestWhatThePageAnswers::test_storage_names_every_directory_this_install_writes_to` | Eran tres —datos, configuración, copias— y eran todas mientras el panel sólo escribía en tres. Ahora lista también **las que declara cada paquete**, del mismo registro que lee una copia (`dir_parts`), así que un módulo que empieza a guardar ficheros aparece aquí sin que el núcleo sepa su nombre |
 | `TestTheReportRenders::*` (6) | Los tres formatos son funciones **puras** del payload —por eso salieron de la ruta—: un formato desconocido cae a texto, cada uno declara su mimetype, el texto lista TODAS las dependencias (no solo las malas), el XML escapa con `ElementTree` (un `&` en el nombre de host, rutas de Windows), una lista sale como hijos repetidos y no como `repr` de Python, y el JSON no toca el payload |
 | `TestTellingWhetherAReleaseIsNewer::*` (10) | Más nueva / vamos por delante / **no se puede decidir**; una etiqueta se lee venga como venga; se niega a preguntar por HTTP plano; un **404 no es un endpoint roto** (`/releases/latest` excluye borradores y prereleases, que es el estado de este repositorio hoy) y se reporta como «nada publicado todavía», mientras que un 403 sigue siendo un HTTP con su código; y la dirección tiene **un solo hogar** (el registro de `spec.py`), que es lo que permite que la pantalla de configuración la muestre en gris detrás de la casilla vacía |
 | `TestItIsBehindItsOwnPermission::*` (2) | `diagnostics_view` es propio: ver el panel no lo concede |
@@ -8975,6 +9437,23 @@ ganar—. De ahí que casi todos estos tests vayan sobre la bandera.
 
 ---
 
+**Que una tarjeta que crece siga cabiendo en la pantalla.** El panel de control agranda un poco
+la tarjeta bajo el cursor, y con un `scale` en tanto por ciento eso es un crecimiento **que
+depende de lo ancha que sea la tarjeta**: una de tres columnas gana doce píxeles y una que ocupa
+la rejilla entera gana sesenta, la mitad de ellos fuera de la ventana —donde no hay
+desplazamiento lateral con el que ir a buscarlos—. Ya se supo de las tarjetas de módulo, que son
+anchas, y se arregló sólo para ellas con una segunda regla; el día que una tarjeta del núcleo
+también fue ancha —el mapa de sedes— volvió el mismo fallo. Así que lo que se comprueba no es que
+el mapa esté arreglado: es que **no queda ninguna regla que crezca por tanto por ciento** y que
+sólo hay una que hace crecer, que es la forma de que no vuelva con la siguiente tarjeta ancha.
+Más la otra mitad: lo que se **maneja** no crece —una tabla se ordena, un mapa se arrastra, y una
+tarjeta que crece bajo el cursor de quien iba a agarrarla le quita de las manos lo que estaba a
+punto de coger— y que la hoja de estilo y el guion dejan fuera exactamente a los mismos.
+
+**Archivo:** `tests/meta/test_wa_overview_pop.py` — 6 tests
+
+---
+
 ## 163. Un widget que detecta un problema lo dice con el fondo
 
 **Archivo:** `tests/meta/test_wa_overview_state.py` — 13 tests
@@ -9168,7 +9647,7 @@ existe para encontrar. Cuatro copias de esa regla se desvían, y la que dejara d
 
 ---
 
-**Archivo:** `tests/integration/test_wa_dcim.py` — 440 tests
+**Archivo:** `tests/integration/test_wa_dcim.py` — 442 tests
 
 Rutas del inventario físico y, sobre todo, **el rack compartido**: quien solo tiene una empresa ve el rack y ve que la U está ocupada, y de lo ajeno no sale ni nombre, ni serie, ni host; el hueco libre sí es de todos; no puede mover lo ajeno pero sí lo suyo; decir de quién es algo es otra bandera; la U solo admite una cosa por cara; y borrar una empresa no deja pertenencias colgando. Y **el plano de la sala**, que es lo único de la sección donde el nombre lo elige quien sube: que lo guardado no se llama como lo subido, que un script con extensión `.png` no entra, que un SVG se sirve como descarga, que cambiar el plano se lleva el anterior —si no, la carpeta crece durante toda la vida de la instalación— y que el nombre no se puede escribir por el CRUD genérico, que dejaría apuntar una sala a la imagen de otra sin subir nada. Y **el cuadro de mando**: que las tarjetas cuentan por sede, que una sede que no se puede ver no sale —la misma regla que el listado, porque un cuadro que contase una sede que el árbol no enseña serían dos pantallas discrepando sobre la misma flota— y que el desglose por empresa solo cuenta lo visible. Y **diseñar la sala**: que una pieza viene con sus medidas de fábrica y el catálogo viaja con la lista —una paleta con las suyas sería una segunda verdad sobre lo que mide una puerta—, que un tipo inventado no entra ni al crear ni al editar, que una pieza no se muda de sala por el cuerpo de un PUT, y sobre todo que **el permiso se mira en la sala y no en la pieza**: una columna no es de nadie, así que preguntarle a ella daría que puede moverla cualquiera. Y **traerse un plano de un fichero**, que es la operación que puede destruir trabajo de otro: que las piezas se reemplazan enteras, que **un rack que el fichero no nombra NO se borra** —dentro hay equipos, y un JSON de hace dos meses no puede tirar el inventario de nadie—, que los racks se emparejan por nombre y solo se les mueve, que un tipo desconocido se salta **y se dice**, y que una coordenada mal escrita no tumba la importación entera. Y **la potencia en un armario compartido**, que es donde está la arista: los totales de una regleta los ve la filial —sin ellos no puede saber si le cabe otro servidor, igual que «la U 12 está ocupada»—, de quién es cada cable no, y el aviso sobre el equipo del vecino no se le cuenta: ni puede arreglarlo ni tiene por qué saber que existe. Y **el color y la máquina de una regleta**: que una nueva toma el de su rama —azul y rojo, que se distinguen desde la puerta de la sala—, que el suyo manda cuando lo tiene, que lo resuelve el servidor en un solo sitio, y que enlazarla con una máquina del registro es lo que convierte una fila de inventario en un dato vivo. Y **el cableado**: que un cable del vecino no es suyo que reconciliar —su etiqueta diría de qué máquina es—, que declararlo es **su propia bandera** (`dcim_cable_edit`), y que la pantalla abre aunque no haya nada con lo que contrastar. Y **los enlaces entre sedes**: que hacen falta dos sedes distintas, que el permiso se pide sobre **las dos puntas** —si no, se podrían dibujar líneas hasta sedes que quien las dibuja no puede ni abrir—, que una punta no se cambia por el cuerpo de un PUT, y que un enlace a una sede que no se ve no se dibuja: una línea a una caja que no está sale al vacío. Y **la previsión**: que la U ocupada por otro **sigue ocupada** aunque quien pregunta no pueda ver qué la ocupa —decir que está libre mandaría a alguien con un servidor a un sitio donde no entra—, que se piden dos ramas por defecto, y que un armario que no se ve no sale. Y que la **zona horaria viaja con la sede** —la hora local la convierte el navegador— y que sin zona es una cadena vacía y no un hueco: que falte la clave y que esté vacía se leen distinto, y solo una de las dos es cierta. Y que **no se crea dentro de lo ajeno**: meter una sala en una sede es escribir en esa sede, y el alta genérica no lo miraba — alguien acotado a su sociedad podía crear una sala dentro de una sede que ni siquiera puede listar, y desde ahí un rack y equipos. Salió de auditar la sección ruta por ruta. Y las dos fugas que salieron de auditar la sección ruta por ruta: que **el nombre del vecino no sale por el otro extremo de un cable** —un equipo ajeno conserva su uid porque el dibujo lo necesita, y declarar un cable hacia él devolvía su etiqueta— y que **un armario que el listado esconde tampoco se abre por uid**, con la regla fina que el caso del holding exige: o lo ves, o tienes algo dentro. Y **las filas de una sala**: que viajan con el plano, que deshacer una **no deshace sus armarios** —los deja sueltos, que es un estado real— y que declararlas es ordenar la sala, con su misma puerta. Y **la cadena eléctrica**: que echar el bypass saca al SAI de la cadena y lo dice, que **esa maniobra queda en la auditoría** —quién la hizo y cuándo es lo primero que se pregunta cuando algo se apaga tres meses después— y que borrar un cuadro deja lo de abajo *sin decir* de qué cuelga en vez de apuntando a algo que no existe. Y **lo que lleva dentro un equipo**: que seis discos son una fila con un seis, que de un equipo ajeno no se lista ni un componente —un disco no ocupa nada que nadie más necesite saber—, que un componente no se muda de equipo por el cuerpo de un PUT, y que meter un panel de parcheo en un armario ya **no añade un desatendido**. Y **las plantillas**, que son el escalón entre lo que un fabricante vende y la caja del U 12: que crear un equipo desde una copia sus componentes y **no su número de serie** —heredarlo serían veinte máquinas con el mismo, que es peor que ninguno—; que la altura sale de la plantilla y, si no la fija, del modelo del catálogo; que **lo tecleado manda** sobre las dos, porque el fondo que alguien acaba de medir vale más que el del estándar de hace un año; que las piezas del equipo son suyas desde que existen —añadir una a la plantilla después no cambia una máquina que nadie ha tocado—; que el equipo recuerda de cuál nació y que retirarla no los toca; que la diferencia entre lo que lleva y lo que decía se puede leer, porque no es un error sino un dato; y que escribir el estándar de compra pide **su propia bandera**, porque con una sola quien monta un rack rescribe lo que compra la empresa. Más el cuarto árbol del catálogo, el de los componentes: que usa las clases de una PIEZA y no las de los que ocupan U, que corregir la clase sin mandar el árbol sigue valiendo, y que el filtro por forma acota también la rejilla de fabricantes. Y **las marcas**, que son la raíz de todo lo anterior: que se dan de alta solas al importar y que dos formas de escribir el mismo nombre son una y no dos; que renombrar una **no pierde sus modelos**, porque lo que los acota es la fila y no el texto; que retirar su ficha se niega mientras los tenga —el nombre volvería solo en el siguiente arranque y lo único perdido sería lo que escribimos nosotros—; que el `slug` no llega por la petición, que sería dejar que dos marcas se hicieran pasar por la misma; y que **leerlas no pide el permiso de importar**, porque la dirección por la que se abre un ticket es la que hace falta a las tres de la mañana. Que **corregir una pieza no pierde lo que no se toca** —el rodeo de quitarla y volver a añadirla se lleva el número de serie— y que la de una plantilla también se corrige. Que un kit **dice cuántas piezas trae**, en la plantilla y en la máquina, y que lo que se compra suelto trae una sin tener que declararlo. Y que **un componente sale del catálogo**: que la marca, el nombre y el tamaño los pone el modelo y no la petición —dejar ganar a quien pide sería dejar que la misma pieza se llamara de dos formas según por qué pantalla entrara—, que la bahía y la cantidad sí son de la pieza, que un modelo que no existe no se apunta, y que el mismo camino vale para la plantilla y para la máquina, que es lo que permite contarlas juntas. A mano sigue valiendo para el disco que salió del cajón. Y los **adjuntos**, que es lo que no es una foto —el manual, la hoja, el zip del firmware—: que entra lo que no es una imagen, que **sale siempre como descarga** con tipo genérico y `nosniff` —lo que permite no tener lista blanca: un HTML subido no se ejecuta en este origen porque no llega a renderizarse—, que ni el nombre del fichero toca el disco ni parte la cabecera de la descarga, que quitarlo borra el fichero y que borrar el modelo se lleva los suyos, que **clonar se los lleva copiados** y no compartidos —dos fichas apuntando al mismo fichero significa que borrar cualquiera deja a la otra sin manual sin que nada haya fallado—, y que leerlos no pide el permiso de importar: buscar el manual a las once de la noche no es administrar el catálogo. Y **el historial de una ficha**: que dice quién y qué —los nombres de los campos, porque una línea del registro se lee de un vistazo entre doscientas y volcar veinte valores la haría ilegible—, que mirarlo no pide el permiso de importar, que volver a una versión escribe sus valores y **es un cambio más y no un deshacer** (si borrara lo de en medio, la respuesta a «quién dejó esto así» sería distinta según cuándo se preguntara), y que una versión de otra ficha no vale. Más los **atributos de un componente**, que salen de un documento y no del código: que se pueden cambiar sin publicar una versión del panel, que lo descartado se dice, que sin `version` no entra, y que quitarlo vuelve al que viene dentro.
 
@@ -9294,7 +9773,7 @@ la descripción no—, que no toque la lista hasta que el servidor conteste, que
 cuente dentro del cuadro, y que las filas **no** miren la bandera de escritura: si la mirasen,
 quien sólo puede leer vería una lista vacía.
 
-**Archivo:** `tests/meta/test_wa_orgs_page.py` — 17 tests
+**Archivo:** `tests/meta/test_wa_orgs_page.py` — 22 tests
 
 ---
 
@@ -9534,7 +10013,7 @@ El número de inventario, que es único entre TODO lo inventariado y no dentro d
 
 **Archivo:** `tests/unit/test_dcim_assets.py` — 23 tests
 
-**Archivo:** `tests/unit/test_dcim_model.py` — 204 tests
+**Archivo:** `tests/unit/test_dcim_model.py` — 212 tests
 
 Inventario físico: la contención (sede→sala→rack→item) y la pertenencia (empresa) como dos árboles distintos; que un rack contiene *items* y solo algunos son hosts; que la cara es parte de la posición y dos cosas no caben en una U; la herencia de dueño con el más concreto mandando; y el rack compartido — quién ve qué, y que un item ajeno solo dice que ocupa. Y el vuelco de estado en vivo: que un item sin host **no está bien** sino sin vigilar, que un rack es lo peor que tiene dentro, y que el recuento cuenta solo lo que quien mira puede ver —el fallo del vecino no sube ni al rack, ni a la sala, ni a la sede—. Y **los mástiles**: que lo que decide si un servidor entra no es el fondo del armario sino la distancia entre mástiles, que entrar no es caber —hay que dejar sitio a los cables— y que sin una de las dos medidas no se contesta ni que sí ni que no. Y **por dónde se llega**: que el acceso es un hecho del sitio y no un tipo de armario, que lo no dicho es todo accesible —y no nada—, y que un equipo montado en una cara inalcanzable es una contradicción entre dos cosas declaradas que se dice sin corregir. Y **el cuadro de mando**: que cada fallo trae el camino entero —sede, sala, rack, U— y los uid con los que se llega de un clic; lo peor primero; que lo que nadie vigila se cuenta aparte en vez de sumarse a lo que está bien; que **el fallo del vecino no sale en el cuadro de la filial** —un cuadro es un sitio cómodo para filtrar de menos, porque la pantalla se ve perfecta con datos que no debería enseñar—; y que una lista recortada lo dice, porque una más corta que la realidad parece completa. Y **lo que hay en la sala que no es un rack**: que vive en su propia tabla y por tanto poner una columna no cambia el inventario —el recuento no incluye extintores ni «sin vigilar» devuelve mamparas—, que las capas salen ordenadas del modelo y no de quien pinta, que una sala sabe cuánto mide y cuánto su baldosa, y que el arranque **no nombra ninguna tabla**: nombrarlas era poder olvidarse de una, y olvidarse no fallaba al arrancar sino semanas después en la instalación de otro. Y **la potencia**, cuya pregunta no es cuántos vatios hay sino qué se apaga si cae una rama: que dos cables a la MISMA rama no son redundancia —contando cables lo parecerían, contando ramas no—, que un equipo sin enchufar no es un aviso porque un panel de parcheo no come, que la carga se mide contra la MITAD de lo que aguanta la regleta —tener dos ramas no sirve si una sola no puede con las dos—, y que sin capacidad declarada no se inventa un 0 %, que sería decirle a alguien que hay sitio de sobra. Y **lo declarado contra lo que se ve**, que es donde el inventario deja de ser documentación: que un cable visto en otro puerto se dice —es alguien que movió el latiguillo y no cambió la etiqueta—, que **un extremo pasivo no se juzga** porque un panel de parcheo es un trozo de metal y marcarlo como «no se ve» llenaría la pantalla de avisos irresolubles, que lo visto y no declarado sale aparte pero **solo entre máquinas que están en un armario**, que arreglar un cable no aumenta la lista de pendientes, y que sin mapa lo declarado se sigue leyendo — una pantalla que no abre porque una sonda no contestó es peor que una que dice menos. Y el **consumo por sociedad**, con el dueño llegando ya resuelto para no tener dos copias de la regla de herencia. Y **qué sede se queda sola**: que una sede con un solo enlace se dice y se dice CUÁL, que dos operadores por la misma zanja no son dos caminos —dos líneas en el mapa y un solo camino en el suelo—, que con un tercer enlace por otra ruta ya no se avisa porque sería mentir, que **no se avisa de lo que nadie escribió** —un aviso sacado de un campo vacío enseña a ignorar la pantalla—, y que el estado de un enlace es el de quien lo termina: un circuito es un contrato y no tiene estado. Y **dónde cabe esto**: que doce U sueltas no son un hueco de doce —el número parece una respuesta y no lo es—, que una rama sin tomas descarta aunque sobre sitio, que se cuentan RAMAS y no regletas, que sin capacidad declarada no se descarta por vatios —eso sería descartar un armario por una casilla vacía—, que los motivos se acumulan (arreglar uno y descubrir el siguiente son dos viajes al armario) y que entre los que valen gana el hueco más ajustado, porque meter un 1U en el tramo de veinte gasta el único sitio donde luego cabrá un chasis. Y **a dónde llega un lector**: o lo ve, o contiene algo suyo. Que se llega a la sede por tener 2U dentro pero no a otra donde no se tiene nada; que quien lo ve todo no necesita conjuntos; y que ese `None` **no** significa llegar a todo — darle dos significados hizo que cualquier filtro que no pasara los conjuntos dejara pasar todo, y los equipos ajenos de un rack compartido salieron enteros en vez de anónimos. Y **una fila es algo que se declara**: que una que aspira donde otra descarga se dice —el error de una sala mal ordenada que no se ve mirando el plano, porque las cajas están perfectamente alineadas—, que dos filas enfrentadas compartiendo pasillo frío NO son un aviso porque es la disposición correcta, que una fila sin pasillos dichos no se juzga, y que los racks sueltos salen aparte y no como error: el armario de un rincón no está en ninguna fila y nunca lo estará. Y **qué pierdo si echan el bypass**: que la cadena sube hasta la acometida, que con el bypass echado el SAI no está en ella pero **se puede preguntar cómo sería sin él** —lo que convierte la duda en una frase—, que una regleta que nunca pasa por un SAI no es un aviso porque eso es media sala técnica, que las dos ramas del mismo SAI sí lo son —dos colores y un punto de fallo tres metros más arriba—, que «nadie lo ha dicho» no es «no tiene», y que un ciclo declarado no cuelga el panel. Y **qué es cada cosa**: que un panel de parcheo deja de contar como «sin vigilar» —no es que nadie lo mire, es que no hay nada que mirar, y cuarenta deberes imposibles enseñan a saltarse la lista—, que un servidor sin máquina **sí** sigue siendo una pregunta, que un rol sin decir también lo es, y que el catálogo **sugiere** el tipo a partir de los puertos —tomas sin interfaces es una regleta, puertos por delante y detrás sin alimentación es un panel— saliendo VACÍO cuando no lo sabe, porque `other` sería una respuesta inventada.
 

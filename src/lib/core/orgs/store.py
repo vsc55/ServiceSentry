@@ -29,11 +29,22 @@ _ORG = TableSpec(
         # not fit in a box 200 pixels wide.
         Column('short',       'TEXT', nullable=False, default="''"),
         Column('description', 'TEXT', nullable=False, default="''"),
+        # De dónde salió, y con qué identidad allí. Vacío es lo normal: una empresa tecleada
+        # aquí no viene de ningún sitio.
+        #
+        # Son DOS columnas y no una porque son dos preguntas: «¿esto lo mantiene otro?» —que
+        # decide si una importación puede pisarlo— y «¿cuál de los suyos es?», que es lo único
+        # que permite volver a importar sin duplicar. Por el NOMBRE no se puede: renombrar una
+        # sociedad en el origen crearía aquí una segunda y dejaría la primera huérfana, sin que
+        # nada lo dijera.
+        Column('source',      'TEXT', nullable=False, default="''"),
+        Column('external_id', 'TEXT', nullable=False, default="''"),
         Column('created_at',  'TEXT', nullable=False, default="''"),
         Column('updated_at',  'TEXT', nullable=False, default="''"),
         Column('updated_by',  'TEXT', nullable=False, default="''"),
     ),
-    indexes=(Index('idx_org_name', ('name',)),),
+    indexes=(Index('idx_org_name', ('name',)),
+             Index('idx_org_source', ('source', 'external_id'))),
 )
 
 _OWNER = TableSpec(
@@ -134,6 +145,19 @@ class OrgsStore:
             if str(row.get(col) or '').strip().casefold() == want:
                 return str(row.get('uid') or '')
         return ''
+
+    def by_external(self, source: str, external_id: str) -> dict | None:
+        """The company this source already has here, or ``None``.
+
+        What makes a second import an UPDATE instead of a duplicate. Matched on the pair and
+        not on the name: renaming a company in the source would otherwise create a second one
+        here and leave the first orphaned, with nothing saying so.
+        """
+        src, ext = str(source or '').strip(), str(external_id or '').strip()
+        if not src or not ext:
+            return None
+        rows = self.orgs.list('source = ? AND external_id = ?', (src, ext))
+        return rows[0] if rows else None
 
     # ── What was said ────────────────────────────────────────────────────────
 

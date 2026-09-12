@@ -121,6 +121,12 @@ class RevisionStore(BaseStore):
 
     def __init__(self, db: BaseConnector) -> None:
         super().__init__(db)
+        # Los nombres, entrecomillados por el dialecto. `by` es palabra reservada en MySQL y
+        # MariaDB —es la mitad de `GROUP BY`— así que sin esto cada INSERT y cada SELECT de
+        # esta tabla es un error de sintaxis, y el historial de versiones del inventario
+        # sencillamente no existe fuera de SQLite. No da un fallo visible: las rutas capturan,
+        # y la ficha aparece sin ninguna versión, como si nadie la hubiera tocado nunca.
+        self._sql_cols = ', '.join(db.quote_ident(c) for c in self._COLS)
         self._db.reconcile_table(SCHEMA)
 
     def _row(self, row) -> dict:
@@ -147,7 +153,7 @@ class RevisionStore(BaseStore):
             (str(scope or 'type'), str(ref_uid)))
         seq = int((fila or (0,))[0] or 0) + 1
         self._db.execute(
-            f'INSERT INTO {self._sql_table} ({", ".join(self._COLS)}) '
+            f'INSERT INTO {self._sql_table} ({self._sql_cols}) '
             f'VALUES ({", ".join("?" for _ in self._COLS)})',
             (uid, str(scope or 'type'), str(ref_uid), BaseStore._now(), seq,
              str(actor or ''), str(action or 'edit'),
@@ -176,7 +182,7 @@ class RevisionStore(BaseStore):
         lo de antes.
         """
         filas = [self._row(r) for r in (self._db.fetchall(
-            f'SELECT {", ".join(self._COLS)} FROM {self._sql_table} '
+            f'SELECT {self._sql_cols} FROM {self._sql_table} '
             'WHERE scope = ? AND ref_uid = ? ORDER BY seq DESC',
             (str(scope or 'type'), str(ref_uid or ''))) or ())]
         for i, fila in enumerate(filas):
@@ -186,7 +192,7 @@ class RevisionStore(BaseStore):
 
     def get(self, uid: str, scope: str = 'type') -> dict | None:
         filas = self._db.fetchall(
-            f'SELECT {", ".join(self._COLS)} FROM {self._sql_table} '
+            f'SELECT {self._sql_cols} FROM {self._sql_table} '
             'WHERE uid = ? AND scope = ?', (str(uid or ''), str(scope or 'type'))) or ()
         return self._row(filas[0]) if filas else None
 

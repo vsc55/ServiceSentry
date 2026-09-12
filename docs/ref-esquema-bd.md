@@ -24,7 +24,7 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **67 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **71 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -524,14 +524,147 @@ config.json (solo lectura/arranque) → BD (editable).
 |---|---|---|---|---|
 | id | AUTOINCREMENT | — | — | PK |
 | ts | REAL | no | — | epoch Unix |
-| module | TEXT | no | — | |
 | item_uid | TEXT | sí | — | → item configurado |
-| key | TEXT | no | — | (reservada en MySQL, entrecomillada) |
 | status | INTEGER | no | — | 1=OK / 0=error |
-| data | TEXT | sí | — | JSON |
+| series_id | INTEGER | sí | — | → `history_series.id` |
 
-Índices: `idx_history_uid_ts(item_uid, ts)`, `idx_history_mkts(module, key, ts)`.
+Índice: `idx_history_series_ts(series_id, ts, status)` — cómo se lee una serie. `status` va
+dentro no para buscar por él sino **para no salir del índice**: contar las muestras de cada serie y
+cuántas estaban bien es un recorrido agrupado, y con el estado fuera había que visitar la fila
+entera de cada una. Medido sobre 30 días de una instalación real (5.266.008 muestras): **108,0 s →
+2,4 s**, por 19 MB de índice.
+
+**`data` tampoco está.** Las medidas son filas en `history_fact`, una por valor medido. El
+documento era la forma correcta para leer **una** serie —8 ms, que es todo lo que el panel hacía—
+y la equivocada para preguntar cualquier cosa **entre** series: «qué interfaces se están
+degradando», «los diez discos más calientes», una alerta sobre una media móvil. Medido sobre 30
+días de una instalación real: los diez que más pasan de **1.264 ms a 97**, y «qué series dieron
+errores en la última hora» de **915 ms a 1**.
+
+El precio es disco: **2.474 MB contra 877**. No compra velocidad —leer una serie pasó de 8 a 16
+ms, el doble— sino preguntas que antes no se podían escribir.
+
+Una base anterior al cambio llega con la columna puesta y `_fill_facts` la pasa a filas al
+arrancar, por lotes y en transacción, vaciando el documento según avanza: se puede interrumpir y
+el siguiente arranque sigue donde lo dejó. Cuando no queda ni un documento, retira la columna. Es
+la propia columna la que hace de marcador, así que preguntarlo después cuesta una introspección y
+no un recorrido. Medido con 5.266.008 muestras: **25 minutos a 3.471 muestras/s**, una vez —sale
+por el registro con su porcentaje, porque un arranque de veinticinco minutos callado parece un
+arranque colgado—. Una muestra sin `series_id` no tiene dónde colocar sus medidas: se queda con
+su documento y la columna no se toca.
+
+**`module` y `key` ya no están aquí**: los guarda la serie, una vez, en vez de repetirlos en cada
+una de las cien mil filas. Tampoco `idx_history_mkts`, que los nombraba, ni
+`idx_history_uid_ts(item_uid, ts)`, que indexaba una columna NULL en todas las filas de todas las
+instalaciones porque ningún registrador ha escrito nunca una.
+
+La migración que llevó una base de la forma vieja a ésta se ejecutó y **se retiró del código**:
+un camino que sólo puede correr una vez y ya corrió es código muerto. Una base anterior a ese
+cambio ya no se migra sola — lo que la reconstruye es una copia de seguridad, y por eso
+`history_series` viaja con `history` en la misma parte de la copia.
+
 El *downsampling* por buckets usa `CAST(FLOOR((ts - ?) / ?) AS <int>)` (portable multi-motor).
+
+### `history_series` — una fila por serie, no por muestra
+
+[lib/core/history/store.py](../src/lib/core/history/store.py)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| id | AUTOINCREMENT | — | — | PK |
+| module | TEXT | no | — | |
+| key | TEXT | no | — | (reservada en MySQL, entrecomillada) |
+| item_uid | TEXT | sí | — | → item configurado |
+| attrs | TEXT | sí | — | JSON: lo que la serie **es** (identidad), última vista |
+| first_ts | REAL | sí | — | primera muestra |
+| last_ts | REAL | sí | — | última muestra |
+| samples | INTEGER | sí | — | cuántas muestras tiene |
+| up_samples | INTEGER | sí | — | cuántas de ellas estaban bien |
+| last_status | INTEGER | sí | — | estado de la última |
+| last_data | TEXT | sí | — | JSON: las medidas de la última |
+
+Índice: `idx_hseries_mk(module, key)` **único** — `(module, key)` es como el resto del producto
+direcciona una serie (`query`, `delete_series`, las coordenadas que lleva la carga de métricas).
+
+Guarda lo que **no cambia** entre dos lecturas de la misma cosa, que en `history` se reescribía
+en cada muestra. La medida que lo justifica está en [explica-snmp.md](explica-snmp.md): SNMP es
+el 83 % de las filas del histórico y, de los 217 bytes que ocupa una de sus muestras, 11 son la
+medida.
+
+Las cuatro últimas columnas son **el resumen**, y son la única desnormalización deliberada del
+esquema: lo que el catálogo pregunta de una serie, contestado por la fila que la representa en vez
+de recorriendo sus muestras. `get_index` lo calculaba con una función de ventana y un agregado —
+dos pasadas sobre la tabla entera para devolver una fila por serie— y eso crece con el histórico:
+sobre 30 días de una instalación real (5.266.008 muestras, 1.465 series) **235.674 ms**, contra
+**35 ms** leyéndolo de aquí.
+
+Quien lo mantiene es `record()`, en el mismo `UPDATE` por clave primaria que ya hacía para
+`last_ts` (0,004 ms por muestra), y quien lo repara es `prune()`, que es lo único que quita
+muestras por detrás: después de podar, las cuentas serían las de unas filas que ya no existen. Una
+serie que se queda sin ninguna vuelve a cero y **deja de decir lo que dijo** — servir su última
+medida sería dar por presente algo que se borró.
+
+Una serie sin muestras no sale del catálogo (`WHERE samples > 0`): sigue existiendo, lo que no
+tiene es histórico que enseñar.
+
+Un histórico grabado antes de que estas columnas existieran se rellena solo al arrancar — 3,1 s
+sobre cinco millones de muestras, una vez; después es un sondeo de 24 ms que no devuelve nada.
+
+
+### `history_fact` — una fila por valor medido
+[lib/core/history/facts.py](../src/lib/core/history/facts.py)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| series_id | INTEGER | no | — | → `history_series.id` |
+| ts | REAL | no | — | epoch Unix de la muestra |
+| field_id | INTEGER | no | — | → `history_field.id` |
+| kind | TEXT | no | `'t'` | qué **es** el valor (una letra) |
+| num | REAL | sí | — | el número, cuando lo hay |
+| txt | TEXT | sí | — | el texto, el JSON anidado o el entero exacto |
+
+Índices: `idx_hfact_serie(series_id, ts, field_id)` — cómo se lee **una** serie — e
+`idx_hfact_campo(field_id, ts, series_id, num)` — cómo se le pregunta a **la flota**, con `num`
+dentro para que un promedio no tenga que visitar la fila.
+
+**No tiene clave primaria, a propósito.** La natural sería `(series_id, ts, field_id)` y no
+costaría nada —el índice ya hace falta— hasta que dos muestras de la misma serie caen en el mismo
+`ts` exacto: entonces el INSERT falla y `record` pierde la medida entera. Medido sobre la
+instalación real: **cero choques en 4.026 muestras**, con las 4.026 marcas de tiempo distintas
+incluso entre series; pero `time.time()` sí se repite en bucle apretado (1.142 valores distintos
+de 2.000 seguidos). Una restricción cuya violación cuesta una medida es mal negocio cuando la
+alternativa cuesta dos puntos dibujados como uno.
+
+Las ocho marcas de `kind` están en
+[values.py](../src/lib/core/history/values.py): `n` decimal, `i` entero, `g` entero que no cabe
+exacto en un REAL, `f` NaN o infinito, `t` texto, `b` booleano, `z` nulo, `j` lista o
+diccionario. Son ocho y no dos porque un JSON lleva el tipo escrito dentro y una columna no:
+sin la marca, `holds_vip: true` vuelve como `1` y `10.0` vuelve como `10`. Ninguna de las dos
+cosas da un error; dan un panel que enseña algo distinto de lo que se midió.
+
+Todas en minúscula y sin pares que se diferencien sólo por la caja: la intercalación por defecto
+de MySQL **no distingue mayúsculas**, así que `n` y `N` serían la misma marca ahí y dos distintas
+en SQLite.
+
+Un entero mayor que 2⁵³ se guarda en las **dos** columnas: aproximado en `num`, para que siga
+contando en un promedio, y exacto en `txt`, que es lo que se devuelve. SNMP manda contadores de
+64 bits y una interfaz de 100 Gb/s saturada cruza los nueve petabytes en poco más de una semana.
+
+### `history_field` — el diccionario de nombres
+[lib/core/history/facts.py](../src/lib/core/history/facts.py)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| id | AUTOINCREMENT | — | — | PK |
+| name | TEXT | no | — | |
+
+Índice: `idx_hfield_name(name)` **único** — dos filas con el mismo nombre son dos ids para el
+mismo campo, y entonces «los diez que más» se contesta con la mitad de las series.
+
+211 nombres en una instalación real, escritos una vez en vez de veintisiete millones. La tabla
+crece sola porque los nombres los inventan los perfiles SNMP y los módulos — que es justo lo que
+hacía imposible «una columna por dato»: 211 columnas casi todas nulas, y una más cada vez que
+alguien carga una MIB.
 
 ### `check_state` — estado vivo por check (reemplaza status.json)
 [lib/services/monitoring/check_state/store.py:56](../src/lib/services/monitoring/check_state/store.py#L56)
@@ -660,6 +793,8 @@ copian a las tablas nuevas si estas están vacías, y las viejas se quedan donde
 | name | TEXT | no | `''` | único |
 | short | TEXT | no | `''` | forma corta para insignias y alzados. **Obligatoria y única** —comparada sin mayúsculas ni espacios— y comprobada en la ruta: dos chapas iguales en un alzado compartido no dicen de quién es el armario. Sin índice único, porque las filas adoptadas del inventario pueden traerla vacía |
 | description | TEXT | no | `''` | |
+| source | TEXT | no | `''` | de dónde salió: vacío es lo normal —una empresa tecleada aquí no viene de ningún sitio— y `freshservice` si la trajo ese proveedor |
+| external_id | TEXT | no | `''` | cuál de las suyas es, en el origen. **Dos columnas y no una** porque son dos preguntas: si lo mantiene otro —que decide si una importación puede pisarlo— y cuál es. Por el NOMBRE no se puede: renombrarla en el origen crearía aquí una segunda y dejaría la primera huérfana |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -711,6 +846,9 @@ usuarios en el directorio. Ver [explica-dcim.md](explica-dcim.md).
 | updated_by | TEXT | no | `''` | auditoría |
 | pos_x | REAL | sí | — | dónde cae en el **mapa de sedes** (no en la Tierra): el mapa no usa teselas, así que las sedes son cajas que alguien coloca. NULL = nadie la ha colocado, y entonces se sitúa proyectando `lat`/`lon` |
 | pos_y | REAL | sí | — | |
+| contact | TEXT | no | `''` | **a quién se llama.** El operador dice qué SOCIEDAD lleva la sede, y una sociedad no abre una puerta a las tres de la mañana |
+| phone | TEXT | no | `''` | su teléfono, aparte para poder marcarlo desde la ficha del mapa |
+| photo | TEXT | no | `''` | el nombre de la foto del sitio en el almacén de imágenes (como el plano de una sala): quien va por primera vez busca UNA puerta en un polígono |
 
 ### `dc_room` — sala
 
@@ -1251,6 +1389,38 @@ siguen apuntando.
 ---
 
 ## Notificaciones
+
+### `dc_drift` — lo que ya se avisó del cableado
+[lib/core/dcim/drift.py](../src/lib/core/dcim/drift.py)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | — | — | PK |
+| drift_key | TEXT | no | `''` | **único** — `moved:<cable>` o `undeclared:<host>\|<host>` |
+| kind | TEXT | no | `''` | `cable_moved` / `cable_undeclared` |
+| fingerprint | TEXT | no | `''` | lo que se vio, resumido |
+| first_seen | REAL | no | `0` | |
+| notified_at | REAL | no | `0` | |
+| times | INTEGER | no | `0` | cuántas veces se ha dicho |
+
+`drift_key` y no `key`: `key` es palabra reservada en MySQL, y este proyecto ya pagó esa lección
+—`dc_rev.by` dejó el historial de versiones sin funcionar fuera de SQLite—. Entrecomillarla
+habría valido; no usarla vale más.
+
+**Por qué una tabla y no un diccionario en el explorador.** Porque esto corre en contenedores.
+Un despliegue tiene varias réplicas web, el arriendo elige una para explorar, y esa no es la
+misma mañana —un despliegue progresivo, un pod reiniciado, un nodo drenado—. Un «ya te lo dije»
+en memoria muere con el proceso y el siguiente líder anuncia el atraso entero como si fuera
+nuevo. `event_cooldowns` existe por exactamente este motivo y lo dice en su propio docstring.
+
+La fila también es lo que **vuelve a armar** el aviso: un hallazgo cuya clave deja de aparecer se
+borra, así que un cable que se corrige y se vuelve a mover se anuncia otra vez. Y `times` es lo
+que hace posible «repítelo tres veces y luego cállate» — sin contador, un tope sólo se puede
+aplicar dentro de un proceso, y aquí el proceso cambia.
+
+Lo escribe el explorador de [cable_scan.py](../src/lib/core/health/cable_scan.py), que es el
+cuarto de los que el panel corre por su cuenta. **No escribe en el inventario**: el
+descubrimiento propone.
 
 ### `dc_rev` — qué decía una ficha antes, y quién la cambió
 

@@ -674,6 +674,11 @@ function ssCanvasFit(id) {
  *  is not a claim about the new one. */
 function ssCanvasReset(id) { delete _ssVB[id]; }
 
+/** Si alguien ha movido esta ventana. Lo que decide si se le puede reencuadrar por debajo:
+ *  volver al dibujo entero mientras alguien está mirando un trozo es quitarle el zoom de las
+ *  manos, y en una pantalla que se refresca sola pasaría cada treinta segundos. */
+function ssCanvasWindowKept(id) { return !!_ssVB[id]; }
+
 /** Zoom about a point in the drawing's own coordinates, so what is under the cursor stays
  *  under the cursor. Zooming about the centre instead is what makes a map feel like it is
  *  running away from you. */
@@ -684,7 +689,14 @@ function ssCanvasZoomAt(id, factor, cx, cy) {
     const w0 = +svg.dataset.w || 100;
     // Bounded both ways: past 8x the picture is one box and past a fifth of it the boxes are
     // specks. Neither is a view of anything, and both are easy to reach with one wheel flick.
-    const w = Math.min(w0 * 5, Math.max(w0 / 8, v.w / factor));
+    //
+    // …salvo que quien dibuja diga otra cosa (`data-zoom-in` / `data-zoom-out`), porque no todo
+    // lo que se dibuja aquí tiene la misma escala: en un plano de sala, ocho veces ya es una
+    // caja llenando la pantalla; en un mapa del mundo, ocho veces desde media península todavía
+    // no enseña una calle — y una calle es exactamente lo que se busca al acercarse a una sede.
+    const cerca = +svg.dataset.zoomIn || 8;
+    const lejos = +svg.dataset.zoomOut || 5;
+    const w = Math.min(w0 * lejos, Math.max(w0 / cerca, v.w / factor));
     const k = w / v.w;
     _ssVB[id] = {x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k, w, h: v.h * k};
     ssCanvasApply(id);

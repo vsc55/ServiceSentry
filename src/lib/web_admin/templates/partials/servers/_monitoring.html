@@ -45,7 +45,10 @@ function _renderHostLatest() {
         const isHist = r.source === 'history';
         let when = '';
         if (r.ts) {
-            const d = isHist ? new Date(r.ts * 1000) : new Date(r.ts);
+            // Con el mismo lector que el resto del panel (`_toDate`): los dos `ts` vienen en
+            // SEGUNDOS —el vivo también— y aquí sólo se multiplicaba el del historial, así que
+            // la fecha de una fila viva era enero de 1970.
+            const d = _toDate(r.ts);
             if (!isNaN(d.getTime())) when = d.toLocaleString();
         }
         const srcBadge = isHist

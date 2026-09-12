@@ -6,6 +6,7 @@
     POST    /api/v1/orgs              create one
     PUT     /api/v1/orgs/<uid>        rename one, or correct its short form
     DELETE  /api/v1/orgs/<uid>        remove one, un-filing what was hers
+    DELETE  /api/v1/orgs/<uid>/source  unlink it from the source that maintains it
     POST    /api/v1/orgs/owner        say whose something is (any declared scope)
 
 The last one is the reason this is not four CRUD handlers. Ownership crosses packages: the scope
@@ -64,9 +65,14 @@ def register(app, wa):
         # fifth — and would say nothing about it.
         conocidos = [{'scope': s, 'label_key': str(d.get('label_key') or '')}
                      for s, d in sorted(org_scopes.registry().items())]
+        # Y de dónde puede venir una, por lo mismo: la columna guarda `freshservice` y la
+        # pantalla enseña un nombre, que lo pone quien la trae. El core no nombra a nadie.
+        fuentes = [{'id': i, 'label_key': str(d.get('label_key') or ''),
+                    'icon': str(d.get('icon') or '')}
+                   for i, d in sorted(org_scopes.sources().items())]
         return jsonify({'orgs': [dict(r, said=said.get(str(r.get('uid') or ''), {}))
                                  for r in rows],
-                        'scopes': conocidos})
+                        'scopes': conocidos, 'sources': fuentes})
 
     def _free(store, data, skip=''):
         """Neither the name nor the short form belongs to another company. ``None`` if writable.
@@ -119,9 +125,17 @@ def register(app, wa):
     @edit_req
     def api_org_update(uid):
         store = _store()
-        if not store.orgs.get(uid):
+        row = store.orgs.get(uid)
+        if not row:
             return jsonify({'error': wa._t('orgs_not_found')}), 404
         data = request.get_json(silent=True) or {}
+        # Lo que mantiene un origen no se corrige aquí: la siguiente importación lo pisaría, y un
+        # campo que se puede escribir y se revierte solo es peor que uno que no se puede. La
+        # pantalla ya lo enseña en solo lectura; esto es la guarda, porque una pantalla no lo es.
+        # `source` y `external_id` no viajan nunca por esta ruta — se ponen importando, y se
+        # quitan desatando.
+        if str(row.get('source') or '') and ({'name', 'short', 'description'} & set(data)):
+            return jsonify({'error': wa._t('orgs_managed', str(row.get('source') or ''))}), 409
         if 'name' in data and not str(data.get('name') or '').strip():
             return jsonify({'error': wa._t('orgs_name_required')}), 400
         # Sólo si viene: un PUT que corrige la descripción no manda la abreviatura, y exigirla
@@ -136,6 +150,24 @@ def register(app, wa):
         except Exception:                       # pylint: disable=broad-except
             return jsonify({'error': wa._t('orgs_name_taken',
                                             str(data.get('name') or ''))}), 409
+        return jsonify({'ok': True})
+
+    @app.route('/api/v1/orgs/<uid>/source', methods=['DELETE'])
+    @edit_req
+    def api_org_unlink(uid):
+        """Desatar una empresa de su origen: vuelve a ser de esta casa y a poder escribirse.
+
+        Hace falta una salida. Sin ella, quitar el proveedor —o dejar de usarlo— deja filas que
+        nadie mantiene y que nadie puede corregir: sólo se podrían borrar, y de una sociedad
+        cuelgan armarios y máquinas. Lo que NO hace es borrar nada ni tocar lo que tiene fichado.
+        """
+        store = _store()
+        row = store.orgs.get(uid) or {}
+        if not row:
+            return jsonify({'error': wa._t('orgs_not_found')}), 404
+        store.orgs.update(uid, {'source': '', 'external_id': ''}, actor=_actor())
+        wa._audit('org_unlinked', detail={'uid': uid, 'name': str(row.get('name') or ''),
+                                          'was': str(row.get('source') or '')})
         return jsonify({'ok': True})
 
     @app.route('/api/v1/orgs/<uid>', methods=['DELETE'])

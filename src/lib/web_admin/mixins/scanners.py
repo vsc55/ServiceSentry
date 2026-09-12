@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""The three things the panel watches on its own, in the background.
+"""The four things the panel watches on its own, in the background.
 
-Service health, certificate expiry and provider secret expiry are not module checks: nobody
-configured them, they have no schedule of their own and they exist because the panel is the
-only thing in a position to notice. Each is a thread started at boot with its own interval.
+Service health, certificate expiry, provider secret expiry and cabling drift are not module
+checks: nobody configured them, they have no schedule of their own and they exist because
+the panel is the only thing in a position to notice. Each is a thread started at boot with
+its own interval, and each takes a lease first so that a deployment with several replicas
+has one of them doing the work rather than all of them doing it badly.
 
 They live together because they share a shape - wake up, look, notify if something changed -
 and separately from the request handling they interrupt, since a scanner that raises must not
@@ -107,6 +109,91 @@ class _ScannersMixin:
         )
         self._cert_scanner.start(
             poll_getter=lambda: self._config_section('certs').get('scan_every_secs', 86400))
+
+    def _start_cable_scanner(self) -> None:
+        """Launch the background cabling scanner: warns when a declared cable's ports stop
+        matching what the devices report over LLDP (``cable_moved``) and when two racked
+        machines see each other with no cable declared between them (``cable_undeclared``).
+
+        Leader-gated, enable read live (``dcim|notify_cabling``). **Discovery proposes**: this
+        writes nothing to the inventory — what is declared is what a person declared, and the
+        scanner exists so they are not told six months later by a torch and a cable tie.
+
+        What has already been announced lives in `dc_drift`, a table rather than a dict, because
+        the process that scans today is not the one that scans tomorrow — see that module.
+        """
+        if getattr(self, '_cable_scanner', None) is not None:
+            return
+        import os as _os  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415
+        from lib.core.dcim.drift import DriftStore  # noqa: PLC0415
+        from lib.core.health.cable_scan import CableDriftScanner, DEFAULT_EVERY  # noqa: PLC0415
+        from lib.services.heartbeat import hostname  # noqa: PLC0415
+        from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
+        _inst_id = f'cablescan-{hostname()}-{_os.getpid()}'
+
+        def _check():
+            """Lo mismo que la pestaña de cableado, pero de TODA la instalación.
+
+            La pantalla acota por armario y por lo que ese lector puede ver; aquí no hay lector
+            —es el sistema— así que se mira entero. Sin las aristas no se contesta: `checked`
+            falso significa «no se ha podido preguntar», y el explorador lo distingue de «no hay
+            nada» para no desdecirse en la vuelta siguiente.
+            """
+            from lib.core.dcim import service as dcim_svc  # noqa: PLC0415
+            store = getattr(self, '_dcim_store', None)
+            if store is None:
+                return {}
+            items = store.items.list()
+            nombres = {}
+            for it in items:
+                ru = str(it.get('rack_uid') or '')
+                if ru and ru not in nombres:
+                    nombres[ru] = str((store.racks.get(ru) or {}).get('name') or '')
+                it['rack_name'] = nombres.get(ru, '')
+            armar = getattr(self, '_infra_topology', None)
+            if not callable(armar):
+                return {}
+            edges = (armar(self._DEFAULT_LANG, evidence=False) or {}).get('edges') or []
+            return dcim_svc.cable_check(store.cables.list(), items, edges)
+
+        def _is_leader():
+            ls = getattr(self, '_service_leader_store', None)
+            if ls is None:
+                return True
+            try:
+                cada = int(self._config_section('dcim').get('cable_scan_every_secs')
+                           or DEFAULT_EVERY)
+            except (TypeError, ValueError):
+                cada = DEFAULT_EVERY
+            try:
+                # El arriendo dura más que una vuelta — si no, el que explora lo pierde entre
+                # dos y cada pod se turna: cada uno con su propia idea de lo que ya dijo.
+                return bool(ls.try_acquire('cable_scan', _inst_id, host=hostname(),
+                                           ttl=max(600, cada * 3)))
+            except Exception:  # pylint: disable=broad-except
+                return True
+
+        def _emit(kind, **fields):
+            _dispatch(self, kind=kind, timestamp=_time.strftime('%Y-%m-%d %H:%M:%S'), **fields)
+
+        try:
+            estado = DriftStore(self._db_connector)
+        except Exception:  # pylint: disable=broad-except
+            self._cable_scanner = None
+            return
+        self._cable_scanner = CableDriftScanner(
+            check_provider=_check,
+            state=estado,
+            dispatch=_emit,
+            config_getter=lambda: self._config_section('dcim'),
+            is_leader=_is_leader,
+            dbg=self._dbg,
+            text_fn=self._notify_text,
+        )
+        self._cable_scanner.start(
+            poll_getter=lambda: self._config_section('dcim').get('cable_scan_every_secs',
+                                                                 DEFAULT_EVERY))
 
     def _save_oidc_secret(self, secret: str, expires_at: str = '') -> bool:
         """Persist a freshly minted OIDC client secret (and the expiry Entra granted).

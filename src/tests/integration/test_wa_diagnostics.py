@@ -148,10 +148,40 @@ class TestWhatThePageAnswers:
         db = client.get('/api/v1/diagnostics').get_json()['database']
         assert db['engine'] == getattr(admin._db_connector, 'KIND', '?')
 
-    def test_storage_names_the_three_directories_that_matter(self, client):
+    def test_storage_names_every_directory_this_install_writes_to(self, client):
+        """Eran tres, y eran todas mientras el panel sólo escribía en tres. Dejó de serlo el
+        día que un módulo empezó a guardar ficheros suyos: una página que contesta «¿hay sitio,
+        se puede escribir?» sobre tres de siete no lo contesta sobre las cuatro que faltan — y
+        entre ellas estaba la que más fácil llena un disco, la de las MIBs.
+        """
         _login(client)
         rows = client.get('/api/v1/diagnostics').get_json()['storage']
-        assert {r['key'] for r in rows} == {'var_dir', 'config_dir', 'backup_dir'}
+        claves = {r['key'] for r in rows}
+        assert {'var_dir', 'config_dir', 'backup_dir'} <= claves
+        # Y las declaradas, que el núcleo no nombra: salen del mismo registro que lee una copia.
+        from lib.core.backup.parts import dir_parts            # noqa: PLC0415
+        declaradas = {p['id'] for p in dir_parts()}
+        assert declaradas, 'sin partes de carpeta no hay nada que comprobar'
+        assert declaradas <= claves, f'faltan rutas declaradas: {declaradas - claves}'
+
+    def test_y_ninguna_ruta_sale_sin_su_nombre_ni_sin_ruta(self, client):
+        _login(client)
+        rows = client.get('/api/v1/diagnostics').get_json()['storage']
+        for r in rows:
+            assert r.get('path'), f"{r['key']} sale sin ruta"
+            # O trae etiqueta propia (la de un módulo, en su idioma) o la pantalla sabe
+            # traducir su clave.
+            from lib.i18n.lang import es_ES                    # noqa: PLC0415
+            assert r.get('label') or ('diag_path_' + r['key']) in es_ES.LANG,                 f"{r['key']} saldría con la clave cruda por nombre"
+
+    def test_una_carpeta_que_aun_no_se_ha_usado_no_sale_como_averia(self, client):
+        """Las que se crean al guardar la primera cosa vienen marcadas, porque si no una
+        instalación recién puesta enseña cuatro rojos y ninguno es un problema."""
+        _login(client)
+        rows = client.get('/api/v1/diagnostics').get_json()['storage']
+        porclave = {r['key']: r for r in rows}
+        assert porclave['backup_dir']['on_demand'] is True
+        assert porclave['var_dir']['on_demand'] is False
 
     def test_it_writes_nothing_to_the_audit_log(self, client, admin):
         """It reads and changes nothing, and it is opened precisely when something is already

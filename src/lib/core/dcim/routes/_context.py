@@ -16,8 +16,6 @@ from types import SimpleNamespace
 
 from flask import request, session
 
-from lib.core.hosts import service as hosts_svc
-
 from lib.core.dcim import assets as dcim_assets
 from lib.core.dcim import builds as dcim_builds
 from lib.core.dcim import catalog as dcim_catalog
@@ -57,24 +55,17 @@ def build(app, wa):
         return dcim_owners.visible_orgs(_perms())
 
     def _states():
-        """Every machine's live state, once per request.
+        """Cómo está cada máquina, una vez por petición y acotado a lo que este lector ve.
 
-        The same read Infrastructure's fleet list is drawn from, so a rack and the list cannot
-        disagree about whether a machine is in trouble. Asked once and handed down: per node it
-        would be a read of the status file per rack, and this screen is opened with forty.
-
-        A caller with no `devices_view` may still see a rack; what they must not get is the
-        state of a machine the registry hides from them. Narrowed here rather than at each
-        drawing, so there is one place to be right.
+        La regla vive en el servicio (`dcim_svc.states_for`) porque el widget de sedes del panel
+        de control la necesita igual, y no llega por aquí: un proveedor de widget recibe el
+        panel y nada más.
         """
-        perms = _perms()
-        try:
-            rows = hosts_svc._host_statuses(wa) or {}
-        except Exception:                       # pylint: disable=broad-except
-            return {}                           # a colour is not worth failing the page for
-        if 'devices_view' in perms:
-            return rows
-        return {uid: st for uid, st in rows.items() if f'server.{uid}.view' in perms}
+        return dcim_svc.states_for(wa, _perms())
+
+    def _names():
+        """Cómo se llama cada máquina, con la misma regla que acota su estado."""
+        return dcim_svc.names_for(wa, _perms())
 
     def _owner_of(store, said, scope, uid):
         return dcim_owners.owner_of(store.chain_of(scope, uid), said)
@@ -335,6 +326,7 @@ def build(app, wa):
         perms=_perms,
         seen=_seen,
         states=_states,
+        names=_names,
         owner_of=_owner_of,
         filtered=_filtered,
         may_write=_may_write,

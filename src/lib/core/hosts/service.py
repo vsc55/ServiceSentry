@@ -118,6 +118,17 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
     results = []
     for bare, keys in bound.items():
         covered = set()
+        # Y qué ITEMS están dando parte ahora mismo, que no es lo mismo que qué claves. Un
+        # `ram_swap` no escribe nada bajo su propia clave: escribe `<item>_ram` y `<item>_swap`.
+        # Así que la clave desnuda `<item>` no tiene valor vivo nunca, y si alguna vez quedó una
+        # serie suya en el historial —dos muestras fallidas de hace ocho horas, sin datos, de
+        # cuando el chequeo aún no leía nada— el respaldo la daba por el estado de AHORA y la
+        # máquina salía en rojo con sus dos medidas en verde al lado. Medido en la pantalla de
+        # PVE01, que la flota daba por buena.
+        #
+        # El respaldo existe para el caso de verdad: una máquina en mantenimiento a la que le
+        # podaron el estado vivo. Si el item habla, no hay nada que respaldar.
+        vivos = set()
         # 1) Live values from status.json.
         mod_status = status_raw.get(bare)
         if not isinstance(mod_status, dict):
@@ -129,6 +140,7 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
                 base = _matches(skey, keys)
                 if base is None:
                     continue
+                vivos.add(base)
                 data = info.get('other_data') if isinstance(info.get('other_data'), dict) else {}
                 name = str(data.get('name') or '').strip() or keys.get(base) or skey
                 row = _row_of(skey, data)
@@ -149,7 +161,7 @@ def build_host_status(bound: dict, status_raw: dict, hist_by_mod: dict) -> list:
             if skey in covered:
                 continue
             base = _matches(skey, keys)
-            if base is None:
+            if base is None or base in vivos:
                 continue
             data = s.get('last_data') if isinstance(s.get('last_data'), dict) else {}
             name = str(data.get('name') or '').strip() or keys.get(base) or skey

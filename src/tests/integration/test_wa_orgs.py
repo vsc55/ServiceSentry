@@ -310,3 +310,90 @@ def _tablas_viejas(db):
     db.execute("CREATE TABLE IF NOT EXISTS dc_owner (scope TEXT, uid TEXT, org_uid TEXT, "
                "set_at TEXT, set_by TEXT)")
     db.commit()
+
+class TestLaListaDiceDeDondePuedeVenirUna:
+    """La columna guarda `freshservice` y la pantalla enseña un nombre. Ese nombre lo declara
+    quien trae las empresas: **ningún texto del core nombra a un proveedor**."""
+
+    def test_los_origenes_declarados_viajan_con_la_lista(self, client, grupo):
+        d = client.get('/api/v1/orgs').get_json()
+        ids = [f['id'] for f in d.get('sources', [])]
+        assert 'freshservice' in ids, 'la pantalla no tiene con qué poner un nombre'
+        fs = [f for f in d['sources'] if f['id'] == 'freshservice'][0]
+        assert fs['label_key'] and fs['icon']
+
+    def test_y_lo_declara_el_paquete_que_las_trae(self):
+        """Aquí se comprueba de dónde sale: si esto se escribiera en el core, quitar el
+        proveedor dejaría un nombre suyo escrito en una pantalla que ya no lo usa."""
+        from lib.core.orgs import scopes as org_scopes
+        assert org_scopes.sources()['freshservice']['package'] == 'freshservice'
+
+
+class TestLoQueMantieneUnOrigenNoSeCorrigeAqui:
+    """La siguiente importación lo pisaría, y un campo que se puede escribir y se revierte solo
+    es peor que uno que no se puede: el trabajo se pierde sin que nada lo diga, y al día
+    siguiente. La pantalla lo enseña en solo lectura; esto es la guarda, porque una pantalla no
+    lo es."""
+
+    def _importada(self, admin, client):
+        """Una empresa como la deja una importación: con su origen puesto."""
+        uid = client.post('/api/v1/orgs',
+                          json={'name': 'Traída', 'short': 'TR'}).get_json()['uid']
+        admin._orgs_store.orgs.update(uid, {'source': 'freshservice', 'external_id': '7'})
+        return uid
+
+    def test_no_se_le_cambia_el_nombre(self, admin, client, grupo):
+        uid = self._importada(admin, client)
+        r = client.put(f'/api/v1/orgs/{uid}', json={'name': 'A mano'})
+        assert r.status_code == 409
+        assert admin._orgs_store.orgs.get(uid)['name'] == 'Traída'
+
+    def test_ni_la_abreviatura_ni_la_descripcion(self, admin, client, grupo):
+        uid = self._importada(admin, client)
+        assert client.put(f'/api/v1/orgs/{uid}', json={'short': 'XX'}).status_code == 409
+        assert client.put(f'/api/v1/orgs/{uid}',
+                          json={'description': 'mía'}).status_code == 409
+
+    def test_y_el_aviso_dice_quien_la_mantiene(self, admin, client, grupo):
+        """Una negativa que no dice de quién es la fila manda a mirar dónde no es."""
+        uid = self._importada(admin, client)
+        d = client.put(f'/api/v1/orgs/{uid}', json={'name': 'A mano'}).get_json()
+        assert 'freshservice' in d['error']
+
+    def test_pero_una_de_esta_casa_se_corrige_como_siempre(self, admin, client, grupo):
+        """La guarda es para lo que mantiene otro, no para todo."""
+        assert client.put(f'/api/v1/orgs/{grupo["b"]}',
+                          json={'description': 'mía'}).status_code == 200
+
+
+class TestSoltarUnaEmpresaDeSuOrigen:
+    """Hace falta una salida: sin ella, quitar el proveedor deja filas que nadie mantiene y que
+    nadie puede corregir — sólo se podrían borrar, y de una sociedad cuelgan armarios."""
+
+    def test_vuelve_a_ser_de_esta_casa(self, admin, client, grupo):
+        uid = client.post('/api/v1/orgs',
+                          json={'name': 'Traída', 'short': 'TR'}).get_json()['uid']
+        admin._orgs_store.orgs.update(uid, {'source': 'freshservice', 'external_id': '7'})
+        assert client.delete(f'/api/v1/orgs/{uid}/source').status_code == 200
+        fila = admin._orgs_store.orgs.get(uid)
+        assert fila['source'] == '' and fila['external_id'] == ''
+        # Y se vuelve a poder escribir, que es para lo que se suelta.
+        assert client.put(f'/api/v1/orgs/{uid}', json={'name': 'A mano'}).status_code == 200
+
+    def test_y_no_se_lleva_por_delante_lo_que_tiene_fichado(self, admin, client, grupo):
+        """Soltarla del origen no es borrarla: los armarios que son suyos siguen siendo suyos."""
+        admin._orgs_store.orgs.update(grupo['it'], {'source': 'freshservice',
+                                                    'external_id': '9'})
+        client.delete(f'/api/v1/orgs/{grupo["it"]}/source')
+        assert admin._orgs_store.said().get(('rack', grupo['rack'])) == grupo['it']
+
+    def test_y_queda_apuntado(self, admin, client, grupo):
+        """«¿Por qué esta ya no se actualiza?» se pregunta semanas después."""
+        admin._orgs_store.orgs.update(grupo['b'], {'source': 'freshservice',
+                                                   'external_id': '9'})
+        client.delete(f'/api/v1/orgs/{grupo["b"]}/source')
+        assert 'org_unlinked' in _eventos(client)
+
+    def test_y_hace_falta_poder_escribir_para_soltarla(self, admin, grupo):
+        c = _as(admin, 'mirona-suelta', ['orgs_view', 'orgs_all_view'])
+        assert c.delete(f'/api/v1/orgs/{grupo["b"]}/source').status_code == 403

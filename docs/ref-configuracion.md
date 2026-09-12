@@ -163,6 +163,23 @@ desaparecieran con él.
 | `snmp.mib_repos` | string | `""` | Plantillas de URL de repositorios GitHub, una por línea. No se edita a mano: la lista de fuentes de la vista **Importar** sabe qué plantillas van juntas (un repo mezcla `.txt`, `.my` y ficheros sin extensión) |
 | `snmp.github_token` | string | `""` | Token personal de GitHub para importar MIB (env `SS_SNMP_GITHUB_TOKEN`). Anónimo son 60 peticiones/hora y una sola carpeta de fabricante puede gastarlas buscando dependencias; con token son 5000. **Secreto**: cifrado en reposo y enmascarado en la API |
 
+### Sección `freshservice`
+
+De dónde salen las empresas cuando ya están escritas en otro sitio. En Freshservice,
+«departamento» y «empresa» son la misma cosa —lo dice su propia documentación—, y en una casa que
+ya lo usa esa lista existe, está mantenida y es la buena. Se trae en **un solo sentido**: nada de
+lo de aquí sube.
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `freshservice.domain` | string | `""` | La dirección de tu Freshservice, `tucasa.freshservice.com`. Vale con `https://` o sin él, y con barra final o sin ella |
+| `freshservice.api_key` | string | `""` | Clave de API de un agente con permiso para ver departamentos (Perfil → API Key). **Secreto**: cifrada en reposo y enmascarada en la API |
+
+Los dos botones de la tarjeta —probar la conexión y traer las empresas— piden `orgs_edit`, que es
+la bandera que decide de quién es cada cosa; traer enseña **primero** qué crearía, qué corregiría
+y qué dejaría en paz. Lo que ya no está en Freshservice se cuenta y **no se borra**: de una
+sociedad cuelgan armarios y equipos fichados aquí.
+
 ### Sección `global`
 
 | Clave | Tipo | Por defecto | Descripción |

@@ -29,6 +29,15 @@ const _DCIM_KIND = {
         // Texto libre es como se acaba con `Europe/Madrid`, `Madrid`, `CET` y `GMT+1` en cuatro
         // sedes, y ninguna de las cuatro sirve para calcular una hora.
         {name: 'timezone', label: 'dcim_timezone', list: 'zones', w: '14rem'},
+        // A quién se llama, que es lo que se pregunta delante de un punto rojo a cuatro horas de
+        // coche. El operador dice qué sociedad lleva la sede; una sociedad no abre una puerta.
+        {name: 'contact', label: 'dcim_contact', w: '14rem'},
+        {name: 'phone', label: 'dcim_phone', w: '11rem'},
+        // Qué se ve al llegar. Quien va por primera vez busca UNA puerta en un polígono, y la
+        // diferencia entre una dirección y una foto de la fachada es no dar dos vueltas a la
+        // manzana de noche. No viaja con el formulario: se sube al momento, como el plano de
+        // una sala, porque un fichero no es un campo de texto.
+        {name: 'photo', label: 'dcim_photo', type: 'photo', w: '18rem'},
     ]},
     room: {url: 'rooms', parent: 'site_uid', title: 'dcim_room', fields: [
         {name: 'name', label: 'dcim_room_name', w: '16rem', req: true},
@@ -320,7 +329,7 @@ function _dcimFormBody() {
         const has = row[fld.name] !== undefined && row[fld.name] !== null && row[fld.name] !== '';
         const val = has ? row[fld.name] : (fld.value !== undefined ? fld.value : '');
         const caja = fld.pick ? _dcimPickBox(fld, i, val, row)
-                              : _dcimFieldHtml(fld, i, val, f.kind);
+                              : _dcimFieldHtml(fld, i, val, f.kind, row);
         return `<label class="ss-fs-2 text-muted">${_dcLabel(fld.label, fld.tt)}${
             fld.req ? ' <span class="text-danger">*</span>' : ''}
             ${fld.said ? `<div class="input-group input-group-sm">${caja}
@@ -349,7 +358,8 @@ function _dcimFormBody() {
 
 /** La caja de un campo: un desplegable de opciones, uno de una lista cerrada, o un cuadro de
  *  texto con sugerencias. */
-function _dcimFieldHtml(fld, i, val, kind) {
+function _dcimFieldHtml(fld, i, val, kind, row) {
+    if (fld.type === 'photo') return _dcimPhotoBox(fld, i, val, row || {});
     if (fld.choices)
         // El prefijo lo dice el campo: escrito a mano, la primera elección que no fuese una
         // cara del rack habría salido con el nombre de una.
@@ -377,6 +387,70 @@ function _dcimFieldHtml(fld, i, val, kind) {
                 ${fld.step ? `step="${escAttr(fld.step)}"` : ''}
                 value="${escAttr(String(val))}"
                 onkeydown="if(event.key==='Enter')_dcimSave();">`;
+}
+
+/** La foto de una sede: lo que hay, y los dos botones.
+ *
+ *  **Se sube al momento y no al guardar**, como el plano de una sala: un fichero no viaja en el
+ *  mismo cuerpo que cuatro cadenas, y sobre todo no hay dónde ponerlo hasta que la sede existe.
+ *  Por eso, mientras se está creando una, esto dice que se puede poner después en vez de ofrecer
+ *  un botón que no tendría a qué subir.
+ *
+ *  El `<input type=file>` va escondido y lo pulsa el botón: el control de fichero de fábrica
+ *  trae su propio texto en el idioma del navegador —que no tiene por qué ser el del panel— y no
+ *  se puede rotular. */
+function _dcimPhotoBox(fld, i, val, row) {
+    // El identificador viaja igual, aunque no se envíe: quien guarda salta este campo por su
+    // tipo, y así una lectura de `dcim-f-<i>` nunca devuelve `undefined`.
+    const oculto = `<input type="hidden" id="dcim-f-${i}" value="${escAttr(String(val || ''))}">`;
+    if (!row.uid)
+        return `${oculto}<div class="text-muted ss-fs-2" style="max-width:${fld.w}">${
+            esc(t('dcim_photo_later'))}</div>`;
+    const u = jsStr(row.uid);
+    return `${oculto}<div style="max-width:${fld.w}">
+        ${val ? `<img src="/api/v1/dcim/media/${encodeURI(String(val))}" alt=""
+                 class="rounded-2 mb-1 d-block"
+                 style="width:100%;max-height:6rem;object-fit:cover">` : ''}
+        <input type="file" accept="image/*" class="d-none" id="dcim-photo-${i}"
+               onchange="_dcimPhotoUp(this, ${u})">
+        <div class="d-flex gap-1">
+            <button type="button" class="btn btn-secondary btn-sm"
+                    onclick="document.getElementById('dcim-photo-${i}').click()">
+                <i class="bi bi-upload me-1"></i>${esc(t('dcim_photo_add'))}</button>
+            ${val ? `<button type="button" class="btn btn-warning btn-sm"
+                    onclick="_dcimPhotoDrop(${u})">
+                <i class="bi bi-trash3 me-1"></i>${esc(t('dcim_photo_drop'))}</button>` : ''}
+        </div>
+    </div>`;
+}
+
+/** Subirla. El servidor decide qué es mirando DENTRO del fichero — una extensión es una
+ *  afirmación de quien sube, y los primeros bytes de un PNG no. */
+async function _dcimPhotoUp(input, uid) {
+    const file = (input.files || [])[0];
+    input.value = '';
+    if (!file) return;
+    const body = new FormData();
+    body.append('file', file);
+    const resp = await fetch(`/api/v1/dcim/sites/${encodeURIComponent(uid)}/photo`,
+                             {method: 'POST', body, credentials: 'same-origin'});
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) { showToast(data.error || t('error'), 'danger'); return; }
+    if (_dcimForm && _dcimForm.row) _dcimForm.row.photo = data.photo || '';
+    showToast(t('saved'), 'success');
+    renderDcim();
+}
+
+/** Quitarla: se va el FICHERO, no sólo la referencia. Una fila limpiada dejando el fichero es
+ *  una carpeta que crece durante toda la vida de la instalación. */
+function _dcimPhotoDrop(uid) {
+    showConfirmModal(t('dcim_photo_drop_q'), async () => {
+        const resp = await fetch(`/api/v1/dcim/sites/${encodeURIComponent(uid)}/photo`,
+                                 {method: 'DELETE', credentials: 'same-origin'});
+        if (!resp.ok) { showToast(t('error'), 'danger'); return; }
+        if (_dcimForm && _dcimForm.row) _dcimForm.row.photo = '';
+        renderDcim();
+    });
 }
 
 /** Una caja que enseña el NOMBRE y guarda el identificador, con un botón que busca.
@@ -773,6 +847,9 @@ async function _dcimSave() {
         const el = document.getElementById('dcim-f-' + i);
         if (!el) return;
         const raw = String(el.value || '').trim();
+        // La foto no viaja aquí: se subió al elegirla, y mandar su nombre otra vez sería este
+        // formulario decidiendo sobre un fichero que no ha tocado.
+        if (fld.type === 'photo') return;
         if (fld.type === 'number' || fld.type === 'coord') {
             // An empty number is not zero — a site whose latitude nobody knows must not end up
             // on the equator. Left out entirely, the column keeps whatever it had.

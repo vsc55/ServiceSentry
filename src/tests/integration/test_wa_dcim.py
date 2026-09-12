@@ -991,6 +991,37 @@ class TestElCuadroDeMando:
         assert por_empresa[fleet['b']]['total'] == 1     # el suyo
         assert por_empresa[fleet['it']]['total'] == 1    # y el del departamento
 
+    def test_una_fila_dice_como_se_llama_la_maquina_y_no_su_uid(self, client, fleet,
+                                                                monkeypatch):
+        """Lo que se rompía en la pantalla: el hueco no llevaba etiqueta, así que la columna
+        del nombre enseñaba el uid de la máquina. El registro sabe cómo se llama; el cuadro
+        tenía que preguntárselo, y no lo hacía."""
+        from lib.core.dcim import service as dcim_svc
+        _login(client)
+        host = client.post('/api/v1/hosts',
+                           json={'name': 'DB03', 'address': '10.0.0.9'}).get_json()['uid']
+        client.post('/api/v1/dcim/items', json={'rack_uid': fleet['rack'], 'u_start': 20,
+                                                'host_uid': host})
+        monkeypatch.setattr(dcim_svc, 'states_for', lambda wa, perms: {host: 'error'})
+        b = client.get('/api/v1/dcim/board').get_json()
+        fila = [r for r in b['trouble'] if r['host_uid'] == host][0]
+        assert fila['name'] == 'DB03', fila
+
+    def test_y_no_el_de_una_maquina_que_este_lector_no_ve(self, admin, client, fleet,
+                                                          monkeypatch):
+        """El nombre se acota como el color. Si no, la lista de averías enseña el inventario
+        del vecino por la puerta de atrás."""
+        from lib.core.dcim import service as dcim_svc
+        _login(client)
+        host = client.post('/api/v1/hosts',
+                           json={'name': 'DB03', 'address': '10.0.0.9'}).get_json()['uid']
+        client.post('/api/v1/dcim/items', json={'rack_uid': fleet['rack'], 'u_start': 20,
+                                                'host_uid': host})
+        monkeypatch.setattr(dcim_svc, 'states_for', lambda wa, perms: {host: 'error'})
+        c = _as(admin, 'sin-registro', ['dcim_view', 'orgs_all_view'])
+        b = c.get('/api/v1/dcim/board').get_json()
+        assert not any(r.get('name') == 'DB03' for r in b['trouble']), b['trouble']
+
     def test_hace_falta_la_bandera(self, admin, fleet):
         c = _as(admin, 'sin-nada', [])
         assert c.get('/api/v1/dcim/board').status_code == 403

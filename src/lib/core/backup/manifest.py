@@ -85,3 +85,4 @@ NOTIFY_EVENTS = [
 # (lib/core/jobs). Declared rather than reached into: a core that imported four job
 # registries by name would have to be edited to learn about a fifth.
 from .jobs import live as BACKGROUND_JOBS      # noqa: E402,F401  (a descriptor)
+from .timers import live as BACKGROUND_TIMERS  # noqa: E402,F401  (a descriptor)

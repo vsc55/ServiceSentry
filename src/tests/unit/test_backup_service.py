@@ -807,7 +807,8 @@ class TestSyslogInADatabaseOfItsOwn:
         """`core` is every table nobody claimed IN THE SYSTEM DATABASE. Asking the wrong one
         would sweep a syslog table into it and restore it to the wrong place."""
         main, side = two
-        by_part = dict(bk_parts.tables_by_part(main, {'core', 'syslog'}, {'syslog': side}))
+        by_part = {pid: tabs for pid, tabs, _err in
+                   bk_parts.tables_by_part(main, {'core', 'syslog'}, {'syslog': side})}
         assert by_part['core'] == ['hosts']
         assert by_part['syslog'] == ['syslog', 'syslog_drops']
 
@@ -834,6 +835,52 @@ class TestSyslogInADatabaseOfItsOwn:
                                       include_secrets=True,
                                       connectors={'syslog': side})
         assert res['ok'] and 'hosts' in res['manifest']['tables']
+
+    def test_y_la_copia_dice_que_le_falta_esa_parte(self, two, tmp_path):
+        """Medido antes de arreglarlo: con la base de syslog caída, la parte volvía con cero
+        tablas y el manifiesto decía `ok`. Indistinguible de una copia hecha en una instalación
+        que nunca tuvo una tabla de syslog — y se descubría al restaurar, que es el único
+        momento en el que nadie se lo puede permitir.
+        """
+        # `close()` no basta: el conector de SQLite vuelve a abrir la base a la primera
+        # pregunta, así que cerrarlo no simula un servidor que no responde — la prueba de al
+        # lado lleva años pasando por esa misma razón sin llegar a probar el caso.
+        class _NoResponde:
+            def list_tables(self):
+                raise OSError('connection refused')
+
+        main, _side = two
+        res = bk_create.create_backup(main, 'copia', var_dir=str(tmp_path),
+                                      config_dir=str(tmp_path), parts=['core', 'syslog'],
+                                      include_secrets=True,
+                                      connectors={'syslog': _NoResponde()})
+        man = res['manifest']
+        paso = next(s for s in man['steps'] if s['part'] == 'syslog')
+        assert paso['ok'] is False, 'una parte que no se pudo leer se declara correcta'
+        assert paso['error'], 'sin motivo, «falló» no le sirve a nadie'
+        assert man['status'] == 'partial', man['status']
+        # Y lo demás sigue copiado: perder una parte no puede costar la copia entera.
+        assert next(s for s in man['steps'] if s['part'] == 'core')['ok'] is True
+
+    def test_pero_una_parte_vacia_de_verdad_sigue_siendo_correcta(self, two, tmp_path):
+        """Sin esto el arreglo sería peor que el fallo: una instalación que nunca encendió el
+        syslog tiene esas tablas sin crear, y marcar eso en rojo pone un hallazgo en todas las
+        copias de todas las instalaciones que no usan esa función.
+
+        Se pide sobre la base **principal** de la pareja, que a propósito no tiene las tablas de
+        syslog: así la parte sale de verdad con cero tablas. La primera versión de esta prueba
+        usaba una base que sí las tenía, y por eso no llegaba a comprobar nada — se vio mutando
+        el arreglo para marcar como fallo toda parte vacía y ver que seguía en verde.
+        """
+        main, _side = two
+        res = bk_create.create_backup(main, 'copia', var_dir=str(tmp_path),
+                                      config_dir=str(tmp_path), parts=['core', 'syslog'],
+                                      include_secrets=True)
+        man = res['manifest']
+        paso = next(s for s in man['steps'] if s['part'] == 'syslog')
+        assert paso['tables'] == 0, 'la prueba no está ejercitando una parte vacía'
+        assert paso['ok'] is True and not paso['error']
+        assert man['status'] == 'ok'
 
 
 class TestAFolderThatWasMoved:

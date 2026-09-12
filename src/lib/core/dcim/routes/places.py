@@ -16,6 +16,8 @@ Rutas:
     POST    /api/v1/dcim/rooms/<uid>/import
     POST    /api/v1/dcim/rooms/<uid>/plan
     DELETE  /api/v1/dcim/rooms/<uid>/plan
+    POST    /api/v1/dcim/sites/<uid>/photo
+    DELETE  /api/v1/dcim/sites/<uid>/photo
     POST    /api/v1/dcim/rows
     PUT     /api/v1/dcim/rows/<uid>
     DELETE  /api/v1/dcim/rows/<uid>
@@ -186,6 +188,56 @@ def register(app, wa, C):
     # exactly this shape, and the fix that holds is the one where a path can only be built in
     # one place, from a name that was minted there.
 
+
+    @app.route('/api/v1/dcim/sites/<uid>/photo', methods=['POST'])
+    @C.edit_req
+    def api_dcim_site_photo(uid):
+        """Poner una foto en una sede.
+
+        Lo mismo que el plano de una sala y por las mismas razones: **el tipo lo decide lo que
+        hay DENTRO del fichero** —una extensión es una afirmación de quien sube, y los primeros
+        bytes de un PNG no—, y el nombre con el que llegó no se guarda en ninguna parte, porque
+        un nombre elegido por una petición es justo lo que nunca puede llegar a un sistema de
+        ficheros.
+
+        Y la que sustituye se borra: sin eso, cada nueva subida deja un fichero al que ya no
+        apunta nadie y la carpeta crece durante toda la vida de la instalación.
+        """
+        store = C.store()
+        site = store.sites.get(uid) if store else None
+        if not site:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if not C.may_write(store, store.owners_map(), C.seen(), 'site', uid):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        blob = b''
+        up = (request.files or {}).get('file')
+        if up is not None:
+            blob = up.read(dcim_media.MAX_BYTES + 1)
+        elif request.data:
+            blob = request.data[:dcim_media.MAX_BYTES + 1]
+        name, err = dcim_media.save(wa._var_dir or '', blob, C.media_dir())
+        if err:
+            return jsonify({'error': wa._t(err)}), 400
+        old = str(site.get('photo') or '')
+        store.sites.update(uid, {'photo': name}, actor=C.actor())
+        if old and old != name:
+            dcim_media.forget(wa._var_dir or '', old, C.media_dir())
+        return jsonify({'photo': name})
+
+    @app.route('/api/v1/dcim/sites/<uid>/photo', methods=['DELETE'])
+    @C.edit_req
+    def api_dcim_site_photo_delete(uid):
+        store = C.store()
+        site = store.sites.get(uid) if store else None
+        if not site:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if not C.may_write(store, store.owners_map(), C.seen(), 'site', uid):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        name = str(site.get('photo') or '')
+        store.sites.update(uid, {'photo': ''}, actor=C.actor())
+        if name:
+            dcim_media.forget(wa._var_dir or '', name, C.media_dir())
+        return jsonify({'ok': True})
 
     @app.route('/api/v1/dcim/rooms/<uid>/plan', methods=['POST'])
     @C.edit_req
@@ -497,4 +549,4 @@ def register(app, wa, C):
 
     # Referenciadas para que un analizador no las dé por muertas: Flask se las
     # queda por su ruta.
-    _ = (api_dcim_orgs,)
+    _ = (api_dcim_orgs, api_dcim_site_photo, api_dcim_site_photo_delete)

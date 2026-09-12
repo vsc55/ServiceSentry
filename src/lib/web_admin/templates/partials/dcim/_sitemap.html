@@ -22,22 +22,58 @@
 const _DCM_SVG = 'dcim-sitemap';
 //: Cuánto ocupa una sede en el dibujo SIN mapa, y cuánto separa dos.
 const _DCM = {W: 190, H: 76, PAD: 60};
-//: El zoom en el que se miden las coordenadas del dibujo cuando hay mapa. El mundo entero son
-//: `256 · 2^Z` píxeles; con 12 son un millón, que da sitio de sobra para distinguir dos naves
-//: de un polígono sin que los números dejen de ser exactos.
-const _DCM_Z = 12;
-const _DCM_WORLD = 256 * Math.pow(2, _DCM_Z);
-//: Cuántas teselas se piden como mucho de una vez. Un tope y no una confianza: un `viewBox`
-//: absurdo —por un arrastre raro o una pantalla enorme— pediría miles de imágenes a un servidor
-//: que es voluntario, y eso es maltratar a quien te está haciendo el favor.
-const _DCM_TILE_CAP = 240;
 
-let _dcimMap = false;
+//: Cuánto pesa cada estado al decidir qué caja se dibuja encima de cuál. El MISMO orden con el
+//: que el servidor ordena la lista de lo que falla (`service._RANK`): dos ideas de «peor» en la
+//: misma pantalla acaban discrepando sobre cuál de dos sedes está peor.
+const _DCM_RANK = {error: 3, warning: 2, ok: 1};
+//: El mundo, la proyección y las teselas son del panel entero (`partials/core/_geo.html`): las
+//: quiere también el widget de sedes, y dos copias de esa aritmética son dos mapas que pueden
+//: discrepar sobre dónde está el mismo edificio sin que nada dé error.
+const _DCM_Z = SS_GEO_Z;
+const _DCM_WORLD = SS_GEO_WORLD;
+
+//: Con cuántos píxeles de ancho se cuenta el dibujo ANTES de poder medirlo. Una suposición, y
+//: sólo decide el tope del acercamiento durante el primer instante: `_dcmFit` lo recalcula con
+//: el ancho de verdad en cuanto la sección está en pantalla.
+const _DCM_PX = 900;
+
+//: Cuánto se puede alejar cuando hay mapa. Acercarse no es un número: sale de las teselas
+//: (`ssGeoZoomIn`), que son lo único que sabe dónde deja de haber más que ver. Sin mapa manda el
+//: tope de fábrica del lienzo, porque ahí las cajas SON el dibujo y no hay nada debajo que
+//: enseñe más al acercarse.
+const _DCM_ZOOM_OUT = 3;
+
+//: Si se pueden mover las sedes de sitio. **Apagado**, y hay que encenderlo con un botón.
+//:
+//: Sobre un mapa, arrastrar una sede es CAMBIAR SUS COORDENADAS: se guardan en el servidor y
+//: pasan a ser dónde está ese edificio para todo el panel. Y arrastrar es también lo que se hace
+//: para mover el mapa, así que con las dos cosas en el mismo gesto un tirón para ver Francia
+//: movía una sede a Francia — sin preguntar, y sin que nadie se enterara hasta mucho después.
+//:
+//: Un interruptor y no una confirmación por arrastre: quien está colocando sedes hace veinte
+//: seguidas, y quien está mirando no hace ninguna.
+//: Qué sede se está señalando desde la lista de abajo, si alguna. Una variable y no una clase
+//: en el nodo: el dibujo se rehace entero en cada rueda y en cada arrastre, así que una marca
+//: puesta a mano en un nodo se va con el siguiente repintado — y con ella el resalte y el orden.
+let _dcmHot = '';
+
+let _dcimMove = false;
+
+//: Si el mapa se dibuja. **Encendido de salida**: la pregunta que trae a alguien a este cuadro
+//: es dónde está lo que va mal, y esconder el mapa hasta que se pide es guardar la respuesta en
+//: un cajón. Apagarlo sigue estando a un botón, para quien quiera la lista y nada más.
+let _dcimMap = true;
 //: El arrastre en curso: `{uid, from, at, moved}` en unidades del dibujo.
 let _dcmDrag = null;
 
 function _dcimToggleMap() {
     _dcimMap = !_dcimMap;
+    renderDcim();
+}
+
+function _dcimToggleMove() {
+    _dcimMove = !_dcimMove;
     renderDcim();
 }
 
@@ -47,27 +83,9 @@ function _dcmTileUrl() {
     return String(((_dcimBoard || {}).map || {}).tiles || '').trim();
 }
 
-// ── La proyección ────────────────────────────────────────────────────────────
-//
-// Web Mercator, que es la que hablan las teselas de todo el mundo. No es «una proyección
-// cualquiera»: si el dibujo usara otra, las sedes caerían al lado del edificio en vez de encima,
-// y un mapa que sitúa mal por poco es peor que uno que no sitúa — el primero se cree.
-
-function _dcmProject(lat, lon) {
-    const la = Math.max(-85.05112878, Math.min(85.05112878, Number(lat) || 0));
-    const rad = la * Math.PI / 180;
-    return {
-        x: (Number(lon) + 180) / 360 * _DCM_WORLD,
-        y: (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * _DCM_WORLD,
-    };
-}
-
-function _dcmUnproject(x, y) {
-    const n = Math.PI - 2 * Math.PI * y / _DCM_WORLD;
-    return {
-        lon: x / _DCM_WORLD * 360 - 180,
-        lat: 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))),
-    };
+/** Y hasta qué nivel llega, que tampoco es cosa del dibujo: lo dice quien sirve las imágenes. */
+function _dcmZMax() {
+    return ((_dcimBoard || {}).map || {}).zmax;
 }
 
 /** Dónde cae una sede.
@@ -78,9 +96,9 @@ function _dcmUnproject(x, y) {
  *  a otras— y si tampoco hay coordenadas, en rejilla, porque en algún lado hay que pintarlas. */
 function _dcmAt(site, i) {
     const lat = Number(site.lat), lon = Number(site.lon);
-    const tiene = isFinite(lat) && isFinite(lon) && (lat || lon);
+    const tiene = ssGeoHas(site);
     if (_dcmTileUrl()) {
-        return tiene ? _dcmProject(lat, lon)
+        return tiene ? ssGeoProject(lat, lon)
                      : {x: _DCM_WORLD / 2 + (i % 6) * 400, y: _DCM_WORLD / 2 + Math.floor(i / 6) * 300};
     }
     if (site.pos_x !== null && site.pos_x !== undefined
@@ -98,12 +116,19 @@ function _dcmAt(site, i) {
  *
  *  Con mapa hay un mínimo: dos sedes de la misma ciudad encuadradas a lo que ocupan saldrían con
  *  un zoom de calle donde no se distingue ni el país. */
-function _dcmExtent(sites) {
+function _dcmExtent(sites, ratio) {
     const pts = sites.map((s, i) => _dcmAt(s, i));
     const conMapa = !!_dcmTileUrl();
+    // Lo alto respecto a lo ancho DEL HUECO. Es la mitad del asunto y no un detalle: `meet`
+    // encaja el dibujo entero dentro del elemento y lo que sobra se queda en bandas vacías, así
+    // que un encuadre cuadrado dentro de un hueco apaisado deja el mapa en una columna en medio
+    // con negro a los lados — que es lo que se veía. Y peor: la escala real pasa a mandarla la
+    // ALTURA, mientras `_dcmScale` la calculaba del ancho, así que las cajas salían pequeñas y
+    // no se podían leer. Reportado desde la pantalla, las dos cosas a la vez.
+    const forma = ratio || 0.5;
     if (!pts.length)
-        return conMapa ? {x: 0, y: 0, width: _DCM_WORLD, height: _DCM_WORLD}
-                       : {x: 0, y: 0, width: 800, height: 400};
+        return conMapa ? {x: 0, y: 0, width: _DCM_WORLD, height: _DCM_WORLD * forma}
+                       : {x: 0, y: 0, width: 800, height: 800 * forma};
     const pad = conMapa ? 0 : _DCM.PAD;
     const w = conMapa ? 0 : _DCM.W, h = conMapa ? 0 : _DCM.H;
     const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
@@ -116,14 +141,25 @@ function _dcmExtent(sites) {
         minX = cx - size / 2; minY = cy - size / 2;
         maxX = cx + size / 2; maxY = cy + size / 2;
     }
-    return {x: minX, y: minY, width: maxX - minX, height: maxY - minY};
+    // Y a la forma del hueco, ESTIRANDO y nunca encogiendo: encoger sacaría fuera lo que ya
+    // cabía, que es esconder una sede.
+    let ancho = maxX - minX, alto = maxY - minY;
+    const mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
+    if (ancho * forma < alto) ancho = alto / forma; else alto = ancho * forma;
+    return {x: mx - ancho / 2, y: my - alto / 2, width: ancho, height: alto};
 }
 
 function _dcimMapHtml(sites) {
     const box = _dcmExtent(sites);
     const cred = String(((_dcimBoard || {}).map || {}).attribution || '').trim();
+    // Un mapa configurado que no dibuja DICE por qué. Sin esto, quien acaba de pegar su clave de
+    // Google ve el mismo dibujo vacío que antes de pegarla y no tiene por dónde empezar: la
+    // tarjeta del panel de control ya lo decía y esta pantalla se callaba.
+    const fallo = String(((_dcimBoard || {}).map || {}).error || '');
     return `<div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative mb-3">
         <svg ${ssCanvasAttrs(_DCM_SVG, box)}
+             data-zoom-in="${ssGeoZoomIn(box.width, _DCM_PX, _dcmZMax())}"
+             data-zoom-out="${_DCM_ZOOM_OUT}"
              onwheel="ssCanvasWheel(${jsStr(_DCM_SVG)},event)"
              onpointerdown="_dcmDown(event)" onpointermove="_dcmMove(event)"
              onpointerup="_dcmUp(event)" onpointercancel="_dcmUp(event)"
@@ -131,9 +167,14 @@ function _dcimMapHtml(sites) {
              aria-label="${escAttr(t('dcim_map'))}">
             <g id="${escAttr(_DCM_SVG)}-tiles"></g>
             <g id="${escAttr(_DCM_SVG)}-links">${_dcmLinks(sites)}</g>
-            <g id="${escAttr(_DCM_SVG)}-pins">${sites.map((s, i) => _dcmSite(s, i)).join('')}</g>
+            <g id="${escAttr(_DCM_SVG)}-pins">${
+                (() => { const con = _dcmLabels(sites);
+                         return _dcmOrder(sites)
+                                .map(([s, i]) => _dcmSite(s, i, !!con[s.uid])).join(''); })()}</g>
         </svg>
         ${cred ? `<div class="ss-map-credit">${esc(cred)}</div>` : ''}
+        ${fallo ? `<div class="ss-map-credit" style="right:auto;left:.25rem">
+            <i class="bi bi-exclamation-triangle me-1 text-warning"></i>${esc(t(fallo))}</div>` : ''}
     </div>`;
 }
 
@@ -156,29 +197,8 @@ function _dcmDrawTiles(view) {
     if (!svg || !v) return;
     const ancho = svg.clientWidth || svg.getBoundingClientRect().width || 800;
     const escala = ancho / v.w;                          // píxeles de pantalla por píxel del dibujo
-    let z = Math.round(_DCM_Z + Math.log2(escala || 1));
-    z = Math.max(0, Math.min(19, z));
-    const lado = 256 * Math.pow(2, _DCM_Z - z);          // lo que mide una tesela EN EL DIBUJO
-    const n = Math.pow(2, z);
-    const i0 = Math.floor(v.x / lado), i1 = Math.floor((v.x + v.w) / lado);
-    const j0 = Math.floor(v.y / lado), j1 = Math.floor((v.y + v.h) / lado);
-    const out = [];
-    for (let j = j0; j <= j1; j++) {
-        if (j < 0 || j >= n) continue;                   // fuera de los polos no hay mundo
-        for (let i = i0; i <= i1; i++) {
-            // …pero en horizontal sí: el mundo da la vuelta, y una tesela de la columna -1 es
-            // la última. Sin esto, cruzar el antimeridiano deja media pantalla en blanco.
-            const x = ((i % n) + n) % n;
-            const url = tpl.replace('{z}', z).replace('{x}', x).replace('{y}', j)
-                           .replace('{s}', 'a');
-            out.push(`<image href="${escAttr(url)}" x="${i * lado}" y="${j * lado}"
-                             width="${lado}" height="${lado}"
-                             preserveAspectRatio="none"></image>`);
-            if (out.length >= _DCM_TILE_CAP) break;
-        }
-        if (out.length >= _DCM_TILE_CAP) break;
-    }
-    g.innerHTML = out.join('');
+    g.innerHTML = ssGeoTiles(tpl, {x: v.x, y: v.y, w: v.w, h: v.h},
+                             ssGeoZoom(escala, _dcmZMax()));
 }
 
 /** Las líneas entre sedes: lo que las une, y de qué color según cómo esté.
@@ -217,35 +237,131 @@ function _dcmLinks(sites) {
     }).join('');
 }
 
+/** Qué sedes llevan rótulo, y cuáles se quedan en chincheta.
+ *
+ *  Porque **varias sedes de la misma ciudad caen en el mismo píxel**, y cada rótulo mide ciento
+ *  noventa. Seis en el mismo sitio no son seis rótulos: son una maraña en la que no se lee
+ *  ninguno, ni siquiera el de arriba, porque los de debajo asoman por los bordes. Se vio en
+ *  pantalla con cinco sedes de la misma comarca — el rótulo de la que estaba caída, ilegible.
+ *
+ *  Se reparte el sitio por importancia: primero la señalada desde la lista, después de peor a
+ *  mejor. La primera que pide un hueco se lo queda; la que chocaría con uno ya dado se queda sin
+ *  rótulo y con su chincheta, que sigue diciendo dónde está y de qué color. Y sigue estando a un
+ *  gesto: pasar el ratón por su tarjeta —o por su chincheta— la señala, y una señalada nunca
+ *  pierde el sitio.
+ *
+ *  Sin mapa no se reparte nada: ahí las cajas van en rejilla, no se pisan, y no hay chincheta
+ *  que quede en su lugar.
+ *
+ *  @returns {Object} `{uid: true}` de las que sí lo llevan. */
+function _dcmLabels(sites) {
+    if (!_dcmTileUrl()) {
+        const con = {};
+        (sites || []).forEach(s => { con[s.uid] = true; });
+        return con;
+    }
+    const k = _dcmScale();
+    const w = _DCM.W * k, h = _DCM.H * k, aire = 6 * k;
+    // Al revés del orden de dibujo, que va de menos a más importante porque lo último tapa. Y
+    // quien reparte es el panel (`ssLabelsFit`), que es el mismo que reparte en el mapa del
+    // cuadro de mando: dos copias de esta regla serían dos mapas que la aplican distinto.
+    return ssLabelsFit(_dcmOrder(sites).slice().reverse().map(([s, i]) => {
+        const at = _dcmAt(s, i);
+        return {key: s.uid, w: w, h: h, x: at.x - w / 2, y: at.y - h - aire};
+    }));
+}
+
 /** Una sede: su nombre, cómo está, y cuánto tiene.
  *
  *  Con mapa el tamaño se calcula en cada repintado a partir del zoom, para que la caja siga
  *  midiendo lo mismo en pantalla: una chincheta que crece al alejarse tapa el país entero. */
-function _dcmSite(site, i) {
+function _dcmSite(site, i, rotulo) {
     const at = _dcmAt(site, i);
+    // Sin decir nada, con rótulo: se llama así desde las pruebas y desde cualquier sitio que
+    // quiera una sola caja. Quien reparte el sitio es `_dcmLabels`, y lo dice.
+    const conRotulo = rotulo !== false;
     const k = _dcmScale();
     const w = _DCM.W * k, h = _DCM.H * k;
     const tone = {error: 'danger', warning: 'warning', ok: 'success'}[site.state] || 'secondary';
     // Con mapa la caja cuelga del PUNTO, no empieza en él: el punto es la sede y la caja es su
     // etiqueta, y una etiqueta que tapa el sitio que señala no señala nada.
     const dx = _dcmTileUrl() ? -w / 2 : 0, dy = _dcmTileUrl() ? -h - 6 * k : 0;
-    return `<g class="ss-grab" data-dcm="${escAttr(site.uid)}"
+    // El resalte se DIBUJA, y con la escala del mapa. Un `filter` de CSS no vale: dentro de este
+    // dibujo las unidades son píxeles del mundo, así que una sombra de seis se queda en seis
+    // millonésimas de la pantalla — invisible. Reportado desde la pantalla, que no se resaltaba
+    // nada.
+    //
+    // Un halo por fuera y nunca el borde de la caja: ese ya dice CÓMO ESTÁ la sede, y pisarlo
+    // para decir «es esta» le quita lo único que dice de un vistazo.
+    //
+    // **Dos aros y no un color bonito.** Uno del color del texto y otro más ancho del color del
+    // fondo por detrás: así se lee sobre lo que sea —una foto de satélite, un callejero claro,
+    // un mar azul— y en los dos temas. Se probó con el azul del panel y sobre el satélite no se
+    // distinguía: el problema de un color fijo es que el fondo de un mapa es cualquier cosa.
+    const hot = site.uid === _dcmHot;
+    // Y lo demás se apaga, que es lo que de verdad hace destacar a una entre siete: resaltar
+    // sube una; apagar las otras seis deja una sola encendida.
+    const apagada = _dcmHot && !hot;
+    // Y la que tiene algo mal se pinta de su color, con el borde más grueso y con un símbolo
+    // delante del nombre. Sobre un mapa hay siete cajas del mismo blanco y un borde fino de
+    // color: a la distancia a la que se mira esto, ese borde no está. Lo mismo que se hizo
+    // abajo con las tarjetas, y por lo mismo. El símbolo va en negro sobre el ámbar y en
+    // blanco sobre el rojo: un aviso cuyo símbolo no se lee es un adorno.
+    //
+    // Y la caja es OPACA, en tres capas: suelo sólido, tinte y borde.
+    //
+    // El suelo es lo que costó ver. `--bs-danger-bg-subtle` **no es un color**: este panel la
+    // redefine para el tema oscuro como `rgba(220,53,69,.10)`, un rojo al diez por ciento. En
+    // una tarjeta funciona porque debajo está el fondo opaco de la página; sobre un mapa no hay
+    // nada debajo, así que el noventa por ciento restante era el satélite y el rótulo salía
+    // ilegible con el mapa dentro. Se vio tres veces en pantalla y las dos primeras se
+    // diagnosticó mal —orden de dibujo, opacidad de la caja— porque un tinte se parece mucho a
+    // un fondo hasta que se pone sobre algo que no es un fondo.
+    //
+    // Ninguna variable de tinte vale como fondo. Debajo va `--bs-body-bg`, que sí es un color
+    // sólido en los dos temas.
+    const malo = site.state === 'error' || site.state === 'warning';
+    // `ss-grab` sólo cuando de verdad se puede agarrar: una mano abierta sobre algo que no se
+    // mueve es una promesa que no se cumple.
+    return `<g class="${_dcimMove && _dcimMay('dcim_edit') ? 'ss-grab' : ''}"
+               data-dcm="${escAttr(site.uid)}"
+               onpointerenter="_dcmRaise(${jsStr(site.uid)})"
+               ${apagada ? 'opacity=".35"' : ''}
                transform="translate(${at.x},${at.y})">
-        ${_dcmTileUrl() ? `<circle r="${5 * k}" fill="var(--bs-${tone})"
+        ${_dcmTileUrl() ? `<circle r="${(conRotulo ? 5 : 7) * k}" fill="var(--bs-${tone})"
              stroke="var(--bs-body-bg)" stroke-width="${2 * k}"></circle>` : ''}
+        ${!conRotulo ? `<title>${esc(site.name)}</title>` : `
         <g transform="translate(${dx},${dy})">
+            ${hot ? `<rect x="${-7 * k}" y="${-7 * k}" width="${w + 14 * k}"
+                          height="${h + 14 * k}" rx="${15 * k}" fill="none"
+                          stroke="var(--bs-body-bg)" stroke-width="${7 * k}"
+                          opacity=".85"></rect>
+                     <rect x="${-7 * k}" y="${-7 * k}" width="${w + 14 * k}"
+                          height="${h + 14 * k}" rx="${15 * k}" fill="none"
+                          stroke="var(--bs-body-color)" stroke-width="${3 * k}"></rect>` : ''}
             <rect width="${w}" height="${h}" rx="${8 * k}"
-                  fill="var(--bs-body-bg)" stroke="var(--bs-${tone})"
-                  stroke-width="${2 * k}" opacity=".95"></rect>
-            <text x="${12 * k}" y="${26 * k}" fill="var(--bs-body-color)"
-                  font-size="${15 * k}" font-weight="600">${esc(_dcmClip(site.name, 20))}</text>
+                  fill="var(--bs-body-bg)"></rect>
+            ${malo ? `<rect width="${w}" height="${h}" rx="${8 * k}"
+                            fill="var(--bs-${tone}-bg-subtle)"></rect>` : ''}
+            <rect width="${w}" height="${h}" rx="${8 * k}" fill="none"
+                  stroke="var(--bs-${tone})"
+                  stroke-width="${(malo ? 3 : 2) * k}"></rect>
+            ${malo ? `<circle cx="${20 * k}" cy="${20 * k}" r="${8 * k}"
+                              fill="var(--bs-${tone})"></circle>
+                      <text x="${20 * k}" y="${24.5 * k}" text-anchor="middle"
+                            font-size="${13 * k}" font-weight="700"
+                            fill="var(--bs-${tone === 'warning' ? 'black' : 'white'
+                                            })">!</text>` : ''}
+            <text x="${(malo ? 34 : 12) * k}" y="${26 * k}" fill="var(--bs-body-color)"
+                  font-size="${15 * k}" font-weight="600">${
+                esc(_dcmClip(site.name, malo ? 17 : 20))}</text>
             <text x="${12 * k}" y="${48 * k}" fill="var(--bs-secondary-color)"
                   font-size="${12 * k}">${
                 esc(tf('dcim_board_tile', site.racks || 0, site.rooms || 0))}</text>
             <text x="${12 * k}" y="${66 * k}" fill="var(--bs-${tone})" font-size="${12 * k}"
                   font-weight="600">${esc(_dcimStateWord(site.state))} · ${
                 esc(site.ok)}/${esc(site.total)}</text>
-        </g>
+        </g>`}
     </g>`;
 }
 
@@ -256,7 +372,18 @@ function _dcmScale() {
     const svg = ssCanvasSvg(_DCM_SVG), v = ssCanvasWindow(_DCM_SVG);
     if (!svg || !v) return 1;
     const ancho = svg.clientWidth || svg.getBoundingClientRect().width || 800;
-    return Math.max(0.2, v.w / (ancho || 800));
+    const alto = svg.clientHeight || svg.getBoundingClientRect().height || 400;
+    // El MAYOR de los dos, que es el que manda con `meet`: el dibujo se encaja entero, así que
+    // la escala la pone el lado que no cabe. Calculada solo del ancho, un encuadre más alto que
+    // el hueco daba cajas mucho más pequeñas que lo pedido — ilegibles, y sin nada que dijera
+    // por qué.
+    //
+    // Y SIN SUELO. Había uno de 0,2, que con el zoom de antes —ocho veces— no se alcanzaba
+    // nunca; desde que se puede llegar a la calle, es lo primero que manda: la escala real cae a
+    // 0,007 y el suelo la dejaba en 0,2, así que una caja pasaba a medir cuatro pantallas y
+    // tapaba el mapa entero. Reportado desde la pantalla, con la chincheta del tamaño de una
+    // manzana. Lo único que hace falta es no dividir por cero.
+    return Math.max(1e-9, Math.max(v.w / (ancho || 800), v.h / (alto || 400)));
 }
 
 /** Un nombre que no cabe se corta AQUÍ y no con CSS: esto se exporta a una imagen, y un
@@ -268,7 +395,10 @@ function _dcmClip(text, n) {
 
 function _dcmDown(ev) {
     const box = ev.target.closest('g[data-dcm]');
-    if (box && _dcimMay('dcim_edit')) {
+    // Señalada al frente aunque no se vaya a mover: pulsar una caja tapada por otra es querer
+    // ESA, y dejarla debajo es contestar con la de al lado.
+    if (box) _dcmRaise(box.dataset.dcm);
+    if (box && _dcimMove && _dcimMay('dcim_edit')) {
         const sites = (_dcimBoard || {}).sites || [];
         const i = sites.findIndex(s => s.uid === box.dataset.dcm);
         const p = ssCanvasPoint(_DCM_SVG, ev);
@@ -293,7 +423,7 @@ function _dcmMove(ev) {
             // Sobre un mapa de verdad, mover una sede es decir dónde está: se guarda como
             // coordenada. Guardarlo como posición dejaría dos verdades sobre el mismo sitio y
             // la próxima pantalla que dibuje el mapa creería a la otra.
-            const c = _dcmUnproject(x, y);
+            const c = ssGeoUnproject(x, y);
             site.lat = c.lat;
             site.lon = c.lon;
         } else {
@@ -326,12 +456,55 @@ async function _dcmUp(ev) {
     showToast(t('saved'), 'success');
 }
 
+/** Traer una sede al frente.
+ *
+ *  En un dibujo no hay «encima»: manda el ORDEN, y lo último que se escribe es lo que tapa. Con
+ *  varias sedes cerca —dos naves del mismo polígono— la que quedó primero se lee a medias
+ *  siempre, y no había forma de leerla entera. Reportado desde la pantalla: señalar la tarjeta
+ *  de abajo tiene que subir su caja.
+ *
+ *  Se mueve el nodo en vez de repintar: repintar el dibujo entero por pasar el ratón por encima
+ *  de una tarjeta es una imagen que parpadea mientras se recorre la lista. */
+function _dcmRaise(uid) {
+    if (_dcmHot === uid) return;         // ya está: repintar por repintar es un parpadeo
+    _dcmHot = uid;
+    _dcmRedraw();
+}
+
+/** Dejar de señalar. Al salir de la LISTA, no al salir de una tarjeta: entre dos tarjetas hay un
+ *  hueco de dos píxeles, y apagar ahí es un parpadeo por cada una que se recorre. */
+function _dcmCool() {
+    if (!_dcmHot) return;
+    _dcmHot = '';
+    _dcmRedraw();
+}
+
+/** En qué ORDEN se dibujan las sedes. En un dibujo no hay «encima»: lo último escrito tapa a
+ *  lo anterior, así que este orden es la respuesta a qué caja se lee entera cuando dos se
+ *  solapan — y con sedes en la misma ciudad se solapan siempre.
+ *
+ *  Lo peor, encima. La caja que dice «caído» es la que hay que poder leer; que la tapara la de
+ *  al lado, que está bien, es esconder justo lo que se venía a ver. Y por delante de todo, la
+ *  señalada desde la lista de abajo, que es una pregunta explícita de quien mira.
+ *
+ *  Devuelve pares `[sede, i]` porque la posición sin mapa se calcula a partir del índice: el
+ *  sitio de una caja en la rejilla no puede depender de cómo esté esa sede hoy. */
+function _dcmOrder(sites) {
+    const peso = (s) => (s.uid === _dcmHot ? 9 : (_DCM_RANK[s.state] || 0));
+    return (sites || []).map((s, i) => [s, i]).sort((a, b) => peso(a[0]) - peso(b[0]));
+}
+
 /** Repintar solo el dibujo: volver a montar la pantalla entera en cada movimiento del ratón
  *  tira el foco y hace saltar el desplazamiento. */
 function _dcmRedraw() {
     const sites = (_dcimBoard || {}).sites || [];
     const pins = document.getElementById(_DCM_SVG + '-pins');
-    if (pins) pins.innerHTML = sites.map((s, i) => _dcmSite(s, i)).join('');
+    // El orden lo decide `_dcmOrder`, y aquí y no moviendo el nodo a mano: esto se rehace en
+    // cada rueda y en cada arrastre, así que un orden puesto fuera se perdía en cuanto alguien
+    // tocaba el mapa.
+    const con = _dcmLabels(sites);
+    if (pins) pins.innerHTML = _dcmOrder(sites)
+                               .map(([s, i]) => _dcmSite(s, i, !!con[s.uid])).join('');
     // Las líneas también: van de caja a caja, así que arrastrar una y no repintarlas dejaría el
     // enlace apuntando a donde la sede estaba.
     const lineas = document.getElementById(_DCM_SVG + '-links');
@@ -345,6 +518,33 @@ function _dcmRedraw() {
 function _dcimMapMounted() {
     if (!_dcimMap) { ssCanvasOnApply(_DCM_SVG, null); return; }
     ssCanvasOnApply(_DCM_SVG, (v) => { _dcmDrawTiles(v); _dcmRedraw(); });
+    _dcmFit();
     _dcmDrawTiles(null);
     _dcmRedraw();
+}
+
+/** Reencuadrar con la forma que tiene el hueco de VERDAD.
+ *
+ *  No se puede saber antes: el ancho de esta sección depende de la barra lateral, de la ventana
+ *  y de si el panel está a pantalla completa, y nada de eso existe mientras se está construyendo
+ *  una cadena de texto. Así que se dibuja con una proporción supuesta y se corrige aquí.
+ *
+ *  A quien ya estaba mirando un trozo no se le toca: reencuadrar sobre un zoom puesto es
+ *  quitárselo de las manos. */
+function _dcmFit() {
+    const svg = ssCanvasSvg(_DCM_SVG);
+    if (!svg) return;
+    const ancho = svg.clientWidth, alto = svg.clientHeight;
+    if (!ancho || !alto) return;
+    const box = _dcmExtent((_dcimBoard || {}).sites || [], alto / ancho);
+    svg.dataset.x = box.x; svg.dataset.y = box.y;
+    svg.dataset.w = box.width; svg.dataset.h = box.height;
+    svg.dataset.zoomIn = ssGeoZoomIn(box.width, ancho, _dcmZMax());
+    if (ssCanvasWindowKept(_DCM_SVG)) ssCanvasApply(_DCM_SVG); else ssCanvasFit(_DCM_SVG);
+    if (svg.dataset.dcmWatch || typeof ResizeObserver !== 'function') return;
+    svg.dataset.dcmWatch = '1';
+    // El hueco cambia sin que esta sección se entere: se pliega la barra lateral, se gira una
+    // tableta, se entra a pantalla completa. Sin esto, el mapa se queda encuadrado para el
+    // tamaño que tenía al pintarse y vuelven las bandas.
+    new ResizeObserver(() => _dcmFit()).observe(svg);
 }

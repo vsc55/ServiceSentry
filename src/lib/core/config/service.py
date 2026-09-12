@@ -17,7 +17,8 @@ import ipaddress
 import re
 
 from lib.config.spec import (
-    CFG_BY_PATH, int_rules, bool_rules, json_dict_fields, normalize_url, cfg_validate,
+    CFG_BY_PATH, int_rules, bool_rules, str_rules, json_dict_fields, normalize_url,
+    cfg_validate,
     cfg_default, cfg_meta, frontend_schema,
 )
 from lib.i18n import SUPPORTED_LANGS
@@ -28,8 +29,10 @@ from lib.core.users.service import AdminOpError
 # apply), the validator below and app.py (bootstrap coercion) share one source.
 #   INT_RULES  {path: {min, max, attr[, flask_cfg]}}
 #   BOOL_RULES {path: attr}  (attr may be None when not mirrored on wa)
+#   STR_RULES  {path: attr}  (las cadenas que dicen reflejarse en un atributo)
 INT_RULES = int_rules()
 BOOL_RULES = bool_rules()
+STR_RULES = str_rules()
 JSON_DICT_FIELDS = json_dict_fields()
 
 # IP-address config fields (authoritative server-side check, mirrors the frontend
@@ -350,6 +353,46 @@ def build_config_schema() -> dict:
     schema['global|log_level'] = {
         'options': ['off', 'debug', 'info', 'warning', 'error'],
         'default': cfg_default('global|log_level'),
+    }
+    # ── El mapa: con qué se dibuja ───────────────────────────────────────────────────────
+    # Un desplegable y no una dirección a secas, porque dos de las respuestas no son una
+    # dirección: Google necesita una clave y una sesión que mina el servidor, y «personalizado»
+    # es la que deja seguir usando un espejo interno. El catálogo es de `lib/maps`, no de aquí:
+    # esta función lo enseña, no lo decide.
+    from lib.maps import catalog as _maps                            # noqa: PLC0415
+    schema['web_admin|dcim_map_provider'] = {
+        'options': list(_maps.ORDER),
+        'options_i18n': _opt_labels(
+            {'': 'dcim_map_provider_off',
+             **{k: v['label_key'] for k, v in _maps.PROVIDERS.items()}}),
+        'default': cfg_default('web_admin|dcim_map_provider'),
+        # Sin `on_change`: cambiar un desplegable ya repasa los campos condicionales de su
+        # sección, que es justo lo que hace falta aquí. Cambiar el proveedor cambia QUÉ campos
+        # tienen sentido, y enseñar una casilla para una clave de Google a quien acaba de elegir
+        # OpenStreetMap es la confusión que hubo que arreglar.
+    }
+    # La plantilla propia y su crédito: sólo con «personalizado» — y con el proveedor SIN
+    # elegir, que es como se queda una instalación que configuró esto antes de que hubiera
+    # proveedores. Esconderle a esa su propia plantilla sería contarle que la ha perdido.
+    _custom = {'dcim_map_provider': [_maps.CUSTOM, '']}
+    schema['web_admin|dcim_map_tiles'] = {'show_when': _custom}
+    schema['web_admin|dcim_map_attribution'] = {'show_when': _custom}
+    schema['web_admin|dcim_map_google_key'] = {
+        'show_when': {'dcim_map_provider': [_maps.GOOGLE]}}
+    # Qué clase de mapa se le pide a Google. Sólo lo entiende él: los demás sirven lo que
+    # sirven, y ofrecer la elección al lado de OpenStreetMap sería un control que no hace nada.
+    schema['web_admin|dcim_map_google_type'] = {
+        **cfg_meta('web_admin|dcim_map_google_type'),
+        'options': list(_maps.GOOGLE_TYPES),
+        'options_i18n': _opt_labels({k: f'dcim_map_gtype_{k}' for k in _maps.GOOGLE_TYPES}),
+        'default': cfg_default('web_admin|dcim_map_google_type'),
+        'show_when': {'dcim_map_provider': [_maps.GOOGLE]},
+    }
+    # Hasta dónde se puede acercar. Vacío = lo que ofrezca el proveedor, que el catálogo ya sabe
+    # de los que trae; el ajuste existe por los espejos internos, que traen lo que traigan.
+    schema['web_admin|dcim_map_max_zoom'] = {
+        **cfg_meta('web_admin|dcim_map_max_zoom'), 'nullable': True,
+        'show_when': {'dcim_map_provider': [p for p in _maps.ORDER if p]},
     }
     # modules section: not web_admin-instance-backed, so expose its registry metadata
     # (type/default/min/max) here so the UI knows the source-of-truth defaults and ranges.

@@ -127,7 +127,11 @@ _orgsData = {
   scopes: [{scope: 'site', label_key: 'orgs_scope_site'},
            {scope: 'rack', label_key: 'orgs_scope_rack'},
            {scope: 'host', label_key: 'orgs_scope_host'}],
+  sources: [{id: 'freshservice', label_key: 'fs_source', icon: 'bi-life-preserver'}],
   loaded: true};
+// Una traída de fuera y una tecleada aquí: la chapa tiene que distinguirlas.
+_orgsData.orgs[0].source = 'freshservice';
+_orgsData.orgs[0].external_id = '42';
 
 __out = {chips: {}, acciones: {}, cambios: {}, marca: {}};
 __out.tarjetas = _orgsCardsBody(_orgsData.orgs, {puede: true});
@@ -138,6 +142,11 @@ __out.ficha = _orgsRecordBody(_orgsData.orgs, {puede: true});
 _orgsPick = 'ya-no-existe';
 __out.fichaHuerfana = _orgsRecordBody(_orgsData.orgs, {puede: true});
 __out.fichaVacia = _orgsRecordBody([], {puede: true});
+__out.origen = {};
+__out.origen.deFuera = _orgsSourceHtml(_orgsData.orgs[0]);
+__out.origen.deAqui = _orgsSourceHtml(_orgsData.orgs[1]);
+__out.origen.desconocida = _orgsSourceHtml({source: 'un_proveedor_que_ya_no_esta'});
+__out.origen_cols = JSON.stringify(Array.from(_ORGS_DEFAULT_COLS));
 __out.chips.conAlgo = _orgsChipsHtml(_orgsData.orgs[0]);
 __out.chips.sinNada = _orgsChipsHtml(_orgsData.orgs[1]);
 __out.acciones.puede = _orgsRowActions(_orgsData.orgs[0], {puede: true});
@@ -348,3 +357,34 @@ class TestLoObligatorioLoMarcaElPanel:
         """Un alta nace con las dos cajas vacías: decirlo al abrir es decirlo cuando sirve."""
         cuadro = pantalla['fuente'].split('function _orgModalOpen(')[1].split('\n}')[0]
         assert 'ssMarkRequired' in cuadro
+
+class TestSeVeDeDondeVieneCadaEmpresa:
+    """En cuanto una lista mezcla lo tecleado aquí con lo traído de fuera, «¿por qué me ha
+    cambiado el nombre de esta sola?» es la primera pregunta — y la respuesta es que a esa la
+    corrige el origen en cada importación. Sin la chapa, no hay forma de saber cuál es cuál."""
+
+    def test_la_traida_de_fuera_lo_dice(self, pantalla):
+        chapa = pantalla['origen']['deFuera']
+        assert 'Freshservice' in chapa, 'no dice de dónde vino'
+        assert 'badge' in chapa
+
+    def test_y_la_tecleada_aqui_no_lleva_chapa(self, pantalla):
+        """Lo normal no se señala: si todo lleva chapa, la chapa no informa."""
+        assert pantalla['origen']['deAqui'] == ''
+
+    def test_y_un_origen_que_ya_no_declara_nadie_no_deja_la_fila_muda(self, pantalla):
+        """Se quitó el paquete que la traía. La empresa sigue siendo de donde era, y enseñar el
+        identificador en crudo dice más que no enseñar nada."""
+        chapa = pantalla['origen']['desconocida']
+        assert 'un_proveedor_que_ya_no_esta' in chapa
+
+    def test_y_el_aviso_explica_lo_que_significa(self, pantalla):
+        """Que su nombre lo corrige el origen: lo que se teclee aquí dura hasta la próxima
+        importación, y eso hay que decirlo donde se está tecleando."""
+        assert 'title=' in pantalla['origen']['deFuera']
+        assert '42' in pantalla['origen']['deFuera'], 'no dice cuál es allí'
+
+    def test_y_la_columna_sale_de_salida(self, pantalla):
+        """Una columna que hay que ir a buscar al selector es una que nadie ve el día que
+        importa."""
+        assert '"source"' in pantalla['origen_cols'], 'la columna no viene marcada de salida'

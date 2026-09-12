@@ -1,0 +1,163 @@
+{# ================================================================
+   Dónde cae un punto de la Tierra en un dibujo, y de dónde salen las imágenes que hay debajo.
+
+   **Una sola proyección para todo el panel.** Web Mercator es la que hablan las teselas de
+   todo el mundo, así que no es «una proyección cualquiera»: con otra, las sedes caerían al
+   lado del edificio en vez de encima, y un mapa que sitúa mal por poco es peor que uno que no
+   sitúa — el primero se cree.
+
+   Está aquí y no dentro de una sección porque ya la quieren dos: el mapa de sedes del
+   inventario y el widget del panel de control. Dos copias de esta aritmética son dos mapas que
+   pueden discrepar sobre dónde está el mismo edificio, y la discrepancia no daría ningún error:
+   daría una chincheta en la calle de al lado.
+
+   Teselas XYZ y **nunca** el SDK de un proveedor: cargar imágenes de un tercero le dice dónde
+   están tus sedes; ejecutar su script le da la página entera. Lo primero se paga; lo segundo no
+   se puede pagar.
+   ================================================================ #}
+
+//: El zoom en el que se miden las coordenadas del dibujo. El mundo entero son `256 · 2^Z`
+//: píxeles; con 12 son un millón, que da sitio de sobra para distinguir dos naves de un
+//: polígono sin que los números dejen de ser exactos.
+const SS_GEO_Z = 12;
+const SS_GEO_WORLD = 256 * Math.pow(2, SS_GEO_Z);
+//: Cuántas teselas se piden como mucho de una vez. Un tope y no una confianza: un `viewBox`
+//: absurdo —por un arrastre raro o una pantalla enorme— pediría miles de imágenes a un servidor
+//: que muchas veces es voluntario, y eso es maltratar a quien te está haciendo el favor.
+const SS_GEO_TILE_CAP = 240;
+
+/** Dónde cae una coordenada en el dibujo. */
+function ssGeoProject(lat, lon) {
+    // El corte en 85,05° no es una manía: Mercator manda la latitud al infinito en el polo, y
+    // sin el tope una sede mal tecleada se dibuja a una distancia que se lleva por delante el
+    // encuadre de todas las demás.
+    const la = Math.max(-85.05112878, Math.min(85.05112878, Number(lat) || 0));
+    const rad = la * Math.PI / 180;
+    return {
+        x: (Number(lon) + 180) / 360 * SS_GEO_WORLD,
+        y: (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * SS_GEO_WORLD,
+    };
+}
+
+/** Y al revés: qué coordenada es un punto del dibujo — lo que hace que arrastrar una sede
+ *  encima de su edificio sea una forma de DECIR dónde está. */
+function ssGeoUnproject(x, y) {
+    const n = Math.PI - 2 * Math.PI * y / SS_GEO_WORLD;
+    return {
+        lon: x / SS_GEO_WORLD * 360 - 180,
+        lat: 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))),
+    };
+}
+
+/** Si algo tiene coordenadas de verdad.
+ *
+ *  El (0, 0) cuenta como que no: es un punto del golfo de Guinea donde no hay ningún
+ *  datacenter, y es exactamente lo que deja un formulario cuyos dos campos se guardaron
+ *  vacíos. Una chincheta ahí no dice «no lo sé», dice una mentira concreta. */
+function ssGeoHas(o) {
+    const lat = Number((o || {}).lat), lon = Number((o || {}).lon);
+    return isFinite(lat) && isFinite(lon) && !!(lat || lon);
+}
+
+//: Hasta qué nivel llega un servidor de teselas cuando nadie ha dicho el suyo. El más común, y
+//: un último recurso: **el de verdad viene con los datos**, porque no es el mismo en todos —
+//: OpenStreetMap llega al 19, Carto al 20, Google al 22, y un espejo interno al que le hayan
+//: cargado hasta el 16, al 16—. Pedir uno que no existe no da ningún error: da un hueco en
+//: blanco al acercarse, y quien mira cree que el mapa se ha roto.
+const SS_GEO_ZMAX = 19;
+
+/** El tope que toca, con el que venga por delante. */
+/** De unos rótulos que se pisan, cuáles se dibujan.
+ *
+ *  Un rótulo de mapa mide más que la chincheta que señala, y varias sedes de la misma ciudad
+ *  caen en el mismo píxel: pintarlos todos no enseña más, enseña menos — una maraña donde no se
+ *  lee ninguno, ni siquiera el de arriba, porque los de debajo asoman por los bordes. Se vio en
+ *  pantalla con cinco sedes de la misma comarca y el rótulo de la que estaba caída ilegible.
+ *
+ *  Aquí y no en cada mapa porque **los dos tienen el problema y sería la misma regla dos veces**,
+ *  y dos copias de una regla son dos sitios donde puede quedarse sin aplicar. Vive con la
+ *  proyección por lo mismo que ella: es aritmética de dibujar mapas, no de ningún dominio.
+ *
+ *  @param cajas Rótulos `{key, x, y, w, h}` **en orden de importancia**. Quien pide primero se
+ *               queda el sitio, así que el orden es la decisión: lo que hay que leer, delante.
+ *  @returns {Object} `{key: true}` de los que caben.
+ */
+function ssLabelsFit(cajas) {
+    const puestas = [], con = {};
+    (cajas || []).forEach(c => {
+        if (puestas.some(r => c.x < r.x + r.w && c.x + c.w > r.x
+                              && c.y < r.y + r.h && c.y + c.h > r.y)) return;
+        puestas.push(c);
+        con[c.key] = true;
+    });
+    return con;
+}
+
+function ssGeoZMax(zmax) {
+    const z = Math.round(Number(zmax) || 0);
+    return (z >= 1 && z <= 22) ? z : SS_GEO_ZMAX;
+}
+
+/** Qué nivel de tesela pedir cuando un píxel del dibujo se ve a *escala* píxeles de pantalla.
+ *
+ *  Pedir siempre el mismo daría un mapa borroso de lejos y un mapa pesadísimo de cerca: son
+ *  cuatro veces más imágenes por cada nivel. */
+function ssGeoZoom(escala, zmax) {
+    const z = Math.round(SS_GEO_Z + Math.log2(escala || 1));
+    return Math.max(0, Math.min(ssGeoZMax(zmax), z));
+}
+
+/** Lo más pequeña que tiene sentido que sea una ventana sobre una caja de *anchoPx* píxeles:
+ *  la que enseña las teselas más finas a su tamaño natural.
+ *
+ *  Esto es lo que sustituye a «se puede acercar N veces». Un número de veces es relativo a lo
+ *  que se ve al abrir, y lo que se ve al abrir depende de dónde estén las sedes: la misma
+ *  cifra —512— daba una calle en una casa con todo en la misma provincia y **dos kilómetros y
+ *  medio** en una con sedes de Pamplona a Barcelona. Reportado desde la pantalla: «no hace
+ *  suficiente zoom», y con razón, porque el tope no tenía nada que ver con lo que se estaba
+ *  mirando.
+ *
+ *  Con esto el tope es siempre el mismo sitio —donde las imágenes dejan de dar más— venga de
+ *  donde venga el encuadre. */
+function ssGeoDeepest(anchoPx, zmax) {
+    return Math.max(1, anchoPx || 1) * Math.pow(2, SS_GEO_Z - ssGeoZMax(zmax));
+}
+
+/** Cuántas veces hay que acercarse desde *ancho* (unidades del dibujo) para llegar ahí. El
+ *  lienzo compartido habla en veces, así que se traduce aquí. */
+function ssGeoZoomIn(ancho, anchoPx, zmax) {
+    return Math.max(8, (ancho || 0) / ssGeoDeepest(anchoPx, zmax));
+}
+
+/** Las teselas que cubren *box* —`{x, y, w, h}` en coordenadas del dibujo— al nivel *z*.
+ *
+ *  Devuelve el marcado, no una lista: quien dibuja el mapa ya tiene un `<g>` donde meterlo, y
+ *  lo único que puede hacer con las teselas es pintarlas.
+ *
+ *  Fuera de los polos no hay mundo y esas filas se saltan; en horizontal sí lo hay, porque el
+ *  mundo da la vuelta: una tesela de la columna −1 es la última. Sin eso, cruzar el
+ *  antimeridiano deja media pantalla en blanco. */
+function ssGeoTiles(tpl, box, z, cap) {
+    const plantilla = String(tpl || '').trim();
+    if (!plantilla || !box) return '';
+    const tope = cap || SS_GEO_TILE_CAP;
+    const lado = 256 * Math.pow(2, SS_GEO_Z - z);        // lo que mide una tesela EN EL DIBUJO
+    const n = Math.pow(2, z);
+    const i0 = Math.floor(box.x / lado), i1 = Math.floor((box.x + box.w) / lado);
+    const j0 = Math.floor(box.y / lado), j1 = Math.floor((box.y + box.h) / lado);
+    const out = [];
+    for (let j = j0; j <= j1; j++) {
+        if (j < 0 || j >= n) continue;
+        for (let i = i0; i <= i1; i++) {
+            const x = ((i % n) + n) % n;
+            const url = plantilla.replace('{z}', z).replace('{x}', x).replace('{y}', j)
+                                 .replace('{s}', 'a');
+            out.push(`<image href="${escAttr(url)}" x="${i * lado}" y="${j * lado}"
+                             width="${lado}" height="${lado}"
+                             preserveAspectRatio="none"></image>`);
+            if (out.length >= tope) break;
+        }
+        if (out.length >= tope) break;
+    }
+    return out.join('');
+}

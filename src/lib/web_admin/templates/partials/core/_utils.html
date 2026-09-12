@@ -59,10 +59,27 @@ function _buildItemsGrid(gridId, data, { q = '', match = null, render, empty = '
 
 /** Format an ISO-8601 string as local `YYYY-MM-DD HH:MM` (minute precision).
  *  Empty/missing → em dash; unparseable → the raw value. */
+/** Una fecha, venga como venga.
+ *
+ *  `new Date(numero)` cuenta MILISEGUNDOS, y media aplicación guarda **segundos**: el estado de
+ *  una comprobación y cada muestra del historial llevan un `ts` de época en segundos. Pasarlo
+ *  tal cual daba «1970-01-21» en toda la columna «Última actividad» de una máquina — una fecha
+ *  tan absurda que se lee como adorno roto y no como el dato que es. Reportado desde la
+ *  pantalla.
+ *
+ *  El corte en 1e12: en milisegundos eso es septiembre de 2001, y en segundos es el año 33.658.
+ *  Cualquier número por debajo son segundos, y cualquier cosa por encima ya son milisegundos.
+ *  Un texto —una fecha ISO, que es como viaja el resto— no se toca. */
+function _toDate(v) {
+    if (typeof v === 'number' && isFinite(v))
+        return new Date(v < 1e12 ? v * 1000 : v);
+    return new Date(v);
+}
+
 function _fmtDateTime(iso) {
     if (!iso) return '—';
     try {
-        const d = new Date(iso), p = n => String(n).padStart(2, '0');
+        const d = _toDate(iso), p = n => String(n).padStart(2, '0');
         if (isNaN(d.getTime())) return iso;   // Invalid Date doesn't throw → avoid "NaN-NaN-NaN"
         return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
     } catch (_) { return iso; }
@@ -1115,4 +1132,24 @@ if (typeof MutationObserver === 'function') {
             }
         }
     }).observe(document.documentElement, {childList: true, subtree: true});
+}
+
+/** Qué hora es en esa zona, o `''` si nadie la dijo o el navegador no la conoce.
+ *
+ *  No es adorno: «son las cuatro de la mañana allí» es lo que decide si se llama ahora o se
+ *  espera, y es la primera pregunta al mirar una sede que no es la de uno. Lo convierte el
+ *  navegador, que sabe hacerlo y no necesita preguntar; una zona que no conozca no rompe nada,
+ *  se calla.
+ *
+ *  Del panel y no de una sección porque ya la quieren dos —el cuadro del inventario y la ficha
+ *  del mapa—, y dos relojes son dos que pueden dar horas distintas de la misma sede. */
+function ssLocalTime(tz) {
+    const z = String(tz || '').trim();
+    if (!z) return '';
+    try {
+        return new Date().toLocaleTimeString(undefined,
+            {timeZone: z, hour: '2-digit', minute: '2-digit'});
+    } catch (e) {
+        return '';
+    }
 }

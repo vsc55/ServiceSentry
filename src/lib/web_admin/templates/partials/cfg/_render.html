@@ -366,7 +366,17 @@ function renderConfig() {
         for (const path of (card.fields || [])) {
             const i = path.indexOf('|');
             const section = path.slice(0, i), field = path.slice(i + 1);
-            h += renderField(field, (configData[section] || {})[field], path, 'config');
+            let campo = renderField(field, (configData[section] || {})[field], path, 'config');
+            // Un campo que sólo tiene sentido según otro se envuelve en el mismo mecanismo que
+            // ya usan el motor de base de datos y la recarga forzada (`sw-field`), declarado en
+            // el esquema y no aquí: así una tarjeta genérica puede tener campos condicionales
+            // sin que este renderizador aprenda el nombre de ninguno.
+            const cond = (configSchema[path] || {}).show_when;
+            if (cond)
+                campo = `<div data-sw-item-path="${escAttr(section)}">`
+                      + `<div class="sw-field" data-sw-when='${escAttr(JSON.stringify(cond))}'>`
+                      + `${campo}</div></div>`;
+            h += campo;
         }
         // Buttons packages contributed to this card (same generic treatment the bespoke
         // auth renderers give them), so any card can carry actions — not just auth ones.
@@ -408,9 +418,15 @@ function renderConfig() {
         });
     });
     initTooltips(c);
-    // Apply initial show_when visibility for the web_admin conditional fields
-    // (e.g. hide force_reload_secs when force-reload is off).
-    _refreshConditionalFields('web_admin');
+    // Apply initial show_when visibility for the conditional fields (e.g. hide
+    // force_reload_secs when force-reload is off, or the Google key when the map is
+    // OpenStreetMap's). Every section that declared one, not just `web_admin`: a hardcoded
+    // section here would leave the next one drawn but never refreshed — visible when it
+    // should be hidden, which is the failure that reads as "why am I being asked this?".
+    new Set(Array.from(c.querySelectorAll('[data-sw-item-path]'),
+                       el => el.dataset.swItemPath))
+        .add('web_admin')
+        .forEach(_refreshConditionalFields);
     // Re-compute status link on any field change (public_url / force_https)
     c.removeEventListener('change', _refreshStatusLink);
     c.addEventListener('change', _refreshStatusLink);

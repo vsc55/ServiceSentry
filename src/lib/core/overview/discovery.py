@@ -61,15 +61,20 @@ def discover_widget_rows() -> dict:
     return out
 
 
-def discover_widget_stats() -> dict:
-    """``{widget_id: fn(wa)}`` — the server-side content providers for data-driven AJAX
-    **stat** cards, from each descriptor's ``stat`` callable.  Each returns the standard
-    stat content (``{value, accent?, icon?, badges}``); served by the same generic
-    ``/api/v1/overview/widget/<id>`` endpoint (which returns ``{content}`` for stats,
-    ``{rows}`` for tables), so every widget fetches its own data independently."""
+def discover_widget_content() -> dict:
+    """``{widget_id: fn(wa)}`` — the server-side provider for every data-driven AJAX widget
+    that is not a table: a **stat** card declares it as ``stat``, anything else as
+    ``content``.  Whatever it returns is handed to the frontend under ``{content}`` by the
+    generic ``/api/v1/overview/widget/<id>`` endpoint (tables get ``{rows}`` instead), so
+    every widget fetches its own data independently.
+
+    Two names for one thing on purpose, and the shape is the reason: a stat card's provider
+    returns the ONE shape a stat card knows (``{value, accent?, icon?, badges}``) and ten
+    descriptors already say ``stat``, while a map's returns whatever a map needs.  Calling
+    the second one ``stat`` would be a function named after a card it does not draw."""
     out: dict = {}
     for w in discover_overview_widgets():
-        fn = w.get('stat')
+        fn = w.get('content') or w.get('stat')
         if callable(fn) and w.get('id'):
             out[w['id']] = fn
     return out

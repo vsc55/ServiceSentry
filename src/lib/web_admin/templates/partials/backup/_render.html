@@ -16,6 +16,9 @@ let _backupParts = [];
 // What this install is. Held because the restore dialog names both sides of the jump, and a
 // build number on its own is one the operator would have to compare in their head.
 let _bkVersion = '';
+//: De dónde sale la clave que descifra los secretos: `{source: 'env'|'file', path}`. El aviso
+//: no puede ser el mismo en los dos casos — ver `_bkKeyNote`.
+let _bkKey = {};
 
 async function renderBackups() {
     const c = document.getElementById('backup-container');
@@ -26,6 +29,7 @@ async function renderBackups() {
     _backups     = (res && res.backups) || [];
     _backupParts = (res && res.parts) || [];
     _bkVersion   = (res && res.version) || '';
+    _bkKey       = (res && res.key) || {};
     const tk = await apiGet('/api/v1/backups/tasks');
     _backupTasks = (tk && tk.tasks) || [];
     // The rules that actually apply to each task, resolved by the server: a task following a
@@ -159,7 +163,8 @@ function _renderBackupPane(c) {
     const rows = _backupsFor(_backupView);
     // The running row shows in the list it belongs to, and nowhere else — see
     // `_bkRunningInView`, which is the one place that decides which list that is.
-    const running = _bkRunningInView() ? _bkRunningRow() : '';
+    const puedeBorrar = (currentUser.permissions || []).includes('backup_delete');
+    const running = _bkRunningInView() ? _bkRunningRow(puedeBorrar) : '';
     if (!rows.length && !running) {
         c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3">
             <div class="text-center py-5 text-muted">
@@ -174,16 +179,32 @@ function _renderBackupPane(c) {
     const th = (label, col, width) =>
         `<th class="small py-2"${width ? ` style="width:${width}"` : ''}>`
         + _thSortInner(label, col, _bkSort, _bkSortDir, 'setBackupSort') + '</th>';
+    // `puedeBorrar` se decidió arriba, con la fila en curso: sólo quien puede borrar ve con
+    // qué elegir, y una columna de casillas que no llevan a ninguna acción es una columna que
+    // enseña algo que no se puede hacer.
+    const borrables = rows.filter(b => !b.locked).map(b => b.name);
+    // La selección sobrevive a los repintados —la lista se refresca sola mientras corre una
+    // copia— pero no a lo que ya no está: un nombre que se quedara dentro mandaría a borrar un
+    // fichero que otro acaba de llevarse.
+    _bkSel.forEach(n => { if (!borrables.includes(n)) _bkSel.delete(n); });
+    const todas = borrables.length > 0 && borrables.every(n => _bkSel.has(n));
     c.innerHTML = `<div class="ss-vscroll ss-scroll-pad px-3">
+        ${puedeBorrar ? _bkSelBarHtml() : ''}
         <table class="table table-sm table-hover align-middle mb-0">
             <thead class="ss-thead-sticky"><tr>
+                ${puedeBorrar ? `<th class="small py-2 ss-bk-pick-col">
+                    <input class="form-check-input mt-0" type="checkbox" id="bkPickAll"
+                        onchange="bkSelectAll(this.checked)"${todas ? ' checked' : ''}
+                        ${borrables.length ? '' : ' disabled'}
+                        title="${escAttr(t('backup_sel_all'))}"
+                        aria-label="${escAttr(t('backup_sel_all'))}"></th>` : ''}
                 ${th(t('backup_col_name'), 'name')}
                 ${th(t('col_time'), 'mtime', '11rem')}
                 ${th(t('backup_col_size'), 'size', '6rem')}
                 ${th(t('col_status'), 'status', '8rem')}
                 <th class="small py-2" style="width:9rem"></th>
             </tr></thead>
-            <tbody>${running}${_bkSorted(rows).map(_backupRow).join('')}</tbody>
+            <tbody>${running}${_bkSorted(rows).map(b => _backupRow(b, puedeBorrar)).join('')}</tbody>
         </table></div>`;
 }
 
@@ -264,11 +285,17 @@ function _bkStatusCell(b) {
 /** One copy: what it is called, when, how big — and what is wrong with it, if anything.
  *  Everything else it knows about itself is one click away in the Details dialog, which reads
  *  it from the manifest rather than from what a row had room to show. */
-function _backupRow(b) {
+function _backupRow(b, conPicos) {
     const perms = new Set(currentUser.permissions || []);
     const when  = b.mtime ? new Date(b.mtime * 1000).toLocaleString() : '—';
     const rows = Object.values(b.tables || {}).reduce((n, v) => n + (Number(v) || 0), 0);
     return `<tr>
+        ${conPicos ? `<td class="ss-bk-pick-col">
+            <input class="form-check-input mt-0" type="checkbox"
+                onchange="bkSelectOne(${jsStr(b.name)}, this.checked)"
+                ${_bkSel.has(b.name) ? ' checked' : ''}${b.locked ? ' disabled' : ''}
+                title="${escAttr(b.locked ? t('backup_sel_locked_out') : b.name)}"
+                aria-label="${escAttr(b.name)}"></td>` : ''}
         <td><span class="d-flex align-items-center gap-2">
             <i class="bi bi-file-earmark-zip text-secondary"></i>
             <span class="min-w-0">
@@ -377,40 +404,6 @@ function _openBackupModal(title, bodyHtml, okLabel, okVariant, onOk, size) {
     modal.show();
 }
 
-function openBackupModal() {
-    const pad = n => String(n).padStart(2, '0');
-    const d = new Date();
-    // Seconds included, like the scheduler's own names. `create_backup` refuses to overwrite,
-    // so two copies started inside the same minute would suggest the same name and the second
-    // would fail on a collision the operator did not cause and cannot see — and the moment you
-    // take two by hand is the moment you are trying something and repeating it.
-    const suggested = `copia-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
-                    + `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-    _openBackupModal(t('backup_create'), `
-        <div class="mb-3">
-            <label class="form-label small" for="backupName">${esc(t('backup_col_name'))}</label>
-            <input type="text" class="form-control form-control-sm" id="backupName"
-                   value="${escAttr(suggested)}">
-        </div>
-        <div class="mb-3">
-            <div class="small text-muted mb-1">${esc(t('backup_col_contents'))}</div>
-            ${_backupPartChecks('bkNew', _backupParts, null)}
-        </div>
-        <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" role="switch" id="backupSecrets" checked>
-            <label class="form-check-label small" for="backupSecrets">${esc(t('backup_secrets'))}</label>
-        </div>
-        <div class="small text-muted mt-1">${esc(t('backup_secrets_hint'))}</div>`,
-        t('backup_create'), 'primary', _createBackup);
-}
-
-// The API helpers do NOT share one shape, and both halves of that have now cost a bug:
-//   apiGet / apiPut     -> the parsed BODY
-//   apiPost / apiDelete -> {status, data}
-// Reading `res.ok` off the second pair, or `res.status` off the first, is reading a key that
-// is never there — so a request that worked reported failure. Delete said "error" with the
-// file already gone; saving a task said it with the task already created. This understands
-// both, because the alternative is remembering which helper is which at each call site.
 function _apiOk(res) {
     if (!res) return false;
     if (typeof res.status === 'number') return res.status >= 200 && res.status < 300;
@@ -418,24 +411,6 @@ function _apiOk(res) {
 }
 function _apiErr(res) {
     return (res && ((res.data && res.data.error) || res.error)) || t('save_error');
-}
-
-/** Start the copy the form describes, and watch it like any other.
- *
- *  It used to await the request and show nothing at all until it came back — on an install
- *  whose syslog table is six figures of rows, that is a minute of a screen that looks broken.
- *  It goes through the same job the schedule does now: a row in the list at once, the dialog
- *  for whoever wants to watch it, and a toast when it lands. */
-async function _createBackup() {
-    const name = (document.getElementById('backupName')?.value || '').trim();
-    const res  = await apiPost('/api/v1/backups', {
-        name,
-        parts: _checkedParts('bkNew', _backupParts),
-        secrets: !!document.getElementById('backupSecrets')?.checked,
-    });
-    const jobId = _apiOk(res) && (res.data || {}).job_id;
-    if (!jobId) { showToast(_apiErr(res), 'danger'); return; }
-    _bkStartWatching({taskId: '', taskName: name, manual: true}, jobId);
 }
 
 {# What the buttons on a row DO lives in _actions.html — delete, verify and the lock. They are

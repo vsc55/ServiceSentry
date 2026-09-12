@@ -55,6 +55,13 @@ function _cfgIsDefault(path) {
     if (dflt === undefined) return false;       // no shipped default → nothing to differ from
     const sep = path.indexOf('|');
     const cur = ((configData || {})[path.slice(0, sep)] || {})[path.slice(sep + 1)];
+    // Un `null` de un campo SECRETO significa lo contrario que un `null` normal: no es «sin
+    // poner», es «puesto, y el servidor no lo manda» — que es justo lo que hace un secreto.
+    // Con la regla de abajo a secas, una clave de API guardada contaba como intacta: no salía
+    // marcada, no entraba en el recuento de la tarjeta y desaparecía al filtrar por «sólo lo
+    // modificado». Reportado desde la pantalla. El vacío sí sigue siendo «sin poner».
+    const _campo = path.split('|').pop();
+    if (cur === null && typeof SENSITIVE !== 'undefined' && SENSITIVE.has(_campo)) return false;
     // Blank is how "not set" is stored, and not set IS the default — that is what the greyed
     // placeholder in the empty box has been saying all along. Reported: the bind address sat
     // empty, showing 0.0.0.0 behind it, and was marked as edited; comparing the two as text

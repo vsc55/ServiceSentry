@@ -85,3 +85,43 @@ def owner_of(wa, said: dict, scope: str, uid: str) -> str:
     """
     from lib.core.orgs import owners             # noqa: PLC0415
     return owners.owner_of(chain_of(wa, scope, uid), said or {})
+
+
+# ── De dónde viene una empresa ──────────────────────────────────────────────────────────
+#
+# La columna `source` guarda un identificador (`freshservice`), y la pantalla tiene que enseñar
+# un nombre. Ese nombre no puede estar escrito en el core: **ningún texto del core nombra a un
+# proveedor**, que es la misma regla por la que los ámbitos se declaran en vez de listarse.
+#
+# Así que lo declara quien trae las empresas, en su `manifest.py`::
+#
+#     ORG_SOURCES = [{'id': 'freshservice', 'label_key': 'fs_source',
+#                     'icon': 'bi-life-preserver'}]
+#
+# Y un origen que ya no declara nadie —el proveedor se quitó— no deja la fila muda: la pantalla
+# enseña el identificador tal cual, que sigue diciendo de dónde vino.
+
+_FUENTES: dict | None = None
+
+
+def sources() -> dict:
+    """``{id: descriptor}`` de todo origen que algún paquete declare."""
+    global _FUENTES                              # pylint: disable=global-statement
+    if _FUENTES is None:
+        from lib.discovery import scan           # noqa: PLC0415
+        out: dict = {}
+        for pkg, decl in scan('ORG_SOURCES'):
+            for spec in (decl if isinstance(decl, (list, tuple)) else [decl]):
+                if not isinstance(spec, dict):
+                    continue
+                ident = str(spec.get('id') or '').strip()
+                if ident and ident not in out:
+                    out[ident] = dict(spec, id=ident, package=pkg)
+        _FUENTES = out
+    return _FUENTES
+
+
+def forget_sources() -> None:
+    """Dropar la caché. Para las pruebas que instalan un paquete a media ejecución."""
+    global _FUENTES                              # pylint: disable=global-statement
+    _FUENTES = None

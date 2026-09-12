@@ -38,26 +38,24 @@ class _EmbedMixin:
         """Los orígenes de los que esta instalación puede cargar imágenes. Hoy: el de las
         teselas, si hay mapa.
 
-        Sacado de la plantilla configurada y no escrito en ninguna parte: un comodín o un host
+        Sacado del proveedor configurado y no escrito en ninguna parte: un comodín o un host
         fijo en el código serían un agujero que sigue abierto el día que nadie usa el mapa. Sin
-        plantilla no devuelve nada, y entonces la política queda exactamente como estaba.
+        mapa no devuelve nada, y entonces la política queda exactamente como estaba.
 
-        Se lee del atributo y no del fichero: el ajuste ya está reflejado ahí y esto se llama en
-        CADA respuesta.
+        **Esta es la mitad silenciosa del asunto.** Si el origen no está aquí, el navegador
+        bloquea cada tesela y no dice nada en la página: el mapa sale vacío exactamente igual
+        que si no estuviera configurado. Por eso pregunta al mismo catálogo que dibuja
+        (`lib.maps`) y no a un atributo suelto — el día que se añada un proveedor, la política
+        se entera sola.
+
+        Del atributo y no de la base de datos, que esto se llama en CADA respuesta; y el
+        catálogo resuelve sin red, porque el origen de Google no depende de ninguna sesión.
         """
-        tpl = str(getattr(self, '_DCIM_MAP_TILES', '') or '').strip()
-        if not tpl:
-            return []
-        try:
-            from urllib.parse import urlsplit                        # noqa: PLC0415
-            parts = urlsplit(tpl)
-            if parts.scheme in ('http', 'https') and parts.netloc:
-                # El ORIGEN, no la URL: una tesela es `.../{z}/{x}/{y}.png` y la directiva
-                # tiene que cubrir el millón de rutas que hay debajo, no una.
-                return [f'{parts.scheme}://{parts.netloc}']
-        except Exception:                                # pylint: disable=broad-except
-            pass
-        return []
+        from lib.maps import catalog as maps                         # noqa: PLC0415
+        return maps.origins_for({
+            'dcim_map_provider': str(getattr(self, '_DCIM_MAP_PROVIDER', '') or ''),
+            'dcim_map_tiles': str(getattr(self, '_DCIM_MAP_TILES', '') or ''),
+        })
 
     def _recompute_frame_ancestors(self) -> None:
         """Rebuild the iframe allowlist: admin-configured origins + every registered embed

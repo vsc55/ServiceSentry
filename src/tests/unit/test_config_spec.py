@@ -293,3 +293,80 @@ class TestNoDefaultIsWrittenTwice:
         app = _io.open(_os.path.join(src, 'lib', 'web_admin', 'app.py'), encoding='utf-8').read()
         for literal in ('DEFAULT_PORT = 8080', "DEFAULT_HOST = '0.0.0.0'"):
             assert literal not in app, literal
+
+
+class TestLaRetencionDelHistoricoEsUnAjuste:
+    """Eran 30 días escritos dentro del bucle de poda del monitor, que es el peor sitio posible
+    para un número que depende enteramente de la flota: en una instalación real SNMP es el 83 %
+    de las filas —noventa mil en diecisiete días— y quien tiene que meter eso en un disco no
+    tenía forma de decirlo sin editar el código.
+
+    Es el paso 2 del plan de `docs/explica-snmp.md`."""
+
+    def test_esta_en_el_registro(self):
+        assert cfg_default('history|retention_days') == 30
+
+    def test_cero_significa_para_siempre_y_se_puede_escribir(self):
+        """El podador ya entiende el cero; sin un mínimo de cero, la pantalla no dejaría
+        pedirlo."""
+        ok, _ = cfg_validate('history|retention_days', 0)
+        assert ok
+
+    def test_y_no_lo_puede_cambiar_cualquiera(self):
+        """Bajarlo borra datos que no vuelven."""
+        assert 'history|retention_days' in admin_only_fields()
+
+    def test_el_monitor_no_lleva_el_numero_escrito(self):
+        """Los dos lados de la misma frase: el registro es el único sitio donde se cambia un
+        valor por defecto, así que un 30 suelto en el podador sería un segundo sitio — y el que
+        gana no es el que la pantalla enseña."""
+        import io as _io                                            # noqa: PLC0415
+        import os as _os                                            # noqa: PLC0415
+        src = _os.path.abspath(__file__).split(_os.sep + 'tests' + _os.sep)[0]
+        man = _io.open(_os.path.join(src, 'lib', 'services', 'monitoring', 'manager.py'),
+                       encoding='utf-8').read()
+        poda = man.split('self._history.prune')[0][-900:]
+        assert "retention_days', 30)" not in poda, 'el 30 sigue escrito en el podador'
+        assert "cfg_default('history|retention_days')" in poda, poda[-300:]
+
+
+class TestUnDesplegableNoEnseñaIdentificadores:
+    """`_opt_labels` busca la palabra de cada opción en el catálogo de idiomas **por su clave de
+    primer nivel**, y si no la encuentra devuelve la opción tal cual. No falla, no avisa: el
+    desplegable sale con «osm», «carto_light», «google» escritos, que es lo que se vio en la
+    pantalla del mapa — las claves se habían metido dentro de `labels`, donde nadie las busca.
+
+    Y es un fallo que se repite solo: cada select nuevo tiene que acordarse de dónde van sus
+    palabras, y el sitio equivocado tiene toda la pinta de ser el bueno.
+    """
+
+    def _selects(self):
+        from lib.core.config.service import build_config_schema      # noqa: PLC0415
+        return {p: m for p, m in build_config_schema().items()
+                if (m or {}).get('options_i18n')}
+
+    def test_cada_opcion_tiene_su_palabra_en_todos_los_idiomas(self):
+        crudas = []
+        for path, meta in self._selects().items():
+            for opcion, porlang in (meta['options_i18n'] or {}).items():
+                for lang, texto in (porlang or {}).items():
+                    if texto == opcion:
+                        crudas.append(f'{path} · {opcion!r} · {lang}')
+        assert not crudas, ('opciones que salen con su identificador escrito:' + chr(10) + '  '
+                            + (chr(10) + '  ').join(crudas))
+
+    def test_y_ninguna_se_queda_sin_etiquetar(self):
+        """Declarar `options_i18n` a medias deja unas opciones con nombre y otras con su
+        identificador, en la misma lista."""
+        faltan = []
+        for path, meta in self._selects().items():
+            etiquetadas = set((meta['options_i18n'] or {}))
+            for opcion in (meta.get('options') or []):
+                if opcion not in etiquetadas:
+                    faltan.append(f'{path} · {opcion!r}')
+        assert not faltan, faltan
+
+    def test_y_hay_desplegables_que_mirar(self):
+        """Sin esto, las dos de arriba pasarían el día que `build_config_schema` dejara de
+        declarar ninguno — verdes y sin mirar nada."""
+        assert len(self._selects()) >= 5

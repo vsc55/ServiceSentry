@@ -30,6 +30,11 @@ handler that only ever serves one section simply declares no parameter and ignor
 current values: ``{'field': <name>, 'not_empty': True}`` renders the button only when
 that field has a value (e.g. no "rotate secret" until an app is registered).
 
+**It answers "has something written in it", never "is switched on".** A boolean turned into
+text is ``"false"``, which is not empty, so gating a button on an unchecked switch with this
+draws it all the same. Gate on the field that carries the value — a URL, a domain, an id —
+which is also the one that says whether the thing is configured at all.
+
 ``perm`` (optional) names a permission flag the user must hold for the button to be
 rendered at all — destructive actions declare the same flag their API endpoint enforces
 (e.g. ``history_delete``). It is a UI gate on top of, never instead of, the server check.

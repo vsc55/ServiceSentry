@@ -85,6 +85,12 @@ class FileStore(BaseStore):
 
     def __init__(self, db: BaseConnector) -> None:
         super().__init__(db)
+        # Entrecomillados por el dialecto, como en el resto de almacenes. `stored` no rompe hoy
+        # en MariaDB 11.8 —comprobado contra el motor— pero ésta es la misma forma que en
+        # `dc_rev` dejó el historial de versiones sin funcionar en MySQL: la lista de columnas
+        # metida cruda en el SQL. Lo que decide si rompe es qué palabras reserve la versión que
+        # tenga delante, y eso no lo elige este código.
+        self._sql_cols = ', '.join(db.quote_ident(c) for c in self._COLS)
         self._db.reconcile_table(SCHEMA)
 
     def _row(self, row) -> dict:
@@ -93,7 +99,7 @@ class FileStore(BaseStore):
     def of(self, ref_uid: str, scope: str = 'type') -> list[dict]:
         """Los de una ficha, por clase y por nombre — que es como se buscan: «el manual»."""
         filas = [self._row(r) for r in (self._db.fetchall(
-            f'SELECT {", ".join(self._COLS)} FROM {self._sql_table} '
+            f'SELECT {self._sql_cols} FROM {self._sql_table} '
             'WHERE scope = ? AND ref_uid = ?',
             (str(scope or 'type'), str(ref_uid or ''))) or ())]
         return sorted(filas, key=lambda f: (str(f.get('kind') or ''),
@@ -101,7 +107,7 @@ class FileStore(BaseStore):
 
     def get(self, uid: str) -> dict | None:
         filas = self._db.fetchall(
-            f'SELECT {", ".join(self._COLS)} FROM {self._sql_table} WHERE uid = ?',
+            f'SELECT {self._sql_cols} FROM {self._sql_table} WHERE uid = ?',
             (str(uid or ''),)) or ()
         return self._row(filas[0]) if filas else None
 
@@ -112,7 +118,7 @@ class FileStore(BaseStore):
             return ''
         uid = new_uid()
         self._db.execute(
-            f'INSERT INTO {self._sql_table} ({", ".join(self._COLS)}) '
+            f'INSERT INTO {self._sql_table} ({self._sql_cols}) '
             f'VALUES ({", ".join("?" for _ in self._COLS)})',
             (uid, str(scope or 'type'), str(ref_uid),
              str(kind if kind in KINDS else 'other'),

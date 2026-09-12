@@ -3,10 +3,11 @@
 """The background-jobs API.
 
     GET /api/v1/jobs               what this process is running right now
+    GET /api/v1/jobs/timers        what wakes up on its own, how often, and in which replica
     GET /api/v1/jobs/history       what it has finished, newest first
     GET /api/v1/jobs/history/<uid>  …and everything one of them said while doing it
 
-Three routes, and every one of them is a GET. This screen starts nothing and stops
+Four routes, and every one of them is a GET. This screen starts nothing and stops
 nothing: every row on it is work another permission already let somebody begin, and the
 buttons that begin it live on the screens that own it. A "cancel" here would be a second way
 to reach four different pieces of machinery from one place that understands none of them.
@@ -24,6 +25,7 @@ from flask import jsonify, request
 
 from lib.core.jobs import record as jobs_record
 from lib.core.jobs import service as jobs_svc
+from lib.core.jobs import timers as jobs_timers
 
 
 def register(app, wa):
@@ -48,6 +50,23 @@ def register(app, wa):
         st = jobs_record.store()
         summary['history'] = st.count() if st is not None else 0
         return jsonify({'jobs': jobs, 'summary': summary, 'now': time.time()})
+
+    @app.route('/api/v1/jobs/timers', methods=['GET'])
+    @jobs_view_req
+    def api_jobs_timers():
+        """Lo que se mueve por detrás: qué despierta solo, cada cuánto y **en qué réplica**.
+
+        Aparte de `/api/v1/jobs` porque son dos preguntas. Aquélla es «qué se está haciendo
+        ahora» y se vacía cuando no hay nada; ésta es «qué hay montado», y su respuesta es la
+        misma con el panel parado que trabajando — que es precisamente el valor: lo que no se
+        ve es lo que nadie revisa.
+
+        `now` viaja con la lista por lo mismo que allí: «le toca en 4 minutos» calculado con el
+        reloj del navegador enseña como pendiente algo que ya corrió.
+        """
+        filas = jobs_timers.live(wa)
+        return jsonify({'timers': filas, 'summary': jobs_timers.summary(filas),
+                        'now': time.time()})
 
     @app.route('/api/v1/jobs/history', methods=['GET'])
     @jobs_view_req

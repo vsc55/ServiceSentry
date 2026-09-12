@@ -32,7 +32,13 @@ PARTS: tuple = (
      'label_key': 'backup_part_core'},
     {'id': 'config_file', 'kind': 'file', 'default': True, 'required': False,
      'label_key': 'backup_part_config_file'},
-    {'id': 'history', 'kind': 'db', 'tables': ('history', 'check_state'),
+    # Las cuatro tablas del historial van juntas y no son opcionales por separado. La muestra
+    # guarda un `series_id` y nada más, y sus medidas viven en `history_fact` apuntando a un
+    # `field_id`: una copia con las muestras y sin las series restaura cien mil filas que no
+    # saben de qué son, y una con los hechos y sin el diccionario, cien mil números sin nombre.
+    # No falla al restaurar — falla al abrir la primera gráfica, que es la forma silenciosa.
+    {'id': 'history', 'kind': 'db',
+     'tables': ('history', 'history_series', 'history_fact', 'history_field', 'check_state'),
      'default': False, 'required': False, 'label_key': 'backup_part_history'},
     {'id': 'audit', 'kind': 'db', 'tables': ('audit',),
      'default': False, 'required': False, 'label_key': 'backup_part_audit'},
@@ -175,7 +181,7 @@ def conn_for(part: dict, connector, connectors=None):
 
 
 def tables_by_part(connector, parts: set, connectors=None) -> list:
-    """``[(part_id, [tables])]`` for the chosen parts, in catalogue order.
+    """``[(part_id, [tables], error)]`` for the chosen parts, in catalogue order.
 
     Kept alongside the flat list because the copy is REPORTED by part — that is the unit an
     operator ticked — while it is written table by table. Deriving one from the other at the
@@ -183,30 +189,44 @@ def tables_by_part(connector, parts: set, connectors=None) -> list:
 
     Each part is asked of ITS OWN database. `core` is "everything nobody else claimed" *in the
     system database*, so a table that lives elsewhere is never swept into it by accident.
+
+    *error* is why a part has no tables when the reason is that **its database could not be
+    asked** — and it is the third element of the tuple rather than an empty list because the
+    two cases are not the same thing and the copy has to be able to tell them apart. Measured
+    before it was written: with `syslog_db` pointing at a server that was down, the part came
+    back with zero tables, the manifest said `ok`, and the copy was indistinguishable from one
+    taken on an install that never had a syslog table. Found at restore time, which is the one
+    moment nobody can afford to find out.
+
+    Zero tables WITHOUT an error stays a success on purpose: a part whose tables do not exist
+    has nothing to copy, and calling that a failure would put a red mark on every install that
+    never turned the feature on.
     """
     seen: set = set()
     out: list = []
     for p in PARTS:
         if p['kind'] != 'db' or p['id'] not in parts:
             continue
+        fallo = ''
         try:
             present = [t for t in conn_for(p, connector, connectors).list_tables()
                        if t not in INTERNAL_TABLES]
-        except Exception:      # pylint: disable=broad-except
+        except Exception as exc:      # pylint: disable=broad-except
             # A second database that cannot be reached costs its own part and nothing else:
-            # the copy of everything else is still worth having, and the empty part says so.
-            present = []
+            # the copy of everything else is still worth having. What it must not cost is the
+            # truth about itself.
+            present, fallo = [], str(exc)[:200] or exc.__class__.__name__
         tabs = ([t for t in present if t not in _CLAIMED_TABLES] if p['tables'] is None
                 else [t for t in p['tables'] if t in present])
         tabs = [t for t in tabs if t not in seen]
         seen.update(tabs)
-        out.append((p['id'], sorted(tabs)))
+        out.append((p['id'], sorted(tabs), fallo))
     return out
 
 
 def tables_for(connector, parts: set, connectors=None) -> list:
     """Which tables the chosen *parts* cover, in a stable order."""
-    return sorted({t for _pid, tabs in tables_by_part(connector, parts, connectors)
+    return sorted({t for _pid, tabs, _err in tables_by_part(connector, parts, connectors)
                    for t in tabs})
 
 

@@ -597,8 +597,10 @@ class TestTheWorkArchivesItselfWhereItEnds:
         which is the one moment the number is no longer news."""
         routes = _read(os.path.join(SRC, 'lib', 'core', 'jobs', 'routes.py'))
         assert "summary['history'] = st.count()" in routes
+        # Las pestañas viven en `_head.html` desde que la pantalla se partió: la cabecera es lo
+        # único que no depende de qué lista se mira, porque es lo que decide cuál.
         js = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'jobs',
-                                '_render.html'))
+                                '_head.html'))
         tabs = _fn(js, '_jobsTabsHtml')
         assert 'sum.history' in tabs
 

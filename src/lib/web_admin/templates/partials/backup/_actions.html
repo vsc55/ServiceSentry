@@ -56,3 +56,72 @@ async function verifyBackup(name) {
         : t('backup_verify_members_bad').replace('{}', (v.bad || []).length);
     showToast(why, 'danger');
 }
+
+
+//: Lo que está marcado para borrar. Un `Set` de nombres y no un campo en cada fila: la lista se
+//: repinta sola mientras corre una copia, y un estado que viva en el DOM se pierde en cada
+//: repintado — que es justo mientras alguien está eligiendo.
+const _bkSel = new Set();
+
+/** Repintar la lista y nada más. El mismo camino que usan el orden y el cambio de vista: la
+ *  lista no se vuelve a pedir al servidor por marcar una casilla. */
+function _bkRepaint() {
+    const c = document.getElementById('backup-container');
+    if (c) _renderBackupPane(c);
+}
+
+function bkSelectOne(name, on) {
+    if (on) _bkSel.add(name); else _bkSel.delete(name);
+    _bkRepaint();
+}
+
+/** Todas, o ninguna — y «todas» son **las que se pueden borrar**.
+ *
+ *  Una copia con candado no entra: la casilla de su fila está desactivada, y una cabecera que
+ *  la metiera en el montón llevaría a un diálogo que promete borrar cinco y borra cuatro. */
+function bkSelectAll(on) {
+    const nombres = _backupsFor(_backupView).filter(b => !b.locked).map(b => b.name);
+    if (on) nombres.forEach(n => _bkSel.add(n)); else _bkSel.clear();
+    _bkRepaint();
+}
+
+/** La barra que aparece al elegir la primera. No ocupa sitio mientras no hay nada elegido. */
+function _bkSelBarHtml() {
+    const n = _bkSel.size;
+    if (!n) return '';
+    return `<div class="d-flex align-items-center gap-2 py-2">
+        <span class="small">${esc(n === 1 ? t('backup_sel_one') : tf('backup_sel_n', n))}</span>
+        <button class="btn btn-sm btn-secondary" type="button" onclick="bkSelectAll(false)"
+            >${esc(t('backup_sel_clear'))}</button>
+        <button class="btn btn-sm btn-danger ms-auto" type="button" onclick="bkDeleteSelected()"
+            ><i class="bi bi-trash3 me-1"></i>${esc(t('delete'))}</button>
+    </div>`;
+}
+
+/** Borrar las elegidas.
+ *
+ *  Una petición por copia y no una en bloque, a propósito: cada archivo deja su propia línea en
+ *  la auditoría —que es la pregunta que se le hace a ese registro: «¿quién se llevó ésta?»— y
+ *  una que falle no se lleva a las demás por delante.
+ *
+ *  Con una sola elegida se usa el diálogo de siempre, que **dice su nombre**: es más útil que
+ *  un «se eliminarán 1 copias», y es el mismo texto que sale por el botón de la fila.
+ */
+function bkDeleteSelected() {
+    const nombres = [..._bkSel];
+    if (!nombres.length) return;
+    if (nombres.length === 1) { deleteBackup(nombres[0]); _bkSel.clear(); return; }
+    showConfirmModal(tf('backup_delete_many', nombres.length), async () => {
+        let bien = 0;
+        for (const name of nombres) {
+            const res = await apiDelete(`/api/v1/backups/${encodeURIComponent(name)}`);
+            if (_apiOk(res)) { bien += 1; _bkSel.delete(name); }
+        }
+        const mal = nombres.length - bien;
+        // Un recuento y no un aviso por copia: veinte tostadas seguidas no las lee nadie, y lo
+        // que hace falta saber es si faltó alguna.
+        showToast(mal ? tf('backup_deleted_some', bien, mal) : tf('backup_deleted_n', bien),
+                  mal ? 'warning' : 'success');
+        renderBackups();
+    });
+}

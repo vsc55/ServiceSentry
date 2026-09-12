@@ -218,6 +218,8 @@ sesión. Ver [explica-mfa.md](explica-mfa.md#la-propiedad-de-la-que-cuelga-todo)
 | GET | `/api/v1/config/versions` | `config_view`\|`config_edit` | Poll ligero: solo tokens de versión |
 | GET | `/api/v1/config/layout` | `config_view`\|`config_edit` | Layout de la UI de config (tabs→cards) |
 | GET | `/api/v1/config/schema` | `config_view`\|`config_edit` | Metadatos UI a nivel de campo |
+| POST | `/api/v1/config/map/test` | `config_edit` | Probar el mapa configurado: resuelve el proveedor, pide una sesión a Google si toca, **se trae una tesela desde el servidor** y dice el origen que la política de contenido tiene que abrir. Devuelve cada paso por separado y el detalle **en crudo** de lo que contestó el otro extremo, que es lo único que distingue «la clave no vale» de «esta máquina no sale a internet» |
+| GET | `/api/v1/config/map/preview/<z>/<x>/<y>` | `config_edit` | Una tesela del mapa que se está probando, **servida por el panel**. Directamente no se puede: `img-src` sólo abre el origen que sale de la configuración **guardada**, así que un proveedor recién elegido tendría todas sus imágenes bloqueadas en silencio. No es un proxy abierto: la dirección no viene en la petición, viene de lo que esa misma persona acaba de probar, en memoria y con caducidad |
 | PUT | `/api/v1/config` | `config_edit` | Guardado parcial versionado |
 | GET | `/api/v1/config/db/targets/<op>` | `db_maintenance` | Las unidades que recorrerá la ejecución, en orden. Responde `{op, targets, divisible}`: el **motor** decide la forma — una tabla por fila donde la sentencia va por tabla, y `divisible: false` donde no (el `VACUUM` de SQLite es una reescritura indivisible, y partirla en 33 filas inventaría una granularidad que el motor no tiene). Sale del **catálogo**, no de los `TableSpec`: una tabla de módulo creada en runtime es tan real como una declarada |
 | POST | `/api/v1/config/db/<op>` | `db_maintenance` | Mantenimiento de la BD principal: `optimize` (estadísticas del planificador; barato y seguro) o `compact` (reescribe y devuelve espacio al disco; **bloquea** la BD mientras dura). `<op>` se busca en una tabla fija, no se llama por nombre sobre el conector. Cuerpo opcional `{table}` para avanzar de una en una: se **valida contra `maintenance_targets(op)`** antes de interpolarse en SQL (un identificador no puede ser parámetro ligado), y eso también rechaza un `compact` por tabla en un motor que no lo divide. Un paso por tabla responde `{ok, operation, table}` y **no** audita; la llamada de cierre —sin `table`— responde `{ok, operation, bytes_before, bytes_after, bytes_freed, freed_human}` y registra la ejecución como la única acción de operador que fue. Los tamaños son `null` si el motor no los da: desconocido, nunca cero |
@@ -351,6 +353,23 @@ Sólo lectura: la sección muestra **qué están haciendo** las máquinas; lo qu
 | GET | `/api/v1/infra/hosts` | `infra_view` | La flota: una fila por máquina, **peor primero**, con su estado y cuánto de ella se vigila. Proyección en lista blanca: los `profiles` (credencial de cada protocolo) no viajan |
 | GET | `/api/v1/infra/hosts/<uid>` | `infra_view` | Una máquina: lo que devolvió cada check (`results`) y los números que su módulo **declaró** como medida (`metrics`), cada uno con etiqueta, unidad y las coordenadas de su serie |
 
+## Freshservice — [lib/providers/freshservice/routes.py](../src/lib/providers/freshservice/routes.py)
+
+Traer las empresas de donde ya están escritas. En Freshservice, «departamento» y «empresa» son la
+misma cosa. **En un solo sentido**: nada de lo de aquí sube.
+
+| Método | Ruta | Permiso | Descripción |
+|---|---|---|---|
+| POST | `/api/v1/providers/freshservice/test` | `orgs_edit` | Pide una página de un departamento: contesta si la clave y el dominio valen, **sin traerse la lista** — es una pregunta, no un acto |
+| GET | `/api/v1/providers/freshservice/preview` | `orgs_edit` | Qué pasaría: una entrada por departamento con `create`, `update`, `adopt` o `same`, más las que ya no están en el origen. **No escribe nada** |
+| POST | `/api/v1/providers/freshservice/import` | `orgs_edit` | Hacerlo. Vuelve a pedir la lista en vez de fiarse de lo que enseñó la pantalla: entre mirar y aceptar pasa un rato. **Nunca borra** — lo que ya no está en el origen se cuenta y se queda |
+
+Se empareja por el identificador de Freshservice y no por el nombre: renombrar una sociedad allí
+crearía aquí una segunda y dejaría la primera huérfana. Una empresa **tecleada aquí** con ese
+mismo nombre se adopta —se le pone el origen— en vez de duplicarla, y no se le pisa la
+descripción. La abreviatura, que allí no existe y aquí es obligatoria, se saca del nombre y se
+deja corregir.
+
 ## Empresas — [lib/core/orgs/routes.py](../src/lib/core/orgs/routes.py)
 
 De quién es cada cosa. Estuvo dentro del inventario físico, que es donde se hizo la pregunta por
@@ -450,6 +469,8 @@ Dónde está el equipamiento y de quién es. Ver [explica-dcim.md](explica-dcim.
 | PUT · DELETE | `/api/v1/dcim/build-parts/<uid>` | `dcim_build_edit` | Cambiarlo o quitarlo. No se muda de plantilla por el cuerpo de la petición |
 | POST | `/api/v1/dcim/rooms/<uid>/plan` | `dcim_edit` | Subir el plano de una sala. **El tipo lo decide el contenido**, no la extensión, y el nombre lo acuña el panel: lo que traía el fichero no llega nunca a un disco. Tope 2 MB. Sustituir borra el anterior |
 | DELETE | `/api/v1/dcim/rooms/<uid>/plan` | `dcim_edit` | Quitarlo — se borra **el fichero**, no solo la referencia |
+| POST | `/api/v1/dcim/sites/<uid>/photo` | `dcim_edit` | Subir la foto de una sede — quien va por primera vez busca UNA puerta en un polígono. Mismas reglas que el plano: el tipo lo decide el contenido, el nombre lo acuña el panel, sustituir borra la anterior |
+| DELETE | `/api/v1/dcim/sites/<uid>/photo` | `dcim_edit` | Quitarla — se borra **el fichero** |
 | GET | `/api/v1/dcim/media/<name>` | `dcim_view` | Servir una imagen guardada. Un SVG va como descarga: puede traer script dentro |
 | GET | `/api/v1/dcim/media-dir` | `config_edit` | A qué carpeta van de verdad las imágenes — para la caja vacía de Configuración. **No la crea** |
 | GET | `/api/v1/dcim/board` | `dcim_view` | El cuadro de mando: baldosas por sede, desglose por empresa y **el camino hasta cada cosa que falla** (sede › sala › rack › U). Estrechado como todo lo demás: en un rack compartido, la filial no ve el problema del departamento. La lista se recorta a 20 y la respuesta lo dice (`capped`, `trouble_total`) |

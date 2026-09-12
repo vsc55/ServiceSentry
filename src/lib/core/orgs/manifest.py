@@ -40,6 +40,9 @@ AUDIT_EVENTS = [
     # And removing a company. Louder than a rename: everything that was on her name stops being
     # on anybody's, which is a change to what a dozen screens show and no screen announces.
     {'key': 'org_deleted', 'severity': 'warning'},
+    # Y soltarla de su origen: deja de mantenerla nadie, y a partir de ahí lo que diga esa fila
+    # es lo que alguien teclee. Es media respuesta a «¿por qué esta ya no se actualiza?».
+    {'key': 'org_unlinked', 'severity': 'info'},
 ]
 
 

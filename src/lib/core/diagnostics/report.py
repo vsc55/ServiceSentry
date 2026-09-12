@@ -57,8 +57,7 @@ def as_text(data: dict, stamp: str) -> str:
         lines += [f'  {k} = {v}' for k, v in block.items()]
         lines.append('')
     lines.append('[Storage]')
-    lines += [f'  {r["key"]} = {r["path"]} (exists={r["exists"]} '
-              f'writable={r["writable"]} free={r["free_bytes"]})' for r in data['storage']]
+    lines += [f'  {r["key"]} = {r["path"]} ({_where(r)})' for r in data['storage']]
     lines.append('')
     lines.append('[Optional features]')
     lines += [f'  {f["module"]} = ' + ('yes ' + f['version'] if f['available'] else 'no')
@@ -95,6 +94,19 @@ def as_text(data: dict, stamp: str) -> str:
     return '\n'.join(lines) + '\n'
 
 
+def _where(row: dict) -> str:
+    """El estado de una carpeta, dicho de forma que no alarme a quien lee el pegote.
+
+    Casi todas se crean al guardar la primera cosa, así que `exists=False` en cuatro filas de
+    una instalación recién puesta se lee como cuatro averías. Aquí no hay color ni distintivo
+    que lo matice: si no lo dice la frase, no lo dice nada.
+    """
+    if not row.get('exists') and row.get('on_demand'):
+        return 'not created yet'
+    libre = f' free={row["free_bytes"]}' if row.get('total_bytes') else ''
+    return f'exists={row["exists"]} writable={row["writable"]}{libre}'
+
+
 def as_xml(data: dict, stamp: str) -> str:
     """The same tree, for a system that ingests XML.
 
@@ -119,6 +131,9 @@ def as_xml(data: dict, stamp: str) -> str:
         ET.SubElement(storage, 'path', {
             'key': row['key'], 'exists': str(row['exists']).lower(),
             'writable': str(row['writable']).lower(),
+            # Que una carpeta se cree al usarla es parte de la respuesta, no un detalle de
+            # pintado: sin esto, quien procese el XML cuenta cuatro averías que no existen.
+            'on_demand': str(bool(row.get('on_demand'))).lower(),
             'free_bytes': str(row['free_bytes']),
             'total_bytes': str(row['total_bytes'])}).text = row['path']
     features = ET.SubElement(root, 'features')

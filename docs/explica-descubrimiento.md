@@ -33,7 +33,7 @@ Difieren solo en **qué raíz escanean** y **qué declaran**:
 | Mecanismo | Declara (símbolo) | Raíz escaneada | Recolector | Consume / ensambla |
 |---|---|---|---|---|
 | [Permisos](#1-permisos-module_permissions) | `manifest.py` · `MODULE_PERMISSIONS` | `lib.core.*` + `lib.services.*` | `discover_permissions()` | `PERMISSIONS` / `PERMISSION_GROUPS` / `BUILTIN_ROLE_PERMISSIONS` |
-| [Widgets de Overview](#2-widgets-de-overview-overview_widgets) | `overview_widget.py` · `OVERVIEW_WIDGETS` | `lib.core.*` + `lib.services.*` | `discover_overview_widgets()` (+ `_stats` / `_rows` / `_public`) | grid de Overview + AJAX por widget |
+| [Widgets de Overview](#2-widgets-de-overview-overview_widgets) | `overview_widget.py` · `OVERVIEW_WIDGETS` | `lib.core.*` + `lib.services.*` | `discover_overview_widgets()` (+ `_content` / `_rows` / `_public`) | grid de Overview + AJAX por widget |
 | [Servicios embebidos](#3-servicios-embebidos-embedded_service) | `__init__.py` · `EMBEDDED_SERVICE` (`embedded.py` · `make_embedded`) | `lib.services.*` | `discover_embedded_services()` | pestaña Services (estado + control) |
 | [Tipos de credencial](#4-tipos-de-credencial-__credential__) | `schema.json` · `__credential__` | `watchfuls/*` | `ModuleBase.discover_schemas()` | gestor de credenciales (formularios por tipo) |
 | [Perfiles de host](#5-perfiles-de-host-__host_profile__) | `schema.json` · `__host_profile__` | `watchfuls/*` | `lib.core.hosts.profiles` | sección Servers (formularios por protocolo) |
@@ -159,8 +159,20 @@ OVERVIEW_WIDGETS = [
 ]
 ```
 
-- `view.kind`: `'stat'` (tarjeta con `stat(wa)` → `{value, accent?, icon?, badges}`) o
-  `'table'` (lista con `rows(wa, f)` → filas ya filtradas por `f`, + `columns`).
+- `view.kind`: `'stat'` (tarjeta con `stat(wa)` → `{value, accent?, icon?, badges}`),
+  `'table'` (lista con `rows(wa, f)` → filas ya filtradas por `f`, + `columns`) o `'map'`
+  (chinchetas con `content(wa)` → `{sites: [{name, lat, lon, state, ok, total}], tiles,
+  attribution, unplaced}`).
+- El proveedor se llama `stat` en una tarjeta de recuento —su forma es fija y así lo declaran
+  diez descriptores— y **`content`** en cualquier otra clase, cuya forma es suya. Los dos los
+  recoge `discover_widget_content()` y los sirve el mismo endpoint bajo `{content}`.
+- Una tarjeta de mapa dibuja **cosas con latitud, longitud y un estado**: el panel no sabe que
+  las trae el inventario, así que cualquier paquete con cosas situadas la usa declarando lo
+  mismo. La proyección y las teselas son del panel
+  (`partials/core/_geo.html`) — una sola, porque dos copias de esa aritmética son dos mapas
+  que pueden discrepar sobre dónde está el mismo edificio sin dar ningún error. El servidor de
+  teselas viaja en los datos (`tiles`) y **está vacío de fábrica**: encenderlo hace que el
+  navegador de cada persona le cuente a un tercero dónde están los datacenters de la casa.
 - `perms`: expresión declarativa evaluada en el frontend — `any` = mostrar si el usuario tiene
   ALGUNO de esos flags; `prefix` = OR de cualquier flag que empiece por esos prefijos (per-servidor).
 - `view.filter` (solo tablas): filtrado server-side declarativo. `store` = clave del `dataset`
@@ -180,16 +192,17 @@ flowchart TB
     decl["cada overview_widget.py<br/>OVERVIEW_WIDGETS [{id, view{kind}, stat/rows, perms, nav, …}]"]
     decl --> disc["discover_overview_widgets() (ordena por 'order')"]
     disc --> pub["discover_overview_widgets_public()<br/>(quita callables) → grid + selects del frontend"]
-    disc --> prov["discover_widget_stats() → {id: stat(wa)}<br/>discover_widget_rows()  → {id: rows(wa, f)}"]
+    disc --> prov["discover_widget_content() → {id: stat/content(wa)}<br/>discover_widget_rows()    → {id: rows(wa, f)}"]
     pub --> grid["Overview: pinta la rejilla (metadatos)"]
     grid -- "por cada widget visible" --> ajax["GET /api/v1/overview/widget/&lt;id&gt;"]
     ajax --> prov
-    prov --> resp["{content} (stat) · {rows} (table)"]
+    prov --> resp["{content} (stat · map) · {rows} (table)"]
     resp --> card["el widget renderiza su dato"]
 ```
 
 - **Qué datos:** metadatos (id/icono/label/layout/perms/nav/view) serializados al front; y, por
-  AJAX bajo demanda, el contenido real (`{value, badges}` para stats; `{rows}` para tablas).
+  AJAX bajo demanda, el contenido real (`{value, badges}` para stats; `{rows}` para tablas;
+  `{sites, tiles, …}` para un mapa).
 - **Dónde acaban:** la rejilla de Overview; cada widget carga su dato independiente por el endpoint
   genérico `/api/v1/overview/widget/<id>` (sin agregado monolítico).
 

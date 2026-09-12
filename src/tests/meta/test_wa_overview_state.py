@@ -43,8 +43,8 @@ def _js(name: str) -> str:
 
 class TestTheStateComesFromTheData:
 
-    def test_a_stat_card_is_tinted_from_its_own_content(self):
-        src = _js('_dwStatFetch')
+    def test_a_card_is_tinted_from_its_own_content(self):
+        src = _js('_dwFetchContent')
         assert '_dwApplyState(' in src, 'the fetched content never reaches the tint'
         assert '.state' in src, 'the tint is not read from the content the widget served'
 
@@ -78,7 +78,7 @@ class TestTheTintSurvivesARedraw:
         cause, which is worse than never having tinted."""
         assert '_dwStateClass(' in _read(RENDER), 'the rebuilt grid drops the state class'
         src = _js('_dwState')
-        assert '_dwStatContent[id]' in src and '_dwTableRows[id]' in src, (
+        assert '_dwFetched[id]' in src and '_dwTableRows[id]' in src, (
             'the state is not derived from what was last fetched')
 
     def test_content_swapped_in_place_is_re_stated(self):

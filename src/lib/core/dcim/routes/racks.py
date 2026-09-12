@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from flask import jsonify, request
 
+import lib.maps as maps
+
 from lib.core.dcim import builds as dcim_builds
 from lib.core.dcim import catalog as dcim_catalog
 from lib.core.dcim import media as dcim_media
@@ -109,7 +111,10 @@ def register(app, wa, C):
         if not store:
             return jsonify({'sites': [], 'orgs': [], 'trouble': [], 'totals': {}})
         out = dcim_svc.board(
-            store, C.states(), store.owners_map(), C.seen(), store.orgs.list())
+            store, C.states(), store.owners_map(), C.seen(), store.orgs.list(),
+            # Con qué NOMBRAR lo que está mal: el hueco de un armario no siempre lleva
+            # etiqueta, y una fila que dice el uid de la máquina no dice nada.
+            host_names=C.names())
         # Con qué se dibuja el mapa. Viaja con el cuadro y no en una ruta aparte: es la misma
         # pantalla, y una petición más para dos cadenas es una petición más en cada apertura.
         # Y los enlaces entre sedes, con su estado y lo que se les ve mal. Viajan con el
@@ -132,10 +137,10 @@ def register(app, wa, C):
                             por_item[it['uid']] = dcim_svc.item_state(it, C.states())
         out.update(dcim_svc.links_roll(enlaces, out['sites'], por_item))
         out['link_kinds'] = list(LINK_KINDS)
-        out['map'] = {
-            'tiles': str(getattr(wa, '_DCIM_MAP_TILES', '') or ''),
-            'attribution': str(getattr(wa, '_DCIM_MAP_ATTRIBUTION', '') or ''),
-        }
+        # Con qué se dibuja, preguntado al catálogo: para Google hay que minar una sesión, y
+        # eso no lo puede hacer un navegador. Lo mismo que recibe la tarjeta del panel de
+        # control, para que las dos pantallas no puedan dibujar mapas distintos.
+        out['map'] = maps.settings(wa)
         return jsonify(out)
 
     @app.route('/api/v1/dcim/media-dir', methods=['GET'])

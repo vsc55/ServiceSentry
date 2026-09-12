@@ -48,6 +48,20 @@ from lib.debug.debug_level import DebugLevel
 # How often to ask "is one due?". See the module docstring: the answer does not go stale.
 TICK_SECONDS = 600
 
+# How long to wait before the FIRST round of a freshly started process.
+#
+# It used to be a whole tick, for a good reason badly sized: running during start-up, while the
+# stores are still being built, is worth avoiding. Ten minutes of grace also means a process
+# that restarts more often than that **never ticks at all** — and nothing anywhere says so. A
+# container in a crash loop, a panel being restarted while somebody works on it: the schedule
+# quietly stops, the copies stop with it, and the only sign is a folder whose newest file gets
+# older. Found exactly that way, from a screen that said the next copy was due «now» and kept
+# saying it: the copy due at 01:13 had not been taken at 01:33, and the newest archive on disk
+# was from the previous night.
+#
+# A minute gives start-up all the room it needs and costs a restarting process nothing.
+FIRST_TICK_SECONDS = 60
+
 # The lease key. Its own rather than borrowing the monitoring one: an install that runs no
 # checks still takes backups, and tying the two would make "monitoring off" mean "no copies"
 # without anybody saying so.
@@ -84,8 +98,14 @@ class BackupRunner(_JobsMixin):
 
     # ── The loop ─────────────────────────────────────────────────────────────
     def _loop(self) -> None:
-        # A first tick right away would run during start-up, while stores are still being
-        # built; one tick of grace costs nothing an interval-based schedule notices.
+        # A short grace and not a whole tick: see `FIRST_TICK_SECONDS`. A process that restarts
+        # more often than its own interval used to take no copies at all, silently.
+        if self._stop.wait(FIRST_TICK_SECONDS):
+            return
+        try:
+            self.tick()
+        except Exception as exc:      # pylint: disable=broad-except
+            self._audit_failure(str(exc))
         while not self._stop.wait(TICK_SECONDS):
             try:
                 self.tick()

@@ -23,6 +23,14 @@ MODULE_PERMISSIONS = {
 # groups them apart for exactly that reason — the two kinds of action there have opposite
 # consequences, and a row of identical red buttons said otherwise.
 CONFIG_ACTIONS = [
+    # Probar el mapa. En esta lista y no en el inventario porque la tarjeta es del panel: la
+    # usan dos pantallas de dos sitios distintos, y lo que se prueba es un AJUSTE — que es de lo
+    # que va este dominio.
+    {'section': 'maps', 'id': 'map_test',
+     'label_key': 'map_test', 'tooltip_key': 'map_test_tt',
+     'icon': 'bi-plug', 'variant': 'secondary', 'order': 10,
+     'group_label_key': 'map_actions', 'perm': 'config_edit',
+     'fn': 'mapTest'},
     {'section': 'maintenance', 'id': 'db_optimize',
      'label_key': 'db_optimize', 'tooltip_key': 'db_optimize_tt',
      'desc_key': 'db_optimize_desc',

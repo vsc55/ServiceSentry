@@ -65,6 +65,11 @@ function _dcimBoardHtml() {
                 <button class="btn btn-sm btn-secondary" onclick="_dcimToggleMap()">
                     <i class="bi bi-map me-1"></i>${esc(t(_dcimMap ? 'dcim_map_hide'
                                                                   : 'dcim_map'))}</button>
+                ${_dcimMap && _dcimMay('dcim_edit') ? `
+                <button class="btn btn-sm ${_dcimMove ? 'btn-warning' : 'btn-secondary'}"
+                        title="${escAttr(t('dcim_move_tt'))}"
+                        onclick="_dcimToggleMove()">
+                    <i class="bi bi-arrows-move me-1"></i>${esc(t('dcim_move'))}</button>` : ''}
                 ${_dcimMap ? ssCanvasTools(_DCM_SVG, 'dcim_sitemap') : ''}
                 <button class="btn btn-sm btn-secondary" onclick="_dcimOpenBoard()">
                     <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
@@ -88,14 +93,29 @@ function _dcimBoardHtml() {
 function _dcimBoardTiles(sites) {
     if (!sites.length)
         return `<div class="text-muted small">${esc(t('dcim_no_sites'))}</div>`;
-    return `<div class="ss-tiles mb-3">${sites.map(s => {
+    return `<div class="ss-tiles mb-3" onmouseleave="_dcmCool()">${sites.map(s => {
         const tone = {error: 'danger', warning: 'warning', ok: 'success'}[s.state] || 'secondary';
-        return `<div class="card ss-tile border-${tone}"
+        // Una sede con algo caído se pinta ENTERA, y con un símbolo. Un borde de un píxel es
+        // lo que distingue «once de catorce» de «todo bien» en una fila de siete tarjetas
+        // iguales, y a un metro de la pantalla —que es desde donde se mira un cuadro de
+        // mando— ese píxel no está. Reportado desde la pantalla: la sede con un equipo caído
+        // no se distinguía de las otras seis.
+        //
+        // Fondo, borde y símbolo, no solo color: quien no separa el rojo del verde sigue
+        // viendo qué tarjeta hay que mirar.
+        const malo = s.state === 'error' || s.state === 'warning';
+        return `<div class="card ss-tile border-${tone} ${
+                         malo ? `border-2 bg-${tone}-subtle` : ''}"
                      role="button" tabindex="0"
+                     onmouseenter="_dcmRaise(${jsStr(s.uid)})"
+                     onfocus="_dcmRaise(${jsStr(s.uid)})"
                      onclick="_dcimBoardGoSite(${jsStr(s.uid)})"
                      onkeydown="if(event.key==='Enter')_dcimBoardGoSite(${jsStr(s.uid)})">
             <div class="card-body py-2 px-3">
                 <div class="d-flex align-items-center gap-2">
+                    ${malo ? `<i class="bi bi-${s.state === 'error' ? 'exclamation-octagon-fill'
+                                                                    : 'exclamation-triangle-fill'
+                                              } text-${tone}-emphasis"></i>` : ''}
                     <span class="fw-semibold text-truncate" title="${escAttr(s.name)}">${
                         esc(s.name)}</span>
                     <span class="badge text-bg-${tone} fw-normal ms-auto">${
@@ -122,14 +142,10 @@ function _dcimBoardTiles(sites) {
  *  calla, que es lo que puede decir con verdad. */
 function _dcimLocalTime(site) {
     const tz = String(site.timezone || '').trim();
-    if (!tz) return '';
-    let hora = '';
-    try {
-        hora = new Date().toLocaleTimeString(undefined, {
-            timeZone: tz, hour: '2-digit', minute: '2-digit'});
-    } catch (e) {
-        return '';
-    }
+    // La conversión es del panel (`ssLocalTime`): la quieren esta pantalla y la ficha del mapa,
+    // y dos relojes son dos que pueden dar horas distintas de la misma sede.
+    const hora = ssLocalTime(tz);
+    if (!hora) return '';
     return `<div class="text-muted ss-fs-1 ss-tabular" title="${escAttr(tz)}">
         <i class="bi bi-clock me-1"></i>${esc(hora)}</div>`;
 }
@@ -276,6 +292,14 @@ async function _dcimBoardGoRack(uid) {
 }
 
 /** Y desde una tarjeta, a la sede: el árbol abierto por donde hay que mirar. */
+/** Ir a una sede. **Pública a propósito**: la nombra el manifiesto del widget del mapa
+ *  (`view.pin_nav`) para que pulsar una chincheta en el panel de control lleve a esa sede, y el
+ *  panel no tiene por qué saber cómo se abre una — sólo a quién preguntárselo.
+ *
+ *  Aguanta que la sección no esté dibujada todavía, que es como llega desde fuera: marcar,
+ *  pintar y luego buscar el elemento. */
+function dcimGoSite(uid) { _dcimBoardGoSite(uid); }
+
 function _dcimBoardGoSite(uid) {
     _dcimMark('inventory');         // una sede es inventario, y la URL tiene que decirlo
     _dcimBoard = null;

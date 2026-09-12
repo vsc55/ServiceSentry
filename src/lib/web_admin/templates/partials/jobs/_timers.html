@@ -1,0 +1,223 @@
+{#
+   Trabajos › Temporizadores: lo que despierta solo.
+
+   Aparte del render principal por la convención de tamaño —un fichero de pantalla se parte en
+   sub-secciones, como ipban/_bans|_history|_whitelist— y porque de verdad es otra pregunta: la
+   lista de al lado dice qué se está HACIENDO, y ésta qué hay MONTADO. La segunda contesta lo
+   mismo con el panel parado que trabajando, y ése es su valor: lo que no se ve es lo que nadie
+   revisa.
+
+   Una TABLA, como el resto del panel: cinco filas caben sin desplazar y se leen bajando por una
+   columna — «¿cuál está atrasado?» se contesta con la vista y no con el ratón. Lo que la tabla
+   no podía dar por sí sola es la única cifra que se mira de verdad, y por eso la cuenta atrás
+   corre en el navegador: un número quieto que dice «dentro de 3 min» lleva mintiendo desde que
+   se pintó.
+#}
+//: Cómo se escribe una duración en esta pantalla, y por qué de esta forma.
+//:
+//: Dos cifras y no una, dos unidades y no un reloj: «2 min 40 s» se lee de un vistazo y «2:40»
+//: hay que interpretarlo —¿minutos y segundos, u horas y minutos?—. Y por debajo de una hora
+//: entran los segundos, que es justo cuando importa el segundo; por encima sobran, y una cifra
+//: que cambia sesenta veces por minuto en algo que falta medio día es ruido que se ignora.
+function _jobsDur(secs) {
+    secs = Math.max(0, Math.round(secs));
+    if (secs < 60) return tf('jobs_dur_s', secs);
+    if (secs < 3600) {
+        const m = Math.floor(secs / 60), s = secs % 60;
+        return s ? tf('jobs_dur_ms', m, s) : tf('jobs_dur_m', m);
+    }
+    if (secs < 86400) {
+        const h = Math.floor(secs / 3600), m = Math.floor(secs / 60) % 60;
+        return m ? tf('jobs_dur_hm', h, m) : tf('jobs_dur_h', h);
+    }
+    return tf('jobs_dur_d', +(secs / 86400).toFixed(1));
+}
+
+/** El intervalo, **sin la palabra «cada»**: ya la lleva la cabecera de la columna.
+ *
+ *  Decirla otra vez en cada fila es la misma palabra cinco veces en vertical, y roba el sitio
+ *  que necesita el número. Y 86400 se dice «24 h» y no «1 día(s)»: un plural entre paréntesis
+ *  es lo que escribe un programa, no una persona. */
+function _jobsEvery(secs) {
+    if (!secs) return '';
+    if (secs === 86400) return tf('jobs_dur_h', 24);
+    return _jobsDur(secs);
+}
+
+/** Cuánto falta. Cambia cada segundo delante de quien lo mira. */
+function _jobsCountdown(secs) {
+    return secs <= 0 ? t('jobs_timers_now') : _jobsDur(secs);
+}
+
+/** Cuánto lleva de retraso, dicho como retraso y no como cuenta atrás.
+ *
+ *  «Atrasado 8 min» y no «+hace 8 min»: reutilicé el formateador de tiempo transcurrido —que ya
+ *  incluye la palabra «hace»— y le pegué un signo delante. Salió en la pantalla. */
+function _jobsLate(secs) {
+    return tf('jobs_timers_late_by', _jobsDur(secs));
+}
+
+/** Lo que despierta solo, en una tabla.
+ *
+ *  La cifra que se mira es «cuánto falta», así que va en su propia columna con una barra detrás
+ *  — la barra dice de un vistazo si queda mucho o poco, y el número dice cuánto. */
+function _jobsTimersHtml() {
+    const d = _jobsTimers || {timers: [], summary: {}, now: 0};
+    const filas = d.timers || [];
+    if (!filas.length)
+        return `<div class="text-center text-muted py-5">
+            <i class="bi bi-stopwatch ss-empty-icon"></i>${esc(t('jobs_timers_empty'))}</div>`;
+    const suelto = (d.summary || {}).unleased || 0;
+    return `<div class="ss-panel"><div class="table-responsive">
+      <table class="table table-sm align-middle mb-0 ss-timer-table">
+        <thead class="ss-timer-head"><tr>
+            <th class="ss-timer-dot-col"></th>
+            <th>${esc(t('jobs_timers_col_timer'))}</th>
+            <th class="d-none d-md-table-cell">${esc(t('jobs_timers_every'))}</th>
+            <th class="ss-timer-next-col">${esc(t('jobs_timers_next'))}</th>
+            <th class="text-end">${esc(t('jobs_timers_where'))}</th>
+        </tr></thead>
+        <tbody>${filas.map(r => _jobsTimerRow(r, d.now)).join('')}</tbody>
+    </table></div></div>
+    ${suelto ? `<div class="text-muted ss-fs-2 pt-2">
+        <i class="bi bi-diagram-3 me-1"></i>${esc(suelto === 1 ? t('jobs_timers_unleased_one')
+                                                              : tf('jobs_timers_unleased', suelto))
+        }</div>` : ''}`;
+}
+
+//: Cómo se pinta cada estado: color del punto y palabra. Un mapa y no tres ternarios repartidos
+//: por la plantilla — el día que haya un cuarto estado se añade aquí y ya está.
+const _JOBS_TIMER_STATE = {
+    overdue: {dot: 'ss-timer-dot-late',  key: 'jobs_timers_overdue'},
+    running: {dot: 'ss-timer-dot-on',    key: 'jobs_timers_running'},
+    idle:    {dot: 'ss-timer-dot-off',   key: 'jobs_timers_idle'},
+    stopped: {dot: 'ss-timer-dot-none',  key: 'jobs_timers_stopped'},
+};
+
+function _jobsTimerRow(r, now) {
+    // Tres estados, y son tres porque dos mienten.
+    //
+    //   Activo      el cron corre y cada vuelta hace algo
+    //   Sin efecto  el cron **corre igual**, pero su trabajo está desactivado en Configuración
+    //   Detenido    el cron no está montado
+    //
+    // La primera versión ponía «Apagado» al de en medio, y era falso: el hilo despierta cada
+    // treinta segundos, está vivo, y lo único apagado es lo que hace al despertar. «Detenido»
+    // tiene que significar que no corre, o manda a buscar un proceso muerto que está vivo.
+    const est = _JOBS_TIMER_STATE[r.overdue ? 'overdue' : (r.state || 'idle')]
+              || _JOBS_TIMER_STATE.idle;
+    return `<tr>
+        <td><span class="ss-timer-dot ${est.dot}" title="${esc(t(est.key))}"></span></td>
+        <td>
+            <div class="fw-medium">${esc(r.label || r.id)}</div>
+            ${_jobsTimerSub(r)}
+        </td>
+        <td class="font-monospace ss-fs-2 text-muted ss-tabular
+                   d-none d-md-table-cell">${esc(_jobsEvery(r.every))}</td>
+        <td>${_jobsTimerNext(r, now)}</td>
+        <td class="text-end">${_jobsTimerWhere(r)}</td>
+    </tr>`;
+}
+
+/** La sublínea del nombre: UNA, no dos.
+ *
+ *  Un temporizador sin efecto tiene algo más útil que decir que lo que hace —que ahora mismo no
+ *  hace nada—: **qué lo enciende**. Así que ahí sustituye a la descripción en vez de sumarse a
+ *  ella; tres líneas en una celda hacen la fila el doble de alta que las demás y la tabla deja
+ *  de leerse bajando por una columna, que es justo para lo que se eligió una tabla. */
+function _jobsTimerSub(r) {
+    if (r.state === 'idle' && (r.setting_label || r.setting))
+        return `<div class="ss-fs-1 text-body-tertiary">${esc(
+            tf('jobs_timers_needs', r.setting_label || r.setting))}</div>`;
+    return r.detail ? `<div class="text-muted ss-fs-1">${esc(r.detail)}</div>` : '';
+}
+
+/** La columna que se mira. Corre sola: ver `_jobsTimersTick`.
+ *
+ *  `data-ss-next` y `data-ss-every` viajan en el DOM para que el tic no tenga que volver a
+ *  pintar la tabla entera cada segundo — repintar cinco filas por segundo tira el foco, cierra
+ *  cualquier menú abierto y hace parpadear la selección de texto. */
+function _jobsTimerNext(r, now) {
+    if (r.overdue && r.next_run)
+        return `<span class="ss-pill ss-pill-warn" data-ss-next="${r.next_run}"
+                      data-ss-late="1">${esc(_jobsLate(now - r.next_run))}</span>`;
+    if (!r.next_run)
+        return `<span class="ss-pill">${esc(
+            r.state === 'idle' ? t('jobs_timers_idle')
+          : r.state === 'stopped' ? t('jobs_timers_stopped')
+          : t('jobs_timers_never'))}</span>`;
+    const falta = Math.max(0, r.next_run - now);
+    const pct = r.every ? Math.max(0, Math.min(100, 100 * (r.every - falta) / r.every)) : 0;
+    return `<div class="ss-timer-next" data-ss-next="${r.next_run}" data-ss-every="${r.every || 0}">
+        <span class="ss-timer-bar"><i style="width:${pct.toFixed(1)}%"></i></span>
+        <span class="ss-timer-num font-monospace ss-tabular"
+            >${esc(_jobsCountdown(falta))}</span>
+    </div>`;
+}
+
+/** Dónde corre, con **tres** respuestas y no dos.
+ *
+ *      sin arriendo ....... en TODAS las réplicas
+ *      lo sostiene ahora .. ese host
+ *      lo sostuvo ......... ese host, en gris — que para un trabajo lento es lo NORMAL: un
+ *                           escaneo diario con arriendo de una hora lo tiene caducado el 96 %
+ *                           del tiempo, y pintarlo en ámbar es una alarma que no dice nada
+ *
+ *  El ámbar se queda para el único caso que es noticia: debería estar corriendo y no lo tiene
+ *  nadie. */
+function _jobsTimerWhere(r) {
+    if (!r.lease)
+        return `<span class="text-muted ss-fs-2"><i class="bi bi-diagram-3 me-1"></i>${
+            esc(t('jobs_timers_everywhere'))}</span>`;
+    if (r.host || r.holder)
+        return `<span class="font-monospace ss-fs-2${r.holding ? '' : ' text-muted'}"
+                      title="${esc(r.holding ? '' : t('jobs_timers_last_held'))}"
+            >${esc(r.host || r.holder)}</span>`;
+    return r.state === 'running'
+        ? `<span class="text-warning ss-fs-2">${esc(t('jobs_timers_nobody'))}</span>`
+        : `<span class="text-muted">—</span>`;
+}
+
+//: El tic de la cuenta atrás, y el desfase entre los dos relojes.
+//:
+//: El servidor manda `now` con la lista precisamente para esto: el reloj del navegador puede ir
+//: un minuto adelantado, y una cuenta atrás calculada sobre él enseña como pendiente algo que ya
+//: corrió. Se guarda la diferencia UNA vez, al recibir la lista, y todo lo demás se cuenta desde
+//: ahí.
+let _jobsTimerTick = null;
+let _jobsTimerSkew = 0;
+
+/** Arrancar o parar el tic según lo que haya en pantalla.
+ *
+ *  Se llama después de cada pintada. Un contador corriendo sobre una pestaña que nadie está
+ *  mirando es trabajo para nadie — la misma regla que ya sigue el refresco de la lista de
+ *  trabajos, y por el mismo motivo. */
+function _jobsTimersSchedule() {
+    if (_jobsTimerTick) { clearInterval(_jobsTimerTick); _jobsTimerTick = null; }
+    if (_jobsTab !== 'timers') return;
+    if (!document.querySelector('[data-ss-next]')) return;
+    _jobsTimerTick = setInterval(_jobsTimersTick, 1000);
+}
+
+function _jobsTimersTick() {
+    const pane = document.getElementById('tab-jobs');
+    if (!pane || !pane.classList.contains('active') || _jobsTab !== 'timers') {
+        clearInterval(_jobsTimerTick); _jobsTimerTick = null; return;
+    }
+    const ahora = Date.now() / 1000 + _jobsTimerSkew;
+    document.querySelectorAll('[data-ss-next]').forEach(el => {
+        const cuando = parseFloat(el.getAttribute('data-ss-next')) || 0;
+        if (!cuando) return;
+        if (el.hasAttribute('data-ss-late')) {
+            el.textContent = _jobsLate(Math.max(0, ahora - cuando));
+            return;
+        }
+        const cada = parseFloat(el.getAttribute('data-ss-every')) || 0;
+        const falta = Math.max(0, cuando - ahora);
+        const num = el.querySelector('.ss-timer-num');
+        const bar = el.querySelector('.ss-timer-bar > i');
+        if (num) num.textContent = _jobsCountdown(falta);
+        if (bar && cada) bar.style.width =
+            Math.max(0, Math.min(100, 100 * (cada - falta) / cada)).toFixed(1) + '%';
+    });
+}

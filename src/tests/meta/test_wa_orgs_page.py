@@ -199,3 +199,37 @@ class TestLoQueSeEscribeSeEscribeConPermiso:
         assert 'orgs_edit' not in filas, 'las filas se esconden a quien no puede escribir'
         assert "_orgsMay('orgs_edit')" in spec.split('prepare:')[1].split('rows:')[0], \
             'nadie resuelve el permiso una vez por dibujado'
+
+
+class TestLoMantenidoNoSeTecleaEnElCuadro:
+    """Su nombre, su abreviatura y su descripción los corrige el origen en cada importación. Un
+    campo que se puede escribir y se revierte solo es peor que uno que no se puede."""
+
+    def _cuadro(self):
+        js = _read(UI)
+        return js.split('function _orgModalOpen(')[1].split(chr(10) + '}' + chr(10))[0]
+
+    def test_las_tres_cajas_se_bloquean(self):
+        cuerpo = self._cuadro()
+        assert 'readOnly' in cuerpo
+        for campo in ("'omName'", "'omShort'", "'omDescription'"):
+            assert campo in cuerpo, campo
+
+    def test_y_el_aviso_dice_quien_la_mantiene(self):
+        """Una caja bloqueada sin explicación es una pantalla rota."""
+        assert 'omManaged' in self._cuadro()
+        assert "tf('orgs_managed'" in self._cuadro()
+
+    def test_y_se_ofrece_la_salida(self):
+        """Sin ella, quitar el proveedor deja filas que nadie mantiene y nadie puede corregir."""
+        js = _read(UI)
+        assert 'function _orgsUnlink(' in js
+        assert '/source' in js.split('function _orgsUnlink(')[1][:400]
+        assert "t('orgs_unlink')" in self._cuadro()
+
+    def test_y_guardar_no_se_ofrece_cuando_no_hay_nada_que_guardar(self):
+        assert 'btnOrgModalOk' in self._cuadro()
+
+    def test_pero_un_alta_se_teclea_entera(self):
+        """`nuevo` manda: una empresa que se está creando no la mantiene nadie todavía."""
+        assert 'o.source && !nuevo' in self._cuadro()

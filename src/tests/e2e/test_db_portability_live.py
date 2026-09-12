@@ -39,7 +39,9 @@ import pytest
 
 from lib.db import get_connector
 
-_STORE_TABLES = ('check_state', 'history', 'hosts', 'groups', 'groups_roles', 'audit',
+_STORE_TABLES = ('check_state', 'history', 'history_series', 'history_fact',
+                 'history_field', 'hosts', 'groups',
+                 'groups_roles', 'audit',
                  'event_cursor', 'event_cooldowns', 'service_leader',
                  'users', 'users_groups', 'roles', 'config', 'entity_versions',
                  'ss_deftest', '__ssreb_ss_deftest', '__ssbak_ss_deftest')
@@ -302,8 +304,15 @@ def test_the_whole_panel_boots_and_serves_on_the_real_engine(live_db, tmp_path):
                         sig = inspect.signature(meth)
                     except (TypeError, ValueError):
                         continue
+                    # KEYWORD_ONLY cuenta igual que posicional: un parámetro obligatorio es
+                    # obligatorio se pase como se pase. Sin él, `ApiTokenStore.create(*,
+                    # user_uid, name, token_id, ...)` pasaba el filtro —no tiene ni uno
+                    # posicional— y se llamaba sin argumentos, que es un TypeError contado como
+                    # «lectura que falla en el motor vivo». El barrido es de lecturas SIN
+                    # parámetros; ésa tiene ocho.
                     if any(p.default is inspect.Parameter.empty
-                           and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+                           and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD,
+                                          p.KEYWORD_ONLY)
                            for p in sig.parameters.values()):
                         continue
                     try:

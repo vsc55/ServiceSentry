@@ -552,6 +552,94 @@ class TestLaRefrigeracionDeUnaSala:
                                 'rear_door', 'split'}
 
 
+class TestLoQueAlguienApagoAProposito:
+    """Una máquina en mantenimiento con sus comprobaciones fallando salía **«Mantenimiento»** en
+    la lista de la flota y **«Caído»** en el cuadro de mando y en la tarjeta del panel de
+    control. Dos pantallas, dos respuestas sobre la misma máquina, y la que despierta a alguien
+    de madrugada era la equivocada.
+
+    `_host_statuses` no dobla el mantenimiento a propósito —la flota lo enseña como lo que es,
+    un estado que PISA al otro— y esta pantalla lo cogía crudo. Se cuenta como **sin vigilar**,
+    que es lo que de verdad pasa: nadie la está mirando ahora, y es una decisión de alguien.
+    Verde sería mentir sobre una máquina que no contesta.
+
+    Reportado desde la pantalla, con los datos delante: la sede salía en rojo por una máquina
+    puesta en mantenimiento hacía días."""
+
+    class _Wa:
+        def __init__(self, filas):
+            self._hosts_store = type('S', (), {'list': lambda s, decrypt=True: filas})()
+
+    _FILAS = [{'uid': 'h1', 'name': 'PVE01', 'maintenance': 0},
+              {'uid': 'h2', 'name': 'PVE20', 'maintenance': 1}]
+
+    def _states(self, monkeypatch, crudo):
+        from lib.core.dcim import service                            # noqa: PLC0415
+        from lib.core.hosts import service as hosts_svc              # noqa: PLC0415
+        monkeypatch.setattr(hosts_svc, '_host_statuses', lambda wa: crudo)
+        return service.states_for(self._Wa(self._FILAS), {'devices_view'})
+
+    def test_la_maquina_en_mantenimiento_no_sale_caida(self, monkeypatch):
+        assert self._states(monkeypatch, {'h1': 'ok', 'h2': 'error'}) == {'h1': 'ok'}
+
+    def test_ni_en_aviso(self, monkeypatch):
+        """Un aviso también pinta ámbar en el armario y también viene de una comprobación que
+        nadie está mirando."""
+        assert 'h2' not in self._states(monkeypatch, {'h1': 'ok', 'h2': 'warning'})
+
+    def test_pero_tampoco_se_pinta_verde(self, monkeypatch):
+        """Que sería la otra forma de mentir: decir que está bien una máquina que no contesta.
+        Sin estado, el armario la pinta gris y la cuenta aparte."""
+        assert self._states(monkeypatch, {'h2': 'ok'}) == {}
+
+    def test_y_las_demas_siguen_diciendo_lo_que_dicen(self, monkeypatch):
+        """Lo que no puede romperse al arreglar lo otro."""
+        assert self._states(monkeypatch, {'h1': 'error'}) == {'h1': 'error'}
+
+    def test_sin_registro_no_se_esconde_nada(self, monkeypatch):
+        """Una instalación sin registro de flota no puede saber quién está en obras, y callar
+        todos los estados sería peor que el fallo que se arregla."""
+        from lib.core.dcim import service                            # noqa: PLC0415
+        from lib.core.hosts import service as hosts_svc              # noqa: PLC0415
+        monkeypatch.setattr(hosts_svc, '_host_statuses', lambda wa: {'h1': 'error'})
+        assert service.states_for(type('W', (), {})(), {'devices_view'}) == {'h1': 'error'}
+
+
+class TestElNombreSeAcotaComoElColor:
+    """A quien se le esconde una máquina se le esconde su nombre. Una lista de averías es un
+    sitio comodísimo por donde enseñar el inventario del vecino: la pantalla se ve perfecta
+    con datos que no debería estar dando.
+
+    Con la MISMA regla que acota el estado (`states_for`), y no con una lectura entera del
+    registro: dos formas de decir lo mismo son dos sitios donde una puede quedarse sin
+    aplicar, y la que se olvida no da ningún error el día que se escribe."""
+
+    class _Wa:
+        def __init__(self, filas):
+            self._hosts_store = type('S', (), {'list': lambda s, decrypt=True: filas})()
+
+    _FILAS = [{'uid': 'h1', 'name': 'DB03'}, {'uid': 'h2', 'name': 'SW-CORE'}]
+
+    def test_con_el_permiso_del_registro_salen_todas(self):
+        from lib.core.dcim import service
+        assert service.names_for(self._Wa(self._FILAS), {'devices_view'}) == {
+            'h1': 'DB03', 'h2': 'SW-CORE'}
+
+    def test_sin_el_permiso_solo_las_concedidas_una_a_una(self):
+        from lib.core.dcim import service
+        assert service.names_for(self._Wa(self._FILAS), {'server.h2.view'}) == {'h2': 'SW-CORE'}
+
+    def test_y_sin_nada_ninguna(self):
+        from lib.core.dcim import service
+        assert service.names_for(self._Wa(self._FILAS), set()) == {}
+
+    def test_sin_registro_no_hay_nombres_y_no_hay_error(self):
+        """El cuadro se dibuja igual en una instalación sin registro de flota: sin nombres,
+        con el camino, que es lo que hay que decir."""
+        from lib.core.dcim import service
+        assert service.names_for(type('W', (), {})(), {'devices_view'}) == {}
+
+
 # ══ El cuadro de mando ══════════════════════════════════════════════════════════════════
 
 class TestElCuadroDicePorDondeSeLlega:
@@ -581,6 +669,38 @@ class TestElCuadroDicePorDondeSeLlega:
         assert fila['u'] == 12 and fila['name'] == 'DB03'
         # …y con los uid, que es lo que permite llevar a alguien allí de un clic.
         assert fila['rack_uid'] == fleet['rack'] and fila['site_uid'] == fleet['site']
+
+    def test_y_el_hueco_sin_etiqueta_toma_el_nombre_de_su_maquina(self, store, fleet):
+        """Un uid no se lee por teléfono. La lista existe para decirse en voz alta mientras el
+        otro camina hacia el armario, y `2b4752f6-6341-4ed1-9c37-412455c5379f` no dice nada.
+
+        Quien coloca un equipo puede etiquetar el hueco y muchas veces no lo hace: el nombre ya
+        está en el registro de la flota, y escribirlo dos veces es tenerlo mal en uno de los
+        dos sitios. Se veía en pantalla, con el uid en la columna del nombre."""
+        from lib.core.dcim import service
+        store.items.create({'rack_uid': fleet['rack'], 'u_start': 30, 'host_uid': 'h-db03'})
+        b = service.board(store, {'h-db03': 'error'}, store.owners_map(), None,
+                          store.orgs.list(), host_names={'h-db03': 'DB03'})
+        assert b['trouble'][0]['name'] == 'DB03'
+
+    def test_pero_la_etiqueta_del_hueco_manda(self, store, fleet):
+        """La escribió alguien delante del armario, sabiendo lo que hay ahí. El registro es de
+        dónde sale el nombre cuando no hay etiqueta, no algo que la pise."""
+        from lib.core.dcim import service
+        store.items.create({'rack_uid': fleet['rack'], 'u_start': 30, 'label': 'Cabina A',
+                            'host_uid': 'h-db03'})
+        b = service.board(store, {'h-db03': 'error'}, store.owners_map(), None,
+                          store.orgs.list(), host_names={'h-db03': 'DB03'})
+        assert b['trouble'][0]['name'] == 'Cabina A'
+
+    def test_y_sin_nombres_sigue_dando_el_camino(self, store, fleet):
+        """Un registro que no se puede leer no puede dejar la lista sin filas: el camino hasta
+        el armario sigue siendo verdad y sigue sirviendo."""
+        from lib.core.dcim import service
+        store.items.create({'rack_uid': fleet['rack'], 'u_start': 30, 'host_uid': 'h-db03'})
+        b = service.board(store, {'h-db03': 'error'}, store.owners_map(), None,
+                          store.orgs.list())
+        assert b['trouble'][0]['rack'] == 'R3' and b['trouble'][0]['name'] == ''
 
     def test_lo_peor_primero(self, store, fleet):
         from lib.core.dcim import service

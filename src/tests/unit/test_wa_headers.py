@@ -117,31 +117,59 @@ class TestElMapaAbreImgSrcYNadaMas:
 
 
 class TestElOrigenSaleDeLaPlantilla:
-    """Escrito en el código sería un agujero abierto el día que nadie usa el mapa."""
+    """Escrito en el código sería un agujero abierto el día que nadie usa el mapa.
 
-    def _origins(self, tpl):
+    Y hay dos reglas, no una:
+
+    * **sin mapa no se abre nada**, que es la propiedad que de verdad se defiende — una
+      instalación que no usa mapas conserva exactamente la política que tenía;
+    * **con mapa se abren los del catálogo**, y no sólo el elegido. La política viaja en la
+      cabecera de cada página, así que con uno solo abierto cambiar de proveedor obligaba a
+      recargar antes de que el mapa nuevo pudiera cargar — y mientras tanto no cargaba nada, en
+      silencio. Lo que se paga son cinco direcciones fijas y conocidas en vez de una; lo que no
+      se paga, y es lo que importa, es abrirle nada a quien no usa mapas.
+    """
+
+    def _origins(self, tpl, provider=''):
         from lib.web_admin.mixins.embed import _EmbedMixin
 
         class _Wa(_EmbedMixin):
             _DCIM_MAP_TILES = tpl
+            _DCIM_MAP_PROVIDER = provider
         return _Wa()._image_origins()
 
     def test_de_una_plantilla_sale_su_origen(self):
-        assert self._origins('https://tile.openstreetmap.org/{z}/{x}/{y}.png') == [
-            'https://tile.openstreetmap.org']
+        assert 'https://tile.openstreetmap.org' in self._origins(
+            'https://tile.openstreetmap.org/{z}/{x}/{y}.png')
 
     def test_es_el_origen_y_no_la_url(self):
         """Una tesela es una ruta de un millón, y la directiva tiene que cubrirlas todas."""
         got = self._origins('https://tiles.example.net/hot/{z}/{x}/{y}@2x.png')
-        assert got == ['https://tiles.example.net']
+        assert 'https://tiles.example.net' in got
+        assert not any('{z}' in o or '@2x' in o for o in got), got
 
     def test_con_puerto_el_puerto_cuenta(self):
-        assert self._origins('http://192.0.2.10:8080/{z}/{x}/{y}.png') == [
-            'http://192.0.2.10:8080']
+        """Un espejo interno casi siempre está en un puerto raro, y un origen sin puerto no es
+        el mismo origen."""
+        assert 'http://192.0.2.10:8080' in self._origins(
+            'http://192.0.2.10:8080/{z}/{x}/{y}.png')
 
     def test_sin_mapa_no_hay_origen(self):
+        """La regla que sostiene todo lo demás."""
         assert self._origins('') == []
         assert self._origins('   ') == []
+
+    def test_con_mapa_se_abren_los_del_catalogo(self):
+        """Para que cambiar de proveedor no obligue a recargar la página."""
+        got = self._origins('', 'osm')
+        assert 'https://tile.openstreetmap.org' in got
+        assert 'https://basemaps.cartocdn.com' in got
+        assert len(got) >= 4, got
+
+    def test_pero_nunca_un_comodin(self):
+        """Direcciones fijas y escritas: un comodín sí cambiaría la forma de lo que se permite."""
+        for o in self._origins('', 'osm'):
+            assert o.startswith(('http://', 'https://')) and '*' not in o, o
 
     def test_una_plantilla_que_no_es_una_url_no_abre_nada(self):
         """Lo que no se entiende no se deja pasar: la respuesta a un ajuste mal escrito es un

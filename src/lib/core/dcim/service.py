@@ -63,6 +63,89 @@ def item_state(item, statuses) -> str:
     return str((statuses or {}).get(uid) or '')
 
 
+def states_for(wa, perms) -> dict:
+    """Cómo está cada máquina, **acotado a lo que este lector puede ver**.
+
+    La misma lectura de la que se dibuja la lista de la flota, para que un armario y la lista no
+    puedan discrepar sobre si una máquina está en apuros. Se pide una vez y se pasa hacia
+    abajo: por nodo serían cuarenta lecturas del mismo fichero de estado para pintar una sala.
+
+    Aquí, y no en las rutas, porque ya lo quieren dos: la sección y el widget de sedes del panel
+    de control. La regla que acota es la que puede equivocarse —quien no tiene `devices_view`
+    puede ver un armario y no puede saber cómo está una máquina que el registro le esconde— y
+    dos copias de esa regla son dos sitios donde se puede quedar sin aplicar; el que se olvida
+    no da ningún error el día que se escribe.
+
+    Un color no vale una página: si el estado no se puede leer, no hay estado.
+    """
+    from lib.core.hosts import service as hosts_svc      # noqa: PLC0415
+    try:
+        rows = hosts_svc._host_statuses(wa) or {}
+    except Exception:                                    # pylint: disable=broad-except
+        return {}
+    perms = set(perms or ())
+    if 'devices_view' not in perms:
+        rows = {uid: st for uid, st in rows.items() if f'server.{uid}.view' in perms}
+    # Y lo que alguien apagó a propósito no está caído.
+    #
+    # `_host_statuses` no dobla el mantenimiento a propósito —la lista de la flota lo enseña
+    # como lo que es, un estado que PISA al otro— y esta pantalla lo cogía crudo: una máquina en
+    # mantenimiento con sus comprobaciones fallando salía «Mantenimiento» en Infraestructura y
+    # **«Caído»** en el cuadro de mando y en la tarjeta del panel. Dos pantallas, dos respuestas,
+    # y la que despierta a alguien de madrugada era la equivocada. Reportado desde la pantalla:
+    # «el widget marca un error pero en dispositivos está todo OK».
+    #
+    # Se cuenta como SIN VIGILAR, que es lo que de verdad pasa: nadie la está mirando ahora, y
+    # es una decisión de alguien. Verde sería mentir sobre una máquina que no contesta.
+    en_obras = {str(h.get('uid') or '') for h in _registry_rows(wa) if h.get('maintenance')}
+    return {uid: st for uid, st in rows.items() if uid not in en_obras}
+
+
+def _registry_rows(wa) -> list:
+    """Las fichas de la flota, sin descifrar. De aquí salen el nombre y el mantenimiento."""
+    store = getattr(wa, '_hosts_store', None)
+    if store is None:
+        return []
+    try:
+        # Sin descifrar: de aquí se quieren dos campos, y descifrar la contraseña de cuarenta
+        # máquinas para leerlos es trabajo y es riesgo, los dos de balde.
+        return list(store.list(decrypt=False) or ())
+    except Exception:                                    # pylint: disable=broad-except
+        return []
+
+
+def names_for(wa, perms) -> dict:
+    """Cómo se **llama** cada máquina, acotado igual que su estado.
+
+    El cuadro de mando no dice «tres cosas mal»: dice cuáles, con el camino hasta cada una. Y
+    una fila que las nombra `2b4752f6-6341-4ed1-9c37-412455c5379f` no las nombra — eso no se
+    lee por teléfono mientras el otro camina hacia el armario, que es exactamente para lo que
+    está esa lista. Se veía en pantalla: el uid en la columna del nombre.
+
+    De dónde sale: quien coloca un equipo en un hueco puede ponerle etiqueta y muchas veces no
+    lo hace —el nombre ya está en el registro de la flota, y escribirlo dos veces es tenerlo
+    mal en uno de los dos sitios—. Así que el nombre lo pone el registro cuando el hueco no
+    trae etiqueta propia.
+
+    Con la MISMA regla que acota el estado (`states_for`) y no con una lectura entera del
+    registro: a quien se le esconde una máquina se le esconde su color y su nombre. Dos formas
+    de decir lo mismo son dos sitios donde una puede quedarse sin aplicar, y la que se olvida
+    no da ningún error el día que se escribe.
+    """
+    filas = _registry_rows(wa)
+    perms = set(perms or ())
+    todas = 'devices_view' in perms
+    out = {}
+    for h in filas:
+        uid = str(h.get('uid') or '')
+        if not uid or not (todas or f'server.{uid}.view' in perms):
+            continue
+        nombre = str(h.get('name') or '').strip()
+        if nombre:
+            out[uid] = nombre
+    return out
+
+
 def rack_roll(items, statuses) -> dict:
     """``{state, total, bad, unwatched}`` for the items **as given**.
 
@@ -305,7 +388,7 @@ def walk(store, said, allowed):
     return out
 
 
-def board(store, statuses, said, allowed, orgs=None) -> dict:
+def board(store, statuses, said, allowed, orgs=None, host_names=None) -> dict:
     """What is wrong, and **how to get to it**.
 
     ``{'sites': [...], 'orgs': [...], 'trouble': [...], 'totals': {...}}``.
@@ -324,6 +407,10 @@ def board(store, statuses, said, allowed, orgs=None) -> dict:
     what is in them.
     """
     names = {o['uid']: o.get('name') or o['uid'] for o in (orgs or ())}
+    #: Cómo se llama cada máquina (`names_for`), para nombrar lo que está mal. Se recibe hecho
+    #: en vez de leerlo aquí porque esta función no conoce el registro de la flota — y porque
+    #: quien solo quiere el mapa de sedes no tiene por qué pagar esa lectura.
+    hosts = host_names or {}
     sites, trouble, per_org = [], [], {}
 
     for site, rooms in walk(store, said, allowed):
@@ -356,14 +443,35 @@ def board(store, statuses, said, allowed, orgs=None) -> dict:
                         'room': room.get('name') or room['uid'], 'room_uid': room['uid'],
                         'rack': rack.get('name') or rack['uid'], 'rack_uid': rack['uid'],
                         'u': item.get('u_start'), 'face': item.get('face') or 'full',
-                        'name': item.get('label') or '', 'host_uid': item.get('host_uid') or '',
+                        # La etiqueta primero: la escribió alguien delante del armario y
+                        # manda sobre lo que dice el registro. Y si no hay, el nombre de la
+                        # máquina — nunca su uid, que no nombra nada.
+                        'name': (item.get('label')
+                                 or hosts.get(str(item.get('host_uid') or '')) or ''),
+                        'host_uid': item.get('host_uid') or '',
                         'item_uid': item['uid'],
                     })
+        # Lo que se pregunta delante de un punto rojo, y que hasta ahora no contestaba
+        # ninguna pantalla sin abrir la ficha: dónde está, a quién se llama y qué se ve al
+        # llegar. Viaja con el cuadro porque es de la misma lectura — pedirlo aparte sería una
+        # petición por sede para pintar una ficha que se enseña al pasar el ratón.
+        #
+        # El OPERADOR se dice por su nombre sólo a quien puede ver esa sociedad: enseñárselo a
+        # quien tiene la sede y no la empresa es contarle el organigrama del grupo por la puerta
+        # de atrás, que es la fuga de siempre con otro nombre.
+        operador = str(site.get('operator_uid') or '')
         sites.append({
             'uid': site['uid'], 'name': site.get('name') or site['uid'],
             'state': worst(s_states), 'rooms': n_rooms, 'racks': n_racks,
             'pos_x': site.get('pos_x'), 'pos_y': site.get('pos_y'),
             'lat': site.get('lat'), 'lon': site.get('lon'),
+            'address': str(site.get('address') or ''),
+            'contact': str(site.get('contact') or ''),
+            'phone': str(site.get('phone') or ''),
+            'photo': str(site.get('photo') or ''),
+            'description': str(site.get('description') or ''),
+            'operator': (names.get(operador, '')
+                         if operador and dcim_owners.may_see(operador, allowed) else ''),
             # La zona horaria viaja con la sede: la hora local se pinta en el navegador —que
             # sabe convertirla y no necesita preguntar— y sin el nombre no hay nada que
             # convertir. «Son las 4 de la mañana allí» es lo que decide si se llama ahora.

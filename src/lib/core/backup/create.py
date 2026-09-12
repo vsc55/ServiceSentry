@@ -86,7 +86,7 @@ def create_backup(connector, name: str, *, var_dir: str, config_dir: str,
          f'secrets={bool(include_secrets)} by={actor or "?"}')
 
     by_part = tables_by_part(connector, want, connectors)
-    tables = sorted({t for _pid, tabs in by_part for t in tabs})
+    tables = sorted({t for _pid, tabs, _err in by_part for t in tabs})
     counts: dict = {}
     # sha256 per member, so a copy can be checked without trusting the file it came in.
     digests: dict = {}
@@ -127,10 +127,18 @@ def create_backup(connector, name: str, *, var_dir: str, config_dir: str,
     try:
         with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zf:
             _done = 0
-            for part_id, part_tables in by_part:
-                step = {'part': part_id, 'ok': True, 'tables': len(part_tables),
-                        'rows': 0, 'error': ''}
+            for part_id, part_tables, unreachable in by_part:
+                # A part whose database could not even be ASKED is not a part with nothing in
+                # it. Both used to come out as zero tables and `ok`, so a copy taken while the
+                # syslog server was down said it was complete — and stayed indistinguishable
+                # from one taken on an install that never had a syslog table until somebody
+                # restored it. The rule the config file has always had, now here too: a part
+                # that was asked for and produced nothing is NOT ok.
+                step = {'part': part_id, 'ok': not unreachable, 'tables': len(part_tables),
+                        'rows': 0, 'error': unreachable}
                 steps.append(step)
+                if unreachable:
+                    continue
                 # Read from the database this part lives on, which is not always the system
                 # one — see `conn_for`.
                 src = conn_for(next(p for p in PARTS if p['id'] == part_id),

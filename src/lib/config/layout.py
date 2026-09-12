@@ -40,6 +40,12 @@ TABS: tuple[dict, ...] = (
     {'id': 'monitoring', 'label_key': 'cfg_tab_monitoring',    'icon': 'bi-activity'},
     {'id': 'notifs',     'label_key': 'cfg_tab_notifications', 'icon': 'bi-bell'},
     {'id': 'syslog',     'label_key': 'cfg_tab_syslog',        'icon': 'bi-hdd-stack'},
+    # De dónde salen los datos que este panel no teclea nadie: otra plataforma los mantiene y
+    # aquí se leen. Su propia pestaña porque no es ninguna de las otras — no autentica a nadie
+    # (eso es «Acceso»), no vigila nada (eso es «Monitorización») y no manda nada fuera (eso es
+    # «Notificaciones»). Estaba en «General», que es donde acaba lo que uno no ha decidido dónde
+    # poner; preguntado desde la pantalla, con razón.
+    {'id': 'sources',    'label_key': 'cfg_tab_sources',       'icon': 'bi-cloud-arrow-down'},
     {'id': 'auth',       'label_key': 'cfg_tab_auth',          'icon': 'bi-person-lock'},
     {'id': 'ipban',      'label_key': 'cfg_tab_ipban',         'icon': 'bi-slash-circle'},
     {'id': 'interface',  'label_key': 'cfg_tab_interface',     'icon': 'bi-layout-wtf'},
@@ -89,6 +95,7 @@ CARDS: tuple[dict, ...] = (
     # decision, made once, by whoever knows which mounts exist.
     {'tab': 'general', 'id': 'backup', 'title_key': 'cfg_card_backup', 'icon': 'bi-archive'},
     {'tab': 'general', 'id': 'dcim', 'title_key': 'cfg_card_dcim', 'icon': 'bi-building'},
+
     # One field: where Diagnostics asks about new releases. A card of its own so the single
     # address this panel is willing to contact is visible to whoever is deciding whether it may
     # reach the internet at all — buried among the backup settings, that is a decision nobody
@@ -99,6 +106,11 @@ CARDS: tuple[dict, ...] = (
     # ══ Monitoring ══════════════════════════════════════════════════════════
     {'tab': 'monitoring', 'id': 'monitoring', 'section': 'monitoring', 'icon': 'bi-activity'},
     {'tab': 'monitoring', 'id': 'modules',    'section': 'modules',    'icon': 'bi-grid-3x3-gap-fill'},
+    # Cuánto se guarda de lo que se mide. Bajo Monitorización y no en General porque es una
+    # decisión sobre las gráficas: quien la toma está mirando hasta dónde quiere poder mirar
+    # atrás, no administrando la plataforma.
+    {'tab': 'monitoring', 'id': 'history', 'title_key': 'cfg_card_history',
+     'icon': 'bi-graph-up'},
 
     # ══ Notifications ═══════════════════════════════════════════════════════
     # Eight sections, not one card with four sub-tabs inside it. They were nested because the
@@ -175,6 +187,20 @@ CARDS: tuple[dict, ...] = (
      'renderer': 'live_update'},   # bespoke: force_reload_secs is conditionally shown
     {'tab': 'interface', 'id': 'advanced',    'title_key': 'cfg_advanced_section',  'icon': 'bi-tools',
      'renderer': 'advanced'},
+    # Los mapas, con su propia tarjeta y no metidos en el inventario. Dan de comer a DOS
+    # pantallas —el mapa de sedes de la sección y la tarjeta «Sedes» del panel de control— y
+    # traen decisiones que no son de inventario: a qué tercero se le piden las imágenes, con qué
+    # clave, en qué forma y hasta dónde llega. Estaban en «Inventario físico», donde nadie las
+    # buscaba y donde se leían como un ajuste del catálogo de armarios; preguntado desde la
+    # pantalla.
+    #
+    # Y aquí y no en «General» por lo mismo que Freshservice: son datos que mantiene otro y este
+    # panel lee.
+    {'tab': 'sources', 'id': 'maps', 'title_key': 'cfg_card_maps', 'icon': 'bi-map'},
+    # Freshservice: de allí salen las empresas. Con las demás fuentes externas y no con el
+    # inventario — lo que las junta es que las mantiene otro y aquí se leen.
+    {'tab': 'sources', 'id': 'freshservice', 'section': 'freshservice',
+     'title_key': 'cfg_card_freshservice', 'icon': 'bi-life-preserver'},
 )
 
 

@@ -9,6 +9,9 @@
 {% include "partials/core/_constants.html" %}
 {% include "partials/core/_utils.html" %}
 {% include "partials/core/_toast.html" %}
+{# Dónde cae un punto de la Tierra en un dibujo. Core porque ya lo quieren dos: el mapa
+   de sedes del inventario y el widget de sedes del panel de control. #}
+{% include "partials/core/_geo.html" %}
 {# The CodeMirror lazy-loader. Core because two unrelated screens want it — the notification
    template editor and the MIB source viewer — and neither should reach into the other. #}
 {% include "partials/core/_codemirror.html" %}
@@ -43,6 +46,7 @@
    built at startup — no module-specific knowledge lives here.
    ================================================================ #}
 {% include "partials/backup/_render.html" %}
+{% include "partials/backup/_create.html" %}
 {% include "partials/backup/_actions.html" %}
 {% include "partials/backup/_retention.html" %}
 {% include "partials/backup/_profiles.html" %}
@@ -75,6 +79,7 @@
 {% include "partials/cfg/_ipban.html" %}
 {% include "partials/cfg/_db_maintenance.html" %}
 {% include "partials/cfg/_seed.html" %}
+{% include "partials/cfg/_maps.html" %}
 {% include "partials/cfg/_search.html" %}
 {% include "partials/cfg/_actions.html" %}
 {% include "partials/cfg/_advanced.html" %}
@@ -158,6 +163,8 @@
    Thin orchestrator: includes sub-partials in order.
    ================================================================ #}
 {% include "partials/jobs/_render.html" %}
+{% include "partials/jobs/_head.html" %}
+{% include "partials/jobs/_timers.html" %}
 {% include "partials/infra/_views.html" %}
 {% include "partials/infra/_render.html" %}
 {% include "partials/infra/_tabs.html" %}

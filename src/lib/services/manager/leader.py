@@ -130,15 +130,47 @@ class ServiceLeaderStore:
         return {'instance_id': holder, 'host': host, 'expires_at': expires}
 
     def list_leaders(self) -> list[dict]:
+        """Quién sostiene cada arriendo ahora mismo.
+
+        ``renewed_at`` viaja con el resto porque es **cuándo dio su última vuelta** quien lo
+        sostiene: el arriendo se renueva en cada pasada del trabajo que lo usa, así que es el
+        único dato de «cuándo corrió esto» que se ve desde OTRO contenedor. El que lleva el
+        propio hilo vive en su proceso y desde fuera no existe.
+        """
         rows = self._db.fetchall(
-            f'SELECT service_key, holder_instance_id, holder_host, expires_at FROM {_T}')
+            f'SELECT service_key, holder_instance_id, holder_host, expires_at, renewed_at '
+            f'FROM {_T}')
         now = time.time()
         out = []
-        for key, holder, host, expires in rows:
+        for key, holder, host, expires, renewed in rows:
             if holder and expires and expires >= now:
                 out.append({'service_key': key, 'instance_id': holder,
-                            'host': host, 'expires_at': expires})
+                            'host': host, 'expires_at': expires,
+                            'renewed_at': float(renewed or 0)})
         return out
+
+
+    def leases(self) -> list[dict]:
+        """**Todos** los arriendos, vivos o no, con `live` diciendo cuál es cuál.
+
+        Distinto de :meth:`list_leaders`, que descarta los caducados — y hace bien, porque lo
+        que pregunta es «¿quién manda ahora?». Aquí la pregunta es otra: «¿quién dio la última
+        vuelta y cuándo?», y para un trabajo lento la respuesta vive casi siempre en una fila
+        caducada.
+
+        Un escaneo de certificados corre cada 24 h y su arriendo dura una hora: está expirado el
+        **96 %** del tiempo. Filtrarlo deja la pantalla diciendo «todavía no ha corrido nunca»
+        sobre algo que corrió esta mañana, que es peor que no decir nada.
+        """
+        rows = self._db.fetchall(
+            f'SELECT service_key, holder_instance_id, holder_host, expires_at, renewed_at, '
+            f'acquired_at FROM {_T}')
+        now = time.time()
+        return [{'service_key': key, 'instance_id': holder or '', 'host': host or '',
+                 'expires_at': float(expires or 0), 'renewed_at': float(renewed or 0),
+                 'acquired_at': float(acquired or 0),
+                 'live': bool(holder and expires and expires >= now)}
+                for key, holder, host, expires, renewed, acquired in rows]
 
 
 def create(db: BaseConnector) -> ServiceLeaderStore:

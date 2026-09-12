@@ -312,6 +312,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # certs nearing expiry (opt-in via certs|notify_expiry).
         self._start_cert_scanner()
         self._start_secret_scanner()
+        # Cabling-drift scanner: periodically contrast the declared cables against what the
+        # devices report over LLDP and alert on a moved patch cord or an undeclared link
+        # (opt-in via dcim|notify_cabling). Proposes; never writes to the inventory.
+        self._start_cable_scanner()
 
     # ------------------------------------------------------------------
     # Public helpers

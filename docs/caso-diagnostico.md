@@ -5,6 +5,457 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## El panel que dejó de hacer copias porque se reiniciaba demasiado
+
+**Síntoma.** Una pantalla nueva decía «siguiente copia: ahora» y no cambiaba. Preguntado desde
+ella dos veces —«¿por qué pone ahora si son cada hora y es la 1:17?», y veinte minutos después
+«son las 1:31 y sigue»—. Las dos primeras veces la respuesta fue arreglar la pantalla, porque
+las dos primeras veces la pantalla estaba mal. La tercera no: era cierto.
+
+```
+$ ls data/backups/
+auto-cada-hora-20260913-001350.zip      ← la más nueva
+auto-diaria-20260913-001350.zip
+auto-full-20260913-001350.zip
+$ date
+Sun Sep 13 01:33:11 2026
+```
+
+La copia horaria tocaba a la 01:13. A la 01:33 no estaba, y llevaba dos ventanas de comprobación
+sin tomarse.
+
+**Diagnóstico.** El hilo de copias espera **una vuelta entera —diez minutos— antes de la
+primera**, con un comentario que explica por qué: no correr durante el arranque, mientras se
+están montando las tiendas. Es una razón buena, mal dimensionada.
+
+Ese panel corría bajo `dev_watch`, que reinicia el proceso cada vez que cambia un `.py`. Y ese
+día un `.py` cambiaba cada pocos minutos. Cada reinicio ponía el contador a cero, así que el hilo
+**nunca llegó a dar una sola vuelta**.
+
+**Causa raíz.** Una espera de arranque del tamaño del intervalo. Con eso, cualquier proceso que
+se reinicie más a menudo que su propio intervalo no ejecuta su tarea jamás, y no hay nada que lo
+diga: no falla, no registra, no avisa — simplemente no ocurre. En desarrollo es una molestia; en
+producción es un contenedor en bucle de reinicios cuyas copias dejaron de hacerse, y la única
+señal es una carpeta cuyo fichero más nuevo se va haciendo viejo.
+
+**Solución.** La primera vuelta a los sesenta segundos. Al arranque le sobra y a un proceso que
+se reinicia no le cuesta nada.
+
+Y la segunda mitad, que es la que convierte esto en algo que se ve: la pantalla se había callado
+**media hora**. «Atrasado» era «más tarde que medio periodo», buena regla para un temporizador
+que se despierta y hace su vuelta, y falsa cuando la vuelta la decide otro reloj — el de las
+copias comprueba cada diez minutos, así que a los once ya se sabe. Ahora un temporizador puede
+declarar con qué precisión puede cumplir, y el de las copias declara su tic.
+
+**Lección.** Cuando alguien insiste en que algo se ve raro, la tercera respuesta no se busca en
+la pantalla: se busca en el disco. Las dos primeras veces la pantalla mentía, y arreglarla estuvo
+bien; la tercera la pantalla decía la verdad y el fallo estaba detrás. Y una espera de arranque
+nunca debe medir lo mismo que el intervalo que protege: si las dos son iguales, basta con
+reiniciar a tiempo para que el trabajo no se haga nunca.
+
+## Una copia que se declara completa sin la mitad que le pidieron
+
+**Síntoma.** Ninguno. Ésa es la ficha. Preguntado desde la pantalla —«¿el backup hace backup de
+todo correctamente, como syslog aún configurado en un segundo servidor de base de datos?»— y la
+respuesta se midió montando los tres casos en vez de leer el código:
+
+```
+una-sola-base    core ok=True tablas=1   syslog ok=True tablas=0   status=ok
+syslog-aparte    core ok=True tablas=1   syslog ok=True tablas=2   status=ok
+syslog-caido     core ok=True tablas=1   syslog ok=True tablas=0   status=ok   ← aquí
+```
+
+El segundo servidor no respondía. La parte `syslog` se pidió, no se copió nada, y la copia se
+declaró **correcta** — con el mismo aspecto exacto que una hecha en una instalación que nunca
+tuvo una tabla de syslog. Se descubre al restaurar, que es el único momento en el que nadie se
+lo puede permitir.
+
+**Diagnóstico.** `tables_by_part` pregunta a la base de cada parte qué tablas tiene, y envolvía
+esa pregunta en un `except Exception` que devolvía lista vacía. Sin registrar nada. A partir de
+ahí todo lo demás era coherente: cero tablas, cero filas, ningún error, `ok`. El comentario de
+ese `except` decía *«the empty part says so»* — y la parte vacía no decía nada, porque no había
+forma de distinguir «no pude preguntar» de «no había nada que copiar».
+
+La regla correcta estaba escrita **tres funciones más abajo**, para el fichero de configuración:
+*«a part that was asked for and produced nothing is NOT ok»*. Las partes de base de datos no la
+tenían.
+
+**Causa raíz.** Un `except` que convierte un fallo en un valor legítimo. Devolver `[]` ante una
+conexión caída no es un apaño: es afirmar que esa base no tiene tablas, que es una respuesta
+distinta y falsa. El coste no lo paga quien escribe el `except` —su función sigue devolviendo
+algo— sino el llamante, que ya no puede saber que preguntó mal.
+
+**Solución.** `tables_by_part` devuelve `(parte, tablas, motivo)`. Con motivo: `ok=False` con él
+dentro, `status: partial` y un aviso en el log. Sin motivo y con cero tablas: sigue siendo un
+éxito —y esto importa tanto como lo otro—, porque una parte cuyas tablas no existen no tiene
+nada que copiar, y marcarla en rojo pondría un hallazgo en todas las copias de todas las
+instalaciones que no usan esa función. El arreglo habría sido peor que el fallo.
+
+**Y una prueba que llevaba años sin probar lo que decía.** Existía
+`test_an_unreachable_second_database_costs_only_its_part`, y hacía «inalcanzable» la segunda base
+con `side.close()`. El conector de SQLite **vuelve a abrir a la primera pregunta**: no lanzaba
+nada, no se ejecutaba la rama del `except`, y la prueba comprobaba el camino feliz con otro
+nombre. Ahora usa un conector cuyo `list_tables` lanza de verdad.
+
+**Lección.** Cuando la pregunta es «¿esto funciona?», la respuesta se monta, no se lee: los tres
+escenarios tardaron menos que revisar el módulo, y el que falla no se distingue de los que
+funcionan sin ponerlos uno al lado del otro. Y un `except` alrededor de una pregunta a otra
+máquina tiene que devolver el **motivo** junto al valor: sin él, el llamante no está tratando un
+error, está creyéndose una respuesta.
+
+## Una clase que el marcado nombra y la hoja de estilos no recoge
+
+**Síntoma.** Se propuso una tabla en una maqueta, se eligió, y la pantalla de verdad no se le
+parecía. Tres veces seguidas: «la tabla sigues sin generarla como me has propuesto», «no estás
+añadiendo bordes, ni la zona de títulos, ni los colores… si me propones eso, ¿por qué no lo
+usas?». Sin error en consola, sin aviso de plantilla y sin prueba en rojo.
+
+**Diagnóstico.** Las dos primeras veces contesté mirando el marcado, que nombraba las columnas
+correctas en el orden correcto — y por eso fallé dos veces. Lo que faltaba no estaba en el
+marcado: el `<table>` pedía `ss-thead`, y el marco, la banda de la cabecera y las píldoras de
+estado **no existían en ninguna hoja**. Un nombre de clase sin regla no es un fallo para el
+navegador: es una palabra en un atributo. La página se dibuja entera, con los estilos por defecto
+de Bootstrap, y lo único que la delata es mirarla.
+
+Dejé de suponer y **renderé la tabla** con el arnés de node —el paquete del panel contra un DOM de
+mentira— para leer su salida en vez de imaginarla. Ahí se vio la diferencia entera de una vez.
+
+**Causa raíz.** Dos, y la segunda no se vio hasta escribir las reglas. La primera: media
+implementación tomada por entera. Una maqueta son dos cosas, marcado y estilo, y sólo se portó la
+primera; las piezas que la hacían reconocible —el marco con borde, la banda de la cabecera, las
+píldoras suaves, la paleta— vivían todas en la segunda.
+
+La segunda, una trampa de Bootstrap que **tapó las reglas nuevas ya escritas**: una `.table` trae
+`--bs-table-bg: var(--bs-body-bg)` y lo pinta en **cada celda**. El fondo de la página, repintado
+por encima de la superficie del marco y de la banda de la cabecera, celda a celda. Por eso, con
+la caja y la banda ya definidas, la pantalla seguía enseñando una tabla plana sobre el fondo: el
+CSS estaba, y la librería lo cubría. La misma trampa en pequeño explica por qué el fondo puesto
+en un `thead` tampoco aparece nunca — lo tapan sus propios `th`.
+
+Y el último tramo fue de color: heredar `bg-success`, `--bs-primary` y `text-bg-warning` para un
+punto de 7 px, una barra de 3 px y una píldora de tres palabras. Son colores de distintivo y de
+botón: el verde, pensado para llevar letras blancas encima, se lee apagado en un punto; el azul
+de los botones pesa más que la cifra que tiene al lado; el ámbar macizo grita desde una píldora.
+El diseño ya era el correcto y aun así la pantalla no era la maqueta.
+
+**Solución.** Las tres piezas como clases genéricas —`.ss-panel`, `.ss-timer-head th`,
+`.ss-pill`— con superficie propia en el marco, `--bs-table-bg: transparent` en la tabla para que
+no repinte lo que hay debajo, la banda puesta en el `th`, y la paleta como fichas de tema
+(`--ss-timer-on`,
+`--ss-timer-late`, `--ss-timer-bar`, `--ss-timer-track`) definidas en **los dos** temas. Y una
+guarda que comprueba las dos mitades: que el marcado pide las piezas y que el CSS las define,
+fichas incluidas. Seis mutaciones, y las seis muerden.
+
+Y el último paso fue **mirarla**: dibujar la tabla con las hojas de estilo reales en un
+navegador sin cabeza y hacerle una foto en los dos temas. Diez minutos, y lo que tres rondas de
+razonar sobre el fuente no había dado.
+
+**Lección.** Una clase que ninguna regla recoge es la versión visual del `ReferenceError` que
+`node --check` no ve: analiza, se ejecuta, dibuja, y hace lo que no se pidió. Ningún test que
+sólo mire el HTML la encuentra, porque el HTML está bien. Si algo se propone dibujado, hay que
+comprobar que lo dibujado existe en las dos mitades — y cuando alguien dice dos veces que la
+pantalla no es la que se le enseñó, la tercera respuesta no se escribe leyendo el fuente: se
+renderiza y se mira.
+
+## Una transacción que se cerraba sola
+
+**Síntoma.** Pasar 4.026 muestras de documento a filas tardaba **6,94 s** — 1,7 ms por muestra,
+que a escala de una instalación real (5,3 millones) son **2,4 horas de arranque**. Se agruparon
+las escrituras en un único `executemany` por lote: bajó a 5,63 s. Se envolvió el lote en una
+transacción explícita, que es lo que arregla esto siempre: **5,73 s**. Peor.
+
+**Diagnóstico.** Un perfil, en vez de otra hipótesis. De los 6,1 s del arranque, **4,77 estaban
+dentro de un solo `executemany`** de 21.092 filas — 226 µs por fila, diez veces más de lo que
+tarda SQLite en crudo. Un `executemany` no puede tardar eso si de verdad es una operación.
+
+El conector abre SQLite con `isolation_level=None`, es decir **autocommit**: cada sentencia es su
+propia transacción con su sincronización a disco. Por eso existe `begin()`. Pero la transacción
+explícita tampoco mejoró, y ahí estaba lo que no se veía: dentro del lote, `field_ids()` llama a
+`_resolve()`, que creaba los 211 campos nuevos y hacía **`commit()`**. Ese commit cerraba la
+transacción del lote. Las veintiséis mil filas siguientes volvían a escribirse una a una.
+
+**Causa raíz.** Una función de bajo nivel que confirma por su cuenta. `_resolve` confirmaba para
+que su `INSERT` se viera en el `SELECT` siguiente — que no hacía falta: dentro de la misma
+conexión un INSERT sin confirmar ya se ve. El coste de esa línea de más no era suya: era de quien
+la llamaba, y sólo aparecía cuando alguien intentaba agrupar trabajo.
+
+**Solución.** `_resolve` no confirma; lo hace quien abrió la transacción. **6,94 s → 1,03 s**,
+casi siete veces. Y de paso se vio otra: las consultas de flota resolvían el nombre del campo con
+`field_ids()`, que **crea** — preguntar por «los diez más calientes» de algo que nadie ha medido
+dejaba un nombre fantasma en el catálogo. Ahora hay un `field_id_of()` que no crea, que es la
+misma regla que `_find_series` ya cumplía con las series.
+
+**Lección.** En autocommit, el coste de una escritura no está donde se escribe: está en quién
+abre y cierra la transacción. Una función de servicio que confirma por su cuenta le quita a
+cualquier llamante la posibilidad de agrupar, y el síntoma no es un error sino un número diez
+veces peor del que debería, en un sitio —`executemany`— donde nadie mira. Y cuando envolver algo
+en una transacción **no** lo arregla, la pregunta no es qué otra cosa probar: es quién está
+confirmando dentro.
+
+*(Del mismo paso, sin ficha propia pero por el mismo pecado: en la poda escribí en un comentario
+que borrar serie a serie sería mejor «porque sale del índice», y lo dejé ahí sin medirlo. Es al
+revés — 93 s serie a serie contra 57 de una pasada. El recorrido es barato; lo caro son mil
+cuatrocientas sentencias. Una afirmación de rendimiento sin número al lado es una opinión con
+tipografía de hecho.)*
+
+## Una prueba que se rompía antes de llegar al fallo
+
+**Síntoma.** `test_the_whole_panel_boots_and_serves_on_the_real_engine[mariadb]` llevaba semanas
+en rojo con un `TypeError: ApiTokenStore.create() missing 8 required keyword-only arguments`.
+Se daba por conocido y ajeno: un defecto del arnés, no del producto. Lo era — y estaba tapando
+otro.
+
+**Diagnóstico.** Esa prueba barre cada almacén llamando a todos sus métodos **sin parámetros**,
+para comprobar que ninguna lectura se rompe contra un motor de verdad. El filtro que decide qué
+métodos son «sin parámetros» miraba:
+
+```python
+p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+```
+
+`ApiTokenStore.create(*, user_uid, name, token_id, ...)` no tiene **ni un** parámetro posicional:
+los ocho son de sólo-palabra-clave. Pasaba el filtro, se llamaba sin argumentos, y el `TypeError`
+se contaba como «lectura que falla en el motor vivo». El `assert` saltaba ahí y la prueba **no
+llegaba** a la mitad siguiente.
+
+Corregido el filtro —`KEYWORD_ONLY` cuenta igual: un parámetro obligatorio lo es se pase como se
+pase—, la prueba avanzó y escupió lo que había detrás:
+
+```
+pymysql.err.ProgrammingError: (1064, "...near 'by, action, data FROM dc_rev WHERE ...")
+```
+
+**Causa raíz.** `dc_rev` tiene una columna llamada `by`, y `RevisionStore` metía la lista de
+columnas cruda en cada `INSERT` y cada `SELECT`: `', '.join(self._COLS)`. `by` es la mitad de
+`GROUP BY` y **es palabra reservada** — preguntado al motor, MariaDB 11.8.6 rechaza
+`SELECT uid, by FROM ...` con error 1064. El historial de versiones del inventario no funcionaba
+en MySQL ni en MariaDB. En absoluto: ni se escribía ni se leía.
+
+Lo que lo hacía invisible por partida doble: las rutas capturan la excepción, así que la ficha
+salía **sin ninguna versión**, exactamente igual que una ficha que nadie ha tocado nunca; y la
+suite entera corre sobre SQLite, que acepta `by` desnuda sin rechistar. El único sitio del
+proyecto que podía verlo era la prueba que llevaba semanas parándose un paso antes.
+
+**Solución.** `self._sql_cols`, la lista entrecomillada por el dialecto, que es lo que ya hacían
+otros seis almacenes con `key`, `virtual`, `user` y `groups`. Lo mismo en `dc_file`, que tiene la
+misma forma con la columna `stored` —ésa **no** rompe hoy en MariaDB, comprobado— porque lo que
+decide si una palabra está reservada es la versión del motor que haya delante, y eso no lo elige
+este código.
+
+Y una guarda de la **clase**, no del caso: `test_every_reserved_column_name_has_a_guard_here`
+recorre los `TableSpec` del producto y falla si aparece una columna con nombre reservado que este
+fichero de pruebas no nombre entrecomillada. Las cinco guardas que ya existían cubrían las cuatro
+palabras que se habían roto **ya**; `by` entró después y no estaba en la lista.
+
+**Lección.** Un rojo permanente que se ha decidido que es «conocido y ajeno» deja de leerse, y
+una prueba que falla pronto no prueba lo que viene después: la línea de abajo del `assert` lleva
+semanas sin ejecutarse. Arreglar el arnés no es limpieza, es **reactivar cobertura apagada**. Y
+una lista de casos conocidos —cuatro palabras reservadas— envejece sola; la guarda tiene que
+preguntarle al código qué hay hoy, no repetir lo que se rompió ayer.
+
+## Un respaldo que no sabía que era un respaldo
+
+**Síntoma.** La ficha de una máquina —PVE01— enseña en «Últimos datos» una fila de `ram_swap` en
+**Error**, sin mensaje, sin datos y con una hora distinta de todas las demás. La lista de la
+flota, mientras tanto, da esa misma máquina por **OK**. Dos pantallas del mismo panel, dos
+respuestas sobre la misma comprobación.
+
+**Diagnóstico.** Medido contra la base de datos de verdad, no deducido:
+
+* en el estado **vivo** hay dos filas de esa comprobación, `<item>_ram` y `<item>_swap`, las dos
+  correctas;
+* en el **historial** hay tres series: esas dos, y una tercera con la clave **desnuda**
+  `<item>` — dos muestras, las dos fallidas, `data` vacío, y la última de ocho horas antes.
+
+`build_host_status` construye la tabla en dos pasadas: el estado vivo, y luego el historial
+«para las series que no tienen valor vivo». La segunda pasada descartaba una serie sólo si su
+CLAVE ya había salido en la primera. Y la clave desnuda no sale nunca: `ram_swap` no escribe nada
+bajo la clave del item, escribe `<item>_ram` y `<item>_swap`. Así que la serie muerta pasaba el
+filtro y se servía como el estado de ahora.
+
+**Causa raíz.** Un respaldo que compara claves cuando la pregunta es de **items**. El respaldo
+existe por un caso real —una máquina en mantenimiento a la que se le podó el estado vivo, que sin
+él abriría una ficha vacía con un año de historia detrás—, pero «esta clave no está viva» no es
+lo mismo que «de esto no hay nada vivo». Y en cuanto una comprobación reparte sus resultados en
+sub-claves, deja de serlo para siempre.
+
+Lo que lo hacía invisible: la fila está bien formada, tiene su nombre, su módulo y su icono, y
+sale ordenada entre las demás. Nada avisa de que lo que se está leyendo es de otro día.
+
+**Solución.** La primera pasada apunta qué **items** están dando parte, y la segunda descarta las
+series de esos items. Si el item habla, no hay nada que respaldar.
+
+**Lección.** Un respaldo tiene que saber **de qué** es respaldo. Comparar la clave más específica
+que se tiene a mano es cómodo y casi siempre coincide con la pregunta; el día que deja de
+coincidir no da un error, da un dato viejo con toda la apariencia de uno nuevo. Y la comprobación
+que lo destapa no es leer la función: es preguntarle a los datos qué claves existen de verdad.
+
+## Enero de 1970 en la columna de la última actividad
+
+**Síntoma.** Todas las fechas de «Última actividad» de la ficha de una máquina dicen
+**1970-01-21**.
+
+**Diagnóstico.** `new Date(numero)` cuenta **milisegundos**. `check_state.last_change_ts` y
+`history.ts` guardan **segundos** de época, con decimales, y el formateador del panel recibía el
+número tal cual. 1.788.720.633 milisegundos son veinte días después de la época.
+
+Media aplicación lo tenía bien por accidente: casi todo lo que se formatea viaja como texto ISO,
+que `Date` sí entiende. Y en la vista de tarjetas de esa misma pantalla estaba multiplicado por
+mil… **sólo para las filas del historial**, así que las vivas también daban 1970 y nadie lo
+relacionó.
+
+**Causa raíz.** Dos unidades con el mismo nombre —«marca de tiempo»— y ningún sitio donde se
+decidiera cuál es la del panel.
+
+**Solución.** El formateador lee las dos: un número por debajo de 1e12 son segundos y se
+multiplican; por encima, milisegundos. El corte no es un número mágico — en milisegundos 1e12 es
+septiembre de 2001 y en segundos es el año 33.658, así que no hay fecha real que caiga del lado
+equivocado. Un texto no se toca.
+
+**Lección.** Una fecha absurda se lee como adorno roto y no como el dato que es, así que nadie la
+reporta: se llevaba meses viendo. Cuando dos capas se pasan un número que representa un instante,
+la unidad es parte del contrato y hay que escribirla en algún sitio — o hacer que el que lo lee
+entienda las dos.
+
+## Un tinte no es un fondo
+
+**Síntoma.** En el mapa del cuadro de mando del inventario, el rótulo de una sede sale **con el
+mapa dentro**: se lee el satélite a través de la caja, y encima el texto de la sede. Reportado
+tres veces desde la pantalla, y las dos primeras se diagnosticó mal.
+
+**Diagnóstico.** Las dos hipótesis razonables se cayeron una detrás de otra:
+
+* *«se dibuja debajo de otra»* — se ejecutó el dibujante en `node` con las siete sedes reales:
+  la sede caída salía **la última**, que es la que tapa. No era el orden.
+* *«la caja es translúcida»* — llevaba un `opacity=".95"`, se quitó, y siguió pasando. Un cinco
+  por ciento tampoco explicaba lo que se veía.
+
+Lo que sí lo explicaba estaba en el CSS del panel, en la redefinición del tema oscuro:
+
+```css
+[data-bs-theme="dark"] { --bs-danger-bg-subtle: rgba(220,53,69,.10); }
+```
+
+`--bs-danger-bg-subtle` **no es un color** aquí: es un rojo al diez por ciento. Bootstrap la
+define opaca, este panel la redefine con alfa, y funciona perfectamente en todas partes —una
+tarjeta, un aviso, una fila— porque en todas ellas hay debajo el fondo opaco de la página. El
+rótulo de un mapa es el único sitio del panel donde debajo **no hay nada**: el noventa por ciento
+restante era la ortofoto.
+
+**Causa raíz.** Usar como fondo una variable que existe para teñir. Las dos cosas se llaman
+`bg`, las dos van en `fill`, y sobre cualquier superficie del panel dan el mismo resultado. La
+diferencia solo aparece cuando detrás hay algo que no es una superficie del panel, y entonces no
+da ningún error: da un color más pálido, que es exactamente lo que un tinte tiene que dar.
+
+**Solución.** Tres capas donde había una: `--bs-body-bg` sólido de suelo, el tinte encima y el
+borde al final. Que es, literalmente, lo que hace una tarjeta del panel — página opaca, tinte del
+diez por ciento, borde de color — con la diferencia de que una tarjeta no tiene que traerse su
+propio suelo y un rótulo sobre un mapa sí.
+
+La guarda mira el dibujo, no el fuente: el primer relleno de la caja tiene que ser
+`var(--bs-body-bg)` y no puede llevar la palabra `subtle`.
+
+**Lección.** **Sobre un mapa no hay fondo de página.** Cualquier variable de color con alfa —los
+`-bg-subtle` de este panel, los `-color` translúcidos— es un tinte, y un tinte necesita algo
+debajo. Antes de pintar con una variable sobre algo que no es una superficie del panel, hay que
+mirar si esa variable es un color o es una capa.
+
+Y la de método, que costó dos rondas: **cuando una hipótesis razonable no arregla lo que se ve,
+la siguiente no es otra hipótesis razonable — es medir**. Las dos primeras explicaban la captura
+igual de bien; la que era verdad estaba a un `grep` de distancia en la hoja de estilo.
+
+## Un `onclick` que el navegador nunca entrega
+
+**Síntoma.** En el mapa del panel de control, pulsar la chincheta de un CPD no hace nada. Ni
+navega, ni avisa, ni deja un error en la consola. El puntero cambia a mano sobre el punto —así
+que algo lo reconoce—, la ficha sale al pasar por encima, y el clic se pierde.
+
+**Diagnóstico.** La chincheta llevaba su manejador escrito encima:
+
+```html
+<g transform="…" onclick="_dwMapPinGo(event, wid, uid)">
+```
+
+Y el mapa se arrastra. Para poder seguir arrastrando aunque el puntero se salga del dibujo, el
+lienzo compartido hace lo que hay que hacer: `setPointerCapture` sobre el `<svg>` en el
+`pointerdown`. A partir de ahí, **los eventos de puntero se redirigen al elemento que captura**,
+así que el `pointerup` no ocurre sobre la chincheta sino sobre el `<svg>` — y el `click`, que el
+navegador compone a partir de dónde bajó y dónde subió el puntero, se dispara en el ancestro
+común: el `<svg>`. La chincheta no lo ve pasar nunca.
+
+Lo peor de este fallo es la prueba que lo acompañaba: llamaba a `_dwMapPinGo` con un evento de
+mentira y comprobaba que navegara. Y navegaba. La función estaba bien; lo que estaba mal era que
+**nada la llamaba**, y una prueba que llama a la función por su nombre no puede ver eso.
+
+**Causa raíz.** Dos mecanismos correctos que no pueden convivir en el mismo elemento: la captura
+del puntero —que es lo que hace que un arrastre no se corte— y un `onclick` en un hijo del que
+captura. No hay aviso de ninguno de los dos, porque cada uno hace exactamente lo que promete.
+
+Y el mapa de la sección ya lo tenía resuelto desde el principio, con un comentario que lo decía
+en voz alta: «una pulsación que no viajó es un clic». Estaba escrito; no se leyó.
+
+**Solución.** La misma que la del otro mapa: no hay `onclick`. El `pointerdown` apunta sobre qué
+chincheta se ha pulsado —que el dibujo dice en `data-site`— y el `pointerup` decide: si no viajó
+más de cuatro píxeles y había una chincheta debajo, es una pulsación. Cuatro y no cero porque un
+dedo sobre un cristal se mueve uno o dos entre que baja y sube.
+
+Y la prueba se reescribió para ejercer **el gesto** —bajar el puntero, moverlo o no, soltarlo— en
+vez de la función: la versión anterior seguía en verde con el fallo delante.
+
+**Lección.** Cuando una prueba llama a la función por su nombre, comprueba la función y no la
+pantalla. Lo que hay que ejercitar es **el gesto de quien la usa** — sobre todo si por el camino
+hay un mecanismo del navegador (captura de puntero, delegación, un manejador que ataja) que puede
+quedarse el evento antes de llegar.
+
+## Un ajuste que se guarda, se enseña guardado y no lo lee nadie
+
+**Síntoma.** Se configura el servidor de teselas del mapa —Configuración → General → Inventario
+físico, con la plantilla de OpenStreetMap—, se guarda, se vuelve a abrir la pantalla y **ahí
+está, escrito**. Y el mapa sigue vacío. Ni un aviso, ni un error en la consola del navegador, ni
+una petición fallida: sencillamente no se pide ninguna tesela. Reiniciar el panel no cambia nada.
+
+**Diagnóstico.** El registro (`lib/config/spec.py`) permite que un campo declare `attr=`: el
+valor vive además en un atributo del panel, que es de donde lo leen las pantallas que no van a
+abrir la configuración en cada petición. El mapa lo leía así:
+
+```python
+tiles = str(getattr(wa, '_DCIM_MAP_TILES', '') or '')
+```
+
+Y ese atributo **no lo ponía nadie**. `_apply_config_attrs` tenía una pasada genérica para los
+enteros (`INT_RULES`) y otra para los interruptores (`BOOL_RULES`), y para las cadenas… una lista
+escrita a mano: el idioma, el idioma de la página de estado, la URL pública, la página de
+entrada. Las que no estaban en esa lista no se aplicaban jamás. El único camino que sí ponía el
+atributo era el de las variables de entorno (`SS_DCIM_MAP_TILES`), que es por lo que la función
+existía y parecía correcta.
+
+Se localizó preguntándoselo a un panel de verdad en tres líneas: escribir el ajuste, leer la
+clave de la base de datos —está—, leer el atributo —no existe—. Lo que costó no fue eso, sino
+llegar a sospechar del atributo: la configuración se comportaba perfectamente en las dos mitades
+que se ven.
+
+**Causa raíz.** Un registro central que declara una intención (`attr=`) y un aplicador que la
+honra **solo para dos de los tres tipos**. Mientras cada cadena nueva se acordara de añadir su
+línea a mano, funcionaba; el día que a alguien se le olvidó —cinco veces— no falló nada, porque
+un valor que no llega a su sitio es indistinguible de un valor sin poner. Las cinco: el servidor
+de teselas y su atribución, la dirección del catálogo de modelos, la carpeta de imágenes y la de
+copias de seguridad.
+
+**Solución.** `str_rules()` junto a `int_rules()` y `bool_rules()`, y su pasada en
+`_apply_config_attrs` — antes de las tres cadenas que necesitan que se les haga algo (validar un
+idioma, normalizar una URL), que siguen en su línea de siempre y mandan. Y una guarda
+(`tests/integration/test_wa_config_attrs.py`) que recorre **el registro**, no una lista: pone una
+marca en cada atributo, aplica una configuración con ese campo escrito, y exige que la marca haya
+desaparecido. Más una segunda que exige que ningún tipo con `attr` se quede sin pasada, para que
+el agujero no se repita con el primer campo de un tipo nuevo.
+
+**Lección.** Cuando un registro declara que algo se refleja en otro sitio, **el reflejo tiene que
+ser genérico o no es un registro**: una lista escrita a mano al lado de la declaración es una
+segunda fuente de verdad que solo dice la verdad mientras alguien se acuerde. Y el síntoma es
+inconfundible una vez visto — un ajuste que se guarda, se relee y no hace nada — así que la
+prueba que lo caza no es del mapa: es de la mecánica, y se escribe una vez para todos los campos
+presentes y futuros.
+
 ## Una ficha para dos listas leyendo el global que sólo rellena una
 
 **Síntoma.** En la sección de Cableado (`/dcim/wiring`) se pulsa una fila, sale la ficha del

@@ -336,24 +336,64 @@ def optional_features() -> list:
 
 # ── Storage ──────────────────────────────────────────────────────────────────
 
-def storage(paths: dict) -> list:
-    """For each named directory: is it there, can we write to it, how much room is left.
+def storage(entries) -> list:
+    """For each declared directory: is it there, can we write to it, how much room is left.
 
     Writability is tested by ASKING the OS (`os.access`), not by writing a file: a diagnostics
     page must not create anything, least of all in the directory somebody is looking at
     because it is behaving strangely.
+
+    *entries* is a list of ``{key, path, label, on_demand}`` — a dict of ``key: path`` is also
+    accepted, which is what the three original rows were.
+
+    Two things this does beyond stat-ing a path, both of them about not raising a false alarm:
+
+    **A folder that has not been created yet is not missing.** Most of these are made the first
+    time something is stored in them, so a fresh install has none of them and a red «does not
+    exist» on every row would say that an install which is working perfectly is broken. Those
+    carry ``on_demand`` and get their own, quiet state.
+
+    **The free space of the same disk, five times, is not five answers.** All of these usually
+    live under one mount, and repeating one bar for each row buries the case that matters —
+    a folder moved to a disk of its own, which is exactly when the number is news. So the room
+    is reported for the FIRST directory of each filesystem and left out of the rest.
     """
-    out = []
-    for key, path in (paths or {}).items():
-        path = str(path or '')
-        row = {'key': key, 'path': path, 'exists': False, 'writable': False,
-               'free_bytes': 0, 'total_bytes': 0}
+    if isinstance(entries, dict):                    # la forma vieja: {clave: ruta}
+        entries = [{'key': k, 'path': v} for k, v in entries.items()]
+    out, vistos = [], set()
+    for e in (entries or ()):
+        path = str(e.get('path') or '')
+        row = {'key': str(e.get('key') or ''), 'label': str(e.get('label') or ''),
+               'path': path, 'on_demand': bool(e.get('on_demand')),
+               # Hay carpetas que se leen y no se escriben —la de los módulos—, y en un
+               # contenedor montarlas de sólo lectura es lo normal y lo deseable. Avisar de eso
+               # es un ámbar en todas las instalaciones bien hechas.
+               'read_only': bool(e.get('read_only')),
+               'exists': False, 'writable': False, 'free_bytes': 0, 'total_bytes': 0}
         if path:
             row['exists'] = os.path.isdir(path)
             row['writable'] = bool(row['exists'] and os.access(path, os.W_OK))
-            usage = _safe(lambda p=path: shutil.disk_usage(p), default=None)
-            if usage is not None:
-                row['free_bytes'] = int(usage.free)
-                row['total_bytes'] = int(usage.total)
+            if row['exists'] and _new_filesystem(path, vistos):
+                usage = _safe(lambda p=path: shutil.disk_usage(p), default=None)
+                if usage is not None:
+                    row['free_bytes'] = int(usage.free)
+                    row['total_bytes'] = int(usage.total)
         out.append(row)
     return out
+
+
+def _new_filesystem(path: str, vistos: set) -> bool:
+    """¿Es la primera carpeta que vemos de este sistema de ficheros?
+
+    `st_dev` lo contesta en los dos mundos: en POSIX es el dispositivo y en Windows el número
+    de serie del volumen. Si no se puede saber —una ruta que desaparece entre dos llamadas—, se
+    mide: de más se ve una barra repetida, de menos se pierde la que era noticia.
+    """
+    try:
+        dev = os.stat(path).st_dev
+    except OSError:
+        return True
+    if dev in vistos:
+        return False
+    vistos.add(dev)
+    return True

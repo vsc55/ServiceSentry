@@ -436,3 +436,95 @@ class TestAPolicyWithANameOnIt:
         assert sched.prune(rows, task, 'x') == [], 'unresolved, the task keeps its own six'
         gone = sched.prune(rows, sched.with_profile(task, self.PROFILES), 'x')
         assert len(gone) == 4, gone
+
+
+class TestCuandoLeTocaLaProximaVez:
+    """`next_due_at` — la cifra que la pantalla de Temporizadores tiene que enseñar.
+
+    Nació de un fallo reportado desde la pantalla: «Copias programadas» salía en ámbar con
+    «Atrasado 41 min» mientras la pantalla de al lado enseñaba tres copias recién hechas. La
+    lista calculaba «última vuelta + cada cuánto», y para este temporizador esas dos cifras
+    miden cosas distintas: el hilo despierta cada diez minutos, pero toma el arriendo **sólo
+    cuando hay trabajo**, así que su marca es la última copia. Sumarle el tic da un instante sin
+    significado, y con una programación horaria o diaria queda siempre en el pasado.
+    """
+
+    def test_una_horaria_que_copio_hace_un_rato_no_esta_atrasada(self):
+        """El caso exacto de la captura: copia horaria, la última hace 51 minutos."""
+        ahora = 1_700_000_000.0
+        t = {'name': 'cada-hora', 'mode': 'interval', 'every_hours': 1}
+        falta = sched.next_due_at(t, ahora, ahora - 51 * 60) - ahora
+        assert 8 * 60 < falta <= 9 * 60, falta
+        assert sched.task_is_due(t, ahora, ahora - 51 * 60) is False
+
+    def test_a_la_que_ya_le_tocaba_le_toca_ahora(self):
+        """«Ahora» y no un pasado inventado: le toca, y eso es lo que hay que decir."""
+        ahora = 1_700_000_000.0
+        t = {'mode': 'interval', 'every_hours': 1}
+        assert sched.next_due_at(t, ahora, ahora - 7200) == ahora
+
+    def test_una_diaria_copiada_hoy_apunta_a_manana(self):
+        hoy = dt.datetime(2026, 9, 13, 12, 0, 0)
+        tarea = {'mode': 'calendar', 'days': [], 'at': '00:13'}
+        ya = hoy.replace(hour=0, minute=13, second=0, microsecond=0).timestamp()
+        prox = dt.datetime.fromtimestamp(sched.next_due_at(tarea, hoy.timestamp(), ya))
+        assert (prox.day, prox.hour, prox.minute) == (14, 0, 13)
+
+    def test_una_semanal_salta_al_proximo_dia_marcado(self):
+        """Lunes y jueves: un lunes por la tarde, la siguiente es el jueves."""
+        lunes = dt.datetime(2026, 9, 14, 18, 0, 0)      # 14/09/2026 es lunes
+        assert lunes.weekday() == 0
+        tarea = {'mode': 'calendar', 'days': [0, 3], 'at': '03:00'}
+        ya = lunes.replace(hour=3, minute=0, second=0, microsecond=0).timestamp()
+        prox = dt.datetime.fromtimestamp(sched.next_due_at(tarea, lunes.timestamp(), ya))
+        assert prox.weekday() == 3 and prox.day == 17
+
+    def test_una_apagada_no_tiene_proxima(self):
+        """Cero horas es APAGADA, no «cada cero»: devolver un instante la pintaría corriendo."""
+        ahora = 1_700_000_000.0
+        assert sched.next_due_at({'every_hours': 0}, ahora, ahora - 60) == 0.0
+        assert sched.next_due_at({'every_hours': 'dos'}, ahora, ahora - 60) == 0.0
+
+    def test_y_una_que_no_ha_copiado_nunca_le_toca_ya(self):
+        """La instalación que nunca ha copiado es la que más lo necesita — la misma regla que
+        sigue `is_due`, y aquí tiene que dar la misma respuesta o las dos discreparían."""
+        ahora = 1_700_000_000.0
+        t = {'mode': 'interval', 'every_hours': 24}
+        assert sched.task_is_due(t, ahora, None) is True
+        assert sched.next_due_at(t, ahora, None) == ahora
+
+
+class TestCadaCuantoLeToca:
+    """`due_span` — el periodo de la tarea, que es el que la barra de avance necesita.
+
+    La otra mitad del fallo de la pantalla: la fila enseñaba «cada 10 min» —el tic del hilo—
+    junto a un «siguiente» sacado de la programación, y la barra, dibujada sobre esos diez
+    minutos mientras faltaba una hora, se llenaba y se quedaba llena.
+    """
+
+    def test_por_intervalo_es_el_intervalo(self):
+        assert sched.due_span({'mode': 'interval', 'every_hours': 1}, 1_700_000_000.0) == 3600
+        assert sched.due_span({'every_hours': 6}, 1_700_000_000.0) == 21600
+
+    def test_una_diaria_por_calendario_es_un_dia(self):
+        mie = dt.datetime(2026, 9, 16, 12, 0, 0)
+        assert sched.due_span({'mode': 'calendar', 'days': [], 'at': '03:00'},
+                              mie.timestamp()) == 86400
+
+    def test_pero_una_semanal_no_lo_es_y_no_es_un_promedio(self):
+        """Lunes y jueves: desde el lunes hay tres días hasta el jueves, y desde el jueves
+        cuatro hasta el lunes. La verdad de ese calendario son las dos, según dónde se mire —
+        y un promedio de tres y medio sería una cifra que no ocurre nunca."""
+        martes = dt.datetime(2026, 9, 15, 12, 0, 0)     # entre el lunes y el jueves
+        assert martes.weekday() == 1
+        assert sched.due_span({'mode': 'calendar', 'days': [0, 3], 'at': '03:00'},
+                              martes.timestamp()) == 3 * 86400
+        viernes = dt.datetime(2026, 9, 18, 12, 0, 0)    # entre el jueves y el lunes
+        assert sched.due_span({'mode': 'calendar', 'days': [0, 3], 'at': '03:00'},
+                              viernes.timestamp()) == 4 * 86400
+
+    def test_y_una_apagada_no_tiene_periodo(self):
+        """Cero y no un valor por defecto: la fila cae entonces al tic, que es lo único cierto
+        de un temporizador cuyo trabajo está apagado."""
+        assert sched.due_span({'every_hours': 0}, 1_700_000_000.0) == 0.0
+        assert sched.due_span({'every_hours': 'dos'}, 1_700_000_000.0) == 0.0

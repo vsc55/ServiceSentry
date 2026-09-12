@@ -428,7 +428,7 @@ lo que las sondas ya saben es útil el mismo día, y es la mitad del trabajo del
 
 ## 10. Lo primero, concretamente
 
-1. `lib/core/dcim/`: `manifest.py` (permisos y eventos), `store.py` (las tablas del §2.2),
+1. `lib/core/dcim/`: `manifest.py` (permisos y eventos), `store/` (las tablas del §2.2, una por fichero),
    `mixin.py`, `routes.py` — el mismo reparto que cualquier otro dominio
    (`tests/unit/test_core_domain_layout.py` lo comprueba).
 2. El importador del catálogo como trabajo de fondo, con su entrada en la sección de Trabajos.
@@ -600,13 +600,29 @@ de la información que habrá cuando toque.
 - [x] Mapa de sedes sobre el lienzo compartido: cajas que se colocan y se guardan en el
       servidor, situadas de partida proyectando `lat`/`lon` porque empezar amontonadas en una
       esquina teniendo el dato delante es tirar lo que alguien tecleó
-- [x] **Teselas de verdad, opcionales** (`dcim_map_tiles`, plantilla XYZ — OpenStreetMap, Carto,
-      un servidor propio o un espejo interno). Web Mercator, así que cada sede cae donde dice su
+- [x] **Teselas de verdad, opcionales**, elegidas de una lista (`dcim_map_provider`:
+      OpenStreetMap, Carto claro y oscuro, Google, o `custom` con tu plantilla o un espejo
+      interno). Cada proveedor trae **su crédito**, porque uno que nombra al proyecto equivocado
+      es peor que ninguno. Google va por su Map Tiles API —el servidor mina la sesión, no el
+      navegador— y su SDK se queda fuera como el de todos: cargar imágenes de un tercero le dice
+      dónde están tus sedes; ejecutar su guion le da la página entera. Un mapa configurado que no
+      dibuja **dice por qué**. Web Mercator, así que cada sede cae donde dice su
       latitud y **arrastrarla escribe sus coordenadas**. La política de contenido abre `img-src`
       solo para el origen que salga de la plantilla, y `script-src` no se toca — que es la razón
       de no usar el SDK de un proveedor. Apagado por defecto: encenderlo le dice a un tercero
       dónde están los datacenters de la organización, y eso lo decide quien despliega
 - [x] El cuadro en la URL: es la pantalla que alguien pega en un chat a las tres de la mañana
+- [x] **El mapa, también en el panel de control** (widget `dcim_sites`). La misma proyección y
+      el mismo servidor de teselas que la sección —una sola aritmética, en
+      `partials/core/_geo.html`, porque dos copias son dos mapas que pueden discrepar sobre
+      dónde está el mismo edificio sin dar ningún error—, y el mismo estado, que sale de
+      `service.board()`. Lo que va mal lleva su nombre escrito y lo que va bien es un punto:
+      quince rótulos en una tarjeta se pisan y no se lee ninguno. Y las sedes **sin
+      coordenadas se cuentan en el pie**, porque una sede que desaparece del mapa parece una
+      que está bien. Se maneja con **el mismo lienzo** que el de la sección —rueda, arrastre y
+      dos pulsaciones para volver— y llega hasta la calle, que es lo que se ha venido a ver; la
+      ventana sobrevive al refresco automático, que si no le quitaría el zoom de las manos a
+      quien está mirando cada treinta segundos
 - [ ] Imagen de fondo del mapa de sedes *(el almacén de medios ya está; falta decidir de quién
       es esa imagen, porque no es de ninguna sede en particular)*
 - [x] Hora local de cada sede en su tarjeta. No es adorno: «son las cuatro de la mañana

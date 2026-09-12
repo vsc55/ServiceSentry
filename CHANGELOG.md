@@ -8,6 +8,977 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.126] - 2026-09-13
+
+### Added
+
+- **Several copies can be deleted at once.** A checkbox per row and one in the header, shown
+  only to whoever holds `backup_delete` — a column of boxes that leads to no action shows
+  something that cannot be done.
+
+  **A locked copy is never in the selection**, header checkbox included: its row's delete button
+  is already disabled, and a "select all" that swept it in would lead to a dialog promising to
+  remove five and removing four. The selection also survives the list's own refresh — it repaints
+  itself while a copy runs — but not what has gone: a name left in it would send a delete for a
+  file somebody else just took.
+
+  One request per copy rather than one bulk call, deliberately: each archive leaves its own line
+  in the audit log — which is the question that log gets asked, *who took this one* — and one
+  failure does not carry the rest with it. The result is a single count ("3 deleted", "2 deleted,
+  1 could not be"), because twenty toasts in a row is not something anybody reads. With exactly
+  one copy selected it falls through to the usual dialog, which **names it**: better than "5
+  copies will be deleted" with a 1 in it.
+
+- **A third list on the Jobs screen: what runs behind the panel on its own.** Eleven threads run
+  back there and **not one of them appeared anywhere**. On a single machine that is merely
+  opaque; in containers it is a real question with no way to ask it — with three web replicas,
+  which pod is taking the backups? Which one is scanning the cabling? The answer was written in
+  `service_leader` all along and nothing ever showed it.
+
+  `GET /api/v1/jobs/timers` collects a new `BACKGROUND_TIMERS` descriptor the same way the jobs
+  list collects its own — declared by each package, never named by the screen — and joins it to
+  the live lease: what it is, how often (read live from the setting that governs it), whether
+  that setting is on, when the last round was, when the next one is due, and **which host is
+  holding it**.
+
+  It is a second list rather than a row in the first one because they are different animals:
+  `BACKGROUND_JOBS` describes work in flight, with a start and a total and an end. A timer sleeps
+  ninety-nine per cent of the time; putting one there would show five permanent `running` rows
+  that never advance, ruining the screen that exists to say what is being done right now.
+
+  Two distinctions the list is careful about, because collapsing either loses the only thing
+  worth knowing: **no lease** means it runs in *every* replica, which is not the same as holding
+  a lease nobody currently owns — that one runs in *none*; and *off* (somebody decided) is not
+  *overdue* (it has gone quiet). The badge counts only the overdue, because a number that always
+  says five stops being read.
+
+  The list also surfaces something uncomfortable and true: **six of the eleven threads take no
+  lease at all**. Some rightly (a config watcher is local to its process), others worth a look.
+
+- **The panel now says when somebody moved a patch cord.** It already knew:
+  `cable_check` contrasts what is declared against what the devices report over LLDP and marks a
+  cable `other_port` when the ports they name are not the written ones, and it hands back
+  undeclared adjacencies already filled in. All of that only happened when a person opened the
+  cabling tab and pressed Check — which, for a rack somebody touches twice a year, is the same
+  as not knowing.
+
+  A fourth background scanner now asks the same question on a schedule and notifies:
+  `cable_moved` when a declared cable's ports stop matching, `cable_undeclared` when two racked
+  machines see each other with nothing declared between them. Off by default
+  (`dcim|notify_cabling`), every 30 minutes by default (`dcim|cable_scan_every_secs`).
+
+  **Discovery proposes; it does not write.** Nothing in the scanner touches the inventory — what
+  is declared is what a person declared. A guard reads the module's syntax tree (not its text,
+  because the docstring names `dc_cable` while explaining exactly this) and fails if it ever
+  names an inventory table or calls anything that executes SQL.
+
+  **How much it insists is two numbers, which give five behaviours**: don't warn
+  (`notify_cabling` off), say it once (the default), repeat every X forever, repeat every X N
+  times, and — always — say it again when the finding *changes*, because the same patch cord
+  moved to a third socket is another fact rather than the same one insisting. A scanner that
+  notices every thirty minutes and tells you every thirty minutes silences the channel within
+  two days, and the one alert that mattered goes with it.
+
+  **What has already been announced lives in a table, `dc_drift`, not in a dict** — because this
+  runs in containers. A deployment has several web replicas, the lease picks one to scan, and
+  that one is not the same process tomorrow: an in-memory "already told you" dies with the pod
+  and the next leader announces the whole backlog as if it were new. `event_cooldowns` exists
+  for exactly this reason. The row is also what re-arms the alert: a finding whose key stops
+  appearing is deleted, so a cable put back and moved again is news again.
+
+### Changed
+
+- **A sample's measurements are rows now, not a JSON document.** `history` keeps only what a
+  sample IS — `ts`, `item_uid`, `status`, `series_id` — and every measured value is a row in
+  `history_fact`, with the 211 distinct field names living once in `history_field`.
+
+  **This buys capability, not speed.** Reading one series costs 8 ms as a document and 16 ms as
+  rows — it got *slower*, and that is the honest number. What it buys is every question that
+  crosses series, which could not be written before without a full scan, which is why none of
+  them existed. Measured over 30 days of a real installation (5,266,008 samples, 27,588,336
+  facts): the ten busiest by a field, **1,264 ms → 97**; which series reported errors in the last
+  hour, **915 ms → 1**; the fleet's hourly average, from *nobody writes it* to **25 ms**. The
+  price is disk: **2,474 MB against 877**.
+
+  The capability does not stop at the SQL: `facts.fields()` says what can be asked, `top()`
+  answers "the ten highest", `series_where()` "which ones did X", and `over_time()` aggregates
+  the fleet into time buckets. A capability you have to hand-write each time is not enabled, it
+  is merely permitted.
+
+  Every value carries a one-letter mark saying what it IS, because a JSON document carries its
+  types and a column does not: without it `holds_vip: true` comes back as `1` and `10.0` comes
+  back as `10`. Neither is an error anyone would see. An integer above 2^53 is stored twice —
+  approximate in `num` so it still counts in an average, exact in `txt` so no digit is lost —
+  because SNMP sends 64-bit counters and a saturated 100 Gb/s interface crosses nine petabytes
+  in a little over a week.
+
+  A database from before the change converts itself on startup, in batches and in transaction,
+  emptying each document as it goes: it can be interrupted and the next start resumes where it
+  stopped. When no document is left it retires the `data` column — the column is the marker, so
+  asking afterwards costs an introspection rather than a scan. Measured: **25 minutes for
+  5,266,008 samples**, once, at 3,471 samples/s, reported through the log with its percentage,
+  because a start that takes twenty-five minutes in silence looks like a start that has hung.
+
+  Verified against the real installation: all **4,026 samples**, field by field and type by
+  type, **with no difference**; and the whole path — migration, reads, bucketing, stats, fleet
+  questions, prune and delete — against a live MariaDB 11.8.
+
+- **A bucketed graph point is now the bucket's LAST sample, not an arbitrary one.** When a range
+  holds more points than pixels, `query` groups into buckets. It used to return `MAX(data)` per
+  bucket — the maximum of a JSON *string*, that is, whichever sample of the bucket happened to
+  sort highest by its characters. It now returns the newest sample of the bucket, which is a
+  rule that can be said out loud. Long-range graphs will look slightly different, and more
+  correct.
+
+- **`get_stats` lost its three per-engine branches.** Extracting a number from a JSON document
+  needed `json_extract` on SQLite, `json_extract … AS DOUBLE` on MySQL and
+  `jsonb_extract_path_text` on PostgreSQL (which has no `json_extract`), its own `try/except`
+  because PostgreSQL *raises* where the other two return NULL, and a whitelist regex because the
+  field name went into the SQL. With one row per measured value the field name is a parameter,
+  the number is in its column, and `AVG` is `AVG`.
+
+### Fixed
+
+- **Pruning deleted one statement per series and paid for it.** A single `DELETE … WHERE ts < ?`
+  over the fact table beats 1,465 index-scoped deletes: measured over 3.1 million measurements,
+  **93 s against 57**, and 427 s outside a transaction — the connector runs in autocommit, so
+  without an explicit one every statement syncs to disk on its own. The comment claiming the
+  per-series delete was better was written before it was measured, and was wrong.
+
+- **The inventory's version history did not work on MySQL or MariaDB at all.** `dc_rev` has a
+  column named `by` — half of `GROUP BY`, and a reserved word — and `RevisionStore` spliced its
+  column list into every `INSERT` and `SELECT` raw. Asked of the engine: MariaDB 11.8.6 rejects
+  `SELECT uid, by FROM ...` with error 1064. Nothing was written and nothing was read, and it
+  showed as a record with no versions at all — exactly like one nobody has ever edited, because
+  the routes catch. `dc_file` had the same shape with `stored`, which does **not** break on
+  MariaDB today; it is quoted anyway, because which words an engine reserves is not this code's
+  choice.
+
+- **A test that broke one step before the bug.** The live-engine sweep calls every store method
+  that takes no parameters, but it only filtered out required POSITIONAL_ONLY and
+  POSITIONAL_OR_KEYWORD arguments — so `ApiTokenStore.create(*, user_uid, name, ...)`, whose
+  eight required arguments are all keyword-only, passed the filter and was called with none.
+  The resulting `TypeError` tripped the assert and the rest of the test never ran. That is where
+  `dc_rev.by` had been hiding.
+
+- **The timers table named classes the stylesheet never defined.** The mockup that was chosen
+  had a frame, a header band and soft state pills; the markup asked for a plain Bootstrap table
+  and got one. Reported three times from the screen with the mockup alongside — «no borders, the
+  title zone is not the same, the colours» — because this is a failure that draws the whole page:
+  nothing errors, the class simply matches no rule. `node --check` cannot see it, and neither can
+  a test that only inspects the HTML.
+
+  The table now wears `.ss-panel` (a bordered, rounded box **with a surface of its own**, a
+  step above the page ground — without one the border and the header band have nothing to
+  contrast against), a header band that paints on the `th` rather than the `thead`, and
+  `.ss-pill` / `.ss-pill-warn` in place of solid badges.
+
+  The second half of the same trap is what kept the colours wrong after the rules were written:
+  a Bootstrap `.table` carries `--bs-table-bg: var(--bs-body-bg)` and paints it on **every
+  cell** — the page background, repainted over the frame's surface and over the header band, one
+  cell at a time. The CSS was there and the library covered it. `.ss-timer-table` now sets
+  `--bs-table-bg: transparent`: the table paints nothing, the frame that holds it does.
+
+  Its colours are its own theme tokens in both themes, not the semantic ones: `bg-success` is a
+  badge background meant to carry white letters and reads dead as a 7px dot, and `--bs-primary`
+  is the button blue, which in a 3px bar outweighs the number beside it — the only figure anyone
+  actually looks at. The guard now renders the table through node and checks **both halves**:
+  that the markup asks for the pieces and that the stylesheet defines them, colour tokens
+  included, in both themes.
+
+- **A process restarting more often than its own tick took no scheduled copies at all,
+  silently.** The scheduler waited a whole interval — ten minutes — before its first round, for
+  a good reason badly sized: not running during start-up while the stores are still being built.
+  Every restart put that counter back to zero, so a panel restarted every few minutes (a
+  container in a crash loop, or one somebody is working on) never reached a single round. The
+  only sign is a backup folder whose newest file keeps getting older.
+
+  Found from the screen that was just fixed to tell the truth: it said the next copy was due
+  «now» and kept saying it. At 01:33 the copy due at 01:13 had not been taken, and the newest
+  archive on disk was from the previous night. **The screen was right and there was a real
+  failure behind it.**
+
+  The first round now comes after a minute, which gives start-up all the room it needs and
+  costs a restarting process nothing.
+
+- **And the screen stayed quiet about it for half an hour.** «Overdue» was «later than half the
+  period», which is a good rule for a timer that wakes and does its round — half an hour of
+  grace on an hourly one. It stops being one when the round is decided by another clock: the
+  backup tick checks every ten minutes, so at eleven you already know the copy was not taken.
+  A timer can now declare the precision it can actually keep (`slack`), and the backup one
+  declares its tick. Anything that declares nothing keeps the old rule.
+
+- **The timers list called the backup tick overdue while it was copying on time.** «Overdue by
+  41 min» in amber, with three copies from an hour ago sitting on the next screen — reported from
+  there. The list works the next round out as «last round + every», which is true of every timer
+  that wakes, does its round and renews its lease. The backup tick does not: it takes the lease
+  **only when there is work**, so the lease marks *when a copy happened*, not *when the thread
+  woke*. Adding the ten-minute tick to that gives an instant that means nothing, and the moment
+  the schedule is sparser than the tick — hourly, daily — it is always in the past.
+
+  Two numbers that measure different things, subtracted into a third that measures none.
+
+  A timer can now declare its own `next_run`, and this one does: the earliest moment one of its
+  enabled tasks is next due, which the schedule knows and the tick does not — so the column says
+  what somebody actually wants, *when the next copy happens*. `next_due_at()` is the schedule's
+  own answer, shared with `task_is_due` so the two cannot disagree: a task already due reads as
+  «now» rather than an invented past, and one that is off has no next at all.
+
+  **And `every` with it**, once the other half of the same report came back: «every 10 min»
+  beside «next: now» is two clocks in one row, and nobody reading it can tell what is going to
+  happen. Worse, the progress bar is drawn on `every` — ten minutes against a countdown of an
+  hour — so it filled up and stayed full. Both numbers now come from the schedule: `due_span()`
+  gives the period of the task that is next due (the interval, or for a calendar task the gap
+  between the window that just passed and the next — three days or four for «Mondays and
+  Thursdays», which is that calendar's truth, not an average nobody ever experiences). The
+  ten-minute tick has not gone: it moved under the name, where it explains why a copy due at
+  quarter past happens at twenty past.
+
+  The four other timers declare nothing and their arithmetic is unchanged.
+
+- **A backup whose second database was unreachable said it was complete.** Measured before it
+  was written: with `syslog_db` pointing at a server that was down, the syslog part came back
+  with zero tables, `ok: true`, no error and the manifest's `status: ok` — indistinguishable
+  from a copy taken on an install that never had a syslog table. Found at restore time, which
+  is the one moment nobody can afford to find out. The `except` that swallowed the connection
+  error logged nothing either.
+
+  `tables_by_part` now returns *why* a part has no tables, and a part whose database could not
+  be asked is `ok: false` with the reason, `status: partial`, and a warning in the log — the
+  rule the config-file part has always had. **Zero tables without an error stays a success**,
+  deliberately: a part whose tables do not exist has nothing to copy, and calling that a failure
+  would put a red mark on every install that never turned the feature on.
+
+  The existing test for this case could not have caught it: it made the second database
+  unreachable with `close()`, and the SQLite connector reopens on the next question.
+
+  What was already right, and is now covered end to end: with the syslog feed in a database of
+  its own, a copy reads those tables from THAT database — `conn_for` — and a restore puts them
+  back there, one transaction per database.
+
+- **The copy does not carry the key that decrypts its secrets, and nothing said so.** Not
+  carrying it is deliberate — one file holding both the secrets and their key gives away the
+  whole install in a single stolen archive — but the hint named only `SS_SECRET_KEY`, which is
+  the form the default install does **not** use. Without that variable the key is
+  `<config_dir>/.flask_secret`, and no screen said it had to be kept anywhere. A restore on
+  another machine gives back credentials nobody can read, and that is discovered when somebody
+  tries to use one.
+
+  `/api/v1/backups` now reports which of the two the install is on, and the create and restore
+  dialogs say exactly where the key is when it is a file. With the variable set they say
+  nothing more: the operator supplies it per process and already administers it.
+
+- **Diagnostics listed three directories out of seven.** Data, config and backups — which was
+  the whole list while those were the only folders the panel wrote to, and stopped being it the
+  day a package started keeping files of its own. A page that answers «is it there, can it be
+  written to, is there room» about three of seven answers it about none of the four it omits,
+  and the one most likely to fill a disk — the MIB store — was among them.
+
+  The missing four are not named there either. They come from `dir_parts()` — the same registry
+  a backup reads to decide what a copy must hold, declared by each package — and are resolved
+  with the same `part_dir` + `configured_dirs` the copy uses, so a folder moved to another disk
+  is reported where it actually is rather than at its default. A module that starts keeping
+  files shows up on this page for the same reason it shows up in a copy: because it said so.
+  The modules directory is listed too, marked read-only.
+
+  Three things the page now avoids saying, each of them a false alarm on a healthy install:
+
+  - **A folder that has not been used yet is not missing.** Most are created when the first
+    thing is stored in them, so a fresh install has none of them — and the one people look at
+    most, backups, does not exist until the first backup. Four red «does not exist» badges say
+    an install that is working perfectly is broken. They carry `on_demand` and get their own
+    quiet state, in the screen, in the pasted report and in the XML.
+  - **A read-only directory is not a finding when it is meant to be read-only.** Mounting the
+    modules directory read-only in a container is the desirable thing to do.
+  - **The free space of one disk, five times, is not five answers.** Room is reported for the
+    first directory of each filesystem; a second bar now means a second disk, which is exactly
+    when the number is news.
+
+- **The timers list showed the raw config key.** Under a timer whose work is switched off, the
+  hint read «turn it on in Configuration → `certs|notify_expiry`» — the plumbing. Reported from
+  the screen, and the bad part is not that it is ugly: it does not say **where** to go and turn
+  it on either, because in Configuration that field is called by its label, not by its key.
+
+  A timer still declares the key — that is the right thing to declare, it is what is read from
+  the config and the only stable thing across languages — and the collector resolves it against
+  the same `labels` block the Configuration screen uses, server-side: «Notify on cert expiry».
+  A package whose switch does **not** live in Configuration says so itself: the scheduled-copy
+  tick points at `Backups → a scheduled task`, because a scheduled copy is a task on the Backups
+  screen and sending somebody to Configuration for it is sending them to the wrong place.
+
+- **The Jobs header stayed still when the section went from one list to three.** The title read
+  «Jobs» and its two counters — *running* and *failed* — while you were looking at Timers: numbers
+  that belong to another list. It is the same class of mistake as the «Off» on a cron that runs —
+  not surplus, it answers a different question. The help line below it had followed the tab since
+  the first day; the header was the part left unfinished.
+
+  The header now follows the tab: its own icon and title, and the figure that is news there —
+  overdue for Timers, nothing for History, where the count is already on the tab and the retention
+  is already in the table's footer.
+
+  The header, the tabs and the refresh button moved to `partials/jobs/_head.html` — the size
+  guard asked for the split, and this is the natural seam: it is the only part of the screen
+  that does not depend on which list is being looked at, because it is what decides which.
+
+  The section keeps the name **Jobs**. Two of the three tabs are literally jobs, a timer is what
+  starts one, and the name is not just a label: it is `/jobs`, the `jobs_view` permission, the
+  permission group in the role editor and `GET /api/v1/jobs/timers`. Renaming only what is on
+  screen would leave a seam between what is read and what is written everywhere else.
+
+- **`{} task(s) on`.** A parenthesised plural is what a program writes when it did not want to
+  choose, and it sat under the name in a table meant to be read at a glance — the same defect
+  already removed from the interval column («1 día(s)»). Both this and `{} timer(s) with no
+  lease` now pick a singular or a plural string.
+
+- **A test helper that had never been called was broken.** `_dibuja()` in
+  `test_wa_jobs_render.py` took a `client` argument and used the module-level `bundle` name
+  inside — the fixture *function*, not its value — so the first call to it failed with a
+  `TypeError` about writing a `FixtureFunctionDefinition`. Dead code fails on the day it stops
+  being dead.
+
+### Added
+
+- **The series catalogue no longer walks the history.** `history_series` carries the summary —
+  `samples`, `up_samples`, `last_status`, `last_data` — and `get_index` / `latest_by_series` read
+  it instead of computing it. They used to: a window function picked each series' newest row
+  while a grouped aggregate counted the rest, two passes over the WHOLE table to return one row
+  per series. That is fine at four thousand rows and ruinous at five million.
+
+  Measured by scaling the real history to the 30 days of retention configured (2.03 rows/s →
+  **5,266,008 samples, 1,465 series, 877 MB**): `get_index` **235,674 ms**, `latest_by_series`
+  **69,100 ms** — while reading one whole series took 234 ms and its last 24 h, 8 ms. The engine
+  was never the problem: those were 1,465 answers computed by reading five million rows.
+
+  With the summary in place, against the same 30 days: **get_index 35 ms** (×6,700),
+  **latest_by_series 30 ms** (×2,300), and all 1,465 series cross-checked one by one against the
+  5,266,008 samples with no discrepancy.
+
+  `record()` maintains it in the same primary-key UPDATE it already ran for `last_ts` — **0.004
+  ms per sample** — and `prune()` repairs it in the same transaction it deletes in, because
+  publishing a catalogue that still counts what it just deleted is precisely the failure this
+  domain has paid for before. A series left with no samples goes back to zero and **stops saying
+  what it said**: serving its last measurement would be presenting something deleted as the
+  present.
+
+  A history recorded before these columns existed fills itself in on startup — 3.1 s once over
+  five million samples, then a 24 ms probe that returns nothing. Not a migration with an expiry
+  date: it is the answer to "this series does not know how many samples it has".
+
+- **`idx_history_series_ts` covers `status`.** It is now `(series_id, ts, status)`. `status` is
+  not there to be searched on: counting each series' samples and how many were up is a grouped
+  scan, and with the status outside the index every row had to be visited. **108.0 s → 2.4 s**,
+  for 19 MB of index (877.5 → 896.7 MB). It is what makes repairing the summary after a prune
+  affordable.
+
+- **SNMP, documented end to end** — `docs/explica-snmp.md`. The split between the device
+  (`lib/core/snmp`) and the series (`watchfuls/snmp`) and why it is there; the connection, the
+  shared engine and what rebuilding it per request used to cost (365 s a cycle, of which 6 were
+  the device); OID checks versus device profiles; the profile format, declaration by declaration,
+  each with the real case that brought it; the shape of a result and the line between what a row
+  IS and what it MEASURES; counter rates, and why a backwards step is a wrap at 32 bits and a
+  reset at 64; the MIB catalogue, which is an authoring aid and is not touched while sampling;
+  and where the data ends up, **with what it costs measured on a real installation**.
+
+  That last part is why the document exists: SNMP is **83 % of the history rows**, and of the
+  217 bytes a sample occupies, **11 are the measurement**. The rest is identity that never
+  changes and field names written again on every sample. The document ends with the checklist
+  for fixing that, step by step.
+
+- **`module` and `key` are gone from `history`** — the last step, and the one that cannot be
+  undone, so it ran with two interlocks: only when not a single sample was left without a
+  `series_id`, and after retiring the index that named those columns. On a real installation the
+  whole migration — series, ids, indexes and columns — took **2.76 s** over 112,219 rows, and the
+  file went from **121.4 MB to 101.1 MB** after a VACUUM, with every row still in it.
+
+  **And then the migration was removed from the code.** A path that can only run once and has
+  run is dead code that still has to be maintained, read and tested. What rebuilds a database
+  from before the change is a backup — which is why `history_series` travels in the same backup
+  part as `history`.
+
+- **The history is read by series.** The four readers narrowed with `module = ? AND key = ?` —
+  two strings repeated on every one of a hundred thousand rows — and now narrow with an integer.
+  `get_index` no longer groups on `COALESCE(item_uid, module||':'||key)`, the expression no index
+  can serve, which forced both of its passes to sort the whole table into a temporary B-tree and
+  which `latest_by_series` was written to dodge. Measured on a real installation: **1,783 ms →
+  976 ms**. Reading does not create — a graph of something never measured leaves no phantom
+  series — deleting a series takes its identity with it and forgets the caches, and the
+  module filter goes through the series table, because doing it on the sample's own column works
+  today and would quietly return less once that column goes.
+
+  One documented difference disappears with it: `get_index` used to fold two names of one
+  `item_uid` into a single series while `latest_by_series` reported two. **A series is
+  `(module, key)`** now, everywhere — which is how the rest of the product already addressed one,
+  and no recorder has ever written an `item_uid`.
+
+- **Indexes: in with `(series_id, ts)`, out with `(item_uid, ts)`.** The second indexed a column
+  that is NULL in every row of every installation — space and one write per sample for nothing.
+  The reconciler never drops an index that stopped being declared (it only reports it, and
+  rightly: dropping something it did not create would be deciding about a database it does not
+  know), so the store retires this one at boot, where it *is* known. With the new index in place,
+  pruning also recomputes `first_ts`, which after a prune was the date of a sample that no longer
+  exists.
+
+- **A sample now stores what it MEASURES.** What the row *is* — the keys starting with an
+  underscore, which are the recorders' own convention for "about this result rather than a
+  measurement of it": `_attrs` (a disk's model and serial, an interface's MAC), `_row`,
+  `_watched` — moves to its series, where it is written once and only when it changes. It was
+  being repeated in every reading of the same interface: 78 of the 217 bytes a sample occupied.
+
+  Reads put it back, so nothing above the store can tell, and a row recorded before the change
+  keeps its own copy, which wins over the series' — that copy is what was true *that day*. This
+  matters more than it sounds: a device's identity panel is drawn from `_attrs`, and for a
+  machine in maintenance — whose live records were pruned — it comes from the history.
+
+  Measured with **3,000 real SNMP samples**: a sample's JSON goes from 153 bytes to 79, and the
+  identity of all 49 series in that slice takes **4 KB in total**. With the key still there
+  (until the last step) that is 210 → 136 bytes a sample; without it, 79.
+
+- **`history.series_id`** — every sample points at its series. Nullable on purpose: a sample
+  recorded when the series could not be resolved is still a sample. The backfill runs series by
+  series and only where the column is empty, so it can be interrupted and picks up where it
+  stopped — **112,219 rows pointed in 0.14 s** on a real installation, none of them at the wrong
+  series.
+
+- **`history_series` — one row per series, not per sample.** The first structural step of the
+  plan in `docs/explica-snmp.md`: the table that holds what does NOT change between two readings
+  of the same thing, which today is rewritten into every sample. `(module, key)` is unique —
+  the panel and the monitor are two processes that can meet a series for the first time at the
+  same moment, and whoever loses that race has to find the other's row rather than create a
+  second one. The migration fills it from what is already recorded, is idempotent by
+  construction (this runs in steps against a live database and can be interrupted between two of
+  them), and reads and inserts in two statements rather than one `INSERT ... SELECT` naming its
+  own target — which reads better and is exactly the shape MySQL refuses. Measured on a real
+  installation: **0.15 s for 2,143 series out of 112,219 rows**, and only the first time.
+
+  **Nothing reads it yet**, deliberately: the step that cannot be undone goes last.
+
+- **`history.retention_days` is a setting now.** It was a 30 written inside the monitor's prune
+  loop — the worst possible place for a number that depends entirely on the fleet. It lives in
+  the registry, appears under Monitoring, and 0 still means forever.
+
+- **The failing point on the dashboard map says what is wrong with it, not just its name.** A
+  name says where to go; it does not say what you are going to. "Home" over a map does not
+  distinguish two machines out of thirteen from all thirteen, nor a warning from an outage — and
+  that is what decides whether somebody gets called at three in the morning. It was in the card
+  that appears on hover, which on a panel glanced at from the doorway is much the same as not
+  being there. The label now carries the state, the count, and the cabinets when the view says
+  which words to count them with — the tally belongs to whatever domain brings the points, not to
+  the map.
+
+- **And a summary of how many there are of each**, over the map. The drawing answers "where",
+  which is what no other card answers. It does not answer "how many": working out whether two or
+  seven are in trouble means counting pins by eye, and by eye one counts wrong — two red dots in
+  the same city are one red dot. All four states are always shown, the zero included: "none down"
+  is the answer people come looking for, and having to infer it from an absence is exactly what
+  cannot be asked of somebody glancing at a panel. Each with **its own sign** and not only its
+  colour: whoever does not separate red from green sees four identical dots with four numbers.
+  And it counts **every** site, not the drawn ones — a site with no coordinates is missing from
+  the map, and missing is not the same as well.
+
+- The site map opens **visible**, and the site whose card you point at is not only raised but
+  **highlighted** — with seven similar boxes, working out which one moved costs more than reading
+  them all. The highlight is a halo and never the border: the border already says how that site
+  is doing, and overwriting it to say "this one" would take away the only thing it says at a
+  glance.
+
+- **Moving a site on the map is now something you switch on**, and hovering a site's card brings
+  its box to the front. Two things asked for from the same screen. Dragging a site on a map is
+  *changing its coordinates* — they are saved and become where that building is for the whole
+  panel — and dragging is also how the map itself is moved, so with both on one gesture a tug to
+  see another country quietly moved a site there. And in a drawing there is no "on top": order
+  decides, so two units on the same estate left one of them half-readable forever; pointing at
+  its card, or at the box, now raises it.
+
+- **Aerial imagery in the catalogue, and a button that proves the map works.** OpenStreetMap has
+  no satellite view and never will — it is vector data drawn by volunteers, and the aerial
+  imagery they trace from belongs to third parties under licences that forbid re-serving it. So
+  the imagery comes from whoever flies it: **Esri World Imagery** (worldwide, no account) and the
+  **IGN's PNOA** (Spain, no account, and the sharpest thing there is for recognising a unit
+  here). A road map does not draw a mast on a hill, and some sites are exactly that.
+
+  And **"Test the map"**, in the new Maps card, because a map that does not draw says nothing on
+  its own: the browser swallows an image that will not load, the content policy blocks in
+  silence, and a key without permission gets a 403 nobody sees. All three look identical — the
+  same empty box. The test walks the whole chain and reports each step separately: which
+  provider the configuration resolves to and how far it zooms, whether Google grants a session,
+  whether **this server** can fetch a tile (which separates "no way out to the internet" from
+  "the key is not valid"), and which origin the content policy has to open. With the raw detail
+  of what the other end said, untranslated, because it is not this panel's text — "403 API not
+  enabled" is the answer, and a red banner without it is another empty box.
+
+  It also **draws a real piece of map**, centred on a known city. That is the half no server-side
+  check can reach: the one that has to fetch the tiles is the viewer's browser, and what stops it
+  leaves no trace on the page. Report green and preview blank means the content policy, seen at a
+  glance instead of deduced.
+
+- **Maps have their own place in the settings**, beside the other things another platform
+  maintains and this panel reads. They were inside "Physical inventory", where nobody looked for
+  them and where they read as a setting about the cabinet catalogue — and they feed two screens,
+  not one. Two more decisions can now be made there:
+
+  * **which kind of Google map** — the road map finds a unit on an industrial estate, which is
+    why it ships, but a mast on a hill is not on any road map and satellite is the only way to
+    recognise the place;
+  * **how far the tiles go**, empty meaning "as far as the chosen provider does". The catalogue
+    knows that for the ones it ships (19 on OpenStreetMap, 20 on Carto, 22 on Google) and it was
+    a constant in the script before, wrong for two out of three. It is set by hand for your own
+    server or an internal mirror, which carry what they carry: asking for a level yours lacks
+    produces blank gaps when zooming in, with no error anywhere, and whoever is looking thinks
+    the map is broken.
+
+  Changing the Google map type throws the cached session away, like the key and the language
+  before it.
+
+- **A pin now answers the question that comes after "something is wrong there".** Hovering one
+  opens a card with what a site knows about itself: how much of it answers, how many rooms and
+  cabinets, the address, the local time (four in the morning there decides whether you call now),
+  who operates it, **who to call and their number** — as a `tel:` link, because in front of a gate
+  at three in the morning the difference between a written number and one you can press is the
+  number itself — and **a photo of the place**, because somebody going for the first time is
+  looking for one door in an industrial estate. A row nobody filled in is simply absent: a card
+  of four empty labels mostly displays what nobody wrote down.
+
+  Three of those are new on the site (`contact`, `phone`, `photo`): the operator says which
+  *company* runs the site, and a company does not open a door. The photo is stored the way a
+  room's floor plan is — the file in the picture store, its name in the row — so it travels in
+  the backup by a road that already existed, and it is uploaded from the site's own form, at the
+  moment it is chosen, because a file is not a text field.
+
+- **Clicking a pin goes to that site.** Where it goes is declared by whoever brings the points
+  (`view.pin_nav`), not by the dashboard: a map of sites goes to the inventory, and whatever
+  brings located things tomorrow will go somewhere else.
+
+- **The dashboard map zooms and pans**, on the same canvas the section's site map uses — wheel to
+  approach, drag to move, double-click back to the whole picture. Two ways of moving two maps of
+  the same panel would be two to learn, and the second one is always the one missing the fixes
+  the first accumulated. What is new there is that a drawing can now say **how far in it goes**
+  (`data-zoom-in` / `data-zoom-out`): the canvas ships with a room-plan's limits, and eight times
+  in from half a peninsula still shows no street — which is exactly what somebody approaching a
+  site came to see.
+
+  Two things follow from a map you can move. The view survives the card being repainted, so the
+  automatic refresh does not take somebody's zoom out of their hands every thirty seconds. And a
+  press on the map no longer navigates to the section: on something you drag, a click is the end
+  of a gesture, and jumping to another tab in the middle of it is the card taking the map away.
+
+- **Companies can come from where they are already written.** In Freshservice, "department" and
+  "company" are the same thing — its own documentation titles that section "Departments /
+  Companies" — and in a house that already uses it, that list exists, is maintained, and is the
+  good one. Typing it again here is two lists, and two lists are one that goes stale without
+  saying so. The new `freshservice` provider brings it in, **in one direction only**: nothing
+  from here goes back.
+
+  The package is split by what can go wrong, not by what it does. `api.py` knows the API and
+  nothing about departments: how it is called (`/api/v2`, HTTPS only, and only on a
+  `…freshservice.com` domain — "works only via Freshservice domains and not via custom CNAMEs",
+  which is a failure people otherwise investigate from the wrong end), how it authenticates, how
+  it wraps answers, how it paginates (the `link` header while there is more, a short page as a
+  fallback, and the page-500 cap **they** ask for), how it writes times, how it reports the quota
+  left, and what each status code means. `client.py` is one two-line function per resource, so
+  agents or assets tomorrow are a function, not another round of reading the documentation.
+  `plan.py` decides — with no network and no database — and that is where the rules live:
+
+  * matched **by their identifier, never by name**: renaming a company there would create a
+    second one here and orphan the first, with nothing saying so;
+  * a company **typed here** is adopted rather than duplicated, and adopting brings the source's
+    data, because from that moment the source maintains the row and the next import would
+    overwrite it anyway — delaying that by one cycle only makes the change arrive on a day
+    nobody is looking;
+  * **what did not change does not travel**, and what is no longer at the source is **counted,
+    never deleted**: cabinets and machines here are filed under a company, and a department
+    disappears from the source through a reorganisation as easily as through a bad filter.
+
+  The short form — required here, non-existent there — is derived from the name, accent-free and
+  de-duplicated with a number, because two identical badges in a shared cabinet do not say whose
+  equipment is whose.
+
+  **Nothing is written without being seen first.** The dialog opens on the press and waits inside
+  it, shows what would be created, corrected, adopted and left alone, lets you search by name,
+  short form or description, groups what is already linked ahead of the rest, and pre-selects
+  **only what is already linked and has changed** — fifty-nine departments are not fifty-nine
+  companies this house wants to know about. Rows can be linked by hand to a local company, which
+  is the one thing the panel cannot deduce: that "Amixalan Energy Supplies, S.L." over there and
+  "Amixalan" here are the same house is known by the person looking, and guessing it from
+  similar names would join two that merely resemble each other.
+
+  Testing the connection answers the other half too: it reads their status page — incidents,
+  service components, published pages — because half the times somebody comes to test a key it is
+  because something is odd. That read is best-effort and separate: it is not on every plan and the
+  key may not reach it, and a perfect key must not report an error over a module that house never
+  bought.
+
+- **A base map is now chosen from a list, not typed as a URL** — and one of the entries is
+  Google. The setting used to be a single XYZ template, which quietly assumed the reader already
+  knew what an XYZ template is and which URL their provider serves; asked from the screen, and
+  the reading was "so the only thing I can configure is Google Maps". `lib/maps` holds the
+  catalogue: OpenStreetMap, Carto light and dark, Google, and **custom** — which is the entry
+  that keeps a tile server of your own or an internal mirror possible, and is why the list is
+  not a cage. Each provider carries its own credit, because a credit that names the wrong
+  project is worse than none, and OpenStreetMap's licence asks for one.
+
+  Google cannot be a URL, and that is the whole reason this needed a catalogue rather than a
+  longer hint. Their tiles come from the **Map Tiles API**: the server mints a session with a
+  key, and only then can a tile be fetched. The session is minted here and not in the browser —
+  one per panel instead of one per open tab, and something has to remember when it expires —
+  and it is thrown away when the key changes, because otherwise changing the key would appear
+  to do nothing for two weeks. Their JavaScript SDK stays out, as every provider's does:
+  loading a third party's images tells them where your sites are; running their script hands
+  them the page. The key is stored encrypted and masked like any other secret, but the field
+  says plainly what that does and does not protect: the key travels to the browser inside every
+  tile URL because that is how the API is built, so it is protected by restricting it in
+  Google's console, not by hiding it.
+
+  A map that is configured and does not draw now **says why** — a wrong key, the API not
+  enabled, no billing, no way out to the internet. Going dark in silence would leave whoever
+  just pasted their key looking at exactly the same empty box as before they pasted it.
+
+  Nothing changes for an installation that already had a template written and never picks a
+  provider: that is what `custom` means, and it keeps working. Turning a map on is still a
+  decision, and still off by default: it makes every viewer's browser tell a third party where
+  this organisation's datacenters are.
+
+- **A company remembers where it came from.** `org` gains `source` and `external_id` — two
+  columns because they answer two questions: whether somebody else maintains it, and which of
+  theirs it is. The Companies screen shows it as a badge in all three views and in the dialog,
+  with the name and icon **declared by whoever brings them** (`ORG_SOURCES`), because no core
+  string names a provider; a source nobody declares any more still shows its identifier rather
+  than leaving the row mute.
+
+  What a source maintains is **read-only here**: its name, short form and description are
+  corrected from there on every import, and a field you can type into that reverts by itself is
+  worse than one you cannot — the work is lost with nothing saying so, and a day later. The
+  server refuses it too, because a screen is not a guard. And there is a way out: unlinking a
+  company from its source hands it back to this house, which is what keeps a removed provider
+  from leaving rows nobody maintains and nobody can correct.
+
+- **Configuration has a tab for external sources.** Freshservice landed in "General", which is
+  where anything one has not decided a place for ends up. It is not a general panel setting: it
+  authenticates nobody (that is Access), watches nothing (Monitoring) and sends nothing out
+  (Notifications). What defines the new tab is one thing — data another platform maintains and
+  this panel reads — which is where Azure or Microsoft 365 would go the day they bring assets or
+  licences.
+
+- **The dashboard says WHERE, not only what.** Every other card on it answers "what is wrong" —
+  a list of machines, a count of warnings. None of them answers the question that decides who
+  gets called at three in the morning: whether the thing that is down sits in the building next
+  door or in the datacenter four hours away that needs notice before anybody can get in. The
+  inventory has held each site's latitude and longitude since its first table; now the panel
+  draws them, coloured by the state of what is inside.
+
+  The card is a **kind of card, not a section's private drawing**: `kind: 'map'` takes things
+  with a latitude, a longitude and a state, so the next package that has located things asks
+  for it by declaring the same word. What is wrong carries its name written on it and what is
+  fine is a dot — fifteen labels on a card this size overlap into a smear, and what has to be
+  read is what is wrong. A site's state, the counts and who may see it all come from
+  `service.board()`, the same read the inventory's own board is drawn from: a second idea of
+  "worst" here would be two screens disagreeing about the same site, both of them right.
+
+  **A site with no coordinates is counted, not dropped.** It cannot be drawn, and a site that
+  vanishes from a map looks like one that is fine — which is exactly what must not be left to
+  believe on something glanced at from the doorway. It shows in the footer beside how many
+  sites there are and how many are in trouble, which is also what makes somebody go and write
+  the latitude down.
+
+  Tiles stay **off by default**, as they already were for the section's map: turning them on
+  makes every viewer's browser ask a third party for images, and that third party then knows
+  where this organisation's datacenters are. The same `dcim_map_tiles` template serves both
+  screens, and the CSP rule that opens `img-src` for that one origin already covered this —
+  it is a policy about a configured origin, not about a page.
+
+### Fixed
+
+- **A machine somebody switched off on purpose is not a machine that is down.** The fleet
+  listing shows maintenance as what it is — a state that *overrides* the other one — while the
+  inventory board and the dashboard card took the raw status: the same machine read
+  "Maintenance" on one screen and **"Down"** on the other two, and the one that gets somebody
+  called at three in the morning was the wrong one. It counts as **unwatched** now, which is
+  what is actually happening: nobody is watching it, and that was a decision. Green would be
+  lying about a machine that is not answering.
+
+- **A fallback that did not know what it was a fallback for.** A machine's "Latest data" showed
+  a `ram_swap` row in **Error** with no message and an hour of its own, while the fleet listing
+  called the same machine fine. Measured against the database: the live state holds that check's
+  two rows, `<item>_ram` and `<item>_swap`, both fine; the history also holds a third series
+  under the **bare** `<item>` key — two failed samples, no data, the last of them eight hours
+  earlier. The history pass skipped a series only when its *key* had already appeared live, and
+  the bare key never appears live, because `ram_swap` files nothing under it. So a dead series
+  was served as the state of now. The pass now notes which **items** are reporting and skips
+  their history: if the item is talking, there is nothing to fall back to.
+
+- **Every "last activity" said 1970-01-21.** `new Date(number)` counts milliseconds and half the
+  application stores **seconds** — `check_state.last_change_ts` and `history.ts` are epoch
+  seconds with decimals. The formatter now reads both: under 1e12 is seconds, over it is
+  milliseconds (in milliseconds 1e12 is September 2001; in seconds it is the year 33,658, so no
+  real date falls on the wrong side). A string is left alone. The card view of that same screen
+  was multiplying by a thousand for history rows only, so the live ones were showing 1970 too.
+
+- **The widget that grows under the cursor no longer grows off the screen.** The dashboard
+  enlarges the card you point at, and with a percentage `scale` that is a growth that depends on
+  how wide the card is: a three-column card gains twelve pixels and one spanning the whole grid
+  gains sixty, half of them outside the window — where there is no sideways scroll to go and look
+  for them. It was already known of module cards, which are wide, and was fixed for those alone
+  with a second rule; the day a core card was wide too — the site map — the same bug came back.
+  So the fixed eight-pixel growth is now for every card and the two rules are one, which is what
+  stops it returning with the next wide card.
+
+  And what you **operate** does not grow at all. A table is sorted and scrolled; a map is dragged
+  and zoomed. A card that swells under the cursor of somebody who was about to grab it is the
+  card taking out of their hands the thing they were reaching for — tables were already excluded,
+  maps are now too.
+
+- **A row saying what is broken named it by its uid.** The board's list exists to be read down
+  the phone while somebody walks towards the cabinet, and `2b4752f6-6341-4ed1-9c37-412455c5379f`
+  cannot be read to anyone. The slot in a rack does not always carry a label — the machine's name
+  is already in the fleet registry, and writing it twice is having it wrong in one of the two
+  places — so the name now comes from the registry when the slot has none. Narrowed by the same
+  rule that narrows the state: whoever is not shown a machine is shown neither its colour nor its
+  name, because a list of failures is a very comfortable door through which to hand out the
+  neighbour's inventory.
+
+- **A site with something down looked like the six that are fine.** The state was a one-pixel
+  border, and at the distance a board is read from, that pixel is not there. The card is now
+  painted whole — tinted background, thicker border and a symbol before the name — and so is its
+  box on the map. Not colour alone: whoever does not separate red from green still sees which one
+  to look at.
+
+  **A tint is not a background.** The label was drawn with `--bs-danger-bg-subtle`, which in this
+  panel's dark theme is not a colour at all: it is redefined as `rgba(220,53,69,.10)`, a ten per
+  cent red. It works everywhere else — a card, an alert, a row — because underneath all of them
+  is the page's opaque ground. A label on a map is the one place in the panel where there is
+  nothing underneath, so the other ninety per cent was the aerial photograph, and the label came
+  out with the map inside it. Three layers now: a solid `--bs-body-bg` floor, the tint over it,
+  the border last — which is exactly what a card does, except a card does not have to bring its
+  own floor.
+
+  And **a label that would collide is not drawn** — its pin stays. That was the real problem, and
+  it is why the box being opaque was not enough: a label is 190 pixels wide and a whole province
+  fits in one, so five sites in the same city painted five labels on the same spot. Not five
+  labels — a tangle in which none can be read, not even the top one, because the ones underneath
+  stick out around its edges. The space is now shared out by importance: the site pointed at from
+  the list first, then worst to best. Whoever asks first keeps it; whoever would collide keeps its
+  pin, which still says where it is, how it is doing, and opens it when clicked — and its label is
+  one hover away.
+
+  The box is also **opaque** now. It carried 95 %, and that 5 % let the box behind it through:
+  with two sites in the same city, two labels written one on top of the other. Over a light map
+  it barely shows; over a dark one it reads perfectly, because there anything that lightens the
+  ground stands out — which is how it was seen, with the neighbour's label inside the box of the
+  site that is down. What is lost is seeing the map through a label, which nobody wants.
+
+  And the worst box is **drawn on top**. In a drawing there is no "on top": order decides, so
+  with two sites in the same city the one that said "down" was covered by the one that is fine —
+  hiding exactly what the screen was opened to see — and which of them won was the order they
+  happened to be stored in. The order also lived only in the redraw, so until somebody touched
+  the map the first paint was left to chance.
+
+- The highlight was the panel's blue, which disappears over satellite imagery — the background of
+  a map is anything at all, so a fixed colour cannot be counted on. It is two rings now, one in
+  the text colour over a wider one in the background colour, which reads over aerial photography,
+  a light street map or a blue sea, in both themes. And the other sites dim while one is pointed
+  at: raising one is not what makes it stand out; dimming the other six is.
+
+- **The highlight on the site map was invisible.** It was a CSS `drop-shadow`, and inside that
+  drawing the units are world pixels — six of them is six millionths of the screen. It is drawn
+  now, with the map's own scale, like every other mark there. Raising and highlighting also moved
+  into the redraw instead of being poked into the node: the pins are rebuilt on every wheel and
+  every drag, so the first time you touched the map both were lost.
+
+- Two words for the map's new button landed in the language file's `labels` sub-dictionary,
+  where `t()` does not look, so the button read `dcim_move`. The same misplacement as the
+  provider options, one screen later.
+
+- **Switching between map providers no longer needs a reload** — the question that exposed the
+  hole in the previous answer: the test dialog worked without one because it fetches through the
+  panel, while the real maps fetch from the provider and are subject to the policy the page was
+  served with. An installation that has a map now opens the catalogue's origins, all five, so
+  moving between them changes nothing about what the page may already do. **With no map, nothing
+  is opened** — the property that was actually worth defending, and a custom template that cannot
+  be parsed opens nothing either. What still needs a reload is genuinely new: turning a map on
+  from none, or pointing a custom template at a server nobody could know in advance. And that
+  answer now comes from the server, which is the only side that knows which policy this page was
+  served with.
+
+- **Saving a new map left the open page unable to load it**, with nothing saying why — you had
+  to press F5 and know that you had to. Where a browser may fetch images from is decided when the
+  page opens, so the page you saved from still carries the previous map's policy and blocks the
+  new provider's tiles in silence. Saving one of the two settings that change that origin now
+  offers to reload, with the button attached: asking somebody to press F5 is asking them to know
+  why.
+
+- **The preview mixed two providers' tiles.** The dialog's tile URL is the same whichever
+  provider is being tested — the panel serves them — so the tile the browser had already fetched
+  while testing the national aerial imagery came straight back out of its cache while testing
+  OpenStreetMap: half streets, half photograph, depending on which squares had been visited.
+  `no-store` does not save you here; with the same URL an `<image>` can still come from the
+  page's own memory cache. Each test now gets its own address.
+
+- **And a composed i18n key reached the screen again**, this time as
+  "dcim_map_provider_ign_pnoa" in the middle of a sentence: the IGN provider's id is `ign_pnoa`
+  and its label key is `…_ign`, so `'dcim_map_provider_' + id` pointed at nothing. The catalogue
+  is now asked for the name (`label_key`), the server sends it, and a guard fails on anything
+  that builds one of these by concatenation — the third time this exact shape has bitten, and
+  every time the function that composed it looked perfectly reasonable.
+
+- **And the test's map stayed blank for any provider that was not the saved one** — only the pin
+  on an empty rectangle, until you saved and pressed F5. It was the content policy: `img-src` is
+  opened for the origin that comes out of the SAVED configuration, so a provider just chosen in
+  the form has its origin closed and the browser blocks every tile without a word. The dialog now
+  fetches its tiles **through the panel**, where nothing needs opening; it is not an open proxy —
+  the address never comes in the request, it comes from what that same person just tested, held
+  in memory with an expiry, behind the same permission that could point the map anywhere anyway.
+  And when what is being tested is not what is saved, the report says so: the other screens keep
+  the old one until you save, and cannot fetch from the new origin until you reload.
+
+- **The map test only ever tested what was saved.** Change the provider in the form, press Test,
+  and it answered about the old one — while the whole point of pressing it is to find out whether
+  the new one works *before* saving. It now takes what is on screen, with one exception that is
+  the rule elsewhere too: a masked secret that did not travel back is the saved one, or testing
+  without retyping the key would always report a missing key.
+
+  The preview is also a real map now — bigger, resizable, and it zooms and pans on the same
+  canvas as the other two, because testing a map you cannot move is looking at a photograph, and
+  what you want to know includes whether the tiles arrive at the levels you will actually use.
+  Its pin no longer grows into a city block when you zoom in: it is drawn in world coordinates,
+  so it is redrawn with the window like every other mark on every other map here.
+
+- **The map test said "it works" over three red crosses.** `apiSend` returns an envelope —
+  `{ok, error, data}` — and the report goes inside it; read as though the envelope were the
+  letter, the banner looked at an error that was empty (the request had succeeded) while every
+  step looked for fields that were not there. Each half did exactly what its code said, and the
+  route's own test passed because the route was right. Opening the envelope is now a named
+  function that can be exercised without a network, and the banner is derived from the same data
+  as the steps, so it cannot contradict them: an empty report is not a working map, and without
+  the tile nothing has been tested.
+
+- **The dashboard's map card was speaking the inventory's language.** Its hover card said "three
+  racks in two rooms" using the inventory's own i18n key — and this file draws maps: the moment
+  it writes that, the next package with located things inherits a sentence about racks. The key
+  is now declared by whoever brings the points (`view.count_key`). The guard that exists for
+  exactly this walked a hand-written list of five functions and the hover card was added later;
+  it now walks every `_dwMap*` function there is, because a guard you have to remember to extend
+  is one that comes up short on the day it matters.
+
+- **Google's tiles were asked for in `en-US`.** They now come in the panel's language and region
+  — English labels inside a Spanish panel are a map that does not read the same, and the region
+  decides how disputed borders are drawn, which is not a cosmetic detail. Changing the language
+  throws the cached session away, or it would keep serving the old language for two weeks: the
+  same trap already avoided with the key.
+
+- **How far a map zooms in is now set by the tiles, not by a number of times.** Both maps said
+  "512×", and a multiple is relative to what you see when it opens — which depends on where the
+  sites are. The same figure gave a street in a house with everything in one province and **two
+  and a half kilometres** in one with sites from Pamplona to Barcelona; reported from the screen
+  as "the widget does not zoom in enough", and rightly, because the limit had nothing to do with
+  what was being looked at. The floor is now the window that shows the finest tiles at their
+  natural size — the same place whatever the frame, and there is nothing beyond it but the same
+  picture enlarged.
+
+- **And at that depth the site boxes covered the map.** The section map's box scale had a floor
+  of 0.2 that eight-times zoom never reached; at street level the real scale is 0.007, so the
+  floor took over and a box grew to four screens wide with the pin the size of a city block.
+  A scale needs no floor — only not to divide by zero.
+
+- **The inventory's own site map had all three of the same faults**, reported from one screen:
+  it did not fill its space, the site boxes were too small to read, and it would not zoom in
+  close. One cause — the frame did not have the shape of the hole it is drawn in. `meet` fits the
+  whole drawing inside the element, so a square frame in a wide hole becomes a column with empty
+  bands beside it; and with the frame taller than the hole, the real scale is set by the HEIGHT
+  while the box size was computed from the width, which is why the labels came out a fraction of
+  the size asked for and nothing said so. It is now framed from the measured element (and
+  re-framed when the element changes size — a folded sidebar, a rotated tablet), the scale is
+  taken from whichever side does not fit, and the map declares how far in it goes.
+
+- **Clicking a pin did nothing.** It carried an `onclick`, and the map is dragged: to keep a
+  drag alive when the pointer leaves the drawing, the shared canvas takes pointer capture on the
+  `<svg>` — and with capture held, the browser fires the `click` on the capturing element, not on
+  the pin inside it. Neither mechanism warns, because each does exactly what it promises. The
+  press is now decided where the section's map has always decided it — on `pointerup`, "a press
+  that did not travel is a click" — and the test was rewritten to perform the gesture instead of
+  calling the function: the old one stayed green with the bug in front of it.
+
+- **The dashboard map left empty bands beside itself.** A card on that grid is far wider than it
+  is tall — 1400×320 on the screen this was reported from — and an SVG `viewBox` with any other
+  proportion is fitted whole inside the box, leaving the rest blank. It cannot be got right while
+  the HTML is being written: how wide a card is depends on how many columns it spans, on the
+  screen, and on what the reader has dragged, and none of that exists while a string is being
+  built. So it is drawn twice — once with an assumed shape, then re-framed from the real
+  measurement as soon as it is on screen, and again whenever the card is resized. Cropping
+  instead of fitting would have been the other way out, and it is worse: it hides pins, and in a
+  map of sites a hidden pin is a hidden site.
+
+- **A config dropdown showed raw identifiers** — `osm`, `carto_light`, `google` — because the
+  option labels went into the language file's `labels` sub-dictionary and the resolver looks them
+  up at the top level. It does not fail or warn: it falls back to the option's own id, which is
+  what reaches the screen. A guard now walks every select the config schema declares and fails on
+  a label that never resolved. The base-map options also say what each one *is* now (light,
+  muted, dark, "needs a key and billing"), because a list of proper nouns does not tell anybody
+  which one to pick.
+
+- **Five settings were saved and read by nobody.** The registry lets a field declare `attr=` —
+  "this value also lives on that attribute of the panel", which is where the screens that will
+  not open the configuration on every request read it from. Integers and switches had a generic
+  pass that applied them; **strings did not**, so each one had to be written out by hand in
+  `_apply_config_attrs`, and the ones nobody wrote never arrived anywhere. That fails nowhere:
+  the screen takes the value, saves it, shows it saved on the way back in — and whoever reads it
+  gets an empty string forever, restart included, because that attribute was only ever set by
+  the environment-variable path. The five: the map tile server and its attribution, the device
+  catalogue's address, the picture folder and the backup folder. Found because somebody
+  configured the map with OpenStreetMap's template and the map stayed empty, which is the only
+  way a failure that does not fail can announce itself. Strings now have the same generic pass
+  as the other two (`str_rules()`), and a guard walks the registry rather than a hand-written
+  list, so the sixth string is covered before it is written.
+
+- **A configuration secret disappeared from the screen once it was saved.** There are two lists
+  of secret field names — what is encrypted and masked on the way out, and what the SCREEN knows
+  is a secret — and being in only the first produces no error at all: the value arrives as
+  `null`, matches no branch of the field renderer, and the last line of that function returns an
+  empty string. **The box vanishes.** Whoever just saved their API key opens the configuration
+  and no longer has anywhere to type it again. Reported from the screen with the Freshservice
+  key; looking at it turned up that the MIB library's GitHub token had been in the same state
+  since the day it was encrypted.
+
+- **And a secret that was set did not count as changed**, from the same `null` read the other way
+  round. The rule that decides whether an option is still at its shipped value treats blank as
+  "not set", and not set IS the default — right for a bind address, backwards for a secret, where
+  `null` means "set, and not transmitted". A stored key counted as untouched: not marked, not in
+  the card's count, and gone under "changed only". The secret rule now decides **before** the
+  blank one, which is the whole fix: the second swallows any `null`.
+
+### Changed
+
+- A generic config card can now carry a field that only appears when another field says so
+  (`show_when` in the schema), through the same `sw-field` mechanism the database driver and the
+  forced-reload seconds already used. Declared, not written here: a card offering a Google key
+  to somebody who just chose OpenStreetMap is how "the only thing I can configure is Google Maps"
+  happens. And the initial pass now refreshes every section that declared one instead of only
+  `web_admin`, so the next one is not drawn and never refreshed.
+
+- `show_when` on a config action answers "has something written in it", never "is switched on":
+  a boolean turned into text is `"false"`, which is not empty. Said where the mechanism is
+  documented, after a switch that gated nothing.
+
+- The node harness that runs the panel's script against a fake DOM moved to `tests/helpers.py`.
+  There were two copies and a third was about to be written; the first time something in that
+  fake DOM is wrong, it is now wrong in one place.
+
+- **One Web Mercator, for the whole panel** (`partials/core/_geo.html`). Projecting, unprojecting,
+  choosing a tile zoom, laying out the tiles that cover a view and deciding that `(0, 0)` is not
+  a coordinate — a point in the Gulf of Guinea where no datacenter is, and what a form with two
+  empty fields leaves behind — now live in one place, and the site map was moved onto it. Two
+  copies of that arithmetic are two maps that can disagree about where the same building is, and
+  the disagreement produces no error at all: it produces a pin in the next street. A map that is
+  wrong by a little is worse than one that does not place anything, because the first one is
+  believed.
+
+- A widget's data provider is called `stat` on a stat card, whose shape is fixed, and `content`
+  on anything else, whose shape is its own; `discover_widget_content()` serves both. A function
+  named after a card it does not draw is the kind of name that is copied.
+
+- `dcim_view` is asked for the state of the machines the same way the section asks for it
+  (`service.states_for`), instead of a second copy of the narrowing rule in the routes. The rule
+  that hides a machine's state from somebody who may see the rack but not the registry is
+  exactly the kind that can quietly stop being applied in the copy nobody edited.
+
 ## [0.0.1+build.125] - 2026-09-05
 
 ### Changed

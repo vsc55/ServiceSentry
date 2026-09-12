@@ -39,6 +39,14 @@ PROFILES = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backu
                         '_profiles.html')
 ACTIONS = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
                        '_actions.html')
+# El diálogo de hacer una copia, sacado del cascarón cuando volvió a pasarse del límite de
+# tamaño — por simetría con `_restore.html`, que ya tenía el suyo.
+CREATE = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'backup',
+                      '_create.html')
+
+
+#: El cierre de una funcion en el guion del panel: salto de linea y llave a la izquierda.
+CIERRE = chr(10) + '}'
 
 
 def _read(path):
@@ -53,7 +61,7 @@ def _ui() -> str:
     function happens to live in would fail the next time one is split. This is that split, and
     it broke fifteen of these before this helper existed.
     """
-    return (_read(RENDER) + _read(PICKER) + _read(TASKS) + _read(RUN)
+    return (_read(RENDER) + _read(CREATE) + _read(PICKER) + _read(TASKS) + _read(RUN)
             + _read(DETAIL) + _read(RESTORE) + _read(RESTORE_TABLES) + _read(RETENTION)
             + _read(PROFILES) + _read(ACTIONS))
 
@@ -602,16 +610,28 @@ class TestTheRowKeepsOnlyWhatCannotWait:
         assert 'success' not in marks[:end]
 
     def test_the_running_row_spans_what_is_left(self):
-        """One column fewer: a span that still counts the old one pushes the actions cell out
-        of the table."""
+        """Las dos filas de la misma tabla tienen que sumar las mismas columnas.
+
+        Contado sobre la fila terminada y no sobre la cabecera: la cabecera se construye
+        llamando a `th(...)` por columna, asi que ahi no hay etiquetas que contar.
+
+        La cuenta es «celdas normales + lo que abarca el `colspan`», que es lo que de verdad
+        tiene que coincidir. La version anterior daba por hecho que la fila en curso tenia UNA
+        celda antes de la barra; al anadir la columna de casillas paso a tener dos —vacia, que
+        una copia a medio escribir no se elige— y la aritmetica dejo de valer aunque la tabla
+        estuviera bien.
+        """
         src = _ui()
-        # Counted off the finished row, not the header: the header is built by calling `th(…)`
-        # per column, so there is no literal tag to count there — and the two rows sitting in
-        # the same table is precisely the thing that has to keep adding up.
-        row = src[src.index('function _backupRow'):]
-        cells = row[:row.index('\n}')].count('<td')
-        assert cells > 1
-        assert 'colspan="%d"' % (cells - 1) in src, f'the progress bar does not span {cells - 1}'
+        fin = src[src.index('function _backupRow'):]
+        columnas = fin[:fin.index(CIERRE)].count('<td')
+        run = src[src.index('function _bkRunningRow'):]
+        run = run[:run.index(CIERRE)]
+        celdas = run.count('<td')
+        abarca = int(re.search(r'colspan="(\d+)"', run).group(1))
+        assert columnas > 1
+        assert (celdas - 1) + abarca == columnas, (
+            f'la fila en curso cubre {(celdas - 1) + abarca} columnas y la tabla tiene '
+            f'{columnas}')
 
 
 class TestTheListSaysWhetherACopyIsGood:
