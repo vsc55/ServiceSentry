@@ -1018,7 +1018,7 @@ módulos, auditoría, historial y los destinos de notificación por canal.
 | `roles` | `uid` | `name` (UNIQUE), `description`, `permissions` (JSON), `enabled`, auditoría | `idx_roles_name` (UNIQUE) | `core/roles/store.py` |
 | `sessions` | `token` | `uid` (id público), `user_uid`, `created`, `last_seen`, `ip`, `user_agent` | `idx_sessions_user_uid` | `core/sessions/store.py` |
 | `credentials` | `uid` | `name` (UNIQUE), `ctype`, `enabled`, `description`, `data` (JSON, secretos cifrados), auditoría | `idx_credentials_name` | `core/credentials/store.py` |
-| `hosts` | `uid` | `name` (UNIQUE), `address`, `kind`, `os`, `maintenance`, `virtual`, `device_type`, `tags` (JSON), `profiles` (JSON, secretos cifrados), `modules` (JSON), auditoría | `idx_hosts_name` | `core/hosts/store.py` |
+| `hosts` | `uid` | `name` (UNIQUE), `address`, `kind`, `os`, `maintenance`, `virtual`, `device_type`, `tags` (JSON), `profiles` (JSON, secretos cifrados), `modules` (JSON), auditoría | `idx_hosts_name` | `core/hosts/stores/hosts.py` |
 | `module_config` | `uid` | `module` (UNIQUE), `data` (JSON: campos de módulo + meta `__*__`), auditoría | `idx_module_config_module` | `core/modules/store.py` |
 | `module_config_items` | `uid` | `module_uid` → `module_config.uid`, `collection`, `host_uid` → `hosts.uid`, `label`, `enabled`, `data` (JSON), auditoría | `idx_module_config_items_moduid`, `idx_module_config_items_host` | `core/modules/store.py` |
 | `config` | `uid` | `path` (UNIQUE, `section\|field`), `value` (JSON), auditoría | `idx_config_path` | `core/config/store.py` |

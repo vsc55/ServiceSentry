@@ -13,6 +13,15 @@
                 <i class="bi bi-hdd-network me-1"></i>{{ i18n.subtab_servers }}
             </button>
         </li>
+        {# Las clases de dispositivo. Aquí y no en el catálogo de Inventario físico porque
+           clasifican a los dispositivos del registro, que es la lista de al lado y la que se
+           filtra por clase; ese catálogo describe equipamiento en general y éste describe lo de
+           esta casa. El catálogo enlaza aquí, para quien la busque allí. #}
+        <li class="nav-item" role="presentation" id="subtab-srv-types-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-types" type="button" id="btn-subtab-srv-types">
+                <i class="bi bi-tags me-1"></i>{{ i18n.subtab_host_types }}
+            </button>
+        </li>
         <li class="nav-item" role="presentation" id="subtab-srv-clusters-li" style="display:none">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-clusters" type="button" id="btn-subtab-srv-clusters">
                 <i class="bi bi-diagram-3 me-1"></i>{{ i18n.subtab_clusters }}
@@ -26,6 +35,13 @@
            shell's top padding — the accent strip sits flush against the breadcrumb. #}
         <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-hosts">
             <div id="servers-container"></div>
+        </div>
+        {# A sangre como sus dos hermanas, y no por gusto: dentro de una `.ss-fullbleed` la
+           tarjeta pierde borde, esquinas y sombra automáticamente, que es lo que hace que las
+           tres pestañas de Infraestructura se lean como la misma pantalla. Con `p-3` salía una
+           caja con borde en medio de dos que no lo tienen. Reportado desde la pantalla. #}
+        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-types">
+            <div id="hosttypes-container"></div>
         </div>
         <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-clusters">
             <div id="clusters-container"></div>

@@ -21,6 +21,7 @@ cosa.
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 
@@ -32,6 +33,19 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from tests.conftest import _login                                   # noqa: E402
+
+
+def _node():
+    """El intérprete con el que se dibuja la pantalla, o None."""
+    import shutil, subprocess                                       # noqa: PLC0415
+    n = shutil.which('node')
+    if not n:
+        return None
+    try:
+        out = subprocess.run([n, '--version'], capture_output=True, text=True, timeout=20)
+        return n if int((out.stdout or '').strip().lstrip('v').split('.')[0]) >= 16 else None
+    except Exception:                                    # pragma: no cover - sin node
+        return None
 
 
 def _as(admin, username, perms):
@@ -397,3 +411,124 @@ class TestSoltarUnaEmpresaDeSuOrigen:
     def test_y_hace_falta_poder_escribir_para_soltarla(self, admin, grupo):
         c = _as(admin, 'mirona-suelta', ['orgs_view', 'orgs_all_view'])
         assert c.delete(f'/api/v1/orgs/{grupo["b"]}/source').status_code == 403
+
+
+class TestElBotonDeImportarViveEnEmpresas:
+    """Estaba en la tarjeta de Freshservice, en Configuración → Fuentes externas. Pedido desde
+    la pantalla: traer las empresas es un acto **sobre la lista de empresas**, y bajar a
+    Configuración para hacerlo es ir a buscar un botón a la pantalla de otra cosa.
+
+    Y con una condición que es la mitad del arreglo: **sólo si el conector está puesto**. Un
+    botón que promete traer cuarenta empresas y falla en la primera llamada por una clave que
+    nadie ha escrito es peor que no tenerlo — el error que da es de autenticación, y eso manda a
+    mirar la credencial en vez del campo vacío.
+    """
+
+    def test_sin_conector_no_hay_boton(self, client, admin):
+        _login(client)
+        admin._write_config({'freshservice': {'domain': '', 'api_key': ''}})
+        assert client.get('/api/v1/orgs').get_json()['actions'] == []
+
+    def test_con_el_conector_puesto_si(self, client, admin):
+        _login(client)
+        admin._write_config({'freshservice': {'domain': 'lacasa.freshservice.com',
+                                              'api_key': 'k'}})
+        [acc] = client.get('/api/v1/orgs').get_json()['actions']
+        assert acc['fn'] == 'freshserviceImport'
+        assert acc['perm'] == 'orgs_edit', 'la acción viajaría sin su permiso'
+
+    def test_con_el_dominio_pero_sin_la_clave_tampoco(self, client, admin):
+        """Medio configurado no es configurado: con el dominio solo, la importación llega a la
+        primera llamada y muere con un error de autenticación."""
+        _login(client)
+        admin._write_config({'freshservice': {'domain': 'lacasa.freshservice.com',
+                                              'api_key': ''}})
+        assert client.get('/api/v1/orgs').get_json()['actions'] == []
+
+    def test_y_la_respuesta_no_se_queda_cacheada(self, client, admin):
+        """La configuración se edita desde el propio panel. Una respuesta guardada de por vida
+        dejaría el botón escondido después de poner la clave, hasta reiniciar."""
+        _login(client)
+        admin._write_config({'freshservice': {'domain': '', 'api_key': ''}})
+        assert client.get('/api/v1/orgs').get_json()['actions'] == []
+        admin._write_config({'freshservice': {'domain': 'lacasa.freshservice.com',
+                                              'api_key': 'k'}})
+        assert len(client.get('/api/v1/orgs').get_json()['actions']) == 1
+
+    def test_cuelga_del_boton_de_anadir_y_no_al_lado(self, client, admin):
+        """Propuesto desde la pantalla, y es mejor: traer de fuera es otra manera de que
+        aparezca una empresa, no una cosa distinta. Con la pestaña, el día que haya tres
+        fuentes la barra sigue teniendo dos botones en vez de cinco.
+
+        Dibujado de verdad en node: que el desplegable esté o no está en el HTML, no en el
+        fuente.
+        """
+        import json as _json                                        # noqa: PLC0415
+        from tests.helpers import node_run, panel_bundle            # noqa: PLC0415
+        if not _node():
+            pytest.skip('no node >= 16 on PATH')
+        _login(client)
+        admin._write_config({'freshservice': {'domain': 'lacasa.freshservice.com',
+                                              'api_key': 'k'}})
+        acciones = client.get('/api/v1/orgs').get_json()['actions']
+        out = node_run(panel_bundle(client), """
+            __out = {};
+            currentUser = {permissions: ['orgs_edit']};
+            _orgsData = {orgs: [], scopes: [], sources: [], actions: %s, loaded: true};
+            __out.con = _orgsNewHtml(true);
+            _orgsData.actions = [];
+            __out.sin = _orgsNewHtml(true);
+            __out.sinPermiso = _orgsNewHtml(false);
+        """ % _json.dumps(acciones))
+        assert 'dropdown-toggle-split' in out['con'], 'la pestaña no está'
+        assert 'freshserviceImport()' in out['con']
+        # Y lo que la pestaña acompaña sigue ahí: es un botón partido, no una pestaña suelta.
+        # Sin esto, quitar `${nuevo}` del grupo dejaba la prueba en verde y la pantalla sin
+        # forma de añadir una empresa a mano — se vio mutándolo.
+        assert 'orgModalOpen' in out['con'], 'la pestaña se llevó el botón de añadir'
+        # Un desplegable vacío es peor que ninguno.
+        assert 'dropdown' not in out['sin'], 'la pestaña sale sin nada que colgar'
+        assert 'orgModalOpen' in out['sin'], 'y el botón de añadir se ha perdido con ella'
+        assert out['sinPermiso'] == ''
+
+    def test_el_core_no_nombra_a_ningun_proveedor(self, client, admin):
+        """La misma regla que siguen los ámbitos y los orígenes: el texto, el icono y la función
+        los pone quien trae las empresas. Si el core escribiera «Freshservice» en algún sitio,
+        quitar el paquete dejaría un botón que no hace nada."""
+        raiz = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
+        for rel in (os.path.join('lib', 'core', 'orgs', 'web', '_ui.html'),
+                    os.path.join('lib', 'core', 'orgs', 'routes.py'),
+                    os.path.join('lib', 'core', 'orgs', 'scopes.py')):
+            texto = io.open(os.path.join(raiz, rel), encoding='utf-8').read()
+            # El comentario de `scopes.py` usa el ejemplo real, que es documentación y no código.
+            codigo = '\n'.join(l for l in texto.split('\n')
+                               if not l.lstrip().startswith(('#', '*', '/*', '//')))
+            assert 'freshservice' not in codigo.lower(), rel
+
+    def test_una_accion_sin_funcion_no_llega_a_la_pantalla(self, client, admin, monkeypatch):
+        """Un descriptor a medio escribir dibujaría un botón cuyo `onclick` es `()`: un error
+        de JavaScript al pulsarlo, que es peor que no ofrecerlo."""
+        from lib.core.orgs import scopes as org_scopes              # noqa: PLC0415
+
+        def _falso(_clave, **_kw):
+            return [('malo', [{'id': 'sin-fn', 'label_key': 'x'},
+                              {'id': 'buena', 'fn': 'algo'}])]
+
+        monkeypatch.setattr('lib.discovery.scan', _falso)
+        assert [a['id'] for a in org_scopes.actions(admin)] == ['buena']
+
+    def test_una_accion_cuyo_ready_revienta_no_tumba_la_pantalla(self, client, admin,
+                                                                monkeypatch):
+        """Es la pantalla de Empresas: un fallo en una línea de un proveedor no puede dejarla
+        sin cargar."""
+        from lib.core.orgs import scopes as org_scopes              # noqa: PLC0415
+
+        def _explota(_wa):
+            raise RuntimeError('boom')
+
+        def _falso(_clave, **_kw):
+            return [('malo', [{'id': 'x', 'fn': 'nada', 'ready': _explota}])]
+
+        monkeypatch.setattr('lib.discovery.scan', _falso)
+        _login(client)
+        assert org_scopes.actions(admin) == []

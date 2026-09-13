@@ -3127,8 +3127,11 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
    simplemente no hace nada.
 
    Con `min()` y no con un ancho fijo: en una pantalla estrecha un valor fijo deja el diálogo
-   saliéndose por los lados, que es peor que la ranura que se venía a quitar. Y sigue siendo
-   `modal-lg`, así que conserva el asa de redimensionar y el botón de maximizar. */
+   saliéndose por los lados, que es peor que la ranura que se venía a quitar.
+
+   Y **no lleva asa ni botón de maximizar** (`_modalResizable` en `init/_behaviors.html`): una
+   talla que el que abre ha declarado es una decisión, y un botón para deshacerla sólo añade
+   hueco vacío debajo de lo que se ha venido a leer. */
 .ss-modal-wide > .modal-content { width: min(96vw, 66rem); }
 
 /* El armario a un lado y el trabajo al otro. Las cuatro listas de un rack —lo que hay dentro,
@@ -3483,3 +3486,58 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 /* Y un ancho mínimo para la cuenta atrás, que si no la columna se encoge con el número: «24 s»
    y «2 min 40 s» moverían la barra de sitio cada vez que uno pasa al otro. */
 .ss-timer-next-col, .ss-timer-next { min-width: 11rem; }
+
+/* ── Elegir un icono ────────────────────────────────────────────────────────────────────
+   Dibujados y no por su nombre: elegir entre `hdd-stack` y `hdd-network` leyendo dos palabras
+   es adivinar cuál era cuál, y lo que se está eligiendo es un dibujo.
+
+   Clases genéricas y no un `#id`: lo que hace falta —una rejilla de cosas de las que se marca
+   una— vale igual el día que algo más tenga que elegir un icono. */
+.ss-icon-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem;
+}
+.ss-icon-pick {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    font-size: 1.1rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .375rem;
+    background: var(--bs-body-bg);
+    color: var(--bs-secondary-color);
+    cursor: pointer;
+}
+.ss-icon-pick:hover { border-color: var(--bs-primary); color: var(--bs-body-color); }
+/* La lista larga, con su propio alto. Son dos mil dibujos: sin acotarlos, el cuadro crece hasta
+   que lo único que se puede hacer con él es bajar, y lo que se estaba escribiendo queda arriba,
+   fuera de la vista. El scroll lo pone `.ss-vscroll`; esto sólo dice hasta dónde. */
+.ss-icon-grid-tall { max-height: 22rem; align-content: flex-start; }
+/* El marcado, con el color de los botones sólidos del panel: nada de contorno, que aquí
+   significaría «es uno más». */
+.ss-icon-pick.active {
+    background: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: #fff;
+}
+
+/* ── El menú de un botón pequeño ────────────────────────────────────────────────────────
+   Bootstrap dimensiona el menú por su cuenta —1rem de letra y su padding de siempre— valga lo
+   que valga el botón del que cuelga. Con un `btn-sm` delante, que es lo que lleva toda barra de
+   este panel, el desplegable sale más grande que el botón que lo abre.
+
+   Genérica y no por `id`: lo mismo le pasa a los tres botones partidos que hay, y al cuarto. La
+   sidebar ya resolvía esto por su cuenta (`.ss-sb-user`); esto es lo mismo, con nombre. */
+.ss-dropdown-sm {
+    font-size: .875rem;                 /* la de `btn-sm` */
+    --bs-dropdown-min-width: 11rem;
+    padding-top: .25rem;
+    padding-bottom: .25rem;
+}
+.ss-dropdown-sm .dropdown-item { padding: .35rem .75rem; }
+.ss-dropdown-sm .dropdown-item i { font-size: .95rem; }
+.ss-dropdown-sm .dropdown-divider { margin: .25rem 0; }
+

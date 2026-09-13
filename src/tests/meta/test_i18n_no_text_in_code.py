@@ -157,3 +157,64 @@ class TestNingunaPalabraDelPanelVivEnElCodigo:
         assert _MAPA.search("{'es_ES': 'Inventario'}")
         assert not _MAPA.search("if lang == 'es_ES':")
         assert _ACENTO.search('Catálogo') and not _ACENTO.search('Catalogue')
+
+
+class TestElCastellanoDeVincularNoEsElDeUnaCuerda:
+    """«Atar», «atado» y «soltar» son lo que se hace con un cordón. Lo que hace este panel cuando
+    una fila de aquí pasa a corresponderse con una de otro sistema es **vincular** — que además
+    es la palabra que ya usaba el cuadro de empresas desde que se escribió («Ya vinculadas con
+    una empresa de aquí»).
+
+    Se coló traduciendo `tie` / `untie` literalmente, y acabó en nueve textos: «Esa empresa ya
+    está atada a otro departamento», «Soltar del origen», «Suéltala de su origen». Reportado desde
+    la pantalla dos veces — la primera por el mensaje de error y la segunda por el botón.
+
+    La guarda es una lista de formas concretas y no una regla sobre la raíz: «suelto» es
+    perfectamente castellano en este panel —«racks sueltos», «un fichero .mib suelto»— y prohibir
+    la palabra sería prohibir lo que sí se dice bien.
+    """
+
+    #: Las formas que sólo aparecen traduciendo mal `tie`/`untie`, y con qué se dicen.
+    PROHIBIDAS = {
+        'está atad': 'está vinculado/a',
+        'ya atada': 'ya vinculada',
+        'ya atado': 'ya vinculado',
+        'Soltar del origen': 'Desvincular del origen',
+        '¿Soltar «': '¿Desvincular «',
+        'Suéltal': 'Desvincúlal',
+        'átala': 'vincúlala',
+        'átalo': 'vincúlalo',
+        'se ata.': 'se vincula.',
+    }
+
+    def test_ningun_texto_en_castellano_ata_nada(self):
+        from lib.i18n import TRANSLATIONS                # noqa: PLC0415
+
+        def _textos(valor, ruta=''):
+            if isinstance(valor, str):
+                yield ruta, valor
+            elif isinstance(valor, dict):
+                for k, v in valor.items():
+                    yield from _textos(v, f'{ruta}.{k}' if ruta else str(k))
+
+        malos = []
+        for clave, texto in _textos(TRANSLATIONS.get('es_ES') or {}):
+            for mala, buena in self.PROHIBIDAS.items():
+                if mala in texto:
+                    malos.append(f'{clave}: «{mala}» → «{buena}»')
+        assert not malos, ('castellano de cuerda en la interfaz:\n' + '\n'.join(malos))
+
+    def test_y_el_ingles_dice_link_y_no_tie(self):
+        """Por el otro lado y por lo mismo: `tie`/`untie` es lo que se hace con un cordón, y en
+        una interfaz se dice `link`/`unlink` — que es además lo que dicen las claves y las rutas.
+
+        `tied to` se deja pasar donde describe una dependencia y no una acción del panel: una app
+        de Teams «tied to this app registration» está bien dicha, y no es un botón.
+        """
+        from lib.i18n import TRANSLATIONS                # noqa: PLC0415
+        words = TRANSLATIONS.get('en_EN') or {}
+        malos = [k for k, v in words.items()
+                 if isinstance(v, str) and k.startswith(('host_type', 'fs_', 'orgs_', 'host_'))
+                 and ('tie it' in v or 'Tie ' in v or 'untie' in v.lower()
+                      or 'is already tied' in v)]
+        assert not malos, f'say link/unlink, not tie/untie: {malos}'

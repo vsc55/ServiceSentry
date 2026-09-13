@@ -16,6 +16,14 @@ Routes registered by this file:
 
     GET    /api/v1/hosts                      list hosts the user may view (masked)
     GET    /api/v1/hosts/<uid>/status         latest recorded results per bound check
+    DELETE /api/v1/hosts/<uid>/source         unlink a device from where it was imported from
+    GET    /api/v1/host_types                 every device class, with how many devices wear it
+    POST   /api/v1/host_types                 add one
+    PUT    /api/v1/host_types/<uid>           rename it / change its icon / describe it
+    DELETE /api/v1/host_types/<uid>           remove one nothing is using
+    POST   /api/v1/host_types/seed            put back whichever of the basics are missing
+    POST   /api/v1/host_types/<uid>/link      link a class to one in an external provider
+    DELETE /api/v1/host_types/<uid>/link      unlink it — it becomes this house's again
     POST   /api/v1/hosts                      create a host
     POST   /api/v1/hosts/<uid>/clone          clone a host (profiles + secrets, new uid)
     PUT    /api/v1/hosts/<uid>                update a host (masked secrets restored)
@@ -31,7 +39,9 @@ from flask import jsonify, request, session
 
 from lib.security import secret_manager
 from lib.core.constants import SYSTEM_USER
+from lib.core.hosts import actions as host_actions
 from lib.core.hosts import service as hosts_svc
+from lib.core.hosts import classes as host_types
 from lib.core.hosts import ssh_client
 from lib.core.hosts import probe as host_probe
 from lib.modules import check_runner
@@ -65,14 +75,21 @@ def register(app, wa):
         if not has_any_view:
             return jsonify({'error': wa._t('access_denied')}), 403
         store = _store()
+        # Lo que algún paquete ofrece hacer en esta pantalla, y de dónde puede venir un
+        # dispositivo. Viajan con la lista y no en una ruta aparte: los dibuja la misma barra que
+        # la lista, y una segunda petición para pintar un botón es un botón que aparece tarde.
+        extra = {'actions': host_actions.actions(wa),
+                 'sources': [{'id': i, 'label_key': str(d.get('label_key') or ''),
+                              'icon': str(d.get('icon') or '')}
+                             for i, d in sorted(host_actions.sources().items())]}
         if store is None:
-            return jsonify({'hosts': []})
+            return jsonify(dict(extra, hosts=[]))
         hosts = secret_manager.mask_sensitive(store.list(decrypt=True), wa._secret_keys)
         if not has_global_view:
             hosts = [h for h in hosts if f"server.{h.get('uid')}.view" in perms]
         hosts_svc.enrich_hosts(hosts, hosts_svc._host_statuses(wa),
                                hosts_svc._host_bound_modules(wa))
-        return jsonify({'hosts': hosts})
+        return jsonify(dict(extra, hosts=hosts))
 
     @app.route('/api/v1/hosts/<uid>/status', methods=['GET'])
     @login_required
@@ -202,6 +219,18 @@ def register(app, wa):
             if not (wa._has_server_permission(uid, 'add')
                     and hosts_svc._only_modules_growth(old, data)):
                 return jsonify({'error': wa._t('access_denied')}), 403
+        # Lo que mantiene un origen no se corrige aquí: la siguiente importación lo pisaría, y un
+        # campo que se puede escribir y se revierte solo es peor que uno que no se puede. La
+        # salida es desatarlo (`DELETE /<uid>/source`), no pelearse con la importación.
+        #
+        # **Sólo esos tres campos, y comparando VALORES y no claves.** Freshservice no sabe nada
+        # de los perfiles de conexión, de los módulos ni de lo vigilado, así que todo eso se
+        # sigue editando; y este cuadro manda la ficha entera en cada guardado, así que mirar si
+        # la clave viene daría un dispositivo importado que no se puede tocar de ninguna manera.
+        gestionado = _managed_fields(old, data)
+        if gestionado:
+            return jsonify({'error': wa._t('host_managed', _source_name(old.get('source')),
+                                            ', '.join(gestionado))}), 409
         if not store.update(uid, data, actor=session.get('username', SYSTEM_USER)):
             return jsonify({'error': wa._t('invalid_modules_data')}), 400
         # Field-level diff (secrets masked) — same convention as config/modules.
@@ -216,6 +245,271 @@ def register(app, wa):
         wa._audit('host_updated', detail={
             'uid': uid, 'name': data.get('name'), 'changes': changes,
         })
+        return jsonify({'ok': True})
+
+    #: Lo que Freshservice —o quien lo traiga— rescribe en cada importación. Aquí y no dentro
+    #: de la ruta porque es la lista que decide qué se puede teclear en un dispositivo atado, y
+    #: una lista escondida en un `if` es una que crece sin que nadie la lea.
+    #: …y cómo se llama cada uno EN PANTALLA. Con su clave de idioma y no con el nombre de la
+    #: columna: decirle a alguien que «description» no se puede cambiar es enseñarle el interior
+    #: de la base de datos y dejarle buscando un campo que en su pantalla se llama otra cosa.
+    _ORIGIN_FIELDS = (('name', 'col_host_name'), ('address', 'col_host_address'),
+                      ('description', 'host_description'))
+
+    def _source_name(source) -> str:
+        """Cómo se llama ese origen en pantalla.
+
+        Se cae al identificador tal cual cuando ya no lo declara nadie, que es lo que pasa
+        cuando se quita el proveedor: sigue diciendo de dónde vino, que es más de lo que dice un
+        hueco.
+        """
+        ident = str(source or '')
+        clave = str((host_actions.sources().get(ident) or {}).get('label_key') or '')
+        return wa._t(clave) if clave else ident
+
+    def _managed_fields(old, data) -> list:
+        """Los campos de un dispositivo atado que este guardado intenta CAMBIAR.
+
+        Vacío cuando no está atado, y vacío cuando la ficha llega igual que estaba — que es lo
+        normal: el cuadro manda todos los campos siempre, y quien acaba de editar un perfil de
+        conexión no ha tocado el nombre.
+        """
+        if not str((old or {}).get('source') or ''):
+            return []
+        return [wa._t(etiqueta) for c, etiqueta in _ORIGIN_FIELDS
+                if c in (data or {}) and str(data.get(c) or '') != str((old or {}).get(c) or '')]
+
+    @app.route('/api/v1/hosts/<uid>/source', methods=['DELETE'])
+    @login_required
+    def api_host_unlink(uid):
+        """Desatar un dispositivo de donde se importó: vuelve a ser de esta casa y a poder
+        escribirse.
+
+        Hace falta una salida. Sin ella, quitar el proveedor —o dejar de usarlo— deja fichas que
+        nadie mantiene y que nadie puede corregir: sólo se podrían borrar, y de un dispositivo
+        cuelgan sus perfiles de conexión, sus módulos y su historial. Lo que NO hace es borrar
+        nada ni tocar nada más de la ficha.
+        """
+        if not wa._has_server_permission(uid, 'edit'):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        store = _store()
+        row = (store.get(uid) if store is not None else None) or {}
+        if not row:
+            return jsonify({'error': wa._t('host_not_found')}), 404
+        store.update(uid, dict(row, source='', external_id=''),
+                     actor=session.get('username', SYSTEM_USER))
+        wa._audit('host_unlinked', detail={'uid': uid, 'name': str(row.get('name') or ''),
+                                           'was': str(row.get('source') or '')})
+        return jsonify({'ok': True})
+
+    # ── Las clases de dispositivo ────────────────────────────────────────────────────────
+    #
+    # **Todas son filas y todas se editan igual**, las once de la siembra incluidas: lo que
+    # cambia entre una y otra no es lo que se puede hacer con ella, sino de dónde sale su
+    # palabra — una sembrada lleva la clave del catálogo de idiomas y se dice en el idioma de
+    # quien mira; una escrita aquí lleva su nombre tal cual, porque es un dato de esta casa y
+    # ningún fichero de idiomas puede saberlo.
+    #
+    # `devices_edit` para escribir, porque decidir qué clases existen es decidir cómo se
+    # clasifica la flota entera; leerlas basta con poder ver dispositivos, o el desplegable
+    # saldría vacío para quien sólo mira.
+
+    def _types_store():
+        return getattr(wa, '_host_types_store', None)
+
+    @app.route('/api/v1/host_types', methods=['GET'])
+    @login_required
+    def api_host_types():
+        """Las clases y **cuántos dispositivos lleva cada una**.
+
+        El recuento va con la lista porque es la mitad de la pregunta: «¿esta la usa alguien?» es
+        lo que decide si se puede quitar, y sin él la única forma de saberlo era intentar borrarla
+        y leer el error.
+        """
+        return jsonify({'types': host_types.catalog(wa), 'usage': host_types.usage(wa),
+                        # Y lo que algún paquete ofrece hacer aquí: traerlas de donde ya están
+                        # escritas. Filtradas ya, así que esta pantalla no sabe de proveedores.
+                        'actions': host_actions.type_actions(wa),
+                        # Y cómo se llama cada origen. La columna guarda `freshservice` y la
+                        # pantalla tiene que poder enseñar un nombre: **ningún texto del core
+                        # nombra a un proveedor**, así que lo declara quien las trae — el mismo
+                        # registro que usa la lista de dispositivos.
+                        'sources': [{'id': i, 'label_key': str(d.get('label_key') or ''),
+                                     'icon': str(d.get('icon') or '')}
+                                    for i, d in sorted(host_actions.sources().items())]})
+
+    @app.route('/api/v1/host_types', methods=['POST'])
+    @login_required
+    def api_host_type_create():
+        if 'devices_edit' not in wa._get_session_permissions():
+            return jsonify({'error': wa._t('access_denied')}), 403
+        data, err = wa._require_json()
+        if err:
+            return err
+        store = _types_store()
+        if store is None:
+            return jsonify({'error': wa._t('save_file_error')}), 500
+        nombre = str(data.get('name') or '').strip()
+        if not nombre:
+            return jsonify({'error': wa._t('host_type_name_required')}), 400
+        ident = store.create(nombre, str(data.get('icon') or ''),
+                             description=str(data.get('description') or ''),
+                             actor=session.get('username', SYSTEM_USER))
+        if not ident:
+            # Una de las dos: el nombre ya está cogido —por otra añadida o por una de serie— o
+            # no queda nada de él al quitarle los signos. Las dos se arreglan escribiendo otro.
+            return jsonify({'error': wa._t('host_type_name_taken', nombre)}), 409
+        wa._audit('host_type_created', detail={'uid': ident, 'name': nombre})
+        return jsonify({'uid': ident})
+
+    @app.route('/api/v1/host_types/<uid>', methods=['PUT'])
+    @login_required
+    def api_host_type_update(uid):
+        """Renombrarla, describirla o cambiarle el icono, sea de la siembra o no: nada es
+        intocable, que era el punto de sacar la lista del código. **Su `uid` no se toca nunca**,
+        eso sí: es lo que guarda cada dispositivo de esa clase, y cambiarlo los dejaría a todos
+        apuntando a una que ya no existe — sin error, y con el filtro devolviendo cero."""
+        if 'devices_edit' not in wa._get_session_permissions():
+            return jsonify({'error': wa._t('access_denied')}), 403
+        data, err = wa._require_json()
+        if err:
+            return err
+        store = _types_store()
+        if store is None or store.get(uid) is None:
+            return jsonify({'error': wa._t('host_type_not_found')}), 404
+        nombre = str(data.get('name') or '').strip()
+        if not nombre:
+            return jsonify({'error': wa._t('host_type_name_required')}), 400
+        # Lo que mantiene un origen es el **nombre**, y sólo él: la siguiente importación lo
+        # pisaría, y un campo que se puede escribir y se revierte solo es peor que uno que no se
+        # puede. La salida es desvincularla (`DELETE /<uid>/link`).
+        #
+        # **El icono no.** Allí no existe —Freshservice no tiene iconos—, así que el dibujo con
+        # el que se distingue una clase entre cuarenta filas es un dato de esta casa. Negarse a
+        # guardarlo era negarse por algo que el origen nunca va a tocar; la importación ya lo
+        # respetaba, que es lo que hacía la negativa doblemente falsa.
+        fila = store.get(uid) or {}
+        vinculada = bool(str(fila.get('source') or '') and str(fila.get('external_id') or ''))
+        if vinculada and nombre != str(fila.get('name') or ''):
+            return jsonify({'error': wa._t('host_type_managed',
+                                            _source_name(fila.get('source')))}), 409
+        if not store.update(uid, nombre, str(data.get('icon') or ''),
+                            # La descripción es de esta casa aunque el nombre no lo sea: el
+                            # origen no la trae, así que es lo único que se puede escribir sobre
+                            # una clase que mantiene un proveedor. Y que NO venga es «déjala
+                            # como está», que no es lo mismo que venir vacía: un cliente que
+                            # manda sólo el icono no borra lo que escribió alguien.
+                            description=(str(data.get('description') or '')
+                                         if 'description' in data else None),
+                            # Renombrar una clase sembrada le quita la clave de idioma: desde ese
+                            # momento se lee lo que alguien escribió. Cambiarle sólo el icono no
+                            # es renombrarla, y perderla ahí dejaría «Servidor» en inglés por
+                            # haber elegido otro dibujo.
+                            keep_label=(nombre == str(fila.get('name') or '')),
+                            actor=session.get('username', SYSTEM_USER)):
+            return jsonify({'error': wa._t('host_type_name_taken', nombre)}), 409
+        wa._audit('host_type_updated', detail={'uid': uid, 'name': nombre})
+        return jsonify({'ok': True})
+
+    @app.route('/api/v1/host_types/<uid>', methods=['DELETE'])
+    @login_required
+    def api_host_type_delete(uid):
+        """Quitar una clase **que no lleve puesta nadie**.
+
+        Borrar una que llevan cuarenta máquinas las deja con una palabra que ya no significa
+        nada: no se traduce, no se filtra y no dibuja su icono. Y no se arregla volviendo a
+        crearla con el mismo nombre, porque lo que se perdió fue saber que había que hacerlo.
+        """
+        if 'devices_edit' not in wa._get_session_permissions():
+            return jsonify({'error': wa._t('access_denied')}), 403
+        store = _types_store()
+        fila = store.get(uid) if store is not None else None
+        if fila is None:
+            return jsonify({'error': wa._t('host_type_not_found')}), 404
+        usados = host_types.in_use(wa, uid)
+        if usados:
+            return jsonify({'error': wa._t('host_type_in_use', fila['name'],
+                                            str(usados))}), 409
+        store.delete(uid)
+        wa._audit('host_type_deleted', detail={'uid': uid, 'name': fila['name']})
+        return jsonify({'ok': True})
+
+    @app.route('/api/v1/host_types/seed', methods=['POST'])
+    @login_required
+    def api_host_types_seed():
+        """Volver a poner las básicas que falten.
+
+        Existe porque la siembra sólo ocurre el día que se crea la tabla: quien borre «Cámara»
+        porque en su casa no hay ninguna no se la encuentra de vuelta en el siguiente arranque, y
+        quien se pase borrando necesita una manera de deshacerlo que no sea teclear once nombres.
+
+        Lo que YA está no se toca — ni el nombre, ni el icono: alguien lo habrá corregido, y un
+        botón que pisa lo corregido es uno que deshace trabajo cada vez que se pulsa.
+        """
+        if 'devices_edit' not in wa._get_session_permissions():
+            return jsonify({'error': wa._t('access_denied')}), 403
+        store = _types_store()
+        if store is None:
+            return jsonify({'error': wa._t('save_file_error')}), 500
+        puestas = store.seed_missing(actor=session.get('username', SYSTEM_USER))
+        if puestas:
+            wa._audit('host_type_created', detail={'seeded': puestas})
+        return jsonify({'added': puestas})
+
+    @app.route('/api/v1/host_types/<uid>/link', methods=['POST'])
+    @login_required
+    def api_host_type_link(uid):
+        """Vincular una clase de aquí con una de un proveedor.
+
+        Es lo que evita el duplicado: una clase escrita a mano que se llama distinto que la de
+        allí se crearía otra vez en la primera importación. Vinculándolas, la importación la
+        reconoce — y desde ese momento su nombre lo mantiene el origen, que es lo que hace que
+        esta pantalla la enseñe en sólo lectura.
+
+        No se comprueba que esa de fuera exista: quién sabe qué clases tiene un proveedor es el
+        proveedor, y el core no puede preguntárselo sin nombrarlo. Lo que sí se comprueba es que
+        no esté ya vinculada con otra de aquí — dos clases locales sobre la misma de fuera es un
+        reparto de la flota en dos montones que nadie decidió.
+        """
+        if 'devices_edit' not in wa._get_session_permissions():
+            return jsonify({'error': wa._t('access_denied')}), 403
+        data, err = wa._require_json()
+        if err:
+            return err
+        store = _types_store()
+        if store is None or store.get(uid) is None:
+            return jsonify({'error': wa._t('host_type_not_found')}), 404
+        source = str(data.get('source') or '').strip()
+        external_id = str(data.get('external_id') or '').strip()
+        if not source or not external_id:
+            return jsonify({'error': wa._t('host_type_link_required')}), 400
+        if not store.link(uid, source, external_id,
+                          actor=session.get('username', SYSTEM_USER)):
+            otra = store.by_external(source, external_id) or {}
+            return jsonify({'error': wa._t('host_type_link_taken',
+                                            otra.get('name') or '')}), 409
+        wa._audit('host_type_updated', detail={'uid': uid, 'linked': source,
+                                               'external_id': external_id})
+        return jsonify({'ok': True})
+
+    @app.route('/api/v1/host_types/<uid>/link', methods=['DELETE'])
+    @login_required
+    def api_host_type_unlink(uid):
+        """Desvincularla: vuelve a ser de esta casa y a poder escribirse.
+
+        Hace falta una salida. Sin ella, quitar el proveedor —o dejar de usarlo— deja clases que
+        nadie mantiene y que nadie puede corregir. Lo que NO hace es borrar nada: ni la clase, ni
+        los dispositivos que la llevan puesta.
+        """
+        if 'devices_edit' not in wa._get_session_permissions():
+            return jsonify({'error': wa._t('access_denied')}), 403
+        store = _types_store()
+        fila = store.get(uid) if store is not None else None
+        if fila is None:
+            return jsonify({'error': wa._t('host_type_not_found')}), 404
+        store.link(uid, '', '', actor=session.get('username', SYSTEM_USER))
+        wa._audit('host_type_updated', detail={'uid': uid,
+                                               'unlinked': fila.get('source') or ''})
         return jsonify({'ok': True})
 
     @app.route('/api/v1/hosts/<uid>', methods=['DELETE'])

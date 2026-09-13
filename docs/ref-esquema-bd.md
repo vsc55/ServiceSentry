@@ -24,7 +24,7 @@ manuales ni herramienta de migración externa.
 
 ## Índice de tablas
 
-Hay **71 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **72 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -38,7 +38,8 @@ Hay **71 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Coordinación entre procesos | `entity_versions` |
 | Configuración | `config`, `module_config`, `module_config_items` |
 | Activos / secretos | `credentials`, `hosts` |
-| Auditoría / historial / estado | `audit`, `history`, `check_state`, `job_history` (qué hizo cada trabajo en segundo plano, después de hacerlo) |
+| Auditoría / historial / estado | `audit`, `history`, `check_state`, `job_history` (qué hizo cada trabajo en segundo plano, después de hacerlo) |
+
 | Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
 | Empresas | `org` (las sociedades del grupo), `org_owner` (de quién es cada cosa, en cualquier ámbito que un paquete declare) |
 | Inventario físico (DCIM) | `dc_site`, `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
@@ -475,8 +476,51 @@ config.json (solo lectura/arranque) → BD (editable).
 
 Índices: `idx_credentials_name(name)`.
 
+### `host_type` — las clases de dispositivo
+[lib/core/hosts/stores/types.py:46](../src/lib/core/hosts/stores/types.py#L46)
+
+**Todas**, y no sólo las añadidas: la lista era una tupla en el código —servidor, hipervisor,
+NAS, conmutador…— que sólo se podía cambiar con un commit, así que lo que no cabía en ella se
+quedaba «sin clasificar». Ahora son filas y se editan desde el panel, las once de siempre
+incluidas.
+
+Del código queda **una semilla** (`lib/core/hosts/stores/types.py::SEED`) que se usa el día que se crea
+la tabla y cuando alguien pulsa «añadir las básicas». **Sembrar es al CREAR y no «cuando esté
+vacía»**: quien borre las once porque en su casa no hay ninguna no se las encuentra de vuelta en
+el siguiente arranque.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK — **por aquí se relaciona**, como en el resto del esquema: es lo que guarda `hosts.device_type`. Antes esa columna llevaba el nombre corto, que funcionaba pero dejaba dos maneras de señalar una fila y había que acordarse de cuál tocaba en cada consulta |
+| name | TEXT | no | `''` | UNIQUE — en una sembrada, el nombre de reserva (en inglés) por si su clave de idioma faltara; en una escrita aquí, lo que se ve. Se compara aplanado, así que «Punto de Acceso» y «punto de acceso» son la misma |
+| label_key | TEXT | no | `''` | la clave del catálogo de idiomas, sólo en las sembradas: es lo que hace que se sigan diciendo «Servidor» o «Server» según quién mire después de mudarse a una tabla. Renombrar una **la borra** — desde que alguien la llama «Cabina de discos», eso es lo que quiere leer |
+| icon | TEXT | no | `''` | clase de Bootstrap Icons (`bi-…`); vacío = el genérico |
+| source | TEXT | no | `''` | **qué sistema de FUERA la mantiene**. Vacío es lo normal y quiere decir «de esta casa» — tanto lo que escribió una persona como lo que puso la siembra, porque la siembra no es un sistema de fuera: es lo que trae cualquier instalación, y marcarla aquí obligaba a excluirla a mano en cada sitio que preguntara «¿esto lo mantiene otro?». Cuál vino de la siembra lo dice `label_key`, que sólo la llevan ellas; quién la escribió, `updated_by`, que en la siembra es `system` |
+| external_id | TEXT | no | `''` | cuál de las suyas es en ese proveedor. Con `source`, es lo que hace que una clase **la mantenga** el origen: su nombre se refresca desde allí y no se puede teclear aquí (se desvincula con `DELETE /api/v1/host_types/<uid>/link`). Por el NOMBRE no se puede, porque renombrarla aquí dejaría a la siguiente importación creando una segunda con el nombre de allí. `source` a solas —la siembra— no ata nada: eso se edita como todo lo demás |
+| sort | INTEGER | no | `100` | en qué orden se ofrecen. Un número y no el alfabeto: la lista va de lo más común a lo menos, y por nombre «Cámara» sale antes que «Servidor» en un desplegable que se usa para decir «servidor» |
+| slug | TEXT | no | `''` | el nombre corto, sacado del nombre (`Punto de acceso` → `punto_de_acceso`) y fijo de por vida. **Ya no apunta a nada** — para eso está `uid`— pero se queda por dos razones: es lo que ata una sembrada con su clave de idioma (`host_type_nas`), y es lo que hace legible una fila en una consulta a mano |
+| description | TEXT | no | `''` | para qué es esta clase. Un renglón que contesta «¿en qué se diferencia de la de al lado?» el día que hay dos parecidas, que es meses después. **De esta casa aunque la clase la mantenga un origen**: allí no existe, así que ninguna importación la va a pisar. En una sembrada va **vacía** y lo que se lee sale del catálogo de idiomas (`label_key` + `_desc`), por lo mismo que su nombre: escrita aquí se congelaría en el idioma de quien creó la base. Lo que se escriba manda sobre ella |
+| created_at | TEXT | no | `''` | |
+| updated_at | TEXT | no | `''` | |
+| updated_by | TEXT | no | `''` | |
+
+Índices: `idx_host_type_name(name)`, `idx_host_type_slug(slug)`.
+
+**De una base anterior se migra al arrancar** (`HostTypesStore::_migrar_a_uid`), y con la flota:
+la tabla se rehace con `uid` y, en la misma vuelta, `hosts.device_type` pasa de llevar el nombre
+corto a llevar el uid. Las dos cosas o ninguna — reescribir una sin la otra deja a todos los
+dispositivos señalando a clases que ya no existen, sin ningún error. Se reconoce por la columna
+`id`, que es lo que queda de la forma vieja; si una vuelta se corta a medias, la tabla apartada
+(`host_type_old`) es de donde se retoma en el siguiente arranque.
+
+Una clase **no se puede borrar si algún dispositivo la lleva puesta**: quedaría una palabra que ya no se traduce, no se filtra y no dibuja icono, y no se
+arregla volviendo a crearla con el mismo nombre. Se gestionan en **Sistema › Infraestructura ›
+Clases** (y el catálogo de Inventario físico enlaza allí).
+
+---
+
 ### `hosts` — hosts monitorizados
-[lib/core/hosts/store.py:36](../src/lib/core/hosts/store.py#L36)
+[lib/core/hosts/stores/hosts.py:36](../src/lib/core/hosts/stores/hosts.py#L36)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -487,7 +531,7 @@ config.json (solo lectura/arranque) → BD (editable).
 | os | TEXT | no | `'auto'` | |
 | maintenance | INTEGER | no | `0` | |
 | virtual | INTEGER | no | `0` | (reservada, entrecomillada) |
-| device_type | TEXT | no | `''` | qué es el dispositivo (`manifest.HOST_TYPES`); vacío = sin clasificar |
+| device_type | TEXT | no | `''` | qué es el dispositivo: el `uid` de una fila de `host_type`, validado contra ella al guardar. Vacío = sin clasificar, que es una respuesta y no un hueco |
 | tags | TEXT | no | `'[]'` | lista JSON |
 | description | TEXT | no | `''` | |
 | profiles | TEXT | no | `'{}'` | JSON, perfiles por protocolo; secretos cifrados |
@@ -496,8 +540,11 @@ config.json (solo lectura/arranque) → BD (editable).
 | updated_at | TEXT | no | `''` | |
 | updated_by | TEXT | no | `''` | |
 | watch | TEXT | no | `'[]'` | lista JSON de `{module, row}`: las filas de esta máquina que alguien ha dicho que merecen aviso. Un puerto de switch caído puede ser un PC apagado o el enlace del servidor, y ningún MIB los distingue — se anota contra la máquina, no en un perfil, porque es conocimiento de ESTA instalación |
+| source | TEXT | no | `''` | de dónde salió el dispositivo (`freshservice`); vacío = lo dio de alta una persona aquí, que es lo normal. Decide si una importación puede pisar su nombre, su dirección y su descripción — y si la pantalla deja teclearlos |
+| external_id | TEXT | no | `''` | cuál de los suyos es en ese origen. Dos columnas y no una porque son dos preguntas: por el NOMBRE no se puede volver a importar sin duplicar, ya que renombrarlo allí crearía aquí un segundo y dejaría el primero huérfano sin que nada lo dijera |
 
-Índices: `idx_hosts_name(name)`. Ver [explica-hosts.md](explica-hosts.md) para el modelo host-céntrico.
+Índices: `idx_hosts_name(name)`, `idx_hosts_source(source, external_id)`. Ver
+[explica-hosts.md](explica-hosts.md) para el modelo host-céntrico.
 
 ---
 
@@ -1190,7 +1237,8 @@ nadie —no lo vende nadie— y sin esta tabla se teclea veinte veces.
 | notes | TEXT | no | `''` | lo que no cabe en un renglón: por qué se eligió ese chasis, qué se probó y no valía, con quién se negoció el precio. Hoy eso vive en un correo, y el correo se pierde antes que el servidor |
 | valid_from | TEXT | no | `''` | desde cuándo se compra así. Un estándar tiene vigencia: sin estas dos fechas, «¿esto todavía se pide?» solo lo sabe quien estaba |
 | valid_to | TEXT | no | `''` | hasta cuándo. Puesta, la plantilla sale marcada como retirada en la lista — y no se borra: los equipos que salieron de ella siguen existiendo |
-| platform_uid | TEXT | no | `''` | con qué sale, en `dc_platform`. Una fila y no texto: cuatro formas de escribir «Debian 12» son cuatro respuestas a una pregunta que solo tiene una. Renombrada en `TableSpec` desde `platform`, que fue una caja de texto mientras se escribía esto |
+| platform_uid | TEXT | no | `''` | con qué sale, en `dc_platform`. Una fila y no texto: cuatro formas de escribir «Debian 12» son cuatro respuestas a una pregunta que solo tiene una. Renombrada en `TableSpec` desde `platform`, que fue una caja de texto mientras se escribía esto |
+
 | u_slots | INTEGER | no | `1` | en cuántas partes se divide el U que ocupa esto. Dos para un patch panel de 0,5 U, ocho para una bandeja de Raspberry. Es del **estándar**; lo que no lo es —*cuál* de las partes toma cada caja, una arriba y otra abajo— vive en `dc_item` |
 | u_slot_span | INTEGER | no | `1` | cuántas de esas partes toma |
 | u_split | TEXT | no | `'width'` | por dónde se parte: `width` o `height`. Se copia al equipo al crearlo desde la plantilla |

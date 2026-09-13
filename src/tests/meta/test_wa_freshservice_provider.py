@@ -94,8 +94,16 @@ class TestNadaDeLoQueDiceEstaEscritoAqui:
         assert not malos, 'frases escritas a mano en un error:\n' + '\n'.join(malos)
 
     def test_y_la_pantalla_pide_sus_palabras_al_catalogo(self):
-        """Todo lo que se pinta pasa por `t()` o `tf()`, y cada clave tiene que existir."""
-        js = _read(os.path.join(PKG, 'web', '_ui.html'))
+        """Todo lo que se pinta pasa por `t()` o `tf()`, y cada clave tiene que existir.
+
+        **Todas sus pantallas, no una.** Esto miraba `web/_ui.html` a secas, y el día que el
+        paquete creció con un segundo cuadro —el de los dispositivos— la guarda habría seguido
+        en verde sin mirarlo: una guarda apuntada a un nombre de fichero deja de guardar en
+        cuanto hay un fichero más, y nadie se entera porque no falla.
+        """
+        web = os.path.join(PKG, 'web')
+        js = '\n'.join(_read(os.path.join(web, f)) for f in sorted(os.listdir(web))
+                       if f.endswith('.html'))
         claves = set(re.findall(r"\bt f?\(?'([a-z_0-9]+)'\)", js)) \
             | set(re.findall(r"\bt\('([a-z_0-9]+)'\)", js)) \
             | set(re.findall(r"\btf\('([a-z_0-9]+)'", js))
@@ -105,24 +113,34 @@ class TestNadaDeLoQueDiceEstaEscritoAqui:
             faltan = sorted(k for k in claves
                             if k not in idioma and not k.startswith('fs_act_'))
             assert not faltan, (code, faltan)
-        # Las cuatro de las acciones se componen (`'fs_act_' + p.action`), así que se miran una
-        # a una: una clave compuesta que no exista sale en crudo dentro de una insignia.
+        # Las de las acciones se componen (`'fs_act_' + p.action`), así que se miran una a una:
+        # una clave compuesta que no exista sale en crudo dentro de una insignia. `create_m` es
+        # la misma acción en masculino — un activo es «Nuevo» y una empresa es «Nueva».
         for code in ('es_ES', 'en_EN'):
             idioma = _lang(code)
-            for accion in ('create', 'update', 'adopt', 'same'):
+            for accion in ('create', 'update', 'adopt', 'same', 'create_m'):
                 assert f'fs_act_{accion}' in idioma, (code, accion)
 
     def test_y_los_botones_tambien(self):
         """Los declara el manifiesto y los dibuja el panel: una clave que no exista deja un botón
-        con el nombre de la clave escrito encima."""
+        con el nombre de la clave escrito encima.
+
+        Los tres sitios donde este paquete pone uno —su tarjeta de configuración, la pantalla de
+        Empresas y la de Dispositivos— más el origen que firma las filas que trae. Se recorren
+        por el NOMBRE del descriptor y no de uno en uno, para que el quinto entre solo.
+        """
         import importlib                                            # noqa: PLC0415
         import sys                                                  # noqa: PLC0415
         if SRC not in sys.path:
             sys.path.insert(0, SRC)
         man = importlib.import_module('lib.providers.freshservice.manifest')
         claves = set()
-        for a in man.CONFIG_ACTIONS:
-            claves |= {a['label_key'], a.get('tooltip_key', ''), a.get('group_label_key', '')}
+        declarados = [n for n in dir(man) if n.endswith('_ACTIONS') or n.endswith('_SOURCES')]
+        assert len(declarados) >= 4, f'¿se ha dejado de declarar algo? {declarados}'
+        for nombre in declarados:
+            for a in getattr(man, nombre):
+                claves |= {a.get('label_key', ''), a.get('tooltip_key', ''),
+                           a.get('group_label_key', '')}
         claves.discard('')
         for code in ('es_ES', 'en_EN'):
             idioma = _lang(code)

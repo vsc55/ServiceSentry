@@ -8,6 +8,480 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.127] - 2026-09-13
+
+### Added
+
+- **Devices can be brought in from Freshservice, and tied to the ones already here.** The same
+  shape as companies one floor down, in System → Infrastructure → Devices: a split button off
+  **New device**, shown only when the connector is configured, opening a preview of what would
+  happen before anything happens. Requested from the screen.
+
+  It is `devices_edit` and not `orgs_edit`. Two routes rather than one with a switch: whoever
+  runs the companies has no business creating forty servers, and what machines exist and whose
+  they are are not decided by the same person at the same moment.
+
+  **An asset's address is not where the API says it is.** Freshservice does not return
+  `ip_address`; it returns `ip_address_7000123456`, with the defining asset type's id stuck on
+  the end — a number that differs per installation and is not even the asset's own type. Asking
+  for the field by its name finds a hole in *every* install, and what shows up is a list of
+  devices with no address: nothing fails, nothing warns, and it gets investigated from the
+  network side. Fields are matched by prefix instead, once, where the quirk is documented.
+
+  The asset's own **name is not a fallback address**, though it looks enough like a hostname to
+  tempt: «Juan's laptop» as the address of a check is a device that is red forever and nobody
+  knows why. No address is an answer.
+
+  **What an imported device has from over there is little, on purpose**: name, address and
+  description. Its connection profiles, the modules watching it, its marked rows and its history
+  are said *here*, because Freshservice has nowhere to keep them — and the host store writes the
+  whole record on every save, so an update written as "three fields and save" silently wipes the
+  SSH credentials of forty machines. It reads the record and writes it back instead.
+
+  It is created running **nothing** on itself (`kind = none`). A switch, a UPS or a printer
+  arriving from an inventory has no shell to run a command on, and `local` would have meant its
+  check measuring this panel's own machine and filing the result under the switch's name.
+
+  **Its kind is guessed once**, from the asset type's name — by words and folded of accents, in
+  both languages, because a type id differs per house and «Cámara IP» and «Camara IP» are the
+  same house saying the same thing. Shown in the preview before accepting, set on create, and
+  never touched again: correct it here and it stays corrected.
+
+- **Device classes moved out of the code and into the database — all of them.** Server,
+  hypervisor, NAS, switch, router, firewall, UPS, printer, camera, workstation and "other" were
+  a tuple in `manifest.py`: they covered almost everything, not the next thing — an access point,
+  an IP phone, an irrigation controller — and changing them took a commit. They are rows now.
+  Add one, rename one, give it an icon, remove one: the eleven originals included, because a
+  list where some entries are untouchable is the closed list again with extra steps.
+
+  What is left in code is **a seed**, used twice: the day the table is created, and when
+  somebody presses *Add the basic ones*. **Seeding happens on CREATE, not "when empty"** — the
+  difference is the whole behaviour. Delete "Camera" because this house has none and it does not
+  come back on the next boot with nothing to explain why; and the button that puts it back
+  leaves every class already there alone, or it would undo somebody's corrections every time it
+  was pressed.
+
+  **And they still translate.** A seeded class carries the language key, so it still reads
+  "Servidor" or "Server" depending on who is looking; one somebody types carries the words they
+  typed, kept as typed — a class of this house is never translatable, because nobody else knows
+  it exists. Renaming a seeded one **drops its key**: from the moment somebody calls it "Cabina
+  de discos", that is what they want to read, not what a translation catalogue says about a word
+  they no longer use.
+
+  **Its id comes from the name once and never moves again.** It is what `hosts.device_type`
+  stores, and the seeded ones keep the ids they always had (`server`, `nas`, `ups`) so an
+  existing fleet is not orphaned by the move. Renaming changes what is read, not what points at
+  it — otherwise every device of that class would be left pointing at one that no longer exists,
+  with no error and the class filter returning zero.
+
+  Two more places where this went wrong quietly, both now pinned: the host store validated
+  against the tuple, so a class this installation had added was offered by the screen and
+  dropped on write; and the page handed the browser that same tuple, so a class somebody had
+  just created did not exist for any picker or icon until a restart.
+
+  A class in use cannot be removed — its delete button is disabled and the server refuses, with
+  a message saying how many devices to fix first: deleting it would leave them with a word that
+  no longer translates, filters or draws an icon, and that is not undone by creating it again.
+
+- **And there is a screen for them: System → Infrastructure → Classes.** Next to Devices, which
+  is the list they classify and the list filtered by them. The physical-inventory catalogue —
+  brands, models, platforms, connectors — links across to it rather than holding a second copy:
+  it is where somebody goes looking for a catalogue, but it describes equipment in general and
+  this describes *this* registry. The shortcut from a device's own record stays, for the moment
+  the need actually shows up: classifying one and not finding the word.
+
+  It carries **one** button, shaped like the other two screens that can grow a list: *Add class*
+  with a caret, holding *Add the basic ones* and whatever a provider declares. Adding by hand and
+  bringing them in from elsewhere are ways for a class to appear, not different things — and with
+  the caret the toolbar does not grow when a second source arrives. Adding and correcting happen
+  in a dialog rather than a form sitting above the list: two fields filled in once and closed
+  should not take up room on a screen opened to look at something.
+
+  **The icon picker draws icons.** It was a `<select>` of names, and choosing between `hdd-stack`
+  and `hdd-network` by reading two words is guessing which was which — what is being chosen is a
+  drawing. Every icon offered is checked against the bundled font, because an unknown `bi-*`
+  class is not an error: it is a class that styles nothing, so the picker draws a blank square
+  and the dialog still looks finished.
+
+  Each row shows how many devices wear it, which is what answers "is anyone using this?" —
+  the question that decides whether it can go, and one that previously could only be answered
+  by trying to delete it and reading the error. **And clicking the row goes to them**, in the
+  by-type view with that class open: "this one is worn by twelve" is followed by "which twelve?",
+  and rebuilding that with a filter by hand is doing by hand what the screen already knows. A row
+  with none is not clickable — a click that opens an empty list reads as the screen having
+  failed.
+
+### Fixed
+
+- **Classes adopted by Freshservice lost their origin and kept the id of a link to nowhere.**
+  Clearing the short-lived `source='seed'` marking was written as one statement — `SET source='',
+  updated_by=? WHERE source='seed' OR updated_by='seed'` — so any row matching half the condition
+  had both columns reset. A seeded class that Freshservice had *adopted* carries its origin and
+  still carries the `updated_by='seed'` from the day it was seeded, and came out of there with a
+  blank source and its `external_id` alone: linked to nothing, with no way of knowing to what.
+  Nothing looks wrong — the class is still in the list, with its name and its icon — except that
+  nobody maintains it any more, and the next import creates a second one beside it. Each column
+  now looks at its own value. Found in a real database.
+
+  The rows that already lost it get it back on startup, but only when there is nothing to guess:
+  with a single device provider declared, that `external_id` cannot belong to anyone else. With
+  two or more it is left alone and re-linked from the screen, because which one is a decision,
+  not a probability.
+
+- **An interrupted migration stopped the panel from starting at all.** Indexes follow the table
+  that is renamed, so `idx_host_type_name` stayed attached to the one set aside — and when the
+  rebuilt table asked for that name it was taken. The drop only ran on the pass that did the
+  renaming, never on the pass that picks up where a cut-short one left off, which is the only
+  pass a database in that state ever gets: `reconcile_table` raised straight out of
+  `WebAdmin.__init__` and `main.py --web` died on the traceback. Reported from the console. The
+  stale indexes are dropped on both paths now, and the guard was mutated to prove it bites — the
+  old-shape fixture had no indexes at all, so it had been passing over the bug.
+
+- **The move to `uid` could be skipped forever, leaving every class without one.** It recognised
+  "this needs migrating" by the *whole* shape — a table with `id` and without `uid` — and that
+  disables it permanently the moment something adds the columns first: `reconcile_table` knows
+  how to add columns, not how to change a primary key, so a database that started the panel while
+  the new schema was half-written ended up with `uid`, `slug` and `description` present and null
+  and `id` still the key. It is recognised by the leftover column now, and a row that already has
+  a uid keeps it. Found in a real database.
+
+  Two more things the same case taught: DDL does not travel in the transaction (the connector
+  sends it on its own connection), so a failure half-way leaves the old table set aside and the
+  new one empty — that set-aside table is now the other place work is looked for, and finding it
+  means finishing a pass that was cut short. And the indexes follow the renamed table, so
+  `idx_host_type_name` was still taken when the new table asked for it.
+
+- **The icon loader said «Consultando Freshservice».** Loading the font's icon list is a core
+  screen talking to this panel's own route; it borrowed the provider's wording because the
+  spinner beside it looked the same. Anyone who read it was told a connector was being queried to
+  draw a list of pictures. It has its own line now. Reported from the screen.
+
+- **The classes screen draws its own table no more.** It hand-rolled one — header, filter
+  strip, checkboxes, bulk bin — with the shared factory that Devices, Companies, Clusters and the
+  inventory all use sitting right there. What came out was a list that behaved unlike every other
+  list in its own section: no accent strip, no filter bar, no column chooser, no sorting, no
+  paging. It is `createListTable` now, so all of that arrives for free and identically, and what
+  is left in the screen is what is genuinely its own: what each cell says and what a row can do.
+  The three layouts became its views, sharing one filter bar, one selection and one pager.
+  Reported from the screen, with a screenshot of Devices.
+
+- **The icon picker reaches the whole font.** Twenty shortlisted icons stay where they were —
+  choosing among two thousand turns a detail into a task — and behind a button sits every icon the
+  bundled font actually has, searchable. The list comes from the stylesheet itself rather than a
+  hand-written copy, so it cannot go stale, and it is fetched the first time somebody opens that
+  section: two thousand names are 37 KB, and shipping them with every page load is paying always
+  for something used occasionally. The icon a class already wears is shown in the short grid even
+  when it is not one of the twenty — otherwise opening it showed twenty drawings and none of them
+  selected.
+
+- **A linked class can still have its icon changed.** What the origin maintains is the name, and
+  only that: Freshservice has no icons, so the drawing that tells one class from another in a list
+  of forty is this house's own data. Refusing to save it was refusing over something the origin
+  will never touch — and the import already left it alone, which is what made the refusal doubly
+  false. Renaming a seeded class still drops its language key; changing only its icon does not,
+  or picking a different drawing would have left «Servidor» reading in English.
+
+- **The seed is not a source, and it is written by `system`.** It stored `source='seed'` and
+  `updated_by='seed'`. `source` says *which external system maintains this row* — it decides
+  whether the name can be typed here and what the badge shows — and the seed is not an external
+  system: it is what every installation is born with. Writing it there meant excluding it by hand
+  in four places on the screen, each one an occasion to forget. Empty means "this house's", the
+  same as it does in `org` and `hosts`; which rows came from the seed is told by `label_key`,
+  which only they carry. And the writer is `system`, the user this panel has for exactly this.
+  Reported from the database.
+
+- **Picking an external class said "saved" and left the picker sitting there.** Linking closed
+  the class dialog and not the provider's own picker stacked above it, so the screen did not move
+  and it read as nothing having happened. Both close now, topmost first — the other order takes
+  the backdrop out from under the one still open. Reported from the screen.
+
+- **The picker disabled the one row you wanted to press.** It greyed out every external class
+  that had a local one *with the same name*, which is right for the import dialog — bringing it
+  in would create nothing — and exactly backwards for linking, where the class that matches by
+  name is usually the one being linked. Those were one field; they are two now: «is there one
+  here called that» and «is one here already linked to it». Only the second disables a row, and
+  the one already linked to *this* class is shown ticked rather than greyed, because that is what
+  says which one it has. Reported from the screen.
+
+- **Spanish said «atar», which is what you do with a rope.** Linking a row here to one in another
+  system is «vincular» — the word the companies dialog had been using all along. It crept in
+  translating `tie`/`untie` literally and reached nine strings («Esa empresa ya está atada a otro
+  departamento», «Soltar del origen», «Suéltala de su origen»). Reported from the screen twice:
+  once for the error message and once for the button. English now says link/unlink too, which is
+  what the keys and the routes already said. Guarded by a list of the exact forms rather than by
+  the root: «suelto» is good Spanish in this panel — «racks sueltos», «un fichero .mib suelto» —
+  and banning it would ban what is written correctly.
+
+- **Removing device classes was slow, and the reason was one query done the wrong way.**
+  Reported from the screen. Measured rather than guessed: with 3,000 devices, removing twelve
+  classes took 1.40 s — 116 ms each, of which 110 ms was counting how many devices wore that
+  class. That count read the **whole fleet** into Python, four `json.loads` per row, once per
+  class: twelve deletions were twelve full reads of the registry. The engine counts it now
+  (`COUNT(*) … WHERE device_type = ?`), and the same twelve take 0.05 s.
+
+  Looking at that turned up a second one nobody had noticed: validating a device's class on save
+  built the classes store, and its constructor **reconciles the schema** — so every device saved
+  reconciled the table, and importing four hundred reconciled it four hundred times. Cheap on
+  SQLite; four hundred round trips to the catalogue on MySQL or PostgreSQL. It is one indexed
+  lookup now, and creating 3,000 devices went from 2.74 s to 1.90 s.
+
+  Both are guarded with a counter rather than a stopwatch: the time depends on the machine, the
+  number of queries does not.
+
+  What did **not** change is one request per class. That is a decision this panel has already
+  taken and written down for the backups list: each removal leaves its own audit line — "who
+  took this one away?" — and one that is refused does not take the rest with it.
+
+### Changed
+
+- **The hosts domain's tables live in `stores/`, one per file, and the questions about classes
+  live above them.** It was `store.py` (the fleet) and `types.py` (the classes) sitting among the
+  dozen other files of the domain — and `types.py` held both the table and the half-dozen
+  functions the rest of the panel calls about classes, so reading the catalogue meant importing
+  the module that declares columns and indexes. Now:
+
+  - `stores/hosts.py` and `stores/types.py`, each declaring exactly one table and named after it,
+    so searching the repo for `host_type` lands in one place. Same arrangement as
+    `lib.core.dcim.store`, where there are twelve. Either store imports from
+    `lib.core.hosts.stores`, so a caller that just wants one need not know which file it is in.
+  - `classes.py` — `catalog` / `ensure` / `known` / `uid_for` / `in_use` / `usage`: what the
+    routes, the Freshservice provider and the page actually call. Whoever draws a class or brings
+    one in from a provider has nothing to say to the table; it asks the panel a question.
+
+  Asked from the screen. Guarded, so the arrangement does not quietly come undone.
+
+- **A device class is pointed at by `uid`, like everything else in this schema.** Its key was a
+  short name derived from its own (`Punto de acceso` → `punto_de_acceso`), and that is what every
+  device stored. It worked — it did not move when the class was renamed, which was the point —
+  but it left the schema with two ways of pointing at a row: `org`, `hosts` and `dc_item` go by
+  `uid`, and this one went by a string made out of a name, so every query had to be written
+  knowing which of the two applied here. Requested from the screen, in those words: relations are
+  made with the UID.
+
+  The short name is not thrown away — it is the `slug` column now. It is what ties a seeded class
+  to its language key (`host_type_nas`), and what makes a row readable in a hand-written query.
+  What changed is what the fleet points at.
+
+  **An existing database migrates itself on startup, and the fleet migrates with it**: the table
+  is rebuilt with a `uid` and, in the same pass, `hosts.device_type` goes from holding the short
+  name to holding that uid. Both or neither — rewriting one without the other leaves every device
+  pointing at classes that no longer exist, with no error, the class filter answering zero and
+  the column blank.
+
+- **A class can say what it is for.** One line, next to the name, answering "how is this one
+  different from the one beside it?" — which is the question asked months later, when there are
+  two alike and nobody remembers. It belongs to this house even when the class is maintained by a
+  provider: the origin has no such field, so no import can overwrite it.
+
+- **The classes grid is the panel's card grid.** It had its own — its own grid, its own card —
+  written beside `_cardGrid` + `_entityCard`, which is what draws the cards in Devices, Sessions
+  and everywhere else. What came out sat flush against the panel edges (the margins come with the
+  shared grid) and was a different shape of card from its neighbours in its own section. Reported
+  from the screen, and the same lesson as the table two screens earlier: a screen declares what a
+  card *says*, not how a card is *drawn*.
+
+- **The eleven classes that ship now say what they are for, in the reader's language.** Their
+  description travels the same road as their name — a key in the language catalogue, derived from
+  the one they already carry (`host_type_nas` → `host_type_nas_desc`) — and the column stays
+  empty, which is the honest state: nobody here has written anything yet. Written into the column
+  it would be frozen in the language of whoever created the database, which is exactly what
+  `label_key` exists to avoid, and here it would be a whole sentence. Anything typed in wins over
+  it, and describing a seeded class does not rename it, so it keeps its translation.
+
+- **The class list comes up with the columns you read a row by**: what it is, what for, who
+  maintains it and how many wear it. The identifiers are not among them — neither the short name
+  nor the uid says anything while looking down a list, and left on they are two columns of
+  monospace between the four that are actually read; they are a click away in the chooser on the
+  day they are wanted. Chosen from the screen.
+
+- **The device class column chooser had a nameless row.** The icon had a column of its own with no
+  header, and the chooser prints a column's label and nothing else — so the first entry in that
+  menu was a blank line with a padlock: a tickbox that cannot be touched and does not say what it
+  is for. The icon now sits in the name cell, which is where Devices puts it and where it reads.
+  Reported from the screen.
+
+- **«De aquí» is not how a column says a class is nobody else's.** The origin column and its
+  filter now say «Interna» / "Internal". Reported from the screen.
+
+- **The whole font's icon list stopped repeating the twenty on top.** The long list handed back
+  everything it had, shortlist included, so the same twenty came out twice in one dialog — with
+  the selected one appearing twice among them, which is what makes you doubt whether they are the
+  same icon. It now subtracts what the short grid actually drew, not the constant behind it: the
+  short grid puts the class's own icon in front when it is not one of the twenty, and subtracting
+  the constant would have left exactly that one repeated — the one icon the reader is looking at.
+  The search box counts what it can really find, too. Reported from the screen.
+
+- **The class dialog declares its width instead of offering to resize it.** `modal-lg` on its own
+  brings the drag handle and the maximise button, and what gets maximised here is the empty space
+  under the icons. It is `ss-modal-wide` now — the panel's way of saying a width is the opener's
+  decision — which is also wider. Reported from the screen.
+
+- **The class UID is a field you can copy.** It is what every relation is made with, so it gets
+  picked up and pasted — into a query, into a ticket — and as running text the only way to take
+  it is to select it by hand. Same shape Users, Groups and Credentials already use: a read-only
+  monospace input with a copy button beside it. Requested from the screen.
+
+- **The class dialog is wide, in two columns, and the description has room to write in.** The
+  whole font's two thousand icons open inside it, and in a narrow dialog that is a four-wide
+  strip with an endless scroll while half the dialog sits empty. What is typed — name and
+  description — is narrow by nature and stays in one column; the icons take the other and get a
+  height of their own. The description is a `textarea`: it is a sentence, not a field. Reported
+  from the screen.
+
+- **The classes screen asks what to bring, and has more than one way to look.** Importing
+  classes fetched the lot and reported afterwards, which is the one thing the other two imports
+  in this package do not do: a house's type list has «Monitor», «Chair» and «Licence» among the
+  switches. It now shows them first, saying of each whether a class here already covers it —
+  choosing what to bring without that is choosing blindly between what creates something and what
+  does nothing. Requested from the screen.
+
+  The list itself gained a search box, a filter (all / with devices / unused, plus one button per
+  origin that has brought something — derived from the rows, so a second provider's button
+  appears on its own), multi-select with a bulk delete, and three layouts to pick between:
+  **table** to work in, **grid** for the icon at the size it will be read at, and **counts** for
+  what the fleet is made of, biggest first.
+
+  **A class in use can never be selected**, header checkbox included: the server refuses to
+  delete it anyway, so a checkbox on it leads to a bin that promises five and removes three —
+  the same rule the backups list already follows for locked copies. And the selection does not
+  survive a filter that stops showing it.
+
+- **A class can be tied to one in an external provider — and then it is read-only.** Somebody who
+  typed «Punto de acceso» where Freshservice calls it «Access Point» got a second class on the
+  first import, with half the new devices going to each. Tying them makes the import recognise
+  it. `host_type` gained `external_id` alongside `source`, and the lookup goes by the id over
+  there **before** the name: renaming a class is something the screen actively invites, and by
+  name alone the next import creates a second one.
+
+  Tied means maintained there: its name refreshes from the origin and cannot be typed here, the
+  dialog opens to be read, and the way out is untying it — because a class nobody can correct and
+  that does not update itself either is a frozen name with no owner. One that was typed here and
+  happens to match by name is **adopted** rather than copied, like companies and devices.
+
+  The seed marker does not count as tied. `source` alone is worn by the eleven basics too, and
+  confusing the two would have left them read-only for everyone.
+
+  The offer to tie one sits at the **bottom** of the dialog under its own heading, as the extra
+  it is: at the top it pushed the name and the icon — what you came for — down the page to offer
+  something most installations do not have. It only exists when a provider is configured, since
+  what draws it is a declared action whose `ready` belongs to that package. And the provider's
+  own list of classes is searchable: an inventory has forty types and the one being tied is one.
+
+- **Classes can also be imported from Freshservice, without fetching a single asset.** A house
+  already using it has its classes written there; typing them again here is keeping two lists,
+  and two lists are one that goes stale without saying so. The type catalogue is a separate
+  resource and one call, so it is cheap. What is already here is left alone, and what gets
+  created is reported by name — creating fifteen classes in silence is how you end up with
+  fifteen nobody remembers asking for. Declared like everything else: the classes screen does
+  not know Freshservice exists.
+
+- **A small button's dropdown is now sized to it.** Bootstrap sizes a `dropdown-menu` on its
+  own — 1rem of text and its usual padding — whatever the button it hangs off is worth, and every
+  toolbar in this panel uses `btn-sm`: the menu came out bigger than the button that opened it.
+  Reported from the classes screen.
+
+  It is not visible reading the markup — the class is the right one, and what is wrong is what
+  Bootstrap decides for it — which is why it had already been fixed **three times in three
+  different ways**: `p-1` plus an inline font-size on the refresh control, `p-1` plus a different
+  inline size on the checks table, and `ss-fs-3` on the Overview. Three copies of one rule are
+  three places for the fourth to be forgotten. There is one class now, `.ss-dropdown-sm`, the
+  three remaining unsized menus wear it, and a guard says no split button's menu may keep the
+  stock size.
+
+- **Which asset types to bring is asked before anything is fetched.** An inventory has
+  «Monitor», «Chair» and «Licence» among the switches, and pulling all four thousand of them to
+  end up looking at twelve is forty round trips to their API. The type catalogue is a separate
+  resource and **one cheap call**, so the dialog opens on it: pick the types, then fetch. With
+  the local kind each type would become shown beside its name, the ones that look like devices
+  listed first, and a shortcut that picks exactly those — a shortcut, not a default: which ones
+  are wanted is decided by whoever is looking, and guessing it up front would hide half the
+  inventory without saying so. Picking none means all, which is what not choosing means.
+  Requested from the screen.
+
+  The chosen types go into the origin's own query, and are **applied again to what comes back**.
+  The shape of that filter is not the same across plans, and an origin that does not understand
+  it answers with the whole list — so the screen would show four thousand assets when twelve
+  switches were asked for, with nothing failing. Asking the origin is an optimisation; filtering
+  what arrived is the guarantee. A rejected filter is retried once without it; an error that is
+  not about the filter (a key that does not work) is not swallowed by that retry.
+
+  **With a filter on, nothing is called missing.** "No longer in Freshservice" is a statement
+  about everything there, and what was seen is a slice: a device imported under another type
+  would be listed as gone for not having been asked about — and what that invites is deleting
+  it. Saying nothing is the honest answer; looking without a filter is one click away.
+
+- **Which local device an asset IS can be said by hand.** That «SRV-BCN-01» over there and
+  «srv-barcelona» here are the same machine is known by whoever is looking, and no name
+  similarity will ever say it. Picking one in the preview turns the row into an adoption:
+  nothing is created, the existing device gets the origin — and keeps its profiles, its modules
+  and everything else. A manual link beats what was deduced, and one that cannot be made is
+  rejected **with its reason** rather than half-done: two assets cannot share a device, or the
+  second would overwrite the first's name on every import and the record would change name on
+  its own.
+
+  `hosts` gained `source` + `external_id` for it. Two columns, not one, because they answer two
+  questions; matching by name cannot work, since renaming the asset over there would create a
+  second record here and orphan the first without anything saying so. A saved record that does
+  not mention the origin **keeps** it: this is the edit dialog, which sends the whole record and
+  knows nothing about this, and without that, correcting a description would quietly unlink the
+  device and the next import would duplicate it.
+
+  The three fields the origin maintains are not typed over — comparing **values, not keys**, so
+  everything the origin knows nothing about stays editable — and there is a way out
+  (`DELETE /api/v1/hosts/<uid>/source`): without one, dropping the provider leaves records
+  nobody maintains and nobody can correct.
+
+### Changed
+
+- **The `ready`-filtering of declared screen actions is written once.** `ORG_ACTIONS` and
+  `HOST_ACTIONS` apply the same rule — no `fn` means nothing to press, `ready(wa)` decides, one
+  that raises counts as "not configured" — so it lives in `lib.discovery.ready_actions` and both
+  screens call it. The second copy would have arrived three days after the first. Same for the
+  small id-keyed registries (`ORG_SOURCES`, `HOST_SOURCES`), now `declared_by_id`.
+
+- **The provider's i18n guard looks at all of its screens, not one.** It read `web/_ui.html` by
+  name, so the day the package grew a second dialog the guard would have stayed green without
+  looking at it: a guard aimed at a filename stops guarding the moment there is one more file,
+  and nobody notices because it does not fail. It now reads every `web/*.html`, and checks the
+  label keys of every declared action and source rather than one constant at a time.
+
+- **The host INSERT counts its own placeholders.** The list of `?` was written by hand and had
+  to be recounted every time the table grew by the end; what a stale one gives you is the
+  engine's complaint about a column count, which says nothing about the column that is missing.
+
+- **The inventory says «dispositivo», not «equipo».** The section was called *Equipos* while its
+  English side already read *Devices* — the translation had drifted, and with it the word used
+  across sixty-odd other strings on the same screens: «{} equipos», «Equipo nuevo», «Hacen falta
+  al menos dos equipos». Renaming only the section heading would have left the label disagreeing
+  with everything under it, so the whole surface moved together. Reported from the screen.
+
+  Three strings keep the old word because there it means something else: a *team* of people
+  (`group_name_ph`), and the machine somebody is sitting at (`mib_upload_title`, «desde este
+  equipo»). Four English labels that had drifted the other way — «Equipment», «Machines»,
+  «items» for the same thing — now all read «Device(s)».
+
+- **Importing companies moved to the screen that has the companies.** The button lived on the
+  Freshservice card in Configuration → External sources, which is where you had to go to press
+  it: fetching them is an act on the companies list, not a question about some settings. Its
+  neighbour stays where it was for the same reason read the other way — testing the connection
+  IS a question about the settings, and it belongs beside the field being typed.
+
+  It hangs off **Add a company** as a split button rather than sitting next to it: bringing them
+  in from elsewhere is another way for a company to appear, not a different thing. With three
+  sources one day the toolbar still has two buttons instead of five. With nothing to hang there
+  is no caret — an empty dropdown is worse than none.
+
+  **And it only appears when the connector is configured** — domain *and* key. A button
+  promising to fetch forty companies that dies on the first call for a key nobody typed is worse
+  than no button: what it reports is an authentication error, which sends somebody to check the
+  credential instead of the empty field.
+
+  Declared, like everything else: `ORG_ACTIONS` in the provider's manifest carries the label,
+  the icon, the permission and the function — and `ready`, which is what decides whether the
+  connector is set up. `ready` is the provider's own function, because what a provider needs in
+  order to work is not something the companies screen can know; the day it needs a third field,
+  the answer changes in one place. The core still names no provider anywhere.
+
 ## [0.0.1+build.126] - 2026-09-13
 
 ### Added

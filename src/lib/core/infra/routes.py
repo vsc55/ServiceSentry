@@ -43,7 +43,7 @@ from lib.core.history import service as history_svc
 from lib.core.hosts import service as hosts_svc
 from lib.core.hosts.service import _checks_for_host
 from lib.core.hosts import profiles as host_profiles
-from lib.core.hosts import store as host_store_mod
+from lib.core.hosts.stores import hosts as host_store_mod
 from lib.core.infra import jobs as infra_jobs
 from lib.core.infra import service as infra_svc
 from lib.core.infra import evidence as infra_evidence

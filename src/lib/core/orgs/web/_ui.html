@@ -31,7 +31,7 @@
 
 //: Lo que trajo el servidor la última vez. Las empresas Y los ámbitos que alguien declara, que
 //: es lo que permite contar «3 armarios» sin que esta pantalla sepa qué es un armario.
-let _orgsData = {orgs: [], scopes: [], sources: [], loaded: false};
+let _orgsData = {orgs: [], scopes: [], sources: [], actions: [], loaded: false};
 
 //: La empresa que se está corrigiendo en el cuadro. `uid` vacío es un alta.
 let _orgDraft = null;
@@ -124,6 +124,45 @@ function _orgsSourceHtml(o) {
     return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
         title="${escAttr(tf('orgs_source_tt', nombre, o.external_id || ''))}">
         <i class="bi ${escAttr(icono)} me-1"></i>${esc(nombre)}</span>`;
+}
+
+/** El botón de añadir y, colgando de él, las otras formas de que entre una empresa.
+ *
+ *  Traer las de fuera es un acto **sobre esta lista**, así que su sitio es éste y no la tarjeta
+ *  de configuración de quien las trae, que es donde estaba: bajar a Configuración para importar
+ *  es ir a buscar un botón a la pantalla de otra cosa.
+ *
+ *  Y colgando del de añadir, no al lado: son maneras de lo mismo —que aparezca una empresa— y
+ *  el día que haya tres fuentes serían tres botones en una barra que hoy tiene dos. Con la
+ *  pestaña, la barra no crece.
+ *
+ *  Sin nada que colgar no hay pestaña: un desplegable vacío es peor que ninguno. Y las acciones
+ *  llegan **ya filtradas** del servidor — sólo las de los conectores que su propio paquete da
+ *  por configurados — porque qué necesita un proveedor para funcionar lo sabe él. El permiso se
+ *  vuelve a mirar aquí, que es una reja encima de la del servidor y nunca en su lugar.
+ *
+ *  Aquí no hay escrito el nombre de ningún proveedor, como en todo lo demás de esta pantalla:
+ *  el texto, el icono y la función los pone quien las trae. */
+function _orgsNewHtml(puede) {
+    if (!puede) return '';
+    const nuevo = `<button class="btn btn-sm btn-success" onclick="_orgModalOpen('')">
+        <i class="bi bi-plus-lg me-1"></i>${esc(t('orgs_new'))}</button>`;
+    const otras = (_orgsData.actions || []).filter(a => !a.perm || _orgsMay(a.perm));
+    if (!otras.length) return `<span class="ms-1">${nuevo}</span>`;
+    return `<div class="btn-group ms-1">
+        ${nuevo}
+        <button class="btn btn-sm btn-success dropdown-toggle dropdown-toggle-split"
+            data-bs-toggle="dropdown" aria-expanded="false"
+            title="${escAttr(t('orgs_new_more'))}"
+            ><span class="visually-hidden">${esc(t('orgs_new_more'))}</span></button>
+        <ul class="dropdown-menu dropdown-menu-end ss-dropdown-sm">
+            ${otras.map(a => `<li><button class="dropdown-item" type="button"
+                onclick="${escAttr(a.fn)}()"
+                title="${escAttr(a.tooltip_key ? t(a.tooltip_key) : '')}"
+                ><i class="bi ${escAttr(a.icon || 'bi-box-arrow-in-down')} me-2"></i>${
+                esc(a.label_key ? t(a.label_key) : a.id)}</button></li>`).join('')}
+        </ul>
+    </div>`;
 }
 
 function _orgsTotal(o) {
@@ -278,9 +317,7 @@ createListTable({
     refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="_orgsReload()"
         title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${
         esc(t('refresh'))}</button>`,
-    headerButtons: ctx => ctx.puede
-        ? `<button class="btn btn-sm btn-success ms-1" onclick="_orgModalOpen('')">
-            <i class="bi bi-plus-lg me-1"></i>${esc(t('orgs_new'))}</button>` : '',
+    headerButtons: ctx => _orgsNewHtml(ctx.puede),
     emptyState: () => `<div class="text-center py-5 text-muted">
         <i class="bi bi-buildings ss-empty-icon"></i><span>${esc(t('orgs_none'))}</span></div>`,
     state: {
@@ -305,7 +342,10 @@ async function _orgsLoad() {
     const d = await apiGet('/api/v1/orgs');
     if (!d) return;                       // la conexión, no la pantalla: el aviso ya está puesto
     _orgsData = {orgs: d.orgs || [], scopes: d.scopes || [],
-                 sources: d.sources || [], loaded: true};
+                 sources: d.sources || [],
+                 // Lo que algún paquete ofrece hacer aquí. Llega ya filtrado: el servidor sólo
+                 // manda las de los conectores que su propio paquete da por configurados.
+                 actions: d.actions || [], loaded: true};
 }
 
 /** Volver a pedirlo todo. Después de cada escritura, que es cuando puede haber cambiado algo — y

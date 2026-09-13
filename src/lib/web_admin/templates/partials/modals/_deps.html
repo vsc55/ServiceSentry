@@ -139,6 +139,42 @@
     </div>
 </div>
 
+{# Añadir o corregir una clase de dispositivo.
+
+   Un cuadro y no un formulario encima de la lista: son dos campos que se rellenan una vez y se
+   cierran, y un formulario permanente ocupa sitio en una pantalla que se abre para mirar.
+
+   Se abre TAMBIÉN sobre el cuadro de clases, cuando se viene desde la ficha de un dispositivo —
+   lo mismo que ya hace la prueba de un dispositivo sobre su ficha. #}
+{# Ancho declarado (`ss-modal-wide`) y el cuerpo en dos columnas: dentro caben los dos mil
+   iconos de la fuente, y en un cuadro estrecho eso es una tira de cuatro columnas con un scroll
+   larguísimo.
+
+   `ss-modal-wide` y no `modal-lg` a secas porque **una talla que el que abre ha declarado es una
+   decisión**: la clase lleva consigo que no salgan ni el asa de redimensionar ni el botón de
+   maximizar, que es lo correcto aquí — lo que se maximiza es el hueco vacío de debajo de los
+   iconos. Las dos cosas, reportadas desde la pantalla. #}
+<div class="modal fade" id="hostTypeEditModal" tabindex="-1">
+    <div class="modal-dialog modal-lg ss-modal-wide modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-tag me-1"></i><span
+                    id="hostTypeEditTitle">{{ i18n.host_types_new_title }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body p-3" id="hostTypeEditBody"></div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary"
+                        data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-sm btn-success" id="btnHostTypeSave"
+                        onclick="_htSave()">
+                    <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {# Assisted host migration modal — proposal of candidate hosts. #}
 <div class="modal fade" id="hostMigrateModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">

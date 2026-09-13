@@ -167,7 +167,7 @@ class Monitor(ObjectBase):
         if self._db is None:
             return None
         try:
-            from lib.core.hosts.store import HostsStore  # noqa: PLC0415
+            from lib.core.hosts.stores import HostsStore  # noqa: PLC0415
             from lib.security import secret_manager          # noqa: PLC0415
             from lib.modules import ModuleBase       # noqa: PLC0415
             secret_keys = secret_manager.ENCRYPT_KEYS | ModuleBase.discover_secret_fields(self.dir_modules)

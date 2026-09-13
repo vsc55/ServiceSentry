@@ -11,7 +11,11 @@ Sin red: se le dan respuestas de mentira con las cabeceras que ellos publican y 
 Cada cosa que se fija está sacada de su documentación, y lo que es decisión nuestra lo dice.
 """
 
+import pytest
+
 from lib.providers.freshservice import api
+from lib.providers.freshservice import api as fs_api
+from lib.providers.freshservice import client as fs_client
 
 
 class _Resp:
@@ -250,3 +254,107 @@ class TestComoFalla:
         sess = _Sess([_Resp(body={'departments': []})])
         api.get(sess, 'h', 'departments')
         assert sess.calls[0]['timeout'] == api.TIMEOUT and api.TIMEOUT > 0
+
+
+class TestPedirSoloUnasClasesDeActivo:
+    """El filtro se le pide al origen para no traerse cuatro mil activos cuando hacen falta
+    cuarenta. Pero su forma no es la misma en todos los planes, y un origen que no lo entienda
+    contesta un 400 — que no puede convertirse en «no se puede importar»."""
+
+    def _espia(self, monkeypatch, fallar_con_filtro=False):
+        visto = []
+
+        def _page_all(sess, host, path, key, params=None, per_page=100):
+            visto.append(dict(params or {}))
+            if fallar_con_filtro and 'filter' in (params or {}):
+                raise fs_api.FreshserviceError('fs_err_request', 'no such filter')
+            return [{'id': 1}]
+
+        monkeypatch.setattr('lib.providers.freshservice.api.page_all', _page_all)
+        monkeypatch.setattr('lib.providers.freshservice.api.session', lambda k: _Sesion())
+        return visto
+
+    def test_sin_clases_no_manda_filtro(self, monkeypatch):
+        visto = self._espia(monkeypatch)
+        fs_client.assets('casa.freshservice.com', 'k')
+        assert 'filter' not in visto[0]
+        assert visto[0]['include'] == 'type_fields', 'sin esto no viene ni la dirección'
+
+    def test_con_clases_las_pide_todas_en_una_consulta(self, monkeypatch):
+        """Una consulta con un `OR` y no una llamada por clase: tres clases serían tres recorridos
+        completos de páginas para la misma respuesta."""
+        visto = self._espia(monkeypatch)
+        fs_client.assets('casa.freshservice.com', 'k', ['7001', '7002'])
+        assert visto[0]['filter'] == '"asset_type_id:7001 OR asset_type_id:7002"'
+
+    def test_lo_que_no_es_un_numero_no_llega_a_la_consulta(self, monkeypatch):
+        """Viene de una pantalla. Un identificador que no sea entero no se arregla escapándolo:
+        no puede ser uno suyo."""
+        visto = self._espia(monkeypatch)
+        fs_client.assets('casa.freshservice.com', 'k', ['7001', "1 OR 1=1", ''])
+        assert visto[0]['filter'] == '"asset_type_id:7001"'
+
+    def test_un_origen_que_no_entiende_el_filtro_sigue_trayendo(self, monkeypatch):
+        """Se vuelve a preguntar sin filtro. Quien llama filtra igualmente lo que reciba, así que
+        lo único que se pierde es el ahorro de viajes — no la importación."""
+        visto = self._espia(monkeypatch, fallar_con_filtro=True)
+        assert fs_client.assets('casa.freshservice.com', 'k', ['7001']) == [{'id': 1}]
+        assert len(visto) == 2 and 'filter' not in visto[1]
+
+    def test_pero_un_fallo_de_verdad_no_se_esconde_detras_del_reintento(self, monkeypatch):
+        """Una clave que no vale contesta 401, y volver a preguntar sin filtro contestaría 401
+        otra vez. Tragárselo convertiría «tu clave no vale» en «no hay activos»."""
+        def _page_all(sess, host, path, key, params=None, per_page=100):
+            raise fs_api.FreshserviceError('fs_err_auth')
+
+        monkeypatch.setattr('lib.providers.freshservice.api.page_all', _page_all)
+        monkeypatch.setattr('lib.providers.freshservice.api.session', lambda k: _Sesion())
+        with pytest.raises(fs_api.FreshserviceError) as e:
+            fs_client.assets('casa.freshservice.com', 'k', ['7001'])
+        assert e.value.key == 'fs_err_auth'
+
+
+class TestContarCuantosHayDeCadaClase:
+    """Su catálogo de tipos **no trae ese número**, así que la única forma de saberlo es recorrer
+    los activos — el mismo viaje que el paso de elegir clases existe para ahorrar. Por eso es una
+    acción aparte y se pide a mano."""
+
+    def _espia(self, monkeypatch, filas):
+        visto = []
+
+        def _page_all(sess, host, path, key, params=None, per_page=100):
+            visto.append(dict(params or {}))
+            return filas
+
+        monkeypatch.setattr('lib.providers.freshservice.api.page_all', _page_all)
+        monkeypatch.setattr('lib.providers.freshservice.api.session', lambda k: _Sesion())
+        return visto
+
+    def test_cuenta_por_clase(self, monkeypatch):
+        self._espia(monkeypatch, [{'asset_type_id': 7001}, {'asset_type_id': 7001},
+                                  {'asset_type_id': 7002}])
+        assert fs_client.asset_counts('casa.freshservice.com', 'k') == {'7001': 2, '7002': 1}
+
+    def test_y_no_pide_los_campos_de_la_plantilla(self, monkeypatch):
+        """`include=type_fields` es lo que hace pesada la respuesta, y para contar no hace falta
+        ni uno de esos campos: son las mismas páginas y muchísimos menos bytes."""
+        visto = self._espia(monkeypatch, [])
+        fs_client.asset_counts('casa.freshservice.com', 'k')
+        assert 'include' not in visto[0]
+
+    def test_un_activo_sin_clase_no_inventa_una(self, monkeypatch):
+        """Se cuenta lo que se puede elegir. Una clase con la cadena vacía por nombre sería una
+        casilla que no se puede marcar y que no dice nada."""
+        self._espia(monkeypatch, [{'asset_type_id': None}, {'asset_type_id': 7001}])
+        assert fs_client.asset_counts('casa.freshservice.com', 'k') == {'7001': 1}
+
+
+class _Sesion:
+    """Lo justo para que `with sess:` funcione. El cliente no llega a usarla: `page_all` está
+    sustituido, que es donde de verdad se decide lo que se pregunta."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False

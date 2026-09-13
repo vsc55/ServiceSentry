@@ -21,36 +21,18 @@
 #
 # `''` (unset) is always allowed and is what every existing device has: making people
 # classify a fleet before they can save anything would be a worse form than none.
-HOST_TYPES: tuple[dict, ...] = (
-    {'id': 'server',      'icon': 'bi-hdd-rack'},
-    {'id': 'workstation', 'icon': 'bi-pc-display'},
-    {'id': 'nas',         'icon': 'bi-hdd-stack'},
-    {'id': 'hypervisor',  'icon': 'bi-boxes'},
-    {'id': 'switch',      'icon': 'bi-ethernet'},
-    {'id': 'router',      'icon': 'bi-router'},
-    {'id': 'firewall',    'icon': 'bi-shield-lock'},
-    {'id': 'ups',         'icon': 'bi-battery-charging'},
-    {'id': 'printer',     'icon': 'bi-printer'},
-    {'id': 'camera',      'icon': 'bi-camera-video'},
-    {'id': 'other',       'icon': 'bi-hdd-network'},
-)
+#
+# **Y la lista ya no está aquí.** Eran once escritas en una tupla —servidor,
+# hipervisor, NAS, conmutador…— y sólo se podían cambiar con un commit, así que lo que no cabía
+# en ellas se quedaba «sin clasificar»: un punto de acceso, un teléfono IP, una controladora de
+# riego. Ahora son filas de la tabla `host_type` y se editan desde el panel. Todo lo de arriba
+# sigue valiendo: sigue siendo una PROPIEDAD y no una sección, y «sin clasificar» sigue siendo
+# una respuesta.
+#
+# De aquellas once queda una semilla en `lib/core/hosts/stores/types.py::SEED`, que se usa el día
+# se crea la tabla y cuando alguien pide «añadir las básicas». **Nada las lee en caliente**: lo
+# que decide si una clase existe es la tabla, y una guarda lo comprueba.
 
-#: The icon an unclassified device wears — the one the section has always used.
-HOST_TYPE_FALLBACK_ICON = 'bi-hdd-network'
-
-
-def host_type_ids() -> tuple:
-    """Just the ids, for validation."""
-    return tuple(t['id'] for t in HOST_TYPES)
-
-
-def host_type_icon(type_id) -> str:
-    """The icon for a type, or the generic one for anything unrecognised."""
-    wanted = str(type_id or '').strip().lower()
-    for t in HOST_TYPES:
-        if t['id'] == wanted:
-            return t['icon']
-    return HOST_TYPE_FALLBACK_ICON
 
 MODULE_PERMISSIONS = {
     'group': 'perm_group_devices',
@@ -122,6 +104,17 @@ AUDIT_EVENTS = [
     {'key': 'host_test_check', 'severity': 'muted'},
     {'key': 'host_tested', 'severity': 'muted'},
     {'key': 'host_updated', 'severity': 'info'},
+    # Soltar un dispositivo del sitio del que se importó. `info` y no `muted`: desde ese momento
+    # deja de refrescarse y lo mantiene esta casa, y eso se pregunta meses después, cuando
+    # alguien nota que un nombre ya no cuadra con el del inventario de al lado.
+    {'key': 'host_unlinked', 'severity': 'info'},
+    # Las clases de dispositivo que añade esta casa. `info` las tres, y no `muted`: cambian cómo
+    # se clasifica la flota entera —el desplegable, el filtro, el icono— y quitar una es una
+    # decisión que sólo se puede tomar cuando no la lleva nadie. «¿Desde cuándo hay una clase
+    # que se llama así?» se pregunta meses después, mirando por qué un filtro no cuadra.
+    {'key': 'host_type_created', 'severity': 'info'},
+    {'key': 'host_type_updated', 'severity': 'info'},
+    {'key': 'host_type_deleted', 'severity': 'info'},
     {'key': 'hosts_migrated', 'severity': 'info'},
 ]
 

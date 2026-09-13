@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~9.686 tests** (10.793 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-12). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~9.925 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -2906,7 +2906,41 @@ que la forma entera se comprueba con un doble que apunta lo que le pidieron.
 
 ## 39. BD — HostsStore
 
-**Archivo:** `tests/unit/test_hosts_store.py` — 39 tests
+**Archivo:** `tests/unit/test_hosts_store.py` — 40 tests
+
+---
+
+**Las clases de dispositivo, que ya no están en el código.** Eran once en una tupla y sólo se
+podían cambiar con un commit, así que lo que no cabía en ellas se quedaba «sin clasificar»: un
+punto de acceso, un teléfono IP, una controladora. Ahora son filas, todas editables, y del código
+queda una semilla que se usa al crear la tabla. Se vigila que **sembrar sea al CREAR y no cuando
+esté vacía** —quien borre las once se las encontraría de vuelta en el siguiente arranque—, que
+volver a sembrar **no pise lo corregido**, y que renombrar una sembrada le quite la clave de
+idioma, o lo que se lee sigue siendo lo que dice el catálogo y no lo que alguien acaba de
+escribir. Lo que se vigila es lo que
+convierte eso en un dato que se pierde solo: que **el identificador no se mueva al renombrar** —
+es lo que guarda cada dispositivo de esa clase, y moverlo los deja a todos señalando a una que ya
+no existe, sin error y con el filtro en cero—; que el almacén de dispositivos **admita** una clase
+añadida, o la pantalla la ofrece, el almacén la tira y el dispositivo se guarda sin nada; que dos
+escrituras del mismo nombre sean la misma clase y que ninguna pise a una de serie; y que buscar
+antes de crear no sea un adorno, porque sin eso dos importaciones seguidas dejan dos clases
+iguales y la segunda se lleva los dispositivos nuevos. Más el recuento de cuántos la llevan
+puesta, que es lo que decide si se puede quitar.
+
+Más atar una clase a una de un proveedor, que es lo que el nombre no puede resolver: se busca por
+el identificador de allí **antes** que por el nombre —renombrar una clase es algo que la pantalla
+invita a hacer, y por el nombre la siguiente importación crea una segunda—, una escrita a mano que
+se llama igual se **adopta**, dos de aquí no pueden compartir una de fuera, y la siembra **no ata
+nada**: `source` a solas lo lleva también ella, y confundirlas dejaría las once de serie en sólo
+lectura.
+
+Y dos que miden lo que no se ve: que contar quién lleva puesta una clase **lo haga el motor** y no
+un recorrido de la flota en Python —con tres mil máquinas eran 110 ms por clase, y quitar doce
+eran doce lecturas completas—, y que guardar un dispositivo **no reconcilie el esquema**, que es
+lo que pasaba al construir el almacén de clases para validar una. Las dos se comprueban con un
+contador y no con un cronómetro: el tiempo depende de la máquina y el número de consultas no.
+
+**Archivo:** `tests/unit/test_hosts_types.py` — 66 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2943,9 +2977,10 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 | `TestWhatTheDeviceIs::test_it_round_trips` | Se guarda y se lee |
 | `TestWhatTheDeviceIs::test_unclassified_is_the_default_and_a_real_value` | Vacío es lo que tiene todo dispositivo anterior al campo, y el que se dio de alta con prisa: exigirlo sería peor formulario que ninguno |
 | `TestWhatTheDeviceIs::test_an_undeclared_type_is_dropped_not_stored` | Llega del cuerpo de una petición; guardarlo pondría en pantalla una palabra que ningún idioma sabe traducir |
-| `TestWhatTheDeviceIs::test_it_is_case_insensitive_on_the_way_in` | `SWITCH` entra como `switch` |
+| `TestWhatTheDeviceIs::test_the_short_name_is_not_a_way_to_point_at_a_class` | La columna lleva el `uid` de la clase y nada más: aceptar también su nombre corto deja media flota apuntando de una manera y media de otra, y el filtro contesta la mitad sin que nada falle |
+| `TestWhatTheDeviceIs::test_a_uid_is_stored_exactly_as_given` | Un identificador opaco no tiene mayúsculas que corregir: bajarlo a minúsculas era cambiarlo |
 | `TestWhatTheDeviceIs::test_an_update_can_set_and_clear_it` | Una reclasificación se puede deshacer |
-| `TestWhatTheDeviceIs::test_every_declared_type_is_storable` | El catálogo y el validador leen la misma lista: un tipo que el selector ofrece y el store rechaza sería un desplegable que no hace nada |
+| `TestWhatTheDeviceIs::test_every_seeded_class_is_storable` | El catálogo y el validador leen la misma lista: un tipo que el selector ofrece y el store rechaza sería un desplegable que no hace nada |
 
 ## 40. BD — CredentialsStore
 
@@ -3413,6 +3448,34 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 ## 56. Panel Web — Servidores (hosts)
 
 **Archivo:** `tests/integration/test_wa_hosts.py` — 52 tests
+
+---
+
+**Las clases de dispositivo por HTTP, y la pantalla que las maneja.** Que su identificador no se
+mueva al renombrarla —comprobado con un dispositivo puesto—, que una sembrada se cambie como
+cualquier otra y al renombrarla **deje de traducirse**, que volver a poner las básicas no pise lo
+corregido, que no se pueda quitar una que lleva puesta alguien y
+que el error diga **cuántos** hay que arreglar, y que escribir pida `devices_edit` mientras leer
+no — o el desplegable saldría vacío para quien sólo mira y sus dispositivos parecerían todos sin
+clasificar. Más las dos cosas que se pierden en silencio: que la página sirva **el catálogo del
+panel y no la lista del código** (si no, una clase creada no existe para ningún desplegable ni
+icono hasta reiniciar), comprobado sobre el literal inyectado y no sobre el texto de la página —
+buscarlo a secas daba verde porque la palabra estaba en un comentario del propio fichero, y se vio
+mutándolo—, y que una clase de casa se diga **con sus palabras**: `t()` cae en la clave que se le
+dio, así que preguntarle primero deja `host_type_punto_de_acceso` escrito en el desplegable.
+
+Y el **descriptor** de la pantalla, en node. La tabla es `createListTable` y sus guardas están con
+ella; aquí se mira lo que puede equivocarse sin dar ningún error: que **una clase en uso no se
+pueda marcar** —el servidor se niega igualmente, así que una casilla sobre ella lleva a una
+papelera que promete cinco y quita tres—, que los dos filtros partan la lista donde deben y que
+«de aquí» incluya la siembra, que buscar mire el nombre **y** el identificador, que el botón de
+añadir lleve su pestaña con o sin conector, que la papelera de una fila venga apagada si la lleva
+alguien, y que el recuento lleve a esos dispositivos mientras una clase vacía no promete una
+lista. Más el cuadro: una clase vinculada se abre para mirar **pero su icono se elige** —el origen
+mantiene el nombre, y allí no hay iconos—, los dos mil iconos están detrás de un botón, y el que
+lleva puesto sale aunque no sea de los veinte de la lista corta.
+
+**Archivo:** `tests/integration/test_wa_host_types.py` — 44 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -5399,7 +5462,7 @@ leído de sus cuatro cabeceras y en números, con los segundos de espera de un 4
 segundos» es una frase y «error» no. Y los siete códigos a siete claves distintas, con el
 `description` y los `errors` de su cuerpo en el detalle.
 
-**Archivo:** `tests/unit/test_freshservice_api.py` — 27 tests
+**Archivo:** `tests/unit/test_freshservice_api.py` — 35 tests
 
 ---
 
@@ -5423,6 +5486,27 @@ una fila.
 
 ---
 
+**Qué se hace con los ACTIVOS, que aquí son los dispositivos.** El hermano del plan de empresas, y
+con un fallo propio que no da ningún error: Freshservice no devuelve `ip_address`, devuelve
+`ip_address_7000123456` —con el identificador del tipo de activo pegado detrás, distinto en cada
+casa y ni siquiera el del propio activo—, así que un lector que pidiera el campo por su nombre
+encontraría un hueco **siempre**, en todas las instalaciones, y lo que se vería es una lista de
+dispositivos sin dirección. Se investiga por el lado de la red. Más: que el NOMBRE del activo no
+valga como dirección —«Portátil de Juan» es un dispositivo en rojo para siempre—, que la clase se
+adivine del tipo de allí con lo específico ganando a lo general y sólo hacia clases que existan de
+verdad, que se empareje por el identificador y no por el nombre, que lo tecleado aquí se adopte,
+que un emparejamiento a mano mande sobre lo deducido y que uno imposible se rechace con su motivo.
+Y que los huérfanos se comparen con **el mismo** identificador con el que se importó: con `id` en
+un sitio y `display_id` en el otro, todos saldrían como huérfanos en cada vista previa. Más el
+filtro por clase de activo, que se aplica **también a lo que llega**: al origen se le pide para no
+traer cuatro mil activos cuando hacen falta cuarenta, pero uno que no entienda ese filtro contesta
+la lista entera y la pantalla enseñaría lo que nadie pidió. Y que no elegir ninguna clase sea
+«todas» y no «ninguna», que sería una pantalla en blanco por no pulsar.
+
+**Archivo:** `tests/unit/test_freshservice_assets.py` — 33 tests
+
+---
+
 **Traer las empresas: las tres rutas, con la red de mentira.** De mentira la red y nada más — la
 aplicación, el almacén y las filas que quedan son de verdad; lo que se sustituye es el cliente
 HTTP, porque una prueba que llama a Freshservice falla el día que se cae, el día que caduca una
@@ -5437,6 +5521,30 @@ módulo que esa casa no ha contratado sería mandar a mirar donde no es. Y el do
 API no atiende: se dice antes de gastar una llamada y el mensaje nombra el que se tecleó.
 
 **Archivo:** `tests/integration/test_wa_freshservice.py` — 31 tests
+
+---
+
+**Traer los dispositivos: las dos rutas, con la red de mentira.** La misma forma que las empresas
+y un peligro que allí no existía: **de un dispositivo cuelgan sus claves de conexión**, y el
+almacén guarda la ficha entera en cada escritura — así que una actualización escrita como «tres
+campos y a guardar» le borra los perfiles SSH, los módulos y lo vigilado a cuarenta máquinas sin
+dar un error; los checks simplemente empiezan a fallar por credenciales. También que un importado
+nazca sin ejecutar nada en él (`kind = none`: un conmutador no tiene dónde correr una orden, y
+`local` haría que su check midiera esta máquina), que la vista previa **no** mande los perfiles de
+la flota para dibujar un desplegable, que aplicar vuelva a pedir la lista, que volver a importar no
+duplique, que un nombre cogido se cuente con el suyo sin tumbar a los demás, y que todo esté tras
+`devices_edit` y no `orgs_edit` — qué máquinas hay y de quién son no las decide la misma persona.
+Más el botón: sólo con el conector puesto, colgando del de añadir y no al lado, sin pestaña cuando
+no hay nada que colgar, dibujado de verdad en node. Y el paso previo de elegir clases: que el
+catálogo se pida **solo** —sin traer un activo—, que cada clase diga en qué se convertiría aquí,
+que lo elegido llegue a la consulta del origen y vuelva a aplicarse a la respuesta, que aceptar
+pida las mismas clases con las que se miró, y que con un filtro puesto **no se acuse de
+desaparecido** a lo que no se preguntó — lo que eso invita a hacer es borrarlo. Y los tres campos que mantiene el origen, que
+no se teclean encima —comparando **valores** y no claves, porque el cuadro manda la ficha entera
+en cada guardado—, con la salida de soltarlo: que suelte, que no borre nada suyo, y que un guardado
+corriente **no** lo suelte en silencio.
+
+**Archivo:** `tests/integration/test_wa_freshservice_assets.py` — 60 tests
 
 ---
 
@@ -5509,7 +5617,19 @@ el alta y en el renombrado, sin distinguir mayúsculas ni espacios, también par
 —dos chapas iguales en un alzado no dicen de quién es el armario—, dejando que muchas no tengan
 ninguna, y sin que guardarse a sí misma cuente como repetirse.
 
-**Archivo:** `tests/integration/test_wa_orgs.py` — 33 tests
+**Y el botón de traer las de fuera, que vive aquí y no en la configuración de quien las trae.**
+Estaba en la tarjeta de Freshservice, en Configuración → Fuentes externas, que es donde había que
+ir a pulsarlo: importar es un acto sobre **esta** lista. Cuelga del botón de añadir, como
+desplegable, porque traer de fuera es otra manera de que aparezca una empresa y no una cosa
+distinta —con tres fuentes la barra seguiría teniendo dos botones—, y **sólo aparece si el
+conector está puesto**: dominio *y* clave. Se comprueban los tres estados contra la API y el
+dibujo contra `node`: sin conector no hay acción, con medio conector tampoco, la respuesta no se
+cachea —la configuración se edita desde el propio panel—, el desplegable no sale sin nada que
+colgar, no se lleva por delante el botón que acompaña, un descriptor sin función no llega a la
+pantalla, un `ready` que revienta no tumba la sección, y **el core no nombra a ningún proveedor**
+en ninguno de los tres ficheros que lo dibujan.
+
+**Archivo:** `tests/integration/test_wa_orgs.py` — 41 tests
 
 ---
 
@@ -5994,7 +6114,15 @@ Ver también §88b y §89.
 **Archivo:** `tests/unit/test_i18n_keys_exist.py` — 9 tests
 **Las palabras del panel viven en los ficheros de idioma. Todas.** La regla ya estaba escrita —una página del CORE apunta a una clave del catálogo del core, y una de un MÓDULO trae sus textos porque ningún texto del core puede nombrar un módulo— y lo que no había era quien la comprobara: las vistas de la sección de inventario llevaban `label_i18n` con el castellano y el inglés dentro del `.py`, que es la convención de los módulos usada donde no toca. Lo que cuesta no es estilo: un texto dentro de un `.py` está fuera del alcance de los ficheros de idioma —no se traduce a un tercer idioma sin tocar código, no sale en ninguna revisión de traducciones, y el día que alguien cambie la palabra en `es_ES.py` la pantalla seguirá diciendo la vieja sin que nada falle—. Tres guardas, una por cada forma de colarlo: un mapa `{'es_ES': …, 'en_EN': …}` escrito a mano en el código del panel (**por el árbol** y no por líneas, porque el formato de un perfil SNMP se explica en un docstring con un mapa de ejemplo dentro); una cadena con acentos castellanos fuera de docstrings y comentarios; y lo mismo en las plantillas, donde todo lo que se pinta pasa por `t()`. Los módulos quedan fuera a propósito: `watchfuls/<m>/lang/` es su catálogo y traer sus textos consigo es lo que les permite viajar solos. Y una excepción, escrita con su razón: «Genérico» se ESCRIBE en filas de la base como fabricante de lo básico que trae el panel —«Genérico Regleta 8»—, así que traducirlo cambiaría lo guardado según quién mire, que es lo contrario de un dato.
 
-**Archivo:** `tests/meta/test_i18n_no_text_in_code.py` — 4 tests
+Y **el castellano de vincular, que no es el de una cuerda.** «Atar», «atado» y «soltar» son lo que
+se hace con un cordón; lo que hace este panel al hacer que una fila de aquí se corresponda con una
+de otro sistema es **vincular** — que además era la palabra que ya usaba el cuadro de empresas.
+Se coló traduciendo `tie`/`untie` literalmente y acabó en nueve textos; reportado desde la pantalla
+dos veces, por el mensaje de error y por el botón. La guarda lista formas concretas y no la raíz:
+«suelto» se dice bien aquí —«racks sueltos», «un fichero .mib suelto»— y prohibirla sería prohibir
+lo que está bien.
+
+**Archivo:** `tests/meta/test_i18n_no_text_in_code.py` — 6 tests
 
 ---
 
@@ -6270,7 +6398,12 @@ no se puede usar. Así que lo que se vigila es la **forma**.
 
 ## 99d. Meta — Qué dice ser un dispositivo
 
-**Archivo:** `tests/meta/test_host_types.py` — 12 tests
+Y que la pantalla **use la tabla del panel** y no una suya: se escribió a mano —cabecera, barra de
+filtros, casillas, papelera— teniendo al lado la fábrica que usan Dispositivos, Empresas,
+Clústeres y el inventario, y lo que salía era una lista que se comportaba distinto que todas las
+demás de su propia sección. Reportado desde la pantalla.
+
+**Archivo:** `tests/meta/test_host_types.py` — 41 tests
 
 El registro guarda servidores, pero también un NAS, un switch y un SAI: la sección se llamaba
 «Servidores» mientras el catálogo SNMP de al lado traía perfiles de Mikrotik, Linksys y dos
@@ -7170,7 +7303,15 @@ servidor algo que el servidor va a rechazar.
 
 ---
 
-**Archivo:** `tests/meta/test_wa_css_traps.py` — 30 tests
+Y **el menú de un botón pequeño**: Bootstrap lo dimensiona por su cuenta —1rem de letra y su
+padding de siempre— valga lo que valga el botón del que cuelga, así que con el `btn-sm` que usa
+toda barra de este panel el desplegable sale más grande que el botón que lo abre. Reportado desde
+la pantalla de clases. No se ve leyendo el markup —la clase es la correcta, y lo que está mal es
+lo que Bootstrap decide por ella— y por eso se había arreglado ya **tres veces y de tres maneras
+distintas**; ahora hay una clase y una guarda mecánica de que ningún menú de botón partido se
+quede con el tamaño de serie.
+
+**Archivo:** `tests/meta/test_wa_css_traps.py` — 32 tests
 
 **El ancho de un modal no sale de `--bs-modal-width`.** Reportado desde la pantalla como «sigue saliendo el scroll»: se le pidió a un diálogo que fuera más ancho, la regla se escribió y el cuadro salió igual. Bootstrap dimensiona con esa variable sobre `.modal-dialog`; este panel se salta ese mecanismo entero —`.modal-lg { width: fit-content }` y `.modal-lg > .modal-content { width: 800px }`, para que el diálogo pueda arrastrarse más grande— así que quien mide es `.modal-content`. Una regla que apunta al mecanismo que ya no manda **no falla: no hace nada**, y no hay nada en pantalla que diga por qué. Se vigilan las dos mitades, porque el día que el panel vuelva al mecanismo de Bootstrap la prohibición pasaría a estar al revés.
 

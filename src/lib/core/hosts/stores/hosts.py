@@ -60,7 +60,7 @@ _HOSTS_SCHEMA = TableSpec(
         # physical machine).  Purely descriptive: lets the UI and the Overview widget
         # separate physical hosts from virtual ones (keepalived VIP, proxmox cluster…).
         Column('virtual',     'INTEGER', nullable=False, default="0"),
-        # What the device IS (see manifest.HOST_TYPES): server, nas, switch, ups…
+        # What the device IS — one of the classes in `host_type` (see hosts/types.py).
         # Empty = unclassified, which is what every device created before this had and
         # what one created in a hurry still has.  Named `device_type` rather than `type`
         # because the short word is a keyword in enough dialects to be worth avoiding.
@@ -85,15 +85,29 @@ _HOSTS_SCHEMA = TableSpec(
         # be added by ADD COLUMN when it is trailing, which is how an existing database gets
         # this one without a migration.
         Column('watch',       'TEXT', nullable=False, default="'[]'"),
+        # De dónde salió este dispositivo, y cuál de los suyos es allí. Vacío es lo normal: uno
+        # dado de alta aquí no viene de ningún sitio.
+        #
+        # Dos columnas y no una, por la misma razón que en `org`: son dos preguntas. «¿Esto lo
+        # mantiene otro?» decide si una importación puede pisarlo, y «¿cuál de los suyos es?»
+        # es lo único que permite volver a importar sin duplicar — por el NOMBRE no se puede,
+        # porque renombrar un activo en el origen crearía aquí un segundo y dejaría el primero
+        # huérfano sin que nada lo dijera.
+        #
+        # Las últimas, para que una base de datos que ya existe las reciba por ADD COLUMN.
+        Column('source',      'TEXT', nullable=False, default="''"),
+        Column('external_id', 'TEXT', nullable=False, default="''"),
     ),
-    indexes=(Index('idx_hosts_name', ('name',)),),
+    indexes=(Index('idx_hosts_name', ('name',)),
+             Index('idx_hosts_source', ('source', 'external_id'))),
 )
 
 _T = _HOSTS_SCHEMA.name  # table name — single source of truth
 
 _COLS = ('uid', 'name', 'address', 'kind', 'os', 'maintenance', 'virtual', 'device_type',
          'tags', 'description',
-         'profiles', 'modules', 'created_at', 'updated_at', 'updated_by', 'watch')
+         'profiles', 'modules', 'created_at', 'updated_at', 'updated_by', 'watch',
+         'source', 'external_id')
 _SELECT = ', '.join(_COLS)
 
 
@@ -125,7 +139,7 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
     # ── Row mapping ───────────────────────────────────────────────────────────
     def _row_to_host(self, row, decrypt: bool) -> dict:
         (uid, name, address, kind, os_, maintenance, virtual, dev_type, tags, desc,
-         profiles, modules, c_at, u_at, u_by, watch) = row
+         profiles, modules, c_at, u_at, u_by, watch, source, external_id) = row
         try:
             watch_l = json.loads(watch) if watch else []
         except (ValueError, TypeError):
@@ -163,6 +177,9 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
             # …and the rows of it somebody said are worth an alert.
             'watch':       [w for w in (watch_l if isinstance(watch_l, list) else [])
                             if isinstance(w, dict) and w.get('module') and w.get('row')],
+            # …y de dónde salió, si es que salió de algún sitio.
+            'source':      source or '',
+            'external_id': external_id or '',
         }
 
     #: How commands are run on a device. See the `kind` column for what each means.
@@ -179,13 +196,35 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
         v = str(value or '').strip().lower()
         return v if v in HostsStore.KINDS else 'none'
 
-    @staticmethod
-    def _norm_device_type(value) -> str:
-        """A declared type, or '' — an unrecognised one is not an error worth refusing a
-        save over, and storing it would put a word on screen that nothing can translate."""
-        from .manifest import host_type_ids  # noqa: PLC0415
-        v = str(value or '').strip().lower()
-        return v if v in host_type_ids() else ''
+    def _norm_device_type(self, value) -> str:
+        """A declared class, or '' — an unrecognised one is not an error worth refusing a
+        save over, and storing it would put a word on screen that nothing can translate.
+
+        **Declared means the `host_type` table, and nothing else.** It used to mean a tuple in
+        `manifest.py`, so a class this installation had added arrived here, was offered by the
+        screen, and was dropped on the way in: no error anywhere, and a device that quietly lost
+        the one thing that had been said about it.
+
+        Read **through this same connector** rather than through the panel: this store is also
+        built by the monitor and by the workers, which have no panel — and a rule that depended
+        on who is asking would accept a value in one process and blank it in the next.
+        """
+        # Sin bajar a minúsculas: lo que lleva esta columna es el `uid` de una clase, y un
+        # identificador opaco no tiene mayúsculas que corregir — tocarlo es cambiarlo.
+        v = str(value or '').strip()
+        if not v:
+            return ''
+        try:
+            # Una consulta a la tabla, y **no** construir su almacén: el constructor reconcilia
+            # el esquema, y esto se llama en CADA guardado de un dispositivo — así que importar
+            # cuatrocientos son cuatrocientas reconciliaciones. En SQLite cuesta poco; contra
+            # MySQL o PostgreSQL son cuatrocientas rondas al catálogo del motor.
+            fila = self._db.fetchone('SELECT 1 FROM host_type WHERE uid = ?', (v,))
+        except Exception:  # pylint: disable=broad-except
+            # Una tabla que todavía no está deja al dispositivo sin clasificar, que es una
+            # respuesta válida — y no impide guardarlo, que es lo que importa.
+            return ''
+        return v if fila else ''
 
     @staticmethod
     def _norm_os(value) -> str:
@@ -202,6 +241,28 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
     def get(self, uid: str, *, decrypt: bool = True) -> dict | None:
         row = self._db.fetchone(f'SELECT {self._qsel} FROM {_T} WHERE uid = ?', (uid,))
         return self._row_to_host(row, decrypt) if row else None
+
+    def count_by_device_type(self) -> dict:
+        """``{clase: cuántos}`` de una consulta, sin traerse la flota.
+
+        La pantalla de clases enseña ese número en cada fila y lo mira antes de dejar quitar una.
+        Calculándolo en Python había que **leer todos los dispositivos** —descifrado aparte, cada
+        fila son cuatro `json.loads`— y con tres mil máquinas eso son cien milisegundos por
+        pregunta. Aquí lo cuenta el motor, que es lo que sabe hacer.
+        """
+        filas = self._db.fetchall(
+            f'SELECT device_type, COUNT(*) FROM {_T} '
+            "WHERE device_type <> '' GROUP BY device_type")
+        return {r[0]: int(r[1] or 0) for r in (filas or ()) if r and r[0]}
+
+    def count_with_device_type(self, device_type: str) -> int:
+        """Cuántos llevan puesta ESA clase. Lo que se pregunta antes de borrarla."""
+        v = str(device_type or '')
+        if not v:
+            return 0
+        fila = self._db.fetchone(
+            f'SELECT COUNT(*) FROM {_T} WHERE device_type = ?', (v,))
+        return int((fila or (0,))[0] or 0)
 
     def get_by_name(self, name: str, *, decrypt: bool = True) -> dict | None:
         row = self._db.fetchone(f'SELECT {self._qsel} FROM {_T} WHERE name = ?', (name,))
@@ -220,8 +281,12 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
         try:
             with self._db.transaction():
                 self._db.execute(
+                    # Los huecos, CONTADOS y no escritos a mano: la lista literal que había aquí
+                    # se quedó corta en cuanto la tabla creció por el final, y lo que da entonces
+                    # es un error del motor sobre un número de columnas — no sobre la columna que
+                    # falta.
                     f'INSERT INTO {_T} ({self._qsel}) '
-                    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    f'VALUES ({", ".join("?" * len(_COLS))})',
                     (uid, name, str(data.get('address') or ''),
                      self._norm_kind(data.get('kind')),
                      self._norm_os(data.get('os')),
@@ -235,7 +300,9 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
                      now, now, actor or '',
                      # A machine is created watching nothing: what matters on it is said
                      # later, on the screen where its rows are.
-                     json.dumps(data.get('watch') or [], ensure_ascii=False)),
+                     json.dumps(data.get('watch') or [], ensure_ascii=False),
+                     # Y de dónde salió. Vacío cuando lo teclea una persona, que es lo normal.
+                     str(data.get('source') or ''), str(data.get('external_id') or '')),
                 )
             return uid
         except Exception:  # pylint: disable=broad-except
@@ -253,12 +320,23 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
         clash = self._db.fetchone(f'SELECT uid FROM {_T} WHERE name = ? AND uid <> ?', (name, uid))
         if clash:
             return False
+        # De dónde salió se CONSERVA cuando no viene, y no se borra por omisión. Esta ruta la usa
+        # el cuadro de editar un dispositivo, que manda la ficha entera y no sabe de esto: sin
+        # esta línea, corregir una descripción soltaría el dispositivo de su origen en silencio y
+        # la siguiente importación lo crearía otra vez, duplicado.
+        origen = self._db.fetchone(
+            f'SELECT source, external_id FROM {_T} WHERE uid = ?', (uid,)) or ('', '')
+        source = data.get('source')
+        source = origen[0] or '' if source is None else str(source or '')
+        external_id = data.get('external_id')
+        external_id = origen[1] or '' if external_id is None else str(external_id or '')
         try:
             with self._db.transaction():
                 self._db.execute(
                     f'UPDATE {_T} SET name=?, address=?, kind=?, os=?, maintenance=?, {self._qvirtual}=?, '
                     'device_type=?, '
-                    'tags=?, description=?, profiles=?, modules=?, updated_at=?, updated_by=? WHERE uid=?',
+                    'tags=?, description=?, profiles=?, modules=?, source=?, external_id=?, '
+                    'updated_at=?, updated_by=? WHERE uid=?',
                     (name, str(data.get('address') or ''),
                      self._norm_kind(data.get('kind')),
                      self._norm_os(data.get('os')),
@@ -269,6 +347,7 @@ class HostsStore(EncryptedPayloadMixin, BaseStore):
                      str(data.get('description') or ''),
                      json.dumps(self._encrypt(data.get('profiles') or {}), ensure_ascii=False),
                      json.dumps(data.get('modules') or [], ensure_ascii=False),
+                     source, external_id,
                      _now(), actor or '', uid),
                 )
             return True

@@ -9,8 +9,9 @@ que cambia de un recurso a otro: su ruta y el nombre de su sobre.
 Esa es toda la gracia: traer los agentes, los activos o los tickets mañana es escribir una función
 de dos líneas, no volver a leerse la documentación y volver a equivocarse con la paginación.
 
-Hoy hay uno, porque es el que se ha pedido: los **departamentos**, que en Freshservice son las
-empresas — lo dice su propia documentación, que titula esa sección «Departments / Companies».
+Hay dos cosas aquí, y las dos se pidieron: los **departamentos**, que en Freshservice son las
+empresas —lo dice su propia documentación, que titula esa sección «Departments / Companies»— y
+los **activos**, que son los dispositivos.
 """
 
 from __future__ import annotations
@@ -53,6 +54,96 @@ def departments(domain: str, api_key: str) -> list:
     host, sess = _abrir(domain, api_key)
     with sess:
         return api.page_all(sess, host, 'departments', 'departments')
+
+
+#: Los códigos con los que un origen dice «no entiendo ese filtro». Cuando contesta uno de
+#: éstos a una petición filtrada, se vuelve a preguntar sin filtro: traer de más y quedarse con
+#: lo que hace falta es lento, pero traer de menos —o no traer nada— es no funcionar.
+_FILTRO_RECHAZADO = ('fs_err_request', 'fs_err_http', 'fs_err_body', 'fs_err_method')
+
+
+def assets(domain: str, api_key: str, type_ids=None) -> list:
+    """Los activos, con sus páginas recorridas. Sólo los de esos tipos, si se dicen.
+
+    Los dispositivos de una casa que ya usa Freshservice están aquí: es la lista que alguien
+    actualiza cuando llega un servidor y la que se mira cuando hay que saber de quién es. Se
+    traen tal cual; convertirlos en fichas de aquí es de :mod:`.assets`, que no tiene red delante
+    y por eso se puede probar.
+
+    `include=type_fields` no es un adorno: **sin él no viene ni la dirección ni el número de
+    serie**. La ficha desnuda de un activo trae el nombre, la etiqueta y poco más; lo que
+    identifica una máquina vive en los campos de su tipo, y pedirlos es una palabra.
+
+    **El filtro por tipo se pide al origen, y no se depende de él.** Un inventario de cuatro mil
+    activos son cuarenta viajes, y tres tipos suelen ser tres; pero la forma de ese filtro no es
+    la misma en todos los planes ni ha sido siempre la misma, y un origen que no lo entienda
+    contesta un 400. Si eso pasa se vuelve a preguntar sin filtro — y quien llama **filtra
+    igualmente** lo que recibe (:func:`lib.providers.freshservice.assets.only_types`), que es lo
+    que hace que esto sea una optimización y no una promesa: la pantalla enseña lo mismo por los
+    dos caminos.
+    """
+    host, sess = _abrir(domain, api_key)
+    consulta = {'include': 'type_fields'}
+    filtro = ' OR '.join(f'asset_type_id:{int(t)}' for t in _ids(type_ids))
+    with sess:
+        if filtro:
+            try:
+                return api.page_all(sess, host, 'assets', 'assets',
+                                    dict(consulta, filter=f'"{filtro}"'))
+            except api.FreshserviceError as exc:
+                if exc.key not in _FILTRO_RECHAZADO:
+                    raise
+        return api.page_all(sess, host, 'assets', 'assets', consulta)
+
+
+def _ids(valores) -> list:
+    """Los identificadores de tipo que se pueden escribir en una consulta: enteros y nada más.
+
+    Lo que llega viene de una pantalla. Un identificador que no sea un número entero no se
+    arregla escapándolo: se tira, porque no puede ser uno suyo.
+    """
+    fuera = []
+    for v in (valores or ()):
+        try:
+            fuera.append(int(str(v).strip()))
+        except (TypeError, ValueError):
+            continue
+    return fuera
+
+
+def asset_types(domain: str, api_key: str) -> list:
+    """Los tipos de activo: «Servidor», «Conmutador», «Impresora»…
+
+    Se traen aparte y una sola vez porque un activo dice el NÚMERO de su tipo y no su nombre, y
+    un desplegable lleno de `7000123456` no dice nada. También es lo que permite adivinar qué
+    clase de dispositivo es cada uno sin que nadie lo teclee.
+    """
+    host, sess = _abrir(domain, api_key)
+    with sess:
+        return api.page_all(sess, host, 'asset_types', 'asset_types')
+
+
+def asset_counts(domain: str, api_key: str) -> dict:
+    """``{asset_type_id: cuántos}``, contados uno a uno.
+
+    **Su catálogo de tipos no trae ese número**, así que la única forma de saberlo es recorrer los
+    activos — que es justo el viaje que el paso de elegir clases existe para ahorrar. Por eso es
+    una acción aparte y se pide a mano: se paga una vez, a propósito, y a partir de ahí se elige
+    sabiendo dónde hay algo.
+
+    Lo que la abarata es lo que NO se pide: sin `include=type_fields` cada activo llega con el
+    nombre, la etiqueta y su tipo, en vez de con todos los campos de su plantilla. Son las mismas
+    páginas, pero muchísimos menos bytes — y aquí no hace falta ni uno de esos campos.
+    """
+    host, sess = _abrir(domain, api_key)
+    with sess:
+        filas = api.page_all(sess, host, 'assets', 'assets')
+    fuera: dict = {}
+    for f in (filas or ()):
+        clave = str((f or {}).get('asset_type_id') or '')
+        if clave:
+            fuera[clave] = fuera.get(clave, 0) + 1
+    return fuera
 
 
 def probe(domain: str, api_key: str) -> dict:

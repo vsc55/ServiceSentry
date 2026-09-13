@@ -1,0 +1,54 @@
+{# ================================================================
+   Lo que la importación de dispositivos va a hacer, antes de hacerlo.
+
+   La misma forma que el cuadro de empresas, y aquí pesa más: un dispositivo creado por error se
+   queda en la lista de todo el mundo, y uno emparejado con el que no es se lleva su nombre y su
+   dirección — y con ella, los checks que apuntaban a otra máquina.
+   ================================================================ #}
+<div class="modal fade" id="fsAssetsModal" tabindex="-1">
+    {# `modal-xl` y `-scrollable`: son siete columnas y pueden ser cientos de filas. #}
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-hdd-network me-1"></i>{{ i18n.fs_hosts_title }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body" id="fsAssetsBody"></div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnFsAssetsApply"
+                        onclick="freshserviceAssetsApply()">
+                    <i class="bi bi-cloud-download me-1"></i>{{ i18n.fs_import }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ================================================================
+   Qué clases de dispositivo traer, antes de traerlas.
+
+   Las otras dos importaciones de este paquete enseñan el plan antes de tocar nada; ésta se
+   lanzaba a ciegas y contaba después lo que había creado. Pedido desde la pantalla: la lista de
+   tipos de una casa lleva «Monitor», «Silla» y «Licencia» entre los conmutadores, y traerlos
+   todos es llenar el desplegable de clases de cosas que aquí no se vigilan.
+   ================================================================ #}
+<div class="modal fade" id="fsTypesModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-tags me-1"></i><span
+                    id="fsTypesTitle">{{ i18n.fs_import_types }}</span></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body" id="fsTypesBody"></div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnFsTypesApply"
+                        onclick="_fsTypesApply()">
+                    <i class="bi bi-cloud-download me-1"></i>{{ i18n.fs_import }}</button>
+            </div>
+        </div>
+    </div>
+</div>

@@ -119,10 +119,26 @@ const ITEM_SCHEMAS = Object.fromEntries([
 // Host registry: per-protocol connection-profile catalog + the connection
 // fields each module contributes (hidden on a check once it is bound to a host).
 const HOST_PROFILES = {{ host_profiles | default({}) | tojson }};
-// What a device may declare itself to be (lib/core/hosts/manifest.py::HOST_TYPES):
-// [{id, icon}] in the order the picker offers them. The label is t('host_type_<id>').
+// What a device may declare itself to be (lib/core/hosts/types.py::catalog):
+// [{uid, slug, icon, label_key | label, description, …}] in the order the picker offers them.
+//
+// Keyed by `uid`, which is what `hosts.device_type` holds and what every one of these maps is
+// looked up with.
+//
+// TWO lists in one. The eleven that ship carry `label_key`, so they are said in the reader's
+// language; the ones this installation added carry `label` — the words somebody typed, kept as
+// typed. A class of this house is never translatable, because nobody else knows it exists.
 const HOST_TYPES = {{ host_types | default([]) | tojson }};
-const HOST_TYPE_ICONS = Object.fromEntries(HOST_TYPES.map(x => [x.id, x.icon]));
+const HOST_TYPE_ICONS = Object.fromEntries(HOST_TYPES.map(x => [x.uid, x.icon]));
+const HOST_TYPE_LABELS = Object.fromEntries(
+    HOST_TYPES.filter(x => x.label).map(x => [x.uid, x.label]));
+// And the language key of every seeded one, by uid. Needed since the column stopped holding the
+// short name: `t('host_type_' + uid)` has nothing to find, and t() answers with the key it was
+// given — a picker of eleven `host_type_7284cb40…` beside ten real words.
+const HOST_TYPE_KEYS = Object.fromEntries(
+    HOST_TYPES.filter(x => x.label_key).map(x => [x.uid, x.label_key]));
+// The short name, for a message that has to say WHICH class without saying a uid out loud.
+const HOST_TYPE_SLUGS = Object.fromEntries(HOST_TYPES.map(x => [x.uid, x.slug || '']));
 /** The icon a device wears: its type's, or the generic one when it has none. */
 function hostTypeIcon(type) { return HOST_TYPE_ICONS[type] || 'bi-hdd-network'; }
 
@@ -181,8 +197,21 @@ function hostStateBadge(status, maintenance, none) {
     return `<span class="badge ${meta[0]}"${sty}><i class="bi ${meta[2]} me-1"></i>${
         esc(t(meta[3]))}</span>`;
 }
-/** Its translated name, or a dash when unclassified. */
-function hostTypeLabel(type) { return type ? (t('host_type_' + type) || type) : ''; }
+/** Its name: translated when it is one of ours, as typed when this house added it.
+ *
+ *  The typed one goes FIRST, and that order is the whole point: `t()` falls back to the key it
+ *  was given, so consulting the catalogue first would show that key — in a picker, beside ten
+ *  real words.
+ *
+ *  Last resort is the SHORT NAME and not the uid: a class the catalogue does not carry (created
+ *  in another tab, say) reads as `switch` rather than as thirty-six hex digits. */
+function hostTypeLabel(type) {
+    if (!type) return '';
+    if (HOST_TYPE_LABELS[type]) return HOST_TYPE_LABELS[type];
+    const clave = HOST_TYPE_KEYS[type];
+    if (clave) return t(clave) || HOST_TYPE_SLUGS[type] || type;
+    return HOST_TYPE_SLUGS[type] || type;
+}
 
 //: The build, for the URL of anything this file points a browser at. Same version the
 //: stylesheets carry, so a mark that changes with a release is fetched again with it and one

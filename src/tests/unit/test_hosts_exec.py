@@ -94,7 +94,7 @@ class TestADeviceThatRunsNothing:
         check and it has no device to disagree with. What must not exist is a BOUND host whose
         kind arrives as something else: the binding writes the store's own value through, so
         the refusal above can be trusted to fire when it should."""
-        from lib.core.hosts.store import HostsStore            # noqa: PLC0415
+        from lib.core.hosts.stores import HostsStore           # noqa: PLC0415
         src = _read_binding()
         assert "resolved['host_kind'] = str(primary.get('kind') or 'none')" in src, (
             'the binding collapses the kind again, so `none` never reaches host_exec')

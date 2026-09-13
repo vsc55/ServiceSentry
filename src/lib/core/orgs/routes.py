@@ -72,7 +72,11 @@ def register(app, wa):
                    for i, d in sorted(org_scopes.sources().items())]
         return jsonify({'orgs': [dict(r, said=said.get(str(r.get('uid') or ''), {}))
                                  for r in rows],
-                        'scopes': conocidos, 'sources': fuentes})
+                        'scopes': conocidos, 'sources': fuentes,
+                        # Y lo que un proveedor ofrece HACER aquí: traer las empresas de donde
+                        # las mantiene otro. Filtradas ya: sólo llegan las que su paquete da por
+                        # listas, así que la pantalla no tiene que saber qué es estar puesto.
+                        'actions': org_scopes.actions(wa)})
 
     def _free(store, data, skip=''):
         """Neither the name nor the short form belongs to another company. ``None`` if writable.

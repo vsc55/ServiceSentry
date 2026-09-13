@@ -116,7 +116,7 @@ def live_db(request):
 # ── the operations that were broken on MySQL/PostgreSQL before the quoting sweep ──
 
 def test_hosts_virtual_roundtrip(live_db):
-    from lib.core.hosts.store import HostsStore
+    from lib.core.hosts.stores import HostsStore
     s = HostsStore(live_db)
     uid = s.create({'name': 'live-h1', 'address': '10.0.0.1', 'virtual': True}, actor='test')
     assert uid and any(h['uid'] == uid for h in s.list())

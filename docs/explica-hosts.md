@@ -20,7 +20,7 @@ conexión a un servidor es propiedad del *servidor*, no de un check concreto).
 
 | Pieza | Fichero | Rol |
 |---|---|---|
-| `HostsStore` | `lib/core/hosts/store.py` | Store relacional (tabla `hosts`): dirección + `profiles` por protocolo; secretos (contraseñas SSH/DB, claves SNMPv3, tokens) **cifrados en reposo** (`secret_manager`) |
+| `HostsStore` | `lib/core/hosts/stores/hosts.py` | Store relacional (tabla `hosts`): dirección + `profiles` por protocolo; secretos (contraseñas SSH/DB, claves SNMPv3, tokens) **cifrados en reposo** (`secret_manager`) |
 | Catálogo de perfiles | `lib/core/hosts/profiles.py` | El mapa **protocolo → campos** que la UI usa para pintar los formularios por-protocolo. `core_profiles()` es el registro de los que declara el **core** (SSH y los `HOST_PROFILE` de manifiesto), que sobrescriben a los de módulo del mismo nombre |
 | Resolución | `lib/core/hosts/resolve.py` | Primitivas sin store: `host_profile_specs()` (normaliza `__host_profile__` **y le completa los campos del core**, incluido su `address_field`), `resolve_os()` |
 | SSH | `lib/core/hosts/ssh_client.py` | Helpers SSH (paramiko, opcional): `connect_host`, `run_command`, `test_connection` |

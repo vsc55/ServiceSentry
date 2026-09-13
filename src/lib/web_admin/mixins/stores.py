@@ -41,12 +41,18 @@ class _StoresMixin:
         # across processes). Wiring lives in _IpBanMixin.
         self._init_ipban()
         # Host registry — connection profiles defined once, reused by modules.
-        from lib.core.hosts.store import HostsStore  # noqa: PLC0415
+        from lib.core.hosts.stores import HostsStore  # noqa: PLC0415
         self._hosts_store = HostsStore(
             self._db_connector,
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
         )
+        # Y qué CLASES de dispositivo conoce esta casa, además de las once de serie. Justo
+        # detrás del registro y antes que nadie: el almacén de dispositivos consulta esta tabla
+        # para decidir si una clase existe, y con el orden al revés la primera comprobación
+        # caería sobre una tabla que todavía no está.
+        from lib.core.hosts.stores import HostTypesStore  # noqa: PLC0415
+        self._host_types_store = HostTypesStore(self._db_connector)
         # Whose everything is, and who the companies are. Before the inventory on purpose:
         # the inventory reads this one, and a store that builds its own copy of a table another
         # store owns is two stores writing the same rows.

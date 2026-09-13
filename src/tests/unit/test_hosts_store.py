@@ -8,7 +8,7 @@ secret values inside the profiles are encrypted at rest and decrypted on read.
 
 
 from lib.db import get_connector
-from lib.core.hosts.store import HostsStore
+from lib.core.hosts.stores import HostsStore
 
 _SECRET_KEYS = frozenset({'ssh_password', 'password', 'token', 'snmpv3_auth_key'})
 
@@ -18,9 +18,34 @@ def _fernet():
     return Fernet(Fernet.generate_key())
 
 
-def _store(fernet=None):
+def _store(fernet=None, *, classes=True):
+    """Un almacén de dispositivos y, al lado, la tabla de clases.
+
+    Las dos, porque es la disposición que tiene un panel de verdad: la columna `device_type` se
+    valida contra `host_type`, así que sin ella un dispositivo se guarda siempre sin clasificar.
+
+    Y **al lado y no de paso**: esto funcionaba porque validar una clase construía su almacén, y
+    ese constructor crea y siembra la tabla — una validación con un efecto secundario sobre el
+    esquema, que en una importación de cuatrocientas máquinas eran cuatrocientas reconciliaciones.
+    Al quitarlo, tres pruebas de aquí se cayeron: estaban apoyadas en él sin saberlo.
+    """
     db = get_connector(None, default_sqlite_path=':memory:')
+    if classes:
+        from lib.core.hosts.stores import HostTypesStore  # noqa: PLC0415
+        HostTypesStore(db)
     return HostsStore(db, fernet=fernet, secret_keys=_SECRET_KEYS), db
+
+
+def _clase(db, corto):
+    """El `uid` de la clase sembrada cuyo nombre corto es *corto*.
+
+    `device_type` guarda el `uid` y sólo el `uid`, que es como se relaciona todo lo demás del
+    esquema. El nombre corto está para leer una fila a mano.
+    """
+    from lib.core.hosts.stores import HostTypesStore      # noqa: PLC0415
+    fila = next((f for f in HostTypesStore(db).list() if f['slug'] == corto), None)
+    assert fila is not None, 'no existe la clase %s' % corto
+    return fila['uid']
 
 
 def _host(name='srv-x'):
@@ -160,7 +185,7 @@ class TestKindAndMaintenance:
     def test_the_kinds_are_written_down_once(self):
         """The form offers them and the runner branches on them; a fourth list somewhere is a
         fourth place for them to stop agreeing."""
-        from lib.core.hosts.store import HostsStore              # noqa: PLC0415
+        from lib.core.hosts.stores import HostsStore             # noqa: PLC0415
         assert HostsStore.KINDS == ('none', 'local', 'remote')
 
     def test_os_defaults_to_auto_and_persists(self):
@@ -237,9 +262,10 @@ class TestWhatTheDeviceIs:
     """
 
     def test_it_round_trips(self):
-        s, _ = _store(_fernet())
-        uid = s.create({**_host('nas-1'), 'device_type': 'nas'})
-        assert s.get(uid)['device_type'] == 'nas'
+        s, db = _store(_fernet())
+        nas = _clase(db, 'nas')
+        uid = s.create({**_host('nas-1'), 'device_type': nas})
+        assert s.get(uid)['device_type'] == nas
 
     def test_unclassified_is_the_default_and_a_real_value(self):
         """Every device that existed before the field did has this, and so does one added in
@@ -256,28 +282,45 @@ class TestWhatTheDeviceIs:
         uid = s.create({**_host('odd-1'), 'device_type': 'toaster'})
         assert s.get(uid)['device_type'] == ''
 
-    def test_it_is_case_insensitive_on_the_way_in(self):
+    def test_the_short_name_is_not_a_way_to_point_at_a_class(self):
+        """The column holds a class UID and nothing else. Accepting the readable short name too
+        would leave half a fleet pointing one way and half the other — and then the class filter
+        answers with half the machines, with nothing failing."""
         s, _ = _store(_fernet())
-        uid = s.create({**_host('sw-1'), 'device_type': 'SWITCH'})
-        assert s.get(uid)['device_type'] == 'switch'
+        uid = s.create({**_host('sw-1'), 'device_type': 'switch'})
+        assert s.get(uid)['device_type'] == ''
+
+    def test_a_uid_is_stored_exactly_as_given(self):
+        """No case folding on the way in. That was there for a short name typed by a person;
+        an opaque id has no capitals to correct, and touching one is changing it."""
+        s, db = _store(_fernet())
+        sw = _clase(db, 'switch')
+        uid = s.create({**_host('sw-1'), 'device_type': ' %s ' % sw})
+        assert s.get(uid)['device_type'] == sw
 
     def test_an_update_can_set_and_clear_it(self):
-        s, _ = _store(_fernet())
+        s, db = _store(_fernet())
+        sw = _clase(db, 'switch')
         uid = s.create(_host('sw-2'))
         h = s.get(uid)
-        assert s.update(uid, {**h, 'device_type': 'switch'})
-        assert s.get(uid)['device_type'] == 'switch'
+        assert s.update(uid, {**h, 'device_type': sw})
+        assert s.get(uid)['device_type'] == sw
         assert s.update(uid, {**h, 'device_type': ''})
         assert s.get(uid)['device_type'] == '', 'a reclassification cannot be undone'
 
-    def test_every_declared_type_is_storable(self):
-        """The catalogue and the validator read the same list; a type offered by the picker
-        and refused by the store would be a select that silently does nothing."""
-        from lib.core.hosts.manifest import host_type_ids
-        s, _ = _store(_fernet())
-        for i, tid in enumerate(host_type_ids()):
-            uid = s.create({**_host('h-%d' % i), 'device_type': tid})
-            assert s.get(uid)['device_type'] == tid, tid
+    def test_every_seeded_class_is_storable(self):
+        """The picker and the validator read the same table; a class offered by one and refused
+        by the other would be a select that silently does nothing.
+
+        They are rows now, not a tuple, so this needs the classes table to exist beside the
+        hosts one — which is exactly the arrangement a real panel has, and the arrangement that
+        broke when the validator was still reading a list in the code."""
+        from lib.core.hosts.stores.types import SEED            # noqa: PLC0415
+        s, db = _store(_fernet())
+        for i, spec in enumerate(SEED):
+            clase = _clase(db, spec['id'])
+            uid = s.create({**_host('h-%d' % i), 'device_type': clase})
+            assert s.get(uid)['device_type'] == clase, spec['id']
 
 
 class TestWhatMattersOnThisMachine:
@@ -361,7 +404,7 @@ class TestAMarkCanSayWhatTheRowIS:
 
     def test_a_word_the_core_does_not_act_on_is_not_stored(self):
         """A mark that reads as a promise and does nothing is worse than no mark."""
-        from lib.core.hosts.store import HostsStore                   # noqa: PLC0415
+        from lib.core.hosts.stores import HostsStore                  # noqa: PLC0415
         assert HostsStore.watch_role('wan') == 'wan'
         assert HostsStore.watch_role('WAN') == 'wan'
         for bad in ('lan', '', None, 'wan ; drop', 42):

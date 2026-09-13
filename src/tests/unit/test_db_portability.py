@@ -72,7 +72,7 @@ def test_history_quotes_key_on_mysql():
 
 
 def test_hosts_quotes_virtual_on_mysql():
-    from lib.core.hosts.store import HostsStore
+    from lib.core.hosts.stores import HostsStore
     c = _RecConn(); s = HostsStore(c)
     s.list(); s.get('x'); s.create({'name': 'n'}, actor='a'); s.update('x', {'name': 'n'}, actor='a')
     sql = '\n'.join(c.sql)

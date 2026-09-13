@@ -1861,6 +1861,15 @@ LANG = {
     'host_new':             'Nuevo dispositivo',
     'host_add':             'Añadir dispositivo',
     'host_new_tt':          'Añadir un dispositivo con sus perfiles de conexión',
+    'hosts_new_more':            'Otras formas de añadir dispositivos',
+    'host_source':               'Origen',
+    'host_source_here':          'De aquí',
+    'host_source_tt':            'Traído de {} (allí es el {}). Al volver a importar, su nombre, su dirección y su descripción se corrigen desde el origen.',
+    'host_managed':              'Este dispositivo lo mantiene {}: {} se corrigen desde allí en cada importación. Desvincúlalo de su origen si quieres escribirlo aquí.',
+    'host_field_managed':        'Lo mantiene {}. Desvincula el dispositivo de su origen si quieres escribirlo aquí.',
+    'host_unlink':               'Desvincular del origen',
+    'host_unlink_q':             '¿Desvincular «{}» de su origen? Deja de actualizarse solo y pasa a ser de esta casa. No se borra nada suyo: ni sus perfiles, ni sus módulos, ni su historial.',
+    'host_unlinked_ok':          'Soltado del origen.',
     'host_edit':            'Editar dispositivo',
     'host_view':            'Ver dispositivo',
     'hosts_reload_tt':      'Recargar dispositivos',
@@ -1880,7 +1889,7 @@ LANG = {
     'host_kind_none':       'Ninguna',
     'host_kind_local':      'Local',
     'host_kind_remote':     'Remoto (SSH)',
-    'host_kind_hint':       'Cómo ejecuta el panel comandos en este dispositivo. «Ninguna» es lo normal en equipo que sólo se lee por SNMP —un switch, un router, un SAI—: no hay nada donde ejecutar. «Local» son comandos en la máquina del panel; «Remoto» por SSH.',
+    'host_kind_hint':       'Cómo ejecuta el panel comandos en este dispositivo. «Ninguna» es lo normal en un dispositivo que sólo se lee por SNMP —un switch, un router, un SAI—: no hay nada donde ejecutar. «Local» son comandos en la máquina del panel; «Remoto» por SSH.',
     'host_os':              'Sistema operativo',
     'host_os_auto':         'Detectar automáticamente',
     'host_os_linux':        'Linux',
@@ -1895,6 +1904,77 @@ LANG = {
     'host_virtual':         'Virtual',
     'host_virtual_hint':    'Dispositivo virtual (VIP de keepalived, cluster de proxmox…): una entidad a monitorizar, no una máquina física.',
     'host_type':               'Tipo de dispositivo',
+    'subtab_host_types':         'Clases',
+    'host_types_new':            'Añadir clase',
+    'host_types_more':           'Otras formas de añadir clases',
+    'host_types_view_title':     'Clase de dispositivo',
+    'host_types_link_title':     'Sistemas externos',
+    'fs_link_type_find':         'Buscar tipo de activo…',
+    'fs_link_type_nohit':        'Ningún tipo con ese nombre.',
+    'host_types_link_hint':       'Si esta clase ya existe en un sistema externo, vincúlala: así la importación la reconoce en vez de crear otra.',
+    'host_types_new_title':      'Nueva clase de dispositivo',
+    'host_types_edit_title':     'Corregir la clase',
+    'host_types_go_tt':          'Ver los dispositivos de esta clase',
+    'host_types_all':            'Clases',
+    'host_types_find':           'Buscar clase…',
+    'host_types_v_grid':         'Rejilla',
+    'host_types_v_tiles':        'Recuentos',
+    'host_types_f_used':         'Con dispositivos',
+    'host_types_f_free':         'Sin usar',
+    'host_types_drop_many_q':    '¿Quitar {} clases? Sólo se marcan las que no lleva ningún dispositivo.',
+    'host_types_dropped_n':      '{} clases quitadas.',
+    'host_types_drop_failed':    '{} no se han podido quitar.',
+    'host_types_none':           'No queda ninguna clase. Añade una o vuelve a poner las básicas.',
+    'host_types_id':             'Identificador',
+    'host_types_used':           'En uso',
+    'host_types_seed':           'Añadir las básicas',
+    'host_types_seed_tt':        'Vuelve a poner las clases con las que nace una instalación (servidor, conmutador, SAI…). No toca las que ya están: lo que hayas corregido se queda como está.',
+    'host_types_seeded':         '{} clases añadidas.',
+    'host_types_seeded_none':    'Ya estaban todas.',
+    'host_types_hint':           'Todas se editan igual. Los dispositivos guardan el UID de su clase, así que renombrarla no los mueve — y una clase en uso no se puede quitar.',
+    'host_types_manage_tt':      'Añadir una clase de dispositivo. Las clases se gestionan en Sistema › Infraestructura › Clases.',
+    'host_types_origin':         'Origen',
+    'host_types_origin_here':    'Interna',
+    'host_types_icons_all':      'Ver todos los iconos',
+    'host_types_icons_find':     'Buscar entre {} iconos…',
+    'host_types_icons_nohit':    'Ningún icono con ese nombre.',
+    'host_types_name':           'Nombre',
+    'host_types_name_ph':        'Punto de acceso',
+    'host_types_icon':           'Icono',
+    'host_types_id_fixed':       'Su identificador ({}) no cambia al renombrarla. Es para leer: lo que guardan los dispositivos de esta clase es su UID.',
+    'host_types_uid':            'UID',
+    # Para qué es cada una de las once de serie. Por el catálogo y no en la columna:
+    # escrita ahí se congelaría en el idioma de quien creó la base, que es el mismo
+    # motivo por el que su nombre tampoco está ahí. La de esta casa, cuando alguien
+    # escriba una, manda sobre ésta.
+    'host_type_server_desc': 'Máquina que presta servicio: aplicaciones, bases de datos o archivos.',
+    'host_type_workstation_desc': 'El equipo de una persona: sobremesa o portátil.',
+    'host_type_nas_desc': 'Cabina o servidor dedicado a guardar datos y servirlos por red.',
+    'host_type_hypervisor_desc': 'Anfitrión que ejecuta máquinas virtuales.',
+    'host_type_switch_desc': 'Conmutador de red: reparte el tráfico entre los equipos de una planta o un armario.',
+    'host_type_router_desc': 'Encamina el tráfico entre redes y suele ser la salida a internet.',
+    'host_type_firewall_desc': 'Filtra el tráfico entre redes y decide qué pasa y qué no.',
+    'host_type_ups_desc': 'Alimentación ininterrumpida: sostiene el equipo cuando se va la luz.',
+    'host_type_printer_desc': 'Impresora o equipo multifunción de red.',
+    'host_type_camera_desc': 'Cámara de videovigilancia conectada a la red.',
+    'host_type_other_desc': 'Lo que no encaja en ninguna de las demás. Si se repite, merece su propia clase.',
+
+    'host_types_desc':           'Descripción',
+    'host_types_desc_ph':        'Puntos de acceso wifi de las plantas',
+    'host_types_desc_hint':      'Para qué es esta clase. Un renglón, y contesta «¿en qué se diferencia de la de al lado?» el día que haya dos parecidas.',
+    'host_types_icons_load':     'Cargando los iconos…',
+    'host_types_drop_q':         '¿Quitar la clase «{}»? Sólo se puede si no la lleva ningún dispositivo.',
+    'host_type_managed':         'Esta clase la mantiene {}: su nombre se corrige desde allí en cada importación. Desvincúlala de su origen si quieres escribirla aquí.',
+    'host_type_link_required':   'Falta decir con qué clase externa se vincula.',
+    'host_type_link_taken':      'Esa clase externa ya está vinculada a «{}».',
+    'host_types_linked':         'La mantiene {}',
+    'host_types_unlink':         'Desvincular del origen',
+    'host_types_unlink_q':       '¿Desvincular «{}» de su origen? Deja de actualizarse sola y pasa a ser de esta casa. No se borra nada, ni los dispositivos que la llevan.',
+    'host_types_link':           'Vincular con una externa',
+    'host_type_name_required':   'La clase necesita un nombre.',
+    'host_type_name_taken':      'Ya hay una clase que se llama «{}».',
+    'host_type_not_found':       'Esa clase no existe, o es una de serie y no se puede cambiar.',
+    'host_type_in_use':          'La clase «{}» la llevan {} dispositivos. Cámbiasela primero.',
     'host_type_hint':          'Qué es este dispositivo. Sólo cambia cómo lo ves y lo agrupas: se monitoriza igual sea lo que sea.',
     'host_type_unset':         'Sin clasificar',
     'col_host_type':           'Tipo de dispositivo',
@@ -2164,6 +2244,10 @@ LANG = {
         'group_deleted':         'Grupos: Eliminado',
         'host_created':          'Dispositivos: Creado',
         'host_updated':          'Dispositivos: Actualizado',
+        'host_unlinked':         'Dispositivos: Soltado de su origen',
+        'host_type_created':     'Dispositivos: Clase creada',
+        'host_type_updated':     'Dispositivos: Clase corregida',
+        'host_type_deleted':     'Dispositivos: Clase quitada',
         'host_cloned':           'Dispositivos: Clonado',
         'host_deleted':          'Dispositivos: Eliminado',
         'host_ssh_tested':       'Dispositivos: Prueba SSH',
@@ -2179,9 +2263,10 @@ LANG = {
         'checks_run':            'Checks: Ejecutados',
         'infra_collect':         'Infraestructura: Datos forzados',
         'infra_watch':           'Infraestructura: Fila vigilada',
-        'dcim_placed':                 'Inventario: equipo colocado',
-        'dcim_removed':                'Inventario: equipo retirado',
+        'dcim_placed':                 'Inventario: dispositivo colocado',
+        'dcim_removed':                'Inventario: dispositivo retirado',
         'freshservice_import':         'Freshservice: empresas importadas',
+        'freshservice_import_hosts':   'Freshservice: dispositivos importados',
         'freshservice_test':           'Freshservice: conexión probada',
         'org_unlinked':                'Empresas: soltada de su origen',
         'org_owner_set':               'Empresas: cambio de propietaria',
@@ -2189,11 +2274,11 @@ LANG = {
         'dcim_catalog_browse':         'Inventario: biblioteca de modelos consultada',
         'dcim_catalog_drop':           'Inventario: modelo del catálogo eliminado',
         'dcim_schema_save':          'Inventario: esquema de modelos traído o escrito',
-        'dcim_build_save':           'Inventario: plantilla de equipo escrita',
+        'dcim_build_save':           'Inventario: plantilla de dispositivo escrita',
         'dcim_brand_save':           'Inventario: ficha de marca escrita o retirada',
         'dcim_platform_save':        'Inventario: plataforma escrita o retirada',
         'dcim_profiles_save':            'Inventario: perfiles de componente cambiados',
-        'dcim_build_drop':           'Inventario: plantilla de equipo retirada',
+        'dcim_build_drop':           'Inventario: plantilla de dispositivo retirada',
         'dcim_catalog_edit':         'Inventario: modelo del catálogo escrito o corregido',
         'dcim_catalog_import':         'Inventario: catálogo de modelos importado',
         'dcim_bypass':          'Inventario: bypass de SAI',
@@ -2787,7 +2872,7 @@ LANG = {
         'backup_auto_secrets': 'Las copias automáticas llevan las credenciales cifradas. Activado por defecto, al revés que una copia hecha a mano donde alguien está delante para decidir: una copia desatendida que no lleva credenciales se descubre al restaurar, que es el peor momento para descubrir nada.',
         'update_check_url': 'Dónde pregunta Diagnóstico si hay una versión más nueva. Vacío = la API de releases de este repositorio. Es un campo y no una constante para que un fork —o una instalación que solo alcanza un espejo interno— apunte a otro sitio sin tocar código, y para que se vea aquí la única dirección que este panel está dispuesto a contactar. La comprobación NUNCA se hace sola: ni al arrancar, ni al pintar una página. Solo al pulsar el botón, así que una URL que nadie pulsa ya está apagada.',
         'backup_dir': 'Dónde se escriben las copias. Vacío = «var/backups», junto a los datos que copia: eso sobrevive a un error humano y a nada más. Apúntalo a un montaje que no sea esta máquina y el mismo botón empieza a producir una copia que merece el nombre. Se lee en cada copia, así que cambiarlo no requiere reiniciar el panel.',
-        'dcim_catalog_url': 'De dónde se trae el catálogo de dispositivos: modelos con sus puertos, su altura en U y sus imágenes de alzado. Por defecto «netbox-community/devicetype-library», que es la que quiere casi todo el mundo. Cámbiala si mantienes un fork con vuestros propios equipos, o si esta sala no sale a github.com y sí a un espejo interno. Vale cualquier repositorio con la misma forma: «device-types/<Fabricante>/*.yaml». Antes de importar nada la pantalla enseña qué fabricantes trae, así que una dirección equivocada cuesta un aviso y no un catálogo lleno de modelos ajenos.',
+        'dcim_catalog_url': 'De dónde se trae el catálogo de dispositivos: modelos con sus puertos, su altura en U y sus imágenes de alzado. Por defecto «netbox-community/devicetype-library», que es la que quiere casi todo el mundo. Cámbiala si mantienes un fork con vuestros propios dispositivos, o si esta sala no sale a github.com y sí a un espejo interno. Vale cualquier repositorio con la misma forma: «device-types/<Fabricante>/*.yaml». Antes de importar nada la pantalla enseña qué fabricantes trae, así que una dirección equivocada cuesta un aviso y no un catálogo lleno de modelos ajenos.',
         'dcim_media_dir': 'Dónde se guardan los planos de sala y, más adelante, los alzados del catálogo. Vacío = «var/dcim_media», junto al resto de datos. Son ficheros que alguien subió y de los que la base de datos solo guarda el nombre, así que van en la copia de seguridad: si se mueve esta carpeta, la copia la sigue. Se lee en cada subida, así que cambiarla no requiere reiniciar el panel.',
         'dcim_map_google_type': 'Qué clase de mapa se le pide a Google. El callejero es lo que sirve para encontrar una nave en un polígono, y por eso es el que viene puesto. El satélite es para sedes que ningún callejero dibuja —una antena en un monte, una caseta en una finca—, donde la foto es la única forma de reconocer el sitio. Sólo lo entiende Google: los demás proveedores sirven lo que sirven.',
         'dcim_map_max_zoom': 'Hasta qué nivel de tesela se puede acercar. VACÍO = hasta donde llegue el proveedor elegido, que es lo que hay que dejar salvo que sepas otra cosa: OpenStreetMap llega al 19, Carto al 20 y Google al 22. Se pone a mano para un servidor propio o un espejo interno, que traen lo que traigan: si el tuyo sólo tiene hasta el 16 y el panel pide el 19, al acercarse salen huecos en blanco sin un solo error, y quien mire creerá que el mapa se ha roto.',
@@ -2839,7 +2924,7 @@ LANG = {
         'certs|notify_expiry':              'Escanear periódicamente los certificados de todas las comprobaciones SSL/TLS y enviar una notificación cuando alguno esté dentro de la ventana de aviso de caducidad. Enrútalo por canal en la matriz de Enrutado de Notificaciones (fila Certificado por caducar). Desactivado por defecto.',
         'certs|warn_days':                  'Avisar cuando un certificado caduque dentro de este número de días (por defecto 21).',
         'certs|scan_every_secs':            'Cada cuántos segundos escanear la caducidad de certificados (por defecto 86400 = diario).',
-        'dcim|notify_cabling':              'Contrastar cada tanto los cables declarados contra lo que los dispositivos dicen verse por LLDP, y avisar de dos cosas: un cable cuyos puertos ya no coinciden con los escritos —alguien movió el latiguillo y no cambió la etiqueta— y dos equipos del armario que se ven entre sí sin ningún cable declarado. El descubrimiento **propone**: esto no escribe nada en el inventario. Enrútalo por canal en la matriz de Enrutado de Notificaciones (filas «Cable movido de puerto» y «Enlace sin declarar»). Desactivado por defecto.',
+        'dcim|notify_cabling':              'Contrastar cada tanto los cables declarados contra lo que los dispositivos dicen verse por LLDP, y avisar de dos cosas: un cable cuyos puertos ya no coinciden con los escritos —alguien movió el latiguillo y no cambió la etiqueta— y dos dispositivos del armario que se ven entre sí sin ningún cable declarado. El descubrimiento **propone**: esto no escribe nada en el inventario. Enrútalo por canal en la matriz de Enrutado de Notificaciones (filas «Cable movido de puerto» y «Enlace sin declarar»). Desactivado por defecto.',
         'dcim|cable_scan_every_secs':       'Cada cuántos segundos se hace ese contraste (por defecto 1800, media hora). El cableado cambia cuando alguien abre un armario, no cuando pasa un minuto, y cada vuelta arma el mapa de la flota entera: bajarlo mucho cuesta trabajo para un dato que cambia dos veces al año. El mínimo son 300 s.',
         'dcim|cable_repeat_every_secs':     'Cada cuántos segundos se repite un aviso que sigue sin resolverse. **0 = decirlo una sola vez**, que es lo que viene puesto. Repetir sirve cuando el canal es un buzón que alguien vacía; si el canal es un chat, un hallazgo que vuelve cada media hora lo silencia en dos días y se lleva por delante el aviso que sí importaba.',
         'dcim|cable_repeat_max':            'Cuántas veces se dice el mismo hallazgo en total, contando la primera. **0 = sin límite**; 1 = una sola vez (lo de fábrica). Junto con el ajuste anterior da los cuatro comportamientos posibles: una vez, cada X para siempre, cada X un número de veces, o —apagando el interruptor de arriba— no avisar. Un hallazgo que **cambia** se dice igual aunque el límite esté gastado: el mismo latiguillo movido a una tercera boca es otro hecho, no el mismo insistiendo.',
@@ -2871,7 +2956,7 @@ LANG = {
         'web_admin|login_ratelimit_max':          'Máximo de inicios de sesión fallidos desde una IP dentro de la ventana antes de bloquearla temporalmente (0 = desactivado). Se suma al bloqueo por cuenta para frenar el password spraying desde una IP.',
         'web_admin|login_ratelimit_window_secs':  'Ventana deslizante (segundos) del límite de inicios de sesión por IP.',
         'web_admin|mfa_required':                 'Quién debe llevar verificación en dos pasos. A quien le aplique y no tenga no se le cierra la puerta: la configura al entrar, que es lo que permite activarlo sin que nadie esté dado de alta. «Administradores» cuenta a quien lo sea por su rol o por un grupo que lo lleve. Se ignora en una instalación que no puede cifrar secretos, porque no se podría guardar el factor.',
-        'web_admin|mfa_hold_secs':                'Cuánto vive un inicio de sesión que ya pasó la contraseña y espera el código. Lo justo para desbloquear el móvil y encontrar la aplicación, y lo bastante corto para que una contraseña tecleada en un equipo compartido no quede medio usable toda la tarde. En un puesto compartido conviene bajarlo; con una llave guardada en un cajón, subirlo. Nadie fuera del panel ve este número: cambiarlo no puede romper el alta en el móvil de nadie.',
+        'web_admin|mfa_hold_secs':                'Cuánto vive un inicio de sesión que ya pasó la contraseña y espera el código. Lo justo para desbloquear el móvil y encontrar la aplicación, y lo bastante corto para que una contraseña tecleada en un dispositivo compartido no quede medio usable toda la tarde. En un puesto compartido conviene bajarlo; con una llave guardada en un cajón, subirlo. Nadie fuera del panel ve este número: cambiarlo no puede romper el alta en el móvil de nadie.',
         'web_admin|webauthn_rp_id':               'El dominio contra el que se registran las llaves de seguridad. Normalmente se deduce de la URL pública y esto se deja vacío: es el escape para varios nombres delante de un panel, o una URL pública en un subdominio del dominio al que deben pertenecer las llaves. Cambiarlo deja de funcionar todas las llaves ya registradas, sin nada en pantalla que lo explique: el navegador las ata a este valor y no se pueden mover.',
         'ldap|mfa_trusted':                   'El panel no pide su propio segundo factor cuando alguien entra por esta vía —ni el código ni el alta obligatoria—, porque la cuenta ya demostró dos cosas antes de que el panel la viera. Actívalo solo si el directorio realmente lo exige. No dice nada de los inicios de sesión locales: un factor dado de alta aquí se sigue pidiendo cuando esa misma persona usa su contraseña.',
         'oidc|mfa_trusted':                   'El panel no pide su propio segundo factor cuando alguien entra por esta vía —ni el código ni el alta obligatoria—, porque la cuenta ya demostró dos cosas antes de que el panel la viera. Actívalo solo si el directorio realmente lo exige. No dice nada de los inicios de sesión locales: un factor dado de alta aquí se sigue pidiendo cuando esa misma persona usa su contraseña.',
@@ -3156,7 +3241,7 @@ LANG = {
     'notif_msg_cert_expired':        'El certificado {} caducó hace {} día(s)',
     'notif_msg_cert_expiring':       'El certificado {} caduca en {} día(s)',
     'notif_msg_cable_moved':         'El cable {} está declarado en {} y los dispositivos dicen verse por {}',
-    'notif_msg_cable_undeclared':    'Los equipos {} se ven entre sí ({}) y no hay ningún cable declarado entre ellos',
+    'notif_msg_cable_undeclared':    'Los dispositivos {} se ven entre sí ({}) y no hay ningún cable declarado entre ellos',
     'notif_msg_secret_expired':      'El secreto de cliente de {} caducó hace {} día(s)',
     'notif_msg_secret_expiring':     'El secreto de cliente de {} caduca en {} día(s)',
     'notif_msg_secret_rotated':      'El secreto de cliente de {} se rotó automáticamente (válido {} día(s) más)',
@@ -3521,7 +3606,7 @@ LANG = {
         'profile_chart_none': 'No se dibuja',
         'profile_chart_value': 'Sólo el valor',
         'profile_copy': 'copia',
-        'profile_delete_confirm': '¿Borrar el perfil {name}? Los equipos que lo usaban conservan el identificador en su campo, y dejará de resolver a nada.',
+        'profile_delete_confirm': '¿Borrar el perfil {name}? Los dispositivos que lo usaban conservan el identificador en su campo, y dejará de resolver a nada.',
         'profile_deleted': 'Perfil borrado',
         'profile_detect': 'Detectar',
         'profile_detect_none': 'Ningún perfil reclama este dispositivo. Los genéricos siguen valiendo; para lo suyo hace falta escribirle uno.',
@@ -3530,7 +3615,7 @@ LANG = {
         'profile_edit': 'Editar perfil',
         'profile_group': 'Grupo',
         'profile_group_covered': 'ya va en un grupo',
-        'profile_group_delete_confirm': '¿Borrar el grupo {name}? Los equipos que lo usaban conservan el identificador en su campo, y dejará de resolver a nada.',
+        'profile_group_delete_confirm': '¿Borrar el grupo {name}? Los dispositivos que lo usaban conservan el identificador en su campo, y dejará de resolver a nada.',
         'profile_group_deleted': 'Grupo borrado',
         'profile_group_desc': 'Descripción',
         'profile_group_edit': 'Editar grupo',
@@ -3674,7 +3759,7 @@ LANG = {
             'snmpv3_auth_key': 'Contraseña de autenticación para SNMP v3.',
             'snmpv3_priv_protocol': 'Algoritmo de cifrado para privacidad SNMP v3.',
             'snmpv3_priv_key': 'Contraseña de privacidad (cifrado) para SNMP v3. Dejar vacío para authNoPriv.',
-            'snmpv3_context': 'Contexto SNMP v3 al que se dirigen las consultas. Muchos equipos exponen una VLAN o una instancia por contexto; dejar vacío para el contexto por defecto.',
+            'snmpv3_context': 'Contexto SNMP v3 al que se dirigen las consultas. Muchos dispositivos exponen una VLAN o una instancia por contexto; dejar vacío para el contexto por defecto.',
             'snmpv3_engine_id': 'Engine ID del agente, en hexadecimal. Solo hace falta cuando el dispositivo no lo anuncia y falla el descubrimiento automático.',
         },
         # `noAuthNoPriv` is not English. Three of these values are ASN.1 identifiers out
@@ -3809,7 +3894,7 @@ LANG = {
         'notif_msg_cert_expired':      ['certificado', 'días'],
         'notif_msg_cert_expiring':     ['certificado', 'días'],
         'notif_msg_cable_moved':       ['cable', 'declarado', 'visto'],
-        'notif_msg_cable_undeclared':  ['equipos', 'puertos'],
+        'notif_msg_cable_undeclared':  ['dispositivos', 'puertos'],
         'notif_msg_secret_expired':    ['proveedor', 'días'],
         'notif_msg_secret_expiring':   ['proveedor', 'días'],
         'notif_msg_secret_rotated':    ['proveedor', 'días'],
@@ -4093,11 +4178,11 @@ LANG = {
     'orgs_all_view':         'Ver lo de todas las empresas',
     'orgs_edit':             'Decidir de qué empresa es cada cosa',
     'dcim_view':             'Ver el inventario físico',
-    'dcim_edit':             'Colocar y mover equipos',
+    'dcim_edit':             'Colocar y mover dispositivos',
     'dcim_cable_edit':       'Declarar cableado y etiquetas',
     'dcim_catalog_view':     'Consultar el catálogo de modelos',
     'dcim_catalog_manage':   'Importar el catálogo de modelos',
-    'dcim_build_edit':           'Definir plantillas de equipo',
+    'dcim_build_edit':           'Definir plantillas de dispositivo',
     'jobs_view':       'Ver los trabajos',
         'sessions_view':   'Ver sesiones',
         'sessions_revoke': 'Revocar sesiones',
@@ -4236,11 +4321,11 @@ LANG = {
     'infra_raw_view':         'La pestaña Datos brutos: todo lo que contestó el dispositivo, sin agrupar ni filtrar — mil filas, incluidos los hechos de cada fila que las otras pestañas guardan junto a la fila a la que pertenecen. Es la pestaña que se abre cuando un número parece mal, no la que se lee en una pantalla de pared, y por eso no se concede a «viewer». Como Medidas, decide qué ofrece la pantalla: los mismos hechos alimentan Detalles.',
     'orgs_view':             'Ver el registro de empresas del grupo y qué tiene fichado cada una. Es la lista que se elige al decir de quién es un armario o una máquina, y sus siglas son las que salen en las chapas de un alzado.',
     'orgs_all_view':         'Ver las cosas de **todas** las empresas, en cualquier sección. Sin esta bandera solo se ven las de las empresas que se concedan una a una, y de las demás se ve que ocupan sitio y nada más — ni nombre, ni modelo, ni estado. Es lo que hace utilizable un rack compartido entre sociedades de un grupo.',
-    'orgs_edit':             'Crear empresas y decir de quién es cada cosa: una sede, un armario, un equipo, una máquina. **Sin rol por defecto, ni siquiera «editor»**: en un grupo esto decide qué se le factura a qué sociedad y quién puede ver qué, que no es la misma autoridad que ordenar un rack.',
+    'orgs_edit':             'Crear empresas y decir de quién es cada cosa: una sede, un armario, un dispositivo, una máquina. **Sin rol por defecto, ni siquiera «editor»**: en un grupo esto decide qué se le factura a qué sociedad y quién puede ver qué, que no es la misma autoridad que ordenar un rack.',
     'dcim_view':             'Ver dónde está el equipamiento: sedes, salas, racks y qué ocupa cada U, con los mapas y los alzados. Es la lectura que se hace andando, y no abre nada del registro — direcciones y credenciales siguen tras «Ver dispositivos».',
     'dcim_edit':             'Crear y mover sedes, salas, racks e items: ordenar el armario. No decide de quién es nada —eso es «Decidir de qué empresa es cada cosa»— ni toca el registro de dispositivos.',
     'dcim_cable_edit':       'Declarar qué cable une qué con qué, con su etiqueta. Es apuntar lo que alguien hizo con las manos; el panel contrasta después lo declarado con lo que ve LLDP.',
-    'dcim_catalog_view':     'Consultar el catálogo de modelos de equipo (altura en U, profundidad, puertos, tomas). Es un libro de referencia sobre equipamiento en general: no dice nada de esta instalación.',
+    'dcim_catalog_view':     'Consultar el catálogo de modelos de dispositivo (altura en U, profundidad, puertos, tomas). Es un libro de referencia sobre equipamiento en general: no dice nada de esta instalación.',
     'dcim_catalog_manage':   'Importar o actualizar el catálogo de modelos. Trae varios miles de ficheros, tarda minutos y reemplaza aquello con lo que se dibuja cada alzado — por eso no se concede a «viewer».',
     'dcim_build_edit':
         'Escribir los estándares de compra: qué es «un servidor de CPD» en esta '
@@ -4439,7 +4524,7 @@ LANG = {
     'tab_dcim_board':              'Cuadro de mando',
     'tab_dcim_catalog':            'Catálogo',
     'tab_dcim_builds':             'Plantillas',
-    'tab_dcim_devices':            'Equipos',
+    'tab_dcim_devices':            'Dispositivos',
     'tab_dcim_wiring':             'Cableado',
     'tab_dcim_sources':            'Fuentes',
     'tab_infra': 'Infraestructura',
@@ -4464,8 +4549,8 @@ LANG = {
     'infra_link_goto_port':    'Ir al puerto {}',
     'infra_link_no_port':      'Puerto sin identificar',
     'infra_link_bundle':      '{} cables',
-    'infra_link_bundle_tt':   'Cada extremo informó de varios puertos hacia el otro: son varios cables. Cuál de ellos va con cuál no se puede saber con lo que contesta LLDP. Si son un agregado SÍ se puede, cuando el equipo sirve IEEE8023-LAG-MIB — y entonces el agregado sale nombrado delante de sus puertos.',
-    'infra_link_lag_tt':      'El agregado del que son miembros estos puertos, según lo dice el propio equipo (IEEE8023-LAG-MIB). Sale sólo cuando todos ellos nombraron el mismo.',
+    'infra_link_bundle_tt':   'Cada extremo informó de varios puertos hacia el otro: son varios cables. Cuál de ellos va con cuál no se puede saber con lo que contesta LLDP. Si son un agregado SÍ se puede, cuando el dispositivo sirve IEEE8023-LAG-MIB — y entonces el agregado sale nombrado delante de sus puertos.',
+    'infra_link_lag_tt':      'El agregado del que son miembros estos puertos, según lo dice el propio dispositivo (IEEE8023-LAG-MIB). Sale sólo cuando todos ellos nombraron el mismo.',
     'infra_link_pin':         'Haz clic en el cable para dejarlo fijo',
     'infra_link_node_hint':   'clic para abrir · arrastra para mover',
     'infra_link_addresses':   'Direcciones',
@@ -4484,7 +4569,7 @@ LANG = {
     'infra_link_said_tt':     'Éste es el extremo de cuya tabla de vecinos salió este cable.',
     'infra_link_silent':      'no lo dice',
     'infra_link_silent_tt':   'Este extremo no ha informado del otro como vecino. O no corre ningún agente LLDP, o lo corre pero no publica LLDP-MIB por SNMP — en Debian eso es lldpd sin su subagente AgentX (-x), con «master agentx» en snmpd. El cable es real de todas formas; lo que pasa es que sólo uno de sus dos extremos lo está confirmando.',
-    'infra_link_port_mac':       'El equipo no dio nombre de puerto: esto es la dirección hardware del puerto que contestó.',
+    'infra_link_port_mac':       'El dispositivo no dio nombre de puerto: esto es la dirección hardware del puerto que contestó.',
     'infra_link_port_mac_short': 'MAC del puerto',
     'infra_link_claim_both':   'Los dos extremos lo dicen',
     'infra_link_claim_one':    'Lo dice un extremo',
@@ -4501,7 +4586,7 @@ LANG = {
     'infra_map_also': '+{} en otra red',
     'infra_map_empty': 'Todavía no hay direcciones registradas: el mapa se dibuja con lo que contestan los dispositivos, así que aparecerá tras la primera recogida.',
     'infra_map_note': 'Mapa deducido de las direcciones que declara cada máquina y de su salida por defecto: {} red/es. No es un esquema de cableado — eso es LLDP, y aquí todavía no lo sirve nadie.',
-    'infra_map_members': '{} equipo/s',
+    'infra_map_members': '{} dispositivo/s',
     'infra_map_no_shared':    'Sin red compartida',
     'infra_map_note2':        '{} red(es) donde se encuentran dos o más máquinas, sobre {} máquina(s). Cada línea de aquí es una DIRECCIÓN: quién alcanza a quién, que no es lo mismo que qué está enchufado a qué.',
     'infra_map_to_links':     '{} cable(s)',
@@ -4544,7 +4629,7 @@ LANG = {
         'De qué plantilla nace: al crearlo se le estampan sus componentes. Sólo al crear — '
         'ofrecerlo después diría que se puede cambiar de qué nació algo que ya nació.',
     'dcim_u_start_tt':
-        'La U de abajo del equipo, la que está serigrafiada en el mástil. Si el armario numera '
+        'La U de abajo del dispositivo, la que está serigrafiada en el mástil. Si el armario numera '
         'al revés, esta casilla habla en los números del armario.',
     'dcim_item_parent_tt':
         'Sobre qué cosa del armario va montado: los mini PC de una bandeja, por ejemplo. '
@@ -4592,7 +4677,7 @@ LANG = {
     'dcim_item_slots':             'Partes del U',
     'dcim_item_slots_tt':
         'En cuántas partes se divide el hueco. Dos para dos patch panel de media U, '
-        'ocho para una bandeja de Raspberry. En un equipo MONTADO sobre otro, las '
+        'ocho para una bandeja de Raspberry. En un dispositivo MONTADO sobre otro, las '
         'partes son las de la bandeja y no las del U: es lo que dice si los dos mini PC '
         'van uno al lado del otro o uno solo la ocupa entera.',
     'dcim_item_slot_tt':
@@ -4613,7 +4698,7 @@ LANG = {
     'dcim_catalog_busy':           'Ya hay una importación en marcha',
     'dcim_catalog_no_yaml':        'Falta PyYAML: sin él no se puede leer el catálogo de modelos. El resto del inventario funciona igual.',
     'dcim_empty':              'Todavía no hay ninguna sede. La primera se crea aquí; luego van dentro las salas y los racks.',
-    'dcim_note':               '{} sede(s) y {} empresa(s). Dónde está cada equipo, y de quién es — que en un grupo no son la misma pregunta.',
+    'dcim_note':               '{} sede(s) y {} empresa(s). Dónde está cada dispositivo, y de quién es — que en un grupo no son la misma pregunta.',
     'dcim_new_site':           'Nueva sede',
     'dcim_site_name':          'Nombre de la sede',
     'dcim_rooms':              '{} sala(s)',
@@ -4625,7 +4710,7 @@ LANG = {
     'dcim_rack_note':          '{} U, con {} cosa(s) dentro',
     'dcim_rack_empty':         'El rack está vacío',
     'dcim_free':               '{} U libres',
-    'dcim_free_tt':            'Por la cara frontal. El hueco libre se ve entero aunque los equipos del vecino no: no dice de quién es nada, y es lo que hace planificable un armario compartido.',
+    'dcim_free_tt':            'Por la cara frontal. El hueco libre se ve entero aunque los dispositivos del vecino no: no dice de quién es nada, y es lo que hace planificable un armario compartido.',
     'dcim_u':                  'U',
     'dcim_elev_names':           'Escribir los nombres en las cajas',
     'dcim_face':               'Cara',
@@ -4633,7 +4718,7 @@ LANG = {
     'dcim_face_front':         'Frontal',
     'dcim_face_rear':          'Trasera',
     'dcim_what':               'Qué',
-    'dcim_items':              'Equipos',
+    'dcim_items':              'Dispositivos',
     'dcim_hist_what':            'Qué pasó',
     'dcim_hist_none':
         'Este armario no tiene historial todavía. Se guarda una versión cada vez que algo '
@@ -4697,7 +4782,7 @@ LANG = {
     'clear_selection':           'Ninguna',
     'fs_link_col':               'Empresa de aquí',
     'fs_link_none':              '— crear una nueva —',
-    'fs_link_taken':             'Esa empresa ya está atada a otro departamento.',
+    'fs_link_taken':             'Esa empresa ya está vinculada a otro departamento.',
     'fs_link_gone':              'Esa empresa ya no existe.',
     'fs_working':                'Consultando Freshservice…',
     'fs_source':                 'Freshservice',
@@ -4716,7 +4801,8 @@ LANG = {
     'fs_status_none':            'Ninguno.',
     'fs_status_unavailable':     'La página de estado no se ha podido leer. No está en todos los planes y la clave puede no alcanzarla — **la conexión funciona igual**.',
     'fs_test_ok':                'Conecta con {}.',
-    'fs_import':                 'Traer empresas',
+    'fs_import':                 'Importar',
+    'fs_import_orgs':            'Importar de Freshservice',
     'fs_import_tt':              'Enseña qué se crearía y qué se corregiría **antes** de hacer nada.',
     'fs_preview_title':          'Empresas de Freshservice',
     'fs_preview_none':           'Freshservice no ha devuelto ningún departamento.',
@@ -4725,7 +4811,7 @@ LANG = {
     'fs_act_update':             'Se corrige',
     'fs_act_adopt':              'Se adopta',
     'fs_act_same':               'Sin cambios',
-    'fs_orphans':                'Ya no están en Freshservice ({}). **No se borran**: de una sociedad cuelgan armarios y equipos fichados aquí, así que quitarlas se decide una a una.',
+    'fs_orphans':                'Ya no están en Freshservice ({}). **No se borran**: de una sociedad cuelgan armarios y dispositivos fichados aquí, así que quitarlas se decide una a una.',
     'fs_done':                   '{} creadas, {} corregidas, {} adoptadas.',
     'fs_done_failed':            '{} se han quedado sin importar.',
     'fs_err_unset':              'Falta el dominio o la clave de API de Freshservice.',
@@ -4743,12 +4829,58 @@ LANG = {
     'fs_err_net':                'No se ha podido llegar a Freshservice.',
     'fs_err_body':               'La respuesta no es la de Freshservice: puede estar contestando un proxy o un portal de acceso.',
     'fs_err_key':                'Falta la clave de API.',
+    'fs_import_hosts':           'Importar de Freshservice',
+    'fs_import_hosts_tt':        'Trae los activos de Freshservice como dispositivos. Enseña qué se crearía y qué se corregiría **antes** de hacer nada.',
+    'fs_import_types':           'Importar clases de Freshservice',
+    'fs_import_types_tt':        'Crea aquí las clases de dispositivo que ya existen en Freshservice. No trae ningún activo y no toca las clases que ya tengas.',
+    'fs_link_type':              'Elegir una de Freshservice',
+    'fs_link_type_tt':           'Vincula esta clase con una de Freshservice: la importación la reconoce en vez de crear otra con el nombre de allí.',
+    'fs_link_type_taken':        'Ya vinculada a «{}»',
+    'fs_link_type_pick':         'Elige la clase de Freshservice con la que se corresponde.',
+    'fs_types_summary':          '{} clases de activo allí; {} no tienen equivalente aquí.',
+    'fs_types_becomes':          'Qué pasaría',
+    'fs_types_have':             'Ya tienes «{}»',
+    'fs_types_only_new':         'Sólo las que faltan',
+    'fs_types_imported':         '{} clases nuevas.',
+    'fs_types_import_none':      'Ninguna clase nueva: ya estaban todas.',
+    'fs_types_hint':             'Elige qué clases de activo traer. Sin elegir ninguna se traen todas — y un inventario grande son muchas páginas de su API.',
+    'fs_types_count':            'Contar',
+    'fs_types_count_tt':         'Freshservice no dice cuántos activos tiene cada clase, así que hay que recorrerlos. Se hace una vez y a partir de ahí se ve dónde hay algo; las clases vacías se apartan.',
+    'fs_types_empty':            'Ver también las {} vacías',
+    'fs_types_none':             'Freshservice no ha devuelto ningún tipo de activo.',
+    'fs_types_go':               'Ver qué pasaría',
+    'fs_types_back':             'Cambiar las clases',
+    'fs_types_devices':          'Las que parecen dispositivos',
+    'fs_types_chosen':           '{} de {} clases',
+    'fs_types_all':              'Todas las clases',
+    'fs_hosts_title':            'Dispositivos de Freshservice',
+    'fs_hosts_none':             'Freshservice no ha devuelto ningún activo.',
+    'fs_hosts_summary':          '{} activos: {} nuevos, {} a corregir, {} a adoptar, {} sin cambios.',
+    'fs_hosts_filter_ph':        'Buscar por nombre, dirección, número de serie o etiqueta…',
+    'fs_hosts_shown':            '{} a la vista · {} marcados',
+    'fs_hosts_group_linked':     'Ya vinculados con un dispositivo de aquí',
+    'fs_hosts_group_new':        'Todavía sin vincular',
+    'fs_hosts_link_col':         'Dispositivo de aquí',
+    'fs_hosts_link_none':        '— crear uno nuevo —',
+    'fs_hosts_link_taken':       'Ese dispositivo ya está vinculado a otro activo.',
+    'fs_hosts_link_gone':        'Ese dispositivo ya no existe.',
+    'fs_hosts_orphans':          'Ya no están en Freshservice ({}). **No se borran**: de un dispositivo cuelgan sus perfiles de conexión, sus módulos y su historial, así que quitarlo se decide uno a uno.',
+    'fs_hosts_done':             '{} creados, {} corregidos, {} adoptados.',
+    'fs_host_name_taken':        'Ya hay aquí un dispositivo con ese nombre. Empareja los dos en vez de crear otro.',
+    'fs_act_create_m':           'Nuevo',
+    'fs_asset_type':             'Tipo allí',
+    'fs_asset_serial':           'Nº de serie',
+    'fs_asset_tag':              'Etiqueta',
+    'fs_asset_no_address':       'sin dirección',
+    'fs_new_type_tt':            'Aquí no hay ninguna clase que se parezca a «{}», así que se creará una con ese nombre. Después puedes renombrarla o cambiarle el icono desde la ficha de cualquier dispositivo.',
+    'fs_guess_type_tt':          'Clase adivinada a partir del tipo de activo de Freshservice. Se pone al crearlo y no se vuelve a tocar: si la corriges aquí, se queda como la dejes.',
     'orgs_title':                'Empresas',
     'orgs_hint':
         'La abreviatura es la que cabe en una chapa y en un alzado, donde el nombre '
         'legal de una sociedad no entra. Borrar una empresa no borra nada de lo suyo: '
         'deja de decirse de quién es.',
     'orgs_new':                  'Añadir empresa',
+    'orgs_new_more':             'Otras formas de añadir empresas',
     'orgs_name':                 'Nombre',
     'orgs_short':                'Abreviatura',
     'orgs_desc':                 'Descripción',
@@ -4765,16 +4897,16 @@ LANG = {
     'orgs_name_taken':           'Ya hay una empresa que se llama «{}».',
     'orgs_short_taken':          'La abreviatura «{}» ya es de otra empresa.',
     'orgs_filter_ph':            'Nombre, abreviatura o descripción…',
-    'orgs_managed':              'Esta empresa la mantiene {}: su nombre, su abreviatura y su descripción se corrigen desde allí en cada importación. Suéltala de su origen si quieres escribirla aquí.',
-    'orgs_unlink':               'Soltar del origen',
-    'orgs_unlink_q':             '¿Soltar «{}» de su origen? Deja de actualizarse sola y pasa a ser de esta casa. No se borra nada de lo que tiene fichado.',
+    'orgs_managed':              'Esta empresa la mantiene {}: su nombre, su abreviatura y su descripción se corrigen desde allí en cada importación. Desvincúlala de su origen si quieres escribirla aquí.',
+    'orgs_unlink':               'Desvincular del origen',
+    'orgs_unlink_q':             '¿Desvincular «{}» de su origen? Deja de actualizarse sola y pasa a ser de esta casa. No se borra nada de lo que tiene fichado.',
     'orgs_name_required':        'Hace falta un nombre',
     'orgs_not_found':            'No encontrado',
     'orgs_bad_scope':            'Eso no es algo que pueda ser de una empresa',
     'orgs_scope_site':           'sedes',
     'orgs_scope_room':           'salas',
     'orgs_scope_rack':           'armarios',
-    'orgs_scope_item':           'equipos',
+    'orgs_scope_item':           'dispositivos',
     'orgs_scope_host':           'máquinas',
     'dcim_link_provider':        'Operador',
     'dcim_link_circuit':         'N.o de circuito',
@@ -4819,6 +4951,7 @@ LANG = {
     'dcim_warn_on_bypass':       '{} no pasa ahora mismo por ningún SAI, pero pasaría por «{}» si no fuera por el bypass.',
     'dcim_warn_same_ups':        '{} cuelgan del mismo SAI: dos ramas y un solo punto de fallo.',
     'dcim_catalog':              'Catálogo',
+    'dcim_cat_host_types_tt':    'Las clases de dispositivo (servidor, conmutador, punto de acceso…) se gestionan en Sistema › Infraestructura, porque clasifican a los dispositivos del registro. Esto lleva allí.',
     'dcim_cat_note':             '{} modelos',
     'dcim_cat_search':           'Fabricante o modelo…',
     'dcim_cat_by_maker':         'Por fabricante',
@@ -4829,7 +4962,7 @@ LANG = {
     'dcim_cat_path':             'Carpeta o zip en el servidor',
     'dcim_cat_path_ph':          '/ruta/al/clon/device-types  ·  /ruta/al/archivo.zip',
     'dcim_cat_source':           'Etiqueta de origen',
-    'dcim_cat_source_help':      'Con qué nombre entra esta importación. Reimportar con la misma etiqueta REEMPLAZA lo que entró antes con ella y deja lo demás intacto: así conviven la biblioteca descargada y los modelos que alguien tecleó a mano para equipos que nadie ha publicado.',
+    'dcim_cat_source_help':      'Con qué nombre entra esta importación. Reimportar con la misma etiqueta REEMPLAZA lo que entró antes con ella y deja lo demás intacto: así conviven la biblioteca descargada y los modelos que alguien tecleó a mano para dispositivos que nadie ha publicado.',
     'dcim_cat_go':               'Importar',
     'dcim_cat_running':          '{} modelos leídos…',
     'dcim_cat_done':             '{} modelos importados',
@@ -5020,7 +5153,7 @@ LANG = {
     'dcim_plat_kind_appliance':    'Appliance',
     'dcim_plat_kind_other':        'Otra',
     'dcim_plat_intro':
-        'Con qué sale un equipo, escrito una vez. Una caja de texto por plantilla '
+        'Con qué sale un dispositivo, escrito una vez. Una caja de texto por plantilla '
         'acaba siendo cuatro formas de escribir «Debian 12», y entonces «cuántas '
         'máquinas hay que actualizar» no tiene una respuesta.',
     'dcim_plat_form_hint':
@@ -5086,7 +5219,7 @@ LANG = {
     'dcim_build_hist_hint':
         'Se guardan los últimos cambios de esta plantilla, con sus componentes. '
         'Volver a una versión reescribe sus datos, NO sus componentes: de ellos '
-        'cuelgan los que ya se estamparon en los equipos que salieron de aquí.',
+        'cuelgan los que ya se estamparon en los dispositivos que salieron de aquí.',
     'dcim_build_hist_restore_q':
         '¿Volver a lo que decía esta versión? Sus componentes no se tocan, y lo de '
         'en medio no se borra: volver atrás es un cambio más y queda registrado.',
@@ -5095,7 +5228,7 @@ LANG = {
     'dcim_attr_capacity':            'Capacidad',
     'dcim_attr_power_type': 'Alimentación',
     'dcim_attr_power_type_tt':
-        'Por dónde se alimenta. Una fuente dentro se cambia sin mover el equipo; un '
+        'Por dónde se alimenta. Una fuente dentro se cambia sin mover el dispositivo; un '
         'alimentador externo hay que llevárselo al mudarlo y no está atornillado a '
         'nada. Y PoE no gasta toma de regleta: la gasta el switch.',
     'dcim_val_internal': 'Fuente interna',
@@ -5167,7 +5300,7 @@ LANG = {
         'no son de seguridad—. A partir de aquí lo que falla se queda como está.',
     'dcim_attr_end_of_security_tt':
         'Cuándo dejan de salir parches de seguridad. Es la fecha que decide si '
-        'ese equipo puede seguir mirando a internet, y por eso se enseña en rojo '
+        'ese dispositivo puede seguir mirando a internet, y por eso se enseña en rojo '
         'en cuanto pasa.',
     'dcim_attr_last_contract_attach_tt':
         'Hasta cuándo se puede contratar soporte por primera vez. Pasada, ya no '
@@ -5516,7 +5649,7 @@ LANG = {
         'SODIMM-1 o en SODIMM-2, y «dos bahías» no dice en cuál está el que hay. '
         'Cada componente dice en qué hueco va y aquí se cruzan por el nombre.',
     'dcim_bay_edit_hint':
-        'El nombre es el del equipo, el que está serigrafiado en la placa y el que '
+        'El nombre es el del dispositivo, el que está serigrafiado en la placa y el que '
         'dice el manual. La cuenta de bahías sale de esta lista: no se teclea aparte '
         'para que no puedan decir dos cosas distintas.',
     'dcim_signals_hint':
@@ -5540,7 +5673,7 @@ LANG = {
     'dcim_bay_name_them':          'Ponerles nombre',
     'dcim_bay_seeded':
         'Los nombres salen del recuento, que es lo único que había: corrígelos con los '
-        'del equipo y borra los que no existan.',
+        'del dispositivo y borra los que no existan.',
     'dcim_bay_name_port':          'Puerto',
     'dcim_bay_name_hint_port':     'USB trasero 1, HDMI, DC-IN…',
     'dcim_bay_holds_port':         'Qué lleva enchufado',
@@ -5557,13 +5690,13 @@ LANG = {
     'dcim_bay_name_them_port':     'Ponerles nombre',
     'dcim_bay_seeded_port':
         'Los nombres salen del recuento, que es lo único que había: corrígelos con los '
-        'del equipo y borra los que no existan.',
+        'del dispositivo y borra los que no existan.',
     'dcim_bay_hint_port':
         'Un puerto por el que cuelga algo también es un SITIO: el adaptador de red va '
         'en el USB de detrás, no en «uno de los cuatro». Cada elemento externo dice a '
         'qué puerto va y aquí se cruzan por el nombre.',
     'dcim_bay_edit_hint_port':
-        'El nombre es el del equipo, el que está serigrafiado en la carcasa y el que '
+        'El nombre es el del dispositivo, el que está serigrafiado en la carcasa y el que '
         'dice el manual. La cuenta de puertos sale de esta lista: no se teclea aparte '
         'para que no puedan decir dos cosas distintas.',
     'dcim_part_hole':            'Hueco',
@@ -5584,8 +5717,8 @@ LANG = {
         'Un mismo SSD va en veinte máquinas. Elegirlo del catálogo es lo que '
         'permite preguntar cuántos hay y dónde están; escrito a mano son once '
         'formas del mismo nombre que no se pueden contar juntas.',
-    'dcim_no_parts':             'Este equipo no tiene componentes apuntados.',
-    'dcim_part_drop_q':          '¿Quitar «{}» del inventario de este equipo?',
+    'dcim_no_parts':             'Este dispositivo no tiene componentes apuntados.',
+    'dcim_part_drop_q':          '¿Quitar «{}» del inventario de este dispositivo?',
     'dcim_builds':               'Plantillas',
     'dcim_build':                'Plantilla',
     'dcim_build_new':            'Nueva plantilla',
@@ -5624,9 +5757,9 @@ LANG = {
         'bahía que le toca.',
     'dcim_build_outer':          'Elementos externos',
     'dcim_build_outer_note':
-        'Lo que cuelga del equipo y no va dentro: el adaptador USB-C a red, el '
+        'Lo que cuelga del dispositivo y no va dentro: el adaptador USB-C a red, el '
         'alimentador, el latiguillo de consola. Se ven, se pierden y se los lleva '
-        'quien mueve el equipo — por eso se cuentan aparte. Van enchufados a un '
+        'quien mueve el dispositivo — por eso se cuentan aparte. Van enchufados a un '
         'puerto, no a una bahía.',
     'dcim_build_ports_tab_hint':
         'Los puertos y las tomas de corriente se editan en sus pestañas.',
@@ -5663,20 +5796,20 @@ LANG = {
         'negoció el precio. Hoy eso vive en un correo, y el correo se pierde '
         'antes que el servidor.',
     'dcim_build_tab_data':         'Resumen',
-    'dcim_build_sum':              'Sale un equipo con',
+    'dcim_build_sum':              'Sale un dispositivo con',
     'dcim_build_sum_ram':          '{} GB de RAM',
     'dcim_build_sum_disk':         '{} TB en bruto',
     'dcim_build_sum_cpu':          '{} CPU',
     'dcim_build_sum_cores':        '{} núcleos',
     'dcim_build_sum_unknown':      '{} piezas sin datos para contar',
-    'dcim_build_items':          'Equipos',
-    'dcim_build_items_of':       '{} equipos han salido de esta plantilla',
+    'dcim_build_items':          'Dispositivos',
+    'dcim_build_items_of':       '{} dispositivos han salido de esta plantilla',
     'dcim_build_no_parts':       'Esta plantilla no lleva nada puesto todavía.',
     'dcim_build_u_auto':         'La del modelo',
     'dcim_build_clone':          'Clonar',
     'dcim_build_clone_q':        'Nombre de la copia de «{}»',
     'dcim_build_drop_q':
-        '¿Retirar la plantilla «{}»? Los equipos que salieron de ella se quedan '
+        '¿Retirar la plantilla «{}»? Los dispositivos que salieron de ella se quedan '
         'como están; lo que se pierde es poder mirar de qué constaba.',
     'dcim_build_name_taken':     'Hace falta un nombre, y que no lo tenga ya otra plantilla.',
     'dcim_build_from':           'Se montó siguiendo «{}»',
@@ -5696,12 +5829,12 @@ LANG = {
     'dcim_asset_tt':
         'El número que le pone la casa: no es la etiqueta —eso es lo que está rotulado en la '
         'caja— ni el de serie, que es del fabricante. Es único entre TODO lo inventariado: '
-        'equipos, armarios y cables comparten numeración. Escribe «INV-?» y se pone el '
+        'dispositivos, armarios y cables comparten numeración. Escribe «INV-?» y se pone el '
         'siguiente; «INV-???» hace lo mismo a tres cifras (INV-046). Vale cualquier principio: '
         'RACK-?, CBL-??…',
     'dcim_asset_taken':
         'Ese número de inventario ya lo lleva otra cosa. Es único entre todo lo inventariado: '
-        'equipos, armarios y cables comparten la misma numeración.',
+        'dispositivos, armarios y cables comparten la misma numeración.',
     'dcim_asset_ask_many':
         'Sólo puede haber un grupo de interrogantes: «INV-?» o «INV-???», no los dos en el '
         'mismo número. Con dos grupos no se sabe cuál hay que numerar.',
@@ -5881,7 +6014,7 @@ LANG = {
     'dcim_dev_no_site':            'Sin sede',
     'dcim_dev_no_rack':            'Sin armario',
     'dcim_dev_find':               'Buscar por nombre, serie, inventario, modelo o armario…',
-    'dcim_dev_none':               'Ningún equipo responde a esa búsqueda.',
+    'dcim_dev_none':               'Ningún dispositivo responde a esa búsqueda.',
     'dcim_dev_capped':
         'La lista está recortada. Afina la búsqueda: con doscientas filas delante, lo que se '
         'hace no es leerlas.',
@@ -5891,7 +6024,7 @@ LANG = {
     'dcim_wire_no_cat':            'Sin categoría',
     'dcim_wire_no_rack':           'Sin armario',
     'dcim_wire_lane_partial':      '{} sin medir, así que hay más',
-    'dcim_wire_find':              'Buscar por etiqueta, inventario, boca o equipo…',
+    'dcim_wire_find':              'Buscar por etiqueta, inventario, boca o dispositivo…',
     'dcim_wire_any_kind':          'De cualquier tipo',
     'dcim_wire_any_cat':           'De cualquier categoría',
     'dcim_wire_n':                 '{} cables',
@@ -5944,16 +6077,16 @@ LANG = {
     'dcim_cable_power':            'corriente',
     'dcim_cable_console':          'consola',
     'dcim_cable_other':            'otro',
-    'dcim_need_two_items':         'Hacen falta al menos dos equipos en el armario para declarar un cable.',
+    'dcim_need_two_items':         'Hacen falta al menos dos dispositivos en el armario para declarar un cable.',
     'dcim_cable_same_item':
-        'Un puente en el mismo equipo va de una boca a OTRA: pon las dos y que sean distintas.',
+        'Un puente en el mismo dispositivo va de una boca a OTRA: pon las dos y que sean distintas.',
     'dcim_cable_drop_q':           '¿Quitar el cable «{}»?',
     'dcim_power_by_org':         'Consumo declarado por empresa',
-    'dcim_n_items':              '{} equipos',
+    'dcim_n_items':              '{} dispositivos',
     'dcim_pdu_color':            'Color de la regleta',
     'dcim_host_none':            'Sin enlazar',
     'dcim_host_tt':              'La máquina de Infraestructura que ES esta regleta: enlazarla le da estado y permite comparar lo medido con lo declarado',
-    'dcim_new_item_fed':         'Equipo nuevo, ya enchufado',
+    'dcim_new_item_fed':         'Dispositivo nuevo, ya enchufado',
     'dcim_plug_into':            'Enchufar a',
     'dcim_full':                 'llena',
     'dcim_power':                'Alimentación',
@@ -5971,7 +6104,7 @@ LANG = {
     'dcim_no_plug':              'No lleva enchufe',
     'dcim_pdu_which':            '¿Cuál es la regleta?',
     'dcim_pdu_which_note':
-        'Elige el equipo del armario que ES la regleta. Declararla es decir de qué rama cuelga '
+        'Elige el dispositivo del armario que ES la regleta. Declararla es decir de qué rama cuelga '
         'y cuántas tomas tiene, y eso no está en el catálogo — pero el nombre y el sitio ya '
         'están escritos y no hay que repetirlos.',
     'dcim_pdu_not_placed':       'No está colocada: va atornillada al lateral',
@@ -5982,7 +6115,7 @@ LANG = {
     'dcim_outlet_move':          'Cambiar de toma',
     'dcim_outlet_unknown':       'No sé en cuál',
     'dcim_outlet_note':
-        'Elige la toma. «No sé en cuál» es una respuesta: deja constancia de que ese equipo '
+        'Elige la toma. «No sé en cuál» es una respuesta: deja constancia de que ese dispositivo '
         'se alimenta de esa regleta sin inventarse un número que nadie ha mirado.',
     'dcim_outlets_n_free':       '{} de {} libres',
     'dcim_outlet_taken':         'Esa toma ya tiene un cable.',
@@ -6000,7 +6133,7 @@ LANG = {
     'dcim_power_note':           '{} W declarados · rama A {} W · rama B {} W',
     'dcim_power_ok':             'Todo lo que consume lo hace de las dos ramas.',
     'dcim_warn_single_branch_n':
-        '{} equipos cuelgan solo de la rama {}: si esa rama cae, se apagan. {}',
+        '{} dispositivos cuelgan solo de la rama {}: si esa rama cae, se apagan. {}',
     'dcim_and_more':             ' y {} más',
     'dcim_warn_single_branch':   '{} cuelga solo de la rama {}: si esa rama cae, se apaga.',
     'dcim_warn_over_half':       '{} está al {} %: si cae su pareja, esta no puede con las dos.',
@@ -6058,8 +6191,8 @@ LANG = {
     'dcim_side_rear':                        'trasero',
     'dcim_side_left':                        'izquierdo',
     'dcim_side_right':                       'derecho',
-    'dcim_unreachable':                      '{} equipo(s) por el lado {}, al que no se llega',
-    'dcim_unreachable_tt':                   'Hay equipo montado en una cara que este armario no deja alcanzar: no se cablea, no se cambia y no se apaga sin descolgarlo. No se corrige nada — cuál de las dos cosas está mal lo sabe quien esté delante.',
+    'dcim_unreachable':                      '{} dispositivo(s) por el lado {}, al que no se llega',
+    'dcim_unreachable_tt':                   'Hay algún dispositivo montado en una cara que este armario no deja alcanzar: no se cablea, no se cambia y no se apaga sin descolgarlo. No se corrige nada — cuál de las dos cosas está mal lo sabe quien esté delante.',
     'dcim_cooling':                          'Refrigeración',
     'dcim_cooling_':                         'Sin especificar',
     'dcim_cooling_none':                     'Ninguna',
@@ -6071,7 +6204,7 @@ LANG = {
     'dcim_cooling_split':                    'Split de pared',
     'dcim_host':               'Máquina',
     'dcim_item_host_tt':
-        'El dispositivo vigilado que ES este equipo. De aquí sale el color del alzado —un '
+        'El host vigilado que ES este dispositivo. De aquí sale el color del alzado —un '
         'armario sin máquinas enganchadas se dibuja entero en gris— y de aquí se le puede '
         'preguntar el número de serie.',
     'dcim_numbering':            'Numeración',
@@ -6094,9 +6227,9 @@ LANG = {
     'dcim_rail_rear_tt':         'Del mástil trasero al fondo del armario. Es por donde salen los cables, y sin ese hueco no cierra la puerta trasera.',
     'dcim_depth_mismatch':       'Descuadre de {} mm',
     'dcim_depth_mismatch_tt':    'Los tres tramos no suman el fondo declarado. No se corrige a propósito: lo que alguien midió con un metro y lo que dice la suma son dos cosas, y quedarse con la segunda pierde la primera.',
-    'dcim_item_depth':           'Fondo del equipo',
+    'dcim_item_depth':           'Fondo del dispositivo',
     'dcim_depth_tight':          'No entra',
-    'dcim_depth_unknown':        'Falta una medida: sin el fondo del equipo o sin la distancia entre mástiles no se puede contestar.',
+    'dcim_depth_unknown':        'Falta una medida: sin el fondo del dispositivo o sin la distancia entre mástiles no se puede contestar.',
     'dcim_depth_too_deep':       'Más largo que el hueco disponible.',
     'dcim_depth_no_cables':      'Entra, pero no deja sitio para los cables por detrás.',
     'dcim_depth_spare':          'Sobran {} mm después de dejar hueco para los cables',
@@ -6106,16 +6239,16 @@ LANG = {
     'dcim_unwatched_tt':       'Nada de lo que hay aquí tiene un check detrás. No es que esté bien: es que nadie lo mira — y un rack en verde sin nadie mirándolo es justo la mentira que este dibujo evita.',
     'dcim_roll_ok':            '{} bien',
     'dcim_roll_bad':           '{} de {} mal',
-    'dcim_roll_tt':            '{} equipos aquí dentro, {} de ellos sin vigilar. Solo cuenta lo que puedes ver.',
+    'dcim_roll_tt':            '{} dispositivos aquí dentro, {} de ellos sin vigilar. Solo cuenta lo que puedes ver.',
     'dcim_new':                'Nuevo',
     'dcim_site':               'Sede',
     'dcim_room':               'Sala',
     'dcim_rack':               'Rack',
-    'dcim_item':               'Equipo',
+    'dcim_item':               'Dispositivo',
     'dcim_board':              'Cuadro de mando',
     'dcim_map':               'Mapa de sedes',
     'dcim_map_hide':          'Ocultar mapa',
-    'dcim_board_note':         '{} sedes · {} equipos',
+    'dcim_board_note':         '{} sedes · {} dispositivos',
     'dcim_board_tile':         '{} racks en {} salas',
     'dcim_board_trouble':      'Qué está fallando',
     'dcim_board_trouble_n':    '{} en total',
@@ -6209,8 +6342,8 @@ LANG = {
     'infra_collect_left_running': 'Se dejó de esperar: lo que falte se guardará solo cuando el módulo acabe.',
     # «Recargar datos del servidor» (refresh_tt) es correcto en todo el panel y equívoco
     # justo aquí: al lado de un dispositivo, «servidor» se lee como el dispositivo. Y la distinción
-    # que importa en esta cabecera es otra: este botón NO consulta al equipo.
-    'infra_reload_tt': 'Volver a leer lo ya guardado (no consulta al equipo)',
+    # que importa en esta cabecera es otra: este botón NO consulta al dispositivo.
+    'infra_reload_tt': 'Volver a leer lo ya guardado (no consulta al dispositivo)',
     'infra_metrics': 'Medidas',
     'infra_tab_raw': 'Datos brutos',
     'infra_raw_values': 'Medidas',
@@ -6261,9 +6394,9 @@ LANG = {
     'attr_serial': 'Número de serie',
     'attr_model': 'Modelo',
     'attr_description': 'Descripción del sistema',
-    'attr_model_reported': 'Modelo (según el equipo)',
+    'attr_model_reported': 'Modelo (según el dispositivo)',
     'attr_vendor': 'Fabricante',
-    'attr_vendor_reported': 'Fabricante (según el equipo)',
+    'attr_vendor_reported': 'Fabricante (según el dispositivo)',
     'attr_firmware': 'Firmware',
     'attr_version': 'Versión',
     'attr_ip': 'Direcciones IP',

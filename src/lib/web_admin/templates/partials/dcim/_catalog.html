@@ -300,6 +300,16 @@ function _dcCatHtml() {
                 onclick="_dcCatGoTab('import')">
                 <i class="bi bi-download me-1"></i>${esc(t('dcim_cat_tab_import'))}</button></li>`
             : ''}
+            {# Las clases de dispositivo NO viven aquí: clasifican a los dispositivos del
+               registro, y este catálogo describe equipamiento en general. Pero es donde alguien
+               las viene a buscar —es el sitio de los catálogos—, así que hay una puerta. Un
+               enlace y no una copia de la pantalla: dos copias son dos que se separan. #}
+            <li class="nav-item ms-auto"><button class="nav-link text-muted"
+                onclick="_navSubtab(null, '#tab-servers', '#subtab-srv-types',
+                                    'ss_active_subtab_infra', '#subtab-srv-types')"
+                title="${escAttr(t('dcim_cat_host_types_tt'))}">
+                <i class="bi bi-tags me-1"></i>${esc(t('subtab_host_types'))}
+                <i class="bi bi-box-arrow-up-right ms-1 ss-fs-1"></i></button></li>
         </ul>
         ${tab === 'brands' ? _dcBrandsHtml()
           : tab === 'conns' ? _dcConnsHtml()

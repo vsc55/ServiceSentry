@@ -1,0 +1,731 @@
+{# ================================================================
+   Freshservice: traer los activos como dispositivos.
+
+   El hermano del cuadro de empresas, y a propósito se parece: las dos preguntas son la misma
+   —«qué va a pasar antes de que pase» y «cuál de los de allí es cuál de los de aquí»— y dos
+   cuadros que se comportan distinto son dos cosas que aprender por la cara.
+
+   Lo que cambia son las columnas: aquí lo que identifica una máquina es su dirección, su número
+   de serie y su etiqueta de inventario, que es lo que se lee en una pegatina cuando alguien está
+   de pie delante del armario decidiendo si ésa es la misma.
+
+   El panel dibuja el botón a partir de lo que declara `manifest.py` y no sabe nada de esto: lo
+   único que sabe es que hay que llamar a una función con este nombre.
+   ================================================================ #}
+
+//: Lo último que contestó la vista previa, lo marcado y lo emparejado a mano. Tres variables
+//: propias y no las del cuadro de empresas: los dos pueden estar abiertos en la misma sesión, y
+//: compartirlas haría que cerrar uno se llevara por delante el trabajo del otro.
+let _fsaPlan = null;
+let _fsaPick = new Set();
+let _fsaLink = {};
+let _fsaQuery = '';
+
+//: Las clases de activo que hay allí, y cuáles se han elegido. Un paso propio antes del plan: el
+//: catálogo de tipos es un recurso aparte y **una sola llamada**, así que se puede preguntar qué
+//: hace falta antes de traer nada — y un inventario de cuatro mil activos son cuarenta viajes a
+//: su API que no hay por qué hacer para acabar mirando los doce conmutadores.
+let _fsaTypes = [];
+let _fsaTypePick = new Set();
+
+//: Cuántos activos hay de cada clase, cuando alguien lo ha preguntado. `null` es «todavía no se
+//: ha contado», que **no es lo mismo que cero**: con esa diferencia borrada, una lista sin contar
+//: se dibujaría entera como vacía y no habría dónde elegir nada.
+//:
+//: Su catálogo de tipos no trae ese número, así que contarlos es recorrer los activos — el viaje
+//: que este paso existe para ahorrar. Por eso se pide a mano: se paga una vez, a propósito.
+let _fsaCounts = null;
+
+//: Si se enseñan también las clases sin ni un activo. De salida no: lo que se viene a hacer aquí
+//: es elegir, y una casilla que no puede traer nada es ruido entre las que sí.
+let _fsaShowEmpty = false;
+
+/** Traer los dispositivos. Tres momentos: qué clases, qué pasaría, y hacerlo. */
+async function freshserviceImportHosts() {
+    // El cuadro se abre al pulsar, con la rueda dentro. Al revés —pedir, y abrir al contestar—
+    // el botón se pulsa y no pasa nada, que es lo que hace que alguien lo pulse tres veces.
+    _fsOpen('fsAssetsModal', 'fsAssetsBody');
+    const btn = document.getElementById('btnFsAssetsApply');
+    if (btn) btn.disabled = true;         // no se acepta un plan que todavía no se ha visto
+    _fsaPlan = null;
+    const d = await apiGet('/api/v1/providers/freshservice/assets/types');
+    const cuerpo = document.getElementById('fsAssetsBody');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fsAssetsModal')).show();
+    if (!d) {                             // la conexión, no la pantalla: el aviso ya está puesto
+        if (cuerpo) cuerpo.innerHTML = _fsFalloHtml(t('fs_err_net'));
+        return;
+    }
+    if (d.error) {
+        if (cuerpo) cuerpo.innerHTML = _fsFalloHtml(d.error);
+        return;
+    }
+    _fsaTypes = d.types || [];
+    _fsaTypePick = new Set();
+    _fsaCounts = null;
+    _fsaShowEmpty = false;
+    _fsaTypesDraw();
+}
+
+/** El primer paso: qué clases de activo. Delante y no dentro de la tabla porque decide **qué se
+ *  le pide al origen**, y un filtro que sólo esconde filas no ahorra ni un viaje.
+ *
+ *  Sin elegir ninguna se traen todas, que es lo que significa no haber elegido — y es lo que
+ *  hacía esto antes de tener este paso. */
+function _fsaTypesDraw() {
+    const cuerpo = document.getElementById('fsAssetsBody');
+    if (!cuerpo) return;
+    if (!_fsaTypes.length) {
+        cuerpo.innerHTML = `<div class="text-muted">${esc(t('fs_types_none'))}</div>`;
+        return;
+    }
+    // Los que se parecen a algo de aquí, primero y con su clase al lado: un inventario tiene
+    // «Monitor», «Silla» y «Licencia» entre los conmutadores, y lo que se viene a buscar es lo
+    // que se puede vigilar.
+    const visibles = _fsaTypes.filter(x => _fsaShowEmpty || _fsaHas(x) !== 0);
+    const vacias = _fsaTypes.length - visibles.length;
+    const orden = [...visibles].sort((a, b) =>
+        (b.device_type ? 1 : 0) - (a.device_type ? 1 : 0)
+        || String(a.name).localeCompare(String(b.name)));
+    cuerpo.innerHTML = `<div class="small text-muted mb-2">${esc(t('fs_types_hint'))}</div>
+    <div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+        <button class="btn btn-sm btn-secondary" onclick="_fsaTypesAll(true)">${
+            esc(t('select_all'))}</button>
+        <button class="btn btn-sm btn-secondary" onclick="_fsaTypesAll(false)">${
+            esc(t('clear_selection'))}</button>
+        <button class="btn btn-sm btn-secondary" onclick="_fsaTypesLikely()">${
+            esc(t('fs_types_devices'))}</button>
+        ${_fsaCounts ? '' : `<button class="btn btn-sm btn-secondary" id="btnFsaCount"
+            onclick="_fsaCount()" title="${escAttr(t('fs_types_count_tt'))}"
+            ><i class="bi bi-123 me-1"></i>${esc(t('fs_types_count'))}</button>`}
+        <span class="small text-muted ms-auto" id="fsAssetsTypeCount"></span>
+    </div>
+    <div class="row g-1">${orden.map(x => {
+        const n = _fsaHas(x);
+        return `<div class="col-sm-6 col-lg-4">
+        <label class="d-flex align-items-center gap-2 px-2 py-1 rounded border">
+            <input type="checkbox" class="form-check-input m-0"
+                   ${_fsaTypePick.has(String(x.id)) ? 'checked' : ''}
+                   ${n === 0 ? 'disabled' : ''}
+                   onchange="_fsaTypeToggle(${jsStr(String(x.id))}, this.checked)">
+            <span class="flex-grow-1 text-truncate${n === 0 ? ' text-muted' : ''}"
+                  title="${escAttr(x.name)}">${esc(x.name)}</span>
+            ${n === null ? '' : `<span class="ss-tabular text-muted ss-fs-1">${esc(String(n))}</span>`}
+            ${x.device_type ? `<span class="badge bg-body-secondary text-body border fw-normal"
+                >${esc(typeof hostTypeLabel === 'function' ? hostTypeLabel(x.device_type)
+                                                           : x.device_type)}</span>` : ''}
+        </label></div>`; }).join('')}</div>
+    ${vacias ? `<div class="mt-2"><button class="btn btn-sm btn-secondary"
+        onclick="_fsaToggleEmpty()">${esc(tf('fs_types_empty', String(vacias)))}</button></div>`
+        : ''}
+    <div class="mt-3">
+        <button class="btn btn-sm btn-primary" onclick="_fsaLoadPlan()">
+            <i class="bi bi-search me-1"></i>${esc(t('fs_types_go'))}</button>
+    </div>`;
+    _fsaTypesSync();
+    const btn = document.getElementById('btnFsAssetsApply');
+    if (btn) btn.disabled = true;         // todavía no hay plan que aceptar
+}
+
+/** Cuántos activos tiene esa clase, o `null` si nadie lo ha contado todavía.
+ *
+ *  `null` y `0` son dos cosas distintas y la diferencia es la pantalla entera: sin contar, todas
+ *  las casillas saldrían apagadas y no habría dónde elegir nada. */
+function _fsaHas(x) {
+    if (!_fsaCounts) return null;
+    return Number(_fsaCounts[String(x.id)] || 0);
+}
+
+/** Contarlos. Se pide a mano porque su catálogo de tipos no trae ese número: la única forma de
+ *  saberlo es recorrer los activos, que es el viaje que este paso existe para ahorrar. Se paga
+ *  una vez, a propósito, y a partir de ahí se elige sabiendo dónde hay algo. */
+async function _fsaCount() {
+    const btn = document.getElementById('btnFsaCount');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>${
+            esc(t('fs_working'))}`;
+    }
+    const d = await apiGet('/api/v1/providers/freshservice/assets/counts');
+    if (!d || d.error) {
+        // El paso sigue siendo usable sin el recuento: es un extra, y que falle no puede dejar
+        // sin importar a quien ya sabía qué clase quería.
+        if (btn) { btn.disabled = false; btn.innerHTML = esc(t('fs_types_count')); }
+        return showToast((d && d.error) || t('fs_err_net'), 'danger');
+    }
+    _fsaCounts = d.counts || {};
+    // Lo marcado que resulte estar vacío se suelta: dejarlo puesto sería pedir un plan que no
+    // puede traer nada y enseñar «no hay activos» como si fuera la respuesta.
+    _fsaTypePick = new Set([..._fsaTypePick].filter(
+        id => Number(_fsaCounts[String(id)] || 0) > 0));
+    _fsaTypesDraw();
+}
+
+function _fsaToggleEmpty() {
+    _fsaShowEmpty = !_fsaShowEmpty;
+    _fsaTypesDraw();
+}
+
+function _fsaTypeToggle(id, on) {
+    if (on) _fsaTypePick.add(String(id)); else _fsaTypePick.delete(String(id));
+    // Sólo el recuento: volver a dibujar la rejilla entera al marcar una casilla mueve las
+    // demás bajo el ratón, porque el orden pone delante las que se parecen a algo de aquí.
+    _fsaTypesSync();
+}
+
+function _fsaTypesAll(on) {
+    // Sobre lo que PUEDE traer algo. Con el recuento hecho, marcar una clase vacía es marcar una
+    // casilla que no cambia nada — y hace que el botón prometa un número que no es.
+    _fsaTypePick = on
+        ? new Set(_fsaTypes.filter(x => _fsaHas(x) !== 0).map(x => String(x.id)))
+        : new Set();
+    _fsaTypesDraw();
+}
+
+/** Las que se parecen a un dispositivo de los de aquí. Un atajo y no un valor por defecto:
+ *  cuáles hacen falta lo decide quien mira, y adivinarlo de salida escondería la mitad del
+ *  inventario sin decir que lo ha hecho. */
+function _fsaTypesLikely() {
+    _fsaTypePick = new Set(_fsaTypes.filter(x => x.device_type && _fsaHas(x) !== 0)
+                                    .map(x => String(x.id)));
+    _fsaTypesDraw();
+}
+
+function _fsaTypesSync() {
+    const el = document.getElementById('fsAssetsTypeCount');
+    if (el) {
+        el.textContent = _fsaTypePick.size
+            ? tf('fs_types_chosen', String(_fsaTypePick.size), String(_fsaTypes.length))
+            : t('fs_types_all');
+    }
+}
+
+/** El segundo paso: qué pasaría con los activos de esas clases. */
+async function _fsaLoadPlan() {
+    _fsOpen('fsAssetsModal', 'fsAssetsBody');
+    const q = [..._fsaTypePick].map(x => 'type=' + encodeURIComponent(x)).join('&');
+    const d = await apiGet('/api/v1/providers/freshservice/assets/preview'
+                           + (q ? '?' + q : ''));
+    const cuerpo = document.getElementById('fsAssetsBody');
+    if (!d) {
+        if (cuerpo) cuerpo.innerHTML = _fsFalloHtml(t('fs_err_net'));
+        return;
+    }
+    if (d.error) {
+        if (cuerpo) cuerpo.innerHTML = _fsFalloHtml(d.error);
+        return;
+    }
+    _fsaPlan = d;
+    _fsaLink = {};
+    _fsaQuery = '';
+    _fsaPick = _fsaDefaultPick(d.plan);
+    _fsaDraw();
+}
+
+/** Qué sale marcado al abrir: **sólo lo que ya es de esta casa y ha cambiado** (`update`).
+ *
+ *  Refrescar lo que ya se mantiene aquí es rutina; traer un dispositivo nuevo es una decisión —
+ *  cuatrocientos activos no son cuatrocientas máquinas de las que aquí se quiera saber nada, y
+ *  la mitad son portátiles. Marcarlas todas de serie haría que la rutina creara cientos de
+ *  fichas que nadie pidió, salvo que alguien se acordara de desmarcarlas. */
+function _fsaDefaultPick(plan) {
+    return new Set((plan || []).filter(p => p.action === 'update')
+                               .map(p => String(p.external_id)));
+}
+
+/** Redibujar las filas y el botón. Junto, porque el botón dice cuántos se van a traer y eso
+ *  cambia con cada casilla: dos sitios que se actualizan por separado son un botón que promete
+ *  un número que ya no es. */
+function _fsaDraw() {
+    // Sólo las FILAS cuando ya está pintado: el buscador vive en la cabecera, y redibujarla al
+    // marcar una casilla le quitaría el cursor a quien está escribiendo.
+    const filas = document.getElementById('fsAssetsRows');
+    if (filas) {
+        filas.innerHTML = _fsaRowsHtml(_fsaPlan || {});
+        _fsaSyncHead();
+    } else {
+        const cuerpo = document.getElementById('fsAssetsBody');
+        if (cuerpo) cuerpo.innerHTML = _fsaPlanHtml(_fsaPlan || {});
+    }
+    const btn = document.getElementById('btnFsAssetsApply');
+    if (!btn) return;
+    const n = _fsaPick.size;
+    // Sin nada marcado, el botón de hacerlo no se ofrece: pulsarlo no cambiaría nada, y un botón
+    // que no cambia nada es uno que enseña a no leer los avisos.
+    btn.disabled = !n;
+    btn.innerHTML = `<i class="bi bi-cloud-download me-1"></i>${esc(t('fs_import'))}${
+        n ? ` (${n})` : ''}`;
+}
+
+function _fsaToggle(ext, on) {
+    const k = String(ext);
+    if (on) _fsaPick.add(k); else _fsaPick.delete(k);
+    _fsaDraw();
+}
+
+/** Todos o ninguno — de los que hacen algo, y **de los que se ven**: con un filtro puesto,
+ *  «todos» son los que se están mirando. Marcar también lo que el filtro esconde es marcar a
+ *  ciegas, que es justo lo que el filtro estaba evitando. */
+function _fsaToggleAll(on) {
+    const visibles = ((_fsaPlan || {}).plan || []).filter(_fsaMatch)
+        .filter(p => p.action !== 'same' || _fsaLink[String(p.external_id)])
+        .map(p => String(p.external_id));
+    for (const ext of visibles) {
+        if (on) _fsaPick.add(ext); else _fsaPick.delete(ext);
+    }
+    _fsaDraw();
+}
+
+/** Emparejar a mano un activo con un dispositivo de aquí — o deshacerlo.
+ *
+ *  Es la mitad de para lo que sirve este cuadro, y es lo que el panel no puede deducir: que
+ *  «SRV-BCN-01» de allí y «srv-barcelona» de aquí son la misma máquina lo sabe quien lo mira, y
+ *  ningún parecido de nombres lo va a decir nunca. Al elegir uno, la fila pasa a decir «se
+ *  adopta»: no se crea nada, se le pone el origen al que ya estaba. */
+function _fsaSetLink(ext, uid) {
+    const k = String(ext);
+    const fila = ((_fsaPlan || {}).plan || []).find(p => String(p.external_id) === k) || {};
+    // Elegir el que el plan ya había encontrado no es un emparejamiento a mano: es dejarlo como
+    // estaba. Guardarlo como si lo fuera haría que la fila dijera «se adopta» cuando no cambia
+    // de dispositivo — y que se marcara solo uno al que no había nada que hacerle.
+    if (uid && uid === String(fila.uid || '')) { delete _fsaLink[k]; _fsaDraw(); return; }
+    if (uid) { _fsaLink[k] = uid; _fsaPick.add(k); } else { delete _fsaLink[k]; }
+    _fsaDraw();
+}
+
+/** Si esta fila es de un dispositivo que ya existe aquí: lo trajo una importación anterior, o
+ *  alguien lo acaba de emparejar a mano. Es la línea que parte la lista en dos. */
+function _fsaLinked(p) {
+    return !!(String((p || {}).uid || '') || _fsaLink[String((p || {}).external_id)]);
+}
+
+/** Las filas, **en dos grupos**: primero lo que ya está vinculado y luego lo demás.
+ *
+ *  Con cuatrocientos activos, los doce que ya se mantienen aquí —que son los que se vienen a
+ *  mirar— salían repartidos por orden alfabético entre trescientos ochenta y ocho que no. Son
+ *  dos preguntas distintas: «¿qué le pasa a lo mío?» y «¿qué más hay?». */
+function _fsaRowsHtml(d) {
+    const todo = ((d || {}).plan || []).filter(_fsaMatch);
+    const vinculados = todo.filter(_fsaLinked);
+    const nuevos = todo.filter(p => !_fsaLinked(p));
+    const cabecera = (clave, n) => `<tr class="table-active"><td colspan="7"
+        class="fw-semibold ss-fs-2 text-muted">${esc(t(clave))} (${n})</td></tr>`;
+    const parte = (filas, clave) => (filas.length
+        ? ((vinculados.length && nuevos.length) ? cabecera(clave, filas.length) : '')
+          + _fsaRowsOf(d, filas)
+        : '');
+    return parte(vinculados, 'fs_hosts_group_linked') + parte(nuevos, 'fs_hosts_group_new');
+}
+
+function _fsaRowsOf(d, plan) {
+    const tono = {create: 'text-bg-success', update: 'text-bg-warning',
+                  adopt: 'text-bg-info', same: 'text-bg-secondary'};
+    // A quién se puede emparejar: los que no están ya atados a OTRO activo. Dos no pueden
+    // compartir uno — el segundo le pisaría el nombre al primero en cada importación, y la ficha
+    // iría cambiando de nombre sola.
+    const ofrecidos = (uid) => ((d || {}).hosts || []).filter(
+        h => h.uid === uid || !(h.source === 'freshservice' && h.external_id));
+    return plan.map(p => {
+        const ext = String(p.external_id);
+        const suyo = String(p.uid || '');
+        const atado = (ext in _fsaLink) ? _fsaLink[ext] : suyo;
+        const accion = (atado && atado !== suyo) ? 'adopt' : p.action;
+        const puede = accion !== 'same' || (atado && atado !== suyo);
+        const marcada = _fsaPick.has(ext);
+        // Lo que cambia, dicho como cambio: antes → ahora. «12 se corrigen» es un número; lo que
+        // alguien mira antes de aceptar es cuál de sus máquinas va a cambiar de dirección.
+        const antes = (p.was || {});
+        const cambia = (campo) => (accion === 'update' || accion === 'adopt')
+            && String(antes[campo] || '') !== String(p[campo] || '')
+            && String(antes[campo] || '');
+        const viejo = (campo) => cambia(campo)
+            ? `<div class="text-muted ss-fs-1 text-decoration-line-through">${
+                esc(antes[campo])}</div>` : '';
+        // La clase adivinada, sólo cuando se va a CREAR: al adoptar no se toca, porque el de
+        // aquí ya la tiene puesta y probablemente la puso una persona.
+        // La clase que se le va a poner, sólo al CREAR: al adoptar no se toca, porque el de
+        // aquí ya la tiene puesta y probablemente la puso una persona.
+        //
+        // Y si no se parece a ninguna de las de aquí, **se va a crear una** — dicho aquí y no
+        // callado: crear clases en silencio es la manera de acabar con quince que nadie recuerda
+        // haber pedido.
+        const nueva = accion === 'create' && !p.device_type && p.new_type;
+        const clase = (accion === 'create' && (p.device_type || nueva))
+            ? `<span class="badge ${nueva ? 'text-bg-success' : 'bg-body-secondary text-body'}
+                 border fw-normal ms-1"
+                 title="${escAttr(nueva ? tf('fs_new_type_tt', p.new_type)
+                                        : t('fs_guess_type_tt'))}">${
+                nueva ? `<i class="bi bi-plus-lg"></i>${esc(p.new_type)}`
+                      : esc(typeof hostTypeLabel === 'function' ? hostTypeLabel(p.device_type)
+                                                                : p.device_type)}</span>` : '';
+        return `<tr${marcada ? '' : ' class="opacity-50"'}>
+        <td class="text-center"><input type="checkbox" class="form-check-input"
+                ${marcada ? 'checked' : ''}${puede ? '' : ' disabled'}
+                onchange="_fsaToggle(${jsStr(ext)}, this.checked)"></td>
+        <td><span class="badge ${tono[accion] || 'text-bg-secondary'}">${
+            esc(t(accion === 'create' ? 'fs_act_create_m' : 'fs_act_' + accion))}</span></td>
+        <td class="fw-semibold text-nowrap">${esc(p.name)}${viejo('name')}</td>
+        <td class="ss-tabular">${p.address ? `<code>${esc(p.address)}</code>`
+            : `<span class="text-muted ss-fs-1">${esc(t('fs_asset_no_address'))}</span>`}${
+            viejo('address')}</td>
+        <td class="ss-fs-2">${esc(p.type_name || '—')}${clase}</td>
+        <td class="ss-fs-2 ss-tabular text-muted">${esc(p.serial || p.asset_tag || '')}</td>
+        <td><select class="form-select form-select-sm"
+                onchange="_fsaSetLink(${jsStr(ext)}, this.value)">
+            ${suyo ? '' : `<option value=""${atado ? '' : ' selected'}>${
+                esc(t('fs_hosts_link_none'))}</option>`}
+            ${ofrecidos(suyo).map(h => `<option value="${escAttr(h.uid)}"${
+                atado === h.uid ? ' selected' : ''}>${esc(h.name)}${
+                h.address ? ` (${esc(h.address)})` : ''}</option>`).join('')}
+        </select></td>
+    </tr>`;
+    }).join('');
+}
+
+/** La tabla entera: resumen, buscador y filas. Se pinta UNA vez por vista previa; a partir de
+ *  ahí sólo se rehacen las filas. */
+function _fsaPlanHtml(d) {
+    const plan = (d && d.plan) || [];
+    if (!plan.length) {
+        return `<div class="text-muted mb-3">${esc(t('fs_hosts_none'))}</div>
+            <button class="btn btn-sm btn-secondary" onclick="_fsaTypesDraw()"
+                ><i class="bi bi-arrow-left me-1"></i>${esc(t('fs_types_back'))}</button>`;
+    }
+    const c = d.counts || {};
+    const filas = _fsaRowsHtml(d);
+    const huerfanos = (d.orphans || []).length
+        ? `<div class="alert alert-warning py-2 px-3 mt-3 mb-0 small">${
+            esc(tf('fs_hosts_orphans', String(d.orphans.length)))}
+            <div class="mt-1">${d.orphans.map(h =>
+                `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1"
+                    >${esc(h.name)}</span>`).join('')}</div></div>`
+        : '';
+    return `<div class="d-flex align-items-center gap-2 mb-2">
+        <span class="small text-muted flex-grow-1">${esc(tf('fs_hosts_summary',
+            String(d.total || plan.length), String(c.create || 0), String(c.update || 0),
+            String(c.adopt || 0), String(c.same || 0)))}</span>
+        <button class="btn btn-sm btn-secondary" onclick="_fsaTypesDraw()"
+            ><i class="bi bi-arrow-left me-1"></i>${esc(t('fs_types_back'))}</button>
+    </div>
+    <div class="d-flex align-items-center gap-2 mb-2">
+        <input type="search" class="form-control form-control-sm" style="max-width:22rem"
+               placeholder="${escAttr(t('fs_hosts_filter_ph'))}" value="${escAttr(_fsaQuery)}"
+               oninput="_fsaFilter(this.value)">
+        <span class="small text-muted flex-grow-1" id="fsAssetsCount"></span>
+        <button class="btn btn-sm btn-secondary" id="fsAssetsAll"
+            onclick="_fsaToggleAll(true)">${esc(t('select_all'))}</button>
+        <button class="btn btn-sm btn-secondary" id="fsAssetsNone"
+            onclick="_fsaToggleAll(false)">${esc(t('clear_selection'))}</button>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead><tr class="text-muted ss-fs-1 text-uppercase">
+                <th style="width:2.5rem"></th>
+                <th style="width:7rem"></th>
+                <th>${esc(t('col_host_name'))}</th>
+                <th style="width:11rem">${esc(t('col_host_address'))}</th>
+                <th style="width:12rem">${esc(t('fs_asset_type'))}</th>
+                <th style="width:10rem">${esc(t('fs_asset_serial'))}</th>
+                <th style="width:16rem">${esc(t('fs_hosts_link_col'))}</th>
+            </tr></thead>
+            <tbody id="fsAssetsRows">${filas}</tbody>
+        </table>
+    </div>${huerfanos}`;
+}
+
+/** Buscar por nombre, dirección, número de serie o etiqueta. Las cuatro a la vez y sin distinguir
+ *  mayúsculas: quien busca «bcn01» no sabe si lo que recuerda era el nombre o la pegatina.
+ *
+ *  Lo que se filtra es lo que se VE. Lo marcado no se toca —vive en `_fsaPick`, por
+ *  identificador— así que filtrar, marcar tres, cambiar el filtro y marcar otros dos deja los
+ *  cinco marcados. Al revés sería un cuadro donde escribir en el buscador borra trabajo. */
+function _fsaMatch(p) {
+    const q = _fsaQuery.trim().toLowerCase();
+    if (!q) return true;
+    return `${p.name || ''} ${p.address || ''} ${p.serial || ''} ${p.asset_tag || ''} ${
+        p.type_name || ''}`.toLowerCase().includes(q);
+}
+
+function _fsaFilter(q) {
+    _fsaQuery = String(q || '');
+    const filas = document.getElementById('fsAssetsRows');
+    if (filas) filas.innerHTML = _fsaRowsHtml(_fsaPlan || {});
+    _fsaSyncHead();
+}
+
+/** Poner al día lo que la cabecera dice sin volver a dibujarla: cuántos se ven, cuántos están
+ *  marcados y si los dos botones tienen algo que hacer. */
+function _fsaSyncHead() {
+    const plan = ((_fsaPlan || {}).plan || []).filter(_fsaMatch);
+    const hacen = plan.filter(p => p.action !== 'same' || _fsaLink[String(p.external_id)]);
+    const marcados = hacen.filter(p => _fsaPick.has(String(p.external_id))).length;
+    const el = document.getElementById('fsAssetsCount');
+    if (el) el.textContent = tf('fs_hosts_shown', String(plan.length), String(marcados));
+    const todos = document.getElementById('fsAssetsAll');
+    if (todos) todos.disabled = !hacen.length || marcados === hacen.length;
+    const ninguno = document.getElementById('fsAssetsNone');
+    if (ninguno) ninguno.disabled = !marcados;
+}
+
+/** Aplicarlo. El servidor vuelve a pedir la lista en vez de fiarse de lo que se enseñó: entre
+ *  mirar y aceptar pasa un rato, y lo que se escribe tiene que ser lo que hay ahora. */
+async function freshserviceAssetsApply() {
+    // Y mientras escribe, el botón lo dice y no se deja pulsar otra vez: son cientos de filas y
+    // un segundo clic las escribiría dos veces.
+    const btn = document.getElementById('btnFsAssetsApply');
+    const antes = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>${
+            esc(t('fs_working'))}`;
+    }
+    const r = await apiSend('POST', '/api/v1/providers/freshservice/assets/import',
+                            {pick: Array.from(_fsaPick), link: _fsaLink,
+                             types: Array.from(_fsaTypePick)});
+    if (btn) { btn.disabled = false; btn.innerHTML = antes; }
+    if (!r.ok) return showToast(r.error || t('fs_err_net'), 'danger');
+    const h = r.data || {};
+    showToast(tf('fs_hosts_done', String(h.created || 0), String(h.updated || 0),
+                 String(h.adopted || 0)), 'success');
+    // Lo que no entró se dice aparte y en rojo: un aviso verde con un «y tres fallaron» dentro
+    // se lee como que fue bien. Y con el nombre del primero, que es por dónde se empieza a
+    // arreglarlo.
+    if ((h.failed || []).length) {
+        const primero = h.failed[0] || {};
+        showToast(`${tf('fs_done_failed', String(h.failed.length))} ${
+            primero.name ? `— ${primero.name}: ${primero.error || ''}` : ''}`, 'danger');
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fsAssetsModal')).hide();
+    // Y si la pantalla de dispositivos está delante, que enseñe lo que ha quedado.
+    if (typeof reloadHosts === 'function' && document.getElementById('servers-container')) {
+        reloadHosts();
+    }
+}
+
+
+// ── Traer las CLASES de dispositivo ─────────────────────────────────────────────────────
+//
+// Sin traer un solo activo: una casa que ya usa Freshservice tiene ahí escritas las clases que
+// usa, y teclearlas otra vez aquí es tener dos listas — que es una que se queda vieja sin avisar.
+// El catálogo de tipos es un recurso aparte y una sola llamada, así que esto es barato.
+//
+// **Y se pregunta cuáles.** Esto las traía todas y contaba después lo que había creado, que es
+// justo lo que las otras dos importaciones de este paquete no hacen: la lista de tipos de una
+// casa lleva «Monitor», «Silla» y «Licencia» entre los conmutadores, y traerlos todos es llenar
+// el desplegable de clases de cosas que aquí no se vigilan. Pedido desde la pantalla.
+
+let _fsTypes = [];
+let _fsTypesPick = new Set();
+
+async function freshserviceImportTypes() {
+    // El cuadro se abre al pulsar, con la rueda dentro: al revés, el botón se pulsa y no pasa
+    // nada durante unos segundos.
+    _fsTypesTitle(t('fs_import_types'));
+    _fsOpen('fsTypesModal', 'fsTypesBody');
+    const btn = document.getElementById('btnFsTypesApply');
+    // Y el de aceptar vuelve, que el cuadro de atar lo esconde.
+    if (btn) { btn.classList.remove('d-none'); btn.disabled = true; }
+    const d = await apiGet('/api/v1/providers/freshservice/assets/types');
+    const cuerpo = document.getElementById('fsTypesBody');
+    if (!d || d.error) {
+        if (cuerpo) cuerpo.innerHTML = _fsFalloHtml((d && d.error) || t('fs_err_net'));
+        return;
+    }
+    _fsTypes = d.types || [];
+    // Marcadas de salida **las que traerían algo**: las que aquí ya tienen una clase que vale no
+    // harían nada, y dejarlas marcadas es un botón que promete un número que no es.
+    _fsTypesPick = new Set(_fsTypes.filter(x => !x.here).map(x => String(x.id)));
+    _fsTypesDraw();
+}
+
+function _fsTypesDraw() {
+    const cuerpo = document.getElementById('fsTypesBody');
+    if (cuerpo) cuerpo.innerHTML = _fsTypesHtml();
+    const btn = document.getElementById('btnFsTypesApply');
+    if (!btn) return;
+    const n = _fsTypesPick.size;
+    // Sin nada marcado no se ofrece aceptar: pulsarlo no cambiaría nada.
+    btn.disabled = !n;
+    btn.innerHTML = `<i class="bi bi-cloud-download me-1"></i>${esc(t('fs_import'))}${
+        n ? ` (${n})` : ''}`;
+}
+
+function _fsTypesHtml() {
+    if (!_fsTypes.length) {
+        return `<div class="text-muted">${esc(t('fs_types_none'))}</div>`;
+    }
+    const nuevas = _fsTypes.filter(x => !x.here).length;
+    return `<div class="small text-muted mb-2">${esc(tf('fs_types_summary',
+            String(_fsTypes.length), String(nuevas)))}</div>
+    <div class="d-flex align-items-center gap-2 mb-2">
+        <button class="btn btn-sm btn-secondary" onclick="_fsTypesAll(true)">${
+            esc(t('select_all'))}</button>
+        <button class="btn btn-sm btn-secondary" onclick="_fsTypesAll(false)">${
+            esc(t('clear_selection'))}</button>
+        <button class="btn btn-sm btn-secondary" onclick="_fsTypesOnlyNew()">${
+            esc(t('fs_types_only_new'))}</button>
+    </div>
+    <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr class="text-muted ss-fs-1 text-uppercase">
+            <th style="width:2.5rem"></th>
+            <th>${esc(t('fs_asset_type'))}</th>
+            <th style="width:16rem">${esc(t('fs_types_becomes'))}</th>
+        </tr></thead>
+        <tbody>${_fsTypes.map(x => _fsTypeRow(x)).join('')}</tbody>
+    </table></div>`;
+}
+
+/** Una fila. Lo que dice la columna de la derecha es lo único que hay que leer para decidir: se
+ *  crea una clase nueva, o ya hay una aquí que la cubre y esto no haría nada. */
+function _fsTypeRow(x) {
+    const id = String(x.id);
+    const marcada = _fsTypesPick.has(id);
+    const clase = x.device_type && typeof hostTypeLabel === 'function'
+        ? hostTypeLabel(x.device_type) : '';
+    return `<tr${marcada ? '' : ' class="opacity-50"'}>
+        <td class="text-center"><input type="checkbox" class="form-check-input"
+            ${marcada ? 'checked' : ''}${x.here ? ' disabled' : ''}
+            onchange="_fsTypesToggle(${jsStr(id)}, this.checked)"></td>
+        <td class="fw-semibold">${esc(x.name)}</td>
+        <td class="ss-fs-2">${x.here
+            ? `<span class="text-muted"><i class="bi bi-check2 me-1"></i>${
+                esc(tf('fs_types_have', x.here_name || x.here))}</span>`
+            : `<span class="badge text-bg-success"><i class="bi bi-plus-lg"></i>${
+                esc(x.name)}</span>${clase
+                ? ` <span class="text-muted ss-fs-1">${esc(clase)}</span>` : ''}`}</td>
+    </tr>`;
+}
+
+function _fsTypesToggle(id, on) {
+    if (on) _fsTypesPick.add(String(id)); else _fsTypesPick.delete(String(id));
+    _fsTypesDraw();
+}
+
+/** Todas o ninguna — de las que **harían algo**: marcar una que aquí ya está cubierta no la trae,
+ *  y hace que el botón prometa un número que no es. */
+function _fsTypesAll(on) {
+    _fsTypesPick = on ? new Set(_fsTypes.filter(x => !x.here).map(x => String(x.id)))
+                      : new Set();
+    _fsTypesDraw();
+}
+
+function _fsTypesOnlyNew() {
+    _fsTypesAll(true);
+}
+
+/** Hacerlo. El servidor vuelve a pedir el catálogo en vez de fiarse de lo que se enseñó, y
+ *  compara por el identificador de allí: entre mirar y aceptar pasa un rato, y un tipo puede
+ *  haber cambiado de nombre. */
+async function _fsTypesApply() {
+    const btn = document.getElementById('btnFsTypesApply');
+    const antes = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>${
+            esc(t('fs_working'))}`;
+    }
+    const r = await apiSend('POST', '/api/v1/providers/freshservice/assets/types',
+                            {pick: Array.from(_fsTypesPick)});
+    if (btn) { btn.disabled = false; btn.innerHTML = antes; }
+    if (!r.ok) return showToast(r.error || t('fs_err_net'), 'danger');
+    const puestas = (r.data || {}).added || [];
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fsTypesModal')).hide();
+    if (!puestas.length) return showToast(t('fs_types_import_none'), 'info');
+    // Con los nombres de las primeras: «5 clases nuevas» no dice cuáles, y cuáles es lo que se
+    // mira para saber si se ha traído lo que se quería.
+    showToast(`${tf('fs_types_imported', String(puestas.length))} — ${
+        puestas.slice(0, 5).map(x => x.name).join(', ')}${
+        puestas.length > 5 ? '…' : ''}`, 'success');
+    if (typeof _htRefresh === 'function') await _htRefresh();
+}
+
+// ── Atar una clase de aquí a una de allí ────────────────────────────────────────────────
+//
+// Hace falta porque el nombre no basta: quien escribió «Punto de acceso» y allí se llama «Access
+// Point» se encontraría una segunda clase en la primera importación, con la mitad de los
+// dispositivos nuevos yendo a cada una. Atándolas, la importación la reconoce.
+//
+// La elección la dibuja **este** paquete y no la pantalla de clases: qué tipos tiene esta casa lo
+// sabe Freshservice, y el core no puede preguntárselo sin nombrarlo.
+
+//: A qué clase de aquí se está atando. Se guarda porque el cuadro se dibuja después de pedir la
+//: lista, y para entonces ya no hay quien lo diga.
+let _fsLinkFor = '';
+
+//: Lo que se ha escrito para buscar entre los tipos de allí. Fuera del cuerpo: la lista se
+//: redibuja al teclear, y una caja que se redibuja pierde el cursor a mitad de palabra.
+let _fsLinkQuery = '';
+
+/** El título del cuadro, que sirve para dos cosas. */
+function _fsTypesTitle(texto) {
+    const el = document.getElementById('fsTypesTitle');
+    if (el) el.textContent = texto;
+}
+
+async function freshserviceLinkType(id) {
+    _fsLinkFor = String(id || '');
+    _fsLinkQuery = '';
+    // El mismo cuadro sirve para traerlas y para atar una, y con el título de traer puesto lo
+    // que se lee al ir a atar es «Importar clases» — que es lo que NO se está haciendo.
+    _fsTypesTitle(t('fs_link_type'));
+    _fsOpen('fsTypesModal', 'fsTypesBody');
+    const btn = document.getElementById('btnFsTypesApply');
+    // Aquí no se acepta nada: se elige una y ya está. El botón de traer sobra.
+    if (btn) btn.classList.add('d-none');
+    const d = await apiGet('/api/v1/providers/freshservice/assets/types');
+    const cuerpo = document.getElementById('fsTypesBody');
+    if (!d || d.error) {
+        if (cuerpo) cuerpo.innerHTML = _fsFalloHtml((d && d.error) || t('fs_err_net'));
+        return;
+    }
+    _fsTypes = d.types || [];
+    if (cuerpo) cuerpo.innerHTML = _fsLinkListHtml();
+}
+
+/** La lista para elegir UNA. Las que ya están atadas a otra clase de aquí salen apagadas y
+ *  diciendo a cuál: dos clases locales sobre la misma de fuera es un reparto de la flota en dos
+ *  montones que nadie decidió, y el servidor se niega — pero enterarse al pulsar es tarde. */
+function _fsLinkListHtml() {
+    if (!_fsTypes.length) return `<div class="text-muted">${esc(t('fs_types_none'))}</div>`;
+    return `<div class="small text-muted mb-2">${esc(t('fs_link_type_pick'))}</div>
+    <input type="search" class="form-control form-control-sm mb-2" id="fsLinkSearch"
+        value="${escAttr(_fsLinkQuery)}" placeholder="${escAttr(t('fs_link_type_find'))}"
+        oninput="_fsLinkFilter(this.value)">
+    <div id="fsLinkRows">${_fsLinkRowsHtml()}</div>`;
+}
+
+/** Sólo las filas. Un inventario tiene cuarenta tipos y la clase que se busca es una: sin esto,
+ *  atar «Servidor» a «Server» era recorrer la lista entera con la vista. Pedido desde la
+ *  pantalla.
+ *
+ *  **Lo que apaga una fila es estar ATADA a otra clase de aquí**, y no llamarse igual que una.
+ *  Eran el mismo campo, y así el cuadro apagaba «Server» al ir a atarle la clase «Servidor» —
+ *  que es exactamente la fila que se quería pulsar. Reportado desde la pantalla.
+ *
+ *  La que ya está atada **a ésta misma** tampoco se apaga: pulsarla no cambia nada, pero verla
+ *  marcada es lo que dice cuál es la que tiene puesta. */
+function _fsLinkRowsHtml() {
+    const q = _fsLinkQuery.trim().toLowerCase();
+    const vistos = _fsTypes.filter(x => !q || String(x.name || '').toLowerCase().includes(q));
+    if (!vistos.length) {
+        return `<div class="text-muted small py-2">${esc(t('fs_link_type_nohit'))}</div>`;
+    }
+    return `<div class="list-group list-group-flush">${vistos.map(x => {
+        const suya = String(x.linked || '') === String(_fsLinkFor);
+        const ocupada = !!x.linked && !suya;
+        return `<button type="button" class="list-group-item list-group-item-action
+                d-flex align-items-center gap-2 px-2 py-1"${ocupada ? ' disabled' : ''}${
+                suya ? ' aria-current="true"' : ''}
+                onclick="hostTypeLinkTo(${jsStr(_fsLinkFor)}, 'freshservice', ${
+                    jsStr(String(x.id))})">
+            <span class="flex-grow-1${suya ? ' fw-semibold' : ''}">${esc(x.name)}</span>
+            ${suya ? `<i class="bi bi-check2 text-success"></i>` : ''}
+            ${ocupada ? `<span class="text-muted ss-fs-1">${
+                esc(tf('fs_link_type_taken', x.linked_name || x.linked))}</span>` : ''}
+        </button>`; }).join('')}</div>`;
+}
+
+function _fsLinkFilter(v) {
+    _fsLinkQuery = String(v || '');
+    const filas = document.getElementById('fsLinkRows');
+    if (filas) filas.innerHTML = _fsLinkRowsHtml();
+}

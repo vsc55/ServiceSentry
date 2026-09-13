@@ -204,6 +204,11 @@ const stSrvHosts = document.getElementById('subtab-srv-hosts-li');
 if (stSrvHosts) stSrvHosts.style.display = hasAnyServer ? '' : 'none';
 const stSrvClusters = document.getElementById('subtab-srv-clusters-li');
 if (stSrvClusters) stSrvClusters.style.display = hasAnyCluster ? '' : 'none';
+// Las clases se ven con lo mismo que los dispositivos: quien puede ver la lista tiene que poder
+// ver de qué se compone su columna de clase, aunque no pueda tocarla — dentro, los botones de
+// escribir los decide `devices_edit`.
+const stSrvTypes = document.getElementById('subtab-srv-types-li');
+if (stSrvTypes) stSrvTypes.style.display = hasAnyServer ? '' : 'none';
 // Activate the saved infra sub-tab, or the first visible one. A stored #subtab-credentials
 // from before the promotion resolves to no element, so it falls through to the first
 // visible one rather than leaving Infrastructure with nothing selected.
@@ -211,7 +216,7 @@ const _savedInfra = localStorage.getItem('ss_active_subtab_infra');
 const _savedInfraBtn = _savedInfra ? document.querySelector(`[data-bs-target="${_savedInfra}"]`) : null;
 const _activeInfra = (_savedInfraBtn && _savedInfraBtn.closest('li')?.style.display !== 'none')
     ? _savedInfraBtn
-    : ['btn-subtab-srv-hosts','btn-subtab-srv-clusters']
+    : ['btn-subtab-srv-hosts','btn-subtab-srv-types','btn-subtab-srv-clusters']
         .map(id => document.getElementById(id))
         .find(btn => btn && btn.closest('li')?.style.display !== 'none');
 if (_activeInfra) bootstrap.Tab.getOrCreateInstance(_activeInfra).show();

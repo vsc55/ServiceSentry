@@ -5,6 +5,94 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## La migración que no llegó a ejecutarse, y la limpieza que borró media fila
+
+**Síntoma.** Dos cosas a la vez en la pantalla de clases, las dos reportadas mirándola:
+
+```
+UID          (vacío en las once filas)
+Origen       (vacío) ... pero el identificador externo, puesto: 53000600293
+```
+
+**Diagnóstico.** Son dos fallos distintos que se dieron juntos, y ninguno de los dos avisa.
+
+El primero: la migración a `uid` reconocía «aquí hay trabajo» por la forma **completa** de la
+tabla — con `id` y **sin** `uid`. Basta con que algo añada las columnas antes para que esa
+condición no se cumpla nunca más, y eso es exactamente lo que hace `reconcile_table`: sabe añadir
+columnas, no sabe cambiar una clave primaria. Con el servidor de desarrollo vivo —que reinicia en
+cada edición de un `.py`— la base pasó por un estado en el que el esquema nuevo estaba a medio
+escribir: se le añadieron `uid`, `slug` y `description` vacías, se quedó con `id` de clave, y
+desde ese momento la migración se saltaba a sí misma en todos los arranques.
+
+El segundo: la limpieza de la marca `seed` estaba escrita como **una** sentencia —
+`SET source='', updated_by=? WHERE source='seed' OR updated_by='seed'`— así que una fila que
+cumpliera **media** condición perdía las **dos** columnas. Una clase sembrada que Freshservice
+hubiera adoptado lleva su origen puesto y conserva el `updated_by='seed'` del día que se sembró:
+salía de ahí con el origen en blanco y el `external_id` a solas. Media relación, que no la
+escribe nada — `link()` escribe siempre los dos datos.
+
+**Causa raíz.** La misma en los dos: **una condición que describe un estado en lugar de la
+propiedad que importa.** «Con `id` y sin `uid`» describe la forma que tenía la tabla el día que se
+escribió la migración, no lo que hay que arreglar, que es «queda la columna vieja». Y
+`source='seed' OR updated_by='seed'` describe «esta fila huele a siembra», no lo que se quería
+corregir, que era cada columna por su cuenta.
+
+**Solución.** La migración se reconoce por la columna vieja y respeta el `uid` que ya tenga una
+fila; la limpieza son dos `UPDATE`, cada uno mirando su propia columna. Y lo que ya se rompió se
+repara al arrancar: a la fila con `external_id` y sin origen se le devuelve el suyo **cuando no
+hay que adivinar**, que es cuando hay un único proveedor declarado.
+
+Por el camino, dos cosas más que enseñó el mismo caso:
+
+* **el DDL no viaja en la transacción** —el conector lo manda por su propia conexión—, así que un
+  fallo a mitad deja la tabla vieja apartada y la nueva vacía: no se deshace nada. Esa tabla
+  apartada es ahora el otro sitio donde se busca trabajo, para poder terminar la vuelta;
+* **los índices siguen a la tabla renombrada**, y `idx_host_type_name` seguía ocupado cuando la
+  tabla nueva lo pedía.
+
+**Lección.** Una migración se escribe para **la base que se va a encontrar**, no para la que había
+cuando se escribió; y como sólo corre una vez, no hay un segundo arranque que arregle lo que dejó
+a medias. Y un `UPDATE` que toca varias columnas bajo un `OR` está afirmando que las dos
+condiciones son la misma: si no lo son, cada fila que cumpla una pierde lo que cuelga de la otra.
+Las dos cosas se vieron en una base de verdad y ninguna daba un error — lo que se veía era una
+columna vacía.
+
+## El filtro que convirtió en «desaparecido» lo que nadie había preguntado
+
+**Síntoma.** Ninguno todavía. Salió al escribir la prueba de una función que acababa de añadirse
+—elegir qué clases de activo traer de Freshservice— y que en la pantalla parecía terminada: los
+conmutadores llegaban, se emparejaban y se importaban bien.
+
+```
+importados antes:  SRV-01 (tipo «Server», id 1)
+se piden:          sólo la clase «Network Switch»
+lo que se enseña:  SW-01 ... y «Ya no están en Freshservice (1): SRV-01»
+```
+
+**Diagnóstico.** La vista previa hace dos cosas con la misma lista: emparejar lo que llega con lo
+de aquí, y decir qué dispositivos importados **ya no están en el origen**. Lo segundo se calcula
+por ausencia — está aquí con un `external_id` de Freshservice y no ha venido en la respuesta.
+
+Mientras la respuesta era *todo*, la ausencia significaba «lo han dado de baja». En cuanto la
+respuesta pasó a ser *un trozo*, la misma cuenta significa «no lo he preguntado», y la pantalla
+no tenía forma de notar la diferencia: el número sale, la lista sale, y lo que propone hacer con
+ella —mirarla una a una y decidir si se borra— es exactamente lo que no hay que hacer.
+
+**Causa raíz.** Un filtro añadido **aguas arriba** cambió el significado de una cuenta que estaba
+aguas abajo, sin tocar ni una línea de ella. Lo que se computaba por ausencia dependía de un
+universo que hasta ese día era completo, y nada en el código decía que lo fuera: la premisa vivía
+en la cabeza de quien lo escribió, no en una firma ni en un nombre.
+
+**Solución.** Con clases elegidas no se cuentan desaparecidos: la lista va vacía y la pantalla no
+enseña el bloque. Callar es la respuesta honesta cuando sólo se ha visto un trozo, y verlos es
+mirar sin filtro, que está a un clic. Con su guarda, que se mutó para comprobar que muerde.
+
+**Lección.** Antes de estrechar lo que entra en una función, hay que mirar **todo lo que se
+deriva de ello**, no sólo lo que se quería estrechar. Lo que se computa por ausencia —«falta»,
+«ya no está», «nadie lo reclama», «sin usar»— es lo primero que miente cuando el conjunto de
+entrada deja de ser completo, y miente sin fallar. Una pista práctica: si una respuesta se
+calcula restando, su firma debería decir de qué universo resta.
+
 ## El panel que dejó de hacer copias porque se reiniciaba demasiado
 
 **Síntoma.** Una pantalla nueva decía «siguiente copia: ahora» y no cambiaba. Preguntado desde

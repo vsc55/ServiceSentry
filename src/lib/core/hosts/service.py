@@ -12,7 +12,7 @@ Two kinds of function live here:
   (``wa._load_modules`` / ``wa._save_modules``) and its stores, but carry **no Flask coupling**
   (no request/session/jsonify).
 
-Host validation/normalization itself lives in :class:`~lib.core.hosts.store.HostsStore`.
+Host validation/normalization itself lives in :class:`~lib.core.hosts.stores.hosts.HostsStore`.
 """
 
 from __future__ import annotations

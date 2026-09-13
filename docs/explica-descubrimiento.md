@@ -81,6 +81,8 @@ core— y por eso declaran en `schema.json` (datos puros), recogidos por el pipe
 | `OVERVIEW_WIDGETS` | widgets del Overview | §2 |
 | `EMBEDDED_SERVICE` / `STANDALONE` | servicio de fondo | §3 |
 | `CONFIG_ACTIONS` | botones en una sección de config | §7b |
+| `ORG_ACTIONS` / `HOST_ACTIONS` | formas de que aparezca una fila en una lista | §7d |
+| `ORG_SOURCES` / `HOST_SOURCES` | de dónde vino una fila traída de fuera | §7d |
 | `GROUP_SOURCES` | origen de grupos de directorio de una sección | §7c |
 | `ORG_SCOPES` | lo que de ese paquete puede ser de una empresa | §5b |
 | `NOTIFY_EVENTS` | eventos notificables | §10 |
@@ -880,6 +882,69 @@ flowchart TB
 
 > Cubierto por `tests/integration/test_wa_group_sources.py`, que además vigila que no reaparezcan las ramas
 > `sec === '…'` ni los ids de botón antiguos.
+
+---
+
+## 7d. Otras formas de que aparezca una fila (`ORG_ACTIONS`, `HOST_ACTIONS`)
+
+Empresas y Dispositivos tienen las dos un botón de **añadir**, y las dos pueden traer lo que ya
+está escrito en otro sitio. Traerlo no es otra cosa: es **otra manera de que aparezca una fila**,
+así que su sitio es esa lista y no la tarjeta de configuración de quien lo trae — bajar a
+Configuración para importar es ir a buscar un botón a la pantalla de otra cosa.
+
+Por eso no es un botón más en la barra, sino una **pestaña del de añadir**: el día que haya tres
+fuentes son tres entradas de un desplegable y no tres botones. Sin nada que colgar, no hay
+pestaña: una flecha que abre un menú vacío promete algo.
+
+**Descriptor** (`lib/providers/<p>/manifest.py`):
+
+```python
+from lib.providers.freshservice.service import is_configured
+
+HOST_ACTIONS = [                                   # ORG_ACTIONS es idéntico
+    {'id': 'import', 'label_key': 'fs_import_hosts', 'tooltip_key': 'fs_import_hosts_tt',
+     'icon': 'bi-cloud-download', 'variant': 'primary', 'order': 10,
+     'perm': 'devices_edit',                       # la misma bandera que exige el servidor
+     'fn': 'freshserviceImportHosts',              # JS que publica el propio provider
+     'ready': is_configured},                      # sin conector, sin botón
+]
+
+HOST_SOURCES = [                                   # cómo firma las filas que trae
+    {'id': 'freshservice', 'label_key': 'fs_source', 'icon': 'bi-life-preserver'},
+]
+```
+
+| Campo | Qué es |
+|---|---|
+| `fn` | la función JS que se llama al pulsar. **Sin ella el descriptor se ignora**: no habría nada que pulsar |
+| `ready` | `fn(wa) -> bool`, opcional. Lo que hace que el botón no aparezca hasta que su conector está puesto. Es **del proveedor**: qué necesita para funcionar lo sabe él, y el día que le haga falta un tercer campo la respuesta cambia en un sitio. Uno que reviente cuenta como «no está puesto» — la alternativa es una pantalla que no carga porque un paquete opcional tiene un fallo en una línea |
+| `perm` | se comprueba **en el servidor y otra vez en la pantalla**. La de la pantalla es una reja encima de la del servidor, nunca en su lugar |
+| `order` | orden en el desplegable; a igualdad, por `label_key` e `id` |
+
+**El filtrado está escrito una vez**, en `lib.discovery.ready_actions(const, wa)`, y lo usan las
+dos pantallas: son la misma regla, y dos copias son dos sitios donde arreglar el mismo fallo.
+**Sin caché**, al revés que los orígenes: `ready` lee la configuración y ésa se edita desde el
+propio panel — una respuesta guardada de por vida dejaría el botón escondido después de poner la
+clave, hasta reiniciar.
+
+Las **fuentes** (`*_SOURCES`) contestan la otra mitad: la columna `source` de la fila guarda
+`freshservice` y la pantalla tiene que enseñar un nombre y un icono sin que el core escriba
+ninguno. Son dos listas y no una porque son dos preguntas — un proveedor puede traer las empresas
+y no los dispositivos, y con una sola el segundo botón aparecería por tener puesto el primero. Un
+origen que ya no declara nadie no deja la fila muda: se enseña el identificador tal cual, que
+sigue diciendo de dónde vino.
+
+**Y las filas traídas se marcan**: `source` + `external_id` en la tabla (`org`, `hosts`). Dos
+columnas porque son dos cosas —«¿esto lo mantiene otro?», que decide si una importación puede
+pisarlo, y «¿cuál de los suyos es?», que es lo único que permite volver a importar sin duplicar—.
+Por el nombre no se puede: renombrarlo en el origen crearía aquí un segundo y dejaría el primero
+huérfano sin que nada lo dijera. Los campos que mantiene el origen no se teclean encima y hay una
+salida (`DELETE /api/v1/<lista>/<uid>/source`), porque sin ella quitar el proveedor deja filas que
+nadie mantiene y nadie puede corregir.
+
+> Cubierto por `tests/integration/test_wa_orgs.py` y `tests/integration/test_wa_freshservice_assets.py`,
+> que además vigilan que **el core no escriba el nombre de ningún proveedor** en las tres piezas
+> que dibujan esto.
 
 ---
 

@@ -42,8 +42,25 @@ CORE_STORES = [
 
 
 def _store_src(domain):
-    return io.open(os.path.join(SRC, 'lib', 'core', domain, 'store.py'),
-                   encoding='utf-8-sig').read()
+    """El almacén de ese dominio, esté en un archivo o en un paquete.
+
+    Los dos sitios porque los dos existen: un dominio con UNA tabla la tiene en `store.py`, y uno
+    con varias las reparte en `store/` o `stores/` con un archivo por tabla —`dcim` tiene doce,
+    `hosts` dos—. Escrita sólo la primera forma, este archivo se cae el día que un dominio crece,
+    y lo hace señalando a un fichero que nadie ha borrado: simplemente ya no se llama así.
+    """
+    base = os.path.join(SRC, 'lib', 'core', domain)
+    suelto = os.path.join(base, 'store.py')
+    if os.path.exists(suelto):
+        return io.open(suelto, encoding='utf-8-sig').read()
+    for carpeta in ('stores', 'store'):
+        # El archivo que se llama como el dominio es el de SU tabla: `hosts/stores/hosts.py`.
+        # El resto de ese paquete son las tablas de al lado, que tienen su propia fila en la
+        # lista de arriba el día que las tengan.
+        propio = os.path.join(base, carpeta, domain + '.py')
+        if os.path.exists(propio):
+            return io.open(propio, encoding='utf-8-sig').read()
+    raise AssertionError('no se encuentra el almacén de %s' % domain)
 
 
 class TestOneTimestampFormat:

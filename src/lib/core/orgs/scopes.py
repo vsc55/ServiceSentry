@@ -108,16 +108,8 @@ def sources() -> dict:
     """``{id: descriptor}`` de todo origen que algún paquete declare."""
     global _FUENTES                              # pylint: disable=global-statement
     if _FUENTES is None:
-        from lib.discovery import scan           # noqa: PLC0415
-        out: dict = {}
-        for pkg, decl in scan('ORG_SOURCES'):
-            for spec in (decl if isinstance(decl, (list, tuple)) else [decl]):
-                if not isinstance(spec, dict):
-                    continue
-                ident = str(spec.get('id') or '').strip()
-                if ident and ident not in out:
-                    out[ident] = dict(spec, id=ident, package=pkg)
-        _FUENTES = out
+        from lib.discovery import declared_by_id  # noqa: PLC0415
+        _FUENTES = declared_by_id('ORG_SOURCES')
     return _FUENTES
 
 
@@ -125,3 +117,32 @@ def forget_sources() -> None:
     """Dropar la caché. Para las pruebas que instalan un paquete a media ejecución."""
     global _FUENTES                              # pylint: disable=global-statement
     _FUENTES = None
+
+
+# ── Lo que un proveedor puede ofrecer EN esta pantalla ───────────────────────────────────
+#
+# Traer las empresas de otro sitio es un acto sobre esta lista, así que su botón va aquí — no en
+# la tarjeta de configuración de quien las trae, que es donde estaba y donde hay que ir a
+# buscarlo. Pedido desde la pantalla.
+#
+# Se declara, como todo lo demás::
+#
+#     ORG_ACTIONS = [{'id': 'import', 'label_key': 'fs_import_orgs',
+#                     'icon': 'bi-cloud-download',
+#                     'variant': 'primary', 'perm': 'orgs_edit',
+#                     'fn': 'freshserviceImport', 'ready': is_configured}]
+#
+# `ready` es lo que hace que el botón no aparezca hasta que su conector está puesto, y es una
+# función **del proveedor**: qué necesita para funcionar lo sabe él, y el día que le haga falta
+# un campo más la respuesta cambia en su paquete y en ningún otro sitio. Sin `ready`, siempre.
+
+def actions(wa) -> list:
+    """Las acciones que los paquetes ofrecen en la pantalla de Empresas, ya filtradas.
+
+    El filtrado —sin `fn` no se dibuja, `ready(wa)` manda, un `ready` que revienta cuenta como
+    «no está puesto»— lo hace :func:`lib.discovery.ready_actions`, que es la misma regla que
+    aplica la pantalla de Dispositivos con `HOST_ACTIONS`. Escrita una vez: dos copias de esto
+    son dos sitios donde arreglar el mismo fallo.
+    """
+    from lib.discovery import ready_actions       # noqa: PLC0415
+    return ready_actions('ORG_ACTIONS', wa)

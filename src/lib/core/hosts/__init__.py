@@ -4,7 +4,12 @@
 :mod:`lib.core`).
 
 Admin/registry layer:
-* ``store``  — :class:`~lib.core.hosts.store.HostsStore` (host registry + encrypted profiles)
+* ``stores``  — the domain's TABLES, one per file: ``stores/hosts.py`` (the host registry and its
+  encrypted profiles) and ``stores/types.py`` (``host_type``, the device classes). Read and
+  written here; import either from ``lib.core.hosts.stores``.
+* ``classes`` — what the panel ASKS about those classes (catalog / ensure / known / uid_for /
+  in_use / usage). A layer above the store, because whoever draws a class or brings one in from
+  a provider has nothing to say to the table — it asks the panel a question.
 * ``routes`` — module ``routes.py`` (``register``): /api/v1/hosts endpoints
 * ``permissions`` — ``MODULE_PERMISSIONS`` (group ``perm_group_devices``: devices_view / add / edit / delete)
 * ``overview_widget`` — the servers/coverage/servers_list Overview widgets

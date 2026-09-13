@@ -33,8 +33,14 @@ SHORT_MAX = 12
 _NO_PALABRA = re.compile(r'[^0-9A-Za-z]+')
 
 
-def _ascii(texto: str) -> str:
-    """Sin acentos y sin eñes: una abreviatura es para una chapa y para un alzado."""
+def ascii_fold(texto: str) -> str:
+    """Sin acentos y sin eñes.
+
+    Lo pide una abreviatura —es para una chapa y para un alzado— y lo pide también comparar con
+    lo que escribe otro: un Freshservice que llame «Cámara IP» a un tipo de activo y otro que lo
+    llame «Camara IP» son la misma casa diciendo lo mismo, y sólo casan los dos si se comparan
+    planos. Público porque lo usan los dos planes de este paquete.
+    """
     plano = unicodedata.normalize('NFKD', str(texto or ''))
     return ''.join(c for c in plano if not unicodedata.combining(c))
 
@@ -51,7 +57,7 @@ def short_for(name: str, taken) -> str:
     letras cuando es una sola («Amixalan» → `AMIXALAN`). Si eso ya está cogido, se le pone un
     número: dos chapas iguales en un armario compartido no dicen de quién es.
     """
-    palabras = [p for p in _NO_PALABRA.split(_ascii(name)) if p]
+    palabras = [p for p in _NO_PALABRA.split(ascii_fold(name)) if p]
     if not palabras:
         base = 'ORG'
     elif len(palabras) > 1:

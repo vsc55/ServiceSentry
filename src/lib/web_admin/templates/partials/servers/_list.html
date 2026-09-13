@@ -23,11 +23,37 @@ let _hostCheckFilters = {};   // {module: filter text} for the per-module check 
 let _hostSnapshot = null;     // baseline for Undo (set on open and after each save)
 
 // ──────────────────────────── Data ─────────────────────────────────
+//: Lo que algún paquete ofrece hacer en esta pantalla, y de dónde puede venir un dispositivo.
+//: Llegan con la lista: los dibuja la misma barra, y una segunda petición para pintar un botón
+//: es un botón que aparece tarde.
+let _hostActions = [];
+let _hostSources = [];
+
 async function loadHosts() {
     const r = await apiGet('/api/v1/hosts');
     hostsData = {};
     (r && r.hosts || []).forEach(h => { hostsData[h.uid] = h; });
+    // Ya filtradas por el servidor: sólo llegan las de los conectores que su propio paquete da
+    // por configurados, así que esta pantalla no tiene que saber qué es estar puesto.
+    _hostActions = (r && r.actions) || [];
+    _hostSources = (r && r.sources) || [];
     return hostsData;
+}
+
+/** De dónde vino este dispositivo, con el nombre y el icono que pone quien lo trae.
+ *
+ *  Aquí no hay escrito el nombre de ningún proveedor: la columna guarda `freshservice` y el
+ *  texto lo declara su paquete. Un origen que ya no declara nadie —se quitó el proveedor— enseña
+ *  el identificador tal cual, que sigue diciendo de dónde vino. */
+function _hostSourceHtml(host) {
+    const id = String((host || {}).source || '');
+    if (!id) return '';
+    const spec = (_hostSources || []).find(s => s.id === id) || {};
+    const nombre = spec.label_key ? t(spec.label_key) : id;
+    return `<span class="badge bg-body-secondary text-body-secondary border fw-normal ms-1"
+        title="${escAttr(tf('host_source_tt', nombre, host.external_id || ''))}"
+        ><i class="bi ${escAttr(spec.icon || 'bi-box-arrow-in-down')} me-1"></i>${
+        esc(nombre)}</span>`;
 }
 async function reloadHosts() {
     await loadHosts();
@@ -124,7 +150,7 @@ createListTable({
             { key: 'type',    label: () => t('col_host_type'), type: 'select', minWidth: '160px',
               options: () => [{ value: '', label: t('all') },
                               { value: '-', label: t('host_type_unset') }].concat(
-                  HOST_TYPES.map(x => ({ value: x.id, label: hostTypeLabel(x.id) }))) },
+                  HOST_TYPES.map(x => ({ value: x.uid, label: hostTypeLabel(x.uid) }))) },
             { key: 'kind',    label: () => t('col_kind'), type: 'select', minWidth: '140px',
               options: () => [{ value: '', label: t('all') },
                               { value: 'local',  label: t('host_kind_local') },
@@ -188,7 +214,7 @@ createListTable({
     },
     cell: (host, colId) => {
         switch (colId) {
-            case 'name':    return `<td class="text-nowrap fw-semibold"${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.name)}${host.virtual ? ` <span class="badge text-bg-info" title="${escAttr(t('host_virtual_hint'))}"><i class="bi bi-diagram-3 me-1"></i>${esc(t('host_virtual'))}</span>` : ''}</td>`;
+            case 'name':    return `<td class="text-nowrap fw-semibold"${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.name)}${host.virtual ? ` <span class="badge text-bg-info" title="${escAttr(t('host_virtual_hint'))}"><i class="bi bi-diagram-3 me-1"></i>${esc(t('host_virtual'))}</span>` : ''}${_hostSourceHtml(host)}</td>`;
             case 'address': return `<td class="text-nowrap"><code${host.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(host.address || '')}</code></td>`;
             case 'type':    return `<td class="text-center">${host.device_type
                 ? `<span class="badge bg-body-secondary text-body border" title="${escAttr(hostTypeLabel(host.device_type))}"><i class="bi ${escAttr(hostTypeIcon(host.device_type))} me-1"></i>${esc(hostTypeLabel(host.device_type))}</span>`
@@ -257,8 +283,44 @@ function _serversToolbar(canEdit) {
             <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('reload'))}</button>
         ${canEdit ? `<button class="btn btn-sm btn-info ms-1" onclick="openMigrateModal()" title="${escAttr(t('host_migrate_tt'))}">
             <i class="bi bi-magic me-1"></i>${esc(t('host_migrate'))}</button>` : ''}
-        ${canEdit ? `<button class="btn btn-sm btn-success ms-1" onclick="openNewHostModal()" title="${escAttr(t('host_new_tt'))}">
-            <i class="bi bi-plus-lg me-1"></i>${esc(t('host_new'))}</button>` : ''}`;
+        ${canEdit ? _hostsNewHtml() : ''}`;
+}
+
+/** El botón de añadir y, colgando de él, las otras formas de que aparezca un dispositivo.
+ *
+ *  Traer los de fuera es un acto **sobre esta lista**, así que su sitio es éste y no la tarjeta
+ *  de configuración de quien los trae: bajar a Configuración para importar es ir a buscar un
+ *  botón a la pantalla de otra cosa.
+ *
+ *  Y colgando del de añadir, no al lado: son maneras de lo mismo —que aparezca un dispositivo— y
+ *  el día que haya tres fuentes serían tres botones en una barra que hoy tiene tres. Con la
+ *  pestaña, la barra no crece.
+ *
+ *  Sin nada que colgar **no hay pestaña**. Una flecha que abre un menú vacío es peor que ninguna
+ *  flecha: promete algo. Y lo que cuelga llega ya filtrado por los conectores que sus propios
+ *  paquetes dan por configurados; el permiso se vuelve a mirar aquí, que es una reja encima de
+ *  la del servidor y nunca en su lugar. */
+function _hostsNewHtml() {
+    const nuevo = `<button class="btn btn-sm btn-success" onclick="openNewHostModal()"
+        title="${escAttr(t('host_new_tt'))}"><i class="bi bi-plus-lg me-1"></i>${
+        esc(t('host_new'))}</button>`;
+    const perms = currentUser.permissions || [];
+    const otras = (_hostActions || []).filter(a => !a.perm || perms.includes(a.perm));
+    if (!otras.length) return `<span class="ms-1">${nuevo}</span>`;
+    return `<div class="btn-group ms-1">
+        ${nuevo}
+        <button class="btn btn-sm btn-success dropdown-toggle dropdown-toggle-split"
+            data-bs-toggle="dropdown" aria-expanded="false"
+            title="${escAttr(t('hosts_new_more'))}"
+            ><span class="visually-hidden">${esc(t('hosts_new_more'))}</span></button>
+        <ul class="dropdown-menu dropdown-menu-end ss-dropdown-sm">
+            ${otras.map(a => `<li><button class="dropdown-item" type="button"
+                onclick="${escAttr(a.fn)}()"
+                title="${escAttr(a.tooltip_key ? t(a.tooltip_key) : '')}"
+                ><i class="bi ${escAttr(a.icon || 'bi-box-arrow-in-down')} me-2"></i>${
+                esc(a.label_key ? t(a.label_key) : a.id)}</button></li>`).join('')}
+        </ul>
+    </div>`;
 }
 
 function _serversBulkBar(canDelete) {

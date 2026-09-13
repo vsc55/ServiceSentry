@@ -133,6 +133,9 @@ function openEditHostModal(uid) {
         virtual: !!host.virtual, device_type: host.device_type || '',
         tags: host.tags || [], description: host.description || '',
         profiles: host.profiles || {},
+        // De dónde vino, que no se edita pero sí se enseña: es lo que explica por qué el nombre
+        // está bloqueado, y lo que da el botón para desbloquearlo.
+        source: host.source || '', external_id: host.external_id || '',
     }));
     // Infer the SSH auth method for hosts saved before the selector existed:
     // a file path → 'file'; stored key text (present, possibly masked) → 'text';
@@ -161,20 +164,83 @@ function openEditHostModal(uid) {
     bootstrap.Modal.getOrCreateInstance(document.getElementById('hostModal')).show();
 }
 
+/** Los tres campos que mantiene un origen no se teclean: la siguiente importación los pisaría, y
+ *  un campo que se puede escribir y se revierte solo es peor que uno que no se puede.
+ *
+ *  El resto de la ficha —los perfiles de conexión, los módulos, lo vigilado, la clase, las
+ *  etiquetas— se sigue editando, porque de eso Freshservice no sabe nada y este panel es el único
+ *  sitio donde vive. Esto no es la guarda: la guarda está en el servidor, que contesta 409. Esto
+ *  es que no haga falta llegar a ella. */
+function _hmManagedAttrs() {
+    const id = String((_hostDraft || {}).source || '');
+    if (!id) return '';
+    return ` readonly title="${escAttr(tf('host_field_managed', _hmSourceName(id)))}"`;
+}
+
+function _hmSourceName(id) {
+    const spec = (typeof _hostSources !== 'undefined' ? _hostSources : []).find(
+        s => s.id === id) || {};
+    return spec.label_key ? t(spec.label_key) : String(id || '');
+}
+
+/** El aviso de arriba: de dónde vino, y por dónde se sale.
+ *
+ *  Con la salida DENTRO del aviso y no escondida en otro sitio: quien viene a corregir un nombre
+ *  y se lo encuentra bloqueado tiene que poder decidir ahí mismo, que es donde está mirando. */
+function _hmSourceNoteHtml() {
+    const id = String((_hostDraft || {}).source || '');
+    if (!id) return '';
+    return `<div class="col-12"><div class="alert alert-secondary py-2 px-3 mb-0 small
+            d-flex align-items-center gap-2">
+        <i class="bi bi-box-arrow-in-down"></i>
+        <span class="flex-grow-1">${esc(tf('host_source_tt', _hmSourceName(id),
+            (_hostDraft || {}).external_id || ''))}</span>
+        <button type="button" class="btn btn-sm btn-warning"
+            onclick="_hostUnlink()">${esc(t('host_unlink'))}</button>
+    </div></div>`;
+}
+
+/** Soltarlo de su origen. Pregunta antes: deja de actualizarse solo, y eso no se descubre
+ *  pulsando. No borra nada suyo — ni perfiles, ni módulos, ni historial. */
+function _hostUnlink() {
+    const uid = _editingHostUid;
+    if (!uid) return;
+    showConfirmModal(tf('host_unlink_q', (_hostDraft || {}).name || ''), async () => {
+        const r = await apiDelete('/api/v1/hosts/' + encodeURIComponent(uid) + '/source');
+        if (!r || r.status !== 200) {
+            return showToast((r && r.data && r.data.error) || t('save_file_error'), 'danger');
+        }
+        showToast(t('host_unlinked_ok'), 'success');
+        _hostDraft.source = '';
+        _hostDraft.external_id = '';
+        if (hostsData[uid]) { hostsData[uid].source = ''; hostsData[uid].external_id = ''; }
+        _renderHostModalBody();
+        renderServers();
+    });
+}
+
+/** Si quien mira puede tocar las clases. La misma bandera que exige el servidor, y aquí una
+ *  reja encima de la suya y nunca en su lugar. */
+function _hostMayEditTypes() {
+    return (currentUser.permissions || []).includes('devices_edit');
+}
+
 function _renderHostModalBody() {
     const d = _hostDraft;
     // General tab: the server's own data (identity, kind/OS, maintenance, SSH).
     const general = `<div class="row g-3">
+        ${_hmSourceNoteHtml()}
         <div class="col-sm-6">
             <label class="form-label small fw-semibold">${esc(t('host_name'))}</label>
             <input type="text" class="form-control form-control-sm" id="hmName" required
-                   value="${escAttr(d.name)}" oninput="_hostDraft.name=this.value">
+                   value="${escAttr(d.name)}" oninput="_hostDraft.name=this.value"${
+                   _hmManagedAttrs()}>
         </div>
         <div class="col-sm-6">
             <label class="form-label small fw-semibold">${esc(t('host_address'))}</label>
             <input type="text" class="form-control form-control-sm" id="hmAddress"
                    value="${escAttr(d.address)}" oninput="_hostDraft.address=this.value"
-                   placeholder="host / IP">
+                   placeholder="host / IP"${_hmManagedAttrs()}>
         </div>
         <div class="col-sm-6">
             <label class="form-label small fw-semibold">${esc(t('col_host_tags'))}</label>
@@ -185,11 +251,16 @@ function _renderHostModalBody() {
         </div>
         <div class="col-sm-6">
             <label class="form-label small fw-semibold">${esc(t('host_type'))}</label>
-            <select class="form-select form-select-sm" id="hmType"
-                    onchange="_hostDraft.device_type=this.value;_refreshHostTypeIcon()">
-                <option value="" ${!d.device_type ? 'selected' : ''}>${esc(t('host_type_unset'))}</option>
-                ${HOST_TYPES.map(x => `<option value="${escAttr(x.id)}" ${d.device_type === x.id ? 'selected' : ''}>${esc(hostTypeLabel(x.id))}</option>`).join('')}
-            </select>
+            <div class="input-group input-group-sm">
+                <select class="form-select form-select-sm" id="hmType"
+                        onchange="_hostDraft.device_type=this.value;_refreshHostTypeIcon()">
+                    <option value="" ${!d.device_type ? 'selected' : ''}>${esc(t('host_type_unset'))}</option>
+                    ${HOST_TYPES.map(x => `<option value="${escAttr(x.uid)}" ${d.device_type === x.uid ? 'selected' : ''}>${esc(hostTypeLabel(x.uid))}</option>`).join('')}
+                </select>
+                ${_hostMayEditTypes() ? `<button class="btn btn-sm btn-secondary" type="button"
+                    onclick="_htOpenEdit('')" title="${escAttr(t('host_types_manage_tt'))}"
+                    ><i class="bi bi-plus-lg"></i></button>` : ''}
+            </div>
             <div class="form-text small">${esc(t('host_type_hint'))}</div>
         </div>
         <div class="col-sm-6">
@@ -225,7 +296,8 @@ function _renderHostModalBody() {
     <div class="mt-3 flex-grow-1 d-flex flex-column" style="min-height:0">
         <label class="form-label small fw-semibold">${esc(t('host_description'))}</label>
         <textarea class="form-control form-control-sm flex-grow-1" id="hmDesc" style="resize:none;min-height:0"
-                  oninput="_hostDraft.description=this.value">${esc(d.description)}</textarea>
+                  oninput="_hostDraft.description=this.value"${_hmManagedAttrs()}>${
+                  esc(d.description)}</textarea>
     </div>`;
 
     // The "Test server" button lives in the modal footer; results open in a
