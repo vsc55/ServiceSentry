@@ -73,7 +73,7 @@ class _ScannersMixin:
         _inst_id = f'certscan-{hostname()}-{_os.getpid()}'
 
         def _host_address(uid):
-            store = getattr(self, '_hosts_store', None)
+            store = getattr(self, '_devices_store', None)
             try:
                 return (store.get(uid) or {}).get('address') if store else None
             except Exception:  # pylint: disable=broad-except
@@ -85,7 +85,7 @@ class _ScannersMixin:
             except Exception:  # pylint: disable=broad-except
                 return []
             warn = self._config_section('certs').get('warn_days', 21)
-            return enumerate_targets(mods, host_address=_host_address, default_warn=warn)
+            return enumerate_targets(mods, device_address=_host_address, default_warn=warn)
 
         def _is_leader():
             ls = getattr(self, '_service_leader_store', None)

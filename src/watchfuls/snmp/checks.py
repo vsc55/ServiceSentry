@@ -48,7 +48,7 @@ class SnmpChecks:
         # and a device may well be worth one and not the other.
         items: list[tuple[str, dict, dict]] = []
         sampled: list[tuple[str, dict]] = []
-        bound: set[str] = set()      # hosts an item SAMPLES, enabled or not
+        bound: set[str] = set()      # devices an item SAMPLES, enabled or not
         unsampled: dict = {}         # …and ones it only checks, which is worth saying
         for srv_key, srv in self.get_conf('servers', {}).items():
             if not isinstance(srv, dict):
@@ -65,7 +65,7 @@ class SnmpChecks:
             # because the configuration also lives on the host would be an upgrade quietly
             # undoing a decision. That is about a decision somebody made; an item with no
             # profiles is not a decision about sampling at all.
-            _uid = str(srv.get('host_uid') or '').strip()
+            _uid = str(srv.get('device_uid') or '').strip()
             if _uid and self.profiles_of(srv):
                 bound.add(_uid)
             elif _uid and (srv.get('checks') or {}):
@@ -87,18 +87,18 @@ class SnmpChecks:
         # nothing until a module entry pointed back at it, which made the module — not the
         # device — the thing that decided it was worth looking at.
         sampled.extend(_devices.devices_to_sample(
-            getattr(self._monitor, '_hosts_store', None), bound, only=self.host_scope))
+            getattr(self._monitor, '_devices_store', None), bound, only=self.device_scope))
 
         # Whoever is watching gets told about the devices this module will NOT sample, once
         # and by name. Silence is what made the reported bug unreadable: the device somebody
         # pressed the button for simply was not in the list, alongside two that were.
         left = {uid: name for uid, name in unsampled.items()
-                if uid not in {str((s or {}).get('host_uid') or '') for _k, s in sampled}}
-        if self.host_scope:
+                if uid not in {str((s or {}).get('device_uid') or '') for _k, s in sampled}}
+        if self.device_scope:
             # A narrowed run speaks about its own machine and no other: naming the devices
             # this run is not sampling would list the whole fleet on a dialog somebody opened
             # about one NAS.
-            left = {u: n for u, n in left.items() if u == self.host_scope}
+            left = {u: n for u, n in left.items() if u == self.device_scope}
         if left:
             self.report_progress(', '.join(sorted(left.values())),
                                  step=self._msg('snmp_step_unsampled',
@@ -145,9 +145,9 @@ class SnmpChecks:
             server = {}
         # Host-centric: if the server references a host, merge its address +
         # SNMP credential profile (no-op for classic inline servers).
-        server = self.resolve_host(server)
-        # Bound host in maintenance → resolve_host disables it: skip the check.
-        if server.get('_host_maintenance') or not server.get('enabled', True):
+        server = self.resolve_device(server)
+        # Bound host in maintenance → resolve_device disables it: skip the check.
+        if server.get('_device_maintenance') or not server.get('enabled', True):
             return
 
         host      = str(server.get('host',      '') or '').strip()

@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~9.925 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~9.941 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no host-capable), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -14,7 +14,7 @@ La suite transversal del panel vive bajo `src/tests/`, repartida en cuatro carpe
 
 | Carpeta | Qué necesita | Ejemplos |
 |---|---|---|
-| `tests/unit/` | **Nada externo**: función/clase aislada, sin app, sin BD, sin HTTP. | `test_monitor.py`, `test_hosts_store.py`, `test_secret_manager.py` |
+| `tests/unit/` | **Nada externo**: función/clase aislada, sin app, sin BD, sin HTTP. | `test_monitor.py`, `test_devices_store.py`, `test_secret_manager.py` |
 | `tests/integration/` | Arranca **Flask** vía `test_client`/`_login` (o stores con BD). | `test_wa_users.py`, `test_wa_config.py`, `test_wa_roles.py` |
 | `tests/e2e/` | Recursos **vivos**: motores de BD reales (`SS_TEST_*`) y navegador Playwright. | `test_ui_playwright.py`, `test_db_portability_live.py`, `test_security_live.py` |
 | `tests/meta/` | Lee la **estructura del propio repo**: fuente, docs, plantillas, git (no prueba conducta en runtime). | `test_docs_tests_inventory.py`, `test_changelog_frozen.py`, `test_routes_documented.py`, los `*_views.py` |
@@ -109,7 +109,7 @@ WebAdmin = pytest.importorskip('lib.web_admin.app').WebAdmin
 36. [Core — Almacén de config en BD](#36-core--almacén-de-config-en-bd)
 37. [BD — Tablas declaradas por módulos](#37-bd--tablas-declaradas-por-módulos)
 38. [BD — ModulesStore](#38-bd--modulesstore)
-39. [BD — HostsStore](#39-bd--hostsstore)
+39. [BD — DevicesStore](#39-bd--devicesstore)
 40. [BD — CredentialsStore](#40-bd--credentialsstore)
 41. [Core — Cliente SSH](#41-core--cliente-ssh)
 42. [Hosts — Ejecución local/SSH](#42-hosts--ejecución-localssh)
@@ -542,6 +542,12 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
+| `TestATableThatChangedItsName::test_la_adopta_cuando_no_hay_tabla_nueva` | `former_names` renombra la tabla con sus filas | 3 filas bajo el nombre nuevo | La tabla vieja sigue ahí |
+| `TestATableThatChangedItsName::test_y_TAMBIEN_cuando_la_nueva_ya_existe_vacia` | Una tabla nueva creada **vacía** por una pasada anterior no bloquea la adopción | La que tiene las filas ocupa su sitio | La flota se queda en la tabla vieja y todas las lecturas devuelven nada |
+| `TestATableThatChangedItsName::test_pero_no_toca_nada_si_las_DOS_tienen_filas` | Con datos en las dos no se toca nada y se registra | 3 y 2 filas intactas | Un paso de esquema decide solo sobre datos |
+| `TestATableThatChangedItsName::test_y_tira_la_vieja_cuando_se_queda_vacia` | Un resto vacío se retira | La vieja desaparece | Queda un nombre ocupado sin datos |
+| `TestATableThatChangedItsName::test_y_pasar_dos_veces_no_cambia_nada` | Idempotente | Mismas filas | Segunda pasada rompe |
+| `TestATableThatChangedItsName::test_una_tabla_que_se_declara_su_propio_nombre_anterior_no_se_borra` | Una declaración que se nombra a sí misma no se autodestruye | Filas intactas | La rama del nonato tira la tabla con todo dentro |
 | `test_creates_table_from_spec` | Crea la tabla desde el `TableSpec` si no existe | Columnas y orden e índices correctos | Si difiere |
 | `test_idempotent_no_changes` | Segunda reconciliación no detecta cambios | `is_empty`, sin rebuild | Si hay falsos positivos |
 | `test_add_trailing_column_keeps_data` | Añadir columna al final | `ADD COLUMN` sin rebuild, datos intactos | Si reconstruye o pierde datos |
@@ -594,7 +600,7 @@ MySQL/PostgreSQL reutilizan el mismo `diff_table` y el rebuild genérico.
 | `test_process_result_buffers_alert` | Un ítem cambiado y notificable se bufferea | `('down','ping','item1','boom')` en el buffer | Si no bufferea |
 | `test_send_message_carries_module_and_item` | Envío ad-hoc conserva módulo e ítem | `('down','ntp','NS1','boom')` | Si difiere |
 | `test_module_supplied_name_wins_over_uid_key` | El nombre amigable gana al UID | `('down','cpu','PVE02','CPU high')` | Si usa el UID |
-| `test_item_label_resolves_host_uid` | `_item_label` resuelve `host_uid`→'NS1' | Clave desconocida devuelve la propia clave | Si no resuelve |
+| `test_item_label_resolves_host_uid` | `_item_label` resuelve `device_uid`→'NS1' | Clave desconocida devuelve la propia clave | Si no resuelve |
 
 ### `TestMonitorAudit` — Auditoría del monitor
 
@@ -856,7 +862,7 @@ nombrar un campo que no existía cuando se escribió.
 
 ## 9c. Hosts — Qué resultados son de esta máquina
 
-**Archivo:** `tests/unit/test_hosts_status_rows.py` — 20 tests
+**Archivo:** `tests/unit/test_devices_status_rows.py` — 20 tests
 
 Un módulo graba resultados con claves suyas; un host sabe qué **items** tiene enlazados. Todo lo
 que enseñan «Últimos datos» e Infraestructura sale de emparejar lo uno con lo otro, y equivocarse
@@ -963,9 +969,9 @@ permite moverse. El mayor `__init__.py` del repo es hoy `ups`, con 298.
 |---|---|---|---|
 | `test_instantiates_and_check_runs_on_empty_config[<mod>]` | El módulo instancia y `check()` devuelve un `ReturnModuleCheck` con config vacía (los hooks pesados, p.ej. compilar MIBs SNMP, se neutralizan) | Devuelve `ReturnModuleCheck` | Si lanza o devuelve otro tipo |
 | `test_declared_credential_type_is_in_catalog[<mod>]` | Si el módulo declara un tipo de credencial (`__credential__`), ese tipo está en el catálogo central | Tipo presente en el catálogo | Si el tipo declarado no está expuesto |
-| `test_host_capable_module_is_exposed_in_catalogs[<mod>]` | Si el módulo es host-capable (`__host_profile__`), aparece en el flag multi-bind y en al menos una colección bindable a host | Presente en ambos catálogos | Si es host-capable pero falta en alguno |
+| `test_host_capable_module_is_exposed_in_catalogs[<mod>]` | Si el módulo es host-capable (`__device_profile__`), aparece en el flag multi-bind y en al menos una colección bindable a host | Presente en ambos catálogos | Si es host-capable pero falta en alguno |
 
-> **Skips intencionados** (no son fallos): estos dos últimos tests solo aplican a un subconjunto de módulos, así que se **saltan** para el resto — `skip("module declares no credential type")` en los módulos sin credencial y `skip("module is not host-capable")` en los que no declaran `__host_profile__`. Es el patrón "parametrizar sobre todos los módulos y saltar los que no tienen la característica"; la invariante sí se comprueba en los módulos a los que aplica.
+> **Skips intencionados** (no son fallos): estos dos últimos tests solo aplican a un subconjunto de módulos, así que se **saltan** para el resto — `skip("module declares no credential type")` en los módulos sin credencial y `skip("module is not host-capable")` en los que no declaran `__device_profile__`. Es el patrón "parametrizar sobre todos los módulos y saltar los que no tienen la característica"; la invariante sí se comprueba en los módulos a los que aplica.
 
 ---
 
@@ -1961,7 +1967,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_permission_matrix[<role>-<ep>]` | Un rol accede si y solo si tiene uno de los permisos requeridos | Rol con permiso → ≠ `403`; rol sin permiso → `403` | Si la puerta no se abre/cierra como debe |
 | `test_matrix_covers_all_crud_actions` | La tabla ejercita view/add/edit/delete (`GET`/`POST`/`PUT`/`DELETE`) | Los 4 métodos presentes | Si falta alguno |
 
-> Las fixtures crean los usuarios `editor`/`viewer`/`none` en `admin._users` y los persisten en la BD vía `admin._persist_users()`; el host de prueba se crea con `admin._hosts_store.create(...)` (registro de hosts en BD).
+> Las fixtures crean los usuarios `editor`/`viewer`/`none` en `admin._users` y los persisten en la BD vía `admin._persist_users()`; el host de prueba se crea con `admin._devices_store.create(...)` (registro de hosts en BD).
 
 ---
 
@@ -1986,7 +1992,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_message_uses_label_to_identify_server` | El label identifica el servidor en el mensaje | "NS1 - /" aparece en el mensaje | Si no aparece |
 | `test_same_mount_distinct_items_do_not_collide` | Mismo mount en dos ítems distintos | Claves distintas (uid-a, uid-b), sin colisión | Si colisionan |
 | `test_partition_not_found_is_error` | Partición inexistente | `status = False`, mensaje con "Error" | Si es `True` |
-| `test_disabled_and_maintenance_skipped` | Ítem deshabilitado + host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_disabled_and_maintenance_skipped` | Ítem deshabilitado + host en mantenimiento | Sin ítems, `device_exec` no invocado | Si procesa |
 
 ### `TestDiscover` — Descubrimiento de particiones
 
@@ -2149,7 +2155,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
 | `test_module_defaults` | Defaults del módulo | `threads=5`, `timeout=30`, `mdstat_path=/proc/mdstat` | Si difieren |
-| `test_schema_is_host_centric` | Schema host-céntrico | `__host_profile__` con clave `ssh`; sin `local`/`host` inline | Si difiere |
+| `test_schema_is_host_centric` | Schema host-céntrico | `__device_profile__` con clave `ssh`; sin `local`/`host` inline | Si difiere |
 
 ### `TestRaidCheck` (`test_raid.py`) — Ejecución del check
 
@@ -2159,11 +2165,11 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_raid_degraded` | RAID degradado | `1_md0` `status = False`, mensaje "degraded" | Si es `True` |
 | `test_raid_recovery` | RAID en reconstrucción | `status = False`, mensaje "recovery", porcentaje 12.6 | Si es `True` |
 | `test_no_raids` | Sin arrays RAID | `1` `status = True`, mensaje "No RAID" | Si es `False` |
-| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
-| `test_non_linux_host_reports_unsupported` | Host no-Linux | `host_exec` no invocado; `status = False`, mensaje "Linux" | Si ejecuta |
-| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `device_exec` no invocado | Si procesa |
+| `test_non_linux_host_reports_unsupported` | Host no-Linux | `device_exec` no invocado; `status = False`, mensaje "Linux" | Si ejecuta |
+| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `device_exec` no invocado | Si procesa |
 | `test_command_failure_is_error` | Fallo del comando | `status = False`, mensaje "Error" | Si es `True` |
-| `test_module_disabled` | Módulo deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_module_disabled` | Módulo deshabilitado | Sin ítems, `device_exec` no invocado | Si procesa |
 
 ### `TestRaidLabel` (`test_raid.py`) — Etiqueta del array
 
@@ -2245,9 +2251,9 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_normal_usage` | Uso normal | `srv_ram`/`srv_swap` `status = True`, used 75.0, nombres "srv - RAM"/"srv - SWAP" | Si difiere |
 | `test_high_ram_triggers_alert` | RAM sobre el umbral (75 ≥ 60) | `srv_ram` `status = False`, mensaje "Excessive" | Si es `True` |
 | `test_windows_reports_ram_only` | Windows | Comando con `wmic`; `srv_ram` presente, `srv_swap` ausente | Si difiere |
-| `test_unsupported_os` | SO no soportado | `host_exec` no invocado; `status = False`, mensaje "unsupported" | Si ejecuta |
-| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
-| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_unsupported_os` | SO no soportado | `device_exec` no invocado; `status = False`, mensaje "unsupported" | Si ejecuta |
+| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `device_exec` no invocado | Si procesa |
+| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `device_exec` no invocado | Si procesa |
 | `test_command_failure_is_error` | Fallo del comando | `status = False`, mensaje "Error" | Si es `True` |
 | `test_invalid_threshold_uses_default` | Umbral inválido/fuera de rango | `_alert` cae al default, parsea "80" | Si no aplica el default |
 
@@ -2280,10 +2286,10 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_expected_stopped_ok` | Esperado detenido y detenido | `status = True`, mensaje "Stopped" | Si es `False` |
 | `test_running_but_expected_stopped` | Corriendo pero esperado detenido | `status = False`, mensaje "expected: Stopped" | Si es `True` |
 | `test_windows_host_uses_sc` | Host Windows | Comando empieza "sc query"; `status = True` | Si difiere |
-| `test_remediation_recovers` | Remediación (incluye "start") | 3 llamadas `host_exec`; `status = True`, remediación `True` | Si no recupera |
-| `test_unsupported_os` | SO no soportado | `host_exec` no invocado; `status = False`, mensaje "unsupported" | Si ejecuta |
-| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
-| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_remediation_recovers` | Remediación (incluye "start") | 3 llamadas `device_exec`; `status = True`, remediación `True` | Si no recupera |
+| `test_unsupported_os` | SO no soportado | `device_exec` no invocado; `status = False`, mensaje "unsupported" | Si ejecuta |
+| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `device_exec` no invocado | Si procesa |
+| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `device_exec` no invocado | Si procesa |
 
 ### `TestDiscover` — Descubrimiento de servicios
 
@@ -2313,9 +2319,9 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 |---|---|---|---|
 | `test_ok_below_threshold` | Temperatura bajo el umbral | `status = True`, temp 45.0 | Si es `False` |
 | `test_over_threshold_warns` | Temperatura sobre el umbral | `status = False`, mensaje "Warning" | Si es `True` |
-| `test_non_linux_unsupported` | Host no-Linux | `host_exec` no invocado; `status = False`, mensaje "Linux" | Si ejecuta |
+| `test_non_linux_unsupported` | Host no-Linux | `device_exec` no invocado; `status = False`, mensaje "Linux" | Si ejecuta |
 | `test_sensor_not_found_is_error` | Sensor no encontrado | `status = False`, mensaje "Error" | Si es `True` |
-| `test_disabled_and_maintenance_skipped` | Ítem deshabilitado + mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_disabled_and_maintenance_skipped` | Ítem deshabilitado + mantenimiento | Sin ítems, `device_exec` no invocado | Si procesa |
 
 ### `TestDiscover` — Descubrimiento de sensores
 
@@ -2431,10 +2437,10 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_below_threshold_ok` | Uso bajo el umbral | `status = True`, used 75.0 | Si es `False` |
 | `test_above_threshold_alert` | Uso sobre el umbral (75 ≥ 60) | `status = False`, mensaje "Excessive" | Si es `True` |
 | `test_windows_host_uses_wmic` | Host Windows | Comando `wmic`; `status = True`, used 42.0 | Si difiere |
-| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
-| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `device_exec` no invocado | Si procesa |
+| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `device_exec` no invocado | Si procesa |
 | `test_command_failure_is_error` | Fallo del comando | `status = False`, mensaje "Error" | Si es `True` |
-| `test_module_disabled` | Módulo deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_module_disabled` | Módulo deshabilitado | Sin ítems, `device_exec` no invocado | Si procesa |
 
 ### `TestThresholdInheritance` — Herencia del umbral
 
@@ -2450,7 +2456,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 | Test | Qué comprueba | OK | Error |
 | --- | --- | --- | --- |
-| `test_host_centric` | Schema host-céntrico | `__host_profile__` clave `ssh`; `list` con `alert` y `label` | Si difiere |
+| `test_host_centric` | Schema host-céntrico | `__device_profile__` clave `ssh`; `list` con `alert` y `label` | Si difiere |
 
 ---
 
@@ -2497,14 +2503,14 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 | Test | Qué comprueba | OK | Error |
 | --- | --- | --- | --- |
-| `test_disabled_module_empty` | Módulo deshabilitado | Sin ítems, `host_exec` no invocado | Si procesa |
-| `test_disabled_item_skipped` | Ítem con `enabled: false` | Sin ítems, `host_exec` no invocado | Si aparece |
+| `test_disabled_module_empty` | Módulo deshabilitado | Sin ítems, `device_exec` no invocado | Si procesa |
+| `test_disabled_item_skipped` | Ítem con `enabled: false` | Sin ítems, `device_exec` no invocado | Si aparece |
 | `test_running_ok` | Proceso con instancias suficientes | `status = True`, count 2 | Si es `False` |
 | `test_min_count_not_met` | Instancias < `min_count` | `status = False`, mensaje "2/3" | Si es `True` |
 | `test_windows_host_uses_tasklist` | Host Windows | Comando `tasklist`; `status = True`, count 2 | Si difiere |
 | `test_empty_process_uses_key` | Campo `process` vacío → usa la clave | Búsqueda con la clave; `status = True` | Si usa string vacío |
 | `test_command_failure_is_error` | Fallo del comando | `status = False`, mensaje "Error" | Si es `True` |
-| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `host_exec` no invocado | Si procesa |
+| `test_maintenance_host_skipped` | Host en mantenimiento | Sin ítems, `device_exec` no invocado | Si procesa |
 
 ### `TestProcessDiscover` — Descubrimiento de procesos
 
@@ -2567,11 +2573,11 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | Test | Qué comprueba | OK | Error |
 | --- | --- | --- | --- |
 | `test_remote_a_via_dig_targets_nameserver` | A remoto vía `dig` apuntando al nameserver | Comando con `dig` y `@192.168.110.253`; `status = True`, resuelto `['192.168.110.10']` | Si difiere |
-| `test_local_host_also_uses_dig` | Host local también usa `dig` vía `host_exec` | `status = True` | Si no usa dig |
-| `test_remote_failure_reports_error` | `host_exec` rc=9 "connection timed out" | `status = False`, mensaje con "timed out" | Si difiere |
+| `test_local_host_also_uses_dig` | Host local también usa `dig` vía `device_exec` | `status = True` | Si no usa dig |
+| `test_remote_failure_reports_error` | `device_exec` rc=9 "connection timed out" | `status = False`, mensaje con "timed out" | Si difiere |
 | `test_parse_dig_short` | `_parse_dig_short` parsea A/MX/TXT/NS | Quita puntos finales y comillas | Si el parseo falla |
 | `test_discover_probe_remote_parses_combined` | Parseo de salida `##TYPE##` combinada | A y MX presentes, AAAA ausente; A `fill_value='1.2.3.4'` | Si difiere |
-| `test_discover_uses_host_via_ssh_when_remote` | `__host__` remoto vía `lib.core.hosts.runner.run` | Registro A con `fill_value='9.9.9.9'` | Si no usa SSH |
+| `test_discover_uses_host_via_ssh_when_remote` | `__device__` remoto vía `lib.core.devices.runner.run` | Registro A con `fill_value='9.9.9.9'` | Si no usa SSH |
 
 ### `TestDnsWindowsResolver`
 
@@ -2648,7 +2654,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_ok` | `test_connection` con `OL` | `ok = True`; mensaje con "host:port" y "OL"; info con estado/carga | Si falla |
 | `test_failure_returns_message` | Conexión rechazada | `ok = False`, mensaje con "refused" | Si difiere |
 | `test_no_host` | Host vacío | `ok = False` | Si acepta |
-| `test_host_from_bound_host_ctx` | Host vacío cae al `__host__` (172.16.0.5) | `ok = True`; usa esa dirección | Si no la usa |
+| `test_host_from_bound_host_ctx` | Host vacío cae al `__device__` (172.16.0.5) | `ok = True`; usa esa dirección | Si no la usa |
 
 ---
 
@@ -2822,7 +2828,7 @@ y vueltas y tardaba unos cinco minutos contra un plazo de 120 s, así que cada r
 
 ## 38a-bis. Una ejecución que va de UNA máquina
 
-**Archivo:** `tests/unit/test_module_host_scope.py` — 12 tests
+**Archivo:** `tests/unit/test_module_device_scope.py` — 12 tests
 
 Un check se ejecuta con todo lo que el módulo tiene, y para una ronda del planificador eso es
 la respuesta correcta: está preguntando cuál es el estado de la instalación. Es la respuesta
@@ -2904,9 +2910,9 @@ que la forma entera se comprueba con un doble que apunta lo que le pidieron.
 
 ---
 
-## 39. BD — HostsStore
+## 39. BD — DevicesStore
 
-**Archivo:** `tests/unit/test_hosts_store.py` — 40 tests
+**Archivo:** `tests/unit/test_devices_store.py` — 40 tests
 
 ---
 
@@ -2940,7 +2946,7 @@ eran doce lecturas completas—, y que guardar un dispositivo **no reconcilie el
 lo que pasaba al construir el almacén de clases para validar una. Las dos se comprueban con un
 contador y no con un cronómetro: el tiempo depende de la máquina y el número de consultas no.
 
-**Archivo:** `tests/unit/test_hosts_types.py` — 66 tests
+**Archivo:** `tests/unit/test_device_types.py` — 69 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3051,7 +3057,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 42. Hosts — Ejecución local/SSH
 
-**Archivo:** `tests/unit/test_hosts_exec.py` — 16 tests
+**Archivo:** `tests/unit/test_devices_exec.py` — 16 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3069,7 +3075,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 43. Hosts — Perfiles de protocolo
 
-**Archivo:** `tests/unit/test_hosts_profiles.py` — 54 tests
+**Archivo:** `tests/unit/test_devices_profiles.py` — 54 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3081,7 +3087,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 | `test_ssh_is_core_builtin` | Ssh is core builtin |
 | `test_datastore_db_endpoint_is_not_a_profile` | Datastore db endpoint is not a profile |
 | `test_module_host_specs_preserves_datastore_ssh` | Module host specs preserves datastore ssh |
-| `test_module_host_fields` | Module host fields |
+| `test_module_device_fields` | Module host fields |
 | `test_module_host_multiple` | Module host multiple |
 | `test_module_host_collections` | Module host collections |
 | `test_missing_dir_is_empty` | Missing dir is empty |
@@ -3089,7 +3095,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 44. Hosts — Resolución host→check
 
-**Archivo:** `tests/unit/test_hosts_config_resolution.py` — 27 tests
+**Archivo:** `tests/unit/test_devices_config_resolution.py` — 27 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3110,13 +3116,13 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 | `test_host_os_auto_local_resolves_to_platform` | Host os auto local resolves to platform |
 | `test_host_os_auto_remote_stays_auto` | Host os auto remote stays auto |
 | `test_dns_has_ssh_host_profile` | Dns has ssh host profile |
-| `test_dns_in_module_host_fields` | Dns in module host fields |
+| `test_dns_in_module_device_fields` | Dns in module host fields |
 | `test_resolved_item_inherits_host` | Resolved item inherits host |
 | `test_resolved_item_inline_unchanged` | Resolved item inline unchanged |
 
 ## 45. Hosts — Sonda de check único
 
-**Archivo:** `tests/unit/test_hosts_probe.py` — 4 tests
+**Archivo:** `tests/unit/test_devices_probe.py` — 4 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3127,7 +3133,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 46. Hosts — Asistente de migración
 
-**Archivo:** `tests/unit/test_hosts_migrate.py` — 8 tests
+**Archivo:** `tests/unit/test_devices_migrate.py` — 8 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3447,7 +3453,7 @@ en dos módulos. Y como los tests de ambos módulos la mockean, sin estos tests 
 
 ## 56. Panel Web — Servidores (hosts)
 
-**Archivo:** `tests/integration/test_wa_hosts.py` — 52 tests
+**Archivo:** `tests/integration/test_wa_devices.py` — 52 tests
 
 ---
 
@@ -3475,7 +3481,7 @@ lista. Más el cuadro: una clase vinculada se abre para mirar **pero su icono se
 mantiene el nombre, y allí no hay iconos—, los dos mil iconos están detrás de un botón, y el que
 lleva puesto sale aunque no sea de los veinte de la lista corta.
 
-**Archivo:** `tests/integration/test_wa_host_types.py` — 44 tests
+**Archivo:** `tests/integration/test_wa_device_types.py` — 44 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3815,12 +3821,12 @@ convertiría la pantalla de vista previa en el único sitio donde el correo se v
 |---|---|---|---|
 | `test_init` | El módulo se inicializa con el nombre correcto | `name_module == 'watchfuls.keepalived'` | nombre distinto |
 | `test_schema_is_cluster` | El esquema declara binding multi-host de cluster (columnas VIP, campo miembro `priority`) | flags de cluster presentes | flags ausentes |
-| `test_declares_vip_provision_host` | El VIP se auto-aprovisiona como host vía `__provision_host__` (vip → vip_host_uid) | declaración con `address_field`/`link_field`/`name_template` | declaración incorrecta |
+| `test_declares_vip_provision_host` | El VIP se auto-aprovisiona como host vía `__provision_device__` (vip → vip_host_uid) | declaración con `address_field`/`link_field`/`name_template` | declaración incorrecta |
 | `test_healthy_single_master` | Cluster sano con un único MASTER que sostiene el VIP | VIP OK, nodo master con `holds_vip=True`, resto `False` | roll-up incorrecto |
 | `test_vip_down_no_holder` | Ningún nodo sostiene el VIP | VIP en fallo con severidad dura (no warning) | VIP marcado OK o warning |
 | `test_split_brain_is_warning` | Dos nodos sostienen el VIP a la vez (split-brain) | VIP en fallo, severidad `warning`, `holders==2` | no detecta split-brain |
 | `test_service_down_node_fails` | Un nodo con servicio inactivo | nodo en fallo pero VIP OK (otro lo sostiene) | VIP afectado erróneamente |
-| `test_unreachable_node` | Un miembro inalcanzable por host_exec | nodo en fallo | nodo marcado OK |
+| `test_unreachable_node` | Un miembro inalcanzable por device_exec | nodo en fallo | nodo marcado OK |
 | `test_maintenance_member_skipped` | Miembro en mantenimiento | nodo omitido (no en resultados) y VIP OK | nodo evaluado/fallado |
 | `test_priority_ok_on_highest` | El VIP lo sostiene el nodo de mayor prioridad | check priority OK | fallo |
 | `test_priority_warns_when_lower_holds_vip` | Un nodo de menor prioridad sostiene el VIP | priority en fallo, `warning`, `top_priority==150` | no avisa |
@@ -3989,7 +3995,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 | `test_test_connection_password_ticket` | test_connection con password: login POST + GET con cookie | `ok=True`, mensaje 'standalone' | flujo de ticket erróneo |
 | `test_provision_creates_token` | Provisión least-privilege: rol custom + usuario + ACL + token | `ok=True`, campos token, comandos pveum correctos | comandos ausentes |
 | `test_provision_renew_rotates_secret_only` | mode=renew solo rota el secret (sin user/ACL) | token nuevo, remove+add token, sin role/user/acl | recrea todo |
-| `test_provision_uses_bound_host_ssh_profile` | Provisión reutiliza el perfil SSH del host vinculado (`__host__`) | conn con address/port/user/password del host | ignora perfil |
+| `test_provision_uses_bound_host_ssh_profile` | Provisión reutiliza el perfil SSH del host vinculado (`__device__`) | conn con address/port/user/password del host | ignora perfil |
 | `test_provision_explicit_overrides_host_profile` | Valor explícito del modal gana sobre el perfil SSH del host | conn con datos explícitos | usa perfil host |
 | `test_provision_verify_host_default_autoadd` | verify_host por defecto False salvo `ssh_verify_host` del perfil | False por defecto, True si activado | valor incorrecto |
 | `test_provision_requires_ssh_credentials` | Provisión sin credenciales SSH | `ok=False`, mensaje con 'ssh' | continúa |
@@ -4689,7 +4695,7 @@ los contenedores en los que el panel **no** se está ejecutando.
 
 ## 76. Hosts — Primitivas de resolución (lib/hosts/resolve.py)
 
-**Archivo:** `tests/unit/test_hosts_resolve.py` — 14 tests
+**Archivo:** `tests/unit/test_devices_resolve.py` — 14 tests
 
 ### `TestHostProfileSpecs` — Normalización de specs de perfil
 
@@ -4715,7 +4721,7 @@ los contenedores en los que el panel **no** se está ejecutando.
 
 ## 77. Hosts — Hook de hosts aprovisionados
 
-**Archivo:** `tests/unit/test_provisioned_hosts.py` — 7 tests
+**Archivo:** `tests/unit/test_provisioned_devices.py` — 7 tests
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -4723,7 +4729,7 @@ los contenedores en los que el panel **no** se está ejecutando.
 | `test_idempotent` | Re-ejecutar con los mismos datos no duplica | Mismo uid y un solo host | Si crea un host duplicado |
 | `test_syncs_address_on_change` | Cambiar el address del item sincroniza el host vinculado | El host actualiza su `address`, sin duplicar | Si no sincroniza o duplica |
 | `test_no_address_no_host` | Item sin address | No crea host ni añade `link_field` | Si crea host o estampa uid |
-| `test_module_without_declaration_is_noop` | Módulo cuyo schema no declara `__provision_host__` | Se salta, no crea hosts | Si crea algún host |
+| `test_module_without_declaration_is_noop` | Módulo cuyo schema no declara `__provision_device__` | Se salta, no crea hosts | Si crea algún host |
 | `test_adopts_existing_host_by_name` | Item sin link adopta un host existente con el nombre determinista (anti-duplicación) | Reutiliza el uid existente, un solo host, address sincronizado | Si crea un duplicado |
 | `test_returns_assignments_for_roundtrip` | El hook devuelve los links establecidos para round-trip; re-run no repite | Devuelve una asignación (`field`/`item`/`uid`); segunda ejecución devuelve `[]` | Si no devuelve la asignación o repite en la segunda pasada |
 
@@ -5184,6 +5190,19 @@ Este guard nació de tres fallos reales encontrados a la vez.
 
 ---
 
+## 88b2. Meta — El arranque llama a lo que existe
+
+**Archivo:** `tests/meta/test_entry_points_agree.py` — 2 tests
+
+`main.py` está fuera de `lib/`, así que un renombrado dentro de la librería no lo arrastra. Un
+cambio amplio dejó `run(host=…)` llamando a `def run(device=…)`: el panel no arrancaba y **la
+suite entera pasaba en verde**, porque `run()` enlaza puertos y no se ejecuta en ella.
+
+| Test | Qué comprueba |
+|---|---|
+| `TestMainCallsWhatIsActuallyThere::test_the_web_entry_point_calls_run_with_the_names_it_declares` | Los argumentos con nombre que usa `main.py` existen en la firma de `run()` |
+| `TestMainCallsWhatIsActuallyThere::test_and_the_bind_address_is_still_called_host` | La dirección de escucha se sigue llamando `host`: es red, no un dispositivo del registro |
+
 ## 88c. Meta — Versión y CHANGELOG
 
 **Archivo:** `tests/meta/test_version_changelog.py` — 9 tests
@@ -5311,7 +5330,7 @@ que caducan, salud de los servicios internos, y quién manda cuando hay varias r
 
 | Test | Qué comprueba |
 |---|---|
-| `TestEnumerate::*` (4) | De dónde salen los objetivos: config inline, `host_uid` resuelto por el store, deshabilitados omitidos, y ausencia de config `ssl_cert` |
+| `TestEnumerate::*` (4) | De dónde salen los objetivos: config inline, `device_uid` resuelto por el store, deshabilitados omitidos, y ausencia de config `ssl_cert` |
 | `TestScanner::test_disabled_never_emits` / `test_not_leader_never_emits` | Ni apagado ni desde una réplica no líder: evita avisos duplicados en HA |
 | `TestScanner::test_healthy_cert_not_alerted` | Un certificado sano no genera ruido |
 | `TestScanner::test_expiring_alerts_once` | Avisa **una vez** por severidad, no en cada ciclo |
@@ -5629,7 +5648,7 @@ colgar, no se lleva por delante el botón que acompaña, un descriptor sin funci
 pantalla, un `ready` que revienta no tumba la sección, y **el core no nombra a ningún proveedor**
 en ninguno de los tres ficheros que lo dibujan.
 
-**Archivo:** `tests/integration/test_wa_orgs.py` — 41 tests
+**Archivo:** `tests/integration/test_wa_orgs.py` — 43 tests
 
 ---
 
@@ -6311,14 +6330,14 @@ Las tres cosas que esto deliberadamente **no** hace pesan tanto como la que hace
 | `TestWhatCountsAsADevice::test_a_host_with_profiles_assigned_is_sampled` | Un host configurado se muestrea sin ninguna entrada de módulo |
 | `TestWhatCountsAsADevice::test_a_host_with_a_community_but_nothing_assigned_is_not` | Alcanzable no es lo mismo que digno de graficar: sin perfiles no hay nada que medir, y muestrearlo registraría nada con pinta de haber funcionado |
 | `TestWhatItRefusesToDecide::test_a_host_an_item_already_speaks_for_is_left_alone` | Muestrearlo dos veces serían dos respuestas a «qué está haciendo este dispositivo», con dos líneas base de contador independientes |
-| `TestWhatItRefusesToDecide::test_maintenance_is_not_decided_here` | Lo decide `resolve_host`, por donde pasa todo ítem muestreado: un sitio donde un host en mantenimiento deja de leerse, no dos que tengan que coincidir |
-| `TestWhatItRefusesToDecide::test_it_returns_an_item_and_not_a_connection` | Construir aquí la conexión sería una segunda implementación de la mezcla que ya hace `resolve_host`, y las dos discreparían en cuanto cambiara una |
+| `TestWhatItRefusesToDecide::test_maintenance_is_not_decided_here` | Lo decide `resolve_device`, por donde pasa todo ítem muestreado: un sitio donde un host en mantenimiento deja de leerse, no dos que tengan que coincidir |
+| `TestWhatItRefusesToDecide::test_it_returns_an_item_and_not_a_connection` | Construir aquí la conexión sería una segunda implementación de la mezcla que ya hace `resolve_device`, y las dos discreparían en cuanto cambiara una |
 | `TestItCannotTakeACycleDown::*` (×4) | Un registro ilegible significa cero dispositivos extra este ciclo — el mismo resultado que no tener ninguno, y no vale un ciclo de monitorización caído |
 | `TestTheKeyIsStable::*` (×3) | El estado de contadores y las filas de historial se archivan bajo esa clave: si cambiara entre ciclos reiniciaría cada tasa y partiría cada gráfica |
 
 | `TestNarrowingToOneDevice::*` (4) | **Acotar a un dispositivo.** Los items de módulo los acota la resolución de configuración del propio módulo; estos son los dispositivos que **no tienen item** que acotar, así que sin esto «obtener datos de erebor» seguía recorriendo todos los switches del rack. Acota, pero **no promueve**: un host sin perfiles asignados no pasa a muestrearse por haber preguntado por él; sin acotar sigue siendo la flota entera; y uno que ya cubre un item **sigue cubierto** aunque sea el que se pide, o el mismo dispositivo se archivaría dos veces bajo dos claves |
 
-Y en `tests/unit/test_hosts_resolve.py`, la convención que lo sostiene: un resultado cuya
+Y en `tests/unit/test_devices_resolve.py`, la convención que lo sostiene: un resultado cuya
 clave empieza por `host.` pertenece a un **host** y no a un check, que es lo que permite a la
 pestaña de Servidores atribuirlo. Sin eso un dispositivo puede muestrearse, darse por caído, y
 seguir enseñando un guion neutro.
@@ -6327,7 +6346,7 @@ seguir enseñando un guion neutro.
 
 ## 99. Meta — Una conexión SNMP descrita dos veces
 
-**Archivo:** `tests/meta/test_snmp_host_profile_agrees.py` — 14 tests
+**Archivo:** `tests/meta/test_snmp_device_profile_agrees.py` — 14 tests
 
 `lib/core/snmp/manifest.py` declara el perfil que lleva un **host**: lo que dibuja el
 formulario de Servidores y lo que hereda cualquier check atado a ese host.
@@ -6346,7 +6365,7 @@ contraseña** — y nada de eso levanta un error en ninguna parte.
 | `TestTheTwoDescriptionsAgree::test_every_core_field_exists_on_the_check` | Un check inline puede decir todo lo que puede decir un host, o el caso «IP suelta» es de segunda y no sabe hacer SNMPv3 |
 | `TestTheTwoDescriptionsAgree::test_the_check_does_not_restate_them` | Control positivo: la colección nombra el protocolo y no repite los diez campos — si no, la expansión podría dejar de funcionar y bastaría con pegarlos de vuelta para volver a verde |
 | `TestTheTwoDescriptionsAgree::test_the_metadata_matches_field_by_field` | Tipo, default, opciones, `show_when`, `secret`, `multi`, mín/máx. El `placeholder` queda fuera a propósito: es una pista de una caja vacía y cada formulario puede redactarla a su manera |
-| `TestTheTwoDescriptionsAgree::test_the_module_names_the_protocol_and_the_core_says_what_it_holds` | El módulo conserva su `__host_profile__` —es lo que hace heredar— pero ya no repite la lista; sí sigue diciendo dónde aterriza la dirección |
+| `TestTheTwoDescriptionsAgree::test_the_module_names_the_protocol_and_the_core_says_what_it_holds` | El módulo conserva su `__device_profile__` —es lo que hace heredar— pero ya no repite la lista; sí sigue diciendo dónde aterriza la dirección |
 | `TestTheTwoDescriptionsAgree::test_the_core_declaration_is_the_one_the_form_draws` | La recoge el escáner compartido de `manifest.py`, así que el catálogo la ofrece esté o no instalado el watchful — que es justo el objetivo |
 | `TestTheTwoDescriptionsAgree::test_every_field_is_named_in_both_languages` | Una etiqueta que falta pone el nombre crudo del campo en pantalla, y eso solo se ve mirando la página |
 | `TestTheCredentialSaysTheSameThing::*` (3) | La tercera descripción de la misma conexión, y la que lleva candado: llega al catálogo, sus campos de identidad coinciden con el perfil de host, y está redactada en los dos idiomas |
@@ -6403,7 +6422,7 @@ filtros, casillas, papelera— teniendo al lado la fábrica que usan Dispositivo
 Clústeres y el inventario, y lo que salía era una lista que se comportaba distinto que todas las
 demás de su propia sección. Reportado desde la pantalla.
 
-**Archivo:** `tests/meta/test_host_types.py` — 41 tests
+**Archivo:** `tests/meta/test_device_types.py` — 41 tests
 
 El registro guarda servidores, pero también un NAS, un switch y un SAI: la sección se llamaba
 «Servidores» mientras el catálogo SNMP de al lado traía perfiles de Mikrotik, Linksys y dos
@@ -6426,12 +6445,12 @@ aplica nada.
 
 ## 99c. Meta — Un protocolo del core dice sus campos en un sitio
 
-**Archivo:** `tests/meta/test_host_profiles_single_source.py` — 4 tests
+**Archivo:** `tests/meta/test_device_profiles_single_source.py` — 4 tests
 
-Once módulos repetían esa lista en su `__host_profile__`: diez con los mismos siete nombres de
+Once módulos repetían esa lista en su `__device_profile__`: diez con los mismos siete nombres de
 SSH y SNMP con los diez suyos, ochenta nombres en total. El catálogo ya ignoraba todas las
 copias —un perfil declarado por el core sobrescribe al del módulo— así que una copia que se
-separara **no cambiaba el formulario**. Cambiaba algo más callado: `resolve_host` lee esa lista
+separara **no cambiaba el formulario**. Cambiaba algo más callado: `resolve_device` lee esa lista
 para decidir **qué valores puede empujar un host atado sobre el check**, y la lista de
 «ocultar al atar» la lee para decidir qué deja de dibujar un check ya atado.
 
@@ -7490,7 +7509,7 @@ Dos funciones necesitan exactamente lo mismo: el botón **probar** de Servers y 
 en vivo** de una página de módulo. Las dos quieren el `check()` **real** del módulo —una sonda
 que pasara por otro código no probaría nada de lo que corre a las 3 de la mañana—, así que el
 módulo recibe un Monitor mínimo y se le llama. Eso es `lib/modules/check_runner.py`, y estuvo
-viviendo en `lib/core/hosts/probe.py` porque allí se necesitó primero: la capa genérica
+viviendo en `lib/core/devices/probe.py` porque allí se necesitó primero: la capa genérica
 dependiendo de **un** dominio.
 
 La factura llegó como bug. El runner no devuelve el resultado del módulo tal cual: lo
@@ -8244,7 +8263,7 @@ era Deshacer o Descartar). Ahora el nombre se pide **antes** de copiar nada, pro
 | Test | Qué comprueba | Verde | Qué evita |
 |---|---|---|---|
 | `TestSavingACloneReportsWhatHappened::*` (×4) | Recorriendo la ruta real: un uid duplicado guarda y responde 200; los dos elementos sobreviven con uid propio; el guardado se audita con el duplicado anotado **en la misma entrada**; y un guardado normal sigue siendo una lista de cambios limpia | 200 + 2 elementos | que la nota sustituya a la lista en vez de sumarse: la UI de auditoría pinta `[{field, old, new}]` como tabla |
-| `TestTheUiStopsManufacturingDuplicates::*` (×3) | El clon limpia el uid, la limpieza baja a colecciones anidadas, y **no** toca `cred_uid`/`host_uid` | `_stripItemUids` recursivo, borrado por nombre exacto | desvincular en silencio la credencial y el host de cada clon — que es lo que haría un «borra todo lo que acabe en uid» |
+| `TestTheUiStopsManufacturingDuplicates::*` (×3) | El clon limpia el uid, la limpieza baja a colecciones anidadas, y **no** toca `cred_uid`/`device_uid` | `_stripItemUids` recursivo, borrado por nombre exacto | desvincular en silencio la credencial y el host de cada clon — que es lo que haría un «borra todo lo que acabe en uid» |
 | `TestTheNameIsAskedForBeforeAnythingIsCopied::*` (×8) | El clic solo abre el modal (nada de copiar, `markDirty` ni toast); aceptar es lo que clona; un nombre vacío o repetido se rechaza **en el modal**; la propuesta cuenta desde la **base** (`web_Copia1` → `web_Copia2`, no `web_Copia1_Copia1`) y compara **nombres visibles**; el nombre tecleado va donde la lista lo lee; y la copia declara su origen | modal + `_itemTitleField` compartido | dos filas con el mismo nombre, un Cancelar que no cancela, y un nombre tecleado escrito donde nadie lo muestra |
 | `TestTheAuditSaysNewOrClonedAndFromWhat::*` (×10) | `__cloned_from__` se **toma** (no se lee) y nunca llega a almacenarse; un elemento nuevo se reporta como nuevo y un clon nombra su fuente; un elemento intacto no genera fila; el nombre sale del campo que **declara el módulo** (`label`, `ups_name`, `process`); y sobrevive a que el descubrimiento no esté disponible | filas `<mod>.<coll> · new item` / `· cloned item` | que la auditoría trate igual un elemento tecleado y uno copiado, que es justo la distinción que hace falta al comparar dos filas casi idénticas |
 
@@ -8392,7 +8411,7 @@ de reventar.
 
 ## 142. Los únicos tests que ejecutan el JavaScript del panel
 
-**Archivo:** `tests/e2e/test_ui_playwright.py` — 52 tests (opt-in: se saltan sin Playwright)
+**Archivo:** `tests/e2e/test_ui_playwright.py` — 55 tests (opt-in: se saltan sin Playwright)
 
 Todo lo demás verifica el frontend **leyendo la plantilla como texto**. Eso fija la estructura
 del marcado y no dice nada sobre si el código de dentro corre: un `TypeError` en la primera
@@ -8833,7 +8852,7 @@ más cubre este código.
 
 **Archivo:** `tests/unit/test_module_action_identity.py` — 9 tests
 
-Una acción lanzada desde un formulario plano lleva `host_uid` y `cred_uid` en el nivel superior, y
+Una acción lanzada desde un formulario plano lleva `device_uid` y `cred_uid` en el nivel superior, y
 la ruta los resuelve ahí. Un **descubrimiento acotado a un ítem padre** tiene otra forma: la UI
 envía `{escalares del módulo…, "<colección>": {"<clave>": {…el ítem…}}}`, y es *dentro del ítem*
 donde viven esas dos claves.
@@ -8851,9 +8870,9 @@ comprobaciones de ese mismo servidor funcionaban, porque el camino de comprobaci
 | `test_the_credential_wins_over_the_items_own_value` | Misma precedencia que el nivel superior: la credencial se aplica la última y gana |
 | `test_the_bound_host_fills_an_empty_address` | El caso reportado: `host` vacío porque la dirección viene del host vinculado |
 | `test_an_address_typed_on_the_item_beats_the_bound_host` | El host **rellena**, no manda: por eso el campo sigue siendo editable |
-| `test_an_item_without_either_is_left_alone` | Sin `host_uid` ni `cred_uid` no se toca nada |
+| `test_an_item_without_either_is_left_alone` | Sin `device_uid` ni `cred_uid` no se toca nada |
 | `test_module_scalars_are_not_mistaken_for_a_collection` | Los campos propios del módulo viajan al lado de la colección |
-| `test_a_dunder_key_is_never_walked` | `__host__` / `__connector__` los inyecta la ruta, no son ítems |
+| `test_a_dunder_key_is_never_walked` | `__device__` / `__connector__` los inyecta la ruta, no son ítems |
 | `test_a_disabled_credential_supplies_nothing` | Una credencial deshabilitada no aporta |
 | `test_a_missing_store_is_not_an_error` | Un proceso recortado puede no tener los almacenes: no puede convertir cada acción en un 500 |
 
@@ -9811,7 +9830,7 @@ mismo acto que mirar la respuesta de ayer.
 | `TestOneMachine::*` (3) | Contesta qué es y qué dijo cada check; una máquina desconocida es 404; y tampoco por ahí salen las credenciales |
 | `TestWhoMaySeeIt::*` (3) | `infra_view` y no `devices_view`: leer el estado en vivo y editar el registro que lo define son actos distintos que quiere gente distinta. Un rol sin la bandera recibe 403, un *viewer* lo lee, y **no existe `infra_edit`** —lo que hay que cambiar vive en el registro, tras los permisos que el registro ya tiene—; las banderas del dominio son exactamente dos, `infra_view` e `infra_collect` |
 | `TestCollectingFromTheWholeFleet::*` (5) | **El botón de la lista**, al lado del de cada dispositivo, y son actos distintos: el de un dispositivo va acotado a él —rápido, y no recorre el rack de otro—; éste es la ejecución sin acotar, que es lo que cuesta una ronda del planificador. Pide sesión; un *viewer* mira la flota y no la refresca; y **tener la bandera no basta sin ver la flota** —`infra_collect` dice qué ACTO puedes hacer, no sobre qué máquinas, y una ejecución sobre toda la flota sondea máquinas que a un operador acotado se le niegan dos rutas más arriba; el botón por dispositivo que sí tiene sigue funcionando, acotado como lo está él—; una instalación **sin nada que ejecutar lo dice** (409 antes de mirar el directorio de módulos: «no hay nada que recoger» es cierto pase lo que pase con el código, y contestarlo con un 500 se lee como un servidor roto); y un dispositivo que es dispositivo **sólo por el registro** sí es algo que ejecutar |
-| `TestWhatTheFleetButtonRuns::*` (5) | **Son los dispositivos de la LISTA**, que es más estrecho que «todo lo activado». Escrito primero como «todo módulo activo con algo que ejecutar», se llevaba por delante los módulos que no vigilan ningún dispositivo —un *tenant* de Microsoft 365, una suscripción de Azure— y el diálogo abría con diecisiete líneas para una flota de diecisiete máquinas. Reportado desde la pantalla con esas palabras. Se comprueba que un módulo **que no vigila ningún dispositivo no es la flota**; que un item atado a uno de la lista **sí**; que un **check de clúster cuenta por su lista de miembros** —la atadura que no es `host_uid`: un VIP de keepalived o un clúster de Proxmox son UN item atado a varias máquinas por `host_uids`, convención del propio core (host_binding, authz y el servicio de permisos se apoyan en ella), y leído sólo como `host_uid` no ata a nada, así que un módulo que vigila ocho máquinas de esta misma pantalla se quedaba fuera del botón que dice que las recoge—; que un item atado a una máquina **que el registro ya no tiene** no cuenta; y que un módulo **apagado no se ejecuta** |
+| `TestWhatTheFleetButtonRuns::*` (5) | **Son los dispositivos de la LISTA**, que es más estrecho que «todo lo activado». Escrito primero como «todo módulo activo con algo que ejecutar», se llevaba por delante los módulos que no vigilan ningún dispositivo —un *tenant* de Microsoft 365, una suscripción de Azure— y el diálogo abría con diecisiete líneas para una flota de diecisiete máquinas. Reportado desde la pantalla con esas palabras. Se comprueba que un módulo **que no vigila ningún dispositivo no es la flota**; que un item atado a uno de la lista **sí**; que un **check de clúster cuenta por su lista de miembros** —la atadura que no es `device_uid`: un VIP de keepalived o un clúster de Proxmox son UN item atado a varias máquinas por `host_uids`, convención del propio core (device_binding, authz y el servicio de permisos se apoyan en ella), y leído sólo como `device_uid` no ata a nada, así que un módulo que vigila ocho máquinas de esta misma pantalla se quedaba fuera del botón que dice que las recoge—; que un item atado a una máquina **que el registro ya no tiene** no cuenta; y que un módulo **apagado no se ejecuta** |
 | `TestCollectingNow::*` (8) | La única ruta que actúa. Pide sesión; **un *viewer* puede mirar la pantalla del botón y no puede pulsarlo** (si el endpoint colgara de `infra_view`, un rol de sólo lectura podría poner a sondear cuarenta dispositivos apoyándose en él); un *editor* sí la tiene —y recibe 409, no 403: pasó la puerta y no encontró nada que ejecutar—; un dispositivo **sin ningún check activo no tiene nada que obtener** y decirle «hecho» sería pintar una hora fresca sobre una pantalla donde no se miró nada; una máquina desconocida es 404; y tener la bandera dice qué ACTO puedes hacer, no **sobre qué máquinas** — se aplica encima el mismo estrechamiento (`devices_view` / `server.<uid>.view`) que los dos GET, así que refrescar tu propio rack no es una forma de sondear el de otro. Y **un dispositivo que es dispositivo sólo por el registro sí tiene algo que obtener**: lo que se ofrecía salía de lo REGISTRADO sobre la máquina, que en uno nunca muestreado es nada, así que contestaba «este dispositivo no tiene ningún check que ejecutar» sobre un dispositivo del que el planificador recoge cada ciclo —y el botón que existe para tomar la PRIMERA muestra era lo único que no podía tomarla—; la otra mitad de la misma regla sigue en pie: SNMP alcanzable no es SNMP muestreado |
 | `TestTheViewModel::*` (5) | Las reglas donde están escritas: **la peor máquina va primero** (esta lista se abre cuando algo va mal; el orden alfabético contesta «cuál está en problemas» obligándote a leer las cuarenta filas); y un valor es una **medida sólo si su módulo lo dijo** —`other_data` es una bolsa de lo que al módulo le apeteció guardar, así que la sección no adivina cuál de esas claves es una medida ni le inventa un nombre: lee la declaración `__history__` del propio módulo, la misma que hace el valor graficable en Historial—. Un texto bajo una clave declarada no llega a un eje, un booleano tampoco (en Python `True` es un entero, así que una bandera de estado se pintaría como una línea en 1 y se leería como dato), y cada medida viaja con las **coordenadas de su serie** para que la pantalla pueda graficarla sin saber nada del módulo |
 
@@ -9943,7 +9962,7 @@ caracteres tras una escucha daba por buena la de al lado.
 
 **Archivo:** `tests/meta/test_wa_dcim_section.py` — 290 tests
 
-El cableado que hace que la sección `/dcim` exista —registro de páginas, pane, bundle, la función que el registro nombra y las rutas— más las convenciones que se rompen sin que nada falle: nada de diálogos del navegador, nada de botones transparentes, lo que teclea una persona sale escapado, y **lo ajeno no se dibuja con nombre**. Y que **dónde está un rack no es la vista de nadie**: soltarlo escribe en el servidor, no en la disposición guardada del navegador, y un rechazo lo devuelve a donde el servidor lo tiene. Y **las coordenadas**: que no son campos numéricos —un `<input type=number>` descarta un texto con coma, así que un pegado de «41.53, 0.42» se perdería entero y la caja se quedaría en blanco—, que cada una sabe cuál es la otra, que el par se reparte al escribir y también al guardar, que un texto que no es un par se deja en paz, y que la insignia no las redondea a cuatro decimales: son once metros, o sea toda la sede, presentados como el dato guardado. Y **que el marco del plano no mezcle unidades**: el origen en milímetros con el tamaño en unidades de dibujo daba una ventana válida mirando a veinte metros de donde estaba el dibujo —todo pintado y la pantalla en blanco, sin un error en la consola—; y que el marco cuente todo lo que se dibuja, que es la trampa que este panel ha pisado tres veces. Y **que el visor 3D no pide nada a fuera**: ni CDN ni librería empotrada, WebGL del propio navegador, con una frase cuando no lo hay —una pantalla negra sin explicación es peor— y soltando el contexto al cerrar, porque un navegador aguanta unos pocos y deja el undécimo en negro sin ningún error. Y que lo exportado no lleva lo que hay DENTRO de un rack: un plano describe una sala. Y que **la inversa de la altura es exacta**: `_dceUAt` y `_dceY` tienen que ser inversas de verdad o arrastrar un servidor lo deja una U por encima —sin ningún error, con el dibujo confirmando el número equivocado—; escrito con `round` fallaban las 84 comprobaciones, porque el centro de una fila cae en `.5`. Y que lo ajeno no se arrastra: moverlo sería reorganizar el armario de otra sociedad sin verlo. Y que **el alzado dice qué sale de cada equipo** con marcas y no con cables —cuarenta latiguillos dibujados son una maraña que tapa lo que se venía a mirar—, sacadas de lo ya cargado y no de una petición por fila, acotadas para que no tapen el nombre, y **sin marcas en lo ajeno**: de qué color es el latiguillo de otra sociedad también es un dato suyo. Y —la que encontró cuatro pantallas que faltaban— que **todo lo que se escribe tiene donde escribirse**: cada verbo de escritura de la sección tiene que aparecer en alguna plantilla, porque una ruta que solo existe en la API es una función que no existe. Los tests no lo ven porque prueban la API, que es justo la mitad que sí estaba. Y **que toda función que se llama esté escrita**, más que ningún `async` se quede colgando: los dos fallos que un comprobador de sintaxis da por buenos y que dejan la pantalla en blanco — reescribiendo un bloque me llevé por delante dos funciones que seguían llamándose desde tres sitios, y al insertar otra delante de un `async function` quedó un `async` suelto que el navegador leyó como una variable que no existe. Los dos rompieron el guion entero, no solo su parte. Y que **mirar una plataforma no sea editarla**: la tabla enseña cinco columnas de quince campos, así que para leer los otros diez había que abrir el formulario — y abrir el formulario para leer es la forma de cambiar algo sin querer. La línea abre una ficha de solo lectura (y se vigila que lo siga siendo: un `<input>` colado ahí escribiría en el borrador del formulario), marcar y borrar cortan la propagación para no abrirla, y del mirar se pasa al escribir con un botón. Y que **un conector se pueda añadir desde donde se echa en falta**: la lista llevaba al editor por ninguna parte y remataba diciendo que se edita un fichero del disco; ahora tiene su botón, la ficha lleva al formulario, la foto que alguien suba manda sobre el dibujo genérico —al revés no serviría de nada: el conector añadido tiene forma `other`, que es justo el genérico—, las formas que se ofrecen salen del propio SVG en vez de una lista copiada, y **un filtro no puede renumerar las filas**: el formulario escribe en `doc.connectors[i]`, así que filtrar sin conservar el índice real editaría el conector de al lado sin decirlo. Y **el historial de un armario**: una foto por cambio contesta las dos preguntas que se le hacen —cómo estaba en marzo y qué le pasó— porque de una lista de acontecimientos no se reconstruye un estado sin reproducirlos todos; se vigila que **ninguna escritura se olvide de dejar la suya**, porque una que falte no deja un hueco: mezcla dos cambios en un renglón y se lo atribuye a quien hizo el segundo, y eso se lee perfectamente bien contando otra cosa. Y que **la fila diga qué es y no lo diga todo**: diez columnas de formulario no entran en ningún diálogo, y ensancharlo hasta que quepan es perseguir el ancho de la pantalla de otro — la fila contesta cómo se llama, de qué tipo, qué cara tiene y en qué casillas se ofrece, y la letra pequeña (velocidad, generaciones, qué lleva, qué es) se pliega, con el galón diciendo **si hay** para no tener que abrir los ciento veintiocho — si hay y no cuánta: un número que suma una velocidad, tres generaciones, dos señales y una nota no cuenta nada, porque «1» no dice cuál de las cuatro cosas es. Y **el formulario de inventario**: que ninguna columna de `dc_item` se quede sin campo que la escriba (`host_uid` primero, `asset` y `description` después: se guardan, se devuelven, y valían siempre su valor por defecto), que lo obligatorio lo declare el campo y no su posición en la lista, que guardar diga por qué no guarda, que una lista cerrada se elija de un desplegable en vez de dejar un uid escrito en la caja, que un valor que no está en esa lista no se pierda al abrir la ficha, y que el formulario abra en un cuadro con rótulos en vez de incrustarse entre las tarjetas. Y **la pantalla de un armario**: que el dibujo y sus cuatro listas vayan en columnas y no apilados —insertadas encima, cada botón movía lo que estabas mirando—, que el alzado mida lo que mide el armario (`aspect-ratio`, no `flex:1 1 auto`: cinco U son ciento cincuenta píxeles y la caja crecía hasta el borde), que lo cargado se olvide al cambiar de rack —los cables de uno bajo el nombre del otro no lo diría nadie—, que un botón que tarda **dibuje su hueco antes de pedir nada**, y que la tabla diga lo que el dibujo no puede: serie, inventario y garantía, con la vencida en rojo. Y el alzado: **a su tamaño** (un U mide 22 px y los nombres están escritos para esa altura; encogido a la mitad es una miniatura que se lee con lupa), que **un dibujo distinto no herede la ventana de zoom del anterior** —vive en el lienzo compartido y no se borra sola: un armario de 5 U abierto detrás de uno de 42 salía diminuto en una esquina— y que haya **botón para volver**, porque una rueda de más no tiene gesto que la deshaga —y dentro del propio dibujo, que es sobre lo que actúan—. Y que **el dibujo y la lista señalen lo mismo**: uno dice dónde está y la otra qué es, y sin unirlos hay que buscar a mano en el segundo lo que se acaba de señalar en el primero; más que la tarjeta de la lupa se aparte cuando describe la última U, porque pegada al borde de abajo tapaba justo lo que estaba explicando — y colocada **midiendo la pantalla**, que es lo único que sigue siendo cierto con el zoom puesto: la U que se ve abajo del todo no es la que tiene la coordenada más grande. Y que el armario **se pueda agrandar** sobre la lista cuando hace falta, reencuadrando al hacerlo: el mismo trozo en un hueco del doble es no haber agrandado nada. Y **lo que va sobre una bandeja se dibuja dentro de ella**: «Bandeja (+2)» era lo que se podía decir sin sitio, y un recuento no enseña cuál de los dos mini PC está en aviso. Se comprueba que se pinten como hermanos y no dentro del `<g>` de la bandeja (`pointerenter` no burbujea, así que salir de un mini PC hacia ella dejaría la tarjeta vacía con el ratón encima de algo), que el rectángulo se calcule una sola vez, que la bandeja conserve sitio para su nombre, y que las cajas midan contra SU ancho y no contra el de la cara — desde que algo puede tomar media U, `_DCE.W` dibujaba el engranaje encima de la caja de al lado.
+El cableado que hace que la sección `/dcim` exista —registro de páginas, pane, bundle, la función que el registro nombra y las rutas— más las convenciones que se rompen sin que nada falle: nada de diálogos del navegador, nada de botones transparentes, lo que teclea una persona sale escapado, y **lo ajeno no se dibuja con nombre**. Y que **dónde está un rack no es la vista de nadie**: soltarlo escribe en el servidor, no en la disposición guardada del navegador, y un rechazo lo devuelve a donde el servidor lo tiene. Y **las coordenadas**: que no son campos numéricos —un `<input type=number>` descarta un texto con coma, así que un pegado de «41.53, 0.42» se perdería entero y la caja se quedaría en blanco—, que cada una sabe cuál es la otra, que el par se reparte al escribir y también al guardar, que un texto que no es un par se deja en paz, y que la insignia no las redondea a cuatro decimales: son once metros, o sea toda la sede, presentados como el dato guardado. Y **que el marco del plano no mezcle unidades**: el origen en milímetros con el tamaño en unidades de dibujo daba una ventana válida mirando a veinte metros de donde estaba el dibujo —todo pintado y la pantalla en blanco, sin un error en la consola—; y que el marco cuente todo lo que se dibuja, que es la trampa que este panel ha pisado tres veces. Y **que el visor 3D no pide nada a fuera**: ni CDN ni librería empotrada, WebGL del propio navegador, con una frase cuando no lo hay —una pantalla negra sin explicación es peor— y soltando el contexto al cerrar, porque un navegador aguanta unos pocos y deja el undécimo en negro sin ningún error. Y que lo exportado no lleva lo que hay DENTRO de un rack: un plano describe una sala. Y que **la inversa de la altura es exacta**: `_dceUAt` y `_dceY` tienen que ser inversas de verdad o arrastrar un servidor lo deja una U por encima —sin ningún error, con el dibujo confirmando el número equivocado—; escrito con `round` fallaban las 84 comprobaciones, porque el centro de una fila cae en `.5`. Y que lo ajeno no se arrastra: moverlo sería reorganizar el armario de otra sociedad sin verlo. Y que **el alzado dice qué sale de cada equipo** con marcas y no con cables —cuarenta latiguillos dibujados son una maraña que tapa lo que se venía a mirar—, sacadas de lo ya cargado y no de una petición por fila, acotadas para que no tapen el nombre, y **sin marcas en lo ajeno**: de qué color es el latiguillo de otra sociedad también es un dato suyo. Y —la que encontró cuatro pantallas que faltaban— que **todo lo que se escribe tiene donde escribirse**: cada verbo de escritura de la sección tiene que aparecer en alguna plantilla, porque una ruta que solo existe en la API es una función que no existe. Los tests no lo ven porque prueban la API, que es justo la mitad que sí estaba. Y **que toda función que se llama esté escrita**, más que ningún `async` se quede colgando: los dos fallos que un comprobador de sintaxis da por buenos y que dejan la pantalla en blanco — reescribiendo un bloque me llevé por delante dos funciones que seguían llamándose desde tres sitios, y al insertar otra delante de un `async function` quedó un `async` suelto que el navegador leyó como una variable que no existe. Los dos rompieron el guion entero, no solo su parte. Y que **mirar una plataforma no sea editarla**: la tabla enseña cinco columnas de quince campos, así que para leer los otros diez había que abrir el formulario — y abrir el formulario para leer es la forma de cambiar algo sin querer. La línea abre una ficha de solo lectura (y se vigila que lo siga siendo: un `<input>` colado ahí escribiría en el borrador del formulario), marcar y borrar cortan la propagación para no abrirla, y del mirar se pasa al escribir con un botón. Y que **un conector se pueda añadir desde donde se echa en falta**: la lista llevaba al editor por ninguna parte y remataba diciendo que se edita un fichero del disco; ahora tiene su botón, la ficha lleva al formulario, la foto que alguien suba manda sobre el dibujo genérico —al revés no serviría de nada: el conector añadido tiene forma `other`, que es justo el genérico—, las formas que se ofrecen salen del propio SVG en vez de una lista copiada, y **un filtro no puede renumerar las filas**: el formulario escribe en `doc.connectors[i]`, así que filtrar sin conservar el índice real editaría el conector de al lado sin decirlo. Y **el historial de un armario**: una foto por cambio contesta las dos preguntas que se le hacen —cómo estaba en marzo y qué le pasó— porque de una lista de acontecimientos no se reconstruye un estado sin reproducirlos todos; se vigila que **ninguna escritura se olvide de dejar la suya**, porque una que falte no deja un hueco: mezcla dos cambios en un renglón y se lo atribuye a quien hizo el segundo, y eso se lee perfectamente bien contando otra cosa. Y que **la fila diga qué es y no lo diga todo**: diez columnas de formulario no entran en ningún diálogo, y ensancharlo hasta que quepan es perseguir el ancho de la pantalla de otro — la fila contesta cómo se llama, de qué tipo, qué cara tiene y en qué casillas se ofrece, y la letra pequeña (velocidad, generaciones, qué lleva, qué es) se pliega, con el galón diciendo **si hay** para no tener que abrir los ciento veintiocho — si hay y no cuánta: un número que suma una velocidad, tres generaciones, dos señales y una nota no cuenta nada, porque «1» no dice cuál de las cuatro cosas es. Y **el formulario de inventario**: que ninguna columna de `dc_item` se quede sin campo que la escriba (`device_uid` primero, `asset` y `description` después: se guardan, se devuelven, y valían siempre su valor por defecto), que lo obligatorio lo declare el campo y no su posición en la lista, que guardar diga por qué no guarda, que una lista cerrada se elija de un desplegable en vez de dejar un uid escrito en la caja, que un valor que no está en esa lista no se pierda al abrir la ficha, y que el formulario abra en un cuadro con rótulos en vez de incrustarse entre las tarjetas. Y **la pantalla de un armario**: que el dibujo y sus cuatro listas vayan en columnas y no apilados —insertadas encima, cada botón movía lo que estabas mirando—, que el alzado mida lo que mide el armario (`aspect-ratio`, no `flex:1 1 auto`: cinco U son ciento cincuenta píxeles y la caja crecía hasta el borde), que lo cargado se olvide al cambiar de rack —los cables de uno bajo el nombre del otro no lo diría nadie—, que un botón que tarda **dibuje su hueco antes de pedir nada**, y que la tabla diga lo que el dibujo no puede: serie, inventario y garantía, con la vencida en rojo. Y el alzado: **a su tamaño** (un U mide 22 px y los nombres están escritos para esa altura; encogido a la mitad es una miniatura que se lee con lupa), que **un dibujo distinto no herede la ventana de zoom del anterior** —vive en el lienzo compartido y no se borra sola: un armario de 5 U abierto detrás de uno de 42 salía diminuto en una esquina— y que haya **botón para volver**, porque una rueda de más no tiene gesto que la deshaga —y dentro del propio dibujo, que es sobre lo que actúan—. Y que **el dibujo y la lista señalen lo mismo**: uno dice dónde está y la otra qué es, y sin unirlos hay que buscar a mano en el segundo lo que se acaba de señalar en el primero; más que la tarjeta de la lupa se aparte cuando describe la última U, porque pegada al borde de abajo tapaba justo lo que estaba explicando — y colocada **midiendo la pantalla**, que es lo único que sigue siendo cierto con el zoom puesto: la U que se ve abajo del todo no es la que tiene la coordenada más grande. Y que el armario **se pueda agrandar** sobre la lista cuando hace falta, reencuadrando al hacerlo: el mismo trozo en un hueco del doble es no haber agrandado nada. Y **lo que va sobre una bandeja se dibuja dentro de ella**: «Bandeja (+2)» era lo que se podía decir sin sitio, y un recuento no enseña cuál de los dos mini PC está en aviso. Se comprueba que se pinten como hermanos y no dentro del `<g>` de la bandeja (`pointerenter` no burbujea, así que salir de un mini PC hacia ella dejaría la tarjeta vacía con el ratón encima de algo), que el rectángulo se calcule una sola vez, que la bandeja conserve sitio para su nombre, y que las cajas midan contra SU ancho y no contra el de la cara — desde que algo puede tomar media U, `_DCE.W` dibujaba el engranaje encima de la caja de al lado.
 
 
 **Archivo:** `tests/meta/test_wa_infra_section.py` — 156 tests
@@ -10208,7 +10227,7 @@ un ciclo.
 | `TestItCannotTakeACycleDown::*` (4) | La evidencia es un adorno encima del ciclo: una escritura o una lectura imposibles contestan vacío en vez de lanzar, un avistamiento sin clave no es un avistamiento, y no se archiva nada bajo un dispositivo sin nombre —acabaría indexado bajo la cadena vacía, junto a todos los demás huérfanos |
 ## 172. Un dispositivo al que hace de dispositivo el registro
 
-**Archivo:** `tests/unit/test_host_sampled_keys.py` — 9 tests
+**Archivo:** `tests/unit/test_device_sampled_keys.py` — 9 tests
 
 Casi todas las máquinas se vigilan porque alguien configuró un check contra ellas. Algunas se
 vigilan porque lo dice el **registro**: un perfil SNMP con perfiles de dispositivo asignados

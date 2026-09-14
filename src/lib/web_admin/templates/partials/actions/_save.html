@@ -31,9 +31,9 @@ function applySavedField(path, version) {
 async function saveModules() {
     const r = await apiPut('/api/v1/modules', modulesData);
     if (r && r.ok) {
-        // The server may have provisioned linked hosts (e.g. an endpoint host for a
-        // module that declares __provision_host__) and stamped their uid on the item.
-        // Adopt those links locally so a later save this session reuses the host
+        // The server may have provisioned linked devices (e.g. an endpoint device for a
+        // module that declares __provision_device__) and stamped their uid on the item.
+        // Adopt those links locally so a later save this session reuses the device
         // instead of re-creating it. Generic — applies whatever the server returns.
         for (const p of (r.provisioned || [])) {
             const coll = modulesData[p.module] && modulesData[p.module][p.collection];

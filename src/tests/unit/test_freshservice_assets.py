@@ -123,7 +123,7 @@ class TestQueClaseDeDispositivoEs:
         Contra la SEMILLA y no contra la tabla: es lo que tiene cualquier instalación recién
         creada, y es de lo único que se puede afirmar algo sin mirar una base de datos concreta.
         Quien borre «nas» a mano se queda sin esa adivinanza, que es su decisión."""
-        from lib.core.hosts.stores.types import SEED                   # noqa: PLC0415
+        from lib.core.devices.stores.types import SEED                   # noqa: PLC0415
         validos = {t['id'] for t in SEED}
         for nuestro, _palabras in fa.TYPE_HINTS:
             assert nuestro in validos, nuestro
@@ -175,41 +175,41 @@ class TestElPlan:
     def test_uno_que_ya_vino_de_aqui_y_no_cambio_no_viaja(self):
         """Una importación que reescribe cuatrocientas fichas idénticas llena el registro de
         auditoría de cambios que no cambian nada."""
-        hosts = [{'uid': 'u1', 'name': 'SRV-01', 'address': '10.0.0.5', 'description': '',
+        devices = [{'uid': 'u1', 'name': 'SRV-01', 'address': '10.0.0.5', 'description': '',
                   'source': 'freshservice', 'external_id': '1'}]
         [p] = fa.build([_activo(1, 'SRV-01', campos={'ip_address_70': '10.0.0.5'})],
-                       hosts, TIPOS)
+                       devices, TIPOS)
         assert p['action'] == 'same'
 
     def test_uno_que_cambio_de_direccion_se_corrige_y_dice_de_que_a_que(self):
-        hosts = [{'uid': 'u1', 'name': 'SRV-01', 'address': '10.0.0.5', 'description': '',
+        devices = [{'uid': 'u1', 'name': 'SRV-01', 'address': '10.0.0.5', 'description': '',
                   'source': 'freshservice', 'external_id': '1'}]
         [p] = fa.build([_activo(1, 'SRV-01', campos={'ip_address_70': '10.0.0.9'})],
-                       hosts, TIPOS)
+                       devices, TIPOS)
         assert p['action'] == 'update'
         assert p['was']['address'] == '10.0.0.5', 'sin el «antes» no se puede mirar el cambio'
 
     def test_se_empareja_por_el_identificador_y_no_por_el_nombre(self):
         """Renombrar un activo en Freshservice crearía aquí un segundo y dejaría el primero
         huérfano, sin que nada lo dijera."""
-        hosts = [{'uid': 'u1', 'name': 'SRV-01', 'address': '', 'description': '',
+        devices = [{'uid': 'u1', 'name': 'SRV-01', 'address': '', 'description': '',
                   'source': 'freshservice', 'external_id': '1'}]
-        [p] = fa.build([_activo(1, 'SRV-NUEVO')], hosts, TIPOS)
+        [p] = fa.build([_activo(1, 'SRV-NUEVO')], devices, TIPOS)
         assert (p['action'], p['uid']) == ('update', 'u1')
 
     def test_lo_que_tecleo_una_persona_se_adopta_en_vez_de_duplicarse(self):
         """El caso real: la lista se tecleó a mano antes de conectar esto."""
-        hosts = [{'uid': 'u9', 'name': 'srv-01', 'address': '', 'description': '',
+        devices = [{'uid': 'u9', 'name': 'srv-01', 'address': '', 'description': '',
                   'source': '', 'external_id': ''}]
-        [p] = fa.build([_activo(1, 'SRV-01')], hosts, TIPOS)
+        [p] = fa.build([_activo(1, 'SRV-01')], devices, TIPOS)
         assert (p['action'], p['uid']) == ('adopt', 'u9')
 
     def test_uno_que_ya_mantiene_OTRO_origen_no_se_adopta(self):
         """Adoptar por el nombre sólo vale para lo que no es de nadie. Uno que mantiene otro
         sistema es uno que ese sistema va a volver a escribir."""
-        hosts = [{'uid': 'u9', 'name': 'SRV-01', 'address': '', 'description': '',
+        devices = [{'uid': 'u9', 'name': 'SRV-01', 'address': '', 'description': '',
                   'source': 'otro', 'external_id': 'x'}]
-        [p] = fa.build([_activo(1, 'SRV-01')], hosts, TIPOS)
+        [p] = fa.build([_activo(1, 'SRV-01')], devices, TIPOS)
         assert p['action'] == 'create'
 
     def test_sin_nombre_o_sin_identidad_no_es_un_dispositivo(self):
@@ -237,7 +237,7 @@ class TestLoQueDeVerdadSeAplica:
 
     def test_lo_no_elegido_no_viaja(self):
         plan = fa.build([_activo(1, 'A'), _activo(2, 'B')], [], TIPOS)
-        fuera, rechazos = fa.select(plan, pick=['1'], hosts=[])
+        fuera, rechazos = fa.select(plan, pick=['1'], devices=[])
         assert [p['external_id'] for p in fuera] == ['1']
         assert rechazos == []
 
@@ -246,7 +246,7 @@ class TestLoQueDeVerdadSeAplica:
         «srv-barcelona» de aquí son la misma máquina lo sabe quien lo mira, y ningún parecido de
         nombres lo va a decir nunca."""
         plan = fa.build([_activo(1, 'SRV-BCN-01')], self.HOSTS, TIPOS)
-        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'u1'}, hosts=self.HOSTS)
+        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'u1'}, devices=self.HOSTS)
         assert (fuera[0]['action'], fuera[0]['uid']) == ('adopt', 'u1')
         assert rechazos == []
 
@@ -254,23 +254,23 @@ class TestLoQueDeVerdadSeAplica:
         """Dos no pueden compartir uno: el segundo le pisaría el nombre al primero en cada
         importación, y la ficha iría cambiando de nombre sola."""
         plan = fa.build([_activo(1, 'A')], self.HOSTS, TIPOS)
-        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'u2'}, hosts=self.HOSTS)
+        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'u2'}, devices=self.HOSTS)
         assert fuera == []
         assert rechazos == [{'name': 'A', 'reason': 'fs_hosts_link_taken'}]
 
     def test_emparejar_con_uno_que_ya_no_existe_se_rechaza_con_su_motivo(self):
         """Se borró entre mirar y aceptar. Es un rechazo y no un silencio: se pidió y no salió."""
         plan = fa.build([_activo(1, 'A')], self.HOSTS, TIPOS)
-        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'fantasma'}, hosts=self.HOSTS)
+        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'fantasma'}, devices=self.HOSTS)
         assert (fuera, [r['reason'] for r in rechazos]) == ([], ['fs_hosts_link_gone'])
 
     def test_uno_elegido_al_que_no_hay_nada_que_hacerle_no_es_un_rechazo(self):
         """No se eligió mal: es que ya estaba bien. Contarlo como fallo diría que algo salió mal
         cuando no había nada que hacer."""
-        hosts = [{'uid': 'u1', 'name': 'A', 'address': '', 'description': '',
+        devices = [{'uid': 'u1', 'name': 'A', 'address': '', 'description': '',
                   'source': 'freshservice', 'external_id': '1'}]
-        plan = fa.build([_activo(1, 'A')], hosts, TIPOS)
-        fuera, rechazos = fa.select(plan, pick=['1'], hosts=hosts)
+        plan = fa.build([_activo(1, 'A')], devices, TIPOS)
+        fuera, rechazos = fa.select(plan, pick=['1'], devices=devices)
         assert (fuera, rechazos) == ([], [])
 
 
@@ -280,20 +280,20 @@ class TestLoQueYaNoEstaEnElOrigen:
     puesto."""
 
     def test_se_cuenta_el_que_vino_de_aqui_y_ya_no_esta(self):
-        hosts = [{'uid': 'u1', 'name': 'viejo', 'source': 'freshservice', 'external_id': '7'}]
-        assert [h['uid'] for h in fa.orphans([_activo(1, 'A')], hosts)] == ['u1']
+        devices = [{'uid': 'u1', 'name': 'viejo', 'source': 'freshservice', 'external_id': '7'}]
+        assert [h['uid'] for h in fa.orphans([_activo(1, 'A')], devices)] == ['u1']
 
     def test_y_no_se_cuenta_el_que_nunca_vino_de_aqui(self):
         """Un dispositivo tecleado en esta casa no es un huérfano de Freshservice, y decir que
         lo es invita a borrarlo."""
-        hosts = [{'uid': 'u1', 'name': 'de aqui', 'source': '', 'external_id': ''}]
-        assert fa.orphans([], hosts) == []
+        devices = [{'uid': 'u1', 'name': 'de aqui', 'source': '', 'external_id': ''}]
+        assert fa.orphans([], devices) == []
 
     def test_se_reconoce_por_el_mismo_identificador_con_el_que_se_importo(self):
         """`display_id` al traer y `display_id` al comparar. Con `id` en un sitio y `display_id`
         en el otro, TODOS los importados saldrían como huérfanos en cada vista previa."""
-        hosts = [{'uid': 'u1', 'name': 'A', 'source': 'freshservice', 'external_id': '1'}]
-        assert fa.orphans([_activo(1, 'A')], hosts) == []
+        devices = [{'uid': 'u1', 'name': 'A', 'source': 'freshservice', 'external_id': '1'}]
+        assert fa.orphans([_activo(1, 'A')], devices) == []
 
 
 class TestLaListaDeCamposMantenidosEsUnaSola:
@@ -303,7 +303,7 @@ class TestLaListaDeCamposMantenidosEsUnaSola:
     actualiza nunca."""
 
     def test_la_ruta_de_guardar_protege_exactamente_esos_campos(self):
-        ruta = io.open(os.path.join(SRC, 'lib', 'core', 'hosts', 'routes.py'),
+        ruta = io.open(os.path.join(SRC, 'lib', 'core', 'devices', 'routes.py'),
                        encoding='utf-8').read()
         trozo = ruta.split('_ORIGIN_FIELDS = (', 1)[1].split(')\n', 1)[0]
         for campo in fa.MANAGED:

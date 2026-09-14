@@ -868,17 +868,17 @@ def register(app, wa, C):
         # normal: nadie rotula un servidor que ya tiene nombre. Sin esto las dos puntas de la
         # tirada salían con su boca y nada más. Con la regla del REGISTRO, que es de quien es el
         # dato: quien no puede ver una máquina tampoco ve su nombre por esta puerta.
-        hosts = getattr(wa, '_hosts_store', None)
-        if hosts is not None:
+        devices = getattr(wa, '_devices_store', None)
+        if devices is not None:
             perms = C.perms()
             de_maquina = {}
-            for h in hosts.list(decrypt=False) or ():
+            for h in devices.list(decrypt=False) or ():
                 hu = str(h.get('uid') or '')
                 if 'devices_view' in perms or f'server.{hu}.view' in perms:
                     de_maquina[hu] = str(h.get('name') or '')
             for it in items:
-                if not it.get('foreign') and it.get('host_uid'):
-                    it['host_name'] = de_maquina.get(str(it.get('host_uid')), '')
+                if not it.get('foreign') and it.get('device_uid'):
+                    it['device_name'] = de_maquina.get(str(it.get('device_uid')), '')
         tirada = dcim_svc.run_of(uid, cables, items)
         if tirada:
             tirada['legs'] = dcim_svc.with_cable(

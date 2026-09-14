@@ -477,7 +477,7 @@ def _load_mib_sources(directory: str = _MIB_SOURCES_DIR) -> list[dict]:
             tpls = [tpls] if tpls else []
         tpls = [str(t).strip() for t in tpls if str(t).strip()]
         # A source is a folder, an archive, or both. Vendors publish one file; projects that
-        # host MIBs publish a directory — and the same vendor can be both, which is the case
+        # device MIBs publish a directory — and the same vendor can be both, which is the case
         # worth supporting rather than choosing between.
         if folder and _parse_github_folder(folder) is None:
             _LOG.warning('Skipping MIB source %s: folder is not a GitHub URL',

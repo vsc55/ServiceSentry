@@ -126,7 +126,7 @@ _orgsData = {
     {uid: 'o3', name: '<script>ojo', short: 'S&C', description: 'con & y <', said: {host: 1}}],
   scopes: [{scope: 'site', label_key: 'orgs_scope_site'},
            {scope: 'rack', label_key: 'orgs_scope_rack'},
-           {scope: 'host', label_key: 'orgs_scope_host'}],
+           {scope: 'device', label_key: 'orgs_scope_device'}],
   sources: [{id: 'freshservice', label_key: 'fs_source', icon: 'bi-life-preserver'}],
   loaded: true};
 // Una traída de fuera y una tecleada aquí: la chapa tiene que distinguirlas.

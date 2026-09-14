@@ -24,15 +24,15 @@ registered; every listed file's own header lists its exact per-endpoint routes.
                                                    /config/db/<op> — optimize | compact)
     credentials      /api/v1/credentials*
     history          /api/v1/history*
-    hosts            /api/v1/hosts*             (perm group 'servers')
+    devices            /api/v1/devices*             (perm group 'servers')
     orgs             /api/v1/orgs*              (the companies, and what belongs to
                                                 each — read by the inventory, the
                                                 directory and whoever owns anything)
     dcim             /api/v1/dcim*              (where the equipment is and whose it is —
                                                 sites, rooms, racks, what fills each U, and
                                                 the imported model catalogue)
-    infra            /api/v1/infra*             (the fleet as it IS right now — hosts owns
-                                                the registry; + /infra/hosts/<uid>/collect,
+    infra            /api/v1/infra*             (the fleet as it IS right now — devices owns
+                                                the registry; + /infra/devices/<uid>/collect,
                                                 the one non-GET, and /infra/collect[/<job_id>]
                                                 to watch it — perm 'infra_collect')
     modules          /api/v1/modules*           (+ /modules/checks/run, /modules/watchfuls/<mod>/<action>)
@@ -71,7 +71,7 @@ registered; every listed file's own header lists its exact per-endpoint routes.
 
 ── path convention ──────────────────────────────────────────────────────────────────
     Internal JSON APIs the frontend calls → ``/api/v1/<domain>/*`` (session + CSRF).
-    Endpoints hit by EXTERNAL systems or an embedding host (IdP callbacks, embedded pages,
+    Endpoints hit by EXTERNAL systems or an embedding device (IdP callbacks, embedded pages,
     provider webhooks) → ``/auth/<provider>/*`` (+ the IETF-mandated ``/scim/v2/*``): these are
     CSRF-exempt (each module self-declares its prefixes via ``wa._register_csrf_exempt`` in its
     register(), discovered — not hardcoded) and authenticated by their own protocol/token, not
@@ -101,7 +101,7 @@ from lib.core.audit.routes import register as _audit
 from lib.core.backup.routes import register as _backup
 from lib.core.diagnostics.routes import register as _diagnostics
 from lib.core.config.routes import register as _config
-from lib.core.hosts.routes import register as _hosts
+from lib.core.devices.routes import register as _hosts
 from lib.core.snmp.routes import register as _snmp
 from lib.core.infra.routes import register as _infra
 from lib.core.orgs.routes import register as _orgs

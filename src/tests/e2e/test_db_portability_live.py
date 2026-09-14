@@ -18,7 +18,7 @@ relies on MySQL 8.0.13+ accepting a parenthesised default and MariaDB 10.2+ acce
 a claim that was worth checking on a real MariaDB rather than assuming.
 
 The target database must be a SCRATCH database: these tests CREATE and DROP the store tables
-(check_state/history/hosts/groups/groups_roles/audit/event_cursor/event_cooldowns). Run them
+(check_state/history/devices/groups/groups_roles/audit/event_cursor/event_cooldowns). Run them
 SERIALLY (``-n0``) — they use fixed table names, so parallel workers would collide.
 
 **Nothing here drops a table it did not create.** The full-panel test snapshots the schema
@@ -40,7 +40,7 @@ import pytest
 from lib.db import get_connector
 
 _STORE_TABLES = ('check_state', 'history', 'history_series', 'history_fact',
-                 'history_field', 'hosts', 'groups',
+                 'history_field', 'devices', 'groups',
                  'groups_roles', 'audit',
                  'event_cursor', 'event_cooldowns', 'service_leader',
                  'users', 'users_groups', 'roles', 'config', 'entity_versions',
@@ -116,8 +116,8 @@ def live_db(request):
 # ── the operations that were broken on MySQL/PostgreSQL before the quoting sweep ──
 
 def test_hosts_virtual_roundtrip(live_db):
-    from lib.core.hosts.stores import HostsStore
-    s = HostsStore(live_db)
+    from lib.core.devices.stores import DevicesStore
+    s = DevicesStore(live_db)
     uid = s.create({'name': 'live-h1', 'address': '10.0.0.1', 'virtual': True}, actor='test')
     assert uid and any(h['uid'] == uid for h in s.list())
     assert s.get(uid)['virtual'] is True

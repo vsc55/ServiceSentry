@@ -31,13 +31,13 @@ from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
 from lib.util.dict_files_path import DictFilesPath
 from lib.modules.discovery.schemas import SchemaDiscovery
-from lib.modules.host_binding import HostBinding
+from lib.modules.device_binding import HostBinding
 from lib.core.object_base import ObjectBase
 
 # What is left here is what a check needs from its base: the run loop, config resolution,
 # the module's own messages, and emitting a result. Scanning every module's schema.json moved
 # to discovery/schemas.py — it answers questions ABOUT modules and needs no instance — and
-# reaching the machine an item is bound to moved to host_binding.py.
+# reaching the machine an item is bound to moved to device_binding.py.
 
 __all__ = ['ModuleBase']
 
@@ -75,13 +75,13 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
     #: asked about one of theirs, and a run that could not finish because a device three racks
     #: away was not answering.
     #:
-    #: Set on the INSTANCE by whoever asks (`Monitor.check_module(only_host=…)`), never on the
+    #: Set on the INSTANCE by whoever asks (`Monitor.check_module(only_device=…)`), never on the
     #: monitor: two runs may be in flight in one process and a scope on the shared object would
     #: be one run narrowing the other's.
     _host_scope = ''
 
     @property
-    def host_scope(self) -> str:
+    def device_scope(self) -> str:
         """The uid this run is narrowed to, or ''."""
         return str(getattr(self, '_host_scope', '') or '').strip()
 
@@ -292,7 +292,7 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         Bridge function to the send_message function of the Monitor object, checking if the
         Monitor is defined and valid before sending the data.
 
-        ``item`` is the friendly name of the thing this alert is about (host/service/…);
+        ``item`` is the friendly name of the thing this alert is about (device/service/…);
         it fills the notification digest's Item column for ad-hoc sends.  ``severity='warning'``
         routes a non-OK alert as a ``warn`` (soft threshold breach) rather than ``down``.
 
@@ -441,12 +441,12 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
                 #
                 # Only the collection itself: reading one item's field (`['list', k, 'label']`)
                 # is a module asking about something it has already chosen.
-                if (self.host_scope and len(keys_list) == 2
+                if (self.device_scope and len(keys_list) == 2
                         and keys_list[1] in self._item_collections()
                         and isinstance(got, dict)):
                     return {k: v for k, v in got.items()
                             if isinstance(v, dict)
-                            and str(v.get('host_uid') or '').strip() == self.host_scope}
+                            and str(v.get('device_uid') or '').strip() == self.device_scope}
                 return got
 
         if find_key or default_val:
@@ -532,7 +532,7 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
             return self._monitor.check_status(status, module, module_sub_key)
 
     def _resolved_item(self, key: str) -> dict:
-        """Item config for *key* with any referenced host merged in (no-op when inline).
+        """Item config for *key* with any referenced device merged in (no-op when inline).
 
         Cached per check cycle — the monitor builds a fresh instance each cycle, so the
         cache cannot go stale, and a module that reads the same item from several checks
@@ -544,7 +544,7 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         cache = self.__dict__.setdefault('_resolved_items', {})
         if key not in cache:
             raw = self.get_conf(['list', key], {})
-            cache[key] = self.resolve_host(raw) if isinstance(raw, dict) else {}
+            cache[key] = self.resolve_device(raw) if isinstance(raw, dict) else {}
         return cache[key]
 
     def _emit(self, key: str, status: bool, message: str, other: dict = None,
@@ -565,7 +565,7 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
         by convention, so the item is the segment before the first ``/``.
 
         Pass ``name`` explicitly when that derivation does not fit: several modules build a
-        friendlier one — a fallback chain (``label`` → host → key), a composed string
+        friendlier one — a fallback chain (``label`` → device → key), a composed string
         (``"disk1 - /dev/sda"``), or a different field entirely (the process name).  That
         variety is exactly why they each grew their own copy of this pairing; the override
         lets them keep the name they want without also re-implementing the notify gate.

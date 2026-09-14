@@ -160,7 +160,7 @@ ObjectBase (lib/core/object_base.py)
 │   ├── CheckStateStore (lib/services/monitoring/check_state/store.py)  → tabla check_state (estado vivo de checks)
 │   ├── CredentialsStore(lib/core/credentials/store.py)  → tabla credentials (identidades SSH reutilizables)
 │   ├── HistoryStore    (lib/core/history/store.py)      → tabla history (series temporales)
-│   ├── HostsStore      (lib/core/hosts/stores/hosts.py) → tabla hosts (dispositivos + perfiles de conexión)
+│   ├── DevicesStore      (lib/core/devices/stores/devices.py) → tabla hosts (dispositivos + perfiles de conexión)
 │   ├── ModulesStore    (lib/core/modules/store.py)  → tablas module_config, module_config_items (config de módulos/ítems)
 │   ├── ConfigStore     (lib/core/config/store.py)       → tabla config (capa editable: una fila por sección|campo)
 │   ├── WebhooksStore   (lib/core/notify/webhook/store.py) → tabla webhooks (destinos HTTP salientes)
@@ -273,7 +273,7 @@ ServiceSentry/
 │   │   │   ├── manager/                 # Control-plane de servicios: instances.py + commands.py + leader.py + routes.py (/api/v1/services/*)
 │   │   │   ├── control_server.py        # Servidor de control de servicios standalone
 │   │   │   └── heartbeat.py             # Heartbeat entre instancias de servicio
-│   │   │   # (hosts: primitivas de conexión/ejecución movidas a lib/core/hosts/ — ver bloque core/)
+│   │   │   # (hosts: primitivas de conexión/ejecución movidas a lib/core/devices/ — ver bloque core/)
 │   │   ├── db/                          # Capa de BD pluggable (SQLite/MySQL/PostgreSQL)
 │   │   │   ├── __init__.py              # get_connector(config, default_sqlite_path)
 │   │   │   ├── base.py                  # BaseConnector + reconcile_table() (reconciliación de esquema)
@@ -295,7 +295,7 @@ ServiceSentry/
 │   │   │   └── debug_level.py           # Enum: null, debug, info, warning, error, emergency
 │   │   ├── modules/
 │   │   │   ├── module_base.py           # Clase base para todos los watchfuls: bucle, config, mensajes, _emit (registrar + notificar)
-│   │   │   ├── host_binding.py          # Cómo un check alcanza su máquina: host_uid → dirección, perfil, credencial, SO, comando
+│   │   │   ├── device_binding.py          # Cómo un check alcanza su máquina: host_uid → dirección, perfil, credencial, SO, comando
 │   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck (el CONTRATO de resultado)
 │   │   │   ├── check_runner.py          # Ejecuta el check() real de un módulo UNA vez, sin monitor (botón "probar" + refresco en vivo); RESULT_FIELDS = qué campos del contrato sobreviven
 │   │   │   ├── page_support.py          # Para watchfuls con sección propia (__page__): lang_section + run_item_once
@@ -378,7 +378,7 @@ ServiceSentry/
 │       ├── unit/                        # Aislado: sin app, sin BD, sin HTTP
 │       │   ├── test_monitor.py
 │       │   ├── test_thermal.py
-│       │   ├── test_hosts_store.py
+│       │   ├── test_devices_store.py
 │       │   ├── test_secret_manager.py
 │       │   └── …                        # (test_config_control, test_exe, test_parse_helpers, …)
 │       ├── integration/                 # Arranca Flask vía test_client/_login
@@ -461,7 +461,7 @@ flowchart TD
     pool --> mod["5. Para CADA módulo (en paralelo): check_module(nombre)"]
     mod --> imp["importlib.import_module(nombre)<br/>Watchful(self) ← le pasa el Monitor"]
     imp --> chk["module.check() → ReturnModuleCheck"]
-    chk --> host["(opcional) resolve_host(item)<br/><small>si el ítem tiene host_uid: fusiona dirección + perfil<br/>del host (Monitor._hosts_store). Ver guía de módulos §4d</small>"]
+    chk --> host["(opcional) resolve_device(item)<br/><small>si el ítem tiene host_uid: fusiona dirección + perfil<br/>del host (Monitor._devices_store). Ver guía de módulos §4d</small>"]
 
     host --> each["Para CADA resultado en ReturnModuleCheck"]
     each --> save["Guarda other_data en check_state"]
@@ -711,7 +711,7 @@ conteste «no sé» y una sonda que no puede contestar no recarga nunca.
 La capa de datos del core (`lib/db/`) abstrae el motor mediante `BaseConnector`,
 con implementaciones para **SQLite** (por defecto), **MySQL/MariaDB** y
 **PostgreSQL**. Todos los stores (repartidos en `lib/core/*/store.py` y `lib/services/*/store/`) (`users`, `groups`, `roles`,
-`sessions`, `audit`, `check_state`, `credentials`, `history`, `hosts`, `modules`,
+`sessions`, `audit`, `check_state`, `credentials`, `history`, `devices`, `modules`,
 `config`, `webhooks`, `event_rules`, `notification_log`, `event_cooldowns`, `event_cursor`, `syslog`, `syslog_drops`)
 reciben un conector inyectado y no hablan nunca con un driver concreto. Se crea **un único conector
 compartido por proceso**: los stores lo reciben inyectado (no abren conexiones

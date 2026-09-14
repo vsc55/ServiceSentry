@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""The host registry can be read five ways, and three of them are about the fleet.
+"""The device registry can be read five ways, and three of them are about the fleet.
 
 Servers is the one list where the rows are not the point: what you want from it is a state
 of the fleet, and a table gives you that one host at a time. Three things it leaves out:
 
 * how the fleet is RIGHT NOW. There is a status column you can sort by, which answers "which
-  host is worst" and never "how many are broken".
+  device is worst" and never "how many are broken".
 * which hosts are not actually being MONITORED. The modules column draws "0/0" and "0/3" in
   the same grey pill: one was never given a check, the other had every check switched off,
   and both mean the fleet is smaller than the list looks. That is how a panel stays green
   while a machine is down.
-* what a host IS as one object rather than eight columns you turn on and read left to right.
+* what a device IS as one object rather than eight columns you turn on and read left to right.
 * what the fleet is MADE OF. A table sorted by type can be paged through until you have the
   answer; a rail of the types states it before you read a row, and picking one is how you say
   "show me the switches".
@@ -74,12 +74,12 @@ class TestPerHostPermissionsAreAskedOnce:
         views = _strip_comments(_read(VIEWS))
         assert views.count('function _srvActionsHtml') == 1
         body = _fn(views, '_srvActionsHtml')
-        assert '_canEditHost(host.uid)' in body and '_canDeleteHost(host.uid)' in body, \
-            'the per-host permission is no longer what decides the buttons'
+        assert '_canEditDevice(device.uid)' in body and '_canDeleteDevice(device.uid)' in body, \
+            'the per-device permission is no longer what decides the buttons'
 
     def test_the_table_composes_the_same_builder(self):
         src = _strip_comments(_read(LIST))
-        assert 'actions: (host, ctx) => _srvActionsHtml(host, ctx)' in src
+        assert 'actions: (device, ctx) => _srvActionsHtml(device, ctx)' in src
 
     def test_no_view_re_derives_the_permission(self):
         """`server.<uid>.edit` grants exactly one row. A view that asked `devices_edit`
@@ -87,10 +87,10 @@ class TestPerHostPermissionsAreAskedOnce:
         the other way round, show them everywhere."""
         for name, path in VIEW_FILES.items():
             body = _strip_comments(_read(path))
-            assert '_canEditHost' not in body, f'{name} re-checks the per-host permission'
+            assert '_canEditDevice' not in body, f'{name} re-checks the per-device permission'
             assert 'currentUser.permissions' not in body, name
-            assert 'openEditHostModal(' not in body, f'{name} wires the edit itself'
-            assert 'deleteHost(' not in body, f'{name} wires the delete itself'
+            assert 'openEditDeviceModal(' not in body, f'{name} wires the edit itself'
+            assert 'deleteDevice(' not in body, f'{name} wires the delete itself'
 
 
 class TestASummaryIsNotAPage:
@@ -124,11 +124,11 @@ class TestASummaryIsNotAPage:
         assert 'cardsBody: (rows, ctx, all) => _srvViewBody(rows, ctx, all)' in src
 
     def test_every_summary_states_the_whole_fleet(self):
-        """A view showing three groups must never suggest the fleet is three hosts."""
+        """A view showing three groups must never suggest the fleet is three devices."""
         for name in SUMMARIES:
             body = _strip_comments(_read(VIEW_FILES[name]))
             assert '_summaryHeader(' in body, name
-            assert "_summaryChip('bi-hdd-network', t('srv_count_hosts'), hosts.length)" in body, name
+            assert "_summaryChip('bi-hdd-network', t('srv_count_hosts'), devices.length)" in body, name
 
     def test_the_column_chooser_belongs_to_the_table(self):
         src = _strip_comments(_read(LIST))
@@ -139,7 +139,7 @@ class TestOneStatusVocabulary:
 
     def test_no_view_paints_its_own_status(self):
         """Maintenance is orange and not yellow, everywhere. A view reaching for the palette
-        itself is free to make the same host look like two different states in two views of
+        itself is free to make the same device look like two different states in two views of
         the same page."""
         for name, path in VIEW_FILES.items():
             body = _strip_comments(_read(path))
@@ -192,7 +192,7 @@ class TestCoverageHasFourAnswers:
         assert '_srvSampledByProfile(' in cov, 'the coverage never asks'
 
     def test_it_names_the_field_and_not_a_protocol(self):
-        """`device_profiles` is part of the host-profile format, so a second protocol that
+        """`device_profiles` is part of the device-profile format, so a second protocol that
         declares one is covered the day it arrives — and this view goes on naming no module."""
         body = _fn(_strip_comments(_read(VIEWS)), '_srvSampledByProfile')
         for word in ("'snmp'", '"snmp"'):
@@ -294,13 +294,13 @@ class TestTheTypeRailShowsWhatIsThere:
         """A rail that reshuffled as devices came and went would move the thing you were
         about to click. Which type is biggest is what the numbers are for."""
         body = _fn(_strip_comments(_read(VIEW_FILES['types'])), '_srvTypeGroups')
-        assert 'HOST_TYPES' in body, 'the order is no longer the declared one'
+        assert 'DEVICE_TYPES' in body, 'the order is no longer the declared one'
         assert 'sort(' not in body, 'the rail reorders itself'
 
     def test_the_unclassified_ones_are_last_and_flagged(self):
         src = _strip_comments(_read(VIEW_FILES['types']))
         groups = _fn(src, '_srvTypeGroups')
-        assert groups.index("by.has('-')") > groups.index('HOST_TYPES'), 'not last'
+        assert groups.index("by.has('-')") > groups.index('DEVICE_TYPES'), 'not last'
         view = _fn(src, '_srvViewTypes')
         assert 'text-bg-warning' in view, 'the count nobody classified is not called out'
         assert 'unset.length ?' in view, 'zero unclassified would be painted as a warning'

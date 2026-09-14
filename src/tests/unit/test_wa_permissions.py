@@ -76,13 +76,13 @@ ENDPOINTS = [
     ("GET",    "/api/v1/history",            frozenset({"history_view"}), None),
     ("DELETE", "/api/v1/history/all",        frozenset({"history_delete"}), None),
     # Servers (host registry)
-    ("GET",    "/api/v1/hosts",              frozenset({"devices_view"}), None),
-    ("POST",   "/api/v1/hosts",              frozenset({"devices_edit"}),
+    ("GET",    "/api/v1/devices",              frozenset({"devices_view"}), None),
+    ("POST",   "/api/v1/devices",              frozenset({"devices_edit"}),
         {"name": "permtest_h", "address": "10.0.0.9", "kind": "remote"}),
     # Uses a real host uid (__HOST__): the PUT handler resolves the host (404 for
     # an unknown uid) before the permission check, so a fake uid wouldn't reach it.
-    ("PUT",    "/api/v1/hosts/__HOST__",     frozenset({"devices_edit"}), {"name": "permtest_h2"}),
-    ("DELETE", "/api/v1/hosts/_nouid_",      frozenset({"devices_delete"}), None),
+    ("PUT",    "/api/v1/devices/__HOST__",     frozenset({"devices_edit"}), {"name": "permtest_h2"}),
+    ("DELETE", "/api/v1/devices/_nouid_",      frozenset({"devices_delete"}), None),
 ]
 
 

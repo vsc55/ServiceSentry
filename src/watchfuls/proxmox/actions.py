@@ -10,7 +10,7 @@ cluster and are we allowed to read what we need - which is why they live togethe
 with the checks: none of them emits a result or notifies anyone.
 """
 
-from .client import _split_hosts
+from .client import _split_devices
 
 
 class ProxmoxActions:
@@ -26,8 +26,8 @@ class ProxmoxActions:
         (cluster name, quorum, node count, Ceph presence).
         Returns {"ok": bool, "message": str}.
         """
-        candidates = (_split_hosts(config.get('vip') or '') + _split_hosts(config.get('host') or '')
-                      or _split_hosts(config.get('_item_key') or ''))
+        candidates = (_split_devices(config.get('vip') or '') + _split_devices(config.get('host') or '')
+                      or _split_devices(config.get('_item_key') or ''))
         candidates = list(dict.fromkeys(candidates))
         if not candidates:
             return {'ok': False, 'message': 'Host requerido'}
@@ -86,8 +86,8 @@ class ProxmoxActions:
         Returns {"ok": bool, "message": str,
                  "results": [{priv, path, feature, ok}, …]}.
         """
-        candidates = (_split_hosts(config.get('vip') or '') + _split_hosts(config.get('host') or '')
-                      or _split_hosts(config.get('_item_key') or ''))
+        candidates = (_split_devices(config.get('vip') or '') + _split_devices(config.get('host') or '')
+                      or _split_devices(config.get('_item_key') or ''))
         candidates = list(dict.fromkeys(candidates))
         if not candidates:
             return {'ok': False, 'message': 'Host requerido'}
@@ -142,8 +142,8 @@ class ProxmoxActions:
         so the user assigns each member host its node without typing it by hand.
         Returns {"ok": bool, "items": [node, …], "message": str}.
         """
-        candidates = (_split_hosts(config.get('vip') or '') + _split_hosts(config.get('host') or '')
-                      or _split_hosts(config.get('_item_key') or ''))
+        candidates = (_split_devices(config.get('vip') or '') + _split_devices(config.get('host') or '')
+                      or _split_devices(config.get('_item_key') or ''))
         candidates = list(dict.fromkeys(candidates))
         if not candidates:
             return {'ok': False, 'message': 'Host requerido', 'items': []}

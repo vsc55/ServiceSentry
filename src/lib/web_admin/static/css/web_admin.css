@@ -2351,6 +2351,20 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     background: #1f2937; border: 1px solid rgba(255,255,255,.12);
     border-radius: .4rem; box-shadow: 0 8px 24px rgba(0,0,0,.45);
 }
+/* **El puente.** El menu se coloca en el borde del CARRIL, y la fila termina antes: donde la
+   lista de secciones desplaza, la barra de desplazamiento se come 10px por dentro. Ese hueco no
+   es de nadie — ni de la fila ni del menu— asi que al cruzarlo el raton SALE del bloque, salta
+   `mouseleave`, el menu se oculta... y al ocultarse ya no esta debajo del raton para volver a
+   entrar. El menu desaparecia a mitad de camino. Reportado desde la pantalla.
+
+   Se tapa con una franja transparente pegada al lado izquierdo del menu, tan ancha como el
+   hueco (`--ss-fly-puente`, que mide el JS al colocarlo). Es parte del menu, asi que pisarla es
+   estar dentro: no hay tierra de nadie que cruzar. Un retardo al cerrar tambien lo taparia,
+   pero eso no quita el hueco — solo da tiempo a salir de el. */
+.ss-sb-flyout::before {
+    content: ''; position: absolute; top: 0; bottom: 0;
+    left: calc(-1 * var(--ss-fly-puente, 0px)); width: var(--ss-fly-puente, 0px);
+}
 [data-bs-theme="dark"] .ss-sb-flyout { background: #111827; }
 /* Single source of truth: JS toggles .ss-fly-open (on mouseenter/leave + click). No CSS
    :hover — mixing it with the JS state + position:fixed left flyouts lingering/overlapping. */

@@ -146,8 +146,8 @@ const _DCIM_KIND = {
         // estaba en el formulario, así que el rack entero salía gris. Tercera vez que aparece
         // esta misma forma de fallo en esta sección: una columna que nadie puede escribir vale
         // siempre su valor por defecto, y el código que la respeta parece que funciona.
-        {name: 'host_uid', zone: 'what', label: 'dcim_host', tt: 'dcim_item_host_tt',
-         list: 'hosts', w: '16rem'},
+        {name: 'device_uid', zone: 'what', label: 'dcim_host', tt: 'dcim_item_host_tt',
+         list: 'devices', w: '16rem'},
         // Y con un botón que se lo pregunta al dispositivo: un número de serie está en una
         // pegatina detrás del rack, y el equipo lo dice por SNMP si su perfil lo publica.
         {name: 'serial', zone: 'buy', tt: 'dcim_serial_tt', label: 'dcim_serial', w: '10rem', said: 'serial'},
@@ -582,14 +582,14 @@ function _dcimPickTake(idx, uid, nombre) {
  *  cuenta cuál de los tres es «el» equipo. */
 async function _dcimSaidAsk(idx, rol) {
     const spec = _DCIM_KIND[(_dcimForm || {}).kind];
-    const host = _dcimSaidHost(spec);
-    if (!host) return showToast(t('dcim_said_no_host'), 'warning', 6000);
+    const device = _dcimSaidHost(spec);
+    if (!device) return showToast(t('dcim_said_no_host'), 'warning', 6000);
     // Lo tecleado, guardado ANTES de abrir nada: el cuadro de las opciones y el formulario son
     // el mismo modal, así que enseñar el primero borra el marcado del segundo — y con él las
     // ocho casillas que se llevaban escritas. Un formulario que se vacía por preguntar algo es
     // peor que no poder preguntarlo.
     _dcimFormSnap();
-    const d = await apiGet(`/api/v1/dcim/said?host=${encodeURIComponent(host)}`);
+    const d = await apiGet(`/api/v1/dcim/said?device=${encodeURIComponent(device)}`);
     // `apiGet` devuelve `null` ante cualquier respuesta que no sea un 200, así que un 403 —el
     // usuario no puede ver esa máquina— llegaba aquí como un `{}` y salía por pantalla como «el
     // dispositivo no ha dicho ningún número de serie». Un error contado como respuesta es la
@@ -632,7 +632,7 @@ function _dcimFormSnap() {
 /** Qué máquina hay elegida AHORA en el formulario, que no tiene por qué ser la guardada: se
  *  engancha el dispositivo y se le pregunta el número en el mismo rato, sin guardar en medio. */
 function _dcimSaidHost(spec) {
-    const i = (spec || {}).fields.findIndex(f => f.name === 'host_uid');
+    const i = (spec || {}).fields.findIndex(f => f.name === 'device_uid');
     const caja = i >= 0 ? document.getElementById('dcim-f-' + i) : null;
     return caja ? String(caja.value || '').trim() : '';
 }
@@ -673,7 +673,7 @@ const _DCIM_LISTS = {
     // máquinas: el uid no se teclea y el nombre cambia.
     rows: {id: 'dcim-rows', rows: () => ((_dcpFeat || {}).rows || []), pick: true,
            value: f => f.uid, label: f => f.name || f.uid},
-    hosts: {id: 'dcim-hosts', rows: () => _dcimHosts || [], pick: true,
+    devices: {id: 'dcim-devices', rows: () => _dcimHosts || [], pick: true,
             value: h => h.uid, label: h => [h.name, h.address].filter(Boolean).join(' · ')},
     // Las plantillas. Se ELIGEN por nombre y se guardan por uid, como las máquinas y las filas.
     builds: {id: 'dcim-builds', rows: () => _dcimBuildOpts || [], pick: true,
@@ -781,7 +781,7 @@ function _dcimItemName(item) {
     // dijo ni el modelo. Y el uid, recortado: como último recurso sirve para distinguir dos
     // filas, que es lo único que hace, y entero se come la columna.
     return i.label
-        || (i.host_uid ? _dcimHostName(i.host_uid) : '')
+        || (i.device_uid ? _dcimHostName(i.device_uid) : '')
         || String(i.type_name || '')
         || (i.role ? t('dcim_role_' + i.role) : '')
         || String(i.uid || '').slice(0, 8);

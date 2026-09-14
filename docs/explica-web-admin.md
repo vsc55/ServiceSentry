@@ -108,7 +108,7 @@ flowchart TD
 | Qué | Cuándo | Cómo |
 |---|---|---|
 | **Permisos** (RBAC) | al **importar** `lib.core.permissions` (antes de la instancia) | `discover_permissions()` escanea el `manifest.py` de cada dominio/servicio |
-| **Campos secretos, credential schemas, perfiles de host** | al **inicio de `__init__`** | escaneo de `watchfuls/` (`discover_secret_fields`, `credential_secret_fields`, `__host_profile__`) |
+| **Campos secretos, credential schemas, perfiles de host** | al **inicio de `__init__`** | escaneo de `watchfuls/` (`discover_secret_fields`, `credential_secret_fields`, `__device_profile__`) |
 | **Tablas de módulo** | en **`_init_entity_store`** | `reconcile_module_tables()` (crea/migra `mod_<m>_<n>`) |
 | **Servicios embebidos** | al **final de `__init__`** | `discover_embedded_services()` + `make_embedded()` + `start_at_boot()` |
 | **Config de módulos, widgets de Overview** | **perezoso** (bajo demanda) | al leer `/api/v1/modules` / `/api/v1/overview/widget/<id>` |
@@ -390,7 +390,7 @@ El permiso requerido se indica entre paréntesis.
 
 ### Dispositivos (registro de hosts)
 
-> El **modelo host-céntrico** (perfiles por protocolo, `host_uid`, ejecución host-aware, migración): ver **[explica-hosts.md](explica-hosts.md)**.
+> El **modelo host-céntrico** (perfiles por protocolo, `device_uid`, ejecución host-aware, migración): ver **[explica-hosts.md](explica-hosts.md)**.
 
 Define un servidor una vez (dirección + perfiles de conexión por protocolo) y
 reutilízalo desde los checks de cualquier módulo. Los secretos de los perfiles
@@ -398,25 +398,25 @@ se enmascaran en lectura y se restauran al guardar (igual que la configuración 
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/hosts` | `devices_view` (o view por host) | Listar hosts (secretos enmascarados) |
-| `POST` | `/api/v1/hosts` | `devices_edit` | Crear un host `{name, address, tags, description, profiles}` |
-| `PUT` | `/api/v1/hosts/<uid>` | `edit` por host | Actualizar un host (secretos omitidos se conservan) |
-| `DELETE` | `/api/v1/hosts/<uid>` | `delete` por host | Eliminar un host |
-| `POST` | `/api/v1/hosts/<uid>/clone` | `devices_edit` | Clonar un host (dirección + perfiles) con nuevo uid/nombre |
-| `GET` | `/api/v1/hosts/<uid>/status` | `devices_view` | Últimos resultados de cada check vinculado al host |
-| `POST` | `/api/v1/hosts/test_ssh` | `devices_edit` | Probar conectividad SSH a un host |
-| `POST` | `/api/v1/hosts/test_check` | `devices_edit` | Probar un check concreto contra un host |
-| `POST` | `/api/v1/hosts/test` | `devices_edit` | Test genérico de una configuración de host |
-| `GET` | `/api/v1/hosts/migrate/preview` | `devices_edit` | Propuesta de migración: agrupa conexiones inline repetidas (secretos enmascarados) |
-| `POST` | `/api/v1/hosts/migrate/apply` | `devices_edit` | Crear hosts para los candidatos aceptados `{accept:[{id,name}]}` y vincular los checks |
+| `GET` | `/api/v1/devices` | `devices_view` (o view por host) | Listar hosts (secretos enmascarados) |
+| `POST` | `/api/v1/devices` | `devices_edit` | Crear un host `{name, address, tags, description, profiles}` |
+| `PUT` | `/api/v1/devices/<uid>` | `edit` por host | Actualizar un host (secretos omitidos se conservan) |
+| `DELETE` | `/api/v1/devices/<uid>` | `delete` por host | Eliminar un host |
+| `POST` | `/api/v1/devices/<uid>/clone` | `devices_edit` | Clonar un host (dirección + perfiles) con nuevo uid/nombre |
+| `GET` | `/api/v1/devices/<uid>/status` | `devices_view` | Últimos resultados de cada check vinculado al host |
+| `POST` | `/api/v1/devices/test_ssh` | `devices_edit` | Probar conectividad SSH a un host |
+| `POST` | `/api/v1/devices/test_check` | `devices_edit` | Probar un check concreto contra un host |
+| `POST` | `/api/v1/devices/test` | `devices_edit` | Test genérico de una configuración de host |
+| `GET` | `/api/v1/devices/migrate/preview` | `devices_edit` | Propuesta de migración: agrupa conexiones inline repetidas (secretos enmascarados) |
+| `POST` | `/api/v1/devices/migrate/apply` | `devices_edit` | Crear hosts para los candidatos aceptados `{accept:[{id,name}]}` y vincular los checks |
 
-Un host se guarda en la BD general (tabla `hosts`); `profiles` es un JSON
+Un host se guarda en la BD general (tabla `devices`); `profiles` es un JSON
 `{protocolo: {campo: valor}}` (ssh/snmp/db/http/tls…). Los protocolos y sus
-campos los aporta cada módulo vía `__host_profile__` (ver guía de módulos §4d).
+campos los aporta cada módulo vía `__device_profile__` (ver guía de módulos §4d).
 
 **Vincular un check a un host.** En la config de un módulo host-capaz, cada ítem
 muestra un selector **Host**: al elegir uno, los campos de conexión se ocultan y
-el check hereda dirección + credenciales del host (`resolve_host` en el monitor).
+el check hereda dirección + credenciales del host (`resolve_device` en el monitor).
 Módulos host-capaces: snmp, ping, datastore, ssl_cert, ntp, web. `dns` se queda
 inline (su target es un dominio, no un servidor con credenciales).
 
@@ -424,14 +424,14 @@ inline (su target es un dominio, no un servidor con credenciales).
 la configuración de módulos (en la BD), agrupa ítems por dirección uniéndolos solo si son compatibles
 (sin conflicto de credenciales en protocolos compartidos) y agregando perfiles
 entre módulos; propone N hosts. Tras confirmar, crea los hosts (credenciales
-cifradas) y reescribe los checks con `host_uid`, quitando los campos de conexión
+cifradas) y reescribe los checks con `device_uid`, quitando los campos de conexión
 ya poseídos por el host. Es opt-in y reversible por revisión (coexistencia con
 los checks inline existentes).
 
 ### Clusters (checks multi-bind)
 
 Un **cluster** es un único check vinculado a **varios hosts** a la vez — el ítem lleva
-un array `host_uids` (en vez de un solo `host_uid`) y el módulo evalúa el conjunto y
+un array `host_uids` (en vez de un solo `device_uid`) y el módulo evalúa el conjunto y
 agrega el estado. El ejemplo canónico es **`keepalived`** (VRRP multi-nodo: servicio por
 nodo, titular de la VIP, split-brain, prioridad — ver [ref-modulos.md](ref-modulos.md), sección keepalived).
 

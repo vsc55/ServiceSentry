@@ -21,7 +21,7 @@ let _discoverPathStr     = null;
 let _discoverFieldPathStr = null;
 let _discoverUrl         = null;   // current discover endpoint
 let _discoverInputSpec   = null;   // __discovery_inputs__ spec when present
-let _discoverHostMod     = null;   // module name when the Servers modal drives discovery
+let _discoverDeviceMod     = null;   // module name when the Servers modal drives discovery
 
 function _discoverSetFilterVisible(show) {
     document.getElementById('discoverFilter')?.classList.toggle('d-none', !show);
@@ -29,7 +29,7 @@ function _discoverSetFilterVisible(show) {
 
 async function openDiscoverModal(pathStr, url) {
     _discoverGen++;            // invalidate any in-flight fetch from a previous open
-    _discoverHostMod = null;   // Modules section, not the Servers (host) modal
+    _discoverDeviceMod = null;   // Modules section, not the Servers (device) modal
     _discoverFieldPathStr = null;
     _discoverPathStr = pathStr;
     _discoverServices = null;
@@ -109,7 +109,7 @@ async function _discoverFetchAndRender(pathStr, url, _colSch, extraInput) {
 }
 
 /** Render the declared __discovery_inputs__ form fields.  *runFn* is the global
- *  function name invoked to run discovery (Modules vs Servers/host mode). */
+ *  function name invoked to run discovery (Modules vs Servers/device mode). */
 function _discoverRenderInputs(modName, spec, runFn) {
     runFn = runFn || '_runDiscovery';
     let h = '<div class="d-flex flex-column gap-2">';
@@ -181,7 +181,7 @@ async function _runDiscovery() {
 
 async function openDiscoverModalForField(fieldPathStr, url) {
     const gen = ++_discoverGen;   // invalidate prior in-flight fetch; snapshot for this open
-    _discoverHostMod = null;   // Modules section, not the Servers (host) modal
+    _discoverDeviceMod = null;   // Modules section, not the Servers (device) modal
     _discoverFieldPathStr = fieldPathStr;
     // Collection path = all parts except field key and item key (last two segments).
     _discoverPathStr = fieldPathStr.split('|').slice(0, -2).join('|');
@@ -230,12 +230,12 @@ function _renderDiscoverList() {
     const filter = (document.getElementById('discoverFilter')?.value || '').toLowerCase();
 
     // Read collection schema (reused for configured-set, render hints, and operators).
-    // In the Servers (host) modal there is no path; resolve it from the module +
+    // In the Servers (device) modal there is no path; resolve it from the module +
     // its collection so schema-driven hints (record type, subtitle, …) still apply.
-    const _hostColl = (_hostChecks[_discoverHostMod] || {}).collection || 'list';
-    const _colSch = _discoverHostMod
-        ? (ITEM_SCHEMAS[_discoverHostMod + '|' + _hostColl]
-           || ITEM_SCHEMAS['watchfuls.' + _discoverHostMod + '|' + _hostColl] || null)
+    const _hostColl = (_deviceChecks[_discoverDeviceMod] || {}).collection || 'list';
+    const _colSch = _discoverDeviceMod
+        ? (ITEM_SCHEMAS[_discoverDeviceMod + '|' + _hostColl]
+           || ITEM_SCHEMAS['watchfuls.' + _discoverDeviceMod + '|' + _hostColl] || null)
         : (_discoverPathStr ? (ITEM_SCHEMAS[_schemaKeyOf(_discoverPathStr)] || null) : null);
 
     // Schema-driven render hints — all module-specific knowledge lives in schema.json.
@@ -255,10 +255,10 @@ function _renderDiscoverList() {
     // Build set of identifiers already configured (case-insensitive).
     // Uses __discovery_field__ from the collection schema to find the operative field.
     const configured = new Set();
-    if (_discoverHostMod) {
-        // Host mode: "already added" comes from the host's pending checks
+    if (_discoverDeviceMod) {
+        // Device mode: "already added" comes from the device's pending checks
         // (keyed by field + type when the module dedups per record type).
-        const _st = _hostChecks[_discoverHostMod] || { items: [], collection: 'list' };
+        const _st = _deviceChecks[_discoverDeviceMod] || { items: [], collection: 'list' };
         const _df = _colSch && _colSch['__discovery_field__'];
         for (const it of _st.items) {
             const v = (_df ? (it.fields[_df] || '') : '').trim();
@@ -271,10 +271,10 @@ function _renderDiscoverList() {
         const collection = getPath(modulesData, _discoverPathStr.split('|')) || {};
         for (const [key, val] of Object.entries(collection)) {
             const _isObj   = typeof val === 'object' && val !== null;
-            // Host-bound checks belong to their server (managed from the Servers
+            // Device-bound checks belong to their server (managed from the Servers
             // modal); the Modules section configures the inline/global set, so they
             // must NOT block adding the same record here.
-            if (_isObj && val.host_uid) continue;
+            if (_isObj && val.device_uid) continue;
             const fieldVal = (_isObj && _discField ? (val[_discField] || '') : '').trim();
             const typeVal  = (_isObj && _typeStoreField ? (val[_typeStoreField] || '') : '');
             configured.add(_dedupKey(fieldVal || key, typeVal));
@@ -410,19 +410,19 @@ function _discoveryItemKey(colSch, name, displayName) {
 // {name}, {display_name}, {type}, plus any {field} resolved from the item's
 // fields (e.g. {db_type}, {server_name}, {url}).  A dangling " - " left by an
 // empty token is collapsed.
-function _discoveryLabel(colSch, host, name, displayName, typeInfo, fields) {
+function _discoveryLabel(colSch, device, name, displayName, typeInfo, fields) {
     const tpl = colSch && colSch['__discovery_label_template__'];
     if (!tpl) return '';
     const f = fields || {};
-    const base = { host: host || '', name: name || '', display_name: displayName || '', type: typeInfo || '' };
+    const base = { device: device || '', name: name || '', display_name: displayName || '', type: typeInfo || '' };
     let s = tpl.replace(/\{(\w+)\}/g, (_, k) =>
         (k in base) ? base[k] : (f[k] != null ? String(f[k]) : ''));
     return s.replace(/\s*-\s*$/, '').replace(/^\s*-\s*/, '').trim();
 }
 
 function _addDiscoveredService(serviceName, category, typeInfo, valueInfo, displayName) {
-    // Servers modal (host mode): add the discovered item as a host check.
-    if (_discoverHostMod) {
+    // Servers modal (device mode): add the discovered item as a device check.
+    if (_discoverDeviceMod) {
         _addDiscoveredHostCheck(serviceName, displayName, typeInfo, valueInfo);
         return;
     }
@@ -449,7 +449,7 @@ function _addDiscoveredService(serviceName, category, typeInfo, valueInfo, displ
     // The operative field keeps the raw discovered name (e.g. the unit name used
     // by systemctl) even when the key is a UUID.
     if (_discField && _discField in item) item[_discField] = serviceName;
-    // Friendly, editable display label (the key itself is a UUID). No host in the
+    // Friendly, editable display label (the key itself is a UUID). No device in the
     // Modules section → the template collapses to just the service name.
     const _labelField = _colSch && _colSch['__check_title_field__'];
     const _label = _discoveryLabel(_colSch, '', serviceName, displayName, typeInfo, item);

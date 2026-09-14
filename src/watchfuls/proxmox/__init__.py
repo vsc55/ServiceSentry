@@ -26,7 +26,7 @@ from lib.modules import ModuleBase
 
 from .actions import ProxmoxActions
 from .checks import ClusterChecks
-from .client import PveClient, _split_hosts
+from .client import PveClient, _split_devices
 from .page import ProxmoxPage
 from .provision import ProxmoxProvision
 
@@ -141,13 +141,13 @@ class Watchful(ClusterChecks, PveClient, ProxmoxActions, ProxmoxPage,
         #   2. the configured/bound host(s) (the field accepts several addresses);
         #   3. the cluster node IPs discovered last cycle (cached in the cluster
         #      result) — so one node going down doesn't blind the whole check.
-        candidates = _split_hosts(it.get('vip', '') or '') + _split_hosts(it.get('host', '') or '')
+        candidates = _split_devices(it.get('vip', '') or '') + _split_devices(it.get('host', '') or '')
         candidates = list(dict.fromkeys(candidates)) or [name]   # dedupe, keep order
         prev = (self.get_status_find(f'{name}/cluster', self.name_module) or {}).get('other_data', {}) or {}
         for ip in (prev.get('node_ips') or []):
             if ip and str(ip) not in candidates:
                 candidates.append(str(ip))
-        # Cluster roster (host↔node mapping, set by resolve_host for a multi-host
+        # Cluster roster (host↔node mapping, set by resolve_device for a multi-host
         # binding): correlate each API node with its host, derive the node
         # maintenance set from each member host's maintenance state, and label
         # nodes by host.  No manual node list — a node is "in maintenance" iff its

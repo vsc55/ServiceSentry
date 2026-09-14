@@ -36,26 +36,26 @@ function _srvTypeRailSelect(id) {
 /** The groups, in the catalogue's order, with the unclassified ones last.
  *  `id` is the type id, or '-' for unclassified: '' would be indistinguishable from "none
  *  selected" the moment it goes through localStorage. */
-function _srvTypeGroups(hosts) {
+function _srvTypeGroups(devices) {
     const by = new Map();
-    for (const h of hosts) {
+    for (const h of devices) {
         const k = h.device_type || '-';
         if (!by.has(k)) by.set(k, []);
         by.get(k).push(h);
     }
-    const groups = HOST_TYPES
+    const groups = DEVICE_TYPES
         .filter(x => by.has(x.id))
-        .map(x => ({ id: x.id, icon: x.icon, label: hostTypeLabel(x.id), rows: by.get(x.id) }));
+        .map(x => ({ id: x.id, icon: x.icon, label: deviceTypeLabel(x.id), rows: by.get(x.id) }));
     if (by.has('-')) {
-        groups.push({ id: '-', icon: 'bi-question-circle', label: t('host_type_unset'),
+        groups.push({ id: '-', icon: 'bi-question-circle', label: t('device_type_unset'),
                       rows: by.get('-'), unset: true });
     }
     return groups;
 }
 
-function _srvViewTypes(hosts, ctx) {
-    if (!hosts.length) return '';
-    const groups = _srvTypeGroups(hosts);
+function _srvViewTypes(devices, ctx) {
+    if (!devices.length) return '';
+    const groups = _srvTypeGroups(devices);
     let sel = _srvTypeSel;
     if (sel === null) { try { sel = localStorage.getItem(_SRV_TYPE_RAIL_KEY); } catch (_) {} }
     const open = groups.find(g => g.id === sel) || groups[0];
@@ -63,9 +63,9 @@ function _srvViewTypes(hosts, ctx) {
     // The unclassified count is the one that is actionable, so it is the one that gets a
     // colour — and only when there are any. "0 unclassified" painted amber would be a
     // warning about nothing.
-    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_hosts'), hosts.length)}
-        ${_summaryChip('bi-tags', t('col_host_type'), groups.length - (unset.length ? 1 : 0))}
-        ${unset.length ? _summaryChip('bi-question-circle', t('host_type_unset'),
+    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_hosts'), devices.length)}
+        ${_summaryChip('bi-tags', t('col_device_type'), groups.length - (unset.length ? 1 : 0))}
+        ${unset.length ? _summaryChip('bi-question-circle', t('device_type_unset'),
                                       unset.length, 'text-bg-warning') : ''}`;
     // `ss-vfill` and not a bare div: the factory's body is what has the height, and a
     // wrapper that is not a link in the fill chain keeps it — the rail then draws at the

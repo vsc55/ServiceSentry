@@ -9,20 +9,20 @@
    An empty error group is the good news, so it is not drawn at all; the header still states
    the total, which is what makes the absence readable rather than ambiguous.
 
-   Hosts with no checks at all get their own group at the bottom. That is not a fifth state
-   of a host, it is the absence of one — "we do not know how this machine is" is not a shade
+   Devices with no checks at all get their own group at the bottom. That is not a fifth state
+   of a device, it is the absence of one — "we do not know how this machine is" is not a shade
    of "fine", and colouring it green would say it was.
    ================================================================ #}
 
-function _srvViewStatus(hosts, ctx) {
-    if (!hosts.length) return '';
+function _srvViewStatus(devices, ctx) {
+    if (!devices.length) return '';
     const by = new Map(_SRV_STATES.map(s => [s, []]));
-    for (const h of hosts) {
+    for (const h of devices) {
         const s = _srvStatusOf(h);
         (by.get(s) || by.get('')).push(h);
     }
     const bad = (by.get('error') || []).length + (by.get('warning') || []).length;
-    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_hosts'), hosts.length)}
+    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_hosts'), devices.length)}
         ${_SRV_STATES.filter(s => (by.get(s) || []).length).map(s =>
             _summaryChip(_SRV_STATE_META[s].icon, _srvStateLabel(s), by.get(s).length,
                      s === 'error' ? 'text-bg-danger' : (s === 'ok' ? 'text-bg-success' : ''))).join(' ')}

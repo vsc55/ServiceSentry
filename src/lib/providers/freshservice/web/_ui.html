@@ -98,7 +98,7 @@ function _fsTestHtml(d) {
                 ? `<div class="text-muted mt-1">${esc(st.error)}</div>` : ''}</div>`;
     return `<div class="d-flex align-items-center gap-2">
             <i class="bi bi-check-circle-fill text-success"></i>
-            <span>${esc(tf('fs_test_ok', d.host || ''))}</span>
+            <span>${esc(tf('fs_test_ok', d.device || ''))}</span>
         </div>${cupoHtml}${estado}`;
 }
 

@@ -8,8 +8,8 @@
 <div class="tab-pane fade" id="tab-servers">
     <!-- Sub-tab nav -->
     <ul class="nav nav-tabs mb-3" id="infraSubTabs" role="tablist">
-        <li class="nav-item" role="presentation" id="subtab-srv-hosts-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-hosts" type="button" id="btn-subtab-srv-hosts">
+        <li class="nav-item" role="presentation" id="subtab-srv-devices-li" style="display:none">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-devices" type="button" id="btn-subtab-srv-devices">
                 <i class="bi bi-hdd-network me-1"></i>{{ i18n.subtab_servers }}
             </button>
         </li>
@@ -33,7 +33,7 @@
            createListTable's cardClass), like History: no card chrome, filling the whole
            area. #infraSubTabs is hidden (the sidebar drives these), so they also eat the
            shell's top padding — the accent strip sits flush against the breadcrumb. #}
-        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-hosts">
+        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-devices">
             <div id="servers-container"></div>
         </div>
         {# A sangre como sus dos hermanas, y no por gusto: dentro de una `.ss-fullbleed` la
@@ -41,7 +41,7 @@
            tres pestañas de Infraestructura se lean como la misma pantalla. Con `p-3` salía una
            caja con borde en medio de dos que no lo tienen. Reportado desde la pantalla. #}
         <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-types">
-            <div id="hosttypes-container"></div>
+            <div id="devicetypes-container"></div>
         </div>
         <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-clusters">
             <div id="clusters-container"></div>

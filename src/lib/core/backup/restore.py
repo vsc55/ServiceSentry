@@ -68,7 +68,7 @@ def restore_backup(connector, var_dir: str, name: str, *, parts=None, tables=Non
     *tables* narrows it FURTHER, to named tables inside those parts; None means every table the
     parts cover, which is what every caller before this asked for. It is the finer grain the
     form calls "advanced", and it is genuinely finer-grained rather than safer: restoring
-    `hosts` without `credentials` leaves rows pointing at a credential that is no longer there,
+    `devices` without `credentials` leaves rows pointing at a credential that is no longer there,
     and nothing here will stop it — the parts are a curated grouping, a hand-picked list of
     tables is not. What it is FOR is the opposite case, the one part-level restore cannot
     express: a bad import touched one table and everything else on the install has moved on
@@ -107,7 +107,7 @@ def restore_backup(connector, var_dir: str, name: str, *, parts=None, tables=Non
     # Exactly what was asked for, and nothing added. `required` says what a COPY must contain
     # — one without `core` restores nothing — and reading it as "must also be applied" would
     # make every partial restore a full one, which is the opposite of the point: restoring
-    # only the hosts after a bad import must not also roll back the users.
+    # only the devices after a bad import must not also roll back the users.
     want = set(man.get('parts') or [])
     if parts is not None:
         want &= {str(p) for p in parts}

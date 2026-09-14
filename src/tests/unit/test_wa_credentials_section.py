@@ -12,7 +12,7 @@ Two structural reasons, beyond the population:
 
 * its neighbours under Infrastructure, Servers and Clusters, are things you MONITOR. A
   credential is not monitored; it is the secret you reach other things WITH.
-* its consumers are spread across hosts, modules and providers alike, so hanging it off any
+* its consumers are spread across devices, modules and providers alike, so hanging it off any
   one of them asserts a belonging that is not real.
 
 Not Access either: that is users, groups, roles and sessions — who may enter the panel.
@@ -106,7 +106,7 @@ class TestNothingStillPointsAtTheOldSubTab:
         src = _strip_comments(_read(FEATURES))
         block = src[src.index('_savedInfra'):]
         assert "closest('li')?.style.display !== 'none'" in block
-        assert 'btn-subtab-srv-hosts' in block
+        assert 'btn-subtab-srv-devices' in block
 
 
 class TestTheGateTravelledWithIt:

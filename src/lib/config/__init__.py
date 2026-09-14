@@ -33,7 +33,7 @@ SECRET_KEY_FILENAME = '.flask_secret'
 # The same key, supplied by the environment instead of a file. It is the one setting that
 # MUST be identical across every process sharing a database — the Fernet key each of them
 # derives from it is what decrypts the stored secrets — and the only one that had no `SS_*`
-# to pin it with. On a single host the compose files get away with sharing a volume; a pod
+# to pin it with. On a single device the compose files get away with sharing a volume; a pod
 # per role does not, so each generated its own key and could not read the others' secrets.
 SECRET_KEY_ENV = 'SS_SECRET_KEY'
 

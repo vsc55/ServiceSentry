@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Where a module action gets its address and its identity from.
 
-An action posted as one flat form carries ``host_uid`` and ``cred_uid`` at the top level, and
+An action posted as one flat form carries ``device_uid`` and ``cred_uid`` at the top level, and
 the route resolves them there.  A discovery scoped to a parent item is a different shape: the
 UI posts ``{module scalars…, "<collection>": {"<key>": {…the item…}}}``, and the item is where
 those two keys live.
@@ -41,8 +41,8 @@ class _Creds:
 class _WA:
     _modules_dir = ''
 
-    def __init__(self, hosts=None, creds=None):
-        self._hosts_store = _Hosts(hosts or {})
+    def __init__(self, devices=None, creds=None):
+        self._devices_store = _Hosts(devices or {})
         self._credentials_store = _Creds(creds or {})
 
 
@@ -79,14 +79,14 @@ class TestAnItemBringsItsOwnIdentity:
     def test_the_bound_host_fills_an_empty_address(self, wa):
         """The case it was reported from: the server's own `host` is blank because the address
         comes from the host it is bound to."""
-        cfg = {'servers': {'PVE01': {'host_uid': 'h1', 'host': '', 'cred_uid': 'c1'}}}
+        cfg = {'servers': {'PVE01': {'device_uid': 'h1', 'host': '', 'cred_uid': 'c1'}}}
         apply_item_identities(wa, 'snmp', cfg)
         assert cfg['servers']['PVE01']['host'] == 'pve01.example.lan'
 
     def test_an_address_typed_on_the_item_beats_the_bound_host(self, wa):
         """The host FILLS, it does not overrule: a per-check override is the reason that field
         stays editable on a bound item."""
-        cfg = {'servers': {'PVE01': {'host_uid': 'h1', 'host': '10.0.0.9'}}}
+        cfg = {'servers': {'PVE01': {'device_uid': 'h1', 'host': '10.0.0.9'}}}
         apply_item_identities(wa, 'snmp', cfg)
         assert cfg['servers']['PVE01']['host'] == '10.0.0.9'
 
@@ -104,10 +104,10 @@ class TestAnItemBringsItsOwnIdentity:
         assert cfg['servers']['PVE01']['community'] == 's3cret'
 
     def test_a_dunder_key_is_never_walked(self, wa):
-        """`__host__` and `__connector__` are injected by the route and are not items."""
-        cfg = {'__host__': {'address': 'x'}, 'servers': {'PVE01': {'cred_uid': 'c1'}}}
+        """`__device__` and `__connector__` are injected by the route and are not items."""
+        cfg = {'__device__': {'address': 'x'}, 'servers': {'PVE01': {'cred_uid': 'c1'}}}
         apply_item_identities(wa, 'snmp', cfg)
-        assert cfg['__host__'] == {'address': 'x'}
+        assert cfg['__device__'] == {'address': 'x'}
 
     def test_a_disabled_credential_supplies_nothing(self, wa):
         wa._credentials_store = _Creds({'c1': {'enabled': False,
@@ -119,9 +119,9 @@ class TestAnItemBringsItsOwnIdentity:
     def test_a_missing_store_is_not_an_error(self):
         """A slimmed process may have neither store. Raising here would turn every action on
         a host-bound item into a 500."""
-        cfg = {'servers': {'PVE01': {'cred_uid': 'c1', 'host_uid': 'h1'}}}
+        cfg = {'servers': {'PVE01': {'cred_uid': 'c1', 'device_uid': 'h1'}}}
         wa = _WA()
-        wa._hosts_store = None
+        wa._devices_store = None
         wa._credentials_store = None
         apply_item_identities(wa, 'snmp', cfg)
         assert cfg['servers']['PVE01']['cred_uid'] == 'c1'

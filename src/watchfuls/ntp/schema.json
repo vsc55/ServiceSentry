@@ -7,7 +7,7 @@
         "timeout":    {"type": "int",   "default": 5,   "min": 0, "inherit_blank": true,   "max": 30}
     },
     "__history__": {"field": "offset_seconds", "unit": "s", "label": "NTP Offset"},
-    "__host_profile__": {"key": "ntp", "address_field": "server", "fields": ["server"]},
+    "__device_profile__": {"key": "ntp", "address_field": "server", "fields": ["server"]},
     "list": {
         "__check_title_field__": "label",
         "__title_editable__": true,

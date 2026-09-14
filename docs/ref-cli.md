@@ -87,7 +87,7 @@ syslog) los indica el panel con su banner de reinicio.
 Regla general del proyecto: **las rutas son solo HTTP** (parseo de petición, sesión,
 persistencia, auditoría) y la **lógica vive en un `service.py` sin Flask** por dominio, en
 `lib/core/<dominio>/service.py`. Todos los dominios de núcleo siguen este patrón
-(`users`, `groups`, `roles`, `modules`, `config`, `hosts`, `credentials`, `history`,
+(`users`, `groups`, `roles`, `modules`, `config`, `devices`, `credentials`, `history`,
 `overview`, `sessions`, `audit`); cada `service.py` es un conjunto de funciones puras sobre
 dicts/stores que **valida + muta** y lanza `AdminOpError(key, *args)` (clave i18n) en las
 violaciones — **sin** persistir ni auditar (de eso se encarga quien llama) y **sin** las

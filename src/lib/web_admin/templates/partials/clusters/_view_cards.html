@@ -1,8 +1,8 @@
 {# ================================================================
    Clusters — cards: a cluster as one object.
 
-   The table needs the Members column turned on to tell you how many hosts a cluster has,
-   and even then it is a number. Here the member hosts are named, which is the difference
+   The table needs the Members column turned on to tell you how many devices a cluster has,
+   and even then it is a number. Here the member devices are named, which is the difference
    between "3" and "the three that are all in the same rack".
 
    Same page, same order, same filters as the table.
@@ -12,7 +12,7 @@ function _clViewCards(rows) {
     return _cardGrid(rows.map(row => {
         const members = _clMembers(row);
         const alone = _clIsAlone(row);
-        // Named, not counted — and cut, because a twelve-host cluster would otherwise make
+        // Named, not counted — and cut, because a twelve-device cluster would otherwise make
         // its card twice the height of every other one.
         const chips = _chipList(members, m => _chipText(m.name, 'bi-hdd-network'), 6, '');
         return _entityCard({

@@ -14,7 +14,7 @@ less: how many U are free is a fact about a cabinet, not about a machine.
 whose a piece of property is belongs to the company registry, and its flag lives there
 (``orgs_edit``, in :mod:`lib.core.orgs.manifest`) — in a group that decides billing and who may
 see what, which is not the same authority as tidying a rack, and it is not this section's
-authority either: the same decision files a host, a mailbox and a subscription.
+authority either: the same decision files a device, a mailbox and a subscription.
 
 **And a shared rack is why ownership has a scope of its own.** A cabinet holding equipment of
 several companies breaks the assumption that seeing a place means seeing what is in it: somebody
@@ -179,7 +179,7 @@ from .jobs import live as BACKGROUND_JOBS      # noqa: E402,F401  (a descriptor)
 # `lib.core.orgs` has never heard of, so a list there would be one the core edits every time a
 # package learns to own something — the core naming a domain.
 #
-# The four containment levels, and `host` for the things that are somebody's and are in no rack
+# The four containment levels, and `device` for the things that are somebody's and are in no rack
 # — a VM, a VIP, a machine on a desk. All four resolve through the same walk, because they are
 # the same chain read from different heights.
 from .owners import chain as _chain             # noqa: E402

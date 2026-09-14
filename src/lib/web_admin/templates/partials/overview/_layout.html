@@ -213,7 +213,7 @@ function _dwDef(id) {
 // TWO copies, and which one wins is the whole design:
 //
 //   * the ACCOUNT (`dashboard_layout`, in the DB) is the layout. It is what every
-//     session of this user sees, on any host and any browser.
+//     session of this user sees, on any device and any browser.
 //   * `localStorage` holds an UNSAVED DRAFT — the arrangement being dragged around
 //     right now, kept across a reload so a half-finished edit is not lost.
 //
@@ -923,7 +923,7 @@ function _dwToolbar(id, cols, h, item) {
             style="width:auto;min-width:6em;font-size:.72rem" onchange="_dwSetSevFilter(this)">${lvlOpts}</select>`;
         if (fl.maintenance)
             tb += `<label class="d-inline-flex align-items-center gap-1 small text-muted mb-0" style="cursor:pointer"
-                title="${escAttr(t('host_status_maintenance'))}">
+                title="${escAttr(t('device_status_maintenance'))}">
                 <input type="checkbox" class="form-check-input mt-0 dw-sev-maint"${cur.maint ? ' checked' : ''}
                     onchange="_dwSetSevFilter(this)"><i class="bi bi-cone-striped"></i></label>`;
         tb += `</span>`;

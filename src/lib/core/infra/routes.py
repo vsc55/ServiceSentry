@@ -4,10 +4,10 @@
 
 Routes registered by this file:
 
-    GET    /api/v1/infra/hosts             every machine, its state and how much of it is watched
-    GET    /api/v1/infra/hosts/<uid>       one machine: what its checks last returned, as numbers
-    POST   /api/v1/infra/hosts/<uid>/collect   run this machine's checks now, and record them
-    POST   /api/v1/infra/hosts/<uid>/watch     say one row of it is worth an alert (or stop)
+    GET    /api/v1/infra/devices             every machine, its state and how much of it is watched
+    GET    /api/v1/infra/devices/<uid>       one machine: what its checks last returned, as numbers
+    POST   /api/v1/infra/devices/<uid>/collect   run this machine's checks now, and record them
+    POST   /api/v1/infra/devices/<uid>/watch     say one row of it is worth an alert (or stop)
     GET    /api/v1/infra/collect              the collection in flight, if any
     GET    /api/v1/infra/collect/<job_id>      how that collection is going
     GET    /api/v1/infra/map              how the fleet is wired, out of what it answered
@@ -24,14 +24,14 @@ dashboard layout already lives: it is a preference about a picture, and it can n
 it was not already allowed to see.
 
 **Where the data comes from — and where it does not.** Every fact is read through the domain
-that owns it: the hosts store owns the machines, ``hosts.service`` owns "what state is this
-host in" and "what did its checks last return" (the same functions the host modal uses), and
+that owns it: the devices store owns the machines, ``devices.service`` owns "what state is this
+device in" and "what did its checks last return" (the same functions the device modal uses), and
 the history metadata owns which of a result's numbers are measurements and what they are
 called. This section composes; it does not compute a second answer to any of those questions,
 because a second answer is one that can disagree.
 
 **Who may see what.** Gated by ``infra_view``, and the fleet is narrowed exactly the way
-``/api/v1/hosts`` narrows it: the whole list for ``devices_view``, otherwise only the hosts
+``/api/v1/devices`` narrows it: the whole list for ``devices_view``, otherwise only the devices
 the caller holds ``server.<uid>.view`` for. One model for "which machines are mine to see",
 not two — and the collect route applies the SAME narrowing on top of its own flag, so holding
 ``infra_collect`` never becomes a way to touch a machine you cannot see.
@@ -40,10 +40,10 @@ not two — and the collect route applies the SAME narrowing on top of its own f
 from flask import jsonify, request, session
 
 from lib.core.history import service as history_svc
-from lib.core.hosts import service as hosts_svc
-from lib.core.hosts.service import _checks_for_host
-from lib.core.hosts import profiles as host_profiles
-from lib.core.hosts.stores import hosts as host_store_mod
+from lib.core.devices import service as devices_svc
+from lib.core.devices.service import _checks_for_host
+from lib.core.devices import profiles as device_profiles
+from lib.core.devices.stores import devices as device_store_mod
 from lib.core.infra import jobs as infra_jobs
 from lib.core.infra import service as infra_svc
 from lib.core.infra import evidence as infra_evidence
@@ -60,11 +60,11 @@ def register(app, wa):
         """Whether this caller may see ONE machine — the same rule as the listing below."""
         return 'devices_view' in perms or f'server.{uid}.view' in perms
 
-    def _visible(hosts, perms):
-        """The hosts this caller may see — the same rule as the registry's own listing."""
+    def _visible(devices, perms):
+        """The devices this caller may see — the same rule as the registry's own listing."""
         if 'devices_view' in perms:
-            return hosts
-        return [h for h in hosts if _may_see(h.get('uid'), perms)]
+            return devices
+        return [h for h in devices if _may_see(h.get('uid'), perms)]
 
     def _said_sources(bound_by_host):
         """``sources_of`` for whichever modules the fleet has a check bound to.
@@ -82,7 +82,7 @@ def register(app, wa):
                  for mod in sorted(mods)}
         return infra_svc.sources_of({}, named)
 
-    @app.route('/api/v1/infra/hosts', methods=['GET'])
+    @app.route('/api/v1/infra/devices', methods=['GET'])
     @infra_view_req
     def api_infra_hosts():
         """The fleet: one row per machine, ordered worst first.
@@ -92,39 +92,39 @@ def register(app, wa):
         credential of everything that reaches the machine — are not in the payload at all,
         rather than being masked on the way out.
         """
-        store = getattr(wa, '_hosts_store', None)
+        store = getattr(wa, '_devices_store', None)
         if store is None:
-            return jsonify({'hosts': [], 'summary': infra_svc.summary([])})
+            return jsonify({'devices': [], 'summary': infra_svc.summary([])})
         # `decrypt=False`: this route never reads a profile, so there is nothing to decrypt
         # and no plaintext to mask — the projection drops the whole field either way.
-        hosts = store.list(decrypt=False)
-        bound = hosts_svc._host_bound_modules(wa)
-        hosts_svc.enrich_hosts(
-            hosts, hosts_svc._host_statuses(wa), bound,
-            infra_svc.fleet_identity(wa._read_check_status(), hosts, _said_sources(bound)))
-        rows = infra_svc.fleet(_visible(hosts, set(wa._get_session_permissions() or [])))
-        return jsonify({'hosts': rows, 'summary': infra_svc.summary(rows)})
+        devices = store.list(decrypt=False)
+        bound = devices_svc._host_bound_modules(wa)
+        devices_svc.enrich_devices(
+            devices, devices_svc._device_statuses(wa), bound,
+            infra_svc.fleet_identity(wa._read_check_status(), devices, _said_sources(bound)))
+        rows = infra_svc.fleet(_visible(devices, set(wa._get_session_permissions() or [])))
+        return jsonify({'devices': rows, 'summary': infra_svc.summary(rows)})
 
-    @app.route('/api/v1/infra/hosts/<uid>', methods=['GET'])
+    @app.route('/api/v1/infra/devices/<uid>', methods=['GET'])
     @infra_view_req
     def api_infra_host(uid):
         """One machine: its identity, what every check bound to it last said, and the numbers.
 
-        ``results`` is the same shape the host modal shows (live values, falling back to
+        ``results`` is the same shape the device modal shows (live values, falling back to
         history when a check has no live state). ``metrics`` is the subset of those results'
         data that the producing module DECLARED as a measurement, each with its label, its
         unit and the coordinates of the series behind it — so the screen can chart a value
         without knowing anything about the module that produced it.
         """
-        store = getattr(wa, '_hosts_store', None)
+        store = getattr(wa, '_devices_store', None)
         record = store.get(uid, decrypt=False) if store is not None else None
         if not record:
-            return jsonify({'error': wa._t('host_not_found')}), 404
+            return jsonify({'error': wa._t('device_not_found')}), 404
         perms = set(wa._get_session_permissions() or [])
         if not _may_see(uid, perms):
             return jsonify({'error': wa._t('access_denied')}), 403
-        statuses, bound_mods = hosts_svc._host_statuses(wa), hosts_svc._host_bound_modules(wa)
-        hosts_svc.enrich_hosts([record], statuses, bound_mods)
+        statuses, bound_mods = devices_svc._device_statuses(wa), devices_svc._host_bound_modules(wa)
+        devices_svc.enrich_devices([record], statuses, bound_mods)
 
         # What is bound to this host, per bare module: {bare: {item_key: label}}.
         bound: dict = {}
@@ -137,7 +137,7 @@ def register(app, wa):
         # and this page did not, so a switch sampled that way went red in the fleet and showed
         # four empty tabs when opened — the machine with the numbers being the one nobody could
         # see. One source for both, so they cannot disagree again.
-        sampled = hosts_svc.host_sampled_keys(status_raw, uid)
+        sampled = devices_svc.device_sampled_keys(status_raw, uid)
         # …and, where the live state says nothing about the device ITSELF, what the history
         # remembers. A machine in maintenance has its checks skipped, so the cycle after that
         # prunes every key the module stopped returning — which for a device sampled through
@@ -155,12 +155,12 @@ def register(app, wa):
                 every_series = hist_store.latest_by_series() or []
             except Exception:                       # pylint: disable=broad-except
                 every_series = []
-            sampled = hosts_svc.host_recorded_keys(every_series, uid)
+            sampled = devices_svc.device_recorded_keys(every_series, uid)
         for bare, keys in sampled.items():
             for key in keys:
                 bound.setdefault(bare, {}).setdefault(key, '')
         # The last sample of each series, as the fallback for a check with no live state —
-        # a host in maintenance has had its live records purged, and "nothing here" would
+        # a device in maintenance has had its live records purged, and "nothing here" would
         # read as a machine that has never reported.
         #
         # `latest_by_series` and not `get_index`: the index also counts the samples, dates the
@@ -183,7 +183,7 @@ def register(app, wa):
                     hist_by_mod.setdefault(series.get('module'), []).append(series)
             except Exception:                       # pylint: disable=broad-except
                 pass                                # a chart is not worth failing the page for
-        results = hosts_svc.build_host_status(bound, status_raw, hist_by_mod)
+        results = devices_svc.build_device_status(bound, status_raw, hist_by_mod)
 
         lang = session.get('lang') or wa._DEFAULT_LANG
         meta = {mod: history_svc.history_meta(wa._modules_dir, mod, lang, wa._var_dir or '')
@@ -194,11 +194,11 @@ def register(app, wa):
         named = {mod: (m or {}).get('sources') or {} for mod, m in meta.items()}
         said = infra_svc.sources_of(fields, named)
         # …and who made this one, off the scan the page has already taken. Through
-        # `enrich_hosts` and not by hand: it is the one place that knows the device's word is
+        # `enrich_devices` and not by hand: it is the one place that knows the device's word is
         # allowed to answer `auto` and never to overrule a setting somebody chose, and a second
         # copy of that rule here is the copy that would drift. The two reads it needs are the
         # ones taken above, so this pass is dict work.
-        hosts_svc.enrich_hosts([record], statuses, bound_mods,
+        devices_svc.enrich_devices([record], statuses, bound_mods,
                                infra_svc.fleet_identity(status_raw, [record], said))
         # What to call a module that groups nothing — its own name, out of its own lang
         # file, so the core still holds no string naming one.
@@ -207,12 +207,12 @@ def register(app, wa):
         # makes withholding it possible at all: the measurements and the attributes below are
         # what Details draws, so they go whatever the other tab flags say. A flag that looks
         # like a wall and is a curtain is worse than none — see the domain manifest.
-        return jsonify({'host':       infra_svc.fleet_row(record),
+        return jsonify({'device':     infra_svc.fleet_row(record),
                         'results':    results if 'infra_results_view' in perms else [],
                         'metrics':    infra_svc.metrics(results, fields, names),
                         'attributes': infra_svc.attributes(results, said)})
 
-    @app.route('/api/v1/infra/hosts/<uid>/watch', methods=['POST'])
+    @app.route('/api/v1/infra/devices/<uid>/watch', methods=['POST'])
     @infra_watch_req
     def api_infra_watch(uid):
         """Say that one row of this machine is worth an alert, or stop saying it.
@@ -228,10 +228,10 @@ def register(app, wa):
         permission of its own. The narrowing every other route here applies still applies: a
         machine you may not see is not a machine you may set a flag on.
         """
-        store = getattr(wa, '_hosts_store', None)
+        store = getattr(wa, '_devices_store', None)
         record = store.get(uid, decrypt=False) if store is not None else None
         if not record:
-            return jsonify({'error': wa._t('host_not_found')}), 404
+            return jsonify({'error': wa._t('device_not_found')}), 404
         if not _may_see(uid, set(wa._get_session_permissions() or [])):
             return jsonify({'error': wa._t('access_denied')}), 403
         body = request.get_json(silent=True) or {}
@@ -243,11 +243,11 @@ def register(app, wa):
         # …and what the row IS, when the screen says so. Checked against the store's own
         # vocabulary rather than passed through: a word the core does not act on is a mark that
         # reads as a promise and does nothing.
-        role = host_store_mod.HostsStore.watch_role(body.get('role'))
+        role = device_store_mod.DevicesStore.watch_role(body.get('role'))
         actor = session.get('username', '')
         if not store.set_watch(uid, module, row, on, role=role, actor=actor):
             return jsonify({'error': wa._t('save_failed')}), 500
-        wa._audit('infra_watch', detail={'host': record.get('name') or uid,
+        wa._audit('infra_watch', detail={'device': record.get('name') or uid,
                                          'module': module, 'row': row,
                                          'role': role, 'on': bool(on)})
         return jsonify({'ok': True, 'watch': (store.get(uid, decrypt=False) or {}).get('watch')})
@@ -333,7 +333,7 @@ def register(app, wa):
     def _modules_to_collect(uid, record=None):
         """The enabled modules with at least one enabled check bound to this machine.
 
-        The modules are then RUN narrowed to this machine (``_run_checks(only_host=…)``), which
+        The modules are then RUN narrowed to this machine (``_run_checks(only_device=…)``), which
         is what the button says it does. It did not always: a module ran with its whole
         configuration, because the monitor prunes from the state it just wrote every key the
         run did not report (``monitor._prune_orphan_status``) — so a narrowed run would have
@@ -362,15 +362,15 @@ def register(app, wa):
         # A device the registry alone makes a device has no item to be enabled, and refusing
         # to collect it would be the button saying "nothing to run" about a machine whose
         # numbers are on the screen behind it.
-        out |= {bare for bare in hosts_svc.host_sampled_keys(wa._read_check_status(), uid)
+        out |= {bare for bare in devices_svc.device_sampled_keys(wa._read_check_status(), uid)
                 if _enabled(bare)}
         # …and one that has never been sampled has recorded nothing to be found that way. The
         # line above reads the RESULTS, so it can only name a module that has already run:
         # a device whose module item was removed a minute ago, and which the registry alone
         # now makes a device, offered its ping and left out the collection that is the reason
-        # anybody pressed the button. What the host's own record DECLARES answers before the
+        # anybody pressed the button. What the device's own record DECLARES answers before the
         # first cycle, which is when it is asked.
-        out |= {bare for bare in host_profiles.profile_sampled_modules(record or {})
+        out |= {bare for bare in device_profiles.profile_sampled_modules(record or {})
                 if _enabled(bare)}
         return sorted(out)
 
@@ -398,12 +398,12 @@ def register(app, wa):
                     return bool(cfg.get('enabled', True))
             return True
 
-        store = getattr(wa, '_hosts_store', None)
+        store = getattr(wa, '_devices_store', None)
         try:
-            hosts = store.list(decrypt=False) if store is not None else []
+            devices = store.list(decrypt=False) if store is not None else []
         except Exception:                       # pylint: disable=broad-except
-            hosts = []
-        uids = {str((h or {}).get('uid') or '').strip() for h in hosts or ()}
+            devices = []
+        uids = {str((h or {}).get('uid') or '').strip() for h in devices or ()}
         uids.discard('')
         if not uids:
             return []
@@ -413,16 +413,16 @@ def register(app, wa):
 
             BOTH bindings, because there are two and the second is not a special case: a
             cluster check — a keepalived VIP, a Proxmox cluster — is ONE item bound to several
-            machines through ``host_uids``, which is the core's own convention (host_binding,
-            authz and the permission service all key on it). Read only as ``host_uid`` it
+            machines through ``device_uids``, which is the core's own convention (device_binding,
+            authz and the permission service all key on it). Read only as ``device_uid`` it
             binds to nothing, so a module watching eight machines on this very screen was left
             out of the button that says it collects them.
             """
             if not isinstance(item, dict) or item.get('enabled') is False:
                 return False
-            if str(item.get('host_uid') or '').strip() in uids:
+            if str(item.get('device_uid') or '').strip() in uids:
                 return True
-            many = item.get('host_uids')
+            many = item.get('device_uids')
             return isinstance(many, list) and any(str(u).strip() in uids for u in many)
 
         out = set()
@@ -443,10 +443,10 @@ def register(app, wa):
         # The devices the REGISTRY alone makes devices: no item anywhere to be found above,
         # and the numbers on the screen behind the button come from them.
         status_raw = wa._read_check_status()
-        for host in hosts or ():
-            out |= {b for b in host_profiles.profile_sampled_modules(host) if _enabled(b)}
-            out |= {b for b in hosts_svc.host_sampled_keys(
-                status_raw, str((host or {}).get('uid') or '')) if _enabled(b)}
+        for device in devices or ():
+            out |= {b for b in device_profiles.profile_sampled_modules(device) if _enabled(b)}
+            out |= {b for b in devices_svc.device_sampled_keys(
+                status_raw, str((device or {}).get('uid') or '')) if _enabled(b)}
         return sorted(out)
 
     @app.route('/api/v1/infra/collect', methods=['POST'])
@@ -454,7 +454,7 @@ def register(app, wa):
     def api_infra_collect_all():
         """Collect from the WHOLE fleet, from the list rather than from one machine.
 
-        The per-device button narrows its run to that device (`only_host`), which is what
+        The per-device button narrows its run to that device (`only_device`), which is what
         makes it quick and what keeps it from walking somebody else's rack. This is the other
         question — "refresh everything" — and it is the un-narrowed run: every module with its
         whole configuration, which is what a scheduler cycle is. The orphan prune therefore
@@ -485,7 +485,7 @@ def register(app, wa):
             raise
         return jsonify({'ok': True, 'job_id': job_id, 'modules': modules})
 
-    @app.route('/api/v1/infra/hosts/<uid>/collect', methods=['POST'])
+    @app.route('/api/v1/infra/devices/<uid>/collect', methods=['POST'])
     @infra_collect_req
     def api_infra_collect(uid):
         """Run this machine's checks now, so the screen stops showing an hour-old answer.
@@ -510,10 +510,10 @@ def register(app, wa):
         be CLOSED without cancelling anything: nothing about the run depends on somebody
         watching it.
         """
-        store = getattr(wa, '_hosts_store', None)
+        store = getattr(wa, '_devices_store', None)
         record = store.get(uid, decrypt=False) if store is not None else None
         if not record:
-            return jsonify({'error': wa._t('host_not_found')}), 404
+            return jsonify({'error': wa._t('device_not_found')}), 404
         if not _may_see(uid, set(wa._get_session_permissions() or [])):
             return jsonify({'error': wa._t('access_denied')}), 403
         modules = _modules_to_collect(uid, record)
@@ -528,7 +528,7 @@ def register(app, wa):
         # "there is nothing to collect", and that answer does not depend on where the module
         # code lives: the configuration this reads comes from the database.
         #
-        # So a host nobody watches answered 500 "Modules directory not configured", which
+        # So a device nobody watches answered 500 "Modules directory not configured", which
         # reads as a broken server and is neither the truth nor actionable. Found by the
         # integration suite, which had never been run against this route: three of its tests
         # asked for 409 and got 500, and had done so since the route was written.
@@ -581,7 +581,7 @@ def register(app, wa):
     def api_infra_collect_status(job_id):
         """How the collection is going: which modules have landed and which are still out.
 
-        Behind ``infra_collect`` and not ``infra_view``, and then narrowed AGAIN to the host
+        Behind ``infra_collect`` and not ``infra_view``, and then narrowed AGAIN to the device
         the job belongs to. A job id is a short random string, but "hard to guess" is not a
         permission — without the second check, anyone who could poll would learn the name of
         a machine they are not allowed to see, from the job of somebody who is.

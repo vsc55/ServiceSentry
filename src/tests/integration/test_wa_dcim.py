@@ -63,11 +63,11 @@ def fleet(client):
     client.post('/api/v1/orgs/owner', json={'scope': 'site', 'uid': site, 'org_uid': it})
     mine = client.post('/api/v1/dcim/items',
                        json={'rack_uid': rack, 'u_start': 1, 'u_height': 1,
-                             'label': 'SW-CORE', 'host_uid': 'h-sw'}).get_json()['uid']
+                             'label': 'SW-CORE', 'device_uid': 'h-sw'}).get_json()['uid']
     theirs = client.post('/api/v1/dcim/items',
                          json={'rack_uid': rack, 'u_start': 12, 'u_height': 2,
                                'label': 'DB03-NOMINAS', 'serial': 'SECRETO-1',
-                               'host_uid': 'h-db03'}).get_json()['uid']
+                               'device_uid': 'h-db03'}).get_json()['uid']
     client.post('/api/v1/orgs/owner', json={'scope': 'item', 'uid': theirs, 'org_uid': b})
     return {'it': it, 'b': b, 'site': site, 'room': room, 'rack': rack,
             'mine': mine, 'theirs': theirs}
@@ -759,21 +759,21 @@ class TestLasZonasHorarias:
 
 class TestEnlazarUnItemConSuMaquina:
     """Sin esto el alzado sale gris entero, que es tanto como no tenerlo: el color en vivo lee
-    `host_uid`, y `host_uid` no se podía escribir desde ninguna parte.
+    `device_uid`, y `device_uid` no se podía escribir desde ninguna parte.
 
     La lista de máquinas es **de este dominio** y no la de Infraestructura, por dos motivos que
     empujan igual: aquélla va tras `infra_view`, que quien ordena armarios no tiene por qué
     tener; y devuelve la forma entera de una máquina, de la que esto necesita cuatro campos."""
 
     def _host(self, client, name='DB03'):
-        r = client.post('/api/v1/hosts', json={'name': name, 'address': '10.0.0.9'})
+        r = client.post('/api/v1/devices', json={'name': name, 'address': '10.0.0.9'})
         assert r.status_code == 200, r.get_json()
         return r.get_json()['uid']
 
     def test_ofrece_las_maquinas_del_registro(self, client, fleet):
         _login(client)
         uid = self._host(client)
-        rows = client.get('/api/v1/dcim/hosts').get_json()['hosts']
+        rows = client.get('/api/v1/dcim/devices').get_json()['devices']
         assert uid and any(h['uid'] == uid and h['name'] == 'DB03' for h in rows)
 
     def test_y_solo_cuatro_campos_de_cada_una(self, client, fleet):
@@ -781,7 +781,7 @@ class TestEnlazarUnItemConSuMaquina:
         lo que cuesta la pantalla de la flota."""
         _login(client)
         self._host(client)
-        rows = client.get('/api/v1/dcim/hosts').get_json()['hosts']
+        rows = client.get('/api/v1/dcim/devices').get_json()['devices']
         assert set(rows[0]) == {'uid', 'name', 'address', 'device_type'}
 
     def test_un_rol_acotado_solo_ve_las_suyas(self, admin, client, fleet):
@@ -789,17 +789,17 @@ class TestEnlazarUnItemConSuMaquina:
         _login(client)
         self._host(client)
         c = _as(admin, 'sin-registro', ['dcim_view', 'orgs_all_view'])
-        assert c.get('/api/v1/dcim/hosts').get_json()['hosts'] == []
+        assert c.get('/api/v1/dcim/devices').get_json()['devices'] == []
 
     def test_y_enlazado_el_item_lo_devuelve(self, client, fleet):
         _login(client)
         uid = self._host(client, 'SW-CORE-2')
         item = client.post('/api/v1/dcim/items',
                            json={'rack_uid': fleet['rack'], 'u_start': 20,
-                                 'host_uid': uid}).get_json()['uid']
+                                 'device_uid': uid}).get_json()['uid']
         items = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}').get_json()['items']
         fila = [i for i in items if i['uid'] == item][0]
-        assert fila['host_uid'] == uid
+        assert fila['device_uid'] == uid
         # …y con él llega el estado, que es todo el sentido del enlace. Sin checks todavía no
         # hay ninguno, y eso NO es «bien»: es que nadie lo mira.
         assert fila['state'] == ''
@@ -998,13 +998,13 @@ class TestElCuadroDeMando:
         tenía que preguntárselo, y no lo hacía."""
         from lib.core.dcim import service as dcim_svc
         _login(client)
-        host = client.post('/api/v1/hosts',
+        host = client.post('/api/v1/devices',
                            json={'name': 'DB03', 'address': '10.0.0.9'}).get_json()['uid']
         client.post('/api/v1/dcim/items', json={'rack_uid': fleet['rack'], 'u_start': 20,
-                                                'host_uid': host})
+                                                'device_uid': host})
         monkeypatch.setattr(dcim_svc, 'states_for', lambda wa, perms: {host: 'error'})
         b = client.get('/api/v1/dcim/board').get_json()
-        fila = [r for r in b['trouble'] if r['host_uid'] == host][0]
+        fila = [r for r in b['trouble'] if r['device_uid'] == host][0]
         assert fila['name'] == 'DB03', fila
 
     def test_y_no_el_de_una_maquina_que_este_lector_no_ve(self, admin, client, fleet,
@@ -1013,10 +1013,10 @@ class TestElCuadroDeMando:
         del vecino por la puerta de atrás."""
         from lib.core.dcim import service as dcim_svc
         _login(client)
-        host = client.post('/api/v1/hosts',
+        host = client.post('/api/v1/devices',
                            json={'name': 'DB03', 'address': '10.0.0.9'}).get_json()['uid']
         client.post('/api/v1/dcim/items', json={'rack_uid': fleet['rack'], 'u_start': 20,
-                                                'host_uid': host})
+                                                'device_uid': host})
         monkeypatch.setattr(dcim_svc, 'states_for', lambda wa, perms: {host: 'error'})
         c = _as(admin, 'sin-registro', ['dcim_view', 'orgs_all_view'])
         b = c.get('/api/v1/dcim/board').get_json()
@@ -1381,15 +1381,15 @@ class TestElColorYLaMaquinaDeUnaRegleta:
 
     def test_una_regleta_se_enlaza_con_una_maquina(self, client, fleet):
         _login(client)
-        host = client.post('/api/v1/hosts', json={'name': 'PDU-RACK3', 'address': '10.0.0.9',
+        host = client.post('/api/v1/devices', json={'name': 'PDU-RACK3', 'address': '10.0.0.9',
                                                   'enabled': True}).get_json()
         uid = client.post('/api/v1/dcim/pdus',
                           json={'rack_uid': fleet['rack'], 'feed': 'a'}).get_json()['uid']
         hid = host.get('uid') or (host.get('data') or {}).get('uid')
-        client.put(f'/api/v1/dcim/pdus/{uid}', json={'host_uid': hid})
+        client.put(f'/api/v1/dcim/pdus/{uid}', json={'device_uid': hid})
         p = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}/power').get_json()
         fila = [x for x in p['pdus'] if x['uid'] == uid][0]
-        assert fila['host_uid'] == hid
+        assert fila['device_uid'] == hid
         # …y con la máquina llega el estado, que es todo el sentido del enlace. Sin checks
         # todavía no hay ninguno, y eso NO es «bien»: es que nadie la mira.
         assert fila['state'] == ''
@@ -1397,10 +1397,10 @@ class TestElColorYLaMaquinaDeUnaRegleta:
     def test_y_se_puede_desenlazar(self, client, fleet):
         _login(client)
         uid = client.post('/api/v1/dcim/pdus',
-                          json={'rack_uid': fleet['rack'], 'host_uid': 'h-x'}).get_json()['uid']
-        client.put(f'/api/v1/dcim/pdus/{uid}', json={'host_uid': ''})
+                          json={'rack_uid': fleet['rack'], 'device_uid': 'h-x'}).get_json()['uid']
+        client.put(f'/api/v1/dcim/pdus/{uid}', json={'device_uid': ''})
         p = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}/power').get_json()
-        assert [x for x in p['pdus'] if x['uid'] == uid][0]['host_uid'] == ''
+        assert [x for x in p['pdus'] if x['uid'] == uid][0]['device_uid'] == ''
 
 
 class TestElCableadoDeclarado:
@@ -4751,7 +4751,7 @@ class TestLaBusquedaDeEquiposSabeNombrarlos:
         assert fila['label'] == '', 'la prueba deja de probar lo que probaba'
         assert fila['type_name'] == 'Generico Regleta 8'
         assert fila['role'] == 'pdu'
-        assert 'host_uid' in fila
+        assert 'device_uid' in fila
 
     def test_y_se_puede_buscar_por_el_modelo(self, admin, client):
         """De lo que no está rotulado, el modelo es lo único que alguien sabe."""

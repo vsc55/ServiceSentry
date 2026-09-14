@@ -8,7 +8,7 @@ MIBs perhaps weekly, and with a single interval that cannot be said without copy
 the pace of the most demanding part, which is how a disk fills.
 
 A table and not `config.json`, because a task is a RECORD, not a setting: it is created,
-renamed, disabled and deleted one at a time, like a webhook or a host. `spec.py` holds scalars
+renamed, disabled and deleted one at a time, like a webhook or a device. `spec.py` holds scalars
 an operator tunes; a list of things an operator keeps belongs where the other lists are.
 
 Schema::

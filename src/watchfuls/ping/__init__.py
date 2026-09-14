@@ -88,8 +88,8 @@ class Watchful(IcmpClient, ModuleBase):
                     # If 'enabled' is not specified, default to the module's default enabled state.
                     # If 'host' is not specified, default to the key.
                     # Host-centric: if the item references a host, its address is
-                    # merged in (resolve_host is a no-op for inline items).
-                    value = self.resolve_host(value)
+                    # merged in (resolve_device is a no-op for inline items).
+                    value = self.resolve_device(value)
                     is_enabled = value.get("enabled", is_enabled)
                     host = (value.get('host', '') or '').strip() or key
                     self._debug(f"Check: {host} - Enabled: {is_enabled}", DebugLevel.info)

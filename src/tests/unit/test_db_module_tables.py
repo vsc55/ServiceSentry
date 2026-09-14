@@ -110,7 +110,7 @@ class TestReconcile:
         Through the CORE reconciler: the library stopped being a module\'s, so its tables
         lost the `mod_` namespace with it. A module\'s prefix exists so two modules cannot
         collide; the core is one namespace already, and `snmp_mib_versions` sits beside
-        `hosts` and `history` because that is what it is."""
+        `devices` and `history` because that is what it is."""
         from lib.db import reconcile_core_tables          # noqa: PLC0415
         con = get_connector(None, default_sqlite_path=':memory:')
         assert 'snmp_mib_versions' in reconcile_core_tables(con)

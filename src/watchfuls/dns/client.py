@@ -215,7 +215,7 @@ def _remote_dns_cmd(os_: str, host: str, record_type: str, nameserver: str, time
     Unix uses ``dig`` (clean, parseable); Windows uses ``nslookup``.  The
     nameserver, when given, directs the query at that server."""
     if os_ == 'windows':
-        # cmd.exe (host_exec shell=True): double-quote to neutralise & | < > ^; strip
+        # cmd.exe (device_exec shell=True): double-quote to neutralise & | < > ^; strip
         # embedded quotes so a config value can't break out and inject a command. (Does not
         # stop %VAR% expansion — no RCE, value is admin/config-controlled.)
         def _wq(s):

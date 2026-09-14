@@ -53,7 +53,7 @@ class TestMergeHostConn:
     """_merge_host_conn fills a module's connection fields from the bound host."""
 
     def test_fills_address_and_ssh(self):
-        from lib.core.modules.actions import merge_host_conn
+        from lib.core.modules.actions import merge_device_conn
 
         class _WA:
             _modules_dir = None
@@ -61,23 +61,23 @@ class TestMergeHostConn:
                'host': '', 'ssh_host': '', 'ssh_user': '', 'ssh_password': ''}
         ctx = {'address': '10.0.0.5',
                'ssh': {'ssh_user': 'root', 'ssh_port': 22, 'ssh_password': 'p'}}
-        merge_host_conn(_WA(), 'datastore', cfg, ctx)
+        merge_device_conn(_WA(), 'datastore', cfg, ctx)
         assert cfg['host'] == '10.0.0.5'          # db address_field ← host address
         assert cfg['ssh_host'] == '10.0.0.5'      # ssh address_field ← host address
         assert cfg['ssh_user'] == 'root' and cfg['ssh_password'] == 'p'
 
     def test_explicit_check_value_wins(self):
-        from lib.core.modules.actions import merge_host_conn
+        from lib.core.modules.actions import merge_device_conn
 
         class _WA:
             _modules_dir = None
         cfg = {'db_type': 'mysql', 'host': 'explicit.db'}
-        merge_host_conn(_WA(), 'datastore', cfg, {'address': '10.0.0.5', 'ssh': {}})
+        merge_device_conn(_WA(), 'datastore', cfg, {'address': '10.0.0.5', 'ssh': {}})
         assert cfg['host'] == 'explicit.db'       # the check's own value is kept
 
 
 class TestResolveHostCtxCred:
-    """Host-aware discovery must resolve a host's named SSH credential (cred_uid),
+    """Host-aware discovery must resolve a device's named SSH credential (cred_uid),
     not only inline secrets — else disk/services/temperature discover get no data."""
 
     def test_ssh_cred_uid_is_resolved(self):
@@ -90,7 +90,7 @@ class TestResolveHostCtxCred:
                         if uid == 'cred1' else None)
 
         class _WA:
-            _hosts_store = None
+            _devices_store = None
             _credentials_store = _Cstore()
 
         cfg = {'_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
@@ -104,7 +104,7 @@ class TestResolveHostCtxCred:
         from lib.core.modules.actions import resolve_host_ctx
 
         class _WA:
-            _hosts_store = None
+            _devices_store = None
             _credentials_store = None
 
         cfg = {'_host': {'address': 'h', 'kind': 'remote', 'os': 'linux',
@@ -121,18 +121,18 @@ class TestActionsReachADeviceThatIsNotReachedOverSsh:
 
     class _WA:
         _modules_dir = None
-        _hosts_store = None
+        _devices_store = None
         _credentials_store = None
         _secret_keys = frozenset({'community', 'snmpv3_auth_key'})
 
     def test_snmp_connection_comes_from_the_snmp_profile(self):
-        from lib.core.modules.actions import merge_host_conn
+        from lib.core.modules.actions import merge_device_conn
 
         cfg = {'device_profiles': 'sys_generic'}
         ctx = {'address': '10.0.0.9', 'ssh': {},
                'profiles': {'snmp': {'community': 'sec', 'version': '2c', 'port': 1161},
                             'ssh':  {'ssh_user': 'root'}}}
-        merge_host_conn(self._WA(), 'snmp', cfg, ctx)
+        merge_device_conn(self._WA(), 'snmp', cfg, ctx)
         assert cfg['host'] == '10.0.0.9'          # address_field ← the host address
         assert cfg['community'] == 'sec'
         assert cfg['version'] == '2c' and cfg['port'] == 1161
@@ -141,30 +141,30 @@ class TestActionsReachADeviceThatIsNotReachedOverSsh:
         assert 'ssh_user' not in cfg
 
     def test_what_the_form_holds_still_wins(self):
-        from lib.core.modules.actions import merge_host_conn
+        from lib.core.modules.actions import merge_device_conn
 
         cfg = {'community': 'typed-just-now'}
         ctx = {'address': '10.0.0.9', 'ssh': {},
                'profiles': {'snmp': {'community': 'stored'}}}
-        merge_host_conn(self._WA(), 'snmp', cfg, ctx)
+        merge_device_conn(self._WA(), 'snmp', cfg, ctx)
         assert cfg['community'] == 'typed-just-now'
 
     def test_the_host_profile_credential_is_carried_over(self):
-        from lib.core.modules.actions import merge_host_conn
+        from lib.core.modules.actions import merge_device_conn
 
         cfg = {}
         ctx = {'address': '10.0.0.9', 'ssh': {},
                'profiles': {'snmp': {'cred_uid': 'snmp-ro'}}}
-        merge_host_conn(self._WA(), 'snmp', cfg, ctx)
+        merge_device_conn(self._WA(), 'snmp', cfg, ctx)
         # Named, not applied here: apply_cred_to_config overlays it afterwards, so the
         # credential still wins over anything filled in from the profile.
         assert cfg['cred_uid'] == 'snmp-ro'
 
     def test_a_ctx_built_without_profiles_still_fills_ssh(self):
-        from lib.core.modules.actions import merge_host_conn
+        from lib.core.modules.actions import merge_device_conn
 
         cfg = {'db_type': 'mysql', 'conn_type': 'ssh', 'ssh_user': ''}
-        merge_host_conn(self._WA(), 'datastore', cfg,
+        merge_device_conn(self._WA(), 'datastore', cfg,
                         {'address': '10.0.0.5', 'ssh': {'ssh_user': 'root'}})
         assert cfg['ssh_user'] == 'root'
 
@@ -181,9 +181,9 @@ class TestActionsReachADeviceThatIsNotReachedOverSsh:
                         if uid == 'h1' else None)
 
         class _WA(TestActionsReachADeviceThatIsNotReachedOverSsh._WA):
-            _hosts_store = _Hosts()
+            _devices_store = _Hosts()
 
-        cfg = {'host_uid': 'h1',
+        cfg = {'device_uid': 'h1',
                '_host': {'address': '10.0.0.9', 'kind': 'local', 'os': 'auto',
                          'profiles': {'snmp': {'community': None, 'version': '3'}}}}
         ctx = resolve_host_ctx(_WA(), cfg)

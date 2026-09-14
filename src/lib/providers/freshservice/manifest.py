@@ -66,7 +66,7 @@ ORG_ACTIONS = [
 #
 # `devices_edit` y no `orgs_edit`: esto crea fichas en el registro de máquinas. Quien lleva las
 # sociedades no tiene por qué poder dar de alta cuarenta servidores, y al revés tampoco.
-HOST_ACTIONS = [
+DEVICE_ACTIONS = [
     {'id': 'import', 'label_key': 'fs_import_hosts', 'tooltip_key': 'fs_import_hosts_tt',
      'icon': 'bi-cloud-download', 'variant': 'primary', 'order': 10,
      'perm': 'devices_edit', 'fn': 'freshserviceImportHosts',
@@ -82,7 +82,7 @@ HOST_ACTIONS = [
 #
 # Se puede pedir **sin traer un solo dispositivo**: el catálogo de tipos es un recurso aparte y
 # una sola llamada.
-HOST_TYPE_ACTIONS = [
+DEVICE_TYPE_ACTIONS = [
     {'id': 'import', 'label_key': 'fs_import_types', 'tooltip_key': 'fs_import_types_tt',
      'icon': 'bi-cloud-download', 'variant': 'secondary', 'order': 10,
      'perm': 'devices_edit', 'fn': 'freshserviceImportTypes',
@@ -103,7 +103,7 @@ HOST_TYPE_ACTIONS = [
 # De dónde vino un dispositivo, para que su ficha pueda decirlo con un nombre y un icono en vez
 # de con el identificador `freshservice`. Aparte de `ORG_SOURCES` porque son dos preguntas: un
 # proveedor puede traer las empresas y no los dispositivos.
-HOST_SOURCES = [
+DEVICE_SOURCES = [
     {'id': 'freshservice', 'label_key': 'fs_source', 'icon': 'bi-life-preserver'},
 ]
 
@@ -111,7 +111,7 @@ HOST_SOURCES = [
 # pantalla de clases enseña de dónde salió cada una, y ningún texto del core nombra a un
 # proveedor. Se reutiliza el de arriba en vez de declarar un tercero — es el mismo origen
 # diciendo el mismo nombre, y dos declaraciones son dos que se separan.
-HOST_TYPE_SOURCES = HOST_SOURCES
+DEVICE_TYPE_SOURCES = DEVICE_SOURCES
 
 
 # Lo que este paquete escribe en el registro de auditoría, y cuánto pesa cada línea. Declarado y

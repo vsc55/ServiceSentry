@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """The last two table surfaces: Clusters, and fail2ban's two lists.
 
-**Clusters** exist for redundancy — one check bound to several hosts, so that a machine going
+**Clusters** exist for redundancy — one check bound to several devices, so that a machine going
 down does not take the check with it. The table lists them and counts their members, which
 reads fine and hides the two ways a cluster is a lie:
 
@@ -50,7 +50,7 @@ class TestTheScanItself:
 
     def test_the_registries_list_their_views(self):
         cl = _strip_comments(_read(CL_VIEWS))
-        for vid in ('table', 'cards', 'hosts'):
+        for vid in ('table', 'cards', 'devices'):
             assert f"id: '{vid}'" in cl, f'clusters: {vid} is not registered'
         ipb = _strip_comments(_read(IPB_VIEWS))
         for const, ids in (('IPBAN_BANS_VIEWS', ('table', 'networks')),
@@ -95,7 +95,7 @@ class TestClustersPivotOntoTheHost:
         assert '(b.clusters.length - a.clusters.length)' in body
 
     def test_it_offers_no_per_cluster_actions(self):
-        """Those act on a CLUSTER and this view is showing hosts; a button per row would
+        """Those act on a CLUSTER and this view is showing devices; a button per row would
         invite pressing it against the row in front of you."""
         assert '_clActionsHtml' not in _strip_comments(_read(CL_HOSTS))
 
@@ -109,7 +109,7 @@ class TestClustersPivotOntoTheHost:
 
     def test_no_view_invents_the_status(self):
         """A cluster must not look healthy in one view and broken in the one beside it."""
-        for name, path in (('cards', CL_CARDS), ('hosts', CL_HOSTS)):
+        for name, path in (('cards', CL_CARDS), ('devices', CL_HOSTS)):
             assert '_clStatusAgg(' not in _strip_comments(_read(path)), \
                 f'{name} aggregates the status itself instead of composing the badge'
 
@@ -124,7 +124,7 @@ class TestClustersPivotOntoTheHost:
         reg = src[src.index('const CLUSTER_VIEWS'):]
         reg = reg[:reg.index('];')]
         for line in reg.splitlines():
-            if "id: 'hosts'" in line:
+            if "id: 'devices'" in line:
                 assert "mode: 'summary'" in line
         lst = _strip_comments(_read(CL_LIST))
         assert 'bodyMode: () => _clView.mode()' in lst

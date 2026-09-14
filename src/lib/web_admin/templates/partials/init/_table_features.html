@@ -186,10 +186,10 @@ const modulesLi = document.getElementById('tab-modules-li');
 if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
 // Credentials is a section of its own, gated only by its own permissions: it stopped being
 // an Infrastructure sub-tab when half the catalogue became tenant-level app registrations
-// with no host behind them.
+// with no device behind them.
 const credentialsLi = document.getElementById('tab-credentials-li');
 if (credentialsLi) credentialsLi.style.display = hasAnyCredential ? '' : 'none';
-// Infrastructure tab (Servers + Cluster sub-tabs). Shows when the user can see hosts
+// Infrastructure tab (Servers + Cluster sub-tabs). Shows when the user can see devices
 // OR manage modules (cluster are multi-bind module checks).
 const hasAnyServer = ['devices_view','devices_edit','devices_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('server.'));
@@ -199,8 +199,8 @@ const hasAnyCluster = ['clusters_view','clusters_add','clusters_edit','clusters_
     || [...perms].some(p => p.startsWith('cluster.'));
 const serversLi = document.getElementById('tab-servers-li');
 if (serversLi) serversLi.style.display = (hasAnyServer || hasAnyModule || hasAnyCluster) ? '' : 'none';
-// Sub-tabs: Servers gated by host perms, Cluster by cluster perms.
-const stSrvHosts = document.getElementById('subtab-srv-hosts-li');
+// Sub-tabs: Servers gated by device perms, Cluster by cluster perms.
+const stSrvHosts = document.getElementById('subtab-srv-devices-li');
 if (stSrvHosts) stSrvHosts.style.display = hasAnyServer ? '' : 'none';
 const stSrvClusters = document.getElementById('subtab-srv-clusters-li');
 if (stSrvClusters) stSrvClusters.style.display = hasAnyCluster ? '' : 'none';
@@ -216,11 +216,11 @@ const _savedInfra = localStorage.getItem('ss_active_subtab_infra');
 const _savedInfraBtn = _savedInfra ? document.querySelector(`[data-bs-target="${_savedInfra}"]`) : null;
 const _activeInfra = (_savedInfraBtn && _savedInfraBtn.closest('li')?.style.display !== 'none')
     ? _savedInfraBtn
-    : ['btn-subtab-srv-hosts','btn-subtab-srv-types','btn-subtab-srv-clusters']
+    : ['btn-subtab-srv-devices','btn-subtab-srv-types','btn-subtab-srv-clusters']
         .map(id => document.getElementById(id))
         .find(btn => btn && btn.closest('li')?.style.display !== 'none');
 if (_activeInfra) bootstrap.Tab.getOrCreateInstance(_activeInfra).show();
-// (New host / Migrate buttons now live inside the JS-rendered Servers card,
+// (New device / Migrate buttons now live inside the JS-rendered Servers card,
 //  gated there by devices_edit — see renderServers.)
 // Config tab
 const configLi = document.getElementById('tab-config-li');

@@ -75,9 +75,9 @@ def build_manifest(client_id: str, *, public_url: str = '', app_name: str = APP_
         pub = 'https://' + pub.split('://', 1)[-1]     # tabs require an https contentUrl
     tab_url = pub or 'https://teams.microsoft.com'
     valid_domains = []
-    host = tab_url.split('://', 1)[-1].split('/', 1)[0]
-    if host and host != 'teams.microsoft.com':
-        valid_domains.append(host)
+    device = tab_url.split('://', 1)[-1].split('/', 1)[0]
+    if device and device != 'teams.microsoft.com':
+        valid_domains.append(device)
     return {
         '$schema': 'https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json',
         'manifestVersion': '1.16',

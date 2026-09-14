@@ -48,13 +48,15 @@ _SOURCE = TableSpec(
         Column('autonomy_min', 'INTEGER', nullable=False, default='0'),
         # Y si contesta. Un SAI gestionado dice si está en batería AHORA, que es la mitad
         # medida de todo esto.
-        Column('host_uid', 'TEXT', nullable=False, default="''"),
+        Column('device_uid', 'TEXT', nullable=False, default="''"),
         Column('description', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_source_site', ('site_uid',)),),
+    # Se llamaba `host_uid`. `reconcile_table` lo aplica antes de comparar, con los datos dentro.
+    renames={'host_uid': 'device_uid'},
 )
 
 #: El color de cada rama cuando la regleta no dice otro. Azul y rojo porque es como se etiqueta
@@ -97,10 +99,10 @@ _PDU = TableSpec(
         Column('outlets',  'INTEGER', nullable=False, default='0'),
         # Lo que aguanta, en vatios. El límite del que hay que quedarse lejos, no el objetivo.
         Column('capacity_w', 'INTEGER', nullable=False, default='0'),
-        # Una PDU gestionada ES un host: contesta por SNMP y dice cuántos amperios está dando
+        # Una PDU gestionada ES un device: contesta por SNMP y dice cuántos amperios está dando
         # AHORA. Cuando lo es tenemos las dos mitades —lo declarado y lo medido— y el desacuerdo
         # entre ellas es la razón de que este panel exista.
-        Column('host_uid', 'TEXT', nullable=False, default="''"),
+        Column('device_uid', 'TEXT', nullable=False, default="''"),
         Column('description', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
@@ -128,6 +130,8 @@ _PDU = TableSpec(
         Column('item_uid', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_pdu_rack', ('rack_uid',)),),
+    # Se llamaba `host_uid`. `reconcile_table` lo aplica antes de comparar, con los datos dentro.
+    renames={'host_uid': 'device_uid'},
 )
 
 _POWER = TableSpec(

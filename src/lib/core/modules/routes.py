@@ -80,7 +80,7 @@ def register(app, wa):
 
         Users with ``modules_edit`` may save any change.  Without it, each
         modified module is authorized individually: a ``module.{name}.edit``
-        grants the whole module, while host-bound item changes can be authorized
+        grants the whole module, while device-bound item changes can be authorized
         by per-server / global server permissions (server ``add`` to add a check,
         ``edit`` to modify/remove one).  New whole modules still need
         ``modules_add``; whole-module removal needs ``modules_delete``.
@@ -119,11 +119,11 @@ def register(app, wa):
         # stored with, and taken rather than read — the mark answers a question about this
         # write, and persisting it would turn it into a permanent property of the item.
         clone_marks = modules_items.take_clone_marks(data)
-        # Generic: provision/link a host for any item that declares one
-        # (__provision_host__ in its schema) — so address modules (ping/web/
+        # Generic: provision/link a device for any item that declares one
+        # (__provision_device__ in its schema) — so address modules (ping/web/
         # ssl_cert) can monitor that endpoint. Module-agnostic (discovery-driven).
         provisioned = modules_prov.sync_provisioned_hosts(
-            getattr(wa, '_hosts_store', None), getattr(wa, '_modules_dir', None),
+            getattr(wa, '_devices_store', None), getattr(wa, '_modules_dir', None),
             data, session.get('username', 'system'))
         if wa._save_modules(data):
             changes = wa._diff_dicts(
@@ -170,8 +170,8 @@ def register(app, wa):
                              - perms_svc.cluster_item_uids(data))
             if gone_clusters:
                 wa._purge_scoped_permissions('cluster', sorted(gone_clusters))
-            # Round-trip any new host links so the client persists them (a later
-            # save in this session then reuses the host instead of re-creating it).
+            # Round-trip any new device links so the client persists them (a later
+            # save in this session then reuses the device instead of re-creating it).
             return jsonify({'ok': True, 'provisioned': provisioned})
         return jsonify({'error': wa._t('save_file_error')}), 500
 
@@ -357,19 +357,19 @@ def register(app, wa):
                 # has to be able to say whose change it was, and the audit log answers that
                 # question somewhere else entirely — one row per action, not per record.
                 config['__user__'] = session.get('username', '')
-                # Host-aware discovery: resolve the bound host (address + SSH, server-side) so
+                # Device-aware discovery: resolve the bound device (address + SSH, server-side) so
                 # the action can run on it (local or over SSH).
-                host_ctx = modules_actions.resolve_host_ctx(wa, config)
-                if host_ctx is not None:
-                    config['__host__'] = host_ctx
-                    # Fill the module's connection fields (address + SSH) from the bound host so
-                    # actions like datastore's list_databases work on a host-bound check.
-                    modules_actions.merge_host_conn(wa, module_name, config, host_ctx)
+                device_ctx = modules_actions.resolve_host_ctx(wa, config)
+                if device_ctx is not None:
+                    config['__device__'] = device_ctx
+                    # Fill the module's connection fields (address + SSH) from the bound device so
+                    # actions like datastore's list_databases work on a device-bound check.
+                    modules_actions.merge_device_conn(wa, module_name, config, device_ctx)
                 # A referenced credential supplies the identity — overlay it last so it wins.
                 modules_actions.apply_cred_to_config(wa, config)
                 # …and again for the items INSIDE the config. A discovery scoped to a parent
                 # item posts that item nested under its collection, which is where its
-                # `host_uid` and `cred_uid` live: resolving only the top level handed the
+                # `device_uid` and `cred_uid` live: resolving only the top level handed the
                 # action an item with no address and no identity.
                 modules_actions.apply_item_identities(wa, module_name, config)
                 result = method(config)

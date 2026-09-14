@@ -185,7 +185,7 @@ function _dcimTroubleRow(r) {
     return `<tr role="button" onclick="_dcimBoardGoRack(${jsStr(r.rack_uid)})">
         <td style="width:1%"><span class="badge text-bg-${tone} fw-normal">${
             esc(_dcimStateWord(r.state))}</span></td>
-        <td class="fw-semibold">${esc(r.name || r.host_uid || t('dcim_item'))}</td>
+        <td class="fw-semibold">${esc(r.name || r.device_uid || t('dcim_item'))}</td>
         <td class="text-muted ss-fs-2">${esc(r.site)} <i class="bi bi-chevron-right ss-fs-1"></i>
             ${esc(r.room)} <i class="bi bi-chevron-right ss-fs-1"></i> ${esc(r.rack)}</td>
         <td class="text-muted ss-fs-2 ss-tabular" style="width:1%">${

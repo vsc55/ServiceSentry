@@ -84,15 +84,15 @@ class ClusterChecks:
 
     @staticmethod
     def _node_extra(node: str, node_host: dict) -> dict:
-        """Host identity to attach to a node's result (host_uid/host_name)."""
+        """Host identity to attach to a node's result (device_uid/device_name)."""
         m = (node_host or {}).get(node)
         if not isinstance(m, dict):
             return {}
         out = {}
-        if m.get('host_uid'):
-            out['host_uid'] = m['host_uid']
+        if m.get('device_uid'):
+            out['device_uid'] = m['device_uid']
         if m.get('name'):
-            out['host_name'] = m['name']
+            out['device_name'] = m['name']
         return out
 
     # ── Individual checks ─────────────────────────────────────────────────

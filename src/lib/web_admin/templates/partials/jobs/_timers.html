@@ -158,8 +158,8 @@ function _jobsTimerNext(r, now) {
 /** Dónde corre, con **tres** respuestas y no dos.
  *
  *      sin arriendo ....... en TODAS las réplicas
- *      lo sostiene ahora .. ese host
- *      lo sostuvo ......... ese host, en gris — que para un trabajo lento es lo NORMAL: un
+ *      lo sostiene ahora .. ese device
+ *      lo sostuvo ......... ese device, en gris — que para un trabajo lento es lo NORMAL: un
  *                           escaneo diario con arriendo de una hora lo tiene caducado el 96 %
  *                           del tiempo, y pintarlo en ámbar es una alarma que no dice nada
  *
@@ -169,10 +169,10 @@ function _jobsTimerWhere(r) {
     if (!r.lease)
         return `<span class="text-muted ss-fs-2"><i class="bi bi-diagram-3 me-1"></i>${
             esc(t('jobs_timers_everywhere'))}</span>`;
-    if (r.host || r.holder)
+    if (r.device || r.holder)
         return `<span class="font-monospace ss-fs-2${r.holding ? '' : ' text-muted'}"
                       title="${esc(r.holding ? '' : t('jobs_timers_last_held'))}"
-            >${esc(r.host || r.holder)}</span>`;
+            >${esc(r.device || r.holder)}</span>`;
     return r.state === 'running'
         ? `<span class="text-warning ss-fs-2">${esc(t('jobs_timers_nobody'))}</span>`
         : `<span class="text-muted">—</span>`;

@@ -3,14 +3,14 @@
 """The configuration a watchful ACTION runs with, resolved the way a scheduled check would.
 
 An action asked for from the UI (`/api/v1/modules/watchfuls/<module>/<action>`) is handed a
-config from a form, and a form does not carry what a scheduled run has: the bound host's
+config from a form, and a form does not carry what a scheduled run has: the bound device's
 address and SSH settings, the secrets the browser was never given, the credential the item
-merely references. Each of those is filled in here, mirroring what ``ModuleBase.resolve_host``
+merely references. Each of those is filled in here, mirroring what ``ModuleBase.resolve_device``
 does on the scheduler's side — because an action that behaves differently from the check it
 belongs to is worse than no action at all.
 
 Resolved TWICE, at two shapes: a flat form posted for the module, and the item nested under
-its collection when a discovery is scoped to one — the item is where `host_uid` and `cred_uid`
+its collection when a discovery is scoped to one — the item is where `device_uid` and `cred_uid`
 live, so the second pass is not a nicety.
 
 The one thing here that is not about the config going in is `cap_audit_lists`, which bounds
@@ -32,20 +32,20 @@ from .items import is_item_collection
 
 # ── watchful-action config resolution ────────────────────────────────────────────
 # Flask-free config resolution/merge for /api/v1/modules/watchfuls/<module>/<action>: resolve the
-# bound host (address + SSH, server-side), restore masked secrets, and overlay referenced
-# credentials — mirroring what ModuleBase.resolve_host does for a scheduled check.
+# bound device (address + SSH, server-side), restore masked secrets, and overlay referenced
+# credentials — mirroring what ModuleBase.resolve_device does for a scheduled check.
 def resolve_host_ctx(wa, config):
-    """Build a host-context dict for host-aware discovery, or None.
+    """Build a device-context dict for device-aware discovery, or None.
 
-    Resolved server-side so SSH secrets never come from the client: a ``host_uid`` is looked
-    up in the host registry (decrypted); a brand-new (unsaved) host may instead pass a
-    ``_host`` draft, whose masked secrets are restored from the stored host when a ``host_uid``
+    Resolved server-side so SSH secrets never come from the client: a ``device_uid`` is looked
+    up in the device registry (decrypted); a brand-new (unsaved) device may instead pass a
+    ``_host`` draft, whose masked secrets are restored from the stored device when a ``device_uid``
     is also given."""
-    from lib.core.hosts.resolve import resolve_os  # noqa: PLC0415
+    from lib.core.devices.resolve import resolve_os  # noqa: PLC0415
 
     def _apply_ssh_cred(ssh):
-        """Overlay a named SSH credential (ssh profile ``cred_uid``) — the host may reference
-        the credential manager instead of inline secrets, so host-aware discovery must resolve
+        """Overlay a named SSH credential (ssh profile ``cred_uid``) — the device may reference
+        the credential manager instead of inline secrets, so device-aware discovery must resolve
         it (like ModuleBase does for checks)."""
         ssh = dict(ssh or {})
         cred_uid = str(ssh.get('cred_uid') or '').strip()
@@ -65,7 +65,7 @@ def resolve_host_ctx(wa, config):
         is_remote = str(kind or 'local').strip().lower() == 'remote'
         # Web discovery can't probe a remote OS here → assume 'linux' for 'auto'.
         os_ = resolve_os(os_, is_remote, remote_auto='linux')
-        # EVERY protocol profile travels, not only ssh. A host carries one profile per
+        # EVERY protocol profile travels, not only ssh. A device carries one profile per
         # protocol it speaks, and an action's connection fields may come from any of them —
         # an SNMP action needs the device's community exactly as an SSH one needs its key.
         # While only ssh was carried, a widened profile handed the action the address and
@@ -76,11 +76,11 @@ def resolve_host_ctx(wa, config):
         return {'address': address or '', 'kind': kind or 'local', 'os': os_,
                 'ssh': profiles['ssh'], 'profiles': profiles}
 
-    store = getattr(wa, '_hosts_store', None)
-    uid = str(config.get('host_uid') or '').strip()
+    store = getattr(wa, '_devices_store', None)
+    uid = str(config.get('device_uid') or '').strip()
     if not uid:
-        # Multi-host (cluster) check: provision against the primary bound host.
-        uids = config.get('host_uids')
+        # Multi-device (cluster) check: provision against the primary bound device.
+        uids = config.get('device_uids')
         if isinstance(uids, list):
             uid = next((str(u).strip() for u in uids if str(u).strip()), '')
     stored = store.get(uid, decrypt=True) if (store and uid) else None
@@ -94,7 +94,7 @@ def resolve_host_ctx(wa, config):
             profiles['ssh'] = dict(draft['ssh'])
         if stored:
             # Restore every secret the client masked out, in every protocol — by the same
-            # field-name rule the host store itself uses, so a module's own secret field
+            # field-name rule the device store itself uses, so a module's own secret field
             # (an SNMP community, a token) is restored without core naming it.
             secret_manager.restore_sensitive(
                 profiles, stored.get('profiles') or {},
@@ -182,7 +182,7 @@ def apply_cred_to_config(wa, config):
     """Overlay every referenced credential's fields onto an action's *config*, so a web action
     (test_connection, provision_token…) authenticates with the stored credential — not an inline
     secret.  Applies the primary ``cred_uid`` plus any secondary ``*_cred_uid`` (e.g. a
-    credential-editor action's ``ssh_cred_uid``).  Mirrors ModuleBase.resolve_host; runs last so
+    credential-editor action's ``ssh_cred_uid``).  Mirrors ModuleBase.resolve_device; runs last so
     the credential wins."""
     cstore = getattr(wa, '_credentials_store', None)
     if cstore is None:
@@ -205,46 +205,46 @@ def apply_cred_to_config(wa, config):
                 config[k] = v
 
 
-def merge_host_conn(wa, module, config, host_ctx):
-    """Populate *config*'s connection fields from the bound host (its address and the profile
-    of EACH protocol the module declares), mirroring ModuleBase.resolve_host — so a web action
-    runs on a host-bound check whose own connection fields are empty.  An explicit value on the
+def merge_device_conn(wa, module, config, device_ctx):
+    """Populate *config*'s connection fields from the bound device (its address and the profile
+    of EACH protocol the module declares), mirroring ModuleBase.resolve_device — so a web action
+    runs on a device-bound check whose own connection fields are empty.  An explicit value on the
     check always wins; only blank/0/missing fields are filled.
 
     Each spec draws from its own protocol (``profiles[spec['key']]``), which is what
-    ``resolve_host`` does for a scheduled check.  Filling every spec from the SSH profile was
+    ``resolve_device`` does for a scheduled check.  Filling every spec from the SSH profile was
     survivable only while ssh was the one profile with fields to give: the moment another
     protocol carries credentials — an SNMP community, a device's port — the action got the
     address and nothing else, and failed as if the device had not answered.
 
-    Reads ``__host_profile__`` straight from the module schema (not module_host_specs, which
+    Reads ``__device_profile__`` straight from the module schema (not module_device_specs, which
     drops address-only profiles like datastore's 'db') so the address_field is filled even when
     its ``fields`` list is empty."""
-    from lib.core.hosts.resolve import host_profile_specs  # noqa: PLC0415
+    from lib.core.devices.resolve import device_profile_specs  # noqa: PLC0415
     try:
         base = wa._modules_dir or os.path.normpath(
             os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, 'watchfuls'))
         with open(os.path.join(base, module, 'schema.json'), encoding='utf-8') as fh:
-            hp = json.load(fh).get('__host_profile__')
+            hp = json.load(fh).get('__device_profile__')
     except Exception:  # pylint: disable=broad-except
         return
-    specs = host_profile_specs(hp)
-    address = host_ctx.get('address') or ''
-    profiles = host_ctx.get('profiles')
+    specs = device_profile_specs(hp)
+    address = device_ctx.get('address') or ''
+    profiles = device_ctx.get('profiles')
     if not isinstance(profiles, dict):      # a caller that built the ctx by hand
-        profiles = {'ssh': host_ctx.get('ssh') or {}}
+        profiles = {'ssh': device_ctx.get('ssh') or {}}
     for spec in specs:
         if not isinstance(spec, dict):
             continue
         address_field = spec.get('address_field')
-        # The address_field is filled from the host address even when not listed in `fields`
+        # The address_field is filled from the device address even when not listed in `fields`
         # (e.g. datastore 'host', web 'url' stay visible/editable) — only when the check left it
         # blank, so a per-check override wins.
         if address_field and address and config.get(address_field) in (None, '', 0):
             config[address_field] = address
         prof = profiles.get(spec.get('key'))
         prof = prof if isinstance(prof, dict) else {}
-        # The host's identity for this protocol, when the action names none — the credential
+        # The device's identity for this protocol, when the action names none — the credential
         # itself is overlaid afterwards by apply_cred_to_config, so it still wins over the
         # inline values filled here, exactly as it does on the scheduler's side.
         if not str(config.get('cred_uid') or '').strip() and prof.get('cred_uid'):
@@ -253,28 +253,28 @@ def merge_host_conn(wa, module, config, host_ctx):
             if config.get(f) not in (None, '', 0):
                 continue              # the check's own value wins
             if f in prof and prof[f] not in (None, ''):
-                config[f] = prof[f]   # ← this protocol's profile on the host
+                config[f] = prof[f]   # ← this protocol's profile on the device
 
 
 def apply_item_identities(wa, module, config):
-    """Resolve the bound host and the referenced credential for the ITEMS inside *config*.
+    """Resolve the bound device and the referenced credential for the ITEMS inside *config*.
 
     The top-level pass beside this one answers for an action posted as one flat form. A
     discovery scoped to a parent item is not that shape: the UI posts
     ``{module scalars…, "<collection>": {"<key>": {…the item…}}}``, and the item is where
-    ``host_uid`` and ``cred_uid`` live. Resolving only the top level left the action looking at
+    ``device_uid`` and ``cred_uid`` live. Resolving only the top level left the action looking at
     an item with an empty address and no identity at all.
 
     That is what "you launch OID discovery and get nothing back" was: the SNMP server took its
-    address from a bound host and its community from a credential, so the action saw
-    ``host: ''`` and skipped the server before sending a single packet — while the checks on
-    that same server ran fine, because the check path resolves per item (ModuleBase.resolve_host)
+    address from a bound device and its community from a credential, so the action saw
+    ``device: ''`` and skipped the server before sending a single packet — while the checks on
+    that same server ran fine, because the check path resolves per item (ModuleBase.resolve_device)
     and this one did not.
 
     Generic on purpose: every module whose discovery scopes to a parent item has the same
     shape, and the alternative is each of them reaching into the credential store on its own.
 
-    Same precedence as the top-level pass, deliberately: the bound host only FILLS what the
+    Same precedence as the top-level pass, deliberately: the bound device only FILLS what the
     item left blank (a per-check override is why that field stays editable), while the
     credential is applied last and WINS. The two passes must not differ — an action that
     authenticated one way when posted as a form and another when posted as an item is the
@@ -286,10 +286,10 @@ def apply_item_identities(wa, module, config):
         for item in coll.values():
             if not isinstance(item, dict):
                 continue
-            host_ctx = resolve_host_ctx(wa, item)
-            if host_ctx is not None:
-                merge_host_conn(wa, module, item, host_ctx)
-            # Last, so the credential wins over anything the host profile filled in.
+            device_ctx = resolve_host_ctx(wa, item)
+            if device_ctx is not None:
+                merge_device_conn(wa, module, item, device_ctx)
+            # Last, so the credential wins over anything the device profile filled in.
             apply_cred_to_config(wa, item)
 
 

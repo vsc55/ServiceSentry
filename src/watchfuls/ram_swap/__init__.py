@@ -24,8 +24,8 @@
 
 """Watchful to check RAM and SWAP usage on the bound host (local or over SSH).
 
-Host-centric: each check binds to a host (``host_uid``).  Memory stats are read
-on that host via :meth:`ModuleBase.host_exec` using an OS-appropriate command
+Host-centric: each check binds to a host (``device_uid``).  Memory stats are read
+on that host via :meth:`ModuleBase.device_exec` using an OS-appropriate command
 (``/proc/meminfo`` on Linux, ``wmic`` on Windows, ``vm_stat``/``sysctl`` on
 macOS, ``sysctl``/``swapinfo`` on FreeBSD) and compared with per-check
 thresholds.
@@ -86,11 +86,11 @@ class Watchful(ModuleBase):
         return v if 0 <= v <= 100 else int(default)
 
     def _mem_check(self, key, raw):
-        item = self.resolve_host(raw)
-        if item.get('_host_maintenance') or not item.get('enabled', True):
+        item = self.resolve_device(raw)
+        if item.get('_device_maintenance') or not item.get('enabled', True):
             return
         label = (item.get('label') or '').strip() or key
-        os_ = self.host_os(item)
+        os_ = self.device_os(item)
         if os_ not in _MEM_CMDS:
             self.dict_return.set(f'{key}_ram', False,
                                  self._msg('mem_unsupported_os', label, os_),
@@ -99,7 +99,7 @@ class Watchful(ModuleBase):
         timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         outs = []
         for cmd in _MEM_CMDS[os_]:
-            out, err, code = self.host_exec(item, cmd, timeout=timeout)
+            out, err, code = self.device_exec(item, cmd, timeout=timeout)
             if code != 0 and not out:
                 raise OSError((err or '').strip() or f'memory query exited {code}')
             outs.append(out)

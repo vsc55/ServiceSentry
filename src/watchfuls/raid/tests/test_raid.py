@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """Tests for watchfuls/raid — host-centric RAID (mdstat) monitoring.
 
-Each check binds to a host (``host_uid``); ``/proc/mdstat`` is read on that host
-via ``host_exec`` (local or over SSH) and parsed by ``RaidMdstat.parse_lines``.
-``host_exec`` is mocked here so no real command/SSH runs; the parser runs for
+Each check binds to a host (``device_uid``); ``/proc/mdstat`` is read on that host
+via ``device_exec`` (local or over SSH) and parsed by ``RaidMdstat.parse_lines``.
+``device_exec`` is mocked here so no real command/SSH runs; the parser runs for
 real against canned mdstat text.
 """
 
@@ -15,8 +15,8 @@ from conftest import create_mock_monitor
 
 
 class _FakeStore:
-    def __init__(self, hosts):
-        self._h = hosts
+    def __init__(self, devices):
+        self._h = devices
     def get(self, uid, **_kw):
         return self._h.get(uid)
 
@@ -27,10 +27,10 @@ def _host(uid='h1', os='linux', kind='remote', maintenance=False):
             'profiles': {'ssh': {'ssh_user': 'root'}}}
 
 
-def _watchful(items, hosts=None):
+def _watchful(items, devices=None):
     from watchfuls.raid import Watchful
     mm = create_mock_monitor({'watchfuls.raid': {'list': items}})
-    mm._hosts_store = _FakeStore(hosts or {'h1': _host()})
+    mm._devices_store = _FakeStore(devices or {'h1': _host()})
     return Watchful(mm)
 
 
@@ -94,7 +94,7 @@ class TestRaidDefaults:
     def test_schema_is_host_centric(self):
         from watchfuls.raid import Watchful
         sch = Watchful.ITEM_SCHEMA
-        assert '__host_profile__' in sch and sch['__host_profile__']['key'] == 'ssh'
+        assert '__device_profile__' in sch and sch['__device_profile__']['key'] == 'ssh'
         assert 'local' not in sch['__module__']        # dropped: use a local host
         assert 'host' not in sch['list']               # no inline SSH on the check
 
@@ -102,61 +102,61 @@ class TestRaidDefaults:
 class TestRaidCheck:
 
     def test_raid_ok(self):
-        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=(_MDSTAT_OK, '', 0)):
+        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=(_MDSTAT_OK, '', 0)):
             items = w.check().list
         assert items['1_md0']['status'] is True
         assert 'good status' in items['1_md0']['message']
 
     def test_raid_degraded(self):
-        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=(_MDSTAT_DEGRADED, '', 0)):
+        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=(_MDSTAT_DEGRADED, '', 0)):
             items = w.check().list
         assert items['1_md0']['status'] is False
         assert 'degraded' in items['1_md0']['message']
 
     def test_raid_recovery(self):
-        w = _watchful({'1': {'enabled': True, 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=(_MDSTAT_RECOVERY, '', 0)):
+        w = _watchful({'1': {'enabled': True, 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=(_MDSTAT_RECOVERY, '', 0)):
             items = w.check().list
         assert items['1_md0']['status'] is False
         assert 'recovery' in items['1_md0']['message']
         assert items['1_md0']['other_data']['percent'] == 12.6
 
     def test_no_raids(self):
-        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=(_MDSTAT_EMPTY, '', 0)):
+        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=(_MDSTAT_EMPTY, '', 0)):
             items = w.check().list
         assert items['1']['status'] is True
         assert 'No RAID' in items['1']['message']
 
     def test_disabled_item_skipped(self):
-        w = _watchful({'1': {'enabled': False, 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec') as he:
+        w = _watchful({'1': {'enabled': False, 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec') as he:
             result = w.check()
         he.assert_not_called()
         assert len(result.items()) == 0
 
     def test_non_linux_host_reports_unsupported(self):
-        w = _watchful({'1': {'enabled': True, 'label': 'WinBox', 'host_uid': 'h1'}},
-                      hosts={'h1': _host(os='windows')})
-        with patch.object(w, 'host_exec') as he:
+        w = _watchful({'1': {'enabled': True, 'label': 'WinBox', 'device_uid': 'h1'}},
+                      devices={'h1': _host(os='windows')})
+        with patch.object(w, 'device_exec') as he:
             items = w.check().list
         he.assert_not_called()                     # no mdstat attempt off-Linux
         assert items['1']['status'] is False
         assert 'Linux' in items['1']['message']
 
     def test_maintenance_host_skipped(self):
-        w = _watchful({'1': {'enabled': True, 'host_uid': 'h1'}},
-                      hosts={'h1': _host(maintenance=True)})
-        with patch.object(w, 'host_exec') as he:
+        w = _watchful({'1': {'enabled': True, 'device_uid': 'h1'}},
+                      devices={'h1': _host(maintenance=True)})
+        with patch.object(w, 'device_exec') as he:
             result = w.check()
         he.assert_not_called()
         assert len(result.items()) == 0
 
     def test_command_failure_is_error(self):
-        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=('', 'No such file', 1)):
+        w = _watchful({'1': {'enabled': True, 'label': 'NAS', 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=('', 'No such file', 1)):
             items = w.check().list
         assert items['1']['status'] is False
         assert 'Error' in items['1']['message']
@@ -164,10 +164,10 @@ class TestRaidCheck:
     def test_module_disabled(self):
         from watchfuls.raid import Watchful
         mm = create_mock_monitor({'watchfuls.raid': {'enabled': False,
-                                                      'list': {'1': {'enabled': True, 'host_uid': 'h1'}}}})
-        mm._hosts_store = _FakeStore({'h1': _host()})
+                                                      'list': {'1': {'enabled': True, 'device_uid': 'h1'}}}})
+        mm._devices_store = _FakeStore({'h1': _host()})
         w = Watchful(mm)
-        with patch.object(w, 'host_exec') as he:
+        with patch.object(w, 'device_exec') as he:
             result = w.check()
         he.assert_not_called()
         assert len(result.items()) == 0
@@ -176,9 +176,9 @@ class TestRaidCheck:
 class TestRaidLabel:
 
     def test_label_from_item(self):
-        w = _watchful({'1': {'label': 'MyServer', 'host_uid': 'h1'}})
+        w = _watchful({'1': {'label': 'MyServer', 'device_uid': 'h1'}})
         assert w._label('1') == 'MyServer'
 
     def test_label_falls_back_to_key(self):
-        w = _watchful({'nas-server': {'host_uid': 'h1'}})
+        w = _watchful({'nas-server': {'device_uid': 'h1'}})
         assert w._label('nas-server') == 'nas-server'

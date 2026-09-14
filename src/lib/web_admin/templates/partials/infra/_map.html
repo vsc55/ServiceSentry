@@ -25,7 +25,7 @@
    Two rules do most of the work:
 
    * **A network with one machine on it is not a place where two machines meet.** Docker gives
-     every host a 172.17.0.0/16; a router declares a route per VLAN. Those were half the lanes
+     every device a 172.17.0.0/16; a router declares a route per VLAN. Those were half the lanes
      on the old picture and none of them answered the question it exists to answer. They are
      folded onto the machine that holds them, counted and named on the hover.
    * **A network nobody is on is not on the map at all** — it is a route, and it belongs in a
@@ -391,7 +391,7 @@ function _infraMapAddr(p) {
  *  never disagree about whether something is down. */
 function _infraMapBox(p) {
     const n = p.node || {};
-    const tone = hostStateColor(n.status);
+    const tone = deviceStateColor(n.status);
     const gw = p.kind === 'gateway';
     const h = p.h || _MAP.BOX_H;
     // The address that put it on the network it hangs from — not the first one it happens to
@@ -408,7 +408,7 @@ function _infraMapBox(p) {
         <foreignObject x="${p.x + 12}" y="${p.y + 8}" width="18" height="18">
             <div xmlns="http://www.w3.org/1999/xhtml"
                  style="font-size:14px;line-height:1;color:var(--bs-secondary-color)">
-                <i class="bi ${escAttr(hostTypeIcon(n.kind || ''))}"></i></div>
+                <i class="bi ${escAttr(deviceTypeIcon(n.kind || ''))}"></i></div>
         </foreignObject>
         <text x="${p.x + 36}" y="${p.y + 21}" font-size="12" font-weight="600"
               fill="currentColor">${esc(_infraMapClip(n.name || p.uid, 19))}</text>
@@ -563,7 +563,7 @@ function _infraMapWireCard(L, i) {
         const n = (p || {}).node || {};
         return `<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
                 onclick="infraOpen(${jsStr(uid)})"><i class="bi ${
-                escAttr(hostTypeIcon(n.kind || ''))} me-1"></i>${
+                escAttr(deviceTypeIcon(n.kind || ''))} me-1"></i>${
                 esc(n.name || uid)}</button>`;
     };
     const net = (cidr) => `<span class="badge bg-body-secondary text-body-secondary border
@@ -735,7 +735,7 @@ function _infraMapPanelHtml() {
                 const n = (p || {}).node || {};
                 return `<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
                     onclick="infraOpen(${jsStr(uid)})"><i class="bi ${
-                    escAttr(hostTypeIcon(n.kind || ''))} me-1"></i>${esc(n.name || uid)}</button>`;
+                    escAttr(deviceTypeIcon(n.kind || ''))} me-1"></i>${esc(n.name || uid)}</button>`;
             }).join('')}
         </div>
     </div>`;
@@ -765,7 +765,7 @@ function _infraMapCloudCard(L) {
     const line = (r) => `<div class="d-flex align-items-baseline gap-2">
         <button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
             onclick="infraOpen(${jsStr(r.uid)})"><i class="bi ${
-            escAttr(hostTypeIcon(r.kind))} me-1"></i>${esc(r.name)}</button>
+            escAttr(deviceTypeIcon(r.kind))} me-1"></i>${esc(r.name)}</button>
         ${r.port ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
             ><i class="bi bi-globe2 me-1"></i>${esc(r.port)}</span>` : ''}
         ${r.public ? `<code class="ss-fs-2">${esc(r.public)}</code>` : ''}

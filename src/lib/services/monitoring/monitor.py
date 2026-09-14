@@ -99,7 +99,7 @@ class Monitor(ObjectBase):
         self._check_state_store = self._init_check_state()
         # The working state lives in the DB (check_state) — no status.json.
         self._read_status()
-        self._hosts_store = self._init_hosts_store()
+        self._devices_store = self._init_hosts_store()
         self._credentials_store = self._init_credentials_store()
         self._audit_store = self._init_audit_store()
         self._reconcile_module_tables()
@@ -163,15 +163,15 @@ class Monitor(ObjectBase):
         return getattr(self, '_db', None)
 
     def _init_hosts_store(self):
-        """Create the host registry store so modules can resolve host_uid → connection."""
+        """Create the host registry store so modules can resolve device_uid → connection."""
         if self._db is None:
             return None
         try:
-            from lib.core.hosts.stores import HostsStore  # noqa: PLC0415
+            from lib.core.devices.stores import DevicesStore  # noqa: PLC0415
             from lib.security import secret_manager          # noqa: PLC0415
             from lib.modules import ModuleBase       # noqa: PLC0415
             secret_keys = secret_manager.ENCRYPT_KEYS | ModuleBase.discover_secret_fields(self.dir_modules)
-            return HostsStore(self._db, fernet=getattr(self, '_fernet', None),
+            return DevicesStore(self._db, fernet=getattr(self, '_fernet', None),
                               secret_keys=secret_keys)
         except Exception:  # pylint: disable=broad-except
             return None
@@ -216,7 +216,7 @@ class Monitor(ObjectBase):
     def purge_maintenance_states(self):
         """Drop the live status of checks bound to a host in maintenance.
 
-        A host in maintenance has its checks skipped (``resolve_host`` disables
+        A host in maintenance has its checks skipped (``resolve_device`` disables
         them), so their last status would otherwise linger stale.  We remove
         those entries from the working state (persisted to ``check_state`` on
         the next save) — the history is kept, so the host modal can still show
@@ -224,7 +224,7 @@ class Monitor(ObjectBase):
         maintenance, the next check has no baseline and re-announces its current
         state.  Called once per cycle.
         """
-        hstore = getattr(self, '_hosts_store', None)
+        hstore = getattr(self, '_devices_store', None)
         if hstore is None:
             return
         try:
@@ -244,7 +244,7 @@ class Monitor(ObjectBase):
                 if coll.startswith('__') or not isinstance(items, dict):
                     continue
                 for ikey, item in items.items():
-                    if isinstance(item, dict) and item.get('host_uid') in maint:
+                    if isinstance(item, dict) and item.get('device_uid') in maint:
                         maint_items.setdefault(mod_name, set()).add(ikey)
         if not maint_items:
             return
@@ -476,7 +476,7 @@ class Monitor(ObjectBase):
         config edits (Telegram creds, routing, intervals) take effect without a restart —
         the notifier reads the current config on every flush, so nothing to refresh here."""
         self._apply_db_config()
-        self._host_name_map = None   # rebuild uid→name map so renamed/new hosts are picked up
+        self._host_name_map = None   # rebuild uid→name map so renamed/new devices are picked up
         # Re-read the module config from the DB each cycle.  The persistent daemon
         # monitor holds its OWN ModulesStore whose version() counter is bumped only
         # by its own writes — it never sees the web admin's edits (a separate store
@@ -546,12 +546,12 @@ class Monitor(ObjectBase):
         return KIND_DOWN
 
     def _uid_name_map(self) -> dict:
-        """host_uid → friendly name, built once per cycle (invalidated by
+        """device_uid → friendly name, built once per cycle (invalidated by
         :meth:`refresh_runtime_config`)."""
         hmap = getattr(self, '_host_name_map', None)
         if hmap is None:
             hmap = {}
-            hs = getattr(self, '_hosts_store', None)
+            hs = getattr(self, '_devices_store', None)
             if hs is not None:
                 try:
                     for h in (hs.list(decrypt=False) or []):
@@ -566,8 +566,8 @@ class Monitor(ObjectBase):
         """Readable name for a check item in notifications.
 
         Host-centric checks key their items by an item UID and carry the bound host in the
-        item config (``host_uid``); resolve that to the host's friendly name.  Falls back to
-        the key itself (which, for host-bound base modules, may already be a host_uid)."""
+        item config (``device_uid``); resolve that to the device's friendly name.  Falls back to
+        the key itself (which, for host-bound base modules, may already be a device_uid)."""
         if not key:
             return ''
         try:
@@ -576,8 +576,8 @@ class Monitor(ObjectBase):
                 if str(coll).startswith('__') or not isinstance(items, dict):
                     continue
                 it = items.get(key) or items.get(str(key).split('/')[0])
-                if isinstance(it, dict) and it.get('host_uid'):
-                    name = self._uid_name_map().get(it['host_uid'])
+                if isinstance(it, dict) and it.get('device_uid'):
+                    name = self._uid_name_map().get(it['device_uid'])
                     if name:
                         return name
                     break
@@ -801,11 +801,11 @@ class Monitor(ObjectBase):
         return importlib.import_module(module_name)
 
     def check_module(self, module_name: str,
-                     only_host: str = '') -> tuple[bool, str, ReturnModuleCheck | None]:
+                     only_device: str = '') -> tuple[bool, str, ReturnModuleCheck | None]:
         """
         Execute module check and return raw result.
 
-        ``only_host`` narrows the run to the items bound to one machine — what "collect this
+        ``only_device`` narrows the run to the items bound to one machine — what "collect this
         device now" means, as opposed to a cycle, which is about the installation. The module
         applies it (``ModuleBase.get_conf``); nothing here knows which of its items are which.
 
@@ -817,8 +817,8 @@ class Monitor(ObjectBase):
             self.debug.print(f"> Monitor > check_module >> Module: {module_name}", DebugLevel.info)
             module_import = self._import_watchful(module_name)
             module = module_import.Watchful(self)
-            if only_host:
-                module._host_scope = only_host   # pylint: disable=protected-access
+            if only_device:
+                module._host_scope = only_device   # pylint: disable=protected-access
             result_data = module.check()
 
             if isinstance(result_data, ReturnModuleCheck):

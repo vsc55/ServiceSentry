@@ -34,7 +34,7 @@ function _permLabel(perm) { return (I18N.permission_labels || {})[perm] || perm;
 function _permHint(perm)  { return (I18N.permission_hints  || {})[perm] || ''; }
 
 // ── Per-instance permissions (module.<id>.<action>, server.…, cluster.…) ──────────
-// A role may narrow the global flags down to ONE module, host or cluster. Those keys are
+// A role may narrow the global flags down to ONE module, device or cluster. Those keys are
 // not in the catalog — they come from the data — so the section reads them from the
 // registry in _resources.html: where the items come from, which global flag each action
 // falls back to, and the labels. Nothing about a resource is described twice.
@@ -329,7 +329,7 @@ function _permVisibleIn(groupKey) {
 }
 
 /** The per-instance rows of a group that survive the current filter, with their spec.
- *  A resource row is matched on its own name (the module, host or cluster), not on a
+ *  A resource row is matched on its own name (the module, device or cluster), not on a
  *  permission label — searching "ping" must find the module, and "only differences" keeps
  *  the row when ANY of its four actions is not agreed on. */
 function _permVisibleResRows(groupKey) {

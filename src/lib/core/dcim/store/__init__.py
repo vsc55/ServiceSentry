@@ -15,13 +15,13 @@ Six tables, and the shape of them is the whole design (see ``docs/explica-dcim.m
 like, it inherits, the innermost wins — is ONE rule, and written as an ``org_uid`` column on
 five tables it is five implementations of it and five places to get it wrong. As a table there
 is one resolver (:mod:`lib.core.dcim.owners`). It also admits scopes that are not in the
-containment chain at all: a host with no rack, a VM, a VIP — all of them belong to somebody.
+containment chain at all: a device with no rack, a VM, a VIP — all of them belong to somebody.
 
-**A rack holds ITEMS, and some items are hosts** — never the reverse. A patch panel takes 1U and
-is not a host; a blanking plate is nothing; a blade chassis takes 7U and contains eight things
+**A rack holds ITEMS, and some items are devices** — never the reverse. A patch panel takes 1U and
+is not a device; a blanking plate is nothing; a blade chassis takes 7U and contains eight things
 that are; a switched-off server occupies its U whether or not anything monitors it. So
-``dc_item.host_uid`` is optional and ``hosts`` is not touched: either side survives the other
-being deleted, which is the point of not putting ``rack_uid`` on the host record.
+``dc_item.device_uid`` is optional and ``devices`` is not touched: either side survives the other
+being deleted, which is the point of not putting ``rack_uid`` on the device record.
 
 **The face is part of the position.** A 1U device fills U 12 front *and* rear; a patch panel may
 fill only the rear; two half-depth devices share one U from opposite sides. Without it the
@@ -70,9 +70,9 @@ from .sites import _SITE
 # cuarenta llamadas que estan bien escritas.
 
 # ── What a thing can be, for the ownership table and for the item's face ─────────────────
-#: The scopes ownership can be declared on HERE: the four containment levels. `host` used to be
+#: The scopes ownership can be declared on HERE: the four containment levels. `device` used to be
 #: in this tuple and is not any more — a machine on a desk belongs to somebody without this
-#: domain being involved, so `lib.core.hosts` declares it, which is the whole point of the
+#: domain being involved, so `lib.core.devices` declares it, which is the whole point of the
 #: scopes being declared instead of listed.
 OWNER_SCOPES = ('site', 'room', 'rack', 'item')
 
@@ -410,8 +410,8 @@ class DcimStore:
             return []
         return self.items.list('build_uid = ?', (str(build_uid),))
 
-    def item_of_host(self, host_uid: str) -> dict | None:
-        rows = self.items.list('host_uid = ?', (str(host_uid or ''),))
+    def item_of_device(self, device_uid: str) -> dict | None:
+        rows = self.items.list('device_uid = ?', (str(device_uid or ''),))
         return rows[0] if rows else None
 
     # ── …and upwards, which is what ownership and "where do I walk" both need ──

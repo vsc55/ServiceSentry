@@ -48,21 +48,21 @@ class TestDeletingTheResourcePrunesIt:
 
     def test_deleting_a_host_drops_its_keys(self, admin, client):
         _login(client)
-        host = admin._hosts_store.create({'name': 'gone', 'address': '10.0.0.5',
+        host = admin._devices_store.create({'name': 'gone', 'address': '10.0.0.5',
                                           'kind': 'remote'}, actor='admin')
         uid = self._role_with(client, ['users_view', f'server.{host}.view',
                                        f'server.{host}.edit'])
-        assert client.delete(f'/api/v1/hosts/{host}').status_code == 200
+        assert client.delete(f'/api/v1/devices/{host}').status_code == 200
         assert self._perms(client, uid) == ['users_view']
 
     def test_the_other_hosts_keep_theirs(self, admin, client):
         _login(client)
-        a = admin._hosts_store.create({'name': 'a', 'address': '10.0.0.6',
+        a = admin._devices_store.create({'name': 'a', 'address': '10.0.0.6',
                                        'kind': 'remote'}, actor='admin')
-        b = admin._hosts_store.create({'name': 'b', 'address': '10.0.0.7',
+        b = admin._devices_store.create({'name': 'b', 'address': '10.0.0.7',
                                        'kind': 'remote'}, actor='admin')
         uid = self._role_with(client, [f'server.{a}.view', f'server.{b}.view'])
-        client.delete(f'/api/v1/hosts/{a}')
+        client.delete(f'/api/v1/devices/{a}')
         assert self._perms(client, uid) == [f'server.{b}.view']
 
     def test_removing_a_module_drops_its_keys(self, admin, client):
@@ -84,19 +84,19 @@ class TestDeletingTheResourcePrunesIt:
         """It edits permissions without anyone asking on that screen, so it has to be
         visible somewhere."""
         _login(client)
-        host = admin._hosts_store.create({'name': 'audited', 'address': '10.0.0.8',
+        host = admin._devices_store.create({'name': 'audited', 'address': '10.0.0.8',
                                           'kind': 'remote'}, actor='admin')
         self._role_with(client, [f'server.{host}.view'])
-        client.delete(f'/api/v1/hosts/{host}')
+        client.delete(f'/api/v1/devices/{host}')
         assert 'role_permissions_pruned' in self._events(client)
 
     def test_nothing_is_written_when_no_role_referenced_it(self, admin, client):
-        """The common case — most hosts are in nobody's scoped list — must not rewrite the
+        """The common case — most devices are in nobody's scoped list — must not rewrite the
         roles table or file an audit entry saying it did."""
         _login(client)
-        host = admin._hosts_store.create({'name': 'lonely', 'address': '10.0.0.9',
+        host = admin._devices_store.create({'name': 'lonely', 'address': '10.0.0.9',
                                           'kind': 'remote'}, actor='admin')
-        client.delete(f'/api/v1/hosts/{host}')
+        client.delete(f'/api/v1/devices/{host}')
         assert 'role_permissions_pruned' not in self._events(client)
 
     @staticmethod

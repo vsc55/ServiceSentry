@@ -50,7 +50,7 @@ error/excepción de casi todos los demás.
 
 ### `name=` no es opcional
 
-Sin él, el monitor cae a `_item_label()`, que resuelve **el host enlazado** vía `host_uid`. Eso
+Sin él, el monitor cae a `_item_label()`, que resuelve **el host enlazado** vía `device_uid`. Eso
 es una cosa distinta de la etiqueta del check.
 
 **Once sitios lo omitían.** Consecuencia: la misma comprobación aparecía en la columna Item con

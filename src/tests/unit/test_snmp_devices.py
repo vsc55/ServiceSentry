@@ -17,10 +17,10 @@ from lib.core.snmp.devices import device_key, devices_to_sample
 
 
 class _Store:
-    def __init__(self, hosts):
-        self._hosts = hosts
+    def __init__(self, devices):
+        self._hosts = devices
 
-    def list(self, decrypt=True):        # noqa: A003 - mirrors HostsStore
+    def list(self, decrypt=True):        # noqa: A003 - mirrors DevicesStore
         return self._hosts
 
 
@@ -41,7 +41,7 @@ class TestWhatCountsAsADevice:
         assert len(out) == 1
         key, item = out[0]
         assert key == device_key('h1')
-        assert item['host_uid'] == 'h1' and item['enabled'] is True
+        assert item['device_uid'] == 'h1' and item['enabled'] is True
         assert item['label'] == 'erebor'
 
     def test_a_host_with_a_community_but_nothing_assigned_is_not(self):
@@ -80,17 +80,17 @@ class TestWhatItRefusesToDecide:
         assert len(devices_to_sample(store, covered={'erebor'})) == 1
 
     def test_maintenance_is_not_decided_here(self):
-        """It is decided by resolve_host, which every sampled item goes through — one place
+        """It is decided by resolve_device, which every sampled item goes through — one place
         where a host in maintenance stops being read, rather than two that must agree."""
         store = _Store([_host('h1', profiles={'snmp': _SNMP}, maintenance=True)])
         assert len(devices_to_sample(store)) == 1
 
     def test_it_returns_an_item_and_not_a_connection(self):
         """Building the connection here would be a second implementation of the merge that
-        `resolve_host` already does — address, credential, profile fields — and the two would
+        `resolve_device` already does — address, credential, profile fields — and the two would
         disagree the first time either changed."""
         _key, item = devices_to_sample(_Store([_host('h1', profiles={'snmp': _SNMP})]))[0]
-        assert set(item) == {'host_uid', 'enabled', 'label'}
+        assert set(item) == {'device_uid', 'enabled', 'label'}
         assert 'community' not in item and 'device_profiles' not in item
 
 
@@ -138,26 +138,26 @@ class TestNarrowingToOneDevice:
     so without this, "collect erebor" still walked every switch in the rack."""
 
     def test_only_the_one_asked_for_comes_back(self):
-        hosts = [_host('h1', 'erebor', {'snmp': _SNMP}),
+        devices = [_host('h1', 'erebor', {'snmp': _SNMP}),
                  _host('h2', 'isen', {'snmp': _SNMP}),
                  _host('h3', 'switch', {'snmp': _SNMP})]
-        out = devices_to_sample(_Store(hosts), only='h2')
-        assert [i['host_uid'] for _k, i in out] == ['h2']
+        out = devices_to_sample(_Store(devices), only='h2')
+        assert [i['device_uid'] for _k, i in out] == ['h2']
 
     def test_asking_for_a_machine_that_is_not_a_device_yields_nothing(self):
         """It narrows; it does not promote. A host with no profiles assigned is not sampled
         because somebody asked about it by name."""
-        hosts = [_host('h1', 'erebor', {'snmp': _SNMP}),
+        devices = [_host('h1', 'erebor', {'snmp': _SNMP}),
                  _host('h2', 'plain', {'ssh': {'ssh_user': 'r'}})]
-        assert devices_to_sample(_Store(hosts), only='h2') == []
+        assert devices_to_sample(_Store(devices), only='h2') == []
 
     def test_no_scope_is_the_whole_fleet(self):
-        hosts = [_host('h1', profiles={'snmp': _SNMP}), _host('h2', profiles={'snmp': _SNMP})]
-        assert len(devices_to_sample(_Store(hosts), only='')) == 2
-        assert len(devices_to_sample(_Store(hosts))) == 2
+        devices = [_host('h1', profiles={'snmp': _SNMP}), _host('h2', profiles={'snmp': _SNMP})]
+        assert len(devices_to_sample(_Store(devices), only='')) == 2
+        assert len(devices_to_sample(_Store(devices))) == 2
 
     def test_a_covered_host_stays_covered_even_when_it_is_the_one_asked_for(self):
         """Its item speaks for it, and that item may carry settings of its own. Sampling it
         BOTH ways would file the same device twice, under two different keys."""
-        hosts = [_host('h1', profiles={'snmp': _SNMP})]
-        assert devices_to_sample(_Store(hosts), covered={'h1'}, only='h1') == []
+        devices = [_host('h1', profiles={'snmp': _SNMP})]
+        assert devices_to_sample(_Store(devices), covered={'h1'}, only='h1') == []

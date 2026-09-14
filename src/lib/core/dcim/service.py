@@ -9,7 +9,7 @@ for putting the two in one panel.
 
 Three rules decide everything here, and each of them is a way of being wrong that looks right:
 
-* **An item with no host has no state — and no state is not "fine".** A rack full of patch
+* **An item with no device has no state — and no state is not "fine".** A rack full of patch
   panels must not come out green, because nothing is watching a patch panel; it comes out with
   no colour, which is the truth. The panel already draws that distinction elsewhere
   (``HOST_STATE_COLORS['']``) and it matters more here, where a wall of green is the thing
@@ -51,13 +51,13 @@ def worst(states) -> str:
 
 
 def item_state(item, statuses) -> str:
-    """One item's state: its host's, or ``''`` if it has no host or nothing watches it.
+    """One item's state: its device's, or ``''`` if it has no device or nothing watches it.
 
     Deliberately not "ok" for the second case. Most of what fills a rack answers to nothing —
     a patch panel, a blanking plate, a switched-off server still bolted in — and painting those
     green would make the one thing this drawing is for, a glance from the door, a lie.
     """
-    uid = str((item or {}).get('host_uid') or '')
+    uid = str((item or {}).get('device_uid') or '')
     if not uid:
         return ''
     return str((statuses or {}).get(uid) or '')
@@ -78,9 +78,9 @@ def states_for(wa, perms) -> dict:
 
     Un color no vale una página: si el estado no se puede leer, no hay estado.
     """
-    from lib.core.hosts import service as hosts_svc      # noqa: PLC0415
+    from lib.core.devices import service as devices_svc      # noqa: PLC0415
     try:
-        rows = hosts_svc._host_statuses(wa) or {}
+        rows = devices_svc._device_statuses(wa) or {}
     except Exception:                                    # pylint: disable=broad-except
         return {}
     perms = set(perms or ())
@@ -88,7 +88,7 @@ def states_for(wa, perms) -> dict:
         rows = {uid: st for uid, st in rows.items() if f'server.{uid}.view' in perms}
     # Y lo que alguien apagó a propósito no está caído.
     #
-    # `_host_statuses` no dobla el mantenimiento a propósito —la lista de la flota lo enseña
+    # `_device_statuses` no dobla el mantenimiento a propósito —la lista de la flota lo enseña
     # como lo que es, un estado que PISA al otro— y esta pantalla lo cogía crudo: una máquina en
     # mantenimiento con sus comprobaciones fallando salía «Mantenimiento» en Infraestructura y
     # **«Caído»** en el cuadro de mando y en la tarjeta del panel. Dos pantallas, dos respuestas,
@@ -103,7 +103,7 @@ def states_for(wa, perms) -> dict:
 
 def _registry_rows(wa) -> list:
     """Las fichas de la flota, sin descifrar. De aquí salen el nombre y el mantenimiento."""
-    store = getattr(wa, '_hosts_store', None)
+    store = getattr(wa, '_devices_store', None)
     if store is None:
         return []
     try:
@@ -151,7 +151,7 @@ def rack_roll(items, statuses) -> dict:
 
     As given: the caller has already dropped or blanked what this reader may not see, so the
     counts follow visibility without this function knowing anything about permissions. A
-    foreign item carries no `host_uid`, so it counts as one more thing occupying space and
+    foreign item carries no `device_uid`, so it counts as one more thing occupying space and
     contributes no state — which is exactly what may be said about it.
     """
     states = [item_state(i, statuses) for i in items or ()]
@@ -388,7 +388,7 @@ def walk(store, said, allowed):
     return out
 
 
-def board(store, statuses, said, allowed, orgs=None, host_names=None) -> dict:
+def board(store, statuses, said, allowed, orgs=None, device_names=None) -> dict:
     """What is wrong, and **how to get to it**.
 
     ``{'sites': [...], 'orgs': [...], 'trouble': [...], 'totals': {...}}``.
@@ -410,7 +410,7 @@ def board(store, statuses, said, allowed, orgs=None, host_names=None) -> dict:
     #: Cómo se llama cada máquina (`names_for`), para nombrar lo que está mal. Se recibe hecho
     #: en vez de leerlo aquí porque esta función no conoce el registro de la flota — y porque
     #: quien solo quiere el mapa de sedes no tiene por qué pagar esa lectura.
-    hosts = host_names or {}
+    devices = device_names or {}
     sites, trouble, per_org = [], [], {}
 
     for site, rooms in walk(store, said, allowed):
@@ -447,8 +447,8 @@ def board(store, statuses, said, allowed, orgs=None, host_names=None) -> dict:
                         # manda sobre lo que dice el registro. Y si no hay, el nombre de la
                         # máquina — nunca su uid, que no nombra nada.
                         'name': (item.get('label')
-                                 or hosts.get(str(item.get('host_uid') or '')) or ''),
-                        'host_uid': item.get('host_uid') or '',
+                                 or devices.get(str(item.get('device_uid') or '')) or ''),
+                        'device_uid': item.get('device_uid') or '',
                         'item_uid': item['uid'],
                     })
         # Lo que se pregunta delante de un punto rojo, y que hasta ahora no contestaba
@@ -520,7 +520,7 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
        que se apaga, y da igual que tenga dos fuentes: lo que cuenta es de dónde comen.
     2. **Cuántas tomas quedan**, que es lo que se pregunta delante del armario con un equipo
        nuevo en las manos.
-    3. **Cuánto se ha declarado frente a lo que aguanta** — y, cuando la regleta es un host que
+    3. **Cuánto se ha declarado frente a lo que aguanta** — y, cuando la regleta es un device que
        contesta, frente a lo que está dando de verdad.
 
     Lo declarado y lo medido no se corrigen el uno al otro. La placa de un servidor dice el
@@ -569,12 +569,12 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
             'watts_said': declarado,
             'capacity_w': cap,
             'load': round(declarado / cap, 3) if cap else None,
-            'host_uid': str(p.get('host_uid') or ''),
+            'device_uid': str(p.get('device_uid') or ''),
             # Resuelto aquí y no en la pantalla: dos sitios decidiendo de qué color va una rama
             # acaban pintándola de dos colores distintos en dos vistas de lo mismo.
             'color': str(p.get('color') or '').strip()
                      or FEED_COLORS.get(str(p.get('feed') or 'none'), FEED_COLORS['none']),
-            'state': item_state({'host_uid': p.get('host_uid')}, statuses or {}),
+            'state': item_state({'device_uid': p.get('device_uid')}, statuses or {}),
         })
 
     # Las regletas que YA están declaradas como tales: su equipo no es un consumidor. Una
@@ -592,7 +592,7 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
         ramas = sorted({rama_de.get(str(c.get('pdu_uid') or ''), 'none') for c in cables})
         fila = {
             'uid': uid, 'label': it.get('label') or '',
-            'u_start': it.get('u_start'), 'host_uid': str(it.get('host_uid') or ''),
+            'u_start': it.get('u_start'), 'device_uid': str(it.get('device_uid') or ''),
             # Con el uid del CABLE: sin él, la pantalla puede enseñar de qué come un equipo
             # y no puede desenchufarlo, que es la mitad de para lo que se abre.
             # Con lo que hace de un cable de corriente una cosa inventariada, no sólo un
@@ -764,9 +764,9 @@ def label_legs(legs, items) -> list:
     # **Cómo se llama**, en el mismo orden que en todas las listas: lo rotulado, si no la
     # máquina, si no el modelo. Con la etiqueta sola, las dos puntas de una tirada salían con la
     # boca y nada más —«gigabitethernet11»— porque lo normal es no rotular un servidor que ya
-    # tiene nombre de máquina. Quien llama pone `host_name` si puede resolverlo; donde no, la
+    # tiene nombre de máquina. Quien llama pone `device_name` si puede resolverlo; donde no, la
     # pantalla lo completa con lo que tiene cargado.
-    nombre = {str(i.get('uid') or ''): (i.get('label') or i.get('host_name')
+    nombre = {str(i.get('uid') or ''): (i.get('label') or i.get('device_name')
                                         or i.get('type_name') or '')
               for i in (items or ())}
     rol = {str(i.get('uid') or ''): str(i.get('role') or '') for i in (items or ())}
@@ -844,9 +844,9 @@ def run_of(cable_uid, cables, items) -> dict:
     # Primero el extremo que ES una máquina cuando sólo uno lo es —una tirada se lee desde donde
     # hay algo que mirar— y, cuando eso no decide, por identificador: hace falta una regla
     # estable, y cualquiera vale mientras sea siempre la misma.
-    host_de = {str(i.get('uid') or ''): str(i.get('host_uid') or '') for i in (items or ())}
+    device_de = {str(i.get('uid') or ''): str(i.get('device_uid') or '') for i in (items or ())}
     ini, fin = legs[0]['a_item'], legs[-1]['b_item']
-    mio, suyo = bool(host_de.get(ini)), bool(host_de.get(fin))
+    mio, suyo = bool(device_de.get(ini)), bool(device_de.get(fin))
     if (suyo and not mio) or (mio == suyo and fin < ini):
         legs = [{'cable': t['cable'], 'a_item': t['b_item'], 'a_port': t['b_port'],
                  'b_item': t['a_item'], 'b_port': t['a_port']} for t in reversed(legs)]
@@ -889,11 +889,11 @@ def _through_passive(cables, items) -> dict:
     el rol —o uno ajeno, que llega sin él— tampoco se atraviesa: no se puede confirmar un camino
     a través de algo que no se puede ni mirar.
     """
-    host_de = {str(i.get('uid') or ''): str(i.get('host_uid') or '') for i in (items or ())}
+    device_de = {str(i.get('uid') or ''): str(i.get('device_uid') or '') for i in (items or ())}
     pasa = _passable(items)
     en_boca = _port_map(cables)
     out: dict = {}
-    for origen, ha in host_de.items():
+    for origen, ha in device_de.items():
         if not ha:
             continue
         # En anchura desde todas las bocas de la máquina, con el camino RECORRIDO a cuestas: lo
@@ -908,7 +908,7 @@ def _through_passive(cables, items) -> dict:
             if boca in visitado:
                 continue
             visitado.add(boca)
-            hb = host_de.get(boca[0], '')
+            hb = device_de.get(boca[0], '')
             if hb:
                 # Un cable directo entre dos máquinas ya lo casa la comprobación de siempre; lo
                 # que aquí interesa es lo que pasa POR algo.
@@ -938,7 +938,7 @@ def cable_check(cables, items, edges=None) -> dict:
     se ve» sería llenar la pantalla de avisos imposibles de resolver, que es la forma más rápida
     de que nadie vuelva a mirarla.
     """
-    host_de = {str(i.get('uid') or ''): str(i.get('host_uid') or '') for i in (items or ())}
+    device_de = {str(i.get('uid') or ''): str(i.get('device_uid') or '') for i in (items or ())}
     nombre_de = {str(i.get('uid') or ''): (i.get('label') or '') for i in (items or ())}
     rol_de = {str(i.get('uid') or ''): str(i.get('role') or '') for i in (items or ())}
     # Dónde está cada punta. Un camino sale del armario abierto —el panel vive en el de
@@ -996,7 +996,7 @@ def cable_check(cables, items, edges=None) -> dict:
             por_camino.setdefault(t['cable'], []).append(i)
     for c in (cables or ()):
         a, b = str(c.get('a_item') or ''), str(c.get('b_item') or '')
-        ha, hb = host_de.get(a, ''), host_de.get(b, '')
+        ha, hb = device_de.get(a, ''), device_de.get(b, '')
         fila = dict(c)
         fila['a_label'] = nombre_de.get(a, '')
         fila['b_label'] = nombre_de.get(b, '')
@@ -1043,7 +1043,7 @@ def cable_check(cables, items, edges=None) -> dict:
 
     # Y al revés: lo que se ve y nadie declaró. Solo entre máquinas que están en un armario —un
     # enlace a un portátil de alguien no es cableado de sala y llenaría la lista de ruido.
-    en_rack = {h for h in host_de.values() if h}
+    en_rack = {h for h in device_de.values() if h}
     # De vuelta: de qué EQUIPO es cada máquina. Sin esto, un enlace descubierto sólo se puede
     # mirar — un cable se declara entre dos equipos del armario, no entre dos máquinas, y
     # traducir uno en otro en la pantalla sería una segunda copia de este mismo diccionario.
@@ -1051,18 +1051,18 @@ def cable_check(cables, items, edges=None) -> dict:
     # El primero que aparezca: una máquina puede estar enganchada a dos equipos si alguien se
     # equivocó, y elegir el primero es tan bueno como cualquiera cuando ya hay un error escrito.
     item_de: dict = {}
-    for uid_item, host in host_de.items():
-        if host:
-            item_de.setdefault(host, uid_item)
+    for uid_item, device in device_de.items():
+        if device:
+            item_de.setdefault(device, uid_item)
     sin_declarar = []
     for par, arista in visto.items():
         if par in casados or not (par[0] in en_rack and par[1] in en_rack):
             continue
         puertos = arista.get('ports') or {}
 
-        def _boca(host, _p=puertos):
+        def _boca(device, _p=puertos):
             """El nombre de puerto que ese lado dijo, si dijo uno solo que valga."""
-            v = _p.get(host)
+            v = _p.get(device)
             if isinstance(v, (list, tuple)):
                 v = v[0] if len(v) == 1 else ''
             return str(v or '')

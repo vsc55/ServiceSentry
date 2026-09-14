@@ -24,7 +24,7 @@ from lib.debug import DebugLevel
 
 
 def run_checks(monitor, module_names, *, timeout: int, history=None,
-               progress_cb=None, lang: str = '', only_host: str = '') -> tuple[dict, list]:
+               progress_cb=None, lang: str = '', only_device: str = '') -> tuple[dict, list]:
     """Run *module_names* on *monitor* concurrently and return ``(results, errors)``.
 
     ``results`` = ``{module: {item: {'status', 'message'}}}`` for modules that ran;
@@ -44,7 +44,7 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
     against a 120 s deadline, so live status appeared (late) on every cycle and the history
     table had not one row of that module since the day it was installed.
 
-    ``only_host`` narrows every module to the items bound to ONE machine — "collect this
+    ``only_device`` narrows every module to the items bound to ONE machine — "collect this
     device now", as opposed to a cycle, which is about the installation. It also turns OFF the
     orphan prune: that deletes every stored key the run did not report, which is right when
     the run covered everything and would wipe thirty-nine other machines' live state when it
@@ -108,11 +108,11 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
         _tell('running', mod_name)
         try:
             success, result_name, result_data = monitor.check_module(
-                mod_name, only_host=only_host)
+                mod_name, only_device=only_device)
             if success and result_data is not None:
                 with _save_lock:
                     monitor._process_module_result(result_name, result_data,
-                                                   prune=not only_host)
+                                                   prune=not only_device)
                     # This module's rows and not the whole table: a run saves once per
                     # module, and rewriting every other module's to record this one is
                     # three quarters of a second per run of `DELETE FROM check_state`,

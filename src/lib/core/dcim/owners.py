@@ -3,7 +3,7 @@
 """Whose is this, and therefore who may see it — the inventory's half of it.
 
 The rule itself is no longer here. Ownership is said at whatever level somebody knows it and
-inherited downwards, innermost wins, and that is true of a rack, a host and a Microsoft 365
+inherited downwards, innermost wins, and that is true of a rack, a device and a Microsoft 365
 mailbox alike — so it lives in :mod:`lib.core.orgs.owners`, where a package that has never heard
 of a cabinet can use it. This module re-exports it under the names forty call sites already use.
 

@@ -250,12 +250,12 @@ class SchemaDiscovery:
             partial_deps  = list(getattr(watchful_cls, 'PARTIAL_DEPS',  None) or [])
 
             for collection, fields in item_schema.items():
-                if collection in ('__i18n__', '__icon__', '__host_profile__', '__host_multiple__',
-                                   '__host_multiple_bind__', '__overview_widget__',
+                if collection in ('__i18n__', '__icon__', '__device_profile__', '__device_multiple__',
+                                   '__device_multiple_bind__', '__overview_widget__',
                                    '__credential__', '__credentials__', '__status_render__',
                                    '__entraid_provision__', '__page__', '__backup_part__'):
-                    # __i18n__ handled separately; __host_profile__/__host_multiple__
-                    # are host-binding metadata; __credential__ is consumed by the
+                    # __i18n__ handled separately; __device_profile__/__device_multiple__
+                    # are device-binding metadata; __credential__ is consumed by the
                     # central credentials catalog (credential_schemas reads it from
                     # schema.json directly); __status_render__ is read by
                     # module_status_render() — none of these are renderable
@@ -408,7 +408,7 @@ class SchemaDiscovery:
     # on a box without registering it as a device first — so the item needs the whole
     # connection on it: address, port, version, community, the v3 keys. Those are the same
     # fields the HOST carries, and the module was writing them out a second time because the
-    # host profile only says what a check inherits when BOUND; it puts nothing on the form of
+    # device profile only says what a check inherits when BOUND; it puts nothing on the form of
     # an unbound one.
     #
     # So the collection names the protocol instead::
@@ -444,7 +444,7 @@ class SchemaDiscovery:
         if not (isinstance(proto, str) and proto.strip()):
             return col_fields
         try:
-            from lib.core.hosts.profiles import core_profile_fields   # noqa: PLC0415
+            from lib.core.devices.profiles import core_profile_fields   # noqa: PLC0415
             declared = core_profile_fields(proto.strip())
         except Exception:  # pylint: disable=broad-except
             declared = []
@@ -475,7 +475,7 @@ class SchemaDiscovery:
         if not pairs or not lang_data:
             return
         try:
-            from lib.core.hosts.profiles import core_profile_fields   # noqa: PLC0415
+            from lib.core.devices.profiles import core_profile_fields   # noqa: PLC0415
         except Exception:  # pylint: disable=broad-except
             return
         for proto, _fields in pairs:

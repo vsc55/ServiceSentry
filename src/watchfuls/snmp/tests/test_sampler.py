@@ -144,8 +144,8 @@ class TestWhichDevicesAreSampled:
         env.profile('p1', [GAUGE])
         dev = _Dev(gets={GAUGE['oid']: ('41', None)})
         srv = _server()
-        with patch.object(Watchful, 'resolve_host',
-                          lambda self, item: {**item, '_host_maintenance': True}):
+        with patch.object(Watchful, 'resolve_device',
+                          lambda self, item: {**item, '_device_maintenance': True}):
             res, _mon = env.run(srv, dev)
         assert res == {} and dev.asked == []
 
@@ -790,13 +790,13 @@ class TestAProbeProvesItAnswersAndStopsThere:
             return {'1': '41'}, None
 
         cfg = {'watchfuls.snmp': {'servers': {'srv': {
-            'enabled': True, 'device_profiles': ','.join(cat), 'host_uid': 'h1',
+            'enabled': True, 'device_profiles': ','.join(cat), 'device_uid': 'h1',
             'community': 'public', 'version': '2c'}}}}
         with patch('watchfuls.snmp._startup_compile_mibs'), \
              patch.object(Watchful, '_snmp_walk_oid', _walk), \
              patch.object(Watchful, '_profile_catalog', lambda _s: cat), \
              patch.object(Watchful, 'is_probe', property(lambda _s: probe)):
-            res = check_runner.run_module_check('snmp', cfg, hosts_store=_Store(),
+            res = check_runner.run_module_check('snmp', cfg, devices_store=_Store(),
                                                 modules_dir='watchfuls')
         return res, walks['n']
 
@@ -823,13 +823,13 @@ class TestAProbeProvesItAnswersAndStopsThere:
 
         cat = self._many(2, 2)
         cfg = {'watchfuls.snmp': {'servers': {'srv': {
-            'enabled': True, 'device_profiles': ','.join(cat), 'host_uid': 'h1',
+            'enabled': True, 'device_profiles': ','.join(cat), 'device_uid': 'h1',
             'community': 'public', 'version': '2c'}}}}
         with patch('watchfuls.snmp._startup_compile_mibs'), \
              patch.object(Watchful, '_snmp_walk_oid', lambda *_a, **_k: ({}, 'timeout')), \
              patch.object(Watchful, '_profile_catalog', lambda _s: cat), \
              patch.object(Watchful, 'is_probe', property(lambda _s: True)):
-            res = check_runner.run_module_check('snmp', cfg, hosts_store=_Store(),
+            res = check_runner.run_module_check('snmp', cfg, devices_store=_Store(),
                                                 modules_dir='watchfuls')
         assert res and res[0]['key'] == 'srv/metrics'
 
@@ -861,13 +861,13 @@ class TestTheProbeThePanelRuns:
         env.profile('p1', [GAUGE])
         dev = _Dev(gets={GAUGE['oid']: ('41', None)})
         cfg = {'watchfuls.snmp': {'servers': {'srv': {
-            'enabled': True, 'device_profiles': 'p1', 'host_uid': 'h1',
+            'enabled': True, 'device_profiles': 'p1', 'device_uid': 'h1',
             'community': 'public', 'version': '2c'}}}}
         # The probe builds its own monitor with NO data directory, so only the shipped
         # catalogue is visible there — the profile has to come from a place it can reach.
         with patch('watchfuls.snmp._startup_compile_mibs'),              patch.object(Watchful, '_snmp_get', dev.get),              patch.object(Watchful, '_snmp_walk_oid', dev.walk),              patch.object(Watchful, '_profile_catalog',
                           lambda self: {'p1': _profile('p1', [GAUGE])}):
-            res = check_runner.run_module_check('snmp', cfg, hosts_store=_Store(),
+            res = check_runner.run_module_check('snmp', cfg, devices_store=_Store(),
                                                 modules_dir='watchfuls')
         assert [r['key'] for r in res] == ['srv/metrics']
         assert res[0]['other_data']['cpu'] == 41
@@ -889,8 +889,8 @@ class TestAHostIsADeviceOnItsOwn:
     """
 
     class _Store:
-        def __init__(self, hosts):
-            self._hosts = hosts
+        def __init__(self, devices):
+            self._hosts = devices
 
         def list(self, decrypt=True):        # noqa: A003
             return self._hosts
@@ -907,12 +907,12 @@ class TestAHostIsADeviceOnItsOwn:
         h.update(kw)
         return h
 
-    def _run(self, env, hosts, servers=None, gets=None):
+    def _run(self, env, devices, servers=None, gets=None):
         env.profile('p1', [GAUGE])
         dev = _Dev(gets=gets if gets is not None else {GAUGE['oid']: ('41', None)})
         mon = create_mock_monitor({'watchfuls.snmp': {'servers': servers or {}}})
         mon.dir_var = env.monitor({}).dir_var
-        mon._hosts_store = self._Store(hosts)
+        mon._devices_store = self._Store(devices)
         with patch('watchfuls.snmp._startup_compile_mibs'), \
              patch.object(Watchful, '_snmp_get', dev.get), \
              patch.object(Watchful, '_snmp_walk_oid', dev.walk):
@@ -939,13 +939,13 @@ class TestAHostIsADeviceOnItsOwn:
         assert res.get_status('host.h1/metrics') is True
 
     def test_a_host_in_maintenance_is_not_read(self, env):
-        """Decided by resolve_host, the same gate a check goes through: a graph of a machine
+        """Decided by resolve_device, the same gate a check goes through: a graph of a machine
         somebody is working on is a graph of the work."""
         _res, dev = self._run(env, [self._host(maintenance=True)])
         assert dev.asked == []
 
     def test_a_host_an_item_already_covers_is_not_sampled_twice(self, env):
-        servers = {'srv': {'enabled': True, 'host_uid': 'h1', 'device_profiles': 'p1',
+        servers = {'srv': {'enabled': True, 'device_uid': 'h1', 'device_profiles': 'p1',
                            'label': 'nas-01'}}
         res, _dev = self._run(env, [self._host()], servers)
         assert 'srv/metrics' in res.list
@@ -955,7 +955,7 @@ class TestAHostIsADeviceOnItsOwn:
         """A disabled item is somebody saying "not this one". Resuming it from the other end
         because the configuration also lives on the host would be an upgrade undoing a
         decision nobody was asked about."""
-        servers = {'srv': {'enabled': False, 'host_uid': 'h1', 'device_profiles': 'p1'}}
+        servers = {'srv': {'enabled': False, 'device_uid': 'h1', 'device_profiles': 'p1'}}
         _res, dev = self._run(env, [self._host()], servers)
         assert dev.asked == []
 
@@ -969,7 +969,7 @@ class TestAHostIsADeviceOnItsOwn:
         line, and no row on any screen. Its own connection test kept returning OIDs the whole
         time, which is what made it unreadable from outside.
         """
-        servers = {'srv': {'enabled': True, 'host_uid': 'h1', 'label': 'SW',
+        servers = {'srv': {'enabled': True, 'device_uid': 'h1', 'label': 'SW',
                            'checks': {'c1': {'enabled': True, 'oid': '1.1'}}}}
         res, dev = self._run(env, [self._host()], servers)
         assert 'host.h1/metrics' in res.list, 'the device is sampled by nobody'
@@ -978,14 +978,14 @@ class TestAHostIsADeviceOnItsOwn:
     def test_an_item_with_profiles_still_claims_it(self, env):
         """The other half: two samplers on one machine would chart every series against
         itself."""
-        servers = {'srv': {'enabled': True, 'host_uid': 'h1', 'device_profiles': 'p1',
+        servers = {'srv': {'enabled': True, 'device_uid': 'h1', 'device_profiles': 'p1',
                            'checks': {'c1': {'enabled': True, 'oid': '1.1'}}}}
         res, _dev = self._run(env, [self._host()], servers)
         assert 'srv/metrics' in res.list and 'host.h1/metrics' not in res.list
 
     def test_a_host_with_no_assignment_is_left_alone(self, env):
-        hosts = [self._host(profiles={'snmp': {'community': 'public', 'version': '2c'}})]
-        _res, dev = self._run(env, hosts)
+        devices = [self._host(profiles={'snmp': {'community': 'public', 'version': '2c'}})]
+        _res, dev = self._run(env, devices)
         assert dev.asked == []
 
 
@@ -1075,7 +1075,7 @@ class TestTheProfileIsTheVerdict:
     def _switch(self, env, watched):
         """Two ports, both down; *watched* is what somebody said matters."""
         env.profile('p1', [self.PORTS])
-        srv = _server(device_profiles='p1', host_uid='h1')
+        srv = _server(device_profiles='p1', device_uid='h1')
         mon = env.monitor(srv)
 
         class _Store:
@@ -1086,7 +1086,7 @@ class TestTheProfileIsTheVerdict:
                         'os': 'auto', 'maintenance': False, 'profiles': {'snmp': {}},
                         'modules': [], 'watch': []}
 
-        mon._hosts_store = _Store()
+        mon._devices_store = _Store()
         dev = _Dev(walks={'1.2.3': ({'1': '2', '2': '2'}, None),
                           '1.2.4': ({'1': 'gi1', '2': 'gi3'}, None)})
         return env.run(srv, dev, monitor=mon)[0]
@@ -1121,14 +1121,14 @@ class TestTheProfileIsTheVerdict:
         """It turns a verdict back ON. An empty answer is the behaviour without the feature,
         which is the right way for a preference to fail."""
         env.profile('p1', [self.PORTS])
-        srv = _server(device_profiles='p1', host_uid='h1')
+        srv = _server(device_profiles='p1', device_uid='h1')
         mon = env.monitor(srv)
 
         class _Broken:
             def watch(self_inner, uid):        # noqa: N805
                 raise RuntimeError('no database today')
 
-        mon._hosts_store = _Broken()
+        mon._devices_store = _Broken()
         dev = _Dev(walks={'1.2.3': ({'1': '2'}, None), '1.2.4': ({'1': 'gi1'}, None)})
         res = env.run(srv, dev, monitor=mon)[0]
         assert res['srv/gi1']['status'] is True

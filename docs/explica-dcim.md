@@ -99,16 +99,16 @@ lleva su **operador** además de que cada cosa lleve su **dueño**.
 La otra decisión que ordena todo lo demás está en la cadena física: **un rack contiene *items*,
 y algunos items son hosts**. No al revés.
 
-Es tentador poner `rack_uid` y `posicion_u` como columnas de `hosts` y acabar antes. No vale, y
+Es tentador poner `rack_uid` y `posicion_u` como columnas de `devices` y acabar antes. No vale, y
 se ve en cuanto se dibuja un rack real: un panel de parcheo ocupa 1U y no es un host. Una tapa
 ciega ocupa 1U y no es nada. Un chasis de blades ocupa 7U y contiene ocho cosas que sí son
 hosts. Una regleta vertical no ocupa ninguna U y sí ocupa el rack. Un equipo apagado que sigue
 atornillado ocupa su sitio aunque el panel no lo monitorice.
 
-Así que el item de rack es la entidad, con `host_uid` **opcional**. Un item con host se colorea
+Así que el item de rack es la entidad, con `device_uid` **opcional**. Un item con host se colorea
 con el estado en vivo; uno sin host es inventario mudo, que es exactamente lo que es.
 
-Corolario: `hosts` **no se toca**. El registro sigue siendo la fuente de verdad de qué
+Corolario: `devices` **no se toca**. El registro sigue siendo la fuente de verdad de qué
 dispositivos hay y cómo se llega a ellos; DCIM añade *dónde están*, en su propia tabla, y la
 relación se rompe sin pérdida por cualquiera de los dos lados.
 
@@ -527,7 +527,7 @@ de la información que habrá cuando toque.
       decidiendo si cabe**: ya sabe de caras y de solapes. Lo ajeno no se arrastra
       *(la inversa altura→U tenía un desplazamiento de una U que no daba ningún error;
       ficha en `caso-diagnostico.md`)*
-- [x] Enlazar un item con un host desde la pantalla — **sin esto el alzado sale gris entero**, que es tanto como no tenerlo: el color en vivo lee `host_uid` y `host_uid` no se podía escribir desde ninguna parte
+- [x] Enlazar un item con un host desde la pantalla — **sin esto el alzado sale gris entero**, que es tanto como no tenerlo: el color en vivo lee `device_uid` y `device_uid` no se podía escribir desde ninguna parte
 
 **Fase 2 — Salas** *(el plano)*
 
@@ -631,7 +631,7 @@ de la información que habrá cuando toque.
 **Fase 4 — Potencia**
 
 - [x] `dc_pdu`: la regleta, con su **rama** (A / B / ninguna), sus tomas y lo que aguanta. Y su
-      `host_uid`, porque **una PDU gestionada es un host**: contesta y dice lo que está dando,
+      `device_uid`, porque **una PDU gestionada es un host**: contesta y dice lo que está dando,
       así que ahí tenemos las dos mitades —lo declarado y lo medido— que son toda la tesis
 - [x] `dc_feed`: un cable. Una fila por cable y **no una columna en el equipo**, porque un
       equipo con una sola fila es justo el hallazgo: dos fuentes y una sin enchufar

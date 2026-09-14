@@ -9,7 +9,7 @@ Rutas:
 
     GET     /api/v1/dcim/board
     GET     /api/v1/dcim/fits
-    GET     /api/v1/dcim/hosts
+    GET     /api/v1/dcim/devices
     POST    /api/v1/dcim/items
     PUT     /api/v1/dcim/items/<uid>
     DELETE  /api/v1/dcim/items/<uid>
@@ -114,7 +114,7 @@ def register(app, wa, C):
             store, C.states(), store.owners_map(), C.seen(), store.orgs.list(),
             # Con qué NOMBRAR lo que está mal: el hueco de un armario no siempre lleva
             # etiqueta, y una fila que dice el uid de la máquina no dice nada.
-            host_names=C.names())
+            device_names=C.names())
         # Con qué se dibuja el mapa. Viaja con el cuadro y no en una ruta aparte: es la misma
         # pantalla, y una petición más para dos cadenas es una petición más en cada apertura.
         # Y los enlaces entre sedes, con su estado y lo que se les ve mal. Viajan con el
@@ -261,9 +261,9 @@ def register(app, wa, C):
         store.parts.delete(uid)
         return jsonify({'ok': True})
 
-    @app.route('/api/v1/dcim/hosts', methods=['GET'])
+    @app.route('/api/v1/dcim/devices', methods=['GET'])
     @C.view_req
-    def api_dcim_hosts():
+    def api_dcim_devices():
         """The machines this caller may link an item to: uid, name, address, and what the
         device said it IS.
 
@@ -277,9 +277,9 @@ def register(app, wa, C):
         Narrowed by the registry's own rule (`devices_view` / `server.<uid>.view`), because what
         is being offered here is the registry's records.
         """
-        store = getattr(wa, '_hosts_store', None)
+        store = getattr(wa, '_devices_store', None)
         if store is None:
-            return jsonify({'hosts': []})
+            return jsonify({'devices': []})
         perms = C.perms()
         rows = []
         for h in store.list(decrypt=False) or ():
@@ -290,7 +290,7 @@ def register(app, wa, C):
                          'address': str(h.get('address') or ''),
                          'device_type': str(h.get('device_type') or '')})
         rows.sort(key=lambda r: r['name'].lower())
-        return jsonify({'hosts': rows})
+        return jsonify({'devices': rows})
 
     @app.route('/api/v1/dcim/racks', methods=['GET'])
     @C.view_req
@@ -346,7 +346,7 @@ def register(app, wa, C):
         items = C.filtered(store.items_of(uid), store, said, allowed, 'item')
         statuses = C.states()
         # …and what each of them is DOING, which is the join this section exists for. A
-        # foreign item carries no host, so it contributes no state and gets none — occupied,
+        # foreign item carries no device, so it contributes no state and gets none — occupied,
         # and nothing else said about it.
         for item in items:
             item['state'] = dcim_svc.item_state(item, statuses)
@@ -570,13 +570,13 @@ def register(app, wa, C):
         le falta esa directiva `extend`. La lista de lo que sí dijo separa las dos sin tener que
         abrir otra pantalla, que es lo que costó la primera vez que pasó.
         """
-        from lib.core.hosts.resolve import reported_facts        # noqa: PLC0415
+        from lib.core.devices.resolve import reported_facts        # noqa: PLC0415
         uid = str(request.args.get('host') or '').strip()
         if not uid:
             return jsonify({'said': {}})
-        store = getattr(wa, '_hosts_store', None)
+        store = getattr(wa, '_devices_store', None)
         if store is None or not store.get(uid, decrypt=False):
-            return jsonify({'error': wa._t('host_not_found')}), 404
+            return jsonify({'error': wa._t('device_not_found')}), 404
         # Con el permiso de la MÁQUINA además del del inventario: lo que se devuelve es lo que
         # un dispositivo contó de sí mismo, y quien no puede abrir su ficha tampoco puede
         # sacárselo por aquí. La misma regla que el listado del registro, dicha igual.
@@ -774,7 +774,7 @@ def register(app, wa, C):
                 continue
             fuera.append({'uid': fila['uid'], 'label': str(fila.get('label') or ''),
                           'type_name': _modelo(fila.get('type_uid')),
-                          'host_uid': str(fila.get('host_uid') or ''),
+                          'device_uid': str(fila.get('device_uid') or ''),
                           'role': str(fila.get('role') or ''),
                           'u_start': fila.get('u_start'),
                           'u_height': fila.get('u_height'),

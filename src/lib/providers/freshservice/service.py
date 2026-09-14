@@ -81,9 +81,9 @@ def _clase(wa, p, actor: str) -> str:
     """
     if wa is None:
         return ''
-    from lib.core.hosts import classes as host_types        # noqa: PLC0415
+    from lib.core.devices import classes as device_types        # noqa: PLC0415
     try:
-        adivinada = host_types.uid_for(wa, str(p.get('device_type') or ''))
+        adivinada = device_types.uid_for(wa, str(p.get('device_type') or ''))
     except Exception:  # pylint: disable=broad-except
         adivinada = ''
     if adivinada:
@@ -92,7 +92,7 @@ def _clase(wa, p, actor: str) -> str:
     if not nombre:
         return ''
     try:
-        return host_types.ensure(wa, nombre, source=SOURCE,
+        return device_types.ensure(wa, nombre, source=SOURCE,
                                  external_id=str(p.get('new_type_id') or ''), actor=actor)
     except Exception:  # pylint: disable=broad-except
         return ''

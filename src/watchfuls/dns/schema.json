@@ -7,8 +7,8 @@
         "timeout":    {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 30}
     },
     "__history__": {"field": "response_time", "unit": "ms", "label": "DNS Resolution Time"},
-    "__host_profile__": {"key": "ssh", "address_field": "ssh_host"},
-    "__host_multiple__": true,
+    "__device_profile__": {"key": "ssh", "address_field": "ssh_host"},
+    "__device_multiple__": true,
     "list": {
         "__discovery__": "discover",
         "__discovery_method__": "POST",

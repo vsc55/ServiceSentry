@@ -16,7 +16,7 @@ FIELD_PICKERS['web_admin|backup_dir'] = {
     icon: 'bi-folder2-open',
     title: 'backup_browse',
     // `...a`: the panes that draw a field do not all call this with the same number of
-    // arguments — the host modal adds one — and an arrow that names them drops the rest
+    // arguments — the device modal adds one — and an arrow that names them drops the rest
     // in silence. It cost an afternoon on the SNMP one.
     open: (...a) => _openDirPicker(...a),
     // Filled in below. Empty until then rather than a guess: showing `<var_dir>/backups` as

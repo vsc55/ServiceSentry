@@ -575,7 +575,7 @@ Configuración por módulo. **Se persiste en la base de datos**, en dos tablas
 Tabla `module_config`: una fila por módulo — los campos a nivel de módulo
 (`enabled`, `alert`, meta `__*__`) como JSON en la columna `data`.
 
-Tabla `module_config_items`: una fila por ítem — `host_uid`, `label` y `enabled`
+Tabla `module_config_items`: una fila por ítem — `device_uid`, `label` y `enabled`
 promovidos a columnas (para joins y búsquedas) y el resto del ítem como JSON en
 la columna `data`.
 

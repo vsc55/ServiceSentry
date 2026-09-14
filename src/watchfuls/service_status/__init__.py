@@ -21,8 +21,8 @@
 
 """Watchful module to monitor system services, on the bound host.
 
-Host-centric: each check binds to a host (``host_uid``).  The service state is
-read on that host via :meth:`ModuleBase.host_exec` — locally or over SSH — using
+Host-centric: each check binds to a host (``device_uid``).  The service state is
+read on that host via :meth:`ModuleBase.device_exec` — locally or over SSH — using
 an OS-appropriate command (``systemctl`` on Linux, ``sc`` on Windows,
 ``launchctl`` on macOS, ``service`` on FreeBSD).  Optional auto-remediation
 starts/stops the service to restore the expected state.  ``discover`` lists the
@@ -42,7 +42,7 @@ _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'),
 
 # Per-OS command to read a service's state ({svc} substituted, shell-quoted).
 def _win_quote(s: str) -> str:
-    """Quote an argument for cmd.exe (host_exec runs with shell=True on Windows). Double
+    """Quote an argument for cmd.exe (device_exec runs with shell=True on Windows). Double
     quotes neutralise the command separators (& | < > ^) and embedded quotes are stripped so
     the value can't break out — the POSIX branches use shlex.quote instead. NB: this does
     NOT stop ``%VAR%`` environment-variable expansion (no command execution, and the value
@@ -102,8 +102,8 @@ class Watchful(ServiceDiscovery, ModuleBase):
         return self.dict_return
 
     def _service_check(self, key, raw):
-        item = self.resolve_host(raw)
-        if item.get('_host_maintenance') or not item.get('enabled', True):
+        item = self.resolve_device(raw)
+        if item.get('_device_maintenance') or not item.get('enabled', True):
             return
         # The item key is a stable UID; the message uses the editable 'label'
         # (e.g. "host - service"), falling back to the service/unit name.  The
@@ -114,7 +114,7 @@ class Watchful(ServiceDiscovery, ModuleBase):
         if expected not in ('running', 'stopped'):
             expected = 'running'
         remediation = bool(item.get('remediation', False))
-        os_ = self.host_os(item)
+        os_ = self.device_os(item)
         if os_ not in _STATUS_CMDS:
             self.dict_return.set(key, False,
                                  self._msg('svc_unsupported_os', label, os_),
@@ -171,7 +171,7 @@ class Watchful(ServiceDiscovery, ModuleBase):
         """Return (running, error, detail) by running the per-OS status command."""
         svc = _win_quote(service_name) if os_ == 'windows' else shlex.quote(service_name)
         cmd = _STATUS_CMDS[os_].format(svc=svc)
-        out, err, code = self.host_exec(
+        out, err, code = self.device_exec(
             item, cmd, timeout=self.module_default('timeout', 15))
         return self._parse_state(os_, out, err, code)
 
@@ -212,4 +212,4 @@ class Watchful(ServiceDiscovery, ModuleBase):
         action = 'stop' if expected == 'stopped' else 'start'
         svc = _win_quote(service_name) if os_ == 'windows' else shlex.quote(service_name)
         cmd = _ACTION_CMDS[os_].format(action=action, svc=svc)
-        self.host_exec(item, cmd, timeout=self.module_default('timeout', 15))
+        self.device_exec(item, cmd, timeout=self.module_default('timeout', 15))

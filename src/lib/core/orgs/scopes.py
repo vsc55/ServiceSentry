@@ -141,7 +141,7 @@ def actions(wa) -> list:
 
     El filtrado —sin `fn` no se dibuja, `ready(wa)` manda, un `ready` que revienta cuenta como
     «no está puesto»— lo hace :func:`lib.discovery.ready_actions`, que es la misma regla que
-    aplica la pantalla de Dispositivos con `HOST_ACTIONS`. Escrita una vez: dos copias de esto
+    aplica la pantalla de Dispositivos con `DEVICE_ACTIONS`. Escrita una vez: dos copias de esto
     son dos sitios donde arreglar el mismo fallo.
     """
     from lib.discovery import ready_actions       # noqa: PLC0415

@@ -1,7 +1,7 @@
 {# ================================================================
-   Servers — cards: a host as one object instead of a row of columns.
+   Servers — cards: a device as one object instead of a row of columns.
 
-   The table can show everything about a host, but only if you turn on eight columns and
+   The table can show everything about a device, but only if you turn on eight columns and
    then read them left to right. A card holds the same facts in the shape you think about a
    machine in: what it is called and where it lives, what kind it is, how it is doing, and
    what is watching it.
@@ -9,9 +9,9 @@
    Same page, same order, same filters as the table — this is a shape, not a different set.
    ================================================================ #}
 
-function _srvViewCards(hosts, ctx) {
-    return _cardGrid(hosts.map(h => {
-        const clusters = (typeof _hostClusterMemberships === 'function') ? _hostClusterMemberships(h.uid) : [];
+function _srvViewCards(devices, ctx) {
+    return _cardGrid(devices.map(h => {
+        const clusters = (typeof _deviceClusterMemberships === 'function') ? _deviceClusterMemberships(h.uid) : [];
         const chips = [
             _srvModulesPill(h),
             (h.os && h.os !== 'auto')
@@ -26,10 +26,10 @@ function _srvViewCards(hosts, ctx) {
             toggle: ctx.canDelete ? `_serversToggleOne(${jsStr(h.uid)}, this.checked)` : '',
             title: `<span class="fw-semibold ss-fs-4"${h.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(h.name)}</span>`,
             // The status badge is the shared one: "maintenance" is orange in the table and
-            // must be orange here, or the same host would look like two different states in
+            // must be orange here, or the same device would look like two different states in
             // two views of the same page.
             badges: `${_srvStatusBadge(h)}${h.virtual
-                ? ` <span class="badge text-bg-info" title="${escAttr(t('host_virtual_hint'))}"><i class="bi bi-diagram-3 me-1"></i>${esc(t('host_virtual'))}</span>` : ''}`,
+                ? ` <span class="badge text-bg-info" title="${escAttr(t('device_virtual_hint'))}"><i class="bi bi-diagram-3 me-1"></i>${esc(t('device_virtual'))}</span>` : ''}`,
             subtitle: `<code>${esc(h.address || '')}</code>${h.description ? ' · ' + esc(h.description) : ''}`,
             chips,
             actions: _srvActionsHtml(h, ctx),

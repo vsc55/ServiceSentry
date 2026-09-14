@@ -85,7 +85,7 @@ class TestQuePuedeSerDeUnaEmpresaLoDiceQuienLoTiene:
         for ambito in ('site', 'room', 'rack', 'item'):
             assert registro[ambito]['package'] == 'dcim', ambito
         # …y la máquina la declara el registro de máquinas, que es de quien es.
-        assert registro['host']['package'] == 'hosts'
+        assert registro['device']['package'] == 'devices'
 
     def test_y_ninguno_llega_sin_nombre_traducible(self):
         """La pantalla cuenta «3 armarios» sin saber qué es un armario: el texto sale de la
@@ -102,7 +102,7 @@ class TestQuePuedeSerDeUnaEmpresaLoDiceQuienLoTiene:
     def test_una_maquina_no_hereda_de_nada_y_eso_es_una_respuesta(self):
         """Un `host` no tiene contenedor del que heredar: es de quien se dijo, y de nadie si no
         se dijo. Contestar consigo mismo es lo que hace que resuelva igual que los demás."""
-        assert scopes.chain_of(None, 'host', 'h1') == [('host', 'h1')]
+        assert scopes.chain_of(None, 'device', 'h1') == [('device', 'h1')]
 
     def test_y_un_ambito_que_no_existe_no_estalla_al_resolverse(self):
         assert scopes.chain_of(None, 'inventado', 'x') == [('inventado', 'x')]

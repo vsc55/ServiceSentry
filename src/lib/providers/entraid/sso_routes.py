@@ -8,7 +8,7 @@ be framed), so it uses the Teams JS SDK: ``getAuthToken()`` yields a signed toke
 the same provider pattern as OIDC/SAML (which also live under ``lib/providers`` and
 reuse ``wa._establish_session`` on the WebAdmin).
 
-External-facing (a host renders the page / a token authenticates it), so both live under
+External-facing (a device renders the page / a token authenticates it), so both live under
 the ``/auth/<provider>/*`` convention — CSRF-exempt, NOT session-gated.
 
 Routes registered by this file:
@@ -30,7 +30,7 @@ _TEAMS_SDK = 'https://res.cdn.office.net/teams-js/2.34.0/js/MicrosoftTeams.min.j
 
 def _tab_csp() -> str:
     """CSP for the tab page: allow the Teams SDK from the office CDN and let the
-    Microsoft Teams/Outlook hosts frame this page."""
+    Microsoft Teams/Outlook devices frame this page."""
     fa = "frame-ancestors 'self' " + ' '.join(tab_sso.TEAMS_FRAME_ANCESTORS)
     head = _CSP_HEAD.replace("script-src 'self' 'unsafe-inline'",
                              "script-src 'self' 'unsafe-inline' https://res.cdn.office.net")

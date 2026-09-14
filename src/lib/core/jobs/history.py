@@ -241,7 +241,7 @@ class JobHistoryStore(BaseStore):
             'uid': r[0], 'job_id': r[1], 'source': r[2], 'kind': r[3], 'label': r[4],
             'state': r[5], 'started_at': float(r[6] or 0), 'ended_at': float(r[7] or 0),
             'done': int(r[8] or 0), 'total': int(r[9] or 0), 'error': r[10] or '',
-            # Which run of which process did it. `host:pid:role` — the same name the service
+            # Which run of which process did it. `device:pid:role` — the same name the service
             # registry and the health screen call it, so it is one a person can look up.
             'owner': r[11] or '',
             'log_lines': len(log) if isinstance(log, list) else 0,

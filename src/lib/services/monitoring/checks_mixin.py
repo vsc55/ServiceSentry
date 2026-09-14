@@ -25,7 +25,7 @@ class _ChecksMixin:
 
     def _run_checks(self, requested, *, timeout: int | None = None,
                     progress_cb=None, lang: str = '',
-                    only_host: str = '') -> tuple[dict, list[str]]:
+                    only_device: str = '') -> tuple[dict, list[str]]:
         """Execute the requested module checks in parallel and return their
         serialisable results.
 
@@ -43,7 +43,7 @@ class _ChecksMixin:
         ``progress_cb(state, module, detail, extra)`` is handed straight to the executor: it
         is called as each module starts and lands, so a background run can be watched.
 
-        ``only_host`` narrows the run to one machine's items — what "collect this device"
+        ``only_device`` narrows the run to one machine's items — what "collect this device"
         means. Absent, every module runs with its whole configuration, which is what a cycle
         and the Status screen's "run all" are asking for.
 
@@ -66,7 +66,7 @@ class _ChecksMixin:
         monitor = Monitor(dir_base, self._config_dir,
                           self._modules_dir, self._var_dir)
         # An on-demand "Run all" notifies exactly like the daemon cycle: give the transient
-        # monitor a cycle notifier routed through this host's core notification router (same as
+        # monitor a cycle notifier routed through this device's core notification router (same as
         # the persistent monitor in manager._monitoring_build_monitor). It is state-change based
         # (the shared check_state is the baseline), so an unchanged service sends nothing; the
         # executor flushes it at the end of the batch.
@@ -87,4 +87,4 @@ class _ChecksMixin:
         return run_checks(monitor, module_names, lang=lang,
                           timeout=int(timeout or _MODULE_CHECK_TIMEOUT),
                           history=getattr(self, '_history', None),
-                          progress_cb=progress_cb, only_host=only_host)
+                          progress_cb=progress_cb, only_device=only_device)

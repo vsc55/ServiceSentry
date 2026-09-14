@@ -21,7 +21,7 @@ aceptar, y ahí se acaba.
 **Y la que no se parece a ninguna se crea.** Un punto de acceso no era ninguna de las once clases
 de serie, así que caía en «sin clasificar» — junto con los teléfonos IP, las controladoras y todo
 lo que no estaba en una lista escrita hace dos años. Ahora la importación añade la clase con el
-nombre que trae el origen (`lib/core/hosts/classes.py::ensure`), y el plan lo **dice antes**:
+nombre que trae el origen (`lib/core/devices/classes.py::ensure`), y el plan lo **dice antes**:
 crear clases en silencio es la manera de acabar con quince que nadie recuerda haber pedido.
 """
 
@@ -36,12 +36,12 @@ from lib.providers.freshservice.plan import SOURCE, ascii_fold
 #: El nombre del activo NO está en la lista, y estuvo: se parece a un nombre de máquina lo
 #: bastante para tentar, y «Portátil de Juan» como dirección de un check es un dispositivo que
 #: sale en rojo para siempre sin que nadie entienda por qué. Sin dirección es una respuesta.
-ADDRESS_FIELDS = ('ip_address', 'hostname', 'host_name', 'fqdn')
+ADDRESS_FIELDS = ('ip_address', 'hostname', 'device_name', 'fqdn')
 
 #: El número de serie, que es lo que se lee en una pegatina y lo que pide un soporte.
 SERIAL_FIELDS = ('serial_number', 'serial_no', 'serial')
 
-#: Qué clase de dispositivo de los de aquí (`lib/core/hosts/manifest.py::HOST_TYPES`) se parece
+#: Qué clase de dispositivo de los de aquí (`lib/core/devices/manifest.py::DEVICE_TYPES`) se parece
 #: a un tipo de activo de allí. **Por palabras y no por identificador**: el número de un tipo de
 #: activo es distinto en cada casa, y su nombre lo escribe quien montó ese Freshservice — en su
 #: idioma, y a veces en dos.
@@ -168,10 +168,10 @@ def _asset(fila, tipos) -> dict:
 MANAGED = ('name', 'address', 'description')
 
 
-def build(assets, hosts, types=None) -> list:
+def build(assets, devices, types=None) -> list:
     """El plan: una entrada por activo, diciendo qué se haría con él.
 
-    *assets* es lo que contestó Freshservice, *hosts* los dispositivos de aquí y *types* sus
+    *assets* es lo que contestó Freshservice, *devices* los dispositivos de aquí y *types* sus
     tipos de activo. Devuelve ``{'action', 'external_id', 'name', 'address', 'description',
     'serial', 'asset_tag', 'type_name', 'device_type', 'uid', 'was'}`` con *action* en:
 
@@ -184,7 +184,7 @@ def build(assets, hosts, types=None) -> list:
     """
     tipos = type_names(types)
     por_ext, por_nombre = {}, {}
-    for h in (hosts or ()):
+    for h in (devices or ()):
         if str(h.get('source') or '') == SOURCE and str(h.get('external_id') or ''):
             por_ext[str(h['external_id'])] = h
         if not str(h.get('source') or ''):
@@ -210,13 +210,13 @@ def build(assets, hosts, types=None) -> list:
     return plan
 
 
-def _was(host) -> dict:
+def _was(device) -> dict:
     """Lo que hay aquí AHORA de los campos que la importación mantiene. Es lo que convierte «12
     se corrigen» en «éste va a cambiar de nombre», que es lo que alguien mira antes de aceptar."""
-    return {c: str((host or {}).get(c) or '') for c in MANAGED}
+    return {c: str((device or {}).get(c) or '') for c in MANAGED}
 
 
-def select(plan, pick=None, link=None, hosts=None):
+def select(plan, pick=None, link=None, devices=None):
     """El plan que de verdad se va a aplicar: lo ELEGIDO, con los emparejamientos a mano puestos.
 
     Devuelve ``(plan, rechazos)``. Dos cosas y no una porque una fila que no se puede hacer no es
@@ -233,7 +233,7 @@ def select(plan, pick=None, link=None, hosts=None):
     * ya está atado a OTRO activo. Dos no pueden compartir uno: el segundo le pisaría el nombre
       al primero en cada importación, y la ficha iría cambiando de nombre sola.
     """
-    por_uid = {str(h.get('uid') or ''): h for h in (hosts or ())}
+    por_uid = {str(h.get('uid') or ''): h for h in (devices or ())}
     elegidos = None if pick is None else {str(x) for x in pick}
     enlaces = {str(k): str(v) for k, v in (link or {}).items() if str(v or '')}
     fuera, rechazos = [], []
@@ -259,7 +259,7 @@ def select(plan, pick=None, link=None, hosts=None):
     return fuera, rechazos
 
 
-def orphans(assets, hosts) -> list:
+def orphans(assets, devices) -> list:
     """Lo que se importó un día y ya no está en Freshservice.
 
     **No se borra**, y por eso esto sólo lo cuenta: de ese dispositivo cuelgan perfiles de
@@ -269,7 +269,7 @@ def orphans(assets, hosts) -> list:
     """
     vivos = {str((f or {}).get('display_id') or (f or {}).get('id') or '')
              for f in (assets or ())}
-    return [h for h in (hosts or ())
+    return [h for h in (devices or ())
             if str(h.get('source') or '') == SOURCE
             and str(h.get('external_id') or '') not in vivos]
 

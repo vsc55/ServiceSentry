@@ -2,7 +2,7 @@
 purpose: AI agent reference for creating ServiceSentry watchful modules
 version: "2.1"
 last_validated: "2026-06-26"
-validated_by: "Code-vs-doc audit (2026-06-26): reconciled host binding (__host_profile__ / __host_multiple__ / __credential__), __history__, field props (multi / nullable / ipkind / term_field / result_multi / placeholder_map_field), discovery UI meta-keys (__check_title_field__, __title_editable__, __discovery_uid_key__/_label_template__/_inputs__/_value_field__/_dedup_with_type__), MISSING_DEPS/PARTIAL_DEPS, host-aware exec helpers. No reverse drift (every documented symbol exists). Prior: agent built http_check from this doc alone, 393/393 tests pass (2026-05-29)."
+validated_by: "Code-vs-doc audit (2026-06-26): reconciled host binding (__device_profile__ / __host_multiple__ / __credential__), __history__, field props (multi / nullable / ipkind / term_field / result_multi / placeholder_map_field), discovery UI meta-keys (__check_title_field__, __title_editable__, __discovery_uid_key__/_label_template__/_inputs__/_value_field__/_dedup_with_type__), MISSING_DEPS/PARTIAL_DEPS, host-aware exec helpers. No reverse drift (every documented symbol exists). Prior: agent built http_check from this doc alone, 393/393 tests pass (2026-05-29)."
 coverage: "100% — all code features documented"
 ---
 
@@ -206,7 +206,7 @@ class Watchful(ModuleBase):
 - [ ] `MISSING_DEPS` — list of required pip packages; if absent, module shows `__unsupported__` + "pip install …"
 - [ ] `PARTIAL_DEPS` — list of optional pip packages; if absent, module shows a warning badge but stays usable
 - [ ] `audit_detail(cls, action, result)` — custom audit log entries
-- [ ] `host_os()` / `host_cmd_for()` / `host_exec()` — host-aware (local/SSH) execution helpers (see §7)
+- [ ] `host_os()` / `host_cmd_for()` / `device_exec()` — host-aware (local/SSH) execution helpers (see §7)
 - [ ] `web/_ui.html` + `web/_modals.html` — custom JS/HTML
 - [ ] `fail_streak(key, failed)` — consecutive failure tracking (persisted in check_state DB; survives cycles/processes)
 
@@ -676,7 +676,7 @@ For host-aware / history / credential-backed modules, declare these in `__module
 | Key | Description |
 |-----|-------------|
 | `api_ver` | API version for action URLs (`/api/<ver>/watchfuls/...`). Default `"v1"` |
-| `__host_profile__` | Which protocol a check inherits its connection from when bound to a host: `{"key": <proto>, "address_field": <field>}` (dict or list). Omit `fields` for a core-owned protocol (`ssh`, `snmp`) — it says what it holds; only a module's own protocol lists them. Resolved by `ModuleBase.resolve_host()` |
+| `__device_profile__` | Which protocol a check inherits its connection from when bound to a host: `{"key": <proto>, "address_field": <field>}` (dict or list). Omit `fields` for a core-owned protocol (`ssh`, `snmp`) — it says what it holds; only a module's own protocol lists them. Resolved by `ModuleBase.resolve_device()` |
 | `__profile_fields__` | Inside a collection: `"__profile_fields__": "<proto>"` expands a core protocol's connection fields into the item, so an UNBOUND check (a bare IP) can still state them without the module copying them |
 | `__host_multiple__` | `true` = a check can bind to several hosts (multi-select) |
 | `__credential__` | Reusable-credential fields: `{"type": "web_auth", "fields": [...]}` (referenceable from the credential store) |
@@ -685,7 +685,7 @@ For host-aware / history / credential-backed modules, declare these in `__module
 ```json
 "__module__": {
     "api_ver": "v1",
-    "__host_profile__": {"key": "snmp", "address_field": "host",
+    "__device_profile__": {"key": "snmp", "address_field": "host",
                      "fields": ["host", "port", "version", "community",
                                 "device_profiles"]},
     "__host_multiple__": true,
@@ -862,7 +862,7 @@ runner.command = 'df -h';  r2 = runner.start()
 os_name = self.host_os(item)                       # 'linux' | 'darwin' | 'win32'
 cmd     = self.host_cmd_for(item, {'linux': 'cat /proc/stat',
                                    'darwin': 'top -l 2 -n 0'})
-out, err, code = self.host_exec(item, cmd, timeout=15)
+out, err, code = self.device_exec(item, cmd, timeout=15)
 ```
 
 ### Useful properties

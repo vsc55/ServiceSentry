@@ -7,18 +7,18 @@ Teams bot conversation-reference store) and *is* the routing: given an event kin
 fans out to every enabled channel (Telegram, Email, Webhook, Microsoft Teams) per the
 ``notifications`` matrix (``{channel}_on_{kind}``) or an explicit channel override.
 
-A host builds one router from a :class:`lib.core.notify.context.NotifyContext` and every
+A device builds one router from a :class:`lib.core.notify.context.NotifyContext` and every
 subsystem (the web admin, the monitor/events/syslog workers) sends its notifications
 *through that router* instead of wiring channels itself — the router is the single place
 channels are registered and dispatched, and it has no idea Flask or the web admin exist.
 
 The channels take a small generic "surface" object (``_config_section`` / ``_dbg`` /
 ``store`` / …); the router *is* that surface, so :func:`run_dispatch` and the channels
-call back into the router — never into a host.  A channel that needs persistence owns its
+call back into the router — never into a device.  A channel that needs persistence owns its
 store and builds it via ``router.store(key, factory)``, keeping the router channel-agnostic.
 :func:`run_dispatch` is kept as a
 module-level function so the thin :mod:`lib.core.notify.notification_dispatcher` shim can
-route a legacy host surface through the exact same logic during the migration.
+route a legacy device surface through the exact same logic during the migration.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def run_dispatch(surface, kind: str, module: str = '', item: str = '',
 class NotificationRouter:
     """Owns the notification channel stores + the routing, built from a NotifyContext.
 
-    This is the object every host delegates to (:meth:`dispatch`), and it is also the
+    This is the object every device delegates to (:meth:`dispatch`), and it is also the
     "surface" the channel senders call back into.  It stays **channel-agnostic**: it names
     no concrete store type — a channel that needs persistence asks :meth:`store` with its
     own factory (``ctx -> store``), so channel-specific code lives in the channel package,
@@ -104,7 +104,7 @@ class NotificationRouter:
 
     # ── generic context surface (called back by run_dispatch + the channels) ────
     def _read_config_file(self, _filename=None) -> dict:
-        # Overlay SS_* env here (the consumption surface for notifications on EVERY host —
+        # Overlay SS_* env here (the consumption surface for notifications on EVERY device —
         # web-embedded and the 3 standalone workers all dispatch through this router). The
         # stored config never carries env (the UI needs it that way), so e.g.
         # SS_TELEGRAM_TOKEN/CHAT_ID would otherwise be ignored when actually sending.

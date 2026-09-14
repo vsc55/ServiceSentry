@@ -100,7 +100,7 @@ def scan_flat(const: str, **kw) -> list:
 # la respuesta cambia en un sitio.
 #
 # Aquí y no copiado en cada pantalla porque la segunda copia llegó tres días después de la
-# primera: Empresas (`ORG_ACTIONS`) y Dispositivos (`HOST_ACTIONS`) hacen exactamente esto, y dos
+# primera: Empresas (`ORG_ACTIONS`) y Dispositivos (`DEVICE_ACTIONS`) hacen exactamente esto, y dos
 # implementaciones de la misma regla son dos sitios donde arreglar el mismo fallo.
 
 def ready_actions(const: str, wa, **kw) -> list:

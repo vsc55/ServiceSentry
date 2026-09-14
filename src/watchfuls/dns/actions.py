@@ -65,8 +65,8 @@ class DnsDiscovery:
         timeout = tables._coerce_int(config.get('timeout'), 5) or 5
         # Host-aware: the Servers modal injects the bound host; when it is remote,
         # probe from THERE (over SSH) so a host that reaches the DNS discovers.
-        from lib.core.hosts import runner as host_runner  # noqa: PLC0415
-        host = config.get('__host__') if isinstance(config, dict) else None
+        from lib.core.devices import runner as device_runner  # noqa: PLC0415
+        host = config.get('__device__') if isinstance(config, dict) else None
         if tables._truthy(inp.get('axfr')):
             try:
                 return cls._discover_axfr(domain, str(inp.get('axfr_server') or '').strip(), timeout)
@@ -74,7 +74,7 @@ class DnsDiscovery:
                 # AXFR is best-effort (usually refused on public zones) — never
                 # 500; an empty result reads as "no records transferable".
                 return []
-        if host_runner.is_remote(host):
+        if device_runner.is_remote(host):
             return cls._discover_probe_remote(host, domain, timeout)
         return cls._discover_probe(domain, timeout)
 
@@ -126,13 +126,13 @@ class DnsDiscovery:
     def _discover_probe_remote(cls, host: dict, domain: str, timeout: int) -> list:
         """Probe record types by running dig/nslookup ON the bound host (SSH), so
         a host that can reach the (internal) DNS does the discovery."""
-        from lib.core.hosts import runner as host_runner  # noqa: PLC0415
+        from lib.core.devices import runner as device_runner  # noqa: PLC0415
         os_ = str((host or {}).get('os') or 'linux').strip().lower()
         types = cls._probe_types()
         if os_ == 'windows':
             out = []
             for rt in types:
-                res, _e, _c = host_runner.run(
+                res, _e, _c = device_runner.run(
                     host, client._remote_dns_cmd('windows', domain, rt, '', timeout), timeout=timeout + 3)
                 resolved = client._parse_nslookup(rt, res)
                 if resolved:
@@ -144,7 +144,7 @@ class DnsDiscovery:
         script = '; '.join(
             f'echo "##{rt}##"; dig +short +time={t} +tries=1 {shlex.quote(rt)} {shlex.quote(domain)}'
             for rt in types)
-        res, _e, _c = host_runner.run(host, script, timeout=t * len(types) + 5)
+        res, _e, _c = device_runner.run(host, script, timeout=t * len(types) + 5)
         return cls._parse_combined_dig(domain, res)
 
     @classmethod

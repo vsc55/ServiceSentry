@@ -174,7 +174,7 @@ class TestWhatEachMeasurementIsCalled:
         """Two sources and both are the module's own: the name it recorded (`_row`), and the
         `<item>/<detail>` key the rest of the product already speaks. Nothing here parses a
         message or infers from a field name."""
-        from lib.core.hosts.service import _row_of          # noqa: PLC0415
+        from lib.core.devices.service import _row_of          # noqa: PLC0415
         assert _row_of('abc/Drive_1', {'_row': 'Drive 1 (DX517-1)'}) == 'Drive 1 (DX517-1)'
         assert _row_of('abc/Drive_1', {}) == 'Drive_1'
         # `metrics` is the sampler's word for "the item itself", so it names no row.
@@ -400,7 +400,7 @@ class TestWhatTheMachineHasBeenSaying:
         assert 'sort: st.sort' in js and 'order: st.order' in js, (
             'the sort never reaches the request')
         fn = _fn(js, '_hostLogsSort')
-        assert '_hostLogsFetch()' in fn and 'st.page = 1' in fn, (
+        assert '_deviceLogsFetch()' in fn and 'st.page = 1' in fn, (
             'sorting leaves the reader on page nine of a different order')
 
     def test_the_header_and_the_rows_read_one_list(self):
@@ -695,7 +695,7 @@ class TestTheOpenDeviceSurvivesAReload:
         Checked against the fleet that was just fetched, rather than asked for and answered
         with a spinner that never resolves."""
         body = _fn(_js(), 'renderInfra')
-        assert '_infraHosts.some(h => h.uid === want)' in body
+        assert '_infraDevices.some(h => h.uid === want)' in body
 
 
 class TestRowsThatBelongToDifferentPartsAreSeparated:

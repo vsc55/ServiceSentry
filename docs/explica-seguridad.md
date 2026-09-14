@@ -761,7 +761,7 @@ Además de los flags globales existen **tres familias dinámicas**, cada una con
 - `cluster.<uid>.*` — por cluster multi-bind concreto (`is_cluster_perm`).
 
 La autorización por-servidor/cluster se resuelve en `lib/core/modules/authz.py` a partir del
-`host_uid`/`host_uids` del ítem; las globales (`servers_*`, `clusters_*`) conceden acceso a
+`device_uid`/`host_uids` del ítem; las globales (`servers_*`, `clusters_*`) conceden acceso a
 todos.
 
 **Cambiar la atadura es cambiar dos hosts.** Un alta se autoriza contra el host destino y una
@@ -1444,7 +1444,7 @@ GET  /api/v1/notify/templates   GET /api/v1/notify/html-templates
 Hay dos rutas de ejecución remota, con políticas de host distintas:
 
 - La clase `Exec` (`lib/system/exe.py`) usa `paramiko.RejectPolicy`: los hosts que no estén en `~/.ssh/known_hosts` son rechazados (no se aceptan hosts desconocidos).
-- La ejecución **host-aware de los módulos** (`ModuleBase.host_exec` → `lib/core/hosts/ssh_client.py::connect_host`) es configurable **por host** mediante `ssh_verify_host`: con `True` carga `known_hosts` y aplica `RejectPolicy`; con `False` (**por defecto**) usa `AutoAddPolicy`, es decir **acepta hosts desconocidos** (añade su clave en el primer contacto). Para entornos sensibles, activa `ssh_verify_host` en el perfil del host.
+- La ejecución **host-aware de los módulos** (`ModuleBase.device_exec` → `lib/core/devices/ssh_client.py::connect_host`) es configurable **por host** mediante `ssh_verify_host`: con `True` carga `known_hosts` y aplica `RejectPolicy`; con `False` (**por defecto**) usa `AutoAddPolicy`, es decir **acepta hosts desconocidos** (añade su clave en el primer contacto). Para entornos sensibles, activa `ssh_verify_host` en el perfil del host.
 
 ---
 

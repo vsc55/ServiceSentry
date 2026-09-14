@@ -43,10 +43,10 @@ def is_item_collection(v) -> bool:
 
 def item_host_uid(o, n) -> str:
     """Host UID of an item from its new or old value (items can be non-dict
-    bool shorthands, which carry no host binding)."""
+    bool shorthands, which carry no device binding)."""
     for it in (n, o):
         if isinstance(it, dict):
-            hu = str(it.get('host_uid') or '').strip()
+            hu = str(it.get('device_uid') or '').strip()
             if hu:
                 return hu
     return ''

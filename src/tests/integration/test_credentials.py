@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Tests for the reusable-credentials feature: the CredentialsStore (CRUD +
 encryption at rest), the apply_credential overlay, cred_uid resolution in
-ModuleBase.resolve_host (inline check and via a host's ssh profile), and the
+ModuleBase.resolve_device (inline check and via a device's ssh profile), and the
 /api/v1/credentials API (masking, CRUD).
 
 Split by category: this file holds the tests that drive the Flask app; the rest of the original
@@ -24,10 +24,10 @@ _SECRET_KEYS = frozenset({'ssh_password', 'ssh_key_string', 'password', 'token'}
 # ── apply_credential overlay ─────────────────────────────────────────────────
 
 
-# ── Resolution in ModuleBase.resolve_host ────────────────────────────────────
+# ── Resolution in ModuleBase.resolve_device ────────────────────────────────────
 class _FakeHosts:
-    def __init__(self, hosts):
-        self._h = hosts
+    def __init__(self, devices):
+        self._h = devices
 
     def get(self, uid):
         return self._h.get(uid)
@@ -114,19 +114,19 @@ class TestApiCredentials:
         assert clone['data']['ssh_password'] == 'p@ss'        # secret copied server-side
 
     def test_host_test_ssh_uses_credential_not_stored(self, client, admin):
-        # Regression: testing a host's SSH with a selected credential must use
-        # the credential's secret, NOT the host's stored inline password.
+        # Regression: testing a device's SSH with a selected credential must use
+        # the credential's secret, NOT the device's stored inline password.
         _login(client)
         cuid = client.post('/api/v1/credentials', json={
             'name': 'cred-x', 'ctype': 'ssh',
             'data': {'ssh_user': 'creduser', 'ssh_auth_method': 'password',
                      'ssh_password': 'credpw'}}).get_json()['uid']
-        huid = admin._hosts_store.create(
+        huid = admin._devices_store.create(
             {'name': 'srv-x', 'address': '10.0.0.9', 'kind': 'remote',
              'profiles': {'ssh': {'ssh_user': 'olduser', 'ssh_password': 'storedpw'}}}, actor='admin')
-        with patch('lib.core.hosts.ssh_client.HAS_PARAMIKO', True), \
-             patch('lib.core.hosts.ssh_client.test_connection', return_value=(True, 'ok', 'linux')) as tc:
-            r = client.post('/api/v1/hosts/test_ssh', json={
+        with patch('lib.core.devices.ssh_client.HAS_PARAMIKO', True), \
+             patch('lib.core.devices.ssh_client.test_connection', return_value=(True, 'ok', 'linux')) as tc:
+            r = client.post('/api/v1/devices/test_ssh', json={
                 'address': '10.0.0.9', 'uid': huid,
                 'profiles': {'ssh': {'cred_uid': cuid}}})
         assert r.status_code == 200
@@ -146,7 +146,7 @@ class TestApiCredentials:
     def test_check_test_applies_credential(self, admin):
         # The host-modal check "test" buttons must use the credential, not the
         # restored inline secret.
-        from lib.core.hosts.service import _apply_check_cred
+        from lib.core.devices.service import _apply_check_cred
         uid = admin._credentials_store.create(
             {'name': 'web3', 'ctype': 'web_auth',
              'data': {'auth_user': 'u', 'auth_password': 'pw'}}, actor='a')
@@ -171,11 +171,11 @@ class TestApiCredentials:
     def test_usage_lists_referencing_host(self, client, admin):
         _login(client)
         uid = client.post('/api/v1/credentials', json=_API_CRED).get_json()['uid']
-        admin._hosts_store.create({'name': 'h-ref', 'address': '10.0.0.9', 'kind': 'remote',
+        admin._devices_store.create({'name': 'h-ref', 'address': '10.0.0.9', 'kind': 'remote',
                                    'profiles': {'ssh': {'ssh_user': 'x', 'cred_uid': uid}}}, actor='admin')
         r = client.get(f'/api/v1/credentials/{uid}/usage')
         assert r.status_code == 200
-        assert 'h-ref' in [h['name'] for h in r.get_json()['hosts']]
+        assert 'h-ref' in [h['name'] for h in r.get_json()['devices']]
 
     def test_bulk_usage_answers_for_the_whole_catalogue(self, client, admin):
         """The catalogue's usage view asks once instead of once per row: the scan walks every
@@ -185,10 +185,10 @@ class TestApiCredentials:
         used = client.post('/api/v1/credentials', json=_API_CRED).get_json()['uid']
         unused = client.post('/api/v1/credentials', json={
             'name': 'nobody-uses-me', 'ctype': 'ssh', 'data': {'ssh_user': 'x'}}).get_json()['uid']
-        admin._hosts_store.create({'name': 'h-bulk', 'address': '10.0.0.9', 'kind': 'remote',
+        admin._devices_store.create({'name': 'h-bulk', 'address': '10.0.0.9', 'kind': 'remote',
                                    'profiles': {'ssh': {'ssh_user': 'x', 'cred_uid': used}}}, actor='admin')
         usage = client.get('/api/v1/credentials/usage').get_json()['usage']
-        assert 'h-bulk' in [h['name'] for h in usage[used]['hosts']]
+        assert 'h-bulk' in [h['name'] for h in usage[used]['devices']]
         # An ABSENT uid is the answer "nothing references this" — the view is built on that
         # reading, so an empty entry must not be invented for it.
         assert unused not in usage
@@ -198,7 +198,7 @@ class TestApiCredentials:
         drift apart and disagree about who uses what."""
         _login(client)
         uid = client.post('/api/v1/credentials', json=_API_CRED).get_json()['uid']
-        admin._hosts_store.create({'name': 'h-same', 'address': '10.0.0.8', 'kind': 'remote',
+        admin._devices_store.create({'name': 'h-same', 'address': '10.0.0.8', 'kind': 'remote',
                                    'profiles': {'ssh': {'ssh_user': 'x', 'cred_uid': uid}}}, actor='admin')
         one = client.get(f'/api/v1/credentials/{uid}/usage').get_json()
         allof = client.get('/api/v1/credentials/usage').get_json()['usage'][uid]
@@ -214,7 +214,7 @@ class TestApiCredentials:
     def test_test_endpoint_uses_stored_secret(self, client, admin):
         _login(client)
         uid = client.post('/api/v1/credentials', json=_API_CRED).get_json()['uid']
-        with patch('lib.core.hosts.ssh_client.test_connection', return_value=(True, 'ok')) as tc:
+        with patch('lib.core.devices.ssh_client.test_connection', return_value=(True, 'ok')) as tc:
             r = client.post('/api/v1/credentials/test',
                             json={'cred_uid': uid, 'address': '10.0.0.5'})
         assert r.get_json()['ok'] is True

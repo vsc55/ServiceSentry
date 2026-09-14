@@ -4,7 +4,7 @@
 the UI is built from.
 
 What was one 787-line module is now the domain it described: `items.py` (an item's identity),
-`authz.py` (may this save touch this item), `provisioning.py` (credentials out, declared hosts
+`authz.py` (may this save touch this item), `provisioning.py` (credentials out, declared devices
 in), `actions.py` (the config a watchful action runs with). What stayed is the document
 itself — the whole config as it is read, checked, normalised and rendered.
 

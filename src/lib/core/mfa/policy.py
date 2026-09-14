@@ -152,10 +152,10 @@ class _MfaPolicyMixin:
         if not origin.startswith('https://'):
             return {'ok': False, 'rp_id': rp_id, 'origin': origin, 'reason': 'not_https'}
         # An override that the origin does not sit under would be rejected by the browser,
-        # which is a worse place to find out. The RP ID must be the origin's host or a parent
+        # which is a worse place to find out. The RP ID must be the origin's device or a parent
         # of it — `example.com` for a panel on `panel.example.com`, never the other way round.
-        host = origin.split('://', 1)[1].split(':', 1)[0]
-        if host != rp_id and not host.endswith('.' + rp_id):
+        device = origin.split('://', 1)[1].split(':', 1)[0]
+        if device != rp_id and not device.endswith('.' + rp_id):
             return {'ok': False, 'rp_id': rp_id, 'origin': origin, 'reason': 'rp_id_mismatch'}
         # A WARNING and not a refusal. `public_url` says https, so the browser will reach a
         # secure context and the ceremony will work — but with `proxy_count` at 0 behind a

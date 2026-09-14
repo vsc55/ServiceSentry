@@ -96,7 +96,7 @@ class TestWhatItFinds:
         rows = _rows(('snmp', 'host.host-gone/gi1', 3))
         found = orphans.scan(rows, ITEMS, HOSTS, modules=MODS)
         assert _keys(found) == {('snmp', 'host.host-gone/gi1')}
-        assert found[0]['reason'] == 'host'
+        assert found[0]['reason'] == 'device'
 
     def test_the_module_is_read_as_the_results_record_it(self):
         """A result says `snmp`; the configuration may hold it as `watchfuls.snmp`."""
@@ -112,7 +112,7 @@ class TestWhatItFinds:
         """A row name may contain `/` or `_`. Cutting at the LAST one would credit a reading
         to an owner that never existed — and, worse, to one that happens to exist."""
         assert orphans.owner_of('item-a/eth0/sub') == ('item', 'item-a/eth0/sub')
-        assert orphans.owner_of('host.host-1/a/b') == ('host', 'host-1')
+        assert orphans.owner_of('host.host-1/a/b') == ('device', 'host-1')
         rows = _rows(('snmp', 'item-a/eth0/sub', 1))
         assert orphans.scan(rows, ITEMS, HOSTS, modules=MODS) == []
 

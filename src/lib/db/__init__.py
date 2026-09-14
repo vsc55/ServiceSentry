@@ -84,7 +84,7 @@ def build_syslog_connector(syslog_db_cfg: dict | None, *, main_connector,
     from that config (so a high-volume syslog feed can live in its own database,
     isolated from the system DB).  Otherwise — or on any error — the shared
     *main_connector* is returned.  The config mirrors the ``database`` section
-    (driver/path/host/port/name/user/password).
+    (driver/path/device/port/name/user/password).
     """
     sdb = syslog_db_cfg or {}
     if not sdb.get('enabled'):

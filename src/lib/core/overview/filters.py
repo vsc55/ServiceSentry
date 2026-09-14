@@ -8,9 +8,9 @@ opaque string so it fits the generic one-value filter plumbing (``item[store]`` 
 
     ''                all
     on                (modules) enabled only
-    virtual|physical  (servers) host type
+    virtual|physical  (servers) device type
     <op>_<level>      op in {ge, eq}, level in {warning, error}
-    ...+m             also include hosts in maintenance (union)
+    ...+m             also include devices in maintenance (union)
     m                 maintenance only
 
 ``ge`` = "that level or higher" (severity ranks: error > warning), ``eq`` = exactly.  Legacy
@@ -28,7 +28,7 @@ def parse_severity_filter(f: str):
 
     * ``level`` in ``'' | 'on' | 'virtual' | 'physical' | 'warning' | 'error'``
     * ``op``    in ``'' | 'ge' | 'eq'`` (set only for a severity level)
-    * ``maint`` bool — also include hosts in maintenance.
+    * ``maint`` bool — also include devices in maintenance.
     """
     f = _LEGACY.get(f or '', f or '')
     maint = f == 'm' or f.endswith('+m')

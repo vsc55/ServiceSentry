@@ -43,11 +43,11 @@ def _spec(name, cols):
 @pytest.fixture
 def db(tmp_path):
     con = SQLiteConnector(str(tmp_path / 'data.db'))
-    con.reconcile_table(_spec('hosts', ['uid', 'name', 'address']))
+    con.reconcile_table(_spec('devices', ['uid', 'name', 'address']))
     con.reconcile_table(_spec('credentials', ['uid', 'name', 'data']))
     con.reconcile_table(_spec('syslog', ['uid', 'msg']))
     con.reconcile_table(_spec('audit', ['uid', 'event']))
-    con.execute("INSERT INTO hosts (uid, name, address) VALUES ('h1','PVE01','10.0.0.1')")
+    con.execute("INSERT INTO devices (uid, name, address) VALUES ('h1','PVE01','10.0.0.1')")
     con.execute("INSERT INTO credentials (uid, name, data) VALUES ('c1','SNMP',?)",
                 (json.dumps({'version': '2c', 'community': 'enc:gAAAAAsecret'}),))
     con.execute("INSERT INTO syslog (uid, msg) VALUES ('s1','noisy')")
@@ -73,7 +73,7 @@ class TestWhatGoesIn:
         res = _make(db, tmp_path)
         assert res['ok'], res.get('message')
         tables = set(res['manifest']['tables'])
-        assert {'hosts', 'credentials'} <= tables
+        assert {'devices', 'credentials'} <= tables
         assert 'syslog' not in tables and 'audit' not in tables
 
     def test_the_bulky_parts_are_opt_in(self, db, tmp_path):
@@ -84,7 +84,7 @@ class TestWhatGoesIn:
         """A copy without `core` restores nothing, and the caller finds that out later."""
         res = _make(db, tmp_path, parts=['syslog'])
         assert 'core' in res['manifest']['parts']
-        assert 'hosts' in res['manifest']['tables']
+        assert 'devices' in res['manifest']['tables']
 
     def test_engine_bookkeeping_is_never_dumped(self):
         """`sqlite_sequence` and friends describe the storage, not the install, and writing
@@ -96,9 +96,9 @@ class TestWhatGoesIn:
         class _Stub:
             @staticmethod
             def list_tables():
-                return ['hosts', 'sqlite_sequence', 'sqlite_stat1', 'sqlite_stat4']
+                return ['devices', 'sqlite_sequence', 'sqlite_stat1', 'sqlite_stat4']
 
-        assert bk_parts.tables_for(_Stub(), {'core'}) == ['hosts']
+        assert bk_parts.tables_for(_Stub(), {'core'}) == ['devices']
 
     def test_the_manifest_is_written_last(self, db, tmp_path):
         """An archive interrupted half way has no manifest at all, so `read_manifest` refuses
@@ -144,40 +144,40 @@ class TestPuttingItBack:
 
     def test_a_round_trip_restores_the_rows(self, db, tmp_path):
         _make(db, tmp_path)
-        db.execute("DELETE FROM hosts")
+        db.execute("DELETE FROM devices")
         db.commit()
         out = bk_restore.restore_backup(db, str(tmp_path), 'copia')
         assert out['ok'], out.get('message')
-        assert db.fetchone('SELECT name FROM hosts')[0] == 'PVE01'
+        assert db.fetchone('SELECT name FROM devices')[0] == 'PVE01'
 
     def test_a_table_is_replaced_not_merged(self, db, tmp_path):
         """A backup is a statement about what the install looked like. Merging would produce a
         third state that never existed anywhere."""
         _make(db, tmp_path)
-        db.execute("INSERT INTO hosts (uid, name, address) VALUES ('h2','LATER','10.0.0.2')")
+        db.execute("INSERT INTO devices (uid, name, address) VALUES ('h2','LATER','10.0.0.2')")
         db.commit()
         bk_restore.restore_backup(db, str(tmp_path), 'copia')
-        assert [r[0] for r in db.fetchall('SELECT uid FROM hosts')] == ['h1']
+        assert [r[0] for r in db.fetchall('SELECT uid FROM devices')] == ['h1']
 
     def test_restoring_one_part_leaves_the_others_alone(self, db, tmp_path):
         _make(db, tmp_path, parts=['core', 'syslog'])
-        db.execute("DELETE FROM hosts")
+        db.execute("DELETE FROM devices")
         db.execute("DELETE FROM syslog")
         db.commit()
         bk_restore.restore_backup(db, str(tmp_path), 'copia', parts=['syslog'])
         assert db.fetchone('SELECT COUNT(*) FROM syslog')[0] == 1
-        assert db.fetchone('SELECT COUNT(*) FROM hosts')[0] == 0
+        assert db.fetchone('SELECT COUNT(*) FROM devices')[0] == 0
 
     def test_a_column_the_schema_dropped_does_not_sink_the_restore(self, db, tmp_path):
         """The backup somebody reaches for is an old one, and refusing it over a schema that
         moved on would make the feature useless at the one moment it matters."""
         _make(db, tmp_path)
-        db.execute('DROP TABLE hosts')
-        db.reconcile_table(_spec('hosts', ['uid', 'name']))     # `address` is gone
+        db.execute('DROP TABLE devices')
+        db.reconcile_table(_spec('devices', ['uid', 'name']))     # `address` is gone
         db.commit()
         out = bk_restore.restore_backup(db, str(tmp_path), 'copia')
         assert out['ok'], out.get('message')
-        assert db.fetchone('SELECT name FROM hosts')[0] == 'PVE01'
+        assert db.fetchone('SELECT name FROM devices')[0] == 'PVE01'
 
     def test_a_newer_format_is_refused_not_half_applied(self, db, tmp_path):
         _make(db, tmp_path)
@@ -401,13 +401,13 @@ class TestCheckingACopy:
         path = os.path.join(str(tmp_path), 'backups', 'copia.zip')
         with zipfile.ZipFile(path) as zf:
             members = {n: zf.read(n) for n in zf.namelist()}
-        members['db/hosts.json'] = b'{"columns":[],"rows":[]}'
+        members['db/devices.json'] = b'{"columns":[],"rows":[]}'
         with zipfile.ZipFile(path, 'w') as zf:
             for n, b in members.items():
                 zf.writestr(n, b)
         out = bk_verify.verify_backup(str(tmp_path), 'copia')
         assert out['ok'] is False
-        assert [b['member'] for b in out['bad']] == ['db/hosts.json']
+        assert [b['member'] for b in out['bad']] == ['db/devices.json']
 
     def test_a_damaged_file_is_caught(self, db, tmp_path):
         _make(db, tmp_path)
@@ -456,13 +456,13 @@ class TestRestoringACopyFromAnotherVersion:
         """This is exactly what restoring a copy from a LATER build does: the columns this
         schema does not have yet go, and the operator has to be told which."""
         _make(db, tmp_path)
-        db.execute('DROP TABLE hosts')
-        db.reconcile_table(_spec('hosts', ['uid', 'name']))     # `address` is gone
+        db.execute('DROP TABLE devices')
+        db.reconcile_table(_spec('devices', ['uid', 'name']))     # `address` is gone
         db.commit()
         out = bk_restore.restore_backup(db, str(tmp_path), 'copia')
         assert out['ok']
-        assert out['skipped']['hosts'] == {'columns': ['address']}
-        assert out['tables']['hosts'] == 1, 'the rest of the row still went in'
+        assert out['skipped']['devices'] == {'columns': ['address']}
+        assert out['tables']['devices'] == 1, 'the rest of the row still went in'
 
     def test_a_table_the_install_no_longer_has_is_reported_with_its_rows(self, db, tmp_path):
         """Its rows are the number that matters: "the table is gone" is a shrug, "1 row did
@@ -585,9 +585,9 @@ class TestItSaysWhatItIsDoingOnTheLog:
         months later why half the install is older than the other half."""
         _make(db, tmp_path)
         self._lines(capsys)
-        bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['hosts'])
+        bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['devices'])
         line = next(ln for ln in self._lines(capsys) if 'tables=' in ln)
-        assert "tables=['hosts']" in line and 'WARNING' in line
+        assert "tables=['devices']" in line and 'WARNING' in line
 
 
 class TestARestoreTicksOffTheSameChecklist:
@@ -623,7 +623,7 @@ class TestARestoreTicksOffTheSameChecklist:
         _make(db, tmp_path)
         db.execute('DROP TABLE audit')      # its own part, so `core` keeps two failures
         db.execute('DROP TABLE credentials')
-        db.execute('DROP TABLE hosts')
+        db.execute('DROP TABLE devices')
         db.commit()
         core = next(s for s in bk_restore.restore_backup(db, str(tmp_path), 'copia')['steps']
                     if s['part'] == 'core')
@@ -665,7 +665,7 @@ class TestChoosingWhichTablesComeBack:
         out = bk_restore.archive_contents(str(tmp_path), 'copia')
         assert out['ok'], out.get('message')
         by_id = {p['id']: [tb['name'] for tb in p['tables']] for p in out['parts']}
-        assert by_id['core'] == ['credentials', 'hosts']
+        assert by_id['core'] == ['credentials', 'devices']
         assert by_id['audit'] == ['audit']
         assert by_id['syslog'] == ['syslog']
 
@@ -675,7 +675,7 @@ class TestChoosingWhichTablesComeBack:
         _make(db, tmp_path)
         out = bk_restore.archive_contents(str(tmp_path), 'copia')
         core = next(p for p in out['parts'] if p['id'] == 'core')
-        assert {tb['name']: tb['rows'] for tb in core['tables']} == {'hosts': 1,
+        assert {tb['name']: tb['rows'] for tb in core['tables']} == {'devices': 1,
                                                                      'credentials': 1}
 
     def test_a_copy_that_is_not_there_is_an_answer_not_a_crash(self, tmp_path):
@@ -685,45 +685,45 @@ class TestChoosingWhichTablesComeBack:
         """The reason the feature exists: a bad import touched one table, and everything else
         has moved on since the copy was taken."""
         _make(db, tmp_path)
-        db.execute("DELETE FROM hosts")
+        db.execute("DELETE FROM devices")
         db.execute("UPDATE credentials SET name='CHANGED SINCE'")
         db.commit()
-        out = bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['hosts'])
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['devices'])
         assert out['ok'], out.get('message')
-        assert db.fetchone('SELECT name FROM hosts')[0] == 'PVE01'
+        assert db.fetchone('SELECT name FROM devices')[0] == 'PVE01'
         assert db.fetchone('SELECT name FROM credentials')[0] == 'CHANGED SINCE'
 
     def test_a_table_left_out_is_never_emptied(self, db, tmp_path):
         """A restore empties a table before refilling it. One that was not chosen must not be
         touched at all — emptied and not refilled is the worst outcome available here."""
         _make(db, tmp_path)
-        bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['hosts'])
+        bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['devices'])
         assert db.fetchone('SELECT COUNT(*) FROM credentials')[0] == 1
 
     def test_none_means_every_table_as_it_always_did(self, db, tmp_path):
         _make(db, tmp_path)
-        db.execute("DELETE FROM hosts")
+        db.execute("DELETE FROM devices")
         db.execute("DELETE FROM credentials")
         db.commit()
         out = bk_restore.restore_backup(db, str(tmp_path), 'copia')
-        assert sorted(out['tables']) == ['credentials', 'hosts']
+        assert sorted(out['tables']) == ['credentials', 'devices']
         assert out['partial'] is False
 
     def test_an_empty_list_means_none_not_all(self, db, tmp_path):
         """The one mistake this must not make: `[]` is "no table", and reading it as "all"
         would rewrite the install of a caller who asked for nothing."""
         _make(db, tmp_path)
-        db.execute("DELETE FROM hosts")
+        db.execute("DELETE FROM devices")
         db.commit()
         out = bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=[])
         assert out['ok'] and out['tables'] == {}
-        assert db.fetchone('SELECT COUNT(*) FROM hosts')[0] == 0
+        assert db.fetchone('SELECT COUNT(*) FROM devices')[0] == 0
 
     def test_a_part_with_nothing_chosen_gets_no_checklist_line(self, db, tmp_path):
         """It was excluded. A line saying "0 rows, ok" about something nobody asked for reads
         as a part that failed."""
         _make(db, tmp_path, parts=['core', 'audit'])
-        out = bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['hosts'])
+        out = bk_restore.restore_backup(db, str(tmp_path), 'copia', tables=['devices'])
         assert [s['part'] for s in out['steps']] == ['core']
         assert out['steps'][0]['tables'] == 1
 
@@ -734,7 +734,7 @@ class TestChoosingWhichTablesComeBack:
         db.execute("DELETE FROM audit")
         db.commit()
         out = bk_restore.restore_backup(db, str(tmp_path), 'copia', parts=['core'],
-                                        tables=['hosts', 'audit'])
+                                        tables=['devices', 'audit'])
         assert 'audit' not in out['tables']
         assert db.fetchone('SELECT COUNT(*) FROM audit')[0] == 0
 
@@ -743,7 +743,7 @@ class TestChoosingWhichTablesComeBack:
         tables were left as they are — and the dialog and the audit line both need to."""
         _make(db, tmp_path)
         assert bk_restore.restore_backup(db, str(tmp_path), 'copia',
-                                         tables=['hosts'])['partial'] is True
+                                         tables=['devices'])['partial'] is True
 
 
 class TestSyslogInADatabaseOfItsOwn:
@@ -759,8 +759,8 @@ class TestSyslogInADatabaseOfItsOwn:
     def two(self, tmp_path):
         """A system database WITHOUT the syslog tables, and a second one that has them."""
         main = SQLiteConnector(str(tmp_path / 'data.db'))
-        main.reconcile_table(_spec('hosts', ['uid', 'name']))
-        main.execute("INSERT INTO hosts (uid, name) VALUES ('h1','PVE01')")
+        main.reconcile_table(_spec('devices', ['uid', 'name']))
+        main.execute("INSERT INTO devices (uid, name) VALUES ('h1','PVE01')")
         main.commit()
         side = SQLiteConnector(str(tmp_path / 'syslog.db'))
         side.reconcile_table(_spec('syslog', ['uid', 'msg']))
@@ -801,7 +801,7 @@ class TestSyslogInADatabaseOfItsOwn:
         out = bk_restore.restore_backup(main, str(tmp_path), 'copia', connectors={'syslog': side})
         assert out['ok'], out.get('message')
         assert side.fetchone('SELECT msg FROM syslog')[0] == 'noisy'
-        assert main.fetchone('SELECT name FROM hosts')[0] == 'PVE01'
+        assert main.fetchone('SELECT name FROM devices')[0] == 'PVE01'
 
     def test_the_second_database_does_not_pollute_core(self, two, tmp_path):
         """`core` is every table nobody claimed IN THE SYSTEM DATABASE. Asking the wrong one
@@ -809,21 +809,21 @@ class TestSyslogInADatabaseOfItsOwn:
         main, side = two
         by_part = {pid: tabs for pid, tabs, _err in
                    bk_parts.tables_by_part(main, {'core', 'syslog'}, {'syslog': side})}
-        assert by_part['core'] == ['hosts']
+        assert by_part['core'] == ['devices']
         assert by_part['syslog'] == ['syslog', 'syslog_drops']
 
     def test_each_database_gets_its_own_transaction(self, two):
         """Two databases cannot share one, and the guarantee that matters — the system tables
         land together or not at all — is kept where it means something."""
         main, side = two
-        groups = bk_restore._by_database([('core', ['hosts']), ('syslog', ['syslog'])], main,
+        groups = bk_restore._by_database([('core', ['devices']), ('syslog', ['syslog'])], main,
                                          {'syslog': side})
         assert [c for c, _g in groups] == [main, side]
 
     def test_one_database_stays_one_transaction(self, db):
         """With `syslog_db` off the web admin hands back the main connector for both, and a
         restore that split them into two transactions would give up the atomicity for nothing."""
-        groups = bk_restore._by_database([('core', ['hosts']), ('syslog', ['syslog'])], db, {})
+        groups = bk_restore._by_database([('core', ['devices']), ('syslog', ['syslog'])], db, {})
         assert len(groups) == 1
 
     def test_an_unreachable_second_database_costs_only_its_part(self, two, tmp_path):
@@ -834,7 +834,7 @@ class TestSyslogInADatabaseOfItsOwn:
                                       config_dir=str(tmp_path), parts=['core', 'syslog'],
                                       include_secrets=True,
                                       connectors={'syslog': side})
-        assert res['ok'] and 'hosts' in res['manifest']['tables']
+        assert res['ok'] and 'devices' in res['manifest']['tables']
 
     def test_y_la_copia_dice_que_le_falta_esa_parte(self, two, tmp_path):
         """Medido antes de arreglarlo: con la base de syslog caída, la parte volvía con cero
@@ -902,8 +902,8 @@ class TestAFolderThatWasMoved:
 
     def _con(self, tmp_path):
         con = SQLiteConnector(str(tmp_path / 'd.db'))
-        con.reconcile_table(_spec('hosts', ['uid']))
-        con.execute("INSERT INTO hosts (uid) VALUES ('h1')")
+        con.reconcile_table(_spec('devices', ['uid']))
+        con.execute("INSERT INTO devices (uid) VALUES ('h1')")
         con.commit()
         return con
 

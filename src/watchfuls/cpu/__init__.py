@@ -21,8 +21,8 @@
 
 """Watchful to check CPU usage on the bound host (local or over SSH).
 
-Host-centric: each check binds to a host (``host_uid``).  CPU usage is sampled
-on that host via :meth:`ModuleBase.host_exec` using an OS-appropriate command
+Host-centric: each check binds to a host (``device_uid``).  CPU usage is sampled
+on that host via :meth:`ModuleBase.device_exec` using an OS-appropriate command
 (``/proc/stat`` on Linux, ``kern.cp_time`` on FreeBSD, ``top -l2`` on macOS,
 ``wmic`` on Windows) and compared with a per-check threshold.
 
@@ -73,17 +73,17 @@ class Watchful(ModuleBase):
         return self.dict_return
 
     def _cpu_check(self, key, raw):
-        item = self.resolve_host(raw)
-        if item.get('_host_maintenance') or not item.get('enabled', True):
+        item = self.resolve_device(raw)
+        if item.get('_device_maintenance') or not item.get('enabled', True):
             return
         label = (item.get('label') or '').strip() or key
-        os_ = self.host_os(item)
+        os_ = self.device_os(item)
         interval = self.module_default('interval', self._MODULE_DEFAULTS['interval'])
         cmd = _cpu_cmd(os_)
         timeout = int(self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])) + 2
 
         def _sample():
-            out, err, code = self.host_exec(item, cmd, timeout=timeout)
+            out, err, code = self.device_exec(item, cmd, timeout=timeout)
             if code != 0 and not out:
                 raise OSError((err or '').strip() or f'cpu query exited {code}')
             return out

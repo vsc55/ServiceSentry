@@ -725,12 +725,12 @@ const _DW_CELLS = {
             s + Object.values(cfg[k]).filter(v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
         return `<td>${(r.items === 0 || activeItems === 0) ? '<span class="text-muted small">—</span>' : _dwChecksBadge(r.checks)}</td>`;
     },
-    // Coloured avatar + label (host / user / module) — `av` picks icon + hue.
-    host_name: (r) => `<td><span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+    // Coloured avatar + label (device / user / module) — `av` picks icon + hue.
+    device_name: (r) => `<td><span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
         style="width:26px;height:26px;background:rgba(14,165,233,.14);color:#0ea5e9;font-size:.85rem;vertical-align:middle"><i class="bi bi-hdd-network"></i></span>${esc(r.name || '')}</td>`,
-    host_status:  (r) => `<td>${_dwSrvStatusBadge(r)}</td>`,
-    host_checks:  (r) => `<td>${_dwChecksBadge(r.checks)}</td>`,
-    host_modules: (r) => `<td>${_dwModulesBadge(r.modules_active, r.modules_total)}</td>`,
+    device_status:  (r) => `<td>${_dwSrvStatusBadge(r)}</td>`,
+    device_checks:  (r) => `<td>${_dwChecksBadge(r.checks)}</td>`,
+    device_modules: (r) => `<td>${_dwModulesBadge(r.modules_active, r.modules_total)}</td>`,
     session_user: (r) => `<td><span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
         style="width:26px;height:26px;background:rgba(6,182,212,.14);color:#06b6d4;font-size:.85rem;vertical-align:middle"><i class="bi bi-person"></i></span>${esc(r.user || '')}</td>`,
     browser: (r) => `<td class="small text-muted text-nowrap" title="${escAttr(r.agent || '')}">${esc(_dwBrowser(r.agent))}</td>`,
@@ -755,8 +755,8 @@ const _DW_CELLS = {
             style="--mh:${_moduleHue(r.module)};width:26px;height:26px;font-size:.85rem;vertical-align:middle">${moduleIcon(r.module, cfg)}</span>${esc(modulePrettyName(r.module, cfg))}</td>`;
     },
     check_danger: (r) => `<td><span class="text-danger"><i class="bi bi-x-circle me-1"></i>${esc(r[/*key*/'check'] || '')}</span></td>`,
-    host_code: (r) => r.host
-        ? `<td><code style="font-size:.8rem">${esc(r.host)}</code></td>`
+    device_code: (r) => r.device
+        ? `<td><code style="font-size:.8rem">${esc(r.device)}</code></td>`
         : '<td><span class="text-muted small">—</span></td>',
     login_detail: (r) => {
         let d = r.detail;
@@ -774,7 +774,7 @@ const _DW_CELLS = {
     },
     syslog_host: (r) => {
         const host = r.hostname || r.source || '';
-        return `<td class="small text-nowrap pe-4" style="width:1%;max-width:12em;overflow:hidden;text-overflow:ellipsis" title="${escAttr(host)}">${esc(host)}</td>`;
+        return `<td class="small text-nowrap pe-4" style="width:1%;max-width:12em;overflow:hidden;text-overflow:ellipsis" title="${escAttr(device)}">${esc(device)}</td>`;
     },
     message: (r) => `<td class="small text-break">${esc(r.message || '')}</td>`,
     ipban_reason: (r) => {
@@ -795,9 +795,9 @@ const _DW_CELL_SORT = {
     module_name:  (r) => modulePrettyName(r.name, modulesData[r.name] || {}).toLowerCase(),
     on_badge:     (r) => (r.enabled ? 1 : 0),
     checks:       (r) => ((r.checks && r.checks.error) || 0) * 1000 + ((r.checks && r.checks.warning) || 0),
-    host_status:  (r) => _dwSrvStatusRank(r),
-    host_checks:  (r) => ((r.checks && r.checks.error) || 0) * 1000 + ((r.checks && r.checks.warning) || 0),
-    host_modules: (r) => r.modules_active || 0,
+    device_status:  (r) => _dwSrvStatusRank(r),
+    device_checks:  (r) => ((r.checks && r.checks.error) || 0) * 1000 + ((r.checks && r.checks.warning) || 0),
+    device_modules: (r) => r.modules_active || 0,
     session_user: (r) => (r.user || '').toLowerCase(),
     browser:      (r) => _dwBrowser(r.agent),
     event_badge:  (r) => ((I18N.audit_events || {})[r.event] || r.event || '').toLowerCase(),
@@ -875,7 +875,7 @@ function _dwViewFilterBadge(id, view, item) {
             parts.push(_dwFilterBadge(pre + t(lo.label_key || ''), b.color || '#6c757d', b.bg || 'rgba(108,117,125,.18)'));
         }
         if (d.maint)
-            parts.push(_dwFilterBadge(t('host_status_maintenance'), '#fd7e14', 'rgba(253,126,20,.18)'));
+            parts.push(_dwFilterBadge(t('device_status_maintenance'), '#fd7e14', 'rgba(253,126,20,.18)'));
         return parts.join('');
     }
     if (view.filter.badge_fn === 'sev') {
@@ -999,11 +999,11 @@ function _dwChecksBadge(checks) {
 
 function _dwSrvStatusBadge(h) {
     if (h.maintenance)
-        return `<span class="badge rounded-pill" style="background:#fd7e14;color:#fff;font-size:.72rem"><i class="bi bi-cone-striped me-1"></i>${esc(t('host_status_maintenance'))}</span>`;
+        return `<span class="badge rounded-pill" style="background:#fd7e14;color:#fff;font-size:.72rem"><i class="bi bi-cone-striped me-1"></i>${esc(t('device_status_maintenance'))}</span>`;
     const map = {
-        ok:      ['rgba(34,197,94,.15)',  'var(--ss-ok-text,#16a34a)',  'bi-check-circle',    'host_status_ok'],
-        error:   ['rgba(239,68,68,.15)',  'var(--ss-err-text,#dc2626)', 'bi-x-circle',        'host_status_error'],
-        warning: ['rgba(245,158,11,.18)', '#d97706',                    'bi-hourglass-split', 'host_status_warning'],
+        ok:      ['rgba(34,197,94,.15)',  'var(--ss-ok-text,#16a34a)',  'bi-check-circle',    'device_status_ok'],
+        error:   ['rgba(239,68,68,.15)',  'var(--ss-err-text,#dc2626)', 'bi-x-circle',        'device_status_error'],
+        warning: ['rgba(245,158,11,.18)', '#d97706',                    'bi-hourglass-split', 'device_status_warning'],
     };
     const m = map[h.status];
     if (!m) return '<span class="text-muted small">—</span>';

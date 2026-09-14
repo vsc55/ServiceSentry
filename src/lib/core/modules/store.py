@@ -6,7 +6,7 @@ Two tables, mirroring the existing nested JSON shape:
 
 * ``module_config`` — one row per module (cpu, dns, …): the module-level fields
   (enabled, alert, interval, ``__*__`` meta) as a JSON ``data`` blob.
-* ``module_config_items``  — one row per item: ``host_uid`` / ``label`` / ``enabled``
+* ``module_config_items``  — one row per item: ``device_uid`` / ``label`` / ``enabled``
   promoted to columns (joins / lookups), the rest of the item in JSON ``data``.
 
 The store maps the nested config dict <-> rows and is value-agnostic: it stores
@@ -55,7 +55,7 @@ def _loads_any(text):
 
 # Item fields stored as their own columns (never duplicated inside ``data``).
 # 'uid' is the primary key / the item's dict key, so it is not in ``data`` either.
-_ITEM_PROMOTED = ('host_uid', 'label', 'enabled', 'created_at', 'updated_at', 'updated_by')
+_ITEM_PROMOTED = ('device_uid', 'label', 'enabled', 'created_at', 'updated_at', 'updated_by')
 
 
 # ── Tabla 1: config a nivel de módulo ────────────────────────────────────────
@@ -79,7 +79,7 @@ _MODULE_CONFIG_ITEMS_SCHEMA = TableSpec(
         Column('uid',        'TEXT', primary_key=True),
         Column('module_uid', 'TEXT', nullable=False, default="''"),   # → module_config.uid
         Column('collection', 'TEXT', nullable=False, default="'list'"),
-        Column('host_uid',   'TEXT', nullable=False, default="''"),   # → hosts.uid
+        Column('device_uid',   'TEXT', nullable=False, default="''"),   # → devices.uid
         Column('label',      'TEXT', nullable=False, default="''"),
         Column('enabled',    'INTEGER', nullable=False, default="1"),
         Column('data',       'TEXT', nullable=False, default="'{}'"),
@@ -89,8 +89,12 @@ _MODULE_CONFIG_ITEMS_SCHEMA = TableSpec(
     ),
     indexes=(
         Index('idx_module_config_items_moduid', ('module_uid',)),
-        Index('idx_module_config_items_host',   ('host_uid',)),
+        Index('idx_module_config_items_device', ('device_uid',)),
     ),
+    # Se llamaba `host_uid`. `reconcile_table` lo aplica antes de comparar, con los datos dentro.
+    renames={'host_uid': 'device_uid'},
+    # Y el índice, que llevaba el nombre de la columna de ayer.
+    former_indexes=('idx_module_config_items_host', 'idx_module_items_host'),
 )
 
 
@@ -140,9 +144,9 @@ class ModulesStore:
                 f'SELECT uid, module, data FROM {_T_CONFIG}'):
             uid2name[uid] = module
             modules[module] = _loads(data, {})
-        for (uid, module_uid, collection, host_uid, label, enabled, data,
+        for (uid, module_uid, collection, device_uid, label, enabled, data,
              created_at, updated_at, updated_by) in self._db.fetchall(
-                f'SELECT uid, module_uid, collection, host_uid, label, enabled, data, '
+                f'SELECT uid, module_uid, collection, device_uid, label, enabled, data, '
                 f'created_at, updated_at, updated_by FROM {_T_ITEMS}'):
             module = uid2name.get(module_uid)
             if module is None:
@@ -153,8 +157,8 @@ class ModulesStore:
                 item['uid'] = uid
                 item['label'] = label or ''
                 item['enabled'] = bool(enabled)
-                if host_uid:                   # omit when empty to keep the original shape
-                    item['host_uid'] = host_uid
+                if device_uid:                   # omit when empty to keep the original shape
+                    item['device_uid'] = device_uid
                 # Per-item audit metadata (column-backed; stripped from the data
                 # blob on save via _ITEM_PROMOTED). Exposed read-only for the UI.
                 if created_at:
@@ -201,28 +205,28 @@ class ModulesStore:
                         iuid = str(iuid)
                         seen_items.add(iuid)
                         if isinstance(item, dict):
-                            host_uid = str(item.get('host_uid') or '')
+                            device_uid = str(item.get('device_uid') or '')
                             label = str(item.get('label') or '')
                             enabled = 0 if item.get('enabled') is False else 1
                             idata = {k: v for k, v in item.items()
                                      if k != 'uid' and k not in _ITEM_PROMOTED}
                         else:
                             # legacy scalar item (e.g. name -> True/False enabled flag)
-                            host_uid, label = '', ''
+                            device_uid, label = '', ''
                             enabled = 0 if item is False else 1
                             idata = item
                         i_json = json.dumps(idata, ensure_ascii=False)
                         if self._db.fetchone(f'SELECT 1 FROM {_T_ITEMS} WHERE uid=?', (iuid,)):
                             self._db.execute(
-                                f'UPDATE {_T_ITEMS} SET module_uid=?, collection=?, host_uid=?, '
+                                f'UPDATE {_T_ITEMS} SET module_uid=?, collection=?, device_uid=?, '
                                 'label=?, enabled=?, data=?, updated_at=?, updated_by=? WHERE uid=?',
-                                (muid, coll, host_uid, label, enabled, i_json, now, actor, iuid))
+                                (muid, coll, device_uid, label, enabled, i_json, now, actor, iuid))
                         else:
                             self._db.execute(
-                                f'INSERT INTO {_T_ITEMS} (uid, module_uid, collection, host_uid, '
+                                f'INSERT INTO {_T_ITEMS} (uid, module_uid, collection, device_uid, '
                                 'label, enabled, data, created_at, updated_at, updated_by) '
                                 'VALUES (?,?,?,?,?,?,?,?,?,?)',
-                                (iuid, muid, coll, host_uid, label, enabled, i_json, now, now, actor))
+                                (iuid, muid, coll, device_uid, label, enabled, i_json, now, now, actor))
             # Prune removed modules (and their items) …
             for module, uid in existing.items():
                 if module not in seen_modules:

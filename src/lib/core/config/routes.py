@@ -432,14 +432,14 @@ def register(app, wa):
                 if str(coll).startswith('__') or not isinstance(entries, dict):
                     continue
                 keys.update(str(k) for k in entries)
-        store = getattr(wa, '_hosts_store', None)
-        hosts = set()
+        store = getattr(wa, '_devices_store', None)
+        devices = set()
         if store is not None:
             try:
-                hosts = {str(h.get('uid') or '') for h in (store.list(decrypt=False) or ())}
+                devices = {str(h.get('uid') or '') for h in (store.list(decrypt=False) or ())}
             except Exception:  # pylint: disable=broad-except
-                hosts = set()
-        return items, hosts, present
+                devices = set()
+        return items, devices, present
 
     def _orphan_series():
         """Every stored series, per table, with what it would cost to keep."""
@@ -477,10 +477,10 @@ def register(app, wa):
         are different statements, and the second is the operator's to make. So this answers
         what there is and what it would cost, and the sweep is a separate press.
         """
-        items, hosts, present = _orphan_inputs()
+        items, devices, present = _orphan_inputs()
         out = {}
         for table, rows in _orphan_series().items():
-            found = orphans.scan(rows, items, hosts, modules=present)
+            found = orphans.scan(rows, items, devices, modules=present)
             out[table] = {**orphans.summary(found), 'rows': found}
         return jsonify(out)
 
@@ -493,13 +493,13 @@ def register(app, wa):
         a key it now owns, and deleting what a screen remembers is how a sweep removes
         something that stopped being an orphan while somebody read the dialog.
         """
-        items, hosts, present = _orphan_inputs()
+        items, devices, present = _orphan_inputs()
         hist = getattr(wa, '_history', None)
         state = getattr(wa, '_check_state_store', None)
         deleted = {'history': 0, 'check_state': 0}
         series = 0
         for table, rows in _orphan_series().items():
-            for row in orphans.scan(rows, items, hosts, modules=present):
+            for row in orphans.scan(rows, items, devices, modules=present):
                 series += 1
                 try:
                     if table == 'history' and hist is not None:

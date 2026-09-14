@@ -625,7 +625,7 @@ class TestOwnLandingPreference:
 
 
 class TestServiceAccountsCannotSignIn:
-    """A service account is ACTIVE — it owns hosts, it receives notifications, it appears in
+    """A service account is ACTIVE — it owns devices, it receives notifications, it appears in
     the audit log — and it never signs in.
 
     Deliberately NOT the same switch as ``enabled``: disabling an account to stop it logging

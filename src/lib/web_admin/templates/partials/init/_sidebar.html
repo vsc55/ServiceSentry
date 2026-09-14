@@ -190,7 +190,7 @@ function _sbUpdateBreadcrumb() {
 // No-value defaults mirror each pane's own restore. Sections without a flyout return null.
 function _sbStoredSub(paneId) {
     switch (paneId) {
-        case 'tab-servers': return localStorage.getItem('ss_active_subtab_infra')  || '#subtab-srv-hosts';
+        case 'tab-servers': return localStorage.getItem('ss_active_subtab_infra')  || '#subtab-srv-devices';
         case 'tab-access':  return localStorage.getItem('ss_active_subtab_access') || '#subtab-users';
         case 'tab-ipban':   return localStorage.getItem('ss_active_subtab_ipban')  || '#subtab-ipban-bans';
         case 'tab-events':  return '#ev-pane-' + (localStorage.getItem('ss_active_subtab_events') === 'log' ? 'log' : 'rules');
@@ -252,6 +252,24 @@ function _placeFlyout(wrap) {
     if (left + w + gap > vw) left = Math.max(gap, (rc ? rc.left : r.left) - w);
     fly.style.top = top + 'px';
     fly.style.left = left + 'px';
+    // Y lo que hay ENTRE la fila y el menú, que hay que poder cruzar.
+    //
+    // La fila se puede pisar hasta donde llega el CONTENIDO de la lista, no hasta donde llega el
+    // carril: cuando la lista desplaza, su barra se come unos píxeles por dentro y recorta ahí
+    // las filas. El menú, en cambio, sale del borde del carril. Entre los dos queda una franja
+    // que no es de nadie —es de la lista— y pisarla dispara `mouseleave`: el menú se oculta y,
+    // ya oculto, no queda nada bajo el ratón donde volver a entrar. Desaparecía a mitad de
+    // camino. Pasa con la barra desplegada y con ella plegada, y siempre mide lo que mida la
+    // barra de desplazamiento. Reportado desde la pantalla.
+    //
+    // Se mide de `clientWidth` —el ancho SIN la barra, que es justo donde acaba lo pisable— y lo
+    // tapa el `::before` del menú con una franja transparente de ese ancho.
+    const lista = document.querySelector('.ss-sb-nav');
+    const borde = lista
+        ? lista.getBoundingClientRect().left + lista.clientWidth
+        : r.right;
+    const puente = Math.max(0, Math.round(left - borde));
+    fly.style.setProperty('--ss-fly-puente', puente + 'px');
 }
 // One mechanism only (the .ss-fly-open class), driven by JS. Hover, focus and click all go
 // through _openFlyout/_closeFlyout so at most ONE flyout is ever open — no CSS :hover racing
@@ -327,7 +345,7 @@ function _sbPaneUrl(btn, paneId) {
     //
     // Reported from the panel: open a device in Infrastructure, press F5, and you land back
     // on the list of forty. The section does put the open device in the address bar
-    // (`?host=<uid>`) and does read it back — but this runs on the initial activation too,
+    // (`?device=<uid>`) and does read it back — but this runs on the initial activation too,
     // and it rebuilds the URL from the section and its view alone. So the landing URL was
     // replaced by `/infra/table` before the section ever looked at it, and the parameter was
     // gone: not lost by the section, swept away by the navigation that was only trying to

@@ -291,7 +291,7 @@ dos estrechan la misma selección, no compiten por ella.
 | `tables: []` | **Ninguna.** No es «todas»: leerlo así reescribiría la instalación entera de quien no pidió nada |
 
 **Más fino no es más seguro, y esa es la advertencia que sale en pantalla.** Las partes son una
-agrupación curada; una lista de tablas a mano no lo es. Restaurar `hosts` sin `credentials` deja
+agrupación curada; una lista de tablas a mano no lo es. Restaurar `devices` sin `credentials` deja
 filas apuntando a una credencial que ya no existe, y nada aquí lo impedirá. Para lo que sirve es
 para el caso contrario, el que la granularidad por partes no sabe decir: *una* tabla es el
 problema y el resto de la instalación ha avanzado desde que se hizo la copia.

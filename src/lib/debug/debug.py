@@ -67,7 +67,7 @@ class Debug:
     Level convention used across the codebase:
       * ``debug``   — verbose per-item / per-command tracing (values, commands).
       * ``info``    — normal operational milestones (cycle start/end, module run).
-      * ``warning`` — recoverable issues (item skipped, host unreachable, timeout).
+      * ``warning`` — recoverable issues (item skipped, device unreachable, timeout).
       * ``error``   — failures (check raised, command failed).
       * ``emergency`` — critical, must always surface.
     """

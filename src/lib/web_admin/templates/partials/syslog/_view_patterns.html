@@ -26,13 +26,13 @@ function _slViewPatterns(rows) {
         const key = `${m.severity}\u0000${m.app || ''}\u0000${_slPattern(m.message)}`;
         let g = by.get(key);
         if (!g) {
-            g = { n: 0, sample: m, hosts: new Set(), first: _slWhen(m), last: _slWhen(m),
+            g = { n: 0, sample: m, devices: new Set(), first: _slWhen(m), last: _slWhen(m),
                   pattern: _slPattern(m.message) };
             by.set(key, g);
         }
         g.n++;
         const h = _slHost(m);
-        if (h) g.hosts.add(h);
+        if (h) g.devices.add(h);
         const w = _slWhen(m);
         if (w < g.first) g.first = w;
         if (w > g.last) g.last = w;
@@ -61,10 +61,10 @@ function _slViewPatterns(rows) {
 }
 
 function _slPatternRow(g) {
-    const hosts = [...g.hosts];
-    // The hosts are listed, not just counted: one message from twelve machines and twelve
+    const devices = [...g.devices];
+    // The devices are listed, not just counted: one message from twelve machines and twelve
     // from one machine are different incidents, and the count alone cannot tell them apart.
-    const hostCell = _chipList(hosts, h => _chipText(h), 3);
+    const hostCell = _chipList(devices, h => _chipText(h), 3);
     // The sample text is shown, with the pattern underneath only when they differ — on a
     // message with no variable parts the two lines would be the same sentence twice.
     const sample = g.sample.message || '';

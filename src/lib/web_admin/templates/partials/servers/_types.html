@@ -1,7 +1,7 @@
 {# ================================================================
    Las clases de dispositivo.
 
-   Todas son filas de la tabla `host_type` y todas se editan igual, las once de la siembra
+   Todas son filas de la tabla `device_type` y todas se editan igual, las once de la siembra
    incluidas: lo que cambia entre una sembrada y una escrita aquí no es lo que se puede hacer con
    ella, sino de dónde sale su palabra — la sembrada lleva la clave del catálogo de idiomas y se
    dice en el idioma de quien mira; la escrita aquí lleva su nombre tal cual.
@@ -68,12 +68,12 @@ let _htIconsOpen = false;
 // página, porque un recuento que cambia al pasar de página es peor que no contar.
 const HT_VIEWS = [
     {id: 'table', label_key: 'srv_view_table', icon: 'bi-table', render: null, mode: 'table'},
-    {id: 'grid', label_key: 'host_types_v_grid', icon: 'bi-grid-3x3-gap',
+    {id: 'grid', label_key: 'device_types_v_grid', icon: 'bi-grid-3x3-gap',
      render: '_htGridBody', mode: 'cards'},
-    {id: 'tiles', label_key: 'host_types_v_tiles', icon: 'bi-bar-chart-steps',
+    {id: 'tiles', label_key: 'device_types_v_tiles', icon: 'bi-bar-chart-steps',
      render: '_htTilesBody', mode: 'summary'},
 ];
-const _htView = createViewState('ss_host_types_view', HT_VIEWS, () => {
+const _htView = createViewState('ss_device_types_view', HT_VIEWS, () => {
     if (typeof _persistTableConfig === 'function') _persistTableConfig();
     renderHostTypes();
 });
@@ -82,7 +82,7 @@ function setHostTypesView(id) { _htView.set(id); }
 // ── Los datos ───────────────────────────────────────────────────────────────────────────
 
 async function _htLoad() {
-    const d = await apiGet('/api/v1/host_types');
+    const d = await apiGet('/api/v1/device_types');
     _htData = (d && d.types) || [];
     _htUsage = (d && d.usage) || {};
     _hostTypeActions = (d && d.actions) || [];
@@ -110,7 +110,7 @@ function _htUsed(x) {
  *  En este orden por lo mismo que el nombre: desde que alguien la describe con sus palabras, eso
  *  es lo que quiere leer. Y con la comprobación de que la clave existe —`t()` devuelve la clave
  *  que se le dio cuando no la encuentra— o una clase de serie sin traducir enseñaría
- *  `host_type_nas_desc` en la columna donde se espera una frase. */
+ *  `device_type_nas_desc` en la columna donde se espera una frase. */
 function _htDesc(x) {
     const propia = String((x || {}).description || '');
     if (propia) return propia;
@@ -158,7 +158,7 @@ function _htSourceBadge(x) {
     if (!src) return '';
     const nombre = _htSourceName(src);
     return ` <span class="badge bg-body-secondary text-body-secondary border fw-normal"
-        title="${escAttr(tf('host_types_linked', nombre))}"
+        title="${escAttr(tf('device_types_linked', nombre))}"
         ><i class="bi ${escAttr(_htSourceIcon(src))} me-1"></i>${esc(nombre)}</span>`;
 }
 
@@ -182,12 +182,12 @@ const _HT_COLS = [
     // entrada en blanco con un candado — una casilla que no se puede tocar y que no dice de qué
     // es. Reportado desde la pantalla. Va en la celda del nombre, que es donde lo pone
     // Dispositivos y donde se lee: el dibujo y la palabra juntos.
-    {id: 'name', label: () => t('host_types_name'), sortKey: 'name', always: true},
-    {id: 'description', label: () => t('host_types_desc'), sortKey: 'description'},
-    {id: 'slug', label: () => t('host_types_id'), sortKey: 'slug'},
+    {id: 'name', label: () => t('device_types_name'), sortKey: 'name', always: true},
+    {id: 'description', label: () => t('device_types_desc'), sortKey: 'description'},
+    {id: 'slug', label: () => t('device_types_id'), sortKey: 'slug'},
     _META_COL.uid,
-    {id: 'source', label: () => t('host_types_origin'), sortKey: 'source'},
-    {id: 'used', label: () => t('host_types_used'), sortKey: 'used'},
+    {id: 'source', label: () => t('device_types_origin'), sortKey: 'source'},
+    {id: 'used', label: () => t('device_types_used'), sortKey: 'used'},
     ..._META_TAIL,
 ];
 //: Lo que se ve sin tocar el selector, y **en el orden en que se lee una fila**: qué es, para qué
@@ -209,10 +209,10 @@ let _htCurrentPage = [];
 let _htSel = new Set();
 
 createListTable({
-    key: 'hosttypes', containerId: 'hosttypes-container', tableId: 'hosttypes-table',
-    accent: 'teal', icon: 'bi-tags', title: () => t('host_types_all'),
+    key: 'devicetypes', containerId: 'devicetypes-container', tableId: 'devicetypes-table',
+    accent: 'teal', icon: 'bi-tags', title: () => t('device_types_all'),
     columns: _HT_COLS, defaultVisible: _HT_DEFAULT_COLS,
-    persist: true, clearLabelKey: 'host_types_all',
+    persist: true, clearLabelKey: 'device_types_all',
     thClass: {used: 'text-end'},
     prepare: async () => {
         if (_htData === null) await _htLoad();
@@ -227,18 +227,18 @@ createListTable({
     selectableRow: (k) => _htSelectable(k),
     filters: {
         fields: () => [
-            {key: 'q', label: () => t('host_types_name'), type: 'search', grow: true,
-             placeholder: () => t('host_types_find')},
+            {key: 'q', label: () => t('device_types_name'), type: 'search', grow: true,
+             placeholder: () => t('device_types_find')},
             // «Con dispositivos» contesta de qué se compone la flota; «sin usar» es exactamente
             // la lista de las que se pueden quitar, que es para lo que está la papelera.
-            {key: 'use', label: () => t('host_types_used'), type: 'select', minWidth: '150px',
+            {key: 'use', label: () => t('device_types_used'), type: 'select', minWidth: '150px',
              options: () => [{value: '', label: t('all')},
-                             {value: 'used', label: t('host_types_f_used')},
-                             {value: 'free', label: t('host_types_f_free')}]},
-            {key: 'source', label: () => t('host_types_origin'), type: 'select',
+                             {value: 'used', label: t('device_types_f_used')},
+                             {value: 'free', label: t('device_types_f_free')}]},
+            {key: 'source', label: () => t('device_types_origin'), type: 'select',
              minWidth: '150px',
              options: () => [{value: '', label: t('all')},
-                             {value: '-', label: t('host_types_origin_here')}].concat(
+                             {value: '-', label: t('device_types_origin_here')}].concat(
                  _htSources().map(s => ({value: s, label: _htSourceName(s)})))},
         ],
         match: (x, f) => _htMatch(x, f),
@@ -267,7 +267,7 @@ createListTable({
             const src = String(x.source || '');
             return `<td class="ss-fs-2">${src
                 ? esc(_htSourceName(src))
-                : `<span class="text-muted">${esc(t('host_types_origin_here'))}</span>`}</td>`;
+                : `<span class="text-muted">${esc(t('device_types_origin_here'))}</span>`}</td>`;
         }
         if (colId === 'used') return `<td class="text-end">${_htUsedCell(x)}</td>`;
         return '<td></td>';
@@ -286,7 +286,7 @@ createListTable({
         title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${
         esc(t('refresh'))}</button>`,
     emptyState: () => `<div class="text-center py-5 text-muted">
-        <i class="bi bi-tags ss-empty-icon"></i><span>${esc(t('host_types_none'))}</span></div>`,
+        <i class="bi bi-tags ss-empty-icon"></i><span>${esc(t('device_types_none'))}</span></div>`,
     state: {
         visible: {get: () => _htVisibleCols, set: v => { _htVisibleCols = v; }},
         order: {get: () => _htColOrder, set: v => { _htColOrder = v; }},
@@ -341,7 +341,7 @@ function _htUsedCell(x) {
     if (!n) return `<span class="text-muted ss-fs-1">—</span>`;
     return `<button class="badge bg-body-secondary text-body border fw-normal"
         onclick="event.stopPropagation();_htGoDevices(${jsStr(x.uid)})"
-        title="${escAttr(t('host_types_go_tt'))}">${esc(String(n))}</button>`;
+        title="${escAttr(t('device_types_go_tt'))}">${esc(String(n))}</button>`;
 }
 
 /** Los dos botones de una fila. Compartidos por la tabla y la rejilla porque son los mismos —
@@ -350,7 +350,7 @@ function _htRowActions(x, ctx) {
     if (!ctx.puede) return '';
     const usados = _htUsed(x);
     return `<button class="btn btn-sm btn-primary py-0 px-1 me-1"
-            title="${escAttr(t(_htLinked(x) ? 'host_types_view_title' : 'edit'))}"
+            title="${escAttr(t(_htLinked(x) ? 'device_types_view_title' : 'edit'))}"
             onclick="_htOpenEdit(${jsStr(x.uid)})"
             ><i class="bi bi-${_htLinked(x) ? 'eye' : 'pencil'}"></i></button>
         <button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete_tt'))}"
@@ -379,7 +379,7 @@ function _htSelBarHtml(ctx, sel) {
  *  desaparece; lo que varía es lo que cuelga de ella. */
 function _htNewHtml() {
     const nuevo = `<button class="btn btn-sm btn-success" onclick="_htOpenEdit('')">
-        <i class="bi bi-plus-lg me-1"></i>${esc(t('host_types_new'))}</button>`;
+        <i class="bi bi-plus-lg me-1"></i>${esc(t('device_types_new'))}</button>`;
     const perms = currentUser.permissions || [];
     // Las de vincular no: ésas van dentro del cuadro de una clase, porque son un acto sobre UNA.
     const otras = (_hostTypeActions || []).filter(
@@ -388,13 +388,13 @@ function _htNewHtml() {
         ${nuevo}
         <button class="btn btn-sm btn-success dropdown-toggle dropdown-toggle-split"
             data-bs-toggle="dropdown" aria-expanded="false"
-            title="${escAttr(t('host_types_more'))}"
-            ><span class="visually-hidden">${esc(t('host_types_more'))}</span></button>
+            title="${escAttr(t('device_types_more'))}"
+            ><span class="visually-hidden">${esc(t('device_types_more'))}</span></button>
         <ul class="dropdown-menu dropdown-menu-end ss-dropdown-sm">
             <li><button class="dropdown-item" type="button" onclick="_htSeed()"
-                title="${escAttr(t('host_types_seed_tt'))}"
+                title="${escAttr(t('device_types_seed_tt'))}"
                 ><i class="bi bi-arrow-counterclockwise me-2"></i>${
-                esc(t('host_types_seed'))}</button></li>
+                esc(t('device_types_seed'))}</button></li>
             ${otras.length ? '<li><hr class="dropdown-divider"></li>' : ''}
             ${otras.map(a => `<li><button class="dropdown-item" type="button"
                 onclick="${escAttr(a.fn)}()"
@@ -448,7 +448,7 @@ function _htTilesBody(filas) {
         const n = _htUsed(x);
         return `<button class="ss-tile${n ? '' : ' opacity-50'}"
             ${n ? `onclick="_htGoDevices(${jsStr(x.uid)})"
-                  title="${escAttr(t('host_types_go_tt'))}"` : ''}>
+                  title="${escAttr(t('device_types_go_tt'))}"` : ''}>
             <span class="ss-tile-k"><i class="bi ${escAttr(x.icon || 'bi-hdd-network')} me-1"
                 ></i>${esc(_htName(x))}</span>
             <span class="ss-tile-v">${esc(String(n))}</span>
@@ -470,8 +470,8 @@ function _htGoDevices(uid) {
     try { localStorage.setItem('ss_devices_type_rail', String(uid)); } catch (_) {}
     if (typeof _srvTypeSel !== 'undefined') _srvTypeSel = String(uid);
     if (typeof _navSubtab === 'function') {
-        _navSubtab(null, '#tab-servers', '#subtab-srv-hosts',
-                   'ss_active_subtab_infra', '#subtab-srv-hosts');
+        _navSubtab(null, '#tab-servers', '#subtab-srv-devices',
+                   'ss_active_subtab_infra', '#subtab-srv-devices');
     }
     if (typeof renderServers === 'function') renderServers();
 }
@@ -498,13 +498,13 @@ function _htOpenEdit(uid) {
                 ro: _htLinked(fila)};
     _htIconQuery = '';
     _htIconsOpen = false;
-    const titulo = document.getElementById('hostTypeEditTitle');
+    const titulo = document.getElementById('deviceTypeEditTitle');
     if (titulo) {
-        titulo.textContent = t(_htDraft.ro ? 'host_types_view_title'
-                                : (uid ? 'host_types_edit_title' : 'host_types_new_title'));
+        titulo.textContent = t(_htDraft.ro ? 'device_types_view_title'
+                                : (uid ? 'device_types_edit_title' : 'device_types_new_title'));
     }
     _htDrawEdit();
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('hostTypeEditModal')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceTypeEditModal')).show();
     setTimeout(() => { const el = document.getElementById('htName'); if (el) el.focus(); }, 200);
 }
 
@@ -519,33 +519,33 @@ function _htOpenEdit(uid) {
  *  En un panel estrecho las dos columnas se apilan solas (`col-12 col-md-*`), que es lo que hace
  *  que el mismo cuadro valga en una pantalla ancha y en media. */
 function _htDrawEdit() {
-    const caja = document.getElementById('hostTypeEditBody');
+    const caja = document.getElementById('deviceTypeEditBody');
     if (!caja || !_htDraft) return;
     const ro = !!_htDraft.ro;
     caja.innerHTML = `
     <div class="row g-3">
         <div class="col-12 col-md-5">
             <label class="form-label small fw-semibold mb-1" for="htName">${
-                esc(t('host_types_name'))}</label>
+                esc(t('device_types_name'))}</label>
             <input type="text" class="form-control form-control-sm" id="htName" maxlength="60"
                    value="${escAttr(_htDraft.name)}"${ro ? ' readonly' : ''}
-                   placeholder="${escAttr(t('host_types_name_ph'))}"
+                   placeholder="${escAttr(t('device_types_name_ph'))}"
                    oninput="_htDraft.name=this.value"
                    onkeydown="if(event.key==='Enter'){event.preventDefault();_htSave();}">
-            ${ro ? `<div class="form-text small">${esc(tf('host_types_linked',
+            ${ro ? `<div class="form-text small">${esc(tf('device_types_linked',
                 _htSourceName(_htDraft.source)))}</div>` : ''}
             <label class="form-label small fw-semibold mb-1 mt-3" for="htDesc">${
-                esc(t('host_types_desc'))}</label>
+                esc(t('device_types_desc'))}</label>
             <textarea class="form-control form-control-sm" id="htDesc" maxlength="200" rows="4"
                       placeholder="${escAttr(_htDraft.desc_default
-                                             || t('host_types_desc_ph'))}"
+                                             || t('device_types_desc_ph'))}"
                       oninput="_htDraft.description=this.value"
                       >${esc(_htDraft.description)}</textarea>
-            <div class="form-text small">${esc(t('host_types_desc_hint'))}</div>
+            <div class="form-text small">${esc(t('device_types_desc_hint'))}</div>
             ${_htDraft.uid ? `<div class="form-text small mt-3 mb-1">${
-                esc(tf('host_types_id_fixed', _htDraft.slug))}</div>
+                esc(tf('device_types_id_fixed', _htDraft.slug))}</div>
             <label class="form-label small fw-semibold mb-1" for="htUid">${
-                esc(t('host_types_uid'))}</label>
+                esc(t('device_types_uid'))}</label>
             <div class="input-group input-group-sm">
                 <input type="text" class="form-control form-control-sm font-monospace text-muted"
                        id="htUid" value="${escAttr(_htDraft.uid)}" readonly>
@@ -555,7 +555,7 @@ function _htDrawEdit() {
             </div>` : ''}
         </div>
         <div class="col-12 col-md-7">
-            <label class="form-label small fw-semibold mb-1">${esc(t('host_types_icon'))}</label>
+            <label class="form-label small fw-semibold mb-1">${esc(t('device_types_icon'))}</label>
             <div class="ss-icon-grid" id="htIconGrid">${_htIconGridHtml()}</div>
             ${_htAllIconsHtml()}
         </div>
@@ -594,19 +594,19 @@ function _htAllIconsHtml() {
     if (!_htIconsOpen) {
         return `<button type="button" class="btn btn-sm btn-secondary mt-2"
             onclick="_htOpenAllIcons()"><i class="bi bi-three-dots me-1"></i>${
-            esc(t('host_types_icons_all'))}</button>`;
+            esc(t('device_types_icons_all'))}</button>`;
     }
     if (_htAllIcons === null) {
         return `<div class="d-flex align-items-center gap-2 mt-2 text-muted small">
             <div class="spinner-border spinner-border-sm"></div>${
-            esc(t('host_types_icons_load'))}</div>`;
+            esc(t('device_types_icons_load'))}</div>`;
     }
     // Con alto propio y su propio scroll: son dos mil dibujos, y sin acotarlos el cuadro crece
     // hasta que lo único que se puede hacer con él es bajar.
     return `<div class="mt-2">
         <input type="search" class="form-control form-control-sm mb-2" id="htIconSearch"
             value="${escAttr(_htIconQuery)}"
-            placeholder="${escAttr(tf('host_types_icons_find',
+            placeholder="${escAttr(tf('device_types_icons_find',
                 String(_htIconsExtra().length)))}"
             oninput="_htIconFilter(this.value)">
         <div class="ss-icon-grid ss-icon-grid-tall ss-vscroll"
@@ -637,7 +637,7 @@ function _htAllIconRowsHtml() {
     const todos = _htIconsExtra();
     const vistos = (q ? todos.filter(i => i.includes(q)) : todos).slice(0, 300);
     if (!vistos.length) {
-        return `<div class="text-muted small">${esc(t('host_types_icons_nohit'))}</div>`;
+        return `<div class="text-muted small">${esc(t('device_types_icons_nohit'))}</div>`;
     }
     return vistos.map(i => `<button type="button" class="ss-icon-pick${
         i === _htDraft.icon ? ' active' : ''}" onclick="_htPickIcon(${jsStr(i)})"
@@ -685,17 +685,17 @@ function _htPickIcon(icono) {
 function _htExternalHtml() {
     if (!_htDraft || !_htDraft.uid) return '';
     const titulo = `<div class="small fw-semibold text-muted text-uppercase ss-fs-1">${
-        esc(t('host_types_link_title'))}</div>`;
+        esc(t('device_types_link_title'))}</div>`;
     if (_htDraft.ro) {
         return `<hr class="my-3">
         <div class="d-flex align-items-center gap-2 flex-wrap">
             <div class="flex-grow-1">
                 ${titulo}
-                <div class="small text-muted">${esc(tf('host_type_managed',
+                <div class="small text-muted">${esc(tf('device_type_managed',
                     _htSourceName(_htDraft.source)))}</div>
             </div>
             <button type="button" class="btn btn-sm btn-warning text-nowrap"
-                onclick="_htUnlink()">${esc(t('host_types_unlink'))}</button>
+                onclick="_htUnlink()">${esc(t('device_types_unlink'))}</button>
         </div>`;
     }
     const perms = currentUser.permissions || [];
@@ -706,7 +706,7 @@ function _htExternalHtml() {
     <div class="d-flex align-items-center gap-2 flex-wrap">
         <div class="flex-grow-1">
             ${titulo}
-            <div class="small text-muted">${esc(t('host_types_link_hint'))}</div>
+            <div class="small text-muted">${esc(t('device_types_link_hint'))}</div>
         </div>
         ${vincular.map(a => `<button type="button" class="btn btn-sm btn-secondary"
             onclick="${escAttr(a.fn)}(${jsStr(_htDraft.uid)})"
@@ -720,8 +720,8 @@ function _htExternalHtml() {
 function _htUnlink() {
     const uid = (_htDraft || {}).uid;
     if (!uid) return;
-    showConfirmModal(tf('host_types_unlink_q', _htDraft.name || uid), async () => {
-        const r = await apiDelete('/api/v1/host_types/' + encodeURIComponent(uid) + '/link');
+    showConfirmModal(tf('device_types_unlink_q', _htDraft.name || uid), async () => {
+        const r = await apiDelete('/api/v1/device_types/' + encodeURIComponent(uid) + '/link');
         if (!r || r.status !== 200) {
             return showToast((r && r.data && r.data.error) || t('save_file_error'), 'danger');
         }
@@ -734,8 +734,8 @@ function _htUnlink() {
 
 /** Vincularla con una de fuera. Lo llama el proveedor cuando quien mira ha elegido cuál: aquí no
  *  se sabe qué clases tiene nadie, y por eso la elección la dibuja quien las trae. */
-async function hostTypeLinkTo(uid, source, externalId) {
-    const r = await apiSend('POST', '/api/v1/host_types/' + encodeURIComponent(uid) + '/link',
+async function deviceTypeLinkTo(uid, source, externalId) {
+    const r = await apiSend('POST', '/api/v1/device_types/' + encodeURIComponent(uid) + '/link',
                             {source: source, external_id: externalId});
     if (!r.ok) return showToast(r.error || t('save_file_error'), 'danger');
     showToast(t('saved'), 'success');
@@ -751,7 +751,7 @@ async function hostTypeLinkTo(uid, source, externalId) {
  *  o el de debajo se lleva el fondo del que sigue abierto — se veía «Guardado» y la pantalla no
  *  se movía. */
 function _htCloseStack() {
-    for (const id of ['fsTypesModal', 'hostTypeEditModal']) {
+    for (const id of ['fsTypesModal', 'deviceTypeEditModal']) {
         const el = document.getElementById(id);
         if (el && el.classList && el.classList.contains('show')) {
             bootstrap.Modal.getOrCreateInstance(el).hide();
@@ -762,15 +762,15 @@ function _htCloseStack() {
 async function _htSave() {
     if (!_htDraft) return;
     const nombre = String(_htDraft.name || '').trim();
-    if (!nombre) return showToast(t('host_type_name_required'), 'danger');
+    if (!nombre) return showToast(t('device_type_name_required'), 'danger');
     const cuerpo = {name: nombre, icon: _htDraft.icon || '',
                     description: String(_htDraft.description || '')};
     const r = _htDraft.uid
-        ? await apiSend('PUT', '/api/v1/host_types/' + encodeURIComponent(_htDraft.uid), cuerpo)
-        : await apiSend('POST', '/api/v1/host_types', cuerpo);
+        ? await apiSend('PUT', '/api/v1/device_types/' + encodeURIComponent(_htDraft.uid), cuerpo)
+        : await apiSend('POST', '/api/v1/device_types', cuerpo);
     if (!r.ok) return showToast(r.error || t('save_file_error'), 'danger');
     showToast(t('saved'), 'success');
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('hostTypeEditModal')).hide();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceTypeEditModal')).hide();
     _htDraft = null;
     await _htRefresh();
 }
@@ -778,10 +778,10 @@ async function _htSave() {
 /** Volver a poner las básicas que falten. Sin preguntar: no pisa nada —lo que ya está se queda
  *  como está— y lo que hace es añadir, que se deshace borrando. */
 async function _htSeed() {
-    const r = await apiSend('POST', '/api/v1/host_types/seed', {});
+    const r = await apiSend('POST', '/api/v1/device_types/seed', {});
     if (!r.ok) return showToast(r.error || t('save_file_error'), 'danger');
     const n = ((r.data || {}).added || []).length;
-    showToast(n ? tf('host_types_seeded', String(n)) : t('host_types_seeded_none'),
+    showToast(n ? tf('device_types_seeded', String(n)) : t('device_types_seeded_none'),
               n ? 'success' : 'info');
     if (n) await _htRefresh();
 }
@@ -790,8 +790,8 @@ async function _htSeed() {
  *  servidor se niega igualmente, pero enterarse al pulsar es enterarse tarde. */
 function _htDrop(uid) {
     const fila = (_htData || []).find(x => x.uid === String(uid)) || {};
-    showConfirmModal(tf('host_types_drop_q', _htName(fila)), async () => {
-        const r = await apiDelete('/api/v1/host_types/' + encodeURIComponent(uid));
+    showConfirmModal(tf('device_types_drop_q', _htName(fila)), async () => {
+        const r = await apiDelete('/api/v1/device_types/' + encodeURIComponent(uid));
         if (!r || r.status !== 200) {
             return showToast((r && r.data && r.data.error) || t('save_file_error'), 'danger');
         }
@@ -810,18 +810,18 @@ function _htDropMany() {
     const uids = Array.from(_htSel);
     if (!uids.length) return;
     if (uids.length === 1) { _htDrop(uids[0]); _htSel.clear(); return; }
-    showConfirmModal(tf('host_types_drop_many_q', String(uids.length)), async () => {
+    showConfirmModal(tf('device_types_drop_many_q', String(uids.length)), async () => {
         let hechas = 0;
         const fallos = [];
         for (const uid of uids) {
-            const r = await apiDelete('/api/v1/host_types/' + encodeURIComponent(uid));
+            const r = await apiDelete('/api/v1/device_types/' + encodeURIComponent(uid));
             if (r && r.status === 200) hechas += 1;
             else fallos.push(uid);
         }
         _htSel.clear();
-        if (hechas) showToast(tf('host_types_dropped_n', String(hechas)), 'success');
+        if (hechas) showToast(tf('device_types_dropped_n', String(hechas)), 'success');
         if (fallos.length) {
-            showToast(tf('host_types_drop_failed', String(fallos.length)), 'danger');
+            showToast(tf('device_types_drop_failed', String(fallos.length)), 'danger');
         }
         await _htRefresh();
     });
@@ -829,7 +829,7 @@ function _htDropMany() {
 
 /** Volver a pedir la lista **y poner al día lo que ya está dibujado**.
  *
- *  `HOST_TYPES` lo trae la página al cargar, así que una clase creada aquí no existiría para el
+ *  `DEVICE_TYPES` lo trae la página al cargar, así que una clase creada aquí no existiría para el
  *  desplegable de la ficha, ni para el filtro de la lista, ni para los iconos — hasta un F5. Y
  *  esta pantalla es la que acaba de crearla. */
 async function _htRefresh() {
@@ -837,24 +837,24 @@ async function _htRefresh() {
     // Los cuatro mapas, y los dos de la palabra se VACÍAN antes: una clase sembrada que alguien
     // acaba de renombrar deja de traer su clave de idioma, y la entrada que quedara ahí seguiría
     // diciendo «NAS / Almacenamiento» después de llamarla «Cabina de discos».
-    HOST_TYPES.length = 0;
-    Object.keys(HOST_TYPE_LABELS).forEach(k => delete HOST_TYPE_LABELS[k]);
-    Object.keys(HOST_TYPE_KEYS).forEach(k => delete HOST_TYPE_KEYS[k]);
+    DEVICE_TYPES.length = 0;
+    Object.keys(DEVICE_TYPE_LABELS).forEach(k => delete DEVICE_TYPE_LABELS[k]);
+    Object.keys(DEVICE_TYPE_KEYS).forEach(k => delete DEVICE_TYPE_KEYS[k]);
     (_htData || []).forEach(x => {
-        HOST_TYPES.push(x);
-        HOST_TYPE_ICONS[x.uid] = x.icon || 'bi-hdd-network';
-        HOST_TYPE_SLUGS[x.uid] = x.slug || '';
-        if (x.label) HOST_TYPE_LABELS[x.uid] = x.label;
-        if (x.label_key) HOST_TYPE_KEYS[x.uid] = x.label_key;
+        DEVICE_TYPES.push(x);
+        DEVICE_TYPE_ICONS[x.uid] = x.icon || 'bi-hdd-network';
+        DEVICE_TYPE_SLUGS[x.uid] = x.slug || '';
+        if (x.label) DEVICE_TYPE_LABELS[x.uid] = x.label;
+        if (x.label_key) DEVICE_TYPE_KEYS[x.uid] = x.label_key;
     });
     // Lo marcado que ya no existe se suelta: un nombre que quedara ahí mandaría un borrado de
     // algo que otro acaba de quitar.
     const vivos = new Set((_htData || []).map(x => String(x.uid)));
     for (const uid of Array.from(_htSel)) { if (!vivos.has(uid)) _htSel.delete(uid); }
-    if (document.getElementById('hosttypes-container')) await renderHostTypes();
+    if (document.getElementById('devicetypes-container')) await renderHostTypes();
     // Y lo que hubiera dibujado con la lista vieja: la ficha abierta detrás y la lista de
     // dispositivos de detrás de ella.
-    if (typeof _renderHostModalBody === 'function' && _hostDraft) _renderHostModalBody();
+    if (typeof _renderDeviceModalBody === 'function' && _deviceDraft) _renderDeviceModalBody();
     if (typeof renderServers === 'function'
         && document.getElementById('servers-container')) renderServers();
 }

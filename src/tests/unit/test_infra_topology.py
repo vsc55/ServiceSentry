@@ -483,8 +483,8 @@ class TestTwoMachinesCannotHoldOneAddress:
         return [{'row': '', 'key': 'ip', 'value': ip}]
 
     def _map(self, *pairs):
-        hosts = [{'uid': u, 'name': u} for u, _ip in pairs]
-        return topology.build(hosts, {u: self._attrs(ip) for u, ip in pairs})
+        devices = [{'uid': u, 'name': u} for u, _ip in pairs]
+        return topology.build(devices, {u: self._attrs(ip) for u, ip in pairs})
 
     def test_the_same_address_twice_is_not_one_network(self):
         out = self._map(('erebor', '172.17.0.1/16'), ('isen', '172.17.0.1/16'))

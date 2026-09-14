@@ -1,26 +1,26 @@
-function openNewHostModal() {
-    _editingHostUid = null;
+function openNewDeviceModal() {
+    _editingDeviceUid = null;
     _hostModalReadonly = false;   // reachable only with edit rights (toolbar-gated)
-    _hostDraft = { name: '', address: '', kind: 'none', os: 'auto', maintenance: false,
+    _deviceDraft = { name: '', address: '', kind: 'none', os: 'auto', maintenance: false,
                    virtual: false, device_type: '', tags: [], description: '', profiles: {} };
-    document.getElementById('hostModalTitle').textContent = t('host_new');
+    document.getElementById('hostModalTitle').textContent = t('device_new');
     _refreshHostTypeIcon();
-    _hostChecks = _buildHostChecks(null);
+    _deviceChecks = _buildHostChecks(null);
     _hostCheckFilters = {};
-    _hostShownMods = new Set();   // new host: start empty, add modules as needed
+    _deviceShownMods = new Set();   // new device: start empty, add modules as needed
     _snapshotHost();              // Undo baseline
-    _renderHostModalBody();
+    _renderDeviceModalBody();
     const err = document.getElementById('hostModalError'); if (err) err.textContent = '';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('hostModal')).show();
 }
 
-// Clone a host: a small modal asks for the new name (prefilled "<name> (copia)")
-// and address; on save the server duplicates the stored host (profiles + secrets)
+// Clone a device: a small modal asks for the new name (prefilled "<name> (copia)")
+// and address; on save the server duplicates the stored device (profiles + secrets)
 // under a new uid. "Save & edit" then opens the clone in the editor.
 let _cloneHostSourceUid = null;
 
-// Module checks bound to a host → [{module, coll, key, label}] (for the clone
-// picker). A multi-host (cluster) check the host is a member of is included too.
+// Module checks bound to a device → [{module, coll, key, label}] (for the clone
+// picker). A multi-device (cluster) check the device is a member of is included too.
 function _hostBoundChecks(uid) {
     const out = [];
     for (const [mk, mc] of Object.entries(modulesData || {})) {
@@ -29,8 +29,8 @@ function _hostBoundChecks(uid) {
             if (coll.startsWith('__') || !items || typeof items !== 'object') continue;
             for (const [key, v] of Object.entries(items)) {
                 if (!v || typeof v !== 'object') continue;
-                const bound = String(v.host_uid || '') === String(uid)
-                    || (Array.isArray(v.host_uids) && v.host_uids.map(String).includes(String(uid)));
+                const bound = String(v.device_uid || '') === String(uid)
+                    || (Array.isArray(v.device_uids) && v.device_uids.map(String).includes(String(uid)));
                 if (bound) out.push({ module: mk, coll, key, label: (v.label || key) });
             }
         }
@@ -65,16 +65,16 @@ function _cloneChecksCount() {
     if (el) el.textContent = `${cbs.filter(cb => cb.checked).length}/${cbs.length}`;
 }
 
-function openCloneHostModal(uid) {
-    const host = hostsData[uid];
-    if (!host) return;
+function openCloneDeviceModal(uid) {
+    const device = devicesData[uid];
+    if (!device) return;
     _cloneHostSourceUid = uid;
     const nameEl = document.getElementById('hostCloneName');
     const addrEl = document.getElementById('hostCloneAddress');
     const errEl  = document.getElementById('hostCloneError');
     if (errEl) errEl.textContent = '';
-    if (nameEl) nameEl.value = `${host.name || ''} (${t('host_clone_copy_suffix')})`;
-    if (addrEl) addrEl.value = host.address || '';
+    if (nameEl) nameEl.value = `${device.name || ''} (${t('device_clone_copy_suffix')})`;
+    if (addrEl) addrEl.value = device.address || '';
     _renderCloneChecks(uid);
     const modalEl = document.getElementById('hostCloneModal');
     // Focus AFTER Bootstrap finishes showing (it moves focus to the modal itself),
@@ -89,7 +89,7 @@ async function _cloneHostSubmit(openEdit) {
     const name = (document.getElementById('hostCloneName')?.value || '').trim();
     const address = (document.getElementById('hostCloneAddress')?.value || '').trim();
     const errEl = document.getElementById('hostCloneError');
-    if (!name) { if (errEl) errEl.textContent = t('host_name_required') || t('invalid'); return; }
+    if (!name) { if (errEl) errEl.textContent = t('device_name_required') || t('invalid'); return; }
     // Selected checks to clone. When the section is shown, only the ticked ones
     // are cloned (an empty selection clones no checks). When absent → clone all.
     const wrap = document.getElementById('hostCloneChecksWrap');
@@ -98,7 +98,7 @@ async function _cloneHostSubmit(openEdit) {
         reqBody.checks = [...document.querySelectorAll('#hostCloneChecks input[data-clone-check]:checked')]
             .map(cb => cb.value);
     }
-    const res = await apiPost('/api/v1/hosts/' + encodeURIComponent(_cloneHostSourceUid) + '/clone', reqBody);
+    const res = await apiPost('/api/v1/devices/' + encodeURIComponent(_cloneHostSourceUid) + '/clone', reqBody);
     const data = res && res.data;
     if (!res || res.status !== 200 || !data || !data.uid) {
         if (errEl) errEl.textContent = (data && data.error) || t('connection_error');
@@ -115,51 +115,51 @@ async function _cloneHostSubmit(openEdit) {
     }
     renderServers();
     const n = data.checks_cloned || 0;
-    showToast(n ? `${t('host_clone_done')} (${n})` : t('host_clone_done'), 'success');
-    if (openEdit) openEditHostModal(newUid);
+    showToast(n ? `${t('device_clone_done')} (${n})` : t('device_clone_done'), 'success');
+    if (openEdit) openEditDeviceModal(newUid);
 }
 
-function openEditHostModal(uid) {
-    const host = hostsData[uid];
-    if (!host) return;
-    _editingHostUid = uid;
+function openEditDeviceModal(uid) {
+    const device = devicesData[uid];
+    if (!device) return;
+    _editingDeviceUid = uid;
     // View-only users (no edit rights on this host) can open it to inspect, but
     // the modal is locked: fields disabled and the save/test actions hidden.
-    _hostModalReadonly = !_canEditHost(uid);
+    _hostModalReadonly = !_canEditDevice(uid);
     // Deep copy so edits aren't applied until saved.
-    _hostDraft = JSON.parse(JSON.stringify({
-        name: host.name || '', address: host.address || '',
-        kind: host.kind || 'none', os: host.os || 'auto', maintenance: !!host.maintenance,
-        virtual: !!host.virtual, device_type: host.device_type || '',
-        tags: host.tags || [], description: host.description || '',
-        profiles: host.profiles || {},
+    _deviceDraft = JSON.parse(JSON.stringify({
+        name: device.name || '', address: device.address || '',
+        kind: device.kind || 'none', os: device.os || 'auto', maintenance: !!device.maintenance,
+        virtual: !!device.virtual, device_type: device.device_type || '',
+        tags: device.tags || [], description: device.description || '',
+        profiles: device.profiles || {},
         // De dónde vino, que no se edita pero sí se enseña: es lo que explica por qué el nombre
         // está bloqueado, y lo que da el botón para desbloquearlo.
-        source: host.source || '', external_id: host.external_id || '',
+        source: device.source || '', external_id: device.external_id || '',
     }));
-    // Infer the SSH auth method for hosts saved before the selector existed:
+    // Infer the SSH auth method for devices saved before the selector existed:
     // a file path → 'file'; stored key text (present, possibly masked) → 'text';
     // otherwise password (the default).
-    const _ssh = _hostDraft.profiles && _hostDraft.profiles.ssh;
+    const _ssh = _deviceDraft.profiles && _deviceDraft.profiles.ssh;
     if (_ssh && _ssh.ssh_auth_method === undefined) {
         _ssh.ssh_auth_method = _ssh.ssh_key ? 'file'
             : (_ssh.ssh_key_string !== undefined ? 'text' : 'password');
     }
-    _hostChecks = _buildHostChecks(uid);
+    _deviceChecks = _buildHostChecks(uid);
     _hostCheckFilters = {};
-    // Show the modules the host monitors: the persisted list (so a module added
+    // Show the modules the device monitors: the persisted list (so a module added
     // with no checks yet still appears) ∪ any module that has bound checks.
-    const _savedMods = Array.isArray(host.modules) ? host.modules : [];
-    _hostShownMods = new Set([
-        ..._savedMods.filter(m => m in _hostChecks),
-        ...Object.keys(_hostChecks).filter(m => (_hostChecks[m]._existingKeys || []).length > 0),
+    const _savedMods = Array.isArray(device.modules) ? device.modules : [];
+    _deviceShownMods = new Set([
+        ..._savedMods.filter(m => m in _deviceChecks),
+        ...Object.keys(_deviceChecks).filter(m => (_deviceChecks[m]._existingKeys || []).length > 0),
     ]);
     _snapshotHost();              // Undo baseline
-    const _hName = (_hostDraft.name || host.name || '').trim();
+    const _hName = (_deviceDraft.name || device.name || '').trim();
     document.getElementById('hostModalTitle').textContent =
-        t(_hostModalReadonly ? 'host_view' : 'host_edit') + (_hName ? ': ' + _hName : '');
+        t(_hostModalReadonly ? 'device_view' : 'device_edit') + (_hName ? ': ' + _hName : '');
     _refreshHostTypeIcon();
-    _renderHostModalBody();
+    _renderDeviceModalBody();
     const err = document.getElementById('hostModalError'); if (err) err.textContent = '';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('hostModal')).show();
 }
@@ -172,9 +172,9 @@ function openEditHostModal(uid) {
  *  sitio donde vive. Esto no es la guarda: la guarda está en el servidor, que contesta 409. Esto
  *  es que no haga falta llegar a ella. */
 function _hmManagedAttrs() {
-    const id = String((_hostDraft || {}).source || '');
+    const id = String((_deviceDraft || {}).source || '');
     if (!id) return '';
-    return ` readonly title="${escAttr(tf('host_field_managed', _hmSourceName(id)))}"`;
+    return ` readonly title="${escAttr(tf('device_field_managed', _hmSourceName(id)))}"`;
 }
 
 function _hmSourceName(id) {
@@ -188,33 +188,33 @@ function _hmSourceName(id) {
  *  Con la salida DENTRO del aviso y no escondida en otro sitio: quien viene a corregir un nombre
  *  y se lo encuentra bloqueado tiene que poder decidir ahí mismo, que es donde está mirando. */
 function _hmSourceNoteHtml() {
-    const id = String((_hostDraft || {}).source || '');
+    const id = String((_deviceDraft || {}).source || '');
     if (!id) return '';
     return `<div class="col-12"><div class="alert alert-secondary py-2 px-3 mb-0 small
             d-flex align-items-center gap-2">
         <i class="bi bi-box-arrow-in-down"></i>
-        <span class="flex-grow-1">${esc(tf('host_source_tt', _hmSourceName(id),
-            (_hostDraft || {}).external_id || ''))}</span>
+        <span class="flex-grow-1">${esc(tf('device_source_tt', _hmSourceName(id),
+            (_deviceDraft || {}).external_id || ''))}</span>
         <button type="button" class="btn btn-sm btn-warning"
-            onclick="_hostUnlink()">${esc(t('host_unlink'))}</button>
+            onclick="_hostUnlink()">${esc(t('device_unlink'))}</button>
     </div></div>`;
 }
 
 /** Soltarlo de su origen. Pregunta antes: deja de actualizarse solo, y eso no se descubre
  *  pulsando. No borra nada suyo — ni perfiles, ni módulos, ni historial. */
 function _hostUnlink() {
-    const uid = _editingHostUid;
+    const uid = _editingDeviceUid;
     if (!uid) return;
-    showConfirmModal(tf('host_unlink_q', (_hostDraft || {}).name || ''), async () => {
-        const r = await apiDelete('/api/v1/hosts/' + encodeURIComponent(uid) + '/source');
+    showConfirmModal(tf('device_unlink_q', (_deviceDraft || {}).name || ''), async () => {
+        const r = await apiDelete('/api/v1/devices/' + encodeURIComponent(uid) + '/source');
         if (!r || r.status !== 200) {
             return showToast((r && r.data && r.data.error) || t('save_file_error'), 'danger');
         }
-        showToast(t('host_unlinked_ok'), 'success');
-        _hostDraft.source = '';
-        _hostDraft.external_id = '';
-        if (hostsData[uid]) { hostsData[uid].source = ''; hostsData[uid].external_id = ''; }
-        _renderHostModalBody();
+        showToast(t('device_unlinked_ok'), 'success');
+        _deviceDraft.source = '';
+        _deviceDraft.external_id = '';
+        if (devicesData[uid]) { devicesData[uid].source = ''; devicesData[uid].external_id = ''; }
+        _renderDeviceModalBody();
         renderServers();
     });
 }
@@ -225,78 +225,78 @@ function _hostMayEditTypes() {
     return (currentUser.permissions || []).includes('devices_edit');
 }
 
-function _renderHostModalBody() {
-    const d = _hostDraft;
+function _renderDeviceModalBody() {
+    const d = _deviceDraft;
     // General tab: the server's own data (identity, kind/OS, maintenance, SSH).
     const general = `<div class="row g-3">
         ${_hmSourceNoteHtml()}
         <div class="col-sm-6">
-            <label class="form-label small fw-semibold">${esc(t('host_name'))}</label>
+            <label class="form-label small fw-semibold">${esc(t('device_name'))}</label>
             <input type="text" class="form-control form-control-sm" id="hmName" required
-                   value="${escAttr(d.name)}" oninput="_hostDraft.name=this.value"${
+                   value="${escAttr(d.name)}" oninput="_deviceDraft.name=this.value"${
                    _hmManagedAttrs()}>
         </div>
         <div class="col-sm-6">
-            <label class="form-label small fw-semibold">${esc(t('host_address'))}</label>
+            <label class="form-label small fw-semibold">${esc(t('device_address'))}</label>
             <input type="text" class="form-control form-control-sm" id="hmAddress"
-                   value="${escAttr(d.address)}" oninput="_hostDraft.address=this.value"
+                   value="${escAttr(d.address)}" oninput="_deviceDraft.address=this.value"
                    placeholder="host / IP"${_hmManagedAttrs()}>
         </div>
         <div class="col-sm-6">
-            <label class="form-label small fw-semibold">${esc(t('col_host_tags'))}</label>
+            <label class="form-label small fw-semibold">${esc(t('col_device_tags'))}</label>
             <input type="text" class="form-control form-control-sm" id="hmTags"
                    value="${escAttr((d.tags || []).join(', '))}"
-                   oninput="_hostDraft.tags=this.value.split(',').map(s=>s.trim()).filter(Boolean)"
+                   oninput="_deviceDraft.tags=this.value.split(',').map(s=>s.trim()).filter(Boolean)"
                    placeholder="prod, db">
         </div>
         <div class="col-sm-6">
-            <label class="form-label small fw-semibold">${esc(t('host_type'))}</label>
+            <label class="form-label small fw-semibold">${esc(t('device_type'))}</label>
             <div class="input-group input-group-sm">
                 <select class="form-select form-select-sm" id="hmType"
-                        onchange="_hostDraft.device_type=this.value;_refreshHostTypeIcon()">
-                    <option value="" ${!d.device_type ? 'selected' : ''}>${esc(t('host_type_unset'))}</option>
-                    ${HOST_TYPES.map(x => `<option value="${escAttr(x.uid)}" ${d.device_type === x.uid ? 'selected' : ''}>${esc(hostTypeLabel(x.uid))}</option>`).join('')}
+                        onchange="_deviceDraft.device_type=this.value;_refreshHostTypeIcon()">
+                    <option value="" ${!d.device_type ? 'selected' : ''}>${esc(t('device_type_unset'))}</option>
+                    ${DEVICE_TYPES.map(x => `<option value="${escAttr(x.uid)}" ${d.device_type === x.uid ? 'selected' : ''}>${esc(deviceTypeLabel(x.uid))}</option>`).join('')}
                 </select>
                 ${_hostMayEditTypes() ? `<button class="btn btn-sm btn-secondary" type="button"
-                    onclick="_htOpenEdit('')" title="${escAttr(t('host_types_manage_tt'))}"
+                    onclick="_htOpenEdit('')" title="${escAttr(t('device_types_manage_tt'))}"
                     ><i class="bi bi-plus-lg"></i></button>` : ''}
             </div>
-            <div class="form-text small">${esc(t('host_type_hint'))}</div>
+            <div class="form-text small">${esc(t('device_type_hint'))}</div>
         </div>
         <div class="col-sm-6">
-            <label class="form-label small fw-semibold">${esc(t('host_kind'))}</label>
+            <label class="form-label small fw-semibold">${esc(t('device_kind'))}</label>
             <select class="form-select form-select-sm" id="hmKind" onchange="_onHostKindChange(this.value)">
                 ${HOST_KINDS.map(k => `<option value="${k}" ${
-                    hostKind(d.kind) === k ? 'selected' : ''}>${esc(t('host_kind_' + k))}</option>`).join('')}
+                    deviceKind(d.kind) === k ? 'selected' : ''}>${esc(t('device_kind_' + k))}</option>`).join('')}
             </select>
-            <div class="form-text small">${esc(t('host_kind_hint'))}</div>
+            <div class="form-text small">${esc(t('device_kind_hint'))}</div>
         </div>
         <div class="col-sm-6" id="hmOsWrap">${_renderOsField()}</div>
         <div class="col-sm-6 d-flex align-items-center">
             <div class="form-check form-switch mt-3">
                 <input class="form-check-input" type="checkbox" id="hmMaint" ${d.maintenance ? 'checked' : ''}
-                       onchange="_hostDraft.maintenance=this.checked">
+                       onchange="_deviceDraft.maintenance=this.checked">
                 <label class="form-check-label small fw-semibold" for="hmMaint">
-                    <i class="bi bi-cone-striped me-1"></i>${esc(t('host_maintenance'))}</label>
-                <div class="form-text small">${esc(t('host_maintenance_hint'))}</div>
+                    <i class="bi bi-cone-striped me-1"></i>${esc(t('device_maintenance'))}</label>
+                <div class="form-text small">${esc(t('device_maintenance_hint'))}</div>
             </div>
         </div>
         <div class="col-sm-6 d-flex align-items-center">
             <div class="form-check form-switch mt-3">
                 <input class="form-check-input" type="checkbox" id="hmVirtual" ${d.virtual ? 'checked' : ''}
-                       onchange="_hostDraft.virtual=this.checked">
+                       onchange="_deviceDraft.virtual=this.checked">
                 <label class="form-check-label small fw-semibold" for="hmVirtual">
-                    <i class="bi bi-diagram-3 me-1"></i>${esc(t('host_virtual'))}</label>
-                <div class="form-text small">${esc(t('host_virtual_hint'))}</div>
+                    <i class="bi bi-diagram-3 me-1"></i>${esc(t('device_virtual'))}</label>
+                <div class="form-text small">${esc(t('device_virtual_hint'))}</div>
             </div>
         </div>
     </div>
     <div id="hmSshConnWrap" class="mt-3">${_renderSshConnection()}</div>
     ${_renderCoreProfileCards()}
     <div class="mt-3 flex-grow-1 d-flex flex-column" style="min-height:0">
-        <label class="form-label small fw-semibold">${esc(t('host_description'))}</label>
+        <label class="form-label small fw-semibold">${esc(t('device_description'))}</label>
         <textarea class="form-control form-control-sm flex-grow-1" id="hmDesc" style="resize:none;min-height:0"
-                  oninput="_hostDraft.description=this.value"${_hmManagedAttrs()}>${
+                  oninput="_deviceDraft.description=this.value"${_hmManagedAttrs()}>${
                   esc(d.description)}</textarea>
     </div>`;
 
@@ -304,24 +304,24 @@ function _renderHostModalBody() {
     // separate modal (#hostTestModal) so they don't disrupt this form.
     // Two tabs: General (server data) and Monitoring (per-module checks).  All
     // connection settings live on each module's check — there is no separate
-    // Credentials tab; the host only provides the address (+ SSH in General).
+    // Credentials tab; the device only provides the address (+ SSH in General).
     let h = `<ul class="nav nav-tabs mb-3" role="tablist">
         <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab"
             data-bs-target="#hmTabGeneral" type="button">
-            <i class="bi bi-hdd me-1"></i>${esc(t('host_tab_general'))}</button></li>
+            <i class="bi bi-hdd me-1"></i>${esc(t('device_tab_general'))}</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
             data-bs-target="#hmTabMonitor" type="button">
-            <i class="bi bi-activity me-1"></i>${esc(t('host_tab_monitoring'))}</button></li>
+            <i class="bi bi-activity me-1"></i>${esc(t('device_tab_monitoring'))}</button></li>
         <li class="nav-item"><button class="nav-link" data-bs-toggle="tab"
             data-bs-target="#hmTabLatest" type="button" onclick="_loadHostLatestData()">
-            <i class="bi bi-clock-history me-1"></i>${esc(t('host_tab_latest'))}</button></li>
+            <i class="bi bi-clock-history me-1"></i>${esc(t('device_tab_latest'))}</button></li>
     </ul>
     <div class="tab-content gm-tab-content">
         <div class="tab-pane fade show active" id="hmTabGeneral">${general}</div>
         <div class="tab-pane fade" id="hmTabMonitor"><div id="hmMonitorBody">${_renderMonitoringSection()}</div></div>
         <div class="tab-pane fade" id="hmTabLatest" data-ro-keep="1">
             <div class="d-flex align-items-center mb-2">
-                <span class="small text-muted me-auto">${esc(t('host_latest_hint'))}</span>
+                <span class="small text-muted me-auto">${esc(t('device_latest_hint'))}</span>
                 ${_latestFilterSelect('hmLatestFilter', _hmLatestFilter, '_hmSetLatestFilter')}
                 <button class="btn btn-sm btn-secondary" onclick="_loadHostLatestData()" title="${escAttr(t('refresh'))}">
                     <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
@@ -335,8 +335,8 @@ function _renderHostModalBody() {
     _applyHostModalPerms();   // lock the fields/actions when opened read-only
 }
 
-// Enforce the host modal's read-only state (set by openEditHostModal from the
-// per-host edit permission). Re-run after every body render: disable all fields
+// Enforce the device modal's read-only state (set by openEditDeviceModal from the
+// per-device edit permission). Re-run after every body render: disable all fields
 // and body action buttons (tab nav stays usable) and hide the footer save/test/
 // undo actions, leaving only Cancel. No-op when the user can edit.
 function _applyHostModalPerms() {
@@ -356,10 +356,10 @@ function _applyHostModalPerms() {
         b.classList.toggle('d-none', ro);
     });
     const title = document.getElementById('hostModalTitle');
-    if (title && ro) title.textContent = t('host_view');
+    if (title && ro) title.textContent = t('device_view');
 }
 
-// Collapsible card wrapper (host modal). The header (chevron + title) toggles
+// Collapsible card wrapper (device modal). The header (chevron + title) toggles
 // the body; action controls on the right are excluded from the toggle.
 //   id          unique collapse target id
 //   titleHtml   left-side header content (icon + title)
@@ -386,18 +386,18 @@ function _collapsibleCard(id, titleHtml, actionsHtml, bodyHtml, expanded, border
     </div>`;
 }
 
-// ── SSH connection (core, host-level) ───────────────────────────────
+// ── SSH connection (core, device-level) ───────────────────────────────
 // SSH is the server's own connection (not a module credential): shown only for
-// a remote host, reused by any module that runs commands on / tunnels through
-// the box.  Driven by the built-in HOST_PROFILES['ssh'] profile.
+// a remote device, reused by any module that runs commands on / tunnels through
+// the box.  Driven by the built-in DEVICE_PROFILES['ssh'] profile.
 function _renderSshConnection() {
-    if (_hostDraft.kind !== 'remote') return '';
-    const spec = HOST_PROFILES['ssh'];
+    if (_deviceDraft.kind !== 'remote') return '';
+    const spec = DEVICE_PROFILES['ssh'];
     if (!spec) return '';
-    const title = `<span class="fw-semibold"><i class="bi bi-hdd-network me-1"></i>${esc(t('host_ssh_conn'))}</span>`;
+    const title = `<span class="fw-semibold"><i class="bi bi-hdd-network me-1"></i>${esc(t('device_ssh_conn'))}</span>`;
     const actions = `<button class="btn btn-sm btn-info py-0 px-2" type="button" onclick="testHostSsh()">
-            <i class="bi bi-plug me-1"></i>${esc(t('host_ssh_test'))}</button>`;
-    const body = `<div class="small text-muted mb-2">${esc(t('host_ssh_hint'))}</div>
+            <i class="bi bi-plug me-1"></i>${esc(t('device_ssh_test'))}</button>`;
+    const body = `<div class="small text-muted mb-2">${esc(t('device_ssh_hint'))}</div>
         <div class="row g-2" id="hmSshFields">${_renderSshFields()}</div>`;
     return `<div class="mb-3">${_collapsibleCard('hmSshCard', title, actions, body, false, 'border-info')}</div>`;
 }
@@ -408,18 +408,18 @@ function _renderSshConnection() {
 const _SSH_IDENTITY_FIELDS = new Set(['ssh_user', 'ssh_auth_method', 'ssh_password', 'ssh_key', 'ssh_key_string']);
 
 function _renderSshFields() {
-    const spec = HOST_PROFILES['ssh'];
+    const spec = DEVICE_PROFILES['ssh'];
     if (!spec) return '';
-    const prof = (_hostDraft.profiles && _hostDraft.profiles.ssh) || {};
+    const prof = (_deviceDraft.profiles && _deviceDraft.profiles.ssh) || {};
     const usingCred = !!prof.cred_uid;
     const eff = {};
     for (const f of (spec.fields || [])) {
         eff[f.name] = (prof[f.name] !== undefined && prof[f.name] !== null) ? prof[f.name] : f.default;
     }
-    const ctx = { mod: '__host__', fields: eff };
+    const ctx = { mod: '__device__', fields: eff };
     // Reusable-credential picker, placed right before the SSH user.  When a
     // credential is chosen it supplies the identity, so the inline user/auth/
-    // secret fields are hidden (port and host-key policy stay).
+    // secret fields are hidden (port and device-key policy stay).
     const picker = `<div class="col-12">
         <label class="form-label form-label-sm mb-1">${esc(t('cred_use'))}</label>
         <select class="form-select form-select-sm ss-cred-picker" data-cred-ctype="ssh" onchange="_setProfileField('ssh','cred_uid',this.value)">${credentialOptions(prof.cred_uid, 'ssh')}</select>
@@ -458,12 +458,12 @@ function _renderSshFields() {
 // SNMP, and a third of the fleet carries four protocols at once. `profiles` has been a map
 // per protocol from the start.
 function _renderCoreProfileCards() {
-    if (typeof HOST_PROFILES === 'undefined') return '';
-    return Object.entries(HOST_PROFILES)
-        // `__host__` is the profile the Local/Remote selector already governs — SSH is not a
+    if (typeof DEVICE_PROFILES === 'undefined') return '';
+    return Object.entries(DEVICE_PROFILES)
+        // `__device__` is the profile the Local/Remote selector already governs — SSH is not a
         // second opinion about how this box is reached, it IS that answer — so it keeps the
         // card the selector draws and does not get another one here.
-        .filter(([, spec]) => spec && spec.builtin && spec.module !== '__host__'
+        .filter(([, spec]) => spec && spec.builtin && spec.module !== '__device__'
                               && (spec.fields || []).some(f => f.name !== spec.address_field))
         .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([proto, spec]) => _renderCoreProfileCard(proto, spec))
@@ -474,13 +474,13 @@ function _renderCoreProfileCard(proto, spec) {
     const slug = proto.replace(/\W/g, '_');
     const name = proto.toUpperCase();
     const title = `<span class="fw-semibold"><i class="bi bi-broadcast-pin me-1"></i>${
-        esc(tf('host_conn_named', name))}</span>`;
+        esc(tf('device_conn_named', name))}</span>`;
     // The test goes through the profile's OWN module, which the declaration already names —
     // the button knows what to run without anything here knowing what SNMP is.
     const actions = spec.module ? `<button class="btn btn-sm btn-info py-0 px-2" type="button"
             onclick="_testHostProfile(${jsStr(spec.module)})">
-            <i class="bi bi-plug me-1"></i>${esc(t('host_ssh_test'))}</button>` : '';
-    const body = `<div class="small text-muted mb-2">${esc(tf('host_conn_named_hint', name))}</div>
+            <i class="bi bi-plug me-1"></i>${esc(t('device_ssh_test'))}</button>` : '';
+    const body = `<div class="small text-muted mb-2">${esc(tf('device_conn_named_hint', name))}</div>
         <div class="row g-2" id="hmProfFields_${slug}">${_renderProfileFields(proto, spec)}</div>`;
     return `<div class="mt-3">${_collapsibleCard(
         'hmProfCard_' + slug, title, actions, body, false, 'border-info')}</div>`;
@@ -495,18 +495,18 @@ function _testHostProfile(mod) {
 }
 
 // ── Operating-system selector (auto / fixed) ────────────────────────
-function _osLabel(o) { return t('host_os_' + o) || o; }
+function _osLabel(o) { return t('device_os_' + o) || o; }
 
 /** Repaint the icon beside the modal title when the type changes — the picker is the only
  *  place the choice is visible otherwise, and a device is recognised by its icon in every
  *  list that shows it. */
 function _refreshHostTypeIcon() {
     const el = document.getElementById('hmTypeIcon');
-    if (el) el.className = 'bi ' + hostTypeIcon((_hostDraft || {}).device_type) + ' me-2';
+    if (el) el.className = 'bi ' + deviceTypeIcon((_deviceDraft || {}).device_type) + ' me-2';
 }
 
 function _renderOsField() {
-    const d = _hostDraft;
+    const d = _deviceDraft;
     const cur = d.os || 'auto';
     const opts = (HOST_OS_OPTIONS && HOST_OS_OPTIONS.length)
         ? HOST_OS_OPTIONS : ['auto', 'linux', 'windows', 'darwin', 'freebsd', 'other'];
@@ -515,11 +515,11 @@ function _renderOsField() {
     let hint = '';
     if (cur === 'auto') {
         hint = d.kind === 'remote'
-            ? t('host_os_auto_remote')
-            : tf('host_os_auto_local', _osLabel(LOCAL_OS || 'other'));
+            ? t('device_os_auto_remote')
+            : tf('device_os_auto_local', _osLabel(LOCAL_OS || 'other'));
     }
-    return `<label class="form-label small fw-semibold">${esc(t('host_os'))}</label>
-        <select class="form-select form-select-sm" id="hmOs" onchange="_hostDraft.os=this.value;_refreshOsField()">${sel}</select>
+    return `<label class="form-label small fw-semibold">${esc(t('device_os'))}</label>
+        <select class="form-select form-select-sm" id="hmOs" onchange="_deviceDraft.os=this.value;_refreshOsField()">${sel}</select>
         ${hint ? `<div class="form-text small">${esc(hint)}</div>` : ''}`;
 }
 
@@ -530,7 +530,7 @@ function _refreshOsField() {
 
 // Toggle the SSH block when local/remote changes (no full re-render needed).
 function _onHostKindChange(kind) {
-    _hostDraft.kind = hostKind(kind);
+    _deviceDraft.kind = deviceKind(kind);
     const wrap = document.getElementById('hmSshConnWrap');
     if (wrap) { wrap.innerHTML = _renderSshConnection(); initTooltips(wrap); }
     _refreshOsField();   // the 'auto' hint depends on local vs remote
@@ -539,22 +539,22 @@ function _onHostKindChange(kind) {
 async function testHostSsh() {
     // Send only the chosen method's credentials so a stale/masked value of
     // another method isn't restored server-side and used instead.
-    const ssh = { ...(_hostDraft.profiles.ssh || {}) };
+    const ssh = { ...(_deviceDraft.profiles.ssh || {}) };
     const m = ssh.ssh_auth_method || 'password';
     if (m !== 'password') delete ssh.ssh_password;
     if (m !== 'file')     delete ssh.ssh_key;
     if (m !== 'text')     delete ssh.ssh_key_string;
-    const body = { uid: _editingHostUid || '', address: _hostDraft.address || '',
+    const body = { uid: _editingDeviceUid || '', address: _deviceDraft.address || '',
                    profiles: { ssh } };
-    const res = await apiPost('/api/v1/hosts/test_ssh', body);
+    const res = await apiPost('/api/v1/devices/test_ssh', body);
     const d = res && res.data;
     if (d && d.ok) {
-        let msg = d.message || t('host_ssh_ok');
+        let msg = d.message || t('device_ssh_ok');
         // Reflect the OS detected over the connection; if the selector is on
         // 'auto', adopt the detected value so it gets stored explicitly.
         if (d.os) {
-            msg += ` — ${t('host_os')}: ${_osLabel(d.os)}`;
-            if ((_hostDraft.os || 'auto') === 'auto') { _hostDraft.os = d.os; _refreshOsField(); }
+            msg += ` — ${t('device_os')}: ${_osLabel(d.os)}`;
+            if ((_deviceDraft.os || 'auto') === 'auto') { _deviceDraft.os = d.os; _refreshOsField(); }
         }
         showToast(msg, 'success');
     } else {
@@ -563,21 +563,21 @@ async function testHostSsh() {
 }
 
 // ── Server test (SSH connection + running each bound check once) ────
-// The current draft connection is sent so an unsaved/edited host is tested as
+// The current draft connection is sent so an unsaved/edited device is tested as
 // shown; the server resolves it (and restores masked secrets) before running.
 function _hostDraftPayload() {
     return {
-        host_uid: _editingHostUid || '',
+        device_uid: _editingDeviceUid || '',
         _host: {
-            address: _hostDraft.address || '', kind: hostKind(_hostDraft.kind),
-            os: _hostDraft.os || 'auto', profiles: _hostDraft.profiles || {},
+            address: _deviceDraft.address || '', kind: deviceKind(_deviceDraft.kind),
+            os: _deviceDraft.os || 'auto', profiles: _deviceDraft.profiles || {},
         },
     };
 }
 
 function _hostChecksPayload() {
     const checks = [];
-    for (const [mod, st] of Object.entries(_hostChecks)) {
+    for (const [mod, st] of Object.entries(_deviceChecks)) {
         for (const it of st.items) {
             if (!it.enabled) continue;                 // test what would actually run
             checks.push({ module: mod, collection: st.collection,
@@ -587,21 +587,21 @@ function _hostChecksPayload() {
     return checks;
 }
 
-// Open the results modal (over the edit-host modal) with a spinner.
+// Open the results modal (over the edit-device modal) with a spinner.
 function _openHostTestModal(titleText) {
     const titleEl = document.getElementById('hostTestModalTitle');
     if (titleEl) titleEl.textContent = titleText;
     const body = document.getElementById('hostTestModalBody');
     if (body) body.innerHTML = `<div class="text-center py-4 text-muted">
-        <div class="spinner-border spinner-border-sm me-2"></div>${esc(t('host_test_running'))}</div>`;
+        <div class="spinner-border spinner-border-sm me-2"></div>${esc(t('device_test_running'))}</div>`;
     const sum = document.getElementById('hostTestModalSummary');
     if (sum) sum.innerHTML = '';
     bootstrap.Modal.getOrCreateInstance(document.getElementById('hostTestModal')).show();
 }
 
 async function testHostServer() {
-    _openHostTestModal(t('host_test') + (_hostDraft.name ? ' — ' + _hostDraft.name : ''));
-    const res = await apiPost('/api/v1/hosts/test', { ..._hostDraftPayload(), checks: _hostChecksPayload() });
+    _openHostTestModal(t('device_test') + (_deviceDraft.name ? ' — ' + _deviceDraft.name : ''));
+    const res = await apiPost('/api/v1/devices/test', { ..._hostDraftPayload(), checks: _hostChecksPayload() });
     _renderHostTestResults(res && res.data);
 }
 
@@ -614,7 +614,7 @@ function _renderHostTestResults(d) {
         return;
     }
     const rows = [];
-    if (d.ssh) rows.push({ label: t('host_ssh_conn'), ok: d.ssh.ok, message: d.ssh.message });
+    if (d.ssh) rows.push({ label: t('device_ssh_conn'), ok: d.ssh.ok, message: d.ssh.message });
     for (const r of (d.results || [])) {
         const modName = modulePrettyName(r.module, {}) || r.module;
         // Main label = module + item name; the opaque key/UID shown small below.
@@ -638,41 +638,41 @@ function _renderHostTestResults(d) {
                 ${r.sub ? `<div class="text-muted font-monospace text-break ss-fs-2">${esc(r.sub)}</div>` : ''}
                 <div class="small text-muted text-break">${esc(r.message || '')}</div>
             </div></div>`).join('')
-        : `<div class="text-center py-4 text-muted">${esc(t('host_test_none'))}</div>`;
+        : `<div class="text-center py-4 text-muted">${esc(t('device_test_none'))}</div>`;
 }
 
 async function testHostCheck(mod, i) {
-    const st = _hostChecks[mod];
+    const st = _deviceChecks[mod];
     const it = st && st.items[i];
     if (!it) return;
-    showToast(t('host_test_running') || 'Testing…');
-    const res = await apiPost('/api/v1/hosts/test_check', {
+    showToast(t('device_test_running') || 'Testing…');
+    const res = await apiPost('/api/v1/devices/test_check', {
         ..._hostDraftPayload(), module: mod, collection: st.collection,
         key: it._key || '', fields: { ...it.fields }, cred_uid: it.cred_uid || '',
     });
     const d = res && res.data;
     if (!d) { showToast(t('error') || 'Error', 'danger'); return; }
     const msg = (d.results || []).map(r => `${r.ok ? '✅' : '⚠️'} ${r.message || r.key}`).join(' · ')
-        || (d.ok ? 'OK' : (t('host_test_none') || '—'));
+        || (d.ok ? 'OK' : (t('device_test_none') || '—'));
     showToast(msg, d.ok ? 'success' : 'warning');
 }
 
 // Test every check of ONE module at once (module-level "test all").
 async function testHostModule(mod) {
-    const st = _hostChecks[mod];
+    const st = _deviceChecks[mod];
     if (!st) return;
     const checks = st.items
         .filter(it => it.enabled)
         .map(it => ({ module: mod, collection: st.collection, key: it._key || '',
                       fields: { ...it.fields }, cred_uid: it.cred_uid || '' }));
-    if (!checks.length) { showToast(t('host_test_none') || '—'); return; }
+    if (!checks.length) { showToast(t('device_test_none') || '—'); return; }
     _openHostTestModal(modulePrettyName(mod));
-    // no_ssh: a module-scoped test skips the host's SSH connection check.
-    const res = await apiPost('/api/v1/hosts/test', { ..._hostDraftPayload(), checks, no_ssh: true });
+    // no_ssh: a module-scoped test skips the device's SSH connection check.
+    const res = await apiPost('/api/v1/devices/test', { ..._hostDraftPayload(), checks, no_ssh: true });
     _renderHostTestResults(res && res.data);
 }
 
 // "Latest data" tab: the last recorded results (daemon's status.json) for this
-// host's bound checks, with their metrics (battery %, latency, temp, …).
+// device's bound checks, with their metrics (battery %, latency, temp, …).
 let _hmLatestFilter = 'all';   // 'all' | 'issues' | 'errors'
 let _hmLatestRows = [];         // cached results so the filter re-renders w/o refetch

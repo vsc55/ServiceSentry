@@ -177,9 +177,9 @@ class TestTheFilesActuallyTravel:
         from lib.db.schema import Column, TableSpec
         from lib.db.sqlite import SQLiteConnector
         con = SQLiteConnector(str(tmp_path / 'data.db'))
-        con.reconcile_table(TableSpec(name='hosts',
+        con.reconcile_table(TableSpec(name='devices',
                                       columns=[Column('uid', 'TEXT', nullable=True)]))
-        con.execute("INSERT INTO hosts (uid) VALUES ('h1')")
+        con.execute("INSERT INTO devices (uid) VALUES ('h1')")
         con.commit()
         return con
 

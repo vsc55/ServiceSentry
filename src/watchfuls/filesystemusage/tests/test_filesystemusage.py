@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Tests for watchfuls/filesystemusage — host-centric disk usage monitoring.
 
-Usage is read via ``host_exec`` (mocked); the per-OS parsers run for real
+Usage is read via ``device_exec`` (mocked); the per-OS parsers run for real
 against canned ``df``/``wmic`` output.
 """
 
@@ -12,8 +12,8 @@ from conftest import create_mock_monitor
 
 
 class _FakeStore:
-    def __init__(self, hosts):
-        self._h = hosts
+    def __init__(self, devices):
+        self._h = devices
     def get(self, uid, **_kw):
         return self._h.get(uid)
 
@@ -23,10 +23,10 @@ def _host(uid='h1', os='linux', kind='remote', maintenance=False):
             'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
 
-def _watchful(items, hosts=None):
+def _watchful(items, devices=None):
     from watchfuls.filesystemusage import Watchful
     mm = create_mock_monitor({'watchfuls.filesystemusage': {'list': items}})
-    mm._hosts_store = _FakeStore(hosts or {'h1': _host()})
+    mm._devices_store = _FakeStore(devices or {'h1': _host()})
     return Watchful(mm)
 
 
@@ -56,24 +56,24 @@ class TestCheck:
 
     def test_ok_below_threshold(self):
         # Result is keyed by the item key (not the mount), so checks stay distinct.
-        w = _watchful({'root': {'enabled': True, 'partition': '/', 'alert': 85, 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=(_DF, '', 0)):
+        w = _watchful({'root': {'enabled': True, 'partition': '/', 'alert': 85, 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=(_DF, '', 0)):
             items = w.check().list
         assert items['root']['status'] is True
         assert items['root']['other_data']['used'] == 75
         assert items['root']['other_data']['mount'] == '/'
 
     def test_alert_above_threshold(self):
-        w = _watchful({'data': {'enabled': True, 'partition': '/data', 'alert': 85, 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=(_DF, '', 0)):
+        w = _watchful({'data': {'enabled': True, 'partition': '/data', 'alert': 85, 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=(_DF, '', 0)):
             items = w.check().list
         assert items['data']['status'] is False        # 90 > 85
         assert 'Warning' in items['data']['message']
 
     def test_windows_host_uses_wmic(self):
-        w = _watchful({'c': {'enabled': True, 'partition': 'C:', 'alert': 85, 'host_uid': 'h1'}},
-                      hosts={'h1': _host(os='windows')})
-        with patch.object(w, 'host_exec', return_value=(_WMIC, '', 0)) as he:
+        w = _watchful({'c': {'enabled': True, 'partition': 'C:', 'alert': 85, 'device_uid': 'h1'}},
+                      devices={'h1': _host(os='windows')})
+        with patch.object(w, 'device_exec', return_value=(_WMIC, '', 0)) as he:
             items = w.check().list
         assert 'wmic' in he.call_args.args[1]
         assert items['c']['status'] is True and items['c']['other_data']['used'] == 75
@@ -81,36 +81,36 @@ class TestCheck:
     def test_message_uses_label_to_identify_server(self):
         # The label (e.g. "NS1 - /") identifies the server in the notification.
         w = _watchful({'uid-a': {'enabled': True, 'partition': '/', 'label': 'NS1 - /',
-                                 'alert': 85, 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=(_DF, '', 0)):
+                                 'alert': 85, 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=(_DF, '', 0)):
             items = w.check().list
         assert 'NS1 - /' in items['uid-a']['message']
 
     def test_same_mount_distinct_items_do_not_collide(self):
-        # Two checks on the same mount (e.g. on different hosts) must produce two
+        # Two checks on the same mount (e.g. on different devices) must produce two
         # results, keyed by their item keys — not collapse into one.
         w = _watchful({
-            'uid-a': {'enabled': True, 'partition': '/', 'alert': 85, 'host_uid': 'h1'},
-            'uid-b': {'enabled': True, 'partition': '/', 'alert': 85, 'host_uid': 'h1'},
+            'uid-a': {'enabled': True, 'partition': '/', 'alert': 85, 'device_uid': 'h1'},
+            'uid-b': {'enabled': True, 'partition': '/', 'alert': 85, 'device_uid': 'h1'},
         })
-        with patch.object(w, 'host_exec', return_value=(_DF, '', 0)):
+        with patch.object(w, 'device_exec', return_value=(_DF, '', 0)):
             items = w.check().list
         assert set(items.keys()) == {'uid-a', 'uid-b'}
 
     def test_partition_not_found_is_error(self):
-        w = _watchful({'x': {'enabled': True, 'partition': '/nope', 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=(_DF, '', 0)):
+        w = _watchful({'x': {'enabled': True, 'partition': '/nope', 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=(_DF, '', 0)):
             items = w.check().list
         assert items['x']['status'] is False and 'Error' in items['x']['message']
 
     def test_disabled_and_maintenance_skipped(self):
-        w = _watchful({'a': {'enabled': False, 'partition': '/', 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec') as he:
+        w = _watchful({'a': {'enabled': False, 'partition': '/', 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec') as he:
             assert len(w.check().items()) == 0
         he.assert_not_called()
-        w2 = _watchful({'a': {'enabled': True, 'partition': '/', 'host_uid': 'h1'}},
-                       hosts={'h1': _host(maintenance=True)})
-        with patch.object(w2, 'host_exec') as he2:
+        w2 = _watchful({'a': {'enabled': True, 'partition': '/', 'device_uid': 'h1'}},
+                       devices={'h1': _host(maintenance=True)})
+        with patch.object(w2, 'device_exec') as he2:
             assert len(w2.check().items()) == 0
         he2.assert_not_called()
 
@@ -120,8 +120,8 @@ class TestDiscover:
     def test_discover_remote_df(self):
         from watchfuls.filesystemusage import Watchful
         host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
-        with patch('lib.core.hosts.runner.run', return_value=(_DF, '', 0)) as run:
-            names = {s['name'] for s in Watchful.discover({'__host__': host})}
+        with patch('lib.core.devices.runner.run', return_value=(_DF, '', 0)) as run:
+            names = {s['name'] for s in Watchful.discover({'__device__': host})}
         assert run.call_args.args[1] == 'df -P -k'
         assert '/' in names and '/data' in names
 

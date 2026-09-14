@@ -17,7 +17,7 @@ Why this screen is worth having
 Eleven threads run behind this panel and until now **not one of them appeared anywhere**. On a
 single machine that is merely opaque. In containers it is a real question with no way to ask it:
 with three web replicas, which pod is taking the backups? Which one is scanning the cabling? The
-answer is written in `service_leader` — holder, host, and when the lease expires — and nothing
+answer is written in `service_leader` — holder, device, and when the lease expires — and nothing
 ever showed it.
 
 That is also why a timer declares its ``lease`` key rather than a boolean: a timer with no lease

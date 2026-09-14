@@ -19,7 +19,7 @@ other people's data:
   credential of every protocol that reaches the machine — and the payload is a whitelist
   projection rather than "the record minus a few keys", which is one added field away from
   shipping them;
-* **it must not invent facts.** The state comes from the hosts domain, the values from the
+* **it must not invent facts.** The state comes from the devices domain, the values from the
   modules, and a number is a measurement only when the module that produced it said so.
 """
 
@@ -45,10 +45,10 @@ _HOST = {
 }
 
 
-def _mkhost(client, **over):
+def _mkdevice(client, **over):
     body = dict(_HOST)
     body.update(over)
-    r = client.post('/api/v1/hosts', json=body)
+    r = client.post('/api/v1/devices', json=body)
     assert r.status_code == 200, r.get_json()
     return r.get_json()['uid']
 
@@ -64,13 +64,13 @@ def _as(admin, username, role='viewer', password='pw-secret'):
 class TestTheFleet:
 
     def test_it_needs_a_session(self, client):
-        assert client.get('/api/v1/infra/hosts').status_code == 401
+        assert client.get('/api/v1/infra/devices').status_code == 401
 
     def test_it_lists_the_machines(self, client):
         _login(client)
-        uid = _mkhost(client)
-        data = client.get('/api/v1/infra/hosts').get_json()
-        row = next(h for h in data['hosts'] if h['uid'] == uid)
+        uid = _mkdevice(client)
+        data = client.get('/api/v1/infra/devices').get_json()
+        row = next(h for h in data['devices'] if h['uid'] == uid)
         assert row['name'] == 'nas-1' and row['address'] == '10.0.0.9'
         assert row['tags'] == ['prod']
 
@@ -80,8 +80,8 @@ class TestTheFleet:
         credential of every protocol that reaches the machine, and a projection written as a
         whitelist cannot start carrying it because somebody added a field."""
         _login(client)
-        _mkhost(client)
-        body = client.get('/api/v1/infra/hosts').data.decode()
+        _mkdevice(client)
+        body = client.get('/api/v1/infra/devices').data.decode()
         assert 'profiles' not in body and 'ssh_password' not in body and 'p@ss' not in body
 
     def test_a_machine_nobody_watches_is_its_own_state(self, client):
@@ -89,19 +89,19 @@ class TestTheFleet:
         is the section lying about the one thing it exists to show — so it has its own count
         in the header, where "31 OK" would have hidden it."""
         _login(client)
-        _mkhost(client)
-        data = client.get('/api/v1/infra/hosts').get_json()
-        row = next(h for h in data['hosts'] if h['name'] == 'nas-1')
+        _mkdevice(client)
+        data = client.get('/api/v1/infra/devices').get_json()
+        row = next(h for h in data['devices'] if h['name'] == 'nas-1')
         assert row['status'] == ''
         assert data['summary']['unwatched'] >= 1
 
     def test_the_summary_counts_what_the_list_holds(self, client):
         _login(client)
-        _mkhost(client)
-        _mkhost(client, name='nas-2', address='10.0.0.10')
-        data = client.get('/api/v1/infra/hosts').get_json()
+        _mkdevice(client)
+        _mkdevice(client, name='nas-2', address='10.0.0.10')
+        data = client.get('/api/v1/infra/devices').get_json()
         s = data['summary']
-        assert s['total'] == len(data['hosts'])
+        assert s['total'] == len(data['devices'])
         assert s['ok'] + s['warning'] + s['error'] + s['unwatched'] == s['total']
 
 
@@ -109,19 +109,19 @@ class TestOneMachine:
 
     def test_it_answers_with_what_it_is_and_what_it_said(self, client):
         _login(client)
-        uid = _mkhost(client)
-        data = client.get(f'/api/v1/infra/hosts/{uid}').get_json()
-        assert data['host']['name'] == 'nas-1'
+        uid = _mkdevice(client)
+        data = client.get(f'/api/v1/infra/devices/{uid}').get_json()
+        assert data['device']['name'] == 'nas-1'
         assert data['results'] == [] and data['metrics'] == []
 
     def test_an_unknown_machine_is_a_404(self, client):
         _login(client)
-        assert client.get('/api/v1/infra/hosts/not-a-host').status_code == 404
+        assert client.get('/api/v1/infra/devices/not-a-host').status_code == 404
 
     def test_it_does_not_carry_the_credentials_either(self, client):
         _login(client)
-        uid = _mkhost(client)
-        assert 'p@ss' not in client.get(f'/api/v1/infra/hosts/{uid}').data.decode()
+        uid = _mkdevice(client)
+        assert 'p@ss' not in client.get(f'/api/v1/infra/devices/{uid}').data.decode()
 
 
 class TestWhoMaySeeIt:
@@ -130,14 +130,14 @@ class TestWhoMaySeeIt:
 
     def test_a_role_without_the_flag_is_refused(self, admin):
         c = _as(admin, 'nobody', role='none')
-        assert c.get('/api/v1/infra/hosts').status_code == 403
+        assert c.get('/api/v1/infra/devices').status_code == 403
 
     def test_a_viewer_may_read_it(self, admin, client):
         _login(client)
-        _mkhost(client)
+        _mkdevice(client)
         c = _as(admin, 'watcher', role='viewer')
-        r = c.get('/api/v1/infra/hosts')
-        assert r.status_code == 200 and r.get_json()['hosts']
+        r = c.get('/api/v1/infra/devices')
+        assert r.status_code == 200 and r.get_json()['devices']
 
     def test_no_flag_here_is_an_edit_of_the_registry(self):
         """There is no `infra_edit`, and that is the design: what there is to CHANGE lives in
@@ -180,7 +180,7 @@ class TestCollectingNow:
     """
 
     def _url(self, uid):
-        return f'/api/v1/infra/hosts/{uid}/collect'
+        return f'/api/v1/infra/devices/{uid}/collect'
 
     def test_it_needs_a_session(self, client):
         assert client.post(self._url('whatever')).status_code == 401
@@ -190,9 +190,9 @@ class TestCollectingNow:
         the button is on; if the button's endpoint rode on that flag, a read-only role would
         be able to make forty devices get polled by leaning on it."""
         _login(client)
-        uid = _mkhost(client)
+        uid = _mkdevice(client)
         c = _as(admin, 'watcher2', role='viewer')
-        assert c.get(f'/api/v1/infra/hosts/{uid}').status_code == 200
+        assert c.get(f'/api/v1/infra/devices/{uid}').status_code == 200
         assert c.post(self._url(uid)).status_code == 403
 
     def test_an_editor_holds_it(self, admin, client):
@@ -200,7 +200,7 @@ class TestCollectingNow:
         the only thing this host has to say. A 403 here would mean the flag never reached the
         role that is supposed to have it."""
         _login(client)
-        uid = _mkhost(client)
+        uid = _mkdevice(client)
         c = _as(admin, 'operator', role='editor')
         r = c.post(self._url(uid))
         assert r.status_code == 409, r.get_json()
@@ -209,7 +209,7 @@ class TestCollectingNow:
         """Reporting success would draw a fresh timestamp over a screen where nothing was
         collected, which is the section telling you it looked when it did not."""
         _login(client)
-        uid = _mkhost(client)
+        uid = _mkdevice(client)
         r = client.post(self._url(uid))
         assert r.status_code == 409
         assert r.get_json()['error']
@@ -230,7 +230,7 @@ class TestCollectingNow:
         there is nothing to collect — which is the whole of the bug.
         """
         _login(client)
-        uid = _mkhost(client, name='switch-1', address='10.0.0.30', profiles={
+        uid = _mkdevice(client, name='switch-1', address='10.0.0.30', profiles={
             'snmp': {'community': 'public', 'version': '2c',
                      'device_profiles': 'grp_generic'}})
         r = client.post(self._url(uid))
@@ -241,7 +241,7 @@ class TestCollectingNow:
         a community and no profiles assigned is one you can ASK things of, not one anybody is
         charting — `devices_to_sample` skips it, so the button must not claim otherwise."""
         _login(client)
-        uid = _mkhost(client, name='switch-2', address='10.0.0.31', profiles={
+        uid = _mkdevice(client, name='switch-2', address='10.0.0.31', profiles={
             'snmp': {'community': 'public', 'version': '2c', 'device_profiles': ''}})
         assert client.post(self._url(uid)).status_code == 409
 
@@ -254,8 +254,8 @@ class TestCollectingNow:
         perform it on. Both questions are asked, and the second is the registry's own rule —
         the same `devices_view` / `server.<uid>.view` narrowing the two GETs apply, so a flag
         meant to refresh your own rack never becomes a way to poll somebody else's."""
-        seen = admin._hosts_store.create({**_HOST, 'name': 'mine'}, actor='admin')
-        other = admin._hosts_store.create(
+        seen = admin._devices_store.create({**_HOST, 'name': 'mine'}, actor='admin')
+        other = admin._devices_store.create(
             {**_HOST, 'name': 'theirs', 'address': '10.0.0.11'}, actor='admin')
         role_uid = '22222222-2222-4222-8222-222222222222'
         admin._custom_roles[role_uid] = {
@@ -295,7 +295,7 @@ class TestCollectingFromTheWholeFleet:
     def test_a_viewer_may_watch_the_fleet_and_not_refresh_it(self, admin, client):
         _login(client)
         c = _as(admin, 'fleetwatcher', role='viewer')
-        assert c.get('/api/v1/infra/hosts').status_code == 200
+        assert c.get('/api/v1/infra/devices').status_code == 200
         assert c.post(self._url()).status_code == 403
 
     def test_holding_the_flag_is_not_enough_without_seeing_the_fleet(self, admin, client):
@@ -304,7 +304,7 @@ class TestCollectingFromTheWholeFleet:
         without this that flag would poll every machine in the building, including the ones
         the same session is refused a GET on two routes above.
         """
-        seen = admin._hosts_store.create({**_HOST, 'name': 'theirs'}, actor='admin')
+        seen = admin._devices_store.create({**_HOST, 'name': 'theirs'}, actor='admin')
         role_uid = '33333333-3333-4333-8333-333333333333'
         admin._custom_roles[role_uid] = {
             'uid': role_uid, 'name': 'rack-op', 'enabled': True,
@@ -317,7 +317,7 @@ class TestCollectingFromTheWholeFleet:
         _login(client, 'rackop')
         assert client.post(self._url()).status_code == 403
         # …and the button they DO have still works, scoped the way they are.
-        assert client.post(f'/api/v1/infra/hosts/{seen}/collect').status_code == 409
+        assert client.post(f'/api/v1/infra/devices/{seen}/collect').status_code == 409
 
     def test_an_installation_with_nothing_to_run_says_so(self, admin, client, monkeypatch):
         """409 and not "done": reporting success would draw a fresh timestamp over a panel
@@ -339,7 +339,7 @@ class TestCollectingFromTheWholeFleet:
         for a list built from the module configuration to find.
         """
         _login(client)
-        _mkhost(client, name='switch-fleet', address='10.0.0.40', profiles={
+        _mkdevice(client, name='switch-fleet', address='10.0.0.40', profiles={
             'snmp': {'community': 'public', 'version': '2c',
                      'device_profiles': 'grp_generic'}})
         r = client.post(self._url())
@@ -368,50 +368,50 @@ class TestWhatTheFleetButtonRuns:
         """A cloud tenant is a check that runs and is not a machine on this screen. Collecting
         it because the button says "all" is the button doing more than it says."""
         _login(client)
-        _mkhost(client, name='in-the-list', address='10.0.0.50')
+        _mkdevice(client, name='in-the-list', address='10.0.0.50')
         self._only(admin, monkeypatch, {
             'm365': {'enabled': True, 'list': {'tenant': {'enabled': True}}},
-            'azure': {'enabled': True, 'list': {'sub': {'enabled': True, 'host_uid': ''}}},
+            'azure': {'enabled': True, 'list': {'sub': {'enabled': True, 'device_uid': ''}}},
         })
         r = client.post(self._url())
         assert r.status_code == 409, r.get_json()
 
     def test_an_item_bound_to_a_listed_device_is(self, admin, client, monkeypatch):
         _login(client)
-        uid = _mkhost(client, name='in-the-list', address='10.0.0.51')
+        uid = _mkdevice(client, name='in-the-list', address='10.0.0.51')
         self._only(admin, monkeypatch, {
-            'ping': {'enabled': True, 'list': {'p': {'enabled': True, 'host_uid': uid}}}})
+            'ping': {'enabled': True, 'list': {'p': {'enabled': True, 'device_uid': uid}}}})
         assert client.post(self._url()).status_code != 409
 
     def test_a_cluster_check_counts_through_its_member_list(self, admin, client, monkeypatch):
-        """The binding that is not `host_uid`. A keepalived VIP or a Proxmox cluster is ONE
-        item bound to several machines through `host_uids` — the core's own convention, which
-        host_binding, authz and the permission service all key on. Read only as `host_uid` it
+        """The binding that is not `device_uid`. A keepalived VIP or a Proxmox cluster is ONE
+        item bound to several machines through `device_uids` — the core's own convention, which
+        device_binding, authz and the permission service all key on. Read only as `device_uid` it
         binds to nothing, so a module watching eight machines on this very screen was left out
         of the button that says it collects them. Caught against a real fleet, not by reading.
         """
         _login(client)
-        uid = _mkhost(client, name='node-1', address='10.0.0.52')
+        uid = _mkdevice(client, name='node-1', address='10.0.0.52')
         self._only(admin, monkeypatch, {
             'keepalived': {'enabled': True,
-                           'list': {'vip': {'enabled': True, 'host_uids': [uid, 'gone']}}}})
+                           'list': {'vip': {'enabled': True, 'device_uids': [uid, 'gone']}}}})
         assert client.post(self._url()).status_code != 409
 
     def test_an_item_bound_to_a_machine_the_registry_no_longer_has_is_not(self, admin, client,
                                                                           monkeypatch):
         _login(client)
-        _mkhost(client, name='in-the-list', address='10.0.0.53')
+        _mkdevice(client, name='in-the-list', address='10.0.0.53')
         self._only(admin, monkeypatch, {
             'ping': {'enabled': True,
-                     'list': {'p': {'enabled': True, 'host_uid': 'deleted-long-ago'}}}})
+                     'list': {'p': {'enabled': True, 'device_uid': 'deleted-long-ago'}}}})
         assert client.post(self._url()).status_code == 409
 
     def test_a_module_the_admin_switched_off_is_not_run(self, admin, client, monkeypatch):
         """"Collect" must not be a way to run something that was turned off."""
         _login(client)
-        uid = _mkhost(client, name='in-the-list', address='10.0.0.54')
+        uid = _mkdevice(client, name='in-the-list', address='10.0.0.54')
         self._only(admin, monkeypatch, {
-            'ping': {'enabled': False, 'list': {'p': {'enabled': True, 'host_uid': uid}}}})
+            'ping': {'enabled': False, 'list': {'p': {'enabled': True, 'device_uid': uid}}}})
         assert client.post(self._url()).status_code == 409
 
 

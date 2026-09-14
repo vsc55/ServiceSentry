@@ -453,15 +453,15 @@ class TestTheDeviceIsWhereTheDeviceIsConfigured:
     """
 
     def test_the_snmp_profile_carries_the_identity_not_just_the_address(self):
-        from lib.core.hosts.resolve import host_profile_specs   # noqa: PLC0415
-        hp = _schema().get('__host_profile__') or {}
+        from lib.core.devices.resolve import device_profile_specs   # noqa: PLC0415
+        hp = _schema().get('__device_profile__') or {}
         # Resolved, not as written: the module names the protocol and the core says what it
         # holds, so the answer is what the panel acts on rather than what the file repeats.
-        fields = set(host_profile_specs(hp)[0].get('fields') or [])
+        fields = set(device_profile_specs(hp)[0].get('fields') or [])
         assert hp.get('key') == 'snmp' and hp.get('address_field') == 'host'
         assert {'community', 'version', 'device_profiles'} <= fields
         # …and NOT how long we wait for it: two entries for one box would then migrate
-        # into two hosts because one of them had a longer timeout.
+        # into two devices because one of them had a longer timeout.
         assert not ({'timeout', 'retries'} & fields)
 
     def test_a_multi_value_field_works_on_a_profile_too(self):
@@ -489,7 +489,7 @@ class TestTheDeviceIsWhereTheDeviceIsConfigured:
         resolves a scheduled check."""
         js = _strip_comments(_read(HOST_MODAL))
         fn = _fn(js, '_hostProfileActionCfg')
-        assert '_host' in fn and 'host_uid' in fn and 'profiles' in fn
+        assert '_host' in fn and 'device_uid' in fn and 'profiles' in fn
 
     def test_both_panes_reach_the_device_through_one_place(self):
         """`_snmpDeviceCfg` is state, and stale state here means asking the last host
@@ -789,7 +789,7 @@ class TestWhereAConnectionProfileIsDrawn:
     def test_the_core_owns_the_snmp_connection(self):
         """The premise of everything below: if SNMP stopped being core-declared, its editor
         would belong back with the module and this whole placement would be wrong."""
-        from lib.core.hosts.profiles import core_profiles     # noqa: PLC0415
+        from lib.core.devices.profiles import core_profiles     # noqa: PLC0415
         assert set(core_profiles()) == {'ssh', 'snmp'}, (
             'the set of connections the core owns changed — check where each is drawn')
 
@@ -823,7 +823,7 @@ class TestWhereAConnectionProfileIsDrawn:
         """The Local/Remote selector already draws it, and it IS that selector's answer —
         not a second opinion about how the box is reached."""
         fn = _fn(self._modal(), '_renderCoreProfileCards')
-        assert "'__host__'" in fn, 'nothing excludes the profile the selector governs'
+        assert "'__device__'" in fn, 'nothing excludes the profile the selector governs'
         assert '_renderSshConnection' in self._modal()
 
     def test_the_card_reuses_the_one_field_renderer(self):
@@ -848,12 +848,12 @@ class TestWhereAConnectionProfileIsDrawn:
         for lang in ('es_ES', 'en_EN'):
             src = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', lang + '.py'))
             words = {}
-            for key in ('host_type', 'host_kind'):
+            for key in ('device_type', 'device_kind'):
                 line = next(ln for ln in src.splitlines()
                             if ln.strip().startswith(f"'{key}':"))
                 words[key] = line.split(':', 1)[1].strip().rstrip(',')
-            assert words['host_type'] != words['host_kind'], (
-                f'{lang}: both fields are labelled {words["host_type"]}')
+            assert words['device_type'] != words['device_kind'], (
+                f'{lang}: both fields are labelled {words["device_type"]}')
 
 
 class TestAskingTheDeviceOneThingIsOnTheScreen:

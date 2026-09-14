@@ -77,11 +77,11 @@ def grupo(client):
                        json={'site_uid': site, 'name': 'Sala 1'}).get_json()['uid']
     rack = client.post('/api/v1/dcim/racks',
                        json={'room_uid': room, 'name': 'R1', 'u_height': 42}).get_json()['uid']
-    host = client.post('/api/v1/hosts', json={'name': 'db03', 'address': '10.0.0.3'})
+    host = client.post('/api/v1/devices', json={'name': 'db03', 'address': '10.0.0.3'})
     host = (host.get_json() or {}).get('uid', '')
     client.post('/api/v1/orgs/owner', json={'scope': 'rack', 'uid': rack, 'org_uid': it})
     if host:
-        client.post('/api/v1/orgs/owner', json={'scope': 'host', 'uid': host, 'org_uid': b})
+        client.post('/api/v1/orgs/owner', json={'scope': 'device', 'uid': host, 'org_uid': b})
     return {'it': it, 'b': b, 'site': site, 'room': room, 'rack': rack, 'host': host}
 
 
@@ -95,7 +95,7 @@ class TestSeFichaLoQueAlguienDeclara:
         dicho = admin._orgs_store.said()
         assert dicho[('rack', grupo['rack'])] == grupo['it']
         if grupo['host']:
-            assert dicho[('host', grupo['host'])] == grupo['b']
+            assert dicho[('device', grupo['host'])] == grupo['b']
 
     def test_y_un_ambito_que_nadie_declara_se_rechaza(self, client, grupo):
         """Una errata escribiría una fila que nada podrá volver a leer: no la ve ninguna
@@ -532,3 +532,36 @@ class TestElBotonDeImportarViveEnEmpresas:
         monkeypatch.setattr('lib.discovery.scan', _falso)
         _login(client)
         assert org_scopes.actions(admin) == []
+
+
+class TestElAmbitoDeUnDispositivoSeLlamabaHost:
+    """`org_owner` dice de qué es dueña una empresa con el par (ámbito, uid), y el ámbito de un
+    dispositivo se guardaba como `host`. El paquete lo declara ahora como `device`.
+
+    Sin migrar esas filas, las de ayer apuntan a un ámbito que ya no declara nadie: las empresas
+    dejan de ser dueñas de sus dispositivos — sin error, con la columna llena, y la pantalla
+    enseñando «sin asignar» sobre una base que lo tiene todo escrito.
+    """
+
+    def test_lo_que_decia_host_lo_dice_device_al_arrancar(self, admin):
+        from lib.core.orgs.store import OrgsStore                # noqa: PLC0415
+        db = admin._db_connector
+        with db.transaction():
+            db.execute("INSERT INTO org_owner (scope, uid, org_uid, set_at, set_by) "
+                       "VALUES ('host', 'u-viejo', 'o-viejo', '2026-01-01', 'test')")
+        OrgsStore(db)                                            # el arranque
+        fila = db.fetchone("SELECT scope, org_uid FROM org_owner WHERE uid = 'u-viejo'")
+        assert fila is not None, 'se ha perdido la fila'
+        assert fila[0] == 'device', 'la empresa ha dejado de ser dueña de su dispositivo'
+        assert fila[1] == 'o-viejo', 'ha cambiado de dueña'
+
+    def test_y_no_toca_los_demas_ambitos(self, admin):
+        """Un armario es `rack` y lo sigue siendo: el `UPDATE` mira su propio valor y no la fila."""
+        from lib.core.orgs.store import OrgsStore                # noqa: PLC0415
+        db = admin._db_connector
+        with db.transaction():
+            db.execute("INSERT INTO org_owner (scope, uid, org_uid, set_at, set_by) "
+                       "VALUES ('rack', 'r-1', 'o-1', '2026-01-01', 'test')")
+        OrgsStore(db)
+        fila = db.fetchone("SELECT scope FROM org_owner WHERE uid = 'r-1'")
+        assert fila[0] == 'rack'

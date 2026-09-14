@@ -337,8 +337,8 @@ async function _atkOwnerChanged() {
     const owner = (document.getElementById('atkOwner') || {}).value || '';
     const hint = document.getElementById('atkSystemHint');
     if (hint) hint.classList.toggle('d-none', owner !== 'system');
-    const host = document.getElementById('atkPerms');
-    if (!host || !owner) return;
+    const device = document.getElementById('atkPerms');
+    if (!device || !owner) return;
     // First draw after a clone has nothing ticked yet, so the preset is what carries the
     // permissions across — the whole point of cloning is not reassembling them by hand.
     const isAdmin = currentUser.role === 'admin';
@@ -352,7 +352,7 @@ async function _atkOwnerChanged() {
     // `unbounded` is the built-in identity: nothing narrows its tokens, so the caller's own
     // set is the only ceiling and no intersection applies.
     const limitTo = data.unbounded ? null : new Set(data.permissions || []);
-    host.innerHTML = _accTokenPermPicker({
+    device.innerHTML = _accTokenPermPicker({
         // The switch is offered exactly where the server would take it: an administrator, and
         // an account that HAS a permission set for `'*'` to resolve against.
         noAll: !isAdmin || !!data.unbounded, forOther: true, limitTo,

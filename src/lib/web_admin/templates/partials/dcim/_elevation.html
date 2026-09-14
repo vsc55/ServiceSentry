@@ -15,11 +15,11 @@
    that pays for itself immediately — **exporting to PNG or SVG** are the same code the two maps
    use. A rack elevation is exactly the thing somebody wants to print and take downstairs.
 
-   **Colour is the fleet's own.** `hostStateColor` and nothing of this file's invention: a rack
+   **Colour is the fleet's own.** `deviceStateColor` and nothing of this file's invention: a rack
    and the machine list disagreeing about whether a server is in trouble would be two screens
    arguing in front of the person who has to decide.
 
-   And the one that is not decoration: **an item with no host has no colour**. Not green. Most
+   And the one that is not decoration: **an item with no device has no colour**. Not green. Most
    of what fills a rack answers to nothing, and a wall of green is precisely the lie this
    drawing exists to prevent.
    ================================================================ #}
@@ -387,7 +387,7 @@ function _dceBesideHtml(items) {
                 onclick="_dcimOpen('edit','item','',${jsStr(i.uid)})"
                 title="${escAttr(t('dcim_place_' + String(i.placement || 'u')))}">
             <span class="ss-dot me-1" style="background:${
-                escAttr(hostStateColor(i.state || ''))}"></span>${
+                escAttr(deviceStateColor(i.state || ''))}"></span>${
             esc(_dcimItemName(i))}</button>`).join('')}
     </div>`;
 }
@@ -429,8 +429,8 @@ function _dceFace(rack, items, face) {
 
 /** One thing bolted into the rack.
  *
- *  Its colour is the fleet's (`hostStateColor`) and its ABSENCE of colour is the point: an item
- *  with no host gets the muted surface, which is what "nobody is watching this" looks like
+ *  Its colour is the fleet's (`deviceStateColor`) and its ABSENCE of colour is the point: an item
+ *  with no device gets the muted surface, which is what "nobody is watching this" looks like
  *  everywhere else in the panel. */
 /** El rectángulo de una caja en el dibujo: dónde empieza y cuánto ocupa.
  *
@@ -497,7 +497,7 @@ function _dceGut(w, kids) {
 function _dceItem(rack, item, face) {
     const caja = _dceRect(rack, item, face);
     const x = caja.x, y = caja.y, w = caja.w, h = caja.h;
-    const tone = item.foreign ? 'var(--bs-secondary-bg)' : hostStateColor(item.state || '');
+    const tone = item.foreign ? 'var(--bs-secondary-bg)' : deviceStateColor(item.state || '');
     const kids = item.foreign ? [] : _dceKidsOf(item);
     // Lo que lleva encima ya no se dice con un `(+2)`: se DIBUJA. El recuento era lo que se
     // podía hacer sin sitio, y una bandeja con dos mini PC contados no enseña cuál de los dos
@@ -576,7 +576,7 @@ function _dceKids(rack, padre, face) {
     const gut = _dceGut(caja.w, kids);
     return kids.map(kid => {
         const r = _dceKidRect(caja, kid, kids, gut, face);
-        const tone = hostStateColor(kid.state || '');
+        const tone = deviceStateColor(kid.state || '');
         const name = _dcimItemName(kid);
         return `<g class="ss-pointer" data-dce="${escAttr(kid.uid)}"
                    onpointerenter="_dceHover(${jsStr(kid.uid)})"
@@ -653,8 +653,8 @@ function _dceCard() {
             ${_dcimOrgBadge(item.org_uid)}
             <span class="text-muted ss-fs-3">${esc(_dceSpan(item))}</span>
             ${item.serial ? `<code class="ss-fs-3">${esc(item.serial)}</code>` : ''}
-            ${item.host_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2"
-                onclick="_dcimOpenHost(${jsStr(item.host_uid)})">${
+            ${item.device_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2"
+                onclick="_dcimOpenHost(${jsStr(item.device_uid)})">${
                 esc(t('dcim_open_device'))}</button>` : ''}
         </div>
     </div>`;

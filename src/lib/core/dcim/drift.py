@@ -39,7 +39,7 @@ SCHEMA = TableSpec(
     name='dc_drift',
     columns=(
         Column('uid',         'TEXT', primary_key=True),
-        # Qué hallazgo es. `moved:<uid del cable>` o `undeclared:<host>|<host>` ordenado, porque
+        # Qué hallazgo es. `moved:<uid del cable>` o `undeclared:<device>|<device>` ordenado, porque
         # estar enchufados es simétrico y quién es «el primero» no es un hecho del cable.
         Column('drift_key',   'TEXT', nullable=False, default="''", unique=True),
         Column('kind',        'TEXT', nullable=False, default="''"),

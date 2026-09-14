@@ -40,9 +40,9 @@ class _StoresMixin:
         # Internal fail2ban: shared, store-backed jail manager (persistent + consistent
         # across processes). Wiring lives in _IpBanMixin.
         self._init_ipban()
-        # Host registry — connection profiles defined once, reused by modules.
-        from lib.core.hosts.stores import HostsStore  # noqa: PLC0415
-        self._hosts_store = HostsStore(
+        # Device registry — connection profiles defined once, reused by modules.
+        from lib.core.devices.stores import DevicesStore  # noqa: PLC0415
+        self._devices_store = DevicesStore(
             self._db_connector,
             fernet=self._get_fernet(),
             secret_keys=getattr(self, '_secret_keys', None),
@@ -51,15 +51,15 @@ class _StoresMixin:
         # detrás del registro y antes que nadie: el almacén de dispositivos consulta esta tabla
         # para decidir si una clase existe, y con el orden al revés la primera comprobación
         # caería sobre una tabla que todavía no está.
-        from lib.core.hosts.stores import HostTypesStore  # noqa: PLC0415
-        self._host_types_store = HostTypesStore(self._db_connector)
+        from lib.core.devices.stores import DeviceTypesStore  # noqa: PLC0415
+        self._device_types_store = DeviceTypesStore(self._db_connector)
         # Whose everything is, and who the companies are. Before the inventory on purpose:
         # the inventory reads this one, and a store that builds its own copy of a table another
         # store owns is two stores writing the same rows.
         from lib.core.orgs.store import OrgsStore  # noqa: PLC0415
         self._orgs_store = OrgsStore(self._db_connector)
         # Where the equipment IS and whose it is — the other axis of the same fleet. Its own
-        # store rather than columns on `hosts`, because most of what fills a rack answers to
+        # store rather than columns on `devices`, because most of what fills a rack answers to
         # nothing: a patch panel, a blanking plate, a switched-off server still bolted in.
         from lib.core.dcim.store import DcimStore  # noqa: PLC0415
         from lib.core.dcim.catalog import CatalogStore  # noqa: PLC0415
@@ -115,7 +115,7 @@ class _StoresMixin:
         # the only way to reach the API at all once that account carries a second factor.
         from lib.core.apitokens.store import ApiTokenStore  # noqa: PLC0415
         self._api_token_store = ApiTokenStore(self._db_connector)
-        # Reusable named credentials (SSH identities referenced by hosts/checks).
+        # Reusable named credentials (SSH identities referenced by devices/checks).
         from lib.core.credentials.store import CredentialsStore  # noqa: PLC0415
         self._credentials_store = CredentialsStore(
             self._db_connector,
@@ -126,7 +126,7 @@ class _StoresMixin:
         # NotificationRouter: it *owns* the channel stores (webhooks + Teams channels +
         # the Teams bot conversation-reference store) and does the fan-out.  The web admin
         # builds one from an explicit NotifyContext and reaches its stores via ``_notify``
-        # (CRUD routes, config bundle) — no per-host channel wiring.
+        # (CRUD routes, config bundle) — no per-device channel wiring.
         from lib.core.notify.context import NotifyContext  # noqa: PLC0415
         from lib.core.notify.router import NotificationRouter  # noqa: PLC0415
         self._notify = NotificationRouter(NotifyContext(
@@ -239,7 +239,7 @@ class _StoresMixin:
     def _init_syslog_stores(self) -> None:
         """Create the shared syslog DB connector + stores.
 
-        They are host infrastructure shared by the embedded listener, the decoupled
+        They are device infrastructure shared by the embedded listener, the decoupled
         event worker and the Syslog tab; the listener *server* lifecycle lives in
         the embedded syslog service object (``lib.services.syslog.embedded``)."""
         self._syslog_store = None

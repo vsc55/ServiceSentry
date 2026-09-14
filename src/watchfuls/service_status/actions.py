@@ -27,13 +27,13 @@ class ServiceDiscovery:
     def discover(cls, config=None) -> list:
         """Return [{name, display_name, status}] for the host's services.
 
-        With a remote host context (``config['__host__']``, injected by the route
+        With a remote host context (``config['__device__']``, injected by the route
         for the Servers modal) the list is read over SSH; otherwise from THIS
         machine.
         """
-        from lib.core.hosts import runner as host_runner  # noqa: PLC0415
-        host = (config or {}).get('__host__') if isinstance(config, dict) else None
-        if host_runner.is_remote(host):
+        from lib.core.devices import runner as device_runner  # noqa: PLC0415
+        host = (config or {}).get('__device__') if isinstance(config, dict) else None
+        if device_runner.is_remote(host):
             return cls._discover_remote(host, str(host.get('os') or 'linux'))
         if cls._PLATFORM == 'windows':
             return cls._discover_windows()
@@ -61,9 +61,9 @@ class ServiceDiscovery:
 
     @classmethod
     def _discover_remote(cls, host, os_: str) -> list:
-        from lib.core.hosts import runner as host_runner  # noqa: PLC0415
+        from lib.core.devices import runner as device_runner  # noqa: PLC0415
         cmd = cls._DISCOVER_CMDS.get(os_) or cls._DISCOVER_CMDS['linux']
-        out, _err, code = host_runner.run(host, cmd, timeout=15)
+        out, _err, code = device_runner.run(host, cmd, timeout=15)
         if code != 0 and not out:
             return []
         if os_ == 'windows':

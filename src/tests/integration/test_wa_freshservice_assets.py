@@ -62,7 +62,7 @@ def _clase(admin, corto):
     Las pruebas la nombran «server» o «access_point» porque es como se lee; lo que se guarda y lo
     que viaja por la API es su `uid`.
     """
-    fila = admin._host_types_store.by_slug(corto)
+    fila = admin._device_types_store.by_slug(corto)
     assert fila is not None, 'no existe la clase %s' % corto
     return fila['uid']
 
@@ -135,13 +135,13 @@ class TestElBotonDeImportarViveEnDispositivos:
     def test_sin_conector_no_hay_boton(self, client, admin):
         _login(client)
         admin._write_config({'freshservice': {'domain': '', 'api_key': ''}})
-        assert client.get('/api/v1/hosts').get_json()['actions'] == []
+        assert client.get('/api/v1/devices').get_json()['actions'] == []
 
     def test_con_el_conector_puesto_si(self, client, admin):
         _login(client)
         admin._write_config({'freshservice': {'domain': 'lacasa.freshservice.com',
                                               'api_key': 'k'}})
-        [acc] = client.get('/api/v1/hosts').get_json()['actions']
+        [acc] = client.get('/api/v1/devices').get_json()['actions']
         assert acc['fn'] == 'freshserviceImportHosts'
         assert acc['perm'] == 'devices_edit', 'la acción viajaría con el permiso de otra cosa'
 
@@ -149,23 +149,23 @@ class TestElBotonDeImportarViveEnDispositivos:
         _login(client)
         admin._write_config({'freshservice': {'domain': 'lacasa.freshservice.com',
                                               'api_key': ''}})
-        assert client.get('/api/v1/hosts').get_json()['actions'] == []
+        assert client.get('/api/v1/devices').get_json()['actions'] == []
 
     def test_y_la_respuesta_no_se_queda_cacheada(self, client, admin):
         """La configuración se edita desde el propio panel. Una respuesta guardada de por vida
         dejaría el botón escondido después de poner la clave, hasta reiniciar."""
         _login(client)
         admin._write_config({'freshservice': {'domain': '', 'api_key': ''}})
-        assert client.get('/api/v1/hosts').get_json()['actions'] == []
+        assert client.get('/api/v1/devices').get_json()['actions'] == []
         admin._write_config({'freshservice': {'domain': 'lacasa.freshservice.com',
                                               'api_key': 'k'}})
-        assert len(client.get('/api/v1/hosts').get_json()['actions']) == 1
+        assert len(client.get('/api/v1/devices').get_json()['actions']) == 1
 
     def test_el_origen_viaja_para_que_la_fila_pueda_decir_de_donde_vino(self, client, admin):
         """La columna guarda `freshservice` y la pantalla enseña un nombre y un icono. Si no
         viajara el descriptor, la fila enseñaría el identificador crudo."""
         _login(client)
-        fuentes = client.get('/api/v1/hosts').get_json()['sources']
+        fuentes = client.get('/api/v1/devices').get_json()['sources']
         assert {'id': 'freshservice', 'label_key': 'fs_source',
                 'icon': 'bi-life-preserver'} in fuentes
 
@@ -175,8 +175,8 @@ class TestElBotonDeImportarViveEnDispositivos:
         nada — y ningún otro proveedor podría ofrecer el suyo."""
         for rel in (os.path.join('lib', 'web_admin', 'templates', 'partials', 'servers',
                                  '_list.html'),
-                    os.path.join('lib', 'core', 'hosts', 'routes.py'),
-                    os.path.join('lib', 'core', 'hosts', 'actions.py')):
+                    os.path.join('lib', 'core', 'devices', 'routes.py'),
+                    os.path.join('lib', 'core', 'devices', 'actions.py')):
             texto = io.open(os.path.join(SRC, rel), encoding='utf-8').read()
             # Los comentarios usan el ejemplo real, que es documentación y no código.
             codigo = '\n'.join(l for l in texto.split('\n')
@@ -192,7 +192,7 @@ class TestElBotonDeImportarViveEnDispositivos:
         _login(client)
         admin._write_config({'freshservice': {'domain': 'lacasa.freshservice.com',
                                               'api_key': 'k'}})
-        acciones = client.get('/api/v1/hosts').get_json()['actions']
+        acciones = client.get('/api/v1/devices').get_json()['actions']
         out = node_run(panel_bundle(client), """
             __out = {};
             currentUser = {permissions: ['devices_edit']};
@@ -207,10 +207,10 @@ class TestElBotonDeImportarViveEnDispositivos:
         assert 'dropdown-toggle-split' in out['con'], 'la pestaña no está'
         assert 'freshserviceImportHosts()' in out['con']
         # Y lo que la pestaña acompaña sigue ahí: es un botón partido, no una pestaña suelta.
-        assert 'openNewHostModal' in out['con'], 'la pestaña se llevó el botón de añadir'
+        assert 'openNewDeviceModal' in out['con'], 'la pestaña se llevó el botón de añadir'
         # Un desplegable vacío es peor que ninguno: promete algo.
         assert 'dropdown' not in out['sin'], 'la pestaña sale sin nada que colgar'
-        assert 'openNewHostModal' in out['sin'], 'y el botón de añadir se ha perdido con ella'
+        assert 'openNewDeviceModal' in out['sin'], 'y el botón de añadir se ha perdido con ella'
         # Sin el permiso del proveedor, la pestaña no sale — pero añadir a mano sí, que es otra
         # bandera y la decide la barra.
         assert 'dropdown' not in out['sinPermiso']
@@ -272,13 +272,13 @@ class TestElegirLasClasesAntesDeTraerNada:
         client.post('/api/v1/providers/freshservice/assets/import',
                     json={'pick': ['2'], 'types': ['7002']})
         assert fsa['asked'] == [['7002'], ['7002']]
-        assert [h['name'] for h in admin._hosts_store.list()] == ['SW-01']
+        assert [h['name'] for h in admin._devices_store.list()] == ['SW-01']
 
     def test_los_huérfanos_se_cuentan_sobre_lo_que_se_pidió(self, client, admin, fsa):
         """Con un filtro puesto, «ya no está en Freshservice» sólo puede decirse de lo que se
         preguntó. Un dispositivo importado de otra clase saldría como desaparecido por no haberlo
         pedido — y lo que eso invita a hacer es borrarlo."""
-        admin._hosts_store.create({'name': 'SRV-01', 'source': 'freshservice',
+        admin._devices_store.create({'name': 'SRV-01', 'source': 'freshservice',
                                    'external_id': '1'})
         fsa['set']([_activo(1, 'SRV-01', tipo=7001), _activo(2, 'SW-01', tipo=7002)])
         d = client.get(
@@ -395,18 +395,18 @@ class TestTraerLasClasesSinTraerNingunActivo:
         # para que la pantalla pueda ir a ellas, pero no dice nada a quien mira.
         assert sorted(x['name'] for x in d['added']) == ['Access Point', 'IP Phone']
         assert all(x['uid'] for x in d['added'])
-        assert admin._host_types_store.by_slug('access_point')['source'] == 'freshservice'
+        assert admin._device_types_store.by_slug('access_point')['source'] == 'freshservice'
         assert fsa['calls'] == 0, 'ha traído activos para crear unas clases'
 
     def test_lo_que_ya_hay_no_se_toca_ni_se_duplica(self, client, admin, fsa):
         """Un tipo que se parece a una clase que ya está no crea una copia: dos «Router» en el
         desplegable son dos sitios donde repartir la misma flota."""
         fsa['types'] = [{'id': 7001, 'name': 'Router'}]
-        antes = len(admin._host_types_store.list())
+        antes = len(admin._device_types_store.list())
         d = client.post('/api/v1/providers/freshservice/assets/types',
                         json={}).get_json()
         assert d['added'] == []
-        assert len(admin._host_types_store.list()) == antes
+        assert len(admin._device_types_store.list()) == antes
 
     def test_dos_veces_seguidas_no_crean_dos(self, client, admin, fsa):
         fsa['types'] = [{'id': 7009, 'name': 'Access Point'}]
@@ -430,8 +430,8 @@ class TestTraerLasClasesSinTraerNingunActivo:
                         {'id': 7010, 'name': 'IP Phone'}]
         client.post('/api/v1/providers/freshservice/assets/types',
                     json={'pick': ['7009']})
-        assert admin._host_types_store.by_slug('access_point') is not None
-        assert admin._host_types_store.by_slug('ip_phone') is None
+        assert admin._device_types_store.by_slug('access_point') is not None
+        assert admin._device_types_store.by_slug('ip_phone') is None
 
     def test_y_el_catalogo_dice_cual_de_ellas_ya_tiene_equivalente(self, client, admin, fsa):
         """Elegir qué traer sin saber qué haría cada una es elegir a ciegas entre lo que crea
@@ -463,7 +463,7 @@ class TestTraerLasClasesSinTraerNingunActivo:
         assert t1['linked'] == '', 'coincidir por el nombre no es estar vinculada'
 
         # Y cuando SÍ lo está, lo dice — con cuál.
-        client.post(f'/api/v1/host_types/{server}/link',
+        client.post(f'/api/v1/device_types/{server}/link',
                     json={'source': 'freshservice', 'external_id': '7001'})
         [t2] = client.get(
             '/api/v1/providers/freshservice/assets/types').get_json()['types']
@@ -491,12 +491,12 @@ class TestTraerLasClasesSinTraerNingunActivo:
         siguiente importación creando una segunda."""
         fsa['types'] = [{'id': 7009, 'name': 'Access Point'}]
         client.post('/api/v1/providers/freshservice/assets/types', json={})
-        fila = admin._host_types_store.by_slug('access_point')
+        fila = admin._device_types_store.by_slug('access_point')
         assert (fila['source'], fila['external_id']) == ('freshservice', '7009')
-        admin._host_types_store.update(fila['uid'], 'Punto de acceso')
-        antes = len(admin._host_types_store.list())
+        admin._device_types_store.update(fila['uid'], 'Punto de acceso')
+        antes = len(admin._device_types_store.list())
         client.post('/api/v1/providers/freshservice/assets/types', json={})
-        assert len(admin._host_types_store.list()) == antes, 'ha creado una segunda'
+        assert len(admin._device_types_store.list()) == antes, 'ha creado una segunda'
 
     def test_y_esta_detras_de_devices_edit(self, admin, fsa):
         c = _as(admin, 'solo-empresas-3', ['devices_view', 'orgs_edit'])
@@ -508,10 +508,10 @@ class TestTraerLasClasesSinTraerNingunActivo:
         clases no sabe que Freshservice existe."""
         _login(client)
         admin._write_config({'freshservice': {'domain': '', 'api_key': ''}})
-        assert client.get('/api/v1/host_types').get_json()['actions'] == []
+        assert client.get('/api/v1/device_types').get_json()['actions'] == []
         admin._write_config({'freshservice': {'domain': 'lacasa.freshservice.com',
                                               'api_key': 'k'}})
-        acciones = client.get('/api/v1/host_types').get_json()['actions']
+        acciones = client.get('/api/v1/device_types').get_json()['actions']
         porfn = {a['fn']: a for a in acciones}
         # Dos: traer el catálogo entero, que va en la barra, y atar UNA clase a una de allí, que
         # va dentro de su ficha. Son dos actos y por eso `link` los separa.
@@ -528,21 +528,21 @@ class TestMirarAntesDeAplicar:
         fsa['set']([_activo(1, 'SRV-01', ip='10.0.0.5')])
         d = client.get('/api/v1/providers/freshservice/assets/preview').get_json()
         assert d['counts'] == {'create': 1, 'update': 0, 'adopt': 0, 'same': 0}
-        assert admin._hosts_store.list() == []
+        assert admin._devices_store.list() == []
 
     def test_lleva_los_de_aqui_para_poder_emparejar_a_mano(self, client, admin, fsa):
         """Qué dispositivo local es el mismo que un activo de allí lo sabe quien mira, no un
         parecido de nombres."""
-        admin._hosts_store.create({'name': 'srv-barcelona', 'address': '10.0.0.5'})
+        admin._devices_store.create({'name': 'srv-barcelona', 'address': '10.0.0.5'})
         fsa['set']([_activo(1, 'SRV-BCN-01')])
         d = client.get('/api/v1/providers/freshservice/assets/preview').get_json()
-        assert [h['name'] for h in d['hosts']] == ['srv-barcelona']
+        assert [h['name'] for h in d['devices']] == ['srv-barcelona']
 
     def test_y_no_lleva_los_perfiles_de_conexion(self, client, admin, fsa):
         """En ese cuadro se elige un nombre de un desplegable. Mandar las claves de SSH de la
         flota entera en una respuesta HTTP para dibujar un `<select>` es regalar lo único que de
         verdad hay que guardar."""
-        admin._hosts_store.create({'name': 'srv-1', 'address': '10.0.0.5',
+        admin._devices_store.create({'name': 'srv-1', 'address': '10.0.0.5',
                                    'profiles': {'ssh': {'ssh_password': 'p@ss'}}})
         fsa['set']([])
         crudo = client.get('/api/v1/providers/freshservice/assets/preview').get_data(
@@ -566,7 +566,7 @@ class TestLoQueEscribe:
         fsa['set']([_activo(1, 'SRV-01', ip='10.0.0.5', description='el de la sala')])
         r = client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
         assert r.get_json()['created'] == 1
-        [h] = admin._hosts_store.list()
+        [h] = admin._devices_store.list()
         assert (h['name'], h['address'], h['description']) == ('SRV-01', '10.0.0.5',
                                                                'el de la sala')
         assert (h['source'], h['external_id']) == ('freshservice', '1')
@@ -577,7 +577,7 @@ class TestLoQueEscribe:
         el resultado con el nombre del conmutador."""
         fsa['set']([_activo(1, 'SW-01')])
         client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
-        assert admin._hosts_store.get_by_name('SW-01')['kind'] == 'none'
+        assert admin._devices_store.get_by_name('SW-01')['kind'] == 'none'
 
     def test_la_clase_se_adivina_del_tipo_de_activo(self, client, admin, fsa):
         """Y se guarda por `uid`. La tabla de pistas contesta con el nombre corto —`server`,
@@ -586,7 +586,7 @@ class TestLoQueEscribe:
         clasificar, sin un solo error."""
         fsa['set']([_activo(1, 'SRV-01')])
         client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
-        assert admin._hosts_store.get_by_name('SRV-01')['device_type'] == _clase(admin,
+        assert admin._devices_store.get_by_name('SRV-01')['device_type'] == _clase(admin,
                                                                                 'server')
 
     def test_la_clase_que_no_existe_aqui_se_crea(self, client, admin, fsa):
@@ -596,8 +596,8 @@ class TestLoQueEscribe:
         fsa['types'] = [{'id': 7009, 'name': 'Access Point'}]
         fsa['set']([_activo(1, 'AP-01', tipo=7009)])
         client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
-        clase = admin._host_types_store.by_slug('access_point')
-        assert admin._hosts_store.get_by_name('AP-01')['device_type'] == clase['uid']
+        clase = admin._device_types_store.by_slug('access_point')
+        assert admin._devices_store.get_by_name('AP-01')['device_type'] == clase['uid']
         assert (clase['name'], clase['source']) == ('Access Point', 'freshservice')
 
     def test_y_no_se_crea_dos_veces(self, client, admin, fsa):
@@ -605,19 +605,19 @@ class TestLoQueEscribe:
         clases iguales, y la segunda se llevaría los dispositivos nuevos."""
         fsa['types'] = [{'id': 7009, 'name': 'Access Point'}]
         fsa['set']([_activo(1, 'AP-01', tipo=7009), _activo(2, 'AP-02', tipo=7009)])
-        antes = len(admin._host_types_store.list())
+        antes = len(admin._device_types_store.list())
         client.post('/api/v1/providers/freshservice/assets/import',
                     json={'pick': ['1', '2']})
-        assert len(admin._host_types_store.list()) == antes + 1
+        assert len(admin._device_types_store.list()) == antes + 1
 
     def test_pero_la_que_SÍ_se_parece_a_una_de_serie_no_crea_ninguna(self, client, admin, fsa):
         """La lista de casa no crece con una copia de algo que ya existe sólo porque el origen lo
         escriba con otras palabras."""
         fsa['set']([_activo(1, 'SRV-01', tipo=7001)])     # «Server» → `server`, ya sembrada
-        antes = len(admin._host_types_store.list())
+        antes = len(admin._device_types_store.list())
         client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
-        assert len(admin._host_types_store.list()) == antes, 'ha creado una copia'
-        assert admin._hosts_store.get_by_name('SRV-01')['device_type'] == _clase(admin,
+        assert len(admin._device_types_store.list()) == antes, 'ha creado una copia'
+        assert admin._devices_store.get_by_name('SRV-01')['device_type'] == _clase(admin,
                                                                                 'server')
 
     def test_la_vista_previa_dice_que_va_a_crearla_antes_de_aceptar(self, client, fsa):
@@ -647,7 +647,7 @@ class TestLoQueEscribe:
         claves de conexión, los módulos que las vigilan y las filas marcadas. Y no da ningún
         error: los checks simplemente empiezan a fallar por credenciales.
         """
-        uid = admin._hosts_store.create({
+        uid = admin._devices_store.create({
             'name': 'SRV-01', 'address': '10.0.0.5', 'source': 'freshservice',
             'external_id': '1', 'profiles': {'ssh': {'ssh_user': 'root',
                                                      'ssh_password': 'p@ss'}},
@@ -656,7 +656,7 @@ class TestLoQueEscribe:
         fsa['set']([_activo(1, 'SRV-01', ip='10.0.0.9')])
         r = client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
         assert r.get_json()['updated'] == 1
-        h = admin._hosts_store.get(uid, decrypt=True)
+        h = admin._devices_store.get(uid, decrypt=True)
         assert h['address'] == '10.0.0.9', 'no ha traído lo que venía a traer'
         assert h['profiles']['ssh']['ssh_password'] == 'p@ss'
         assert (h['modules'], h['tags']) == (['ping'], ['prod'])
@@ -666,36 +666,36 @@ class TestLoQueEscribe:
         client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
         r = client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
         assert r.get_json()['created'] == 0
-        assert len(admin._hosts_store.list()) == 1
+        assert len(admin._devices_store.list()) == 1
 
     def test_lo_que_tecleo_una_persona_se_adopta(self, client, admin, fsa):
         """El caso real: la flota se tecleó a mano antes de conectar esto. Y adoptar conserva lo
         de aquí que el origen no sabe — que es casi todo."""
-        uid = admin._hosts_store.create({'name': 'SRV-01', 'address': '10.0.0.1',
+        uid = admin._devices_store.create({'name': 'SRV-01', 'address': '10.0.0.1',
                                          'modules': ['ping']})
         fsa['set']([_activo(1, 'SRV-01', ip='10.0.0.5')])
         r = client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
         assert r.get_json()['adopted'] == 1
-        h = admin._hosts_store.get(uid)
+        h = admin._devices_store.get(uid)
         assert (h['source'], h['external_id'], h['address']) == ('freshservice', '1',
                                                                  '10.0.0.5')
         assert h['modules'] == ['ping']
-        assert len(admin._hosts_store.list()) == 1
+        assert len(admin._devices_store.list()) == 1
 
     def test_emparejar_a_mano_ata_los_dos_que_no_se_parecen(self, client, admin, fsa):
-        uid = admin._hosts_store.create({'name': 'srv-barcelona'})
+        uid = admin._devices_store.create({'name': 'srv-barcelona'})
         fsa['set']([_activo(1, 'SRV-BCN-01', ip='10.0.0.5')])
         r = client.post('/api/v1/providers/freshservice/assets/import',
                         json={'pick': ['1'], 'link': {'1': uid}})
         assert r.get_json()['adopted'] == 1
-        h = admin._hosts_store.get(uid)
+        h = admin._devices_store.get(uid)
         assert (h['name'], h['external_id']) == ('SRV-BCN-01', '1')
 
     def test_un_nombre_que_ya_esta_cogido_se_cuenta_y_no_tumba_a_los_demas(
             self, client, admin, fsa):
         """Son decenas y cada una es independiente. Y lo que falla se cuenta **con su nombre**,
         para que se pueda emparejar a mano — que es lo que se quería hacer."""
-        admin._hosts_store.create({'name': 'SRV-01', 'source': 'otro', 'external_id': 'x'})
+        admin._devices_store.create({'name': 'SRV-01', 'source': 'otro', 'external_id': 'x'})
         fsa['set']([_activo(1, 'SRV-01'), _activo(2, 'SRV-02')])
         d = client.post('/api/v1/providers/freshservice/assets/import',
                         json={'pick': ['1', '2']}).get_json()
@@ -706,13 +706,13 @@ class TestLoQueEscribe:
     def test_lo_que_ya_no_esta_en_el_origen_se_cuenta_y_no_se_borra(self, client, admin, fsa):
         """De un dispositivo cuelgan sus perfiles, sus módulos y meses de historial, y un activo
         desaparece del origen tanto por una baja real como por un filtro mal puesto."""
-        admin._hosts_store.create({'name': 'viejo', 'source': 'freshservice',
+        admin._devices_store.create({'name': 'viejo', 'source': 'freshservice',
                                    'external_id': '7'})
         fsa['set']([])
         d = client.get('/api/v1/providers/freshservice/assets/preview').get_json()
         assert [h['name'] for h in d['orphans']] == ['viejo']
         client.post('/api/v1/providers/freshservice/assets/import', json={'pick': []})
-        assert admin._hosts_store.get_by_name('viejo') is not None
+        assert admin._devices_store.get_by_name('viejo') is not None
 
     def test_un_catalogo_de_tipos_inalcanzable_no_impide_traer_nada(self, client, admin, fsa):
         """Que una clave no alcance el catálogo de tipos no puede convertirse en negarse a traer
@@ -721,7 +721,7 @@ class TestLoQueEscribe:
         fsa['set']([_activo(1, 'SRV-01')])
         r = client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
         assert r.get_json()['created'] == 1
-        assert admin._hosts_store.get_by_name('SRV-01')['device_type'] == ''
+        assert admin._devices_store.get_by_name('SRV-01')['device_type'] == ''
 
 
 class TestQuienPuedeHacerlo:
@@ -745,26 +745,26 @@ class TestUnDispositivoAtadoNoSeTecleaEncima:
     no se puede. La salida es soltarlo de su origen."""
 
     def test_cambiarle_el_nombre_se_rechaza_y_dice_por_que(self, client, admin, fsa):
-        uid = admin._hosts_store.create({'name': 'SRV-01', 'source': 'freshservice',
+        uid = admin._devices_store.create({'name': 'SRV-01', 'source': 'freshservice',
                                          'external_id': '1'})
-        r = client.put(f'/api/v1/hosts/{uid}', json={'name': 'otro'})
+        r = client.put(f'/api/v1/devices/{uid}', json={'name': 'otro'})
         assert r.status_code == 409
         error = r.get_json()['error']
         assert 'Freshservice' in error, 'enseña el identificador crudo del origen'
         assert 'name' not in error, 'enseña el nombre de la columna de la base de datos'
-        assert admin._hosts_store.get(uid)['name'] == 'SRV-01'
+        assert admin._devices_store.get(uid)['name'] == 'SRV-01'
 
     def test_pero_todo_lo_demas_se_sigue_editando(self, client, admin, fsa):
         """Freshservice no sabe nada de los perfiles de conexión, de los módulos ni de las
         etiquetas: este panel es el único sitio donde viven. Un dispositivo importado que no se
         puede tocar de ninguna manera es un dispositivo que no se puede vigilar."""
-        uid = admin._hosts_store.create({'name': 'SRV-01', 'address': '10.0.0.5',
+        uid = admin._devices_store.create({'name': 'SRV-01', 'address': '10.0.0.5',
                                          'source': 'freshservice', 'external_id': '1'})
-        r = client.put(f'/api/v1/hosts/{uid}',
+        r = client.put(f'/api/v1/devices/{uid}',
                        json={'name': 'SRV-01', 'address': '10.0.0.5', 'tags': ['prod'],
                              'profiles': {'ssh': {'ssh_user': 'root'}}})
         assert r.status_code == 200
-        h = admin._hosts_store.get(uid)
+        h = admin._devices_store.get(uid)
         assert h['tags'] == ['prod']
         # **Y sigue atado.** Un guardado que no menciona el origen no lo borra: este cuadro manda
         # la ficha y no sabe de esto, así que sin conservarlo, editar un perfil de conexión
@@ -775,15 +775,15 @@ class TestUnDispositivoAtadoNoSeTecleaEncima:
     def test_guardar_la_ficha_entera_sin_tocar_nada_no_se_rechaza(self, client, admin, fsa):
         """El cuadro manda todos los campos siempre. Mirar si la clave VIENE —en vez de si el
         valor cambia— dejaría un dispositivo importado bloqueado del todo."""
-        uid = admin._hosts_store.create({'name': 'SRV-01', 'address': '10.0.0.5',
+        uid = admin._devices_store.create({'name': 'SRV-01', 'address': '10.0.0.5',
                                          'description': 'x', 'source': 'freshservice',
                                          'external_id': '1'})
-        h = admin._hosts_store.get(uid)
-        assert client.put(f'/api/v1/hosts/{uid}', json=h).status_code == 200
+        h = admin._devices_store.get(uid)
+        assert client.put(f'/api/v1/devices/{uid}', json=h).status_code == 200
 
     def test_editar_uno_de_esta_casa_no_toca_nada_de_esto(self, client, admin, fsa):
-        uid = admin._hosts_store.create({'name': 'de-aqui'})
-        assert client.put(f'/api/v1/hosts/{uid}',
+        uid = admin._devices_store.create({'name': 'de-aqui'})
+        assert client.put(f'/api/v1/devices/{uid}',
                           json={'name': 'renombrado'}).status_code == 200
 
 
@@ -792,21 +792,21 @@ class TestSoltarloDeSuOrigen:
     nadie puede corregir: sólo se podrían borrar."""
 
     def test_lo_suelta_y_vuelve_a_poder_escribirse(self, client, admin, fsa):
-        uid = admin._hosts_store.create({'name': 'SRV-01', 'source': 'freshservice',
+        uid = admin._devices_store.create({'name': 'SRV-01', 'source': 'freshservice',
                                          'external_id': '1'})
-        assert client.delete(f'/api/v1/hosts/{uid}/source').status_code == 200
-        assert admin._hosts_store.get(uid)['source'] == ''
-        assert client.put(f'/api/v1/hosts/{uid}', json={'name': 'otro'}).status_code == 200
+        assert client.delete(f'/api/v1/devices/{uid}/source').status_code == 200
+        assert admin._devices_store.get(uid)['source'] == ''
+        assert client.put(f'/api/v1/devices/{uid}', json={'name': 'otro'}).status_code == 200
 
     def test_no_borra_nada_suyo(self, client, admin, fsa):
         """Ni sus perfiles, ni sus módulos, ni su dirección. Soltarlo es dejar de refrescarlo,
         no deshacer lo que se sabe de él."""
-        uid = admin._hosts_store.create({
+        uid = admin._devices_store.create({
             'name': 'SRV-01', 'address': '10.0.0.5', 'modules': ['ping'],
             'profiles': {'ssh': {'ssh_password': 'p@ss'}},
             'source': 'freshservice', 'external_id': '1'})
-        client.delete(f'/api/v1/hosts/{uid}/source')
-        h = admin._hosts_store.get(uid, decrypt=True)
+        client.delete(f'/api/v1/devices/{uid}/source')
+        h = admin._devices_store.get(uid, decrypt=True)
         assert (h['address'], h['modules']) == ('10.0.0.5', ['ping'])
         assert h['profiles']['ssh']['ssh_password'] == 'p@ss'
 
@@ -815,20 +815,20 @@ class TestSoltarloDeSuOrigen:
         """Soltarlo no lo esconde del origen: sigue llamándose igual, así que la siguiente
         importación lo encuentra por el nombre y lo adopta. Lo que se ha ganado es el rato de
         poder corregirlo a mano."""
-        uid = admin._hosts_store.create({'name': 'SRV-01', 'source': 'freshservice',
+        uid = admin._devices_store.create({'name': 'SRV-01', 'source': 'freshservice',
                                          'external_id': '1'})
-        client.delete(f'/api/v1/hosts/{uid}/source')
+        client.delete(f'/api/v1/devices/{uid}/source')
         fsa['set']([_activo(1, 'SRV-01')])
         r = client.post('/api/v1/providers/freshservice/assets/import', json={'pick': ['1']})
         assert r.get_json()['adopted'] == 1
-        assert len(admin._hosts_store.list()) == 1
+        assert len(admin._devices_store.list()) == 1
 
     def test_quien_no_puede_editar_ese_dispositivo_no_lo_suelta(self, admin, fsa):
-        uid = admin._hosts_store.create({'name': 'SRV-01', 'source': 'freshservice',
+        uid = admin._devices_store.create({'name': 'SRV-01', 'source': 'freshservice',
                                          'external_id': '1'})
         c = _as(admin, 'mirón', ['devices_view'])
-        assert c.delete(f'/api/v1/hosts/{uid}/source').status_code == 403
-        assert admin._hosts_store.get(uid)['source'] == 'freshservice'
+        assert c.delete(f'/api/v1/devices/{uid}/source').status_code == 403
+        assert admin._devices_store.get(uid)['source'] == 'freshservice'
 
     def test_uno_que_no_existe_es_un_404_y_no_un_500(self, client, admin, fsa):
-        assert client.delete('/api/v1/hosts/fantasma/source').status_code == 404
+        assert client.delete('/api/v1/devices/fantasma/source').status_code == 404

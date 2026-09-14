@@ -38,7 +38,7 @@ class _EmbedMixin:
         """Los orígenes de los que esta instalación puede cargar imágenes. Hoy: el de las
         teselas, si hay mapa.
 
-        Sacado del proveedor configurado y no escrito en ninguna parte: un comodín o un host
+        Sacado del proveedor configurado y no escrito en ninguna parte: un comodín o un device
         fijo en el código serían un agujero que sigue abierto el día que nadie usa el mapa. Sin
         mapa no devuelve nada, y entonces la política queda exactamente como estaba.
 

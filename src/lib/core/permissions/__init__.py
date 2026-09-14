@@ -53,9 +53,9 @@ def discover_permissions() -> list[dict]:
 
 # ── Permission-key validators (per-instance keys) ───────────────────────────────────
 _MODULE_PERM_RE = re.compile(r'^module\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
-# Per-server (host) permission key.  'add' authorizes adding host-bound checks to
-# THIS specific host (not creating a host — that is the global ``devices_add``);
-# 'edit'/'delete' act on existing host-bound checks and the host record.
+# Per-server (device) permission key.  'add' authorizes adding device-bound checks to
+# THIS specific device (not creating a device — that is the global ``devices_add``);
+# 'edit'/'delete' act on existing device-bound checks and the device record.
 _SERVER_PERM_RE = re.compile(r'^server\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
 # Per-cluster permission key (cluster.{uid}.{action}) — a cluster is a multi-bind
 # check identified by its item UID.
@@ -100,7 +100,7 @@ def is_org_perm(p: str) -> bool:
 
 # Core permission flags.  Almost every domain now declares its own permissions in its
 # module's ``manifest.py`` (lib.core.* / lib.services.*), discovered and
-# appended by the merge below.  Only ``services`` (the Services tab itself — the host of
+# appended by the merge below.  Only ``services`` (the Services tab itself — the device of
 # the discovery mechanism, not a discoverable module) stays hardcoded here.
 _CORE_PERMISSIONS = (
     'services_view',     # view the Services dashboard (scheduler/syslog/worker/DB)

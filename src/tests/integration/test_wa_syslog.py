@@ -57,13 +57,13 @@ class TestSyslogApi:
         _seed(admin, hostname='ccc', severity=6, message='m2')
         _seed(admin, hostname='bbb', severity=4, message='m3')
         # ascending by host
-        hosts = [m['hostname'] for m in
+        devices = [m['hostname'] for m in
                  client.get('/api/v1/syslog?sort=hostname&order=asc').get_json()['messages']]
-        assert hosts == ['aaa', 'bbb', 'ccc']
+        assert devices == ['aaa', 'bbb', 'ccc']
         # descending by host
-        hosts = [m['hostname'] for m in
+        devices = [m['hostname'] for m in
                  client.get('/api/v1/syslog?sort=hostname&order=desc').get_json()['messages']]
-        assert hosts == ['ccc', 'bbb', 'aaa']
+        assert devices == ['ccc', 'bbb', 'aaa']
         # ascending by severity (numeric)
         sevs = [m['severity'] for m in
                 client.get('/api/v1/syslog?sort=severity&order=asc').get_json()['messages']]
@@ -145,11 +145,11 @@ class TestSyslogApi:
         _seed(admin, hostname='db01', app='mysqld', severity=4)
         st = client.get('/api/v1/syslog/stats').get_json()
         assert st['total'] == 3
-        assert st['by_host'][0] == {'value': 'web01', 'count': 2}
+        assert st['by_device'][0] == {'value': 'web01', 'count': 2}
         assert any(d['name'] == 'err' for d in st['by_severity'])
         # honours filters like the list endpoint
         st = client.get('/api/v1/syslog/stats?severity_max=3').get_json()
-        assert st['total'] == 1 and st['by_host'] == [{'value': 'web01', 'count': 1}]
+        assert st['total'] == 1 and st['by_device'] == [{'value': 'web01', 'count': 1}]
 
     def test_stats_requires_auth(self, client):
         assert client.get('/api/v1/syslog/stats').status_code == 401

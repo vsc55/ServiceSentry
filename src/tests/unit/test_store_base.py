@@ -37,7 +37,7 @@ from lib.util.entity_audit import touch_entity, utc_now_iso
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 CORE_STORES = [
-    'audit', 'credentials', 'groups', 'history', 'hosts', 'roles', 'sessions', 'users',
+    'audit', 'credentials', 'groups', 'history', 'devices', 'roles', 'sessions', 'users',
 ]
 
 
@@ -46,7 +46,7 @@ def _store_src(domain):
 
     Los dos sitios porque los dos existen: un dominio con UNA tabla la tiene en `store.py`, y uno
     con varias las reparte en `store/` o `stores/` con un archivo por tabla —`dcim` tiene doce,
-    `hosts` dos—. Escrita sólo la primera forma, este archivo se cae el día que un dominio crece,
+    `devices` dos—. Escrita sólo la primera forma, este archivo se cae el día que un dominio crece,
     y lo hace señalando a un fichero que nadie ha borrado: simplemente ya no se llama así.
     """
     base = os.path.join(SRC, 'lib', 'core', domain)
@@ -54,7 +54,7 @@ def _store_src(domain):
     if os.path.exists(suelto):
         return io.open(suelto, encoding='utf-8-sig').read()
     for carpeta in ('stores', 'store'):
-        # El archivo que se llama como el dominio es el de SU tabla: `hosts/stores/hosts.py`.
+        # El archivo que se llama como el dominio es el de SU tabla: `devices/stores/devices.py`.
         # El resto de ese paquete son las tablas de al lado, que tienen su propia fila en la
         # lista de arriba el día que las tengan.
         propio = os.path.join(base, carpeta, domain + '.py')
@@ -104,7 +104,7 @@ class TestTheSharedBase:
 
     def test_encryption_is_defined_once(self):
         """Credentials and host profiles used byte-identical helpers."""
-        for domain in ('credentials', 'hosts'):
+        for domain in ('credentials', 'devices'):
             src = _store_src(domain)
             assert 'EncryptedPayloadMixin' in src
             assert 'def _encrypt' not in src, f'{domain} kept its own copy'

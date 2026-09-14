@@ -52,7 +52,7 @@ class TestTheSystemBlockAlwaysAnswers:
 
 class TestWhetherThisIsAContainer:
     """The row the rest of the page is read against: a path that "exists" is inside an image
-    that may be recreated tomorrow, and free disk is the layer's and not the host's."""
+    that may be recreated tomorrow, and free disk is the layer's and not the device's."""
 
     @pytest.mark.parametrize('marker', ['/.dockerenv', '/run/.containerenv'])
     def test_each_runtime_leaves_its_own_marker(self, marker, monkeypatch):

@@ -122,6 +122,78 @@ class BaseConnector(ABC):
         """
         raise NotImplementedError
 
+    def adopt_former_name(self, spec: TableSpec) -> bool:
+        """Take over whichever of this table's ``former_names`` still holds the rows. Idempotent.
+
+        Separate from :meth:`reconcile_table` — which calls it first — because a store may have
+        migrating of its own to do, and it has to do it on a table that already answers to
+        today's name. Renaming afterwards would mean every one of those migrations knowing both
+        names.
+
+        **The decision is "where are the rows", not "does the new table exist".** An earlier
+        version asked the second question and gave up when the answer was yes — so a table
+        created empty by any schema pass that ran before this rename was declared (a dev server
+        restarting mid-edit is enough) blocked the adoption for ever: the fleet sat in `hosts`
+        while `devices` answered every read with nothing, and no error was raised anywhere.
+        That is the same shape of mistake as recognising a migration by a leftover artefact
+        instead of by the property it exists to establish.
+
+        So:
+
+        * nothing under the new name → rename the one that is there;
+        * new name present but **empty** while a former one has rows → the empty one is
+          stillborn: it is dropped and the one with the rows takes its place;
+        * both hold rows → **nothing is touched** and it is logged as an error. Merging them is
+          a decision about data that no schema step should take on its own;
+        * former name present and empty → dropped, it is only a leftover.
+        """
+        if not spec.former_names:
+            return False
+        nuevas = self._row_count(spec.name) if self.table_exists(spec.name) else None
+        adoptada = False
+        for antes in spec.former_names:
+            if not antes or antes == spec.name or not self.table_exists(antes):
+                continue
+            viejas = self._row_count(antes)
+            if nuevas is None:                      # no hay tabla nueva todavía
+                _log.info('Table %s was %s — renaming (%s rows)', spec.name, antes, viejas)
+                self.rename_table(antes, spec.name)
+                nuevas, adoptada = viejas, True
+                continue
+            if viejas == 0:                         # un resto vacío
+                _log.info('Table %s (empty) left over from before %s — dropping',
+                          antes, spec.name)
+                self.drop_table(antes)
+                continue
+            if nuevas == 0:                         # la nueva nació vacía: manda la que tiene datos
+                _log.warning('Table %s is empty and %s still holds %s rows — adopting it',
+                             spec.name, antes, viejas)
+                self.drop_table(spec.name)
+                self.rename_table(antes, spec.name)
+                nuevas, adoptada = viejas, True
+                continue
+            _log.error('Both %s (%s rows) and %s (%s rows) hold data — leaving them alone; '
+                       'merging them is not a schema decision', spec.name, nuevas, antes, viejas)
+        return adoptada
+
+    def _row_count(self, table: str) -> int:
+        """How many rows *table* holds; ``0`` if it cannot be asked."""
+        try:
+            fila = self.fetchone(f'SELECT COUNT(*) FROM {self.quote_ident(table)}')
+            return int(fila[0]) if fila else 0
+        except Exception:  # pylint: disable=broad-except
+            return 0
+
+    def drop_table(self, table: str) -> None:
+        """Drop *table* if it is there."""
+        self.execute_ddl(f'DROP TABLE IF EXISTS {self.quote_ident(table)}')
+
+    def rename_table(self, old: str, new: str) -> None:
+        """Rename a table, keeping its rows and its indexes.  ``ALTER TABLE … RENAME TO`` is
+        the one spelling SQLite, MySQL/MariaDB and PostgreSQL all accept."""
+        q = self.quote_ident
+        self.execute_ddl(f'ALTER TABLE {q(old)} RENAME TO {q(new)}')
+
     def rename_column(self, table: str, old: str, new: str) -> None:
         """Rename a column, preserving its data.  Portable across modern
         SQLite (3.25+), MySQL (8+/MariaDB 10.5+) and PostgreSQL."""
@@ -236,7 +308,10 @@ class BaseConnector(ABC):
     def reconcile_table(self, spec: TableSpec) -> SchemaDiff:
         """Make the physical table match *spec*.
 
-        Creates the table if missing; otherwise applies declared renames, diffs
+        A table declaring ``former_names`` and not present under its own name is renamed from
+        the first of those that IS present — with its rows, its indexes and its history, which
+        is what a rename is for. Then, as ever: creates the table if missing; applies declared
+        column renames, diffs
         the live schema against *spec*, and reconciles columns, order, types,
         nullability, defaults and indexes — rebuilding the table when an
         in-place ``ALTER`` cannot express the change.  Columns present in the DB
@@ -244,6 +319,10 @@ class BaseConnector(ABC):
         Returns the computed :class:`SchemaDiff`.
         """
         q = self.quote_ident
+        # El nombre anterior, si lo hubo. Delante de todo lo demás: a partir de aquí el resto de
+        # este método mira una tabla que ya se llama como toca, y no tiene que saber que ayer se
+        # llamaba de otra manera.
+        self.adopt_former_name(spec)
         if not self.table_exists(spec.name):
             self.execute_ddl(create_table_ddl(
                 spec, self._type_map, q,
@@ -259,6 +338,13 @@ class BaseConnector(ABC):
             for old, new in spec.renames.items():
                 if old in present and new not in present:
                     self.rename_column(spec.name, old, new)
+
+        # Y los índices que se llamaban de otra manera: siguieron a la tabla al renombrarla.
+        for viejo in (spec.former_indexes or ()):
+            try:
+                self.execute_ddl(f'DROP INDEX IF EXISTS {q(viejo)}')
+            except Exception:  # pylint: disable=broad-except
+                pass
 
         actual_cols = self.describe_table(spec.name)
         actual_idx = self.list_indexes(spec.name)

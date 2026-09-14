@@ -346,7 +346,7 @@ poner una cabecera `Authorization`— y la respuesta no lleva cookie de sesión.
 
 ## Infraestructura (vivo) — [lib/core/infra/routes.py](../src/lib/core/infra/routes.py)
 
-Sólo lectura: la sección muestra **qué están haciendo** las máquinas; lo que las define vive en el registro (`/api/v1/hosts`), tras los permisos que el registro ya tiene.
+Sólo lectura: la sección muestra **qué están haciendo** las máquinas; lo que las define vive en el registro (`/api/v1/devices`), tras los permisos que el registro ya tiene.
 
 | Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
@@ -526,7 +526,7 @@ Dónde está el equipamiento y de quién es. Ver [explica-dcim.md](explica-dcim.
 | DELETE | `/api/v1/credentials/<uid>` | sesión | Borrar |
 | POST | `/api/v1/credentials/test` | sesión | Abrir conexión SSH para verificar |
 
-## Hosts — [lib/core/hosts/routes.py](../src/lib/core/hosts/routes.py)
+## Hosts — [lib/core/devices/routes.py](../src/lib/core/devices/routes.py)
 
 > Todas son `@login_required`; el permiso se aplica **inline** por la familia `servers_*` y
 > `_has_server_permission(uid, acción)` (permiso por host). Ver [explica-hosts.md](explica-hosts.md).
@@ -534,17 +534,17 @@ Dónde está el equipamiento y de quién es. Ver [explica-dcim.md](explica-dcim.
 | Método | Ruta | Permiso (inline) | Propósito |
 |---|---|---|---|
 | GET/POST | `/api/v1/snmp/<acción>` | `snmp_view` (lectura) · `snmp_manage` (el resto) | La biblioteca de MIB, el catálogo de perfiles de dispositivo y preguntarle a un dispositivo qué sirve. 42 acciones; las declara `lib/core/snmp/manifest.py`. `discover` **no** está aquí: busca OIDs para el campo de un check, así que sigue en `/api/v1/modules/watchfuls/snmp/discover` |
-| GET | `/api/v1/hosts` | `devices_view` (global) o view por host | Listar hosts, secretos enmascarados |
-| GET | `/api/v1/hosts/<uid>/status` | `view` por host | Últimos resultados de checks |
-| POST | `/api/v1/hosts` | `devices_edit` | Crear host |
-| POST | `/api/v1/hosts/<uid>/clone` | `devices_edit` | Clonar host |
-| PUT | `/api/v1/hosts/<uid>` | `edit` por host | Actualizar host |
-| DELETE | `/api/v1/hosts/<uid>` | `delete` por host | Borrar host |
-| POST | `/api/v1/hosts/test_ssh` | `edit` por host / `devices_edit` | Probar SSH sin guardar |
-| POST | `/api/v1/hosts/test_check` | `edit` por host | Ejecutar un check una vez |
-| POST | `/api/v1/hosts/test` | `edit` por host | Test completo: SSH + todos los checks |
-| GET | `/api/v1/hosts/migrate/preview` | `devices_edit` | Propuesta de migración, secretos enmascarados |
-| POST | `/api/v1/hosts/migrate/apply` | `devices_edit` | Crear hosts para candidatos aceptados |
+| GET | `/api/v1/devices` | `devices_view` (global) o view por host | Listar hosts, secretos enmascarados |
+| GET | `/api/v1/devices/<uid>/status` | `view` por host | Últimos resultados de checks |
+| POST | `/api/v1/devices` | `devices_edit` | Crear host |
+| POST | `/api/v1/devices/<uid>/clone` | `devices_edit` | Clonar host |
+| PUT | `/api/v1/devices/<uid>` | `edit` por host | Actualizar host |
+| DELETE | `/api/v1/devices/<uid>` | `delete` por host | Borrar host |
+| POST | `/api/v1/devices/test_ssh` | `edit` por host / `devices_edit` | Probar SSH sin guardar |
+| POST | `/api/v1/devices/test_check` | `edit` por host | Ejecutar un check una vez |
+| POST | `/api/v1/devices/test` | `edit` por host | Test completo: SSH + todos los checks |
+| GET | `/api/v1/devices/migrate/preview` | `devices_edit` | Propuesta de migración, secretos enmascarados |
+| POST | `/api/v1/devices/migrate/apply` | `devices_edit` | Crear hosts para candidatos aceptados |
 
 ## Módulos — [lib/core/modules/routes.py](../src/lib/core/modules/routes.py)
 

@@ -239,7 +239,7 @@ def tables_in_archive_by_part(in_zip: list, want: set) -> list:
     tables a part means.
 
     Takes the TABLE NAMES an archive holds, not its member list: turning ``db/hosts.json``
-    into ``hosts`` is the layout's business (`archive.member_tables`), and this module's job
+    into ``devices`` is the layout's business (`archive.member_tables`), and this module's job
     is the grouping. Kept apart so neither has to know the other's rule.
     """
     seen: set = set()

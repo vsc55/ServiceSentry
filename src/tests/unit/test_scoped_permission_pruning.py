@@ -49,11 +49,11 @@ class TestTheRuleItself:
         assert perms_svc.strip_scoped({'r': {}}, 'server', [None, '']) == []
 
     def test_cluster_items_are_the_ones_bound_to_many_hosts(self):
-        """A cluster is a multi-host check — an item carrying `host_uids`. A single-host
+        """A cluster is a multi-host check — an item carrying `device_uids`. A single-host
         item is a server-scoped thing and must not be mistaken for one."""
         cfg = {'ping': {'checks': {
-            'a': {'uid': 'u1', 'host_uids': ['h1', 'h2']},
-            'b': {'uid': 'u2', 'host_uid': 'h1'},
+            'a': {'uid': 'u1', 'device_uids': ['h1', 'h2']},
+            'b': {'uid': 'u2', 'device_uid': 'h1'},
             '__meta__': {'x': 1},
         }}}
         assert perms_svc.cluster_item_uids(cfg) == {'u1'}

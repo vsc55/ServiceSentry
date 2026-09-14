@@ -36,7 +36,7 @@ Difieren solo en **qué raíz escanean** y **qué declaran**:
 | [Widgets de Overview](#2-widgets-de-overview-overview_widgets) | `overview_widget.py` · `OVERVIEW_WIDGETS` | `lib.core.*` + `lib.services.*` | `discover_overview_widgets()` (+ `_content` / `_rows` / `_public`) | grid de Overview + AJAX por widget |
 | [Servicios embebidos](#3-servicios-embebidos-embedded_service) | `__init__.py` · `EMBEDDED_SERVICE` (`embedded.py` · `make_embedded`) | `lib.services.*` | `discover_embedded_services()` | pestaña Services (estado + control) |
 | [Tipos de credencial](#4-tipos-de-credencial-__credential__) | `schema.json` · `__credential__` | `watchfuls/*` | `ModuleBase.discover_schemas()` | gestor de credenciales (formularios por tipo) |
-| [Perfiles de host](#5-perfiles-de-host-__host_profile__) | `schema.json` · `__host_profile__` | `watchfuls/*` | `lib.core.hosts.profiles` | sección Servers (formularios por protocolo) |
+| [Perfiles de host](#5-perfiles-de-host-__device_profile__) | `schema.json` · `__device_profile__` | `watchfuls/*` | `lib.core.devices.profiles` | sección Servers (formularios por protocolo) |
 | [Tablas de módulo](#6-tablas-de-módulo-discover_db_tables) | `__init__.py` · `discover_db_tables()` | `watchfuls/*` | `reconcile_module_tables()` | BD general (crea/migra `mod_<m>_<n>`) |
 | [Campos de historial en caliente](#6c-campos-de-historial-en-caliente-discover_history_fields) | `__init__.py` · `discover_history_fields()` | `watchfuls/*` | `module_history_fields()` | leyenda y eje de las gráficas de History e Infraestructura |
 | [Provisión Entra](#7-provisión-entra-__entraid_provision__) | `schema.json`/OIDC · `__entraid_provision__` | `watchfuls/*` + config OIDC | `normalize_entraid_provision()` | asistente device-code → registro de app en Graph |
@@ -81,8 +81,8 @@ core— y por eso declaran en `schema.json` (datos puros), recogidos por el pipe
 | `OVERVIEW_WIDGETS` | widgets del Overview | §2 |
 | `EMBEDDED_SERVICE` / `STANDALONE` | servicio de fondo | §3 |
 | `CONFIG_ACTIONS` | botones en una sección de config | §7b |
-| `ORG_ACTIONS` / `HOST_ACTIONS` | formas de que aparezca una fila en una lista | §7d |
-| `ORG_SOURCES` / `HOST_SOURCES` | de dónde vino una fila traída de fuera | §7d |
+| `ORG_ACTIONS` / `DEVICE_ACTIONS` | formas de que aparezca una fila en una lista | §7d |
+| `ORG_SOURCES` / `DEVICE_SOURCES` | de dónde vino una fila traída de fuera | §7d |
 | `GROUP_SOURCES` | origen de grupos de directorio de una sección | §7c |
 | `ORG_SCOPES` | lo que de ese paquete puede ser de una empresa | §5b |
 | `NOTIFY_EVENTS` | eventos notificables | §10 |
@@ -457,13 +457,13 @@ flowchart TB
 
 ---
 
-## 5. Perfiles de host (`__host_profile__`)
+## 5. Perfiles de host (`__device_profile__`)
 
 Un módulo declara a qué **protocolo de conexión** se ata un check (SNMP, SSH, un perfil de
 BD…). El panel usa el catálogo para pintar los formularios por-protocolo de la sección Servers
 y para saber qué campos ocultar en un check una vez ligado a un host.
 
-**Descriptor** (en `watchfuls/<m>/schema.json`): `__host_profile__` = un spec o una lista
+**Descriptor** (en `watchfuls/<m>/schema.json`): `__device_profile__` = un spec o una lista
 (datastore aporta varios: túnel `ssh` + perfil `db`).
 
 **Dos dueños.** Un protocolo que declara el **core** —`ssh`, y cualquier `HOST_PROFILE` de un
@@ -482,7 +482,7 @@ nombre de un protocolo dentro— y dejó de ser cierta en silencio el día que S
 su editor siguió dibujándose bajo el módulo mientras lo que editaba ya era propiedad del
 dispositivo. Guardado en `tests/meta/test_snmp_profiles_screen.py`.
 
-Y como `__host_profile__` sólo dice qué hereda un check **atado** —no pinta nada en el
+Y como `__device_profile__` sólo dice qué hereda un check **atado** —no pinta nada en el
 formulario de uno sin atar—, una colección que necesite la conexión inline (el caso «IP
 suelta») la pide con `"__profile_fields__": "<protocolo>"` y `discover_schemas()` la expande
 desde la misma declaración del core. Ver [ref-schema-json.md](ref-schema-json.md).
@@ -491,9 +491,9 @@ desde la misma declaración del core. Ver [ref-schema-json.md](ref-schema-json.m
 
 ```mermaid
 flowchart TB
-    decl["schema.json · __host_profile__ (spec o lista)"]
+    decl["schema.json · __device_profile__ (spec o lista)"]
     meta["schema.json + lang/ del módulo<br/>(tipo/opciones/secret/i18n por campo)"]
-    decl --> disc["lib.core.hosts.profiles<br/>escanea watchfuls/ vía ModuleBase"]
+    decl --> disc["lib.core.devices.profiles<br/>escanea watchfuls/ vía ModuleBase"]
     meta --> disc
     disc --> map["{protocolo: {module, address_field, fields[{name, type, options, secret, i18n}]}}"]
     map --> ui["sección Servers: formulario por protocolo del Host"]
@@ -885,7 +885,7 @@ flowchart TB
 
 ---
 
-## 7d. Otras formas de que aparezca una fila (`ORG_ACTIONS`, `HOST_ACTIONS`)
+## 7d. Otras formas de que aparezca una fila (`ORG_ACTIONS`, `DEVICE_ACTIONS`)
 
 Empresas y Dispositivos tienen las dos un botón de **añadir**, y las dos pueden traer lo que ya
 está escrito en otro sitio. Traerlo no es otra cosa: es **otra manera de que aparezca una fila**,
@@ -901,7 +901,7 @@ pestaña: una flecha que abre un menú vacío promete algo.
 ```python
 from lib.providers.freshservice.service import is_configured
 
-HOST_ACTIONS = [                                   # ORG_ACTIONS es idéntico
+DEVICE_ACTIONS = [                                   # ORG_ACTIONS es idéntico
     {'id': 'import', 'label_key': 'fs_import_hosts', 'tooltip_key': 'fs_import_hosts_tt',
      'icon': 'bi-cloud-download', 'variant': 'primary', 'order': 10,
      'perm': 'devices_edit',                       # la misma bandera que exige el servidor
@@ -909,7 +909,7 @@ HOST_ACTIONS = [                                   # ORG_ACTIONS es idéntico
      'ready': is_configured},                      # sin conector, sin botón
 ]
 
-HOST_SOURCES = [                                   # cómo firma las filas que trae
+DEVICE_SOURCES = [                                   # cómo firma las filas que trae
     {'id': 'freshservice', 'label_key': 'fs_source', 'icon': 'bi-life-preserver'},
 ]
 ```
@@ -934,7 +934,7 @@ y no los dispositivos, y con una sola el segundo botón aparecería por tener pu
 origen que ya no declara nadie no deja la fila muda: se enseña el identificador tal cual, que
 sigue diciendo de dónde vino.
 
-**Y las filas traídas se marcan**: `source` + `external_id` en la tabla (`org`, `hosts`). Dos
+**Y las filas traídas se marcan**: `source` + `external_id` en la tabla (`org`, `devices`). Dos
 columnas porque son dos cosas —«¿esto lo mantiene otro?», que decide si una importación puede
 pisarlo, y «¿cuál de los suyos es?», que es lo único que permite volver a importar sin duplicar—.
 Por el nombre no se puede: renombrarlo en el origen crearía aquí un segundo y dejaría el primero
@@ -1059,7 +1059,7 @@ flowchart TB
 | Uno o varios widgets de Overview desde un **módulo watchful** | `schema.json` → `__overview_widget__` (lista) + hook `Watchful.overview_widget()` — ver §2b |
 | Un servicio de fondo nuevo | un paquete en `lib/services/<s>/` con `EMBEDDED_SERVICE` + `make_embedded(host)` |
 | Un tipo de credencial para un módulo | `schema.json` → `__credential__` (+ campos en schema/lang) |
-| Un protocolo de conexión de host | `schema.json` → `__host_profile__` |
+| Un protocolo de conexión de host | `schema.json` → `__device_profile__` |
 | Una tabla propia de un módulo | `discover_db_tables()` en el `__init__.py` del módulo |
 | Que un módulo nombre campos de historial que sólo conoce en caliente | `discover_history_fields(lang, var_dir)` en su `__init__.py` — ver §6c |
 | Que el backup incluya los ficheros de un módulo | `schema.json` → `__backup_part__` — ver §6b |

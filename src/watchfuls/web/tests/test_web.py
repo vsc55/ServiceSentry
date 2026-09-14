@@ -43,7 +43,7 @@ class TestWebInit:
         assert schema['port']['default'] == 0
         assert schema['port']['type'] == 'int'
         # The host's address fills 'server' now.
-        assert Watchful.ITEM_SCHEMA['__host_profile__']['address_field'] == 'server'
+        assert Watchful.ITEM_SCHEMA['__device_profile__']['address_field'] == 'server'
 
 
 class TestWebCheck:

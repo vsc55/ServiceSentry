@@ -8,7 +8,7 @@
         "alert":   {"type": "int", "default": 1, "inherit_blank": true, "min": 1, "max": 100}
     },
     "__history__": {"field": "latency_ms", "unit": "ms", "label": "Latency"},
-    "__host_profile__": {"key": "icmp", "address_field": "host", "fields": ["host"]},
+    "__device_profile__": {"key": "icmp", "address_field": "host", "fields": ["host"]},
     "list": {
         "__check_title_field__": "label",
         "__title_editable__": true,

@@ -4,7 +4,7 @@
 
 An *event rule* matches events from a source (audit log / syslog) and, when it
 fires, sends a notification through the chosen channels (telegram/email/webhook,
-via lib.core.notify.notification_dispatcher).  Like webhooks/hosts/credentials,
+via lib.core.notify.notification_dispatcher).  Like webhooks/devices/credentials,
 rules live in their own DB table (not config.json).
 
 Like the credentials/roles/groups stores, the frequently-displayed/queried

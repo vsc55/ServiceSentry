@@ -157,7 +157,7 @@ class TestPatternsCountHonestly:
         """One message from twelve machines and twelve from one machine are different
         incidents, and a count alone cannot tell them apart."""
         body = _strip_comments(_read(VIEW_FILES['patterns']))
-        assert 'g.hosts' in body and '_chipList(' in body
+        assert 'g.devices' in body and '_chipList(' in body
 
     def test_the_rare_line_is_findable(self):
         """The point of collapsing is that the line which appears twice stops being buried;

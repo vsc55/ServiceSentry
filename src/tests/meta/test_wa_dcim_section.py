@@ -221,7 +221,7 @@ class TestLaPantallaRespetaLasConvencionesDelPanel:
         assert 'escAttr(t(key))' in cuerpo
 
     #: Lo que un item ajeno no trae y esta pantalla no puede inventar.
-    AJENO = ('item.label', 'item.serial', 'item.host_uid', 'item.org_uid', 'item.state')
+    AJENO = ('item.label', 'item.serial', 'item.device_uid', 'item.org_uid', 'item.state')
 
     def _ramas(self, js):
         """Cada `if (item.foreign)` con su bloque, contando llaves.
@@ -537,7 +537,7 @@ class TestUnPlanoSeLlevaYSeTrae:
         copia de seguridad."""
         js = _read(os.path.join(DCIM, '_pieces.html'))
         cuerpo = js.split('function _dcpExportJson(')[1].split(chr(10) + chr(125))[0]
-        for dentro in ('items', 'host_uid', 'serial'):
+        for dentro in ('items', 'device_uid', 'serial'):
             assert dentro not in cuerpo, dentro
 
     def test_importar_avisa_de_lo_que_reemplaza(self):
@@ -872,7 +872,7 @@ class TestUnFiltroNoPuedeRenumerarLasFilas:
 class TestUnaColumnaQueNadiePuedeEscribir:
     """La forma de fallo que esta sección lleva repetida CUATRO veces.
 
-    `host_uid` existía desde el primer commit, la API la aceptaba y el vuelco de estado la leía —
+    `device_uid` existía desde el primer commit, la API la aceptaba y el vuelco de estado la leía —
     y no había campo, así que el rack entero salía gris y el código que la respeta parecía
     funcionar. Luego `asset` y `description`: dos columnas de `dc_item` que se guardan, se
     devuelven y valían siempre su valor por defecto porque ningún formulario las escribía.
@@ -2361,7 +2361,7 @@ class TestLaBusquedaDelPanelNoEnsenaIdentificadores:
         rutas = _read(os.path.join(SRC, 'lib', 'core', 'dcim', 'routes', 'racks.py'))
         i = rutas.index('def api_dcim_items_find(')
         cuerpo = rutas[i:rutas.index('@app.route', i)]
-        for clave in ("'label'", "'type_name'", "'host_uid'", "'role'"):
+        for clave in ("'label'", "'type_name'", "'device_uid'", "'role'"):
             assert clave in cuerpo, f'la búsqueda no manda {clave}'
 
 

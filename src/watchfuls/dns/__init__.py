@@ -73,8 +73,8 @@ class Watchful(DnsDiscovery, ModuleBase):
                 continue
             # Host-centric: when bound to a host, inject its SSH connection / OS /
             # kind so the query can run ON that host (no-op for inline checks).
-            value = self.resolve_host(raw)
-            if value.get('_host_maintenance'):
+            value = self.resolve_device(raw)
+            if value.get('_device_maintenance'):
                 continue
             enabled = str(value.get('enabled', True)).lower() in ('true', '1', 'yes', True, 'on', 'enable')
             if not enabled:
@@ -95,7 +95,7 @@ class Watchful(DnsDiscovery, ModuleBase):
                        or tables._coerce_int(self.module_default('timeout', self._MODULE_DEFAULTS['timeout']))
                        or self._MODULE_DEFAULTS['timeout'])
             self._debug(f"DNS: {self.item_label(key)} - host={host} type={record_type} expected={expected!r}", DebugLevel.info)
-            # Carry the resolved value (ssh_*, host_os, host_kind) plus the
+            # Carry the resolved value (ssh_*, device_os, device_kind) plus the
             # cleaned check fields so _dns_check can run locally or over SSH.
             item = dict(value)
             item.update({
@@ -129,11 +129,11 @@ class Watchful(DnsDiscovery, ModuleBase):
         return self.dict_return
 
     def _resolve_on_host(self, item, host, record_type, nameserver, timeout):
-        """Resolve by running dig/nslookup ON the bound host (host_exec: SSH for a
+        """Resolve by running dig/nslookup ON the bound host (device_exec: SSH for a
         remote host, a local subprocess for a local one)."""
-        os_ = self.host_os(item)
+        os_ = self.device_os(item)
         cmd = client._remote_dns_cmd(os_, host, record_type, nameserver, timeout)
-        out, err, code = self.host_exec(item, cmd, timeout=int(timeout) + 5)
+        out, err, code = self.device_exec(item, cmd, timeout=int(timeout) + 5)
         if os_ == 'windows':
             return client._parse_nslookup(record_type, out)
         parsed = client._parse_dig_short(record_type, out)
@@ -156,10 +156,10 @@ class Watchful(DnsDiscovery, ModuleBase):
         error = None
         _t0 = time.monotonic()
         try:
-            if item.get('host_kind'):
+            if item.get('device_kind'):
                 # Bound to a host: run the query THERE via dig/nslookup — over SSH
                 # for a remote host, or as a local subprocess for a local host.
-                # host_exec picks the transport; only INLINE checks (no host) use
+                # device_exec picks the transport; only INLINE checks (no host) use
                 # the daemon's in-process resolver below.
                 resolved = self._resolve_on_host(item, host, record_type, nameserver, timeout)
             elif client._IS_WINDOWS:

@@ -370,8 +370,8 @@ function _dcimItemRow(item) {
         <td${item.parent_uid ? ' class="ps-4 ss-nowrap"' : ' class="ss-nowrap"'}>
             ${item.state ? _infraStateBadge(item.state) + ' ' : ''}
             ${_dcimFitBadge(item.depth)}
-            ${item.host_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2 me-1"
-                onclick="_dcimOpenHost(${jsStr(item.host_uid)})"
+            ${item.device_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2 me-1"
+                onclick="_dcimOpenHost(${jsStr(item.device_uid)})"
                 title="${escAttr(t('dcim_open_device'))}"><i class="bi bi-hdd"></i></button>` : ''}
             ${esc(_dcimItemName(item))}
         </td>

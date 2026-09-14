@@ -8,6 +8,71 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.128] - 2026-09-14
+
+### Changed
+
+- **The sidebar's fly-out menu closed halfway across, and only when the section list was
+  scrolling.** Going from a section on the rail to its menu — Infrastructure to Devices / Classes
+  / Clusters — the menu vanished mid-move. The menu is placed at the rail's edge, but a row can
+  only be hovered as far as the list's *content* reaches, and a scrollbar eats ten pixels inside
+  it: between the two lay a strip that belonged to neither. Crossing it fired `mouseleave`, the
+  menu hid, and once hidden there was nothing under the pointer left to enter — the `mouseenter`
+  that would reopen it never came. A transparent strip, as wide as the gap and part of the menu
+  itself, now bridges it: the width is measured from the list's `clientWidth`, which is exactly
+  where hovering stops working. A close delay would have hidden the symptom without removing the
+  hole. Reported from the screen; three browser cases guard it.
+
+- **The host domain is the device domain now — the word is gone from everything that names it.**
+  The panel calls them devices on every screen and called them hosts in every identifier behind
+  them: two vocabularies for one thing, and a translation to make on every read.
+
+  - `lib/core/hosts/` is `lib/core/devices/`, `stores/hosts.py` is `stores/devices.py`, and
+    `lib/modules/host_binding.py` is `device_binding.py`.
+  - Tables: `hosts` → `devices`, `host_type` → `device_type`; the column `host_uid` → `device_uid`
+    in `dc_item`, `dc_pdu`, `dc_source` and `module_config_items`, and the indexes with them.
+  - Routes: `/api/v1/hosts*` → `/api/v1/devices*`, `/api/v1/host_types*` → `/api/v1/device_types*`.
+    **A clean break** — anything calling the old paths stops working rather than being quietly
+    redirected somewhere else.
+  - The watchful contract: `__host_profile__`, `__provision_host__`, `__host__`,
+    `__host_multiple__` and `__host_multiple_bind__` all say device now.
+  - 213 language keys, the stores, the JS, the DOM ids, 17 test files and the docs.
+
+  **An existing database migrates itself on startup**, and that needed the declarative schema
+  mechanism to grow two things it did not have: `TableSpec.former_names` renames a table with its
+  rows and its history, and `former_indexes` drops the indexes that followed it under yesterday's
+  names — otherwise two indexes sit over one column, the spare one written on every insert, for
+  ever. Column renames already had `renames`. And the ownership rows say `device` where they said
+  `host` (`org_owner.scope`): a scope no package declares any more is a company that owns nothing,
+  with the column full and the screen saying "unassigned".
+
+  **Fixed on the way**: the bind address of `run()` is not a device — it was renamed with
+  everything else and `main.py`, which lives outside `lib/` and was not, went on calling
+  `run(host=…)`. The panel died on the first second while the whole suite stayed green, because
+  `run()` binds ports and nothing in the suite runs it. There is a guard now that compares
+  `main.py`'s keyword arguments against the signature, and it was mutated to prove it bites.
+
+  **Fixed after the first run against a real database**: `former_names` asked "does the new
+  table exist?" and gave up when it did. `devices` did exist — created empty by a schema pass
+  that ran before the rename was declared — so the adoption never fired: the 19 machines stayed
+  in `hosts` while `devices` answered every read with nothing, and no error was raised, because
+  an empty table is a valid answer. That is where the uids came from too: a row that cannot find
+  a device's name draws the only thing it has. It now decides by where the rows are — an empty
+  new table is a stillbirth and the one holding the data takes its place; two tables with rows
+  are left alone and logged, since merging them is not a schema decision. The seeded classes'
+  `label_key` is rewritten at startup as well (`host_type_nas` → `device_type_nas`): that key
+  lives in the row, so renaming it in the language files only made `t()` print the key itself in
+  the name column. And a table declaring its own name as a former one is ignored — the mass
+  rename had rewritten the string inside the declaration, leaving `devices` saying it used to be
+  called `devices`.
+
+  **What kept its name, on purpose**: `hostname`, `localhost`, `known_hosts`, the SSH host key,
+  `ssh_host`, `bind_host`, the SMTP host, a syslog message's sending host, the SNMP profile's
+  `host` field, the stored `host.` result-key prefix and the `{host}` label placeholder. Those are
+  the network word, or a key already written inside somebody's database — renaming them would be
+  writing something untrue, or reading a key nobody stored. `{device}` works in labels now;
+  `{host}` still does.
+
 ## [0.0.1+build.127] - 2026-09-13
 
 ### Added

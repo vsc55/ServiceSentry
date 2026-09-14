@@ -105,7 +105,7 @@ class BaseStore:
 
 
 class EncryptedPayloadMixin:
-    """A store whose payload column holds secrets (credentials, host profiles).
+    """A store whose payload column holds secrets (credentials, device profiles).
 
     The two implementations were byte-identical apart from the parameter name.  Which keys
     count as secret comes from :mod:`lib.security.secret_manager`, so the rule lives with

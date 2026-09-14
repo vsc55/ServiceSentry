@@ -17,9 +17,9 @@ Those are two questions and they are deliberately not one tree:
   impossible, and it is the normal case as soon as there is more than one company.
 
 The other decision that shapes everything is that **a rack holds ITEMS, and some items are
-hosts** — never the reverse. A patch panel takes 1U and is not a host; a blanking plate takes 1U
+devices** — never the reverse. A patch panel takes 1U and is not a device; a blanking plate takes 1U
 and is nothing; a blade chassis takes 7U and contains eight things that are; a switched-off
-server still occupies its U whether or not anything monitors it. So `hosts` is not touched: the
+server still occupies its U whether or not anything monitors it. So `devices` is not touched: the
 registry stays the source of truth for what exists and how to reach it, this package says where
 it sits, and either side survives the other being deleted.
 

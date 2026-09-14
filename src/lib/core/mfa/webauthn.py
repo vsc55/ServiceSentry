@@ -103,14 +103,14 @@ def rp_id_from(public_url: str) -> str:
     if '://' in text:
         text = text.split('://', 1)[1]
     text = text.split('/', 1)[0].split('?', 1)[0]
-    # A bracketed IPv6 literal, or a host:port. Neither a literal address nor a port belongs
+    # A bracketed IPv6 literal, or a device:port. Neither a literal address nor a port belongs
     # in an RP ID: the specification wants a domain.
     if text.startswith('['):
         return ''
-    host = text.split(':', 1)[0].strip().lower().rstrip('.')
-    if not host or host.replace('.', '').isdigit():
+    device = text.split(':', 1)[0].strip().lower().rstrip('.')
+    if not device or device.replace('.', '').isdigit():
         return ''          # an IP address is not a registrable domain
-    return host
+    return device
 
 
 def origin_from(public_url: str) -> str:

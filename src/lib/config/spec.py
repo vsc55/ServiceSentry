@@ -717,7 +717,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # Declaring them here would duplicate the registry — the single source of truth.
 
     # ══ Syslog receiver ═════════════════════════════════════════════════════
-    # Built-in syslog server: receive RFC 3164/5424 events from external hosts
+    # Built-in syslog server: receive RFC 3164/5424 events from external devices
     # over UDP/TCP(+TLS), store them (lib/services/syslog/store) and optionally alert.
     Cfg('syslog|enabled',         bool, True, admin_only=True, card='syslog_conn'),
     # autostart: launch the EMBEDDED listener at web-admin boot (a standalone

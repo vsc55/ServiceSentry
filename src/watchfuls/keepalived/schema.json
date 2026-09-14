@@ -8,24 +8,24 @@
         "timeout": {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 300}
     },
     "__history__": {"field": null, "unit": null, "label": "Keepalived VIP"},
-    "__host_profile__": [
+    "__device_profile__": [
         {"key": "ssh", "address_field": "ssh_host"},
         {"key": "keepalived", "fields": ["priority"]}
     ],
-    "__host_multiple__": false,
-    "__host_multiple_bind__": true,
+    "__device_multiple__": false,
+    "__device_multiple_bind__": true,
     "list": {
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__cluster_columns__": ["vip"],
         "__member_field__": {"key": "priority", "type": "int", "label": "cl_map_weight",
                              "default": 100, "min": 0, "max": 255, "placeholder": "100"},
-        "__provision_host__": {"address_field": "vip", "link_field": "vip_host_uid",
+        "__provision_device__": {"address_field": "vip", "link_field": "vip_host_uid",
                                "name_template": "VIP: {label}"},
         "__edit_tabs__": [
             {"id": "general", "general": true,      "icon": "bi-info-circle",   "groups": ["general"]},
             {"id": "setup",                         "icon": "bi-hdd-network",   "groups": ["connection"]},
-            {"id": "hosts",   "member_table": true, "icon": "bi-hdd-stack",     "groups": []},
+            {"id": "devices",   "member_table": true, "icon": "bi-hdd-stack",     "groups": []},
             {"id": "monitoring",                    "icon": "bi-activity",      "groups": ["checks", "alerts"]},
             {"id": "lastdata", "last_data": true,   "icon": "bi-clock-history", "groups": []},
             {"id": "logs",     "logs": true, "perm": "syslog_view", "icon": "bi-card-list", "groups": []}

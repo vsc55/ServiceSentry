@@ -187,10 +187,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             self._module_secret_fields = ModuleBase.discover_secret_fields(modules_dir)
         except Exception:  # pylint: disable=broad-except
             self._module_secret_fields = set()
-        # Combined key sets: core secrets + the host's built-in SSH secrets +
+        # Combined key sets: core secrets + the device's built-in SSH secrets +
         # module-declared secret fields.
         try:
-            from lib.core.hosts.profiles import CORE_SSH_SECRET_FIELDS  # noqa: PLC0415
+            from lib.core.devices.profiles import CORE_SSH_SECRET_FIELDS  # noqa: PLC0415
         except Exception:  # pylint: disable=broad-except
             CORE_SSH_SECRET_FIELDS = frozenset()
         # Secret fields declared by credential-type schemas (built-in ssh +
@@ -249,7 +249,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # it invisible: the only install affected is the one nobody has restarted yet.
         # Idempotent — `_create_app` calls it again and gets the same key.
         self._load_or_create_secret_key()
-        self._init_entity_store()  # DB-backed entities (users/groups/roles/sessions/hosts)
+        self._init_entity_store()  # DB-backed entities (users/groups/roles/sessions/devices)
         # History + check-state stores reuse the single shared connector (created
         # in _init_entity_store) — must come AFTER it, else they'd each open their
         # own DB connection via their create() factory.
@@ -292,7 +292,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             # Start the heartbeat FIRST when we host the service, so its leader lease
             # is acquired before start_at_boot launches the scheduler/worker — else a
             # leader-gated first cycle could be skipped (not yet leader).  Only when
-            # this process actually hosts it (state != 'external'; a dedicated
+            # this process actually devices it (state != 'external'; a dedicated
             # container owns the external ones).  Best-effort; never fatal.
             try:
                 if _svc.status().get('state') != 'external':

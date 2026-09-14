@@ -234,13 +234,13 @@ class SyslogStore:
             where, params = self._where(sub)
             return self._group_counts(column, where, params, limit)
 
-        by_host = grp(_HOST_EXPR, 'hostname', top, 'host')
+        by_device = grp(_HOST_EXPR, 'hostname', top, 'host')
         by_app = grp('app', 'app', top, 'app')
         by_sev = grp('severity', 'severity', len(SEVERITIES), 'severity')
         by_fac = grp('facility', 'facility', len(FACILITIES), 'facility')
         return {
             'total': total,
-            'by_host': by_host,
+            'by_device': by_device,
             'by_app':  by_app,
             'by_severity': [
                 {'value': s['value'],

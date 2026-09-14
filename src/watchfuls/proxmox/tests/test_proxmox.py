@@ -328,7 +328,7 @@ class TestProxmoxCheck:
         checks (network here) skipped — its problems must not alert."""
         item = _item(check_network=True)
         item['__cluster_members__'] = [
-            {'node': 'pve02', 'name': 'srv-2', 'host_uid': 'h2', 'maintenance': True}]
+            {'node': 'pve02', 'name': 'srv-2', 'device_uid': 'h2', 'maintenance': True}]
         api = {
             '/nodes': [{'node': 'pve01', 'status': 'online'},
                        {'node': 'pve02', 'status': 'online'}],
@@ -346,25 +346,25 @@ class TestProxmoxCheck:
         (OK), not offline-error — and carries the host name."""
         item = _item(check_nodes=True)
         item['__cluster_members__'] = [
-            {'node': 'pve02', 'name': 'srv-2', 'host_uid': 'h2', 'maintenance': True}]
+            {'node': 'pve02', 'name': 'srv-2', 'device_uid': 'h2', 'maintenance': True}]
         api = {'/nodes': [{'node': 'pve01', 'status': 'online'},
                           {'node': 'pve02', 'status': 'offline'}],
                '/cluster/ha/status/current': []}
         res = _run(item, api)
         assert res['pve/node/pve02']['status'] is True
         assert res['pve/node/pve02']['other_data'].get('maintenance') is True
-        assert res['pve/node/pve02']['other_data'].get('host_name') == 'srv-2'
+        assert res['pve/node/pve02']['other_data'].get('device_name') == 'srv-2'
 
     def test_member_host_name_annotates_node(self):
         """An online node mapped to a host shows the host name in status."""
         item = _item(check_nodes=True)
         item['__cluster_members__'] = [
-            {'node': 'pve01', 'name': 'srv-1', 'host_uid': 'h1', 'maintenance': False}]
+            {'node': 'pve01', 'name': 'srv-1', 'device_uid': 'h1', 'maintenance': False}]
         api = {'/nodes': [{'node': 'pve01', 'status': 'online'}],
                '/cluster/ha/status/current': []}
         res = _run(item, api)
         assert res['pve/node/pve01']['status'] is True
-        assert res['pve/node/pve01']['other_data'].get('host_name') == 'srv-1'
+        assert res['pve/node/pve01']['other_data'].get('device_name') == 'srv-1'
         assert 'srv-1' in res['pve/node/pve01']['message']
 
     # ── VIP / cluster address ────────────────────────────────────────────
@@ -463,9 +463,9 @@ class TestProxmoxProvision:
     def _ssh(self, out='', err='', code=0, raise_exc=None):
         """Patch ssh_client so connect() yields a fake client and run_command()
         returns (out, err, code).  Yields (connect_mock, run_mock)."""
-        with patch('lib.core.hosts.ssh_client.HAS_PARAMIKO', True), \
-             patch('lib.core.hosts.ssh_client.connect') as conn, \
-             patch('lib.core.hosts.ssh_client.run_command', return_value=(out, err, code)) as run:
+        with patch('lib.core.devices.ssh_client.HAS_PARAMIKO', True), \
+             patch('lib.core.devices.ssh_client.connect') as conn, \
+             patch('lib.core.devices.ssh_client.run_command', return_value=(out, err, code)) as run:
             if raise_exc is not None:
                 conn.side_effect = raise_exc
             else:
@@ -521,7 +521,7 @@ class TestProxmoxProvision:
 
     def test_provision_uses_bound_host_ssh_profile(self):
         """When the check is host-bound, provisioning reuses the host's SSH
-        profile (address + port + secret) injected as __host__ — the same SSH
+        profile (address + port + secret) injected as __device__ — the same SSH
         path the host-aware checks use — instead of guessing the default port."""
         from watchfuls.proxmox import Watchful
         token_json = ('{"full-tokenid":"servicesentry@pve!monitoring",'
@@ -529,7 +529,7 @@ class TestProxmoxProvision:
         with self._ssh(out=token_json) as (conn, _run):
             out = Watchful.provision_token({
                 # no inline host / ssh_* fields — all from the bound host context
-                '__host__': {'address': '10.9.9.9',
+                '__device__': {'address': '10.9.9.9',
                              'ssh': {'ssh_user': 'admin', 'ssh_port': 2222,
                                      'ssh_password': 'hpw'}},
                 'prov_user': 'servicesentry@pve', 'prov_token': 'monitoring',
@@ -548,7 +548,7 @@ class TestProxmoxProvision:
         with self._ssh(out=token_json) as (conn, _run):
             out = Watchful.provision_token({
                 'host': '10.0.0.5', 'ssh_port': 22, 'ssh_user': 'root', 'ssh_password': 'pw',
-                '__host__': {'address': '10.9.9.9',
+                '__device__': {'address': '10.9.9.9',
                              'ssh': {'ssh_user': 'admin', 'ssh_port': 2222}},
             })
         assert out['ok'] is True
@@ -567,7 +567,7 @@ class TestProxmoxProvision:
         assert conn.call_args.kwargs['verify_host'] is False
         with self._ssh(out=token_json) as (conn, _run):
             Watchful.provision_token({
-                '__host__': {'address': '10.0.0.1',
+                '__device__': {'address': '10.0.0.1',
                              'ssh': {'ssh_user': 'root', 'ssh_password': 'pw',
                                      'ssh_verify_host': True}}})
         assert conn.call_args.kwargs['verify_host'] is True
@@ -649,7 +649,7 @@ class TestProxmoxProvision:
 
 class TestProxmoxCredentialManager:
     """The reusable credential (type proxmox_auth) is overlaid onto the item at
-    check time via resolve_host()/_apply_cred → the check uses its token."""
+    check time via resolve_device()/_apply_cred → the check uses its token."""
 
     def test_credential_overlays_token(self):
         from watchfuls.proxmox import Watchful

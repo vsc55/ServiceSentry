@@ -396,7 +396,7 @@ function _dcpRack(rack) {
     const y = Number(rack.pos_y || 0) * _DCP_SCALE;
     const rot = Number(rack.rotation || 0);
     const roll = rack.roll || {};
-    const tone = roll.state ? hostStateColor(roll.state) : 'var(--bs-secondary-bg)';
+    const tone = roll.state ? deviceStateColor(roll.state) : 'var(--bs-secondary-bg)';
     return `<g class="ss-grab" data-dcp="${escAttr(rack.uid)}"
                transform="rotate(${rot} ${x + w / 2} ${y + d / 2})"
                onpointerenter="_dcpHover(${jsStr(rack.uid)})"

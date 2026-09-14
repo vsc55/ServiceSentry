@@ -133,8 +133,8 @@ async function renderDcim() {
     if (_dcimViewWanted()) return;
     if (_dcimZones === null) _dcimZones = await _dcimLoadZones();
     if (_dcimHosts === null) {
-        const d = await apiGet('/api/v1/dcim/hosts');
-        _dcimHosts = (d || {}).hosts || [];
+        const d = await apiGet('/api/v1/dcim/devices');
+        _dcimHosts = (d || {}).devices || [];
     }
     if (_dcimBuildOpts === null) {
         const d = await apiGet('/api/v1/dcim/builds');

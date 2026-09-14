@@ -1,13 +1,13 @@
 {# ================================================================
    One field, drawn from its schema: the label, the control, the hint and the lock.
 
-   The panel's most-used renderer — modules, config, hosts, clusters and every module page go
+   The panel's most-used renderer — modules, config, devices, clusters and every module page go
    through it. What it decides is what a SINGLE field looks like: its type, whether it is
    masked, pinned by an env var, inheriting a global default, or an amount with a unit
    attached to its box.
 
    Its neighbours carry the jobs that are not that: `_field_scalars.html` (a whole object's
-   fields), `_field_hosts.html` (binding to a host), `_field_ctl.html` (the shared control
+   fields), `_field_devices.html` (binding to a device), `_field_ctl.html` (the shared control
    skeleton and its adapter registry), `_field_chips.html` (multi-value fields) and
    `_field_conditional.html` (fields that appear because another says so).
    ================================================================ #}
@@ -59,7 +59,7 @@ function _fieldTermFor(key, meta, pathStr, target) {
  *
  *  `{icon, title, open}` — `open(pathStr, currentValue, onPick?)` does whatever it likes and
  *  calls `updateField` when the user picks something. A caller that is not editing
- *  `modulesData` — the host modal edits an unsaved draft — passes `onPick(value)` instead and
+ *  `modulesData` — the device modal edits an unsaved draft — passes `onPick(value)` instead and
  *  does the writing itself, which is what lets ONE picker serve both panes.
  *
  *  An optional `actions: [{icon, title, run}]` hangs further buttons off the same field, for
@@ -613,7 +613,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 placeholder: (_mph != null && _mph !== '') ? String(_mph) : '',
                 validate: (meta.ipkind || ''), suggest: (meta.suggest || ''), trailing: _mFp + _unitSel + _actionBtn}), _hintHtml);
         }
-        // Single IP / bind-address field (e.g. web_admin|host) — validate on
+        // Single IP / bind-address field (e.g. web_admin|device) — validate on
         // change, revert + toast on invalid. Placeholder shows the registry default.
         if (meta && meta.ipkind && !meta.multi) {
             const _ipDef = (meta.placeholder != null && meta.placeholder !== '')
@@ -668,15 +668,15 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                 if (_phRaw === '__key__') {
                     _phVal = _itemKey;
                 } else if (_phRaw === '__address__') {
-                    // The address field auto-fills from the BOUND host at runtime
-                    // (resolve_host), so its placeholder is that host's address.
+                    // The address field auto-fills from the BOUND device at runtime
+                    // (resolve_device), so its placeholder is that host's address.
                     // It must NOT echo stale per-item fields (a leftover legacy
-                    // value would mask the real host) — an inline check (no host)
+                    // value would mask the real device) — an inline check (no device)
                     // simply has no placeholder. The field's own typed value, when
                     // present, is shown as the value, not via this placeholder.
                     const _it = getPath(modulesData, pathStr.split('|').slice(0, -1)) || {};
-                    if (_it.host_uid && typeof hostsList === 'function') {
-                        const _h = hostsList().find(h => h.uid === _it.host_uid);
+                    if (_it.device_uid && typeof devicesList === 'function') {
+                        const _h = devicesList().find(h => h.uid === _it.device_uid);
                         _phVal = (_h && _h.address) || '';
                     } else {
                         _phVal = '';

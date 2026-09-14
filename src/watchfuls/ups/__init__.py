@@ -124,8 +124,8 @@ class Watchful(ModuleBase):
             if not isinstance(raw, dict):
                 continue
             # Host-centric: merge the bound host's address + NUT credentials.
-            value = self.resolve_host(raw)
-            if value.get('_host_maintenance'):
+            value = self.resolve_device(raw)
+            if value.get('_device_maintenance'):
                 continue
             enabled = str(value.get('enabled', True)).lower() in ('true', '1', 'yes', True, 'on', 'enable')
             if not enabled:
@@ -271,13 +271,13 @@ class Watchful(ModuleBase):
         """Probe the NUT UPSD connection for one UPS item (web UI button).
 
         Host-centric: use the item's ``host`` field, falling back to the bound
-        host's address injected as ``__host__`` by the route.  NUT is queried
+        host's address injected as ``__device__`` by the route.  NUT is queried
         directly over TCP, so the test connects to ``host:port`` regardless of
         whether the host is reached locally or over SSH for other modules.
         """
         host = str(config.get('host') or '').strip()
         if not host:
-            host = str((config.get('__host__') or {}).get('address') or '').strip()
+            host = str((config.get('__device__') or {}).get('address') or '').strip()
         if not host:
             return {'ok': False, 'message': 'No host configured'}
         port     = int(config.get('port') or 0) or 3493

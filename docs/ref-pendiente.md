@@ -64,7 +64,7 @@ registrados en Entra ID y en Proxmox).
 Auditoría del 2026-08-15. `register(app, wa)` guarda las rutas de un dominio como *closures*,
 así que su tamaño es el del dominio entero y no el de una función: **46 funciones pasan de 100
 líneas y las seis primeras son todas `register`** — `providers/entraid/routes.py` (646),
-`core/hosts/routes.py` (474), `core/users/routes.py` (351), `core/modules/routes.py` (350),
+`core/devices/routes.py` (474), `core/users/routes.py` (351), `core/modules/routes.py` (350),
 `core/config/routes.py` (300), `core/notify/email/template_routes.py` (291).
 
 No es deuda automática: el patrón es deliberado y `wa` se captura una vez. Pero a partir de
@@ -228,7 +228,7 @@ historial de versiones y su parte en la copia de seguridad. Falta el camino.
 y uno donde alguien ha dicho que sí no son el mismo producto, y éste es el segundo. Va en la misma
 línea que «un módulo ausente no está apagado, está sin añadir».
 
-Eso **no tiene precedente en el panel**: lo único parecido es `__provision_host__`, que hace lo
+Eso **no tiene precedente en el panel**: lo único parecido es `__provision_device__`, que hace lo
 contrario —crea o actualiza el host que el módulo describe, sin preguntar
 ([provisioning.py](../src/lib/core/modules/provisioning.py))—. Así que hay que inventar la forma,
 y de proponer se sigue más de lo que parece:

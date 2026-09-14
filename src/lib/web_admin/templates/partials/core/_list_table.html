@@ -76,7 +76,7 @@ function createListTable(spec) {
         },
     };
     /** Re-fill the select options in place. The bar is built once (rebuilding it would steal
-     *  focus mid-typing), but its choices come from live data — new hosts bring new tags. Only
+     *  focus mid-typing), but its choices come from live data — new devices bring new tags. Only
      *  touches a select whose option list actually changed, and keeps the current value. */
     function _fbSyncSelects() {
         for (const f of fbSchema.fields) {
@@ -178,9 +178,9 @@ function createListTable(spec) {
         // so a new list table inherits it without touching CSS — no per-section ids.
         c.classList.add('ss-vfill');
         // With filters, the container is a shell: a filter bar that STAYS (so typing keeps
-        // focus) over a body this function rebuilds. `host` is set once ctx is known, since
+        // focus) over a body this function rebuilds. `device` is set once ctx is known, since
         // the bar's fields/options may derive from the loaded data.
-        let host = c;
+        let device = c;
         try {
         // Materialise dynamic state synchronously (before any await) so getVis()/
         // getOrd() never return null (e.g. cluster' "use defaults" sentinel).
@@ -192,7 +192,7 @@ function createListTable(spec) {
             if (!c.querySelector('.ss-filterbar'))
                 c.innerHTML = buildFilterBar(fbSchema) + '<div class="ss-lt-body ss-vfill"></div>';
             else _fbSyncSelects();      // built already: just refresh the choices in place
-            host = c.querySelector('.ss-lt-body');
+            device = c.querySelector('.ss-lt-body');
         }
         if (st.pageSize.get() == null) st.pageSize.set(_tableRowsDefault);
         const cols = _cols(ctx);
@@ -254,7 +254,7 @@ function createListTable(spec) {
         // sessions/users/roles card grids) and 'summary' (a body that describes the whole
         // filtered SET: it is handed every row, and the pagination bands are not drawn).
         //
-        // The distinction is not cosmetic. A summary counts things — "4 hosts have no checks
+        // The distinction is not cosmetic. A summary counts things — "4 devices have no checks
         // at all" — and counted over one page that number changes as you page through, which
         // is worse than not counting. So the factory hands it everything and stops claiming
         // there are pages.
@@ -300,8 +300,8 @@ function createListTable(spec) {
             // emptyBody (and the filtered state) → card + header + body, so the toolbar stays;
             // emptyState → bare (no card). The empty card still fills its pane (.ss-vfill +
             // .ss-vscroll body) so an empty table stretches exactly like a populated one.
-            if (emptyHtml != null) host.innerHTML = `<div class="${cardClass} ss-vfill">${accentDiv}${headerHtml}<div class="ss-vscroll">${emptyHtml}</div></div>`;
-            else host.innerHTML = spec.emptyState ? spec.emptyState(ctx) : '';
+            if (emptyHtml != null) device.innerHTML = `<div class="${cardClass} ss-vfill">${accentDiv}${headerHtml}<div class="ss-vscroll">${emptyHtml}</div></div>`;
+            else device.innerHTML = spec.emptyState ? spec.emptyState(ctx) : '';
             return;
         }
 
@@ -402,7 +402,7 @@ function createListTable(spec) {
             : _renderPagination(total, page, st.pageSize.get(), gp.goPage, gp.changePageSize);
         const band = pos => pagination
             ? `<div class="ss-card-band ss-card-band-${pos}">${pagination}</div>` : '';
-        host.innerHTML = `<div class="${cardClass} ss-vfill">
+        device.innerHTML = `<div class="${cardClass} ss-vfill">
         ${accentDiv}
         ${headerHtml}
         ${band('top')}
@@ -415,8 +415,8 @@ function createListTable(spec) {
             // Never leave the tab blank on a render/prepare error: log it and show a
             // minimal empty state (e.g. a table whose emptyBody/prepare threw).
             console.error(`list-table[${spec.key}] render failed:`, err);
-            if (!host.innerHTML.trim())
-                host.innerHTML = `<div class="${cardClass} p-4 text-center text-muted">${esc(t('no_items') || 'No items')}</div>`;
+            if (!device.innerHTML.trim())
+                device.innerHTML = `<div class="${cardClass} p-4 text-center text-muted">${esc(t('no_items') || 'No items')}</div>`;
         }
     }
 

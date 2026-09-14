@@ -70,7 +70,7 @@ def provision_saml2_app(access_token: str, acs_url: str, sp_entity_id: str, tena
         _time.sleep(2)
 
     # 2 — Configure the application: SAML Entity ID (identifierUris), the group claim
-    # and Graph Group.Read.All.  On an unverified domain (e.g. an internal .lan host)
+    # and Graph Group.Read.All.  On an unverified domain (e.g. an internal .lan device)
     # Entra rejects a custom identifierUri, so fall back to api://{appId}, which it
     # always accepts — without a valid identifier the app has no Entity ID and SAML
     # mode can't be enabled.  The effective Entity ID is returned so ServiceSentry

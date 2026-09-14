@@ -21,8 +21,8 @@
 
 """Watchful module to check that processes are running, on the bound host.
 
-Host-centric: each check binds to a host (``host_uid``).  The process list is
-read on that host via :meth:`ModuleBase.host_exec` — locally for a *local* host
+Host-centric: each check binds to a host (``device_uid``).  The process list is
+read on that host via :meth:`ModuleBase.device_exec` — locally for a *local* host
 or over SSH for a *remote* one — using an OS-appropriate command (``ps`` on
 Unix, ``tasklist`` on Windows) and the matches are counted against ``min_count``.
 """
@@ -76,18 +76,18 @@ class Watchful(ModuleBase):
         return self.dict_return
 
     def _process_check(self, key, raw):
-        item = self.resolve_host(raw)
-        # Bound host in maintenance → skip (resolve_host disables it).
-        if item.get('_host_maintenance') or not item.get('enabled', True):
+        item = self.resolve_device(raw)
+        # Bound host in maintenance → skip (resolve_device disables it).
+        if item.get('_device_maintenance') or not item.get('enabled', True):
             return
         name = (item.get('process', '') or '').strip() or key
         module_min = int(self.get_conf('min_count', self._MODULE_DEFAULTS.get('min_count', 1)) or 1)
         min_count = int(item.get('min_count', 0) or 0) or module_min
-        os_ = self.host_os(item)
+        os_ = self.device_os(item)
         timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
 
-        cmd = self.host_cmd_for(item, _LIST_CMDS, default_os='linux')
-        out, err, code = self.host_exec(item, cmd, timeout=timeout)
+        cmd = self.device_cmd_for(item, _LIST_CMDS, default_os='linux')
+        out, err, code = self.device_exec(item, cmd, timeout=timeout)
         if code != 0 and not out:
             raise OSError((err or '').strip() or f'process listing exited {code}')
 
@@ -129,16 +129,16 @@ class Watchful(ModuleBase):
     def discover(cls, config=None) -> list:
         """List running processes (with instance counts) for the autocomplete.
 
-        When called with a host context (``config['__host__']``, injected by the
+        When called with a host context (``config['__device__']``, injected by the
         route for the Servers modal) and that host is remote, the list is read
         over SSH on the host; otherwise it is read from THIS machine (psutil).
         """
-        from lib.core.hosts import runner as host_runner  # noqa: PLC0415
-        host = (config or {}).get('__host__') if isinstance(config, dict) else None
-        if host_runner.is_remote(host):
+        from lib.core.devices import runner as device_runner  # noqa: PLC0415
+        host = (config or {}).get('__device__') if isinstance(config, dict) else None
+        if device_runner.is_remote(host):
             os_ = str(host.get('os') or 'linux')
             cmd = _LIST_CMDS.get(os_) or _LIST_CMDS['linux']
-            out, _err, code = host_runner.run(host, cmd, timeout=15)
+            out, _err, code = device_runner.run(host, cmd, timeout=15)
             if code != 0 and not out:
                 return []
             return cls._discover_from_listing(out, os_)

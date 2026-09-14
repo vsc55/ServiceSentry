@@ -236,7 +236,7 @@ class TestOpeningARunningJob:
         real = dict(infra_jobs._JOBS)
         infra_jobs._JOBS.clear()
         infra_jobs._JOBS['j'] = {
-            'id': 'j', 'host_name': 'SW', 'done': False, 'error': '', '_started': 1.0,
+            'id': 'j', 'device_name': 'SW', 'done': False, 'error': '', '_started': 1.0,
             'modules': [{'module': 'snmp', 'label': 'SNMP', 'state': 'timeout',
                          'steps': [{'key': 'reading', 'scope': 'sw', 'state': 'run'}]}]}
         try:
@@ -281,7 +281,7 @@ class TestOpeningARunningJob:
         real = dict(infra_jobs._JOBS)
         infra_jobs._JOBS.clear()
         infra_jobs._JOBS['j'] = {
-            'id': 'j', 'host_name': 'SW', 'done': False, 'error': '', '_started': 1.0,
+            'id': 'j', 'device_name': 'SW', 'done': False, 'error': '', '_started': 1.0,
             'modules': [{'module': 'snmp', 'label': 'SNMP', 'state': 'running', 'detail': '',
                          'steps': [{'key': 'Reading', 'scope': 'erebor', 'state': 'run',
                                     'n': 2, 'total': 24, 'note': 'Disks'}]}]}

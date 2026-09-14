@@ -83,13 +83,13 @@ ENDPOINTS = [
     ("GET",    "/api/v1/history",            frozenset({"history_view"}), None),
     ("DELETE", "/api/v1/history/all",        frozenset({"history_delete"}), None),
     # Servers (host registry)
-    ("GET",    "/api/v1/hosts",              frozenset({"devices_view"}), None),
-    ("POST",   "/api/v1/hosts",              frozenset({"devices_edit"}),
+    ("GET",    "/api/v1/devices",              frozenset({"devices_view"}), None),
+    ("POST",   "/api/v1/devices",              frozenset({"devices_edit"}),
         {"name": "permtest_h", "address": "10.0.0.9", "kind": "remote"}),
     # Uses a real host uid (__HOST__): the PUT handler resolves the host (404 for
     # an unknown uid) before the permission check, so a fake uid wouldn't reach it.
-    ("PUT",    "/api/v1/hosts/__HOST__",     frozenset({"devices_edit"}), {"name": "permtest_h2"}),
-    ("DELETE", "/api/v1/hosts/_nouid_",      frozenset({"devices_delete"}), None),
+    ("PUT",    "/api/v1/devices/__HOST__",     frozenset({"devices_edit"}), {"name": "permtest_h2"}),
+    ("DELETE", "/api/v1/devices/_nouid_",      frozenset({"devices_delete"}), None),
 ]
 
 
@@ -122,24 +122,24 @@ def role_clients(admin):
 
 
 @pytest.fixture()
-def host_uid(admin):
+def device_uid(admin):
     """Create a host so endpoints that resolve a host before checking the
-    permission (PUT /hosts/<uid>) actually reach the gate."""
-    return admin._hosts_store.create(
+    permission (PUT /devices/<uid>) actually reach the gate."""
+    return admin._devices_store.create(
         {"name": "permtest_seed", "address": "10.0.0.1", "kind": "remote"},
         actor="admin",
     )
 
 
-def _request(client, method, path, body, host_uid):
-    return client.open(path.replace("__HOST__", host_uid), method=method, json=body)
+def _request(client, method, path, body, device_uid):
+    return client.open(path.replace("__HOST__", device_uid), method=method, json=body)
 
 
 @pytest.mark.parametrize("ep", ENDPOINTS, ids=_id)
-def test_unauthenticated_is_blocked(client, host_uid, ep):
+def test_unauthenticated_is_blocked(client, device_uid, ep):
     """An unauthenticated caller never reaches a gated endpoint (401/403)."""
     method, path, _req, body = ep
-    resp = _request(client, method, path, body, host_uid)
+    resp = _request(client, method, path, body, device_uid)
     assert resp.status_code in (401, 403), (
         f"{method} {path} unauthenticated → {resp.status_code} (expected 401/403)"
     )
@@ -147,12 +147,12 @@ def test_unauthenticated_is_blocked(client, host_uid, ep):
 
 @pytest.mark.parametrize("ep", ENDPOINTS, ids=_id)
 @pytest.mark.parametrize("role", ROLES)
-def test_permission_matrix(role_clients, host_uid, ep, role):
+def test_permission_matrix(role_clients, device_uid, ep, role):
     """A role is allowed iff it holds one of the required permissions."""
     method, path, required, body = ep
     role_perms = BUILTIN_ROLE_PERMISSIONS[role]
     allowed = bool(role_perms & required)
-    resp = _request(role_clients[role], method, path, body, host_uid)
+    resp = _request(role_clients[role], method, path, body, device_uid)
     if allowed:
         assert resp.status_code != 403, (
             f"{method} {path} as '{role}' (has {role_perms & required}) → 403, "

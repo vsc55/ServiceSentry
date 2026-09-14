@@ -486,7 +486,7 @@ function escAttr(s) {
 function jsStr(s) { return escAttr(JSON.stringify(s)); }
 
 //: How the panel runs commands on a device — the same three the store keeps
-//: (`HostsStore.KINDS`), and the one thing that decides which.
+//: (`DevicesStore.KINDS`), and the one thing that decides which.
 //:
 //: Here because it was written EIGHT times across the panel, as
 //: `kind === 'remote' ? 'remote' : 'local'` and as `kind || 'local'`, and every one of those
@@ -495,7 +495,7 @@ function jsStr(s) { return escAttr(JSON.stringify(s)); }
 //: value was correct in the draft, in the select and in the store, and was flattened on its
 //: way out of the browser.
 const HOST_KINDS = ['none', 'local', 'remote'];
-function hostKind(v) {
+function deviceKind(v) {
     const k = String(v || '').trim().toLowerCase();
     return HOST_KINDS.includes(k) ? k : 'none';
 }
@@ -666,7 +666,7 @@ function ssDownloadBlob(blob, filename) {
 
 // ── Things several sections need, which is why they are here ────────────────
 // Each of these was defined inside whichever section wrote it first and then read from three
-// or four others — the same shape as a generic module runner living in the hosts domain. A
+// or four others — the same shape as a generic module runner living in the devices domain. A
 // section's file is for what only that section does.
 
 /** A stable hue (0–359) for a module name: the colour half the panel tints a module with.
@@ -680,7 +680,7 @@ function _moduleHue(name) {
 
 /** A random UUID for item keys (browsers expose crypto.randomUUID on secure origins incl.
  *  localhost; fall back to a v4 generator otherwise). Used wherever a new record needs an
- *  opaque key — clusters, host checks, module discovery. */
+ *  opaque key — clusters, device checks, module discovery. */
 function _genUuid() {
     try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (_) {}
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -858,7 +858,7 @@ async function generateToken(nBytes = 32) {
     }
 }
 
-// The effective public base URL (scheme://host, no trailing slash). Single source
+// The effective public base URL (scheme://device, no trailing slash). Single source
 // for every user-facing URL the JS builds (SSO redirect URIs, SCIM endpoint…).
 // A live edit of web_admin|public_url in the config form wins (so the UI updates as
 // you type); otherwise the value the server resolved (config override → proxy-aware

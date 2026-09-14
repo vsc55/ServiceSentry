@@ -87,7 +87,7 @@ function _infraLogCount(addr) {
     _INFRA_LOG_COUNTS[addr] = undefined;
     // `limit=1` because only the total is wanted: the endpoint counts the filtered set
     // whatever page it is asked for, so this is the count without a page of rows behind it.
-    apiGet('/api/v1/syslog?limit=1&host=' + encodeURIComponent(addr)).then(data => {
+    apiGet('/api/v1/syslog?limit=1&device=' + encodeURIComponent(addr)).then(data => {
         const total = (data && data.total) || 0;
         _INFRA_LOG_COUNTS[addr] = total;
         const el = document.getElementById('infra-tabcount-logs');
@@ -107,7 +107,7 @@ function _infraTabsHtml(d) {
     // syslog table — so the badge is filled in when the answer arrives rather than left off.
     // Asked for AFTER this paints: a count over 60.000 rows is ~60 ms with the index behind
     // it, and the section must draw now. The same rule the collection bar follows.
-    const _addr = String((d.host || {}).address || '').trim();
+    const _addr = String((d.device || {}).address || '').trim();
     if (_addr) counts.logs = _infraLogCount(_addr);
     const tabs = _infraTabsFor();
     const tab = tabs.some(x => x.id === _infraTab) ? _infraTab : 'details';
@@ -132,14 +132,14 @@ function _infraTabsHtml(d) {
     if (tab === 'logs') {
         // The panel fills itself in — it is a page of its own with filters, a pager and its
         // own refresh, so it is loaded after this markup lands rather than built into it.
-        const addr = String((d.host || {}).address || '').trim();
+        const addr = String((d.device || {}).address || '').trim();
         setTimeout(() => {
             _loadHostLogs('infraLogsBody', addr);
             // …and then give it the height that is left: the stylesheet's floor is what it
             // draws at until this runs, and a floor cannot know where on the page it starts.
             fitToViewportBottom(document.getElementById('infraLogsBody'));
         }, 0);
-        body = `<div class="small text-muted mb-2">${esc(t('host_logs_hint'))}</div>
+        body = `<div class="small text-muted mb-2">${esc(t('device_logs_hint'))}</div>
             <div id="infraLogsBody" class="ss-vfill ss-pane-tall"></div>`;
     } else if (tab === 'details') {
         body = `<div id="infra-details">${_infraRowsOf ? _infraRowsPane(metrics)
@@ -174,7 +174,7 @@ function _infraTabsHtml(d) {
  *  it rather than about a measurement — grouped by the row each fact belongs to, so a disk's
  *  model, serial and bay read together instead of scattered through an alphabet of keys. */
 function _infraIdentityHtml(d) {
-    const h = d.host || {};
+    const h = d.device || {};
     const attrs = d.attributes || [];
     // The DEVICE's own facts, and not its rows'. Reported from the screen: the column ran
     // for pages. One SNMP item files a result per disk, per volume, per share, and each of

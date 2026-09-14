@@ -206,7 +206,7 @@ function _eventMatchSummary(r) {
     const bits = [];
     if (r.severity_max !== '' && r.severity_max != null)
         bits.push('≤ ' + ((typeof _SYSLOG_SEV !== 'undefined' && _SYSLOG_SEV[r.severity_max]) || r.severity_max));
-    if (r.host) bits.push('host=' + r.host);
+    if (r.device) bits.push('host=' + r.device);
     if (r.app) bits.push('app=' + r.app);
     const n = _evMatchersCount(r);
     if (n) bits.push(tf('event_n_matchers', n));
@@ -251,7 +251,7 @@ function _evEnsureConditions(d) {
     if (!groups.length && d.match_type && d.match_type !== 'any' && (d.match_text || d.match_type === 'not_contains'))
         groups = [[{ field: 'message', type: d.match_type, text: d.match_text || '' }]];
     // Migrate the OLD top-level filters (which were global AND preconditions) into
-    // every group as conditions, then drop them: host/app → 'equals', and the
+    // every group as conditions, then drop them: device/app → 'equals', and the
     // "min severity" threshold → 'severity ≤ N' (its original semantics).
     const pre = [];
     if (d.severity_max !== '' && d.severity_max != null)
@@ -260,7 +260,7 @@ function _evEnsureConditions(d) {
     if (d.app)  pre.push({ field: 'app',  type: 'equals', text: String(d.app) });
     if (pre.length) {
         groups = (groups.length ? groups : [[]]).map(g => [...pre.map(p => ({ ...p })), ...g]);
-        d.host = ''; d.app = ''; d.severity_max = '';
+        d.device = ''; d.app = ''; d.severity_max = '';
     }
     let flat = _evGroupsToFlat(groups);
     if (!flat.length) flat = [{ field: 'message', type: 'contains', text: '', join: '' }];

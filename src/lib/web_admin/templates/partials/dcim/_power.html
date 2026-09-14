@@ -244,7 +244,7 @@ function _dcPduRow(p) {
                : carga > 0.9 ? 'danger' : carga > 0.45 ? 'warning' : 'success';
     return `<tr>
         <td class="fw-semibold">${esc(p.name)}${
-            p.host_uid ? ` <i class="bi bi-broadcast text-muted ss-fs-1"
+            p.device_uid ? ` <i class="bi bi-broadcast text-muted ss-fs-1"
                 title="${escAttr(t('dcim_pdu_monitored'))}"></i>` : ''}</td>
         <td><span class="d-inline-flex align-items-center gap-2">
             <span class="badge fw-normal" style="background:${escAttr(p.color)};color:#fff"
@@ -279,24 +279,24 @@ function _dcPduRow(p) {
  *
  *  Se elige por NOMBRE y se guarda por uid, que es lo que hay que hacer con cualquier cosa que
  *  tenga las dos: el uid no se teclea y el nombre cambia. La lista es la misma que ofrece el
- *  formulario de un equipo —`/api/v1/dcim/hosts`, ya cargada— y está estrechada por el registro,
+ *  formulario de un equipo —`/api/v1/dcim/devices`, ya cargada— y está estrechada por el registro,
  *  así que aquí no se ofrece ninguna máquina que este lector no pueda ver de todas formas. */
 function _dcPduHostCell(p) {
     if (!_dcimMay('dcim_edit'))
-        return p.host_uid
-            ? `<span class="ss-fs-2">${esc(_dcimHostName(p.host_uid))}</span>` : '';
-    const lista = (_dcimHosts || []).length ? ' list="dcim-hosts" autocomplete="off"' : '';
-    return `${_dcimDatalist('hosts')}
+        return p.device_uid
+            ? `<span class="ss-fs-2">${esc(_dcimHostName(p.device_uid))}</span>` : '';
+    const lista = (_dcimHosts || []).length ? ' list="dcim-devices" autocomplete="off"' : '';
+    return `${_dcimDatalist('devices')}
         <input class="form-control form-control-sm" style="max-width:11rem"${lista}
-               value="${escAttr(p.host_uid || '')}"
+               value="${escAttr(p.device_uid || '')}"
                placeholder="${escAttr(t('dcim_host_none'))}"
-               title="${escAttr(p.host_uid ? _dcimHostName(p.host_uid) : t('dcim_host_tt'))}"
+               title="${escAttr(p.device_uid ? _dcimHostName(p.device_uid) : t('dcim_host_tt'))}"
                onchange="_dcPduHost(${jsStr(p.uid)},this.value)">`;
 }
 
-async function _dcPduHost(uid, host) {
+async function _dcPduHost(uid, device) {
     const r = await _dcimSend('PUT', `/api/v1/dcim/pdus/${encodeURIComponent(uid)}`,
-                              {host_uid: String(host || '').trim()});
+                              {device_uid: String(device || '').trim()});
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
     _dcPowerOpen();
 }

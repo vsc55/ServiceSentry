@@ -8,7 +8,7 @@
 **Fuente de verdad:** cada tabla se declara **una sola vez** como un `TableSpec`
 ([lib/db/schema.py:51](../src/lib/db/schema.py#L51)) compuesto de `Column` / `Index`, y se
 reconcilia en el arranque de cada *store* mediante `connector.reconcile_table(spec)`
-([lib/db/base.py:232](../src/lib/db/base.py#L232)). Los tipos simbólicos (`TEXT`, `INTEGER`,
+([lib/db/base.py:308](../src/lib/db/base.py#L308)). Los tipos simbólicos (`TEXT`, `INTEGER`,
 `REAL`, `AUTOINCREMENT`) se traducen a DDL nativo por motor (ver
 [§ Portabilidad multi-motor](#portabilidad-multi-motor)).
 
@@ -29,7 +29,7 @@ Hay **72 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
 > Al pasar al core perdieron el prefijo: existe para que dos módulos no colisionen, y
-> el core ya es un espacio de nombres — `snmp_catalog` va al lado de `hosts` y
+> el core ya es un espacio de nombres — `snmp_catalog` va al lado de `devices` y
 > `history`. Se renombraron sin migración porque no había nada en producción.
 
 | Grupo | Tablas |
@@ -37,7 +37,7 @@ Hay **72 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Identidad / control de acceso | `users`, `users_groups`, `groups`, `groups_roles`, `roles`, `sessions`, `session_access`, `mfa_factors`, `mfa_recovery`, `api_tokens`, `api_token_access` |
 | Coordinación entre procesos | `entity_versions` |
 | Configuración | `config`, `module_config`, `module_config_items` |
-| Activos / secretos | `credentials`, `hosts` |
+| Activos / secretos | `credentials`, `devices` |
 | Auditoría / historial / estado | `audit`, `history`, `check_state`, `job_history` (qué hizo cada trabajo en segundo plano, después de hacerlo) |
 
 | Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
@@ -442,7 +442,7 @@ config.json (solo lectura/arranque) → BD (editable).
 | uid | TEXT | no | — | PK (clave del item en el dict) |
 | module_uid | TEXT | no | `''` | → `module_config.uid` |
 | collection | TEXT | no | `'list'` | |
-| host_uid | TEXT | no | `''` | → `hosts.uid` |
+| device_uid | TEXT | no | `''` | → `hosts.uid` |
 | label | TEXT | no | `''` | |
 | enabled | INTEGER | no | `1` | |
 | data | TEXT | no | `'{}'` | JSON (resto del item) |
@@ -450,7 +450,7 @@ config.json (solo lectura/arranque) → BD (editable).
 | updated_at | TEXT | no | `''` | |
 | updated_by | TEXT | no | `''` | |
 
-Índices: `idx_module_config_items_moduid(module_uid)`, `idx_module_config_items_host(host_uid)`.
+Índices: `idx_module_config_items_moduid(module_uid)`, `idx_module_config_items_device(host_uid)`.
 
 ---
 
@@ -476,15 +476,15 @@ config.json (solo lectura/arranque) → BD (editable).
 
 Índices: `idx_credentials_name(name)`.
 
-### `host_type` — las clases de dispositivo
-[lib/core/hosts/stores/types.py:46](../src/lib/core/hosts/stores/types.py#L46)
+### `device_type` — las clases de dispositivo
+[lib/core/devices/stores/types.py:49](../src/lib/core/devices/stores/types.py#L49)
 
 **Todas**, y no sólo las añadidas: la lista era una tupla en el código —servidor, hipervisor,
 NAS, conmutador…— que sólo se podía cambiar con un commit, así que lo que no cabía en ella se
 quedaba «sin clasificar». Ahora son filas y se editan desde el panel, las once de siempre
 incluidas.
 
-Del código queda **una semilla** (`lib/core/hosts/stores/types.py::SEED`) que se usa el día que se crea
+Del código queda **una semilla** (`lib/core/devices/stores/types.py::SEED`) que se usa el día que se crea
 la tabla y cuando alguien pulsa «añadir las básicas». **Sembrar es al CREAR y no «cuando esté
 vacía»**: quien borre las once porque en su casa no hay ninguna no se las encuentra de vuelta en
 el siguiente arranque.
@@ -496,7 +496,7 @@ el siguiente arranque.
 | label_key | TEXT | no | `''` | la clave del catálogo de idiomas, sólo en las sembradas: es lo que hace que se sigan diciendo «Servidor» o «Server» según quién mire después de mudarse a una tabla. Renombrar una **la borra** — desde que alguien la llama «Cabina de discos», eso es lo que quiere leer |
 | icon | TEXT | no | `''` | clase de Bootstrap Icons (`bi-…`); vacío = el genérico |
 | source | TEXT | no | `''` | **qué sistema de FUERA la mantiene**. Vacío es lo normal y quiere decir «de esta casa» — tanto lo que escribió una persona como lo que puso la siembra, porque la siembra no es un sistema de fuera: es lo que trae cualquier instalación, y marcarla aquí obligaba a excluirla a mano en cada sitio que preguntara «¿esto lo mantiene otro?». Cuál vino de la siembra lo dice `label_key`, que sólo la llevan ellas; quién la escribió, `updated_by`, que en la siembra es `system` |
-| external_id | TEXT | no | `''` | cuál de las suyas es en ese proveedor. Con `source`, es lo que hace que una clase **la mantenga** el origen: su nombre se refresca desde allí y no se puede teclear aquí (se desvincula con `DELETE /api/v1/host_types/<uid>/link`). Por el NOMBRE no se puede, porque renombrarla aquí dejaría a la siguiente importación creando una segunda con el nombre de allí. `source` a solas —la siembra— no ata nada: eso se edita como todo lo demás |
+| external_id | TEXT | no | `''` | cuál de las suyas es en ese proveedor. Con `source`, es lo que hace que una clase **la mantenga** el origen: su nombre se refresca desde allí y no se puede teclear aquí (se desvincula con `DELETE /api/v1/device_types/<uid>/link`). Por el NOMBRE no se puede, porque renombrarla aquí dejaría a la siguiente importación creando una segunda con el nombre de allí. `source` a solas —la siembra— no ata nada: eso se edita como todo lo demás |
 | sort | INTEGER | no | `100` | en qué orden se ofrecen. Un número y no el alfabeto: la lista va de lo más común a lo menos, y por nombre «Cámara» sale antes que «Servidor» en un desplegable que se usa para decir «servidor» |
 | slug | TEXT | no | `''` | el nombre corto, sacado del nombre (`Punto de acceso` → `punto_de_acceso`) y fijo de por vida. **Ya no apunta a nada** — para eso está `uid`— pero se queda por dos razones: es lo que ata una sembrada con su clave de idioma (`host_type_nas`), y es lo que hace legible una fila en una consulta a mano |
 | description | TEXT | no | `''` | para qué es esta clase. Un renglón que contesta «¿en qué se diferencia de la de al lado?» el día que hay dos parecidas, que es meses después. **De esta casa aunque la clase la mantenga un origen**: allí no existe, así que ninguna importación la va a pisar. En una sembrada va **vacía** y lo que se lee sale del catálogo de idiomas (`label_key` + `_desc`), por lo mismo que su nombre: escrita aquí se congelaría en el idioma de quien creó la base. Lo que se escriba manda sobre ella |
@@ -504,9 +504,9 @@ el siguiente arranque.
 | updated_at | TEXT | no | `''` | |
 | updated_by | TEXT | no | `''` | |
 
-Índices: `idx_host_type_name(name)`, `idx_host_type_slug(slug)`.
+Índices: `idx_device_type_name(name)`, `idx_device_type_slug(slug)`.
 
-**De una base anterior se migra al arrancar** (`HostTypesStore::_migrar_a_uid`), y con la flota:
+**De una base anterior se migra al arrancar** (`DeviceTypesStore::_migrar_a_uid`), y con la flota:
 la tabla se rehace con `uid` y, en la misma vuelta, `hosts.device_type` pasa de llevar el nombre
 corto a llevar el uid. Las dos cosas o ninguna — reescribir una sin la otra deja a todos los
 dispositivos señalando a clases que ya no existen, sin ningún error. Se reconoce por la columna
@@ -519,8 +519,8 @@ Clases** (y el catálogo de Inventario físico enlaza allí).
 
 ---
 
-### `hosts` — hosts monitorizados
-[lib/core/hosts/stores/hosts.py:36](../src/lib/core/hosts/stores/hosts.py#L36)
+### `devices` — hosts monitorizados
+[lib/core/devices/stores/devices.py:36](../src/lib/core/devices/stores/devices.py#L36)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -531,7 +531,7 @@ Clases** (y el catálogo de Inventario físico enlaza allí).
 | os | TEXT | no | `'auto'` | |
 | maintenance | INTEGER | no | `0` | |
 | virtual | INTEGER | no | `0` | (reservada, entrecomillada) |
-| device_type | TEXT | no | `''` | qué es el dispositivo: el `uid` de una fila de `host_type`, validado contra ella al guardar. Vacío = sin clasificar, que es una respuesta y no un hueco |
+| device_type | TEXT | no | `''` | qué es el dispositivo: el `uid` de una fila de `device_type`, validado contra ella al guardar. Vacío = sin clasificar, que es una respuesta y no un hueco |
 | tags | TEXT | no | `'[]'` | lista JSON |
 | description | TEXT | no | `''` | |
 | profiles | TEXT | no | `'{}'` | JSON, perfiles por protocolo; secretos cifrados |
@@ -543,7 +543,7 @@ Clases** (y el catálogo de Inventario físico enlaza allí).
 | source | TEXT | no | `''` | de dónde salió el dispositivo (`freshservice`); vacío = lo dio de alta una persona aquí, que es lo normal. Decide si una importación puede pisar su nombre, su dirección y su descripción — y si la pantalla deja teclearlos |
 | external_id | TEXT | no | `''` | cuál de los suyos es en ese origen. Dos columnas y no una porque son dos preguntas: por el NOMBRE no se puede volver a importar sin duplicar, ya que renombrarlo allí crearía aquí un segundo y dejaría el primero huérfano sin que nada lo dijera |
 
-Índices: `idx_hosts_name(name)`, `idx_hosts_source(source, external_id)`. Ver
+Índices: `idx_devices_name(name)`, `idx_devices_source(source, external_id)`. Ver
 [explica-hosts.md](explica-hosts.md) para el modelo host-céntrico.
 
 ---
@@ -850,7 +850,7 @@ copian a las tablas nuevas si estas están vacías, y las viejas se quedan donde
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
-| scope | TEXT | no | — | lo que **declare** un paquete: hoy `site` \| `room` \| `rack` \| `item` (inventario) y `host` (registro de máquinas) |
+| scope | TEXT | no | — | lo que **declare** un paquete: hoy `site` \| `room` \| `rack` \| `item` (inventario) y `device` (registro de dispositivos). Las filas que decían `host` se renombran al arrancar (`OrgsStore._renombrar_ambito_host`): un ámbito que ya no declara nadie deja a la empresa sin ser dueña de nada, sin error |
 | uid | TEXT | no | — | lo que pertenece a alguien |
 | org_uid | TEXT | no | — | la empresa |
 | set_at | TEXT | no | `''` | cuándo se dijo |
@@ -1065,7 +1065,7 @@ si lo echan?» antes de que lo echen**.
 | bypass_at | TEXT | no | `''` | dónde está físicamente ese interruptor, para que la etiqueta cuadre con lo que hay en la pared |
 | capacity_w | INTEGER | no | `0` | |
 | autonomy_min | INTEGER | no | `0` | minutos de batería. Sin ellos un SAI es un nombre; con ellos es «tengo ocho minutos para apagar cuarenta máquinas» |
-| host_uid | TEXT | no | `''` | la máquina, si el SAI contesta: dice si está en batería AHORA |
+| device_uid | TEXT | no | `''` | la máquina, si el SAI contesta: dice si está en batería AHORA |
 | description | TEXT | no | `''` | |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
@@ -1085,7 +1085,7 @@ lo medido— y el desacuerdo entre ellas es la razón de que esto exista.
 | feed | TEXT | no | `'a'` | la rama: `a`, `b` o `none`. Decide qué se apaga cuando cae un SAI, y por eso es columna y no una etiqueta dentro del nombre |
 | outlets | INTEGER | no | `0` | cuántas tomas tiene; de aquí sale «cuántas quedan» |
 | capacity_w | INTEGER | no | `0` | lo que aguanta: el límite del que hay que quedarse lejos, no el objetivo |
-| host_uid | TEXT | no | `''` | la máquina, si la regleta contesta |
+| device_uid | TEXT | no | `''` | la máquina, si la regleta contesta |
 | description | TEXT | no | `''` | |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
@@ -1150,7 +1150,7 @@ columna.
 | u_start | INTEGER | no | `1` | la U más baja que ocupa |
 | u_height | INTEGER | no | `1` | cuántas ocupa |
 | face | TEXT | no | `'full'` | `full` \| `front` \| `rear` |
-| host_uid | TEXT | no | `''` | el dispositivo del registro, **si lo hay**; índice `idx_dc_item_host` |
+| device_uid | TEXT | no | `''` | el dispositivo del registro, **si lo hay**; índice `idx_dc_item_device` |
 | type_uid | TEXT | no | `''` | el modelo del catálogo, si se ha casado |
 | label | TEXT | no | `''` | lo que está rotulado por delante, que es lo que se lee con una linterna |
 | serial | TEXT | no | `''` | |
@@ -1174,8 +1174,8 @@ columna.
 
 > **Un rack contiene items, y algunos items son hosts** — nunca al revés. Un panel de parcheo
 > ocupa 1U y no es un host; una tapa ciega no es nada; un chasis de blades ocupa 7U y contiene
-> ocho cosas que sí lo son; un servidor apagado sigue ocupando su U. Por eso `host_uid` es
-> opcional y la tabla `hosts` no se toca: cada lado sobrevive a que borren el otro.
+> ocho cosas que sí lo son; un servidor apagado sigue ocupando su U. Por eso `device_uid` es
+> opcional y la tabla `devices` no se toca: cada lado sobrevive a que borren el otro.
 >
 > **La cara es parte de la posición.** Un equipo de 1U llena la U 12 por delante *y* por detrás;
 > un panel de parcheo puede llenar solo la trasera; dos equipos de media profundidad comparten
@@ -2019,7 +2019,7 @@ Cada tabla es un `TableSpec` inmutable de `Column` (nombre, tipo simbólico, nul
 default, primary_key, unique) e `Index`, más `composite_pk`, `unique_constraints` y
 `renames` (viejo→nuevo) opcionales.
 
-### Reconcile en el arranque — `reconcile_table(spec)` ([base.py:232](../src/lib/db/base.py#L232))
+### Reconcile en el arranque — `reconcile_table(spec)` ([base.py:308](../src/lib/db/base.py#L308))
 
 1. Si la tabla no existe → `create_table_ddl` + un `create_index_ddl` por índice.
 2. Aplica renames declarados primero (solo si la col vieja existe y la nueva no) — portable
@@ -2045,7 +2045,7 @@ Crear-copiar-borrar-renombrar en una transacción (SQLite/PostgreSQL, DDL transa
 ([mysql.py:100](../src/lib/db/mysql.py#L100)) porque su DDL auto-commitea: construye la tabla
 de reemplazo y hace un `RENAME TABLE` atómico.
 
-### Mapa de tipos por motor — `_type_map` ([base.py:222](../src/lib/db/base.py#L222))
+### Mapa de tipos por motor — `_type_map` ([base.py:298](../src/lib/db/base.py#L298))
 
 | Token simbólico | SQLite | MySQL | PostgreSQL |
 |---|---|---|---|
@@ -2061,7 +2061,7 @@ parte de un índice lo usa (MySQL no puede indexar TEXT sin límite → `VARCHAR
 - `KIND` (`'sqlite'`/`'mysql'`/`'postgresql'`) decide el last-insert-id y la extracción JSON.
 - `quote_ident`: comillas dobles por defecto, backtick en MySQL.
 - Normalización de tipos para el diff: `canonical_type` / `canonical_default`
-  ([schema.py:95](../src/lib/db/schema.py#L95)).
+  ([schema.py:107](../src/lib/db/schema.py#L107)).
 
 ### Notas
 

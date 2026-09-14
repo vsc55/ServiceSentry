@@ -147,7 +147,7 @@ class _SessionsMixin:
         used to reach the server.
         """
         token    = secrets.token_hex(32)          # the secret auth credential (256-bit)
-        uid      = str(uuid.uuid4())               # public session id (matches user/host/… uids)
+        uid      = str(uuid.uuid4())               # public session id (matches user/device/… uids)
         now      = datetime.now(timezone.utc).isoformat()
         user_uid = (self._users.get(username) or {}).get('uid', username)
         entry = {

@@ -8,7 +8,7 @@ MODULE_PERMISSIONS = {
     'permissions': (
         # viewer sees them too: the listing masks every secret (secret_manager.mask_sensitive)
         # and a viewer already reaches that endpoint through devices_view/modules_view for the
-        # host form's credential picker — withholding the flag only hid the Credentials tab.
+        # device form's credential picker — withholding the flag only hid the Credentials tab.
         {'flag': 'credentials_view',   'roles': ('editor', 'viewer')},  # view reusable credentials
         {'flag': 'credentials_add',    'roles': ()},           # create reusable credentials (admin)
         {'flag': 'credentials_edit',   'roles': ('editor',)},  # edit reusable credentials

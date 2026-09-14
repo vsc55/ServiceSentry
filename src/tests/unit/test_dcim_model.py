@@ -8,7 +8,7 @@ Tres propiedades sostienen este dominio, y las tres se rompen en silencio:
   rack entre las sociedades del grupo: en el mismo armario hay 2U de una, 4U de otra y un switch
   del propio departamento de IT. Si la empresa fuese la raíz de la contención, ese caso —el
   normal en cuanto hay más de una sociedad— sería inexpresable.
-* **Un rack contiene items, y algunos items son hosts**, nunca al revés. Un panel de parcheo
+* **Un rack contiene items, y algunos items son devices**, nunca al revés. Un panel de parcheo
   ocupa 1U y no es un host; un chasis de blades ocupa 7U y contiene ocho cosas que sí lo son.
 * **Un rack compartido rompe que ver un sitio sea ver lo que hay dentro.** El de la filial B
   tiene que ver que la U 12 está ocupada —si no, planificar es imposible— y no puede ver de
@@ -84,13 +84,13 @@ class TestUnRackContieneItemsYAlgunosSonHosts:
         """Un panel de parcheo ocupa 1U y no contesta a nada."""
         uid = store.items.create({'rack_uid': fleet['rack'], 'u_start': 40,
                                   'label': 'Patch 1-24'})
-        assert store.items.get(uid)['host_uid'] == ''
+        assert store.items.get(uid)['device_uid'] == ''
 
     def test_y_el_que_lo_tiene_se_encuentra_por_el(self, store, fleet):
         uid = store.items.create({'rack_uid': fleet['rack'], 'u_start': 2,
-                                  'host_uid': 'h-db03'})
-        assert store.item_of_host('h-db03')['uid'] == uid
-        assert store.item_of_host('h-que-no') is None
+                                  'device_uid': 'h-db03'})
+        assert store.item_of_device('h-db03')['uid'] == uid
+        assert store.item_of_device('h-que-no') is None
 
 
 # ══ La U, que es donde el modelo se gana el sueldo ══════════════════════════════════════
@@ -185,8 +185,8 @@ class TestDeQuienEsCadaCosa:
 
     def test_un_host_suelto_tambien_es_de_alguien(self, store, fleet):
         """Una VM, un VIP o una máquina encima de una mesa no están en ningún rack."""
-        store.set_owner('host', 'h-vip', fleet['filial'])
-        assert self._owner(store, 'host', 'h-vip') == fleet['filial']
+        store.set_owner('device', 'h-vip', fleet['filial'])
+        assert self._owner(store, 'device', 'h-vip') == fleet['filial']
 
     def test_un_ambito_inventado_no_se_guarda(self, store, fleet):
         assert store.set_owner('planeta', 'marte', fleet['it']) is False
@@ -210,7 +210,7 @@ class TestElRackCompartidoEsElCasoDuro:
 
     def test_un_item_ajeno_ocupa_y_no_dice_nada_mas(self):
         item = {'uid': 'i1', 'rack_uid': 'r1', 'u_start': 12, 'u_height': 2, 'face': 'full',
-                'host_uid': 'h-db03', 'label': 'DB03', 'serial': 'ABC123',
+                'device_uid': 'h-db03', 'label': 'DB03', 'serial': 'ABC123',
                 'type_uid': 't-dell-r640', 'description': 'nómina'}
         out = owners.opaque(item)
         assert out == {'uid': 'i1', 'rack_uid': 'r1', 'u_start': 12, 'u_height': 2,
@@ -222,12 +222,12 @@ class TestElRackCompartidoEsElCasoDuro:
         inclusiones la omite —que es un hueco en una pantalla. Solo una de las dos es un
         problema de seguridad."""
         item = {'uid': 'i1', 'rack_uid': 'r1', 'u_start': 1, 'u_height': 1, 'face': 'full',
-                'host_uid': 'h', 'label': 'x', 'serial': 's', 'asset': 'a', 'type_uid': 't',
+                'device_uid': 'h', 'label': 'x', 'serial': 's', 'asset': 'a', 'type_uid': 't',
                 'description': 'd', 'created_at': 'ayer', 'updated_by': 'juan',
                 'columna_que_alguien_anada_manana': 'secreto'}
         out = owners.opaque(item)
         assert 'columna_que_alguien_anada_manana' not in out
-        for leak in ('host_uid', 'label', 'serial', 'asset', 'type_uid', 'description',
+        for leak in ('device_uid', 'label', 'serial', 'asset', 'type_uid', 'description',
                      'updated_by'):
             assert leak not in out, leak
 
@@ -303,11 +303,11 @@ class TestUnItemSinHostNoEstaBien:
     def test_con_host_pero_sin_checks_tampoco(self):
         """Un servidor apagado que sigue atornillado ocupa su U y no reporta nada."""
         from lib.core.dcim import service
-        assert service.item_state({'host_uid': 'h9'}, {'h1': 'ok'}) == ''
+        assert service.item_state({'device_uid': 'h9'}, {'h1': 'ok'}) == ''
 
     def test_y_con_host_es_el_de_su_maquina(self):
         from lib.core.dcim import service
-        assert service.item_state({'host_uid': 'h1'}, {'h1': 'error'}) == 'error'
+        assert service.item_state({'device_uid': 'h1'}, {'h1': 'error'}) == 'error'
 
 
 class TestUnRackEsLoPeorQueTieneDentro:
@@ -324,7 +324,7 @@ class TestUnRackEsLoPeorQueTieneDentro:
         """Son dos cosas distintas y se cuentan aparte: cuarenta paneles de parcheo sin vigilar
         no son motivo de nada; cuarenta SERVIDORES sin vigilar son una pregunta."""
         from lib.core.dcim import service
-        items = [{'host_uid': 'a'}, {'host_uid': 'b'}, {'host_uid': 'c'}, {'uid': 'panel'}]
+        items = [{'device_uid': 'a'}, {'device_uid': 'b'}, {'device_uid': 'c'}, {'uid': 'panel'}]
         roll = service.rack_roll(items, {'a': 'error', 'b': 'ok', 'c': 'warning'})
         # `passive` se añadió con los roles: lo que no contesta POR NATURALEZA deja de
         # contarse entre los desatendidos. Aquí no hay ninguno, y eso también es un dato.
@@ -337,13 +337,13 @@ class TestUnRackEsLoPeorQueTieneDentro:
         assert roll['state'] == '' and roll['unwatched'] == 2
 
     def test_y_lo_ajeno_ocupa_pero_no_cuenta_como_estado(self):
-        """Un item ajeno llega sin `host_uid` —eso es lo que significa opaco— así que suma como
+        """Un item ajeno llega sin `device_uid` —eso es lo que significa opaco— así que suma como
         una cosa que ocupa sitio y no aporta ningún estado. Que es exactamente lo que se puede
         decir de él."""
         from lib.core.dcim import owners, service
         ajeno = owners.opaque({'uid': 'x', 'rack_uid': 'r', 'u_start': 1, 'u_height': 1,
-                               'face': 'full', 'host_uid': 'h-secreto'})
-        roll = service.rack_roll([ajeno, {'host_uid': 'mio'}], {'h-secreto': 'error',
+                               'face': 'full', 'device_uid': 'h-secreto'})
+        roll = service.rack_roll([ajeno, {'device_uid': 'mio'}], {'h-secreto': 'error',
                                                                 'mio': 'ok'})
         assert roll['state'] == 'ok', 'el fallo del vecino se coló en mi rack'
         assert roll['total'] == 2 and roll['unwatched'] == 1
@@ -367,9 +367,9 @@ class TestElVuelcoCuentaSoloLoQueSePuedeVer:
     def test_lo_ajeno_no_llega_al_rack_ni_a_la_sala_ni_a_la_sede(self, store, fleet):
         from lib.core.dcim import service
         mio = store.items.create({'rack_uid': fleet['rack'], 'u_start': 1,
-                                  'host_uid': 'h-mio'})
+                                  'device_uid': 'h-mio'})
         suyo = store.items.create({'rack_uid': fleet['rack'], 'u_start': 5,
-                                   'host_uid': 'h-suyo'})
+                                   'device_uid': 'h-suyo'})
         store.set_owner('item', mio, fleet['filial'])
         store.set_owner('item', suyo, fleet['it'])
         statuses = {'h-mio': 'ok', 'h-suyo': 'error'}
@@ -390,7 +390,7 @@ class TestElVuelcoCuentaSoloLoQueSePuedeVer:
     def test_y_sin_ninguna_empresa_no_se_ve_ningun_estado(self, store, fleet):
         from lib.core.dcim import service
         store.set_owner('site', fleet['site'], fleet['it'])
-        store.items.create({'rack_uid': fleet['rack'], 'u_start': 1, 'host_uid': 'h'})
+        store.items.create({'rack_uid': fleet['rack'], 'u_start': 1, 'device_uid': 'h'})
         roll = service.tree_roll(store, {'h': 'error'}, store.owners_map(), set())
         # Ni siquiera un vuelco vacío: la sede es de una empresa que este lector no tiene, así
         # que no se recorre — la misma regla que hace que no aparezca en el listado. Devolver
@@ -558,7 +558,7 @@ class TestLoQueAlguienApagoAProposito:
     control. Dos pantallas, dos respuestas sobre la misma máquina, y la que despierta a alguien
     de madrugada era la equivocada.
 
-    `_host_statuses` no dobla el mantenimiento a propósito —la flota lo enseña como lo que es,
+    `_device_statuses` no dobla el mantenimiento a propósito —la flota lo enseña como lo que es,
     un estado que PISA al otro— y esta pantalla lo cogía crudo. Se cuenta como **sin vigilar**,
     que es lo que de verdad pasa: nadie la está mirando ahora, y es una decisión de alguien.
     Verde sería mentir sobre una máquina que no contesta.
@@ -568,15 +568,15 @@ class TestLoQueAlguienApagoAProposito:
 
     class _Wa:
         def __init__(self, filas):
-            self._hosts_store = type('S', (), {'list': lambda s, decrypt=True: filas})()
+            self._devices_store = type('S', (), {'list': lambda s, decrypt=True: filas})()
 
     _FILAS = [{'uid': 'h1', 'name': 'PVE01', 'maintenance': 0},
               {'uid': 'h2', 'name': 'PVE20', 'maintenance': 1}]
 
     def _states(self, monkeypatch, crudo):
         from lib.core.dcim import service                            # noqa: PLC0415
-        from lib.core.hosts import service as hosts_svc              # noqa: PLC0415
-        monkeypatch.setattr(hosts_svc, '_host_statuses', lambda wa: crudo)
+        from lib.core.devices import service as devices_svc              # noqa: PLC0415
+        monkeypatch.setattr(devices_svc, '_device_statuses', lambda wa: crudo)
         return service.states_for(self._Wa(self._FILAS), {'devices_view'})
 
     def test_la_maquina_en_mantenimiento_no_sale_caida(self, monkeypatch):
@@ -600,8 +600,8 @@ class TestLoQueAlguienApagoAProposito:
         """Una instalación sin registro de flota no puede saber quién está en obras, y callar
         todos los estados sería peor que el fallo que se arregla."""
         from lib.core.dcim import service                            # noqa: PLC0415
-        from lib.core.hosts import service as hosts_svc              # noqa: PLC0415
-        monkeypatch.setattr(hosts_svc, '_host_statuses', lambda wa: {'h1': 'error'})
+        from lib.core.devices import service as devices_svc              # noqa: PLC0415
+        monkeypatch.setattr(devices_svc, '_device_statuses', lambda wa: {'h1': 'error'})
         assert service.states_for(type('W', (), {})(), {'devices_view'}) == {'h1': 'error'}
 
 
@@ -616,7 +616,7 @@ class TestElNombreSeAcotaComoElColor:
 
     class _Wa:
         def __init__(self, filas):
-            self._hosts_store = type('S', (), {'list': lambda s, decrypt=True: filas})()
+            self._devices_store = type('S', (), {'list': lambda s, decrypt=True: filas})()
 
     _FILAS = [{'uid': 'h1', 'name': 'DB03'}, {'uid': 'h2', 'name': 'SW-CORE'}]
 
@@ -649,10 +649,10 @@ class TestElCuadroDicePorDondeSeLlega:
     def _fleet(self, store, fleet):
         """Dos equipos en el rack: uno de la filial y uno del departamento."""
         suyo = store.items.create({'rack_uid': fleet['rack'], 'u_start': 12, 'u_height': 2,
-                                   'label': 'DB03', 'host_uid': 'h-db03'})
+                                   'label': 'DB03', 'device_uid': 'h-db03'})
         store.set_owner('item', suyo, fleet['filial'])
         nuestro = store.items.create({'rack_uid': fleet['rack'], 'u_start': 1,
-                                      'label': 'SW-CORE', 'host_uid': 'h-sw'})
+                                      'label': 'SW-CORE', 'device_uid': 'h-sw'})
         # Dicho de quién es, y no dejado sin reclamar: lo que nadie reclama lo ve todo el mundo
         # —un rack sin fichar no es un secreto— así que el caso del vecino solo existe cuando
         # alguien ha dicho que es del vecino.
@@ -678,9 +678,9 @@ class TestElCuadroDicePorDondeSeLlega:
         está en el registro de la flota, y escribirlo dos veces es tenerlo mal en uno de los
         dos sitios. Se veía en pantalla, con el uid en la columna del nombre."""
         from lib.core.dcim import service
-        store.items.create({'rack_uid': fleet['rack'], 'u_start': 30, 'host_uid': 'h-db03'})
+        store.items.create({'rack_uid': fleet['rack'], 'u_start': 30, 'device_uid': 'h-db03'})
         b = service.board(store, {'h-db03': 'error'}, store.owners_map(), None,
-                          store.orgs.list(), host_names={'h-db03': 'DB03'})
+                          store.orgs.list(), device_names={'h-db03': 'DB03'})
         assert b['trouble'][0]['name'] == 'DB03'
 
     def test_pero_la_etiqueta_del_hueco_manda(self, store, fleet):
@@ -688,16 +688,16 @@ class TestElCuadroDicePorDondeSeLlega:
         dónde sale el nombre cuando no hay etiqueta, no algo que la pise."""
         from lib.core.dcim import service
         store.items.create({'rack_uid': fleet['rack'], 'u_start': 30, 'label': 'Cabina A',
-                            'host_uid': 'h-db03'})
+                            'device_uid': 'h-db03'})
         b = service.board(store, {'h-db03': 'error'}, store.owners_map(), None,
-                          store.orgs.list(), host_names={'h-db03': 'DB03'})
+                          store.orgs.list(), device_names={'h-db03': 'DB03'})
         assert b['trouble'][0]['name'] == 'Cabina A'
 
     def test_y_sin_nombres_sigue_dando_el_camino(self, store, fleet):
         """Un registro que no se puede leer no puede dejar la lista sin filas: el camino hasta
         el armario sigue siendo verdad y sigue sirviendo."""
         from lib.core.dcim import service
-        store.items.create({'rack_uid': fleet['rack'], 'u_start': 30, 'host_uid': 'h-db03'})
+        store.items.create({'rack_uid': fleet['rack'], 'u_start': 30, 'device_uid': 'h-db03'})
         b = service.board(store, {'h-db03': 'error'}, store.owners_map(), None,
                           store.orgs.list())
         assert b['trouble'][0]['rack'] == 'R3' and b['trouble'][0]['name'] == ''
@@ -745,7 +745,7 @@ class TestElCuadroDicePorDondeSeLlega:
         statuses = {}
         for u in range(1, service.BOARD_TROUBLE_CAP + 6):
             store.items.create({'rack_uid': fleet['rack'], 'u_start': u,
-                                'label': f'S{u}', 'host_uid': f'h{u}'})
+                                'label': f'S{u}', 'device_uid': f'h{u}'})
             statuses[f'h{u}'] = 'error'
         b = service.board(store, statuses, store.owners_map(), None, store.orgs.list())
         assert len(b['trouble']) == service.BOARD_TROUBLE_CAP
@@ -758,7 +758,7 @@ class TestElCuadroDicePorDondeSeLlega:
         otra = store.sites.create({'name': 'DC Sur'})
         sala = store.rooms.create({'site_uid': otra, 'name': 'S1'})
         rack = store.racks.create({'room_uid': sala, 'name': 'R1', 'u_height': 42})
-        store.items.create({'rack_uid': rack, 'u_start': 1, 'host_uid': 'h-x'})
+        store.items.create({'rack_uid': rack, 'u_start': 1, 'device_uid': 'h-x'})
         b = service.board(store, {'h-db03': 'ok', 'h-sw': 'ok', 'h-x': 'error'},
                           store.owners_map(), None, store.orgs.list())
         assert b['totals'] == {'total': 3, 'bad': 1, 'unwatched': 0, 'ok': 2,
@@ -1034,10 +1034,10 @@ class TestLoDeclaradoContraLoQueSeVe:
     pantalla en ruido que nadie vuelve a mirar.
     """
 
-    ITEMS = [{'uid': 'i1', 'host_uid': 'h-sw', 'label': 'SW01'},
-             {'uid': 'i2', 'host_uid': 'h-db', 'label': 'DB03'},
-             {'uid': 'i3', 'host_uid': '', 'label': 'Panel B'},
-             {'uid': 'i4', 'host_uid': 'h-x', 'label': 'SRV9'}]
+    ITEMS = [{'uid': 'i1', 'device_uid': 'h-sw', 'label': 'SW01'},
+             {'uid': 'i2', 'device_uid': 'h-db', 'label': 'DB03'},
+             {'uid': 'i3', 'device_uid': '', 'label': 'Panel B'},
+             {'uid': 'i4', 'device_uid': 'h-x', 'label': 'SRV9'}]
 
     def _edges(self):
         return [{'kind': 'lldp', 'from': 'h-sw', 'to': 'h-db',
@@ -1371,7 +1371,7 @@ class TestAdondeLlegaUnLector:
         contar para la filial."""
         from lib.core.dcim import service
         self._monta(store, fleet)
-        del_it = store.items.create({'rack_uid': fleet['rack'], 'u_start': 1, 'host_uid': 'h'})
+        del_it = store.items.create({'rack_uid': fleet['rack'], 'u_start': 1, 'device_uid': 'h'})
         store.set_owner('item', del_it, fleet['it'])
         b = service.board(store, {'h': 'error'}, store.owners_map(), {fleet['filial']},
                           store.orgs.list())
@@ -1560,7 +1560,7 @@ class TestUnPanelDeParcheoNoEstaSinVigilar:
         """Si alguien enlaza un panel gestionado con una máquina, tiene estado: cuenta como lo
         que es y no como pasivo."""
         from lib.core.dcim import service
-        r = service.rack_roll([{'uid': '1', 'role': 'patch_panel', 'host_uid': 'h'}],
+        r = service.rack_roll([{'uid': '1', 'role': 'patch_panel', 'device_uid': 'h'}],
                               {'h': 'ok'})
         assert r['passive'] == 0 and r['unwatched'] == 0
 
@@ -1630,8 +1630,8 @@ class TestUnEnlaceVistoVieneListoParaDeclararlo:
 
     def test_trae_los_dos_equipos_y_las_dos_bocas(self):
         from lib.core.dcim import service
-        r = service.cable_check([], [{'uid': 'i1', 'host_uid': 'h1'},
-                                     {'uid': 'i2', 'host_uid': 'h2'}], self._edges())
+        r = service.cable_check([], [{'uid': 'i1', 'device_uid': 'h1'},
+                                     {'uid': 'i2', 'device_uid': 'h2'}], self._edges())
         f = r['undeclared'][0]
         assert {f['a_item'], f['b_item']} == {'i1', 'i2'}
         assert {f['a_port'], f['b_port']} == {'eno1', 'gi9'}
@@ -1642,8 +1642,8 @@ class TestUnEnlaceVistoVieneListoParaDeclararlo:
         from lib.core.dcim import service
         edges = [{'kind': 'lldp', 'from': 'h1', 'to': 'h2',
                   'ports': {'h1': ['eth1', 'eth2'], 'h2': 'gi9'}}]
-        f = service.cable_check([], [{'uid': 'i1', 'host_uid': 'h1'},
-                                     {'uid': 'i2', 'host_uid': 'h2'}], edges)['undeclared'][0]
+        f = service.cable_check([], [{'uid': 'i1', 'device_uid': 'h1'},
+                                     {'uid': 'i2', 'device_uid': 'h2'}], edges)['undeclared'][0]
         por_lado = {f['a_item']: f['a_port'], f['b_item']: f['b_port']}
         assert por_lado['i1'] == '' and por_lado['i2'] == 'gi9'
 
@@ -1653,8 +1653,8 @@ class TestUnEnlaceVistoVieneListoParaDeclararlo:
         from lib.core.dcim import service
         r = service.cable_check([{'uid': 'c1', 'a_item': 'i1', 'b_item': 'i2',
                                   'a_port': 'eno1', 'b_port': 'gi9'}],
-                                [{'uid': 'i1', 'host_uid': 'h1'},
-                                 {'uid': 'i2', 'host_uid': 'h2'}], self._edges())
+                                [{'uid': 'i1', 'device_uid': 'h1'},
+                                 {'uid': 'i2', 'device_uid': 'h2'}], self._edges())
         assert r['undeclared'] == []
         assert r['cables'][0]['seen'] == 'seen'
 
@@ -1662,8 +1662,8 @@ class TestUnEnlaceVistoVieneListoParaDeclararlo:
         from lib.core.dcim import service
         r = service.cable_check([{'uid': 'c1', 'a_item': 'i1', 'b_item': 'i2',
                                   'a_port': 'eno1', 'b_port': 'gi9'}],
-                                [{'uid': 'i1', 'host_uid': 'h1'},
-                                 {'uid': 'i2', 'host_uid': 'h2'}],
+                                [{'uid': 'i1', 'device_uid': 'h1'},
+                                 {'uid': 'i2', 'device_uid': 'h2'}],
                                 [{'kind': 'lldp', 'from': 'h1', 'to': 'h2',
                                   'ports': {'h1': 'eno7', 'h2': 'gi22'}}])
         assert r['cables'][0]['seen'] == 'other_port'
@@ -1680,7 +1680,7 @@ class TestUnaFilaQueSonCuatroCablesLoDice:
         from lib.core.dcim import service
         return service.cable_check(
             [{'uid': 'c1', 'a_item': 'i1', 'b_item': 'i2'}],
-            [{'uid': 'i1', 'host_uid': 'h1'}, {'uid': 'i2', 'host_uid': 'h2'}],
+            [{'uid': 'i1', 'device_uid': 'h1'}, {'uid': 'i2', 'device_uid': 'h2'}],
             [{'kind': 'lldp', 'from': 'h1', 'to': 'h2', 'bundle': bundle,
               'ports': {'h1': ['gi25', 'gi26'], 'h2': ['ether11', 'ether12']}}])
 
@@ -1707,7 +1707,7 @@ class TestElCableadoNoPagaElMapaEntero:
 
     def test_solo_mira_los_enlaces_lldp(self):
         from lib.core.dcim import service
-        items = [{'uid': 'i1', 'host_uid': 'h1'}, {'uid': 'i2', 'host_uid': 'h2'}]
+        items = [{'uid': 'i1', 'device_uid': 'h1'}, {'uid': 'i2', 'device_uid': 'h2'}]
         # Un enlace deducido de una tabla de puertos NO es un enlace declarable: nadie lo ha
         # visto verse, se ha inferido de por dónde pasó una MAC.
         r = service.cable_check([], items, [{'kind': 'port', 'from': 'h1', 'to': 'h2',
@@ -1734,8 +1734,8 @@ class TestNoPreguntadoNoEsNoSeVe:
         return [{'uid': 'c1', 'a_item': 'i1', 'b_item': 'i2'}]
 
     def _items(self):
-        return [{'uid': 'i1', 'host_uid': 'h1', 'label': 'A'},
-                {'uid': 'i2', 'host_uid': 'h2', 'label': 'B'}]
+        return [{'uid': 'i1', 'device_uid': 'h1', 'label': 'A'},
+                {'uid': 'i2', 'device_uid': 'h2', 'label': 'B'}]
 
     def test_sin_preguntar_ninguna_fila_lleva_veredicto(self):
         from lib.core.dcim import service
@@ -1766,10 +1766,10 @@ class TestUnEnlacePorPanelDeParcheo:
     """
 
     def _via(self, rol_medio='patch_panel'):
-        return ([{'uid': 'srv', 'host_uid': 'h1', 'role': 'server', 'label': 'SRV'},
+        return ([{'uid': 'srv', 'device_uid': 'h1', 'role': 'server', 'label': 'SRV'},
                  {'uid': 'pa', 'role': rol_medio, 'label': 'PP-A'},
                  {'uid': 'pb', 'role': rol_medio, 'label': 'PP-B'},
-                 {'uid': 'sw', 'host_uid': 'h2', 'role': 'switch', 'label': 'SW'}],
+                 {'uid': 'sw', 'device_uid': 'h2', 'role': 'switch', 'label': 'SW'}],
                 [{'uid': 'c1', 'a_item': 'srv', 'a_port': 'eno1', 'b_item': 'pa'},
                  {'uid': 'c2', 'a_item': 'pa', 'b_item': 'pb'},
                  {'uid': 'c3', 'a_item': 'pb', 'b_item': 'sw', 'b_port': 'gi1'}],
@@ -1816,7 +1816,7 @@ class TestUnEnlacePorPanelDeParcheo:
 
     def test_y_un_ciclo_declarado_por_error_no_lo_cuelga(self):
         from lib.core.dcim import service
-        items = [{'uid': 'srv', 'host_uid': 'h1', 'role': 'server'},
+        items = [{'uid': 'srv', 'device_uid': 'h1', 'role': 'server'},
                  {'uid': 'pa', 'role': 'patch_panel'}, {'uid': 'pb', 'role': 'patch_panel'}]
         cables = [{'uid': 'c1', 'a_item': 'srv', 'b_item': 'pa'},
                   {'uid': 'c2', 'a_item': 'pa', 'b_item': 'pb'},
@@ -1831,9 +1831,9 @@ class TestUnPuenteEnElMismoPanel:
     """
 
     def _items(self):
-        return [{'uid': 'srv', 'host_uid': 'h1', 'role': 'server'},
+        return [{'uid': 'srv', 'device_uid': 'h1', 'role': 'server'},
                 {'uid': 'pp', 'role': 'patch_panel'},
-                {'uid': 'sw', 'host_uid': 'h2', 'role': 'switch'}]
+                {'uid': 'sw', 'device_uid': 'h2', 'role': 'switch'}]
 
     def _edges(self):
         return [{'kind': 'lldp', 'from': 'h1', 'to': 'h2',
@@ -1881,10 +1881,10 @@ class TestLaTrazaDelEnlace:
     """
 
     def _todo(self):
-        items = [{'uid': 'srv', 'host_uid': 'h1', 'role': 'server', 'label': 'SRV'},
+        items = [{'uid': 'srv', 'device_uid': 'h1', 'role': 'server', 'label': 'SRV'},
                  {'uid': 'pa', 'role': 'patch_panel', 'label': 'PP-A'},
                  {'uid': 'pb', 'role': 'patch_panel', 'label': 'PP-B'},
-                 {'uid': 'sw', 'host_uid': 'h2', 'role': 'switch', 'label': 'SW'}]
+                 {'uid': 'sw', 'device_uid': 'h2', 'role': 'switch', 'label': 'SW'}]
         cables = [{'uid': 'c1', 'a_item': 'srv', 'a_port': 'eno1',
                    'b_item': 'pa', 'b_port': '25'},
                   {'uid': 'j', 'a_item': 'pa', 'a_port': '25', 'b_item': 'pa', 'b_port': '17'},
@@ -2047,10 +2047,10 @@ class TestLaTiradaDeUnCable:
     un latiguillo, sin LLDP de por medio— no salía en ninguna parte estando declarada entera.
     """
 
-    ITEMS = [{'uid': 'srv', 'host_uid': 'h-srv', 'role': 'server', 'label': 'SRV01'},
+    ITEMS = [{'uid': 'srv', 'device_uid': 'h-srv', 'role': 'server', 'label': 'SRV01'},
              {'uid': 'ppA', 'role': 'patch_panel', 'label': 'PP-A'},
              {'uid': 'ppB', 'role': 'patch_panel', 'label': 'PP-B'},
-             {'uid': 'sw', 'host_uid': 'h-sw', 'role': 'switch', 'label': 'SW01'}]
+             {'uid': 'sw', 'device_uid': 'h-sw', 'role': 'switch', 'label': 'SW01'}]
     CABLES = [{'uid': 'c1', 'a_item': 'srv', 'a_port': 'eth0', 'b_item': 'ppA', 'b_port': '12'},
               {'uid': 'c2', 'a_item': 'ppB', 'a_port': '12', 'b_item': 'ppA', 'b_port': '12'},
               {'uid': 'c3', 'a_item': 'sw', 'a_port': 'Gi1/0/7', 'b_item': 'ppB',

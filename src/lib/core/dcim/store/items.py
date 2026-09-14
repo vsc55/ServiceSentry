@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""``dc_item`` — what occupies U in a rack. Some items are hosts; most are not."""
+"""``dc_item`` — what occupies U in a rack. Some items are devices; most are not."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ _ITEM = TableSpec(
         Column('face',      'TEXT', nullable=False, default="'full'"),
         # The registry's device, when there is one. Optional on purpose: most of what fills a
         # rack answers to nothing.
-        Column('host_uid',  'TEXT', nullable=False, default="''"),
+        Column('device_uid',  'TEXT', nullable=False, default="''"),
         # The catalogue model, when one was matched.
         Column('type_uid',  'TEXT', nullable=False, default="''"),
         # What is written on the front of it, which is what somebody reads with a torch.
@@ -118,7 +118,11 @@ _ITEM = TableSpec(
         Column('placement', 'TEXT', nullable=False, default="'u'"),
     ),
     indexes=(Index('idx_dc_item_rack', ('rack_uid',)),
-             Index('idx_dc_item_host', ('host_uid',)),
+             Index('idx_dc_item_device', ('device_uid',)),
              Index('idx_dc_item_parent', ('parent_uid',)),
              Index('idx_dc_item_build', ('build_uid',))),
+    # Se llamaba `host_uid`. `reconcile_table` lo aplica antes de comparar, con los datos dentro.
+    renames={'host_uid': 'device_uid'},
+    # Y el índice, que llevaba el nombre de la columna de ayer.
+    former_indexes=('idx_dc_item_host',),
 )

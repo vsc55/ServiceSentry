@@ -819,7 +819,7 @@ function ssPublicIp(addresses) {
 function ssHostCard(node, uid, opts) {
     const n = node || {};
     const o = opts || {};
-    const h = (typeof _infraHosts !== 'undefined' ? _infraHosts : []).find(x => x.uid === uid)
+    const h = (typeof _infraDevices !== 'undefined' ? _infraDevices : []).find(x => x.uid === uid)
               || {};
     const type = n.kind || h.device_type || '';
     // A row per fact the device answered, and NO row for one it did not: a card of empty
@@ -835,7 +835,7 @@ function ssHostCard(node, uid, opts) {
     const code = v => `<code class="ss-fs-2">${esc(v)}</code>`;
     return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
         <div class="d-flex align-items-center gap-2 mb-1">
-            <i class="bi ${escAttr(hostTypeIcon(type))} text-muted"></i>
+            <i class="bi ${escAttr(deviceTypeIcon(type))} text-muted"></i>
             <span class="fw-semibold">${esc(n.name || h.name || uid)}</span>
             ${typeof _infraStateBadge === 'function'
               ? _infraStateBadge(h.status || n.status, h.maintenance) : ''}
@@ -843,11 +843,11 @@ function ssHostCard(node, uid, opts) {
                   ><i class="bi bi-hand-index me-1"></i>${esc(t(o.hint))}</span>` : ''}
         </div>
         <div class="d-flex flex-column gap-1">
-            ${row('bi-tag', t('host_type'), type
-                  ? esc(hostTypeLabel(type))
-                  : `<span class="text-muted">${esc(t('host_type_unset'))}</span>`)}
+            ${row('bi-tag', t('device_type'), type
+                  ? esc(deviceTypeLabel(type))
+                  : `<span class="text-muted">${esc(t('device_type_unset'))}</span>`)}
             ${row('bi-award', t('col_host_brand'), hostBrandLine(h, {text: true}))}
-            ${row('bi-cpu', t('col_host_os'),
+            ${row('bi-cpu', t('col_device_os'),
                   typeof _infraOsHtml === 'function' ? _infraOsHtml(h) : esc(h.os || ''))}
             ${row('bi-hdd-network', t('infra_link_addresses'),
                   (n.addresses || []).map(code).join(' ') || (h.address ? code(h.address) : ''))}
@@ -859,7 +859,7 @@ function ssHostCard(node, uid, opts) {
                   o.cables === undefined ? '' : String(o.cables))}
             ${row('bi-eye', t('col_host_modules'),
                   h.modules_total ? esc(`${h.modules_active || 0}/${h.modules_total}`) : '')}
-            ${row('bi-tags', t('col_host_tags'), (h.tags || []).map(tg =>
+            ${row('bi-tags', t('col_device_tags'), (h.tags || []).map(tg =>
                   `<span class="badge bg-body-secondary text-body-secondary border fw-normal
                          me-1">${esc(tg)}</span>`).join(''))}
             ${o.extra ? row('bi-box', o.extra[0], esc(o.extra[1])) : ''}

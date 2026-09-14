@@ -286,7 +286,7 @@ let _infraPortWanted = '';
  */
 function infraOpenPort(uid, port) {
     _infraPortWanted = String(port || '');
-    if (uid && uid === _infraHost && _infraDetail) return _infraFocusPort();
+    if (uid && uid === _infraDevice && _infraDetail) return _infraFocusPort();
     infraOpen(uid);
 }
 
@@ -496,7 +496,7 @@ function _infraIsWatched(module, row) {
  *  the port a machine reaches the internet through, which no MIB answers — only whoever ran
  *  the cable knows, which is the same reason the plain mark exists at all. */
 function _infraWatchMark(module, row) {
-    const list = ((_infraDetail || {}).host || {}).watch || [];
+    const list = ((_infraDetail || {}).device || {}).watch || [];
     return list.find(w => w && w.module === module && w.row === row) || null;
 }
 
@@ -515,9 +515,9 @@ const INFRA_WATCH_ROLES = {
  *  patched here: what is on screen then IS what is stored, and a failed save leaves the
  *  button where it was instead of lying about it until the next refresh. */
 async function _infraSetWatch(module, row, on, role) {
-    const uid = _infraHost;
+    const uid = _infraDevice;
     if (!uid) return;
-    const r = await apiPost(`/api/v1/infra/hosts/${encodeURIComponent(uid)}/watch`,
+    const r = await apiPost(`/api/v1/infra/devices/${encodeURIComponent(uid)}/watch`,
                             {module, row, on: !!on, role: role || ''});
     // `apiPost` answers `{status, data}` — the payload is one level down. Read as `r.watch`
     // it was ALWAYS undefined, so every click replaced the list with an empty one: the bell
@@ -532,7 +532,7 @@ async function _infraSetWatch(module, row, on, role) {
         showToast(said.error || t('save_failed'), 'danger');
         return;
     }
-    if (_infraDetail && _infraDetail.host) _infraDetail.host.watch = said.watch;
+    if (_infraDetail && _infraDetail.device) _infraDetail.device.watch = said.watch;
     showToast(t(on ? 'infra_watch_added' : 'infra_watch_removed'), 'success');
     _infraWatchPaint(module, row);
     // The role button is the other half of the same mark, so it has to follow — and it is

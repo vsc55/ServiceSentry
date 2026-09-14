@@ -111,7 +111,7 @@ function _fsaTypesDraw() {
                   title="${escAttr(x.name)}">${esc(x.name)}</span>
             ${n === null ? '' : `<span class="ss-tabular text-muted ss-fs-1">${esc(String(n))}</span>`}
             ${x.device_type ? `<span class="badge bg-body-secondary text-body border fw-normal"
-                >${esc(typeof hostTypeLabel === 'function' ? hostTypeLabel(x.device_type)
+                >${esc(typeof deviceTypeLabel === 'function' ? deviceTypeLabel(x.device_type)
                                                            : x.device_type)}</span>` : ''}
         </label></div>`; }).join('')}</div>
     ${vacias ? `<div class="mt-2"><button class="btn btn-sm btn-secondary"
@@ -322,7 +322,7 @@ function _fsaRowsOf(d, plan) {
     // A quién se puede emparejar: los que no están ya atados a OTRO activo. Dos no pueden
     // compartir uno — el segundo le pisaría el nombre al primero en cada importación, y la ficha
     // iría cambiando de nombre sola.
-    const ofrecidos = (uid) => ((d || {}).hosts || []).filter(
+    const ofrecidos = (uid) => ((d || {}).devices || []).filter(
         h => h.uid === uid || !(h.source === 'freshservice' && h.external_id));
     return plan.map(p => {
         const ext = String(p.external_id);
@@ -355,7 +355,7 @@ function _fsaRowsOf(d, plan) {
                  title="${escAttr(nueva ? tf('fs_new_type_tt', p.new_type)
                                         : t('fs_guess_type_tt'))}">${
                 nueva ? `<i class="bi bi-plus-lg"></i>${esc(p.new_type)}`
-                      : esc(typeof hostTypeLabel === 'function' ? hostTypeLabel(p.device_type)
+                      : esc(typeof deviceTypeLabel === 'function' ? deviceTypeLabel(p.device_type)
                                                                 : p.device_type)}</span>` : '';
         return `<tr${marcada ? '' : ' class="opacity-50"'}>
         <td class="text-center"><input type="checkbox" class="form-check-input"
@@ -421,8 +421,8 @@ function _fsaPlanHtml(d) {
             <thead><tr class="text-muted ss-fs-1 text-uppercase">
                 <th style="width:2.5rem"></th>
                 <th style="width:7rem"></th>
-                <th>${esc(t('col_host_name'))}</th>
-                <th style="width:11rem">${esc(t('col_host_address'))}</th>
+                <th>${esc(t('col_device_name'))}</th>
+                <th style="width:11rem">${esc(t('col_device_address'))}</th>
                 <th style="width:12rem">${esc(t('fs_asset_type'))}</th>
                 <th style="width:10rem">${esc(t('fs_asset_serial'))}</th>
                 <th style="width:16rem">${esc(t('fs_hosts_link_col'))}</th>
@@ -496,8 +496,8 @@ async function freshserviceAssetsApply() {
     }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('fsAssetsModal')).hide();
     // Y si la pantalla de dispositivos está delante, que enseñe lo que ha quedado.
-    if (typeof reloadHosts === 'function' && document.getElementById('servers-container')) {
-        reloadHosts();
+    if (typeof reloadDevices === 'function' && document.getElementById('servers-container')) {
+        reloadDevices();
     }
 }
 
@@ -579,8 +579,8 @@ function _fsTypesHtml() {
 function _fsTypeRow(x) {
     const id = String(x.id);
     const marcada = _fsTypesPick.has(id);
-    const clase = x.device_type && typeof hostTypeLabel === 'function'
-        ? hostTypeLabel(x.device_type) : '';
+    const clase = x.device_type && typeof deviceTypeLabel === 'function'
+        ? deviceTypeLabel(x.device_type) : '';
     return `<tr${marcada ? '' : ' class="opacity-50"'}>
         <td class="text-center"><input type="checkbox" class="form-check-input"
             ${marcada ? 'checked' : ''}${x.here ? ' disabled' : ''}
@@ -715,7 +715,7 @@ function _fsLinkRowsHtml() {
         return `<button type="button" class="list-group-item list-group-item-action
                 d-flex align-items-center gap-2 px-2 py-1"${ocupada ? ' disabled' : ''}${
                 suya ? ' aria-current="true"' : ''}
-                onclick="hostTypeLinkTo(${jsStr(_fsLinkFor)}, 'freshservice', ${
+                onclick="deviceTypeLinkTo(${jsStr(_fsLinkFor)}, 'freshservice', ${
                     jsStr(String(x.id))})">
             <span class="flex-grow-1${suya ? ' fw-semibold' : ''}">${esc(x.name)}</span>
             ${suya ? `<i class="bi bi-check2 text-success"></i>` : ''}

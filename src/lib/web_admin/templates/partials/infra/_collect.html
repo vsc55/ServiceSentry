@@ -34,7 +34,7 @@
 //: The collection this browser started, while it is still going. `null` the rest of the time.
 //: One at a time is not a decision made here — the server holds the same lock the Status
 //: screen's run takes, so a second attempt is refused with a message rather than queued.
-let _infraCollectJob = null;      // {id, host, host_name, total, completed, modules[], done…}
+let _infraCollectJob = null;      // {id, device, device_name, total, completed, modules[], done…}
 
 //: Whether the shared dialog is currently showing THIS. The panel has one `#infoModal` and
 //: everything borrows it, so repainting it on a poll without asking would overwrite whatever
@@ -47,9 +47,9 @@ function _infraCollecting() { return !!(_infraCollectJob && !_infraCollectJob.do
 
 /** Start one. The answer is a job id, not results — see lib/core/infra/routes.py. */
 async function _infraCollect() {
-    const uid = _infraHost;
+    const uid = _infraDevice;
     if (!uid || _infraCollecting()) return;
-    const res = await apiPost(`/api/v1/infra/hosts/${encodeURIComponent(uid)}/collect`, {});
+    const res = await apiPost(`/api/v1/infra/devices/${encodeURIComponent(uid)}/collect`, {});
     if (!res || res.status !== 200) {
         showToast(res?.data?.error || t('infra_collect_failed'), 'danger');
         return;
@@ -60,7 +60,7 @@ async function _infraCollect() {
     // the dialog opens empty and the first second of a five-minute run looks like nothing
     // happened, which is the exact impression this whole file exists to prevent.
     _infraCollectJob = {
-        id: jobId, host: uid, host_name: _infraHostName(uid), done: false,
+        id: jobId, device: uid, device_name: _infraHostName(uid), done: false,
         total: (res.data.modules || []).length, completed: 0,
         modules: (res.data.modules || []).map(m => ({module: m, state: 'pending', detail: ''})),
         answered: [], errors: [], error: '',
@@ -91,11 +91,11 @@ async function _infraCollectAllRun() {
     }
     const jobId = (res.data || {}).job_id;
     if (!jobId) { showToast(t('infra_collect_failed'), 'danger'); return; }
-    // `host: ''` is what says "this one is about the fleet" — the dialog's title, its note and
+    // `device: ''` is what says "this one is about the fleet" — the dialog's title, its note and
     // which header slot shows the bar all read it, and it is the same thing the server means
-    // by a job with no host.
+    // by a job with no device.
     _infraCollectJob = {
-        id: jobId, host: '', host_name: t('infra_collect_all_scope'), done: false,
+        id: jobId, device: '', device_name: t('infra_collect_all_scope'), done: false,
         total: (res.data.modules || []).length, completed: 0,
         modules: (res.data.modules || []).map(m => ({module: m, state: 'pending', detail: ''})),
         answered: [], errors: [], error: '',
@@ -133,8 +133,8 @@ async function _infraCollectAdopt() {
 
 /** The name of a device we have in the fleet, for the dialog's title. */
 function _infraHostName(uid) {
-    const h = (_infraHosts || []).find(x => x.uid === uid);
-    return (h && h.name) || (_infraDetail && _infraDetail.host && _infraDetail.host.name) || '';
+    const h = (_infraDevices || []).find(x => x.uid === uid);
+    return (h && h.name) || (_infraDetail && _infraDetail.device && _infraDetail.device.name) || '';
 }
 
 /** Ask every second until it is done.
@@ -181,14 +181,14 @@ function _infraCollectFinish(job) {
     // Only if it is still the device that was asked: a collection takes long enough to walk
     // away from, and redrawing the machine somebody moved on to with another machine's
     // payload is worse than not redrawing at all.
-    if (_infraHost === job.host) _infraReload();
+    if (_infraDevice === job.device) _infraReload();
 }
 
 /** Open (or re-open) the dialog on the run in flight. */
 function _infraCollectOpen() {
     if (!_infraCollectJob) return;
     _infraCollectShown = true;
-    showHtmlModal(tf('infra_collect_title', _infraCollectJob.host_name || ''),
+    showHtmlModal(tf('infra_collect_title', _infraCollectJob.device_name || ''),
                   _infraCollectBody(_infraCollectJob), 'primary');
     // The dialog is closed by the user, by another dialog, or by the panel navigating. All
     // three end with `hidden`, and after it this file must stop writing into a box it no
@@ -207,7 +207,7 @@ function _infraCollectPaint() {
     if (_infraCollectShown && body && _infraCollectJob)
         body.innerHTML = `<div class="ss-modal-primary">${_infraCollectBody(_infraCollectJob)}</div>`;
     const slot = document.getElementById('infraCollectSlot');
-    if (slot) slot.innerHTML = _infraCollectSlotHtml(_infraHost);
+    if (slot) slot.innerHTML = _infraCollectSlotHtml(_infraDevice);
     // The fleet list has a slot of its own, and only one of the two is ever on screen — but
     // painting only the device one is how the list's button sat there saying "collect" while
     // a collection was running.
@@ -231,7 +231,7 @@ function _infraCollectPct(job) {
 /** The device header's slot: its button, or — while ITS run is out — the bar. */
 function _infraCollectSlotHtml(uid) {
     const job = _infraCollectJob;
-    if (!job || job.done || (uid && job.host !== uid))
+    if (!job || job.done || (uid && job.device !== uid))
         return `<button class="btn btn-sm btn-secondary" onclick="_infraCollect()"
                         title="${escAttr(t('infra_collect_tt'))}">
                     <i class="bi bi-broadcast me-1"></i>${esc(t('infra_collect'))}</button>`;
@@ -310,8 +310,8 @@ function _infraCollectBody(job) {
                  style="width:${pct}%"></div>
         </div>
         <div class="text-muted ss-fs-2 mb-2">
-            <i class="bi ${job.host ? 'bi-bullseye' : 'bi-diagram-3'} me-1"></i>${
-                esc(t(job.host ? 'infra_collect_this_device' : 'infra_collect_all_note'))}</div>
+            <i class="bi ${job.device ? 'bi-bullseye' : 'bi-diagram-3'} me-1"></i>${
+                esc(t(job.device ? 'infra_collect_this_device' : 'infra_collect_all_note'))}</div>
         <div class="small">${(job.modules || []).map(_infraCollectRow).join('')}</div>
         ${job.error ? `<div class="alert alert-danger py-2 px-3 small mt-2 mb-0">${esc(job.error)}</div>` : ''}
         <div class="small text-muted mt-3">

@@ -36,10 +36,10 @@ class _WA:
         self._behaviour = behaviour or (lambda mods, cb: ({m: {} for m in mods}, []))
         self._timeout_seen = timeout_seen if timeout_seen is not None else []
 
-    def _run_checks(self, mods, *, timeout, progress_cb, lang='', only_host=''):
+    def _run_checks(self, mods, *, timeout, progress_cb, lang='', only_device=''):
         self._timeout_seen.append(timeout)
         self.lang_seen.append(lang)
-        self.scope_seen.append(only_host)
+        self.scope_seen.append(only_device)
         return self._behaviour(mods, progress_cb)
 
     def _audit_write(self, event, user, ip, detail):
@@ -247,7 +247,7 @@ class TestItReportsWhileItRuns:
         """Most modules take a second and say nothing about phases. Their line is the module,
         and the sentence they do send belongs on it."""
         def plain(mods, cb):
-            cb('running', mods[0], 'pinging 4 hosts')
+            cb('running', mods[0], 'pinging 4 devices')
             cb('ok', mods[0], '4')
             return {m: {} for m in mods}, []
 

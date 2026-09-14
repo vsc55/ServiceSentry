@@ -8,8 +8,8 @@ Consulta [caso-guia-watchful.md](caso-guia-watchful.md) para crear el tuyo propi
 > **Módulos de sistema host-aware.** Los módulos que miden recursos del sistema
 > (`cpu`, `ram_swap`, `temperature`, `filesystemusage`, `process`, `service_status`
 > y `raid`) **no** usan `psutil` en el `check()`: ejecutan comandos de SO mediante
-> `ModuleBase.host_exec`, **en local** o **por SSH** según el host vinculado al ítem
-> (perfil `__host_profile__` de tipo `ssh`). Cada uno elige el comando propio de
+> `ModuleBase.device_exec`, **en local** o **por SSH** según el host vinculado al ítem
+> (perfil `__device_profile__` de tipo `ssh`). Cada uno elige el comando propio de
 > cada SO (Linux/Windows/FreeBSD) y parsea la salida en Python. `psutil` solo
 > se usa, cuando aplica, en el `discover()` **local** (autocompletado de la UI).
 
@@ -63,7 +63,7 @@ Estructura devuelta por el método `check()` de cada módulo:
 ## 🖥️ cpu — Uso de CPU
 
 Monitoriza el porcentaje de uso de CPU. Es **host-aware**: cada ítem se vincula a un
-host del registro y la CPU se mide vía `ModuleBase.host_exec` **en local o por SSH**
+host del registro y la CPU se mide vía `ModuleBase.device_exec` **en local o por SSH**
 con el comando propio de cada SO (nunca `psutil` en el check).
 
 **Plataforma:** Linux, Windows, FreeBSD 🌐
@@ -90,9 +90,9 @@ con el comando propio de cada SO (nunca `psutil` en el check).
 | `list.*.alert` | int | 0 | Umbral por ítem; `0` (en blanco) hereda el `alert` global |
 
 > La clave de cada ítem de `list` (p. ej. `local`) identifica el ítem; la CPU se mide
-> en el **host vinculado** (`__host_profile__` de tipo `ssh`; sin vínculo = local).
+> en el **host vinculado** (`__device_profile__` de tipo `ssh`; sin vínculo = local).
 
-**Flujo:** `ModuleBase.host_exec(item, cmd)` (local o SSH) ejecuta el comando de CPU
+**Flujo:** `ModuleBase.device_exec(item, cmd)` (local o SSH) ejecuta el comando de CPU
 propio del SO (`_cpu_cmd`): `cat /proc/stat` en Linux, `sysctl -n kern.cp_time` en
 FreeBSD, `wmic cpu get loadpercentage /value` en Windows. En
 Linux/FreeBSD se toman **dos muestras** con la espera de `interval` en Python (el delta
@@ -143,7 +143,7 @@ Comprueba los días hasta la expiración de certificados SSL/TLS de servidores r
 | `list.*.warning_days` | int | 0 | Umbral de alerta por host. `0` usa el valor global |
 | `list.*.timeout` | int | 0 | Timeout por host en segundos. `0` usa el valor global |
 
-Es **host-aware**: el ítem puede vincularse a un host del registro y heredar la dirección (`__host_profile__`).
+Es **host-aware**: el ítem puede vincularse a un host del registro y heredar la dirección (`__device_profile__`).
 
 **Flujo:** `ssl.create_default_context()` + `socket.create_connection()` → `ssock.getpeercert(binary_form=True)` (DER) → `cryptography.x509.load_der_x509_certificate(der)` → lee `not_valid_after` → calcula días restantes → alerta si `days_left <= warning_days`.
 
@@ -153,7 +153,7 @@ Es **host-aware**: el ítem puede vincularse a un host del registro y heredar la
 
 ## ⚙️ process — Procesos en Ejecución
 
-Verifica que los procesos del sistema están en ejecución comprobando el número mínimo de instancias activas. Es **host-aware**: cada ítem se vincula a un host del registro y la lista de procesos se lee vía `ModuleBase.host_exec` en local o por SSH.
+Verifica que los procesos del sistema están en ejecución comprobando el número mínimo de instancias activas. Es **host-aware**: cada ítem se vincula a un host del registro y la lista de procesos se lee vía `ModuleBase.device_exec` en local o por SSH.
 
 **Plataforma:** Linux, Windows, FreeBSD 🌐
 
@@ -186,7 +186,7 @@ Verifica que los procesos del sistema están en ejecución comprobando el númer
 
 **Discover:** El botón "Discover" en la cabecera de la colección y el botón inline junto al campo `process` enumeran todos los procesos activos del sistema ordenados alfabéticamente, con el número de instancias en ejecución. Al seleccionar uno se rellena automáticamente el campo y la clave del ítem. El descubrimiento usa `psutil.process_iter(['name'])` en el host **local**, o el comando por SSH para un host remoto.
 
-**Flujo:** `ModuleBase.host_exec(item, cmd)` ejecuta el listado de procesos del SO (`ps -A -o comm=` en Unix, `tasklist /FO CSV /NH` en Windows) → cuenta instancias con nombre coincidente (case-insensitive) → alerta si `count < min_count`. `psutil` **no** se usa en el check, solo en `discover()` local.
+**Flujo:** `ModuleBase.device_exec(item, cmd)` ejecuta el listado de procesos del SO (`ps -A -o comm=` en Unix, `tasklist /FO CSV /NH` en Windows) → cuenta instancias con nombre coincidente (case-insensitive) → alerta si `count < min_count`. `psutil` **no** se usa en el check, solo en `discover()` local.
 
 ---
 
@@ -340,7 +340,7 @@ Es **host-aware** (el ítem puede vincularse a un host del registro).
 
 ## 📁 filesystemusage — Uso de Disco
 
-Monitoriza el porcentaje de uso de particiones. Es **host-aware**: cada ítem se vincula a un host del registro y el uso se mide vía `ModuleBase.host_exec` en local o por SSH.
+Monitoriza el porcentaje de uso de particiones. Es **host-aware**: cada ítem se vincula a un host del registro y el uso se mide vía `ModuleBase.device_exec` en local o por SSH.
 
 **Plataforma:** Linux, Windows, FreeBSD 🌐
 
@@ -381,7 +381,7 @@ Monitoriza el porcentaje de uso de particiones. Es **host-aware**: cada ítem se
 
 > **Formato legacy:** el valor de un ítem puede ser directamente un entero (`"/": 90`) — se interpreta como umbral de alerta para esa partición. La UI lo promueve automáticamente al formato dict al renderizarlo.
 
-**Flujo:** `ModuleBase.host_exec(item, cmd)` ejecuta `df -P -k` en Unix o `wmic logicaldisk get DeviceID,FreeSpace,Size /format:value` en Windows → parsea el % de uso de la partición → compara con el umbral. `psutil` **no** se usa en el check, solo en `discover()` local. Un fallo duro (`df` inalcanzable, punto de montaje inexistente) se reporta como `down`.
+**Flujo:** `ModuleBase.device_exec(item, cmd)` ejecuta `df -P -k` en Unix o `wmic logicaldisk get DeviceID,FreeSpace,Size /format:value` en Windows → parsea el % de uso de la partición → compara con el umbral. `psutil` **no** se usa en el check, solo en `discover()` local. Un fallo duro (`df` inalcanzable, punto de montaje inexistente) se reporta como `down`.
 
 > **Severidad:** superar el umbral emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
@@ -424,7 +424,7 @@ Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco. A
 | `list.*.alert` | int | 0 | Umbral por ítem (°C); `0` (en blanco) hereda el global |
 
 > La **dirección del host** no es un campo de `list`: el ítem se **vincula a un host**
-> del registro y hereda la dirección vía `__host_profile__` (la `key` del item se usa
+> del registro y hereda la dirección vía `__device_profile__` (la `key` del item se usa
 > como fallback). Ver [explica-web-admin.md → Dispositivos](explica-web-admin.md#dispositivos-registro-de-hosts).
 
 **Flujo:** `socket.create_connection(host, port)` → lee datos → parsea formato `|dev|model|temp|unit|` → compara con el umbral.
@@ -726,7 +726,7 @@ Monitoriza arrays RAID software de Linux leyendo `/proc/mdstat`, localmente y v�
 > **Modelo actual (host-aware):** en el `schema.json` vigente, cada ítem de `list`
 > tiene solo `enabled` y `label`; la **conexión SSH** (host/puerto/usuario/clave) ya
 > **no** son campos del ítem, sino que se heredan al **vincular el ítem a un host**
-> del registro (`__host_profile__` + credenciales reutilizables). El ejemplo de
+> del registro (`__device_profile__` + credenciales reutilizables). El ejemplo de
 > arriba con `host`/`user`/`key_file` inline es el **formato legacy** (clave `remote`),
 > que sigue leyéndose por compatibilidad. Ver [explica-web-admin.md → Dispositivos](explica-web-admin.md#dispositivos-registro-de-hosts).
 
@@ -748,7 +748,7 @@ Monitoriza arrays RAID software de Linux leyendo `/proc/mdstat`, localmente y v�
 
 ## 🐏 ram_swap — Uso de RAM y SWAP
 
-Monitoriza el porcentaje de uso de RAM y SWAP. Es **host-aware**: cada ítem se vincula a un host del registro y la memoria se mide vía `ModuleBase.host_exec` en local o por SSH (nunca `psutil` en el check).
+Monitoriza el porcentaje de uso de RAM y SWAP. Es **host-aware**: cada ítem se vincula a un host del registro y la memoria se mide vía `ModuleBase.device_exec` en local o por SSH (nunca `psutil` en el check).
 
 **Plataforma:** Linux, Windows, FreeBSD 🌐
 
@@ -773,9 +773,9 @@ Monitoriza el porcentaje de uso de RAM y SWAP. Es **host-aware**: cada ítem se 
 | `list.*.label` | string | `""` | Nombre visible del ítem |
 | `list.*.alert_ram` / `alert_swap` | int | 0 | Umbral por ítem; `0` (en blanco) hereda el valor del módulo |
 
-> Cada ítem de `list` se mide en el **host vinculado** (`__host_profile__` de tipo `ssh`; sin vínculo = local). El check emite **dos resultados** por ítem: `<clave>_ram` y `<clave>_swap` (el SWAP solo si el SO lo reporta).
+> Cada ítem de `list` se mide en el **host vinculado** (`__device_profile__` de tipo `ssh`; sin vínculo = local). El check emite **dos resultados** por ítem: `<clave>_ram` y `<clave>_swap` (el SWAP solo si el SO lo reporta).
 
-**Flujo:** `ModuleBase.host_exec(item, cmd)` ejecuta el/los comando(s) de memoria propios del SO (`_MEM_CMDS`): `cat /proc/meminfo` en Linux, `wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value` en Windows, `sysctl`/`swapinfo -k` en FreeBSD → parsea el % de uso en Python → compara con los umbrales. Un SO no soportado o un fallo duro se reporta como problema (`down`/parse).
+**Flujo:** `ModuleBase.device_exec(item, cmd)` ejecuta el/los comando(s) de memoria propios del SO (`_MEM_CMDS`): `cat /proc/meminfo` en Linux, `wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value` en Windows, `sysctl`/`swapinfo -k` en FreeBSD → parsea el % de uso en Python → compara con los umbrales. Un SO no soportado o un fallo duro se reporta como problema (`down`/parse).
 
 > **Severidad:** superar el umbral de RAM/SWAP emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
@@ -783,7 +783,7 @@ Monitoriza el porcentaje de uso de RAM y SWAP. Es **host-aware**: cada ítem se 
 
 ## ⚙️ service_status — Estado de Servicios del Sistema
 
-Comprueba si los servicios del sistema están en ejecución. Es **host-aware** (el estado se lee en local o por SSH según el host vinculado vía `ModuleBase.host_exec`), soporta **auto-remediación** (inicio/detención automática) y permite definir el **estado esperado** por servicio (`running` o `stopped`).
+Comprueba si los servicios del sistema están en ejecución. Es **host-aware** (el estado se lee en local o por SSH según el host vinculado vía `ModuleBase.device_exec`), soporta **auto-remediación** (inicio/detención automática) y permite definir el **estado esperado** por servicio (`running` o `stopped`).
 
 **Plataforma:** Linux, Windows, FreeBSD 🌐
 
@@ -830,7 +830,7 @@ Comprueba si los servicios del sistema están en ejecución. Es **host-aware** (
 
 > **Descubrimiento:** la UI web incluye un botón para listar automáticamente los servicios del sistema e incorporarlos a la configuración con un solo clic. El `discover()` sí ramifica según el init system detectado (systemd `list-units`, OpenRC `rc-status`, SysV `/etc/init.d`) o el SO del host remoto por SSH — a diferencia del check.
 
-**Comando de estado por SO** (ejecutado vía `host_exec`, servicio *shell-quoted*):
+**Comando de estado por SO** (ejecutado vía `device_exec`, servicio *shell-quoted*):
 
 | SO | Comando de estado |
 | -- | ----------------- |
@@ -841,12 +841,12 @@ Comprueba si los servicios del sistema están en ejecución. Es **host-aware** (
 **Flujo:**
 ```text
 Por cada servicio habilitado (en el host vinculado, local o SSH):
-   Ejecuta el comando de estado del SO vía host_exec  →  running/stopped
+   Ejecuta el comando de estado del SO vía device_exec  →  running/stopped
    estado_real vs. expected
    ├── Coincide  → OK ✅
    └── Difiere   → FALLO ⚠️
        └── Si remediation=true:
-           ├── start / stop según expected (comando de acción del SO vía host_exec)
+           ├── start / stop según expected (comando de acción del SO vía device_exec)
            ├── Re-check del estado
            └── Notifica el resultado de la recuperación
 ```
@@ -892,7 +892,7 @@ sub-colección de **checks** (OIDs a comprobar):
 
 > **Los campos de conexión tampoco los escribe el módulo.** La colección nombra el protocolo
 > (`"__profile_fields__": "snmp"`) y el panel expande dentro de ella la declaración del core
-> (`HOST_PROFILE`), con sus etiquetas y sus ayudas. `__host_profile__` sólo dice qué hereda un
+> (`HOST_PROFILE`), con sus etiquetas y sus ayudas. `__device_profile__` sólo dice qué hereda un
 > check **atado** a un host; no pinta nada en el formulario de uno sin atar, y un check contra
 > una IP suelta tiene que poder decir su comunidad y sus claves v3 — eso era lo que obligaba a
 > escribirlos dos veces. Ver [ref-schema-json.md](ref-schema-json.md).
@@ -949,7 +949,8 @@ resolución host-céntrica, no el bucle de comprobaciones:
 | `group` | A qué **tabla** pertenece la métrica, para las tablas cuyas filas no tienen nombre: la identidad de una fila es su nombre, y sin él dos tablas caen a su índice SNMP — donde almacenamiento fila 3 y procesador fila 3 no son la misma fila |
 | `chart` | `line`, `area`, `value` o `none` |
 | `role` | Para los `text`: `name`, `model`, `location`… — lo que hace reconocible a la máquina. **Un papel por perfil**: la fila tiene una casilla por papel, así que dos textos que pidan `model` son el segundo pisando al primero sin decirlo |
-| `of_device` | Sólo para los `text` de una tabla: sus filas describen **la caja**, no cosas de dentro. `ipAddrTable` son las direcciones de *una* máquina, así que se pliegan en **un** dato del dispositivo, unidas en el orden en que las anduvo el agente y sin repetir. Una fila por dirección deja la respuesta a «qué es esta caja en la red» en cinco filas que nada abre |
+| `of_device` | Sólo para los `text` de una tabla: sus filas describen **la caja**, no cosas de dentro. `ipAddrTable` son las direcciones de *una* máquina, así que se pliegan en **un** dato del dispositivo, unidas en el orden en que las anduvo el agente y sin repetir. Una fila por dirección deja la respuesta a «qué es esta caja en la red» en cinco filas que nada abre |
+
 | `present_when` | **A nivel de perfil.** Cómo saber si la pieza que este perfil describe está de verdad ahí: `{"field": "…", "above": 0}`. Un agente contesta una tabla exista o no el hardware detrás — SYNOLOGY-GPUINFO lo contesta cualquier NAS, con GPU o sin ella (uso 0 %, memoria 0 B), y el resumen de todos ellos criaba una tarjeta de GPU que no decía nada. Cero es una lectura y no puede decir «aquí no hay nada» por sí solo, y el panel tampoco puede decidirlo: el perfil nombra la columna que es la prueba, porque una GPU sin memoria no es una GPU ociosa. Mientras no se cumpla, ninguna lectura del perfil es cabecera — se quedan en Medidas, que es donde la pregunta es qué contestó. Una lectura ausente no es una lectura de cero: si la columna no contestó, la pieza se da por presente, o un datagrama perdido vaciaría el resumen |
 | `states[…].absent` | Este valor significa que **la pieza no está**. Un switch pasivo contesta «ventilador: no presente», que es cierto y no es noticia: el resumen contesta «cómo está esta caja», y un componente que la caja dice no tener no tiene condición que reportar. Sale del resumen y se queda en Medidas, donde la pregunta es qué contestó |
 | `aggregate` | `"sum"`: la columna se graba como **un solo número** para todo el dispositivo, lo que suman sus filas. A diferencia del recuento —que se calcula al dibujar— esto es una **medida**: se suma donde se lee y entra en la serie como cualquier otra, que es la diferencia entre un número en una tarjeta y una gráfica con una semana detrás. Cada fila conserva su propia línea base (sumar contadores crudos antes de derivarlos daría un pico cada vez que aparece un puerto). El tráfico general de un switch es el caso: lo dibuja cualquier herramienta de monitorización y no lo sirve ningún agente, porque es la suma de los puertos |
@@ -960,7 +961,8 @@ resolución host-céntrica, no el bucle de comprobaciones:
 | `chart_with` | Lista de claves de otras métricas que van **en la misma gráfica**. El tráfico de entrada y el de salida no son dos preguntas —nadie mira lo que recibió un enlace sin mirar lo que envió— y dos gráficas una al lado de otra, con dos escalas ajustadas por separado, es esa comparación hecha imposible. Qué columnas van juntas lo dice el perfil: el núcleo tendría que saber que entrada y salida son pareja y que CPU y temperatura no. Se dibuja **una** tarjeta con las dos cifras y **una** petición al histórico (son columnas del mismo resultado, así que cada punto ya trae las dos) |
 | `chart_label` | Cómo se llama esa gráfica combinada. La etiqueta de la métrica nombra **una mitad**, y una gráfica de las dos titulada «Tráfico de entrada» es una gráfica que miente sobre sí misma. Solo tiene sentido junto a `chart_with` |
 | `where` | **Qué filas** de una tabla es esta métrica, por lo que diga otra columna de ellas: `{"oid": "…4.21.1.1", "equals": "0.0.0.0"}`. La pasarela por defecto es el siguiente salto **de la fila** cuyo destino es 0.0.0.0, y el de cualquier otra fila contesta otra pregunta. Coincidencia exacta y no patrón: lo que se selecciona aquí son constantes de protocolo, y una expresión regular sería una forma de escribir un filtro que acierta a medias sin querer |
-| `skip` | Lecturas que **no son respuestas**, como expresión regular: una columna contesta por todas sus filas, incluidas las que no dicen nada a nadie (`ipAddrTable` lista el loopback al lado de la dirección por la que se llega de verdad). El patrón es del **perfil** — el núcleo no tiene opinión sobre qué significa 127, y el siguiente perfil querrá descartar «N/A». Un patrón que no compila es *ningún* filtro, no uno que lo tira todo |
+| `skip` | Lecturas que **no son respuestas**, como expresión regular: una columna contesta por todas sus filas, incluidas las que no dicen nada a nadie (`ipAddrTable` lista el loopback al lado de la dirección por la que se llega de verdad). El patrón es del **perfil** — el núcleo no tiene opinión sobre qué significa 127, y el siguiente perfil querrá descartar «N/A». Un patrón que no compila es *ningún* filtro, no uno que lo tira todo |
+
 | `match.sysobjectid_prefix` | **Quién fabricó** el dispositivo: qué dispositivos reclama el perfil; gana el prefijo **más específico** |
 | `match.probe` | **Qué sirve** el dispositivo: un OID que, si contesta, hace que el perfil aplique. Es el que importa para los genéricos — «¿implementa la HOST-RESOURCES-MIB?» no lo puede contestar un `sysObjectID`: un Synology, un Linux y un Windows la implementan y sus `sysObjectID` no tienen nada que ver |
 | `match.supersedes` | Qué perfiles genéricos **desplaza** éste en los dispositivos que reclama: un Synology contesta el sondeo de E/S de UCD y el suyo, y los dos miden los mismos discos |
@@ -992,10 +994,12 @@ grupos de más abajo):
 | `ucd_linux` | UCD-SNMP-MIB | CPU, carga y memoria, más los contadores que sólo importan en un hipervisor: **CPU robada** al anfitrión y **CPU gastada dentro de las invitadas** |
 | `hr_storage` | HOST-RESOURCES-MIB | Uso y capacidad por volumen |
 | `disk_io` | UCD-SNMP-MIB | Bytes y operaciones por segundo, por dispositivo de bloque |
-| `lm_sensors` | LM-SENSORS-MIB | Temperaturas, ventiladores y voltajes, una fila por sonda |
+| `lm_sensors` | LM-SENSORS-MIB | Temperaturas, ventiladores y voltajes, una fila por sonda |
+
 | `bridge_vlans` | Q-BRIDGE-MIB | Las **VLAN configuradas**, con el nombre que alguien les puso. La tabla de interfaces sólo dice que una fila es «virtual»: no dice qué VLAN es, cómo se llama, ni que existe cuando aún no hay nada puenteado a ella |
 | `lldp` | LLDP-MIB | **A quién ve el dispositivo al otro lado de sus propios cables**, y por cuál de los puertos de ellos. Lo único en SNMP que contesta la topología con exactitud: lo demás dice quién alcanza a quién. Una fila por vecino **y puerto**. Sólo contesta donde alguien corre un agente LLDP (`lldpd` en Linux, de fábrica en casi todo switch gestionable) |
-| `ucd_disk` | UCD-SNMP-MIB | Cuán lleno está cada sistema de ficheros **en porcentaje**, inodos incluidos, y la bandera «se pasó del límite» del propio agente. Porcentajes y no bytes: `dskTotal` es una cuenta de kibibytes de 32 bits y da la vuelta en silencio a partir de 2 TiB |
+| `ucd_disk` | UCD-SNMP-MIB | Cuán lleno está cada sistema de ficheros **en porcentaje**, inodos incluidos, y la bandera «se pasó del límite» del propio agente. Porcentajes y no bytes: `dskTotal` es una cuenta de kibibytes de 32 bits y da la vuelta en silencio a partir de 2 TiB |
+
 | `ucd_extend` | NET-SNMP-EXTEND-MIB | Sistema operativo, modelo, fabricante y número de serie de la máquina, de las directivas `extend` de `snmpd.conf` (la convención de Observium/LibreNMS). Un Linux pelado no contesta ninguna MIB de fabricante, así que sin esto no hay ni modelo ni marca en ninguna parte |
 
 Los contadores de interfaz dicen *cuánto* tráfico hubo; `ip_stats` dice *qué pasó* con él, y las
@@ -1147,7 +1151,8 @@ propone como **una sola fila**. Comprobado sobre el catálogo real, nueve casos:
 | Synology | `grp_synology` |
 | MikroTik | `grp_mikrotik` |
 | Linksys | `grp_linksys` |
-| Linux con net-snmp | `grp_linux` |
+| Linux con net-snmp | `grp_linux` |
+
 | Nodo Proxmox VE | `grp_proxmox` — **a mano** (ver abajo) |
 | SAI de APC | `grp_network` + `apc_ups` |
 | Un switch de cualquier otro | `grp_network` |
@@ -1282,7 +1287,7 @@ importaciones por URL pasan por el guard SSRF `validate_external_url()`. Ver
 
 ## 🌡️ temperature — Sensores Térmicos
 
-Monitoriza sensores de temperatura del sistema leyendo `/sys/class/thermal/*` en el host vinculado vía `ModuleBase.host_exec`. Es **host-aware**: el sensor se lee en local o por SSH según el host del registro.
+Monitoriza sensores de temperatura del sistema leyendo `/sys/class/thermal/*` en el host vinculado vía `ModuleBase.device_exec`. Es **host-aware**: el sensor se lee en local o por SSH según el host del registro.
 
 **Plataforma:** Linux (**solo Linux**)
 
@@ -1319,7 +1324,7 @@ Monitoriza sensores de temperatura del sistema leyendo `/sys/class/thermal/*` en
 > **Claves de sensor:** el nombre proviene del `type` de cada *thermal zone* (p. ej. `coretemp`, `acpitz`); los duplicados se numeran (`coretemp`, `coretemp_1`…). Los nombres exactos disponibles dependen del hardware.
 > **Descubrimiento:** la UI web incluye un botón para listar automáticamente los sensores disponibles e incorporarlos a la configuración con un solo clic. Muestra el nombre y la temperatura actual (lee las thermal zones en local o por SSH).
 
-**Flujo:** `ModuleBase.host_exec(item, cmd)` ejecuta un único `grep -H . /sys/class/thermal/thermal_zone*/{type,temp}` → correlaciona `type`↔`temp` por zona en Python → compara la temperatura del sensor con el umbral → alerta si lo supera. Un fallo de lectura del sensor se reporta como `down`.
+**Flujo:** `ModuleBase.device_exec(item, cmd)` ejecuta un único `grep -H . /sys/class/thermal/thermal_zone*/{type,temp}` → correlaciona `type`↔`temp` por zona en Python → compara la temperatura del sensor con el umbral → alerta si lo supera. Un fallo de lectura del sensor se reporta como `down`.
 
 > **Severidad:** superar el umbral de temperatura emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
@@ -1362,7 +1367,7 @@ Comprueba que las URLs responden con el código HTTP esperado.
 | `timeout` | int | 15 | Timeout por defecto de la petición (global) |
 | `list.*.enabled` | bool | `true` | Habilitar monitorización de esta URL |
 | `list.*.label` | string | `""` | Nombre mostrado en la UI. Si está vacío, se usa la clave del ítem |
-| `list.*.server` | string | `""` | Host/dirección base. Si está vacío, se usa la clave del ítem o el host vinculado (`__host_profile__` `http`) |
+| `list.*.server` | string | `""` | Host/dirección base. Si está vacío, se usa la clave del ítem o el host vinculado (`__device_profile__` `http`) |
 | `list.*.path` | string | `""` | Ruta a añadir a la URL base (p. ej. `/health`) |
 | `list.*.scheme` | string | `https` | Esquema: `http` o `https` |
 | `list.*.port` | int | 0 | Puerto; `0` (en blanco) usa el estándar del esquema |

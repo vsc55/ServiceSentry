@@ -56,10 +56,10 @@ class _SyslogMixin:
         cfg = {**section_defaults('syslog'),
                **{k: v for k, v in saved.items() if v is not None}}
         cfg = overlay_section_env('syslog', cfg)   # SS_SYSLOG_* env wins over saved/defaults
-        host_override = getattr(self, '_host_override', None)
+        device_override = getattr(self, '_host_override', None)
         port_override = getattr(self, '_port_override', None)
-        if host_override:
-            cfg['bind_host'] = host_override
+        if device_override:
+            cfg['bind_host'] = device_override
         if port_override is not None:
             cfg['udp_port'] = port_override
             cfg['tcp_port'] = port_override

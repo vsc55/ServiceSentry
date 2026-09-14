@@ -300,7 +300,7 @@ class _MonitoringMixin:
         monitor = self._monitoring_get_monitor()
         # Apply global|log_level + re-read the effective (DB) config each cycle so
         # live edits to verbosity / Telegram / public URL take effect without a
-        # restart; then drop stale live status for hosts now in maintenance.
+        # restart; then drop stale live status for devices now in maintenance.
         monitor.debug.set_from_config(cfg_get(self._config_section('global'), 'global|log_level'))
         monitor.refresh_runtime_config()
         monitor.purge_maintenance_states()

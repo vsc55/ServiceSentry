@@ -21,7 +21,7 @@ _CSP_HEAD = (
 )
 _CSP_TAIL = "base-uri 'self'; form-action 'self'; object-src 'none'"
 # NOTE: this module stays provider-agnostic. Integration-specific frame-ancestors (e.g. the
-# Microsoft Teams/Outlook hosts) are declared by the provider via wa._register_embed_origins()
+# Microsoft Teams/Outlook devices) are declared by the provider via wa._register_embed_origins()
 # and discovered at startup — not hardcoded here.
 
 

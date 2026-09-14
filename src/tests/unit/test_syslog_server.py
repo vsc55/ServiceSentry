@@ -160,13 +160,13 @@ class TestLifecycle:
 
 
 class TestLoad:
-    """Under fan-in load a real collector sees many hosts connecting at once and
+    """Under fan-in load a real collector sees many devices connecting at once and
     streaming bursts.  TCP is a reliable stream, so *nothing* may be lost: every
     framed message must reach the sink exactly once.  (UDP is best-effort by design
     — see ``test_udp_burst_is_best_effort`` — so it gets a tolerant assertion.)"""
 
     def test_many_concurrent_connections_no_loss_tcp(self, sink):
-        # 1000 hosts connected at the same time, each streaming a few messages = 5000.
+        # 1000 devices connected at the same time, each streaming a few messages = 5000.
         # Phase 1 opens ALL sockets first (bounded to the listen backlog so we don't
         # self-inflict SYN drops), holding them open — so the server really holds 1000
         # live connections, one reader thread each, at once.  Phase 2 then streams on

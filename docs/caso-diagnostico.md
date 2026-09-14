@@ -5,6 +5,104 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## El menú que se cerraba a mitad de camino, y sólo con la barra desplazada
+
+**Síntoma.** Al ir de una sección de la barra izquierda a su menú desplegado —de «Infraestructura»
+a «Dispositivos / Clases / Clústeres»— el menú se cerraba a medio camino. No siempre: «yo diría
+que es por el scroll». Reportado desde la pantalla.
+
+**Diagnóstico.** Lo era. Con la lista de secciones desplazando, la geometría es ésta:
+
+```
+|<-- lista de secciones -->|<- barra ->|
+|  fila pulsable hasta 230 |    10px   | 240 = aquí empieza el menú
+                            ^^^^^^^^^^^
+                            de nadie
+```
+
+El menú se coloca en el borde del **carril** (a propósito: con la barra plegada, la fila mide lo
+que un icono y anclarlo a ella lo dejaba a mitad de camino). Las filas, en cambio, se pueden pisar
+sólo hasta donde llega el **contenido** de la lista: la barra de desplazamiento se come 10px por
+dentro y las recorta ahí. Entre las dos queda una franja que no pertenece ni a la fila ni al menú
+— es de la lista.
+
+Al pisarla salta `mouseleave` sobre el bloque, el menú se oculta y, **ya oculto, no queda nada
+bajo el ratón donde volver a entrar**: el `mouseenter` que lo reabriría no llega nunca. Sin barra
+de desplazamiento no hay franja y no pasa, que es por lo que iba y venía.
+
+Con la barra plegada ocurre igual y por lo mismo: la barra de desplazamiento sigue ahí, recorta la
+fila en 46 y el menú sale en 56.
+
+**Causa raíz.** Dos bordes distintos tratados como el mismo: **dónde se dibuja** el menú (el
+carril) y **hasta dónde se puede pisar** la fila (el contenido de la lista, sin su barra). Mientras
+coinciden no se nota; el día que algo se interpone entre los dos —una barra de desplazamiento— el
+hueco es un agujero por el que se sale el ratón.
+
+**Solución.** Una franja transparente pegada al lado izquierdo del menú (`::before`), tan ancha
+como el hueco. El ancho lo mide el JS al colocarlo, de `clientWidth` de la lista —el ancho **sin**
+la barra, que es justo donde acaba lo pisable— y lo pasa en `--ss-fly-puente`. La franja es parte
+del menú, así que pisarla es estar dentro: deja de haber tierra de nadie. Tres casos en
+`tests/e2e/test_ui_playwright.py`, con el hueco forzado por CSS porque el navegador sin ventana
+dibuja las barras superpuestas (0 px) y el fallo no aparece.
+
+**Lección.** Un retardo al cerrar habría tapado el síntoma sin quitar el hueco — y con el ratón
+lento, o parándose a medias, habría vuelto. Cuando algo «se cierra solo» al moverse entre dos
+elementos, la pregunta no es cuánto esperar antes de cerrar: es **qué hay exactamente en el camino
+entre los dos**. Se contesta pidiéndole al navegador el `elementFromPoint` de cada píxel del
+recorrido, que es lo que acabó señalando la franja.
+
+## La tabla renombrada que nunca se adoptó, y la pantalla llena de uids
+
+**Síntoma.** Después de renombrar el dominio `host` → `device`, el panel arrancaba y no salía
+**ningún dispositivo**. En Clases, las once filas se llamaban `host_type_camera`,
+`host_type_server`… Y en media pantalla —cuadro de mando, mapa, armarios— donde va el nombre de
+una máquina salía su uid. Ni un error en el log.
+
+**Diagnóstico.** Tres cosas encadenadas, y la primera explica las otras dos.
+
+`TableSpec.former_names` renombra una tabla al arrancar, y decidía así:
+
+```python
+if not spec.former_names or self.table_exists(spec.name):
+    return False            # «ya existe la nueva, no hay nada que hacer»
+```
+
+La pregunta está mal. `devices` **existía**: la había creado vacía una pasada de esquema anterior
+a la declaración del renombrado —con `dev_watch` vivo, cualquier edición de un `.py` aplica el
+esquema a la base real, así que basta un reinicio a mitad de trabajo—. Desde ese momento la
+adopción no se disparaba nunca: las 19 filas se quedaron en `hosts` y `devices` contestaba «no
+hay nada» a todas las lecturas. **Sin error, porque una tabla vacía es una respuesta válida.**
+
+De ahí sale lo del uid: quien dibuja una fila pide el nombre al registro y, si no lo encuentra,
+enseña lo único que tiene. `esc(n.name || uid)` está en una docena de sitios y todos hacían lo
+correcto sobre un registro que había desaparecido.
+
+Y un segundo fallo, independiente: la clave de idioma de las once de serie está **guardada en la
+fila** (`label_key`). Renombrarla en los ficheros de idioma no cambia la base, y `t()` devuelve la
+clave que se le da cuando no la encuentra — así que la columna del nombre pasó a enseñar la clave.
+
+De regalo, un tercero que explica por qué no se vio antes: el renombrado masivo reescribió la
+cadena **dentro de la propia declaración**, y `devices` acabó diciendo `former_names=('devices',)`
+— que antes se llamaba como se llama.
+
+**Causa raíz.** Reconocer el trabajo por un **estado** («¿existe la tabla nueva?») en vez de por
+la **propiedad** que la migración existe para establecer («¿dónde están las filas?»). Es
+exactamente la misma forma que la ficha de arriba, y volvió a costar una pantalla en blanco.
+
+**Solución.** `adopt_former_name` decide por las filas: si la nueva está vacía y una anterior
+tiene datos, la vacía se tira y la que tiene los datos ocupa su sitio; si las dos tienen filas no
+se toca nada y se registra como error, porque juntarlas es una decisión sobre datos; si la
+anterior está vacía, se retira. Y una declaración que se nombra a sí misma se ignora, o la rama
+del nonato se encuentra a sí misma y tira la tabla con todo dentro. Las claves guardadas se
+reescriben al arrancar desde el nombre corto (`device_type_` + `slug`). Seis casos en
+`tests/unit/test_db_schema.py` y tres en `tests/unit/test_device_types.py`.
+
+**Lección.** Una migración se pregunta **dónde está el dato**, nunca **qué artefacto existe**. Un
+artefacto lo crea cualquiera —otra pasada, otro proceso, un reinicio a destiempo— y el día que
+aparece antes de tiempo la migración se apaga para siempre, en silencio. Y cuando media pantalla
+empieza a enseñar identificadores donde había nombres, no son doce fallos de pintado: es que el
+sitio de donde salían los nombres dejó de contestar.
+
 ## La migración que no llegó a ejecutarse, y la limpieza que borró media fila
 
 **Síntoma.** Dos cosas a la vez en la pantalla de clases, las dos reportadas mirándola:
@@ -47,7 +145,7 @@ Por el camino, dos cosas más que enseñó el mismo caso:
 * **el DDL no viaja en la transacción** —el conector lo manda por su propia conexión—, así que un
   fallo a mitad deja la tabla vieja apartada y la nueva vacía: no se deshace nada. Esa tabla
   apartada es ahora el otro sitio donde se busca trabajo, para poder terminar la vuelta;
-* **los índices siguen a la tabla renombrada**, y `idx_host_type_name` seguía ocupado cuando la
+* **los índices siguen a la tabla renombrada**, y `idx_device_type_name` seguía ocupado cuando la
   tabla nueva lo pedía.
 
 **Lección.** Una migración se escribe para **la base que se va a encontrar**, no para la que había
@@ -1429,7 +1527,7 @@ después espera a la red. Así que el problema estaba en la respuesta de
 reales en vez de razonar:
 
 ```text
-_host_statuses(wa)  (toda la flota)                 1,3 ms
+_device_statuses(wa)  (toda la flota)                 1,3 ms
 history_meta(snmp)                                 35,4 ms
 history_meta(ping|cpu|filesystemusage)             ~1   ms
 check_state.as_status_dict()                         27 ms
@@ -1538,7 +1636,7 @@ llevaban desde el primer día en rojo sin que nadie lo supiera.
 
 ## Dos NAS en aviso con todas sus lecturas en verde
 
-**Fecha:** 2026-08-24 · **Área:** `lib/core/hosts/service.py::_host_statuses`
+**Fecha:** 2026-08-24 · **Área:** `lib/core/devices/service.py::_device_statuses`
 
 **Síntoma.** «¿Por qué los NAS erebor e isen salen en warning?» En la lista de Infraestructura
 los dos con la insignia ámbar. Ningún check fallando, ninguna severidad, ningún mensaje. El
@@ -1562,7 +1660,7 @@ elif a['has_warn'] or a['known'] == 0:
     out[uid] = 'warning'      # tiene checks activos y ninguno evaluado todavia
 ```
 
-`known == 0`. Reproducido ejecutando `_host_statuses` con sus datos reales:
+`known == 0`. Reproducido ejecutando `_device_statuses` con sus datos reales:
 
 ```text
 warning  PVE01      <- de verdad (el disco ceph)
@@ -1725,7 +1823,7 @@ sampled.extend(_devices.devices_to_sample(hosts_store, bound))   # el resto, del
 
 `bound` es el conjunto de hosts de los que «ya se encarga un item», y el rescate desde el
 registro salta a los que están dentro. El switch tenía un item SNMP ligado **con checks OID y
-sin perfiles de dispositivo**: entraba en `bound` por tener `host_uid`, y no entraba en
+sin perfiles de dispositivo**: entraba en `bound` por tener `device_uid`, y no entraba en
 `sampled` por no tener perfiles.
 
 Reclamado por un item que no muestrea nada, y por eso descartado por el único que lo habría
@@ -2123,7 +2221,7 @@ bonito». Lo segundo no distingue el daño propio del contenido ajeno, y lo borr
 **Síntoma** — Se pulsa **Probar servidor** en un NAS con SNMP y perfiles (sin SSH y sin checks
 de OID) y el modal se queda en «Probando…» sin sacar nada. No hay error, no hay resultados.
 
-**Diagnóstico** — `/api/v1/hosts/test` ejecuta cada check enlazado del host, y para SNMP eso
+**Diagnóstico** — `/api/v1/devices/test` ejecuta cada check enlazado del host, y para SNMP eso
 incluye el **muestreo de perfiles**, cuyo docstring lo dice entero: *«Read every metric of
 every profile assigned to the server»*. Un walk por columna de soporte, por métrica, por
 perfil. Con los quince perfiles de Synology puestos, medido en un banco con walks de 50 ms:
@@ -2358,7 +2456,7 @@ rápido, se quedaba pensando.
 
 ## Todo se medía, se guardaba y se nombraba bien, y la pantalla estaba vacía
 
-**Fecha:** 2026-08-20 · **Área:** `lib/core/hosts/service.py::build_host_status._matches`
+**Fecha:** 2026-08-20 · **Área:** `lib/core/devices/service.py::build_host_status._matches`
 (el join entre los resultados de un módulo y los items enlazados a un host)
 
 **Síntoma** — Tras cablear el muestreo de perfiles SNMP, un NAS con perfiles asignados aparecía
@@ -2379,7 +2477,7 @@ derivada con sufijo (`<uid>_ram`, de ram_swap). El muestreo emite la forma **com
 siendo la clave entera, no estaba entre las del host, y la fila se descartaba. Todas.
 
 **Solución** — `_matches()` prueba tres formas, de más específica a menos: la clave exacta, el
-primer segmento antes de `/`, y el sufijo tras el último `_`. Y `tests/unit/test_hosts_status_rows.py`,
+primer segmento antes de `/`, y el sufijo tras el último `_`. Y `tests/unit/test_devices_status_rows.py`,
 que ese join no tenía: incluye que **sólo** el primer segmento es el item (proxmox emite
 `<uid>/node/pve04`), y que `srv-uid2/metrics` **no** pertenece a `srv-uid` — un `startswith`
 habría hecho que sí.
@@ -2516,7 +2614,7 @@ colección, la revisión no es del código que se cambia sino de **todos** sus �
 
 **Fecha:** 2026-08-15 · **Área:** `lib/core/modules/authz.py` (`authorize_module_write`)
 
-**Síntoma** — Ninguno; leyendo `lib/core/modules` detrás de `hosts`. Un guardado así se ve
+**Síntoma** — Ninguno; leyendo `lib/core/modules` detrás de `devices`. Un guardado así se ve
 idéntico en pantalla salga bien o mal.
 
 **Diagnóstico** — El guardado de módulos autoriza **ítem a ítem**, y un check atado a un host se
@@ -3027,7 +3125,7 @@ Nada del camino de error hablaba, y ese es el defecto de fondo:
 
 1. `cloneItem` limpia el uid con `_stripItemUids(...)`, recursivo (un elemento puede contener su
    propia colección de elementos, como los `checks` por servidor de snmp, también keyed por uid).
-   Borrado por **nombre exacto**: `cred_uid` y `host_uid` son *referencias*, y el clon debe
+   Borrado por **nombre exacto**: `cred_uid` y `device_uid` son *referencias*, y el clon debe
    seguir apuntando a la misma credencial y al mismo host.
 2. La nota del duplicado pasa a ser una **fila más** de la lista de cambios
    (`{field, old, new}`), que es lo que la UI de auditoría pinta como tabla.
@@ -3146,7 +3244,7 @@ función con la ruta dada —esa seguirá pasando— sino la de la función **si
 
 ## La misma comprobación salía ámbar o roja según quién la ejecutara
 
-**Fecha:** 2026-07-28 · **Área:** `lib/core/hosts/probe.py` (`run_module_check`) · afectaba
+**Fecha:** 2026-07-28 · **Área:** `lib/core/devices/probe.py` (`run_module_check`) · afectaba
 a toda ejecución bajo demanda: refresco en vivo de páginas de módulo (`run_item_once`) y
 "probar" una credencial/host desde Servers
 
@@ -3172,7 +3270,7 @@ other_data}` — describía la forma que hacía falta, no la que llegaba.
 que seguir siendo una ausencia porque es lo que significa «esto sí es un error». Y como la
 decisión no era de hosts, el runner (`ProbeMonitor` + `run_module_check`) se mudó a
 [`lib/modules/check_runner.py`](../src/lib/modules/check_runner.py), junto a su consumidor
-natural; en `probe.py` se queda `ProbeHostsStore`, que sí es de hosts, **sin re-exportar** el
+natural; en `probe.py` se queda `ProbeDevicesStore`, que sí es de hosts, **sin re-exportar** el
 runner: un import de conveniencia lo dejaría pareciendo código de hosts y el siguiente lo
 volvería a buscar ahí. La lista blanca dejó de ser una lista a mano: `RESULT_FIELDS` se
 compara contra lo que escribe `ReturnModuleCheck.set()` y un campo nuevo del contrato tiene
@@ -3384,7 +3482,7 @@ de excepción. Esas ramas **calculaban** la etiqueta para el texto del mensaje p
 pasaban a `set(...)`.
 
 **Causa raíz** — sin `name=`, el monitor cae a `_item_label()`, que resuelve el
-`host_uid` al nombre del host. Dos módulos parecían correctos a simple vista porque
+`device_uid` al nombre del host. Dos módulos parecían correctos a simple vista porque
 ponían el nombre en `other_data={'name': …}` — que `get_name()` **no lee**, porque mira el
 campo de nivel superior. Y `proxmox` tenía una variante peor: suprimía la notificación del
 monitor (`send_msg=False`) **y** no enviaba ninguna a mano, así que una excepción no

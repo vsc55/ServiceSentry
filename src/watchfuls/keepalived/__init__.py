@@ -6,13 +6,13 @@
 """Watchful to monitor a Keepalived VRRP virtual IP (VIP) across an HA cluster.
 
 Host-centric / multi-host binding: one configured item = one VIP guarded by a
-cluster of member hosts (the HA nodes, bound via ``host_uids``).  At the cluster
+cluster of member devices (the HA nodes, bound via ``device_uids``).  At the cluster
 level you configure the VIP; per member host you configure its *priority*
 (weight) — stored on the host's ``keepalived`` profile and editable in the
 cluster's Hosts tab.
 
 Each cycle the check connects to every member host (locally or over SSH, via
-:meth:`ModuleBase.host_exec`) and reads two things:
+:meth:`ModuleBase.device_exec`) and reads two things:
 
   * the keepalived service state (``systemctl is-active keepalived``);
   * whether that node currently holds the VIP (``ip -o addr show`` — the VRRP
@@ -64,7 +64,7 @@ def _svc_state(out: str) -> str:
 
 
 class Watchful(ModuleBase):
-    """Monitors a Keepalived VRRP virtual IP across its member hosts."""
+    """Monitors a Keepalived VRRP virtual IP across its member devices."""
 
     ITEM_SCHEMA = _SCHEMA
 
@@ -88,7 +88,7 @@ class Watchful(ModuleBase):
         return self.dict_return
 
     def _check_item(self, key: str, raw: dict) -> None:
-        it = self.resolve_host(raw)
+        it = self.resolve_device(raw)
         if not it.get('enabled', True):
             return
         label = (it.get('label') or '').strip() or key
@@ -120,17 +120,17 @@ class Watchful(ModuleBase):
         holders = []          # (name, priority) of nodes currently holding the VIP
         alive_prio = []       # (name, priority) of reachable, service-active nodes
         for m in members:
-            uid = str(m.get('host_uid') or '').strip()
+            uid = str(m.get('device_uid') or '').strip()
             name = (m.get('name') or uid or '?').strip()
-            extra = {'host_uid': uid, 'host_name': name}
+            extra = {'device_uid': uid, 'device_name': name}
             if m.get('maintenance'):
                 # A member in maintenance does not fail the cluster — skip its node.
                 continue
-            mi = self.resolve_host({'host_uid': uid}) if uid else it
-            if mi.get('_host_maintenance'):
+            mi = self.resolve_device({'device_uid': uid}) if uid else it
+            if mi.get('_device_maintenance'):
                 continue
             priority = _to_int(mi.get('priority'))
-            out, err, code = self.host_exec(mi, probe, timeout=timeout)
+            out, err, code = self.device_exec(mi, probe, timeout=timeout)
             if code != 0 and not (out or '').strip():
                 self._emit(f'{key}/node/{name}', False,
                            self._msg('ka_host_unreachable', label, name,

@@ -363,7 +363,7 @@ class BackupRunner(_JobsMixin):
         """Who this process is, to the lease.
 
         The same shape the health and certificate scanners use for theirs
-        (`lib/web_admin/mixins/scanners.py`) — job, host, pid — because the lease's whole
+        (`lib/web_admin/mixins/scanners.py`) — job, device, pid — because the lease's whole
         purpose is telling two processes apart, and two of them on one host differ only by the
         pid. Computed once: a lease renewed under a NEW id every tick is not a renewal, it is
         one process fighting itself for its own lease.

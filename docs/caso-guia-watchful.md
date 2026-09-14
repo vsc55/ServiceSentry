@@ -690,18 +690,18 @@ Por defecto cada módulo define la conexión **dentro de cada ítem** (host, pue
 credenciales…). Para no repetir el mismo servidor en varios módulos, un módulo
 puede declararse **host-capaz**: sus campos de conexión pasan a un **Host**
 (definido una vez en la sección *Servers*) y los checks lo referencian por
-`host_uid`, heredando dirección + credenciales en tiempo de ejecución.
+`device_uid`, heredando dirección + credenciales en tiempo de ejecución.
 
-**1. Declarar `__host_profile__` en `schema.json`** (a nivel raíz, hermano de
+**1. Declarar `__device_profile__` en `schema.json`** (a nivel raíz, hermano de
 `__module__`). Indica el protocolo y qué campo recibe la dirección del host
 (`address_field`):
 
 ```json
-"__host_profile__": {"key": "snmp", "address_field": "host"},
+"__device_profile__": {"key": "snmp", "address_field": "host"},
 ```
 
 **Si el protocolo lo declara el core** (`ssh`, `snmp`) no pongas `fields`: qué campos tiene un
-protocolo no es cosa del módulo y `host_profile_specs()` los completa desde la declaración del
+protocolo no es cosa del módulo y `device_profile_specs()` los completa desde la declaración del
 core. Sólo un protocolo propio del módulo (el `http` de `web`, el `db` de `datastore`) escribe
 su lista.
 
@@ -713,18 +713,18 @@ timeout dejan de ser el mismo host para el migrador, y se convierten en dos.
 
 Puede ser una **lista** de specs para módulos con varios protocolos (p. ej.
 `datastore` declara `db` + `ssh`). Solo los specs con `address_field` reciben la
-dirección del host; el resto aportan sus campos de perfil. `__host_profile__` es
+dirección del host; el resto aportan sus campos de perfil. `__device_profile__` es
 metadata (no una colección): `discover_schemas` y la UI lo ignoran como tal.
 
-**2. Resolver en el `check()`** con `self.resolve_host(item)`: si el ítem (o, en
-SNMP, el *server*) tiene `host_uid`, devuelve una copia con `address` + el perfil
+**2. Resolver en el `check()`** con `self.resolve_device(item)`: si el ítem (o, en
+SNMP, el *server*) tiene `device_uid`, devuelve una copia con `address` + el perfil
 del protocolo fusionados (gana el host); si no, devuelve el ítem igual (los
 checks *inline* clásicos siguen funcionando — coexistencia):
 
 ```python
 def check(self):
     for key, value in self.get_conf('list', {}).items():
-        item = self.resolve_host(value)          # no-op si es inline
+        item = self.resolve_device(value)          # no-op si es inline
         host = item.get('host')                  # viene del host si está vinculado
         ...
 ```
@@ -734,12 +734,12 @@ por cycle y lee de él (patrón `_resolved_item` en `datastore`/`web`).
 
 > **Qué cubre el host, dónde se almacena y cómo se cifra** (el host posee *cómo
 > conectar*, el ítem *qué comprobar*; la UI oculta los campos de conexión al
-> vincular; los hosts viven en `HostsStore` con los secretos cifrados) está en
+> vincular; los hosts viven en `DevicesStore` con los secretos cifrados) está en
 > [explica-hosts.md](explica-hosts.md).
 
 **Cuándo NO declararlo.** Si el "target" del módulo no es un servidor con
 conexión/credenciales sino un sujeto de la comprobación (p. ej. **dns**, cuyo
-target es un dominio a resolver), **no** declares `__host_profile__`: el módulo
+target es un dominio a resolver), **no** declares `__device_profile__`: el módulo
 se queda inline-only.
 
 ---
@@ -787,7 +787,7 @@ self.dict_return.set(key, status, message, send_msg=True, other_data=None,
 
 | Parámetro | Tipo | Descripción |
 |-----------|------|-------------|
-| `key` | str | Nombre/ID del ítem — se usa como clave en el dict de resultados y en la tabla `check_state`. En módulos host-céntricos suele ser el `host_uid` (un UID, no legible) |
+| `key` | str | Nombre/ID del ítem — se usa como clave en el dict de resultados y en la tabla `check_state`. En módulos host-céntricos suele ser el `device_uid` (un UID, no legible) |
 | `status` | bool | `True` = OK, `False` = Error |
 | `message` | str | Texto del resultado. Se envía **en texto plano** en las notificaciones (el Markdown de Telegram se elimina, ya que se rompía al agrupar) — no incrustes `*`/`_` esperando formato |
 | `send_msg` | bool | `True` **por defecto**: el monitor notifica el cambio de estado por su cuenta (patrón A). Ponlo a `False` solo si vas a notificar tú — y entonces usa `_emit()`, que hace el emparejamiento correcto. Nota: `send_msg=False` **no** afecta al registro del estado, solo silencia el aviso automático |

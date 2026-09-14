@@ -47,7 +47,7 @@ def section_credentials(cfg_for, data: dict) -> tuple[str, str, str]:
 
 
 def public_base(wa) -> str:
-    """The server's public base URL (scheme + host, no trailing slash) — what expands a
+    """The server's public base URL (scheme + device, no trailing slash) — what expands a
     ``{public_url}`` token in a profile's redirect URIs.  Single source:
     :meth:`WebAdmin.public_base_url` (config override → proxy-aware auto-detect)."""
     return wa.public_base_url()

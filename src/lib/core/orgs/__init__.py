@@ -4,7 +4,7 @@
 
 The registry is three columns and the interesting half is the other one: **ownership is said at
 whatever level somebody knows it and inherited downwards, innermost wins**, over scopes that
-belong to whoever declares them. A rack is one scope; a host is another; a mailbox in Microsoft
+belong to whoever declares them. A rack is one scope; a device is another; a mailbox in Microsoft
 365 and a subscription in Azure are two more, and none of them is this package's business beyond
 knowing that they exist.
 

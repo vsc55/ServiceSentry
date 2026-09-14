@@ -20,7 +20,7 @@ function _connGatewayDown(status) { return status === 502 || status === 503 || s
         init = init || {};
         const method = (init.method || (typeof input === 'object' && input && input.method) || 'GET').toUpperCase();
         const url = typeof input === 'string' ? input : (input && input.url) || '';
-        // NB: reject protocol-relative URLs ('//host/…') first — they start with '/' but are
+        // NB: reject protocol-relative URLs ('//device/…') first — they start with '/' but are
         // cross-origin, so they must NOT receive the CSRF token.
         const sameOrigin = !url.startsWith('//') &&
             (url.startsWith('/') || (typeof location !== 'undefined' && url.startsWith(location.origin)));

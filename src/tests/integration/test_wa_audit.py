@@ -37,10 +37,10 @@ class TestAuditLog:
         from unittest.mock import patch
         with patch.object(admin._audit_store, 'insert',
                           side_effect=RuntimeError('database is locked')):
-            admin._audit_system('host_tested', detail={'ok': False})  # must NOT raise
+            admin._audit_system('device_tested', detail={'ok': False})  # must NOT raise
         # Auditing recovers on the next write.
-        admin._audit_system('host_tested', detail={'ok': True})
-        assert any(e['event'] == 'host_tested' for e in admin._audit_log)
+        admin._audit_system('device_tested', detail={'ok': True})
+        assert any(e['event'] == 'device_tested' for e in admin._audit_log)
 
     def test_failed_login_audited(self, admin, client):
         """Failed login creates an audit entry."""

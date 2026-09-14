@@ -137,8 +137,8 @@ class SnmpSampler:
         Same gate as a check, and for the same reason: a host in maintenance is a machine
         somebody is working on, and a graph of it during the work is a graph of the work.
         """
-        server = self.resolve_host(srv)
-        if server.get('_host_maintenance') or not server.get('enabled', True):
+        server = self.resolve_device(srv)
+        if server.get('_device_maintenance') or not server.get('enabled', True):
             return
         label = str(server.get('label') or '').strip() or srv_key
         self._sample_server(srv_key, server, label)
@@ -300,8 +300,8 @@ class SnmpSampler:
 
     def _watch_source(self, server: dict) -> tuple:
         """``(host uid, registry)`` — or ``('', None)`` when this device has neither."""
-        uid = str(server.get('host_uid') or server.get('_host_uid') or '').strip()
-        store = getattr(self._monitor, '_hosts_store', None) if self.is_monitor_exist else None
+        uid = str(server.get('device_uid') or server.get('_host_uid') or '').strip()
+        store = getattr(self._monitor, '_devices_store', None) if self.is_monitor_exist else None
         return (uid, store) if uid and store is not None else ('', None)
 
     def _watched_roles(self, server: dict) -> dict:
@@ -425,12 +425,12 @@ class SnmpSampler:
         """The key the registry files a watched row under — ITS function, not a second copy
         of the composition: two places building this string is two places to get it wrong the
         day one of them changes."""
-        from lib.core.hosts.store import HostsStore   # noqa: PLC0415
+        from lib.core.devices.store import DevicesStore   # noqa: PLC0415
         # The BARE name — `snmp` and not `watchfuls.snmp`. It is what a result records as its
         # module and therefore what the screen sends back when somebody marks a row; the
         # dotted one is this class's import path and matches nothing anybody stored.
         bare = str(self.name_module or '').rsplit('.', 1)[-1]
-        return HostsStore.watch_key(bare, row)
+        return DevicesStore.watch_key(bare, row)
 
     def _store_value(self, rows: dict, row_key: str, row_name: str, metric: dict,
                      raw, now: float, state: dict, factor=1, source: str = '',
@@ -618,7 +618,7 @@ class SnmpSampler:
         """
         if not sightings:
             return
-        uid = str(server.get('host_uid') or server.get('_host_uid') or '').strip()
+        uid = str(server.get('device_uid') or server.get('_host_uid') or '').strip()
         db = getattr(self, 'db', None)
         if not uid or db is None:
             return

@@ -4,7 +4,7 @@
 
 Several notification destinations share exactly this shape — an independent record with
 a name, an enabled flag and some endpoint fields, living in its **own** table rather than
-in ``config.json`` (like hosts, credentials and modules).  Webhooks and Microsoft Teams
+in ``config.json`` (like devices, credentials and modules).  Webhooks and Microsoft Teams
 channels were two 135-line stores whose logic was identical: the differences were the
 table name, the prose, and whether a local was called ``webhook`` or ``channel``.
 

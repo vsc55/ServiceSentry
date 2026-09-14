@@ -12,11 +12,11 @@ resolving the identity for a test connection.  Pure functions over plain dicts; 
 from __future__ import annotations
 
 
-def find_all_credential_usage(hosts: list, modules: dict) -> dict:
-    """Every credential's references, in ONE pass: ``{uid: {'hosts': […], 'checks': […]}}``.
+def find_all_credential_usage(devices: list, modules: dict) -> dict:
+    """Every credential's references, in ONE pass: ``{uid: {'devices': […], 'checks': […]}}``.
 
     The scan cost is the same whether it answers about one credential or all of them — it
-    walks every host profile and every module check either way — so asking per credential
+    walks every device profile and every module check either way — so asking per credential
     means paying for the whole walk once per row.  The catalogue view asks about all of them
     at once and this is what it calls.
 
@@ -28,13 +28,13 @@ def find_all_credential_usage(hosts: list, modules: dict) -> dict:
     out: dict = {}
 
     def _bucket(uid: str, key: str) -> list:
-        return out.setdefault(uid, {'hosts': [], 'checks': []})[key]
+        return out.setdefault(uid, {'devices': [], 'checks': []})[key]
 
-    for h in hosts:
+    for h in devices:
         ssh = (h.get('profiles') or {}).get('ssh') or {}
         uid = ssh.get('cred_uid')
         if uid:
-            _bucket(uid, 'hosts').append({'uid': h.get('uid'), 'name': h.get('name')})
+            _bucket(uid, 'devices').append({'uid': h.get('uid'), 'name': h.get('name')})
     for mod_key, mod_cfg in modules.items():
         if not isinstance(mod_cfg, dict):
             continue
@@ -50,10 +50,10 @@ def find_all_credential_usage(hosts: list, modules: dict) -> dict:
     return out
 
 
-def find_credential_usage(uid: str, hosts: list, modules: dict) -> dict:
-    """Where credential *uid* is referenced: hosts (ssh profile ``cred_uid``) and module
-    checks (inline ``cred_uid``).  Returns ``{'hosts': [...], 'checks': [...]}``."""
-    return find_all_credential_usage(hosts, modules).get(uid) or {'hosts': [], 'checks': []}
+def find_credential_usage(uid: str, devices: list, modules: dict) -> dict:
+    """Where credential *uid* is referenced: devices (ssh profile ``cred_uid``) and module
+    checks (inline ``cred_uid``).  Returns ``{'devices': [...], 'checks': [...]}``."""
+    return find_all_credential_usage(devices, modules).get(uid) or {'devices': [], 'checks': []}
 
 
 def clone_payload(src: dict) -> dict:

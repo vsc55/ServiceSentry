@@ -43,7 +43,7 @@ class RaidMdstat:
     def __init__(
             self,
             mdstat=None,
-            host=None,
+            device=None,
             port=22,
             user=None,
             password=None,
@@ -55,7 +55,7 @@ class RaidMdstat:
         self.paths.set('mdstat', '/proc/mdstat')
         if mdstat is not None:
             self.paths.set('mdstat', mdstat)
-        self._host = host
+        self._host = device
         self._port = port
         self._user = user
         self._pass = password
@@ -64,7 +64,7 @@ class RaidMdstat:
 
     @property
     def is_remote(self) -> bool:
-        """ Return if the mdstat information is collected from a remote host. """
+        """ Return if the mdstat information is collected from a remote device. """
         return bool(self._host)
 
     @property
@@ -76,7 +76,7 @@ class RaidMdstat:
                 and bool(str(self._user).strip()))
 
     def _exec_remote(self, cmd) -> ExecResult:
-        """ Execute a command on the remote host. Returns (stdout, stderr, stdexcept). """
+        """ Execute a command on the remote device. Returns (stdout, stderr, stdexcept). """
         result = Exec.execute(
             cmd,
             self._host,

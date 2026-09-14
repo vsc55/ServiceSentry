@@ -58,8 +58,8 @@ class Watchful(ModuleBase):
             if not isinstance(raw, dict):
                 continue
             # Host-centric: merge the bound host's address (no-op when inline).
-            value = self.resolve_host(raw)
-            if value.get('_host_maintenance') or not value.get('enabled', self._DEFAULTS['enabled']):
+            value = self.resolve_device(raw)
+            if value.get('_device_maintenance') or not value.get('enabled', self._DEFAULTS['enabled']):
                 continue
             host = (value.get('host') or '').strip()
             if not host:

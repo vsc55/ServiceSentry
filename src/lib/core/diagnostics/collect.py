@@ -57,7 +57,7 @@ def _in_container() -> bool:
     """Is this a container? Worth knowing before anything else on the page.
 
     It changes what every other answer means: a path that "exists" is inside an image that may
-    be recreated tomorrow, and free disk is the layer's, not the host's. Three signals, because
+    be recreated tomorrow, and free disk is the layer's, not the device's. Three signals, because
     none is universal — Docker's marker file, Podman's, and a cgroup line naming a runtime.
 
     Podman needs its own: it writes `/run/.containerenv` and not `/.dockerenv`, and under

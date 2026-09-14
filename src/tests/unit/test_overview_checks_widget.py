@@ -11,8 +11,8 @@ import pytest
 # the package's own overview_widget.py (see lib/discovery.py).
 from lib.core.modules.manifest import OVERVIEW_WIDGETS as MOD_WIDGETS
 from lib.core.modules.overview_widget import _mod_checks, _modules_list_rows
-from lib.core.hosts.manifest import OVERVIEW_WIDGETS as HOST_WIDGETS
-from lib.core.hosts.overview_widget import _server_matches
+from lib.core.devices.manifest import OVERVIEW_WIDGETS as HOST_WIDGETS
+from lib.core.devices.overview_widget import _server_matches
 from lib.core.overview.filters import parse_severity_filter, severity_matches
 from lib.services.monitoring.overview_widget import checks_stat
 

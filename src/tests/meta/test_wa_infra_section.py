@@ -117,8 +117,8 @@ class TestItShowsWithoutHandingOver:
                     writes.add((verb, path))
         assert writes == {
             ('POST', '/api/v1/infra/collect'),
-            ('POST', '/api/v1/infra/hosts/<uid>/collect'),
-            ('POST', '/api/v1/infra/hosts/<uid>/watch'),
+            ('POST', '/api/v1/infra/devices/<uid>/collect'),
+            ('POST', '/api/v1/infra/devices/<uid>/watch'),
             ('PUT',  '/api/v1/infra/map-layout'),
         }, f'unexpected write route(s) in the infrastructure section: {sorted(writes)}'
         # The registry's own write path is what must not be reachable from here.
@@ -149,7 +149,7 @@ class TestItShowsWithoutHandingOver:
         """
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
         for path, flag in (('/collect', 'infra_collect'), ('/watch', 'infra_watch')):
-            body = routes.split(f"'/api/v1/infra/hosts/<uid>{path}'")[1].split('def ')[0]
+            body = routes.split(f"'/api/v1/infra/devices/<uid>{path}'")[1].split('def ')[0]
             assert f'{flag}_req' in body, f'the {path} route is not gated by its own flag'
             assert 'infra_view_req' not in body, (
                 f'{path} rides on the permission that only lets you look')
@@ -159,7 +159,7 @@ class TestItShowsWithoutHandingOver:
         """Holding `infra_watch` is not being shown a machine. Every other route here narrows
         to what the caller may see, and a write must not be the one that forgets."""
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
-        body = routes.split("'/api/v1/infra/hosts/<uid>/watch'")[1].split('\n    @app.route')[0]
+        body = routes.split("'/api/v1/infra/devices/<uid>/watch'")[1].split('\n    @app.route')[0]
         assert '_may_see(' in body, 'the write does not narrow to what the caller may see'
         assert "wa._audit('infra_watch'" in body, (
             'nothing records who decided what the panel would report')
@@ -214,7 +214,7 @@ class TestWatchingItHappen:
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
         # By its own path: the section has more than one POST, and "the first one" stopped
         # meaning the collection the day a second was added.
-        body = routes.split("'/api/v1/infra/hosts/<uid>/collect'")[1].split('@app.route')[0]
+        body = routes.split("'/api/v1/infra/devices/<uid>/collect'")[1].split('@app.route')[0]
         assert "'job_id': job_id" in body
         assert 'start_collect(' in body
         assert '/api/v1/infra/collect/<job_id>' in routes, 'nothing can be asked about it'
@@ -250,7 +250,7 @@ class TestWatchingItHappen:
     def test_the_bar_belongs_to_its_own_machine(self):
         """A run started on one device must not draw its progress over another's header."""
         body = self._collect().split('function _infraCollectSlotHtml')[1].split(chr(10) + 'function ')[0]
-        assert 'job.host !== uid' in body
+        assert 'job.device !== uid' in body
 
     def test_the_percentage_is_never_alone(self):
         """Progress is per MODULE, so nine fast ones and an SNMP profile reach 90 % in two
@@ -330,18 +330,18 @@ class TestWatchingItHappen:
         assert 'return;' in body
 
     def test_it_owns_no_store(self):
-        """Every fact it shows belongs to somebody — hosts, check state, history. A fourth
+        """Every fact it shows belongs to somebody — devices, check state, history. A fourth
         copy would be a fourth thing to keep in step, and the first to drift would be the one
         people are watching."""
         assert not os.path.exists(os.path.join(SRC, 'lib', 'core', 'infra', 'store.py'))
 
     def test_the_state_vocabulary_is_the_registry_s(self):
         """One vocabulary for "how is this machine": `ok/warning/error` and the empty string,
-        which is what `hosts.service._host_statuses` produces. A second set of names would be
-        a second definition of a broken host.
+        which is what `devices.service._device_statuses` produces. A second set of names would be
+        a second definition of a broken device.
 
-        And one BADGE for it, in the shared host vocabulary. It had its own, which is how the
-        same host in maintenance came out orange with a cone on the fleet list and grey with a
+        And one BADGE for it, in the shared device vocabulary. It had its own, which is how the
+        same device in maintenance came out orange with a cone on the fleet list and grey with a
         spanner here — reported from the screen. Two badges for one state is two states as far
         as anybody reading them can tell.
         """
@@ -359,7 +359,7 @@ class TestWatchingItHappen:
             assert 'text-bg-success' not in own, f'{fn} paints a state of its own again'
         render = _read(os.path.join(INFRA, '_render.html'))
         own = render.split('function _infraStateBadge')[1].split(chr(10) + '}')[0]
-        assert 'infra_unwatched' in own, 'a host nobody watches has no state of its own'
+        assert 'infra_unwatched' in own, 'a device nobody watches has no state of its own'
 
 
 class TestRefreshingTheWholeFleet:
@@ -404,7 +404,7 @@ class TestRefreshingTheWholeFleet:
         run takes — so while a device is being collected this button cannot be pressed either.
         Leaving it as a button offers something that answers "already running"."""
         body = _fn(self._collect(), '_infraCollectAllSlotHtml')
-        assert 'job.done' in body and 'job.host' not in body, (
+        assert 'job.done' in body and 'job.device' not in body, (
             'it decides by whose run it is, so another run leaves it looking pressable')
 
     def test_both_slots_are_repainted(self):
@@ -420,11 +420,11 @@ class TestRefreshingTheWholeFleet:
         which button started it."""
         body = _fn(self._collect(), '_infraCollectBody')
         assert 'infra_collect_this_device' in body and 'infra_collect_all_note' in body
-        assert 'job.host' in body, 'it does not read the scope it is describing'
+        assert 'job.device' in body, 'it does not read the scope it is describing'
 
     def test_a_fleet_job_is_visible_to_whoever_sees_the_fleet(self):
-        """Its job carries no host, and the two polling routes narrow by exactly that: with no
-        host, `_may_see` is true only for `devices_view` — which is the same rule that let the
+        """Its job carries no device, and the two polling routes narrow by exactly that: with no
+        device, `_may_see` is true only for `devices_view` — which is the same rule that let the
         run start. A job nobody can poll is a dialog that never updates."""
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
         # Nested inside `register`, so read as text: what matters is the RULE, and the rule is
@@ -492,9 +492,9 @@ class TestItDoesNotGoStale:
 
     def test_opening_the_section_asks_the_server(self):
         body = self._render().split('async function renderInfra(')[1].split('\n}')[0]
-        assert "apiGet('/api/v1/infra/hosts')" in body
-        assert '_infraHosts.length' not in body, (
-            'the entry point serves a cached fleet again — a host added in System would not '
+        assert "apiGet('/api/v1/infra/devices')" in body
+        assert '_infraDevices.length' not in body, (
+            'the entry point serves a cached fleet again — a device added in System would not '
             'appear until somebody pressed Refresh')
 
     def test_the_cheap_redraws_do_not_hit_the_network(self):
@@ -670,7 +670,7 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
 
     def test_a_network_of_one_is_folded_onto_the_machine_that_holds_it(self):
         """It is not a place where two machines meet, which is the only question this map
-        exists to answer. Docker gives every host its own 172.17.0.0/16, and a router declares
+        exists to answer. Docker gives every device its own 172.17.0.0/16, and a router declares
         one per VLAN: on the reported screen those were most of the picture."""
         layout = _fn(self._js(), '_infraMapLayout')
         assert 'members.length > 1 && !net.private' in layout
@@ -872,7 +872,7 @@ class TestFlaggingARowShowsOnTheScreen:
         """Not patched from what was clicked: what is on screen then IS what is stored."""
         fn = _fn(self._js(), '_infraSetWatch')
         assert '_infraWatchPaint(' in fn
-        assert fn.index('_infraDetail.host.watch') < fn.index('_infraWatchPaint('), (
+        assert fn.index('_infraDetail.device.watch') < fn.index('_infraWatchPaint('), (
             'it repaints before it has the new list')
 
     def test_it_repaints_the_flag_and_not_the_device(self):
@@ -950,7 +950,7 @@ class TestTheIdentityColumnDoesNotRepeatTheHeader:
     def test_the_record_card_is_gone(self):
         fn = _fn(self._tabs(), '_infraIdentityHtml')
         assert 'infra_record' not in fn
-        assert 'host_address' not in fn, 'the address is repeated under the header again'
+        assert 'device_address' not in fn, 'the address is repeated under the header again'
 
     def test_and_so_is_the_word_it_used(self):
         for lang in ('es_ES', 'en_EN'):
@@ -1013,7 +1013,7 @@ class TestOneStateLooksLikeOneState:
     """A machine's state has a colour, and it had four.
 
     The badge, the stripe down a card, the dot beside a board column and the box on a map each
-    worked it out for themselves — so a host in maintenance came out orange on the fleet list,
+    worked it out for themselves — so a device in maintenance came out orange on the fleet list,
     grey in the infrastructure badge, and grey again on the board. Reported from the screen
     twice: once for the badge, and once more for the cards after the badge was fixed, which is
     exactly what happens when a duplicate is fixed one copy at a time.
@@ -1023,7 +1023,7 @@ class TestOneStateLooksLikeOneState:
 
     def test_there_is_one_palette(self):
         core = _read(self.CORE)
-        assert 'const HOST_STATE_COLORS' in core and 'function hostStateColor(' in core
+        assert 'const HOST_STATE_COLORS' in core and 'function deviceStateColor(' in core
         block = core.split('const HOST_STATE_COLORS')[1].split('};')[0]
         for state in ('maintenance:', 'error:', 'warning:', 'ok:'):
             assert state in block, state
@@ -1054,7 +1054,7 @@ class TestOneStateLooksLikeOneState:
         for name, fn in (('_links.html', '_infraLinkBox'), ('_map.html', '_infraMapBox')):
             body = _read(os.path.join(INFRA, name)).split(
                 'function ' + fn + '(')[1].split(chr(10) + '}')[0]
-            assert 'hostStateColor(' in body, name
+            assert 'deviceStateColor(' in body, name
 
 
 class TestTheReloadDoesNotFlashWhite:

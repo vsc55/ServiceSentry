@@ -8,7 +8,7 @@
 * :mod:`lib.core.permissions` — :func:`discover_permissions`, the unified permission
   discovery scanning ``lib.core.*`` and ``lib.services.*``.
 * One package per **core domain** (``audit``, ``users``, ``roles``, ``groups``,
-  ``sessions``, ``config``, ``credentials``, ``history``, ``modules``, ``hosts``,
+  ``sessions``, ``config``, ``credentials``, ``history``, ``modules``, ``devices``,
   ``clusters``, ``overview``): each bundles everything about that domain — its
   ``store`` (persistence), its ``mixin`` (the WebAdmin glue), its ``routes`` (endpoint
   registration) and its ``permissions`` (the flags/group/role grants it owns) — instead

@@ -18,7 +18,7 @@ const _bootTrack = fn => function (...args) {
 // listed here: the registry loop below wraps them as it wires them, so each is wrapped
 // exactly once. These are the panel tabs, which have no registry descriptor.
 for (const n of ['renderAudit', 'renderEvents', 'renderFail2ban', 'renderServices',
-                 'initAccountPage', 'reloadConfig', 'reloadModules', 'reloadHosts']) {
+                 'initAccountPage', 'reloadConfig', 'reloadModules', 'reloadDevices']) {
     if (typeof window[n] === 'function') window[n] = _bootTrack(window[n]);
 }
 // Safety net for any landing section whose render is not on that list: the sidebar sees the
@@ -149,11 +149,11 @@ document.getElementById('btn-tab-config')?.addEventListener('shown.bs.tab', () =
 document.getElementById('btn-tab-modules')?.addEventListener('shown.bs.tab', () => {
     if (!_isDirty('modules')) reloadModules(true);
 });
-// Re-fetch host status every time the Servers tab is shown, so the Status column
+// Re-fetch device status every time the Servers tab is shown, so the Status column
 // reflects a "Run all" or a status "clean" done from the Status tab (both leave
-// hostsData stale until reloaded).
+// devicesData stale until reloaded).
 document.getElementById('btn-tab-servers')?.addEventListener('shown.bs.tab', () => {
-    reloadHosts();
+    reloadDevices();
     // Refresh the active sub-tab too when the parent Infrastructure tab is shown
     // (Bootstrap does not re-fire a sub-tab's shown event on a parent tab change).
     if (document.getElementById('subtab-srv-clusters')?.classList.contains('active')
@@ -166,8 +166,8 @@ document.getElementById('btn-subtab-srv-clusters')?.addEventListener('shown.bs.t
     localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-clusters');
     renderClusters();
 });
-document.getElementById('btn-subtab-srv-hosts')?.addEventListener('shown.bs.tab', () => {
-    localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-hosts');
+document.getElementById('btn-subtab-srv-devices')?.addEventListener('shown.bs.tab', () => {
+    localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-devices');
 });
 document.getElementById('btn-subtab-srv-types')?.addEventListener('shown.bs.tab', () => {
     localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-types');
@@ -299,7 +299,7 @@ try {
     if ((currentUser.permissions || []).includes('overview_view')) {
         _dwGlobalDefault = await apiGet('/api/v1/overview/default-layout') || [];
     }
-    // Credentials are needed both for their own tab and for the host SSH picker,
+    // Credentials are needed both for their own tab and for the device SSH picker,
     // so load them for credential managers AND server editors.
     if ((currentUser.permissions || []).some(p =>
         p.startsWith('credentials_') || p === 'devices_view' || p === 'devices_edit'

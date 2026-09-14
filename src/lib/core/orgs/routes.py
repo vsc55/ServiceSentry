@@ -11,7 +11,7 @@
 
 The last one is the reason this is not four CRUD handlers. Ownership crosses packages: the scope
 comes from whoever declared it (:mod:`lib.core.orgs.scopes`), so the same endpoint files a rack,
-a host, and whatever the next package learns to own — without this file naming any of them.
+a device, and whatever the next package learns to own — without this file naming any of them.
 """
 
 from __future__ import annotations

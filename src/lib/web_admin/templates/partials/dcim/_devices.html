@@ -195,7 +195,7 @@ function _dcdSortValue(i, key) {
 /** Una celda, con su `<td>`. Fuera de la declaración porque son nueve. */
 function _dcdCell(i, id) {
     if (id === 'name') return `<td><span class="ss-dot me-1" style="background:${
-            escAttr(hostStateColor(i.state || ''))}"></span><span
+            escAttr(deviceStateColor(i.state || ''))}"></span><span
         class="fw-semibold">${esc(_dcimItemName(i))}</span></td>`;
     if (id === 'state') return `<td class="ss-fs-2">${
         esc(_dcDevStateName(_dcDevState(i)))}</td>`;
@@ -362,7 +362,7 @@ function _dcDevTilesHtml(filas) {
         onclick="_dcDevPick(${jsStr(k)})">
         <span class="ss-tile-k">${_dcdBy === 'state'
             ? `<span class="ss-dot" style="background:${
-                escAttr(hostStateColor(k === 'mudo' ? '' : k))};${
+                escAttr(deviceStateColor(k === 'mudo' ? '' : k))};${
                 k === 'mudo' ? 'opacity:.4' : ''}"></span>` : ''}${
             esc(_dcDevGroupName(k))}</span>
         <span class="ss-tile-v">${esc(String(n))}</span>

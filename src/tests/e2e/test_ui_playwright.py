@@ -304,15 +304,15 @@ class TestStoredPayloadsDoNotExecute:
 
     def test_a_payload_in_a_host_name_never_runs(self, page, admin):
         """A second surface, because escaping is per-render: the users table proves nothing
-        about the hosts table, which builds its own rows."""
-        admin._hosts_store.create(
+        about the devices table, which builds its own rows."""
+        admin._devices_store.create(
             {'name': '<img src=x onerror="window.__xss_fired=1">', 'address': '10.0.0.1'},
             actor='test')
         page.goto(f'{page.panel_url}/admin')
         _ready(page)
-        page.evaluate("_navSubtab(null, '#tab-servers', '#subtab-hosts')")
+        page.evaluate("_navSubtab(null, '#tab-servers', '#subtab-devices')")
         page.wait_for_timeout(1500)
-        assert not self._canary_fired(page), 'a stored payload executed in the hosts view'
+        assert not self._canary_fired(page), 'a stored payload executed in the devices view'
 
 
 class TestWhatOnlyTheBrowserEnforces:
@@ -359,7 +359,7 @@ class TestPayloadsFromEveryDirection:
         """The audit view renders a JSON blob assembled from submitted values. It is also
         the one screen someone opens *because* something suspicious happened, which is the
         worst possible moment for the page to run what an attacker stored in it."""
-        admin._audit_system('host_tested', detail={'host': XSS_CANARY, 'ok': False})
+        admin._audit_system('device_tested', detail={'host': XSS_CANARY, 'ok': False})
         page.goto(f'{page.panel_url}/admin')
         _ready(page)
         page.evaluate("_navSubtab(null, '#tab-audit', '#subtab-audit')")
@@ -423,12 +423,12 @@ class TestSavingOneCheckDoesNotSwitchOnEveryModule:
         _ready(page)
         return page.evaluate("""(cpuEnabled) => {
             modulesData = { 'watchfuls.ping': { enabled: true, list: {} } };
-            _hostDraft  = { name: 'srv-1' };
+            _deviceDraft  = { name: 'srv-1' };
             const slot = (enabled) => ({ collection: 'list', fieldsMeta: [], multiple: false,
                                          _existingKeys: [],
                                          items: [{ _key: null, enabled, fields: {} }] });
-            _hostChecks = { ping: slot(true), cpu: slot(cpuEnabled) };
-            _hostChecks.ping.items[0].fields = { address: '10.0.0.9' };
+            _deviceChecks = { ping: slot(true), cpu: slot(cpuEnabled) };
+            _deviceChecks.ping.items[0].fields = { address: '10.0.0.9' };
             _applyHostChecks('host-uid-1');
             return Object.keys(modulesData).filter(k => /(^|\.)cpu$/.test(k));
         }""", cpu_enabled)
@@ -1394,3 +1394,94 @@ class TestTheDependencyCheckDrawsItsTwoColumns:
         assert after['card'] == 'kept', 'the card element was replaced again'
         assert after['tables'] == 'tables', 'the table container was replaced, not filled'
         assert after['scroll'] == before['scroll'],             f"the pane jumped: {before['scroll']} -> {after['scroll']}"
+
+
+class TestCrossingIntoTheFlyout:
+    """Ir de la fila de la izquierda a su menú desplegado, que es lo que se hace cuarenta veces
+    al día. Se cerraba a mitad de camino y sólo cuando la lista de secciones desplazaba.
+
+    **Por qué**: el menú se coloca en el borde del carril, y las filas se pueden pisar sólo hasta
+    donde llega el CONTENIDO de la lista — la barra de desplazamiento se come unos píxeles por
+    dentro y las recorta ahí. Esa franja no es de nadie: al pisarla salta `mouseleave`, el menú se
+    oculta, y ya oculto no queda nada bajo el ratón donde volver a entrar.
+
+    **Por qué se prueba con el hueco forzado por CSS** y no con una barra de verdad: el navegador
+    sin ventana dibuja las barras superpuestas (0 px) y el fallo no aparece. Lo que hace falta es
+    la geometría —el contenido de la lista acabando antes que el carril—, no de dónde sale.
+    """
+
+    HUECO = 10
+
+    @staticmethod
+    def _abre_el_primero(page):
+        """Posa el ratón en la primera fila con menú y devuelve su geometría, ya abierto."""
+        caja = page.evaluate("""() => {
+            const w = [...document.querySelectorAll('.ss-sb-flywrap')].find(
+                x => x.querySelector('.ss-sb-flyout'));
+            if (!w) return null;
+            w.dataset.ssProbe = '1';
+            const r = w.getBoundingClientRect();
+            return {x: r.x + 20, y: r.y + r.height / 2};
+        }""")
+        assert caja, 'ninguna sección de la barra tiene menú'
+        page.mouse.move(caja['x'], caja['y'])
+        page.wait_for_timeout(120)
+        assert page.evaluate("() => !!document.querySelector('.ss-sb-flywrap.ss-fly-open')"), \
+            'el menú no llega a abrirse al posar el ratón'
+        return caja
+
+    def _con_hueco(self, page):
+        """La lista, diez píxeles más estrecha que el carril — la misma forma que deja su barra."""
+        page.add_style_tag(content='.ss-sb-nav { width: calc(100%% - %dpx); }' % self.HUECO)
+        page.wait_for_timeout(50)
+
+    def test_el_menu_sigue_abierto_al_cruzar_el_hueco(self, page):
+        self._con_hueco(page)
+        caja = self._abre_el_primero(page)
+        destino = page.evaluate("""() => {
+            const f = document.querySelector('.ss-sb-flywrap.ss-fly-open .ss-sb-flyout');
+            const r = f.getBoundingClientRect();
+            return {x: r.x + 20, y: r.y + 12};
+        }""")
+        # Píxel a píxel, que es como lo cruza una mano: a saltos grandes el ratón se teletransporta
+        # por encima de la franja y no la pisa nunca — pasaría incluso rota.
+        page.mouse.move(destino['x'], destino['y'], steps=int(abs(destino['x'] - caja['x'])) + 2)
+        page.wait_for_timeout(150)
+        assert page.evaluate("() => !!document.querySelector('.ss-sb-flywrap.ss-fly-open')"), \
+            'el menú se cerró al cruzar el hueco entre la fila y él'
+
+    def test_y_la_franja_de_enmedio_pertenece_al_menu(self, page):
+        """La otra mitad de lo mismo, dicho sobre la geometría: lo que hay en ese hueco tiene que
+        ser parte del bloque abierto. Si ahí hay cualquier otra cosa, cruzar es salirse."""
+        self._con_hueco(page)
+        self._abre_el_primero(page)
+        quien = page.evaluate("""() => {
+            const w = document.querySelector('.ss-sb-flywrap.ss-fly-open');
+            const f = w.querySelector('.ss-sb-flyout');
+            const lista = document.querySelector('.ss-sb-nav');
+            const r = f.getBoundingClientRect();
+            const borde = lista.getBoundingClientRect().left + lista.clientWidth;
+            const el = document.elementFromPoint((borde + r.left) / 2, r.top + 12);
+            return {dentro: !!(el && w.contains(el)),
+                    era: el ? el.tagName + '.' + String(el.className).slice(0, 24) : 'nada',
+                    hueco: Math.round(r.left - borde)};
+        }""")
+        assert quien['hueco'] > 0, 'la prueba no llegó a crear el hueco que dice probar'
+        assert quien['dentro'], (
+            'en el hueco hay %s, que no es del menú: cruzarlo lo cierra' % quien['era'])
+
+    def test_y_sin_hueco_no_se_inventa_una_franja(self, page):
+        """Con la lista y el carril al ras no hay nada que puentear, y el puente mide cero: una
+        franja transparente de más se planta encima de la barra de desplazamiento sin motivo."""
+        self._abre_el_primero(page)
+        page.evaluate("""() => {
+            const lista = document.querySelector('.ss-sb-nav');
+            lista.style.width = '100%';
+        }""")
+        page.evaluate("() => window.dispatchEvent(new Event('resize'))")
+        page.wait_for_timeout(80)
+        puente = page.evaluate("""() => {
+            const f = document.querySelector('.ss-sb-flywrap.ss-fly-open .ss-sb-flyout');
+            return (getComputedStyle(f).getPropertyValue('--ss-fly-puente') || '').trim();
+        }""")
+        assert puente in ('0px', '', '0'), 'puente inventado sin hueco: %r' % puente

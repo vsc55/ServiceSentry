@@ -37,11 +37,11 @@ const _PERM_RES_SPECS = [
         prefix: 'server', group: 'perm_group_devices',
         info: () => t('server_perms_info'), colLabel: () => t('col_server') || 'Server',
         globalFor: { view: 'devices_view', add: 'devices_add', edit: 'devices_edit', delete: 'devices_delete' },
-        // 'add' on a server = "add checks to THIS host" (not creating a host).
+        // 'add' on a server = "add checks to THIS host" (not creating a device).
         actionLabel: a => a === 'add' ? (t('server_perm_add') || t('module_perm_add')) : (t('module_perm_' + a) || a),
         actionTip: a => a === 'add' ? t('server_perm_add_tt') : '',
         items() {
-            return Object.values(typeof hostsData !== 'undefined' ? hostsData : {})
+            return Object.values(typeof devicesData !== 'undefined' ? devicesData : {})
                 .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
                 .map(h => ({ id: h.uid, name: h.name || h.uid, sub: { type: 'text', text: h.address || '' } }));
         },
@@ -58,7 +58,7 @@ const _PERM_RES_SPECS = [
                     if (coll.startsWith('__') || !items || typeof items !== 'object' || Array.isArray(items)) continue;
                     const tf = (typeof _clColSchema === 'function' ? (_clColSchema(mod, coll)['__check_title_field__'] || 'label') : 'label');
                     for (const [key, item] of Object.entries(items)) {
-                        if (item && typeof item === 'object' && Array.isArray(item.host_uids))
+                        if (item && typeof item === 'object' && Array.isArray(item.device_uids))
                             out.push({ id: String(item.uid || key), name: String(item[tf] || key),
                                        sub: { type: 'text', text: modulePrettyName(mod, cfg) } });
                     }

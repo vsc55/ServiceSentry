@@ -3,12 +3,12 @@
 """Explicit collaborator bundle for the notification router.
 
 :class:`NotifyContext` is the *only* thing :class:`lib.core.notify.router.NotificationRouter`
-knows about its host.  It carries the handful of collaborators the router needs —
+knows about its device.  It carries the handful of collaborators the router needs —
 a DB connector for the channel stores, a config reader, the secret cipher, a debug
 sink, an optional audit sink and public-URL/panel-user callables — **as plain
 callables/values**, never the web admin or a Flask app.
 
-Each host (the web admin, the monitor/events/syslog workers) builds one of these from
+Each device (the web admin, the monitor/events/syslog workers) builds one of these from
 its own surface and hands it to a router; the router stays Flask-free and
 web_admin-independent, which is the whole point of moving routing into ``lib/core/notify``.
 """

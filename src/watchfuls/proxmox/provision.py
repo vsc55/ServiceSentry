@@ -16,7 +16,7 @@ creating is the one the API would have needed.
 import json
 import re
 
-from .client import _split_hosts
+from .client import _split_devices
 
 # reads (cluster/ceph/ha status, nodes, network) need Sys.Audit; reading storage
 # status (/nodes/{node}/storage) needs Datastore.Audit. Still far tighter than the
@@ -67,47 +67,47 @@ class ProxmoxProvision:
         and ``fix_permissions``.
 
         Resolves the SSH target from the modal fields, falling back to the bound
-        host's ``__host__`` SSH context; tries each candidate address in turn behind
+        host's ``__device__`` SSH context; tries each candidate address in turn behind
         the SSRF guard.  Returns ``{'ok': True, 'out', 'err', 'code'}`` on a
         successful run, else ``{'ok': False, 'message': <reason>}``.
         """
-        from lib.core.hosts import ssh_client  # noqa: PLC0415
+        from lib.core.devices import ssh_client  # noqa: PLC0415
         from lib.security.net_guard import validate_external_url  # noqa: PLC0415
 
         # When the check is bound to a host, the route injects the resolved host
-        # context (__host__): address + the host's SSH profile (user/port/secret,
+        # context (__device__): address + the host's SSH profile (user/port/secret,
         # credential already applied) — the SAME SSH path the host-aware checks
         # use.  Reuse it so provisioning reaches the node on the host's real SSH
         # address/port, not a guessed default.  An explicit modal value still wins.
-        host_ctx = config.get('__host__') if isinstance(config.get('__host__'), dict) else {}
-        host_ssh = host_ctx.get('ssh') if isinstance(host_ctx.get('ssh'), dict) else {}
+        device_ctx = config.get('__device__') if isinstance(config.get('__device__'), dict) else {}
+        device_ssh = device_ctx.get('ssh') if isinstance(device_ctx.get('ssh'), dict) else {}
 
         def _conn(key, default=''):
             v = config.get(key)
             if v not in (None, '', 0):
                 return v
-            v = host_ssh.get(key)
+            v = device_ssh.get(key)
             if v not in (None, '', 0):
                 return v
             return default
 
         host = ((config.get('host') or '').strip()
-                or str(host_ctx.get('address') or '').strip()
+                or str(device_ctx.get('address') or '').strip()
                 or (config.get('_item_key') or '').strip())
         # The host field may list several addresses (comma/space separated) for
         # API failover — provisioning only needs one reachable node, so split and
         # try each in turn rather than handing the whole string to SSH.
-        candidates = _split_hosts(host)
+        candidates = _split_devices(host)
         if not candidates:
             return {'ok': False, 'message': 'Host requerido'}
         ssh_user = str(_conn('ssh_user', 'root') or 'root').strip() or 'root'
         ssh_port = int(_conn('ssh_port', 22) or 22)
-        ssh_password = config.get('ssh_password') or host_ssh.get('ssh_password') or None
-        ssh_key = (config.get('ssh_key') or host_ssh.get('ssh_key') or '').strip() or None  # key file path
-        ssh_key_string = config.get('ssh_key_string') or host_ssh.get('ssh_key_string') or None  # inline key
+        ssh_password = config.get('ssh_password') or device_ssh.get('ssh_password') or None
+        ssh_key = (config.get('ssh_key') or device_ssh.get('ssh_key') or '').strip() or None  # key file path
+        ssh_key_string = config.get('ssh_key_string') or device_ssh.get('ssh_key_string') or None  # inline key
         # Host-key policy: mirror the host-aware checks — default AutoAdd (accept
         # unknown keys on first contact), honouring the host's ssh_verify_host.
-        ssh_verify = bool(host_ssh.get('ssh_verify_host', config.get('ssh_verify_host', False)))
+        ssh_verify = bool(device_ssh.get('ssh_verify_host', config.get('ssh_verify_host', False)))
         if not ssh_password and not ssh_key and not ssh_key_string:
             return {'ok': False,
                     'message': 'Indica una contraseña o clave SSH (o una credencial SSH) para el aprovisionamiento'}

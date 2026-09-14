@@ -4,13 +4,13 @@
 /api/v1/credentials/<uid> (PUT, DELETE), /api/v1/credentials/test (POST).
 
 A credential is a named SSH identity (user + password or private key) defined
-once and referenced by hosts and inline checks via ``cred_uid``.  Management is
+once and referenced by devices and inline checks via ``cred_uid``.  Management is
 gated by the dedicated ``credentials_*`` permissions; the list is also visible
-to anyone who can see/edit servers, so the host form can offer a picker.
+to anyone who can see/edit servers, so the device form can offer a picker.
 
 Secret values inside ``data`` (ssh_password / ssh_key_string) are masked on
 read and restored from the stored value when the client omits them on write —
-the same scheme as the host profiles.
+the same scheme as the device profiles.
 
 Routes registered by this file:
 
@@ -21,13 +21,13 @@ Routes registered by this file:
     GET    /api/v1/credentials/<uid>/usage      where a credential is referenced
     PUT    /api/v1/credentials/<uid>            update a credential (masked restored)
     DELETE /api/v1/credentials/<uid>            delete a credential
-    POST   /api/v1/credentials/test             test an SSH credential against a host
+    POST   /api/v1/credentials/test             test an SSH credential against a device
 """
 
 from flask import jsonify, session
 
 from lib.security import secret_manager
-from lib.core.hosts import ssh_client
+from lib.core.devices import ssh_client
 from lib.core.credentials import service as cred_svc
 
 from lib.core.constants import SYSTEM_USER
@@ -45,7 +45,7 @@ def register(app, wa):
         """List credentials (secrets masked).
 
         Visible to ``credentials_view`` or to anyone who can see/edit servers
-        (so the host SSH form can offer a credential picker)."""
+        (so the device SSH form can offer a credential picker)."""
         perms = wa._get_session_permissions()
         if not (perms & {'credentials_view', 'credentials_edit',
                          'credentials_add', 'credentials_delete',
@@ -112,10 +112,10 @@ def register(app, wa):
     @app.route('/api/v1/credentials/usage', methods=['GET'])
     @login_required
     def api_credentials_usage_all():
-        """Where every credential is referenced, as ``{uid: {hosts, checks}}``.
+        """Where every credential is referenced, as ``{uid: {devices, checks}}``.
 
         The catalogue's usage view asks this once instead of once per row: the scan walks
-        every host profile and every module check whichever way it is asked, so N calls
+        every device profile and every module check whichever way it is asked, so N calls
         would repeat the same walk N times to answer N slices of one result.
 
         Same gate as the per-credential endpoint below, which is also exactly what opens the
@@ -125,22 +125,22 @@ def register(app, wa):
         if not (perms & {'credentials_view', 'credentials_edit',
                          'credentials_add', 'credentials_delete'}):
             return jsonify({'error': wa._t('access_denied')}), 403
-        hs = getattr(wa, '_hosts_store', None)
-        hosts = hs.list(decrypt=False) if hs is not None else []
-        return jsonify({'usage': cred_svc.find_all_credential_usage(hosts, wa._load_modules())})
+        hs = getattr(wa, '_devices_store', None)
+        devices = hs.list(decrypt=False) if hs is not None else []
+        return jsonify({'usage': cred_svc.find_all_credential_usage(devices, wa._load_modules())})
 
     @app.route('/api/v1/credentials/<uid>/usage', methods=['GET'])
     @login_required
     def api_credential_usage(uid):
-        """Where a credential is referenced: hosts (ssh profile cred_uid) and
+        """Where a credential is referenced: devices (ssh profile cred_uid) and
         module checks (inline cred_uid).  Shown in the credential modal."""
         perms = wa._get_session_permissions()
         if not (perms & {'credentials_view', 'credentials_edit',
                          'credentials_add', 'credentials_delete'}):
             return jsonify({'error': wa._t('access_denied')}), 403
-        hs = getattr(wa, '_hosts_store', None)
-        hosts = hs.list(decrypt=False) if hs is not None else []
-        return jsonify(cred_svc.find_credential_usage(uid, hosts, wa._load_modules()))
+        hs = getattr(wa, '_devices_store', None)
+        devices = hs.list(decrypt=False) if hs is not None else []
+        return jsonify(cred_svc.find_credential_usage(uid, devices, wa._load_modules()))
 
     @app.route('/api/v1/credentials/<uid>', methods=['PUT'])
     @login_required
@@ -171,7 +171,7 @@ def register(app, wa):
     @app.route('/api/v1/credentials/<uid>', methods=['DELETE'])
     @login_required
     def api_delete_credential(uid):
-        """Delete a credential.  Hosts/checks that referenced it fall back to
+        """Delete a credential.  Devices/checks that referenced it fall back to
         their inline SSH fields (a dangling cred_uid is ignored at resolution)."""
         if 'credentials_delete' not in wa._get_session_permissions():
             return jsonify({'error': wa._t('access_denied')}), 403
@@ -194,7 +194,7 @@ def register(app, wa):
         # A stored credential's secret is decrypted server-side and sent to the target
         # address, so restrict this to the credential-management circle: a plain
         # devices_edit holder must not be able to exfiltrate a secret it cannot see by
-        # pointing the test at an attacker-controlled host.
+        # pointing the test at an attacker-controlled device.
         perms = wa._get_session_permissions()
         if not (perms & {'credentials_view', 'credentials_edit', 'credentials_add'}):
             return jsonify({'error': wa._t('access_denied')}), 403
@@ -210,7 +210,7 @@ def register(app, wa):
             cred_svc.resolve_test_identity(data, stored.get('data') or {})
         address = str(body.get('address') or '').strip()
         if not address:
-            return jsonify({'ok': False, 'message': wa._t('host_address_required')})
+            return jsonify({'ok': False, 'message': wa._t('device_address_required')})
         ok, msg = ssh_client.test_connection(
             address=address,
             port=body.get('ssh_port') or 22,

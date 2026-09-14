@@ -100,7 +100,7 @@ function _cfgCardChangedCount(node) {
 function _cfgFieldIsChanged(w) {
     // An option that does not APPLY has not been changed, whatever is stored under it.
     // Database was the case that showed it: on SQLite the section offers two options and the
-    // index said six, because the host/port/user/password left behind by a MySQL deployment
+    // index said six, because the device/port/user/password left behind by a MySQL deployment
     // are still in the config and were still being counted. The number sent you looking for
     // four settings that are not on the screen and would do nothing if they were.
     if (!_cfgFieldApplies(w)) return false;

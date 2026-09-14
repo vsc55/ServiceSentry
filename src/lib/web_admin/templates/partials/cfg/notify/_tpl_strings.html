@@ -179,7 +179,7 @@ function _notifTplRender() {
                 ${(e.vars && e.vars.length) ? `<div class="d-flex flex-wrap gap-1 mt-1">` + e.vars.map(v => {
                     const ph = v.ph || ('{' + v.i + '}');
                     // Named placeholders ({item}) are self-descriptive → no separate label; only
-                    // positional ones ({0}) need a name (host, usage %, …).
+                    // positional ones ({0}) need a name (device, usage %, …).
                     const showName = v.name && ph !== ('{' + v.name + '}');
                     return `<button class="btn btn-secondary btn-sm py-0 px-1" type="button" style="font-size:.7rem"
                         data-ph="${escAttr(ph)}" title="${escAttr(t('notif_tpl_insert_var'))}"

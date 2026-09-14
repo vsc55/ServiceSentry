@@ -214,7 +214,7 @@ class TestElCastellanoDeVincularNoEsElDeUnaCuerda:
         from lib.i18n import TRANSLATIONS                # noqa: PLC0415
         words = TRANSLATIONS.get('en_EN') or {}
         malos = [k for k, v in words.items()
-                 if isinstance(v, str) and k.startswith(('host_type', 'fs_', 'orgs_', 'host_'))
+                 if isinstance(v, str) and k.startswith(('device_type', 'fs_', 'orgs_', 'device_'))
                  and ('tie it' in v or 'Tie ' in v or 'untie' in v.lower()
                       or 'is already tied' in v)]
         assert not malos, f'say link/unlink, not tie/untie: {malos}'

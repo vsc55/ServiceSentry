@@ -178,8 +178,8 @@ def register(app, wa):
 
     # ── Los activos, que aquí son los dispositivos ───────────────────────────────────────
 
-    def _hosts_store():
-        return getattr(wa, '_hosts_store', None)
+    def _devices_store():
+        return getattr(wa, '_devices_store', None)
 
     @app.route('/api/v1/providers/freshservice/assets/types', methods=['GET'])
     @dev_req
@@ -207,8 +207,8 @@ def register(app, wa):
         # Estaban juntas en un solo campo, y el cuadro de atar apagaba lo que coincidía por el
         # nombre — que es justo la fila que se quiere pulsar, porque la clase que se llama igual
         # suele ser la que se está intentando atar. Reportado desde la pantalla.
-        from lib.core.hosts import classes as host_types          # noqa: PLC0415
-        almacen = getattr(wa, '_host_types_store', None)
+        from lib.core.devices import classes as device_types          # noqa: PLC0415
+        almacen = getattr(wa, '_device_types_store', None)
         fuera = []
         for t in (filas or []):
             if not t.get('id'):
@@ -219,14 +219,14 @@ def register(app, wa):
             if almacen is not None:
                 try:
                     atada = almacen.by_external(fs_plan.SOURCE, ext)
-                    if host_types.slug(nombre):
+                    if device_types.slug(nombre):
                         ya = almacen.by_name(nombre)
                 except Exception:      # pylint: disable=broad-except
                     ya = atada = None
             fuera.append({'id': ext, 'name': nombre,
                           # Dicha por `uid`, que es como la nombra todo lo demás: la pantalla la
                           # traduce con el catálogo del navegador, y ése va por uid.
-                          'device_type': host_types.uid_for(
+                          'device_type': device_types.uid_for(
                               wa, fs_assets.device_type_for(nombre)),
                           'here': str((ya or {}).get('uid') or ''),
                           'here_name': str((ya or {}).get('name') or ''),
@@ -268,7 +268,7 @@ def register(app, wa):
         Lo que ya está no se toca —ni el nombre ni el icono— y lo que se crea se cuenta con su
         nombre: crear quince clases en silencio es la manera de acabar con quince que nadie
         recuerda haber pedido. Un tipo que se parece a una clase que ya hay no crea una copia,
-        que es lo que hace :func:`lib.core.hosts.classes.ensure`.
+        que es lo que hace :func:`lib.core.devices.classes.ensure`.
         """
         datos = request.get_json(silent=True) or {}
         pick = datos.get('pick')
@@ -280,8 +280,8 @@ def register(app, wa):
             filas = fs_client.asset_types(domain, key)
         except fs_client.FreshserviceError as exc:
             return _fallo(exc)
-        from lib.core.hosts import classes as host_types          # noqa: PLC0415
-        antes = {c['uid'] for c in host_types.catalog(wa)}
+        from lib.core.devices import classes as device_types          # noqa: PLC0415
+        antes = {c['uid'] for c in device_types.catalog(wa)}
         puestas = []
         for t in (filas or []):
             nombre = str((t or {}).get('name') or '').strip()
@@ -292,14 +292,14 @@ def register(app, wa):
             # y aceptar, y entonces lo que se traería no sería lo que se marcó.
             if elegidos is not None and str((t or {}).get('id') or '') not in elegidos:
                 continue
-            ident = host_types.ensure(wa, nombre, source=fs_plan.SOURCE,
+            ident = device_types.ensure(wa, nombre, source=fs_plan.SOURCE,
                                       external_id=str((t or {}).get('id') or ''),
                                       actor=session.get('username', ''))
             if ident and ident not in antes:
                 antes.add(ident)
                 puestas.append({'uid': ident, 'name': nombre})
         if puestas:
-            wa._audit('host_type_created',
+            wa._audit('device_type_created',
                       detail={'source': fs_plan.SOURCE,
                               'added': [p['uid'] for p in puestas]})
         return jsonify({'added': puestas, 'total': len(filas or [])})
@@ -315,9 +315,9 @@ def register(app, wa):
         domain, key = _cfg()
         if not domain or not key:
             return None, (jsonify({'error': wa._t('fs_err_unset')}), 400)
-        store = _hosts_store()
+        store = _devices_store()
         if store is None:
-            return None, (jsonify({'error': wa._t('host_not_found')}), 500)
+            return None, (jsonify({'error': wa._t('device_not_found')}), 500)
         try:
             filas = fs_assets.only_types(fs_client.assets(domain, key, type_ids), type_ids)
             # Los tipos son un extra que mejora la respuesta y no puede estropearla: sin ellos
@@ -331,23 +331,23 @@ def register(app, wa):
                 tipos = []
         except fs_client.FreshserviceError as exc:
             return None, _fallo(exc)
-        hosts = store.list(decrypt=False)
+        devices = store.list(decrypt=False)
         # **Los huérfanos sólo se pueden contar sin filtro.** «Ya no está en Freshservice» es una
         # afirmación sobre TODO lo que hay allí, y con unas clases elegidas lo que se ha visto es
         # un trozo: un dispositivo importado de otra clase saldría como desaparecido por no
         # haberlo preguntado — y lo que eso invita a hacer es borrarlo. Callar es la respuesta
         # honesta; para verlos se mira sin filtro, que es una opción de la pantalla.
-        desaparecidos = [] if type_ids else fs_assets.orphans(filas, hosts)
+        desaparecidos = [] if type_ids else fs_assets.orphans(filas, devices)
         # La clase adivinada sale de una tabla de pistas y viene dicha con el nombre corto de una
         # sembrada; de aquí en adelante viaja por `uid`, que es lo que la pantalla sabe traducir
         # y lo que la columna acepta. Traducirla aquí es traducirla una vez: mirar y aplicar usan
         # este mismo plan, que es lo que hace que lo aplicado sea lo que se enseñó.
-        from lib.core.hosts import classes as host_types          # noqa: PLC0415
-        plan = fs_assets.build(filas, hosts, tipos)
+        from lib.core.devices import classes as device_types          # noqa: PLC0415
+        plan = fs_assets.build(filas, devices, tipos)
         for p in plan:
             if p.get('device_type'):
-                p['device_type'] = host_types.uid_for(wa, p['device_type'])
-        return {'hosts': hosts,
+                p['device_type'] = device_types.uid_for(wa, p['device_type'])
+        return {'devices': devices,
                 'plan': plan,
                 'orphans': [{'uid': h['uid'], 'name': h['name']} for h in desaparecidos],
                 'total': len(filas)}, None
@@ -367,8 +367,8 @@ def register(app, wa):
         # cuadro, y menos en una respuesta HTTP.
         locales = [{'uid': h['uid'], 'name': h['name'], 'address': h.get('address') or '',
                     'source': h.get('source') or '',
-                    'external_id': h.get('external_id') or ''} for h in out.pop('hosts', [])]
-        return jsonify(dict(out, counts=fs_assets.counts(out['plan']), hosts=locales))
+                    'external_id': h.get('external_id') or ''} for h in out.pop('devices', [])]
+        return jsonify(dict(out, counts=fs_assets.counts(out['plan']), devices=locales))
 
     @app.route('/api/v1/providers/freshservice/assets/import', methods=['POST'])
     @dev_req
@@ -386,8 +386,8 @@ def register(app, wa):
         pick = None if pick is None else [str(x) for x in (pick or [])]
         plan, rechazos = fs_assets.select(out['plan'], pick=pick,
                                           link=datos.get('link') or {},
-                                          hosts=out.get('hosts') or [])
-        hecho = fs_service.apply_hosts(_hosts_store(), plan,
+                                          devices=out.get('devices') or [])
+        hecho = fs_service.apply_hosts(_devices_store(), plan,
                                        actor=session.get('username', ''), wa=wa)
         # Lo que no se pudo hacer se cuenta como lo que es: algo que se pidió y no salió, con su
         # motivo y en el idioma de quien mira.

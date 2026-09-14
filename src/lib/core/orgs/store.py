@@ -6,7 +6,7 @@
 inherits, the innermost wins — is ONE rule, and written as an ``org_uid`` column on every table
 that can belong to somebody it is n implementations of it and n places to get it wrong. As a
 table there is one resolver (:mod:`lib.core.orgs.owners`), and it admits scopes that live in
-tables this package has never heard of: a host, a mailbox, a subscription.
+tables this package has never heard of: a device, a mailbox, a subscription.
 
 **Nothing derived is stored.** What a rack inherits from its room is computed on the way out, so
 the day somebody re-parents it there is no stale copy of what it used to inherit — a lie that
@@ -86,6 +86,25 @@ class OrgsStore:
         self.orgs.bootstrap()
         self.owners.bootstrap()
         self._adopt()
+        self._renombrar_ambito_host()
+
+    def _renombrar_ambito_host(self) -> None:
+        """El ámbito `host` pasó a llamarse `device`, y aquí está escrito **dentro de las filas**.
+
+        Cada fila de `org_owner` dice de qué es dueña una empresa con el par (ámbito, uid), y el
+        ámbito de un dispositivo se guardaba como `host`. El paquete lo declara ahora como
+        `device`, así que sin esto las filas de ayer apuntan a un ámbito que ya no existe: las
+        empresas dejan de ser dueñas de sus dispositivos — sin error, con la columna llena y la
+        pantalla enseñando «sin asignar».
+        """
+        try:
+            with self._db.transaction():
+                self._db.execute(
+                    "UPDATE org_owner SET scope = 'device' WHERE scope = 'host'")
+        except Exception:  # pylint: disable=broad-except
+            # Una base que no se deja escribir no puede impedir que el panel abra; lo que queda
+            # es una propiedad que hay que volver a decir a mano.
+            pass
 
     # ── Coming from the inventory ────────────────────────────────────────────
 

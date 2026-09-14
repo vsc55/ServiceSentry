@@ -95,7 +95,7 @@
     },
     "tab_labels": {
         "general":    "General",
-        "hosts":      "Hosts",
+        "devices":      "Hosts",
         "setup":      "Connection",
         "monitoring": "Monitoring",
         "lastdata":   "Latest data",

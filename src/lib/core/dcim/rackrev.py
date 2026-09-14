@@ -30,7 +30,7 @@ from __future__ import annotations
 #: tabla de versiones y lo que se le pregunta a un armario de hace seis meses es qué había, dónde
 #: y con qué número de serie — no el fondo en milímetros de cada caja.
 CAMPOS = ('uid', 'label', 'u_start', 'u_height', 'face', 'role', 'serial', 'asset',
-          'host_uid', 'parent_uid', 'u_slots', 'u_slot', 'u_slot_span', 'u_split')
+          'device_uid', 'parent_uid', 'u_slots', 'u_slot', 'u_slot_span', 'u_split')
 
 #: Y del armario. Su nombre y su altura son lo que cambia de sitio a las demás cosas.
 CAMPOS_RACK = ('name', 'u_height', 'desc_units', 'width_mm', 'depth_mm', 'room_uid')

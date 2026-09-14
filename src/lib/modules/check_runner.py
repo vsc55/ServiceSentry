@@ -11,11 +11,11 @@ config, an in-memory status, and whatever registry it needs to resolve a connect
 Telegram, no history, no file writes.
 
 This lives in ``lib/modules`` because it is about the module result contract and nothing
-else.  It spent its first life in ``lib/core/hosts/probe.py``, where it was written for the
+else.  It spent its first life in ``lib/core/devices/probe.py``, where it was written for the
 Servers button, and the module pages imported it from there — a generic layer reaching into
 one domain.  The bill arrived as a bug: the projection below is the one place that decides
 which fields of a result survive an on-demand run, it silently stopped carrying ``severity``,
-and nobody looked for that decision in a hosts file.  See
+and nobody looked for that decision in a devices file.  See
 ``docs/caso-diagnostico.md`` → "La misma comprobación salía ámbar o roja según quién la
 ejecutara".
 """
@@ -54,7 +54,7 @@ class ProbeMonitor(Monitor):
     # from a private attribute being None.
     is_probe = True
 
-    def __init__(self, modules_config, hosts_store, db,
+    def __init__(self, modules_config, devices_store, db,
                  modules_dir='', notify_cfg=None):  # pylint: disable=super-init-not-called
         self.dir_base = self.dir_config = self.dir_var = ''
         # dir_modules must point at the watchfuls dir so ModuleBase._msg can load
@@ -64,7 +64,7 @@ class ProbeMonitor(Monitor):
         self.tg = None
         self._db = db
         self._history = None
-        self._hosts_store = hosts_store
+        self._devices_store = devices_store
         self._audit_store = None
         self._status_counts_dirty = False
         # Global config so _notify_lang() resolves the configured notification
@@ -88,7 +88,7 @@ class ProbeMonitor(Monitor):
 
 
 def run_module_check(module_name: str, modules_config: dict, *,
-                     hosts_store=None, db=None, modules_dir=None,
+                     devices_store=None, db=None, modules_dir=None,
                      notify_cfg=None) -> list:
     """Run ``watchfuls.<module_name>.check()`` once and return its results.
 
@@ -106,7 +106,7 @@ def run_module_check(module_name: str, modules_config: dict, *,
     cls = getattr(mod, 'Watchful', None)
     if cls is None:
         raise ImportError(f'watchfuls.{module_name} has no Watchful')
-    watchful = cls(ProbeMonitor(modules_config, hosts_store, db,
+    watchful = cls(ProbeMonitor(modules_config, devices_store, db,
                                 modules_dir=modules_dir, notify_cfg=notify_cfg))
     watchful.check()
     out = []
