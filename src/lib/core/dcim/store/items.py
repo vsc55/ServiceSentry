@@ -57,16 +57,6 @@ _ITEM = TableSpec(
         Column('serial',    'TEXT', nullable=False, default="''"),
         Column('asset',     'TEXT', nullable=False, default="''"),
         Column('description', 'TEXT', nullable=False, default="''"),
-        # How deep this thing is. Not in the catalogue: devicetype-library says whether a model
-        # is full depth and never how many millimetres, so this is somebody's tape measure or
-        # the vendor's sheet — and without it the rack can still say what it HAS, which is what
-        # a person standing in front of it with a box wants to know.
-        #
-        # Last, because a missing column can only be added by ADD COLUMN when it is trailing,
-        # which is how an existing database gets this one without a migration.
-        Column('created_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_by', 'TEXT', nullable=False, default="''"),
         Column('depth_mm',  'INTEGER', nullable=False, default='0'),
         # Qué CLASE de dispositivo es — uno de `ITEM_ROLES`. Vacío = nadie lo ha dicho, que es
         # distinto de `other`: lo primero es una pregunta y lo segundo una respuesta.
@@ -116,13 +106,19 @@ _ITEM = TableSpec(
         #
         # La última, para que aparecer sobre una tabla llena sea un `ADD COLUMN`.
         Column('placement', 'TEXT', nullable=False, default="'u'"),
+        # How deep this thing is. Not in the catalogue: devicetype-library says whether a model
+        # is full depth and never how many millimetres, so this is somebody's tape measure or
+        # the vendor's sheet — and without it the rack can still say what it HAS, which is what
+        # a person standing in front of it with a box wants to know.
+        #
+        # Last, because a missing column can only be added by ADD COLUMN when it is trailing,
+        # which is how an existing database gets this one without a migration.
+        Column('created_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_item_rack', ('rack_uid',)),
              Index('idx_dc_item_device', ('device_uid',)),
              Index('idx_dc_item_parent', ('parent_uid',)),
              Index('idx_dc_item_build', ('build_uid',))),
-    # Se llamaba `host_uid`. `reconcile_table` lo aplica antes de comparar, con los datos dentro.
-    renames={'host_uid': 'device_uid'},
-    # Y el índice, que llevaba el nombre de la columna de ayer.
-    former_indexes=('idx_dc_item_host',),
 )

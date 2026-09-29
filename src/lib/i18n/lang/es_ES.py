@@ -5768,6 +5768,11 @@ LANG = {
     'dcim_build_valid_from':       'Vigente desde',
     'dcim_build_valid_to':         'Vigente hasta',
     'dcim_build_retired':          'retirada',
+    # El filtro: la chapa de la fila va en minúscula porque va pegada al nombre; esto es
+    # un rótulo de desplegable y se lee solo.
+    'dcim_build_state':            'Estado',
+    'dcim_build_active':           'Vigentes',
+    'dcim_build_retired_pl':       'Retiradas',
     'dcim_build_notes':            'Comentarios',
     'dcim_build_share':            'Cómo comparte el U',
     'dcim_build_ports_none':       'Este chasis no declara ningún puerto',

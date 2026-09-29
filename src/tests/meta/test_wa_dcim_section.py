@@ -3219,3 +3219,48 @@ class TestLaFichaDeUnEquipoVaPorZonas:
         cuerpo = _strip_comments(_fn(self._js(), '_dcimZoneHtml'))
         assert 'spec.fields[0]' not in cuerpo
         assert 'primera' in cuerpo
+
+
+class TestPlantillasUsaLaTablaDelPanel:
+    """La lista de plantillas era una tabla escrita a mano: siete cabeceras fijas, sin selector
+    de columnas, sin orden — y **sin las tres de auditoría** que la fila lleva guardadas desde
+    el primer día. «A `dc_build` le faltan las columnas de creada, actualizada y actualizado
+    por», reportado desde la pantalla, con el dato entero en la base y en la API.
+
+    Se comprueba la declaración y no el dibujo: quien mira una tabla a mano no ve lo que le
+    falta, porque lo que falta no está escrito en ninguna parte.
+    """
+
+    JS = os.path.join(DCIM, '_builds.html')
+
+    def test_la_lista_se_declara_sobre_createListTable(self):
+        js = _strip_comments(_read(self.JS))
+        assert 'createListTable({' in js, 'la lista volvió a escribirse a mano'
+        assert "containerId: 'dcbld-container'" in js
+        # Y el hueco que esa tabla llena, puesto por la pantalla.
+        assert "id=\"dcbld-container\"" in js, 'nadie deja el hueco donde dibujarse'
+
+    def test_y_ofrece_creada_actualizada_y_por_quien(self):
+        """Las tres juntas y del catálogo común (`_META_TAIL`), no tres columnas escritas aquí:
+        copiarlas es tener dos formas de enseñar la misma fecha y una que se queda atrás."""
+        js = _strip_comments(_read(self.JS))
+        cols = js.split('const _DCB_COLS = [', 1)[1].split('\n];', 1)[0]
+        assert '_META_TAIL' in cols, 'las tres de auditoría no están entre las columnas'
+        assert '_META_COL.uid' in cols
+
+    def test_y_dice_de_donde_sacarlas(self):
+        """`record` es lo que conecta esas columnas con la fila. Sin él la tabla compartida las
+        ofrece en el selector y pinta las celdas **vacías** — que es peor que no tenerlas:
+        parece un dato que falta en la base, y el dato está."""
+        js = _strip_comments(_read(self.JS))
+        assert re.search(r'record:\s*\(?\w+\)?\s*=>', js), 'las celdas saldrían en blanco'
+
+    def test_y_no_queda_la_tabla_de_antes(self):
+        """Dos tablas para una lista es la que se queda sin arreglar cuando cambie algo."""
+        js = _strip_comments(_read(self.JS))
+        assert '_dcBuildsTable(' not in js, 'la tabla a mano sigue ahí'
+        # Acotado a la función de la LISTA: la ficha de una plantilla tiene sus propias tablas
+        # —bocas, piezas, ficheros— y ésas no son de lo que va esto.
+        lista = _fn(js, '_dcBuildsHtml')
+        assert '<thead' not in lista and '<table' not in lista, (
+            'la lista vuelve a dibujar su propia tabla')

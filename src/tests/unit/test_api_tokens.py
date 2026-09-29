@@ -116,7 +116,7 @@ class TestWhatTheApiReports:
     def test_public_never_carries_the_hash_or_the_token(self):
         row = {'uid': 'u1', 'name': 'ci', 'token_id': 'abc', 'token_hash': 'DEADBEEF',
                'permissions': '["users_view"]', 'expires_at': '', 'last_used': '',
-               'revoked': 0, 'created': 'x', 'created_by': 'me'}
+               'revoked': 0, 'created_at': 'x', 'created_by': 'me'}
         out = S.public(row)
         assert 'token_hash' not in out and 'token' not in out
         assert 'DEADBEEF' not in str(out)

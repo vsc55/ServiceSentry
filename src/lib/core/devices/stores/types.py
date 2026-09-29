@@ -48,8 +48,6 @@ _log = logging.getLogger(__name__)
 
 _TYPE = TableSpec(
     name='device_type',
-    # Antes `host_type`. Mismo trato que la flota: el motor la renombra en el primer arranque.
-    former_names=('host_type',),
     columns=(
         # **Por aquí se relaciona.** Un `uid` como el de todo lo demás de este esquema —`org`,
         # `devices`, `dc_item`—, y es lo que guarda `devices.device_type`. Antes esa columna llevaba
@@ -103,7 +101,6 @@ _TYPE = TableSpec(
     ),
     indexes=(Index('idx_device_type_name', ('name',)),
              Index('idx_device_type_slug', ('slug',))),
-    former_indexes=('idx_host_type_name', 'idx_host_type_slug'),
 )
 
 _T = _TYPE.name
@@ -176,236 +173,18 @@ class DeviceTypesStore(BaseStore):
         # once porque en su casa no hay ninguna se las encontraría de vuelta en el siguiente
         # arranque, sin que nada lo explicara. Lo que se sembró, sembrado está; volver a ponerlas
         # es un botón que se pulsa a propósito.
-        #
-        # Y «nueva» es que no haya NADA de donde venir, ni la tabla ni la que una migración a
-        # medias dejó apartada. Mirando sólo la primera, una base que se quedó a medio rehacer
-        # —la vieja a un lado, la nueva sin crear— se sembraría encima: once clases de fábrica
-        # donde había las de esa casa, y la flota señalando a ninguna de ellas.
-        # Lo primero de todo, el nombre: una base de las antiguas tiene esta tabla llamada
-        # `host_type` **y** con la forma de entonces, y lo que viene detrás —la migración a
-        # `uid`— mira una tabla que se llama como se llama hoy. Al revés se quedaría sin hacer.
-        self._db.adopt_former_name(_TYPE)
-        nueva = not self._existe() and not self._hay_apartada()
-        # La forma vieja —clave primaria `id` con el nombre corto dentro— hay que rehacerla antes
-        # de reconciliar: cambiar una clave primaria no es añadir una columna, y `reconcile_table`
-        # no lo intenta. Con esto delante, una base de esos días entra en la forma nueva sola.
-        if not nueva:
-            self._migrar_a_uid()
+        nueva = not self._existe()
         self._db.reconcile_table(_TYPE)
-        from lib.core.constants import SYSTEM_USER                # noqa: PLC0415
         if nueva:
+            from lib.core.constants import SYSTEM_USER            # noqa: PLC0415
             self.seed_missing(actor=SYSTEM_USER)
-        else:
-            self._limpiar_siembra(SYSTEM_USER)
-            self._renombrar_claves_de_idioma()
-            self._reparar_vinculos()
-
-    def _renombrar_claves_de_idioma(self) -> None:
-        """Las once de serie decían `host_type_…` y el catálogo ahora las llama `device_type_…`.
-
-        La clave está **guardada en la fila**, así que renombrarla en los ficheros de idioma no
-        la cambia aquí: `t()` devuelve la clave que se le da cuando no la encuentra, y la pantalla
-        pasa a enseñar `host_type_camera` en la columna del nombre — sin error, con la fila
-        entera bien escrita.
-
-        Se reconstruye desde el nombre corto, que es de donde salió (`host_type_nas` se armó como
-        `host_type_` + `nas`), y sólo sobre las que llevan el prefijo de ayer: una clase escrita
-        en esta casa no tiene clave y no se toca.
-        """
-        try:
-            filas = self._db.fetchall(
-                f"SELECT uid, slug FROM {_T} WHERE label_key LIKE 'host_type_%'")
-            if not filas:
-                return
-            with self._db.transaction():
-                for uid, slug in filas:
-                    nueva = 'device_type_' + str(slug or '')
-                    self._db.execute(f'UPDATE {_T} SET label_key = ? WHERE uid = ?',
-                                     (nueva, uid))
-            _log.info('device_type: %s label keys renamed to device_type_*', len(filas))
-        except Exception:  # pylint: disable=broad-except
-            # Una base que no se deja escribir no puede impedir que el panel abra: lo que queda
-            # es una columna de nombres feos, no una pantalla en blanco.
-            pass
-
-    def _migrar_a_uid(self) -> None:
-        """Pasar la tabla de relacionar por el nombre corto a relacionar por `uid`.
-
-        Y **con la flota**: `devices.device_type` guardaba ese nombre corto, así que rehacer la
-        tabla sin reescribirlo deja a todos los dispositivos señalando a clases que ya no existen
-        —sin error, con el filtro de clase en cero y con la columna en blanco—.
-
-        Tres cosas que costaron una base de verdad cada una:
-
-        **Se reconoce por la columna vieja, no por la forma entera.** La primera versión pedía
-        «con `id` y sin `uid`», y eso la desactiva para siempre en cuanto algo añada las columnas
-        antes: `reconcile_table` sabe añadirlas —no sabe cambiar una clave primaria—, así que una
-        base que arrancó con el esquema a medio escribir se quedó con `uid`, `slug` y
-        `description` puestas y a NULL, y con `id` todavía de clave. Mientras `id` esté ahí hay
-        trabajo que hacer, y el `uid` que ya tenga una fila se respeta.
-
-        **El DDL no entra en la transacción.** El conector lo manda por su propia conexión, así
-        que un fallo a mitad no deshace el renombrado: lo que queda es la tabla vieja apartada y
-        la nueva vacía, y al siguiente arranque no hay ningún `id` que mirar — las once clases
-        desaparecidas y la flota sin clasificar. Por eso la tabla apartada **es** el otro sitio
-        donde se busca trabajo: encontrarla es una vuelta que se quedó a medias, y se termina.
-
-        **Los índices siguen a la tabla renombrada.** `idx_host_type_name` se va con ella, y
-        entonces crear la tabla nueva falla por un nombre ocupado por una tabla que está a punto
-        de desaparecer. Se quitan antes de pedirla.
-        """
-        # Los dos apartados posibles: el de hoy y el de cuando esta tabla se llamaba `host_type`
-        # — una vuelta que se cortó entonces dejó el suyo con aquel nombre, y ahí está todo.
-        apartados = [f'{_T}_old'] + [f'{n}_old' for n in (_TYPE.former_names or ())]
-        viejo = apartados[0]
-        try:
-            cols = set(self._db.list_columns(_T))
-            if 'id' in cols:
-                origen = _T
-            else:
-                quedado = next((a for a in apartados if self._db.table_exists(a)), '')
-                if not quedado:
-                    return
-                origen = viejo = quedado   # una vuelta anterior se quedó a medias
-        except Exception:  # pylint: disable=broad-except
-            return
-        import uuid as _uuid                                       # noqa: PLC0415
-        try:
-            # De las columnas que puede que no estén —una tabla de la forma original no tiene
-            # `uid` ni `slug`— se lee lo que haya, y de lo que no hay se pone el hueco.
-            hay = set(self._db.list_columns(origen))
-            campos = ['id', 'name', 'label_key', 'icon', 'source', 'sort', 'created_at',
-                      'updated_at', 'updated_by', 'external_id']
-            campos.append('uid' if 'uid' in hay else "'' AS uid")
-            campos.append('slug' if 'slug' in hay else "'' AS slug")
-            campos.append('description' if 'description' in hay else "'' AS description")
-            filas, nuevos = [], {}
-            for r in self._db.fetchall(f'SELECT {", ".join(campos)} FROM {origen}') or []:
-                corto = str(r[0] or '')
-                ident = str(r[10] or '') or str(_uuid.uuid4())
-                if corto:
-                    nuevos[corto] = ident
-                filas.append((ident, r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9],
-                              str(r[11] or '') or corto, r[12] or ''))
-            if origen == _T:
-                self._db.execute_ddl(f'ALTER TABLE {_T} RENAME TO {viejo}')
-            # Los índices se quitan SIEMPRE, y no sólo al apartar la tabla: siguen a la
-            # renombrada, así que `idx_host_type_name` se queda colgando de la apartada y el
-            # nombre sigue ocupado. Al retomar una vuelta a medias eso es lo único que hay
-            # delante, y hacía fallar la reconciliación **al arrancar el panel** — que es un
-            # panel que no abre. Se vuelven a crear en la reconciliación de aquí abajo.
-            for idx in _TYPE.indexes:
-                try:
-                    self._db.execute_ddl(f'DROP INDEX IF EXISTS {idx.name}')
-                except Exception:  # pylint: disable=broad-except
-                    pass
-            self._db.reconcile_table(_TYPE)
-            # Los datos sí van juntos: las clases y la flota que las lleva puesta, o ninguna de
-            # las dos cosas. Media migración es una flota apuntando a la nada.
-            # Puede no haber flota que reescribir: una base donde las clases existen y los
-            # dispositivos todavía no. Preguntarlo es lo que distingue «no hay nada que hacer» de
-            # «ha fallado» — sin esto, el `UPDATE` contra una tabla que no está tira la
-            # transacción entera y lo que queda es la tabla nueva VACÍA: las once clases
-            # desaparecidas por no tener dispositivos a los que avisar.
-            try:
-                hay_flota = bool(self._db.table_exists('devices'))
-            except Exception:  # pylint: disable=broad-except
-                hay_flota = False
-            with self._db.transaction():
-                for fila in filas:
-                    self._db.execute(
-                        f'INSERT INTO {_T} ({_SELECT}) '
-                        f'VALUES ({", ".join("?" * len(_COLS))})', fila)
-                for corto, nuevo in (nuevos.items() if hay_flota else ()):
-                    self._db.execute(
-                        'UPDATE devices SET device_type = ? WHERE device_type = ?',
-                        (nuevo, corto))
-            self._db.execute_ddl(f'DROP TABLE {viejo}')
-        except Exception:  # pylint: disable=broad-except
-            # Lo que quede apartado se retoma al siguiente arranque, que es para lo que se mira
-            # la tabla vieja arriba. Lo que no puede pasar es que el panel no abra por esto.
-            pass
-
-    def _limpiar_siembra(self, system_user: str) -> None:
-        """Quitarle el origen falso a lo que se sembró antes de que esto se decidiera.
-
-        Durante un rato la siembra se marcó con `source='seed'` y `updated_by='seed'`. Lo primero
-        es mentira —`source` dice qué sistema de FUERA mantiene la fila, y la siembra no es uno— y
-        lo segundo es un usuario que no existe en ninguna otra tabla de este panel.
-
-        Se arregla aquí y no con un aviso porque lo que deja es una chapa «seed» en cada fila y una
-        entrada «seed» en el filtro de orígenes, para siempre, en toda instalación que se creara
-        esos días.
-
-        **Son dos correcciones y no una.** Escritas como una sola —`SET source='', updated_by=?
-        WHERE source='seed' OR updated_by='seed'`— cada fila que cumpliera media condición perdía
-        las dos columnas: una clase de la siembra que Freshservice hubiera **adoptado** lleva su
-        origen puesto y conserva el `updated_by='seed'` de cuando se sembró, y salía de aquí con el
-        origen en blanco y el `external_id` a solas — vinculada a nada, y sin manera de saber a qué
-        lo estaba. Visto en una base de verdad. Cada columna mira su propio valor.
-        """
-        try:
-            with self._db.transaction():
-                self._db.execute(
-                    f"UPDATE {_T} SET source = '' WHERE source = 'seed'")
-                self._db.execute(
-                    f"UPDATE {_T} SET updated_by = ? WHERE updated_by = 'seed'",
-                    (system_user,))
-        except Exception:  # pylint: disable=broad-except
-            # Una base a la que no se puede escribir no puede impedir abrir el panel: lo que
-            # queda es la chapa de más, que es feo y no rompe nada.
-            pass
-
-    def _reparar_vinculos(self) -> None:
-        """Devolverle el origen a las filas que se quedaron con el `external_id` a solas.
-
-        Un vínculo son **dos datos** —de qué sistema y cuál de los suyos— y :meth:`link` escribe
-        siempre los dos. Media fila no la escribe nada: es lo que dejó la limpieza de la siembra
-        cuando reseteaba la fila entera por cumplir media condición. Y no se nota mirando: la
-        clase sigue ahí, con su nombre y su icono, sólo que ya no la mantiene nadie — la siguiente
-        importación crea una segunda al lado, y ésa se lleva los dispositivos nuevos.
-
-        **Sólo cuando no hay que adivinar**, que es cuando hay un único proveedor de dispositivos
-        declarado: entonces ese `external_id` no puede ser de otro. Con dos o más se deja como
-        está y se vuelve a vincular desde la pantalla, que es una decisión de quien mira y no una
-        que se pueda tomar por probabilidad.
-        """
-        try:
-            filas = self._db.fetchall(
-                f"SELECT uid FROM {_T} WHERE external_id <> '' AND source = ''") or []
-            if not filas:
-                return
-            from lib.core.devices import actions as device_actions     # noqa: PLC0415
-            fuentes = sorted(device_actions.sources().keys())
-            if len(fuentes) != 1:
-                return
-            with self._db.transaction():
-                self._db.execute(
-                    f"UPDATE {_T} SET source = ? WHERE external_id <> '' AND source = ''",
-                    (fuentes[0],))
-        except Exception:  # pylint: disable=broad-except
-            # Como la limpieza de al lado: una base que no se deja escribir no puede impedir que
-            # el panel abra. Lo que queda es una clase que hay que volver a vincular a mano.
-            pass
-
-    def _hay_apartada(self) -> bool:
-        """Si una migración a medias dejó la tabla vieja a un lado. Es de donde se retoma."""
-        try:
-            return bool(self._db.table_exists(f'{_T}_old'))
-        except Exception:  # pylint: disable=broad-except
-            return False
 
     def _existe(self) -> bool:
-        """Si esta tabla ya está — **con el nombre que tiene hoy o con el que tuvo**.
-
-        Los dos, y no sólo el de hoy: la que se llamaba `host_type` todavía se llama así cuando se
-        hace esta pregunta, porque quien la renombra es `reconcile_table` y eso viene después.
-        Mirando sólo el nombre nuevo, una base de ayer se lee como «no existe» y se siembra encima
-        — y las once vuelven a aparecerle a quien borró tres a propósito.
-        """
+        """Si esta tabla ya está. Es lo que decide si se siembra: se siembra **al crearla**, no
+        cuando está vacía — quien borre las once porque en su casa no hay ninguna se las
+        encontraría de vuelta en el siguiente arranque."""
         try:
-            nombres = (_T,) + tuple(getattr(_TYPE, 'former_names', ()) or ())
-            return any(self._db.table_exists(n) for n in nombres)
+            return bool(self._db.table_exists(_T))
         except Exception:  # pylint: disable=broad-except
             # Un conector que no sepa contestar no puede hacer que se siembre encima de lo que ya
             # hay: se trata como «ya existía», que es lo que no escribe nada.

@@ -25,9 +25,6 @@ _ROOM = TableSpec(
         # catalogue's path traversal was exactly this shape.
         Column('plan',        'TEXT', nullable=False, default="''"),
         Column('description', 'TEXT', nullable=False, default="''"),
-        Column('created_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_by',  'TEXT', nullable=False, default="''"),
         # How it is cooled — one of `COOLING`. Empty means nobody has said, which is NOT the
         # same as `none`: a comms cupboard with no cooling at all is a fact worth recording, and
         # a room whose cooling nobody wrote down is a question. Trailing, so an existing
@@ -48,6 +45,9 @@ _ROOM = TableSpec(
         Column('width_mm', 'INTEGER', nullable=False, default='0'),
         Column('depth_mm', 'INTEGER', nullable=False, default='0'),
         Column('tile_mm',  'INTEGER', nullable=False, default='600'),
+        Column('created_at',  'TEXT', nullable=False, default="''"),
+        Column('updated_at',  'TEXT', nullable=False, default="''"),
+        Column('updated_by',  'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_room_site', ('site_uid',)),),
 )

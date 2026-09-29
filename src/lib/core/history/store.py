@@ -56,8 +56,8 @@ _SCHEMA = TableSpec(
         #
         # Una base anterior al cambio llega aquí con la columna puesta, y el reconciliador **no
         # la borra** —una columna que dejó de declararse se conserva y se reporta, que es lo
-        # correcto: borrar algo que no puso él sería decidir sobre una base que no conoce—. La
-        # retira `_fill_facts`, cuando no queda ni un documento sin pasar.
+        # correcto: borrar algo que no puso él sería decidir sobre una base que no conoce—. Se
+        # queda ahí sin que nadie la lea, que es lo que ya hacía.
         # → history_series.id. Nullable because a sample recorded while the series could not
         # be resolved is still a sample: losing the id costs a join, refusing the row costs
         # the measurement.
@@ -167,9 +167,6 @@ class HistoryStore(BaseStore):
         self._db.reconcile_table(_SCHEMA)
         self._db.reconcile_table(_SERIES_SCHEMA)
         self.facts.bootstrap()
-        # Antes que el resumen: el resumen guarda la última medida de cada serie, y hasta que
-        # las medidas no son filas no hay de dónde sacarla.
-        self._fill_facts()
         self._fill_summary()
 
     def _fill_summary(self) -> None:
@@ -192,116 +189,6 @@ class HistoryStore(BaseStore):
             self._db.commit()
         except Exception:  # pylint: disable=broad-except
             pass
-
-    #: Cuántas muestras se pasan de documento a filas por viaje. Ni una a una —serían cinco
-    #: millones de transacciones— ni todas de golpe, que es una transacción de veintisiete
-    #: millones de filas sobre una base en producción.
-    _LOTE_HECHOS = 5000
-
-    def _fill_facts(self) -> None:
-        """Pasar a filas las medidas de las muestras que todavía las llevan en un documento.
-
-        **La columna es el marcador.** Mientras `history.data` exista queda trabajo; cuando se
-        retira, no vuelve a haberlo — y preguntarlo cuesta una introspección, no un recorrido de
-        cinco millones de filas. Es la misma forma que tuvo el paso que quitó `module` y `key`,
-        y por el mismo motivo: un camino que sólo puede correr una vez necesita saber si ya
-        corrió sin pagar por preguntarlo.
-
-        Se puede interrumpir. Cada lote escribe sus hechos y vacía el documento de esas muestras
-        **en la misma transacción**, así que un corte deja la base coherente y el siguiente
-        arranque sigue donde lo dejó, no donde empezó.
-        """
-        try:
-            if 'data' not in self._db.list_columns(_T):
-                return
-        except Exception:  # pylint: disable=broad-except
-            return
-        try:
-            quedan = self._db.fetchone(
-                f'SELECT COUNT(*) FROM {_T} WHERE data IS NOT NULL AND series_id IS NOT NULL')
-            quedan = int((quedan or (0,))[0] or 0)
-        except Exception:  # pylint: disable=broad-except
-            quedan = 0
-        if not quedan:
-            self._retire_data_column()
-            return
-        # Esto tarda. Medido con el código definitivo sobre 5.266.008 muestras —treinta días de
-        # una instalación real— **25 minutos**, a 3.471 muestras por segundo. Un arranque que
-        # tarda veinticinco minutos sin decir nada parece un arranque colgado, y alguien lo mata
-        # a la mitad; que se pueda reanudar no sirve de nada si el que espera no lo sabe.
-        _log.info('history: moving %d samples from document to rows — this takes a while '
-                  '(~%d min at the %d/s measured)', quedan,
-                  max(1, quedan // 3471 // 60), 3471)
-        desde, hechas, ultimo_aviso = 0, 0, time.time()
-        try:
-            while True:
-                # Por `id` ascendente y no «las que queden»: sin el `id > ?` cada vuelta
-                # volvería a recorrer desde el principio las que ya pasó, y pasar cinco
-                # millones costaría el cuadrado de lo que cuesta.
-                filas = self._db.fetchall(
-                    f'SELECT id, ts, series_id, data FROM {_T} '
-                    'WHERE id > ? AND data IS NOT NULL AND series_id IS NOT NULL '
-                    'ORDER BY id LIMIT ?', (desde, self._LOTE_HECHOS)) or ()
-                if not filas:
-                    break
-                ids = [int(r[0]) for r in filas]
-                # Una transacción por lote, explícita. El conector va en **autocommit**, así
-                # que sin esto cada una de las veintiséis mil filas de un lote sería su propia
-                # transacción con su sincronización a disco: medido, 4,77 s para 21.092 hechos
-                # — que a escala de cinco millones de muestras son horas de arranque.
-                #
-                # Y además es lo que hace que se pueda interrumpir sin quedarse a medias: los
-                # hechos y el vaciado del documento entran o no entran juntos.
-                with self._db.transaction():
-                    self.facts.write_many(
-                        [(int(sid), float(ts), _load_json(documento))
-                         for _id, ts, sid, documento in filas])
-                    self._db.execute(
-                        f'UPDATE {_T} SET data = NULL WHERE id IN ({",".join("?" * len(ids))})',
-                        tuple(ids))
-                desde, hechas = ids[-1], hechas + len(ids)
-                if time.time() - ultimo_aviso >= 30:
-                    _log.info('history: %d of %d samples (%d %%)',
-                              hechas, quedan, hechas * 100 // max(1, quedan))
-                    ultimo_aviso = time.time()
-        except Exception as exc:  # pylint: disable=broad-except
-            # Lo escrito, escrito queda: cada lote entró con su transacción, así que la base
-            # está coherente y el siguiente arranque sigue donde éste lo dejó.
-            _log.warning('history: moving measurements to rows stopped at %d of %d '
-                         '(%s: %s) — the next start resumes', hechas, quedan,
-                         type(exc).__name__, exc)
-            return
-        _log.info('history: %d samples moved to rows', hechas)
-        self._retire_data_column()
-
-    def _retire_data_column(self) -> None:
-        """Quitar `history.data`, y sólo si no queda nada dentro.
-
-        Es el paso que no se puede deshacer, así que el cerrojo va delante: una muestra sin
-        `series_id` no tiene dónde colocar sus medidas —no hay serie a la que pertenezcan— y se
-        queda con su documento, que es lo único que le queda. Mientras haya una sola, la columna
-        no se toca. Lo que reconstruye una base anterior a este cambio es una copia de
-        seguridad, que por eso se lleva las tres tablas en la misma parte.
-        """
-        try:
-            if self._db.fetchone(f'SELECT id FROM {_T} WHERE data IS NOT NULL LIMIT 1'):
-                return
-            self._db.execute_ddl(
-                f'ALTER TABLE {self._db.quote_ident(_T)} '
-                f'DROP COLUMN {self._db.quote_ident("data")}')
-            self._db.commit()
-            # **Sin `VACUUM`, a propósito.** Los documentos vaciados dejan páginas libres —sobre
-            # treinta días de una instalación real, unos 700 MB— que SQLite reutiliza pero no
-            # devuelve al disco. Compactar ahí mismo pediría el doble de espacio libre del que
-            # ocupa la base y tardaría minutos más, en el arranque, sobre la base de producción
-            # de alguien que no lo ha pedido. Devolver ese hueco es una decisión suya, y ya
-            # tiene el botón: Configuración → General → Mantenimiento.
-            _log.info('history: `data` retired. The space the emptied documents leave is '
-                      'reused on its own; to hand it back to the disk, Maintenance → compact.')
-        except Exception as exc:  # pylint: disable=broad-except
-            import sys  # noqa: PLC0415
-            print(f'[history] history.data is still there: {type(exc).__name__}: {exc}',
-                  file=sys.stderr, flush=True)
 
     def _resummarise(self, *, con_ultima: bool = False) -> None:
         """Recalcular el resumen de cada serie a partir de las muestras que le quedan.

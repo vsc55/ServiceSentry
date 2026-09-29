@@ -235,6 +235,15 @@ class TestQuienTieneUnaEmpresaVeEsaEmpresa:
         assert r.get_json()['orgs'] == []
 
 
+def _eventos(client):
+    """Los nombres de lo último apuntado. La ruta contesta una lista pelada, y leerla como si
+    fuese un sobre con `entries` dentro es como se escribió esto la primera vez."""
+    filas = client.get('/api/v1/audit?limit=50').get_json() or []
+    if isinstance(filas, dict):
+        filas = filas.get('entries') or filas.get('logs') or []
+    return [str(e.get('event') or e.get('action') or '') for e in filas]
+
+
 class TestBorrarUnaEmpresaDejaLoSuyoSinFichar:
 
     def test_lo_suyo_sigue_estando_y_deja_de_ser_de_ella(self, admin, client, grupo):
@@ -261,69 +270,6 @@ class TestBorrarUnaEmpresaDejaLoSuyoSinFichar:
         eventos = _eventos(client)
         assert 'org_owner_set' in eventos
 
-
-class TestLoQueVeniaDelInventarioSeAdopta:
-    """Una instalación que ya tenía empresas las tiene en `dc_org`/`dc_owner`. Copiadas y no
-    renombradas: una copia a una tabla VACÍA es idempotente, vale igual en los tres motores, y
-    deja las filas viejas donde están — que es lo que hace esto recuperable."""
-
-    def test_las_filas_viejas_aparecen_en_las_nuevas(self, admin):
-        from lib.core.orgs.store import OrgsStore
-        db = admin._db_connector
-        _tablas_viejas(db)
-        db.execute("INSERT INTO dc_org (uid, name, short, description, created_at, "
-                   "updated_at, updated_by) VALUES ('o-vieja', 'De antes', 'DA', '', "
-                   "'2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'quien-fuera')")
-        db.execute("INSERT INTO dc_owner (scope, uid, org_uid, set_at, set_by) "
-                   "VALUES ('rack', 'r-viejo', 'o-vieja', '2026-01-01T00:00:00Z', 'x')")
-        db.execute("DELETE FROM org")
-        db.execute("DELETE FROM org_owner")
-        db.commit()
-
-        store = OrgsStore(db)
-        assert [o['name'] for o in store.orgs.list()] == ['De antes']
-        assert store.said() == {('rack', 'r-viejo'): 'o-vieja'}
-
-    def test_y_no_pisa_lo_que_ya_hubiera(self, admin, client):
-        """Idempotente a propósito: se arranca más de una vez, y un panel que aún no ha
-        reiniciado sigue escribiendo en la tabla vieja mientras tanto."""
-        from lib.core.orgs.store import OrgsStore
-        _login(client)
-        _tablas_viejas(admin._db_connector)
-        uid = client.post('/api/v1/orgs',
-                          json={'name': 'La de ahora', 'short': 'LDA'}).get_json()['uid']
-        db = admin._db_connector
-        db.execute("INSERT INTO dc_org (uid, name, short, description, created_at, "
-                   "updated_at, updated_by) VALUES ('o-vieja2', 'De antes', '', '', '', '', '')")
-        db.commit()
-        store = OrgsStore(db)
-        nombres = {o['name'] for o in store.orgs.list()}
-        assert nombres == {'La de ahora'}, 'la adopción ha pisado lo que ya había'
-        assert store.orgs.get(uid) is not None
-
-
-def _eventos(client):
-    """Los nombres de lo ultimo apuntado. La ruta contesta una lista pelada, y leerla como si
-    fuese un sobre con `entries` dentro es como se escribio esto la primera vez."""
-    filas = client.get('/api/v1/audit?limit=50').get_json() or []
-    if isinstance(filas, dict):
-        filas = filas.get('entries') or filas.get('logs') or []
-    return [str(e.get('event') or e.get('action') or '') for e in filas]
-
-
-def _tablas_viejas(db):
-    """Las dos tablas que este panel ya no declara, puestas a mano.
-
-    Es lo que hace honesta la prueba: si las siguiese creando alguien, lo que se estaria
-    comprobando es que dos tablas vivas se copian entre si, no que una instalacion vieja se
-    encuentra sus empresas donde ahora se buscan.
-    """
-    db.execute("CREATE TABLE IF NOT EXISTS dc_org (uid TEXT PRIMARY KEY, name TEXT, "
-               "short TEXT, description TEXT, created_at TEXT, updated_at TEXT, "
-               "updated_by TEXT)")
-    db.execute("CREATE TABLE IF NOT EXISTS dc_owner (scope TEXT, uid TEXT, org_uid TEXT, "
-               "set_at TEXT, set_by TEXT)")
-    db.commit()
 
 class TestLaListaDiceDeDondePuedeVenirUna:
     """La columna guarda `freshservice` y la pantalla enseña un nombre. Ese nombre lo declara
@@ -532,36 +478,3 @@ class TestElBotonDeImportarViveEnEmpresas:
         monkeypatch.setattr('lib.discovery.scan', _falso)
         _login(client)
         assert org_scopes.actions(admin) == []
-
-
-class TestElAmbitoDeUnDispositivoSeLlamabaHost:
-    """`org_owner` dice de qué es dueña una empresa con el par (ámbito, uid), y el ámbito de un
-    dispositivo se guardaba como `host`. El paquete lo declara ahora como `device`.
-
-    Sin migrar esas filas, las de ayer apuntan a un ámbito que ya no declara nadie: las empresas
-    dejan de ser dueñas de sus dispositivos — sin error, con la columna llena, y la pantalla
-    enseñando «sin asignar» sobre una base que lo tiene todo escrito.
-    """
-
-    def test_lo_que_decia_host_lo_dice_device_al_arrancar(self, admin):
-        from lib.core.orgs.store import OrgsStore                # noqa: PLC0415
-        db = admin._db_connector
-        with db.transaction():
-            db.execute("INSERT INTO org_owner (scope, uid, org_uid, set_at, set_by) "
-                       "VALUES ('host', 'u-viejo', 'o-viejo', '2026-01-01', 'test')")
-        OrgsStore(db)                                            # el arranque
-        fila = db.fetchone("SELECT scope, org_uid FROM org_owner WHERE uid = 'u-viejo'")
-        assert fila is not None, 'se ha perdido la fila'
-        assert fila[0] == 'device', 'la empresa ha dejado de ser dueña de su dispositivo'
-        assert fila[1] == 'o-viejo', 'ha cambiado de dueña'
-
-    def test_y_no_toca_los_demas_ambitos(self, admin):
-        """Un armario es `rack` y lo sigue siendo: el `UPDATE` mira su propio valor y no la fila."""
-        from lib.core.orgs.store import OrgsStore                # noqa: PLC0415
-        db = admin._db_connector
-        with db.transaction():
-            db.execute("INSERT INTO org_owner (scope, uid, org_uid, set_at, set_by) "
-                       "VALUES ('rack', 'r-1', 'o-1', '2026-01-01', 'test')")
-        OrgsStore(db)
-        fila = db.fetchone("SELECT scope FROM org_owner WHERE uid = 'r-1'")
-        assert fila[0] == 'rack'

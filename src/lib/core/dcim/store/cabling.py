@@ -61,9 +61,6 @@ _CABLE = TableSpec(
         Column('color',    'TEXT', nullable=False, default="''"),
         Column('length_mm', 'INTEGER', nullable=False, default='0'),
         Column('description', 'TEXT', nullable=False, default="''"),
-        Column('created_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_by', 'TEXT', nullable=False, default="''"),
         # De qué CATEGORÍA es, que no es lo mismo que de qué está hecho: `kind` dice cobre o
         # fibra y esto dice Cat 6A o OM4. La diferencia decide si un enlace de 10 Gb va a
         # funcionar, y es lo que hay que mirar en la caja de repuestos antes de bajar al armario
@@ -78,6 +75,9 @@ _CABLE = TableSpec(
         #
         # Las últimas, para que aparecer sobre una tabla llena sea un `ADD COLUMN`.
         Column('asset', 'TEXT', nullable=False, default="''"),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_cable_a', ('a_item',)),
              Index('idx_dc_cable_b', ('b_item',))),

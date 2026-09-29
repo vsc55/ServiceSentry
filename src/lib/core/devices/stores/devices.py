@@ -35,10 +35,6 @@ from lib.db.store_base import BaseStore, EncryptedPayloadMixin
 
 _DEVICES_SCHEMA = TableSpec(
     name='devices',
-    # Se llamaba `hosts`, y eso es lo que hay escrito en toda base anterior a este cambio: el
-    # motor la adopta con sus filas y sus índices en el primer arranque. Declararlo aquí es lo
-    # que hace que no haya que acordarse de ello en ningún otro sitio.
-    former_names=('hosts',),
     columns=(
         Column('uid',         'TEXT', primary_key=True),
         Column('name',        'TEXT', nullable=False, default="''", unique=True),
@@ -75,9 +71,6 @@ _DEVICES_SCHEMA = TableSpec(
         # Modules this server is monitored by (so a module added with no checks
         # yet still persists).  JSON list of bare module names.
         Column('modules',     'TEXT', nullable=False, default="'[]'"),
-        Column('created_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_by',  'TEXT', nullable=False, default="''"),
         # The rows of this machine somebody has said are worth an alert. A switch port that
         # is down may be a PC switched off at seven — which is not news and made a rack of
         # half-populated switches permanently red — or it may be the link to a server, which
@@ -101,13 +94,12 @@ _DEVICES_SCHEMA = TableSpec(
         # Las últimas, para que una base de datos que ya existe las reciba por ADD COLUMN.
         Column('source',      'TEXT', nullable=False, default="''"),
         Column('external_id', 'TEXT', nullable=False, default="''"),
+        Column('created_at',  'TEXT', nullable=False, default="''"),
+        Column('updated_at',  'TEXT', nullable=False, default="''"),
+        Column('updated_by',  'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_devices_name', ('name',)),
              Index('idx_devices_source', ('source', 'external_id'))),
-    # Los que llevaban el nombre viejo. Un índice sigue a la tabla que se renombra, así que en
-    # una base anterior seguirían ahí —con su nombre de ayer— al lado de los de arriba: dos
-    # índices sobre la misma columna, y el sobrante escribiéndose en cada alta para siempre.
-    former_indexes=('idx_hosts_name', 'idx_hosts_source'),
 )
 
 _T = _DEVICES_SCHEMA.name  # table name — single source of truth

@@ -97,6 +97,11 @@ del nonato se encuentra a sí misma y tira la tabla con todo dentro. Las claves 
 reescriben al arrancar desde el nombre corto (`device_type_` + `slug`). Seis casos en
 `tests/unit/test_db_schema.py` y tres en `tests/unit/test_device_types.py`.
 
+**Epílogo.** Lo de un solo uso —la reescritura de `label_key`, el renombrado del ámbito en
+`org_owner`— se retiró una vez aplicado en todas las bases de esta máquina, que aún no está en
+producción. Lo que se queda es el mecanismo: `former_names` y `former_indexes` en `TableSpec`, que
+no son una migración sino la forma declarada de renombrar una tabla la próxima vez.
+
 **Lección.** Una migración se pregunta **dónde está el dato**, nunca **qué artefacto existe**. Un
 artefacto lo crea cualquiera —otra pasada, otro proceso, un reinicio a destiempo— y el día que
 aparece antes de tiempo la migración se apaga para siempre, en silencio. Y cuando media pantalla
@@ -147,6 +152,11 @@ Por el camino, dos cosas más que enseñó el mismo caso:
   apartada es ahora el otro sitio donde se busca trabajo, para poder terminar la vuelta;
 * **los índices siguen a la tabla renombrada**, y `idx_device_type_name` seguía ocupado cuando la
   tabla nueva lo pedía.
+
+**Epílogo.** Las dos correcciones —`_migrar_a_uid` y la limpieza de la siembra— se retiraron una
+vez aplicadas en todas las bases de esta máquina. Eran de un solo uso, no hay instalación en
+producción de aquellos días, y código de migración que ya no puede encontrar trabajo es código que
+sólo se lee para descartarlo.
 
 **Lección.** Una migración se escribe para **la base que se va a encontrar**, no para la que había
 cuando se escribió; y como sólo corre una vez, no hay un segundo arranque que arregle lo que dejó

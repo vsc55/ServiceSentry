@@ -361,7 +361,7 @@ class TestRotating:
         uid = created['record']['uid']
         now = datetime.now(timezone.utc)
         admin._api_token_store._db.execute(
-            'UPDATE api_tokens SET created = ?, expires_at = ? WHERE uid = ?',
+            'UPDATE api_tokens SET created_at = ?, expires_at = ? WHERE uid = ?',
             ((now - timedelta(days=29)).isoformat(), (now + timedelta(days=1)).isoformat(), uid))
         admin._api_token_store._db.commit()
         rec = self._rotate(client, uid).get_json()['record']
@@ -538,7 +538,7 @@ class TestTheAdministratorsList:
         ed = _as(admin, 'ed', role='viewer')
         admin._api_token_store.create(
             user_uid='u-ed', name='eds', token_id='tid-ed', token_hash='x',
-            permissions='[]', expires_at='', created='2026-01-01', created_by='ed')
+            permissions='[]', expires_at='', created_at='2026-01-01', created_by='ed')
         names = {t['name']: t for t in client.get('/api/v1/tokens').get_json()['tokens']}
         assert 'mine' in names and 'eds' in names
         assert names['eds']['username'] == 'ed'
@@ -550,7 +550,7 @@ class TestTheAdministratorsList:
         _login(client)
         admin._api_token_store.create(
             user_uid='u-vanished', name='orphan', token_id='tid-o', token_hash='x',
-            permissions='[]', expires_at='', created='2026-01-01', created_by='who')
+            permissions='[]', expires_at='', created_at='2026-01-01', created_by='who')
         row = next(t for t in client.get('/api/v1/tokens').get_json()['tokens']
                    if t['name'] == 'orphan')
         assert row['username'] == ''
@@ -569,7 +569,7 @@ class TestTheAdministratorsList:
         _as(admin, 'ed', role='viewer')
         uid = admin._api_token_store.create(
             user_uid='u-ed', name='eds', token_id='tid-ed2', token_hash='x',
-            permissions='[]', expires_at='', created='2026-01-01', created_by='ed')
+            permissions='[]', expires_at='', created_at='2026-01-01', created_by='ed')
         assert client.delete(f'/api/v1/tokens/{uid}').status_code == 200
         assert admin._api_token_store.by_token_id('tid-ed2')['revoked']
 
@@ -849,7 +849,7 @@ class TestActingOnSomebodyElsesToken:
         _login(client)
         uid = admin._api_token_store.create(
             user_uid='u-vanished', name='orphan', token_id='tid-orph', token_hash='x',
-            permissions='[]', expires_at='', created='2026-01-01', created_by='who')
+            permissions='[]', expires_at='', created_at='2026-01-01', created_by='who')
         assert client.put(f'/api/v1/tokens/{uid}', json={'permissions': ['users_view']}
                           ).status_code == 404
         assert client.post(f'/api/v1/tokens/{uid}/rotate').status_code == 404
@@ -1011,7 +1011,7 @@ class TestTheCrossTokenFeed:
         _login(client)
         admin._api_token_store.create(
             user_uid='u-vanished', name='orphan', token_id='tid-feed', token_hash='x',
-            permissions='[]', expires_at='', created='2026-01-01', created_by='who')
+            permissions='[]', expires_at='', created_at='2026-01-01', created_by='who')
         row = admin._api_token_store.by_token_id('tid-feed')
         admin._api_token_store.log_access(row['uid'], ts='2026-01-01T00:00:00', ip='9.9.9.9',
                                           method='GET', path='/x', status=200)

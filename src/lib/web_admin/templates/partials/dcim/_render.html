@@ -175,6 +175,9 @@ async function renderDcim() {
     // HTML. La misma razón que el lienzo y el visor 3D de las dos líneas de abajo.
     if (_dcWire && typeof renderDcWire === 'function') renderDcWire();
     if (_dcDev && typeof renderDcDev === 'function') renderDcDev();
+    // Lo mismo para Plantillas, que desde que usa la tabla compartida deja un hueco que
+    // hay que llenar: sin esto la pantalla queda en blanco, sin un solo error.
+    if (_dcBuilds && !_dcBuild && typeof renderDcBld === 'function') renderDcBld();
     if (typeof _dcimMapMounted === 'function') _dcimMapMounted();
     // Y el visor 3D, por lo mismo: un `<canvas>` que todavía no está en el documento mide
     // cero píxeles, y WebGL sobre cero píxeles es una pantalla negra sin ningún error.

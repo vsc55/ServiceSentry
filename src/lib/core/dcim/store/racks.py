@@ -54,14 +54,14 @@ _RACK = TableSpec(
         # real: el armario de comunicaciones de un rincón no está en ninguna fila.
         Column('row_uid', 'TEXT', nullable=False, default="''"),
         Column('description', 'TEXT', nullable=False, default="''"),
-        Column('created_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_by', 'TEXT', nullable=False, default="''"),
         # Un armario también se compra. Lo llevaban el equipo, el cable de datos y el de
         # corriente, y el mueble que los sostiene no — que es el que sale por más dinero en el
         # albarán y el que la aseguradora pregunta primero. La última, para que aparecer sobre
         # una tabla llena sea un `ADD COLUMN`.
         Column('asset', 'TEXT', nullable=False, default="''"),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_rack_room', ('room_uid',)),),
 )

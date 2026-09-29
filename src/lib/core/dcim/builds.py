@@ -62,9 +62,6 @@ _BUILD = TableSpec(
         Column('depth_mm',    'INTEGER', nullable=False, default='0'),
         Column('face',        'TEXT', nullable=False, default="'full'"),
         Column('description', 'TEXT', nullable=False, default="''"),
-        Column('created_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_by',  'TEXT', nullable=False, default="''"),
         # Las últimas declaradas, para que aparecer sobre una tabla llena sea un `ADD COLUMN`.
         #
         # Lo que no cabe en un renglón: por qué se eligió ese chasis, qué se probó y no valía,
@@ -112,11 +109,13 @@ _BUILD = TableSpec(
         # sin que nada haya fallado—. Mismo agujero que ya se tapó al clonar un modelo.
         Column('front_image', 'TEXT', nullable=False, default="''"),
         Column('rear_image',  'TEXT', nullable=False, default="''"),
+        Column('created_at',  'TEXT', nullable=False, default="''"),
+        Column('updated_at',  'TEXT', nullable=False, default="''"),
+        Column('updated_by',  'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_build_name', ('name',)),),
     # La caja de texto que fue durante media rama. Nunca salió de aquí, pero sí está en la base
     # de datos de quien la lleva probando, y renombrar conserva lo que hubiera escrito.
-    renames={'platform': 'platform_uid'},
 )
 
 _BUILD_PART = TableSpec(
@@ -133,9 +132,6 @@ _BUILD_PART = TableSpec(
         Column('size',        'TEXT', nullable=False, default="''"),
         Column('qty',         'INTEGER', nullable=False, default='1'),
         Column('description', 'TEXT', nullable=False, default="''"),
-        Column('created_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_by',  'TEXT', nullable=False, default="''"),
         # La marca, por lo mismo que en `dc_part`: la misma forma, porque estampar es copiar.
         Column('brand',       'TEXT', nullable=False, default="''"),
         # Cuántas piezas trae una unidad: un kit de dos módulos son dos zócalos ocupados.
@@ -148,6 +144,9 @@ _BUILD_PART = TableSpec(
         # `nic_externa` el día que alguien enchufe una tarjeta de red por USB, que es el caso
         # que trajo esto.
         Column('mount',       'TEXT', nullable=False, default="''"),
+        Column('created_at',  'TEXT', nullable=False, default="''"),
+        Column('updated_at',  'TEXT', nullable=False, default="''"),
+        Column('updated_by',  'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_build_part_build', ('build_uid',)),),
 )

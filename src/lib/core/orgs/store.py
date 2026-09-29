@@ -85,57 +85,8 @@ class OrgsStore:
         self.owners = Rows(db, _OWNER)
         self.orgs.bootstrap()
         self.owners.bootstrap()
-        self._adopt()
-        self._renombrar_ambito_host()
-
-    def _renombrar_ambito_host(self) -> None:
-        """El ámbito `host` pasó a llamarse `device`, y aquí está escrito **dentro de las filas**.
-
-        Cada fila de `org_owner` dice de qué es dueña una empresa con el par (ámbito, uid), y el
-        ámbito de un dispositivo se guardaba como `host`. El paquete lo declara ahora como
-        `device`, así que sin esto las filas de ayer apuntan a un ámbito que ya no existe: las
-        empresas dejan de ser dueñas de sus dispositivos — sin error, con la columna llena y la
-        pantalla enseñando «sin asignar».
-        """
-        try:
-            with self._db.transaction():
-                self._db.execute(
-                    "UPDATE org_owner SET scope = 'device' WHERE scope = 'host'")
-        except Exception:  # pylint: disable=broad-except
-            # Una base que no se deja escribir no puede impedir que el panel abra; lo que queda
-            # es una propiedad que hay que volver a decir a mano.
-            pass
 
     # ── Coming from the inventory ────────────────────────────────────────────
-
-    def _adopt(self) -> None:
-        """Take over ``dc_org``/``dc_owner`` if this installation still has them.
-
-        Copied and not renamed: a rename is one statement that either finds the old table or
-        raises, and it has to be right on three engines. A copy into an EMPTY table is the same
-        result, is idempotent, and leaves the old rows where they are — which is what makes this
-        recoverable if the move turns out to be wrong.
-
-        Failure here is logged by the caller and never fatal. An installation that comes up with
-        no companies is one screen short; one that does not come up at all is everything short.
-        """
-        for old, new in _WAS:
-            try:
-                if not self._db.table_exists(old):
-                    continue
-                rows = self._db.fetchall(f'SELECT COUNT(*) FROM {self._db.quote_ident(new)}')
-                if rows and int(rows[0][0] or 0):
-                    continue                    # already has its own, nothing to adopt
-                cols = sorted(self._db.list_columns(old) & self._db.list_columns(new))
-                if not cols:
-                    continue
-                names = ', '.join(self._db.quote_ident(c) for c in cols)
-                self._db.execute(
-                    f'INSERT INTO {self._db.quote_ident(new)} ({names}) '
-                    f'SELECT {names} FROM {self._db.quote_ident(old)}')
-                self._db.commit()
-            except Exception:                   # pylint: disable=broad-except
-                continue
 
     # ── Who is already called this ───────────────────────────────────────────
 

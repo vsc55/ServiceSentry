@@ -52,13 +52,19 @@ _TOKENS = TableSpec(
         # and a write per request would put the busiest table in the database on the hot path.
         Column('last_used',   'TEXT', nullable=False, default="''"),
         Column('revoked',     'INTEGER', nullable=False, default='0'),
-        Column('created',     'TEXT', nullable=False, default="''"),
         Column('created_by',  'TEXT', nullable=False, default="''"),
+        # `created_at`, no `created`: es la misma columna que llevan otras cuarenta tablas, y
+        # con dos nombres ninguna guarda las alcanza a las dos.
+        Column('created_at',  'TEXT', nullable=False, default="''"),
     ),
     indexes=(
         Index('idx_api_tokens_user', ('user_uid',)),
         Index('idx_api_tokens_tid', ('token_id',)),
     ),
+    # Se llamaban `created`/`updated`. Declarado, el motor las renombra con
+    # la fecha dentro; sin esto la columna nueva nace vacía y la vieja se queda
+    # con el dato, sin que nada falle.
+    renames={'created': 'created_at'},
 )
 
 # ── What a token has done ────────────────────────────────────────────────────────────────
@@ -117,10 +123,10 @@ class ApiTokenStore(BaseStore):
         return {'uid': r[0], 'user_uid': r[1], 'name': r[2] or '', 'token_id': r[3] or '',
                 'token_hash': r[4] or '', 'permissions': r[5] or '[]',
                 'expires_at': r[6] or '', 'last_used': r[7] or '',
-                'revoked': bool(r[8]), 'created': r[9] or '', 'created_by': r[10] or ''}
+                'revoked': bool(r[8]), 'created_at': r[9] or '', 'created_by': r[10] or ''}
 
     _COLS = ('uid, user_uid, name, token_id, token_hash, permissions, expires_at, '
-             'last_used, revoked, created, created_by')
+             'last_used, revoked, created_at, created_by')
 
     def by_token_id(self, token_id: str) -> dict | None:
         """The row a presented token names, revoked ones included.
@@ -187,7 +193,7 @@ class ApiTokenStore(BaseStore):
     def list_for(self, user_uid: str) -> list:
         """One account's tokens, newest first. Never the hash — see :meth:`public`."""
         rows = self._db.fetchall(
-            f'SELECT {self._COLS} FROM {_T} WHERE user_uid = ? ORDER BY created DESC',
+            f'SELECT {self._COLS} FROM {_T} WHERE user_uid = ? ORDER BY created_at DESC',
             (str(user_uid or ''),))
         return [self._row(r) for r in rows]
 
@@ -198,7 +204,7 @@ class ApiTokenStore(BaseStore):
         installation ("what standing access exists"), and asking it account by account is how
         the answer ends up depending on which accounts you remembered to look at.
         """
-        rows = self._db.fetchall(f'SELECT {self._COLS} FROM {_T} ORDER BY created DESC')
+        rows = self._db.fetchall(f'SELECT {self._COLS} FROM {_T} ORDER BY created_at DESC')
         return [self._row(r) for r in rows]
 
     def count_for(self, user_uid: str, *, active_only: bool = True) -> int:
@@ -220,15 +226,15 @@ class ApiTokenStore(BaseStore):
     # ── Write ────────────────────────────────────────────────────────────────
 
     def create(self, *, user_uid: str, name: str, token_id: str, token_hash: str,
-               permissions: str, expires_at: str, created: str, created_by: str) -> str:
+               permissions: str, expires_at: str, created_at: str, created_by: str) -> str:
         uid = str(uuid.uuid4())
         self._db.execute(
             f'INSERT INTO {_T} (uid, user_uid, name, token_id, token_hash, permissions,'
-            ' expires_at, last_used, revoked, created, created_by)'
+            ' expires_at, last_used, revoked, created_at, created_by)'
             " VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?)",
             (uid, str(user_uid or ''), str(name or ''), str(token_id or ''),
              str(token_hash or ''), str(permissions or '[]'), str(expires_at or ''),
-             str(created or ''), str(created_by or '')))
+             str(created_at or ''), str(created_by or '')))
         self._db.commit()
         return uid
 

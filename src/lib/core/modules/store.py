@@ -91,10 +91,6 @@ _MODULE_CONFIG_ITEMS_SCHEMA = TableSpec(
         Index('idx_module_config_items_moduid', ('module_uid',)),
         Index('idx_module_config_items_device', ('device_uid',)),
     ),
-    # Se llamaba `host_uid`. `reconcile_table` lo aplica antes de comparar, con los datos dentro.
-    renames={'host_uid': 'device_uid'},
-    # Y el índice, que llevaba el nombre de la columna de ayer.
-    former_indexes=('idx_module_config_items_host', 'idx_module_items_host'),
 )
 
 

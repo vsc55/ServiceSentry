@@ -79,7 +79,7 @@ class TestSessionRegistry:
                                   'password_hash': '', 'enabled': True}
         admin._sessions['fake'] = {
             'uid': 'fakeuid', 'user_uid': other_uid,
-            'created': '', 'last_seen': '', 'ip': '', 'user_agent': '',
+            'created_at': '', 'last_seen': '', 'ip': '', 'user_agent': '',
         }
         assert len(admin._sessions) == 2
         removed = admin._revoke_user_sessions('other')
@@ -140,7 +140,7 @@ class TestSessionRegistry:
                                    'password_hash': '', 'enabled': True}
         admin._sessions['fake'] = {
             'uid': 'fakeuid2', 'user_uid': victim_uid,
-            'created': '', 'last_seen': '', 'ip': '', 'user_agent': '',
+            'created_at': '', 'last_seen': '', 'ip': '', 'user_agent': '',
         }
         resp = client.post("/api/v1/sessions/revoke-user/victim",
                            content_type="application/json", data="{}")
@@ -278,7 +278,7 @@ class TestRememberMeReachesTheServer:
         """`remember_me_days` is the number the checkbox is named after, and it remains the
         ceiling — "remember me" must not mean "forever"."""
         _login_remembered(client)
-        _entry(admin)['created'] = '2020-01-01T00:00:00+00:00'
+        _entry(admin)['created_at'] = '2020-01-01T00:00:00+00:00'
         assert client.get('/api/v1/me').status_code == 401
         entry = next(e for e in admin._audit_log if e['event'] == 'session_expired')
         assert entry['detail']['reason'] == 'absolute'
@@ -317,7 +317,7 @@ class TestLastSeenReachesTheDatabase:
         monkeypatch.setattr(ses_mixin, '_TOUCH_SECONDS', 0)
         _login(client)
         uid = _entry(admin)['uid']
-        login_time = _entry(admin)['created']
+        login_time = _entry(admin)['created_at']
         client.get('/api/v1/me')
         admin._sessions = admin._sessions_store.load()      # what a restart sees
         assert _entry(admin)['last_seen'] > login_time

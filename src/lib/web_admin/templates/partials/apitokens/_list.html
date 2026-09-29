@@ -29,7 +29,7 @@ const _ATK_COLS = [
     { id: 'permissions', label: () => t('api_token_col_perms'),     sortKey: 'permissions', always: false },
     { id: 'expires_at',  label: () => t('api_token_col_expires'),   sortKey: 'expires_at',  always: false },
     { id: 'last_used',   label: () => t('api_token_col_last_used'), sortKey: 'last_used',   always: false },
-    { id: 'created',     label: () => t('col_created_at'),          sortKey: 'created',     always: false },
+    { id: 'created_at',  label: () => t('col_created_at'),          sortKey: 'created_at',     always: false },
     { id: 'created_by',  label: () => t('col_created_by'),          sortKey: 'created_by',  always: false },
 ];
 const _ATK_DEFAULT_COLS = new Set(['permissions', 'expires_at', 'last_used']);
@@ -58,7 +58,7 @@ let _atkColOrder = (() => {
 })();
 let _atkPage = 1;
 let _atkPageSize = null;
-let _atkSort = 'created';
+let _atkSort = 'created_at';
 let _atkSortDir = 'desc';
 let _atkSelected = new Set();
 let _atkCurrentPage = [];
@@ -135,7 +135,7 @@ createListTable({
             case 'last_used':    return tk.last_used || '0000';
             case 'permissions':  return tk.permissions === '*' ? '*' : (tk.permissions || []).join(',');
             case 'token_id':     return tk.token_id || '';
-            case 'created':      return tk.created || '';
+            case 'created_at':   return tk.created_at || '';
             case 'created_by':   return (tk.created_by || '').toLowerCase();
             case 'name':         return (tk.name || '').toLowerCase();
             default:             return (tk.username || '').toLowerCase();
@@ -165,7 +165,7 @@ createListTable({
                 return `<td class="text-nowrap small">${tk.last_used
                     ? esc(_fmtDateTime(tk.last_used))
                     : `<span class="text-muted">${esc(t('api_token_unused'))}</span>`}</td>`;
-            case 'created':    return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(tk.created))}</td>`;
+            case 'created_at': return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(tk.created_at))}</td>`;
             case 'created_by': return `<td class="text-nowrap small text-muted">${esc(tk.created_by || '—')}</td>`;
             default: return '<td></td>';
         }

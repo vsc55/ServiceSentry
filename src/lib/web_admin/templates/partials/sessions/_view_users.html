@@ -23,7 +23,7 @@ function _sesViewUsers(sids) {
         a.n++;
         if (s.ip) a.ips.add(s.ip);
         if (s.is_current) a.current = true;
-        if (s.created && (!a.oldest || s.created < a.oldest)) a.oldest = s.created;
+        if (s.created_at && (!a.oldest || s.created_at < a.oldest)) a.oldest = s.created_at;
         if (s.last_seen && (!a.last || s.last_seen > a.last)) a.last = s.last_seen;
     }
     // Most sessions first: the account with eight of them is the one you opened this for.

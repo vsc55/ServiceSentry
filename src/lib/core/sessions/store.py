@@ -13,7 +13,7 @@ expose); the secret ``token`` is the primary key and is never sent to clients.
 
 Schema::
 
-    sessions(uid, token PK, user_uid, created, last_seen, ip, user_agent, remember)
+    sessions(uid, token PK, user_uid, created_at, last_seen, ip, user_agent, remember)
     session_access(uid PK, session_uid, ts, ip, method, path, status)
 """
 
@@ -31,7 +31,6 @@ _SCHEMA = TableSpec(
         Column('uid',        'TEXT', primary_key=True),   # stable session id
         Column('token',      'TEXT', nullable=False, default="''", unique=True),
         Column('user_uid',   'TEXT', nullable=False, default="''"),
-        Column('created',    'TEXT', nullable=False, default="''"),
         Column('last_seen',  'TEXT', nullable=False, default="''"),
         Column('ip',         'TEXT', nullable=False, default="''"),
         Column('user_agent', 'TEXT', nullable=False, default="''"),
@@ -42,9 +41,12 @@ _SCHEMA = TableSpec(
         # more than `session_idle_minutes` had passed, and you signed in again. Stored here so
         # the check that enforces the timeout can see what the person asked for.
         Column('remember',   'INTEGER', nullable=False, default='0'),
+        Column('created_at',    'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_sessions_user_uid', ('user_uid',)),),
-    renames={'sid': 'uid'},  # legacy column rename, data preserved
+    # Se llamaba `created`: la misma columna que llevan las demás tablas, con otro nombre. Sin
+    # declararlo, la nueva nace vacía y cada sesión pierde su hora de entrada.
+    renames={'created': 'created_at'},
 )
 
 # ── What a session has done ──────────────────────────────────────────────────────────────
@@ -112,14 +114,14 @@ class SessionsStore(BaseStore):
     def load(self) -> dict:
         """Return all sessions as ``{token: {uid, user_uid, …}}``."""
         rows = self._db.fetchall(
-            'SELECT token, uid, user_uid, created, last_seen, ip, user_agent, remember '
+            'SELECT token, uid, user_uid, created_at, last_seen, ip, user_agent, remember '
             f'FROM {_T}'
         )
         return {
             r[0]: {
                 'uid':        r[1],
                 'user_uid':   r[2],
-                'created':    r[3],
+                'created_at':    r[3],
                 'last_seen':  r[4],
                 'ip':         r[5],
                 'user_agent': r[6],
@@ -145,11 +147,11 @@ class SessionsStore(BaseStore):
                 for token, s in sessions.items():
                     self._db.execute(
                         f'INSERT INTO {_T}'
-                        '(token, uid, user_uid, created, last_seen, ip, user_agent,'
+                        '(token, uid, user_uid, created_at, last_seen, ip, user_agent,'
                         ' remember) VALUES(?,?,?,?,?,?,?,?)',
                         (token,
                          s.get('uid', ''),        s.get('user_uid', ''),
-                         s.get('created', ''),    s.get('last_seen', ''),
+                         s.get('created_at', ''),    s.get('last_seen', ''),
                          s.get('ip', ''),         s.get('user_agent', ''),
                          1 if s.get('remember') else 0),
                     )
@@ -165,11 +167,11 @@ class SessionsStore(BaseStore):
                 self._db.execute(f'DELETE FROM {_T} WHERE token = ?', (token,))
                 self._db.execute(
                     f'INSERT INTO {_T}'
-                    '(token, uid, user_uid, created, last_seen, ip, user_agent,'
+                    '(token, uid, user_uid, created_at, last_seen, ip, user_agent,'
                     ' remember) VALUES(?,?,?,?,?,?,?,?)',
                     (token,
                      session.get('uid', ''),        session.get('user_uid', ''),
-                     session.get('created', ''),    session.get('last_seen', ''),
+                     session.get('created_at', ''),    session.get('last_seen', ''),
                      session.get('ip', ''),         session.get('user_agent', ''),
                      1 if session.get('remember') else 0),
                 )

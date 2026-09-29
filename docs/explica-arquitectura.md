@@ -461,7 +461,7 @@ flowchart TD
     pool --> mod["5. Para CADA módulo (en paralelo): check_module(nombre)"]
     mod --> imp["importlib.import_module(nombre)<br/>Watchful(self) ← le pasa el Monitor"]
     imp --> chk["module.check() → ReturnModuleCheck"]
-    chk --> host["(opcional) resolve_device(item)<br/><small>si el ítem tiene host_uid: fusiona dirección + perfil<br/>del host (Monitor._devices_store). Ver guía de módulos §4d</small>"]
+    chk --> host["(opcional) resolve_device(item)<br/><small>si el ítem tiene device_uid: fusiona dirección + perfil<br/>del host (Monitor._devices_store). Ver guía de módulos §4d</small>"]
 
     host --> each["Para CADA resultado en ReturnModuleCheck"]
     each --> save["Guarda other_data en check_state"]

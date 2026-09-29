@@ -32,12 +32,12 @@ _SCHEMA = TableSpec(
         Column('action',      'TEXT', nullable=False, default="''"),
         Column('args',        'TEXT', nullable=False, default="''"),    # JSON
         Column('created_by',  'TEXT', nullable=False, default="''"),
-        Column('created_at',  'REAL'),
         Column('claimed_at',  'REAL'),
         Column('claimed_by',  'TEXT'),                                  # instance_id
         Column('done_at',     'REAL'),
         Column('ok',          'INTEGER'),                              # null until done
         Column('result',      'TEXT'),
+        Column('created_at',  'REAL'),
     ),
     indexes=(
         Index('idx_svccmd_pending', ('service_key', 'claimed_at')),

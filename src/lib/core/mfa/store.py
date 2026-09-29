@@ -16,8 +16,8 @@ file. A shared database with a per-process key would make every OTHER process un
 Schema::
 
     mfa_factors(uid PK, user_uid, method, secret, confirmed, last_step, label,
-                credential_id, public_key, alg, sign_count, created, updated)
-    mfa_recovery(uid PK, user_uid, code_hash, used_at, created)
+                credential_id, public_key, alg, sign_count, created_at, updated_at)
+    mfa_recovery(uid PK, user_uid, code_hash, used_at, created_at)
 
 Two tables and not one column, because a user may end up with a TOTP app AND a security key —
 ``method`` is what tells them apart, and it was there from the first commit for exactly this.
@@ -70,10 +70,16 @@ _FACTORS = TableSpec(
         Column('alg',           'INTEGER', nullable=False, default='0'),
         # The authenticator's own counter. Zero means it keeps none, which is allowed.
         Column('sign_count',    'INTEGER', nullable=False, default='0'),
-        Column('created',   'TEXT', nullable=False, default="''"),
-        Column('updated',   'TEXT', nullable=False, default="''"),
+        # `created_at` / `updated_at`, como el resto del esquema: `created` y `updated`
+        # eran la misma idea con otro nombre.
+        Column('created_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_at', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_mfa_factors_user', ('user_uid',)),),
+    # Se llamaban `created`/`updated`. Declarado, el motor las renombra con
+    # la fecha dentro; sin esto la columna nueva nace vacía y la vieja se queda
+    # con el dato, sin que nada falle.
+    renames={'created': 'created_at', 'updated': 'updated_at'},
 )
 
 _RECOVERY = TableSpec(
@@ -86,9 +92,13 @@ _RECOVERY = TableSpec(
         # it instead of being a second decision nobody revisits.
         Column('code_hash', 'TEXT', nullable=False, default="''"),
         Column('used_at',   'TEXT', nullable=False, default="''"),
-        Column('created',   'TEXT', nullable=False, default="''"),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_mfa_recovery_user', ('user_uid',)),),
+    # Se llamaban `created`/`updated`. Declarado, el motor las renombra con
+    # la fecha dentro; sin esto la columna nueva nace vacía y la vieja se queda
+    # con el dato, sin que nada falle.
+    renames={'created': 'created_at'},
 )
 
 _F = _FACTORS.name
@@ -144,15 +154,15 @@ class MfaStore(BaseStore):
         that a factor EXISTS, and none of them needs what it is.
         """
         row = self._db.fetchone(
-            'SELECT uid, user_uid, method, secret, confirmed, last_step, label, created,'
-            f' updated, credential_id, public_key, alg, sign_count FROM {_F}'
+            'SELECT uid, user_uid, method, secret, confirmed, last_step, label, created_at,'
+            f' updated_at, credential_id, public_key, alg, sign_count FROM {_F}'
             ' WHERE user_uid = ? AND method = ?', (str(user_uid or ''), str(method)))
         if not row:
             return None
         return {'uid': row[0], 'user_uid': row[1], 'method': row[2],
                 'secret': self._open(row[3]) if decrypt else '',
                 'confirmed': bool(row[4]), 'last_step': int(row[5] if row[5] is not None else -1),
-                'label': row[6] or '', 'created': row[7] or '', 'updated': row[8] or '',
+                'label': row[6] or '', 'created_at': row[7] or '', 'updated_at': row[8] or '',
                 'credential_id': row[9] or '', 'public_key': row[10] or '',
                 'alg': int(row[11] or 0), 'sign_count': int(row[12] or 0)}
 
@@ -201,7 +211,7 @@ class MfaStore(BaseStore):
                                  (str(user_uid or ''), str(method)))
                 self._db.execute(
                     f'INSERT INTO {_F}(uid, user_uid, method, secret, confirmed, last_step,'
-                    ' label, created, updated) VALUES(?,?,?,?,?,?,?,?,?)',
+                    ' label, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)',
                     (uid, str(user_uid or ''), str(method), sealed, 0, -1,
                      str(label or ''), now, now))
             return uid
@@ -218,7 +228,7 @@ class MfaStore(BaseStore):
         try:
             with self._db.transaction():
                 changed = self._db.execute(
-                    f'UPDATE {_F} SET confirmed = 1, last_step = ?, updated = ?'
+                    f'UPDATE {_F} SET confirmed = 1, last_step = ?, updated_at = ?'
                     ' WHERE user_uid = ? AND method = ?',
                     (int(step), self._now(), str(user_uid or ''), str(method)))
             return changed > 0
@@ -234,7 +244,7 @@ class MfaStore(BaseStore):
         try:
             with self._db.transaction():
                 changed = self._db.execute(
-                    f'UPDATE {_F} SET last_step = ?, updated = ?'
+                    f'UPDATE {_F} SET last_step = ?, updated_at = ?'
                     ' WHERE user_uid = ? AND method = ? AND last_step < ?',
                     (int(step), self._now(), str(user_uid or ''), str(method), int(step)))
             return changed > 0
@@ -276,7 +286,7 @@ class MfaStore(BaseStore):
                 self._db.execute(f'DELETE FROM {_R} WHERE user_uid = ?', (who,))
                 for code_hash in code_hashes:
                     self._db.execute(
-                        f'INSERT INTO {_R}(uid, user_uid, code_hash, used_at, created)'
+                        f'INSERT INTO {_R}(uid, user_uid, code_hash, used_at, created_at)'
                         ' VALUES(?,?,?,?,?)',
                         (str(uuid.uuid4()), who, str(code_hash), '', now))
             return True
@@ -318,7 +328,7 @@ class MfaStore(BaseStore):
                                  (who,))
                 self._db.execute(
                     f'INSERT INTO {_F}(uid, user_uid, method, secret, confirmed, last_step,'
-                    ' label, created, updated, credential_id, public_key, alg, sign_count)'
+                    ' label, created_at, updated_at, credential_id, public_key, alg, sign_count)'
                     " VALUES(?,?,'webauthn','',1,-1,?,?,?,?,?,?,?)",
                     (str(uuid.uuid4()), who, str(label or ''), now, now,
                      str(credential_id), str(public_key), int(alg), int(sign_count)))
@@ -336,7 +346,7 @@ class MfaStore(BaseStore):
         try:
             with self._db.transaction():
                 changed = self._db.execute(
-                    f'UPDATE {_F} SET sign_count = ?, updated = ?'
+                    f'UPDATE {_F} SET sign_count = ?, updated_at = ?'
                     " WHERE user_uid = ? AND method = 'webauthn' AND sign_count < ?",
                     (int(count), self._now(), str(user_uid or ''), int(count)))
             return changed > 0

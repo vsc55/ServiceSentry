@@ -55,8 +55,6 @@ _SOURCE = TableSpec(
         Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_source_site', ('site_uid',)),),
-    # Se llamaba `host_uid`. `reconcile_table` lo aplica antes de comparar, con los datos dentro.
-    renames={'host_uid': 'device_uid'},
 )
 
 #: El color de cada rama cuando la regleta no dice otro. Azul y rojo porque es como se etiqueta
@@ -104,9 +102,6 @@ _PDU = TableSpec(
         # entre ellas es la razón de que este panel exista.
         Column('device_uid', 'TEXT', nullable=False, default="''"),
         Column('description', 'TEXT', nullable=False, default="''"),
-        Column('created_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_by', 'TEXT', nullable=False, default="''"),
         # De qué color se pinta. Vacío = el de su rama, que es lo normal. Existe porque hay
         # salas con tres alimentaciones y salas donde el color de cada rama ya está decidido
         # desde antes de que llegara este panel, y discutir con la etiqueta que hay pegada en la
@@ -128,10 +123,11 @@ _PDU = TableSpec(
         # Última columna: una que falta sólo se puede añadir con ADD COLUMN si va al final, que
         # es como una base que ya existe recibe ésta sin migración.
         Column('item_uid', 'TEXT', nullable=False, default="''"),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_pdu_rack', ('rack_uid',)),),
-    # Se llamaba `host_uid`. `reconcile_table` lo aplica antes de comparar, con los datos dentro.
-    renames={'host_uid': 'device_uid'},
 )
 
 _POWER = TableSpec(
@@ -151,9 +147,6 @@ _POWER = TableSpec(
         # mida la regleta, sin corregir ninguno de los dos.
         Column('watts_said', 'INTEGER', nullable=False, default='0'),
         Column('label',    'TEXT', nullable=False, default="''"),
-        Column('created_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_by', 'TEXT', nullable=False, default="''"),
         # **Un cable de corriente es un cable.** Esta fila decía de qué toma cuelga y cuántos
         # vatios se declararon, y nada más — como si el latiguillo no existiera. Y existe: se
         # compra, se guarda en una caja, se rompe y hay que sustituirlo, y la pregunta de la
@@ -169,6 +162,9 @@ _POWER = TableSpec(
         # encuentra en un mazo de treinta detrás de un armario. La última, para que aparecer
         # sobre una tabla llena sea un `ADD COLUMN`.
         Column('color',    'TEXT', nullable=False, default="''"),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_feed_item', ('item_uid',)),
              Index('idx_dc_feed_pdu', ('pdu_uid',))),

@@ -24,7 +24,7 @@ def build_sessions_view(sessions: dict, users: dict, current_token) -> dict:
             'user_uid':   user_uid,
             'ip':         entry.get('ip', ''),
             'user_agent': entry.get('user_agent', ''),
-            'created':    entry.get('created', ''),
+            'created_at':    entry.get('created_at', ''),
             'last_seen':  entry.get('last_seen', ''),
             # Whether this sign-in asked to be remembered — which now means something on the
             # server: it is exempt from the idle timeout. Without it on screen, the one

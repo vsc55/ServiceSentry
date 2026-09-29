@@ -153,7 +153,7 @@ class _SessionsMixin:
         entry = {
             'uid':        uid,
             'user_uid':   user_uid,
-            'created':    now,
+            'created_at':    now,
             'last_seen':  now,
             'ip':         ip,
             'user_agent': user_agent,
@@ -210,7 +210,7 @@ class _SessionsMixin:
                 return None
 
         idle_age = _age('last_seen')
-        abs_age  = _age('created')
+        abs_age  = _age('created_at')
         max_abs  = self._REMEMBER_ME_DAYS * 86400
         # "Remember me" waives the IDLE window and only that. The absolute cap below still
         # applies, so a remembered session is bounded by `remember_me_days` — the number the

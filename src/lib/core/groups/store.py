@@ -49,8 +49,8 @@ _GROUPS_ROLES_SCHEMA = TableSpec(
         Column('uid',        'TEXT', primary_key=True),
         Column('group_uid',  'TEXT', nullable=False),
         Column('role_uid',   'TEXT', nullable=False),
-        Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('created_by', 'TEXT', nullable=False, default="''"),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(
         Index('idx_gr_group', ('group_uid',)),
@@ -92,7 +92,6 @@ class GroupsStore(BaseStore):
         db = self._db
         db.reconcile_table(_GROUPS_SCHEMA)
         db.reconcile_table(_GROUPS_ROLES_SCHEMA)
-        self._backfill_audit_columns()
         db.commit()
         self._ensure_version_row()
 

@@ -8,6 +8,78 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.129] - 2026-09-14
+
+### Changed
+
+- **And they are called that everywhere.** `api_tokens`, `mfa_factors`, `mfa_recovery` and
+  `sessions` carried `created` and `updated` — the same idea under a second name, which meant no
+  guard reached both and anyone reading the schema had to learn two vocabularies to know they
+  were one thing. Renamed, with the rename declared so the dates travel; a guard now refuses
+  `created`, `updated`, `modified` and `changed` outright. Timestamps that name a fact of their
+  own (`set_at`, `banned_at`, `imported_at`) stay as they are: those are not audit.
+
+- **`users_groups` records who granted a membership and when.** It had `uid`, `user_uid`,
+  `group_uid` and nothing else, while its sibling `groups_roles` has kept `created_by` and
+  `created_at` since day one — and a membership is a grant of permissions, which is exactly where
+  "since when has this person had access?" gets asked. Saving a user rewrites its memberships
+  wholesale, so the grant date is carried across the rewrite: stamping it fresh would have said
+  access was granted today every time somebody changed that user's theme.
+
+- **`created_at`, `updated_at` and `updated_by` are the last columns of every table now.**
+  They sat wherever the day each table was written happened to put them — in `dc_build`, between
+  `description` and `notes` — so reading a `CREATE TABLE` meant finding them before you could
+  skip them, and forty tables put the same three in a different place each. Reported from the
+  screen. Sixteen tables moved; the order lives in the declaration, so the engine rebuilt them
+  with their rows inside, which is what `order_wrong` has always been for. There is a guard now,
+  over the declaration rather than over any database, and it accepts the tables that carry only
+  one or two of the three.
+
+  A side effect worth having: nothing sits behind the audit trio any more, so the next column
+  anyone adds lands right in front of it — where an `ADD COLUMN` is enough and no rebuild is
+  needed.
+
+- **The Builds list is on the panel's shared table, and it carries what the row already knew.**
+  It was a hand-written table: seven fixed headers, no column chooser, no sorting — and no way to
+  see when a build was created, when it was last touched or by whom, three things `dc_build` has
+  stored since its first day and that the API was already sending. Reported from the screen. Now
+  it offers them like every other list (off by default, on for the day the question is "who
+  changed this?"), plus the uid, sorting by any column, resizable widths and a filter that
+  separates the retired builds from the ones you would build with today. Guarded, including the
+  thing that looks right and is not: declaring the columns without telling the table where to
+  read them draws the cells empty, which reads as missing data rather than missing wiring.
+
+### Removed
+
+- **The one-off migrations from the host → device rename are gone, now that every database on
+  this machine has them applied.** They were written for a shape no database has any more: the
+  `hosts`/`host_type` table adoption and its stale indexes, `host_uid` → `device_uid` on four
+  tables, the `label_key` rewrite, `org_owner.scope`, the `id` → `uid` rebuild and the seed
+  cleanup it came with. Nothing is in production, and migration code that can no longer find work
+  is code that is only ever read to be dismissed. The two scratch databases in the data directory
+  were opened once so they would adopt the rename before it went.
+
+- **And the five older ones, which had nothing left to do either.** `dc_build.platform` →
+  `platform_uid`, `sessions.sid` → `uid`, the `dc_org`/`dc_owner` adoption, the audit-column
+  backfill in the shared store base, and the pass that moved history samples out of their JSON
+  document and then retired the column. Every one of them is applied in every database on this
+  machine.
+
+  The history one is worth a note: in two older copies its column still holds 1062 documents, and
+  it can never convert them — they have no `series_id`, so there is no series to hang the
+  measurements on, and the retirement refuses to drop a column with anything inside. Nothing but
+  that migration ever read the column, so removing it loses nothing that was reachable; the column
+  stays where it was, unread, exactly as it already was.
+
+  **What stays is the mechanism, not the migration**: `TableSpec.former_names`, `former_indexes`
+  and `BaseConnector.rename_table` / `adopt_former_name` are how a table is renamed declaratively,
+  with their own cases in `tests/unit/test_db_schema.py` — including the one that says the
+  decision is where the rows are and not whether the new table exists.
+
+  Backups taken before the rename hold a `db/hosts.json` part that restore can no longer place,
+  and they were deleted rather than left as a trap: restore matches a part to a table by name, so
+  that part is reported missing and the fleet does not come back.
+
 ## [0.0.1+build.128] - 2026-09-14
 
 ### Changed

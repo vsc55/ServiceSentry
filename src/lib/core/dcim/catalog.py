@@ -147,13 +147,6 @@ SCHEMA = TableSpec(
         # que saber si una tarjeta entra en un chasis. La marca tiene la suya, comercial y de
         # soporte; esta es la de ESTE modelo, que es otra cosa.
         Column('url', 'TEXT', nullable=False, default="''"),
-        # Cuándo se tocó por última vez, quién, y por qué versión va. El historial las tiene una
-        # a una; esto es el resumen que quiere una ficha —cuándo y cuántas— sin abrirlo. Columnas
-        # y no una consulta al historial porque la lista enseña doscientas filas, y contar
-        # versiones de doscientas fichas para pintar dos casillas sería pagar el resumen a precio
-        # del detalle.
-        Column('updated_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_by', 'TEXT', nullable=False, default="''"),
         Column('rev', 'INTEGER', nullable=False, default='1'),
         # Cuántas piezas trae UNA de estas. Un kit de dos módulos se compra como uno y se monta
         # como dos; una caja de cincuenta tornillos, igual. La pregunta del inventario —«cuántos
@@ -171,6 +164,13 @@ SCHEMA = TableSpec(
         # `none` no es un valor de aquí: eso lo dice `is_powered` en cero, y tenerlo en dos sitios
         # serían dos respuestas a la misma pregunta.
         Column('power_type', 'TEXT', nullable=False, default="''"),
+        # Cuándo se tocó por última vez, quién, y por qué versión va. El historial las tiene una
+        # a una; esto es el resumen que quiere una ficha —cuándo y cuántas— sin abrirlo. Columnas
+        # y no una consulta al historial porque la lista enseña doscientas filas, y contar
+        # versiones de doscientas fichas para pintar dos casillas sería pagar el resumen a precio
+        # del detalle.
+        Column('updated_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_type_match', ('match_key',)),
              Index('idx_dc_type_maker', ('manufacturer',)),

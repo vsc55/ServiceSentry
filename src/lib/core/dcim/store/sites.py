@@ -23,9 +23,6 @@ _SITE = TableSpec(
         # to bill and one to know who to call.
         Column('operator_uid', 'TEXT', nullable=False, default="''"),
         Column('description', 'TEXT', nullable=False, default="''"),
-        Column('created_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_at',  'TEXT', nullable=False, default="''"),
-        Column('updated_by',  'TEXT', nullable=False, default="''"),
         # Where it sits on the SITE MAP, which is not where it sits on the Earth. The map has
         # no tile provider on purpose — that would be a request to a third party from somebody
         # else's browser, and this panel is deployed where there is no way out — so the sites
@@ -49,6 +46,9 @@ _SITE = TableSpec(
         # fichero, y el fichero en el almacén de imágenes— para que viaje en la copia de
         # seguridad por el mismo camino.
         Column('photo', 'TEXT', nullable=False, default="''"),
+        Column('created_at',  'TEXT', nullable=False, default="''"),
+        Column('updated_at',  'TEXT', nullable=False, default="''"),
+        Column('updated_by',  'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_site_name', ('name',)),),
 )

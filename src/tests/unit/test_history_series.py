@@ -180,26 +180,6 @@ class TestLaMuestraLlevaMedidasYLaSerieLlevaIdentidad:
             assert datos['_attrs'] == {'p1': {'mac': 'aa:bb'}}
             assert datos['_row'] == 'eth0' and datos['_watched'] is True
 
-    def test_y_una_muestra_vieja_manda_sobre_la_serie(self, tmp_path):
-        """Una fila anterior a este cambio lleva su propia copia de la identidad **dentro del
-        documento**, y esa es la que era verdad ese día; la de la serie es la última que se vio.
-
-        Al pasar el documento a filas hay que llevársela tal cual: repartirla como se reparte
-        una muestra nueva —identidad a la serie, medidas a los hechos— le pondría a una lectura
-        de agosto el alias que la interfaz tiene hoy.
-        """
-        base = str(tmp_path / 'h.db')
-        st = HistoryStore(get_connector(None, default_sqlite_path=base))
-        st.record('snmp', 'host.h1/eth0', status=True, data=dict(self._MUESTRA))
-        _con_documento(st, 'snmp', 'host.h1/eth0',
-                       {'if_in': 5, '_row': 'eth0 (como estaba)'})
-        otro = HistoryStore(get_connector(None, default_sqlite_path=base))
-        puntos = otro.query('snmp', 'host.h1/eth0', 0, 9e12)
-        vieja = [p for p in puntos if p['data'].get('_row') == 'eth0 (como estaba)']
-        assert vieja, [p['data'] for p in puntos]
-        # …y lo que la muestra no dice lo sigue poniendo la serie.
-        assert vieja[0]['data']['_attrs'] == {'p1': {'mac': 'aa:bb'}}
-
     def test_la_identidad_se_reescribe_solo_cuando_cambia(self):
         """Es lo mismo en muestra tras muestra —ese es el motivo de sacarla de la muestra— y
         volver a escribirla cada vez cambiaría un derroche de bytes por uno de escrituras."""

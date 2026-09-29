@@ -116,83 +116,175 @@ function _dcBuildBack() {
 
 function _dcBuildsHtml() {
     if (_dcBuild) return _dcBuildHtml();
-    const d = _dcBuilds || {};
-    const puede = _dcimMay('dcim_build_edit');
-    return `<div class="card ss-vfill">
-        <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
-            <i class="bi bi-boxes"></i>
-            <span class="fw-semibold">${esc(t('dcim_builds'))}</span>
-            <span class="text-muted ss-fs-2">${esc(String((d.rows || []).length))}</span>
-            <div class="ms-auto d-flex gap-2">
-                ${(d.rows || []).length ? `<button class="btn btn-sm btn-secondary"
-                    onclick="_dcPortExport([], (_dcBuilds.rows || []).map(x => x.uid))"
-                    title="${escAttr(t('dcim_port_all'))}">
-                    <i class="bi bi-download"></i></button>` : ''}
-                ${puede ? `<button class="btn btn-sm btn-secondary"
-                    onclick="_dcPortImport(_dcBuildsOpen)" title="${escAttr(t('dcim_import'))}">
-                    <i class="bi bi-upload"></i></button>` : ''}
-                ${puede ? `<button class="btn btn-sm btn-primary" onclick="_dcBuildNew()">
-                    <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_build_new'))}</button>` : ''}
-                <button class="btn btn-sm btn-secondary" onclick="_dcBuildsClose()">
-                    <i class="bi bi-x-lg"></i></button>
-            </div>
-        </div>
-        <div class="card-body ss-vscroll">
-            <div class="text-muted ss-fs-2 mb-3">${esc(t('dcim_build_intro'))}</div>
-            ${(d.rows || []).length ? _dcBuildsTable(d.rows, puede)
-                : `<div class="text-muted ss-fs-2">${esc(t('dcim_build_none'))}</div>`}
-        </div>
+    // Sólo el hueco: lo llena `renderDcBld`, que es lo que crea `createListTable`. El mismo
+    // arreglo que Equipos y por el mismo motivo — la tabla compartida se dibuja sola y aquí no
+    // hay que saber cómo.
+    return `<div id="dcbld-container" class="ss-vfill"></div>`;
+}
+
+// ── La lista, sobre la tabla del panel ───────────────────────────────────────────────
+
+//: Lo que se puede enseñar de una plantilla. Las tres últimas —`_META_TAIL`— son las que la
+//: fila ya guardaba y la tabla a mano no tenía dónde poner: cuándo se creó, cuándo se tocó por
+//: última vez y quién. Apagadas por defecto, como en las demás pantallas: se encienden el día
+//: que se pregunta «¿y esto quién lo cambió?», que es el día que importan.
+const _DCB_COLS = [
+    {id: 'name', label: () => t('dcim_build_name'), sortKey: 'name', always: true},
+    {id: 'base', label: () => t('dcim_build_base'), sortKey: 'base'},
+    {id: 'role', label: () => t('dcim_role'), sortKey: 'role'},
+    {id: 'platform', label: () => t('dcim_plat_name'), sortKey: 'platform'},
+    {id: 'u', label: () => 'U', sortKey: 'u'},
+    {id: 'parts', label: () => t('dcim_build_parts'), sortKey: 'parts'},
+    {id: 'items', label: () => t('dcim_build_items'), sortKey: 'items'},
+    _META_COL.uid,
+    ..._META_TAIL,
+];
+const _DCB_DEFAULT_COLS = new Set(['base', 'role', 'platform', 'u', 'parts', 'items']);
+
+let _dcbVisibleCols = null;
+let _dcbColOrder = null;
+let _dcbPage = 1;
+let _dcbPageSize = null;
+let _dcbSort = 'name';
+let _dcbSortDir = 'asc';
+let _dcbCurrentPage = [];
+
+/** Por qué se ordena cada columna. Las de contar, por número —ordenadas como texto, 10 va antes
+ *  que 2— y las que enseñan un nombre traducido, por ese nombre y no por la clave. */
+function _dcbSortValue(b, key) {
+    if (key === 'parts' || key === 'items') return Number(b[key] || 0);
+    if (key === 'u') return Number(b.u_tenths || 0);
+    if (key === 'role') return String(b.role ? t('dcim_role_' + b.role) : '');
+    if (key === 'platform') return _dcPlatName(b.platform_uid);
+    if (key === 'base') return String(b.type_name || '');
+    return String(b[key] || '');
+}
+
+/** Una celda, con su `<td>`. Fuera de la declaración porque son siete. */
+function _dcbCell(b, id) {
+    if (id === 'name') {
+        return `<td class="fw-semibold">${esc(b.name || '')}
+            ${b.valid_to ? `<span class="badge bg-body-secondary text-body-secondary
+                border fw-normal ms-1">${esc(t('dcim_build_retired'))}</span>` : ''}
+            ${b.description ? `<div class="text-muted ss-fs-1 fw-normal">${
+                esc(b.description)}</div>` : ''}</td>`;
+    }
+    if (id === 'base') return `<td>${_dcBuildBaseCell(b)}</td>`;
+    if (id === 'role') {
+        return `<td class="ss-fs-2">${esc(b.role ? t('dcim_role_' + b.role) : '—')}</td>`;
+    }
+    if (id === 'platform') {
+        const p = _dcPlatName(b.platform_uid);
+        return `<td class="ss-fs-2">${p ? esc(p) : '<span class="text-muted">—</span>'}</td>`;
+    }
+    if (id === 'u') {
+        const decimas = Number(b.u_tenths || 0);
+        return `<td class="text-end ss-tabular">${esc(decimas
+            ? _dcBuildSitio(decimas, b.u_slots, b.u_slot_span)
+            : t('dcim_build_u_auto'))}</td>`;
+    }
+    if (id === 'parts') return `<td class="text-end ss-tabular">${esc(String(b.parts || 0))}</td>`;
+    if (id === 'items') return `<td class="text-end ss-tabular">${esc(String(b.items || 0))}</td>`;
+    return '<td></td>';
+}
+
+/** Los tres botones de una fila. `event.stopPropagation()` porque la fila entera abre la
+ *  plantilla: sin eso, borrar abre y borra. */
+function _dcbRowActions(b) {
+    return `<div class="btn-group btn-group-sm" onclick="event.stopPropagation()">
+        <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
+            onclick="_dcBuildOpen(${jsStr(b.uid)})"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('dcim_build_clone'))}"
+            onclick="_dcBuildClone(${jsStr(b.uid)})"><i class="bi bi-files"></i></button>
+        <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+            onclick="_dcBuildDrop(${jsStr(b.uid)},${jsStr(b.name || '')})">
+            <i class="bi bi-trash"></i></button>
     </div>`;
 }
 
-function _dcBuildsTable(rows, puede) {
-    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
-        <thead><tr>
-            <th>${esc(t('dcim_build_name'))}</th>
-            <th>${esc(t('dcim_build_base'))}</th>
-            <th>${esc(t('dcim_role'))}</th>
-            <th>${esc(t('dcim_plat_name'))}</th>
-            <th class="text-end">U</th>
-            <th class="text-end">${esc(t('dcim_build_parts'))}</th>
-            <th class="text-end">${esc(t('dcim_build_items'))}</th>
-            <th></th>
-        </tr></thead>
-        <tbody>${rows.map(b => {
-            // Lo copiado vive en la fila desde que se estampa: `base` era leer en vivo la
-            // ficha del catálogo, y con el modelo retirado eso es un hueco.
-            const rol = String(b.role || '');
-            const decimas = Number(b.u_tenths || 0);
-            const sitio = _dcBuildSitio(decimas, b.u_slots, b.u_slot_span);
-            return `<tr class="ss-rowlink" onclick="_dcBuildOpen(${jsStr(b.uid)})">
-            <td class="fw-semibold">${esc(b.name || '')}
-                ${b.valid_to ? `<span class="badge bg-body-secondary text-body-secondary
-                    border fw-normal ms-1">${esc(t('dcim_build_retired'))}</span>` : ''}
-                ${b.description ? `<div class="text-muted ss-fs-1 fw-normal">${
-                    esc(b.description)}</div>` : ''}</td>
-            <td>${_dcBuildBaseCell(b)}</td>
-            <td class="ss-fs-2">${esc(rol ? t('dcim_role_' + rol) : '')}</td>
-            <td class="ss-fs-2">${esc(_dcPlatName(b.platform_uid))}</td>
-            <td class="text-end ss-tabular">${esc(decimas ? sitio
-                                                          : t('dcim_build_u_auto'))}</td>
-            <td class="text-end ss-tabular">${esc(String(b.parts || 0))}</td>
-            <td class="text-end ss-tabular">${esc(String(b.items || 0))}</td>
-            <td class="text-end">${puede ? `<div class="btn-group btn-group-sm"
-                onclick="event.stopPropagation()">
-                <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
-                    onclick="_dcBuildOpen(${jsStr(b.uid)})">
-                    <i class="bi bi-pencil"></i></button>
-                <button class="btn btn-secondary py-0 px-1"
-                    title="${escAttr(t('dcim_build_clone'))}"
-                    onclick="_dcBuildClone(${jsStr(b.uid)})">
-                    <i class="bi bi-files"></i></button>
-                <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
-                    onclick="_dcBuildDrop(${jsStr(b.uid)},${jsStr(b.name || '')})">
-                    <i class="bi bi-trash"></i></button>
-            </div>` : ''}</td>
-        </tr>`;
-        }).join('')}</tbody>
-    </table></div>`;
+/** Lo que había en la cabecera de la tarjeta y sigue haciendo falta: sacar todas las bocas,
+ *  traerlas de un fichero, crear una plantilla y cerrar la pantalla. */
+function _dcbHeaderButtons(ctx) {
+    const filas = ctx.d.rows || [];
+    return `${filas.length ? `<button class="btn btn-sm btn-secondary"
+            onclick="_dcPortExport([], (_dcBuilds.rows || []).map(x => x.uid))"
+            title="${escAttr(t('dcim_port_all'))}"><i class="bi bi-download"></i></button>` : ''}
+        ${ctx.puede ? `<button class="btn btn-sm btn-secondary"
+            onclick="_dcPortImport(_dcBuildsOpen)" title="${escAttr(t('dcim_import'))}">
+            <i class="bi bi-upload"></i></button>` : ''}
+        ${ctx.puede ? `<button class="btn btn-sm btn-primary" onclick="_dcBuildNew()">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_build_new'))}</button>` : ''}
+        <button class="btn btn-sm btn-secondary" onclick="_dcBuildsClose()"
+            title="${escAttr(t('close'))}"><i class="bi bi-x-lg"></i></button>`;
 }
+
+createListTable({
+    key: 'dcbld', containerId: 'dcbld-container', tableId: 'dcbld-table',
+    accent: 'blue', icon: 'bi-boxes', title: () => t('dcim_builds'),
+    columns: _DCB_COLS, defaultVisible: _DCB_DEFAULT_COLS,
+    persist: true, clearLabelKey: 'dcim_builds',
+    prepare: async () => ({d: _dcBuilds || {}, puede: _dcimMay('dcim_build_edit')}),
+    rows: (ctx) => (ctx.d.rows || []),
+    rowKey: (b) => String(b.uid || ''),
+    uidOf: (b) => String(b.uid || ''),
+    // De dónde saca la tabla el `uid` y las tres de auditoría: de la fila misma, que ya las
+    // trae. Sin esto las columnas salen —están en el selector— y las celdas van **vacías**,
+    // que es peor que no tenerlas: parecen un dato que falta.
+    record: (b) => b,
+    filters: {
+        fields: (ctx) => [
+            {key: 'q', label: () => t('dcim_build_name'), type: 'search', grow: true,
+             placeholder: () => t('dcim_build_name')},
+            {key: 'role', label: () => t('dcim_role'), type: 'select', minWidth: '150px',
+             options: () => [{value: '', label: t('all')}].concat(
+                 (ctx.d.roles || []).filter(Boolean)
+                     .map(r => ({value: r, label: t('dcim_role_' + r)})))},
+            // Las retiradas siguen en la lista —una plantilla retirada explica los equipos que
+            // nacieron de ella— pero estorban al elegir con qué crear el siguiente.
+            {key: 'vigente', label: () => t('dcim_build_state'), type: 'select',
+             minWidth: '150px',
+             options: () => [{value: '', label: t('all')},
+                             {value: 'si', label: t('dcim_build_active')},
+                             {value: 'no', label: t('dcim_build_retired_pl')}]},
+        ],
+        match: (b, f) => {
+            if (f.role && String(b.role || '') !== f.role) return false;
+            if (f.vigente === 'si' && b.valid_to) return false;
+            if (f.vigente === 'no' && !b.valid_to) return false;
+            const q = (f.q || '').toLowerCase();
+            if (!q) return true;
+            return [b.name, b.description, b.type_name, b.manufacturer, b.model,
+                    _dcPlatName(b.platform_uid)]
+                .some(x => String(x || '').toLowerCase().includes(q));
+        },
+    },
+    sortValue: (b, key) => _dcbSortValue(b, key),
+    rowAttrs: (b) => ` class="ss-rowlink" onclick="_dcBuildOpen(${jsStr(b.uid)})"`,
+    cell: (b, id) => _dcbCell(b, id),
+    actions: (b) => _dcbRowActions(b),
+    actionsVisible: ctx => ctx.puede,
+    headerButtons: ctx => _dcbHeaderButtons(ctx),
+    beforeBody: () => `<div class="text-muted ss-fs-2 mb-3">${esc(t('dcim_build_intro'))}</div>`,
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="_dcBuildsOpen()"
+        title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${
+        esc(t('refresh'))}</button>`,
+    emptyState: () => `<div class="text-center py-5 text-muted">
+        <i class="bi bi-boxes ss-empty-icon"></i><span>${esc(t('dcim_build_none'))}</span></div>`,
+    state: {
+        visible: {get: () => _dcbVisibleCols, set: v => { _dcbVisibleCols = v; }},
+        order: {get: () => _dcbColOrder, set: v => { _dcbColOrder = v; }},
+        page: {get: () => _dcbPage, set: v => { _dcbPage = v; }},
+        pageSize: {get: () => _dcbPageSize, set: v => { _dcbPageSize = v; }},
+        sort: {get: () => _dcbSort, set: v => { _dcbSort = v; }},
+        sortDir: {get: () => _dcbSortDir, set: v => { _dcbSortDir = v; }},
+        currentPage: {get: () => _dcbCurrentPage, set: v => { _dcbCurrentPage = v; }},
+    },
+    globalPrefix: {
+        render: 'renderDcBld', goPage: '_goDcBldPage', changePageSize: '_changeDcBldPageSize',
+        sort: '_sortDcBld', toggleCol: '_dcbToggleCol', resetCols: '_resetDcbCols',
+        saveOrder: '_dcbSaveColOrder', initFeatures: '_initDcbTableFeatures',
+    },
+});
 
 /** El chasis de una fila: su foto y su nombre. Sin la foto no se distingue una plantilla de
  *  otra en una lista, que es justo donde hay que elegir — y el alzado la tiene desde el primer

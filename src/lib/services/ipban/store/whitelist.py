@@ -23,8 +23,8 @@ _SCHEMA = TableSpec(
         Column('uid',         'TEXT', primary_key=True),
         Column('value',       'TEXT', nullable=False, default="''", unique=True),
         Column('description', 'TEXT', nullable=False, default="''"),
-        Column('created_at',  'REAL', nullable=False, default='0'),
         Column('created_by',  'TEXT', nullable=False, default="''"),
+        Column('created_at',  'REAL', nullable=False, default='0'),
     ),
     indexes=(Index('idx_ip_whitelist_value', ('value',)),),
 )

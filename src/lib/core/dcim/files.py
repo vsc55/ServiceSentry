@@ -64,8 +64,8 @@ SCHEMA = TableSpec(
         Column('label',      'TEXT', nullable=False, default="''"),
         Column('stored',     'TEXT', nullable=False, default="''"),
         Column('size',       'INTEGER', nullable=False, default='0'),
-        Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('created_by', 'TEXT', nullable=False, default="''"),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_file_ref', ('scope', 'ref_uid')),),
 )

@@ -20,6 +20,13 @@ manuales ni herramienta de migración externa.
 > el código. No existen claves foráneas declaradas: **el motor nunca emite `FOREIGN KEY`**;
 > las relaciones son referencias por UID (integridad gestionada en la capa de aplicación).
 
+**La auditoría va al final.** `created_at`, `updated_at` y `updated_by` —las que la tabla
+declare— son siempre las **últimas columnas**, en ese orden. No es estética: son el pie que
+comparten cuarenta tablas y que nadie lee al buscar qué hace distinta a ésta, así que puestas
+siempre en el mismo sitio se saltan de un vistazo. Y detrás de ellas no va nada, lo que hace que
+la siguiente columna que alguien añada aterrice justo delante — donde un `ADD COLUMN` basta.
+Lo vigila `tests/meta/test_docs_db_schema.py::TestLaAuditoriaVaAlFinal`, sobre la declaración.
+
 ---
 
 ## Índice de tablas
@@ -94,7 +101,7 @@ erDiagram
 > que referenciar — ver [ref-permisos.md](ref-permisos.md).
 
 ### `users` — cuentas de usuario del WebAdmin
-[lib/core/users/store.py:42](../src/lib/core/users/store.py#L42)
+[lib/core/users/store.py:43](../src/lib/core/users/store.py#L43)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -116,13 +123,15 @@ erDiagram
 Índices: `idx_users_role(role)`.
 
 ### `users_groups` — pertenencia usuario↔grupo (M:N)
-[lib/core/users/store.py:63](../src/lib/core/users/store.py#L63)
+[lib/core/users/store.py:65](../src/lib/core/users/store.py#L65)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
 | uid | TEXT | no | — | PK (id de fila sintético) |
 | user_uid | TEXT | no | — | → `users.uid` |
 | group_uid | TEXT | no | — | → `groups.uid` |
+| created_by | TEXT | no | `''` | quién concedió la pertenencia |
+| created_at | TEXT | no | `''` | y cuándo. Una pertenencia es una **concesión de permisos**: sin esto, «¿desde cuándo tiene acceso a esto?» sólo lo contesta la auditoría, y sólo mientras llegue tan atrás. Se conserva al reescribir la lista de grupos: guardar un usuario borra y reinserta sus pertenencias, y sellarlas de nuevo diría que se le dio acceso hoy cada vez que alguien le cambia el tema |
 
 Restricción única: `(user_uid, group_uid)`.
 Índices: `idx_users_groups_user(user_uid)`, `idx_users_groups_group(group_uid)`.
@@ -154,8 +163,8 @@ reservada en MySQL) — [store.py:77](../src/lib/core/groups/store.py#L77).
 | uid | TEXT | no | — | PK |
 | group_uid | TEXT | no | — | → `groups.uid` |
 | role_uid | TEXT | no | — | → `roles.uid` |
-| created_at | TEXT | no | `''` | |
 | created_by | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | |
 
 Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_role`.
 
@@ -183,11 +192,11 @@ Restricción única: `(group_uid, role_uid)`. Índices: `idx_gr_group`, `idx_gr_
 | uid | TEXT | no | — | **PK** (id de sesión estable) |
 | token | TEXT | no | `''` | UNIQUE (secreto) |
 | user_uid | TEXT | no | `''` | → `users.uid` |
-| created | TEXT | no | `''` | |
 | last_seen | TEXT | no | `''` | |
 | ip | TEXT | no | `''` | |
 | user_agent | TEXT | no | `''` | |
 | remember | INTEGER | no | `0` | Se inició con «Recordarme» → **exenta del timeout por inactividad** |
+| created_at | TEXT | no | `''` | |
 
 Índices: `idx_sessions_user_uid(user_uid)`. Rename heredado: `sid`→`uid`.
 
@@ -255,8 +264,8 @@ límite, que es justo lo que un anillo evita.
 | public_key | TEXT | no | `''` | **WebAuthn**: la clave COSE tal como la mandó el autenticador (base64url del CBOR) |
 | alg | INTEGER | no | `0` | **WebAuthn**: el algoritmo, grabado al **registrar** |
 | sign_count | INTEGER | no | `0` | **WebAuthn**: el contador del autenticador; 0 = no lleva |
-| created | TEXT | no | `''` | |
-| updated | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | |
+| updated_at | TEXT | no | `''` | |
 
 Índices: `idx_mfa_factors_user(user_uid)`.
 
@@ -290,7 +299,7 @@ dos réplicas del web con un contador local cada una aceptarían el mismo códig
 | user_uid | TEXT | no | `''` | → `users.uid` |
 | code_hash | TEXT | no | `''` | **hash**, no cifrado |
 | used_at | TEXT | no | `''` | vacío = sin gastar |
-| created | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | |
 
 Índices: `idx_mfa_recovery_user(user_uid)`.
 
@@ -316,8 +325,8 @@ que dos peticiones con el mismo código sólo cambien una fila.
 | expires_at | TEXT | no | `''` | Vacío = no caduca |
 | last_used | TEXT | no | `''` | Escrito como mucho una vez por minuto |
 | revoked | INTEGER | no | `0` | |
-| created | TEXT | no | `''` | |
 | created_by | TEXT | no | `''` | |
+| created_at | TEXT | no | `''` | |
 
 Índices: `idx_api_tokens_user(user_uid)`, `idx_api_tokens_tid(token_id)`.
 
@@ -536,12 +545,12 @@ Clases** (y el catálogo de Inventario físico enlaza allí).
 | description | TEXT | no | `''` | |
 | profiles | TEXT | no | `'{}'` | JSON, perfiles por protocolo; secretos cifrados |
 | modules | TEXT | no | `'[]'` | lista JSON |
-| created_at | TEXT | no | `''` | |
-| updated_at | TEXT | no | `''` | |
-| updated_by | TEXT | no | `''` | |
 | watch | TEXT | no | `'[]'` | lista JSON de `{module, row}`: las filas de esta máquina que alguien ha dicho que merecen aviso. Un puerto de switch caído puede ser un PC apagado o el enlace del servidor, y ningún MIB los distingue — se anota contra la máquina, no en un perfil, porque es conocimiento de ESTA instalación |
 | source | TEXT | no | `''` | de dónde salió el dispositivo (`freshservice`); vacío = lo dio de alta una persona aquí, que es lo normal. Decide si una importación puede pisar su nombre, su dirección y su descripción — y si la pantalla deja teclearlos |
 | external_id | TEXT | no | `''` | cuál de los suyos es en ese origen. Dos columnas y no una porque son dos preguntas: por el NOMBRE no se puede volver a importar sin duplicar, ya que renombrarlo allí crearía aquí un segundo y dejaría el primero huérfano sin que nada lo dijera |
+| created_at | TEXT | no | `''` | |
+| updated_at | TEXT | no | `''` | |
+| updated_by | TEXT | no | `''` | |
 
 Índices: `idx_devices_name(name)`, `idx_devices_source(source, external_id)`. Ver
 [explica-hosts.md](explica-hosts.md) para el modelo host-céntrico.
@@ -591,9 +600,10 @@ errores en la última hora» de **915 ms a 1**.
 El precio es disco: **2.474 MB contra 877**. No compra velocidad —leer una serie pasó de 8 a 16
 ms, el doble— sino preguntas que antes no se podían escribir.
 
-Una base anterior al cambio llega con la columna puesta y `_fill_facts` la pasa a filas al
-arrancar, por lotes y en transacción, vaciando el documento según avanza: se puede interrumpir y
-el siguiente arranque sigue donde lo dejó. Cuando no queda ni un documento, retira la columna. Es
+Una base anterior al cambio llega con la columna puesta. El paso que pasaba esos documentos a
+filas ya no está —corrió en todas las bases de aquí y se retiró con las demás migraciones del
+renombrado—, así que en una base de entonces la columna se queda puesta y sin que nadie la lea: el
+reconciliador conserva lo que no declaró. Es
 la propia columna la que hace de marcador, así que preguntarlo después cuesta una introspección y
 no un recorrido. Medido con 5.266.008 muestras: **25 minutos a 3.471 muestras/s**, una vez —sale
 por el registro con su porcentaje, porque un arranque de veinticinco minutos callado parece un
@@ -827,8 +837,7 @@ hereda hacia dentro, ganando lo más concreto.
 Estuvo dentro del inventario físico (`dc_org` y `dc_owner`), que es donde se hizo la pregunta por
 primera vez. Es del core desde build.125: la misma sociedad que paga el armario tiene usuarios en
 el directorio y licencias en Microsoft 365, y un registro que vive dentro de una sección es uno
-que las demás no pueden usar sin nombrarla. Las filas viejas se **adoptan** al arrancar: se
-copian a las tablas nuevas si estas están vacías, y las viejas se quedan donde están.
+que las demás no pueden usar sin nombrarla. Las filas de `dc_org`/`dc_owner` se adoptaron al arrancar mientras hubo alguna; ese paso se retiró una vez aplicado.
 
 ### `org` — empresa
 
@@ -850,7 +859,7 @@ copian a las tablas nuevas si estas están vacías, y las viejas se quedan donde
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
-| scope | TEXT | no | — | lo que **declare** un paquete: hoy `site` \| `room` \| `rack` \| `item` (inventario) y `device` (registro de dispositivos). Las filas que decían `host` se renombran al arrancar (`OrgsStore._renombrar_ambito_host`): un ámbito que ya no declara nadie deja a la empresa sin ser dueña de nada, sin error |
+| scope | TEXT | no | — | lo que **declare** un paquete: hoy `site` \| `room` \| `rack` \| `item` (inventario) y `device` (registro de dispositivos) |
 | uid | TEXT | no | — | lo que pertenece a alguien |
 | org_uid | TEXT | no | — | la empresa |
 | set_at | TEXT | no | `''` | cuándo se dijo |
@@ -888,14 +897,14 @@ usuarios en el directorio. Ver [explica-dcim.md](explica-dcim.md).
 | timezone | TEXT | no | `''` | |
 | operator_uid | TEXT | no | `''` | **quién lo opera**, que no es de quién es lo de dentro |
 | description | TEXT | no | `''` | |
-| created_at | TEXT | no | `''` | auditoría |
-| updated_at | TEXT | no | `''` | auditoría |
-| updated_by | TEXT | no | `''` | auditoría |
 | pos_x | REAL | sí | — | dónde cae en el **mapa de sedes** (no en la Tierra): el mapa no usa teselas, así que las sedes son cajas que alguien coloca. NULL = nadie la ha colocado, y entonces se sitúa proyectando `lat`/`lon` |
 | pos_y | REAL | sí | — | |
 | contact | TEXT | no | `''` | **a quién se llama.** El operador dice qué SOCIEDAD lleva la sede, y una sociedad no abre una puerta a las tres de la mañana |
 | phone | TEXT | no | `''` | su teléfono, aparte para poder marcarlo desde la ficha del mapa |
 | photo | TEXT | no | `''` | el nombre de la foto del sitio en el almacén de imágenes (como el plano de una sala): quien va por primera vez busca UNA puerta en un polígono |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
 
 ### `dc_room` — sala
 
@@ -906,14 +915,14 @@ usuarios en el directorio. Ver [explica-dcim.md](explica-dcim.md).
 | name | TEXT | no | `''` | |
 | plan | TEXT | no | `''` | **nombre** del plano en el almacén de medios, nunca una ruta |
 | description | TEXT | no | `''` | |
-| created_at | TEXT | no | `''` | auditoría |
-| updated_at | TEXT | no | `''` | auditoría |
-| updated_by | TEXT | no | `''` | auditoría |
 | cooling | TEXT | no | `''` | cómo se enfría; vacío = **nadie lo ha dicho**, que no es `none` |
 | plan_mm | INTEGER | no | `0` | ancho del plano **en la sala**, en mm; el alto sale de la proporción de la imagen. 0 = sin escalar |
 | width_mm | INTEGER | no | `0` | cuánto mide la sala; 0 = nadie lo ha dicho y el plano se encuadra a lo que hay |
 | depth_mm | INTEGER | no | `0` | |
 | tile_mm | INTEGER | no | `600` | la baldosa del suelo técnico. Es un dato de la sala y no una constante —hay suelos de 500 y de 610— y de ahí salen el imán del editor y los nombres de posición («B7»), que es como se dan por teléfono |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
 
 ### `dc_rack` — rack
 
@@ -935,10 +944,10 @@ usuarios en el directorio. Ver [explica-dcim.md](explica-dcim.md).
 | access | TEXT | no | `'front,rear,left,right'` | **por qué lados se llega**; un armario de pared no tiene trasera |
 | row_uid | TEXT | no | `''` | a qué fila pertenece. Vacío = suelto, que es un estado real: el armario de comunicaciones de un rincón no está en ninguna fila y nunca lo estará |
 | description | TEXT | no | `''` | |
+| asset | TEXT | no | `''` | su número de inventario. El mueble también se compra, y es el que sale por más dinero en el albarán |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
-| asset | TEXT | no | `''` | su número de inventario. El mueble también se compra, y es el que sale por más dinero en el albarán |
 
 > La posición en el plano vive **aquí** y no en la disposición guardada del navegador: dónde
 > ESTÁ un rack es un hecho de la sala, y el siguiente que abra el plano necesita la misma
@@ -1031,11 +1040,11 @@ se documenta a mano, porque nadie más lo va a saber.
 | color | TEXT | no | `''` | |
 | length_mm | INTEGER | no | `0` | cuánto mide, en milímetros. La pantalla pregunta metros con un decimal: nadie mide un latiguillo en milímetros y todo el mundo lo compra en metros |
 | description | TEXT | no | `''` | |
+| category | TEXT | no | `''` | de qué categoría, que no es lo mismo que de qué está hecho: `kind` dice cobre o fibra y esto dice Cat 6A o OM4. Decide si un enlace de 10 Gb va a funcionar, y dos latiguillos de categorías distintas son indistinguibles a un metro. Abierto: lo que no esté en `CABLE_CATEGORIES` se puede escribir igual |
+| asset | TEXT | no | `''` | el número de INVENTARIO, que no es la etiqueta: `label` es lo que está rotulado en el cable —se repite, se borra y se equivoca, y aun así es con lo que trabaja quien está allí con una linterna— y esto lo pone la casa, es único y es con lo que se cuenta. Meter los dos en una casilla obliga a elegir cuál se pierde |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
-| category | TEXT | no | `''` | de qué categoría, que no es lo mismo que de qué está hecho: `kind` dice cobre o fibra y esto dice Cat 6A o OM4. Decide si un enlace de 10 Gb va a funcionar, y dos latiguillos de categorías distintas son indistinguibles a un metro. Abierto: lo que no esté en `CABLE_CATEGORIES` se puede escribir igual |
-| asset | TEXT | no | `''` | el número de INVENTARIO, que no es la etiqueta: `label` es lo que está rotulado en el cable —se repite, se borra y se equivoca, y aun así es con lo que trabaja quien está allí con una linterna— y esto lo pone la casa, es único y es con lo que se cuenta. Meter los dos en una casilla obliga a elegir cuál se pierde |
 
 ### `dc_source` — lo que hay aguas arriba de una regleta
 
@@ -1087,12 +1096,12 @@ lo medido— y el desacuerdo entre ellas es la razón de que esto exista.
 | capacity_w | INTEGER | no | `0` | lo que aguanta: el límite del que hay que quedarse lejos, no el objetivo |
 | device_uid | TEXT | no | `''` | la máquina, si la regleta contesta |
 | description | TEXT | no | `''` | |
-| created_at | TEXT | no | `''` | auditoría |
-| updated_at | TEXT | no | `''` | auditoría |
-| updated_by | TEXT | no | `''` | auditoría |
 | color | TEXT | no | `''` | de qué color se pinta. Vacío = el de su rama (`FEED_COLORS`: A azul, B rojo). Existe porque hay salas con tres alimentaciones y salas donde el color de cada rama estaba decidido antes de que llegara este panel — y discutir con la etiqueta pegada en la regleta de verdad es una discusión que el panel pierde |
 | source_uid | TEXT | no | `''` | de qué cuadro o SAI cuelga. Vacío = nadie lo ha dicho, que es distinto de que no tenga: media sala técnica cuelga de un cuadro que nadie documentó |
 | item_uid | TEXT | no | `''` | qué equipo del armario ES, cuando ocupa uno. Vacío es lo normal: la mayoría van atornilladas al lateral y no ocupan U — por eso una regleta puede existir sin equipo. Cuando sí ocupa, son la misma cosa descrita dos veces, y sin este enlace el panel pedía declararla dos veces y luego la contaba entre los equipos «sin enchufar» |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
 
 ### `dc_feed` — un cable de alimentación
 
@@ -1108,14 +1117,14 @@ dos cuelgan de la misma rama.
 | outlet | INTEGER | no | `0` | la toma. 0 = «en esa regleta, no sé en cuál», que es lo que alguien sabe mirando una foto — obligarle a inventarse un número sería peor dato que ninguno |
 | watts_said | INTEGER | no | `0` | lo que **alguien dijo** que consume por este cable. La placa dice el máximo que puede pedir, no lo que pide; se compara con lo medido sin corregir ninguno |
 | label | TEXT | no | `''` | etiqueta del cable |
-| created_at | TEXT | no | `''` | auditoría |
-| updated_at | TEXT | no | `''` | auditoría |
-| updated_by | TEXT | no | `''` | auditoría |
 | asset | TEXT | no | `''` | su número de inventario. **Un cable de corriente es un cable**: se compra, se guarda en una caja, se rompe y hay que sustituirlo. Esta fila decía de qué toma cuelga y cuántos vatios se declararon, como si el latiguillo no existiera |
 | category | TEXT | no | `''` | el par de conectores: `c13-c14` va de un equipo a una regleta y `c19-c20` alimenta lo que pide dieciséis amperios. Es lo que hay que mirar en la caja antes de bajar al armario. Abierto, como el de datos, con `FEED_CATEGORIES` de sugerencia |
 | length_mm | INTEGER | no | `0` | cuánto mide, en milímetros; la pantalla lo pregunta en metros, con coma o con punto |
 | description | TEXT | no | `''` | lo que haya que decir de ESE cable |
 | color | TEXT | no | `''` | de qué color es la funda, como su hermano de datos: es con lo que se encuentra en un mazo de treinta detrás de un armario. **No es el de su rama** —ése es de la regleta— y meterlos en el mismo campo hacía que la ficha enseñara uno por otro |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
 
 ### `dc_feature` — lo que hay en la sala que no es un rack
 
@@ -1156,9 +1165,6 @@ columna.
 | serial | TEXT | no | `''` | |
 | asset | TEXT | no | `''` | el número que le puso el inventario contable. **Único entre todas las tablas que lo llevan** (`dc_item`, `dc_rack`, `dc_cable`, `dc_feed`): en el albarán hay una lista, no cuatro. Y escrito con comodín —`INV-?`, `INV-???`— lo resuelve el servidor al guardar, no la pantalla |
 | description | TEXT | no | `''` | |
-| created_at | TEXT | no | `''` | auditoría |
-| updated_at | TEXT | no | `''` | auditoría |
-| updated_by | TEXT | no | `''` | auditoría |
 | depth_mm | INTEGER | no | `0` | su fondo; el catálogo no lo sabe (sólo si es de profundidad completa) |
 | role | TEXT | no | `''` | qué CLASE de dispositivo es (`ITEM_ROLES`: servidor, switch, router, cortafuegos, cabina, panel de parcheo, panel de fibra, SAI, regleta, bandeja, KVM, consola, tapa ciega, otro). Vacío = nadie lo ha dicho, que es una pregunta; `other` es una respuesta. De aquí cuelga que un panel de parcheo deje de contarse como «sin vigilar»: no es que nadie lo mire, es que no hay nada que mirar |
 | build_uid | TEXT | no | `''` | de qué **plantilla nació** (`dc_build`); índice `idx_dc_item_build`. No es lo que lleva hoy: las piezas se copian al crearlo y desde ese momento son suyas. Es lo que contesta «cuáles son los veinte del estándar de 2024» aunque a tres les hayan cambiado los discos |
@@ -1171,6 +1177,9 @@ columna.
 | u_split | TEXT | no | `'width'` | por dónde se parte: `width` (uno al lado del otro — dos mini PC, ocho Raspberry) o `height` (uno encima del otro — dos patch panel de 0,5 U). A la rejilla le da igual, porque lo que comprueba es si el trozo está libre; al **dibujo** no, que existe para parecerse a lo que se ve al abrir el armario |
 | parent_uid | TEXT | no | `''` | montado **en** otro elemento (los mini PC sobre una bandeja); índice `idx_dc_item_parent`. El que lo lleva ocupa el U y el montado **no**, porque ese U ya está pagado — y hereda su rack, su U, su altura y su cara, para que el alzado y los recuentos sigan leyendo lo mismo sin saber que esto va montado. Un solo nivel: una bandeja sobre una bandeja no es una sala. Y **no se retira lo que lleva algo encima**, porque quitarlo dejaría tres máquinas colgando de un sitio que ya no está |
 | placement | TEXT | no | `'u'` | cómo está puesto: uno de `PLACEMENTS`. `u` se atornilla a los mástiles y ocupa `u_start`..`u_height`; `side` está en el armario sin ocupar U (la regleta del lateral, la bandeja colgada) y `near`, al lado (el SAI en el suelo, el cuadro en la pared). Lo que no ocupa U sigue estando EN el armario para todo lo demás —se alimenta, se cablea, tiene estado— y por eso no entra en la ocupación ni en el alzado |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
 
 > **Un rack contiene items, y algunos items son hosts** — nunca al revés. Un panel de parcheo
 > ocupa 1U y no es un host; una tapa ciega no es nada; un chasis de blades ocupa 7U y contiene
@@ -1203,14 +1212,14 @@ descripción no se le puede preguntar.
 | size | TEXT | no | `''` | como **texto**: «4 TB», «32 GB», «750 W». En bytes habría que decidir si 4 TB son 4·10¹² o 4·2⁴⁰ —las dos respuestas están en algún albarán— y convertir para enseñar lo que alguien ya escribió bien |
 | qty | INTEGER | no | `1` | seis discos idénticos son **una fila con un seis**: nadie apunta el número de serie de cada uno, y obligar a ello garantiza que no se apunte ninguno |
 | description | TEXT | no | `''` | |
-| created_at | TEXT | no | `''` | auditoría |
-| updated_at | TEXT | no | `''` | auditoría |
-| updated_by | TEXT | no | `''` | auditoría |
 
 | type_uid | TEXT | no | `''` | el modelo del catálogo, cuando alguien lo dijo. Opcional a propósito: el disco que salió del cajón no está en ningún catálogo y sigue siendo un disco. Lo que da es poder preguntar «cuántos KSM32RD8/32 hay puestos» sin depender de que las once formas de escribir el mismo modelo coincidan |
 | brand | TEXT | no | `''` | la MARCA, aparte del modelo. «Samsung PM9A3» en una sola casilla son once formas de escribir lo mismo que no se pueden contar juntas — y contar juntas es la única pregunta que se le hace a esto. Como texto y no como `brand_uid`, igual que `dc_type.manufacturer`: el vínculo bueno lo tiene el modelo del catálogo, que es a quien apunta `type_uid` |
 | kit_qty | INTEGER | no | `1` | cuántas piezas trae una unidad de lo que se compró. Estampada como lo demás: una máquina que dice llevar dos kits sigue diciendo cuántos módulos son aunque alguien borre el modelo del catálogo |
 | mount | TEXT | no | `''` | dentro de la caja o **colgando de ella**. `''` = dentro, que es lo que eran todas las que ya había: una columna nueva no puede inventarse el valor. Aparte de `kind` porque son dos preguntas —`kind` dice **qué es** (un disco, una fuente, un adaptador) y esto **dónde está**— y en un solo campo habría que inventar `nic_externa` el día que alguien enchufe una tarjeta de red por USB, que es el caso que trajo esto. Lo de dentro va en una bahía; lo que cuelga, enchufado a un puerto que se ve. Se estampa al equipo con lo demás: el día de la mudanza, lo externo es justo lo que hay que acordarse de meter en la caja |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
 
 ### `dc_build` — una plantilla: lo que de verdad se compra
 
@@ -1231,9 +1240,6 @@ nadie —no lo vende nadie— y sin esta tabla se teclea veinte veces.
 | depth_mm | INTEGER | no | `0` | |
 | face | TEXT | no | `'full'` | |
 | description | TEXT | no | `''` | |
-| created_at | TEXT | no | `''` | auditoría |
-| updated_at | TEXT | no | `''` | auditoría |
-| updated_by | TEXT | no | `''` | auditoría |
 | notes | TEXT | no | `''` | lo que no cabe en un renglón: por qué se eligió ese chasis, qué se probó y no valía, con quién se negoció el precio. Hoy eso vive en un correo, y el correo se pierde antes que el servidor |
 | valid_from | TEXT | no | `''` | desde cuándo se compra así. Un estándar tiene vigencia: sin estas dos fechas, «¿esto todavía se pide?» solo lo sabe quien estaba |
 | valid_to | TEXT | no | `''` | hasta cuándo. Puesta, la plantilla sale marcada como retirada en la lista — y no se borra: los equipos que salieron de ella siguen existiendo |
@@ -1252,6 +1258,9 @@ nadie —no lo vende nadie— y sin esta tabla se teclea veinte veces.
 | extra | TEXT | no | `'{}'` | lo que no cabe en columnas, empezando por las seis fechas de la vida del equipo |
 | front_image | TEXT | no | `''` | copiada **de verdad**, con nombre nuevo: apuntar al fichero del catálogo es una bomba de relojería —borrar cualquiera de los dos se lleva el fichero y el otro enseña un hueco sin que nada haya fallado— |
 | rear_image | TEXT | no | `''` | idem |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
 
 > **Lo copiado se rellena solo una vez, y solo donde falta.** Las nueve columnas de arriba
 > son nuevas, y `ADD COLUMN` no puede inventarse el valor: las plantillas escritas antes las
@@ -1287,12 +1296,12 @@ nadie —no lo vende nadie— y sin esta tabla se teclea veinte veces.
 | size | TEXT | no | `''` | |
 | qty | INTEGER | no | `1` | |
 | description | TEXT | no | `''` | |
-| created_at | TEXT | no | `''` | auditoría |
-| updated_at | TEXT | no | `''` | auditoría |
-| updated_by | TEXT | no | `''` | auditoría |
 | brand | TEXT | no | `''` | la marca, por lo mismo que en `dc_part`: la misma forma, porque estampar es copiar |
 | kit_qty | INTEGER | no | `1` | cuántas piezas trae una unidad de lo que se compró. Estampada como lo demás: una máquina que dice llevar dos kits sigue diciendo cuántos módulos son aunque alguien borre el modelo del catálogo |
 | mount | TEXT | no | `''` | dentro de la caja o **colgando de ella**. `''` = dentro, que es lo que eran todas las que ya había: una columna nueva no puede inventarse el valor. Aparte de `kind` porque son dos preguntas —`kind` dice **qué es** (un disco, una fuente, un adaptador) y esto **dónde está**— y en un solo campo habría que inventar `nic_externa` el día que alguien enchufe una tarjeta de red por USB, que es el caso que trajo esto. Lo de dentro va en una bahía; lo que cuelga, enchufado a un puerto que se ve. Se estampa al equipo con lo demás: el día de la mudanza, lo externo es justo lo que hay que acordarse de meter en la caja |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
 
 > **La misma forma que `dc_part` a propósito**: crear un equipo desde una plantilla es copiarlas.
 > Lo que NO se copia es el número de serie — es lo único que tiene esa unidad y ninguna otra, y
@@ -1406,11 +1415,11 @@ siguen apuntando.
 | brand_uid | TEXT | no | `''` | la marca, como **fila** (`dc_brand`); índice `idx_dc_type_brand_uid`. La columna `manufacturer` se queda: es lo que dijo el fichero de origen y lo que sigue siendo cierto si alguien retira la ficha de la marca — un modelo no deja de ser de Dell porque nadie quiera guardar el teléfono de Dell |
 | size | TEXT | no | `''` | el TAMAÑO, que solo tienen los componentes: «32 GB», «1.92 TB», «750 W». Columna y no una clave dentro de `extra` —donde están las medidas de un armario— porque no es lo mismo: aquello son ocho campos de 140 filas, y esto es **el campo que se lee en cada renglón** de lo que más se teclea a mano; dentro de un JSON no se ordena, no se busca y no se enseña sin desenvolverlo. Como texto, por lo mismo que en `dc_part` |
 | url | TEXT | no | `''` | la **página del producto**: la hoja de características, el firmware, el manual. No la trae ninguna biblioteca y es lo primero que se busca cuando hay que saber si una tarjeta entra en un chasis. La marca tiene la suya, comercial y de soporte; esta es la de ESTE modelo, que es otra cosa |
-| updated_at | TEXT | no | `''` | cuándo se tocó por última vez |
-| updated_by | TEXT | no | `''` | y quién |
 | rev | INTEGER | no | `1` | por qué **versión** va. El historial (`dc_rev`) las tiene una a una; esto es el resumen que quiere una ficha —cuándo y cuántas— sin abrirlo. Columnas y no una consulta al historial porque la lista enseña doscientas filas, y contar versiones de doscientas fichas para pintar dos casillas sería pagar el resumen a precio del detalle |
 | kit_qty | INTEGER | no | `1` | cuántas piezas trae **una** de estas. Un kit de dos módulos se compra como uno y se monta como dos; una caja de cincuenta tornillos, igual. «Cuántos DIMM de 16 GB tengo» quiere la segunda cifra y «cuántos pedí» quiere la primera, y con una sola casilla hay que elegir cuál se contesta mal. Columna y no atributo del documento porque el panel **multiplica por ella**, y lo que se multiplica no puede depender de que nadie renombre una clave en un JSON |
 | power_type | TEXT | no | `''` | por dónde se alimenta: `internal` \| `external` \| `poe`. `is_powered` dice **si** consume y no dice cómo, y la diferencia entre una fuente dentro y un alimentador externo decide si hace falta una toma en la regleta o un enchufe en la pared — y si al mover el equipo hay que acordarse de llevarse algo que no está atornillado. `none` no es un valor de aquí: eso lo dice `is_powered` en cero, y tenerlo en dos sitios serían dos respuestas a la misma pregunta |
+| updated_at | TEXT | no | `''` | cuándo se tocó por última vez |
+| updated_by | TEXT | no | `''` | y quién |
 
 > **Se importa, no se empaqueta.** El origen es
 > [devicetype-library](https://github.com/netbox-community/devicetype-library) (CC0-1.0), varios
@@ -1522,8 +1531,8 @@ las once de la noche con una tarjeta que no arranca.
 | label | TEXT | no | `''` | cómo se llamaba. Una **etiqueta que se enseña, no una ruta**: la del disco la acuña el panel |
 | stored | TEXT | no | `''` | el nombre acuñado, en el almacén de medios. Con extensión `.bin` a propósito: si llevara la de verdad, un servidor mal configurado delante podría decidir servirlo por su cuenta, y esa decisión no es suya |
 | size | INTEGER | no | `0` | |
-| created_at | TEXT | no | `''` | auditoría |
 | created_by | TEXT | no | `''` | auditoría |
+| created_at | TEXT | no | `''` | auditoría |
 
 > **No hay lista blanca de tipos, y es una decisión.** Lo útil aquí es abierto: un PDF, el `.docx`
 > que mandó el distribuidor, un `.zip` con el firmware. Una lista se queda corta cada semana y
@@ -1831,8 +1840,8 @@ Restricción única: `(ip, track)`. Índices: `idx_ip_offc_updated(updated_at)`.
 | uid | TEXT | no | — | PK |
 | value | TEXT | no | `''` | UNIQUE (IP/CIDR) |
 | description | TEXT | no | `''` | |
-| created_at | REAL | no | `0` | |
 | created_by | TEXT | no | `''` | |
+| created_at | REAL | no | `0` | |
 
 Índices: `idx_ip_whitelist_value(value)`. Limitado a 2000.
 
@@ -1982,12 +1991,12 @@ sin error en ninguna parte.
 | action | TEXT | no | `''` | |
 | args | TEXT | no | `''` | JSON |
 | created_by | TEXT | no | `''` | |
-| created_at | REAL | sí | — | |
 | claimed_at | REAL | sí | — | |
 | claimed_by | TEXT | sí | — | → `instance_id` |
 | done_at | REAL | sí | — | |
 | ok | INTEGER | sí | — | null hasta terminar |
 | result | TEXT | sí | — | |
+| created_at | REAL | sí | — | |
 
 Índices: `idx_svccmd_pending(service_key, claimed_at)`, `idx_svccmd_created(created_at)`.
 

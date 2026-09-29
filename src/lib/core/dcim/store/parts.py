@@ -59,9 +59,6 @@ _PART = TableSpec(
         # ninguno.
         Column('qty',      'INTEGER', nullable=False, default='1'),
         Column('description', 'TEXT', nullable=False, default="''"),
-        Column('created_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_at', 'TEXT', nullable=False, default="''"),
-        Column('updated_by', 'TEXT', nullable=False, default="''"),
         # De qué modelo del catálogo es, cuando alguien lo dijo. Opcional a propósito: el disco
         # que salió del cajón no está en ningún catálogo y sigue siendo un disco. Lo que da es
         # poder preguntar «cuántos KSM32RD8/32 hay puestos» sin depender de que las once formas
@@ -85,6 +82,9 @@ _PART = TableSpec(
         # adaptador de red que el estándar dice que lleva sigue siendo externo en la máquina que
         # sale de él, y el día de la mudanza eso es lo que hay que acordarse de meter en la caja.
         Column('mount',   'TEXT', nullable=False, default="''"),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_part_item', ('item_uid',)),),
 )

@@ -74,7 +74,7 @@ ser el mismo host para el asistente de migración.
 
 ## Cómo un check se liga a un host
 
-Un ítem de check referencia un host por **`device_uid`** (o **`host_uids`** para un check
+Un ítem de check referencia un host por **`device_uid`** (o **`device_uids`** para un check
 multi-bind que apunta a varios). En tiempo de ejecución, `ModuleBase.resolve_device()` **fusiona
 la conexión del host sobre la config del ítem**; qué campos vienen del host lo declara el
 módulo con `__device_profile__` en su `schema.json`:
@@ -85,7 +85,7 @@ módulo con `__device_profile__` en su `schema.json`:
 
 ```mermaid
 flowchart LR
-    item["ítem de check<br/>{host_uid: 'srv-1', …}"] --> res["ModuleBase.resolve_device(item)"]
+    item["ítem de check<br/>{device_uid: 'srv-1', …}"] --> res["ModuleBase.resolve_device(item)"]
     store[("DevicesStore · host 'srv-1'<br/>address + profiles{ssh,snmp,…}")] --> res
     res --> merged["config efectiva<br/>(dirección + credenciales del host + campos del ítem)"]
     merged --> exec["el módulo ejecuta el check<br/>(local o SSH según el host)"]
@@ -131,7 +131,7 @@ inline repetidas en hosts reutilizables. Dos funciones **puras** (sin I/O) en
 flowchart LR
     scan["escanea la config de módulos<br/>(ítems con conexión inline)"] --> plan["build_migration_plan()<br/>agrupa por dirección · agrega protocolos"]
     plan --> review(["propuesta revisable<br/>hosts candidatos + sus ítems"])
-    review --> apply["apply_to_modules()<br/>crea los hosts + reescribe ítems a host_uid"]
+    review --> apply["apply_to_modules()<br/>crea los hosts + reescribe ítems a device_uid"]
     apply --> ev["evento de auditoría hosts_migrated"]
 ```
 
