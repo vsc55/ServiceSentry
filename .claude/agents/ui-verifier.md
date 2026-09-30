@@ -37,7 +37,8 @@ Playwright está instalado en el venv.
 
 - Login: `/login`, rellenar `input[name=username]` e `input[name=password]`, enviar y esperar a que
   desaparezca `#loading`. Luego `/admin` y otra vez esperar a `#loading`.
-- **Navega por la interfaz, como una persona**: pulsa la entrada del menú (`#nav-page-<sección>`)
+- **Navega por la interfaz, como una persona**: pulsa la entrada del menú —`#nav-page-<sección>`
+  si la sección es una sola vista, `#btn-nav-<sección>` si tiene subvistas (Inventario las tiene)—
   y usa las funciones de navegación de la propia pantalla (por ejemplo `_dcimGo('builds')`).
 - **No leas el estado leyendo variables desde `evaluate`.** Las declaradas con `let`/`const` no
   están en `window`: verás `null` aunque la pantalla esté bien. Las funciones con `function` sí

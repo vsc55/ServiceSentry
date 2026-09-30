@@ -434,6 +434,11 @@ html.ss-nocss body { visibility: visible; }
    The .ss-card-band pagination strips keep their natural height, so they pin
    top/bottom while the .ss-vscroll body between them scrolls. */
 .ss-vfill   { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+/* .ss-fill-screen : take the whole window, for a viewer that wants to be big where the browser
+   has no Fullscreen API (Safari on iPhone). The !important beats an inline `height:` — which is
+   how a viewer sets its resting size. */
+.ss-fill-screen { position: fixed !important; inset: 0 !important; z-index: 1080;
+                  height: auto !important; margin: 0 !important; border-radius: 0 !important; }
 .ss-vscroll { flex: 1 1 auto; overflow: auto; min-height: 0; }
 /* .ss-scroll-pad : for an .ss-vscroll holding plain flowing content (cards, not a table).
    The scrollbar sits INSIDE the box, so without a gutter it lands on top of the content's
@@ -1493,6 +1498,23 @@ html.ss-nocss body { visibility: visible; }
     background: var(--bs-body-bg);
     cursor: grab;
 }
+/* .ss-editor : a working surface with a side panel beside it — a canvas and its inspector. The
+   surface takes whatever is left; on a phone the panel drops underneath instead of squeezing it. */
+.ss-editor { display: flex; gap: .5rem; flex: 1 1 auto; min-height: 360px; }
+.ss-editor > .ss-infra-canvas { min-width: 0; }
+@media (max-width: 767.98px) { .ss-editor { flex-direction: column; }
+                               .ss-editor > .ss-side-panel { flex-basis: auto; } }
+/* .ss-side-panel : a fixed-width column that scrolls on its own; .is-collapsed leaves only the
+   button that brings it back. */
+.ss-side-panel { flex: 0 0 17rem; min-height: 0; overflow-y: auto; background: var(--bs-body-bg); }
+.ss-side-panel.is-collapsed { flex-basis: 2.6rem; padding: .25rem; }
+/* .ss-float-tools : a vertical strip of tool buttons floating over a canvas, top-left; it wraps
+   into a second column when the canvas is shorter than the strip. */
+.ss-float-tools { position: absolute; top: .5rem; left: .5rem; z-index: 2; display: flex;
+                  flex-direction: column; flex-wrap: wrap; align-content: flex-start; gap: .25rem;
+                  max-height: calc(100% - 1rem); }
+/* .ss-grid-2 : two equal columns, for pairs of small fields (X and Y, width and depth). */
+.ss-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
 
 /* The panel that describes one cable or one machine. It stands over the drawing, so it is in
    front of part of the thing it is describing — asked for from the screen the other way round:

@@ -8,6 +8,147 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.130] - 2026-09-29
+
+### Added
+
+- **A rack can hang on a wall.** `dc_rack.base_mm` says how high off the floor the cabinet
+  starts — 0 for one standing on the floor, which is almost all of them. The 3D view stood a wall
+  cabinet on the floor under the switch it holds, and nothing said at what height to look for
+  it. The rack form asks for it, the 3D view lifts the rack, the plan's rack card says "on the
+  wall at 1.80 m", and it travels in the plan file and when a rack is duplicated. Importing a
+  plan file written before it existed leaves the height alone: reading its silence as "on the
+  floor" would bring down a rack someone had hung. A column rather than a "wall-mounted" flag:
+  the flag is `base_mm > 0`, and without the height it does not say where to put the ladder.
+
+- **A piece on the room plan is handled from the piece.** Hovering one shows a small bar over
+  its top-right corner — edit, turn, duplicate, delete — for anyone who may edit the plan, and
+  never while dragging. A click now only selects: the measurements box opens from the pencil,
+  where it used to open on every click and cover the room with a form nobody had asked for,
+  just as they were about to stretch or nudge the piece. Clicking the floor lets go of the
+  selection — dragging the floor to pan does not. Duplicate drops the copy one tile along, not
+  on top of the original where it would look as if nothing happened, and leaves it selected.
+  The bar sits in the canvas frame, outside the `<svg>`, so pressing one of its buttons does not
+  also start a drag.
+
+- **And so is a rack.** Hovering it shows the same bar — open, edit, turn, duplicate, delete, or
+  only open for someone who may just look — and a click no longer opens it: every mis-aimed
+  click used to take you out of the plan. Edit is the rack's usual form, not a smaller one for
+  the plan; duplicate is an empty rack with the same size, turn, height, rails, access and row,
+  and without its contents or its asset tag, which identifies one cabinet and repeated
+  identifies none. The form now finds the plan's own racks, so it no longer opens empty from
+  there, and saving or deleting returns to the plan with the change drawn.
+
+- **A piece on the room plan is resized by dragging.** The selected piece shows eight handles —
+  the four sides and the four corners — that turn with it. Each moves the side it sits on and
+  keeps the side or corner opposite where it is seen, whatever the angle: the turn is about the
+  centre, and without recomputing the stored corner a turned piece would slide sideways as it
+  grew. The drag is turned back into the piece's own frame, so pulling a door turned a quarter
+  stretches what is under the hand. The size being dragged is shown right beside the piece.
+  Sizes go through the magnet, never below 50 mm, and are saved on release — or put back if the
+  server refuses them.
+
+- **Four project agents for tests and security** under `.claude/agents`: `test-triage` sorts a
+  red run into real faults, runs that overlapped an edit, environment and stale tests;
+  `guard-writer` writes a regression test and proves it bites by mutating the source;
+  `security-auditor` reviews one area at a time against this project's threat model without
+  re-reporting what `docs/ref-pendiente.md` already defers or accepts; `deps-audit` runs
+  `pip-audit` over the lock.
+- **The room's 3D view can be walked through, and opened full screen.** The camera only orbited
+  a fixed point a metre off the floor: the wheel stopped 1.2 m short and the view never went
+  below the horizontal, so the far wall could not be reached and there was no getting under a
+  wall-mounted rack. Now the wheel keeps going once it is close — forward and level, and no
+  further than the room's walls, so it neither sinks into the floor nor carries on into the
+  void behind the wall — W A S D or the arrows walk, Q and E go down and up, the orbit goes
+  past the horizontal to look from below without the eye ever going under the floor, and Home
+  or F returns to the starting view. The right-button drag panned forward and back instead of
+  sideways; it now grabs the floor. A full-screen button uses the browser's Fullscreen API —
+  Esc leaves it, and since it is the same canvas growing, you come back exactly where you were,
+  camera included — and falls back to filling the window where the API does not exist.
+
+- **All four walls, and the one in the way turns to glass.** Only the two back walls were drawn,
+  and stepping through one left the screen grey: the room was being looked at through its own
+  wall, from behind. Each wall is now solid seen from inside and nearly transparent from outside
+  — enough to say where the room ends, not enough to hide it — decided every frame, since the
+  camera moves every frame. From the starting view the two front walls read as faint glass.
+
+### Changed
+
+- **The room plan is laid out as an editor.** Five bands sat above the canvas — the header, the
+  rows, the room's measurements and two rows of palette — and ate almost 300 px before the plan
+  began, with a piece box that pushed it further down when it opened. Now there is one toolbar
+  row, the palette is a column of icons floating over the canvas (name and size on hover), and a
+  collapsible inspector sits beside it: the room's measurements and rows when nothing is
+  selected, the piece's fields and actions when one is. Selecting no longer moves anything —
+  only the inspector redraws — the collapsed state is remembered per browser, and the pencil in
+  a piece's floating bar opens the inspector if it is folded away. The initial framing leaves
+  room on the left for the palette, so it does not cover the edge of the room. The canvas takes
+  the rest of the height: about 820 px instead of 550 on a 950 px window. Chosen from four
+  proposals.
+
+- **Racks are selected like any other piece, and every item is reachable from a list.** A click
+  on a rack only showed its floating bar, so tables and doors were edited in the inspector and
+  the rack — the thing a room is mostly about — was not. It is now marked on the plan and its
+  inspector holds its name, position, size, height in U, turn and height off the floor, with
+  open, full form, turn, duplicate and delete; Escape lets go of it, which it did not. With
+  nothing selected, the inspector lists every rack and piece in the room: the only way to reach
+  something drawn under something else — a piece under a wall rack could never be clicked. Picking
+  something from the hidden air layer turns that layer on.
+
+- **The room can be seen from the front, wall by wall.** A plan says nothing about height, and a
+  wall rack hides whatever is under it. A switch in the toolbar changes between the plan and a
+  front view of one wall, seen from inside the room, with arrows to turn to the wall on either
+  side. Each item stands at the height it is at — a rack from its `base_mm` up its U, a piece from
+  its own base and height or its kind's — measured from the viewer's left corner; what is against that wall
+  is solid and what stands further into the room is fainter, drawn on top without hiding it. The
+  wall grows if something reaches above the ceiling. Clicking selects, and dragging moves an
+  item along that wall — with the viewer's sign, so right is
+  east facing north and west facing south — and up or down, and never changes its distance to
+  the wall, which this view does not show. The selected item carries handles: its two sides, when
+  one faces the wall squarely (turned 45°, none does, and stretching two measures at once would
+  be something other than what is seen), and its top — a rack in U, a piece in millimetres. The
+  opposite side stays put, through the same arithmetic as the plan.
+
+- **Each piece can have its own height and height off the floor.** Every table measured what
+  its kind said — 750 mm — so stretching one upward from the front view had nowhere to be kept.
+  `dc_feature.height_mm` and `base_mm` are empty for "its kind's", which is what every piece was
+  before; empty and not zero, because zero is a measurement — a tray on the floor — and with zero
+  meaning "unsaid" there would be no way to put it there. One helper resolves them for the front
+  view, the 3D view and the inspector, which shows the effective value rather than a blank; the
+  plan file carries them, and importing a file that does not leaves them empty.
+
+### Fixed
+
+- **Typing in several fields in a row saves all of them.** Every field re-armed one shared timer
+  with only its own change, so typing a rack's height and then its name saved the name and dropped
+  the height, silently; a piece's X then Y lost the X the same way. Changes now accumulate and go
+  out together once typing stops, and switching to another item sends what was pending first.
+  Found while testing the rack inspector.
+
+- **The 3D view draws the room the plan draws.** Every box turned about its corner and the
+  other way round from the plan, which turns about the centre: a door against the wall — its
+  stored corner at −440 mm — stood 44 cm off it in 3D, and anything turned sat somewhere other
+  than on the plan. A rack's front strip was on its back, so the plan and the 3D view said
+  opposite things about which way the rack blows; it is on the plan's front side now, turning
+  about the rack's centre. The camera started behind the two walls the view draws, which hid
+  the room, and everything was lit by one light on colours of 0.1 over a near-black background:
+  dark on dark. It now starts from the opposite corner, the light is a key, a fill and a sky/
+  ground ambient over lighter colours, and the floor shows its tiles, which is the only
+  distance anyone reads in a perspective view. Reported from the screen, with a screenshot.
+
+- **A turned piece on the room plan can be dragged right up to the wall.** A door turned a
+  quarter stopped 44 cm short of it, with the magnet on or off — and a door is the piece that
+  goes on the wall. `pos_x`/`pos_y` are the corner of the unturned box and the turn is about its
+  centre, but the drag clamped and snapped that corner: turned 90°, a 1000 × 120 door is drawn
+  440 mm to the right of it. The clamp and the magnet now measure the edge you see, for any
+  angle, and the corner follows from it — so it can be negative, which the server already
+  accepted. Racks drag through the same arithmetic and had the same stop, and the arrow keys
+  had it too. Unturned pieces move exactly as before. Reported from the screen.
+
+- **The selected piece's box can be closed.** Escape was the only way out, and a shortcut nobody
+  can see is not a way to do something. It now has a close button that goes through the same
+  path as Escape. Reported from the screen.
+
 ## [0.0.1+build.129] - 2026-09-14
 
 ### Changed

@@ -29,6 +29,13 @@ const _DCP_SVG = 'dcimPlanSvg';
 const _DCP_SCALE = 0.02;
 const _DCP = {PAD: 400, GRID: 1000};        // millimetres
 
+//: Desde dónde se mira la sala: `'top'` en planta, o una pared de frente —`N`, `E`, `S`, `W`—,
+//: desde dentro. En planta no se ve la altura de nada, y un rack colgado en la pared tapa lo que
+//: haya debajo de él: la mitad de lo que se pregunta de una sala es a qué altura está algo.
+let _dcpView = 'top';
+//: Las paredes en el orden en que se gira: norte (arriba en el plano), este, sur, oeste.
+const _DCP_SIDES = ['N', 'E', 'S', 'W'];
+
 //: Which room's plan is open, and the racks on it. Its own state and not `_dcimRack`'s: a plan
 //: is a room, and the rack view is one rack.
 let _dcimPlan = null;
@@ -152,9 +159,14 @@ function _dcimClosePlan() {
 function _dcimPlanHtml() {
     const room = _dcimPlan.room || {};
     const racks = _dcimPlan.racks || [];
-    const box = _dcpExtent(racks);
-    return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad">
-        <div class="ss-toolrow mb-3">
+    const planta = _dcpView === 'top';
+    const box = planta ? _dcpExtent(racks) : _dcpElevationExtent();
+    const edita = _dcimMay('dcim_edit');
+    // Una fila arriba, y debajo el editor: el lienzo con la paleta flotando encima y el inspector
+    // al lado. Eran cinco franjas —cabecera, filas, medidas, dos filas de paleta— que se comían
+    // casi 300 px antes de empezar el plano, y un cuadro de pieza que al abrirse lo empujaba más.
+    return `<div class="px-3 py-2 ss-vfill ss-vscroll ss-scroll-pad">
+        <div class="ss-toolrow mb-2">
             <button class="btn btn-sm btn-secondary" onclick="_dcimClosePlan()">
                 <i class="bi bi-arrow-left me-1"></i>${esc(t('dcim_back'))}</button>
             <span class="fw-semibold ss-fs-5">${esc(room.name || room.uid)}</span>
@@ -162,6 +174,16 @@ function _dcimPlanHtml() {
             <span class="text-muted ss-fs-2 ss-toolrow-text">${
                 esc(tf('dcim_plan_note', racks.length))}</span>
             <div class="ss-toolrow-tools">
+                ${_dcpViewSwitcher()}
+                <span class="text-muted ss-fs-2 ss-tabular me-1" id="dcp-readout">—</span>
+                ${edita ? `<button class="btn btn-sm ${_dcpMagnet ? 'btn-warning' : 'btn-secondary'}"
+                        onclick="_dcpMagnet=!_dcpMagnet;renderDcim()"
+                        title="${escAttr(t('dcim_magnet'))}" aria-label="${escAttr(t('dcim_magnet'))}">
+                    <i class="bi bi-magnet"></i></button>
+                <button class="btn btn-sm ${_dcpAir ? 'btn-warning' : 'btn-secondary'}"
+                        onclick="_dcpAir=!_dcpAir;renderDcim()"
+                        title="${escAttr(t('dcim_layer_air'))}" aria-label="${escAttr(t('dcim_layer_air'))}">
+                    <i class="bi bi-bezier2"></i></button>` : ''}
                 <!-- The native file input is a transparent, system-bordered control, which is
                      the one shape this panel does not use. So it is hidden behind a solid
                      button that opens it. -->
@@ -169,12 +191,12 @@ function _dcimPlanHtml() {
                        accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
                        onchange="_dcpUpload(this)">
                 <button class="btn btn-sm btn-secondary"
-                        onclick="document.getElementById('dcpPlanFile').click()">
-                    <i class="bi bi-image me-1"></i>${
-                        esc(t(room.plan ? 'dcim_plan_replace' : 'dcim_plan_upload'))}</button>
-                ${room.plan ? `<button class="btn btn-sm btn-warning"
-                        onclick="_dcpDropPlan()">
-                    <i class="bi bi-trash me-1"></i>${esc(t('dcim_plan_drop'))}</button>` : ''}
+                        onclick="document.getElementById('dcpPlanFile').click()"
+                        title="${escAttr(t(room.plan ? 'dcim_plan_replace' : 'dcim_plan_upload'))}">
+                    <i class="bi bi-image"></i></button>
+                ${room.plan ? `<button class="btn btn-sm btn-warning" onclick="_dcpDropPlan()"
+                        title="${escAttr(t('dcim_plan_drop'))}">
+                    <i class="bi bi-trash"></i></button>` : ''}
                 <input type="file" id="dcpImportFile" class="d-none"
                        accept=".json,application/json" onchange="_dcpImport(this)">
                 <button class="btn btn-sm ${_dc3d ? 'btn-warning' : 'btn-secondary'}"
@@ -183,7 +205,7 @@ function _dcimPlanHtml() {
                 <button class="btn btn-sm btn-secondary" onclick="_dcpExport()"
                         title="${escAttr(t('dcim_export'))}">
                     <i class="bi bi-filetype-json"></i></button>
-                ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary"
+                ${edita ? `<button class="btn btn-sm btn-secondary"
                         onclick="document.getElementById('dcpImportFile').click()"
                         title="${escAttr(t('dcim_import'))}">
                     <i class="bi bi-upload"></i></button>` : ''}
@@ -191,25 +213,29 @@ function _dcimPlanHtml() {
             </div>
         </div>
         ${_dc3d ? _dc3dHtml() : ''}
-        ${_dcpRowsHtml()}
         ${_dcpRowWarnings()}
-        ${_dcpDesignBar(room)}
-        ${_dcpPaletteHtml()}
-        ${_dcpSelectedHtml()}
-        ${`<div class="border rounded-3 overflow-hidden ss-infra-canvas
-                                      position-relative">
-            <div id="dcimPlanPanel" class="position-absolute ss-passthru"
-                 style="left:.5rem;bottom:.5rem;right:.5rem;z-index:2"></div>
-            <svg ${ssCanvasAttrs(_DCP_SVG, box)}
-                 onwheel="ssCanvasWheel(${jsStr(_DCP_SVG)},event)"
-                 onpointerdown="_dcpDown(event)" onpointermove="_dcpMove(event)"
-                 onpointerup="_dcpUp(event)" onpointercancel="_dcpUp(event)"
-                 onpointerleave="_dcpUp(event)"
-                 aria-label="${escAttr(t('dcim_plan'))}">
-                ${_dcpContent(racks)}
-            </svg>
-        </div>`}
-        <div class="text-muted ss-fs-3 mt-2">${esc(t('dcim_plan_hint'))}</div>
+        <div class="ss-editor">
+            <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
+                ${planta ? _dcpPaletteHtml() : ''}
+                <div id="dcimPlanPanel" class="position-absolute ss-passthru"
+                     style="left:.5rem;bottom:.5rem;right:.5rem;z-index:2"></div>
+                <div id="dcpSize" class="position-absolute d-none badge text-bg-warning ss-tabular"
+                     style="z-index:3;pointer-events:none"></div>
+                <div id="dcpFloat" class="position-absolute d-none"
+                     style="z-index:3;transform:translate(-100%,calc(-100% - 4px))"
+                     onpointerenter="_dcpFloatKeep()" onpointerleave="_dcpFloatLater()"></div>
+                <svg ${ssCanvasAttrs(_DCP_SVG, box)}
+                     onwheel="_dcpFloatHide();ssCanvasWheel(${jsStr(_DCP_SVG)},event)"
+                     onpointerdown="_dcpDown(event)" onpointermove="_dcpMove(event)"
+                     onpointerup="_dcpUp(event)" onpointercancel="_dcpUp(event)"
+                     onpointerleave="_dcpUp(event)"
+                     aria-label="${escAttr(t('dcim_plan'))}">
+                    ${planta ? _dcpContent(racks) : _dcpElevationSvg()}
+                </svg>
+            </div>
+            ${_dcpInspectorHtml()}
+        </div>
+        <div class="text-muted ss-fs-3 mt-1">${esc(t('dcim_plan_hint'))}</div>
     </div>`;
 }
 
@@ -227,36 +253,6 @@ function _dcpRowWarnings() {
             esc(tf('dcim_warn_hot_intake', w.label, w.aisle, w.other))}</div>`).join('')}</div>`;
 }
 
-/** Lo que hace falta para DISEÑAR la sala, separado de lo que hace falta para mirarla.
- *
- *  Las medidas de la sala están aquí y no en el formulario de la sala porque es aquí donde se
- *  descubre que hacen falta: se está colocando la tercera fila y hay que saber si llega. Un dato
- *  que solo se puede escribir en otra pantalla es un dato que nadie escribe.
- *
- *  El imán y la capa aérea son de la sesión, no de la sala: son cómo estoy mirando yo ahora
- *  mismo, y guardarlos le cambiaría la vista al siguiente que abra el plano. */
-function _dcpDesignBar(room) {
-    if (!_dcimMay('dcim_edit')) return '';
-    const medida = (name, label) =>
-        `<label class="ss-fs-2 text-muted">${esc(t(label))}
-            <input class="form-control form-control-sm ss-tabular" type="number" step="100"
-                   min="0" style="max-width:7rem" value="${escAttr(String(room[name] || 0))}"
-                   oninput="_dcpRoomSet(${jsStr(name)},this.value)"></label>`;
-    return `<div class="ss-toolrow mb-2">
-        ${medida('width_mm', 'dcim_room_width')}
-        ${medida('depth_mm', 'dcim_room_depth')}
-        ${medida('tile_mm', 'dcim_tile')}
-        <div class="ss-toolrow-tools">
-            <span class="text-muted ss-fs-2 ss-tabular me-1" id="dcp-readout">—</span>
-            <button class="btn btn-sm ${_dcpMagnet ? 'btn-warning' : 'btn-secondary'}"
-                    onclick="_dcpMagnet=!_dcpMagnet;renderDcim()">
-                <i class="bi bi-magnet me-1"></i>${esc(t('dcim_magnet'))}</button>
-            <button class="btn btn-sm ${_dcpAir ? 'btn-warning' : 'btn-secondary'}"
-                    onclick="_dcpAir=!_dcpAir;renderDcim()">
-                <i class="bi bi-bezier2 me-1"></i>${esc(t('dcim_layer_air'))}</button>
-        </div>
-    </div>`;
-}
 
 //: Las medidas de la sala se guardan cuando se para de teclear, como las de una pieza: en cada
 //: tecla serían cinco peticiones por «13000».
@@ -308,8 +304,12 @@ function _dcpExtent(racks) {
     // ponía la ventana en (-400,-400) con un tamaño de 96×72: mirando a un sitio donde no hay
     // nada. El dibujo salía entero y en su sitio, y la pantalla salía en blanco.
     const pad = _DCP.PAD * _DCP_SCALE;
-    return {x: -pad, y: -pad,
-            width: maxX * _DCP_SCALE + pad * 2,
+    // Y a la izquierda, sitio para la paleta, que flota sobre el lienzo: sin él tapaba el
+    // borde izquierdo de la sala y su cota. En proporción al ancho y no en píxeles, porque el
+    // marco está en unidades del dibujo y el encuadre lo escala a la pantalla. Solo si hay paleta.
+    const izq = pad + (_dcimMay('dcim_edit') ? (maxX * _DCP_SCALE + pad * 2) * 0.07 : 0);
+    return {x: -izq, y: -pad,
+            width: maxX * _DCP_SCALE + pad + izq,
             height: maxY * _DCP_SCALE + pad * 2};
 }
 
@@ -397,10 +397,11 @@ function _dcpRack(rack) {
     const rot = Number(rack.rotation || 0);
     const roll = rack.roll || {};
     const tone = roll.state ? deviceStateColor(roll.state) : 'var(--bs-secondary-bg)';
+    const puesto = _dcpSel && _dcpSel.kind === 'rack' && _dcpSel.uid === rack.uid;
     return `<g class="ss-grab" data-dcp="${escAttr(rack.uid)}"
                transform="rotate(${rot} ${x + w / 2} ${y + d / 2})"
-               onpointerenter="_dcpHover(${jsStr(rack.uid)})"
-               onpointerleave="_dcpHover('')">
+               onpointerenter="_dcpHover(${jsStr(rack.uid)});_dcpFloatShow(${jsStr(rack.uid)},this,'rack')"
+               onpointerleave="_dcpHover('');_dcpFloatLater()">
         <title>${escAttr(rack.name || rack.uid)}</title>
         <rect x="${x}" y="${y}" width="${w}" height="${d}" rx="1"
               fill="var(--bs-tertiary-bg)" stroke="${tone}" stroke-width="1.5"></rect>
@@ -408,12 +409,78 @@ function _dcpRack(rack) {
               fill="${tone}"></rect>
         <text x="${x + w / 2}" y="${y + d / 2 + 3}" font-size="7" text-anchor="middle"
               fill="currentColor">${esc(_dceClip(rack.name || '', 10))}</text>
+        ${puesto ? `<rect x="${x - 1}" y="${y - 1}" width="${w + 2}" height="${d + 2}" fill="none"
+            stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
+            vector-effect="non-scaling-stroke"></rect>` : ''}
     </g>`;
 }
 
 // ── Moving one, which writes to the server ──────────────────────────────────
 
 function _dcpDown(ev) {
+    _dcpFloatHide();
+    // De frente, pulsar selecciona, y arrastrar mueve lo que se ve: a lo largo de la pared, y
+    // un rack además arriba y abajo. La distancia a la pared no: de frente no se ve, y una mano
+    // que la cambiara sin verla movería las cosas a donde nadie las ha mirado.
+    if (_dcpView !== 'top') {
+        // Un asa antes que la cosa, igual que en planta: está dentro de ella.
+        const asa = ev.target.closest('[data-dcph]');
+        const ga = asa && asa.closest('g[data-dcpf], g[data-dcp]');
+        if (ga && _dcimMay('dcim_edit')) {
+            const rack = !ga.dataset.dcpf;
+            const uid = rack ? ga.dataset.dcp : ga.dataset.dcpf;
+            const o = rack ? _dcpRack1(uid) : _dcpFeatures().find(x => x.uid === uid);
+            const p = ssCanvasPoint(_DCP_SVG, ev);
+            if (o && p) {
+                _dcpDrag = {what: 'elevsize', kind: rack ? 'rack' : 'feature', uid, from: p,
+                            handle: asa.dataset.dcph, side: _dcpView, moved: false,
+                            rot: Number(o.rotation || 0), w0: Number(o.width_mm || 600),
+                            d0: Number(o.depth_mm || (rack ? 1000 : 600)),
+                            u0: Number(o.u_height) || 42, h0: rack ? 0 : _dcpPieceZ(o).h,
+                            at: {x: Number(o.pos_x || 0), y: Number(o.pos_y || 0)}};
+                ev.currentTarget.setPointerCapture?.(ev.pointerId);
+                return;
+            }
+        }
+        const g = ev.target.closest('g[data-dcpf], g[data-dcp]');
+        if (g) {
+            const rack = !g.dataset.dcpf;
+            const uid = rack ? g.dataset.dcp : g.dataset.dcpf;
+            _dcpSel = {kind: rack ? 'rack' : 'feature', uid};
+            const o = rack ? _dcpRack1(uid) : _dcpFeatures().find(x => x.uid === uid);
+            const p = ssCanvasPoint(_DCP_SVG, ev);
+            if (o && p && _dcimMay('dcim_edit')) {
+                _dcpDrag = {what: 'elev', kind: rack ? 'rack' : 'feature', uid, from: p,
+                            side: _dcpView, moved: false, rot: Number(o.rotation || 0),
+                            w: Number(o.width_mm || 600), d: Number(o.depth_mm || (rack ? 1000 : 600)),
+                            base: rack ? Math.max(0, Number(o.base_mm) || 0) : _dcpPieceZ(o).base,
+                            at: {x: Number(o.pos_x || 0), y: Number(o.pos_y || 0)}};
+                ev.currentTarget.setPointerCapture?.(ev.pointerId);
+            }
+            _dcpRedraw();
+            _dcpInspectorDraw();
+            return;
+        }
+        _dcpBlank = {x: ev.clientX, y: ev.clientY};
+        ssCanvasPanStart(_DCP_SVG, ev);
+        return;
+    }
+    // Un asa antes que la pieza: el asa está DENTRO de la pieza, y preguntar primero por la
+    // pieza convierte cada intento de estirarla en moverla.
+    const asa = ev.target.closest('[data-dcph]');
+    if (asa && _dcimMay('dcim_edit')) {
+        const g = asa.closest('g[data-dcpf]');
+        const f = g && _dcpFeatures().find(x => x.uid === g.dataset.dcpf);
+        const p = ssCanvasPoint(_DCP_SVG, ev);
+        if (f && p) {
+            _dcpDrag = {uid: f.uid, what: 'resize', handle: asa.dataset.dcph, moved: false,
+                        from: p, w0: Number(f.width_mm || 600), d0: Number(f.depth_mm || 600),
+                        rot: Number(f.rotation || 0),
+                        at: {x: Number(f.pos_x || 0), y: Number(f.pos_y || 0)}};
+            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+            return;
+        }
+    }
     // Una pieza de la sala: se coge igual que un rack, y por eso el arrastre es uno solo. Lo
     // que cambia es a qué tabla va lo que se suelte, y eso lo decide `_dcpUp`.
     const pieza = ev.target.closest('g[data-dcpf]');
@@ -443,21 +510,380 @@ function _dcpDown(ev) {
             return;
         }
     }
+    // En el suelo: lo que empieza aquí es desplazar el plano, o —si no se mueve— soltar lo
+    // seleccionado. Se apunta dónde se bajó el dedo para distinguir las dos al levantarlo.
+    _dcpBlank = {x: ev.clientX, y: ev.clientY};
     ssCanvasPanStart(_DCP_SVG, ev);
+}
+
+//: Dónde se pulsó el suelo del plano, o `null`. Pulsar fuera de todo es como se suelta una
+//: selección en cualquier editor; aquí solo lo hacía Escape.
+let _dcpBlank = null;
+
+/** Where the edge you SEE sits relative to the corner that is stored.
+ *
+ *  `pos_x`/`pos_y` are the corner of the UNturned box, and the turn is about its centre. Turned a
+ *  quarter, a 1000 × 120 door is drawn 440 mm to the right of its `pos_x`: clamping `pos_x ≥ 0`
+ *  kept it 44 cm off the wall — exactly where a door goes — and the magnet, lining up that
+ *  invisible corner with the tiles, never brought it to the edge either. Rounded to the
+ *  millimetre, or a turn of 90° stores -439.99999999999997. */
+function _dcpEdgeOffset(w, d, rot) {
+    const r = (Number(rot) || 0) * Math.PI / 180;
+    const c = Math.abs(Math.cos(r)), s = Math.abs(Math.sin(r));
+    return {x: Math.round((w - (w * c + d * s)) / 2),
+            y: Math.round((d - (w * s + d * c)) / 2)};
+}
+
+/** The stored corner after moving `dx`, `dy` millimetres: the VISIBLE edge is what snaps to the
+ *  magnet and what stops at the wall, and the corner follows from it. Unturned, the offset is
+ *  zero and this is the arithmetic it always was. */
+function _dcpPlace(at, dx, dy, w, d, rot) {
+    const o = _dcpEdgeOffset(w, d, rot);
+    return {x: Math.max(0, _dcpSnap(at.x + o.x + dx)) - o.x,
+            y: Math.max(0, _dcpSnap(at.y + o.y + dy)) - o.y};
+}
+
+/** The size being dragged, next to the piece being dragged.
+ *
+ *  Beside the corner the handles pull from, just outside it — the readout in the design bar is
+ *  a glance away from the hand, and a label INSIDE the piece is unreadable on a door 12 cm deep.
+ *  The piece's own width and depth, not the box on screen: turned, those are the numbers the
+ *  box fields will show. Recomputed after every redraw, because the redraw replaces the `<g>`. */
+function _dcpSizeShow(f) {
+    const tag = document.getElementById('dcpSize');
+    const svg = _dcimPlanSvg();
+    const g = svg && svg.querySelector(`g[data-dcpf="${CSS.escape(String(f.uid))}"]`);
+    const marco = g && g.closest('.ss-infra-canvas');
+    if (!tag || !marco) return;
+    tag.textContent = `${f.width_mm} × ${f.depth_mm} mm`;
+    tag.classList.remove('d-none');
+    const a = marco.getBoundingClientRect();
+    const b = g.getBoundingClientRect();
+    const izq = Math.min(b.right - a.left + 6, a.width - tag.offsetWidth - 4);
+    const arr = Math.min(b.bottom - a.top + 6, a.height - tag.offsetHeight - 4);
+    tag.style.left = `${Math.max(4, izq)}px`;
+    tag.style.top = `${Math.max(4, arr)}px`;
+}
+
+function _dcpSizeHide() {
+    const tag = document.getElementById('dcpSize');
+    if (tag) tag.classList.add('d-none');
+}
+
+/** Cambiar de vista: planta, o una pared de frente. El encuadre se olvida —el de la planta no
+ *  dice nada de una pared— y la barra flotante se esconde, que apuntaba a algo del otro dibujo. */
+function _dcpSetView(v) {
+    _dcpView = (v === 'top' || _DCP_SIDES.includes(v)) ? v : 'top';
+    ssCanvasReset(_DCP_SVG);
+    _dcpFloatHide();
+    renderDcim();
+}
+
+/** Girar a la pared de al lado: `+1` hacia la derecha de quien mira, `-1` hacia la izquierda. */
+function _dcpViewTurn(paso) {
+    const i = _DCP_SIDES.indexOf(_dcpView);
+    _dcpSetView(_DCP_SIDES[((i < 0 ? 0 : i) + paso + 4) % 4]);
+}
+
+function _dcpViewSwitcher() {
+    const planta = _dcpView === 'top';
+    const boton = (on, click, icono, texto) =>
+        `<button type="button" class="btn btn-sm ${on ? 'btn-warning' : 'btn-secondary'}"
+            onclick="${click}" title="${escAttr(texto)}" aria-label="${escAttr(texto)}">
+            <i class="bi ${icono}"></i></button>`;
+    return `<div class="btn-group btn-group-sm">
+            ${boton(planta, "_dcpSetView('top')", 'bi-grid-3x3', t('dcim_view_top'))}
+            ${boton(!planta, `_dcpSetView(${jsStr(planta ? 'N' : _dcpView)})`, 'bi-bricks',
+                    t('dcim_view_front'))}
+        </div>
+        ${planta ? '' : `<div class="btn-group btn-group-sm">
+            ${boton(false, '_dcpViewTurn(-1)', 'bi-chevron-left', t('dcim_wall_prev'))}
+            <span class="btn btn-sm btn-secondary disabled ss-tabular">${
+                esc(t('dcim_wall_' + _dcpView))}</span>
+            ${boton(false, '_dcpViewTurn(1)', 'bi-chevron-right', t('dcim_wall_next'))}
+        </div>`}`;
+}
+
+/** Lo alto de la sala para dibujarla de frente: el techo, o lo más alto que haya si algo pasa
+ *  de él —un rack de 48U colgado a 1,8 m—, que dibujado cortado mentiría sobre lo que cabe. */
+function _dcpElevationH() {
+    let h = typeof _DC3_ROOM_H === 'number' ? _DC3_ROOM_H : 3000;
+    for (const b of _dcpBoxes()) h = Math.max(h, b.y1);
+    return h;
+}
+
+/** Todo lo que hay en la sala como cajas en milímetros, con lo que se VE en planta —la caja
+ *  girada, no la guardada— y de qué altura a qué altura va. Es lo que necesita dibujarse de
+ *  frente, y lo que la lista de elementos recorre. */
+function _dcpBoxes() {
+    const kinds = _dcpKinds();
+    const out = [];
+    for (const r of ((_dcimPlan || {}).racks || [])) {
+        const w = Number(r.width_mm) || 600, d = Number(r.depth_mm) || 1000;
+        const o = _dcpEdgeOffset(w, d, r.rotation);
+        const x0 = (Number(r.pos_x) || 0) + o.x, z0 = (Number(r.pos_y) || 0) + o.y;
+        const y0 = Math.max(0, Number(r.base_mm) || 0);
+        out.push({kind: 'rack', uid: r.uid, name: r.name || '', x0, x1: x0 + w - 2 * o.x,
+                  z0, z1: z0 + d - 2 * o.y, y0, y1: y0 + (Number(r.u_height) || 42) * 44.45,
+                  tone: (r.roll || {}).state ? deviceStateColor(r.roll.state) : ''});
+    }
+    for (const f of _dcpFeatures()) {
+        const spec = kinds[f.kind] || {};
+        const w = Number(f.width_mm) || 600, d = Number(f.depth_mm) || 600;
+        const o = _dcpEdgeOffset(w, d, f.rotation);
+        const x0 = (Number(f.pos_x) || 0) + o.x, z0 = (Number(f.pos_y) || 0) + o.y;
+        const z = _dcpPieceZ(f);
+        out.push({kind: 'feature', uid: f.uid, what: f.kind, layer: spec.layer || 'room',
+                  name: f.label || t('dcim_kind_' + f.kind), x0, x1: x0 + w - 2 * o.x,
+                  z0, z1: z0 + d - 2 * o.y, y0: z.base, y1: z.base + z.h});
+    }
+    return out;
+}
+
+/** Lo largo de la pared que se mira, y de la sala en fondo desde ella. */
+function _dcpElevationSize(side) {
+    const room = (_dcimPlan || {}).room || {};
+    let W = Number(room.width_mm) || 0, D = Number(room.depth_mm) || 0;
+    for (const b of _dcpBoxes()) { W = Math.max(W, b.x1); D = Math.max(D, b.z1); }
+    W = W || 4000; D = D || 3000;
+    return {W, D, L: (side === 'N' || side === 'S') ? W : D, fondo: (side === 'N' || side === 'S') ? D : W};
+}
+
+/** Lo que se ve de frente desde dentro de la sala, mirando a `side`, del fondo hacia delante.
+ *
+ *  `u` es la distancia desde el rincón de la IZQUIERDA de quien mira —mirando al norte, la
+ *  izquierda es el oeste; mirando al sur, el este— y `dist`, a qué distancia de esa pared está.
+ *  Ordenado de lo más cercano a la pared a lo más lejano, que se pinta encima y más transparente:
+ *  un banco en medio de la sala no debe tapar lo que cuelga del muro, que es lo que se vino a
+ *  mirar, pero tampoco desaparecer. */
+function _dcpElevationItems(side) {
+    const {W, D} = _dcpElevationSize(side);
+    const air = typeof _dcpAir === 'undefined' ? true : _dcpAir;
+    return _dcpBoxes().filter(b => air || b.layer !== 'air').map(b => {
+        let u0, u1, dist;
+        if (side === 'N') { u0 = b.x0; u1 = b.x1; dist = b.z0; }
+        else if (side === 'S') { u0 = W - b.x1; u1 = W - b.x0; dist = D - b.z1; }
+        else if (side === 'E') { u0 = b.z0; u1 = b.z1; dist = W - b.x1; }
+        else { u0 = D - b.z1; u1 = D - b.z0; dist = b.x0; }
+        return Object.assign({}, b, {u0, u1, dist: Math.max(0, dist)});
+    }).sort((a, b) => a.dist - b.dist);
+}
+
+function _dcpElevationExtent() {
+    const {L} = _dcpElevationSize(_dcpView);
+    const pad = _DCP.PAD * _DCP_SCALE;
+    return {x: -pad * 2, y: -pad * 2, width: L * _DCP_SCALE + pad * 3,
+            height: _dcpElevationH() * _DCP_SCALE + pad * 3};
+}
+
+/** Una pared de frente: el muro, el suelo, una marca por metro de altura, y cada cosa de la
+ *  sala a la altura a la que está. */
+function _dcpElevationSvg() {
+    const side = _dcpView;
+    const {L, fondo} = _dcpElevationSize(side);
+    const H = _dcpElevationH(), S = _DCP_SCALE;
+    const y = (mm) => (H - mm) * S;
+    let h = `<rect x="0" y="0" width="${L * S}" height="${H * S}" fill="var(--bs-tertiary-bg)"
+                stroke="var(--bs-secondary-color)" stroke-width="1"
+                vector-effect="non-scaling-stroke"></rect>
+        <text x="${L * S / 2}" y="${-3}" font-size="5" text-anchor="middle"
+              fill="var(--bs-body-color)">${esc(t('dcim_wall_' + side))}</text>`;
+    for (let m = 1000; m < H; m += 1000) {
+        h += `<line x1="0" x2="${L * S}" y1="${y(m)}" y2="${y(m)}" stroke="var(--bs-border-color)"
+                  stroke-dasharray="2 3" vector-effect="non-scaling-stroke"></line>
+            <text x="-2" y="${y(m) + 1.3}" font-size="3.6" text-anchor="end"
+                  fill="var(--bs-secondary-color)">${m / 1000} m</text>`;
+    }
+    for (const it of _dcpElevationItems(side)) {
+        const x = it.u0 * S, w = Math.max(0.6, (it.u1 - it.u0) * S);
+        const top = y(it.y1), alto = Math.max(0.6, (it.y1 - it.y0) * S);
+        // Lo que está pegado a esta pared, macizo; lo que queda en medio o al fondo de la sala,
+        // cada vez más tenue.
+        const op = it.dist < 400 ? 1 : Math.max(0.25, 1 - it.dist / Math.max(fondo, 1));
+        const puesto = _dcpSel && _dcpSel.kind === it.kind && _dcpSel.uid === it.uid;
+        const look = it.kind === 'rack'
+            ? {fill: 'var(--bs-tertiary-bg)', line: it.tone || 'var(--bs-body-color)'}
+            : _dcpLook(it.what);
+        const attr = it.kind === 'rack' ? `data-dcp="${escAttr(it.uid)}"`
+                                        : `data-dcpf="${escAttr(it.uid)}"`;
+        const tam = Math.min(5, Math.max(2.6, Math.min(w, alto) * 0.3));
+        h += `<g ${attr} style="cursor:pointer" opacity="${op.toFixed(2)}">
+            <title>${esc(it.name)}</title>
+            <rect x="${x}" y="${top}" width="${w}" height="${alto}" rx=".6"
+                  fill="${look.fill === 'none' ? 'transparent' : look.fill}" stroke="${look.line === 'none' ? 'var(--bs-secondary-color)' : look.line}"
+                  stroke-width="1.2" vector-effect="non-scaling-stroke"></rect>
+            ${w > 6 && alto > 4 ? `<text x="${x + w / 2}" y="${top + alto / 2 + tam * 0.35}"
+                font-size="${tam}" text-anchor="middle"
+                fill="${look.dark ? 'var(--bs-dark)' : 'var(--bs-body-color)'}"
+                style="pointer-events:none">${esc(_dceClip(it.name, Math.max(3, Math.floor(w / (tam * 0.6)))))}</text>` : ''}
+            ${puesto ? `<rect x="${x - 1}" y="${top - 1}" width="${w + 2}" height="${alto + 2}"
+                fill="none" stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
+                vector-effect="non-scaling-stroke"></rect>` : ''}
+            ${puesto && _dcimMay('dcim_edit') ? _dcpElevHandles(it, x, top, w, alto) : ''}
+        </g>`;
+    }
+    // El suelo, encima de todo: es la línea desde la que se lee cada altura.
+    h += `<line x1="${-_DCP.PAD * S}" x2="${(L + _DCP.PAD) * S}" y1="${H * S}" y2="${H * S}"
+              stroke="var(--bs-body-color)" stroke-width="2" vector-effect="non-scaling-stroke"></line>`;
+    return h;
+}
+
+/** Lo que cambia al arrastrar de frente `du` milímetros a lo largo de la pared (positivo, hacia
+ *  la derecha de quien mira) y `dh` hacia arriba.
+ *
+ *  A lo largo de la pared es el eje del plano que corre paralelo a ella, con el signo de quien
+ *  mira: de frente al norte la derecha es el este, de frente al sur es el oeste. Pasa por
+ *  `_dcpPlace`, así que el imán y el tope de la pared son los mismos que en planta — y solo se
+ *  toca ese eje: el otro, la distancia a la pared, no se ve desde aquí. Y la altura desde el
+ *  suelo, en un rack y en una pieza: a pasos de 50 mm y nunca bajo el suelo. */
+function _dcpElevApply(g, du, dh) {
+    const eje = (g.side === 'N' || g.side === 'S') ? 'x' : 'y';
+    const signo = (g.side === 'N' || g.side === 'E') ? 1 : -1;
+    const pl = _dcpPlace(g.at, eje === 'x' ? signo * du : 0, eje === 'y' ? signo * du : 0,
+                         g.w, g.d, g.rot);
+    const out = eje === 'x' ? {pos_x: pl.x, pos_y: g.at.y} : {pos_x: g.at.x, pos_y: pl.y};
+    if (g.base !== null && g.base !== undefined)
+        out.base_mm = Math.max(0, Math.round((g.base + dh) / 50) * 50);
+    return out;
+}
+
+//: Hacia dónde queda, en el suelo, la DERECHA de quien mira cada pared desde dentro.
+const _DCP_RIGHT = {N: [1, 0], S: [-1, 0], E: [0, 1], W: [0, -1]};
+
+/** El lado de la pieza que mira hacia `dir` en el suelo —`e`, `w`, `n` o `s`, en el marco de
+ *  la pieza—, o `''` si ninguno lo hace: girada 45°, no hay lado que dé a la pared de frente, y
+ *  un asa que estirase dos medidas a la vez haría otra cosa que la que se ve. */
+function _dcpFacing(rot, dir) {
+    const r = (Number(rot) || 0) * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+    const lados = {e: [c, s], w: [-c, -s], s: [-s, c], n: [s, -c]};
+    for (const [k, v] of Object.entries(lados))
+        if (v[0] * dir[0] + v[1] * dir[1] > 0.99) return k;
+    return '';
+}
+
+/** Las asas de lo seleccionado, de frente: los dos lados, si alguno da de frente a la pared, y
+ *  arriba en un rack. Dentro de su `<g>`, en unidades del dibujo. */
+function _dcpElevHandles(it, x, top, w, alto) {
+    const t = Math.max(2.4, Math.min(4, Math.min(w, alto) * 0.45));
+    const asa = (id, cx, cy, cursor) => `<rect data-dcph="${id}" x="${cx - t / 2}" y="${cy - t / 2}"
+        width="${t}" height="${t}" rx=".6" fill="var(--bs-warning)" stroke="var(--bs-dark)"
+        stroke-width="1" vector-effect="non-scaling-stroke" style="cursor:${cursor}"></rect>`;
+    const o = it.kind === 'rack' ? _dcpRack1(it.uid) : _dcpFeatures().find(f => f.uid === it.uid);
+    const lados = o && _dcpFacing(o.rotation, _DCP_RIGHT[_dcpView]) !== '';
+    return (lados ? asa('el', x, top + alto / 2, 'ew-resize') + asa('er', x + w, top + alto / 2, 'ew-resize') : '')
+         + asa('et', x + w / 2, top, 'ns-resize');
+}
+
+/** Lo que cambia al estirar de frente `du` mm a lo largo de la pared y `dh` hacia arriba.
+ *
+ *  Los lados, por la misma cuenta que en planta (`_dcpResize`): se busca qué lado de la pieza da
+ *  a la derecha —o a la izquierda— de quien mira, y se estira ese con el movimiento pasado al
+ *  suelo. Así el lado contrario se queda donde se ve, la pieza no resbala aunque esté girada, y
+ *  el imán y el mínimo son los de siempre. Arriba, su alto: en un rack en U, en una pieza en
+ *  milímetros. */
+function _dcpElevResize(g, du, dh) {
+    if (g.handle === 'et') {
+        // Un rack, de U en U, que es como se compran; una pieza, a pasos de 50 mm. Nunca menos
+        // de una U ni de 50 mm: algo de alto cero no hay quien lo vuelva a coger.
+        return g.kind === 'rack' ? {u_height: Math.max(1, Math.round(g.u0 + dh / 44.45))}
+                                 : {height_mm: Math.max(50, Math.round((g.h0 + dh) / 50) * 50)};
+    }
+    const der = _DCP_RIGHT[g.side];
+    const dir = g.handle === 'er' ? der : [-der[0], -der[1]];
+    const local = _dcpFacing(g.rot, dir);
+    if (!local) return {};
+    return _dcpResize({handle: local, w0: g.w0, d0: g.d0, rot: g.rot, at: g.at},
+                      der[0] * du, der[1] * du);
+}
+
+/** The new size and corner after dragging a resize handle `dx`, `dy` millimetres.
+ *
+ *  The handle is one of eight: `n`, `s`, `e`, `w` and the four corners between them. What it
+ *  moves is the side it sits on; what stays put is the side or corner OPPOSITE, where it is
+ *  seen. The drag is turned back into the piece's frame first, or pulling a door turned a
+ *  quarter would change the other measure. And the stored corner has to be recomputed, because
+ *  the turn is about the centre and the centre moves when the size does. Sizes go through the
+ *  magnet like positions, and never below 50 mm: a piece of zero cannot be grabbed again. */
+function _dcpResize(g, dx, dy) {
+    const r = (Number(g.rot) || 0) * Math.PI / 180;
+    const c = Math.cos(r), s = Math.sin(r);
+    const lx = dx * c + dy * s, ly = -dx * s + dy * c;
+    const h = String(g.handle || '');
+    // Which way each axis grows (+1 right/down, -1 left/up, 0 untouched)…
+    const gx = h.includes('e') ? 1 : (h.includes('w') ? -1 : 0);
+    const gy = h.includes('s') ? 1 : (h.includes('n') ? -1 : 0);
+    const w = gx ? Math.max(50, _dcpSnap(g.w0 + gx * lx)) : g.w0;
+    const d = gy ? Math.max(50, _dcpSnap(g.d0 + gy * ly)) : g.d0;
+    // …and the anchor is the opposite side, in the piece's frame, from its centre.
+    const turn = (x, y) => [x * c - y * s, x * s + y * c];
+    const [a0x, a0y] = turn(-gx * g.w0 / 2, -gy * g.d0 / 2);
+    const ax = g.at.x + g.w0 / 2 + a0x, ay = g.at.y + g.d0 / 2 + a0y;
+    const [a1x, a1y] = turn(-gx * w / 2, -gy * d / 2);
+    return {width_mm: w, depth_mm: d,
+            pos_x: Math.round(ax - a1x - w / 2), pos_y: Math.round(ay - a1y - d / 2)};
 }
 
 function _dcpMove(ev) {
     // La posición bajo el puntero, siempre: es lo que se lee en la barra mientras se coloca, y
     // «B7» es lo que alguien dirá por teléfono cuando esté dentro de la sala.
     const bajo = ssCanvasPoint(_DCP_SVG, ev);
+    if (_dcpDrag && _dcpDrag.what === 'elevsize') {
+        const o = _dcpDrag.kind === 'rack' ? _dcpRack1(_dcpDrag.uid)
+                                           : _dcpFeatures().find(x => x.uid === _dcpDrag.uid);
+        if (!bajo || !o) return;
+        Object.assign(o, _dcpElevResize(_dcpDrag, (bajo.x - _dcpDrag.from.x) / _DCP_SCALE,
+                                        -(bajo.y - _dcpDrag.from.y) / _DCP_SCALE));
+        _dcpDrag.moved = true;
+        const el = document.getElementById('dcp-readout');
+        if (el) el.textContent = _dcpDrag.handle !== 'et' ? `${o.width_mm} × ${o.depth_mm} mm`
+            : (_dcpDrag.kind === 'rack' ? `${o.u_height} U` : `↕ ${o.height_mm} mm`);
+        _dcpRedraw();
+        return;
+    }
+    if (_dcpDrag && _dcpDrag.what === 'elev') {
+        const o = _dcpDrag.kind === 'rack' ? _dcpRack1(_dcpDrag.uid)
+                                           : _dcpFeatures().find(x => x.uid === _dcpDrag.uid);
+        if (!bajo || !o) return;
+        Object.assign(o, _dcpElevApply(_dcpDrag, (bajo.x - _dcpDrag.from.x) / _DCP_SCALE,
+                                       -(bajo.y - _dcpDrag.from.y) / _DCP_SCALE));
+        _dcpDrag.moved = true;
+        const el = document.getElementById('dcp-readout');
+        if (el) el.textContent = _dcpDrag.kind === 'rack'
+            ? `↑ ${((Number(o.base_mm) || 0) / 1000).toFixed(2)} m` : '';
+        _dcpRedraw();
+        return;
+    }
+    if (_dcpView !== 'top') {
+        // De frente, lo que se lee es a qué distancia del rincón y a qué altura.
+        const el = document.getElementById('dcp-readout');
+        if (el && bajo) el.textContent = `${(bajo.x / _DCP_SCALE / 1000).toFixed(2)} m · ↑ ${
+            ((_dcpElevationH() - bajo.y / _DCP_SCALE) / 1000).toFixed(2)} m`;
+        return ssCanvasPanMove(_DCP_SVG, ev);
+    }
     if (bajo && !_dcpDrag) _dcpReadout(bajo.x / _DCP_SCALE, bajo.y / _DCP_SCALE);
 
+    if (_dcpDrag && _dcpDrag.what === 'resize') {
+        const p = ssCanvasPoint(_DCP_SVG, ev);
+        const f = _dcpFeatures().find(x => x.uid === _dcpDrag.uid);
+        if (!p || !f) return;
+        Object.assign(f, _dcpResize(_dcpDrag, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
+                                    (p.y - _dcpDrag.from.y) / _DCP_SCALE));
+        _dcpDrag.moved = true;
+        const el = document.getElementById('dcp-readout');
+        if (el) el.textContent = `${f.width_mm} × ${f.depth_mm} mm`;
+        _dcpRedraw();
+        _dcpSizeShow(f);
+        return;
+    }
     if (_dcpDrag && _dcpDrag.what === 'feature') {
         const p = ssCanvasPoint(_DCP_SVG, ev);
         const f = _dcpFeatures().find(x => x.uid === _dcpDrag.uid);
         if (!p || !f) return;
-        f.pos_x = Math.max(0, _dcpSnap(_dcpDrag.at.x + (p.x - _dcpDrag.from.x) / _DCP_SCALE));
-        f.pos_y = Math.max(0, _dcpSnap(_dcpDrag.at.y + (p.y - _dcpDrag.from.y) / _DCP_SCALE));
+        const sitio = _dcpPlace(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
+                                (p.y - _dcpDrag.from.y) / _DCP_SCALE,
+                                Number(f.width_mm || 600), Number(f.depth_mm || 600), f.rotation);
+        f.pos_x = sitio.x;
+        f.pos_y = sitio.y;
         _dcpDrag.moved = true;
         _dcpReadout(f.pos_x + Number(f.width_mm) / 2, f.pos_y + Number(f.depth_mm) / 2);
         _dcpRedraw();
@@ -471,8 +897,12 @@ function _dcpMove(ev) {
         // Back to millimetres: the drawing is in scaled units and the RECORD is in the units
         // the room is measured in. Storing pixels would make the plan unreadable the day the
         // scale changes, and the scale is a decision about drawing, not about the room.
-        rack.pos_x = Math.max(0, _dcpSnap(_dcpDrag.at.x + (p.x - _dcpDrag.from.x) / _DCP_SCALE));
-        rack.pos_y = Math.max(0, _dcpSnap(_dcpDrag.at.y + (p.y - _dcpDrag.from.y) / _DCP_SCALE));
+        const sitio = _dcpPlace(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
+                                (p.y - _dcpDrag.from.y) / _DCP_SCALE,
+                                Number(rack.width_mm || 600), Number(rack.depth_mm || 1000),
+                                rack.rotation);
+        rack.pos_x = sitio.x;
+        rack.pos_y = sitio.y;
         _dcpDrag.moved = true;
         _dcpReadout(rack.pos_x + Number(rack.width_mm || 600) / 2,
                     rack.pos_y + Number(rack.depth_mm || 1000) / 2);
@@ -483,21 +913,93 @@ function _dcpMove(ev) {
 }
 
 async function _dcpUp(ev) {
+    _dcpSizeHide();
     const drag = _dcpDrag;
+    if (drag && drag.what === 'elevsize') {
+        _dcpDrag = null;
+        ssCanvasPanEnd(ev);
+        if (!drag.moved) return;
+        const o = drag.kind === 'rack' ? _dcpRack1(drag.uid)
+                                       : _dcpFeatures().find(x => x.uid === drag.uid);
+        if (!o) return;
+        const cuerpo = drag.handle !== 'et'
+            ? {width_mm: o.width_mm, depth_mm: o.depth_mm, pos_x: o.pos_x, pos_y: o.pos_y}
+            : (drag.kind === 'rack' ? {u_height: o.u_height} : {height_mm: o.height_mm});
+        const r = await _dcimSend('PUT', `/api/v1/dcim/${drag.kind === 'rack' ? 'racks' : 'features'}/${
+            encodeURIComponent(drag.uid)}`, cuerpo);
+        if (!r.ok) {
+            showToast(r.error || t('save_failed'), 'danger');
+            return _dcimOpenPlan(_dcimPlan.room.uid);
+        }
+        return _dcpInspectorDraw();
+    }
+    if (drag && drag.what === 'elev') {
+        _dcpDrag = null;
+        ssCanvasPanEnd(ev);
+        if (!drag.moved) return;
+        const o = drag.kind === 'rack' ? _dcpRack1(drag.uid)
+                                       : _dcpFeatures().find(x => x.uid === drag.uid);
+        if (!o) return;
+        const cuerpo = {pos_x: o.pos_x, pos_y: o.pos_y, base_mm: o.base_mm};
+        const r = await _dcimSend('PUT', `/api/v1/dcim/${drag.kind === 'rack' ? 'racks' : 'features'}/${
+            encodeURIComponent(drag.uid)}`, cuerpo);
+        if (!r.ok) {
+            showToast(r.error || t('save_failed'), 'danger');
+            return _dcimOpenPlan(_dcimPlan.room.uid);     // back to where the server has it
+        }
+        return _dcpInspectorDraw();
+    }
     _dcpDrag = null;
     ssCanvasPanEnd(ev);
-    if (!drag) return;
+    const suelo = _dcpBlank;
+    _dcpBlank = null;
+    if (!drag) {
+        // Un toque en el suelo que no desplazó el plano: soltar la pieza. Cuatro píxeles de
+        // margen, que es lo que tiembla una mano; más, y lo que se quería era mover el plano.
+        const quieto = suelo && ev.type === 'pointerup'
+            && Math.hypot(ev.clientX - suelo.x, ev.clientY - suelo.y) < 4;
+        if (quieto && _dcpSel) _dcpDeselect();
+        return;
+    }
+    if (drag.what === 'resize') {
+        const f = _dcpFeatures().find(x => x.uid === drag.uid);
+        if (!f || !drag.moved) return renderDcim();
+        const r = await _dcimSend('PUT', `/api/v1/dcim/features/${encodeURIComponent(f.uid)}`,
+                                  {width_mm: f.width_mm, depth_mm: f.depth_mm,
+                                   pos_x: f.pos_x, pos_y: f.pos_y});
+        if (!r.ok) {
+            showToast(r.error || t('save_failed'), 'danger');
+            return _dcimOpenPlan(_dcimPlan.room.uid);   // back to the size the server has
+        }
+        // The inspector's width and depth fields have to say what the piece now measures.
+        return _dcpInspectorDraw();
+    }
     if (drag.what === 'feature') {
         const f = _dcpFeatures().find(x => x.uid === drag.uid);
         if (!f) return;
-        // Una pulsación que no viajó es una selección: AHORA se puede repintar la pantalla,
-        // porque ya no hay ninguna mano encima del dibujo, y así aparece el panel de la pieza.
-        if (!drag.moved) return renderDcim();
+        // Una pulsación que no viajó es una selección: el contorno y las asas se pintaron al bajar
+        // el dedo, y lo que queda es que el inspector hable de ESTA pieza. Solo el inspector: la
+        // pantalla entera rehace el dibujo y lo que se estaba mirando.
+        if (!drag.moved) return _dcpInspectorDraw();
+        _dcpInspectorDraw();
         return _dcpSave(f.uid, {pos_x: f.pos_x, pos_y: f.pos_y});
     }
     const rack = (_dcimPlan.racks || []).find(r => r.uid === drag.uid);
     if (!rack) return;
-    if (!drag.moved) return _dcimLoadRack(rack.uid);     // a press that did not travel = open it
+    // A press that did not travel used to OPEN the rack, which took you out of the plan for
+    // every mis-aimed click. It shows the rack's bar instead — opening is one of its buttons —
+    // which is also the only way to reach that bar on a screen without a pointer to hover.
+    if (!drag.moved) {
+        // Seleccionarlo, como una pieza: marcado en el plano y con sus campos en el inspector.
+        // Solo sacaba su barra flotante, así que las mesas y las puertas se editaban desde el
+        // inspector y el rack —lo que más se toca de una sala— no.
+        _dcpSel = {kind: 'rack', uid: rack.uid};
+        _dcpRedraw();
+        _dcpInspectorDraw();
+        // Y su barra, que en una pantalla sin ratón es la única forma de llegar a ella.
+        const g = _dcimPlanSvg()?.querySelector(`g[data-dcp="${CSS.escape(String(rack.uid))}"]`);
+        return _dcpFloatShow(rack.uid, g, 'rack');
+    }
     // …and where it ended up goes to the SERVER. Not the browser's arrangement store: a rack
     // stands in one place for everybody, and the next person to open this plan must see where
     // it actually is.
@@ -507,6 +1009,7 @@ async function _dcpUp(ev) {
         showToast(r.error || t('save_failed'), 'danger');
         return _dcimOpenPlan(_dcimPlan.room.uid);        // put it back where the server has it
     }
+    _dcpInspectorDraw();                                 // its X and Y, where it now is
 }
 
 /** Turn a rack a quarter turn. Its own control and not a drag gesture: rotating by dragging is
@@ -540,7 +1043,7 @@ function _dcpReadout(mmX, mmY) {
 function _dcpRedraw() {
     const svg = _dcimPlanSvg();
     if (!svg || !_dcimPlan) return;
-    svg.innerHTML = _dcpContent(_dcimPlan.racks || []);
+    svg.innerHTML = _dcpView === 'top' ? _dcpContent(_dcimPlan.racks || []) : _dcpElevationSvg();
 }
 
 //: What the pointer is on.
@@ -564,7 +1067,9 @@ function _dcpCard() {
             ${_dcimRollBadge(rack.roll)}
             ${_dcimOrgBadge(rack.org_uid)}
             <span class="text-muted ss-fs-3 ss-tabular">${esc(String(rack.u_height || ''))}U ·
-                ${esc(String(rack.width_mm || 600))}×${esc(String(rack.depth_mm || 1000))} mm</span>
+                ${esc(String(rack.width_mm || 600))}×${esc(String(rack.depth_mm || 1000))} mm${
+                Number(rack.base_mm) > 0 ? ` · ${esc(tf('dcim_rack_wall_at',
+                    (Number(rack.base_mm) / 1000).toFixed(2)))}` : ''}</span>
             <button class="btn btn-sm btn-secondary py-0 px-2"
                 onclick="_dcimLoadRack(${jsStr(rack.uid)})">${esc(t('dcim_open_rack'))}</button>
             ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-secondary py-0 px-2"

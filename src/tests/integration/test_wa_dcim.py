@@ -1193,6 +1193,24 @@ class TestLlevarseElPlanoYTraerlo:
         assert (rack['pos_x'], rack['pos_y'], rack['rotation']) == (2400, 1200, 90)
         assert rack['u_height'] == 42, 'la altura de un rack existente no la decide un fichero'
 
+    def test_la_altura_de_un_rack_de_pared_viaja_con_el_plano(self, client, fleet):
+        """A qué altura cuelga es parte de DÓNDE está, igual que la posición."""
+        _login(client)
+        plano = self._plano(racks=[{'name': 'R3', 'pos_x': 0, 'pos_y': 0, 'base_mm': 1800}])
+        client.post(f'/api/v1/dcim/rooms/{fleet["room"]}/import', json=plano)
+        rack = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}').get_json()['rack']
+        assert rack['base_mm'] == 1800
+
+    def test_y_un_fichero_que_no_la_dice_no_lo_baja_al_suelo(self, client, fleet):
+        """Un plano exportado antes de que existiera la altura no sabe nada de ella. Leer su
+        silencio como «en el suelo» bajaría al suelo un rack que alguien había colgado."""
+        _login(client)
+        client.put(f'/api/v1/dcim/racks/{fleet["rack"]}', json={'base_mm': 1200})
+        plano = self._plano(racks=[{'name': 'R3', 'pos_x': 600, 'pos_y': 0}])
+        client.post(f'/api/v1/dcim/rooms/{fleet["room"]}/import', json=plano)
+        rack = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}').get_json()['rack']
+        assert rack['pos_x'] == 600 and rack['base_mm'] == 1200
+
     def test_un_rack_que_no_existe_se_crea(self, client, fleet):
         _login(client)
         plano = self._plano(racks=[{'name': 'R9', 'pos_x': 0, 'pos_y': 0, 'u_height': 24}])

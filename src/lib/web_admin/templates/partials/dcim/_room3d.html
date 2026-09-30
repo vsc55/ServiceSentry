@@ -34,7 +34,47 @@ function _dcimToggle3d() {
     renderDcim();
 }
 
+/** El visor a pantalla completa, y de vuelta.
+ *
+ *  26 rem dan para asomarse, no para moverse por una sala. Pantalla completa del navegador y no
+ *  otra sección: al salir —Esc, o el mismo botón— se está exactamente donde se estaba, con la
+ *  cámara donde se dejó, porque es el mismo lienzo el que crece. Donde no hay pantalla completa
+ *  (Safari en iPhone), el visor ocupa la ventana con `.ss-fill-screen`, que es lo más que se
+ *  puede. El lienzo se ajusta solo: mide su tamaño en cada fotograma. */
+function _dc3dFull() {
+    const box = document.getElementById('dc3d-box');
+    if (!box) return;
+    const dentro = document.fullscreenElement === box || box.classList.contains('ss-fill-screen');
+    if (dentro) {
+        if (document.fullscreenElement) document.exitFullscreen?.();
+        box.classList.remove('ss-fill-screen');
+    } else if (box.requestFullscreen) {
+        box.requestFullscreen().catch(() => box.classList.add('ss-fill-screen'));
+    } else {
+        box.classList.add('ss-fill-screen');
+    }
+    // El teclado, al lienzo: a pantalla completa lo primero que se quiere es andar.
+    setTimeout(() => { document.getElementById('dc3d-canvas')?.focus({preventScroll: true});
+                       _dc3dFullIcon(); }, 50);
+}
+
+/** El icono del botón dice lo que hará: ampliar o salir. Se repinta también cuando se sale con
+ *  Esc, que el navegador resuelve sin preguntar a nadie. */
+function _dc3dFullIcon() {
+    const box = document.getElementById('dc3d-box');
+    const i = document.querySelector('#dc3d-full i');
+    if (!box || !i) return;
+    const dentro = document.fullscreenElement === box || box.classList.contains('ss-fill-screen');
+    i.className = 'bi ' + (dentro ? 'bi-fullscreen-exit' : 'bi-arrows-fullscreen');
+}
+document.addEventListener('fullscreenchange', _dc3dFullIcon);
+
 function _dc3dStop() {
+    // Cerrar el visor desde dentro de la pantalla completa no debe dejar al navegador en ella
+    // con el lienzo ya desaparecido: una pantalla negra de la que solo se sale sabiendo que Esc
+    // funciona.
+    if (document.fullscreenElement && document.fullscreenElement.id === 'dc3d-box')
+        document.exitFullscreen?.();
     if (_dc3d && _dc3d.raf) cancelAnimationFrame(_dc3d.raf);
     if (_dc3d && _dc3d.gl) {
         // Soltar el contexto a propósito: un navegador aguanta unos pocos contextos WebGL vivos
@@ -47,11 +87,15 @@ function _dc3dStop() {
 }
 
 function _dc3dHtml() {
-    return `<div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative mb-3"
+    return `<div id="dc3d-box" class="border rounded-3 overflow-hidden ss-infra-canvas position-relative mb-3"
                  style="height:26rem">
-        <canvas id="dc3d-canvas" style="display:block;width:100%;height:100%;
-                touch-action:none;cursor:grab"
-                onwheel="_dc3dWheel(event)"
+        <button type="button" class="btn btn-sm btn-secondary position-absolute" id="dc3d-full"
+                style="top:.5rem;right:.5rem;z-index:2" onclick="_dc3dFull()"
+                title="${escAttr(t('dcim_3d_full'))}" aria-label="${escAttr(t('dcim_3d_full'))}">
+            <i class="bi bi-arrows-fullscreen"></i></button>
+        <canvas id="dc3d-canvas" tabindex="0" style="display:block;width:100%;height:100%;
+                touch-action:none;cursor:grab;outline:none"
+                onwheel="_dc3dWheel(event)" onkeydown="_dc3dKey(event)"
                 onpointerdown="_dc3dDown(event)" onpointermove="_dc3dMove(event)"
                 onpointerup="_dc3dUp(event)" onpointercancel="_dc3dUp(event)"
                 oncontextmenu="return false"></canvas>
@@ -93,18 +137,23 @@ void main(){
   gl_Position = uMVP * uModel * vec4(aPos, 1.0);
 }`;
 
-// Iluminación de mentira y a propósito: una direccional fija más un suelo de luz ambiente. Lo
-// que hace legible una caja no es de dónde viene la luz, es que sus tres caras visibles se
-// distingan entre sí — y eso lo da cualquier normal con cualquier dirección.
+// Tres luces baratas, y ninguna sombra. Una principal desde arriba y delante, que es la que
+// separa las tres caras visibles de una caja; un relleno desde el lado contrario, para que la
+// cara que la principal no toca no se quede en negro; y un ambiente de cielo y suelo —más claro
+// mirando arriba que abajo—, que es lo que hace que un techo de rack no se lea igual que su
+// costado. Con una sola luz direccional y colores de 0,1, la sala entera salía negra sobre
+// negro: se veía el contorno de lo amarillo y nada más.
 const _DC3_FS = `
 precision mediump float;
 uniform vec4 uColor;
 varying vec3 vNor;
 void main(){
   vec3 n = normalize(vNor);
-  float d = max(dot(n, normalize(vec3(0.45, 0.8, 0.35))), 0.0);
-  float l = 0.45 + 0.55 * d;
-  gl_FragColor = vec4(uColor.rgb * l, uColor.a);
+  float key = max(dot(n, normalize(vec3(0.45, 0.85, 0.30))), 0.0);
+  float fill = max(dot(n, normalize(vec3(-0.60, 0.35, -0.50))), 0.0);
+  float sky = 0.5 + 0.5 * n.y;
+  float l = 0.32 + 0.22 * sky + 0.55 * key + 0.20 * fill;
+  gl_FragColor = vec4(min(uColor.rgb * l, vec3(1.0)), uColor.a);
 }`;
 
 // ── Matrices, las cuatro que hacen falta ─────────────────────────────────────
@@ -135,15 +184,20 @@ function _dc3lookAt(ojo, mira) {
         -(z[0] * ojo[0] + z[1] * ojo[1] + z[2] * ojo[2]), 1]);
 }
 
-function _dc3model(x, y, z, w, h, d, rotDeg) {
-    // Escalar, girar en Y, y llevar al sitio. En este orden y no en otro: girar después de
-    // mover haría que cada caja orbitase alrededor de la esquina de la sala.
+function _dc3model(x, y, z, w, h, d, rotDeg, pivot) {
+    // La caja `x..x+w` × `z..z+d`, girada en Y alrededor de `pivot` —su propio centro si no se
+    // dice otro—, como gira en el plano: `pos_x`/`pos_y` son la esquina de la caja SIN girar y
+    // el giro va sobre el centro. Girándola sobre la esquina, cualquier pieza girada salía en
+    // otro sitio que en planta, y una puerta pegada a la pared —esquina en -440 mm— se
+    // despegaba 44 cm de ella. Y en el mismo sentido que el plano: al revés, lo que en planta
+    // mira a la derecha miraba a la izquierda.
     const a = (rotDeg || 0) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    const px = pivot ? pivot[0] : x + w / 2, pz = pivot ? pivot[1] : z + d / 2;
     return new Float32Array([
-        w * c, 0, w * -s, 0,
+        w * c, 0, w * s, 0,
         0, h, 0, 0,
-        d * s, 0, d * c, 0,
-        x, y, z, 1]);
+        -d * s, 0, d * c, 0,
+        px + (x - px) * c - (z - pz) * s, y, pz + (x - px) * s + (z - pz) * c, 1]);
 }
 
 const _dc3cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
@@ -159,13 +213,14 @@ const _dc3norm = (v) => {
 //: una sala real se ve a través de ellos, y un pasillo confinado opaco esconde justo la fila de
 //: racks que se quería mirar.
 const _DC3_COLOR = {
-    floor: [0.14, 0.15, 0.17, 1], wallroom: [0.10, 0.11, 0.13, 1],
-    rack:  [0.10, 0.11, 0.14, 1],
+    floor: [0.30, 0.32, 0.35, 1], wallroom: [0.22, 0.24, 0.27, 1],
+    tile: [0.40, 0.42, 0.46, 1],
+    rack:  [0.20, 0.22, 0.26, 1],
     aisle: [0.62, 0.68, 1.00, 0.16], zone: [0.35, 0.38, 0.43, 0.35],
-    column: [0.06, 0.07, 0.09, 1], wall: [0.60, 0.66, 1.00, 0.22],
+    column: [0.36, 0.37, 0.40, 1], wall: [0.60, 0.66, 1.00, 0.22],
     door: [0.95, 0.76, 0.05, 1], panel: [0.82, 0.80, 0.74, 1],
-    ups: [0.18, 0.20, 0.24, 1], crac: [0.10, 0.24, 0.28, 1],
-    bench: [0.24, 0.20, 0.16, 1], extinguisher: [0.62, 0.12, 0.12, 1],
+    ups: [0.30, 0.32, 0.37, 1], crac: [0.20, 0.44, 0.50, 1],
+    bench: [0.46, 0.37, 0.27, 1], extinguisher: [0.72, 0.16, 0.16, 1],
     tray: [0.95, 0.76, 0.05, 0.85], label: [0.35, 0.38, 0.43, 0.5],
 };
 
@@ -188,17 +243,33 @@ function _dc3dScene() {
     const D = (Number(room.depth_mm) || 0) * M;
     const H = _DC3_ROOM_H * M;
     const cajas = [];
-    const push = (color, x, y, z, w, h, d, rot, lee) =>
-        cajas.push({color, m: _dc3model(x, y, z, w, h, d, rot), lee});
+    const push = (color, x, y, z, w, h, d, rot, lee, pivot) =>
+        cajas.push({color, m: _dc3model(x, y, z, w, h, d, rot, pivot), lee});
 
     // El suelo, del tamaño de la sala si alguien lo dijo y del de lo que hay si no: una sala sin
     // medidas dibujada sobre la nada deja los racks flotando.
     const cx = W || 12, cz = D || 8;
     push(_DC3_COLOR.floor, 0, -0.02, 0, cx, 0.02, cz, 0, null);
-    // Y dos muros, los del fondo: los cuatro taparían la vista desde fuera, que es desde donde
-    // se mira esto.
-    push(_DC3_COLOR.wallroom, 0, 0, -0.06, cx, H, 0.06, 0, null);
-    push(_DC3_COLOR.wallroom, -0.06, 0, 0, 0.06, H, cz, 0, null);
+    // Los cuatro muros, cada uno con el lado de la sala en que queda FUERA: el que se interpone
+    // entre la cámara y la sala se dibuja de cristal (`_dc3dWallAlpha`). Antes solo había los
+    // dos del fondo —los cuatro tapaban la vista desde fuera—, y cruzar uno de ellos dejaba la
+    // pantalla en gris: se miraba la sala a través de su muro, por detrás.
+    const muro = (x, z, w, d, lado) =>
+        cajas.push({color: _DC3_COLOR.wallroom, m: _dc3model(x, 0, z, w, H, d, 0), lee: null,
+                    muro: lado});
+    muro(0, -0.06, cx, 0.06, 'z0');
+    muro(-0.06, 0, 0.06, cz, 'x0');
+    muro(0, cz, cx, 0.06, 'z1');
+    muro(cx, 0, 0.06, cz, 'x1');
+    // Las baldosas, como líneas en el suelo: sin ellas no hay con qué medir a ojo, y en una
+    // vista en perspectiva «a dos baldosas» es la única distancia que se lee.
+    const baldosa = (Number(room.tile_mm) || 600) * M;
+    if (baldosa > 0.1 && cx / baldosa < 200 && cz / baldosa < 200) {
+        for (let x = baldosa; x < cx - 1e-6; x += baldosa)
+            push(_DC3_COLOR.tile, x - 0.004, 0, 0, 0.008, 0.001, cz, 0, null);
+        for (let z = baldosa; z < cz - 1e-6; z += baldosa)
+            push(_DC3_COLOR.tile, 0, 0, z - 0.004, cx, 0.001, 0.008, 0, null);
+    }
 
     for (const r of (_dcimPlan.racks || [])) {
         const w = (Number(r.width_mm) || 600) * M, d = (Number(r.depth_mm) || 1000) * M;
@@ -206,28 +277,47 @@ function _dc3dScene() {
         // 12 son dos cosas distintas y en planta se ven iguales.
         const h = Math.max(0.3, (Number(r.u_height) || 42) * 44.45 * M);
         const estado = (r.roll || {}).state || '';
-        push(_DC3_COLOR.rack, (Number(r.pos_x) || 0) * M, 0, (Number(r.pos_y) || 0) * M,
-             w, h, d, Number(r.rotation) || 0,
+        // Un rack de pared empieza donde está colgado, no en el suelo.
+        const base = Math.max(0, Number(r.base_mm) || 0) * M;
+        const rx = (Number(r.pos_x) || 0) * M, rz = (Number(r.pos_y) || 0) * M;
+        const rot = Number(r.rotation) || 0;
+        push(_DC3_COLOR.rack, rx, base, rz, w, h, d, rot,
              {name: r.name || '', kind: t('dcim_rack'), w, d, h, state: estado});
-        // La franja del frente, que es lo que dice cuál es el pasillo frío. Un poco por delante
-        // de la cara para que no pelee con ella por el mismo píxel.
+        // La franja del frente, que es lo que dice cuál es el pasillo frío. En el MISMO lado que
+        // en planta —el de `pos_y`, donde el plano pinta su franja—: estaba en el de atrás, y el
+        // plano y el 3D decían cosas contrarias sobre hacia dónde sopla el rack. Un poco por
+        // delante de la cara para que no pelee con ella por el mismo píxel, y girando con el
+        // rack, alrededor de SU centro: sobre el suyo propio se iría a otro lado.
         push(_DC3_STATE[estado] || [0.95, 0.76, 0.05, 1],
-             (Number(r.pos_x) || 0) * M, h * 0.02, (Number(r.pos_y) || 0) * M + d - 0.012,
-             w, h * 0.96, 0.012, Number(r.rotation) || 0, null);
+             rx, base + h * 0.02, rz - 0.012, w, h * 0.96, 0.012, rot, null,
+             [rx + w / 2, rz + d / 2]);
     }
 
     for (const f of _dcpFeatures()) {
         const spec = kinds[f.kind] || {};
         if ((spec.layer === 'air') && !_dcpAir) continue;
         const w = (Number(f.width_mm) || 600) * M, d = (Number(f.depth_mm) || 600) * M;
-        const h = Math.max(0.01, (Number(spec.h) || 1000) * M);
-        const base = (Number(spec.base) || 0) * M;
+        // Lo suyo si lo tiene, lo de su tipo si no: la misma cuenta que el alzado.
+        const z = _dcpPieceZ(f);
+        const h = Math.max(0.01, z.h * M);
+        const base = z.base * M;
         push(_DC3_COLOR[f.kind] || [0.3, 0.32, 0.36, 1],
              (Number(f.pos_x) || 0) * M, base, (Number(f.pos_y) || 0) * M,
              w, h, d, Number(f.rotation) || 0,
              {name: f.label || '', kind: t('dcim_kind_' + f.kind), w, d, h, state: ''});
     }
     return {cajas, W: cx, D: cz, H};
+}
+
+/** Lo opaco que se dibuja un muro visto desde `ojo`.
+ *
+ *  Macizo si la cámara está del lado de dentro, casi transparente si está fuera: desde fuera, un
+ *  muro macizo es exactamente lo que hay entre quien mira y lo que quiere ver. Casi y no del
+ *  todo: un cristal tenue deja saber dónde acaba la sala, que es la mitad de mirarla. */
+function _dc3dWallAlpha(lado, ojo, escena) {
+    const fuera = (lado === 'z0' && ojo[2] < 0) || (lado === 'x0' && ojo[0] < 0)
+               || (lado === 'z1' && ojo[2] > escena.D) || (lado === 'x1' && ojo[0] > escena.W);
+    return fuera ? 0.12 : 1;
 }
 
 // ── El motor ─────────────────────────────────────────────────────────────────
@@ -255,12 +345,7 @@ function _dc3dMount() {
     const escena = _dc3dScene();
     Object.assign(_dc3d, {
         gl, prog, buf, escena, cv,
-        // La cámara, en coordenadas de órbita: a dónde mira, a qué distancia y desde qué ángulo.
-        // Empieza mirando al centro de la sala desde una esquina alta, que es como se enseña una
-        // sala a alguien que no la ha visto.
-        cam: {mira: [escena.W / 2, 1.0, escena.D / 2],
-              radio: Math.max(escena.W, escena.D) * 1.4 || 14,
-              theta: -Math.PI / 2.4, phi: 0.95},
+        cam: _dc3dCamHome(escena),
         loc: {
             pos: gl.getAttribLocation(prog, 'aPos'),
             nor: gl.getAttribLocation(prog, 'aNor'),
@@ -270,6 +355,40 @@ function _dc3dMount() {
         },
     });
     _dc3dLoop();
+}
+
+/** La cámara de partida, en coordenadas de órbita: a dónde mira, a qué distancia y desde qué
+ *  ángulo. El centro de la sala desde una esquina alta, que es como se enseña una sala a quien
+ *  no la ha visto — y desde la esquina de DELANTE a la derecha, la contraria a la de los dos
+ *  muros que se dibujan: empezaba detrás de ellos, y el muro tapaba la sala entera. Desde aquí
+ *  la sala sale orientada como en planta: lo de abajo del plano, más cerca. En una función
+ *  porque se vuelve a ella con Inicio: moviéndose con libertad, perderse es cuestión de tiempo. */
+function _dc3dCamHome(escena) {
+    return {mira: [escena.W / 2, 1.0, escena.D / 2],
+            radio: Math.max(escena.W, escena.D) * 1.4 || 14,
+            theta: Math.PI / 3, phi: 0.95};
+}
+
+/** Hacia dónde mira la cámara, en el suelo, y cuál es su derecha. Lo que usan andar con el
+ *  teclado y desplazar con el botón derecho: los dos tienen que moverse respecto a lo que se
+ *  VE, no respecto a los ejes de la sala. */
+function _dc3dAxes(c) {
+    const f = [-Math.cos(c.theta), 0, -Math.sin(c.theta)];
+    return {fwd: f, right: [-f[2], 0, f[0]]};
+}
+
+/** Mover el punto al que se mira, que es mover la cámara con él.
+ *
+ *  Dentro de la sala, hasta sus muros y no más allá: sin tope, la rueda atravesaba la sala
+ *  entera y seguía hacia el vacío de detrás del muro, donde no hay nada que ver ni referencia
+ *  para volver. Mirar la sala desde fuera no es andar, es alejarse: eso lo da la rueda hacia
+ *  atrás, que abre la órbita. En vertical, sin pasar del suelo ni muy por encima del techo. */
+function _dc3dShift(c, dx, dy, dz) {
+    const e = (_dc3d && _dc3d.escena) || {};
+    const W = e.W || 12, D = e.D || 8, H = e.H || 3, fuera = 0.3;
+    c.mira[0] = Math.max(-fuera, Math.min(W + fuera, c.mira[0] + dx));
+    c.mira[1] = Math.max(0.05, Math.min(H + 2, c.mira[1] + dy));
+    c.mira[2] = Math.max(-fuera, Math.min(D + fuera, c.mira[2] + dz));
 }
 
 function _dc3dProgram(gl) {
@@ -317,12 +436,14 @@ function _dc3dDraw() {
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.clearColor(0.04, 0.05, 0.06, 1);
+    gl.clearColor(0.08, 0.09, 0.11, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     const c = S.cam;
     const ojo = [c.mira[0] + c.radio * Math.sin(c.phi) * Math.cos(c.theta),
-                 c.mira[1] + c.radio * Math.cos(c.phi),
+                 // Nunca por debajo del suelo: mirando desde abajo —bajo un rack de pared— el ojo
+                 // se apoya en el suelo en vez de atravesarlo y ver la sala del revés.
+                 Math.max(0.05, c.mira[1] + c.radio * Math.cos(c.phi)),
                  c.mira[2] + c.radio * Math.sin(c.phi) * Math.sin(c.theta)];
     const vp = _dc3mul(_dc3perspective(0.96, ancho / alto, 0.05, 400),
                        _dc3lookAt(ojo, c.mira));
@@ -337,9 +458,15 @@ function _dc3dDraw() {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, S.buf.idx);
     gl.uniformMatrix4fv(S.loc.mvp, false, vp);
 
+    // Los muros, según dónde esté la cámara: el que queda entre ella y la sala, de cristal. Se
+    // decide en cada fotograma porque la cámara se mueve en cada fotograma.
+    const cajas = S.escena.cajas.map(k => (k.muro
+        ? Object.assign({}, k, {color: [k.color[0], k.color[1], k.color[2],
+                                        _dc3dWallAlpha(k.muro, ojo, S.escena)]})
+        : k));
     // Lo opaco primero y lo translúcido después: al revés, el vidrio escribe profundidad y borra
     // lo que hay detrás, que es justo lo que se quería ver a través de él.
-    const orden = S.escena.cajas.slice().sort((a, b) => (a.color[3] < 1) - (b.color[3] < 1));
+    const orden = cajas.sort((a, b) => (a.color[3] < 1) - (b.color[3] < 1));
     for (const caja of orden) {
         gl.uniformMatrix4fv(S.loc.model, false, caja.m);
         gl.uniform4fv(S.loc.color, caja.color);
@@ -353,6 +480,7 @@ function _dc3dDraw() {
 
 function _dc3dDown(ev) {
     if (!_dc3d) return;
+    ev.currentTarget.focus?.({preventScroll: true});
     ev.currentTarget.setPointerCapture?.(ev.pointerId);
     _dc3d.arrastre = {x: ev.clientX, y: ev.clientY,
                       // El botón derecho desplaza en vez de girar, como en cualquier visor.
@@ -365,15 +493,20 @@ function _dc3dMove(ev) {
     const a = _dc3d.arrastre, c = _dc3d.cam;
     const dx = ev.clientX - a.x, dy = ev.clientY - a.y;
     if (a.pan) {
-        const k = c.radio * 0.0016;
-        const der = [Math.sin(c.theta - Math.PI / 2), 0, -Math.cos(c.theta - Math.PI / 2)];
-        const ade = [Math.cos(c.theta), 0, Math.sin(c.theta)];
-        for (let i = 0; i < 3; i++) c.mira[i] += der[i] * -dx * k + ade[i] * -dy * k;
+        // Se agarra el suelo: arrastrar a la derecha lleva la sala a la derecha, y hacia abajo la
+        // acerca. Lo que había llamaba «derecha» a lo que era «adelante», y arrastrar de lado
+        // metía y sacaba la cámara de la sala. Un mínimo en el factor: con la cámara pegada a lo
+        // que mira, `radio` es casi cero y el arrastre no movería nada.
+        const k = Math.max(c.radio, 1.5) * 0.0016;
+        const e = _dc3dAxes(c);
+        _dc3dShift(c, (e.right[0] * -dx + e.fwd[0] * dy) * k, 0,
+                   (e.right[2] * -dx + e.fwd[2] * dy) * k);
     } else {
         c.theta += dx * 0.006;
-        // Acotado: pasado el cenit la cámara se da la vuelta y la sala aparece del revés, que es
-        // fácil de provocar con un gesto y difícil de deshacer.
-        c.phi = Math.max(0.12, Math.min(Math.PI / 2 - 0.04, c.phi - dy * 0.006));
+        // Acotado, pero pasando de la horizontal: por debajo de ella se mira desde abajo, que es
+        // como se ve un rack colgado en la pared. Al cenit y al nadir no se llega, porque ahí la
+        // cámara se da la vuelta y la sala aparece del revés.
+        c.phi = Math.max(0.08, Math.min(Math.PI - 0.15, c.phi - dy * 0.006));
     }
     _dc3d.arrastre = {x: ev.clientX, y: ev.clientY, pan: a.pan};
 }
@@ -385,10 +518,50 @@ function _dc3dUp(ev) {
 }
 
 /** La rueda acerca y aleja. En el propio elemento y no como oyente global: la rueda dentro del
- *  visor no debe desplazar la página, y para poder impedirlo hay que estar en el sitio. */
+ *  visor no debe desplazar la página, y para poder impedirlo hay que estar en el sitio.
+ *
+ *  Acercar se paraba a 1,2 m de lo que se miraba, así que la pared del fondo no se alcanzaba
+ *  nunca. Ahora, llegado a medio metro, la rueda sigue: lleva hacia delante el punto que se mira
+ *  —y la cámara con él—, hacia donde se mira y en horizontal. Se cruza la sala con la rueda,
+ *  que es como se hace en cualquier visor. */
 function _dc3dWheel(ev) {
-    if (!_dc3d) return;
+    if (!_dc3d || !_dc3d.cam) return;
     ev.preventDefault();
-    _dc3d.cam.radio = Math.max(1.2, Math.min(90,
-        _dc3d.cam.radio * (ev.deltaY > 0 ? 1.12 : 0.89)));
+    const c = _dc3d.cam;
+    if (ev.deltaY > 0) {
+        c.radio = Math.min(90, c.radio * 1.12);
+    } else if (c.radio > 0.5) {
+        c.radio = Math.max(0.5, c.radio * 0.89);
+    } else {
+        // Hacia delante y en horizontal, como andar con W: siguiendo la mirada —que casi siempre
+        // va hacia abajo— la rueda hundía la cámara en el suelo en tres vueltas. Para subir y
+        // bajar están Q y E.
+        const paso = (ev.shiftKey ? 1.2 : 0.3);
+        const f = _dc3dAxes(c).fwd;
+        _dc3dShift(c, f[0] * paso, 0, f[2] * paso);
+    }
+}
+
+/** Andar con el teclado, con el visor enfocado —se enfoca al pulsarlo—.
+ *
+ *  W A S D o las flechas, hacia donde se mira y a los lados; Q y E, o AvPág y RePág, bajar y
+ *  subir; Mayúsculas, cuatro veces más rápido; Inicio o F, volver a la vista de partida. Solo con
+ *  el foco en el lienzo: fuera de él, las flechas y las letras son de la página y de lo que se
+ *  esté escribiendo. */
+function _dc3dKey(ev) {
+    if (!_dc3d || !_dc3d.cam) return;
+    const c = _dc3d.cam, e = _dc3dAxes(c);
+    const paso = ev.shiftKey ? 0.6 : 0.15;
+    const k = (ev.key || '').toLowerCase();
+    let dx = 0, dy = 0, dz = 0;
+    if (k === 'w' || k === 'arrowup') { dx = e.fwd[0]; dz = e.fwd[2]; }
+    else if (k === 's' || k === 'arrowdown') { dx = -e.fwd[0]; dz = -e.fwd[2]; }
+    else if (k === 'a' || k === 'arrowleft') { dx = -e.right[0]; dz = -e.right[2]; }
+    else if (k === 'd' || k === 'arrowright') { dx = e.right[0]; dz = e.right[2]; }
+    else if (k === 'e' || k === 'pageup') dy = 1;
+    else if (k === 'q' || k === 'pagedown') dy = -1;
+    else if (k === 'home' || k === 'f') { _dc3d.cam = _dc3dCamHome(_dc3d.escena); ev.preventDefault(); return; }
+    else return;
+    ev.preventDefault();
+    _dc3dShift(c, dx * paso, dy * paso, dz * paso);
 }

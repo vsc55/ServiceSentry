@@ -413,6 +413,376 @@ class TestDondeEstaUnRackNoEsLaVistaDeNadie:
         assert '/ _DCP_SCALE' in cuerpo, 'la posición se guarda en píxeles'
 
 
+class TestElArrastreMideLoQueSeVe:
+    """El tope y el imán del arrastre miran el borde **visible**, no la esquina guardada.
+
+    `pos_x`/`pos_y` son la esquina de la caja sin girar, y el giro va sobre su centro. Con el
+    tope en esa esquina, una puerta girada un cuarto se quedaba a 44 cm de la pared, con imán y
+    sin él. Las dos ramas del arrastre —piezas y racks— pasan por `_dcpPlace`, que es donde se
+    cuenta el giro: una tercera forma de colocar que haga la cuenta a mano vuelve a dejar las
+    piezas giradas lejos de la pared.
+    """
+
+    def test_las_dos_ramas_pasan_por_el_mismo_sitio(self):
+        cuerpo = _section().split('function _dcpMove(')[1].split(chr(10) + chr(125))[0]
+        assert cuerpo.count('_dcpPlace(') == 2, 'una rama del arrastre no cuenta el giro'
+
+    def test_y_ninguna_topa_la_esquina_sin_girar(self):
+        cuerpo = _section().split('function _dcpMove(')[1].split(chr(10) + chr(125))[0]
+        assert 'Math.max(0, _dcpSnap(' not in cuerpo, (
+            'el tope vuelve a ser la esquina sin girar')
+
+
+class TestUnaPiezaSeManejaSinBuscarElAtajo:
+    """El cuadro de una pieza solo se cerraba con Escape, y editar, duplicar o quitar pedía
+    seleccionarla primero. Reportado desde la pantalla: un atajo que nadie ve no es una forma de
+    hacer algo, y lo que se hace con una pieza se hace desde la pieza.
+    """
+
+    def test_el_cuadro_tiene_con_que_cerrarse(self):
+        cuadro = _fn(_section(), '_dcpInspectorBody')
+        assert '_dcpDeselect()' in cuadro, 'la pieza del inspector no se puede soltar'
+
+    def test_y_escape_cierra_por_el_mismo_sitio(self):
+        """Dos formas de cerrar que hacen cosas distintas acaban cerrando cosas distintas."""
+        assert '_dcpDeselect()' in _fn(_section(), '_dcpKey')
+
+    def test_cada_pieza_ensena_su_barra_al_pasar_por_encima(self):
+        pieza = _fn(_section(), '_dcpFeature')
+        assert 'onpointerenter="_dcpFloatShow(' in pieza
+        assert 'onpointerleave="_dcpFloatLater()"' in pieza, 'la barra no se esconde nunca'
+
+    def test_con_editar_duplicar_y_quitar(self):
+        barra = _fn(_section(), '_dcpFloatHtml')
+        for accion in ('_dcpEdit', '_dcpDuplicate', '_dcpDropFeature'):
+            assert "'%s'" % accion in barra, accion
+
+    def test_solo_para_quien_edita_y_nunca_mientras_se_arrastra(self):
+        mostrar = _fn(_section(), '_dcpFloatShow')
+        assert "_dcimMay('dcim_edit')" in mostrar, 'la barra sale a quien solo puede mirar'
+        assert '_dcpDrag' in mostrar
+        assert '_dcpFloatHide()' in _fn(_section(), '_dcpDown'), 'arrastrar deja la barra encima'
+
+    def test_la_barra_vive_fuera_del_dibujo(self):
+        """Dentro del `<svg>`, pulsar un botón de la barra sería también empezar un arrastre."""
+        plano = _section().split('<svg ${ssCanvasAttrs(_DCP_SVG')[0]
+        assert 'id="dcpFloat"' in plano.split('ss-infra-canvas')[-1], (
+            'la barra no está en el marco del dibujo, antes del <svg>')
+
+    def test_las_flechas_topan_en_la_pared_que_se_ve(self):
+        """El mismo fallo que el arrastre, por el teclado: un tope en cero sobre la esquina sin
+        girar deja una puerta girada a 44 cm de la pared."""
+        teclas = _fn(_section(), '_dcpKey')
+        assert '_dcpEdgeOffset(' in teclas
+        assert 'Math.max(0, Number(f.pos_x)' not in teclas
+        assert 'Math.max(0, Number(f.pos_y)' not in teclas
+
+
+class TestUnaPiezaSeEstiraArrastrando:
+    """Cambiar el tamaño de una pieza solo se podía tecleando el ancho y el fondo. Reportado
+    desde la pantalla: se mueve arrastrando, y se estira igual."""
+
+    def test_la_pieza_seleccionada_lleva_sus_asas(self):
+        pieza = _fn(_section(), '_dcpFeature')
+        assert "puesto && _dcimMay('dcim_edit') ? _dcpHandles(" in pieza, (
+            'las asas no salen, o salen a quien solo puede mirar')
+
+    def test_dentro_de_la_pieza_para_que_giren_con_ella(self):
+        pieza = _fn(_section(), '_dcpFeature')
+        assert pieza.index('_dcpHandles(') < pieza.index('</g>'), 'el asa no gira con la pieza'
+
+    def test_el_asa_se_pregunta_antes_que_la_pieza(self):
+        """El asa está dentro de la pieza: preguntar primero por la pieza convierte cada intento
+        de estirarla en moverla."""
+        abajo = _fn(_section(), '_dcpDown')
+        assert abajo.index("closest('[data-dcph]')") < abajo.index("closest('g[data-dcpf]')")
+
+    def test_y_lo_estirado_se_guarda_en_el_servidor(self):
+        arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
+        tramo = arriba.split("drag.what === 'resize'")[1].split("drag.what === 'feature'")[0]
+        for campo in ('width_mm', 'depth_mm', 'pos_x', 'pos_y'):
+            assert campo in tramo, campo
+        assert '_dcimOpenPlan' in tramo, 'un rechazo del servidor deja la pieza estirada'
+
+
+class TestElPlanoEsUnEditor:
+    """El plano era cinco franjas encima del lienzo —cabecera, filas, medidas de la sala, dos filas
+    de paleta— que se comían casi 300 px, y un cuadro de pieza que al abrirse lo empujaba más
+    abajo. Reportado desde la pantalla; elegido el esquema de un editor: una fila arriba, la paleta
+    flotando sobre el lienzo y un inspector plegable al lado."""
+
+    def _plano(self):
+        return _fn(_section(), '_dcimPlanHtml')
+
+    def test_la_paleta_flota_sobre_el_lienzo(self):
+        """Dentro del marco del lienzo y antes del `<svg>`: dentro de él, pulsar un botón sería
+        también empezar un arrastre."""
+        lienzo = self._plano().split('ss-infra-canvas')[1].split('<svg ')[0]
+        assert '_dcpPaletteHtml()' in lienzo, 'la paleta no flota sobre el lienzo'
+        assert 'ss-float-tools' in _fn(_section(), '_dcpPaletteHtml')
+
+    def test_el_inspector_va_al_lado_y_no_encima(self):
+        plano = self._plano()
+        editor = plano.split('class="ss-editor"')[1]
+        assert '_dcpInspectorHtml()' in editor, 'el inspector no está junto al lienzo'
+        antes = plano.split('class="ss-editor"')[0]
+        for fuera in ('_dcpInspectorHtml()', '_dcpPaletteHtml()'):
+            assert fuera not in antes, '%s vuelve a ir encima del lienzo' % fuera
+
+    def test_seleccionar_no_mueve_nada_de_sitio(self):
+        """Una pulsación sin viaje solo repinta el inspector: la pantalla entera rehace el dibujo
+        y lo que se estaba mirando."""
+        arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
+        tramo = arriba.split("drag.what === 'feature'")[1]
+        assert 'if (!drag.moved) return _dcpInspectorDraw();' in tramo
+
+    def test_sin_nada_seleccionado_enseña_la_sala(self):
+        """Las medidas y las filas de la sala, que eran dos franjas encima del plano."""
+        sala = _fn(_section(), '_dcpRoomPanelHtml')
+        assert '_dcpRoomSet(' in sala and '_dcpRowNew()' in sala
+
+    def test_se_pliega_y_se_recuerda(self):
+        panel = _fn(_section(), '_dcpPanel')
+        assert 'localStorage.setItem' in panel, 'plegado no se recuerda'
+        assert 'try {' in panel, 'un navegador sin almacén rompe el plegado'
+
+    def test_el_lapiz_lo_despliega(self):
+        """Con el inspector plegado, el lápiz no haría nada que se viera."""
+        assert '_dcpPanel(true)' in _fn(_section(), '_dcpEdit')
+
+
+class TestAlEstirarLaMedidaVaConLaPieza:
+    """La medida de lo que se estira, al lado de la pieza y no solo en la barra de arriba: mirar
+    la barra es apartar la vista de la mano. Reportado desde la pantalla."""
+
+    def test_se_ensena_mientras_se_estira(self):
+        mover = _section().split('function _dcpMove(')[1].split(chr(10) + chr(125))[0]
+        tramo = mover.split("_dcpDrag.what === 'resize'")[1].split("_dcpDrag.what === 'feature'")[0]
+        assert '_dcpSizeShow(f)' in tramo
+
+    def test_y_se_quita_al_soltar(self):
+        assert '_dcpSizeHide()' in _section().split('async function _dcpUp(')[1][:200]
+
+    def test_y_no_se_interpone_en_el_arrastre(self):
+        plano = _section().split('<svg ${ssCanvasAttrs(_DCP_SVG')[0]
+        etiqueta = plano.split('id="dcpSize"')[1].split('</div>')[0]
+        assert 'pointer-events:none' in etiqueta, 'la etiqueta se come el puntero'
+
+
+class TestLasOchoAsas:
+    """Con solo las asas de abajo y la derecha, llevar una mampara hasta la pared de la izquierda
+    era estirarla hacia el otro lado y luego moverla. Reportado desde la pantalla."""
+
+    def test_los_cuatro_lados_y_las_cuatro_esquinas(self):
+        asas = _fn(_section(), '_dcpHandles')
+        for id_ in ('n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'):
+            assert "asa('%s'," % id_ in asas, id_
+
+
+class TestUnRackSeManejaDesdeSuBarra:
+    """Pasar por encima de un rack no ofrecía nada, y pulsarlo lo ABRÍA: cada clic mal apuntado
+    sacaba del plano. Reportado desde la pantalla."""
+
+    def test_pasar_por_encima_saca_su_barra(self):
+        rack = _fn(_section(), '_dcpRack')
+        assert "_dcpFloatShow(${jsStr(rack.uid)},this,'rack')" in rack
+        assert '_dcpFloatLater()' in rack
+
+    @staticmethod
+    def _barra_rack():
+        barra = _fn(_section(), '_dcpFloatHtml')
+        return barra.split("if (kind === 'rack') {")[1].split(chr(10) + '    }')[0]
+
+    def test_con_abrir_editar_girar_duplicar_y_quitar(self):
+        barra = self._barra_rack()
+        for accion in ('_dcpRackOpen', '_dcpRackEdit', '_dcpTurn', '_dcpRackDuplicate',
+                       '_dcpRackDrop'):
+            assert "'%s'" % accion in barra, accion
+
+    def test_y_quien_solo_mira_solo_puede_abrirlo(self):
+        barra = self._barra_rack()
+        assert "edita ? boton('_dcpRackOpen'" not in barra, 'abrirlo se le niega a quien mira'
+        for accion in ('_dcpRackEdit', '_dcpTurn', '_dcpRackDuplicate', '_dcpRackDrop'):
+            assert "edita ? boton('%s'" % accion in barra, accion
+
+    def test_pulsarlo_ya_no_lo_abre(self):
+        arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
+        assert 'if (!drag.moved) return _dcimLoadRack(' not in arriba, 'un clic saca del plano'
+
+    def test_editar_es_el_formulario_de_siempre(self):
+        """Uno más pequeño para el plano sería otra forma de editar lo mismo, que se queda atrás
+        el día que el rack gane un campo."""
+        assert "_dcimOpen('edit', 'rack'" in _fn(_section(), '_dcpRackEdit')
+
+    def test_y_el_formulario_encuentra_el_rack_del_plano(self):
+        """Sin esto el formulario sale vacío, y guardarlo vacía el rack."""
+        assert '_dcimPlan' in _fn(_section(), '_dcimFind')
+
+    def test_duplicar_no_copia_lo_que_identifica_a_ese_armario(self):
+        dup = _fn(_section(), '_dcpRackDuplicate')
+        assert "'asset'" not in dup, 'el número de activo repetido deja de identificar nada'
+
+
+class TestPulsarFueraSueltaLaSeleccion:
+    """Pulsar el suelo del plano, sin arrastrar, suelta la pieza seleccionada. Solo lo hacía
+    Escape, y pulsar fuera es como se suelta una selección en cualquier editor. Reportado desde la
+    pantalla."""
+
+    def test_el_suelo_apunta_donde_se_pulso(self):
+        abajo = _fn(_section(), '_dcpDown')
+        assert '_dcpBlank = {x: ev.clientX, y: ev.clientY}' in abajo
+
+    def test_y_al_levantar_sin_moverse_se_suelta(self):
+        arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
+        tramo = arriba.split('if (!drag) {')[1].split(chr(10) + '    }')[0]
+        assert '_dcpDeselect()' in tramo, 'pulsar fuera no suelta nada'
+        # Desplazar el plano no es pulsar fuera: si lo fuera, cada vez que alguien arrastra la
+        # sala para verla mejor perdería lo que tenía seleccionado.
+        assert 'Math.hypot(' in tramo, 'desplazar el plano también suelta la selección'
+
+
+class TestLaBarraDeUnaPiezaTambienGira:
+    """La barra del rack giraba y la de las piezas no. Reportado desde la pantalla."""
+
+    def test_girar_esta_en_la_barra_de_la_pieza(self):
+        barra = _fn(_section(), '_dcpFloatHtml').split("if (kind === 'rack') {")[1]
+        barra = barra.split(chr(10) + '    }', 1)[1]
+        assert "boton('_dcpTurnFeature'" in barra
+
+
+class TestUnRackDePared:
+    """Un rack de pared cuelga a una altura, y hasta ahora no había dónde decirla: el 3D lo
+    plantaba en el suelo y nada decía a qué altura buscarlo. Reportado desde la pantalla."""
+
+    def test_el_formulario_la_pregunta(self):
+        campos = _section().split("rack: {url: 'racks'")[1].split(']},')[0]
+        assert "name: 'base_mm'" in campos
+
+    def test_el_3d_lo_levanta(self):
+        tres_d = _section().split('for (const r of (_dcimPlan.racks || []))')[1][:1200]
+        assert 'r.base_mm' in tres_d, 'el 3D sigue poniendo en el suelo un rack colgado'
+
+    def test_la_tarjeta_del_plano_lo_dice(self):
+        assert 'dcim_rack_wall_at' in _fn(_section(), '_dcpCard')
+
+    def test_viaja_en_el_fichero_del_plano_y_al_duplicar(self):
+        assert 'base_mm' in _fn(_section(), '_dcpExportJson')
+        assert "'base_mm'" in _fn(_section(), '_dcpRackDuplicate')
+
+
+class TestEl3dSeAbreAPantallaCompleta:
+    """26 rem dan para asomarse, no para moverse por una sala. Reportado desde la pantalla."""
+
+    def test_el_visor_tiene_su_boton(self):
+        html = _fn(_section(), '_dc3dHtml')
+        assert 'onclick="_dc3dFull()"' in html and 'id="dc3d-box"' in html
+
+    def test_y_donde_no_hay_pantalla_completa_ocupa_la_ventana(self):
+        """Safari en iPhone no tiene la API: sin la alternativa, el botón no haría nada."""
+        assert "classList.add('ss-fill-screen')" in _fn(_section(), '_dc3dFull')
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '.ss-fill-screen {' in css
+
+    def test_cerrar_el_visor_sale_de_la_pantalla_completa(self):
+        """Si no, queda una pantalla negra de la que solo sale quien sabe que Esc funciona."""
+        assert 'exitFullscreen' in _fn(_section(), '_dc3dStop')
+
+    def test_y_el_lienzo_recibe_el_teclado(self):
+        html = _fn(_section(), '_dc3dHtml')
+        assert 'tabindex="0"' in html and 'onkeydown="_dc3dKey(event)"' in html
+
+
+class TestUnRackSeSeleccionaComoUnaPieza:
+    """Las mesas y las puertas se seleccionaban y se editaban en el inspector; el rack solo sacaba
+    su barra flotante. Reportado desde la pantalla."""
+
+    def test_pulsarlo_lo_selecciona_y_el_inspector_habla_de_el(self):
+        arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
+        tramo = arriba.split("drag.what === 'resize'")[0].split('const rack =')[-1]
+        tramo = arriba[arriba.rindex('if (!drag.moved) {'):]
+        assert "_dcpSel = {kind: 'rack', uid: rack.uid}" in tramo
+        assert '_dcpInspectorDraw()' in tramo
+
+    def test_el_inspector_tiene_sus_campos(self):
+        cuerpo = _fn(_section(), '_dcpInspectorBody')
+        assert "_dcpSel.kind === 'rack'" in cuerpo and '_dcpRackPanelHtml(' in cuerpo
+        panel = _fn(_section(), '_dcpRackPanelHtml')
+        for campo in ("'name'", "'pos_x'", "'pos_y'", "'u_height'", "'rotation'", "'base_mm'"):
+            assert campo in panel, campo
+
+    def test_lo_tecleado_llega_al_servidor_y_un_rechazo_lo_deshace(self):
+        poner = _fn(_section(), '_dcpRackSet')
+        assert '_dcpQueue(' in poner and '_dcimOpenPlan' in poner
+        assert "_dcimSend('PUT'" in _fn(_section(), '_dcpFlush')
+
+    def test_se_ve_seleccionado_en_el_plano(self):
+        assert "_dcpSel.kind === 'rack'" in _fn(_section(), '_dcpRack')
+
+    def test_y_escape_lo_suelta(self):
+        """Escape se miraba después de «solo piezas», así que con un rack no hacía nada."""
+        teclas = _fn(_section(), '_dcpKey')
+        assert teclas.index("ev.key === 'Escape'") < teclas.index("_dcpSel.kind !== 'feature'")
+
+
+class TestTodoSeAlcanzaDesdeLaLista:
+    """Una pieza debajo de un rack de pared no se podía pulsar nunca en el plano: el rack está
+    encima. Reportado desde la pantalla."""
+
+    def test_el_inspector_de_la_sala_lista_los_elementos(self):
+        assert '_dcpElementsHtml()' in _fn(_section(), '_dcpRoomPanelHtml')
+        assert '_dcpPick(' in _fn(_section(), '_dcpElementsHtml')
+
+    def test_elegir_algo_escondido_en_el_aire_enciende_su_capa(self):
+        """Seleccionar algo que no se dibuja es seleccionar a ciegas."""
+        assert '_dcpAir = true' in _fn(_section(), '_dcpPick')
+
+
+class TestLaSalaSeVeDeFrente:
+    """Planta, o una pared de frente, girando de una a otra. Reportado desde la pantalla."""
+
+    def test_la_barra_cambia_de_vista_y_gira(self):
+        sel = _fn(_section(), '_dcpViewSwitcher')
+        assert "_dcpSetView('top')" in sel and '_dcpViewTurn(-1)' in sel and '_dcpViewTurn(1)' in sel
+        assert '_dcpViewSwitcher()' in _fn(_section(), '_dcimPlanHtml')
+
+    def test_el_lienzo_y_el_repintado_dibujan_la_vista_elegida(self):
+        assert '_dcpElevationSvg()' in _fn(_section(), '_dcimPlanHtml')
+        assert '_dcpElevationSvg()' in _fn(_section(), '_dcpRedraw')
+
+    def test_de_frente_pulsar_selecciona_y_quien_edita_arrastra(self):
+        """Se pidió poder mover desde aquí. Solo quien puede editar: para quien mira, pulsar es
+        seleccionar y nada más."""
+        abajo = _fn(_section(), '_dcpDown')
+        tramo = abajo.split("if (_dcpView !== 'top') {")[1].split(chr(10) + '    }')[0]
+        assert '_dcpSel =' in tramo
+        assert "what: 'elev'" in tramo and "_dcimMay('dcim_edit')" in tramo
+
+    def test_y_soltar_lo_guarda_o_lo_devuelve(self):
+        arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
+        tramo = arriba.split("drag.what === 'elev'")[1].split('drag.what ===')[0]
+        assert "_dcimSend('PUT'" in tramo and '_dcimOpenPlan' in tramo and 'base_mm' in tramo
+
+    def test_cambiar_de_vista_olvida_el_encuadre(self):
+        assert 'ssCanvasReset(_DCP_SVG)' in _fn(_section(), '_dcpSetView')
+
+
+class TestDeFrenteTambienSeEstira:
+    """Se pidió poder redimensionar en la vista de frente, no solo mover."""
+
+    def test_lo_seleccionado_lleva_sus_asas(self):
+        assert "puesto && _dcimMay('dcim_edit') ? _dcpElevHandles(" in _fn(_section(), '_dcpElevationSvg')
+
+    def test_el_asa_se_pregunta_antes_que_la_cosa(self):
+        abajo = _fn(_section(), '_dcpDown')
+        tramo = abajo.split("if (_dcpView !== 'top') {")[1]
+        assert tramo.index("closest('[data-dcph]')") < tramo.index("closest('g[data-dcpf], g[data-dcp]');\n        if (g)")
+
+    def test_y_soltar_lo_guarda_o_lo_devuelve(self):
+        arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
+        tramo = arriba.split("drag.what === 'elevsize'")[1].split("drag.what === 'elev')")[0]
+        assert "_dcimSend('PUT'" in tramo and '_dcimOpenPlan' in tramo and 'u_height' in tramo
+
+
 class TestLasCoordenadasNiSeRedondeanNiSeTecleanEnDosVeces:
     """Un mapa da las dos coordenadas juntas y con diecisiete dígitos.
 

@@ -72,6 +72,10 @@ const _DCIM_KIND = {
          w: '7rem'},
         {name: 'depth_mm', label: 'dcim_depth_mm', type: 'number', min: 1, value: 1000,
          w: '7rem'},
+        // A qué altura del suelo empieza. 0 = de suelo, que es casi todos; uno de pared cuelga
+        // a 1,2 o 1,8 m, y sin decirlo el 3D lo plantaba en el suelo.
+        {name: 'base_mm', label: 'dcim_rack_base', tt: 'dcim_rack_base_tt', type: 'number',
+         min: 0, value: 0, w: '8rem'},
         // Los mástiles. Lo que decide si un servidor entra no es el fondo del armario sino la
         // distancia ENTRE mástiles —donde se atornillan sus raíles— y lo que queda detrás del
         // trasero para los cables.
@@ -909,6 +913,9 @@ async function _dcimSave() {
             showToast(copiadas ? tf('dcim_build_stamped', copiadas) : t('saved'), 'success');
         const rack = (_dcimRack || {}).rack;
         if (rack && (kind === 'item' || uid === rack.uid)) return _dcimLoadRack(rack.uid);
+        // Editado desde el plano: el plano lleva su propia copia de los racks, y sin volver a
+        // pedirla el rack seguiría con el nombre y la medida de antes de guardar.
+        if (kind === 'rack' && _dcimPlan) return _dcimOpenPlan(_dcimPlan.room.uid);
         return renderDcim();
     }
     showToast(r.error || t('save_failed'), 'danger');
@@ -925,6 +932,7 @@ function _dcimDelete(kind, uid, name) {
             const rack = (_dcimRack || {}).rack;
             if (kind === 'item' && rack) return _dcimLoadRack(rack.uid);
             if (kind === 'rack' && rack && rack.uid === uid) { _dcimRack = null; _dcimUrl(); }
+            if (kind === 'rack' && _dcimPlan) return _dcimOpenPlan(_dcimPlan.room.uid);
             return renderDcim();
         }
         showToast(r.error || t('delete_error'), 'danger');

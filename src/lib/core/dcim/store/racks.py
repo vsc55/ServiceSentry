@@ -59,6 +59,13 @@ _RACK = TableSpec(
         # albarán y el que la aseguradora pregunta primero. La última, para que aparecer sobre
         # una tabla llena sea un `ADD COLUMN`.
         Column('asset', 'TEXT', nullable=False, default="''"),
+        # How high off the floor the cabinet starts, in millimetres. 0 is a rack standing on the
+        # floor, which is almost all of them; a wall-mounted cabinet hangs at 1.2 or 1.8 m, and
+        # without this the 3D view stood it on the floor under the switch it is meant to hold,
+        # and nothing said at what height to look for it. Its own column rather than a
+        # "wall-mounted" flag: the flag is `base_mm > 0`, and a flag without the height is the
+        # half of the fact that does not tell you where to put the ladder.
+        Column('base_mm', 'INTEGER', nullable=False, default='0'),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

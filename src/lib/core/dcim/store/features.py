@@ -54,6 +54,14 @@ _FEATURE = TableSpec(
         Column('width_mm', 'INTEGER', nullable=False, default='600'),
         Column('depth_mm', 'INTEGER', nullable=False, default='600'),
         Column('rotation', 'INTEGER', nullable=False, default='0'),
+        # Lo alto que es, y a qué altura del suelo empieza, en milímetros. VACÍOS —`NULL`— son
+        # «los de su tipo» (`FEATURE_KINDS`), que es lo que eran todas las piezas antes de que
+        # existieran: una mesa, 750; una bandeja, colgada a 2720. Vacíos y no cero porque cero es
+        # una medida: una bandeja puesta en el suelo está a cero, y con cero como «sin decir» no
+        # habría forma de ponerla ahí. Se pidieron desde la vista de frente, estirando una mesa
+        # hacia arriba: no había dónde guardar que ESA mesa es más alta.
+        Column('height_mm', 'INTEGER'),
+        Column('base_mm', 'INTEGER'),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

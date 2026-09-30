@@ -251,8 +251,10 @@ function _dcimFind(kind, uid) {
         for (const s of _dcimData.sites || [])
             for (const r of s.rooms || [])
                 for (const k of r.rackList || []) if (k.uid === uid) return k;
-        return (_dcimRack && _dcimRack.rack && _dcimRack.rack.uid === uid)
-               ? _dcimRack.rack : {};
+        if (_dcimRack && _dcimRack.rack && _dcimRack.rack.uid === uid) return _dcimRack.rack;
+        // Desde el plano: la sala tiene sus racks a mano aunque el árbol no los haya listado.
+        // Sin esto el formulario de editar salía vacío, y guardarlo vaciaba el rack.
+        return ((_dcimPlan || {}).racks || []).find(r => r.uid === uid) || {};
     }
     return ((_dcimRack || {}).items || []).find(i => i.uid === uid) || {};
 }

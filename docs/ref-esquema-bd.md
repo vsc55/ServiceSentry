@@ -945,6 +945,7 @@ usuarios en el directorio. Ver [explica-dcim.md](explica-dcim.md).
 | row_uid | TEXT | no | `''` | a qué fila pertenece. Vacío = suelto, que es un estado real: el armario de comunicaciones de un rincón no está en ninguna fila y nunca lo estará |
 | description | TEXT | no | `''` | |
 | asset | TEXT | no | `''` | su número de inventario. El mueble también se compra, y es el que sale por más dinero en el albarán |
+| base_mm | INTEGER | no | `0` | a qué altura del suelo empieza el armario, en mm. `0` = de suelo, casi todos; uno de pared cuelga a 1,2 o 1,8 m. Una columna y no una marca «de pared»: la marca es `base_mm > 0`, y sin la altura no dice dónde poner la escalera. La usan el 3D, que lo levanta, la tarjeta del plano y el fichero del plano |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -1146,6 +1147,8 @@ columna.
 | width_mm | INTEGER | no | `600` | |
 | depth_mm | INTEGER | no | `600` | |
 | rotation | INTEGER | no | `0` | grados |
+| height_mm | INTEGER | sí | — | lo alto que es ESTA pieza, en mm. Vacío = el de su tipo (`FEATURE_KINDS`), que es lo que eran todas antes de existir la columna |
+| base_mm | INTEGER | sí | — | a qué altura del suelo empieza, en mm. Vacío = la de su tipo (una bandeja cuelga a 2720). Vacío y no cero, porque cero es una medida: una bandeja en el suelo |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |

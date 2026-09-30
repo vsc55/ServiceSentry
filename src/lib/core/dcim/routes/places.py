@@ -512,6 +512,11 @@ def register(app, wa, C):
                 'width_mm': int(_num(row.get('width_mm')) or spec['w']),
                 'depth_mm': int(_num(row.get('depth_mm')) or spec['d']),
                 'rotation': int(_num(row.get('rotation'))) % 360,
+                # Vacías si el fichero no las dice: las de su tipo, que es lo que eran.
+                'height_mm': (max(1, int(_num(row.get('height_mm'))))
+                              if row.get('height_mm') not in (None, '') else None),
+                'base_mm': (max(0, int(_num(row.get('base_mm'))))
+                            if row.get('base_mm') not in (None, '') else None),
             }, actor=actor)
             piezas += 1
 
@@ -524,6 +529,11 @@ def register(app, wa, C):
                 continue
             sitio = {'pos_x': _num(row.get('pos_x')), 'pos_y': _num(row.get('pos_y')),
                      'rotation': int(_num(row.get('rotation'))) % 360}
+            # A qué altura cuelga es parte de dónde está. Solo si el fichero lo dice: uno
+            # exportado antes de que existiera no sabe nada de ello, y leer su silencio como
+            # «en el suelo» bajaría al suelo un rack que alguien había colgado.
+            if 'base_mm' in row:
+                sitio['base_mm'] = max(0, int(_num(row.get('base_mm'))))
             if nombre in por_nombre:
                 store.racks.update(por_nombre[nombre]['uid'], sitio, actor=actor)
                 movidos += 1
