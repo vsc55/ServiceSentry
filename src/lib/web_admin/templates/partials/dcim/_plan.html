@@ -804,7 +804,10 @@ function _dcpElevResize(g, du, dh) {
  *  quarter would change the other measure. And the stored corner has to be recomputed, because
  *  the turn is about the centre and the centre moves when the size does. Sizes go through the
  *  magnet like positions, and never below 50 mm: a piece of zero cannot be grabbed again. */
-function _dcpResize(g, dx, dy) {
+function _dcpResize(g, dx, dy, snap) {
+    // The step is the caller's: a piece in a room snaps to the tile or 5 cm, a room on a
+    // building's plan to 10 cm — a 600 mm tile says nothing about a building.
+    const paso = snap || _dcpSnap;
     const r = (Number(g.rot) || 0) * Math.PI / 180;
     const c = Math.cos(r), s = Math.sin(r);
     const lx = dx * c + dy * s, ly = -dx * s + dy * c;
@@ -812,8 +815,8 @@ function _dcpResize(g, dx, dy) {
     // Which way each axis grows (+1 right/down, -1 left/up, 0 untouched)…
     const gx = h.includes('e') ? 1 : (h.includes('w') ? -1 : 0);
     const gy = h.includes('s') ? 1 : (h.includes('n') ? -1 : 0);
-    const w = gx ? Math.max(50, _dcpSnap(g.w0 + gx * lx)) : g.w0;
-    const d = gy ? Math.max(50, _dcpSnap(g.d0 + gy * ly)) : g.d0;
+    const w = gx ? Math.max(50, paso(g.w0 + gx * lx)) : g.w0;
+    const d = gy ? Math.max(50, paso(g.d0 + gy * ly)) : g.d0;
     // …and the anchor is the opposite side, in the piece's frame, from its centre.
     const turn = (x, y) => [x * c - y * s, x * s + y * c];
     const [a0x, a0y] = turn(-gx * g.w0 / 2, -gy * g.d0 / 2);

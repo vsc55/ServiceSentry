@@ -31,7 +31,7 @@ Lo vigila `tests/meta/test_docs_db_schema.py::TestLaAuditoriaVaAlFinal`, sobre l
 
 ## Índice de tablas
 
-Hay **72 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **73 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -49,7 +49,7 @@ Hay **72 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 
 | Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
 | Empresas | `org` (las sociedades del grupo), `org_owner` (de quién es cada cosa, en cualquier ámbito que un paquete declare) |
-| Inventario físico (DCIM) | `dc_site`, `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
+| Inventario físico (DCIM) | `dc_site`, `dc_floor` (una planta de la sede, con su plano), `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
@@ -906,6 +906,27 @@ usuarios en el directorio. Ver [explica-dcim.md](explica-dcim.md).
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
 
+### `dc_floor` — una planta de una sede
+
+Lo que faltaba entre la sede y la sala: dónde está cada sala **dentro** del edificio. Una planta
+es un plano de fondo —el que mandó el arquitecto— sobre el que se colocan las salas de esa planta
+a su tamaño real. No es un ámbito de propiedad: es de su sede, y escribir en ella es escribir en
+la sede. Quitarla **no** borra sus salas: se quedan en la sede, sin colocar.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| site_uid | TEXT | no | — | índice `idx_dc_floor_site` |
+| name | TEXT | no | `''` | lo que pone en el ascensor |
+| level | INTEGER | no | `0` | contando desde la calle: 0 la baja, 1 la primera, -1 el sótano. Es el orden en que se enseñan |
+| plan | TEXT | no | `''` | **nombre** del plano de fondo en el almacén de medios, nunca una ruta; lo acuña la subida |
+| plan_mm | INTEGER | no | `0` | lo ancho que es de verdad lo que dibuja el plano, en mm; el alto sale de la proporción de la imagen. 0 = sin decir, y el plano se estira a lo que haya |
+| description | TEXT | no | `''` | |
+| area_uid | TEXT | no | `''` | su **zona general**: la sala, en (0, 0) y sin girar, donde va lo que se pone en la planta sin estar en ninguna sala —un rack en un pasillo, un cuadro eléctrico—. Una sala y no un rack sin sala, porque todo el inventario cuelga de una. Vacío hasta la primera vez; lo acuña `POST /floors/<uid>/area` y no se escribe a mano |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
 ### `dc_room` — sala
 
 | Columna | Tipo | Null | Default | Clave |
@@ -920,6 +941,10 @@ usuarios en el directorio. Ver [explica-dcim.md](explica-dcim.md).
 | width_mm | INTEGER | no | `0` | cuánto mide la sala; 0 = nadie lo ha dicho y el plano se encuadra a lo que hay |
 | depth_mm | INTEGER | no | `0` | |
 | tile_mm | INTEGER | no | `600` | la baldosa del suelo técnico. Es un dato de la sala y no una constante —hay suelos de 500 y de 610— y de ahí salen el imán del editor y los nombres de posición («B7»), que es como se dan por teléfono |
+| floor_uid | TEXT | no | `''` | en qué planta de su sede está (`dc_floor`); vacío = **sin colocar**. Solo puede ser una planta de SU sede: otra la dibujaría en el plano de otro edificio |
+| pos_x | REAL | no | `0` | dónde está en el plano de su planta, en mm: la esquina de la caja sin girar, como un rack en una sala |
+| pos_y | REAL | no | `0` | |
+| rotation | INTEGER | no | `0` | grados, sobre su centro. Su tamaño en la planta es su `width_mm` × `depth_mm`: dos medidas de lo mismo serían dos respuestas |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |

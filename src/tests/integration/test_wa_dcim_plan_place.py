@@ -203,6 +203,19 @@ casos.estFrente = {
     u: _dcpElevResize(est('N', 'et', 0), 0, 44.45 * 6),
     uMin: _dcpElevResize(est('N', 'et', 0), 0, -9000),
 };
+// A room stretched on a building's plan snaps to 10 cm, not to a room's 600 mm tile.
+_dcpMagnet = true;
+casos.salaEstirada = _dcpResize({handle: 'se', w0: 4000, d0: 3000, rot: 0, at: {x: 1000, y: 1000}},
+                                1234, 567, _dcsSnap);
+casos.planoSinAncho = [_dcsImageMm().mm];
+// A point on the floor, in the coordinates of a room turned a quarter: what places a rack INSIDE
+// a turned room where it was dropped.
+const girada = {pos_x: 10000, pos_y: 5000, width_mm: 6000, depth_mm: 4000, rotation: 90};
+casos.local = {
+    centro: _dcsToLocal(girada, 13000, 7000),
+    esquina: _dcsToLocal(girada, 15000, 4000),
+    zona: _dcsToLocal({pos_x: 0, pos_y: 0, width_mm: 0, depth_mm: 0, rotation: 0}, 9000, 4000),
+};
 __out.casos = JSON.stringify(casos);
 """
 
@@ -490,3 +503,39 @@ class TestDeFrenteSeEstira:
     def test_un_rack_crece_de_u_en_u_y_nunca_baja_de_una(self, casos):
         assert casos['estFrente']['u'] == {'u_height': 48}
         assert casos['estFrente']['uMin'] == {'u_height': 1}
+
+
+class TestUnaSalaSeAjustaAlPlanoDeSuPlanta:
+    """Se pidió poder estirar una sala sobre el plano de su planta hasta que ocupe su zona, y
+    que el zoom no rompa la proporción entre el plano y las salas."""
+
+    def test_se_estira_a_pasos_de_diez_centimetros(self, casos):
+        """No a la baldosa de 600 de una sala: en el plano de un edificio no hay baldosa."""
+        e = casos['salaEstirada']
+        assert (e['width_mm'], e['depth_mm']) == (5200, 3600), e
+        assert (e['pos_x'], e['pos_y']) == (1000, 1000), 'la esquina opuesta se ha movido'
+
+    def test_un_plano_sin_ancho_tiene_un_tamano_fijo(self, casos):
+        """Sacarlo de las salas estiraba el plano cada vez que se movía una sala hacia fuera,
+        y lo ya colocado dejaba de cuadrar con el dibujo."""
+        assert casos['planoSinAncho'] == [50000]
+
+
+class TestLoQueSeSueltaCaeEnSuSala:
+    """El plano de la sede pone racks y piezas en la sala que haya debajo, en las coordenadas de
+    esa sala aunque esté girada; y fuera de toda sala, en la zona general de la planta, que está
+    en (0, 0) sin girar."""
+
+    def _r(self, p):
+        return [round(p['x']), round(p['y'])]
+
+    def test_el_centro_de_una_sala_girada_es_su_centro(self, casos):
+        assert self._r(casos['local']['centro']) == [3000, 2000]
+
+    def test_y_su_esquina_de_origen_es_su_origen(self, casos):
+        """Girada un cuarto (en el sentido de las agujas), la esquina de origen de la sala queda
+        arriba a la DERECHA en la planta."""
+        assert self._r(casos['local']['esquina']) == [0, 0]
+
+    def test_en_la_zona_general_la_planta_y_la_sala_coinciden(self, casos):
+        assert self._r(casos['local']['zona']) == [9000, 4000]

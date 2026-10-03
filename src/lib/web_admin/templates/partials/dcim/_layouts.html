@@ -1,0 +1,750 @@
+{# ================================================================
+   The inventory, four ways: the same sites, rooms and racks, laid out for four different
+   questions — and one switch to go between them.
+
+   - **Lista** (`_tree.html`): every site on one line, unfolded into its rooms and racks. The
+     closest to what this screen always was.
+   - **Ficha**: the tree on the left, the picked site on the right with its numbers and its
+     rooms. For moving around a big inventory.
+   - **Tarjetas**: one card per site. For seeing all of it at a glance when it is small.
+   - **Tabla**: sites, rooms and racks as rows. For comparing, finding and exporting.
+
+   The map of sites lives on the board and not here: a fifth view drawing it again was taken out.
+
+   They share everything that is not layout: the search, the company filter, the selection, what
+   is folded, the "⋯" menu and the occupancy bar. A view that filtered on its own would make
+   switching views look like losing things.
+   ================================================================ #}
+
+//: Which view, remembered in this browser: it is how this person likes to look at it, and
+//: nobody else's business. Read once; a browser without storage just starts on the list.
+const _DCIM_LAYOUT_KEY = 'ss_dcim_layout';
+let _dcimLayout = (() => {
+    try {
+        const v = localStorage.getItem(_DCIM_LAYOUT_KEY);
+        return ['list', 'detail', 'cards', 'table'].includes(v) ? v : 'list';
+    } catch (_) { return 'list'; }
+})();
+//: What is typed in the search box, and which company is picked ('' = all).
+let _dcimQuery = '';
+let _dcimOrgPick = '';
+let _dcimQueryTimer = null;
+//: Sites folded in the list and the table.
+let _dcimFold = new Set();
+//: Sites whose folding has been decided already. A site is decided ONCE, the first time it is
+//: seen: folded, unless something in it is wrong — that one opens, because what is wrong is what
+//: this screen is opened to find. After that what the person folds or unfolds is what stays.
+let _dcimFoldSeen = new Set();
+//: Sites unfolded in the detail view's tree, besides the picked one, which always is.
+let _dcimTreeOpen = new Set();
+//: What is picked in the detail view.
+let _dcimSel = {site: '', room: ''};
+//: The table: grouped as a tree or not, which kind of row, and which columns.
+let _dcimTableGroup = 'tree';
+let _dcimTableKind = '';
+const _DCIM_TABLE_COLS_KEY = 'ss_dcim_table_cols';
+const _DCIM_TABLE_COLS_DEFAULT = ['kind', 'where', 'cap', 'usage', 'cool', 'org', 'state'];
+let _dcimTableCols = (() => {
+    try {
+        const v = JSON.parse(localStorage.getItem(_DCIM_TABLE_COLS_KEY) || 'null');
+        if (Array.isArray(v)) return new Set(v);
+    } catch (_) { /* a browser without storage shows them all */ }
+    return new Set(_DCIM_TABLE_COLS_DEFAULT);
+})();
+
+// ── Shared pieces ──────────────────────────────────────────────────────────────────────────
+
+/** Rooms, racks, U and equipment of a site, added up from what is listed.
+ *
+ *  The equipment is what each rack's roll counts — already narrowed to what this reader may see,
+ *  so a shared rack never adds somebody else's machines to the number. */
+function _dcimSiteTotals(site) {
+    const out = {rooms: (site.rooms || []).length, racks: 0, u: 0, used: 0, things: 0, quiet: 0};
+    for (const r of site.rooms || []) {
+        const t = _dcimRoomTotals(r);
+        out.racks += t.racks;
+        out.u += t.u;
+        out.used += t.used;
+        out.things += t.things;
+        out.quiet += t.quiet;
+    }
+    return out;
+}
+
+function _dcimRoomTotals(room) {
+    const out = {racks: (room.rackList || []).length, u: 0, used: 0, things: 0, quiet: 0};
+    for (const k of room.rackList || []) {
+        const roll = k.roll || {};
+        out.u += Number(k.u_height) || 0;
+        out.used += Number(k.used_u) || 0;
+        out.things += Number(roll.total) || 0;
+        // Sin estado ninguno, todo lo que tiene está sin vigilar; con estado, lo que diga.
+        out.quiet += roll.state ? (Number(roll.unwatched) || 0) : (Number(roll.total) || 0);
+    }
+    return out;
+}
+
+/** Fold, the first time they are seen, the sites that have nothing wrong. */
+function _dcimFoldNew() {
+    for (const site of _dcimData.sites || []) {
+        if (_dcimFoldSeen.has(site.uid)) continue;
+        _dcimFoldSeen.add(site.uid);
+        const estado = (site.roll || {}).state;
+        if (estado !== 'error' && estado !== 'warning') _dcimFold.add(site.uid);
+    }
+}
+
+/** Whether a site is shown folded. Never while searching: a search answers with what it found,
+ *  and a match hidden under a folded site is a search that seems to find nothing. */
+function _dcimIsFolded(uid) {
+    return _dcimFold.has(uid) && !_dcimQuery.trim();
+}
+
+/** A status light: green when it is fine, amber with a warning, red when something is down, grey
+ *  when nothing in it is watched — and that grey is NOT green, for the same reason a rack of patch
+ *  panels gets no green badge: a light that says "fine" about what nobody checks is a lie seen
+ *  from the door. With the word beside it when there is room, and always for a screen reader. */
+function _dcimLed(state, conPalabra) {
+    const tono = {error: 'bg-danger text-danger', warning: 'bg-warning text-warning',
+                  ok: 'bg-success text-success'}[state] || 'bg-secondary text-secondary';
+    const malo = state === 'error' || state === 'warning';
+    const palabra = _dcimStateWord(state);
+    return `<span class="d-inline-flex align-items-center gap-1 ss-fs-2 text-nowrap"
+                  title="${escAttr(palabra)}"><span class="ss-led ${tono} ${malo ? 'is-bad' : ''}"
+            role="img" aria-label="${escAttr(palabra)}"></span>${
+            conPalabra ? `<span class="${malo ? 'fw-semibold' : 'text-muted'}">${esc(palabra)}</span>` : ''}</span>`;
+}
+
+function _dcimPct(used, total) {
+    return total ? Math.min(100, Math.round(used * 100 / total)) : 0;
+}
+
+/** How full, as a thin bar. Nothing when there is nothing to fill: an empty bar on a room with
+ *  no racks would say "empty", which is a different thing from "nothing here". Amber past 80 %:
+ *  the point where somebody planning the next install has to look elsewhere. */
+function _dcimUBar(used, total, cls) {
+    if (!total) return '';
+    const pct = _dcimPct(used, total);
+    return `<div class="progress ss-ubar ${cls || ''}" role="progressbar" aria-valuenow="${pct}"
+                 aria-valuemin="0" aria-valuemax="100"
+                 title="${escAttr(tf('dcim_u_used_tt', used, total))}">
+        <div class="progress-bar ${pct > 80 ? 'bg-warning' : 'bg-info'}"
+             style="width:${pct}%"></div></div>`;
+}
+
+/** The same, standing up — the shape of the rack it describes. */
+function _dcimUBarV(used, total) {
+    const pct = _dcimPct(used, total);
+    return `<div class="ss-ubar-v" title="${escAttr(tf('dcim_u_used_tt', used, total))}">
+        <div class="${pct > 80 ? 'bg-warning' : 'bg-info'}" style="height:${pct}%"></div></div>`;
+}
+
+/** Everything that can be done to a site, a room or a rack, behind one "⋯".
+ *
+ *  It replaces the row of three or four buttons every level carried, which repeated on every
+ *  line was most of what the screen showed. Fixed positioning: the list scrolls inside its own
+ *  box, and a menu positioned inside it would be cut at its edge. */
+function _dcimMenu(kind, uid, name, childKind) {
+    if (!_dcimMay('dcim_edit')) return '';
+    const item = (fn, icon, label, tone) => `<li><button type="button"
+        class="dropdown-item ${tone || ''}" onclick="${fn}"><i class="bi ${icon} me-2"></i>${
+        esc(label)}</button></li>`;
+    const hijo = childKind === 'room' ? t('dcim_new_room')
+               : childKind === 'rack' ? t('dcim_new_rack') : '';
+    return `<div class="dropdown d-inline-block">
+        <button type="button" class="btn btn-sm btn-secondary" data-bs-toggle="dropdown"
+                data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false"
+                title="${escAttr(t('dcim_more'))}" aria-label="${escAttr(t('dcim_more'))}">
+            <i class="bi bi-three-dots"></i></button>
+        <ul class="dropdown-menu dropdown-menu-end">
+            ${hijo ? item(`_dcimOpen('new',${jsStr(childKind)},${jsStr(uid)},'')`,
+                          'bi-plus-lg', hijo) : ''}
+            ${item(`_dcimOpen('edit',${jsStr(kind)},'',${jsStr(uid)})`, 'bi-pencil', t('edit'))}
+            ${_dcimMay('orgs_edit') ? item(
+                `_dcimOwnerAsk(${jsStr(kind)},${jsStr(uid)},${jsStr(name || '')})`,
+                'bi-building-check', t('dcim_owner')) : ''}
+            <li><hr class="dropdown-divider"></li>
+            ${item(`_dcimDelete(${jsStr(kind)},${jsStr(uid)},${jsStr(name || '')})`,
+                   'bi-trash3', t('delete'), 'text-danger')}
+        </ul>
+    </div>`;
+}
+
+/** The "add one more" tile at the end of a row or a grid. */
+function _dcimAddTile(fn, label, big) {
+    if (!_dcimMay('dcim_edit')) return '';
+    return `<button type="button" class="ss-add-tile ${big ? 'h-100 py-4' : ''}" onclick="${fn}"
+            title="${escAttr(label)}" aria-label="${escAttr(label)}">
+        <i class="bi bi-plus-lg ${big ? 'ss-fs-6' : ''}"></i>${big ? `<span>${esc(label)}</span>` : ''}
+    </button>`;
+}
+
+/** The company of a room as a word, for a summary line: its own, or its site's. */
+function _dcimOrgShort(uid) {
+    const org = (_dcimData.orgs || []).find(o => o.uid === uid);
+    return org ? (org.short || org.name || '') : '';
+}
+
+// ── Filter, selection, switching ───────────────────────────────────────────────────────────
+
+/** The sites as the search and the company filter leave them.
+ *
+ *  A site, room or rack is kept when it matches the text itself or sits inside something that
+ *  does — searching "HQ" shows HQ with everything in it, searching "Rack01" shows each Rack01
+ *  with the rooms and sites that hold it, so the answer still says where. The company is the
+ *  one each thing says, or failing that the one of what holds it. */
+function _dcimFiltered() {
+    const q = _dcimQuery.trim().toLowerCase();
+    const org = _dcimOrgPick;
+    const has = (...v) => !q || v.some(x => String(x || '').toLowerCase().includes(q));
+    const out = [];
+    for (const s of _dcimData.sites || []) {
+        const sOrg = s.org_uid || '';
+        const sHit = has(s.name, s.address);
+        const rooms = [];
+        for (const r of s.rooms || []) {
+            const rOrg = r.org_uid || sOrg;
+            const rHit = sHit || has(r.name);
+            const racks = (r.rackList || []).filter(k =>
+                (!org || (k.org_uid || rOrg) === org) && (rHit || has(k.name, k.asset)));
+            if (racks.length || ((!org || rOrg === org) && rHit))
+                rooms.push(Object.assign({}, r, {rackList: racks}));
+        }
+        if (rooms.length || ((!org || sOrg === org) && sHit))
+            out.push(Object.assign({}, s, {rooms}));
+    }
+    return out;
+}
+
+/** Whether the inventory itself is what is on screen — and not a rack, a plan or another view
+ *  of this section, which share the same pane. */
+function _dcimInvShown() {
+    return !(_dcCat || _dcBuilds || _dcWire || _dcDev || _dcSrc || _dcimBoard
+             || _dcimRack || _dcimPlan || _dcsPlan);
+}
+
+/** Paint the inventory again from what is already loaded: switching view or filter is not a
+ *  reason to ask the server again. */
+function _dcimInvPaint() {
+    const pane = document.getElementById('dcim-container');
+    if (!pane || !_dcimInvShown()) return renderDcim();
+    pane.innerHTML = _dcimTreeHtml();
+}
+
+/** Only what is under the toolbar — so the search box keeps the focus while it is typed in. */
+function _dcimInvBody() {
+    const el = document.getElementById('dcimInvBody');
+    if (!el) return _dcimInvPaint();
+    el.innerHTML = _dcimLayoutHtml();
+}
+
+function _dcimSetLayout(v) {
+    _dcimLayout = v;
+    try { localStorage.setItem(_DCIM_LAYOUT_KEY, v); } catch (_) { /* not remembered, that's all */ }
+    _dcimInvPaint();
+}
+
+function _dcimSearch(v) {
+    _dcimQuery = String(v || '');
+    clearTimeout(_dcimQueryTimer);
+    _dcimQueryTimer = setTimeout(_dcimInvBody, 150);
+}
+
+/** Pick a company. The whole screen and not only the body: the toolbar's selector and the
+ *  cards' chips say which one is picked, and both have to agree. */
+function _dcimPickOrg(v) {
+    _dcimOrgPick = String(v || '');
+    _dcimInvPaint();
+}
+
+function _dcimAllFolded() {
+    _dcimFoldNew();
+    const sites = _dcimData.sites || [];
+    return sites.length > 0 && sites.every(s => _dcimFold.has(s.uid));
+}
+
+function _dcimFoldAll() {
+    if (_dcimAllFolded()) _dcimFold.clear();
+    else _dcimFold = new Set((_dcimData.sites || []).map(s => s.uid));
+    _dcimInvPaint();               // the button's own label changes too
+}
+
+function _dcimFoldToggle(uid) {
+    if (_dcimFold.has(uid)) _dcimFold.delete(uid); else _dcimFold.add(uid);
+    _dcimInvBody();
+}
+
+/** Ask again. */
+function _dcimRefresh() {
+    renderDcim();
+}
+
+/** Pick a site: in the detail view it is what is shown beside the list; in the others
+ *  it is where the screen goes. Unfolded, because going to a folded site shows nothing of it. */
+async function _dcimPickSite(uid, room) {
+    _dcimSel = {site: uid, room: room || ''};
+    _dcimFold.delete(uid);
+    _dcimTreeOpen.add(uid);
+    if (_dcimInvShown() && document.getElementById('dcimInvBody')) _dcimInvBody();
+    else await renderDcim();
+    // After painting: scrolling to something not yet in the document goes nowhere, silently.
+    setTimeout(() => {
+        const el = document.getElementById(room ? 'dcim-room-' + room : 'dcim-site-' + uid);
+        if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }, 0);
+}
+
+/** Open a site in the detail view: from a card or from a table row. */
+function _dcimShowSite(uid) {
+    _dcimSel = {site: uid, room: ''};
+    _dcimTreeOpen.add(uid);
+    _dcimSetLayout('detail');
+}
+
+/** The switch. Icons with their word: four icons alone are a quiz — except on a phone, where
+ *  the words do not fit and the name stays in the tooltip and for the screen reader. */
+function _dcimLayoutPicker() {
+    const vistas = [
+        ['list', 'bi-list-nested', t('dcim_layout_list'), t('dcim_layout_list_tt')],
+        ['detail', 'bi-layout-sidebar-inset', t('dcim_layout_detail'), t('dcim_layout_detail_tt')],
+        ['cards', 'bi-grid-3x2-gap', t('dcim_layout_cards'), t('dcim_layout_cards_tt')],
+        ['table', 'bi-table', t('dcim_layout_table'), t('dcim_layout_table_tt')],
+    ];
+    return `<div class="btn-group btn-group-sm" role="group" aria-label="${escAttr(t('dcim_layout'))}">
+        ${vistas.map(([k, icono, nombre, ayuda]) => `<button type="button"
+            class="btn ${k === _dcimLayout ? 'btn-primary' : 'btn-secondary'}"
+            aria-pressed="${k === _dcimLayout}" title="${escAttr(ayuda)}"
+            aria-label="${escAttr(nombre)}"
+            onclick="_dcimSetLayout(${jsStr(k)})"><i class="bi ${icono}"></i><span
+            class="d-none d-sm-inline ms-1">${esc(nombre)}</span></button>`).join('')}
+    </div>`;
+}
+
+/** What goes under the toolbar. */
+function _dcimLayoutHtml() {
+    if (!(_dcimData.sites || []).length)
+        return `<div class="text-muted small">${esc(t('dcim_empty'))}</div>`;
+    _dcimFoldNew();
+    const sites = _dcimFiltered();
+    if (_dcimLayout === 'cards') return _dcimCardsHtml(sites);
+    if (!sites.length) return `<div class="text-muted small">${esc(t('dcim_no_match'))}</div>`;
+    if (_dcimLayout === 'detail') return _dcimDetailHtml(sites);
+    if (_dcimLayout === 'table') return _dcimTableHtml(sites);
+    return _dcimListHtml(sites);
+}
+
+/** The site picked, or the first one shown when the picked one is filtered out. */
+function _dcimSelSite(sites) {
+    return sites.find(s => s.uid === _dcimSel.site) || sites[0] || null;
+}
+
+// ── Ficha: tree + detail ───────────────────────────────────────────────────────────────────
+
+function _dcimDetailHtml(sites) {
+    const site = _dcimSelSite(sites);
+    // La primera vez, sin nada elegido, la que sale se elige y se ve desplegada. Solo esa vez:
+    // abrirla en CADA dibujado impedía plegarla, porque plegar es volver a dibujar.
+    if (site && !_dcimSel.site) {
+        _dcimSel = {site: site.uid, room: ''};
+        _dcimTreeOpen.add(site.uid);
+    }
+    return `<div class="ss-master">
+        <nav class="ss-master-list card p-2 d-flex flex-column gap-1"
+             aria-label="${escAttr(t('dcim_sites_head'))}">
+            <div class="ss-head-caps px-2 pt-1 pb-1">${esc(t('dcim_sites_head'))}</div>
+            ${sites.map(s => _dcimDetailNav(s, site)).join('')}
+        </nav>
+        <div class="ss-master-main">${site ? _dcimDetailSite(site) : ''}</div>
+    </div>`;
+}
+
+/** Pulsar una sede del árbol: elegirla, o —si ya lo estaba— plegarla o desplegarla. Una línea
+ *  entera que se pulsa y no un botón de chevrón aparte: el chevrón suelto era un blanco de
+ *  veinte píxeles al lado de otro más grande, y la maqueta no lo tenía. */
+function _dcimTreePick(uid) {
+    const elegida = _dcimSel.site === uid && !_dcimSel.room;
+    if (elegida) {
+        if (_dcimTreeOpen.has(uid)) _dcimTreeOpen.delete(uid); else _dcimTreeOpen.add(uid);
+        return _dcimInvBody();
+    }
+    _dcimTreeOpen.add(uid);
+    _dcimPickSite(uid);
+}
+
+/** A site in the tree — chevron, name, company — and, unfolded, its rooms. */
+function _dcimDetailNav(s, site) {
+    const activa = site && s.uid === site.uid;
+    const abierta = _dcimTreeOpen.has(s.uid);
+    return `<button type="button" class="ss-tree-row ${activa && !_dcimSel.room ? 'is-picked' : ''}"
+            aria-expanded="${abierta}" aria-current="${!!activa}"
+            onclick="_dcimTreePick(${jsStr(s.uid)})">
+        <i class="bi bi-chevron-${abierta ? 'down' : 'right'} text-muted"></i>
+        ${_dcimLed((s.roll || {}).state)}
+        <i class="bi bi-building"></i>
+        <span class="flex-grow-1 text-truncate">${esc(s.name || s.uid)}</span>
+        ${_dcimOrgBadge(s.org_uid)}
+    </button>
+    ${abierta ? (s.rooms || []).map(r => `<button type="button"
+            class="ss-tree-row ss-tree-sub ${_dcimSel.room === r.uid ? 'is-picked' : ''}"
+            onclick="_dcimPickSite(${jsStr(s.uid)},${jsStr(r.uid)})">
+        ${_dcimLed((r.roll || {}).state)}
+        <i class="bi bi-door-open"></i>
+        <span class="flex-grow-1 text-truncate">${esc(r.name || r.uid)}</span>
+        <span class="text-muted text-nowrap ss-fs-2">${esc(tf('dcim_racks', (r.rackList || []).length))}</span>
+    </button>`).join('') : ''}`;
+}
+
+function _dcimDetailSite(site) {
+    const tot = _dcimSiteTotals(site);
+    const kpi = (label, value) => `<div class="card"><div class="card-body py-2 px-3">
+        <div class="text-muted ss-fs-2">${esc(label)}</div>
+        <div class="ss-fs-6 fw-semibold ss-tabular">${esc(String(value))}</div></div></div>`;
+    const edita = _dcimMay('dcim_edit');
+    return `<div id="dcim-site-${escAttr(site.uid)}" class="d-flex flex-column gap-3">
+        <div class="d-flex flex-wrap align-items-start gap-2">
+            <div class="flex-grow-1 d-flex flex-column gap-1">
+                <nav class="text-muted ss-fs-2" aria-label="breadcrumb">${esc(t('dcim_inventory'))} › <span
+                    class="text-body">${esc(site.name || site.uid)}</span></nav>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <span class="ss-fs-6 fw-semibold">${esc(site.name || site.uid)}</span>
+                    ${_dcimOrgBadge(site.org_uid)} ${_dcimLed((site.roll || {}).state, true)}
+                </div>
+                <div class="d-flex flex-wrap gap-3 text-muted ss-fs-2">
+                    ${site.address ? `<span>${esc(site.address)}</span>` : ''}
+                    ${_dcimCoords(site)}
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-sm btn-primary" onclick="_dcsOpen(${jsStr(site.uid)})">
+                    <i class="bi bi-layers me-1"></i>${esc(t('dcim_site_plan_short'))}</button>
+                ${edita ? `<button class="btn btn-sm btn-secondary"
+                        onclick="_dcimOpen('new','room',${jsStr(site.uid)},'')">
+                    <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_kind_room'))}</button>
+                <button class="btn btn-sm btn-secondary"
+                        onclick="_dcimOpen('edit','site','',${jsStr(site.uid)})">
+                    <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>` : ''}
+                ${_dcimMenu('site', site.uid, site.name, '')}
+            </div>
+        </div>
+        <div class="ss-kpis">
+            ${kpi(t('dcim_kpi_floors'), site.floors || 0)}
+            ${kpi(t('dcim_kpi_rooms'), tot.rooms)}
+            ${kpi(t('dcim_kpi_racks'), tot.racks)}
+            ${kpi(t('dcim_kpi_u'), tf('dcim_u_used', tot.used, tot.u))}
+            ${kpi(t('dcim_kpi_devices'), tot.things)}
+        </div>
+        ${(site.rooms || []).length ? (site.rooms || []).map(r => _dcimDetailRoom(r, site)).join('')
+            : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_rooms'))}</div>`}
+    </div>`;
+}
+
+function _dcimDetailRoom(room, site) {
+    const racks = room.rackList || [];
+    const tot = _dcimRoomTotals(room);
+    const elegida = _dcimSel.room === room.uid;
+    const empresa = _dcimOrgShort(room.org_uid || site.org_uid);
+    const edita = _dcimMay('dcim_edit');
+    return `<div class="card ${elegida ? 'border-primary' : ''}" id="dcim-room-${escAttr(room.uid)}">
+        <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+            ${_dcimLed((room.roll || {}).state)}
+            <i class="bi bi-door-open"></i>
+            <span class="fw-semibold">${esc(room.name || room.uid)}</span>
+            ${_dcimCoolBadge(room)}
+            <span class="text-muted ss-fs-2 flex-grow-1">${esc(tf('dcim_racks', tot.racks))}${
+                empresa ? ' · ' + esc(empresa) : ''}</span>
+            <button class="btn btn-sm btn-secondary" onclick="_dcimOpenPlan(${jsStr(room.uid)})">
+                <i class="bi bi-map me-1"></i>${esc(t('dcim_open_plan'))}</button>
+            ${edita ? `<button class="btn btn-sm btn-secondary"
+                    onclick="_dcimOpen('new','rack',${jsStr(room.uid)},'')"
+                    title="${escAttr(t('dcim_new_rack'))}" aria-label="${escAttr(t('dcim_new_rack'))}">
+                <i class="bi bi-plus-lg"></i></button>` : ''}
+            ${_dcimMenu('room', room.uid, room.name, '')}
+        </div>
+        <div class="card-body d-flex flex-wrap gap-3">
+            ${racks.map(k => _dcimDetailRack(k, room, site)).join('')}
+            ${!racks.length ? `<span class="text-muted ss-fs-2">${esc(tf('dcim_racks', 0))}</span>` : ''}
+        </div>
+    </div>`;
+}
+
+/** A rack in the detail view: standing up, with how full it is, pressed as a whole to open. */
+function _dcimDetailRack(rack, room, site) {
+    const empresa = rack.org_uid || room.org_uid || site.org_uid;
+    return `<button type="button" class="ss-tile-btn d-flex gap-3 align-items-stretch"
+            style="width:13.75rem" onclick="_dcimLoadRack(${jsStr(rack.uid)})">
+        ${_dcimUBarV(rack.used_u || 0, rack.u_height || 0)}
+        <span class="d-flex flex-column gap-1 flex-grow-1 ss-min-0">
+            <span class="d-flex align-items-center gap-2">${_dcimLed((rack.roll || {}).state)}<strong
+                class="text-truncate">${esc(rack.name || rack.uid)}</strong></span>
+            <span class="text-muted ss-fs-2">${esc(String(rack.u_height || 0))}U</span>
+            <span class="text-muted ss-fs-2">${esc(tf('dcim_u_taken', rack.used_u || 0))}</span>
+            <span class="d-flex gap-1 flex-wrap mt-auto">${_dcimOrgBadge(empresa)}${
+                _dcimRollBadge(rack.roll)}</span>
+        </span>
+    </button>`;
+}
+
+// ── Tarjetas ───────────────────────────────────────────────────────────────────────────────
+
+/** The companies as chips with how many sites each has — the cards' filter, as drawn. */
+function _dcimOrgChips() {
+    const sites = _dcimData.sites || [];
+    const chip = (uid, label) => `<button type="button"
+            class="btn btn-sm rounded-pill ${_dcimOrgPick === uid ? 'btn-primary' : 'btn-secondary'}"
+            aria-pressed="${_dcimOrgPick === uid}"
+            onclick="_dcimPickOrg(${jsStr(uid)})">${esc(label)}</button>`;
+    const porEmpresa = (_dcimData.orgs || []).map(o => {
+        const n = sites.filter(s => s.org_uid === o.uid).length;
+        const nombre = o.short || o.name || '';
+        return chip(o.uid, n ? nombre + ' · ' + n : nombre);       // `chip` lo escapa
+    }).join('');
+    return `<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <span class="text-muted ss-fs-2 me-1">${esc(t('dcim_owner'))}</span>
+        ${chip('', tf('dcim_all_n', sites.length))}
+        ${porEmpresa}
+    </div>`;
+}
+
+function _dcimCardsHtml(sites) {
+    return `${_dcimOrgChips()}
+        ${sites.length ? '' : `<div class="text-muted small mb-3">${esc(t('dcim_no_match'))}</div>`}
+        <div class="ss-card-grid">
+            ${sites.map(_dcimCard).join('')}
+            ${_dcimAddTile(`_dcimOpen('new','site','','')`, t('dcim_new_site'), true)}
+        </div>`;
+}
+
+/** The strip on top of a card: the lowest floor that has a plan, drawn small. */
+function _dcimCardThumb(site) {
+    const planta = (site.floor_list || []).find(f => f.plan);
+    if (planta) return `<img class="ss-card-thumb" loading="lazy"
+        src="${escAttr(_dcimMediaUrl(planta.plan))}" alt="${escAttr(planta.name || '')}">`;
+    return `<div class="ss-card-thumb ss-fs-2"><i class="bi bi-map me-2"></i>${esc(t('dcim_no_plan'))}</div>`;
+}
+
+function _dcimCard(site) {
+    const tot = _dcimSiteTotals(site);
+    const pct = _dcimPct(tot.used, tot.u);
+    const numero = (n, palabra) => `<span><strong>${esc(String(n))}</strong> <span
+        class="text-muted">${esc(palabra)}</span></span>`;
+    return `<div class="card h-100 overflow-hidden" id="dcim-site-${escAttr(site.uid)}">
+        ${_dcimCardThumb(site)}
+        <div class="card-body d-flex flex-column gap-2">
+            <div class="d-flex align-items-center gap-2">
+                <span class="fw-semibold ss-fs-4 flex-grow-1 text-truncate">${esc(site.name || site.uid)}</span>
+                ${_dcimLed((site.roll || {}).state, true)} ${_dcimOrgBadge(site.org_uid)}
+            </div>
+            ${site.address ? `<div class="text-muted ss-fs-2">${esc(site.address)}</div>` : ''}
+            <div class="d-flex gap-3 ss-fs-3 flex-wrap">
+                ${numero(tot.rooms, t('dcim_word_rooms'))}
+                ${numero(tot.racks, t('dcim_word_racks'))}
+                ${numero(tot.u, 'U')}
+            </div>
+            ${tot.u ? `<div class="d-flex flex-column gap-1">
+                ${_dcimUBar(tot.used, tot.u, 'w-100')}
+                <span class="text-muted ss-fs-1">${esc(tf('dcim_pct_used', pct))}${
+                    tot.quiet ? ' · ' + esc(tf('dcim_unwatched_n', tot.quiet)) : ''}</span>
+            </div>` : ''}
+            <div class="border-top pt-1">
+                ${(site.rooms || []).map(r => `<a href="#"
+                        class="d-flex align-items-center gap-2 py-1 ss-fs-3 link-body-emphasis text-decoration-none"
+                        onclick="_dcimOpenPlan(${jsStr(r.uid)});return false" title="${escAttr(t('dcim_plan'))}">
+                    ${_dcimLed((r.roll || {}).state)}
+                    <i class="bi bi-door-open text-muted"></i>
+                    <span class="flex-grow-1 text-truncate">${esc(r.name || r.uid)}</span>
+                    <span class="text-muted ss-fs-2">${esc(tf('dcim_racks', (r.rackList || []).length))}${
+                        r.cooling ? ' · ' + esc(t('dcim_cooling_' + r.cooling)) : ''}</span>
+                </a>`).join('')}
+            </div>
+        </div>
+        <div class="card-footer d-flex gap-2">
+            <button class="btn btn-sm btn-primary flex-grow-1"
+                    onclick="_dcimShowSite(${jsStr(site.uid)})">${esc(t('dcim_open'))}</button>
+            <button class="btn btn-sm btn-secondary" onclick="_dcsOpen(${jsStr(site.uid)})">
+                <i class="bi bi-layers me-1"></i>${esc(t('dcim_site_plan_short'))}</button>
+            ${_dcimMenu('site', site.uid, site.name, 'room')}
+        </div>
+    </div>`;
+}
+
+// ── Tabla ──────────────────────────────────────────────────────────────────────────────────
+
+//: The table's columns. Name and actions always; the rest can be hidden.
+function _dcimTableColumns() {
+    return [
+        {id: 'kind', label: () => t('dcim_col_kind')},
+        {id: 'where', label: () => t('dcim_col_where')},
+        {id: 'cap', label: () => t('dcim_col_capacity')},
+        {id: 'usage', label: () => t('dcim_col_usage')},
+        {id: 'cool', label: () => t('dcim_col_cooling')},
+        {id: 'org', label: () => t('dcim_col_org')},
+        {id: 'state', label: () => t('dcim_col_state')},
+    ];
+}
+
+function _dcimTableColToggle(id) {
+    if (_dcimTableCols.has(id)) _dcimTableCols.delete(id); else _dcimTableCols.add(id);
+    try { localStorage.setItem(_DCIM_TABLE_COLS_KEY, JSON.stringify([..._dcimTableCols])); }
+    catch (_) { /* not remembered, that's all */ }
+    _dcimInvBody();
+}
+
+function _dcimTableColReset() {
+    _dcimTableCols = new Set(_DCIM_TABLE_COLS_DEFAULT);
+    try { localStorage.removeItem(_DCIM_TABLE_COLS_KEY); } catch (_) { /* nothing to forget */ }
+    _dcimInvBody();
+}
+
+function _dcimTableSet(campo, valor) {
+    if (campo === 'group') _dcimTableGroup = valor === 'none' ? 'none' : 'tree';
+    if (campo === 'kind') _dcimTableKind = ['site', 'room', 'rack'].includes(valor) ? valor : '';
+    _dcimInvBody();
+}
+
+/** The rows, as data: the same list draws the table and writes the CSV, so what is exported is
+ *  exactly what is on screen. */
+function _dcimTableRows(sites) {
+    const plano = _dcimTableGroup === 'none' || !!_dcimTableKind;
+    const quiere = (k) => !_dcimTableKind || _dcimTableKind === k;
+    const filas = [];
+    for (const s of sites) {
+        const tot = _dcimSiteTotals(s);
+        const plegada = !plano && _dcimIsFolded(s.uid);
+        if (quiere('site')) filas.push({
+            id: 'dcim-site-' + s.uid, kind: 'site', depth: 0, fold: plano ? '' : s.uid,
+            folded: plegada, icon: 'bi-building', name: s.name || s.uid,
+            where: s.address || '', cap: tf('dcim_rooms', tot.rooms) + ' · ' + tf('dcim_racks', tot.racks),
+            used: tot.used, u: tot.u, cool: '', org: s.org_uid, roll: s.roll,
+            open: `_dcimShowSite(${jsStr(s.uid)})`, menu: _dcimMenu('site', s.uid, s.name, 'room')});
+        if (plegada) continue;
+        const plantas = Object.fromEntries((s.floor_list || []).map(f => [f.uid, f.name]));
+        for (const r of s.rooms || []) {
+            const rt = _dcimRoomTotals(r);
+            if (quiere('room')) filas.push({
+                id: 'dcim-room-' + r.uid, kind: 'room', depth: plano ? 0 : 1, icon: 'bi-door-open',
+                name: r.name || r.uid,
+                where: (s.name || '') + (plantas[r.floor_uid] ? ' › ' + plantas[r.floor_uid] : ''),
+                cap: tf('dcim_racks', rt.racks), used: rt.used, u: rt.u,
+                cool: r.cooling ? t('dcim_cooling_' + r.cooling) : '', org: r.org_uid || s.org_uid,
+                roll: r.roll, open: `_dcimOpenPlan(${jsStr(r.uid)})`,
+                menu: _dcimMenu('room', r.uid, r.name, 'rack')});
+            for (const k of r.rackList || []) {
+                if (quiere('rack')) filas.push({
+                    kind: 'rack', depth: plano ? 0 : 2, icon: 'bi-hdd-rack', name: k.name || k.uid,
+                    where: (s.name || '') + ' › ' + (r.name || ''),
+                    cap: (k.u_height || 0) + 'U', used: k.used_u || 0, u: k.u_height || 0,
+                    cool: '', org: k.org_uid || r.org_uid || s.org_uid, roll: k.roll,
+                    open: `_dcimLoadRack(${jsStr(k.uid)})`, menu: _dcimMenu('rack', k.uid, k.name, '')});
+            }
+        }
+    }
+    return filas;
+}
+
+function _dcimKindWord(kind) {
+    if (kind === 'site') return t('dcim_kind_site');
+    if (kind === 'room') return t('dcim_kind_room');
+    return t('dcim_kind_rack');
+}
+
+function _dcimTableHtml(sites) {
+    const filas = _dcimTableRows(sites);
+    const ver = (id) => _dcimTableCols.has(id);
+    const cab = (id, texto) => ver(id) ? `<th>${esc(texto)}</th>` : '';
+    const opcion = (v, actual, texto) =>
+        `<option value="${escAttr(v)}" ${v === actual ? 'selected' : ''}>${esc(texto)}</option>`;
+    return `<div class="card mb-3"><div class="card-body py-2 d-flex flex-wrap gap-2 align-items-center">
+            <select class="form-select form-select-sm w-auto" aria-label="${escAttr(t('dcim_group'))}"
+                    onchange="_dcimTableSet('group',this.value)">
+                ${opcion('tree', _dcimTableGroup, t('dcim_group_tree'))}
+                ${opcion('none', _dcimTableGroup, t('dcim_group_none'))}
+            </select>
+            <select class="form-select form-select-sm w-auto" aria-label="${escAttr(t('dcim_col_kind'))}"
+                    onchange="_dcimTableSet('kind',this.value)">
+                ${opcion('', _dcimTableKind, t('dcim_kind_all'))}
+                ${opcion('site', _dcimTableKind, t('dcim_kind_sites'))}
+                ${opcion('room', _dcimTableKind, t('dcim_kind_rooms'))}
+                ${opcion('rack', _dcimTableKind, t('dcim_kind_racks'))}
+            </select>
+            <span class="ms-auto"></span>
+            ${_buildColChooser(_dcimTableColumns(), _dcimTableCols,
+                               '_dcimTableColToggle', '_dcimTableColReset')}
+            <button class="btn btn-sm btn-secondary" onclick="_dcimCsv()">
+                <i class="bi bi-download me-1"></i>${esc(t('dcim_export_csv'))}</button>
+        </div></div>
+        <div class="table-responsive border rounded">
+        <table class="table table-sm table-hover align-middle mb-0 ss-fs-3 text-nowrap">
+            <thead><tr>
+                <th>${esc(t('dcim_col_name'))}</th>${cab('kind', t('dcim_col_kind'))}${
+                cab('where', t('dcim_col_where'))}${cab('cap', t('dcim_col_capacity'))}${
+                cab('usage', t('dcim_col_usage'))}${cab('cool', t('dcim_col_cooling'))}${
+                cab('org', t('dcim_col_org'))}${cab('state', t('dcim_col_state'))}
+                <th class="text-end">${esc(t('dcim_col_actions'))}</th>
+            </tr></thead>
+            <tbody>${filas.map(_dcimTableRow).join('')}</tbody>
+        </table>
+        </div>
+        <div class="text-muted ss-fs-2 mt-2">${esc(tf('dcim_table_foot', sites.length,
+                                                       (_dcimData.sites || []).length))}</div>`;
+}
+
+function _dcimTableRow(f) {
+    const ver = (id) => _dcimTableCols.has(id);
+    const sangria = ['', 'ps-4', 'ps-5'][f.depth] || '';
+    const pliegue = f.fold ? `<button class="btn btn-sm btn-secondary py-0 px-1 me-1"
+            onclick="_dcimFoldToggle(${jsStr(f.fold)})" aria-expanded="${!f.folded}"
+            aria-label="${escAttr(f.folded ? t('dcim_unfold') : t('dcim_fold'))}">
+        <i class="bi bi-chevron-${f.folded ? 'right' : 'down'}"></i></button>` : '';
+    const pct = _dcimPct(f.used, f.u);
+    return `<tr ${f.id ? `id="${escAttr(f.id)}"` : ''} class="${f.kind === 'site' && f.fold
+                                                              ? 'table-active' : ''} ss-hover-host">
+        <td><div class="${sangria} d-flex align-items-center gap-1">
+            ${pliegue}<i class="bi ${f.icon} text-muted me-1"></i>
+            <span class="${f.kind === 'site' ? 'fw-semibold' : ''}">${esc(f.name)}</span></div></td>
+        ${ver('kind') ? `<td class="text-muted">${esc(_dcimKindWord(f.kind))}</td>` : ''}
+        ${ver('where') ? `<td class="text-muted">${esc(f.where)}</td>` : ''}
+        ${ver('cap') ? `<td class="ss-tabular">${esc(f.cap)}</td>` : ''}
+        ${ver('usage') ? `<td><div class="d-flex align-items-center gap-2">${_dcimUBar(f.used, f.u)}${
+            f.u ? `<span class="text-muted ss-tabular" title="${escAttr(tf('dcim_u_used_tt', f.used, f.u))}">${
+                esc(String(pct))} %</span>` : ''}</div></td>` : ''}
+        ${ver('cool') ? `<td class="text-muted">${esc(f.cool)}</td>` : ''}
+        ${ver('org') ? `<td>${_dcimOrgBadge(f.org)}</td>` : ''}
+        ${ver('state') ? `<td><span class="d-inline-flex align-items-center gap-2">${
+            _dcimLed((f.roll || {}).state, true)}${_dcimRollBadge(f.roll)}</span></td>` : ''}
+        <td class="text-end">
+            <button class="btn btn-sm btn-secondary" onclick="${f.open}"
+                    title="${escAttr(t('dcim_open'))}" aria-label="${escAttr(t('dcim_open'))}">
+                <i class="bi bi-chevron-right"></i></button>
+            ${f.menu}
+        </td>
+    </tr>`;
+}
+
+/** The table as a CSV file: the rows on screen, the columns on screen, the words on screen. */
+function _dcimCsv() {
+    const ver = (id) => _dcimTableCols.has(id);
+    const cols = [['name', t('dcim_col_name'), f => f.name]];
+    if (ver('kind')) cols.push(['kind', t('dcim_col_kind'), f => _dcimKindWord(f.kind)]);
+    if (ver('where')) cols.push(['where', t('dcim_col_where'), f => f.where]);
+    if (ver('cap')) cols.push(['cap', t('dcim_col_capacity'), f => f.cap]);
+    if (ver('usage')) {
+        cols.push(['used', t('dcim_kpi_u'), f => f.u ? `${f.used}/${f.u}` : '']);
+        cols.push(['pct', t('dcim_col_usage'), f => f.u ? `${_dcimPct(f.used, f.u)} %` : '']);
+    }
+    if (ver('cool')) cols.push(['cool', t('dcim_col_cooling'), f => f.cool]);
+    if (ver('org')) cols.push(['org', t('dcim_col_org'), f => f.org ? _dcimOrgName(f.org) : '']);
+    if (ver('state')) cols.push(['state', t('dcim_col_state'), f => _dcimStateWord((f.roll || {}).state)]);
+    // Todas las filas, también las de las sedes plegadas: plegar es mirar, no filtrar.
+    const plegadas = _dcimFold;
+    _dcimFold = new Set();
+    let filas;
+    try { filas = _dcimTableRows(_dcimFiltered()); } finally { _dcimFold = plegadas; }
+    const celda = (v) => {
+        const s = String(v === null || v === undefined ? '' : v);
+        return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const texto = [cols.map(c => celda(c[1])).join(',')]
+        .concat(filas.map(f => cols.map(c => celda(c[2](f))).join(','))).join('\r\n');
+    ssDownloadBlob(new Blob(['﻿' + texto], {type: 'text/csv;charset=utf-8'}),
+                   t('dcim_csv_name') + '.csv');
+}

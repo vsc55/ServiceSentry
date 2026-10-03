@@ -54,6 +54,7 @@ from lib.db.store_base import BaseStore
 from .cabling import (CABLE_CATEGORIES, CABLE_COLORS, CABLE_KINDS, LINK_KINDS,
                       _CABLE, _LINK)
 from .features import FEATURE_KINDS, FEATURE_LAYERS, _FEATURE
+from .floors import _FLOOR
 from .items import FACES, ITEM_ROLES, PLACEMENTS, ROLES_MUDOS, _ITEM
 from .parts import (PART_KINDS, PORT_FAMILIES, PORT_LIST_MAX, PORT_SIGNALS_MAX,
                     WATTS_MAX, _PART, clean_port_list)
@@ -76,7 +77,7 @@ from .sites import _SITE
 #: scopes being declared instead of listed.
 OWNER_SCOPES = ('site', 'room', 'rack', 'item')
 
-SCHEMAS = (_SITE, _ROOM, _RACK, _ITEM, _FEATURE, _PDU, _POWER, _CABLE,
+SCHEMAS = (_SITE, _FLOOR, _ROOM, _RACK, _ITEM, _FEATURE, _PDU, _POWER, _CABLE,
            _LINK, _ROW, _SOURCE, _PART)
 
 #: Lo que este paquete ofrece hacia fuera. Escrito y no deducido: casi todo se importa aquí
@@ -176,6 +177,7 @@ class DcimStore:
         self.orgs = self._orgs.orgs
         self.owners = self._orgs.owners
         self.sites = Rows(db, _SITE)
+        self.floors = Rows(db, _FLOOR)
         self.rooms = Rows(db, _ROOM)
         self.racks = Rows(db, _RACK)
         self.items = Rows(db, _ITEM)
@@ -306,6 +308,11 @@ class DcimStore:
 
     def rooms_of(self, site_uid: str) -> list[dict]:
         return self.rooms.list('site_uid = ?', (str(site_uid or ''),))
+
+    def floors_of(self, site_uid: str) -> list[dict]:
+        """Las plantas de una sede, de abajo arriba: como se recorre un edificio."""
+        rows = self.floors.list('site_uid = ?', (str(site_uid or ''),))
+        return sorted(rows, key=lambda f: (int(f.get('level') or 0), str(f.get('name') or '')))
 
     def racks_of(self, room_uid: str) -> list[dict]:
         return self.racks.list('room_uid = ?', (str(room_uid or ''),))

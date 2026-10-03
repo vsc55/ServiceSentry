@@ -12,6 +12,13 @@
     DELETE /api/v1/dcim/sites/<uid>
     POST   /api/v1/dcim/rooms/<uid>/plan     upload a room's floor plan
     DELETE /api/v1/dcim/rooms/<uid>/plan     …and take it away
+    GET    /api/v1/dcim/sites/<uid>/floors   a site's floors, bottom up
+    POST   /api/v1/dcim/floors               add a floor to a site
+    PUT    /api/v1/dcim/floors/<uid>         rename it, renumber it, scale its plan
+    DELETE /api/v1/dcim/floors/<uid>         take it away; its rooms stay, not placed
+    POST   /api/v1/dcim/floors/<uid>/plan    upload a floor's background plan
+    DELETE /api/v1/dcim/floors/<uid>/plan    …and take it away
+    POST   /api/v1/dcim/floors/<uid>/area    its general area, made on first use
     GET    /api/v1/dcim/media/<path:name>    serve one stored picture
     GET    /api/v1/dcim/media-dir            which folder the pictures actually go to
     GET    /api/v1/dcim/rooms/<uid>/features what is in the room besides the racks

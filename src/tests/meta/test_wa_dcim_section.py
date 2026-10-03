@@ -783,6 +783,93 @@ class TestDeFrenteTambienSeEstira:
         assert "_dcimSend('PUT'" in tramo and '_dcimOpenPlan' in tramo and 'u_height' in tramo
 
 
+class TestLaSedeTienePlantas:
+    """La sede solo tenía su ubicación: dónde está cada sala DENTRO del edificio no se podía
+    decir. Cada planta lleva su plano de fondo y encima se colocan sus salas. Reportado desde la
+    pantalla."""
+
+    def test_la_tarjeta_de_la_sede_abre_sus_plantas(self):
+        assert '_dcsOpen(${jsStr(site.uid)})' in _fn(_section(), '_dcimSiteCard')
+
+    def test_el_plano_de_la_sede_es_una_pantalla_de_la_seccion(self):
+        """Y va DESPUÉS del plano de una sala: abrir una sala desde la sede y volver deja en la
+        sede, que es de donde se venía."""
+        js = _section()
+        cadena = js.split('pane.innerHTML = (')[1].split(');')[0]
+        assert cadena.index('_dcimPlan ? _dcimPlanHtml()') < cadena.index('_dcsPlan ? _dcsHtml()')
+
+    def test_volver_al_arbol_cierra_la_sede(self):
+        assert '_dcsPlan = null;' in _fn(_section(), '_dcimGo')
+
+    def test_la_sede_se_redibuja_con_datos_frescos(self):
+        """`renderDcim` pide las sedes en cada dibujado: quedarse con la de al abrir enseñaría
+        una planta sin la sala que alguien acaba de crear."""
+        assert '_dcimData.sites' in _fn(_section(), '_dcsHtml')
+
+    def test_el_doble_clic_se_reconoce_al_pulsar(self):
+        """Pulsar una sala captura el puntero para arrastrarla, y con él capturado un
+        `ondblclick` en la sala no llega nunca: no abría nada."""
+        abajo = _fn(_section(), '_dcsDown')
+        assert '_dcsLastDown' in abajo and '_dcimOpenPlan(' in abajo
+        assert 'ondblclick' not in _fn(_section(), '_dcsRoom')
+
+    def test_lo_tecleado_va_por_la_cola_de_siempre(self):
+        assert '_dcpQueue(' in _fn(_section(), '_dcsRoomSet')
+        assert '_dcpQueue(' in _fn(_section(), '_dcsFloorSet')
+
+    def test_la_sala_seleccionada_lleva_sus_asas(self):
+        assert "puesto && _dcimMay('dcim_edit') ? _dcsHandles(" in _fn(_section(), '_dcsRoom')
+
+    def test_el_asa_se_pregunta_antes_que_la_sala(self):
+        abajo = _fn(_section(), '_dcsDown')
+        assert abajo.index("closest('[data-dcph]')") < abajo.index("closest('g[data-dcs]');" + chr(10) + "    if (g)")
+
+    def test_el_plano_no_se_mide_con_las_salas(self):
+        """Una referencia que se mueve con lo que se coloca encima no sirve para colocar."""
+        assert '_dcsHere()' not in _fn(_section(), '_dcsImageMm')
+
+    def test_colocar_varias_no_las_apila(self):
+        assert 'pisa(' in _fn(_section(), '_dcsPlace')
+
+    def test_lo_de_dentro_se_dibuja_encima_de_las_salas(self):
+        """Un rack suelto en la zona general que quedara debajo de la caja de una sala no se
+        podía pulsar: el ratón agarraba la sala."""
+        dibujo = _fn(_section(), '_dcsContent')
+        assert dibujo.index('_dcsRoom(r)') < dibujo.index('_dcsInside(area)')
+
+    def test_la_paleta_pone_en_la_sala_o_en_la_zona_general(self):
+        poner = _fn(_section(), '_dcsAdd')
+        assert '_dcsToLocal(' in poner and '/area`' in poner
+
+    def test_salas_racks_y_piezas_sacan_su_barra_al_pasar(self):
+        """Se pidió desde la pantalla: botones rápidos sin tener que seleccionar antes."""
+        assert "_dcsFloatShow('room'," in _fn(_section(), '_dcsRoom')
+        assert '_dcsFloatShow(${jsStr(kind)}' in _fn(_section(), '_dcsThing')
+
+    def test_la_barra_vive_fuera_del_dibujo_y_se_esconde_al_arrastrar(self):
+        plano = _fn(_section(), '_dcsHtml')
+        assert plano.index('id="dcsFloat"') < plano.index('<svg ')
+        assert '_dcsFloatHide()' in _fn(_section(), '_dcsDown')
+
+    def test_ir_hacia_la_barra_de_un_rack_no_la_cambia_por_la_de_su_sala(self):
+        """El camino del rack a su barra cruza la sala que lo contiene: sin esperar, la barra
+        se cambiaba a mitad de camino y se pulsaba otro botón."""
+        mostrar = _fn(_section(), '_dcsFloatShow')
+        assert "kind === 'room' && _dcsFloatTimer" in mostrar
+        assert '_dcsFloatPending' in _fn(_section(), '_dcsFloatKeep')
+
+    def test_quien_solo_mira_solo_abre(self):
+        barra = _fn(_section(), '_dcsFloatHtml')
+        assert "if (!edita) return" in barra and 'abrir' in barra.split('if (!edita) return')[1][:80]
+
+    def test_duplicar_un_rack_no_copia_su_numero_de_activo(self):
+        dup = _fn(_section(), '_dcsItemDuplicate')
+        assert "'asset'" not in dup and 'dcim_rack_copy_name' in dup
+
+    def test_quitar_una_planta_pregunta_con_el_modal_del_panel(self):
+        assert 'showConfirmModal(' in _fn(_section(), '_dcsFloorDrop')
+
+
 class TestLasCoordenadasNiSeRedondeanNiSeTecleanEnDosVeces:
     """Un mapa da las dos coordenadas juntas y con diecisiete dígitos.
 
@@ -3634,3 +3721,119 @@ class TestPlantillasUsaLaTablaDelPanel:
         lista = _fn(js, '_dcBuildsHtml')
         assert '<thead' not in lista and '<table' not in lista, (
             'la lista vuelve a dibujar su propia tabla')
+
+
+class TestElInventarioTieneCincoVistas:
+    """Se pidió desde la pantalla: lista, ficha, tarjetas y tabla, con un selector. Hubo una
+    quinta, el mapa, y se quitó: el mapa de sedes ya está en el cuadro de mando."""
+
+    def test_el_selector_ofrece_las_cuatro(self):
+        sel = _fn(_section(), '_dcimLayoutPicker')
+        for v in ('list', 'detail', 'cards', 'table'):
+            assert "['%s', " % v in sel, v
+        assert "['map', " not in sel
+
+    def test_una_vista_de_mapa_recordada_vuelve_a_la_lista(self):
+        """Quien la eligió la tiene guardada en su navegador: sin esto abriría una vista que ya
+        no existe, que es una pantalla en blanco."""
+        assert "['list', 'detail', 'cards', 'table'].includes(v)" in _section()
+
+    def test_sus_nombres_se_escriben_enteros(self):
+        """Una clave construida (`t('dcim_layout_' + v)`) no la ve el guardián de palabras."""
+        assert "t('dcim_layout_' +" not in _section()
+
+    def test_el_buscador_vive_fuera_de_lo_que_repinta(self):
+        """Repintar la caja donde se escribe es perder el foco a cada letra."""
+        arbol = _fn(_section(), '_dcimTreeHtml')
+        assert arbol.index('_dcimToolbar()') < arbol.index('id="dcimInvBody"')
+        assert '_dcimInvBody' in _fn(_section(), '_dcimSearch')
+        assert '_dcimInvPaint' not in _fn(_section(), '_dcimSearch')
+
+    def test_la_vista_se_recuerda_sin_reventar_sin_almacen(self):
+        js = _section()
+        assert "try { localStorage.setItem(_DCIM_LAYOUT_KEY" in _fn(js, '_dcimSetLayout')
+
+    def test_el_cuadro_no_se_pide_con_cada_inventario(self):
+        """El cuadro recorre la flota entera."""
+        assert '/api/v1/dcim/board' not in _fn(_section(), 'renderDcim')
+
+    def test_pulsar_una_sede_del_mapa_del_cuadro_lleva_a_ella(self):
+        up = _fn(_section(), '_dcmUp')
+        assert '_dcimBoardGoSite(press.uid)' in up and "ev.type !== 'pointerup'" in up
+
+    def test_el_cuadro_lleva_a_la_sede_eligiendola(self):
+        """En la ficha no hay nada hasta donde desplazarse: hay que elegirla."""
+        assert '_dcimPickSite(uid)' in _fn(_section(), '_dcimBoardGoSite')
+
+    def test_volver_al_inventario_borra_la_sala_de_la_url(self):
+        """Sin esto un F5 en el inventario reabría el plano de la sala de la que se salió."""
+        ir = _fn(_section(), '_dcimGo')
+        tramo = ir[ir.index('_dcsPlan = null;'):]
+        assert tramo.index('_dcimUrl()') < tramo.index('renderDcim()')
+
+    def test_las_acciones_van_en_un_menu_que_no_se_corta(self):
+        menu = _fn(_section(), '_dcimMenu')
+        assert 'data-bs-toggle="dropdown"' in menu and '"strategy":"fixed"' in menu
+        assert "_dcimMay('dcim_edit')" in menu
+
+    def test_la_lista_ya_no_repite_los_tres_botones_en_cada_fila(self):
+        js = _section()
+        for fn in ('_dcimSiteCard', '_dcimRoomRow', '_dcimRackChip'):
+            assert '_dcimActions(' not in _fn(js, fn), fn
+        # Las de la sede y la sala salen al pasar el ratón; un rack se pulsa entero.
+        for fn in ('_dcimSiteCard', '_dcimRoomRow'):
+            assert 'ss-hover-tools' in _fn(js, fn), fn
+        assert '_dcimLoadRack(' in _fn(js, '_dcimRackChip')
+
+    def test_cada_fila_trae_su_hueco_para_uno_mas(self):
+        """Como en la maqueta: «+» al final de los racks de una sala y una tarjeta para una
+        sede nueva."""
+        js = _section()
+        assert "_dcimOpen('new','rack'" in _fn(js, '_dcimRoomRow')
+        assert 'ss-add-tile' in _fn(js, '_dcimRoomRow')
+        assert "_dcimAddTile(`_dcimOpen('new','site'" in _fn(js, '_dcimCardsHtml')
+
+    def test_la_ficha_cuenta_los_dispositivos(self):
+        assert "t('dcim_kpi_devices')" in _fn(_section(), '_dcimDetailSite')
+
+    def test_la_tabla_exporta_lo_que_enseña(self):
+        csv = _fn(_section(), '_dcimCsv')
+        assert '_dcimTableRows(' in csv and 'ssDownloadBlob(' in csv
+
+    def test_en_la_lista_la_sede_y_lo_que_cuelga_tienen_fondos_distintos(self):
+        """Reportado desde la pantalla: con un solo fondo no se veía dónde empezaba cada sede."""
+        tarjeta = _fn(_section(), '_dcimSiteCard')
+        assert 'ss-fold-head' in tarjeta and 'ss-fold-body' in tarjeta
+        css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
+        assert '.ss-fold-head {' in css and '.ss-fold-body {' in css
+
+    def test_el_arbol_de_la_ficha_se_pulsa_por_lineas(self):
+        """Reportado desde la pantalla: el panel de sedes con botones de chevrón sueltos."""
+        arbol = _fn(_section(), '_dcimDetailNav')
+        assert 'ss-tree-row' in arbol and 'btn-secondary' not in arbol
+
+    def test_la_sede_elegida_se_puede_plegar(self):
+        """Abrirla en cada dibujado impedía plegarla: plegar es volver a dibujar."""
+        ficha = _fn(_section(), '_dcimDetailHtml')
+        assert '!_dcimSel.site' in ficha
+
+    def test_cada_sede_sala_y_rack_de_la_lista_lleva_su_luz(self):
+        """Pedido desde la pantalla: ver de un vistazo si hay algún error."""
+        js = _section()
+        for fn in ('_dcimSiteCard', '_dcimRoomRow', '_dcimRackChip', '_dcimDetailNav',
+                   '_dcimDetailRoom', '_dcimDetailRack', '_dcimCard', '_dcimTableRow'):
+            assert '_dcimLed(' in _fn(js, fn), fn
+
+    def test_las_sedes_se_pliegan_al_llegar_salvo_las_que_van_mal(self):
+        js = _section()
+        assert '_dcimFoldNew()' in _fn(js, '_dcimLayoutHtml')
+        nuevo = _fn(js, '_dcimFoldNew')
+        assert "'error'" in nuevo and "'warning'" in nuevo and '_dcimFoldSeen' in nuevo
+
+    def test_en_la_lista_los_numeros_la_luz_y_la_barra_van_en_columna(self):
+        """Reportado desde la pantalla: «1 sala · 1 rack · Bien» era más corto que sus vecinos y
+        sacaba de la vertical la luz y la barra de su línea. Anchos fijos, y la barra con su
+        hueco aunque la sede no tenga racks."""
+        tarjeta = _fn(_section(), '_dcimSiteCard')
+        for clase in ('ss-col-count', 'ss-col-state', 'ss-col-bar'):
+            assert clase in tarjeta, clase

@@ -5627,3 +5627,203 @@ class TestUnaEmpresaDiceQueTieneFichado:
                 if i['uid'] == fleet['theirs']][0]
         assert fila.get('org_uid') != fleet['b']
         assert fila.get('org_uid') == fleet['it']
+
+
+class TestLasPlantasDeUnaSede:
+    """Dónde está cada sala DENTRO de su sede. Se pidió desde la pantalla: la sede solo tenía su
+    ubicación, y en un edificio de tres plantas «la sala de comunicaciones» son tres sitios. Una
+    planta es un plano de fondo sobre el que se colocan las salas de esa planta."""
+
+    PNG = b'\x89PNG\r\n\x1a\n' + b'0' * 32
+
+    def _planta(self, client, site, name='Planta 1', level=1):
+        r = client.post('/api/v1/dcim/floors', json={'site_uid': site, 'name': name, 'level': level})
+        assert r.status_code == 200, r.get_json()
+        return r.get_json()['uid']
+
+    def test_se_listan_de_abajo_arriba(self, client, fleet):
+        _login(client)
+        self._planta(client, fleet['site'], 'Primera', 1)
+        self._planta(client, fleet['site'], 'Sótano', -1)
+        self._planta(client, fleet['site'], 'Baja', 0)
+        d = client.get(f'/api/v1/dcim/sites/{fleet["site"]}/floors').get_json()
+        assert [f['name'] for f in d['floors']] == ['Sótano', 'Baja', 'Primera']
+
+    def test_sin_nombre_no(self, client, fleet):
+        _login(client)
+        r = client.post('/api/v1/dcim/floors', json={'site_uid': fleet['site'], 'name': ' '})
+        assert r.status_code == 400
+
+    def test_una_sala_se_coloca_en_su_planta(self, client, fleet):
+        _login(client)
+        p = self._planta(client, fleet['site'])
+        r = client.put(f'/api/v1/dcim/rooms/{fleet["room"]}',
+                       json={'floor_uid': p, 'pos_x': 1200, 'pos_y': 800, 'rotation': 90})
+        assert r.status_code == 200, r.get_json()
+        sites = client.get('/api/v1/dcim/sites').get_json()['sites']
+        sala = [x for s in sites for x in s['rooms'] if x['uid'] == fleet['room']][0]
+        assert (sala['floor_uid'], sala['pos_x'], sala['pos_y'], sala['rotation']) == (
+            p, 1200, 800, 90)
+
+    def test_pero_no_en_la_de_otra_sede(self, client, fleet):
+        """Aparecería dibujada en el plano de otro edificio."""
+        _login(client)
+        otra = client.post('/api/v1/dcim/sites', json={'name': 'DC Sur'}).get_json()['uid']
+        ajena = self._planta(client, otra)
+        r = client.put(f'/api/v1/dcim/rooms/{fleet["room"]}', json={'floor_uid': ajena})
+        assert r.status_code == 400
+        r = client.post('/api/v1/dcim/rooms', json={'site_uid': fleet['site'], 'name': 'S2',
+                                                    'floor_uid': ajena})
+        assert r.status_code == 400
+
+    def test_quitar_una_planta_no_se_lleva_sus_salas(self, client, fleet):
+        """Una sala tiene racks dentro: se queda en la sede, sin colocar."""
+        _login(client)
+        p = self._planta(client, fleet['site'])
+        client.put(f'/api/v1/dcim/rooms/{fleet["room"]}', json={'floor_uid': p})
+        assert client.delete(f'/api/v1/dcim/floors/{p}').status_code == 200
+        sites = client.get('/api/v1/dcim/sites').get_json()['sites']
+        sala = [x for s in sites for x in s['rooms'] if x['uid'] == fleet['room']][0]
+        assert sala['floor_uid'] == '' and sala['racks'] == 1
+
+    def test_el_plano_de_fondo_se_sube_se_cambia_y_se_va_con_ella(self, admin, client, fleet):
+        """Por el mismo camino que el de una sala: el fichero sustituido y el de una planta
+        quitada no se quedan en disco sin que nada los nombre."""
+        _login(client)
+        from lib.core.dcim import media
+        var = admin._var_dir or ''                             # noqa: SLF001
+        p = self._planta(client, fleet['site'])
+        subir = lambda: client.post(f'/api/v1/dcim/floors/{p}/plan',  # noqa: E731
+                                    data={'file': (io.BytesIO(self.PNG), 'p.png')},
+                                    content_type='multipart/form-data')
+        primero = subir().get_json()['plan']
+        segundo = subir().get_json()['plan']
+        assert media.every(var) == [segundo] and primero != segundo
+        client.delete(f'/api/v1/dcim/floors/{p}')
+        assert media.every(var) == []
+
+    def test_el_plano_no_se_escribe_a_mano(self, client, fleet):
+        """Lo acuña la subida: escrito en la petición, una planta podría apuntar al dibujo de
+        otra sin subir nada."""
+        _login(client)
+        p = self._planta(client, fleet['site'])
+        client.put(f'/api/v1/dcim/floors/{p}', json={'plan': 'own/ajeno.png', 'name': 'Nueva'})
+        d = client.get(f'/api/v1/dcim/sites/{fleet["site"]}/floors').get_json()['floors'][0]
+        assert d['plan'] == '' and d['name'] == 'Nueva'
+
+    def test_quien_solo_mira_no_crea_plantas(self, admin, client, fleet):
+        c = _as(admin, 'mirona-planta', ['dcim_view', 'orgs_all_view'])
+        r = c.post('/api/v1/dcim/floors', json={'site_uid': fleet['site'], 'name': 'X'})
+        assert r.status_code == 403
+        assert c.get(f'/api/v1/dcim/sites/{fleet["site"]}/floors').status_code == 200
+
+
+class TestLaZonaGeneralDeUnaPlanta:
+    """Lo que se pone en una planta sin estar en ninguna sala —un rack en un pasillo, un cuadro
+    eléctrico— va a la «zona general» de la planta: una sala más, que se crea la primera vez."""
+
+    def _planta(self, client, site):
+        return client.post('/api/v1/dcim/floors', json={'site_uid': site, 'name': 'Baja',
+                                                        'level': 0}).get_json()['uid']
+
+    def test_se_crea_la_primera_vez_y_despues_es_la_misma(self, client, fleet):
+        _login(client)
+        p = self._planta(client, fleet['site'])
+        a = client.post(f'/api/v1/dcim/floors/{p}/area').get_json()['room_uid']
+        assert client.post(f'/api/v1/dcim/floors/{p}/area').get_json()['room_uid'] == a
+        sites = client.get('/api/v1/dcim/sites').get_json()['sites']
+        sala = [x for s in sites for x in s['rooms'] if x['uid'] == a][0]
+        assert sala['floor_uid'] == p and (sala['pos_x'], sala['pos_y'], sala['rotation']) == (0, 0, 0)
+        assert 'Baja' in sala['name']
+
+    def test_en_ella_se_pone_un_rack_como_en_cualquier_sala(self, client, fleet):
+        _login(client)
+        p = self._planta(client, fleet['site'])
+        a = client.post(f'/api/v1/dcim/floors/{p}/area').get_json()['room_uid']
+        r = client.post('/api/v1/dcim/racks', json={'room_uid': a, 'name': 'R-PASILLO',
+                                                    'u_height': 12, 'pos_x': 9000, 'pos_y': 4000})
+        assert r.status_code == 200
+        assert [x['name'] for x in client.get(f'/api/v1/dcim/racks?room={a}').get_json()['racks']] == ['R-PASILLO']
+
+    def test_si_la_borran_se_hace_otra(self, client, fleet):
+        """Una zona que apunta a una sala que ya no está es un rack que se crea en ninguna parte."""
+        _login(client)
+        p = self._planta(client, fleet['site'])
+        a = client.post(f'/api/v1/dcim/floors/{p}/area').get_json()['room_uid']
+        client.delete(f'/api/v1/dcim/rooms/{a}')
+        b = client.post(f'/api/v1/dcim/floors/{p}/area').get_json()['room_uid']
+        assert b and b != a
+
+    def test_quitar_la_planta_se_lleva_su_zona_si_esta_vacia(self, client, fleet):
+        """Sin planta y sin nada dentro sería una sala «sin colocar» que nadie creó."""
+        _login(client)
+        p = self._planta(client, fleet['site'])
+        a = client.post(f'/api/v1/dcim/floors/{p}/area').get_json()['room_uid']
+        client.delete(f'/api/v1/dcim/floors/{p}')
+        sites = client.get('/api/v1/dcim/sites').get_json()['sites']
+        assert a not in [x['uid'] for s in sites for x in s['rooms']]
+
+    def test_pero_no_si_tiene_algo_dentro(self, client, fleet):
+        """Un rack en la zona general es inventario: se queda, sin colocar."""
+        _login(client)
+        p = self._planta(client, fleet['site'])
+        a = client.post(f'/api/v1/dcim/floors/{p}/area').get_json()['room_uid']
+        client.post('/api/v1/dcim/racks', json={'room_uid': a, 'name': 'R-PASILLO'})
+        client.delete(f'/api/v1/dcim/floors/{p}')
+        sites = client.get('/api/v1/dcim/sites').get_json()['sites']
+        sala = [x for s in sites for x in s['rooms'] if x['uid'] == a][0]
+        assert sala['floor_uid'] == '' and sala['racks'] == 1
+
+    def test_no_se_apunta_a_mano(self, client, fleet):
+        _login(client)
+        p = self._planta(client, fleet['site'])
+        client.put(f'/api/v1/dcim/floors/{p}', json={'area_uid': fleet['room']})
+        d = client.get(f'/api/v1/dcim/sites/{fleet["site"]}/floors').get_json()['floors'][0]
+        assert d['area_uid'] == ''
+
+    def test_quien_solo_mira_no_la_crea(self, admin, client, fleet):
+        _login(client)
+        p = self._planta(client, fleet['site'])
+        c = _as(admin, 'mirona-zona', ['dcim_view', 'orgs_all_view'])
+        assert c.post(f'/api/v1/dcim/floors/{p}/area').status_code == 403
+
+
+class TestElArbolDiceCuantoOcupaCadaRack:
+    """Las vistas del inventario enseñan cuánto de cada rack está ocupado, y de cuántas plantas
+    tiene cada sede: los dos números viajan con el árbol, que es lo que pintan las cinco."""
+
+    def _rack(self, client, fleet):
+        sites = client.get('/api/v1/dcim/sites').get_json()['sites']
+        return [k for s in sites for r in s['rooms'] for k in r['rackList']
+                if k['uid'] == fleet['rack']][0]
+
+    def test_cada_rack_trae_sus_u_ocupadas(self, client, fleet):
+        _login(client)
+        assert self._rack(client, fleet)['used_u'] == 3            # U1, más U12 y U13
+
+    def test_lo_atornillado_solo_detras_tambien_ocupa(self, client, fleet):
+        """Un panel de parcheo solo por detrás ocupa ese U: contarlo libre es ofrecer un hueco
+        donde no cabe nada."""
+        _login(client)
+        client.post('/api/v1/dcim/items', json={'rack_uid': fleet['rack'], 'u_start': 30,
+                                                'u_height': 1, 'face': 'rear', 'label': 'PP'})
+        assert self._rack(client, fleet)['used_u'] == 4
+
+    def test_un_rack_vacio_dice_cero(self, client, fleet):
+        _login(client)
+        uid = client.post('/api/v1/dcim/racks', json={'room_uid': fleet['room'], 'name': 'R9',
+                                                      'u_height': 42}).get_json()['uid']
+        sites = client.get('/api/v1/dcim/sites').get_json()['sites']
+        rack = [k for s in sites for r in s['rooms'] for k in r['rackList'] if k['uid'] == uid][0]
+        assert rack['used_u'] == 0
+
+    def test_cada_sede_dice_cuantas_plantas_tiene(self, client, fleet):
+        _login(client)
+
+        def plantas():
+            sites = client.get('/api/v1/dcim/sites').get_json()['sites']
+            return [s for s in sites if s['uid'] == fleet['site']][0]['floors']
+
+        assert plantas() == 0
+        client.post('/api/v1/dcim/floors', json={'site_uid': fleet['site'], 'name': 'Baja'})
+        assert plantas() == 1

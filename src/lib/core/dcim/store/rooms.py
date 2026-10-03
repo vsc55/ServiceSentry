@@ -45,6 +45,15 @@ _ROOM = TableSpec(
         Column('width_mm', 'INTEGER', nullable=False, default='0'),
         Column('depth_mm', 'INTEGER', nullable=False, default='0'),
         Column('tile_mm',  'INTEGER', nullable=False, default='600'),
+        # Dónde está la sala DENTRO de su sede: en qué planta (`dc_floor`, vacío = sin
+        # colocar) y en qué punto de su plano, en milímetros y grados, con el mismo convenio que
+        # un rack en una sala —la esquina de la caja sin girar, y el giro sobre su centro—. Su
+        # tamaño en el plano de la planta es el que ya tiene, ancho por fondo: dos medidas de
+        # lo mismo son dos respuestas distintas a cuánto mide la sala.
+        Column('floor_uid', 'TEXT', nullable=False, default="''"),
+        Column('pos_x',     'REAL', nullable=False, default='0'),
+        Column('pos_y',     'REAL', nullable=False, default='0'),
+        Column('rotation',  'INTEGER', nullable=False, default='0'),
         Column('created_at',  'TEXT', nullable=False, default="''"),
         Column('updated_at',  'TEXT', nullable=False, default="''"),
         Column('updated_by',  'TEXT', nullable=False, default="''"),

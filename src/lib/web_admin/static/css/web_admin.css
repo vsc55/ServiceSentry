@@ -1497,6 +1497,9 @@ html.ss-nocss body { visibility: visible; }
     min-height: 240px;
     background: var(--bs-body-bg);
     cursor: grab;
+    /* Every canvas is dragged on, and a drag that also selects the labels under the hand paints
+       them blue and leaves them selected: seen on the site plan, dragging a room. */
+    user-select: none;
 }
 /* .ss-editor : a working surface with a side panel beside it — a canvas and its inspector. The
    surface takes whatever is left; on a phone the panel drops underneath instead of squeezing it. */
@@ -1515,6 +1518,89 @@ html.ss-nocss body { visibility: visible; }
                   max-height: calc(100% - 1rem); }
 /* .ss-grid-2 : two equal columns, for pairs of small fields (X and Y, width and depth). */
 .ss-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+
+/* .ss-master : a list beside what is picked in it. The list keeps
+   its width and the main column takes the rest; on a narrow screen they stack, list first. */
+.ss-master { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+.ss-master-list { flex: 1 1 16rem; min-width: 0; }
+.ss-master-main { flex: 999 1 30rem; min-width: 0; }
+/* .ss-card-grid : cards of one size in as many columns as fit. */
+.ss-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+                gap: 1rem; }
+/* .ss-kpis : a row of small "label over number" boxes. */
+.ss-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: .75rem; }
+/* .ss-hover-tools : controls that only show while the row holding them (.ss-hover-host) is under
+   the pointer or has the focus — and always on a screen with no pointer to hover with. Hidden
+   with visibility and not display, so the row does not jump when they appear. */
+.ss-hover-host .ss-hover-tools { visibility: hidden; }
+.ss-hover-host:hover .ss-hover-tools,
+.ss-hover-host:focus-within .ss-hover-tools { visibility: visible; }
+@media (hover: none) { .ss-hover-host .ss-hover-tools { visibility: visible; } }
+/* .ss-ubar : how full something is, as a thin bar; .ss-ubar-v stands it up, like a rack. */
+.ss-ubar { height: .375rem; width: 5rem; flex: 0 0 auto; }
+.ss-ubar-v { width: 1.1rem; height: 4.25rem; flex: 0 0 auto; border: 1px solid var(--bs-border-color);
+             border-radius: .2rem; padding: 2px; display: flex; flex-direction: column;
+             justify-content: flex-end; }
+.ss-ubar-v > div { border-radius: 1px; }
+.ss-ubar.ss-ubar-wide { width: 7.5rem; }
+/* .ss-col-label : the fixed label column of a row whose right side wraps (a room beside its racks). */
+.ss-col-label { width: 15rem; max-width: 100%; }
+/* .ss-col-count / .ss-col-state : fixed-width cells in a row of rows — the counts (right-aligned)
+   and the status — so that, line after line, the numbers, the lights and what follows them fall
+   in the same vertical. Sized to the longest content they hold, which is why they are not left
+   to the content: "1 sala · 1 rack" and "Bien" are shorter than their neighbours' and pulled the
+   rest of their line out of column. Reported from the screen. */
+.ss-col-count { width: 10rem; flex: 0 0 auto; text-align: right; }
+.ss-col-state { width: 6.5rem; flex: 0 0 auto; }
+.ss-col-bar { width: 7.5rem; flex: 0 0 auto; display: flex; align-items: center; }
+/* .ss-rack-w : the width of a rack tile in a row of them. */
+.ss-rack-w { width: 10rem; }
+/* .ss-min-0 : a flex child allowed to shrink below its content, so its text can truncate. */
+.ss-min-0 { min-width: 0; }
+/* .ss-add-tile : the "add one more" slot at the end of a row of tiles or a grid of cards — dashed,
+   so it reads as a place for something rather than a thing, but on a solid fill like any button. */
+.ss-add-tile { border: 1px dashed var(--bs-border-color); border-radius: var(--bs-border-radius);
+               background: var(--bs-tertiary-bg); color: var(--bs-secondary-color);
+               display: flex; flex-direction: column; align-items: center; justify-content: center;
+               gap: .35rem; min-width: 2.75rem; min-height: 2.75rem; padding: .25rem .5rem; }
+.ss-add-tile:hover, .ss-add-tile:focus-visible { background: var(--bs-secondary-bg);
+                                                 color: var(--bs-body-color); }
+/* .ss-tile-btn : a tile that is pressed as a whole — a rack in a row of racks, a floor in a grid. */
+.ss-tile-btn { border: 1px solid var(--bs-border-color); border-radius: var(--bs-border-radius);
+               background: var(--bs-tertiary-bg); color: var(--bs-body-color); text-align: left;
+               padding: .4rem .6rem; }
+.ss-tile-btn:hover, .ss-tile-btn:focus-visible { background: var(--bs-secondary-bg); }
+/* .ss-card-thumb : the picture strip on top of a card, or the grey strip that stands in for it. */
+.ss-card-thumb { height: 6rem; width: 100%; object-fit: cover; display: flex; align-items: center;
+                 justify-content: center; background: var(--bs-tertiary-bg);
+                 border-bottom: 1px solid var(--bs-border-color); color: var(--bs-secondary-color); }
+/* .ss-fold-head / .ss-fold-body : a foldable row and what it unfolds into, told apart by their
+   ground — the line a shade up (and one more under the pointer), what hangs from it a shade down,
+   so the eye finds where each site starts without reading. */
+.ss-fold-head { background: var(--bs-tertiary-bg); }
+/* A veil over the ground and not another variable: in this panel's dark theme the "secondary"
+   ground is DARKER than the "tertiary" one, so swapping them dimmed the line under the pointer. */
+.ss-fold-head:hover { background-image: linear-gradient(rgba(127, 127, 127, .12), rgba(127, 127, 127, .12)); }
+.ss-fold-body { background: var(--bs-body-bg); }
+/* .ss-tree-row : a line of a navigation tree — the whole line is what is pressed; .ss-tree-sub
+   is one level in; .is-picked is the one shown beside the tree. */
+.ss-tree-row { display: flex; align-items: center; gap: .5rem; width: 100%; border: 0;
+               padding: .4rem .75rem; text-align: left; color: var(--bs-body-color);
+               background: var(--bs-body-bg); border-radius: var(--bs-border-radius); }
+.ss-tree-row:hover, .ss-tree-row:focus-visible { background: var(--bs-tertiary-bg); }
+.ss-tree-row.ss-tree-sub { padding: .25rem .75rem .25rem 2.6rem; font-size: .85rem; }
+.ss-tree-row.is-picked { background: var(--bs-primary); color: #fff; }
+.ss-tree-row.is-picked .text-muted { color: rgba(255, 255, 255, .75) !important; }
+.ss-tree-row > .bi-chevron-down, .ss-tree-row > .bi-chevron-right { font-size: .7rem; width: .8rem; }
+/* .ss-led : a status light — a dot of the state's colour. One that has something wrong glows,
+   so a red among twenty greys is found from across the room. */
+.ss-led { width: .6rem; height: .6rem; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+.ss-led.is-bad { box-shadow: 0 0 .4rem .05rem currentColor; }
+/* .ss-head-caps : a small uppercase heading over a group in a side panel. */
+.ss-head-caps { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase;
+                color: var(--bs-secondary-color); }
+/* .ss-w-search : the width of a search box in a toolbar — enough to read what was typed. */
+.ss-w-search { width: 15rem; max-width: 100%; }
 
 /* The panel that describes one cable or one machine. It stands over the drawing, so it is in
    front of part of the thing it is describing — asked for from the screen the other way round:
@@ -1559,6 +1645,10 @@ html.ss-nocss body { visibility: visible; }
     margin-left: auto;
     white-space: nowrap;
 }
+/* .ss-toolrow-tools.ss-wrap : a cluster too long to stay on one line on a phone — the search, a
+   filter, a view switch, the actions. It may break into lines BETWEEN its controls (each one
+   still keeps its label on one line); without this the end of it was cut off the screen. */
+.ss-toolrow-tools.ss-wrap { flex-wrap: wrap; flex-shrink: 1; min-width: 0; justify-content: flex-end; }
 
 /* .ss-passthru : a layer that floats OVER something you work in — a panel on a diagram, a
    caption on a picture — and reads without taking the pointer away from it. The layer itself

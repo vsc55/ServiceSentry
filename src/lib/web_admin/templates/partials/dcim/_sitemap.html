@@ -67,6 +67,11 @@ let _dcimMap = true;
 //: El arrastre en curso: `{uid, from, at, moved}` en unidades del dibujo.
 let _dcmDrag = null;
 
+/** De dónde sale lo dibujado: el cuadro, que es el único que lo enseña. */
+function _dcmData() {
+    return _dcimBoard || {};
+}
+
 function _dcimToggleMap() {
     _dcimMap = !_dcimMap;
     renderDcim();
@@ -80,12 +85,12 @@ function _dcimToggleMove() {
 /** Si esta instalación tiene servidor de teselas. Viene con el cuadro: es configuración del
  *  panel, no del navegador, y quien dibuja no tiene por qué preguntarla aparte. */
 function _dcmTileUrl() {
-    return String(((_dcimBoard || {}).map || {}).tiles || '').trim();
+    return String((_dcmData().map || {}).tiles || '').trim();
 }
 
 /** Y hasta qué nivel llega, que tampoco es cosa del dibujo: lo dice quien sirve las imágenes. */
 function _dcmZMax() {
-    return ((_dcimBoard || {}).map || {}).zmax;
+    return (_dcmData().map || {}).zmax;
 }
 
 /** Dónde cae una sede.
@@ -151,11 +156,11 @@ function _dcmExtent(sites, ratio) {
 
 function _dcimMapHtml(sites) {
     const box = _dcmExtent(sites);
-    const cred = String(((_dcimBoard || {}).map || {}).attribution || '').trim();
+    const cred = String((_dcmData().map || {}).attribution || '').trim();
     // Un mapa configurado que no dibuja DICE por qué. Sin esto, quien acaba de pegar su clave de
     // Google ve el mismo dibujo vacío que antes de pegarla y no tiene por dónde empezar: la
     // tarjeta del panel de control ya lo decía y esta pantalla se callaba.
-    const fallo = String(((_dcimBoard || {}).map || {}).error || '');
+    const fallo = String((_dcmData().map || {}).error || '');
     return `<div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative mb-3">
         <svg ${ssCanvasAttrs(_DCM_SVG, box)}
              data-zoom-in="${ssGeoZoomIn(box.width, _DCM_PX, _dcmZMax())}"
@@ -210,7 +215,7 @@ function _dcmDrawTiles(view) {
  *  porque una línea es una línea. El aviso está escrito con palabras en el cuadro, que es donde
  *  se lee; ponerlo también en el dibujo sería decir dos veces lo mismo y tapar el mapa. */
 function _dcmLinks(sites) {
-    const enlaces = (_dcimBoard || {}).links || [];
+    const enlaces = _dcmData().links || [];
     if (!enlaces.length) return '';
     const donde = {};
     sites.forEach((s, i) => { donde[s.uid] = _dcmAt(s, i); });
@@ -399,7 +404,7 @@ function _dcmDown(ev) {
     // ESA, y dejarla debajo es contestar con la de al lado.
     if (box) _dcmRaise(box.dataset.dcm);
     if (box && _dcimMove && _dcimMay('dcim_edit')) {
-        const sites = (_dcimBoard || {}).sites || [];
+        const sites = _dcmData().sites || [];
         const i = sites.findIndex(s => s.uid === box.dataset.dcm);
         const p = ssCanvasPoint(_DCM_SVG, ev);
         if (i >= 0 && p) {
@@ -408,14 +413,20 @@ function _dcmDown(ev) {
             return;
         }
     }
+    // Sin mover sedes, pulsar una es elegirla — si la mano no viaja: arrastrar desde encima de
+    // una caja sigue siendo mover el mapa, que es lo que hace quien explora.
+    _dcmPress = box ? {uid: box.dataset.dcm, x: ev.clientX, y: ev.clientY} : null;
     ssCanvasPanStart(_DCM_SVG, ev);
 }
+
+//: La caja pulsada sin poder moverla, y dónde: al soltar sin haber viajado es un clic.
+let _dcmPress = null;
 
 function _dcmMove(ev) {
     if (_dcmDrag) {
         const p = ssCanvasPoint(_DCM_SVG, ev);
         if (!p) return;
-        const site = ((_dcimBoard || {}).sites || []).find(s => s.uid === _dcmDrag.uid);
+        const site = (_dcmData().sites || []).find(s => s.uid === _dcmDrag.uid);
         if (!site) return;
         const x = _dcmDrag.at.x + (p.x - _dcmDrag.from.x);
         const y = _dcmDrag.at.y + (p.y - _dcmDrag.from.y);
@@ -439,10 +450,17 @@ function _dcmMove(ev) {
 
 async function _dcmUp(ev) {
     const drag = _dcmDrag;
+    const press = _dcmPress;
     _dcmDrag = null;
+    _dcmPress = null;
     ssCanvasPanEnd(ev);
-    if (!drag) return;
-    const site = ((_dcimBoard || {}).sites || []).find(s => s.uid === drag.uid);
+    if (!drag) {
+        // `pointerleave` también suelta, y salir del dibujo no es pulsar nada.
+        if (!press || ev.type !== 'pointerup'
+            || Math.hypot(ev.clientX - press.x, ev.clientY - press.y) > 4) return;
+        return _dcimBoardGoSite(press.uid);
+    }
+    const site = (_dcmData().sites || []).find(s => s.uid === drag.uid);
     if (!site) return;
     // Una pulsación que no viajó es un clic: llevar a la sede, que es para lo que se abre esto.
     if (!drag.moved) return _dcimBoardGoSite(site.uid);
@@ -497,7 +515,7 @@ function _dcmOrder(sites) {
 /** Repintar solo el dibujo: volver a montar la pantalla entera en cada movimiento del ratón
  *  tira el foco y hace saltar el desplazamiento. */
 function _dcmRedraw() {
-    const sites = (_dcimBoard || {}).sites || [];
+    const sites = _dcmData().sites || [];
     const pins = document.getElementById(_DCM_SVG + '-pins');
     // El orden lo decide `_dcmOrder`, y aquí y no moviendo el nodo a mano: esto se rehace en
     // cada rueda y en cada arrastre, así que un orden puesto fuera se perdía en cuanto alguien
@@ -516,7 +534,11 @@ function _dcmRedraw() {
  *  Las teselas dependen de QUÉ TROZO se está mirando, y eso cambia sin que esta sección se
  *  entere: alguien arrastra, alguien gira la rueda. El aviso del lienzo es cómo se entera. */
 function _dcimMapMounted() {
-    if (!_dcimMap) { ssCanvasOnApply(_DCM_SVG, null); return; }
+    // Sin el dibujo en pantalla no hay nada que enganchar: el cuadro lo esconde con un botón.
+    if (!_dcimBoard || !_dcimMap || !document.getElementById(_DCM_SVG)) {
+        ssCanvasOnApply(_DCM_SVG, null);
+        return;
+    }
     ssCanvasOnApply(_DCM_SVG, (v) => { _dcmDrawTiles(v); _dcmRedraw(); });
     _dcmFit();
     _dcmDrawTiles(null);
@@ -536,7 +558,7 @@ function _dcmFit() {
     if (!svg) return;
     const ancho = svg.clientWidth, alto = svg.clientHeight;
     if (!ancho || !alto) return;
-    const box = _dcmExtent((_dcimBoard || {}).sites || [], alto / ancho);
+    const box = _dcmExtent(_dcmData().sites || [], alto / ancho);
     svg.dataset.x = box.x; svg.dataset.y = box.y;
     svg.dataset.w = box.width; svg.dataset.h = box.height;
     svg.dataset.zoomIn = ssGeoZoomIn(box.width, ancho, _dcmZMax());

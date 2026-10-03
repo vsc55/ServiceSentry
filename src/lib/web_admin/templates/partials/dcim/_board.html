@@ -303,13 +303,9 @@ function dcimGoSite(uid) { _dcimBoardGoSite(uid); }
 function _dcimBoardGoSite(uid) {
     _dcimMark('inventory');         // una sede es inventario, y la URL tiene que decirlo
     _dcimBoard = null;
-    renderDcim();
-    // Después de pintar: el árbol no existe hasta que se pinta, y desplazarse a un elemento
-    // que todavía no está es no desplazarse a ninguna parte y no decir nada.
-    setTimeout(() => {
-        const el = document.getElementById('dcim-site-' + uid);
-        if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
-    }, 0);
+    // Elegirla, y no solo desplazarse hasta ella: en la vista de ficha y en la de mapa ir a una
+    // sede es enseñarla al lado de la lista, y allí no hay nada hasta donde desplazarse.
+    _dcimPickSite(uid);
 }
 
 

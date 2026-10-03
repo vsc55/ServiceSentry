@@ -10,6 +10,12 @@ Rutas:
     POST    /api/v1/dcim/features
     PUT     /api/v1/dcim/features/<uid>
     DELETE  /api/v1/dcim/features/<uid>
+    POST    /api/v1/dcim/floors
+    PUT     /api/v1/dcim/floors/<uid>
+    DELETE  /api/v1/dcim/floors/<uid>
+    POST    /api/v1/dcim/floors/<uid>/plan
+    DELETE  /api/v1/dcim/floors/<uid>/plan
+    POST    /api/v1/dcim/floors/<uid>/area
     GET     /api/v1/dcim/media/<path:name>
     GET     /api/v1/dcim/orgs
     GET     /api/v1/dcim/rooms/<uid>/features
@@ -18,6 +24,7 @@ Rutas:
     DELETE  /api/v1/dcim/rooms/<uid>/plan
     POST    /api/v1/dcim/sites/<uid>/photo
     DELETE  /api/v1/dcim/sites/<uid>/photo
+    GET     /api/v1/dcim/sites/<uid>/floors
     POST    /api/v1/dcim/rows
     PUT     /api/v1/dcim/rows/<uid>
     DELETE  /api/v1/dcim/rows/<uid>
@@ -87,12 +94,45 @@ def register(app, wa, C):
                                   'rack', reach)
                 for rack in racks:
                     rack['roll'] = roll['rack'].get(rack['uid']) or {}
+                    rack['used_u'] = _used_u(store, rack)
                 room['rackList'] = racks
                 room['racks'] = len(racks)
                 room['roll'] = roll['room'].get(room['uid']) or {}
-            out.append(dict(site, rooms=rooms,
+            # Las plantas, de abajo arriba: cuántas, y cuáles —con su plano, que es la miniatura
+            # de la tarjeta de la sede y lo que abre cada botón de planta del panel del mapa—.
+            plantas = [{'uid': f['uid'], 'name': f['name'], 'level': f['level'],
+                        'plan': f['plan']} for f in store.floors_of(site['uid'])]
+            out.append(dict(site, rooms=rooms, floors=len(plantas), floor_list=plantas,
                             roll=roll['site'].get(site['uid']) or {}))
         return jsonify({'sites': out})
+
+    def _used_u(store, rack):
+        """Cuántos U de un rack están ocupados, por cualquiera de las dos caras.
+
+        Por las dos: un panel de parcheo atornillado solo detrás ocupa ese U igual, y contarlo
+        libre sería ofrecer un hueco donde no cabe nada. Lo ajeno cuenta: está ahí, ocupando,
+        aunque este lector no pueda saber qué es — que es lo mismo que dibuja el alzado.
+        """
+        taken = store.occupancy(rack['uid'])
+        height = int(taken.get('height') or 0)
+        usados = set(taken.get('front') or {}) | set(taken.get('rear') or {})
+        return len([u for u in usados if 1 <= int(u) <= height])
+
+    def _room_floor_ok(store, data, room_uid=''):
+        """Una sala solo se coloca en una planta de SU sede, o en ninguna.
+
+        Sin esto, una petición podía colgar una sala de la planta de otro edificio: aparecería
+        dibujada en un plano que no es el suyo, y quien mirara esa planta vería una sala que no
+        está. Vacío es «sin colocar», que siempre vale.
+        """
+        fid = str(data.get('floor_uid') or '')
+        if 'floor_uid' not in data or not fid:
+            return True
+        floor = store.floors.get(fid)
+        site = str(data.get('site_uid') or '')
+        if not site and room_uid:
+            site = str((store.rooms.get(room_uid) or {}).get('site_uid') or '')
+        return bool(floor) and str(floor.get('site_uid') or '') == site
 
     def _crud(kind, part, scope, required, minted=(), parent=None):
         """The four verbs for one kind of container.
@@ -132,6 +172,8 @@ def register(app, wa, C):
             err = C.asset(part, data)
             if err:
                 return jsonify({'error': wa._t(err)}), 400
+            if part == 'rooms' and not _room_floor_ok(store, data):
+                return jsonify({'error': wa._t('dcim_floor_other_site')}), 400
             uid = getattr(store, part).create(data, actor=C.actor())
             # Y con qué número se quedó, para lo que lleve número: quien escribe `RACK-?` no
             # puede verlo hasta ir a buscarlo a la lista.
@@ -152,6 +194,8 @@ def register(app, wa, C):
             err = C.asset(part, data, uid)
             if err:
                 return jsonify({'error': wa._t(err)}), 400
+            if part == 'rooms' and not _room_floor_ok(store, data, uid):
+                return jsonify({'error': wa._t('dcim_floor_other_site')}), 400
             getattr(store, part).update(uid, data, actor=C.actor())
             # Y su foto, si lo editado ES un armario: renombrarlo o cambiarle la altura mueve de
             # sitio a todo lo que hay dentro, y eso es parte de su historia. Aquí y no en cada
@@ -235,6 +279,164 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('access_denied')}), 403
         name = str(site.get('photo') or '')
         store.sites.update(uid, {'photo': ''}, actor=C.actor())
+        if name:
+            dcim_media.forget(wa._var_dir or '', name, C.media_dir())
+        return jsonify({'ok': True})
+
+    # ── Las plantas de una sede ──────────────────────────────────────────────
+    #
+    # No son un ámbito de propiedad: una planta es de su sede, y todo lo que se hace con una se
+    # permite o no según esa sede. Por eso no pasan por `_crud`, que comprueba el dueño de lo
+    # que se toca: aquí lo que se toca no tiene dueño propio.
+
+    def _floor_site(store, floor_uid):
+        floor = store.floors.get(floor_uid) if store else None
+        return floor, str((floor or {}).get('site_uid') or '')
+
+    def _site_writable(store, site_uid) -> bool:
+        return bool(store.sites.get(site_uid)) and C.may_write(
+            store, store.owners_map(), C.seen(), 'site', site_uid)
+
+    @app.route('/api/v1/dcim/sites/<uid>/floors', methods=['GET'])
+    @C.view_req
+    def api_dcim_site_floors(uid):
+        """Las plantas de una sede, de abajo arriba, para quien puede ver la sede."""
+        store = C.store()
+        site = store.sites.get(uid) if store else None
+        if not site:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        said, allowed = store.owners_map(), C.seen()
+        reach = dcim_svc.reachable(store, said, allowed)
+        if not C.filtered([site], store, said, allowed, 'site', reach):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        # Con los tipos de pieza y sus medidas: la paleta del plano de la sede los necesita
+        # aunque la planta no tenga todavía ninguna sala a la que preguntárselos.
+        return jsonify({'floors': store.floors_of(uid), 'kinds': FEATURE_KINDS})
+
+    @app.route('/api/v1/dcim/floors', methods=['POST'])
+    @C.edit_req
+    def api_dcim_floor_new():
+        store = C.store()
+        # `plan` lo acuña la subida, como el de una sala: escrito aquí, una petición podría
+        # apuntar una planta al dibujo de otra sin subir nada.
+        data = _without(request.get_json(silent=True) or {}, ('plan', 'area_uid'))
+        site = str(data.get('site_uid') or '')
+        if not store or not store.sites.get(site):
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if not _site_writable(store, site):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        if not str(data.get('name') or '').strip():
+            return jsonify({'error': wa._t('dcim_name_required')}), 400
+        data['level'] = int(_num(data.get('level')))
+        return jsonify({'uid': store.floors.create(data, actor=C.actor())})
+
+    @app.route('/api/v1/dcim/floors/<uid>', methods=['PUT'])
+    @C.edit_req
+    def api_dcim_floor_edit(uid):
+        store = C.store()
+        floor, site = _floor_site(store, uid)
+        if not floor:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if not _site_writable(store, site):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        # Ni el plano ni la sede: el plano lo acuña la subida, y cambiar de sede una planta
+        # dejaría sus salas colgando de un edificio que no es el suyo.
+        data = _without(request.get_json(silent=True) or {}, ('plan', 'site_uid', 'area_uid'))
+        if 'name' in data and not str(data.get('name') or '').strip():
+            return jsonify({'error': wa._t('dcim_name_required')}), 400
+        if 'level' in data:
+            data['level'] = int(_num(data.get('level')))
+        store.floors.update(uid, data, actor=C.actor())
+        return jsonify({'ok': True})
+
+    @app.route('/api/v1/dcim/floors/<uid>', methods=['DELETE'])
+    @C.edit_req
+    def api_dcim_floor_del(uid):
+        """Quitar una planta. Sus salas NO se borran: se quedan en la sede, sin colocar. Una
+        sala es un registro con racks dentro, y quitar el dibujo de una planta no puede llevarse
+        el inventario de nadie."""
+        store = C.store()
+        floor, site = _floor_site(store, uid)
+        if not floor:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if not _site_writable(store, site):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        # Su zona general, si está VACÍA, se va con ella: es una sala que existía solo para
+        # sostener lo suelto de esta planta, y sin planta ni nada dentro se quedaría en el árbol
+        # como una sala «sin colocar» que nadie creó. Con algo dentro se queda, como las demás.
+        area = str(floor.get('area_uid') or '')
+        if area and store.rooms.get(area) and not store.racks_of(area)                 and not store.features_of(area):
+            store.rooms.delete(area)
+            store.forget_scope('room', area)
+        for room in store.rooms.list('floor_uid = ?', (uid,)):
+            store.rooms.update(room['uid'], {'floor_uid': ''}, actor=C.actor())
+        store.floors.delete(uid)
+        name = str(floor.get('plan') or '')
+        if name:
+            dcim_media.forget(wa._var_dir or '', name, C.media_dir())
+        return jsonify({'ok': True})
+
+    @app.route('/api/v1/dcim/floors/<uid>/area', methods=['POST'])
+    @C.edit_req
+    def api_dcim_floor_area(uid):
+        """La zona general de la planta: la que hay, o una nueva la primera vez.
+
+        La llama la pantalla antes de poner algo en la planta fuera de toda sala. Si la que se
+        apuntó ya no existe —alguien borró esa sala—, se hace otra: una zona que apunta a una sala
+        que no está es un rack que se crea en ninguna parte.
+        """
+        store = C.store()
+        floor, site = _floor_site(store, uid)
+        if not floor:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if not _site_writable(store, site):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        area = str(floor.get('area_uid') or '')
+        if area and store.rooms.get(area):
+            return jsonify({'room_uid': area})
+        nombre = '%s · %s' % (str(floor.get('name') or ''), wa._t('dcim_floor_area'))
+        area = store.rooms.create({'site_uid': site, 'name': nombre, 'floor_uid': uid,
+                                   'pos_x': 0, 'pos_y': 0, 'rotation': 0}, actor=C.actor())
+        store.floors.update(uid, {'area_uid': area}, actor=C.actor())
+        return jsonify({'room_uid': area})
+
+    @app.route('/api/v1/dcim/floors/<uid>/plan', methods=['POST'])
+    @C.edit_req
+    def api_dcim_floor_plan(uid):
+        """El plano de fondo de una planta, por el mismo camino que el de una sala: el tipo se
+        decide por lo que HAY dentro del fichero, y el nombre lo acuña el panel."""
+        store = C.store()
+        floor, site = _floor_site(store, uid)
+        if not floor:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if not _site_writable(store, site):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        blob = b''
+        up = (request.files or {}).get('file')
+        if up is not None:
+            blob = up.read(dcim_media.MAX_BYTES + 1)
+        elif request.data:
+            blob = request.data[:dcim_media.MAX_BYTES + 1]
+        name, err = dcim_media.save(wa._var_dir or '', blob, C.media_dir())
+        if err:
+            return jsonify({'error': wa._t(err)}), 400
+        old = str(floor.get('plan') or '')
+        store.floors.update(uid, {'plan': name}, actor=C.actor())
+        if old and old != name:
+            dcim_media.forget(wa._var_dir or '', old, C.media_dir())
+        return jsonify({'plan': name})
+
+    @app.route('/api/v1/dcim/floors/<uid>/plan', methods=['DELETE'])
+    @C.edit_req
+    def api_dcim_floor_plan_delete(uid):
+        store = C.store()
+        floor, site = _floor_site(store, uid)
+        if not floor:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if not _site_writable(store, site):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        name = str(floor.get('plan') or '')
+        store.floors.update(uid, {'plan': ''}, actor=C.actor())
         if name:
             dcim_media.forget(wa._var_dir or '', name, C.media_dir())
         return jsonify({'ok': True})

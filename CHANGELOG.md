@@ -8,6 +8,96 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.131] - 2026-09-30
+
+### Added
+
+- **A site has floors, and its rooms are placed on them.** A site was only a point on the map
+  of sites and a room was drawn from the inside, but where each room is *inside the building*
+  could not be said — and in a three-storey site "the comms room" is three places. `dc_floor`
+  holds a site's floors, bottom up by level, each with its own background plan and the real
+  width that plan draws; each room gains `floor_uid`, `pos_x`, `pos_y` and `rotation` and is
+  drawn at its real width × depth, the same convention as a rack in a room. A "Floors" button on
+  the site card opens an editor laid out like the room plan: a floor switcher, the floor's plan
+  with its rooms on it, and an inspector with the floor's name, level and plan width, its rooms,
+  and the site's rooms not yet placed, each one click from this floor. Rooms are dragged into
+  place; double-clicking one opens its own plan, and going back returns to the floor, so the
+  whole chain — site, floor, room, rack — can be walked. A floor is not an ownership scope: it
+  belongs to its site, and writing it needs the site. A room can only be placed on a floor of its
+  own site, deleting a floor leaves its rooms in the site, not placed, and a floor's plan goes the
+  same way as a room's: typed by what is inside the file, named by the panel, and removed from
+  disk when replaced or when the floor goes.
+
+- **A room is fitted to its floor's plan by stretching it.** The selected room carries the same
+  eight handles as a piece in a room, snapping to 10 cm rather than to a 600 mm tile; stretching
+  it sets the room's real width and depth — the ones its own plan uses — so fitting it to the
+  architect's drawing is saying how big it is. Rooms are see-through, with haloed labels, so the
+  drawing's walls stay visible while fitting; several rooms placed in a row no longer land on top
+  of each other. A plan whose real width is not given is drawn at a fixed 50 m — it used to be
+  stretched to whatever the rooms spanned, so moving a room outward resized the whole plan under
+  everything already placed — and the inspector says the width is missing. Dragging on any canvas
+  no longer selects the labels under the pointer.
+
+- **Racks and pieces can be put straight on a floor, and the site plan shows what every room
+  holds.** A floor gets a general area — `dc_floor.area_uid`, a room at (0, 0) spanning the floor,
+  made the first time something is put down outside every room — so a rack in a corridor or an
+  electrical panel by the stairs lands in the inventory like anything inside a room: with a room,
+  a company and a place in the tree. A room and not a room-less rack, because the whole inventory
+  hangs from rooms — ownership, cabling, the 3D and front views assume it — and making that link
+  optional meant changing all of them. The site plan draws the racks and pieces of every room on
+  the floor, turned with their room, above the room boxes so nothing drawn under a room is out of
+  reach; a palette drops a rack or a piece into whatever room is under the centre of the view, in
+  that room's own coordinates, or into the general area when there is none. They are dragged,
+  turned, deleted and opened — a double click opens a rack's elevation or a piece's room — and
+  their labels stay upright whatever their turn. Deleting a floor takes its general area with it
+  when it is empty and keeps it, not placed, when it holds something.
+
+- **The site plan has the room plan's floating bar.** Hovering a room shows open its plan, turn
+  it and take it off the floor; hovering a rack or a piece shows open, duplicate, turn and delete
+  — and only open, for someone who may just look. Duplicate makes an empty rack with the same
+  size, turn, height, rails, access and row, or the same piece, beside the original in the same
+  room, and selects it; the inspector gained the same button. A rack sits inside its room, so the
+  way from a rack to its bar crosses the room: the room's bar now waits a moment instead of
+  replacing the rack's halfway there, which made the click land on another button.
+
+- **The inventory can be laid out four ways, with a switch between them.** *List* is what the
+  screen was, made compact: each site on one line (clicking the line unfolds it) with its
+  rooms beneath, each room's racks as tiles with how full they are and a "+" tile for a new rack.
+  The edit, company and delete buttons that used to repeat on every site, room and rack moved into
+  one "⋯" menu, shown with "Floors" and "+ room" on hover. A site's line and the rooms hanging
+  from it have different grounds, so each site's start is seen without reading. *Detail* is the
+  tree on the left, pressed by whole lines (pressing the picked site folds or unfolds it), and the
+  picked site on the right, with a breadcrumb, its floors, rooms, racks, U taken and devices, and
+  its rooms as cards whose racks stand up with how full they are. *Cards* is one card per site,
+  with company chips that count their sites, the plan of the site's lowest floor as the card's
+  picture, the percentage taken and how much is unwatched, and a last card to add a site. *Table*
+  is sites, rooms and racks as foldable rows, with grouping, a type filter, a column chooser and a
+  CSV export of every row on screen, folded ones included. All four share a search box (sites,
+  addresses, rooms, racks, asset tags — a match keeps the room and site that hold it, so the
+  answer still says where) and a company filter. The board's jump to a site picks it in whichever
+  view is open. The view is remembered in the browser. Every rack in the tree now carries
+  `used_u`, the U taken on either face, so a rear-only patch panel counts; every site carries
+  `floors` and `floor_list`, its floors with their plans. On a phone the toolbar wraps instead of
+  running off the screen.
+
+- **Every site, room and rack in the inventory shows a status light.** Green when all is well,
+  amber with a warning, red when something is down — those two glow — and grey when nothing in
+  it is watched, which is deliberately not green. The site's light carries its word too. They are
+  in every view: on the list's lines, in the detail view's tree, header, rooms and racks, on the
+  cards and in the table's state column (and its CSV). Sites now start folded, except those with
+  an error or a warning, which open on their own; this is decided once per site, so what someone
+  unfolds stays unfolded, and nothing is folded while searching. On the list, each site's counts, light and bar
+  sit in fixed-width columns, so they line up from one site to the next whatever their length.
+
+### Fixed
+
+- **Going back to the inventory from the menu cleared the room from the address.** It left
+  `?room=…` in the URL, so reloading the inventory reopened the plan of the room that had just
+  been left.
+- **Clicking a site on the board's map goes to it.** A press on a site's box only did something
+  in "move sites" mode; now a press that does not travel goes to the site, as clicking its card
+  does. Dragging from a box still pans the map.
+
 ## [0.0.1+build.130] - 2026-09-29
 
 ### Added

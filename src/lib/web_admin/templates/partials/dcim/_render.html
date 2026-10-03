@@ -166,6 +166,7 @@ async function renderDcim() {
                    : _dcimBoard ? _dcimBoardHtml()
                    : _dcimRack ? _dcimRackHtml()
                    : _dcimPlan ? _dcimPlanHtml()
+                   : _dcsPlan ? _dcsHtml()
                    : _dcimTreeHtml());
     // Las teselas y las chinchetas se dibujan DESPUÉS de que el navegador tenga el SVG
     // puesto: las dos necesitan saber cuántos píxeles mide en pantalla, y antes de estar en el
@@ -319,6 +320,10 @@ function _dcimGo(donde) {
     // rack, que es donde ya se estaba.
     _dcimRack = null;
     _dcimPlan = null;
+    _dcsPlan = null;
+    // Y la URL con ellos: sin esto seguía diciendo `?room=…`, y un F5 en el inventario volvía a
+    // abrir el plano de la sala de la que se acababa de salir.
+    _dcimUrl();
     renderDcim();
 }
 
