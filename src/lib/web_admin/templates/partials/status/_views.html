@@ -86,7 +86,7 @@ function _stVisible(data, sort = true) {
         if (q) {
             const pretty = String(modulePrettyName(mod, modulesData[mod] || {}) || '').toLowerCase();
             const hitMod = mod.toLowerCase().includes(q) || pretty.includes(q);
-            // Matching a CHECK name too: half the time you are looking for one host, not for
+            // Matching a CHECK name too: half the time you are looking for one device, not for
             // the module it happens to live under.
             const hitCheck = st.rows.some(r => r.name.toLowerCase().includes(q));
             if (!hitMod && !hitCheck) continue;

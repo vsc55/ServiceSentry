@@ -25,7 +25,7 @@ let _dcimZones = null;
 //: Las máquinas a las que se puede enlazar un item, pedidas una vez. Mismo trato que las zonas:
 //: `null` = todavía no, `[]` = ninguna que este lector pueda ver — y entonces el campo no se
 //: ofrece, en vez de ofrecer una lista vacía.
-let _dcimHosts = null;
+let _dcimDevices = null;
 //: Las plantillas, para poder elegir una al crear un equipo. Mismo trato: `null` = todavía no,
 //: `[]` = no hay ninguna, y entonces el campo no se ofrece en vez de ofrecer una lista vacía.
 let _dcimBuildOpts = null;
@@ -67,10 +67,33 @@ function _dcimMediaUrl(nombre) {
  *  Se cambia de sección y luego se abre, que es lo que el botón dice que hace. En este orden:
  *  la pestaña, al activarse, redibuja infraestructura, y ese redibujado respeta la máquina
  *  abierta — al revés, el redibujado de la pestaña llegaría después y enseñaría la flota. */
-function _dcimOpenHost(uid) {
-    if (!uid) return;
-    if (typeof _navTab === 'function') _navTab('#tab-infra');
-    if (typeof infraOpen === 'function') infraOpen(uid);
+function _dcimOpenDevice(uid) {
+    openDeviceSheet(uid);
+}
+
+/** Abrir un sitio del inventario desde OTRA sección: la ficha de un dispositivo lleva a su
+ *  sede, a su sala o a su rack. Se cambia de sección y luego se abre, como `_dcimOpenDevice` hace
+ *  al revés — abrir sin cambiar sería dibujar en una pestaña que no se está mirando.
+ *
+ *  La sala necesita el árbol (es de donde sale su nombre y su sede), así que se pide si todavía
+ *  no se ha pedido: quien llega desde fuera puede no haber abierto nunca el inventario. */
+async function dcimGoTo(kind, uid) {
+    if (typeof _navTab === 'function') _navTab('#tab-dcim');
+    _dcCat = null; _dcBuilds = null; _dcBuild = null; _dcSrc = null; _dcWire = null; _dcDev = null;
+    _dcimBoard = null;
+    _dcsPlan = null;
+    _dcimMark('inventory');
+    if (kind === 'rack' && uid) return _dcimLoadRack(uid);
+    _dcimRack = null;
+    _dcimPlan = null;
+    if (!(_dcimData.sites || []).length) {
+        const [sites, orgs] = await Promise.all([
+            apiGet('/api/v1/dcim/sites'), apiGet('/api/v1/dcim/orgs')]);
+        _dcimData = {sites: (sites || {}).sites || [], orgs: (orgs || {}).orgs || []};
+    }
+    if (kind === 'room' && uid && _dcimFindRoom(uid)) return _dcimOpenPlan(uid);
+    if (kind === 'site' && uid) return _dcimPickSite(uid);
+    return renderDcim();
 }
 
 function _dcimMay(flag) {
@@ -108,9 +131,55 @@ document.addEventListener('shown.bs.tab', ev => {
     if (rack) _dcimLoadRack(rack.uid);
 });
 
+/** Cuál de los dos paneles del Catálogo que dibuja esta sección está a la vista, si alguno.
+ *
+ *  Los modelos y las plantillas son entradas del Catálogo, pero su código es de aquí y se
+ *  repinta llamando a `renderDcim` —setenta veces—. En vez de enseñar a cada llamada adónde
+ *  pintar, el dibujado mira qué panel está abierto: es la única pregunta cuya respuesta no
+ *  puede quedarse vieja. */
+function _dcimApartPane() {
+    const abierto = (id) => !!document.getElementById(id)?.classList.contains('active');
+    if (abierto('tab-models')) return 'models';
+    if (abierto('tab-builds')) return 'builds';
+    return '';
+}
+
+/** Pintar los modelos o las plantillas en su propio panel — abriéndolos si todavía no lo están:
+ *  la carga vuelve a llamar a `renderDcim` al llegar, y entonces ya se pintan. */
+function _dcimRenderApart(cual) {
+    const pane = document.getElementById(cual + '-container');
+    if (!pane) return;
+    if (cual === 'models') {
+        if (!_dcCat) return _dcCatOpen();
+        pane.innerHTML = _dcCatHtml();
+        return;
+    }
+    if (!_dcBuilds) return _dcBuildsOpen();
+    pane.innerHTML = _dcBuildsHtml();
+    // La lista la dibuja la tabla compartida en SU contenedor, que tiene que estar ya puesto.
+    if (!_dcBuild && typeof renderDcBld === 'function') renderDcBld();
+}
+
+//: Las direcciones de cuando los modelos y las plantillas eran vistas de esta sección. Un
+//: marcador guardado entonces lleva a su entrada del Catálogo en vez de al inventario.
+const _DCIM_MOVED_VIEWS = {'/dcim/catalog': '#tab-models', '/dcim/builds': '#tab-builds'};
+
 async function renderDcim() {
+    const aparte = _dcimApartPane();
+    if (aparte) return _dcimRenderApart(aparte);
+    const movido = _DCIM_MOVED_VIEWS[window.location.pathname];
+    if (movido && typeof _navTab === 'function') {
+        history.replaceState({pane: movido.slice(1)}, '', '/admin?tab=' + movido.slice(5));
+        return _navTab(movido);
+    }
     const pane = document.getElementById('dcim-container');
     if (!pane) return;
+    // En el inventario no hay catálogo ni plantillas: son otras entradas del menú. Lo que
+    // quedara abierto de ellos se olvida aquí, y al volver a su entrada se vuelve a pedir.
+    _dcCat = null;
+    _dcCatJob = '';
+    _dcBuilds = null;
+    _dcBuild = null;
     // Only on the FIRST render: after that the variables are the answer, and re-reading the URL
     // would reopen a rack somebody had just closed.
     if (!_dcimUrlRead) {
@@ -132,9 +201,9 @@ async function renderDcim() {
     // pintar dos pantallas, la segunda encima de la primera.
     if (_dcimViewWanted()) return;
     if (_dcimZones === null) _dcimZones = await _dcimLoadZones();
-    if (_dcimHosts === null) {
+    if (_dcimDevices === null) {
         const d = await apiGet('/api/v1/dcim/devices');
-        _dcimHosts = (d || {}).devices || [];
+        _dcimDevices = (d || {}).devices || [];
     }
     if (_dcimBuildOpts === null) {
         const d = await apiGet('/api/v1/dcim/builds');
@@ -275,8 +344,7 @@ function _dcimFind(kind, uid) {
  *  a dibujar y seguir sería dibujar dos veces la misma pantalla, la segunda encima. */
 function _dcimViewWanted() {
     const quiere = (typeof _sbPageView === 'function') ? _sbPageView('dcim') : '';
-    const donde = _dcCat ? 'catalog' : _dcBuilds ? 'builds'
-                : _dcWire ? 'wiring'
+    const donde = _dcWire ? 'wiring'
                 : _dcDev ? 'devices'
                 : _dcSrc ? 'sources' : _dcimBoard ? 'board' : 'inventory';
     if (!quiere || quiere === donde) return false;
@@ -301,6 +369,10 @@ function _dcimMark(slug) {
 /** Ir a una vista. Cerrar las otras es parte de ir: son excluyentes y quien elige qué dibujar
  *  mira las cuatro variables, así que dejar una puesta sería llegar a otro sitio. */
 function _dcimGo(donde) {
+    // Los modelos y las plantillas ya no son vistas de esta sección: ir a ellos es ir a su
+    // entrada del Catálogo.
+    if (donde === 'catalog') return _navTab('#tab-models');
+    if (donde === 'builds') return _navTab('#tab-builds');
     _dcimMark(donde);
     _dcCat = null;
     _dcCatJob = '';
@@ -310,10 +382,8 @@ function _dcimGo(donde) {
     _dcWire = null;
     _dcDev = null;
     _dcimBoard = null;
-    if (donde === 'catalog') return _dcCatOpen();
     if (donde === 'wiring') return _dcWireOpen();
     if (donde === 'devices') return _dcDevOpen();
-    if (donde === 'builds') return _dcBuildsOpen();
     if (donde === 'sources') return _dcSrcOpen();
     if (donde === 'board') return _dcimOpenBoard();
     // Al inventario se vuelve del todo: si se quedara el rack abierto, «Inventario» llevaría al

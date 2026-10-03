@@ -189,39 +189,26 @@ if (modulesLi) modulesLi.style.display = hasAnyModule ? '' : 'none';
 // with no device behind them.
 const credentialsLi = document.getElementById('tab-credentials-li');
 if (credentialsLi) credentialsLi.style.display = hasAnyCredential ? '' : 'none';
-// Infrastructure tab (Servers + Cluster sub-tabs). Shows when the user can see devices
-// OR manage modules (cluster are multi-bind module checks).
+// The device classes are seen with what the devices are: whoever may see the fleet has to be
+// able to read what its class column is made of, even without touching it — inside, the write
+// buttons are decided by `devices_edit`.
 const hasAnyServer = ['devices_view','devices_edit','devices_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('server.'));
-// Cluster are their OWN resource: gated strictly by cluster_* (global) or any
-// cluster.{uid}.* (per-cluster). Module permissions do NOT grant the Cluster tab.
+// Clusters are their OWN resource: gated strictly by cluster_* (global) or any
+// cluster.{uid}.* (per-cluster). Module permissions do NOT grant them.
 const hasAnyCluster = ['clusters_view','clusters_add','clusters_edit','clusters_delete'].some(p => perms.has(p))
     || [...perms].some(p => p.startsWith('cluster.'));
-const serversLi = document.getElementById('tab-servers-li');
-if (serversLi) serversLi.style.display = (hasAnyServer || hasAnyModule || hasAnyCluster) ? '' : 'none';
-// Sub-tabs: Servers gated by device perms, Cluster by cluster perms.
-const stSrvHosts = document.getElementById('subtab-srv-devices-li');
-if (stSrvHosts) stSrvHosts.style.display = hasAnyServer ? '' : 'none';
-const stSrvClusters = document.getElementById('subtab-srv-clusters-li');
-if (stSrvClusters) stSrvClusters.style.display = hasAnyCluster ? '' : 'none';
-// Las clases se ven con lo mismo que los dispositivos: quien puede ver la lista tiene que poder
-// ver de qué se compone su columna de clase, aunque no pueda tocarla — dentro, los botones de
-// escribir los decide `devices_edit`.
-const stSrvTypes = document.getElementById('subtab-srv-types-li');
-if (stSrvTypes) stSrvTypes.style.display = hasAnyServer ? '' : 'none';
-// Activate the saved infra sub-tab, or the first visible one. A stored #subtab-credentials
-// from before the promotion resolves to no element, so it falls through to the first
-// visible one rather than leaving Infrastructure with nothing selected.
-const _savedInfra = localStorage.getItem('ss_active_subtab_infra');
-const _savedInfraBtn = _savedInfra ? document.querySelector(`[data-bs-target="${_savedInfra}"]`) : null;
-const _activeInfra = (_savedInfraBtn && _savedInfraBtn.closest('li')?.style.display !== 'none')
-    ? _savedInfraBtn
-    : ['btn-subtab-srv-devices','btn-subtab-srv-types','btn-subtab-srv-clusters']
-        .map(id => document.getElementById(id))
-        .find(btn => btn && btn.closest('li')?.style.display !== 'none');
-if (_activeInfra) bootstrap.Tab.getOrCreateInstance(_activeInfra).show();
-// (New device / Migrate buttons now live inside the JS-rendered Servers card,
-//  gated there by devices_edit — see renderServers.)
+const devtypesLi = document.getElementById('tab-devtypes-li');
+if (devtypesLi) devtypesLi.style.display = hasAnyServer ? '' : 'none';
+const clustersLi = document.getElementById('tab-clusters-li');
+if (clustersLi) clustersLi.style.display = hasAnyCluster ? '' : 'none';
+// The models with the permission that reads them: offering an entry that opens on a refusal is
+// an entry that looks broken. The templates are read with the inventory's own permission — the
+// item form picks one — so whoever sees the inventory sees them.
+const modelsLi = document.getElementById('tab-models-li');
+if (modelsLi) modelsLi.style.display = perms.has('dcim_catalog_view') ? '' : 'none';
+const buildsLi = document.getElementById('tab-builds-li');
+if (buildsLi) buildsLi.style.display = perms.has('dcim_view') ? '' : 'none';
 // Config tab
 const configLi = document.getElementById('tab-config-li');
 const hasConfigEdit = perms.has('config_edit');

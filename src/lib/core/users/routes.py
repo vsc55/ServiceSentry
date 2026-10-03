@@ -404,6 +404,12 @@ def register(app, wa):
                 user['modal_config'] = mc
         if 'dashboard_layout' in data:
             dl = data['dashboard_layout']
+            # A layout of one's own is `overview_edit`, which the screen asked and this did not:
+            # without it the button was hidden and the request still went through. Going back to
+            # the default (an empty list) is not customising anything, and stays open to all.
+            if (isinstance(dl, list) and dl
+                    and 'overview_edit' not in wa._get_session_permissions()):
+                return jsonify({'error': wa._t('access_denied')}), 403
             if isinstance(dl, list):
                 user['dashboard_layout'] = dl
         wa._persist_users()

@@ -3,7 +3,7 @@
 """Tests para watchfuls/keepalived.
 
 The check binds one item to several member devices and probes each over
-``device_exec`` (SVC state + ``ip addr`` dump). Both ``resolve_device`` (host
+``device_exec`` (SVC state + ``ip addr`` dump). Both ``resolve_device`` (device
 registry) and ``device_exec`` (SSH/local) are patched so the tests stay hermetic
 and exercise only the per-node + VIP roll-up aggregation.
 """
@@ -26,7 +26,7 @@ def _out(state, addrs):
 
 
 def _run(item, members, exec_map, priorities=None):
-    """Run check() for a single keepalived item with patched host access.
+    """Run check() for a single keepalived item with patched device access.
 
     *exec_map*: ``{uid: (stdout, stderr, code)}`` returned by device_exec for that
     member (missing uid → unreachable). *priorities*: ``{uid: priority}``.
@@ -74,13 +74,13 @@ class TestKeepalivedBasics:
         assert sch['list']['__cluster_columns__'] == ['vip']
         assert sch['list']['__member_field__']['key'] == 'priority'
 
-    def test_declares_vip_provision_host(self):
-        """The VIP is auto-provisioned as a host via the generic core hook: the
-        module declares __provision_device__ (address_field vip → vip_host_uid)."""
+    def test_declares_vip_provision_device(self):
+        """The VIP is auto-provisioned as a device via the generic core hook: the
+        module declares __provision_device__ (address_field vip → vip_device_uid)."""
         from watchfuls.keepalived import Watchful
         decl = Watchful.ITEM_SCHEMA['list']['__provision_device__']
         assert decl['address_field'] == 'vip'
-        assert decl['link_field'] == 'vip_host_uid'
+        assert decl['link_field'] == 'vip_device_uid'
         assert '{label}' in decl['name_template']
 
 

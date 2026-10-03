@@ -302,7 +302,7 @@ class TestStoredPayloadsDoNotExecute:
         assert 'onerror' in body or 'img src=x' in body, \
             'the payload was neither executed nor displayed — it vanished'
 
-    def test_a_payload_in_a_host_name_never_runs(self, page, admin):
+    def test_a_payload_in_a_device_name_never_runs(self, page, admin):
         """A second surface, because escaping is per-render: the users table proves nothing
         about the devices table, which builds its own rows."""
         admin._devices_store.create(
@@ -310,7 +310,8 @@ class TestStoredPayloadsDoNotExecute:
             actor='test')
         page.goto(f'{page.panel_url}/admin')
         _ready(page)
-        page.evaluate("_navSubtab(null, '#tab-servers', '#subtab-devices')")
+        # The devices are listed in Infrastructure since the registry's own list went there.
+        page.evaluate("_navTab('#tab-infra')")
         page.wait_for_timeout(1500)
         assert not self._canary_fired(page), 'a stored payload executed in the devices view'
 
@@ -405,11 +406,11 @@ class TestThePanelRefusesToBeFramed:
 
 class TestSavingOneCheckDoesNotSwitchOnEveryModule:
     """Adding a ping check to a server used to enable cpu, hddtemp, ntp, raid, ram_swap and
-    snmp — every single-check host module — each with no items at all.
+    snmp — every single-check device module — each with no items at all.
 
-    The monitoring section of the host modal renders one slot per host-bindable module, and a
+    The monitoring section of the device modal renders one slot per device-bindable module, and a
     single-check module gets an empty placeholder slot even when the user never touches it.
-    ``_applyHostChecks`` created ``modulesData[module][collection]`` up front and only then
+    ``_applyDeviceChecks`` created ``modulesData[module][collection]`` up front and only then
     skipped the placeholder, leaving the module behind as ``{}`` — and a module whose
     ``enabled`` key is absent reads as ENABLED (``schemas.py`` declares ``default: True``).
     Saving the one check the user did add then PUT the whole object, persisting the lot.
@@ -429,7 +430,7 @@ class TestSavingOneCheckDoesNotSwitchOnEveryModule:
                                          items: [{ _key: null, enabled, fields: {} }] });
             _deviceChecks = { ping: slot(true), cpu: slot(cpuEnabled) };
             _deviceChecks.ping.items[0].fields = { address: '10.0.0.9' };
-            _applyHostChecks('host-uid-1');
+            _applyDeviceChecks('device-uid-1');
             return Object.keys(modulesData).filter(k => /(^|\.)cpu$/.test(k));
         }""", cpu_enabled)
 

@@ -5,6 +5,78 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## Lo que un renombrado mecánico se llevó por delante con la suite en verde
+
+**Síntoma.** Con la suite completa en local (ya sin la fuga de memoria, ficha siguiente), 28 fallos
+en tres ficheros: `AttributeError: 'Request' object has no attribute 'device'`,
+`RaidMdstat.__init__() got an unexpected keyword argument 'host'` y un `KeyError` en el
+muestreador SNMP. En CI nunca se habían visto, porque el runner moría antes de llegar a ellos.
+
+**Diagnóstico.** Los tres venían del commit que convirtió el dominio *host* en *device*. Una
+revisión de su diff entero, línea a línea, buscando lo que **no** era la entrada del registro,
+encontró trece casos más: atributos de terceros (`request.host` de Flask, el `host_name` de
+Freshservice), un import diferido a un módulo que no existe, claves guardadas dentro de JSON
+(`host_uids` de los clústeres), nombres de evento ya escritos en reglas de usuarios y diez claves
+del JavaScript cuyo otro extremo seguía diciendo `host`. La base real lo confirmó: 3 clústeres
+sin miembros.
+
+**Causa raíz.** «host» era dos palabras: la entidad del panel y la palabra de red. El renombrado
+las trató como una, y la lista de excepciones del commit (hostname, ssh_host, `{host}`…) se
+escribió pero no se aplicó a todas partes. Ninguna de estas roturas lanza: un import diferido
+falla solo cuando se ejecuta (y un `except` se lo traga), un filtro que se ignora enseña todo, un
+campo que falta pinta un guion y una regla que no casa no dice nada.
+
+**Solución.** Separar las dos palabras. Donde es la palabra de red (`request.host`, la dirección
+a la que se conecta un check, el remitente de un syslog, la máquina que tiene un lease), `host`
+en los dos extremos. Donde es la entidad del panel, `device` en los dos extremos, y un barrido
+de los identificadores que aún decían host. Los datos guardados con los nombres viejos
+(`host_uids`, `vip_host_uid`, los eventos de auditoría `host_*`) se actualizaron en la base:
+sin alias, porque nada está aún en producción. Una guarda nueva comprueba en disco cada import
+del propio código, también los que van dentro de funciones; otra fija cada clave del
+JavaScript.
+
+**Lección.** Un renombrado se hace por **significado**, no por cadena: cada coincidencia es una
+pregunta («¿esto es la entidad o es la palabra?»), y las claves que viven fuera del código —en
+JSON guardado, en reglas de usuario, en la API de un tercero— no las alcanza una migración de
+columnas: hay que buscarlas en los datos.
+
+## El job de pruebas que GitHub mataba en cada pull request
+
+**Síntoma.** Cada pull request de `feat/dcim` acababa en rojo con «The runner has received a
+shutdown signal» y «The operation was canceled». Ningún test fallaba: siempre en torno al 15 %,
+siempre dentro de `tests/integration`, y cada vez en un test distinto. En local la suite pasaba.
+
+**Diagnóstico.** Un fallo que cae en un sitio distinto cada vez no es de un test, es de la
+máquina. Un plugin de pytest que imprimía cada 25 tests la memoria, los hilos y los descriptores
+del proceso lo enseñó en un solo fichero (`test_wa_config.py`, `-n0`):
+
+```
+## 25  rss=487MB  threads=129
+## 50  rss=862MB  threads=254
+## 150 rss=2351MB threads=754
+```
+
+~15 MB y 5 hilos por test, y ninguno devuelto. Volcar al final de la sesión los hilos vivos con su
+pila (`sys._current_frames()`) los identificó: `svc-health`, `cert-scan`, `cable-scan`,
+`secret-scan` y `ss-backup` — uno de cada por `WebAdmin` construido.
+
+**Causa raíz.** `WebAdmin.__init__` arranca cinco hilos en segundo plano, y sus bucles guardan la
+instancia en sus cierres (`lambda: self._config_section(...)`, `BackupRunner(self)`). El fixture
+`admin` paraba los servicios embebidos, pero no éstos; y nadie los paraba en los ~60 sitios que
+construyen un `WebAdmin` a mano. Un hilo daemon vivo es una raíz para el recolector: la app
+entera —Flask, la base, las cachés— quedaba viva hasta el final del proceso. En el runner de
+GitHub (16 GB, dos workers de xdist) eso es memoria agotada hacia el 15 % de la suite; el sistema
+mata al runner y Actions sólo ve que se ha ido.
+
+**Solución.** `WebAdmin.stop_background()` para los cinco. En `tests/conftest.py`, un `WeakSet`
+apunta cada `WebAdmin` que se construye (envolviendo `__init__`) y un fixture autouse,
+`_stop_every_web_admin`, para al terminar cada test los hilos y los servicios embebidos de todos
+ellos. Al ser débil, la instancia se libera en cuanto sus hilos se paran.
+
+**Lección.** Un «shutdown signal» del runner sin un test en rojo es memoria o disco, no código:
+se mide, no se lee el log. Y quien arranca un hilo tiene que ofrecer cómo pararlo, y el fixture
+que lo construye tiene que llamarlo — un hilo daemon no muere con la prueba, muere con el proceso.
+
 ## El menú que se cerraba a mitad de camino, y sólo con la barra desplazada
 
 **Síntoma.** Al ir de una sección de la barra izquierda a su menú desplegado —de «Infraestructura»

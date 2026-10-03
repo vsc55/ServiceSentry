@@ -407,7 +407,7 @@ class SchemaDiscovery:
     # A check against a bare address has to stay possible — somebody wants to watch one OID
     # on a box without registering it as a device first — so the item needs the whole
     # connection on it: address, port, version, community, the v3 keys. Those are the same
-    # fields the HOST carries, and the module was writing them out a second time because the
+    # fields the DEVICE carries, and the module was writing them out a second time because the
     # device profile only says what a check inherits when BOUND; it puts nothing on the form of
     # an unbound one.
     #

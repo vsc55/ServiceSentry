@@ -100,7 +100,7 @@ class TestQuePuedeSerDeUnaEmpresaLoDiceQuienLoTiene:
         assert scopes.known('') is False
 
     def test_una_maquina_no_hereda_de_nada_y_eso_es_una_respuesta(self):
-        """Un `host` no tiene contenedor del que heredar: es de quien se dijo, y de nadie si no
+        """Un `device` no tiene contenedor del que heredar: es de quien se dijo, y de nadie si no
         se dijo. Contestar consigo mismo es lo que hace que resuelva igual que los demás."""
         assert scopes.chain_of(None, 'device', 'h1') == [('device', 'h1')]
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/filesystemusage — host-centric disk usage monitoring.
+"""Tests for watchfuls/filesystemusage — device-centric disk usage monitoring.
 
 Usage is read via ``device_exec`` (mocked); the per-OS parsers run for real
 against canned ``df``/``wmic`` output.
@@ -18,7 +18,7 @@ class _FakeStore:
         return self._h.get(uid)
 
 
-def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+def _device(uid='h1', os='linux', kind='remote', maintenance=False):
     return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
             'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
@@ -26,7 +26,7 @@ def _host(uid='h1', os='linux', kind='remote', maintenance=False):
 def _watchful(items, devices=None):
     from watchfuls.filesystemusage import Watchful
     mm = create_mock_monitor({'watchfuls.filesystemusage': {'list': items}})
-    mm._devices_store = _FakeStore(devices or {'h1': _host()})
+    mm._devices_store = _FakeStore(devices or {'h1': _device()})
     return Watchful(mm)
 
 
@@ -70,9 +70,9 @@ class TestCheck:
         assert items['data']['status'] is False        # 90 > 85
         assert 'Warning' in items['data']['message']
 
-    def test_windows_host_uses_wmic(self):
+    def test_windows_device_uses_wmic(self):
         w = _watchful({'c': {'enabled': True, 'partition': 'C:', 'alert': 85, 'device_uid': 'h1'}},
-                      devices={'h1': _host(os='windows')})
+                      devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec', return_value=(_WMIC, '', 0)) as he:
             items = w.check().list
         assert 'wmic' in he.call_args.args[1]
@@ -109,7 +109,7 @@ class TestCheck:
             assert len(w.check().items()) == 0
         he.assert_not_called()
         w2 = _watchful({'a': {'enabled': True, 'partition': '/', 'device_uid': 'h1'}},
-                       devices={'h1': _host(maintenance=True)})
+                       devices={'h1': _device(maintenance=True)})
         with patch.object(w2, 'device_exec') as he2:
             assert len(w2.check().items()) == 0
         he2.assert_not_called()
@@ -119,9 +119,9 @@ class TestDiscover:
 
     def test_discover_remote_df(self):
         from watchfuls.filesystemusage import Watchful
-        host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
+        device = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
         with patch('lib.core.devices.runner.run', return_value=(_DF, '', 0)) as run:
-            names = {s['name'] for s in Watchful.discover({'__device__': host})}
+            names = {s['name'] for s in Watchful.discover({'__device__': device})}
         assert run.call_args.args[1] == 'df -P -k'
         assert '/' in names and '/data' in names
 

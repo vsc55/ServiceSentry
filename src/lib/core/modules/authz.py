@@ -3,7 +3,7 @@
 """May this save touch this item?
 
 The module save is the one write in the panel that crosses domains: a check belongs to a
-module, but it is bound to a HOST or a CLUSTER, and the person editing it may hold the
+module, but it is bound to a DEVICE or a CLUSTER, and the person editing it may hold the
 permission for one and not the other. So "who may write here" cannot be answered by the module
 flag alone, and answering it wrong is an authorisation bug rather than a bad screen.
 
@@ -37,10 +37,10 @@ def has_any_module_write(perms) -> bool:
     )
 
 
-def _item_host_uid(it) -> str:
+def _item_device_uid(it) -> str:
     """The device binding of ONE side of an item change (items can be non-dict shorthands).
 
-    Deliberately not :func:`items.item_host_uid`, which answers for the pair and prefers the
+    Deliberately not :func:`items.item_device_uid`, which answers for the pair and prefers the
     new value: authorising a rebind needs the two bindings apart, not whichever exists.
     """
     return str(it.get('device_uid') or '').strip() if isinstance(it, dict) else ''
@@ -128,13 +128,13 @@ def authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
                     return False
                 continue
             # BOTH bindings, when there are two. A modification that moves a check from
-            # one host to another is an edit of the host it is taken FROM as much as of the
+            # one device to another is an edit of the device it is taken FROM as much as of the
             # one it lands on, and authorising only the destination let a `server.<mine>.edit`
             # holder rebind any other device's check onto their own — which takes the check off
-            # that host. The permission exists to confine them to their host; this was the
+            # that device. The permission exists to confine them to their device; this was the
             # one write that reached outside it. (Verified: the same edit made in place is
             # refused, so only the rebind got through.)
-            old_hu, new_hu = _item_host_uid(o), _item_host_uid(n)
+            old_hu, new_hu = _item_device_uid(o), _item_device_uid(n)
             if o is None:
                 if not _server_authorized(perms, 'add', new_hu):
                     return False

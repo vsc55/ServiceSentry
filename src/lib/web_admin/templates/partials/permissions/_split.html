@@ -92,7 +92,7 @@ function _permSplitGroupHtml(groupKey, perms, uid, editable) {
     }
     h += '</div>';
 
-    // Per-instance overrides (this module / this host / this cluster). Only ONE role is on
+    // Per-instance overrides (this module / this device / this cluster). Only ONE role is on
     // screen here, so this pane can afford the full items × actions table (_resources.html),
     // hooked to the draft through onChange.
     const { spec, rows } = _permVisibleResRows(groupKey);

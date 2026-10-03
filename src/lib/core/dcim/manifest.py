@@ -27,7 +27,9 @@ query that returns a list.
 Nothing here alerts, and nothing here reaches a device. This package stores what people know.
 """
 
-MODULE_PERMISSIONS = {
+# Two groups, because the screens are in two places: the physical inventory, and — in the
+# Catalogue — the models and the purchase templates. The role editor reads like the sidebar.
+MODULE_PERMISSIONS = [{
     'group': 'perm_group_dcim',       # i18n key for the role-editor group heading
     'order': 46,                      # right after infrastructure (45): same fleet, other axis
     'permissions': (
@@ -40,6 +42,11 @@ MODULE_PERMISSIONS = {
         # Declare and retire cabling and its labels. `editor`, like moving equipment: it is the
         # same act of recording what somebody did with their hands.
         {'flag': 'dcim_cable_edit', 'roles': ('editor',)},
+    ),
+}, {
+    'group': 'perm_group_dcim_catalog',   # Catálogo › Modelos y Plantillas
+    'order': 47,
+    'permissions': (
         # The catalogue of models. Both roles: it is a reference book about equipment in
         # general, and it says nothing about this installation.
         {'flag': 'dcim_catalog_view', 'roles': ('editor', 'viewer')},
@@ -53,7 +60,7 @@ MODULE_PERMISSIONS = {
         # `orgs_edit` — lo que importa es que se pueda quitar sin quitar nada más.
         {'flag': 'dcim_build_edit', 'roles': ('editor',)},
     ),
-}
+}]
 
 
 # What this package writes to the audit log, and how loud each one is. Declared rather than

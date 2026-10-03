@@ -321,10 +321,10 @@ class TestProxmoxCheck:
         res = _run(_item(check_storage=True, storage_threshold=0), api)
         assert res['pve/storage/n1']['status'] is True
 
-    # ── maintenance (derived from member-host maintenance) ───────────────
+    # ── maintenance (derived from member-device maintenance) ───────────────
 
     def test_maintenance_skips_per_node_checks(self):
-        """An online node whose mapped host is in maintenance has its per-node
+        """An online node whose mapped device is in maintenance has its per-node
         checks (network here) skipped — its problems must not alert."""
         item = _item(check_network=True)
         item['__cluster_members__'] = [
@@ -339,11 +339,11 @@ class TestProxmoxCheck:
         assert 'pve/net/pve02' not in res            # maintenance → skipped, no alert
         assert res['pve/net/pve01']['status'] is True
 
-    # ── cluster member ↔ host mapping ────────────────────────────────────
+    # ── cluster member ↔ device mapping ────────────────────────────────────
 
-    def test_member_host_maintenance_skips_node(self):
-        """A node whose mapped host is in maintenance is reported as maintenance
-        (OK), not offline-error — and carries the host name."""
+    def test_member_device_maintenance_skips_node(self):
+        """A node whose mapped device is in maintenance is reported as maintenance
+        (OK), not offline-error — and carries the device name."""
         item = _item(check_nodes=True)
         item['__cluster_members__'] = [
             {'node': 'pve02', 'name': 'srv-2', 'device_uid': 'h2', 'maintenance': True}]
@@ -355,8 +355,8 @@ class TestProxmoxCheck:
         assert res['pve/node/pve02']['other_data'].get('maintenance') is True
         assert res['pve/node/pve02']['other_data'].get('device_name') == 'srv-2'
 
-    def test_member_host_name_annotates_node(self):
-        """An online node mapped to a host shows the host name in status."""
+    def test_member_device_name_annotates_node(self):
+        """An online node mapped to a device shows the device name in status."""
         item = _item(check_nodes=True)
         item['__cluster_members__'] = [
             {'node': 'pve01', 'name': 'srv-1', 'device_uid': 'h1', 'maintenance': False}]
@@ -370,7 +370,7 @@ class TestProxmoxCheck:
     # ── VIP / cluster address ────────────────────────────────────────────
 
     def test_vip_used_when_no_host(self):
-        """Only a VIP configured (no member host) still connects and runs."""
+        """Only a VIP configured (no member device) still connects and runs."""
         api = {'/cluster/status': [{'type': 'cluster', 'name': 'lab', 'quorate': 1},
                                    {'type': 'node', 'name': 'n1', 'online': 1}]}
         res = _run(_item(host='', vip='cluster.lan', check_cluster=True), api)
@@ -457,7 +457,7 @@ class TestProxmoxAction:
 
 class TestProxmoxProvision:
     """Provisioning connects over the shared ssh_client (the same SSH path the
-    host-aware checks use), so the tests patch ssh_client.connect/run_command."""
+    device-aware checks use), so the tests patch ssh_client.connect/run_command."""
 
     @contextmanager
     def _ssh(self, out='', err='', code=0, raise_exc=None):
@@ -519,16 +519,16 @@ class TestProxmoxProvision:
         assert 'pveum user token remove' in cmd
         assert 'pveum user token add' in cmd
 
-    def test_provision_uses_bound_host_ssh_profile(self):
-        """When the check is host-bound, provisioning reuses the host's SSH
+    def test_provision_uses_bound_device_ssh_profile(self):
+        """When the check is device-bound, provisioning reuses the device's SSH
         profile (address + port + secret) injected as __device__ — the same SSH
-        path the host-aware checks use — instead of guessing the default port."""
+        path the device-aware checks use — instead of guessing the default port."""
         from watchfuls.proxmox import Watchful
         token_json = ('{"full-tokenid":"servicesentry@pve!monitoring",'
                       '"value":"sec-uuid-9","info":{"privsep":0}}')
         with self._ssh(out=token_json) as (conn, _run):
             out = Watchful.provision_token({
-                # no inline host / ssh_* fields — all from the bound host context
+                # no inline host / ssh_* fields — all from the bound device context
                 '__device__': {'address': '10.9.9.9',
                              'ssh': {'ssh_user': 'admin', 'ssh_port': 2222,
                                      'ssh_password': 'hpw'}},
@@ -541,8 +541,8 @@ class TestProxmoxProvision:
         assert kw['user'] == 'admin'
         assert kw['password'] == 'hpw'
 
-    def test_provision_explicit_overrides_host_profile(self):
-        """An explicit modal value wins over the bound host's SSH profile."""
+    def test_provision_explicit_overrides_device_profile(self):
+        """An explicit modal value wins over the bound device's SSH profile."""
         from watchfuls.proxmox import Watchful
         token_json = '{"full-tokenid":"u@pve!t","value":"s","info":{}}'
         with self._ssh(out=token_json) as (conn, _run):
@@ -559,7 +559,7 @@ class TestProxmoxProvision:
 
     def test_provision_verify_host_default_autoadd(self):
         """By default the host key is auto-added (verify_host=False), unless the
-        host SSH profile enables ssh_verify_host."""
+        device SSH profile enables ssh_verify_host."""
         from watchfuls.proxmox import Watchful
         token_json = '{"full-tokenid":"u@pve!t","value":"s","info":{}}'
         with self._ssh(out=token_json) as (conn, _run):

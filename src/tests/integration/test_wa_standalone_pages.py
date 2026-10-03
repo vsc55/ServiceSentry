@@ -83,7 +83,7 @@ class TestEveryUrlIsTheSameShell:
         html = client.get(path).data.decode('utf-8', 'replace')
         # Every URL ships the whole panel's panes, not just the section being viewed.
         for pane in ('tab-modules', 'tab-config', 'tab-access', 'tab-audit',
-                     'tab-servers', 'tab-services', 'tab-ipban', 'tab-events',
+                     'tab-devtypes', 'tab-clusters', 'tab-services', 'tab-ipban', 'tab-events',
                      'tab-overview', 'tab-history', 'tab-syslog', 'tab-account'):
             assert f'id="{pane}"' in html, f'{path} is missing the {pane} pane'
 

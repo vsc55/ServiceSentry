@@ -36,7 +36,7 @@ from lib.providers.freshservice.plan import SOURCE, ascii_fold
 #: El nombre del activo NO está en la lista, y estuvo: se parece a un nombre de máquina lo
 #: bastante para tentar, y «Portátil de Juan» como dirección de un check es un dispositivo que
 #: sale en rojo para siempre sin que nadie entienda por qué. Sin dirección es una respuesta.
-ADDRESS_FIELDS = ('ip_address', 'hostname', 'device_name', 'fqdn')
+ADDRESS_FIELDS = ('ip_address', 'hostname', 'host_name', 'fqdn')
 
 #: El número de serie, que es lo que se lee en una pegatina y lo que pide un soporte.
 SERIAL_FIELDS = ('serial_number', 'serial_no', 'serial')
@@ -249,11 +249,11 @@ def select(plan, pick=None, link=None, devices=None):
             continue
         suyo = por_uid.get(uid)
         if suyo is None:
-            rechazos.append({'name': p.get('name') or '', 'reason': 'fs_hosts_link_gone'})
+            rechazos.append({'name': p.get('name') or '', 'reason': 'fs_devices_link_gone'})
             continue
         otro = str(suyo.get('external_id') or '')
         if str(suyo.get('source') or '') == SOURCE and otro and otro != ext:
-            rechazos.append({'name': p.get('name') or '', 'reason': 'fs_hosts_link_taken'})
+            rechazos.append({'name': p.get('name') or '', 'reason': 'fs_devices_link_taken'})
             continue
         fuera.append(dict(p, action='adopt', uid=uid, was=_was(suyo)))
     return fuera, rechazos

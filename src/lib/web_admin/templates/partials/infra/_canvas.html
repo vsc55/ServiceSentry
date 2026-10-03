@@ -816,7 +816,7 @@ function ssPublicIp(addresses) {
     return (addresses || []).find(a => !ssPrivateIp(a)) || '';
 }
 
-function ssHostCard(node, uid, opts) {
+function ssDeviceCard(node, uid, opts) {
     const n = node || {};
     const o = opts || {};
     const h = (typeof _infraDevices !== 'undefined' ? _infraDevices : []).find(x => x.uid === uid)
@@ -846,7 +846,7 @@ function ssHostCard(node, uid, opts) {
             ${row('bi-tag', t('device_type'), type
                   ? esc(deviceTypeLabel(type))
                   : `<span class="text-muted">${esc(t('device_type_unset'))}</span>`)}
-            ${row('bi-award', t('col_host_brand'), hostBrandLine(h, {text: true}))}
+            ${row('bi-award', t('col_device_brand'), deviceBrandLine(h, {text: true}))}
             ${row('bi-cpu', t('col_device_os'),
                   typeof _infraOsHtml === 'function' ? _infraOsHtml(h) : esc(h.os || ''))}
             ${row('bi-hdd-network', t('infra_link_addresses'),
@@ -857,7 +857,7 @@ function ssHostCard(node, uid, opts) {
             ${row('bi-signpost-2', t('infra_link_gateway'), n.gateway ? code(n.gateway) : '')}
             ${row('bi-plugin', t('infra_link_cables'),
                   o.cables === undefined ? '' : String(o.cables))}
-            ${row('bi-eye', t('col_host_modules'),
+            ${row('bi-eye', t('col_device_modules'),
                   h.modules_total ? esc(`${h.modules_active || 0}/${h.modules_total}`) : '')}
             ${row('bi-tags', t('col_device_tags'), (h.tags || []).map(tg =>
                   `<span class="badge bg-body-secondary text-body-secondary border fw-normal

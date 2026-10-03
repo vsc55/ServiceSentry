@@ -4,7 +4,7 @@
 
 ``server.<uid>.edit``, ``module.<name>.view`` and ``cluster.<uid>.delete`` narrow a global
 flag down to one thing. That thing lives in another table (or in the module configuration)
-and nothing connected the two: deleting a host left its keys in every role's permission
+and nothing connected the two: deleting a device left its keys in every role's permission
 list for good.
 
 They granted nothing — a UUID is never reused — but they accumulated unseen, and the
@@ -39,7 +39,7 @@ class TestTheRuleItself:
 
     def test_a_role_that_did_not_hold_them_is_not_reported_changed(self):
         """The caller persists and audits only when something actually changed; saying
-        "changed" for every role would write the whole table on every host deletion."""
+        "changed" for every role would write the whole table on every device deletion."""
         roles = {'r': {'permissions': ['users_view']}}
         assert perms_svc.strip_scoped(roles, 'server', ['a']) == []
         assert roles['r']['permissions'] == ['users_view']
@@ -48,8 +48,8 @@ class TestTheRuleItself:
         assert perms_svc.strip_scoped({}, 'server', []) == []
         assert perms_svc.strip_scoped({'r': {}}, 'server', [None, '']) == []
 
-    def test_cluster_items_are_the_ones_bound_to_many_hosts(self):
-        """A cluster is a multi-host check — an item carrying `device_uids`. A single-host
+    def test_cluster_items_are_the_ones_bound_to_many_devices(self):
+        """A cluster is a multi-device check — an item carrying `device_uids`. A single-device
         item is a server-scoped thing and must not be mistaken for one."""
         cfg = {'ping': {'checks': {
             'a': {'uid': 'u1', 'device_uids': ['h1', 'h2']},

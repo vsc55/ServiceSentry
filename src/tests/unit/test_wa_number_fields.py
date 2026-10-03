@@ -26,7 +26,7 @@ from tests.helpers import _fn, _read
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 CORE = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core')
-# The field renderer is six partials — one field, a whole object's fields, the host binding,
+# The field renderer is six partials — one field, a whole object's fields, the device binding,
 # the shared control skeleton, the chips and the conditional fields. They are ONE surface, and
 # a guard that named the file a function happens to live in today would fail the next time one
 # moves, which is exactly what happened when the renderer was split.

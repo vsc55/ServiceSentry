@@ -60,7 +60,7 @@ def _prepare_flask_request(req) -> dict:
         port = 443 if req.scheme == 'https' else 80
     return {
         'https':       'on' if req.scheme == 'https' else 'off',
-        'http_host':   req.device,
+        'http_host':   req.host,
         'server_port': str(port),
         'script_name': req.path,
         'get_data':    req.args.copy(),

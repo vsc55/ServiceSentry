@@ -82,7 +82,7 @@ class TestModulesStore:
         for k in ('uid', 'device_uid', 'label', 'enabled'):
             assert k not in d
 
-    def test_host_uid_omitted_when_empty(self):
+    def test_device_uid_omitted_when_empty(self):
         s, db = _store()
         s.save_all(_sample())
         assert db.fetchone("SELECT device_uid FROM module_config_items WHERE uid='u2'")[0] == ''

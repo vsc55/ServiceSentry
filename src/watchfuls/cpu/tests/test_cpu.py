@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/cpu — host-centric CPU usage monitoring.
+"""Tests for watchfuls/cpu — device-centric CPU usage monitoring.
 
 CPU is sampled via ``device_exec`` (mocked here); the per-OS parsers run for real
 against canned command output.
@@ -28,7 +28,7 @@ class _FakeStore:
         return self._h.get(uid)
 
 
-def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+def _device(uid='h1', os='linux', kind='remote', maintenance=False):
     return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
             'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
@@ -36,7 +36,7 @@ def _host(uid='h1', os='linux', kind='remote', maintenance=False):
 def _watchful(items, devices=None):
     from watchfuls.cpu import Watchful
     mm = create_mock_monitor({'watchfuls.cpu': {'list': items}})
-    mm._devices_store = _FakeStore(devices or {'h1': _host()})
+    mm._devices_store = _FakeStore(devices or {'h1': _device()})
     return Watchful(mm)
 
 
@@ -99,9 +99,9 @@ class TestCheck:
         assert items['c']['status'] is False        # 75% >= 60%
         assert 'Excessive' in items['c']['message']
 
-    def test_windows_host_uses_wmic(self):
+    def test_windows_device_uses_wmic(self):
         w = _watchful({'c': {'enabled': True, 'alert': 85, 'device_uid': 'h1'}},
-                      devices={'h1': _host(os='windows')})
+                      devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec', return_value=(_WMIC, '', 0)) as he:
             items = w.check().list
         assert 'wmic' in he.call_args.args[1]
@@ -113,9 +113,9 @@ class TestCheck:
             assert len(w.check().items()) == 0
         he.assert_not_called()
 
-    def test_maintenance_host_skipped(self):
+    def test_maintenance_device_skipped(self):
         w = _watchful({'c': {'enabled': True, 'device_uid': 'h1'}},
-                      devices={'h1': _host(maintenance=True)})
+                      devices={'h1': _device(maintenance=True)})
         with patch.object(w, 'device_exec') as he:
             assert len(w.check().items()) == 0
         he.assert_not_called()
@@ -130,7 +130,7 @@ class TestCheck:
         from watchfuls.cpu import Watchful
         mm = create_mock_monitor({'watchfuls.cpu': {'enabled': False,
                                   'list': {'c': {'enabled': True, 'device_uid': 'h1'}}}})
-        mm._devices_store = _FakeStore({'h1': _host()})
+        mm._devices_store = _FakeStore({'h1': _device()})
         w = Watchful(mm)
         with patch.object(w, 'device_exec') as he:
             assert len(w.check().items()) == 0
@@ -144,7 +144,7 @@ class TestThresholdInheritance:
     def _w(cfg, devices=None):
         from watchfuls.cpu import Watchful
         mm = create_mock_monitor({'watchfuls.cpu': cfg})
-        mm._devices_store = _FakeStore(devices or {'h1': _host()})
+        mm._devices_store = _FakeStore(devices or {'h1': _device()})
         return Watchful(mm)
 
     def test_blank_item_inherits_module_threshold(self):
@@ -191,7 +191,7 @@ class TestThresholdInheritance:
 
 class TestSchema:
 
-    def test_host_centric(self):
+    def test_device_centric(self):
         from watchfuls.cpu import Watchful
         sch = Watchful.ITEM_SCHEMA
         assert sch['__device_profile__']['key'] == 'ssh'

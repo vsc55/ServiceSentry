@@ -123,7 +123,7 @@ class Watchful(ModuleBase):
         for (key, raw) in self.get_conf('list', {}).items():
             if not isinstance(raw, dict):
                 continue
-            # Host-centric: merge the bound host's address + NUT credentials.
+            # Device-centric: merge the bound device's address + NUT credentials.
             value = self.resolve_device(raw)
             if value.get('_device_maintenance'):
                 continue
@@ -270,8 +270,8 @@ class Watchful(ModuleBase):
     def test_connection(cls, config: dict) -> dict:
         """Probe the NUT UPSD connection for one UPS item (web UI button).
 
-        Host-centric: use the item's ``host`` field, falling back to the bound
-        host's address injected as ``__device__`` by the route.  NUT is queried
+        Device-centric: use the item's ``host`` field, falling back to the bound
+        device's address injected as ``__device__`` by the route.  NUT is queried
         directly over TCP, so the test connects to ``host:port`` regardless of
         whether the host is reached locally or over SSH for other modules.
         """

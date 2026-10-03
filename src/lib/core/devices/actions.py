@@ -21,9 +21,9 @@ from __future__ import annotations
 
 # El descriptor, con el ejemplo real::
 #
-#     DEVICE_ACTIONS = [{'id': 'import', 'label_key': 'fs_import_hosts',
+#     DEVICE_ACTIONS = [{'id': 'import', 'label_key': 'fs_import_devices',
 #                      'icon': 'bi-cloud-download', 'variant': 'primary',
-#                      'perm': 'devices_edit', 'fn': 'freshserviceImportHosts',
+#                      'perm': 'devices_edit', 'fn': 'freshserviceImportDevices',
 #                      'ready': is_configured}]
 #
 # `ready` es lo que hace que el botón no aparezca hasta que su conector está puesto, y es una

@@ -328,25 +328,25 @@ class TestApiWatchfulActionAuthorization:
 
 
 
-# ── Host-aware discovery (Servers modal: run discover on the bound host) ──────
+# ── Device-aware discovery (Servers modal: run discover on the bound device) ──────
 
 
-class TestHostAwareDiscovery:
-    """POST discover with a host context runs the listing on that host (here a
-    remote host, with the SSH command runner mocked)."""
+class TestDeviceAwareDiscovery:
+    """POST discover with a device context runs the listing on that device (here a
+    remote device, with the SSH command runner mocked)."""
 
     def test_process_discover_remote_draft(self, client_with_modules):
         c = client_with_modules
         _login(c)
         with patch('lib.core.devices.runner.run', return_value=('nginx\nnginx\nsshd\n', '', 0)) as run:
             r = c.post('/api/v1/modules/watchfuls/process/discover', json={
-                '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                '_device': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},
             })
         assert r.status_code == 200
         names = {s['name'] for s in r.get_json()}
         assert 'nginx' in names and 'sshd' in names
-        # The command ran against the remote host context.
+        # The command ran against the remote device context.
         assert run.call_args.args[1] == 'ps -A -o comm='
 
     def test_service_discover_remote_draft(self, client_with_modules):
@@ -355,7 +355,7 @@ class TestHostAwareDiscovery:
         out = "  nginx.service   loaded active running  Web server\n"
         with patch('lib.core.devices.runner.run', return_value=(out, '', 0)):
             r = c.post('/api/v1/modules/watchfuls/service_status/discover', json={
-                '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                '_device': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},
             })
         assert r.status_code == 200

@@ -2,7 +2,7 @@ function openEventRuleModal(rid) {
     const found = rid ? _eventRules.find(r => r.id === rid) : null;
     _eventDraft = found ? JSON.parse(JSON.stringify(found))
         : { id: null, name: '', description: '', enabled: true, source: 'audit', events: [],
-            severity_max: '', device: '', app: '', match_groups: [], tags: [],
+            severity_max: '', host: '', app: '', match_groups: [], tags: [],
             channels: [], webhook_ids: [], cooldown: null };
     _evEnsureConditions(_eventDraft);
     _eventAuditFilter = '';

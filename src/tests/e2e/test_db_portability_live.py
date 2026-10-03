@@ -115,7 +115,7 @@ def live_db(request):
 
 # ── the operations that were broken on MySQL/PostgreSQL before the quoting sweep ──
 
-def test_hosts_virtual_roundtrip(live_db):
+def test_devices_virtual_roundtrip(live_db):
     from lib.core.devices.stores import DevicesStore
     s = DevicesStore(live_db)
     uid = s.create({'name': 'live-h1', 'address': '10.0.0.1', 'virtual': True}, actor='test')

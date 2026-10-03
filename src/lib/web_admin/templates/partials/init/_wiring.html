@@ -149,30 +149,21 @@ document.getElementById('btn-tab-config')?.addEventListener('shown.bs.tab', () =
 document.getElementById('btn-tab-modules')?.addEventListener('shown.bs.tab', () => {
     if (!_isDirty('modules')) reloadModules(true);
 });
-// Re-fetch device status every time the Servers tab is shown, so the Status column
-// reflects a "Run all" or a status "clean" done from the Status tab (both leave
-// devicesData stale until reloaded).
-document.getElementById('btn-tab-servers')?.addEventListener('shown.bs.tab', () => {
-    reloadDevices();
-    // Refresh the active sub-tab too when the parent Infrastructure tab is shown
-    // (Bootstrap does not re-fire a sub-tab's shown event on a parent tab change).
-    if (document.getElementById('subtab-srv-clusters')?.classList.contains('active')
-        && typeof renderClusters === 'function') renderClusters();
-    if (document.getElementById('subtab-srv-types')?.classList.contains('active')
-        && typeof renderHostTypes === 'function') renderHostTypes();
+// The device classes and the clusters both count and name devices, so the registry is
+// fetched first: a list of classes saying "3 devices" from a registry loaded an hour ago is
+// the number somebody acts on.
+document.getElementById('btn-tab-devtypes')?.addEventListener('shown.bs.tab', async () => {
+    await loadDevices();
+    renderDeviceTypes();
 });
-// Infrastructure sub-tabs: render on demand; persist the active sub-tab.
-document.getElementById('btn-subtab-srv-clusters')?.addEventListener('shown.bs.tab', () => {
-    localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-clusters');
+document.getElementById('btn-tab-clusters')?.addEventListener('shown.bs.tab', async () => {
+    await loadDevices();
     renderClusters();
 });
-document.getElementById('btn-subtab-srv-devices')?.addEventListener('shown.bs.tab', () => {
-    localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-devices');
-});
-document.getElementById('btn-subtab-srv-types')?.addEventListener('shown.bs.tab', () => {
-    localStorage.setItem('ss_active_subtab_infra', '#subtab-srv-types');
-    renderHostTypes();
-});
+// The models and the templates draw through the inventory's renderer, which paints whichever
+// of its panes is on screen.
+document.getElementById('btn-tab-models')?.addEventListener('shown.bs.tab', () => renderDcim());
+document.getElementById('btn-tab-builds')?.addEventListener('shown.bs.tab', () => renderDcim());
 document.getElementById('btnUserModalOk').addEventListener('click', saveUserModal);
 document.getElementById('btnResetPasswordOk').addEventListener('click', resetUserPassword);
 document.getElementById('btnRoleModalOk').addEventListener('click', saveRoleModal);
@@ -202,7 +193,10 @@ function _resolveLandingTab() {
         return !!(btn && btn.closest('li')?.style.display !== 'none');
     };
     const firstVisible = () => {
-        const li = [...document.querySelectorAll('#ss-sb-settings > li.nav-item')]
+        // System first: it is where the panel has always landed (Services), and the Catalogue
+        // only when nothing in System is open to this reader.
+        const li = [...document.querySelectorAll('#ss-sb-settings > li.nav-item'),
+                    ...document.querySelectorAll('#ss-sb-catalog > li.nav-item')]
             .find(el => el.style.display !== 'none');
         return li ? li.querySelector('[data-bs-target]')?.dataset.bsTarget : null;
     };
@@ -293,7 +287,7 @@ try {
     clearDirty('modules'); // applyModuleDefaults may call markDirty for migrations; reset here
     if ((currentUser.permissions || []).some(p =>
         p === 'devices_view' || p === 'devices_edit' || p === 'devices_delete' || p.startsWith('server.'))) {
-        await loadHosts();
+        await loadDevices();
     }
     // Org-wide default dashboard layout (for users who haven't customised theirs).
     if ((currentUser.permissions || []).includes('overview_view')) {
@@ -336,12 +330,13 @@ try {
     // Reveal the Settings ("Administration panel") group now that its sub-tabs' visibility is
     // decided — showing it only if the user can open at least one panel tab. It starts hidden
     // so it doesn't flash as the lone sidebar item behind the boot overlay.
-    const _settingsGrp = document.getElementById('ss-sb-settings-group');
-    if (_settingsGrp) {
-        const _anyPanel = [...document.querySelectorAll('#ss-sb-settings > li.nav-item')]
+    // Every group the same way — the Catalogue and System: shown only if the user can open at
+    // least one of its entries.
+    document.querySelectorAll('#ss-sidebar li.ss-sb-group').forEach(grp => {
+        const _anyPanel = [...grp.querySelectorAll(':scope > .ss-sb-sub > li.nav-item')]
             .some(li => li.style.display !== 'none');
-        _settingsGrp.style.display = _anyPanel ? '' : 'none';
-    }
+        grp.style.display = _anyPanel ? '' : 'none';
+    });
     // Open the pane the URL points at: a section URL (/overview, /history, /syslog, /account)
     // maps straight to its pane; /admin falls back to the remembered/landing tab. Activating
     // the tab fires its shown.bs.tab, which runs that section's render — no full reload, and

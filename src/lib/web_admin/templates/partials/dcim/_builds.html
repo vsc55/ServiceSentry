@@ -47,6 +47,8 @@ async function _dcBuildsOpen() {
 }
 
 function _dcBuildsClose() {
+    // Las plantillas son una entrada del Catálogo: salir de ellas es ir al inventario.
+    if (typeof _navTab === 'function') _navTab('#tab-dcim');
     _dcimGo('inventory');
 }
 
@@ -213,9 +215,7 @@ function _dcbHeaderButtons(ctx) {
             onclick="_dcPortImport(_dcBuildsOpen)" title="${escAttr(t('dcim_import'))}">
             <i class="bi bi-upload"></i></button>` : ''}
         ${ctx.puede ? `<button class="btn btn-sm btn-primary" onclick="_dcBuildNew()">
-            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_build_new'))}</button>` : ''}
-        <button class="btn btn-sm btn-secondary" onclick="_dcBuildsClose()"
-            title="${escAttr(t('close'))}"><i class="bi bi-x-lg"></i></button>`;
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_build_new'))}</button>` : ''}`;
 }
 
 createListTable({

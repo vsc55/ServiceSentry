@@ -46,7 +46,7 @@ el mismo estado.
 > plano). Recomendaciones: si esperas **muchísimas** conexiones TCP/TLS persistentes, usa la
 > topología de **microservicios** para aislar el contenedor `syslog` y ajústale `mem_limit` /
 > límites de hilos acorde; prefiere **UDP** o conexiones TCP cortas cuando sea viable. La
-> mayoría de instalaciones (decenas-cientos de hosts) caben de sobra en el contenedor
+> mayoría de instalaciones (decenas-cientos de dispositivos) caben de sobra en el contenedor
 > monolítico por defecto.
 
 Ambas topologías de microservicios definen dos **redes** (ver
@@ -395,7 +395,7 @@ variables de entorno en texto plano.
 ```yaml
 volumes:
   config:        # → /etc/ServiSesentry      (config.json)
-  vardata:       # → /var/lib/ServiSesentry  (data.db: usuarios, roles, grupos, sesiones, auditoría, hosts, credenciales, historial, estado de checks y config de módulos/ítems — tablas module_config/module_config_items)
+  vardata:       # → /var/lib/ServiSesentry  (data.db: usuarios, roles, grupos, sesiones, auditoría, dispositivos, credenciales, historial, estado de checks y config de módulos/ítems — tablas module_config/module_config_items)
   dbdata:        # MariaDB principal           (solo microservicios)
   syslogdbdata:  # MariaDB de syslog           (solo microservicios)
   letsencrypt:   # acme.json de Traefik        (solo topología Traefik)

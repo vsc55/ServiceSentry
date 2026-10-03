@@ -101,7 +101,7 @@ function _dcCatUrlSave() {
             if (v) url.searchParams.set(clave, v);
             else url.searchParams.delete(clave);
         });
-        window.history.replaceState({pane: 'tab-dcim'}, '', url);
+        window.history.replaceState({pane: 'tab-models'}, '', url);
     } catch (e) { /* ídem: no vale fallar un dibujado por una dirección */ }
 }
 
@@ -167,14 +167,15 @@ function _dcCatUrlClear() {
     try {
         const url = new URL(window.location.href);
         _DCCAT_URL.forEach(([clave]) => url.searchParams.delete(clave));
-        window.history.replaceState({pane: 'tab-dcim'}, '', url);
+        window.history.replaceState({pane: 'tab-models'}, '', url);
     } catch (e) { /* ídem */ }
 }
 
 function _dcCatClose() {
     _dcCatUrlClear();
-    // Al inventario, y apuntándolo: cerrar la caja y quedarse callado dejaba la URL diciendo
-    // `/dcim/catalog`, y el siguiente dibujado volvía a abrirlo.
+    // Al inventario: los modelos son una entrada del Catálogo, así que salir de ellos es ir a
+    // otra sección y no cerrar una vista de ésta.
+    if (typeof _navTab === 'function') _navTab('#tab-dcim');
     _dcimGo('inventory');
 }
 
@@ -269,9 +270,7 @@ function _dcCatHtml() {
     const cuenta = d.counts || {};
     return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad">
         <div class="ss-toolrow mb-2">
-            <button class="btn btn-sm btn-secondary" onclick="_dcCatClose()">
-                <i class="bi bi-arrow-left me-1"></i>${esc(t('dcim_back'))}</button>
-            <span class="fw-semibold ss-fs-5">${esc(t('dcim_catalog'))}</span>
+            <span class="fw-semibold ss-fs-5">${esc(t('tab_models'))}</span>
             <span class="text-muted ss-fs-2 ss-toolrow-text">${
                 esc(tf('dcim_cat_note', d.total || 0))}</span>
         </div>
@@ -305,10 +304,9 @@ function _dcCatHtml() {
                las viene a buscar —es el sitio de los catálogos—, así que hay una puerta. Un
                enlace y no una copia de la pantalla: dos copias son dos que se separan. #}
             <li class="nav-item ms-auto"><button class="nav-link text-muted"
-                onclick="_navSubtab(null, '#tab-servers', '#subtab-srv-types',
-                                    'ss_active_subtab_infra', '#subtab-srv-types')"
-                title="${escAttr(t('dcim_cat_host_types_tt'))}">
-                <i class="bi bi-tags me-1"></i>${esc(t('subtab_host_types'))}
+                onclick="_navTab('#tab-devtypes')"
+                title="${escAttr(t('dcim_cat_device_types_tt'))}">
+                <i class="bi bi-tags me-1"></i>${esc(t('tab_devtypes'))}
                 <i class="bi bi-box-arrow-up-right ms-1 ss-fs-1"></i></button></li>
         </ul>
         ${tab === 'brands' ? _dcBrandsHtml()

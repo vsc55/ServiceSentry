@@ -409,11 +409,11 @@ function renderCollection(title, data, pathStr, target) {
 
     // Order items by their bound device's label (then the item label, then the key)
     // so device-bound checks read in a predictable, alphabetical order.
-    const _hostNames = (typeof devicesList === 'function')
+    const _deviceNames = (typeof devicesList === 'function')
         ? Object.fromEntries(devicesList().map(hh => [hh.uid, hh.name || ''])) : {};
     const _sorted = Object.entries(data).sort((a, b) =>
-        _collSortKey(a[1], a[0], _hostNames).localeCompare(
-            _collSortKey(b[1], b[0], _hostNames), undefined, { numeric: true, sensitivity: 'base' }));
+        _collSortKey(a[1], a[0], _deviceNames).localeCompare(
+            _collSortKey(b[1], b[0], _deviceNames), undefined, { numeric: true, sensitivity: 'base' }));
     for (const [name, val] of _sorted) {
         h += renderCollectionItem(name, val, pathStr + '|' + name, pathStr, target);
     }
@@ -427,7 +427,7 @@ function renderCollection(title, data, pathStr, target) {
 // Header badge telling whether a (device-capable) item is bound to a device or runs
 // inline. Bound → device icon + name (or "first +N" for a multi-device binding);
 // device-capable but unbound → a muted "inline" chip; not device-capable → nothing.
-function _itemHostBadge(val, hostCapable) {
+function _itemDeviceBadge(val, deviceCapable) {
     const huid  = (val && typeof val === 'object') ? (val.device_uid || '') : '';
     const huids = (val && Array.isArray(val.device_uids)) ? val.device_uids.filter(Boolean) : [];
     // Resolve to KNOWN devices only — a dangling uid (deleted device) must never be
@@ -443,7 +443,7 @@ function _itemHostBadge(val, hostCapable) {
             style="font-size:.64rem"
             title="${escAttr(t('device_bind_label'))}: ${escAttr(label)}"><i class="bi bi-hdd-network me-1"></i>${esc(label)}</span>`;
     }
-    if (!hostCapable) return '';
+    if (!deviceCapable) return '';
     const _inlineTxt = t('device_inline_short');
     return `<span class="badge rounded-pill text-bg-secondary flex-shrink-0 me-1" data-no-collapse="1"
         style="font-size:.64rem;opacity:.75"
@@ -452,10 +452,10 @@ function _itemHostBadge(val, hostCapable) {
 
 // Sort key for a collection item: the bound device's label first (device_uid or the
 // first of a multi-device device_uids), else the item's own label, else the raw key.
-function _collSortKey(val, key, hostNames) {
+function _collSortKey(val, key, deviceNames) {
     if (val && typeof val === 'object') {
         const huid = val.device_uid || (Array.isArray(val.device_uids) ? val.device_uids[0] : '');
-        const hn = huid && hostNames[huid];
+        const hn = huid && deviceNames[huid];
         if (hn) return String(hn).toLowerCase();
         if ((val.label || '').trim()) return String(val.label).toLowerCase();
     }
@@ -643,10 +643,10 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         // Device-association indicator (only for device-capable collections).
         const _modBare = _modNameItem.replace(/^watchfuls\./, '');
         const _collSuffix = parentPathStr.includes('|') ? parentPathStr.slice(parentPathStr.indexOf('|') + 1) : '';
-        const _hostColls = (typeof MODULE_HOST_COLLECTIONS !== 'undefined')
-            ? (MODULE_HOST_COLLECTIONS[_modBare] || MODULE_HOST_COLLECTIONS[_modNameItem]) : null;
-        const _hostCapable = !!(target === 'modules' && _hostColls && _collSuffix && _hostColls.includes(_collSuffix));
-        const _hostBadge = _itemHostBadge(itemValue, _hostCapable);
+        const _deviceColls = (typeof MODULE_DEVICE_COLLECTIONS !== 'undefined')
+            ? (MODULE_DEVICE_COLLECTIONS[_modBare] || MODULE_DEVICE_COLLECTIONS[_modNameItem]) : null;
+        const _deviceCapable = !!(target === 'modules' && _deviceColls && _collSuffix && _deviceColls.includes(_collSuffix));
+        const _deviceBadge = _itemDeviceBadge(itemValue, _deviceCapable);
 
         const isAutoExpand = (_autoExpandItemPath === pathStr);
         if (isAutoExpand) _autoExpandItemPath = null;
@@ -660,7 +660,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                     onchange="event.stopPropagation();_toggleItemSel(${sp},this.checked,${pp},${tg})"
                     title="${escAttr(t('select') || 'Select')}">` : ''}
                 <code class="flex-grow-1 min-w-0" style="font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayName)}${keyBadge}</code>
-                ${_hostBadge}${_maintBadge}${sw}${testBtn}${editLabelBtn}${renameBtn}${cloneBtn}${delBtn}
+                ${_deviceBadge}${_maintBadge}${sw}${testBtn}${editLabelBtn}${renameBtn}${cloneBtn}${delBtn}
                 <button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     style="background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${isAutoExpand}"

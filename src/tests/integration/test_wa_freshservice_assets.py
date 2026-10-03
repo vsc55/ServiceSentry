@@ -142,7 +142,7 @@ class TestElBotonDeImportarViveEnDispositivos:
         admin._write_config({'freshservice': {'domain': 'lacasa.freshservice.com',
                                               'api_key': 'k'}})
         [acc] = client.get('/api/v1/devices').get_json()['actions']
-        assert acc['fn'] == 'freshserviceImportHosts'
+        assert acc['fn'] == 'freshserviceImportDevices'
         assert acc['perm'] == 'devices_edit', 'la acción viajaría con el permiso de otra cosa'
 
     def test_con_el_dominio_pero_sin_la_clave_tampoco(self, client, admin):
@@ -196,16 +196,16 @@ class TestElBotonDeImportarViveEnDispositivos:
         out = node_run(panel_bundle(client), """
             __out = {};
             currentUser = {permissions: ['devices_edit']};
-            _hostActions = %s;
-            __out.con = _hostsNewHtml();
-            _hostActions = [];
-            __out.sin = _hostsNewHtml();
+            _deviceActions = %s;
+            __out.con = _devicesNewHtml();
+            _deviceActions = [];
+            __out.sin = _devicesNewHtml();
             currentUser = {permissions: []};
-            _hostActions = %s;
-            __out.sinPermiso = _hostsNewHtml();
+            _deviceActions = %s;
+            __out.sinPermiso = _devicesNewHtml();
         """ % (json.dumps(acciones), json.dumps(acciones)))
         assert 'dropdown-toggle-split' in out['con'], 'la pestaña no está'
-        assert 'freshserviceImportHosts()' in out['con']
+        assert 'freshserviceImportDevices()' in out['con']
         # Y lo que la pestaña acompaña sigue ahí: es un botón partido, no una pestaña suelta.
         assert 'openNewDeviceModal' in out['con'], 'la pestaña se llevó el botón de añadir'
         # Un desplegable vacío es peor que ninguno: promete algo.
@@ -701,7 +701,7 @@ class TestLoQueEscribe:
                         json={'pick': ['1', '2']}).get_json()
         assert d['created'] == 1
         assert [f['name'] for f in d['failed']] == ['SRV-01']
-        assert 'fs_host_name_taken' not in d['failed'][0]['error'], 'la clave sin traducir'
+        assert 'fs_device_name_taken' not in d['failed'][0]['error'], 'la clave sin traducir'
 
     def test_lo_que_ya_no_esta_en_el_origen_se_cuenta_y_no_se_borra(self, client, admin, fsa):
         """De un dispositivo cuelgan sus perfiles, sus módulos y meses de historial, y un activo

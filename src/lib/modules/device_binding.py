@@ -34,7 +34,7 @@ from lib.core.devices.resolve import device_profile_specs, reported_os, resolve_
 from lib.util import os_detect
 
 
-class HostBinding:
+class DeviceBinding:
     """Resolving an item's device, its credential and how to run a command on it."""
 
     def _reported_os(self, uid) -> str:
@@ -85,15 +85,15 @@ class HostBinding:
         if isinstance(device_uids, list):
             uids = [str(u).strip() for u in device_uids if str(u).strip()]
             if uids:
-                return self._resolve_bound_hosts(item, uids, multi=True)
+                return self._resolve_bound_devices(item, uids, multi=True)
         device_uid = str(item.get('device_uid') or '').strip()
         if not device_uid:
             # Inline check (no device): still honour a referenced named credential.
             cred_uid = str(item.get('cred_uid') or '').strip()
             return self._apply_cred(item, cred_uid) if cred_uid else item
-        return self._resolve_bound_hosts(item, [device_uid])
+        return self._resolve_bound_devices(item, [device_uid])
 
-    def _resolve_bound_hosts(self, item: dict, uids: list, multi: bool = False) -> dict:
+    def _resolve_bound_devices(self, item: dict, uids: list, multi: bool = False) -> dict:
         """Merge one or more referenced devices onto a check (see resolve_device).
 
         The FIRST resolved device is the primary: it supplies the per-protocol
@@ -148,7 +148,7 @@ class HostBinding:
             # not already carry its own value.  A visible address_field (e.g.
             # web's 'server') can thus be overridden per check — needed when one
             # device (a reverse proxy) serves several FQDNs — while hidden ones
-            # (snmp 'host', ssh 'ssh_host') stay blank and always take the host.
+            # (snmp 'host', ssh 'ssh_host') stay blank and always take the device's address.
             if (addr_field and address_value
                     and not str(item.get(addr_field) or '').strip()):
                 conn[addr_field] = address_value

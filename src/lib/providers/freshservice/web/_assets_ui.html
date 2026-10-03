@@ -41,7 +41,7 @@ let _fsaCounts = null;
 let _fsaShowEmpty = false;
 
 /** Traer los dispositivos. Tres momentos: qué clases, qué pasaría, y hacerlo. */
-async function freshserviceImportHosts() {
+async function freshserviceImportDevices() {
     // El cuadro se abre al pulsar, con la rueda dentro. Al revés —pedir, y abrir al contestar—
     // el botón se pulsa y no pasa nada, que es lo que hace que alguien lo pulse tres veces.
     _fsOpen('fsAssetsModal', 'fsAssetsBody');
@@ -313,7 +313,7 @@ function _fsaRowsHtml(d) {
         ? ((vinculados.length && nuevos.length) ? cabecera(clave, filas.length) : '')
           + _fsaRowsOf(d, filas)
         : '');
-    return parte(vinculados, 'fs_hosts_group_linked') + parte(nuevos, 'fs_hosts_group_new');
+    return parte(vinculados, 'fs_devices_group_linked') + parte(nuevos, 'fs_devices_group_new');
 }
 
 function _fsaRowsOf(d, plan) {
@@ -372,7 +372,7 @@ function _fsaRowsOf(d, plan) {
         <td><select class="form-select form-select-sm"
                 onchange="_fsaSetLink(${jsStr(ext)}, this.value)">
             ${suyo ? '' : `<option value=""${atado ? '' : ' selected'}>${
-                esc(t('fs_hosts_link_none'))}</option>`}
+                esc(t('fs_devices_link_none'))}</option>`}
             ${ofrecidos(suyo).map(h => `<option value="${escAttr(h.uid)}"${
                 atado === h.uid ? ' selected' : ''}>${esc(h.name)}${
                 h.address ? ` (${esc(h.address)})` : ''}</option>`).join('')}
@@ -386,7 +386,7 @@ function _fsaRowsOf(d, plan) {
 function _fsaPlanHtml(d) {
     const plan = (d && d.plan) || [];
     if (!plan.length) {
-        return `<div class="text-muted mb-3">${esc(t('fs_hosts_none'))}</div>
+        return `<div class="text-muted mb-3">${esc(t('fs_devices_none'))}</div>
             <button class="btn btn-sm btn-secondary" onclick="_fsaTypesDraw()"
                 ><i class="bi bi-arrow-left me-1"></i>${esc(t('fs_types_back'))}</button>`;
     }
@@ -394,13 +394,13 @@ function _fsaPlanHtml(d) {
     const filas = _fsaRowsHtml(d);
     const huerfanos = (d.orphans || []).length
         ? `<div class="alert alert-warning py-2 px-3 mt-3 mb-0 small">${
-            esc(tf('fs_hosts_orphans', String(d.orphans.length)))}
+            esc(tf('fs_devices_orphans', String(d.orphans.length)))}
             <div class="mt-1">${d.orphans.map(h =>
                 `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1"
                     >${esc(h.name)}</span>`).join('')}</div></div>`
         : '';
     return `<div class="d-flex align-items-center gap-2 mb-2">
-        <span class="small text-muted flex-grow-1">${esc(tf('fs_hosts_summary',
+        <span class="small text-muted flex-grow-1">${esc(tf('fs_devices_summary',
             String(d.total || plan.length), String(c.create || 0), String(c.update || 0),
             String(c.adopt || 0), String(c.same || 0)))}</span>
         <button class="btn btn-sm btn-secondary" onclick="_fsaTypesDraw()"
@@ -408,7 +408,7 @@ function _fsaPlanHtml(d) {
     </div>
     <div class="d-flex align-items-center gap-2 mb-2">
         <input type="search" class="form-control form-control-sm" style="max-width:22rem"
-               placeholder="${escAttr(t('fs_hosts_filter_ph'))}" value="${escAttr(_fsaQuery)}"
+               placeholder="${escAttr(t('fs_devices_filter_ph'))}" value="${escAttr(_fsaQuery)}"
                oninput="_fsaFilter(this.value)">
         <span class="small text-muted flex-grow-1" id="fsAssetsCount"></span>
         <button class="btn btn-sm btn-secondary" id="fsAssetsAll"
@@ -425,7 +425,7 @@ function _fsaPlanHtml(d) {
                 <th style="width:11rem">${esc(t('col_device_address'))}</th>
                 <th style="width:12rem">${esc(t('fs_asset_type'))}</th>
                 <th style="width:10rem">${esc(t('fs_asset_serial'))}</th>
-                <th style="width:16rem">${esc(t('fs_hosts_link_col'))}</th>
+                <th style="width:16rem">${esc(t('fs_devices_link_col'))}</th>
             </tr></thead>
             <tbody id="fsAssetsRows">${filas}</tbody>
         </table>
@@ -459,7 +459,7 @@ function _fsaSyncHead() {
     const hacen = plan.filter(p => p.action !== 'same' || _fsaLink[String(p.external_id)]);
     const marcados = hacen.filter(p => _fsaPick.has(String(p.external_id))).length;
     const el = document.getElementById('fsAssetsCount');
-    if (el) el.textContent = tf('fs_hosts_shown', String(plan.length), String(marcados));
+    if (el) el.textContent = tf('fs_devices_shown', String(plan.length), String(marcados));
     const todos = document.getElementById('fsAssetsAll');
     if (todos) todos.disabled = !hacen.length || marcados === hacen.length;
     const ninguno = document.getElementById('fsAssetsNone');
@@ -484,7 +484,7 @@ async function freshserviceAssetsApply() {
     if (btn) { btn.disabled = false; btn.innerHTML = antes; }
     if (!r.ok) return showToast(r.error || t('fs_err_net'), 'danger');
     const h = r.data || {};
-    showToast(tf('fs_hosts_done', String(h.created || 0), String(h.updated || 0),
+    showToast(tf('fs_devices_done', String(h.created || 0), String(h.updated || 0),
                  String(h.adopted || 0)), 'success');
     // Lo que no entró se dice aparte y en rojo: un aviso verde con un «y tres fallaron» dentro
     // se lee como que fue bien. Y con el nombre del primero, que es por dónde se empieza a

@@ -15,7 +15,7 @@ Two functions, both pure (no I/O), so they're easy to test:
   when they share an address AND don't disagree on any shared protocol's
   credentials, so a candidate never has ambiguous credentials.  Profiles from
   different protocols on the same address are aggregated (e.g. an SNMP server +
-  a ping target + a DB on one host → one host with snmp/db profiles).
+  a ping target + a DB on one device → one device with snmp/db profiles).
 
 * :func:`apply_to_modules` → given the candidates the user accepted (each with a
   freshly created device uid), rewrite the member items: set ``device_uid`` and drop

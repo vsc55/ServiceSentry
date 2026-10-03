@@ -654,7 +654,7 @@ function _dceCard() {
             <span class="text-muted ss-fs-3">${esc(_dceSpan(item))}</span>
             ${item.serial ? `<code class="ss-fs-3">${esc(item.serial)}</code>` : ''}
             ${item.device_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2"
-                onclick="_dcimOpenHost(${jsStr(item.device_uid)})">${
+                onclick="_dcimOpenDevice(${jsStr(item.device_uid)})">${
                 esc(t('dcim_open_device'))}</button>` : ''}
         </div>
     </div>`;

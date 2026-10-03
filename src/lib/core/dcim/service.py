@@ -12,7 +12,7 @@ Three rules decide everything here, and each of them is a way of being wrong tha
 * **An item with no device has no state — and no state is not "fine".** A rack full of patch
   panels must not come out green, because nothing is watching a patch panel; it comes out with
   no colour, which is the truth. The panel already draws that distinction elsewhere
-  (``HOST_STATE_COLORS['']``) and it matters more here, where a wall of green is the thing
+  (``DEVICE_STATE_COLORS['']``) and it matters more here, where a wall of green is the thing
   somebody glances at from the door.
 * **A count follows visibility.** A rack reporting "3 down" of which none are yours is an
   enumeration of somebody else's fleet through the back door — the same shape as the IDOR audit
@@ -32,7 +32,10 @@ from .store import FEED_COLORS, ITEM_ROLES, ROLES_MUDOS, SIDES
 #: Worst first. A rack is the worst thing in it, and this is what "worst" means — the same
 #: order the fleet list sorts by, so a rack and the list cannot disagree about which of two
 #: machines is in more trouble.
-_RANK = {'error': 3, 'warning': 2, 'ok': 1, '': 0}
+# `maintenance` por encima de nada y por debajo de todo lo demás: lo que alguien apagó a
+# propósito no hace que un armario o una sede salgan en ámbar ni en rojo —no es una alarma—, pero
+# un armario con todo en obras dice eso y no «sin vigilar», que es otra cosa.
+_RANK = {'error': 3, 'warning': 2, 'ok': 1, 'maintenance': 0.5, '': 0}
 
 
 #: Cuántas filas de «esto está mal» se devuelven. Una flota con doscientas cosas caídas
@@ -95,10 +98,17 @@ def states_for(wa, perms) -> dict:
     # y la que despierta a alguien de madrugada era la equivocada. Reportado desde la pantalla:
     # «el widget marca un error pero en dispositivos está todo OK».
     #
-    # Se cuenta como SIN VIGILAR, que es lo que de verdad pasa: nadie la está mirando ahora, y
-    # es una decisión de alguien. Verde sería mentir sobre una máquina que no contesta.
+    # Se cuenta como EN MANTENIMIENTO, que es lo que la flota dice de ella: un estado que pisa al
+    # otro. Contarla «sin vigilar» quitaba la falsa alarma pero decía otra cosa que Infraestructura
+    # sobre la misma máquina; verde sería mentir sobre una máquina que no contesta. Y no sube a
+    # alarma: en `_RANK` vale menos que cualquier comprobación.
+    def _ve(uid):
+        return 'devices_view' in perms or f'server.{uid}.view' in perms
+
     en_obras = {str(h.get('uid') or '') for h in _registry_rows(wa) if h.get('maintenance')}
-    return {uid: st for uid, st in rows.items() if uid not in en_obras}
+    out = {uid: st for uid, st in rows.items() if uid not in en_obras}
+    out.update({uid: 'maintenance' for uid in en_obras if uid and _ve(uid)})
+    return out
 
 
 def _registry_rows(wa) -> list:

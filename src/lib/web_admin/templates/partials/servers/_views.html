@@ -1,14 +1,17 @@
 {# ================================================================
-   Servers — the part every view shares.
+   Servers — what a device means, decided once: the actions, the states, the coverage.
+
+   The registry's own list is gone — the fleet is listed once, in Infrastructure, which composes
+   these — but what follows is still the one place each of them is decided.
 
    The device registry is the one list where the rows are not the point: what you actually
-   want from it is a state of the fleet, and the table gives you that one host at a time.
+   want from it is a state of the fleet, and the table gives you that one device at a time.
    Three questions it leaves on the floor:
 
    * how is the fleet RIGHT NOW. There is a status column and you can sort by it, which
-     answers "which is the worst host" and never "how many are broken". Grouped by state the
+     answers "which is the worst device" and never "how many are broken". Grouped by state the
      answer is the first thing on screen, and an empty error group is itself the good news.
-   * which hosts are not actually being MONITORED. A host with no checks is registered and
+   * which devices are not actually being MONITORED. A device with no checks is registered and
      watched by nothing; a device whose checks are all disabled is worse, because somebody
      turned them off and the row still looks configured. Both read as ordinary rows in the
      table — the modules column says "0/0" and "0/3" in the same grey pill — and both mean
@@ -23,68 +26,9 @@
    What must NOT differ between views is what a device means: the status vocabulary, the
    maintenance override that wins over it, and the ACTIONS. Servers is the section with
    per-device permissions (`server.<uid>.edit`), so a view assembling its own buttons would be
-   a view that forgot somebody may edit exactly one host — the buttons are built in one place
+   a view that forgot somebody may edit exactly one device — the buttons are built in one place
    and every view composes them.
    ================================================================ #}
-
-// ── The registry ─────────────────────────────────────────────────────────────
-// `render` is looked up by NAME at call time: the view files are concatenated after this
-// one. A null render means the factory's own table body. `mode` is what createListTable is
-// told: 'cards' is an alternate body over the same page, 'summary' gets every filtered row
-// and no pagination bands.
-const SERVER_VIEWS = [
-    { id: 'table',    label_key: 'srv_view_table',    icon: 'bi-table',        render: null,                mode: 'table'   },
-    { id: 'cards',    label_key: 'srv_view_cards',    icon: 'bi-grid-3x3-gap', render: '_srvViewCards',     mode: 'cards'   },
-    { id: 'status',   label_key: 'srv_view_status',   icon: 'bi-activity',     render: '_srvViewStatus',    mode: 'summary' },
-    { id: 'coverage', label_key: 'srv_view_coverage', icon: 'bi-puzzle',       render: '_srvViewCoverage',  mode: 'summary' },
-    { id: 'types',    label_key: 'srv_view_types',    icon: 'bi-tags',         render: '_srvViewTypes',     mode: 'summary' },
-];
-const _SRV_VIEW_KEY = 'ss_devices_view';
-
-let _srvViewMode = (() => {
-    try {
-        const s = localStorage.getItem(_SRV_VIEW_KEY);
-        return SERVER_VIEWS.some(v => v.id === s) ? s : 'table';
-    } catch (_) { return 'table'; }
-})();
-
-function _srvViewId() { return _srvViewMode; }
-function _srvView()   { return SERVER_VIEWS.find(v => v.id === _srvViewMode) || SERVER_VIEWS[0]; }
-function _srvBodyMode() { return _srvView().mode; }
-
-/** Restore the saved view on login (the table config's `view` field). Unknown or absent
- *  means the table — what a user who has never touched the switcher gets. */
-function _srvApplyView(id) {
-    _srvViewMode = SERVER_VIEWS.some(v => v.id === id) ? id : 'table';
-    try { localStorage.setItem(_SRV_VIEW_KEY, _srvViewMode); } catch (_) {}
-}
-
-/** Switching view redraws what is already loaded: every view reads the same `devicesData`,
- *  and the fleet's status comes with it, so re-fetching would be a request that changes
- *  nothing but the layout. */
-function setServersView(id) {
-    if (!SERVER_VIEWS.some(v => v.id === id)) return;
-    _srvViewMode = id;
-    try { localStorage.setItem(_SRV_VIEW_KEY, id); } catch (_) {}
-    _persistTableConfig();
-    // The summaries draw no checkboxes, so a selection carried into them would leave the
-    // bulk-delete bar armed over rows that are no longer on screen.
-    if (_srvView().mode === 'summary') _selectedServers.clear();
-    renderServers();
-}
-
-function _srvViewSwitcher() {
-    return _viewSwitcher(SERVER_VIEWS, _srvViewId(), 'setServersView', 'view_mode');
-}
-
-/** The non-table body. A 'cards' view is handed the page; a 'summary' the whole filtered
- *  set — see the `summary` mode in createListTable. */
-function _srvViewBody(pageRows, ctx, allRows) {
-    const v = _srvView();
-    const fn = v.render ? window[v.render] : null;
-    if (!fn) return '';
-    return fn(v.mode === 'summary' ? allRows : pageRows, ctx);
-}
 
 // ── What a device means, decided once ──────────────────────────────────────────
 /** The action buttons — the ONE place the server permissions become controls, and the only
@@ -103,20 +47,8 @@ function _srvActionsHtml(device, ctx) {
             title="${escAttr(t('delete_tt') || t('delete') || 'Delete')}"><i class="bi bi-trash3"></i></button>` : ''}`;
 }
 
-// The states a device can be in, in the order they matter. Empty (no checks at all) is last
-// and is NOT a state of the device but the absence of one — it gets its own group rather than
-// being drawn as a fifth colour, because "we do not know" is not a shade of "fine".
-const _SRV_STATES = ['error', 'warning', 'maintenance', 'ok', ''];
-const _SRV_STATE_META = {
-    error:       { icon: 'bi-x-circle-fill',   key: 'device_status_error'       },
-    warning:     { icon: 'bi-hourglass-split', key: 'device_status_warning'     },
-    maintenance: { icon: 'bi-cone-striped',    key: 'device_status_maintenance' },
-    ok:          { icon: 'bi-check-circle-fill', key: 'device_status_ok'        },
-    '':          { icon: 'bi-question-circle', key: 'srv_status_unknown'      },
-};
-function _srvStateLabel(state) { return t((_SRV_STATE_META[state] || {}).key) || state || '—'; }
 
-/** How much of this host is actually being watched, which is three answers and not two:
+/** How much of this device is actually being watched, which is three answers and not two:
  *   - `none`:     no checks at all. Registered, monitored by nothing.
  *   - `inactive`: it has checks and every one of them is off. Worse than none, because the
  *                 row looks configured and somebody turned it off.
@@ -130,7 +62,7 @@ function _srvStateLabel(state) { return t((_SRV_STATE_META[state] || {}).key) ||
  *  collecting from them every cycle — reported from the screen in those words.
  *
  *  By the declared FIELD and not by naming a protocol: `device_profiles` is part of the device
- *  profile format (`lib/core/snmp/manifest.py::HOST_PROFILE`), so a second protocol that
+ *  profile format (`lib/core/snmp/manifest.py::DEVICE_PROFILE`), so a second protocol that
  *  declares one is covered here the day it arrives, and this file goes on naming no module. */
 function _srvSampledByProfile(device) {
     return Object.values((device && device.profiles) || {}).some(p => {
@@ -172,9 +104,12 @@ function _srvModulesPill(device) {
 
 /** One device as a line, shared by both grouped views so a device reads the same under a state
  *  and under a coverage bucket. */
-function _srvHostLine(device, ctx, extraHtml) {
+function _srvDeviceLine(device, ctx, extraHtml) {
     return `<div class="d-flex align-items-center gap-2 px-2 py-1">
-        <span class="fw-semibold text-nowrap"${device.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(device.name)}</span>
+        <a href="#" class="fw-semibold text-nowrap link-body-emphasis text-decoration-none"${
+            device.maintenance ? ' style="color:#fd7e14"' : ''}
+           onclick="infraOpen(${jsStr(device.uid)});return false"
+           title="${escAttr(t('infra_open_device'))}">${esc(device.name)}</a>
         <code class="text-muted ss-fs-2 text-nowrap">${esc(device.address || '')}</code>
         ${deviceKind(device.kind) === 'none' ? ''
             : `<span class="badge bg-body-secondary text-body-secondary fw-normal ss-fs-1">${

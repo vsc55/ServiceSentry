@@ -10,6 +10,7 @@ Rutas:
     GET     /api/v1/dcim/board
     GET     /api/v1/dcim/fits
     GET     /api/v1/dcim/devices
+    GET     /api/v1/dcim/devices/<uid>/place
     POST    /api/v1/dcim/items
     PUT     /api/v1/dcim/items/<uid>
     DELETE  /api/v1/dcim/items/<uid>
@@ -292,6 +293,115 @@ def register(app, wa, C):
         rows.sort(key=lambda r: r['name'].lower())
         return jsonify({'devices': rows})
 
+    @app.route('/api/v1/dcim/devices/<uid>/place', methods=['GET'])
+    @C.view_req
+    def api_dcim_device_place(uid):
+        """Dónde está un dispositivo del registro: sede, planta, sala, rack y U, de quién es, y
+        qué cables y qué enchufes tiene.
+
+        Es la pestaña «Ubicación» de la ficha del dispositivo. Hasta ahora el inventario sabía
+        llevar de un equipo a su dispositivo y nada llevaba de vuelta: quien miraba una máquina
+        que fallaba no tenía cómo saber a qué armario ir sin buscarla a mano en otra sección.
+
+        Una LISTA y no un sitio: el enlace es una columna de cada equipo, y nada impide que dos
+        apunten al mismo dispositivo —un chasis y su bandeja, un error al dar de alta—. Decir
+        uno solo sería esconder el otro; se enseñan todos y la pantalla lo dice.
+
+        Lo que este lector no puede ver **no sale**, ni opaco: aquí se pregunta por UN
+        dispositivo, y contestar «está en un rack que no puedes ver» ya es decir dónde está. Del
+        otro extremo de un cable que no es suyo sale que hay un cable y nada más, que es lo que
+        el armario ya enseña.
+        """
+        store = C.store()
+        if store is None:
+            return jsonify({'places': []})
+        # Con el permiso de la MÁQUINA además del del inventario, como `said`: es una pregunta
+        # sobre un dispositivo, y quien no puede abrir su ficha no la hace por aquí.
+        perms = C.perms()
+        if 'devices_view' not in perms and f'server.{uid}.view' not in perms:
+            return jsonify({'error': wa._t('access_denied')}), 403
+        said, allowed = store.owners_map(), C.seen()
+
+        def _ve(scope, row_uid):
+            org = C.owner_of(store, said, scope, row_uid)
+            return dcim_owners.may_see(org, allowed), org
+
+        registro = getattr(wa, '_devices_store', None)
+
+        def _equipo(fila):
+            """Cómo se llama un equipo: su etiqueta, o el nombre de su dispositivo si este lector
+            puede verlo. Nunca su uid: un identificador interno en una tabla no le dice a nadie
+            a qué está enchufado esto."""
+            if str(fila.get('label') or '').strip():
+                return str(fila['label']).strip()
+            dev = str(fila.get('device_uid') or '')
+            if dev and registro is not None and (
+                    'devices_view' in perms or f'server.{dev}.view' in perms):
+                return str((registro.get(dev, decrypt=False) or {}).get('name') or '')
+            return ''
+
+        def _nombre(row, *campos):
+            for c in campos:
+                v = str((row or {}).get(c) or '').strip()
+                if v:
+                    return v
+            return ''
+
+        lugares = []
+        for item in store.items.list('device_uid = ?', (str(uid),)):
+            visible, org = _ve('item', item['uid'])
+            if not visible:
+                continue
+            rack = store.racks.get(item.get('rack_uid')) or {}
+            room = store.rooms.get(rack.get('room_uid')) or {}
+            site = store.sites.get(room.get('site_uid')) or {}
+            floor = store.floors.get(room.get('floor_uid')) if room.get('floor_uid') else None
+            cables = []
+            for c in store.cables_of([item['uid']]):
+                mio_a = c.get('a_item') == item['uid']
+                otro = str((c.get('b_item') if mio_a else c.get('a_item')) or '')
+                fila = store.items.get(otro) or {}
+                otro_ve, _ = _ve('item', otro) if fila else (False, '')
+                cables.append({
+                    'uid': c['uid'], 'kind': c.get('kind') or '', 'color': c.get('color') or '',
+                    'label': c.get('label') or '',
+                    'port': str((c.get('a_port') if mio_a else c.get('b_port')) or ''),
+                    'peer': ({'uid': otro, 'label': _equipo(fila),
+                              'device_uid': str(fila.get('device_uid') or ''),
+                              'rack_uid': str(fila.get('rack_uid') or ''),
+                              'port': str((c.get('b_port') if mio_a else c.get('a_port')) or '')}
+                             if otro_ve else {'foreign': True}),
+                })
+            enchufes = []
+            for f in store.feeds.list('item_uid = ?', (item['uid'],)):
+                pdu = store.pdus.get(f.get('pdu_uid')) or {}
+                enchufes.append({'pdu': _nombre(pdu, 'name', 'uid'),
+                                 'feed': str(pdu.get('feed') or ''),
+                                 'outlet': int(f.get('outlet') or 0),
+                                 'watts': int(f.get('watts_said') or 0)})
+            lugares.append({
+                'item': {'uid': item['uid'], 'label': item.get('label') or '',
+                         'u_start': item.get('u_start'), 'u_height': item.get('u_height'),
+                         'face': item.get('face') or '', 'placement': item.get('placement') or '',
+                         'serial': item.get('serial') or '', 'asset': item.get('asset') or ''},
+                'rack': {'uid': rack.get('uid') or '', 'name': rack.get('name') or '',
+                         'u_height': rack.get('u_height') or 0},
+                'room': {'uid': room.get('uid') or '', 'name': room.get('name') or ''},
+                'floor': ({'uid': floor['uid'], 'name': floor.get('name') or ''}
+                          if floor else None),
+                'site': {'uid': site.get('uid') or '', 'name': site.get('name') or '',
+                         'address': site.get('address') or ''},
+                'org_uid': org or '',
+                # El nombre con él: la ficha del dispositivo vive en otra sección, que no ha
+                # pedido la lista de empresas y no tiene por qué pedirla para un rótulo.
+                'org': ({'name': str((store.orgs.get(org) or {}).get('name') or ''),
+                         'short': str((store.orgs.get(org) or {}).get('short') or '')}
+                        if org else None),
+                'cables': cables,
+                'power': enchufes,
+            })
+        return jsonify({'places': lugares})
+
     @app.route('/api/v1/dcim/racks', methods=['GET'])
     @C.view_req
     def api_dcim_racks():
@@ -571,7 +681,10 @@ def register(app, wa, C):
         abrir otra pantalla, que es lo que costó la primera vez que pasó.
         """
         from lib.core.devices.resolve import reported_facts        # noqa: PLC0415
-        uid = str(request.args.get('host') or '').strip()
+        # `device`, que es lo que pregunta la ficha. Leía `host` desde antes de que el dominio
+        # se llamara así, y la pantalla ya preguntaba con el nombre nuevo: el botón nunca
+        # recibía nada y parecía que ningún dispositivo dijera su número de serie.
+        uid = str(request.args.get('device') or '').strip()
         if not uid:
             return jsonify({'said': {}})
         store = getattr(wa, '_devices_store', None)

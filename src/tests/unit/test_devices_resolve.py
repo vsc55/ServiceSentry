@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for lib/core/devices/resolve.py — shared host-resolution primitives."""
+"""Tests for lib/core/devices/resolve.py — shared device-resolution primitives."""
 
 from lib.core.devices.resolve import (DEVICE_RESULT_PREFIX, device_profile_specs,
                                     device_result_key, device_uid_from_key, resolve_os)
 from lib.util.os_detect import local_os
 
 
-class TestHostProfileSpecs:
+class TestDeviceProfileSpecs:
 
     def test_dict_becomes_single_element_list(self):
         spec = {'key': 'proprietary', 'address_field': 'addr'}
@@ -26,7 +26,7 @@ class TestHostProfileSpecs:
         """A module names the protocol it binds to; WHICH fields that protocol has is not
         the module's to state. Eleven of them stated it anyway — ten repeating the same
         seven SSH names — and the catalogue overrode every copy for the form it draws, so a
-        copy that drifted did not change the form: it changed which values a bound host was
+        copy that drifted did not change the form: it changed which values a bound device was
         allowed to push onto the check, silently."""
         from lib.core.devices.profiles import core_profile_field_names
         [spec] = device_profile_specs({'key': 'ssh', 'address_field': 'ssh_host'})
@@ -69,9 +69,9 @@ class TestResolveOs:
         assert resolve_os('auto', is_remote=True, remote_auto='linux') == 'linux'
 
 
-class TestAResultThatBelongsToAHost:
-    """Some results have no check behind them: a device the panel reads because the HOST says
-    it is one. They still belong to a host, and the Servers tab has to be able to say so — or
+class TestAResultThatBelongsToADevice:
+    """Some results have no check behind them: a device the panel reads because the DEVICE says
+    it is one. They still belong to a device, and the Servers tab has to be able to say so — or
     a device can be sampled, found down, and still show a neutral dash."""
 
     def test_a_key_round_trips(self):
@@ -81,15 +81,15 @@ class TestAResultThatBelongsToAHost:
         """The recorders already file `<key>/<metric>`, so this has to read through it."""
         assert device_uid_from_key('host.abc123/metrics') == 'abc123'
 
-    def test_a_check_key_names_no_host(self):
+    def test_a_check_key_names_no_device(self):
         """The two namespaces must never be confused: an item key is a bare uid, and
-        answering a host uid for one would attribute a check to a machine at random."""
+        answering a device uid for one would attribute a check to a machine at random."""
         for key in ('abc123', 'abc123/metrics', 'srv_1.chk_2', '', None):
             assert device_uid_from_key(key) == ''
 
     def test_a_key_that_merely_starts_with_the_word_is_not_one(self):
         """The prefix ends in a separator for this reason: without it, an item somebody
-        named `hostname` would be read as the host `name`."""
+        named `hostname` would be read as the device `name`."""
         assert device_result_key('x').startswith(DEVICE_RESULT_PREFIX)
         assert device_uid_from_key('hostname') == ''
         assert device_uid_from_key('hostile/metrics') == ''

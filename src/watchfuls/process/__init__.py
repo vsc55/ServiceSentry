@@ -19,10 +19,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Watchful module to check that processes are running, on the bound host.
+"""Watchful module to check that processes are running, on the bound device.
 
-Host-centric: each check binds to a host (``device_uid``).  The process list is
-read on that host via :meth:`ModuleBase.device_exec` — locally for a *local* host
+Device-centric: each check binds to a device (``device_uid``).  The process list is
+read on that device via :meth:`ModuleBase.device_exec` — locally for a *local* device
 or over SSH for a *remote* one — using an OS-appropriate command (``ps`` on
 Unix, ``tasklist`` on Windows) and the matches are counted against ``min_count``.
 """
@@ -50,7 +50,7 @@ _LIST_CMDS = {
 
 
 class Watchful(ModuleBase):
-    """Check that named processes are running (>= min_count) on each host."""
+    """Check that named processes are running (>= min_count) on each device."""
 
     WATCHFUL_ACTIONS: frozenset = frozenset({'discover'})
 
@@ -77,7 +77,7 @@ class Watchful(ModuleBase):
 
     def _process_check(self, key, raw):
         item = self.resolve_device(raw)
-        # Bound host in maintenance → skip (resolve_device disables it).
+        # Bound device in maintenance → skip (resolve_device disables it).
         if item.get('_device_maintenance') or not item.get('enabled', True):
             return
         name = (item.get('process', '') or '').strip() or key
@@ -129,16 +129,16 @@ class Watchful(ModuleBase):
     def discover(cls, config=None) -> list:
         """List running processes (with instance counts) for the autocomplete.
 
-        When called with a host context (``config['__device__']``, injected by the
-        route for the Servers modal) and that host is remote, the list is read
-        over SSH on the host; otherwise it is read from THIS machine (psutil).
+        When called with a device context (``config['__device__']``, injected by the
+        route for the Servers modal) and that device is remote, the list is read
+        over SSH on the device; otherwise it is read from THIS machine (psutil).
         """
         from lib.core.devices import runner as device_runner  # noqa: PLC0415
-        host = (config or {}).get('__device__') if isinstance(config, dict) else None
-        if device_runner.is_remote(host):
-            os_ = str(host.get('os') or 'linux')
+        device = (config or {}).get('__device__') if isinstance(config, dict) else None
+        if device_runner.is_remote(device):
+            os_ = str(device.get('os') or 'linux')
             cmd = _LIST_CMDS.get(os_) or _LIST_CMDS['linux']
-            out, _err, code = device_runner.run(host, cmd, timeout=15)
+            out, _err, code = device_runner.run(device, cmd, timeout=15)
             if code != 0 and not out:
                 return []
             return cls._discover_from_listing(out, os_)

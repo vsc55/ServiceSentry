@@ -149,13 +149,13 @@ class _HooksMixin:
         return None
 
     def _hook_enforce_fqdn(self):
-        """Send a request that arrived on the wrong device to the public URL.
+        """Send a request that arrived on the wrong host to the public URL.
 
         Opt-in (``web_admin|force_fqdn``) and only with a public URL configured.  Two
         things it must never do, because both make the panel unreachable — including the
         page that would let you turn it off:
 
-        * **redirect over a port difference.**  ``request.device`` carries the port,
+        * **redirect over a port difference.**  ``request.host`` carries the port,
           ``public_url`` need not.  Comparing the raw strings made ``192.168.0.1:8080``
           a "different host" from ``192.168.0.1`` and sent the browser to port 80, where
           nothing is listening.  The setting is about the *hostname* you arrived on, so
@@ -166,8 +166,8 @@ class _HooksMixin:
         """
         if not self._FORCE_FQDN or not self._PUBLIC_URL:
             return None
-        want = self._PUBLIC_URL.strip().lower()      # device[:port], never a scheme
-        have = (request.device or '').strip().lower()
+        want = self._PUBLIC_URL.strip().lower()      # host[:port], never a scheme
+        have = (request.host or '').strip().lower()
         if ':' not in want:
             have = have.split(':', 1)[0]
         if have == want:
@@ -185,7 +185,7 @@ class _HooksMixin:
     def _hook_trace_end(self, response):
         """Security headers, the fail2ban offence count, cache policy, and one trace line."""
         # Security headers (defense-in-depth; policy in lib.security.headers).
-        # An admin-defined frame-ancestors allowlist (+ optional Teams devices) opens
+        # An admin-defined frame-ancestors allowlist (+ optional Teams hosts) opens
         # framing to those origins so the Teams personal tab can embed the panel.
         apply_security_headers(response,
                                frame_ancestors=self._frame_ancestors_list or None,

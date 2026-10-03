@@ -28,7 +28,7 @@ from lib.security import secret_manager
 
 
 def enrich_devices(devices: list, statuses: dict, bound: dict, reported: dict | None = None) -> list:
-    """Annotate each host (in place) with ``status`` and module totals.  *statuses* is
+    """Annotate each device (in place) with ``status`` and module totals.  *statuses* is
     ``{uid: status}``; *bound* is ``{uid: {module: has_active_check}}``.  ``modules_total`` =
     the device's saved modules ∪ any with a bound check; ``modules_active`` = those with at
     least one enabled check.  Returns *devices*.
@@ -197,7 +197,7 @@ def build_clone_record(src: dict, body: dict, member_fields) -> dict:
     # A clone is a DIFFERENT machine → let the OS auto-detect rather than inheriting the
     # source's (possibly wrong) value.
     data['os'] = 'auto'
-    # The per-node cluster identity (which node this host IS) is unique to the machine;
+    # The per-node cluster identity (which node this device IS) is unique to the machine;
     # a clone is a different node, so blank it.
     strip = {'node'} | set(member_fields)
     for prof in (data.get('profiles') or {}).values():
@@ -213,7 +213,7 @@ _MOD_RE = re.compile(r'^[a-z][a-z0-9_]*$')
 # Device fields that an 'add'-only user may NOT change (only the ``modules`` hint list may
 # grow).  Secrets in ``profiles`` must already be restored before this comparison so an
 # unchanged profile is not seen as edited.
-_HOST_EDIT_FIELDS = ('name', 'address', 'kind', 'os', 'maintenance', 'virtual',
+_DEVICE_EDIT_FIELDS = ('name', 'address', 'kind', 'os', 'maintenance', 'virtual',
                      'tags', 'description', 'profiles')
 
 
@@ -236,15 +236,11 @@ def _coll_meta(modules_dir: str, mod: str, coll: str) -> dict:
 
 
 def _format_item_label(tpl: str, device_name: str, item: dict, disc_field: str) -> str:
-    """Format a check's label from the module's discovery template (e.g. ``"{host} - {name}"``):
-    ``{device}`` = the (new) device name (``{host}`` still works — it is what is written in the
-    label templates people already saved), ``{name}`` = the item's operative field
+    """Format a check's label from the module's discovery template (e.g. ``"{device} - {name}"``):
+    ``{device}`` = the (new) device name, ``{name}`` = the item's operative field
     (``__discovery_field__``, e.g. service/partition), ``{other}`` = any item field.
     Mirrors the frontend ``_discoveryLabel``."""
-    # `{host}` sigue aceptándose además de `{device}`: es lo que hay escrito en las plantillas de
-    # etiqueta que alguien guardó, y una plantilla que deja de sustituir no da ningún error —
-    # escribe `{host}` tal cual en el nombre de cuarenta filas.
-    base = {'device': device_name or '', 'host': device_name or '',
+    base = {'device': device_name or '',
             'name': str(item.get(disc_field) or '') if disc_field else '',
             'display_name': '', 'type': ''}
 
@@ -260,7 +256,7 @@ def _format_item_label(tpl: str, device_name: str, item: dict, disc_field: str) 
     return s.strip()
 
 
-def _delete_host_checks(wa, uid: str) -> int:
+def _delete_device_checks(wa, uid: str) -> int:
     """Delete every module check bound to device *uid*.  Single-bind items (``device_uid``) are
     removed; for a multi-device (cluster) check the device is just removed from ``device_uids`` (the
     check is deleted only if it had no other member).  Returns how many checks were deleted or
@@ -298,7 +294,7 @@ def _delete_host_checks(wa, uid: str) -> int:
     return count
 
 
-def _clone_host_checks(wa, src_uid: str, new_uid: str, label: str = '',
+def _clone_device_checks(wa, src_uid: str, new_uid: str, label: str = '',
                        only_keys: set | None = None) -> int:
     """Duplicate every module check item bound to *src_uid* onto *new_uid*.
 
@@ -326,7 +322,7 @@ def _clone_host_checks(wa, src_uid: str, new_uid: str, label: str = '',
         for coll, items in list(mcfg.items()):
             if str(coll).startswith('__') or not isinstance(items, dict):
                 continue
-            # The collection's label template (e.g. service_status "{host} - {name}") lets the
+            # The collection's label template (e.g. service_status "{device} - {name}") lets the
             # clone keep its per-item part (service/partition) with the NEW device name; without
             # one we just use the device name.
             _meta = _coll_meta(wa._modules_dir, mod, coll)
@@ -366,7 +362,7 @@ def _clone_host_checks(wa, src_uid: str, new_uid: str, label: str = '',
 def _only_modules_growth(old: dict, data: dict) -> bool:
     """True if *data* changes nothing on the device except adding entries to the ``modules``
     list (no field edits, no module removals)."""
-    for f in _HOST_EDIT_FIELDS:
+    for f in _DEVICE_EDIT_FIELDS:
         if data.get(f) != old.get(f):
             return False
     old_mods = set(old.get('modules') or [])
@@ -374,16 +370,16 @@ def _only_modules_growth(old: dict, data: dict) -> bool:
     return old_mods <= new_mods
 
 
-def _probe_host_record(wa, body):
+def _probe_device_record(wa, body):
     """Build a decrypted device record for testing from the request.
 
-    A stored device (by ``device_uid``) merged with the posted ``_host`` draft; masked secrets in
+    A stored device (by ``device_uid``) merged with the posted ``_device`` draft; masked secrets in
     the draft are restored from storage.  Maintenance is forced off so an explicit test always
     runs."""
     store = getattr(wa, '_devices_store', None)
     uid = str(body.get('device_uid') or '').strip()
     stored = store.get(uid, decrypt=True) if (store and uid) else None
-    draft = body.get('_host') if isinstance(body.get('_host'), dict) else None
+    draft = body.get('_device') if isinstance(body.get('_device'), dict) else None
     record = dict(stored) if stored else {}
     if draft:
         record['address'] = draft.get('address', record.get('address', ''))
@@ -441,7 +437,7 @@ def _apply_check_cred(wa, fields):
     return apply_credential(fields, cred)
 
 
-def _checks_for_host(wa, uid):
+def _checks_for_device(wa, uid):
     """Grouped ``{(bare_module, collection): {key: item}}`` for every check in the module
     configuration bound to *uid* (used when the client doesn't send the list)."""
     modules = wa._load_modules()
@@ -492,7 +488,7 @@ def device_recorded_keys(series: list, uid: str) -> dict:
 
 
 def device_sampled_keys(status_raw: dict, uid: str) -> dict:
-    """``{bare_module: {result_key: ''}}`` for what a module recorded about the HOST itself.
+    """``{bare_module: {result_key: ''}}`` for what a module recorded about the DEVICE itself.
 
     Some devices are read because the REGISTRY says they are devices, not because somebody
     configured a check: an SNMP profile with device profiles assigned is enough, and what comes
@@ -612,7 +608,7 @@ def _device_statuses(wa):
                         a['has_error'] = True
 
     # …and the results that belong to a device with no check behind them: a device the panel
-    # reads because the HOST says it is one (an SNMP profile with device profiles assigned).
+    # reads because the DEVICE says it is one (an SNMP profile with device profiles assigned).
     # Without this a device can be sampled, found down, and still show a neutral dash — the
     # column would be answering "how many checks did you configure" while looking like it
     # answers "is this machine all right".
@@ -648,9 +644,9 @@ def _device_statuses(wa):
     return out
 
 
-def _host_bound_modules(wa):
+def _device_bound_modules(wa):
     """Return ``{device_uid: {bare_module: any_check_enabled}}`` — which modules have checks
-    bound to each host and whether any of them is enabled."""
+    bound to each device and whether any of them is enabled."""
     modules = wa._load_modules()
     out = {}
     for mod_key, mod_cfg in modules.items():
@@ -671,7 +667,7 @@ def _host_bound_modules(wa):
     return out
 
 
-def _create_unique_host(store, name, candidate, actor):
+def _create_unique_device(store, name, candidate, actor):
     """Create a device, suffixing the name on collision.  Returns the uid or None."""
     base = (name or candidate.get('address') or 'device').strip() or 'device'
     profiles = candidate.get('profiles', {})

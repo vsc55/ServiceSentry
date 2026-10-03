@@ -157,7 +157,7 @@ function _infraLinkLayout(map) {
                               {pad: _LNK.PAD, width: widest + _LNK.PAD,
                                height: y0 - _LNK.BOX_H + _LNK.PAD});
     return {
-        pos, edges, loose, wan, wanHost: device,
+        pos, edges, loose, wan, wanDevice: device,
         x: ext.x, y: ext.y, width: ext.width, height: ext.height,
     };
 }
@@ -395,7 +395,7 @@ function _infraLinkWanAt(L) { return (L || {}).wan || null; }
  *  cable it is.
  */
 function _infraLinkWanCard(L) {
-    const device = _infraLinkWanHost(L);
+    const device = _infraLinkWanDevice(L);
     if (!device) return '';
     const port = String(device.node.wan || '');
     // The cable this map already knows about that port, if any: the way out usually leaves by
@@ -439,14 +439,14 @@ function _infraLinkWanCard(L) {
 }
 
 /** The machine somebody declared the line out on, as it sits on this picture. */
-function _infraLinkWanHost(L) { return (L || {}).wanHost || null; }
+function _infraLinkWanDevice(L) { return (L || {}).wanDevice || null; }
 
 /** …and the box, plus the cable from it. Drawn only when somebody DECLARED one: this map
  *  shows what is plugged into what, and which of those cables is the line is the one thing it
  *  cannot see for itself. Deducing it from a next hop would be a different claim drawn as
  *  this one. */
 function _infraLinkWanBox(L) {
-    const device = _infraLinkWanHost(L);
+    const device = _infraLinkWanDevice(L);
     const at = _infraLinkWanAt(L);
     if (!device || !at) return '';
     const h = _LNK.BOX_H - 8;
@@ -767,7 +767,7 @@ function _infraLinkPanelHtml() {
  *  are about THIS map — how many cables it has, and that a box here can also be dragged. */
 function _infraLinkNodeHtml(L, uid) {
     const n = (L.pos[uid] || {}).node || {};
-    return ssHostCard(n, uid, {
+    return ssDeviceCard(n, uid, {
         hint: 'infra_link_node_hint',
         cables: (L.edges || []).filter(e => e.from === uid || e.to === uid).length,
     });

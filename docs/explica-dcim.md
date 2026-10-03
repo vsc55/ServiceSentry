@@ -58,7 +58,7 @@ CONTENCIÓN (dónde está)                 PERTENENCIA (de quién es)
 Datacenter ──< Sala ──< Rack ──< Item          Empresa
                                   │              ▲
                                   └── pertenece ─┘
-                                  └──? Host (opcional)
+                                  └──? Dispositivo (opcional)
 ```
 
 La empresa **no es la raíz de nada**. Un holding con un departamento de IT central que da
@@ -76,7 +76,7 @@ A; un item dentro de ese rack que diga «empresa B» es de la B, y ya está.
 **Un dueño por cosa, y decidido así** (`org_owner` lleva índice único por `(ámbito, uid)`). «¿Y si
 algo es de varias empresas?» se contesta **por el nivel de abajo**, que es como funciona de verdad
 un armario compartido: la sala es del que la opera y cada rack es de su empresa; el rack es del
-proveedor y cada equipo es de su cliente. Los cinco ámbitos —sede, sala, rack, item y host— llegan
+proveedor y cada equipo es de su cliente. Los cinco ámbitos —sede, sala, rack, item y dispositivo— llegan
 lo bastante abajo para que el reparto siempre se pueda decir donde toca.
 
 Lo que **no** se puede decir es algo compartido de verdad que no se reparta por nada: una sala de
@@ -97,16 +97,16 @@ se preguntan de verdad —una para facturar y otra para saber a quién llamar—
 lleva su **operador** además de que cada cosa lleve su **dueño**.
 
 La otra decisión que ordena todo lo demás está en la cadena física: **un rack contiene *items*,
-y algunos items son hosts**. No al revés.
+y algunos items son dispositivos**. No al revés.
 
 Es tentador poner `rack_uid` y `posicion_u` como columnas de `devices` y acabar antes. No vale, y
-se ve en cuanto se dibuja un rack real: un panel de parcheo ocupa 1U y no es un host. Una tapa
+se ve en cuanto se dibuja un rack real: un panel de parcheo ocupa 1U y no es un dispositivo. Una tapa
 ciega ocupa 1U y no es nada. Un chasis de blades ocupa 7U y contiene ocho cosas que sí son
-hosts. Una regleta vertical no ocupa ninguna U y sí ocupa el rack. Un equipo apagado que sigue
+dispositivos. Una regleta vertical no ocupa ninguna U y sí ocupa el rack. Un equipo apagado que sigue
 atornillado ocupa su sitio aunque el panel no lo monitorice.
 
-Así que el item de rack es la entidad, con `device_uid` **opcional**. Un item con host se colorea
-con el estado en vivo; uno sin host es inventario mudo, que es exactamente lo que es.
+Así que el item de rack es la entidad, con `device_uid` **opcional**. Un item con dispositivo se colorea
+con el estado en vivo; uno sin dispositivo es inventario mudo, que es exactamente lo que es.
 
 Corolario: `devices` **no se toca**. El registro sigue siendo la fuente de verdad de qué
 dispositivos hay y cómo se llega a ellos; DCIM añade *dónde están*, en su propia tabla, y la
@@ -122,9 +122,9 @@ Nombres provisionales; el prefijo `dc_` mantiene el espacio propio en la BD comp
 | `dc_site` | Datacenter, sede, armario en una oficina | Dirección, coordenadas, zona horaria, **operador** |
 | `dc_room` | Sala, planta, CPD pequeño | `site_uid`, plano de fondo opcional, rejilla |
 | `dc_rack` | Rack | `room_uid`, altura en U, ancho, profundidad, posición y giro en el plano, numeración ascendente o descendente |
-| `dc_item` | Lo que ocupa U en un rack | `rack_uid`, `u_inicial`, `u_altura`, cara (front/rear/full), `host_uid?`, `type_uid?`, etiqueta, nº de serie, activo |
+| `dc_item` | Lo que ocupa U en un rack | `rack_uid`, `u_inicial`, `u_altura`, cara (front/rear/full), `device_uid?`, `type_uid?`, etiqueta, nº de serie, activo |
 | `dc_type` | Catálogo de modelos | Importado de devicetype-library: fabricante, modelo, altura, profundidad completa, imágenes, puertos |
-| `dc_power` | Regletas, tomas y de qué se alimenta cada item | Rama A/B, potencia declarada, `host_uid?` de la regleta si se mide |
+| `dc_power` | Regletas, tomas y de qué se alimenta cada item | Rama A/B, potencia declarada, `device_uid?` de la regleta si se mide |
 | `dc_cable` | Cable físico con sus dos extremos | Etiqueta, tipo, longitud, color; extremo = (item, puerto) o (item, toma) |
 | `dc_link` | Enlace entre sedes | SD-WAN, IPSEC, MPLS, fibra oscura; declarado, y contrastado con lo medido |
 
@@ -132,7 +132,7 @@ Nombres provisionales; el prefijo `dc_` mantiene el espacio propio en la BD comp
 quieras, hereda hacia abajo, el más concreto manda»— es una sola, y escrita como una columna
 `org_uid` en cinco tablas son cinco sitios donde implementarla y cinco donde equivocarse. En una
 tabla aparte hay **un** resolutor: se sube por la cadena física hasta encontrar la primera
-pertenencia dicha. Además admite ámbitos que no están en la cadena —un host suelto, una VM, un
+pertenencia dicha. Además admite ámbitos que no están en la cadena —un dispositivo suelto, una VM, un
 VIP— que también son de alguien y no están en ningún rack.
 
 Y por eso **no es de esta sección**: desde build.125 vive en `lib/core/orgs`, con la tabla `org`
@@ -149,10 +149,10 @@ misma U por caras opuestas. Sin `cara` el mapa de un rack real es mentira a la p
 Cada nivel se colorea con lo peor que tenga debajo:
 
 ```
-item (host) → rack → sala → datacenter → empresa
+item (dispositivo) → rack → sala → datacenter → empresa
 ```
 
-No hay que inventar nada: el estado por host ya lo calcula `lib/core/infra/service.py` a partir
+No hay que inventar nada: el estado por dispositivo ya lo calcula `lib/core/infra/service.py` a partir
 de `_read_check_status`, con la severidad `warning` ya diferenciada del `down`. Lo que hace
 falta es **un servicio de agregación** que recorra la contención una vez por render y devuelva,
 por nodo, `{peor_estado, cuántos, cuántos malos, cuántos sin vigilar}`.
@@ -165,8 +165,8 @@ dos criterios de «peor estado» que acabarán discrepando.
 
 Dos cosas a cuidar desde el principio, porque son las que rompen esto a escala:
 
-- **Un item sin host no es «bien»**, es *sin dato*. Un rack lleno de paneles de parcheo no puede
-  salir verde: sale gris, que es la verdad. El panel ya tiene ese criterio (`HOST_STATE_COLORS['']`).
+- **Un item sin dispositivo no es «bien»**, es *sin dato*. Un rack lleno de paneles de parcheo no puede
+  salir verde: sale gris, que es la verdad. El panel ya tiene ese criterio (`DEVICE_STATE_COLORS['']`).
 - **Una U vacía tampoco es «bien»**. La ocupación es otra lectura distinta del estado.
 
 ---
@@ -389,7 +389,7 @@ la anterior a medias.
 | # | Fase | Entrega | Depende de |
 | --- | --- | --- | --- |
 | **0** | **Modelo, pertenencia y catálogo** | Tablas, stores, permisos, **empresas con `org_owner` y el ámbito `org.<uid>.view`**, importación de devicetype-library con su trabajo de fondo. Sin mapas: listas y formularios | — |
-| **1** | **Racks** | Alzado frontal y trasero, colocación de items, enlace opcional a host, color en vivo, ocupación de U, **y el item ajeno dibujado ocupado y anónimo** | 0 |
+| **1** | **Racks** | Alzado frontal y trasero, colocación de items, enlace opcional a dispositivo, color en vivo, ocupación de U, **y el item ajeno dibujado ocupado y anónimo** | 0 |
 | **2** | **Salas** | Plano con racks vistos desde arriba, imagen de fondo, agregación de estado sala→rack | 1 |
 | **3** | **Sedes y cuadro de mando** | Geografía, esquema de sedes, y el desglose **por sitio y por empresa** con el camino hasta el fallo | 2 |
 | **4** | **Potencia** | Regletas, tomas, ramas A/B, potencia declarada frente a la medida por el SAI, capacidad libre, **y consumo por empresa dentro de un rack compartido** | 1 |
@@ -482,7 +482,7 @@ escrito. Un punto a medias se queda sin marcar aunque el fichero exista.
 **0.5 La sección**
 
 - [x] `routes.py` con las rutas de lectura y escritura, cada una tras su permiso
-- [x] El pegamento del panel *(no hace falta un `mixin.py`: como infra e historial, el dominio son rutas + store, y el store se construye en el arranque junto al registro de hosts)*
+- [x] El pegamento del panel *(no hace falta un `mixin.py`: como infra e historial, el dominio son rutas + store, y el store se construye en el arranque junto al registro de dispositivos)*
 - [x] Entrada en el registro de páginas: `/dcim`
 - [x] Listas de empresas, sedes, salas y racks — sin mapas todavía *(el árbol y el contenido de un rack; crear una sede desde la propia barra)*
 - [x] i18n de todo lo anterior
@@ -505,12 +505,12 @@ de la información que habrá cuando toque.
 
 - [x] `service.py`: estado por item, lo peor de un rack, y el vuelco sede→sala→rack en **una
       pasada** — por nodo serían cuarenta lecturas del mismo fichero de estado
-- [x] Un item **sin host no está bien**, está sin vigilar: sin color, no verde
+- [x] Un item **sin dispositivo no está bien**, está sin vigilar: sin color, no verde
 - [x] El recuento cuenta **solo lo que quien mira puede ver**, y eso sube solo: lo que no llega
       a un rack no puede llegar a su sala
 - [x] Alzado frontal y trasero, uno al lado del otro, sobre el lienzo compartido — con lo que
       trae gratis: encuadre, zoom, arrastre y **exportar a PNG/SVG**
-- [x] Color en vivo, con `hostStateColor` y no uno propio
+- [x] Color en vivo, con `deviceStateColor` y no uno propio
 - [x] La numeración de U respeta si el rack va de abajo arriba o al revés — **y se puede decir**: la columna existía desde el principio y el alzado ya la respetaba, pero no estaba en el formulario, así que todo rack era de abajo arriba y parecía correcto
 - [x] Dimensiones del armario (ancho y fondo) y **posición de los mástiles**: frente→mástil, entre mástiles y mástil→fondo — con el veredicto de si un equipo de un fondo dado entra, y el descuadre dicho cuando los tramos no suman
 - [x] Un item ajeno se dibuja ocupado, anónimo y sin color
@@ -527,7 +527,7 @@ de la información que habrá cuando toque.
       decidiendo si cabe**: ya sabe de caras y de solapes. Lo ajeno no se arrastra
       *(la inversa altura→U tenía un desplazamiento de una U que no daba ningún error;
       ficha en `caso-diagnostico.md`)*
-- [x] Enlazar un item con un host desde la pantalla — **sin esto el alzado sale gris entero**, que es tanto como no tenerlo: el color en vivo lee `device_uid` y `device_uid` no se podía escribir desde ninguna parte
+- [x] Enlazar un item con un dispositivo desde la pantalla — **sin esto el alzado sale gris entero**, que es tanto como no tenerlo: el color en vivo lee `device_uid` y `device_uid` no se podía escribir desde ninguna parte
 
 **Fase 2 — Salas** *(el plano)*
 
@@ -631,7 +631,7 @@ de la información que habrá cuando toque.
 **Fase 4 — Potencia**
 
 - [x] `dc_pdu`: la regleta, con su **rama** (A / B / ninguna), sus tomas y lo que aguanta. Y su
-      `device_uid`, porque **una PDU gestionada es un host**: contesta y dice lo que está dando,
+      `device_uid`, porque **una PDU gestionada es un dispositivo**: contesta y dice lo que está dando,
       así que ahí tenemos las dos mitades —lo declarado y lo medido— que son toda la tesis
 - [x] `dc_feed`: un cable. Una fila por cable y **no una columna en el equipo**, porque un
       equipo con una sola fila es justo el hallazgo: dos fuentes y una sin enchufar

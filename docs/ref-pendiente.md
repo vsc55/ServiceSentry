@@ -229,7 +229,7 @@ y uno donde alguien ha dicho que sí no son el mismo producto, y éste es el seg
 línea que «un módulo ausente no está apagado, está sin añadir».
 
 Eso **no tiene precedente en el panel**: lo único parecido es `__provision_device__`, que hace lo
-contrario —crea o actualiza el host que el módulo describe, sin preguntar
+contrario —crea o actualiza el dispositivo que el módulo describe, sin preguntar
 ([provisioning.py](../src/lib/core/modules/provisioning.py))—. Así que hay que inventar la forma,
 y de proponer se sigue más de lo que parece:
 
@@ -387,7 +387,7 @@ De aquella ronda quedaron sin arreglar, clasificados como latentes o de borde:
   upsert de `event_cursor`/cooldowns en MySQL, `ADD COLUMN` idempotente.
 - **Frontend (severidad baja):** los recogidos como *frontend-lows* en la misma ronda.
 
-**Riesgo aceptado explícitamente:** exfiltración vía `api_test_host_ssh`. El endpoint se
+**Riesgo aceptado explícitamente:** exfiltración vía `api_test_device_ssh`. El endpoint se
 endureció parcialmente (`api_test_credential` perdió `devices_edit`), pero el riesgo de fondo
 se asumió a conciencia — no lo "arregles" sin releer aquella decisión.
 

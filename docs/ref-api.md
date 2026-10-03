@@ -63,7 +63,7 @@ sin uso en rutas. Ver el catálogo completo de permisos en [explica-seguridad.md
   suelen responder `{ok: true, ...}` o el recurso resultante; los de error devuelven
   `{message: "..."}` con el código HTTP correspondiente.
 - **Secretos**: en las respuestas de listado/lectura los campos sensibles van **enmascarados**
-  (credenciales, hosts, webhooks); al guardar, un valor enmascarado sin cambios se **restaura**
+  (credenciales, dispositivos, webhooks); al guardar, un valor enmascarado sin cambios se **restaura**
   desde el valor cifrado en BD. Ver [explica-seguridad.md](explica-seguridad.md).
 - Códigos típicos: `200` OK, `400` payload inválido, `401` sin sesión, `403` sin permiso o
   fallo CSRF, `404` recurso inexistente, `409` conflicto (p. ej. nombre duplicado), `429`
@@ -526,25 +526,25 @@ Dónde está el equipamiento y de quién es. Ver [explica-dcim.md](explica-dcim.
 | DELETE | `/api/v1/credentials/<uid>` | sesión | Borrar |
 | POST | `/api/v1/credentials/test` | sesión | Abrir conexión SSH para verificar |
 
-## Hosts — [lib/core/devices/routes.py](../src/lib/core/devices/routes.py)
+## Dispositivos — [lib/core/devices/routes.py](../src/lib/core/devices/routes.py)
 
-> Todas son `@login_required`; el permiso se aplica **inline** por la familia `servers_*` y
-> `_has_server_permission(uid, acción)` (permiso por host). Ver [explica-hosts.md](explica-hosts.md).
+> Todas son `@login_required`; el permiso se aplica **inline** por la familia `devices_*` y
+> `_has_server_permission(uid, acción)` (permiso por dispositivo). Ver [explica-dispositivos.md](explica-dispositivos.md).
 
 | Método | Ruta | Permiso (inline) | Propósito |
 |---|---|---|---|
 | GET/POST | `/api/v1/snmp/<acción>` | `snmp_view` (lectura) · `snmp_manage` (el resto) | La biblioteca de MIB, el catálogo de perfiles de dispositivo y preguntarle a un dispositivo qué sirve. 42 acciones; las declara `lib/core/snmp/manifest.py`. `discover` **no** está aquí: busca OIDs para el campo de un check, así que sigue en `/api/v1/modules/watchfuls/snmp/discover` |
-| GET | `/api/v1/devices` | `devices_view` (global) o view por host | Listar hosts, secretos enmascarados |
-| GET | `/api/v1/devices/<uid>/status` | `view` por host | Últimos resultados de checks |
-| POST | `/api/v1/devices` | `devices_edit` | Crear host |
-| POST | `/api/v1/devices/<uid>/clone` | `devices_edit` | Clonar host |
-| PUT | `/api/v1/devices/<uid>` | `edit` por host | Actualizar host |
-| DELETE | `/api/v1/devices/<uid>` | `delete` por host | Borrar host |
-| POST | `/api/v1/devices/test_ssh` | `edit` por host / `devices_edit` | Probar SSH sin guardar |
-| POST | `/api/v1/devices/test_check` | `edit` por host | Ejecutar un check una vez |
-| POST | `/api/v1/devices/test` | `edit` por host | Test completo: SSH + todos los checks |
+| GET | `/api/v1/devices` | `devices_view` (global) o view por dispositivo | Listar dispositivos, secretos enmascarados |
+| GET | `/api/v1/devices/<uid>/status` | `view` por dispositivo | Últimos resultados de checks |
+| POST | `/api/v1/devices` | `devices_edit` | Crear dispositivo |
+| POST | `/api/v1/devices/<uid>/clone` | `devices_edit` | Clonar dispositivo |
+| PUT | `/api/v1/devices/<uid>` | `edit` por dispositivo | Actualizar dispositivo |
+| DELETE | `/api/v1/devices/<uid>` | `delete` por dispositivo | Borrar dispositivo |
+| POST | `/api/v1/devices/test_ssh` | `edit` por dispositivo / `devices_edit` | Probar SSH sin guardar |
+| POST | `/api/v1/devices/test_check` | `edit` por dispositivo | Ejecutar un check una vez |
+| POST | `/api/v1/devices/test` | `edit` por dispositivo | Test completo: SSH + todos los checks |
 | GET | `/api/v1/devices/migrate/preview` | `devices_edit` | Propuesta de migración, secretos enmascarados |
-| POST | `/api/v1/devices/migrate/apply` | `devices_edit` | Crear hosts para candidatos aceptados |
+| POST | `/api/v1/devices/migrate/apply` | `devices_edit` | Crear dispositivos para candidatos aceptados |
 
 ## Módulos — [lib/core/modules/routes.py](../src/lib/core/modules/routes.py)
 

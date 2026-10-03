@@ -74,8 +74,8 @@ erDiagram
     users ||--o{ sessions : "abre"
     users }o--|| roles : "role"
     module_config ||--o{ module_config_items : "items"
-    hosts ||--o{ module_config_items : "host_uid"
-    credentials }o--o{ hosts : "cred_uid (en JSON profiles)"
+    devices ||--o{ module_config_items : "device_uid"
+    credentials }o--o{ devices : "cred_uid (en JSON profiles)"
     module_config_items ||--o{ check_state : "item_uid"
     module_config_items ||--o{ history : "item_uid"
     event_rules ||--o{ event_cooldowns : "rule_uid"
@@ -459,7 +459,7 @@ config.json (solo lectura/arranque) → BD (editable).
 | updated_at | TEXT | no | `''` | |
 | updated_by | TEXT | no | `''` | |
 
-Índices: `idx_module_config_items_moduid(module_uid)`, `idx_module_config_items_device(host_uid)`.
+Índices: `idx_module_config_items_moduid(module_uid)`, `idx_module_config_items_device(device_uid)`.
 
 ---
 
@@ -523,12 +523,12 @@ dispositivos señalando a clases que ya no existen, sin ningún error. Se recono
 (`host_type_old`) es de donde se retoma en el siguiente arranque.
 
 Una clase **no se puede borrar si algún dispositivo la lleva puesta**: quedaría una palabra que ya no se traduce, no se filtra y no dibuja icono, y no se
-arregla volviendo a crearla con el mismo nombre. Se gestionan en **Sistema › Infraestructura ›
-Clases** (y el catálogo de Inventario físico enlaza allí).
+arregla volviendo a crearla con el mismo nombre. Se gestionan en **Catálogo › Tipos de dispositivo** (y el catálogo de Inventario físico enlaza
+allí).
 
 ---
 
-### `devices` — hosts monitorizados
+### `devices` — dispositivos monitorizados
 [lib/core/devices/stores/devices.py:36](../src/lib/core/devices/stores/devices.py#L36)
 
 | Columna | Tipo | Null | Default | Clave |
@@ -553,7 +553,7 @@ Clases** (y el catálogo de Inventario físico enlaza allí).
 | updated_by | TEXT | no | `''` | |
 
 Índices: `idx_devices_name(name)`, `idx_devices_source(source, external_id)`. Ver
-[explica-hosts.md](explica-hosts.md) para el modelo host-céntrico.
+[explica-dispositivos.md](explica-dispositivos.md) para el modelo centrado en el dispositivo.
 
 ---
 
@@ -1108,7 +1108,7 @@ si lo echan?» antes de que lo echen**.
 
 ### `dc_pdu` — una regleta
 
-De qué se alimenta un armario. **Una PDU gestionada es además un host**: contesta por SNMP y dice
+De qué se alimenta un armario. **Una PDU gestionada es además un dispositivo**: contesta por SNMP y dice
 cuántos amperios está dando ahora, así que cuando lo es tenemos las dos mitades —lo declarado y
 lo medido— y el desacuerdo entre ellas es la razón de que esto exista.
 
@@ -1209,8 +1209,8 @@ columna.
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
 
-> **Un rack contiene items, y algunos items son hosts** — nunca al revés. Un panel de parcheo
-> ocupa 1U y no es un host; una tapa ciega no es nada; un chasis de blades ocupa 7U y contiene
+> **Un rack contiene items, y algunos items son dispositivos** — nunca al revés. Un panel de parcheo
+> ocupa 1U y no es un dispositivo; una tapa ciega no es nada; un chasis de blades ocupa 7U y contiene
 > ocho cosas que sí lo son; un servidor apagado sigue ocupando su U. Por eso `device_uid` es
 > opcional y la tabla `devices` no se toca: cada lado sobrevive a que borren el otro.
 >
@@ -1672,7 +1672,7 @@ Sin índices.
 Sin índices.
 
 Una tabla y no `config.json` porque una tarea es un **registro**, no un ajuste: se crea, se
-renombra, se desactiva y se borra de una en una, como un webhook o un host. Varias tareas es
+renombra, se desactiva y se borra de una en una, como un webhook o un dispositivo. Varias tareas es
 justo el motivo de que exista: la configuración interesa a diario y el syslog quizá una vez por
 semana, y con un solo intervalo eso no se puede decir sin copiarlo todo al ritmo del más
 exigente. Nada de `data` va cifrado: una tarea dice **qué** copiar y cada cuánto, nunca una

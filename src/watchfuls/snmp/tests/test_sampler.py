@@ -139,7 +139,7 @@ class TestWhichDevicesAreSampled:
         res, _mon = env.run(_server(device_profiles='gone'), dev)
         assert res == {} and dev.asked == []
 
-    def test_a_host_in_maintenance_is_not_charted(self, env):
+    def test_a_device_in_maintenance_is_not_charted(self, env):
         """Somebody is working on it, and a graph of the work is not a graph of the machine."""
         env.profile('p1', [GAUGE])
         dev = _Dev(gets={GAUGE['oid']: ('41', None)})
@@ -843,7 +843,7 @@ class TestAProbeProvesItAnswersAndStopsThere:
 
 
 class TestTheProbeThePanelRuns:
-    """"Test" in the host modal does not go through the monitor: it builds a throwaway
+    """"Test" in the device modal does not go through the monitor: it builds a throwaway
     Watchful with one item and reports whatever came back. A server with profiles and no OID
     checks used to produce nothing there, and "nothing" is rendered as "nothing to test" —
     which reads as a misconfiguration rather than as a feature that was not wired.
@@ -880,8 +880,8 @@ class TestTheProbeThePanelRuns:
         assert 'sys_generic' in _p.catalog()
 
 
-class TestAHostIsADeviceOnItsOwn:
-    """The point of the whole move: a host that carries an SNMP profile with device profiles
+class TestADeviceIsADeviceOnItsOwn:
+    """The point of the whole move: a device that carries an SNMP profile with device profiles
     assigned is sampled, with no entry in the module pointing back at it.
 
     Before this, that configuration bought nothing until a second thing existed. The device
@@ -890,16 +890,16 @@ class TestAHostIsADeviceOnItsOwn:
 
     class _Store:
         def __init__(self, devices):
-            self._hosts = devices
+            self._devices = devices
 
         def list(self, decrypt=True):        # noqa: A003
-            return self._hosts
+            return self._devices
 
         def get(self, uid):
-            return next((h for h in self._hosts if h.get('uid') == uid), None)
+            return next((h for h in self._devices if h.get('uid') == uid), None)
 
     @staticmethod
-    def _host(uid='h1', name='erebor', profiles=None, **kw):
+    def _device(uid='h1', name='erebor', profiles=None, **kw):
         h = {'uid': uid, 'name': name, 'address': '10.0.0.9', 'kind': 'local',
              'os': 'auto', 'maintenance': False, 'modules': [],
              'profiles': profiles if profiles is not None else {
@@ -919,59 +919,59 @@ class TestAHostIsADeviceOnItsOwn:
             res = Watchful(mon).check()
         return res, dev
 
-    def test_a_configured_host_is_sampled_with_no_module_entry(self, env):
-        res, dev = self._run(env, [self._host()])
+    def test_a_configured_device_is_sampled_with_no_module_entry(self, env):
+        res, dev = self._run(env, [self._device()])
         assert 'host.h1/metrics' in res.list
         assert res.get_other_data('host.h1/metrics')['cpu'] == 41
         assert ('get', GAUGE['oid']) in dev.asked
 
-    def test_the_device_is_named_after_the_host(self, env):
+    def test_the_device_is_named_after_the_device(self, env):
         """A chart legend and an alert both read this; `host.h1` is not a machine anybody
         recognises."""
-        res, _dev = self._run(env, [self._host(name='erebor')])
+        res, _dev = self._run(env, [self._device(name='erebor')])
         assert res.get_name('host.h1/metrics') == 'erebor'
 
-    def test_the_connection_comes_from_the_host_profile(self, env):
-        """Nothing carries the community but the host, so a device that answers proves the
+    def test_the_connection_comes_from_the_device_profile(self, env):
+        """Nothing carries the community but the device, so a device that answers proves the
         profile was resolved — address included, since the item has no address at all."""
-        res, dev = self._run(env, [self._host()])
+        res, dev = self._run(env, [self._device()])
         assert dev.asked, 'the device was never asked anything'
         assert res.get_status('host.h1/metrics') is True
 
-    def test_a_host_in_maintenance_is_not_read(self, env):
+    def test_a_device_in_maintenance_is_not_read(self, env):
         """Decided by resolve_device, the same gate a check goes through: a graph of a machine
         somebody is working on is a graph of the work."""
-        _res, dev = self._run(env, [self._host(maintenance=True)])
+        _res, dev = self._run(env, [self._device(maintenance=True)])
         assert dev.asked == []
 
-    def test_a_host_an_item_already_covers_is_not_sampled_twice(self, env):
+    def test_a_device_an_item_already_covers_is_not_sampled_twice(self, env):
         servers = {'srv': {'enabled': True, 'device_uid': 'h1', 'device_profiles': 'p1',
                            'label': 'nas-01'}}
-        res, _dev = self._run(env, [self._host()], servers)
+        res, _dev = self._run(env, [self._device()], servers)
         assert 'srv/metrics' in res.list
         assert 'host.h1/metrics' not in res.list
 
     def test_a_device_switched_off_stays_off(self, env):
         """A disabled item is somebody saying "not this one". Resuming it from the other end
-        because the configuration also lives on the host would be an upgrade undoing a
+        because the configuration also lives on the device would be an upgrade undoing a
         decision nobody was asked about."""
         servers = {'srv': {'enabled': False, 'device_uid': 'h1', 'device_profiles': 'p1'}}
-        _res, dev = self._run(env, [self._host()], servers)
+        _res, dev = self._run(env, [self._device()], servers)
         assert dev.asked == []
 
-    def test_an_item_that_samples_nothing_does_not_claim_the_host(self, env):
+    def test_an_item_that_samples_nothing_does_not_claim_the_device(self, env):
         """Reported from the panel, and it is the whole reason "covered" is about PROFILES and
         not about the binding.
 
         A switch had an SNMP item bound to it carrying OID checks and no device profiles. The
-        item claimed the host — so the registry fallback skipped it — and then sampled nothing,
+        item claimed the device — so the registry fallback skipped it — and then sampled nothing,
         because it had nothing to sample. The device was collected by NOBODY: no error, no log
         line, and no row on any screen. Its own connection test kept returning OIDs the whole
         time, which is what made it unreadable from outside.
         """
         servers = {'srv': {'enabled': True, 'device_uid': 'h1', 'label': 'SW',
                            'checks': {'c1': {'enabled': True, 'oid': '1.1'}}}}
-        res, dev = self._run(env, [self._host()], servers)
+        res, dev = self._run(env, [self._device()], servers)
         assert 'host.h1/metrics' in res.list, 'the device is sampled by nobody'
         assert dev.asked, 'and nothing was ever asked of it'
 
@@ -980,11 +980,11 @@ class TestAHostIsADeviceOnItsOwn:
         itself."""
         servers = {'srv': {'enabled': True, 'device_uid': 'h1', 'device_profiles': 'p1',
                            'checks': {'c1': {'enabled': True, 'oid': '1.1'}}}}
-        res, _dev = self._run(env, [self._host()], servers)
+        res, _dev = self._run(env, [self._device()], servers)
         assert 'srv/metrics' in res.list and 'host.h1/metrics' not in res.list
 
-    def test_a_host_with_no_assignment_is_left_alone(self, env):
-        devices = [self._host(profiles={'snmp': {'community': 'public', 'version': '2c'}})]
+    def test_a_device_with_no_assignment_is_left_alone(self, env):
+        devices = [self._device(profiles={'snmp': {'community': 'public', 'version': '2c'}})]
         _res, dev = self._run(env, devices)
         assert dev.asked == []
 
@@ -1103,7 +1103,7 @@ class TestTheProfileIsTheVerdict:
             'marking one port made every port on the switch report')
 
     def test_a_marked_row_says_so_IN_the_row(self, env):
-        """The mark lives in the host registry and the screens that read a SAMPLE never open
+        """The mark lives in the device registry and the screens that read a SAMPLE never open
         it — so a fact about the row has to travel with the row, or "which of these thirty
         ports did somebody ask to be told about" is unanswerable from the recorded state.
 

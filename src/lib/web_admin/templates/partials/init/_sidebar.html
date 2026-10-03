@@ -33,20 +33,23 @@ function _closeSidebar() { document.getElementById('ss-layout')?.classList.remov
     } catch (e) { /* ignore */ }
 })();
 
-// Persist the Settings ("Administration panel") accordion open/closed state. It defaults to
+// Persist each group's accordion open/closed state — the Catalogue and System. Each defaults to
 // expanded (the `show` class in the template); if the user collapsed it, keep it collapsed on
-// the next load instead of always re-expanding.
-const _SB_SETTINGS_KEY = 'ss_sidebar_settings_open';
-(function _initSettingsAccordion() {
-    const el = document.getElementById('ss-sb-settings');
-    if (!el) return;
-    const parent = document.querySelector('[data-bs-target="#ss-sb-settings"]');
-    if (localStorage.getItem(_SB_SETTINGS_KEY) === '0') {
-        el.classList.remove('show');                       // start collapsed (default is open)
-        parent?.setAttribute('aria-expanded', 'false');
-    }
-    el.addEventListener('shown.bs.collapse',  () => { try { localStorage.setItem(_SB_SETTINGS_KEY, '1'); } catch (e) { /* ignore */ } });
-    el.addEventListener('hidden.bs.collapse', () => { try { localStorage.setItem(_SB_SETTINGS_KEY, '0'); } catch (e) { /* ignore */ } });
+// the next load instead of always re-expanding. The key is the group's own (`data-sb-store`), so
+// folding one never folds the other.
+(function _initGroupAccordions() {
+    document.querySelectorAll('#ss-sidebar .ss-sb-sub[data-sb-store]').forEach(el => {
+        const key = el.dataset.sbStore;
+        const parent = document.querySelector(`[data-bs-target="#${el.id}"]`);
+        try {
+            if (localStorage.getItem(key) === '0') {
+                el.classList.remove('show');               // start collapsed (default is open)
+                parent?.setAttribute('aria-expanded', 'false');
+            }
+        } catch (e) { /* a browser without storage starts it open */ }
+        el.addEventListener('shown.bs.collapse',  () => { try { localStorage.setItem(key, '1'); } catch (e) { /* ignore */ } });
+        el.addEventListener('hidden.bs.collapse', () => { try { localStorage.setItem(key, '0'); } catch (e) { /* ignore */ } });
+    });
 })();
 
 // The user menu opens to the RIGHT (dropend). The sidebar is overflow:hidden, so use Popper's
@@ -100,7 +103,6 @@ function _navSubtab(el, paneTarget, subTarget, storageKey, storageValue) {
     // Events/ipban pass an explicit key/value (their sub-tabs are built in JS); Infra/Access
     // store the full '#subtab-*' target under a per-section key derived from the pane.
     if (storageKey) localStorage.setItem(storageKey, storageValue);
-    else if (paneTarget === '#tab-servers') localStorage.setItem('ss_active_subtab_infra', subTarget);
     else if (paneTarget === '#tab-access')  localStorage.setItem('ss_active_subtab_access', subTarget);
     _navTab(paneTarget);                          // show the parent pane first
     // If the sub-tab button already exists (static, or the pane was already rendered),
@@ -190,7 +192,6 @@ function _sbUpdateBreadcrumb() {
 // No-value defaults mirror each pane's own restore. Sections without a flyout return null.
 function _sbStoredSub(paneId) {
     switch (paneId) {
-        case 'tab-servers': return localStorage.getItem('ss_active_subtab_infra')  || '#subtab-srv-devices';
         case 'tab-access':  return localStorage.getItem('ss_active_subtab_access') || '#subtab-users';
         case 'tab-ipban':   return localStorage.getItem('ss_active_subtab_ipban')  || '#subtab-ipban-bans';
         case 'tab-events':  return '#ev-pane-' + (localStorage.getItem('ss_active_subtab_events') === 'log' ? 'log' : 'rules');

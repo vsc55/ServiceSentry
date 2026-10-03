@@ -5,10 +5,10 @@ Referencia de configuración y comportamiento de todos los módulos de monitoriz
 Cada módulo es un **package** (carpeta con `__init__.py`) en `watchfuls/`.
 Consulta [caso-guia-watchful.md](caso-guia-watchful.md) para crear el tuyo propio.
 
-> **Módulos de sistema host-aware.** Los módulos que miden recursos del sistema
+> **Módulos de sistema conscientes del dispositivo.** Los módulos que miden recursos del sistema
 > (`cpu`, `ram_swap`, `temperature`, `filesystemusage`, `process`, `service_status`
 > y `raid`) **no** usan `psutil` en el `check()`: ejecutan comandos de SO mediante
-> `ModuleBase.device_exec`, **en local** o **por SSH** según el host vinculado al ítem
+> `ModuleBase.device_exec`, **en local** o **por SSH** según el dispositivo vinculado al ítem
 > (perfil `__device_profile__` de tipo `ssh`). Cada uno elige el comando propio de
 > cada SO (Linux/Windows/FreeBSD) y parsea la salida en Python. `psutil` solo
 > se usa, cuando aplica, en el `discover()` **local** (autocompletado de la UI).
@@ -62,8 +62,8 @@ Estructura devuelta por el método `check()` de cada módulo:
 
 ## 🖥️ cpu — Uso de CPU
 
-Monitoriza el porcentaje de uso de CPU. Es **host-aware**: cada ítem se vincula a un
-host del registro y la CPU se mide vía `ModuleBase.device_exec` **en local o por SSH**
+Monitoriza el porcentaje de uso de CPU. Es **consciente del dispositivo**: cada ítem se vincula a un
+dispositivo del registro y la CPU se mide vía `ModuleBase.device_exec` **en local o por SSH**
 con el comando propio de cada SO (nunca `psutil` en el check).
 
 **Plataforma:** Linux, Windows, FreeBSD 🌐
@@ -90,14 +90,14 @@ con el comando propio de cada SO (nunca `psutil` en el check).
 | `list.*.alert` | int | 0 | Umbral por ítem; `0` (en blanco) hereda el `alert` global |
 
 > La clave de cada ítem de `list` (p. ej. `local`) identifica el ítem; la CPU se mide
-> en el **host vinculado** (`__device_profile__` de tipo `ssh`; sin vínculo = local).
+> en el **dispositivo vinculado** (`__device_profile__` de tipo `ssh`; sin vínculo = local).
 
 **Flujo:** `ModuleBase.device_exec(item, cmd)` (local o SSH) ejecuta el comando de CPU
 propio del SO (`_cpu_cmd`): `cat /proc/stat` en Linux, `sysctl -n kern.cp_time` en
 FreeBSD, `wmic cpu get loadpercentage /value` en Windows. En
 Linux/FreeBSD se toman **dos muestras** con la espera de `interval` en Python (el delta
 de ocupación); se parsea el uso en Python → compara con el umbral → alerta si supera
-`alert`. Un fallo duro (host inalcanzable, salida no parseable) se reporta como `down`.
+`alert`. Un fallo duro (dispositivo inalcanzable, salida no parseable) se reporta como `down`.
 
 > **Severidad:** superar el umbral emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
@@ -136,14 +136,14 @@ Comprueba los días hasta la expiración de certificados SSL/TLS de servidores r
 | --- | --- | --- | --- |
 | `warning_days` | int | 30 | Días antes de vencimiento para alertar (umbral global) |
 | `timeout` | int | 10 | Timeout de conexión TCP en segundos (global) |
-| `list.*.host` | string | `""` | Hostname del servidor (o se hereda del host vinculado). Si está vacío, se usa la clave del ítem |
+| `list.*.host` | string | `""` | Hostname del servidor (o se hereda del dispositivo vinculado). Si está vacío, se usa la clave del ítem |
 | `list.*.server_name` | string | `""` | Nombre SNI a presentar en el handshake (vacío = usa `host`); útil para vhosts con varios certificados |
 | `list.*.port` | int | 0 | Puerto TLS. `0` aplica el puerto estándar 443. La UI muestra `443` como placeholder |
 | `list.*.verify` | bool | true | Verificar la cadena del certificado; `false` permite autofirmados (solo comprueba caducidad) |
 | `list.*.warning_days` | int | 0 | Umbral de alerta por host. `0` usa el valor global |
 | `list.*.timeout` | int | 0 | Timeout por host en segundos. `0` usa el valor global |
 
-Es **host-aware**: el ítem puede vincularse a un host del registro y heredar la dirección (`__device_profile__`).
+Es **consciente del dispositivo**: el ítem puede vincularse a un dispositivo del registro y heredar la dirección (`__device_profile__`).
 
 **Flujo:** `ssl.create_default_context()` + `socket.create_connection()` → `ssock.getpeercert(binary_form=True)` (DER) → `cryptography.x509.load_der_x509_certificate(der)` → lee `not_valid_after` → calcula días restantes → alerta si `days_left <= warning_days`.
 
@@ -153,7 +153,7 @@ Es **host-aware**: el ítem puede vincularse a un host del registro y heredar la
 
 ## ⚙️ process — Procesos en Ejecución
 
-Verifica que los procesos del sistema están en ejecución comprobando el número mínimo de instancias activas. Es **host-aware**: cada ítem se vincula a un host del registro y la lista de procesos se lee vía `ModuleBase.device_exec` en local o por SSH.
+Verifica que los procesos del sistema están en ejecución comprobando el número mínimo de instancias activas. Es **consciente del dispositivo**: cada ítem se vincula a un dispositivo del registro y la lista de procesos se lee vía `ModuleBase.device_exec` en local o por SSH.
 
 **Plataforma:** Linux, Windows, FreeBSD 🌐
 
@@ -184,7 +184,7 @@ Verifica que los procesos del sistema están en ejecución comprobando el númer
 | `list.*.process` | string | clave | Nombre del proceso a buscar (insensible a mayúsculas). Si está vacío, se usa la clave del ítem |
 | `list.*.min_count` | int | 0 | Mínimo de instancias por ítem. `0` (en blanco) hereda el global del módulo |
 
-**Discover:** El botón "Discover" en la cabecera de la colección y el botón inline junto al campo `process` enumeran todos los procesos activos del sistema ordenados alfabéticamente, con el número de instancias en ejecución. Al seleccionar uno se rellena automáticamente el campo y la clave del ítem. El descubrimiento usa `psutil.process_iter(['name'])` en el host **local**, o el comando por SSH para un host remoto.
+**Discover:** El botón "Discover" en la cabecera de la colección y el botón inline junto al campo `process` enumeran todos los procesos activos del sistema ordenados alfabéticamente, con el número de instancias en ejecución. Al seleccionar uno se rellena automáticamente el campo y la clave del ítem. El descubrimiento usa `psutil.process_iter(['name'])` en el dispositivo **local**, o el comando por SSH para un dispositivo remoto.
 
 **Flujo:** `ModuleBase.device_exec(item, cmd)` ejecuta el listado de procesos del SO (`ps -A -o comm=` en Unix, `tasklist /FO CSV /NH` en Windows) → cuenta instancias con nombre coincidente (case-insensitive) → alerta si `count < min_count`. `psutil` **no** se usa en el check, solo en `discover()` local.
 
@@ -321,7 +321,7 @@ Consulta el estado de SAIs/UPS a través del protocolo NUT (Network UPS Tools) p
 | `alert_battery` | int | 20 | Umbral global: alerta si la carga de batería (%) baja de este valor (0 = desactivado) |
 | `alert_runtime` | int | 10 | Umbral global: alerta si la autonomía estimada (minutos) baja de este valor (0 = desactivado) |
 | `alert_load` | int | 0 | Umbral global: alerta si la carga del UPS (%) supera este valor (0 = desactivado) |
-| `list.*.host` | string | `""` | IP/hostname del demonio NUT (`upsd`) (o se hereda del host vinculado) |
+| `list.*.host` | string | `""` | IP/hostname del demonio NUT (`upsd`) (o se hereda del dispositivo vinculado) |
 | `list.*.port` | int | 0 | Puerto TCP de `upsd`. `0` aplica el puerto estándar 3493. La UI muestra `3493` como placeholder |
 | `list.*.ups_name` | string | `"ups"` | Nombre del UPS en `upsd` |
 | `list.*.user` | string | `""` | Usuario NUT (opcional) |
@@ -330,7 +330,7 @@ Consulta el estado de SAIs/UPS a través del protocolo NUT (Network UPS Tools) p
 | `list.*.alert_on_battery` | bool | true | Alertar cuando el UPS pasa a batería (`OB`) |
 | `list.*.alert_battery` / `alert_runtime` / `alert_load` | int | 0 | Umbrales por ítem; `0` (en blanco) hereda el global del módulo |
 
-Es **host-aware** (el ítem puede vincularse a un host del registro).
+Es **consciente del dispositivo** (el ítem puede vincularse a un dispositivo del registro).
 
 **Estados:** `OL` = en línea ✅, `OB` = funcionando con batería ⚠️, `LB` = batería baja ⚠️.
 
@@ -340,7 +340,7 @@ Es **host-aware** (el ítem puede vincularse a un host del registro).
 
 ## 📁 filesystemusage — Uso de Disco
 
-Monitoriza el porcentaje de uso de particiones. Es **host-aware**: cada ítem se vincula a un host del registro y el uso se mide vía `ModuleBase.device_exec` en local o por SSH.
+Monitoriza el porcentaje de uso de particiones. Es **consciente del dispositivo**: cada ítem se vincula a un dispositivo del registro y el uso se mide vía `ModuleBase.device_exec` en local o por SSH.
 
 **Plataforma:** Linux, Windows, FreeBSD 🌐
 
@@ -377,7 +377,7 @@ Monitoriza el porcentaje de uso de particiones. Es **host-aware**: cada ítem se
 | `list.*.alert` | int | 85 | Umbral de alerta (%) para esta partición, anula el umbral global |
 | `list.*.label` | string | `""` | Nombre mostrado en notificaciones. Si está vacío, se usa la clave del ítem |
 
-> **Descubrimiento:** la UI web incluye un botón para listar automáticamente las particiones montadas e incorporarlas a la configuración con un solo clic. Muestra dispositivo, tipo de filesystem y porcentaje de uso actual. En un host **local** usa `psutil.disk_partitions()`/`disk_usage()` (ignorando tipos de filesystem irrelevantes: squashfs, tmpfs, devtmpfs, overlay, etc.); en un host remoto usa el comando por SSH.
+> **Descubrimiento:** la UI web incluye un botón para listar automáticamente las particiones montadas e incorporarlas a la configuración con un solo clic. Muestra dispositivo, tipo de filesystem y porcentaje de uso actual. En un dispositivo **local** usa `psutil.disk_partitions()`/`disk_usage()` (ignorando tipos de filesystem irrelevantes: squashfs, tmpfs, devtmpfs, overlay, etc.); en un dispositivo remoto usa el comando por SSH.
 
 > **Formato legacy:** el valor de un ítem puede ser directamente un entero (`"/": 90`) — se interpreta como umbral de alerta para esa partición. La UI lo promueve automáticamente al formato dict al renderizarlo.
 
@@ -423,9 +423,9 @@ Consulta el demonio hddtemp por socket TCP para obtener temperaturas de disco. A
 | `list.*.exclude` | list | `[]` | Dispositivos a ignorar (ej: `"/dev/sdc"`) |
 | `list.*.alert` | int | 0 | Umbral por ítem (°C); `0` (en blanco) hereda el global |
 
-> La **dirección del host** no es un campo de `list`: el ítem se **vincula a un host**
+> La **dirección del dispositivo** no es un campo de `list`: el ítem se **vincula a un dispositivo**
 > del registro y hereda la dirección vía `__device_profile__` (la `key` del item se usa
-> como fallback). Ver [explica-web-admin.md → Dispositivos](explica-web-admin.md#dispositivos-registro-de-hosts).
+> como fallback). Ver [explica-web-admin.md → Dispositivos](explica-web-admin.md#registro-de-dispositivos).
 
 **Flujo:** `socket.create_connection(host, port)` → lee datos → parsea formato `|dev|model|temp|unit|` → compara con el umbral.
 
@@ -723,12 +723,12 @@ Monitoriza arrays RAID software de Linux leyendo `/proc/mdstat`, localmente y v�
 }
 ```
 
-> **Modelo actual (host-aware):** en el `schema.json` vigente, cada ítem de `list`
+> **Modelo actual (consciente del dispositivo):** en el `schema.json` vigente, cada ítem de `list`
 > tiene solo `enabled` y `label`; la **conexión SSH** (host/puerto/usuario/clave) ya
-> **no** son campos del ítem, sino que se heredan al **vincular el ítem a un host**
+> **no** son campos del ítem, sino que se heredan al **vincular el ítem a un dispositivo**
 > del registro (`__device_profile__` + credenciales reutilizables). El ejemplo de
 > arriba con `host`/`user`/`key_file` inline es el **formato legacy** (clave `remote`),
-> que sigue leyéndose por compatibilidad. Ver [explica-web-admin.md → Dispositivos](explica-web-admin.md#dispositivos-registro-de-hosts).
+> que sigue leyéndose por compatibilidad. Ver [explica-web-admin.md → Dispositivos](explica-web-admin.md#registro-de-dispositivos).
 
 | Clave | Tipo | Por defecto | Descripción |
 |-------|------|-------------|-------------|
@@ -738,7 +738,7 @@ Monitoriza arrays RAID software de Linux leyendo `/proc/mdstat`, localmente y v�
 | `mdstat_path` | string | `/proc/mdstat` | Ruta del fichero mdstat a leer |
 | `list.*.enabled` | bool | `true` | Habilitar monitorización de este ítem |
 | `list.*.label` | string | `""` | Nombre mostrado en la UI y en notificaciones. Si está vacío, se usa la clave del ítem |
-| *(host SSH)* | — | — | Dirección/credenciales heredadas del **host vinculado** (no son campos de `list`); legacy: `host`/`port`/`user`/`password`/`key_file` inline |
+| *(dispositivo SSH)* | — | — | Dirección/credenciales heredadas del **dispositivo vinculado** (no son campos de `list`); legacy: `host`/`port`/`user`/`password`/`key_file` inline |
 
 **Estados detectados:** `ok`, `error` (array degradado), `recovery` (reconstruyendo con %, tiempo estimado y velocidad).
 
@@ -748,7 +748,7 @@ Monitoriza arrays RAID software de Linux leyendo `/proc/mdstat`, localmente y v�
 
 ## 🐏 ram_swap — Uso de RAM y SWAP
 
-Monitoriza el porcentaje de uso de RAM y SWAP. Es **host-aware**: cada ítem se vincula a un host del registro y la memoria se mide vía `ModuleBase.device_exec` en local o por SSH (nunca `psutil` en el check).
+Monitoriza el porcentaje de uso de RAM y SWAP. Es **consciente del dispositivo**: cada ítem se vincula a un dispositivo del registro y la memoria se mide vía `ModuleBase.device_exec` en local o por SSH (nunca `psutil` en el check).
 
 **Plataforma:** Linux, Windows, FreeBSD 🌐
 
@@ -773,7 +773,7 @@ Monitoriza el porcentaje de uso de RAM y SWAP. Es **host-aware**: cada ítem se 
 | `list.*.label` | string | `""` | Nombre visible del ítem |
 | `list.*.alert_ram` / `alert_swap` | int | 0 | Umbral por ítem; `0` (en blanco) hereda el valor del módulo |
 
-> Cada ítem de `list` se mide en el **host vinculado** (`__device_profile__` de tipo `ssh`; sin vínculo = local). El check emite **dos resultados** por ítem: `<clave>_ram` y `<clave>_swap` (el SWAP solo si el SO lo reporta).
+> Cada ítem de `list` se mide en el **dispositivo vinculado** (`__device_profile__` de tipo `ssh`; sin vínculo = local). El check emite **dos resultados** por ítem: `<clave>_ram` y `<clave>_swap` (el SWAP solo si el SO lo reporta).
 
 **Flujo:** `ModuleBase.device_exec(item, cmd)` ejecuta el/los comando(s) de memoria propios del SO (`_MEM_CMDS`): `cat /proc/meminfo` en Linux, `wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value` en Windows, `sysctl`/`swapinfo -k` en FreeBSD → parsea el % de uso en Python → compara con los umbrales. Un SO no soportado o un fallo duro se reporta como problema (`down`/parse).
 
@@ -783,7 +783,7 @@ Monitoriza el porcentaje de uso de RAM y SWAP. Es **host-aware**: cada ítem se 
 
 ## ⚙️ service_status — Estado de Servicios del Sistema
 
-Comprueba si los servicios del sistema están en ejecución. Es **host-aware** (el estado se lee en local o por SSH según el host vinculado vía `ModuleBase.device_exec`), soporta **auto-remediación** (inicio/detención automática) y permite definir el **estado esperado** por servicio (`running` o `stopped`).
+Comprueba si los servicios del sistema están en ejecución. Es **consciente del dispositivo** (el estado se lee en local o por SSH según el dispositivo vinculado vía `ModuleBase.device_exec`), soporta **auto-remediación** (inicio/detención automática) y permite definir el **estado esperado** por servicio (`running` o `stopped`).
 
 **Plataforma:** Linux, Windows, FreeBSD 🌐
 
@@ -828,7 +828,7 @@ Comprueba si los servicios del sistema están en ejecución. Es **host-aware** (
 | `list.*.expected` | string | `"running"` | Estado esperado: `running` o `stopped`. Se genera alerta cuando el estado real difiere |
 | `list.*.remediation` | bool | `false` | Si `true`, ejecuta start/stop automáticamente para restaurar el estado esperado |
 
-> **Descubrimiento:** la UI web incluye un botón para listar automáticamente los servicios del sistema e incorporarlos a la configuración con un solo clic. El `discover()` sí ramifica según el init system detectado (systemd `list-units`, OpenRC `rc-status`, SysV `/etc/init.d`) o el SO del host remoto por SSH — a diferencia del check.
+> **Descubrimiento:** la UI web incluye un botón para listar automáticamente los servicios del sistema e incorporarlos a la configuración con un solo clic. El `discover()` sí ramifica según el init system detectado (systemd `list-units`, OpenRC `rc-status`, SysV `/etc/init.d`) o el SO del dispositivo remoto por SSH — a diferencia del check.
 
 **Comando de estado por SO** (ejecutado vía `device_exec`, servicio *shell-quoted*):
 
@@ -840,7 +840,7 @@ Comprueba si los servicios del sistema están en ejecución. Es **host-aware** (
 
 **Flujo:**
 ```text
-Por cada servicio habilitado (en el host vinculado, local o SSH):
+Por cada servicio habilitado (en el dispositivo vinculado, local o SSH):
    Ejecuta el comando de estado del SO vía device_exec  →  running/stopped
    estado_real vs. expected
    ├── Coincide  → OK ✅
@@ -892,8 +892,8 @@ sub-colección de **checks** (OIDs a comprobar):
 
 > **Los campos de conexión tampoco los escribe el módulo.** La colección nombra el protocolo
 > (`"__profile_fields__": "snmp"`) y el panel expande dentro de ella la declaración del core
-> (`HOST_PROFILE`), con sus etiquetas y sus ayudas. `__device_profile__` sólo dice qué hereda un
-> check **atado** a un host; no pinta nada en el formulario de uno sin atar, y un check contra
+> (`DEVICE_PROFILE`), con sus etiquetas y sus ayudas. `__device_profile__` sólo dice qué hereda un
+> check **atado** a un dispositivo; no pinta nada en el formulario de uno sin atar, y un check contra
 > una IP suelta tiene que poder decir su comunidad y sus claves v3 — eso era lo que obligaba a
 > escribirlos dos veces. Ver [ref-schema-json.md](ref-schema-json.md).
 >
@@ -904,7 +904,7 @@ sub-colección de **checks** (OIDs a comprobar):
 > versión, una comunidad y los siete campos de v3— es un hecho del *protocolo*, así que la
 > declara `lib/core/snmp/manifest.py` (`CREDENTIAL`). El motivo no es pulcritud: un tipo de
 > credencial que desaparece al desinstalar el watchful se lleva las credenciales guardadas
-> fuera del editor, mientras siguen en la base de datos referenciadas por los hosts que las
+> fuera del editor, mientras siguen en la base de datos referenciadas por los dispositivos que las
 > usan.
 >
 > `snmpv3_auth_key`, `snmpv3_priv_key` y `community` siguen cifrándose igual: el descubrimiento
@@ -920,8 +920,8 @@ una clave, una etiqueta, una unidad, un tipo y cómo se dibuja.
 
 Los perfiles son **datos, no código** — ficheros JSON en `lib/core/snmp/profiles/sources/`.
 Están en el core y no en el módulo porque **qué es un dispositivo** no es asunto de un
-check: un host lleva sus perfiles igual que lleva su dirección, y quien los lee es la
-resolución host-céntrica, no el bucle de comprobaciones:
+check: un dispositivo lleva sus perfiles igual que lleva su dirección, y quien los lee es la
+resolución centrada en el dispositivo, no el bucle de comprobaciones:
 
 ```json
 {
@@ -1287,7 +1287,7 @@ importaciones por URL pasan por el guard SSRF `validate_external_url()`. Ver
 
 ## 🌡️ temperature — Sensores Térmicos
 
-Monitoriza sensores de temperatura del sistema leyendo `/sys/class/thermal/*` en el host vinculado vía `ModuleBase.device_exec`. Es **host-aware**: el sensor se lee en local o por SSH según el host del registro.
+Monitoriza sensores de temperatura del sistema leyendo `/sys/class/thermal/*` en el dispositivo vinculado vía `ModuleBase.device_exec`. Es **consciente del dispositivo**: el sensor se lee en local o por SSH según el dispositivo del registro.
 
 **Plataforma:** Linux (**solo Linux**)
 
@@ -1367,7 +1367,7 @@ Comprueba que las URLs responden con el código HTTP esperado.
 | `timeout` | int | 15 | Timeout por defecto de la petición (global) |
 | `list.*.enabled` | bool | `true` | Habilitar monitorización de esta URL |
 | `list.*.label` | string | `""` | Nombre mostrado en la UI. Si está vacío, se usa la clave del ítem |
-| `list.*.server` | string | `""` | Host/dirección base. Si está vacío, se usa la clave del ítem o el host vinculado (`__device_profile__` `http`) |
+| `list.*.server` | string | `""` | Host/dirección base. Si está vacío, se usa la clave del ítem o el dispositivo vinculado (`__device_profile__` `http`) |
 | `list.*.path` | string | `""` | Ruta a añadir a la URL base (p. ej. `/health`) |
 | `list.*.scheme` | string | `https` | Esquema: `http` o `https` |
 | `list.*.port` | int | 0 | Puerto; `0` (en blanco) usa el estándar del esquema |
@@ -1383,7 +1383,7 @@ Comprueba que las URLs responden con el código HTTP esperado.
 | `list.*.auth_user` | string | `""` | Usuario para auth básica |
 | `list.*.auth_password` | string | `""` | Contraseña para auth básica (**cifrada en disco**) |
 
-Es **host-aware** (el ítem puede vincularse a un host del registro; admite `__credential__` `web_auth` reutilizable).
+Es **consciente del dispositivo** (el ítem puede vincularse a un dispositivo del registro; admite `__credential__` `web_auth` reutilizable).
 
 **Flujo:** `urllib.request` (stdlib de Python) → compara el código HTTP real con el esperado (y opcionalmente el contenido). Soporta HTTP y HTTPS sin dependencias externas.
 
@@ -1399,7 +1399,7 @@ autentica con una credencial **`proxmox_auth`** reutilizable (API token o usuari
 
 | Clave | Tipo | Por defecto | Descripción |
 | --- | --- | --- | --- |
-| `list.*.host` | string | `""` | Host/IP del nodo Proxmox (puede vincularse a un host del registro) |
+| `list.*.host` | string | `""` | Host/IP del nodo Proxmox (puede vincularse a un dispositivo del registro) |
 | `list.*.port` | int | 8006 | Puerto de la API |
 | `list.*.verify_ssl` | bool | false | Verificar el certificado TLS |
 | `list.*.auth_method` | string | `token` | `token` (API token) o `password` (usuario/contraseña) |
@@ -1426,7 +1426,7 @@ Admite provisioning asistido de la credencial vía SSH (`provision_token`).
 
 Monitoriza un cluster **keepalived (VRRP)**: estado del **servicio** por nodo, **qué nodo
 tiene la VIP**, detección de **split-brain** y **prioridad** (weight). Es un módulo
-**multi-bind** (multi-nodo): un ítem = un cluster, con varios nodos (cada uno un host del
+**multi-bind** (multi-nodo): un ítem = un cluster, con varios nodos (cada uno un dispositivo del
 registro) y su peso VRRP.
 
 **Plataforma:** Linux (los nodos se consultan por SSH)
@@ -1435,7 +1435,7 @@ registro) y su peso VRRP.
 | --- | --- | --- | --- |
 | `list.*.vip` | string | `""` | IP virtual (VIP) a vigilar |
 | `list.*.router_id` | int | 0 | `virtual_router_id` VRRP del grupo |
-| `list.*.vip_host_uid` | string | `""` | Host desde el que verificar quién tiene la VIP |
+| `list.*.vip_device_uid` | string | `""` | Dispositivo desde el que verificar quién tiene la VIP |
 | `list.*.__member_field__` | int | 100 | Prioridad (weight) VRRP declarada por nodo miembro |
 | `list.*.check_service` | bool | true | Servicio keepalived activo en cada nodo |
 | `list.*.check_vip` | bool | true | Exactamente un nodo tiene la VIP (detecta split-brain) |

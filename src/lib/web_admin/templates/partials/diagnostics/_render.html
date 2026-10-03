@@ -198,7 +198,7 @@ function _dgNetworkCard(n) {
             : `<span class="badge text-bg-secondary"><i class="bi bi-unlock me-1"></i>HTTP</span>`;
     const body = _dgRows([
         [t('diag_net_scheme'), n.scheme || '—', t('diag_net_scheme_tt')],
-        [t('diag_net_host'), n.device || '—'],
+        [t('diag_net_host'), n.host || '—'],
         [t('diag_net_client'), n.client_ip || '—', t('diag_net_client_tt')],
         [t('diag_net_proxies'), n.proxy_count === 0 ? t('diag_net_direct') : n.proxy_count,
          t('diag_net_proxies_tt')],

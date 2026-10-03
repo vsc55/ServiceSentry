@@ -76,13 +76,9 @@ HOME_PAGES = (
                          'label_key': 'tab_dcim_inventory'},
                         {'slug': 'board', 'icon': 'bi-speedometer2', 'kind': '', 'action': '',
                          'label_key': 'tab_dcim_board'},
-                        {'slug': 'catalog', 'icon': 'bi-journal-text', 'kind': '', 'action': '',
-                         'label_key': 'tab_dcim_catalog'},
-                        # Entre el catálogo y el inventario: lo que de verdad se compra. Al
-                        # lado del catálogo y no del inventario a propósito — se abre cuando se
-                        # decide qué se compra, no cuando se monta un armario.
-                        {'slug': 'builds', 'icon': 'bi-boxes', 'kind': '', 'action': '',
-                         'label_key': 'tab_dcim_builds'},
+                        # Los modelos y las plantillas estuvieron aquí: son datos de referencia
+                        # —qué se puede comprar, qué se compra de verdad— y se consultan desde
+                        # muchos sitios, así que son entradas del Catálogo (PANEL_TABS).
                         # El cableado, fuera de su armario. Dentro de un rack se contesta
                         # «qué sale de aquí»; aquí se contesta «dónde está el cable C-014» y
                         # «cuántos latiguillos de Cat 6A hay puestos», que obligaban a saber el
@@ -131,11 +127,32 @@ HOME_PAGES = (
 # template cannot sort by a string it is about to look up.
 #
 # Ordering is not declared here for the same reason: whoever renders knows the language.
+#
+# `group` says which of the two sidebar groups a tab is drawn in — `catalog`, the organisation's
+# registers (what devices it has and how to reach them), or `system` (the default), the platform
+# itself. Same two words a declared section's `placement` uses, so a core tab and a core package's
+# section are filed by one rule.
 PANEL_TABS = (
     {'id': 'services',    'icon': 'bi-hdd-rack',         'label_key': 'tab_services'},
     {'id': 'modules',     'icon': 'bi-puzzle',           'label_key': 'tab_modules'},
-    {'id': 'servers',     'icon': 'bi-hdd-network',      'label_key': 'tab_infrastructure'},
-    {'id': 'credentials', 'icon': 'bi-key',              'label_key': 'tab_credentials'},
+    # The device registry is not a tab any more: its list and its "new device" live in
+    # Infrastructure, beside the state of each device. What it classified them with — the
+    # classes and the clusters — are reference data, each a catalogue entry of its own.
+    {'id': 'devtypes',    'icon': 'bi-tags',             'label_key': 'tab_devtypes',
+     'group': 'catalog'},
+    {'id': 'clusters',    'icon': 'bi-diagram-3',        'label_key': 'subtab_clusters',
+     'group': 'catalog'},
+    # The models of equipment and the purchase templates built from them. Views of the physical
+    # inventory until it was clear they are reference data: what can be bought and what is
+    # actually bought, consulted from every rack and every device rather than being a place in
+    # the building. Their code is still the inventory's and draws through `renderDcim`, which
+    # paints whichever of the three panes is on screen.
+    {'id': 'models',      'icon': 'bi-journal-text',     'label_key': 'tab_models',
+     'group': 'catalog'},
+    {'id': 'builds',      'icon': 'bi-boxes',            'label_key': 'tab_dcim_builds',
+     'group': 'catalog'},
+    {'id': 'credentials', 'icon': 'bi-key',              'label_key': 'tab_credentials',
+     'group': 'catalog'},
     {'id': 'status',      'icon': 'bi-activity',         'label_key': 'tab_status'},
     {'id': 'events',      'icon': 'bi-bell',             'label_key': 'tab_events'},
     {'id': 'ipban',       'icon': 'bi-slash-circle',     'label_key': 'tab_ipban'},

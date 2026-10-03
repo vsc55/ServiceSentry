@@ -65,20 +65,20 @@ class TestWhatANarrowedRunSees:
 
     def test_with_one_it_sees_that_machines_items_only(self):
         w = _watchful()
-        w._host_scope = 'h1'
+        w._device_scope = 'h1'
         assert sorted(w.get_conf('list', {})) == ['a']
 
     def test_an_item_bound_to_nothing_is_not_this_machines(self):
-        """`c` has no host. A collection of h1 that swept it in would be the button quietly
+        """`c` has no device. A collection of h1 that swept it in would be the button quietly
         running a check the operator did not ask about — and, worse, one whose device is
         somewhere else entirely."""
         w = _watchful()
-        w._host_scope = 'h1'
+        w._device_scope = 'h1'
         assert 'c' not in w.get_conf('list', {})
 
     def test_a_machine_with_nothing_bound_sees_nothing(self):
         w = _watchful()
-        w._host_scope = 'nobody'
+        w._device_scope = 'nobody'
         assert w.get_conf('list', {}) == {}
 
     def test_the_collection_it_narrows_is_the_one_the_schema_declares(self):
@@ -92,7 +92,7 @@ class TestWhatANarrowedRunSees:
         """The module whose collection is not called `list`, which is the whole reason the
         name is read from the schema rather than assumed."""
         w = _watchful('snmp', 'servers')
-        w._host_scope = 'h2'
+        w._device_scope = 'h2'
         assert sorted(w.get_conf('servers', {})) == ['b']
 
 
@@ -102,27 +102,27 @@ class TestWhatItMustNotNarrow:
 
     def test_a_modules_own_setting_is_not_an_item(self):
         w = _watchful(threads=7)
-        w._host_scope = 'h1'
+        w._device_scope = 'h1'
         assert w.get_conf('threads', 0) == 7
 
     def test_reading_one_field_of_an_item_still_works(self):
         """`['list', 'b', 'label']` is a module asking about something it has already chosen —
         and modules do read fields of items they are not iterating."""
         w = _watchful()
-        w._host_scope = 'h1'
+        w._device_scope = 'h1'
         assert w.get_conf(['list', 'b', 'label'], '') == 'B'
 
     def test_the_whole_module_configuration_is_not_a_collection(self):
         """`get_conf()` with no key returns the module's entire config. It is not the item
         list, so it is not filtered — and nothing may depend on it being."""
         w = _watchful()
-        w._host_scope = 'h1'
+        w._device_scope = 'h1'
         got = w.get_conf()
         assert set(got.get('list') or {}) == {'a', 'b', 'c'}
 
     def test_a_scope_of_only_whitespace_is_no_scope(self):
         w = _watchful()
-        w._host_scope = '   '
+        w._device_scope = '   '
         assert w.device_scope == ''
         assert sorted(w.get_conf('list', {})) == ['a', 'b', 'c']
 
@@ -136,10 +136,10 @@ class TestWhereTheScopeLives:
         then prunes them.
         """
         one, two = _watchful(), _watchful()
-        one._host_scope = 'h1'
+        one._device_scope = 'h1'
         assert sorted(two.get_conf('list', {})) == ['a', 'b', 'c']
         assert two.device_scope == ''
-        assert not hasattr(one._monitor, '_host_scope')
+        assert not hasattr(one._monitor, '_device_scope')
 
     def test_every_module_gets_it_without_knowing_about_it(self):
         """The point of putting it in `get_conf`: no watchful mentions a scope anywhere, so

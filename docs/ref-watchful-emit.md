@@ -50,7 +50,7 @@ error/excepción de casi todos los demás.
 
 ### `name=` no es opcional
 
-Sin él, el monitor cae a `_item_label()`, que resuelve **el host enlazado** vía `device_uid`. Eso
+Sin él, el monitor cae a `_item_label()`, que resuelve **el dispositivo enlazado** vía `device_uid`. Eso
 es una cosa distinta de la etiqueta del check.
 
 **Once sitios lo omitían.** Consecuencia: la misma comprobación aparecía en la columna Item con
@@ -83,7 +83,7 @@ apaga la ruta del monitor; ese `send_message` explícito es **la única** notifi
 |---|---|---|
 | Re-avisar cuando cambia la **razón**, no solo el estado | `change_msg=<razón interna>` → usa `check_status_custom` | `datastore`, `hddtemp` |
 | **Varios avisos** en un mismo ciclo | imposible con `_emit`; emparejar a mano | `service_status` |
-| Un **nombre** propio distinto del host resuelto | `name=` | la mayoría |
+| Un **nombre** propio distinto del dispositivo resuelto | `name=` | la mayoría |
 
 El tercero ya no obliga a B: A también acepta `name=`. Quedan dos motivos reales.
 
@@ -181,7 +181,7 @@ por ciclo (B).** Y pon `name=` siempre, en los dos.
 
 | Test | Impide |
 |---|---|
-| `test_automatic_results_carry_an_explicit_name` | Un resultado sin `name=`, que se etiquetaría con el host |
+| `test_automatic_results_carry_an_explicit_name` | Un resultado sin `name=`, que se etiquetaría con el dispositivo |
 | `test_other_data_name_is_not_mistaken_for_the_real_one` | La confusión `other_data['name']` |
 | `test_manual_emit_is_the_exception_not_the_rule` | Una deriva silenciosa hacia el emparejamiento a mano |
 

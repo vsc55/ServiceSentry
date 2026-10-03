@@ -324,7 +324,7 @@ class TestAskingTheDeviceWhatItIs:
         res = acts.detect_profiles({'host': '10.0.0.1'})
         assert res['ok'] is False and res['items'] == []
 
-    def test_without_a_host_nothing_is_asked(self, acts):
+    def test_without_a_device_nothing_is_asked(self, acts):
         res = acts.detect_profiles({'host': '   '})
         assert res['ok'] is False and acts._got == []
 
@@ -742,7 +742,7 @@ class TestWhatTheAssignmentActuallyReads:
         res = acts.test_profiles({**cfg, 'device_profiles': ''})
         assert res['ok'] is False and res.get('message')
 
-    def test_without_a_host_nothing_is_asked(self, acts, tmp_path):
+    def test_without_a_device_nothing_is_asked(self, acts, tmp_path):
         cfg = self._prof(tmp_path)
         res = acts.test_profiles({**cfg, 'host': '  '})
         assert res['ok'] is False and acts._got == []

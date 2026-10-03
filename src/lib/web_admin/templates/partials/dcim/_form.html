@@ -150,8 +150,8 @@ const _DCIM_KIND = {
         // estaba en el formulario, así que el rack entero salía gris. Tercera vez que aparece
         // esta misma forma de fallo en esta sección: una columna que nadie puede escribir vale
         // siempre su valor por defecto, y el código que la respeta parece que funciona.
-        {name: 'device_uid', zone: 'what', label: 'dcim_host', tt: 'dcim_item_host_tt',
-         list: 'devices', w: '16rem'},
+        {name: 'device_uid', zone: 'what', label: 'dcim_device', tt: 'dcim_item_device_tt',
+         list: 'devices', w: '16rem', create: 'device'},
         // Y con un botón que se lo pregunta al dispositivo: un número de serie está en una
         // pegatina detrás del rack, y el equipo lo dice por SNMP si su perfil lo publica.
         {name: 'serial', zone: 'buy', tt: 'dcim_serial_tt', label: 'dcim_serial', w: '10rem', said: 'serial'},
@@ -340,7 +340,15 @@ function _dcimFormBody() {
                 <button class="btn btn-secondary" type="button"
                         title="${escAttr(t('dcim_said_ask'))}"
                         onclick="_dcimSaidAsk(${i},${jsStr(fld.said)})">
-                    <i class="bi bi-magic"></i></button></div>` : caja}</label>`;
+                    <i class="bi bi-magic"></i></button></div>`
+            : fld.create === 'device' && _dcimMay('devices_edit')
+                ? `<div class="input-group input-group-sm">${caja}
+                <button class="btn btn-secondary" type="button"
+                        title="${escAttr(t('dcim_device_create_tt'))}"
+                        aria-label="${escAttr(t('dcim_device_create_tt'))}"
+                        onclick="_dcimDeviceCreate(${i})">
+                    <i class="bi bi-plus-circle"></i></button></div>`
+            : caja}</label>`;
     };
     // Un `<datalist>` por lista y no por campo: son cientos de opciones, y una copia por
     // campo serían cientos por cada uno.
@@ -586,8 +594,8 @@ function _dcimPickTake(idx, uid, nombre) {
  *  cuenta cuál de los tres es «el» equipo. */
 async function _dcimSaidAsk(idx, rol) {
     const spec = _DCIM_KIND[(_dcimForm || {}).kind];
-    const device = _dcimSaidHost(spec);
-    if (!device) return showToast(t('dcim_said_no_host'), 'warning', 6000);
+    const device = _dcimSaidDevice(spec);
+    if (!device) return showToast(t('dcim_said_no_device'), 'warning', 6000);
     // Lo tecleado, guardado ANTES de abrir nada: el cuadro de las opciones y el formulario son
     // el mismo modal, así que enseñar el primero borra el marcado del segundo — y con él las
     // ocho casillas que se llevaban escritas. Un formulario que se vacía por preguntar algo es
@@ -619,6 +627,33 @@ async function _dcimSaidAsk(idx, rol) {
             </button>`).join('')}</div>`, 'primary', '', 'fit');
 }
 
+/** Dar de alta en el registro el dispositivo de este equipo, y dejarlo enganchado.
+ *
+ *  Quien monta un servidor en un rack es quien sabe que existe, y hasta ahora tenía que ir a
+ *  Infraestructura a darlo de alta y volver a buscarlo en la lista. Se crea con el nombre del
+ *  equipo y nada más —cómo se le llega y qué lo vigila se dicen en su ficha, que es donde se
+ *  configura— y se engancha en la casilla sin guardar el formulario: guardar sigue siendo cosa
+ *  de quien lo está rellenando. */
+async function _dcimDeviceCreate(idx) {
+    _dcimFormSnap();
+    const f = _dcimForm;
+    if (!f) return;
+    const row = f.row || {};
+    if (String(row.device_uid || '').trim())
+        return showToast(t('dcim_device_create_has'), 'warning', 6000);
+    const nombre = String(row.label || '').trim();
+    if (!nombre) return showToast(t('dcim_device_create_name'), 'warning', 6000);
+    const r = await _dcimSend('POST', '/api/v1/devices', {name: nombre});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    const uid = String((r.data || {}).uid || '');
+    if (!uid) return;
+    _dcimDevices = (_dcimDevices || []).concat([{uid, name: nombre, address: '', device_type: ''}])
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    row.device_uid = uid;
+    showToast(tf('dcim_device_created', nombre), 'success');
+    _dcimFormDraw();
+}
+
 /** Lo que hay tecleado ahora mismo, guardado en el borrador.
  *
  *  El formulario es **sin estado**: las casillas se leen del DOM al guardar, que es lo correcto
@@ -635,7 +670,7 @@ function _dcimFormSnap() {
 
 /** Qué máquina hay elegida AHORA en el formulario, que no tiene por qué ser la guardada: se
  *  engancha el dispositivo y se le pregunta el número en el mismo rato, sin guardar en medio. */
-function _dcimSaidHost(spec) {
+function _dcimSaidDevice(spec) {
     const i = (spec || {}).fields.findIndex(f => f.name === 'device_uid');
     const caja = i >= 0 ? document.getElementById('dcim-f-' + i) : null;
     return caja ? String(caja.value || '').trim() : '';
@@ -677,7 +712,7 @@ const _DCIM_LISTS = {
     // máquinas: el uid no se teclea y el nombre cambia.
     rows: {id: 'dcim-rows', rows: () => ((_dcpFeat || {}).rows || []), pick: true,
            value: f => f.uid, label: f => f.name || f.uid},
-    devices: {id: 'dcim-devices', rows: () => _dcimHosts || [], pick: true,
+    devices: {id: 'dcim-devices', rows: () => _dcimDevices || [], pick: true,
             value: h => h.uid, label: h => [h.name, h.address].filter(Boolean).join(' · ')},
     // Las plantillas. Se ELIGEN por nombre y se guardan por uid, como las máquinas y las filas.
     builds: {id: 'dcim-builds', rows: () => _dcimBuildOpts || [], pick: true,
@@ -759,8 +794,8 @@ function _dcimNameOf(uid, fila) {
 }
 
 /** El nombre de una máquina, para enseñarlo donde solo hay un uid. */
-function _dcimHostName(uid) {
-    const h = (_dcimHosts || []).find(x => x.uid === uid);
+function _dcimDeviceName(uid) {
+    const h = (_dcimDevices || []).find(x => x.uid === uid);
     return h ? (h.name || h.uid) : String(uid || '');
 }
 
@@ -785,7 +820,7 @@ function _dcimItemName(item) {
     // dijo ni el modelo. Y el uid, recortado: como último recurso sirve para distinguir dos
     // filas, que es lo único que hace, y entero se come la columna.
     return i.label
-        || (i.device_uid ? _dcimHostName(i.device_uid) : '')
+        || (i.device_uid ? _dcimDeviceName(i.device_uid) : '')
         || String(i.type_name || '')
         || (i.role ? t('dcim_role_' + i.role) : '')
         || String(i.uid || '').slice(0, 8);

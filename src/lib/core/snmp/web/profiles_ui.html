@@ -1273,7 +1273,7 @@ FIELD_PICKERS['snmp|servers|device_profiles'] = {
     // A function because the module's i18n block is not loaded when this line runs.
     title: () => _snmpT('device_profiles_pick', 'Device profiles'),
     // `...a`, and it is not a style choice. The renderer that draws a check calls these
-    // with three arguments; the HOST modal calls them with a fourth — a function that reads
+    // with three arguments; the DEVICE modal calls them with a fourth — a function that reads
     // the draft on screen, because on that pane the device being tested may never have been
     // saved and its address lives in the form. An arrow that names three parameters silently
     // drops it, and every button in here that speaks to the device answered "no host".
@@ -1361,7 +1361,7 @@ async function _snmpTestRun(btn) {
     const body = _snmpTestEl('snmpTestBody');
     if (body) body.innerHTML = _snmpTestStepsHtml([]);
     const done = (typeof ssBtnBusy === 'function') ? ssBtnBusy(btn) : (() => {});
-    _snmpTestLog('run', {device: cfg.device || (cfg._host && cfg._host.address) || '',
+    _snmpTestLog('run', {device: cfg.device || (cfg._device && cfg._device.address) || '',
                          profiles: cfg.device_profiles || ''});
 
     const fail = (msg) => {
@@ -1433,7 +1433,7 @@ function _snmpTestReport(d) {
         readings: d.values, walked: d.sweep.walked, uncaptured: d.sweep.uncaptured,
     });
     if (typeof console === 'undefined' || !console.table) return;
-    console.groupCollapsed('[snmp-test] ' + (d.sysname || d.device || ''));
+    console.groupCollapsed('[snmp-test] ' + (d.sysname || d.host || ''));
     console.table((d.metrics || []).map(m => ({
         profile: m.profile, metric: m.key, oid: m.oid, rows: m.rows_total,
         value: (m.rows[0] || {}).value, raw: (m.rows[0] || {}).raw,
@@ -1494,7 +1494,7 @@ function _snmpTestRender() {
     const body = _snmpTestEl('snmpTestBody');
     if (!d || !body) return;
     const dev = _snmpTestEl('snmpTestDevice');
-    if (dev) dev.textContent = d.sysname || d.device || '';
+    if (dev) dev.textContent = d.sysname || d.host || '';
 
     // ── The summary: how much of the device this assignment is reading ──────
     const sum = _snmpTestEl('snmpTestSummary');

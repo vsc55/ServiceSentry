@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/raid — host-centric RAID (mdstat) monitoring.
+"""Tests for watchfuls/raid — device-centric RAID (mdstat) monitoring.
 
-Each check binds to a host (``device_uid``); ``/proc/mdstat`` is read on that host
+Each check binds to a device (``device_uid``); ``/proc/mdstat`` is read on that device
 via ``device_exec`` (local or over SSH) and parsed by ``RaidMdstat.parse_lines``.
 ``device_exec`` is mocked here so no real command/SSH runs; the parser runs for
 real against canned mdstat text.
@@ -21,7 +21,7 @@ class _FakeStore:
         return self._h.get(uid)
 
 
-def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+def _device(uid='h1', os='linux', kind='remote', maintenance=False):
     return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
             'maintenance': maintenance,
             'profiles': {'ssh': {'ssh_user': 'root'}}}
@@ -30,7 +30,7 @@ def _host(uid='h1', os='linux', kind='remote', maintenance=False):
 def _watchful(items, devices=None):
     from watchfuls.raid import Watchful
     mm = create_mock_monitor({'watchfuls.raid': {'list': items}})
-    mm._devices_store = _FakeStore(devices or {'h1': _host()})
+    mm._devices_store = _FakeStore(devices or {'h1': _device()})
     return Watchful(mm)
 
 
@@ -91,11 +91,11 @@ class TestRaidDefaults:
         assert md['threads'] == 5 and md['timeout'] == 30
         assert md['mdstat_path'] == '/proc/mdstat'
 
-    def test_schema_is_host_centric(self):
+    def test_schema_is_device_centric(self):
         from watchfuls.raid import Watchful
         sch = Watchful.ITEM_SCHEMA
         assert '__device_profile__' in sch and sch['__device_profile__']['key'] == 'ssh'
-        assert 'local' not in sch['__module__']        # dropped: use a local host
+        assert 'local' not in sch['__module__']        # dropped: use a local device
         assert 'host' not in sch['list']               # no inline SSH on the check
 
 
@@ -137,18 +137,18 @@ class TestRaidCheck:
         he.assert_not_called()
         assert len(result.items()) == 0
 
-    def test_non_linux_host_reports_unsupported(self):
+    def test_non_linux_device_reports_unsupported(self):
         w = _watchful({'1': {'enabled': True, 'label': 'WinBox', 'device_uid': 'h1'}},
-                      devices={'h1': _host(os='windows')})
+                      devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec') as he:
             items = w.check().list
         he.assert_not_called()                     # no mdstat attempt off-Linux
         assert items['1']['status'] is False
         assert 'Linux' in items['1']['message']
 
-    def test_maintenance_host_skipped(self):
+    def test_maintenance_device_skipped(self):
         w = _watchful({'1': {'enabled': True, 'device_uid': 'h1'}},
-                      devices={'h1': _host(maintenance=True)})
+                      devices={'h1': _device(maintenance=True)})
         with patch.object(w, 'device_exec') as he:
             result = w.check()
         he.assert_not_called()
@@ -165,7 +165,7 @@ class TestRaidCheck:
         from watchfuls.raid import Watchful
         mm = create_mock_monitor({'watchfuls.raid': {'enabled': False,
                                                       'list': {'1': {'enabled': True, 'device_uid': 'h1'}}}})
-        mm._devices_store = _FakeStore({'h1': _host()})
+        mm._devices_store = _FakeStore({'h1': _device()})
         w = Watchful(mm)
         with patch.object(w, 'device_exec') as he:
             result = w.check()

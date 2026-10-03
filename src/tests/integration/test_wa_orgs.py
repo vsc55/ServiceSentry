@@ -77,12 +77,12 @@ def grupo(client):
                        json={'site_uid': site, 'name': 'Sala 1'}).get_json()['uid']
     rack = client.post('/api/v1/dcim/racks',
                        json={'room_uid': room, 'name': 'R1', 'u_height': 42}).get_json()['uid']
-    host = client.post('/api/v1/devices', json={'name': 'db03', 'address': '10.0.0.3'})
-    host = (host.get_json() or {}).get('uid', '')
+    device = client.post('/api/v1/devices', json={'name': 'db03', 'address': '10.0.0.3'})
+    device = (device.get_json() or {}).get('uid', '')
     client.post('/api/v1/orgs/owner', json={'scope': 'rack', 'uid': rack, 'org_uid': it})
-    if host:
-        client.post('/api/v1/orgs/owner', json={'scope': 'device', 'uid': host, 'org_uid': b})
-    return {'it': it, 'b': b, 'site': site, 'room': room, 'rack': rack, 'host': host}
+    if device:
+        client.post('/api/v1/orgs/owner', json={'scope': 'device', 'uid': device, 'org_uid': b})
+    return {'it': it, 'b': b, 'site': site, 'room': room, 'rack': rack, 'device': device}
 
 
 class TestSeFichaLoQueAlguienDeclara:
@@ -94,8 +94,8 @@ class TestSeFichaLoQueAlguienDeclara:
         """Dos paquetes distintos fichando en el mismo sitio: es la razón de todo el traslado."""
         dicho = admin._orgs_store.said()
         assert dicho[('rack', grupo['rack'])] == grupo['it']
-        if grupo['host']:
-            assert dicho[('device', grupo['host'])] == grupo['b']
+        if grupo['device']:
+            assert dicho[('device', grupo['device'])] == grupo['b']
 
     def test_y_un_ambito_que_nadie_declara_se_rechaza(self, client, grupo):
         """Una errata escribiría una fila que nada podrá volver a leer: no la ve ninguna

@@ -19,10 +19,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Watchful module to monitor system services, on the bound host.
+"""Watchful module to monitor system services, on the bound device.
 
-Host-centric: each check binds to a host (``device_uid``).  The service state is
-read on that host via :meth:`ModuleBase.device_exec` — locally or over SSH — using
+Device-centric: each check binds to a device (``device_uid``).  The service state is
+read on that device via :meth:`ModuleBase.device_exec` — locally or over SSH — using
 an OS-appropriate command (``systemctl`` on Linux, ``sc`` on Windows,
 ``launchctl`` on macOS, ``service`` on FreeBSD).  Optional auto-remediation
 starts/stops the service to restore the expected state.  ``discover`` lists the
@@ -75,7 +75,7 @@ def _detect_linux_init() -> str:
 
 
 class Watchful(ServiceDiscovery, ModuleBase):
-    """Monitor service state per host (running/stopped), with optional remediation."""
+    """Monitor service state per device (running/stopped), with optional remediation."""
 
     ITEM_SCHEMA = _SCHEMA
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
@@ -106,7 +106,7 @@ class Watchful(ServiceDiscovery, ModuleBase):
         if item.get('_device_maintenance') or not item.get('enabled', True):
             return
         # The item key is a stable UID; the message uses the editable 'label'
-        # (e.g. "host - service"), falling back to the service/unit name.  The
+        # (e.g. "device - service"), falling back to the service/unit name.  The
         # status is always tracked under the key so it stays stable across edits.
         service_name = (item.get('service', '') or '').strip() or key
         label = (item.get('label', '') or '').strip() or service_name

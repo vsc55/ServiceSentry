@@ -74,7 +74,7 @@ function _infraMapRefresh() {
 const _NET_SVG = 'infraNetSvg';
 const _MAP = {
     COL: 200, BOX_W: 178, BOX_H: 50, NET_H: 34, ROUTER_H: 52,
-    Y_CLOUD: 24, Y_ROUTER: 48, Y_NET: 152, Y_HOST: 222, HOST_GAP: 12, PAD: 16,
+    Y_CLOUD: 24, Y_ROUTER: 48, Y_NET: 152, Y_DEVICE: 222, DEVICE_GAP: 12, PAD: 16,
 };
 
 /** The tree, before anything is drawn.
@@ -151,9 +151,9 @@ function _infraMapLayout(map) {
         c.boxes = c.members.map((uid, k) => {
             const b = {uid, node: byUid.get(uid) || {uid, name: uid},
                        x: x + (_MAP.COL - _MAP.BOX_W) / 2,
-                       y: _MAP.Y_HOST + k * (_MAP.BOX_H + _MAP.HOST_GAP),
+                       y: _MAP.Y_DEVICE + k * (_MAP.BOX_H + _MAP.DEVICE_GAP),
                        addr: claim.get(uid) || '',
-                       solo: solo.get(uid) || [], kind: 'host'};
+                       solo: solo.get(uid) || [], kind: 'device'};
             boxes.push(b);
             return b;
         });
@@ -188,8 +188,8 @@ function _infraMapLayout(map) {
                                    w: _CLOUD_W, h: _MAP.BOX_H - 8}]),
                               {w: _MAP.BOX_W, h: _MAP.BOX_H},
                               {pad: _MAP.PAD, width: wide,
-                               height: _MAP.Y_HOST + Math.max(1, ...cols.map(
-                                   c => c.boxes.length)) * (_MAP.BOX_H + _MAP.HOST_GAP) + 16});
+                               height: _MAP.Y_DEVICE + Math.max(1, ...cols.map(
+                                   c => c.boxes.length)) * (_MAP.BOX_H + _MAP.DEVICE_GAP) + 16});
 
     const at = new Map(boxes.map(b => [b.uid, b]));
     // The ways out a machine states for itself, which is the one thing on this picture a
@@ -398,7 +398,7 @@ function _infraMapBox(p) {
     // report. A router hangs from nothing, so for one of those the first is all there is.
     const addr = _infraMapAddr(p);
     return `<g class="ss-grab" data-open="${escAttr(p.uid)}"
-             onpointerenter="_infraMapHover('host',${jsStr(p.uid)})"
+             onpointerenter="_infraMapHover('device',${jsStr(p.uid)})"
              onpointerleave="_infraMapHover('','')">
         <rect x="${p.x}" y="${p.y}" width="${_MAP.BOX_W}" height="${h}" rx="7"
               fill="${gw ? 'var(--bs-tertiary-bg)' : 'var(--bs-body-bg)'}"
@@ -674,7 +674,7 @@ function _infraMapPaint() {
  *  not its own — a machine's uid and a subnet are two namespaces, and `192.168.1.0/24` could
  *  in principle be a uid. */
 function _netKey(kind, id) {
-    if (kind === 'host') return String(id || '');
+    if (kind === 'device') return String(id || '');
     if (kind === 'net') return 'net:' + String(id || '');
     if (kind === 'cloud') return _NET_CLOUD;
     return '';
@@ -713,9 +713,9 @@ function _infraMapPanelHtml() {
     if (kind === 'wire') return _infraMapWireCard(_infraMapLayout(_infraMap || {}), +id);
     if (!kind || !_infraMap) return '';
     const L = _infraMapLayout(_infraMap);
-    if (kind === 'host') {
+    if (kind === 'device') {
         const p = L.at.get(id);
-        return p ? ssHostCard(p.node, id, {
+        return p ? ssDeviceCard(p.node, id, {
             hint: 'infra_map_node_hint',
             extra: p.solo.length ? [t('infra_map_solo_of'), p.solo.join(', ')] : null,
         }) : '';

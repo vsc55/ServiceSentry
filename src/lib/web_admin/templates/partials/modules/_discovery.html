@@ -232,10 +232,10 @@ function _renderDiscoverList() {
     // Read collection schema (reused for configured-set, render hints, and operators).
     // In the Servers (device) modal there is no path; resolve it from the module +
     // its collection so schema-driven hints (record type, subtitle, …) still apply.
-    const _hostColl = (_deviceChecks[_discoverDeviceMod] || {}).collection || 'list';
+    const _deviceColl = (_deviceChecks[_discoverDeviceMod] || {}).collection || 'list';
     const _colSch = _discoverDeviceMod
-        ? (ITEM_SCHEMAS[_discoverDeviceMod + '|' + _hostColl]
-           || ITEM_SCHEMAS['watchfuls.' + _discoverDeviceMod + '|' + _hostColl] || null)
+        ? (ITEM_SCHEMAS[_discoverDeviceMod + '|' + _deviceColl]
+           || ITEM_SCHEMAS['watchfuls.' + _discoverDeviceMod + '|' + _deviceColl] || null)
         : (_discoverPathStr ? (ITEM_SCHEMAS[_schemaKeyOf(_discoverPathStr)] || null) : null);
 
     // Schema-driven render hints — all module-specific knowledge lives in schema.json.
@@ -406,7 +406,7 @@ function _discoveryItemKey(colSch, name, displayName) {
     return k || name;
 }
 
-// Build a display label from __discovery_label_template__.  Tokens: {host},
+// Build a display label from __discovery_label_template__.  Tokens: {device},
 // {name}, {display_name}, {type}, plus any {field} resolved from the item's
 // fields (e.g. {db_type}, {server_name}, {url}).  A dangling " - " left by an
 // empty token is collapsed.
@@ -423,7 +423,7 @@ function _discoveryLabel(colSch, device, name, displayName, typeInfo, fields) {
 function _addDiscoveredService(serviceName, category, typeInfo, valueInfo, displayName) {
     // Servers modal (device mode): add the discovered item as a device check.
     if (_discoverDeviceMod) {
-        _addDiscoveredHostCheck(serviceName, displayName, typeInfo, valueInfo);
+        _addDiscoveredDeviceCheck(serviceName, displayName, typeInfo, valueInfo);
         return;
     }
     if (!_discoverPathStr) return;

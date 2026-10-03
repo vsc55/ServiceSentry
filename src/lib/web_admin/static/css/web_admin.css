@@ -341,7 +341,7 @@ html.ss-nocss body { visibility: visible; }
 .ss-card-band-top    { border-bottom: 1px solid var(--bs-border-color); }
 .ss-card-band-bottom { border-top:    1px solid var(--bs-border-color); }
 
-/* ── Collapsible card header (host modal, etc.) ───────────────────────────── */
+/* ── Collapsible card header (device modal, etc.) ───────────────────────────── */
 .ss-collapse-head { cursor: pointer; user-select: none; }
 .ss-collapse-caret { transition: transform .2s ease; }
 .ss-collapse-head.collapsed .ss-collapse-caret { transform: rotate(-90deg); }
@@ -527,7 +527,7 @@ html.ss-nocss body { visibility: visible; }
     -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
             mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
 }
-/* Log tables (host/cluster) loading/empty state: an OVERLAY over the body area (below the
+/* Log tables (device/cluster) loading/empty state: an OVERLAY over the body area (below the
    header) instead of stretching the table — so the header keeps its natural height and nothing
    overflows. Centered vertically + horizontally; transparent so the header shows through. */
 .sl-log-wrap {
@@ -1042,12 +1042,12 @@ html.ss-nocss body { visibility: visible; }
 #eventRuleModal .evm-content > .tab-pane { overflow-y: auto; overflow-x: hidden; }
 #eventRuleModal .evm-content > .tab-pane.show.active { height: 100%; display: flex; flex-direction: column; }
 
-/* Host modal: flex-fill body so the General "Description" textarea and the Logs
+/* Device modal: flex-fill body so the General "Description" textarea and the Logs
    table stretch to the bottom as the (resizable) dialog grows. */
-#hostModal .modal-content { width: min(1500px, 96vw); }
-#hostModal .modal-body { display: flex; flex-direction: column; overflow: hidden; }
-#hostModal .gm-tab-content { flex: 1 1 auto; min-height: 0; }
-#hostModal .gm-tab-content > .tab-pane { overflow-y: auto; overflow-x: hidden; }
+#deviceModal .modal-content { width: min(1500px, 96vw); }
+#deviceModal .modal-body { display: flex; flex-direction: column; overflow: hidden; }
+#deviceModal .gm-tab-content { flex: 1 1 auto; min-height: 0; }
+#deviceModal .gm-tab-content > .tab-pane { overflow-y: auto; overflow-x: hidden; }
 
 /* User / Role / Group edit modals (gm-tab-content tab layout): flex-fill so their
    tab tables/lists (active sessions, permissions, assignments, roles, members…)

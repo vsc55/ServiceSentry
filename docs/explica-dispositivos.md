@@ -1,6 +1,6 @@
-# Hosts (modelo host-céntrico)
+# Dispositivos (modelo centrado en el dispositivo)
 
-Un **host** (servidor) es un objetivo que monitorizas — una **dirección** más sus
+Un **dispositivo** (servidor) es un objetivo que monitorizas — una **dirección** más sus
 **perfiles de conexión por protocolo** (SSH, SNMP, base de datos, HTTP…). La idea central:
 **definir la conexión de un servidor UNA sola vez** y que **todos los checks** de cualquier
 módulo la reutilicen por referencia (`device_uid`), en vez de re-introducir dirección y
@@ -10,28 +10,28 @@ Todo el subsistema vive en `lib/core/devices/` (parte de la capa fundacional, po
 conexión a un servidor es propiedad del *servidor*, no de un check concreto).
 
 > Los **campos** de cada protocolo se descubren de los módulos (`__device_profile__`) — ver
-> [explica-descubrimiento.md → Perfiles de host](explica-descubrimiento.md#5-perfiles-de-host-__device_profile__). La
+> [explica-descubrimiento.md → Perfiles de dispositivo](explica-descubrimiento.md#5-perfiles-de-dispositivo-__device_profile__). La
 > **referencia de esa meta-clave** está en [ref-schema-json.md](ref-schema-json.md) / [ref-modulos.md](ref-modulos.md).
 > La **UI y los endpoints** (sección Dispositivos) en [explica-web-admin.md → Dispositivos](explica-web-admin.md).
 
 ---
 
-## Qué es un host
+## Qué es un dispositivo
 
 | Pieza | Fichero | Rol |
 |---|---|---|
 | `DevicesStore` | `lib/core/devices/stores/devices.py` | Store relacional (tabla `devices`): dirección + `profiles` por protocolo; secretos (contraseñas SSH/DB, claves SNMPv3, tokens) **cifrados en reposo** (`secret_manager`) |
-| Catálogo de perfiles | `lib/core/devices/profiles.py` | El mapa **protocolo → campos** que la UI usa para pintar los formularios por-protocolo. `core_profiles()` es el registro de los que declara el **core** (SSH y los `HOST_PROFILE` de manifiesto), que sobrescriben a los de módulo del mismo nombre |
+| Catálogo de perfiles | `lib/core/devices/profiles.py` | El mapa **protocolo → campos** que la UI usa para pintar los formularios por-protocolo. `core_profiles()` es el registro de los que declara el **core** (SSH y los `DEVICE_PROFILE` de manifiesto), que sobrescriben a los de módulo del mismo nombre |
 | Resolución | `lib/core/devices/resolve.py` | Primitivas sin store: `device_profile_specs()` (normaliza `__device_profile__` **y le completa los campos del core**, incluido su `address_field`), `resolve_os()` |
 | SSH | `lib/core/devices/ssh_client.py` | Helpers SSH (paramiko, opcional): `connect_host`, `run_command`, `test_connection` |
-| Ejecución | `lib/core/devices/runner.py` | Ejecuta un comando en el host, **local o remoto por SSH** |
-| Sonda | `lib/core/devices/probe.py` | Resuelve un host **sin guardar** (el borrador del modal) para que el asistente pruebe lo que el admin acaba de teclear. Ejecutar el check en sí **no** es asunto de hosts: eso es `lib/modules/check_runner.py` |
-| Migración | `lib/core/devices/migrate.py` | Asistente inline→host (agrupar conexiones repetidas) |
+| Ejecución | `lib/core/devices/runner.py` | Ejecuta un comando en el dispositivo, **local o remoto por SSH** |
+| Sonda | `lib/core/devices/probe.py` | Resuelve un dispositivo **sin guardar** (el borrador del modal) para que el asistente pruebe lo que el admin acaba de teclear. Ejecutar el check en sí **no** es asunto de dispositivos: eso es `lib/modules/check_runner.py` |
+| Migración | `lib/core/devices/migrate.py` | Asistente inline→dispositivo (agrupar conexiones repetidas) |
 
-Un host declarado como **`remote`** lleva una conexión SSH (usuario + contraseña / fichero de
+Un dispositivo declarado como **`remote`** lleva una conexión SSH (usuario + contraseña / fichero de
 clave / clave en línea) para que los módulos que necesitan **ejecutar comandos** en el
 servidor (p.ej. `raid`) o **abrir un túnel** a través de él (p.ej. `datastore`) reutilicen las
-mismas credenciales definidas una vez en el host.
+mismas credenciales definidas una vez en el dispositivo.
 
 ### Qué es el dispositivo (`device_type`)
 
@@ -58,25 +58,25 @@ que conteste. SSH fue el primero en tenerlo y durante un tiempo fue el único, l
 como una regla y solo era la consecuencia de ser el único perfil con algo que guardar.
 
 Cualquier protocolo cuyo módulo declare `__credential__` ofrece lo mismo en el formulario del
-host: o los valores en línea, o una **credencial reutilizable** (`cred_uid`) del gestor. Al
-elegir una, los campos que esa credencial aporta desaparecen del formulario **y del host** —
+dispositivo: o los valores en línea, o una **credencial reutilizable** (`cred_uid`) del gestor. Al
+elegir una, los campos que esa credencial aporta desaparecen del formulario **y del dispositivo** —
 dos sitios guardando un secreto significa que el día que se rota uno, gana el otro.
 
 En SNMP eso son la versión, la comunidad y las claves v3, más lo que el dispositivo **declara
 ser** (`device_profiles`). Una comunidad compartida por cuarenta switches se define una vez y
 se referencia cuarenta, que es exactamente para lo que está el gestor de credenciales.
 
-Lo que **no** sube al host es cuánto esperamos por él (`timeout`, `retries`): eso es política
+Lo que **no** sube al dispositivo es cuánto esperamos por él (`timeout`, `retries`): eso es política
 de sondeo del check, y además dos entradas de la misma IP que solo difieran ahí dejarían de
-ser el mismo host para el asistente de migración.
+ser el mismo dispositivo para el asistente de migración.
 
 ---
 
-## Cómo un check se liga a un host
+## Cómo un check se liga a un dispositivo
 
-Un ítem de check referencia un host por **`device_uid`** (o **`device_uids`** para un check
+Un ítem de check referencia un dispositivo por **`device_uid`** (o **`device_uids`** para un check
 multi-bind que apunta a varios). En tiempo de ejecución, `ModuleBase.resolve_device()` **fusiona
-la conexión del host sobre la config del ítem**; qué campos vienen del host lo declara el
+la conexión del dispositivo sobre la config del ítem**; qué campos vienen del dispositivo lo declara el
 módulo con `__device_profile__` en su `schema.json`:
 
 ```json
@@ -86,33 +86,33 @@ módulo con `__device_profile__` en su `schema.json`:
 ```mermaid
 flowchart LR
     item["ítem de check<br/>{device_uid: 'srv-1', …}"] --> res["ModuleBase.resolve_device(item)"]
-    store[("DevicesStore · host 'srv-1'<br/>address + profiles{ssh,snmp,…}")] --> res
-    res --> merged["config efectiva<br/>(dirección + credenciales del host + campos del ítem)"]
-    merged --> exec["el módulo ejecuta el check<br/>(local o SSH según el host)"]
+    store[("DevicesStore · dispositivo 'srv-1'<br/>address + profiles{ssh,snmp,…}")] --> res
+    res --> merged["config efectiva<br/>(dirección + credenciales del dispositivo + campos del ítem)"]
+    merged --> exec["el módulo ejecuta el check<br/>(local o SSH según el dispositivo)"]
 ```
 
 - Un ítem **sin** `device_uid` (config inline clásica) se devuelve sin cambios → compatibilidad
   total con checks que llevan su conexión embebida.
-- Los campos que aporta el host (los de `__device_profile__`) se **ocultan** en el formulario del
-  check cuando está ligado a un host (no se re-piden).
+- Los campos que aporta el dispositivo (los de `__device_profile__`) se **ocultan** en el formulario del
+  check cuando está ligado a un dispositivo (no se re-piden).
 
 ---
 
-## Ejecución host-aware (local vs SSH)
+## Ejecución consciente del dispositivo (local vs SSH)
 
-Los módulos de SO ejecutan sus comandos **donde vive el host**: en local o en el servidor
-remoto por SSH, de forma transparente. El *contexto de host* que se pasa es:
+Los módulos de SO ejecutan sus comandos **donde vive el dispositivo**: en local o en el servidor
+remoto por SSH, de forma transparente. El *contexto de dispositivo* que se pasa es:
 
 ```python
 {"kind": "local"|"remote", "os": "<canónico>", "address": "<host>",
  "ssh": {ssh_port, ssh_user, ssh_password, ssh_key, ssh_key_string, ssh_verify_host}}
 ```
 
-- **`ModuleBase.device_exec()`** — la ejecución host-aware desde un check (instancia del monitor).
+- **`ModuleBase.device_exec()`** — la ejecución consciente del dispositivo desde un check (instancia del monitor).
 - **`lib/core/devices/runner.py`** — la variante para las acciones `discover` (que son
-  classmethods, sin instancia): reciben el contexto de host y listan ítems en el host ligado.
+  classmethods, sin instancia): reciben el contexto de dispositivo y listan ítems en el dispositivo ligado.
   Nunca lanza excepción — los fallos vuelven como `('', <error>, -1)`.
-- **`ssh_verify_host`** por host controla la política de host key (ver
+- **`ssh_verify_host`** por dispositivo controla la política de host key (ver
   [explica-seguridad.md](explica-seguridad.md)): `True` = `known_hosts` + `RejectPolicy`; `False` (por defecto) =
   `AutoAddPolicy` (acepta hosts desconocidos en el primer contacto).
 
@@ -121,26 +121,26 @@ devuelve una pista de instalación en vez de fallar.
 
 ---
 
-## Migración asistida inline → hosts
+## Migración asistida inline → dispositivos
 
-Para bases instaladas antes del modelo host-céntrico, un asistente **agrupa** las conexiones
-inline repetidas en hosts reutilizables. Dos funciones **puras** (sin I/O) en
+Para bases instaladas antes del modelo centrado en el dispositivo, un asistente **agrupa** las conexiones
+inline repetidas en dispositivos reutilizables. Dos funciones **puras** (sin I/O) en
 `lib/core/devices/migrate.py`:
 
 ```mermaid
 flowchart LR
     scan["escanea la config de módulos<br/>(ítems con conexión inline)"] --> plan["build_migration_plan()<br/>agrupa por dirección · agrega protocolos"]
-    plan --> review(["propuesta revisable<br/>hosts candidatos + sus ítems"])
-    review --> apply["apply_to_modules()<br/>crea los hosts + reescribe ítems a device_uid"]
-    apply --> ev["evento de auditoría hosts_migrated"]
+    plan --> review(["propuesta revisable<br/>dispositivos candidatos + sus ítems"])
+    review --> apply["apply_to_modules()<br/>crea los dispositivos + reescribe ítems a device_uid"]
+    apply --> ev["evento de auditoría devices_migrated"]
 ```
 
-- **`build_migration_plan()`** → propuesta: hosts candidatos + los ítems miembros. El agrupado
+- **`build_migration_plan()`** → propuesta: dispositivos candidatos + los ítems miembros. El agrupado
   es **seguro**: dos ítems se fusionan solo si comparten dirección **y** no discrepan en las
   credenciales de ningún protocolo compartido (un candidato nunca tiene credenciales ambiguas).
   Perfiles de distintos protocolos en la misma dirección se **agregan** (un servidor SNMP + un
-  target ping + una BD en un host → un host con perfiles snmp/db).
-- **`apply_to_modules()`** → aplica: crea los hosts y reescribe los ítems para que referencien
+  target ping + una BD en un dispositivo → un dispositivo con perfiles snmp/db).
+- **`apply_to_modules()`** → aplica: crea los dispositivos y reescribe los ítems para que referencien
   `device_uid`.
 - Endpoints y UI del asistente ("Detectar duplicados", preview/apply): [explica-web-admin.md →
   Servidores](explica-web-admin.md).
@@ -153,18 +153,18 @@ flowchart LR
 (`ModuleBase.resolve_device`) y la ruta web de "ejecutar una acción de watchful", para que el
 comportamiento (normalizar `__device_profile__`, resolver el SO) viva en un solo sitio:
 
-- **`device_profile_specs(host_profile)`** — normaliza el `__device_profile__` de un módulo (un
+- **`device_profile_specs(device_profile)`** — normaliza el `__device_profile__` de un módulo (un
   spec, varios o ninguno) a una lista de specs.
-- **`resolve_os(...)`** — resuelve el SO canónico del host (para elegir el colector correcto).
+- **`resolve_os(...)`** — resuelve el SO canónico del dispositivo (para elegir el colector correcto).
 
 ---
 
 ## Dónde se gestiona
 
-- **UI + endpoints** (crear/editar hosts, perfiles por protocolo, probar conexión, migración):
+- **UI + endpoints** (crear/editar dispositivos, perfiles por protocolo, probar conexión, migración):
   [explica-web-admin.md → Dispositivos](explica-web-admin.md).
 - **Meta-clave `__device_profile__`** (referencia de campos): [ref-schema-json.md](ref-schema-json.md) y
   [ref-modulos.md](ref-modulos.md).
-- **Descubrimiento** del catálogo protocolo→campos: [explica-descubrimiento.md](explica-descubrimiento.md#5-perfiles-de-host-__device_profile__).
-- **Seguridad** de la ejecución remota (`ssh_verify_host`, hardening del host):
+- **Descubrimiento** del catálogo protocolo→campos: [explica-descubrimiento.md](explica-descubrimiento.md#5-perfiles-de-dispositivo-__device_profile__).
+- **Seguridad** de la ejecución remota (`ssh_verify_host`, hardening del dispositivo):
   [explica-seguridad.md](explica-seguridad.md) y [caso-ssh-hardening.md](caso-ssh-hardening.md).

@@ -1,4 +1,4 @@
-async function _loadHostLatestData() {
+async function _loadDeviceLatestData() {
     const body = document.getElementById('hmLatestBody');
     if (!body) return;
     if (!_editingDeviceUid) {
@@ -10,10 +10,10 @@ async function _loadHostLatestData() {
         <div class="spinner-border spinner-border-sm me-2"></div>${esc(t('loading'))}</div>`;
     const res = await apiGet('/api/v1/devices/' + encodeURIComponent(_editingDeviceUid) + '/status');
     _hmLatestRows = (res && res.results) || [];
-    _renderHostLatest();
+    _renderDeviceLatest();
 }
-function _hmSetLatestFilter(v) { _hmLatestFilter = v; _renderHostLatest(); }
-function _renderHostLatest() {
+function _hmSetLatestFilter(v) { _hmLatestFilter = v; _renderDeviceLatest(); }
+function _renderDeviceLatest() {
     const body = document.getElementById('hmLatestBody');
     if (!body) return;
     if (!_hmLatestRows.length) {
@@ -78,7 +78,7 @@ function _renderHostLatest() {
 // and the shared _renderPagination control.
 let _deviceLogsState = null;   // {addr, page, pageSize, severity_max, q, since, until}
 
-let _hostLogsTimer = null;       // interval-driven / live refresh
+let _deviceLogsTimer = null;       // interval-driven / live refresh
 
 //: The columns of the device-logs table: what each one is, and the name the API sorts it by.
 //:
@@ -101,8 +101,8 @@ const _HML_COLS = [
 //: Where the reader's own preferences live. One key for both screens that draw this table —
 //: the device modal and the Infrastructure page — because it is one table, and a width dragged
 //: on one of them is a width somebody set for these columns.
-const _HML_ORDER_KEY = 'ss_hostlogs_col_order';
-const _HML_WIDTH_KEY = 'ss_hostlogs_col_w';
+const _HML_ORDER_KEY = 'ss_devicelogs_col_order';
+const _HML_WIDTH_KEY = 'ss_devicelogs_col_w';
 
 function _hmlPrefs(key) {
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; }
@@ -123,7 +123,7 @@ function _hmlOrderedCols() {
     return _hmlColOrder().map(id => by[id]).filter(Boolean);
 }
 
-function _hostLogsReset(addr) {
+function _deviceLogsReset(addr) {
     _deviceLogsState = { addr, page: 1, pageSize: _tableRowsDefault,   // not `|| 50`: 0 is "all", a real answer
                        severity_max: '', q: '', since: '', until: '', auto: 0,
                        // The API's default, said out loud: newest first. Held here so the
@@ -137,7 +137,7 @@ function _hostLogsReset(addr) {
 /** Sort by a column — server-side, because this table is paged there too. Sorting the page
  *  in the browser would sort the fifty rows somebody happens to be looking at and call it
  *  the order of forty thousand. */
-function _hostLogsSort(col) {
+function _deviceLogsSort(col) {
     const st = _deviceLogsState;
     if (!st) return;
     st.order = (st.sort === col && st.order === 'desc') ? 'asc' : 'desc';
@@ -146,18 +146,18 @@ function _hostLogsSort(col) {
     _deviceLogsFetch();
 }
 
-function _hostLogsStopTimer() {
-    if (_hostLogsTimer) { clearInterval(_hostLogsTimer); _hostLogsTimer = null; }
+function _deviceLogsStopTimer() {
+    if (_deviceLogsTimer) { clearInterval(_deviceLogsTimer); _deviceLogsTimer = null; }
 }
 
 // (Re)start the refresh timer from state.auto (0=off, secs, or 'live').
-function _hostLogsApplyTimer() {
-    _hostLogsStopTimer();
+function _deviceLogsApplyTimer() {
+    _deviceLogsStopTimer();
     const a = _deviceLogsState ? _deviceLogsState.auto : 0;
     const live = a === 'live';
     const secs = live ? _SL_LIVE_SECS : (parseInt(a, 10) || 0);
     if (secs > 0) {
-        _hostLogsTimer = setInterval(() => {
+        _deviceLogsTimer = setInterval(() => {
             // Keyed on the TABLE and not on one screen's tab pane. It used to look up the
             // device modal's `#hmTabLogs` and stop when it was missing — so the day the modal
             // stopped carrying logs (they are in Infrastructure, where a machine is looked
@@ -165,7 +165,7 @@ function _hostLogsApplyTimer() {
             // such pane and switched the auto-refresh off. Nothing would have said so: the
             // rows simply stop being new.
             const rows = document.getElementById('hml-rows');
-            if (!rows) { _hostLogsStopTimer(); return; }
+            if (!rows) { _deviceLogsStopTimer(); return; }
             // `offsetParent` is null for anything inside a hidden tab, whichever screen it
             // belongs to — there is no point asking the server for rows nobody is looking at.
             if (rows.offsetParent !== null) _deviceLogsFetch();
@@ -173,32 +173,32 @@ function _hostLogsApplyTimer() {
     }
 }
 
-function setHostLogsAutoRefresh(seconds) {
+function setDeviceLogsAutoRefresh(seconds) {
     if (_deviceLogsState) _deviceLogsState.auto = seconds;
-    _hostLogsApplyTimer();
-    _hostLogsRenderAutoRefresh();
+    _deviceLogsApplyTimer();
+    _deviceLogsRenderAutoRefresh();
 }
 
-function toggleHostLogsLive() {
+function toggleDeviceLogsLive() {
     if (_deviceLogsState) _deviceLogsState.auto = (_deviceLogsState.auto === 'live') ? 0 : 'live';
-    _hostLogsApplyTimer();
-    _hostLogsRenderAutoRefresh();
+    _deviceLogsApplyTimer();
+    _deviceLogsRenderAutoRefresh();
 }
 
-function _hostLogsRenderAutoRefresh() {
+function _deviceLogsRenderAutoRefresh() {
     const el = document.getElementById('hml-auto-refresh');
     if (!el || !_deviceLogsState) return;
     const live = _deviceLogsState.auto === 'live';
     el.innerHTML = _autoRefreshControl({
-        id: 'hostlogs', interval: live ? 0 : (parseInt(_deviceLogsState.auto, 10) || 0),
-        setFn: 'setHostLogsAutoRefresh', refreshFn: '_deviceLogsFetch',
-        liveFn: 'toggleHostLogsLive', liveActive: live, hideAuto: true,
+        id: 'devicelogs', interval: live ? 0 : (parseInt(_deviceLogsState.auto, 10) || 0),
+        setFn: 'setDeviceLogsAutoRefresh', refreshFn: '_deviceLogsFetch',
+        liveFn: 'toggleDeviceLogsLive', liveActive: live, hideAuto: true,
         countId: 'hml-refresh-count', fillId: 'hml-refresh-fill',
     });
 }
 
-function _hostLogsGoPage(p) { _deviceLogsState.page = Math.max(1, p | 0); _deviceLogsFetch(); }
-function _hostLogsSetPageSize(v) { _deviceLogsState.pageSize = parseInt(v, 10) || 0; _deviceLogsState.page = 1; _deviceLogsFetch(); }
+function _deviceLogsGoPage(p) { _deviceLogsState.page = Math.max(1, p | 0); _deviceLogsFetch(); }
+function _deviceLogsSetPageSize(v) { _deviceLogsState.pageSize = parseInt(v, 10) || 0; _deviceLogsState.page = 1; _deviceLogsFetch(); }
 
 // Render the Logs tab shell (filter bar + table + pager) and load the first page.
 //
@@ -207,7 +207,7 @@ function _hostLogsSetPageSize(v) { _deviceLogsState.pageSize = parseInt(v, 10) |
 // and the Infrastructure page (where it is looked at), and the second is the one somebody
 // opens when a machine is misbehaving. Two copies of a syslog table with two filter bars and
 // two pagers is two places for them to stop agreeing.
-async function _loadHostLogs(containerId, address) {
+async function _loadDeviceLogs(containerId, address) {
     const body = containerId ? document.getElementById(containerId) : null;
     if (!body) return;
     const addr = String(address != null ? address
@@ -216,7 +216,7 @@ async function _loadHostLogs(containerId, address) {
         body.innerHTML = `<div class="text-muted small py-4 text-center">${esc(t('device_logs_no_address'))}</div>`;
         return;
     }
-    if (!_deviceLogsState || _deviceLogsState.addr !== addr) _hostLogsReset(addr);
+    if (!_deviceLogsState || _deviceLogsState.addr !== addr) _deviceLogsReset(addr);
     const st = _deviceLogsState;
     const sevOpts = `<option value="">${esc(t('syslog_all'))}</option>` +
         (typeof _SYSLOG_SEV !== 'undefined' ? _SYSLOG_SEV : [])
@@ -256,8 +256,8 @@ async function _loadHostLogs(containerId, address) {
     };
     // Nothing to unbind from a dialog: this table is drawn by the Infrastructure section,
     // and the tick above stops itself the moment the table is no longer on the page.
-    _hostLogsRenderAutoRefresh();
-    _hostLogsApplyTimer();
+    _deviceLogsRenderAutoRefresh();
+    _deviceLogsApplyTimer();
     _deviceLogsFetch();
 }
 
@@ -291,9 +291,9 @@ async function _deviceLogsFetch() {
         if (!msgs.length) stateEl.innerHTML = `<i class="bi bi-inbox"></i><div>${esc(t('device_logs_none'))}</div>`;
     }
     st.rows = msgs;
-    _hostLogsDrawTable();
+    _deviceLogsDrawTable();
     const pagerHtml = total > 0
-        ? _renderPagination(total, all ? 1 : st.page, all ? 0 : st.pageSize, '_hostLogsGoPage', '_hostLogsSetPageSize')
+        ? _renderPagination(total, all ? 1 : st.page, all ? 0 : st.pageSize, '_deviceLogsGoPage', '_deviceLogsSetPageSize')
         : '';
     for (const id of ['hml-pager-top', 'hml-pager']) {
         const el = document.getElementById(id); if (el) el.innerHTML = pagerHtml;
@@ -328,7 +328,7 @@ function _hmlCell(m, id) {
  *  Both from the same ordered column list, in one function, because a header and a body that
  *  each decide their own order is a table that puts one column's data under another's name
  *  the first time somebody drags one. */
-function _hostLogsDrawTable() {
+function _deviceLogsDrawTable() {
     const st = _deviceLogsState;
     const head = document.getElementById('hml-head');
     const tbody = document.getElementById('hml-rows');
@@ -336,7 +336,7 @@ function _hostLogsDrawTable() {
     const cols = _hmlOrderedCols();
     const widths = _hmlPrefs(_HML_WIDTH_KEY) || {};
     head.innerHTML = cols.map(c => {
-        const inner = _thSortInner(c.label(), c.sort, st.sort, st.order, '_hostLogsSort');
+        const inner = _thSortInner(c.label(), c.sort, st.sort, st.order, '_deviceLogsSort');
         // The reader's width if they set one; otherwise the message column takes what is
         // left, which is the shape this table has always had.
         const w = widths[c.id] ? widths[c.id] : (c.wide ? '55%' : '');
@@ -352,7 +352,7 @@ function _hostLogsDrawTable() {
         _hmlColOrder,
         o => { try { localStorage.setItem(_HML_ORDER_KEY, JSON.stringify(o)); } catch (_) {} },
         () => {},
-        _hostLogsDrawTable,
+        _deviceLogsDrawTable,
         (col, w) => {
             const m = _hmlPrefs(_HML_WIDTH_KEY) || {};
             m[col] = w;
@@ -369,7 +369,7 @@ function _goToHistory(mod, key) {
         localStorage.setItem('ss_history_mod', mod);
         localStorage.setItem('ss_history_key', key);
     } catch (e) { /* ignore */ }
-    bootstrap.Modal.getInstance(document.getElementById('hostModal'))?.hide();
+    bootstrap.Modal.getInstance(document.getElementById('deviceModal'))?.hide();
     window.location.href = '/history?module=' + encodeURIComponent(mod)
                          + '&key=' + encodeURIComponent(key);
 }
@@ -378,10 +378,10 @@ async function testDeviceRow(uid) {
     // Open the results modal (with the per-check breakdown) so a failing check is
     // identifiable — not just a "8/9" summary toast.
     const device = devicesData[uid];
-    _openHostTestModal(t('device_test') + (device && device.name ? ' — ' + device.name : ''));
+    _openDeviceTestModal(t('device_test') + (device && device.name ? ' — ' + device.name : ''));
     const res = await apiPost('/api/v1/devices/test', { device_uid: uid });
     const d = res && res.data;
-    _renderHostTestResults(d);
+    _renderDeviceTestResults(d);
     // Reflect the test outcome in the Status column right away (transient — the
     // daemon's next run overwrites it on the following reload).
     if (d && devicesData[uid]) {
@@ -392,7 +392,7 @@ async function testDeviceRow(uid) {
 
 
 // Active/total count badge content for a module (mirrors the Modules section).
-function _hostCountHtml(st) {
+function _deviceCountHtml(st) {
     const total = st.items.length;
     const active = st.items.filter(it => it.enabled).length;
     return `<i class="bi bi-list-ul me-1" style="opacity:.6"></i>${active}/${total}`;
@@ -400,7 +400,7 @@ function _hostCountHtml(st) {
 
 // Refresh a module's header count badge (active/total + warning colour) and
 // keep the master enable switch in sync.
-function _refreshHostCount(mod) {
+function _refreshDeviceCount(mod) {
     const st = _deviceChecks[mod];
     if (!st) return;
     const slug = mod.replace(/\W/g, '_');
@@ -408,7 +408,7 @@ function _refreshHostCount(mod) {
     const active = st.items.filter(it => it.enabled).length;
     const cnt = document.getElementById('hmCnt_' + slug);
     if (cnt) {
-        cnt.innerHTML = _hostCountHtml(st);
+        cnt.innerHTML = _deviceCountHtml(st);
         cnt.style.color = active < total
             ? 'var(--bs-warning-text-emphasis)' : 'var(--bs-secondary-color)';
     }
@@ -417,11 +417,11 @@ function _refreshHostCount(mod) {
 }
 
 // Master switch: enable/disable ALL of a module's checks on this server.
-function _toggleHostModule(mod, on) {
+function _toggleDeviceModule(mod, on) {
     const st = _deviceChecks[mod];
     if (!st) return;
     st.items.forEach(it => { it.enabled = on; });
-    _refreshHostCheckList(mod);   // re-render item switches + count badge
+    _refreshDeviceCheckList(mod);   // re-render item switches + count badge
 }
 
 // Re-render the whole Monitoring section (after add/remove of a module).
@@ -430,8 +430,8 @@ function _refreshMonitoring() {
     if (el) { el.innerHTML = _renderMonitoringSection(); initTooltips(el); }
 }
 
-// Add a module to this host (it then shows in the Monitoring list).
-function _addHostModule(mod) {
+// Add a module to this device (it then shows in the Monitoring list).
+function _addDeviceModule(mod) {
     if (!_deviceChecks[mod]) return;
     _deviceShownMods.add(mod);
     // A single-check module starts enabled when added explicitly.
@@ -440,8 +440,8 @@ function _addHostModule(mod) {
     _refreshMonitoring();
 }
 
-// Remove a module from this host: hide it and drop its checks (deleted on save).
-function _removeHostModule(mod) {
+// Remove a module from this device: hide it and drop its checks (deleted on save).
+function _removeDeviceModule(mod) {
     const msg = (t('device_module_remove_confirm') || 'Remove module "{name}" and its checks?')
         .replace('{name}', modulePrettyName(mod));
     showConfirmModal(msg, () => {
@@ -462,7 +462,7 @@ function _removeHostModule(mod) {
 
 // Module picker modal (same look as the Modules section): a grid of the device's
 // available modules + an "already configured" list.  Reuses #addModuleModal.
-function openHostAddModule() {
+function openDeviceAddModule() {
     const all = Object.keys(_deviceChecks).sort();
     const available  = all.filter(m => !_deviceShownMods.has(m));
     const configured = all.filter(m =>  _deviceShownMods.has(m));
@@ -485,7 +485,7 @@ function openHostAddModule() {
             const accent = `hsl(${hue},65%,55%)`;
             h += `<div class="rounded-3 border d-flex flex-column align-items-center gap-2 py-3 px-2 text-center"
                        style="cursor:pointer;background:var(--ss-surface-bg,var(--bs-body-bg));transition:box-shadow .15s,border-color .15s"
-                       onclick="_hostAddModulePick(${jsStr(name)})"
+                       onclick="_deviceAddModulePick(${jsStr(name)})"
                        onmouseover="this.style.boxShadow='0 4px 14px rgba(0,0,0,.13)';this.style.borderColor='${accent}'"
                        onmouseout="this.style.boxShadow='';this.style.borderColor=''">
                 <span class="ss-mod-av rounded-2 d-flex align-items-center justify-content-center"
@@ -512,15 +512,15 @@ function openHostAddModule() {
     bootstrap.Modal.getOrCreateInstance(document.getElementById('addModuleModal')).show();
 }
 
-function _hostAddModulePick(name) {
+function _deviceAddModulePick(name) {
     // Keep the picker open so several modules can be added in one go — the chosen
     // module moves to the "already configured" list and the grid re-renders.
     // Close it with the header ✕ / "Close" button when finished.
-    _addHostModule(name);
-    openHostAddModule();
+    _addDeviceModule(name);
+    openDeviceAddModule();
 }
 
-// ── Monitoring tab (which modules check this host + their settings) ──
+// ── Monitoring tab (which modules check this device + their settings) ──
 // Each module can have SEVERAL checks bound to the device (e.g. one server runs
 // both MySQL and PostgreSQL → two Database Connectivity checks).
 function _renderMonitoringSection() {
@@ -531,10 +531,10 @@ function _renderMonitoringSection() {
     // Toolbar: hint + "Add module" button → opens the module picker modal.
     let h = `<div class="d-flex align-items-center gap-2 mb-2">
         <span class="small text-muted">${esc(t('device_monitor_hint'))}</span>
-        <button class="btn btn-sm btn-success ms-auto" onclick="openHostAddModule()">
+        <button class="btn btn-sm btn-success ms-auto" onclick="openDeviceAddModule()">
             <i class="bi bi-plus-lg me-1"></i>${esc(t('device_add_module'))}</button></div>`;
 
-    // Read-only: multi-bind (cluster) checks this host is a member of. They are
+    // Read-only: multi-bind (cluster) checks this device is a member of. They are
     // managed in the Modules tab (one check spans all nodes), not per-device — but
     // we surface them so the node shows it belongs to a cluster check.
     const memberHtml = _renderClustersMembershipCards(_deviceClusterMemberships(_editingDeviceUid));
@@ -555,7 +555,7 @@ function _renderMonitoringSection() {
             // count (like the Modules section) and an icon-only "test all".
             const title = `<span class="fw-semibold">${esc(modulePrettyName(mod))}</span>
                 <span class="badge rounded-pill flex-shrink-0 ms-2" id="hmCnt_${slug}"
-                      style="font-size:.7rem;background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color)">${_hostCountHtml(st)}</span>`;
+                      style="font-size:.7rem;background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color)">${_deviceCountHtml(st)}</span>`;
             const _sch = ITEM_SCHEMAS[mod + '|' + st.collection] || {};
             const _hasDisc = !!_sch['__discovery__'];
             // Header: a master enable switch (toggles ALL the module's checks on
@@ -565,12 +565,12 @@ function _renderMonitoringSection() {
                 <div class="form-check form-switch mb-0">
                     <input class="form-check-input" type="checkbox" id="hmMaster_${slug}" ${_anyOn ? 'checked' : ''}
                            ${st.items.length ? '' : 'disabled'}
-                           onchange="_toggleHostModule(${jsStr(mod)}, this.checked)"
+                           onchange="_toggleDeviceModule(${jsStr(mod)}, this.checked)"
                            title="${escAttr(t('device_module_enable'))}" aria-label="${escAttr(t('device_module_enable'))}">
                 </div>
-                <button class="btn btn-sm btn-info py-0 px-1" onclick="testHostModule(${jsStr(mod)})"
+                <button class="btn btn-sm btn-info py-0 px-1" onclick="testDeviceModule(${jsStr(mod)})"
                     title="${escAttr(t('device_test_all'))}"><i class="bi bi-play-circle"></i></button>
-                <button class="btn btn-sm btn-danger py-0 px-1" onclick="_removeHostModule(${jsStr(mod)})"
+                <button class="btn btn-sm btn-danger py-0 px-1" onclick="_removeDeviceModule(${jsStr(mod)})"
                     title="${escAttr(t('device_module_remove'))}"><i class="bi bi-x-lg"></i></button>
                 </div>`;
             // Toolbar inside the card body: a filter that fills the free space
@@ -579,21 +579,21 @@ function _renderMonitoringSection() {
                 <div class="input-group input-group-sm flex-grow-1">
                     <span class="input-group-text"><i class="bi bi-funnel"></i></span>
                     <input type="text" id="hmFilter_${slug}" class="form-control" placeholder="${escAttr(t('device_filter_checks') || 'Filter…')}"
-                        value="${escAttr(_hostCheckFilters[mod] || '')}"
-                        oninput="_setHostCheckFilter(${jsStr(mod)}, this.value)">
+                        value="${escAttr(_deviceCheckFilters[mod] || '')}"
+                        oninput="_setDeviceCheckFilter(${jsStr(mod)}, this.value)">
                     <button class="btn btn-secondary" type="button" title="${escAttr(t('clear') || 'Clear')}"
-                        onclick="document.getElementById('hmFilter_${slug}').value='';_setHostCheckFilter(${jsStr(mod)}, '')"><i class="bi bi-x-lg"></i></button>
+                        onclick="document.getElementById('hmFilter_${slug}').value='';_setDeviceCheckFilter(${jsStr(mod)}, '')"><i class="bi bi-x-lg"></i></button>
                 </div>
-                ${_hasDisc ? `<button class="btn btn-sm btn-info flex-shrink-0 text-nowrap" onclick="openHostDiscover(${jsStr(mod)})"
+                ${_hasDisc ? `<button class="btn btn-sm btn-info flex-shrink-0 text-nowrap" onclick="openDeviceDiscover(${jsStr(mod)})"
                     title="${escAttr(t('discover'))}"><i class="bi bi-search me-1"></i>${esc(t('discover'))}</button>` : ''}
-                <button class="btn btn-sm btn-success flex-shrink-0 text-nowrap" onclick="_addHostCheck(${jsStr(mod)})"
+                <button class="btn btn-sm btn-success flex-shrink-0 text-nowrap" onclick="_addDeviceCheck(${jsStr(mod)})"
                     title="${escAttr(t('device_add_check'))}"><i class="bi bi-plus-lg me-1"></i>${esc(t('device_add_check'))}</button>
             </div>`;
             // The device's connection first, then the checks that use it — one profile for
-            // the module, not one per check (see _hostProfileBlock).
-            const _prof = _hostProfileBlock(mod);
+            // the module, not one per check (see _deviceProfileBlock).
+            const _prof = _deviceProfileBlock(mod);
             const body = `${_prof ? `<div class="row g-2 mb-3">${_prof}</div>` : ''}`
-                + `${toolbar}<div id="hmChkList_${slug}">${_renderHostCheckList(mod)}</div>`;
+                + `${toolbar}<div id="hmChkList_${slug}">${_renderDeviceCheckList(mod)}</div>`;
             // Collapsed when editing an existing device; expanded for a new one.
             h += _collapsibleCard('hmCard_' + slug, title, actions, body, !_editingDeviceUid);
         } else {
@@ -604,5 +604,5 @@ function _renderMonitoringSection() {
     return h;
 }
 
-// Multi-bind (cluster) checks that reference this host via device_uids — the host
+// Multi-bind (cluster) checks that reference this device via device_uids — the device
 // is one of the cluster's nodes.  Returns [{mod, key, label, count}].

@@ -25,7 +25,7 @@ from lib.core.infra import jobs
 
 
 class _WA:
-    """The four things the job touches on its host, and nothing else."""
+    """The four things the job touches on its device, and nothing else."""
 
     def __init__(self, behaviour=None, timeout_seen=None):
         self._check_lock = threading.Lock()

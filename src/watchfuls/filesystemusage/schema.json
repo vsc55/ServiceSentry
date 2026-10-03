@@ -15,7 +15,7 @@
         "__discovery__": "discover",
         "__discovery_field__": "partition",
         "__discovery_uid_key__": true,
-        "__discovery_label_template__": "{host} - {name}",
+        "__discovery_label_template__": "{device} - {name}",
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__new_item_fields__": ["label", "partition"],

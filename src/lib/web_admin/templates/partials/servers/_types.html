@@ -28,7 +28,7 @@
 //: algún paquete ofrece hacer aquí y cómo se llama cada origen.
 let _htData = null;
 let _htUsage = {};
-let _hostTypeActions = [];
+let _deviceTypeActions = [];
 let _htSourceSpecs = [];
 
 //: Lo que se está escribiendo en el cuadro de añadir o corregir. `uid` vacío = una nueva.
@@ -75,9 +75,9 @@ const HT_VIEWS = [
 ];
 const _htView = createViewState('ss_device_types_view', HT_VIEWS, () => {
     if (typeof _persistTableConfig === 'function') _persistTableConfig();
-    renderHostTypes();
+    renderDeviceTypes();
 });
-function setHostTypesView(id) { _htView.set(id); }
+function setDeviceTypesView(id) { _htView.set(id); }
 
 // ── Los datos ───────────────────────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ async function _htLoad() {
     const d = await apiGet('/api/v1/device_types');
     _htData = (d && d.types) || [];
     _htUsage = (d && d.usage) || {};
-    _hostTypeActions = (d && d.actions) || [];
+    _deviceTypeActions = (d && d.actions) || [];
     _htSourceSpecs = (d && d.sources) || [];
     return _htData;
 }
@@ -278,7 +278,7 @@ createListTable({
     bodyMode: () => _htView.mode(),
     showChooser: mode => mode === 'table',
     cardsBody: (page, ctx, todas) => _htView.body(page, ctx, todas),
-    headerLead: () => _htView.switcher('setHostTypesView'),
+    headerLead: () => _htView.switcher('setDeviceTypesView'),
     headerButtons: ctx => (ctx.puede ? _htNewHtml() : ''),
     persistExtra: () => ({view: _htView.id()}),
     applyExtra: cfg => _htView.apply(cfg && cfg.view),
@@ -298,7 +298,7 @@ createListTable({
         currentPage: {get: () => _htCurrentPage, set: v => { _htCurrentPage = v; }},
     },
     globalPrefix: {
-        render: 'renderHostTypes', goPage: '_htGoPage', changePageSize: '_htChangePageSize',
+        render: 'renderDeviceTypes', goPage: '_htGoPage', changePageSize: '_htChangePageSize',
         sort: '_htSortBy', toggleCol: '_htToggleCol', resetCols: '_htResetCols',
         saveOrder: '_htSaveColOrder', selectAll: '_htSelectAll', toggleOne: '_htSelectOne',
         initFeatures: '_htInitFeatures',
@@ -331,7 +331,7 @@ function _htMatch(x, f) {
 /** Volver a pedirlo todo. Después de cada escritura, que es cuando puede haber cambiado algo. */
 async function _htReload() {
     _htData = null;
-    await renderHostTypes();
+    await renderDeviceTypes();
 }
 
 /** El recuento, que **lleva a esos dispositivos**: la pregunta que sigue a «ésta la llevan doce»
@@ -366,7 +366,7 @@ function _htSelBarHtml(ctx, sel) {
         <button class="btn btn-sm btn-danger py-0 px-2" onclick="_htDropMany()"
             title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>
         <button class="btn btn-sm btn-secondary py-0 px-2"
-            onclick="_htSel.clear();renderHostTypes()"
+            onclick="_htSel.clear();renderDeviceTypes()"
             title="${escAttr(t('clear_selection'))}"><i class="bi bi-x-lg"></i></button>
     </div>`;
 }
@@ -382,7 +382,7 @@ function _htNewHtml() {
         <i class="bi bi-plus-lg me-1"></i>${esc(t('device_types_new'))}</button>`;
     const perms = currentUser.permissions || [];
     // Las de vincular no: ésas van dentro del cuadro de una clase, porque son un acto sobre UNA.
-    const otras = (_hostTypeActions || []).filter(
+    const otras = (_deviceTypeActions || []).filter(
         a => !a.link && (!a.perm || perms.includes(a.perm)));
     return `<div class="btn-group ms-1">
         ${nuevo}
@@ -463,17 +463,19 @@ function _htTilesBody(filas) {
  *  la vista que todavía no es. */
 function _htGoDevices(uid) {
     _htCloseStack();
-    if (typeof _srvApplyView === 'function') _srvApplyView('types');
-    // El carril guarda su elección fuera del cuerpo —el cuerpo se rehace en cada dibujado— así
-    // que se pone en los dos sitios: la variable, para este dibujado, y el almacén, para que
-    // siga puesta al volver.
-    try { localStorage.setItem('ss_devices_type_rail', String(uid)); } catch (_) {}
-    if (typeof _srvTypeSel !== 'undefined') _srvTypeSel = String(uid);
-    if (typeof _navSubtab === 'function') {
-        _navSubtab(null, '#tab-servers', '#subtab-srv-devices',
-                   'ss_active_subtab_infra', '#subtab-srv-devices');
-    }
-    if (typeof renderServers === 'function') renderServers();
+    // Los dispositivos de una clase son la flota de Infraestructura en su carril, agrupada por
+    // clase y con ésta elegida. El carril guarda su elección fuera del cuerpo —el cuerpo se
+    // rehace en cada dibujado— así que se pone en los dos sitios: la variable, para este
+    // dibujado, y el almacén, para que siga puesta al volver.
+    try {
+        localStorage.setItem('ss_infra_group_by', 'device_type');
+        localStorage.setItem('ss_infra_rail_pick', String(uid));
+    } catch (_) {}
+    _infraGroupBy = 'device_type';
+    _infraRailPick = String(uid);
+    _infraView.apply('rail');
+    if (typeof _navTab === 'function') _navTab('#tab-infra');
+    infraOpen('');
 }
 
 // ── Añadir y corregir, en un cuadro ─────────────────────────────────────────────────────
@@ -699,7 +701,7 @@ function _htExternalHtml() {
         </div>`;
     }
     const perms = currentUser.permissions || [];
-    const vincular = (_hostTypeActions || []).filter(
+    const vincular = (_deviceTypeActions || []).filter(
         a => a.link && (!a.perm || perms.includes(a.perm)));
     if (!vincular.length) return '';
     return `<hr class="my-3">
@@ -851,7 +853,7 @@ async function _htRefresh() {
     // algo que otro acaba de quitar.
     const vivos = new Set((_htData || []).map(x => String(x.uid)));
     for (const uid of Array.from(_htSel)) { if (!vivos.has(uid)) _htSel.delete(uid); }
-    if (document.getElementById('devicetypes-container')) await renderHostTypes();
+    if (document.getElementById('devicetypes-container')) await renderDeviceTypes();
     // Y lo que hubiera dibujado con la lista vieja: la ficha abierta detrás y la lista de
     // dispositivos de detrás de ella.
     if (typeof _renderDeviceModalBody === 'function' && _deviceDraft) _renderDeviceModalBody();

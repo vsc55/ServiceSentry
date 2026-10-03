@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for lib/core/devices/probe — the HOST half of the Servers "test" feature.
+"""Tests for lib/core/devices/probe — the DEVICE half of the Servers "test" feature.
 
-Resolving an unsaved host is what is specific to devices here; running the check is not, and
+Resolving an unsaved device is what is specific to devices here; running the check is not, and
 lives in lib/modules/check_runner (see tests/test_module_check_runner.py).  The runs below
-stay in this file because what they exercise is the host resolution: a check reaching a
+stay in this file because what they exercise is the device resolution: a check reaching a
 remote machine through the draft the admin has typed but not yet saved.
 """
 
@@ -32,19 +32,19 @@ class _FakeStore:
         return self._h.get(uid)
 
 
-_HOST = {'uid': 'h1', 'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+_DEVICE = {'uid': 'h1', 'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
          'maintenance': False, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
 _PS_OUT = "nginx\nnginx\nsshd\n"
 
 
-class TestTheDraftHostIsWhatGetsChecked:
+class TestTheDraftDeviceIsWhatGetsChecked:
     """The modal tests what the admin typed, so the check must reach the draft's address."""
 
     def test_runs_process_check_remote(self):
         cfg = {'watchfuls.process': {'list': {
             'web': {'process': 'nginx', 'min_count': 2, 'enabled': True, 'device_uid': 'h1'}}}}
-        store = device_probe.ProbeHostsStore(_HOST, _FakeStore({'h1': _HOST}))
+        store = device_probe.ProbeDevicesStore(_DEVICE, _FakeStore({'h1': _DEVICE}))
         with _mock_ssh(_PS_OUT):
             results = run_module_check('process', cfg, devices_store=store)
         assert len(results) == 1
@@ -54,18 +54,18 @@ class TestTheDraftHostIsWhatGetsChecked:
     def test_runs_process_check_failure(self):
         cfg = {'watchfuls.process': {'list': {
             'web': {'process': 'nginx', 'min_count': 5, 'enabled': True, 'device_uid': 'h1'}}}}
-        store = device_probe.ProbeHostsStore(_HOST, _FakeStore({'h1': _HOST}))
+        store = device_probe.ProbeDevicesStore(_DEVICE, _FakeStore({'h1': _DEVICE}))
         with _mock_ssh(_PS_OUT):
             results = run_module_check('process', cfg, devices_store=store)
         assert results[0]['status'] is False
 
 
-class TestProbeHostsStore:
+class TestProbeDevicesStore:
 
     def test_returns_draft_for_its_uid(self):
         real = _FakeStore({'real': {'uid': 'real', 'address': 'x'}})
         draft = {'uid': '__probe__', 'address': '10.0.0.9'}
-        store = device_probe.ProbeHostsStore(draft, real)
+        store = device_probe.ProbeDevicesStore(draft, real)
         assert store.get('__probe__')['address'] == '10.0.0.9'
         assert store.get('real')['address'] == 'x'
         assert store.get('nope') is None

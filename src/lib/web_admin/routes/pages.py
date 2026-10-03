@@ -39,21 +39,22 @@ from lib.core.overview.discovery import discover_overview_widgets_public as _dis
 from ..constants import page_label, standalone_pages
 
 
-def _panel_tabs(wa, lang: str) -> list:
-    """Every entry of the System panel, translated and in alphabetical order.
+def _panel_tabs(wa, lang: str, group: str = 'system') -> list:
+    """Every entry of one sidebar group, translated and in alphabetical order.
 
-    The core's own tabs plus the pages a module declared belong here
-    (``__page__`` with ``"placement": "system"``). Merged before sorting rather than appended
+    *group* is ``system`` (the platform) or ``catalog`` (the organisation's registers). The
+    core's own tabs of that group plus the pages declared for it (``__page__`` / a core
+    package's ``PAGE`` with that ``placement``). Merged before sorting rather than appended
     after: a module section pinned to the end reads as an afterthought, and where a thing
     came from is not what somebody scanning a menu is looking for.
     """
     from lib.web_admin.constants import (PANEL_TABS, page_label,  # noqa: PLC0415
                                          standalone_pages, tab_sort_key)
     out = [{'id': t['id'], 'icon': t['icon'], 'label': wa._t(t['label_key'])}
-           for t in PANEL_TABS]
+           for t in PANEL_TABS if t.get('group', 'system') == group]
     for p in standalone_pages():
         sa = p.get('standalone') or {}
-        if sa.get('placement') != 'system':
+        if sa.get('placement') != group:
             continue
         # `url` and `views` travel with it: a module section HAS a URL of its own, and a
         # section with several views is several destinations. Placement decides where the
@@ -134,6 +135,9 @@ def register(app, wa):
             # of the translated word. Core tabs and module-contributed ones are one list —
             # a reader looking for "SNMP" should not have to know it came from a module.
             panel_tabs=_panel_tabs(wa, _lang),
+            # The organisation's registers — companies, devices, credentials, MIBs — in a group
+            # of their own above System: who manages them is not who manages the platform.
+            catalog_tabs=_panel_tabs(wa, _lang, 'catalog'),
             standalone_specs=[{'id': p['id'], 'url': p['url'], **p['standalone'],
                                'views': _view_specs(p, _lang),
                                'label': (wa._t(p['standalone']['nav_label_key'])

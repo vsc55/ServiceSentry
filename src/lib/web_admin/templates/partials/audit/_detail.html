@@ -53,7 +53,7 @@ function formatAuditDetailFull(detail) {
         // Device test result (device_tested / device_test_check): show the server +
         // every check launched with its pass/fail and error message.
         if (Array.isArray(detail.results)) {
-            return formatHostTestDetail(detail);
+            return formatDeviceTestDetail(detail);
         }
         let html = '';
         if (detail.reason)   html += `<p class="mb-1">${esc(t(detail.reason) || detail.reason)}</p>`;
@@ -118,7 +118,7 @@ function _formatBeforeAfter(before, after) {
 }
 
 // Device test result detail: server + each launched check (pass/fail + message).
-function formatHostTestDetail(d) {
+function formatDeviceTestDetail(d) {
     let html = '';
     if (d.name) {
         html += `<p class="mb-1"><strong>${esc(t('col_server') || 'Server')}:</strong> <code>${esc(d.name)}</code></p>`;

@@ -712,7 +712,7 @@ class TestABoxIsAlsoSomethingToREAD:
 
     def _card(self):
         return _read(os.path.join(INFRA, '_canvas.html')).split(
-            'function ssHostCard(')[1].split(chr(10) + '}')[0]
+            'function ssDeviceCard(')[1].split(chr(10) + '}')[0]
 
     def test_a_box_reads_from_what_is_already_in_hand(self):
         body = self._card()
@@ -755,7 +755,7 @@ class TestABoxIsAlsoSomethingToREAD:
         """"Which machine is that box" is asked of either picture, and two answers to it are
         two things to keep in agreement."""
         for f in ('_links.html', '_map.html'):
-            assert 'ssHostCard(' in _read(os.path.join(INFRA, f)), f
+            assert 'ssDeviceCard(' in _read(os.path.join(INFRA, f)), f
 
 
 class TestTheBoxesCanBePutWhereTheyBelong:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Host-side support for the Servers "test" feature.
+"""Device-side support for the Servers "test" feature.
 
 What is specific to devices is resolving an **unsaved** device: the modal tests what the admin
 has typed, which by definition is not in the store yet.  Running the module's check itself
@@ -17,7 +17,7 @@ up here in the first place.
 from __future__ import annotations
 
 
-class ProbeHostsStore:
+class ProbeDevicesStore:
     """Return a (possibly unsaved draft) device for its uid, else delegate.
 
     Lets the Servers modal test an edited/new device without first persisting it.

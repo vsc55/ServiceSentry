@@ -57,7 +57,7 @@ def _syslog_filters():
     severity accept multiple values (Ctrl+click multi-select in the UI)."""
     return {
         'source':   request.args.get('source', '').strip(),
-        'host':     request.args.get('host', '').strip(),
+        'host':     request.args.get('device', '').strip(),   # a device's address, matched against the sender
         'hostname': _multi_arg('hostname'),
         'app':      _multi_arg('app'),
         'facility': _multi_int_arg('facility'),

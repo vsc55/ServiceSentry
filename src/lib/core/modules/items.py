@@ -41,8 +41,8 @@ def is_item_collection(v) -> bool:
     return isinstance(v, dict)
 
 
-def item_host_uid(o, n) -> str:
-    """Host UID of an item from its new or old value (items can be non-dict
+def item_device_uid(o, n) -> str:
+    """Device UID of an item from its new or old value (items can be non-dict
     bool shorthands, which carry no device binding)."""
     for it in (n, o):
         if isinstance(it, dict):

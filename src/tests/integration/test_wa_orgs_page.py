@@ -123,7 +123,7 @@ _orgsData = {
   orgs: [
     {uid: 'o1', name: 'Sociedad A', short: 'SA', description: 'La matriz', said: {site: 3, rack: 2}},
     {uid: 'o2', name: 'Sociedad B', short: 'SB', description: '', said: {}},
-    {uid: 'o3', name: '<script>ojo', short: 'S&C', description: 'con & y <', said: {host: 1}}],
+    {uid: 'o3', name: '<script>ojo', short: 'S&C', description: 'con & y <', said: {device: 1}}],
   scopes: [{scope: 'site', label_key: 'orgs_scope_site'},
            {scope: 'rack', label_key: 'orgs_scope_rack'},
            {scope: 'device', label_key: 'orgs_scope_device'}],

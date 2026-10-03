@@ -120,7 +120,7 @@ def connect_host(device_ssh: dict, address: str, *, timeout: int = 15):
     """Open a client from a device's resolved SSH fields (see resolve_device).
 
     *device_ssh* keys: ssh_port, ssh_user, ssh_password, ssh_key, ssh_key_string,
-    ssh_verify_host.  *address* is the host address (used as the SSH host).
+    ssh_verify_host.  *address* is the device address (used as the SSH host).
     """
     return connect(
         address=address,

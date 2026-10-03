@@ -230,7 +230,7 @@ class TestLoQueDeVerdadSeAplica:
     """Lo elegido, con los emparejamientos a mano puestos — y lo que no se puede hacer,
     contado."""
 
-    HOSTS = [{'uid': 'u1', 'name': 'srv-barcelona', 'address': '', 'description': '',
+    DEVICES = [{'uid': 'u1', 'name': 'srv-barcelona', 'address': '', 'description': '',
               'source': '', 'external_id': ''},
              {'uid': 'u2', 'name': 'otro', 'address': '', 'description': '',
               'source': 'freshservice', 'external_id': '99'}]
@@ -245,24 +245,24 @@ class TestLoQueDeVerdadSeAplica:
         """Es la mitad de para lo que sirve la pantalla: que «SRV-BCN-01» de allí y
         «srv-barcelona» de aquí son la misma máquina lo sabe quien lo mira, y ningún parecido de
         nombres lo va a decir nunca."""
-        plan = fa.build([_activo(1, 'SRV-BCN-01')], self.HOSTS, TIPOS)
-        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'u1'}, devices=self.HOSTS)
+        plan = fa.build([_activo(1, 'SRV-BCN-01')], self.DEVICES, TIPOS)
+        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'u1'}, devices=self.DEVICES)
         assert (fuera[0]['action'], fuera[0]['uid']) == ('adopt', 'u1')
         assert rechazos == []
 
     def test_emparejar_con_uno_ya_atado_a_otro_activo_se_rechaza_con_su_motivo(self):
         """Dos no pueden compartir uno: el segundo le pisaría el nombre al primero en cada
         importación, y la ficha iría cambiando de nombre sola."""
-        plan = fa.build([_activo(1, 'A')], self.HOSTS, TIPOS)
-        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'u2'}, devices=self.HOSTS)
+        plan = fa.build([_activo(1, 'A')], self.DEVICES, TIPOS)
+        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'u2'}, devices=self.DEVICES)
         assert fuera == []
-        assert rechazos == [{'name': 'A', 'reason': 'fs_hosts_link_taken'}]
+        assert rechazos == [{'name': 'A', 'reason': 'fs_devices_link_taken'}]
 
     def test_emparejar_con_uno_que_ya_no_existe_se_rechaza_con_su_motivo(self):
         """Se borró entre mirar y aceptar. Es un rechazo y no un silencio: se pidió y no salió."""
-        plan = fa.build([_activo(1, 'A')], self.HOSTS, TIPOS)
-        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'fantasma'}, devices=self.HOSTS)
-        assert (fuera, [r['reason'] for r in rechazos]) == ([], ['fs_hosts_link_gone'])
+        plan = fa.build([_activo(1, 'A')], self.DEVICES, TIPOS)
+        fuera, rechazos = fa.select(plan, pick=['1'], link={'1': 'fantasma'}, devices=self.DEVICES)
+        assert (fuera, [r['reason'] for r in rechazos]) == ([], ['fs_devices_link_gone'])
 
     def test_uno_elegido_al_que_no_hay_nada_que_hacerle_no_es_un_rechazo(self):
         """No se eligió mal: es que ya estaba bien. Contarlo como fallo diría que algo salió mal

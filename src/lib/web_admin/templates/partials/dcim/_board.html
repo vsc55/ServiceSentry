@@ -44,6 +44,7 @@ function _dcimStateWord(state) {
     if (state === 'error') return t('dcim_state_error');
     if (state === 'warning') return t('dcim_state_warning');
     if (state === 'ok') return t('dcim_state_ok');
+    if (state === 'maintenance') return t('device_status_maintenance');
     return t('dcim_state_unwatched');
 }
 

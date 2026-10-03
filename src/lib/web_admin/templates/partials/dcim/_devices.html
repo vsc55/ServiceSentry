@@ -114,7 +114,7 @@ function setDcDevView(id) { _dcdView.set(id); }
 //: `mudo` va al final y aparte: un panel de parcheo no contesta porque no hay nada que
 //: preguntarle, y meterlo entre los desatendidos llena la pantalla de deberes imposibles. Es la
 //: misma decisión que ya toma el recuento de un armario con sus pasivos.
-const _DCD_STATE_ORDER = ['error', 'warning', 'ok', '', 'mudo'];
+const _DCD_STATE_ORDER = ['error', 'warning', 'ok', 'maintenance', '', 'mudo'];
 
 //: Los que no llevan nada que vigilar. Copiada aquí y no pedida al servidor porque esta pantalla
 //: no pide un armario: es la misma lista que `ROLES_MUDOS`, y una guarda comprueba que no se
@@ -135,6 +135,7 @@ function _dcDevState(i) {
 function _dcDevStateName(k) {
     if (k === 'mudo') return t('dcim_dev_st_quiet');
     if (!k) return t('dcim_dev_st_unwatched');
+    if (k === 'maintenance') return t('device_status_maintenance');
     return t('dcim_dev_st_' + k);
 }
 
@@ -194,9 +195,15 @@ function _dcdSortValue(i, key) {
 
 /** Una celda, con su `<td>`. Fuera de la declaración porque son nueve. */
 function _dcdCell(i, id) {
+    // La fila lleva a su armario; el botón, a la ficha del dispositivo cuando lo hay — el
+    // estado, las métricas y la configuración están allí, y no se repiten aquí.
     if (id === 'name') return `<td><span class="ss-dot me-1" style="background:${
             escAttr(deviceStateColor(i.state || ''))}"></span><span
-        class="fw-semibold">${esc(_dcimItemName(i))}</span></td>`;
+        class="fw-semibold">${esc(_dcimItemName(i))}</span>${i.device_uid && _dcimMay('infra_view')
+            ? ` <button class="btn btn-sm btn-secondary py-0 px-1 ms-1" title="${escAttr(t('device_open_sheet'))}"
+                aria-label="${escAttr(t('device_open_sheet'))}"
+                onclick="event.stopPropagation();openDeviceSheet(${jsStr(i.device_uid)})"><i
+                class="bi bi-box-arrow-up-right"></i></button>` : ''}</td>`;
     if (id === 'state') return `<td class="ss-fs-2">${
         esc(_dcDevStateName(_dcDevState(i)))}</td>`;
     if (id === 'role') return `<td class="ss-fs-2">${

@@ -250,7 +250,7 @@ createListTable({
     },
     rowKey: r => r.key,
     record: r => r.item,
-    // Three ways to read the set (clusters/_views.html). "By host" is a summary: it is handed
+    // Three ways to read the set (clusters/_views.html). "By device" is a summary: it is handed
     // every filtered row and drops the pagination, because "3 clusters have a single member"
     // is a statement about the deployment, not about the page.
     bodyMode: () => _clView.mode(),
@@ -366,13 +366,13 @@ async function _clTestRow(mod, coll, key) {
     const item = ((modulesData[mod] || {})[coll] || {})[key];
     if (!item) return;
     const label = item.label || key;
-    _openHostTestModal(`${modulePrettyName(mod)} — ${label}`);
+    _openDeviceTestModal(`${modulePrettyName(mod)} — ${label}`);
     const res = await apiPost('/api/v1/devices/test', {
         no_ssh: true,
         checks: [{ module: mod, collection: coll, key,
                    fields: { ...item }, cred_uid: item.cred_uid || '' }],
     });
-    _renderHostTestResults(res && res.data);
+    _renderDeviceTestResults(res && res.data);
 }
 
 // Quick enable/disable from the table (no full re-render — just dim the row).

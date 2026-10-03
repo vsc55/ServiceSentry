@@ -66,12 +66,12 @@ Todos `daemon=True`, por lo que no impiden el cierre del proceso:
 ### El ciclo de monitorización
 
 - El tiempo de un ciclo ≈ el módulo/item **más lento** (los rápidos esperan en el `wait`).
-  Ejemplos de checks lentos por naturaleza: SSH a hosts remotos, HTTP con timeouts,
+  Ejemplos de checks lentos por naturaleza: SSH a dispositivos remotos, HTTP con timeouts,
   resolución DNS, SNMP con reintentos.
 - Con muchos módulos, el tope de **16 workers** entre módulos puede serializar parcialmente.
   El paralelismo por-item dentro de cada módulo lo compensa para módulos con muchos items.
 - **Recomendación**: ajustar el `interval` del scheduler por encima del tiempo típico de
-  ciclo; usar `workers` por módulo para módulos con muchos items (p. ej. muchos hosts SSH).
+  ciclo; usar `workers` por módulo para módulos con muchos items (p. ej. muchos dispositivos SSH).
 
 ### Base de datos
 
@@ -176,7 +176,7 @@ insertar, el store poda las filas más antiguas por encima del tope:
 
 ## Recomendaciones de escalado
 
-1. **Muchos hosts/items** → subir `workers` por módulo y separar el monitor a un proceso
+1. **Muchos dispositivos/items** → subir `workers` por módulo y separar el monitor a un proceso
    **standalone** (modo microservicios) con BD PostgreSQL/MySQL compartida.
 2. **Alta disponibilidad** → varios monitores con lease de líder (`service_leader`); solo el
    líder ejecuta, el resto en espera. Ver [explica-servicios.md](explica-servicios.md) y [caso-kubernetes.md](caso-kubernetes.md).

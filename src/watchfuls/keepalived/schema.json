@@ -20,8 +20,8 @@
         "__cluster_columns__": ["vip"],
         "__member_field__": {"key": "priority", "type": "int", "label": "cl_map_weight",
                              "default": 100, "min": 0, "max": 255, "placeholder": "100"},
-        "__provision_device__": {"address_field": "vip", "link_field": "vip_host_uid",
-                               "name_template": "VIP: {label}"},
+        "__provision_device__": {"address_field": "vip", "link_field": "vip_device_uid",
+                                 "name_template": "VIP: {label}"},
         "__edit_tabs__": [
             {"id": "general", "general": true,      "icon": "bi-info-circle",   "groups": ["general"]},
             {"id": "setup",                         "icon": "bi-hdd-network",   "groups": ["connection"]},
@@ -45,7 +45,7 @@
         "vip":           {"type": "str",  "default": "", "placeholder": "192.168.1.50", "group": "connection"},
         "router_id":     {"type": "int",  "default": 0, "min": 0, "max": 255,
                           "zero_as_blank": true, "placeholder": "51", "group": "connection"},
-        "vip_host_uid":  {"type": "str",  "default": "", "hidden": true},
+        "vip_device_uid":  {"type": "str",  "default": "", "hidden": true},
         "timeout":       {"type": "int",  "default": 0, "min": 0, "max": 300,
                           "zero_as_blank": true, "placeholder_module": "timeout", "group": "connection"},
 

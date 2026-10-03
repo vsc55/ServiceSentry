@@ -122,7 +122,7 @@ def register(app, wa):
         # Generic: provision/link a device for any item that declares one
         # (__provision_device__ in its schema) — so address modules (ping/web/
         # ssl_cert) can monitor that endpoint. Module-agnostic (discovery-driven).
-        provisioned = modules_prov.sync_provisioned_hosts(
+        provisioned = modules_prov.sync_provisioned_devices(
             getattr(wa, '_devices_store', None), getattr(wa, '_modules_dir', None),
             data, session.get('username', 'system'))
         if wa._save_modules(data):
@@ -359,7 +359,7 @@ def register(app, wa):
                 config['__user__'] = session.get('username', '')
                 # Device-aware discovery: resolve the bound device (address + SSH, server-side) so
                 # the action can run on it (local or over SSH).
-                device_ctx = modules_actions.resolve_host_ctx(wa, config)
+                device_ctx = modules_actions.resolve_device_ctx(wa, config)
                 if device_ctx is not None:
                     config['__device__'] = device_ctx
                     # Fill the module's connection fields (address + SSH) from the bound device so

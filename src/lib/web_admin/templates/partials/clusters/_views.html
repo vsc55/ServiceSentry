@@ -12,9 +12,9 @@
      and they are all pinned to the same machine, so one reboot takes out all of them. No
      per-cluster row can show that: it is a fact about the intersection.
 
-   So the third view pivots onto the HOST and the header counts the single-member clusters.
+   So the third view pivots onto the DEVICE and the header counts the single-member clusters.
    Both are summaries: computed over everything the filters left standing and not paginated,
-   because "3 clusters have one host" is a statement about the deployment and a count over
+   because "3 clusters have one device" is a statement about the deployment and a count over
    one page changes as you page through it.
 
    What must not differ between views is what a cluster means — its status vocabulary comes
@@ -25,7 +25,7 @@
 const CLUSTER_VIEWS = [
     { id: 'table', label_key: 'cl_view_table', icon: 'bi-table',        render: null,             mode: 'table'   },
     { id: 'cards', label_key: 'cl_view_cards', icon: 'bi-grid-3x3-gap', render: '_clViewCards',   mode: 'cards'   },
-    { id: 'devices', label_key: 'cl_view_hosts', icon: 'bi-hdd-network',  render: '_clViewHosts',   mode: 'summary' },
+    { id: 'devices', label_key: 'cl_view_devices', icon: 'bi-hdd-network',  render: '_clViewDevices',   mode: 'summary' },
 ];
 
 const _clView = createViewState('ss_clusters_view', CLUSTER_VIEWS, () => {
@@ -75,7 +75,7 @@ function _clActionsHtml(row) {
 }
 
 /** A cluster with a single member is the case this section exists to prevent: one check,
- *  one host, and the word "cluster" on it. Not an error — it is a valid configuration on the
+ *  one device, and the word "cluster" on it. Not an error — it is a valid configuration on the
  *  way to a second device — which is why it is a marker and a count, not a red row. */
 function _clIsAlone(row) { return _clMembers(row).length < 2; }
 

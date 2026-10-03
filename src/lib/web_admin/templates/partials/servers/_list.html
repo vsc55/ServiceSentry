@@ -5,7 +5,7 @@
 
 let _deviceDraft = null;        // working copy while the device modal is open
 let _editingDeviceUid = null;   // null = new, uid = editing
-let _hostModalReadonly = false;  // true → no edit rights: fields disabled, no save
+let _deviceModalReadonly = false;  // true → no edit rights: fields disabled, no save
 
 // Per-device permission checks: the global servers_* permission OR the granular
 // per-server one (server.<uid>.<action>), mirroring the backend (routes/devices.py).
@@ -18,25 +18,25 @@ function _canDeleteDevice(uid) {
     return p.includes('devices_delete') || p.includes('server.' + uid + '.delete');
 }
 let _deviceChecks = {};         // {module: {collection, enabled, _key, fieldsMeta, fields}}
-let _deviceShownMods = new Set(); // modules shown for this host (add/remove per host)
-let _hostCheckFilters = {};   // {module: filter text} for the per-module check list
-let _hostSnapshot = null;     // baseline for Undo (set on open and after each save)
+let _deviceShownMods = new Set(); // modules shown for this device (add/remove per device)
+let _deviceCheckFilters = {};   // {module: filter text} for the per-module check list
+let _deviceSnapshot = null;     // baseline for Undo (set on open and after each save)
 
 // ──────────────────────────── Data ─────────────────────────────────
 //: Lo que algún paquete ofrece hacer en esta pantalla, y de dónde puede venir un dispositivo.
 //: Llegan con la lista: los dibuja la misma barra, y una segunda petición para pintar un botón
 //: es un botón que aparece tarde.
-let _hostActions = [];
-let _hostSources = [];
+let _deviceActions = [];
+let _deviceSources = [];
 
-async function loadHosts() {
+async function loadDevices() {
     const r = await apiGet('/api/v1/devices');
     devicesData = {};
     (r && r.devices || []).forEach(h => { devicesData[h.uid] = h; });
     // Ya filtradas por el servidor: sólo llegan las de los conectores que su propio paquete da
     // por configurados, así que esta pantalla no tiene que saber qué es estar puesto.
-    _hostActions = (r && r.actions) || [];
-    _hostSources = (r && r.sources) || [];
+    _deviceActions = (r && r.actions) || [];
+    _deviceSources = (r && r.sources) || [];
     return devicesData;
 }
 
@@ -45,10 +45,10 @@ async function loadHosts() {
  *  Aquí no hay escrito el nombre de ningún proveedor: la columna guarda `freshservice` y el
  *  texto lo declara su paquete. Un origen que ya no declara nadie —se quitó el proveedor— enseña
  *  el identificador tal cual, que sigue diciendo de dónde vino. */
-function _hostSourceHtml(device) {
+function _deviceSourceHtml(device) {
     const id = String((device || {}).source || '');
     if (!id) return '';
-    const spec = (_hostSources || []).find(s => s.id === id) || {};
+    const spec = (_deviceSources || []).find(s => s.id === id) || {};
     const nombre = spec.label_key ? t(spec.label_key) : id;
     return `<span class="badge bg-body-secondary text-body-secondary border fw-normal ms-1"
         title="${escAttr(tf('device_source_tt', nombre, device.external_id || ''))}"
@@ -56,7 +56,7 @@ function _hostSourceHtml(device) {
         esc(nombre)}</span>`;
 }
 async function reloadDevices() {
-    await loadHosts();
+    await loadDevices();
     renderServers();
 }
 
@@ -66,224 +66,35 @@ function devicesList() {
         String(a.name || '').localeCompare(String(b.name || '')));
 }
 
-// ── Column definitions ─────────────────────────────────────────────
-const _SRV_COLS = [
-    _META_COL.uid,
-    { id: 'name',        label: () => t('col_device_name'),                  sortKey: 'name',        always: true  },
-    { id: 'address',     label: () => t('col_device_address'),               sortKey: 'address',     always: false, resizable: false },
-    { id: 'type',        label: () => t('col_device_type'),                  sortKey: 'type',        always: false, resizable: false },
-    { id: 'kind',        label: () => t('col_device_kind'),                  sortKey: 'kind',        always: false, resizable: false },
-    { id: 'os',          label: () => t('col_device_os')||t('device_os'),       sortKey: 'os',          always: false, resizable: false },
-    { id: 'status',      label: () => t('col_host_status')||'Status',       sortKey: 'status',      always: false, resizable: false },
-    { id: 'modules',     label: () => t('col_host_modules')||'Modules',     sortKey: 'modules',     always: false, resizable: false },
-    { id: 'cluster',     label: () => t('col_host_cluster')||'Cluster',     sortKey: null,          always: false, resizable: false },
-    { id: 'tags',        label: () => t('col_device_tags'),                  sortKey: null,          always: false },
-    { id: 'description', label: () => t('device_description'),               sortKey: null,          always: false },
-    ..._META_TAIL,
-];
-const _SERVERS_DEFAULT_COLS = new Set(['address', 'type', 'kind', 'status', 'modules', 'cluster', 'tags']);
-
-// The 'maintenance' column was renamed to 'status'; migrate any saved config.
-const _srvMigrateCols = a => (Array.isArray(a) ? a.map(c => c === 'maintenance' ? 'status' : c) : a);
-let _serversVisibleCols = (() => {
-    try { const s = _srvMigrateCols(JSON.parse(localStorage.getItem('ss_servers_cols')||'null')); if (Array.isArray(s)) return new Set(s); } catch(_){}
-    return new Set(_SERVERS_DEFAULT_COLS);
-})();
-let _serversColOrder = (() => {
-    try { const s = _srvMigrateCols(JSON.parse(localStorage.getItem('ss_servers_col_order')||'null')); if (Array.isArray(s)) return s; } catch(_){}
-    return _SRV_COLS.map(c => c.id);
-})();
-// Column visibility/order/sort/page/select handlers are generated by the factory
-// (createListTable below). Date formatting uses the shared _fmtDateTime.
-
-// Effective server status: maintenance (a device-level override) wins over the
 // monitoring state ('error'/'warning'/'ok') computed by the backend from the
 // daemon's check results.  Empty = the device has no enabled checks.
 function _srvStatusOf(device) {
     if (device && device.maintenance) return 'maintenance';
     return (device && device.status) || '';
 }
-function _srvStatusRank(device) {
-    return { error: 0, warning: 1, maintenance: 2, ok: 3 }[_srvStatusOf(device)] ?? 4;
-}
 function _srvStatusBadge(device) {
-    // The shared one (see `HOST_STATE_BADGES`). This screen carries maintenance AS the status
+    // The shared one (see `DEVICE_STATE_BADGES`). This screen carries maintenance AS the status
     // rather than beside it, which the badge takes either way.
-    return hostStateBadge(_srvStatusOf(device));
+    return deviceStateBadge(_srvStatusOf(device));
 }
 
-// ── Filter helpers (the select choices come from the fleet, not a fixed list) ──────
-/** Cluster labels this host belongs to (empty when the cluster UI is not loaded). */
-function _srvClusterLabels(uid) {
-    return (typeof _deviceClusterMemberships === 'function' ? _deviceClusterMemberships(uid) : [])
-        .map(m => m.label).filter(Boolean);
-}
-const _srvAllTags = () =>
-    [...new Set(Object.values(devicesData).flatMap(h => h.tags || []))].sort();
-const _srvAllClusterLabels = () =>
-    [...new Set(Object.values(devicesData).flatMap(h => _srvClusterLabels(h.uid)))].sort();
-const _srvFilterOptions = values =>
-    [{ value: '', label: t('all') }].concat(values.map(v => ({ value: v, label: v })));
-
-// ── Sort / page state ──────────────────────────────────────────────
-let _serversPage = 1;
-let _serversPageSize = null;
-let _serversSort = 'name';
-let _serversSortDir = 'asc';
+//: What is ticked in the fleet list for a bulk action. The rows are device uids.
 let _selectedServers = new Set();
-let _serversCurrentPage = [];
 
-createListTable({
-    key: 'servers', containerId: 'servers-container', tableId: 'servers-table',
-    accent: 'teal', icon: 'bi-hdd-network', title: () => esc(t('tab_servers')),
-    columns: _SRV_COLS, defaultVisible: _SERVERS_DEFAULT_COLS,
-    thClass: { type: 'text-center', kind: 'text-center', status: 'text-center', modules: 'text-center' },
-    persist: true, clearLabelKey: 'tab_servers',
-    // Filter strip (shared design — see createListTable's spec.filters). The select options are
-    // derived from the fleet itself (tags, cluster memberships), so they follow the data instead
-    // of being a hardcoded list; the factory refreshes them in place on every reload.
-    filters: {
-        fields: [
-            { key: 'q',       label: () => t('col_device_name'), type: 'search', grow: true,
-              placeholder: () => t('device_filter_ph') },
-            { key: 'address', label: () => t('col_device_address'), type: 'search', minWidth: '150px' },
-            { key: 'type',    label: () => t('col_device_type'), type: 'select', minWidth: '160px',
-              options: () => [{ value: '', label: t('all') },
-                              { value: '-', label: t('device_type_unset') }].concat(
-                  DEVICE_TYPES.map(x => ({ value: x.uid, label: deviceTypeLabel(x.uid) }))) },
-            { key: 'kind',    label: () => t('col_kind'), type: 'select', minWidth: '140px',
-              options: () => [{ value: '', label: t('all') },
-                              { value: 'local',  label: t('device_kind_local') },
-                              { value: 'remote', label: t('device_kind_remote') }] },
-            { key: 'status',  label: () => t('col_status'), type: 'select', minWidth: '150px',
-              options: () => [{ value: '', label: t('all') }].concat(
-                  ['ok', 'warning', 'error', 'maintenance'].map(s =>
-                      ({ value: s, label: t('device_status_' + s) || s }))) },
-            { key: 'cluster', label: () => t('col_host_cluster') || 'Cluster', type: 'select',
-              minWidth: '160px', options: () => _srvFilterOptions(_srvAllClusterLabels()) },
-            { key: 'tag',     label: () => t('col_device_tags'), type: 'select', minWidth: '150px',
-              options: () => _srvFilterOptions(_srvAllTags()) },
-        ],
-        match: (h, f) => {
-            const q = (f.q || '').toLowerCase();
-            if (q && !['name', 'description'].some(
-                k => String(h[k] || '').toLowerCase().includes(q))) return false;
-            if (f.address && !String(h.address || '').toLowerCase()
-                                   .includes(f.address.toLowerCase())) return false;
-            // '-' is "unclassified", which is a real answer and not the same as "any":
-            // it is how you find the devices somebody added in a hurry.
-            if (f.type === '-' && h.device_type) return false;
-            if (f.type && f.type !== '-' && (h.device_type || '') !== f.type) return false;
-            if (f.kind && deviceKind(h.kind) !== f.kind) return false;
-            if (f.status && _srvStatusOf(h) !== f.status) return false;
-            if (f.tag && !(h.tags || []).includes(f.tag)) return false;
-            return !f.cluster || _srvClusterLabels(h.uid).includes(f.cluster);
-        },
-    },
-    rows: () => Object.values(devicesData), rowKey: device => device.uid,
-    record: device => device,
-    // Five ways to read the fleet (see servers/_views.html). The summaries are handed
-    // every filtered row instead of the page, and the factory drops the pagination bands for
-    // them — a count of "devices with no checks" that shrank as you paged would be worse than
-    // no count at all.
-    bodyMode: () => _srvBodyMode(),
-    showChooser: mode => mode === 'table',
-    cardsBody: (rows, ctx, all) => _srvViewBody(rows, ctx, all),
-    headerLead: () => _srvViewSwitcher(),
-    persistExtra: () => ({ view: _srvViewId() }),
-    applyExtra: cfg => _srvApplyView(cfg && cfg.view),
-    prepare: () => {
-        const p = currentUser.permissions || [];
-        return { canEdit: p.includes('devices_edit'), canDelete: p.includes('devices_delete') };
-    },
-    selectable: ctx => ctx.canDelete,
-    sortValue: (device, sortKey) => {
-        switch (sortKey) {
-            case 'uid':          return String(device.uid || '');
-            case 'address':      return String(device.address || '').toLowerCase();
-            case 'type':         return deviceTypeLabel(device.device_type || '').toLowerCase();
-            case 'kind':         return deviceKind(device.kind);
-            case 'os':           return String(device.os || 'auto');
-            case 'status':       return _srvStatusRank(device);
-            case 'modules':      return device.modules_total || 0;
-            case 'created_at':
-            case 'updated_at':   return String(device[sortKey] || '');
-            case 'updated_by':   return String(device.updated_by || '').toLowerCase();
-            default:             return String(device.name || '').toLowerCase();
-        }
-    },
-    cell: (device, colId) => {
-        switch (colId) {
-            case 'name':    return `<td class="text-nowrap fw-semibold"${device.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(device.name)}${device.virtual ? ` <span class="badge text-bg-info" title="${escAttr(t('device_virtual_hint'))}"><i class="bi bi-diagram-3 me-1"></i>${esc(t('device_virtual'))}</span>` : ''}${_hostSourceHtml(device)}</td>`;
-            case 'address': return `<td class="text-nowrap"><code${device.maintenance ? ' style="color:#fd7e14"' : ''}>${esc(device.address || '')}</code></td>`;
-            case 'type':    return `<td class="text-center">${device.device_type
-                ? `<span class="badge bg-body-secondary text-body border" title="${escAttr(deviceTypeLabel(device.device_type))}"><i class="bi ${escAttr(deviceTypeIcon(device.device_type))} me-1"></i>${esc(deviceTypeLabel(device.device_type))}</span>`
-                : `<span class="text-muted small">—</span>`}</td>`;
-            case 'kind':    return `<td class="text-center">${device.kind === 'remote'
-                ? `<span class="badge text-bg-secondary"><i class="bi bi-hdd-network me-1"></i>${esc(t('device_kind_remote'))}</span>`
-                : `<span class="badge bg-body-secondary text-body border">${esc(t('device_kind_local'))}</span>`}</td>`;
-            case 'os': {
-                const o = device.os || 'auto';
-                return `<td class="text-nowrap">${o === 'auto'
-                    ? `<span class="text-muted small">${esc(_osLabel('auto'))}</span>`
-                    : `<span class="badge bg-body-secondary text-body border">${esc(_osLabel(o))}</span>`}</td>`;
-            }
-            case 'status': return `<td class="text-center">${_srvStatusBadge(device)}</td>`;
-            case 'modules': {
-                const tot = device.modules_total || 0, act = device.modules_active || 0;
-                if (!tot) return `<td class="text-center"><span class="text-muted small">—</span></td>`;
-                return `<td class="text-center"><span class="badge bg-body-secondary text-body border"
-                    title="${escAttr((t('device_modules_count')||'{active} active / {total} added').replace('{active}',act).replace('{total}',tot))}">
-                    <i class="bi bi-puzzle me-1" style="opacity:.6"></i>${act}/${tot}</span></td>`;
-            }
-            case 'cluster': {
-                const mem = (typeof _deviceClusterMemberships === 'function') ? _deviceClusterMemberships(device.uid) : [];
-                if (!mem.length) return `<td><span class="text-muted small">—</span></td>`;
-                return `<td class="text-nowrap">${mem.map(m =>
-                    `<span class="badge bg-secondary me-1" title="${escAttr(modulePrettyName(m.mod) + ' · ' + m.count + ' ' + (t('device_cluster_nodes')||'nodes'))}">
-                        <i class="bi bi-diagram-3 me-1"></i>${esc(m.label)}</span>`).join('')}</td>`;
-            }
-            case 'tags':    return `<td>${(device.tags || []).map(tg =>
-                `<span class="badge bg-secondary me-1">${esc(tg)}</span>`).join('') || '<span class="text-muted small">—</span>'}</td>`;
-            case 'description': return `<td class="text-muted small text-truncate ss-td-ellipsis" title="${escAttr(device.description || '')}">${esc(device.description || '')}</td>`;
-            default:            return '<td></td>';
-        }
-    },
-    // The buttons come from the shared builder: this is the section with PER-HOST
-    // permissions, so "may this user edit" has a different answer per row and must be asked
-    // in one place — see servers/_views.html.
-    actions: (device, ctx) => _srvActionsHtml(device, ctx),
-    bulkBar: (ctx, sel) => _serversBulkBar(ctx.canDelete),
-    headerButtons: ctx => _serversToolbar(ctx.canEdit),
-    emptyBody: () => `<div class="text-center py-5 text-muted">
-                <i class="bi bi-hdd-network ss-empty-icon"></i>
-                <span>${esc(t('device_no_hosts'))}</span>
-            </div>`,
-    state: {
-        visible: { get: () => _serversVisibleCols, set: s => { _serversVisibleCols = s; } },
-        order:   { get: () => _serversColOrder,    set: o => { _serversColOrder = o; } },
-        page:    { get: () => _serversPage,        set: p => { _serversPage = p; } },
-        pageSize:{ get: () => _serversPageSize,    set: v => { _serversPageSize = v; } },
-        sort:    { get: () => _serversSort,        set: v => { _serversSort = v; } },
-        sortDir: { get: () => _serversSortDir,     set: v => { _serversSortDir = v; } },
-        selected: () => _selectedServers,
-        currentPage: { get: () => _serversCurrentPage, set: a => { _serversCurrentPage = a; } },
-    },
-    globalPrefix: {
-        render: 'renderServers', goPage: '_goServersPage', changePageSize: '_changeServersPageSize',
-        sort: '_sortServers', toggleCol: '_serversToggleCol', resetCols: '_resetServersCols',
-        saveOrder: '_srvSaveColOrder', selectAll: '_serversSelectAll', toggleOne: '_serversToggleOne',
-        initFeatures: '_initServersTableFeatures',
-    },
-});
+/** The registry has no list of its own any more: the fleet is listed in Infrastructure. What
+ *  used to redraw this list — saving a device, cloning it, deleting one — redraws that one, and
+ *  asks the server again, because a device just created is not in a list fetched before it. */
+function renderServers() {
+    if (typeof renderInfra === 'function' && document.getElementById('infra-container')) renderInfra();
+}
 
-// Toolbar buttons (reload / migrate / new) — gated by devices_edit.
+// The registry's buttons, drawn in Infrastructure's fleet toolbar — gated by devices_edit.
+// No reload of its own: the fleet list has one, and two refresh buttons on one bar are two
+// guesses at which one fetches what.
 function _serversToolbar(canEdit) {
-    return `<button class="btn btn-sm btn-secondary" onclick="reloadDevices()" title="${escAttr(t('hosts_reload_tt'))}">
-            <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('reload'))}</button>
-        ${canEdit ? `<button class="btn btn-sm btn-info ms-1" onclick="openMigrateModal()" title="${escAttr(t('device_migrate_tt'))}">
+    return `${canEdit ? `<button class="btn btn-sm btn-info ms-1" onclick="openMigrateModal()" title="${escAttr(t('device_migrate_tt'))}">
             <i class="bi bi-magic me-1"></i>${esc(t('device_migrate'))}</button>` : ''}
-        ${canEdit ? _hostsNewHtml() : ''}`;
+        ${canEdit ? _devicesNewHtml() : ''}`;
 }
 
 /** El botón de añadir y, colgando de él, las otras formas de que aparezca un dispositivo.
@@ -300,19 +111,19 @@ function _serversToolbar(canEdit) {
  *  flecha: promete algo. Y lo que cuelga llega ya filtrado por los conectores que sus propios
  *  paquetes dan por configurados; el permiso se vuelve a mirar aquí, que es una reja encima de
  *  la del servidor y nunca en su lugar. */
-function _hostsNewHtml() {
+function _devicesNewHtml() {
     const nuevo = `<button class="btn btn-sm btn-success" onclick="openNewDeviceModal()"
         title="${escAttr(t('device_new_tt'))}"><i class="bi bi-plus-lg me-1"></i>${
         esc(t('device_new'))}</button>`;
     const perms = currentUser.permissions || [];
-    const otras = (_hostActions || []).filter(a => !a.perm || perms.includes(a.perm));
+    const otras = (_deviceActions || []).filter(a => !a.perm || perms.includes(a.perm));
     if (!otras.length) return `<span class="ms-1">${nuevo}</span>`;
     return `<div class="btn-group ms-1">
         ${nuevo}
         <button class="btn btn-sm btn-success dropdown-toggle dropdown-toggle-split"
             data-bs-toggle="dropdown" aria-expanded="false"
-            title="${escAttr(t('hosts_new_more'))}"
-            ><span class="visually-hidden">${esc(t('hosts_new_more'))}</span></button>
+            title="${escAttr(t('devices_new_more'))}"
+            ><span class="visually-hidden">${esc(t('devices_new_more'))}</span></button>
         <ul class="dropdown-menu dropdown-menu-end ss-dropdown-sm">
             ${otras.map(a => `<li><button class="dropdown-item" type="button"
                 onclick="${escAttr(a.fn)}()"

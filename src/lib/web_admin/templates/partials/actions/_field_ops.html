@@ -389,10 +389,10 @@ function editItemLabel(target, pathStr, parentPathStr) {
     const sch = ITEM_SCHEMAS[_schemaKeyOf(parentPathStr)] || {};
     const titleField = sch['__check_title_field__'];
     if (!titleField) return;
-    const input = document.getElementById('hostLabelInput');
+    const input = document.getElementById('deviceLabelInput');
     input.value = String(item[titleField] || '');
-    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('hostLabelModal'));
-    document.getElementById('btnHostLabelOk').onclick = () => {
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceLabelModal'));
+    document.getElementById('btnDeviceLabelOk').onclick = () => {
         updateField(target, pathStr + '|' + titleField, input.value.trim());
         modal.hide();
         target === 'modules' ? _renderModulesSurface() : renderConfig();

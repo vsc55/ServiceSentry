@@ -25,7 +25,7 @@ _SECRET_KEYS = frozenset({'ssh_password', 'ssh_key_string', 'password', 'token'}
 
 
 # ── Resolution in ModuleBase.resolve_device ────────────────────────────────────
-class _FakeHosts:
+class _FakeDevices:
     def __init__(self, devices):
         self._h = devices
 
@@ -113,7 +113,7 @@ class TestApiCredentials:
         assert clone['data']['ssh_user'] == 'root'
         assert clone['data']['ssh_password'] == 'p@ss'        # secret copied server-side
 
-    def test_host_test_ssh_uses_credential_not_stored(self, client, admin):
+    def test_device_test_ssh_uses_credential_not_stored(self, client, admin):
         # Regression: testing a device's SSH with a selected credential must use
         # the credential's secret, NOT the device's stored inline password.
         _login(client)
@@ -144,7 +144,7 @@ class TestApiCredentials:
         assert config['url'] == 'http://x'                                         # untouched
 
     def test_check_test_applies_credential(self, admin):
-        # The host-modal check "test" buttons must use the credential, not the
+        # The device-modal check "test" buttons must use the credential, not the
         # restored inline secret.
         from lib.core.devices.service import _apply_check_cred
         uid = admin._credentials_store.create(
@@ -168,7 +168,7 @@ class TestApiCredentials:
         assert item.get('cred_uid') == uid
         assert 'auth_user' not in item and 'auth_password' not in item
 
-    def test_usage_lists_referencing_host(self, client, admin):
+    def test_usage_lists_referencing_device(self, client, admin):
         _login(client)
         uid = client.post('/api/v1/credentials', json=_API_CRED).get_json()['uid']
         admin._devices_store.create({'name': 'h-ref', 'address': '10.0.0.9', 'kind': 'remote',
@@ -179,7 +179,7 @@ class TestApiCredentials:
 
     def test_bulk_usage_answers_for_the_whole_catalogue(self, client, admin):
         """The catalogue's usage view asks once instead of once per row: the scan walks every
-        host profile and every module check whichever way it is asked, so N calls would
+        device profile and every module check whichever way it is asked, so N calls would
         repeat one walk N times to answer N slices of the same result."""
         _login(client)
         used = client.post('/api/v1/credentials', json=_API_CRED).get_json()['uid']

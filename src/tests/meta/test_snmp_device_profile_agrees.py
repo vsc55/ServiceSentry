@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """The SNMP connection is described once, and this is what checks that it arrives.
 
-``lib/core/snmp/manifest.py`` declares the profile a HOST carries: what the Servers form
-draws, and what any check bound to that host inherits. A check against a bare IP has to stay
+``lib/core/snmp/manifest.py`` declares the profile a DEVICE carries: what the Servers form
+draws, and what any check bound to that device inherits. A check against a bare IP has to stay
 possible without registering a device first, so the same fields have to appear on a *server*
 item too — and the module used to write them out a second time for that.
 
@@ -41,14 +41,14 @@ def _servers():
 
 
 def _core():
-    from lib.core.snmp.manifest import HOST_PROFILE          # noqa: PLC0415
-    return {f['name']: f for f in HOST_PROFILE['fields']}
+    from lib.core.snmp.manifest import DEVICE_PROFILE          # noqa: PLC0415
+    return {f['name']: f for f in DEVICE_PROFILE['fields']}
 
 
 class TestTheTwoDescriptionsAgree:
 
     def test_every_core_field_exists_on_the_check(self):
-        """An inline check has to be able to say everything a host can say, or the loose-IP
+        """An inline check has to be able to say everything a device can say, or the loose-IP
         case is a second-class citizen that quietly cannot do SNMPv3."""
         servers = _servers()
         missing = [n for n in _core() if n not in servers]
@@ -76,7 +76,7 @@ class TestTheTwoDescriptionsAgree:
 
     def test_the_module_names_the_protocol_and_the_core_says_what_it_holds(self):
         """The module keeps its ``__device_profile__`` — that is what makes a check bound to a
-        host inherit these fields — but it no longer RESTATES them. It used to, and so did
+        device inherit these fields — but it no longer RESTATES them. It used to, and so did
         ten other modules for SSH; the list is not theirs to hold.
 
         What the module still says is where the address lands: which field of ITS item
@@ -115,7 +115,7 @@ class TestTheCredentialSaysTheSameThing:
     that disappears takes its stored credentials out of the editor while they stay in the
     database, still referenced by the devices that use them.
 
-    Declared by the core now, and pinned against the host profile because the two describe
+    Declared by the core now, and pinned against the device profile because the two describe
     the same fields: a `show_when` that drifts hides a v3 key on one form and not the other,
     and an `options` list that drifts offers an auth protocol the other cannot store.
     """
@@ -129,12 +129,12 @@ class TestTheCredentialSaysTheSameThing:
         from lib.modules.discovery.credential_schemas import credential_schemas  # noqa: PLC0415
         cat = credential_schemas()
         assert 'snmp_auth' in cat, 'the SNMP credential type is gone from the editor'
-        # `module` still says 'snmp': it is what the host form reads to offer this type on
+        # `module` still says 'snmp': it is what the device form reads to offer this type on
         # the SNMP profile's card, and that is a lookup key, not a claim about who ran it.
         assert cat['snmp_auth']['module'] == 'snmp'
         assert len(cat['snmp_auth']['fields']) == len(self._cred())
 
-    def test_the_identity_fields_agree_with_the_host_profile(self):
+    def test_the_identity_fields_agree_with_the_device_profile(self):
         core = _core()
         cred = self._cred()
         shared = sorted(set(core) & set(cred))

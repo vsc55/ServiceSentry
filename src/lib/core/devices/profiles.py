@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Host connection-profile catalog.
+"""Device connection-profile catalog.
 
 Builds, from every watchful module's ``__device_profile__`` declaration, the map
 of connection protocols a Device can carry and the fields each one holds — with
@@ -85,7 +85,7 @@ CORE_SSH_SECRET_FIELDS = frozenset({'ssh_password', 'ssh_key_string'})
 _BUILTIN_SSH = {
     'module':        '__device__',
     'builtin':       True,
-    'address_field': 'ssh_host',   # fed from the host address; never shown
+    'address_field': 'ssh_host',   # fed from the device address; never shown
     'fields': [
         {'name': 'ssh_port', 'type': 'int', 'min': 1, 'max': 65535, 'placeholder': 22,
          'default': 0,
@@ -218,7 +218,7 @@ def _core_profiles() -> dict:
             'fields':        list(_BUILTIN_SSH['fields']),
         },
     }
-    for pkg, decl in scan('HOST_PROFILE'):
+    for pkg, decl in scan('DEVICE_PROFILE'):
         if not isinstance(decl, dict) or not decl.get('key'):
             continue
         section = decl.get('i18n') or ''
@@ -299,7 +299,7 @@ def core_profile_field_names(key: str) -> tuple:
 
 def module_device_multiple(watchfuls_dir: str | None = None) -> dict:
     """Return ``{module: bool}`` — whether a device-capable module allows SEVERAL
-    checks bound to one host (e.g. datastore: mysql + postgres; web: many URLs).
+    checks bound to one device (e.g. datastore: mysql + postgres; web: many URLs).
     Declared by ``"__device_multiple__": true`` in the module schema; default False
     (single check per device, e.g. ping/ntp)."""
     base = _watchfuls_dir(watchfuls_dir)
@@ -328,7 +328,7 @@ def module_device_multi_bind(watchfuls_dir: str | None = None) -> dict:
     ``"__device_multiple_bind__": true`` (e.g. proxmox: a cluster check whose
     failover address list spans all member nodes); default False.
 
-    Distinct from :func:`module_device_multiple` (several *checks* per one host).
+    Distinct from :func:`module_device_multiple` (several *checks* per one device).
     A multi-bind module is configured as a single multi-device check (Modules),
     not per-device — so it is excluded from the per-device "Servers" enable flow."""
     base = _watchfuls_dir(watchfuls_dir)

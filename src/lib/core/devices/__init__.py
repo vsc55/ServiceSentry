@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Hosts domain — everything about devices in one place (the "Servers" tab; see
+"""Devices domain — everything about devices in one place (the "Servers" tab; see
 :mod:`lib.core`).
 
 Admin/registry layer:

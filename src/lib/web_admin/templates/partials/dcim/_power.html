@@ -231,7 +231,7 @@ function _dcPduTable(pdus) {
             <th class="text-end">${esc(t('dcim_outlets_free'))}</th>
             <th class="text-end">${esc(t('dcim_watts_said'))}</th>
             <th style="width:9rem">${esc(t('dcim_load'))}</th>
-            <th>${esc(t('dcim_host'))}</th>
+            <th>${esc(t('dcim_device'))}</th>
             <th></th>
         </tr></thead>
         <tbody>${pdus.map(_dcPduRow).join('')}</tbody>
@@ -264,7 +264,7 @@ function _dcPduRow(p) {
                 <div class="progress-bar bg-${tono}"
                      style="width:${Math.min(100, Math.round(carga * 100))}%"></div>
             </div>`}</td>
-        <td>${_dcPduHostCell(p)}</td>
+        <td>${_dcPduDeviceCell(p)}</td>
         <td class="text-end">${_dcimMay('dcim_edit') ? `<button
             class="btn btn-sm btn-warning" onclick="_dcPduDrop(${jsStr(p.uid)},${
                 jsStr(p.name)})"><i class="bi bi-trash"></i></button>` : ''}</td>
@@ -281,20 +281,20 @@ function _dcPduRow(p) {
  *  tenga las dos: el uid no se teclea y el nombre cambia. La lista es la misma que ofrece el
  *  formulario de un equipo —`/api/v1/dcim/devices`, ya cargada— y está estrechada por el registro,
  *  así que aquí no se ofrece ninguna máquina que este lector no pueda ver de todas formas. */
-function _dcPduHostCell(p) {
+function _dcPduDeviceCell(p) {
     if (!_dcimMay('dcim_edit'))
         return p.device_uid
-            ? `<span class="ss-fs-2">${esc(_dcimHostName(p.device_uid))}</span>` : '';
-    const lista = (_dcimHosts || []).length ? ' list="dcim-devices" autocomplete="off"' : '';
+            ? `<span class="ss-fs-2">${esc(_dcimDeviceName(p.device_uid))}</span>` : '';
+    const lista = (_dcimDevices || []).length ? ' list="dcim-devices" autocomplete="off"' : '';
     return `${_dcimDatalist('devices')}
         <input class="form-control form-control-sm" style="max-width:11rem"${lista}
                value="${escAttr(p.device_uid || '')}"
-               placeholder="${escAttr(t('dcim_host_none'))}"
-               title="${escAttr(p.device_uid ? _dcimHostName(p.device_uid) : t('dcim_host_tt'))}"
-               onchange="_dcPduHost(${jsStr(p.uid)},this.value)">`;
+               placeholder="${escAttr(t('dcim_device_none'))}"
+               title="${escAttr(p.device_uid ? _dcimDeviceName(p.device_uid) : t('dcim_device_tt'))}"
+               onchange="_dcPduDevice(${jsStr(p.uid)},this.value)">`;
 }
 
-async function _dcPduHost(uid, device) {
+async function _dcPduDevice(uid, device) {
     const r = await _dcimSend('PUT', `/api/v1/dcim/pdus/${encodeURIComponent(uid)}`,
                               {device_uid: String(device || '').trim()});
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');

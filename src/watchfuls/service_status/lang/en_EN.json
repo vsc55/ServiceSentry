@@ -29,7 +29,7 @@
     "hints": {
         "threads":     "Number of services to check in parallel.",
         "timeout":     "Command/SSH timeout in seconds.",
-        "label":       "Display name shown in Modules and notifications (e.g. \"host - service\"). Editable; defaults from discovery.",
+        "label":       "Display name shown in Modules and notifications (e.g. \"device - service\"). Editable; defaults from discovery.",
         "service":     "System service / unit name used to query the state (e.g. systemctl). Filled by discovery.",
         "expected":    "Expected state. An alert is triggered when the actual state differs.",
         "remediation": "Automatically starts or stops the service to restore the expected state."
@@ -41,7 +41,7 @@
         "item_added":     "Service \"{}\" added"
     },
     "messages": {
-        "svc_unsupported_os":     "Service: {} - unsupported host OS: {} ⚠️",
+        "svc_unsupported_os":     "Service: {} - unsupported device OS: {} ⚠️",
         "svc_ok":                 "Service: {} - OK ✅",
         "svc_running":            "Service: {} - Running ✅",
         "svc_stopped":            "Service: {} - Stopped ✅",

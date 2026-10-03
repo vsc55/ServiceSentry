@@ -8,7 +8,7 @@ Este documento explica cómo funciona de punta a punta, y termina con el **plan 
 almacenamiento** que ese 83 % justifica.
 
 > Las **credenciales y el perfil de conexión** viven en el registro de dispositivos — ver
-> [explica-hosts.md](explica-hosts.md). La **API** está en [ref-api.md](ref-api.md) y la
+> [explica-dispositivos.md](explica-dispositivos.md). La **API** está en [ref-api.md](ref-api.md) y la
 > **configuración del módulo** en [ref-modulos.md](ref-modulos.md).
 
 ---
@@ -21,7 +21,7 @@ almacenamiento** que ese 83 % justifica.
 | `watchfuls/snmp/` | **El módulo**: los checks de OID, y convertir una lectura en una **serie** — el valor anterior, el nombre de la fila, el veredicto, el resultado |
 
 El corte no es organizativo. Al núcleo lo llaman **tres** sitios que tienen que dar la misma
-respuesta: el planificador, la pantalla de «probar perfiles» y el recorrido de un host desde el
+respuesta: el planificador, la pantalla de «probar perfiles» y el recorrido de un dispositivo desde el
 registro. Un formato de perfil implementado dos veces son dos ideas de qué mide un dispositivo.
 
 Y el estado que sobrevive al proceso —la línea base de cada contador, la racha de fallos— vive en
@@ -58,8 +58,8 @@ ninguno. Un nombre que no esté en la tabla cae a MD5/DES.
 > `version == '3'` — una petición v2c a un dispositivo v3. Los checks funcionaban y el
 > descubrimiento devolvía silencio.
 
-**Dónde viven las credenciales**: en el perfil de host `snmp`, declarado una vez en
-`lib/core/snmp/manifest.py` (`HOST_PROFILE`) — `host`, `port`, `version`, `community`,
+**Dónde viven las credenciales**: en el perfil de dispositivo `snmp`, declarado una vez en
+`lib/core/snmp/manifest.py` (`DEVICE_PROFILE`) — `host`, `port`, `version`, `community`,
 `snmpv3_username`, `snmpv3_auth_key`, `snmpv3_priv_key`, `snmpv3_auth_protocol`,
 `snmpv3_priv_protocol`, `device_profiles`. El `schema.json` del módulo sólo dice
 `"__profile_fields__": "snmp"`; el panel expande la declaración del núcleo dentro.
@@ -143,8 +143,8 @@ ciclo que no se ejecuta es un fallo peor.
 El tercero es la base de datos y no una cuarta carpeta porque un despliegue con un contenedor
 web y otro worker **comparte la base de datos y no el disco**.
 
-**A quién se le aplica**: a un item del módulo que lleve `device_profiles`, y a **cualquier host**
-del registro cuyo perfil `snmp` tenga perfiles asignados. Eso último es el punto entero: un host
+**A quién se le aplica**: a un item del módulo que lleve `device_profiles`, y a **cualquier dispositivo**
+del registro cuyo perfil `snmp` tenga perfiles asignados. Eso último es el punto entero: un dispositivo
 con perfil SNMP y al menos un perfil de dispositivo **es** un dispositivo y se muestrea; no hace
 falta que exista nada más. No pisa un «apagado» explícito, no toma la decisión de mantenimiento y
 no mira los checks.
@@ -194,7 +194,7 @@ perfil no lo muestrean dos veces.
 | `verdict: false` | Un estado que **colorea pero no juzga**: un armario de switches a medio poblar salía permanentemente en rojo |
 | `aggregate: sum` | El total del dispositivo. Cada fila conserva su propia línea base y se diferencia por separado; **la suma es de los resultados**, no de los contadores en bruto — sumar antes de diferenciar da un pico cada vez que se añade un puerto |
 | `of_device` | Las filas de `ipAddrTable` son las direcciones de **una** máquina: se doblan en un solo hecho unido por comas, porque una respuesta por dirección es «una respuesta archivada en cinco sitios que nadie abre» |
-| `evidence` | Las tablas de reenvío y las cachés ARP no llegan a ser resultados: van al almacén de indicios, archivadas por host, **y se escriben aunque estén vacías** — un switch que ha olvidado todas las MAC no puede dejar los cables de la semana pasada dibujados en el mapa |
+| `evidence` | Las tablas de reenvío y las cachés ARP no llegan a ser resultados: van al almacén de indicios, archivadas por dispositivo, **y se escriben aunque estén vacías** — un switch que ha olvidado todas las MAC no puede dejar los cables de la semana pasada dibujados en el mapa |
 
 ---
 

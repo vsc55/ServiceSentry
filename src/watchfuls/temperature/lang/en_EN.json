@@ -13,7 +13,7 @@
         "enabled": "Enable or disable monitoring for this sensor.",
         "threads": "Number of sensors to check in parallel.",
         "timeout": "Command/SSH timeout in seconds.",
-        "sensor":  "Sensor name (Linux thermal zone type) to read on the host. If empty, the item key is used.",
+        "sensor":  "Sensor name (Linux thermal zone type) to read on the device. If empty, the item key is used.",
         "label":   "Display name shown in notifications. Falls back to the sensor name if empty.",
         "alert":   "Temperature threshold (\u00b0C). An alert is triggered when the sensor exceeds this value. Overrides the module-level threshold."
     },
@@ -31,7 +31,7 @@
         "item_added":     "Sensor \"{}\" added"
     },
     "messages": {
-        "temp_unsupported_os": "Temp: {} - only available on Linux (host OS: {}) ⚠️",
+        "temp_unsupported_os": "Temp: {} - only available on Linux (device OS: {}) ⚠️",
         "temp_high": "Sensor {}, over temperature Warning {} ºC 🔥",
         "temp_ok":   "Sensor {}, temperature Ok {} ºC ✅"
     },

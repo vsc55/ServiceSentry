@@ -67,9 +67,9 @@ ORG_ACTIONS = [
 # `devices_edit` y no `orgs_edit`: esto crea fichas en el registro de máquinas. Quien lleva las
 # sociedades no tiene por qué poder dar de alta cuarenta servidores, y al revés tampoco.
 DEVICE_ACTIONS = [
-    {'id': 'import', 'label_key': 'fs_import_hosts', 'tooltip_key': 'fs_import_hosts_tt',
+    {'id': 'import', 'label_key': 'fs_import_devices', 'tooltip_key': 'fs_import_devices_tt',
      'icon': 'bi-cloud-download', 'variant': 'primary', 'order': 10,
-     'perm': 'devices_edit', 'fn': 'freshserviceImportHosts',
+     'perm': 'devices_edit', 'fn': 'freshserviceImportDevices',
      'ready': is_configured},
 ]
 
@@ -127,7 +127,7 @@ AUDIT_EVENTS = [
     # Traer los dispositivos. `info`, como las empresas y por lo mismo: crea fichas que después
     # salen en la lista de todo el mundo y a las que alguien engancha checks, y «¿de dónde ha
     # salido esta máquina?» se pregunta meses después.
-    {'key': 'freshservice_import_hosts', 'severity': 'info'},
+    {'key': 'freshservice_import_devices', 'severity': 'info'},
 ]
 
 

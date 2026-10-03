@@ -34,12 +34,12 @@ from .items import is_item_collection
 # Flask-free config resolution/merge for /api/v1/modules/watchfuls/<module>/<action>: resolve the
 # bound device (address + SSH, server-side), restore masked secrets, and overlay referenced
 # credentials — mirroring what ModuleBase.resolve_device does for a scheduled check.
-def resolve_host_ctx(wa, config):
+def resolve_device_ctx(wa, config):
     """Build a device-context dict for device-aware discovery, or None.
 
     Resolved server-side so SSH secrets never come from the client: a ``device_uid`` is looked
     up in the device registry (decrypted); a brand-new (unsaved) device may instead pass a
-    ``_host`` draft, whose masked secrets are restored from the stored device when a ``device_uid``
+    ``_device`` draft, whose masked secrets are restored from the stored device when a ``device_uid``
     is also given."""
     from lib.core.devices.resolve import resolve_os  # noqa: PLC0415
 
@@ -84,7 +84,7 @@ def resolve_host_ctx(wa, config):
         if isinstance(uids, list):
             uid = next((str(u).strip() for u in uids if str(u).strip()), '')
     stored = store.get(uid, decrypt=True) if (store and uid) else None
-    draft = config.get('_host') if isinstance(config.get('_host'), dict) else None
+    draft = config.get('_device') if isinstance(config.get('_device'), dict) else None
 
     if draft:
         profiles = {k: dict(v) for k, v in (draft.get('profiles') or {}).items()
@@ -286,7 +286,7 @@ def apply_item_identities(wa, module, config):
         for item in coll.values():
             if not isinstance(item, dict):
                 continue
-            device_ctx = resolve_host_ctx(wa, item)
+            device_ctx = resolve_device_ctx(wa, item)
             if device_ctx is not None:
                 merge_device_conn(wa, module, item, device_ctx)
             # Last, so the credential wins over anything the device profile filled in.

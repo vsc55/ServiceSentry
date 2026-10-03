@@ -342,25 +342,25 @@ class TestWhatTheMachineHasBeenSaying:
     def test_it_is_a_tab_here(self):
         js = _js()
         assert "id: 'logs'" in js, 'the section still has no logs'
-        assert "_loadHostLogs('infraLogsBody'" in js, 'the tab draws nothing'
+        assert "_loadDeviceLogs('infraLogsBody'" in js, 'the tab draws nothing'
 
     def test_it_is_the_same_panel_the_modal_draws(self):
         """Two syslog tables with two filter bars and two pagers is two places for them to
         stop agreeing — and the second one is always the one nobody updates."""
         js = _strip_comments(_read(self.MONITORING))
-        assert js.count('async function _loadHostLogs') == 1, 'a second logs panel appeared'
-        body = _fn(js, '_loadHostLogs')
+        assert js.count('async function _loadDeviceLogs') == 1, 'a second logs panel appeared'
+        body = _fn(js, '_loadDeviceLogs')
         assert 'containerId' in body, 'it still knows which box it lives in'
         assert 'address != null' in body, 'it still reads the modal draft'
 
-    def test_it_is_drawn_HERE_and_not_in_the_host_dialog_too(self):
+    def test_it_is_drawn_HERE_and_not_in_the_device_dialog_too(self):
         """The dialog is where a device is CONFIGURED; this is where it is looked at, and a
         machine misbehaving is looked at here. Two copies of one syslog table, with two filter
         bars and two pagers, is two places for them to stop agreeing — and the second is
         always the one nobody updates."""
         modal = _strip_comments(_read(os.path.join(
             SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_modal.html')))
-        for gone in ('hmTabLogs', 'hmLogsBody', '_loadHostLogs'):
+        for gone in ('hmTabLogs', 'hmLogsBody', '_loadDeviceLogs'):
             assert gone not in modal, f'the dialog draws the logs again ({gone})'
 
     def test_the_refresh_tick_belongs_to_the_table(self):
@@ -369,7 +369,7 @@ class TestWhatTheMachineHasBeenSaying:
         would have found no such pane and switched the auto-refresh off — with nothing to say
         so, because the only symptom is that rows stop being new."""
         js = _strip_comments(_read(self.MONITORING))
-        tick = _fn(js, '_hostLogsApplyTimer')
+        tick = _fn(js, '_deviceLogsApplyTimer')
         assert 'hmTabLogs' not in tick, 'the tick still looks for the dialog'
         assert "getElementById('hml-rows')" in tick, 'it is not keyed on the table'
         assert 'offsetParent' in tick, (
@@ -377,8 +377,8 @@ class TestWhatTheMachineHasBeenSaying:
 
     def test_nothing_is_bound_to_a_dialog_it_cannot_be_inside(self):
         js = _strip_comments(_read(self.MONITORING))
-        body = _fn(js, '_loadHostLogs')
-        assert 'hostModal' not in body, 'it still unbinds from a dialog that never holds it'
+        body = _fn(js, '_loadDeviceLogs')
+        assert 'deviceModal' not in body, 'it still unbinds from a dialog that never holds it'
         assert "containerId ? document.getElementById(containerId)" in body, (
             'it falls back to an element the dialog used to have')
 
@@ -387,8 +387,8 @@ class TestWhatTheMachineHasBeenSaying:
         header and `_attachColFeatures` for resize / auto-fit / reorder. The logs table was
         the one that did not use them."""
         js = _strip_comments(_read(self.MONITORING))
-        draw = _fn(js, '_hostLogsDrawTable')
-        assert '_thSortInner(' in draw and '_hostLogsSort' in draw
+        draw = _fn(js, '_deviceLogsDrawTable')
+        assert '_thSortInner(' in draw and '_deviceLogsSort' in draw
         assert 'ss-th-resizable' in draw and 'draggable="true"' in draw
         assert '_attachColFeatures(' in draw, 'a second resize implementation'
 
@@ -399,7 +399,7 @@ class TestWhatTheMachineHasBeenSaying:
         js = _strip_comments(_read(self.MONITORING))
         assert 'sort: st.sort' in js and 'order: st.order' in js, (
             'the sort never reaches the request')
-        fn = _fn(js, '_hostLogsSort')
+        fn = _fn(js, '_deviceLogsSort')
         assert '_deviceLogsFetch()' in fn and 'st.page = 1' in fn, (
             'sorting leaves the reader on page nine of a different order')
 
@@ -407,7 +407,7 @@ class TestWhatTheMachineHasBeenSaying:
         """A header and a body that each decide their own column order is a table that puts
         one column's data under another's name the first time somebody drags one."""
         js = _strip_comments(_read(self.MONITORING))
-        draw = _fn(js, '_hostLogsDrawTable')
+        draw = _fn(js, '_deviceLogsDrawTable')
         assert draw.count('_hmlOrderedCols()') == 1, 'two orders in one table'
         assert 'hml-head' in draw and 'hml-rows' in draw, (
             'the header and the rows are not drawn together')
@@ -749,7 +749,7 @@ class TestNothingIsPushedOutOfItsColumn:
     CSS = os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css')
 
     def test_the_body_beside_a_column_can_shrink(self):
-        for fn, src in (('_infraMetricsPane', _js()), ('_infraHostHtml', _js())):
+        for fn, src in (('_infraMetricsPane', _js()), ('_infraDeviceHtml', _js())):
             body = _fn(src, fn)
             assert 'min-width:0' in body, (
                 f'{fn} gives its main column a floor of its own content, so a wide row of '
@@ -1046,7 +1046,7 @@ class TestHowIsThisMachine:
 
     def test_a_table_says_which_of_its_rows_the_summary_is_about(self):
         """Reported from the screen, and it is the difference between a summary and a dump.
-        HOST-RESOURCES-MIB reports every store a host has: on a NAS running containers that is
+        DEVICE-RESOURCES-MIB reports every store a device has: on a NAS running containers that is
         physical memory, swap and the buffers, then forty bind mounts of the same volume — so
         Details came out as five useful rings followed by thirty-nine that all said 67 % of the
         same 31 TiB."""

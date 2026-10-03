@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for DevicesStore — the host registry (servers + per-protocol profiles).
+"""Tests for DevicesStore — the device registry (servers + per-protocol profiles).
 
 Covers CRUD, name uniqueness, profile preservation, and — importantly — that
 secret values inside the profiles are encrypted at rest and decrypted on read.
@@ -48,7 +48,7 @@ def _clase(db, corto):
     return fila['uid']
 
 
-def _host(name='srv-x'):
+def _device(name='srv-x'):
     return {
         'name': name, 'address': '10.0.0.1', 'tags': ['prod', 'db'],
         'description': 'primary',
@@ -63,7 +63,7 @@ class TestCrud:
 
     def test_create_and_get_roundtrip(self):
         s, _ = _store(_fernet())
-        uid = s.create(_host(), actor='admin')
+        uid = s.create(_device(), actor='admin')
         assert uid
         h = s.get(uid)
         assert h['name'] == 'srv-x'
@@ -80,31 +80,31 @@ class TestCrud:
 
     def test_duplicate_name_rejected(self):
         s, _ = _store()
-        assert s.create(_host('dup'))
-        assert s.create(_host('dup')) is None
+        assert s.create(_device('dup'))
+        assert s.create(_device('dup')) is None
 
     def test_list_ordered_by_name(self):
         s, _ = _store()
-        s.create(_host('bravo'))
-        s.create(_host('alpha'))
+        s.create(_device('bravo'))
+        s.create(_device('alpha'))
         assert [h['name'] for h in s.list()] == ['alpha', 'bravo']
 
     def test_get_by_name(self):
         s, _ = _store()
-        uid = s.create(_host('byname'))
+        uid = s.create(_device('byname'))
         assert s.get_by_name('byname')['uid'] == uid
         assert s.get_by_name('nope') is None
 
     def test_count(self):
         s, _ = _store()
         assert s.count() == 0
-        s.create(_host('a'))
-        s.create(_host('b'))
+        s.create(_device('a'))
+        s.create(_device('b'))
         assert s.count() == 2
 
     def test_update_replaces_fields(self):
         s, _ = _store(_fernet())
-        uid = s.create(_host('u1'))
+        uid = s.create(_device('u1'))
         h = s.get(uid)
         h['name'] = 'u1-renamed'
         h['address'] = '10.9.9.9'
@@ -118,26 +118,26 @@ class TestCrud:
 
     def test_update_rejects_name_clash(self):
         s, _ = _store()
-        s.create(_host('taken'))
-        uid = s.create(_host('mine'))
+        s.create(_device('taken'))
+        uid = s.create(_device('mine'))
         h = s.get(uid)
         h['name'] = 'taken'
         assert s.update(uid, h) is False
 
     def test_update_unknown_uid(self):
         s, _ = _store()
-        assert s.update('nope', _host()) is False
+        assert s.update('nope', _device()) is False
 
     def test_delete(self):
         s, _ = _store()
-        uid = s.create(_host('del'))
+        uid = s.create(_device('del'))
         assert s.delete(uid) is True
         assert s.get(uid) is None
         assert s.delete(uid) is False
 
 
 class TestKindAndMaintenance:
-    """Local/remote kind and maintenance flag are first-class host columns."""
+    """Local/remote kind and maintenance flag are first-class device columns."""
 
     def test_kind_defaults_to_none(self):
         """A device says nothing about running commands until somebody says something.
@@ -147,7 +147,7 @@ class TestKindAndMaintenance:
         is nothing to run a shell command on, so a check bound to a newly added switch
         measured the panel and filed the answer under the switch's name."""
         s, _ = _store()
-        uid = s.create(_host('k1'))
+        uid = s.create(_device('k1'))
         h = s.get(uid)
         assert h['kind'] == 'none'
         assert h['maintenance'] is False
@@ -155,20 +155,20 @@ class TestKindAndMaintenance:
     def test_all_three_kinds_survive_a_round_trip(self):
         s, _ = _store()
         for i, kind in enumerate(('none', 'local', 'remote')):
-            uid = s.create({**_host('k1r%d' % i), 'kind': kind})
+            uid = s.create({**_device('k1r%d' % i), 'kind': kind})
             assert s.get(uid)['kind'] == kind
 
-    def test_an_existing_local_host_stays_local(self):
+    def test_an_existing_local_device_stays_local(self):
         """The default changed; nothing stored did. A machine somebody set to `local` is one
         whose checks are meant to run here, and a new default must not move it."""
         s, _ = _store()
-        uid = s.create({**_host('k1keep'), 'kind': 'local'})
+        uid = s.create({**_device('k1keep'), 'kind': 'local'})
         s.update(uid, {'name': 'k1keep', 'kind': 'local'}, actor='t')
         assert s.get(uid)['kind'] == 'local'
 
     def test_create_remote_and_maintenance(self):
         s, _ = _store()
-        uid = s.create({**_host('k2'), 'kind': 'remote', 'maintenance': True})
+        uid = s.create({**_device('k2'), 'kind': 'remote', 'maintenance': True})
         h = s.get(uid)
         assert h['kind'] == 'remote'
         assert h['maintenance'] is True
@@ -179,7 +179,7 @@ class TestKindAndMaintenance:
         the wrong box quietly. A record that says nothing gets nothing."""
         s, _ = _store()
         for bad in ('banana', '', None, 'LOCALHOST', 0):
-            uid = s.create({**_host('k3-%s' % bad), 'kind': bad})
+            uid = s.create({**_device('k3-%s' % bad), 'kind': bad})
             assert s.get(uid)['kind'] == 'none', bad
 
     def test_the_kinds_are_written_down_once(self):
@@ -190,22 +190,22 @@ class TestKindAndMaintenance:
 
     def test_os_defaults_to_auto_and_persists(self):
         s, _ = _store()
-        uid = s.create(_host('k3a'))
+        uid = s.create(_device('k3a'))
         assert s.get(uid)['os'] == 'auto'
-        uid2 = s.create({**_host('k3b'), 'os': 'linux'})
+        uid2 = s.create({**_device('k3b'), 'os': 'linux'})
         assert s.get(uid2)['os'] == 'linux'
 
     def test_invalid_os_normalised_to_auto(self):
         s, _ = _store()
-        uid = s.create({**_host('k3c'), 'os': 'plan9'})
+        uid = s.create({**_device('k3c'), 'os': 'plan9'})
         assert s.get(uid)['os'] == 'auto'
 
     def test_modules_list_persists(self):
         s, _ = _store()
-        uid = s.create({**_host('m1'), 'modules': ['web', 'ping']})
+        uid = s.create({**_device('m1'), 'modules': ['web', 'ping']})
         assert s.get(uid)['modules'] == ['web', 'ping']
         # Defaults to empty when not provided.
-        uid2 = s.create(_host('m2'))
+        uid2 = s.create(_device('m2'))
         assert s.get(uid2)['modules'] == []
         # Updatable.
         h = s.get(uid)
@@ -215,7 +215,7 @@ class TestKindAndMaintenance:
 
     def test_update_toggles_kind_and_maintenance(self):
         s, _ = _store()
-        uid = s.create(_host('k4'))
+        uid = s.create(_device('k4'))
         h = s.get(uid)
         h['kind'] = 'remote'
         h['maintenance'] = True
@@ -228,7 +228,7 @@ class TestSecretEncryption:
 
     def test_secrets_encrypted_at_rest(self):
         s, db = _store(_fernet())
-        uid = s.create(_host('enc'))
+        uid = s.create(_device('enc'))
         raw = db.fetchone('SELECT profiles FROM devices WHERE uid = ?', (uid,))[0]
         # The ciphertext column must not contain the plaintext secrets…
         assert 's3cr3t' not in raw
@@ -240,14 +240,14 @@ class TestSecretEncryption:
     def test_no_fernet_stores_plaintext(self):
         # Without a Fernet the store degrades gracefully (no crypto available).
         s, db = _store(fernet=None)
-        uid = s.create(_host('plain'))
+        uid = s.create(_device('plain'))
         assert s.get(uid)['profiles']['ssh']['ssh_password'] == 's3cr3t'
 
     def test_persists_across_store_instances(self):
         f = _fernet()
         db = get_connector(None, default_sqlite_path=':memory:')
         s1 = DevicesStore(db, fernet=f, secret_keys=_SECRET_KEYS)
-        uid = s1.create(_host('persist'))
+        uid = s1.create(_device('persist'))
         # A second store on the SAME connector reads + decrypts what s1 wrote.
         s2 = DevicesStore(db, fernet=f, secret_keys=_SECRET_KEYS)
         assert s2.get(uid)['profiles']['ssh']['ssh_password'] == 's3cr3t'
@@ -264,14 +264,14 @@ class TestWhatTheDeviceIs:
     def test_it_round_trips(self):
         s, db = _store(_fernet())
         nas = _clase(db, 'nas')
-        uid = s.create({**_host('nas-1'), 'device_type': nas})
+        uid = s.create({**_device('nas-1'), 'device_type': nas})
         assert s.get(uid)['device_type'] == nas
 
     def test_unclassified_is_the_default_and_a_real_value(self):
         """Every device that existed before the field did has this, and so does one added in
         a hurry. Refusing to save without it would be a worse form than none."""
         s, _ = _store(_fernet())
-        uid = s.create(_host('plain-1'))
+        uid = s.create(_device('plain-1'))
         assert s.get(uid)['device_type'] == ''
 
     def test_an_undeclared_type_is_dropped_not_stored(self):
@@ -279,7 +279,7 @@ class TestWhatTheDeviceIs:
         that no lang file can translate — the picker would show a raw token and the icon
         lookup would fall through to the generic one, with nothing saying why."""
         s, _ = _store(_fernet())
-        uid = s.create({**_host('odd-1'), 'device_type': 'toaster'})
+        uid = s.create({**_device('odd-1'), 'device_type': 'toaster'})
         assert s.get(uid)['device_type'] == ''
 
     def test_the_short_name_is_not_a_way_to_point_at_a_class(self):
@@ -287,7 +287,7 @@ class TestWhatTheDeviceIs:
         would leave half a fleet pointing one way and half the other — and then the class filter
         answers with half the machines, with nothing failing."""
         s, _ = _store(_fernet())
-        uid = s.create({**_host('sw-1'), 'device_type': 'switch'})
+        uid = s.create({**_device('sw-1'), 'device_type': 'switch'})
         assert s.get(uid)['device_type'] == ''
 
     def test_a_uid_is_stored_exactly_as_given(self):
@@ -295,13 +295,13 @@ class TestWhatTheDeviceIs:
         an opaque id has no capitals to correct, and touching one is changing it."""
         s, db = _store(_fernet())
         sw = _clase(db, 'switch')
-        uid = s.create({**_host('sw-1'), 'device_type': ' %s ' % sw})
+        uid = s.create({**_device('sw-1'), 'device_type': ' %s ' % sw})
         assert s.get(uid)['device_type'] == sw
 
     def test_an_update_can_set_and_clear_it(self):
         s, db = _store(_fernet())
         sw = _clase(db, 'switch')
-        uid = s.create(_host('sw-2'))
+        uid = s.create(_device('sw-2'))
         h = s.get(uid)
         assert s.update(uid, {**h, 'device_type': sw})
         assert s.get(uid)['device_type'] == sw
@@ -319,7 +319,7 @@ class TestWhatTheDeviceIs:
         s, db = _store(_fernet())
         for i, spec in enumerate(SEED):
             clase = _clase(db, spec['id'])
-            uid = s.create({**_host('h-%d' % i), 'device_type': clase})
+            uid = s.create({**_device('h-%d' % i), 'device_type': clase})
             assert s.get(uid)['device_type'] == clase, spec['id']
 
 
@@ -391,7 +391,7 @@ class TestAMarkCanSayWhatTheRowIS:
 
     def _marked(self):
         st, _db_ = _store()
-        st.create(_host('sw'))
+        st.create(_device('sw'))
         return st, st.list()[0]['uid']
 
     def test_a_role_is_stored_beside_the_mark(self):

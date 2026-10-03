@@ -117,7 +117,7 @@ class TestApplyCredential:
 
 
 # ── Resolution in ModuleBase.resolve_device ────────────────────────────────────
-class _FakeHosts:
+class _FakeDevices:
     def __init__(self, devices):
         self._h = devices
 
@@ -137,7 +137,7 @@ class TestResolveCredential:
 
     def _proc(self, devices=None, creds=None):
         mm = create_mock_monitor({'watchfuls.process': {}})
-        mm._devices_store = _FakeHosts(devices or {})
+        mm._devices_store = _FakeDevices(devices or {})
         mm._credentials_store = _FakeCreds(creds or {})
         return process.Watchful(mm)
 
@@ -146,16 +146,16 @@ class TestResolveCredential:
         out = w.resolve_device({'cred_uid': 'c1', 'enabled': True})
         assert out['ssh_user'] == 'svc' and out['ssh_password'] == 'pw'
 
-    def test_host_ssh_profile_cred_uid(self):
-        host = {'uid': 'h1', 'address': '10.0.0.9', 'kind': 'remote', 'maintenance': False,
+    def test_device_ssh_profile_cred_uid(self):
+        device = {'uid': 'h1', 'address': '10.0.0.9', 'kind': 'remote', 'maintenance': False,
                 'os': 'linux',
                 'profiles': {'ssh': {'ssh_user': 'inline', 'cred_uid': 'c1'}}}
-        w = self._proc(devices={'h1': host},
+        w = self._proc(devices={'h1': device},
                        creds={'c1': {'data': {'ssh_user': 'svc', 'ssh_password': 'pw'}}})
         out = w.resolve_device({'device_uid': 'h1', 'enabled': True})
-        # Credential identity overrides the host profile's inline ssh_user.
+        # Credential identity overrides the device profile's inline ssh_user.
         assert out['ssh_user'] == 'svc' and out['ssh_password'] == 'pw'
-        assert out['ssh_host'] == '10.0.0.9'      # address still from the host
+        assert out['ssh_host'] == '10.0.0.9'      # address still from the device
 
     def test_dangling_cred_uid_is_ignored(self):
         w = self._proc(creds={})
@@ -172,7 +172,7 @@ class TestResolveCredential:
 class TestFindAllCredentialUsage:
     """One scan answers for every credential at once (the catalogue's usage view)."""
 
-    HOSTS = [
+    DEVICES = [
         {'uid': 'h1', 'name': 'web-01', 'profiles': {'ssh': {'cred_uid': 'c1'}}},
         {'uid': 'h2', 'name': 'web-02', 'profiles': {'ssh': {'cred_uid': 'c2'}}},
         {'uid': 'h3', 'name': 'no-cred', 'profiles': {'ssh': {'ssh_user': 'root'}}},
@@ -186,7 +186,7 @@ class TestFindAllCredentialUsage:
 
     def _usage(self):
         from lib.core.credentials.service import find_all_credential_usage
-        return find_all_credential_usage(self.HOSTS, self.MODULES)
+        return find_all_credential_usage(self.DEVICES, self.MODULES)
 
     def test_it_buckets_every_reference_by_credential(self):
         u = self._usage()
@@ -200,7 +200,7 @@ class TestFindAllCredentialUsage:
         assert 'c9' not in self._usage()
 
     def test_module_metadata_is_not_a_check(self):
-        """Keys starting with `__` are the module's own config (host profile, defaults), not
+        """Keys starting with `__` are the module's own config (device profile, defaults), not
         items a user defined — counting one as a consumer would keep a credential looking
         alive after its last real check was deleted."""
         assert 'ignored' not in self._usage()
@@ -212,8 +212,8 @@ class TestFindAllCredentialUsage:
     def test_the_single_credential_answer_is_the_same_slice(self):
         """find_credential_usage delegates, so the two cannot drift apart."""
         from lib.core.credentials.service import find_credential_usage
-        assert find_credential_usage('c1', self.HOSTS, self.MODULES) == self._usage()['c1']
-        assert find_credential_usage('c9', self.HOSTS, self.MODULES) == {'devices': [], 'checks': []}
+        assert find_credential_usage('c1', self.DEVICES, self.MODULES) == self._usage()['c1']
+        assert find_credential_usage('c9', self.DEVICES, self.MODULES) == {'devices': [], 'checks': []}
 
 
 class TestCredentialSchemas:

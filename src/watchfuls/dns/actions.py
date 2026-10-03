@@ -25,7 +25,7 @@
 
 Probes the apex for a handful of types, and where the zone allows it, asks for the whole
 thing at once (AXFR) - which turns "add a check per record" from an afternoon into a
-selection. Runs locally, or over SSH on the bound host when the item has one, because a
+selection. Runs locally, or over SSH on the bound device when the item has one, because a
 record can resolve differently depending on where you stand.
 """
 
@@ -63,10 +63,10 @@ class DnsDiscovery:
         if not domain:
             return []
         timeout = tables._coerce_int(config.get('timeout'), 5) or 5
-        # Host-aware: the Servers modal injects the bound host; when it is remote,
-        # probe from THERE (over SSH) so a host that reaches the DNS discovers.
+        # Device-aware: the Servers modal injects the bound device; when it is remote,
+        # probe from THERE (over SSH) so a device that reaches the DNS discovers.
         from lib.core.devices import runner as device_runner  # noqa: PLC0415
-        host = config.get('__device__') if isinstance(config, dict) else None
+        device = config.get('__device__') if isinstance(config, dict) else None
         if tables._truthy(inp.get('axfr')):
             try:
                 return cls._discover_axfr(domain, str(inp.get('axfr_server') or '').strip(), timeout)
@@ -74,8 +74,8 @@ class DnsDiscovery:
                 # AXFR is best-effort (usually refused on public zones) — never
                 # 500; an empty result reads as "no records transferable".
                 return []
-        if device_runner.is_remote(host):
-            return cls._discover_probe_remote(host, domain, timeout)
+        if device_runner.is_remote(device):
+            return cls._discover_probe_remote(device, domain, timeout)
         return cls._discover_probe(domain, timeout)
 
     @classmethod
@@ -123,17 +123,17 @@ class DnsDiscovery:
         }
 
     @classmethod
-    def _discover_probe_remote(cls, host: dict, domain: str, timeout: int) -> list:
-        """Probe record types by running dig/nslookup ON the bound host (SSH), so
-        a host that can reach the (internal) DNS does the discovery."""
+    def _discover_probe_remote(cls, device: dict, domain: str, timeout: int) -> list:
+        """Probe record types by running dig/nslookup ON the bound device (SSH), so
+        a device that can reach the (internal) DNS does the discovery."""
         from lib.core.devices import runner as device_runner  # noqa: PLC0415
-        os_ = str((host or {}).get('os') or 'linux').strip().lower()
+        os_ = str((device or {}).get('os') or 'linux').strip().lower()
         types = cls._probe_types()
         if os_ == 'windows':
             out = []
             for rt in types:
                 res, _e, _c = device_runner.run(
-                    host, client._remote_dns_cmd('windows', domain, rt, '', timeout), timeout=timeout + 3)
+                    device, client._remote_dns_cmd('windows', domain, rt, '', timeout), timeout=timeout + 3)
                 resolved = client._parse_nslookup(rt, res)
                 if resolved:
                     out.append(cls._probe_record(domain, rt, resolved))
@@ -144,7 +144,7 @@ class DnsDiscovery:
         script = '; '.join(
             f'echo "##{rt}##"; dig +short +time={t} +tries=1 {shlex.quote(rt)} {shlex.quote(domain)}'
             for rt in types)
-        res, _e, _c = device_runner.run(host, script, timeout=t * len(types) + 5)
+        res, _e, _c = device_runner.run(device, script, timeout=t * len(types) + 5)
         return cls._parse_combined_dig(domain, res)
 
     @classmethod

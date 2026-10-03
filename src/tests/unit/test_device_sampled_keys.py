@@ -21,7 +21,7 @@ list of which modules sample devices — a list would be a third thing to keep i
 from lib.core.devices.service import device_sampled_keys
 
 
-class TestWhatAModuleRecordedAboutTheHostItself:
+class TestWhatAModuleRecordedAboutTheDeviceItself:
 
     def test_a_device_sampled_through_the_registry_is_found(self):
         raw = {'watchfuls.snmp': {'host.sw1/metrics': {'status': True}}}
@@ -36,7 +36,7 @@ class TestWhatAModuleRecordedAboutTheHostItself:
 
     def test_a_configured_check_is_not_one_of_these(self):
         """Those are found the way they always were, through the module configuration. A key
-        that names an item is not a key that names a host."""
+        that names an item is not a key that names a device."""
         raw = {'snmp': {'srv-uid.check-uid': {}, 'plain-item': {}}}
         assert device_sampled_keys(raw, 'sw1') == {}
 

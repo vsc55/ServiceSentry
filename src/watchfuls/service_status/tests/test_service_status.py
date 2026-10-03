@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/service_status — host-centric service monitoring.
+"""Tests for watchfuls/service_status — device-centric service monitoring.
 
 Service state is read via ``device_exec`` (mocked); the per-OS state parser runs
 for real against canned command output.  ``discover`` (local autocomplete) is
@@ -19,7 +19,7 @@ class _FakeStore:
         return self._h.get(uid)
 
 
-def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+def _device(uid='h1', os='linux', kind='remote', maintenance=False):
     return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
             'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
@@ -27,7 +27,7 @@ def _host(uid='h1', os='linux', kind='remote', maintenance=False):
 def _watchful(items, devices=None):
     from watchfuls.service_status import Watchful
     mm = create_mock_monitor({'watchfuls.service_status': {'list': items}})
-    mm._devices_store = _FakeStore(devices or {'h1': _host()})
+    mm._devices_store = _FakeStore(devices or {'h1': _device()})
     return Watchful(mm)
 
 
@@ -111,9 +111,9 @@ class TestCheck:
         assert items['web']['status'] is False
         assert 'expected: Stopped' in items['web']['message']
 
-    def test_windows_host_uses_sc(self):
+    def test_windows_device_uses_sc(self):
         w = _watchful({'svc': {'enabled': True, 'service': 'nginx', 'device_uid': 'h1'}},
-                      devices={'h1': _host(os='windows')})
+                      devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec', return_value=(_SC_RUNNING, '', 0)) as he:
             items = w.check().list
         assert he.call_args.args[1].startswith('sc query')
@@ -171,7 +171,7 @@ class TestCheck:
 
     def test_unsupported_os(self):
         w = _watchful({'web': {'enabled': True, 'service': 'nginx', 'device_uid': 'h1'}},
-                      devices={'h1': _host(os='other')})
+                      devices={'h1': _device(os='other')})
         with patch.object(w, 'device_exec') as he:
             items = w.check().list
         he.assert_not_called()
@@ -183,9 +183,9 @@ class TestCheck:
             assert len(w.check().items()) == 0
         he.assert_not_called()
 
-    def test_maintenance_host_skipped(self):
+    def test_maintenance_device_skipped(self):
         w = _watchful({'web': {'enabled': True, 'service': 'nginx', 'device_uid': 'h1'}},
-                      devices={'h1': _host(maintenance=True)})
+                      devices={'h1': _device(maintenance=True)})
         with patch.object(w, 'device_exec') as he:
             assert len(w.check().items()) == 0
         he.assert_not_called()
@@ -210,10 +210,10 @@ class TestDiscover:
 
     def test_remote_discovery_uses_ssh(self):
         from watchfuls.service_status import Watchful
-        host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
+        device = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
         out = "  nginx.service   loaded active running  Web server\n"
         with patch('lib.core.devices.runner.run', return_value=(out, '', 0)) as run:
-            res = Watchful.discover({'__device__': host})
+            res = Watchful.discover({'__device__': device})
         assert run.call_args.args[1].startswith('systemctl list-units')
         assert any(s['name'] == 'nginx' for s in res)
 

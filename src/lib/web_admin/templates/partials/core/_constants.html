@@ -153,7 +153,7 @@ function deviceTypeIcon(type) { return DEVICE_TYPE_ICONS[type] || 'bi-hdd-networ
 //: Maintenance keeps the orange it has had everywhere else, deliberately distinct from the
 //: yellow of a warning: "somebody switched this off on purpose" and "something is wrong with
 //: it" are not the same news and must not be the same colour.
-const HOST_STATE_BADGES = {
+const DEVICE_STATE_BADGES = {
     maintenance: ['', 'background-color:#fd7e14;color:#fff', 'bi-cone-striped',
                   'device_status_maintenance'],
     error:       ['text-bg-danger',  '', 'bi-x-circle-fill',     'device_status_error'],
@@ -165,7 +165,7 @@ const HOST_STATE_BADGES = {
 //: card, the dot beside a column heading. Same four states, same orange for maintenance,
 //: because a card and its own badge disagreeing about a colour is the same device looking like
 //: two things in one glance — which is exactly what was reported.
-const HOST_STATE_COLORS = {
+const DEVICE_STATE_COLORS = {
     maintenance: '#fd7e14',
     error:   'var(--bs-danger)',
     warning: 'var(--bs-warning)',
@@ -176,8 +176,8 @@ const HOST_STATE_COLORS = {
 };
 
 function deviceStateColor(status, maintenance) {
-    return HOST_STATE_COLORS[maintenance ? 'maintenance' : String(status || '')]
-        || HOST_STATE_COLORS[''];
+    return DEVICE_STATE_COLORS[maintenance ? 'maintenance' : String(status || '')]
+        || DEVICE_STATE_COLORS[''];
 }
 
 /** One machine's state, as a badge.
@@ -190,8 +190,8 @@ function deviceStateColor(status, maintenance) {
  *  green would be the panel telling you something nobody is checking. What that reads like is
  *  the screen's own business — a dash in a table, a word on a card — so it is passed in.
  */
-function hostStateBadge(status, maintenance, none) {
-    const meta = HOST_STATE_BADGES[maintenance ? 'maintenance' : String(status || '')];
+function deviceStateBadge(status, maintenance, none) {
+    const meta = DEVICE_STATE_BADGES[maintenance ? 'maintenance' : String(status || '')];
     if (!meta) return none === undefined ? '<span class="text-muted small">—</span>' : none;
     const sty = meta[1] ? ` style="${meta[1]}"` : '';
     return `<span class="badge ${meta[0]}"${sty}><i class="bi ${meta[2]} me-1"></i>${
@@ -237,7 +237,7 @@ const ASSET_V = '{{ asset_v }}';
  *  *opts.text* draws the name beside the mark; without it the mark stands alone with the name
  *  as its tooltip, which is what a column 17rem wide can afford.
  */
-function hostBrandMarkHtml(brand, size) {
+function deviceBrandMarkHtml(brand, size) {
     const b = brand || {};
     const name = String(b.name || '').trim();
     if (!name) return '';
@@ -263,7 +263,7 @@ function hostBrandMarkHtml(brand, size) {
     return '';
 }
 
-function hostBrandHtml(brand, opts) {
+function deviceBrandHtml(brand, opts) {
     const b = brand || {}, o = opts || {};
     const name = String(b.name || '').trim();
     if (!name) return '';
@@ -271,7 +271,7 @@ function hostBrandHtml(brand, opts) {
     // "[Synology] Synology" is the same word twice, and it was on every card of a machine whose
     // mark we happen to ship. Reported from the screen. The name is still on the element, as
     // its tooltip and as what a reader with no images gets.
-    const mark = hostBrandMarkHtml(b, o.size);
+    const mark = deviceBrandMarkHtml(b, o.size);
     if (mark) return mark;
     if (o.text) return `<span>${esc(name)}</span>`;
     // No mark and no room for the name: the initial on the maker's own colour, which is still
@@ -290,7 +290,7 @@ function hostBrandHtml(brand, opts) {
  *  maker's word inside it ("MikroTik-branded CRS") is a model, and cutting it would be the
  *  panel editing what the device said.
  */
-function hostModelWithout(model, maker) {
+function deviceModelWithout(model, maker) {
     const text = String(model || '').trim();
     const name = String(maker || '').trim();
     if (!name || text.toLowerCase().indexOf(name.toLowerCase()) !== 0) return text;
@@ -302,22 +302,22 @@ function hostModelWithout(model, maker) {
 
 /** What a machine IS, in one line: who made it and which model. Either half may be missing —
  *  a switch that names its maker and not its model still says something worth reading. */
-function hostBrandLine(device, opts) {
+function deviceBrandLine(device, opts) {
     const h = device || {};
-    const mark = hostBrandHtml(h.brand, opts);
-    const model = hostModelWithout(h.model, (h.brand || {}).name || h.vendor);
+    const mark = deviceBrandHtml(h.brand, opts);
+    const model = deviceModelWithout(h.model, (h.brand || {}).name || h.vendor);
     if (!mark && !model) return '';
     return `<span class="d-inline-flex align-items-center gap-1 text-truncate">${mark}${
         model ? `<span class="text-muted">${esc(model)}</span>` : ''}</span>`;
 }
 const CREDENTIAL_TYPES = {{ credential_types | default({}) | tojson }};
-const MODULE_HOST_FIELDS = {{ module_device_fields | default({}) | tojson }};
-// Which collection(s) of each host-centric module may bind to a host (show the
+const MODULE_DEVICE_FIELDS = {{ module_device_fields | default({}) | tojson }};
+// Which collection(s) of each device-centric module may bind to a device (show the
 // device picker).  SSH-only/address-only modules expose their item collection even
 // though no connection field is inline; nested sub-collections never bind.
-const MODULE_HOST_COLLECTIONS = {{ module_device_collections | default({}) | tojson }};
-// Whether each module allows several checks bound to one host (schema __device_multiple__).
-const MODULE_HOST_MULTIPLE = {{ module_device_multiple | default({}) | tojson }};
+const MODULE_DEVICE_COLLECTIONS = {{ module_device_collections | default({}) | tojson }};
+// Whether each module allows several checks bound to one device (schema __device_multiple__).
+const MODULE_DEVICE_MULTIPLE = {{ module_device_multiple | default({}) | tojson }};
 // Whether ONE check of each module binds to SEVERAL devices (device_uids list, schema
 // __device_multiple_bind__, e.g. proxmox cluster). Such modules use a multi-select
 // device picker and are excluded from the per-device "Servers" enable flow.
@@ -335,7 +335,7 @@ const OVERVIEW_WIDGETS = {{ overview_widgets | default([]) | tojson }};
 // each directive generically, so no other_data key names are hardcoded in core.
 const MODULE_STATUS_RENDER = {{ module_status_render | default({}) | tojson }};
 // Device OS selector: selectable values (auto first) + this server's detected OS.
-const HOST_OS_OPTIONS = {{ device_os_options | default([]) | tojson }};
+const DEVICE_OS_OPTIONS = {{ device_os_options | default([]) | tojson }};
 const LOCAL_OS = {{ local_os | default('other') | tojson }};
 const HINTS = I18N.hints || {};
 const ENV_LOCKED = new Set({{ wa_env_locked_fields | tojson }});

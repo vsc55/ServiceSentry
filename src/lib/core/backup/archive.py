@@ -143,7 +143,7 @@ def restore_cell(value):
 def member_tables(names) -> list:
     """The table names an archive's member list holds, sorted.
 
-    ``db/hosts.json`` → ``hosts``. Here and not in `parts.py` because it is the LAYOUT
+    ``db/devices.json`` → ``devices``. Here and not in `parts.py` because it is the LAYOUT
     talking: which directory the tables go in and what the members are called is this
     module's rule, and grouping them into parts is the other one's. Neither has to know both.
     """

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/process — host-centric process monitoring.
+"""Tests for watchfuls/process — device-centric process monitoring.
 
-Each check binds to a host; the process list is read via ``device_exec`` (mocked
+Each check binds to a device; the process list is read via ``device_exec`` (mocked
 here, so no real command/SSH runs) and matched against ``min_count``.  The
 per-OS match parser runs for real against canned ``ps``/``tasklist`` output.
 """
@@ -19,7 +19,7 @@ class _FakeStore:
         return self._h.get(uid)
 
 
-def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+def _device(uid='h1', os='linux', kind='remote', maintenance=False):
     return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
             'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
@@ -27,7 +27,7 @@ def _host(uid='h1', os='linux', kind='remote', maintenance=False):
 def _watchful(items, devices=None):
     from watchfuls.process import Watchful
     mm = create_mock_monitor({'watchfuls.process': {'list': items}})
-    mm._devices_store = _FakeStore(devices or {'h1': _host()})
+    mm._devices_store = _FakeStore(devices or {'h1': _device()})
     return Watchful(mm)
 
 
@@ -60,7 +60,7 @@ class TestProcessCheck:
         from watchfuls.process import Watchful
         mm = create_mock_monitor({'watchfuls.process': {'enabled': False,
                                   'list': {'a': {'enabled': True, 'process': 'nginx', 'device_uid': 'h1'}}}})
-        mm._devices_store = _FakeStore({'h1': _host()})
+        mm._devices_store = _FakeStore({'h1': _device()})
         w = Watchful(mm)
         with patch.object(w, 'device_exec') as he:
             assert len(w.check().items()) == 0
@@ -87,9 +87,9 @@ class TestProcessCheck:
         assert items['web']['status'] is False
         assert '2/3' in items['web']['message']
 
-    def test_windows_host_uses_tasklist(self):
+    def test_windows_device_uses_tasklist(self):
         w = _watchful({'web': {'enabled': True, 'process': 'nginx', 'device_uid': 'h1'}},
-                      devices={'h1': _host(os='windows')})
+                      devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec', return_value=(_TASKLIST_OUT, '', 0)) as he:
             items = w.check().list
         assert 'tasklist' in he.call_args.args[1]
@@ -108,9 +108,9 @@ class TestProcessCheck:
         assert items['web']['status'] is False
         assert 'Error' in items['web']['message']
 
-    def test_maintenance_host_skipped(self):
+    def test_maintenance_device_skipped(self):
         w = _watchful({'web': {'enabled': True, 'process': 'nginx', 'device_uid': 'h1'}},
-                      devices={'h1': _host(maintenance=True)})
+                      devices={'h1': _device(maintenance=True)})
         with patch.object(w, 'device_exec') as he:
             assert len(w.check().items()) == 0
         he.assert_not_called()
@@ -134,16 +134,16 @@ class TestProcessDiscover:
 
     def test_discover_remote_over_ssh(self):
         from watchfuls.process import Watchful
-        host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
+        device = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
         with patch('lib.core.devices.runner.run', return_value=(_PS_OUT, '', 0)) as run:
-            res = {s['name']: s['status'] for s in Watchful.discover({'__device__': host})}
+            res = {s['name']: s['status'] for s in Watchful.discover({'__device__': device})}
         assert run.call_args.args[1] == 'ps -A -o comm='
         assert res['nginx'] == '×2' and res['sshd'] == '×1'
 
     def test_discover_remote_windows_tasklist(self):
         from watchfuls.process import Watchful
-        host = {'kind': 'remote', 'os': 'windows', 'address': '10.0.0.9', 'ssh': {}}
+        device = {'kind': 'remote', 'os': 'windows', 'address': '10.0.0.9', 'ssh': {}}
         with patch('lib.core.devices.runner.run', return_value=(_TASKLIST_OUT, '', 0)) as run:
-            res = {s['name']: s['status'] for s in Watchful.discover({'__device__': host})}
+            res = {s['name']: s['status'] for s in Watchful.discover({'__device__': device})}
         assert 'tasklist' in run.call_args.args[1]
         assert res['nginx.exe'] == '×2'

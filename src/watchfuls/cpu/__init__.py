@@ -19,10 +19,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Watchful to check CPU usage on the bound host (local or over SSH).
+"""Watchful to check CPU usage on the bound device (local or over SSH).
 
-Host-centric: each check binds to a host (``device_uid``).  CPU usage is sampled
-on that host via :meth:`ModuleBase.device_exec` using an OS-appropriate command
+Device-centric: each check binds to a device (``device_uid``).  CPU usage is sampled
+on that device via :meth:`ModuleBase.device_exec` using an OS-appropriate command
 (``/proc/stat`` on Linux, ``kern.cp_time`` on FreeBSD, ``top -l2`` on macOS,
 ``wmic`` on Windows) and compared with a per-check threshold.
 
@@ -52,7 +52,7 @@ def _cpu_cmd(os_: str) -> str:
 
 
 class Watchful(ModuleBase):
-    """Check CPU usage per host against a percentage threshold."""
+    """Check CPU usage per device against a percentage threshold."""
 
     ITEM_SCHEMA = _SCHEMA
 
@@ -110,7 +110,7 @@ class Watchful(ModuleBase):
         used = round(float(usage), 1)
         ok = used < alert
         msg = self._msg('cpu_ok' if ok else 'cpu_high', label, f'{used:.1f}')
-        # A threshold breach is a warning (the host is reachable), not a down — a hard
+        # A threshold breach is a warning (the device is reachable), not a down — a hard
         # failure (unreachable/parse error) raises above and is reported as down.
         self.dict_return.set(key, ok, msg, other_data={'used': used, 'alert': alert},
                              severity='warning', name=label)

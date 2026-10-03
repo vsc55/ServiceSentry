@@ -57,12 +57,12 @@ class SnmpChecks:
             # profiles and not merely the binding. Reported from the panel: a switch whose
             # SNMP profile test returned OIDs was in nobody's collection, because the module
             # item bound to it carried OID checks and no device profiles — so it claimed the
-            # host from the registry fallback and then sampled nothing. A device sampled by
+            # device from the registry fallback and then sampled nothing. A device sampled by
             # nobody, with no error anywhere and no line on any screen.
             #
             # Collected BEFORE the enabled gate on purpose: a disabled item still speaks for
-            # its host. Somebody switched that device off, and resuming it from the other end
-            # because the configuration also lives on the host would be an upgrade quietly
+            # its device. Somebody switched that device off, and resuming it from the other end
+            # because the configuration also lives on the device would be an upgrade quietly
             # undoing a decision. That is about a decision somebody made; an item with no
             # profiles is not a decision about sampling at all.
             _uid = str(srv.get('device_uid') or '').strip()
@@ -82,7 +82,7 @@ class SnmpChecks:
                 if chk_cfg.get('enabled', _CHECK_DEFAULTS['enabled']):
                     items.append((f'{srv_key}.{chk_key}', chk_cfg, srv))
 
-        # …and every host that IS an SNMP device without anybody having said so twice. A host
+        # …and every device that IS an SNMP device without anybody having said so twice. A device
         # with a community and device profiles assigned is a device; that used to be worth
         # nothing until a module entry pointed back at it, which made the module — not the
         # device — the thing that decided it was worth looking at.
@@ -143,10 +143,10 @@ class SnmpChecks:
         """
         if server is None:
             server = {}
-        # Host-centric: if the server references a host, merge its address +
+        # Device-centric: if the server references a device, merge its address +
         # SNMP credential profile (no-op for classic inline servers).
         server = self.resolve_device(server)
-        # Bound host in maintenance → resolve_device disables it: skip the check.
+        # Bound device in maintenance → resolve_device disables it: skip the check.
         if server.get('_device_maintenance') or not server.get('enabled', True):
             return
 

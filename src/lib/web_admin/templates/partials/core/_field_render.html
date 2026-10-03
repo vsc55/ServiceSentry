@@ -669,7 +669,7 @@ function _renderFieldInner(key, value, pathStr, target = 'modules', _infoIcon = 
                     _phVal = _itemKey;
                 } else if (_phRaw === '__address__') {
                     // The address field auto-fills from the BOUND device at runtime
-                    // (resolve_device), so its placeholder is that host's address.
+                    // (resolve_device), so its placeholder is that device's address.
                     // It must NOT echo stale per-item fields (a leftover legacy
                     // value would mask the real device) — an inline check (no device)
                     // simply has no placeholder. The field's own typed value, when

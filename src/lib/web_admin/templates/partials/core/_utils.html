@@ -494,10 +494,10 @@ function jsStr(s) { return escAttr(JSON.stringify(s)); }
 //: why choosing None looked like it worked, said it had saved, and came back as Local: the
 //: value was correct in the draft, in the select and in the store, and was flattened on its
 //: way out of the browser.
-const HOST_KINDS = ['none', 'local', 'remote'];
+const DEVICE_KINDS = ['none', 'local', 'remote'];
 function deviceKind(v) {
     const k = String(v || '').trim().toLowerCase();
-    return HOST_KINDS.includes(k) ? k : 'none';
+    return DEVICE_KINDS.includes(k) ? k : 'none';
 }
 
 // ── List/card view toggle (createListTable tables that offer both views) ─────

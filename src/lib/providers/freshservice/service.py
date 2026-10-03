@@ -128,7 +128,7 @@ def is_configured(wa) -> bool:
 # se le cambia lo que mantiene el origen y se vuelve a guardar. Escribir sólo los tres campos
 # sería, palabra por palabra, borrarle las claves de conexión a cuarenta máquinas.
 
-def apply_hosts(store, plan, *, actor: str = '', wa=None) -> dict:
+def apply_devices(store, plan, *, actor: str = '', wa=None) -> dict:
     """Ejecutar el plan sobre el registro de dispositivos. Devuelve cuántos de cada cosa.
 
     Fila a fila y no en una transacción, por lo mismo que las empresas: son unas decenas, cada
@@ -162,7 +162,7 @@ def apply_hosts(store, plan, *, actor: str = '', wa=None) -> dict:
                     # entonces lo que se quería era emparejarlos. Se cuenta con su nombre para
                     # que se pueda hacer a mano.
                     hecho['failed'].append({'name': campos['name'],
-                                            'error_key': 'fs_host_name_taken'})
+                                            'error_key': 'fs_device_name_taken'})
                     continue
                 hecho['created'] += 1
             elif accion in ('update', 'adopt'):
@@ -171,7 +171,7 @@ def apply_hosts(store, plan, *, actor: str = '', wa=None) -> dict:
                 actual = store.get(p.get('uid') or '', decrypt=True)
                 if actual is None:
                     hecho['failed'].append({'name': campos['name'],
-                                            'error_key': 'fs_hosts_link_gone'})
+                                            'error_key': 'fs_devices_link_gone'})
                     continue
                 ficha = dict(actual, **campos)
                 if accion == 'adopt':

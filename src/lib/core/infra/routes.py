@@ -41,7 +41,7 @@ from flask import jsonify, request, session
 
 from lib.core.history import service as history_svc
 from lib.core.devices import service as devices_svc
-from lib.core.devices.service import _checks_for_host
+from lib.core.devices.service import _checks_for_device
 from lib.core.devices import profiles as device_profiles
 from lib.core.devices.stores import devices as device_store_mod
 from lib.core.infra import jobs as infra_jobs
@@ -66,7 +66,7 @@ def register(app, wa):
             return devices
         return [h for h in devices if _may_see(h.get('uid'), perms)]
 
-    def _said_sources(bound_by_host):
+    def _said_sources(bound_by_device):
         """``sources_of`` for whichever modules the fleet has a check bound to.
 
         The names — and the BRANDS — of the things that answer come from the modules, and
@@ -75,7 +75,7 @@ def register(app, wa):
         fleet rather than once per machine, and only for the modules something is actually
         bound to: an installation with no SNMP pays nothing, which is most of them.
         """
-        mods = {m for mods in (bound_by_host or {}).values() for m in mods}
+        mods = {m for mods in (bound_by_device or {}).values() for m in mods}
         lang = session.get('lang') or wa._DEFAULT_LANG
         named = {mod: (history_svc.history_meta(wa._modules_dir, mod, lang,
                                                 wa._var_dir or '') or {}).get('sources') or {}
@@ -84,11 +84,11 @@ def register(app, wa):
 
     @app.route('/api/v1/infra/devices', methods=['GET'])
     @infra_view_req
-    def api_infra_hosts():
+    def api_infra_devices():
         """The fleet: one row per machine, ordered worst first.
 
         The secrets never leave the store: the row is a whitelist projection (see
-        ``infra.service._HOST_FIELDS``), so the per-protocol profiles — which hold the bound
+        ``infra.service._DEVICE_FIELDS``), so the per-protocol profiles — which hold the bound
         credential of everything that reaches the machine — are not in the payload at all,
         rather than being masked on the way out.
         """
@@ -98,7 +98,7 @@ def register(app, wa):
         # `decrypt=False`: this route never reads a profile, so there is nothing to decrypt
         # and no plaintext to mask — the projection drops the whole field either way.
         devices = store.list(decrypt=False)
-        bound = devices_svc._host_bound_modules(wa)
+        bound = devices_svc._device_bound_modules(wa)
         devices_svc.enrich_devices(
             devices, devices_svc._device_statuses(wa), bound,
             infra_svc.fleet_identity(wa._read_check_status(), devices, _said_sources(bound)))
@@ -107,7 +107,7 @@ def register(app, wa):
 
     @app.route('/api/v1/infra/devices/<uid>', methods=['GET'])
     @infra_view_req
-    def api_infra_host(uid):
+    def api_infra_device(uid):
         """One machine: its identity, what every check bound to it last said, and the numbers.
 
         ``results`` is the same shape the device modal shows (live values, falling back to
@@ -123,16 +123,16 @@ def register(app, wa):
         perms = set(wa._get_session_permissions() or [])
         if not _may_see(uid, perms):
             return jsonify({'error': wa._t('access_denied')}), 403
-        statuses, bound_mods = devices_svc._device_statuses(wa), devices_svc._host_bound_modules(wa)
+        statuses, bound_mods = devices_svc._device_statuses(wa), devices_svc._device_bound_modules(wa)
         devices_svc.enrich_devices([record], statuses, bound_mods)
 
-        # What is bound to this host, per bare module: {bare: {item_key: label}}.
+        # What is bound to this device, per bare module: {bare: {item_key: label}}.
         bound: dict = {}
-        for (bare, _coll), items in _checks_for_host(wa, uid).items():
+        for (bare, _coll), items in _checks_for_device(wa, uid).items():
             for key, item in items.items():
                 bound.setdefault(bare, {})[key] = str((item or {}).get('label') or '').strip()
         status_raw = wa._read_check_status()
-        # …and what a module recorded about the HOST itself, with no check behind it: a device
+        # …and what a module recorded about the DEVICE itself, with no check behind it: a device
         # read because the registry says it is one. The status column has always counted those
         # and this page did not, so a switch sampled that way went red in the fleet and showed
         # four empty tabs when opened — the machine with the numbers being the one nobody could
@@ -268,7 +268,7 @@ def register(app, wa):
         leen enteras, y quien sólo quiere los enlaces LLDP no tiene por qué pagarlas: pedirlo
         aparte es lo que separa «el mapa» de «lo que dos dispositivos dicen verse».
         """
-        return infra_svc.topology(wa, _visible, _checks_for_host, _said_sources, lang,
+        return infra_svc.topology(wa, _visible, _checks_for_device, _said_sources, lang,
                                   evidence_kinds=(infra_svc.EVIDENCE_KINDS if evidence else ()))
 
     wa._infra_topology = _topology
@@ -356,7 +356,7 @@ def register(app, wa):
                 if isinstance(cfg, dict):
                     return bool(cfg.get('enabled', True))
             return True
-        out = {bare for (bare, _coll), items in _checks_for_host(wa, uid).items()
+        out = {bare for (bare, _coll), items in _checks_for_device(wa, uid).items()
                if _enabled(bare)
                and any((it or {}).get('enabled') is not False for it in items.values())}
         # A device the registry alone makes a device has no item to be enabled, and refusing
@@ -386,7 +386,7 @@ def register(app, wa):
         So it is the same question `_modules_to_collect` answers, asked of every machine and
         unioned — which also means the two can never disagree about what watches a device.
         The configuration and the live state are read ONCE here rather than per machine: the
-        per-device path re-reads both, which is right for one host and is forty times the work
+        per-device path re-reads both, which is right for one device and is forty times the work
         for a fleet.
         """
         saved = wa._load_modules() or {}
@@ -572,7 +572,7 @@ def register(app, wa):
         is nothing running, which is what "nothing you may see is running" should look like.
         """
         job = infra_jobs.running_job()
-        if not job or not _may_see(job.get('host'), set(wa._get_session_permissions() or [])):
+        if not job or not _may_see(job.get('device'), set(wa._get_session_permissions() or [])):
             return jsonify({})
         return jsonify(job)
 
@@ -593,6 +593,6 @@ def register(app, wa):
         job = infra_jobs.job_status(job_id)
         if not job:
             return jsonify({'error': wa._t('infra_collect_unknown_job')}), 404
-        if not _may_see(job.get('host'), set(wa._get_session_permissions() or [])):
+        if not _may_see(job.get('device'), set(wa._get_session_permissions() or [])):
             return jsonify({'error': wa._t('access_denied')}), 403
         return jsonify(job)

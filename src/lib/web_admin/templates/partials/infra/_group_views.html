@@ -49,7 +49,7 @@ const _INFRA_GROUPERS = [
       of: h => [deviceKind(h.kind)],
       label: v => t('device_kind_' + v),
       icon:  () => 'bi-plug' },
-    { key: 'status', label_key: 'col_host_status',
+    { key: 'status', label_key: 'col_device_status',
       of: h => [h.maintenance ? 'maintenance' : (h.status || '')],
       label: v => _INFRA_STATE_LABEL[v] ? _INFRA_STATE_LABEL[v]() : v,
       icon:  () => 'bi-activity' },
@@ -203,10 +203,10 @@ function _infraGroupedBody(uids) {
             </td></tr>`;
         if (folded) continue;
         for (const uid of g.uids) {
-            h += `<tr style="cursor:pointer" title="${escAttr(t('infra_open_host'))}"
+            h += `<tr style="cursor:pointer" title="${escAttr(t('infra_open_device'))}"
                       onclick="if(!event.target.closest('button,a,input,select,label')) infraOpen(${jsStr(uid)})">
                 ${cols.map(c => _infraCell(uid, c.id)).join('')}
-                <td class="ss-td-actions">${_infraRowActions(uid)}</td>
+                <td class="ss-td-actions">${_infraRowActions(uid, _infraCtx())}</td>
             </tr>`;
         }
     }
@@ -247,10 +247,10 @@ function _infraRailBody(uids) {
         </button>`).join('');
 
     const rows = cur.uids.map(uid => `
-        <tr style="cursor:pointer" title="${escAttr(t('infra_open_host'))}"
+        <tr style="cursor:pointer" title="${escAttr(t('infra_open_device'))}"
             onclick="if(!event.target.closest('button,a,input,select,label')) infraOpen(${jsStr(uid)})">
             ${cols.map(c => _infraCell(uid, c.id)).join('')}
-            <td class="ss-td-actions">${_infraRowActions(uid)}</td>
+            <td class="ss-td-actions">${_infraRowActions(uid, _infraCtx())}</td>
         </tr>`).join('');
 
     return _infraGroupPicker() + `<div class="d-flex gap-3 px-3 pb-3 pt-2 align-items-start">
@@ -285,7 +285,7 @@ function _infraRailBody(uids) {
 function _infraBoardBody(uids) {
     const by = Object.fromEntries(_infraDevices.map(h => [h.uid, h]));
     const lanes = [..._INFRA_STATES, 'maintenance'];
-    // The shared colours (see `HOST_STATE_COLORS`). It kept its own, and maintenance came out
+    // The shared colours (see `DEVICE_STATE_COLORS`). It kept its own, and maintenance came out
     // grey here and orange on the fleet list — reported from the screen, twice, for the badge
     // and then for these cards.
     const tone = s => deviceStateColor(s, s === 'maintenance');

@@ -1,4 +1,4 @@
-function _buildHostChecks(uid) {
+function _buildDeviceChecks(uid) {
     const out = {};
     const _defaults = (fieldsMeta) => {
         const f = {};
@@ -6,10 +6,10 @@ function _buildHostChecks(uid) {
         return f;
     };
     // Device-bindable = every module that declares a __device_profile__ (exposed via
-    // MODULE_HOST_MULTIPLE, which lists them all).  Not MODULE_HOST_FIELDS: a
+    // MODULE_DEVICE_MULTIPLE, which lists them all).  Not MODULE_DEVICE_FIELDS: a
     // module may bind to a device yet hide NO fields (e.g. web, whose 'server' stays
     // visible so a reverse proxy can carry several FQDNs).
-    for (const mod of Object.keys(MODULE_HOST_MULTIPLE)) {
+    for (const mod of Object.keys(MODULE_DEVICE_MULTIPLE)) {
         // Multi-bind modules (e.g. proxmox cluster) are configured as a single
         // multi-device check in Modules, not per-device — skip them here so enabling
         // them on each node doesn't create duplicate cluster checks.
@@ -17,8 +17,8 @@ function _buildHostChecks(uid) {
         const coll = _deviceConnCollection(mod);
         const sch = ITEM_SCHEMAS[mod + '|' + coll] || ITEM_SCHEMAS['watchfuls.' + mod + '|' + coll] || {};
         const mirrorField = sch['__key_mirrors_field__'];   // e.g. service_status → 'service'
-        const fieldsMeta = _hostCheckFields(mod, coll);
-        const multiple = !!MODULE_HOST_MULTIPLE[mod];
+        const fieldsMeta = _deviceCheckFields(mod, coll);
+        const multiple = !!MODULE_DEVICE_MULTIPLE[mod];
         const items = [];
         if (uid) {
             for (const mk of [mod, 'watchfuls.' + mod]) {
@@ -49,7 +49,7 @@ function _buildHostChecks(uid) {
 
 // The collection that holds a module's connection items (snmp 'servers', else 'list').
 function _deviceConnCollection(mod) {
-    const fields = MODULE_HOST_FIELDS[mod] || [];
+    const fields = MODULE_DEVICE_FIELDS[mod] || [];
     for (const key of Object.keys(ITEM_SCHEMAS)) {
         if (!key.startsWith(mod + '|')) continue;
         const coll = key.slice(mod.length + 1);
@@ -62,13 +62,13 @@ function _deviceConnCollection(mod) {
 
 // Editable check fields of a module: scalar item fields minus the device-owned
 // connection fields, minus 'enabled' (the master toggle) and sub-collections.
-function _hostCheckFields(mod, coll) {
+function _deviceCheckFields(mod, coll) {
     const sch = ITEM_SCHEMAS[mod + '|' + coll] || {};
-    const hostF = new Set(MODULE_HOST_FIELDS[mod] || []);
+    const deviceF = new Set(MODULE_DEVICE_FIELDS[mod] || []);
     const out = [];
     const order = sch['__field_order__'] || Object.keys(sch);
     for (const k of order) {
-        if (k.startsWith('__') || hostF.has(k) || k === 'enabled' || k === 'device_uid') continue;
+        if (k.startsWith('__') || deviceF.has(k) || k === 'enabled' || k === 'device_uid') continue;
         const meta = sch[k];
         if (!meta || typeof meta !== 'object' || !('type' in meta)) continue;
         if (meta.type === 'sub_collection') continue;   // e.g. snmp OID checks
@@ -111,10 +111,10 @@ function _renderProfileFields(proto, spec) {
             // Before the first credential field that is actually VISIBLE — the v3 keys only
             // show at version 3 — so the picker never ends up stranded under a heading whose
             // fields are all hidden.
-            if (!placed && _hostFieldVisible(f, ctx)) { h += picker; placed = true; }
+            if (!placed && _deviceFieldVisible(f, ctx)) { h += picker; placed = true; }
             if (usingCred) continue;      // the credential supplies these
         }
-        h += _hostFieldRow(f, prof[f.name] !== undefined ? prof[f.name] : f.default,
+        h += _deviceFieldRow(f, prof[f.name] !== undefined ? prof[f.name] : f.default,
                            `_setProfileField(${jsStr(proto)},${jsStr(f.name)},`, ctx);
     }
     if (!placed) h = picker + h;
@@ -131,7 +131,7 @@ function _profileCredFields(proto) {
 
 // Module-level default for a field referenced by placeholder_module (e.g. the
 // ping module's default timeout), falling back to the schema default.
-function _hostModuleDefault(mod, key) {
+function _deviceModuleDefault(mod, key) {
     const mk = (modulesData[mod] !== undefined) ? mod
              : (modulesData['watchfuls.' + mod] !== undefined ? 'watchfuls.' + mod : mod);
     const v = (modulesData[mk] || {})[key];
@@ -144,8 +144,8 @@ function _hostModuleDefault(mod, key) {
 // Delegates the control markup to fieldCtl() (core/_field_render.html) so the
 // device modal renders identically to the Modules tab — numbers show the default
 // as placeholder (blank when 0/unset), secrets mask, multi fields use chips.
-// Only the data wiring (onch / _setHostCheckField) is device-specific.
-function _hostFieldControl(f, val, onch, ctx) {
+// Only the data wiring (onch / _setDeviceCheckField) is device-specific.
+function _deviceFieldControl(f, val, onch, ctx) {
     if (f.type === 'bool') {
         return fieldCtl({kind: 'switch', value: val, onChange: `${onch}this.checked)`});
     }
@@ -181,7 +181,7 @@ function _hostFieldControl(f, val, onch, ctx) {
         } else if (f.placeholder != null) {
             ph = f.placeholder;
         } else if (f.placeholder_module != null && ctx) {
-            ph = _hostModuleDefault(ctx.mod, f.placeholder_module);
+            ph = _deviceModuleDefault(ctx.mod, f.placeholder_module);
         } else if (f.default != null && f.default !== 0) {
             ph = f.default;   // generic: show the schema default
         }
@@ -208,7 +208,7 @@ function _hostFieldControl(f, val, onch, ctx) {
     } else if (f.placeholder_module != null && ctx) {
         // Module-level default shown as placeholder (e.g. dns nameserver), falling
         // back to the field's static placeholder when the global is empty.
-        const _mp = _hostModuleDefault(ctx.mod, f.placeholder_module);
+        const _mp = _deviceModuleDefault(ctx.mod, f.placeholder_module);
         _ph = (_mp != null && _mp !== '') ? String(_mp)
             : (f.placeholder != null && f.placeholder !== '__key__' ? String(f.placeholder) : '');
     } else if (f.placeholder != null && f.placeholder !== '__key__') {
@@ -221,9 +221,9 @@ function _hostFieldControl(f, val, onch, ctx) {
     const _ia = f.input_action;
     if (_ia && ctx && ctx.idx != null) {
         const _t = _fieldTerm(ctx.mod, f, ctx.fields);
-        const _al = escAttr((_t && _t.action) || _hostActionLabel(ctx.mod, _ia.id));
+        const _al = escAttr((_t && _t.action) || _deviceActionLabel(ctx.mod, _ia.id));
         const _btn = `<button class="btn btn-secondary" type="button" title="${_al}"
-                onclick="_runHostFieldAction(${jsStr(ctx.mod)},${ctx.idx},${jsStr(f.name)},this)">
+                onclick="_runDeviceFieldAction(${jsStr(ctx.mod)},${ctx.idx},${jsStr(f.name)},this)">
                 <i class="bi ${escAttr(_ia.icon || 'bi-list')}"></i></button>`;
         // Multi value (several databases) → shared removable-chips widget, bound to
         // this check's data via a field adapter keyed "mod|idx|field".
@@ -232,7 +232,7 @@ function _hostFieldControl(f, val, onch, ctx) {
             registerFieldAdapter(_key,
                 () => { const it = _deviceChecks[ctx.mod] && _deviceChecks[ctx.mod].items[ctx.idx];
                         return it ? it.fields[f.name] : ''; },
-                v => _setHostCheckField(ctx.mod, ctx.idx, f.name, v));
+                v => _setDeviceCheckField(ctx.mod, ctx.idx, f.name, v));
             return fieldCtl({kind: 'multi', key: _key, value: val, trailing: _btn});
         }
         return fieldCtl({kind: 'text', inputAttrs: _textAttrs, onChange: `${onch}this.value)`, trailing: _btn});
@@ -246,23 +246,23 @@ function _hostFieldControl(f, val, onch, ctx) {
         registerFieldAdapter(_mKey,
             () => { const it = _deviceChecks[ctx.mod] && _deviceChecks[ctx.mod].items[ctx.idx];
                     return it ? (it.fields[f.name] || '') : ''; },
-            v => _setHostCheckField(ctx.mod, ctx.idx, f.name, v));
+            v => _setDeviceCheckField(ctx.mod, ctx.idx, f.name, v));
         return fieldCtl({kind: 'multi', key: _mKey, value: val,
             placeholder: (f.placeholder != null ? String(f.placeholder) : ''),
-            trailing: _hostFieldPickerBtn(ctx.mod, ctx.idx, f.name)});
+            trailing: _deviceFieldPickerBtn(ctx.mod, ctx.idx, f.name)});
     }
     // …and the same field on a PROTOCOL PROFILE, which has no check index. What a device
     // IS — the SNMP profiles it carries — belongs to the device, so this is where it is
     // now edited; without this branch it renders as a text box holding a comma-separated
     // list, which looks editable and is the one thing nobody should type by hand.
     if (f.multi && ctx && ctx.idx == null && ctx.proto) {
-        const _pKey = 'host|' + ctx.proto + '|' + f.name;
+        const _pKey = 'device|' + ctx.proto + '|' + f.name;
         registerFieldAdapter(_pKey,
             () => (((_deviceDraft.profiles || {})[ctx.proto] || {})[f.name]) || '',
             v => _setProfileField(ctx.proto, f.name, v));
         return fieldCtl({kind: 'multi', key: _pKey, value: val,
             placeholder: (f.placeholder != null ? String(f.placeholder) : ''),
-            trailing: _hostProfilePickerBtn(ctx.proto, ctx.mod, f.name)});
+            trailing: _deviceProfilePickerBtn(ctx.proto, ctx.mod, f.name)});
     }
     return fieldCtl({kind: 'text', inputAttrs: _textAttrs, onChange: `${onch}this.value)`});
 }
@@ -272,40 +272,40 @@ function _hostFieldControl(f, val, onch, ctx) {
  *  A picker is registered against the kind of field, and that identity is spelled with the
  *  module's device-capable collection in the middle — the same string the Modules tab uses,
  *  so one registration serves both screens and neither knows about the other. */
-function _hostProfileSchemaKey(mod, name) {
-    const colls = (typeof MODULE_HOST_COLLECTIONS !== 'undefined')
-        ? (MODULE_HOST_COLLECTIONS[mod] || []) : [];
+function _deviceProfileSchemaKey(mod, name) {
+    const colls = (typeof MODULE_DEVICE_COLLECTIONS !== 'undefined')
+        ? (MODULE_DEVICE_COLLECTIONS[mod] || []) : [];
     const coll = Array.isArray(colls) ? colls[0] : colls;
     return coll ? `${mod}|${coll}|${name}` : '';
 }
 
 /** The picker button (and any actions beside it) for a profile field. */
-function _hostProfilePickerBtn(proto, mod, name) {
-    const key = _hostProfileSchemaKey(mod, name);
+function _deviceProfilePickerBtn(proto, mod, name) {
+    const key = _deviceProfileSchemaKey(mod, name);
     const fp = (key && typeof _fieldPickerFor === 'function') ? _fieldPickerFor(key) : null;
     if (!fp) return '';
     let h = `<button class="btn btn-secondary" type="button"
             title="${escAttr(_fieldPickerTitle(fp))}"
-            onclick="_hostProfilePickerOpen(${jsStr(proto)},${jsStr(mod)},${jsStr(name)})">
+            onclick="_deviceProfilePickerOpen(${jsStr(proto)},${jsStr(mod)},${jsStr(name)})">
             <i class="bi ${escAttr(fp.icon)}"></i></button>`;
     (fp.actions || []).forEach((a, i) => {
         h += `<button class="btn btn-secondary" type="button"
             title="${escAttr(_fieldPickerTitle(a))}"
-            onclick="_hostProfileActionRun(${jsStr(proto)},${jsStr(mod)},${jsStr(name)},${i},this)">
+            onclick="_deviceProfileActionRun(${jsStr(proto)},${jsStr(mod)},${jsStr(name)},${i},this)">
             <i class="bi ${escAttr(a.icon)}"></i></button>`;
     });
     return h;
 }
 
-function _hostProfilePickerOpen(proto, mod, name) {
-    const key = _hostProfileSchemaKey(mod, name);
+function _deviceProfilePickerOpen(proto, mod, name) {
+    const key = _deviceProfileSchemaKey(mod, name);
     const fp = key && _fieldPickerFor(key);
     if (!fp) return;
     const cur = ((_deviceDraft.profiles || {})[proto] || {})[name] || '';
     fp.open(key, cur, (v) => {
         _setProfileField(proto, name, v);
-        if (typeof renderChips === 'function') renderChips('host|' + proto + '|' + name);
-    }, () => _hostProfileActionCfg(proto));
+        if (typeof renderChips === 'function') renderChips('device|' + proto + '|' + name);
+    }, () => _deviceProfileActionCfg(proto));
 }
 
 /** Run one of the picker's neighbouring actions (e.g. SNMP's "test against the device").
@@ -313,25 +313,25 @@ function _hostProfilePickerOpen(proto, mod, name) {
  *  The action is handed the device draft rather than a config path: on this screen the value
  *  it is about may never have been saved, and the device it would be tested against is the
  *  one in the form. */
-function _hostProfileActionRun(proto, mod, name, idx, btn) {
-    const key = _hostProfileSchemaKey(mod, name);
+function _deviceProfileActionRun(proto, mod, name, idx, btn) {
+    const key = _deviceProfileSchemaKey(mod, name);
     const fp = key && _fieldPickerFor(key);
     const act = fp && (fp.actions || [])[idx];
     if (!act) return;
     const cur = ((_deviceDraft.profiles || {})[proto] || {})[name] || '';
-    act.run(key, cur, btn, () => _hostProfileActionCfg(proto));
+    act.run(key, cur, btn, () => _deviceProfileActionCfg(proto));
 }
 
 /** What an action posted from the device modal runs against.
  *
- *  The identity is NOT sent: the draft travels as `_host` and the server resolves the
+ *  The identity is NOT sent: the draft travels as `_device` and the server resolves the
  *  bound device and its credential exactly as it does for a scheduled check — which is also
  *  the only way it can work, since the browser holds a mask where each secret used to be. */
-function _hostProfileActionCfg(proto) {
+function _deviceProfileActionCfg(proto) {
     const d = _deviceDraft || {};
     const cfg = { ...(d.profiles || {})[proto] };
     if (_editingDeviceUid) cfg.device_uid = _editingDeviceUid;
-    cfg._host = { address: d.address || '', kind: deviceKind(d.kind), os: d.os || 'auto',
+    cfg._device = { address: d.address || '', kind: deviceKind(d.kind), os: d.os || 'auto',
                   profiles: d.profiles || {} };
     return cfg;
 }
@@ -339,24 +339,24 @@ function _hostProfileActionCfg(proto) {
 /** The picker button for a check field, when the module registered one for that KIND of
  *  field. Same registry the Modules tab reads; the difference is only where the value is
  *  written back, which is why the picker is opened with a callback here. */
-function _hostFieldPickerBtn(mod, idx, name) {
-    const key = _hostFieldSchemaKey(mod, name);
+function _deviceFieldPickerBtn(mod, idx, name) {
+    const key = _deviceFieldSchemaKey(mod, name);
     const fp = (typeof _fieldPickerFor === 'function') ? _fieldPickerFor(key) : null;
     if (!fp) return '';
     return `<button class="btn btn-secondary" type="button"
             title="${escAttr(_fieldPickerTitle(fp))}"
-            onclick="_hostFieldPickerOpen(${jsStr(mod)},${idx},${jsStr(name)})">
+            onclick="_deviceFieldPickerOpen(${jsStr(mod)},${idx},${jsStr(name)})">
             <i class="bi ${escAttr(fp.icon)}"></i></button>`;
 }
 
 /** `<module>|<collection>|<field>` — the identity a picker is registered against. */
-function _hostFieldSchemaKey(mod, name) {
+function _deviceFieldSchemaKey(mod, name) {
     const coll = (_deviceChecks[mod] || {}).collection || '';
     return coll ? `${mod}|${coll}|${name}` : '';
 }
 
-function _hostFieldPickerOpen(mod, idx, name) {
-    const key = _hostFieldSchemaKey(mod, name);
+function _deviceFieldPickerOpen(mod, idx, name) {
+    const key = _deviceFieldSchemaKey(mod, name);
     const fp = _fieldPickerFor(key);
     if (!fp) return;
     const it = (_deviceChecks[mod] || {}).items[idx];
@@ -364,13 +364,13 @@ function _hostFieldPickerOpen(mod, idx, name) {
     // The callback is what makes one picker serve both panes: the Modules tab writes into
     // modulesData by path, and here the value belongs to a draft that is not saved yet.
     fp.open(key, cur, (v) => {
-        _setHostCheckField(mod, idx, name, v);
+        _setDeviceCheckField(mod, idx, name, v);
         if (typeof renderChips === 'function') renderChips(mod + '|' + idx + '|' + name);
     });
 }
 
 // Action label from the module's i18n (action_labels), like the Modules tab.
-function _hostActionLabel(mod, id) {
+function _deviceActionLabel(mod, id) {
     const i18n = ITEM_SCHEMAS[mod + '|__i18n__'];
     const ld = i18n && (i18n[CURRENT_LANG] || i18n[SYSTEM_DEFAULT_LANG]);
     return (ld && ld.action_labels && ld.action_labels[id]) || t(id) || id;
@@ -379,7 +379,7 @@ function _hostActionLabel(mod, id) {
 // Run a per-field action (input_action) for a device-bound check: POST the check's
 // fields + device binding (so the server resolves the device's address/SSH) and, for
 // a field_picker result, write the chosen value back into the check.
-async function _runHostFieldAction(mod, idx, fieldName, btn) {
+async function _runDeviceFieldAction(mod, idx, fieldName, btn) {
     const st = _deviceChecks[mod];
     const it = st && st.items[idx];
     if (!it) return;
@@ -389,7 +389,7 @@ async function _runHostFieldAction(mod, idx, fieldName, btn) {
     // _item_key lets the server restore this check's masked secrets (e.g. the DB
     // password) from the stored config, so the action authenticates after reload.
     const payload = { ...it.fields, ...(ia.extra || {}), cred_uid: it.cred_uid || '',
-                      _item_key: it._key || '', ..._hostDraftPayload() };
+                      _item_key: it._key || '', ..._deviceDraftPayload() };
     // Spinner on the button (no "Testing…" toast — this isn't a test, e.g. it
     // just lists databases), mirroring the Modules tab's itemAction().
     const _done = ssBtnBusy(btn);
@@ -402,11 +402,11 @@ async function _runHostFieldAction(mod, idx, fieldName, btn) {
         if (!items.length) { showToast(t('no_items') || 'No items', 'secondary'); return; }
         const field = ia.result_field || fieldName;
         const _t = _fieldTerm(mod, meta, it.fields);
-        const _title = (_t && _t.pick) || _hostActionLabel(mod, ia.id);
+        const _title = (_t && _t.pick) || _deviceActionLabel(mod, ia.id);
         openFieldPickerModal(null, items, _title, (value) => {
             it.fields[field] = value;
             // Re-render only this card's fields so it stays expanded.
-            if (st.multiple) _refreshHostCheckItemFields(mod, idx); else _refreshSingleCheck(mod);
+            if (st.multiple) _refreshDeviceCheckItemFields(mod, idx); else _refreshSingleCheck(mod);
         }, it.fields[field], !!ia.result_multi);   // current value + multi-select mode
     } else {
         showToast(d.message || 'OK', 'success');
@@ -437,7 +437,7 @@ function _setProfileField(proto, field, value) {
     // cred_uid isn't a schema controller, but toggling it shows/hides that protocol's
     // identity fields, so its section has to be redrawn.
     const credToggle = (field === 'cred_uid');
-    if (spec && (credToggle || _hostFieldControls(spec.fields, field))) {
+    if (spec && (credToggle || _deviceFieldControls(spec.fields, field))) {
         if (proto === 'ssh') {
             const el = document.getElementById('hmSshFields');
             if (el) { el.innerHTML = _renderSshFields(); initTooltips(el); }
@@ -448,8 +448,8 @@ function _setProfileField(proto, field, value) {
     }
 }
 
-async function saveHostModal(closeAfter = true) {
-    const errEl = document.getElementById('hostModalError');
+async function saveDeviceModal(closeAfter = true) {
+    const errEl = document.getElementById('deviceModalError');
     if (errEl) errEl.textContent = '';
     const d = _deviceDraft;
     if (!d || !String(d.name || '').trim()) {
@@ -522,12 +522,12 @@ async function saveHostModal(closeAfter = true) {
     // updates it instead of creating a duplicate.
     if (wasNew && uid) _editingDeviceUid = uid;
 
-    // Persist the monitoring choices (which modules check this host + settings).
-    const modsChanged = _applyHostChecks(uid);
+    // Persist the monitoring choices (which modules check this device + settings).
+    const modsChanged = _applyDeviceChecks(uid);
     if (modsChanged) {
         const r = await apiPut('/api/v1/modules', modulesData);
         if (!(r && r.ok)) {
-            // Device saved, but the checks couldn't be persisted. _applyHostChecks already
+            // Device saved, but the checks couldn't be persisted. _applyDeviceChecks already
             // mutated modulesData in memory, so resync it from the server (authoritative)
             // — otherwise the stale local change lingers and a later "Save Modules" would
             // push it unintentionally.
@@ -542,17 +542,17 @@ async function saveHostModal(closeAfter = true) {
         renderModules();
     }
 
-    _snapshotHost();   // new baseline for Undo
+    _snapshotDevice();   // new baseline for Undo
     showToast(t(wasNew ? 'device_created' : 'device_updated'));
     await reloadDevices();
     if (closeAfter) {
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('hostModal')).hide();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceModal')).hide();
     }
 }
 
 // Snapshot the current draft/checks/shown-modules so "Undo" can restore them.
-function _snapshotHost() {
-    _hostSnapshot = {
+function _snapshotDevice() {
+    _deviceSnapshot = {
         draft: deepClone(_deviceDraft),
         checks: deepClone(_deviceChecks),
         shown: [..._deviceShownMods],
@@ -560,18 +560,18 @@ function _snapshotHost() {
 }
 
 // Undo: discard edits made since the modal was opened (or the last save).
-function _undoHostModal() {
-    if (!_hostSnapshot) return;
-    _deviceDraft = deepClone(_hostSnapshot.draft);
-    _deviceChecks = deepClone(_hostSnapshot.checks);
-    _deviceShownMods = new Set(_hostSnapshot.shown);
+function _undoDeviceModal() {
+    if (!_deviceSnapshot) return;
+    _deviceDraft = deepClone(_deviceSnapshot.draft);
+    _deviceChecks = deepClone(_deviceSnapshot.checks);
+    _deviceShownMods = new Set(_deviceSnapshot.shown);
     _renderDeviceModalBody();
 }
 
 // Apply the device's monitoring lists to modulesData (in place): create/update the
-// current checks bound to this host and delete the ones the user removed.
+// current checks bound to this device and delete the ones the user removed.
 // Returns true if anything changed.
-function _applyHostChecks(uid) {
+function _applyDeviceChecks(uid) {
     let changed = false;
     for (const [mod, st] of Object.entries(_deviceChecks)) {
         if (!st.items.length && !st._existingKeys.length) continue;
@@ -643,7 +643,7 @@ function _applyHostChecks(uid) {
             }
             changed = true;
         }
-        // Delete checks that were bound to this host but the user removed. `col` stays null
+        // Delete checks that were bound to this device but the user removed. `col` stays null
         // when the module has no stored collection, and then there is nothing to delete.
         for (const oldKey of st._existingKeys) {
             if (col && !keptKeys.has(oldKey) && oldKey in col) {
@@ -665,9 +665,9 @@ function _uniqueItemKey(collection, base) {
     return key + '-' + Date.now();
 }
 
-// How many module checks are bound to this host (device_uid, or a member of a
+// How many module checks are bound to this device (device_uid, or a member of a
 // multi-device device_uids) — drives the "also delete its checks?" prompt.
-function _hostBoundCheckCount(uid) {
+function _deviceBoundCheckCount(uid) {
     let n = 0;
     for (const [mk, mc] of Object.entries(modulesData || {})) {
         if (!mc || typeof mc !== 'object' || mk.startsWith('__')) continue;
@@ -686,10 +686,10 @@ function _hostBoundCheckCount(uid) {
 function deleteDevice(uid) {
     const device = devicesData[uid];
     if (!device) return;
-    const n = _hostBoundCheckCount(uid);
+    const n = _deviceBoundCheckCount(uid);
     const baseMsg = t('device_delete_confirm').replace('{name}', device.name || uid);
     showConfirmModal(baseMsg, async () => {
-        const withChecks = n > 0 && document.getElementById('delHostWithChecks')?.checked;
+        const withChecks = n > 0 && document.getElementById('delDeviceWithChecks')?.checked;
         const res = await apiDelete('/api/v1/devices/' + encodeURIComponent(uid) + (withChecks ? '?with_checks=1' : ''));
         if (res && res.status === 200) {
             showToast(t('device_deleted'));
@@ -711,8 +711,8 @@ function deleteDevice(uid) {
         const msgEl = document.getElementById('confirmModalMsg');
         if (msgEl) msgEl.innerHTML = `${esc(baseMsg)}
             <div class="form-check mt-2">
-                <input class="form-check-input" type="checkbox" id="delHostWithChecks" checked>
-                <label class="form-check-label small" for="delHostWithChecks">${esc(tf('device_delete_with_checks', n))}</label>
+                <input class="form-check-input" type="checkbox" id="delDeviceWithChecks" checked>
+                <label class="form-check-label small" for="delDeviceWithChecks">${esc(tf('device_delete_with_checks', n))}</label>
             </div>`;
     }
 }
@@ -721,11 +721,11 @@ function deleteDevice(uid) {
 let _migrateCandidates = [];   // last preview proposal
 
 async function openMigrateModal() {
-    const body = document.getElementById('hostMigrateBody');
-    const info = document.getElementById('hostMigrateInfo');
+    const body = document.getElementById('deviceMigrateBody');
+    const info = document.getElementById('deviceMigrateInfo');
     body.innerHTML = `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
     if (info) info.textContent = '';
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('hostMigrateModal')).show();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceMigrateModal')).show();
 
     const plan = await apiGet('/api/v1/devices/migrate/preview');
     _migrateCandidates = (plan && plan.candidates) || [];
@@ -740,7 +740,7 @@ async function openMigrateModal() {
             <th style="width:2rem"></th>
             <th>${esc(t('device_name'))}</th>
             <th>${esc(t('col_device_address'))}</th>
-            <th>${esc(t('col_host_profiles'))}</th>
+            <th>${esc(t('col_device_profiles'))}</th>
             <th>${esc(t('device_migrate_members'))}</th>
         </tr></thead><tbody>`;
     _migrateCandidates.forEach((c, i) => {
@@ -766,12 +766,12 @@ async function openMigrateModal() {
 
 async function applyMigration() {
     const accept = [];
-    document.querySelectorAll('#hostMigrateBody input[data-mig-idx]').forEach(cb => {
+    document.querySelectorAll('#deviceMigrateBody input[data-mig-idx]').forEach(cb => {
         if (!cb.checked) return;
         const i = parseInt(cb.dataset.migIdx, 10);
         const cand = _migrateCandidates[i];
         if (!cand) return;
-        const nameEl = document.querySelector(`#hostMigrateBody input[data-mig-name="${i}"]`);
+        const nameEl = document.querySelector(`#deviceMigrateBody input[data-mig-name="${i}"]`);
         accept.push({ id: cand.id, name: (nameEl && nameEl.value || '').trim() });
     });
     if (!accept.length) {
@@ -783,7 +783,7 @@ async function applyMigration() {
     const res = await apiPost('/api/v1/devices/migrate/apply', { accept });
     if (btn) btn.disabled = false;
     if (res && res.status === 200 && res.data && res.data.ok) {
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('hostMigrateModal')).hide();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceMigrateModal')).hide();
         showToast(tf('device_migrate_done', res.data.created, res.data.checks));
         await reloadDevices();
         // The checks now reference devices — reload module config so the UI reflects it.

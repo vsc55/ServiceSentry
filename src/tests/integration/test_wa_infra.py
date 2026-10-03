@@ -15,7 +15,7 @@ the registry with it.
 Most of this file is about the two things that are easy to get wrong when a screen composes
 other people's data:
 
-* **it must not leak more than it shows.** A host record carries `profiles` — the bound
+* **it must not leak more than it shows.** A device record carries `profiles` — the bound
   credential of every protocol that reaches the machine — and the payload is a whitelist
   projection rather than "the record minus a few keys", which is one added field away from
   shipping them;
@@ -39,14 +39,14 @@ from tests.conftest import _login
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason='Flask is not installed')
 
-_HOST = {
+_DEVICE = {
     'name': 'nas-1', 'address': '10.0.0.9', 'tags': ['prod'],
     'profiles': {'ssh': {'user': 'root', 'ssh_password': 'p@ss', 'port': 22}},
 }
 
 
 def _mkdevice(client, **over):
-    body = dict(_HOST)
+    body = dict(_DEVICE)
     body.update(over)
     r = client.post('/api/v1/devices', json=body)
     assert r.status_code == 200, r.get_json()
@@ -85,7 +85,7 @@ class TestTheFleet:
         assert 'profiles' not in body and 'ssh_password' not in body and 'p@ss' not in body
 
     def test_a_machine_nobody_watches_is_its_own_state(self, client):
-        """Not "ok". A host with no enabled check has no status at all, and painting it green
+        """Not "ok". A device with no enabled check has no status at all, and painting it green
         is the section lying about the one thing it exists to show — so it has its own count
         in the header, where "31 OK" would have hidden it."""
         _login(client)
@@ -116,7 +116,7 @@ class TestOneMachine:
 
     def test_an_unknown_machine_is_a_404(self, client):
         _login(client)
-        assert client.get('/api/v1/infra/devices/not-a-host').status_code == 404
+        assert client.get('/api/v1/infra/devices/not-a-device').status_code == 404
 
     def test_it_does_not_carry_the_credentials_either(self, client):
         _login(client)
@@ -174,7 +174,7 @@ class TestCollectingNow:
     of polling on somebody's fleet is not the same act as looking at yesterday's answer.
 
     These tests stop at the gate on purpose: what happens past it is the executor's, and it is
-    tested where it lives (tests/unit/test_monitor_executor.py). A host with no bound check
+    tested where it lives (tests/unit/test_monitor_executor.py). A device with no bound check
     reaches the end of the route without running anything, which is what makes the whole gate
     testable without a device on the other side.
     """
@@ -197,7 +197,7 @@ class TestCollectingNow:
 
     def test_an_editor_holds_it(self, admin, client):
         """409 and not 403: the request got past the gate and found nothing to run, which is
-        the only thing this host has to say. A 403 here would mean the flag never reached the
+        the only thing this device has to say. A 403 here would mean the flag never reached the
         role that is supposed to have it."""
         _login(client)
         uid = _mkdevice(client)
@@ -247,16 +247,16 @@ class TestCollectingNow:
 
     def test_an_unknown_machine_is_a_404(self, client):
         _login(client)
-        assert client.post(self._url('not-a-host')).status_code == 404
+        assert client.post(self._url('not-a-device')).status_code == 404
 
     def test_it_refuses_a_machine_this_caller_cannot_see(self, admin, client):
         """Holding `infra_collect` says which ACT you may perform, not which machines you may
         perform it on. Both questions are asked, and the second is the registry's own rule —
         the same `devices_view` / `server.<uid>.view` narrowing the two GETs apply, so a flag
         meant to refresh your own rack never becomes a way to poll somebody else's."""
-        seen = admin._devices_store.create({**_HOST, 'name': 'mine'}, actor='admin')
+        seen = admin._devices_store.create({**_DEVICE, 'name': 'mine'}, actor='admin')
         other = admin._devices_store.create(
-            {**_HOST, 'name': 'theirs', 'address': '10.0.0.11'}, actor='admin')
+            {**_DEVICE, 'name': 'theirs', 'address': '10.0.0.11'}, actor='admin')
         role_uid = '22222222-2222-4222-8222-222222222222'
         admin._custom_roles[role_uid] = {
             'uid': role_uid, 'name': 'infra-op', 'enabled': True,
@@ -304,7 +304,7 @@ class TestCollectingFromTheWholeFleet:
         without this that flag would poll every machine in the building, including the ones
         the same session is refused a GET on two routes above.
         """
-        seen = admin._devices_store.create({**_HOST, 'name': 'theirs'}, actor='admin')
+        seen = admin._devices_store.create({**_DEVICE, 'name': 'theirs'}, actor='admin')
         role_uid = '33333333-3333-4333-8333-333333333333'
         admin._custom_roles[role_uid] = {
             'uid': role_uid, 'name': 'rack-op', 'enabled': True,

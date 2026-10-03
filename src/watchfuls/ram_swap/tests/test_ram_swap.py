@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/ram_swap — host-centric RAM/SWAP monitoring.
+"""Tests for watchfuls/ram_swap — device-centric RAM/SWAP monitoring.
 
 Memory figures are read via ``device_exec`` (mocked); the per-OS parsers run for
 real against canned command output.
@@ -18,7 +18,7 @@ class _FakeStore:
         return self._h.get(uid)
 
 
-def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+def _device(uid='h1', os='linux', kind='remote', maintenance=False):
     return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
             'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
@@ -26,7 +26,7 @@ def _host(uid='h1', os='linux', kind='remote', maintenance=False):
 def _watchful(items, devices=None):
     from watchfuls.ram_swap import Watchful
     mm = create_mock_monitor({'watchfuls.ram_swap': {'list': items}})
-    mm._devices_store = _FakeStore(devices or {'h1': _host()})
+    mm._devices_store = _FakeStore(devices or {'h1': _device()})
     return Watchful(mm)
 
 
@@ -111,7 +111,7 @@ class TestCheck:
 
     def test_windows_reports_ram_only(self):
         w = _watchful({'srv': {'enabled': True, 'alert_ram': 90, 'device_uid': 'h1'}},
-                      devices={'h1': _host(os='windows')})
+                      devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec', return_value=(_WMIC, '', 0)) as he:
             items = w.check().list
         assert 'wmic' in he.call_args.args[1]
@@ -119,7 +119,7 @@ class TestCheck:
 
     def test_unsupported_os(self):
         w = _watchful({'srv': {'enabled': True, 'device_uid': 'h1'}},
-                      devices={'h1': _host(os='other')})
+                      devices={'h1': _device(os='other')})
         with patch.object(w, 'device_exec') as he:
             items = w.check().list
         he.assert_not_called()
@@ -132,9 +132,9 @@ class TestCheck:
             assert len(w.check().items()) == 0
         he.assert_not_called()
 
-    def test_maintenance_host_skipped(self):
+    def test_maintenance_device_skipped(self):
         w = _watchful({'srv': {'enabled': True, 'device_uid': 'h1'}},
-                      devices={'h1': _host(maintenance=True)})
+                      devices={'h1': _device(maintenance=True)})
         with patch.object(w, 'device_exec') as he:
             assert len(w.check().items()) == 0
         he.assert_not_called()

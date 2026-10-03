@@ -55,6 +55,7 @@
     PUT    /api/v1/dcim/parts/<uid>         …change it
     DELETE /api/v1/dcim/parts/<uid>         …take it out
     GET    /api/v1/dcim/devices                 the machines an item may be linked to
+    GET    /api/v1/dcim/devices/<uid>/place     where a device is: site, room, rack, U, cables, power
     GET    /api/v1/dcim/racks                 the racks of one room (?room=<uid>)
     GET    /api/v1/dcim/racks/<uid>           one rack: its items and what is free
     POST   /api/v1/dcim/items                 put something in a rack

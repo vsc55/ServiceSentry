@@ -78,9 +78,9 @@ class TestTodoEstaEnUnSitio:
         assert [i['uid'] for i in store.items_of(fleet['rack'])] == [a]
 
 
-class TestUnRackContieneItemsYAlgunosSonHosts:
+class TestUnRackContieneItemsYAlgunosSonDevices:
 
-    def test_un_item_no_necesita_host(self, store, fleet):
+    def test_un_item_no_necesita_device(self, store, fleet):
         """Un panel de parcheo ocupa 1U y no contesta a nada."""
         uid = store.items.create({'rack_uid': fleet['rack'], 'u_start': 40,
                                   'label': 'Patch 1-24'})
@@ -183,7 +183,7 @@ class TestDeQuienEsCadaCosa:
         assert self._owner(store, 'rack', fleet['rack']) == fleet['filial']
         assert len(store.owners.list()) == 1
 
-    def test_un_host_suelto_tambien_es_de_alguien(self, store, fleet):
+    def test_un_device_suelto_tambien_es_de_alguien(self, store, fleet):
         """Una VM, un VIP o una máquina encima de una mesa no están en ningún rack."""
         store.set_owner('device', 'h-vip', fleet['filial'])
         assert self._owner(store, 'device', 'h-vip') == fleet['filial']
@@ -242,7 +242,10 @@ class TestLasBanderasDelDominio:
         cada cosa— no eran de esta sección: la misma sociedad que paga el armario tiene usuarios
         en el directorio, así que viven en `lib.core.orgs` y se llaman `orgs_*`."""
         from lib.core.dcim.manifest import MODULE_PERMISSIONS
-        flags = [p['flag'] for p in MODULE_PERMISSIONS['permissions']]
+        # En dos grupos desde que los modelos y las plantillas son del Catálogo.
+        flags = [p['flag'] for g in MODULE_PERMISSIONS for p in g['permissions']]
+        assert [g['group'] for g in MODULE_PERMISSIONS] == ['perm_group_dcim',
+                                                             'perm_group_dcim_catalog']
         assert flags == ['dcim_view', 'dcim_edit',
                          'dcim_cable_edit', 'dcim_catalog_view', 'dcim_catalog_manage',
                          'dcim_build_edit']
@@ -252,7 +255,7 @@ class TestLasBanderasDelDominio:
         """Este dominio guarda lo que la gente sabe. No alcanza a un aparato, no alerta, y no
         abre nada del registro — direcciones y credenciales siguen tras `devices_*`."""
         from lib.core.dcim.manifest import MODULE_PERMISSIONS
-        flags = [p['flag'] for p in MODULE_PERMISSIONS['permissions']]
+        flags = [p['flag'] for g in MODULE_PERMISSIONS for p in g['permissions']]
         assert not any(f.startswith('devices_') or f.startswith('infra_') for f in flags)
 
     def test_decir_de_quien_es_algo_no_se_regala_con_ningun_rol(self):
@@ -260,7 +263,7 @@ class TestLasBanderasDelDominio:
         no es la misma autoridad que ordenar un armario."""
         from lib.core.dcim.manifest import MODULE_PERMISSIONS
         from lib.core.orgs.manifest import MODULE_PERMISSIONS as ORG_PERMS
-        roles = {p['flag']: p['roles'] for p in MODULE_PERMISSIONS['permissions']}
+        roles = {p['flag']: p['roles'] for g in MODULE_PERMISSIONS for p in g['permissions']}
         org_roles = {p['flag']: p['roles'] for p in ORG_PERMS['permissions']}
         assert org_roles['orgs_edit'] == ()
         assert 'viewer' not in roles['dcim_edit']
@@ -288,7 +291,7 @@ class TestLasBanderasDelDominio:
 
 # ══ El estado en vivo, volcado sobre el inventario ══════════════════════════════════════
 
-class TestUnItemSinHostNoEstaBien:
+class TestUnItemSinDeviceNoEstaBien:
     """La trampa de este dominio entero. Un rack lleno de paneles de parcheo **no puede salir
     verde**: no es que esté bien, es que nadie lo mira — y un muro verde es exactamente lo que
     alguien mira de un vistazo desde la puerta.
@@ -296,16 +299,16 @@ class TestUnItemSinHostNoEstaBien:
     El panel ya distingue «sin estado» de «bien» en el color de la flota; aquí importa más,
     porque aquí es donde se decide si hace falta bajar al CPD."""
 
-    def test_sin_host_no_hay_estado(self):
+    def test_sin_device_no_hay_estado(self):
         from lib.core.dcim import service
         assert service.item_state({'uid': 'i1'}, {'h': 'ok'}) == ''
 
-    def test_con_host_pero_sin_checks_tampoco(self):
+    def test_con_device_pero_sin_checks_tampoco(self):
         """Un servidor apagado que sigue atornillado ocupa su U y no reporta nada."""
         from lib.core.dcim import service
         assert service.item_state({'device_uid': 'h9'}, {'h1': 'ok'}) == ''
 
-    def test_y_con_host_es_el_de_su_maquina(self):
+    def test_y_con_device_es_el_de_su_maquina(self):
         from lib.core.dcim import service
         assert service.item_state({'device_uid': 'h1'}, {'h1': 'error'}) == 'error'
 
@@ -559,9 +562,9 @@ class TestLoQueAlguienApagoAProposito:
     de madrugada era la equivocada.
 
     `_device_statuses` no dobla el mantenimiento a propósito —la flota lo enseña como lo que es,
-    un estado que PISA al otro— y esta pantalla lo cogía crudo. Se cuenta como **sin vigilar**,
-    que es lo que de verdad pasa: nadie la está mirando ahora, y es una decisión de alguien.
-    Verde sería mentir sobre una máquina que no contesta.
+    un estado que PISA al otro— y esta pantalla lo cogía crudo. Se contó como **sin vigilar**,
+    que quitaba la alarma pero decía otra cosa que la flota; ahora es **mantenimiento**, como en
+    Infraestructura, y no sube a alarma. Verde sería mentir sobre una máquina que no contesta.
 
     Reportado desde la pantalla, con los datos delante: la sede salía en rojo por una máquina
     puesta en mantenimiento hacía días."""
@@ -580,21 +583,31 @@ class TestLoQueAlguienApagoAProposito:
         return service.states_for(self._Wa(self._FILAS), {'devices_view'})
 
     def test_la_maquina_en_mantenimiento_no_sale_caida(self, monkeypatch):
-        assert self._states(monkeypatch, {'h1': 'ok', 'h2': 'error'}) == {'h1': 'ok'}
+        assert self._states(monkeypatch, {'h1': 'ok', 'h2': 'error'}) == {
+            'h1': 'ok', 'h2': 'maintenance'}
 
     def test_ni_en_aviso(self, monkeypatch):
         """Un aviso también pinta ámbar en el armario y también viene de una comprobación que
         nadie está mirando."""
-        assert 'h2' not in self._states(monkeypatch, {'h1': 'ok', 'h2': 'warning'})
+        assert self._states(monkeypatch, {'h1': 'ok', 'h2': 'warning'})['h2'] == 'maintenance'
 
     def test_pero_tampoco_se_pinta_verde(self, monkeypatch):
         """Que sería la otra forma de mentir: decir que está bien una máquina que no contesta.
-        Sin estado, el armario la pinta gris y la cuenta aparte."""
-        assert self._states(monkeypatch, {'h2': 'ok'}) == {}
+        En mantenimiento, el armario la pinta como la flota y la cuenta aparte."""
+        assert self._states(monkeypatch, {'h2': 'ok'}) == {'h2': 'maintenance'}
 
     def test_y_las_demas_siguen_diciendo_lo_que_dicen(self, monkeypatch):
         """Lo que no puede romperse al arreglar lo otro."""
-        assert self._states(monkeypatch, {'h1': 'error'}) == {'h1': 'error'}
+        assert self._states(monkeypatch, {'h1': 'error'})['h1'] == 'error'
+
+    def test_una_en_obras_que_no_puedes_ver_no_se_cuenta(self, monkeypatch):
+        """Decir que una máquina está en mantenimiento es decir que existe."""
+        from lib.core.dcim import service                            # noqa: PLC0415
+        from lib.core.devices import service as devices_svc              # noqa: PLC0415
+        monkeypatch.setattr(devices_svc, '_device_statuses', lambda wa: {})
+        assert service.states_for(self._Wa(self._FILAS), {'server.h1.view'}) == {}
+        assert service.states_for(self._Wa(self._FILAS), {'server.h2.view'}) == {
+            'h2': 'maintenance'}
 
     def test_sin_registro_no_se_esconde_nada(self, monkeypatch):
         """Una instalación sin registro de flota no puede saber quién está en obras, y callar
@@ -2190,3 +2203,28 @@ class TestLoQueYaSeUsa:
         """La misma pregunta se le puede hacer a cualquier tabla, y la que no la lleva contesta
         que no tiene ninguno — que es la verdad, no un fallo."""
         assert store.items.in_use('color') == []
+
+
+class TestElMantenimientoNoEsAlarma:
+    """Al resumir un armario o una sede, lo que está en obras no sube a ámbar ni a rojo —no es
+    una alarma—, pero un armario con todo en obras lo dice, y no «sin vigilar»."""
+
+    def test_no_tapa_un_fallo(self):
+        from lib.core.dcim.service import worst                      # noqa: PLC0415
+        assert worst(['error', 'maintenance']) == 'error'
+        assert worst(['warning', 'maintenance']) == 'warning'
+
+    def test_ni_estropea_lo_que_esta_bien(self):
+        from lib.core.dcim.service import worst                      # noqa: PLC0415
+        assert worst(['ok', 'maintenance']) == 'ok'
+
+    def test_pero_todo_en_obras_es_mantenimiento_y_no_nada(self):
+        from lib.core.dcim.service import worst                      # noqa: PLC0415
+        assert worst(['maintenance', '']) == 'maintenance'
+
+    def test_y_no_cuenta_como_sin_vigilar(self):
+        """Lo apagó alguien a propósito: no es un deber pendiente de nadie."""
+        from lib.core.dcim.service import rack_roll                  # noqa: PLC0415
+        roll = rack_roll([{'device_uid': 'h1'}, {'device_uid': 'h2'}],
+                         {'h1': 'maintenance', 'h2': 'ok'})
+        assert roll['state'] == 'ok' and roll['unwatched'] == 0 and roll['bad'] == 0

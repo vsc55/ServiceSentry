@@ -34,7 +34,7 @@ ROLES = ("admin", "editor", "viewer", "none")
 
 # (method, path, frozenset(required_any_of), json_body)
 # required is the permission(s) the endpoint accepts (any-of). For inline-checked
-# host endpoints the required perm is the one the handler actually consults.
+# device endpoints the required perm is the one the handler actually consults.
 ENDPOINTS = [
     # Users
     ("GET",    "/api/v1/users",              frozenset({"users_view"}),   None),
@@ -75,13 +75,13 @@ ENDPOINTS = [
     ("GET",    "/api/v1/history/index",      frozenset({"history_view"}), None),
     ("GET",    "/api/v1/history",            frozenset({"history_view"}), None),
     ("DELETE", "/api/v1/history/all",        frozenset({"history_delete"}), None),
-    # Servers (host registry)
+    # Servers (device registry)
     ("GET",    "/api/v1/devices",              frozenset({"devices_view"}), None),
     ("POST",   "/api/v1/devices",              frozenset({"devices_edit"}),
         {"name": "permtest_h", "address": "10.0.0.9", "kind": "remote"}),
-    # Uses a real host uid (__HOST__): the PUT handler resolves the host (404 for
+    # Uses a real device uid (__DEVICE__): the PUT handler resolves the device (404 for
     # an unknown uid) before the permission check, so a fake uid wouldn't reach it.
-    ("PUT",    "/api/v1/devices/__HOST__",     frozenset({"devices_edit"}), {"name": "permtest_h2"}),
+    ("PUT",    "/api/v1/devices/__DEVICE__",     frozenset({"devices_edit"}), {"name": "permtest_h2"}),
     ("DELETE", "/api/v1/devices/_nouid_",      frozenset({"devices_delete"}), None),
 ]
 

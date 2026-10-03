@@ -49,8 +49,8 @@ def client_with_modules(tmp_path):
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 
-class TestMergeHostConn:
-    """_merge_host_conn fills a module's connection fields from the bound host."""
+class TestMergeDeviceConn:
+    """_merge_device_conn fills a module's connection fields from the bound device."""
 
     def test_fills_address_and_ssh(self):
         from lib.core.modules.actions import merge_device_conn
@@ -62,8 +62,8 @@ class TestMergeHostConn:
         ctx = {'address': '10.0.0.5',
                'ssh': {'ssh_user': 'root', 'ssh_port': 22, 'ssh_password': 'p'}}
         merge_device_conn(_WA(), 'datastore', cfg, ctx)
-        assert cfg['host'] == '10.0.0.5'          # db address_field ← host address
-        assert cfg['ssh_host'] == '10.0.0.5'      # ssh address_field ← host address
+        assert cfg['host'] == '10.0.0.5'          # db address_field ← device address
+        assert cfg['ssh_host'] == '10.0.0.5'      # ssh address_field ← device address
         assert cfg['ssh_user'] == 'root' and cfg['ssh_password'] == 'p'
 
     def test_explicit_check_value_wins(self):
@@ -76,12 +76,12 @@ class TestMergeHostConn:
         assert cfg['host'] == 'explicit.db'       # the check's own value is kept
 
 
-class TestResolveHostCtxCred:
-    """Host-aware discovery must resolve a device's named SSH credential (cred_uid),
+class TestResolveDeviceCtxCred:
+    """Device-aware discovery must resolve a device's named SSH credential (cred_uid),
     not only inline secrets — else disk/services/temperature discover get no data."""
 
     def test_ssh_cred_uid_is_resolved(self):
-        from lib.core.modules.actions import resolve_host_ctx
+        from lib.core.modules.actions import resolve_device_ctx
 
         class _Cstore:
             def get(self, uid, decrypt=True):
@@ -93,29 +93,29 @@ class TestResolveHostCtxCred:
             _devices_store = None
             _credentials_store = _Cstore()
 
-        cfg = {'_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+        cfg = {'_device': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                          'profiles': {'ssh': {'cred_uid': 'cred1', 'ssh_port': 22}}}}
-        ctx = resolve_host_ctx(_WA(), cfg)
+        ctx = resolve_device_ctx(_WA(), cfg)
         assert ctx['ssh']['ssh_user'] == 'svc'        # credential identity applied
         assert ctx['ssh']['ssh_password'] == 'secret'
         assert ctx['ssh']['ssh_port'] == 22           # other ssh fields preserved
 
     def test_no_cred_uid_left_unchanged(self):
-        from lib.core.modules.actions import resolve_host_ctx
+        from lib.core.modules.actions import resolve_device_ctx
 
         class _WA:
             _devices_store = None
             _credentials_store = None
 
-        cfg = {'_host': {'address': 'h', 'kind': 'remote', 'os': 'linux',
+        cfg = {'_device': {'address': 'h', 'kind': 'remote', 'os': 'linux',
                          'profiles': {'ssh': {'ssh_user': 'root'}}}}
-        ctx = resolve_host_ctx(_WA(), cfg)
+        ctx = resolve_device_ctx(_WA(), cfg)
         assert ctx['ssh']['ssh_user'] == 'root'
 
 
 class TestActionsReachADeviceThatIsNotReachedOverSsh:
-    """An action posted from the Servers tab runs against a HOST, and a host speaks more
-    than one protocol.  While only its ssh profile travelled, an SNMP action bound to a host
+    """An action posted from the Servers tab runs against a DEVICE, and a device speaks more
+    than one protocol.  While only its ssh profile travelled, an SNMP action bound to a device
     was handed the address and nothing else — which fails as "the device did not answer"
     rather than as "nobody told me the community", and is the harder of the two to read."""
 
@@ -133,11 +133,11 @@ class TestActionsReachADeviceThatIsNotReachedOverSsh:
                'profiles': {'snmp': {'community': 'sec', 'version': '2c', 'port': 1161},
                             'ssh':  {'ssh_user': 'root'}}}
         merge_device_conn(self._WA(), 'snmp', cfg, ctx)
-        assert cfg['host'] == '10.0.0.9'          # address_field ← the host address
+        assert cfg['host'] == '10.0.0.9'          # address_field ← the device address
         assert cfg['community'] == 'sec'
         assert cfg['version'] == '2c' and cfg['port'] == 1161
         # The device's own profile, not the box's login: an SNMP action has no business
-        # picking up an ssh user just because the host has one.
+        # picking up an ssh user just because the device has one.
         assert 'ssh_user' not in cfg
 
     def test_what_the_form_holds_still_wins(self):
@@ -149,7 +149,7 @@ class TestActionsReachADeviceThatIsNotReachedOverSsh:
         merge_device_conn(self._WA(), 'snmp', cfg, ctx)
         assert cfg['community'] == 'typed-just-now'
 
-    def test_the_host_profile_credential_is_carried_over(self):
+    def test_the_device_profile_credential_is_carried_over(self):
         from lib.core.modules.actions import merge_device_conn
 
         cfg = {}
@@ -168,25 +168,25 @@ class TestActionsReachADeviceThatIsNotReachedOverSsh:
                         {'address': '10.0.0.5', 'ssh': {'ssh_user': 'root'}})
         assert cfg['ssh_user'] == 'root'
 
-    def test_a_masked_secret_is_restored_from_the_stored_host(self):
+    def test_a_masked_secret_is_restored_from_the_stored_device(self):
         """The browser never held the community — it holds the mask the API sent it — so a
         draft posted straight back carries ``None`` where the secret is.  Reading it as "the
         user cleared this" is how a Test button authenticates with nothing at all."""
-        from lib.core.modules.actions import resolve_host_ctx
+        from lib.core.modules.actions import resolve_device_ctx
 
-        class _Hosts:
+        class _Devices:
             def get(self, uid, decrypt=True):
                 return ({'address': '10.0.0.9', 'kind': 'local', 'os': 'auto',
                          'profiles': {'snmp': {'community': 'real', 'version': '2c'}}}
                         if uid == 'h1' else None)
 
         class _WA(TestActionsReachADeviceThatIsNotReachedOverSsh._WA):
-            _devices_store = _Hosts()
+            _devices_store = _Devices()
 
         cfg = {'device_uid': 'h1',
-               '_host': {'address': '10.0.0.9', 'kind': 'local', 'os': 'auto',
+               '_device': {'address': '10.0.0.9', 'kind': 'local', 'os': 'auto',
                          'profiles': {'snmp': {'community': None, 'version': '3'}}}}
-        ctx = resolve_host_ctx(_WA(), cfg)
+        ctx = resolve_device_ctx(_WA(), cfg)
         assert ctx['profiles']['snmp']['community'] == 'real'
         # …and an UNSAVED edit beside it is still what gets tested: that is the point of
         # a Test button on a form somebody is in the middle of filling in.
@@ -282,6 +282,6 @@ class TestSsrfGuard:
         assert validate_external_url('http://192.168.1.10/status') is None
 
 
-# ── Host-aware discovery (Servers modal: run discover on the bound host) ──────
+# ── Device-aware discovery (Servers modal: run discover on the bound device) ──────
 
 

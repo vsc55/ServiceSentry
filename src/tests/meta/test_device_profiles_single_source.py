@@ -6,11 +6,11 @@ Eleven modules used to restate that list in their ``__device_profile__``: ten re
 same seven SSH names, and SNMP the ten of its own — eighty names in all. The catalogue already ignored every copy —
 a core-declared profile overrides a module-declared one — so a copy that drifted did not
 change the form anybody sees. It changed something quieter: ``resolve_device`` reads that list
-to decide **which values a bound host may push onto the check**, and the hide-when-bound list
+to decide **which values a bound device may push onto the check**, and the hide-when-bound list
 reads it to decide what a bound check stops drawing.
 
 They had drifted. All ten listed ``ssh_host`` and none listed ``ssh_auth_method``, so a
-host that stored its authentication method without a named credential never handed it over.
+device that stored its authentication method without a named credential never handed it over.
 Nothing failed; the check just authenticated the default way.
 
 This is what stops the copies from coming back.
@@ -25,7 +25,7 @@ WATCHFULS = os.path.join(SRC, 'watchfuls')
 
 
 def _schemas():
-    """``{module: schema}`` for every watchful that declares a host profile."""
+    """``{module: schema}`` for every watchful that declares a device profile."""
     out = {}
     for entry in sorted(os.listdir(WATCHFULS)):
         path = os.path.join(WATCHFULS, entry, 'schema.json')
@@ -57,7 +57,7 @@ class TestNobodyRestatesWhatTheCoreOwns:
 
     def test_a_module_that_binds_to_one_still_resolves_to_its_fields(self):
         """Deleting the copies is only safe because normalising a spec fills them in. If it
-        stopped, every one of these modules would bind to a host and inherit nothing — and
+        stopped, every one of these modules would bind to a device and inherit nothing — and
         the check would fall back to its inline (blank) connection rather than fail."""
         from lib.core.devices.profiles import core_profile_field_names   # noqa: PLC0415
         from lib.core.devices.resolve import device_profile_specs          # noqa: PLC0415
@@ -73,12 +73,12 @@ class TestNobodyRestatesWhatTheCoreOwns:
         assert seen >= 11, f'only {seen} bindings to a core protocol — did they move?'
 
 
-class TestTheAddressFieldIsHostOwned:
+class TestTheAddressFieldIsDeviceOwned:
 
     def test_it_is_in_the_list_a_bound_check_stops_drawing(self):
         """It is the field that RECEIVES the device's address. ``datastore`` has a real
         ``ssh_host`` box on its items, so leaving it out puts that box back on a check that
-        is already bound — asking for an address the host has already given."""
+        is already bound — asking for an address the device has already given."""
         from lib.core.devices.profiles import (core_profile_field_names,   # noqa: PLC0415
                                              module_device_fields)
         hidden = module_device_fields()

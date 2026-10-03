@@ -284,8 +284,8 @@ class TestTestConnection:
         assert res['ok'] is False
 
     @patch('watchfuls.ups._nut_query', return_value=_make_vars('OB'))
-    def test_host_from_bound_host_ctx(self, mock_query):
-        """Empty host falls back to the bound host's address (__device__)."""
+    def test_host_from_bound_device_ctx(self, mock_query):
+        """Empty host falls back to the bound device's address (__device__)."""
         res = ups_module.Watchful.test_connection(
             {'host': '', '__device__': {'address': '172.16.0.5'}})
         assert res['ok'] is True

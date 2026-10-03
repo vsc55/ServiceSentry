@@ -52,19 +52,19 @@ from .overview_widget import coverage_stat, server_list_rows, servers_stat  # no
 OVERVIEW_WIDGETS = [
     {'id': 'servers', 'icon': 'bi-hdd-network', 'label_key': 'overview_servers',
      'cols': 2, 'h': 'auto', 'has_h': False, 'order': 30,
-     'perms': {'any': ['devices_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-servers'},
+     'perms': {'any': ['devices_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-infra'},
      'stat': servers_stat,
      'view': {'kind': 'stat', 'icon': 'bi-hdd-network-fill', 'label_key': 'overview_servers',
               'accent': 'blue', 'data_url': '/api/v1/overview/widget/servers'}},
     {'id': 'coverage', 'icon': 'bi-pie-chart', 'label_key': 'overview_coverage',
      'cols': 2, 'h': 'auto', 'has_h': False, 'order': 100,
-     'perms': {'any': ['devices_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-servers'},
+     'perms': {'any': ['devices_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-infra'},
      'stat': coverage_stat,
      'view': {'kind': 'stat', 'icon': 'bi-pie-chart-fill', 'label_key': 'overview_coverage',
               'accent': 'green', 'data_url': '/api/v1/overview/widget/coverage'}},
     {'id': 'servers_list', 'icon': 'bi-hdd-network', 'label_key': 'overview_servers',
      'cols': 4, 'h': 340, 'has_h': True, 'order': 170,
-     'perms': {'any': ['devices_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-servers'},
+     'perms': {'any': ['devices_view'], 'prefix': ['server.']}, 'nav': {'tab': '#tab-infra'},
      'rows': server_list_rows,
      'view': {'kind': 'table', 'icon': 'bi-hdd-network', 'title_key': 'overview_servers',
               'accent': 'blue', 'data_url': '/api/v1/overview/widget/servers_list',
@@ -85,9 +85,9 @@ OVERVIEW_WIDGETS = [
               ]},
               'columns': [
                   {'key': 'name',    'label_key': 'col_server',        'sortable': True, 'cell': 'device_name'},
-                  {'key': 'status',  'label_key': 'col_host_status',   'sortable': True, 'cell': 'device_status'},
+                  {'key': 'status',  'label_key': 'col_device_status',   'sortable': True, 'cell': 'device_status'},
                   {'key': 'checks',  'label_key': 'col_checks',        'sortable': True, 'cell': 'device_checks'},
-                  {'key': 'modules', 'label_key': 'col_host_modules',  'sortable': True, 'cell': 'device_modules'},
+                  {'key': 'modules', 'label_key': 'col_device_modules',  'sortable': True, 'cell': 'device_modules'},
               ]}},
 ]
 
@@ -115,7 +115,7 @@ AUDIT_EVENTS = [
     {'key': 'device_type_created', 'severity': 'info'},
     {'key': 'device_type_updated', 'severity': 'info'},
     {'key': 'device_type_deleted', 'severity': 'info'},
-    {'key': 'hosts_migrated', 'severity': 'info'},
+    {'key': 'devices_migrated', 'severity': 'info'},
 ]
 
 

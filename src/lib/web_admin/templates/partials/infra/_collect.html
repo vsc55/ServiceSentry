@@ -60,7 +60,7 @@ async function _infraCollect() {
     // the dialog opens empty and the first second of a five-minute run looks like nothing
     // happened, which is the exact impression this whole file exists to prevent.
     _infraCollectJob = {
-        id: jobId, device: uid, device_name: _infraHostName(uid), done: false,
+        id: jobId, device: uid, device_name: _infraDeviceName(uid), done: false,
         total: (res.data.modules || []).length, completed: 0,
         modules: (res.data.modules || []).map(m => ({module: m, state: 'pending', detail: ''})),
         answered: [], errors: [], error: '',
@@ -132,7 +132,7 @@ async function _infraCollectAdopt() {
 }
 
 /** The name of a device we have in the fleet, for the dialog's title. */
-function _infraHostName(uid) {
+function _infraDeviceName(uid) {
     const h = (_infraDevices || []).find(x => x.uid === uid);
     return (h && h.name) || (_infraDetail && _infraDetail.device && _infraDetail.device.name) || '';
 }

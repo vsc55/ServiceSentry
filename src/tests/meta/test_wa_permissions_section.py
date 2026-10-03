@@ -178,7 +178,7 @@ class TestTheWiringItself:
 
     def test_the_per_instance_permissions_are_shown(self):
         """They went missing on the first cut: a role can narrow a global flag down to one
-        module, host or cluster (`module.ping.view`), and the section rendered only the 64
+        module, device or cluster (`module.ping.view`), and the section rendered only the 64
         catalog flags. Saving preserved them — they were simply invisible, which is worse
         than losing them, because the screen then says a role holds less than it does."""
         for layout in ('_matrix.html', '_split.html'):
@@ -188,7 +188,7 @@ class TestTheWiringItself:
     def test_the_resource_table_has_one_builder(self):
         """Both layouts draw the items × actions table from ONE function — the rows, the
         fallback to the global flag and the key format are defined once. A copy would be a
-        second answer to "what may this role do to that host"."""
+        second answer to "what may this role do to that device"."""
         assert 'function _permResTableHtml(' in _read('permissions', '_resources.html')
         assert '_permResTableHtml(' in _read('permissions', '_split.html')
 

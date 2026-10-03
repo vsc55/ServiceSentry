@@ -138,8 +138,8 @@ class ProxmoxActions:
     def list_nodes(cls, config: dict) -> dict:
         """POST /api/v1/modules/watchfuls/proxmox/list_nodes
 
-        Return the cluster member node names — for the host↔node mapping picker,
-        so the user assigns each member host its node without typing it by hand.
+        Return the cluster member node names — for the device↔node mapping picker,
+        so the user assigns each member device its node without typing it by hand.
         Returns {"ok": bool, "items": [node, …], "message": str}.
         """
         candidates = (_split_devices(config.get('vip') or '') + _split_devices(config.get('host') or '')

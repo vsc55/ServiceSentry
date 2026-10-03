@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Which of a module's results belong to a host — the join behind "Latest data" and /infra.
+"""Which of a module's results belong to a device — the join behind "Latest data" and /infra.
 
-A module records results under keys of its own choosing; a host knows which ITEMS are bound to
+A module records results under keys of its own choosing; a device knows which ITEMS are bound to
 it. Everything both screens show comes from matching one to the other, and the failure mode of
 getting it wrong is the quiet kind: the rows are recorded correctly, charted correctly and named
 correctly, and simply never appear. Nothing errors, and the screen reads as a machine that has
@@ -27,7 +27,7 @@ def _live(**rows):
 BOUND = {'snmp': {'srv-uid': 'nas-01'}}
 
 
-class TestWhichResultsBelongToTheHost:
+class TestWhichResultsBelongToTheDevice:
 
     def test_a_key_that_is_the_item(self):
         """The plain case: an inline check whose result key is the item itself."""
@@ -62,7 +62,7 @@ class TestWhichResultsBelongToTheHost:
                             'uid_swap': {'status': True, 'other_data': {'used': 2}}}}
         assert {r['key'] for r in build_device_status(bound, raw, {})} == {'uid_ram', 'uid_swap'}
 
-    def test_a_result_of_another_host_is_not_borrowed(self):
+    def test_a_result_of_another_device_is_not_borrowed(self):
         """The join is what scopes a module's results to THIS machine; a loose match would
         put another device's disks on this device's page."""
         rows = build_device_status(BOUND, _live(**{'other-uid/metrics': {'cpu': 1}}), {})
@@ -78,7 +78,7 @@ class TestWhichResultsBelongToTheHost:
 class TestWhenThereIsNoLiveValue:
 
     def test_history_fills_in_for_a_composite_key_too(self):
-        """A host in maintenance has had its live records purged, and "nothing here" would read
+        """A device in maintenance has had its live records purged, and "nothing here" would read
         as a machine that never reported. The fallback has to understand the same shapes."""
         hist = {'snmp': [{'key': 'srv-uid/eth0', 'last_status': True,
                           'last_data': {'if_in': 5}, 'last_ts': '2026-08-20T09:00:00'}]}
@@ -98,7 +98,7 @@ class TestWhenThereIsNoLiveValue:
         state of NOW. The machine read red on its own page with both its measurements green
         beside it, while the fleet listing called it fine. Measured on the screen.
 
-        The fallback is for the real case — a host in maintenance whose live records were
+        The fallback is for the real case — a device in maintenance whose live records were
         pruned. If the item is talking, there is nothing to fall back to."""
         hist = {'snmp': [{'key': 'srv-uid', 'last_status': False, 'last_data': {},
                           'last_ts': 1788690526.0}]}
@@ -132,7 +132,7 @@ class TestACheckWhoseResultsAreAllSubMetrics:
     """Reported from the panel: two NAS sitting in warning with every reading they answer
     green, and nothing anywhere saying why.
 
-    A host is `warning` when it has enabled checks and none of them has been evaluated yet —
+    A device is `warning` when it has enabled checks and none of them has been evaluated yet —
     the newly-added case. Each NAS has one enabled SNMP item with no OID checks and twelve
     device profiles, so every one of its 295 readings is filed as `<key>/<row>` or
     `<key>_<metric>` and NOT ONE under the item's own key. Looked up by key alone the check

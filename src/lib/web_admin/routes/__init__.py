@@ -101,7 +101,7 @@ from lib.core.audit.routes import register as _audit
 from lib.core.backup.routes import register as _backup
 from lib.core.diagnostics.routes import register as _diagnostics
 from lib.core.config.routes import register as _config
-from lib.core.devices.routes import register as _hosts
+from lib.core.devices.routes import register as _devices
 from lib.core.snmp.routes import register as _snmp
 from lib.core.infra.routes import register as _infra
 from lib.core.orgs.routes import register as _orgs
@@ -134,7 +134,7 @@ def register_all(app, wa):
     _modules(app, wa)
     _overview(app, wa)
     _config(app, wa)
-    _hosts(app, wa)
+    _devices(app, wa)
     _snmp(app, wa)
     _infra(app, wa)
     _orgs(app, wa)

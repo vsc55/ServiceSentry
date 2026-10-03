@@ -49,13 +49,13 @@ def strip_credential_fields(data: dict, modules_dir: str) -> None:
                         item.pop(f, None)
 
 
-def provision_host_decl(modules_dir: str, module_name: str) -> dict | None:
+def provision_device_decl(modules_dir: str, module_name: str) -> dict | None:
     """A module's ``__provision_device__`` declaration, if any (from schema.json).
 
     Generic, module-agnostic: a module may declare — in a collection's schema —
     that each item provisions a linked device from one of its address fields::
 
-        "__provision_device__": {"address_field": "endpoint", "link_field": "endpoint_host_uid",
+        "__provision_device__": {"address_field": "endpoint", "link_field": "endpoint_device_uid",
                                "name_template": "Endpoint: {label}", "collection": "list"}
 
     The core reads this by discovery; nothing here is specific to any module."""
@@ -75,13 +75,13 @@ def provision_host_decl(modules_dir: str, module_name: str) -> dict | None:
     return None
 
 
-def sync_provisioned_hosts(devices_store, modules_dir: str, data: dict, actor: str) -> list:
+def sync_provisioned_devices(devices_store, modules_dir: str, data: dict, actor: str) -> list:
     """Auto-provision/link a device for every module item that declares one (mutates *data*
     in place).  **Writes** to *devices_store* (the one persisting function here — the store is
     injected explicitly, not reached through ``wa``).
 
     Fully generic: driven by each module's ``__provision_device__`` schema declaration
-    (see :func:`provision_host_decl`) — the core knows nothing about any specific module.  A
+    (see :func:`provision_device_decl`) — the core knows nothing about any specific module.  A
     module declares that its items provision a device from one of their address fields (a
     stable/floating endpoint address); this ensures a linked device (``address == that field``)
     and stamps its uid on the item's ``link_field``, syncing the address when it changes.
@@ -99,12 +99,12 @@ def sync_provisioned_hosts(devices_store, modules_dir: str, data: dict, actor: s
     swallowed so they never block saving the config."""
     if devices_store is None or not modules_dir:
         return []
-    from lib.core.devices.service import _create_unique_host  # noqa: PLC0415
+    from lib.core.devices.service import _create_unique_device  # noqa: PLC0415
     assignments: list = []
     for mod_key, mod_cfg in data.items():
         if not isinstance(mod_cfg, dict):
             continue
-        decl = provision_host_decl(modules_dir, str(mod_key).split('.')[-1])
+        decl = provision_device_decl(modules_dir, str(mod_key).split('.')[-1])
         if not decl:
             continue
         addr_f, link_f = decl.get('address_field'), decl.get('link_field')
@@ -139,7 +139,7 @@ def sync_provisioned_hosts(devices_store, modules_dir: str, data: dict, actor: s
                     if str(existing.get('address') or '').strip() != addr:
                         devices_store.update(new_uid, {**existing, 'address': addr}, actor=actor)
                 else:
-                    new_uid = _create_unique_host(
+                    new_uid = _create_unique_device(
                         devices_store, hostname, {'address': addr, 'profiles': {}}, actor)
                 if new_uid:
                     item[link_f] = new_uid

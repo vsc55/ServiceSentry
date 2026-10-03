@@ -118,7 +118,7 @@ function _openCredActionFromCheck(btn, actionId) {
     if (!primaryUid && Array.isArray(item.device_uids) && item.device_uids.length) {
         primaryUid = String(item.device_uids[0] || '').trim();
     }
-    let device = String(item.device || '').trim();
+    let device = String(item.host || '').trim();
     if (device) device = device.split(/[,\s]+/)[0];   // first address if a failover list
     if (!device && primaryUid && typeof devicesList === 'function') {
         const h = devicesList().find(x => x.uid === primaryUid);
@@ -128,7 +128,7 @@ function _openCredActionFromCheck(btn, actionId) {
     // (address + port + credential) — the same SSH path the device-aware checks
     // use, so provisioning reaches the node exactly like they do.
     const init = {};
-    if (device) init.device = device;
+    if (device) init.host = device;
     if (primaryUid) init.device_uid = primaryUid;
     openModuleActionModal(action, init, (data) => {
         const fields = (data && data.fields) || {};

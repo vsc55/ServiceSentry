@@ -76,9 +76,9 @@ class TestSyslogApi:
         _seed(admin, hostname='pve01.lan', source='10.0.0.9', message='a')
         _seed(admin, hostname='', source='192.168.1.5', message='b')   # no hostname
         _seed(admin, hostname='other', source='10.0.0.1', message='c')
-        # the per-server Logs tab passes ?host=<address> (FQDN or IP)
-        assert client.get('/api/v1/syslog?host=pve01.lan').get_json()['total'] == 1
-        assert client.get('/api/v1/syslog?host=192.168.1.5').get_json()['total'] == 1
+        # the per-device Logs tab passes ?device=<address> (FQDN or IP)
+        assert client.get('/api/v1/syslog?device=pve01.lan').get_json()['total'] == 1
+        assert client.get('/api/v1/syslog?device=192.168.1.5').get_json()['total'] == 1
 
     def test_multi_value_filter(self, client, admin):
         _login(client)

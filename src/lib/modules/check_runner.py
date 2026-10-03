@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Run one module's ``check()`` once, right now, with no monitor behind it.
 
-Two features need exactly this and nothing more: the Servers "test" button (does this host
+Two features need exactly this and nothing more: the Servers "test" button (does this device
 answer?) and a module page's live refresh (what does this check say *now*, rather than what
 it said when the monitor last ran).  Both want the module's REAL ``check()`` — a probe that
 went through different code would prove nothing about the check that actually runs at 3am —

@@ -105,6 +105,16 @@ function _dcimIsFolded(uid) {
  *  panels gets no green badge: a light that says "fine" about what nobody checks is a lie seen
  *  from the door. With the word beside it when there is room, and always for a screen reader. */
 function _dcimLed(state, conPalabra) {
+    // El mantenimiento, del color con el que lo pinta la flota: la misma máquina no puede salir
+    // de dos colores en dos secciones. Sin brillo: alguien lo apagó a propósito, no es alarma.
+    if (state === 'maintenance') {
+        const palabra = _dcimStateWord(state);
+        return `<span class="d-inline-flex align-items-center gap-1 ss-fs-2 text-nowrap"
+                      title="${escAttr(palabra)}"><span class="ss-led"
+                style="background:${escAttr(deviceStateColor('maintenance'))}"
+                role="img" aria-label="${escAttr(palabra)}"></span>${
+                conPalabra ? `<span class="text-muted">${esc(palabra)}</span>` : ''}</span>`;
+    }
     const tono = {error: 'bg-danger text-danger', warning: 'bg-warning text-warning',
                   ok: 'bg-success text-success'}[state] || 'bg-secondary text-secondary';
     const malo = state === 'error' || state === 'warning';

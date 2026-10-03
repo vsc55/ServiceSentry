@@ -7,7 +7,7 @@
 
 Every init system answers differently - systemd, OpenRC, SysV, launchd, Windows SC - so there
 is one command and one parser per family, and the dispatch picks by platform. It runs locally
-or over SSH when the item is bound to a host, because the list is a property of that machine
+or over SSH when the item is bound to a device, because the list is a property of that machine
 and not of the one running the panel.
 """
 
@@ -22,19 +22,19 @@ import psutil
 class ServiceDiscovery:
     """The ``discover`` action and its per-init parsers. Mixed into ``Watchful``."""
 
-    # ── Discover (local autocomplete, or over SSH for a remote host) ──────────
+    # ── Discover (local autocomplete, or over SSH for a remote device) ──────────
     @classmethod
     def discover(cls, config=None) -> list:
-        """Return [{name, display_name, status}] for the host's services.
+        """Return [{name, display_name, status}] for the device's services.
 
-        With a remote host context (``config['__device__']``, injected by the route
+        With a remote device context (``config['__device__']``, injected by the route
         for the Servers modal) the list is read over SSH; otherwise from THIS
         machine.
         """
         from lib.core.devices import runner as device_runner  # noqa: PLC0415
-        host = (config or {}).get('__device__') if isinstance(config, dict) else None
-        if device_runner.is_remote(host):
-            return cls._discover_remote(host, str(host.get('os') or 'linux'))
+        device = (config or {}).get('__device__') if isinstance(config, dict) else None
+        if device_runner.is_remote(device):
+            return cls._discover_remote(device, str(device.get('os') or 'linux'))
         if cls._PLATFORM == 'windows':
             return cls._discover_windows()
         if cls._INIT_SYSTEM == 'openrc':
@@ -60,10 +60,10 @@ class ServiceDiscovery:
     }
 
     @classmethod
-    def _discover_remote(cls, host, os_: str) -> list:
+    def _discover_remote(cls, device, os_: str) -> list:
         from lib.core.devices import runner as device_runner  # noqa: PLC0415
         cmd = cls._DISCOVER_CMDS.get(os_) or cls._DISCOVER_CMDS['linux']
-        out, _err, code = device_runner.run(host, cmd, timeout=15)
+        out, _err, code = device_runner.run(device, cmd, timeout=15)
         if code != 0 and not out:
             return []
         if os_ == 'windows':

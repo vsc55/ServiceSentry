@@ -238,7 +238,7 @@ def tables_in_archive_by_part(in_zip: list, want: set) -> list:
     kept as the one place that decides so the two directions cannot disagree about which
     tables a part means.
 
-    Takes the TABLE NAMES an archive holds, not its member list: turning ``db/hosts.json``
+    Takes the TABLE NAMES an archive holds, not its member list: turning ``db/devices.json``
     into ``devices`` is the layout's business (`archive.member_tables`), and this module's job
     is the grouping. Kept apart so neither has to know the other's rule.
     """

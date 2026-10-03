@@ -72,7 +72,7 @@ class _ScannersMixin:
         from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
         _inst_id = f'certscan-{hostname()}-{_os.getpid()}'
 
-        def _host_address(uid):
+        def _device_address(uid):
             store = getattr(self, '_devices_store', None)
             try:
                 return (store.get(uid) or {}).get('address') if store else None
@@ -85,7 +85,7 @@ class _ScannersMixin:
             except Exception:  # pylint: disable=broad-except
                 return []
             warn = self._config_section('certs').get('warn_days', 21)
-            return enumerate_targets(mods, device_address=_host_address, default_warn=warn)
+            return enumerate_targets(mods, device_address=_device_address, default_warn=warn)
 
         def _is_leader():
             ls = getattr(self, '_service_leader_store', None)
@@ -267,3 +267,18 @@ class _ScannersMixin:
         )
         self._secret_scanner.start(
             poll_getter=lambda: self._config_section('certs').get('scan_every_secs', 86400))
+
+    def stop_background(self) -> None:
+        """Stop every thread the panel started on its own: the scanners and the backup runner.
+
+        Each loop holds the instance through its closures, so an instance whose threads are
+        left running is never freed. Safe to call twice and on a half-built instance."""
+        for name in ('_service_health', '_cert_scanner', '_cable_scanner', '_secret_scanner',
+                     '_backup_runner'):
+            worker = getattr(self, name, None)
+            if worker is None:
+                continue
+            try:
+                worker.stop()
+            except Exception:  # pylint: disable=broad-except
+                pass

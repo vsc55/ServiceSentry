@@ -81,8 +81,8 @@ class Watchful(DatastoreChecks, EngineDrivers, DatastoreActions, ModuleBase):
                     default = self.get_conf('enabled', self._DEFAULTS['enabled'])
                 case _:
                     default = self.get_conf(opt.name, self._DEFAULTS.get(opt.name, ''))
-        # Read from the host-resolved item so device_uid-bound checks inherit the
-        # host's connection; falls back to the default when the field is absent.
+        # Read from the device-resolved item so device_uid-bound checks inherit the
+        # device's connection; falls back to the default when the field is absent.
         item = self._resolved_item(key)
         val = item.get(opt.name, default) if isinstance(item, dict) else default
         match opt:

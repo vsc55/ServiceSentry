@@ -15,7 +15,7 @@
 // Maps a field key → {get,set} so stateful widgets (currently the removable
 // chips multi-field) bind to ANY data model.  The Modules tab registers an
 // adapter backed by modulesData/updateField; the device edit modal one backed by
-// _deviceChecks/_setHostCheckField.  Both then drive ONE widget implementation,
+// _deviceChecks/_setDeviceCheckField.  Both then drive ONE widget implementation,
 // so a change to the widget applies to both places.
 const _fieldAdapters = {};
 function registerFieldAdapter(key, get, set) { _fieldAdapters[key] = { get, set }; }

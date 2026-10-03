@@ -7,7 +7,7 @@ top of the same data:
 
 * what KIND of secret each one is — an SSH identity and a tenant app registration are not
   the same animal (one reaches a machine, the other is an application with consented
-  permissions and no host behind it), and sorting by Type only interleaves them;
+  permissions and no device behind it), and sorting by Type only interleaves them;
 * who still REFERENCES it — which is not part of a credential at all. Its consumers live in
   the devices store and inside every module's config, so the catalogue cannot see them, and a
   secret nobody references is a secret nobody rotates and that stays valid.
@@ -203,7 +203,7 @@ class TestUsageIsADifferentFact:
     """Who references a credential is not part of the credential."""
 
     def test_it_is_asked_once_for_the_whole_catalogue(self):
-        """Not once per row: the server walks every host profile and every module check
+        """Not once per row: the server walks every device profile and every module check
         whichever way it is asked, so N calls repeat one scan N times."""
         views = _strip_comments(_read(VIEWS))
         assert "apiGet('/api/v1/credentials/usage')" in views
@@ -225,7 +225,7 @@ class TestUsageIsADifferentFact:
         assert "_credUsageState === 'error'" in body, 'the error state re-arms the fetch'
 
     def test_a_refresh_drops_the_cached_map(self):
-        """It can go stale for reasons the catalogue never sees — a host or a check edited in
+        """It can go stale for reasons the catalogue never sees — a device or a check edited in
         another section — so every path that refetches the catalogue invalidates it."""
         body = _fn(_strip_comments(_read(PICKER)), 'loadCredentials')
         assert '_credInvalidateUsage()' in body

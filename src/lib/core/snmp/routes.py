@@ -83,7 +83,7 @@ def register(app, wa):
         config['__var_dir__'] = wa._var_dir or ''
         config['__connector__'] = getattr(wa, '_db_connector', None)
         config['__user__'] = session.get('username', '')
-        device_ctx = modules_actions.resolve_host_ctx(wa, config)
+        device_ctx = modules_actions.resolve_device_ctx(wa, config)
         if device_ctx is not None:
             config['__device__'] = device_ctx
             modules_actions.merge_device_conn(wa, 'snmp', config, device_ctx)

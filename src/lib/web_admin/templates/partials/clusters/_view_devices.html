@@ -4,8 +4,8 @@
    Every cluster row looks redundant on its own. The two ways that is false are both facts
    about the intersection of the rows, which is why no per-cluster view can show them:
 
-   * one host carrying several clusters. Each of them says "3 members" and they are the same
-     three, so a single reboot takes out all of them at once. Here that host is one line with
+   * one device carrying several clusters. Each of them says "3 members" and they are the same
+     three, so a single reboot takes out all of them at once. Here that device is one line with
      several clusters on it, and it sorts to the top.
    * a cluster with one member. A failover pair with nothing to fail over to — counted in the
      header rather than hidden in a Members column that reads "1" the same way it reads "3".
@@ -15,7 +15,7 @@
    clusters. Offering them per row would invite pressing them against the row in front of you.
    ================================================================ #}
 
-function _clViewHosts(rows) {
+function _clViewDevices(rows) {
     if (!rows.length) return '';
     const by = new Map();          // device uid → {name, clusters: [row]}
     let orphan = 0;                // clusters naming no device at all
@@ -35,7 +35,7 @@ function _clViewHosts(rows) {
     const alone = rows.filter(_clIsAlone).length;
     const shared = devices.filter(h => h.clusters.length > 1).length;
     const chips = `${_summaryChip('bi-diagram-3', t('cl_count_clusters'), rows.length)}
-        ${_summaryChip('bi-hdd-network', t('cl_count_hosts'), devices.length)}
+        ${_summaryChip('bi-hdd-network', t('cl_count_devices'), devices.length)}
         ${alone ? _summaryChip('bi-exclamation-triangle', t('cl_count_alone'), alone, 'text-bg-warning') : ''}
         ${shared ? _summaryChip('bi-layers', t('cl_count_shared'), shared) : ''}
         ${orphan ? _summaryChip('bi-slash-circle', t('cl_count_orphan'), orphan, 'text-bg-warning') : ''}`;
@@ -47,12 +47,12 @@ function _clViewHosts(rows) {
                 <th class="text-end">${esc(t('cl_col_clusters'))}</th>
                 <th>${esc(t('cl_col_in_clusters'))}</th>
             </tr></thead>
-            <tbody>${devices.map(_clHostRow).join('')}</tbody>
+            <tbody>${devices.map(_clDeviceRow).join('')}</tbody>
         </table></div>
     </div>`;
 }
 
-function _clHostRow(h) {
+function _clDeviceRow(h) {
     const device = devicesData[h.uid] || {};
     return `<tr>
         <td class="text-nowrap"><span class="fw-semibold">${esc(h.name)}</span>

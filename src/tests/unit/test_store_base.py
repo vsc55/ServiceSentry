@@ -103,7 +103,7 @@ class TestTheSharedBase:
             or '_TABLE' not in src, f'{domain} has both _TABLE and its own count()'
 
     def test_encryption_is_defined_once(self):
-        """Credentials and host profiles used byte-identical helpers."""
+        """Credentials and device profiles used byte-identical helpers."""
         for domain in ('credentials', 'devices'):
             src = _store_src(domain)
             assert 'EncryptedPayloadMixin' in src
@@ -114,7 +114,7 @@ class TestTheSharedBase:
 
     def test_the_mixin_passes_the_payload_through_without_a_key(self):
         """No Fernet configured (encryption off) must mean "leave it alone", never "drop
-        it" — these payloads are host profiles and credentials."""
+        it" — these payloads are device profiles and credentials."""
         class _S(EncryptedPayloadMixin):
             pass
         payload = {'ssh_password': 'plaintext'}

@@ -52,16 +52,16 @@ DB_TABLES = list(_TABLES)
 
 # ── The section this package claims ──────────────────────────────────────────────────────
 #
-# `placement: system` because of what it IS: something an operator ADMINISTERS, filed beside
-# Services, Modules and Credentials, not beside the dashboards an operator watches. It is
-# written on the first day and almost never again.
+# `placement: catalog` because of what it IS: one of the organisation's registers, administered
+# and not watched — written on the first day and almost never again — and filed with the devices
+# and the credentials rather than with the platform's settings, which somebody else may manage.
 #
 # `i18n` names the section of the core language files its words come from. A module's page is
 # titled by its `pretty_name` because the core owns no string that names a module; a core
 # section names itself.
 PAGE: dict = {
     'id': 'orgs', 'icon': 'bi-buildings', 'order': 40,
-    'placement': 'system', 'perm': 'orgs_view',
+    'placement': 'catalog', 'perm': 'orgs_view',
     'render': 'renderOrgsPage',
     'i18n': 'orgs_page',
 }

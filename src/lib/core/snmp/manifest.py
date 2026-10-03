@@ -25,8 +25,8 @@ from __future__ import annotations
 # only place the fields are written down: a check against a bare IP has to remain possible, so
 # the ``servers`` collection asks for them with ``"__profile_fields__": "snmp"`` and the panel
 # expands THIS declaration into it. What used to be three copies pinned against each other is
-# one declaration and a guard that it arrives (tests/meta/test_snmp_host_profile_agrees.py).
-HOST_PROFILE: dict = {
+# one declaration and a guard that it arrives (tests/meta/test_snmp_device_profile_agrees.py).
+DEVICE_PROFILE: dict = {
     'key':           'snmp',
     'module':        'snmp',      # whose credential type the form offers (snmp_auth)
     'address_field': 'host',      # filled from the device's address; never drawn
@@ -183,15 +183,16 @@ AUDIT_EVENTS = [
 # somebody removed the SNMP watchful would be a library you can still fill and no longer look
 # at, and a catalogue the sampler still reads with nowhere to edit it.
 #
-# `placement: system` because of what it IS: something an operator ADMINISTERS, filed beside
-# Services, Modules and Credentials, not beside the dashboards an operator watches.
+# `placement: catalog` because of what it IS: a library an operator ADMINISTERS — the MIBs and
+# the device profiles built on them — filed with the devices and credentials it describes, not
+# beside the dashboards an operator watches nor the platform's own settings.
 #
 # `i18n` names the section of the core lang files its words come from — the title and one per
 # view. A module's page is titled by its `pretty_name` because the core owns no string that
 # names a module; a core section names itself.
 PAGE: dict = {
     'id': 'snmp', 'icon': 'bi-hdd-stack', 'order': 25,
-    'placement': 'system', 'perm': 'snmp_view',
+    'placement': 'catalog', 'perm': 'snmp_view',
     'render': 'renderSnmpMibsPage',
     'i18n': 'snmp_page',
     'views': [

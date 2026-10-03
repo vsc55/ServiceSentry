@@ -5,6 +5,7 @@
 import json
 import os
 import unittest.mock
+import weakref
 
 import pytest
 
@@ -53,6 +54,58 @@ def _shared_debug_state():
     was = (dbg.enabled, dbg.level)
     yield
     dbg.enabled, dbg.level = was
+
+def _stop_web_admin(wa):
+    """Stop what one WebAdmin started in __init__: the embedded services (heartbeat lease
+    loop, scheduler/worker) and the panel's own scanners and backup runner."""
+    for _svc in getattr(wa, "_embedded_services", {}).values():
+        try:
+            _svc.stop_heartbeat()
+        except Exception:
+            pass
+        try:
+            _svc.stop()
+        except Exception:
+            try:
+                _svc.control("stop")
+            except Exception:
+                pass
+    try:
+        wa.stop_background()
+    except Exception:
+        pass
+
+
+# Every WebAdmin built while a test runs, whoever built it. Weak: one whose threads are
+# stopped is free to go.
+_LIVE_WEB_ADMINS = weakref.WeakSet()
+
+if _HAS_FLASK:
+    _wa_init = WebAdmin.__init__
+
+    def _tracked_init(self, *a, **kw):
+        _LIVE_WEB_ADMINS.add(self)
+        _wa_init(self, *a, **kw)
+
+    WebAdmin.__init__ = _tracked_init
+
+
+@pytest.fixture(autouse=True)
+def _stop_every_web_admin():
+    """Stop the threads of every WebAdmin the test built.
+
+    Each instance starts five daemon threads — service health, certificate, cabling and
+    secret scanners, and the backup runner — whose loops hold the instance through their
+    closures. Nothing stopped them, so no instance was ever freed: ~15 MB and 5 threads per
+    test, never given back. On a 16 GB GitHub runner the two xdist workers ran it out of
+    memory around 15 % of the suite, and the runner was killed ("received a shutdown
+    signal") on every pull request, each time in a different test.
+    """
+    yield
+    for wa in list(_LIVE_WEB_ADMINS):
+        _stop_web_admin(wa)
+        _LIVE_WEB_ADMINS.discard(wa)
+
 
 # Sample module/item configuration the tests expect. Seeded directly into the
 # DB-backed modules store by the ``admin`` fixture (module config lives in the
@@ -179,21 +232,8 @@ def admin(config_dir, var_dir):
             {"ping": {"192.168.1.1": {"status": True, "other_data": {}}}}
         )
     yield wa
-    # Teardown — stop the background workers this WebAdmin started in __init__
-    # (per-service heartbeat lease loop + any scheduler/worker). Without this every
-    # test leaks live threads and the full suite piles up CPU/RAM until it runs away.
-    for _svc in getattr(wa, "_embedded_services", {}).values():
-        try:
-            _svc.stop_heartbeat()
-        except Exception:
-            pass
-        try:
-            _svc.stop()
-        except Exception:
-            try:
-                _svc.control("stop")
-            except Exception:
-                pass
+    # Teardown is `_stop_every_web_admin`, which covers this instance and any other the test
+    # built by hand.
 
 
 @pytest.fixture()

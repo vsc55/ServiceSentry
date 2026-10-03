@@ -71,7 +71,7 @@ def incident_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> list
                 continue
             mcfg = modules_raw.get(mn)
             mcfg = mcfg if isinstance(mcfg, dict) else {}
-            labels, hosts_of = {}, {}
+            labels, devices_of = {}, {}
             for coll, items in mcfg.items():
                 if coll.startswith('__') or not isinstance(items, dict):
                     continue
@@ -82,7 +82,7 @@ def incident_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> list
                     if lbl:
                         labels[k] = lbl
                     if it.get('device_uid'):
-                        hosts_of[k] = it['device_uid']
+                        devices_of[k] = it['device_uid']
             for ck, info in mstatus.items():
                 if not (isinstance(info, dict) and info.get('status') is False):
                     continue
@@ -93,7 +93,7 @@ def incident_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> list
                 if not disp and '/' in ck and labels.get(head):
                     disp = f'{labels[head]} / {ck.split("/", 1)[1]}'
                 disp = disp or ck
-                huid = hosts_of.get(ck) or hosts_of.get(head, '')
+                huid = devices_of.get(ck) or devices_of.get(head, '')
                 out.append({'module': mn, 'check': disp,
                             'device': device_name.get(huid, '') if huid else ''})
         out.sort(key=lambda x: (str(x['module']).lower(), str(x['check']).lower()))

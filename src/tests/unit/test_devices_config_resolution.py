@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for host-centric config resolution end-to-end via ``ModuleBase.resolve_device``.
+"""Tests for device-centric config resolution end-to-end via ``ModuleBase.resolve_device``.
 
 (The low-level resolution primitives in lib/core/devices/resolve.py are tested apart in
-test_hosts_resolve.py; this file exercises the full merge over a mock monitor.)
+test_devices_resolve.py; this file exercises the full merge over a mock monitor.)
 
 A check (or, for SNMP, a server) may carry a ``device_uid`` instead of inline
 connection fields; ``ModuleBase.resolve_device`` merges the referenced device's
@@ -31,7 +31,7 @@ class _FakeStore:
         return self._h.get(uid)
 
 
-_HOST = {
+_DEVICE = {
     'uid': 'h1', 'address': '10.0.0.9', 'kind': 'remote', 'maintenance': False,
     'profiles': {
         'icmp': {},
@@ -39,7 +39,7 @@ _HOST = {
         'ntp':  {'port': 1230},
         'snmp': {'community': 'sec', 'version': '2c', 'port': 161,
                  'snmpv3_auth_key': 'authk'},
-        # datastore: only the address + SSH tunnel are host-owned; the per-DB
+        # datastore: only the address + SSH tunnel are device-owned; the per-DB
         # connection (port/user/password) lives on each check.
         'ssh':  {'ssh_host': 'jump.local', 'ssh_user': 'jduser', 'ssh_password': 'jp'},
         'http': {'scheme': 'https', 'verify_ssl': True,
@@ -50,11 +50,11 @@ _HOST = {
 
 def _ping(monitor_cfg=None):
     mm = create_mock_monitor({'watchfuls.ping': monitor_cfg or {}})
-    mm._devices_store = _FakeStore({'h1': _HOST})
+    mm._devices_store = _FakeStore({'h1': _DEVICE})
     return ping.Watchful(mm)
 
 
-class TestResolveHostGeneric:
+class TestResolveDeviceGeneric:
 
     def test_inline_item_unchanged(self):
         w = _ping()
@@ -68,16 +68,16 @@ class TestResolveHostGeneric:
         item = {'device_uid': 'h1'}
         assert w.resolve_device(item) == item
 
-    def test_unknown_host_returns_item(self):
+    def test_unknown_device_returns_item(self):
         mm = create_mock_monitor({'watchfuls.ping': {}})
         mm._devices_store = _FakeStore({})
         w = ping.Watchful(mm)
         item = {'device_uid': 'h1'}
         assert w.resolve_device(item) == item
 
-    def test_address_injected_and_host_wins(self):
+    def test_address_injected_and_device_wins(self):
         w = _ping()
-        # The item's stale (empty) host must be overridden by the host address.
+        # The item's stale (empty) host must be overridden by the device address.
         out = w.resolve_device({'device_uid': 'h1', 'host': '', 'enabled': True})
         assert out['host'] == '10.0.0.9'
         assert out['enabled'] is True   # non-connection field preserved
@@ -88,15 +88,15 @@ class TestPerModuleProfiles:
     def _snmp(self):
         with patch('watchfuls.snmp._startup_compile_mibs'):
             s = SnmpWatchful(create_mock_monitor({'watchfuls.snmp': {}}))
-        s._monitor._devices_store = _FakeStore({'h1': _HOST})
+        s._monitor._devices_store = _FakeStore({'h1': _DEVICE})
         return s
 
-    def test_snmp_inherits_the_device_identity_from_the_host(self):
-        """Bound to a host, the device's own settings come from the device — address,
+    def test_snmp_inherits_the_device_identity_from_the_device(self):
+        """Bound to a device, the device's own settings come from the device — address,
         port, community and the v3 keys alike.  The values left on the item are stale by
-        construction: the form that would have edited them is hidden once a host is
+        construction: the form that would have edited them is hidden once a device is
         bound, so preferring them means authenticating with what somebody typed before
-        the host existed."""
+        the device existed."""
         srv = self._snmp().resolve_device({'device_uid': 'h1', 'community': 'mine',
                                          'version': '3', 'checks': {}})
         assert srv['host'] == '10.0.0.9'
@@ -105,9 +105,9 @@ class TestPerModuleProfiles:
         assert srv['port'] == 161
         assert srv['snmpv3_auth_key'] == 'authk'
 
-    def test_snmp_without_a_host_keeps_its_own_connection(self):
+    def test_snmp_without_a_device_keeps_its_own_connection(self):
         """A one-off check against a bare address stays legal: no device_uid, nothing
-        resolved, the item answers for itself.  Binding to a host is how a device you
+        resolved, the item answers for itself.  Binding to a device is how a device you
         monitor is configured, not a requirement for asking one question of an IP."""
         srv = self._snmp().resolve_device({'host': '192.0.2.7', 'community': 'mine',
                                          'version': '3', 'checks': {}})
@@ -115,36 +115,36 @@ class TestPerModuleProfiles:
         assert srv['community'] == 'mine' and srv['version'] == '3'
 
     def test_ssl_cert_host_address_port_stays_on_check(self):
-        # The host owns only the address; each check has its own port (a server
+        # The device owns only the address; each check has its own port (a server
         # can expose several TLS services).  A stale 'port' left in the stored
         # tls profile (pre-schema-evolution data) must NOT clobber the check's.
         mm = create_mock_monitor({'watchfuls.ssl_cert': {}})
-        mm._devices_store = _FakeStore({'h1': _HOST})
+        mm._devices_store = _FakeStore({'h1': _DEVICE})
         out = ssl_cert.Watchful(mm).resolve_device({'device_uid': 'h1', 'port': 9443})
         assert out['host'] == '10.0.0.9'
         assert out['port'] == 9443          # check's own port preserved
 
     def test_ntp_host_address_port_stays_on_check(self):
-        # The host owns only the address; the NTP port is a check setting
+        # The device owns only the address; the NTP port is a check setting
         # (Monitoring tab).  A stale 'port' in the stored ntp profile must not
         # clobber the check's value.
         mm = create_mock_monitor({'watchfuls.ntp': {}})
-        mm._devices_store = _FakeStore({'h1': _HOST})
+        mm._devices_store = _FakeStore({'h1': _DEVICE})
         out = ntp.Watchful(mm).resolve_device({'device_uid': 'h1', 'port': 124})
         assert out['server'] == '10.0.0.9'
         assert out['port'] == 124
 
-    def test_datastore_address_and_ssh_from_host_db_creds_from_check(self):
+    def test_datastore_address_and_ssh_from_device_db_creds_from_check(self):
         mm = create_mock_monitor({'watchfuls.datastore': {}})
-        mm._devices_store = _FakeStore({'h1': _HOST})
+        mm._devices_store = _FakeStore({'h1': _DEVICE})
         # The check carries its own per-DB connection (port/user/password); only
-        # the address + SSH tunnel come from the host.  This is what lets one host
+        # the address + SSH tunnel come from the device.  This is what lets one device
         # run several DB checks (mysql + postgres) with different credentials.
         out = datastore.Watchful(mm).resolve_device(
             {'device_uid': 'h1', 'db_type': 'postgres',
              'user': 'pg', 'password': 'pgpw', 'port': 5432})
-        assert out['host'] == '10.0.0.9'                       # address from host
-        # The SSH bridge connects to THIS server: ssh_host = host address (the
+        assert out['host'] == '10.0.0.9'                       # address from device
+        # The SSH bridge connects to THIS server: ssh_host = device address (the
         # stale ssh_host stored in the profile is ignored — address_field wins).
         assert out['ssh_host'] == '10.0.0.9'
         assert out['ssh_user'] == 'jduser' and out['ssh_password'] == 'jp'
@@ -152,26 +152,26 @@ class TestPerModuleProfiles:
         assert out['db_type'] == 'postgres'
 
     def test_web_inherits_only_address(self):
-        # The host provides only the address (→ server); scheme/auth/etc. are
+        # The device provides only the address (→ server); scheme/auth/etc. are
         # per-check now, so the check's own values are kept.
         mm = create_mock_monitor({'watchfuls.web': {}})
-        mm._devices_store = _FakeStore({'h1': _HOST})
+        mm._devices_store = _FakeStore({'h1': _DEVICE})
         out = web.Watchful(mm).resolve_device(
             {'device_uid': 'h1', 'path': '/health', 'method': 'GET',
              'scheme': 'http', 'auth_user': 'me'})
         assert out['server'] == '10.0.0.9'       # address → server
-        assert out['scheme'] == 'http'           # NOT overridden by the host
+        assert out['scheme'] == 'http'           # NOT overridden by the device
         assert out['auth_user'] == 'me'
         assert out['path'] == '/health' and out['method'] == 'GET'
 
 
-class TestHostKindAndMaintenance:
-    """Local/remote kind and maintenance mode are core host properties."""
+class TestDeviceKindAndMaintenance:
+    """Local/remote kind and maintenance mode are core device properties."""
 
-    def test_local_host_skips_ssh_profile(self):
-        # A local host is reached directly: its ssh profile must NOT be injected
+    def test_local_device_skips_ssh_profile(self):
+        # A local device is reached directly: its ssh profile must NOT be injected
         # (no tunnel / command bridge), even if one is stored.
-        local = {**_HOST, 'kind': 'local'}
+        local = {**_DEVICE, 'kind': 'local'}
         mm = create_mock_monitor({'watchfuls.datastore': {}})
         mm._devices_store = _FakeStore({'h1': local})
         out = datastore.Watchful(mm).resolve_device(
@@ -179,16 +179,16 @@ class TestHostKindAndMaintenance:
         assert out['host'] == '10.0.0.9'          # address still inherited
         assert 'ssh_user' not in out              # ssh profile skipped for local
 
-    def test_remote_host_injects_ssh_profile(self):
+    def test_remote_device_injects_ssh_profile(self):
         mm = create_mock_monitor({'watchfuls.datastore': {}})
-        mm._devices_store = _FakeStore({'h1': _HOST})   # kind == remote
+        mm._devices_store = _FakeStore({'h1': _DEVICE})   # kind == remote
         out = datastore.Watchful(mm).resolve_device(
             {'device_uid': 'h1', 'db_type': 'postgres'})
         assert out['ssh_host'] == '10.0.0.9' and out['ssh_user'] == 'jduser'
 
     def test_maintenance_disables_check(self):
-        # A host in maintenance disables every bound check (modules skip disabled).
-        maint = {**_HOST, 'maintenance': True}
+        # A device in maintenance disables every bound check (modules skip disabled).
+        maint = {**_DEVICE, 'maintenance': True}
         w = _ping()
         w._monitor._devices_store = _FakeStore({'h1': maint})
         out = w.resolve_device({'device_uid': 'h1', 'enabled': True})
@@ -201,57 +201,57 @@ class TestHostKindAndMaintenance:
         assert out.get('enabled') is True
         assert '_device_maintenance' not in out
 
-    def test_host_os_explicit_injected(self):
+    def test_device_os_explicit_injected(self):
         w = _ping()
-        w._monitor._devices_store = _FakeStore({'h1': {**_HOST, 'os': 'windows'}})
+        w._monitor._devices_store = _FakeStore({'h1': {**_DEVICE, 'os': 'windows'}})
         out = w.resolve_device({'device_uid': 'h1'})
         assert out['device_os'] == 'windows'
 
-    def test_host_os_auto_local_resolves_to_platform(self):
+    def test_device_os_auto_local_resolves_to_platform(self):
         from lib.util import os_detect
-        local = {**_HOST, 'kind': 'local', 'os': 'auto'}
+        local = {**_DEVICE, 'kind': 'local', 'os': 'auto'}
         w = _ping()
         w._monitor._devices_store = _FakeStore({'h1': local})
         out = w.resolve_device({'device_uid': 'h1'})
         assert out['device_os'] == os_detect.local_os()
 
-    def test_host_os_auto_remote_stays_auto(self):
+    def test_device_os_auto_remote_stays_auto(self):
         # Remote 'auto' is resolved over SSH by the consumer, not at resolve time.
         w = _ping()
-        w._monitor._devices_store = _FakeStore({'h1': {**_HOST, 'os': 'auto'}})  # kind remote
+        w._monitor._devices_store = _FakeStore({'h1': {**_DEVICE, 'os': 'auto'}})  # kind remote
         out = w.resolve_device({'device_uid': 'h1'})
         assert out['device_os'] == 'auto'
 
 
-class TestDnsHostAware:
-    """DNS is host-aware: it can bind to a host to run the query over SSH (so a
-    host that reaches the DNS server resolves), while inline checks still run on
+class TestDnsDeviceAware:
+    """DNS is device-aware: it can bind to a device to run the query over SSH (so a
+    device that reaches the DNS server resolves), while inline checks still run on
     the daemon."""
 
-    def test_dns_has_ssh_host_profile(self):
+    def test_dns_has_ssh_device_profile(self):
         import watchfuls.dns as dns
         hp = (dns.Watchful.ITEM_SCHEMA or {}).get('__device_profile__')
         assert isinstance(hp, dict) and hp.get('key') == 'ssh'
 
-    def test_dns_in_module_host_fields(self):
+    def test_dns_in_module_device_fields(self):
         from lib.core.devices.profiles import module_device_fields
         assert 'ssh_host' in module_device_fields().get('dns', [])
 
 
 class TestDatastoreResolvedItem:
-    """The datastore reads fields via _resolved_item, which must merge the host."""
+    """The datastore reads fields via _resolved_item, which must merge the device."""
 
-    def test_resolved_item_inherits_host(self):
+    def test_resolved_item_inherits_device(self):
         cfg = {'watchfuls.datastore': {'list': {
             'db1': {'device_uid': 'h1', 'db_type': 'postgres', 'enabled': True,
                     'user': 'pg', 'password': 'pgpw', 'port': 5432}}}}
         mm = create_mock_monitor(cfg)
-        mm._devices_store = _FakeStore({'h1': _HOST})
+        mm._devices_store = _FakeStore({'h1': _DEVICE})
         dw = datastore.Watchful(mm)
         item = dw._resolved_item('db1')
-        assert item['host'] == '10.0.0.9'         # address from host
-        assert item['ssh_host'] == '10.0.0.9'     # ssh bridge targets this host
-        assert item['ssh_user'] == 'jduser'       # tunnel credentials from host
+        assert item['host'] == '10.0.0.9'         # address from device
+        assert item['ssh_host'] == '10.0.0.9'     # ssh bridge targets this device
+        assert item['ssh_user'] == 'jduser'       # tunnel credentials from device
         # the per-DB connection stays on the check
         assert item['user'] == 'pg' and item['password'] == 'pgpw' and item['port'] == 5432
 
@@ -259,15 +259,15 @@ class TestDatastoreResolvedItem:
         cfg = {'watchfuls.datastore': {'list': {
             'db2': {'host': 'inline.local', 'db_type': 'mysql', 'enabled': True}}}}
         mm = create_mock_monitor(cfg)
-        mm._devices_store = _FakeStore({'h1': _HOST})
+        mm._devices_store = _FakeStore({'h1': _DEVICE})
         dw = datastore.Watchful(mm)
         assert dw._resolved_item('db2')['host'] == 'inline.local'
 
 
-class TestMultiHostBinding:
+class TestMultiDeviceBinding:
     """A __device_multiple_bind__ module (proxmox) binds to several devices via
     device_uids; the address field becomes the space-joined failover list, and the
-    first host is primary (profile fields / OS / maintenance)."""
+    first device is primary (profile fields / OS / maintenance)."""
 
     _NODES = {
         'n1': {'uid': 'n1', 'address': '10.0.0.1', 'kind': 'remote',
@@ -289,21 +289,21 @@ class TestMultiHostBinding:
         assert out['port'] == 8006            # from the primary's proxmox profile
         assert out['enabled'] is True
 
-    def test_missing_hosts_skipped(self):
+    def test_missing_devices_skipped(self):
         out = self._pve().resolve_device({'device_uids': ['n1', 'nope'], 'host': ''})
         assert out['host'] == '10.0.0.1'
 
-    def test_empty_host_uids_inline(self):
+    def test_empty_device_uids_inline(self):
         item = {'device_uids': [], 'host': '1.2.3.4', 'enabled': True}
         assert self._pve({}).resolve_device(item) == item
 
-    def test_single_host_uid_unaffected(self):
+    def test_single_device_uid_unaffected(self):
         out = self._pve().resolve_device({'device_uid': 'n1', 'host': ''})
         assert out['host'] == '10.0.0.1'
         assert out['port'] == 8006
 
     def test_exposes_cluster_members_roster(self):
-        """Multi-host binding exposes the member roster (uid/name/address/node/
+        """Multi-device binding exposes the member roster (uid/name/address/node/
         maintenance) so the module can map API nodes to devices; a member in
         maintenance does NOT disable the whole check."""
         devices = {
@@ -320,8 +320,8 @@ class TestMultiHostBinding:
         assert [m['maintenance'] for m in members] == [False, True]
         assert out['enabled'] is True            # member maintenance does NOT disable
 
-    def test_single_host_maintenance_still_disables(self):
+    def test_single_device_maintenance_still_disables(self):
         devices = {'n1': {'uid': 'n1', 'name': 's', 'address': '10.0.0.1', 'kind': 'remote',
                         'maintenance': True, 'profiles': {}}}
         out = self._pve(devices).resolve_device({'device_uid': 'n1', 'host': ''})
-        assert out['enabled'] is False           # single-host maintenance disables
+        assert out['enabled'] is False           # single-device maintenance disables

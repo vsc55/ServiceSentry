@@ -1,50 +1,14 @@
 {#
-   Servers section: the markup of its tab pane.
+   The device classes and the clusters: two catalogue entries, each a pane of its own.
 
-   Lives with the rest of the section rather than inline in dashboard.html, which is
-   the shell: the panes it used to hold belonged to twelve different sections, so a
-   change to any one of them meant editing the file that renders the whole panel.
+   They were two sub-tabs of the device registry, beside its list. The list moved to
+   Infrastructure — where each device is also watched, located and configured — and these two
+   stayed what they are: reference data the devices are described with. Full-bleed with a flush
+   card, like every list in the panel (see each createListTable's cardClass).
 #}
-<div class="tab-pane fade" id="tab-servers">
-    <!-- Sub-tab nav -->
-    <ul class="nav nav-tabs mb-3" id="infraSubTabs" role="tablist">
-        <li class="nav-item" role="presentation" id="subtab-srv-devices-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-devices" type="button" id="btn-subtab-srv-devices">
-                <i class="bi bi-hdd-network me-1"></i>{{ i18n.subtab_servers }}
-            </button>
-        </li>
-        {# Las clases de dispositivo. Aquí y no en el catálogo de Inventario físico porque
-           clasifican a los dispositivos del registro, que es la lista de al lado y la que se
-           filtra por clase; ese catálogo describe equipamiento en general y éste describe lo de
-           esta casa. El catálogo enlaza aquí, para quien la busque allí. #}
-        <li class="nav-item" role="presentation" id="subtab-srv-types-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-types" type="button" id="btn-subtab-srv-types">
-                <i class="bi bi-tags me-1"></i>{{ i18n.subtab_host_types }}
-            </button>
-        </li>
-        <li class="nav-item" role="presentation" id="subtab-srv-clusters-li" style="display:none">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#subtab-srv-clusters" type="button" id="btn-subtab-srv-clusters">
-                <i class="bi bi-diagram-3 me-1"></i>{{ i18n.subtab_clusters }}
-            </button>
-        </li>
-    </ul>
-    <div class="tab-content">
-        {# The Infrastructure sub-panes run full-bleed with a flush card (see each
-           createListTable's cardClass), like History: no card chrome, filling the whole
-           area. #infraSubTabs is hidden (the sidebar drives these), so they also eat the
-           shell's top padding — the accent strip sits flush against the breadcrumb. #}
-        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-devices">
-            <div id="servers-container"></div>
-        </div>
-        {# A sangre como sus dos hermanas, y no por gusto: dentro de una `.ss-fullbleed` la
-           tarjeta pierde borde, esquinas y sombra automáticamente, que es lo que hace que las
-           tres pestañas de Infraestructura se lean como la misma pantalla. Con `p-3` salía una
-           caja con borde en medio de dos que no lo tienen. Reportado desde la pantalla. #}
-        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-types">
-            <div id="devicetypes-container"></div>
-        </div>
-        <div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="subtab-srv-clusters">
-            <div id="clusters-container"></div>
-        </div>
-    </div>
+<div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="tab-devtypes">
+    <div id="devicetypes-container"></div>
+</div>
+<div class="tab-pane fade ss-fullbleed ss-fullbleed-top" id="tab-clusters">
+    <div id="clusters-container"></div>
 </div>

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the host-aware command runner (ModuleBase.device_exec & helpers).
+"""Tests for the device-aware command runner (ModuleBase.device_exec & helpers).
 
 These back the OS modules (raid, ram_swap, process, service_status…): a check
-bound to a remote host runs its command over the device's SSH connection; a local
+bound to a remote device runs its command over the device's SSH connection; a local
 or inline check runs it locally.
 """
 
@@ -19,7 +19,7 @@ def _w():
     return ping.Watchful(create_mock_monitor({'watchfuls.ping': {}}))
 
 
-class TestHostCmdFor:
+class TestDeviceCmdFor:
 
     def test_picks_by_os(self):
         cmds = {'linux': 'free', 'windows': 'wmic', 'darwin': 'vm_stat'}
@@ -34,7 +34,7 @@ class TestHostCmdFor:
         assert _w().device_cmd_for({'device_os': 'linux'}, {}) == ''
 
 
-class TestHostExecLocal:
+class TestDeviceExecLocal:
 
     def test_local_inline_runs_locally(self):
         w = _w()
@@ -81,17 +81,17 @@ class TestADeviceThatRunsNothing:
         _, err2, _ = _w().device_exec({'device_kind': 'none'}, 'echo hi')
         assert err2 == runner.NO_EXEC, 'two wordings for one refusal'
 
-    def test_no_host_at_all_still_runs_here(self):
-        """A classic inline check has always meant this machine, and says so by having no host
+    def test_no_device_at_all_still_runs_here(self):
+        """A classic inline check has always meant this machine, and says so by having no device
         to disagree with. Refusing that would be reading "no connection" out of "no device"."""
         from lib.core.devices import runner                      # noqa: PLC0415
         fake = MagicMock(stdout='OUT', stderr='', returncode=0)
         with patch('subprocess.run', return_value=fake):
             assert runner.run(None, 'echo hi') == ('OUT', '', 0)
 
-    def test_a_bound_host_always_carries_one_of_the_three(self):
+    def test_a_bound_device_always_carries_one_of_the_three(self):
         """An item with NO `device_kind` is the inline case and runs here — that is the classic
-        check and it has no device to disagree with. What must not exist is a BOUND host whose
+        check and it has no device to disagree with. What must not exist is a BOUND device whose
         kind arrives as something else: the binding writes the store's own value through, so
         the refusal above can be trusted to fire when it should."""
         from lib.core.devices.stores import DevicesStore           # noqa: PLC0415
@@ -109,7 +109,7 @@ def _read_binding():
         return fh.read()
 
 
-class TestHostExecRemote:
+class TestDeviceExecRemote:
 
     def _remote_item(self):
         return {'device_kind': 'remote', 'device_os': 'linux', 'ssh_host': '10.0.0.9',

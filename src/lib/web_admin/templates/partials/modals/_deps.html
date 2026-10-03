@@ -47,29 +47,29 @@
     </div>
 </div>
 
-{# New/Edit device (server) modal — body is built dynamically by saveHostModal/openEditDeviceModal. #}
-<div class="modal fade" id="hostModal" tabindex="-1">
+{# New/Edit device (server) modal — body is built dynamically by saveDeviceModal/openEditDeviceModal. #}
+<div class="modal fade" id="deviceModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-xl">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title"><i class="bi bi-hdd-network me-2" id="hmTypeIcon"></i><span id="hostModalTitle">{{ i18n.device_new }}</span></h6>
+                <h6 class="modal-title"><i class="bi bi-hdd-network me-2" id="hmTypeIcon"></i><span id="deviceModalTitle">{{ i18n.device_new }}</span></h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
-            <div class="modal-body p-3" id="hostModalBody"></div>
+            <div class="modal-body p-3" id="deviceModalBody"></div>
             <div class="modal-footer py-2">
                 <div class="d-flex align-items-center gap-2 me-auto">
-                    <button type="button" class="btn btn-sm btn-primary" onclick="testHostServer()">
+                    <button type="button" class="btn btn-sm btn-primary" onclick="testDeviceServer()">
                         <i class="bi bi-play-circle me-1"></i>{{ i18n.device_test }}</button>
-                    <span class="text-danger small" id="hostModalError"></span>
+                    <span class="text-danger small" id="deviceModalError"></span>
                 </div>
                 <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button type="button" class="btn btn-sm btn-secondary" onclick="_undoHostModal()" title="{{ i18n.device_undo_tt }}">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="_undoDeviceModal()" title="{{ i18n.device_undo_tt }}">
                     <i class="bi bi-arrow-counterclockwise me-1"></i>{{ i18n.undo }}
                 </button>
-                <button type="button" class="btn btn-sm btn-primary" onclick="saveHostModal(false)" title="{{ i18n.device_save_tt }}">
+                <button type="button" class="btn btn-sm btn-primary" onclick="saveDeviceModal(false)" title="{{ i18n.device_save_tt }}">
                     <i class="bi bi-save me-1"></i>{{ i18n.save }}
                 </button>
-                <button type="button" class="btn btn-sm btn-primary" id="btnHostModalOk" onclick="saveHostModal(true)">
+                <button type="button" class="btn btn-sm btn-primary" id="btnDeviceModalOk" onclick="saveDeviceModal(true)">
                     <i class="bi bi-save2 me-1"></i>{{ i18n.save_and_close }}
                 </button>
             </div>
@@ -78,7 +78,7 @@
 </div>
 
 {# Clone-device modal: ask name + new address, then create the duplicate. #}
-<div class="modal fade" id="hostCloneModal" tabindex="-1">
+<div class="modal fade" id="deviceCloneModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header py-2">
@@ -88,34 +88,34 @@
             <div class="modal-body p-3">
                 <div class="mb-2">
                     <label class="form-label form-label-sm mb-1">{{ i18n.device_name }}</label>
-                    <input type="text" class="form-control form-control-sm" id="hostCloneName" autocomplete="off"
-                           onkeydown="if(event.key==='Enter'){event.preventDefault();_cloneHostSubmit(true);}">
+                    <input type="text" class="form-control form-control-sm" id="deviceCloneName" autocomplete="off"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();_cloneDeviceSubmit(true);}">
                 </div>
                 <div class="mb-1">
                     <label class="form-label form-label-sm mb-1">{{ i18n.device_address }}</label>
-                    <input type="text" class="form-control form-control-sm" id="hostCloneAddress" autocomplete="off"
-                           onkeydown="if(event.key==='Enter'){event.preventDefault();_cloneHostSubmit(true);}">
+                    <input type="text" class="form-control form-control-sm" id="deviceCloneAddress" autocomplete="off"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();_cloneDeviceSubmit(true);}">
                 </div>
                 {# Bound module checks to clone (all selected by default). Hidden when none. #}
-                <div id="hostCloneChecksWrap" class="mt-3 d-none">
+                <div id="deviceCloneChecksWrap" class="mt-3 d-none">
                     <div class="d-flex align-items-center gap-2 mb-1">
                         <label class="form-label form-label-sm mb-0">{{ i18n.device_clone_checks }}</label>
-                        <span class="badge bg-secondary" id="hostCloneChecksCount" style="font-size:.7rem"></span>
+                        <span class="badge bg-secondary" id="deviceCloneChecksCount" style="font-size:.7rem"></span>
                         <button type="button" class="btn btn-sm btn-secondary py-0 px-2 ms-auto"
                                 onclick="_cloneChecksToggleAll(true)">{{ i18n.select_all }}</button>
                         <button type="button" class="btn btn-sm btn-secondary py-0 px-2"
                                 onclick="_cloneChecksToggleAll(false)">{{ i18n.select_none }}</button>
                     </div>
-                    <div id="hostCloneChecks" class="border rounded p-2"
+                    <div id="deviceCloneChecks" class="border rounded p-2"
                          style="max-height:14rem;overflow:auto;background:var(--bs-body-bg)"></div>
                 </div>
-                <div class="text-danger small mt-2" id="hostCloneError"></div>
+                <div class="text-danger small mt-2" id="deviceCloneError"></div>
             </div>
             <div class="modal-footer py-2">
                 <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
-                <button type="button" class="btn btn-sm btn-primary" onclick="_cloneHostSubmit(false)">
+                <button type="button" class="btn btn-sm btn-primary" onclick="_cloneDeviceSubmit(false)">
                     <i class="bi bi-save me-1"></i>{{ i18n.save }}</button>
-                <button type="button" class="btn btn-sm btn-primary" onclick="_cloneHostSubmit(true)">
+                <button type="button" class="btn btn-sm btn-primary" onclick="_cloneDeviceSubmit(true)">
                     <i class="bi bi-save2 me-1"></i>{{ i18n.device_clone_save_edit }}</button>
             </div>
         </div>
@@ -123,16 +123,16 @@
 </div>
 
 {# Device test results modal (shown over the edit-device modal). #}
-<div class="modal fade" id="hostTestModal" tabindex="-1">
+<div class="modal fade" id="deviceTestModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title"><i class="bi bi-play-circle me-1"></i><span id="hostTestModalTitle">{{ i18n.device_test }}</span></h6>
+                <h6 class="modal-title"><i class="bi bi-play-circle me-1"></i><span id="deviceTestModalTitle">{{ i18n.device_test }}</span></h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
-            <div class="modal-body p-3" id="hostTestModalBody"></div>
+            <div class="modal-body p-3" id="deviceTestModalBody"></div>
             <div class="modal-footer py-2">
-                <span class="small me-auto" id="hostTestModalSummary"></span>
+                <span class="small me-auto" id="deviceTestModalSummary"></span>
                 <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
             </div>
         </div>
@@ -176,16 +176,16 @@
 </div>
 
 {# Assisted device migration modal — proposal of candidate devices. #}
-<div class="modal fade" id="hostMigrateModal" tabindex="-1">
+<div class="modal fade" id="deviceMigrateModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered modal-xl modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h6 class="modal-title"><i class="bi bi-magic me-1"></i>{{ i18n.device_migrate_title }}</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
-            <div class="modal-body p-3" id="hostMigrateBody"></div>
+            <div class="modal-body p-3" id="deviceMigrateBody"></div>
             <div class="modal-footer py-2">
-                <span class="text-muted small me-auto" id="hostMigrateInfo"></span>
+                <span class="text-muted small me-auto" id="deviceMigrateInfo"></span>
                 <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
                 <button type="button" class="btn btn-sm btn-primary" id="btnMigrateApply" onclick="applyMigration()">
                     <i class="bi bi-check2-circle me-1"></i>{{ i18n.device_migrate_apply }}

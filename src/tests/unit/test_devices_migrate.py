@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the assisted host-migration planner (lib/core/devices/migrate.py)."""
+"""Tests for the assisted device-migration planner (lib/core/devices/migrate.py)."""
 
 from lib.core.devices.migrate import build_migration_plan, apply_to_modules
 
@@ -27,15 +27,15 @@ class TestPlan:
         c = _by_addr(plan)['10.0.0.1']
         assert c['is_duplicate'] is True
         assert {m['key'] for m in c['members']} == {'r1', 'r1b', 'p1'}
-        # The SNMP identity is the DEVICE's, so the candidate host carries it: the
-        # migration moves whatever the module declares as host-owned, and nothing
+        # The SNMP identity is the DEVICE's, so the candidate device carries it: the
+        # migration moves whatever the module declares as device-owned, and nothing
         # here had to learn the word "community" to do it.
         assert c['profiles'] == {'snmp': {'community': 'public', 'version': '2c'}}
         assert set(c['modules']) == {'snmp', 'ping'}
 
     def test_same_address_and_same_identity_merge(self):
         # One address, one credential, one device — the ordinary case, and the whole
-        # point of the migration: two module entries collapse into one host.
+        # point of the migration: two module entries collapse into one device.
         mods = {'watchfuls.snmp': {'servers': {
             'a': {'host': '1.1.1.1', 'community': 'public', 'uid': 'a'},
             'b': {'host': '1.1.1.1', 'community': 'public', 'timeout': 30, 'uid': 'b'},
@@ -86,10 +86,10 @@ class TestPlan:
                     'conn_type': 'ssh', 'uid': 'd1'},
         }}}
         plan = build_migration_plan(mods)
-        # The host is the SSH server ('jump'): datastore's DB endpoint ('host')
-        # is now an editable per-check field (like web's 'url'), not a host
+        # The device is the SSH server ('jump'): datastore's DB endpoint ('host')
+        # is now an editable per-check field (like web's 'url'), not a device
         # profile — so only the ssh tunnel is shared.  The per-DB connection
-        # (host/user/password) stays on the check, letting one host run several
+        # (host/user/password) stays on the check, letting one device run several
         # DBs, possibly tunnelled to different boxes (docker/internal).
         c = _by_addr(plan)['jump']
         assert c['protocols'] == ['ssh']
@@ -99,7 +99,7 @@ class TestPlan:
 
 class TestApply:
 
-    def test_strips_connection_and_sets_host_uid(self):
+    def test_strips_connection_and_sets_device_uid(self):
         mods = {
             'watchfuls.snmp': {'servers': {
                 'r1': {'host': '10.0.0.1', 'community': 'public', 'version': '2c',
@@ -109,11 +109,11 @@ class TestApply:
         }
         plan = build_migration_plan(mods)
         cand = _by_addr(plan)['10.0.0.1']
-        apply_to_modules(mods, [{'uid': 'HOST-A', 'members': cand['members']}])
+        apply_to_modules(mods, [{'uid': 'DEVICE-A', 'members': cand['members']}])
 
         r1 = mods['watchfuls.snmp']['servers']['r1']
-        assert r1['device_uid'] == 'HOST-A'
-        # Everything the host now owns is stripped — the address AND the identity — so
+        assert r1['device_uid'] == 'DEVICE-A'
+        # Everything the device now owns is stripped — the address AND the identity — so
         # there is exactly one place the community can be edited. Leaving a copy behind
         # is worse than either: the check would keep answering with a stale secret long
         # after the device's was changed.
@@ -122,7 +122,7 @@ class TestApply:
         assert r1['enabled'] is True and r1['uid'] == 's1'
 
         p1 = mods['watchfuls.ping']['list']['p1']
-        assert p1['device_uid'] == 'HOST-A' and 'host' not in p1
+        assert p1['device_uid'] == 'DEVICE-A' and 'host' not in p1
         assert p1['timeout'] == 5
 
     def test_apply_ignores_unknown_members(self):

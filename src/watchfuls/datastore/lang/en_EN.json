@@ -44,7 +44,7 @@
         "label":        "Optional display name shown in notifications and the dashboard instead of the item key.",
         "db_type":      "Database engine to connect to.",
         "conn_type":    "How to reach the server: TCP direct connection, Unix socket file, or TCP tunnelled over SSH.",
-        "host":         "IP address or hostname of the database server. Used for TCP and SSH tunnel modes. When the check is bound to a host it stays editable on purpose: over an SSH tunnel the database often lives on a different machine reachable only from that host (e.g. 127.0.0.1 or an internal Docker/private address). Leave it empty to fall back to the bound host's address.",
+        "host":         "IP address or hostname of the database server. Used for TCP and SSH tunnel modes. When the check is bound to a device it stays editable on purpose: over an SSH tunnel the database often lives on a different machine reachable only from that device (e.g. 127.0.0.1 or an internal Docker/private address). Leave it empty to fall back to the bound device's address.",
         "port":         "TCP port the server is listening on. Use 0 to apply the engine default (MySQL/MariaDB: 3306, PostgreSQL: 5432, MSSQL: 1433, MongoDB: 27017, Redis/Valkey: 6379, Elasticsearch/OpenSearch: 9200, InfluxDB: 8086, Memcached: 11211).",
         "user":         "Username for authentication.",
         "password":     "Password for authentication.",

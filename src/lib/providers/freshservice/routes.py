@@ -387,7 +387,7 @@ def register(app, wa):
         plan, rechazos = fs_assets.select(out['plan'], pick=pick,
                                           link=datos.get('link') or {},
                                           devices=out.get('devices') or [])
-        hecho = fs_service.apply_hosts(_devices_store(), plan,
+        hecho = fs_service.apply_devices(_devices_store(), plan,
                                        actor=session.get('username', ''), wa=wa)
         # Lo que no se pudo hacer se cuenta como lo que es: algo que se pidió y no salió, con su
         # motivo y en el idioma de quien mira.
@@ -396,7 +396,7 @@ def register(app, wa):
                   for f in hecho['failed']]
         hecho['failed'] = fallos + [{'name': r['name'], 'error': wa._t(r['reason'])}
                                     for r in rechazos]
-        wa._audit('freshservice_import_hosts',
+        wa._audit('freshservice_import_devices',
                   detail={'created': hecho['created'], 'updated': hecho['updated'],
                           'adopted': hecho['adopted'], 'failed': len(hecho['failed']),
                           'picked': len(plan), 'orphans': len(out['orphans'])})

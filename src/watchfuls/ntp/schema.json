@@ -12,7 +12,7 @@
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__discovery_uid_key__": true,
-        "__discovery_label_template__": "{host}",
+        "__discovery_label_template__": "{device}",
         "__new_item_fields__": ["label"],
         "__field_order__": ["enabled", "label", "server", "port", "timeout", "max_offset"],
         "enabled":    {"type": "bool",  "default": true},

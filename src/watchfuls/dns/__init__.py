@@ -71,8 +71,8 @@ class Watchful(DnsDiscovery, ModuleBase):
         for (key, raw) in self.get_conf('list', {}).items():
             if not isinstance(raw, dict):
                 continue
-            # Host-centric: when bound to a host, inject its SSH connection / OS /
-            # kind so the query can run ON that host (no-op for inline checks).
+            # Device-centric: when bound to a device, inject its SSH connection / OS /
+            # kind so the query can run ON that device (no-op for inline checks).
             value = self.resolve_device(raw)
             if value.get('_device_maintenance'):
                 continue
@@ -128,9 +128,9 @@ class Watchful(DnsDiscovery, ModuleBase):
         super().check()
         return self.dict_return
 
-    def _resolve_on_host(self, item, host, record_type, nameserver, timeout):
-        """Resolve by running dig/nslookup ON the bound host (device_exec: SSH for a
-        remote host, a local subprocess for a local one)."""
+    def _resolve_on_device(self, item, host, record_type, nameserver, timeout):
+        """Resolve by running dig/nslookup ON the bound device (device_exec: SSH for a
+        remote device, a local subprocess for a local one)."""
         os_ = self.device_os(item)
         cmd = client._remote_dns_cmd(os_, host, record_type, nameserver, timeout)
         out, err, code = self.device_exec(item, cmd, timeout=int(timeout) + 5)
@@ -138,7 +138,7 @@ class Watchful(DnsDiscovery, ModuleBase):
             return client._parse_nslookup(record_type, out)
         parsed = client._parse_dig_short(record_type, out)
         # dig: empty output with a non-zero exit means the query failed (e.g. the
-        # server timed out / is unreachable from the host) — surface it.
+        # server timed out / is unreachable from the device) — surface it.
         if not parsed and code != 0:
             raise OSError((err or out or f'dig exited {code}').strip())
         return parsed
@@ -157,11 +157,11 @@ class Watchful(DnsDiscovery, ModuleBase):
         _t0 = time.monotonic()
         try:
             if item.get('device_kind'):
-                # Bound to a host: run the query THERE via dig/nslookup — over SSH
-                # for a remote host, or as a local subprocess for a local host.
-                # device_exec picks the transport; only INLINE checks (no host) use
+                # Bound to a device: run the query THERE via dig/nslookup — over SSH
+                # for a remote device, or as a local subprocess for a local device.
+                # device_exec picks the transport; only INLINE checks (no device) use
                 # the daemon's in-process resolver below.
-                resolved = self._resolve_on_host(item, host, record_type, nameserver, timeout)
+                resolved = self._resolve_on_device(item, host, record_type, nameserver, timeout)
             elif client._IS_WINDOWS:
                 # Inline check on a Windows daemon: use the OS DNS Client, since
                 # python.exe's direct dnspython queries are commonly firewalled.

@@ -29,11 +29,17 @@ const _INFRA_TABS = [
     // First, because it is the question a device page is opened with. The other tabs answer
     // "show me everything"; this one answers "is this box all right".
     {id: 'details', label_key: 'infra_tab_details', icon: 'bi-speedometer2'},
+    // Where it is, from the inventory: the question of somebody who has to go and touch it.
+    // Second, because it is the first one asked after "is it all right" when it is not.
+    {id: 'place',   label_key: 'infra_tab_place',   icon: 'bi-geo-alt', perm: 'dcim_view'},
     {id: 'metrics', label_key: 'infra_tab_metrics', icon: 'bi-graph-up',
      perm: 'infra_metrics_view'},
     {id: 'results', label_key: 'infra_tab_results', icon: 'bi-list-check',
      perm: 'infra_results_view'},
     {id: 'logs',    label_key: 'infra_tab_logs',    icon: 'bi-card-text', perm: 'syslog_view'},
+    // How it is configured, from the registry — read here, edited in the registry's own modal,
+    // which this tab opens: one place to change it, now reachable from where it is watched.
+    {id: 'config',  label_key: 'infra_tab_config',  icon: 'bi-sliders', perm: 'devices_view'},
     // Last, and never the default: a thousand undifferentiated lines is the right answer to a
     // question nobody has asked yet. It is the tab you open when a number looks wrong on one
     // of the others and you need to know whether the problem is the device, the profile or
@@ -109,6 +115,7 @@ function _infraTabsHtml(d) {
     // it, and the section must draw now. The same rule the collection bar follows.
     const _addr = String((d.device || {}).address || '').trim();
     if (_addr) counts.logs = _infraLogCount(_addr);
+    counts.place = _infraPlaceCount(String((d.device || {}).uid || ''));
     const tabs = _infraTabsFor();
     const tab = tabs.some(x => x.id === _infraTab) ? _infraTab : 'details';
     const nav = `<ul class="nav nav-tabs px-3 pt-2">${tabs.map(x => `
@@ -134,7 +141,7 @@ function _infraTabsHtml(d) {
         // own refresh, so it is loaded after this markup lands rather than built into it.
         const addr = String((d.device || {}).address || '').trim();
         setTimeout(() => {
-            _loadHostLogs('infraLogsBody', addr);
+            _loadDeviceLogs('infraLogsBody', addr);
             // …and then give it the height that is left: the stylesheet's floor is what it
             // draws at until this runs, and a floor cannot know where on the page it starts.
             fitToViewportBottom(document.getElementById('infraLogsBody'));
@@ -152,6 +159,10 @@ function _infraTabsHtml(d) {
         // `_infraRowsPane`, which builds a string and has no page to measure on; and on every
         // render of this tab, because picking a port rebuilds the rail with it.
         setTimeout(() => capToScrollBox(document.getElementById('infra-rows-rail')), 0);
+    } else if (tab === 'place') {
+        body = _infraPlacePane(d);
+    } else if (tab === 'config') {
+        body = _infraConfigPane(d);
     } else if (tab === 'raw') {
         body = _infraRawPane(d);
     } else if (tab === 'results') {
@@ -270,8 +281,8 @@ function _infraIdentityHtml(d) {
     // for is not a name and the heading still has to carry it.
     const block = (title, list, note, st, brand) => `<div class="rounded-3 border px-3 py-2 mb-2">
         <div class="d-flex align-items-center gap-2 mb-1">
-            ${hostBrandMarkHtml(brand, '1.5em')}
-            ${hostBrandMarkHtml(brand, '') && title === (brand || {}).name
+            ${deviceBrandMarkHtml(brand, '1.5em')}
+            ${deviceBrandMarkHtml(brand, '') && title === (brand || {}).name
               ? '' : `<span class="fw-semibold">${esc(title)}</span>`}
             ${note ? `<span class="text-muted ss-fs-2">${esc(note)}</span>` : ''}
         </div>${facts(list, st)}${states(loose(st, list))}</div>`;

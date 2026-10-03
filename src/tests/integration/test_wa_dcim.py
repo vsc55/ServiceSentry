@@ -8,7 +8,7 @@ no, planificar es imposible— y no puede ver de quién es ni cómo se llama.
 
 Ahí es donde una fuga se cuela sin que nadie la note, porque la pantalla *se ve bien*: enseña
 un rack, con sus huecos, con sus cajas. Lo que se comprueba aquí es que de las cajas ajenas no
-sale ni un nombre, ni un modelo, ni un número de serie, ni el host al que apuntan — y que la
+sale ni un nombre, ni un modelo, ni un número de serie, ni el dispositivo al que apuntan — y que la
 cuenta de lo que hay tampoco los delata.
 
 Con app y sesión: es lo que hace el filtro, y probarlo sin HTTP sería probar otra cosa.
@@ -765,14 +765,14 @@ class TestEnlazarUnItemConSuMaquina:
     empujan igual: aquélla va tras `infra_view`, que quien ordena armarios no tiene por qué
     tener; y devuelve la forma entera de una máquina, de la que esto necesita cuatro campos."""
 
-    def _host(self, client, name='DB03'):
+    def _device(self, client, name='DB03'):
         r = client.post('/api/v1/devices', json={'name': name, 'address': '10.0.0.9'})
         assert r.status_code == 200, r.get_json()
         return r.get_json()['uid']
 
     def test_ofrece_las_maquinas_del_registro(self, client, fleet):
         _login(client)
-        uid = self._host(client)
+        uid = self._device(client)
         rows = client.get('/api/v1/dcim/devices').get_json()['devices']
         assert uid and any(h['uid'] == uid and h['name'] == 'DB03' for h in rows)
 
@@ -780,20 +780,20 @@ class TestEnlazarUnItemConSuMaquina:
         """Un selector que se trae el estado, las etiquetas y los módulos de cada máquina cuesta
         lo que cuesta la pantalla de la flota."""
         _login(client)
-        self._host(client)
+        self._device(client)
         rows = client.get('/api/v1/dcim/devices').get_json()['devices']
         assert set(rows[0]) == {'uid', 'name', 'address', 'device_type'}
 
     def test_un_rol_acotado_solo_ve_las_suyas(self, admin, client, fleet):
         """Se estrecha con la regla del REGISTRO, porque lo que se ofrece son sus fichas."""
         _login(client)
-        self._host(client)
+        self._device(client)
         c = _as(admin, 'sin-registro', ['dcim_view', 'orgs_all_view'])
         assert c.get('/api/v1/dcim/devices').get_json()['devices'] == []
 
     def test_y_enlazado_el_item_lo_devuelve(self, client, fleet):
         _login(client)
-        uid = self._host(client, 'SW-CORE-2')
+        uid = self._device(client, 'SW-CORE-2')
         item = client.post('/api/v1/dcim/items',
                            json={'rack_uid': fleet['rack'], 'u_start': 20,
                                  'device_uid': uid}).get_json()['uid']
@@ -998,13 +998,13 @@ class TestElCuadroDeMando:
         tenía que preguntárselo, y no lo hacía."""
         from lib.core.dcim import service as dcim_svc
         _login(client)
-        host = client.post('/api/v1/devices',
+        device = client.post('/api/v1/devices',
                            json={'name': 'DB03', 'address': '10.0.0.9'}).get_json()['uid']
         client.post('/api/v1/dcim/items', json={'rack_uid': fleet['rack'], 'u_start': 20,
-                                                'device_uid': host})
-        monkeypatch.setattr(dcim_svc, 'states_for', lambda wa, perms: {host: 'error'})
+                                                'device_uid': device})
+        monkeypatch.setattr(dcim_svc, 'states_for', lambda wa, perms: {device: 'error'})
         b = client.get('/api/v1/dcim/board').get_json()
-        fila = [r for r in b['trouble'] if r['device_uid'] == host][0]
+        fila = [r for r in b['trouble'] if r['device_uid'] == device][0]
         assert fila['name'] == 'DB03', fila
 
     def test_y_no_el_de_una_maquina_que_este_lector_no_ve(self, admin, client, fleet,
@@ -1013,11 +1013,11 @@ class TestElCuadroDeMando:
         del vecino por la puerta de atrás."""
         from lib.core.dcim import service as dcim_svc
         _login(client)
-        host = client.post('/api/v1/devices',
+        device = client.post('/api/v1/devices',
                            json={'name': 'DB03', 'address': '10.0.0.9'}).get_json()['uid']
         client.post('/api/v1/dcim/items', json={'rack_uid': fleet['rack'], 'u_start': 20,
-                                                'device_uid': host})
-        monkeypatch.setattr(dcim_svc, 'states_for', lambda wa, perms: {host: 'error'})
+                                                'device_uid': device})
+        monkeypatch.setattr(dcim_svc, 'states_for', lambda wa, perms: {device: 'error'})
         c = _as(admin, 'sin-registro', ['dcim_view', 'orgs_all_view'])
         b = c.get('/api/v1/dcim/board').get_json()
         assert not any(r.get('name') == 'DB03' for r in b['trouble']), b['trouble']
@@ -1399,11 +1399,11 @@ class TestElColorYLaMaquinaDeUnaRegleta:
 
     def test_una_regleta_se_enlaza_con_una_maquina(self, client, fleet):
         _login(client)
-        host = client.post('/api/v1/devices', json={'name': 'PDU-RACK3', 'address': '10.0.0.9',
+        device = client.post('/api/v1/devices', json={'name': 'PDU-RACK3', 'address': '10.0.0.9',
                                                   'enabled': True}).get_json()
         uid = client.post('/api/v1/dcim/pdus',
                           json={'rack_uid': fleet['rack'], 'feed': 'a'}).get_json()['uid']
-        hid = host.get('uid') or (host.get('data') or {}).get('uid')
+        hid = device.get('uid') or (device.get('data') or {}).get('uid')
         client.put(f'/api/v1/dcim/pdus/{uid}', json={'device_uid': hid})
         p = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}/power').get_json()
         fila = [x for x in p['pdus'] if x['uid'] == uid][0]
@@ -5827,3 +5827,63 @@ class TestElArbolDiceCuantoOcupaCadaRack:
         assert plantas() == 0
         client.post('/api/v1/dcim/floors', json={'site_uid': fleet['site'], 'name': 'Baja'})
         assert plantas() == 1
+
+
+class TestDondeEstaUnDispositivo:
+    """La pestaña «Ubicación» de la ficha del dispositivo: sede, sala, rack y U, de quién es, y
+    sus cables. Hasta ahora del inventario se llegaba al dispositivo y nada llevaba de vuelta."""
+
+    def _sitio(self, c, device):
+        r = c.get(f'/api/v1/dcim/devices/{device}/place')
+        return r.status_code, (r.get_json() or {}).get('places')
+
+    def test_dice_sede_sala_rack_y_u(self, client, fleet):
+        _login(client)
+        code, sitios = self._sitio(client, 'h-sw')
+        assert code == 200 and len(sitios) == 1
+        s = sitios[0]
+        assert (s['site']['name'], s['room']['name'], s['rack']['name']) == ('DC Norte', 'Sala 1', 'R3')
+        assert s['item']['uid'] == fleet['mine'] and s['item']['u_start'] == 1
+        assert s['org_uid'] == fleet['it'] and s['floor'] is None
+        assert s['org'] == {'name': 'IT del grupo', 'short': 'IT'}
+
+    def test_un_dispositivo_que_no_esta_en_ningun_rack_no_esta_en_ninguna_parte(self, client, fleet):
+        _login(client)
+        assert self._sitio(client, 'h-sin-colocar') == (200, [])
+
+    def test_lleva_sus_cables_con_lo_que_hay_al_otro_lado(self, client, fleet):
+        _login(client)
+        client.post('/api/v1/dcim/cables', json={'a_item': fleet['mine'], 'a_port': 'Gi1/0/7',
+                                                 'b_item': fleet['theirs'], 'b_port': 'eth0'})
+        cable = self._sitio(client, 'h-sw')[1][0]['cables'][0]
+        assert cable['port'] == 'Gi1/0/7'
+        assert cable['peer']['label'] == 'DB03-NOMINAS' and cable['peer']['port'] == 'eth0'
+        assert cable['peer']['device_uid'] == 'h-db03'
+
+    def test_lo_que_no_es_tuyo_no_dice_donde_esta(self, admin, client, fleet):
+        """Contestar «está en un rack que no puedes ver» ya es decir dónde está."""
+        _login(client)
+        client.post('/api/v1/dcim/cables', json={'a_item': fleet['mine'], 'a_port': 'Gi1/0/7',
+                                                 'b_item': fleet['theirs'], 'b_port': 'eth0'})
+        c = _as(admin, 'filial-sitio', ['dcim_view', 'devices_view', f'org.{fleet["b"]}.view'])
+        assert self._sitio(c, 'h-sw') == (200, [])
+        suyo = self._sitio(c, 'h-db03')[1]
+        assert len(suyo) == 1
+        # Del otro extremo, que es del departamento, sale que hay un cable y nada más.
+        assert suyo[0]['cables'][0]['peer'] == {'foreign': True}
+
+    def test_hace_falta_poder_ver_el_dispositivo(self, admin, fleet):
+        c = _as(admin, 'solo-inventario', ['dcim_view', 'orgs_all_view'])
+        assert c.get('/api/v1/dcim/devices/h-sw/place').status_code == 403
+        c = _as(admin, 'ese-si', ['dcim_view', 'orgs_all_view', 'server.h-sw.view'])
+        assert c.get('/api/v1/dcim/devices/h-sw/place').status_code == 200
+
+
+class TestElNumeroDeSerieQueDiceElDispositivo:
+
+    def test_se_pregunta_por_device(self, client, fleet):
+        """La ficha pregunta `?device=` y la ruta leía `?host=`: contestaba siempre vacío, y
+        parecía que ningún dispositivo dijera su número de serie."""
+        _login(client)
+        r = client.get('/api/v1/dcim/said?device=no-existe')
+        assert r.status_code == 404

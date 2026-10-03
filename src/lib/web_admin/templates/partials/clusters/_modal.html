@@ -67,9 +67,9 @@ function _clGeneralChrome(item, path, titleField, key, sch) {
     ${extra}`;
 }
 
-// ── "Hosts" tab: the cluster's member servers as a sortable table ───────────
+// ── "Devices" tab: the cluster's member servers as a sortable table ───────────
 // One row per member device (device_uids): name, address, maintenance state, last
-// monitoring status, and its cluster-node assignment (stored on the HOST via the
+// monitoring status, and its cluster-node assignment (stored on the DEVICE via the
 // devices API). An "Add" dropdown adds members; the × removes them. Reuses the device
 // modal's node helpers (_clusterNodeOptions / _takenClusterNodes).
 let _clMemCtx = null;          // {item, mod, key, pkey, path} for the open Devices tab
@@ -89,7 +89,7 @@ function _clRenderMembers(item, mod, key) {
 }
 
 // Last-monitoring-status badge from the device registry status (ok/warning/error).
-function _clHostLastStatus(st) {
+function _clDeviceLastStatus(st) {
     const m = { ok:      ['text-bg-success', 'bi-check-circle-fill', t('device_status_ok')      || 'OK'],
                 warning: ['text-bg-warning', 'bi-hourglass-split',   t('device_status_warning') || 'Warning'],
                 error:   ['text-bg-danger',  'bi-x-circle-fill',     t('device_status_error')   || 'Error'] }[st];
@@ -160,7 +160,7 @@ function _clMembersInner() {
             <td class="text-nowrap fw-semibold">${esc(h.name || uid)}</td>
             <td class="text-nowrap"><code class="small">${esc(h.address || '')}</code></td>
             <td>${maintBadge}</td>
-            <td>${_clHostLastStatus(st)}</td>
+            <td>${_clDeviceLastStatus(st)}</td>
             <td>${mf
                 ? `<input type="number" class="form-control form-control-sm" style="max-width:8rem" data-uid="${escAttr(uid)}" ${ro}
                     value="${escAttr(node)}" placeholder="${escAttr(mf.placeholder || '')}"${
@@ -177,7 +177,7 @@ function _clMembersInner() {
     const th = (lbl, col) => `<th class="ss-th">${_thSortInner(lbl, col, _clMemSort, _clMemSortDir, '_sortClMem')}</th>`;
     return toolbar + `<table class="table table-sm align-middle mb-0 ss-table">
         <thead class="ss-thead"><tr>
-            ${th(t('cl_map_host'), 'name')}
+            ${th(t('cl_map_device'), 'name')}
             ${th(t('col_device_address') || 'Address', 'address')}
             ${th(t('cl_mem_state'), 'maint')}
             ${th(t('cl_mem_laststatus'), 'status')}
@@ -206,19 +206,19 @@ function _clMemOptFilter(inp) {
 // fields (which live in the Connection tab) and re-render the member table.
 function _clMemberAdd(uid) {
     if (!_clMemCtx) return;
-    const arr = _hostMultiVals(_clMemCtx.path, 'modules');
+    const arr = _deviceMultiVals(_clMemCtx.path, 'modules');
     if (!arr.includes(String(uid))) arr.push(String(uid));
     _clMemberCommit(arr);
 }
 function _clMemberRemove(uid) {
     if (!_clMemCtx) return;
-    _clMemberCommit(_hostMultiVals(_clMemCtx.path, 'modules').filter(u => u !== String(uid)));
+    _clMemberCommit(_deviceMultiVals(_clMemCtx.path, 'modules').filter(u => u !== String(uid)));
 }
 function _clMemberCommit(arr) {
     const path = _clMemCtx.path;
     updateField('modules', path + '|device_uids', arr);
     const bound = arr.length > 0;
-    document.querySelectorAll(`.hostprof-field[data-hp-item="${CSS.escape(path)}"]`)
+    document.querySelectorAll(`.deviceprof-field[data-hp-item="${CSS.escape(path)}"]`)
         .forEach(el => { el.style.display = bound ? 'none' : ''; });
     if (!bound && typeof _refreshConditionalFields === 'function') _refreshConditionalFields(path);
     _clMemCtx.item.device_uids = arr;
@@ -311,7 +311,7 @@ function _clRenderLastData(item) {
     const tf = _clColSchema(mod, coll)['__check_title_field__'] || 'label';
     // Provisioned-device banner (generic, schema-driven via __provision_device__): a
     // module item may auto-provision a device from an address field (a stable/floating
-    // endpoint). Point the user at that host so they can attach checks (ping/web/cert…)
+    // endpoint). Point the user at that device so they can attach checks (ping/web/cert…)
     // whose results then show below. Nothing here is module-specific.
     const _pdecl = (_clColSchema(mod, coll) || {})['__provision_device__'] || null;
     const _linkF = _pdecl && _pdecl.link_field, _addrF = _pdecl && _pdecl.address_field;
@@ -319,20 +319,20 @@ function _clRenderLastData(item) {
     const provAddr = (_addrF ? String(item[_addrF] || '') : '').trim();
     _clLastCtx = { mod, key: (_clEditCtx && _clEditCtx.key) || '',
                    name: String(item[tf] || (_clEditCtx && _clEditCtx.key) || ''),
-                   provHostUid: provUid };
+                   provDeviceUid: provUid };
     let provBanner = '';
     if (_pdecl && provAddr) {
         if (provUid && devicesData[provUid]) {
             const vh = devicesData[provUid];
             provBanner = `<div class="alert alert-secondary d-flex align-items-center gap-2 py-2 mb-2" data-ro-keep="1">
                 <i class="bi bi-hdd-network"></i>
-                <div class="small">${esc(t('cl_prov_host_hint'))}
+                <div class="small">${esc(t('cl_prov_device_hint'))}
                     <strong>${esc(vh.name || '')}</strong> <code>${esc(vh.address || provAddr)}</code></div>
                 <button class="btn btn-sm btn-secondary ms-auto" onclick="openEditDeviceModal(${jsStr(provUid)})">
-                    <i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('cl_prov_open_host'))}</button>
+                    <i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('cl_prov_open_device'))}</button>
             </div>`;
         } else {
-            provBanner = `<div class="alert alert-secondary py-2 mb-2 small" data-ro-keep="1">${esc(t('cl_prov_host_pending'))}</div>`;
+            provBanner = `<div class="alert alert-secondary py-2 mb-2 small" data-ro-keep="1">${esc(t('cl_prov_device_pending'))}</div>`;
         }
     }
     return provBanner + `<div class="d-flex align-items-center mb-2" data-ro-keep="1">
@@ -349,7 +349,7 @@ function _clRenderLastData(item) {
 async function _clLoadLastData() {
     const body = document.getElementById('clLastBody');
     if (!body || !_clLastCtx) return;
-    const { mod, key, provHostUid } = _clLastCtx;
+    const { mod, key, provDeviceUid } = _clLastCtx;
     if (!mod || !key) { body.innerHTML = `<div class="alert alert-secondary mb-0">${esc(t('cl_map_no_members'))}</div>`; return; }
     body.innerHTML = `<div class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div>${esc(t('loading'))}</div>`;
     let status = {};
@@ -371,10 +371,10 @@ async function _clLoadLastData() {
     // The provisioned endpoint is modelled as a device; pull the checks bound to it
     // (ping/web/ssl_cert…) so the endpoint's health shows alongside the cluster's
     // own results. Generic — driven by the discovered __provision_device__ link.
-    if (provHostUid) {
-        const provName = (devicesData[provHostUid] || {}).name || '';
+    if (provDeviceUid) {
+        const provName = (devicesData[provDeviceUid] || {}).name || '';
         let hs = null;
-        try { hs = await apiGet('/api/v1/devices/' + encodeURIComponent(provHostUid) + '/status'); } catch (_) { hs = null; }
+        try { hs = await apiGet('/api/v1/devices/' + encodeURIComponent(provDeviceUid) + '/status'); } catch (_) { hs = null; }
         for (const r of ((hs && hs.results) || [])) {
             const lvl = r.level || (r.ok ? 'ok' : 'error');
             rows.push({
@@ -480,7 +480,7 @@ function _clLogsRender() {
     const srvOpts = `<option value="">${esc(t('syslog_all'))}</option>` +
         st.members.map(m => `<option value="${escAttr(m.address)}"${st.sel === m.address ? ' selected' : ''}>${esc(m.name)}</option>`).join('');
     wrap.innerHTML = `<div class="d-flex flex-wrap align-items-end gap-2 mb-2">
-            <div><label class="form-label small mb-1">${esc(t('cl_map_host'))}</label>
+            <div><label class="form-label small mb-1">${esc(t('cl_map_device'))}</label>
                 <select class="form-select form-select-sm" style="min-width:140px"
                     onchange="_clLogsState.sel=this.value;_clLogsState.page=1;_clLogsFetch()">${srvOpts}</select></div>
             <div><label class="form-label small mb-1">${esc(t('syslog_min_severity'))}</label>
@@ -503,7 +503,7 @@ function _clLogsRender() {
             <thead><tr>
                 <th class="text-nowrap">${esc(t('syslog_time'))}</th>
                 <th>${esc(t('syslog_severity'))}</th>
-                <th>${esc(t('cl_map_host'))}</th>
+                <th>${esc(t('cl_map_device'))}</th>
                 <th>${esc(t('syslog_app'))}</th>
                 <th style="width:50%">${esc(t('syslog_message'))}</th>
             </tr></thead><tbody id="clLogsRows"></tbody></table>
@@ -569,7 +569,7 @@ async function _clLogsFetch() {
         stateEl.style.display = '';
     }
     const qs = new URLSearchParams({ limit: String(st.pageSize), offset: String((st.page - 1) * st.pageSize) });
-    // One member selected → just that host; otherwise every member (effective-host filter).
+    // One member selected → just that device; otherwise every member (effective-device filter).
     (st.sel ? [st.sel] : st.addrs).forEach(a => qs.append('hostname', a));
     if (st.severity_max !== '') qs.set('severity_max', st.severity_max);
     if (st.q) qs.set('q', st.q);
@@ -635,7 +635,7 @@ function openClusterEdit(mod, coll, key, isNew) {
     if (tabs && tabs.length) {
         // Declarative tabbed layout (schema __edit_tabs__): one pane per tab,
         // each rendering only its groups; the device/members picker lands in the
-        // tab flagged "host". Fully generic — the modal knows nothing module-specific.
+        // tab flagged "device". Fully generic — the modal knows nothing module-specific.
         const navs = [], panes = [];
         tabs.forEach((tab, i) => {
             const pid = 'clt-' + (tab.id || i);
@@ -657,7 +657,7 @@ function openClusterEdit(mod, coll, key, isNew) {
                 fields = _clRenderMembers(item, mod, key);
                 if (Array.isArray(tab.groups) && tab.groups.length) {
                     fields += `<div class="mt-3 pt-3 border-top">${renderScalarFields(
-                        item, path, 'modules', exclude, _clPostGroupHtml, { onlyGroups: tab.groups, skipHostPicker: true })}</div>`;
+                        item, path, 'modules', exclude, _clPostGroupHtml, { onlyGroups: tab.groups, skipDevicePicker: true })}</div>`;
                 }
             } else if (tab.last_data) {
                 fields = _clRenderLastData(item);
@@ -665,7 +665,7 @@ function openClusterEdit(mod, coll, key, isNew) {
                 fields = _clRenderLogs(item);
             } else {
                 fields = renderScalarFields(item, path, 'modules', exclude, _clPostGroupHtml,
-                    { onlyGroups: Array.isArray(tab.groups) ? tab.groups : [], skipHostPicker: !tab.host });
+                    { onlyGroups: Array.isArray(tab.groups) ? tab.groups : [], skipDevicePicker: !tab.device });
             }
             const fieldsHtml = chrome && fields ? `<div class="mt-3">${fields}</div>` : fields;
             panes.push(`<div class="tab-pane fade${act ? ' show active' : ''}" id="${pid}"
@@ -739,7 +739,7 @@ document.getElementById('clusterEditModal')?.addEventListener('hidden.bs.modal',
 // Re-render whichever module surface is active, keeping the Modules tab and the
 // Cluster sub-tab in sync after a shared item mutation (add/delete/rename/…).
 function _renderModulesSurface() {
-    const clEl = document.getElementById('subtab-srv-clusters');
+    const clEl = document.getElementById('tab-clusters');
     const clusterActive = clEl && clEl.classList.contains('active')
                         && document.getElementById('clusters-container');
     renderModules();

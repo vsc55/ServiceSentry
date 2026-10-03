@@ -62,22 +62,22 @@ class ProxmoxProvision:
 
     @classmethod
     def _provision_ssh(cls, config: dict, cmd: str, *, timeout: int = 30) -> dict:
-        """Run *cmd* on a Proxmox node over SSH (root/sudo), reusing the host's SSH
+        """Run *cmd* on a Proxmox node over SSH (root/sudo), reusing the device's SSH
         profile/credential — the shared connection path behind ``provision_token``
         and ``fix_permissions``.
 
         Resolves the SSH target from the modal fields, falling back to the bound
-        host's ``__device__`` SSH context; tries each candidate address in turn behind
+        device's ``__device__`` SSH context; tries each candidate address in turn behind
         the SSRF guard.  Returns ``{'ok': True, 'out', 'err', 'code'}`` on a
         successful run, else ``{'ok': False, 'message': <reason>}``.
         """
         from lib.core.devices import ssh_client  # noqa: PLC0415
         from lib.security.net_guard import validate_external_url  # noqa: PLC0415
 
-        # When the check is bound to a host, the route injects the resolved host
-        # context (__device__): address + the host's SSH profile (user/port/secret,
-        # credential already applied) — the SAME SSH path the host-aware checks
-        # use.  Reuse it so provisioning reaches the node on the host's real SSH
+        # When the check is bound to a device, the route injects the resolved device
+        # context (__device__): address + the device's SSH profile (user/port/secret,
+        # credential already applied) — the SAME SSH path the device-aware checks
+        # use.  Reuse it so provisioning reaches the node on the device's real SSH
         # address/port, not a guessed default.  An explicit modal value still wins.
         device_ctx = config.get('__device__') if isinstance(config.get('__device__'), dict) else {}
         device_ssh = device_ctx.get('ssh') if isinstance(device_ctx.get('ssh'), dict) else {}
@@ -105,8 +105,8 @@ class ProxmoxProvision:
         ssh_password = config.get('ssh_password') or device_ssh.get('ssh_password') or None
         ssh_key = (config.get('ssh_key') or device_ssh.get('ssh_key') or '').strip() or None  # key file path
         ssh_key_string = config.get('ssh_key_string') or device_ssh.get('ssh_key_string') or None  # inline key
-        # Host-key policy: mirror the host-aware checks — default AutoAdd (accept
-        # unknown keys on first contact), honouring the host's ssh_verify_host.
+        # Host-key policy: mirror the device-aware checks — default AutoAdd (accept
+        # unknown keys on first contact), honouring the device's ssh_verify_host.
         ssh_verify = bool(device_ssh.get('ssh_verify_host', config.get('ssh_verify_host', False)))
         if not ssh_password and not ssh_key and not ssh_key_string:
             return {'ok': False,
@@ -115,7 +115,7 @@ class ProxmoxProvision:
         if not ssh_client.HAS_PARAMIKO:
             return {'ok': False, 'message': 'paramiko no está instalado (pip install paramiko)'}
 
-        # Connect over SSH via the shared ssh_client (same path as the host-aware
+        # Connect over SSH via the shared ssh_client (same path as the device-aware
         # checks): it accepts an inline key text directly and honours the host-key
         # policy.  Try each candidate node until one connects.
         out = err = ''
@@ -147,7 +147,7 @@ class ProxmoxProvision:
         if not connected:
             hint = ''
             if last_err and 'known_hosts' in last_err:
-                hint = (' La clave del host no está en known_hosts y el perfil SSH del host '
+                hint = (' La clave del host no está en known_hosts y el perfil SSH del dispositivo '
                         'tiene la verificación activada: desactívala o añade la clave.')
             return {'ok': False,
                     'message': (f'SSH: {last_err or "ningún host alcanzable"}.{hint} '

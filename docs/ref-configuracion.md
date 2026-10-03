@@ -598,7 +598,7 @@ clave de primer nivel coincide con el nombre de la carpeta del módulo en
         "enabled": true,
         ...configuración específica del módulo...,
         "list": {
-            "uid-del-item": { "host_uid": "...", "label": "...", "enabled": true, ... }
+            "uid-del-item": { "device_uid": "...", "label": "...", "enabled": true, ... }
         }
     }
 }

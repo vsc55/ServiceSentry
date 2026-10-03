@@ -71,7 +71,7 @@ def scan(rows, items, devices, *, modules=None) -> list[dict]:
 
     *rows* is ``[{'module', 'key', 'count'}]`` — one entry per stored series, from whichever
     table is being swept. *items* is ``{bare module: {item keys}}`` as the configuration
-    holds them, *devices* the set of host uids in the registry.
+    holds them, *devices* the set of device uids in the registry.
 
     *modules* is the set of bare modules the configuration still has an entry for. A module
     ABSENT from it is not swept: absent means "not added", which is also what a module

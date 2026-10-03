@@ -215,7 +215,7 @@ class TestAPickerForwardsWhatItWasGiven:
     """A field picker is called with a different number of arguments by each pane.
 
     The Modules tab draws a check that HAS a path into `modulesData`, so three arguments say
-    everything. The host modal is editing a draft that may never have been saved — the device
+    everything. The device modal is editing a draft that may never have been saved — the device
     the button would speak to lives in the form, not in the store — so it passes a fourth: a
     function that reads that draft.
 

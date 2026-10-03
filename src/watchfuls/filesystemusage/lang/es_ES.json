@@ -14,7 +14,7 @@
         "timeout":   "Tiempo de espera del comando/SSH en segundos.",
         "alert":     "Umbral de uso (%). Se genera una alerta cuando el uso del disco supera este valor. Anula el umbral del módulo para esta partición.",
         "partition": "Punto de montaje o letra de unidad a monitorizar (p. ej. / o C:\\). Lo rellena el descubrimiento.",
-        "label":     "Nombre mostrado en Módulos, la página de estado y las notificaciones (p. ej. \"host - /\"). Editable; se rellena desde el descubrimiento.",
+        "label":     "Nombre mostrado en Módulos, la página de estado y las notificaciones (p. ej. \"dispositivo - /\"). Editable; se rellena desde el descubrimiento.",
         "enabled":   "Habilitar o deshabilitar la monitorización de esta partición."
     },
     "new_item_key_label": "Ruta de partición (p. ej. / o C:\\):",
@@ -39,8 +39,8 @@
         "fs_warn_part":  "Aviso partición {} uso {}% ⚠️"
     },
     "messages_vars": {
-        "fs_ok_label": ["host", "montaje", "uso %"],
-        "fs_warn_label": ["host", "montaje", "uso %"],
+        "fs_ok_label": ["dispositivo", "montaje", "uso %"],
+        "fs_warn_label": ["dispositivo", "montaje", "uso %"],
         "fs_ok_part": ["montaje", "uso %"],
         "fs_warn_part": ["montaje", "uso %"]
     }

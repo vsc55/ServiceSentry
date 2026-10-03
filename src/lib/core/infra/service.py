@@ -56,7 +56,7 @@ def split_row(name: str, pattern: str) -> tuple:
 # "the record minus a few keys": the device record carries `profiles`, which holds the bound
 # credential of every protocol that reaches it, and a projection written as a subtraction is
 # one field away from shipping those the day somebody adds a key.
-_HOST_FIELDS = ('uid', 'name', 'address', 'kind', 'device_type', 'os', 'virtual',
+_DEVICE_FIELDS = ('uid', 'name', 'address', 'kind', 'device_type', 'os', 'virtual',
                 'maintenance',
                 # What the machine SAID it runs, where nobody has chosen. Not the setting —
                 # the answer the setting stands for; see `enrich_devices`.
@@ -74,7 +74,7 @@ _HOST_FIELDS = ('uid', 'name', 'address', 'kind', 'device_type', 'os', 'virtual'
 
 def fleet_row(device: dict) -> dict:
     """One device, projected to what the live section shows."""
-    out = {k: device.get(k) for k in _HOST_FIELDS}
+    out = {k: device.get(k) for k in _DEVICE_FIELDS}
     out['tags'] = list(device.get('tags') or [])
     # A dict either way: the row is JSON, and a screen that has to test for null before it can
     # ask for a name is a screen with two shapes to draw.
@@ -886,7 +886,7 @@ def topology(wa, visible, checks_for_device, said_sources, lang: str = '',
     # golpe — y se hacía dos veces, con dos nombres, a doce líneas de distancia. No da ningún
     # error: da una pantalla que tarda el doble de lo que su propio comentario explica.
     status_raw = wa._read_check_status()
-    bound_mods = devices_svc._host_bound_modules(wa)
+    bound_mods = devices_svc._device_bound_modules(wa)
     devices_svc.enrich_devices(
         devices, devices_svc._device_statuses(wa), bound_mods,
         fleet_identity(status_raw, devices, said_sources(bound_mods)))
@@ -912,7 +912,7 @@ def topology(wa, visible, checks_for_device, said_sources, lang: str = '',
     # y ese import se paga en la recolección de tests entera, no en esta función.
     lang = lang or getattr(wa, '_DEFAULT_LANG', '')
     meta_cache: dict = {}
-    attrs_by_host: dict = {}
+    attrs_by_device: dict = {}
     for device in devices:
         uid = str(device.get('uid') or '')
         bound: dict = {}
@@ -935,7 +935,7 @@ def topology(wa, visible, checks_for_device, said_sources, lang: str = '',
         # …and what to CALL each thing that answered, which a profile of pure identity
         # facts can only say here: it charts nothing, so it is in no field map.
         named = {mod: (meta_cache.get(mod) or {}).get('sources') or {} for mod in bound}
-        attrs_by_host[uid] = attributes(
+        attrs_by_device[uid] = attributes(
             results, sources_of(fields, named))
     # What devices SAW, which is what places a machine on a switch port when it speaks
     # no LLDP. Its own store because a forwarding table is hundreds of volatile rows that
@@ -955,4 +955,4 @@ def topology(wa, visible, checks_for_device, said_sources, lang: str = '',
                 evidence[kind] = store.by_device(kind)
         except Exception:                       # pylint: disable=broad-except
             evidence = {}                       # a map without the ports beats no map
-    return topology_mod.build(devices, attrs_by_host, evidence)
+    return topology_mod.build(devices, attrs_by_device, evidence)

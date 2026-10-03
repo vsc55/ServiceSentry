@@ -36,7 +36,7 @@ Difieren solo en **qué raíz escanean** y **qué declaran**:
 | [Widgets de Overview](#2-widgets-de-overview-overview_widgets) | `overview_widget.py` · `OVERVIEW_WIDGETS` | `lib.core.*` + `lib.services.*` | `discover_overview_widgets()` (+ `_content` / `_rows` / `_public`) | grid de Overview + AJAX por widget |
 | [Servicios embebidos](#3-servicios-embebidos-embedded_service) | `__init__.py` · `EMBEDDED_SERVICE` (`embedded.py` · `make_embedded`) | `lib.services.*` | `discover_embedded_services()` | pestaña Services (estado + control) |
 | [Tipos de credencial](#4-tipos-de-credencial-__credential__) | `schema.json` · `__credential__` | `watchfuls/*` | `ModuleBase.discover_schemas()` | gestor de credenciales (formularios por tipo) |
-| [Perfiles de host](#5-perfiles-de-host-__device_profile__) | `schema.json` · `__device_profile__` | `watchfuls/*` | `lib.core.devices.profiles` | sección Servers (formularios por protocolo) |
+| [Perfiles de dispositivo](#5-perfiles-de-dispositivo-__device_profile__) | `schema.json` · `__device_profile__` | `watchfuls/*` | `lib.core.devices.profiles` | sección Servers (formularios por protocolo) |
 | [Tablas de módulo](#6-tablas-de-módulo-discover_db_tables) | `__init__.py` · `discover_db_tables()` | `watchfuls/*` | `reconcile_module_tables()` | BD general (crea/migra `mod_<m>_<n>`) |
 | [Campos de historial en caliente](#6c-campos-de-historial-en-caliente-discover_history_fields) | `__init__.py` · `discover_history_fields()` | `watchfuls/*` | `module_history_fields()` | leyenda y eje de las gráficas de History e Infraestructura |
 | [Provisión Entra](#7-provisión-entra-__entraid_provision__) | `schema.json`/OIDC · `__entraid_provision__` | `watchfuls/*` + config OIDC | `normalize_entraid_provision()` | asistente device-code → registro de app en Graph |
@@ -346,7 +346,7 @@ etiqueta, los datos y (si quiere) el renderizador.
 | `icon`, `order` | icono BI de la sidebar y posición entre las secciones (las del core usan 10/20/30). |
 | `render` | nombre de la función JS que el cableado llama al abrir el panel; el módulo la envía en su `web/_ui.html`, igual que el `fn` de un `CONFIG_ACTION`. Vacío = el core pinta solo con los datos del hook. |
 | `perm` | permiso que protege **la ruta y** la entrada de la sidebar. Por defecto `modules_view`: un watchful no tiene manifiesto Python, así que **no posee flags propios** y debe reutilizar uno existente. |
-| `placement` | **dónde** va la entrada: `section` (por defecto) de primer nivel, o `system` dentro del acordeón del panel. La distinción es qué se hace con la sección: una que se **mira** va arriba con los paneles; una que se **administra** —la biblioteca de MIBs de `snmp`— va donde ya están Servicios, Módulos y Credenciales. El core la coloca y sigue sin saber qué módulo la pidió; el panel, el permiso, el cableado y las vistas son los mismos en las dos. |
+| `placement` | **dónde** va la entrada: `section` (por defecto) de primer nivel, `catalog` dentro del grupo **Catálogo** o `system` dentro de **Sistema**. La distinción es qué se hace con la sección: una que se **mira** va arriba con los paneles; una que se **administra** va a uno de los dos grupos. **Catálogo** guarda los datos de referencia de la organización —Empresas, Tipos de dispositivo, Clústeres, Modelos, Plantillas, Credenciales y la biblioteca de MIBs de `snmp`—; **Sistema**, la plataforma —Servicios, Módulos, Configuración, Acceso, Copias…—. Son dos porque los gestiona gente distinta. Un valor desconocido cae en `section`. El core la coloca y sigue sin saber qué módulo la pidió; el panel, el permiso, el cableado y las vistas son los mismos en los tres. |
 | `views` | las **vistas** de la sección, con dos o más. Un módulo con dos cosas que enseñar no reclama una segunda sección —serían dos entradas de sidebar, dos permisos que mantener a la par, dos paneles y dos rutas para algo que el lector piensa como un sitio— sino que declara sus vistas aquí: la entrada pasa a ser un padre con flyout (el patrón que ya usan Infraestructura y Acceso) y cada vista es un sub-path que comparte panel y permiso. |
 
 El **título** es el `pretty_name` traducido del módulo (`label_i18n`), no una clave del core.
@@ -457,16 +457,16 @@ flowchart TB
 
 ---
 
-## 5. Perfiles de host (`__device_profile__`)
+## 5. Perfiles de dispositivo (`__device_profile__`)
 
 Un módulo declara a qué **protocolo de conexión** se ata un check (SNMP, SSH, un perfil de
 BD…). El panel usa el catálogo para pintar los formularios por-protocolo de la sección Servers
-y para saber qué campos ocultar en un check una vez ligado a un host.
+y para saber qué campos ocultar en un check una vez ligado a un dispositivo.
 
 **Descriptor** (en `watchfuls/<m>/schema.json`): `__device_profile__` = un spec o una lista
 (datastore aporta varios: túnel `ssh` + perfil `db`).
 
-**Dos dueños.** Un protocolo que declara el **core** —`ssh`, y cualquier `HOST_PROFILE` de un
+**Dos dueños.** Un protocolo que declara el **core** —`ssh`, y cualquier `DEVICE_PROFILE` de un
 `manifest.py`— dice él mismo qué campos tiene, y sobrescribe a un perfil de módulo del mismo
 nombre. El módulo entonces sólo lo *nombra*: `{"key": "ssh", "address_field": "ssh_host"}`, sin
 `fields`. Un protocolo propio del módulo sigue escribiendo los suyos.
@@ -496,13 +496,13 @@ flowchart TB
     decl --> disc["lib.core.devices.profiles<br/>escanea watchfuls/ vía ModuleBase"]
     meta --> disc
     disc --> map["{protocolo: {module, address_field, fields[{name, type, options, secret, i18n}]}}"]
-    map --> ui["sección Servers: formulario por protocolo del Host"]
-    map --> hide["check ligado a host: oculta los campos del perfil"]
+    map --> ui["sección Servers: formulario por protocolo del Dispositivo"]
+    map --> hide["check ligado a dispositivo: oculta los campos del perfil"]
 ```
 
 - **Qué datos:** por protocolo, el módulo dueño, el campo de dirección y la lista de campos con
   sus metadatos (tipo, opciones, secret, i18n).
-- **Dónde acaban:** los formularios de la sección Servers y la resolución host-céntrica de checks.
+- **Dónde acaban:** los formularios de la sección Servers y la resolución centrada en el dispositivo de checks.
   Ver [ref-modulos.md](ref-modulos.md) y [ref-schema-json.md](ref-schema-json.md).
 
 ---
@@ -902,10 +902,10 @@ pestaña: una flecha que abre un menú vacío promete algo.
 from lib.providers.freshservice.service import is_configured
 
 DEVICE_ACTIONS = [                                   # ORG_ACTIONS es idéntico
-    {'id': 'import', 'label_key': 'fs_import_hosts', 'tooltip_key': 'fs_import_hosts_tt',
+    {'id': 'import', 'label_key': 'fs_import_devices', 'tooltip_key': 'fs_import_devices_tt',
      'icon': 'bi-cloud-download', 'variant': 'primary', 'order': 10,
      'perm': 'devices_edit',                       # la misma bandera que exige el servidor
-     'fn': 'freshserviceImportHosts',              # JS que publica el propio provider
+     'fn': 'freshserviceImportDevices',              # JS que publica el propio provider
      'ready': is_configured},                      # sin conector, sin botón
 ]
 
@@ -1059,7 +1059,7 @@ flowchart TB
 | Uno o varios widgets de Overview desde un **módulo watchful** | `schema.json` → `__overview_widget__` (lista) + hook `Watchful.overview_widget()` — ver §2b |
 | Un servicio de fondo nuevo | un paquete en `lib/services/<s>/` con `EMBEDDED_SERVICE` + `make_embedded(host)` |
 | Un tipo de credencial para un módulo | `schema.json` → `__credential__` (+ campos en schema/lang) |
-| Un protocolo de conexión de host | `schema.json` → `__device_profile__` |
+| Un protocolo de conexión de dispositivo | `schema.json` → `__device_profile__` |
 | Una tabla propia de un módulo | `discover_db_tables()` en el `__init__.py` del módulo |
 | Que un módulo nombre campos de historial que sólo conoce en caliente | `discover_history_fields(lang, var_dir)` en su `__init__.py` — ver §6c |
 | Que el backup incluya los ficheros de un módulo | `schema.json` → `__backup_part__` — ver §6b |

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Host registry HTTP routes — all under /api/v1/devices:
+"""Device registry HTTP routes — all under /api/v1/devices:
 
 * CRUD: GET (list), POST (create), GET /<uid>/status, POST /<uid>/clone, PUT /<uid>, DELETE /<uid>
 * test/probe: POST /test_ssh, /test_check, /test (run a check once without saving)
@@ -47,8 +47,8 @@ from lib.core.devices import probe as device_probe
 from lib.modules import check_runner
 from lib.core.devices.migrate import apply_to_modules, build_migration_plan
 from lib.core.devices.service import (
-    _MOD_RE, _bare, _probe_host_record, _restore_check_secrets,
-    _apply_check_cred, _checks_for_host, _create_unique_host,
+    _MOD_RE, _bare, _probe_device_record, _restore_check_secrets,
+    _apply_check_cred, _checks_for_device, _create_unique_device,
 )
 
 
@@ -88,14 +88,14 @@ def register(app, wa):
         if not has_global_view:
             devices = [h for h in devices if f"server.{h.get('uid')}.view" in perms]
         devices_svc.enrich_devices(devices, devices_svc._device_statuses(wa),
-                               devices_svc._host_bound_modules(wa))
+                               devices_svc._device_bound_modules(wa))
         return jsonify(dict(extra, devices=devices))
 
     @app.route('/api/v1/devices/<uid>/status', methods=['GET'])
     @login_required
     def api_device_status(uid):
         """Latest recorded results (from the daemon's status.json) for every
-        check bound to this host — shown in the server modal's "Latest data" tab.
+        check bound to this device — shown in the server modal's "Latest data" tab.
 
         Each entry: ``{module, key, name, ok, message, data, ts}``.  Derived keys
         (e.g. ram_swap ``<uid>_ram``) are matched to their base bound item.
@@ -104,7 +104,7 @@ def register(app, wa):
             return jsonify({'error': wa._t('access_denied')}), 403
         # Bound items per bare module: {bare: {item_key: label}}.
         bound: dict = {}
-        for (bare, _coll), items in _checks_for_host(wa, uid).items():
+        for (bare, _coll), items in _checks_for_device(wa, uid).items():
             for k, item in items.items():
                 bound.setdefault(bare, {})[k] = str((item or {}).get('label') or '').strip()
         # Current live state (from the check_state DB table).
@@ -185,7 +185,7 @@ def register(app, wa):
         # user picked them in the modal); absent → clone all.
         _sel = (body or {}).get('checks')
         only_keys = set(str(k) for k in _sel) if isinstance(_sel, list) else None
-        checks_cloned = devices_svc._clone_host_checks(wa, uid, new_uid, label=data['name'],
+        checks_cloned = devices_svc._clone_device_checks(wa, uid, new_uid, label=data['name'],
                                                      only_keys=only_keys)
         wa._audit('device_cloned', detail={
             'uid': new_uid, 'source_uid': uid, 'name': data['name'],
@@ -524,11 +524,11 @@ def register(app, wa):
         old = store.get(uid, decrypt=False)
         if old is None or not store.delete(uid):
             return jsonify({'error': wa._t('device_not_found')}), 404
-        # Optionally also delete the module checks bound to this host (the client
+        # Optionally also delete the module checks bound to this device (the client
         # asks the user). Otherwise they are left (and read as inline).
         checks_deleted = 0
         if str(request.args.get('with_checks') or '').lower() in ('1', 'true', 'yes'):
-            checks_deleted = devices_svc._delete_host_checks(wa, uid)
+            checks_deleted = devices_svc._delete_device_checks(wa, uid)
         wa._audit('device_deleted', detail={
             'uid': uid, 'name': old.get('name', ''), 'address': old.get('address', ''),
             'checks_deleted': checks_deleted,
@@ -540,7 +540,7 @@ def register(app, wa):
 
     # ── test / probe endpoints (run a check once without saving) ─────────────────
 
-    def _can_edit_body_host():
+    def _can_edit_body_device():
         """Edit gate for the test endpoints — allow the global ``devices_edit``
         or a per-server ``server.{uid}.edit`` when the body targets an existing
         device (a new draft has no uid, so it needs the global permission)."""
@@ -549,7 +549,7 @@ def register(app, wa):
 
     @app.route('/api/v1/devices/test_ssh', methods=['POST'])
     @login_required
-    def api_test_host_ssh():
+    def api_test_device_ssh():
         """Probe the SSH connection for a (remote) device without saving it.
 
         Body: ``{address, profiles:{ssh:{...}}, uid?}``.  When a secret field is
@@ -565,7 +565,7 @@ def register(app, wa):
         semi-trusted role; every attempt is audited below (``device_ssh_tested`` with uid +
         address).  See memory ``project_bug_audit_2026_07``.
         """
-        if not _can_edit_body_host():
+        if not _can_edit_body_device():
             return jsonify({'error': wa._t('access_denied')}), 403
         if not ssh_client.HAS_PARAMIKO:
             return jsonify({'ok': False,
@@ -622,7 +622,7 @@ def register(app, wa):
 
     def _run_checks(record, grouped):
         """Run each grouped check once on the device; return a flat result list."""
-        store = device_probe.ProbeHostsStore(record, _store())
+        store = device_probe.ProbeDevicesStore(record, _store())
         db = getattr(wa, '_db_connector', None)
         # Global config → the probe resolves check messages in the configured
         # notification language (with admin text overrides) instead of raw i18n keys.
@@ -664,9 +664,9 @@ def register(app, wa):
 
     @app.route('/api/v1/devices/test_check', methods=['POST'])
     @login_required
-    def api_test_host_check():
+    def api_test_device_check():
         """Run ONE check once on the device and return its result(s)."""
-        if not _can_edit_body_host():
+        if not _can_edit_body_device():
             return jsonify({'error': wa._t('access_denied')}), 403
         body, err = wa._require_json()
         if err:
@@ -676,7 +676,7 @@ def register(app, wa):
             return jsonify({'ok': False, 'message': wa._t('invalid_module_name')}), 400
         coll = str(body.get('collection') or 'list')
         key = str(body.get('key') or 'check')
-        record = _probe_host_record(wa, body)
+        record = _probe_device_record(wa, body)
         fields = dict(body.get('fields') or {})
         # The modal sends cred_uid at the body level (the check's binding lives
         # outside its fields); fold it in so the credential is actually applied.
@@ -697,14 +697,14 @@ def register(app, wa):
 
     @app.route('/api/v1/devices/test', methods=['POST'])
     @login_required
-    def api_test_host():
+    def api_test_device():
         """Full device test: SSH connection (if remote) + every bound check once."""
-        if not _can_edit_body_host():
+        if not _can_edit_body_device():
             return jsonify({'error': wa._t('access_denied')}), 403
         body, err = wa._require_json()
         if err:
             return err
-        record = _probe_host_record(wa, body)
+        record = _probe_device_record(wa, body)
         out = {'ssh': None, 'results': []}
         # A module-scoped test (no_ssh) skips the SSH connection check.
         if str(record.get('kind') or '').lower() == 'remote' and not body.get('no_ssh'):
@@ -728,7 +728,7 @@ def register(app, wa):
                 grouped.setdefault((bare, coll), {})[key] = {
                     **fields, 'device_uid': record['uid'], 'enabled': True}
         else:
-            grouped = _checks_for_host(wa, record['uid'])
+            grouped = _checks_for_device(wa, record['uid'])
             for _items in grouped.values():
                 for _k in list(_items):
                     _items[_k] = _apply_check_cred(wa, _items[_k])
@@ -789,7 +789,7 @@ def register(app, wa):
             cand = by_id.get(acc.get('id'))
             if not cand:
                 continue
-            uid = _create_unique_host(store, acc.get('name'), cand, actor)
+            uid = _create_unique_device(store, acc.get('name'), cand, actor)
             if not uid:
                 continue
             applied.append({'uid': uid, 'members': cand['members']})
@@ -805,7 +805,7 @@ def register(app, wa):
             apply_to_modules(modules, applied, wa._modules_dir)
             if not wa._save_modules(modules):
                 return jsonify({'error': wa._t('save_file_error')}), 500
-            wa._audit('hosts_migrated', detail={
+            wa._audit('devices_migrated', detail={
                 'devices': len(created),
                 'checks': sum(c['members'] for c in created),
                 'created': [{k: c[k] for k in ('uid', 'name', 'address', 'checks')}

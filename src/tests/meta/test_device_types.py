@@ -183,30 +183,34 @@ class TestTheAnswerReachesTheBrowser:
                                   'modals', '_deps.html'))
         assert "getElementById('hmTypeIcon')" in modal
         assert 'id="hmTypeIcon"' in deps, 'the repaint has no element to paint'
-        assert modal.count('_refreshHostTypeIcon()') >= 3, \
+        assert modal.count('_refreshDeviceTypeIcon()') >= 3, \
             'not called from both open paths and the picker'
 
     def test_the_list_draws_it_and_can_filter_by_it(self):
-        js = _strip_comments(_read(LIST))
-        assert "id: 'type'" in js, 'no column'
+        # The fleet list is Infrastructure's since the registry's own list went there.
+        js = _strip_comments(_read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+                                                'infra', '_list.html')))
+        assert "id: 'device_type'" in js, 'no column'
         assert "key: 'type'" in js, 'no filter'
-        assert 'deviceTypeIcon(device.device_type)' in js, 'the row shows no icon'
+        assert 'deviceTypeIcon(h.device_type)' in js, 'the row shows no icon'
         # "Unclassified" has to be selectable on its own: it is how somebody finds the
         # devices added in a hurry, and it is not the same question as "any".
         assert "f.type === '-'" in js, 'no way to ask for the unclassified ones'
 
 
 class TestTheClassesTabIsWiredEverywhereItHasToBe:
-    """A sub-tab is four files, and missing one of them fails **silently and differently** each
-    time: no sidebar entry and it exists but nobody finds it; no `<li>` and the sidebar points at
-    nothing; no `shown.bs.tab` handler and it opens empty; not in the visibility list and it
-    stays hidden for everyone. None of the four raises.
+    """A catalogue entry is four files, and missing one of them fails **silently and
+    differently** each time: not declared and it exists but nobody finds it; no pane and the
+    sidebar points at nothing; no `shown.bs.tab` handler and it opens empty; not in the
+    visibility list and it stays hidden for everyone. None of the four raises.
 
     It is the screen the whole point of this work hangs on — where the classes are managed — so
-    the four are pinned together rather than trusted to a memory of having done them.
+    the four are pinned together rather than trusted to a memory of having done them. It was a
+    sub-tab of the device registry; it is an entry of the Catalogue since the registry's list
+    moved to Infrastructure.
     """
 
-    SIDEBAR = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', '_sidebar.html')
+    CONSTANTS = os.path.join(SRC, 'lib', 'web_admin', 'constants.py')
     PANE = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers',
                         '_pane.html')
     WIRING = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'init',
@@ -215,35 +219,31 @@ class TestTheClassesTabIsWiredEverywhereItHasToBe:
                             '_table_features.html')
 
     def test_the_sidebar_offers_it(self):
-        assert "'sub': 'subtab-srv-types'" in _read(self.SIDEBAR)
+        src = _read(self.CONSTANTS)
+        fila = src.split("{'id': 'devtypes'", 1)[1].split('},', 1)[0]
+        assert "'group': 'catalog'" in fila, 'declared, but not in the Catalogue'
 
     def test_the_pane_has_its_tab_and_its_container(self):
         pane = _read(self.PANE)
-        assert 'id="subtab-srv-types-li"' in pane, 'the sidebar would point at nothing'
-        assert 'id="subtab-srv-types"' in pane
+        assert 'id="tab-devtypes"' in pane, 'the sidebar would point at nothing'
         assert 'id="devicetypes-container"' in pane, 'the renderer has nowhere to draw'
 
-    def test_and_runs_full_bleed_like_the_other_two(self):
+    def test_and_runs_full_bleed_like_the_other_lists(self):
         """Inside a `.ss-fullbleed` pane the card loses its border, corners and shadow on its
-        own — which is what makes the three Infrastructure sub-tabs read as one screen. With
-        ordinary padding it came out as a bordered box between two that have none. Reported from
-        the screen, with a screenshot of Devices beside it."""
+        own — which is what makes every list of the panel read as one kind of screen. With
+        ordinary padding it came out as a bordered box. Reported from the screen."""
         pane = _read(self.PANE)
-        trozo = pane.split('id="subtab-srv-types"', 1)[0].rsplit('<div class="tab-pane', 1)[1]
+        trozo = pane.split('id="tab-devtypes"', 1)[0].rsplit('<div class="tab-pane', 1)[1]
         assert 'ss-fullbleed' in trozo and 'ss-fullbleed-top' in trozo, trozo[:90]
 
     def test_opening_it_draws_it(self):
-        """Both ways in: clicking the sub-tab, and coming back to Infrastructure with it already
-        active — Bootstrap does not re-fire a sub-tab's shown event on a parent tab change, which
-        is what left Clusters blank before."""
         wiring = _read(self.WIRING)
-        assert "getElementById('btn-subtab-srv-types')" in wiring
-        assert wiring.count('renderHostTypes()') >= 2, 'wired to one way in only'
+        cuerpo = wiring.split("getElementById('btn-tab-devtypes')", 1)[1].split('});', 1)[0]
+        assert 'renderDeviceTypes()' in cuerpo, 'it opens empty'
 
     def test_and_somebody_can_see_it(self):
         feats = _read(self.FEATURES)
-        assert "getElementById('subtab-srv-types-li')" in feats, 'hidden for everyone'
-        assert 'btn-subtab-srv-types' in feats, 'never picked as the first visible one'
+        assert "getElementById('tab-devtypes-li')" in feats, 'hidden for everyone'
 
     def test_the_screen_uses_the_panel_s_table_and_not_one_of_its_own(self):
         """It hand-rolled its own: header, filter strip, checkboxes, bulk bin — with the shared
@@ -252,13 +252,13 @@ class TestTheClassesTabIsWiredEverywhereItHasToBe:
         accent strip, no filter bar, no column chooser, no sorting, no paging. Reported from the
         screen.
 
-        `renderHostTypes` is not defined here any more — the factory generates it from
+        `renderDeviceTypes` is not defined here any more — the factory generates it from
         `globalPrefix.render`, which is also what the sub-tab wiring calls."""
         js = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers',
                                 '_types.html'))
         assert 'createListTable({' in js, 'the screen builds its own table again'
         assert "containerId: 'devicetypes-container'" in js
-        assert "render: 'renderHostTypes'" in js, 'the sub-tab calls a function nothing defines'
+        assert "render: 'renderDeviceTypes'" in js, 'the sub-tab calls a function nothing defines'
         assert "selectableRow:" in js, 'a class in use would become selectable'
 
     def test_and_the_inventory_catalogue_points_at_it(self):
@@ -266,10 +266,8 @@ class TestTheClassesTabIsWiredEverywhereItHasToBe:
         where somebody goes looking for a catalogue. A link, not a second copy of the screen."""
         cat = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'dcim',
                                  '_catalog.html'))
-        # El DESTINO de la navegación, no la palabra suelta. Buscarla a secas daba verde con el
-        # enlace apuntando a la lista de dispositivos, porque la clave de localStorage de al lado
-        # sigue nombrándola. Encontrado mutándolo.
-        assert "'#tab-servers', '#subtab-srv-types'" in cat
+        # El DESTINO de la navegación, no la palabra suelta.
+        assert "_navTab('#tab-devtypes')" in cat
 
 
 class TestTheClassesScreenIsWiredToItsOwnMarkup:
@@ -341,10 +339,12 @@ class TestTheClassesScreenIsWiredToItsOwnMarkup:
         rebuild that with a filter by hand is doing by hand what the screen already knows."""
         js = _strip_comments(_read(self.JS))
         ir = js.split('function _htGoDevices', 1)[1].split('\n}', 1)[0]
-        assert "_srvApplyView('types')" in ir, 'it lands on whatever view was last used'
-        assert 'ss_devices_type_rail' in ir, 'the rail opens on the wrong class'
-        assert "'#subtab-srv-devices'" in ir, 'it never leaves the classes tab'
-        assert 'renderServers()' in ir, 'it navigates to a list nobody redrew'
+        # The fleet is Infrastructure's: its rail, grouped by class, with this one picked.
+        assert "_infraView.apply('rail')" in ir, 'it lands on whatever view was last used'
+        assert "'ss_infra_group_by', 'device_type'" in ir, 'the rail is grouped by something else'
+        assert 'ss_infra_rail_pick' in ir, 'the rail opens on the wrong class'
+        assert "_navTab('#tab-infra')" in ir, 'it never leaves the classes screen'
+        assert "infraOpen('')" in ir, 'it navigates to a device page instead of the fleet'
 
     def test_the_grid_view_is_the_panel_card_grid(self):
         """It had its own — its own grid, its own card — written beside the shared pieces that

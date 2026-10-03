@@ -44,7 +44,7 @@
         "label":        "Nombre de visualización opcional que aparece en las notificaciones y el panel en lugar de la clave del ítem.",
         "db_type":      "Motor de base de datos al que conectar.",
         "conn_type":    "Cómo conectar al servidor: conexión TCP directa, socket Unix o TCP tunelizado vía SSH.",
-        "host":         "Dirección IP o nombre de host del servidor de base de datos. Utilizado en los modos TCP y túnel SSH. Cuando el check está vinculado a un host se mantiene editable a propósito: a través de un túnel SSH la base de datos suele estar en otra máquina accesible solo desde ese host (p. ej. 127.0.0.1 o una dirección interna de Docker/privada). Déjalo vacío para usar la dirección del host vinculado.",
+        "host":         "Dirección IP o nombre de host del servidor de base de datos. Utilizado en los modos TCP y túnel SSH. Cuando el check está vinculado a un dispositivo se mantiene editable a propósito: a través de un túnel SSH la base de datos suele estar en otra máquina accesible solo desde ese dispositivo (p. ej. 127.0.0.1 o una dirección interna de Docker/privada). Déjalo vacío para usar la dirección del dispositivo vinculado.",
         "port":         "Puerto TCP en el que escucha el servidor. Usa 0 para aplicar el puerto por defecto del motor (MySQL/MariaDB: 3306, PostgreSQL: 5432, MSSQL: 1433, MongoDB: 27017, Redis/Valkey: 6379, Elasticsearch/OpenSearch: 9200, InfluxDB: 8086, Memcached: 11211).",
         "user":         "Usuario para la autenticación.",
         "password":     "Contraseña para la autenticación.",

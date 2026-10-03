@@ -137,7 +137,7 @@ class DevicesStore(EncryptedPayloadMixin, BaseStore):
     # ── Secret encryption (value-level, inside profiles) ──────────────────────
 
     # ── Row mapping ───────────────────────────────────────────────────────────
-    def _row_to_host(self, row, decrypt: bool) -> dict:
+    def _row_to_device(self, row, decrypt: bool) -> dict:
         (uid, name, address, kind, os_, maintenance, virtual, dev_type, tags, desc,
          profiles, modules, c_at, u_at, u_by, watch, source, external_id) = row
         try:
@@ -235,12 +235,12 @@ class DevicesStore(EncryptedPayloadMixin, BaseStore):
     # ── Read ──────────────────────────────────────────────────────────────────
     def list(self, *, decrypt: bool = True) -> list[dict]:
         """Return all devices ordered by name."""
-        return [self._row_to_host(r, decrypt)
+        return [self._row_to_device(r, decrypt)
                 for r in self._db.fetchall(f'SELECT {self._qsel} FROM {_T} ORDER BY name')]
 
     def get(self, uid: str, *, decrypt: bool = True) -> dict | None:
         row = self._db.fetchone(f'SELECT {self._qsel} FROM {_T} WHERE uid = ?', (uid,))
-        return self._row_to_host(row, decrypt) if row else None
+        return self._row_to_device(row, decrypt) if row else None
 
     def count_by_device_type(self) -> dict:
         """``{clase: cuántos}`` de una consulta, sin traerse la flota.
@@ -266,7 +266,7 @@ class DevicesStore(EncryptedPayloadMixin, BaseStore):
 
     def get_by_name(self, name: str, *, decrypt: bool = True) -> dict | None:
         row = self._db.fetchone(f'SELECT {self._qsel} FROM {_T} WHERE name = ?', (name,))
-        return self._row_to_host(row, decrypt) if row else None
+        return self._row_to_device(row, decrypt) if row else None
 
     # ── Write ─────────────────────────────────────────────────────────────────
     def create(self, data: dict, *, actor: str = '') -> str | None:

@@ -1173,12 +1173,20 @@ class TestTodoLoQueSeEscribeTieneDondeEscribirse:
                     return True
             return False
 
+        # Y una tercera desde que los modelos y las plantillas son entradas del Catálogo: la
+        # entrada declarada (PANEL_TABS) Y el dibujado de su panel sabiendo abrirla.
+        aparte = _fn(ir, '_dcimRenderApart')
+
+        def por_el_catalogo(abre):
+            entradas = {'_dcCatOpen': "'id': 'models'", '_dcBuildsOpen': "'id': 'builds'"}
+            return abre in entradas and entradas[abre] in registro and abre in aparte
+
         faltan = []
-        for abre in ('_dcCatOpen', '_dcSrcOpen', '_dcimOpenBoard', '_dcPartsOpen'):
+        for abre in ('_dcCatOpen', '_dcBuildsOpen', '_dcSrcOpen', '_dcimOpenBoard', '_dcPartsOpen'):
             dueno = [f for f, src in ficheros.items() if f'function {abre}(' in src]
             desde_fuera = [f for f, src in ficheros.items()
                            if f not in dueno and abre in pulsable(src)]
-            if not desde_fuera and not por_el_menu(abre):
+            if not desde_fuera and not por_el_menu(abre) and not por_el_catalogo(abre):
                 faltan.append(abre)
         # Y una acción EN SITIO basta con que tenga su botón donde ocurre: para decir de quién es
         # un rack ya se está mirando el rack.
@@ -3837,3 +3845,56 @@ class TestElInventarioTieneCincoVistas:
         tarjeta = _fn(_section(), '_dcimSiteCard')
         for clase in ('ss-col-count', 'ss-col-state', 'ss-col-bar'):
             assert clase in tarjeta, clase
+
+
+class TestModelosYPlantillasSonDelCatalogo:
+    """Paso 3: los modelos y las plantillas son datos de referencia —qué se puede comprar, qué se
+    compra de verdad— y no un sitio del edificio. Son entradas del Catálogo con su panel; su
+    código sigue siendo de esta sección y dibuja con `renderDcim`."""
+
+    def _const(self):
+        return _read(os.path.join(SRC, 'lib', 'web_admin', 'constants.py'))
+
+    def test_son_entradas_del_catalogo_y_no_vistas_del_inventario(self):
+        reg = self._const()
+        dcim = reg[reg.index("'id': 'dcim'"):]
+        dcim = dcim[:dcim.index("'id': 'history'")]
+        assert "'slug': 'catalog'" not in dcim and "'slug': 'builds'" not in dcim
+        for uid in ('models', 'builds'):
+            fila = reg.split("{'id': '%s'" % uid, 1)[1].split('},', 1)[0]
+            assert "'group': 'catalog'" in fila, uid
+
+    def test_cada_una_tiene_su_panel(self):
+        pane = _read(os.path.join(DCIM, '_pane.html'))
+        for pid, cont in (('tab-models', 'models-container'), ('tab-builds', 'builds-container')):
+            assert f'id="{pid}"' in pane and f'id="{cont}"' in pane, pid
+
+    def test_el_dibujado_pinta_en_el_panel_que_esta_a_la_vista(self):
+        """Setenta llamadas a `renderDcim` repintan los modelos y las plantillas: en vez de
+        enseñar a cada una adónde pintar, el dibujado mira qué panel está abierto."""
+        js = _section()
+        dib = _fn(js, 'renderDcim')
+        assert dib.index('_dcimApartPane()') < dib.index("getElementById('dcim-container')")
+        aparte = _fn(js, '_dcimRenderApart')
+        assert "'models-container'" in aparte or "cual + '-container'" in aparte
+        assert 'renderDcBld()' in aparte, 'la lista de plantillas no se llenaría'
+
+    def test_en_el_inventario_no_se_cuelan(self):
+        """Volver al inventario con un modelo abierto pintaría el catálogo en el inventario."""
+        dib = _fn(_section(), 'renderDcim')
+        trozo = dib[dib.index("getElementById('dcim-container')"):]
+        assert trozo.index('_dcCat = null;') < trozo.index('pane.innerHTML')
+
+    def test_un_marcador_viejo_lleva_a_su_entrada(self):
+        js = _section()
+        assert "'/dcim/catalog': '#tab-models'" in js and "'/dcim/builds': '#tab-builds'" in js
+
+    def test_se_abren_al_mostrarse_y_las_ve_quien_puede_leerlas(self):
+        base = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'init')
+        wiring = _read(os.path.join(base, '_wiring.html'))
+        for b in ('btn-tab-models', 'btn-tab-builds'):
+            cuerpo = wiring.split(f"getElementById('{b}')", 1)[1].split(';', 1)[0]
+            assert 'renderDcim()' in cuerpo, b
+        feats = _read(os.path.join(base, '_table_features.html'))
+        assert "modelsLi.style.display = perms.has('dcim_catalog_view')" in feats
+        assert "buildsLi.style.display = perms.has('dcim_view')" in feats

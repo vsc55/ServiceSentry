@@ -44,8 +44,11 @@ def discover_permissions() -> list[dict]:
 
     Declarations live in each package's ``manifest.py``; the shared scanner
     (:mod:`lib.discovery`) collects them, so this only filters + orders."""
-    from lib.discovery import scan_values  # noqa: PLC0415
-    found = [m for m in scan_values('MODULE_PERMISSIONS', roots=_MODULE_ROOTS)
+    # A list as well as one dict: a package whose screens live in two places of the menu —
+    # the physical inventory, and its models and templates in the Catalogue — declares one
+    # group per place, so the role editor reads like the sidebar.
+    from lib.discovery import scan_flat  # noqa: PLC0415
+    found = [m for m in scan_flat('MODULE_PERMISSIONS', roots=_MODULE_ROOTS)
              if isinstance(m, dict) and m.get('group') and m.get('permissions')]
     found.sort(key=lambda m: m.get('order', 999))
     return found
@@ -53,9 +56,9 @@ def discover_permissions() -> list[dict]:
 
 # ── Permission-key validators (per-instance keys) ───────────────────────────────────
 _MODULE_PERM_RE = re.compile(r'^module\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
-# Per-server (device) permission key.  'add' authorizes adding device-bound checks to
-# THIS specific device (not creating a device — that is the global ``devices_add``);
-# 'edit'/'delete' act on existing device-bound checks and the device record.
+# Per-device permission key.  'add' authorizes adding device-bound checks to THIS specific
+# device (not creating a device — that is the global ``devices_edit``, the same flag that
+# edits one); 'edit'/'delete' act on existing device-bound checks and the device record.
 _SERVER_PERM_RE = re.compile(r'^server\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
 # Per-cluster permission key (cluster.{uid}.{action}) — a cluster is a multi-bind
 # check identified by its item UID.

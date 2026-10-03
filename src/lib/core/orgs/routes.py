@@ -190,6 +190,10 @@ def register(app, wa):
         store.forget_org(uid)
         store.orgs.delete(uid)
         wa._audit('org_deleted', detail={'uid': uid, 'name': str(row.get('name') or '')})
+        # The roles that let somebody see THIS company keep a key naming something that no
+        # longer exists — dead weight nobody can see, and counted as a grant. The same clean-up
+        # a device, a module and a cluster get.
+        wa._purge_scoped_permissions('org', [uid])
         return jsonify({'ok': True})
 
     @app.route('/api/v1/orgs/owner', methods=['POST'])

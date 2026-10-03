@@ -26,7 +26,7 @@
 Straight through the socket for A/AAAA/PTR, dnspython for everything else, PowerShell's
 Resolve-DnsName on Windows (where python.exe's own queries are often blocked by the firewall
 while the OS DNS client resolves fine), and dig/nslookup over SSH when the question has to be
-asked from a bound host rather than from here.
+asked from a bound device rather than from here.
 
 A check decides WHAT to look up and what the answer means. This decides how to ask.
 """
@@ -208,9 +208,9 @@ def _resolve_win(host: str, record_type: str, nameserver: str, timeout: float) -
     return _parse_resolve_dnsname(record_type, data)
 
 
-# ── Remote resolution (run on a bound host via SSH) ───────────────────────────
+# ── Remote resolution (run on a bound device via SSH) ───────────────────────────
 def _remote_dns_cmd(os_: str, host: str, record_type: str, nameserver: str, timeout: int) -> str:
-    """Build the DNS query command to run ON the bound host.
+    """Build the DNS query command to run ON the bound device.
 
     Unix uses ``dig`` (clean, parseable); Windows uses ``nslookup``.  The
     nameserver, when given, directs the query at that server."""

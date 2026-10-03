@@ -1,5 +1,5 @@
 {# ================================================================
-   Servers — coverage: which hosts are actually being watched.
+   Servers — coverage: which devices are actually being watched.
 
    A device in the registry is not the same thing as a device being monitored, and the table
    draws both the same way. Its modules column says "0/0" and "0/3" in the same grey pill,
@@ -29,7 +29,7 @@ function _srvViewCoverage(devices, ctx) {
     for (const h of devices) (buckets[_srvCoverage(h)] || buckets.none).push(h);
     // Read by its own record and read through a module are both being read.
     const watched = buckets.ok.length + buckets.profiles.length;
-    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_hosts'), devices.length)}
+    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_devices'), devices.length)}
         ${order.filter(k => buckets[k].length).map(k =>
             // The colour from the same place the badge takes it, rather than a ternary
             // per key that has to be extended every time a bucket is.
@@ -45,7 +45,7 @@ function _srvViewCoverage(devices, ctx) {
                     <span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">${buckets[k].length}</span>
                     <span class="text-muted small">${esc(t('srv_cov_' + k + '_hint'))}</span>
                 </div>
-                ${buckets[k].map(h => _srvHostLine(h, ctx, `${_srvStatusBadge(h)} ${_srvModulesPill(h)}`)).join('')}
+                ${buckets[k].map(h => _srvDeviceLine(h, ctx, `${_srvStatusBadge(h)} ${_srvModulesPill(h)}`)).join('')}
             </div>`).join('')}
         </div>
     </div>`;

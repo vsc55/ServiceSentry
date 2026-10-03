@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the host registry API — /api/v1/devices (GET/POST/PUT/DELETE)."""
+"""Tests for the device registry API — /api/v1/devices (GET/POST/PUT/DELETE)."""
 
 import copy
 from unittest.mock import patch
@@ -17,20 +17,20 @@ from tests.conftest import _login
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 
-_HOST = {
+_DEVICE = {
     'name': 'srv-1', 'address': '10.0.0.5', 'tags': ['prod'],
     'profiles': {'ssh': {'user': 'root', 'ssh_password': 'p@ss', 'port': 22}},
 }
 
 
-class TestApiHosts:
+class TestApiDevices:
 
     def test_requires_auth(self, client):
         assert client.get('/api/v1/devices').status_code == 401
 
     def test_create_list_and_mask(self, client, admin):
         _login(client)
-        r = client.post('/api/v1/devices', json=_HOST)
+        r = client.post('/api/v1/devices', json=_DEVICE)
         assert r.status_code == 200
         uid = r.get_json()['uid']
 
@@ -44,12 +44,12 @@ class TestApiHosts:
         # …but stored (decrypted) for the monitor to use.
         assert admin._devices_store.get(uid)['profiles']['ssh']['ssh_password'] == 'p@ss'
 
-    def test_overview_servers_widget_returns_hosts(self, client, admin):
-        """Regression: the servers Overview widget's row provider imported its host
+    def test_overview_servers_widget_returns_devices(self, client, admin):
+        """Regression: the servers Overview widget's row provider imported its device
         helpers from ``lib.core.devices`` (not re-exported) after the reorg; the swallowed
         ImportError left the widget empty ('-') even with devices present."""
         _login(client)
-        assert client.post('/api/v1/devices', json=_HOST).status_code == 200
+        assert client.post('/api/v1/devices', json=_DEVICE).status_code == 200
         from lib.core.devices.overview_widget import server_list_rows
         rows = server_list_rows(admin)
         assert any(r['name'] == 'srv-1' for r in rows), rows
@@ -58,7 +58,7 @@ class TestApiHosts:
         """The 'virtual' flag persists (store + API round-trip) and the servers
         Overview widget separates physical from virtual devices."""
         _login(client)
-        assert client.post('/api/v1/devices', json={**_HOST, 'name': 'phys-1'}).status_code == 200
+        assert client.post('/api/v1/devices', json={**_DEVICE, 'name': 'phys-1'}).status_code == 200
         assert client.post('/api/v1/devices', json={
             'name': 'vip-1', 'address': '10.0.0.100', 'virtual': True}).status_code == 200
         assert admin._devices_store.get_by_name('vip-1')['virtual'] is True
@@ -72,7 +72,7 @@ class TestApiHosts:
 
     def test_clone_duplicates_with_secrets(self, client, admin):
         _login(client)
-        src = client.post('/api/v1/devices', json=_HOST).get_json()['uid']
+        src = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
         r = client.post(f'/api/v1/devices/{src}/clone',
                         json={'name': 'srv-1 (copia)', 'address': '10.0.0.9'})
         assert r.status_code == 200
@@ -85,7 +85,7 @@ class TestApiHosts:
         # DECRYPTED source — a client-side copy of the masked payload would lose it).
         assert stored['profiles']['ssh']['ssh_password'] == 'p@ss'
         assert stored['profiles']['ssh']['user'] == 'root'
-        # The source host is untouched.
+        # The source device is untouched.
         assert admin._devices_store.get(src, decrypt=True)['address'] == '10.0.0.5'
 
     def test_clone_only_selected_checks(self, client, admin):
@@ -115,7 +115,7 @@ class TestApiHosts:
 
     def test_clone_defaults_name_when_blank(self, client, admin):
         _login(client)
-        src = client.post('/api/v1/devices', json=_HOST).get_json()['uid']
+        src = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
         new_uid = client.post(f'/api/v1/devices/{src}/clone', json={}).get_json()['uid']
         assert admin._devices_store.get(new_uid)['name'] == 'srv-1 (copia)'
 
@@ -124,9 +124,9 @@ class TestApiHosts:
         assert client.post('/api/v1/devices/nope/clone',
                            json={'name': 'x'}).status_code == 404
 
-    def test_delete_host_with_checks(self, client, admin):
+    def test_delete_device_with_checks(self, client, admin):
         """DELETE ?with_checks=1 also removes single-bind checks and unbinds the
-        host from multi-host (cluster) checks (deleting them only if it was the
+        device from multi-device (cluster) checks (deleting them only if it was the
         sole member)."""
         _login(client)
         a = client.post('/api/v1/devices', json={'name': 'a', 'address': '10.4.0.1'}).get_json()['uid']
@@ -145,7 +145,7 @@ class TestApiHosts:
         assert mods['proxmox']['list']['cl_multi']['device_uids'] == [b]   # unbound, kept
         assert 'cl_solo' not in mods['proxmox']['list']        # sole member → deleted
 
-    def test_delete_host_without_checks_keeps_them(self, client, admin):
+    def test_delete_device_without_checks_keeps_them(self, client, admin):
         _login(client)
         a = client.post('/api/v1/devices', json={'name': 'a', 'address': '10.4.1.1'}).get_json()['uid']
         admin._save_modules({'web': {'enabled': True, 'list': {'w1': {'device_uid': a, 'enabled': True}}}})
@@ -155,8 +155,8 @@ class TestApiHosts:
 
     def test_clone_label_uses_module_template(self, client, admin):
         """A check whose module declares __discovery_label_template__ keeps its
-        per-item part (service) with the NEW host name — e.g. 'srv2 - nginx' —
-        instead of collapsing to just the host name."""
+        per-item part (service) with the NEW device name — e.g. 'srv2 - nginx' —
+        instead of collapsing to just the device name."""
         _login(client)
         src = client.post('/api/v1/devices', json={
             'name': 'srv', 'address': '10.9.0.1', 'kind': 'remote'}).get_json()['uid']
@@ -166,7 +166,7 @@ class TestApiHosts:
                               json={'name': 'srv2', 'address': '10.9.0.2'}).get_json()['uid']
         svc = admin._load_modules()['watchfuls.service_status']['list']
         cloned = next(v for v in svc.values() if v.get('device_uid') == new_uid)
-        assert cloned['label'] == 'srv2 - nginx'          # template: {host} - {name}
+        assert cloned['label'] == 'srv2 - nginx'          # template: {device} - {name}
         assert cloned['service'] == 'nginx'               # operative field preserved
 
     def test_clone_blanks_cluster_node(self, client, admin):
@@ -210,12 +210,12 @@ class TestApiHosts:
         bound_src = [k for k, v in web.items() if v.get('device_uid') == src]
         assert len(bound_new) == 1 and len(bound_src) == 1       # cloned, original kept
         assert web[bound_new[0]]['server'] == 'x.example.com'    # fields copied
-        # web declares __discovery_label_template__ "{host} - {server}" → the clone
-        # keeps its per-item part (the server) with the new host name.
+        # web declares __discovery_label_template__ "{device} - {server}" → the clone
+        # keeps its per-item part (the server) with the new device name.
         assert web[bound_new[0]]['label'] == 's (copia) - x.example.com'
 
     def test_clone_joins_cluster_membership(self, client, admin):
-        """Cloning a host that is a MEMBER of a multi-host (cluster) check adds the
+        """Cloning a device that is a MEMBER of a multi-device (cluster) check adds the
         clone to that check's device_uids (joins the cluster) instead of duplicating
         the check — even if a stale device_uid also points at the source."""
         _login(client)
@@ -249,7 +249,7 @@ class TestApiHosts:
         assert api['profiles']['ssh']['ssh_password'] is None
 
     def test_status_derived_from_checks(self, client, admin):
-        """The listing carries a per-host monitoring status built from the
+        """The listing carries a per-device monitoring status built from the
         daemon's status file and each check's device_uid binding."""
         import json
         import os
@@ -286,18 +286,18 @@ class TestApiHosts:
         assert devices[uids['maint']]['status'] == 'ok'
 
     def test_module_counts_in_listing(self, client, admin):
-        """The listing reports modules added vs active per host: total = the
+        """The listing reports modules added vs active per device: total = the
         device's saved module list ∪ modules with a bound check; active = those
         with at least one enabled check."""
         _login(client)
         a = client.post('/api/v1/devices', json={'name': 'a', 'address': '10.1.0.1'}).get_json()['uid']
         b = client.post('/api/v1/devices', json={'name': 'b', 'address': '10.1.0.2'}).get_json()['uid']
-        # Host A: 'web' added with an enabled check + 'cpu' added with no check yet.
+        # Device A: 'web' added with an enabled check + 'cpu' added with no check yet.
         client.put(f'/api/v1/devices/{a}', json={
             'name': 'a', 'address': '10.1.0.1', 'modules': ['web', 'cpu']})
         modules = {
             'web': {'enabled': True, 'list': {'w1': {'device_uid': a, 'enabled': True}}},
-            # Host B: only a disabled check, and 'cpu' not in any saved list.
+            # Device B: only a disabled check, and 'cpu' not in any saved list.
             'cpu': {'enabled': True, 'list': {'c1': {'device_uid': b, 'enabled': False}}},
         }
         assert admin._save_modules(modules)
@@ -319,7 +319,7 @@ class TestApiHosts:
 
     def test_update_restores_masked_secret(self, client, admin):
         _login(client)
-        uid = client.post('/api/v1/devices', json=_HOST).get_json()['uid']
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
         # Client re-sends the profile with the secret masked (None) — the route
         # must restore the stored value instead of wiping it.
         upd = {'name': 'srv-1b', 'address': '10.0.0.6',
@@ -331,11 +331,11 @@ class TestApiHosts:
 
     def test_update_unknown_uid(self, client):
         _login(client)
-        assert client.put('/api/v1/devices/nope', json=_HOST).status_code == 404
+        assert client.put('/api/v1/devices/nope', json=_DEVICE).status_code == 404
 
     def test_delete(self, client, admin):
         _login(client)
-        uid = client.post('/api/v1/devices', json=_HOST).get_json()['uid']
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
         assert client.delete(f'/api/v1/devices/{uid}').status_code == 200
         assert admin._devices_store.get(uid) is None
         assert client.delete(f'/api/v1/devices/{uid}').status_code == 404
@@ -361,7 +361,7 @@ class TestTestSsh:
         assert kw['password'] == 'pw' and kw['port'] == 2222
         assert kw['detect'] is True
 
-    def test_probe_restores_masked_secret_from_stored_host(self, client, admin):
+    def test_probe_restores_masked_secret_from_stored_device(self, client, admin):
         _login(client)
         uid = client.post('/api/v1/devices', json={
             'name': 'rem', 'address': '10.0.0.9', 'kind': 'remote',
@@ -401,14 +401,14 @@ class TestApiMigrate:
         assert set(grp['modules']) == {'snmp', 'ping'}
 
         res = client.post('/api/v1/devices/migrate/apply',
-                          json={'accept': [{'id': grp['id'], 'name': 'host-a'}]})
+                          json={'accept': [{'id': grp['id'], 'name': 'device-a'}]})
         assert res.status_code == 200
         assert res.get_json()['created'] == 1
 
-        host = admin._devices_store.get_by_name('host-a')
-        assert host and host['address'] == '10.0.0.1'
-        # The device's identity moves WITH it: the host is what the community is about.
-        assert (host.get('profiles') or {})['snmp'] == {'community': 'public', 'version': '2c'}
+        device = admin._devices_store.get_by_name('device-a')
+        assert device and device['address'] == '10.0.0.1'
+        # The device's identity moves WITH it: the device is what the community is about.
+        assert (device.get('profiles') or {})['snmp'] == {'community': 'public', 'version': '2c'}
 
         newmods = client.get('/api/v1/modules').get_json()
         # Items are now keyed by their uid, so look them up by value.
@@ -425,9 +425,9 @@ class TestApiMigrate:
 
     def test_preview_masks_secrets(self, client):
         _login(client)
-        # The SSH tunnel is host-owned; its password must be masked in the preview.
-        # The candidate host is the SSH server ('jump') — datastore's DB endpoint
-        # ('host') is now a per-check field, not a host profile.
+        # The SSH tunnel is device-owned; its password must be masked in the preview.
+        # The candidate device is the SSH server ('jump') — datastore's DB endpoint
+        # ('host') is now a per-check field, not a device profile.
         mods = {'datastore': {'list': {'d1': {
             'host': 'db.x', 'db_type': 'postgres', 'conn_type': 'ssh',
             'ssh_host': 'jump', 'ssh_user': 'j', 'ssh_password': 'topsecret'}}}}
@@ -446,8 +446,8 @@ class TestApiMigrate:
         assert client.post('/api/v1/devices/migrate/apply', json={'accept': []}).status_code == 403
 
 
-class TestHostAudits:
-    """Host operations must be audited with meaningful detail (field diffs,
+class TestDeviceAudits:
+    """Device operations must be audited with meaningful detail (field diffs,
     names, masked secrets) — same convention as config/modules."""
 
     def _last(self, admin, event):
@@ -455,7 +455,7 @@ class TestHostAudits:
 
     def test_update_audits_field_diff_with_masked_secret(self, client, admin):
         _login(client)
-        uid = client.post('/api/v1/devices', json=_HOST).get_json()['uid']
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
         upd = {'name': 'srv-1', 'address': '10.0.0.99',
                'profiles': {'ssh': {'user': 'root2', 'ssh_password': 'newpw', 'port': 22}}}
         assert client.put(f'/api/v1/devices/{uid}', json=upd).status_code == 200
@@ -470,7 +470,7 @@ class TestHostAudits:
         """Regression: adding a whole SSH profile must NOT log the password /
         key text in plaintext (only one side of the diff is a dict)."""
         _login(client)
-        # Create a host with no profiles, then add the SSH profile on update.
+        # Create a device with no profiles, then add the SSH profile on update.
         uid = client.post('/api/v1/devices', json={'name': 'srv-x', 'address': '10.0.0.5'}).get_json()['uid']
         upd = {'name': 'srv-x', 'address': '10.0.0.5', 'kind': 'remote',
                'profiles': {'ssh': {'ssh_user': 'root',
@@ -484,24 +484,24 @@ class TestHostAudits:
 
     def test_create_and_delete_audit_details(self, client, admin):
         _login(client)
-        uid = client.post('/api/v1/devices', json=_HOST).get_json()['uid']
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
         created = self._last(admin, 'device_created')['detail']
         assert created['address'] == '10.0.0.5' and created['profiles'] == ['ssh']
         client.delete(f'/api/v1/devices/{uid}')
         deleted = self._last(admin, 'device_deleted')['detail']
         assert deleted['name'] == 'srv-1' and deleted['address'] == '10.0.0.5'
 
-    def test_migrate_audits_created_hosts(self, client, admin):
+    def test_migrate_audits_created_devices(self, client, admin):
         _login(client)
         mods = {'ping': {'list': {'p1': {'host': '10.9.9.1'}, 'p2': {'host': '10.9.9.1'}}}}
         assert client.put('/api/v1/modules', json=mods).status_code == 200
         plan = client.get('/api/v1/devices/migrate/preview').get_json()
         grp = next(c for c in plan['candidates'] if c['address'] == '10.9.9.1')
         client.post('/api/v1/devices/migrate/apply',
-                    json={'accept': [{'id': grp['id'], 'name': 'mig-host'}]})
-        detail = self._last(admin, 'hosts_migrated')['detail']
+                    json={'accept': [{'id': grp['id'], 'name': 'mig-device'}]})
+        detail = self._last(admin, 'devices_migrated')['detail']
         assert detail['devices'] == 1 and detail['checks'] == 2
-        assert detail['created'][0]['name'] == 'mig-host'
+        assert detail['created'][0]['name'] == 'mig-device'
         # Checks are identified by their uid key now; just assert count + module.
         checks = detail['created'][0]['checks']
         assert len(checks) == 2 and all(c.startswith('ping/') for c in checks)
@@ -529,13 +529,13 @@ class TestStateChangeAudits:
         assert any(e['event'] == 'history_all_deleted' for e in admin._audit_log)
 
 
-class TestHostStatus:
+class TestDeviceStatus:
     """/api/v1/devices/<uid>/status — latest recorded data for the modal tab."""
 
     def test_returns_bound_check_status(self, client, admin):
         _login(client)
-        uid = client.post('/api/v1/devices', json=_HOST).get_json()['uid']
-        # Bind a ping check to this host.
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
+        # Bind a ping check to this device.
         mods = admin._load_modules()
         mods.setdefault('ping', {}).setdefault('list', {})['chk1'] = {
             'device_uid': uid, 'enabled': True, 'host': '10.0.0.5',
@@ -554,7 +554,7 @@ class TestHostStatus:
     def test_matches_derived_keys(self, client, admin):
         """ram_swap derived keys (<uid>_ram) match their base bound item."""
         _login(client)
-        uid = client.post('/api/v1/devices', json=_HOST).get_json()['uid']
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
         mods = admin._load_modules()
         mods.setdefault('ram_swap', {}).setdefault('list', {})['base1'] = {
             'device_uid': uid, 'enabled': True, 'label': 'NS1', 'uid': 'rs1'}
@@ -611,7 +611,7 @@ class TestServerTest:
             c.start()
         try:
             r = client.post('/api/v1/devices/test_check', json={
-                '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                '_device': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},
                 'module': 'process', 'collection': 'list', 'key': 'web',
                 'fields': {'process': 'nginx', 'min_count': 2},
@@ -634,7 +634,7 @@ class TestServerTest:
             c.start()
         try:
             r = client.post('/api/v1/devices/test', json={
-                '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                '_device': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},
                 'checks': [{'module': 'process', 'collection': 'list', 'key': 'web',
                             'fields': {'process': 'nginx', 'min_count': 1}}],
@@ -665,7 +665,7 @@ class TestServerTest:
         try:
             r = client.post('/api/v1/devices/test', json={
                 'no_ssh': True,
-                '_host': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                '_device': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
                           'profiles': {'ssh': {'ssh_user': 'root'}}},
                 'checks': [{'module': 'process', 'collection': 'list', 'key': 'web',
                             'fields': {'process': 'nginx', 'min_count': 1}}],
@@ -702,13 +702,13 @@ class TestPerServerPermissions:
         }
         return 'srvuser'
 
-    # Hosts are created directly through the store so no admin login is needed —
+    # Devices are created directly through the store so no admin login is needed —
     # the test then logs in *only* as the per-server user (logging in over an
     # active admin session would not switch the session).
     def test_view_scoped_to_granted_server(self, client, admin):
-        uid1 = admin._devices_store.create({**_HOST}, actor='admin')
+        uid1 = admin._devices_store.create({**_DEVICE}, actor='admin')
         uid2 = admin._devices_store.create(
-            {**_HOST, 'name': 'srv-2', 'address': '10.0.0.6'}, actor='admin')
+            {**_DEVICE, 'name': 'srv-2', 'address': '10.0.0.6'}, actor='admin')
         self._make_user(admin, [f'server.{uid1}.view'])
         _login(client, 'srvuser')
         devices = client.get('/api/v1/devices').get_json()['devices']
@@ -716,13 +716,13 @@ class TestPerServerPermissions:
         assert uid1 in ids and uid2 not in ids
 
     def test_no_server_perm_forbidden(self, client, admin):
-        admin._devices_store.create({**_HOST}, actor='admin')
+        admin._devices_store.create({**_DEVICE}, actor='admin')
         self._make_user(admin, [])
         _login(client, 'srvuser')
         assert client.get('/api/v1/devices').status_code == 403
 
     def test_view_only_cannot_edit_or_delete(self, client, admin):
-        uid = admin._devices_store.create({**_HOST}, actor='admin')
+        uid = admin._devices_store.create({**_DEVICE}, actor='admin')
         self._make_user(admin, [f'server.{uid}.view'])
         _login(client, 'srvuser')
         assert client.put(f'/api/v1/devices/{uid}',
@@ -730,7 +730,7 @@ class TestPerServerPermissions:
         assert client.delete(f'/api/v1/devices/{uid}').status_code == 403
 
     def test_edit_and_delete_when_granted(self, client, admin):
-        uid = admin._devices_store.create({**_HOST}, actor='admin')
+        uid = admin._devices_store.create({**_DEVICE}, actor='admin')
         self._make_user(admin, [f'server.{uid}.view',
                                 f'server.{uid}.edit', f'server.{uid}.delete'])
         _login(client, 'srvuser')
@@ -740,29 +740,29 @@ class TestPerServerPermissions:
 
     # ── 'add' permission: add modules/checks to a server ─────────────────────
     def _modules_with_check(self, admin, device_uid, key='newchk', **fields):
-        """Full module configuration plus one host-bound ping check."""
+        """Full module configuration plus one device-bound ping check."""
         data = copy.deepcopy(admin._load_modules())
         data.setdefault('ping', {}).setdefault('list', {})[key] = {
             'device_uid': device_uid, 'enabled': True, 'host': '10.0.0.5', **fields}
         return data
 
-    def test_server_add_can_add_host_bound_check(self, client, admin):
-        uid = admin._devices_store.create({**_HOST}, actor='admin')
+    def test_server_add_can_add_device_bound_check(self, client, admin):
+        uid = admin._devices_store.create({**_DEVICE}, actor='admin')
         self._make_user(admin, [f'server.{uid}.view', f'server.{uid}.add'])
         _login(client, 'srvuser')
         data = self._modules_with_check(admin, uid)
         assert client.put('/api/v1/modules', json=data).status_code == 200
 
     def test_server_view_only_cannot_add_check(self, client, admin):
-        uid = admin._devices_store.create({**_HOST}, actor='admin')
+        uid = admin._devices_store.create({**_DEVICE}, actor='admin')
         self._make_user(admin, [f'server.{uid}.view'])
         _login(client, 'srvuser')
         data = self._modules_with_check(admin, uid)
         assert client.put('/api/v1/modules', json=data).status_code == 403
 
     def test_server_add_cannot_edit_existing_check(self, client, admin):
-        uid = admin._devices_store.create({**_HOST}, actor='admin')
-        # Seed an existing host-bound check, then try to modify it with add-only.
+        uid = admin._devices_store.create({**_DEVICE}, actor='admin')
+        # Seed an existing device-bound check, then try to modify it with add-only.
         seed = self._modules_with_check(admin, uid, key='chk1', uid='u-chk1')
         admin._save_modules(seed)
         self._make_user(admin, [f'server.{uid}.view', f'server.{uid}.add'])
@@ -771,8 +771,8 @@ class TestPerServerPermissions:
         data['ping']['list']['chk1']['enabled'] = False   # modify existing → edit
         assert client.put('/api/v1/modules', json=data).status_code == 403
 
-    def test_server_add_host_modules_growth_allowed_not_field_edit(self, client, admin):
-        uid = admin._devices_store.create({**_HOST, 'modules': []}, actor='admin')
+    def test_server_add_device_modules_growth_allowed_not_field_edit(self, client, admin):
+        uid = admin._devices_store.create({**_DEVICE, 'modules': []}, actor='admin')
         self._make_user(admin, [f'server.{uid}.view', f'server.{uid}.add'])
         _login(client, 'srvuser')
         cur = admin._devices_store.get(uid, decrypt=True)

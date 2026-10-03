@@ -203,10 +203,10 @@ def _wan_port(device: dict) -> str:
     return ''
 
 
-def build(devices: list, attrs_by_host: dict, evidence: dict | None = None) -> dict:
+def build(devices: list, attrs_by_device: dict, evidence: dict | None = None) -> dict:
     """The map: ``{'networks': [...], 'nodes': [...], 'edges': [...], 'unplaced': [...]}``.
 
-    *devices* is the fleet as the list screen has it (uid, name, …). *attrs_by_host* is
+    *devices* is the fleet as the list screen has it (uid, name, …). *attrs_by_device* is
     ``{uid: [attribute, …]}`` — whatever ``infra.service.attributes`` produced for each.
     *evidence* is ``{kind: {uid: {key: value}}}`` from ``infra.evidence`` — what devices SAW,
     which is what places a machine on a switch port when it speaks no LLDP.
@@ -236,7 +236,7 @@ def build(devices: list, attrs_by_host: dict, evidence: dict | None = None) -> d
         uid = str(device.get('uid') or '')
         if not uid:
             continue
-        attrs = attrs_by_host.get(uid) or []
+        attrs = attrs_by_device.get(uid) or []
         facts = _facts_of(attrs)
         rows = _rows_of(attrs)
         seen[uid] = [r for r in rows if r.get('neighbour')]

@@ -31,7 +31,7 @@ from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
 from lib.util.dict_files_path import DictFilesPath
 from lib.modules.discovery.schemas import SchemaDiscovery
-from lib.modules.device_binding import HostBinding
+from lib.modules.device_binding import DeviceBinding
 from lib.core.object_base import ObjectBase
 
 # What is left here is what a check needs from its base: the run loop, config resolution,
@@ -46,7 +46,7 @@ __all__ = ['ModuleBase']
 _MODULE_MSG_CACHE: dict = {}
 
 
-class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
+class ModuleBase(SchemaDiscovery, DeviceBinding, ObjectBase):
     """ Base class for modules. """
 
     def __init__(self, obj_monitor, name=None):
@@ -78,12 +78,12 @@ class ModuleBase(SchemaDiscovery, HostBinding, ObjectBase):
     #: Set on the INSTANCE by whoever asks (`Monitor.check_module(only_device=…)`), never on the
     #: monitor: two runs may be in flight in one process and a scope on the shared object would
     #: be one run narrowing the other's.
-    _host_scope = ''
+    _device_scope = ''
 
     @property
     def device_scope(self) -> str:
         """The uid this run is narrowed to, or ''."""
-        return str(getattr(self, '_host_scope', '') or '').strip()
+        return str(getattr(self, '_device_scope', '') or '').strip()
 
     def _item_collections(self) -> set:
         """The module's own item collections, as its schema declares them.

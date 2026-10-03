@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for the host connection-profile catalog (lib/core/devices/profiles.py)."""
+"""Tests for the device connection-profile catalog (lib/core/devices/profiles.py)."""
 
 from lib.core.devices.profiles import (
     core_profiles,
@@ -28,7 +28,7 @@ class TestCatalog:
         the same community, and made the panel's own screens ask for it again.
 
         The field METADATA comes from the module's own schema — options, show_when, the
-        secret flag — so the host form renders v3 exactly as the module tab does, without
+        secret flag — so the device form renders v3 exactly as the module tab does, without
         core holding a second copy of what an SNMP credential looks like."""
         cat = device_profiles_catalog()
         snmp = cat['snmp']
@@ -54,7 +54,7 @@ class TestCatalog:
         cat = device_profiles_catalog()
         assert cat['ssh']['module'] == '__device__'
         assert cat['ssh'].get('builtin') is True
-        assert cat['ssh']['address_field'] == 'ssh_host'   # fed from host.address
+        assert cat['ssh']['address_field'] == 'ssh_host'   # fed from device.address
         names = [f['name'] for f in cat['ssh']['fields']]
         assert 'ssh_key_string' in names                   # inline private key support
         for fn in ('ssh_password', 'ssh_key_string'):
@@ -71,55 +71,55 @@ class TestCatalog:
 
     def test_datastore_db_endpoint_is_not_a_profile(self):
         # datastore's DB endpoint ('host') is an editable per-check field (like
-        # web's 'url'), not a host-owned profile — so it never auto-hides when a
+        # web's 'url'), not a device-owned profile — so it never auto-hides when a
         # server is bound (SSH-tunnelled DBs may target a different box).
         cat = device_profiles_catalog()
         assert 'db' not in cat
 
-    def test_module_host_specs_preserves_datastore_ssh(self):
+    def test_module_device_specs_preserves_datastore_ssh(self):
         # The migration relies on the module's own __device_profile__ (not the
         # catalog) so datastore's ssh tunnel fields are still recognised.
         from lib.core.devices.profiles import module_device_specs
         specs = module_device_specs()
         protos = {p for p, _, _ in specs.get('datastore', [])}
-        assert 'ssh' in protos   # the ssh tunnel is the host-owned profile
+        assert 'ssh' in protos   # the ssh tunnel is the device-owned profile
 
-    def test_module_host_fields(self):
+    def test_module_device_fields(self):
         m = module_device_fields()
         assert 'host' in m['ping']
-        # Host-owned = the address only (per-protocol settings live on the
+        # Device-owned = the address only (per-protocol settings live on the
         # check now — there is no Credentials section anymore).
         assert m['ssl_cert'] == ['host']
-        # SNMP host-owns its identity as well as its address (see the catalog test):
+        # SNMP device-owns its identity as well as its address (see the catalog test):
         # the device is who you authenticate to, not a setting of each check.
         assert {'host', 'community', 'version', 'device_profiles'} <= set(m['snmp'])
-        # web hides nothing: 'url' stays visible so one host (a reverse proxy)
-        # can carry several FQDNs — blank url falls back to the host address.
+        # web hides nothing: 'url' stays visible so one device (a reverse proxy)
+        # can carry several FQDNs — blank url falls back to the device address.
         assert 'web' not in m or 'url' not in m['web']
-        # datastore host-owns ONLY the ssh tunnel; 'host' (the DB endpoint) stays
+        # datastore device-owns ONLY the ssh tunnel; 'host' (the DB endpoint) stays
         # an editable per-check field so an SSH-tunnelled DB can target another
         # box (docker/internal), and the per-DB creds stay on the check too.
         assert 'ssh_host' in m['datastore']
         assert 'host' not in m.get('datastore', [])
         assert 'password' not in m['datastore'] and 'user' not in m['datastore']
 
-    def test_module_host_multiple(self):
-        # Multiple checks per host is opt-in via __device_multiple__ in the schema.
+    def test_module_device_multiple(self):
+        # Multiple checks per device is opt-in via __device_multiple__ in the schema.
         m = module_device_multiple()
         assert m.get('datastore') is True   # mysql + postgres on one server
-        assert m.get('web') is True         # several URLs on one host
+        assert m.get('web') is True         # several URLs on one device
         assert m.get('ssl_cert') is True    # several TLS services / ports
-        assert m.get('ping') is False       # one ping per host
+        assert m.get('ping') is False       # one ping per device
         assert m.get('ntp') is False and m.get('snmp') is False
-        assert m.get('dns') is True         # host-aware: query via SSH from a host
+        assert m.get('dns') is True         # device-aware: query via SSH from a device
 
-    def test_module_host_multi_bind(self):
+    def test_module_device_multi_bind(self):
         # One check binding to several devices is opt-in via __device_multiple_bind__.
         from lib.core.devices.profiles import module_device_multi_bind
         m = module_device_multi_bind()
         assert m.get('proxmox') is True     # cluster: one check spans member nodes
-        assert m.get('ping') is False       # single-host check
-        assert m.get('datastore') is False  # several checks per host, but one host each
+        assert m.get('ping') is False       # single-device check
+        assert m.get('datastore') is False  # several checks per device, but one device each
 
     def test_module_member_fields(self):
         # A multi-bind module may declare a per-node member field (__member_field__).
@@ -138,10 +138,10 @@ class TestCatalog:
         assert fs and fs[0]['type'] == 'bar' and fs[0]['value'] == 'used'
         assert 'ping' not in m                     # no decoration declared
 
-    def test_module_host_collections(self):
+    def test_module_device_collections(self):
         m = module_device_collections()
-        # Every host-centric module exposes a host-capable item collection, so the
-        # host picker appears on ALL module items (not just those with inline
+        # Every device-centric module exposes a device-capable item collection, so the
+        # device picker appears on ALL module items (not just those with inline
         # connection fields).
         for mod in ('ups', 'cpu', 'dns', 'ram_swap', 'web', 'ping', 'ssl_cert',
                     'ntp', 'datastore', 'process', 'raid', 'service_status',
@@ -157,7 +157,7 @@ class TestCatalog:
 
 
 
-class TestWhatMakesAHostADevice:
+class TestWhatMakesADeviceADevice:
     """A connection profile can say that carrying it IS the monitoring.
 
     A switch, a router or a UPS read over SNMP has no check and no module item: the device
@@ -171,7 +171,7 @@ class TestWhatMakesAHostADevice:
     was the one thing that could not take it.
     """
 
-    def test_a_host_with_device_profiles_is_sampled_by_the_module_that_declared_them(self):
+    def test_a_device_with_device_profiles_is_sampled_by_the_module_that_declared_them(self):
         assert profile_sampled_modules(
             {'profiles': {'snmp': {'cred_uid': 'c', 'device_profiles': 'grp_synology'}}}
         ) == {'snmp'}
@@ -199,8 +199,8 @@ class TestWhatMakesAHostADevice:
             {'profiles': {'ssh': {'ssh_user': 'root', 'ssh_password': 'x'}}}) == set()
 
     def test_a_record_with_nothing_to_go_on(self):
-        for host in ({}, None, {'profiles': None}, {'profiles': 'nope'}, {'profiles': {}}):
-            assert profile_sampled_modules(host) == set(), host
+        for device in ({}, None, {'profiles': None}, {'profiles': 'nope'}, {'profiles': {}}):
+            assert profile_sampled_modules(device) == set(), device
 
     def test_the_declared_field_is_the_one_the_module_actually_parses(self):
         """The declaration and the sampler must name the SAME field. They are two files —
@@ -208,10 +208,10 @@ class TestWhatMakesAHostADevice:
         itself to decide what to walk — so a rename on one side would produce a button that
         offers a collection nobody runs, with nothing raising anywhere.
         """
-        from lib.core.snmp.manifest import HOST_PROFILE          # noqa: PLC0415
+        from lib.core.snmp.manifest import DEVICE_PROFILE          # noqa: PLC0415
         from lib.core.snmp.profiles import assigned              # noqa: PLC0415
-        field = HOST_PROFILE['samples_when']
-        assert field in {f['name'] for f in HOST_PROFILE['fields']}, (
+        field = DEVICE_PROFILE['samples_when']
+        assert field in {f['name'] for f in DEVICE_PROFILE['fields']}, (
             'it declares a field the profile does not have')
         assert assigned({field: 'grp_x'}) == ['grp_x'], (
             'the sampler does not read the field the declaration names')
@@ -226,9 +226,9 @@ class TestWhatMakesAHostADevice:
 class TestAMachineInMaintenanceStillHasAPast:
     """Reported from the screen: a switch put into maintenance opened onto four empty tabs.
 
-    A host in maintenance has its checks skipped, so the cycle after that prunes every key the
+    A device in maintenance has its checks skipped, so the cycle after that prunes every key the
     module stopped returning — and for a device sampled through the REGISTRY (an SNMP profile
-    on the host record, no check item behind it) that is all of them. The page worked out what
+    on the device record, no check item behind it) that is all of them. The page worked out what
     a device is made of from the live state alone, so there was nothing left to build a row
     out of.
 
@@ -307,7 +307,7 @@ class TestAutoMeansAsk:
 
     A device answering SNMP has said what it runs — `sysDescr` on every agent, and a
     `lsb_release` extend where somebody set one up — and the panel was throwing that away and
-    guessing. The guess is worse than it sounds: `auto` on a host whose kind is neither local
+    guessing. The guess is worse than it sounds: `auto` on a device whose kind is neither local
     nor remote resolved to the PANEL's platform, so a Synology came out as whatever the server
     happens to run.
     """
@@ -358,7 +358,7 @@ class TestAutoMeansAsk:
         assert resolve_os('windows', False, reported='Linux nas 5.10') == 'windows'
 
     def test_and_it_is_asked_BEFORE_the_old_guess(self):
-        """The old ladder is what produced the wrong answer: on a host that is neither local
+        """The old ladder is what produced the wrong answer: on a device that is neither local
         nor remote it returns this process's platform."""
         from lib.core.devices.resolve import resolve_os                 # noqa: PLC0415
         assert resolve_os('auto', False, reported='Linux nas 5.10') == 'linux'
@@ -388,7 +388,7 @@ class TestAutoMeansAsk:
         assert devices[0]['os_auto'] == 'linux'
         assert devices[1]['os_auto'] == '', 'it overwrote a chosen setting'
         from lib.core.infra import service as infra                   # noqa: PLC0415
-        assert 'os_auto' in infra._HOST_FIELDS, 'it never leaves the server'
+        assert 'os_auto' in infra._DEVICE_FIELDS, 'it never leaves the server'
 
 
 class TestWhoMadeIt:

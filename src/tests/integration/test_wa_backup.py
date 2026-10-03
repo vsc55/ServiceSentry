@@ -207,7 +207,7 @@ class TestEachOneHasItsOwnPermission:
     @pytest.fixture
     def viewer(self, client, admin):
         # The admin's own hash, so the fixture's password works and this test says nothing
-        # about how passwords are stored — the pattern the host tests already use.
+        # about how passwords are stored — the pattern the device tests already use.
         admin._users['viewer'] = {'password_hash': admin._users['admin']['password_hash'],
                                   'role': 'viewer', 'display_name': 'V'}
         _login(client, 'viewer')

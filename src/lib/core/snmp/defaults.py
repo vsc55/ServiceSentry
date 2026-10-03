@@ -8,7 +8,7 @@
 Port 161 belongs to SNMP. So does "community strings default to public, version 2c unless
 told, one retry is enough": none of it is an opinion a *check* holds, and none of it stops
 being true when no check exists. Anything that opens a conversation with a device reads these
-— the scheduler, the test screen, discovery, the host walk — and there is exactly one of them
+— the scheduler, the test screen, discovery, the device walk — and there is exactly one of them
 so those four cannot disagree about what "unset" means.
 
 The module's ``schema.json`` states the same values, because a form has to render them and a

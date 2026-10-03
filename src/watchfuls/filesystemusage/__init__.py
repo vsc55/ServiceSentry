@@ -21,10 +21,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""Watchful to check filesystem usage on the bound host (local or over SSH).
+"""Watchful to check filesystem usage on the bound device (local or over SSH).
 
-Host-centric: each check binds to a host (``device_uid``) and a mount point.  Disk
-usage is read on that host via :meth:`ModuleBase.device_exec` (``df`` on Unix,
+Device-centric: each check binds to a device (``device_uid``) and a mount point.  Disk
+usage is read on that device via :meth:`ModuleBase.device_exec` (``df`` on Unix,
 ``wmic logicaldisk`` on Windows) and compared with a per-check threshold.
 """
 
@@ -54,7 +54,7 @@ _IGNORED_FSTYPES = frozenset({
 
 
 class Watchful(ModuleBase):
-    """Check filesystem usage per host + mount point against a threshold."""
+    """Check filesystem usage per device + mount point against a threshold."""
 
     ITEM_SCHEMA = _SCHEMA
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
@@ -80,7 +80,7 @@ class Watchful(ModuleBase):
         if item.get('_device_maintenance') or not item.get('enabled', True):
             return
         part = (item.get('partition', '') or '').strip() or key
-        # Editable display name (e.g. "host - /"); falls back to the partition.
+        # Editable display name (e.g. "device - /"); falls back to the partition.
         label = (item.get('label', '') or '').strip() or part
         os_ = self.device_os(item)
         cmd = self.device_cmd_for(item, _DF_CMDS, default_os='linux')
@@ -149,15 +149,15 @@ class Watchful(ModuleBase):
                 return round((size - free) / size * 100) if size > 0 else None
         return None
 
-    # ── Discover (local autocomplete, or over SSH for a remote host) ──────────
+    # ── Discover (local autocomplete, or over SSH for a remote device) ──────────
     @classmethod
     def discover(cls, config=None) -> list:
         from lib.core.devices import runner as device_runner  # noqa: PLC0415
-        host = (config or {}).get('__device__') if isinstance(config, dict) else None
-        if device_runner.is_remote(host):
-            os_ = str(host.get('os') or 'linux')
+        device = (config or {}).get('__device__') if isinstance(config, dict) else None
+        if device_runner.is_remote(device):
+            os_ = str(device.get('os') or 'linux')
             cmd = _DF_CMDS.get(os_) or _DF_CMDS['linux']
-            out, _err, code = device_runner.run(host, cmd, timeout=15)
+            out, _err, code = device_runner.run(device, cmd, timeout=15)
             if code != 0 and not out:
                 return []
             return cls._discover_parse(os_, out)

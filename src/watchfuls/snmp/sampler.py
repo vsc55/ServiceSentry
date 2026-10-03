@@ -35,7 +35,7 @@ from lib.debug import DebugLevel
 from lib.core.snmp import metrics as _metrics
 from lib.core.snmp.profiles import store as _profile_store
 from lib.core.snmp import profiles as _profiles
-# Reading a metric off a device is core: the scheduler, the test screen and the host
+# Reading a metric off a device is core: the scheduler, the test screen and the device
 # walk have to get the same answer, so there is one implementation of it.
 from lib.core.snmp.sampler import _row_factor, _safe_key, read_metric
 from lib.core.snmp import manifest as _manifest
@@ -132,9 +132,9 @@ class SnmpSampler:
     # ── One device, one cycle ─────────────────────────────────────────────────
 
     def _sample_item(self, srv_key: str, srv: dict) -> None:
-        """Sample one server, resolving its bound host exactly as a check does.
+        """Sample one server, resolving its bound device exactly as a check does.
 
-        Same gate as a check, and for the same reason: a host in maintenance is a machine
+        Same gate as a check, and for the same reason: a device in maintenance is a machine
         somebody is working on, and a graph of it during the work is a graph of the work.
         """
         server = self.resolve_device(srv)
@@ -283,7 +283,7 @@ class SnmpSampler:
     def _watched_rows(self, server: dict) -> set:
         """The rows of this machine somebody has said are worth an alert.
 
-        Empty for a device with no host bound to it, and empty when the registry cannot be
+        Empty for a device with no device bound to it, and empty when the registry cannot be
         reached: a cycle that fails because of a preference is worse than one that reports a
         little less. What it turns back ON is a verdict the profile switched off — see
         `verdict` in the profile format — so the failure mode of an empty answer is the
@@ -299,8 +299,8 @@ class SnmpSampler:
             return set()
 
     def _watch_source(self, server: dict) -> tuple:
-        """``(host uid, registry)`` — or ``('', None)`` when this device has neither."""
-        uid = str(server.get('device_uid') or server.get('_host_uid') or '').strip()
+        """``(device uid, registry)`` — or ``('', None)`` when this device has neither."""
+        uid = str(server.get('device_uid') or server.get('_device_uid') or '').strip()
         store = getattr(self._monitor, '_devices_store', None) if self.is_monitor_exist else None
         return (uid, store) if uid and store is not None else ('', None)
 
@@ -405,7 +405,7 @@ class SnmpSampler:
             return ''
         for n in names:
             if n:
-                found = roles.get(self._hosts_watch_key(n))
+                found = roles.get(self._devices_watch_key(n))
                 if found:
                     return found
         return ''
@@ -419,13 +419,13 @@ class SnmpSampler:
         """
         if not watched:
             return False
-        return any(self._hosts_watch_key(n) in watched for n in names if n)
+        return any(self._devices_watch_key(n) in watched for n in names if n)
 
-    def _hosts_watch_key(self, row: str) -> str:
+    def _devices_watch_key(self, row: str) -> str:
         """The key the registry files a watched row under — ITS function, not a second copy
         of the composition: two places building this string is two places to get it wrong the
         day one of them changes."""
-        from lib.core.devices.store import DevicesStore   # noqa: PLC0415
+        from lib.core.devices.stores import DevicesStore  # noqa: PLC0415
         # The BARE name — `snmp` and not `watchfuls.snmp`. It is what a result records as its
         # module and therefore what the screen sends back when somebody marks a row; the
         # dotted one is this class's import path and matches nothing anybody stored.
@@ -453,7 +453,7 @@ class SnmpSampler:
 
         *marked* is whether somebody said THIS row is one that matters. It travels with the
         row because it is a fact about the row and nothing that reads the recorded state can
-        work it out: the mark lives in the host registry, and the screens that read a sample
+        work it out: the mark lives in the device registry, and the screens that read a sample
         never open that. It already decided whether a quiet column judges; recorded, it also
         lets a screen put the ports somebody is watching where they can be found.
 
@@ -608,8 +608,8 @@ class SnmpSampler:
     def _save_sightings(self, server: dict, sightings: dict) -> None:
         """Hand what this device SAW to the store that keeps sightings.
 
-        Filed under the HOST and not the server key: the map joins across machines, and a
-        machine is what it joins on. A server with no host bound to it is a sighting nobody
+        Filed under the DEVICE and not the server key: the map joins across machines, and a
+        machine is what it joins on. A server with no device bound to it is a sighting nobody
         can place, so it is dropped rather than filed under something that is not a machine.
 
         Written even when a kind came back empty — a switch that has forgotten every MAC is a
@@ -618,7 +618,7 @@ class SnmpSampler:
         """
         if not sightings:
             return
-        uid = str(server.get('device_uid') or server.get('_host_uid') or '').strip()
+        uid = str(server.get('device_uid') or server.get('_device_uid') or '').strip()
         db = getattr(self, 'db', None)
         if not uid or db is None:
             return

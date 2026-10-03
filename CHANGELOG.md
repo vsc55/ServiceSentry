@@ -8,6 +8,158 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.132] - 2026-10-03
+
+### Changed
+
+- **The sidebar has a Catalogue group above System.** System mixed two kinds of things: the
+  platform itself (services, modules, configuration, access, audit, backups, diagnostics,
+  fail2ban, jobs, status, events) and the organisation's reference data. That data —
+  Companies, Device types, Clusters, Models, Templates, Credentials and SNMP — is now a
+  Catalogue of its own, because who files the company that owns a rack or the credentials of a
+  switch is not who manages the backups. The Catalogue is drawn exactly like System: its entries
+  in the reader's alphabetical order, shown only when the reader can open one of them, with its
+  own remembered open/closed state. A declared section picks it with `"placement": "catalog"`
+  (the third value beside `section` and `system`; an unknown one still lands at the top), and a
+  core panel tab with `"group": "catalog"`.
+- **The device page says where a device is and how it is configured.** Infrastructure's page of
+  a device gains two tabs. *Location*, from the inventory: site › floor › room › rack › U, the
+  owner company, serial and asset tag, the rack drawn small with the device lit, its cables
+  (with the device at the other end, which opens its own page) and its power outlets, and
+  buttons to open the rack or the room plan. *Configuration*, from the registry: class, how it is
+  reached, OS, connection profiles, the modules watching it and how many checks each, tags and
+  origin, with the registry's own form one click away. Both read here and send the editing to
+  where it already happened, so there is still one place to change each thing. The gear in the
+  header opens THIS device's form instead of the registry's list, and the registry's rows and
+  the inventory's equipment list gain a button to the device page. Nothing went from a device
+  back to its rack before: a machine that failed told nobody which cabinet to walk to. New route
+  `GET /api/v1/dcim/devices/<uid>/place`, narrowed like everything in the inventory: what the
+  reader may not see is not listed at all (saying "it is in a rack you cannot see" already says
+  where it is), and the far end of a cable that is not theirs is only "equipment of another
+  company".
+- **The device registry lives in Infrastructure.** It was a tab of its own (System ›
+  Infrastructure, with the same name as the top-level Infrastructure section) holding a second
+  list of the same devices, readable five ways, beside Infrastructure's list of them with their
+  state: the list where devices were added was not the one where anybody looked at them.
+  Infrastructure's fleet list now carries what the registry's had — "New device" with the
+  imports hanging from it, migrate, test/edit/clone/delete on every row (still decided per device
+  by `server.<uid>.*`), ticking rows for a bulk delete, a filter by class with "unclassified" as
+  its own answer, and the coverage view of which devices are actually watched, whose names open
+  the device page. The registry's state and by-class views were not moved: Infrastructure's
+  board and rail answer those. Its two other sub-tabs are Catalogue entries of their own, Device
+  types and Clusters; "see the devices of this class" lands on Infrastructure's rail grouped by
+  class with that one picked, the physical inventory's catalogue links to Device types, and the
+  device widgets of the Overview open Infrastructure. The registry tab's remembered sub-tab is
+  gone with it. Seeing the device list now takes `infra_view` as well as the registry's own
+  permission, which is what Infrastructure always asked.
+- **Models and Templates are Catalogue entries.** The equipment models (with their brands,
+  platforms, connectors, schemas and import) and the purchase templates built from them were
+  views of the physical inventory; they are reference data — what can be bought and what is
+  actually bought — consulted from every rack and every device rather than being a place in the
+  building. Each is now a Catalogue entry with its own pane: Models for whoever may read the
+  catalogue (`dcim_catalog_view`, which the inventory's menu never asked, so it offered a view
+  that then opened on a refusal), Templates for whoever sees the inventory. Their code is still
+  the inventory's: `renderDcim` paints whichever of the three panes is on screen, and going
+  back to the inventory leaves nothing of them behind in it. The "back" and "close" buttons that
+  returned to the inventory are gone, the link to Device types carries its new name, and the
+  catalogue's own list tab is called Models. A bookmark to `/dcim/catalog` or `/dcim/builds`
+  lands on its Catalogue entry.
+- **A device and its equipment can be registered from either side.** The inventory's equipment
+  form has a button beside its device picker that registers a device with the equipment's name
+  and links it, without saving the form — saving stays with whoever is filling it in. A device
+  page whose Location tab finds it in no rack offers to place it: pick a rack, first U, height
+  and face, and the equipment is created there, named after the device and linked to it; the
+  inventory's own refusal ("that U is taken") is what is shown when it does not fit. And the
+  Location tab puts the serial number typed into the inventory beside the one the device reports
+  about itself: when they differ, or the inventory has none, it says so and offers to use the
+  reported one — offered, never written on its own.
+- **Maintenance is called maintenance in the inventory too.** A device in maintenance was counted
+  "unwatched" in the inventory, to keep its failing checks from turning a rack red, while
+  Infrastructure called it what it is. It is "maintenance" in both now, with the fleet's colour,
+  and still raises no alarm: it ranks below every check when a rack, a room or a site is summed
+  up, so it never turns one amber or red, and it is not counted as unwatched. A rack with
+  everything in maintenance says so instead of "unwatched". A device in maintenance that the
+  reader may not see is not reported either.
+- **The permissions are up to date with the screens they open.** All 93 flags keep their names,
+  but what the role editor says about them had fallen behind the moves: descriptions still sent
+  the admin to "the Devices tab", "the Clusters sub-tab" and to tabs that are sections, the
+  per-device rows talked about servers, and the tooltip of a per-device "add" said registering a
+  device was the global "Add" permission when the route asks `devices_edit` — which is now
+  labelled "Create and edit devices" and says it also clones, detects duplicates and manages
+  device types. The model catalogue's manage flag is "Manage the model catalogue" (it edits, not
+  only imports), `dcim_view` says it also opens Catalogue › Templates, and `infra_watch` names a
+  permission by its label instead of its flag. The groups follow the sidebar: the catalogue and
+  template flags are a group of their own, "Models and templates", beside "Physical inventory"
+  (a package may now declare several groups), "Checks" is "Status" and "Event rules" is
+  "Events"; an unused group key is gone.
+- **Per-company grants can be given.** `org.<uid>.view` — see one company's things without
+  `orgs_all_view` — was in the server's rule and the manifest said it was granted in the role
+  editor, and nothing drew it. Access › Permissions has a row per company in the Companies group,
+  view only.
+- **The panel's registry entity is `device` everywhere.** The identifiers, DOM ids, i18n keys,
+  JS functions, test names and payload keys that still said `host` while meaning the registry
+  entry are renamed to `device` (`_checks_for_device`, `MODULE_DEVICE_FIELDS`, `deviceModal`,
+  `cl_view_devices`, the `_device` draft a test posts, `node_device` in Proxmox…). `host` stays
+  only as the network word: `request.host`, hostnames, SSH host keys, bind/SMTP/DB hosts, a
+  check's address field, a syslog sender and a lease holder.
+- **Keys the panel writes into stored module items are renamed without an alias**:
+  `vip_host_uid` → `vip_device_uid` (keepalived) and `endpoint_host_uid` →
+  `endpoint_device_uid` (the provisioned-device hook); the `hosts_migrated` audit event is
+  `devices_migrated`.
+- User-visible texts that said "host" for a device — module descriptions, field help and message
+  argument labels of the device-bound modules, the credential and cluster texts — say "device" /
+  «dispositivo». `docs/explica-hosts.md` is `docs/explica-dispositivos.md`, and the clusters'
+  `_view_hosts.html` partial is `_view_devices.html`.
+
+### Security
+
+- **Saving a layout of one's own on the Overview requires `overview_edit` on the server.** The
+  screen hid the button without it; the request went through anyway. Going back to the default
+  layout stays open to everyone.
+- **Deleting a company prunes its `org.<uid>.view` grants from every custom role**, as deleting a
+  device, a module or a cluster already did: a grant naming something that no longer exists is
+  dead weight nobody can see, and it is still counted as a grant.
+
+### Fixed
+
+- **A per-device viewer can follow the collection of a device they may see.** The job records
+  its device as `device`, and both progress routes asked it for `host`: the answer was always
+  empty, so only a holder of `devices_view` passed the check.
+- **The test job was killed on every pull request.** Each `WebAdmin` starts five daemon threads
+  (service health, certificate, cabling and secret scanners, and the backup runner) whose loops
+  hold the instance, and no test ever stopped them: ~15 MB and five threads per integration test
+  were never given back. On GitHub's runner the two xdist workers ran out of memory around 15 %
+  of the suite and the runner died with "received a shutdown signal", each time in a different
+  test. `WebAdmin.stop_background()` stops them, and an autouse fixture calls it for every
+  instance a test builds — through the `admin` fixture or by hand.
+- **The rename of hosts to devices broke the places where `host` was the network word, and
+  left both ends of some conversations disagreeing.**
+  - `request.host` (Flask) had become `request.device`: with `force_fqdn` on, every page
+    answered 500, the settings page included, and SAML could not build its request.
+  - The SNMP sampler imported `lib.core.devices.store` (the package is `stores`). The error was
+    swallowed, so a port marked as watched, or as the line to the internet, stopped reporting.
+  - Freshservice's `host_name` address field and the SSH `host` argument of `RaidMdstat` are
+    `host` again.
+  - Both ends now say `device` where one of them still said `host`:
+    - the syslog route filters a device's messages by `?device=`, so the device's syslog badge
+      and Logs tab stop showing every message on the install;
+    - the discovery label placeholder is `{device}`, in every module and both renderers;
+    - the credential-profile wrapper class is `credprof-device`;
+    - `/api/v1/dcim/said` reads `device` only.
+  - Both ends say `host` where it is the network word: a Proxmox item's address, a syslog
+    sender in an event rule, a lease holder's machine, the HTTP Host in Diagnostics, the
+    Freshservice and SNMP test results.
+  - Cluster members (`host_uids` inside the item JSON) and the `host_*` audit event names are
+    `device_uids` / `device_*`. Nothing reads the old names, since nothing is in production
+    yet.
+  - New guards: every import of the project's own code must resolve on disk, including those
+    inside functions (`tests/meta/test_imports_resolve.py`), and both ends of each renamed
+    conversation are pinned (`tests/meta/test_device_rename_templates.py`).
+- **The inventory's "serial the device reported" button got no answer.** The form asked
+  `/api/v1/dcim/said?device=` and the route read `?host=`, left over from when the domain was
+  called hosts, so it always answered empty and every device seemed to report no serial. It reads
+  `device` now.
+
 ## [0.0.1+build.131] - 2026-09-30
 
 ### Added

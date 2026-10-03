@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/temperature — host-centric sensor temperature (Linux).
+"""Tests for watchfuls/temperature — device-centric sensor temperature (Linux).
 
 Sensors are read via ``device_exec`` (mocked); the thermal-zone parser runs for
 real against canned ``/sys/class/thermal`` output.
@@ -18,7 +18,7 @@ class _FakeStore:
         return self._h.get(uid)
 
 
-def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+def _device(uid='h1', os='linux', kind='remote', maintenance=False):
     return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
             'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
@@ -26,7 +26,7 @@ def _host(uid='h1', os='linux', kind='remote', maintenance=False):
 def _watchful(items, devices=None):
     from watchfuls.temperature import Watchful
     mm = create_mock_monitor({'watchfuls.temperature': {'list': items}})
-    mm._devices_store = _FakeStore(devices or {'h1': _host()})
+    mm._devices_store = _FakeStore(devices or {'h1': _device()})
     return Watchful(mm)
 
 
@@ -78,7 +78,7 @@ class TestCheck:
 
     def test_non_linux_unsupported(self):
         w = _watchful({'cpu': {'enabled': True, 'sensor': 'x', 'device_uid': 'h1'}},
-                      devices={'h1': _host(os='windows')})
+                      devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec') as he:
             items = w.check().list
         he.assert_not_called()
@@ -96,7 +96,7 @@ class TestCheck:
             assert len(w.check().items()) == 0
         he.assert_not_called()
         w2 = _watchful({'cpu': {'enabled': True, 'sensor': 'x', 'device_uid': 'h1'}},
-                       devices={'h1': _host(maintenance=True)})
+                       devices={'h1': _device(maintenance=True)})
         with patch.object(w2, 'device_exec') as he2:
             assert len(w2.check().items()) == 0
         he2.assert_not_called()
@@ -106,7 +106,7 @@ class TestDiscover:
 
     def test_discover_remote(self):
         from watchfuls.temperature import Watchful
-        host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
+        device = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
         with patch('lib.core.devices.runner.run', return_value=(_THERMAL, '', 0)):
-            names = {s['name'] for s in Watchful.discover({'__device__': host})}
+            names = {s['name'] for s in Watchful.discover({'__device__': device})}
         assert {'x86_pkg_temp', 'acpitz', 'acpitz_1'} <= names

@@ -48,14 +48,14 @@ def server_list_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> l
         return []
     rows = []
     try:
-        from lib.core.devices.service import _device_statuses, _host_bound_modules  # noqa: PLC0415
+        from lib.core.devices.service import _device_statuses, _device_bound_modules  # noqa: PLC0415
         if status_raw is None:
             status_raw = wa._read_check_status()
         if modules_raw is None:
             modules_raw = wa._load_modules() or {}
         devices = hstore.list(decrypt=False) or []
         hstatuses = _device_statuses(wa)
-        hbound = _host_bound_modules(wa)
+        hbound = _device_bound_modules(wa)
         hchecks = _device_checks(status_raw, modules_raw)
         for h in devices:
             uid = h.get('uid')
@@ -153,5 +153,5 @@ def coverage_stat(wa) -> dict:
     pct = round(100 * monitored / total) if total else 0
     accent = 'green' if pct >= 90 else ('orange' if pct >= 50 else 'red')
     return {'value': f'{pct}%', 'accent': accent,
-            'badges': [{'plain': True, 'key': 'overview_of_hosts',
+            'badges': [{'plain': True, 'key': 'overview_of_devices',
                         'args': [monitored, total]}]}

@@ -117,7 +117,7 @@ Las **tablas** de un módulo no se declaran: ya están en `core` por la regla in
 ```text
 copia-20260811-210233.zip
 ├── db/
-│   ├── hosts.json            {"columns": [...], "rows": [[...], ...]}
+│   ├── devices.json          {"columns": [...], "rows": [[...], ...]}
 │   ├── users.json
 │   ├── config.json           ← la tabla `config`, no el fichero
 │   └── …                     una por tabla
@@ -192,7 +192,7 @@ flowchart LR
     subgraph web["contenedor web"]
       runner["BackupRunner<br/>_connectors(wa)"]
     end
-    runner -->|"'main'"| maindb[("BD sistema<br/>hosts · users · config · …")]
+    runner -->|"'main'"| maindb[("BD sistema<br/>dispositivos · users · config · …")]
     runner -->|"'syslog'"| sysdb[("BD syslog<br/>syslog · syslog_drops")]
     maindb --> zip["copia.zip"]
     sysdb --> zip
@@ -276,7 +276,7 @@ no dejan a nadie fuera.
 
 `parts` acota lo que se aplica. `required` dice qué debe **contener** una copia, no qué debe
 aplicarse: leerlo como lo segundo convertiría toda restauración parcial en total, que es lo
-contrario de lo que se pide al restaurar solo los hosts tras una importación mala.
+contrario de lo que se pide al restaurar solo los dispositivos tras una importación mala.
 
 ### Restaurar solo unas tablas
 
@@ -643,7 +643,7 @@ En el **log** del panel (`global|log_level`, ver [explica-logging.md](explica-lo
 ```
 [INFO   ] > Backup > job a3f9c1 >> restore 'copia-20260811-2102' started
 [INFO   ] > Backup > restore >> 'copia-20260811-2102' parts=['config_file', 'core'] made with 0.0.1+build.40
-[DEBUG  ] > Backup > restore >> hosts: 12 rows
+[DEBUG  ] > Backup > restore >> devices: 12 rows
 [WARNING] > Backup > restore >> credentials: table is gone, 4 rows not applied
 [WARNING] > Backup > restore >> 'copia-20260811-2102' done, 148 rows in 9 tables, 1 could not be applied in full
 ```
@@ -653,7 +653,7 @@ lo que se dejó fuera se dejó fuera a propósito, y esto es lo que explica mese
 media instalación es más vieja que la otra media:
 
 ```
-[WARNING] > Backup > restore >> 'copia-20260811-2102' parts=['core'] tables=['hosts'] made with 0.0.1+build.65
+[WARNING] > Backup > restore >> 'copia-20260811-2102' parts=['core'] tables=['devices'] made with 0.0.1+build.65
 ```
 
 ---
@@ -689,7 +689,7 @@ flowchart TB
 
 | Cambia | ¿Se aplica sin reiniciar? |
 |---|---|
-| Filas (hosts, usuarios, roles, checks, credenciales) | **Sí, al instante** — se leen de la BD compartida |
+| Filas (dispositivos, usuarios, roles, checks, credenciales) | **Sí, al instante** — se leen de la BD compartida |
 | Config editable (tabla `config`) | **Sí** — poke inmediato, y en su defecto el poll de 15 s |
 | Puertos de syslog, allowlist, certificados | **Sí** — el listener se recarga solo… |
 | …pero el **puerto publicado de Docker** | **No.** Se fijó al crear el contenedor: hay que tocar el compose |

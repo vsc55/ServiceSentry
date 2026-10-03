@@ -1,8 +1,8 @@
 {# ================================================================
-   Binding a check to a host, and to several.
+   Binding a check to a device, and to several.
 
-   "Which host is this about" is not a field like the others: choosing one makes the check
-   inherit that host's address and credential profile, and the inline connection fields step
+   "Which device is this about" is not a field like the others: choosing one makes the check
+   inherit that device's address and credential profile, and the inline connection fields step
    aside. The multi-picker is the same idea for a check that watches a set of them.
 
    Kept apart from the field renderer because it is the one control that changes what the
@@ -10,11 +10,11 @@
    ================================================================ #}
 
 /**
- * Render the "bind to a host" picker for a host-capable item.  Selecting a host
- * makes the check inherit that host's address + credential profile; the inline
+ * Render the "bind to a device" picker for a device-capable item.  Selecting a device
+ * makes the check inherit that device's address + credential profile; the inline
  * connection fields are hidden.  The empty option keeps the classic inline mode.
  */
-function _renderHostPicker(itemPath, curUid, target) {
+function _renderDevicePicker(itemPath, curUid, target) {
     const opts = ['<option value="">' + esc(t('device_inline')) + '</option>'].concat(
         devicesList().map(hh =>
             `<option value="${escAttr(hh.uid)}"${hh.uid === curUid ? ' selected' : ''}>` +
@@ -23,31 +23,31 @@ function _renderHostPicker(itemPath, curUid, target) {
         <label class="form-label small fw-semibold">
             <i class="bi bi-hdd-network me-1"></i>${esc(t('device_bind_label'))}</label>
         <select class="form-select form-select-sm"
-                onchange="_onHostPick(${jsStr(itemPath)},this.value,${jsStr(target)})">${opts.join('')}</select>
+                onchange="_onDevicePick(${jsStr(itemPath)},this.value,${jsStr(target)})">${opts.join('')}</select>
     </div>`;
 }
 
 /**
- * Apply a host selection: store device_uid and show/hide the inline connection
+ * Apply a device selection: store device_uid and show/hide the inline connection
  * fields without a full re-render (preserves expand/scroll state).
  */
-function _onHostPick(itemPath, uid, target) {
+function _onDevicePick(itemPath, uid, target) {
     updateField(target, itemPath + '|device_uid', uid || '');
-    document.querySelectorAll(`.hostprof-field[data-hp-item="${CSS.escape(itemPath)}"]`)
+    document.querySelectorAll(`.deviceprof-field[data-hp-item="${CSS.escape(itemPath)}"]`)
         .forEach(el => { el.style.display = uid ? 'none' : ''; });
     // When unbinding, restore each field's own show_when visibility.
     if (!uid) _refreshConditionalFields(itemPath);
 }
 
 /**
- * Multi-host picker for a __device_multiple_bind__ module (e.g. a Proxmox cluster):
+ * Multi-device picker for a __device_multiple_bind__ module (e.g. a Proxmox cluster):
  * a check binds to SEVERAL devices (device_uids) whose addresses form the failover
- * list.  A checkbox per host; binding hides the inline connection fields.
+ * list.  A checkbox per device; binding hides the inline connection fields.
  */
-function _renderHostMultiPicker(itemPath, curUids, target) {
+function _renderDeviceMultiPicker(itemPath, curUids, target) {
     const sel = (curUids || []).map(String);
     const devices = devicesList();
-    // Selected devices → removable chips (show the host NAME, store the UID).
+    // Selected devices → removable chips (show the device NAME, store the UID).
     const chips = sel.map(uid => {
         const h = devices.find(x => String(x.uid) === uid);
         const name = h ? h.name : uid;
@@ -55,7 +55,7 @@ function _renderHostMultiPicker(itemPath, curUids, target) {
             ${esc(name)}
             <button type="button" class="btn-close btn-close-white ss-fs-1"
                 title="${escAttr(t('remove') || 'Remove')}"
-                onclick="_hostMultiRemove(${jsStr(itemPath)},${jsStr(uid)},${jsStr(target)})"></button>
+                onclick="_deviceMultiRemove(${jsStr(itemPath)},${jsStr(uid)},${jsStr(target)})"></button>
         </span>`;
     }).join('');
     // Unselected devices → entries of an "Add" dropdown (searchable when many).
@@ -63,7 +63,7 @@ function _renderHostMultiPicker(itemPath, curUids, target) {
     const opts = available.map(h =>
         `<li><button type="button" class="dropdown-item small hpm-opt"
             data-hpm-name="${escAttr((String(h.name) + ' ' + String(h.address || '')).toLowerCase())}"
-            onclick="_hostMultiAdd(${jsStr(itemPath)},${jsStr(String(h.uid))},${jsStr(target)})">
+            onclick="_deviceMultiAdd(${jsStr(itemPath)},${jsStr(String(h.uid))},${jsStr(target)})">
             ${esc(h.name)}${h.address ? ` <span class="text-muted">(${esc(h.address)})</span>` : ''}</button></li>`).join('')
         || `<li><span class="dropdown-item-text text-muted small">${esc(t('no_items') || '—')}</span></li>`;
     return `<div class="cfg-field-wrap mb-2" data-hp-multi="${escAttr(itemPath)}">
@@ -78,7 +78,7 @@ function _renderHostMultiPicker(itemPath, curUids, target) {
                 <div class="dropdown-menu dropdown-menu-end p-2" style="min-width:260px">
                     ${available.length > 6 ? `<input type="search" class="form-control form-control-sm mb-2"
                         placeholder="${escAttr((t('search') || 'Search') + '…')}"
-                        oninput="_hostMultiOptFilter(this)" onclick="event.stopPropagation()">` : ''}
+                        oninput="_deviceMultiOptFilter(this)" onclick="event.stopPropagation()">` : ''}
                     <ul class="list-unstyled mb-0" style="max-height:13rem;overflow:auto">${opts}</ul>
                 </div>
             </div>
@@ -89,38 +89,38 @@ function _renderHostMultiPicker(itemPath, curUids, target) {
     </div>`;
 }
 
-// Filter the "Add host" dropdown entries by name/address.
-function _hostMultiOptFilter(inp) {
+// Filter the "Add device" dropdown entries by name/address.
+function _deviceMultiOptFilter(inp) {
     const q = String(inp.value || '').trim().toLowerCase();
     inp.closest('.dropdown-menu')?.querySelectorAll('.hpm-opt').forEach(o => {
         o.closest('li').style.display = (!q || (o.dataset.hpmName || '').includes(q)) ? '' : 'none';
     });
 }
 
-function _hostMultiVals(itemPath, target) {
+function _deviceMultiVals(itemPath, target) {
     const data = target === 'config' ? configData : modulesData;
     const it = getPath(data, itemPath.split('|'));
     return Array.isArray(it && it.device_uids) ? it.device_uids.map(String) : [];
 }
-function _hostMultiAdd(itemPath, uid, target) {
-    const arr = _hostMultiVals(itemPath, target);
+function _deviceMultiAdd(itemPath, uid, target) {
+    const arr = _deviceMultiVals(itemPath, target);
     if (!arr.includes(String(uid))) arr.push(String(uid));
-    _hostMultiCommit(itemPath, target, arr);
+    _deviceMultiCommit(itemPath, target, arr);
 }
-function _hostMultiRemove(itemPath, uid, target) {
-    _hostMultiCommit(itemPath, target, _hostMultiVals(itemPath, target).filter(u => u !== String(uid)));
+function _deviceMultiRemove(itemPath, uid, target) {
+    _deviceMultiCommit(itemPath, target, _deviceMultiVals(itemPath, target).filter(u => u !== String(uid)));
 }
-function _hostMultiCommit(itemPath, target, arr) {
+function _deviceMultiCommit(itemPath, target, arr) {
     updateField(target, itemPath + '|device_uids', arr);
-    // Binding to ≥1 host hides the inline connection fields (host owns them).
+    // Binding to ≥1 device hides the inline connection fields (device owns them).
     const bound = arr.length > 0;
-    document.querySelectorAll(`.hostprof-field[data-hp-item="${CSS.escape(itemPath)}"]`)
+    document.querySelectorAll(`.deviceprof-field[data-hp-item="${CSS.escape(itemPath)}"]`)
         .forEach(el => { el.style.display = bound ? 'none' : ''; });
     if (!bound) _refreshConditionalFields(itemPath);
     // Re-render the picker in place (deferred so the current click cycle, incl.
     // Bootstrap's dropdown handling, finishes before the node is replaced).
     setTimeout(() => {
         const el = document.querySelector(`[data-hp-multi="${CSS.escape(itemPath)}"]`);
-        if (el) el.outerHTML = _renderHostMultiPicker(itemPath, arr, target);
+        if (el) el.outerHTML = _renderDeviceMultiPicker(itemPath, arr, target);
     }, 0);
 }

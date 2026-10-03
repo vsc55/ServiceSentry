@@ -5,20 +5,20 @@
 #
 """Watchful to monitor a Keepalived VRRP virtual IP (VIP) across an HA cluster.
 
-Host-centric / multi-host binding: one configured item = one VIP guarded by a
+Device-centric / multi-device binding: one configured item = one VIP guarded by a
 cluster of member devices (the HA nodes, bound via ``device_uids``).  At the cluster
-level you configure the VIP; per member host you configure its *priority*
-(weight) — stored on the host's ``keepalived`` profile and editable in the
-cluster's Hosts tab.
+level you configure the VIP; per member device you configure its *priority*
+(weight) — stored on the device's ``keepalived`` profile and editable in the
+cluster's Devices tab.
 
-Each cycle the check connects to every member host (locally or over SSH, via
+Each cycle the check connects to every member device (locally or over SSH, via
 :meth:`ModuleBase.device_exec`) and reads two things:
 
   * the keepalived service state (``systemctl is-active keepalived``);
   * whether that node currently holds the VIP (``ip -o addr show`` — the VRRP
     MASTER is the node that owns the floating address).
 
-It then emits per-node results (``<key>/node/<host>``) plus a cluster roll-up
+It then emits per-node results (``<key>/node/<device>``) plus a cluster roll-up
 for the VIP (``<key>/vip``): OK when exactly one node holds it, an *error* when
 no node does (VIP down), and a *warning* on split-brain (several holders).  With
 ``check_priority`` on, it also warns (``<key>/priority``) when the VIP sits on a
@@ -45,7 +45,7 @@ _SVC_RE = re.compile(r'^SVC=(\S+)', re.MULTILINE)
 
 
 def _to_int(value, default=None):
-    """Best-effort int (a per-host priority may be blank/str/None)."""
+    """Best-effort int (a per-device priority may be blank/str/None)."""
     try:
         return int(str(value).strip())
     except (TypeError, ValueError):
@@ -111,7 +111,7 @@ class Watchful(ModuleBase):
                        self._msg('ka_no_vip', label),
                        {'vip': ''}, severity='warning')
 
-        # One probe per member host: service state + its current addresses.
+        # One probe per member device: service state + its current addresses.
         # Match the VIP by address across all interfaces (interface names can differ
         # between nodes, e.g. eth0 vs ens18), so no per-interface filter is needed.
         probe = ('echo "SVC=$(systemctl is-active keepalived 2>/dev/null || echo unknown)"; '

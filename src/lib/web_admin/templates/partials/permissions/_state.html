@@ -19,7 +19,7 @@ let _permSelRole = null;
 let _permReady = false;
 
 // ── Catalog ───────────────────────────────────────────────────────
-// The 64 global permissions, i.e. everything PERM_GROUPS declares. A role may ALSO
+// The global permissions, i.e. everything PERM_GROUPS declares. A role may ALSO
 // hold granular keys (module.<id>.view, server.<uid>.edit …) that this screen does not
 // show; the draft keeps a role's full permission list and only ever adds/removes
 // catalog keys, so saving from here can never drop a granular key it never rendered.
@@ -39,6 +39,12 @@ function _permHint(perm)  { return (I18N.permission_hints  || {})[perm] || ''; }
 // registry in _resources.html: where the items come from, which global flag each action
 // falls back to, and the labels. Nothing about a resource is described twice.
 const _PERM_ACTIONS = ['view', 'add', 'edit', 'delete'];
+
+/** The actions a resource can be narrowed by: all four, or what its spec declares — a company
+ *  is only ever SEEN one by one (`org.<uid>.view`); owning things is the global `orgs_edit`. */
+function _permActionsOf(spec) {
+    return (spec && spec.actions) || _PERM_ACTIONS;
+}
 
 function _permResSpec(groupKey) {
     if (typeof _PERM_RES_SPECS === 'undefined') return null;
@@ -207,7 +213,7 @@ function _permRolesMenuFilter(query) {
 function _permRoleName(uid) { return rolesData[uid]?.name || uid; }
 
 /** How much a role grants, split the way the screen shows it: `global` counts the catalog
- *  flags (out of 64), `scoped` the per-instance overrides it holds explicitly. Reported
+ *  flags (out of all of them), `scoped` the per-instance overrides it holds explicitly. Reported
  *  apart because they are not comparable — one `module.ping.edit` is not "one more
  *  permission" beside `modules_edit`, it is a narrower version of it. */
 function _permCounts(uid) {
@@ -342,7 +348,7 @@ function _permVisibleResRows(groupKey) {
             if (!hay.includes(q)) return false;
         }
         if (_permOnlyDiff())
-            return _PERM_ACTIONS.some(a => !_permIsUniform(`${spec.prefix}.${row.id}.${a}`));
+            return _permActionsOf(spec).some(a => !_permIsUniform(`${spec.prefix}.${row.id}.${a}`));
         return true;
     });
     return { spec, rows };
@@ -402,6 +408,15 @@ function _permDiscard() {
 function renderPermissions() {
     const box = document.getElementById('permissions-container');
     if (!box) return;
+    // The companies, for their per-company rows: asked once, quietly — whoever cannot list them
+    // simply gets no rows, which is the same answer the server would give.
+    if (_permOrgs === null) {
+        _permOrgs = [];
+        apiGetSilent('/api/v1/orgs').then(d => {
+            _permOrgs = (d && d.orgs) || [];
+            if (_permOrgs.length) renderPermissions();
+        });
+    }
     _permReady = true;
     for (const view of ['matrix', 'split']) {
         document.getElementById('permViewBtn_' + view)

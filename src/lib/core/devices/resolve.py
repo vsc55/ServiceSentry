@@ -13,7 +13,7 @@ from __future__ import annotations
 # ── Results that belong to a device rather than to a check ─────────────────────────────────
 #
 # A check is an item somebody configured, and its result is filed under that item's key. Some
-# results have no item behind them: a device the panel monitors because the HOST says it is
+# results have no item behind them: a device the panel monitors because the DEVICE says it is
 # one — an SNMP profile with device profiles assigned — is read without anybody creating a
 # check about it. Those results still belong to a device, and the Servers tab has to be able to
 # say so, or a device can be sampled, reported down, and still show a neutral dash.

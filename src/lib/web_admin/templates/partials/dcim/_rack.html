@@ -371,7 +371,7 @@ function _dcimItemRow(item) {
             ${item.state ? _infraStateBadge(item.state) + ' ' : ''}
             ${_dcimFitBadge(item.depth)}
             ${item.device_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2 me-1"
-                onclick="_dcimOpenHost(${jsStr(item.device_uid)})"
+                onclick="_dcimOpenDevice(${jsStr(item.device_uid)})"
                 title="${escAttr(t('dcim_open_device'))}"><i class="bi bi-hdd"></i></button>` : ''}
             ${esc(_dcimItemName(item))}
         </td>
