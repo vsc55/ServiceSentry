@@ -16,6 +16,9 @@
 // {prefix}.{id}.{action} keys are shared. To add a new scoped resource: a spec here
 // plus its catalog permissions. Both layouts of the Permissions section pick it up
 // with no code of their own.
+//: The companies the per-company rows are drawn from, fetched by `renderPermissions`.
+let _permOrgs = null;
+
 const _PERM_RES_SPECS = [
     {
         prefix: 'module', group: 'perm_group_modules',
@@ -35,13 +38,13 @@ const _PERM_RES_SPECS = [
     },
     {
         prefix: 'server', group: 'perm_group_devices',
-        info: () => t('server_perms_info'), colLabel: () => t('col_server') || 'Server',
+        info: () => t('server_perms_info'), colLabel: () => t('col_device_perm') || 'Device',
         globalFor: { view: 'devices_view', add: 'devices_add', edit: 'devices_edit', delete: 'devices_delete' },
-        // 'add' on a server = "add checks to THIS host" (not creating a host).
+        // 'add' on a server = "add checks to THIS device" (not creating a device).
         actionLabel: a => a === 'add' ? (t('server_perm_add') || t('module_perm_add')) : (t('module_perm_' + a) || a),
         actionTip: a => a === 'add' ? t('server_perm_add_tt') : '',
         items() {
-            return Object.values(typeof hostsData !== 'undefined' ? hostsData : {})
+            return Object.values(typeof devicesData !== 'undefined' ? devicesData : {})
                 .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
                 .map(h => ({ id: h.uid, name: h.name || h.uid, sub: { type: 'text', text: h.address || '' } }));
         },
@@ -58,13 +61,26 @@ const _PERM_RES_SPECS = [
                     if (coll.startsWith('__') || !items || typeof items !== 'object' || Array.isArray(items)) continue;
                     const tf = (typeof _clColSchema === 'function' ? (_clColSchema(mod, coll)['__check_title_field__'] || 'label') : 'label');
                     for (const [key, item] of Object.entries(items)) {
-                        if (item && typeof item === 'object' && Array.isArray(item.host_uids))
+                        if (item && typeof item === 'object' && Array.isArray(item.device_uids))
                             out.push({ id: String(item.uid || key), name: String(item[tf] || key),
                                        sub: { type: 'text', text: modulePrettyName(mod, cfg) } });
                     }
                 }
             }
             return out.sort((a, b) => a.name.localeCompare(b.name));
+        },
+    },
+    // A company seen one by one: `org.<uid>.view`. It existed in the server's rule
+    // (`owners.visible_orgs`) and the manifest said it was granted here, and nothing here drew
+    // it — so the only way to give a subsidiary its own things was everything (`orgs_all_view`).
+    {
+        prefix: 'org', group: 'perm_group_orgs', actions: ['view'],
+        info: () => t('org_perms_info'), colLabel: () => t('dcim_owner') || 'Company',
+        globalFor: { view: 'orgs_all_view' },
+        items() {
+            return (_permOrgs || []).map(o => ({ id: o.uid, name: o.name || o.uid,
+                                                 sub: { type: 'text', text: o.short || '' } }))
+                .sort((a, b) => String(a.name).localeCompare(String(b.name)));
         },
     },
 ];
@@ -101,7 +117,7 @@ function _permResSubHtml(spec, row) {
 function _permResTableHtml(spec, activePerms, disabled, opts = {}) {
     const rows = opts.rows || spec.items();
     const derive = opts.derive === undefined ? disabled : opts.derive;
-    const actions = ['view', 'add', 'edit', 'delete'];
+    const actions = _permActionsOf(spec);
     const lbl = a => spec.actionLabel ? spec.actionLabel(a) : (t('module_perm_' + a) || a);
     const tip = a => (spec.actionTip && spec.actionTip(a)) ? ` title="${escAttr(spec.actionTip(a))}"` : '';
     const thStyle = spec.thStyle || 'width:1%;white-space:nowrap;padding-left:.65rem;padding-right:.65rem';

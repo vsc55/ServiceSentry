@@ -1,0 +1,862 @@
+{# ================================================================
+   Las clases de dispositivo.
+
+   Todas son filas de la tabla `device_type` y todas se editan igual, las once de la siembra
+   incluidas: lo que cambia entre una sembrada y una escrita aquí no es lo que se puede hacer con
+   ella, sino de dónde sale su palabra — la sembrada lleva la clave del catálogo de idiomas y se
+   dice en el idioma de quien mira; la escrita aquí lleva su nombre tal cual.
+
+   **Se relaciona por `uid`**, como todo lo demás del esquema: es lo que guarda cada dispositivo
+   de esa clase. El nombre corto que sale en la columna «Identificador» es para leer —sale de su
+   nombre y no se mueve al renombrarla— pero no apunta a nada.
+
+   **Y la rejilla es la del panel.** La primera se escribió a mano —su propio `.ss-ht-card`, su
+   propia rejilla— al lado de `_cardGrid` + `_entityCard`, que es lo que dibuja las tarjetas de
+   Dispositivos, Sesiones y el resto: salía pegada a los bordes del panel y con otra forma de
+   tarjeta que sus vecinas. Reportado desde la pantalla, y es el mismo error que la tabla.
+
+   **Y la tabla es la del panel.** Esto se escribió a mano —cabecera, barra de filtros, casillas,
+   papelera de lo marcado— teniendo al lado la tabla compartida que usan Dispositivos, Empresas,
+   Clústeres y el inventario. Lo que salía era una lista que se comportaba distinto que todas las
+   demás de su propia sección: sin franja de acento, sin barra de filtros, sin elegir columnas,
+   sin ordenar por una y sin paginar. Reportado desde la pantalla. Ahora es `createListTable`, y
+   aquí queda sólo lo que de verdad es propio: qué dice cada celda y qué se puede hacer con una
+   fila.
+   ================================================================ #}
+
+//: Lo último que contestó el servidor: las clases, cuántos dispositivos lleva cada una, lo que
+//: algún paquete ofrece hacer aquí y cómo se llama cada origen.
+let _htData = null;
+let _htUsage = {};
+let _deviceTypeActions = [];
+let _htSourceSpecs = [];
+
+//: Lo que se está escribiendo en el cuadro de añadir o corregir. `uid` vacío = una nueva.
+let _htDraft = null;
+
+//: Los iconos que se ofrecen de entrada. Una lista corta y a propósito: lo que hace falta es que
+//: la clase se distinga de un vistazo en una lista de cuarenta filas, y elegir entre dos mil
+//: dibujos convierte en tarea lo que era un detalle. Los dos mil están **a un clic**, en la
+//: sección de abajo — que es donde debe estar lo que casi nadie necesita.
+const HT_ICONS = ['bi-hdd-network', 'bi-hdd-rack', 'bi-pc-display', 'bi-hdd-stack',
+                  'bi-boxes', 'bi-ethernet', 'bi-router', 'bi-shield-lock',
+                  'bi-battery-charging', 'bi-printer', 'bi-camera-video', 'bi-wifi',
+                  'bi-telephone', 'bi-tv', 'bi-cpu', 'bi-thermometer-half',
+                  'bi-door-closed', 'bi-lightning-charge', 'bi-usb-drive', 'bi-broadcast'];
+
+//: Todos los que trae la fuente, pedidos **la primera vez que alguien despliega la lista larga**.
+//: Son dos mil nombres y unos 37 KB: mandarlos con cada carga del panel es pagarlos siempre para
+//: que sirvan de vez en cuando. `null` es «todavía no se han pedido», que no es lo mismo que
+//: «no hay»: con los dos escritos igual, el cuadro se quedaría girando para siempre.
+let _htAllIcons = null;
+let _htIconQuery = '';
+let _htIconsOpen = false;
+
+// ── Las maquetas ────────────────────────────────────────────────────────────────────────
+//
+// La misma pregunta mirada de tres maneras, y por eso comparten filtros, selección y paginación:
+// cambiar de maqueta no es cambiar de pantalla.
+//
+// * **tabla** — la de trabajar: el identificador a la vista, las casillas y las dos acciones.
+// * **rejilla** — la de reconocer: el icono grande y el nombre. Es lo que se elige en el
+//   desplegable de un dispositivo, y verlo del tamaño en que se va a leer es la mitad de decidir
+//   si hace falta otra clase.
+// * **recuentos** — la de componer: cuántos lleva cada una, de mayor a menor. Contesta «¿de qué
+//   está hecha la flota?» antes de leer una fila, y pulsar uno lleva a esos dispositivos.
+//
+// `summary` en los recuentos y no `cards`: se le entregan TODAS las filas filtradas en vez de la
+// página, porque un recuento que cambia al pasar de página es peor que no contar.
+const HT_VIEWS = [
+    {id: 'table', label_key: 'srv_view_table', icon: 'bi-table', render: null, mode: 'table'},
+    {id: 'grid', label_key: 'device_types_v_grid', icon: 'bi-grid-3x3-gap',
+     render: '_htGridBody', mode: 'cards'},
+    {id: 'tiles', label_key: 'device_types_v_tiles', icon: 'bi-bar-chart-steps',
+     render: '_htTilesBody', mode: 'summary'},
+];
+const _htView = createViewState('ss_device_types_view', HT_VIEWS, () => {
+    if (typeof _persistTableConfig === 'function') _persistTableConfig();
+    renderDeviceTypes();
+});
+function setDeviceTypesView(id) { _htView.set(id); }
+
+// ── Los datos ───────────────────────────────────────────────────────────────────────────
+
+async function _htLoad() {
+    const d = await apiGet('/api/v1/device_types');
+    _htData = (d && d.types) || [];
+    _htUsage = (d && d.usage) || {};
+    _deviceTypeActions = (d && d.actions) || [];
+    _htSourceSpecs = (d && d.sources) || [];
+    return _htData;
+}
+
+function _htMay() {
+    return (currentUser.permissions || []).includes('devices_edit');
+}
+
+/** Cómo se dice una clase: por el catálogo de idiomas si la sembró la instalación, y con sus
+ *  palabras si la escribió alguien. */
+function _htName(x) {
+    return (x || {}).label || t((x || {}).label_key || '') || (x || {}).slug || '';
+}
+
+function _htUsed(x) {
+    return Number(_htUsage[(x || {}).uid] || 0);
+}
+
+/** Para qué es: lo que escribió alguien de esta casa y, si no hay nada, lo que dice el catálogo
+ *  de idiomas de las once de serie.
+ *
+ *  En este orden por lo mismo que el nombre: desde que alguien la describe con sus palabras, eso
+ *  es lo que quiere leer. Y con la comprobación de que la clave existe —`t()` devuelve la clave
+ *  que se le dio cuando no la encuentra— o una clase de serie sin traducir enseñaría
+ *  `device_type_nas_desc` en la columna donde se espera una frase. */
+function _htDesc(x) {
+    const propia = String((x || {}).description || '');
+    if (propia) return propia;
+    const clave = String((x || {}).desc_key || '');
+    if (!clave) return '';
+    const dicho = t(clave);
+    return dicho === clave ? '' : dicho;
+}
+
+/** Si esa clase la mantiene un origen: tiene el origen **y** cuál de las suyas es.
+ *
+ *  Las dos cosas y no una, aunque hoy no se dé la mitad: una fila con origen y sin identificador
+ *  allí es una que nadie puede volver a encontrar al importar, así que tratarla como mantenida
+ *  sería bloquearle el nombre sin que nada vuelva a escribirlo nunca. */
+function _htLinked(x) {
+    return !!(String((x || {}).source || '') && String((x || {}).external_id || ''));
+}
+
+/** Lo que se puede marcar: **sólo lo que se puede quitar**. Una clase en uso no se borra —el
+ *  servidor se niega— así que una casilla sobre ella lleva a una papelera que promete cinco y
+ *  quita tres. Es la misma regla que ya sigue la lista de copias con las bloqueadas. */
+function _htSelectable(uid) {
+    return Number(_htUsage[String(uid)] || 0) === 0;
+}
+
+/** Cómo se dice un origen. Se cae al identificador tal cual cuando ya no lo declara nadie —el
+ *  proveedor se quitó—: sigue diciendo de dónde vino, que es más de lo que dice un hueco. */
+function _htSourceName(src) {
+    const spec = (_htSourceSpecs || []).find(s => s.id === String(src || '')) || {};
+    return spec.label_key ? t(spec.label_key) : String(src || '');
+}
+
+function _htSourceIcon(src) {
+    const spec = (_htSourceSpecs || []).find(s => s.id === String(src || '')) || {};
+    return spec.icon || 'bi-box-arrow-in-down';
+}
+
+/** De dónde salió, cuando viene de fuera.
+ *
+ *  Vacío es «de esta casa» —lo escrito a mano y lo que puso la siembra— y no lleva chapa: sale en
+ *  casi todas las filas y no distingue nada, así que lo que se lee es ruido repetido y el que sí
+ *  importa —«ésta la trajo Freshservice»— se pierde entre ellas. */
+function _htSourceBadge(x) {
+    const src = String((x || {}).source || '');
+    if (!src) return '';
+    const nombre = _htSourceName(src);
+    return ` <span class="badge bg-body-secondary text-body-secondary border fw-normal"
+        title="${escAttr(tf('device_types_linked', nombre))}"
+        ><i class="bi ${escAttr(_htSourceIcon(src))} me-1"></i>${esc(nombre)}</span>`;
+}
+
+/** Los orígenes que de verdad hay delante.
+ *
+ *  Sacados de las filas y no escritos: esta pantalla no sabe qué proveedores existen, y el día
+ *  que haya un segundo aparece en el filtro solo. */
+function _htSources() {
+    const vistos = [];
+    for (const x of (_htData || [])) {
+        const s = String(x.source || '');
+        if (s && vistos.indexOf(s) < 0) vistos.push(s);
+    }
+    return vistos.sort();
+}
+
+// ── La tabla, que es la del panel ───────────────────────────────────────────────────────
+
+const _HT_COLS = [
+    // Sin columna para el icono: iba delante, sin título, y en el selector de columnas eso es una
+    // entrada en blanco con un candado — una casilla que no se puede tocar y que no dice de qué
+    // es. Reportado desde la pantalla. Va en la celda del nombre, que es donde lo pone
+    // Dispositivos y donde se lee: el dibujo y la palabra juntos.
+    {id: 'name', label: () => t('device_types_name'), sortKey: 'name', always: true},
+    {id: 'description', label: () => t('device_types_desc'), sortKey: 'description'},
+    {id: 'slug', label: () => t('device_types_id'), sortKey: 'slug'},
+    _META_COL.uid,
+    {id: 'source', label: () => t('device_types_origin'), sortKey: 'source'},
+    {id: 'used', label: () => t('device_types_used'), sortKey: 'used'},
+    ..._META_TAIL,
+];
+//: Lo que se ve sin tocar el selector, y **en el orden en que se lee una fila**: qué es, para qué
+//: es, quién la mantiene y cuántos la llevan.
+//:
+//: Los identificadores no: ni el nombre corto ni el `uid` dicen nada mirando la lista —se
+//: consultan el día que hacen falta, y ese día están a un clic en el selector— y puestos siempre
+//: son dos columnas de letra monoespaciada entre las cuatro que sí se leen. Las fechas, lo mismo.
+//: Elegido desde la pantalla.
+const _HT_DEFAULT_COLS = new Set(['description', 'source', 'used']);
+
+let _htVisibleCols = null;
+let _htColOrder = null;
+let _htPage = 1;
+let _htPageSize = null;
+let _htSort = 'name';
+let _htSortDir = 'asc';
+let _htCurrentPage = [];
+let _htSel = new Set();
+
+createListTable({
+    key: 'devicetypes', containerId: 'devicetypes-container', tableId: 'devicetypes-table',
+    accent: 'teal', icon: 'bi-tags', title: () => t('device_types_all'),
+    columns: _HT_COLS, defaultVisible: _HT_DEFAULT_COLS,
+    persist: true, clearLabelKey: 'device_types_all',
+    thClass: {used: 'text-end'},
+    prepare: async () => {
+        if (_htData === null) await _htLoad();
+        return {puede: _htMay()};
+    },
+    rows: () => (_htData || []),
+    rowKey: x => String(x.uid),
+    record: x => x,
+    // Marcar sólo lo que se puede quitar. La tabla compartida dibuja la casilla apagada, que es
+    // mejor que no dibujarla: la columna no se rompe y se ve que ahí hay una fila que no entra.
+    selectable: ctx => ctx.puede,
+    selectableRow: (k) => _htSelectable(k),
+    filters: {
+        fields: () => [
+            {key: 'q', label: () => t('device_types_name'), type: 'search', grow: true,
+             placeholder: () => t('device_types_find')},
+            // «Con dispositivos» contesta de qué se compone la flota; «sin usar» es exactamente
+            // la lista de las que se pueden quitar, que es para lo que está la papelera.
+            {key: 'use', label: () => t('device_types_used'), type: 'select', minWidth: '150px',
+             options: () => [{value: '', label: t('all')},
+                             {value: 'used', label: t('device_types_f_used')},
+                             {value: 'free', label: t('device_types_f_free')}]},
+            {key: 'source', label: () => t('device_types_origin'), type: 'select',
+             minWidth: '150px',
+             options: () => [{value: '', label: t('all')},
+                             {value: '-', label: t('device_types_origin_here')}].concat(
+                 _htSources().map(s => ({value: s, label: _htSourceName(s)})))},
+        ],
+        match: (x, f) => _htMatch(x, f),
+    },
+    sortValue: (x, key) => {
+        if (key === 'used') return _htUsed(x);
+        if (key === 'name') return _htName(x).toLowerCase();
+        if (key === 'source') return _htSourceName(x.source).toLowerCase();
+        return String(x[key] || '').toLowerCase();
+    },
+    cell: (x, colId) => {
+        if (colId === 'name') {
+            return `<td class="fw-semibold"><i class="bi ${
+                escAttr(x.icon || 'bi-hdd-network')} text-muted me-2"></i>${
+                esc(_htName(x))}${_htSourceBadge(x)}</td>`;
+        }
+        if (colId === 'slug') {
+            return `<td><code class="ss-fs-1 text-muted">${esc(x.slug || '')}</code></td>`;
+        }
+        if (colId === 'description') {
+            const dice = _htDesc(x);
+            return `<td class="ss-fs-2 text-muted">${dice
+                ? esc(dice) : '<span class="text-muted">—</span>'}</td>`;
+        }
+        if (colId === 'source') {
+            const src = String(x.source || '');
+            return `<td class="ss-fs-2">${src
+                ? esc(_htSourceName(src))
+                : `<span class="text-muted">${esc(t('device_types_origin_here'))}</span>`}</td>`;
+        }
+        if (colId === 'used') return `<td class="text-end">${_htUsedCell(x)}</td>`;
+        return '<td></td>';
+    },
+    actions: (x, ctx) => _htRowActions(x, ctx),
+    actionsVisible: ctx => ctx.puede,
+    bulkBar: (ctx, sel) => _htSelBarHtml(ctx, sel),
+    bodyMode: () => _htView.mode(),
+    showChooser: mode => mode === 'table',
+    cardsBody: (page, ctx, todas) => _htView.body(page, ctx, todas),
+    headerLead: () => _htView.switcher('setDeviceTypesView'),
+    headerButtons: ctx => (ctx.puede ? _htNewHtml() : ''),
+    persistExtra: () => ({view: _htView.id()}),
+    applyExtra: cfg => _htView.apply(cfg && cfg.view),
+    refreshButton: () => `<button class="btn btn-sm btn-secondary" onclick="_htReload()"
+        title="${escAttr(t('refresh_tt'))}"><i class="bi bi-arrow-clockwise me-1"></i>${
+        esc(t('refresh'))}</button>`,
+    emptyState: () => `<div class="text-center py-5 text-muted">
+        <i class="bi bi-tags ss-empty-icon"></i><span>${esc(t('device_types_none'))}</span></div>`,
+    state: {
+        visible: {get: () => _htVisibleCols, set: v => { _htVisibleCols = v; }},
+        order: {get: () => _htColOrder, set: v => { _htColOrder = v; }},
+        page: {get: () => _htPage, set: v => { _htPage = v; }},
+        pageSize: {get: () => _htPageSize, set: v => { _htPageSize = v; }},
+        sort: {get: () => _htSort, set: v => { _htSort = v; }},
+        sortDir: {get: () => _htSortDir, set: v => { _htSortDir = v; }},
+        selected: () => _htSel,
+        currentPage: {get: () => _htCurrentPage, set: v => { _htCurrentPage = v; }},
+    },
+    globalPrefix: {
+        render: 'renderDeviceTypes', goPage: '_htGoPage', changePageSize: '_htChangePageSize',
+        sort: '_htSortBy', toggleCol: '_htToggleCol', resetCols: '_htResetCols',
+        saveOrder: '_htSaveColOrder', selectAll: '_htSelectAll', toggleOne: '_htSelectOne',
+        initFeatures: '_htInitFeatures',
+    },
+});
+
+/** Si esa clase entra en lo que se está mirando: los dos filtros **y** lo que se ha escrito.
+ *
+ *  Con nombre y fuera del descriptor de la tabla a propósito: es la única decisión de esta
+ *  pantalla que puede equivocarse en silencio —esconder una fila que debía salir no da ningún
+ *  error— y desde dentro del objeto que se le pasa a `createListTable` no hay cómo llamarla para
+ *  probarla. */
+function _htMatch(x, f) {
+    const usados = _htUsed(x);
+    if (f.use === 'used' && !usados) return false;
+    if (f.use === 'free' && usados) return false;
+    const src = String(x.source || '');
+    // «De aquí» es todo lo que no mantiene nadie de fuera: lo escrito a mano y lo que puso la
+    // siembra, que es lo mismo desde el primer día.
+    if (f.source === '-' && src) return false;
+    if (f.source && f.source !== '-' && src !== f.source) return false;
+    const q = (f.q || '').toLowerCase();
+    if (!q) return true;
+    // Por lo que se lee, por el nombre corto Y por la descripción: quien busca `nas` puede estar
+    // mirando «NAS / Almacenamiento», y quien busca «rack» lo escribió en la descripción.
+    return `${_htName(x)} ${x.slug || ''} ${_htDesc(x)} ${src}`
+        .toLowerCase().includes(q);
+}
+
+/** Volver a pedirlo todo. Después de cada escritura, que es cuando puede haber cambiado algo. */
+async function _htReload() {
+    _htData = null;
+    await renderDeviceTypes();
+}
+
+/** El recuento, que **lleva a esos dispositivos**: la pregunta que sigue a «ésta la llevan doce»
+ *  es «¿cuáles?», y rehacerlo con un filtro a mano es hacer a mano lo que ya se sabe. */
+function _htUsedCell(x) {
+    const n = _htUsed(x);
+    if (!n) return `<span class="text-muted ss-fs-1">—</span>`;
+    return `<button class="badge bg-body-secondary text-body border fw-normal"
+        onclick="event.stopPropagation();_htGoDevices(${jsStr(x.uid)})"
+        title="${escAttr(t('device_types_go_tt'))}">${esc(String(n))}</button>`;
+}
+
+/** Los dos botones de una fila. Compartidos por la tabla y la rejilla porque son los mismos —
+ *  una tarjeta sin papelera sería la misma lista con una acción menos según cómo se mire. */
+function _htRowActions(x, ctx) {
+    if (!ctx.puede) return '';
+    const usados = _htUsed(x);
+    return `<button class="btn btn-sm btn-primary py-0 px-1 me-1"
+            title="${escAttr(t(_htLinked(x) ? 'device_types_view_title' : 'edit'))}"
+            onclick="_htOpenEdit(${jsStr(x.uid)})"
+            ><i class="bi bi-${_htLinked(x) ? 'eye' : 'pencil'}"></i></button>
+        <button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete_tt'))}"
+            ${usados ? 'disabled' : ''} onclick="_htDrop(${jsStr(x.uid)})"
+            ><i class="bi bi-trash3"></i></button>`;
+}
+
+/** La papelera de lo marcado. Sólo con algo marcado: una barra vacía es sitio ocupado. */
+function _htSelBarHtml(ctx, sel) {
+    if (!ctx.puede || !sel || !sel.size) return '';
+    return `<div class="d-flex align-items-center gap-1 border-start ps-2 ms-1">
+        <span class="badge bg-secondary rounded-pill">${esc(String(sel.size))}</span>
+        <button class="btn btn-sm btn-danger py-0 px-2" onclick="_htDropMany()"
+            title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>
+        <button class="btn btn-sm btn-secondary py-0 px-2"
+            onclick="_htSel.clear();renderDeviceTypes()"
+            title="${escAttr(t('clear_selection'))}"><i class="bi bi-x-lg"></i></button>
+    </div>`;
+}
+
+/** El botón de añadir y, colgando de él, las otras formas de que aparezca una clase.
+ *
+ *  La misma forma que en Empresas y en Dispositivos, y por lo mismo: poner las básicas y traerlas
+ *  de fuera son **maneras de que aparezca una clase**, no cosas distintas. Aquí siempre hay algo
+ *  que colgar —«añadir las básicas» no depende de ningún conector— así que la pestaña no
+ *  desaparece; lo que varía es lo que cuelga de ella. */
+function _htNewHtml() {
+    const nuevo = `<button class="btn btn-sm btn-success" onclick="_htOpenEdit('')">
+        <i class="bi bi-plus-lg me-1"></i>${esc(t('device_types_new'))}</button>`;
+    const perms = currentUser.permissions || [];
+    // Las de vincular no: ésas van dentro del cuadro de una clase, porque son un acto sobre UNA.
+    const otras = (_deviceTypeActions || []).filter(
+        a => !a.link && (!a.perm || perms.includes(a.perm)));
+    return `<div class="btn-group ms-1">
+        ${nuevo}
+        <button class="btn btn-sm btn-success dropdown-toggle dropdown-toggle-split"
+            data-bs-toggle="dropdown" aria-expanded="false"
+            title="${escAttr(t('device_types_more'))}"
+            ><span class="visually-hidden">${esc(t('device_types_more'))}</span></button>
+        <ul class="dropdown-menu dropdown-menu-end ss-dropdown-sm">
+            <li><button class="dropdown-item" type="button" onclick="_htSeed()"
+                title="${escAttr(t('device_types_seed_tt'))}"
+                ><i class="bi bi-arrow-counterclockwise me-2"></i>${
+                esc(t('device_types_seed'))}</button></li>
+            ${otras.length ? '<li><hr class="dropdown-divider"></li>' : ''}
+            ${otras.map(a => `<li><button class="dropdown-item" type="button"
+                onclick="${escAttr(a.fn)}()"
+                title="${escAttr(a.tooltip_key ? t(a.tooltip_key) : '')}"
+                ><i class="bi ${escAttr(a.icon || 'bi-box-arrow-in-down')} me-2"></i>${
+                esc(a.label_key ? t(a.label_key) : a.id)}</button></li>`).join('')}
+        </ul>
+    </div>`;
+}
+
+// ── Las otras dos maquetas ──────────────────────────────────────────────────────────────
+
+/** **Rejilla.** La misma clase mirada como objeto y no como fila: el icono que la distingue, su
+ *  nombre, para qué es y cuántos la llevan.
+ *
+ *  Con `_cardGrid` + `_entityCard`, que son las piezas con las que están hechas las tarjetas de
+ *  Dispositivos, Sesiones, Empresas y el resto. La primera versión traía rejilla y tarjeta
+ *  propias: salía pegada a los bordes —los márgenes los pone `_cardGrid`— y con otra forma de
+ *  tarjeta que sus vecinas, en la misma sección. Reportado desde la pantalla, y es la misma
+ *  lección que la tabla dos pantallas antes: **aquí se declara qué dice una tarjeta, no cómo se
+ *  dibuja una tarjeta.** */
+function _htGridBody(filas, ctx) {
+    if (!filas.length) return '';
+    return _cardGrid(filas.map(x => {
+        const uid = String(x.uid);
+        const n = _htUsed(x);
+        return _entityCard({
+            icon: x.icon || 'bi-hdd-network', accentClass: 'teal',
+            selected: _htSel.has(uid),
+            // Sólo lo que se puede quitar lleva casilla, igual que en la tabla: marcar una en uso
+            // lleva a una papelera que promete cinco y quita tres.
+            toggle: (ctx.puede && _htSelectable(uid))
+                ? `_htSelectOne(${jsStr(uid)}, this.checked)` : '',
+            title: `<span class="fw-semibold">${esc(_htName(x))}</span>`,
+            badges: _htSourceBadge(x),
+            subtitle: `<code>${esc(x.slug || '')}</code>${
+                _htDesc(x) ? ' · ' + esc(_htDesc(x)) : ''}`,
+            chips: n ? _htUsedCell(x) : '',
+            actions: _htRowActions(x, ctx),
+        });
+    }).join(''));
+}
+
+/** **Recuentos.** De qué está hecha la flota, de mayor a menor y antes de leer una fila. Las que
+ *  no lleva nadie van al final y apagadas: aquí se mira de qué hay, no qué sobra. */
+function _htTilesBody(filas) {
+    if (!filas.length) return '';
+    const orden = [...filas].sort((a, b) => (_htUsed(b) - _htUsed(a))
+        || String(_htName(a)).localeCompare(String(_htName(b))));
+    return `<div class="ss-tiles">${orden.map(x => {
+        const n = _htUsed(x);
+        return `<button class="ss-tile${n ? '' : ' opacity-50'}"
+            ${n ? `onclick="_htGoDevices(${jsStr(x.uid)})"
+                  title="${escAttr(t('device_types_go_tt'))}"` : ''}>
+            <span class="ss-tile-k"><i class="bi ${escAttr(x.icon || 'bi-hdd-network')} me-1"
+                ></i>${esc(_htName(x))}</span>
+            <span class="ss-tile-v">${esc(String(n))}</span>
+        </button>`; }).join('')}</div>`;
+}
+
+/** Ir a los dispositivos de esa clase: la sección de Dispositivos, en la vista **por tipo**, con
+ *  su carril abierto.
+ *
+ *  Las tres cosas en este orden y **un solo dibujado al final**: la vista y el carril redibujan
+ *  cada uno por su cuenta, así que hacerlo con ellos pinta la lista dos veces, y la primera con
+ *  la vista que todavía no es. */
+function _htGoDevices(uid) {
+    _htCloseStack();
+    // Los dispositivos de una clase son la flota de Infraestructura en su carril, agrupada por
+    // clase y con ésta elegida. El carril guarda su elección fuera del cuerpo —el cuerpo se
+    // rehace en cada dibujado— así que se pone en los dos sitios: la variable, para este
+    // dibujado, y el almacén, para que siga puesta al volver.
+    try {
+        localStorage.setItem('ss_infra_group_by', 'device_type');
+        localStorage.setItem('ss_infra_rail_pick', String(uid));
+    } catch (_) {}
+    _infraGroupBy = 'device_type';
+    _infraRailPick = String(uid);
+    _infraView.apply('rail');
+    if (typeof _navTab === 'function') _navTab('#tab-infra');
+    infraOpen('');
+}
+
+// ── Añadir y corregir, en un cuadro ─────────────────────────────────────────────────────
+//
+// Y no en un formulario encima de la lista: son dos campos que se rellenan una vez y se cierran.
+
+function _htOpenEdit(uid) {
+    const fila = (_htData || []).find(x => x.uid === String(uid || '')) || {};
+    _htDraft = {uid: String(uid || ''),
+                slug: String(fila.slug || ''),
+                name: uid ? _htName(fila) : '',
+                // Lo GUARDADO, y aparte lo que se enseña cuando no hay nada guardado. Prellenar
+                // el campo con la traducción sería escribirla en la columna al primer guardado
+                // —aunque se viniera a cambiar el icono— y con ella el idioma de quien pulsó.
+                description: String(fila.description || ''),
+                desc_default: uid ? _htDesc(Object.assign({}, fila, {description: ''})) : '',
+                icon: (uid ? fila.icon : '') || HT_ICONS[0],
+                // Lo que la mantiene, si es que la mantiene alguien. De aquí sale que el nombre
+                // no se pueda teclear — el icono sí, que allí no existe.
+                source: String(fila.source || ''),
+                external_id: String(fila.external_id || ''),
+                ro: _htLinked(fila)};
+    _htIconQuery = '';
+    _htIconsOpen = false;
+    const titulo = document.getElementById('deviceTypeEditTitle');
+    if (titulo) {
+        titulo.textContent = t(_htDraft.ro ? 'device_types_view_title'
+                                : (uid ? 'device_types_edit_title' : 'device_types_new_title'));
+    }
+    _htDrawEdit();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceTypeEditModal')).show();
+    setTimeout(() => { const el = document.getElementById('htName'); if (el) el.focus(); }, 200);
+}
+
+/** El cuerpo del cuadro. El mismo para crear y para corregir: son los mismos campos, y con dos
+ *  formularios lo que pasa es que uno se queda sin el arreglo que se le hace al otro.
+ *
+ *  **En dos columnas**, y el reparto no es decorativo: lo que se escribe —nombre y descripción—
+ *  es estrecho por naturaleza y cabe en una columna; los iconos son una rejilla, y una rejilla
+ *  necesita ancho. Puestos en fila única, la lista larga salía de cuatro en cuatro con un scroll
+ *  interminable mientras la mitad del cuadro estaba vacía. Reportado desde la pantalla.
+ *
+ *  En un panel estrecho las dos columnas se apilan solas (`col-12 col-md-*`), que es lo que hace
+ *  que el mismo cuadro valga en una pantalla ancha y en media. */
+function _htDrawEdit() {
+    const caja = document.getElementById('deviceTypeEditBody');
+    if (!caja || !_htDraft) return;
+    const ro = !!_htDraft.ro;
+    caja.innerHTML = `
+    <div class="row g-3">
+        <div class="col-12 col-md-5">
+            <label class="form-label small fw-semibold mb-1" for="htName">${
+                esc(t('device_types_name'))}</label>
+            <input type="text" class="form-control form-control-sm" id="htName" maxlength="60"
+                   value="${escAttr(_htDraft.name)}"${ro ? ' readonly' : ''}
+                   placeholder="${escAttr(t('device_types_name_ph'))}"
+                   oninput="_htDraft.name=this.value"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();_htSave();}">
+            ${ro ? `<div class="form-text small">${esc(tf('device_types_linked',
+                _htSourceName(_htDraft.source)))}</div>` : ''}
+            <label class="form-label small fw-semibold mb-1 mt-3" for="htDesc">${
+                esc(t('device_types_desc'))}</label>
+            <textarea class="form-control form-control-sm" id="htDesc" maxlength="200" rows="4"
+                      placeholder="${escAttr(_htDraft.desc_default
+                                             || t('device_types_desc_ph'))}"
+                      oninput="_htDraft.description=this.value"
+                      >${esc(_htDraft.description)}</textarea>
+            <div class="form-text small">${esc(t('device_types_desc_hint'))}</div>
+            ${_htDraft.uid ? `<div class="form-text small mt-3 mb-1">${
+                esc(tf('device_types_id_fixed', _htDraft.slug))}</div>
+            <label class="form-label small fw-semibold mb-1" for="htUid">${
+                esc(t('device_types_uid'))}</label>
+            <div class="input-group input-group-sm">
+                <input type="text" class="form-control form-control-sm font-monospace text-muted"
+                       id="htUid" value="${escAttr(_htDraft.uid)}" readonly>
+                <button class="btn btn-sm btn-secondary" type="button"
+                    onclick="_copyToClipboard(${jsStr(_htDraft.uid)})"
+                    title="${escAttr(t('copy_uid'))}"><i class="bi bi-copy"></i></button>
+            </div>` : ''}
+        </div>
+        <div class="col-12 col-md-7">
+            <label class="form-label small fw-semibold mb-1">${esc(t('device_types_icon'))}</label>
+            <div class="ss-icon-grid" id="htIconGrid">${_htIconGridHtml()}</div>
+            ${_htAllIconsHtml()}
+        </div>
+    </div>
+    ${_htExternalHtml()}`;
+}
+
+/** La rejilla corta. **Dibujados y no por su nombre**: elegir entre `hdd-stack` y `hdd-network`
+ *  leyendo dos palabras es adivinar cuál era cuál, y lo que se está eligiendo es un dibujo.
+ *
+ *  También cuando la clase viene de fuera: lo que mantiene el origen es el nombre, y el icono no
+ *  existe allí. */
+function _htIconsShort() {
+    const puestos = HT_ICONS.slice();
+    // El que lleva, si no es de los veinte: sin esto, abrir una clase con un icono de la lista
+    // larga enseñaría veinte dibujos y ninguno marcado — el suyo no estaría.
+    if (_htDraft && _htDraft.icon && puestos.indexOf(_htDraft.icon) < 0) {
+        puestos.unshift(_htDraft.icon);
+    }
+    return puestos;
+}
+
+function _htIconGridHtml() {
+    return _htIconsShort().map(i => `<button type="button" class="ss-icon-pick${
+        i === _htDraft.icon ? ' active' : ''}" onclick="_htPickIcon(${jsStr(i)})"
+        title="${escAttr(i.replace('bi-', ''))}"><i class="bi ${escAttr(i)}"></i></button>`
+    ).join('');
+}
+
+/** Y los dos mil, detrás de un desplegable.
+ *
+ *  Plegado de salida y pedido sólo al abrirlo: son dos mil nombres y unos 37 KB, y lo que hace
+ *  falta casi siempre son los veinte de arriba. Abrirlo es decir «ninguno de éstos me vale», que
+ *  es exactamente cuándo compensa pagarlo. */
+function _htAllIconsHtml() {
+    if (!_htIconsOpen) {
+        return `<button type="button" class="btn btn-sm btn-secondary mt-2"
+            onclick="_htOpenAllIcons()"><i class="bi bi-three-dots me-1"></i>${
+            esc(t('device_types_icons_all'))}</button>`;
+    }
+    if (_htAllIcons === null) {
+        return `<div class="d-flex align-items-center gap-2 mt-2 text-muted small">
+            <div class="spinner-border spinner-border-sm"></div>${
+            esc(t('device_types_icons_load'))}</div>`;
+    }
+    // Con alto propio y su propio scroll: son dos mil dibujos, y sin acotarlos el cuadro crece
+    // hasta que lo único que se puede hacer con él es bajar.
+    return `<div class="mt-2">
+        <input type="search" class="form-control form-control-sm mb-2" id="htIconSearch"
+            value="${escAttr(_htIconQuery)}"
+            placeholder="${escAttr(tf('device_types_icons_find',
+                String(_htIconsExtra().length)))}"
+            oninput="_htIconFilter(this.value)">
+        <div class="ss-icon-grid ss-icon-grid-tall ss-vscroll"
+             id="htAllIconGrid">${_htAllIconRowsHtml()}</div>
+    </div>`;
+}
+
+/** Los que NO están arriba. La lista larga los traía todos, así que los veinte de la rejilla
+ *  corta salían **dos veces** en el mismo cuadro — y el marcado aparecía dos veces con él, que
+ *  es lo que hace dudar de si son el mismo. Reportado desde la pantalla.
+ *
+ *  **De la misma cuenta que la de arriba** (`_htIconsShort`) y no de `HT_ICONS`: la corta añade
+ *  delante el icono que lleva la clase cuando no es de los veinte, así que restar sólo los veinte
+ *  dejaría repetido justo ése — el único que quien abre el cuadro está mirando.
+ *
+ *  Con nombre y aparte del dibujado para poder probarlo: que una lista tenga de más no da ningún
+ *  error, sólo se ve. */
+function _htIconsExtra() {
+    const arriba = new Set(_htIconsShort());
+    return (_htAllIcons || []).filter(i => !arriba.has(i));
+}
+
+/** Sólo la rejilla larga. **Trescientos como mucho**: dibujar dos mil botones cada vez que se
+ *  teclea una letra convierte el buscador en una pantalla que se atasca, y quien busca «wifi»
+ *  tiene lo que quiere entre los primeros. */
+function _htAllIconRowsHtml() {
+    const q = _htIconQuery.trim().toLowerCase();
+    const todos = _htIconsExtra();
+    const vistos = (q ? todos.filter(i => i.includes(q)) : todos).slice(0, 300);
+    if (!vistos.length) {
+        return `<div class="text-muted small">${esc(t('device_types_icons_nohit'))}</div>`;
+    }
+    return vistos.map(i => `<button type="button" class="ss-icon-pick${
+        i === _htDraft.icon ? ' active' : ''}" onclick="_htPickIcon(${jsStr(i)})"
+        title="${escAttr(i.replace('bi-', ''))}"><i class="bi ${escAttr(i)}"></i></button>`
+    ).join('');
+}
+
+async function _htOpenAllIcons() {
+    _htIconsOpen = true;
+    _htDrawEdit();
+    if (_htAllIcons === null) {
+        const d = await apiGet('/api/v1/ui/icons');
+        // Una lista vacía es una respuesta —la hoja de la fuente no se pudo leer— y tiene que
+        // quedar escrita como tal: con `null` el cuadro se quedaría girando para siempre.
+        _htAllIcons = (d && d.icons) || [];
+        _htDrawEdit();
+    }
+}
+
+function _htIconFilter(v) {
+    _htIconQuery = String(v || '');
+    const rejilla = document.getElementById('htAllIconGrid');
+    if (rejilla) rejilla.innerHTML = _htAllIconRowsHtml();
+}
+
+/** Marcar uno. Sólo las rejillas se rehacen: redibujar el cuadro entero le quitaría el cursor a
+ *  quien todavía está escribiendo el nombre o buscando un icono. */
+function _htPickIcon(icono) {
+    if (!_htDraft) return;
+    _htDraft.icon = String(icono || '');
+    const corta = document.getElementById('htIconGrid');
+    if (corta) corta.innerHTML = _htIconGridHtml();
+    const larga = document.getElementById('htAllIconGrid');
+    if (larga) larga.innerHTML = _htAllIconRowsHtml();
+}
+
+/** **Al pie, bajo un separador**: todo lo que tiene que ver con sistemas de fuera.
+ *
+ *  Los dos casos en el mismo sitio y con el mismo rótulo: si esta clase la mantiene alguien —con
+ *  su botón de desvincular— o si todavía no y se puede vincular. Poner cada uno en una punta del
+ *  cuadro obliga a buscar en dos sitios lo mismo.
+ *
+ *  Y abajo porque es un extra: arriba empujaba el nombre y el icono —que es a lo que se viene—
+ *  para hablar de algo que la mayoría de las instalaciones no tiene. */
+function _htExternalHtml() {
+    if (!_htDraft || !_htDraft.uid) return '';
+    const titulo = `<div class="small fw-semibold text-muted text-uppercase ss-fs-1">${
+        esc(t('device_types_link_title'))}</div>`;
+    if (_htDraft.ro) {
+        return `<hr class="my-3">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <div class="flex-grow-1">
+                ${titulo}
+                <div class="small text-muted">${esc(tf('device_type_managed',
+                    _htSourceName(_htDraft.source)))}</div>
+            </div>
+            <button type="button" class="btn btn-sm btn-warning text-nowrap"
+                onclick="_htUnlink()">${esc(t('device_types_unlink'))}</button>
+        </div>`;
+    }
+    const perms = currentUser.permissions || [];
+    const vincular = (_deviceTypeActions || []).filter(
+        a => a.link && (!a.perm || perms.includes(a.perm)));
+    if (!vincular.length) return '';
+    return `<hr class="my-3">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <div class="flex-grow-1">
+            ${titulo}
+            <div class="small text-muted">${esc(t('device_types_link_hint'))}</div>
+        </div>
+        ${vincular.map(a => `<button type="button" class="btn btn-sm btn-secondary"
+            onclick="${escAttr(a.fn)}(${jsStr(_htDraft.uid)})"
+            ><i class="bi ${escAttr(a.icon || 'bi-link-45deg')} me-1"></i>${
+            esc(a.label_key ? t(a.label_key) : a.id)}</button>`).join('')}
+    </div>`;
+}
+
+/** Desvincularla de su origen. Pregunta antes: deja de actualizarse sola, y eso no se descubre
+ *  pulsando. No borra nada — ni la clase, ni los dispositivos que la llevan puesta. */
+function _htUnlink() {
+    const uid = (_htDraft || {}).uid;
+    if (!uid) return;
+    showConfirmModal(tf('device_types_unlink_q', _htDraft.name || uid), async () => {
+        const r = await apiDelete('/api/v1/device_types/' + encodeURIComponent(uid) + '/link');
+        if (!r || r.status !== 200) {
+            return showToast((r && r.data && r.data.error) || t('save_file_error'), 'danger');
+        }
+        showToast(t('saved'), 'success');
+        _htCloseStack();
+        _htDraft = null;
+        await _htRefresh();
+    });
+}
+
+/** Vincularla con una de fuera. Lo llama el proveedor cuando quien mira ha elegido cuál: aquí no
+ *  se sabe qué clases tiene nadie, y por eso la elección la dibuja quien las trae. */
+async function deviceTypeLinkTo(uid, source, externalId) {
+    const r = await apiSend('POST', '/api/v1/device_types/' + encodeURIComponent(uid) + '/link',
+                            {source: source, external_id: externalId});
+    if (!r.ok) return showToast(r.error || t('save_file_error'), 'danger');
+    showToast(t('saved'), 'success');
+    _htCloseStack();
+    _htDraft = null;
+    await _htRefresh();
+}
+
+/** Cerrar lo que haya abierto encima de la pantalla de clases.
+ *
+ *  Por NOMBRE y no por quién lo abrió: el selector lo dibuja el proveedor, así que la lista de
+ *  cuadros que pueden quedar encima crece con cada uno que se declare. **El de arriba primero**,
+ *  o el de debajo se lleva el fondo del que sigue abierto — se veía «Guardado» y la pantalla no
+ *  se movía. */
+function _htCloseStack() {
+    for (const id of ['fsTypesModal', 'deviceTypeEditModal']) {
+        const el = document.getElementById(id);
+        if (el && el.classList && el.classList.contains('show')) {
+            bootstrap.Modal.getOrCreateInstance(el).hide();
+        }
+    }
+}
+
+async function _htSave() {
+    if (!_htDraft) return;
+    const nombre = String(_htDraft.name || '').trim();
+    if (!nombre) return showToast(t('device_type_name_required'), 'danger');
+    const cuerpo = {name: nombre, icon: _htDraft.icon || '',
+                    description: String(_htDraft.description || '')};
+    const r = _htDraft.uid
+        ? await apiSend('PUT', '/api/v1/device_types/' + encodeURIComponent(_htDraft.uid), cuerpo)
+        : await apiSend('POST', '/api/v1/device_types', cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_file_error'), 'danger');
+    showToast(t('saved'), 'success');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceTypeEditModal')).hide();
+    _htDraft = null;
+    await _htRefresh();
+}
+
+/** Volver a poner las básicas que falten. Sin preguntar: no pisa nada —lo que ya está se queda
+ *  como está— y lo que hace es añadir, que se deshace borrando. */
+async function _htSeed() {
+    const r = await apiSend('POST', '/api/v1/device_types/seed', {});
+    if (!r.ok) return showToast(r.error || t('save_file_error'), 'danger');
+    const n = ((r.data || {}).added || []).length;
+    showToast(n ? tf('device_types_seeded', String(n)) : t('device_types_seeded_none'),
+              n ? 'success' : 'info');
+    if (n) await _htRefresh();
+}
+
+/** Quitar una. Pregunta antes y el botón ya viene apagado cuando la lleva puesta alguien: el
+ *  servidor se niega igualmente, pero enterarse al pulsar es enterarse tarde. */
+function _htDrop(uid) {
+    const fila = (_htData || []).find(x => x.uid === String(uid)) || {};
+    showConfirmModal(tf('device_types_drop_q', _htName(fila)), async () => {
+        const r = await apiDelete('/api/v1/device_types/' + encodeURIComponent(uid));
+        if (!r || r.status !== 200) {
+            return showToast((r && r.data && r.data.error) || t('save_file_error'), 'danger');
+        }
+        showToast(t('deleted'), 'success');
+        await _htRefresh();
+    });
+}
+
+/** Quitar las marcadas. Una petición por clase y no una en bloque, a propósito y como la lista de
+ *  copias: cada borrado deja su propia línea de auditoría —que es la pregunta que se le hace a
+ *  ese registro— y uno que falle no se lleva a los demás por delante.
+ *
+ *  Con una sola marcada se usa el diálogo de siempre, que **dice su nombre**: es más útil que un
+ *  «¿quitar 1 clases?», y es el mismo texto que sale por el botón de la fila. */
+function _htDropMany() {
+    const uids = Array.from(_htSel);
+    if (!uids.length) return;
+    if (uids.length === 1) { _htDrop(uids[0]); _htSel.clear(); return; }
+    showConfirmModal(tf('device_types_drop_many_q', String(uids.length)), async () => {
+        let hechas = 0;
+        const fallos = [];
+        for (const uid of uids) {
+            const r = await apiDelete('/api/v1/device_types/' + encodeURIComponent(uid));
+            if (r && r.status === 200) hechas += 1;
+            else fallos.push(uid);
+        }
+        _htSel.clear();
+        if (hechas) showToast(tf('device_types_dropped_n', String(hechas)), 'success');
+        if (fallos.length) {
+            showToast(tf('device_types_drop_failed', String(fallos.length)), 'danger');
+        }
+        await _htRefresh();
+    });
+}
+
+/** Volver a pedir la lista **y poner al día lo que ya está dibujado**.
+ *
+ *  `DEVICE_TYPES` lo trae la página al cargar, así que una clase creada aquí no existiría para el
+ *  desplegable de la ficha, ni para el filtro de la lista, ni para los iconos — hasta un F5. Y
+ *  esta pantalla es la que acaba de crearla. */
+async function _htRefresh() {
+    await _htLoad();
+    // Los cuatro mapas, y los dos de la palabra se VACÍAN antes: una clase sembrada que alguien
+    // acaba de renombrar deja de traer su clave de idioma, y la entrada que quedara ahí seguiría
+    // diciendo «NAS / Almacenamiento» después de llamarla «Cabina de discos».
+    DEVICE_TYPES.length = 0;
+    Object.keys(DEVICE_TYPE_LABELS).forEach(k => delete DEVICE_TYPE_LABELS[k]);
+    Object.keys(DEVICE_TYPE_KEYS).forEach(k => delete DEVICE_TYPE_KEYS[k]);
+    (_htData || []).forEach(x => {
+        DEVICE_TYPES.push(x);
+        DEVICE_TYPE_ICONS[x.uid] = x.icon || 'bi-hdd-network';
+        DEVICE_TYPE_SLUGS[x.uid] = x.slug || '';
+        if (x.label) DEVICE_TYPE_LABELS[x.uid] = x.label;
+        if (x.label_key) DEVICE_TYPE_KEYS[x.uid] = x.label_key;
+    });
+    // Lo marcado que ya no existe se suelta: un nombre que quedara ahí mandaría un borrado de
+    // algo que otro acaba de quitar.
+    const vivos = new Set((_htData || []).map(x => String(x.uid)));
+    for (const uid of Array.from(_htSel)) { if (!vivos.has(uid)) _htSel.delete(uid); }
+    if (document.getElementById('devicetypes-container')) await renderDeviceTypes();
+    // Y lo que hubiera dibujado con la lista vieja: la ficha abierta detrás y la lista de
+    // dispositivos de detrás de ella.
+    if (typeof _renderDeviceModalBody === 'function' && _deviceDraft) _renderDeviceModalBody();
+    if (typeof renderServers === 'function'
+        && document.getElementById('servers-container')) renderServers();
+}

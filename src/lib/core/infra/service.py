@@ -53,13 +53,13 @@ def split_row(name: str, pattern: str) -> tuple:
     return (m.group('row') or text).strip(), (m.groupdict().get('group') or '').strip()
 
 # What a machine IS, for a screen that may not touch it. Deliberately a whitelist and not
-# "the record minus a few keys": the host record carries `profiles`, which holds the bound
+# "the record minus a few keys": the device record carries `profiles`, which holds the bound
 # credential of every protocol that reaches it, and a projection written as a subtraction is
 # one field away from shipping those the day somebody adds a key.
-_HOST_FIELDS = ('uid', 'name', 'address', 'kind', 'device_type', 'os', 'virtual',
+_DEVICE_FIELDS = ('uid', 'name', 'address', 'kind', 'device_type', 'os', 'virtual',
                 'maintenance',
                 # What the machine SAID it runs, where nobody has chosen. Not the setting —
-                # the answer the setting stands for; see `enrich_hosts`.
+                # the answer the setting stands for; see `enrich_devices`.
                 'os_auto',
                 # …and who made it, which one it is, and the mark to draw for the maker. The
                 # registry holds none of these: they are the device's own word, and until now
@@ -72,30 +72,30 @@ _HOST_FIELDS = ('uid', 'name', 'address', 'kind', 'device_type', 'os', 'virtual'
                 'watch')
 
 
-def fleet_row(host: dict) -> dict:
-    """One host, projected to what the live section shows."""
-    out = {k: host.get(k) for k in _HOST_FIELDS}
-    out['tags'] = list(host.get('tags') or [])
+def fleet_row(device: dict) -> dict:
+    """One device, projected to what the live section shows."""
+    out = {k: device.get(k) for k in _DEVICE_FIELDS}
+    out['tags'] = list(device.get('tags') or [])
     # A dict either way: the row is JSON, and a screen that has to test for null before it can
     # ask for a name is a screen with two shapes to draw.
-    out['brand'] = dict(host.get('brand') or {})
-    out['virtual'] = bool(host.get('virtual'))
-    out['maintenance'] = bool(host.get('maintenance'))
-    # A host with no enabled checks has no status at all (see hosts.service._host_statuses),
+    out['brand'] = dict(device.get('brand') or {})
+    out['virtual'] = bool(device.get('virtual'))
+    out['maintenance'] = bool(device.get('maintenance'))
+    # A device with no enabled checks has no status at all (see devices.service._device_statuses),
     # and that is not the same as "fine". The empty string travels as it is so the screen can
     # say "not watched" instead of painting a machine nobody is looking at as OK.
-    out['status'] = str(host.get('status') or '')
+    out['status'] = str(device.get('status') or '')
     out['watch'] = [{'module': w['module'], 'row': w['row'],
                      # …and what the row was marked AS. Without it the screen can say a port
                      # is watched and not that it is the line out, which is the whole point of
                      # having said so.
                      'role': str(w.get('role') or '')}
-                    for w in (host.get('watch') or ())
+                    for w in (device.get('watch') or ())
                     if isinstance(w, dict) and w.get('module') and w.get('row')]
     return out
 
 
-def fleet(hosts: list) -> list:
+def fleet(devices: list) -> list:
     """The fleet, newest problem first.
 
     Ordered by STATE and not alphabetically: this list is opened when something is wrong, and
@@ -104,7 +104,7 @@ def fleet(hosts: list) -> list:
     reads as a list of machines rather than a shuffling one.
     """
     rank = {'error': 0, 'warning': 1, '': 2, 'ok': 3}
-    return sorted((fleet_row(h) for h in hosts or ()),
+    return sorted((fleet_row(h) for h in devices or ()),
                   key=lambda h: (rank.get(h['status'], 2), str(h.get('name') or '').lower()))
 
 
@@ -171,7 +171,7 @@ def sources_of(fields_by_module: dict, declared: dict | None = None) -> dict:
     return out
 
 
-def fleet_identity(status_raw: dict, hosts: list, sources: dict | None = None) -> dict:
+def fleet_identity(status_raw: dict, devices: list, sources: dict | None = None) -> dict:
     """``{uid: {os, vendor, model, brand}}`` for a whole fleet, one pass per machine.
 
     What the screens want out of the recorded state, worked out where the recorded state is
@@ -179,10 +179,10 @@ def fleet_identity(status_raw: dict, hosts: list, sources: dict | None = None) -
     with a setting to lose to, and skipping the rest of the fleet would mean a switch whose OS
     somebody pinned also lost its manufacturer.
     """
-    from lib.core.hosts.resolve import os_from_facts, reported_facts        # noqa: PLC0415
+    from lib.core.devices.resolve import os_from_facts, reported_facts        # noqa: PLC0415
     out: dict = {}
-    for host in hosts or ():
-        uid = str((host or {}).get('uid') or '')
+    for device in devices or ():
+        uid = str((device or {}).get('uid') or '')
         if not uid:
             continue
         facts = reported_facts(status_raw, uid)
@@ -220,7 +220,7 @@ def brand_said(vendor: str, sources: dict | None = None) -> dict:
 def identity_of(facts: dict, sources: dict | None = None) -> dict:
     """``{'brand', 'vendor', 'model'}`` — who made this box and which one it is.
 
-    *facts* is :func:`lib.core.hosts.resolve.reported_facts`; *sources* is :func:`sources_of`.
+    *facts* is :func:`lib.core.devices.resolve.reported_facts`; *sources* is :func:`sources_of`.
 
     **The brand comes from whatever RECOGNISED the device, not from a list here.** A profile
     that matches on `1.3.6.1.4.1.14988` is the only thing in the product that knows a device
@@ -651,7 +651,7 @@ def _headline_of(meta: dict, row: dict, data: dict, value=None):
     """The field's headline flag, once this ROW has been allowed to keep it.
 
     A summary is not a dump, and a table is where the difference shows. HOST-RESOURCES-MIB
-    reports every store a host has: on a NAS running containers that is physical memory, swap,
+    reports every store a device has: on a NAS running containers that is physical memory, swap,
     the buffers — and then forty bind mounts of the same volume, so the Details tab came out as
     five useful rings followed by thirty-nine that all said 67 % of the same 31 TiB.
 
@@ -713,9 +713,9 @@ def _headline_of(meta: dict, row: dict, data: dict, value=None):
 
 
 def metrics(results: list, fields_by_module: dict, names: dict | None = None) -> list:
-    """The numbers behind a host's results.
+    """The numbers behind a device's results.
 
-    *results* is what :func:`lib.core.hosts.service.build_host_status` returns; each row
+    *results* is what :func:`lib.core.devices.service.build_device_status` returns; each row
     carries its module and its ``data`` bag. *fields_by_module* is
     ``{module: {field: {label, unit}}}`` — the module's own ``__history__`` declaration,
     already translated.
@@ -850,3 +850,109 @@ def metrics(results: list, fields_by_module: dict, names: dict | None = None) ->
     out.extend(_tally_rows(tallies))
     out.sort(key=lambda m: (m['module'], str(m['item'] or ''), m['label']))
     return out
+
+#: Lo que un dispositivo puede haber VISTO, y que sirve para colocar una máquina en el puerto
+#: de un switch cuando ella no habla LLDP. Son tablas grandes —una tabla MAC son todas las
+#: direcciones que ese switch ha visto pasar— y se leen enteras.
+EVIDENCE_KINDS = ('fdb', 'bridgeport', 'ifname', 'arp')
+
+
+def topology(wa, visible, checks_for_device, said_sources, lang: str = '',
+             evidence_kinds=EVIDENCE_KINDS) -> dict:
+    """El mapa de la flota: redes, nodos y enlaces, tal como se puede saber sin preguntar.
+
+    Aquí y no en la ruta porque lo necesitan dos pantallas: el mapa de infraestructura y la
+    reconciliación del cableado, que contrasta lo que alguien declaró con lo que los dispositivos
+    dicen ver. Dos copias de cómo se arma serían dos pantallas contando cosas distintas de la
+    misma flota, y las dos parecerían correctas.
+
+    Las tres funciones que se pasan viven en el módulo de rutas porque dependen de la sesión
+    —quién mira decide qué máquinas entran— y traerlas aquí habría metido la sesión en un
+    sitio que no la tiene ni la quiere.
+    """
+    # Dentro y no arriba: traer estos módulos al nivel del fichero monta un ciclo
+    # —`devices.service` acaba importando esto— y se pagaría en cada arranque.
+    from lib.core.devices import service as devices_svc            # noqa: PLC0415
+    from lib.core.history import service as history_svc        # noqa: PLC0415
+    from lib.core.infra import evidence as infra_evidence      # noqa: PLC0415
+    from lib.core.infra import topology as topology_mod        # noqa: PLC0415
+
+    store = getattr(wa, '_devices_store', None)
+    if store is None:
+        return {'networks': [], 'nodes': [], 'edges': [], 'unplaced': []}
+    devices = store.list(decrypt=False)
+    # **Una sola vez.** El comentario de doce líneas más abajo dice que la tabla de estado es
+    # una de las dos lecturas caras de este camino y que por eso se hace para toda la flota de
+    # golpe — y se hacía dos veces, con dos nombres, a doce líneas de distancia. No da ningún
+    # error: da una pantalla que tarda el doble de lo que su propio comentario explica.
+    status_raw = wa._read_check_status()
+    bound_mods = devices_svc._device_bound_modules(wa)
+    devices_svc.enrich_devices(
+        devices, devices_svc._device_statuses(wa), bound_mods,
+        fleet_identity(status_raw, devices, said_sources(bound_mods)))
+    devices = visible(devices, set(wa._get_session_permissions() or []))
+    # Read ONCE for the whole fleet and not once per machine: the state table and the
+    # history index are the two expensive reads on this path, and a map of forty machines
+    # would be forty of each.
+    hist_by_mod: dict = {}
+    # …and flat, for the other question this same read answers: WHICH machines the history
+    # remembers at all. A machine in maintenance has its live keys pruned, so without this
+    # it falls off the map entirely — the same disappearance the device page had.
+    every_series: list = []
+    hist_store = getattr(wa, '_history', None)
+    if hist_store is not None:
+        try:
+            every_series = list(hist_store.get_index())
+            for series in every_series:
+                hist_by_mod.setdefault(series.get('module'), []).append(series)
+        except Exception:                       # pylint: disable=broad-except
+            pass                                # a map is not worth failing the page for
+    # El idioma llega DE FUERA: leerlo de la sesión aquí metería Flask en un módulo que
+    # tiene que sobrevivir a una instalación sin él —un contenedor de servicio adelgazado—
+    # y ese import se paga en la recolección de tests entera, no en esta función.
+    lang = lang or getattr(wa, '_DEFAULT_LANG', '')
+    meta_cache: dict = {}
+    attrs_by_device: dict = {}
+    for device in devices:
+        uid = str(device.get('uid') or '')
+        bound: dict = {}
+        for (bare, _coll), items in checks_for_device(wa, uid).items():
+            for key, item in items.items():
+                bound.setdefault(bare, {})[key] = str((item or {}).get('label') or '').strip()
+        # A device sampled through the registry has no item to be bound BY, and its
+        # addresses are exactly what places it on the map.
+        sampled = (devices_svc.device_sampled_keys(status_raw, uid)
+                   or devices_svc.device_recorded_keys(every_series, uid))
+        for bare, keys in sampled.items():
+            for key in keys:
+                bound.setdefault(bare, {}).setdefault(key, '')
+        for mod in bound:
+            if mod not in meta_cache:
+                meta_cache[mod] = history_svc.history_meta(
+                    wa._modules_dir, mod, lang, wa._var_dir or '')
+        results = devices_svc.build_device_status(bound, status_raw, hist_by_mod)
+        fields = {mod: (meta_cache.get(mod) or {}).get('fields') or {} for mod in bound}
+        # …and what to CALL each thing that answered, which a profile of pure identity
+        # facts can only say here: it charts nothing, so it is in no field map.
+        named = {mod: (meta_cache.get(mod) or {}).get('sources') or {} for mod in bound}
+        attrs_by_device[uid] = attributes(
+            results, sources_of(fields, named))
+    # What devices SAW, which is what places a machine on a switch port when it speaks
+    # no LLDP. Its own store because a forwarding table is hundreds of volatile rows that
+    # are not checks (see lib/core/infra/evidence.py); read here in one go for every kind.
+    #
+    # **Y sólo si quien pide el mapa las necesita.** La reconciliación del cableado usa
+    # únicamente los enlaces LLDP —lo que dos dispositivos dicen verse el uno al otro— y pagaba
+    # igualmente la lectura entera de las cuatro: cuatro tablas sin cota, la de MAC la primera,
+    # leídas y tiradas a la basura en cada apertura de la pestaña. Nadie lo notaba en el mapa,
+    # que las usa; se notaba en la pestaña que no.
+    evidence: dict = {}
+    db = getattr(wa, '_db_connector', None) or getattr(wa, '_db', None)
+    if db is not None and evidence_kinds:
+        try:
+            store = infra_evidence.EvidenceStore(db)
+            for kind in evidence_kinds:
+                evidence[kind] = store.by_device(kind)
+        except Exception:                       # pylint: disable=broad-except
+            evidence = {}                       # a map without the ports beats no map
+    return topology_mod.build(devices, attrs_by_device, evidence)

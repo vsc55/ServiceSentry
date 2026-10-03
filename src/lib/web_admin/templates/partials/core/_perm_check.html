@@ -67,7 +67,7 @@ async function showPermissionCheck(spec) {
         ? rows.map(row => `<div class="d-flex align-items-start gap-2 py-1">
             <span class="cpk-ic" id="${escAttr(_permCheckDomId(row.id))}"><span class="spinner-border spinner-border-sm text-secondary"></span></span>
             <div><code class="ss-fs-2">${esc(row.label)}</code><div class="text-muted ss-fs-2" id="${escAttr(_permCheckDomId(row.id))}-why"></div></div></div>`).join('')
-        : `<div class="text-muted small">${esc(t('host_test_none') || '—')}</div>`;
+        : `<div class="text-muted small">${esc(t('device_test_none') || '—')}</div>`;
     bootstrap.Modal.getOrCreateInstance(el).show();
 
     const r = await apiPost(spec.url, spec.body || {});

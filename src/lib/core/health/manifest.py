@@ -17,4 +17,15 @@ NOTIFY_EVENTS = [
      'matrix': True, 'order': 71},
     {'key': 'secret_rotated', 'source': 'certs', 'label_key': 'notif_event_secret_rotated',
      'matrix': True, 'order': 72},
+    # El cableado. Viven aquí y no en el paquete del inventario porque quien los emite es el
+    # explorador de este paquete — la misma regla por la que `cert_expiring` no está en el de
+    # los módulos que tienen certificados.
+    {'key': 'cable_moved', 'source': 'dcim', 'label_key': 'notif_event_cable_moved',
+     'matrix': True, 'order': 73},
+    {'key': 'cable_undeclared', 'source': 'dcim',
+     'label_key': 'notif_event_cable_undeclared', 'matrix': True, 'order': 74},
 ]
+
+# Lo que este paquete despierta a hacer cada tanto, para la lista de temporizadores
+# (lib/core/jobs). Cuatro hilos viven aquí y hasta ahora no aparecían en ninguna pantalla.
+from .timers import live as BACKGROUND_TIMERS   # noqa: E402,F401  (a descriptor)

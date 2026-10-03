@@ -8,12 +8,12 @@
         "alert":   {"type": "int", "default": 1, "inherit_blank": true, "min": 1, "max": 100}
     },
     "__history__": {"field": "latency_ms", "unit": "ms", "label": "Latency"},
-    "__host_profile__": {"key": "icmp", "address_field": "host", "fields": ["host"]},
+    "__device_profile__": {"key": "icmp", "address_field": "host", "fields": ["host"]},
     "list": {
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__discovery_uid_key__": true,
-        "__discovery_label_template__": "{host}",
+        "__discovery_label_template__": "{device}",
         "__field_order__": ["enabled", "label", "host", "timeout", "attempt", "alert"],
         "__new_item_fields__": ["label"],
         "enabled": {"type": "bool", "default": true},

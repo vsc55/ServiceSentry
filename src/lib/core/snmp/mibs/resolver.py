@@ -786,7 +786,7 @@ _HTTP_FETCH_TIMEOUT = 8
 # …and how many times one source may time out before it is written off for the rest of this
 # compilation. A timeout alone is not the problem: pysmi asks each source for SEVERAL name
 # variants of every missing module (`SNMPv2-SMI`, `.txt`, `.mib`, …), so ONE unreachable mirror
-# costs the timeout times the variants times the modules — twenty MIBs behind a dead host is
+# costs the timeout times the variants times the modules — twenty MIBs behind a dead device is
 # hours, and on screen it is a progress bar frozen at 0 with nothing to say why.
 _HTTP_DEAD_AFTER = 2
 
@@ -842,12 +842,12 @@ def _pysmi_overwrites():
 
 
 def _http_reader_with_timeout(url: str, timeout: int):
-    """Build a pysmi ``HttpReader`` that honours a hard timeout AND gives up on a dead host.
+    """Build a pysmi ``HttpReader`` that honours a hard timeout AND gives up on a dead device.
 
     pysmi's ``HttpReader.get_data()`` calls ``session.get(url)`` with no timeout, so an
     unresponsive mirror blocks a compilation indefinitely. A timeout alone is not enough
     either: pysmi asks each source for several name variants of every missing module and
-    swallows the error between tries, so an unreachable host is paid for once per variant, per
+    swallows the error between tries, so an unreachable device is paid for once per variant, per
     module. That is the difference between a compile that is slow and one that looks frozen —
     which is what a mirror going offline actually did.
 
@@ -872,8 +872,8 @@ def _http_reader_with_timeout(url: str, timeout: int):
             except Exception:
                 _state['fails'] += 1
                 raise
-            # A 404 is an answer: this mirror simply does not host that MIB, and the next
-            # variant or the next source might. Only a host that will not talk counts.
+            # A 404 is an answer: this mirror simply does not device that MIB, and the next
+            # variant or the next source might. Only a device that will not talk counts.
             _state['fails'] = 0
             return resp
 
@@ -996,7 +996,7 @@ def compile_raw_mibs_progressive(
         # Local raw MIBs first; HTTP fallback for standard/dependency MIBs.
         # The HTTP reader is given a hard timeout: pysmi's HttpReader issues
         # `session.get(url)` with NO timeout, so a slow/unreachable mirror (or a
-        # MIB the mirror doesn't host) would hang the whole compile forever
+        # MIB the mirror doesn't device) would hang the whole compile forever
         # (the classic "stuck at MIB N/M" freeze).
         # One source per directory: pysmi resolves an imported module by name against the
         # directories it was given and knows nothing about a tree, so a MIB in a vendor

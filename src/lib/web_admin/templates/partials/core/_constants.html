@@ -52,7 +52,7 @@ let usersData = {};
 let sessionsData = {};
 let rolesData = {};
 let groupsData = {};
-let hostsData = {};   // {uid: {name, address, tags, profiles, …}} — host registry
+let devicesData = {};   // {uid: {name, address, tags, profiles, …}} — device registry
 let credentialsData = {};   // {uid: {name, ctype, data:{ssh_*}}} — reusable credentials
 let currentUser = {};
 let _uid = 0;
@@ -116,40 +116,56 @@ const ITEM_SCHEMAS = Object.fromEntries([
     ...Object.entries(_rawItemSchemas),
     ...Object.entries(_rawItemSchemas).map(([k, v]) => [`watchfuls.${k}`, v])
 ]);
-// Host registry: per-protocol connection-profile catalog + the connection
-// fields each module contributes (hidden on a check once it is bound to a host).
-const HOST_PROFILES = {{ host_profiles | default({}) | tojson }};
-// What a device may declare itself to be (lib/core/hosts/manifest.py::HOST_TYPES):
-// [{id, icon}] in the order the picker offers them. The label is t('host_type_<id>').
-const HOST_TYPES = {{ host_types | default([]) | tojson }};
-const HOST_TYPE_ICONS = Object.fromEntries(HOST_TYPES.map(x => [x.id, x.icon]));
+// Device registry: per-protocol connection-profile catalog + the connection
+// fields each module contributes (hidden on a check once it is bound to a device).
+const DEVICE_PROFILES = {{ device_profiles | default({}) | tojson }};
+// What a device may declare itself to be (lib/core/devices/types.py::catalog):
+// [{uid, slug, icon, label_key | label, description, …}] in the order the picker offers them.
+//
+// Keyed by `uid`, which is what `devices.device_type` holds and what every one of these maps is
+// looked up with.
+//
+// TWO lists in one. The eleven that ship carry `label_key`, so they are said in the reader's
+// language; the ones this installation added carry `label` — the words somebody typed, kept as
+// typed. A class of this house is never translatable, because nobody else knows it exists.
+const DEVICE_TYPES = {{ device_types | default([]) | tojson }};
+const DEVICE_TYPE_ICONS = Object.fromEntries(DEVICE_TYPES.map(x => [x.uid, x.icon]));
+const DEVICE_TYPE_LABELS = Object.fromEntries(
+    DEVICE_TYPES.filter(x => x.label).map(x => [x.uid, x.label]));
+// And the language key of every seeded one, by uid. Needed since the column stopped holding the
+// short name: `t('device_type_' + uid)` has nothing to find, and t() answers with the key it was
+// given — a picker of eleven `device_type_7284cb40…` beside ten real words.
+const DEVICE_TYPE_KEYS = Object.fromEntries(
+    DEVICE_TYPES.filter(x => x.label_key).map(x => [x.uid, x.label_key]));
+// The short name, for a message that has to say WHICH class without saying a uid out loud.
+const DEVICE_TYPE_SLUGS = Object.fromEntries(DEVICE_TYPES.map(x => [x.uid, x.slug || '']));
 /** The icon a device wears: its type's, or the generic one when it has none. */
-function hostTypeIcon(type) { return HOST_TYPE_ICONS[type] || 'bi-hdd-network'; }
+function deviceTypeIcon(type) { return DEVICE_TYPE_ICONS[type] || 'bi-hdd-network'; }
 
 //: What a machine's state LOOKS like: `[badge class, inline style, icon, label key]`.
 //:
 //: One definition, because a state is one thing. It was two — the fleet list painting
 //: maintenance in its signature orange with a cone, the infrastructure section painting it
-//: grey with a spanner — so the same host in maintenance looked like two different states on
-//: two screens about the same host. Reported from the screen, and the answer to "which is
+//: grey with a spanner — so the same device in maintenance looked like two different states on
+//: two screens about the same device. Reported from the screen, and the answer to "which is
 //: right" is "whichever, but only one".
 //:
 //: Maintenance keeps the orange it has had everywhere else, deliberately distinct from the
 //: yellow of a warning: "somebody switched this off on purpose" and "something is wrong with
 //: it" are not the same news and must not be the same colour.
-const HOST_STATE_BADGES = {
+const DEVICE_STATE_BADGES = {
     maintenance: ['', 'background-color:#fd7e14;color:#fff', 'bi-cone-striped',
-                  'host_status_maintenance'],
-    error:       ['text-bg-danger',  '', 'bi-x-circle-fill',     'host_status_error'],
-    warning:     ['text-bg-warning', '', 'bi-hourglass-split',   'host_status_warning'],
-    ok:          ['text-bg-success', '', 'bi-check-circle-fill', 'host_status_ok'],
+                  'device_status_maintenance'],
+    error:       ['text-bg-danger',  '', 'bi-x-circle-fill',     'device_status_error'],
+    warning:     ['text-bg-warning', '', 'bi-hourglass-split',   'device_status_warning'],
+    ok:          ['text-bg-success', '', 'bi-check-circle-fill', 'device_status_ok'],
 };
 
 //: …and what that state looks like where there is no room for a badge: the stripe down a
 //: card, the dot beside a column heading. Same four states, same orange for maintenance,
-//: because a card and its own badge disagreeing about a colour is the same host looking like
+//: because a card and its own badge disagreeing about a colour is the same device looking like
 //: two things in one glance — which is exactly what was reported.
-const HOST_STATE_COLORS = {
+const DEVICE_STATE_COLORS = {
     maintenance: '#fd7e14',
     error:   'var(--bs-danger)',
     warning: 'var(--bs-warning)',
@@ -159,9 +175,9 @@ const HOST_STATE_COLORS = {
     '':      'var(--bs-secondary-bg)',
 };
 
-function hostStateColor(status, maintenance) {
-    return HOST_STATE_COLORS[maintenance ? 'maintenance' : String(status || '')]
-        || HOST_STATE_COLORS[''];
+function deviceStateColor(status, maintenance) {
+    return DEVICE_STATE_COLORS[maintenance ? 'maintenance' : String(status || '')]
+        || DEVICE_STATE_COLORS[''];
 }
 
 /** One machine's state, as a badge.
@@ -170,19 +186,32 @@ function hostStateColor(status, maintenance) {
  *  AS the status ("maintenance"), passing the status alone is enough.
  *
  *  *none* is what a screen shows for a machine with NO state, which is a real answer and not
- *  a missing one: a host with no enabled check is not fine, it is unwatched, and painting it
+ *  a missing one: a device with no enabled check is not fine, it is unwatched, and painting it
  *  green would be the panel telling you something nobody is checking. What that reads like is
  *  the screen's own business — a dash in a table, a word on a card — so it is passed in.
  */
-function hostStateBadge(status, maintenance, none) {
-    const meta = HOST_STATE_BADGES[maintenance ? 'maintenance' : String(status || '')];
+function deviceStateBadge(status, maintenance, none) {
+    const meta = DEVICE_STATE_BADGES[maintenance ? 'maintenance' : String(status || '')];
     if (!meta) return none === undefined ? '<span class="text-muted small">—</span>' : none;
     const sty = meta[1] ? ` style="${meta[1]}"` : '';
     return `<span class="badge ${meta[0]}"${sty}><i class="bi ${meta[2]} me-1"></i>${
         esc(t(meta[3]))}</span>`;
 }
-/** Its translated name, or a dash when unclassified. */
-function hostTypeLabel(type) { return type ? (t('host_type_' + type) || type) : ''; }
+/** Its name: translated when it is one of ours, as typed when this house added it.
+ *
+ *  The typed one goes FIRST, and that order is the whole point: `t()` falls back to the key it
+ *  was given, so consulting the catalogue first would show that key — in a picker, beside ten
+ *  real words.
+ *
+ *  Last resort is the SHORT NAME and not the uid: a class the catalogue does not carry (created
+ *  in another tab, say) reads as `switch` rather than as thirty-six hex digits. */
+function deviceTypeLabel(type) {
+    if (!type) return '';
+    if (DEVICE_TYPE_LABELS[type]) return DEVICE_TYPE_LABELS[type];
+    const clave = DEVICE_TYPE_KEYS[type];
+    if (clave) return t(clave) || DEVICE_TYPE_SLUGS[type] || type;
+    return DEVICE_TYPE_SLUGS[type] || type;
+}
 
 //: The build, for the URL of anything this file points a browser at. Same version the
 //: stylesheets carry, so a mark that changes with a release is fetched again with it and one
@@ -208,7 +237,7 @@ const ASSET_V = '{{ asset_v }}';
  *  *opts.text* draws the name beside the mark; without it the mark stands alone with the name
  *  as its tooltip, which is what a column 17rem wide can afford.
  */
-function hostBrandMarkHtml(brand, size) {
+function deviceBrandMarkHtml(brand, size) {
     const b = brand || {};
     const name = String(b.name || '').trim();
     if (!name) return '';
@@ -234,7 +263,7 @@ function hostBrandMarkHtml(brand, size) {
     return '';
 }
 
-function hostBrandHtml(brand, opts) {
+function deviceBrandHtml(brand, opts) {
     const b = brand || {}, o = opts || {};
     const name = String(b.name || '').trim();
     if (!name) return '';
@@ -242,7 +271,7 @@ function hostBrandHtml(brand, opts) {
     // "[Synology] Synology" is the same word twice, and it was on every card of a machine whose
     // mark we happen to ship. Reported from the screen. The name is still on the element, as
     // its tooltip and as what a reader with no images gets.
-    const mark = hostBrandMarkHtml(b, o.size);
+    const mark = deviceBrandMarkHtml(b, o.size);
     if (mark) return mark;
     if (o.text) return `<span>${esc(name)}</span>`;
     // No mark and no room for the name: the initial on the maker's own colour, which is still
@@ -261,7 +290,7 @@ function hostBrandHtml(brand, opts) {
  *  maker's word inside it ("MikroTik-branded CRS") is a model, and cutting it would be the
  *  panel editing what the device said.
  */
-function hostModelWithout(model, maker) {
+function deviceModelWithout(model, maker) {
     const text = String(model || '').trim();
     const name = String(maker || '').trim();
     if (!name || text.toLowerCase().indexOf(name.toLowerCase()) !== 0) return text;
@@ -273,26 +302,26 @@ function hostModelWithout(model, maker) {
 
 /** What a machine IS, in one line: who made it and which model. Either half may be missing —
  *  a switch that names its maker and not its model still says something worth reading. */
-function hostBrandLine(host, opts) {
-    const h = host || {};
-    const mark = hostBrandHtml(h.brand, opts);
-    const model = hostModelWithout(h.model, (h.brand || {}).name || h.vendor);
+function deviceBrandLine(device, opts) {
+    const h = device || {};
+    const mark = deviceBrandHtml(h.brand, opts);
+    const model = deviceModelWithout(h.model, (h.brand || {}).name || h.vendor);
     if (!mark && !model) return '';
     return `<span class="d-inline-flex align-items-center gap-1 text-truncate">${mark}${
         model ? `<span class="text-muted">${esc(model)}</span>` : ''}</span>`;
 }
 const CREDENTIAL_TYPES = {{ credential_types | default({}) | tojson }};
-const MODULE_HOST_FIELDS = {{ module_host_fields | default({}) | tojson }};
-// Which collection(s) of each host-centric module may bind to a host (show the
-// host picker).  SSH-only/address-only modules expose their item collection even
+const MODULE_DEVICE_FIELDS = {{ module_device_fields | default({}) | tojson }};
+// Which collection(s) of each device-centric module may bind to a device (show the
+// device picker).  SSH-only/address-only modules expose their item collection even
 // though no connection field is inline; nested sub-collections never bind.
-const MODULE_HOST_COLLECTIONS = {{ module_host_collections | default({}) | tojson }};
-// Whether each module allows several checks bound to one host (schema __host_multiple__).
-const MODULE_HOST_MULTIPLE = {{ module_host_multiple | default({}) | tojson }};
-// Whether ONE check of each module binds to SEVERAL hosts (host_uids list, schema
-// __host_multiple_bind__, e.g. proxmox cluster). Such modules use a multi-select
-// host picker and are excluded from the per-host "Servers" enable flow.
-const MODULE_HOST_MULTI_BIND = {{ module_host_multi_bind | default({}) | tojson }};
+const MODULE_DEVICE_COLLECTIONS = {{ module_device_collections | default({}) | tojson }};
+// Whether each module allows several checks bound to one device (schema __device_multiple__).
+const MODULE_DEVICE_MULTIPLE = {{ module_device_multiple | default({}) | tojson }};
+// Whether ONE check of each module binds to SEVERAL devices (device_uids list, schema
+// __device_multiple_bind__, e.g. proxmox cluster). Such modules use a multi-select
+// device picker and are excluded from the per-device "Servers" enable flow.
+const MODULE_DEVICE_MULTI_BIND = {{ module_device_multi_bind | default({}) | tojson }};
 // Module-contributed Overview widgets (schema __overview_widget__): {module:
 // {icon, multi, perm, cols, h, label_i18n}}. The core renders them generically;
 // the data comes from the module's overview_widget() hook (module_widgets payload).
@@ -305,8 +334,8 @@ const OVERVIEW_WIDGETS = {{ overview_widgets | default([]) | tojson }};
 // (usage bar / badge). Declared per-module via __status_render__; the core renders
 // each directive generically, so no other_data key names are hardcoded in core.
 const MODULE_STATUS_RENDER = {{ module_status_render | default({}) | tojson }};
-// Host OS selector: selectable values (auto first) + this server's detected OS.
-const HOST_OS_OPTIONS = {{ host_os_options | default([]) | tojson }};
+// Device OS selector: selectable values (auto first) + this server's detected OS.
+const DEVICE_OS_OPTIONS = {{ device_os_options | default([]) | tojson }};
 const LOCAL_OS = {{ local_os | default('other') | tojson }};
 const HINTS = I18N.hints || {};
 const ENV_LOCKED = new Set({{ wa_env_locked_fields | tojson }});
@@ -551,8 +580,8 @@ function applyModuleDefaults() {
                 for (const [newF, oldF, isAddr] of _fmig) {
                     if (!(oldF in item)) continue;
                     const _hasNew = item[newF] != null && String(item[newF]).trim() !== '';
-                    const _bound  = item.host_uid != null && String(item.host_uid).trim() !== '';
-                    // The address field of a host-bound check is owned by the host
+                    const _bound  = item.device_uid != null && String(item.device_uid).trim() !== '';
+                    // The address field of a device-bound check is owned by the device
                     // (it auto-fills at runtime) — drop the orphan rather than
                     // resurrecting a stale value that would shadow the binding.
                     if (!_hasNew && !(isAddr && _bound)) item[newF] = item[oldF];

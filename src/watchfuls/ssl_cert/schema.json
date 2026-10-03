@@ -7,13 +7,13 @@
         "timeout":      {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 60}
     },
     "__history__": {"field": "days_left", "unit": " days", "label": "Days Until Expiry"},
-    "__host_profile__": {"key": "tls", "address_field": "host", "fields": ["host"]},
-    "__host_multiple__": true,
+    "__device_profile__": {"key": "tls", "address_field": "host", "fields": ["host"]},
+    "__device_multiple__": true,
     "list": {
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__discovery_uid_key__": true,
-        "__discovery_label_template__": "{host} - {server_name}",
+        "__discovery_label_template__": "{device} - {server_name}",
         "__new_item_fields__": ["label", "server_name"],
         "__field_order__": [
             "enabled", "label",

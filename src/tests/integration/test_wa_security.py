@@ -318,7 +318,7 @@ class TestSecurityInjection:
         mods = wa._load_modules()
         mods.setdefault('datastore', {}).setdefault('list', {})['x'] = {
             'db_type': 'mysql', 'user': 'u', 'password': 'SUPERSECRET123',
-            'token': 'TOKSECRET', 'ssh_password': 'SSHSECRET', 'host_uid': 'h'}
+            'token': 'TOKSECRET', 'ssh_password': 'SSHSECRET', 'device_uid': 'h'}
         assert wa._save_modules(mods)
         resp = c.get("/api/v1/modules")
         assert resp.status_code == 200

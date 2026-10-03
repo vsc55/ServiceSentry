@@ -7,7 +7,7 @@ built-in ``ssh`` type lives here (core-owned); additional types are discovered
 from each watchful module's ``schema.json`` ``__credential__`` declaration, so a
 module that needs its own kind of secret (e.g. the ``web`` module's HTTP
 authentication) registers a credential type the manager can create/edit and the
-module then consumes by reference (``cred_uid``) — exactly like host profiles.
+module then consumes by reference (``cred_uid``) — exactly like device profiles.
 
 A module declaration lists only the *field names* (and the type key); it carries
 **no translations**.  Field labels/types come from the module's own collection
@@ -29,7 +29,7 @@ import json
 import os
 
 # Built-in SSH credential type — the identity (user + password or key) reused
-# by hosts and OS checks.  Core-owned: the declaration carries no translations,
+# by devices and OS checks.  Core-owned: the declaration carries no translations,
 # only i18n KEYS (``label``/``hint``) resolved by the frontend against the core
 # lang files (lib/web_admin/lang/en_EN.py / es_ES.py).  Module types instead
 # carry resolved ``label_i18n``/``hint_i18n`` from their own lang/ files.
@@ -340,7 +340,7 @@ def _core_credentials(catalog: dict) -> None:
     SNMP's is the first. What an SNMP credential IS — a version, a community, the v3 keys —
     is a fact about the protocol, and it was declared by a watchful that may not be
     installed: a credential type that disappears takes its stored credentials out of the
-    editor with it, while they stay in the database being referenced by hosts.
+    editor with it, while they stay in the database being referenced by devices.
     """
     from lib.discovery import scan                     # noqa: PLC0415
     from lib.i18n import TRANSLATIONS                   # noqa: PLC0415
@@ -396,7 +396,7 @@ def _core_credentials(catalog: dict) -> None:
                         label[lang] = val
             catalog[ctype] = {
                 # No module behind it. The consumers that group by module already tolerate
-                # this (the host form reads `spec.module` to find a protocol's credential
+                # this (the device form reads `spec.module` to find a protocol's credential
                 # type, and a core type names its own key), so it says what is true.
                 'module':     spec.get('module') or pkg,
                 'label_i18n': label or {'en_EN': ctype},

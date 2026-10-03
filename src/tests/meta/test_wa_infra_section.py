@@ -88,7 +88,7 @@ class TestItShowsWithoutHandingOver:
         """A projection written as "the record minus a few keys" is one added field away from
         shipping the bound credentials of every protocol that reaches the machine."""
         svc = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'service.py'))
-        assert '_HOST_FIELDS' in svc
+        assert '_DEVICE_FIELDS' in svc
         assert "'profiles'" not in svc, 'the projection names the credential bag'
 
     def test_the_domain_does_not_reach_the_registry(self):
@@ -117,8 +117,8 @@ class TestItShowsWithoutHandingOver:
                     writes.add((verb, path))
         assert writes == {
             ('POST', '/api/v1/infra/collect'),
-            ('POST', '/api/v1/infra/hosts/<uid>/collect'),
-            ('POST', '/api/v1/infra/hosts/<uid>/watch'),
+            ('POST', '/api/v1/infra/devices/<uid>/collect'),
+            ('POST', '/api/v1/infra/devices/<uid>/watch'),
             ('PUT',  '/api/v1/infra/map-layout'),
         }, f'unexpected write route(s) in the infrastructure section: {sorted(writes)}'
         # The registry's own write path is what must not be reachable from here.
@@ -149,7 +149,7 @@ class TestItShowsWithoutHandingOver:
         """
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
         for path, flag in (('/collect', 'infra_collect'), ('/watch', 'infra_watch')):
-            body = routes.split(f"'/api/v1/infra/hosts/<uid>{path}'")[1].split('def ')[0]
+            body = routes.split(f"'/api/v1/infra/devices/<uid>{path}'")[1].split('def ')[0]
             assert f'{flag}_req' in body, f'the {path} route is not gated by its own flag'
             assert 'infra_view_req' not in body, (
                 f'{path} rides on the permission that only lets you look')
@@ -159,7 +159,7 @@ class TestItShowsWithoutHandingOver:
         """Holding `infra_watch` is not being shown a machine. Every other route here narrows
         to what the caller may see, and a write must not be the one that forgets."""
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
-        body = routes.split("'/api/v1/infra/hosts/<uid>/watch'")[1].split('\n    @app.route')[0]
+        body = routes.split("'/api/v1/infra/devices/<uid>/watch'")[1].split('\n    @app.route')[0]
         assert '_may_see(' in body, 'the write does not narrow to what the caller may see'
         assert "wa._audit('infra_watch'" in body, (
             'nothing records who decided what the panel would report')
@@ -187,7 +187,7 @@ class TestItShowsWithoutHandingOver:
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
         assert '_prune_orphan_status' in routes, (
             'the reason whole modules are run is not written down where somebody would '
-            'narrow it to one host')
+            'narrow it to one device')
         assert 'wa._run_checks(' in _read(os.path.join(SRC, 'lib', 'core', 'infra', 'jobs.py')), (
             'collecting does not go through the shared executor — a second implementation of '
             '"run a check and record it" is a second answer to what a result means')
@@ -214,19 +214,19 @@ class TestWatchingItHappen:
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
         # By its own path: the section has more than one POST, and "the first one" stopped
         # meaning the collection the day a second was added.
-        body = routes.split("'/api/v1/infra/hosts/<uid>/collect'")[1].split('@app.route')[0]
+        body = routes.split("'/api/v1/infra/devices/<uid>/collect'")[1].split('@app.route')[0]
         assert "'job_id': job_id" in body
         assert 'start_collect(' in body
         assert '/api/v1/infra/collect/<job_id>' in routes, 'nothing can be asked about it'
 
-    def test_the_progress_route_is_narrowed_to_the_job_s_host(self):
+    def test_the_progress_route_is_narrowed_to_the_job_s_device(self):
         """A job id is a short random string, and "hard to guess" is not a permission: without
         this, anyone who may poll learns the NAME of a machine they may not see."""
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
         # [-1]: the path is named twice — in the module header and on the decorator —
         # and the half that matters is the one after the LAST of them.
         body = routes.split('/api/v1/infra/collect/<job_id>')[-1]
-        assert "_may_see(job.get('host')" in body
+        assert "_may_see(job.get('device')" in body
 
     def test_closing_the_dialog_does_not_stop_the_run(self):
         """The whole reason the work is a thread on the server: nothing about it depends on
@@ -250,7 +250,7 @@ class TestWatchingItHappen:
     def test_the_bar_belongs_to_its_own_machine(self):
         """A run started on one device must not draw its progress over another's header."""
         body = self._collect().split('function _infraCollectSlotHtml')[1].split(chr(10) + 'function ')[0]
-        assert 'job.host !== uid' in body
+        assert 'job.device !== uid' in body
 
     def test_the_percentage_is_never_alone(self):
         """Progress is per MODULE, so nine fast ones and an SNMP profile reach 90 % in two
@@ -330,24 +330,24 @@ class TestWatchingItHappen:
         assert 'return;' in body
 
     def test_it_owns_no_store(self):
-        """Every fact it shows belongs to somebody — hosts, check state, history. A fourth
+        """Every fact it shows belongs to somebody — devices, check state, history. A fourth
         copy would be a fourth thing to keep in step, and the first to drift would be the one
         people are watching."""
         assert not os.path.exists(os.path.join(SRC, 'lib', 'core', 'infra', 'store.py'))
 
     def test_the_state_vocabulary_is_the_registry_s(self):
         """One vocabulary for "how is this machine": `ok/warning/error` and the empty string,
-        which is what `hosts.service._host_statuses` produces. A second set of names would be
-        a second definition of a broken host.
+        which is what `devices.service._device_statuses` produces. A second set of names would be
+        a second definition of a broken device.
 
-        And one BADGE for it, in the shared host vocabulary. It had its own, which is how the
-        same host in maintenance came out orange with a cone on the fleet list and grey with a
+        And one BADGE for it, in the shared device vocabulary. It had its own, which is how the
+        same device in maintenance came out orange with a cone on the fleet list and grey with a
         spanner here — reported from the screen. Two badges for one state is two states as far
         as anybody reading them can tell.
         """
         shared = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
                                     'core', '_constants.html'))
-        body = shared.split('const HOST_STATE_BADGES')[1].split('};')[0]
+        body = shared.split('const DEVICE_STATE_BADGES')[1].split('};')[0]
         for state in ('ok:', 'warning:', 'error:', 'maintenance:'):
             assert state in body, state
         # …and the two screens read it rather than each keeping one.
@@ -355,11 +355,11 @@ class TestWatchingItHappen:
                         (('servers', '_list.html'), '_srvStatusBadge')):
             src = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', *rel))
             own = src.split('function ' + fn)[1].split(chr(10) + '}')[0]
-            assert 'hostStateBadge(' in own, fn
+            assert 'deviceStateBadge(' in own, fn
             assert 'text-bg-success' not in own, f'{fn} paints a state of its own again'
         render = _read(os.path.join(INFRA, '_render.html'))
         own = render.split('function _infraStateBadge')[1].split(chr(10) + '}')[0]
-        assert 'infra_unwatched' in own, 'a host nobody watches has no state of its own'
+        assert 'infra_unwatched' in own, 'a device nobody watches has no state of its own'
 
 
 class TestRefreshingTheWholeFleet:
@@ -404,7 +404,7 @@ class TestRefreshingTheWholeFleet:
         run takes — so while a device is being collected this button cannot be pressed either.
         Leaving it as a button offers something that answers "already running"."""
         body = _fn(self._collect(), '_infraCollectAllSlotHtml')
-        assert 'job.done' in body and 'job.host' not in body, (
+        assert 'job.done' in body and 'job.device' not in body, (
             'it decides by whose run it is, so another run leaves it looking pressable')
 
     def test_both_slots_are_repainted(self):
@@ -420,11 +420,11 @@ class TestRefreshingTheWholeFleet:
         which button started it."""
         body = _fn(self._collect(), '_infraCollectBody')
         assert 'infra_collect_this_device' in body and 'infra_collect_all_note' in body
-        assert 'job.host' in body, 'it does not read the scope it is describing'
+        assert 'job.device' in body, 'it does not read the scope it is describing'
 
     def test_a_fleet_job_is_visible_to_whoever_sees_the_fleet(self):
-        """Its job carries no host, and the two polling routes narrow by exactly that: with no
-        host, `_may_see` is true only for `devices_view` — which is the same rule that let the
+        """Its job carries no device, and the two polling routes narrow by exactly that: with no
+        device, `_may_see` is true only for `devices_view` — which is the same rule that let the
         run start. A job nobody can poll is a dialog that never updates."""
         routes = _read(os.path.join(SRC, 'lib', 'core', 'infra', 'routes.py'))
         # Nested inside `register`, so read as text: what matters is the RULE, and the rule is
@@ -492,9 +492,9 @@ class TestItDoesNotGoStale:
 
     def test_opening_the_section_asks_the_server(self):
         body = self._render().split('async function renderInfra(')[1].split('\n}')[0]
-        assert "apiGet('/api/v1/infra/hosts')" in body
-        assert '_infraHosts.length' not in body, (
-            'the entry point serves a cached fleet again — a host added in System would not '
+        assert "apiGet('/api/v1/infra/devices')" in body
+        assert '_infraDevices.length' not in body, (
+            'the entry point serves a cached fleet again — a device added in System would not '
             'appear until somebody pressed Refresh')
 
     def test_the_cheap_redraws_do_not_hit_the_network(self):
@@ -670,7 +670,7 @@ class TestTheMapIsReadAtAGlanceOrItIsNothing:
 
     def test_a_network_of_one_is_folded_onto_the_machine_that_holds_it(self):
         """It is not a place where two machines meet, which is the only question this map
-        exists to answer. Docker gives every host its own 172.17.0.0/16, and a router declares
+        exists to answer. Docker gives every device its own 172.17.0.0/16, and a router declares
         one per VLAN: on the reported screen those were most of the picture."""
         layout = _fn(self._js(), '_infraMapLayout')
         assert 'members.length > 1 && !net.private' in layout
@@ -872,7 +872,7 @@ class TestFlaggingARowShowsOnTheScreen:
         """Not patched from what was clicked: what is on screen then IS what is stored."""
         fn = _fn(self._js(), '_infraSetWatch')
         assert '_infraWatchPaint(' in fn
-        assert fn.index('_infraDetail.host.watch') < fn.index('_infraWatchPaint('), (
+        assert fn.index('_infraDetail.device.watch') < fn.index('_infraWatchPaint('), (
             'it repaints before it has the new list')
 
     def test_it_repaints_the_flag_and_not_the_device(self):
@@ -889,7 +889,7 @@ class TestFlaggingARowShowsOnTheScreen:
         paint = _fn(self._js(), '_infraWatchPaint')
         assert 'data-watch-bell' in paint and "getElementById('infra-watch-btn')" in paint, (
             'it does not reach the two things the flag decides')
-        assert 'innerHTML = _infraHostHtml' not in paint
+        assert 'innerHTML = _infraDeviceHtml' not in paint
 
     def test_only_the_row_that_changed_changes(self):
         """The rail carries one slot per row; a flag on one of them must not touch the
@@ -950,7 +950,7 @@ class TestTheIdentityColumnDoesNotRepeatTheHeader:
     def test_the_record_card_is_gone(self):
         fn = _fn(self._tabs(), '_infraIdentityHtml')
         assert 'infra_record' not in fn
-        assert 'host_address' not in fn, 'the address is repeated under the header again'
+        assert 'device_address' not in fn, 'the address is repeated under the header again'
 
     def test_and_so_is_the_word_it_used(self):
         for lang in ('es_ES', 'en_EN'):
@@ -973,7 +973,7 @@ class TestTheIdentityColumnDoesNotRepeatTheHeader:
         """Removing a card is only right while the thing it said is somewhere else."""
         render = _strip_comments(_read(os.path.join(
             SRC, 'lib', 'web_admin', 'templates', 'partials', 'infra', '_render.html')))
-        head = _fn(render, '_infraHostHtml')
+        head = _fn(render, '_infraDeviceHtml')
         assert 'h.address' in head and 'h.name' in head, (
             'the device header no longer carries what the record card used to')
 
@@ -1013,7 +1013,7 @@ class TestOneStateLooksLikeOneState:
     """A machine's state has a colour, and it had four.
 
     The badge, the stripe down a card, the dot beside a board column and the box on a map each
-    worked it out for themselves — so a host in maintenance came out orange on the fleet list,
+    worked it out for themselves — so a device in maintenance came out orange on the fleet list,
     grey in the infrastructure badge, and grey again on the board. Reported from the screen
     twice: once for the badge, and once more for the cards after the badge was fixed, which is
     exactly what happens when a duplicate is fixed one copy at a time.
@@ -1023,15 +1023,15 @@ class TestOneStateLooksLikeOneState:
 
     def test_there_is_one_palette(self):
         core = _read(self.CORE)
-        assert 'const HOST_STATE_COLORS' in core and 'function hostStateColor(' in core
-        block = core.split('const HOST_STATE_COLORS')[1].split('};')[0]
+        assert 'const DEVICE_STATE_COLORS' in core and 'function deviceStateColor(' in core
+        block = core.split('const DEVICE_STATE_COLORS')[1].split('};')[0]
         for state in ('maintenance:', 'error:', 'warning:', 'ok:'):
             assert state in block, state
 
     def test_and_maintenance_is_the_orange_it_has_always_been(self):
         """Deliberately not the yellow of a warning: "somebody switched this off on purpose"
         and "something is wrong with it" are not the same news."""
-        block = _read(self.CORE).split('const HOST_STATE_COLORS')[1].split('};')[0]
+        block = _read(self.CORE).split('const DEVICE_STATE_COLORS')[1].split('};')[0]
         assert '#fd7e14' in block
 
     def test_nothing_in_the_section_paints_a_state_itself(self):
@@ -1054,7 +1054,7 @@ class TestOneStateLooksLikeOneState:
         for name, fn in (('_links.html', '_infraLinkBox'), ('_map.html', '_infraMapBox')):
             body = _read(os.path.join(INFRA, name)).split(
                 'function ' + fn + '(')[1].split(chr(10) + '}')[0]
-            assert 'hostStateColor(' in body, name
+            assert 'deviceStateColor(' in body, name
 
 
 class TestTheReloadDoesNotFlashWhite:
@@ -1212,11 +1212,11 @@ class TestAMakersMarkFitsItsBox:
         """A logo is the maker's name written by the maker: "[Synology] Synology" is the same
         word twice, and it was on every card of a machine whose mark we happen to ship."""
         src = _strip_comments(_read(os.path.join(TPL, 'partials', 'core', '_constants.html')))
-        body = _fn(src, 'hostBrandHtml')
-        assert 'hostBrandMarkHtml' in body and 'if (mark) return mark;' in body
+        body = _fn(src, 'deviceBrandHtml')
+        assert 'deviceBrandMarkHtml' in body and 'if (mark) return mark;' in body
         card = _strip_comments(_read(os.path.join(INFRA, '_tabs.html')))
         head = card.split('const block = (title')[1].split('const facts')[0]
-        assert 'hostBrandMarkHtml(brand' in head, 'the card draws no mark'
+        assert 'deviceBrandMarkHtml(brand' in head, 'the card draws no mark'
         assert 'title === (brand || {}).name' in head, 'the card writes the maker out twice'
 
 class TestThePanelDoesNotStandOnTheDrawing:
@@ -1411,7 +1411,7 @@ class TestTheSwitcherBreaksWhereTheQuestionDoes:
         src = _read(os.path.join(INFRA, '_views.html'))
         fams = re.findall(r"id: '(\w+)'[^\n]*family: '(\w+)'", src)
         assert dict(fams) == {'card': 'list', 'table': 'list', 'grouped': 'list',
-                              'rail': 'list', 'board': 'list',
+                              'rail': 'list', 'board': 'list', 'coverage': 'list',
                               'map': 'map', 'links': 'map'}, fams
 
     def test_and_the_switcher_breaks_on_it_rather_than_on_a_name(self):
@@ -1698,9 +1698,14 @@ class TestTheDevicePageIsNotOneRead:
         src = self._tabs()
         table = src.split('const _INFRA_TABS = [')[1].split('];')[0]
         rows = dict(re.findall(r"id: '(\w+)'[^\n]*(?:\n[^\n]*)?perm: '([\w.]+)'", table))
+        # `place` and `config` come from the other two sections — the inventory and the
+        # registry — and ask for THEIR permission: holding infra_view says nothing about being
+        # allowed to know which rack a machine is in, or how it is reached.
         assert rows == {'metrics': 'infra_metrics_view', 'results': 'infra_results_view',
-                        'logs': 'syslog_view', 'raw': 'infra_raw_view'}, rows
-        assert "id: 'details'" in table and "perm" not in table.split("id: 'metrics'")[0], \
+                        'logs': 'syslog_view', 'raw': 'infra_raw_view',
+                        'place': 'dcim_view', 'config': 'devices_view'}, rows
+        detalles = [l for l in table.split('\n') if "id: 'details'" in l]
+        assert detalles and 'perm' not in detalles[0], \
             'Details asks for something beyond infra_view'
 
     def test_and_the_domain_declares_them(self):
@@ -1727,3 +1732,77 @@ class TestTheDevicePageIsNotOneRead:
         """What the browser remembers outlives a permission being taken away."""
         body = self._tabs().split('let _infraTab = ')[1].split('})();')[0]
         assert '_infraTabsFor()' in body, 'it opens straight onto a tab nobody may see'
+
+
+class TestTheDevicePageIsTheOnePlace:
+    """Paso 1 de unir Infraestructura, Dispositivos e Inventario: la ficha del dispositivo dice
+    también dónde está y cómo está configurado, y todo lo que nombra un dispositivo lleva a ella."""
+
+    def _p(self, *ruta):
+        return _strip_comments(_read(os.path.join(TPL, 'partials', *ruta)))
+
+    def test_la_ubicacion_sale_del_inventario(self):
+        lugar = self._p('infra', '_place.html')
+        assert '/api/v1/dcim/devices/${encodeURIComponent(uid)}/place' in lugar
+        assert 'dcimGoTo(' in _fn(lugar, '_infraPlaceCard')
+
+    def test_la_configuracion_se_edita_donde_siempre(self):
+        """Se lee aquí y se cambia en el modal del registro: un solo sitio donde cambiarla."""
+        lugar = self._p('infra', '_place.html')
+        assert 'openEditDeviceModal(uid)' in _fn(lugar, '_infraEditDevice')
+        assert "'hidden.bs.modal'" in _fn(lugar, '_infraEditDevice')
+
+    def test_el_engranaje_abre_este_dispositivo_y_no_la_lista(self):
+        cabecera = _fn(self._p('infra', '_render.html'), '_infraDeviceHtml')
+        assert '_infraEditDevice(' in cabecera and '/admin?tab=servers' not in cabecera
+
+    def test_el_registro_y_el_inventario_llevan_a_la_ficha(self):
+        # El registro ya no tiene lista propia: es la de Infraestructura, cuyas filas abren la
+        # ficha y llevan los botones del registro al lado.
+        filas = _fn(self._p('infra', '_list.html'), '_infraRowActions')
+        assert 'infraOpen(' in filas and '_srvActionsHtml(' in filas
+        assert 'openDeviceSheet(' in _fn(self._p('dcim', '_devices.html'), '_dcdCell')
+        assert 'openDeviceSheet(uid)' in _fn(self._p('dcim', '_render.html'), '_dcimOpenDevice')
+
+    def test_la_ficha_cambia_de_seccion_antes_de_abrir(self):
+        """Abrir sin cambiar sería dibujar en una pestaña que no se está mirando."""
+        abrir = _fn(self._p('infra', '_render.html'), 'openDeviceSheet')
+        assert abrir.index("_navTab('#tab-infra')") < abrir.index('infraOpen(uid)')
+        ir = _fn(self._p('dcim', '_render.html'), 'dcimGoTo')
+        assert ir.index("_navTab('#tab-dcim')") < ir.index('_dcimLoadRack(uid)')
+
+
+class TestLosDosLadosSeDanDeAlta:
+    """Paso 4: un equipo del inventario puede dar de alta su dispositivo, un dispositivo puede
+    colocarse en un rack desde su ficha, y el número de serie de los dos se compara."""
+
+    def _p(self, *ruta):
+        return _strip_comments(_read(os.path.join(TPL, 'partials', *ruta)))
+
+    def test_el_formulario_del_equipo_crea_el_dispositivo(self):
+        form = self._p('dcim', '_form.html')
+        assert "create: 'device'" in form
+        crea = _fn(form, '_dcimDeviceCreate')
+        assert "'/api/v1/devices'" in crea and 'row.device_uid = uid' in crea
+        # Lo engancha en el formulario y no lo guarda: guardar es de quien lo rellena.
+        assert '_dcimSave(' not in crea
+        assert "_dcimMay('devices_edit')" in _fn(form, '_dcimFormBody')
+
+    def test_la_ficha_coloca_en_un_rack(self):
+        lugar = self._p('infra', '_place.html')
+        guarda = _fn(lugar, '_infraPlaceSave')
+        assert "'/api/v1/dcim/items'" in guarda and 'device_uid: uid' in guarda
+        assert "_infraMay('dcim_edit') ? _infraPlaceForm(" in _fn(lugar, '_infraPlacePane')
+
+    def test_el_numero_de_serie_se_compara_y_se_ofrece(self):
+        lugar = self._p('infra', '_place.html')
+        assert '_infraSerialCheck(p, ' in _fn(lugar, '_infraPlaceCard')
+        usa = _fn(lugar, '_infraSerialUse')
+        assert "'PUT'" in usa and '{serial: valor}' in usa
+        # Ofrece, no escribe: nada guarda el número sin que alguien pulse.
+        assert 'apiSend' not in _fn(lugar, '_infraSerialCheck')
+
+    def test_el_mantenimiento_se_llama_igual_en_el_inventario(self):
+        tablero = self._p('dcim', '_board.html')
+        assert "'maintenance'" in _fn(tablero, '_dcimStateWord')
+        assert "deviceStateColor('maintenance')" in _fn(self._p('dcim', '_layouts.html'), '_dcimLed')

@@ -176,7 +176,7 @@ def test_no_payload_reaches_the_engine_as_sql(panel):
                                'role': 'viewer', 'display_name': p, 'email': p}),
             ('/api/v1/groups', {'name': p, 'roles': []}),
             ('/api/v1/roles', {'name': p, 'permissions': ['users_view']}),
-            ('/api/v1/hosts', {'name': p, 'address': p}),
+            ('/api/v1/devices', {'name': p, 'address': p}),
             ('/api/v1/credentials', {'name': p, 'kind': 'ssh', 'username': 'r', 'password': 'x'}),
         ]
         for path, body in posts:
@@ -226,7 +226,7 @@ def test_access_control_and_escalation_hold(panel):
     # 1 — anonymous
     anon = panel.client()
     for path in ('/api/v1/users', '/api/v1/roles', '/api/v1/config', '/api/v1/credentials',
-                 '/api/v1/hosts', '/api/v1/audit'):
+                 '/api/v1/devices', '/api/v1/audit'):
         must(anon.get(path).status_code in (401, 302), f'anon read {path} without a session')
     must(anon.post('/api/v1/users', json={'username': 'a', 'password': 'testpass1'}).status_code
          in (401, 302), 'anon created a user')
@@ -237,7 +237,7 @@ def test_access_control_and_escalation_hold(panel):
     for method, path, body in [
         ('post', '/api/v1/users', {'username': 'vx', 'password': 'testpass1', 'role': 'viewer'}),
         ('post', '/api/v1/roles', {'name': 'vr', 'permissions': ['users_view']}),
-        ('post', '/api/v1/hosts', {'name': 'vh', 'address': '1.1.1.1'}),
+        ('post', '/api/v1/devices', {'name': 'vh', 'address': '1.1.1.1'}),
         ('put',  '/api/v1/config', {'monitoring': {'timer_check': 1}}),
         ('delete', '/api/v1/users/admin', None),
     ]:
@@ -269,27 +269,27 @@ def test_access_control_and_escalation_hold(panel):
     assert not problems, 'access-control failures:\n  ' + '\n  '.join(problems)
 
 
-def test_per_host_access_cannot_reach_another_host(panel):
-    """IDOR: hosts are scoped per resource (``server.{uid}.view/edit/delete``), so holding a
-    permission on host A must not reach host B by naming B's UID directly.
+def test_per_device_access_cannot_reach_another_device(panel):
+    """IDOR: devices are scoped per resource (``server.{uid}.view/edit/delete``), so holding a
+    permission on device A must not reach device B by naming B's UID directly.
 
     This is the whole point of a scoped model and the exact spot where it breaks quietly: the
-    LIST endpoint filters, but each per-host endpoint has to run its own check, and one that
-    forgot would let anyone with a foothold on any host walk the rest by UID. Secrets make it
-    worse — a leaked host carries a stored SSH credential.
+    LIST endpoint filters, but each per-device endpoint has to run its own check, and one that
+    forgot would let anyone with a foothold on any device walk the rest by UID. Secrets make it
+    worse — a leaked device carries a stored SSH credential.
     """
     wa, admin = panel.wa, panel.admin
 
-    a_uid = admin.post('/api/v1/hosts', json={
-        'name': 'host-A', 'address': '10.0.0.1'}).get_json()['uid']
-    b_uid = admin.post('/api/v1/hosts', json={
-        'name': 'host-B-secret', 'address': '10.0.0.2'}).get_json()['uid']
+    a_uid = admin.post('/api/v1/devices', json={
+        'name': 'device-A', 'address': '10.0.0.1'}).get_json()['uid']
+    b_uid = admin.post('/api/v1/devices', json={
+        'name': 'device-B-secret', 'address': '10.0.0.2'}).get_json()['uid']
 
-    # A role that can see ONLY host A — a well-formed per-server permission, nothing global.
-    admin.post('/api/v1/roles', json={'name': 'host_a_only',
+    # A role that can see ONLY device A — a well-formed per-server permission, nothing global.
+    admin.post('/api/v1/roles', json={'name': 'device_a_only',
                                       'permissions': [f'server.{a_uid}.view']})
     admin.post('/api/v1/users', json={'username': 'scoped', 'password': 'testpass1',
-                                      'role': 'host_a_only'})
+                                      'role': 'device_a_only'})
     u = panel.client('scoped', 'testpass1')
 
     problems = []
@@ -298,27 +298,27 @@ def test_per_host_access_cannot_reach_another_host(panel):
         if not cond:
             problems.append(msg)
 
-    # Positive control: the scoped user CAN reach host A, and the list shows A only.
-    must(u.get(f'/api/v1/hosts/{a_uid}/status').status_code == 200,
-         'the scoped permission does not even grant host A (the grant is not real)')
-    listing = u.get('/api/v1/hosts')
+    # Positive control: the scoped user CAN reach device A, and the list shows A only.
+    must(u.get(f'/api/v1/devices/{a_uid}/status').status_code == 200,
+         'the scoped permission does not even grant device A (the grant is not real)')
+    listing = u.get('/api/v1/devices')
     must(listing.status_code == 200, 'scoped user cannot list at all')
-    names = [h.get('name') for h in (listing.get_json() or {}).get('hosts', [])]
-    must('host-A' in names, 'host A missing from the scoped list')
-    must('host-B-secret' not in names, 'IDOR: host B leaked into the scoped list')
+    names = [h.get('name') for h in (listing.get_json() or {}).get('devices', [])]
+    must('device-A' in names, 'device A missing from the scoped list')
+    must('device-B-secret' not in names, 'IDOR: device B leaked into the scoped list')
 
-    # IDOR: every per-host endpoint aimed at B must refuse.
-    must(u.get(f'/api/v1/hosts/{b_uid}/status').status_code == 403,
-         'IDOR: read host B status with only server.A.view')
-    must(u.put(f'/api/v1/hosts/{b_uid}',
+    # IDOR: every per-device endpoint aimed at B must refuse.
+    must(u.get(f'/api/v1/devices/{b_uid}/status').status_code == 403,
+         'IDOR: read device B status with only server.A.view')
+    must(u.put(f'/api/v1/devices/{b_uid}',
                json={'name': 'pwned', 'address': '6.6.6.6'}).status_code == 403,
-         'IDOR: edited host B with only server.A.view')
-    must(u.delete(f'/api/v1/hosts/{b_uid}').status_code == 403,
-         'IDOR: deleted host B with only server.A.view')
+         'IDOR: edited device B with only server.A.view')
+    must(u.delete(f'/api/v1/devices/{b_uid}').status_code == 403,
+         'IDOR: deleted device B with only server.A.view')
 
     # State-level: B is untouched — not renamed, not gone.
-    after = {h['uid']: h for h in wa._hosts_store.list()}
-    must(b_uid in after and after[b_uid]['name'] == 'host-B-secret',
-         'host B was modified or deleted despite the 403s')
+    after = {h['uid']: h for h in wa._devices_store.list()}
+    must(b_uid in after and after[b_uid]['name'] == 'device-B-secret',
+         'device B was modified or deleted despite the 403s')
 
-    assert not problems, 'per-host IDOR failures:\n  ' + '\n  '.join(problems)
+    assert not problems, 'per-device IDOR failures:\n  ' + '\n  '.join(problems)

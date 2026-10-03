@@ -81,7 +81,7 @@ def status(store, user_uid: str) -> dict:
         'method': (factor or {}).get('method', '') if factor and factor.get('confirmed')
                   else (methods[0] if methods else ''),
         'methods': methods,
-        'since': (factor or {}).get('updated', ''),
+        'since': (factor or {}).get('updated_at', ''),
         'recovery_left': store.recovery_left(user_uid) if methods else 0,
     }
 

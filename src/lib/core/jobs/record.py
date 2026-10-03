@@ -21,7 +21,7 @@ import uuid
 _DB = None
 _LIMITS = {'keep': 500, 'days': 30, 'lines': 200}
 
-#: WHO is running this. Not a fresh uuid: `host:pid:role` is the identity this panel already
+#: WHO is running this. Not a fresh uuid: `device:pid:role` is the identity this panel already
 #: gives itself — the heartbeat writes it, the service registry lists it, and the health screen
 #: shows it — so a job's owner is a name somebody can look up rather than twelve hex digits
 #: that mean nothing anywhere else. The pid makes it new on every start, which is the property
@@ -43,8 +43,8 @@ _WRITES = [0]
 def _identity(given: str = '') -> str:
     """Who this process is, in the words the rest of the panel already uses.
 
-    ``host:pid:role`` — what :mod:`lib.services.heartbeat` writes into the service registry.
-    Falling back to host and pid where no role was handed over, and to a random id where even
+    ``device:pid:role`` — what :mod:`lib.services.heartbeat` writes into the service registry.
+    Falling back to device and pid where no role was handed over, and to a random id where even
     the hostname cannot be read: an owner nobody can look up is still better than two runs
     sharing one.
     """

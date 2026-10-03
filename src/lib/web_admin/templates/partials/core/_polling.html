@@ -389,3 +389,16 @@ function _showRestartBanner() {
     banner.classList.remove('d-none');
     currentUser.restart_pending = true;
 }
+
+/** Pedir que se recargue la página, con el botón puesto.
+ *
+ *  No es reiniciar el servicio —el ajuste ya está en vigor en el servidor— y por eso no usa el
+ *  cartel rojo de los que sí lo necesitan: es la PÁGINA la que se quedó vieja. La política de
+ *  contenido llega en la cabecera de cada página, así que la que está abierta sigue con la que
+ *  había cuando se abrió, y el navegador bloquea las teselas del proveedor nuevo sin decir una
+ *  palabra.
+ *
+ *  Con botón porque pedirle a alguien que pulse F5 es pedirle que sepa por qué. */
+function _askReload() {
+    showConfirmModal(t('cfg_saved_reload'), () => window.location.reload());
+}

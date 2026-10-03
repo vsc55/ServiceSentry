@@ -56,7 +56,8 @@ async function openRestoreModal(name) {
         </div>
         ${_bkTablePickHtml(inside)}
         ${b.secrets ? '' : `<div class="alert alert-warning py-2 px-3 small mb-0">
-            ${esc(t('backup_restore_nosecrets'))}</div>`}`,
+            ${esc(t('backup_restore_nosecrets'))}</div>`}
+        ${b.secrets ? _bkKeyNote('backup_restore_key_file') : ''}`,
         t('backup_restore'), 'warning',
         // Wide, and the BODY scrolls: with the fold open this form is taller than the screen
         // on any install with a few dozen tables, and a dialog that clips instead of scrolling

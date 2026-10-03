@@ -29,7 +29,7 @@ const _ATK_COLS = [
     { id: 'permissions', label: () => t('api_token_col_perms'),     sortKey: 'permissions', always: false },
     { id: 'expires_at',  label: () => t('api_token_col_expires'),   sortKey: 'expires_at',  always: false },
     { id: 'last_used',   label: () => t('api_token_col_last_used'), sortKey: 'last_used',   always: false },
-    { id: 'created',     label: () => t('col_created_at'),          sortKey: 'created',     always: false },
+    { id: 'created_at',  label: () => t('col_created_at'),          sortKey: 'created_at',     always: false },
     { id: 'created_by',  label: () => t('col_created_by'),          sortKey: 'created_by',  always: false },
 ];
 const _ATK_DEFAULT_COLS = new Set(['permissions', 'expires_at', 'last_used']);
@@ -58,7 +58,7 @@ let _atkColOrder = (() => {
 })();
 let _atkPage = 1;
 let _atkPageSize = null;
-let _atkSort = 'created';
+let _atkSort = 'created_at';
 let _atkSortDir = 'desc';
 let _atkSelected = new Set();
 let _atkCurrentPage = [];
@@ -135,7 +135,7 @@ createListTable({
             case 'last_used':    return tk.last_used || '0000';
             case 'permissions':  return tk.permissions === '*' ? '*' : (tk.permissions || []).join(',');
             case 'token_id':     return tk.token_id || '';
-            case 'created':      return tk.created || '';
+            case 'created_at':   return tk.created_at || '';
             case 'created_by':   return (tk.created_by || '').toLowerCase();
             case 'name':         return (tk.name || '').toLowerCase();
             default:             return (tk.username || '').toLowerCase();
@@ -165,7 +165,7 @@ createListTable({
                 return `<td class="text-nowrap small">${tk.last_used
                     ? esc(_fmtDateTime(tk.last_used))
                     : `<span class="text-muted">${esc(t('api_token_unused'))}</span>`}</td>`;
-            case 'created':    return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(tk.created))}</td>`;
+            case 'created_at': return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(tk.created_at))}</td>`;
             case 'created_by': return `<td class="text-nowrap small text-muted">${esc(tk.created_by || '—')}</td>`;
             default: return '<td></td>';
         }
@@ -303,7 +303,7 @@ function _atkNewForUser(preset) {
         </div>
         <div class="mb-2">
             <label class="form-label small fw-semibold">${esc(t('api_token_col_name'))}</label>
-            <input type="text" class="form-control form-control-sm" id="accTokName" maxlength="64"
+            <input type="text" class="form-control form-control-sm" id="accTokName" required maxlength="64"
                    value="${escAttr(_atkPreset.name || '')}"
                    placeholder="${escAttr(t('api_token_name_ph'))}">
         </div>
@@ -337,8 +337,8 @@ async function _atkOwnerChanged() {
     const owner = (document.getElementById('atkOwner') || {}).value || '';
     const hint = document.getElementById('atkSystemHint');
     if (hint) hint.classList.toggle('d-none', owner !== 'system');
-    const host = document.getElementById('atkPerms');
-    if (!host || !owner) return;
+    const device = document.getElementById('atkPerms');
+    if (!device || !owner) return;
     // First draw after a clone has nothing ticked yet, so the preset is what carries the
     // permissions across — the whole point of cloning is not reassembling them by hand.
     const isAdmin = currentUser.role === 'admin';
@@ -352,7 +352,7 @@ async function _atkOwnerChanged() {
     // `unbounded` is the built-in identity: nothing narrows its tokens, so the caller's own
     // set is the only ceiling and no intersection applies.
     const limitTo = data.unbounded ? null : new Set(data.permissions || []);
-    host.innerHTML = _accTokenPermPicker({
+    device.innerHTML = _accTokenPermPicker({
         // The switch is offered exactly where the server would take it: an administrator, and
         // an account that HAS a permission set for `'*'` to resolve against.
         noAll: !isAdmin || !!data.unbounded, forOther: true, limitTo,

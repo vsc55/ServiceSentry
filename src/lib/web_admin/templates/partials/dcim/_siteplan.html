@@ -1,0 +1,1039 @@
+// ── El plano de una sede: sus plantas, y en cada una sus salas ─────────────────────────────
+//
+// Lo que faltaba entre el mapa de sedes y el plano de una sala. Una sede se situaba en el mapa
+// por su dirección y una sala se dibujaba por dentro, pero dónde está cada sala DENTRO del
+// edificio no se podía decir — y en una sede de tres plantas, «la sala de comunicaciones» son
+// tres sitios. Cada planta lleva su plano de fondo, el que mandó el arquitecto, y encima se
+// colocan las salas de esa planta a su tamaño de verdad. Con esto se recorre todo: sede, planta,
+// sala, rack.
+//
+// El mismo esquema de pantalla que el plano de una sala —una fila arriba, el lienzo y un
+// inspector al lado— y las mismas piezas: el lienzo compartido, la cola de guardado y el
+// almacén de imágenes. Dos editores que se manejan distinto son dos cosas que aprender.
+
+//: La sede abierta, sus plantas, cuál se está mirando y su plano de fondo. `null` = cerrado.
+let _dcsPlan = null;
+//: La sala seleccionada en la planta, por su uid, o `''`.
+let _dcsSel = '';
+//: Un rack o una pieza seleccionados en la planta: `{kind: 'rack'|'feature', uid, room}`, o
+//: `null`. Aparte de `_dcsSel` porque se manejan distinto: una sala se estira, lo de dentro no.
+let _dcsItem = null;
+//: El arrastre en curso: `{uid, from, at, moved}`, o `null`.
+let _dcsDrag = null;
+//: Dónde se pulsó el suelo, para saber al soltar si era soltar la selección o desplazar.
+let _dcsBlank = null;
+//: La última pulsación sobre una sala, `{uid, t}`: el doble clic se reconoce aquí y no con
+//: `ondblclick`, porque pulsar una sala captura el puntero para poder arrastrarla, y con el
+//: puntero capturado el doble clic le llega al lienzo y no a la sala — no abría nada.
+let _dcsLastDown = null;
+const _DCS_SVG = 'dcimSiteSvg';
+//: Una sala sin medidas se dibuja con estas, a trazos: sin tamaño sería un punto, y un punto
+//: no se puede agarrar para colocarlo.
+const _DCS_NOSIZE = {w: 4000, d: 3000};
+//: Lo ancho que se dibuja un plano de fondo cuando nadie ha dicho cuánto mide de verdad. FIJO:
+//: sacarlo de las salas —lo que se hacía— estiraba el plano entero cada vez que se movía una
+//: sala hacia fuera, y lo ya colocado dejaba de cuadrar con el dibujo.
+const _DCS_PLAN_MM = 50000;
+//: Colocar y estirar salas va a pasos de 10 cm: en el plano de un edificio nadie coloca una
+//: sala al milímetro, y un número así sugiere una exactitud que no existe.
+const _dcsSnap = (mm) => Math.round(mm / 100) * 100;
+
+/** Abrir el plano de una sede: en la planta pedida —un botón de planta del panel del mapa—,
+ *  o en la de más abajo. */
+async function _dcsOpen(siteUid, floorUid) {
+    const site = (_dcimData.sites || []).find(s => s.uid === siteUid);
+    if (!site) return;
+    const d = await apiGet(`/api/v1/dcim/sites/${encodeURIComponent(siteUid)}/floors`) || {};
+    _dcsPlan = {site, floors: d.floors || [], floor: '', image: null, kinds: d.kinds || {},
+                content: {}};
+    const pedida = _dcsPlan.floors.find(f => f.uid === floorUid) || _dcsPlan.floors[0] || {};
+    _dcsPlan.floor = pedida.uid || '';
+    _dcsSel = '';
+    _dcsItem = null;
+    ssCanvasReset(_DCS_SVG);
+    await Promise.all([_dcsLoadImage(), _dcsLoadContents()]);
+    renderDcim();
+}
+
+/** Lo que hay dentro de cada sala de esta planta —sus racks y sus piezas—, zona general
+ *  incluida. Una petición por sala: son pocas por planta, y lo que devuelven es lo mismo que
+ *  pinta el plano de cada una. */
+async function _dcsLoadContents() {
+    if (!_dcsPlan) return;
+    const salas = _dcsHere();
+    const res = await Promise.all(salas.map(r => Promise.all([
+        apiGet(`/api/v1/dcim/racks?room=${encodeURIComponent(r.uid)}`),
+        apiGet(`/api/v1/dcim/rooms/${encodeURIComponent(r.uid)}/features`)])));
+    const content = {};
+    salas.forEach((r, i) => {
+        const [k, f] = res[i];
+        content[r.uid] = {racks: (k || {}).racks || [], features: (f || {}).features || []};
+        if (f && f.kinds && !Object.keys(_dcsPlan.kinds).length) _dcsPlan.kinds = f.kinds;
+    });
+    _dcsPlan.content = content;
+}
+
+/** La sala que es la zona general de esta planta, si ya existe. */
+function _dcsAreaUid() { return (_dcsFloor() || {}).area_uid || ''; }
+
+function _dcsClose() {
+    _dcsPlan = null;
+    _dcsSel = '';
+    renderDcim();
+}
+
+function _dcsFloor() {
+    return _dcsPlan ? (_dcsPlan.floors.find(f => f.uid === _dcsPlan.floor) || null) : null;
+}
+
+/** Las salas de la sede, las de ESTA planta y las que no están en ninguna. */
+function _dcsRooms() { return (_dcsPlan && _dcsPlan.site.rooms) || []; }
+function _dcsHere() { return _dcsRooms().filter(r => r.floor_uid && r.floor_uid === _dcsPlan.floor); }
+//: Las salas de esta planta que se dibujan como caja: todas menos su zona general, que es la
+//: planta misma y no se coloca ni se estira.
+function _dcsHereRooms() { const a = _dcsAreaUid(); return _dcsHere().filter(r => r.uid !== a); }
+function _dcsLoose() {
+    const plantas = new Set((_dcsPlan ? _dcsPlan.floors : []).map(f => f.uid));
+    return _dcsRooms().filter(r => !r.floor_uid || !plantas.has(r.floor_uid));
+}
+
+/** El plano de fondo de la planta, leído como el de una sala: a `data:` y con su proporción
+ *  medida en la propia imagen. Sin plano no es un error, es una planta a la que aún no se le ha
+ *  subido. */
+async function _dcsLoadImage() {
+    if (!_dcsPlan) return;
+    _dcsPlan.image = null;
+    const f = _dcsFloor();
+    if (!f || !f.plan) return;
+    try {
+        const resp = await fetch(_dcimMediaUrl(f.plan), {credentials: 'same-origin'});
+        if (!resp.ok) return;
+        const blob = await resp.blob();
+        const data = await new Promise(ok => {
+            const fr = new FileReader();
+            fr.onload = () => ok(String(fr.result || ''));
+            fr.onerror = () => ok('');
+            fr.readAsDataURL(blob);
+        });
+        if (!data) return;
+        const ratio = await new Promise(ok => {
+            const img = new Image();
+            img.onload = () => ok(img.naturalWidth ? img.naturalHeight / img.naturalWidth : 0);
+            img.onerror = () => ok(0);
+            img.src = data;
+        });
+        if (_dcsPlan && _dcsPlan.floor === f.uid) _dcsPlan.image = {data, ratio: ratio || 0.7};
+    } catch (e) { /* una planta sin plano es lo normal al empezar */ }
+}
+
+/** Cambiar de planta: otro dibujo, otro encuadre, y nada seleccionado de la anterior. */
+async function _dcsGo(floorUid) {
+    if (!_dcsPlan) return;
+    // Lo tecleado en la planta que se deja sale antes: el dibujado siguiente pide los datos al
+    // servidor, y sin esto volvería con lo de antes de teclear.
+    await _dcpFlush();
+    _dcsPlan.floor = floorUid;
+    _dcsSel = '';
+    _dcsItem = null;
+    ssCanvasReset(_DCS_SVG);
+    await Promise.all([_dcsLoadImage(), _dcsLoadContents()]);
+    renderDcim();
+}
+
+// ── Lo que mide cada cosa en el dibujo ─────────────────────────────────────────────────────
+
+function _dcsSize(r) {
+    const w = Number(r.width_mm) || 0, d = Number(r.depth_mm) || 0;
+    return (w > 0 && d > 0) ? {w, d, real: true} : {w: _DCS_NOSIZE.w, d: _DCS_NOSIZE.d, real: false};
+}
+
+/** Lo ancho que es el plano de fondo en milímetros: lo dicho, o si no, un tamaño FIJO. Nunca
+ *  lo que midan las salas: el plano es la referencia sobre la que se colocan, y una referencia
+ *  que se mueve con lo que se coloca no sirve para colocar nada. */
+function _dcsImageMm() {
+    const dicho = Number((_dcsFloor() || {}).plan_mm) || 0;
+    return dicho > 0 ? {mm: dicho, scaled: true} : {mm: _DCS_PLAN_MM, scaled: false};
+}
+
+function _dcsExtent() {
+    let maxX = 20000, maxY = 15000;
+    const img = _dcsPlan && _dcsPlan.image;
+    if (img) {
+        const {mm} = _dcsImageMm();
+        maxX = Math.max(maxX, mm);
+        maxY = Math.max(maxY, mm * img.ratio);
+    }
+    for (const r of _dcsHereRooms()) {
+        const s = _dcsSize(r);
+        maxX = Math.max(maxX, (Number(r.pos_x) || 0) + s.w);
+        maxY = Math.max(maxY, (Number(r.pos_y) || 0) + s.d);
+    }
+    const pad = _DCP.PAD * 2 * _DCP_SCALE;
+    return {x: -pad, y: -pad, width: maxX * _DCP_SCALE + pad * 2,
+            height: maxY * _DCP_SCALE + pad * 2};
+}
+
+// ── El dibujo ──────────────────────────────────────────────────────────────────────────────
+
+function _dcsContent() {
+    const S = _DCP_SCALE;
+    let h = '';
+    const img = _dcsPlan && _dcsPlan.image;
+    if (img) {
+        const {mm, scaled} = _dcsImageMm();
+        h += `<image href="${escAttr(img.data)}" x="0" y="0" width="${mm * S}"
+                     height="${mm * S * img.ratio}" opacity="${scaled ? '.85' : '.5'}"
+                     preserveAspectRatio="xMinYMin meet"></image>`;
+    }
+    // Primero las cajas de las salas y ENCIMA todo lo que contienen, lo de la zona general
+    // incluido. Al revés, un rack suelto en la zona general que quedara debajo de una sala no se
+    // podía pulsar nunca: el ratón agarraba la sala. La caja se sigue agarrando por lo que no
+    // tiene nada encima, y es translúcida para que se vea lo que hay debajo.
+    const salas = _dcsHereRooms();
+    for (const r of salas) h += _dcsRoom(r);
+    const area = _dcsRooms().find(r => r.uid === _dcsAreaUid());
+    if (area) h += _dcsInside(area);
+    for (const r of salas) h += _dcsInside(r);
+    return h;
+}
+
+/** Dónde está una sala en la planta y cuánto mide: lo que convierte sus coordenadas —en las
+ *  que están sus racks y sus piezas— a las de la planta. */
+function _dcsFrame(r) {
+    const s = _dcsSize(r);
+    return {x: Number(r.pos_x) || 0, y: Number(r.pos_y) || 0, w: s.w, d: s.d,
+            rot: Number(r.rotation) || 0};
+}
+
+/** Un punto de la planta en las coordenadas de una sala. La inversa del giro de la sala sobre
+ *  su centro; para la zona general —en (0, 0) y sin girar— es el mismo punto. */
+function _dcsToLocal(r, px, py) {
+    const f = _dcsFrame(r);
+    const a = f.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    const dx = px - (f.x + f.w / 2), dy = py - (f.y + f.d / 2);
+    return {x: dx * c + dy * s + f.w / 2, y: -dx * s + dy * c + f.d / 2};
+}
+
+/** Lo que hay dentro de una sala, en su sitio de la planta: la misma transformación que la
+ *  caja de la sala, así que lo de dentro se mueve y gira con ella. */
+function _dcsInside(r) {
+    const c = ((_dcsPlan || {}).content || {})[r.uid];
+    if (!c) return '';
+    const f = _dcsFrame(r), S = _DCP_SCALE;
+    const kinds = (_dcsPlan || {}).kinds || {};
+    let h = '';
+    for (const x of c.features) {
+        if (((kinds[x.kind] || {}).layer === 'air')) continue;
+        h += _dcsThing('feature', x, r.uid, Number(x.width_mm) || 600, Number(x.depth_mm) || 600,
+                       _dcpLook(x.kind), x.label || t('dcim_kind_' + x.kind));
+    }
+    for (const x of c.racks) {
+        const tone = (x.roll || {}).state ? deviceStateColor(x.roll.state) : 'var(--bs-secondary-color)';
+        h += _dcsThing('rack', x, r.uid, Number(x.width_mm) || 600, Number(x.depth_mm) || 1000,
+                       {fill: 'var(--bs-tertiary-bg)', line: tone, front: tone}, x.name || '');
+    }
+    return `<g transform="translate(${f.x * S},${f.y * S}) rotate(${f.rot} ${f.w * S / 2} ${f.d * S / 2})">${h}</g>`;
+}
+
+/** Un rack o una pieza, en las coordenadas de su sala. Un rack lleva la franja de su frente,
+ *  como en el plano de la sala: desde el edificio también importa hacia dónde sopla. */
+function _dcsThing(kind, x, room, wmm, dmm, look, nombre) {
+    const S = _DCP_SCALE, w = wmm * S, d = dmm * S;
+    const px = (Number(x.pos_x) || 0) * S, py = (Number(x.pos_y) || 0) * S;
+    const rot = Number(x.rotation) || 0;
+    const puesto = _dcsItem && _dcsItem.uid === x.uid;
+    const tam = Math.min(5, Math.max(2.4, Math.min(w, d) * 0.35));
+    // El rótulo, FUERA del giro: gira la caja y no el texto, que girado con ella salía de lado
+    // o boca abajo. El centro no se mueve al girar, así que el texto sigue donde está la caja.
+    const ancho = Math.abs(rot % 180) === 90 ? d : w;
+    return `<g class="ss-grab" data-dcsi="${escAttr(kind)}" data-uid="${escAttr(x.uid)}"
+               data-room="${escAttr(room)}"
+               onpointerenter="_dcsFloatShow(${jsStr(kind)},${jsStr(x.uid)},${jsStr(room)},this)"
+               onpointerleave="_dcsFloatLater()">
+        <title>${esc(nombre)}</title>
+        <g transform="rotate(${rot} ${px + w / 2} ${py + d / 2})">
+            <rect x="${px}" y="${py}" width="${w}" height="${d}" rx=".6"
+                  fill="${look.fill === 'none' ? 'transparent' : look.fill}"
+                  stroke="${look.line === 'none' ? 'var(--bs-secondary-color)' : look.line}"
+                  stroke-width="1.2" vector-effect="non-scaling-stroke"></rect>
+            ${look.front ? `<rect x="${px}" y="${py}" width="${w}" height="${Math.max(1, d * 0.08)}"
+                  fill="${look.front}"></rect>` : ''}
+            ${puesto ? `<rect x="${px - 1}" y="${py - 1}" width="${w + 2}" height="${d + 2}" fill="none"
+                stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
+                vector-effect="non-scaling-stroke"></rect>` : ''}
+        </g>
+        ${ancho > 4 ? `<text x="${px + w / 2}" y="${py + d / 2 + tam * 0.35}" font-size="${tam}"
+              text-anchor="middle" fill="var(--bs-body-color)" stroke="var(--bs-body-bg)"
+              stroke-width="${tam * 0.2}" paint-order="stroke" style="pointer-events:none">${
+              esc(_dceClip(nombre, Math.max(3, Math.floor(ancho / (tam * 0.6)))))}</text>` : ''}
+    </g>`;
+}
+
+/** Una sala en la planta: su caja a tamaño real, girada sobre su centro como un rack en una
+ *  sala, con su nombre y su medida. A trazos si no tiene medidas: está, pero su tamaño es un
+ *  supuesto y no debe leerse como dato.
+ *
+ *  Translúcida, y el texto con un contorno del color del fondo: una sala se ajusta CONTRA el
+ *  dibujo del edificio, y un relleno opaco tapaba justo las paredes con las que había que hacerla
+ *  coincidir. El contorno hace que el nombre se lea sobre cualquier plano, claro u oscuro. */
+function _dcsRoom(r) {
+    const S = _DCP_SCALE;
+    const sz = _dcsSize(r);
+    const w = sz.w * S, d = sz.d * S;
+    const x = (Number(r.pos_x) || 0) * S, y = (Number(r.pos_y) || 0) * S;
+    const rot = Number(r.rotation) || 0;
+    const puesto = _dcsSel === r.uid;
+    const tone = (r.roll || {}).state ? deviceStateColor(r.roll.state) : 'var(--bs-info)';
+    const tam = Math.min(12, Math.max(4, Math.min(w, d) * 0.16));
+    return `<g class="ss-grab" data-dcs="${escAttr(r.uid)}"
+               transform="rotate(${rot} ${x + w / 2} ${y + d / 2})"
+               onpointerenter="_dcsFloatShow('room',${jsStr(r.uid)},'',this)"
+               onpointerleave="_dcsFloatLater()">
+        <title>${esc(r.name || '')}</title>
+        <rect x="${x}" y="${y}" width="${w}" height="${d}" rx="1.5"
+              fill="var(--bs-info)" fill-opacity=".18" stroke="${tone}"
+              stroke-width="1.6" ${sz.real ? '' : 'stroke-dasharray="5 3"'}
+              vector-effect="non-scaling-stroke"></rect>
+        <text x="${x + w / 2}" y="${y + d / 2}" font-size="${tam}" text-anchor="middle"
+              fill="var(--bs-body-color)" stroke="var(--bs-body-bg)" stroke-width="${tam * 0.22}"
+              paint-order="stroke" style="pointer-events:none">${esc(r.name || '')}</text>
+        <text x="${x + w / 2}" y="${y + d / 2 + tam * 1.1}" font-size="${tam * 0.6}"
+              text-anchor="middle" fill="var(--bs-body-color)" stroke="var(--bs-body-bg)"
+              stroke-width="${tam * 0.15}" paint-order="stroke" style="pointer-events:none">${
+              esc(sz.real ? `${(sz.w / 1000).toFixed(1)} × ${(sz.d / 1000).toFixed(1)} m`
+                          : t('dcim_room_no_size'))}</text>
+        ${puesto ? `<rect x="${x - 1}" y="${y - 1}" width="${w + 2}" height="${d + 2}" fill="none"
+            stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
+            vector-effect="non-scaling-stroke"></rect>` : ''}
+        ${puesto && _dcimMay('dcim_edit') ? _dcsHandles(x, y, w, d) : ''}
+    </g>`;
+}
+
+/** Las asas de una sala: las mismas ocho que las de una pieza, puestas donde está la sala —la
+ *  sala se dibuja en su sitio dentro de su `<g>`, y una pieza desde el origen del suyo—. */
+function _dcsHandles(x, y, w, d) {
+    return `<g transform="translate(${x},${y})">${_dcpHandles(w, d)}</g>`;
+}
+
+function _dcsRedraw() {
+    const svg = ssCanvasSvg(_DCS_SVG);
+    if (svg) svg.innerHTML = _dcsContent();
+}
+
+// ── La pantalla ────────────────────────────────────────────────────────────────────────────
+
+function _dcsHtml() {
+    // La sede FRESCA: `renderDcim` vuelve a pedir las sedes en cada dibujado, y quedarse con la
+    // que había al abrir enseñaría una planta sin la sala que alguien acaba de crear.
+    const fresca = (_dcimData.sites || []).find(s => s.uid === _dcsPlan.site.uid);
+    if (fresca) _dcsPlan.site = fresca;
+    const site = _dcsPlan.site;
+    const edita = _dcimMay('dcim_edit');
+    const f = _dcsFloor();
+    const plantas = _dcsPlan.floors;
+    return `<div class="px-3 py-2 ss-vfill ss-vscroll ss-scroll-pad">
+        <div class="ss-toolrow mb-2">
+            <button class="btn btn-sm btn-secondary" onclick="_dcsClose()">
+                <i class="bi bi-arrow-left me-1"></i>${esc(t('dcim_back'))}</button>
+            <i class="bi bi-building text-muted"></i>
+            <span class="fw-semibold ss-fs-5">${esc(site.name || site.uid)}</span>
+            ${plantas.length ? `<div class="btn-group btn-group-sm flex-wrap">${plantas.map(p =>
+                `<button type="button" class="btn btn-sm ${p.uid === _dcsPlan.floor ? 'btn-warning' : 'btn-secondary'}"
+                    data-dcs-floor="${escAttr(p.uid)}" onclick="_dcsGo(${jsStr(p.uid)})" title="${escAttr(tf('dcim_floor_level_is', p.level))}">
+                    ${esc(p.name || '')}</button>`).join('')}</div>` : ''}
+            ${edita ? `<button class="btn btn-sm btn-secondary" onclick="_dcsFloorNew()">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_floor_new'))}</button>` : ''}
+            <div class="ss-toolrow-tools">
+                <span class="text-muted ss-fs-2 ss-tabular me-1" id="dcs-readout">—</span>
+                ${edita && f ? `<input type="file" id="dcsPlanFile" class="d-none"
+                       accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+                       onchange="_dcsUpload(this)">
+                <button class="btn btn-sm btn-secondary"
+                        onclick="document.getElementById('dcsPlanFile').click()"
+                        title="${escAttr(t(f.plan ? 'dcim_plan_replace' : 'dcim_plan_upload'))}">
+                    <i class="bi bi-image"></i></button>
+                ${f.plan ? `<button class="btn btn-sm btn-warning" onclick="_dcsDropPlan()"
+                        title="${escAttr(t('dcim_plan_drop'))}"><i class="bi bi-trash"></i></button>` : ''}` : ''}
+                ${ssCanvasTools(_DCS_SVG, 'site_plan')}
+            </div>
+        </div>
+        ${f ? `<div class="ss-editor">
+            <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
+                ${_dcsPaletteHtml()}
+                <div id="dcsFloat" class="position-absolute d-none"
+                     style="z-index:3;transform:translate(-100%,calc(-100% - 4px))"
+                     onpointerenter="_dcsFloatKeep()" onpointerleave="_dcsFloatLater()"></div>
+                <svg ${ssCanvasAttrs(_DCS_SVG, _dcsExtent())}
+                     onwheel="_dcsFloatHide();ssCanvasWheel(${jsStr(_DCS_SVG)},event)"
+                     onpointerdown="_dcsDown(event)" onpointermove="_dcsMove(event)"
+                     onpointerup="_dcsUp(event)" onpointercancel="_dcsUp(event)"
+                     onpointerleave="_dcsUp(event)"
+                     aria-label="${escAttr(t('dcim_site_plan'))}">
+                    ${_dcsContent()}
+                </svg>
+            </div>
+            ${_dcsInspectorHtml()}
+        </div>
+        <div class="text-muted ss-fs-3 mt-1">${esc(t('dcim_site_plan_hint'))}</div>`
+        : `<div class="text-muted ss-fs-2 p-4 text-center border rounded-3">
+            <i class="bi bi-layers d-block fs-2 mb-2"></i>${esc(t('dcim_floors_none'))}
+            ${edita ? `<div class="mt-3"><button class="btn btn-sm btn-primary" onclick="_dcsFloorNew()">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_floor_new'))}</button></div>` : ''}
+        </div>`}
+    </div>`;
+}
+
+/** Lo que se puede poner en la planta: un rack y cada tipo de pieza. Cae en la sala que haya
+ *  en el centro de lo que se mira, o en la zona general de la planta si no hay ninguna. */
+function _dcsPaletteHtml() {
+    if (!_dcimMay('dcim_edit')) return '';
+    const kinds = (_dcsPlan || {}).kinds || {};
+    const boton = (onclick, icono, texto) =>
+        `<button type="button" class="btn btn-sm btn-secondary" onclick="${onclick}"
+            title="${escAttr(texto)}" aria-label="${escAttr(texto)}"><i class="bi ${icono}"></i></button>`;
+    return `<div class="ss-float-tools">
+        ${boton("_dcsAdd('rack')", 'bi-hdd-rack', t('dcim_rack'))}
+        ${Object.keys(kinds).filter(k => (kinds[k] || {}).layer !== 'air').map(k =>
+            boton(`_dcsAdd(${jsStr(k)})`, _DCP_ICON[k] || 'bi-square',
+                  `${t('dcim_kind_' + k)} · ${kinds[k].w} × ${kinds[k].d} mm`)).join('')}
+    </div>`;
+}
+
+/** Poner algo en la planta. En la sala que haya bajo el centro de la vista —en sus propias
+ *  coordenadas, aunque esté girada— y, si no hay ninguna, en la zona general, que se crea la
+ *  primera vez. Así lo que se suelta en un pasillo acaba en el inventario igual que lo de dentro
+ *  de una sala: con su sala, su empresa y su sitio en el árbol. */
+async function _dcsAdd(kind) {
+    if (!_dcsPlan || !_dcsPlan.floor) return;
+    const v = ssCanvasWindow(_DCS_SVG) || {x: 0, y: 0, w: 20000 * _DCP_SCALE, h: 15000 * _DCP_SCALE};
+    const cx = (v.x + v.w / 2) / _DCP_SCALE, cy = (v.y + v.h / 2) / _DCP_SCALE;
+    let sala = _dcsHereRooms().find(r => {
+        const p = _dcsToLocal(r, cx, cy), f = _dcsFrame(r);
+        return p.x >= 0 && p.y >= 0 && p.x <= f.w && p.y <= f.d;
+    });
+    if (!sala) {
+        const r = await _dcimSend('POST', `/api/v1/dcim/floors/${encodeURIComponent(_dcsPlan.floor)}/area`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        const f = _dcsFloor();
+        if (f) f.area_uid = String((r.data || {}).room_uid || '');
+        sala = {uid: f.area_uid, pos_x: 0, pos_y: 0, rotation: 0, width_mm: 0, depth_mm: 0};
+    }
+    const p = _dcsToLocal(sala, cx, cy);
+    const spec = kind === 'rack' ? {w: 600, d: 1000} : ((_dcsPlan.kinds || {})[kind] || {w: 600, d: 600});
+    const at = {pos_x: _dcsSnap(p.x - spec.w / 2), pos_y: _dcsSnap(p.y - spec.d / 2)};
+    const r = kind === 'rack'
+        ? await _dcimSend('POST', '/api/v1/dcim/racks', Object.assign(
+            {room_uid: sala.uid, name: t('dcim_new_rack'), u_height: 42}, at))
+        : await _dcimSend('POST', '/api/v1/dcim/features', Object.assign(
+            {room_uid: sala.uid, kind}, at));
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcsSel = '';
+    _dcsItem = {kind: kind === 'rack' ? 'rack' : 'feature', uid: String((r.data || {}).uid || ''),
+                room: sala.uid};
+    await _dcsReload();
+}
+
+// ── El inspector ───────────────────────────────────────────────────────────────────────────
+
+function _dcsInspectorHtml() {
+    if (!_dcimMay('dcim_edit')) return '';
+    return `<aside id="dcsInspector" class="ss-side-panel border rounded-3 p-2">${
+        _dcsInspectorBody()}</aside>`;
+}
+
+function _dcsInspectorDraw() {
+    const el = document.getElementById('dcsInspector');
+    if (el) el.innerHTML = _dcsInspectorBody();
+}
+
+function _dcsInspectorBody() {
+    const it = _dcsItemRow();
+    if (it) return _dcsItemPanel(it);
+    const r = _dcsSel ? _dcsRooms().find(x => x.uid === _dcsSel) : null;
+    return r ? _dcsRoomPanel(r) : _dcsFloorPanel();
+}
+
+/** El rack o la pieza seleccionados, tal como vinieron de su sala. */
+function _dcsItemRow() {
+    if (!_dcsItem || !_dcsPlan) return null;
+    const c = (_dcsPlan.content || {})[_dcsItem.room] || {};
+    const lista = _dcsItem.kind === 'rack' ? (c.racks || []) : (c.features || []);
+    return lista.find(x => x.uid === _dcsItem.uid) || null;
+}
+
+/** Un rack o una pieza en el plano de la sede: de qué sala es y las tres cosas que se hacen
+ *  desde aquí —abrirlo, girarlo, quitarlo—. Lo demás, en su propia pantalla: un rack se edita
+ *  en su alzado y una pieza en el plano de su sala, y repetir aquí sus campos sería otra forma
+ *  de editar lo mismo. */
+function _dcsItemPanel(x) {
+    const rack = _dcsItem.kind === 'rack';
+    const sala = _dcsItem.room === _dcsAreaUid() ? t('dcim_floor_area')
+        : ((_dcsRooms().find(r => r.uid === _dcsItem.room) || {}).name || '');
+    const nombre = rack ? (x.name || '') : (x.label || t('dcim_kind_' + x.kind));
+    return `<div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi ${rack ? 'bi-hdd-rack' : (_DCP_ICON[x.kind] || 'bi-square')} text-muted"></i>
+            <span class="fw-semibold text-truncate">${esc(nombre)}</span>
+            ${rack ? _dcimRollBadge(x.roll) : ''}
+            <button type="button" class="btn btn-sm btn-secondary ms-auto" onclick="_dcsPick('')"
+                title="${escAttr(t('close'))}" aria-label="${escAttr(t('close'))}">
+                <i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="text-muted ss-fs-2 mb-3"><i class="bi bi-door-open me-1"></i>${esc(sala)}</div>
+        <div class="d-flex gap-1 flex-wrap">
+            <button type="button" class="btn btn-sm btn-primary" onclick="_dcsItemOpen()">
+                <i class="bi ${rack ? 'bi-box-arrow-in-right' : 'bi-map'} me-1"></i>${
+                esc(t(rack ? 'dcim_open_rack' : 'dcim_room_open_plan'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcsItemDuplicate()"
+                title="${escAttr(t('dcim_piece_duplicate'))}"><i class="bi bi-files"></i></button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcsItemTurn()"
+                title="${escAttr(t('dcim_turn'))}"><i class="bi bi-arrow-clockwise"></i></button>
+            <button type="button" class="btn btn-sm btn-danger" onclick="_dcsItemDrop()"
+                title="${escAttr(t('delete'))}"><i class="bi bi-trash"></i></button>
+        </div>`;
+}
+
+function _dcsItemOpen() {
+    if (!_dcsItem) return;
+    if (_dcsItem.kind === 'rack') return _dcimLoadRack(_dcsItem.uid);
+    return _dcimOpenPlan(_dcsItem.room);
+}
+
+async function _dcsItemTurn() {
+    const x = _dcsItemRow();
+    if (!x) return;
+    const rot = ((Number(x.rotation) || 0) + 90) % 360;
+    const url = `/api/v1/dcim/${_dcsItem.kind === 'rack' ? 'racks' : 'features'}/${encodeURIComponent(x.uid)}`;
+    const r = await _dcimSend('PUT', url, {rotation: rot});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    x.rotation = rot;
+    _dcsRedraw();
+}
+
+/** Quitarlo, con la confirmación del panel. Un rack se lleva lo que tiene dentro; por eso se
+ *  pregunta con su nombre. */
+function _dcsItemDrop() {
+    const x = _dcsItemRow();
+    if (!x) return;
+    const rack = _dcsItem.kind === 'rack';
+    const nombre = rack ? (x.name || '') : (x.label || t('dcim_kind_' + x.kind));
+    showConfirmModal(tf('dcim_delete_confirm', nombre), async () => {
+        const url = `/api/v1/dcim/${rack ? 'racks' : 'features'}/${encodeURIComponent(x.uid)}`;
+        const r = await _dcimSend('DELETE', url);
+        if (!r.ok) return showToast(r.error || t('delete_error'), 'danger');
+        _dcsItem = null;
+        await _dcsReload();
+    });
+}
+
+// ── La barra flotante ──────────────────────────────────────────────────────────────────────
+//
+// La misma que en el plano de una sala: al pasar por encima de algo, lo que se hace con ello,
+// sin tener que seleccionarlo antes. Fuera del `<svg>` —dentro, pulsar un botón sería también
+// empezar un arrastre— y nunca mientras se arrastra. Quien solo puede mirar ve «abrir» y nada
+// más, que es todo lo que puede hacer.
+
+//: Con retraso al esconderse: para llegar a la barra hay que SALIR de la cosa.
+let _dcsFloatTimer = null;
+//: La barra de una SALA que espera a salir. Un rack está dentro de su sala, y el camino del
+//: ratón desde el rack hasta su barra cruza la sala: sin esperar, la barra se cambiaba a la de
+//: la sala a mitad de camino y el botón pulsado era otro.
+let _dcsFloatPending = null;
+
+function _dcsFloatShow(kind, uid, room, el) {
+    if (_dcsDrag) return;
+    clearTimeout(_dcsFloatPending);
+    _dcsFloatPending = null;
+    // Saliendo de algo hacia su barra —el margen antes de esconderla está corriendo— y entrando
+    // en una sala: la de la sala espera. Si se llega a la barra, se queda la que había; si el
+    // ratón se queda en la sala, sale la suya.
+    if (kind === 'room' && _dcsFloatTimer) {
+        _dcsFloatPending = setTimeout(() => {
+            _dcsFloatPending = null;
+            _dcsFloatPaint(kind, uid, room, el);
+        }, 320);
+        return;
+    }
+    _dcsFloatPaint(kind, uid, room, el);
+}
+
+function _dcsFloatPaint(kind, uid, room, el) {
+    if (_dcsDrag) return;
+    const barra = document.getElementById('dcsFloat');
+    const marco = el && el.closest('.ss-infra-canvas');
+    if (!barra || !marco || !el.isConnected) return;
+    clearTimeout(_dcsFloatTimer);
+    _dcsFloatTimer = null;
+    const a = marco.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    barra.innerHTML = _dcsFloatHtml(kind, uid, room);
+    barra.style.left = `${Math.max(0, b.right - a.left)}px`;
+    barra.style.top = `${Math.max(0, b.top - a.top)}px`;
+    barra.classList.remove('d-none');
+}
+
+function _dcsFloatHtml(kind, uid, room) {
+    const edita = _dcimMay('dcim_edit');
+    const boton = (act, icono, texto, tono) =>
+        `<button type="button" class="btn btn-sm ${tono} py-0 px-1"
+            onclick="_dcsFloatAct(${jsStr(act)},${jsStr(kind)},${jsStr(uid)},${jsStr(room)})"
+            title="${escAttr(texto)}" aria-label="${escAttr(texto)}"><i class="bi ${icono}"></i></button>`;
+    const abrir = kind === 'rack'
+        ? boton('open', 'bi-box-arrow-in-right', t('dcim_open_rack'), 'btn-secondary')
+        : boton('open', 'bi-map', t('dcim_room_open_plan'), 'btn-secondary');
+    if (!edita) return `<div class="btn-group btn-group-sm shadow-sm">${abrir}</div>`;
+    if (kind === 'room') {
+        return `<div class="btn-group btn-group-sm shadow-sm">${abrir}
+            ${boton('turn', 'bi-arrow-clockwise', t('dcim_turn'), 'btn-secondary')}
+            ${boton('unplace', 'bi-box-arrow-up', t('dcim_floor_unplace'), 'btn-warning')}
+        </div>`;
+    }
+    return `<div class="btn-group btn-group-sm shadow-sm">${abrir}
+        ${boton('dup', 'bi-files', t('dcim_piece_duplicate'), 'btn-secondary')}
+        ${boton('turn', 'bi-arrow-clockwise', t('dcim_turn'), 'btn-secondary')}
+        ${boton('drop', 'bi-trash', t('delete'), 'btn-danger')}
+    </div>`;
+}
+
+function _dcsFloatLater() {
+    clearTimeout(_dcsFloatTimer);
+    _dcsFloatTimer = setTimeout(_dcsFloatHide, 250);
+}
+
+/** El ratón ha llegado a la barra: se queda, y la de la sala que esperaba ya no sale. */
+function _dcsFloatKeep() {
+    clearTimeout(_dcsFloatTimer);
+    _dcsFloatTimer = null;
+    clearTimeout(_dcsFloatPending);
+    _dcsFloatPending = null;
+}
+
+function _dcsFloatHide() {
+    clearTimeout(_dcsFloatTimer);
+    _dcsFloatTimer = null;
+    const barra = document.getElementById('dcsFloat');
+    if (barra) barra.classList.add('d-none');
+}
+
+/** Lo que hace cada botón de la barra. Por los mismos caminos que el inspector —abrir, girar,
+ *  quitar— para que la barra y el inspector no puedan hacer cosas distintas con el mismo nombre. */
+function _dcsFloatAct(act, kind, uid, room) {
+    _dcsFloatHide();
+    if (kind === 'room') {
+        if (act === 'open') return _dcimOpenPlan(uid);
+        if (act === 'turn') return _dcsTurn(uid);
+        if (act === 'unplace') return _dcsUnplace(uid);
+        return;
+    }
+    _dcsSel = '';
+    _dcsItem = {kind, uid, room};
+    if (act === 'open') return _dcsItemOpen();
+    if (act === 'turn') return _dcsItemTurn();
+    if (act === 'drop') return _dcsItemDrop();
+    if (act === 'dup') return _dcsItemDuplicate();
+}
+
+/** Uno igual, al lado, en la misma sala. Un rack, VACÍO: lo que es del armario —alto, medidas,
+ *  giro, altura, carriles, accesos, fila— y nada de lo que es de ESE armario, ni su contenido ni
+ *  su número de activo, que repetido deja de identificar nada. Al lado y no encima: una copia
+ *  que cae sobre el original no se ve, y lo que se ve es que el botón no ha hecho nada. */
+async function _dcsItemDuplicate() {
+    const x = _dcsItemRow();
+    if (!x) return;
+    const rack = _dcsItem.kind === 'rack';
+    const ancho = Number(x.width_mm) || (rack ? 600 : 600);
+    const cuerpo = {room_uid: _dcsItem.room, pos_x: (Number(x.pos_x) || 0) + ancho + 200,
+                    pos_y: Number(x.pos_y) || 0};
+    const copia = rack
+        ? ['u_height', 'width_mm', 'depth_mm', 'rotation', 'base_mm', 'desc_units',
+           'rail_front_mm', 'rail_depth_mm', 'rail_rear_mm', 'access', 'row_uid']
+        : ['kind', 'label', 'width_mm', 'depth_mm', 'rotation', 'height_mm', 'base_mm'];
+    for (const c of copia) if (x[c] !== undefined && x[c] !== null) cuerpo[c] = x[c];
+    if (rack) cuerpo.name = tf('dcim_rack_copy_name', x.name || '');
+    const r = await _dcimSend('POST', `/api/v1/dcim/${rack ? 'racks' : 'features'}`, cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcsItem = {kind: _dcsItem.kind, uid: String((r.data || {}).uid || ''), room: _dcsItem.room};
+    await _dcsReload();
+}
+
+/** Una sala seleccionada: dónde está en la planta y cuánto mide — lo mismo que usa su propio
+ *  plano, que es por lo que se edita aquí y no en una copia. */
+function _dcsRoomPanel(r) {
+    const campo = (name, label, paso, min) =>
+        `<label class="ss-fs-2 text-muted">${esc(t(label))}
+            <input class="form-control form-control-sm ss-tabular" type="number" step="${paso}"
+                   ${min !== undefined ? `min="${min}"` : ''}
+                   value="${escAttr(String(r[name] ?? 0))}"
+                   oninput="_dcsRoomSet(${jsStr(r.uid)},${jsStr(name)},this.value)"></label>`;
+    return `<div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-door-open text-muted"></i>
+            <span class="fw-semibold text-truncate">${esc(r.name || '')}</span>
+            ${_dcimRollBadge(r.roll)}
+            <button type="button" class="btn btn-sm btn-secondary ms-auto" onclick="_dcsPick('')"
+                title="${escAttr(t('close'))}" aria-label="${escAttr(t('close'))}">
+                <i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="ss-grid-2 mb-2">
+            ${campo('pos_x', 'dcim_pos_x', 100)}
+            ${campo('pos_y', 'dcim_pos_y', 100)}
+            ${campo('width_mm', 'dcim_room_width', 100, 0)}
+            ${campo('depth_mm', 'dcim_room_depth', 100, 0)}
+            ${campo('rotation', 'dcim_rotation', 90)}
+        </div>
+        <div class="d-flex gap-1 flex-wrap">
+            <button type="button" class="btn btn-sm btn-primary" onclick="_dcimOpenPlan(${jsStr(r.uid)})">
+                <i class="bi bi-map me-1"></i>${esc(t('dcim_room_open_plan'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcsTurn(${jsStr(r.uid)})"
+                title="${escAttr(t('dcim_turn'))}"><i class="bi bi-arrow-clockwise"></i></button>
+            <button type="button" class="btn btn-sm btn-warning" onclick="_dcsUnplace(${jsStr(r.uid)})"
+                title="${escAttr(t('dcim_floor_unplace'))}"><i class="bi bi-box-arrow-up"></i></button>
+        </div>`;
+}
+
+/** Sin nada seleccionado, la planta: cómo se llama, qué nivel es y cuánto mide su plano; sus
+ *  salas; y las de la sede que aún no están en ninguna, que son las que se vienen a colocar. */
+function _dcsFloorPanel() {
+    const f = _dcsFloor();
+    if (!f) return '';
+    const aqui = _dcsHereRooms(), sueltas = _dcsLoose();
+    const lista = (salas, extra) => salas.map(r => `<div class="d-flex align-items-center gap-1 mb-1">
+        <button type="button" class="btn btn-sm btn-secondary text-start flex-grow-1 text-truncate"
+            onclick="${extra ? `_dcsPlace(${jsStr(r.uid)})` : `_dcsPick(${jsStr(r.uid)})`}"
+            title="${escAttr(extra ? t('dcim_floor_place') : (r.name || ''))}">
+            <i class="bi ${extra ? 'bi-box-arrow-in-down' : 'bi-door-open'} me-1"></i>${esc(r.name || '')}</button>
+    </div>`).join('');
+    return `<div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-layers text-muted"></i>
+            <span class="fw-semibold">${esc(t('dcim_floor'))}</span>
+            <button type="button" class="btn btn-sm btn-danger ms-auto" onclick="_dcsFloorDrop()"
+                title="${escAttr(t('delete'))}"><i class="bi bi-trash"></i></button>
+        </div>
+        <label class="ss-fs-2 text-muted d-block mb-2">${esc(t('dcim_label'))}
+            <input class="form-control form-control-sm" value="${escAttr(f.name || '')}"
+                   oninput="_dcsFloorSet('name',this.value)"></label>
+        <div class="ss-grid-2 mb-3">
+            <label class="ss-fs-2 text-muted" title="${escAttr(t('dcim_floor_level_tt'))}">${esc(t('dcim_floor_level'))}
+                <input class="form-control form-control-sm ss-tabular" type="number" step="1"
+                       value="${escAttr(String(f.level ?? 0))}"
+                       oninput="_dcsFloorSet('level',this.value)"></label>
+            <label class="ss-fs-2 text-muted" title="${escAttr(t('dcim_floor_plan_mm_tt'))}">${esc(t('dcim_floor_plan_mm'))}
+                <input class="form-control form-control-sm ss-tabular" type="number" step="100" min="0"
+                       value="${escAttr(String(f.plan_mm || 0))}"
+                       oninput="_dcsFloorSet('plan_mm',this.value)"></label>
+        </div>
+        ${f.plan && !(Number(f.plan_mm) > 0) ? `<div class="text-warning-emphasis ss-fs-2 mb-3">
+            <i class="bi bi-rulers me-1"></i>${esc(tf('dcim_floor_plan_mm_unset', _DCS_PLAN_MM / 1000))}</div>` : ''}
+        <div class="fw-semibold ss-fs-2 mb-1">${esc(t('dcim_floor_rooms'))}
+            <span class="text-muted ss-fs-1 ms-1">${aqui.length}</span></div>
+        ${aqui.length ? lista(aqui, false) : `<div class="text-muted ss-fs-2 mb-1">—</div>`}
+        <div class="fw-semibold ss-fs-2 mt-3 mb-1">${esc(t('dcim_floor_unplaced'))}
+            <span class="text-muted ss-fs-1 ms-1">${sueltas.length}</span></div>
+        ${sueltas.length ? lista(sueltas, true) : `<div class="text-muted ss-fs-2">—</div>`}`;
+}
+
+// ── Lo que se hace ─────────────────────────────────────────────────────────────────────────
+
+function _dcsPick(uid) {
+    _dcsSel = String(uid || '');
+    _dcsItem = null;
+    _dcsRedraw();
+    _dcsInspectorDraw();
+}
+
+/** Una planta nueva, encima de la más alta, y ya abierta: el nombre se cambia en el inspector,
+ *  que es donde se mira. Preguntarlo antes en un cuadro es un paso más para decir «Planta 2». */
+async function _dcsFloorNew() {
+    if (!_dcsPlan) return;
+    const nivel = _dcsPlan.floors.length
+        ? Math.max(..._dcsPlan.floors.map(f => Number(f.level) || 0)) + 1 : 0;
+    const r = await _dcimSend('POST', '/api/v1/dcim/floors', {
+        site_uid: _dcsPlan.site.uid, name: tf('dcim_floor_new_name', nivel), level: nivel});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    const d = await apiGet(`/api/v1/dcim/sites/${encodeURIComponent(_dcsPlan.site.uid)}/floors`) || {};
+    _dcsPlan.floors = d.floors || [];
+    await _dcsGo(String((r.data || {}).uid || ''));
+}
+
+function _dcsFloorSet(campo, valor) {
+    const f = _dcsFloor();
+    if (!f) return;
+    f[campo] = campo === 'name' ? String(valor) : Number(valor);
+    if (campo === 'plan_mm') _dcsRedraw();
+    // El nombre también arriba, en el selector de plantas: si no, el inspector dice un nombre y
+    // el botón de la planta otro hasta el siguiente dibujado.
+    if (campo === 'name') {
+        const b = document.querySelector(`[data-dcs-floor="${CSS.escape(f.uid)}"]`);
+        if (b) b.textContent = f.name;
+    }
+    _dcpQueue(`/api/v1/dcim/floors/${encodeURIComponent(f.uid)}`, {[campo]: f[campo]});
+}
+
+/** Quitar la planta. Sus salas se quedan en la sede, sin colocar: una sala tiene racks, y el
+ *  dibujo de una planta no puede llevarse el inventario de nadie. */
+function _dcsFloorDrop() {
+    const f = _dcsFloor();
+    if (!f) return;
+    showConfirmModal(tf('dcim_floor_drop_q', f.name || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/floors/${encodeURIComponent(f.uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        for (const room of _dcsRooms()) if (room.floor_uid === f.uid) room.floor_uid = '';
+        _dcsPlan.floors = _dcsPlan.floors.filter(x => x.uid !== f.uid);
+        await _dcsGo((_dcsPlan.floors[0] || {}).uid || '');
+    });
+}
+
+/** Colocar en esta planta una sala que no estaba en ninguna, en el centro de lo que se mira: en
+ *  el origen se apilaría con las demás y habría que ir a buscarla. */
+function _dcsPlace(uid) {
+    const r = _dcsRooms().find(x => x.uid === uid);
+    if (!r || !_dcsPlan.floor) return;
+    const v = ssCanvasWindow(_DCS_SVG) || {x: 0, y: 0, w: 20000 * _DCP_SCALE, h: 15000 * _DCP_SCALE};
+    const s = _dcsSize(r);
+    // En el centro de lo que se mira y, si ahí ya hay una sala, a su derecha: colocando varias
+    // seguidas caían todas en el mismo punto, una encima de otra, y la de abajo no se podía
+    // agarrar.
+    let x = _dcsSnap((v.x + v.w / 2) / _DCP_SCALE - s.w / 2);
+    const y = _dcsSnap((v.y + v.h / 2) / _DCP_SCALE - s.d / 2);
+    const pisa = (px) => _dcsHereRooms().some(o => {
+        const t = _dcsSize(o), ox = Number(o.pos_x) || 0, oy = Number(o.pos_y) || 0;
+        return px < ox + t.w && px + s.w > ox && y < oy + t.d && y + s.d > oy;
+    });
+    for (let i = 0; i < 20 && pisa(x); i++) x = _dcsSnap(x + s.w + 500);
+    const cambios = {floor_uid: _dcsPlan.floor, pos_x: x, pos_y: y};
+    Object.assign(r, cambios);
+    _dcsSel = uid;
+    _dcpQueue(`/api/v1/dcim/rooms/${encodeURIComponent(uid)}`, cambios, () => _dcsReload());
+    _dcpFlush();
+    _dcsLoadContents().then(() => { _dcsRedraw(); _dcsInspectorDraw(); });
+    _dcsRedraw();
+    _dcsInspectorDraw();
+}
+
+function _dcsUnplace(uid) {
+    const r = _dcsRooms().find(x => x.uid === uid);
+    if (!r) return;
+    r.floor_uid = '';
+    _dcsSel = '';
+    _dcpQueue(`/api/v1/dcim/rooms/${encodeURIComponent(uid)}`, {floor_uid: ''}, () => _dcsReload());
+    _dcpFlush();
+    _dcsRedraw();
+    _dcsInspectorDraw();
+}
+
+function _dcsTurn(uid) {
+    const r = _dcsRooms().find(x => x.uid === uid);
+    if (!r) return;
+    _dcsRoomSet(uid, 'rotation', ((Number(r.rotation) || 0) + 90) % 360);
+    _dcsInspectorDraw();
+}
+
+/** Un campo de la sala, desde el inspector. Por la misma cola que el resto del inventario: lo
+ *  tecleado en varios campos seguidos sale junto, y un rechazo vuelve a lo que tiene el
+ *  servidor. */
+function _dcsRoomSet(uid, campo, valor) {
+    const r = _dcsRooms().find(x => x.uid === uid);
+    if (!r) return;
+    r[campo] = Number(valor);
+    _dcsRedraw();
+    _dcpQueue(`/api/v1/dcim/rooms/${encodeURIComponent(uid)}`, {[campo]: r[campo]},
+              () => _dcsReload());
+}
+
+/** Volver a lo que tiene el servidor, sin perder la planta que se miraba. Las salas vienen con
+ *  el propio dibujado —`renderDcim` pide las sedes cada vez—; las plantas se piden aquí. */
+async function _dcsReload() {
+    if (!_dcsPlan) return;
+    const d = await apiGet(`/api/v1/dcim/sites/${encodeURIComponent(_dcsPlan.site.uid)}/floors`) || {};
+    _dcsPlan.floors = d.floors || [];
+    if (!_dcsPlan.floors.some(f => f.uid === _dcsPlan.floor))
+        _dcsPlan.floor = (_dcsPlan.floors[0] || {}).uid || '';
+    await renderDcim();
+    await Promise.all([_dcsLoadImage(), _dcsLoadContents()]);
+    _dcsRedraw();
+    _dcsInspectorDraw();
+}
+
+async function _dcsUpload(input) {
+    const file = (input.files || [])[0];
+    input.value = '';
+    const f = _dcsFloor();
+    if (!file || !f) return;
+    const body = new FormData();
+    body.append('file', file);
+    const resp = await fetch(`/api/v1/dcim/floors/${encodeURIComponent(f.uid)}/plan`,
+                             {method: 'POST', body, credentials: 'same-origin'});
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) { showToast(data.error || t('error'), 'danger'); return; }
+    f.plan = data.plan || '';
+    await _dcsLoadImage();
+    showToast(t('dcim_plan_saved'), 'success');
+    renderDcim();
+}
+
+function _dcsDropPlan() {
+    const f = _dcsFloor();
+    if (!f) return;
+    showConfirmModal(t('dcim_plan_drop_q'), async () => {
+        const resp = await fetch(`/api/v1/dcim/floors/${encodeURIComponent(f.uid)}/plan`,
+                                 {method: 'DELETE', credentials: 'same-origin'});
+        if (!resp.ok) { showToast(t('error'), 'danger'); return; }
+        f.plan = '';
+        _dcsPlan.image = null;
+        renderDcim();
+    });
+}
+
+// ── El ratón ───────────────────────────────────────────────────────────────────────────────
+
+function _dcsDown(ev) {
+    _dcsFloatHide();
+    // Un asa antes que la sala, igual que en una sala: está dentro de ella, y preguntar primero
+    // por la sala convierte cada intento de estirarla en moverla.
+    const asa = ev.target.closest('[data-dcph]');
+    const ga = asa && asa.closest('g[data-dcs]');
+    if (ga && _dcimMay('dcim_edit')) {
+        const r = _dcsRooms().find(x => x.uid === ga.dataset.dcs);
+        const p = ssCanvasPoint(_DCS_SVG, ev);
+        if (r && p) {
+            const s = _dcsSize(r);
+            _dcsDrag = {uid: r.uid, what: 'resize', handle: asa.dataset.dcph, from: p,
+                        moved: false, w0: s.w, d0: s.d, rot: Number(r.rotation) || 0,
+                        at: {x: Number(r.pos_x) || 0, y: Number(r.pos_y) || 0}};
+            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+            return;
+        }
+    }
+    // Un rack o una pieza, antes que la sala en la que están: están encima de ella.
+    const gi = ev.target.closest('g[data-dcsi]');
+    if (gi) {
+        const ahora = Date.now();
+        const uid = gi.dataset.uid;
+        if (_dcsLastDown && _dcsLastDown.uid === uid && ahora - _dcsLastDown.t < 400) {
+            _dcsLastDown = null;
+            _dcsItem = {kind: gi.dataset.dcsi, uid, room: gi.dataset.room};
+            return _dcsItemOpen();
+        }
+        _dcsLastDown = {uid, t: ahora};
+        _dcsSel = '';
+        _dcsItem = {kind: gi.dataset.dcsi, uid, room: gi.dataset.room};
+        const x = _dcsItemRow();
+        const sala = gi.dataset.room === _dcsAreaUid()
+            ? {pos_x: 0, pos_y: 0, rotation: 0, width_mm: 0, depth_mm: 0}
+            : _dcsRooms().find(r => r.uid === gi.dataset.room);
+        const p = ssCanvasPoint(_DCS_SVG, ev);
+        if (x && sala && p && _dcimMay('dcim_edit')) {
+            _dcsDrag = {what: 'item', uid, from: p, moved: false, rot: Number(sala.rotation) || 0,
+                        at: {x: Number(x.pos_x) || 0, y: Number(x.pos_y) || 0}};
+            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+        }
+        _dcsRedraw();
+        _dcsInspectorDraw();
+        return;
+    }
+    const g = ev.target.closest('g[data-dcs]');
+    if (g) {
+        _dcsItem = null;
+        const ahora = Date.now();
+        if (_dcsLastDown && _dcsLastDown.uid === g.dataset.dcs && ahora - _dcsLastDown.t < 400) {
+            _dcsLastDown = null;
+            return _dcimOpenPlan(g.dataset.dcs);
+        }
+        _dcsLastDown = {uid: g.dataset.dcs, t: ahora};
+        const r = _dcsRooms().find(x => x.uid === g.dataset.dcs);
+        const p = ssCanvasPoint(_DCS_SVG, ev);
+        _dcsSel = g.dataset.dcs;
+        if (r && p && _dcimMay('dcim_edit')) {
+            _dcsDrag = {uid: r.uid, from: p, moved: false,
+                        at: {x: Number(r.pos_x) || 0, y: Number(r.pos_y) || 0}};
+            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+        }
+        _dcsRedraw();
+        _dcsInspectorDraw();
+        return;
+    }
+    _dcsBlank = {x: ev.clientX, y: ev.clientY};
+    ssCanvasPanStart(_DCS_SVG, ev);
+}
+
+function _dcsMove(ev) {
+    const p = ssCanvasPoint(_DCS_SVG, ev);
+    if (_dcsDrag && _dcsDrag.what === 'item') {
+        const x = _dcsItemRow();
+        if (!p || !x) return;
+        // El movimiento de la mano está en la planta; la posición, en la sala: se gira de vuelta
+        // con el giro de la sala, o arrastrar a la derecha un rack de una sala girada lo movería
+        // hacia arriba.
+        const dx = (p.x - _dcsDrag.from.x) / _DCP_SCALE, dy = (p.y - _dcsDrag.from.y) / _DCP_SCALE;
+        const a = _dcsDrag.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+        x.pos_x = _dcsSnap(_dcsDrag.at.x + dx * c + dy * s);
+        x.pos_y = _dcsSnap(_dcsDrag.at.y - dx * s + dy * c);
+        _dcsDrag.moved = true;
+        _dcsRedraw();
+        return;
+    }
+    if (_dcsDrag && _dcsDrag.what === 'resize') {
+        const r = _dcsRooms().find(x => x.uid === _dcsDrag.uid);
+        if (!p || !r) return;
+        // La cuenta de siempre (`_dcpResize`): lo opuesto al asa se queda donde se ve aunque la
+        // sala esté girada. Lo que cambia es la medida REAL de la sala, la misma que usa su
+        // propio plano: ajustarla al dibujo del edificio es decir cuánto mide.
+        Object.assign(r, _dcpResize(_dcsDrag, (p.x - _dcsDrag.from.x) / _DCP_SCALE,
+                                    (p.y - _dcsDrag.from.y) / _DCP_SCALE, _dcsSnap));
+        _dcsDrag.moved = true;
+        const el = document.getElementById('dcs-readout');
+        if (el) el.textContent = `${(r.width_mm / 1000).toFixed(1)} × ${(r.depth_mm / 1000).toFixed(1)} m`;
+        _dcsRedraw();
+        return;
+    }
+    if (_dcsDrag) {
+        const r = _dcsRooms().find(x => x.uid === _dcsDrag.uid);
+        if (!p || !r) return;
+        // A pasos de 10 cm: en el plano de un edificio nadie coloca una sala al milímetro, y
+        // el número resultante sugeriría una exactitud que no existe.
+        r.pos_x = _dcsSnap(_dcsDrag.at.x + (p.x - _dcsDrag.from.x) / _DCP_SCALE);
+        r.pos_y = _dcsSnap(_dcsDrag.at.y + (p.y - _dcsDrag.from.y) / _DCP_SCALE);
+        _dcsDrag.moved = true;
+        _dcsRedraw();
+        return;
+    }
+    const el = document.getElementById('dcs-readout');
+    if (el && p) el.textContent = `${(p.x / _DCP_SCALE / 1000).toFixed(2)}, ${
+        (p.y / _DCP_SCALE / 1000).toFixed(2)} m`;
+    ssCanvasPanMove(_DCS_SVG, ev);
+}
+
+async function _dcsUp(ev) {
+    const drag = _dcsDrag;
+    _dcsDrag = null;
+    ssCanvasPanEnd(ev);
+    const suelo = _dcsBlank;
+    _dcsBlank = null;
+    if (!drag) {
+        const quieto = suelo && ev.type === 'pointerup'
+            && Math.hypot(ev.clientX - suelo.x, ev.clientY - suelo.y) < 4;
+        if (quieto && (_dcsSel || _dcsItem)) _dcsPick('');
+        return;
+    }
+    if (!drag.moved) return;
+    if (drag.what === 'item') {
+        const x = _dcsItemRow();
+        if (!x) return;
+        const url = `/api/v1/dcim/${_dcsItem.kind === 'rack' ? 'racks' : 'features'}/${encodeURIComponent(x.uid)}`;
+        const resp = await _dcimSend('PUT', url, {pos_x: x.pos_x, pos_y: x.pos_y});
+        if (!resp.ok) {
+            showToast(resp.error || t('save_failed'), 'danger');
+            return _dcsReload();
+        }
+        return;
+    }
+    const r = _dcsRooms().find(x => x.uid === drag.uid);
+    if (!r) return;
+    const cuerpo = drag.what === 'resize'
+        ? {width_mm: r.width_mm, depth_mm: r.depth_mm, pos_x: r.pos_x, pos_y: r.pos_y}
+        : {pos_x: r.pos_x, pos_y: r.pos_y};
+    const resp = await _dcimSend('PUT', `/api/v1/dcim/rooms/${encodeURIComponent(r.uid)}`, cuerpo);
+    if (!resp.ok) {
+        showToast(resp.error || t('save_failed'), 'danger');
+        return _dcsReload();
+    }
+    _dcsInspectorDraw();
+}

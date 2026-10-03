@@ -26,9 +26,9 @@ pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
 class TestPermissionsConstants:
     """Verify the PERMISSIONS, PERMISSION_GROUPS and BUILTIN_ROLE_PERMISSIONS constants."""
 
-    def test_permissions_tuple_has_84_flags(self):
+    def test_permissions_tuple_has_93_flags(self):
         from lib.core.permissions import PERMISSIONS
-        assert len(PERMISSIONS) == 84
+        assert len(PERMISSIONS) == 93
 
     def test_permissions_are_unique(self):
         from lib.core.permissions import PERMISSIONS
@@ -70,6 +70,15 @@ class TestPermissionsConstants:
             'infra_metrics_view',
             'infra_results_view',
             'infra_raw_view',
+            # Where the equipment IS — one axis of the fleet.
+            'dcim_view', 'dcim_edit', 'dcim_cable_edit',
+            'dcim_catalog_view', 'dcim_catalog_manage', 'dcim_build_edit',
+            # …and whose it is, which is the other and is NOT the inventory's: the same company
+            # that pays for the cabinet has users in the directory and licences in Microsoft
+            # 365. `orgs_edit` is apart from every `_edit` because moving a device between U is
+            # tidying a cabinet and moving it between companies is moving property, which in a
+            # group decides both billing and who may see it (lib/core/orgs/manifest.py).
+            'orgs_view', 'orgs_all_view', 'orgs_edit',
             'jobs_view',
             'mfa_reset_others',
             'checks_view', 'checks_run',
@@ -339,10 +348,59 @@ class TestEveryPermissionIsExplainedToTheAdmin:
         """The other direction: a label for a flag that no longer exists is dead text that
         outlives every reader who could have noticed, exactly like a stale table in a schema
         document."""
-        from lib.i18n.lang import es_ES
+        from lib.i18n.lang import en_EN, es_ES
         known = set(self._flags())
-        stale = [k for k in es_ES.LANG['permission_labels'] if k not in known]
-        assert not stale, f'labels for permissions that do not exist: {stale}'
+        for name, table in (('es_ES', es_ES.LANG), ('en_EN', en_EN.LANG)):
+            for dic in ('permission_labels', 'permission_hints'):
+                stale = [k for k in table[dic] if k not in known]
+                assert not stale, f'{name} {dic} for permissions that do not exist: {stale}'
+
+    def test_every_group_has_a_name_in_both_languages(self):
+        """The heading of a group goes through `t(groupKey)` at runtime, so no static key check
+        sees it: a group added without its name shows `perm_group_xyz` on the screen."""
+        from lib.core.permissions import PERMISSION_GROUPS
+        from lib.i18n.lang import en_EN, es_ES
+        for name, table in (('es_ES', es_ES.LANG), ('en_EN', en_EN.LANG)):
+            missing = [g for g, _ in PERMISSION_GROUPS if not table.get(g)]
+            assert not missing, f'{name} has no name for the groups: {missing}'
+
+    def test_no_text_names_a_screen_that_is_gone(self):
+        """The registry stopped being a tab, the clusters a sub-tab, and the rest are sections:
+        a description that sends the admin to «la pestaña Dispositivos» sends them nowhere."""
+        from lib.i18n.lang import en_EN, es_ES
+        # The places that are gone, by name: the device page's own tabs (Measures, Raw data…)
+        # are real tabs and stay called so.
+        viejo = ('pestaña dispositivos', 'sub-pestaña', 'pestaña servicios', 'pestaña syslog',
+                 'pestaña eventos', 'pestaña notificaciones', 'pestaña historial',
+                 'pestaña de estado', 'pestaña del panel', 'devices tab', 'sub-tab',
+                 'services tab', 'syslog tab', 'events tab', 'notifications tab',
+                 'history tab', 'status tab', 'dashboard tab', 'servidores', 'servers')
+        for name, table in (('es_ES', es_ES.LANG), ('en_EN', en_EN.LANG)):
+            for flag, text in table['permission_hints'].items():
+                low = str(text).lower()
+                assert not any(w in low for w in viejo), f'{name} {flag}: {text}'
+            for key in ('server_perms_info', 'server_perm_add_tt'):
+                assert not any(w in str(table[key]).lower() for w in viejo), f'{name} {key}'
+
+    def test_creating_a_device_is_said_to_be_the_flag_that_does_it(self):
+        """The tooltip said creating a device was the global «Add»; the route checks
+        `devices_edit`. A tooltip that names the wrong flag sends the admin to grant the wrong
+        one and wonder why it does nothing."""
+        from lib.i18n.lang import en_EN, es_ES
+        for table in (es_ES.LANG, en_EN.LANG):
+            assert table['permission_labels']['devices_edit'] in table['server_perm_add_tt']
+
+
+class TestAPackageMayDeclareTwoGroups:
+    """The inventory's screens are in two places of the menu — the physical inventory, and its
+    models and templates in the Catalogue — and its flags are in two groups to match."""
+
+    def test_the_catalogue_flags_have_their_own_group(self):
+        from lib.core.permissions import PERMISSION_GROUPS
+        grupos = dict(PERMISSION_GROUPS)
+        assert set(grupos['perm_group_dcim_catalog']) == {
+            'dcim_catalog_view', 'dcim_catalog_manage', 'dcim_build_edit'}
+        assert set(grupos['perm_group_dcim']) == {'dcim_view', 'dcim_edit', 'dcim_cable_edit'}
 
 
 class TestTheBuiltinRoleKeysAreReservedNames:

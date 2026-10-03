@@ -1,0 +1,304 @@
+{# ================================================================
+   The tree: companies, sites, rooms and the racks in each room.
+
+   Split out of `_render.html` because it is a sub-section and not a helper of one — the shell
+   keeps the state, the single form and the entry point; this owns everything drawn until
+   somebody opens a rack. A render file that keeps growing is a section hiding sub-sections
+   inside it, which is how another one here reached nine hundred lines with three.
+   ================================================================ #}
+
+// ── The tree ────────────────────────────────────────────────────────────────
+
+function _dcimTreeHtml() {
+    // La barra fuera del hueco que se repinta: escribir en el buscador repinta lo de abajo, y
+    // repintar también la caja donde se está escribiendo es perder el foco a cada letra.
+    return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad">
+        ${_dcimToolbar()}
+        <div id="dcimInvBody">${_dcimLayoutHtml()}</div>
+    </div>`;
+}
+
+function _dcimToolbar() {
+    const orgs = _dcimData.orgs;
+    const sites = _dcimData.sites;
+    const salas = sites.reduce((n, s) => n + (s.rooms || []).length, 0);
+    const racks = sites.reduce((n, s) => n + _dcimSiteTotals(s).racks, 0);
+    const plegable = _dcimLayout === 'list' || _dcimLayout === 'table';
+    return `<div class="ss-toolrow mb-3">
+        <i class="bi bi-info-circle text-muted" title="${
+            escAttr(tf('dcim_note', sites.length, orgs.length))}"></i>
+        <span class="text-muted ss-fs-2 ss-toolrow-text">${
+            esc(tf('dcim_summary', sites.length, salas, racks, orgs.length))}</span>
+        <div class="ss-toolrow-tools ss-wrap">
+            <input type="search" class="form-control form-control-sm ss-w-search" id="dcimQuery"
+                   value="${escAttr(_dcimQuery)}" placeholder="${escAttr(t('dcim_search'))}"
+                   aria-label="${escAttr(t('dcim_search'))}" oninput="_dcimSearch(this.value)">
+            ${orgs.length && _dcimLayout !== 'cards' ? `<select class="form-select form-select-sm w-auto"
+                    aria-label="${escAttr(t('dcim_owner'))}" onchange="_dcimPickOrg(this.value)">
+                <option value="">${esc(t('dcim_org_all'))}</option>
+                ${orgs.map(o => `<option value="${escAttr(o.uid)}" ${
+                    o.uid === _dcimOrgPick ? 'selected' : ''}>${
+                    esc(o.short || o.name || '')}</option>`).join('')}
+            </select>` : ''}
+            ${_dcimLayoutPicker()}
+            ${plegable ? `<button class="btn btn-sm btn-secondary" onclick="_dcimFoldAll()">
+                <i class="bi bi-arrows-collapse me-1"></i>${esc(_dcimAllFolded()
+                    ? t('dcim_unfold_all') : t('dcim_fold_all'))}</button>` : ''}
+            ${_dcimMay('dcim_edit') ? `<button class="btn btn-sm btn-primary"
+                onclick="_dcimOpen('new','site','','')"><i class="bi bi-plus-lg me-1"></i>${
+                esc(t('dcim_new_site'))}</button>` : ''}
+            <button class="btn btn-sm btn-secondary" onclick="_dcimRefresh()"
+                    title="${escAttr(t('refresh'))}" aria-label="${escAttr(t('refresh'))}">
+                <i class="bi bi-arrow-clockwise"></i></button>
+        </div>
+    </div>`;
+}
+
+/** The three buttons every level has: add a child, edit me, delete me.
+ *
+ *  Written once because they are the same three everywhere, and a level that grows a fourth
+ *  copy of them is the one where "edit" quietly never arrives — which is what happened: three
+ *  levels had create and delete and none of them had edit. Reported from the screen. */
+function _dcimActions(kind, uid, name, childKind) {
+    if (!_dcimMay('dcim_edit')) return '';
+    const btn = (fn, icon, key) => `<button class="btn btn-sm btn-secondary py-0 px-2"
+        onclick="${fn}" title="${escAttr(t(key))}"><i class="bi ${icon}"></i></button>`;
+    return `<span class="btn-group btn-group-sm">
+        ${childKind ? btn(`_dcimOpen('new',${jsStr(childKind)},${jsStr(uid)},'')`,
+                          'bi-plus-lg', 'dcim_new_' + childKind) : ''}
+        ${btn(`_dcimOpen('edit',${jsStr(kind)},'',${jsStr(uid)})`, 'bi-pencil', 'edit')}
+        ${_dcimMay('orgs_edit') ? btn(
+            `_dcimOwnerAsk(${jsStr(kind)},${jsStr(uid)},${jsStr(name || '')})`,
+            'bi-building-check', 'dcim_owner') : ''}
+        ${btn(`_dcimDelete(${jsStr(kind)},${jsStr(uid)},${jsStr(name || '')})`,
+              'bi-trash3', 'delete')}
+    </span>`;
+}
+
+/** Decir de qué empresa es algo.
+
+ *  Su propia bandera (`orgs_edit`, que ningún rol trae de serie) y, hasta ahora, ningún botón:
+ *  el eje del modelo del holding se podía escribir por la API y no desde la pantalla, que es lo
+ *  mismo que no poder escribirlo. La bandera es del core y no de esta sección: la misma decisión
+ *  ficha un armario, una máquina y —el día que se declare— un buzón.
+ *
+ *  Se elige entre las empresas que este lector ve, más «de nadie» — que es un estado real y el
+ *  más común el primer día: un rack sin fichar no es un secreto, es uno que nadie ha fichado. */
+function _dcimOwnerAsk(kind, uid, name) {
+    const orgs = _dcimData.orgs || [];
+    // Sin ninguna, el aviso solo dice lo que ya se ve. A quien puede declararlas se le abre el
+    // cuadro donde se hace, que es lo que iba a buscar a continuación.
+    if (!orgs.length) {
+        showToast(t('orgs_none'), 'warning');
+        // A quien puede declararlas se le lleva a donde se hace, que es lo que iba a buscar a
+        // continuación. Es otra sección —el registro es del core— así que se navega, no se
+        // dibuja: dibujar aquí pintaría las empresas dentro del inventario.
+        if (_dcimMay('orgs_edit') && typeof _navTab === 'function') _navTab('#tab-orgs');
+        return;
+    }
+    showConfirmModal(tf('dcim_owner_q', name || ''), async () => {
+        const sel = document.getElementById('dcim-owner-pick');
+        const r = await _dcimSend('POST', '/api/v1/orgs/owner',
+                                  {scope: kind, uid: uid, org_uid: sel ? sel.value : ''});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        renderDcim();
+    });
+    // El desplegable se mete DENTRO del modal que acaba de abrirse: el panel no tiene un modal
+    // con selector, y añadir uno sería un segundo sitio donde arreglar el foco y la tecla Enter.
+    const cuerpo = document.getElementById('confirmModalMsg');
+    if (!cuerpo) return;
+    const caja = document.createElement('div');
+    caja.className = 'mt-2';
+    const sel = document.createElement('select');
+    sel.id = 'dcim-owner-pick';
+    sel.className = 'form-select form-select-sm';
+    const nadie = document.createElement('option');
+    nadie.value = '';
+    nadie.textContent = t('dcim_owner_none');
+    sel.appendChild(nadie);
+    for (const o of orgs) {
+        const op = document.createElement('option');
+        op.value = o.uid;
+        op.textContent = o.name || o.uid;
+        sel.appendChild(op);
+    }
+    caja.appendChild(sel);
+    cuerpo.appendChild(caja);
+}
+
+/** La vista «Lista»: un acordeón, una sede por línea.
+ *
+ *  Una línea y no una tarjeta con todo abierto: con siete sedes la pantalla era una pared de
+ *  botones —cuatro por sede, cuatro por sala, tres por rack— y lo que se buscaba, que es DÓNDE
+ *  está algo, quedaba entre ellos. Las acciones salen al pasar el ratón y lo que se usa poco va
+ *  en «⋯». Reportado desde la pantalla. */
+function _dcimListHtml(sites) {
+    return `<div class="card overflow-hidden">${sites.map(_dcimSiteCard).join('')}</div>`;
+}
+
+/** Una sede: su línea, y debajo sus salas si está desplegada. Un clic en la línea la despliega;
+ *  los botones de dentro hacen lo suyo y no la pliegan. */
+function _dcimSiteCard(site) {
+    const rooms = site.rooms || [];
+    const tot = _dcimSiteTotals(site);
+    const plegada = _dcimIsFolded(site.uid);
+    const rotulo = plegada ? t('dcim_unfold') : t('dcim_fold');
+    const edita = _dcimMay('dcim_edit');
+    // Con id: el cuadro de mando lleva hasta aquí desde una tarjeta, y llevar a alguien a
+    // una pantalla sin llevarlo al sitio de la pantalla es dejarlo buscando otra vez.
+    return `<div class="border-bottom" id="dcim-site-${escAttr(site.uid)}">
+        <div class="d-flex align-items-center gap-3 flex-wrap px-3 py-2 ss-hover-host ss-fold-head"
+             onclick="if(!event.target.closest('button,a,.dropdown'))_dcimFoldToggle(${jsStr(site.uid)})">
+            <button class="btn btn-sm btn-secondary py-0 px-1" aria-expanded="${!plegada}"
+                    onclick="_dcimFoldToggle(${jsStr(site.uid)})"
+                    aria-label="${escAttr(rotulo)}" title="${escAttr(rotulo)}">
+                <i class="bi bi-chevron-${plegada ? 'right' : 'down'}"></i></button>
+            <span class="fw-semibold ss-fs-4">${esc(site.name || site.uid)}</span>
+            ${_dcimOrgBadge(site.org_uid)}
+            <span class="text-muted ss-fs-2 text-truncate flex-grow-1">${esc(site.address || '')} ${
+                _dcimCoords(site)}</span>
+            <span class="text-muted ss-fs-2 text-nowrap ss-col-count">${esc(tf('dcim_rooms', rooms.length))} · ${
+                esc(tf('dcim_racks', tot.racks))}</span>
+            <span class="ss-col-state">${_dcimLed((site.roll || {}).state, true)}</span>
+            <span class="ss-col-bar">${_dcimUBar(tot.used, tot.u, 'ss-ubar-wide')}</span>
+            <span class="ss-hover-tools d-flex gap-1">
+                <button class="btn btn-sm btn-secondary" onclick="_dcsOpen(${jsStr(site.uid)})"
+                        title="${escAttr(t('dcim_site_plan'))}"><i class="bi bi-layers me-1"></i>${
+                        esc(t('dcim_site_plan_short'))}</button>
+                ${edita ? `<button class="btn btn-sm btn-secondary"
+                        onclick="_dcimOpen('new','room',${jsStr(site.uid)},'')"
+                        title="${escAttr(t('dcim_new_room'))}" aria-label="${escAttr(t('dcim_new_room'))}">
+                    <i class="bi bi-plus-lg"></i></button>` : ''}
+                ${_dcimMenu('site', site.uid, site.name, '')}
+            </span>
+        </div>
+        ${plegada ? '' : `<div class="px-3 pb-3 ps-5 ss-fold-body border-top">
+            ${rooms.length ? rooms.map(_dcimRoomRow).join('')
+                           : `<div class="text-muted ss-fs-2 py-2">${esc(t('dcim_no_rooms'))}</div>`}
+        </div>`}
+    </div>`;
+}
+
+/** Where a site is, when somebody has said. Shown because it is the one field of a site nobody
+ *  can check by looking at the screen: a wrong name is obvious, a wrong latitude is not — and
+ *  it is what the map of sites will be drawn from. */
+function _dcimCoords(site) {
+    if (site.lat === null || site.lat === undefined
+        || site.lon === null || site.lon === undefined) return '';
+    // Seis decimales y no cuatro: cuatro son once metros —toda la sede— y quien lo leyera
+    // creería que el dato guardado es ese. Seis son once centímetros, que es donde deja de
+    // haber diferencia para señalar un edificio. Lo GUARDADO no se toca: la columna es REAL y
+    // se queda con los diecisiete dígitos que da un mapa, que es lo que vuelve al formulario.
+    const exacto = `${site.lat}, ${site.lon}`;
+    return `<span class="text-muted ss-fs-3 ss-tabular" title="${escAttr(exacto)}"
+        ><i class="bi bi-geo-alt me-1"></i>${esc(_dcimCoord(site.lat))}, ${
+        esc(_dcimCoord(site.lon))}</span>`;
+}
+
+/** Una coordenada como se lee, sin inventar decimales que no están ni esconder los que sí.
+ *
+ *  `toFixed` hace las dos cosas mal a la vez: recorta lo que sobra y rellena con ceros lo que
+ *  falta, así que un 41.5 pasa a ser un 41.500000 que parece medido. */
+function _dcimCoord(v) {
+    const n = Number(v);
+    if (!isFinite(n)) return '';
+    return String(Math.round(n * 1e6) / 1e6);
+}
+
+/** Una sala: su nombre y cómo se enfría a la izquierda, sus racks a la derecha — y al final
+ *  el hueco para uno más, que es la otra cosa que se viene a hacer aquí. */
+function _dcimRoomRow(room) {
+    const racks = room.rackList || [];
+    return `<div class="d-flex flex-wrap align-items-center gap-3 pt-2 ss-hover-host">
+        <div class="d-flex align-items-center gap-2 ss-col-label">
+            ${_dcimLed((room.roll || {}).state)}
+            <i class="bi bi-door-open text-muted"></i>
+            <a href="#" class="fw-semibold link-body-emphasis text-decoration-none"
+               onclick="_dcimOpenPlan(${jsStr(room.uid)});return false"
+               title="${escAttr(t('dcim_plan'))}">${esc(room.name || room.uid)}</a>
+            ${room.cooling ? `<span class="text-muted ss-fs-2">${
+                esc(t('dcim_cooling_' + room.cooling))}</span>` : ''}
+        </div>
+        <div class="d-flex flex-wrap gap-2 flex-grow-1 align-items-stretch">
+            ${racks.map(_dcimRackChip).join('')}
+            ${_dcimMay('dcim_edit') ? `<button type="button" class="ss-add-tile"
+                    onclick="_dcimOpen('new','rack',${jsStr(room.uid)},'')"
+                    title="${escAttr(t('dcim_new_rack'))}" aria-label="${escAttr(t('dcim_new_rack'))}">
+                <i class="bi bi-plus-lg"></i></button>` : ''}
+        </div>
+        <span class="ss-hover-tools">${_dcimMenu('room', room.uid, room.name, '')}</span>
+    </div>`;
+}
+
+/** Cómo se enfría una sala, cuando alguien lo dijo. */
+function _dcimCoolBadge(room) {
+    if (!room.cooling) return '';
+    return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+        title="${escAttr(t('dcim_cooling'))}"><i class="bi bi-snow me-1"></i>${
+        esc(t('dcim_cooling_' + room.cooling))}</span>`;
+}
+
+/** A rack, listed where it is: a tile with its name, its height and how full it is, pressed
+ *  as a whole to open it.
+ *
+ *  It used to be behind a click on the room that opened a dialog — which hid the one thing
+ *  somebody scanning this page is looking for, and turned "which racks are in this room" from
+ *  an answer into a question. Reported from the screen. */
+function _dcimRackChip(rack) {
+    return `<button type="button" class="ss-tile-btn d-flex flex-column gap-1 ss-rack-w"
+            onclick="_dcimLoadRack(${jsStr(rack.uid)})"
+            title="${escAttr(tf('dcim_u_used_tt', rack.used_u || 0, rack.u_height || 0))}">
+        <span class="d-flex align-items-center gap-2 w-100">
+            ${_dcimLed((rack.roll || {}).state)}
+            <strong class="text-truncate flex-grow-1">${esc(rack.name || rack.uid)}</strong>
+            <span class="text-muted ss-fs-2 ss-tabular">${esc(String(rack.u_height || 0))}U</span>
+        </span>
+        ${_dcimUBar(rack.used_u || 0, rack.u_height || 0, 'w-100')}
+        ${rack.roll && rack.roll.total ? `<span>${_dcimRollBadge(rack.roll)}</span>` : ''}
+    </button>`;
+}
+
+/** How whatever is under this is doing — the worst of it, and how many are in trouble.
+ *
+ *  Nothing when nothing under it has a state, and that is not the same as "fine": a rack of
+ *  patch panels is watched by nobody, and a green badge on it would be the drawing telling
+ *  somebody a thing it does not know. A wall of green is exactly what this section must not
+ *  produce, because a wall of green is what somebody glances at from the door.
+ *
+ *  The counts are already narrowed to what this caller may see (see `dcim/service.py`): a rack
+ *  saying "3 down" of which none are theirs would be an enumeration of somebody else's fleet
+ *  through the back door. */
+function _dcimRollBadge(roll) {
+    const r = roll || {};
+    if (!r.total) return '';
+    if (!r.state)
+        return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+            title="${escAttr(t('dcim_unwatched_tt'))}">${
+            esc(tf('dcim_unwatched_n', r.total))}</span>`;
+    const tone = {error: 'text-bg-danger', warning: 'text-bg-warning',
+                  ok: 'text-bg-success'}[r.state] || 'bg-body-secondary';
+    return `<span class="badge ${tone} fw-normal"
+        title="${escAttr(tf('dcim_roll_tt', r.total, r.unwatched || 0))}">${
+        r.bad ? esc(tf('dcim_roll_bad', r.bad, r.total)) : esc(tf('dcim_roll_ok', r.total))
+    }</span>`;
+}
+
+/** The company something belongs to, as a badge — or nothing.
+ *
+ *  Nothing, and not "unassigned": an unclaimed rack is not a mystery, it is one nobody has got
+ *  round to filing, which is the state of every installation on its first day. A badge saying
+ *  so on four hundred rows is noise that teaches nobody anything. */
+/** El nombre de una sociedad, para enseñarlo donde solo hay un uid. Aquí y no en cada pantalla
+ *  que lo necesite: son dos líneas y ya son tres las que las querían. */
+function _dcimOrgName(uid) {
+    const org = (_dcimData.orgs || []).find(o => o.uid === uid);
+    return org ? (org.name || org.uid) : String(uid || '');
+}
+
+function _dcimOrgBadge(uid) {
+    if (!uid) return '';
+    const org = (_dcimData.orgs || []).find(o => o.uid === uid);
+    if (!org) return '';
+    return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+        title="${escAttr(org.name || '')}">${esc(org.short || org.name || '')}</span>`;
+}

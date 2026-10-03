@@ -3,7 +3,7 @@
 """Certificate-expiry scanner — proactive ``cert_expiring`` notifications.
 
 Periodically scans the certificates of every configured ``ssl_cert`` check (host:port,
-resolving a ``host_uid`` to its address via the hosts store) and emits a ``cert_expiring``
+resolving a ``device_uid`` to its address via the devices store) and emits a ``cert_expiring``
 notification when a cert is within ``certs|warn_days`` of expiry — **once per severity**
 (``expiring`` → ``expired``), so it never spams every scan; a cert that recovers (renewed)
 re-arms for a future alert.  Leader-gated so replicas don't double-alert.
@@ -24,11 +24,11 @@ import threading
 import time
 
 
-def enumerate_targets(modules_cfg: dict, *, host_address=lambda _uid: None,
+def enumerate_targets(modules_cfg: dict, *, device_address=lambda _uid: None,
                       default_warn: int = 21) -> list[dict]:
     """Cert targets from the ``ssl_cert`` module config → list of dicts with
-    ``key/label/host/port/server_name/verify/warn_days``.  ``host_uid`` items resolve
-    their address via ``host_address(uid)``; disabled items are skipped."""
+    ``key/label/host/port/server_name/verify/warn_days``.  ``device_uid`` items resolve
+    their address via ``device_address(uid)``; disabled items are skipped."""
     ssl_mod = (modules_cfg or {}).get('ssl_cert') or {}
     items = ssl_mod.get('list') or {}
     try:
@@ -40,9 +40,9 @@ def enumerate_targets(modules_cfg: dict, *, host_address=lambda _uid: None,
         if not isinstance(v, dict) or v.get('enabled') is False:
             continue
         host = (v.get('host') or '').strip()
-        uid = (v.get('host_uid') or '').strip()
+        uid = (v.get('device_uid') or '').strip()
         if not host and uid:
-            host = (host_address(uid) or '').strip()
+            host = (device_address(uid) or '').strip()
         host = host or str(key)
         try:
             port = int(v.get('port') or 0) or 443

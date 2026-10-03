@@ -174,7 +174,7 @@ de cada uno, enrutado por la misma matriz (`{canal}_on_{kind}`):
   `<blockquote>`, más un **resumen** con enlace a `/status`; troceado bajo el tope de 4096.
   Sin agrupar → una línea por alerta.
 - **Email** — **un digest** (`render_summary`) con esas dos zonas, cada una en una tabla
-  agrupada por item (todas las filas de un host juntas).
+  agrupada por item (todas las filas de un mismo item juntas).
 - **Webhook / Teams** — **una llamada por alerta** (eventos discretos), no agrupado.
 
 Detalles:
@@ -199,7 +199,7 @@ flowchart TD
     reg --> m{"matriz: {canal}_on_{kind}?"}
     m -- "false" --> skip["omitir ese canal/kind"]
     m -- "true" --> tg["Telegram: 1 digest HTML agrupado<br/>(⚠️ Issues / ✅ Recovered, troceado &lt;4096)"]
-    m -- "true" --> em["Email: 1 digest (render_summary)<br/>2 zonas, agrupado por host"]
+    m -- "true" --> em["Email: 1 digest (render_summary)<br/>2 zonas, agrupado por item"]
     m -- "true" --> wh["Webhook / Teams:<br/>1 llamada POR alerta (no agrupado)"]
 ```
 

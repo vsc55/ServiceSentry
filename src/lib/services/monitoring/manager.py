@@ -300,7 +300,7 @@ class _MonitoringMixin:
         monitor = self._monitoring_get_monitor()
         # Apply global|log_level + re-read the effective (DB) config each cycle so
         # live edits to verbosity / Telegram / public URL take effect without a
-        # restart; then drop stale live status for hosts now in maintenance.
+        # restart; then drop stale live status for devices now in maintenance.
         monitor.debug.set_from_config(cfg_get(self._config_section('global'), 'global|log_level'))
         monitor.refresh_runtime_config()
         monitor.purge_maintenance_states()
@@ -380,9 +380,17 @@ class _MonitoringMixin:
             if time.time() - self._monitoring_last_prune_ts > 86400:
                 try:
                     if getattr(self, '_history', None):
+                        # El valor por defecto sale del REGISTRO y no de un literal aquí: un 30
+                        # escrito en este bucle es un ajuste que no existe en ninguna pantalla,
+                        # y quien tiene noventa mil filas de SNMP en diecisiete días no tiene
+                        # forma de decirlo. `lib/config/spec.py` es el único sitio donde se
+                        # cambia un valor por defecto.
+                        from lib.config.spec import cfg_default   # noqa: PLC0415
                         cfg = self._read_config_file(self._CONFIG_FILE) or {}
-                        days = max(0, int(cfg.get('history', {}).get('retention_days', 30)))
-                        self._history.prune(days)
+                        crudo = (cfg.get('history') or {}).get('retention_days')
+                        if crudo in (None, ''):
+                            crudo = cfg_default('history|retention_days')
+                        self._history.prune(max(0, int(crudo)))
                 except Exception:  # pylint: disable=broad-except
                     pass
                 self._monitoring_last_prune_ts = time.time()

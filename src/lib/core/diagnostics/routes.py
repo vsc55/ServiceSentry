@@ -35,7 +35,7 @@ def register(app, wa):
         """What THIS request looked like, for the network block.
 
         Gathered here because `service` is Flask-free and this half of the answer exists only
-        while a request is being served. `scheme`, `host` and `remote_addr` are already through
+        while a request is being served. `scheme`, `device` and `remote_addr` are already through
         ProxyFix when it is mounted; the `X-Forwarded-*` headers are read RAW beside them, so
         the report can say "a proxy declared https and this panel is ignoring it" — which is a
         different fault from plain HTTP and has a different fix.

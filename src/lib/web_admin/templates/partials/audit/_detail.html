@@ -50,10 +50,10 @@ function formatAuditDetailFull(detail) {
     }
 
     if (typeof detail === 'object') {
-        // Host test result (host_tested / host_test_check): show the server +
+        // Device test result (device_tested / device_test_check): show the server +
         // every check launched with its pass/fail and error message.
         if (Array.isArray(detail.results)) {
-            return formatHostTestDetail(detail);
+            return formatDeviceTestDetail(detail);
         }
         let html = '';
         if (detail.reason)   html += `<p class="mb-1">${esc(t(detail.reason) || detail.reason)}</p>`;
@@ -117,8 +117,8 @@ function _formatBeforeAfter(before, after) {
         <table class="table table-sm table-borderless table-striped mb-0"><tbody>${rows}</tbody></table>`;
 }
 
-// Host test result detail: server + each launched check (pass/fail + message).
-function formatHostTestDetail(d) {
+// Device test result detail: server + each launched check (pass/fail + message).
+function formatDeviceTestDetail(d) {
     let html = '';
     if (d.name) {
         html += `<p class="mb-1"><strong>${esc(t('col_server') || 'Server')}:</strong> <code>${esc(d.name)}</code></p>`;
@@ -180,7 +180,7 @@ function _auditChangeLabel(field) {
 // audit log ends up half in Spanish and half in identifiers.
 //
 // The list is of FIELDS and not of values, on purpose: a value-driven rule would translate a
-// host called `local` or a module whose id happens to match one of these words. And every
+// device called `local` or a module whose id happens to match one of these words. And every
 // lookup falls back to the word itself, so an entry a module wrote — or one from a build newer
 // than the language file — still reads, just untranslated.
 const _AUDIT_ENUM_FIELDS = new Set(['stage', 'error', 'method', 'source', 'result', 'kind',
@@ -290,7 +290,7 @@ function auditSummaryHtml(idx, detail) {
         if (Array.isArray(detail.results)) {
             const total  = (typeof detail.total  === 'number') ? detail.total  : detail.results.length;
             const passed = (typeof detail.passed === 'number') ? detail.passed : detail.results.filter(r => r.ok).length;
-            label = (detail.name ? esc(detail.name) + ' · ' : '') + tf('host_test_summary', passed, total);
+            label = (detail.name ? esc(detail.name) + ' · ' : '') + tf('device_test_summary', passed, total);
             // falls through to the clickable badge below → opens the full modal
         } else if (detail.reason) {
             return `<span class="text-muted small">${esc(t(detail.reason) || detail.reason)}</span>`;

@@ -44,8 +44,11 @@ def discover_permissions() -> list[dict]:
 
     Declarations live in each package's ``manifest.py``; the shared scanner
     (:mod:`lib.discovery`) collects them, so this only filters + orders."""
-    from lib.discovery import scan_values  # noqa: PLC0415
-    found = [m for m in scan_values('MODULE_PERMISSIONS', roots=_MODULE_ROOTS)
+    # A list as well as one dict: a package whose screens live in two places of the menu —
+    # the physical inventory, and its models and templates in the Catalogue — declares one
+    # group per place, so the role editor reads like the sidebar.
+    from lib.discovery import scan_flat  # noqa: PLC0415
+    found = [m for m in scan_flat('MODULE_PERMISSIONS', roots=_MODULE_ROOTS)
              if isinstance(m, dict) and m.get('group') and m.get('permissions')]
     found.sort(key=lambda m: m.get('order', 999))
     return found
@@ -53,13 +56,21 @@ def discover_permissions() -> list[dict]:
 
 # ── Permission-key validators (per-instance keys) ───────────────────────────────────
 _MODULE_PERM_RE = re.compile(r'^module\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
-# Per-server (host) permission key.  'add' authorizes adding host-bound checks to
-# THIS specific host (not creating a host — that is the global ``devices_add``);
-# 'edit'/'delete' act on existing host-bound checks and the host record.
+# Per-device permission key.  'add' authorizes adding device-bound checks to THIS specific
+# device (not creating a device — that is the global ``devices_edit``, the same flag that
+# edits one); 'edit'/'delete' act on existing device-bound checks and the device record.
 _SERVER_PERM_RE = re.compile(r'^server\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
 # Per-cluster permission key (cluster.{uid}.{action}) — a cluster is a multi-bind
 # check identified by its item UID.
 _CLUSTER_PERM_RE = re.compile(r'^cluster\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delete)$')
+# Per-company key (org.{uid}.view) — which companies' equipment somebody may see in the
+# physical inventory, for the rack a group's subsidiaries share.
+#
+# `view` and nothing else, unlike the three above. Those grant four actions because four exist;
+# here only the read is narrowed, and a key for an action nothing performs is a checkbox that
+# grants nothing and reads as though it does. The day an `org.<uid>.edit` means something, it
+# goes here with the code that honours it.
+_ORG_PERM_RE = re.compile(r'^org\.[a-zA-Z0-9_\-.]+\.view$')
 
 
 def is_module_perm(p: str) -> bool:
@@ -77,6 +88,11 @@ def is_cluster_perm(p: str) -> bool:
     return bool(_CLUSTER_PERM_RE.match(p))
 
 
+def is_org_perm(p: str) -> bool:
+    """Return True if *p* is a valid per-company permission key (org.{uid}.view)."""
+    return bool(_ORG_PERM_RE.match(p))
+
+
 # ── Built-in RBAC model ─────────────────────────────────────────────────────────────
 # The built-in role KEYS ('admin', 'editor', …) and the stable UUIDs behind them are
 # identities, not catalog: they live in lib.core.constants (``ROLES``,
@@ -87,7 +103,7 @@ def is_cluster_perm(p: str) -> bool:
 
 # Core permission flags.  Almost every domain now declares its own permissions in its
 # module's ``manifest.py`` (lib.core.* / lib.services.*), discovered and
-# appended by the merge below.  Only ``services`` (the Services tab itself — the host of
+# appended by the merge below.  Only ``services`` (the Services tab itself — the device of
 # the discovery mechanism, not a discoverable module) stays hardcoded here.
 _CORE_PERMISSIONS = (
     'services_view',     # view the Services dashboard (scheduler/syslog/worker/DB)
@@ -150,7 +166,8 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
 # forgotten would silently DROP those keys instead of failing.
 def is_valid_perm(p: str) -> bool:
     """True if *p* is a known flag or a well-formed per-instance key."""
-    return p in PERMISSIONS or is_module_perm(p) or is_server_perm(p) or is_cluster_perm(p)
+    return (p in PERMISSIONS or is_module_perm(p) or is_server_perm(p)
+            or is_cluster_perm(p) or is_org_perm(p))
 
 
 def filter_valid_permissions(perms) -> list:

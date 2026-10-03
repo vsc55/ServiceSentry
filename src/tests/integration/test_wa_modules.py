@@ -194,7 +194,7 @@ class TestApiOverview:
         admin._check_state_store.persist_status({'watchfuls.proxmox': {
             'cl1/cluster':     {'status': True, 'other_data': {'quorate': True, 'nodes_online': 2}},
             'cl1/ceph':        {'status': True, 'other_data': {'health': 'HEALTH_OK'}},
-            'cl1/node/pve01':  {'status': True, 'other_data': {'host_name': 'srv-1'}},
+            'cl1/node/pve01':  {'status': True, 'other_data': {'device_name': 'srv-1'}},
             'cl1/node/pve02':  {'status': False, 'other_data': {}},
         }})
         mw = client.get('/api/v1/modules/overview').get_json()['module_widgets']

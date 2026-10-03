@@ -25,15 +25,15 @@ from lib.debug import DebugLevel
 class MonitorNotifier:
     """Accumulates a monitoring cycle's alerts and flushes them grouped per channel.
 
-    Routing/channel access goes through the host's core notification router
+    Routing/channel access goes through the device's core notification router
     (``wa._notify``) when present, so the monitor sends *through* the router — the same
-    channel registry every other subsystem uses; it falls back to the host itself when a
+    channel registry every other subsystem uses; it falls back to the device itself when a
     router isn't wired (legacy surface: ``_read_config_file`` / ``_CONFIG_FILE`` / ``_dbg``).
     """
 
     def __init__(self, wa, *, route_kind: str | None = None):
         # Prefer the core router (owns the channel stores + config surface); fall back to
-        # the host's own surface so tests and any un-migrated caller keep working.
+        # the device's own surface so tests and any un-migrated caller keep working.
         self._wa = getattr(wa, '_notify', None) or wa
         self._alerts: list[dict] = []
         # When set, the WHOLE flush routes as this one kind (``notifications|{channel}_on_

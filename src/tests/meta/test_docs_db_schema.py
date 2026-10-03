@@ -175,3 +175,59 @@ class TestTheGuardIsLookingAtSomething:
         assert not empty, f'TableSpec with no columns parsed: {empty}'
         empty_doc = sorted(t for t, cols in DOCUMENTED.items() if not cols)
         assert not empty_doc, f'documented tables with no column table: {empty_doc}'
+
+
+class TestLaAuditoriaVaAlFinal:
+    """`created_at`, `updated_at` y `updated_by` son **las últimas** de cada tabla, en ese orden.
+
+    No es estética. Son las tres columnas que tienen cuarenta tablas y que nadie consulta al
+    leer un `CREATE TABLE`: buscando lo que hace distinta a esta tabla, se saltan — y si cada
+    una las pone en un sitio, hay que leerlas para saltarlas. Puestas siempre al final, la parte
+    de arriba es lo propio de la tabla y el pie es el mismo en todas.
+
+    Y hay una razón mecánica encima: una columna nueva se declara al final, porque ahí un
+    `ADD COLUMN` basta y en medio hay que reconstruir la tabla. Con la auditoría al final, la
+    siguiente columna que alguien añada aterriza justo delante de ella — que es donde va.
+
+    Se comprueba sobre las que la tabla DECLARA: hay tablas con sólo `created_at`, y exigirles
+    las tres sería inventarles columnas que nadie ha pedido.
+    """
+
+    TRIO = ('created_at', 'updated_at', 'updated_by')
+
+    def test_ninguna_tabla_las_deja_en_medio(self):
+        mal = []
+        for tabla, cols in sorted(_specs_from_code().items()):
+            suyas = [c for c in self.TRIO if c in cols]
+            if not suyas:
+                continue
+            if cols[-len(suyas):] != suyas:
+                mal.append('%s: %s en %s de %d columnas'
+                           % (tabla, ','.join(suyas),
+                              [cols.index(c) for c in suyas], len(cols)))
+        assert not mal, 'la auditoría no está al final en: ' + '; '.join(mal)
+
+    def test_y_nadie_las_llama_de_otra_manera(self):
+        """`created` y `updated` a secas están prohibidas: son la misma idea con otro nombre.
+
+        `api_tokens` llevaba `created` y `mfa_factors` `created`/`updated`, y con dos vocabularios
+        ninguna guarda alcanza a los dos: la de «al final» las ignoraba, la documentación las
+        contaba aparte, y quien lee el esquema tiene que aprenderse las dos formas para saber que
+        son una. `*_at` dice que es una marca de tiempo; `created` no dice si es una fecha, una
+        bandera o un contador.
+
+        Las que terminan en `_at` con otro nombre —`set_at`, `banned_at`, `imported_at`— se
+        quedan: ésas nombran un hecho propio de la fila, no la auditoría de quién la tocó.
+        """
+        mal = []
+        for tabla, cols in sorted(_specs_from_code().items()):
+            for c in ('created', 'updated', 'modified', 'changed'):
+                if c in cols:
+                    mal.append('%s.%s' % (tabla, c))
+        assert not mal, 'auditoría con otro nombre: ' + ', '.join(mal)
+
+    def test_y_la_guarda_mira_algo(self):
+        """Cuarenta tablas la tienen; si este número se desploma, el recolector dejó de leer."""
+        con = [t for t, cols in _specs_from_code().items()
+               if any(c in cols for c in self.TRIO)]
+        assert len(con) >= 35, 'sólo %d tablas con auditoría: ¿se leen todas?' % len(con)

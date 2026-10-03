@@ -33,6 +33,36 @@ from .locks import read_lock, LOCK_SUFFIX
 _BUILD_RE = re.compile(r'\+build\.(\d+)\b')
 
 
+def key_source(wa) -> dict:
+    """De dónde sale la clave que descifra los secretos de una copia, y dónde está si es un
+    fichero.
+
+    Los secretos viajan cifrados, tal como están en la base de datos, y la copia **no lleva la
+    clave**: eso es deliberado — un zip con los secretos y con la llave dentro es un solo
+    fichero robado que entrega todas las credenciales de la instalación. Pero entonces la clave
+    hay que guardarla aparte, y el aviso que lo decía nombraba sólo `SS_SECRET_KEY`, que es
+    justamente la forma que **no** usa la instalación por defecto: sin esa variable la clave es
+    un fichero en `config_dir`, y nadie decía que hubiera que salvarlo. Restaurar en otra
+    máquina devuelve credenciales que no se pueden descifrar, y se descubre al usarlas.
+
+    Así que el panel dice en cuál de los dos casos está, porque lo sabe:
+
+    ``{'source': 'env'}``   la pone el operador en cada proceso — es suyo saber dónde está
+    ``{'source': 'file', 'path': …}``   está en ese fichero, y hay que copiarlo a mano
+    """
+    from lib.config import secret_key_from_env, SECRET_KEY_FILENAME   # noqa: PLC0415
+    try:
+        if secret_key_from_env():
+            return {'source': 'env', 'path': ''}
+    except Exception:  # pylint: disable=broad-except
+        # Una variable mal puesta es problema del arranque, no de esta pantalla. Aquí lo que
+        # importa es que hay una, y que por tanto no es el fichero lo que hay que guardar.
+        return {'source': 'env', 'path': ''}
+    cfg = str(getattr(wa, '_config_dir', '') or '')
+    return {'source': 'file',
+            'path': os.path.join(cfg, SECRET_KEY_FILENAME) if cfg else SECRET_KEY_FILENAME}
+
+
 def version_relation(made_with: str, running: str) -> str:
     """How a copy's version stands to this install: same / older / newer / unknown.
 

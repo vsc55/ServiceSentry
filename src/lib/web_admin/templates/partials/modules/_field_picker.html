@@ -125,7 +125,7 @@ function _fpSelectedList() {
 }
 
 // Persist a multi selection: works both for a modules-tab field path and for
-// the host-modal callback (_fpOnPick). The modal stays open.
+// the device-modal callback (_fpOnPick). The modal stays open.
 function _fpCommit(list) {
     const seen = new Set(), out = [];
     for (const v of list) { const k = v.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(v); } }

@@ -87,11 +87,18 @@ function _bkRunningInView() {
 
 /** The row for the copy being made. Same shape as a finished one, so the list does not jump
  *  when it is replaced by the real thing. */
-function _bkRunningRow() {
+/** La fila de la copia que se está escribiendo ahora.
+ *
+ *  *conPicos* dice si la lista está enseñando la columna de casillas. Esta fila **no** lleva
+ *  casilla —una copia a medio escribir no se elige para borrar— pero sí la celda vacía: sin
+ *  ella la tabla pierde una columna justo en la fila que alguien está mirando. Lo pasa quien
+ *  pinta la lista, que es el único que sabe si el que mira puede borrar. */
+function _bkRunningRow(conPicos) {
     const r = _bkRunning;
     const pct = r.total ? Math.round((r.step / r.total) * 100) : 0;
     return `<tr id="bkRunningRow" style="cursor:pointer"
                 onclick="_bkOpenRunningDetail()" title="${escAttr(t('backup_run_detail'))}">
+        ${conPicos ? '<td class="ss-bk-pick-col"></td>' : ''}
         <td><span class="d-flex align-items-center gap-2">
             <div class="spinner-border spinner-border-sm text-secondary"></div>
             <span class="min-w-0">
@@ -234,7 +241,11 @@ async function _bkPollJob(jobId) {
         Object.assign(_bkRunning, {step: job.step, total: job.total, table: job.table,
                                    steps: job.steps || []});
         const row = document.getElementById('bkRunningRow');
-        if (row) row.outerHTML = _bkRunningRow();
+        // El tic repinta sólo esta fila, así que tiene que preguntar otra vez por la
+        // columna: el permiso no cambia, pero leerlo de un sitio y de otro es como se
+        // desalinean las dos mitades de una tabla.
+        if (row) row.outerHTML = _bkRunningRow(
+            (currentUser.permissions || []).includes('backup_delete'));
         // …and the detail dialog too, when somebody has it open. Repainted rather than
         // reopened: `_openBackupModal` would re-show a dialog that is already up and reset the
         // scroll of whoever is reading it.

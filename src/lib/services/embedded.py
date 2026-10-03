@@ -116,7 +116,7 @@ class _EmbeddedBase(_HeartbeatMixin):
 
     @property
     def _notify(self):
-        """The host's core notification router — dispatch/monitor route through it, so an
+        """The device's core notification router — dispatch/monitor route through it, so an
         embedded service never wires channels itself (that duplication lived here before)."""
         return getattr(self._host, '_notify', None)
 

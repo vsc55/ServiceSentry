@@ -136,17 +136,76 @@ def network(wa, seen: dict | None = None) -> dict:
     return out
 
 
-def storage_paths(wa) -> dict:
-    """The three directories worth reporting on, resolved the way their owners resolve them."""
+def storage_paths(wa) -> list:
+    """Every directory this installation stores things in, resolved the way its owner resolves
+    it — **declared**, not listed here.
+
+    It reported three: data, config and backups. That was the whole list while those were the
+    only folders the panel wrote to, and it stopped being the whole list the day a module
+    started keeping files of its own. A page that answers «is there room, can it write» about
+    three of seven directories answers it about none of the four that are missing, and the one
+    most likely to fill a disk — the MIB store — was among them.
+
+    The other four are not named here either: `dir_parts()` is the same registry a backup reads
+    to decide what a copy must hold, and it is declared by each package. A module that starts
+    keeping files appears on this page for the same reason it appears in a copy — because it
+    said so — and the core never learns its name.
+
+    Resolved with the SAME function the copy uses (`part_dir` + `configured_dirs`), so a folder
+    moved to another disk is reported where it actually is. Resolving it a second way here is
+    how the two halves come to disagree, and the one that would be wrong is the page that says
+    everything is fine.
+    """
     var_dir = str(getattr(wa, '_var_dir', '') or '')
-    return {
-        'var_dir': var_dir,
-        'config_dir': str(getattr(wa, '_config_dir', '') or ''),
+    filas = [
+        {'key': 'var_dir', 'path': var_dir},
+        {'key': 'config_dir', 'path': str(getattr(wa, '_config_dir', '') or '')},
         # Empty `backup_dir` means `<var_dir>/backups`, and the page has to report where copies
         # ACTUALLY land — not the setting, which is blank on most installs.
-        'backup_dir': (str(getattr(wa, '_BACKUP_DIR', '') or '')
-                       or os.path.join(var_dir, 'backups')),
-    }
+        #
+        # `on_demand` porque `create_backup` la hace con `makedirs(exist_ok=True)` en la primera
+        # copia: en una instalación que todavía no ha hecho ninguna, decir «no existe» en rojo
+        # es señalar como avería lo que es simplemente no haber empezado.
+        {'key': 'backup_dir', 'on_demand': True,
+         'path': (str(getattr(wa, '_BACKUP_DIR', '') or '')
+                  or os.path.join(var_dir, 'backups'))},
+    ]
+    # Donde viven los módulos. Sólo de lectura, y por eso no se juzga que no se pueda escribir
+    # en él; pero si no está, esta instalación no tiene ni una comprobación que hacer.
+    mods = str(getattr(wa, '_modules_dir', '') or '')
+    if mods:
+        filas.append({'key': 'modules_dir', 'path': mods, 'read_only': True})
+    filas.extend(_declared_dirs(wa, var_dir))
+    return filas
+
+
+def _declared_dirs(wa, var_dir: str) -> list:
+    """Las carpetas que declara cada paquete, con su nombre ya en el idioma de la sesión.
+
+    Una parte del núcleo trae una clave de i18n y una de un módulo trae el texto en su propio
+    fichero de idioma —que el catálogo del panel no tiene—, así que se resuelven aquí las dos:
+    mandar la clave a secas enseñaría `backup_part_mibs` a quien instaló el módulo.
+
+    Que la lista se caiga no puede llevarse la página por delante: el resto del diagnóstico es
+    justo lo que alguien viene a mirar cuando algo va mal.
+    """
+    try:
+        from lib.core.backup import parts as bp                 # noqa: PLC0415
+        movidas = bp.configured_dirs(wa)
+        lang = wa._lang() if hasattr(wa, '_lang') else ''
+        fuera = []
+        for p in bp.dir_parts():
+            textos = p.get('label_i18n') or {}
+            etiqueta = (wa._t(p['label_key']) if p.get('label_key') and hasattr(wa, '_t')
+                        else textos.get(lang) or textos.get('en_EN') or '')
+            fuera.append({'key': str(p.get('id') or ''), 'label': etiqueta,
+                          'path': bp.part_dir(p, var_dir, movidas),
+                          # Se crean al guardar la primera cosa: que no exista todavía no es un
+                          # hallazgo, es una instalación que aún no ha usado eso.
+                          'on_demand': True})
+        return fuera
+    except Exception:  # pylint: disable=broad-except
+        return []
 
 
 def update_url(wa) -> str:

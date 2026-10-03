@@ -1,28 +1,28 @@
 {# ================================================================
    Cluster sub-tab — table of multi-bind module checks + edit modal.
 
-   A "cluster" is one check bound to SEVERAL hosts at once (failover):
-   any module declaring __host_multiple_bind__ (exposed as
-   MODULE_HOST_MULTI_BIND) qualifies — Proxmox today, anything tomorrow.
+   A "cluster" is one check bound to SEVERAL devices at once (failover):
+   any module declaring __device_multiple_bind__ (exposed as
+   MODULE_DEVICE_MULTI_BIND) qualifies — Proxmox today, anything tomorrow.
    The list is a compact table with quick actions; the "Edit" button opens
    a modal that hosts the SHARED field editor (renderScalarFields, incl. the
-   multi-host picker), so there is NO module-specific code here. Extra table
+   multi-device picker), so there is NO module-specific code here. Extra table
    columns are declared per-module via the __cluster_columns__ schema meta.
    ================================================================ #}
 
-// Modules that bind ONE check to SEVERAL hosts (a cluster), present in config
+// Modules that bind ONE check to SEVERAL devices (a cluster), present in config
 // (these drive the rows/columns — they must exist in modulesData).
 function _clusterModules() {
-    return Object.keys(MODULE_HOST_MULTI_BIND || {})
-        .filter(m => MODULE_HOST_MULTI_BIND[m]
+    return Object.keys(MODULE_DEVICE_MULTI_BIND || {})
+        .filter(m => MODULE_DEVICE_MULTI_BIND[m]
                   && modulesData[m] && typeof modulesData[m] === 'object'
                   && !Array.isArray(modulesData[m]));
 }
-// Cluster-capable module TYPES available in this build (declare __host_multiple_bind__),
+// Cluster-capable module TYPES available in this build (declare __device_multiple_bind__),
 // regardless of whether any is configured yet — used for the "New cluster" chooser so
 // the first cluster can be created from scratch (newCluster bootstraps the entry).
 function _clusterAddableModules() {
-    return Object.keys(MODULE_HOST_MULTI_BIND || {}).filter(m => MODULE_HOST_MULTI_BIND[m]);
+    return Object.keys(MODULE_DEVICE_MULTI_BIND || {}).filter(m => MODULE_DEVICE_MULTI_BIND[m]);
 }
 
 // Cluster permissions (view/add/edit/delete) — gated STRICTLY by the dedicated
@@ -80,9 +80,9 @@ function _clStatusHtml(state) {
 }
 
 function _clMembersHtml(item) {
-    // Only count/name members the user may view (never leak a non-viewable host UID).
-    const names = (Array.isArray(item.host_uids) ? item.host_uids : [])
-        .map(u => (hostsList().find(h => h.uid === u) || {}).name)
+    // Only count/name members the user may view (never leak a non-viewable device UID).
+    const names = (Array.isArray(item.device_uids) ? item.device_uids : [])
+        .map(u => (devicesList().find(h => h.uid === u) || {}).name)
         .filter(Boolean);
     if (!names.length) return `<span class="text-muted small">${esc(t('cl_no_members'))}</span>`;
     // Just the member count; the member names stay available as a tooltip.
@@ -91,7 +91,7 @@ function _clMembersHtml(item) {
 
 // "New cluster" control: a single button that opens a picker modal listing the
 // cluster-capable module types (same style as "Add Module"), so the user chooses
-// the type — Proxmox today, anything declaring __host_multiple_bind__ tomorrow.
+// the type — Proxmox today, anything declaring __device_multiple_bind__ tomorrow.
 function _clNewControl() {
     return `<button class="btn btn-sm btn-success" onclick="openNewClusterModal()">
         <i class="bi bi-plus-lg me-1"></i>${esc(t('cl_new'))}</button>`;
@@ -187,7 +187,7 @@ function _clSortVal(row, key) {
         case 'summary':    return { err: 0, warn: 1, unknown: 2, ok: 3 }[_clStatusAgg(row.mod, row.key)] ?? 4;
         case 'module':     return modulePrettyName(row.mod).toLowerCase();
         case 'description':return String(row.item.description || '').toLowerCase();
-        case 'members':    return Array.isArray(row.item.host_uids) ? row.item.host_uids.length : 0;
+        case 'members':    return Array.isArray(row.item.device_uids) ? row.item.device_uids.length : 0;
         case 'name':       return String(row.name || '').toLowerCase();
         case 'uid':        return String(row.key || '').toLowerCase();
         case 'enabled':    return row.item.enabled !== false ? 1 : 0;
@@ -225,7 +225,7 @@ createListTable({
         const extraCols = [];
         const seenCol = new Set();
         for (const mod of mods) {
-            const sch = _clColSchema(mod, _hostConnCollection(mod) || 'list');
+            const sch = _clColSchema(mod, _deviceConnCollection(mod) || 'list');
             for (const f of (Array.isArray(sch['__cluster_columns__']) ? sch['__cluster_columns__'] : [])) {
                 if (seenCol.has(f)) continue;
                 seenCol.add(f);
@@ -237,7 +237,7 @@ createListTable({
     rows: ctx => {
         const out = [];
         for (const mod of ctx.mods) {
-            const coll = _hostConnCollection(mod) || 'list';
+            const coll = _deviceConnCollection(mod) || 'list';
             const data = modulesData[mod][coll];
             if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
             const titleField = _clColSchema(mod, coll)['__check_title_field__'] || 'label';
@@ -250,7 +250,7 @@ createListTable({
     },
     rowKey: r => r.key,
     record: r => r.item,
-    // Three ways to read the set (clusters/_views.html). "By host" is a summary: it is handed
+    // Three ways to read the set (clusters/_views.html). "By device" is a summary: it is handed
     // every filtered row and drops the pagination, because "3 clusters have a single member"
     // is a statement about the deployment, not about the page.
     bodyMode: () => _clView.mode(),
@@ -360,19 +360,19 @@ createListTable({
 
 // Run a single cluster (multi-bind) check once and show its per-member results
 // in the shared test-results modal — the cluster counterpart of the Servers
-// list's testHostRow(). The check resolves its member hosts from host_uids, so
-// no host_uid is needed (no_ssh: the SSH connection check is host-scoped, N/A).
+// list's testDeviceRow(). The check resolves its member devices from device_uids, so
+// no device_uid is needed (no_ssh: the SSH connection check is device-scoped, N/A).
 async function _clTestRow(mod, coll, key) {
     const item = ((modulesData[mod] || {})[coll] || {})[key];
     if (!item) return;
     const label = item.label || key;
-    _openHostTestModal(`${modulePrettyName(mod)} — ${label}`);
-    const res = await apiPost('/api/v1/hosts/test', {
+    _openDeviceTestModal(`${modulePrettyName(mod)} — ${label}`);
+    const res = await apiPost('/api/v1/devices/test', {
         no_ssh: true,
         checks: [{ module: mod, collection: coll, key,
                    fields: { ...item }, cred_uid: item.cred_uid || '' }],
     });
-    _renderHostTestResults(res && res.data);
+    _renderDeviceTestResults(res && res.data);
 }
 
 // Quick enable/disable from the table (no full re-render — just dim the row).
@@ -384,18 +384,18 @@ function _clToggle(mod, coll, key, on, el) {
 
 // Create a fresh cluster (multi-bind check) and open its editor straight away.
 function newCluster(mod) {
-    const coll = _hostConnCollection(mod) || 'list';
+    const coll = _deviceConnCollection(mod) || 'list';
     const sch = _clColSchema(mod, coll);
     const def = schemaDefaults(sch) || {};
     if (!('enabled' in def)) def.enabled = true;
-    def.host_uids = Array.isArray(def.host_uids) ? def.host_uids : [];
+    def.device_uids = Array.isArray(def.device_uids) ? def.device_uids : [];
     // Bootstrap the module entry so the FIRST cluster can be created before the
     // module has any config (the "New cluster" chooser offers available types).
     if (!modulesData[mod] || typeof modulesData[mod] !== 'object' || Array.isArray(modulesData[mod]))
         modulesData[mod] = {};
     if (!modulesData[mod][coll] || typeof modulesData[mod][coll] !== 'object'
         || Array.isArray(modulesData[mod][coll])) modulesData[mod][coll] = {};
-    const key = _genUuid();             // opaque, globally-unique id (like hosts); the human name lives in the title field
+    const key = _genUuid();             // opaque, globally-unique id (like devices); the human name lives in the title field
     modulesData[mod][coll][key] = def;
     markDirty('modules');
     openClusterEdit(mod, coll, key, true);

@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """Tests para watchfuls/keepalived.
 
-The check binds one item to several member hosts and probes each over
-``host_exec`` (SVC state + ``ip addr`` dump). Both ``resolve_host`` (host
-registry) and ``host_exec`` (SSH/local) are patched so the tests stay hermetic
+The check binds one item to several member devices and probes each over
+``device_exec`` (SVC state + ``ip addr`` dump). Both ``resolve_device`` (device
+registry) and ``device_exec`` (SSH/local) are patched so the tests stay hermetic
 and exercise only the per-node + VIP roll-up aggregation.
 """
 
@@ -16,7 +16,7 @@ VIP = '192.168.1.50'
 
 
 def _members(*uids):
-    return [{'host_uid': u, 'name': u, 'address': f'10.0.0.{i + 1}', 'maintenance': False}
+    return [{'device_uid': u, 'name': u, 'address': f'10.0.0.{i + 1}', 'maintenance': False}
             for i, u in enumerate(uids)]
 
 
@@ -26,9 +26,9 @@ def _out(state, addrs):
 
 
 def _run(item, members, exec_map, priorities=None):
-    """Run check() for a single keepalived item with patched host access.
+    """Run check() for a single keepalived item with patched device access.
 
-    *exec_map*: ``{uid: (stdout, stderr, code)}`` returned by host_exec for that
+    *exec_map*: ``{uid: (stdout, stderr, code)}`` returned by device_exec for that
     member (missing uid → unreachable). *priorities*: ``{uid: priority}``.
     """
     from watchfuls.keepalived import Watchful
@@ -37,19 +37,19 @@ def _run(item, members, exec_map, priorities=None):
     prio = priorities or {}
 
     def fake_resolve(arg):
-        # Per-member connection lookup: {'host_uid': uid} (no cluster fields).
-        if isinstance(arg, dict) and 'host_uid' in arg and '__cluster_members__' not in arg \
+        # Per-member connection lookup: {'device_uid': uid} (no cluster fields).
+        if isinstance(arg, dict) and 'device_uid' in arg and '__cluster_members__' not in arg \
                 and 'label' not in arg:
-            uid = arg['host_uid']
-            return {'host_uid': uid, 'ssh_host': uid, 'host_kind': 'remote',
+            uid = arg['device_uid']
+            return {'device_uid': uid, 'ssh_host': uid, 'device_kind': 'remote',
                     'enabled': True, 'priority': prio.get(uid)}
         return {**arg, '__cluster_members__': members}
 
     def fake_exec(mi, cmd, timeout=15):
         return exec_map.get(mi.get('ssh_host'), ('', 'unreachable', -1))
 
-    with patch.object(w, 'resolve_host', side_effect=fake_resolve), \
-         patch.object(w, 'host_exec', side_effect=fake_exec):
+    with patch.object(w, 'resolve_device', side_effect=fake_resolve), \
+         patch.object(w, 'device_exec', side_effect=fake_exec):
         return w.check().list
 
 
@@ -70,17 +70,17 @@ class TestKeepalivedBasics:
     def test_schema_is_cluster(self):
         from watchfuls.keepalived import Watchful
         sch = Watchful.ITEM_SCHEMA
-        assert sch['__host_multiple_bind__'] is True
+        assert sch['__device_multiple_bind__'] is True
         assert sch['list']['__cluster_columns__'] == ['vip']
         assert sch['list']['__member_field__']['key'] == 'priority'
 
-    def test_declares_vip_provision_host(self):
-        """The VIP is auto-provisioned as a host via the generic core hook: the
-        module declares __provision_host__ (address_field vip → vip_host_uid)."""
+    def test_declares_vip_provision_device(self):
+        """The VIP is auto-provisioned as a device via the generic core hook: the
+        module declares __provision_device__ (address_field vip → vip_device_uid)."""
         from watchfuls.keepalived import Watchful
-        decl = Watchful.ITEM_SCHEMA['list']['__provision_host__']
+        decl = Watchful.ITEM_SCHEMA['list']['__provision_device__']
         assert decl['address_field'] == 'vip'
-        assert decl['link_field'] == 'vip_host_uid'
+        assert decl['link_field'] == 'vip_device_uid'
         assert '{label}' in decl['name_template']
 
 
@@ -125,7 +125,7 @@ class TestVipRollup:
     def test_unreachable_node(self):
         res = _run(_item(), _members('a', 'b'), {
             'a': (_out('active', ['10.0.0.1', VIP]), '', 0),
-            # 'b' missing → host_exec returns unreachable
+            # 'b' missing → device_exec returns unreachable
         })
         assert res['k1/node/b']['status'] is False
 

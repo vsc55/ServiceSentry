@@ -55,7 +55,7 @@ def configure_ipban(manager, wa_cfg: dict, extra_whitelist=()) -> None:
 def ipban_notify(surface, action: str, ip: str, info: dict) -> None:
     """Audit a ban lifecycle event and route it through the notification matrix.
 
-    Parameterised by *surface* (the WebAdmin or a standalone service) so both hosts share
+    Parameterised by *surface* (the WebAdmin or a standalone service) so both devices share
     one implementation: it needs only ``_read_config_file`` / ``_CONFIG_FILE`` and a
     ``_notify`` router (used by ``dispatch``); ``_audit_system`` is used when present. Both
     the audit and the dispatch are best-effort (a notify failure never affects the ban)."""

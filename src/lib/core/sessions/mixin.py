@@ -147,13 +147,13 @@ class _SessionsMixin:
         used to reach the server.
         """
         token    = secrets.token_hex(32)          # the secret auth credential (256-bit)
-        uid      = str(uuid.uuid4())               # public session id (matches user/host/… uids)
+        uid      = str(uuid.uuid4())               # public session id (matches user/device/… uids)
         now      = datetime.now(timezone.utc).isoformat()
         user_uid = (self._users.get(username) or {}).get('uid', username)
         entry = {
             'uid':        uid,
             'user_uid':   user_uid,
-            'created':    now,
+            'created_at':    now,
             'last_seen':  now,
             'ip':         ip,
             'user_agent': user_agent,
@@ -210,7 +210,7 @@ class _SessionsMixin:
                 return None
 
         idle_age = _age('last_seen')
-        abs_age  = _age('created')
+        abs_age  = _age('created_at')
         max_abs  = self._REMEMBER_ME_DAYS * 86400
         # "Remember me" waives the IDLE window and only that. The absolute cap below still
         # applies, so a remembered session is bounded by `remember_me_days` — the number the

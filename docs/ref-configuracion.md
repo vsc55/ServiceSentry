@@ -163,6 +163,23 @@ desaparecieran con él.
 | `snmp.mib_repos` | string | `""` | Plantillas de URL de repositorios GitHub, una por línea. No se edita a mano: la lista de fuentes de la vista **Importar** sabe qué plantillas van juntas (un repo mezcla `.txt`, `.my` y ficheros sin extensión) |
 | `snmp.github_token` | string | `""` | Token personal de GitHub para importar MIB (env `SS_SNMP_GITHUB_TOKEN`). Anónimo son 60 peticiones/hora y una sola carpeta de fabricante puede gastarlas buscando dependencias; con token son 5000. **Secreto**: cifrado en reposo y enmascarado en la API |
 
+### Sección `freshservice`
+
+De dónde salen las empresas cuando ya están escritas en otro sitio. En Freshservice,
+«departamento» y «empresa» son la misma cosa —lo dice su propia documentación—, y en una casa que
+ya lo usa esa lista existe, está mantenida y es la buena. Se trae en **un solo sentido**: nada de
+lo de aquí sube.
+
+| Clave | Tipo | Por defecto | Descripción |
+|-------|------|-------------|-------------|
+| `freshservice.domain` | string | `""` | La dirección de tu Freshservice, `tucasa.freshservice.com`. Vale con `https://` o sin él, y con barra final o sin ella |
+| `freshservice.api_key` | string | `""` | Clave de API de un agente con permiso para ver departamentos (Perfil → API Key). **Secreto**: cifrada en reposo y enmascarada en la API |
+
+Los dos botones de la tarjeta —probar la conexión y traer las empresas— piden `orgs_edit`, que es
+la bandera que decide de quién es cada cosa; traer enseña **primero** qué crearía, qué corregiría
+y qué dejaría en paz. Lo que ya no está en Freshservice se cuenta y **no se borra**: de una
+sociedad cuelgan armarios y equipos fichados aquí.
+
 ### Sección `global`
 
 | Clave | Tipo | Por defecto | Descripción |
@@ -558,7 +575,7 @@ Configuración por módulo. **Se persiste en la base de datos**, en dos tablas
 Tabla `module_config`: una fila por módulo — los campos a nivel de módulo
 (`enabled`, `alert`, meta `__*__`) como JSON en la columna `data`.
 
-Tabla `module_config_items`: una fila por ítem — `host_uid`, `label` y `enabled`
+Tabla `module_config_items`: una fila por ítem — `device_uid`, `label` y `enabled`
 promovidos a columnas (para joins y búsquedas) y el resto del ítem como JSON en
 la columna `data`.
 
@@ -581,7 +598,7 @@ clave de primer nivel coincide con el nombre de la carpeta del módulo en
         "enabled": true,
         ...configuración específica del módulo...,
         "list": {
-            "uid-del-item": { "host_uid": "...", "label": "...", "enabled": true, ... }
+            "uid-del-item": { "device_uid": "...", "label": "...", "enabled": true, ... }
         }
     }
 }

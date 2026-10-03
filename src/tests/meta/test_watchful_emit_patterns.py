@@ -11,7 +11,7 @@ There are two legitimate patterns (see ``docs/ref-watchful-emit.md``):
 
 The failure this guards against is real and was found in **eleven** call sites: a module
 using B on its main path and A in its exception branch, without passing ``name`` to the
-latter.  The monitor then falls back to resolving the BOUND HOST, so the same check
+latter.  The monitor then falls back to resolving the BOUND DEVICE, so the same check
 appeared in notifications under two different names depending on how it failed — "A
 example.com" normally, "ns1" when it raised.
 
@@ -57,7 +57,7 @@ def _is_manual(node) -> bool:
 class TestEveryResultIsNamed:
 
     def test_automatic_results_carry_an_explicit_name(self):
-        """Pattern A must pass ``name``: the monitor's fallback resolves the bound HOST,
+        """Pattern A must pass ``name``: the monitor's fallback resolves the bound DEVICE,
         which is a different thing from the check's own label. Eleven sites got this wrong
         — every one of them an error/unsupported branch, i.e. exactly the moment the
         notification matters most."""
@@ -65,7 +65,7 @@ class TestEveryResultIsNamed:
                    if not _is_manual(n) and 'name' not in {k.arg for k in n.keywords}]
         assert not missing, (
             'dict_return.set() without name= (the alert would be labelled with the bound '
-            'host, not the check): ' + ', '.join(missing))
+            'device, not the check): ' + ', '.join(missing))
 
     def test_other_data_name_is_not_mistaken_for_the_real_one(self):
         """``other_data={'name': …}`` does NOT feed the notification: ``get_name()`` reads

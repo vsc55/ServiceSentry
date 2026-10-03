@@ -4,8 +4,8 @@
 
 Historically this module *was* the dispatcher; routing now lives in the core-owned,
 web_admin-independent :class:`lib.core.notify.router.NotificationRouter`.  This shim
-keeps the ``dispatch(wa, kind, ...)`` call sites working: it routes through the host's
-own router (``wa._notify``) when present, or — for a legacy host that only exposes the
+keeps the ``dispatch(wa, kind, ...)`` call sites working: it routes through the device's
+own router (``wa._notify``) when present, or — for a legacy device that only exposes the
 channel surface — runs the same logic against that surface directly.
 """
 

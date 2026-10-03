@@ -61,7 +61,7 @@ def _add_tree(zf: zipfile.ZipFile, root: str, arc_prefix: str) -> int:
 def create_backup(connector, name: str, *, var_dir: str, config_dir: str,
                   parts, include_secrets: bool, actor: str = '',
                   app_version: str = '', engine: str = '', backup_dir: str = '',
-                  progress_cb=None, connectors=None) -> dict:
+                  progress_cb=None, connectors=None, dirs=None) -> dict:
     """Write ``<var_dir>/backups/<name>.zip`` and return its manifest.
 
     *parts* is whatever the caller asked for; the required ones are added whether or not it
@@ -86,7 +86,7 @@ def create_backup(connector, name: str, *, var_dir: str, config_dir: str,
          f'secrets={bool(include_secrets)} by={actor or "?"}')
 
     by_part = tables_by_part(connector, want, connectors)
-    tables = sorted({t for _pid, tabs in by_part for t in tabs})
+    tables = sorted({t for _pid, tabs, _err in by_part for t in tabs})
     counts: dict = {}
     # sha256 per member, so a copy can be checked without trusting the file it came in.
     digests: dict = {}
@@ -127,10 +127,18 @@ def create_backup(connector, name: str, *, var_dir: str, config_dir: str,
     try:
         with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zf:
             _done = 0
-            for part_id, part_tables in by_part:
-                step = {'part': part_id, 'ok': True, 'tables': len(part_tables),
-                        'rows': 0, 'error': ''}
+            for part_id, part_tables, unreachable in by_part:
+                # A part whose database could not even be ASKED is not a part with nothing in
+                # it. Both used to come out as zero tables and `ok`, so a copy taken while the
+                # syslog server was down said it was complete — and stayed indistinguishable
+                # from one taken on an install that never had a syslog table until somebody
+                # restored it. The rule the config file has always had, now here too: a part
+                # that was asked for and produced nothing is NOT ok.
+                step = {'part': part_id, 'ok': not unreachable, 'tables': len(part_tables),
+                        'rows': 0, 'error': unreachable}
                 steps.append(step)
+                if unreachable:
+                    continue
                 # Read from the database this part lives on, which is not always the system
                 # one — see `conn_for`.
                 src = conn_for(next(p for p in PARTS if p['id'] == part_id),
@@ -176,12 +184,13 @@ def create_backup(connector, name: str, *, var_dir: str, config_dir: str,
                 steps.append({'part': 'config_file', 'ok': ok, 'tables': 0,
                               'rows': 1 if ok else 0,
                               'error': '' if ok else 'config.json not found'})
-            # Whatever the modules declared, by the same rule for each: their own directory
-            # under var_dir, into their own place in the archive. The core names none of them.
-            for mp in _parts.module_parts():
+            # Every directory part, by the same rule for each: its own directory under
+            # var_dir, into its own place in the archive. The core's own are in that list now
+            # too (floor plans) — and it still names no module, which is what matters.
+            for mp in _parts.dir_parts():
                 if mp['id'] not in want:
                     continue
-                n = _add_tree(zf, os.path.join(var_dir, *mp['dir'].split('/')),
+                n = _add_tree(zf, _parts.part_dir(mp, var_dir, dirs),
                               f'{PARTS_PREFIX}/{mp["id"]}')
                 manifest['files'][mp['id']] = n
                 steps.append({'part': mp['id'], 'ok': n > 0, 'tables': 0, 'rows': n,

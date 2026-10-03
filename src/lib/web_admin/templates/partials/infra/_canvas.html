@@ -637,11 +637,23 @@ function ssCanvasWindow(id) {
  *
  *  The attribute and not a re-render: a drag is a stream of events, and rebuilding the SVG on
  *  each one is a picture that stutters under the hand holding it. */
+//: Quién quiere enterarse de que una ventana se ha movido, por lienzo. Un solo apuntado por
+//: id: lo que se dibuja debajo de un mapa —hoy las teselas— depende de QUÉ TROZO se está
+//: mirando, y eso solo cambia aquí. Sin esto, la única forma de enterarse sería repintar la
+//: pantalla entera en cada movimiento del ratón, que es una imagen que tiembla bajo la mano.
+const _ssOnApply = {};
+
+/** Avisarme cuando esta ventana cambie. `null` lo quita. */
+function ssCanvasOnApply(id, fn) {
+    if (fn) _ssOnApply[id] = fn; else delete _ssOnApply[id];
+}
+
 function ssCanvasApply(id) {
     const svg = ssCanvasSvg(id);
     const v = _ssVB[id];
     if (!svg || !v) return;
     svg.setAttribute('viewBox', `${v.x} ${v.y} ${v.w} ${v.h}`);
+    try { _ssOnApply[id] && _ssOnApply[id](v); } catch (e) { /* un dibujo de más no rompe el de debajo */ }
 }
 
 /** The whole drawing, centred — which is also the state it opens in.
@@ -662,6 +674,11 @@ function ssCanvasFit(id) {
  *  is not a claim about the new one. */
 function ssCanvasReset(id) { delete _ssVB[id]; }
 
+/** Si alguien ha movido esta ventana. Lo que decide si se le puede reencuadrar por debajo:
+ *  volver al dibujo entero mientras alguien está mirando un trozo es quitarle el zoom de las
+ *  manos, y en una pantalla que se refresca sola pasaría cada treinta segundos. */
+function ssCanvasWindowKept(id) { return !!_ssVB[id]; }
+
 /** Zoom about a point in the drawing's own coordinates, so what is under the cursor stays
  *  under the cursor. Zooming about the centre instead is what makes a map feel like it is
  *  running away from you. */
@@ -672,7 +689,14 @@ function ssCanvasZoomAt(id, factor, cx, cy) {
     const w0 = +svg.dataset.w || 100;
     // Bounded both ways: past 8x the picture is one box and past a fifth of it the boxes are
     // specks. Neither is a view of anything, and both are easy to reach with one wheel flick.
-    const w = Math.min(w0 * 5, Math.max(w0 / 8, v.w / factor));
+    //
+    // …salvo que quien dibuja diga otra cosa (`data-zoom-in` / `data-zoom-out`), porque no todo
+    // lo que se dibuja aquí tiene la misma escala: en un plano de sala, ocho veces ya es una
+    // caja llenando la pantalla; en un mapa del mundo, ocho veces desde media península todavía
+    // no enseña una calle — y una calle es exactamente lo que se busca al acercarse a una sede.
+    const cerca = +svg.dataset.zoomIn || 8;
+    const lejos = +svg.dataset.zoomOut || 5;
+    const w = Math.min(w0 * lejos, Math.max(w0 / cerca, v.w / factor));
     const k = w / v.w;
     _ssVB[id] = {x: cx - (cx - v.x) * k, y: cy - (cy - v.y) * k, w, h: v.h * k};
     ssCanvasApply(id);
@@ -792,10 +816,10 @@ function ssPublicIp(addresses) {
     return (addresses || []).find(a => !ssPrivateIp(a)) || '';
 }
 
-function ssHostCard(node, uid, opts) {
+function ssDeviceCard(node, uid, opts) {
     const n = node || {};
     const o = opts || {};
-    const h = (typeof _infraHosts !== 'undefined' ? _infraHosts : []).find(x => x.uid === uid)
+    const h = (typeof _infraDevices !== 'undefined' ? _infraDevices : []).find(x => x.uid === uid)
               || {};
     const type = n.kind || h.device_type || '';
     // A row per fact the device answered, and NO row for one it did not: a card of empty
@@ -811,7 +835,7 @@ function ssHostCard(node, uid, opts) {
     const code = v => `<code class="ss-fs-2">${esc(v)}</code>`;
     return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
         <div class="d-flex align-items-center gap-2 mb-1">
-            <i class="bi ${escAttr(hostTypeIcon(type))} text-muted"></i>
+            <i class="bi ${escAttr(deviceTypeIcon(type))} text-muted"></i>
             <span class="fw-semibold">${esc(n.name || h.name || uid)}</span>
             ${typeof _infraStateBadge === 'function'
               ? _infraStateBadge(h.status || n.status, h.maintenance) : ''}
@@ -819,11 +843,11 @@ function ssHostCard(node, uid, opts) {
                   ><i class="bi bi-hand-index me-1"></i>${esc(t(o.hint))}</span>` : ''}
         </div>
         <div class="d-flex flex-column gap-1">
-            ${row('bi-tag', t('host_type'), type
-                  ? esc(hostTypeLabel(type))
-                  : `<span class="text-muted">${esc(t('host_type_unset'))}</span>`)}
-            ${row('bi-award', t('col_host_brand'), hostBrandLine(h, {text: true}))}
-            ${row('bi-cpu', t('col_host_os'),
+            ${row('bi-tag', t('device_type'), type
+                  ? esc(deviceTypeLabel(type))
+                  : `<span class="text-muted">${esc(t('device_type_unset'))}</span>`)}
+            ${row('bi-award', t('col_device_brand'), deviceBrandLine(h, {text: true}))}
+            ${row('bi-cpu', t('col_device_os'),
                   typeof _infraOsHtml === 'function' ? _infraOsHtml(h) : esc(h.os || ''))}
             ${row('bi-hdd-network', t('infra_link_addresses'),
                   (n.addresses || []).map(code).join(' ') || (h.address ? code(h.address) : ''))}
@@ -833,9 +857,9 @@ function ssHostCard(node, uid, opts) {
             ${row('bi-signpost-2', t('infra_link_gateway'), n.gateway ? code(n.gateway) : '')}
             ${row('bi-plugin', t('infra_link_cables'),
                   o.cables === undefined ? '' : String(o.cables))}
-            ${row('bi-eye', t('col_host_modules'),
+            ${row('bi-eye', t('col_device_modules'),
                   h.modules_total ? esc(`${h.modules_active || 0}/${h.modules_total}`) : '')}
-            ${row('bi-tags', t('col_host_tags'), (h.tags || []).map(tg =>
+            ${row('bi-tags', t('col_device_tags'), (h.tags || []).map(tg =>
                   `<span class="badge bg-body-secondary text-body-secondary border fw-normal
                          me-1">${esc(tg)}</span>`).join(''))}
             ${o.extra ? row('bi-box', o.extra[0], esc(o.extra[1])) : ''}

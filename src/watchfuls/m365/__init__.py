@@ -138,10 +138,10 @@ class Watchful(StorageChecks, HealthChecks, IdentityChecks, PostureChecks,
         return self.dict_return
 
     def _check_item(self, key: str, raw: dict) -> None:
-        # resolve_host applies a referenced credential (cred_uid) — no host binding
+        # resolve_device applies a referenced credential (cred_uid) — no host binding
         # for this cloud module, so it just overlays the m365_app credential's
         # tenant_id/client_id/client_secret onto the item.
-        it = self.resolve_host(raw)
+        it = self.resolve_device(raw)
         if not it.get('enabled', True):
             return
         label = (it.get('label') or '').strip() or key

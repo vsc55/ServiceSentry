@@ -7,9 +7,9 @@ top of the same data:
 
 * what KIND of secret each one is — an SSH identity and a tenant app registration are not
   the same animal (one reaches a machine, the other is an application with consented
-  permissions and no host behind it), and sorting by Type only interleaves them;
+  permissions and no device behind it), and sorting by Type only interleaves them;
 * who still REFERENCES it — which is not part of a credential at all. Its consumers live in
-  the hosts store and inside every module's config, so the catalogue cannot see them, and a
+  the devices store and inside every module's config, so the catalogue cannot see them, and a
   secret nobody references is a secret nobody rotates and that stays valid.
 
 What must not differ between the views is what a credential MEANS: the type badge, the

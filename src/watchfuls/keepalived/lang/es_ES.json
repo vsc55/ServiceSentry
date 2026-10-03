@@ -23,7 +23,7 @@
         "timeout":        "Tiempo máximo por defecto de cada comprobación en un nodo, en segundos.",
         "vip":            "Dirección IP virtual flotante que gestiona keepalived (p. ej. 192.168.1.50). Es la que se comprueba en cada nodo (en cualquier interfaz) para saber quién la tiene. Puedes indicarla con o sin máscara (192.168.1.50 o 192.168.1.50/24).",
         "router_id":      "Identificador de la instancia VRRP (virtual_router_id), de 1 a 255. Debe ser el mismo en todos los nodos del grupo y único por segmento de red. Informativo/documental; déjalo vacío si no aplica.",
-        "priority":       "Prioridad VRRP (peso) de este nodo. El nodo con mayor prioridad activo debería ser el MASTER que sostiene la VIP. Se configura por host en la pestaña Hosts.",
+        "priority":       "Prioridad VRRP (peso) de este nodo. El nodo con mayor prioridad activo debería ser el MASTER que sostiene la VIP. Se configura por dispositivo en la pestaña Dispositivos.",
         "check_service":  "Comprueba que el servicio keepalived esté activo (systemctl is-active) en cada nodo miembro.",
         "check_vip":      "Comprueba que exactamente un nodo tenga la VIP. Ninguno = VIP caída (error); varios = split-brain (aviso).",
         "check_priority": "Avisa si la VIP la sostiene un nodo con prioridad menor que otro nodo activo (posible failover no óptimo o prioridades mal configuradas)."
@@ -37,7 +37,7 @@
     "tab_labels": {
         "general":    "General",
         "setup":      "VIP",
-        "hosts":      "Hosts",
+        "devices":      "Dispositivos",
         "monitoring": "Monitorización",
         "lastdata":   "Últimos datos",
         "logs":       "Logs"
@@ -46,7 +46,7 @@
     "rename_item_prompt": "Introduce el nuevo nombre:",
     "collections": {"list": "VIP de Keepalived"},
     "messages": {
-        "ka_no_members":      "Keepalived: {} — sin hosts miembros ⚠️",
+        "ka_no_members":      "Keepalived: {} — sin dispositivos miembros ⚠️",
         "ka_no_vip":          "Keepalived: {} — VIP no configurada ⚠️",
         "ka_host_unreachable": "Keepalived: {}/{} — host inaccesible [{}] 🔽",
         "ka_service":         "Keepalived: {}/{} — servicio {} 🔽",

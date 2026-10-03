@@ -21,9 +21,16 @@ Routes registered by this file:
     POST   /api/v1/config/db/<op>       database maintenance: optimize | compact
     GET    /api/v1/config/db/orphans    readings stored under a key nothing owns any more
     DELETE /api/v1/config/db/orphans    …and the sweep that removes them
+    GET    /api/v1/config/map/preview/<int:z>/<int:x>/<int:y>   una tesela del mapa
+                                     que se está probando, servida por el panel (la
+                                     política de contenido sólo abre el GUARDADO)
+    POST   /api/v1/config/map/test     probar el mapa: proveedor, sesión, una tesela y el
+                                     origen que la política de contenido abre
 """
 
 import uuid
+
+import time
 
 from flask import jsonify, request, session
 
@@ -48,6 +55,170 @@ def register(app, wa):
 
     config_view_req = wa._perm_required('config_view', 'config_edit')
     config_edit_req = wa._perm_required('config_edit')
+
+    #: Con qué plantilla dibuja el mapa de prueba de cada persona, y hasta cuándo vale. En
+    #: memoria y por usuario: es lo que acaba de teclear ESA persona en un formulario sin
+    #: guardar, no un ajuste de la casa. Se caduca sola porque nadie va a venir a borrarla.
+    if not hasattr(wa, '_map_preview'):
+        wa._map_preview = {}
+
+    #: Cuánto vale. Lo que dura mirar un cuadro de diagnóstico y volver a pulsar un par de veces.
+    _PREVIEW_TTL = 600
+
+    def _map_needs_reload(antes: dict, ahora: dict) -> bool:
+        """Si el mapa recién guardado NO cabe en la política que lleva la página abierta.
+
+        De dónde puede el navegador traerse imágenes se decide al abrir la página, y viaja en su
+        cabecera: la que está delante de quien guarda se sirvió con la configuración de ANTES.
+        Si el origen que hace falta ahora ya estaba en aquella lista, no hay nada que hacer —y
+        ese es el caso corriente desde que una instalación con mapa abre todos los del catálogo,
+        así que cambiar de proveedor ya no pide nada—. Si no estaba, el navegador va a bloquear
+        cada tesela **sin decir una palabra**, y entonces sí hay que pedir la página otra vez.
+
+        Los dos casos que quedan: encender el mapa por primera vez —antes no había ningún
+        origen abierto— y escribir una plantilla propia que apunta a un servidor nuevo.
+        """
+        from lib.maps import catalog as cat                           # noqa: PLC0415
+        abiertos = cat.origins_for((antes or {}).get('web_admin') or {})
+        hace_falta = cat.origin_of(cat.resolve((ahora or {}).get('web_admin') or {})['tiles'])
+        return bool(hace_falta) and hace_falta not in abiertos
+
+    @app.route('/api/v1/config/map/preview/<int:z>/<int:x>/<int:y>', methods=['GET'])
+    @config_edit_req
+    def api_config_map_preview(z, x, y):
+        """Una tesela del mapa que se está probando, **servida por el panel**.
+
+        Y no directamente desde el proveedor, que es lo que hace un mapa de verdad. La razón es
+        la política de contenido: `img-src` se abre para el origen que sale de la configuración
+        **guardada**, así que un proveedor recién elegido en el formulario tiene su origen
+        cerrado — el navegador bloquea cada tesela sin decir una palabra y sólo queda la
+        chincheta sobre un rectángulo vacío. Que es exactamente lo que se veía, y lo que hacía
+        falta guardar y recargar para que dejara de pasar.
+
+        Aquí no hay que abrir nada: las imágenes vienen del propio panel.
+
+        **No es un proxy abierto.** La dirección no viene en la petición: viene de lo que esta
+        misma persona acaba de probar, guardado en memoria y con caducidad, y sólo llegan aquí
+        quienes pueden editar la configuración — que son los que ya podían apuntar el mapa a
+        donde quisieran. Lo único que se puede pedir es la tesela z/x/y de ESE mapa.
+        """
+        guardado = (wa._map_preview or {}).get(session.get('username', '') or '')
+        if not guardado or guardado[1] < time.time():
+            return jsonify({'error': wa._t('map_err_off')}), 404
+        from lib import maps                                          # noqa: PLC0415
+        datos, tipo = maps.fetch_tile(guardado[0], z, x, y)
+        if not datos:
+            # 404 y no 500: no hay tesela ahí. Lo que ha fallado ya lo cuenta el informe, y un
+            # error de servidor por una imagen que no está llenaría el registro de ruido.
+            return jsonify({'error': wa._t('map_err_tile')}), 404
+        return app.response_class(datos, mimetype=tipo or 'image/png',
+                                  # Un cuadro de diagnóstico no quiere una imagen de hace un
+                                  # rato: se pulsa precisamente porque algo ha cambiado.
+                                  headers={'Cache-Control': 'no-store'})
+
+    @app.route('/api/v1/config/map/test', methods=['POST'])
+    @config_edit_req
+    def api_config_map_test():
+        """Probar el mapa: **pedir una tesela de verdad** y contar qué pasó.
+
+        Un mapa que no sale no dice nada por su cuenta: el navegador se traga una imagen que no
+        carga, la política de contenido bloquea en silencio y una clave sin permiso contesta un
+        403 que nadie ve. Todo el rato es el mismo cuadro vacío, y no hay por dónde empezar.
+
+        Así que esto recorre la cadena entera y devuelve **cada paso por separado**:
+
+        1. qué proveedor sale de la configuración y con qué dirección;
+        2. para Google, si dan una sesión — y si no, **lo que contestaron ellos**, que es donde
+           está la respuesta (una clave sin la Map Tiles API activada, un proyecto sin
+           facturación, una restricción por referente que a una llamada de servidor le falta);
+        3. si desde ESTE servidor se puede traer una tesela, que separa «no hay salida a
+           internet» de «la clave no vale»;
+        4. y qué origen tiene que abrir la política de contenido, que es la mitad que falla sin
+           dejar rastro en la página.
+
+        La sesión se pide NUEVA a propósito: probar contra la que está guardada contestaría que
+        todo va bien con una clave que se acaba de cambiar.
+        """
+        from lib import maps                                          # noqa: PLC0415
+        from lib.maps import catalog as cat                           # noqa: PLC0415
+        from lib.maps import google as gmaps                          # noqa: PLC0415
+        # Lo que hay EN PANTALLA, no lo que está guardado. Un botón de probar que sólo mira lo
+        # guardado contesta siempre lo mismo mientras alguien cambia de proveedor y vuelve a
+        # pulsar — y lo que se quiere saber antes de guardar es precisamente si lo nuevo va a
+        # funcionar. Reportado desde la pantalla.
+        #
+        # Lo posteado manda SALVO donde no venga: la clave sale enmascarada a la pantalla, así
+        # que si nadie la ha tocado no viaja de vuelta, y ahí lo que vale es la guardada. Es la
+        # misma regla que hace que guardar la configuración no borre un secreto que no se editó.
+        cfg = dict(wa._config_section('web_admin') or {})
+        dado = (request.get_json(silent=True) or {}).get('web_admin') or {}
+        for campo in ('dcim_map_provider', 'dcim_map_tiles', 'dcim_map_attribution',
+                      'dcim_map_google_key', 'dcim_map_google_type', 'dcim_map_max_zoom'):
+            if isinstance(dado.get(campo), (str, int)) and dado.get(campo) != '':
+                cfg[campo] = dado[campo]
+            elif dado.get(campo) == '' and campo != 'dcim_map_google_key':
+                # Vaciar una casilla es una decisión: «sin plantilla propia», «sin tope». La
+                # clave es la excepción, porque vacía es como llega cuando no se ha tocado.
+                cfg[campo] = ''
+        elegido = cat.resolve(cfg)
+        # Lo que hay guardado, que puede no ser lo que se está probando: los mapas de las
+        # demás pantallas siguen con ese hasta que alguien guarde, y su política de contenido
+        # hasta que además recargue. Decirlo evita el «pues aquí funciona y allí no».
+        guardado_cfg = cat.resolve(wa._config_section('web_admin') or {})
+        out = {'provider': elegido['provider'], 'zmax': elegido.get('zmax') or 0,
+               'saved_provider': guardado_cfg['provider'], 'preview': '',
+               # Cómo se llama cada uno, dicho por el catálogo. Componer la clave con el
+               # identificador ya salió a la pantalla: el del IGN se llama `ign_pnoa` y su
+               # rótulo es `…_ign`, así que se leyó la clave en crudo dentro de una frase.
+               'saved_label_key': cat.label_key(guardado_cfg['provider']),
+               'label_key': cat.label_key(elegido['provider']),
+               'attribution': elegido.get('attribution') or '',
+               'origin': cat.origin_of(elegido['tiles']), 'session': False,
+               # La dirección LISTA —con la sesión y la clave de Google ya puestas—, para que el
+               # cuadro pueda dibujar un trozo de mapa de verdad. Es la mitad que este servidor
+               # no puede comprobar: él se trae la tesela por su cuenta, y quien tiene que poder
+               # traerla es el navegador. Si el informe dice que llegó y el dibujo sale en
+               # blanco, es la política de contenido — y así se ve de un vistazo en vez de
+               # deducirse.
+               'tiles': '', 'tile': {}, 'error': '', 'detail': ''}
+        if not elegido['provider']:
+            out['error'] = 'map_err_off'
+            return jsonify(out)
+        url = elegido['tiles']
+        if elegido['provider'] == cat.GOOGLE:
+            gmaps.forget()          # la de ahora, no la de antes de cambiar la clave
+            lang, region = gmaps.lang_of(getattr(wa, '_DEFAULT_LANG', '') or '')
+            try:
+                url = gmaps.tiles(url, str(cfg.get('dcim_map_google_key') or ''),
+                                  lang=lang, region=region,
+                                  map_type=str(cfg.get('dcim_map_google_type') or ''))
+                out['session'] = True
+            except gmaps.MapKeyError as exc:
+                out['error'], out['detail'] = exc.key, exc.detail
+                return jsonify(out)
+            except Exception as exc:                 # pylint: disable=broad-except
+                out['error'], out['detail'] = 'gmaps_err_session', str(exc)
+                return jsonify(out)
+        if not url:
+            out['error'] = 'map_err_no_tiles'
+            return jsonify(out)
+        out['tiles'] = url
+        # Con qué dibuja el cuadro: por el panel, no directo. Ver `api_config_map_preview`.
+        wa._map_preview[session.get('username', '') or ''] = (url, time.time() + _PREVIEW_TTL)
+        # Con una marca distinta en cada prueba. **La dirección del cuadro es la misma para
+        # todos los proveedores** —la sirve el panel—, así que sin esto la tesela z/x/y que el
+        # navegador ya se trajo probando el satélite del IGN se reutiliza al probar
+        # OpenStreetMap: sale un mapa a trozos, mitad callejero y mitad foto aérea, según cuáles
+        # estuvieran ya en la caché. Reportado desde la pantalla, y no lo arregla `no-store`:
+        # con la misma URL, un `<image>` puede salir de la caché de memoria de la propia página.
+        out['preview'] = (f'/api/v1/config/map/preview/{{z}}/{{x}}/{{y}}'
+                          f'?v={int(time.time() * 1000)}')
+        out['tile'] = maps.probe_tile(url)
+        if not out['tile'].get('ok'):
+            out['error'] = 'map_err_tile'
+            out['detail'] = str(out['tile'].get('detail') or '')
+        return jsonify(out)
+
 
     # Sections that contain external-service credentials (LDAP bind password,
     # OIDC client secret, SMTP password, etc.).  Only admins may modify them.
@@ -215,6 +386,13 @@ def register(app, wa):
                 'saved': list(to_apply.keys()),
                 'conflicts': conflicts,
                 'versions': saved_versions,
+                # Si la página que acaba de guardar puede cargar el mapa nuevo, o hay que
+                # pedirla otra vez. Lo contesta el SERVIDOR porque es quien sabe con qué
+                # política se sirvió esa página: la de la configuración vieja, que es la que
+                # tenía delante quien pulsó guardar. La pantalla no puede saberlo — no puede
+                # leer su propia cabecera— y una regla escrita allí sería una copia de esta que
+                # se desviaría el día que cambie.
+                'reload_required': _map_needs_reload(old_data, new_data),
             })
             resp.headers['ETag'] = f'"{wa._config_version}"'
             return resp
@@ -254,14 +432,14 @@ def register(app, wa):
                 if str(coll).startswith('__') or not isinstance(entries, dict):
                     continue
                 keys.update(str(k) for k in entries)
-        store = getattr(wa, '_hosts_store', None)
-        hosts = set()
+        store = getattr(wa, '_devices_store', None)
+        devices = set()
         if store is not None:
             try:
-                hosts = {str(h.get('uid') or '') for h in (store.list(decrypt=False) or ())}
+                devices = {str(h.get('uid') or '') for h in (store.list(decrypt=False) or ())}
             except Exception:  # pylint: disable=broad-except
-                hosts = set()
-        return items, hosts, present
+                devices = set()
+        return items, devices, present
 
     def _orphan_series():
         """Every stored series, per table, with what it would cost to keep."""
@@ -299,10 +477,10 @@ def register(app, wa):
         are different statements, and the second is the operator's to make. So this answers
         what there is and what it would cost, and the sweep is a separate press.
         """
-        items, hosts, present = _orphan_inputs()
+        items, devices, present = _orphan_inputs()
         out = {}
         for table, rows in _orphan_series().items():
-            found = orphans.scan(rows, items, hosts, modules=present)
+            found = orphans.scan(rows, items, devices, modules=present)
             out[table] = {**orphans.summary(found), 'rows': found}
         return jsonify(out)
 
@@ -315,13 +493,13 @@ def register(app, wa):
         a key it now owns, and deleting what a screen remembers is how a sweep removes
         something that stopped being an orphan while somebody read the dialog.
         """
-        items, hosts, present = _orphan_inputs()
+        items, devices, present = _orphan_inputs()
         hist = getattr(wa, '_history', None)
         state = getattr(wa, '_check_state_store', None)
         deleted = {'history': 0, 'check_state': 0}
         series = 0
         for table, rows in _orphan_series().items():
-            for row in orphans.scan(rows, items, hosts, modules=present):
+            for row in orphans.scan(rows, items, devices, modules=present):
                 series += 1
                 try:
                     if table == 'history' and hist is not None:

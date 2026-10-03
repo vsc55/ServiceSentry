@@ -1,0 +1,739 @@
+{
+  "version": 16,
+  "_note": [
+    "Qué se pregunta de un componente de cada clase, y que no es lo mismo para un disco que",
+    "para una CPU. Un fichero y no una tabla de Python: añadir el formato de una tarjeta nueva",
+    "no tiene por qué ser una release, y quien lo sabe casi nunca es quien toca el código.",
+    "",
+    "Sube 'version' al cambiarlo. Manda la versión MAS ALTA entre este fichero y la que haya",
+    "guardada en la base de datos, así que una actualización del panel supera a un parche",
+    "local — y un parche local supera a lo que venía si nadie ha publicado nada más nuevo.",
+    "",
+    "El nombre de cada campo se traduce con la clave 'dcim_attr_<nombre>'; uno sin traducir se",
+    "enseña tal cual, que es peor que una palabra y mucho mejor que un hueco.",
+    "",
+    "El TAMANO no va aquí: es la columna 'size' del modelo, porque es el dato que se lee en",
+    "cada renglón y el que se copia a la pieza. Repetirlo serían dos sitios donde escribirlo.",
+    "",
+    "'size' dice cómo se llama la casilla de tamaño en cada clase y con qué ejemplo: la misma",
+    "casilla es la capacidad de un disco, los gigas de un DIMM y los vatios de una fuente, y una",
+    "palabra que vale para las tres no informa de ninguna. El ejemplo enseña la unidad.",
+    "",
+    "'unit_of' empareja un campo con la magnitud que mide: el desplegable sale pegado a ella, sin",
+    "etiqueta propia, porque el peso y su unidad son un solo dato y no dos. Igual 'size.units'.",
+    "",
+    "'column': true escribe en una COLUMNA del modelo en vez de en 'extra'. Es para lo que ya",
+    "tiene sitio propio —la disipación es la misma columna 'airflow' que la de un servidor— y",
+    "guardarlo dos veces serían dos respuestas a la misma pregunta que pueden discrepar.",
+    "",
+    "'type' puede ser: text, number, bool, date, enum (con 'enum': [...])."
+  ],
+  "common": [
+    {
+      "name": "airflow",
+      "type": "enum",
+      "column": true,
+      "enum": [
+        "none",
+        "passive",
+        "front-to-rear",
+        "rear-to-front",
+        "left-to-right",
+        "right-to-left",
+        "side-to-rear"
+      ]
+    },
+    {
+      "name": "weight",
+      "type": "number"
+    },
+    {
+      "name": "weight_unit",
+      "type": "enum",
+      "enum": [
+        "g",
+        "kg"
+      ],
+      "unit_of": "weight"
+    },
+    {
+      "name": "launched",
+      "type": "date",
+      "group": "lifecycle"
+    },
+    {
+      "name": "end_of_sale",
+      "type": "date",
+      "group": "lifecycle"
+    },
+    {
+      "name": "end_of_maintenance",
+      "type": "date",
+      "group": "lifecycle"
+    },
+    {
+      "name": "end_of_security",
+      "type": "date",
+      "group": "lifecycle"
+    },
+    {
+      "name": "last_contract_attach",
+      "type": "date",
+      "group": "lifecycle"
+    },
+    {
+      "name": "last_contract_renewal",
+      "type": "date",
+      "group": "lifecycle"
+    },
+    {
+      "name": "eol",
+      "type": "date",
+      "group": "lifecycle"
+    }
+  ],
+  "kinds": {
+    "disk": [
+      {
+        "name": "form_factor",
+        "type": "enum",
+        "enum": [
+          "3.5\"",
+          "2.5\""
+        ]
+      },
+      {
+        "name": "interface",
+        "type": "enum",
+        "enum": [
+          "IDE",
+          "SATA",
+          "SAS",
+          "SCSI",
+          "NVMe"
+        ]
+      },
+      {
+        "name": "rpm",
+        "type": "number"
+      },
+      {
+        "name": "interface_detail",
+        "type": "text"
+      },
+      {
+        "name": "cache",
+        "type": "text"
+      },
+      {
+        "name": "encryption",
+        "type": "enum",
+        "enum": [
+          "AES-128",
+          "AES-256",
+          "AES-XTS-128",
+          "AES-XTS-256",
+          "AES-CBC-128",
+          "AES-CBC-256",
+          "Twofish-256",
+          "Serpent-256",
+          "Camellia-128",
+          "Camellia-192",
+          "Camellia-256",
+          "AES-Twofish",
+          "AES-Twofish-Serpent"
+        ]
+      }
+    ],
+    "ssd": [
+      {
+        "name": "form_factor",
+        "type": "enum",
+        "enum": [
+          "2.5\"",
+          "3.5\"",
+          "M.2 2300",
+          "M.2 2242",
+          "M.2 2260",
+          "M.2 2280",
+          "M.2 22110",
+          "U.2",
+          "Add-In Card",
+          "External"
+        ]
+      },
+      {
+        "name": "interface",
+        "type": "enum",
+        "enum": [
+          "SATA",
+          "SAS",
+          "NVMe",
+          "PCIe",
+          "M.2",
+          "U.2",
+          "U.3"
+        ]
+      },
+      {
+        "name": "endurance_tbw",
+        "type": "number"
+      },
+      {
+        "name": "interface_detail",
+        "type": "text"
+      },
+      {
+        "name": "nand",
+        "type": "text"
+      },
+      {
+        "name": "cache",
+        "type": "text"
+      },
+      {
+        "name": "encryption",
+        "type": "enum",
+        "enum": [
+          "AES-128",
+          "AES-256",
+          "AES-XTS-128",
+          "AES-XTS-256",
+          "AES-CBC-128",
+          "AES-CBC-256",
+          "Twofish-256",
+          "Serpent-256",
+          "Camellia-128",
+          "Camellia-192",
+          "Camellia-256",
+          "AES-Twofish",
+          "AES-Twofish-Serpent"
+        ]
+      }
+    ],
+    "memory": [
+      {
+        "name": "ddr",
+        "type": "enum",
+        "enum": [
+          "DDR",
+          "DDR2",
+          "DDR3",
+          "DDR4",
+          "DDR5"
+        ]
+      },
+      {
+        "name": "form_factor",
+        "type": "enum",
+        "enum": [
+          "DIMM",
+          "SODIMM",
+          "MicroDIMM",
+          "CAMM2"
+        ]
+      },
+      {
+        "name": "module_type",
+        "type": "enum",
+        "enum": [
+          "UDIMM",
+          "RDIMM",
+          "LRDIMM",
+          "FBDIMM",
+          "NVDIMM"
+        ]
+      },
+      {
+        "name": "speed_mts",
+        "type": "number"
+      },
+      {
+        "name": "pc_rating",
+        "type": "enum",
+        "enum": [
+          "PC-1600 · DDR-200",
+          "PC-2100 · DDR-266",
+          "PC-2700 · DDR-333",
+          "PC-3200 · DDR-400",
+          "PC2-3200 · DDR2-400",
+          "PC2-4200 · DDR2-533",
+          "PC2-5300 · DDR2-667",
+          "PC2-6400 · DDR2-800",
+          "PC2-8500 · DDR2-1066",
+          "PC3-6400 · DDR3-800",
+          "PC3-8500 · DDR3-1066",
+          "PC3-10600 · DDR3-1333",
+          "PC3-12800 · DDR3-1600",
+          "PC3-14900 · DDR3-1866",
+          "PC3-17000 · DDR3-2133",
+          "PC4-17000 · DDR4-2133",
+          "PC4-19200 · DDR4-2400",
+          "PC4-21300 · DDR4-2666",
+          "PC4-23400 · DDR4-2933",
+          "PC4-25600 · DDR4-3200",
+          "PC5-38400 · DDR5-4800",
+          "PC5-41600 · DDR5-5200",
+          "PC5-44800 · DDR5-5600",
+          "PC5-48000 · DDR5-6000",
+          "PC5-51200 · DDR5-6400",
+          "PC5-54400 · DDR5-6800",
+          "PC5-57600 · DDR5-7200",
+          "PC5-60800 · DDR5-7600",
+          "PC5-64000 · DDR5-8000",
+          "PC5-70400 · DDR5-8800"
+        ]
+      },
+      {
+        "name": "cl",
+        "type": "number"
+      },
+      {
+        "name": "timings",
+        "type": "text"
+      },
+      {
+        "name": "ranks",
+        "type": "enum",
+        "enum": [
+          "1Rx8",
+          "1Rx4",
+          "2Rx8",
+          "2Rx4",
+          "4Rx4",
+          "8Rx4"
+        ]
+      },
+      {
+        "name": "voltage_v",
+        "type": "number"
+      },
+      {
+        "name": "ecc",
+        "type": "bool"
+      },
+      {
+        "name": "profile_xmp",
+        "type": "enum",
+        "enum": [
+          "XMP 2.0",
+          "XMP 3.0",
+          "AMD EXPO"
+        ]
+      },
+      {
+        "name": "height",
+        "type": "enum",
+        "enum": [
+          "Standard",
+          "Low profile",
+          "Very low profile (VLP)"
+        ]
+      }
+    ],
+    "cpu": [
+      {
+        "name": "segment",
+        "type": "enum",
+        "enum": [
+          "desktop",
+          "server",
+          "workstation",
+          "mobile",
+          "embedded"
+        ]
+      },
+      {
+        "name": "socket",
+        "type": "enum",
+        "enum": [
+          "Intel Socket 370",
+          "Intel Socket 423",
+          "Intel Socket 478",
+          "Intel Socket 479",
+          "Intel LGA 775",
+          "Intel LGA 771",
+          "Intel LGA 1366",
+          "Intel LGA 1156",
+          "Intel LGA 1155",
+          "Intel LGA 1567",
+          "Intel LGA 2011",
+          "Intel LGA 1150",
+          "Intel LGA 1151",
+          "Intel LGA 2011-3",
+          "Intel LGA 2066",
+          "Intel LGA 3647",
+          "Intel LGA 1200",
+          "Intel LGA 4189",
+          "Intel LGA 1700",
+          "Intel LGA 4677",
+          "Intel LGA 1851",
+          "Intel LGA 7529",
+          "AMD Socket A (462)",
+          "AMD Socket 754",
+          "AMD Socket 939",
+          "AMD Socket 940",
+          "AMD Socket AM2",
+          "AMD Socket F (1207)",
+          "AMD Socket AM2+",
+          "AMD Socket AM3",
+          "AMD Socket G34",
+          "AMD Socket C32",
+          "AMD Socket AM3+",
+          "AMD Socket FM1",
+          "AMD Socket FM2",
+          "AMD Socket FM2+",
+          "AMD Socket AM1",
+          "AMD Socket AM4",
+          "AMD Socket SP3",
+          "AMD Socket TR4",
+          "AMD Socket sTRX4",
+          "AMD Socket sWRX8",
+          "AMD Socket AM5",
+          "AMD Socket SP5",
+          "AMD Socket SP6",
+          "AMD Socket sTR5"
+        ]
+      },
+      {
+        "name": "sockets_max",
+        "type": "number"
+      },
+      {
+        "name": "cores",
+        "type": "number"
+      },
+      {
+        "name": "cores_p",
+        "type": "number"
+      },
+      {
+        "name": "cores_e",
+        "type": "number"
+      },
+      {
+        "name": "threads",
+        "type": "number"
+      },
+      {
+        "name": "base_ghz",
+        "type": "number"
+      },
+      {
+        "name": "turbo_ghz",
+        "type": "number"
+      },
+      {
+        "name": "tdp_w",
+        "type": "number"
+      },
+      {
+        "name": "tdp_max_w",
+        "type": "number"
+      },
+      {
+        "name": "lithography",
+        "type": "text"
+      },
+      {
+        "name": "cache_l2_mb",
+        "type": "number"
+      },
+      {
+        "name": "cache_l3_mb",
+        "type": "number"
+      },
+      {
+        "name": "memory_type",
+        "type": "text"
+      },
+      {
+        "name": "memory_channels",
+        "type": "number"
+      },
+      {
+        "name": "memory_max_gb",
+        "type": "number"
+      },
+      {
+        "name": "ecc",
+        "type": "bool"
+      },
+      {
+        "name": "igpu",
+        "type": "bool"
+      },
+      {
+        "name": "igpu_model",
+        "type": "text"
+      },
+      {
+        "name": "management",
+        "type": "enum",
+        "enum": [
+          "Intel vPro",
+          "AMD PRO"
+        ]
+      },
+      {
+        "name": "pcie_gen",
+        "type": "enum",
+        "enum": [
+          "3.0",
+          "4.0",
+          "5.0",
+          "6.0"
+        ]
+      },
+      {
+        "name": "pcie_lanes",
+        "type": "number"
+      }
+    ],
+    "gpu": [
+      {
+        "name": "interface",
+        "type": "enum",
+        "enum": [
+          "PCIe x8",
+          "PCIe x16",
+          "SXM",
+          "MXM",
+          "Thunderbolt"
+        ]
+      },
+      {
+        "name": "tdp_w",
+        "type": "number"
+      }
+    ],
+    "nic": [
+      {
+        "name": "interface",
+        "type": "enum",
+        "enum": [
+          "PCIe x1",
+          "PCIe x4",
+          "PCIe x8",
+          "PCIe x16",
+          "OCP NIC 3.0",
+          "OCP Mezzanine",
+          "M.2",
+          "Mini PCIe",
+          "USB-A",
+          "USB-C",
+          "Thunderbolt"
+        ]
+      },
+      {
+        "name": "ports",
+        "type": "number"
+      },
+      {
+        "name": "link_speed",
+        "type": "enum",
+        "enum": [
+          "10 Mbps",
+          "100 Mbps",
+          "1 Gbps",
+          "2.5 Gbps",
+          "5 Gbps",
+          "10 Gbps",
+          "25 Gbps",
+          "40 Gbps",
+          "50 Gbps",
+          "100 Gbps",
+          "200 Gbps",
+          "400 Gbps",
+          "800 Gbps"
+        ]
+      },
+      {
+        "name": "connector",
+        "type": "enum",
+        "enum": [
+          "RJ45",
+          "SFP",
+          "SFP+",
+          "SFP28",
+          "QSFP+",
+          "QSFP28"
+        ]
+      }
+    ],
+    "hba": [
+      {
+        "name": "interface",
+        "type": "enum",
+        "enum": [
+          "PCIe x4",
+          "PCIe x8",
+          "PCIe x16"
+        ]
+      },
+      {
+        "name": "ports",
+        "type": "number"
+      },
+      {
+        "name": "link_speed",
+        "type": "enum",
+        "enum": [
+          "SAS 3 Gb/s",
+          "SAS 6 Gb/s",
+          "SAS 12 Gb/s",
+          "SAS 24 Gb/s",
+          "FC 4 Gb/s",
+          "FC 8 Gb/s",
+          "FC 16 Gb/s",
+          "FC 32 Gb/s",
+          "FC 64 Gb/s"
+        ]
+      }
+    ],
+    "psu": [
+      {
+        "name": "form_factor",
+        "type": "enum",
+        "enum": [
+          "ATX",
+          "ATX12VO",
+          "SFX",
+          "SFX-L",
+          "TFX",
+          "Flex ATX",
+          "CRPS",
+          "external-desktop",
+          "external-wall",
+          "din-rail",
+          "open-frame",
+          "poe-injector"
+        ]
+      },
+      {
+        "name": "efficiency",
+        "type": "enum",
+        "enum": [
+          "80+ Bronze",
+          "80+ Silver",
+          "80+ Gold",
+          "80+ Platinum",
+          "80+ Titanium",
+          "DoE VI",
+          "CoC Tier 2"
+        ]
+      }
+    ],
+    "transceiver": [
+      {
+        "name": "form_factor",
+        "type": "enum",
+        "enum": [
+          "SFP",
+          "SFP+",
+          "SFP28",
+          "QSFP+",
+          "QSFP28",
+          "QSFP-DD"
+        ]
+      },
+      {
+        "name": "link_speed",
+        "type": "enum",
+        "enum": [
+          "10 Mbps",
+          "100 Mbps",
+          "1 Gbps",
+          "2.5 Gbps",
+          "5 Gbps",
+          "10 Gbps",
+          "25 Gbps",
+          "40 Gbps",
+          "50 Gbps",
+          "100 Gbps",
+          "200 Gbps",
+          "400 Gbps",
+          "800 Gbps"
+        ]
+      },
+      {
+        "name": "wavelength_nm",
+        "type": "number"
+      },
+      {
+        "name": "distance_m",
+        "type": "number"
+      }
+    ],
+    "battery": [
+      {
+        "name": "voltage_v",
+        "type": "number"
+      }
+    ],
+    "fan": [
+      {
+        "name": "rpm",
+        "type": "number"
+      },
+      {
+        "name": "cfm",
+        "type": "number"
+      }
+    ]
+  },
+  "size": {
+    "disk": {
+      "label": "capacity",
+      "hint": "4 TB",
+      "units": [
+        "MB",
+        "GB",
+        "TB",
+        "PB"
+      ]
+    },
+    "ssd": {
+      "label": "capacity",
+      "hint": "1.92 TB",
+      "units": [
+        "MB",
+        "GB",
+        "TB",
+        "PB"
+      ]
+    },
+    "memory": {
+      "label": "capacity",
+      "hint": "32 GB",
+      "units": [
+        "MB",
+        "GB",
+        "TB"
+      ]
+    },
+    "psu": {
+      "label": "power",
+      "hint": "750 W",
+      "units": [
+        "W",
+        "kW"
+      ]
+    },
+    "battery": {
+      "label": "capacity",
+      "hint": "9 Ah",
+      "units": [
+        "Ah"
+      ]
+    },
+    "gpu": {
+      "label": "capacity",
+      "hint": "24 GB",
+      "units": [
+        "MB",
+        "GB"
+      ]
+    }
+  }
+}

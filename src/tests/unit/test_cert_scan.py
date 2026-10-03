@@ -17,9 +17,9 @@ class TestEnumerate:
         assert ts['b']['port'] == 443 and ts['b']['warn_days'] == 30
         assert ts['b']['server_name'] == 'b.example'          # sni defaults to host
 
-    def test_host_uid_resolved_via_store(self):
-        cfg = {'ssl_cert': {'list': {'h': {'host_uid': 'uid-1', 'port': 443}}}}
-        ts = enumerate_targets(cfg, host_address=lambda uid: '10.0.0.5' if uid == 'uid-1' else None)
+    def test_device_uid_resolved_via_store(self):
+        cfg = {'ssl_cert': {'list': {'h': {'device_uid': 'uid-1', 'port': 443}}}}
+        ts = enumerate_targets(cfg, device_address=lambda uid: '10.0.0.5' if uid == 'uid-1' else None)
         assert ts[0]['host'] == '10.0.0.5'
 
     def test_disabled_skipped_and_per_item_warn(self):

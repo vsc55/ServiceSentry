@@ -93,15 +93,15 @@ class TestNotifier:
         monitor._process_module_result('cpu', rmc)
         assert added == [('down', 'cpu', 'PVE02', 'CPU high')]
 
-    def test_item_label_resolves_host_uid(self, monitor):
-        """The item column shows the bound host's friendly name, not the item/host UID."""
-        monitor._host_name_map = {'uid-1': 'NS1'}
-        # A check item bound to a host via host_uid in the module config → host name.
+    def test_item_label_resolves_device_uid(self, monitor):
+        """The item column shows the bound device's friendly name, not the item/device UID."""
+        monitor._device_name_map = {'uid-1': 'NS1'}
+        # A check item bound to a device via device_uid in the module config → device name.
         monitor.config_modules = type('C', (), {
             'get_conf': lambda self, path: (
-                {'list': {'chk-1': {'host_uid': 'uid-1'}}} if path == ['cpu'] else {})})()
+                {'list': {'chk-1': {'device_uid': 'uid-1'}}} if path == ['cpu'] else {})})()
         assert monitor._item_label('cpu', 'chk-1') == 'NS1'
-        # The key itself is a host_uid (host-bound base modules) → host name.
+        # The key itself is a device_uid (device-bound base modules) → device name.
         assert monitor._item_label('cpu', 'uid-1') == 'NS1'
         # Unknown → the key itself.
         assert monitor._item_label('cpu', 'nope') == 'nope'
@@ -297,17 +297,17 @@ class TestCheckStatePersistence:
         assert monitor._check_state_store.get_all() == {}
 
     def test_maintenance_purges_live_state(self, monitor):
-        # An item bound to host H1, with a recorded live status.
-        monitor.config_modules.data = {'mod': {'list': {'item1': {'host_uid': 'H1'}}}}
+        # An item bound to device H1, with a recorded live status.
+        monitor.config_modules.data = {'mod': {'list': {'item1': {'device_uid': 'H1'}}}}
         monitor._process_module_result('mod', self._result('item1', True, 'ok'))
         monitor.status.save()
         assert ('mod', 'item1', '') in monitor._check_state_store.get_all()
 
         # H1 enters maintenance → its live state must be purged (history kept).
-        class _FakeHosts:
+        class _FakeDevices:
             def list(self, decrypt=False):   # noqa: D401, ARG002
                 return [{'uid': 'H1', 'maintenance': True}]
-        monitor._hosts_store = _FakeHosts()
+        monitor._devices_store = _FakeDevices()
         monitor.purge_maintenance_states()
 
         assert ('mod', 'item1', '') not in monitor._check_state_store.get_all()

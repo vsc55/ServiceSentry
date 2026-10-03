@@ -1,0 +1,1199 @@
+{
+  "version": 5,
+  "racks": [
+    {
+      "model": {
+        "es_ES": "Rack 42U",
+        "en_EN": "Rack 42U"
+      },
+      "u": 42,
+      "width": 600,
+      "depth": 1000,
+      "height": 2000
+    },
+    {
+      "model": {
+        "es_ES": "Rack 47U",
+        "en_EN": "Rack 47U"
+      },
+      "u": 47,
+      "width": 600,
+      "depth": 1200,
+      "height": 2250
+    },
+    {
+      "model": {
+        "es_ES": "Rack 24U",
+        "en_EN": "Rack 24U"
+      },
+      "u": 24,
+      "width": 600,
+      "depth": 800,
+      "height": 1200
+    },
+    {
+      "model": {
+        "es_ES": "Rack 12U mural",
+        "en_EN": "12U wall-mount rack"
+      },
+      "u": 12,
+      "width": 600,
+      "depth": 600,
+      "height": 640
+    },
+    {
+      "model": {
+        "es_ES": "Rack 9U mural",
+        "en_EN": "9U wall-mount rack"
+      },
+      "u": 9,
+      "width": 600,
+      "depth": 450,
+      "height": 500
+    }
+  ],
+  "devices": [
+    {
+      "model": {
+        "es_ES": "Servidor 1U",
+        "en_EN": "1U server"
+      },
+      "u": 1,
+      "ports": {
+        "interfaces": {
+          "1000base-t": 2
+        },
+        "power-ports": {
+          "": 2
+        }
+      }
+    },
+    {
+      "model": {
+        "es_ES": "Servidor 2U",
+        "en_EN": "2U server"
+      },
+      "u": 2,
+      "ports": {
+        "interfaces": {
+          "1000base-t": 4
+        },
+        "power-ports": {
+          "": 2
+        }
+      }
+    },
+    {
+      "model": {
+        "es_ES": "Servidor 4U",
+        "en_EN": "4U server"
+      },
+      "u": 4,
+      "ports": {
+        "interfaces": {
+          "1000base-t": 4
+        },
+        "power-ports": {
+          "": 2
+        }
+      }
+    },
+    {
+      "model": {
+        "es_ES": "Switch 24 puertos",
+        "en_EN": "24-port switch"
+      },
+      "u": 1,
+      "ports": {
+        "interfaces": {
+          "1000base-t": 24
+        },
+        "power-ports": {
+          "": 1
+        }
+      }
+    },
+    {
+      "model": {
+        "es_ES": "Switch 48 puertos",
+        "en_EN": "48-port switch"
+      },
+      "u": 1,
+      "ports": {
+        "interfaces": {
+          "1000base-t": 48
+        },
+        "power-ports": {
+          "": 1
+        }
+      }
+    },
+    {
+      "model": {
+        "es_ES": "Switch 8 puertos",
+        "en_EN": "8-port switch"
+      },
+      "u": 1,
+      "ports": {
+        "interfaces": {
+          "1000base-t": 8
+        },
+        "power-ports": {
+          "": 1
+        }
+      }
+    },
+    {
+      "model": {
+        "es_ES": "Router",
+        "en_EN": "Router"
+      },
+      "u": 1,
+      "ports": {
+        "interfaces": {
+          "1000base-t": 4
+        },
+        "power-ports": {
+          "": 1
+        }
+      },
+      "kind": "router"
+    },
+    {
+      "model": {
+        "es_ES": "Cortafuegos",
+        "en_EN": "Firewall"
+      },
+      "u": 1,
+      "ports": {
+        "interfaces": {
+          "1000base-t": 6
+        },
+        "power-ports": {
+          "": 2
+        }
+      },
+      "kind": "firewall"
+    },
+    {
+      "model": {
+        "es_ES": "Cabina de disco 2U",
+        "en_EN": "2U disk array"
+      },
+      "u": 2,
+      "ports": {
+        "interfaces": {
+          "10gbase-x-sfpp": 4
+        },
+        "power-ports": {
+          "": 2
+        }
+      },
+      "kind": "storage"
+    },
+    {
+      "model": {
+        "es_ES": "Panel de parcheo 24",
+        "en_EN": "24-port patch panel"
+      },
+      "u": 1,
+      "ports": {
+        "front-ports": {
+          "8p8c": 24
+        },
+        "rear-ports": {
+          "8p8c": 24
+        }
+      },
+      "powered": false
+    },
+    {
+      "model": {
+        "es_ES": "Panel de parcheo 48",
+        "en_EN": "48-port patch panel"
+      },
+      "u": 2,
+      "ports": {
+        "front-ports": {
+          "8p8c": 48
+        },
+        "rear-ports": {
+          "8p8c": 48
+        }
+      },
+      "powered": false
+    },
+    {
+      "model": {
+        "es_ES": "Panel de fibra 24",
+        "en_EN": "24-port fibre panel"
+      },
+      "u": 1,
+      "ports": {
+        "front-ports": {
+          "lc": 24
+        },
+        "rear-ports": {
+          "lc": 24
+        }
+      },
+      "kind": "fiber_panel",
+      "powered": false
+    },
+    {
+      "model": {
+        "es_ES": "Regleta 8 tomas",
+        "en_EN": "8-outlet power strip"
+      },
+      "u": 1,
+      "ports": {
+        "power-outlets": {
+          "iec-60320-c13": 8
+        },
+        "power-ports": {
+          "": 1
+        }
+      }
+    },
+    {
+      "model": {
+        "es_ES": "Regleta 16 tomas",
+        "en_EN": "16-outlet power strip"
+      },
+      "u": 1,
+      "ports": {
+        "power-outlets": {
+          "iec-60320-c13": 16
+        },
+        "power-ports": {
+          "": 1
+        }
+      }
+    },
+    {
+      "model": {
+        "es_ES": "Regleta vertical 24 tomas",
+        "en_EN": "24-outlet vertical power strip"
+      },
+      "u": 0,
+      "ports": {
+        "power-outlets": {
+          "iec-60320-c13": 24
+        },
+        "power-ports": {
+          "": 1
+        }
+      }
+    },
+    {
+      "model": {
+        "es_ES": "SAI 1U",
+        "en_EN": "1U UPS"
+      },
+      "u": 1,
+      "ports": {
+        "power-outlets": {
+          "iec-60320-c13": 4
+        },
+        "power-ports": {
+          "": 1
+        }
+      },
+      "kind": "ups"
+    },
+    {
+      "model": {
+        "es_ES": "SAI 2U",
+        "en_EN": "2U UPS"
+      },
+      "u": 2,
+      "ports": {
+        "power-outlets": {
+          "iec-60320-c13": 8
+        },
+        "power-ports": {
+          "": 1
+        }
+      },
+      "kind": "ups"
+    },
+    {
+      "model": {
+        "es_ES": "SAI 3U",
+        "en_EN": "3U UPS"
+      },
+      "u": 3,
+      "ports": {
+        "power-outlets": {
+          "iec-60320-c13": 8
+        },
+        "power-ports": {
+          "": 1
+        }
+      },
+      "kind": "ups"
+    },
+    {
+      "model": {
+        "es_ES": "Bandeja voladiza 1U",
+        "en_EN": "1U cantilever shelf"
+      },
+      "u": 1,
+      "kind": "shelf",
+      "powered": false,
+      "full_depth": false
+    },
+    {
+      "model": {
+        "es_ES": "Bandeja voladiza 2U",
+        "en_EN": "2U cantilever shelf"
+      },
+      "u": 2,
+      "kind": "shelf",
+      "powered": false,
+      "full_depth": false
+    },
+    {
+      "model": {
+        "es_ES": "Bandeja fija 1U (4 puntos)",
+        "en_EN": "1U fixed shelf (4-post)"
+      },
+      "u": 1,
+      "kind": "shelf",
+      "powered": false
+    },
+    {
+      "model": {
+        "es_ES": "Bandeja fija 2U (4 puntos)",
+        "en_EN": "2U fixed shelf (4-post)"
+      },
+      "u": 2,
+      "kind": "shelf",
+      "powered": false
+    },
+    {
+      "model": {
+        "es_ES": "Bandeja deslizante 1U",
+        "en_EN": "1U sliding shelf"
+      },
+      "u": 1,
+      "kind": "shelf",
+      "powered": false
+    },
+    {
+      "model": {
+        "es_ES": "Tapa ciega 1U",
+        "en_EN": "1U blanking plate"
+      },
+      "u": 1,
+      "kind": "blank",
+      "powered": false
+    },
+    {
+      "model": {
+        "es_ES": "Tapa ciega 2U",
+        "en_EN": "2U blanking plate"
+      },
+      "u": 2,
+      "kind": "blank",
+      "powered": false
+    },
+    {
+      "model": {
+        "es_ES": "Cajetín pasahilos",
+        "en_EN": "Cable management panel"
+      },
+      "u": 1,
+      "kind": "other",
+      "powered": false
+    },
+    {
+      "model": {
+        "es_ES": "KVM de consola",
+        "en_EN": "Console KVM"
+      },
+      "u": 1,
+      "ports": {
+        "interfaces": {
+          "1000base-t": 1
+        },
+        "power-ports": {
+          "": 1
+        }
+      },
+      "kind": "kvm"
+    }
+  ],
+  "modules": [
+    {
+      "model": {
+        "es_ES": "Transceptor SFP 1G",
+        "en_EN": "1G SFP transceiver"
+      },
+      "slug": "generic-sfp-1g"
+    },
+    {
+      "model": {
+        "es_ES": "Transceptor SFP+ 10G",
+        "en_EN": "10G SFP+ transceiver"
+      },
+      "slug": "generic-sfpp-10g"
+    },
+    {
+      "model": {
+        "es_ES": "Fuente redundante",
+        "en_EN": "Redundant power supply"
+      },
+      "slug": "generic-psu",
+      "kind": "psu"
+    },
+    {
+      "model": {
+        "es_ES": "Tarjeta de red 4x1G",
+        "en_EN": "4x1G network card"
+      },
+      "slug": "generic-nic-4x1g",
+      "kind": "nic"
+    }
+  ],
+  "platforms": [
+    {
+      "name": "Windows 10 Home",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 10",
+      "extra": {
+        "end_of_security": "2025-10-14",
+        "eol": "2025-10-14",
+        "launched": "2015-07-29"
+      },
+      "notes": {
+        "es_ES": "Fecha de la 22H2, que es la última de Windows 10.",
+        "en_EN": "Date for 22H2, which is the last Windows 10 version."
+      }
+    },
+    {
+      "name": "Windows 10 Pro",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 10",
+      "extra": {
+        "end_of_security": "2025-10-14",
+        "eol": "2025-10-14",
+        "launched": "2015-07-29"
+      },
+      "notes": {
+        "es_ES": "Fecha de la 22H2, que es la última de Windows 10.",
+        "en_EN": "Date for 22H2, which is the last Windows 10 version."
+      }
+    },
+    {
+      "name": "Windows 10 Enterprise",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 10",
+      "extra": {
+        "end_of_security": "2025-10-14",
+        "eol": "2025-10-14",
+        "launched": "2015-07-29"
+      },
+      "notes": {
+        "es_ES": "Fecha de la 22H2, que es la última de Windows 10.",
+        "en_EN": "Date for 22H2, which is the last Windows 10 version."
+      }
+    },
+    {
+      "name": "Windows 10 Education",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 10",
+      "extra": {
+        "end_of_security": "2025-10-14",
+        "eol": "2025-10-14",
+        "launched": "2015-07-29"
+      },
+      "notes": {
+        "es_ES": "Fecha de la 22H2, que es la última de Windows 10.",
+        "en_EN": "Date for 22H2, which is the last Windows 10 version."
+      }
+    },
+    {
+      "name": "Windows 10 IoT Enterprise",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 10",
+      "extra": {
+        "end_of_security": "2025-10-14",
+        "eol": "2025-10-14",
+        "launched": "2015-07-29"
+      },
+      "notes": {
+        "es_ES": "Fecha de la 22H2, que es la última de Windows 10.",
+        "en_EN": "Date for 22H2, which is the last Windows 10 version."
+      }
+    },
+    {
+      "name": "Windows 10 Enterprise LTSC",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 10",
+      "extra": {
+        "end_of_maintenance": "2026-01-13",
+        "end_of_security": "2027-01-12",
+        "eol": "2027-01-12",
+        "launched": "2021-11-16"
+      },
+      "notes": {
+        "es_ES": "Fechas de la LTSC 2021, la última de Windows 10.",
+        "en_EN": "Dates for LTSC 2021, the last Windows 10 LTSC."
+      }
+    },
+    {
+      "name": "Windows 10 IoT Enterprise LTSC",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 10",
+      "extra": {
+        "end_of_maintenance": "2027-01-12",
+        "end_of_security": "2032-01-13",
+        "eol": "2032-01-13",
+        "launched": "2021-11-16"
+      },
+      "notes": {
+        "es_ES": "La IoT LTSC 2021 tiene diez años, no cinco: es la que se pone en un equipo que no se va a tocar.",
+        "en_EN": "IoT LTSC 2021 runs ten years, not five: it is what goes on a machine nobody is going to touch."
+      }
+    },
+    {
+      "name": "Windows 11 Home",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 11",
+      "extra": {
+        "launched": "2021-10-05"
+      },
+      "notes": {
+        "es_ES": "El canal anual marca una fecha por versión (22H2, 23H2, 24H2…), no una por producto. Escribe aquí la de la que tengas desplegada.",
+        "en_EN": "The annual channel sets one date per version (22H2, 23H2, 24H2…), not one per product. Write down the one you have deployed."
+      }
+    },
+    {
+      "name": "Windows 11 Pro",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 11",
+      "extra": {
+        "launched": "2021-10-05"
+      },
+      "notes": {
+        "es_ES": "El canal anual marca una fecha por versión (22H2, 23H2, 24H2…), no una por producto. Escribe aquí la de la que tengas desplegada.",
+        "en_EN": "The annual channel sets one date per version (22H2, 23H2, 24H2…), not one per product. Write down the one you have deployed."
+      }
+    },
+    {
+      "name": "Windows 11 Enterprise",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 11",
+      "extra": {
+        "launched": "2021-10-05"
+      },
+      "notes": {
+        "es_ES": "El canal anual marca una fecha por versión (22H2, 23H2, 24H2…), no una por producto. Escribe aquí la de la que tengas desplegada.",
+        "en_EN": "The annual channel sets one date per version (22H2, 23H2, 24H2…), not one per product. Write down the one you have deployed."
+      }
+    },
+    {
+      "name": "Windows 11 Education",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 11",
+      "extra": {
+        "launched": "2021-10-05"
+      },
+      "notes": {
+        "es_ES": "El canal anual marca una fecha por versión (22H2, 23H2, 24H2…), no una por producto. Escribe aquí la de la que tengas desplegada.",
+        "en_EN": "The annual channel sets one date per version (22H2, 23H2, 24H2…), not one per product. Write down the one you have deployed."
+      }
+    },
+    {
+      "name": "Windows 11 IoT Enterprise",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 11",
+      "extra": {
+        "launched": "2021-10-05"
+      },
+      "notes": {
+        "es_ES": "El canal anual marca una fecha por versión (22H2, 23H2, 24H2…), no una por producto. Escribe aquí la de la que tengas desplegada.",
+        "en_EN": "The annual channel sets one date per version (22H2, 23H2, 24H2…), not one per product. Write down the one you have deployed."
+      }
+    },
+    {
+      "name": "Windows 11 Enterprise LTSC",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 11",
+      "extra": {
+        "end_of_security": "2029-10-09",
+        "eol": "2029-10-09",
+        "launched": "2024-10-01"
+      },
+      "notes": {
+        "es_ES": "Fechas de la LTSC 2024.",
+        "en_EN": "Dates for LTSC 2024."
+      }
+    },
+    {
+      "name": "Windows 11 IoT Enterprise LTSC",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows 11",
+      "extra": {
+        "end_of_security": "2034-10-10",
+        "eol": "2034-10-10",
+        "launched": "2024-10-01"
+      },
+      "notes": {
+        "es_ES": "La IoT LTSC 2024 tiene diez años.",
+        "en_EN": "IoT LTSC 2024 runs ten years."
+      }
+    },
+    {
+      "name": "Windows Server 2012 R2 Standard",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows Server 2012 R2",
+      "extra": {
+        "end_of_maintenance": "2018-10-09",
+        "eol": "2023-10-10",
+        "launched": "2013-11-25"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
+        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
+      }
+    },
+    {
+      "name": "Windows Server 2012 R2 Datacenter",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows Server 2012 R2",
+      "extra": {
+        "end_of_maintenance": "2018-10-09",
+        "eol": "2023-10-10",
+        "launched": "2013-11-25"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
+        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
+      }
+    },
+    {
+      "name": "Windows Server 2016 Standard",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows Server 2016",
+      "extra": {
+        "end_of_maintenance": "2022-01-11",
+        "eol": "2027-01-12",
+        "launched": "2016-10-15"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
+        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
+      }
+    },
+    {
+      "name": "Windows Server 2016 Datacenter",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows Server 2016",
+      "extra": {
+        "end_of_maintenance": "2022-01-11",
+        "eol": "2027-01-12",
+        "launched": "2016-10-15"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
+        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
+      }
+    },
+    {
+      "name": "Windows Server 2019 Standard",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows Server 2019",
+      "extra": {
+        "end_of_maintenance": "2024-01-09",
+        "eol": "2029-01-09",
+        "launched": "2018-11-13"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
+        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
+      }
+    },
+    {
+      "name": "Windows Server 2019 Datacenter",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows Server 2019",
+      "extra": {
+        "end_of_maintenance": "2024-01-09",
+        "eol": "2029-01-09",
+        "launched": "2018-11-13"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
+        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
+      }
+    },
+    {
+      "name": "Windows Server 2022 Standard",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows Server 2022",
+      "extra": {
+        "end_of_maintenance": "2026-10-13",
+        "eol": "2031-10-14",
+        "launched": "2021-08-18"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
+        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
+      }
+    },
+    {
+      "name": "Windows Server 2022 Datacenter",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows Server 2022",
+      "extra": {
+        "end_of_maintenance": "2026-10-13",
+        "eol": "2031-10-14",
+        "launched": "2021-08-18"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
+        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
+      }
+    },
+    {
+      "name": "Windows Server 2025 Standard",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows Server 2025",
+      "extra": {
+        "end_of_maintenance": "2029-10-09",
+        "eol": "2034-10-10",
+        "launched": "2024-11-01"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
+        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
+      }
+    },
+    {
+      "name": "Windows Server 2025 Datacenter",
+      "kind": "os",
+      "brand": "Microsoft",
+      "family": "Windows Server 2025",
+      "extra": {
+        "end_of_maintenance": "2029-10-09",
+        "eol": "2034-10-10",
+        "launched": "2024-11-01"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte estándar; \"fin de soporte\", el del extendido.",
+        "en_EN": "\"End of maintenance\" is the end of mainstream support; \"end of support\", the end of extended support."
+      }
+    },
+    {
+      "name": "Debian 10",
+      "kind": "os",
+      "brand": "Debian",
+      "family": "Debian",
+      "extra": {
+        "end_of_security": "2022-09-10",
+        "eol": "2024-06-30",
+        "launched": "2019-07-06"
+      },
+      "notes": {
+        "es_ES": "\"Fin de parches\" es el del equipo de seguridad; \"fin de soporte\", el de Debian LTS.",
+        "en_EN": "\"End of security updates\" is the security team's; \"end of support\", Debian LTS's."
+      }
+    },
+    {
+      "name": "Debian 11",
+      "kind": "os",
+      "brand": "Debian",
+      "family": "Debian",
+      "extra": {
+        "end_of_security": "2024-08-14",
+        "eol": "2026-08-31",
+        "launched": "2021-08-14"
+      },
+      "notes": {
+        "es_ES": "\"Fin de parches\" es el del equipo de seguridad; \"fin de soporte\", el de Debian LTS.",
+        "en_EN": "\"End of security updates\" is the security team's; \"end of support\", Debian LTS's."
+      }
+    },
+    {
+      "name": "Debian 12",
+      "kind": "os",
+      "brand": "Debian",
+      "family": "Debian",
+      "extra": {
+        "end_of_security": "2026-06-30",
+        "eol": "2028-06-30",
+        "launched": "2023-06-10"
+      },
+      "notes": {
+        "es_ES": "\"Fin de parches\" es el del equipo de seguridad; \"fin de soporte\", el de Debian LTS.",
+        "en_EN": "\"End of security updates\" is the security team's; \"end of support\", Debian LTS's."
+      }
+    },
+    {
+      "name": "Debian 13",
+      "kind": "os",
+      "brand": "Debian",
+      "family": "Debian",
+      "extra": {
+        "eol": "2030-06-30",
+        "launched": "2025-08-09"
+      },
+      "notes": {
+        "es_ES": "El fin de LTS lo publica el proyecto; el del equipo de seguridad se fija un año después de que salga la siguiente.",
+        "en_EN": "The LTS end is published by the project; the security team's is set one year after the next release ships."
+      }
+    },
+    {
+      "name": "Ubuntu 20.04 LTS",
+      "kind": "os",
+      "brand": "Canonical",
+      "family": "Ubuntu",
+      "extra": {
+        "end_of_security": "2025-05-29",
+        "eol": "2030-04-30",
+        "launched": "2020-04-23"
+      },
+      "notes": {
+        "es_ES": "\"Fin de parches\" es el mantenimiento estándar (cinco años); \"fin de soporte\", el de Ubuntu Pro / ESM (diez).",
+        "en_EN": "\"End of security updates\" is standard maintenance (five years); \"end of support\", Ubuntu Pro / ESM (ten)."
+      }
+    },
+    {
+      "name": "Ubuntu 22.04 LTS",
+      "kind": "os",
+      "brand": "Canonical",
+      "family": "Ubuntu",
+      "extra": {
+        "end_of_security": "2027-04-01",
+        "eol": "2032-04-01",
+        "launched": "2022-04-21"
+      },
+      "notes": {
+        "es_ES": "\"Fin de parches\" es el mantenimiento estándar (cinco años); \"fin de soporte\", el de Ubuntu Pro / ESM (diez).",
+        "en_EN": "\"End of security updates\" is standard maintenance (five years); \"end of support\", Ubuntu Pro / ESM (ten)."
+      }
+    },
+    {
+      "name": "Ubuntu 24.04 LTS",
+      "kind": "os",
+      "brand": "Canonical",
+      "family": "Ubuntu",
+      "extra": {
+        "end_of_security": "2029-04-25",
+        "eol": "2034-04-25",
+        "launched": "2024-04-25"
+      },
+      "notes": {
+        "es_ES": "\"Fin de parches\" es el mantenimiento estándar (cinco años); \"fin de soporte\", el de Ubuntu Pro / ESM (diez).",
+        "en_EN": "\"End of security updates\" is standard maintenance (five years); \"end of support\", Ubuntu Pro / ESM (ten)."
+      }
+    },
+    {
+      "name": "Ubuntu 26.04 LTS",
+      "kind": "os",
+      "brand": "Canonical",
+      "family": "Ubuntu",
+      "extra": {
+        "end_of_security": "2031-04-01",
+        "eol": "2036-04-01",
+        "launched": "2026-04-23"
+      },
+      "notes": {
+        "es_ES": "Fechas de la política de LTS —cinco años, y diez con Pro— sobre la fecha de lanzamiento prevista. Ajústalas si Canonical las mueve.",
+        "en_EN": "Dates from the LTS policy — five years, ten with Pro — applied to the scheduled release date. Adjust them if Canonical moves them."
+      }
+    },
+    {
+      "name": "Proxmox VE 6",
+      "kind": "hypervisor",
+      "brand": "Proxmox",
+      "family": "Proxmox VE",
+      "extra": {
+        "eol": "2022-07-31",
+        "launched": "2019-07-16"
+      },
+      "notes": {
+        "es_ES": "Cada Proxmox va sobre la Debian de su época y se acaba con ella: el fin de soporte lo anuncia Proxmox al sacar la siguiente.",
+        "en_EN": "Each Proxmox rides the Debian of its day and ends with it: the end of support is announced when the next one ships."
+      }
+    },
+    {
+      "name": "Proxmox VE 7",
+      "kind": "hypervisor",
+      "brand": "Proxmox",
+      "family": "Proxmox VE",
+      "extra": {
+        "eol": "2024-07-31",
+        "launched": "2021-07-06"
+      },
+      "notes": {
+        "es_ES": "Cada Proxmox va sobre la Debian de su época y se acaba con ella: el fin de soporte lo anuncia Proxmox al sacar la siguiente.",
+        "en_EN": "Each Proxmox rides the Debian of its day and ends with it: the end of support is announced when the next one ships."
+      }
+    },
+    {
+      "name": "Proxmox VE 8",
+      "kind": "hypervisor",
+      "brand": "Proxmox",
+      "family": "Proxmox VE",
+      "extra": {
+        "eol": "2026-07-31",
+        "launched": "2023-06-22"
+      },
+      "notes": {
+        "es_ES": "Cada Proxmox va sobre la Debian de su época y se acaba con ella: el fin de soporte lo anuncia Proxmox al sacar la siguiente.",
+        "en_EN": "Each Proxmox rides the Debian of its day and ends with it: the end of support is announced when the next one ships."
+      }
+    },
+    {
+      "name": "Proxmox VE 9",
+      "kind": "hypervisor",
+      "brand": "Proxmox",
+      "family": "Proxmox VE",
+      "extra": {
+        "launched": "2025-08-05"
+      },
+      "notes": {
+        "es_ES": "Su fin de soporte se anunciará al salir la siguiente. Cada Proxmox va sobre la Debian de su época y se acaba con ella: el fin de soporte lo anuncia Proxmox al sacar la siguiente.",
+        "en_EN": "Its end of support will be announced when the next one ships. Each Proxmox rides the Debian of its day and ends with it."
+      }
+    },
+    {
+      "name": "VMware ESXi 6.0",
+      "kind": "hypervisor",
+      "brand": "VMware",
+      "family": "VMware ESXi",
+      "extra": {
+        "end_of_maintenance": "2020-03-12",
+        "eol": "2022-03-12",
+        "launched": "2015-03-12"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
+        "en_EN": "\"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance — when there is no longer anyone to ask."
+      }
+    },
+    {
+      "name": "VMware ESXi 6.5",
+      "kind": "hypervisor",
+      "brand": "VMware",
+      "family": "VMware ESXi",
+      "extra": {
+        "end_of_maintenance": "2022-10-15",
+        "eol": "2023-11-15",
+        "launched": "2016-11-15"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
+        "en_EN": "\"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance — when there is no longer anyone to ask."
+      }
+    },
+    {
+      "name": "VMware ESXi 6.7",
+      "kind": "hypervisor",
+      "brand": "VMware",
+      "family": "VMware ESXi",
+      "extra": {
+        "end_of_maintenance": "2022-10-15",
+        "eol": "2023-11-15",
+        "launched": "2018-04-17"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
+        "en_EN": "\"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance — when there is no longer anyone to ask."
+      }
+    },
+    {
+      "name": "VMware ESXi 7.0",
+      "kind": "hypervisor",
+      "brand": "VMware",
+      "family": "VMware ESXi",
+      "extra": {
+        "end_of_maintenance": "2025-04-02",
+        "eol": "2027-04-02",
+        "launched": "2020-04-02"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
+        "en_EN": "\"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance — when there is no longer anyone to ask."
+      }
+    },
+    {
+      "name": "VMware ESXi 8.0",
+      "kind": "hypervisor",
+      "brand": "VMware",
+      "family": "VMware ESXi",
+      "extra": {
+        "end_of_maintenance": "2027-10-11",
+        "eol": "2029-10-11",
+        "launched": "2022-10-11"
+      },
+      "notes": {
+        "es_ES": "\"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
+        "en_EN": "\"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance — when there is no longer anyone to ask."
+      }
+    },
+    {
+      "name": "VMware ESXi 9.0",
+      "kind": "hypervisor",
+      "brand": "VMware",
+      "family": "VMware ESXi",
+      "extra": {
+        "launched": "2025-06-17"
+      },
+      "notes": {
+        "es_ES": "Broadcom publica sus fechas en la matriz de ciclo de vida; escríbelas cuando las fije. \"Fin de mantenimiento\" es el fin del soporte general; \"fin de soporte\", el fin de la guía técnica, que es cuando deja de haber a quién preguntar.",
+        "en_EN": "Broadcom publishes its dates in the lifecycle matrix; write them down once they are set. \"End of maintenance\" is the end of general support; \"end of support\", the end of technical guidance."
+      }
+    },
+    {
+      "name": "Synology DSM 6.0",
+      "kind": "appliance",
+      "brand": "Synology",
+      "family": "Synology DSM",
+      "extra": {
+        "launched": "2016-03-23"
+      },
+      "notes": {
+        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
+        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
+      }
+    },
+    {
+      "name": "Synology DSM 6.1",
+      "kind": "appliance",
+      "brand": "Synology",
+      "family": "Synology DSM",
+      "extra": {
+        "launched": "2017-02-22"
+      },
+      "notes": {
+        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
+        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
+      }
+    },
+    {
+      "name": "Synology DSM 6.2",
+      "kind": "appliance",
+      "brand": "Synology",
+      "family": "Synology DSM",
+      "extra": {
+        "launched": "2018-05-24"
+      },
+      "notes": {
+        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
+        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
+      }
+    },
+    {
+      "name": "Synology DSM 7.0",
+      "kind": "appliance",
+      "brand": "Synology",
+      "family": "Synology DSM",
+      "extra": {
+        "launched": "2021-06-29"
+      },
+      "notes": {
+        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
+        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
+      }
+    },
+    {
+      "name": "Synology DSM 7.1",
+      "kind": "appliance",
+      "brand": "Synology",
+      "family": "Synology DSM",
+      "extra": {
+        "launched": "2022-05-17"
+      },
+      "notes": {
+        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
+        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
+      }
+    },
+    {
+      "name": "Synology DSM 7.2",
+      "kind": "appliance",
+      "brand": "Synology",
+      "family": "Synology DSM",
+      "extra": {
+        "launched": "2023-05-17"
+      },
+      "notes": {
+        "es_ES": "Synology no publica un fin de soporte por versión de DSM: lo publica POR MODELO, y una versión sigue recibiendo parches mientras algún equipo la lleve. Escribe aquí la del tuyo.",
+        "en_EN": "Synology does not publish an end of support per DSM version: it publishes one PER MODEL, and a version keeps getting patches for as long as some box still runs it. Write down the one for yours."
+      }
+    },
+    {
+      "name": "RouterOS 6",
+      "kind": "firmware",
+      "brand": "MikroTik",
+      "family": "RouterOS",
+      "extra": {
+        "launched": "2013-05-20"
+      },
+      "notes": {
+        "es_ES": "MikroTik no publica un fin por versión: la 6 y la 7 conviven y las dos siguen recibiendo builds. Escribe la tuya si tu contrato dice otra cosa.",
+        "en_EN": "MikroTik publishes no per-version end: 6 and 7 coexist and both still get builds. Write down yours if your contract says otherwise."
+      }
+    },
+    {
+      "name": "RouterOS 7",
+      "kind": "firmware",
+      "brand": "MikroTik",
+      "family": "RouterOS",
+      "extra": {
+        "launched": "2021-11-17"
+      },
+      "notes": {
+        "es_ES": "MikroTik no publica un fin por versión: la 6 y la 7 conviven y las dos siguen recibiendo builds. Escribe la tuya si tu contrato dice otra cosa.",
+        "en_EN": "MikroTik publishes no per-version end: 6 and 7 coexist and both still get builds. Write down yours if your contract says otherwise."
+      }
+    },
+    {
+      "name": "Linksys (firmware de fábrica)",
+      "kind": "firmware",
+      "brand": "Linksys",
+      "family": "Linksys",
+      "notes": {
+        "es_ES": "El fin de soporte no es de la versión sino del modelo que la corre: escríbelo cuando lo publiquen para el tuyo.",
+        "en_EN": "The end of support belongs to the model, not the version: write it down once it is published for yours."
+      }
+    },
+    {
+      "name": "OpenWrt",
+      "kind": "firmware",
+      "brand": "OpenWrt",
+      "family": "OpenWrt",
+      "notes": {
+        "es_ES": "La versión y su fin de soporte dependen de la rama; escríbelos.",
+        "en_EN": "The version and its end of support depend on the branch; write them down."
+      }
+    }
+  ]
+}

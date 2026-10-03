@@ -569,7 +569,7 @@ def _headline_rows(raw) -> dict:
     """Which ROWS of this table belong on a summary — or ``{}`` for all of them.
 
     Reported from the screen, and it is the difference between a summary and a dump.
-    HOST-RESOURCES-MIB reports every store a host has, and on a NAS running containers that is
+    HOST-RESOURCES-MIB reports every store a device has, and on a NAS running containers that is
     physical memory, swap, the buffers, and then forty bind mounts of the same volume: the
     Details tab came out as five rings of memory followed by thirty-nine rings that all said
     67 % of the same 31 TiB. Nobody can read that, and the summary was the one screen that

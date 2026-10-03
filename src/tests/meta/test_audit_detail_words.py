@@ -10,7 +10,7 @@ audit screen exactly as written, which is how a log ends up reading half in Span
 snake_case. Reported from the panel: "I see texts like bad_code, forced_enrol".
 
 The renderer translates by FIELD and never by value — a value-driven rule would translate a
-host called ``local`` — and every lookup falls back to the raw word, so an entry a module wrote
+device called ``local`` — and every lookup falls back to the raw word, so an entry a module wrote
 still reads, just untranslated. That fallback is also why nothing FAILS when a word is missing,
 which is precisely why this guard exists: the symptom is quiet, and it is one grep away from
 being caught.
@@ -146,7 +146,7 @@ class TestAPermissionReadsTheSameEverywhere:
         assert '_permLabel(' in src, 'a second set of names instead of the shared catalog'
 
     def test_it_is_by_field_and_not_by_value(self):
-        """The rule this whole file is about: a value-driven match would translate a host
+        """The rule this whole file is about: a value-driven match would translate a device
         called `local` or a module whose id happens to be a flag."""
         src = io.open(DETAIL, encoding='utf-8-sig').read()
         assert '_AUDIT_PERM_FIELDS.has(k)' in src

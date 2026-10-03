@@ -11,7 +11,7 @@ consecutive-failure counter (``fail_count``).  This is both:
   ``module_state``, message-change detection), and
 * the durable change-detection baseline (survives restarts, so an ongoing
   OK/DOWN state is not re-announced), and
-* the read model for the UI (``/status`` page, overview, host "Latest data").
+* the read model for the UI (``/status`` page, overview, device "Latest data").
 
 Schema — table ``check_state`` (composite PK ``module`` + ``key`` + ``metric``):
 

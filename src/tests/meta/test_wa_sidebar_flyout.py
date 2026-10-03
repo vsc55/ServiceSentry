@@ -62,7 +62,39 @@ class TestTheViewportIsTheConstraint:
         """One axis fixed and the other left alone is the same defect in a narrower window."""
         body = _place()
         assert 'window.innerWidth' in body, 'the horizontal overflow is unguarded'
-        assert 'r.left - w' in body, 'it never opens to the left of its item'
+        assert '- w' in body and 'left = Math.max(' in body, \
+            'it never opens to the left when there is no room on the right'
+
+    def test_it_hangs_off_the_RAIL_and_not_off_its_own_row(self):
+        """A row is as wide as the column while the sidebar is open and as wide as one icon
+        while it is collapsed. Measured from the row, the menu opened half way across the rail
+        with a gap to its left showing the page underneath. The menu belongs to the sidebar, so
+        it starts where the sidebar ends — the same place in both states."""
+        body = _place()
+        assert "getElementById('ss-sidebar')" in body, 'the rail is never measured'
+        assert 'rc.right' in body, 'the menu still hangs off its own row'
+
+
+class TestWhatIsOpenStaysWhereItPoints:
+    """Se coloca UNA VEZ, al abrirlo. Todo lo que mueva la fila de debajo lo deja apuntando a
+    donde ya no hay nada."""
+
+    def test_moving_the_rail_does_not_leave_a_menu_behind(self):
+        src = _read(WIRING)
+        assert "addEventListener('resize'" in src, 'a resized window leaves the menu behind'
+        assert "addEventListener('scroll'" in src, 'scrolling the rail leaves the menu behind'
+        assert 'ss-fly-open' in _fn(src, '_toggleSidebar'), \
+            'collapsing the sidebar leaves a menu floating in the middle of the page'
+
+    def test_the_browser_tooltip_gets_out_of_the_way(self):
+        """En modo icono el `title` es lo unico que dice como se llama una fila, asi que no
+        puede salir del marcado — pero con el menu abierto lo dice el menu, y el globo se planta
+        encima de la primera entrada."""
+        src = _read(WIRING)
+        assert "removeAttribute('title')" in _fn(src, '_openFlyout'), \
+            'the tooltip still covers the menu it duplicates'
+        assert 'ssTitle' in _fn(src, '_closeFlyout'), \
+            'the tooltip never comes back, so an icon-only rail stops naming its rows'
 
 
 class TestWhatMeasuringRequires:

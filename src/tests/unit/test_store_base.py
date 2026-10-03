@@ -37,13 +37,30 @@ from lib.util.entity_audit import touch_entity, utc_now_iso
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 CORE_STORES = [
-    'audit', 'credentials', 'groups', 'history', 'hosts', 'roles', 'sessions', 'users',
+    'audit', 'credentials', 'groups', 'history', 'devices', 'roles', 'sessions', 'users',
 ]
 
 
 def _store_src(domain):
-    return io.open(os.path.join(SRC, 'lib', 'core', domain, 'store.py'),
-                   encoding='utf-8-sig').read()
+    """El almacén de ese dominio, esté en un archivo o en un paquete.
+
+    Los dos sitios porque los dos existen: un dominio con UNA tabla la tiene en `store.py`, y uno
+    con varias las reparte en `store/` o `stores/` con un archivo por tabla —`dcim` tiene doce,
+    `devices` dos—. Escrita sólo la primera forma, este archivo se cae el día que un dominio crece,
+    y lo hace señalando a un fichero que nadie ha borrado: simplemente ya no se llama así.
+    """
+    base = os.path.join(SRC, 'lib', 'core', domain)
+    suelto = os.path.join(base, 'store.py')
+    if os.path.exists(suelto):
+        return io.open(suelto, encoding='utf-8-sig').read()
+    for carpeta in ('stores', 'store'):
+        # El archivo que se llama como el dominio es el de SU tabla: `devices/stores/devices.py`.
+        # El resto de ese paquete son las tablas de al lado, que tienen su propia fila en la
+        # lista de arriba el día que las tengan.
+        propio = os.path.join(base, carpeta, domain + '.py')
+        if os.path.exists(propio):
+            return io.open(propio, encoding='utf-8-sig').read()
+    raise AssertionError('no se encuentra el almacén de %s' % domain)
 
 
 class TestOneTimestampFormat:
@@ -86,8 +103,8 @@ class TestTheSharedBase:
             or '_TABLE' not in src, f'{domain} has both _TABLE and its own count()'
 
     def test_encryption_is_defined_once(self):
-        """Credentials and host profiles used byte-identical helpers."""
-        for domain in ('credentials', 'hosts'):
+        """Credentials and device profiles used byte-identical helpers."""
+        for domain in ('credentials', 'devices'):
             src = _store_src(domain)
             assert 'EncryptedPayloadMixin' in src
             assert 'def _encrypt' not in src, f'{domain} kept its own copy'
@@ -97,7 +114,7 @@ class TestTheSharedBase:
 
     def test_the_mixin_passes_the_payload_through_without_a_key(self):
         """No Fernet configured (encryption off) must mean "leave it alone", never "drop
-        it" — these payloads are host profiles and credentials."""
+        it" — these payloads are device profiles and credentials."""
         class _S(EncryptedPayloadMixin):
             pass
         payload = {'ssh_password': 'plaintext'}

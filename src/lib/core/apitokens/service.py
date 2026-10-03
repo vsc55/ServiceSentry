@@ -165,7 +165,7 @@ def public(row: dict, *, permissions=None) -> dict:
         'expired': is_expired(row.get('expires_at', '')),
         'last_used': row.get('last_used', ''),
         'revoked': bool(row.get('revoked')),
-        'created': row.get('created', ''),
+        'created_at': row.get('created_at', ''),
         'created_by': row.get('created_by', ''),
     }
 

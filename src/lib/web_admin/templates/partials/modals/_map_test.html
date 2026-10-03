@@ -1,0 +1,23 @@
+{# ================================================================
+   Lo que contestó el mapa al probarlo.
+
+   Un cuadro y no un aviso que se va solo: aquí hay cuatro cosas que mirar —qué proveedor sale de
+   la configuración, si dan sesión, si desde este servidor se puede traer una tesela y qué origen
+   tiene que abrir la política de contenido— y se leen despacio, precisamente porque algo no está
+   saliendo.
+   ================================================================ #}
+<div class="modal fade" id="mapTestModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-map me-1"></i>{{ i18n.map_test }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body" id="mapTestBody"></div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>

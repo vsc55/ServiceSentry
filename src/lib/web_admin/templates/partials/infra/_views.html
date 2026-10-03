@@ -20,6 +20,10 @@ const INFRA_VIEWS = [
     { id: 'grouped', label_key: 'infra_view_grouped', icon: 'bi-list-nested',   render: '_infraGroupedBody', mode: 'summary', columns: true, family: 'list' },
     { id: 'rail',    label_key: 'infra_view_rail',    icon: 'bi-layout-sidebar', render: '_infraRailBody',   mode: 'summary', columns: true, family: 'list' },
     { id: 'board',   label_key: 'infra_view_board',   icon: 'bi-kanban',        render: '_infraBoardBody',   mode: 'summary', family: 'list' },
+    // Which devices are actually WATCHED — the registry's view, which came with its list: a
+    // device with no checks, or with every check turned off, is in the fleet count and watched
+    // by nothing.
+    { id: 'coverage', label_key: 'srv_view_coverage', icon: 'bi-puzzle',       render: '_infraCoverageBody', mode: 'summary', family: 'list' },
     // `map: true` says this view READS the fleet-wide join, which is fetched once and cached.
     // It is what the loader redraws on — it used to name the view instead, so the day a second
     // one read the same payload it sat on "loading…" for ever with the answer already in hand.

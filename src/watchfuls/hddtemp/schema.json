@@ -7,7 +7,7 @@
         "timeout": {"type": "int", "default": 5,    "min": 0, "inherit_blank": true, "max": 300}
     },
     "__history__": {"field": "TEMP", "unit": "°C", "label": "Disk Temperature"},
-    "__host_profile__": {"key": "hddtemp", "address_field": "host", "fields": ["host"]},
+    "__device_profile__": {"key": "hddtemp", "address_field": "host", "fields": ["host"]},
     "list": {
         "__check_title_field__": "label",
         "__field_order__": ["enabled", "label", "port", "exclude", "alert"],

@@ -103,18 +103,30 @@ function _dwOnGridClick(e) {
     if (_dwEditing) return;
     const dw = e.target.closest('.dw[data-wid]');
     if (!dw || _dwIsSpacer(dw.dataset.wid)) return;
-    if (e.target.closest('a,button,input,select,label,textarea,.page-link,[role="button"],[onclick]')) return;
+    // …ni sobre algo que se maneja con el ratón, como un mapa: ahí una pulsación es el final
+    // de un arrastre o de un doble clic para reencuadrar, y navegar a otra pestaña en medio de
+    // eso es la tarjeta quitándole el mapa de las manos a quien lo estaba moviendo.
+    if (e.target.closest('a,button,input,select,label,textarea,.page-link,[role="button"],[onclick],[data-dwmap]')) return;
     _dwNavigate(dw.dataset.wid);
 }
 
-// Module stat cards are wide, so a proportional pop would balloon over the neighbours.
-// Give them a FIXED small growth (~8px, like a narrow card) via --dw-pop, and point the
-// transform-origin at whichever side has room so the little growth stays on screen.
+// Lo que crece una tarjeta al señalarla: OCHO PÍXELES, y no un tanto por ciento.
+//
+// Un tanto por ciento es un crecimiento que depende de lo ancha que sea la tarjeta, y una que
+// ocupa la rejilla entera crece decenas de píxeles — la mitad de ellos fuera de la ventana,
+// donde no hay desplazamiento lateral con el que ir a buscarlos. Se sabía de las tarjetas de
+// módulo, que son anchas; volvió a pasar el día que una tarjeta del núcleo también lo fue —el
+// mapa de sedes, reportado desde la pantalla—, así que el crecimiento fijo es para todas.
+//
+// Y el origen de la transformación apunta al lado que tiene sitio, para que los ocho píxeles se
+// queden dentro.
 const _DW_POP_PX = 8;                       // absolute width a popped card gains
 function _dwOnGridHover(e) {
     if (_dwEditing) return;
-    const dw = e.target.closest('.dw-module');
-    if (!dw) return;
+    // Todas las que crecen, y las que crecen las decide la hoja de estilo con la misma regla:
+    // ni las que se manejan —una tabla se ordena, un mapa se arrastra— ni los separadores.
+    const dw = e.target.closest('.dw:not(.dw-spacer)');
+    if (!dw || dw.querySelector('table') || dw.querySelector('[data-dwmap]')) return;
     const r = dw.getBoundingClientRect();
     if (!r.width) return;
     const vw = document.documentElement.clientWidth;
@@ -201,7 +213,7 @@ function _dwDef(id) {
 // TWO copies, and which one wins is the whole design:
 //
 //   * the ACCOUNT (`dashboard_layout`, in the DB) is the layout. It is what every
-//     session of this user sees, on any host and any browser.
+//     session of this user sees, on any device and any browser.
 //   * `localStorage` holds an UNSAVED DRAFT — the arrangement being dragged around
 //     right now, kept across a reload so a half-finished edit is not lost.
 //
@@ -911,7 +923,7 @@ function _dwToolbar(id, cols, h, item) {
             style="width:auto;min-width:6em;font-size:.72rem" onchange="_dwSetSevFilter(this)">${lvlOpts}</select>`;
         if (fl.maintenance)
             tb += `<label class="d-inline-flex align-items-center gap-1 small text-muted mb-0" style="cursor:pointer"
-                title="${escAttr(t('host_status_maintenance'))}">
+                title="${escAttr(t('device_status_maintenance'))}">
                 <input type="checkbox" class="form-check-input mt-0 dw-sev-maint"${cur.maint ? ' checked' : ''}
                     onchange="_dwSetSevFilter(this)"><i class="bi bi-cone-striped"></i></label>`;
         tb += `</span>`;

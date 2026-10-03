@@ -1,0 +1,293 @@
+{# ================================================================
+   DCIM — los cuadros y los SAI, y el interruptor que lo cambia todo.
+
+   Esta pantalla faltaba entera. El modelo sabía decir las cuatro instalaciones y **no había
+   dónde escribirlas**, así que la cadena aguas arriba existía solo en la API.
+
+   Lo que se ve aquí es un árbol —acometida → cuadro → SAI → cuadro— y, al lado de cada SAI, el
+   interruptor del bypass. Echarlo no es editar un campo: es la maniobra que deja sin protección
+   a todo lo que cuelga, así que se pregunta antes, **se dice qué regletas se quedan sin SAI**, y
+   queda en la auditoría.
+   ================================================================ #}
+
+//: Lo que devolvió `/sources`, o `null` si no está abierta. `{sources, paths, warnings, kinds}`.
+let _dcSrc = null;
+
+async function _dcSrcOpen() {
+    _dcSrc = await apiGet('/api/v1/dcim/sources') || {};
+    renderDcim();
+}
+
+function _dcSrcClose() {
+    // Al inventario, y apuntándolo: la URL manda al dibujar, así que cerrar y callarse haría
+    // que el siguiente dibujado volviera a abrir esta pantalla.
+    _dcimGo('inventory');
+}
+
+function _dcSrcHtml() {
+    const d = _dcSrc || {};
+    const puede = _dcimMay('dcim_edit');
+    return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad">
+        <div class="ss-toolrow mb-3">
+            <button class="btn btn-sm btn-secondary" onclick="_dcSrcClose()">
+                <i class="bi bi-arrow-left me-1"></i>${esc(t('dcim_back'))}</button>
+            <span class="fw-semibold ss-fs-5">${esc(t('dcim_sources'))}</span>
+            <span class="text-muted ss-fs-2 ss-toolrow-text">${
+                esc(tf('dcim_sources_note', (d.sources || []).length))}</span>
+            <div class="ss-toolrow-tools">
+                ${puede ? `<button class="btn btn-sm btn-secondary" onclick="_dcSrcNew()">
+                    <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_source'))}</button>` : ''}
+                <button class="btn btn-sm btn-secondary" onclick="_dcSrcOpen()">
+                    <i class="bi bi-arrow-clockwise"></i></button>
+            </div>
+        </div>
+        ${_dcSrcWarnings(d.warnings || [])}
+        ${_dcSrcForm()}
+        ${_dcSrcTree(d.sources || [], puede)}
+    </div>`;
+}
+
+/** Lo que no cuadra, con la frase entera. Los dos hallazgos de esta pantalla son los que no dan
+ *  ningún error: una regleta que **ahora mismo** no pasa por un SAI aunque pasaría sin el bypass,
+ *  y las dos ramas de un armario colgando del mismo SAI. */
+function _dcSrcWarnings(avisos) {
+    if (!avisos.length)
+        return `<div class="text-success ss-fs-2 mb-2">
+            <i class="bi bi-check-circle me-1"></i>${esc(t('dcim_sources_ok'))}</div>`;
+    return `<div class="mb-3">${avisos.map(w => {
+        const texto = w.kind === 'on_bypass'
+            ? tf('dcim_warn_on_bypass', w.label || '', (w.ups || []).join(', '))
+            : tf('dcim_warn_same_ups', (w.labels || []).join(' + '), (w.ups || []).length);
+        return `<div class="ss-fs-2 text-warning-emphasis">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc(texto)}</div>`;
+    }).join('')}</div>`;
+}
+
+/** El árbol: cada fuente colgando de la suya. Se dibuja desde las raíces —lo que no cuelga de
+ *  nada— y hacia abajo, que es como se lee una instalación eléctrica: de la calle hacia dentro. */
+function _dcSrcTree(fuentes, puede) {
+    if (!fuentes.length)
+        return `<div class="text-muted small">${esc(t('dcim_sources_empty'))}</div>`;
+    const hijos = {};
+    for (const f of fuentes) {
+        const padre = String(f.upstream_uid || '');
+        if (!hijos[padre]) hijos[padre] = [];
+        hijos[padre].push(f);
+    }
+    // Una vez cada uno: un dato ya guardado puede traer una cadena que se muerde la cola —el
+    // servidor lo rechaza desde hoy, no desde siempre— y bajar por los hijos de sus hijos sin
+    // llevar cuenta sería no volver nunca.
+    const visto = new Set();
+    const pinta = (uid, nivel) => (hijos[uid] || []).map(f => {
+        const suyo = String(f.uid || '');
+        if (visto.has(suyo)) return '';
+        visto.add(suyo);
+        // Las guías de la sangría: una rayita por nivel. Con `padding-left` la sangría se ve
+        // pero no de QUIÉN cuelga, que es lo que se viene a mirar.
+        const guias = Array.from({length: nivel}, () => '<span class="ss-treeline"></span>')
+            .join('');
+        // **Lo que el botón VA A HACER, dicho una sola vez.** El rótulo salía de un condicional
+        // y la acción de otro, y estaban al revés: sin bypass echado ponía «Quitar bypass», y el
+        // cuadro que se abría después preguntaba «¿Echar el bypass?». De los dos, el que decía
+        // la verdad era el segundo. Con una variable no se pueden contradecir.
+        const echar = !f.bypass;
+        const bypass = f.kind === 'ups' && puede
+            ? `<button class="btn btn-sm ${echar ? 'btn-secondary' : 'btn-warning'}"
+                onclick="_dcSrcBypass(${jsStr(f.uid)},${jsStr(f.name || '')},${echar})">
+                <i class="bi bi-arrow-left-right me-1"></i>${
+                esc(t(echar ? 'dcim_bypass_on' : 'dcim_bypass_off'))}</button>` : '';
+        const manos = puede ? `${bypass}
+            <button class="btn btn-sm btn-secondary" onclick="_dcSrcClone(${jsStr(f.uid)},${
+                jsStr(f.name || '')})" title="${escAttr(t('dcim_source_clone'))}">
+                <i class="bi bi-copy"></i></button>
+            <button class="btn btn-sm btn-secondary" onclick="_dcSrcEditOpen(${jsStr(f.uid)})"
+                title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-warning"
+                onclick="_dcSrcDrop(${jsStr(f.uid)},${jsStr(f.name || '')})"
+                title="${escAttr(t('delete'))}"><i class="bi bi-trash"></i></button>` : '';
+        return `<div class="ss-treerow">
+            ${guias}
+            <i class="bi ${_dcSrcIcon(f.kind)} ${f.bypass ? 'text-warning' : 'text-muted'}"></i>
+            <span class="fw-semibold">${esc(f.name || f.uid)}</span>
+            <span class="badge bg-body-secondary text-body-secondary border fw-normal">${
+                esc(t('dcim_source_' + f.kind) || f.kind)}</span>
+            ${f.capacity_w ? `<span class="text-muted ss-fs-2 ss-tabular">${
+                esc(String(f.capacity_w))} W</span>` : ''}
+            ${f.autonomy_min ? `<span class="text-muted ss-fs-2 ss-tabular">${
+                esc(tf('dcim_autonomy', f.autonomy_min))}</span>` : ''}
+            ${f.bypass ? `<span class="badge text-bg-warning fw-normal">${
+                esc(t('dcim_bypassed'))}</span>` : ''}
+            <div class="ms-auto d-flex gap-1 flex-shrink-0">${manos}</div>
+        </div>
+        ${pinta(suyo, nivel + 1)}`;
+    }).join('');
+    return `<div class="card"><div class="card-body py-0">${pinta('', 0)}</div></div>`;
+}
+
+function _dcSrcIcon(kind) {
+    if (kind === 'ups') return 'bi-battery-charging';
+    if (kind === 'mains') return 'bi-plug-fill';
+    if (kind === 'generator') return 'bi-fuel-pump';
+    return 'bi-lightning-charge';
+}
+
+//: Si el formulario está abierto.
+let _dcSrcNewOpen = false;
+//: Y de qué fuente, si se está corrigiendo una. `null` = una nueva. Uno solo y no un formulario
+//: por fila: dos abiertos son dos sitios donde teclear y ninguna pista de cuál guarda Enter.
+let _dcSrcEdit = null;
+
+function _dcSrcNew() {
+    _dcSrcNewOpen = !_dcSrcNewOpen;
+    _dcSrcEdit = null;
+    renderDcim();
+}
+
+function _dcSrcEditOpen(uid) {
+    _dcSrcEdit = String(uid || '');
+    _dcSrcNewOpen = true;
+    renderDcim();
+}
+
+/** *uid* y todo lo que cuelga de él, directa o indirectamente.
+ *
+ *  Para no ofrecerlo como padre de sí mismo: el árbol se dibuja desde las raíces hacia abajo, y
+ *  una cadena cerrada sobre sí misma no tiene raíz — así que las filas del ciclo no se pintan, y
+ *  con ellas se va el botón con el que se arreglaría.
+ *
+ *  Por punto fijo y no bajando en recursión: los datos ya guardados pueden traer un ciclo de
+ *  antes, y una función que baja por los hijos de sus hijos no volvería nunca. */
+function _dcSrcKids(uid) {
+    const fuentes = ((_dcSrc || {}).sources || []);
+    const fuera = new Set([String(uid || '')]);
+    let crece = true;
+    while (crece) {
+        crece = false;
+        fuentes.forEach(f => {
+            const padre = String(f.upstream_uid || '');
+            if (padre && fuera.has(padre) && !fuera.has(String(f.uid))) {
+                fuera.add(String(f.uid));
+                crece = true;
+            }
+        });
+    }
+    return fuera;
+}
+
+function _dcSrcForm() {
+    if (!_dcSrcNewOpen || !_dcimMay('dcim_edit')) return '';
+    const d = _dcSrc || {};
+    const sedes = _dcimData.sites || [];
+    const f = _dcSrcEdit
+        ? ((d.sources || []).find(x => String(x.uid) === String(_dcSrcEdit)) || {}) : {};
+    // Ni ella misma ni lo que cuelga de ella: sería una cadena sin raíz, y lo que no tiene raíz
+    // no se dibuja.
+    const suyos = _dcSrcEdit ? _dcSrcKids(_dcSrcEdit) : new Set();
+    const padres = (d.sources || []).filter(x => !suyos.has(String(x.uid)));
+    // La sede se dice y no se pregunta cuando se corrige: cambiarla cambia quién puede tocar la
+    // fila, así que la ruta la descarta — y una casilla que no guarda es peor que no tenerla.
+    const suya = ((_dcimData.sites || [])
+        .find(x => String(x.uid) === String(f.site_uid || '')) || {}).name || '—';
+    const sede = _dcSrcEdit
+        ? `<div class="ss-fs-2 text-muted">${esc(t('dcim_site'))}
+               <div class="fw-semibold">${esc(suya)}</div></div>`
+        : `<label class="ss-fs-2 text-muted">${esc(t('dcim_site'))}
+            <select id="dcs-site" class="form-select form-select-sm" style="max-width:11rem">
+                <option value=""></option>${sedes.map(x =>
+                    `<option value="${escAttr(x.uid)}">${esc(x.name)}</option>`).join('')}
+            </select></label>`;
+    return `<div class="d-flex align-items-end gap-2 flex-wrap p-2 rounded bg-body-secondary mb-3">
+        <label class="ss-fs-2 text-muted">${esc(t('name'))}
+            <input id="dcs-name" class="form-control form-control-sm" style="max-width:12rem"
+                   value="${escAttr(String(f.name || ''))}"
+                   onkeydown="if(event.key==='Enter')_dcSrcSave()"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_source_kind'))}
+            <select id="dcs-kind" class="form-select form-select-sm" style="max-width:10rem">${
+            (d.kinds || []).map(k => `<option value="${escAttr(k)}"${
+                String(f.kind || '') === k ? ' selected' : ''}>${
+                esc(t('dcim_source_' + k) || k)}</option>`).join('')}</select></label>
+        ${sede}
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_upstream'))}
+            <select id="dcs-up" class="form-select form-select-sm" style="max-width:12rem">
+                <option value="">${esc(t('dcim_upstream_none'))}</option>${
+                padres.map(x => `<option value="${escAttr(x.uid)}"${
+                    String(f.upstream_uid || '') === String(x.uid) ? ' selected' : ''}>${
+                    esc(x.name || x.uid)}</option>`).join('')}
+            </select></label>
+        <label class="ss-fs-2 text-muted">W
+            <input id="dcs-cap" type="number" min="0" class="form-control form-control-sm
+                   ss-tabular" style="max-width:7rem"
+                   value="${escAttr(String(f.capacity_w || ''))}"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_autonomy_min'))}
+            <input id="dcs-aut" type="number" min="0" class="form-control form-control-sm
+                   ss-tabular" style="max-width:6rem"
+                   value="${escAttr(String(f.autonomy_min || ''))}"></label>
+        <button class="btn btn-sm btn-primary" onclick="_dcSrcSave()">
+            <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+        <button class="btn btn-sm btn-secondary"
+                onclick="_dcSrcNewOpen=false;_dcSrcEdit=null;renderDcim()">
+            ${esc(t('cancel'))}</button>
+    </div>`;
+}
+
+async function _dcSrcSave() {
+    const val = (id) => (document.getElementById(id) || {}).value || '';
+    const cuerpo = {name: val('dcs-name'), kind: val('dcs-kind'),
+                    upstream_uid: val('dcs-up'),
+                    capacity_w: Number(val('dcs-cap')) || 0,
+                    autonomy_min: Number(val('dcs-aut')) || 0};
+    // La sede solo al declararla: al corregir, la ruta la descarta —cambiarla cambiaría quién
+    // puede tocar la fila— así que mandarla sería mandar algo que se tira.
+    if (!_dcSrcEdit) cuerpo.site_uid = val('dcs-site');
+    const r = _dcSrcEdit
+        ? await _dcimSend('PUT', `/api/v1/dcim/sources/${encodeURIComponent(_dcSrcEdit)}`, cuerpo)
+        : await _dcimSend('POST', '/api/v1/dcim/sources', cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcSrcNewOpen = false;
+    _dcSrcEdit = null;
+    _dcSrcOpen();
+}
+
+/** Echar o quitar el bypass. Se pregunta antes **diciendo qué se queda sin SAI**, porque es la
+ *  única forma de que quien lo pulsa sepa lo que va a pasar: la lista de regletas afectadas ya
+ *  la tiene la pantalla, y esconderla detrás de un «¿seguro?» sería no decir nada. */
+function _dcSrcBypass(uid, nombre, poner) {
+    const afectadas = Object.entries((_dcSrc || {}).paths || {})
+        .filter(([, p]) => (p.ups || []).includes(uid) || (p.clean || []).includes(uid))
+        .length;
+    const pregunta = poner ? tf('dcim_bypass_on_q', nombre, afectadas)
+                           : tf('dcim_bypass_off_q', nombre);
+    showConfirmModal(pregunta, async () => {
+        const r = await _dcimSend('PUT', `/api/v1/dcim/sources/${encodeURIComponent(uid)}`,
+                                  {bypass: poner ? 1 : 0});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcSrcOpen();
+    });
+}
+
+function _dcSrcDrop(uid, nombre) {
+    showConfirmModal(tf('dcim_source_drop_q', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/sources/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcSrcOpen();
+    });
+}
+
+/** Clonar una fuente **con todo lo que cuelga de ella**.
+ *
+ *  Se pregunta antes diciendo CUÁNTAS filas van a salir: «clonar» sobre un cuadro con dos SAI y
+ *  cuatro cuadros de salida detrás escribe siete, y saberlo después es enterarse de lo que ya
+ *  ha pasado.
+ *
+ *  El bypass no viaja en la copia —es una maniobra en curso, no una forma de estar cableado— ni
+ *  las regletas, que cuelgan de la fuente y no son la fuente. */
+function _dcSrcClone(uid, nombre) {
+    const cuantas = _dcSrcKids(uid).size;
+    showConfirmModal(tf('dcim_source_clone_q', nombre || '', cuantas), async () => {
+        const r = await _dcimSend('POST',
+                                  `/api/v1/dcim/sources/${encodeURIComponent(uid)}/clone`, {});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        showToast(tf('dcim_source_cloned', Number(r.n || 0)), 'success');
+        _dcSrcOpen();
+    });
+}

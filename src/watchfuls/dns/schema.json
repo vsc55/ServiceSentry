@@ -7,8 +7,8 @@
         "timeout":    {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 30}
     },
     "__history__": {"field": "response_time", "unit": "ms", "label": "DNS Resolution Time"},
-    "__host_profile__": {"key": "ssh", "address_field": "ssh_host"},
-    "__host_multiple__": true,
+    "__device_profile__": {"key": "ssh", "address_field": "ssh_host"},
+    "__device_multiple__": true,
     "list": {
         "__discovery__": "discover",
         "__discovery_method__": "POST",
@@ -17,7 +17,7 @@
         "__discovery_type_store_field__": "record_type",
         "__discovery_value_field__": "expected",
         "__discovery_uid_key__": true,
-        "__discovery_label_template__": "{host} - {type} {name}",
+        "__discovery_label_template__": "{device} - {type} {name}",
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__new_item_fields__": ["label", "host", "record_type"],

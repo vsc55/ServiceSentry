@@ -63,6 +63,10 @@ import re
 # Reuse the credential-catalog helpers (watchfuls dir resolution + lang loader).
 from lib.modules.discovery.credential_schemas import _watchfuls_dir, _module_i18n
 
+#: Where a declared section can be drawn: a top-level entry of its own, or an entry of one of the
+#: two groups — the organisation's registers (`catalog`) or the platform's settings (`system`).
+PLACEMENTS = ('section', 'catalog', 'system')
+
 # The id lands in a URL, an element id and a Bootstrap tab target, so keep it to
 # the same shape the action dispatch already demands of a module name.
 _ID_RE = re.compile(r'^[a-z][a-z0-9_]*$')
@@ -112,12 +116,13 @@ def _page_spec(module: str, d: dict) -> dict | None:
     if not _ID_RE.match(pid) or pid in _RESERVED:
         return None
     # WHERE the page belongs, declared rather than assumed. A section of its own is the
-    # right home for something an operator watches — m365's status, azure's — and the wrong
-    # one for something an operator ADMINISTERS: the MIB library is managed beside Services,
-    # Modules and Credentials, not beside the dashboards. The core places it; it still has no
-    # idea which module asked.
+    # right home for something an operator watches — m365's status, azure's. What an operator
+    # ADMINISTERS goes in one of the two groups below them: `catalog` for the organisation's
+    # own registers — companies, devices, credentials, the MIB library — and `system` for
+    # the platform itself — services, modules, access, backups. The core places it; it still
+    # has no idea which module asked.
     placement = str(d.get('placement') or 'section').strip().lower()
-    if placement not in ('section', 'system'):
+    if placement not in PLACEMENTS:
         placement = 'section'
     return {
         'id':     pid,

@@ -6,9 +6,9 @@ SNMP arrived as a watchful because the first thing anybody wanted from it was a 
 an OID, compare the answer. It stopped being one a long time ago. A MIB library, a symbol
 browser, a compiler, a resolver, a catalogue of device profiles and a sampler that turns one
 of them into a chart are not "a check with options" — they are how the panel speaks a
-protocol, in the same sense that :mod:`lib.core.hosts` is how it reaches a machine.
+protocol, in the same sense that :mod:`lib.core.devices` is how it reaches a machine.
 
-The consequence is the one that matters: **what a device IS belongs to the device**. A host
+The consequence is the one that matters: **what a device IS belongs to the device**. A device
 carries its SNMP profile the way it carries its SSH connection — an address, a port, an
 identity — and every check bound to it inherits that instead of restating it. A module
 cannot own that, because it is not about any one module.
@@ -22,7 +22,7 @@ What lives here (arriving in steps — this package is being assembled, not desi
 
 What stays a watchful (``watchfuls/snmp``): the *check* — one OID, an operator, a value an
 admin expects — including a check against a bare address that was never registered as a
-host. Asking one question of an IP should not require declaring a device first.
+device. Asking one question of an IP should not require declaring a device first.
 
 Kept light on purpose, like every other core domain's ``__init__``: no submodule imports
 here, and nothing that reaches for Flask. Discovery imports core packages very early.

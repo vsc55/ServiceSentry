@@ -251,7 +251,7 @@ function _evEnsureConditions(d) {
     if (!groups.length && d.match_type && d.match_type !== 'any' && (d.match_text || d.match_type === 'not_contains'))
         groups = [[{ field: 'message', type: d.match_type, text: d.match_text || '' }]];
     // Migrate the OLD top-level filters (which were global AND preconditions) into
-    // every group as conditions, then drop them: host/app → 'equals', and the
+    // every group as conditions, then drop them: device/app → 'equals', and the
     // "min severity" threshold → 'severity ≤ N' (its original semantics).
     const pre = [];
     if (d.severity_max !== '' && d.severity_max != null)

@@ -217,7 +217,7 @@ def test_app_only_stays_minimal_without_sso_options():
 
 def test_module_entraid_provision_discovers_declarations():
     # A module can declare an Entra app to provision via the shared wizard; the
-    # discovery lives in modules.entraid_provision (not hosts.profiles).
+    # discovery lives in modules.entraid_provision (not devices.profiles).
     from lib.providers.entraid import module_entraid_provision
     m = module_entraid_provision()
     roles = m.get('m365', {}).get('app_roles') or []

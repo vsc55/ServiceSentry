@@ -127,7 +127,8 @@ class _ConfigMixin:
         When *live* is True the Flask app already exists, so Flask-level settings (the
         ``flask_cfg`` mirrors + ``SESSION_COOKIE_SECURE``) are pushed onto ``self._app`` too.
         """
-        from lib.core.config.service import INT_RULES, BOOL_RULES  # local import avoids circular
+        from lib.core.config.service import (                     # local import avoids circular
+            INT_RULES, BOOL_RULES, STR_RULES)
         wa_cfg = data.get('web_admin') or {}
         # Integer rules (values in a saved config are already in valid range).
         for path, rule in INT_RULES.items():
@@ -148,6 +149,24 @@ class _ConfigMixin:
             section, field = path.split('|')
             v = (data.get(section) or {}).get(field)
             if isinstance(v, bool):
+                setattr(self, attr, v)
+        # Cadenas del registro. Faltaba esta pasada entera: los enteros y los interruptores
+        # tenían su trato genérico y las cadenas no, así que cada una había que escribirla a
+        # mano aquí abajo — y las que nadie escribió **no llegaban a ninguna parte**. El ajuste
+        # se guardaba, la pantalla lo enseñaba guardado, y quien lo leía por su atributo recibía
+        # una cadena vacía para siempre, ni siquiera reiniciando: ese atributo solo lo ponía el
+        # camino de las variables de entorno. Así cayeron cinco —el servidor de teselas y su
+        # atribución, la dirección del catálogo, la carpeta de imágenes y la de copias—, y se
+        # notó porque alguien configuró el mapa y el mapa siguió sin salir.
+        #
+        # Antes de las tres que necesitan que se les haga algo (el idioma, el de la página de
+        # estado y la URL pública): esas se aplican abajo, en su línea de siempre, y mandan.
+        for path, attr in STR_RULES.items():
+            if not attr:
+                continue
+            section, field = path.split('|')
+            v = (data.get(section) or {}).get(field)
+            if isinstance(v, str):
                 setattr(self, attr, v)
         # Ensure pw_max_len >= pw_min_len after both are applied
         if self._PW_MAX_LEN < self._PW_MIN_LEN:

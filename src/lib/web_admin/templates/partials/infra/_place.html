@@ -1,0 +1,366 @@
+{# ================================================================
+   Infrastructure — the device page's two tabs that come from the other sections: where the
+   device IS (the inventory: site, floor, room, rack, U, cables, power, owner) and how it is
+   CONFIGURED (the registry: class, how it is reached, its connection profiles, what watches it).
+
+   The device page is the one place a device is looked at. The registry used to be where its
+   configuration lived and the inventory where its location lived, and from the page that
+   watched it neither could be reached: a machine that failed told nobody which cabinet to walk
+   to. Both tabs READ here and send the editing to where it already happens — the registry's
+   modal, the inventory's rack — so there is still one place to change each thing.
+   ================================================================ #}
+
+//: Where the open device is, asked once per device: `places` is null until the answer arrives.
+let _infraPlace = {uid: '', places: null};
+//: Whether the registry list is being fetched for the configuration tab.
+let _infraCfgLoading = false;
+//: The racks a device can be placed in, asked once: `null` = not yet.
+let _infraRacks = null;
+//: What the open device reported about itself (`/dcim/said`), per device: `{uid, said}`.
+let _infraSaid = {uid: '', said: null};
+
+// ── Location ─────────────────────────────────────────────────────────────────────────────────
+
+async function _infraPlaceLoad(uid) {
+    const r = await apiGet(`/api/v1/dcim/devices/${encodeURIComponent(uid)}/place`);
+    if (_infraPlace.uid !== uid) return;              // somebody opened another meanwhile
+    _infraPlace.places = (r && r.places) || [];
+    if (_infraDevice === uid && _infraTab === 'place') renderInfra();
+}
+
+/** How many places the open device has, for the tab's badge — once known. */
+function _infraPlaceCount(uid) {
+    return _infraPlace.uid === uid && _infraPlace.places ? _infraPlace.places.length : undefined;
+}
+
+function _infraPlacePane(d) {
+    const uid = String((d.device || {}).uid || _infraDevice || '');
+    if (_infraPlace.uid !== uid) {
+        _infraPlace = {uid, places: null};
+        _infraPlaceLoad(uid);
+    }
+    if (_infraPlace.places === null)
+        return `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    const lugares = _infraPlace.places;
+    if (!lugares.length) {
+        return `<div class="d-flex flex-column gap-3 align-items-start">
+            <span class="text-muted"><i class="bi bi-geo-alt me-1"></i>${esc(t('infra_place_none'))}</span>
+            ${_infraMay('dcim_edit') ? _infraPlaceForm(uid, d.device || {}) : ''}
+            ${_infraMay('dcim_view') ? `<button class="btn btn-sm btn-secondary"
+                onclick="dcimGoTo('inventory','')"><i class="bi bi-building me-1"></i>${
+                esc(t('infra_place_go_inventory'))}</button>` : ''}
+        </div>`;
+    }
+    // Más de un sitio no es lo normal —un dispositivo está en un armario—, pero pasa: un chasis y
+    // su bandeja, un alta repetida. Se enseñan todos y se dice, que es como se arregla.
+    return `${lugares.length > 1 ? `<div class="alert alert-warning py-2 small">${
+            esc(tf('infra_place_many', lugares.length))}</div>` : ''}
+        ${lugares.map(_infraPlaceCard).join('')}`;
+}
+
+// ── Placing a device that is in no rack ─────────────────────────────────────────────────────
+
+async function _infraRacksLoad() {
+    const d = await apiGet('/api/v1/dcim/sites') || {};
+    const out = [];
+    for (const s of d.sites || [])
+        for (const r of s.rooms || [])
+            for (const k of r.rackList || [])
+                out.push({uid: k.uid, u: Number(k.u_height) || 0,
+                          label: `${s.name || ''} › ${r.name || ''} › ${k.name || k.uid}`});
+    _infraRacks = out;
+    if (_infraTab === 'place') renderInfra();
+}
+
+/** Put it in a rack from here: the same equipment the inventory's form would create, named
+ *  after the device and already linked to it. Where it goes is the one thing asked — the rest
+ *  of the equipment (model, serial, owner) is filled in the inventory, where it lives. */
+function _infraPlaceForm(uid, dev) {
+    if (_infraRacks === null) {
+        _infraRacks = [];
+        _infraRacksLoad();
+    }
+    if (!_infraRacks.length)
+        return `<div class="text-muted ss-fs-2">${esc(t('infra_place_no_racks'))}</div>`;
+    return `<div class="card"><div class="card-body d-flex flex-wrap gap-2 align-items-end">
+        <label class="ss-fs-2 text-muted">${esc(t('infra_place_rack'))}
+            <select id="infraPlaceRack" class="form-select form-select-sm" style="min-width:18rem">
+                ${_infraRacks.map(k => `<option value="${escAttr(k.uid)}">${esc(k.label)} (${k.u}U)</option>`).join('')}
+            </select></label>
+        <label class="ss-fs-2 text-muted">${esc(t('infra_place_u_start'))}
+            <input id="infraPlaceU" type="number" min="1" class="form-control form-control-sm ss-tabular"
+                   style="width:6rem" value="1"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('infra_place_u_height'))}
+            <input id="infraPlaceH" type="number" min="1" class="form-control form-control-sm ss-tabular"
+                   style="width:6rem" value="1"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('infra_place_face'))}
+            <select id="infraPlaceFace" class="form-select form-select-sm">
+                ${['full', 'front', 'rear'].map(f => `<option value="${f}">${esc(t('dcim_face_' + f))}</option>`).join('')}
+            </select></label>
+        <button class="btn btn-sm btn-primary" onclick="_infraPlaceSave(${jsStr(uid)},${jsStr(dev.name || '')})">
+            <i class="bi bi-box-arrow-in-down me-1"></i>${esc(t('infra_place_put'))}</button>
+    </div></div>`;
+}
+
+async function _infraPlaceSave(uid, nombre) {
+    const val = id => (document.getElementById(id) || {}).value;
+    const cuerpo = {rack_uid: val('infraPlaceRack'), u_start: Number(val('infraPlaceU')) || 1,
+                    u_height: Number(val('infraPlaceH')) || 1, face: val('infraPlaceFace') || 'full',
+                    label: nombre, device_uid: uid};
+    const r = await apiSend('POST', '/api/v1/dcim/items', cuerpo);
+    // Lo que diga el inventario, tal cual: «esa U está ocupada» es la respuesta útil.
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger', 8000);
+    showToast(t('infra_place_done'), 'success');
+    _infraPlace = {uid: '', places: null};
+    renderInfra();
+}
+
+// ── The serial the inventory has, against the one the device reports ───────────────────────
+
+async function _infraSaidLoad(uid) {
+    const d = await apiGetSilent(`/api/v1/dcim/said?device=${encodeURIComponent(uid)}`);
+    if (_infraSaid.uid !== uid) return;
+    _infraSaid.said = (d && d.said) || {};
+    if (_infraDevice === uid && _infraTab === 'place') renderInfra();
+}
+
+/** What the device says its serial is, when it says one. Asked only of someone who could fix a
+ *  difference — the route is the inventory form's, behind `dcim_edit`. */
+function _infraSerialsSaid(uid) {
+    if (!_infraMay('dcim_edit')) return null;
+    if (_infraSaid.uid !== uid) {
+        _infraSaid = {uid, said: null};
+        _infraSaidLoad(uid);
+    }
+    if (!_infraSaid.said) return null;
+    return (_infraSaid.said.serial || []).map(x => String((x || {}).value || '').trim()).filter(Boolean);
+}
+
+/** The two serials side by side, when they disagree — or the reported one offered when the
+ *  inventory has none. A serial typed off a sticker and one the device reports are two answers
+ *  to one question, and until now nothing put them next to each other. Offered, never written
+ *  on its own: a number nobody checked would look checked from then on. */
+function _infraSerialCheck(p, devUid) {
+    const it = p.item || {};
+    const dichos = _infraSerialsSaid(devUid);
+    if (!dichos || !dichos.length) return '';
+    const norm = v => String(v || '').trim().toLowerCase();
+    const tenemos = norm(it.serial);
+    if (tenemos && dichos.some(v => norm(v) === tenemos)) return '';
+    const boton = v => `<button class="btn btn-sm btn-warning py-0" onclick="_infraSerialUse(${jsStr(it.uid)},${jsStr(v)})">${
+        esc(tf('infra_serial_use', v))}</button>`;
+    return `<div class="alert ${tenemos ? 'alert-warning' : 'alert-info'} py-2 mb-0 ss-fs-2 d-flex flex-wrap gap-2 align-items-center">
+        <i class="bi ${tenemos ? 'bi-exclamation-triangle' : 'bi-info-circle'}"></i>
+        <span>${esc(tenemos ? tf('infra_serial_mismatch', it.serial, dichos.join(', '))
+                            : tf('infra_serial_offer', dichos.join(', ')))}</span>
+        ${dichos.map(boton).join('')}
+    </div>`;
+}
+
+async function _infraSerialUse(itemUid, valor) {
+    const r = await apiSend('PUT', `/api/v1/dcim/items/${encodeURIComponent(itemUid)}`, {serial: valor});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger', 8000);
+    showToast(t('saved'), 'success');
+    _infraPlace = {uid: '', places: null};
+    renderInfra();
+}
+
+function _infraMay(flag) {
+    return new Set(currentUser.permissions || []).has(flag);
+}
+
+/** One place: the rack drawn small with the device lit, the path to it, and what it plugs into. */
+function _infraPlaceCard(p) {
+    const it = p.item || {};
+    const enlace = (kind, uid, texto) => uid
+        ? `<a href="#" class="link-body-emphasis" onclick="dcimGoTo(${jsStr(kind)},${jsStr(uid)});return false">${
+            esc(texto)}</a>` : esc(texto);
+    const ruta = [
+        p.site && p.site.uid ? enlace('site', p.site.uid, p.site.name || p.site.uid) : '',
+        p.floor ? esc(p.floor.name || '') : '',
+        p.room && p.room.uid ? enlace('room', p.room.uid, p.room.name || p.room.uid) : '',
+        p.rack && p.rack.uid ? enlace('rack', p.rack.uid, p.rack.name || p.rack.uid) : '',
+    ].filter(Boolean).join(' <span class="text-muted">›</span> ');
+    const alto = Math.max(1, Number(it.u_height) || 1);
+    const desde = Number(it.u_start) || 0;
+    const donde = desde
+        ? (alto > 1 ? tf('infra_place_u_range', desde, desde + alto - 1) : tf('infra_place_u', desde))
+        : t('infra_place_off_rails');
+    const cara = it.face ? t('dcim_face_' + it.face) : '';
+    const dato = (label, valor) => valor ? `<div><div class="text-muted ss-fs-1">${esc(label)}</div>
+        <div class="ss-tabular">${valor}</div></div>` : '';
+    return `<div class="card mb-3">
+        <div class="card-body d-flex flex-wrap gap-4">
+            ${_infraRackMini(p)}
+            <div class="d-flex flex-column gap-2 flex-grow-1" style="min-width:16rem">
+                <div class="fw-semibold">${ruta}</div>
+                <div class="ss-fs-2">${esc(donde)}${cara ? ' · ' + esc(cara) : ''}${
+                    it.label ? ` · <span class="text-muted">${esc(it.label)}</span>` : ''}</div>
+                ${_infraSerialCheck(p, _infraPlace.uid)}
+                <div class="d-flex flex-wrap gap-4 ss-fs-2">
+                    ${dato(t('dcim_owner'), p.org ? esc(p.org.name || p.org.short || '') : '')}
+                    ${dato(t('infra_place_serial'), esc(it.serial || ''))}
+                    ${dato(t('infra_place_asset'), esc(it.asset || ''))}
+                    ${p.site && p.site.address ? dato(t('infra_place_address'), esc(p.site.address)) : ''}
+                </div>
+                <div class="d-flex flex-wrap gap-2 mt-1">
+                    ${p.rack && p.rack.uid ? `<button class="btn btn-sm btn-primary"
+                        onclick="dcimGoTo('rack',${jsStr(p.rack.uid)})"><i class="bi bi-hdd-rack me-1"></i>${
+                        esc(t('infra_place_open_rack'))}</button>` : ''}
+                    ${p.room && p.room.uid ? `<button class="btn btn-sm btn-secondary"
+                        onclick="dcimGoTo('room',${jsStr(p.room.uid)})"><i class="bi bi-map me-1"></i>${
+                        esc(t('infra_place_open_room'))}</button>` : ''}
+                </div>
+            </div>
+        </div>
+        <div class="card-body border-top">
+            <div class="fw-semibold ss-fs-3 mb-2"><i class="bi bi-ethernet me-1"></i>${
+                esc(t('infra_place_cables'))}</div>
+            ${_infraPlaceCables(p.cables || [])}
+        </div>
+        <div class="card-body border-top">
+            <div class="fw-semibold ss-fs-3 mb-2"><i class="bi bi-plug me-1"></i>${
+                esc(t('infra_place_power'))}</div>
+            ${_infraPlacePower(p.power || [])}
+        </div>
+    </div>`;
+}
+
+/** The rack, small, with the device lit — the picture somebody needs before walking there:
+ *  near the top or near the floor, and how much of it. */
+function _infraRackMini(p) {
+    const H = Math.max(1, Number((p.rack || {}).u_height) || 42);
+    const it = p.item || {};
+    const W = 46, alto = 180, pad = 4;
+    const u = (alto - 2 * pad) / H;
+    const desde = Number(it.u_start) || 0;
+    const n = Math.max(1, Number(it.u_height) || 1);
+    // Las U se cuentan desde abajo: la 1 es la del suelo.
+    const y = pad + (H - (desde + n - 1)) * u;
+    return `<svg width="${W}" height="${alto}" viewBox="0 0 ${W} ${alto}" role="img"
+                 aria-label="${escAttr(tf('infra_place_rack_tt', H))}" class="flex-shrink-0">
+        <title>${esc(tf('infra_place_rack_tt', H))}</title>
+        <rect x="1" y="1" width="${W - 2}" height="${alto - 2}" rx="3" fill="none"
+              stroke="var(--bs-border-color)" stroke-width="2"></rect>
+        ${desde ? `<rect x="${pad + 2}" y="${y}" width="${W - 2 * pad - 4}" height="${Math.max(2, n * u - 1)}"
+              rx="1" fill="var(--bs-primary)"></rect>` : ''}
+    </svg>`;
+}
+
+function _infraPlaceCables(cables) {
+    if (!cables.length) return `<div class="text-muted ss-fs-2">${esc(t('infra_place_no_cables'))}</div>`;
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0 ss-fs-3">
+        <thead><tr><th>${esc(t('infra_place_port'))}</th><th>${esc(t('infra_place_to'))}</th>
+            <th>${esc(t('infra_place_cable'))}</th></tr></thead>
+        <tbody>${cables.map(c => {
+            const otro = c.peer || {};
+            const destino = otro.foreign
+                ? `<span class="text-muted">${esc(t('infra_place_peer_foreign'))}</span>`
+                : `${otro.device_uid
+                      ? `<a href="#" class="link-body-emphasis" onclick="infraOpen(${jsStr(otro.device_uid)});return false">${
+                            esc(otro.label || t('infra_place_unnamed'))}</a>`
+                      : esc(otro.label || t('infra_place_unnamed'))}${
+                   otro.port ? ` <span class="text-muted">· ${esc(otro.port)}</span>` : ''}`;
+            return `<tr>
+                <td class="ss-tabular">${esc(c.port || '—')}</td>
+                <td>${destino}</td>
+                <td class="text-muted">${c.color ? `<span class="ss-dot me-1" style="background:${
+                    escAttr(c.color)}"></span>` : ''}${esc(c.label || '')}</td>
+            </tr>`;
+        }).join('')}</tbody></table></div>`;
+}
+
+function _infraPlacePower(power) {
+    if (!power.length) return `<div class="text-muted ss-fs-2">${esc(t('infra_place_no_power'))}</div>`;
+    return `<ul class="list-unstyled mb-0 ss-fs-3">${power.map(f => `<li class="py-1">
+        <i class="bi bi-lightning-charge text-muted me-1"></i>${
+        esc(tf('infra_place_outlet', f.pdu || '', String(f.feed || '').toUpperCase() || '—',
+               f.outlet || '—'))}${f.watts ? ` <span class="text-muted">· ${esc(String(f.watts))} W</span>` : ''}
+    </li>`).join('')}</ul>`;
+}
+
+// ── Configuration ───────────────────────────────────────────────────────────────────────────
+
+/** The checks bound to one device, per module — read off the modules' configuration, which is
+ *  where a check lives; the device only knows it is watched. */
+function _infraChecksOf(uid) {
+    const out = {};
+    for (const [mod, cols] of Object.entries(modulesData || {})) {
+        if (!cols || typeof cols !== 'object') continue;
+        for (const col of Object.values(cols)) {
+            if (!col || typeof col !== 'object' || Array.isArray(col)) continue;
+            for (const item of Object.values(col)) {
+                if (!item || typeof item !== 'object' || item.device_uid !== uid) continue;
+                const nombre = mod.replace(/^watchfuls\./, '');
+                out[nombre] = (out[nombre] || 0) + 1;
+            }
+        }
+    }
+    return out;
+}
+
+function _infraConfigPane(d) {
+    const uid = String((d.device || {}).uid || _infraDevice || '');
+    const dev = devicesData[uid];
+    if (!dev) {
+        if (!_infraCfgLoading) {
+            _infraCfgLoading = true;
+            loadDevices().finally(() => {
+                _infraCfgLoading = false;
+                if (_infraDevice === uid && _infraTab === 'config') renderInfra();
+            });
+        }
+        return `<div class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></div>`;
+    }
+    const puede = _canEditDevice(uid);
+    const fila = (label, valor) => `<tr><th class="text-muted fw-normal ss-fs-2 text-nowrap pe-3">${
+        esc(label)}</th><td>${valor}</td></tr>`;
+    // Los perfiles que tienen algo escrito: un perfil vacío es un protocolo que no se usa.
+    const perfiles = Object.entries(dev.profiles || {})
+        .filter(([, v]) => v && typeof v === 'object' && Object.values(v).some(x => x !== '' && x !== null && x !== undefined))
+        .map(([k]) => `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1">${
+            esc(k.toUpperCase())}</span>`).join('');
+    const checks = _infraChecksOf(uid);
+    const modulos = [...new Set([...(dev.modules || []), ...Object.keys(checks)])].sort();
+    const etiquetas = (dev.tags || []).map(tg =>
+        `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1">${esc(tg)}</span>`).join('');
+    return `<div class="d-flex flex-column gap-3">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="text-muted ss-fs-2 flex-grow-1">${esc(t('infra_config_hint'))}</span>
+            <button class="btn btn-sm ${puede ? 'btn-primary' : 'btn-secondary'}"
+                    onclick="_infraEditDevice(${jsStr(uid)})">
+                <i class="bi ${puede ? 'bi-pencil' : 'bi-eye'} me-1"></i>${
+                esc(puede ? t('device_edit') : t('device_view'))}</button>
+        </div>
+        <table class="table table-sm mb-0 ss-fs-3"><tbody>
+            ${fila(t('device_type'), `<i class="bi ${escAttr(deviceTypeIcon(dev.device_type))} me-1"></i>${
+                esc(deviceTypeLabel(dev.device_type) || '—')}`)}
+            ${fila(t('device_kind'), esc(t('device_kind_' + (dev.kind || 'none'))))}
+            ${fila(t('device_os'), esc(dev.os || '—'))}
+            ${fila(t('infra_config_profiles'), perfiles || `<span class="text-muted">—</span>`)}
+            ${fila(t('col_device_modules'), modulos.length ? modulos.map(m =>
+                `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1">${esc(m)}${
+                    checks[m] ? ` · ${esc(String(checks[m]))}` : ''}</span>`).join('')
+                : `<span class="text-muted">${esc(t('infra_config_no_modules'))}</span>`)}
+            ${fila(t('device_maintenance'), esc(dev.maintenance ? t('yes') : t('no')))}
+            ${dev.virtual ? fila(t('device_virtual'), esc(t('yes'))) : ''}
+            ${etiquetas ? fila(t('col_device_tags'), etiquetas) : ''}
+            ${dev.description ? fila(t('device_description'), esc(dev.description)) : ''}
+            ${dev.source ? fila(t('device_source'), _deviceSourceHtml(dev)) : ''}
+        </tbody></table>
+    </div>`;
+}
+
+/** Open the registry's own modal for this device — the one place it is edited — and draw the
+ *  page again when it closes, so what was saved is what the page shows. */
+async function _infraEditDevice(uid) {
+    if (!devicesData[uid]) await loadDevices();
+    if (!devicesData[uid]) return showToast(t('device_not_found'), 'warning');
+    const modal = document.getElementById('deviceModal');
+    if (modal) modal.addEventListener('hidden.bs.modal', async () => {
+        if (_infraDevice !== uid) return;
+        await loadDevices();
+        _infraReload();
+    }, {once: true});
+    openEditDeviceModal(uid);
+}

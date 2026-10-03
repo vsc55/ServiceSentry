@@ -56,7 +56,6 @@ class RolesStore(BaseStore):
     def _bootstrap(self) -> None:
         db = self._db
         db.reconcile_table(_SCHEMA)
-        self._backfill_audit_columns()
         db.commit()
         self._ensure_version_row()
 

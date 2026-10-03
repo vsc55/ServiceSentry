@@ -1,0 +1,166 @@
+{# ================================================================
+   DCIM — las marcas, que son la raíz de todo lo demás.
+
+   Hasta ahora una marca era **una cadena de texto repetida ocho mil quinientas veces**. Eso da
+   para agrupar una rejilla y para nada más: no había dónde apuntar por dónde se abre un ticket,
+   ni el número de cliente, ni por qué esta casa compra a esos; y dos formas de escribir el mismo
+   nombre eran dos marcas que nadie podía juntar.
+
+   El orden de la sección queda como es de verdad, y se lee de arriba abajo en las pestañas:
+
+       marca → modelo del catálogo → plantilla → equipo del inventario
+
+   **Se dan de alta solas al importar.** Nadie va a teclear trescientas antes de traerse la
+   biblioteca — y si hubiera que hacerlo, no se haría. Lo que se teclea aquí es justo lo que
+   ningún repositorio puede saber: dónde se pide soporte, con qué número de contrato, y qué hay
+   que recordar de ellos.
+
+   Se lee **sin permiso de gestión** a propósito: la dirección donde se abre un ticket es lo que
+   hace falta a las tres de la mañana, y esa es la hora a la que nadie tiene el permiso bueno.
+   ================================================================ #}
+
+//: Las marcas, o `null` si todavía no se han pedido. `{rows}`.
+let _dcBrands = null;
+//: La que se está escribiendo o corrigiendo, o `null`. La misma ficha para las dos cosas: crear
+//: y editar son lo mismo sobre otras columnas.
+let _dcBrandForm = null;
+//: Lo que se busca en la lista. En memoria y no en el servidor: son trescientas filas, y una
+//: ida y vuelta por letra para filtrar trescientas sería gastar la red en no hacer nada.
+let _dcBrandQ = '';
+
+async function _dcBrandsLoad() {
+    const d = await apiGet('/api/v1/dcim/brands') || {};
+    _dcBrands = {rows: d.brands || []};
+    renderDcim();
+}
+
+function _dcBrandsHtml() {
+    if (_dcBrands === null) {
+        _dcBrandsLoad();
+        return `<div class="text-center py-4"><div class="spinner-border spinner-border-sm">
+            </div></div>`;
+    }
+    const puede = _dcimMay('dcim_catalog_manage');
+    const q = _dcBrandQ.trim().toLowerCase();
+    const rows = (_dcBrands.rows || []).filter(
+        b => !q || String(b.name || '').toLowerCase().indexOf(q) >= 0);
+    return `<div class="ss-toolrow mb-2">
+            <input class="form-control form-control-sm" style="max-width:16rem"
+                   value="${escAttr(_dcBrandQ)}"
+                   placeholder="${escAttr(t('dcim_cat_filter_maker'))}"
+                   oninput="_dcBrandQ=this.value;renderDcim()">
+            ${_dcBrandQ ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcBrandQ='';renderDcim()">${esc(t('clear'))}</button>` : ''}
+            ${puede ? `<button class="btn btn-sm btn-secondary" onclick="_dcBrandEdit(null)">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_brand_new'))}</button>` : ''}
+            <span class="text-muted ss-fs-2 ss-toolrow-text">${esc(t('dcim_brand_intro'))}</span>
+        </div>
+        ${rows.length ? _dcBrandsTable(rows, puede)
+            : `<div class="text-muted ss-fs-2">${esc(t('dcim_brand_none'))}</div>`}`;
+}
+
+function _dcBrandsTable(rows, puede) {
+    const enlace = (url, etiqueta) => url
+        ? `<a href="${escAttr(url)}" target="_blank" rel="noopener noreferrer"
+             class="ss-fs-2">${esc(etiqueta)}</a>`
+        : '<span class="text-muted ss-fs-2">—</span>';
+    return `<div class="table-responsive"><table class="table table-sm align-middle mb-0">
+        <thead><tr>
+            <th>${esc(t('dcim_brand_name'))}</th>
+            <th class="text-end">${esc(t('dcim_brand_models'))}</th>
+            <th>${esc(t('dcim_brand_url'))}</th>
+            <th>${esc(t('dcim_brand_support'))}</th>
+            <th>${esc(t('dcim_brand_account'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${rows.map(b => `<tr class="ss-rowlink"
+                onclick="_dcBrandGo(${jsStr(b.uid)},${jsStr(b.name || '')})">
+            <td class="fw-semibold">${esc(b.name || '')}
+                ${b.description ? `<div class="text-muted ss-fs-1 fw-normal">${
+                    esc(b.description)}</div>` : ''}</td>
+            <td class="text-end ss-tabular">${esc(String(b.models || 0))}</td>
+            <td onclick="event.stopPropagation()">${enlace(b.url, t('dcim_brand_open'))}</td>
+            <td onclick="event.stopPropagation()">${
+                enlace(b.support_url, t('dcim_brand_open'))}</td>
+            <td class="ss-fs-2 ss-tabular">${esc(b.account || '')}</td>
+            <td class="text-end">${puede ? `<div class="btn-group btn-group-sm"
+                onclick="event.stopPropagation()">
+                <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
+                    onclick="_dcBrandEdit(${jsStr(b.uid)})">
+                    <i class="bi bi-pencil"></i></button>
+                <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+                    onclick="_dcBrandDrop(${jsStr(b.uid)},${jsStr(b.name || '')})">
+                    <i class="bi bi-trash"></i></button>
+            </div>` : ''}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+/** Ir a sus modelos. Por **uid** y no por nombre: es lo que sigue siendo cierto después de
+ *  renombrarla, y acotar por el texto dejaría de encontrar nada el día que «HP» pase a llamarse
+ *  «Hewlett Packard Enterprise». */
+function _dcBrandGo(uid, nombre) {
+    _dcCatTab = 'list';
+    _dcCatView = 'list';
+    _dcCatBrand = uid;
+    _dcCatBrandName = nombre || '';
+    _dcCatMaker = '';
+    _dcCatOff = 0;
+    _dcCatOpen();
+}
+
+// ── La ficha ────────────────────────────────────────────────────────────────────────────
+
+function _dcBrandEdit(uid) {
+    const fila = uid ? ((_dcBrands || {}).rows || []).find(b => String(b.uid) === String(uid))
+                     : null;
+    if (uid && !fila) return;
+    _dcBrandForm = fila ? Object.assign({}, fila) : {};
+    _dcBrandFormDraw();
+}
+
+function _dcBrandFormDraw() {
+    const b = _dcBrandForm || {};
+    const campo = (k, etiqueta, tipo, pista) => `<label class="ss-fs-2 text-muted">
+        ${esc(etiqueta)}
+        <input class="form-control form-control-sm" type="${escAttr(tipo || 'text')}"
+               value="${escAttr(String(b[k] === undefined ? '' : b[k]))}"
+               ${pista ? `placeholder="${escAttr(pista)}"` : ''}
+               oninput="_dcBrandForm['${k}']=this.value"></label>`;
+    const html = `<div class="d-flex flex-column gap-2">
+        ${campo('name', t('dcim_brand_name'))}
+        ${campo('description', t('dcim_cat_desc'))}
+        <div class="d-flex gap-2 flex-wrap">
+            ${campo('url', t('dcim_brand_url'), 'url', 'https://')}
+            ${campo('support_url', t('dcim_brand_support'), 'url', 'https://')}
+            ${campo('account', t('dcim_brand_account'))}
+        </div>
+        <div class="text-muted ss-fs-1">${esc(t('dcim_brand_form_hint'))}</div>
+    </div>`;
+    showHtmlModal(b.uid ? String(b.name || '') : t('dcim_brand_new'), html, 'primary',
+                  `<button class="btn btn-primary" onclick="_dcBrandSave()">
+                     <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>`);
+}
+
+async function _dcBrandSave() {
+    const b = _dcBrandForm || {};
+    const cuerpo = {name: b.name || '', description: b.description || '', url: b.url || '',
+                    support_url: b.support_url || '', account: b.account || ''};
+    const r = b.uid
+        ? await _dcimSend('PUT', `/api/v1/dcim/brands/${encodeURIComponent(b.uid)}`, cuerpo)
+        : await _dcimSend('POST', '/api/v1/dcim/brands', cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    hideInfoModal();
+    showToast(t('saved'), 'success');
+    _dcBrandForm = null;
+    _dcBrandsLoad();
+}
+
+function _dcBrandDrop(uid, nombre) {
+    showConfirmModal(tf('dcim_brand_drop_q', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/brands/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger', 8000);
+        showToast(t('deleted'), 'success');
+        _dcBrandsLoad();
+    });
+}

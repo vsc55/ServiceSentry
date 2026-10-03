@@ -58,6 +58,7 @@ aparece en los tres sin tocar nada más.
 | `history` | tablas | sistema | ❌ | `history`, `check_state` |
 | `audit` | tablas | sistema | ❌ | `audit` |
 | `syslog` | tablas | **syslog** | ❌ | `syslog`, `syslog_drops` |
+| `dcim_media` | carpeta | — | ✅ | Los ficheros del inventario: planos de sala, imágenes del catálogo y los adjuntos (manuales, firmware) |
 | *(las que declare un módulo)* | ficheros | — | según declare | p. ej. los MIB del módulo SNMP |
 
 ### La regla de `core` está invertida a propósito
@@ -68,6 +69,30 @@ mañana —incluidas las que los módulos crean en ejecución vía
 en vez de quedarse fuera en silencio.
 
 > Una copia que se salta lo que no reconoció es de esos fallos que se descubren una sola vez.
+
+### La primera carpeta del núcleo, y que se puede mover
+
+Las **23 tablas del inventario** (`dc_*`) entran por esa misma regla invertida: nadie las
+reclama, luego son de `core`, que es obligatoria. Pero de un plano de sala la base de datos
+guarda **solo el nombre** — el fichero está en el disco, y una copia sin él restaura salas cuyo
+plano ya no existe. De ahí `dcim_media`, la primera parte de tipo carpeta que no es de un
+módulo. Marcada por defecto porque esos ficheros son pequeños e irreemplazables, que es la
+pareja de propiedades que lo decide.
+
+Esa carpeta **se puede mover** (`web_admin|dcim_media_dir` / `SS_DCIM_MEDIA_DIR`): veinte salas
+de planos y alzados son megas de verdad, y el disco de la base de datos no tiene por qué ser
+donde alguien los quiere. Quien arranca la copia —el botón, la tarea programada y la
+restauración— resuelve el ajuste con `parts.configured_dirs()` y se lo pasa a `create_backup`
+/ `restore_backup`; sin ese paso se archivaría la carpeta por defecto, vacía, y una restauración
+dejaría los planos en un directorio que el panel no lee.
+
+> Con el ajuste vacío se usa `<var_dir>/dcim_media`, que es lo que `part_dir()` ya sabe: solo
+> viaja lo que de verdad está puesto.
+
+Hoy la parte se lleva la carpeta **entera**, y ahí dentro conviven lo propio (`own/`: la foto
+del armario, el manual que mandó el distribuidor) y lo importado (`library/`: cientos de
+imágenes de alzado que se vuelven a bajar con un botón). Separarlas —guardar lo insustituible
+sin arrastrar la biblioteca— está pendiente.
 
 ### Un módulo aporta la suya
 
@@ -92,13 +117,14 @@ Las **tablas** de un módulo no se declaran: ya están en `core` por la regla in
 ```text
 copia-20260811-210233.zip
 ├── db/
-│   ├── hosts.json            {"columns": [...], "rows": [[...], ...]}
+│   ├── devices.json          {"columns": [...], "rows": [[...], ...]}
 │   ├── users.json
 │   ├── config.json           ← la tabla `config`, no el fichero
 │   └── …                     una por tabla
 ├── files/
 │   ├── config.json           ← el FICHERO de arranque (parte `config_file`)
 │   └── parts/
+│       ├── dcim_media/…      ← planos, imágenes y adjuntos (parte `dcim_media`)
 │       └── mibs/…            ← los ficheros de un módulo (parte `mibs`)
 └── manifest.json             ← escrito el ÚLTIMO, a propósito
 
@@ -166,7 +192,7 @@ flowchart LR
     subgraph web["contenedor web"]
       runner["BackupRunner<br/>_connectors(wa)"]
     end
-    runner -->|"'main'"| maindb[("BD sistema<br/>hosts · users · config · …")]
+    runner -->|"'main'"| maindb[("BD sistema<br/>dispositivos · users · config · …")]
     runner -->|"'syslog'"| sysdb[("BD syslog<br/>syslog · syslog_drops")]
     maindb --> zip["copia.zip"]
     sysdb --> zip
@@ -250,7 +276,7 @@ no dejan a nadie fuera.
 
 `parts` acota lo que se aplica. `required` dice qué debe **contener** una copia, no qué debe
 aplicarse: leerlo como lo segundo convertiría toda restauración parcial en total, que es lo
-contrario de lo que se pide al restaurar solo los hosts tras una importación mala.
+contrario de lo que se pide al restaurar solo los dispositivos tras una importación mala.
 
 ### Restaurar solo unas tablas
 
@@ -265,7 +291,7 @@ dos estrechan la misma selección, no compiten por ella.
 | `tables: []` | **Ninguna.** No es «todas»: leerlo así reescribiría la instalación entera de quien no pidió nada |
 
 **Más fino no es más seguro, y esa es la advertencia que sale en pantalla.** Las partes son una
-agrupación curada; una lista de tablas a mano no lo es. Restaurar `hosts` sin `credentials` deja
+agrupación curada; una lista de tablas a mano no lo es. Restaurar `devices` sin `credentials` deja
 filas apuntando a una credencial que ya no existe, y nada aquí lo impedirá. Para lo que sirve es
 para el caso contrario, el que la granularidad por partes no sabe decir: *una* tabla es el
 problema y el resto de la instalación ha avanzado desde que se hizo la copia.
@@ -617,7 +643,7 @@ En el **log** del panel (`global|log_level`, ver [explica-logging.md](explica-lo
 ```
 [INFO   ] > Backup > job a3f9c1 >> restore 'copia-20260811-2102' started
 [INFO   ] > Backup > restore >> 'copia-20260811-2102' parts=['config_file', 'core'] made with 0.0.1+build.40
-[DEBUG  ] > Backup > restore >> hosts: 12 rows
+[DEBUG  ] > Backup > restore >> devices: 12 rows
 [WARNING] > Backup > restore >> credentials: table is gone, 4 rows not applied
 [WARNING] > Backup > restore >> 'copia-20260811-2102' done, 148 rows in 9 tables, 1 could not be applied in full
 ```
@@ -627,7 +653,7 @@ lo que se dejó fuera se dejó fuera a propósito, y esto es lo que explica mese
 media instalación es más vieja que la otra media:
 
 ```
-[WARNING] > Backup > restore >> 'copia-20260811-2102' parts=['core'] tables=['hosts'] made with 0.0.1+build.65
+[WARNING] > Backup > restore >> 'copia-20260811-2102' parts=['core'] tables=['devices'] made with 0.0.1+build.65
 ```
 
 ---
@@ -663,7 +689,7 @@ flowchart TB
 
 | Cambia | ¿Se aplica sin reiniciar? |
 |---|---|
-| Filas (hosts, usuarios, roles, checks, credenciales) | **Sí, al instante** — se leen de la BD compartida |
+| Filas (dispositivos, usuarios, roles, checks, credenciales) | **Sí, al instante** — se leen de la BD compartida |
 | Config editable (tabla `config`) | **Sí** — poke inmediato, y en su defecto el poll de 15 s |
 | Puertos de syslog, allowlist, certificados | **Sí** — el listener se recarga solo… |
 | …pero el **puerto publicado de Docker** | **No.** Se fijó al crear el contenedor: hay que tocar el compose |

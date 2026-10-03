@@ -28,6 +28,22 @@
 
 ## Frontend
 
+### Plurales entre paréntesis: «{} tarea(s)»
+
+Medido el 2026-09-12: **59 cadenas en `es_ES.py` y 55 en `en_EN.py`** escriben el plural entre
+paréntesis — `{} error(es)`, `{} miembro(s)`, `Grupo(s) desconocido(s)`. Es lo que escribe un
+programa que no quiso elegir, y se lee como tal.
+
+La convención para arreglarlo **ya existe y está en uso**: una segunda clave `…_one` con el
+singular escrito entero (`summary_one`, `config_updated_banner_one`, y ahora
+`timer_backup_task_one` y `jobs_timers_unleased_one`), y quien la usa elige. Lo que falta es
+pasar las otras ciento diez y pico, cada una en su punto de uso — no es un reemplazo de texto,
+porque hay que tocar la llamada.
+
+No se ha hecho de una vez a propósito: son ~114 cadenas repartidas por todo el panel y cada una
+tiene su llamante. Las de la pantalla de Temporizadores sí están hechas, que es donde se
+reportó.
+
 ### La marca dice «SENTINEL NEXUS»
 
 El lockup (`assets/brand/logo.png`) lleva ese nombre, y el panel se llama **ServiceSentry** en el
@@ -48,7 +64,7 @@ registrados en Entra ID y en Proxmox).
 Auditoría del 2026-08-15. `register(app, wa)` guarda las rutas de un dominio como *closures*,
 así que su tamaño es el del dominio entero y no el de una función: **46 funciones pasan de 100
 líneas y las seis primeras son todas `register`** — `providers/entraid/routes.py` (646),
-`core/hosts/routes.py` (474), `core/users/routes.py` (351), `core/modules/routes.py` (350),
+`core/devices/routes.py` (474), `core/users/routes.py` (351), `core/modules/routes.py` (350),
 `core/config/routes.py` (300), `core/notify/email/template_routes.py` (291).
 
 No es deuda automática: el patrón es deliberado y `wa` se captura una vez. Pero a partir de
@@ -163,6 +179,77 @@ decisión por proceso y no por instalación, `SS_SERVICE_ROLE`/`SS_WEB_*`/`SS_SY
 `SS_LOG_LEVEL`/`SS_VERBOSE` los traduce `entrypoint.sh` a flags de CLI, y `SS_USERNAME`/
 `SS_PASSWORD` son el bootstrap de primera ejecución.
 
+### El inventario que SNMP ya descubre y nadie recoge
+
+Medido sobre la instalación real el **2026-09-12**:
+
+| SNMP ha descubierto | Tecleado en el inventario |
+|---|---|
+| **10** discos con modelo y bahía (de 20 dispositivos) | **8** SSD |
+| 464 interfaces con identidad — **no son piezas** | **4** tarjetas de red |
+| **79** adyacencias LLDP | **11** cables |
+| 214 volúmenes, 30 agregados, 28 pilas | **17** equipos, **24** piezas |
+
+**Cuidado con las cifras de esta tabla, que ya se contaron mal una vez.** «230 discos» eran 220
+series de *atributos* SMART (`dev_sda_Power_On_Hours`, `dev_sda_Seek_Error_Rate`…) más diez
+discos de verdad: los dispositivos distintos son **20**, y sólo **10** traen modelo y bahía. Los
+otros diez sólo tienen estado, sin modelo ni serie, así que de ellos no hay nada que proponer. Y
+una interfaz **no es una tarjeta**: una de cuatro puertos es una pieza, y agrupar 464 interfaces
+en tarjetas físicas no se puede hacer sin inventar.
+
+Lo que SNMP descubre —modelo y número de serie de un disco, MAC y alias de una interfaz, vecino
+LLDP, descripción del sistema, incluso `location` con coordenadas— se guarda en
+`history_series.attrs`, un JSON por serie con «lo que la serie ES, como se vio por última vez».
+Son 1.311 series con identidad guardada.
+
+**Y no cruza al inventario.** Comprobado: ni `lib/core/snmp/` ni `watchfuls/snmp/` nombran una
+tabla `dc_*`, y `lib/core/dcim/service.py` no lee `attrs`. `dc_item` y `dc_part` se rellenan a
+mano.
+
+Lo llamativo es que **la tabla ya existe y encaja casi campo a campo**. Un disco descubierto:
+
+```json
+{"bay": "Disk 1", "kind": "SATA", "model": "ST12000VN0008-2JH101", "role": "data"}
+```
+
+y `dc_part` tiene `slot`, `kind`, `model`, `serial`, `size`, `qty`, `description`. `bay` → `slot`
+y las otras dos por su nombre. La forma de tabla está escrita, con su pantalla, sus permisos, su
+historial de versiones y su parte en la copia de seguridad. Falta el camino.
+
+> **Hecho en parte (2026-09-12).** Lo de abajo se escribió creyendo que no había ningún
+> mecanismo de proponer. **Sí lo había, y para el cableado**: `cable_check` lleva tiempo
+> detectando un latiguillo movido y devolviendo las adyacencias sin declarar listas para
+> aceptar. Lo que faltaba era que alguien lo dijera sin que hubiera que abrir la pestaña, y eso
+> ya está: un explorador periódico con su arriendo, su política de repetición y su estado en
+> `dc_drift`. **Lo que sigue pendiente es el inventario de PIEZAS** —discos, tarjetas—, que es
+> de lo que trata el resto de esta entrada.
+
+**Decidido (2026-09-12): el descubrimiento PROPONE, no crea.** Un inventario que se rellena solo
+y uno donde alguien ha dicho que sí no son el mismo producto, y éste es el segundo. Va en la misma
+línea que «un módulo ausente no está apagado, está sin añadir».
+
+Eso **no tiene precedente en el panel**: lo único parecido es `__provision_device__`, que hace lo
+contrario —crea o actualiza el dispositivo que el módulo describe, sin preguntar
+([provisioning.py](../src/lib/core/modules/provisioning.py))—. Así que hay que inventar la forma,
+y de proponer se sigue más de lo que parece:
+
+- **Emparejar antes de proponer.** Un disco ya tecleado no puede volver a ofrecerse. La llave
+  natural es `serial` cuando lo hay y `(item_uid, slot)` cuando no — y SNMP no siempre trae
+  número de serie: el bloque de ejemplo de arriba tiene `bay`, `kind`, `model` y `role`, y ningún
+  serial.
+- **Una propuesta rechazada tiene que quedarse rechazada.** Si vuelve en el siguiente ciclo, la
+  lista de propuestas se convierte en ruido y deja de mirarse a la semana. Eso es estado nuevo:
+  «esto se vio y se dijo que no».
+- **Y una aceptada tiene que poder actualizarse sin pisar lo tecleado.** Si alguien corrigió el
+  modelo a mano, el siguiente descubrimiento no puede deshacerlo.
+
+**Lo que sí está claro** es que `attrs` seguirá siendo un JSON y está bien que lo sea: es una
+caché de «lo último que se vio» para que la ficha de un dispositivo enseñe el modelo del disco
+sin ir a buscarlo, incluso con la máquina en mantenimiento y sin estado vivo. Lo que no es, es el
+inventario. Consumirlo hoy obliga a leer 1.311 documentos y a saberse de memoria que la ruta es
+`_attrs → synology_disks → model`, que en otro fabricante se llama distinto — no hay SQL que
+pregunte eso, ni índice que lo sirva, ni pantalla que lo filtre.
+
 ### Catálogo MIB en tabla de módulo — o no
 
 Existe el mecanismo general de tablas-de-módulo en la BD principal
@@ -205,7 +292,7 @@ host. Dibujar una VM enchufada a `gi11` sería más falso, no más preciso.
   El panel ya sabe qué máquina es un hipervisor y qué nodos declara —el módulo Proxmox lo
   recoge— así que el dato existe; lo que no está decidido es si eso es un dibujo mejor o una
   jerarquía que estorba en un mapa de cables.
-- **Decir por qué un aparato no tiene enlace LLDP.** Es la tercera vez que la pregunta llega a
+- **Decir por qué un dispositivo no tiene enlace LLDP.** Es la tercera vez que la pregunta llega a
   mano: «se le preguntó por vecinos y no contestó» es un estado que el panel conoce (perfil
   asignado, tabla vacía) y no enseña en ninguna parte.
 - **La heurística de puerto de Netdisco.** `_port_edges` descarta un puerto si hay más de una
@@ -300,7 +387,7 @@ De aquella ronda quedaron sin arreglar, clasificados como latentes o de borde:
   upsert de `event_cursor`/cooldowns en MySQL, `ADD COLUMN` idempotente.
 - **Frontend (severidad baja):** los recogidos como *frontend-lows* en la misma ronda.
 
-**Riesgo aceptado explícitamente:** exfiltración vía `api_test_host_ssh`. El endpoint se
+**Riesgo aceptado explícitamente:** exfiltración vía `api_test_device_ssh`. El endpoint se
 endureció parcialmente (`api_test_credential` perdió `devices_edit`), pero el riesgo de fondo
 se asumió a conciencia — no lo "arregles" sin releer aquella decisión.
 

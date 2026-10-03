@@ -155,7 +155,7 @@ def collect_core_tables() -> list:
 
     The same idea as a module's, minus the namespace: a module's tables are prefixed so two
     modules can never collide, and a core package's are named outright because the core is
-    one namespace already — ``snmp_catalog``, beside ``hosts`` and ``history``.
+    one namespace already — ``snmp_catalog``, beside ``devices`` and ``history``.
 
     Declared rather than constructed at boot: these stores are built on demand (a request
     that edits a MIB, a cycle that reads the catalogue), so without this the table would be

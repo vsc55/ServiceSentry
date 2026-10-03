@@ -3,7 +3,7 @@
 """Tests for ModulesStore — the DB-backed module/item configuration store.
 
 Covers the dict <-> rows mapping: round-trip fidelity, promoted columns
-(host_uid/label/enabled) kept out of the JSON ``data``, host_uid omitted when
+(device_uid/label/enabled) kept out of the JSON ``data``, device_uid omitted when
 empty, ``__``-meta kept as a module field (not a collection), transactional
 sync (add/remove module and item), stable module UIDs, and the version token.
 """
@@ -43,15 +43,15 @@ def _sample():
         'cpu': {
             'enabled': True, 'alert': 85, 'interval': 1,
             'list': {
-                'u1': {'uid': 'u1', 'label': 'PVE20', 'host_uid': 'h1',
+                'u1': {'uid': 'u1', 'label': 'PVE20', 'device_uid': 'h1',
                        'enabled': True, 'alert': 85},
-                'u2': {'uid': 'u2', 'label': 'Moria', 'enabled': True, 'alert': 90},  # no host_uid
+                'u2': {'uid': 'u2', 'label': 'Moria', 'enabled': True, 'alert': 90},  # no device_uid
             },
         },
         'dns': {
             'enabled': False, 'interval': 5,
             'list': {
-                'd1': {'uid': 'd1', 'label': 'Router', 'host_uid': 'h2',
+                'd1': {'uid': 'd1', 'label': 'Router', 'device_uid': 'h2',
                        'enabled': False, 'nameserver': '8.8.8.8'},
             },
         },
@@ -74,19 +74,19 @@ class TestModulesStore:
     def test_promoted_columns_not_duplicated_in_data(self):
         s, db = _store()
         s.save_all(_sample())
-        host_uid, label, enabled, data = db.fetchone(
-            "SELECT host_uid, label, enabled, data FROM module_config_items WHERE uid='u1'")
-        assert (host_uid, label, enabled) == ('h1', 'PVE20', 1)
+        device_uid, label, enabled, data = db.fetchone(
+            "SELECT device_uid, label, enabled, data FROM module_config_items WHERE uid='u1'")
+        assert (device_uid, label, enabled) == ('h1', 'PVE20', 1)
         d = json.loads(data)
         assert d == {'alert': 85}                       # promoted keys + uid stripped
-        for k in ('uid', 'host_uid', 'label', 'enabled'):
+        for k in ('uid', 'device_uid', 'label', 'enabled'):
             assert k not in d
 
-    def test_host_uid_omitted_when_empty(self):
+    def test_device_uid_omitted_when_empty(self):
         s, db = _store()
         s.save_all(_sample())
-        assert db.fetchone("SELECT host_uid FROM module_config_items WHERE uid='u2'")[0] == ''
-        assert 'host_uid' not in s.load_all()['cpu']['list']['u2']
+        assert db.fetchone("SELECT device_uid FROM module_config_items WHERE uid='u2'")[0] == ''
+        assert 'device_uid' not in s.load_all()['cpu']['list']['u2']
 
     def test_enabled_false_preserved(self):
         s, _ = _store()
@@ -96,13 +96,13 @@ class TestModulesStore:
     def test_meta_key_is_module_field_not_collection(self):
         s, db = _store()
         s.save_all({'snmp': {'enabled': True,
-                             '__host_profile__': {'foo': 'bar'},
+                             '__device_profile__': {'foo': 'bar'},
                              'list': {'s1': {'uid': 's1', 'label': 'L', 'enabled': True}}}})
         out = s.load_all()
-        assert out['snmp']['__host_profile__'] == {'foo': 'bar'}
+        assert out['snmp']['__device_profile__'] == {'foo': 'bar'}
         assert 's1' in out['snmp']['list']
         mc = json.loads(db.fetchone("SELECT data FROM module_config WHERE module='snmp'")[0])
-        assert '__host_profile__' in mc and 'list' not in mc
+        assert '__device_profile__' in mc and 'list' not in mc
 
     def test_scalar_legacy_items_preserved(self):
         # Legacy format: a collection item can be a bare scalar (name -> bool),
@@ -122,7 +122,7 @@ class TestModulesStore:
         # Real data uses both 'list' and 'servers' (snmp) as collection keys.
         s, db = _store()
         data = {'snmp': {'enabled': True,
-                         'servers': {'s1': {'uid': 's1', 'label': 'SW1', 'host_uid': 'h9',
+                         'servers': {'s1': {'uid': 's1', 'label': 'SW1', 'device_uid': 'h9',
                                             'enabled': True, 'oid': '1.3.6'}}}}
         s.save_all(data)
         assert _strip_audit(s.load_all()) == data

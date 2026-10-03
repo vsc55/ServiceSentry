@@ -34,6 +34,29 @@ class _EmbedMixin:
         self._embed_profiles = (*self._embed_profiles, prof)
         self._recompute_frame_ancestors()
 
+    def _image_origins(self) -> list:
+        """Los orígenes de los que esta instalación puede cargar imágenes. Hoy: el de las
+        teselas, si hay mapa.
+
+        Sacado del proveedor configurado y no escrito en ninguna parte: un comodín o un device
+        fijo en el código serían un agujero que sigue abierto el día que nadie usa el mapa. Sin
+        mapa no devuelve nada, y entonces la política queda exactamente como estaba.
+
+        **Esta es la mitad silenciosa del asunto.** Si el origen no está aquí, el navegador
+        bloquea cada tesela y no dice nada en la página: el mapa sale vacío exactamente igual
+        que si no estuviera configurado. Por eso pregunta al mismo catálogo que dibuja
+        (`lib.maps`) y no a un atributo suelto — el día que se añada un proveedor, la política
+        se entera sola.
+
+        Del atributo y no de la base de datos, que esto se llama en CADA respuesta; y el
+        catálogo resuelve sin red, porque el origen de Google no depende de ninguna sesión.
+        """
+        from lib.maps import catalog as maps                         # noqa: PLC0415
+        return maps.origins_for({
+            'dcim_map_provider': str(getattr(self, '_DCIM_MAP_PROVIDER', '') or ''),
+            'dcim_map_tiles': str(getattr(self, '_DCIM_MAP_TILES', '') or ''),
+        })
+
     def _recompute_frame_ancestors(self) -> None:
         """Rebuild the iframe allowlist: admin-configured origins + every registered embed
         profile whose flag attr is currently on. Cheap, called on config change / at startup."""

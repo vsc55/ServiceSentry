@@ -34,6 +34,6 @@ def session_rows(wa, f: str = '') -> list:
             continue
         uname = uid_to_name.get(s.get('user_uid', ''), s.get('user_uid', ''))
         rows.append({'user': uname, 'ip': s.get('ip', ''), 'agent': s.get('user_agent', ''),
-                     'created': s.get('created', ''), 'last_seen': s.get('last_seen', '')})
+                     'created_at': s.get('created_at', ''), 'last_seen': s.get('last_seen', '')})
     rows.sort(key=lambda x: str(x.get('last_seen') or ''), reverse=True)
     return rows

@@ -11,7 +11,7 @@ There are two legitimate patterns (see ``docs/ref-watchful-emit.md``):
 
 The failure this guards against is real and was found in **eleven** call sites: a module
 using B on its main path and A in its exception branch, without passing ``name`` to the
-latter.  The monitor then falls back to resolving the BOUND HOST, so the same check
+latter.  The monitor then falls back to resolving the BOUND DEVICE, so the same check
 appeared in notifications under two different names depending on how it failed — "A
 example.com" normally, "ns1" when it raised.
 

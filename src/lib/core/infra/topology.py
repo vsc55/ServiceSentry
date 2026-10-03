@@ -186,8 +186,8 @@ def _split_private(networks: dict) -> None:
         net['private'] = any(len(v) > 1 for v in seen.values())
 
 
-def _wan_port(host: dict) -> str:
-    """The row of *host* somebody marked as the way out to the internet, or ``''``.
+def _wan_port(device: dict) -> str:
+    """The row of *device* somebody marked as the way out to the internet, or ``''``.
 
     No MIB answers this. Which of thirty ports carries the office's line is knowledge about
     the installation, so the registry is where it was written down — the same place, and for
@@ -197,16 +197,16 @@ def _wan_port(host: dict) -> str:
     a default route is what the routing table happens to say today. A drawing that showed one
     as the other would be asserting something nobody said.
     """
-    for w in (host or {}).get('watch') or ():
+    for w in (device or {}).get('watch') or ():
         if isinstance(w, dict) and str(w.get('role') or '') == 'wan' and w.get('row'):
             return str(w['row'])
     return ''
 
 
-def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dict:
+def build(devices: list, attrs_by_device: dict, evidence: dict | None = None) -> dict:
     """The map: ``{'networks': [...], 'nodes': [...], 'edges': [...], 'unplaced': [...]}``.
 
-    *hosts* is the fleet as the list screen has it (uid, name, …). *attrs_by_host* is
+    *devices* is the fleet as the list screen has it (uid, name, …). *attrs_by_device* is
     ``{uid: [attribute, …]}`` — whatever ``infra.service.attributes`` produced for each.
     *evidence* is ``{kind: {uid: {key: value}}}`` from ``infra.evidence`` — what devices SAW,
     which is what places a machine on a switch port when it speaks no LLDP.
@@ -232,11 +232,11 @@ def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dic
     seen: dict = {}                      # uid → the neighbours it reported
     unplaced: list = []
 
-    for host in hosts or ():
-        uid = str(host.get('uid') or '')
+    for device in devices or ():
+        uid = str(device.get('uid') or '')
         if not uid:
             continue
-        attrs = attrs_by_host.get(uid) or []
+        attrs = attrs_by_device.get(uid) or []
         facts = _facts_of(attrs)
         rows = _rows_of(attrs)
         seen[uid] = [r for r in rows if r.get('neighbour')]
@@ -264,7 +264,7 @@ def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dic
         # what `sysName` says and is usually — but not always — what the registry calls it.
         # Both are indexed, because a machine registered as "nas" and calling itself
         # "erebor.cerebelum.lan" is one machine and the map must not draw it as two.
-        for name in (facts.get('name'), host.get('name')):
+        for name in (facts.get('name'), device.get('name')):
             for form in _name_forms(name):
                 by_name.setdefault(form, uid)
         addrs, nets = [], []
@@ -284,18 +284,18 @@ def build(hosts: list, attrs_by_host: dict, evidence: dict | None = None) -> dic
         # The registry's own address, for a machine whose checks have never answered. It is
         # the address somebody typed, which is a fact about the record and not about the
         # device — so it places the node and is never treated as one the device claimed.
-        if not addrs and str(host.get('address') or '').strip():
-            addrs.append(str(host['address']).strip())
-            by_address.setdefault(str(host['address']).strip(), uid)
-        node = {'uid': uid, 'name': str(host.get('name') or ''),
-                'kind': str(host.get('device_type') or host.get('kind') or ''),
-                'status': str(host.get('status') or ''),
+        if not addrs and str(device.get('address') or '').strip():
+            addrs.append(str(device['address']).strip())
+            by_address.setdefault(str(device['address']).strip(), uid)
+        node = {'uid': uid, 'name': str(device.get('name') or ''),
+                'kind': str(device.get('device_type') or device.get('kind') or ''),
+                'status': str(device.get('status') or ''),
                 'addresses': addrs, 'networks': sorted(set(nets)),
                 'gateway': str(facts.get('gateway') or '').split(',')[0].strip(),
                 # …and the port somebody DECLARED as the way out, which is a different kind of
                 # statement from a next hop: a next hop is what the routing table happens to
                 # say today, and this is what the person who ran the cable says the line IS.
-                'wan': _wan_port(host)}
+                'wan': _wan_port(device)}
         nodes.append(node)
         for net in set(nets):
             networks[net]['members'].append(uid)

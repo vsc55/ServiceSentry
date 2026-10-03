@@ -8,7 +8,7 @@ load.  The section URLs are not hardcoded: one is registered per entry in the ``
 registry that declares a ``standalone`` spec (pane id, render entry point, permission), so a
 new section gets its URL by declaring itself.
 
-The rendered dashboard pulls in the module/host/widget discovery catalogs it needs to build
+The rendered dashboard pulls in the module/device/widget discovery catalogs it needs to build
 the UI.  The lighter session/API endpoints (/lang, /api/v1/me, /api/v1/health) live in
 :mod:`lib.web_admin.routes.ui`.
 
@@ -24,36 +24,37 @@ from flask import make_response, redirect, render_template, session, url_for
 
 from lib.modules import ModuleBase
 from lib.util import os_detect
-from lib.core.hosts.profiles import (
-    host_profiles_catalog,
-    module_host_collections,
-    module_host_fields,
-    module_host_multiple,
-    module_host_multi_bind,
+from lib.core.devices.profiles import (
+    device_profiles_catalog,
+    module_device_collections,
+    module_device_fields,
+    module_device_multiple,
+    module_device_multi_bind,
     module_status_render,
 )
-from lib.core.hosts.manifest import HOST_TYPES
+from lib.core.devices.classes import catalog as device_types_catalog
 from lib.modules.discovery.credential_schemas import credential_schemas
 from lib.modules.discovery.overview_widgets import overview_widgets_catalog
 from lib.core.overview.discovery import discover_overview_widgets_public as _discover_overview_widgets
 from ..constants import page_label, standalone_pages
 
 
-def _panel_tabs(wa, lang: str) -> list:
-    """Every entry of the System panel, translated and in alphabetical order.
+def _panel_tabs(wa, lang: str, group: str = 'system') -> list:
+    """Every entry of one sidebar group, translated and in alphabetical order.
 
-    The core's own tabs plus the pages a module declared belong here
-    (``__page__`` with ``"placement": "system"``). Merged before sorting rather than appended
+    *group* is ``system`` (the platform) or ``catalog`` (the organisation's registers). The
+    core's own tabs of that group plus the pages declared for it (``__page__`` / a core
+    package's ``PAGE`` with that ``placement``). Merged before sorting rather than appended
     after: a module section pinned to the end reads as an afterthought, and where a thing
     came from is not what somebody scanning a menu is looking for.
     """
     from lib.web_admin.constants import (PANEL_TABS, page_label,  # noqa: PLC0415
                                          standalone_pages, tab_sort_key)
     out = [{'id': t['id'], 'icon': t['icon'], 'label': wa._t(t['label_key'])}
-           for t in PANEL_TABS]
+           for t in PANEL_TABS if t.get('group', 'system') == group]
     for p in standalone_pages():
         sa = p.get('standalone') or {}
-        if sa.get('placement') != 'system':
+        if sa.get('placement') != group:
             continue
         # `url` and `views` travel with it: a module section HAS a URL of its own, and a
         # section with several views is several destinations. Placement decides where the
@@ -70,16 +71,26 @@ def _panel_tabs(wa, lang: str) -> list:
 def _view_specs(page: dict, lang: str) -> list:
     """A section's views, with each label resolved for this language.
 
-    Same rule as the section title: the text comes from the MODULE's lang file, so the
-    core ships no string naming a module's view. A view with no translation falls back to
-    English and then to its own slug — an untranslated menu entry beats a blank one.
+    **The same two conventions as a page's own title**, and for the same reason
+    (:func:`page_label`): a CORE view points at a key in the core catalog, and a MODULE view
+    carries its own translations because no core string may name a module.
+
+    Core views were carrying `label_i18n` with the words written in — the module convention used
+    where it does not apply. That left Spanish and English inside a `.py`, out of reach of the
+    language files, so translating a core section into a third language meant editing code.
+    Reported from the screen.
+
+    A view with no translation falls back to English and then to its own slug — an untranslated
+    menu entry beats a blank one.
     """
     out = []
     for v in (page.get('standalone', {}).get('views') or []):
         texts = v.get('label_i18n') or {}
+        clave = v.get('label_key') or ''
+        label = page_label({'label_key': clave}, lang) if clave else (
+            texts.get(lang) or texts.get('en_EN') or v['slug'])
         out.append({'slug': v['slug'], 'icon': v['icon'], 'kind': v['kind'],
-                    'action': v['action'],
-                    'label': texts.get(lang) or texts.get('en_EN') or v['slug']})
+                    'action': v['action'], 'label': label})
     return out
 
 
@@ -124,6 +135,9 @@ def register(app, wa):
             # of the translated word. Core tabs and module-contributed ones are one list —
             # a reader looking for "SNMP" should not have to know it came from a module.
             panel_tabs=_panel_tabs(wa, _lang),
+            # The organisation's registers — companies, devices, credentials, MIBs — in a group
+            # of their own above System: who manages them is not who manages the platform.
+            catalog_tabs=_panel_tabs(wa, _lang, 'catalog'),
             standalone_specs=[{'id': p['id'], 'url': p['url'], **p['standalone'],
                                'views': _view_specs(p, _lang),
                                'label': (wa._t(p['standalone']['nav_label_key'])
@@ -134,18 +148,21 @@ def register(app, wa):
             display_name=session.get('display_name', ''),
             role=session.get('role', 'viewer'),
             item_schemas=ModuleBase.discover_schemas(wa._modules_dir),
-            host_profiles=host_profiles_catalog(wa._modules_dir),
-            # What a device may declare itself to be, and the icon each wears.
-            host_types=[dict(t) for t in HOST_TYPES],
+            device_profiles=device_profiles_catalog(wa._modules_dir),
+            # What a device may declare itself to be, and the icon each wears — the eleven
+            # that ship here PLUS the ones this installation added. Read through the panel
+            # rather than off the constant, or a class somebody created would be missing from
+            # every picker and every icon until a restart.
+            device_types=device_types_catalog(wa),
             credential_types=credential_schemas(wa._modules_dir),
-            module_host_fields=module_host_fields(wa._modules_dir),
-            module_host_collections=module_host_collections(wa._modules_dir),
-            module_host_multiple=module_host_multiple(wa._modules_dir),
-            module_host_multi_bind=module_host_multi_bind(wa._modules_dir),
+            module_device_fields=module_device_fields(wa._modules_dir),
+            module_device_collections=module_device_collections(wa._modules_dir),
+            module_device_multiple=module_device_multiple(wa._modules_dir),
+            module_device_multi_bind=module_device_multi_bind(wa._modules_dir),
             module_widgets=overview_widgets_catalog(wa._modules_dir),
             overview_widgets=_discover_overview_widgets(),
             module_status_render=module_status_render(wa._modules_dir),
-            host_os_options=list(os_detect.OPTIONS),
+            device_os_options=list(os_detect.OPTIONS),
             local_os=os_detect.local_os(),
         )
         # Never cache the dashboard: it embeds the server's startup_id (used by the

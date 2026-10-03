@@ -18,13 +18,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""Watchful to monitor RAID health on a host (local or remote over SSH).
+"""Watchful to monitor RAID health on a device (local or remote over SSH).
 
-Host-centric: each ``list`` item binds to a host (``host_uid``).  The Linux
-``/proc/mdstat`` is read on that host via :meth:`ModuleBase.host_exec` — locally
-for a *local* host, or over the host's SSH connection for a *remote* host — and
+Device-centric: each ``list`` item binds to a device (``device_uid``).  The Linux
+``/proc/mdstat`` is read on that device via :meth:`ModuleBase.device_exec` — locally
+for a *local* device, or over the device's SSH connection for a *remote* device — and
 parsed with :meth:`lib.system.linux.RaidMdstat.parse_lines`.  To watch the monitor's
-own machine, add a host of kind *local*.
+own machine, add a device of kind *local*.
 """
 
 import json
@@ -39,7 +39,7 @@ _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'),
 
 
 class Watchful(ModuleBase):
-    """Monitor RAID (mdstat) health per host, locally or over SSH."""
+    """Monitor RAID (mdstat) health per device, locally or over SSH."""
 
     ITEM_SCHEMA = _SCHEMA
 
@@ -62,12 +62,12 @@ class Watchful(ModuleBase):
         return self.dict_return
 
     def _check_item(self, key, raw):
-        item = self.resolve_host(raw)
-        # Bound host in maintenance → skip (resolve_host disables it).
-        if item.get('_host_maintenance') or not item.get('enabled', True):
+        item = self.resolve_device(raw)
+        # Bound device in maintenance → skip (resolve_device disables it).
+        if item.get('_device_maintenance') or not item.get('enabled', True):
             return
         label = (item.get('label') or '').strip() or key
-        os_ = self.host_os(item)
+        os_ = self.device_os(item)
         if os_ != 'linux':
             self.dict_return.set(
                 f'{key}', False,
@@ -76,7 +76,7 @@ class Watchful(ModuleBase):
             return
         path = self.get_conf('mdstat_path', self._MODULE_DEFAULTS['mdstat_path']) or '/proc/mdstat'
         timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
-        out, err, code = self.host_exec(item, f"cat {shlex.quote(path)}", timeout=timeout)
+        out, err, code = self.device_exec(item, f"cat {shlex.quote(path)}", timeout=timeout)
         if code != 0:
             raise OSError((err or '').strip() or f'cat {path} exited {code}')
         self._md_analyze(RaidMdstat.parse_lines(out), key, label)

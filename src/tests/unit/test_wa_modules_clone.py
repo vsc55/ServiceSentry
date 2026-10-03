@@ -60,8 +60,8 @@ class TestTheUiStopsManufacturingDuplicates:
         assert 'Array.isArray' in body, 'a list of items would be walked past'
 
     def test_references_are_not_stripped(self):
-        """`cred_uid` and `host_uid` are references, not identity: the copy must go on
-        pointing at the same credential and the same host. Deleting anything ending in `uid`
+        """`cred_uid` and `device_uid` are references, not identity: the copy must go on
+        pointing at the same credential and the same device. Deleting anything ending in `uid`
         would silently unbind every clone."""
         body = _fn(self._src(), '_stripItemUids')
         assert 'delete value.uid' in body, 'the strip is no longer by exact name'

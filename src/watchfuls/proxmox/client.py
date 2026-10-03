@@ -33,7 +33,7 @@ class PveError(Exception):
         super().__init__(f'HTTP {code}: {msg}' if code else (msg or 'connection error'))
 
 
-def _split_hosts(value: str) -> list:
+def _split_devices(value: str) -> list:
     """Split a host field into a candidate address list (comma/space/newline) — a
     Proxmox cluster has several nodes, so the check can fail over between them."""
     return [h for h in re.split(r'[,\s]+', str(value or '').strip()) if h]
@@ -86,7 +86,7 @@ class PveClient:
         """Build a connection context (base URL + auth headers). For password
         auth it logs in to obtain a ticket. Raises ``PveError`` on failure."""
         base = f'https://{host}:{port}/api2/json'
-        # SSRF guard (blocks link-local/metadata; private hosts allowed) like web.
+        # SSRF guard (blocks link-local/metadata; private devices allowed) like web.
         from lib.security.net_guard import validate_external_url  # noqa: PLC0415
         reason = validate_external_url(f'https://{host}:{port}')
         if reason:

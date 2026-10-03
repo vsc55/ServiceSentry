@@ -50,7 +50,7 @@ flowchart TD
     main --> cli
 
     subgraph domain["Dominio (lib/core/*)"]
-        core["users · groups · roles · sessions · config<br/>hosts · credentials · audit · history · modules · overview"]
+        core["users · groups · roles · sessions · config<br/>dispositivos · credentials · audit · history · modules · overview"]
         notify["lib/core/notify<br/><small>router + canales (telegram/email/webhook/msteams)</small>"]
     end
 
@@ -160,7 +160,7 @@ ObjectBase (lib/core/object_base.py)
 │   ├── CheckStateStore (lib/services/monitoring/check_state/store.py)  → tabla check_state (estado vivo de checks)
 │   ├── CredentialsStore(lib/core/credentials/store.py)  → tabla credentials (identidades SSH reutilizables)
 │   ├── HistoryStore    (lib/core/history/store.py)      → tabla history (series temporales)
-│   ├── HostsStore      (lib/core/hosts/store.py)        → tabla hosts (dispositivos + perfiles de conexión)
+│   ├── DevicesStore      (lib/core/devices/stores/devices.py) → tabla devices (dispositivos + perfiles de conexión)
 │   ├── ModulesStore    (lib/core/modules/store.py)  → tablas module_config, module_config_items (config de módulos/ítems)
 │   ├── ConfigStore     (lib/core/config/store.py)       → tabla config (capa editable: una fila por sección|campo)
 │   ├── WebhooksStore   (lib/core/notify/webhook/store.py) → tabla webhooks (destinos HTTP salientes)
@@ -227,7 +227,7 @@ ServiceSentry/
 │   │   │   ├── users/ roles/ groups/ sessions/ audit/   # store.py + mixin.py + routes.py + service.py + manifest.py
 │   │   │   ├── credentials/ history/ config/            # store.py + routes.py + service.py + manifest.py. credentials/history no tienen mixin (sus stores los importan los servicios); config/ SÍ: mixin.py es su pegamento con el panel (_read_config_file/_write_config/_apply_config_on_save + overlay SS_*), y añade overview_widget.py. config/service.py incluye INT/BOOL_RULES + build_config_schema
 │   │   │   ├── modules/                                 # store.py + facade.py + service.py + routes.py (config CRUD + /api/v1/modules/watchfuls action dispatch) + manifest.py
-│   │   │   ├── hosts/                                   # store.py + service.py (CRUD-transform + check fan-out/status/probe-prep) + routes.py (CRUD+test+migrate) + profiles/runner/ssh_client/resolve/probe/migrate + manifest.py (grupo perm = 'servers')
+│   │   │   ├── devices/                                 # store.py + service.py (CRUD-transform + check fan-out/status/probe-prep) + routes.py (CRUD+test+migrate) + profiles/runner/ssh_client/resolve/probe/migrate + manifest.py (grupo perm = 'servers')
 │   │   │   ├── overview/                                # service.py (layout/widgets) + routes.py + manifest.py (grupo virtual, sin store)
 │   │   │   ├── clusters/                                # solo manifest.py (grupo virtual, sin store/routes propios)
 │   │   │   ├── health/                  # Auto-monitorización de la plataforma (sin Flask); emite notificaciones vía el router
@@ -273,7 +273,7 @@ ServiceSentry/
 │   │   │   ├── manager/                 # Control-plane de servicios: instances.py + commands.py + leader.py + routes.py (/api/v1/services/*)
 │   │   │   ├── control_server.py        # Servidor de control de servicios standalone
 │   │   │   └── heartbeat.py             # Heartbeat entre instancias de servicio
-│   │   │   # (hosts: primitivas de conexión/ejecución movidas a lib/core/hosts/ — ver bloque core/)
+│   │   │   # (dispositivos: primitivas de conexión/ejecución movidas a lib/core/devices/ — ver bloque core/)
 │   │   ├── db/                          # Capa de BD pluggable (SQLite/MySQL/PostgreSQL)
 │   │   │   ├── __init__.py              # get_connector(config, default_sqlite_path)
 │   │   │   ├── base.py                  # BaseConnector + reconcile_table() (reconciliación de esquema)
@@ -295,7 +295,7 @@ ServiceSentry/
 │   │   │   └── debug_level.py           # Enum: null, debug, info, warning, error, emergency
 │   │   ├── modules/
 │   │   │   ├── module_base.py           # Clase base para todos los watchfuls: bucle, config, mensajes, _emit (registrar + notificar)
-│   │   │   ├── host_binding.py          # Cómo un check alcanza su máquina: host_uid → dirección, perfil, credencial, SO, comando
+│   │   │   ├── device_binding.py          # Cómo un check alcanza su máquina: device_uid → dirección, perfil, credencial, SO, comando
 │   │   │   ├── dict_return_check.py     # Estructura ReturnModuleCheck (el CONTRATO de resultado)
 │   │   │   ├── check_runner.py          # Ejecuta el check() real de un módulo UNA vez, sin monitor (botón "probar" + refresco en vivo); RESULT_FIELDS = qué campos del contrato sobreviven
 │   │   │   ├── page_support.py          # Para watchfuls con sección propia (__page__): lang_section + run_item_once
@@ -353,7 +353,7 @@ ServiceSentry/
 │   │           ├── ui.py                # sesión/API ligero: /lang/<code> (navegación), /api/v1/me, /api/v1/health
 │   │           ├── status.py errors.py util.py
 │   │           └── …                    # Los demás registradores viven con su dominio/servicio:
-│   │                                    #   core:      users/roles/groups/sessions/audit/config/credentials/history/hosts/modules/notify/*
+│   │                                    #   core:      users/roles/groups/sessions/audit/config/credentials/history/devices/modules/notify/*
 │   │                                    #   services:  monitoring/routes.py (/api/v1/monitoring/*), syslog/routes.py, events/routes.py, ipban, manager (/api/v1/services)
 │   │                                    #   providers: ldap/oidc/saml/scim/entraid (auth externa + SCIM)
 │   ├── watchfuls/                       # Módulos de monitorización (packages)
@@ -378,7 +378,7 @@ ServiceSentry/
 │       ├── unit/                        # Aislado: sin app, sin BD, sin HTTP
 │       │   ├── test_monitor.py
 │       │   ├── test_thermal.py
-│       │   ├── test_hosts_store.py
+│       │   ├── test_devices_store.py
 │       │   ├── test_secret_manager.py
 │       │   └── …                        # (test_config_control, test_exe, test_parse_helpers, …)
 │       ├── integration/                 # Arranca Flask vía test_client/_login
@@ -386,7 +386,7 @@ ServiceSentry/
 │       │   ├── test_wa_config.py
 │       │   ├── test_wa_groups.py
 │       │   ├── test_wa_security.py
-│       │   └── …                        # (test_wa_hosts, test_wa_auth, test_wa_scim, …)
+│       │   └── …                        # (test_wa_devices, test_wa_auth, test_wa_scim, …)
 │       ├── e2e/                         # Recursos vivos: motores de BD reales + navegador Playwright
 │       │   ├── test_ui_playwright.py
 │       │   ├── test_db_portability_live.py
@@ -400,14 +400,14 @@ ServiceSentry/
 │       # (misma base): p. ej. test_credentials.py → unit/ + integration/. Ver ref-tests.md.
 ├── data/                                # Datos en modo desarrollo (config_dir == var_dir)
 │   ├── config.json                     # Capa de solo-lectura + arranque: sección `database`, credenciales de primer arranque, overrides bloqueados y datos de feature (webhooks/overview/plantillas)
-│   └── data.db                         # BD SQLite por defecto (usuarios, roles, sesiones, auditoría, hosts, credenciales, historial, estado de checks, config de módulos/ítems Y la configuración editable: tabla `config`)
+│   └── data.db                         # BD SQLite por defecto (usuarios, roles, sesiones, auditoría, dispositivos, credenciales, historial, estado de checks, config de módulos/ítems Y la configuración editable: tabla `config`)
 └── docs/
     ├── explica-arquitectura.md                  # Este archivo
     ├── ref-configuracion.md
     ├── explica-notificaciones.md                  # Entrega de notificaciones (dispatcher/canales/matriz/textos) — FUENTE CANÓNICA
     ├── explica-servicios.md                       # Servicios de fondo (embebido/standalone, microservicios, HA)
     ├── explica-descubrimiento.md                      # Patrones self-describing (permisos, servicios, widgets, eventos)
-    ├── explica-hosts.md                          # Modelo host-céntrico (hosts + perfiles de conexión)
+    ├── explica-dispositivos.md                          # Modelo centrado en el dispositivo (dispositivos + perfiles de conexión)
     ├── ref-modulos.md
     ├── caso-guia-watchful.md
     ├── caso-guia-modulo-ia.md
@@ -461,7 +461,7 @@ flowchart TD
     pool --> mod["5. Para CADA módulo (en paralelo): check_module(nombre)"]
     mod --> imp["importlib.import_module(nombre)<br/>Watchful(self) ← le pasa el Monitor"]
     imp --> chk["module.check() → ReturnModuleCheck"]
-    chk --> host["(opcional) resolve_host(item)<br/><small>si el ítem tiene host_uid: fusiona dirección + perfil<br/>del host (Monitor._hosts_store). Ver guía de módulos §4d</small>"]
+    chk --> host["(opcional) resolve_device(item)<br/><small>si el ítem tiene device_uid: fusiona dirección + perfil<br/>del dispositivo (Monitor._devices_store). Ver guía de módulos §4d</small>"]
 
     host --> each["Para CADA resultado en ReturnModuleCheck"]
     each --> save["Guarda other_data en check_state"]
@@ -700,7 +700,7 @@ convierte en dict. Nada de eso se comparte. Lo que sí se comparte —y estaba c
 uno— vive en `lib/db/store_base.py`: `BaseStore` aporta el conector, `close()` (no-op: el
 dueño del ciclo de vida es el conector), `count()`, la sonda `stamp()`, el relleno de columnas
 de auditoría y **el** formato de fecha; `EncryptedPayloadMixin` aporta cifrar/descifrar el
-payload para los dos stores que guardan secretos (credenciales y perfiles de host).
+payload para los dos stores que guardan secretos (credenciales y perfiles de dispositivo).
 
 Un store declara dos nombres, no uno: el **lógico** (clave del contador de versiones, y como
 lo llama la documentación) y el **identificador SQL**, que puede necesitar comillas —`groups`
@@ -711,7 +711,7 @@ conteste «no sé» y una sonda que no puede contestar no recarga nunca.
 La capa de datos del core (`lib/db/`) abstrae el motor mediante `BaseConnector`,
 con implementaciones para **SQLite** (por defecto), **MySQL/MariaDB** y
 **PostgreSQL**. Todos los stores (repartidos en `lib/core/*/store.py` y `lib/services/*/store/`) (`users`, `groups`, `roles`,
-`sessions`, `audit`, `check_state`, `credentials`, `history`, `hosts`, `modules`,
+`sessions`, `audit`, `check_state`, `credentials`, `history`, `devices`, `modules`,
 `config`, `webhooks`, `event_rules`, `notification_log`, `event_cooldowns`, `event_cursor`, `syslog`, `syslog_drops`)
 reciben un conector inyectado y no hablan nunca con un driver concreto. Se crea **un único conector
 compartido por proceso**: los stores lo reciben inyectado (no abren conexiones

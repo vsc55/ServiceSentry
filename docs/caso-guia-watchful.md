@@ -186,7 +186,7 @@ class Watchful(ModuleBase):
                     future.result()
                 except Exception as exc:
                     message = self._msg('mimod_error', name, exc)  # texto en lang/*.json → messages
-                    # name= siempre: sin él el monitor etiqueta la alerta con el HOST enlazado,
+                    # name= siempre: sin él el monitor etiqueta la alerta con el DISPOSITIVO enlazado,
                     # que es otra cosa distinta del check (ver ref-watchful-emit.md).
                     self.dict_return.set(name, False, message, name=name)
 
@@ -684,24 +684,24 @@ backends.
 
 ---
 
-## 4d. Config host-céntrica (vincular checks a un host)
+## 4d. Config centrada en el dispositivo (vincular checks a un dispositivo)
 
 Por defecto cada módulo define la conexión **dentro de cada ítem** (host, puerto,
 credenciales…). Para no repetir el mismo servidor en varios módulos, un módulo
-puede declararse **host-capaz**: sus campos de conexión pasan a un **Host**
+puede declararse **enlazable a dispositivo**: sus campos de conexión pasan a un **Dispositivo**
 (definido una vez en la sección *Servers*) y los checks lo referencian por
-`host_uid`, heredando dirección + credenciales en tiempo de ejecución.
+`device_uid`, heredando dirección + credenciales en tiempo de ejecución.
 
-**1. Declarar `__host_profile__` en `schema.json`** (a nivel raíz, hermano de
-`__module__`). Indica el protocolo y qué campo recibe la dirección del host
+**1. Declarar `__device_profile__` en `schema.json`** (a nivel raíz, hermano de
+`__module__`). Indica el protocolo y qué campo recibe la dirección del dispositivo
 (`address_field`):
 
 ```json
-"__host_profile__": {"key": "snmp", "address_field": "host"},
+"__device_profile__": {"key": "snmp", "address_field": "host"},
 ```
 
 **Si el protocolo lo declara el core** (`ssh`, `snmp`) no pongas `fields`: qué campos tiene un
-protocolo no es cosa del módulo y `host_profile_specs()` los completa desde la declaración del
+protocolo no es cosa del módulo y `device_profile_specs()` los completa desde la declaración del
 core. Sólo un protocolo propio del módulo (el `http` de `web`, el `db` de `datastore`) escribe
 su lista.
 
@@ -709,37 +709,37 @@ Esos campos marcan **qué es el dispositivo**, no qué hacemos con él: su direc
 la identidad con la que hay que hablarle y lo que declara ser. `timeout` y `retries` se
 quedan fuera a propósito —son cuánto esperamos antes de rendirnos, no quién es la máquina—
 y meterlos tiene un coste concreto: dos entradas de la misma IP que solo difieran en el
-timeout dejan de ser el mismo host para el migrador, y se convierten en dos.
+timeout dejan de ser el mismo dispositivo para el migrador, y se convierten en dos.
 
 Puede ser una **lista** de specs para módulos con varios protocolos (p. ej.
 `datastore` declara `db` + `ssh`). Solo los specs con `address_field` reciben la
-dirección del host; el resto aportan sus campos de perfil. `__host_profile__` es
+dirección del dispositivo; el resto aportan sus campos de perfil. `__device_profile__` es
 metadata (no una colección): `discover_schemas` y la UI lo ignoran como tal.
 
-**2. Resolver en el `check()`** con `self.resolve_host(item)`: si el ítem (o, en
-SNMP, el *server*) tiene `host_uid`, devuelve una copia con `address` + el perfil
-del protocolo fusionados (gana el host); si no, devuelve el ítem igual (los
+**2. Resolver en el `check()`** con `self.resolve_device(item)`: si el ítem (o, en
+SNMP, el *server*) tiene `device_uid`, devuelve una copia con `address` + el perfil
+del protocolo fusionados (gana el dispositivo); si no, devuelve el ítem igual (los
 checks *inline* clásicos siguen funcionando — coexistencia):
 
 ```python
 def check(self):
     for key, value in self.get_conf('list', {}).items():
-        item = self.resolve_host(value)          # no-op si es inline
-        host = item.get('host')                  # viene del host si está vinculado
+        item = self.resolve_device(value)          # no-op si es inline
+        host = item.get('host')                  # viene del dispositivo si está vinculado
         ...
 ```
 
 Para módulos que leen campo-a-campo (`get_conf_in_list`), cachea el ítem resuelto
 por cycle y lee de él (patrón `_resolved_item` en `datastore`/`web`).
 
-> **Qué cubre el host, dónde se almacena y cómo se cifra** (el host posee *cómo
+> **Qué cubre el dispositivo, dónde se almacena y cómo se cifra** (el dispositivo posee *cómo
 > conectar*, el ítem *qué comprobar*; la UI oculta los campos de conexión al
-> vincular; los hosts viven en `HostsStore` con los secretos cifrados) está en
-> [explica-hosts.md](explica-hosts.md).
+> vincular; los dispositivos viven en `DevicesStore` con los secretos cifrados) está en
+> [explica-dispositivos.md](explica-dispositivos.md).
 
 **Cuándo NO declararlo.** Si el "target" del módulo no es un servidor con
 conexión/credenciales sino un sujeto de la comprobación (p. ej. **dns**, cuyo
-target es un dominio a resolver), **no** declares `__host_profile__`: el módulo
+target es un dominio a resolver), **no** declares `__device_profile__`: el módulo
 se queda inline-only.
 
 ---
@@ -787,13 +787,13 @@ self.dict_return.set(key, status, message, send_msg=True, other_data=None,
 
 | Parámetro | Tipo | Descripción |
 |-----------|------|-------------|
-| `key` | str | Nombre/ID del ítem — se usa como clave en el dict de resultados y en la tabla `check_state`. En módulos host-céntricos suele ser el `host_uid` (un UID, no legible) |
+| `key` | str | Nombre/ID del ítem — se usa como clave en el dict de resultados y en la tabla `check_state`. En módulos centrados en el dispositivo suele ser el `device_uid` (un UID, no legible) |
 | `status` | bool | `True` = OK, `False` = Error |
 | `message` | str | Texto del resultado. Se envía **en texto plano** en las notificaciones (el Markdown de Telegram se elimina, ya que se rompía al agrupar) — no incrustes `*`/`_` esperando formato |
 | `send_msg` | bool | `True` **por defecto**: el monitor notifica el cambio de estado por su cuenta (patrón A). Ponlo a `False` solo si vas a notificar tú — y entonces usa `_emit()`, que hace el emparejamiento correcto. Nota: `send_msg=False` **no** afecta al registro del estado, solo silencia el aviso automático |
 | `other_data` | dict | Datos extra que se almacenan en `check_state` junto al resultado. Accesibles en la página pública `/status` bajo la clave `extra` de cada ítem |
 | `severity` | str | Severidad de un estado no-OK: `'warning'` (aviso, amarillo → kind `warn`) o `'error'` (por defecto). Los OK llevan `''` |
-| `name` | str | **Nombre amigable del ítem** para las notificaciones (p.ej. `PVE04`). Rellena la columna *Item* del digest; sin él, el monitor intenta resolver `host_uid → nombre`. Pásalo siempre que tengas el label del host/servicio |
+| `name` | str | **Nombre amigable del ítem** para las notificaciones (p.ej. `PVE04`). Rellena la columna *Item* del digest; sin él, el monitor intenta resolver `device_uid → nombre`. Pásalo siempre que tengas el label del dispositivo/servicio |
 
 **`other_data` en la API de estado:** lo que pases en `other_data` aparece como `extra` en la respuesta de la página `/status`:
 
@@ -878,13 +878,13 @@ ello la zona del digest y el color):
 | `False` | `'warning'` | `warn` | **Con problemas** (ámbar — umbral blando) |
 | `False` | `''` (resto) | `down` | **Con problemas** (rojo — caída) |
 
-Pasa **`item`** con el nombre amigable del host/servicio para rellenar la columna *Item* del
+Pasa **`item`** con el nombre amigable del dispositivo/servicio para rellenar la columna *Item* del
 digest (equivale a `name=` en `dict_return.set`); sin él, la fila sale sin nombre. El mensaje
 se envía en **texto plano** (el Markdown se elimina al agrupar por ciclo). El mapeo
 `(status, severity) → kind` lo hace `Monitor._alert_kind`; ver
 [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
-> Nota: los watchfuls host-céntricos que devuelven el resultado con `dict_return.set(...,
+> Nota: los watchfuls centrados en el dispositivo que devuelven el resultado con `dict_return.set(...,
 > send_msg=True)` notifican por esa vía (estructurada) — ahí el nombre va en `name=` y la
 > severidad en `severity=`. `send_message()` es para el patrón `set(send_msg=False)` +
 > notificación manual.

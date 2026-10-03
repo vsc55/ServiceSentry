@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 """The last two table surfaces: Clusters, and fail2ban's two lists.
 
-**Clusters** exist for redundancy — one check bound to several hosts, so that a machine going
+**Clusters** exist for redundancy — one check bound to several devices, so that a machine going
 down does not take the check with it. The table lists them and counts their members, which
 reads fine and hides the two ways a cluster is a lie:
 
 * one member. A failover pair with nothing to fail over to, and in the table it is a row with
   a "1" where another has a "3".
-* several clusters pinned to the same host. Each row looks redundant on its own; they all go
+* several clusters pinned to the same device. Each row looks redundant on its own; they all go
   down together. That is a fact about the intersection of the rows, so no per-cluster view can
-  show it — hence the pivot onto the host.
+  show it — hence the pivot onto the device.
 
 **fail2ban** lists addresses, and an IP is the one kind of row whose interesting fact is
 almost never in the row. Forty bans are usually three networks (whoever is knocking rotates
@@ -31,7 +31,7 @@ P = os.path.join(TPL, 'partials')
 CL_VIEWS = os.path.join(P, 'clusters', '_views.html')
 CL_LIST = os.path.join(P, 'clusters', '_list.html')
 CL_CARDS = os.path.join(P, 'clusters', '_view_cards.html')
-CL_HOSTS = os.path.join(P, 'clusters', '_view_hosts.html')
+CL_DEVICES = os.path.join(P, 'clusters', '_view_devices.html')
 IPB_VIEWS = os.path.join(P, 'ipban', '_views.html')
 IPB_BANS = os.path.join(P, 'ipban', '_bans.html')
 IPB_HIST = os.path.join(P, 'ipban', '_history.html')
@@ -44,13 +44,13 @@ IPB_REACH = os.path.join(P, 'ipban', '_view_reach.html')
 class TestTheScanItself:
 
     def test_every_file_is_found(self):
-        for p in (CL_VIEWS, CL_LIST, CL_CARDS, CL_HOSTS,
+        for p in (CL_VIEWS, CL_LIST, CL_CARDS, CL_DEVICES,
                   IPB_VIEWS, IPB_BANS, IPB_HIST, IPB_NET, IPB_IPS):
             assert os.path.isfile(p), p
 
     def test_the_registries_list_their_views(self):
         cl = _strip_comments(_read(CL_VIEWS))
-        for vid in ('table', 'cards', 'hosts'):
+        for vid in ('table', 'cards', 'devices'):
             assert f"id: '{vid}'" in cl, f'clusters: {vid} is not registered'
         ipb = _strip_comments(_read(IPB_VIEWS))
         for const, ids in (('IPBAN_BANS_VIEWS', ('table', 'networks')),
@@ -63,7 +63,7 @@ class TestTheScanItself:
     def test_the_bundle_includes_them_after_their_registries(self):
         js = _read(os.path.join(P, '_js_sections.html'))
         for reg, views in (('clusters/_views.html',
-                            ('clusters/_view_cards.html', 'clusters/_view_hosts.html')),
+                            ('clusters/_view_cards.html', 'clusters/_view_devices.html')),
                            ('ipban/_views.html',
                             ('ipban/_view_networks.html', 'ipban/_view_ips.html'))):
             for v in views:
@@ -71,7 +71,7 @@ class TestTheScanItself:
                 assert js.index(v) > js.index(reg), f'{v} is included before {reg}'
 
 
-class TestClustersPivotOntoTheHost:
+class TestClustersPivotOntoTheDevice:
 
     def test_a_single_member_cluster_is_named(self):
         """It is a failover pair with nothing to fail over to, and the Members column reads
@@ -81,23 +81,23 @@ class TestClustersPivotOntoTheHost:
         src = _strip_comments(_read(CL_VIEWS))
         assert 'function _clIsAlone(row) { return _clMembers(row).length < 2; }' in src
         assert 'cl_alone' in _strip_comments(_read(CL_CARDS))
-        assert 'cl_count_alone' in _strip_comments(_read(CL_HOSTS))
+        assert 'cl_count_alone' in _strip_comments(_read(CL_DEVICES))
 
-    def test_the_host_view_counts_the_shared_ones(self):
+    def test_the_device_view_counts_the_shared_ones(self):
         """Several clusters on one machine all go down together, and every one of them looks
         redundant on its own row."""
-        body = _fn(_strip_comments(_read(CL_HOSTS)), '_clViewHosts')
+        body = _fn(_strip_comments(_read(CL_DEVICES)), '_clViewDevices')
         assert 'h.clusters.length > 1' in body
         assert 'cl_count_shared' in body
 
-    def test_the_busiest_host_leads(self):
-        body = _fn(_strip_comments(_read(CL_HOSTS)), '_clViewHosts')
+    def test_the_busiest_device_leads(self):
+        body = _fn(_strip_comments(_read(CL_DEVICES)), '_clViewDevices')
         assert '(b.clusters.length - a.clusters.length)' in body
 
     def test_it_offers_no_per_cluster_actions(self):
-        """Those act on a CLUSTER and this view is showing hosts; a button per row would
+        """Those act on a CLUSTER and this view is showing devices; a button per row would
         invite pressing it against the row in front of you."""
-        assert '_clActionsHtml' not in _strip_comments(_read(CL_HOSTS))
+        assert '_clActionsHtml' not in _strip_comments(_read(CL_DEVICES))
 
     def test_the_per_cluster_permission_is_asked_in_one_place(self):
         """`cluster.<uid>.edit` grants exactly one row — the same granular shape as Servers."""
@@ -109,7 +109,7 @@ class TestClustersPivotOntoTheHost:
 
     def test_no_view_invents_the_status(self):
         """A cluster must not look healthy in one view and broken in the one beside it."""
-        for name, path in (('cards', CL_CARDS), ('hosts', CL_HOSTS)):
+        for name, path in (('cards', CL_CARDS), ('devices', CL_DEVICES)):
             assert '_clStatusAgg(' not in _strip_comments(_read(path)), \
                 f'{name} aggregates the status itself instead of composing the badge'
 
@@ -124,7 +124,7 @@ class TestClustersPivotOntoTheHost:
         reg = src[src.index('const CLUSTER_VIEWS'):]
         reg = reg[:reg.index('];')]
         for line in reg.splitlines():
-            if "id: 'hosts'" in line:
+            if "id: 'devices'" in line:
                 assert "mode: 'summary'" in line
         lst = _strip_comments(_read(CL_LIST))
         assert 'bodyMode: () => _clView.mode()' in lst
@@ -248,7 +248,7 @@ class TestTheWhitelistMeasuresItsHoles:
 class TestTheLabelsExist:
 
     def test_every_view_is_named_in_both_languages(self):
-        keys = ['cl_view_table', 'cl_view_cards', 'cl_view_hosts',
+        keys = ['cl_view_table', 'cl_view_cards', 'cl_view_devices',
                 'ipb_view_table', 'ipb_view_networks', 'ipb_view_ips', 'ipb_view_reach']
         for lang in ('en_EN', 'es_ES'):
             src = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', f'{lang}.py'))
@@ -256,7 +256,7 @@ class TestTheLabelsExist:
                 assert f"'{k}':" in src, f'{lang} does not name {k}'
 
     def test_the_vocabulary_exists_in_both_languages(self):
-        keys = ['cl_alone', 'cl_count_clusters', 'cl_count_hosts', 'cl_count_alone',
+        keys = ['cl_alone', 'cl_count_clusters', 'cl_count_devices', 'cl_count_alone',
                 'cl_count_shared', 'cl_count_orphan', 'cl_col_clusters', 'cl_col_in_clusters',
                 'ipb_count_networks', 'ipb_count_clustered', 'ipb_count_repeat',
                 'ipb_col_network', 'ipb_col_addresses', 'ipb_col_bans', 'ipb_col_max_level',

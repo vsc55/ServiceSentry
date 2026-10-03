@@ -59,7 +59,7 @@ sudo -u svcsentry install -d -m 700 /home/svcsentry/.ssh
 
 En el **gestor de credenciales** de ServiceSentry crea una credencial SSH para
 este host usando **autenticación por clave** (no contraseña) y activa
-`ssh_verify_host` en el perfil SSH del host para validar la host key del remoto
+`ssh_verify_host` en el perfil SSH del dispositivo para validar la host key del remoto
 (evita ataques MITM).
 
 ## Paso 2 — Instalar el envoltorio
@@ -143,7 +143,7 @@ ssh -i clave_privada svcsentry@host 'rm -rf /'      # → "command not allowed",
 sudo journalctl -t ssentry-wrap                      # auditoría de OK/DENIED
 ```
 
-Desde la propia interfaz, el botón **Test connection** del host y de cada
+Desde la propia interfaz, el botón **Test connection** del dispositivo y de cada
 comprobación debe seguir devolviendo OK con la cuenta restringida.
 
 ---

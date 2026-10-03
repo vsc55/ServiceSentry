@@ -77,22 +77,22 @@ class ClusterChecks:
             self._emit(key, True, self._msg('px_perms_ok', label))
 
     @staticmethod
-    def _node_tag(node: str, node_host: dict) -> str:
-        """`` (host name)`` suffix when the API node maps to a registry host."""
-        m = (node_host or {}).get(node)
+    def _node_tag(node: str, node_device: dict) -> str:
+        """`` (device name)`` suffix when the API node maps to a registry device."""
+        m = (node_device or {}).get(node)
         return f' ({m["name"]})' if m and m.get('name') else ''
 
     @staticmethod
-    def _node_extra(node: str, node_host: dict) -> dict:
-        """Host identity to attach to a node's result (host_uid/host_name)."""
-        m = (node_host or {}).get(node)
+    def _node_extra(node: str, node_device: dict) -> dict:
+        """Device identity to attach to a node's result (device_uid/device_name)."""
+        m = (node_device or {}).get(node)
         if not isinstance(m, dict):
             return {}
         out = {}
-        if m.get('host_uid'):
-            out['host_uid'] = m['host_uid']
+        if m.get('device_uid'):
+            out['device_uid'] = m['device_uid']
         if m.get('name'):
-            out['host_name'] = m['name']
+            out['device_name'] = m['name']
         return out
 
     # ── Individual checks ─────────────────────────────────────────────────
@@ -124,7 +124,7 @@ class ClusterChecks:
                     'node_ips': node_ips})
 
     def _chk_nodes(self, conn: dict, name: str, label: str, nodes: list,
-                   maint: set = frozenset(), node_host: dict = None) -> None:
+                   maint: set = frozenset(), node_device: dict = None) -> None:
         # Maintenance is reported by the HA manager (only when HA is configured).
         ha = {}
         try:
@@ -139,8 +139,8 @@ class ClusterChecks:
             if not node:
                 continue
             key = f'{name}/node/{node}'
-            tag = self._node_tag(node, node_host)
-            extra = self._node_extra(node, node_host)
+            tag = self._node_tag(node, node_device)
+            extra = self._node_extra(node, node_device)
             online = str(n.get('status', '')) == 'online'
             if node in maint:
                 # User-declared maintenance: never alert (e.g. powered off on purpose).
@@ -184,14 +184,14 @@ class ClusterChecks:
                    {'health': health}, severity='' if (ok or bad) else 'warning')
 
     def _chk_network(self, conn: dict, name: str, label: str, nodes: list,
-                     maint: set = frozenset(), node_host: dict = None) -> None:
+                     maint: set = frozenset(), node_device: dict = None) -> None:
         for n in nodes:
             node = n.get('node')
             if not node or node in maint or str(n.get('status', '')) != 'online':
                 continue
             key = f'{name}/net/{node}'
-            tag = self._node_tag(node, node_host)
-            extra = self._node_extra(node, node_host)
+            tag = self._node_tag(node, node_device)
+            extra = self._node_extra(node, node_device)
             try:
                 ifaces = self._pve_get(conn, f'/nodes/{node}/network') or []
             except Exception as exc:  # pylint: disable=broad-except
@@ -209,14 +209,14 @@ class ClusterChecks:
                 self._emit(key, True, self._msg('px_net_ok', label, node, tag), extra)
 
     def _chk_updates(self, conn: dict, name: str, label: str, nodes: list,
-                     threshold: int, maint: set = frozenset(), node_host: dict = None) -> None:
+                     threshold: int, maint: set = frozenset(), node_device: dict = None) -> None:
         for n in nodes:
             node = n.get('node')
             if not node or node in maint or str(n.get('status', '')) != 'online':
                 continue
             key = f'{name}/updates/{node}'
-            tag = self._node_tag(node, node_host)
-            extra = self._node_extra(node, node_host)
+            tag = self._node_tag(node, node_device)
+            extra = self._node_extra(node, node_device)
             try:
                 ups = self._pve_get(conn, f'/nodes/{node}/apt/update') or []
             except Exception as exc:  # pylint: disable=broad-except
@@ -238,14 +238,14 @@ class ClusterChecks:
                            {'total': total, 'security': 0, **extra})
 
     def _chk_storage(self, conn: dict, name: str, label: str, nodes: list,
-                     threshold: int, maint: set = frozenset(), node_host: dict = None) -> None:
+                     threshold: int, maint: set = frozenset(), node_device: dict = None) -> None:
         for n in nodes:
             node = n.get('node')
             if not node or node in maint or str(n.get('status', '')) != 'online':
                 continue
             key = f'{name}/storage/{node}'
-            tag = self._node_tag(node, node_host)
-            extra = self._node_extra(node, node_host)
+            tag = self._node_tag(node, node_device)
+            extra = self._node_extra(node, node_device)
             try:
                 stores = self._pve_get(conn, f'/nodes/{node}/storage') or []
             except Exception as exc:  # pylint: disable=broad-except

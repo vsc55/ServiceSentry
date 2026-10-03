@@ -22,8 +22,8 @@ except Exception:  # pylint: disable=broad-except
     _HAS_JWT = False
 
 
-# Microsoft host origins that embed a Teams personal tab (Teams + the Outlook/Microsoft 365
-# hosts that also render Teams tabs). Declared here (Teams-specific) and registered as an
+# Microsoft device origins that embed a Teams personal tab (Teams + the Outlook/Microsoft 365
+# devices that also render Teams tabs). Declared here (Teams-specific) and registered as an
 # "embed profile" so the core security layer stays provider-agnostic.
 TEAMS_FRAME_ANCESTORS: tuple[str, ...] = (
     'https://teams.microsoft.com', 'https://*.teams.microsoft.com',

@@ -31,9 +31,9 @@ function applySavedField(path, version) {
 async function saveModules() {
     const r = await apiPut('/api/v1/modules', modulesData);
     if (r && r.ok) {
-        // The server may have provisioned linked hosts (e.g. an endpoint host for a
-        // module that declares __provision_host__) and stamped their uid on the item.
-        // Adopt those links locally so a later save this session reuses the host
+        // The server may have provisioned linked devices (e.g. an endpoint device for a
+        // module that declares __provision_device__) and stamped their uid on the item.
+        // Adopt those links locally so a later save this session reuses the device
         // instead of re-creating it. Generic — applies whatever the server returns.
         for (const p of (r.provisioned || [])) {
             const coll = modulesData[p.module] && modulesData[p.module][p.collection];
@@ -76,14 +76,18 @@ async function saveConfig() {
         fields[pathStr] = { value, version: _fieldVersions[pathStr] ?? null };
     }
     // Detect restart-required changes among dirty fields only.
-    const _needsRestart = [];
-    for (const path of RESTART_REQUIRED_FIELDS) {
-        if (!_dirtyFields.has(path)) continue;
-        const [sec, field] = path.split('|');
-        const oldVal = (_serverConfigData?.[sec] ?? {})[field];
-        const newVal = (configData?.[sec] ?? {})[field];
-        if (newVal !== undefined && oldVal !== newVal) _needsRestart.push(path);
-    }
+    const _cambiados = (lista) => {
+        const fuera = [];
+        for (const path of lista) {
+            if (!_dirtyFields.has(path)) continue;
+            const [sec, field] = path.split('|');
+            const oldVal = (_serverConfigData?.[sec] ?? {})[field];
+            const newVal = (configData?.[sec] ?? {})[field];
+            if (newVal !== undefined && oldVal !== newVal) fuera.push(path);
+        }
+        return fuera;
+    };
+    const _needsRestart = _cambiados(RESTART_REQUIRED_FIELDS);
     let _saveResp;
     try {
         const _fetchResp = await fetch('/api/v1/config', {
@@ -107,6 +111,10 @@ async function saveConfig() {
     if (hasSaved) {
         _refreshTableRowChoices();
         if (_needsRestart.length > 0) { showToast(t('config_saved_restart'), 'warning'); _showRestartBanner(); }
+        // Recargar lo pide el SERVIDOR y no una lista de aquí: quien sabe con qué política se
+        // sirvió esta página es él, y desde que una instalación con mapa abre todos los
+        // proveedores del catálogo, cambiar de uno a otro ya no hace falta pedir nada.
+        else if (_saveResp.reload_required) _askReload();
         else if (hasConflicts)          showToast(t('cfg_partial_conflict'), 'warning');
         else                            showToast(t('config_saved'));
     }

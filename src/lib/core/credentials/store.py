@@ -3,15 +3,15 @@
 """Relational store for reusable, named connection credentials.
 
 A *credential* is an SSH identity (user + password or private key) defined
-**once** and referenced by many hosts and/or inline checks via ``cred_uid``,
-so the same secret is not re-entered per host/module.  The target's address,
-port and host-key policy stay on the host/check; a credential only carries the
+**once** and referenced by many devices and/or inline checks via ``cred_uid``,
+so the same secret is not re-entered per device/module.  The target's address,
+port and device-key policy stay on the device/check; a credential only carries the
 *identity* (who authenticates and how).
 
 Backed by the shared :class:`lib.db.BaseConnector`, like the other stores.  The
 secret fields (``ssh_password``/``ssh_key_string``) inside ``data`` are
 encrypted at rest with :mod:`lib.security.secret_manager` (the same value-level Fernet
-scheme as the host profiles).  ``get``/``list`` return decrypted data so the
+scheme as the device profiles).  ``get``/``list`` return decrypted data so the
 monitor can connect; the API route masks secrets before sending them out.
 
 Schema::
@@ -32,7 +32,7 @@ from lib.db import BaseConnector
 from lib.db.schema import Column, Index, TableSpec
 from lib.db.store_base import BaseStore, EncryptedPayloadMixin
 
-# Identity fields a credential owns; overlaid onto a host/check ssh dict when a
+# Identity fields a credential owns; overlaid onto a device/check ssh dict when a
 # cred_uid is set.  Address/port/verify_host are NOT here — they belong to the
 # target, not the identity.
 SSH_CRED_FIELDS = ('ssh_user', 'ssh_auth_method', 'ssh_password', 'ssh_key', 'ssh_key_string')
@@ -45,7 +45,7 @@ _CREDS_SCHEMA = TableSpec(
         # Credential type — only 'ssh' today, but kept explicit for future kinds.
         Column('ctype',       'TEXT', nullable=False, default="'ssh'"),
         # When 0 the credential is inactive: it is ignored at resolution, so a
-        # host/check referencing it falls back to its inline SSH fields.
+        # device/check referencing it falls back to its inline SSH fields.
         Column('enabled',     'INTEGER', nullable=False, default="1"),
         Column('description', 'TEXT', nullable=False, default="''"),
         Column('data',        'TEXT', nullable=False, default="'{}'"),
@@ -72,7 +72,7 @@ def apply_credential(target: dict, cred: dict | None) -> dict:
     Returns a NEW dict: every non-empty field the credential holds (its type's
     fields — ssh_user/secret for SSH, auth_user/auth_password for a web auth
     type, …) wins, since choosing a credential means "authenticate as this".
-    Other keys in *target* (address, port, host-key policy…) are preserved.
+    Other keys in *target* (address, port, device-key policy…) are preserved.
     A falsy *cred* returns a copy of *target* unchanged.
     """
     if not isinstance(target, dict):

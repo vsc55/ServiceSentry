@@ -35,6 +35,19 @@ html.ss-nocss body { visibility: visible; }
     --ss-pagination-bg:    #f0f2f5;
     --ss-cfg-update-bg:    var(--bs-success-bg-subtle);
     --ss-cfg-update-color: var(--bs-success-text-emphasis);
+    /* Cuenta atrás: su propio juego de colores y no los semánticos de Bootstrap. `bg-success`
+       es un verde de fondo de distintivo, pensado para llevar letras blancas encima; de punto
+       de 7 px en una columna se lee apagado. Y `--bs-primary` es el azul de los botones: en una
+       barra de 3 px pesa más que el número que tiene al lado, que es lo que se mira. */
+    --ss-panel-bg:         #ffffff;
+    --ss-panel-head-bg:    #f1f3f6;
+    --ss-timer-on:         #1a7f37;
+    --ss-timer-off:        #c6ccd4;
+    --ss-timer-late:       #9a6700;
+    --ss-timer-late-bg:    #fff8c5;
+    --ss-timer-late-line:  #d9c37a;
+    --ss-timer-bar:        #2563eb;
+    --ss-timer-track:      #e3e6ea;
 }
 
 /* ── Deep dark theme (Plex-inspired) ────────────────────────────── */
@@ -65,6 +78,18 @@ html.ss-nocss body { visibility: visible; }
     --ss-err-text:                  #f87171;
     --ss-cfg-update-bg:             rgba(251, 191, 36, .20);
     --ss-cfg-update-color:          #fbbf24;
+    /* Los mismos, subidos de luz para el fondo oscuro: un verde y un azul que valen sobre
+       blanco desaparecen sobre #181818, y el ámbar sólido de Bootstrap (#ffc107) hace lo
+       contrario — grita desde una píldora de tres palabras. */
+    --ss-panel-bg:                  #212121;
+    --ss-panel-head-bg:             #1a1a1a;
+    --ss-timer-on:                  #46c35c;
+    --ss-timer-off:                 #4a4a4a;
+    --ss-timer-late:                #d5a028;
+    --ss-timer-late-bg:             #2b2210;
+    --ss-timer-late-line:           #5c4a1c;
+    --ss-timer-bar:                 #5b8cff;
+    --ss-timer-track:               #363636;
 }
 [data-bs-theme="dark"] .form-control,
 [data-bs-theme="dark"] .form-select {
@@ -316,7 +341,7 @@ html.ss-nocss body { visibility: visible; }
 .ss-card-band-top    { border-bottom: 1px solid var(--bs-border-color); }
 .ss-card-band-bottom { border-top:    1px solid var(--bs-border-color); }
 
-/* ── Collapsible card header (host modal, etc.) ───────────────────────────── */
+/* ── Collapsible card header (device modal, etc.) ───────────────────────────── */
 .ss-collapse-head { cursor: pointer; user-select: none; }
 .ss-collapse-caret { transition: transform .2s ease; }
 .ss-collapse-head.collapsed .ss-collapse-caret { transform: rotate(-90deg); }
@@ -409,6 +434,11 @@ html.ss-nocss body { visibility: visible; }
    The .ss-card-band pagination strips keep their natural height, so they pin
    top/bottom while the .ss-vscroll body between them scrolls. */
 .ss-vfill   { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+/* .ss-fill-screen : take the whole window, for a viewer that wants to be big where the browser
+   has no Fullscreen API (Safari on iPhone). The !important beats an inline `height:` — which is
+   how a viewer sets its resting size. */
+.ss-fill-screen { position: fixed !important; inset: 0 !important; z-index: 1080;
+                  height: auto !important; margin: 0 !important; border-radius: 0 !important; }
 .ss-vscroll { flex: 1 1 auto; overflow: auto; min-height: 0; }
 /* .ss-scroll-pad : for an .ss-vscroll holding plain flowing content (cards, not a table).
    The scrollbar sits INSIDE the box, so without a gutter it lands on top of the content's
@@ -497,7 +527,7 @@ html.ss-nocss body { visibility: visible; }
     -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
             mask-image: linear-gradient(to bottom, transparent 0, #000 10px);
 }
-/* Log tables (host/cluster) loading/empty state: an OVERLAY over the body area (below the
+/* Log tables (device/cluster) loading/empty state: an OVERLAY over the body area (below the
    header) instead of stretching the table — so the header keeps its natural height and nothing
    overflows. Centered vertically + horizontally; transparent so the header shows through. */
 .sl-log-wrap {
@@ -1012,12 +1042,12 @@ html.ss-nocss body { visibility: visible; }
 #eventRuleModal .evm-content > .tab-pane { overflow-y: auto; overflow-x: hidden; }
 #eventRuleModal .evm-content > .tab-pane.show.active { height: 100%; display: flex; flex-direction: column; }
 
-/* Host modal: flex-fill body so the General "Description" textarea and the Logs
+/* Device modal: flex-fill body so the General "Description" textarea and the Logs
    table stretch to the bottom as the (resizable) dialog grows. */
-#hostModal .modal-content { width: min(1500px, 96vw); }
-#hostModal .modal-body { display: flex; flex-direction: column; overflow: hidden; }
-#hostModal .gm-tab-content { flex: 1 1 auto; min-height: 0; }
-#hostModal .gm-tab-content > .tab-pane { overflow-y: auto; overflow-x: hidden; }
+#deviceModal .modal-content { width: min(1500px, 96vw); }
+#deviceModal .modal-body { display: flex; flex-direction: column; overflow: hidden; }
+#deviceModal .gm-tab-content { flex: 1 1 auto; min-height: 0; }
+#deviceModal .gm-tab-content > .tab-pane { overflow-y: auto; overflow-x: hidden; }
 
 /* User / Role / Group edit modals (gm-tab-content tab layout): flex-fill so their
    tab tables/lists (active sessions, permissions, assignments, roles, members…)
@@ -1151,6 +1181,38 @@ html.ss-nocss body { visibility: visible; }
 .ss-fs-8 { font-size: 2rem; }
 .ss-fs-9 { font-size: 2.5rem; }
 .ss-pointer { cursor: pointer; }
+
+/* Una rejilla de bloques de datos que se reparte sola el ancho que haya: tantas columnas como
+   quepan de 17rem, y cada bloque **alto de lo que dice** — `align-items: start` es lo que evita
+   que un bloque de dos renglones se estire hasta la altura del de ocho y deje el hueco en blanco
+   que motivó esto. Genérica a propósito: el patrón «bloques que se adaptan» no es de esta
+   pantalla. */
+/* Una fila de árbol: la sangría con GUÍAS y no con espacio en blanco —una rayita por nivel dice
+   de quién cuelga— y una línea entre filas con realce al pasar por encima, que es lo que lleva el
+   ojo desde el nombre de la izquierda hasta sus botones de la derecha. Genérica: el primero que
+   la usa es el árbol de cuadros y SAI, y «una lista con jerarquía» no es suya. */
+.ss-treerow {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .35rem .25rem;
+}
+
+.ss-treerow + .ss-treerow { border-top: 1px solid var(--bs-border-color); }
+.ss-treerow:hover { background: var(--bs-tertiary-bg); }
+
+.ss-treeline {
+    flex: 0 0 1.25rem;
+    align-self: stretch;
+    border-left: 1px solid var(--bs-border-color);
+}
+
+.ss-grid-info {
+    display: grid;
+    gap: .5rem;
+    align-items: start;
+    grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+}
 /* A thing you can pick up and put down. Generic on purpose: the link map's boxes are the
    first, and "what does a draggable element look like" is not a fact about that map. */
 .ss-grab { cursor: grab; }
@@ -1435,7 +1497,110 @@ html.ss-nocss body { visibility: visible; }
     min-height: 240px;
     background: var(--bs-body-bg);
     cursor: grab;
+    /* Every canvas is dragged on, and a drag that also selects the labels under the hand paints
+       them blue and leaves them selected: seen on the site plan, dragging a room. */
+    user-select: none;
 }
+/* .ss-editor : a working surface with a side panel beside it — a canvas and its inspector. The
+   surface takes whatever is left; on a phone the panel drops underneath instead of squeezing it. */
+.ss-editor { display: flex; gap: .5rem; flex: 1 1 auto; min-height: 360px; }
+.ss-editor > .ss-infra-canvas { min-width: 0; }
+@media (max-width: 767.98px) { .ss-editor { flex-direction: column; }
+                               .ss-editor > .ss-side-panel { flex-basis: auto; } }
+/* .ss-side-panel : a fixed-width column that scrolls on its own; .is-collapsed leaves only the
+   button that brings it back. */
+.ss-side-panel { flex: 0 0 17rem; min-height: 0; overflow-y: auto; background: var(--bs-body-bg); }
+.ss-side-panel.is-collapsed { flex-basis: 2.6rem; padding: .25rem; }
+/* .ss-float-tools : a vertical strip of tool buttons floating over a canvas, top-left; it wraps
+   into a second column when the canvas is shorter than the strip. */
+.ss-float-tools { position: absolute; top: .5rem; left: .5rem; z-index: 2; display: flex;
+                  flex-direction: column; flex-wrap: wrap; align-content: flex-start; gap: .25rem;
+                  max-height: calc(100% - 1rem); }
+/* .ss-grid-2 : two equal columns, for pairs of small fields (X and Y, width and depth). */
+.ss-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+
+/* .ss-master : a list beside what is picked in it. The list keeps
+   its width and the main column takes the rest; on a narrow screen they stack, list first. */
+.ss-master { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
+.ss-master-list { flex: 1 1 16rem; min-width: 0; }
+.ss-master-main { flex: 999 1 30rem; min-width: 0; }
+/* .ss-card-grid : cards of one size in as many columns as fit. */
+.ss-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+                gap: 1rem; }
+/* .ss-kpis : a row of small "label over number" boxes. */
+.ss-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); gap: .75rem; }
+/* .ss-hover-tools : controls that only show while the row holding them (.ss-hover-host) is under
+   the pointer or has the focus — and always on a screen with no pointer to hover with. Hidden
+   with visibility and not display, so the row does not jump when they appear. */
+.ss-hover-host .ss-hover-tools { visibility: hidden; }
+.ss-hover-host:hover .ss-hover-tools,
+.ss-hover-host:focus-within .ss-hover-tools { visibility: visible; }
+@media (hover: none) { .ss-hover-host .ss-hover-tools { visibility: visible; } }
+/* .ss-ubar : how full something is, as a thin bar; .ss-ubar-v stands it up, like a rack. */
+.ss-ubar { height: .375rem; width: 5rem; flex: 0 0 auto; }
+.ss-ubar-v { width: 1.1rem; height: 4.25rem; flex: 0 0 auto; border: 1px solid var(--bs-border-color);
+             border-radius: .2rem; padding: 2px; display: flex; flex-direction: column;
+             justify-content: flex-end; }
+.ss-ubar-v > div { border-radius: 1px; }
+.ss-ubar.ss-ubar-wide { width: 7.5rem; }
+/* .ss-col-label : the fixed label column of a row whose right side wraps (a room beside its racks). */
+.ss-col-label { width: 15rem; max-width: 100%; }
+/* .ss-col-count / .ss-col-state : fixed-width cells in a row of rows — the counts (right-aligned)
+   and the status — so that, line after line, the numbers, the lights and what follows them fall
+   in the same vertical. Sized to the longest content they hold, which is why they are not left
+   to the content: "1 sala · 1 rack" and "Bien" are shorter than their neighbours' and pulled the
+   rest of their line out of column. Reported from the screen. */
+.ss-col-count { width: 10rem; flex: 0 0 auto; text-align: right; }
+.ss-col-state { width: 6.5rem; flex: 0 0 auto; }
+.ss-col-bar { width: 7.5rem; flex: 0 0 auto; display: flex; align-items: center; }
+/* .ss-rack-w : the width of a rack tile in a row of them. */
+.ss-rack-w { width: 10rem; }
+/* .ss-min-0 : a flex child allowed to shrink below its content, so its text can truncate. */
+.ss-min-0 { min-width: 0; }
+/* .ss-add-tile : the "add one more" slot at the end of a row of tiles or a grid of cards — dashed,
+   so it reads as a place for something rather than a thing, but on a solid fill like any button. */
+.ss-add-tile { border: 1px dashed var(--bs-border-color); border-radius: var(--bs-border-radius);
+               background: var(--bs-tertiary-bg); color: var(--bs-secondary-color);
+               display: flex; flex-direction: column; align-items: center; justify-content: center;
+               gap: .35rem; min-width: 2.75rem; min-height: 2.75rem; padding: .25rem .5rem; }
+.ss-add-tile:hover, .ss-add-tile:focus-visible { background: var(--bs-secondary-bg);
+                                                 color: var(--bs-body-color); }
+/* .ss-tile-btn : a tile that is pressed as a whole — a rack in a row of racks, a floor in a grid. */
+.ss-tile-btn { border: 1px solid var(--bs-border-color); border-radius: var(--bs-border-radius);
+               background: var(--bs-tertiary-bg); color: var(--bs-body-color); text-align: left;
+               padding: .4rem .6rem; }
+.ss-tile-btn:hover, .ss-tile-btn:focus-visible { background: var(--bs-secondary-bg); }
+/* .ss-card-thumb : the picture strip on top of a card, or the grey strip that stands in for it. */
+.ss-card-thumb { height: 6rem; width: 100%; object-fit: cover; display: flex; align-items: center;
+                 justify-content: center; background: var(--bs-tertiary-bg);
+                 border-bottom: 1px solid var(--bs-border-color); color: var(--bs-secondary-color); }
+/* .ss-fold-head / .ss-fold-body : a foldable row and what it unfolds into, told apart by their
+   ground — the line a shade up (and one more under the pointer), what hangs from it a shade down,
+   so the eye finds where each site starts without reading. */
+.ss-fold-head { background: var(--bs-tertiary-bg); }
+/* A veil over the ground and not another variable: in this panel's dark theme the "secondary"
+   ground is DARKER than the "tertiary" one, so swapping them dimmed the line under the pointer. */
+.ss-fold-head:hover { background-image: linear-gradient(rgba(127, 127, 127, .12), rgba(127, 127, 127, .12)); }
+.ss-fold-body { background: var(--bs-body-bg); }
+/* .ss-tree-row : a line of a navigation tree — the whole line is what is pressed; .ss-tree-sub
+   is one level in; .is-picked is the one shown beside the tree. */
+.ss-tree-row { display: flex; align-items: center; gap: .5rem; width: 100%; border: 0;
+               padding: .4rem .75rem; text-align: left; color: var(--bs-body-color);
+               background: var(--bs-body-bg); border-radius: var(--bs-border-radius); }
+.ss-tree-row:hover, .ss-tree-row:focus-visible { background: var(--bs-tertiary-bg); }
+.ss-tree-row.ss-tree-sub { padding: .25rem .75rem .25rem 2.6rem; font-size: .85rem; }
+.ss-tree-row.is-picked { background: var(--bs-primary); color: #fff; }
+.ss-tree-row.is-picked .text-muted { color: rgba(255, 255, 255, .75) !important; }
+.ss-tree-row > .bi-chevron-down, .ss-tree-row > .bi-chevron-right { font-size: .7rem; width: .8rem; }
+/* .ss-led : a status light — a dot of the state's colour. One that has something wrong glows,
+   so a red among twenty greys is found from across the room. */
+.ss-led { width: .6rem; height: .6rem; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+.ss-led.is-bad { box-shadow: 0 0 .4rem .05rem currentColor; }
+/* .ss-head-caps : a small uppercase heading over a group in a side panel. */
+.ss-head-caps { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase;
+                color: var(--bs-secondary-color); }
+/* .ss-w-search : the width of a search box in a toolbar — enough to read what was typed. */
+.ss-w-search { width: 15rem; max-width: 100%; }
 
 /* The panel that describes one cable or one machine. It stands over the drawing, so it is in
    front of part of the thing it is describing — asked for from the screen the other way round:
@@ -1456,6 +1621,11 @@ html.ss-nocss body { visibility: visible; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .ss-infra-linkinfo { background: rgba(var(--bs-body-bg-rgb), .9); }
 }
+/* .ss-tabular : digits that line up in a column. A U number, a port count, a byte figure —
+   anything read down a column rather than across a sentence. Proportional digits make 11 and 44
+   different widths, and a column of those cannot be scanned. */
+.ss-tabular { font-variant-numeric: tabular-nums; }
+
 /* .ss-toolrow : a line of PROSE with controls at the end of it.
    A plain flex row shares the squeeze out among everything in it, so the sentence takes two
    lines AND every button is compressed until its label wraps inside it — reported from the
@@ -1475,6 +1645,10 @@ html.ss-nocss body { visibility: visible; }
     margin-left: auto;
     white-space: nowrap;
 }
+/* .ss-toolrow-tools.ss-wrap : a cluster too long to stay on one line on a phone — the search, a
+   filter, a view switch, the actions. It may break into lines BETWEEN its controls (each one
+   still keeps its label on one line); without this the end of it was cut off the screen. */
+.ss-toolrow-tools.ss-wrap { flex-wrap: wrap; flex-shrink: 1; min-width: 0; justify-content: flex-end; }
 
 /* .ss-passthru : a layer that floats OVER something you work in — a panel on a diagram, a
    caption on a picture — and reads without taking the pointer away from it. The layer itself
@@ -1631,30 +1805,34 @@ html.ss-nocss body { visibility: visible; }
 .dashboard-grid:not(.dashboard-edit) .dw:not(.dw-spacer) {
     transition: transform .2s ease, box-shadow .2s ease, opacity .2s ease;
 }
-/* Siblings of the hovered widget recede (everything except the hovered one) — for a
-   core OR module stat card, so a popped module card has room and doesn't just overlap. */
-.dashboard-grid:not(.dashboard-edit):has(.dw:not(.dw-spacer):not(:has(table)):hover)
+/* Which widgets pop at all. Not the ones you OPERATE: a table is scrolled and sorted, and a
+   map is dragged and zoomed — a card that grows under the cursor of somebody who was about to
+   grab it is the card taking the thing out of their hands. Reported from the screen, twice: the
+   tables first, the site map after.
+
+   `:has()` and not a class, to match how the tables were already excluded. */
+.dashboard-grid:not(.dashboard-edit):has(
+        .dw:not(.dw-spacer):not(:has(table)):not(:has([data-dwmap])):hover)
         .dw:not(.dw-spacer):not(:hover) {
     transform: scale(.95);
     opacity: .7;
 }
-/* The hovered non-table widget pops out. */
 /* Luminous focus glow, tinted per theme so it stands out on either background. */
 [data-bs-theme="dark"]  .dashboard-grid { --ss-focus-glow: 245, 158, 11; }  /* amber */
 [data-bs-theme="light"] .dashboard-grid { --ss-focus-glow: 37, 99, 235; }   /* blue */
-.dashboard-grid:not(.dashboard-edit) .dw:not(.dw-spacer):not(.dw-module):not(:has(table)):hover {
-    transform: scale(1.04);
-    box-shadow: 0 0 18px 1px rgba(var(--ss-focus-glow, 56, 189, 248), .6),
-                0 8px 24px rgba(0, 0, 0, .35);
-    position: relative;
-    z-index: 3;
-}
-/* Module stat cards are wide, so a proportional scale would balloon (overlap/overflow).
-   They pop by a FIXED small amount instead: JS sets --dw-pop = 1 + 8px/width (see
-   _dwOnGridHover) so a wide card grows the same ~8px as a narrow one, and points
-   transform-origin at the side with room. Plus glow + a crisp outline; radius from .dw
-   so all three hug the card corners. Only the stat-card view pops (tables don't). */
-.dashboard-grid:not(.dashboard-edit) .dw-module:not(:has(table)):hover {
+/* The hovered widget pops out — by a FIXED number of PIXELS and never by a percentage.
+   A percentage is a growth that depends on how wide the card is, and a card that spans the
+   whole grid grows by tens of pixels: half of that lands outside the window, where there is no
+   sideways scroll to go and look for it. It was already known for module cards, which are wide;
+   the same thing happened the day a CORE card was wide too — the site map, reported from the
+   screen — so the fixed pop is now for everyone and the two rules are one.
+
+   JS sets --dw-pop = 1 + 8px/width (see `_dwOnGridHover`) so a wide card grows the same ~8px as
+   a narrow one, and points transform-origin at whichever side has room. The fallback only
+   applies for the instant before that runs. Radius comes from .dw so glow and outline hug the
+   card's corners. */
+.dashboard-grid:not(.dashboard-edit)
+        .dw:not(.dw-spacer):not(:has(table)):not(:has([data-dwmap])):hover {
     transform: scale(var(--dw-pop, 1.02));
     outline: 1px solid var(--bs-border-color);
     box-shadow: 0 0 18px 1px rgba(var(--ss-focus-glow, 56, 189, 248), .6),
@@ -2285,6 +2463,20 @@ body.ss-kiosk #kioskExit:hover { opacity: 1; }
     background: #1f2937; border: 1px solid rgba(255,255,255,.12);
     border-radius: .4rem; box-shadow: 0 8px 24px rgba(0,0,0,.45);
 }
+/* **El puente.** El menu se coloca en el borde del CARRIL, y la fila termina antes: donde la
+   lista de secciones desplaza, la barra de desplazamiento se come 10px por dentro. Ese hueco no
+   es de nadie — ni de la fila ni del menu— asi que al cruzarlo el raton SALE del bloque, salta
+   `mouseleave`, el menu se oculta... y al ocultarse ya no esta debajo del raton para volver a
+   entrar. El menu desaparecia a mitad de camino. Reportado desde la pantalla.
+
+   Se tapa con una franja transparente pegada al lado izquierdo del menu, tan ancha como el
+   hueco (`--ss-fly-puente`, que mide el JS al colocarlo). Es parte del menu, asi que pisarla es
+   estar dentro: no hay tierra de nadie que cruzar. Un retardo al cerrar tambien lo taparia,
+   pero eso no quita el hueco — solo da tiempo a salir de el. */
+.ss-sb-flyout::before {
+    content: ''; position: absolute; top: 0; bottom: 0;
+    left: calc(-1 * var(--ss-fly-puente, 0px)); width: var(--ss-fly-puente, 0px);
+}
 [data-bs-theme="dark"] .ss-sb-flyout { background: #111827; }
 /* Single source of truth: JS toggles .ss-fly-open (on mouseenter/leave + click). No CSS
    :hover — mixing it with the JS state + position:fixed left flyouts lingering/overlapping. */
@@ -2746,3 +2938,732 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
     line-height: 1;
     flex: 0 0 auto;
 }
+
+/* ── Rejilla de baldosas de resumen ─────────────────────────────────────────
+   Genérica y no del cuadro de mando: una fila de «esto de esto» con su estado es una forma que
+   ya piden tres pantallas. `auto-fill` con un mínimo, para que ocho sedes no salgan en ocho
+   columnas ilegibles ni dos ocupen la pantalla entera. */
+.ss-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+    gap: .75rem;
+}
+
+/* El borde lleva el estado, así que se ve sin leer — pero nunca solo el borde: la insignia de
+   dentro lo dice con palabras, porque un cuadro que solo se lee por el color no se lee de
+   todas las formas en que la gente lee. */
+.ss-tile {
+    border-width: 2px;
+    transition: transform .12s ease;
+}
+
+.ss-tile:hover,
+.ss-tile:focus-visible {
+    transform: translateY(-2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ss-tile { transition: none; }
+    .ss-tile:hover, .ss-tile:focus-visible { transform: none; }
+}
+
+/* Crédito del mapa. Obligatorio con OpenStreetMap y de sentido común con cualquier otro: quien
+   te presta las imágenes tiene derecho a que se sepa. Encima del dibujo y legible, no un gris
+   sobre gris que cumple el trámite sin cumplir la licencia. */
+/* La ficha que sale al señalar un punto de un mapa. Genérica y no por identificador: la usa
+   cualquier tarjeta de mapa, traiga los puntos quien los traiga.
+
+   `pointer-events: none` es la mitad del asunto: la ficha aparece PEGADA al puntero, así que si
+   recibiera el ratón se lo quitaría a la chincheta que la está enseñando y parpadearía sin
+   parar. */
+.dw-map-card {
+    position: absolute;
+    z-index: 3;
+    width: 15rem;
+    max-width: calc(100% - .5rem);
+    padding: .5rem .6rem;
+    font-size: .8rem;
+    line-height: 1.35;
+    color: var(--bs-body-color);
+    background: color-mix(in srgb, var(--bs-body-bg) 94%, transparent);
+    border: 1px solid var(--bs-border-color);
+    border-radius: .4rem;
+    box-shadow: 0 .35rem 1rem rgba(0, 0, 0, .22);
+    pointer-events: none;
+}
+
+/* Una caja que se puede estirar hacia abajo. Genérica y no por identificador: cuánto sitio
+   merece un dibujo depende de lo que se esté mirando, y eso no lo puede decidir quien lo pinta.
+   `resize` necesita `overflow` distinto de `visible` para que el navegador lo respete. */
+.ss-resize-v {
+    resize: vertical;
+    overflow: auto;
+    min-height: 8rem;
+}
+
+
+/* El recuento por estado de un mapa: arriba a la izquierda, en la esquina que ningún mapa usa
+   —el pie de créditos va abajo a la derecha, y las chinchetas caen en el centro—.
+
+   Con `pointer-events: none` como el pie: es un rótulo, no un mando, y encima de un mapa que se
+   arrastra cualquier cosa que atrape el puntero es un trozo del mapa que no se puede agarrar. */
+.ss-map-tally {
+    position: absolute;
+    left: .25rem;
+    top: .25rem;
+    display: flex;
+    gap: .5rem;
+    padding: .15rem .45rem;
+    font-size: .72rem;
+    line-height: 1.3;
+    color: var(--bs-body-color);
+    background: color-mix(in srgb, var(--bs-body-bg) 82%, transparent);
+    border-radius: .25rem;
+    pointer-events: none;
+}
+
+.ss-map-tally-item {
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Cero es un dato y se dice, pero apagado: el color se guarda para lo que sí está pasando. */
+.ss-map-tally-none { opacity: .45; }
+
+.ss-map-credit {
+    position: absolute;
+    right: .25rem;
+    bottom: .25rem;
+    padding: .1rem .4rem;
+    font-size: .7rem;
+    line-height: 1.3;
+    color: var(--bs-body-color);
+    background: color-mix(in srgb, var(--bs-body-bg) 82%, transparent);
+    border-radius: .25rem;
+    pointer-events: none;
+}
+
+/* ── Paleta de piezas de un plano ───────────────────────────────────────────
+   Una rejilla de botones que se ajusta al ancho que haya: en una pantalla estrecha son dos
+   columnas y en una ancha seis, sin que nadie decida un número. */
+.ss-piece-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: .35rem;
+    margin-bottom: .75rem;
+}
+
+/* El botón lleva tres cosas en una línea: icono, nombre y de cuánto es de fábrica. La medida
+   importa al elegir —una mampara de 4 m no cabe donde una puerta— así que se ve antes de
+   pulsar y no después de colocarla. */
+.ss-piece {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    text-align: left;
+    overflow: hidden;
+}
+
+.ss-piece span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ss-piece small { margin-left: auto; flex: 0 0 auto; }
+
+/* Una muestra de color en línea: el color de un cable o de una rama, del tamaño del texto que
+   lleva al lado. Genérica porque ya la piden dos pantallas. */
+.ss-swatch {
+    display: inline-block;
+    width: .75em;
+    height: .75em;
+    border-radius: 2px;
+    border: 1px solid rgba(128, 128, 128, .4);
+    vertical-align: baseline;
+}
+
+/* La misma rejilla de piezas cuando lo que hay dentro no cabe en la pantalla: trescientos
+   fabricantes en una columna son trescientos scrolls de página. Se le pone techo a la lista y la
+   página sigue quieta.
+   El techo se mide en PANTALLA y no en rem: dieciocho rem son dieciocho rem tenga el monitor el
+   alto que tenga, y en uno grande dejaban la lista cortada con media pantalla vacía debajo.
+   `60vh` es siempre algo más de la mitad de lo que hay.
+   Y con `max-height` y no con `flex`, que fue el intento anterior: llenar el hueco exige
+   encadenar `display:flex; min-height:0` por todos los antepasados, la cadena pasa por una
+   tarjeta de Bootstrap, y donde se rompe la rejilla se queda sin altura contra la que calcular
+   — las filas se pisan y el scroll desaparece. */
+.ss-piece-list-scroll {
+    max-height: 60vh;
+    overflow-y: auto;
+    align-content: start;
+    margin-bottom: .5rem;
+}
+
+/* Una fila que se abre al pulsarla. Genérica: lo piden el catálogo de modelos y cualquier tabla
+   cuyo detalle no quepa en columnas. */
+.ss-rowlink { cursor: pointer; }
+.ss-rowlink:hover > td { background: var(--bs-secondary-bg); }
+
+/* Un texto escrito a mano: los saltos de línea que puso quien lo escribió son parte de lo que
+   dijo. Genérica porque los comentarios de una plataforma son los primeros y no serán los
+   últimos — una nota de un rack se lee igual. */
+.ss-prewrap { white-space: pre-wrap; }
+
+/* Un hueco que todavía no se ha llenado: el marco de trazos dice «aquí falta algo» sin gastar
+   un color de aviso, que es para lo que va mal y no para lo que aún no se ha hecho. Genérica
+   porque la primera es la plantilla sin modelo base y no será la última. */
+.ss-dashed { border-style: dashed !important; }
+
+/* La foto de una cara de un chasis, **en un marco de tamaño fijo**. Sin él cada imagen sale a
+   su proporción: la frontal de un mini-PC es apaisada y la trasera casi cuadrada, así que las
+   dos caras del mismo equipo salían de tamaños distintos y una parecía más importante que la
+   otra. El marco iguala; `contain` mete la foto dentro sin recortarla ni deformarla, que es lo
+   único que no se puede hacer con la foto de un dispositivo — un chasis deformado ya no se
+   reconoce, que es para lo que está la foto.
+
+   Genérica y no de la plantilla: el catálogo enseña estas mismas dos caras. */
+/* Una opción marcada o no, con su nombre escrito. Genérica: la primera es «en qué bahías va este
+   componente» y no será la última — un conjunto que se elige marcando cabe igual con dos que con
+   dieciséis, y una fila de dieciséis desplegables no.
+
+   `.ss-off` es la que está pero no se puede tomar. Sale igual, porque esconderla dejaría sin
+   saber que existe; lo que dice por qué no se puede va en el `title`. */
+.ss-pick {
+    display: inline-flex;
+    align-items: center;
+    padding: .1rem .45rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 3px;
+    font-size: .85em;
+    line-height: 1.4;
+    color: var(--bs-body-color);
+    cursor: pointer;
+    margin: 0;
+    white-space: nowrap;
+}
+
+.ss-pick:hover { border-color: var(--bs-primary); }
+
+.ss-pick.ss-on {
+    background: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: #fff;
+}
+
+.ss-pick.ss-off {
+    opacity: .45;
+    cursor: not-allowed;
+    text-decoration: line-through;
+}
+
+.ss-pick.ss-off:hover { border-color: var(--bs-border-color); }
+
+/* El foco del teclado se ve en el marco: la casilla está oculta, así que sin esto recorrerlas
+   con el tabulador es recorrerlas a ciegas. */
+.ss-pick:focus-within { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
+
+/* Una familia de puerto marcada o no, en el editor de conectores. Nueve por fila: en palabras no
+   caben en una celda, así que va el icono y el nombre se queda en el `title` y en el rótulo que
+   lee un lector de pantalla — lo que se ahorra es sitio, no la palabra.
+
+   Un `<label>` y no un botón: envuelve la casilla de verdad, así que el teclado la alcanza y el
+   navegador se encarga de marcarla. Lo que se esconde es la casilla, no lo que hace. */
+.ss-conn-fam {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 3px;
+    color: var(--bs-secondary-color);
+    cursor: pointer;
+    margin: 0;
+}
+
+.ss-conn-fam:hover { border-color: var(--bs-primary); }
+
+.ss-conn-fam.ss-on {
+    background: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: #fff;
+}
+
+/* El foco del teclado se ve en el marco: la casilla está oculta, así que sin esto tabular por
+   nueve familias es tabular a ciegas. */
+.ss-conn-fam:focus-within { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
+
+/* El número de lo que hay detrás de una pestaña.
+
+   Existe para decidir si merece la pena entrar, y para eso tiene que leerse SIN mirarlo: en
+   cuanto pesa más que el rótulo deja de acompañar al nombre y compite con él. Pequeño, de
+   esquina cerrada y del color del fondo — una píldora de color al lado de una palabra es un
+   aviso, y aquí no hay nada de lo que avisar.
+
+   `tabular-nums` porque son cifras en una fila de pestañas: sin ello un `128` y un `111` miden
+   distinto y la tira se mueve al cambiar de sección. */
+.ss-tab-n {
+    display: inline-block;
+    margin-left: .3rem;
+    padding: 0 .25rem;
+    border-radius: 2px;
+    font-size: .74em;
+    font-weight: 600;
+    line-height: 1.45;
+    /* Del color de la letra y no del fondo: `--bs-secondary-bg` está a un paso del fondo de la
+       página, y sobre la pestaña activa —que ES el fondo de la página— la chapa desaparecía. Un
+       porcentaje de la tinta funciona en los dos temas sin escribir dos paletas, y el primer
+       `background` queda de reserva para el navegador que no sepa mezclar. */
+    background: var(--bs-secondary-bg);
+    background: color-mix(in srgb, var(--bs-body-color) 16%, transparent);
+    color: var(--bs-body-color);
+    font-variant-numeric: tabular-nums;
+}
+
+/* La cara de un conector, al lado de su nombre. Alta como una mayúscula y sentada en la línea
+   base del texto: un icono que sobresale de su renglón parte la tabla en dos alturas.
+
+   El trazo lo pone `currentColor`, así que vale en los dos temas sin dibujarlo dos veces. Y
+   `flex:0 0 auto` porque una columna estrecha lo aplastaría antes que al texto, y un dibujo
+   aplastado deja de ser el conector que es. */
+.ss-conn {
+    width: 1.6em;
+    height: 1.07em;
+    vertical-align: -0.15em;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    opacity: .85;
+}
+
+/* Un diálogo para una TABLA de las anchas. `modal-lg` son 800px, que le sobran a un volcado
+   clave/valor y le faltan a diez columnas con un campo en cada una.
+
+   **Sobre `.modal-content` y no sobre `--bs-modal-width`.** Esa variable es de Bootstrap y aquí
+   no la lee nadie: este panel se salta ese mecanismo entero unos cientos de líneas más arriba
+   —`.modal-lg { width: fit-content }` y `.modal-lg > .modal-content { width: 800px }`, para que
+   el diálogo pueda arrastrarse más grande— así que ponerla dejaba el cuadro exactamente igual
+   de ancho y sin decir por qué. Una regla que apunta al mecanismo que ya no manda no falla:
+   simplemente no hace nada.
+
+   Con `min()` y no con un ancho fijo: en una pantalla estrecha un valor fijo deja el diálogo
+   saliéndose por los lados, que es peor que la ranura que se venía a quitar.
+
+   Y **no lleva asa ni botón de maximizar** (`_modalResizable` en `init/_behaviors.html`): una
+   talla que el que abre ha declarado es una decisión, y un botón para deshacerla sólo añade
+   hueco vacío debajo de lo que se ha venido a leer. */
+.ss-modal-wide > .modal-content { width: min(96vw, 66rem); }
+
+/* El armario a un lado y el trabajo al otro. Las cuatro listas de un rack —lo que hay dentro,
+   cómo está cableado, de dónde come, qué lleva una caja— se insertaban ENCIMA del dibujo y lo
+   empujaban hacia abajo: se pulsaba un botón y lo que estabas mirando se movía. Al lado, el
+   armario no se pierde de vista mientras se trabaja en una de sus listas — que es justo cuando
+   hace falta, porque un cable va de una U a otra.
+
+   `align-items:start` para que la caja de la derecha mida lo que mida su contenido en vez de
+   estirarse hasta la altura del dibujo de un rack de 42 U. */
+.ss-rack-grid {
+    display: grid;
+    /* El hueco libre es del DIBUJO. Es lo que se viene a mirar, y cuanto más grande mejor se
+       lee; el panel de listas es texto y con veinticuatro caracteres de ancho ya dice lo que
+       tiene que decir. Al revés —el dibujo pidiendo lo justo y el panel quedándose el resto—
+       dejaba un alzado pequeño al lado de una tabla con la mitad de las celdas vacías. */
+    grid-template-columns: minmax(0, 42rem) minmax(28rem, 1fr);
+    gap: .75rem;
+    align-items: start;
+}
+
+/* Lo que dice el equipo señalado: **debajo del dibujo**, con su hueco reservado. Dentro no
+   cabe — el armario ocupa el dibujo entero, así que esté donde esté tapa una U— y apareciendo
+   sólo cuando hay algo señalado daría un salto cada vez que el ratón entra y sale de una caja. */
+.ss-elev-info {
+    min-height: 2.4rem;
+    padding-top: .35rem;
+}
+
+/* Mirar un armario de cerca durante un rato: pasa a primer plano y ocupa lo visible. **Sin mover
+   la tabla**, que es la diferencia entre apartar algo y taparlo: lo primero obliga a devolverlo
+   a su sitio para volver a donde estabas.
+
+   El panel deja de desplazarse mientras tanto, y eso es lo que hace que `inset: 0` sea
+   exactamente lo que se ve: sobre un contenedor que se desplaza sería el alto de TODO lo que
+   hay dentro, y el dibujo saldría tan alto como la tabla que está tapando. */
+.ss-rack-pane { position: relative; }
+.ss-rack-pane.ss-rack-over { overflow: hidden; }
+
+.ss-elev-over {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    background: var(--bs-body-bg);
+    padding: .75rem 1rem;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Y ahí el dibujo se queda con lo que sobre, en vez de con su proporción: es justo lo que se
+   ha pedido al agrandarlo. */
+.ss-elev-over .ss-canvas-fit { flex: 1 1 auto; min-height: 0; }
+
+/* Por debajo de esto las dos columnas no caben sin que las dos queden mal: se apilan, que es
+   el layout de antes hecho a propósito y no por accidente. */
+@media (max-width: 68rem) {
+    .ss-rack-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.ss-rack-panel { min-width: 0; }
+
+/* Un lienzo que mide lo que mide su dibujo. `.ss-infra-canvas` es `flex: 1 1 auto` —correcto
+   para los dos mapas, que ocupan lo que haya— y aquí sobraba: quien declara la proporción es
+   quien pinta, y de ahí sale la altura sin medir nada. */
+.ss-canvas-fit {
+    flex: 0 0 auto;
+    background: var(--bs-body-bg);
+    cursor: grab;
+}
+
+/* La forma de lo que viene, mientras viene. Una rueda dice «espera»; unas filas grises dicen
+   «aquí van filas», que además es cierto y evita el salto de cuando llegan. */
+.ss-skel {
+    height: 1.15rem;
+    border-radius: 4px;
+    background: linear-gradient(90deg,
+        var(--bs-secondary-bg) 25%, var(--bs-tertiary-bg) 37%, var(--bs-secondary-bg) 63%);
+    background-size: 400% 100%;
+    animation: ss-skel-slide 1.4s ease-in-out infinite;
+}
+.ss-skel:nth-child(2) { width: 82%; }
+.ss-skel:nth-child(3) { width: 64%; }
+.ss-skel:nth-child(4) { width: 74%; }
+.ss-skel:nth-child(5) { width: 58%; }
+
+@keyframes ss-skel-slide {
+    0%   { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ss-skel { animation: none; }
+}
+
+/* Lo señalado en la otra pantalla. El dibujo dice dónde está y la tabla qué es, y son la
+   misma cosa contada dos veces: pasar por una tiene que encender la otra, o hay que buscar a
+   mano en la segunda lo que se acaba de señalar en la primera.
+
+   Genérica porque el par dibujo/lista se repite: el alzado y sus equipos hoy, el plano y sus
+   armarios en cuanto se pida. `!important` porque compite con el rayado de `table-striped`,
+   que es lo que pinta el fondo de las filas pares. */
+.ss-hl > td { background: var(--bs-primary-bg-subtle) !important; }
+
+/* Una columna que ocupa lo suyo y ni un píxel más. `width: 1%` es como se le dice a una tabla
+   «esta celda mide lo que mide su contenido»: el resto del ancho se lo reparten las que no lo
+   piden, que es lo que hace que la columna del nombre crezca y los botones se queden pegados a
+   la derecha en vez de flotando en medio de una celda vacía. */
+.ss-hug { width: 1%; }
+
+/* Un rótulo no se parte. «Entrada de corriente» debajo de «Tipo» es una etiqueta de columna, y
+   partida en dos renglones dobla el alto de todas las filas de la tabla sin decir nada más.
+   Genérica porque el sitio donde hace falta es cualquier celda que lleve un rótulo. */
+.ss-nowrap { white-space: nowrap; }
+
+/* Una foto donde iba el dibujo. Los ciento y pico que vienen con el panel llevan dibujo —uno
+   por forma— y el que alguien añada lleva la suya: la caja es la misma, y `contain` es lo que
+   impide que una foto apaisada salga estirada dentro de ella. */
+.ss-conn-img {
+    object-fit: contain;
+    stroke: none;
+    opacity: 1;
+}
+
+/* El mismo dibujo, para mirarlo. En la tabla mide lo que una letra —basta para reconocer el que
+   ya se conoce— y aquí se agranda, que es lo que hace falta para el que no. Un solo dibujo y dos
+   tamaños: dos dibujos acabarían siendo dos que se separan. */
+.ss-conn-big {
+    width: 9rem;
+    height: 6rem;
+    vertical-align: baseline;
+    opacity: 1;
+    stroke-width: 0.9;
+}
+
+.ss-shot {
+    width: 14rem;
+    height: 6rem;
+    object-fit: contain;
+    background: var(--bs-body-bg);
+}
+
+/* La traza de un enlace: una cadena de paradas con el cable dibujado en medio.
+   Genérica y no por id, como el resto: es «una cadena de pasos», y la siguiente que haga falta
+   —el camino de la corriente desde la acometida— es la misma forma. */
+.ss-path { display: flex; flex-direction: column; }
+.ss-path-stop { display: flex; align-items: center; gap: .4rem; }
+.ss-path-dot { width: .5rem; height: .5rem; border-radius: 50%; flex: 0 0 auto;
+               background: var(--bs-secondary-color); }
+.ss-path-end { background: var(--bs-primary); width: .65rem; height: .65rem; }
+.ss-path-leg { display: flex; align-items: center; gap: .4rem; margin-left: .2rem;
+               padding: .1rem 0; }
+.ss-path-line { width: .16rem; height: 1.1rem; border-radius: .08rem; flex: 0 0 auto;
+                margin-left: .1rem; }
+.ss-path-mine .ss-path-line { height: 1.4rem; width: .28rem; }
+.ss-path-mine { font-weight: 600; }
+
+/* Un punto de estado, del tamaño de una letra: acompaña a un nombre sin competir con él.
+   Nunca va solo — el color dice lo mismo que la palabra de al lado, y sin ella no se lee en
+   blanco y negro ni con una deficiencia de color. */
+.ss-dot { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%;
+          flex: 0 0 auto; vertical-align: middle; }
+
+/* La cabecera de un grupo dentro de una tabla. Pegada arriba al desplazar: un montón de
+   cuarenta filas deja de decir de qué montón es en cuanto se pasa de la primera pantalla,
+   y entonces agrupar no sirve de nada. */
+.ss-lt-group > td { position: sticky; top: 0; z-index: 2;
+                    background: var(--bs-secondary-bg); font-weight: 600;
+                    border-top: 1px solid var(--bs-border-color); }
+.ss-lt-gn { font-family: var(--bs-font-monospace); font-size: .75em; font-weight: 400;
+            color: var(--bs-secondary-color); border: 1px solid var(--bs-border-color);
+            border-radius: .25rem; padding: 0 .3rem; margin-left: .4rem; }
+
+/* La fila de recuentos: contesta «de qué tengo y cuánto» y filtra la tabla de abajo.
+
+   **Cajas cortas y no franjas estiradas.** Con `1fr` cada recuento se comía un tercio de la
+   pantalla cuando había tres montones, y una caja de cuarenta centímetros para decir «6» no se
+   lee mejor: se lee peor, porque el número y su palabra quedan a un palmo de distancia. Con un
+   tope de ancho se quedan del tamaño de lo que dicen y el hueco sobrante se queda sobrante, que
+   es lo que tiene que pasar. */
+.ss-tiles { display: grid; gap: .4rem; padding: .5rem .55rem;
+            grid-template-columns: repeat(auto-fill, minmax(8rem, 13rem));
+            border-bottom: 1px solid var(--bs-border-color); }
+.ss-tile { display: grid; gap: .1rem; text-align: left; cursor: pointer;
+           border: 1px solid var(--bs-border-color); border-radius: .35rem;
+           background: var(--bs-body-bg); color: inherit; padding: .4rem .5rem; }
+.ss-tile:hover { background: var(--bs-tertiary-bg); }
+.ss-tile-on { border-color: var(--bs-primary); background: var(--bs-tertiary-bg); }
+.ss-tile-k { display: flex; align-items: center; gap: .3rem; font-size: .72rem;
+             color: var(--bs-secondary-color); }
+.ss-tile-v { font-family: var(--bs-font-monospace); font-size: 1.15rem; line-height: 1.1;
+             font-weight: 500; }
+
+/* El rótulo de una zona de un formulario: una palabra pequeña y una raya que llega hasta el
+   borde. Pequeña a propósito — nombra un grupo, no compite con los rótulos de las casillas que
+   hay debajo, que son los que se leen para rellenar. */
+.ss-zone-h { display: flex; align-items: center; gap: .5rem; margin-bottom: .4rem; }
+.ss-zone-h > span { font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+                    color: var(--bs-secondary-color); font-weight: 600; }
+.ss-zone-h > i { flex: 1; height: 1px; background: var(--bs-border-color); }
+
+/* Una ficha a dos columnas: a la izquierda lo que es, a la derecha por dónde pasa. En una sola
+   en cuanto la ventana no da para dos — una tirada de cuatro paradas con nombre de armario y U
+   no cabe en media pantalla de portátil, y partirla en dos líneas por parada la hace ilegible.
+   Las dos con `minmax(0, …)`: sin él, una parada con un nombre largo estira su columna y se
+   come la otra en vez de recortarse. */
+.ss-cable-two { display: grid; gap: 1.25rem; align-items: start;
+                grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 62rem) {
+    .ss-cable-two { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+}
+
+/* Meter un panel por esta punta. Pequeño y al final del renglón: es una acción de ESA parada y
+   tiene que leerse como parte de ella, no como un botón del cuadro. Sólo se ve al pasar por
+   encima de su parada — dos de éstos siempre visibles compiten con lo que hay que leer, que es
+   por dónde pasa el cable. Visible al recibir el foco, o con el teclado no habría forma. */
+.ss-path-add { padding: 0 .35rem; line-height: 1.2; opacity: 0; transition: opacity .12s; }
+.ss-path-stop:hover .ss-path-add,
+.ss-path-add:focus-visible { opacity: 1; }
+
+/* Las casillas de un formulario en rejilla, no en una fila que se envuelve. Con `auto-fit` y un
+   mínimo: caben las que quepan y las demás bajan enteras, en vez de partirse el grupo por donde
+   acabe el ancho de la ventana. `minmax(0, …)` para que un rótulo largo no estire su columna y
+   se coma la de al lado. */
+.ss-fgrid { display: grid; gap: .5rem .75rem;
+            grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr)); }
+.ss-fgrid > label { margin: 0; min-width: 0; }
+
+/* Muestras de color para elegir una. Cuadradas y pegadas, que es como se lee un muestrario; la
+   puesta con un anillo por fuera —y no por dentro— para que no cambie de tamaño al elegirla, que
+   es lo que hace bailar la fila entera. El borde tenue existe por el blanco: sin él, un cuadro
+   blanco sobre fondo claro no es un cuadro. */
+.ss-chips { display: flex; flex-wrap: wrap; gap: .2rem; margin-top: .15rem; }
+.ss-chip { width: 1.15rem; height: 1.15rem; padding: 0; border-radius: .2rem;
+           border: 1px solid var(--bs-border-color); cursor: pointer; }
+.ss-chip-on { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
+.ss-chip:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
+
+/* «Sin color»: una muestra vacía con una raya, que es como se dice «ninguno» en un muestrario.
+   Y la muestra plana del botón, que enseña lo elegido y no se pulsa por su cuenta. */
+.ss-chip-none { background: var(--bs-body-bg);
+                background-image: linear-gradient(to top right, transparent calc(50% - 1px),
+                                  var(--bs-danger) calc(50% - 1px), var(--bs-danger) calc(50% + 1px),
+                                  transparent calc(50% + 1px)); }
+.ss-chip-flat { display: inline-block; vertical-align: -.2rem; margin-right: .35rem;
+                pointer-events: none; }
+
+/* La columna de las casillas de una lista que se puede elegir en bloque: lo justo para la
+   casilla, para que no le robe sitio al nombre, que es lo que se lee. Genérica y no por id:
+   vale para cualquier tabla con selección. */
+.ss-bk-pick-col { width: 2.2rem; }
+
+/* Una caja con borde y esquinas alrededor de una tabla. Sin ella una tabla flota sobre el
+   fondo de la pestaña y sus filas se confunden con lo que haya encima o debajo; con ella el
+   bloque tiene principio y final. `overflow: hidden` para que la banda de la cabecera y la
+   última fila se recorten en la curva en vez de asomar por la esquina.
+
+   Y **superficie propia**, un escalón por encima del fondo de la página: sin eso el borde y la
+   banda de la cabecera no tienen contra qué contrastar y el marco desaparece aunque esté ahí. */
+.ss-panel {
+    background: var(--ss-panel-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: .5rem;
+    overflow: hidden;
+}
+
+/* ── Temporizadores (Trabajos → Temporizadores) ──────────────────────────────────────
+   Una tabla, como el resto del panel, con la única cifra que se mira de verdad —cuánto falta—
+   en su propia columna: la barra dice de un vistazo si queda mucho o poco y el número dice
+   cuánto. El número corre en el navegador, así que las cifras van de ancho fijo: si no, cada
+   segundo mueve la columna entera.
+   Genéricas y no por id: valen para cualquier lista de cosas con cuenta atrás. */
+.ss-timer-dot-col { width: 1.6rem; }
+.ss-timer-dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+}
+/* Apagado se pinta apagado. `bg-secondary` es un gris con peso: en una columna de cinco puntos
+   pesa lo mismo que el verde, y dice justo lo contrario. */
+.ss-timer-dot-on   { background: var(--ss-timer-on); }
+.ss-timer-dot-late { background: var(--ss-timer-late); }
+.ss-timer-dot-off  { background: var(--ss-timer-off); }
+.ss-timer-dot-none { background: var(--ss-timer-off); opacity: .5; }
+.ss-timer-next { display: flex; align-items: center; gap: .5rem; }
+.ss-timer-bar {
+    flex: 0 0 5.25rem;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--ss-timer-track);
+    overflow: hidden;
+}
+.ss-timer-bar > i {
+    display: block;
+    height: 100%;
+    background: var(--ss-timer-bar);
+    transition: width .9s linear;
+}
+.ss-timer-num { font-size: .78rem; }
+@media (prefers-reduced-motion: reduce) {
+    .ss-timer-bar > i { transition: none; }
+}
+/* La cabecera de esta tabla, en versalitas pequeñas SOBRE UNA BANDA: las cuatro palabras son
+   etiquetas de columna y no títulos —a tamaño normal compiten con los nombres, que es lo que
+   se lee—, y el fondo propio es lo que las convierte en una zona en vez de en una fila más.
+   El color va en el `th` y no en el `thead`: una `.table` de Bootstrap pinta el fondo en cada
+   celda, así que un fondo puesto en la fila queda tapado por las suyas. */
+.ss-timer-head th {
+    font-size: .68rem;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    font-weight: 500;
+    color: var(--bs-secondary-color);
+    background: var(--ss-panel-head-bg);
+    border-bottom: 1px solid var(--bs-border-color);
+    padding: .5rem 1rem;
+}
+
+/* Una `.table` de Bootstrap trae `--bs-table-bg: var(--bs-body-bg)` y lo pinta en **cada
+   celda**: el fondo de la página, repintado por encima de la superficie del marco y de la banda
+   de la cabecera. Ésta era la respuesta a «los colores siguen sin ser correctos» — la caja, el
+   borde y la banda estaban escritos y una regla de la librería los tapaba celda a celda. La
+   tabla no pinta: pinta el marco que la contiene. */
+.ss-timer-table { --bs-table-bg: transparent; }
+
+/* El aire de las celdas. `table-sm` aprieta a .25rem, que para cinco filas con dos líneas cada
+   una las pega unas a otras: la tabla se lee bajando por una columna y para eso hace falta que
+   una fila se distinga de la siguiente sin mirar dos veces. */
+.ss-timer-table > tbody > tr > td { padding: .55rem 1rem; }
+.ss-timer-table > tbody > tr > td { border-bottom-color: var(--bs-border-color); }
+/* Y la última sin raya: el borde del marco ya cierra la tabla, y dos líneas juntas se ven. */
+.ss-timer-table > tbody > tr:last-child > td { border-bottom: 0; }
+/* Las dos respuestas que no son un número: «Atrasado 42 min» y «Sin efecto». Píldoras suaves
+   —fondo tenue, borde del mismo tono— y no distintivos macizos: un `text-bg-warning` sólido en
+   una tabla de cinco filas grita más que el propio retraso, y el ámbar deja de significar algo
+   cuando se usa para llamar la atención sobre lo que no la necesita. */
+.ss-pill {
+    display: inline-block;
+    font-size: .68rem;
+    line-height: 1.55;
+    padding: .1rem .5rem;
+    border-radius: 10rem;
+    border: 1px solid var(--bs-border-color);
+    color: var(--bs-secondary-color);
+    white-space: nowrap;
+}
+.ss-pill-warn {
+    color: var(--ss-timer-late);
+    background: var(--ss-timer-late-bg);
+    border-color: var(--ss-timer-late-line);
+}
+
+/* Y un ancho mínimo para la cuenta atrás, que si no la columna se encoge con el número: «24 s»
+   y «2 min 40 s» moverían la barra de sitio cada vez que uno pasa al otro. */
+.ss-timer-next-col, .ss-timer-next { min-width: 11rem; }
+
+/* ── Elegir un icono ────────────────────────────────────────────────────────────────────
+   Dibujados y no por su nombre: elegir entre `hdd-stack` y `hdd-network` leyendo dos palabras
+   es adivinar cuál era cuál, y lo que se está eligiendo es un dibujo.
+
+   Clases genéricas y no un `#id`: lo que hace falta —una rejilla de cosas de las que se marca
+   una— vale igual el día que algo más tenga que elegir un icono. */
+.ss-icon-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem;
+}
+.ss-icon-pick {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    font-size: 1.1rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .375rem;
+    background: var(--bs-body-bg);
+    color: var(--bs-secondary-color);
+    cursor: pointer;
+}
+.ss-icon-pick:hover { border-color: var(--bs-primary); color: var(--bs-body-color); }
+/* La lista larga, con su propio alto. Son dos mil dibujos: sin acotarlos, el cuadro crece hasta
+   que lo único que se puede hacer con él es bajar, y lo que se estaba escribiendo queda arriba,
+   fuera de la vista. El scroll lo pone `.ss-vscroll`; esto sólo dice hasta dónde. */
+.ss-icon-grid-tall { max-height: 22rem; align-content: flex-start; }
+/* El marcado, con el color de los botones sólidos del panel: nada de contorno, que aquí
+   significaría «es uno más». */
+.ss-icon-pick.active {
+    background: var(--bs-primary);
+    border-color: var(--bs-primary);
+    color: #fff;
+}
+
+/* ── El menú de un botón pequeño ────────────────────────────────────────────────────────
+   Bootstrap dimensiona el menú por su cuenta —1rem de letra y su padding de siempre— valga lo
+   que valga el botón del que cuelga. Con un `btn-sm` delante, que es lo que lleva toda barra de
+   este panel, el desplegable sale más grande que el botón que lo abre.
+
+   Genérica y no por `id`: lo mismo le pasa a los tres botones partidos que hay, y al cuarto. La
+   sidebar ya resolvía esto por su cuenta (`.ss-sb-user`); esto es lo mismo, con nombre. */
+.ss-dropdown-sm {
+    font-size: .875rem;                 /* la de `btn-sm` */
+    --bs-dropdown-min-width: 11rem;
+    padding-top: .25rem;
+    padding-bottom: .25rem;
+}
+.ss-dropdown-sm .dropdown-item { padding: .35rem .75rem; }
+.ss-dropdown-sm .dropdown-item i { font-size: .95rem; }
+.ss-dropdown-sm .dropdown-divider { margin: .25rem 0; }
+

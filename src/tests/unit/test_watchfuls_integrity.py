@@ -109,7 +109,7 @@ class TestRealModuleImport:
         schema = mod.Watchful.ITEM_SCHEMA
         for collection, fields in schema.items():
             if collection.startswith("__"):
-                # dunder metadata (i18n, host profile/multiple, credential…),
+                # dunder metadata (i18n, device profile/multiple, credential…),
                 # not a renderable collection of field defs.
                 continue
             assert isinstance(fields, dict), (
@@ -448,21 +448,21 @@ class TestRealModuleRuntimeContract:
                 )
 
     @pytest.mark.parametrize("mod_name", _MODULE_NAMES)
-    def test_host_capable_module_is_exposed_in_catalogs(self, mod_name):
-        """A module that declares a __host_profile__ must be exposed by the host
+    def test_device_capable_module_is_exposed_in_catalogs(self, mod_name):
+        """A module that declares a __device_profile__ must be exposed by the device
         catalogs the UI/monitor rely on: the multi-bind flag (which enumerates
-        every host-capable module) and at least one host-bindable collection.
-        (module_host_fields legitimately omits modules that hide no fields, e.g.
+        every device-capable module) and at least one device-bindable collection.
+        (module_device_fields legitimately omits modules that hide no fields, e.g.
         web's visible 'url', so it is NOT the right catalog to assert here.)"""
-        from lib.core.hosts.profiles import module_host_collections, module_host_multi_bind
-        if not _load_schema(mod_name).get("__host_profile__"):
-            pytest.skip("module is not host-capable")
-        mb = module_host_multi_bind()
+        from lib.core.devices.profiles import module_device_collections, module_device_multi_bind
+        if not _load_schema(mod_name).get("__device_profile__"):
+            pytest.skip("module is not device-capable")
+        mb = module_device_multi_bind()
         assert mod_name in mb and isinstance(mb[mod_name], bool), (
-            f"{mod_name} missing a multi-bind flag in module_host_multi_bind()"
+            f"{mod_name} missing a multi-bind flag in module_device_multi_bind()"
         )
-        assert module_host_collections().get(mod_name), (
-            f"{mod_name} host-capable but has no host-bindable collection"
+        assert module_device_collections().get(mod_name), (
+            f"{mod_name} device-capable but has no device-bindable collection"
         )
 
 

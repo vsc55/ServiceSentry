@@ -82,14 +82,14 @@ class SyslogService(_HeartbeatMixin, _StandaloneConfigMixin, _EventsMixin, _Sysl
         return info
 
     def __init__(self, config_dir: str, var_dir: str | None = None,
-                 host_override: str | None = None, port_override: int | None = None,
+                 device_override: str | None = None, port_override: int | None = None,
                  log_level: str | None = None):
         self._config_dir = config_dir
         self._var_dir = var_dir or config_dir
         # CLI/env overrides (--syslog-host / --syslog-port): when set they win over
         # the stored config (consumed by _SyslogMixin._syslog_cfg).  A single port
         # overrides both UDP and TCP (the usual syslog pair); TLS keeps its port.
-        self._host_override = host_override or None
+        self._host_override = device_override or None
         self._port_override = port_override
         self._log_level_override = log_level or None
         self._secret_key_path = secret_key_path(config_dir)
@@ -268,6 +268,6 @@ def run_standalone(args, config_dir: str, var_dir: str, modules_dir=None) -> int
     """Build + run the syslog receiver as a standalone process (``main.py --syslog``)."""
     return SyslogService(
         config_dir, var_dir,
-        host_override=getattr(args, 'syslog_host', None),
+        device_override=getattr(args, 'syslog_host', None),
         port_override=getattr(args, 'syslog_port', None),
         log_level=getattr(args, 'log_level', None)).run()

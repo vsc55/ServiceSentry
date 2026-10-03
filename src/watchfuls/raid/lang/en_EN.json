@@ -1,6 +1,6 @@
 {
     "pretty_name": "RAID",
-    "module_description": "Monitors RAID array health via /proc/mdstat on each bound host — locally or over the host's SSH connection. Alerts on degraded or recovering arrays.",
+    "module_description": "Monitors RAID array health via /proc/mdstat on each bound device — locally or over the device's SSH connection. Alerts on degraded or recovering arrays.",
     "labels": {
         "enabled":     "Enabled",
         "threads":     "Threads",
@@ -10,16 +10,16 @@
     },
     "hints": {
         "enabled":     "Enable or disable this RAID check.",
-        "threads":     "Number of hosts to check in parallel.",
+        "threads":     "Number of devices to check in parallel.",
         "timeout":     "Command/SSH timeout in seconds.",
-        "mdstat_path": "Path to the mdstat file read on the host (default /proc/mdstat).",
+        "mdstat_path": "Path to the mdstat file read on the device (default /proc/mdstat).",
         "label":       "Display name shown in the UI. Falls back to the item key if empty."
     },
     "new_item_key_label": "Check name or identifier:",
     "rename_item_prompt": "Enter new check name or identifier:",
     "collections": {"list": "RAID checks"},
     "messages": {
-        "raid_unsupported_os": "RAID: {} - mdstat only available on Linux (host OS: {}) ⚠️",
+        "raid_unsupported_os": "RAID: {} - mdstat only available on Linux (device OS: {}) ⚠️",
         "raid_none":     "[{}] No RAID's in the system. ✅",
         "raid_ok":       "RAID {}/{} in good status. ✅",
         "raid_degraded": "RAID {}/{} is degraded. ⚠️",
@@ -27,11 +27,11 @@
         "raid_unknown":  "RAID {}/{} Unknown Error. ⚠️"
     },
     "messages_vars": {
-        "raid_unsupported_os": ["host", "OS"],
-        "raid_none": ["host"],
-        "raid_ok": ["host", "array"],
-        "raid_degraded": ["host", "array"],
-        "raid_recovery": ["host", "array", "%", "ETA"],
-        "raid_unknown": ["host", "array"]
+        "raid_unsupported_os": ["device", "OS"],
+        "raid_none": ["device"],
+        "raid_ok": ["device", "array"],
+        "raid_degraded": ["device", "array"],
+        "raid_recovery": ["device", "array", "%", "ETA"],
+        "raid_unknown": ["device", "array"]
     }
 }

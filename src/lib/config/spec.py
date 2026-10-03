@@ -166,6 +166,85 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # that on dependency lookups alone. A token raises it to 5000; a secret, so it is
     # encrypted at rest and masked on the way out (see secret_manager.ENCRYPT_KEYS).
     Cfg('snmp|github_token', str, '', card='snmp_library', env='SS_SNMP_GITHUB_TOKEN'),
+    Cfg('web_admin|dcim_map_provider', str, '', attr='_DCIM_MAP_PROVIDER',
+        # WHICH map. Empty = none, and none is the default on purpose: turning a map on makes
+        # every viewer's browser ask a third party for thousands of images, and that third party
+        # then knows where this organisation's datacenters are. That is a decision for whoever
+        # deploys the panel, not something to inherit.
+        #
+        # A NAME and not only a URL, because two of the answers are not a URL: `google` needs a
+        # key and a session minted server-side (its tiles cannot be had any other way without
+        # running their JavaScript, which would hand them the page), and `custom` is the one
+        # that keeps a template of your own or an internal mirror possible. The catalogue lives
+        # in `lib/maps/catalog.py` — one table with each provider's template AND its credit,
+        # because a credit that names the wrong project is worse than none.
+        #
+        # Empty with a template already written still means `custom`: an installation that
+        # configured this before there were providers must not have its map switched off by an
+        # upgrade.
+        env='SS_DCIM_MAP_PROVIDER', card='maps'),
+    Cfg('web_admin|dcim_map_tiles', str, '', attr='_DCIM_MAP_TILES',
+        # The tile server, as an XYZ template — `{z}/{x}/{y}`. Only read when the provider is
+        # `custom`, which is what it is for: a server of your own, an internal mirror, a paid
+        # provider that is not in the catalogue.
+        #
+        # A template and never a provider's JavaScript SDK, which would mean opening
+        # `script-src` to somebody else's code: loading a third party's images tells them where
+        # your sites are; running their script hands them the page.
+        env='SS_DCIM_MAP_TILES', card='maps'),
+    Cfg('web_admin|dcim_map_attribution', str,
+        '© OpenStreetMap contributors', attr='_DCIM_MAP_ATTRIBUTION',
+        # What has to be SAID when a `custom` template is drawn. Its own field because it is a
+        # different question from where the images come from, and because OpenStreetMap's
+        # licence requires the credit. The catalogue's providers carry their own.
+        env='SS_DCIM_MAP_ATTRIBUTION', card='maps'),
+    Cfg('web_admin|dcim_map_google_key', str, '', attr='_DCIM_MAP_GOOGLE_KEY',
+        # The Google Maps Platform key, for the `google` provider. Encrypted at rest and masked
+        # on the way out like every other secret (secret_manager.ENCRYPT_KEYS) — but be clear
+        # about what that protects: this key travels INSIDE each tile's URL, because that is how
+        # their Map Tiles API is designed. Anybody who can open the map can read it. It is
+        # protected by RESTRICTING it in Google's console (HTTP referrer + that one API), not by
+        # hiding it, and the field's hint says so.
+        env='SS_DCIM_MAP_GOOGLE_KEY', card='maps'),
+    Cfg('web_admin|dcim_map_google_type', str, 'roadmap', attr='_DCIM_MAP_GOOGLE_TYPE',
+        # Qué clase de mapa se le pide a Google. El callejero es lo que sirve para encontrar una
+        # nave en un polígono, y por eso es el defecto — pero hay casas cuyas sedes están donde
+        # ningún callejero dibuja nada: una antena en un monte, una caseta en una finca. Ahí el
+        # satélite es la única forma de reconocer el sitio, y sin este ajuste no había manera de
+        # pedirlo. Sólo lo entiende Google; los demás sirven lo que sirven.
+        env='SS_DCIM_MAP_GOOGLE_TYPE', card='maps'),
+    Cfg('web_admin|dcim_map_max_zoom', int, None, attr='_DCIM_MAP_MAX_ZOOM',
+        min=1, max=22, nullable=True,
+        # Hasta qué nivel de tesela se puede acercar. VACÍO = hasta donde llegue el proveedor
+        # elegido, que es lo que hay que dejar puesto salvo que sepas otra cosa: el catálogo lo
+        # sabe de los que trae (19 en OpenStreetMap, 20 en Carto, 22 en Google).
+        #
+        # Existe por los servidores propios y los espejos internos, que traen lo que traigan: uno
+        # con hasta el 16 y este panel pidiendo el 19 son huecos en blanco al acercarse, sin un
+        # solo error por ninguna parte — y quien mira cree que el mapa se ha roto.
+        env='SS_DCIM_MAP_MAX_ZOOM', card='maps'),
+    Cfg('web_admin|dcim_catalog_url', str,
+        'https://github.com/netbox-community/devicetype-library', attr='_DCIM_CATALOG_URL',
+        # Where the device catalogue is fetched from. NetBox's library is what nearly everybody
+        # wants — four thousand models with their ports, heights and elevation pictures — so it
+        # is what ships. But `nearly` is not `all`: some sites keep a fork with their own kit,
+        # and some rooms reach an internal mirror and never github.com. A URL written into the
+        # code would leave both of them unable to use the feature at all.
+        #
+        # Any GitHub repository laid out the same way works: `device-types/<Vendor>/*.yaml`.
+        # It is browsed before it is imported, so a wrong address costs a message and not a
+        # catalogue full of somebody else's models.
+        env='SS_DCIM_CATALOG_URL', card='dcim'),
+    Cfg('web_admin|dcim_media_dir', str, '', attr='_DCIM_MEDIA_DIR',
+        # Where the physical inventory's pictures go — floor plans today, the catalogue's
+        # elevations later. Empty means `<var_dir>/dcim_media`, which is the sane default and
+        # not somewhere to leave it closed: twenty rooms of plans and elevations are real
+        # megabytes, and the disk the database lives on need not be where somebody wants them.
+        #
+        # Read at every call rather than cached, like the backup folder and for the same
+        # reason: moving it must not need a restart, and an operator who moves it mid-day
+        # would otherwise write the next upload to the old path and not find it there.
+        env='SS_DCIM_MEDIA_DIR', card='dcim'),
     Cfg('web_admin|backup_dir', str, '', attr='_BACKUP_DIR',
         # Where copies are written. Empty means `<var_dir>/backups`, which is the sane
         # default and the wrong place to leave it: a copy on the same disk as the data it
@@ -392,6 +471,21 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('telegram|group_messages', bool, False, env='SS_TELEGRAM_GROUP_MESSAGES',
         no_rule=True),
 
+    # ══ freshservice (de dónde salen las empresas cuando ya están en otro sitio) ═
+    # En Freshservice, «departamento» y «empresa» son la misma cosa. En una casa que ya lo usa,
+    # esa lista existe, está mantenida y es la buena; teclearla otra vez aquí son dos listas, y
+    # dos listas son una que se queda vieja sin avisar.
+    #
+    # `api_key` se cifra en reposo y sale enmascarada (secret_manager.ENCRYPT_KEYS): es una
+    # credencial que abre el sistema de tickets de la casa entera.
+    #
+    # Y NO hay interruptor: lo que dice si esta integración está puesta es que tenga dominio y
+    # clave. Un `enabled` al lado no contestaba ninguna pregunta que estos dos no contestaran ya,
+    # y un interruptor que no decide nada invita a creer que enciende algo — una importación
+    # automática, por ejemplo, que no existe.
+    Cfg('freshservice|domain', str, '', no_rule=True, card='freshservice'),
+    Cfg('freshservice|api_key', str, '', no_rule=True, card='freshservice'),
+
     # ══ monitoring (the service monitor) ═════════════════════════════════════
     # Like syslog: a simple on/off ``enabled`` flag; whether this process hosts it
     # (embedded) or a standalone ``--monitor`` process / worker container owns it
@@ -414,6 +508,20 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # is about how long the CYCLE is willing to wait, not about who gets recorded.
     Cfg('monitoring|module_timeout', int, 120, min=10, max=3600, env='SS_MODULE_TIMEOUT',
         card='monitoring'),
+    # ── The measurement history ──────────────────────────────────────────────
+    # How many days of samples are kept. Zero means forever.
+    #
+    # It was a 30 written into the monitor's prune loop, which is the wrong place for a number
+    # that depends entirely on the fleet: on a real installation SNMP is 83 % of the rows —
+    # ninety thousand of them in seventeen days — and whoever has to fit that on a disk had no
+    # way to say so short of editing the source. See docs/explica-snmp.md.
+    #
+    # Days and not a row cap: a cap answers "how much disk", but the question somebody asks in
+    # front of a graph is "how far back can I look", and a cap makes that depend on how many
+    # devices happen to be sampled this month.
+    Cfg('history|retention_days', int, 30, min=0, max=3650, admin_only=True, nullable=True,
+        card='history'),
+
     # ── Platform self-monitoring (lib/core/health) — NOT the monitoring service ──
     # Service-health notifications: alert when a background service (monitor/syslog/events
     # worker) stops beating (crashed/unreachable) and when it recovers.  Off by default.
@@ -428,6 +536,34 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('certs|warn_days', int, 21, min=1, max=3650, admin_only=True, card='health'),
     Cfg('certs|scan_every_secs', int, 86400, min=3600, max=604800, admin_only=True,
         card='health'),
+    # Cableado: una vuelta periódica que contrasta lo declarado contra lo que los dispositivos
+    # dicen verse por LLDP, y avisa de un latiguillo movido (`cable_moved`) o de una adyacencia
+    # que nadie declaró (`cable_undeclared`). Cada hallazgo se dice UNA vez — lo ya dicho vive
+    # en `dc_drift`, no en memoria, porque el proceso que explora hoy no es el de mañana.
+    #
+    # Media hora por defecto: esto cambia cuando alguien abre un armario, no cuando pasa un
+    # minuto. El mínimo son cinco: el contraste arma el mapa de la flota entera, y pedirlo cada
+    # treinta segundos sería pagar el inventario de direcciones de la flota por un dato que
+    # cambia dos veces al año.
+    Cfg('dcim|notify_cabling', bool, False, admin_only=True, card='health'),
+    Cfg('dcim|cable_scan_every_secs', int, 1800, min=300, max=86400, admin_only=True,
+        card='health'),
+    # Y cuánto insiste. Los dos números juntos dicen las cinco cosas que se pueden querer:
+    #
+    #   no avisar ...................... notify_cabling = off
+    #   decirlo una vez ................ repeat_every = 0   (o repeat_max = 1)
+    #   repetir cada X para siempre .... repeat_every = X,  repeat_max = 0
+    #   repetir cada X, N veces ........ repeat_every = X,  repeat_max = N
+    #
+    # Por defecto **una vez**: un hallazgo que vuelve cada media hora hasta que alguien lo
+    # arregla silencia el canal en dos días, y con él el aviso que sí importaba. Repetir es
+    # útil cuando el canal es un buzón que alguien vacía, y eso lo sabe quien lo configura.
+    #
+    # Un hallazgo que CAMBIA —el mismo latiguillo movido a una tercera boca— se dice otra vez
+    # aunque el límite esté gastado: es otro hecho, no el mismo insistiendo.
+    Cfg('dcim|cable_repeat_every_secs', int, 0, min=0, max=604800, admin_only=True,
+        card='health'),
+    Cfg('dcim|cable_repeat_max', int, 1, min=0, max=100, admin_only=True, card='health'),
 
     # ══ modules: global defaults inherited by every watchful module ══════════
     # Last link of the item → module → global resolution chain.  'threads' also
@@ -581,7 +717,7 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # Declaring them here would duplicate the registry — the single source of truth.
 
     # ══ Syslog receiver ═════════════════════════════════════════════════════
-    # Built-in syslog server: receive RFC 3164/5424 events from external hosts
+    # Built-in syslog server: receive RFC 3164/5424 events from external devices
     # over UDP/TCP(+TLS), store them (lib/services/syslog/store) and optionally alert.
     Cfg('syslog|enabled',         bool, True, admin_only=True, card='syslog_conn'),
     # autostart: launch the EMBEDDED listener at web-admin boot (a standalone
@@ -827,6 +963,28 @@ def bool_rules() -> dict:
     """``{path: attr}`` for every boolean rule field (``attr`` may be ``None``)."""
     return {f.path: f.attr for f in CONFIG_FIELDS
             if f.type is bool and not f.no_rule}
+
+
+def str_rules() -> dict:
+    """``{path: attr}`` para cada campo de TEXTO que dice reflejarse en un atributo.
+
+    Existía para los enteros y para los interruptores, y no para las cadenas: cada una había
+    que escribirla a mano en `_apply_config_attrs`, y las que nadie escribió **no llegaban a
+    ninguna parte**. El ajuste se guardaba, la pantalla lo enseñaba guardado, y quien lo leía
+    con `getattr(wa, '_LO_QUE_SEA', '')` recibía una cadena vacía para siempre — ni siquiera
+    reiniciando, porque el atributo solo lo ponía el camino de las variables de entorno.
+
+    Así cayeron cinco: el servidor de teselas y su atribución, la dirección del catálogo, la
+    carpeta de imágenes y la de copias. Se notó porque alguien configuró el mapa y siguió sin
+    salir, que es la forma que tiene de avisar un fallo que no da ningún error.
+
+    `no_rule` sigue significando lo de siempre —lo que no pasa por el trato genérico— y las
+    tres cadenas que necesitan que se les haga algo antes de guardarlas (el idioma, el idioma
+    de la página de estado y la URL pública) se aplican **después** de esta pasada, en su línea
+    de siempre, y mandan.
+    """
+    return {f.path: f.attr for f in CONFIG_FIELDS
+            if f.type is str and f.attr and not f.no_rule}
 
 
 def json_dict_fields() -> set:

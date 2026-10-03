@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Tests for watchfuls/service_status — host-centric service monitoring.
+"""Tests for watchfuls/service_status — device-centric service monitoring.
 
-Service state is read via ``host_exec`` (mocked); the per-OS state parser runs
+Service state is read via ``device_exec`` (mocked); the per-OS state parser runs
 for real against canned command output.  ``discover`` (local autocomplete) is
 unchanged and still covered.
 """
@@ -13,21 +13,21 @@ from conftest import create_mock_monitor
 
 
 class _FakeStore:
-    def __init__(self, hosts):
-        self._h = hosts
+    def __init__(self, devices):
+        self._h = devices
     def get(self, uid, **_kw):
         return self._h.get(uid)
 
 
-def _host(uid='h1', os='linux', kind='remote', maintenance=False):
+def _device(uid='h1', os='linux', kind='remote', maintenance=False):
     return {'uid': uid, 'address': '10.0.0.9', 'kind': kind, 'os': os,
             'maintenance': maintenance, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
 
-def _watchful(items, hosts=None):
+def _watchful(items, devices=None):
     from watchfuls.service_status import Watchful
     mm = create_mock_monitor({'watchfuls.service_status': {'list': items}})
-    mm._hosts_store = _FakeStore(hosts or {'h1': _host()})
+    mm._devices_store = _FakeStore(devices or {'h1': _device()})
     return Watchful(mm)
 
 
@@ -89,50 +89,50 @@ class TestParseState:
 class TestCheck:
 
     def test_running_ok(self):
-        w = _watchful({'web': {'enabled': True, 'service': 'nginx', 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=('active', '', 0)):
+        w = _watchful({'web': {'enabled': True, 'service': 'nginx', 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=('active', '', 0)):
             items = w.check().list
         assert items['web']['status'] is True
         assert 'Running' in items['web']['message']
 
     def test_expected_stopped_ok(self):
         w = _watchful({'web': {'enabled': True, 'service': 'nginx',
-                               'expected': 'stopped', 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=('inactive', '', 3)):
+                               'expected': 'stopped', 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=('inactive', '', 3)):
             items = w.check().list
         assert items['web']['status'] is True
         assert 'Stopped' in items['web']['message']
 
     def test_running_but_expected_stopped(self):
         w = _watchful({'web': {'enabled': True, 'service': 'nginx',
-                               'expected': 'stopped', 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=('active', '', 0)):
+                               'expected': 'stopped', 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=('active', '', 0)):
             items = w.check().list
         assert items['web']['status'] is False
         assert 'expected: Stopped' in items['web']['message']
 
-    def test_windows_host_uses_sc(self):
-        w = _watchful({'svc': {'enabled': True, 'service': 'nginx', 'host_uid': 'h1'}},
-                      hosts={'h1': _host(os='windows')})
-        with patch.object(w, 'host_exec', return_value=(_SC_RUNNING, '', 0)) as he:
+    def test_windows_device_uses_sc(self):
+        w = _watchful({'svc': {'enabled': True, 'service': 'nginx', 'device_uid': 'h1'}},
+                      devices={'h1': _device(os='windows')})
+        with patch.object(w, 'device_exec', return_value=(_SC_RUNNING, '', 0)) as he:
             items = w.check().list
         assert he.call_args.args[1].startswith('sc query')
         assert items['svc']['status'] is True
 
     def _remediation_run(self, second_state):
         w = _watchful({'web': {'enabled': True, 'service': 'nginx',
-                               'remediation': True, 'host_uid': 'h1'}})
+                               'remediation': True, 'device_uid': 'h1'}})
         # Remediation only runs on a state *change* → make check_status report one.
         w._monitor.check_status = MagicMock(return_value=True)
         # First status call: stopped; remediation start; second call: the given state.
         calls = [('inactive', '', 3), ('', '', 0), (second_state, '', 0)]
-        with patch.object(w, 'host_exec', side_effect=calls) as he:
+        with patch.object(w, 'device_exec', side_effect=calls) as he:
             items = w.check().list
         return w, he, items
 
     def test_remediation_runs_and_restarts_the_service(self):
         _w, he, _items = self._remediation_run('active')
-        # status + start + re-check = 3 host_exec calls
+        # status + start + re-check = 3 device_exec calls
         assert he.call_count == 3
         assert any('start' in c.args[1] for c in he.call_args_list)
 
@@ -160,33 +160,33 @@ class TestCheck:
         stored result stays a warning — the alert reports the news, the record keeps the
         incident."""
         w = _watchful({'web': {'enabled': True, 'service': 'nginx',
-                               'remediation': True, 'host_uid': 'h1'}})
+                               'remediation': True, 'device_uid': 'h1'}})
         w._monitor.check_status = MagicMock(return_value=True)
         sent = []
         w.send_message = lambda msg, status=None, item='', severity='': sent.append(status)
         calls = [('inactive', '', 3), ('', '', 0), ('active', '', 0)]
-        with patch.object(w, 'host_exec', side_effect=calls):
+        with patch.object(w, 'device_exec', side_effect=calls):
             w.check()
         assert sent == [False, True], 'expected the fall then the recovery'
 
     def test_unsupported_os(self):
-        w = _watchful({'web': {'enabled': True, 'service': 'nginx', 'host_uid': 'h1'}},
-                      hosts={'h1': _host(os='other')})
-        with patch.object(w, 'host_exec') as he:
+        w = _watchful({'web': {'enabled': True, 'service': 'nginx', 'device_uid': 'h1'}},
+                      devices={'h1': _device(os='other')})
+        with patch.object(w, 'device_exec') as he:
             items = w.check().list
         he.assert_not_called()
         assert items['web']['status'] is False and 'unsupported' in items['web']['message'].lower()
 
     def test_disabled_item_skipped(self):
-        w = _watchful({'web': {'enabled': False, 'service': 'nginx', 'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec') as he:
+        w = _watchful({'web': {'enabled': False, 'service': 'nginx', 'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec') as he:
             assert len(w.check().items()) == 0
         he.assert_not_called()
 
-    def test_maintenance_host_skipped(self):
-        w = _watchful({'web': {'enabled': True, 'service': 'nginx', 'host_uid': 'h1'}},
-                      hosts={'h1': _host(maintenance=True)})
-        with patch.object(w, 'host_exec') as he:
+    def test_maintenance_device_skipped(self):
+        w = _watchful({'web': {'enabled': True, 'service': 'nginx', 'device_uid': 'h1'}},
+                      devices={'h1': _device(maintenance=True)})
+        with patch.object(w, 'device_exec') as he:
             assert len(w.check().items()) == 0
         he.assert_not_called()
 
@@ -210,10 +210,10 @@ class TestDiscover:
 
     def test_remote_discovery_uses_ssh(self):
         from watchfuls.service_status import Watchful
-        host = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
+        device = {'kind': 'remote', 'os': 'linux', 'address': '10.0.0.9', 'ssh': {}}
         out = "  nginx.service   loaded active running  Web server\n"
-        with patch('lib.core.hosts.runner.run', return_value=(out, '', 0)) as run:
-            res = Watchful.discover({'__host__': host})
+        with patch('lib.core.devices.runner.run', return_value=(out, '', 0)) as run:
+            res = Watchful.discover({'__device__': device})
         assert run.call_args.args[1].startswith('systemctl list-units')
         assert any(s['name'] == 'nginx' for s in res)
 

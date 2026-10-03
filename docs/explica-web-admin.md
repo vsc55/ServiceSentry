@@ -52,7 +52,7 @@ lib/web_admin/                # Solo lo genuinamente web; los dominios/servicios
 # El resto de mixins/routes viven con su dominio/servicio/provider (self-contained):
 #   lib/core/<d>/          routes.py (HTTP fino) + service.py (lógica sin Flask) + store.py
 #                          + manifest.py (+ mixin.py en users/roles/groups/sessions/audit/permissions)
-#     users, roles, groups, sessions, audit, config, credentials, history, hosts,
+#     users, roles, groups, sessions, audit, config, credentials, history, devices,
 #     modules (routes.py: config CRUD + /api/v1/modules/watchfuls action dispatch),
 #     notify/{telegram,email,webhook}/routes.py (/api/v1/notify/*)
 #   lib/services/<svc>/    monitoring/routes.py (/api/v1/monitoring/*), syslog/routes.py,
@@ -87,7 +87,7 @@ flowchart TD
 
     subgraph ini["2 · WebAdmin.__init__ (construcción, en orden)"]
         direction TB
-        a["a) Descubre campos secretos de MÓDULOS<br/>ModuleBase.discover_secret_fields + perfiles de host + credential schemas<br/>→ claves de cifrado/máscara"]
+        a["a) Descubre campos secretos de MÓDULOS<br/>ModuleBase.discover_secret_fields + perfiles de dispositivo + credential schemas<br/>→ claves de cifrado/máscara"]
         a --> b["b) _init_entity_store(): abre la BD (conector único)<br/>reconcilia tablas core + reconcile_module_tables (tablas declaradas por módulos)<br/>→ ConfigManager + stores (users/groups/roles/sessions/hosts)"]
         b --> c["c) history + check_state stores (reusan el conector)"]
         c --> d["d) _load_or_create_users (crea el 1er admin si falta)<br/>+ _load_sessions / _load_roles / _load_groups (desde BD)"]
@@ -108,7 +108,7 @@ flowchart TD
 | Qué | Cuándo | Cómo |
 |---|---|---|
 | **Permisos** (RBAC) | al **importar** `lib.core.permissions` (antes de la instancia) | `discover_permissions()` escanea el `manifest.py` de cada dominio/servicio |
-| **Campos secretos, credential schemas, perfiles de host** | al **inicio de `__init__`** | escaneo de `watchfuls/` (`discover_secret_fields`, `credential_secret_fields`, `__host_profile__`) |
+| **Campos secretos, credential schemas, perfiles de dispositivo** | al **inicio de `__init__`** | escaneo de `watchfuls/` (`discover_secret_fields`, `credential_secret_fields`, `__device_profile__`) |
 | **Tablas de módulo** | en **`_init_entity_store`** | `reconcile_module_tables()` (crea/migra `mod_<m>_<n>`) |
 | **Servicios embebidos** | al **final de `__init__`** | `discover_embedded_services()` + `make_embedded()` + `start_at_boot()` |
 | **Config de módulos, widgets de Overview** | **perezoso** (bajo demanda) | al leer `/api/v1/modules` / `/api/v1/overview/widget/<id>` |
@@ -122,9 +122,9 @@ flowchart TD
 | Característica | Descripción |
 |---------------|-------------|
 | **Panel de módulos** | Habilitar/deshabilitar módulos, configurar ítems con formularios generados automáticamente desde los schemas; barra de herramientas con **Añadir**, **Recargar** (descarta cambios y recarga desde el servidor) y **Deshacer** (revierte cambios no guardados al último estado guardado) |
-| **Dispositivos (hosts)** | Define un dispositivo una vez (dirección + perfiles de conexión por protocolo: ssh/snmp/db/http/tls…) y vincúlalo desde los checks de cualquier módulo, que heredan dirección + credenciales. Asistente "Detectar duplicados" que agrupa conexiones inline repetidas en hosts compartidos. Secretos cifrados en la BD general. Ver §[Dispositivos (registro de hosts)](#dispositivos-registro-de-hosts) |
-| **Clusters** | Pestaña Clusters: checks **multi-bind** (una comprobación vinculada a varios hosts vía `host_uids`), p. ej. `keepalived` VRRP. Modal de creación/edición con hosts miembros; se persisten como ítems de módulo (`PUT /api/v1/modules`). Permisos `clusters_*` + `cluster.{uid}.{acción}`. Ver §[Clusters (checks multi-bind)](#clusters-checks-multi-bind) |
-| **Credenciales** | Identidades SSH reutilizables (usuario + clave) referenciables desde hosts y checks, en vez de duplicar secretos; clonado y vista de uso. Secretos cifrados en la BD. Permisos `credentials_*`. |
+| **Dispositivos** | Define un dispositivo una vez (dirección + perfiles de conexión por protocolo: ssh/snmp/db/http/tls…) y vincúlalo desde los checks de cualquier módulo, que heredan dirección + credenciales. Asistente "Detectar duplicados" que agrupa conexiones inline repetidas en dispositivos compartidos. Secretos cifrados en la BD general. Ver §[Registro de dispositivos](#registro-de-dispositivos) |
+| **Clusters** | Pestaña Clusters: checks **multi-bind** (una comprobación vinculada a varios dispositivos vía `device_uids`), p. ej. `keepalived` VRRP. Modal de creación/edición con dispositivos miembros; se persisten como ítems de módulo (`PUT /api/v1/modules`). Permisos `clusters_*` + `cluster.{uid}.{acción}`. Ver §[Clusters (checks multi-bind)](#clusters-checks-multi-bind) |
+| **Credenciales** | Identidades SSH reutilizables (usuario + clave) referenciables desde dispositivos y checks, en vez de duplicar secretos; clonado y vista de uso. Secretos cifrados en la BD. Permisos `credentials_*`. |
 | **Receptor Syslog** | Servidor syslog integrado (RFC 3164/5424, UDP/TCP/TLS): **página propia** (`/syslog`) con mensajes filtrables (severidad/host/app/búsqueda), allowlist de orígenes y **registro de descartes**; retención por antigüedad/filas; BD dedicada opcional; puede correr embebido o como contenedor aparte. Permisos `syslog_view`/`syslog_delete`. Ver §[Syslog](#syslog) |
 | **Gestor de eventos** | Reglas que observan eventos de auditoría o syslog y notifican por los canales configurados (Telegram/Email/webhooks concretos); cooldown global con herencia por regla; **log de notificaciones** enviadas. La evaluación está **desacoplada de la ingesta**: un *procesador de eventos* lee por cursor los mensajes/eventos ya guardados (cooldown persistido), embebido o como contenedor propio. Permisos `events_*`. Ver §[Eventos (reglas de notificación)](#eventos-reglas-de-notificación) |
 | **Servicios** | Pestaña Services: estado y **control (start/stop)** de los servicios de fondo (monitor embebido, receptor syslog, **procesador de eventos**, worker, base de datos). Permisos `services_view`/`services_control`. Ver §[Servicios](#servicios) |
@@ -132,7 +132,7 @@ flowchart TD
 | **fail2ban interno** | Baneo de IP a nivel de servicio (web + syslog) por ofensas acumuladas (login fallido, CSRF, acceso no autorizado…), con duraciones escaladas, lista blanca gestionada, watchlist, historial y acción de bloqueo por servicio. Sección operativa propia (IPs baneadas / Lista blanca / Historial) + ajustes en Config → fail2ban. Persistido en BD (cross-proceso). Permisos `config_view`/`config_edit`. Ver §[fail2ban](#fail2ban-bans-de-ip) y [explica-seguridad.md](explica-seguridad.md#fail2ban-interno-bans-de-ip-a-nivel-de-servicio) |
 | **Dashboard personalizable** | Widgets arrastrables, redimensionables y ocultables; posición, tamaño y visibilidad persistidos por usuario en la BD (campo `dashboard_layout` de las preferencias de cuenta, con `localStorage` como caché local); modo edición con barra de herramientas por widget (ancho en columnas 2–12, altura sm/md/lg/xl, drag-and-drop HTML5) |
 | **Vista general (Overview)** | **Página propia** (`/overview`, separada del panel de administración) con tarjetas de resumen (Modules, Checks, Servers, **Services**, Users, Groups, Roles, Sessions, Webhooks, Credentials, Coverage, Syslog, Events, **fail2ban**) + widgets de tabla (lista de módulos, servidores, sesiones, incidencias, fallos de login, actividad reciente, syslog reciente, **IP baneadas**); cada widget enlaza (click-through) a su pestaña del panel; los widgets de tabla con filtro muestran un **indicador del filtro activo** en la cabecera — uno o varios badges (p.ej. Servers "Error + Mantenimiento" pinta ambos; Syslog pinta "≥ nivel"); auto-refresco configurable (OFF / 10 s / 30 s / 60 s); columnas ordenables. Layout de fábrica + default global por admin. El widget **Services** cuenta los servicios embebidos activos vs parados |
-| **Navegación (sidebar + shell SPA)** | La navegación es una **barra lateral colapsable**: arriba las secciones (Overview, History, Syslog) y debajo el grupo **System**, que agrupa las pestañas del panel. **Todas las URLs sirven el MISMO shell** (`dashboard.html`) y la ruta solo elige qué panel arranca activo, así que moverse entre secciones es un cambio de pestaña **sin recarga**, incluida `/account`. Las secciones se declaran en el registro `HOME_PAGES` con su descriptor `standalone` (panel, función de render, permiso, icono y rótulo): una factoría de rutas las sirve, la sidebar se construye del mismo dato y el panel se genera de ahí. **Un módulo watchful puede aportar la suya** declarando `__page__` en su `schema.json` (hoy `/module/m365` y `/module/azure`): obtiene URL, entrada de sidebar con su permiso, panel y cableado sin que el core lo nombre — ver [explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__). `/history` acepta enlace profundo `?module=&key=` (es el salto "ver historial de este check" desde Infraestructura). Ver §[Layout de la UI](#layout-de-la-ui-sidebar-shell-spa-y-full-bleed) |
+| **Navegación (sidebar + shell SPA)** | La navegación es una **barra lateral colapsable**: arriba las secciones que se miran (Resumen, Infraestructura, Inventario, Historial, Syslog y las de los módulos) y debajo dos grupos de lo que se administra: **Catálogo**, los datos de referencia de la organización (Empresas, Tipos de dispositivo, Clústeres, Modelos, Plantillas, Credenciales, SNMP), y **Sistema**, la plataforma (Servicios, Módulos, Configuración, Acceso, Auditoría, Copias…). Dentro de cada grupo, las entradas van en el orden alfabético del idioma de quien lee; una sección declarada elige grupo con `placement` y una pestaña del core con `group` en `PANEL_TABS`. **Todas las URLs sirven el MISMO shell** (`dashboard.html`) y la ruta solo elige qué panel arranca activo, así que moverse entre secciones es un cambio de pestaña **sin recarga**, incluida `/account`. Las secciones se declaran en el registro `HOME_PAGES` con su descriptor `standalone` (panel, función de render, permiso, icono y rótulo): una factoría de rutas las sirve, la sidebar se construye del mismo dato y el panel se genera de ahí. **Un módulo watchful puede aportar la suya** declarando `__page__` en su `schema.json` (hoy `/module/m365` y `/module/azure`): obtiene URL, entrada de sidebar con su permiso, panel y cableado sin que el core lo nombre — ver [explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__). `/history` acepta enlace profundo `?module=&key=` (es el salto "ver historial de este check" desde Infraestructura). Ver §[Layout de la UI](#layout-de-la-ui-sidebar-shell-spa-y-full-bleed) |
 | **Pestaña de configuración** | Editar la configuración (Telegram, monitorización, idioma, …) directamente desde el navegador; paneles colapsables por sección |
 | **Mantenimiento (borrado de datos)** | Config → General → **Mantenimiento** reúne los borrados destructivos: *Borrar Una Serie*, *Borrar Todo El Historial*, *Vaciar Mensajes De Syslog*, *Eliminar Todos Los Eventos De Auditoría*, *Borrar El Registro De Notificaciones De Eventos* y *Borrar El Historial De Baneos*. Antes vivían en la barra de la propia sección que vacían — páginas que se dejan abiertas todo el día. La tarjeta no tiene campos propios: cada dominio aporta su botón como `CONFIG_ACTION` sobre la sección `maintenance`, con el permiso (`history_delete`, `syslog_delete`, `audit_delete`, `events_notify_delete`, `ipban_history_delete`) que oculta el botón a quien no lo tenga. Elegir *qué* serie borrar abre un modal selector. Ver [explica-descubrimiento.md §7b](explica-descubrimiento.md#7b-acciones-de-config-y-ui-aportadas-por-un-paquete-config_actions--web) |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
@@ -140,7 +140,7 @@ flowchart TD
 | **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, **auto-refresco por AJAX** (recarga solo el cuerpo vía `/status?fragment=1`, sin recargar la página → sin parpadeo, mantiene el scroll) con **overlay de "sin conexión"** si el servidor no responde; siempre visible para usuarios logueados |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal. La validación + operaciones viven en una capa sin Flask (`lib/core/users/service.py`), compartida con el [CLI de gestión](ref-cli.md) (`user add/enable/disable/passwd/role/group-add/group-del`) |
-| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 76 flags granulares; activar/desactivar desde el modal. Los permisos se editan por dos caminos: el modal del rol (un rol cada vez) y la sub-sección **Acceso › Permisos**, que los pone todos a la vez frente a los integrados |
+| **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 93 flags granulares; activar/desactivar desde el modal. Los permisos se editan en un solo sitio, la sub-sección **Acceso › Permisos**, que pone todos los roles a la vez frente a los integrados; el modal del rol edita su identidad y a quién se asigna |
 | **Grupos de usuarios** | Agrupar usuarios bajo uno o más roles; los permisos de los grupos se suman a los del rol individual del usuario; grupo `administrators` integrado; activar/desactivar desde el modal |
 | **Autenticación LDAP / AD** | Login con credenciales de Active Directory o cualquier servidor LDAP compatible. Sincronización automática de usuarios en primer login. Mapeo grupo → rol configurable. Soporte de login por email (`allow_email_login`). Requiere el paquete opcional `ldap3`. |
 | **SSO OIDC / OAuth2** | Login mediante proveedor externo (Microsoft Entra ID, Google, Keycloak…). Botón "Login with SSO" en la pantalla de login. Mapeo de claims y grupos a roles. Wizard de registro automático en Entra ID (Device Code Flow). Requiere `authlib`. |
@@ -240,7 +240,7 @@ Hay **dos formas de usarla**, según de dónde salga la tabla:
 **Regla de oro en ambos casos: la barra vive FUERA del bloque que se re-renderiza.** Si estuviera
 dentro, cada tecla la destruiría y el foco saltaría (fue un bug real, con un apaño que reponía el
 foco y el cursor a mano; hoy no hace falta). Los `<select>` se repueblan **en sitio** en cada
-recarga de datos, así que un host nuevo aporta su etiqueta sin robar el foco.
+recarga de datos, así que un dispositivo nuevo aporta su etiqueta sin robar el foco.
 
 Cuando un filtro deja la tabla vacía se dice **eso** ("Ninguna fila coincide con estos filtros", con
 el botón de limpiar), no el estado vacío propio de la tabla — que afirmaría que no hay usuarios
@@ -252,7 +252,7 @@ mientras un filtro los esconde.
 
 ![Gestión de acceso](images/access_tab.svg)
 
-El **catálogo completo** de roles integrados, roles personalizados, grupos y los **76 flags
+El **catálogo completo** de roles integrados, roles personalizados, grupos y los **93 flags
 de permiso** (más los permisos dinámicos por módulo/servidor/cluster y las estructuras
 internas `PERMISSIONS`/`PERMISSION_GROUPS`/`_perm_required`/`_get_effective_permissions`) es
 la fuente única en **[ref-permisos.md](ref-permisos.md)**. La **semántica de seguridad**
@@ -335,9 +335,9 @@ confirmación de acciones destructivas con modal —nunca `confirm()` nativo—,
 secretos en la auditoría) son la fuente única en **[explica-seguridad.md](explica-seguridad.md)**.
 
 > **Política de host SSH (matiz importante):** no hay un `RejectPolicy` global. Solo la clase
-> `Exec` usa `RejectPolicy`; la ruta host-aware por defecto usa `ssh_verify_host=False` →
+> `Exec` usa `RejectPolicy`; la ruta consciente del dispositivo por defecto usa `ssh_verify_host=False` →
 > `AutoAddPolicy` (acepta hosts desconocidos). Detalle en
-> [explica-seguridad.md](explica-seguridad.md) y [explica-hosts.md](explica-hosts.md).
+> [explica-seguridad.md](explica-seguridad.md) y [explica-dispositivos.md](explica-dispositivos.md).
 
 ---
 
@@ -388,9 +388,9 @@ El permiso requerido se indica entre paréntesis.
 | `PUT` | `/api/v1/overview/default-layout` | `overview_set_default` | Fijar el layout actual como default global para todos los usuarios |
 | `POST` | `/api/v1/overview/reset-factory` | `overview_reset_factory` | Borrar el default global y volver al layout de fábrica |
 
-### Dispositivos (registro de hosts)
+### Registro de dispositivos
 
-> El **modelo host-céntrico** (perfiles por protocolo, `host_uid`, ejecución host-aware, migración): ver **[explica-hosts.md](explica-hosts.md)**.
+> El **modelo centrado en el dispositivo** (perfiles por protocolo, `device_uid`, ejecución consciente del dispositivo, migración): ver **[explica-dispositivos.md](explica-dispositivos.md)**.
 
 Define un servidor una vez (dirección + perfiles de conexión por protocolo) y
 reutilízalo desde los checks de cualquier módulo. Los secretos de los perfiles
@@ -398,55 +398,55 @@ se enmascaran en lectura y se restauran al guardar (igual que la configuración 
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/api/v1/hosts` | `devices_view` (o view por host) | Listar hosts (secretos enmascarados) |
-| `POST` | `/api/v1/hosts` | `devices_edit` | Crear un host `{name, address, tags, description, profiles}` |
-| `PUT` | `/api/v1/hosts/<uid>` | `edit` por host | Actualizar un host (secretos omitidos se conservan) |
-| `DELETE` | `/api/v1/hosts/<uid>` | `delete` por host | Eliminar un host |
-| `POST` | `/api/v1/hosts/<uid>/clone` | `devices_edit` | Clonar un host (dirección + perfiles) con nuevo uid/nombre |
-| `GET` | `/api/v1/hosts/<uid>/status` | `devices_view` | Últimos resultados de cada check vinculado al host |
-| `POST` | `/api/v1/hosts/test_ssh` | `devices_edit` | Probar conectividad SSH a un host |
-| `POST` | `/api/v1/hosts/test_check` | `devices_edit` | Probar un check concreto contra un host |
-| `POST` | `/api/v1/hosts/test` | `devices_edit` | Test genérico de una configuración de host |
-| `GET` | `/api/v1/hosts/migrate/preview` | `devices_edit` | Propuesta de migración: agrupa conexiones inline repetidas (secretos enmascarados) |
-| `POST` | `/api/v1/hosts/migrate/apply` | `devices_edit` | Crear hosts para los candidatos aceptados `{accept:[{id,name}]}` y vincular los checks |
+| `GET` | `/api/v1/devices` | `devices_view` (o view por dispositivo) | Listar dispositivos (secretos enmascarados) |
+| `POST` | `/api/v1/devices` | `devices_edit` | Crear un dispositivo `{name, address, tags, description, profiles}` |
+| `PUT` | `/api/v1/devices/<uid>` | `edit` por dispositivo | Actualizar un dispositivo (secretos omitidos se conservan) |
+| `DELETE` | `/api/v1/devices/<uid>` | `delete` por dispositivo | Eliminar un dispositivo |
+| `POST` | `/api/v1/devices/<uid>/clone` | `devices_edit` | Clonar un dispositivo (dirección + perfiles) con nuevo uid/nombre |
+| `GET` | `/api/v1/devices/<uid>/status` | `devices_view` | Últimos resultados de cada check vinculado al dispositivo |
+| `POST` | `/api/v1/devices/test_ssh` | `devices_edit` | Probar conectividad SSH a un dispositivo |
+| `POST` | `/api/v1/devices/test_check` | `devices_edit` | Probar un check concreto contra un dispositivo |
+| `POST` | `/api/v1/devices/test` | `devices_edit` | Test genérico de una configuración de dispositivo |
+| `GET` | `/api/v1/devices/migrate/preview` | `devices_edit` | Propuesta de migración: agrupa conexiones inline repetidas (secretos enmascarados) |
+| `POST` | `/api/v1/devices/migrate/apply` | `devices_edit` | Crear dispositivos para los candidatos aceptados `{accept:[{id,name}]}` y vincular los checks |
 
-Un host se guarda en la BD general (tabla `hosts`); `profiles` es un JSON
+Un dispositivo se guarda en la BD general (tabla `devices`); `profiles` es un JSON
 `{protocolo: {campo: valor}}` (ssh/snmp/db/http/tls…). Los protocolos y sus
-campos los aporta cada módulo vía `__host_profile__` (ver guía de módulos §4d).
+campos los aporta cada módulo vía `__device_profile__` (ver guía de módulos §4d).
 
-**Vincular un check a un host.** En la config de un módulo host-capaz, cada ítem
-muestra un selector **Host**: al elegir uno, los campos de conexión se ocultan y
-el check hereda dirección + credenciales del host (`resolve_host` en el monitor).
-Módulos host-capaces: snmp, ping, datastore, ssl_cert, ntp, web. `dns` se queda
+**Vincular un check a un dispositivo.** En la config de un módulo enlazable a dispositivo, cada ítem
+muestra un selector **Dispositivo**: al elegir uno, los campos de conexión se ocultan y
+el check hereda dirección + credenciales del dispositivo (`resolve_device` en el monitor).
+Módulos enlazables a dispositivo: snmp, ping, datastore, ssl_cert, ntp, web. `dns` se queda
 inline (su target es un dominio, no un servidor con credenciales).
 
 **Asistente de migración** (botón "Detectar duplicados" en *Servers*). Escanea
 la configuración de módulos (en la BD), agrupa ítems por dirección uniéndolos solo si son compatibles
 (sin conflicto de credenciales en protocolos compartidos) y agregando perfiles
-entre módulos; propone N hosts. Tras confirmar, crea los hosts (credenciales
-cifradas) y reescribe los checks con `host_uid`, quitando los campos de conexión
-ya poseídos por el host. Es opt-in y reversible por revisión (coexistencia con
+entre módulos; propone N dispositivos. Tras confirmar, crea los dispositivos (credenciales
+cifradas) y reescribe los checks con `device_uid`, quitando los campos de conexión
+ya poseídos por el dispositivo. Es opt-in y reversible por revisión (coexistencia con
 los checks inline existentes).
 
 ### Clusters (checks multi-bind)
 
-Un **cluster** es un único check vinculado a **varios hosts** a la vez — el ítem lleva
-un array `host_uids` (en vez de un solo `host_uid`) y el módulo evalúa el conjunto y
+Un **cluster** es un único check vinculado a **varios dispositivos** a la vez — el ítem lleva
+un array `device_uids` (en vez de un solo `device_uid`) y el módulo evalúa el conjunto y
 agrega el estado. El ejemplo canónico es **`keepalived`** (VRRP multi-nodo: servicio por
 nodo, titular de la VIP, split-brain, prioridad — ver [ref-modulos.md](ref-modulos.md), sección keepalived).
 
 - Pestaña **Clusters** propia (`templates/partials/clusters/`): tabla + modal de
-  creación/edición con selección de los hosts miembros y sus columnas dinámicas.
+  creación/edición con selección de los dispositivos miembros y sus columnas dinámicas.
 - **No tiene CRUD dedicado**: los clusters se persisten como ítems de módulo vía
   `PUT /api/v1/modules` (igual que cualquier check), y su estado sale de
   `/api/v1/modules/status`.
 - Autorización: permisos globales `clusters_view/add/edit/delete` **+** permisos
   dinámicos por-cluster `cluster.{uid}.{view|add|edit|delete}` (resueltos en
-  `lib/core/modules/routes.py` por el `host_uids` del ítem). Ver §[Permisos](#roles-grupos-y-permisos).
+  `lib/core/modules/routes.py` por el `device_uids` del ítem). Ver §[Permisos](#roles-grupos-y-permisos).
 
 ### Credenciales
 
-Identidades SSH reutilizables (usuario + clave/clave-privada) que los hosts y
+Identidades SSH reutilizables (usuario + clave/clave-privada) que los dispositivos y
 checks pueden referenciar en lugar de duplicar secretos. Los secretos se cifran en
 la BD y se enmascaran en lectura.
 
@@ -456,7 +456,7 @@ la BD y se enmascaran en lectura.
 | `POST` | `/api/v1/credentials` | `credentials_add` | Crear una credencial |
 | `POST` | `/api/v1/credentials/<uid>/clone` | `credentials_add` | Clonar una credencial existente |
 | `GET` | `/api/v1/credentials/usage` | `credentials_view` | Dónde se usa **cada** credencial, en una sola pasada (vista «Quién las usa») |
-| `GET` | `/api/v1/credentials/<uid>/usage` | `credentials_view` | Dónde se usa la credencial (hosts/checks) |
+| `GET` | `/api/v1/credentials/<uid>/usage` | `credentials_view` | Dónde se usa la credencial (dispositivos/checks) |
 | `PUT` | `/api/v1/credentials/<uid>` | `credentials_edit` | Editar una credencial (secretos omitidos se conservan) |
 | `DELETE` | `/api/v1/credentials/<uid>` | `credentials_delete` | Eliminar una credencial |
 | `POST` | `/api/v1/credentials/test` | auth | Probar una credencial (conexión SSH) |
@@ -999,7 +999,7 @@ Widgets de tabla:
 | Module List | `modules_list` | Módulo, estado activo, resultado de checks, nº de ítems |
 | Server List | `servers_list` | Servidor, estado, checks, módulos activos |
 | Sessions | `sessions_list` | Usuario, IP, navegador, última actividad |
-| Active Issues | `incidents` | Checks que están fallando (módulo, check, host) |
+| Active Issues | `incidents` | Checks que están fallando (módulo, check, dispositivo) |
 | Failed Logins | `failed_logins` | Intentos de login fallidos (hora, usuario, IP, detalle) |
 | Recent Activity | `activity` | Últimos eventos de auditoría |
 | Recent Syslog | `syslog` | Mensajes syslog recientes (filtrables por severidad mínima) |
@@ -1038,7 +1038,7 @@ El estado **viaja con el dato del propio widget**, nunca desde una lista en el c
   de incidencias activas—. Una tabla de sesiones no está en apuros por tener filas.
 
 Así, un widget aportado por un módulo consigue lo mismo diciendo la misma palabra. Lo declaran
-hoy: **comprobaciones**, **dispositivos** (mantenimiento **no** cuenta: ese host lo tiró alguien a
+hoy: **comprobaciones**, **dispositivos** (mantenimiento **no** cuenta: ese dispositivo lo tiró alguien a
 propósito), **servicios** (uno parado es aviso, nunca error), **syslog** (severidades RFC 5424,
 leídas del mismo desglose que pintan las insignias) y la tabla de **incidencias activas**.
 
@@ -1095,7 +1095,7 @@ alguien a medias.
   "roles":    { "total": 3, "builtin": 3, "custom": 0 },
   "webhooks": { "total": 1, "enabled": 1 },
   "credentials": { "total": 0, "enabled": 0, "by_type": {} },
-  "coverage": { "hosts_total": 2, "hosts_monitored": 2, "pct": 100 },
+  "coverage": { "devices_total": 2, "devices_monitored": 2, "pct": 100 },
   "syslog":   { "total": 0, "recent": [], "by_severity": [] },
   "events":   { "total": 0, "enabled": 0, "by_source": {}, "notifications": 0 },
   "ipban":    { "enabled": true, "banned": 0, "watchlist": 0, "whitelist": 1, "bans": [] },
@@ -1179,11 +1179,10 @@ Las claves de i18n relacionadas con el sistema de permisos son:
 
 | Clave | Descripción |
 |-------|-------------|
-| `permission_labels` | Dict `{flag: etiqueta}` con los 76 permisos |
-| `perm_group_users` … `perm_group_checks` | Nombre de cada grupo de permisos para el modal de rol |
+| `permission_labels` / `permission_hints` | Dicts `{flag: etiqueta}` y `{flag: descripción}` con los 93 permisos |
+| `perm_group_*` | Nombre de cada grupo de permisos en **Acceso › Permisos** y en los diálogos de tokens de API |
 | `group_roles` | Etiqueta del selector de roles en el modal de grupo |
 | `group_builtin_badge` | Texto del badge "Predeterminado" en grupos integrados |
-| `role_tab_permissions` | Pestaña "Permisos" del modal de rol |
 | `role_tab_assignments` | Pestaña "Asignación" del modal de rol |
 | `role_assign_users` | Título de la columna de usuarios en la pestaña Asignación |
 | `role_assign_groups` | Título de la columna de grupos en la pestaña Asignación |
@@ -1260,13 +1259,13 @@ vistas sobre **los mismos datos y los mismos filtros**:
 | Status, Modules, páginas de módulo | resumen, tabla, mosaico / los cuatro layouts |
 | Services | tarjetas, flota (una fila por **instancia**), compacta |
 | Credentials | tarjetas, por tipo, **quién las usa** |
-| Servers | tarjetas, por estado, **cobertura** (qué host no vigila nadie) |
+| Servers | tarjetas, por estado, **cobertura** (qué dispositivo no vigila nadie) |
 | Audit | cronología, por actor, actividad por hora |
 | Syslog | stream, patrones |
 | Events (reglas / log) | tarjetas · por canal · entrega / cronología · por regla · por canal |
 | History | inventario de series |
 | Users, Roles, Groups, Sessions | tarjetas + **acceso efectivo / quién lo tiene / qué concede / por usuario** |
-| Clusters | tarjetas, por host |
+| Clusters | tarjetas, por dispositivo |
 | fail2ban (baneos / historial / whitelist) | por red / por dirección / por alcance |
 
 La forma es siempre la misma, y vive en `partials/core/`:
@@ -1283,7 +1282,7 @@ La forma es siempre la misma, y vive en `partials/core/`:
 Hay una vuelta de tuerca en las secciones que aporta un módulo: ahí las vistas no son solo disposiciones de una lista, sino **caras distintas de la sección**, cada una con su sub-path (`/module/m365/storage`) y su sitio en un desplegable de la barra lateral. Se declaran en el `schema.json` del módulo (`__page__.views`), comparten panel y permiso, y una de tipo `table` recibe del módulo sus columnas y sus filas — el núcleo dispone, ordena, filtra y pagina sin saber qué significan. Esas tablas traen además dos disposiciones propias (barras y agrupada) cuando el módulo declara qué columna dibujar. Ver [explica-descubrimiento.md §2c](explica-descubrimiento.md#2c-una-sección-propia-aportada-por-un-módulo-__page__).
 
 Esa última distinción es la regla que gobierna las vistas nuevas: un resumen **cuenta cosas**
-(«4 hosts sin ninguna comprobación», «6 baneos de esta IP»), y un recuento hecho sobre una
+(«4 dispositivos sin ninguna comprobación», «6 baneos de esta IP»), y un recuento hecho sobre una
 página cambia según avanzas — que es peor que no contar. Por eso una cabecera de resumen
 siempre declara el conjunto entero (`_summaryHeader` + `_summaryChip`), y las listas largas se
 recortan con `_chipList`, que nombra los primeros y añade «+n»: *cuáles* suele ser el dato
@@ -1381,9 +1380,9 @@ Todos los eventos auditados:
 | `syslog_drops_cleared` | Vaciado del registro de descartes de syslog |
 | `syslog_started` / `syslog_stopped` | Arranque/parada del receptor syslog desde la pestaña Services |
 | `events_worker_started` / `events_worker_stopped` | Arranque/parada del procesador de eventos desde la pestaña Services |
-| `host_created` / `host_updated` / `host_deleted` | CRUD del registro de dispositivos |
-| `host_ssh_tested` / `host_test_check` / `host_tested` | Pruebas de conexión/check contra un host |
-| `hosts_migrated` | Migración de conexiones inline a hosts compartidos |
+| `device_created` / `device_updated` / `device_deleted` | CRUD del registro de dispositivos |
+| `device_ssh_tested` / `device_test_check` / `device_tested` | Pruebas de conexión/check contra un dispositivo |
+| `devices_migrated` | Migración de conexiones inline a dispositivos compartidos |
 | `credential_created` / `credential_cloned` / `credential_updated` / `credential_deleted` | CRUD de credenciales reutilizables |
 | `daemon_started` / `daemon_stopped` | Arranque/parada del scheduler embebido |
 | `daemon_config_changed` | Cambio de intervalo (`timer_check`) o del interruptor `enabled` del monitor |

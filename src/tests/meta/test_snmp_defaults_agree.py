@@ -76,7 +76,7 @@ class TestTheFormOffersTheDefaultTheSchedulerObeys:
 
 
 class TestTheOnePairStillWrittenTwice:
-    """``timeout`` and ``retries`` stay on the check because the host profile has no place
+    """``timeout`` and ``retries`` stay on the check because the device profile has no place
     for them: a slow device cannot yet carry its own patience, so each check states it. The
     core states them too, for the callers that never see a check — discovery, the test
     screen. Two places, one meaning, no mechanism between them."""
@@ -85,7 +85,7 @@ class TestTheOnePairStillWrittenTwice:
         from lib.core.snmp.defaults import CONN_DEFAULTS      # noqa: PLC0415
         raw = _raw_servers()
         for field in ('timeout', 'retries'):
-            assert field in raw, f'{field} left the schema — is it host-owned now?'
+            assert field in raw, f'{field} left the schema — is it device-owned now?'
             assert raw[field].get('default') == CONN_DEFAULTS[field], (
                 f'{field}: core says {CONN_DEFAULTS[field]!r}, the check offers '
                 f'{raw[field].get("default")!r}')

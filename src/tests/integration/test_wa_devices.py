@@ -1,0 +1,785 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Tests for the device registry API — /api/v1/devices (GET/POST/PUT/DELETE)."""
+
+import copy
+from unittest.mock import patch
+
+import pytest
+
+try:
+    from lib.web_admin import WebAdmin  # noqa: F401
+    _HAS_FLASK = True
+except ImportError:
+    _HAS_FLASK = False
+
+from tests.conftest import _login
+
+pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
+
+_DEVICE = {
+    'name': 'srv-1', 'address': '10.0.0.5', 'tags': ['prod'],
+    'profiles': {'ssh': {'user': 'root', 'ssh_password': 'p@ss', 'port': 22}},
+}
+
+
+class TestApiDevices:
+
+    def test_requires_auth(self, client):
+        assert client.get('/api/v1/devices').status_code == 401
+
+    def test_create_list_and_mask(self, client, admin):
+        _login(client)
+        r = client.post('/api/v1/devices', json=_DEVICE)
+        assert r.status_code == 200
+        uid = r.get_json()['uid']
+
+        devices = client.get('/api/v1/devices').get_json()['devices']
+        h = next(x for x in devices if x['uid'] == uid)
+        assert h['name'] == 'srv-1' and h['address'] == '10.0.0.5'
+        assert h['tags'] == ['prod']
+        # Secret masked in the API payload, non-secret fields visible.
+        assert h['profiles']['ssh']['ssh_password'] is None
+        assert h['profiles']['ssh']['user'] == 'root'
+        # …but stored (decrypted) for the monitor to use.
+        assert admin._devices_store.get(uid)['profiles']['ssh']['ssh_password'] == 'p@ss'
+
+    def test_overview_servers_widget_returns_devices(self, client, admin):
+        """Regression: the servers Overview widget's row provider imported its device
+        helpers from ``lib.core.devices`` (not re-exported) after the reorg; the swallowed
+        ImportError left the widget empty ('-') even with devices present."""
+        _login(client)
+        assert client.post('/api/v1/devices', json=_DEVICE).status_code == 200
+        from lib.core.devices.overview_widget import server_list_rows
+        rows = server_list_rows(admin)
+        assert any(r['name'] == 'srv-1' for r in rows), rows
+
+    def test_virtual_flag_roundtrip_and_widget_split(self, client, admin):
+        """The 'virtual' flag persists (store + API round-trip) and the servers
+        Overview widget separates physical from virtual devices."""
+        _login(client)
+        assert client.post('/api/v1/devices', json={**_DEVICE, 'name': 'phys-1'}).status_code == 200
+        assert client.post('/api/v1/devices', json={
+            'name': 'vip-1', 'address': '10.0.0.100', 'virtual': True}).status_code == 200
+        assert admin._devices_store.get_by_name('vip-1')['virtual'] is True
+        assert admin._devices_store.get_by_name('phys-1')['virtual'] is False
+        api = client.get('/api/v1/devices').get_json()['devices']
+        assert next(h for h in api if h['name'] == 'vip-1')['virtual'] is True
+        from lib.core.devices.overview_widget import server_list_rows, servers_summary
+        summ = servers_summary(server_list_rows(admin))
+        assert summ['virtual'] == 1
+        assert summ['physical'] == summ['total'] - 1
+
+    def test_clone_duplicates_with_secrets(self, client, admin):
+        _login(client)
+        src = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
+        r = client.post(f'/api/v1/devices/{src}/clone',
+                        json={'name': 'srv-1 (copia)', 'address': '10.0.0.9'})
+        assert r.status_code == 200
+        new_uid = r.get_json()['uid']
+        assert new_uid and new_uid != src
+        stored = admin._devices_store.get(new_uid, decrypt=True)
+        # Overridden name + address…
+        assert stored['name'] == 'srv-1 (copia)' and stored['address'] == '10.0.0.9'
+        # …profiles copied AND the inline secret preserved (server-side clone of the
+        # DECRYPTED source — a client-side copy of the masked payload would lose it).
+        assert stored['profiles']['ssh']['ssh_password'] == 'p@ss'
+        assert stored['profiles']['ssh']['user'] == 'root'
+        # The source device is untouched.
+        assert admin._devices_store.get(src, decrypt=True)['address'] == '10.0.0.5'
+
+    def test_clone_only_selected_checks(self, client, admin):
+        """When the request carries a `checks` list, only those items are cloned."""
+        _login(client)
+        src = client.post('/api/v1/devices', json={'name': 's', 'address': '10.10.0.1'}).get_json()['uid']
+        admin._save_modules({'web': {'enabled': True, 'list': {
+            'w1': {'device_uid': src, 'enabled': True, 'url': 'http://a'},
+            'w2': {'device_uid': src, 'enabled': True, 'url': 'http://b'},
+        }}})
+        r = client.post(f'/api/v1/devices/{src}/clone',
+                        json={'name': 's2', 'address': '10.10.0.2', 'checks': ['w1']})
+        assert r.get_json()['checks_cloned'] == 1
+        new_uid = r.get_json()['uid']
+        web = admin._load_modules()['web']['list']
+        cloned = [v for v in web.values() if v.get('device_uid') == new_uid]
+        assert len(cloned) == 1 and cloned[0]['url'] == 'http://a'   # only w1 cloned
+
+    def test_clone_empty_checks_clones_none(self, client, admin):
+        _login(client)
+        src = client.post('/api/v1/devices', json={'name': 's', 'address': '10.11.0.1'}).get_json()['uid']
+        admin._save_modules({'web': {'enabled': True, 'list': {
+            'w1': {'device_uid': src, 'enabled': True, 'url': 'http://a'}}}})
+        r = client.post(f'/api/v1/devices/{src}/clone',
+                        json={'name': 's2', 'address': '10.11.0.2', 'checks': []})
+        assert r.get_json()['checks_cloned'] == 0
+
+    def test_clone_defaults_name_when_blank(self, client, admin):
+        _login(client)
+        src = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
+        new_uid = client.post(f'/api/v1/devices/{src}/clone', json={}).get_json()['uid']
+        assert admin._devices_store.get(new_uid)['name'] == 'srv-1 (copia)'
+
+    def test_clone_missing_source_returns_404(self, client):
+        _login(client)
+        assert client.post('/api/v1/devices/nope/clone',
+                           json={'name': 'x'}).status_code == 404
+
+    def test_delete_device_with_checks(self, client, admin):
+        """DELETE ?with_checks=1 also removes single-bind checks and unbinds the
+        device from multi-device (cluster) checks (deleting them only if it was the
+        sole member)."""
+        _login(client)
+        a = client.post('/api/v1/devices', json={'name': 'a', 'address': '10.4.0.1'}).get_json()['uid']
+        b = client.post('/api/v1/devices', json={'name': 'b', 'address': '10.4.0.2'}).get_json()['uid']
+        admin._save_modules({
+            'web':     {'enabled': True, 'list': {'w1': {'device_uid': a, 'enabled': True}}},
+            'proxmox': {'enabled': True, 'list': {
+                'cl_multi': {'device_uids': [a, b], 'enabled': True},   # a is one member
+                'cl_solo':  {'device_uids': [a], 'enabled': True},      # a is the only member
+            }},
+        })
+        r = client.delete(f'/api/v1/devices/{a}?with_checks=1')
+        assert r.status_code == 200 and r.get_json()['checks_deleted'] == 3
+        mods = admin._load_modules()
+        assert 'w1' not in mods['web']['list']                 # single-bind check deleted
+        assert mods['proxmox']['list']['cl_multi']['device_uids'] == [b]   # unbound, kept
+        assert 'cl_solo' not in mods['proxmox']['list']        # sole member → deleted
+
+    def test_delete_device_without_checks_keeps_them(self, client, admin):
+        _login(client)
+        a = client.post('/api/v1/devices', json={'name': 'a', 'address': '10.4.1.1'}).get_json()['uid']
+        admin._save_modules({'web': {'enabled': True, 'list': {'w1': {'device_uid': a, 'enabled': True}}}})
+        r = client.delete(f'/api/v1/devices/{a}')                 # no with_checks
+        assert r.status_code == 200 and r.get_json()['checks_deleted'] == 0
+        assert 'w1' in admin._load_modules()['web']['list']     # check kept (now dangling)
+
+    def test_clone_label_uses_module_template(self, client, admin):
+        """A check whose module declares __discovery_label_template__ keeps its
+        per-item part (service) with the NEW device name — e.g. 'srv2 - nginx' —
+        instead of collapsing to just the device name."""
+        _login(client)
+        src = client.post('/api/v1/devices', json={
+            'name': 'srv', 'address': '10.9.0.1', 'kind': 'remote'}).get_json()['uid']
+        admin._save_modules({'watchfuls.service_status': {'enabled': True, 'list': {
+            'svc1': {'device_uid': src, 'enabled': True, 'service': 'nginx', 'label': 'srv - nginx'}}}})
+        new_uid = client.post(f'/api/v1/devices/{src}/clone',
+                              json={'name': 'srv2', 'address': '10.9.0.2'}).get_json()['uid']
+        svc = admin._load_modules()['watchfuls.service_status']['list']
+        cloned = next(v for v in svc.values() if v.get('device_uid') == new_uid)
+        assert cloned['label'] == 'srv2 - nginx'          # template: {device} - {name}
+        assert cloned['service'] == 'nginx'               # operative field preserved
+
+    def test_clone_blanks_cluster_node(self, client, admin):
+        """The cluster-node identity (profiles.proxmox.node) is unique to the
+        machine → a clone must not inherit it."""
+        _login(client)
+        src = client.post('/api/v1/devices', json={
+            'name': 'pn', 'address': '10.8.0.1', 'kind': 'remote',
+            'profiles': {'proxmox': {'node': 'pve01', 'port': 8006}},
+        }).get_json()['uid']
+        new_uid = client.post(f'/api/v1/devices/{src}/clone',
+                              json={'name': 'pn (copia)', 'address': '10.8.0.2'}).get_json()['uid']
+        clone = admin._devices_store.get(new_uid, decrypt=True)
+        assert 'node' not in (clone.get('profiles', {}).get('proxmox', {}))   # blanked
+        assert clone['profiles']['proxmox']['port'] == 8006                   # rest kept
+        # source untouched
+        assert admin._devices_store.get(src, decrypt=True)['profiles']['proxmox']['node'] == 'pve01'
+
+    def test_clone_resets_os_to_auto(self, client, admin):
+        _login(client)
+        src = client.post('/api/v1/devices',
+                          json={'name': 'lx', 'address': '10.5.0.1', 'os': 'linux'}).get_json()['uid']
+        new_uid = client.post(f'/api/v1/devices/{src}/clone',
+                              json={'name': 'lx (copia)', 'address': '10.5.0.2'}).get_json()['uid']
+        assert admin._devices_store.get(new_uid)['os'] == 'auto'   # clone auto-detects
+
+    def test_clone_duplicates_bound_module_checks(self, client, admin):
+        _login(client)
+        src = client.post('/api/v1/devices',
+                          json={'name': 's', 'address': '10.6.0.1'}).get_json()['uid']
+        admin._save_modules({'web': {'enabled': True, 'list': {
+            'w1': {'device_uid': src, 'enabled': True, 'server': 'x.example.com'},
+        }}})
+        r = client.post(f'/api/v1/devices/{src}/clone',
+                        json={'name': 's (copia)', 'address': '10.6.0.2'})
+        assert r.status_code == 200
+        new_uid = r.get_json()['uid']
+        assert r.get_json()['checks_cloned'] == 1
+        web = admin._load_modules()['web']['list']
+        bound_new = [k for k, v in web.items() if v.get('device_uid') == new_uid]
+        bound_src = [k for k, v in web.items() if v.get('device_uid') == src]
+        assert len(bound_new) == 1 and len(bound_src) == 1       # cloned, original kept
+        assert web[bound_new[0]]['server'] == 'x.example.com'    # fields copied
+        # web declares __discovery_label_template__ "{device} - {server}" → the clone
+        # keeps its per-item part (the server) with the new device name.
+        assert web[bound_new[0]]['label'] == 's (copia) - x.example.com'
+
+    def test_clone_joins_cluster_membership(self, client, admin):
+        """Cloning a device that is a MEMBER of a multi-device (cluster) check adds the
+        clone to that check's device_uids (joins the cluster) instead of duplicating
+        the check — even if a stale device_uid also points at the source."""
+        _login(client)
+        src = client.post('/api/v1/devices',
+                          json={'name': 'n', 'address': '10.7.0.1'}).get_json()['uid']
+        admin._save_modules({'proxmox': {'enabled': True, 'list': {
+            'cl': {'device_uid': src, 'device_uids': [src, 'other'], 'enabled': True},
+        }}})
+        r = client.post(f'/api/v1/devices/{src}/clone',
+                        json={'name': 'n (copia)', 'address': '10.7.0.2'})
+        new_uid = r.get_json()['uid']
+        assert r.get_json()['checks_cloned'] == 1
+        prox = admin._load_modules()['proxmox']['list']
+        assert len(prox) == 1                                    # not duplicated
+        assert new_uid in prox['cl']['device_uids']                # clone joined the cluster
+        assert src in prox['cl']['device_uids']                    # original kept
+
+    def test_kind_and_maintenance_persist(self, client, admin):
+        _login(client)
+        uid = client.post('/api/v1/devices', json={
+            'name': 'remote-1', 'address': '10.0.0.7', 'kind': 'remote',
+            'maintenance': True,
+            'profiles': {'ssh': {'ssh_user': 'root', 'ssh_password': 'x'}},
+        }).get_json()['uid']
+        h = admin._devices_store.get(uid)
+        assert h['kind'] == 'remote' and h['maintenance'] is True
+        # Round-trips through the API too (masked secret).
+        api = next(x for x in client.get('/api/v1/devices').get_json()['devices']
+                   if x['uid'] == uid)
+        assert api['kind'] == 'remote' and api['maintenance'] is True
+        assert api['profiles']['ssh']['ssh_password'] is None
+
+    def test_status_derived_from_checks(self, client, admin):
+        """The listing carries a per-device monitoring status built from the
+        daemon's status file and each check's device_uid binding."""
+        import json
+        import os
+
+        _login(client)
+        uids = {n: client.post('/api/v1/devices', json={'name': n, 'address': f'10.0.0.{i}'})
+                .get_json()['uid']
+                for i, n in enumerate(('ok', 'err', 'pend', 'none', 'maint'), start=20)}
+        client.put(f"/api/v1/devices/{uids['maint']}", json={
+            'name': 'maint', 'address': '10.0.0.24', 'maintenance': True})
+
+        modules = {'web': {'enabled': True, 'list': {
+            'c_ok':    {'device_uid': uids['ok'],    'enabled': True},
+            'c_err':   {'device_uid': uids['err'],   'enabled': True},
+            'c_pend':  {'device_uid': uids['pend'],  'enabled': True},
+            'c_maint': {'device_uid': uids['maint'], 'enabled': True},
+            'c_off':   {'device_uid': uids['none'],  'enabled': False},  # disabled → ignored
+        }}}
+        assert admin._save_modules(modules)
+        admin._check_state_store.persist_status({'web': {
+            'c_ok':    {'status': True},
+            'c_err':   {'status': False},
+            'c_maint': {'status': True},
+            # c_pend has no entry → pending/no data
+        }})
+
+        devices = {h['uid']: h for h in client.get('/api/v1/devices').get_json()['devices']}
+        assert devices[uids['ok']]['status'] == 'ok'
+        assert devices[uids['err']]['status'] == 'error'
+        assert devices[uids['pend']]['status'] == 'warning'   # checks bound, no data yet
+        assert devices[uids['none']]['status'] == ''          # only a disabled check
+        # Maintenance is a UI overlay: the backend still reports the monitoring
+        # state (here the check is OK), and the frontend shows "Maintenance".
+        assert devices[uids['maint']]['status'] == 'ok'
+
+    def test_module_counts_in_listing(self, client, admin):
+        """The listing reports modules added vs active per device: total = the
+        device's saved module list ∪ modules with a bound check; active = those
+        with at least one enabled check."""
+        _login(client)
+        a = client.post('/api/v1/devices', json={'name': 'a', 'address': '10.1.0.1'}).get_json()['uid']
+        b = client.post('/api/v1/devices', json={'name': 'b', 'address': '10.1.0.2'}).get_json()['uid']
+        # Device A: 'web' added with an enabled check + 'cpu' added with no check yet.
+        client.put(f'/api/v1/devices/{a}', json={
+            'name': 'a', 'address': '10.1.0.1', 'modules': ['web', 'cpu']})
+        modules = {
+            'web': {'enabled': True, 'list': {'w1': {'device_uid': a, 'enabled': True}}},
+            # Device B: only a disabled check, and 'cpu' not in any saved list.
+            'cpu': {'enabled': True, 'list': {'c1': {'device_uid': b, 'enabled': False}}},
+        }
+        assert admin._save_modules(modules)
+
+        devices = {h['uid']: h for h in client.get('/api/v1/devices').get_json()['devices']}
+        # A: web (active) + cpu (added, no check) → 1 active / 2 total
+        assert devices[a]['modules_total'] == 2 and devices[a]['modules_active'] == 1
+        # B: cpu bound but disabled → 1 total, 0 active
+        assert devices[b]['modules_total'] == 1 and devices[b]['modules_active'] == 0
+
+    def test_create_requires_name(self, client):
+        _login(client)
+        assert client.post('/api/v1/devices', json={'address': '1.2.3.4'}).status_code == 400
+
+    def test_duplicate_name_rejected(self, client):
+        _login(client)
+        assert client.post('/api/v1/devices', json={'name': 'dup'}).status_code == 200
+        assert client.post('/api/v1/devices', json={'name': 'dup'}).status_code == 400
+
+    def test_update_restores_masked_secret(self, client, admin):
+        _login(client)
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
+        # Client re-sends the profile with the secret masked (None) — the route
+        # must restore the stored value instead of wiping it.
+        upd = {'name': 'srv-1b', 'address': '10.0.0.6',
+               'profiles': {'ssh': {'user': 'root', 'ssh_password': None, 'port': 22}}}
+        assert client.put(f'/api/v1/devices/{uid}', json=upd).status_code == 200
+        h = admin._devices_store.get(uid)
+        assert h['name'] == 'srv-1b' and h['address'] == '10.0.0.6'
+        assert h['profiles']['ssh']['ssh_password'] == 'p@ss'   # preserved
+
+    def test_update_unknown_uid(self, client):
+        _login(client)
+        assert client.put('/api/v1/devices/nope', json=_DEVICE).status_code == 404
+
+    def test_delete(self, client, admin):
+        _login(client)
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
+        assert client.delete(f'/api/v1/devices/{uid}').status_code == 200
+        assert admin._devices_store.get(uid) is None
+        assert client.delete(f'/api/v1/devices/{uid}').status_code == 404
+
+
+class TestTestSsh:
+    """POST /api/v1/devices/test_ssh probes the SSH connection without saving."""
+
+    def test_probe_uses_submitted_fields(self, client):
+        _login(client)
+        with patch('lib.core.devices.ssh_client.test_connection',
+                   return_value=(True, 'SSH connection successful', 'linux')) as probe:
+            r = client.post('/api/v1/devices/test_ssh', json={
+                'address': '10.0.0.9',
+                'profiles': {'ssh': {'ssh_user': 'root', 'ssh_password': 'pw',
+                                     'ssh_port': 2222}},
+            })
+        body = r.get_json()
+        assert r.status_code == 200 and body['ok'] is True
+        assert body['os'] == 'linux'        # OS detected over the connection
+        kw = probe.call_args.kwargs
+        assert kw['address'] == '10.0.0.9' and kw['user'] == 'root'
+        assert kw['password'] == 'pw' and kw['port'] == 2222
+        assert kw['detect'] is True
+
+    def test_probe_restores_masked_secret_from_stored_device(self, client, admin):
+        _login(client)
+        uid = client.post('/api/v1/devices', json={
+            'name': 'rem', 'address': '10.0.0.9', 'kind': 'remote',
+            'profiles': {'ssh': {'ssh_user': 'root', 'ssh_password': 'storedpw'}},
+        }).get_json()['uid']
+        # Client sends the secret masked (null) — route restores it from storage.
+        with patch('lib.core.devices.ssh_client.test_connection',
+                   return_value=(True, 'ok', '')) as probe:
+            client.post('/api/v1/devices/test_ssh', json={
+                'uid': uid, 'address': '10.0.0.9',
+                'profiles': {'ssh': {'ssh_user': 'root', 'ssh_password': None}},
+            })
+        assert probe.call_args.kwargs['password'] == 'storedpw'
+
+    def test_probe_requires_edit_permission(self, client, admin):
+        admin._users['viewer'] = {'password_hash': admin._users['admin']['password_hash'],
+                                  'role': 'viewer', 'display_name': 'V'}
+        _login(client, 'viewer')
+        assert client.post('/api/v1/devices/test_ssh',
+                           json={'address': '1.2.3.4'}).status_code == 403
+
+
+class TestApiMigrate:
+
+    def test_preview_and_apply(self, client, admin):
+        _login(client)
+        mods = {
+            'snmp': {'servers': {'r1': {'host': '10.0.0.1', 'community': 'public',
+                                        'version': '2c', 'checks': {}}}},
+            'ping': {'list': {'p1': {'host': '10.0.0.1'}}},
+        }
+        assert client.put('/api/v1/modules', json=mods).status_code == 200
+
+        plan = client.get('/api/v1/devices/migrate/preview').get_json()
+        grp = next(c for c in plan['candidates'] if c['address'] == '10.0.0.1')
+        assert grp['is_duplicate'] is True
+        assert set(grp['modules']) == {'snmp', 'ping'}
+
+        res = client.post('/api/v1/devices/migrate/apply',
+                          json={'accept': [{'id': grp['id'], 'name': 'device-a'}]})
+        assert res.status_code == 200
+        assert res.get_json()['created'] == 1
+
+        device = admin._devices_store.get_by_name('device-a')
+        assert device and device['address'] == '10.0.0.1'
+        # The device's identity moves WITH it: the device is what the community is about.
+        assert (device.get('profiles') or {})['snmp'] == {'community': 'public', 'version': '2c'}
+
+        newmods = client.get('/api/v1/modules').get_json()
+        # Items are now keyed by their uid, so look them up by value.
+        r1 = next(iter(newmods['snmp']['servers'].values()))
+        assert r1.get('device_uid') and 'host' not in r1
+        # …and does not stay behind on the check. Read the DECRYPTED stored config, not the
+        # API response, where a secret is masked either way: masking would hide the
+        # difference between "moved" and "copied", and a copy is the failure worth catching —
+        # the check would keep authenticating with a stale secret after the device's is rotated.
+        r1_stored = next(iter(admin._load_modules()['snmp']['servers'].values()))
+        assert 'community' not in r1_stored and 'version' not in r1_stored
+        p1 = next(iter(newmods['ping']['list'].values()))
+        assert p1.get('device_uid') == r1['device_uid'] and 'host' not in p1
+
+    def test_preview_masks_secrets(self, client):
+        _login(client)
+        # The SSH tunnel is device-owned; its password must be masked in the preview.
+        # The candidate device is the SSH server ('jump') — datastore's DB endpoint
+        # ('host') is now a per-check field, not a device profile.
+        mods = {'datastore': {'list': {'d1': {
+            'host': 'db.x', 'db_type': 'postgres', 'conn_type': 'ssh',
+            'ssh_host': 'jump', 'ssh_user': 'j', 'ssh_password': 'topsecret'}}}}
+        assert client.put('/api/v1/modules', json=mods).status_code == 200
+        plan = client.get('/api/v1/devices/migrate/preview').get_json()
+        c = next(c for c in plan['candidates'] if c['address'] == 'jump')
+        assert c['profiles']['ssh']['ssh_user'] == 'j'
+        assert c['profiles']['ssh']['ssh_password'] is None   # secret masked
+
+    def test_apply_requires_edit_permission(self, client, admin):
+        # A viewer (no devices_edit) cannot preview/apply.
+        admin._users['viewer'] = {'password_hash': admin._users['admin']['password_hash'],
+                                  'role': 'viewer', 'display_name': 'V'}
+        _login(client, 'viewer')
+        assert client.get('/api/v1/devices/migrate/preview').status_code == 403
+        assert client.post('/api/v1/devices/migrate/apply', json={'accept': []}).status_code == 403
+
+
+class TestDeviceAudits:
+    """Device operations must be audited with meaningful detail (field diffs,
+    names, masked secrets) — same convention as config/modules."""
+
+    def _last(self, admin, event):
+        return next(e for e in reversed(admin._audit_log) if e['event'] == event)
+
+    def test_update_audits_field_diff_with_masked_secret(self, client, admin):
+        _login(client)
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
+        upd = {'name': 'srv-1', 'address': '10.0.0.99',
+               'profiles': {'ssh': {'user': 'root2', 'ssh_password': 'newpw', 'port': 22}}}
+        assert client.put(f'/api/v1/devices/{uid}', json=upd).status_code == 200
+        detail = self._last(admin, 'device_updated')['detail']
+        fields = {c['field'] for c in detail['changes']}
+        assert 'address' in fields
+        assert any(f.startswith('profiles') for f in fields)
+        # The changed secret must never appear in the audit trail.
+        assert 'newpw' not in str(detail)
+
+    def test_added_ssh_profile_secret_masked_in_audit(self, client, admin):
+        """Regression: adding a whole SSH profile must NOT log the password /
+        key text in plaintext (only one side of the diff is a dict)."""
+        _login(client)
+        # Create a device with no profiles, then add the SSH profile on update.
+        uid = client.post('/api/v1/devices', json={'name': 'srv-x', 'address': '10.0.0.5'}).get_json()['uid']
+        upd = {'name': 'srv-x', 'address': '10.0.0.5', 'kind': 'remote',
+               'profiles': {'ssh': {'ssh_user': 'root',
+                                    'ssh_password': 'topsecret',
+                                    'ssh_key_string': '-----BEGIN OPENSSH PRIVATE KEY-----xyz'}}}
+        assert client.put(f'/api/v1/devices/{uid}', json=upd).status_code == 200
+        detail = self._last(admin, 'device_updated')['detail']
+        blob = str(detail)
+        assert 'topsecret' not in blob and 'BEGIN OPENSSH' not in blob
+        assert '***' in blob
+
+    def test_create_and_delete_audit_details(self, client, admin):
+        _login(client)
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
+        created = self._last(admin, 'device_created')['detail']
+        assert created['address'] == '10.0.0.5' and created['profiles'] == ['ssh']
+        client.delete(f'/api/v1/devices/{uid}')
+        deleted = self._last(admin, 'device_deleted')['detail']
+        assert deleted['name'] == 'srv-1' and deleted['address'] == '10.0.0.5'
+
+    def test_migrate_audits_created_devices(self, client, admin):
+        _login(client)
+        mods = {'ping': {'list': {'p1': {'host': '10.9.9.1'}, 'p2': {'host': '10.9.9.1'}}}}
+        assert client.put('/api/v1/modules', json=mods).status_code == 200
+        plan = client.get('/api/v1/devices/migrate/preview').get_json()
+        grp = next(c for c in plan['candidates'] if c['address'] == '10.9.9.1')
+        client.post('/api/v1/devices/migrate/apply',
+                    json={'accept': [{'id': grp['id'], 'name': 'mig-device'}]})
+        detail = self._last(admin, 'devices_migrated')['detail']
+        assert detail['devices'] == 1 and detail['checks'] == 2
+        assert detail['created'][0]['name'] == 'mig-device'
+        # Checks are identified by their uid key now; just assert count + module.
+        checks = detail['created'][0]['checks']
+        assert len(checks) == 2 and all(c.startswith('ping/') for c in checks)
+
+
+class TestStateChangeAudits:
+    """Previously-unaudited state changes must now leave an audit entry."""
+
+    def test_history_delete_audited(self, client, admin):
+        _login(client)
+        if not admin._history:
+            import pytest
+            pytest.skip('history store unavailable')
+        admin._history.record('mod_x', 'k1', True, {})
+        client.delete('/api/v1/history?module=mod_x&key=k1')
+        entry = next(e for e in reversed(admin._audit_log) if e['event'] == 'history_deleted')
+        assert entry['detail']['module'] == 'mod_x' and entry['detail']['key'] == 'k1'
+
+    def test_history_delete_all_audited(self, client, admin):
+        _login(client)
+        if not admin._history:
+            import pytest
+            pytest.skip('history store unavailable')
+        client.delete('/api/v1/history/all')
+        assert any(e['event'] == 'history_all_deleted' for e in admin._audit_log)
+
+
+class TestDeviceStatus:
+    """/api/v1/devices/<uid>/status — latest recorded data for the modal tab."""
+
+    def test_returns_bound_check_status(self, client, admin):
+        _login(client)
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
+        # Bind a ping check to this device.
+        mods = admin._load_modules()
+        mods.setdefault('ping', {}).setdefault('list', {})['chk1'] = {
+            'device_uid': uid, 'enabled': True, 'host': '10.0.0.5',
+            'label': 'My Ping', 'uid': 'u1'}
+        assert admin._save_modules(mods)
+        # Daemon recorded a result for it (in the check_state DB).
+        admin._check_state_store.persist_status({'ping': {'chk1': {
+            'status': True, 'message': 'pong', 'other_data': {'latency_ms': 1.2}}}})
+
+        r = client.get(f'/api/v1/devices/{uid}/status')
+        assert r.status_code == 200
+        e = next(x for x in r.get_json()['results'] if x['key'] == 'chk1')
+        assert e['ok'] is True and e['name'] == 'My Ping'
+        assert e['message'] == 'pong' and e['data']['latency_ms'] == 1.2
+
+    def test_matches_derived_keys(self, client, admin):
+        """ram_swap derived keys (<uid>_ram) match their base bound item."""
+        _login(client)
+        uid = client.post('/api/v1/devices', json=_DEVICE).get_json()['uid']
+        mods = admin._load_modules()
+        mods.setdefault('ram_swap', {}).setdefault('list', {})['base1'] = {
+            'device_uid': uid, 'enabled': True, 'label': 'NS1', 'uid': 'rs1'}
+        assert admin._save_modules(mods)
+        admin._check_state_store.persist_status({'ram_swap': {'base1_ram': {
+            'status': True, 'other_data': {'name': 'NS1 - RAM', 'used': 42.0}}}})
+        r = client.get(f'/api/v1/devices/{uid}/status')
+        e = next(x for x in r.get_json()['results'] if x['key'] == 'base1_ram')
+        assert e['name'] == 'NS1 - RAM' and e['data']['used'] == 42.0
+
+
+class TestCheckSecretRestore:
+    """A test run after reload must use the stored secret, not the masked null."""
+
+    def test_restores_masked_password_from_stored_item(self, admin):
+        from lib.core.devices.service import _restore_check_secrets
+        mods = admin._load_modules()
+        mods.setdefault('datastore', {}).setdefault('list', {})['d1'] = {
+            'db_type': 'mysql', 'user': 'u', 'password': 'REALPASS', 'uid': 'u1'}
+        assert admin._save_modules(mods)
+        # The modal would send the masked secret (null) on a post-reload test.
+        fields = {'db_type': 'mysql', 'user': 'u', 'password': None}
+        _restore_check_secrets(admin, 'datastore', 'list', 'd1', fields)
+        assert fields['password'] == 'REALPASS'      # restored from storage
+        assert fields['user'] == 'u'
+
+    def test_explicit_new_password_is_kept(self, admin):
+        from lib.core.devices.service import _restore_check_secrets
+        mods = admin._load_modules()
+        mods.setdefault('datastore', {}).setdefault('list', {})['d1'] = {
+            'password': 'OLDPASS', 'uid': 'u1'}
+        assert admin._save_modules(mods)
+        fields = {'password': 'TYPED_NEW'}           # user typed a new one
+        _restore_check_secrets(admin, 'datastore', 'list', 'd1', fields)
+        assert fields['password'] == 'TYPED_NEW'     # the typed value wins
+
+
+class TestServerTest:
+    """Full/individual server test endpoints reuse each module's check() once."""
+
+    def _mock_check(self):
+        # The check path uses device_exec → ssh_client.connect_host + run_command.
+        from lib.core.devices import ssh_client
+        return [
+            patch.object(ssh_client, 'HAS_PARAMIKO', True),
+            patch.object(ssh_client, 'connect_host', return_value=object()),
+            patch.object(ssh_client, 'run_command', return_value=('nginx\nnginx\n', '', 0)),
+        ]
+
+    def test_test_check_individual(self, client):
+        _login(client)
+        ctx = self._mock_check()
+        for c in ctx:
+            c.start()
+        try:
+            r = client.post('/api/v1/devices/test_check', json={
+                '_device': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                          'profiles': {'ssh': {'ssh_user': 'root'}}},
+                'module': 'process', 'collection': 'list', 'key': 'web',
+                'fields': {'process': 'nginx', 'min_count': 2},
+            })
+        finally:
+            for c in ctx:
+                c.stop()
+        assert r.status_code == 200
+        d = r.get_json()
+        assert d['ok'] is True
+        assert d['results'][0]['key'] == 'web'
+
+    def test_full_test_ssh_and_checks(self, client, admin):
+        from lib.core.devices import ssh_client
+        _login(client)
+        ctx = self._mock_check() + [
+            patch.object(ssh_client, 'test_connection', return_value=(True, 'ok', 'linux')),
+        ]
+        for c in ctx:
+            c.start()
+        try:
+            r = client.post('/api/v1/devices/test', json={
+                '_device': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                          'profiles': {'ssh': {'ssh_user': 'root'}}},
+                'checks': [{'module': 'process', 'collection': 'list', 'key': 'web',
+                            'fields': {'process': 'nginx', 'min_count': 1}}],
+            })
+        finally:
+            for c in ctx:
+                c.stop()
+        assert r.status_code == 200
+        d = r.get_json()
+        assert d['ssh']['ok'] is True
+        assert d['ok'] is True
+        assert any(x['module'] == 'process' and x['ok'] for x in d['results'])
+        # The test is audited with a per-check breakdown (not just a count).
+        ev = next(e for e in reversed(admin._audit_log) if e['event'] == 'device_tested')
+        det = ev['detail']
+        assert det['total'] == 1 and det['passed'] == 1 and det['failed'] == 0
+        assert det['results'][0]['module'] == 'process' and det['results'][0]['ok'] is True
+
+    def test_module_test_no_ssh_skips_ssh(self, client):
+        """A module-scoped test (no_ssh) runs the checks but not the SSH probe."""
+        from lib.core.devices import ssh_client
+        _login(client)
+        ctx = self._mock_check() + [
+            patch.object(ssh_client, 'test_connection', return_value=(True, 'ok', 'linux')),
+        ]
+        for c in ctx:
+            c.start()
+        try:
+            r = client.post('/api/v1/devices/test', json={
+                'no_ssh': True,
+                '_device': {'address': '10.0.0.9', 'kind': 'remote', 'os': 'linux',
+                          'profiles': {'ssh': {'ssh_user': 'root'}}},
+                'checks': [{'module': 'process', 'collection': 'list', 'key': 'web',
+                            'fields': {'process': 'nginx', 'min_count': 1}}],
+            })
+        finally:
+            for c in ctx:
+                c.stop()
+        d = r.get_json()
+        assert d['ssh'] is None                       # SSH probe skipped
+        assert any(x['module'] == 'process' and x['ok'] for x in d['results'])
+
+    def test_test_requires_edit_permission(self, client, admin):
+        admin._users['viewer'] = {'password_hash': admin._users['admin']['password_hash'],
+                                  'role': 'viewer', 'display_name': 'V'}
+        _login(client, 'viewer')
+        assert client.post('/api/v1/devices/test', json={}).status_code == 403
+        assert client.post('/api/v1/devices/test_check', json={}).status_code == 403
+
+
+class TestPerServerPermissions:
+    """Per-server overrides (server.<uid>.<view|edit|delete>) gate access the
+    same way per-module permissions do — without any global ``servers_*``."""
+
+    def _make_user(self, admin, perms):
+        """Assign a custom role holding *perms* to a fresh user; return its name."""
+        role_uid = '11111111-1111-4111-8111-111111111111'
+        admin._custom_roles[role_uid] = {
+            'uid': role_uid, 'name': 'srv-role', 'enabled': True,
+            'permissions': list(perms),
+        }
+        admin._users['srvuser'] = {
+            'password_hash': admin._users['admin']['password_hash'],
+            'role': role_uid, 'display_name': 'S',
+        }
+        return 'srvuser'
+
+    # Devices are created directly through the store so no admin login is needed —
+    # the test then logs in *only* as the per-server user (logging in over an
+    # active admin session would not switch the session).
+    def test_view_scoped_to_granted_server(self, client, admin):
+        uid1 = admin._devices_store.create({**_DEVICE}, actor='admin')
+        uid2 = admin._devices_store.create(
+            {**_DEVICE, 'name': 'srv-2', 'address': '10.0.0.6'}, actor='admin')
+        self._make_user(admin, [f'server.{uid1}.view'])
+        _login(client, 'srvuser')
+        devices = client.get('/api/v1/devices').get_json()['devices']
+        ids = {h['uid'] for h in devices}
+        assert uid1 in ids and uid2 not in ids
+
+    def test_no_server_perm_forbidden(self, client, admin):
+        admin._devices_store.create({**_DEVICE}, actor='admin')
+        self._make_user(admin, [])
+        _login(client, 'srvuser')
+        assert client.get('/api/v1/devices').status_code == 403
+
+    def test_view_only_cannot_edit_or_delete(self, client, admin):
+        uid = admin._devices_store.create({**_DEVICE}, actor='admin')
+        self._make_user(admin, [f'server.{uid}.view'])
+        _login(client, 'srvuser')
+        assert client.put(f'/api/v1/devices/{uid}',
+                          json={'name': 'x', 'address': '10.0.0.5'}).status_code == 403
+        assert client.delete(f'/api/v1/devices/{uid}').status_code == 403
+
+    def test_edit_and_delete_when_granted(self, client, admin):
+        uid = admin._devices_store.create({**_DEVICE}, actor='admin')
+        self._make_user(admin, [f'server.{uid}.view',
+                                f'server.{uid}.edit', f'server.{uid}.delete'])
+        _login(client, 'srvuser')
+        assert client.put(f'/api/v1/devices/{uid}',
+                          json={'name': 'x', 'address': '10.0.0.5'}).status_code == 200
+        assert client.delete(f'/api/v1/devices/{uid}').status_code == 200
+
+    # ── 'add' permission: add modules/checks to a server ─────────────────────
+    def _modules_with_check(self, admin, device_uid, key='newchk', **fields):
+        """Full module configuration plus one device-bound ping check."""
+        data = copy.deepcopy(admin._load_modules())
+        data.setdefault('ping', {}).setdefault('list', {})[key] = {
+            'device_uid': device_uid, 'enabled': True, 'host': '10.0.0.5', **fields}
+        return data
+
+    def test_server_add_can_add_device_bound_check(self, client, admin):
+        uid = admin._devices_store.create({**_DEVICE}, actor='admin')
+        self._make_user(admin, [f'server.{uid}.view', f'server.{uid}.add'])
+        _login(client, 'srvuser')
+        data = self._modules_with_check(admin, uid)
+        assert client.put('/api/v1/modules', json=data).status_code == 200
+
+    def test_server_view_only_cannot_add_check(self, client, admin):
+        uid = admin._devices_store.create({**_DEVICE}, actor='admin')
+        self._make_user(admin, [f'server.{uid}.view'])
+        _login(client, 'srvuser')
+        data = self._modules_with_check(admin, uid)
+        assert client.put('/api/v1/modules', json=data).status_code == 403
+
+    def test_server_add_cannot_edit_existing_check(self, client, admin):
+        uid = admin._devices_store.create({**_DEVICE}, actor='admin')
+        # Seed an existing device-bound check, then try to modify it with add-only.
+        seed = self._modules_with_check(admin, uid, key='chk1', uid='u-chk1')
+        admin._save_modules(seed)
+        self._make_user(admin, [f'server.{uid}.view', f'server.{uid}.add'])
+        _login(client, 'srvuser')
+        data = copy.deepcopy(admin._load_modules())
+        data['ping']['list']['chk1']['enabled'] = False   # modify existing → edit
+        assert client.put('/api/v1/modules', json=data).status_code == 403
+
+    def test_server_add_device_modules_growth_allowed_not_field_edit(self, client, admin):
+        uid = admin._devices_store.create({**_DEVICE, 'modules': []}, actor='admin')
+        self._make_user(admin, [f'server.{uid}.view', f'server.{uid}.add'])
+        _login(client, 'srvuser')
+        cur = admin._devices_store.get(uid, decrypt=True)
+        body = {k: cur.get(k) for k in
+                ('name', 'address', 'kind', 'os', 'maintenance', 'virtual',
+                 'tags', 'description', 'profiles')}
+        body['modules'] = ['ping']                         # only grow the list
+        assert client.put(f'/api/v1/devices/{uid}', json=body).status_code == 200
+        body2 = dict(body); body2['address'] = '9.9.9.9'   # edit a field → denied
+        assert client.put(f'/api/v1/devices/{uid}', json=body2).status_code == 403

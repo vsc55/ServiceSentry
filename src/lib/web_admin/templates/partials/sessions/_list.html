@@ -17,10 +17,10 @@ const _SES_COLS = [
     { id: 'username',   label: () => t('col_user'),                       sortKey: 'username',   always: true  },
     { id: 'ip',         label: () => t('col_ip'),                         sortKey: 'ip',         always: false, resizable: false },
     { id: 'user_agent', label: () => t('col_user_agent')||'User Agent',   sortKey: null,         always: false },
-    { id: 'created',    label: () => t('col_created'),                    sortKey: 'created',    always: false, resizable: false },
+    { id: 'created_at',    label: () => t('col_created'),                    sortKey: 'created_at',    always: false, resizable: false },
     { id: 'last_seen',  label: () => t('col_last_seen'),                  sortKey: 'last_seen',  always: false, resizable: false },
 ];
-const _SESSIONS_DEFAULT_COLS = new Set(['ip', 'created', 'last_seen']);
+const _SESSIONS_DEFAULT_COLS = new Set(['ip', 'created_at', 'last_seen']);
 
 let _sessionsVisibleCols = (() => {
     try { const s = JSON.parse(localStorage.getItem('ss_sessions_cols')||'null'); if (Array.isArray(s)) return new Set(s); } catch(_){}
@@ -52,7 +52,7 @@ function _sessionsCardsBody(sids) {
             : 'linear-gradient(90deg,var(--bs-primary),#60a5fa)';
         const avatarBg    = isCurrent ? '#dcfce7' : 'var(--bs-secondary-bg)';
         const avatarColor = isCurrent ? '#15803d' : 'var(--bs-secondary-color)';
-        const created     = new Date(s.created).toLocaleString();
+        const created     = new Date(s.created_at).toLocaleString();
         const lastSeen    = new Date(s.last_seen).toLocaleString();
 
         h += `<div class="rounded-3 overflow-hidden border ss-session-card" data-sid="${escAttr(sid)}" style="background:var(--bs-tertiary-bg);box-shadow:0 2px 6px rgba(0,0,0,.06)">
@@ -132,7 +132,7 @@ createListTable({
             case 'uid':      return sid;
             case 'username': return (s.username || '').toLowerCase();
             case 'ip':       return s.ip || '';
-            case 'created':  return s.created || '';
+            case 'created_at':  return s.created_at || '';
             default:         return s.last_seen || '';
         }
     },
@@ -145,7 +145,7 @@ createListTable({
                     esc(t('session_remembered'))}</span>` : ''}</td>`;
             case 'ip':         return `<td class="text-nowrap"><code class="text-muted ss-fs-3">${esc(s.ip)}</code></td>`;
             case 'user_agent': return `<td class="small text-muted" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(s.user_agent||'')}">${esc(s.user_agent||'—')}</td>`;
-            case 'created':    return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.created))}</td>`;
+            case 'created_at':    return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.created_at))}</td>`;
             case 'last_seen':  return `<td class="text-nowrap small text-muted">${esc(_fmtSesDt(s.last_seen))}</td>`;
             default:           return '<td></td>';
         }

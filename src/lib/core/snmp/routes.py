@@ -9,7 +9,7 @@ through a module long after the module stopped owning any of it.
 
 The pipeline is deliberately the one a watchful action already went through, because the
 actions are the same functions: the client never sends back a secret it was shown masked, a
-bound host is resolved server-side, and a named credential wins over inline values.
+bound device is resolved server-side, and a named credential wins over inline values.
 Diverging here would mean an operation behaved differently depending on which URL reached it.
 
 ``discover`` is NOT here. It finds OIDs for the field of a check, so it is a check's action
@@ -83,10 +83,10 @@ def register(app, wa):
         config['__var_dir__'] = wa._var_dir or ''
         config['__connector__'] = getattr(wa, '_db_connector', None)
         config['__user__'] = session.get('username', '')
-        host_ctx = modules_actions.resolve_host_ctx(wa, config)
-        if host_ctx is not None:
-            config['__host__'] = host_ctx
-            modules_actions.merge_host_conn(wa, 'snmp', config, host_ctx)
+        device_ctx = modules_actions.resolve_device_ctx(wa, config)
+        if device_ctx is not None:
+            config['__device__'] = device_ctx
+            modules_actions.merge_device_conn(wa, 'snmp', config, device_ctx)
         modules_actions.apply_cred_to_config(wa, config)
         modules_actions.apply_item_identities(wa, 'snmp', config)
 

@@ -65,9 +65,9 @@ class ProxmoxPage:
                 if is_ok:
                     n_ok += 1
                 nm = nk.split('/node/', 1)[1]
-                host = nod.get('host_name', '')
+                device = nod.get('device_name', '')
                 rows.append({
-                    'name':  f'{nm} ({host})' if host else nm,
+                    'name':  f'{nm} ({device})' if device else nm,
                     'state': 'warn' if nod.get('maintenance') else ('ok' if is_ok else 'error'),
                     'detail': '',
                 })

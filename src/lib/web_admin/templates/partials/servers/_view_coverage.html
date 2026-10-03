@@ -1,11 +1,11 @@
 {# ================================================================
-   Servers — coverage: which hosts are actually being watched.
+   Servers — coverage: which devices are actually being watched.
 
-   A host in the registry is not the same thing as a host being monitored, and the table
+   A device in the registry is not the same thing as a device being monitored, and the table
    draws both the same way. Its modules column says "0/0" and "0/3" in the same grey pill,
    and neither is a state you notice while scanning names and addresses. They mean:
 
-   * 0/0 — the host was added and never given a check. It is in the fleet count, it is in
+   * 0/0 — the device was added and never given a check. It is in the fleet count, it is in
      the list, and nothing is looking at it.
    * 0/3 — it has checks and every one of them is off. Worse: the row looks configured, and
      it was somebody turning them off rather than never getting round to it.
@@ -14,28 +14,28 @@
    working majority is at the bottom, collapsed into what it is: the part that needs no
    decision.
 
-   It counts over everything the filters left standing, not the page — "4 hosts have no
+   It counts over everything the filters left standing, not the page — "4 devices have no
    checks" is a fact about the fleet, and one that shrank as you paged would be worse than
    no number at all.
    ================================================================ #}
 
-function _srvViewCoverage(hosts, ctx) {
-    if (!hosts.length) return '';
+function _srvViewCoverage(devices, ctx) {
+    if (!devices.length) return '';
     // Built FROM the bucket list, so a coverage answer added tomorrow gets a bucket
     // instead of `buckets[undefined].push` — which is not an empty group, it is this
     // view throwing and the section drawing nothing.
     const order = ['none', 'inactive', 'profiles', 'ok'];
     const buckets = Object.fromEntries(order.map(k => [k, []]));
-    for (const h of hosts) (buckets[_srvCoverage(h)] || buckets.none).push(h);
+    for (const h of devices) (buckets[_srvCoverage(h)] || buckets.none).push(h);
     // Read by its own record and read through a module are both being read.
     const watched = buckets.ok.length + buckets.profiles.length;
-    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_hosts'), hosts.length)}
+    const chips = `${_summaryChip('bi-hdd-network', t('srv_count_devices'), devices.length)}
         ${order.filter(k => buckets[k].length).map(k =>
             // The colour from the same place the badge takes it, rather than a ternary
             // per key that has to be extended every time a bucket is.
             _summaryChip(_SRV_COVERAGE[k].icon, t(_SRV_COVERAGE[k].key), buckets[k].length,
                          _SRV_COVERAGE[k].cls)).join(' ')}
-        <span class="text-muted small">${esc(tf('srv_cov_ratio', watched, hosts.length))}</span>`;
+        <span class="text-muted small">${esc(tf('srv_cov_ratio', watched, devices.length))}</span>`;
     return `<div>
         ${_summaryHeader(chips)}
         <div class="p-2">
@@ -45,7 +45,7 @@ function _srvViewCoverage(hosts, ctx) {
                     <span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal">${buckets[k].length}</span>
                     <span class="text-muted small">${esc(t('srv_cov_' + k + '_hint'))}</span>
                 </div>
-                ${buckets[k].map(h => _srvHostLine(h, ctx, `${_srvStatusBadge(h)} ${_srvModulesPill(h)}`)).join('')}
+                ${buckets[k].map(h => _srvDeviceLine(h, ctx, `${_srvStatusBadge(h)} ${_srvModulesPill(h)}`)).join('')}
             </div>`).join('')}
         </div>
     </div>`;

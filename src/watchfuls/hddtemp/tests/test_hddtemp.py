@@ -159,7 +159,7 @@ class TestHddtempCheck:
         assert found_fail
 
     def test_check_empty_list(self):
-        """Sin hosts configurados, no hay resultados."""
+        """Sin devices configurados, no hay resultados."""
         config = {'watchfuls.hddtemp': {'list': {}}}
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)

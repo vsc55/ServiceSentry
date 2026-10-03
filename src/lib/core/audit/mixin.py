@@ -18,11 +18,21 @@ class _AuditMixin:
     # Core secret field names redacted from audit detail.  Module-declared
     # secret fields are added dynamically at init via _module_secret_fields
     # (see _sensitive_fields()), keeping the core free of module specifics.
+    # **Y lo que la pantalla de configuración sabe que es un secreto**, que es la otra mitad y
+    # no es evidente: el servidor enmascara con `null` todo lo de `secret_manager.ENCRYPT_KEYS`,
+    # y el dibujante de campos sólo tiene esta lista para reconocerlo. Un nombre que esté en una
+    # y no en la otra se guarda cifrado, vuelve como `null`, no encaja en ninguna rama del
+    # dibujante… y **su caja desaparece de la pantalla** — sin ningún error. Reportado desde la
+    # pantalla con `api_key`, y `github_token` llevaba igual desde que se cifró.
+    # Vigilado en tests/meta/test_wa_config_secrets.py.
     _SENSITIVE_FIELDS = frozenset({
         'password', 'password_hash', 'token', 'secret', 'key_file',
         'bind_password', 'client_secret', 'graph_secret', 'sp_key', 'idp_cert',
         'smtp_password', 'ms365_client_secret',
         'gmail_client_secret', 'gmail_refresh_token',
+        'github_token',         # el de la biblioteca MIB
+        'api_key',              # el de Freshservice
+        'dcim_map_google_key',  # el de las teselas de Google
     })
 
     # ── Initialisation ────────────────────────────────────────────────────────

@@ -28,7 +28,7 @@ const _TOK_COLS = [
     { id: 'permissions', label: () => t('api_token_col_perms'),     sortKey: 'permissions', always: false },
     { id: 'expires_at',  label: () => t('api_token_col_expires'),   sortKey: 'expires_at',  always: false },
     { id: 'last_used',   label: () => t('api_token_col_last_used'), sortKey: 'last_used',   always: false },
-    { id: 'created',     label: () => t('col_created_at'),          sortKey: 'created',     always: false },
+    { id: 'created_at',  label: () => t('col_created_at'),          sortKey: 'created_at',     always: false },
 ];
 const _TOK_DEFAULT_COLS = new Set(['token_id', 'permissions', 'expires_at', 'last_used']);
 
@@ -64,7 +64,7 @@ function _tokSetShowRevoked(on) {
 
 let _tokPage = 1;
 let _tokPageSize = null;
-let _tokSort = 'created';
+let _tokSort = 'created_at';
 let _tokSortDir = 'desc';
 let _selectedTokens = new Set();
 let _tokCurrentPage = [];
@@ -132,7 +132,7 @@ createListTable({
             case 'last_used':    return tk.last_used || '0000';
             case 'permissions':  return tk.permissions === '*' ? '*' : (tk.permissions || []).join(',');
             case 'token_id':     return tk.token_id || '';
-            case 'created':      return tk.created || '';
+            case 'created_at':   return tk.created_at || '';
             default:             return (tk.name || '').toLowerCase();
         }
     },
@@ -157,8 +157,8 @@ createListTable({
                 return `<td class="text-nowrap small">${tk.last_used
                     ? esc(_fmtDateTime(tk.last_used))
                     : `<span class="text-muted">${esc(t('api_token_unused'))}</span>`}</td>`;
-            case 'created':
-                return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(tk.created))}</td>`;
+            case 'created_at':
+                return `<td class="text-nowrap small text-muted">${esc(_fmtDateTime(tk.created_at))}</td>`;
             default: return '<td></td>';
         }
     },
@@ -410,7 +410,7 @@ function _accTokenNew(preset) {
     showHtmlModal(t('api_token_new'), `
         <div class="mb-2">
             <label class="form-label small fw-semibold">${esc(t('api_token_col_name'))}</label>
-            <input type="text" class="form-control form-control-sm" id="accTokName" maxlength="64"
+            <input type="text" class="form-control form-control-sm" id="accTokName" required maxlength="64"
                    value="${escAttr(preset.name || '')}"
                    placeholder="${escAttr(t('api_token_name_ph'))}">
         </div>
@@ -500,7 +500,7 @@ function _accTokenClone(uid) {
         // The original SPAN, not what is left of it: a clone of a 90-day token is another
         // 90-day token, and copying the remaining three days would be a different decision
         // made on the clonee's behalf.
-        const span = Math.round((new Date(tk.expires_at) - new Date(tk.created)) / 86400000);
+        const span = Math.round((new Date(tk.expires_at) - new Date(tk.created_at)) / 86400000);
         days = [30, 90, 365].includes(span) ? span : null;
     }
     _accTokenNew({name: `${tk.name} ${t('api_token_copy_suffix')}`.slice(0, 64),

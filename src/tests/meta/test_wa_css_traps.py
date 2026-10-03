@@ -499,3 +499,89 @@ class TestARowHoverThatPaintsTheWholeTable:
         grey = css.split('.ss-hover-rows {')[1].split('}')[0]
         accent = css.split('.ss-hover-accent {')[1].split('}')[0]
         assert grey.strip() != accent.strip()
+
+
+class TestElAnchoDeUnModalNoSaleDeLaVariableDeBootstrap:
+    """Reportado desde la pantalla como «sigue saliendo el scroll»: se le pidió a un diálogo que
+    fuera más ancho, la regla se escribió, se guardó, y el cuadro salió exactamente igual.
+
+    Bootstrap dimensiona con `--bs-modal-width` sobre `.modal-dialog`. **Este panel se salta ese
+    mecanismo entero**: `.modal-lg { width: fit-content }` y `.modal-lg > .modal-content
+    { width: 800px }`, para que el diálogo pueda arrastrarse más grande — así que quien mide es
+    `.modal-content` y la variable no la lee nadie.
+
+    Una regla que apunta al mecanismo que ya no manda no falla: no hace nada, y no hay nada en la
+    pantalla que diga por qué. Es la clase de trampa que solo se ve sabiendo las dos mitades, y
+    por eso está escrita aquí.
+    """
+
+    def test_nadie_dimensiona_un_modal_con_la_variable_muerta(self):
+        css = _read(CSS)
+        malas = [ln.strip() for ln in css.splitlines()
+                 if '--bs-modal-width' in ln and not ln.lstrip().startswith(('*', '/*'))]
+        assert not malas, (
+            'esto no hace nada: el ancho de un modal de este panel lo pone '
+            f'`.modal-content`, no `--bs-modal-width` — {malas}')
+
+    def test_y_el_mecanismo_que_si_manda_sigue_siendo_ese(self):
+        """La otra mitad. El día que este panel vuelva al de Bootstrap, la regla de arriba pasa a
+        estar al revés — y una guarda que prohíbe lo correcto es peor que ninguna."""
+        css = _read(CSS)
+        assert re.search(r'\.modal-lg\s*>\s*\.modal-content\s*\{[^}]*width:', css), \
+            'el ancho ya no lo pone `.modal-content`: revisa la guarda de arriba'
+
+
+class TestElMenuDeUnBotonPequenoNoSaleAlTamanoDeBootstrap:
+    """Bootstrap dimensiona un `dropdown-menu` por su cuenta —1rem de letra y su padding de
+    siempre— valga lo que valga el botón del que cuelga. Toda barra de este panel usa `btn-sm`, y
+    con uno delante el desplegable sale **más grande que el botón que lo abre**. Reportado desde
+    la pantalla de clases: «esas opciones son enormes».
+
+    No es un fallo que se vea leyendo el markup —la clase es la correcta, y lo que está mal es lo
+    que Bootstrap decide por ella— y por eso se había arreglado ya **tres veces y de tres maneras
+    distintas**: `p-1` con un `style` de tamaño en la barra de refresco, `p-1` con otro `style` en
+    la tabla de comprobaciones, y `ss-fs-3` en el Overview. Tres copias de la misma regla son tres
+    sitios donde el cuarto se olvida.
+
+    Ahora hay una clase, `.ss-dropdown-sm`, y lo que se comprueba aquí es mecánico: que ningún
+    menú de un botón partido se quede con el tamaño de serie.
+    """
+
+    #: Lo que cuenta como «alguien se ocupó del tamaño». Las tres primeras son los apaños que ya
+    #: estaban y se respetan; la nuestra es la que debería usar lo nuevo.
+    DIMENSIONADO = ('ss-dropdown-sm', 'ss-fs-', 'font-size', 'dropdown-menu p-1',
+                    'dropdown-menu-end p-1')
+
+    def _plantillas(self):
+        """Las del panel y las que traen los paquetes con pantalla propia."""
+        raiz_src = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
+        raices = [os.path.join(raiz_src, 'lib', 'web_admin', 'templates'),
+                  os.path.join(raiz_src, 'lib', 'core'),
+                  os.path.join(raiz_src, 'lib', 'providers')]
+        for raiz in raices:
+            for base, _dirs, ficheros in os.walk(raiz):
+                for nombre in ficheros:
+                    if nombre.endswith('.html'):
+                        yield os.path.join(base, nombre)
+
+    def test_no_hay_menus_de_boton_partido_con_el_tamano_de_serie(self):
+        raiz_src = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
+        malos = []
+        for ruta in self._plantillas():
+            texto = _read(ruta)
+            if 'dropdown-toggle-split' not in texto:
+                continue
+            for n, linea in enumerate(texto.split('\n'), 1):
+                if 'dropdown-menu' not in linea or '<ul' not in linea:
+                    continue
+                if not any(m in linea for m in self.DIMENSIONADO):
+                    malos.append(f'{os.path.relpath(ruta, raiz_src)}:{n}')
+        assert not malos, ('menús de un botón pequeño con el tamaño de Bootstrap — '
+                           'ponles `ss-dropdown-sm`:\n' + '\n'.join(malos))
+
+    def test_y_la_clase_existe_de_verdad(self):
+        """Una clase que no está en la hoja es un atributo que no hace nada: el menú sale igual de
+        grande y el markup dice que alguien lo arregló."""
+        css = _read(CSS)
+        assert '.ss-dropdown-sm {' in css
+        assert '.ss-dropdown-sm .dropdown-item {' in css, 'sólo achica la letra, no el padding'

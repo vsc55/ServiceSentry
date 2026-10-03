@@ -8,7 +8,7 @@
 The half of sampling that is about the DEVICE, and therefore the half that is core. Three
 things ask for it and they are not the same caller: the scheduler, once per cycle; the test
 screen, when somebody wants to know whether an assignment is right before trusting it; and,
-soon, the host walk. They must all get identical answers or the screen becomes a second
+soon, the device walk. They must all get identical answers or the screen becomes a second
 opinion, which is worse than no screen at all.
 
 What is NOT here is what to do with the answer — the previous reading it is a difference

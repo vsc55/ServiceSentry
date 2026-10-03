@@ -5,7 +5,7 @@
 A role may narrow a global flag down to one instance — ``server.<uid>.edit``,
 ``module.<name>.view``, ``cluster.<uid>.delete``.  Those keys name a resource that lives
 in a different table (or, for modules, in the module configuration), and nothing tied the
-two together: deleting a host left its keys in every role's permission list for good.
+two together: deleting a device left its keys in every role's permission list for good.
 
 They granted nothing — a UUID is never reused, so the key referred to something that could
 not come back — but they piled up unseen, and the Permissions section counts them, so a
@@ -58,7 +58,7 @@ def strip_scoped(custom_roles: dict, prefix: str, ids: Iterable[str]) -> list:
 def cluster_item_uids(modules_cfg: dict) -> set:
     """The UIDs of every cluster item in a module configuration.
 
-    A cluster is a multi-host-bound check — an item carrying a ``host_uids`` list — and it
+    A cluster is a multi-device-bound check — an item carrying a ``device_uids`` list — and it
     is identified by its item UID, which is what ``cluster.<uid>.<action>`` names.
     """
     out = set()
@@ -69,6 +69,6 @@ def cluster_item_uids(modules_cfg: dict) -> set:
             if coll.startswith('__') or not isinstance(items, dict):
                 continue
             for key, item in items.items():
-                if isinstance(item, dict) and isinstance(item.get('host_uids'), list):
+                if isinstance(item, dict) and isinstance(item.get('device_uids'), list):
                     out.add(str(item.get('uid') or key))
     return out

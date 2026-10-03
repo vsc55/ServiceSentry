@@ -791,7 +791,7 @@ function _mibDeleteBtn(r) {
 function _mibDeleteMenu(call) {
     const item = (scope, icon, label) => `<li><button class="dropdown-item"
             onclick="${call}'${scope}')"><i class="bi ${icon} me-1"></i>${esc(label)}</button></li>`;
-    return `<ul class="dropdown-menu dropdown-menu-end">
+    return `<ul class="dropdown-menu dropdown-menu-end ss-dropdown-sm">
         ${item('all', 'bi-trash3', _ms('mib_delete_everything', 'Everything'))}
         ${item('compiled', 'bi-gear', _ms('mib_delete_only_compiled', 'Only the compilation'))}
         ${item('raw', 'bi-file-earmark-text', _ms('mib_delete_only_raw', 'Only the source'))}

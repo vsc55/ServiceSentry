@@ -33,7 +33,7 @@ class TestPingCheck:
         self.Watchful = Watchful
 
     def test_check_empty_list(self):
-        """Sin hosts configurados, no hay resultados."""
+        """Sin devices configurados, no hay resultados."""
         config = {'watchfuls.ping': {'list': {}}}
         mock_monitor = create_mock_monitor(config)
         w = self.Watchful(mock_monitor)
@@ -139,7 +139,7 @@ class TestPingCheck:
             assert items['192.168.1.1']['status'] is True
 
     def test_check_multiple_hosts(self):
-        """Múltiples hosts se procesan."""
+        """Múltiples devices se procesan."""
         config = {
             'watchfuls.ping': {
                 'attempt': 1,

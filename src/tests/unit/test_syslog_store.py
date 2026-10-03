@@ -106,8 +106,8 @@ class TestSyslogStats:
                     _rec(hostname='db01',  app='mysqld', severity=4, facility=3)])
         st = s.stats()
         assert st['total'] == 3
-        # by_host ordered by count desc
-        assert st['by_host'][0] == {'value': 'web01', 'count': 2}
+        # by_device ordered by count desc
+        assert st['by_device'][0] == {'value': 'web01', 'count': 2}
         # severity/facility carry their human name
         sevs = {d['name']: d['count'] for d in st['by_severity']}
         assert sevs.get('err') == 1 and sevs.get('info') == 1
@@ -127,25 +127,25 @@ class TestSyslogStats:
         assert st['total'] == 2                                # total is always computed
         assert [d['count'] for d in st['by_severity']] == [1, 1]
         # Omitted ones are empty, not missing — callers index them unconditionally.
-        for key in ('by_host', 'by_app', 'by_facility'):
+        for key in ('by_device', 'by_app', 'by_facility'):
             assert st[key] == [], f'{key} was computed but not requested'
 
     def test_no_only_still_computes_everything(self):
         s = _store()
         s.add_many([_rec(hostname='web01', app='nginx', severity=3, facility=4)])
         st = s.stats()
-        assert st['by_host'] and st['by_app'] and st['by_severity'] and st['by_facility']
+        assert st['by_device'] and st['by_app'] and st['by_severity'] and st['by_facility']
 
     def test_stats_honour_filters(self):
         s = _store()
         s.add_many([_rec(hostname='a', severity=2), _rec(hostname='b', severity=6)])
         st = s.stats({'severity_max': 3})                      # only the severe one
         assert st['total'] == 1
-        assert st['by_host'] == [{'value': 'a', 'count': 1}]
+        assert st['by_device'] == [{'value': 'a', 'count': 1}]
 
     def test_stats_empty(self):
         st = _store().stats()
-        assert st['total'] == 0 and st['by_host'] == [] and st['by_severity'] == []
+        assert st['total'] == 0 and st['by_device'] == [] and st['by_severity'] == []
 
     def test_stats_faceting_keeps_own_dimension_options(self):
         # Selecting a severity must NOT collapse the By-severity breakdown — its
@@ -155,7 +155,7 @@ class TestSyslogStats:
                     _rec(severity=6, hostname='b')])
         st = s.stats({'severity': [2]})
         assert {d['value'] for d in st['by_severity']} >= {2, 4, 6}   # all still shown
-        assert st['by_host'] == [{'value': 'a', 'count': 1}]          # other facets apply it
+        assert st['by_device'] == [{'value': 'a', 'count': 1}]          # other facets apply it
         assert st['total'] == 1                                        # total applies everything
 
     def test_effective_host_falls_back_to_source(self):
@@ -165,8 +165,8 @@ class TestSyslogStats:
         s.add_many([_rec(hostname='h1', source='10.0.0.1'),
                     _rec(hostname='', source='192.168.200.10')])
         assert '192.168.200.10' in s.distinct('hostname')          # appears in the dropdown
-        hosts = {d['value'] for d in s.stats()['by_host']}
-        assert hosts == {'h1', '192.168.200.10'}                   # chart, no blank/—
+        devices = {d['value'] for d in s.stats()['by_device']}
+        assert devices == {'h1', '192.168.200.10'}                   # chart, no blank/—
         assert s.count({'hostname': '192.168.200.10'}) == 1        # filterable by the IP
         assert s.count({'hostname': 'h1'}) == 1
 
@@ -175,5 +175,5 @@ class TestSyslogStats:
         s.add_many([_rec(hostname='a'), _rec(hostname='b'), _rec(hostname='c')])
         st = s.stats({'hostname': ['a', 'b']})
         assert st['total'] == 2
-        # by_host excludes its own filter → all three hosts still listed
-        assert {d['value'] for d in st['by_host']} == {'a', 'b', 'c'}
+        # by_device excludes its own filter → all three devices still listed
+        assert {d['value'] for d in st['by_device']} == {'a', 'b', 'c'}

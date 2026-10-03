@@ -29,6 +29,7 @@ import uuid
 from lib.db import BaseConnector
 from lib.db.freshness import bump_version
 from lib.db.schema import Column, Index, TableSpec
+from lib.util.entity_audit import utc_now_iso
 from lib.db.store_base import BaseStore
 
 # Fields stored as individual columns; everything else goes into ``extra``.
@@ -66,6 +67,12 @@ _USERS_GROUPS_SCHEMA = TableSpec(
         Column('uid',       'TEXT', primary_key=True),   # synthetic row id (PK)
         Column('user_uid',  'TEXT', nullable=False),
         Column('group_uid', 'TEXT', nullable=False),
+        # Quién metió a esta persona en este grupo, y cuándo. Una pertenencia es una concesión de
+        # permisos —justo donde se pregunta «¿desde cuándo tiene acceso a esto?»— y sin estas dos
+        # sólo lo contesta la auditoría, y sólo mientras llegue tan atrás. Su hermana
+        # `groups_roles` lo guarda desde el primer día; ésta no, y son la misma pregunta.
+        Column('created_by', 'TEXT', nullable=False, default="''"),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
     ),
     # The membership pair stays unique — a user belongs to a group at most once.
     unique_constraints=(('user_uid', 'group_uid'),),
@@ -97,7 +104,6 @@ class UsersStore(BaseStore):
         db = self._db
         db.reconcile_table(_USERS_SCHEMA)
         db.reconcile_table(_USERS_GROUPS_SCHEMA)
-        self._backfill_audit_columns()
         db.commit()
         self._ensure_version_row()
 
@@ -188,14 +194,33 @@ class UsersStore(BaseStore):
 
     def _write_row(self, username: str, data: dict) -> None:
         uid = data.get('uid') or username
+        # Cuándo se concedió cada pertenencia y quién la concedió, **antes** de borrarlas.
+        #
+        # Guardar un usuario borra sus pertenencias y las vuelve a escribir enteras, que es lo
+        # que hace fácil «déjale exactamente estos grupos». Pero una fila reescrita no es una
+        # concesión nueva: sellarla con la hora de ahora diría que se le dio acceso hoy cada vez
+        # que alguien le cambia el tema oscuro. Lo que se conservaba antes de este guardado
+        # vuelve tal cual; sólo lo que no estaba se sella ahora.
+        antes = {}
+        try:
+            for g, cuando, quien in self._db.fetchall(
+                    f'SELECT group_uid, created_at, created_by FROM {_T_USERS_GROUPS} '
+                    'WHERE user_uid = ?', (uid,)):
+                antes[str(g)] = (cuando or '', quien or '')
+        except Exception:  # pylint: disable=broad-except
+            antes = {}
+        ahora = utc_now_iso()
+        actor = str(data.get('updated_by') or '')
         self._db.execute(f'DELETE FROM {_T_USERS} WHERE username = ?', (username,))
         self._db.execute(f'DELETE FROM {_T_USERS_GROUPS} WHERE user_uid = ?', (uid,))
         uid = self._insert_user_row(username, data)
         for grp_uid in dict.fromkeys(data.get('groups', [])):   # dedupe, keep order
             if grp_uid:
+                cuando, quien = antes.get(str(grp_uid), (ahora, actor))
                 self._db.execute(
-                    f'INSERT INTO {_T_USERS_GROUPS}(uid, user_uid, group_uid) VALUES(?,?,?)',
-                    (str(uuid.uuid4()), uid, str(grp_uid)),
+                    f'INSERT INTO {_T_USERS_GROUPS}'
+                    '(uid, user_uid, group_uid, created_by, created_at) VALUES(?,?,?,?,?)',
+                    (str(uuid.uuid4()), uid, str(grp_uid), quien, cuando),
                 )
 
     def _delete_row(self, username: str) -> bool:

@@ -97,7 +97,7 @@ def _prune(now: float) -> None:
             _JOBS.pop(jid, None)
 
 
-def start_collect(wa, uid: str, host_name: str, modules: list,
+def start_collect(wa, uid: str, device_name: str, modules: list,
                   actor: str = '', ip: str = '', lang: str = '') -> str:
     """Run *modules* in the background and hand back a job id to ask about.
 
@@ -119,7 +119,7 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
     _prune(now)
     job_id = uuid.uuid4().hex[:12]
     job = _JOBS[job_id] = {
-        'id': job_id, 'host': uid, 'host_name': host_name,
+        'id': job_id, 'device': uid, 'device_name': device_name,
         'total': len(modules), 'completed': 0,
         # One row per module, in the order they were started, each with the state it is in.
         # A list and not a dict: the screen draws it as a list, and the order a dict of
@@ -174,7 +174,7 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
 
     def _work():
         try:
-            # `only_host`: this is a collection OF A DEVICE. It used to run each module
+            # `only_device`: this is a collection OF A DEVICE. It used to run each module
             # with its whole configuration — so asking for one NAS walked every other machine
             # that module watches, which on an SNMP fleet is minutes of other people's
             # equipment and, when one of them is not answering, a run that never lands.
@@ -182,7 +182,7 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
             # in it, only one of which had been asked about.
             results, errors = wa._run_checks(
                 modules, timeout=_timeout_of(wa), progress_cb=_progress, lang=lang,
-                only_host=uid)
+                only_device=uid)
             job['answered'] = sorted(results.keys())
             job['errors'] = list(errors or [])
         except Exception as exc:      # pylint: disable=broad-except
@@ -190,7 +190,7 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
         finally:
             try:
                 wa._audit_write('infra_collect', actor or 'system', ip or 'internal', {
-                    'uid': uid, 'name': host_name, 'modules': modules,
+                    'uid': uid, 'name': device_name, 'modules': modules,
                     'answered': job['answered'], 'errors': job['errors'],
                     'error': job['error'],
                 })
@@ -220,7 +220,7 @@ def start_collect(wa, uid: str, host_name: str, modules: list,
     from lib.core.jobs import record as _record         # noqa: PLC0415
     job['_hist'] = _record.start({
         'id': job_id, 'kind': 'collect', 'source': 'infra',
-        'label': host_name, 'started': now, 'total': len(modules)})
+        'label': device_name, 'started': now, 'total': len(modules)})
     threading.Thread(target=_work, daemon=True, name='ss-infra-collect').start()
     return job_id
 
@@ -264,7 +264,7 @@ def _archive(job: dict) -> None:
     bad = [r for r in rows if r.get('state') in ('failed', 'timeout')]
     _record.finish(job.get('_hist') or '', {
         'id': job.get('id') or '', 'kind': 'collect', 'source': 'infra',
-        'label': str(job.get('host_name') or ''),
+        'label': str(job.get('device_name') or ''),
         'state': 'failed' if (job.get('error') or bad) else 'done',
         'started': float(job.get('_started') or 0),
         'ended': float(job.get('_ended') or time.time()),
@@ -408,7 +408,7 @@ def live(_wa) -> list:
         out.append({
             'id': jid,
             'kind': 'collect',
-            'label': str(job.get('host_name') or ''),
+            'label': str(job.get('device_name') or ''),
             'detail': _live_detail(rows),
             'state': ('done' if not job.get('error') else 'failed') if job.get('done')
                      else 'running',

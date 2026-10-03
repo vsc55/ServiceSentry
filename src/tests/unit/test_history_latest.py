@@ -91,7 +91,9 @@ class TestTheLastSampleOfEachSeries:
         st.record('cpu', 'k', status=True, data={'v': 1})
         st.record('cpu', 'k', status=True, data={'v': 2})
         # force the tie
-        st._db.execute('UPDATE history SET ts = 1000 WHERE module = ?', ('cpu',))
+        # Por la SERIE: la muestra ya no lleva el módulo encima — lo lleva una vez su serie.
+        st._db.execute('UPDATE history SET ts = 1000 WHERE series_id = ?',
+                       (st.series_id('cpu', 'k'),))
         rows = st.latest_by_series()
         assert len(rows) == 1, 'a tie in the timestamp duplicated the series'
 
@@ -119,12 +121,20 @@ class TestNothingWritesAnItemUid:
         st.record('cpu', 'b', status=True, data={})
         assert _by_key(st.get_index()).keys() == _by_key(st.latest_by_series()).keys()
 
-    def test_a_row_that_does_carry_one_is_where_they_part(self):
-        """Not a failure — a difference, written down. The index folds the two keys of one
-        item into a single series; this reports the series as the rest of the product
-        addresses them."""
+    def test_a_row_that_carries_one_no_longer_makes_them_part(self):
+        """They used to disagree here, and it was written down as a difference rather than a
+        bug: the index grouped on ``COALESCE(item_uid, module||':'||key)``, so two names of one
+        item folded into a single series, while this one reported two.
+
+        ``history_series`` settles it, and settles it the way the rest of the product already
+        addressed a series: **a series is ``(module, key)``**. Two names are two series unless
+        something explicitly ties them, and nothing does — no recorder has ever written an
+        ``item_uid`` (zero rows out of 112.219 on a real installation). What the fold bought was
+        a second notion of identity, live in one reader only; what it cost was the un-indexable
+        expression that made the index expensive enough to need this function written."""
         st = _store()
         st.record('cpu', 'old-name', status=True, data={}, item_uid='u1')
         st.record('cpu', 'new-name', status=True, data={}, item_uid='u1')
-        assert len(st.get_index()) == 1
+        assert len(st.get_index()) == 2
         assert len(st.latest_by_series()) == 2
+        assert _by_key(st.get_index()).keys() == _by_key(st.latest_by_series()).keys()

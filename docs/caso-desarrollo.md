@@ -100,8 +100,8 @@ src/
 ├── conftest.py                          # Fixtures compartidos: admin, client, _login()
 ├── tests/                               # Tests de core y web admin (~160 ficheros)
 │   ├── conftest.py                      # Fixtures compartidas (config_dir, var_dir, admin, client); se hereda en las subcarpetas
-│   ├── unit/                            # Aislado (sin app/BD/HTTP): core, hosts, stores, syslog parser, monitor, secretos…
-│   ├── integration/                     # Flask vía test_client/_login: test_wa_*.py (users, roles, config, security, hosts, sso…)
+│   ├── unit/                            # Aislado (sin app/BD/HTTP): core, dispositivos, stores, syslog parser, monitor, secretos…
+│   ├── integration/                     # Flask vía test_client/_login: test_wa_*.py (users, roles, config, security, dispositivos, sso…)
 │   ├── e2e/                             # Recursos vivos: test_ui_playwright, test_db_portability_live, test_security_live
 │   ├── meta/                            # Estructura del repo: test_docs_*, changelog/versión, *_views, partials_convention
 │   └── # (ver docs/ref-tests.md → «Organización de directorios» para el criterio e inventario completo)

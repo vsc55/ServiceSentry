@@ -24,7 +24,7 @@
     </div>
 </div>
 
-{# Cluster edit modal — hosts the shared field editor for one multi-bind check #}
+{# Cluster edit modal — devices the shared field editor for one multi-bind check #}
 <div class="modal fade" id="clusterEditModal" tabindex="-1">
     <div class="modal-dialog cl-modal-dialog">
         <div class="modal-content">
@@ -163,21 +163,21 @@
 </div>
 
 {# Edit check name (label) modal — used by the Servers modal's title pencil #}
-<div class="modal fade" id="hostLabelModal" tabindex="-1"
-     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnHostLabelOk').click();}">
+<div class="modal fade" id="deviceLabelModal" tabindex="-1"
+     onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('btnDeviceLabelOk').click();}">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h6 class="modal-title"><i class="bi bi-pencil-square me-1"></i>{{ i18n.host_edit_name }}</h6>
+                <h6 class="modal-title"><i class="bi bi-pencil-square me-1"></i>{{ i18n.device_edit_name }}</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
             </div>
             <div class="modal-body">
-                <label class="form-label small" for="hostLabelInput">{{ i18n.host_edit_name_prompt }}</label>
-                <input type="text" class="form-control form-control-sm" id="hostLabelInput">
+                <label class="form-label small" for="deviceLabelInput">{{ i18n.device_edit_name_prompt }}</label>
+                <input type="text" class="form-control form-control-sm" id="deviceLabelInput">
             </div>
             <div class="modal-footer py-1">
                 <button class="btn btn-sm btn-secondary" data-bs-dismiss="modal" title="{{ i18n.cancel }}">{{ i18n.cancel }}</button>
-                <button class="btn btn-sm btn-primary" id="btnHostLabelOk" title="{{ i18n.save }}">
+                <button class="btn btn-sm btn-primary" id="btnDeviceLabelOk" title="{{ i18n.save }}">
                     <i class="bi bi-check-lg me-1"></i>{{ i18n.save }}
                 </button>
             </div>

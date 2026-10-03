@@ -34,13 +34,14 @@ def register(app, wa):
     @login_required
     def api_widget_data(wid):
         """Self-contained data for one Overview widget so every card/table fetches its own
-        (no monolithic aggregate).  Returns ``{content}`` for a **stat** card (its
-        ``stat(wa)`` provider) or ``{rows}`` for a **table** (its ``rows(wa, f)`` provider,
-        filtered server-side via ``?f=``).  The provider + permission gate (``perms`` =
-        any/prefix) come from the widget's own descriptor."""
+        (no monolithic aggregate).  Returns ``{rows}`` for a **table** (its ``rows(wa, f)``
+        provider, filtered server-side via ``?f=``) and ``{content}`` for everything else
+        (its ``stat(wa)`` / ``content(wa)`` provider — a stat card's shape is fixed, a map's
+        is its own).  The provider + permission gate (``perms`` = any/prefix) come from the
+        widget's own descriptor."""
         from lib.core.overview.discovery import (  # noqa: PLC0415
-            discover_widget_rows, discover_widget_stats, discover_overview_widgets)
-        stat_fn = discover_widget_stats().get(wid)
+            discover_widget_rows, discover_widget_content, discover_overview_widgets)
+        stat_fn = discover_widget_content().get(wid)
         rows_fn = discover_widget_rows().get(wid)
         if stat_fn is None and rows_fn is None:
             return jsonify({'error': 'not_found'}), 404

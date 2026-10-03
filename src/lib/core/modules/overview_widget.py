@@ -50,18 +50,18 @@ def _modules_list_rows(wa, f: str = '') -> list:
 
 def incident_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> list:
     """Active issues (every check currently reporting ``status: False``) for the incidents
-    table: module/check/host, sorted by module then check.  Display name mirrors the public
-    status page (other_data.name > item label > raw key); host from the item's host_uid."""
+    table: module/check/device, sorted by module then check.  Display name mirrors the public
+    status page (other_data.name > item label > raw key); device from the item's device_uid."""
     if status_raw is None:
         status_raw = wa._read_check_status()
     if modules_raw is None:
         modules_raw = wa._load_modules() or {}
-    host_name: dict = {}
-    hstore = getattr(wa, '_hosts_store', None)
+    device_name: dict = {}
+    hstore = getattr(wa, '_devices_store', None)
     if hstore is not None:
         try:
             for h in (hstore.list(decrypt=False) or []):
-                host_name[h.get('uid')] = h.get('name', '')
+                device_name[h.get('uid')] = h.get('name', '')
         except Exception:  # pylint: disable=broad-except
             pass
     out = []
@@ -71,7 +71,7 @@ def incident_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> list
                 continue
             mcfg = modules_raw.get(mn)
             mcfg = mcfg if isinstance(mcfg, dict) else {}
-            labels, hosts_of = {}, {}
+            labels, devices_of = {}, {}
             for coll, items in mcfg.items():
                 if coll.startswith('__') or not isinstance(items, dict):
                     continue
@@ -81,8 +81,8 @@ def incident_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> list
                     lbl = str(it.get('label') or '').strip()
                     if lbl:
                         labels[k] = lbl
-                    if it.get('host_uid'):
-                        hosts_of[k] = it['host_uid']
+                    if it.get('device_uid'):
+                        devices_of[k] = it['device_uid']
             for ck, info in mstatus.items():
                 if not (isinstance(info, dict) and info.get('status') is False):
                     continue
@@ -93,9 +93,9 @@ def incident_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> list
                 if not disp and '/' in ck and labels.get(head):
                     disp = f'{labels[head]} / {ck.split("/", 1)[1]}'
                 disp = disp or ck
-                huid = hosts_of.get(ck) or hosts_of.get(head, '')
+                huid = devices_of.get(ck) or devices_of.get(head, '')
                 out.append({'module': mn, 'check': disp,
-                            'host': host_name.get(huid, '') if huid else ''})
+                            'device': device_name.get(huid, '') if huid else ''})
         out.sort(key=lambda x: (str(x['module']).lower(), str(x['check']).lower()))
     except Exception:  # pylint: disable=broad-except
         pass

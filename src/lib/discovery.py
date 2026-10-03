@@ -89,3 +89,71 @@ def scan_flat(const: str, **kw) -> list:
         else:
             out.append(value)
     return out
+
+
+# ── Acciones que un paquete ofrece EN una pantalla ───────────────────────────────────────
+#
+# Un caso particular de :func:`scan_flat` con dos reglas propias, y las dos salieron de la
+# pantalla de Empresas: un descriptor sin `fn` no se dibuja —no habría nada que pulsar— y uno
+# cuyo `ready(wa)` dice que no, tampoco. `ready` es de QUIEN declara: qué necesita un conector
+# para funcionar lo sabe su paquete, y el día que le haga falta un tercer campo de configuración
+# la respuesta cambia en un sitio.
+#
+# Aquí y no copiado en cada pantalla porque la segunda copia llegó tres días después de la
+# primera: Empresas (`ORG_ACTIONS`) y Dispositivos (`DEVICE_ACTIONS`) hacen exactamente esto, y dos
+# implementaciones de la misma regla son dos sitios donde arreglar el mismo fallo.
+
+def ready_actions(const: str, wa, **kw) -> list:
+    """Los descriptores de *const* que este panel puede ofrecer ahora mismo, ordenados.
+
+    **Sin caché, a propósito.** `ready` lee la configuración, y ésa se edita desde el propio
+    panel: una respuesta guardada de por vida dejaría el botón escondido después de poner la
+    clave, hasta reiniciar. Son dos o tres descriptores y una lectura de sección.
+
+    Un `ready` que revienta cuenta como «no está puesto». La alternativa es una pantalla que no
+    carga porque un proveedor opcional tiene un fallo en una línea, que es la misma decisión que
+    toma :func:`scan` al tragarse los errores de importación.
+    """
+    fuera: list = []
+    for pkg, decl in scan(const, **kw):
+        for spec in (decl if isinstance(decl, (list, tuple)) else [decl]):
+            if not isinstance(spec, dict) or not spec.get('fn'):
+                continue
+            listo = spec.get('ready')
+            if callable(listo):
+                try:
+                    if not listo(wa):
+                        continue
+                except Exception:  # pylint: disable=broad-except
+                    continue
+            fuera.append({'id': str(spec.get('id') or ''), 'package': pkg,
+                          'label_key': str(spec.get('label_key') or ''),
+                          'tooltip_key': str(spec.get('tooltip_key') or ''),
+                          'icon': str(spec.get('icon') or ''),
+                          'variant': str(spec.get('variant') or 'secondary'),
+                          'perm': str(spec.get('perm') or ''),
+                          'fn': str(spec.get('fn') or ''),
+                          # Dónde va: en la barra de la lista (por defecto) o dentro de la ficha
+                          # de UNA fila. Lo segundo es otro acto — «atar ESTA a una de fuera»— y
+                          # su `fn` recibe cuál, así que la pantalla tiene que poder separarlos.
+                          'link': bool(spec.get('link')),
+                          'order': int(spec.get('order') or 0)})
+    return sorted(fuera, key=lambda a: (a['order'], a['label_key'], a['id']))
+
+
+def declared_by_id(const: str, **kw) -> dict:
+    """``{id: descriptor}`` de todo paquete que declare *const*, con su paquete dentro.
+
+    La forma que tienen los catálogos pequeños —de dónde vino una fila, qué iconos y qué texto
+    lleva—: descriptores con un `id` y lo justo para dibujarlos. El primero que declara un `id`
+    se lo queda, que es la regla de :func:`scan` para todo lo demás.
+    """
+    out: dict = {}
+    for pkg, decl in scan(const, **kw):
+        for spec in (decl if isinstance(decl, (list, tuple)) else [decl]):
+            if not isinstance(spec, dict):
+                continue
+            ident = str(spec.get('id') or '').strip()
+            if ident and ident not in out:
+                out[ident] = dict(spec, id=ident, package=pkg)
+    return out

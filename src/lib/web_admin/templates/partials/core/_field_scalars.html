@@ -6,7 +6,7 @@
    group's action buttons go, and which groups a tabbed dialog is asking for this time.
 
    Its own partial because those are two questions, and the layout decisions
-   (`onlyGroups`, `skipHostPicker`, the groups themselves) are all in this one — none of
+   (`onlyGroups`, `skipDevicePicker`, the groups themselves) are all in this one — none of
    which a single field knows or should.
    ================================================================ #}
 
@@ -15,7 +15,7 @@
  *  the last field of that group (used to embed action buttons inside a group). */
 // opts (all optional, used by the cluster edit modal's tabbed layout):
 //   onlyGroups     — render only fields whose `group` is in this list (a tab pane)
-//   skipHostPicker — do not emit the host / multi-host binding picker
+//   skipDevicePicker — do not emit the device / multi-device binding picker
 function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtml = {}, opts = {}) {
     let h = '';
     // _schemaKeyOf handles both flat ("snmp|servers") and nested ("snmp|servers|router|checks") paths.
@@ -82,31 +82,31 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         .map(k => (fieldMeta(_sch, k) || {}).unit_field).filter(Boolean));
     if (_claimedUnits.size) keys = keys.filter(k => !_claimedUnits.has(k));
 
-    // ── Host binding (host-centric config) ──────────────────────────────────
-    // A module whose connection fields are declared in __host_profile__ (exposed
-    // as MODULE_HOST_FIELDS) lets an item reference a host instead of inline
-    // connection.  Show a host picker and, when one is bound, hide those fields.
+    // ── Device binding (device-centric config) ──────────────────────────────────
+    // A module whose connection fields are declared in __device_profile__ (exposed
+    // as MODULE_DEVICE_FIELDS) lets an item reference a device instead of inline
+    // connection.  Show a device picker and, when one is bound, hide those fields.
     const _modBase = _modName.replace(/^watchfuls\./, '');
-    const _hostFields = (target !== 'config')
-        ? (MODULE_HOST_FIELDS[_modBase] || MODULE_HOST_FIELDS[_modName] || []) : [];
-    // A collection is host-capable when MODULE_HOST_COLLECTIONS lists it — this
+    const _deviceFields = (target !== 'config')
+        ? (MODULE_DEVICE_FIELDS[_modBase] || MODULE_DEVICE_FIELDS[_modName] || []) : [];
+    // A collection is device-capable when MODULE_DEVICE_COLLECTIONS lists it — this
     // covers SSH-only/address-only modules (cpu, dns, ram_swap, web…) whose
     // connection fields are never inline, while still excluding nested
     // sub-collections (e.g. snmp 'servers|checks').  The suffix matches
     // _schemaKeyOf (the schema key without the leading "module|").
     const _collKey = (target !== 'config') ? (_schemaKeyOf(pathPrefix) || '') : '';
     const _collSuffix = _collKey.includes('|') ? _collKey.slice(_collKey.indexOf('|') + 1) : '';
-    const _hostColls = (target !== 'config')
-        ? (MODULE_HOST_COLLECTIONS[_modBase] || MODULE_HOST_COLLECTIONS[_modName] || null) : null;
-    const _hostCapable = !!(_hostColls && _collSuffix && _hostColls.includes(_collSuffix));
-    // Multi-bind modules (e.g. proxmox cluster) bind to several hosts via host_uids.
-    const _hostMultiBind = !!(MODULE_HOST_MULTI_BIND[_modBase] || MODULE_HOST_MULTI_BIND[_modName]);
-    const _hostBound = _hostCapable && obj &&
-        (_hostMultiBind ? (Array.isArray(obj.host_uids) && obj.host_uids.length) : obj.host_uid);
-    if (_hostCapable && !(opts && opts.skipHostPicker)) {
-        h += _hostMultiBind
-            ? _renderHostMultiPicker(pathPrefix, obj.host_uids || [], target)
-            : _renderHostPicker(pathPrefix, obj.host_uid || '', target);
+    const _deviceColls = (target !== 'config')
+        ? (MODULE_DEVICE_COLLECTIONS[_modBase] || MODULE_DEVICE_COLLECTIONS[_modName] || null) : null;
+    const _deviceCapable = !!(_deviceColls && _collSuffix && _deviceColls.includes(_collSuffix));
+    // Multi-bind modules (e.g. proxmox cluster) bind to several devices via device_uids.
+    const _deviceMultiBind = !!(MODULE_DEVICE_MULTI_BIND[_modBase] || MODULE_DEVICE_MULTI_BIND[_modName]);
+    const _deviceBound = _deviceCapable && obj &&
+        (_deviceMultiBind ? (Array.isArray(obj.device_uids) && obj.device_uids.length) : obj.device_uid);
+    if (_deviceCapable && !(opts && opts.skipDevicePicker)) {
+        h += _deviceMultiBind
+            ? _renderDeviceMultiPicker(pathPrefix, obj.device_uids || [], target)
+            : _renderDevicePicker(pathPrefix, obj.device_uid || '', target);
     }
 
     // ── Credential binding (module-declared credential type) ──────────────────
@@ -124,7 +124,7 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
     let _openCollapseId = null;   // id of an open collapsible-group <div>, if any
     for (const k of keys) {
         if (exclude.includes(k)) continue;
-        if (k === 'host_uid') continue;   // rendered by the host picker above
+        if (k === 'device_uid') continue;   // rendered by the device picker above
         if (k === 'cred_uid') continue;   // rendered by the credential picker
         if (k === 'created_at' || k === 'updated_at' || k === 'updated_by') continue;  // read-only audit metadata
         const v = obj[k];
@@ -206,11 +206,11 @@ function renderScalarFields(obj, pathPrefix, target, exclude = [], _postGroupHtm
         let _inner = _showWhen
             ? `<div class="sw-field" data-sw-when="${escAttr(JSON.stringify(_showWhen))}"${_disp}>${_fhtml}</div>`
             : _fhtml;
-        // Connection field of a host-capable module: wrap so it can be hidden
-        // when a host is bound (its value comes from the host then).
-        if (_hostCapable && _hostFields.includes(k)) {
-            const _hpDisp = _hostBound ? ' style="display:none"' : '';
-            _inner = `<div class="hostprof-field" data-hp-item="${escAttr(pathPrefix)}"${_hpDisp}>${_inner}</div>`;
+        // Connection field of a device-capable module: wrap so it can be hidden
+        // when a device is bound (its value comes from the device then).
+        if (_deviceCapable && _deviceFields.includes(k)) {
+            const _hpDisp = _deviceBound ? ' style="display:none"' : '';
+            _inner = `<div class="deviceprof-field" data-hp-item="${escAttr(pathPrefix)}"${_hpDisp}>${_inner}</div>`;
         }
         // Credential field of a credential-capable module: hide when a
         // credential is bound (its value comes from the credential then).

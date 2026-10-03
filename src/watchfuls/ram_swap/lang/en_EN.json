@@ -1,6 +1,6 @@
 {
     "pretty_name": "RAM & Swap",
-    "module_description": "Monitors RAM and swap usage on the bound host (locally or over SSH). Alerts when usage exceeds the configured percentage thresholds.",
+    "module_description": "Monitors RAM and swap usage on the bound device (locally or over SSH). Alerts when usage exceeds the configured percentage thresholds.",
     "labels": {
         "enabled":    "Enabled",
         "threads":    "Threads",
@@ -11,7 +11,7 @@
     },
     "hints": {
         "enabled":    "Enable or disable this RAM and SWAP check.",
-        "threads":    "Number of hosts to check in parallel.",
+        "threads":    "Number of devices to check in parallel.",
         "timeout":    "Command/SSH timeout in seconds.",
         "label":      "Display name shown in the UI. Falls back to the item key if empty.",
         "alert_ram":  "RAM usage threshold (%). An alert is triggered when used RAM exceeds this value.",
@@ -24,13 +24,13 @@
     },
     "collections": {"list": "Memory checks"},
     "messages": {
-        "mem_unsupported_os": "Memory: {} - unsupported host OS: {} ⚠️",
+        "mem_unsupported_os": "Memory: {} - unsupported device OS: {} ⚠️",
         "mem_ok":   "Normal {} ({}) used {}% ✅",
         "mem_high": "Excessive {} ({}) used {}% ⚠️"
     },
     "messages_vars": {
-        "mem_unsupported_os": ["host", "OS"],
-        "mem_ok": ["type", "host", "usage %"],
-        "mem_high": ["type", "host", "usage %"]
+        "mem_unsupported_os": ["device", "OS"],
+        "mem_ok": ["type", "device", "usage %"],
+        "mem_high": ["type", "device", "usage %"]
     }
 }

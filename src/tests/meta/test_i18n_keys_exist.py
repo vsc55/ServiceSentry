@@ -171,3 +171,75 @@ _LABELLED_ELSEWHERE = {
 }
 
 
+
+
+class TestLoQueTfPuedeSustituir:
+    """`tf(clave, …valores)` sustituye `{}` **por orden**. No entiende `{0}`.
+
+    Una cadena escrita con índices no falla, no avisa y sale a la pantalla con las llaves
+    literales: «{0} cuelga solo de la rama {1}: si esa rama cae, se apaga.» Eso no parece un
+    texto sin traducir — parece el panel roto.
+
+    Salió de la pantalla, con veintiséis cadenas escritas así de una tacada. Y no se puede ver
+    leyendo, porque `{0}` es exactamente lo que uno escribiría: es el formato de Python, el de
+    las plantillas de notificación de este mismo panel, y el de casi todo lo demás.
+
+    Se vigila solo lo que **de verdad pasa por `tf`**: las plantillas de notificación se
+    formatean en el servidor y ahí `{0}` sí funciona, así que prohibirlo en todas partes sería
+    prohibir algo correcto.
+    """
+
+    def _claves_de_tf(self):
+        """Las claves que alguna plantilla pasa a `tf`, con el fichero donde lo hace."""
+        import io as _io, os as _os, re as _re                    # noqa: PLC0415
+        root = _os.path.abspath(__file__).split(_os.sep + 'tests' + _os.sep)[0]
+        tpl = _os.path.join(root, 'lib', 'web_admin', 'templates')
+        out = {}
+        for base, _dirs, files in _os.walk(tpl):
+            for name in files:
+                if not name.endswith('.html'):
+                    continue
+                ruta = _os.path.join(base, name)
+                texto = _io.open(ruta, encoding='utf-8', errors='replace').read()
+                for clave in _re.findall(r"\btf\('([a-z0-9_]+)'", texto):
+                    out.setdefault(clave, _os.path.relpath(ruta, tpl))
+        return out
+
+    def test_ninguna_lleva_indices(self):
+        import io as _io, os as _os, re as _re                    # noqa: PLC0415
+        root = _os.path.abspath(__file__).split(_os.sep + 'tests' + _os.sep)[0]
+        usadas = self._claves_de_tf()
+        assert usadas, 'ninguna plantilla llama a tf, que sería más raro todavía'
+        malas = []
+        for lang in ('es_ES', 'en_EN'):
+            texto = _io.open(_os.path.join(root, 'lib', 'i18n', 'lang', f'{lang}.py'),
+                             encoding='utf-8').read()
+            for linea in texto.split('\n'):
+                m = _re.match(r"^ +'([a-z0-9_]+)'\s*:\s*'(.*)'\s*,\s*$", linea)
+                if not m:
+                    continue
+                clave, valor = m.group(1), m.group(2)
+                if clave in usadas and _re.search(r'\{\d+\}', valor):
+                    malas.append(f'{lang}:{clave} (usada en {usadas[clave]})')
+        assert not malas, (
+            '`tf` sustituye `{}` por orden y no entiende `{0}`: estas saldrían con las llaves '
+            f'literales en pantalla — {malas}')
+
+    def test_y_las_dos_lenguas_piden_los_mismos_valores(self):
+        """Una traducción con un hueco de más se come un argumento y desplaza el resto; con uno
+        de menos deja un valor sin poner. Las dos versiones se leen bien."""
+        import io as _io, os as _os, re as _re                    # noqa: PLC0415
+        root = _os.path.abspath(__file__).split(_os.sep + 'tests' + _os.sep)[0]
+        usadas = self._claves_de_tf()
+        huecos = {}
+        for lang in ('es_ES', 'en_EN'):
+            texto = _io.open(_os.path.join(root, 'lib', 'i18n', 'lang', f'{lang}.py'),
+                             encoding='utf-8').read()
+            for linea in texto.split('\n'):
+                m = _re.match(r"^ +'([a-z0-9_]+)'\s*:\s*'(.*)'\s*,\s*$", linea)
+                if m and m.group(1) in usadas:
+                    huecos.setdefault(m.group(1), {})[lang] = m.group(2).count('{}')
+        distintas = [f'{k}: es={v.get("es_ES")} en={v.get("en_EN")}'
+                     for k, v in huecos.items()
+                     if len(v) == 2 and v['es_ES'] != v['en_EN']]
+        assert not distintas, distintas

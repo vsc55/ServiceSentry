@@ -244,14 +244,26 @@ function _dgStorageCard(rows) {
                                                / r.total_bytes) : 0;
         // A missing or read-only directory is the finding, so it is a badge and not a colour
         // on a bar somebody has to interpret.
+        //
+        // Con tres matices, y los tres son para no dar una alarma falsa: una carpeta que se
+        // crea al guardar la primera cosa **no falta** en una instalación que aún no ha
+        // guardado nada; una que se lee y no se escribe —la de los módulos— no es un hallazgo
+        // por no poder escribirse, que en un contenedor es lo deseable; y la ruta de la que no
+        // se sabe nada no dice nada.
         const flag = !r.exists
-            ? `<span class="badge text-bg-danger">${esc(t('diag_missing'))}</span>`
-            : !r.writable
+            ? (r.on_demand
+                ? `<span class="badge text-bg-body-secondary text-body-secondary fw-normal"
+                    >${esc(t('diag_unused'))}</span>`
+                : `<span class="badge text-bg-danger">${esc(t('diag_missing'))}</span>`)
+            : (!r.writable && !r.read_only)
                 ? `<span class="badge text-bg-warning">${esc(t('diag_readonly'))}</span>`
                 : '';
+        // El nombre lo trae la fila cuando lo declara quien es su dueño —un módulo escribe el
+        // suyo en su propio fichero de idioma—, y si no, la clave se traduce aquí.
+        const nombre = r.label || t('diag_path_' + r.key) || r.key;
         return `<div class="mb-2">
             <div class="d-flex gap-2">
-                <span class="text-muted">${esc(t('diag_path_' + r.key) || r.key)}</span>
+                <span class="text-muted">${esc(nombre)}</span>
                 <span class="font-monospace text-truncate flex-grow-1">${esc(r.path || '—')}</span>
                 ${flag}
             </div>

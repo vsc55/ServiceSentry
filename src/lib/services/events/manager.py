@@ -17,7 +17,7 @@ It runs in the WebAdmin (embedded) and in the standalone syslog/event services a
 
 Sources:
 * ``audit``  — every audit-log entry (login_failed, daemon/syslog started/stopped,
-  config_changed, host/user created/deleted, …), read from the ``audit`` table.
+  config_changed, device/user created/deleted, …), read from the ``audit`` table.
   This also covers "service status" for the embedded services (their start/stop
   are audit events).
 * ``syslog`` — each received syslog message (severity/host/app/match), read from the

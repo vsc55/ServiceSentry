@@ -127,7 +127,7 @@ class Watchful(HealthChecks, ComputeChecks, CostChecks, IdentityChecks,
         return self.dict_return
 
     def _check_item(self, key: str, raw: dict) -> None:
-        it = self.resolve_host(raw)
+        it = self.resolve_device(raw)
         label = str(it.get('label') or key)
         timeout = int(it.get('timeout') or self.module_default('timeout', 15))
         enabled = [(tog, sfx, m) for tog, sfx, m in self._SERVICES if it.get(tog)]

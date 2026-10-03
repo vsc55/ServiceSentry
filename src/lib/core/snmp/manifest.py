@@ -8,7 +8,7 @@ module and is imported here, so this file stays a readable list of what the pack
 
 from __future__ import annotations
 
-# ── The connection a Host carries for this protocol ──────────────────────────────────────
+# ── The connection a Device carries for this protocol ──────────────────────────────────────
 #
 # Declared by the core, the way SSH is, and for the same reason SSH is: **an SNMP profile is
 # a property of the device**. Its address, its port, the identity it answers to and what it
@@ -16,37 +16,37 @@ from __future__ import annotations
 # every check that points at one box is how a device ends up authenticating two ways.
 #
 # It was the SNMP *watchful* that declared this until now, which had a consequence beyond
-# tidiness: the host form could only offer a protocol whose module happened to be installed,
+# tidiness: the device form could only offer a protocol whose module happened to be installed,
 # and core code that needed to know what an SNMP connection looks like had to go and read a
 # module's schema.json to find out.
 #
-# The module still declares its own ``__host_profile__`` — that is how a CHECK inherits these
-# fields when it is bound to a host — but it names the protocol and nothing else. This is the
+# The module still declares its own ``__device_profile__`` — that is how a CHECK inherits these
+# fields when it is bound to a device — but it names the protocol and nothing else. This is the
 # only place the fields are written down: a check against a bare IP has to remain possible, so
 # the ``servers`` collection asks for them with ``"__profile_fields__": "snmp"`` and the panel
 # expands THIS declaration into it. What used to be three copies pinned against each other is
-# one declaration and a guard that it arrives (tests/meta/test_snmp_host_profile_agrees.py).
-HOST_PROFILE: dict = {
+# one declaration and a guard that it arrives (tests/meta/test_snmp_device_profile_agrees.py).
+DEVICE_PROFILE: dict = {
     'key':           'snmp',
     'module':        'snmp',      # whose credential type the form offers (snmp_auth)
-    'address_field': 'host',      # filled from the host's address; never drawn
+    'address_field': 'host',      # filled from the device's address; never drawn
     # Field labels come from the lang files under this section, exactly as the built-in SSH
     # profile's do: a core-owned form takes its words from core i18n.
     'i18n':          'snmp_profile',
-    # A host carrying this profile with THIS field filled in is a device this module samples,
+    # A device carrying this profile with THIS field filled in is a device this module samples,
     # with no check and no module item anywhere — `devices.devices_to_sample` is the rule and
     # this is that rule declared, so the core can read it without naming SNMP.
     #
     # It has to be declared because "what would run against this machine" is asked in places
     # that have nothing to do with sampling. "Collect now" worked it out from what had been
-    # RECORDED about the host, which cannot include a device that has never been sampled: a
+    # RECORDED about the device, which cannot include a device that has never been sampled: a
     # NAS whose module item had just been removed offered to collect its ping and nothing
     # else, and the button that exists to take the first sample was the one thing that could
     # not. Reported from the screen in those words.
     'samples_when':  'device_profiles',
     # `group` is which section of a form the field falls under, and it is a fact about the
     # FIELD, not about one screen: a community is the identity wherever it is asked for.
-    # The check form draws the headers; the host profile's is a flat list and ignores them.
+    # The check form draws the headers; the device profile's is a flat list and ignores them.
     'fields': [
         {'name': 'host', 'type': 'str', 'placeholder': '192.168.1.1', 'default': '',
          'group': 'connection'},
@@ -183,15 +183,16 @@ AUDIT_EVENTS = [
 # somebody removed the SNMP watchful would be a library you can still fill and no longer look
 # at, and a catalogue the sampler still reads with nowhere to edit it.
 #
-# `placement: system` because of what it IS: something an operator ADMINISTERS, filed beside
-# Services, Modules and Credentials, not beside the dashboards an operator watches.
+# `placement: catalog` because of what it IS: a library an operator ADMINISTERS — the MIBs and
+# the device profiles built on them — filed with the devices and credentials it describes, not
+# beside the dashboards an operator watches nor the platform's own settings.
 #
 # `i18n` names the section of the core lang files its words come from — the title and one per
 # view. A module's page is titled by its `pretty_name` because the core owns no string that
 # names a module; a core section names itself.
 PAGE: dict = {
     'id': 'snmp', 'icon': 'bi-hdd-stack', 'order': 25,
-    'placement': 'system', 'perm': 'snmp_view',
+    'placement': 'catalog', 'perm': 'snmp_view',
     'render': 'renderSnmpMibsPage',
     'i18n': 'snmp_page',
     'views': [
@@ -247,14 +248,14 @@ DB_TABLES = [_CATALOG, _MIB_VERSIONS]
 # A version, a community, and the seven fields SNMPv3 needs. That is a fact about the
 # PROTOCOL, and it was declared by a watchful that an installation may not have: a credential
 # type that disappears takes its stored credentials out of the editor with it, while they
-# stay in the database, still referenced by hosts that use them.
+# stay in the database, still referenced by devices that use them.
 #
 # `i18n` points at the section of core i18n these fields are worded from — the same section
-# the host profile reads, because the credential editor asks the same questions a check does
+# the device profile reads, because the credential editor asks the same questions a check does
 # and there is no reason for the panel to have two vocabularies for one protocol.
 CREDENTIAL: dict = {
     'type':   'snmp_auth',
-    'module': 'snmp',        # whose card the host form offers this credential on
+    'module': 'snmp',        # whose card the device form offers this credential on
     'i18n':   'snmp_profile',
     'fields': [
         {'name': 'version', 'kind': 'select', 'default': '2c', 'options': ['1', '2c', '3']},

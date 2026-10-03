@@ -134,6 +134,11 @@
         {% include "partials/infra/_pane.html" %}
         {% include "partials/jobs/_pane.html" %}
 
+        <!-- ==================== Physical inventory Tab ==================== -->
+        {% endif %}
+        {% if not standalone or standalone == 'dcim' %}
+        {% include "partials/dcim/_pane.html" %}
+
         <!-- ==================== History Tab ==================== -->
         {% endif %}
         {% if not standalone or standalone == 'history' %}

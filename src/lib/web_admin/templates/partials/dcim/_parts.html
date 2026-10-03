@@ -1,0 +1,681 @@
+{# ================================================================
+   DCIM — lo que hay DENTRO de un equipo.
+
+   Seis discos, la memoria, las dos fuentes, la tarjeta de red — y el cargador del mini-PC que
+   vive en una bandeja, que no es un componente elegante y es exactamente lo que hay que reponer
+   cuando desaparece.
+
+   **Una fila por componente y no un campo de descripción**, porque la pregunta que se hace no es
+   «qué lleva este servidor» sino «cuántos discos de 4 TB tengo y en qué máquinas» — y eso a una
+   descripción no se le puede preguntar.
+
+   Y **cantidad**, no una fila por unidad: seis discos idénticos son una fila con un seis. Nadie
+   apunta el número de serie de cada uno, y obligar a ello garantiza que no se apunte ninguno.
+   ================================================================ #}
+
+//: Los componentes del equipo abierto: `{item, parts, kinds}`, o `null` si no hay ninguno
+//: abierto. Se piden al abrir y no con el rack: un armario de cuarenta equipos son cuarenta
+//: listas que casi nadie mira.
+let _dcParts = null;
+
+async function _dcPartsOpen(itemUid) {
+    const d = await apiGet(`/api/v1/dcim/items/${encodeURIComponent(itemUid)}/parts`);
+    if (!d || d.error) return showToast((d || {}).error || t('dcim_not_found'), 'warning');
+    _dcParts = {item: itemUid, parts: d.parts || [], kinds: d.kinds || [],
+                // Los huecos que declara su modelo del catálogo, con la forma de una plantilla:
+                // un panel de parcheo no nace de ninguna —no tiene estándar que estampar— así
+                // que sin esto nunca había de dónde elegir en cuál va cada conector.
+                model: d.model || null,
+                build: d.build || null, diff: d.diff || []};
+    // Y se enseña: la pestaña de componentes sólo existe mientras hay un equipo abierto, así que
+    // pedirla sin ir a ella sería cargar una lista que no se ve.
+    _dcRackTab = 'parts';
+    renderDcim();
+}
+
+function _dcPartsClose() {
+    _dcParts = null;
+    // Su pestaña se va con ella: dejarla marcada dejaría el panel enseñando un hueco.
+    if (_dcRackTab === 'parts') _dcRackTab = 'items';
+    renderDcim();
+}
+
+/** Lo que lleva un equipo. Dentro de su pestaña — pero esta sí dice **de cuál**: la pestaña se
+ *  llama «Componentes» y los componentes son de una caja concreta, así que sin su nombre la
+ *  lista no dice de qué está hablando. */
+function _dcPartsHtml() {
+    const d = _dcParts || {};
+    const item = ((_dcimRack || {}).items || []).find(i => i.uid === d.item) || {};
+    const puede = _dcimMay('dcim_edit');
+    return `<div class="ss-toolrow mb-2">
+            <span class="fw-semibold ss-fs-3">${esc(_dcimItemName(item))}</span>
+            ${_dcRoleHint(item)}
+            <span class="ss-toolrow-text"></span>
+            ${puede ? `<button class="btn btn-sm btn-secondary"
+                onclick="_dcCompStart('item')">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_part'))}</button>` : ''}
+            <button class="btn btn-sm btn-secondary" onclick="_dcPartsClose()"
+                    title="${escAttr(t('close'))}"><i class="bi bi-x-lg"></i></button>
+        </div>
+        ${(d.parts || []).length ? _dcPartsTable(d.parts, puede)
+            : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_parts'))}</div>`}
+        ${_dcPartsDiffHtml(d)}`;
+}
+
+/** Lo que lleva contra lo que su plantilla decía.
+ *
+ *  Ninguna de las dos partes es «el error». Que una máquina se separe de su estándar es un hecho
+ *  sobre esa máquina —le cambiaron los discos, le pusieron memoria— y la diferencia ES el dato,
+ *  igual que en el contraste de cableado y en el de consumo.
+ *
+ *  Una sola tabla y no dos: cambiar un disco de 4 TB por uno de 8 sale como un renglón que falta
+ *  y otro que sobra, y separarlos obligaría a leer las dos para entender que fue un cambio. */
+function _dcPartsDiffHtml(d) {
+    if (!d.build) return '';
+    const dif = d.diff || [];
+    return `<div class="mt-3 pt-2 border-top">
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <i class="bi bi-boxes text-muted"></i>
+            <span class="ss-fs-2 text-muted">${esc(tf('dcim_build_from', d.build.name || ''))}</span>
+        </div>
+        ${dif.length ? `<div class="table-responsive">
+            <table class="table table-sm mb-0 align-middle">
+            <thead><tr>
+                <th>${esc(t('dcim_part'))}</th>
+                <th>${esc(t('dcim_part_model'))}</th>
+                <th>${esc(t('dcim_part_size'))}</th>
+                <th>${esc(t('dcim_part_brand'))}</th>
+                <th class="text-end">${esc(t('dcim_build_want'))}</th>
+                <th class="text-end">${esc(t('dcim_build_have'))}</th>
+            </tr></thead>
+            <tbody>${dif.map(f => `<tr>
+                <td class="fw-semibold">${esc(t('dcim_kind_' + f.kind) || f.kind)}</td>
+                <td class="ss-fs-2">${esc(f.model || '')}</td>
+                <td class="ss-fs-2 ss-tabular">${esc(f.size || '')}</td>
+                <td class="ss-fs-2">${esc(f.brand || '')}</td>
+                <td class="text-end ss-tabular">${esc(String(f.want))}</td>
+                <td class="text-end ss-tabular ${
+                    f.diff > 0 ? 'text-success' : 'text-warning'}">${
+                    esc(String(f.have))}</td>
+            </tr>`).join('')}</tbody></table></div>`
+            : `<div class="text-muted ss-fs-2">${esc(t('dcim_build_same'))}</div>`}
+    </div>`;
+}
+
+/** Lo que el CATÁLOGO cree que es este equipo, cuando el modelo está casado y nadie ha dicho el
+ *  tipo todavía.
+ *
+ *  Propone y no escribe, como el resto del catálogo en este panel: la biblioteca no dice el rol
+ *  en ninguna parte, así que esto se deduce de los puertos — y una deducción escrita como si
+ *  fuera un hecho es justo lo que este dominio evita. */
+function _dcRoleHint(item) {
+    const sug = String(item.role_hint || '');
+    if (!sug || item.role) return '';
+    return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+        title="${escAttr(t('dcim_role_' + sug))}">${
+        esc(tf('dcim_role_hint', t('dcim_role_' + sug)))}</span>`;
+}
+
+/** Abrir la corrección desde una fila. La fila trae el uid y el formulario quiere la pieza
+ *  entera, así que se busca en lo que ya está en pantalla: es la misma lista que se está
+ *  pintando, y volver a pedirla al servidor sería una ida y vuelta para recuperar lo que se ve. */
+function _dcCompEditFrom(where, uid) {
+    const donde = where === 'build' ? ((_dcBuild || {}).parts || []) : ((_dcParts || {}).parts || []);
+    const p = donde.find(x => String(x.uid) === String(uid));
+    if (p) _dcCompEdit(where, p);
+}
+
+/** La cantidad de una pieza, y cuántas son de verdad.
+ *
+ *  Dos kits de dos son dos cosas compradas y cuatro módulos puestos. Enseñar solo la primera cifra
+ *  contesta la pregunta del pedido a quien está mirando lo que lleva la máquina. */
+function _dcPartQty(p) {
+    const cajas = Number(p.qty || 1) || 1;
+    const kit = Number(p.kit_qty || 1) || 1;
+    return kit > 1 ? `${cajas} × ${kit} = ${cajas * kit}` : String(cajas);
+}
+
+function _dcPartsTable(parts, puede) {
+    return `<div class="table-responsive"><table class="table table-sm mb-0 align-middle">
+        <thead><tr>
+            <th>${esc(t('dcim_part'))}</th>
+            <th>${esc(t('dcim_part_slot'))}</th>
+            <th>${esc(t('dcim_part_brand'))}</th>
+            <th>${esc(t('dcim_part_model'))}</th>
+            <th>${esc(t('dcim_part_size'))}</th>
+            <th class="text-end">${esc(t('dcim_part_qty'))}</th>
+            <th>${esc(t('dcim_serial'))}</th>
+            <th></th>
+        </tr></thead>
+        <tbody>${parts.map(p => `<tr>
+            <td class="fw-semibold">${esc(t('dcim_kind_' + p.kind) || p.kind)}</td>
+            <td class="ss-fs-2">${esc(p.slot || '')}</td>
+            <td class="ss-fs-2">${esc(p.brand || '')}</td>
+            <td class="ss-fs-2">${esc(p.model || '')}${
+                p.type_uid ? ' <i class="bi bi-journal-text text-muted ss-fs-1"'
+                             + ` title="${escAttr(t('dcim_comp_chosen'))}"></i>` : ''}</td>
+            <td class="ss-fs-2 ss-tabular">${esc(p.size || '')}</td>
+            <td class="text-end ss-tabular">${esc(_dcPartQty(p))}</td>
+            <td class="ss-fs-2 ss-tabular text-muted">${esc(p.serial || '')}</td>
+            <td class="text-end">${puede ? `<div class="btn-group btn-group-sm">
+                <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
+                    onclick="_dcCompEditFrom('item', ${jsStr(p.uid)})">
+                    <i class="bi bi-pencil"></i></button>
+                <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+                    onclick="_dcPartDrop(${jsStr(p.uid)},${jsStr(
+                        t('dcim_kind_' + p.kind) || p.kind)})">
+                    <i class="bi bi-trash"></i></button>
+            </div>` : ''}</td>
+        </tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+//: El componente que se está añadiendo **o corrigiendo**, venga de donde venga:
+//: `{where, uid, type_uid, kind, brand, model, size, slot, qty, manual, q, rows, searching}`.
+//: `uid` puesto = se está corrigiendo esa fila; vacío = es una nueva.
+//: `where` es `build` (una plantilla) o `item` (una máquina).
+//:
+//: Uno solo para los dos sitios: piden exactamente lo mismo, y dos formularios serían que el día
+//: que se añada un campo salga en uno y no en el otro.
+let _dcCompDraft = null;
+
+/** Empezar a añadir un componente. Se abre **buscando en el catálogo**, que es el camino normal:
+ *  un SSD no es de esta máquina, es un modelo que va en veinte. */
+function _dcCompStart(where, mount) {
+    if (_dcCompDraft && _dcCompDraft.where === where
+        && String(_dcCompDraft.mount || '') === String(mount || '') && !_dcCompDraft.uid) {
+        _dcCompDraft = null;
+    } else {
+        _dcCompDraft = {where, uid: '', type_uid: '', kind: 'other', brand: '', model: '',
+                        size: '', slot: '', qty: 1, kit_qty: 1, manual: false, q: '', rows: [],
+                        // Dentro o colgando, según de qué pestaña se pulsó: es lo que decide en
+                        // cuál sale después, y preguntarlo sería preguntar algo que ya se sabe.
+                        mount: String(mount || ''),
+                        searching: true};
+    }
+    renderDcim();
+}
+
+/** Corregir una que ya está. Se abre **por los campos** y no buscando en el catálogo: quien
+ *  corrige suele venir a cambiar la bahía o la cantidad, no el modelo — y para cambiarlo está el
+ *  botón de siempre, que ya está ahí. */
+function _dcCompEdit(where, p) {
+    if (!p) return;
+    _dcCompDraft = {where, uid: p.uid, type_uid: p.type_uid || '', kind: p.kind || 'other',
+                    brand: p.brand || '', model: p.model || '', size: p.size || '',
+                    slot: p.slot || '', qty: Number(p.qty || 1) || 1,
+                    kit_qty: Number(p.kit_qty || 1) || 1, serial: p.serial || '',
+                    mount: String(p.mount || ''),
+                    manual: !p.type_uid, q: '', rows: [], searching: false};
+    renderDcim();
+}
+
+function _dcCompClose() {
+    _dcCompDraft = null;
+    renderDcim();
+}
+
+/** Los modelos de componente que casan con lo buscado. Contra el árbol de componentes y no
+ *  contra el catálogo entero: aquí no se busca un switch. */
+async function _dcCompSearch() {
+    const d = _dcCompDraft;
+    if (!d) return;
+    const r = await apiGet('/api/v1/dcim/catalog?tree=component-types'
+                           + `&q=${encodeURIComponent(d.q || '')}`) || {};
+    d.rows = r.types || [];
+    renderDcim();
+}
+
+/** Tomar uno. La marca, el nombre y el tamaño salen de ÉL — el servidor los vuelve a resolver al
+ *  guardar, así que lo que se ve aquí es lo que se va a guardar y no una copia que pueda diferir. */
+function _dcCompTake(uid) {
+    const d = _dcCompDraft;
+    if (!d) return;
+    const fila = (d.rows || []).find(r => String(r.uid) === String(uid));
+    if (!fila) return;
+    d.type_uid = fila.uid;
+    d.brand = fila.manufacturer || '';
+    d.model = fila.model || '';
+    d.size = fila.size || '';
+    d.kit_qty = Number(fila.kit_qty || 1) || 1;
+    if (fila.kind) d.kind = fila.kind;
+    d.searching = false;
+    d.manual = false;
+    renderDcim();
+}
+
+/** Escribirlo a mano: para lo que todavía no está en el catálogo. Es una salida y no el camino,
+ *  y por eso hay que pedirla. */
+function _dcCompManual() {
+    if (!_dcCompDraft) return;
+    _dcCompDraft.manual = true;
+    _dcCompDraft.searching = false;
+    _dcCompDraft.type_uid = '';
+    renderDcim();
+}
+
+function _dcCompFormHtml(where) {
+    const d = _dcCompDraft;
+    if (!d || d.where !== where) return '';
+    const kinds = (_dcParts || {}).kinds || (_dcBuilds || {}).kinds || [];
+    const elegido = !!d.type_uid;
+    return `<div class="d-flex flex-column gap-2 p-2 rounded bg-body-secondary mb-2">
+        ${d.searching ? `<div class="d-flex gap-2 align-items-center flex-wrap">
+            <input class="form-control form-control-sm" style="max-width:22rem" autofocus
+                   value="${escAttr(d.q)}" placeholder="${escAttr(t('dcim_comp_search'))}"
+                   oninput="_dcCompDraft.q=this.value"
+                   onkeydown="if(event.key==='Enter')_dcCompSearch()">
+            <button class="btn btn-sm btn-primary" onclick="_dcCompSearch()">
+                <i class="bi bi-search"></i></button>
+            <button class="btn btn-sm btn-secondary" onclick="_dcCompManual()">
+                ${esc(t('dcim_comp_manual'))}</button>
+            <button class="btn btn-sm btn-secondary" onclick="_dcCompClose()">
+                ${esc(t('cancel'))}</button>
+        </div>
+        ${(d.rows || []).length ? `<div class="d-flex flex-column gap-1 ss-piece-list-scroll">${
+            d.rows.slice(0, 50).map(r => `<button class="btn btn-sm btn-secondary text-start"
+                onclick="_dcCompTake(${jsStr(r.uid)})">
+                <span class="badge bg-body-secondary text-body-secondary border fw-normal me-1">${
+                    esc(t('dcim_kind_' + r.kind) || r.kind)}</span>
+                ${esc(((r.manufacturer || '') + ' ' + (r.model || '')).trim())}
+                ${r.size ? `<span class="ss-tabular"> · ${esc(r.size)}</span>` : ''}
+                </button>`).join('')}</div>`
+            : (d.q ? `<div class="text-muted ss-fs-2">${
+                esc(t('dcim_comp_none_found'))}</div>` : '')}
+        <div class="text-muted ss-fs-1">${esc(t('dcim_comp_hint'))}</div>` : ''}
+        ${d.searching ? '' : _dcCompFieldsHtml(d, where, elegido, kinds)}
+    </div>`;
+}
+
+/** Las cajas del formulario, en **dos bloques**: qué es y dónde va.
+ *
+ *  Iban todas en la misma fila corrida —marca, modelo, tamaño, hueco, cantidad y los botones—
+ *  ajustándose sola al ancho de la ventana, así que dónde acababa una pregunta y empezaba la otra
+ *  dependía de por dónde partiera la línea. Con su título y una raya en medio no hay que
+ *  deducirlo. */
+function _dcCompFieldsHtml(d, where, elegido, kinds) {
+    const dicho = `<div class="ss-fs-2 text-muted">${esc(t('dcim_comp_chosen'))}
+        <div class="d-flex gap-2 align-items-center">
+            <span class="badge bg-body-secondary text-body-secondary border fw-normal">${
+                esc(t('dcim_kind_' + d.kind) || d.kind)}</span>
+            <span class="fw-semibold">${esc((d.brand + ' ' + d.model).trim())}</span>
+            ${d.size ? `<span class="ss-tabular">${esc(d.size)}</span>` : ''}
+            <button class="btn btn-sm btn-secondary"
+                onclick="_dcCompDraft.searching=true;renderDcim()">
+                ${esc(t('dcim_comp_change'))}</button>
+        </div></div>`;
+    // Y se REDIBUJA: la clase decide de qué lista salen los huecos —un conector de panel va en
+    // el frente y un DIMM en una ranura— así que cambiarla sin repintar deja la mitad derecha
+    // del formulario contestando a la clase anterior. El borrador guarda lo tecleado, así que
+    // repintar no pierde nada.
+    const aMano = `<label class="ss-fs-2 text-muted">${esc(t('dcim_part'))}
+            <select class="form-select form-select-sm" style="max-width:11rem"
+                    onchange="_dcCompDraft.kind=this.value;renderDcim()">${
+                kinds.map(k => `<option value="${escAttr(k)}"${
+                    d.kind === k ? ' selected' : ''}>${
+                    esc(t('dcim_kind_' + k) || k)}</option>`).join('')}</select></label>
+        ${_dcCompBox('brand', t('dcim_part_brand'), '10rem')}
+        ${_dcCompBox('model', t('dcim_part_model'), '12rem')}
+        ${_dcCompBox('size', t('dcim_part_size'), '7rem')}
+        ${_dcCompBox('kit_qty', _dcAttrName('kit_qty'), '8rem', 'number')}`;
+    const total = Number(d.kit_qty || 1) > 1
+        ? `<div class="ss-fs-2 text-muted">${esc(_dcAttrName('kit_qty'))}
+             <div class="fw-semibold">${esc(_dcPartQty(d))}</div></div>` : '';
+    const serie = where === 'item' ? _dcCompBox('serial', t('dcim_serial'), '10rem') : '';
+    // De canto y no apiladas: son cuatro cajas, y en tres pisos ocupan tres filas de alto con
+    // la mitad del ancho vacío. La raya sigue diciendo lo mismo puesta de pie, y si la ventana
+    // es estrecha las columnas caen una debajo de otra con su raya al lado.
+    return `<div class="d-flex gap-3 align-items-start flex-wrap">
+        <div>
+            <div class="ss-fs-1 text-muted mb-1">${esc(t('dcim_comp_grp_what'))}</div>
+            <div class="d-flex gap-2 align-items-end flex-wrap">
+                ${elegido ? dicho : aMano}
+                ${_dcCompBox('qty', t('dcim_part_qty'), '5rem', 'number')}
+                ${total}
+                ${serie}
+            </div>
+        </div>
+        <div class="border-start ps-3">
+            <div class="ss-fs-1 text-muted mb-1">${esc(t('dcim_comp_grp_where'))}</div>
+            ${_dcCompSlotBox()}
+        </div>
+        <div class="border-start ps-3 d-flex gap-2 align-self-end">
+            <button class="btn btn-sm btn-primary" onclick="_dcCompSave()">
+                <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+            <button class="btn btn-sm btn-secondary" onclick="_dcCompClose()">
+                ${esc(t('cancel'))}</button>
+        </div>
+    </div>`;
+}
+
+/** Los huecos que una pieza ocupa, leídos de su campo. **Puede ser más de uno**: un kit de dos
+ *  módulos va en dos ranuras, y esa es la gracia del kit.
+ *
+ *  Separados por coma porque es una columna de texto que ya existía y lo que había escrito en
+ *  ella sigue valiendo: `SODIMM-1` sigue siendo un hueco, y `SODIMM-1, SODIMM-2` son dos. */
+function _dcSlotsOf(p) {
+    return String((p || {}).slot || '').split(',').map(x => x.trim()).filter(Boolean);
+}
+
+/** Cuántos huecos ocupa esta pieza: uno por unidad. Es el mismo número que se enseña como
+ *  `1 × 2 = 2` — un kit de dos módulos ocupa dos ranuras, y cuatro discos, cuatro bahías. */
+function _dcPartUnits(p) {
+    return Math.max(1, (Number((p || {}).qty || 1) || 1)
+                       * (Number((p || {}).kit_qty || 1) || 1));
+}
+
+/** Qué bahías tiene ocupadas ya **otra** pieza, y cuál. Sin la que se está editando, que si no
+ *  se marcaría a sí misma como ocupada y no se podría dejar donde estaba. */
+function _dcSlotTaken(salvo) {
+    const parts = ((_dcParts || {}).parts) || ((_dcBuild || {}).parts) || [];
+    const fuera = {};
+    parts.forEach(p => {
+        if (salvo && String(p.uid) === String(salvo)) return;
+        _dcSlotsOf(p).forEach(nombre => {
+            const k = _dcBaySlug(nombre);
+            if (k) fuera[k] = [p.brand, p.model].filter(Boolean).join(' ')
+                              || t('dcim_kind_' + p.kind) || p.kind;
+        });
+    });
+    return fuera;
+}
+
+/** En qué huecos va este componente. **De las bahías que declara la plantilla**, si las declara.
+ *
+ *  Era una caja de texto, y una caja de texto para nombrar un sitio que ya está escrito en otro
+ *  lado produce `SODIMM-1`, `sodimm 1` y `Sodimm1` para la misma ranura: tres formas de decir lo
+ *  mismo, y entonces «¿qué hay en SODIMM-1?» no tiene respuesta.
+ *
+ *  **Se marcan, no se ordenan.** Una pieza puede ocupar varias —un kit de dos módulos va en dos
+ *  ranuras, cuatro discos en cuatro bahías— y un desplegable por unidad diría que el módulo 1 va
+ *  en una y el 2 en otra, que no significa nada: los módulos de un kit son idénticos. Lo que
+ *  ocupa es un conjunto. Y marcando cabe igual con dos que con dieciséis, que es lo que una fila
+ *  de dieciséis desplegables no hace.
+ *
+ *  Una bahía **ocupada sale y no se puede elegir**, con lo que hay dentro: esconderla dejaría sin
+ *  saber que existe, y ofrecerla es invitar a poner dos módulos donde cabe uno.
+ *
+ *  Sin bahías declaradas se queda como estaba: una caja donde escribir. No hay lista de la que
+ *  elegir, y ofrecer un cuadro vacío sería ofrecer elegir entre nada. Y lo tecleado que no
+ *  coincide con ninguna **se conserva**: un equipo puede llevar algo donde la plantilla no dijo.
+ */
+/** Cómo se llama la casilla: **hueco** para lo que va dentro, **puerto** para lo que cuelga.
+ *  Es la misma pregunta —cuál— pero no la misma palabra, y la de dentro no sirve para lo de
+ *  fuera: nadie llama «hueco» al USB de detrás. */
+function _dcSlotWord() {
+    const d = _dcCompDraft || {};
+    // Un keystone no va «en un puerto» ni «en una bahía»: va en un HUECO del panel, que es como
+    // lo llama quien lo monta. La palabra sale de la clase antes que del montaje, porque la
+    // clase es más concreta.
+    if (_DC_KIND_FAMS[String(d.kind || '')]) return t('dcim_part_hole');
+    return t(String(d.mount || '') === 'external' ? 'dcim_part_port' : 'dcim_part_slot');
+}
+
+function _dcCompSlotBox() {
+    const d = _dcCompDraft || {};
+    const bahias = _dcCompSlots();
+    const cuantos = _dcPartUnits(d);
+    const puestos = _dcSlotsOf(d);
+    // Sin lista declarada se escribe y ya está: no hay de qué elegir, y un botón que abre un
+    // cuadro vacío es un botón que promete algo que no hay.
+    const aMano = !bahias.length || d.slotFree;
+    const faltan = cuantos - puestos.length;
+    // Cuántos hacen falta y cuántos llevas. Marcar seis de ocho es un estado normal a mitad de
+    // camino, no un error: se dice y no se impide.
+    const titulo = cuantos > 1 ? tf('dcim_bay_n_of', puestos.length, cuantos) : _dcSlotWord();
+    const aviso = (faltan > 0 && puestos.length)
+        ? `<span class="text-warning ms-1">${esc(tf('dcim_bay_left', faltan))}</span>` : '';
+    // De solo lectura mientras se elige de la lista: lo que se teclee encima de lo marcado son
+    // dos sitios donde decir lo mismo, y el que gane depende de cuál se tocó el último.
+    const caja = aMano
+        ? `<input class="form-control" value="${escAttr(String(d.slot || ''))}"
+                  placeholder="${escAttr(cuantos > 1 ? t('dcim_bay_many_hint') : '')}"
+                  oninput="_dcCompDraft.slot=this.value"
+                  onkeydown="if(event.key==='Enter')_dcCompSave()">`
+        : `<input class="form-control ss-pointer" readonly
+                  value="${escAttr(String(d.slot || ''))}"
+                  placeholder="${escAttr(t('dcim_slot_none'))}"
+                  onclick="_dcSlotPickOpen()">`;
+    return `<label class="ss-fs-2 text-muted">${esc(titulo)}${aviso}
+        <div class="input-group input-group-sm" style="min-width:15rem;max-width:24rem">
+            ${caja}
+            ${bahias.length ? `<button class="btn btn-secondary" onclick="_dcSlotPickOpen()"
+                title="${escAttr(t('dcim_bay_from_list'))}">
+                <i class="bi bi-list-ul"></i></button>
+            <button class="btn btn-secondary" onclick="_dcSlotFree(${aMano ? 'false' : 'true'})"
+                title="${escAttr(t(aMano ? 'dcim_bay_from_list' : 'dcim_bay_other'))}">
+                <i class="bi ${aMano ? 'bi-list-check' : 'bi-pencil'}"></i></button>` : ''}
+        </div></label>`;
+}
+
+/** Escribir el hueco a mano, o volver a elegirlo de la lista. */
+function _dcSlotFree(on) {
+    const d = _dcCompDraft;
+    if (!d) return;
+    d.slotFree = !!on;
+    renderDcim();
+}
+
+/** El cuadro donde se elige, aparte del formulario.
+ *
+ *  Dentro eran tres filas de chapas creciendo con el equipo —tres puertos en un mini-PC, veinte
+ *  en un chasis— en medio de las cajas del componente: ni el campo cabía en una línea ni se veía
+ *  dónde acababa una cosa y empezaba la otra. Fuera cabe todo, y con sitio para decir de qué cara
+ *  es cada puerto.
+ *
+ *  Se marca y se queda marcado sin cerrar nada: cada clic escribe en el borrador y redibuja las
+ *  dos pantallas, la de detrás y esta. Cerrar es el botón, y no hay nada que perder al cerrarlo
+ *  porque no hay nada pendiente de aceptar. */
+function _dcSlotPickOpen() {
+    if (!(_dcCompDraft || {}).where) return;
+    showHtmlModal(_dcSlotWord(), `<div id="dcSlotPick">${_dcSlotPickHtml()}</div>`, 'primary',
+                  `<button class="btn btn-primary" onclick="hideInfoModal()">
+                     <i class="bi bi-check-lg me-1"></i>${esc(t('close'))}</button>`);
+}
+
+/** Redibujar solo el cuadro. `renderDcim()` pinta lo de detrás y no lo de dentro del diálogo:
+ *  sin esto se marcaba una chapa y la chapa no se enteraba. */
+function _dcSlotPickDraw() {
+    const el = document.getElementById('dcSlotPick');
+    if (el) el.innerHTML = _dcSlotPickHtml();
+}
+
+function _dcSlotPickHtml() {
+    const d = _dcCompDraft || {};
+    const bahias = _dcCompSlots();
+    const cuantos = _dcPartUnits(d);
+    const puestos = _dcSlotsOf(d);
+    const marcadas = {};
+    puestos.forEach(x => { marcadas[_dcBaySlug(x)] = true; });
+    const ocupadas = _dcSlotTaken(d.uid);
+    // Por familia, y en el orden en que salen: la pregunta que una fila corrida de chapas no
+    // contesta es de qué cara del equipo es cada una.
+    const grupos = [];
+    bahias.forEach(x => {
+        let g = grupos.filter(y => y.fam === x.fam)[0];
+        if (!g) { g = {fam: x.fam, xs: []}; grupos.push(g); }
+        g.xs.push(x);
+    });
+    // Lo tecleado que no está declarado va aparte y se conserva: un equipo puede llevar algo
+    // donde la plantilla no dijo, y borrarlo por no reconocerlo es perder el dato.
+    const sueltas = puestos.filter(x => !bahias.some(y => y.name === x));
+    const _dcSlotChip = x => {
+        const k = _dcBaySlug(x.name);
+        const mia = !!marcadas[k];
+        const quien = ocupadas[k] || '';
+        const libre = !quien || mia;
+        const pista = [x.type ? _dcPortSpeed(x) : '',
+                       (x.signals || []).map(_dcSignalName).join(', '),
+                       _dcPortPower(x), quien].filter(Boolean).join(' · ');
+        const clase = 'ss-pick' + (mia ? ' ss-on' : '') + (libre ? '' : ' ss-off');
+        return `<label class="${clase}" title="${escAttr(pista)}">
+            <input type="checkbox" class="d-none"${mia ? ' checked' : ''}${
+                libre ? '' : ' disabled'}
+                onchange="_dcCompSlotToggle(${jsStr(x.name)}, this.checked)">${
+            esc(x.name)}</label>`;
+    };
+    // Cuántas hacen falta y cuántas llevas. Marcar seis de ocho es un estado normal a mitad de
+    // camino, no un error: se dice y no se impide.
+    const faltan = cuantos - puestos.length;
+    return `<div class="ss-fs-2 text-muted">
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <span>${esc(cuantos > 1 ? tf('dcim_bay_n_of', puestos.length, cuantos)
+                                     : _dcSlotWord())}</span>
+            ${faltan > 0 && puestos.length ? `<span class="text-warning">${
+                esc(tf('dcim_bay_left', faltan))}</span>` : ''}
+            <button class="btn btn-sm btn-secondary py-0 px-1 ms-auto"
+                    onclick="hideInfoModal();_dcSlotFree(true)"
+                    title="${escAttr(t('dcim_bay_other'))}">
+                <i class="bi bi-pencil me-1"></i>${esc(t('dcim_bay_other'))}</button>
+        </div>
+        <div class="ss-scroll-box">${grupos.map(g => `
+            <div class="mb-1">
+                <div class="ss-fs-1 text-muted">${esc(_dcPortName(g.fam))}</div>
+                <div class="d-flex gap-1 flex-wrap">${g.xs.map(_dcSlotChip).join('')}</div>
+            </div>`).join('')}
+            ${sueltas.length ? `<div class="mb-1">
+                <div class="ss-fs-1 text-muted">${esc(t('dcim_bay_not_declared'))}</div>
+                <div class="d-flex gap-1 flex-wrap">${sueltas.map(x =>
+                    `<label class="ss-pick ss-on">
+                        <input type="checkbox" class="d-none" checked
+                            onchange="_dcCompSlotToggle(${jsStr(x)}, this.checked)">${
+                        esc(x)}</label>`).join('')}</div>
+            </div>` : ''}
+        </div>
+    </div>`;
+}
+
+/** Marcar o desmarcar una bahía. El orden que se guarda es el de la **plantilla** y no el de los
+ *  clics: dos piezas en las mismas ranuras tienen que decirlo igual, o la ficha cambia sin que
+ *  cambie nada. */
+function _dcCompSlotToggle(nombre, on) {
+    const d = _dcCompDraft || {};
+    const puestos = _dcSlotsOf(d).filter(x => _dcBaySlug(x) !== _dcBaySlug(nombre));
+    if (on) puestos.push(String(nombre));
+    const orden = _dcCompSlots().map(x => x.name);
+    puestos.sort((a, b) => {
+        const ia = orden.indexOf(a), ib = orden.indexOf(b);
+        // Lo que no está declarado va al final y en el orden en que se escribió: no hay dónde
+        // colocarlo, y moverlo entre sí sería inventarse una posición.
+        return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib);
+    });
+    d.slot = puestos.join(', ');
+    d.slotFree = false;
+    renderDcim();
+    _dcSlotPickDraw();
+}
+
+//: A qué se enchufa lo que cuelga: los puertos que se ven por fuera. Los de datos delante y
+//: detrás, y las tomas de corriente — un alimentador va a una toma y no a una ranura de memoria.
+const _DC_OUTER_FAMS = ['front-ports', 'rear-ports', 'power-ports', 'console-ports'];
+
+//: De qué familia son los huecos de una clase de pieza, cuando su clase lo decide sola.
+//:
+//: Un conector de panel va en un hueco del frente o del trasero y en ningún otro sitio. No es
+//: «lo de dentro» ni «lo que cuelga», que son las dos listas de siempre, así que sin esto habría
+//: que mentir en `mount` —decir que va por fuera— para que le ofrecieran su sitio. Una tabla y
+//: no un `if`: la siguiente clase con sitio propio se añade aquí y no en tres condiciones.
+const _DC_KIND_FAMS = {jack: ['front-ports', 'rear-ports']};
+
+/** Dónde puede ir lo que se está editando: **las bahías si va dentro, los puertos si cuelga**.
+ *
+ *  Son dos listas distintas y no una filtrada, porque son dos preguntas: un DIMM va en una
+ *  ranura de la placa y un adaptador va enchufado a algo que se ve. Ofrecer las bahías a un
+ *  alimentador es ofrecerle sitios donde no cabe.
+ *
+ *  Vacío si no hay plantilla abierta —esto también sale en la ficha de un equipo— o si no
+ *  declaró ninguno con nombre. */
+function _dcCompSlots() {
+    // De la plantilla si hay una abierta, y si no del MODELO del equipo. Es la misma pregunta
+    // —qué huecos tiene esto— contestada por quien la sepa, y mirando solo la plantilla se
+    // quedaba sin contestar justo donde más falta hace: un panel de parcheo no nace de ninguna
+    // plantilla —no tiene estándar de compra ni componentes que estampar— así que en su ficha
+    // nunca había lista y siempre había que teclear el nombre del hueco.
+    const b = ((_dcBuild || {}).build) || ((_dcParts || {}).model) || null;
+    if (!b || typeof _dcBuildBays !== 'function') return [];
+    const d = _dcCompDraft || {};
+    const fuera = String(d.mount || '') === 'external';
+    const fams = _DC_KIND_FAMS[String(d.kind || '')]
+        || (fuera ? _DC_OUTER_FAMS : (_DC_BAY_FAMS || []));
+    // Con su familia pegada: un nombre suelto no dice de qué cara es, y «USB-A 1» delante y
+    // «USB-A 1» detrás son dos puertos distintos con el mismo rótulo.
+    let lista = [];
+    fams.forEach(fam => {
+        // Nombrados si el modelo los nombró, y NUMERADOS a partir del recuento si solo dijo
+        // cuántos. «Tiene veinticuatro huecos y no sé cómo se llaman» no es «no tiene ninguno»,
+        // y era lo segundo lo que pasaba: un panel escrito a mano dice el número —eso es lo que
+        // pide el formulario del catálogo— y no los nombres, así que se quedaba sin lista y con
+        // una caja de texto, que es de donde salen tres nombres para el mismo hueco.
+        //
+        // Con los mismos nombres que siembra el editor de plantillas, y por la misma función:
+        // dos que numeren igual acaban numerando distinto, y entonces el hueco 7 de la
+        // plantilla y el 7 del equipo dejan de ser el mismo.
+        let bahias = _dcBuildBays(b, fam);
+        if (!bahias.length && typeof _dcBaySeed === 'function') bahias = _dcBaySeed(b, fam);
+        bahias.forEach(x => lista.push({name: x.name, type: x.type, fam: fam,
+                                        gen: x.gen, signals: x.signals,
+                                        volts: x.volts, watts: x.watts}));
+    });
+    return lista;
+}
+
+function _dcCompBox(k, etiqueta, ancho, tipo) {
+    const d = _dcCompDraft || {};
+    return `<label class="ss-fs-2 text-muted">${esc(etiqueta)}
+        <input class="form-control form-control-sm" style="max-width:${ancho}"
+               type="${escAttr(tipo || 'text')}" ${tipo === 'number' ? 'min="1"' : ''}
+               value="${escAttr(String(d[k] === undefined ? '' : d[k]))}"
+               oninput="_dcCompDraft['${k}']=this.value"
+               onkeydown="if(event.key==='Enter')_dcCompSave()"></label>`;
+}
+
+/** Guardar. El sitio decide la ruta y a qué se vuelve; lo que se manda es lo mismo — y cuando
+ *  viene del catálogo se manda **el identificador**, porque la marca, el nombre y el tamaño los
+ *  resuelve el servidor: si los copiara cada pantalla, dos caminos escribirían dos cosas
+ *  distintas de la misma pieza y el segundo tardaría meses en descubrirse. */
+async function _dcCompSave() {
+    const d = _dcCompDraft;
+    if (!d) return;
+    const cuerpo = {kind: d.kind || 'other', slot: d.slot || '', qty: Number(d.qty) || 1,
+                    mount: String(d.mount || ''),
+                    type_uid: d.type_uid || ''};
+    if (!d.type_uid) cuerpo.kit_qty = Math.max(1, Number(d.kit_qty) || 1);
+    if (!d.type_uid) {
+        cuerpo.brand = d.brand || '';
+        cuerpo.model = d.model || '';
+        cuerpo.size = d.size || '';
+    }
+    let r;
+    if (d.where === 'build') {
+        const b = ((_dcBuild || {}).build || {}).uid || '';
+        if (!b) return;
+        r = d.uid
+            ? await _dcimSend('PUT',
+                `/api/v1/dcim/build-parts/${encodeURIComponent(d.uid)}`, cuerpo)
+            : await _dcimSend('POST',
+                `/api/v1/dcim/builds/${encodeURIComponent(b)}/parts`, cuerpo);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcCompDraft = null;
+        // Dejando la ficha donde estaba: releerla la devuelve a la primera pestaña, y quien
+        // acaba de añadir un adaptador en «Elementos externos» se encontraba en «Resumen» sin
+        // haber navegado, con la lista que venía de tocar fuera de la vista.
+        return _dcBuildReopen(b);
+    }
+    if (!_dcParts) return;
+    cuerpo.item_uid = _dcParts.item;
+    cuerpo.serial = d.serial || '';
+    r = d.uid
+        ? await _dcimSend('PUT', `/api/v1/dcim/parts/${encodeURIComponent(d.uid)}`, cuerpo)
+        : await _dcimSend('POST', '/api/v1/dcim/parts', cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcCompDraft = null;
+    _dcPartsOpen(_dcParts.item);
+}
+
+function _dcPartDrop(uid, nombre) {
+    showConfirmModal(tf('dcim_part_drop_q', nombre || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/parts/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcPartsOpen(_dcParts.item);
+    });
+}

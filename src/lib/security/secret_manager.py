@@ -33,6 +33,7 @@ ENC_PREFIX = 'enc:'
 # key set via the ``keys=`` parameter of the functions below.
 ENCRYPT_KEYS: frozenset[str] = frozenset({
     'password', 'ssh_password', 'token', 'secret',
+    'api_key',              # Freshservice API key (Basic auth: opens the ticket system)
     'bind_password',        # LDAP service-account password
     'client_secret',        # OIDC client secret
     'sp_key',               # SAML2 SP private key
@@ -44,6 +45,11 @@ ENCRYPT_KEYS: frozenset[str] = frozenset({
     'gmail_refresh_token',  # Email Gmail refresh token
     'webhook_url',          # Teams channel Incoming Webhook URL (embeds a secret token)
     'bot_app_password',     # Teams Bot Framework app password/secret
+    # The Google Maps Platform key for the site map's tiles. Encrypted like the rest — but
+    # what that protects is the panel, not the key: it travels inside every tile URL because
+    # that is how their Map Tiles API works, so anybody who can open the map can read it. It is
+    # protected by restricting it in Google's console, and the field's hint says so.
+    'dcim_map_google_key',
     # GitHub personal token for MIB imports. A core secret since the setting became one:
     # it used to be encrypted because the SNMP module declared it `secret` in its schema,
     # and a module's declaration stops applying the moment the setting leaves the module.

@@ -82,7 +82,7 @@ class Watchful(ModuleBase):
     @staticmethod
     def _compose_target(server: str, port, path: str = '') -> str:
         """Build the request target (host[:port][/path], scheme-less) from the
-        host-centric fields.  The scheme is applied separately by ``_web_request``.
+        device-centric fields.  The scheme is applied separately by ``_web_request``.
 
         * ``port`` is appended only when it is a non-standard port — 80/443 are
           implied by the scheme and omitted, as is a blank/0 port.
@@ -110,7 +110,7 @@ class Watchful(ModuleBase):
 
     def _web_check(self, name: str) -> None:
         it = self._resolved_item(name)
-        # Host-centric: a host's address fills 'server'; 'port'/'path' compose the
+        # Device-centric: a device's address fills 'server'; 'port'/'path' compose the
         # target.  Legacy items keep the address in 'url' (pre-server/port split) —
         # honoured as a fallback so existing checks keep working until re-saved.
         server = (it.get('server', '') or '').strip() or (it.get('url', '') or '').strip()
@@ -170,7 +170,7 @@ class Watchful(ModuleBase):
         """
         target = url if '://' in url else f'{scheme}://{url}'
         # SSRF guard: block non-HTTP(S) schemes and link-local/metadata targets.
-        # Private/internal hosts are intentionally allowed (legitimate monitoring).
+        # Private/internal devices are intentionally allowed (legitimate monitoring).
         from lib.security.net_guard import validate_external_url  # noqa: PLC0415
         _reason = validate_external_url(target)
         if _reason:
@@ -213,7 +213,7 @@ class Watchful(ModuleBase):
         Receives the item fields from the UI form and runs a live request.
         Returns {"ok": bool, "message": str}.
         """
-        # Compose from server/port/path (host-centric).  Fall back to legacy 'url'
+        # Compose from server/port/path (device-centric).  Fall back to legacy 'url'
         # and then to _item_key (the item's dict key, injected by the action
         # handler) so older configs and key-as-address checks still test.
         server = ((config.get('server') or '').strip()

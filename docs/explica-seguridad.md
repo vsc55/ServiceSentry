@@ -748,7 +748,7 @@ El cliente JS detecta el 401 mediante un poll de `/api/v1/me` cada 20 segundos y
 
 ## Control de Acceso Basado en Roles (RBAC)
 
-> El **catálogo completo** de permisos (76 flags), roles integrados, roles personalizados y
+> El **catálogo completo** de permisos (93 flags), roles integrados, roles personalizados y
 > grupos es la fuente única en **[ref-permisos.md](ref-permisos.md)**. Esta sección cubre solo
 > las **propiedades de seguridad** del RBAC.
 
@@ -757,18 +757,18 @@ El cliente JS detecta el 401 mediante un poll de `/api/v1/me` cada 20 segundos y
 Además de los flags globales existen **tres familias dinámicas**, cada una con `.view`/`.add`/`.edit`/`.delete`, otorgables por entidad concreta desde el editor de roles:
 
 - `module.<nombre>.*` — por módulo watchful.
-- `server.<uid>.*` — por host/servidor concreto (`is_server_perm`).
+- `server.<uid>.*` — por dispositivo/servidor concreto (`is_server_perm`).
 - `cluster.<uid>.*` — por cluster multi-bind concreto (`is_cluster_perm`).
 
 La autorización por-servidor/cluster se resuelve en `lib/core/modules/authz.py` a partir del
-`host_uid`/`host_uids` del ítem; las globales (`servers_*`, `clusters_*`) conceden acceso a
+`device_uid`/`device_uids` del ítem; las globales (`devices_*`, `clusters_*`) conceden acceso a
 todos.
 
-**Cambiar la atadura es cambiar dos hosts.** Un alta se autoriza contra el host destino y una
-baja contra el de origen, pero una **modificación** que mueve el check de un host a otro exige
+**Cambiar la atadura es cambiar dos dispositivos.** Un alta se autoriza contra el dispositivo destino y una
+baja contra el de origen, pero una **modificación** que mueve el check de un dispositivo a otro exige
 permiso sobre **los dos**. Autorizar sólo el destino —lo que se hacía hasta la auditoría del
 2026-08-15— convertía `server.<uid>.edit` en la única escritura que alcanzaba fuera de sus
-hosts: se podía traer el check de cualquier otro al propio, y el que se quedaba sin monitorizar
+dispositivos: se podía traer el check de cualquier otro al propio, y el que se quedaba sin monitorizar
 era el otro. Guardas en `tests/unit/test_modules_authz.py` (8). Definidas en `lib/core/permissions/` (el catálogo; la resolución efectiva vive en
 `lib/core/permissions/mixin.py`).
 
@@ -864,7 +864,7 @@ Un no-admin con los permisos `users_edit`, `roles_edit`, `groups_edit`, `config_
 
 Los tests de regresión de seguridad están centralizados en `src/tests/integration/test_security_regressions.py`. Cada clase cubre un fix específico — si un refactor futuro rompe alguno, la propiedad de seguridad correspondiente está comprometida.
 
-Además, `src/tests/e2e/test_security_live.py` **arranca el panel real contra MySQL, MariaDB y PostgreSQL** y repite los ataques de un auditor: inyección SQL en cada campo de string (un 500 delataría una consulta concatenada; una tabla-canario que sobrevive prueba que ningún `DROP` se coló), la matriz de control de acceso (anónimo no lee nada, un viewer no muta nada, un `users_add` ni acuña admin ni se auto-asciende) y el **IDOR por host** (un permiso sobre el host A no alcanza al B por su UID). Es opt-in (`SS_TEST_*_HOST`) y cada guarda está comprobado desactivándolo y viendo fallar el test — ver [ref-tests.md](ref-tests.md) §143. En navegador, `test_ui_playwright.py` verifica que un payload almacenado **no se ejecuta** al pintarse (canarios `onerror`/`onload`, no `<script>`), que la cookie de sesión no es legible desde JavaScript y que el panel no se deja meter en un iframe.
+Además, `src/tests/e2e/test_security_live.py` **arranca el panel real contra MySQL, MariaDB y PostgreSQL** y repite los ataques de un auditor: inyección SQL en cada campo de string (un 500 delataría una consulta concatenada; una tabla-canario que sobrevive prueba que ningún `DROP` se coló), la matriz de control de acceso (anónimo no lee nada, un viewer no muta nada, un `users_add` ni acuña admin ni se auto-asciende) y el **IDOR por dispositivo** (un permiso sobre el dispositivo A no alcanza al B por su UID). Es opt-in (`SS_TEST_*_HOST`) y cada guarda está comprobado desactivándolo y viendo fallar el test — ver [ref-tests.md](ref-tests.md) §143. En navegador, `test_ui_playwright.py` verifica que un payload almacenado **no se ejecuta** al pintarse (canarios `onerror`/`onload`, no `<script>`), que la cookie de sesión no es legible desde JavaScript y que el panel no se deja meter en un iframe.
 
 **Tests generales de RBAC** (`test_wa_roles.py`, `test_wa_users.py`):
 
@@ -1327,7 +1327,7 @@ previa a publicación; las bases de datos de desarrollo se reescribieron a mano)
 
 ### Cuentas de servicio (`login_enabled`)
 
-Una cuenta puede estar **activa y no iniciar sesión nunca**: posee hosts, recibe notificaciones y
+Una cuenta puede estar **activa y no iniciar sesión nunca**: posee dispositivos, recibe notificaciones y
 aparece en auditoría, pero nadie entra con ella. Es un interruptor aparte de `enabled` a
 propósito: desactivar una cuenta para que no entre también la invalida como propietaria y como
 destinataria, que no es lo que significa «esta identidad es de un script».
@@ -1444,7 +1444,7 @@ GET  /api/v1/notify/templates   GET /api/v1/notify/html-templates
 Hay dos rutas de ejecución remota, con políticas de host distintas:
 
 - La clase `Exec` (`lib/system/exe.py`) usa `paramiko.RejectPolicy`: los hosts que no estén en `~/.ssh/known_hosts` son rechazados (no se aceptan hosts desconocidos).
-- La ejecución **host-aware de los módulos** (`ModuleBase.host_exec` → `lib/core/hosts/ssh_client.py::connect_host`) es configurable **por host** mediante `ssh_verify_host`: con `True` carga `known_hosts` y aplica `RejectPolicy`; con `False` (**por defecto**) usa `AutoAddPolicy`, es decir **acepta hosts desconocidos** (añade su clave en el primer contacto). Para entornos sensibles, activa `ssh_verify_host` en el perfil del host.
+- La ejecución **consciente del dispositivo de los módulos** (`ModuleBase.device_exec` → `lib/core/devices/ssh_client.py::connect_host`) es configurable **por dispositivo** mediante `ssh_verify_host`: con `True` carga `known_hosts` y aplica `RejectPolicy`; con `False` (**por defecto**) usa `AutoAddPolicy`, es decir **acepta hosts desconocidos** (añade su clave en el primer contacto). Para entornos sensibles, activa `ssh_verify_host` en el perfil del dispositivo.
 
 ---
 

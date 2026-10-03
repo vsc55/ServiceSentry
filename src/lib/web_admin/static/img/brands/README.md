@@ -32,7 +32,7 @@ trazado y falla si la declarada es mayor.
    (el núcleo rechaza cualquier otra cosa antes de que llegue a una URL).
 2. Decláralo donde corresponda, y hay **dos sitios** porque hay dos preguntas distintas.
 
-   El perfil **es** de un fabricante —casa con su árbol de OIDs, así que un aparato que lo
+   El perfil **es** de un fabricante —casa con su árbol de OIDs, así que un dispositivo que lo
    contesta lo hizo él— y lo dice al lado del `match`:
 
    ```json
@@ -50,7 +50,7 @@ trazado y falla si la declarada es mayor.
    ```
 
    `any` son las cadenas que significan ese fabricante, buscadas **dentro** de lo que dijo el
-   aparato y en minúsculas: una máquina dice «HP», la siguiente «Hewlett-Packard» y la tercera
+   dispositivo y en minúsculas: una máquina dice «HP», la siguiente «Hewlett-Packard» y la tercera
    «HPE ProLiant», y son el mismo rack.
 
 Un fabricante para el que no haya fichero **no es un error**: se dibuja su nombre sobre su

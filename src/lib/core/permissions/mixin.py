@@ -165,7 +165,7 @@ class _PermissionsMixin:
     def _purge_scoped_permissions(self, prefix: str, ids) -> int:
         """Drop ``{prefix}.{id}.*`` from every custom role after those resources are gone.
 
-        Called from the delete paths of the resources themselves (a host, a module, a
+        Called from the delete paths of the resources themselves (a device, a module, a
         cluster item), which is the only place that knows exactly what disappeared —
         pruning on load would mean deciding what is "unknown" from a store that might
         simply have failed to read.
@@ -286,9 +286,9 @@ class _PermissionsMixin:
             return True
         return f'module.{module_name}.{action}' in perms
 
-    def _has_server_permission(self, host_uid: str, action: str) -> bool:
+    def _has_server_permission(self, device_uid: str, action: str) -> bool:
         """Return True if the current user may perform *action* (view/edit/delete)
-        on server *host_uid* — via the global ``servers_*`` permission or a
+        on server *device_uid* — via the global ``servers_*`` permission or a
         per-server ``server.{uid}.{action}`` override."""
         perms = self._get_session_permissions()
         _global = {'view': 'devices_view', 'add': 'devices_add',
@@ -296,4 +296,4 @@ class _PermissionsMixin:
         global_perm = _global.get(action)
         if global_perm and global_perm in perms:
             return True
-        return bool(host_uid) and f'server.{host_uid}.{action}' in perms
+        return bool(device_uid) and f'server.{device_uid}.{action}' in perms

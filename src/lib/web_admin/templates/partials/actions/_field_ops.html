@@ -169,8 +169,8 @@ function _bulkDeleteItems(collPath, target) {
  *  `checks`), and those are keyed by uid on the server too — a clone that kept them would
  *  collide once per nested check instead of once per item.
  *
- *  Only the exact name `uid` goes. `cred_uid` and `host_uid` are REFERENCES, not identity:
- *  the copy should go on pointing at the same credential and the same host, which is why
+ *  Only the exact name `uid` goes. `cred_uid` and `device_uid` are REFERENCES, not identity:
+ *  the copy should go on pointing at the same credential and the same device, which is why
  *  this cannot be "delete anything ending in uid". No module schema declares a plain `uid`
  *  field of its own, so the name is unambiguous. */
 function _stripItemUids(value) {
@@ -389,10 +389,10 @@ function editItemLabel(target, pathStr, parentPathStr) {
     const sch = ITEM_SCHEMAS[_schemaKeyOf(parentPathStr)] || {};
     const titleField = sch['__check_title_field__'];
     if (!titleField) return;
-    const input = document.getElementById('hostLabelInput');
+    const input = document.getElementById('deviceLabelInput');
     input.value = String(item[titleField] || '');
-    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('hostLabelModal'));
-    document.getElementById('btnHostLabelOk').onclick = () => {
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('deviceLabelModal'));
+    document.getElementById('btnDeviceLabelOk').onclick = () => {
         updateField(target, pathStr + '|' + titleField, input.value.trim());
         modal.hide();
         target === 'modules' ? _renderModulesSurface() : renderConfig();

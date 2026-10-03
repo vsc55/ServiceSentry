@@ -145,10 +145,10 @@ function _infraLinkLayout(map) {
     // extent and the panel all have to read ONE set of positions, or a wire is drawn to where
     // a box is not.
     const boxes = Object.values(pos);
-    const host = boxes.find(p => (p.node || {}).wan) || null;
-    const wan = host ? (ssCanvasMoved(_LNK_SVG)[_LNK_WAN]
-                        || {x: host.x + (_LNK.BOX_W - _LNK_WAN_W) / 2,
-                            y: host.y - _LNK.BOX_H - 34}) : null;
+    const device = boxes.find(p => (p.node || {}).wan) || null;
+    const wan = device ? (ssCanvasMoved(_LNK_SVG)[_LNK_WAN]
+                        || {x: device.x + (_LNK.BOX_W - _LNK_WAN_W) / 2,
+                            y: device.y - _LNK.BOX_H - 34}) : null;
     const ext = ssCanvasPlace(_LNK_SVG, boxes.concat(wan
                                   ? [{uid: _LNK_WAN, x: wan.x, y: wan.y,
                                       w: _LNK_WAN_W, h: _LNK.BOX_H - 8}]
@@ -157,7 +157,7 @@ function _infraLinkLayout(map) {
                               {pad: _LNK.PAD, width: widest + _LNK.PAD,
                                height: y0 - _LNK.BOX_H + _LNK.PAD});
     return {
-        pos, edges, loose, wan, wanHost: host,
+        pos, edges, loose, wan, wanDevice: device,
         x: ext.x, y: ext.y, width: ext.width, height: ext.height,
     };
 }
@@ -238,7 +238,7 @@ function _infraLinkWires(L) {
  *  is the fastest thing on a diagram to read, and this map is about how equipment is wired,
  *  which is a question about kinds of equipment.
  *
- *  Through `hostTypeIcon`, so it is the SAME icon as in the list, the cards and the device
+ *  Through `deviceTypeIcon`, so it is the SAME icon as in the list, the cards and the device
  *  page: a second table of "what a NAS looks like" is how one screen ends up disagreeing with
  *  the others about a device somebody just retyped.
  *
@@ -247,9 +247,9 @@ function _infraLinkWires(L) {
  *  parser for something the browser already knows how to do.
  */
 function _infraLinkBox(p, links) {
-    const tone = hostStateColor(p.node.status);
+    const tone = deviceStateColor(p.node.status);
     const type = p.node.kind || '';
-    const label = type ? hostTypeLabel(type) : t('host_type_unset');
+    const label = type ? deviceTypeLabel(type) : t('device_type_unset');
     return `<g class="ss-grab" data-node="${escAttr(p.uid)}"
              onpointerenter="_infraLinkNodeHover(${jsStr(p.uid)})"
              onpointerleave="_infraLinkNodeHover('')">
@@ -261,7 +261,7 @@ function _infraLinkBox(p, links) {
         <foreignObject x="${p.x + 12}" y="${p.y + 13}" width="18" height="18">
             <div xmlns="http://www.w3.org/1999/xhtml"
                  style="font-size:15px;line-height:1;color:var(--bs-secondary-color)">
-                <i class="bi ${escAttr(hostTypeIcon(type))}"></i></div>
+                <i class="bi ${escAttr(deviceTypeIcon(type))}"></i></div>
         </foreignObject>
         <text x="${p.x + 36}" y="${p.y + 19}" font-size="12" font-weight="600"
               fill="currentColor">${esc(_infraMapClip(p.node.name || p.uid, 19))}</text>
@@ -395,14 +395,14 @@ function _infraLinkWanAt(L) { return (L || {}).wan || null; }
  *  cable it is.
  */
 function _infraLinkWanCard(L) {
-    const host = _infraLinkWanHost(L);
-    if (!host) return '';
-    const port = String(host.node.wan || '');
+    const device = _infraLinkWanDevice(L);
+    if (!device) return '';
+    const port = String(device.node.wan || '');
     // The cable this map already knows about that port, if any: the way out usually leaves by
     // a port with nothing of ours at the far end, and then there is no cable to show.
     const i = (L.edges || []).findIndex(
-        e => (e.from === host.uid && e.fromPort === port)
-          || (e.to === host.uid && e.toPort === port));
+        e => (e.from === device.uid && e.fromPort === port)
+          || (e.to === device.uid && e.toPort === port));
     const row = (icon, label, value) => (value
         ? `<div class="d-flex align-items-baseline gap-2">
                <i class="bi ${escAttr(icon)} text-muted ss-fs-2"></i>
@@ -417,19 +417,19 @@ function _infraLinkWanCard(L) {
             <span class="fw-semibold">${esc(t('infra_map_outside'))}</span>
         </div>
         <div class="d-flex flex-column gap-1">
-            ${row('bi-hdd-network', t('col_host_name'),
+            ${row('bi-hdd-network', t('col_device_name'),
                   `<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
-                       onclick="infraOpen(${jsStr(host.uid)})">${
-                       esc(host.node.name || host.uid)}</button>`)}
+                       onclick="infraOpen(${jsStr(device.uid)})">${
+                       esc(device.node.name || device.uid)}</button>`)}
             ${row('bi-globe2', t('infra_watch_wan'), code(port))}
             ${row('bi-hdd-network', t('infra_link_public_ip'),
-                  ssPublicIp(host.node.addresses) ? code(ssPublicIp(host.node.addresses))
+                  ssPublicIp(device.node.addresses) ? code(ssPublicIp(device.node.addresses))
                                                   : `<span class="text-muted">${
                                                       esc(t('infra_link_no_public'))}</span>`)}
             ${row('bi-signpost-2', t('infra_link_gateway'),
-                  host.node.gateway ? code(host.node.gateway) : '')}
+                  device.node.gateway ? code(device.node.gateway) : '')}
             ${row('bi-diagram-2', t('infra_link_networks'),
-                  (host.node.networks || []).map(code).join(' '))}
+                  (device.node.networks || []).map(code).join(' '))}
             ${i >= 0 ? row('bi-plugin', t('infra_link_cables'),
                            `<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2"
                                 onclick="_infraLinkPin(${i})">${esc(t('infra_link_open'))}</button>`)
@@ -439,29 +439,29 @@ function _infraLinkWanCard(L) {
 }
 
 /** The machine somebody declared the line out on, as it sits on this picture. */
-function _infraLinkWanHost(L) { return (L || {}).wanHost || null; }
+function _infraLinkWanDevice(L) { return (L || {}).wanDevice || null; }
 
 /** …and the box, plus the cable from it. Drawn only when somebody DECLARED one: this map
  *  shows what is plugged into what, and which of those cables is the line is the one thing it
  *  cannot see for itself. Deducing it from a next hop would be a different claim drawn as
  *  this one. */
 function _infraLinkWanBox(L) {
-    const host = _infraLinkWanHost(L);
+    const device = _infraLinkWanDevice(L);
     const at = _infraLinkWanAt(L);
-    if (!host || !at) return '';
+    if (!device || !at) return '';
     const h = _LNK.BOX_H - 8;
     // Through the same maker as every other cable here: which sides it leaves by is the same
     // question, and answering it twice is how the line out ended up assuming the way out is
     // always above — dragged below the machine it left downwards, looped back up and hooked
     // into the top of a box it was underneath. Reported from the screen.
     const d = ssCanvasCable({x: at.x, y: at.y, w: _LNK_WAN_W, h: h},
-                              {x: host.x, y: host.y, w: _LNK.BOX_W, h: _LNK.BOX_H});
-    return `<path data-a="${escAttr(_LNK_WAN)}" data-b="${escAttr(host.uid)}" d="${d}"
+                              {x: device.x, y: device.y, w: _LNK.BOX_W, h: _LNK.BOX_H});
+    return `<path data-a="${escAttr(_LNK_WAN)}" data-b="${escAttr(device.uid)}" d="${d}"
                   fill="none" ${ssCanvasStroke(_LNK_STROKE.wan)}></path>
         <g data-node="${escAttr(_LNK_WAN)}" class="ss-grab"
            onpointerenter="_infraLinkNodeHover(${jsStr(_LNK_WAN)})"
            onpointerleave="_infraLinkNodeHover('')">
-            <title>${escAttr(tf('infra_link_wan', host.node.wan))}</title>
+            <title>${escAttr(tf('infra_link_wan', device.node.wan))}</title>
             <rect x="${at.x}" y="${at.y}" width="${_LNK_WAN_W}" height="${h}" rx="7"
                   fill="var(--bs-body-bg)" stroke="var(--bs-info)" stroke-width="1.5"
                   stroke-dasharray="4 3"></rect>
@@ -733,7 +733,7 @@ function _infraLinkPanelHtml() {
         // from which side has a port name on it.
         const told = (e.by || []).includes(uid);
         return `<div class="d-flex align-items-center gap-2 flex-wrap py-1">
-            <i class="bi ${escAttr(hostTypeIcon(n.kind || ''))} text-muted"></i>
+            <i class="bi ${escAttr(deviceTypeIcon(n.kind || ''))} text-muted"></i>
             <button class="btn btn-sm btn-secondary py-0 px-2" style="min-width:9rem"
                     onclick="infraOpen(${jsStr(uid)})">${esc(n.name || uid)}</button>
             ${claim === 'one' ? `<span class="badge fw-normal ss-fs-2
@@ -767,7 +767,7 @@ function _infraLinkPanelHtml() {
  *  are about THIS map — how many cables it has, and that a box here can also be dragged. */
 function _infraLinkNodeHtml(L, uid) {
     const n = (L.pos[uid] || {}).node || {};
-    return ssHostCard(n, uid, {
+    return ssDeviceCard(n, uid, {
         hint: 'infra_link_node_hint',
         cables: (L.edges || []).filter(e => e.from === uid || e.to === uid).length,
     });

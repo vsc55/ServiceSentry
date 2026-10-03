@@ -37,7 +37,7 @@ LoginResult = namedtuple('LoginResult', 'user source username flash_key reason')
 class _AuthMixin:
     """Local credential verification and brute-force lockout.
 
-    Relies on the host WebAdmin for the user store (``self._users`` /
+    Relies on the device WebAdmin for the user store (``self._users`` /
     ``self._persist_users``), the lockout thresholds (``self._LOCKOUT_*``) and the
     debug printer (``self._dbg``)."""
 

@@ -164,7 +164,7 @@ function _historySaveField(field) {
 // ── Compare mode (multi-series overlay) ────────────────────────────────────────
 // A series is comparable only when its module declares a numeric __history__
 // field; the overlay restricts members to the SAME field+unit so the Y axis is
-// meaningful (e.g. ping latency_ms across several hosts).
+// meaningful (e.g. ping latency_ms across several devices).
 function _historyMetricKey(s) {
     const c = s?.history_cfg || {};
     const numeric = (typeof c.field === 'string' && c.field)

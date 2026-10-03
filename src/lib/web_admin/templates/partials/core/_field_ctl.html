@@ -2,7 +2,7 @@
    The shared field-control skeleton, and the adapter registry underneath it.
 
    ONE implementation of "a switch / a select / a number box / a secret / a textarea", used by
-   the Modules tab and by the host edit modal alike. The two keep their data in different
+   the Modules tab and by the device edit modal alike. The two keep their data in different
    places, so a widget reaching for one of them directly could only ever serve that one: an
    ADAPTER (`registerFieldAdapter`) says how to read and write a value, and the widget is
    written against that instead.
@@ -14,8 +14,8 @@
 // ── Field-value adapter registry ────────────────────────────────────────────
 // Maps a field key → {get,set} so stateful widgets (currently the removable
 // chips multi-field) bind to ANY data model.  The Modules tab registers an
-// adapter backed by modulesData/updateField; the host edit modal one backed by
-// _hostChecks/_setHostCheckField.  Both then drive ONE widget implementation,
+// adapter backed by modulesData/updateField; the device edit modal one backed by
+// _deviceChecks/_setDeviceCheckField.  Both then drive ONE widget implementation,
 // so a change to the widget applies to both places.
 const _fieldAdapters = {};
 function registerFieldAdapter(key, get, set) { _fieldAdapters[key] = { get, set }; }
@@ -23,11 +23,11 @@ function _faGet(key) { const a = _fieldAdapters[key]; return a ? (a.get() || '')
 function _faSet(key, v) { const a = _fieldAdapters[key]; if (a) a.set(v); }
 
 
-// ── Shared field-control skeleton (single source for Modules + host modal) ────
+// ── Shared field-control skeleton (single source for Modules + device modal) ────
 // Assembles the input-group markup for one control kind.  Data-model wiring
 // (onchange / oninput JS, options, value, placeholder, trailing buttons) is
 // computed by the caller and passed in, so the markup itself lives in one place
-// and any visual change applies to both the Modules tab and the host modal.
+// and any visual change applies to both the Modules tab and the device modal.
 //   spec = { kind:'switch'|'select'|'number'|'secret'|'textarea'|'multi'|'text',
 //            value, onChange, onInput, key, trailing, optionsHtml,
 //            inputType, inputCls, inputAttrs, rows, placeholder, textareaVal }

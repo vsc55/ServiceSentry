@@ -385,7 +385,7 @@ def lint_mib(text: str, filename: str = '') -> list[dict]:
             })
 
     # ── An OID hung off a parent that is nowhere ─────────────────────────────
-    # `host OBJECT IDENTIFIER ::= { mib-2 25 }` with no `mib-2` in the IMPORTS. pysmi answers
+    # `device OBJECT IDENTIFIER ::= { mib-2 25 }` with no `mib-2` in the IMPORTS. pysmi answers
     # "Unknown parent symbol: mib_2" — under the name it mangled, in a module it names by the
     # FILE, and with nothing pointing at the import that is missing. The MIB set shipped with
     # Windows 10 Pro 22H2 has exactly this in its HOST-RESOURCES-MIB.

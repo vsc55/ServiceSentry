@@ -408,6 +408,76 @@ def is_due_calendar(now, days, at: str, last_ts: float | None) -> bool:
     return float(last_ts) < due.timestamp()
 
 
+def next_due_at(task: dict, now_ts: float, last_ts: float | None) -> float:
+    """Cuándo le toca a *task* la próxima vez — en segundos de época, o 0 si nunca.
+
+    Existe porque la pantalla de Temporizadores restaba dos cifras que miden cosas distintas y
+    llamaba «atrasado» al resultado. El hilo de copias despierta cada diez minutos; el arriendo
+    lo toma **sólo cuando hay trabajo**, así que su marca es «la última copia», no «la última
+    vuelta». «Última copia + diez minutos» es un instante que no significa nada, y en cuanto la
+    programación es más espaciada que el tic —una copia por hora, o diaria— queda en el pasado
+    siempre: la pantalla decía «atrasado 41 min» de un trabajo que había copiado a su hora.
+
+    Lo que hace falta saber no es cuándo despierta el hilo, es **cuándo pasará algo**. Y eso lo
+    sabe la programación, que es la que decide.
+
+    Si ya le tocaba y no ha corrido, devuelve *now_ts*: le toca ahora, que es verdad y no un
+    pasado inventado.
+    """
+    import datetime as _dt      # noqa: PLC0415
+    if task_is_due(task, now_ts, last_ts):
+        return float(now_ts)
+    if str((task or {}).get('mode') or MODE_INTERVAL) == MODE_CALENDAR:
+        # La siguiente ventana después de la última que pasó: `last_due_at` mira hacia atrás,
+        # y de ahí se camina hacia delante hasta dar con el próximo día marcado.
+        ahora = _dt.datetime.fromtimestamp(now_ts)
+        hour, minute = parse_at((task or {}).get('at'))
+        quiere = normalise_days((task or {}).get('days'))
+        for adelante in range(0, 8):
+            cand = (ahora + _dt.timedelta(days=adelante)).replace(
+                hour=hour, minute=minute, second=0, microsecond=0)
+            if cand <= ahora:
+                continue
+            if not quiere or cand.weekday() in quiere:
+                return cand.timestamp()
+        return 0.0
+    try:
+        horas = float((task or {}).get('every_hours') or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if horas <= 0 or last_ts is None:
+        return 0.0
+    return float(last_ts) + horas * 3600.0
+
+
+def due_span(task: dict, now_ts: float) -> float:
+    """Cada cuánto le toca a *task*, en segundos — su periodo, no el del hilo.
+
+    Existe por la otra mitad del mismo fallo: la fila de la pantalla enseñaba «cada 10 min»
+    —el tic del hilo— junto a un «siguiente» sacado de la programación. Dos relojes en una
+    misma fila: quien la lee no puede saber qué va a pasar, y la barra de avance, dibujada
+    sobre los diez minutos mientras faltaba una hora, se llenaba y se quedaba llena.
+
+    Por intervalo es el intervalo. Por calendario es la distancia entre la ventana que acaba de
+    pasar y la siguiente, que para «cada día a las 3» es un día y para «lunes y jueves» son tres
+    días o cuatro según dónde se mire — que es la verdad de ese calendario, no un promedio.
+    """
+    import datetime as _dt      # noqa: PLC0415
+    if str((task or {}).get('mode') or MODE_INTERVAL) == MODE_CALENDAR:
+        ahora = _dt.datetime.fromtimestamp(now_ts)
+        previa = last_due_at(ahora, (task or {}).get('days'), (task or {}).get('at'))
+        siguiente = next_due_at(dict(task or {}, mode=MODE_CALENDAR), now_ts,
+                                previa.timestamp() if previa else None)
+        if previa and siguiente:
+            return max(0.0, siguiente - previa.timestamp())
+        return 86400.0
+    try:
+        horas = float((task or {}).get('every_hours') or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return horas * 3600.0 if horas > 0 else 0.0
+
+
 def task_is_due(task: dict, now_ts: float, last_ts: float | None) -> bool:
     """Is *task* due — whichever way it says when.
 

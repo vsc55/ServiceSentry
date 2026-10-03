@@ -187,10 +187,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             self._module_secret_fields = ModuleBase.discover_secret_fields(modules_dir)
         except Exception:  # pylint: disable=broad-except
             self._module_secret_fields = set()
-        # Combined key sets: core secrets + the host's built-in SSH secrets +
+        # Combined key sets: core secrets + the device's built-in SSH secrets +
         # module-declared secret fields.
         try:
-            from lib.core.hosts.profiles import CORE_SSH_SECRET_FIELDS  # noqa: PLC0415
+            from lib.core.devices.profiles import CORE_SSH_SECRET_FIELDS  # noqa: PLC0415
         except Exception:  # pylint: disable=broad-except
             CORE_SSH_SECRET_FIELDS = frozenset()
         # Secret fields declared by credential-type schemas (built-in ssh +
@@ -249,7 +249,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # it invisible: the only install affected is the one nobody has restarted yet.
         # Idempotent — `_create_app` calls it again and gets the same key.
         self._load_or_create_secret_key()
-        self._init_entity_store()  # DB-backed entities (users/groups/roles/sessions/hosts)
+        self._init_entity_store()  # DB-backed entities (users/groups/roles/sessions/devices)
         # History + check-state stores reuse the single shared connector (created
         # in _init_entity_store) — must come AFTER it, else they'd each open their
         # own DB connection via their create() factory.
@@ -292,7 +292,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
             # Start the heartbeat FIRST when we host the service, so its leader lease
             # is acquired before start_at_boot launches the scheduler/worker — else a
             # leader-gated first cycle could be skipped (not yet leader).  Only when
-            # this process actually hosts it (state != 'external'; a dedicated
+            # this process actually devices it (state != 'external'; a dedicated
             # container owns the external ones).  Best-effort; never fatal.
             try:
                 if _svc.status().get('state') != 'external':
@@ -312,6 +312,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # certs nearing expiry (opt-in via certs|notify_expiry).
         self._start_cert_scanner()
         self._start_secret_scanner()
+        # Cabling-drift scanner: periodically contrast the declared cables against what the
+        # devices report over LLDP and alert on a moved patch cord or an undeclared link
+        # (opt-in via dcim|notify_cabling). Proposes; never writes to the inventory.
+        self._start_cable_scanner()
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -321,6 +325,18 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
     def app(self) -> Flask:
         """Flask application instance (useful for testing)."""
         return self._app
+
+    def _lang(self) -> str:
+        """En qué idioma se está hablando ahora mismo.
+
+        Lo que `_t` deduce para traducir una clave, pero como dato: hace falta donde el texto
+        NO viene de la tabla de traducciones —los básicos del catálogo lo traen dentro de su
+        JSON— y donde se copia a una fila que va a sobrevivir a la sesión que la escribió.
+        """
+        try:
+            return str(session.get('lang', self._DEFAULT_LANG))
+        except RuntimeError:           # working outside of request context
+            return str(self._DEFAULT_LANG)
 
     def _t(self, key: str, *args: str) -> str:
         """Return the translated string for *key* in the session language.
@@ -484,9 +500,32 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
         # Secure from it would silently break login over plain HTTP (a Secure cookie is
         # dropped by the browser on http://).
         app.config['SESSION_COOKIE_SECURE'] = bool(self._SECURE_COOKIES or self._FORCE_HTTPS)
-        # Cap request bodies (JSON APIs + SCIM) so an oversized payload can't exhaust
-        # memory before parsing.
-        app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024   # 8 MiB
+        # Cap request bodies. **Two numbers, because they answer two questions.**
+        #
+        # `MAX_CONTENT_LENGTH` is the biggest thing this application accepts at all, and it
+        # has to be at least what its own upload routes say they take — the catalogue zip
+        # declares 64 MB and a model's attachments 32 MB. It was 8 MiB, so a twenty-meg
+        # firmware died in the framework before reaching the route that was going to accept
+        # it: no check of ours ran, no message, a bare 413. Two limits for one question are
+        # two answers, and the one that wins is not the one written where somebody looks.
+        #
+        # `MAX_FORM_MEMORY_SIZE` is the one that does the protecting the old comment claimed:
+        # in a multipart body the FILES spool to a temporary file on disk, and what is held
+        # whole in memory is the non-file fields. That is what must stay small, and it now
+        # says so by name instead of falling out of the other number by accident.
+        app.config['MAX_CONTENT_LENGTH'] = 80 * 1024 * 1024      # 80 MiB
+        app.config['MAX_FORM_MEMORY_SIZE'] = 1024 * 1024         # 1 MiB of non-file fields
+
+        # Y un cuerpo por encima del tope contesta en JSON. La página de Werkzeug es correcta
+        # y es HTML: quien la recibe es una pantalla que esperaba `{'error': …}` y enseña
+        # «error inesperado», que no dice nada de lo único que había que decir.
+        @app.errorhandler(413)
+        def _demasiado_grande(_err):
+            cabe = int(app.config.get('MAX_CONTENT_LENGTH') or 0) // (1024 * 1024)
+            texto = self._t('upload_too_big', str(cabe))
+            if request.path.startswith('/api/'):
+                return jsonify({'error': texto}), 413
+            return texto, 413
 
         if self._PROXY_COUNT > 0:
             app.wsgi_app = ProxyFix(

@@ -223,7 +223,7 @@ def register(app, wa):
         tok_uid = wa._api_token_store.create(
             user_uid=uid, name=name, token_id=token_id, token_hash=token_hash,
             permissions=tok_svc.encode_permissions(perms), expires_at=expires_at,
-            created=datetime.now(timezone.utc).isoformat(), created_by=username)
+            created_at=datetime.now(timezone.utc).isoformat(), created_by=username)
         # The detail names the token and what it may do — never the token itself. An audit
         # log that carries a live credential is a second place to steal it from.
         wa._audit('api_token_created', detail={
@@ -285,10 +285,10 @@ def register(app, wa):
         if not old or old.get('revoked'):
             return jsonify({'error': wa._t('api_token_not_found')}), 404
         span_days = 0
-        if old.get('expires_at') and old.get('created'):
+        if old.get('expires_at') and old.get('created_at'):
             try:
                 span = (datetime.fromisoformat(old['expires_at'])
-                        - datetime.fromisoformat(old['created']))
+                        - datetime.fromisoformat(old['created_at']))
                 span_days = max(1, min(MAX_EXPIRY_DAYS, span.days))
             except ValueError:
                 span_days = 0
@@ -303,7 +303,7 @@ def register(app, wa):
         wa._api_token_store.create(
             user_uid=my_uid, name=name, token_id=token_id, token_hash=token_hash,
             permissions=old.get('permissions', '[]'), expires_at=expires_at,
-            created=datetime.now(timezone.utc).isoformat(), created_by=_username)
+            created_at=datetime.now(timezone.utc).isoformat(), created_by=_username)
         wa._audit('api_token_rotated', detail={
             'name': name, 'token_id': token_id,
             'replaces': old.get('token_id', ''),
@@ -481,7 +481,7 @@ def register(app, wa):
         wa._api_token_store.create(
             user_uid=uid, name=name, token_id=token_id, token_hash=token_hash,
             permissions=tok_svc.encode_permissions(perms), expires_at=expires_at,
-            created=datetime.now(timezone.utc).isoformat(), created_by=actor)
+            created_at=datetime.now(timezone.utc).isoformat(), created_by=actor)
         # Its own event, and a loud one: this is somebody handing out a credential that is not
         # theirs, which is a different act from minting one for yourself and has to be findable
         # as such.
@@ -625,10 +625,10 @@ def register(app, wa):
         if err:
             return err
         span_days = 0
-        if old.get('expires_at') and old.get('created'):
+        if old.get('expires_at') and old.get('created_at'):
             try:
                 span = (datetime.fromisoformat(old['expires_at'])
-                        - datetime.fromisoformat(old['created']))
+                        - datetime.fromisoformat(old['created_at']))
                 span_days = max(1, min(MAX_EXPIRY_DAYS, span.days))
             except ValueError:
                 span_days = 0
@@ -642,7 +642,7 @@ def register(app, wa):
         wa._api_token_store.create(
             user_uid=old.get('user_uid', ''), name=name, token_id=token_id,
             token_hash=token_hash, permissions=old.get('permissions', '[]'),
-            expires_at=expires_at, created=datetime.now(timezone.utc).isoformat(),
+            expires_at=expires_at, created_at=datetime.now(timezone.utc).isoformat(),
             created_by=actor)
         wa._audit('api_token_rotated_by_admin', detail={
             'username': owner, 'name': name, 'token_id': token_id,

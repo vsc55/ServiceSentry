@@ -18,17 +18,17 @@
                                "uptime": {"unit": "s"},
                                "memory": {"unit": "MB"},
                                "queries": {"unit": ""}}},
-    "__host_profile__": [
+    "__device_profile__": [
         {"key": "db", "address_field": "host", "fields": []},
         {"key": "ssh", "address_field": "ssh_host"}
     ],
-    "__host_multiple__": true,
+    "__device_multiple__": true,
     "list": {
         "__test__": "/api/v1/modules/watchfuls/datastore/test_connection",
         "__check_title_field__": "label",
         "__title_editable__": true,
         "__discovery_uid_key__": true,
-        "__discovery_label_template__": "{host} - {db_type}",
+        "__discovery_label_template__": "{device} - {db_type}",
         "__new_item_fields__": ["label", "db_type"],
         "__field_order__": [
             "enabled", "label", "conn_type", "db_type",

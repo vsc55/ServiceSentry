@@ -23,6 +23,7 @@ import uuid
 
 from lib import __version__
 from lib.core.backup import create as _create
+from lib.core.backup import parts as _parts
 from lib.core.backup import restore as _restore
 from lib.core.backup.archive import _log
 from lib.debug.debug_level import DebugLevel
@@ -147,7 +148,7 @@ class _JobsMixin:
                 parts=list(parts or []), include_secrets=bool(include_secrets),
                 actor=actor, app_version=__version__, progress_cb=job.update,
                 engine=str(getattr(wa._db_connector, 'driver', '') or ''),
-                connectors=_connectors(wa),
+                connectors=_connectors(wa), dirs=_parts.configured_dirs(wa),
             )
             if not res.get('ok'):
                 job['error'] = str(res.get('message', ''))[:500]
@@ -192,6 +193,7 @@ class _JobsMixin:
                 config_dir=getattr(wa, '_config_dir', '') or '',
                 backup_dir=str(getattr(wa, '_BACKUP_DIR', '') or ''),
                 progress_cb=job.update, connectors=_connectors(wa),
+                dirs=_parts.configured_dirs(wa),
             )
             job.update({'tables': res.get('tables', {}), 'skipped': res.get('skipped', {}),
                         # So the dialog can say "these tables, the rest left as they are"

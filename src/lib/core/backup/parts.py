@@ -15,6 +15,8 @@ Imports nothing from its siblings: it names tables, it does not open archives.
 
 from __future__ import annotations
 
+import os
+
 
 # Engine bookkeeping. Never dumped, never restored: they describe the storage, not the install,
 # and writing SQLite's own statistics into a MySQL restore is at best noise.
@@ -30,7 +32,13 @@ PARTS: tuple = (
      'label_key': 'backup_part_core'},
     {'id': 'config_file', 'kind': 'file', 'default': True, 'required': False,
      'label_key': 'backup_part_config_file'},
-    {'id': 'history', 'kind': 'db', 'tables': ('history', 'check_state'),
+    # Las cuatro tablas del historial van juntas y no son opcionales por separado. La muestra
+    # guarda un `series_id` y nada más, y sus medidas viven en `history_fact` apuntando a un
+    # `field_id`: una copia con las muestras y sin las series restaura cien mil filas que no
+    # saben de qué son, y una con los hechos y sin el diccionario, cien mil números sin nombre.
+    # No falla al restaurar — falla al abrir la primera gráfica, que es la forma silenciosa.
+    {'id': 'history', 'kind': 'db',
+     'tables': ('history', 'history_series', 'history_fact', 'history_field', 'check_state'),
      'default': False, 'required': False, 'label_key': 'backup_part_history'},
     {'id': 'audit', 'kind': 'db', 'tables': ('audit',),
      'default': False, 'required': False, 'label_key': 'backup_part_audit'},
@@ -40,11 +48,78 @@ PARTS: tuple = (
     # says so in no way an operator notices until a restore comes back empty.
     {'id': 'syslog', 'kind': 'db', 'tables': ('syslog', 'syslog_drops'), 'db': 'syslog',
      'default': False, 'required': False, 'label_key': 'backup_part_syslog'},
+    # A directory of the CORE's own — the first one. Floor plans are files somebody uploaded,
+    # and the database holds only their names: a copy without them restores rooms whose plans
+    # are gone. On by default because they are small and irreplaceable, which is the pair of
+    # properties that decides this.
+    #
+    # `dir_attr` is what makes the setting `web_admin|dcim_media_dir` reach this far: the
+    # folder can be moved to another disk, and a copy that resolved `dcim_media` against
+    # `var_dir` anyway would archive the empty default. Named here rather than at the call
+    # site so the next configurable folder is one key, not another branch — see
+    # `configured_dirs`.
+    {'id': 'dcim_media', 'kind': 'dir', 'dir': 'dcim_media', 'dir_attr': '_DCIM_MEDIA_DIR',
+     'default': True, 'required': False, 'label_key': 'backup_part_dcim_media'},
 )
 
 PART_IDS: tuple = tuple(p['id'] for p in PARTS)
 _CLAIMED_TABLES: frozenset = frozenset(
     t for p in PARTS if p['kind'] == 'db' and p['tables'] for t in p['tables'])
+
+
+def dir_parts() -> list:
+    """Every part that is a DIRECTORY under ``var_dir`` — the core's own, then the modules'.
+
+    One list because the two are copied and restored identically: a folder in, a folder out.
+    The loops that do it used to ask for the modules' alone, which was right while the core had
+    no directories of its own and stopped being right the day it did — and it would have failed
+    the way this domain's failures do, by simply not copying something and saying nothing.
+    """
+    core = [{'id': p['id'], 'dir': p['dir'], 'default': p['default'],
+             'label_i18n': {}, 'label_key': p['label_key']}
+            for p in PARTS if p.get('kind') == 'dir']
+    return core + module_parts()
+
+
+def configured_dirs(holder) -> dict:
+    """``{part_id: path}`` for every core part whose folder has been MOVED.
+
+    The other half of :func:`part_dir`, which has always known how to honour an override and
+    was never given one: `dirs` reached `create_backup` and `restore_backup` as a parameter
+    nobody filled in, so an install with `web_admin|dcim_media_dir` set copied
+    `<var_dir>/dcim_media` — the default folder, empty — and a restore would have put the
+    floor plans back into a directory the panel does not read.
+
+    *holder* is whatever object carries the resolved settings (the web admin), read by the
+    attribute the part declares. Only the ones actually set are returned: an empty setting
+    means "the default", and `part_dir` already knows what that is.
+
+    Reading it on every call and not once at start-up is the same rule the setting itself
+    follows — moving the folder must not need a restart.
+    """
+    out: dict = {}
+    for p in PARTS:
+        attr = p.get('dir_attr')
+        if not attr:
+            continue
+        path = str(getattr(holder, attr, '') or '').strip()
+        if path:
+            out[p['id']] = path
+    return out
+
+
+def part_dir(part: dict, var_dir: str, dirs=None) -> str:
+    """Dónde vive de verdad la carpeta de una parte.
+
+    Casi siempre `<var_dir>/<lo declarado>`, que es lo que vale para todo lo de un módulo. Pero
+    una parte del núcleo puede ser **configurable** —la de los planos lo es— y entonces resolver
+    contra `var_dir` copiaría la carpeta por defecto, vacía, y lo diría como un éxito. Un fallo
+    de copia que solo se ve en una restauración es el peor que hay.
+    """
+    override = str((dirs or {}).get(part.get('id')) or '').strip()
+    if override:
+        return override
+    return os.path.join(var_dir, *str(part.get('dir') or '').split('/'))
 
 
 def module_parts() -> list:
@@ -106,7 +181,7 @@ def conn_for(part: dict, connector, connectors=None):
 
 
 def tables_by_part(connector, parts: set, connectors=None) -> list:
-    """``[(part_id, [tables])]`` for the chosen parts, in catalogue order.
+    """``[(part_id, [tables], error)]`` for the chosen parts, in catalogue order.
 
     Kept alongside the flat list because the copy is REPORTED by part — that is the unit an
     operator ticked — while it is written table by table. Deriving one from the other at the
@@ -114,30 +189,44 @@ def tables_by_part(connector, parts: set, connectors=None) -> list:
 
     Each part is asked of ITS OWN database. `core` is "everything nobody else claimed" *in the
     system database*, so a table that lives elsewhere is never swept into it by accident.
+
+    *error* is why a part has no tables when the reason is that **its database could not be
+    asked** — and it is the third element of the tuple rather than an empty list because the
+    two cases are not the same thing and the copy has to be able to tell them apart. Measured
+    before it was written: with `syslog_db` pointing at a server that was down, the part came
+    back with zero tables, the manifest said `ok`, and the copy was indistinguishable from one
+    taken on an install that never had a syslog table. Found at restore time, which is the one
+    moment nobody can afford to find out.
+
+    Zero tables WITHOUT an error stays a success on purpose: a part whose tables do not exist
+    has nothing to copy, and calling that a failure would put a red mark on every install that
+    never turned the feature on.
     """
     seen: set = set()
     out: list = []
     for p in PARTS:
         if p['kind'] != 'db' or p['id'] not in parts:
             continue
+        fallo = ''
         try:
             present = [t for t in conn_for(p, connector, connectors).list_tables()
                        if t not in INTERNAL_TABLES]
-        except Exception:      # pylint: disable=broad-except
+        except Exception as exc:      # pylint: disable=broad-except
             # A second database that cannot be reached costs its own part and nothing else:
-            # the copy of everything else is still worth having, and the empty part says so.
-            present = []
+            # the copy of everything else is still worth having. What it must not cost is the
+            # truth about itself.
+            present, fallo = [], str(exc)[:200] or exc.__class__.__name__
         tabs = ([t for t in present if t not in _CLAIMED_TABLES] if p['tables'] is None
                 else [t for t in p['tables'] if t in present])
         tabs = [t for t in tabs if t not in seen]
         seen.update(tabs)
-        out.append((p['id'], sorted(tabs)))
+        out.append((p['id'], sorted(tabs), fallo))
     return out
 
 
 def tables_for(connector, parts: set, connectors=None) -> list:
     """Which tables the chosen *parts* cover, in a stable order."""
-    return sorted({t for _pid, tabs in tables_by_part(connector, parts, connectors)
+    return sorted({t for _pid, tabs, _err in tables_by_part(connector, parts, connectors)
                    for t in tabs})
 
 
@@ -149,8 +238,8 @@ def tables_in_archive_by_part(in_zip: list, want: set) -> list:
     kept as the one place that decides so the two directions cannot disagree about which
     tables a part means.
 
-    Takes the TABLE NAMES an archive holds, not its member list: turning ``db/hosts.json``
-    into ``hosts`` is the layout's business (`archive.member_tables`), and this module's job
+    Takes the TABLE NAMES an archive holds, not its member list: turning ``db/devices.json``
+    into ``devices`` is the layout's business (`archive.member_tables`), and this module's job
     is the grouping. Kept apart so neither has to know the other's rule.
     """
     seen: set = set()

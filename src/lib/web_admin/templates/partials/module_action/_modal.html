@@ -9,7 +9,7 @@
 
    openModuleActionModal(action, values, onResult)
      action   = {id, url, icon, label_i18n|label, result, inputs:[…]}
-     values   = initial input values (defaults + prefill, e.g. a check's host)
+     values   = initial input values (defaults + prefill, e.g. a check's device)
      onResult = fn(res.data)  // res.data: {ok, message, fields, …}
    ================================================================ */
 let _maState = { action: null, values: {}, onResult: null };
@@ -99,8 +99,8 @@ async function _maRun() {
 
 // ── Open a module's credential-type action from a check's __actions__ button ──
 // The action (and its inputs) is declared once in the module's __credential__;
-// the check button just references it by id. Prefills the host (FQDN/IP) we
-// already have (the item's host, or its bound server's address) and writes the
+// the check button just references it by id. Prefills the device (FQDN/IP) we
+// already have (the item's device, or its bound server's address) and writes the
 // returned token fields back into the item.
 function _openCredActionFromCheck(btn, actionId) {
     const pathStr = btn.dataset.actionPath;
@@ -112,24 +112,24 @@ function _openCredActionFromCheck(btn, actionId) {
     if (!action) { showToast(t('connection_error'), 'danger'); return; }
 
     const item = getPath(modulesData, parts) || {};
-    // The primary bound host: a single host_uid, or the first of a multi-host
-    // (cluster) binding (host_uids). Provisioning targets one node.
-    let primaryUid = String(item.host_uid || '').trim();
-    if (!primaryUid && Array.isArray(item.host_uids) && item.host_uids.length) {
-        primaryUid = String(item.host_uids[0] || '').trim();
+    // The primary bound device: a single device_uid, or the first of a multi-device
+    // (cluster) binding (device_uids). Provisioning targets one node.
+    let primaryUid = String(item.device_uid || '').trim();
+    if (!primaryUid && Array.isArray(item.device_uids) && item.device_uids.length) {
+        primaryUid = String(item.device_uids[0] || '').trim();
     }
-    let host = String(item.host || '').trim();
-    if (host) host = host.split(/[,\s]+/)[0];   // first address if a failover list
-    if (!host && primaryUid && typeof hostsList === 'function') {
-        const h = hostsList().find(x => x.uid === primaryUid);
-        host = (h && h.address) || '';
+    let device = String(item.host || '').trim();
+    if (device) device = device.split(/[,\s]+/)[0];   // first address if a failover list
+    if (!device && primaryUid && typeof devicesList === 'function') {
+        const h = devicesList().find(x => x.uid === primaryUid);
+        device = (h && h.address) || '';
     }
-    // Carry host_uid so the server resolves the bound host's SSH profile
-    // (address + port + credential) — the same SSH path the host-aware checks
+    // Carry device_uid so the server resolves the bound device's SSH profile
+    // (address + port + credential) — the same SSH path the device-aware checks
     // use, so provisioning reaches the node exactly like they do.
     const init = {};
-    if (host) init.host = host;
-    if (primaryUid) init.host_uid = primaryUid;
+    if (device) init.host = device;
+    if (primaryUid) init.device_uid = primaryUid;
     openModuleActionModal(action, init, (data) => {
         const fields = (data && data.fields) || {};
         Object.entries(fields).forEach(([k, v]) => {

@@ -471,7 +471,7 @@ def render_summary(
         )
 
     def _section(heading, accent, rows):
-        # Group by item (all of a host's rows together), items alphabetical.
+        # Group by item (all of a device's rows together), items alphabetical.
         rows = sorted(rows, key=lambda e: ((e.get('item', '') or '').lower(),
                                            (e.get('module', '') or '').lower()))
         body, last = '', None

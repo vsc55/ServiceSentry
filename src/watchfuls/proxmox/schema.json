@@ -8,9 +8,9 @@
         "timeout": {"type": "int",  "default": 10, "min": 0, "inherit_blank": true, "max": 300}
     },
     "__history__": {"field": null, "unit": null, "label": "Proxmox VE"},
-    "__host_profile__": {"key": "proxmox", "address_field": "host", "fields": ["host", "port"]},
-    "__host_multiple__": false,
-    "__host_multiple_bind__": true,
+    "__device_profile__": {"key": "proxmox", "address_field": "host", "fields": ["host", "port"]},
+    "__device_multiple__": false,
+    "__device_multiple_bind__": true,
     "__overview_widget__": {"icon": "bi-diagram-3", "multi": true, "perm": "modules_view"},
     "__credential__": {
         "type": "proxmox_auth",
@@ -59,7 +59,7 @@
         "__edit_tabs__": [
             {"id": "general", "general": true,      "icon": "bi-info-circle", "groups": ["general"]},
             {"id": "setup",                         "icon": "bi-hdd-network", "groups": ["connection", "auth"]},
-            {"id": "hosts",   "member_table": true, "icon": "bi-hdd-stack",   "groups": []},
+            {"id": "devices",   "member_table": true, "icon": "bi-hdd-stack",   "groups": []},
             {"id": "monitoring",                    "icon": "bi-activity",    "groups": ["checks", "alerts"]},
             {"id": "lastdata", "last_data": true,   "icon": "bi-clock-history", "groups": []},
             {"id": "logs",     "logs": true, "perm": "syslog_view", "icon": "bi-card-list", "groups": []}

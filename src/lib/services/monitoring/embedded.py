@@ -4,7 +4,7 @@
 
 Composes the shared scheduler (:class:`_MonitoringMixin`) with the host context
 (:class:`_EmbeddedBase`).  Owns its own persistent ``Monitor`` and scheduler
-thread; shares the host's ``_check_lock`` so the scheduler and an on-demand check
+thread; shares the device's ``_check_lock`` so the scheduler and an on-demand check
 never overlap.
 """
 

@@ -187,7 +187,9 @@ class _HooksMixin:
         # Security headers (defense-in-depth; policy in lib.security.headers).
         # An admin-defined frame-ancestors allowlist (+ optional Teams hosts) opens
         # framing to those origins so the Teams personal tab can embed the panel.
-        apply_security_headers(response, frame_ancestors=self._frame_ancestors_list or None)
+        apply_security_headers(response,
+                               frame_ancestors=self._frame_ancestors_list or None,
+                               img_origins=self._image_origins() or None)
         # fail2ban: count a 401/403 as an offense for the client IP (logic in
         # _IpBanMixin; skips gate blocks and requests that already counted).
         self._ipban_capture(response)

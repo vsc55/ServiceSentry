@@ -108,7 +108,7 @@ class TestTheyShowWhatTheTableShows:
         which is the bug the `kind` column already had once."""
         src = _group()
         assert '_infraCell(' in src
-        assert 'hostTypeLabel' in _read(os.path.join(INFRA, '_list.html'))
+        assert 'deviceTypeLabel' in _read(os.path.join(INFRA, '_list.html'))
         # …and the list's own table delegates to the same one rather than keeping a copy.
         assert '_infraCell(uid, colId)' in _read(os.path.join(INFRA, '_list.html'))
 
@@ -619,11 +619,11 @@ class TestAPortOnTheMapGoesToThePort:
 
     def test_a_box_says_what_kind_of_thing_it_is(self):
         """A rack drawn as eight identical boxes makes you read every name to find the switch.
-        Through `hostTypeIcon`, so it is the same icon as the list, the cards and the device
+        Through `deviceTypeIcon`, so it is the same icon as the list, the cards and the device
         page — a second table of "what a NAS looks like" is how one screen ends up disagreeing
         with the others about a device somebody just retyped."""
         box = self._links().split('function _infraLinkBox(')[1].split(chr(10) + '}')[0]
-        assert 'hostTypeIcon(' in box
+        assert 'deviceTypeIcon(' in box
         assert 'foreignObject' in box, 'SVG has no <i>, and these are font glyphs'
 
     def test_the_port_waits_for_the_payload(self):
@@ -712,17 +712,17 @@ class TestABoxIsAlsoSomethingToREAD:
 
     def _card(self):
         return _read(os.path.join(INFRA, '_canvas.html')).split(
-            'function ssHostCard(')[1].split(chr(10) + '}')[0]
+            'function ssDeviceCard(')[1].split(chr(10) + '}')[0]
 
     def test_a_box_reads_from_what_is_already_in_hand(self):
         body = self._card()
         assert 'apiGet' not in body and 'fetch(' not in body, 'a request per hover'
-        assert '_infraHosts' in body, 'the list screen already holds the rest of the row'
+        assert '_infraDevices' in body, 'the list screen already holds the rest of the row'
 
     def test_and_says_the_things_somebody_hovers_a_box_to_learn(self):
         body = self._card()
         for key in ('infra_link_addresses', 'infra_link_networks', 'infra_link_gateway',
-                    'infra_link_cables', 'col_host_os', 'host_type'):
+                    'infra_link_cables', 'col_device_os', 'device_type'):
             assert key in body, key
         for lang in ('en_EN', 'es_ES'):
             text = _read(os.path.join(LANGS, lang + '.py'))
@@ -755,7 +755,7 @@ class TestABoxIsAlsoSomethingToREAD:
         """"Which machine is that box" is asked of either picture, and two answers to it are
         two things to keep in agreement."""
         for f in ('_links.html', '_map.html'):
-            assert 'ssHostCard(' in _read(os.path.join(INFRA, f)), f
+            assert 'ssDeviceCard(' in _read(os.path.join(INFRA, f)), f
 
 
 class TestTheBoxesCanBePutWhereTheyBelong:

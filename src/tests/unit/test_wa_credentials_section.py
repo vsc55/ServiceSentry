@@ -4,7 +4,7 @@
 
 It arrived under Infrastructure when the catalogue was reusable SSH identities, and the
 comment that justified the move said exactly that. It stopped being true: half the catalogue
-is now Entra ID app registrations — reached by tenant, with no host behind them at all — and
+is now Entra ID app registrations — reached by tenant, with no device behind them at all — and
 the flows built around them (rotate a secret, grant and consent the roles an app is missing)
 never touch a machine.
 
@@ -12,7 +12,7 @@ Two structural reasons, beyond the population:
 
 * its neighbours under Infrastructure, Servers and Clusters, are things you MONITOR. A
   credential is not monitored; it is the secret you reach other things WITH.
-* its consumers are spread across hosts, modules and providers alike, so hanging it off any
+* its consumers are spread across devices, modules and providers alike, so hanging it off any
   one of them asserts a belonging that is not real.
 
 Not Access either: that is users, groups, roles and sessions — who may enter the panel.
@@ -100,13 +100,13 @@ class TestNothingStillPointsAtTheOldSubTab:
         assert "'#tab-credentials'" in nav.group(1)
         assert "'sub'" not in nav.group(1)
 
-    def test_a_stored_sub_tab_from_before_does_not_strand_infrastructure(self):
-        """Someone whose last visit left #subtab-credentials saved must still land on a
-        visible Infrastructure sub-tab, not on none at all."""
+    def test_the_registry_has_no_sub_tabs_left_to_strand_anybody_on(self):
+        """Someone whose last visit left #subtab-credentials saved used to need rescuing onto
+        a visible Infrastructure sub-tab. The registry's pane is gone — its list lives in
+        Infrastructure, its classes and clusters are catalogue entries — so there is no stored
+        sub-tab left to restore, and nothing must still try."""
         src = _strip_comments(_read(FEATURES))
-        block = src[src.index('_savedInfra'):]
-        assert "closest('li')?.style.display !== 'none'" in block
-        assert 'btn-subtab-srv-hosts' in block
+        assert '_savedInfra' not in src and 'ss_active_subtab_infra' not in src
 
 
 class TestTheGateTravelledWithIt:
@@ -121,9 +121,10 @@ class TestTheGateTravelledWithIt:
         """Before, holding only credentials_view opened Infrastructure — for its sake. With
         the section gone from there, that would be an empty tab."""
         src = _strip_comments(_read(FEATURES))
-        line = re.search(r'serversLi\.style\.display = \(([^)]*)\)', src)
-        assert line, 'the Infrastructure gate is gone — this guard needs updating'
-        assert 'hasAnyCredential' not in line.group(1)
+        for li in ('devtypesLi', 'clustersLi'):
+            line = re.search(li + r'\.style\.display = ([^;]*);', src)
+            assert line, f'the {li} gate is gone — this guard needs updating'
+            assert 'hasAnyCredential' not in line.group(1)
 
     def test_it_still_loads_on_access(self):
         """The list is fetched when the section opens, not at boot: a panel that loaded

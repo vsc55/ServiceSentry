@@ -10,7 +10,7 @@
         "threads":  {"type": "int",  "default": 5, "min": 0, "inherit_blank": true, "max": 50}
     },
     "__history__": {"field": null, "unit": null, "label": "SNMP Check"},
-    "__host_profile__": {"key": "snmp", "address_field": "host"},
+    "__device_profile__": {"key": "snmp", "address_field": "host"},
     "servers": {
         "__new_item_fields__": ["host", "community"],
         "__field_order__": ["enabled", "host", "port", "timeout", "retries", "version", "community", "snmpv3_username", "snmpv3_auth_key", "snmpv3_priv_key", "snmpv3_auth_protocol", "snmpv3_priv_protocol", "device_profiles", "checks"],

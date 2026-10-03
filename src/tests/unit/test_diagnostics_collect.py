@@ -52,7 +52,7 @@ class TestTheSystemBlockAlwaysAnswers:
 
 class TestWhetherThisIsAContainer:
     """The row the rest of the page is read against: a path that "exists" is inside an image
-    that may be recreated tomorrow, and free disk is the layer's and not the host's."""
+    that may be recreated tomorrow, and free disk is the layer's and not the device's."""
 
     @pytest.mark.parametrize('marker', ['/.dockerenv', '/run/.containerenv'])
     def test_each_runtime_leaves_its_own_marker(self, marker, monkeypatch):
@@ -322,6 +322,41 @@ class TestStorageAsksTheOsAndWritesNothing:
         diag.storage({'var_dir': target})
         assert not os.path.exists(target)
         assert os.listdir(str(tmp_path)) == []
+
+    def test_una_carpeta_que_aun_no_se_ha_usado_no_es_una_averia(self, tmp_path):
+        """Casi todas se crean al guardar la primera cosa. Un rojo «no existe» en cada una
+        diría que una instalación recién puesta está rota — y la que más se mira es
+        precisamente la de las copias, que no existe hasta la primera copia."""
+        falta = os.path.join(str(tmp_path), 'todavia-no')
+        [fila] = diag.storage([{'key': 'backup_dir', 'path': falta, 'on_demand': True}])
+        assert fila['exists'] is False
+        assert fila['on_demand'] is True, 'la pantalla no puede distinguir los dos casos'
+        [dura] = diag.storage([{'key': 'var_dir', 'path': falta}])
+        assert dura['on_demand'] is False
+
+    def test_la_carpeta_de_solo_lectura_se_declara_como_tal(self, tmp_path):
+        """La de los módulos se lee y no se escribe, y en un contenedor montarla de sólo
+        lectura es lo deseable: avisar de eso es un ámbar en toda instalación bien hecha."""
+        [fila] = diag.storage([{'key': 'modules_dir', 'path': str(tmp_path),
+                                'read_only': True}])
+        assert fila['read_only'] is True
+
+    def test_el_hueco_libre_se_mide_una_vez_por_disco(self, tmp_path):
+        """Todas suelen colgar de un mismo montaje, y repetir la misma barra en cada fila
+        entierra el caso que importa: una carpeta movida a un disco propio."""
+        otra = tmp_path / 'otra'
+        otra.mkdir()
+        filas = diag.storage([{'key': 'var_dir', 'path': str(tmp_path)},
+                              {'key': 'dcim_media', 'path': str(otra)}])
+        assert filas[0]['total_bytes'] > 0
+        assert filas[1]['total_bytes'] == 0, 'dos barras del mismo disco no son dos respuestas'
+
+    def test_y_la_etiqueta_que_trae_la_fila_se_conserva(self, tmp_path):
+        """Un módulo escribe el nombre de su carpeta en su propio fichero de idioma, que el
+        catálogo del panel no tiene: mandar la clave enseñaría `backup_part_mibs`."""
+        [fila] = diag.storage([{'key': 'mibs', 'path': str(tmp_path), 'label': 'MIBs SNMP'}])
+        assert fila['label'] == 'MIBs SNMP'
+        assert diag.storage({'var_dir': str(tmp_path)})[0]['label'] ==             '', 'sin etiqueta declarada la pone la pantalla, no el colector'
 
 
 class TestTheReportRenders:

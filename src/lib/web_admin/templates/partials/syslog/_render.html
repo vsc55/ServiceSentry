@@ -133,7 +133,7 @@ async function _loadSyslogStats() {
     const s = await apiGet('/api/v1/syslog/stats?' + _syslogQS().toString());
     if (!s) { el.innerHTML = ''; return; }
     el.dataset.loaded = '1';
-    const host = (s.by_host || []).map(x => ({ label: x.value || '—', count: x.count, cls: 'info', fk: x.value ? 'hostname' : '', fv: x.value }));
+    const host = (s.by_device || []).map(x => ({ label: x.value || '—', count: x.count, cls: 'info', fk: x.value ? 'hostname' : '', fv: x.value }));
     const appl = (s.by_app || []).map(x => ({ label: x.value || '—', count: x.count, cls: 'primary', fk: x.value ? 'app' : '', fv: x.value }));
     const sev  = (s.by_severity || []).map(x => ({ label: x.name, count: x.count, cls: _SYSLOG_SEV_CLS[x.value] || 'secondary', fk: 'severity', fv: x.value }));
     const fac  = (s.by_facility || []).map(x => ({ label: x.name, count: x.count, cls: 'secondary', fk: 'facility', fv: x.value }));

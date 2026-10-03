@@ -695,22 +695,22 @@ flowchart TD
 Prioridad completa de `moduleIcon` (con `config.icon` y fallback `__i18n__`/emoji)
 en [explica-i18n.md → Resolución de etiquetas](explica-i18n.md#resolución-de-etiquetas-en-el-navegador).
 
-### `__host_profile__`
+### `__device_profile__`
 
-Declara a qué **protocolo** se ata el check para heredar la conexión de un host del registro.
+Declara a qué **protocolo** se ata el check para heredar la conexión de un dispositivo del registro.
 Dict (o lista de dicts) con `{"key": <protocolo>, "address_field": <campo de dirección>}`. Lo
-resuelve `ModuleBase.resolve_host()`. Ver
-[explica-web-admin.md → Dispositivos](explica-web-admin.md#dispositivos-registro-de-hosts).
+resuelve `ModuleBase.resolve_device()`. Ver
+[explica-web-admin.md → Dispositivos](explica-web-admin.md#registro-de-dispositivos).
 
 ```json
-"__host_profile__": {"key": "snmp", "address_field": "host"}
+"__device_profile__": {"key": "snmp", "address_field": "host"}
 ```
 
 **No lleva `fields`** si el protocolo lo declara el core (`ssh`, `snmp`): *qué campos tiene*
-un protocolo no es del módulo, y `host_profile_specs()` los completa desde la declaración del
+un protocolo no es del módulo, y `device_profile_specs()` los completa desde la declaración del
 core. Once módulos los repetían —diez con los mismos siete de SSH— y el catálogo ya
 sobrescribía todas esas copias, así que una que se separase no cambiaba ningún formulario:
-cambiaba qué valores podía empujar un host atado sobre el check, sin decirlo.
+cambiaba qué valores podía empujar un dispositivo atado sobre el check, sin decirlo.
 
 `address_field` sí lo dice el módulo: **qué campo suyo** recibe la dirección es cosa suya
 (`web` la pone en `server`, SNMP en `host`). Entra automáticamente en lo que un check atado
@@ -732,7 +732,7 @@ copiarlos.
 }
 ```
 
-`__host_profile__` dice qué hereda un check **atado**; no pinta nada en el formulario de uno
+`__device_profile__` dice qué hereda un check **atado**; no pinta nada en el formulario de uno
 **sin atar**, y un check contra una IP suelta tiene que poder decir comunidad, versión y claves
 v3 por sí mismo. Eso era lo que obligaba a escribir los campos una segunda vez.
 
@@ -741,9 +741,9 @@ posición, y sus etiquetas y ayudas salen de la i18n del core por los mismos cam
 (`label_i18n` en el campo, `hints` a través de `__i18n__`). **El navegador recibe lo mismo que
 antes.** Un campo que la colección declare ella misma gana: la expansión nunca pisa.
 
-### `__host_multiple__`
+### `__device_multiple__`
 
-Bool. Si es `true`, el check puede vincularse a **varios hosts** (selección múltiple).
+Bool. Si es `true`, el check puede vincularse a **varios dispositivos** (selección múltiple).
 Por defecto `false`.
 
 Un campo numérico puede declarar `"unit_field": "<campo>"`: el selector de unidad se dibuja
@@ -790,7 +790,7 @@ y su panel. Por defecto, de primer nivel al lado de Overview, Historial y Syslog
 | `render` | `""` | Función JS que pinta la sección; el módulo la envía en su `web/_ui.html`. **Vacío = la pinta el renderizador genérico del core** a partir de `page_data`, y el módulo no necesita nada de frontend |
 | `refresh` | `""` | Acción de watchful que el botón de refresco en vivo invoca (debe estar en `WATCHFUL_ACTIONS`). Vacío = la página es solo caché |
 | `perm` | `modules_view` | Permiso que protege la ruta **y** la entrada de la barra lateral. Un watchful no posee flags propios, así que debe reutilizar uno existente |
-| `placement` | `section` | **Dónde** va la entrada. `section` = de primer nivel, que es lo correcto para algo que se **mira** (el estado de m365). `system` = dentro del acordeón del panel, que es donde vive lo que se **administra** (la biblioteca de MIBs, al lado de Servicios, Módulos y Credenciales). El core la coloca sin saber de quién es; todo lo demás —panel, permiso, cableado, vistas— es idéntico en las dos |
+| `placement` | `section` | **Dónde** va la entrada. `section` = de primer nivel, que es lo correcto para algo que se **mira** (el estado de m365). `catalog` = dentro del grupo **Catálogo**, donde viven los datos de referencia de la organización que se **administran** (Empresas, Tipos de dispositivo, Clústeres, Modelos, Plantillas, Credenciales, la biblioteca de MIBs). `system` = dentro de **Sistema**, la plataforma (Servicios, Módulos, Configuración, Acceso…). Un valor desconocido cae en `section`. El core la coloca sin saber de quién es; todo lo demás —panel, permiso, cableado, vistas— es idéntico en los tres |
 | `views` | `[]` | Las **vistas** de la sección. Con dos o más, la entrada de la barra lateral pasa a ser un padre con flyout y cada vista es un **sub-path** (`/module/m365/storage`): comparten panel, permiso y descriptor, y entre todas cuestan **una** ruta más. Con menos de dos se ignora — un padre con un solo hijo es un menú que gasta un clic. Independiente de `placement`: las vistas son de la sección, y dónde la dibuja la barra lateral no es propiedad de nada |
 
 **Cada vista** (`views[]`): `slug` (apto para URL, obligatorio), `icon`, `label` (clave en el
@@ -829,7 +829,7 @@ Usadas por la UI (lista/modal de descubrimiento), normalmente en `list`:
 | `__check_title_field__` | Campo que contiene la etiqueta visible del ítem (p. ej. `"label"`, `"process"`) |
 | `__title_editable__` | Bool: permite renombrar el ítem editando ese campo |
 | `__discovery_uid_key__` | Bool: la clave del ítem es un UUID opaco (no editable) |
-| `__discovery_label_template__` | Plantilla `{campo}` para construir la etiqueta de cada fila descubierta (p. ej. `"{host} - {db_type}"`) |
+| `__discovery_label_template__` | Plantilla `{campo}` para construir la etiqueta de cada fila descubierta (p. ej. `"{device} - {db_type}"`) |
 | `__discovery_inputs__` | Lista de controles de entrada extra en el modal de descubrimiento (filtros) |
 | `__discovery_value_field__` | Campo del resultado de descubrimiento con el que se rellena el ítem (en vez de la clave) |
 
@@ -1006,7 +1006,7 @@ o append-only usan un `id` autoincremental.
 
 ### Tablas del núcleo (`lib/core/*`) — BD principal
 
-Estado del panel: usuarios, grupos, roles, hosts, credenciales, configuración de
+Estado del panel: usuarios, grupos, roles, dispositivos, credenciales, configuración de
 módulos, auditoría, historial y los destinos de notificación por canal.
 
 | Tabla | PK | Columnas clave | Índices | Store |
@@ -1018,9 +1018,9 @@ módulos, auditoría, historial y los destinos de notificación por canal.
 | `roles` | `uid` | `name` (UNIQUE), `description`, `permissions` (JSON), `enabled`, auditoría | `idx_roles_name` (UNIQUE) | `core/roles/store.py` |
 | `sessions` | `token` | `uid` (id público), `user_uid`, `created`, `last_seen`, `ip`, `user_agent` | `idx_sessions_user_uid` | `core/sessions/store.py` |
 | `credentials` | `uid` | `name` (UNIQUE), `ctype`, `enabled`, `description`, `data` (JSON, secretos cifrados), auditoría | `idx_credentials_name` | `core/credentials/store.py` |
-| `hosts` | `uid` | `name` (UNIQUE), `address`, `kind`, `os`, `maintenance`, `virtual`, `device_type`, `tags` (JSON), `profiles` (JSON, secretos cifrados), `modules` (JSON), auditoría | `idx_hosts_name` | `core/hosts/store.py` |
+| `devices` | `uid` | `name` (UNIQUE), `address`, `kind`, `os`, `maintenance`, `virtual`, `device_type`, `tags` (JSON), `profiles` (JSON, secretos cifrados), `modules` (JSON), auditoría | `idx_devices_name` | `core/devices/stores/devices.py` |
 | `module_config` | `uid` | `module` (UNIQUE), `data` (JSON: campos de módulo + meta `__*__`), auditoría | `idx_module_config_module` | `core/modules/store.py` |
-| `module_config_items` | `uid` | `module_uid` → `module_config.uid`, `collection`, `host_uid` → `hosts.uid`, `label`, `enabled`, `data` (JSON), auditoría | `idx_module_config_items_moduid`, `idx_module_config_items_host` | `core/modules/store.py` |
+| `module_config_items` | `uid` | `module_uid` → `module_config.uid`, `collection`, `device_uid` → `hosts.uid`, `label`, `enabled`, `data` (JSON), auditoría | `idx_module_config_items_moduid`, `idx_module_config_items_device` | `core/modules/store.py` |
 | `config` | `uid` | `path` (UNIQUE, `section\|field`), `value` (JSON), auditoría | `idx_config_path` | `core/config/store.py` |
 | `audit` | `id` (auto) | `ts`, `event`, `user`, `ip`, `detail` (JSON) | `idx_audit_id` (DESC), `idx_audit_event` | `core/audit/store.py` |
 | `history` | `id` (auto) | `ts` (REAL), `module`, `item_uid`, `key`, `status`, `data` (JSON) | `idx_history_uid_ts`, `idx_history_mkts` | `core/history/store.py` |
@@ -1092,7 +1092,7 @@ erDiagram
     groups ||--o{ groups_roles : "group_uid"
     roles ||--o{ groups_roles : "role_uid"
     users ||--o{ sessions : "user_uid"
-    hosts ||--o{ module_config_items : "host_uid"
+    devices ||--o{ module_config_items : "device_uid"
     module_config ||--o{ module_config_items : "module_uid"
     module_config_items ||--o{ history : "item_uid"
     module_config_items ||--o{ check_state : "item_uid"

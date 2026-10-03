@@ -10,7 +10,7 @@ Routes registered by this file:
 
     GET    /api/v1/syslog              received messages (newest first)
     GET    /api/v1/syslog/stats        aggregate counts for dashboard charts
-    GET    /api/v1/syslog/facets       distinct hosts/sources/apps for filters
+    GET    /api/v1/syslog/facets       distinct devices/sources/apps for filters
     GET    /api/v1/syslog/status       listener status + stored count
     DELETE /api/v1/syslog              delete all stored messages
     GET    /api/v1/syslog/drops        senders rejected by the allowlist
@@ -57,7 +57,7 @@ def _syslog_filters():
     severity accept multiple values (Ctrl+click multi-select in the UI)."""
     return {
         'source':   request.args.get('source', '').strip(),
-        'host':     request.args.get('host', '').strip(),
+        'host':     request.args.get('device', '').strip(),   # a device's address, matched against the sender
         'hostname': _multi_arg('hostname'),
         'app':      _multi_arg('app'),
         'facility': _multi_int_arg('facility'),
@@ -100,7 +100,7 @@ def register(app, wa):
         """Aggregate counts for the dashboard charts (total + by host/severity/
         facility/app), honouring the same filters as the message list."""
         store = getattr(wa, '_syslog_store', None)
-        _empty = {'total': 0, 'by_host': [], 'by_app': [],
+        _empty = {'total': 0, 'by_device': [], 'by_app': [],
                   'by_severity': [], 'by_facility': []}
         if store is None:
             return jsonify(_empty)
@@ -113,7 +113,7 @@ def register(app, wa):
     @app.route('/api/v1/syslog/facets', methods=['GET'])
     @syslog_view_req
     def api_syslog_facets():
-        """Distinct hosts/sources/apps for the filter dropdowns."""
+        """Distinct devices/sources/apps for the filter dropdowns."""
         store = getattr(wa, '_syslog_store', None)
         if store is None:
             return jsonify({'hostname': [], 'source': [], 'app': []})

@@ -1,0 +1,50 @@
+{# ================================================================
+   Lo que la importación va a hacer, antes de hacerlo.
+
+   Una tabla y un botón. La tabla es la que convierte «12 se corrigen» en «esta y esta van a
+   cambiar de nombre», que es lo que alguien mira antes de aceptar.
+   ================================================================ #}
+<div class="modal fade" id="fsPlanModal" tabindex="-1">
+    {# `modal-xl` y `-scrollable`: son seis columnas y pueden ser sesenta filas. Con el cuerpo
+       recortado a mano, la tabla se quedaba en un tercio del cuadro y el resto en blanco —
+       peor cuanto más grande se hacía la ventana, que es justo al revés de lo que se espera. #}
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-xl">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-life-preserver me-1"></i>{{ i18n.fs_preview_title }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body" id="fsPlanBody"></div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.cancel }}</button>
+                <button type="button" class="btn btn-sm btn-primary" id="btnFsApply"
+                        onclick="freshserviceApply()">
+                    <i class="bi bi-cloud-download me-1"></i>{{ i18n.fs_import }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ================================================================
+   Lo que contesta la prueba de conexión.
+
+   Un aviso que se va solo vale para «guardado». Aquí hay tres cosas que mirar —a qué dominio se
+   ha llegado, cuánto cupo queda y qué dice su página de estado— y las tres se leen despacio,
+   normalmente porque algo va raro.
+   ================================================================ #}
+<div class="modal fade" id="fsTestModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-plug me-1"></i>{{ i18n.fs_test }}</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"
+                        title="{{ i18n.close }}" aria-label="{{ i18n.close }}"></button>
+            </div>
+            <div class="modal-body" id="fsTestBody"></div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">{{ i18n.close }}</button>
+            </div>
+        </div>
+    </div>
+</div>

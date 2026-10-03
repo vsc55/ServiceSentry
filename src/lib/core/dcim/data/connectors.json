@@ -1,0 +1,1771 @@
+{
+  "version": 2,
+  "_comment": "Los conectores que se ofrecen al decir por donde se enchufa algo. Sugerencias, no una lista cerrada: lo que se teclee se guarda igual. Los identificadores son los de netbox-community/devicetype-library, para que el mismo conector no se cuente dos veces segun quien lo teclee. Cada uno dice ademas que GENERACIONES caben en esa forma y que SENALES puede llevar: un USB-C 3.2 Gen 2 que ademas saca DisplayPort no es otro conector, es el mismo con dos datos mas que los dice el puerto.",
+  "connectors": [
+    {
+      "id": "iec-60320-c6",
+      "name": "IEC C6",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "note": {
+        "es_ES": "El «trébol» de las fuentes de portátil.",
+        "en_EN": "The \"cloverleaf\" on laptop bricks."
+      },
+      "shape": "clover"
+    },
+    {
+      "id": "iec-60320-c8",
+      "name": "IEC C8",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "note": {
+        "es_ES": "El «ocho», sin toma de tierra.",
+        "en_EN": "The \"figure-8\", no earth."
+      },
+      "shape": "fig8"
+    },
+    {
+      "id": "iec-60320-c14",
+      "name": "IEC C14",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "note": {
+        "es_ES": "El de siempre: 10 A. Lo que lleva casi todo lo de rack.",
+        "en_EN": "The usual one: 10 A. What nearly every rack device has."
+      },
+      "shape": "c14"
+    },
+    {
+      "id": "iec-60320-c16",
+      "name": "IEC C16",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "note": {
+        "es_ES": "Como el C14 pero para más temperatura.",
+        "en_EN": "Like the C14 but rated for more heat."
+      },
+      "shape": "c14"
+    },
+    {
+      "id": "iec-60320-c20",
+      "name": "IEC C20",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "note": {
+        "es_ES": "20 A. El de las fuentes grandes: no entra en una C13.",
+        "en_EN": "20 A. Big power supplies: it will not go into a C13."
+      },
+      "shape": "c20"
+    },
+    {
+      "id": "iec-60320-c22",
+      "name": "IEC C22",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "c20"
+    },
+    {
+      "id": "iec-60309-p-n-e-4h",
+      "name": "IEC 60309 P+N+E 4H",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "round"
+    },
+    {
+      "id": "iec-60309-2p-e-4h",
+      "name": "IEC 60309 2P+E 4H",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "round"
+    },
+    {
+      "id": "iec-60309-3p-n-e-4h",
+      "name": "IEC 60309 3P+N+E 4H",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "round"
+    },
+    {
+      "id": "nema-1-15p",
+      "name": "NEMA 1-15P",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "nema"
+    },
+    {
+      "id": "nema-5-15p",
+      "name": "NEMA 5-15P",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "nema"
+    },
+    {
+      "id": "nema-5-20p",
+      "name": "NEMA 5-20P",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "nema"
+    },
+    {
+      "id": "nema-l6-30p",
+      "name": "NEMA L6-30P",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "twist"
+    },
+    {
+      "id": "cs8365c",
+      "name": "CS8365C",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "twist"
+    },
+    {
+      "id": "cee-7-7",
+      "name": "CEE 7/7",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "note": {
+        "es_ES": "El europeo de dos clavijas con tierra: el schuko de aquí.",
+        "en_EN": "The European two-pin with earth: the schuko."
+      },
+      "shape": "schuko-p"
+    },
+    {
+      "id": "bs-1363",
+      "name": "BS 1363",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "note": {
+        "es_ES": "El británico, el cuadrado con fusible dentro.",
+        "en_EN": "The British one, square pins with a fuse inside."
+      },
+      "shape": "bs1363"
+    },
+    {
+      "id": "iec-60906-1",
+      "name": "IEC 60906-1",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "schuko-p"
+    },
+    {
+      "id": "dc-terminal",
+      "name": {
+        "es_ES": "Entrada de continua",
+        "en_EN": "DC input"
+      },
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "note": {
+        "es_ES": "Un alimentador externo. Al mudar el equipo hay que acordarse de llevárselo.",
+        "en_EN": "An external brick. Moving the machine means remembering to take it."
+      },
+      "shape": "dc-jack"
+    },
+    {
+      "id": "saf-d-grid",
+      "name": "Saf-D-Grid",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "block"
+    },
+    {
+      "id": "neutrik-powercon-20a",
+      "name": "Neutrik powerCON 20 A",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "round"
+    },
+    {
+      "id": "molex-micro-fit-2x2",
+      "name": "Molex Micro-Fit 2x2",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "block"
+    },
+    {
+      "id": "molex-micro-fit-2x4",
+      "name": "Molex Micro-Fit 2x4",
+      "group": "power-in",
+      "families": [
+        "power-ports"
+      ],
+      "shape": "block"
+    },
+    {
+      "id": "usb-a",
+      "name": "USB-A",
+      "group": "power-in",
+      "families": [
+        "power-ports",
+        "console-ports",
+        "console-server-ports",
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "usb-a",
+      "gens": [
+        {
+          "id": "usb1.1",
+          "name": "USB 1.1",
+          "speed": "12 Mbps"
+        },
+        {
+          "id": "usb2",
+          "name": "USB 2.0",
+          "speed": "480 Mbps"
+        },
+        {
+          "id": "usb3.2g1",
+          "name": "USB 3.2 Gen 1 (3.0 / 3.1 Gen 1)",
+          "speed": "5 Gbps"
+        },
+        {
+          "id": "usb3.2g2",
+          "name": "USB 3.2 Gen 2 (3.1 Gen 2)",
+          "speed": "10 Gbps"
+        }
+      ],
+      "signals": [
+        "data",
+        "power-out",
+        "ethernet",
+        "audio"
+      ]
+    },
+    {
+      "id": "usb-b",
+      "name": "USB-B",
+      "group": "power-in",
+      "families": [
+        "power-ports",
+        "console-ports",
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "usb-b",
+      "gens": [
+        {
+          "id": "usb1.1",
+          "name": "USB 1.1",
+          "speed": "12 Mbps"
+        },
+        {
+          "id": "usb2",
+          "name": "USB 2.0",
+          "speed": "480 Mbps"
+        },
+        {
+          "id": "usb3.2g1",
+          "name": "USB 3.2 Gen 1 (3.0 / 3.1 Gen 1)",
+          "speed": "5 Gbps"
+        },
+        {
+          "id": "usb3.2g2",
+          "name": "USB 3.2 Gen 2 (3.1 Gen 2)",
+          "speed": "10 Gbps"
+        }
+      ],
+      "signals": [
+        "data"
+      ]
+    },
+    {
+      "id": "usb-c",
+      "name": "USB-C",
+      "group": "power-in",
+      "families": [
+        "power-ports",
+        "console-ports",
+        "console-server-ports",
+        "front-ports",
+        "rear-ports"
+      ],
+      "note": {
+        "es_ES": "Alimenta y habla por el mismo cable, según qué lleve el equipo dentro.",
+        "en_EN": "Powers and talks down the same lead, depending on what is behind it."
+      },
+      "shape": "usb-c",
+      "gens": [
+        {
+          "id": "usb1.1",
+          "name": "USB 1.1",
+          "speed": "12 Mbps"
+        },
+        {
+          "id": "usb2",
+          "name": "USB 2.0",
+          "speed": "480 Mbps"
+        },
+        {
+          "id": "usb3.2g1",
+          "name": "USB 3.2 Gen 1 (3.0 / 3.1 Gen 1)",
+          "speed": "5 Gbps"
+        },
+        {
+          "id": "usb3.2g2",
+          "name": "USB 3.2 Gen 2 (3.1 Gen 2)",
+          "speed": "10 Gbps"
+        },
+        {
+          "id": "usb3.2g2x2",
+          "name": "USB 3.2 Gen 2×2",
+          "speed": "20 Gbps"
+        },
+        {
+          "id": "usb4",
+          "name": "USB4",
+          "speed": "40 Gbps"
+        },
+        {
+          "id": "usb4v2",
+          "name": "USB4 v2",
+          "speed": "80 Gbps"
+        },
+        {
+          "id": "tb3",
+          "name": "Thunderbolt 3",
+          "speed": "40 Gbps"
+        },
+        {
+          "id": "tb4",
+          "name": "Thunderbolt 4",
+          "speed": "40 Gbps"
+        },
+        {
+          "id": "tb5",
+          "name": "Thunderbolt 5",
+          "speed": "80 Gbps"
+        }
+      ],
+      "signals": [
+        "data",
+        "dp",
+        "thunderbolt",
+        "ethernet",
+        "audio",
+        "power-in",
+        "power-out"
+      ]
+    },
+    {
+      "id": "usb-micro-b",
+      "name": "USB Micro-B",
+      "group": "power-in",
+      "families": [
+        "power-ports",
+        "console-ports",
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "usb-micro",
+      "gens": [
+        {
+          "id": "usb1.1",
+          "name": "USB 1.1",
+          "speed": "12 Mbps"
+        },
+        {
+          "id": "usb2",
+          "name": "USB 2.0",
+          "speed": "480 Mbps"
+        },
+        {
+          "id": "usb3.2g1",
+          "name": "USB 3.2 Gen 1 (3.0 / 3.1 Gen 1)",
+          "speed": "5 Gbps"
+        },
+        {
+          "id": "usb3.2g2",
+          "name": "USB 3.2 Gen 2 (3.1 Gen 2)",
+          "speed": "10 Gbps"
+        }
+      ],
+      "signals": [
+        "data",
+        "power-in"
+      ]
+    },
+    {
+      "id": "usb-mini-b",
+      "name": "USB Mini-B",
+      "group": "power-in",
+      "families": [
+        "power-ports",
+        "console-ports",
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "usb-mini",
+      "gens": [
+        {
+          "id": "usb1.1",
+          "name": "USB 1.1",
+          "speed": "12 Mbps"
+        },
+        {
+          "id": "usb2",
+          "name": "USB 2.0",
+          "speed": "480 Mbps"
+        },
+        {
+          "id": "usb3.2g1",
+          "name": "USB 3.2 Gen 1 (3.0 / 3.1 Gen 1)",
+          "speed": "5 Gbps"
+        },
+        {
+          "id": "usb3.2g2",
+          "name": "USB 3.2 Gen 2 (3.1 Gen 2)",
+          "speed": "10 Gbps"
+        }
+      ],
+      "signals": [
+        "data",
+        "power-in"
+      ]
+    },
+    {
+      "id": "iec-60320-c5",
+      "name": "IEC C5",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "clover"
+    },
+    {
+      "id": "iec-60320-c7",
+      "name": "IEC C7",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "fig8"
+    },
+    {
+      "id": "iec-60320-c13",
+      "name": "IEC C13",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "note": {
+        "es_ES": "La boca normal de una regleta de rack. Va con un C14.",
+        "en_EN": "The usual socket on a rack strip. Pairs with a C14."
+      },
+      "shape": "c13"
+    },
+    {
+      "id": "iec-60320-c15",
+      "name": "IEC C15",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "c13"
+    },
+    {
+      "id": "iec-60320-c19",
+      "name": "IEC C19",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "note": {
+        "es_ES": "20 A. Va con un C20, y no con un C14: son dos cosas distintas.",
+        "en_EN": "20 A. Pairs with a C20, not a C14 — they are two different things."
+      },
+      "shape": "c19"
+    },
+    {
+      "id": "iec-60320-c21",
+      "name": "IEC C21",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "c19"
+    },
+    {
+      "id": "iec-60309-p-n-e-4h-out",
+      "name": "IEC 60309 P+N+E 4H",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "round"
+    },
+    {
+      "id": "nema-1-15r",
+      "name": "NEMA 1-15R",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "nema"
+    },
+    {
+      "id": "nema-5-15r",
+      "name": "NEMA 5-15R",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "nema"
+    },
+    {
+      "id": "nema-5-20r",
+      "name": "NEMA 5-20R",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "nema"
+    },
+    {
+      "id": "nema-l6-30r",
+      "name": "NEMA L6-30R",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "twist"
+    },
+    {
+      "id": "cee-7-3",
+      "name": "CEE 7/3",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "note": {
+        "es_ES": "La base schuko de pared.",
+        "en_EN": "The wall schuko socket."
+      },
+      "shape": "schuko-r"
+    },
+    {
+      "id": "bs-1363-out",
+      "name": "BS 1363",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "bs1363"
+    },
+    {
+      "id": "dc-terminal-out",
+      "name": {
+        "es_ES": "Salida de continua",
+        "en_EN": "DC output"
+      },
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "dc-jack"
+    },
+    {
+      "id": "hdot-cx",
+      "name": "HDOT Cx",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "block"
+    },
+    {
+      "id": "saf-d-grid-out",
+      "name": "Saf-D-Grid",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "block"
+    },
+    {
+      "id": "usb-a-out",
+      "name": "USB-A",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "usb-a",
+      "gens": [
+        {
+          "id": "usb1.1",
+          "name": "USB 1.1",
+          "speed": "12 Mbps"
+        },
+        {
+          "id": "usb2",
+          "name": "USB 2.0",
+          "speed": "480 Mbps"
+        },
+        {
+          "id": "usb3.2g1",
+          "name": "USB 3.2 Gen 1 (3.0 / 3.1 Gen 1)",
+          "speed": "5 Gbps"
+        },
+        {
+          "id": "usb3.2g2",
+          "name": "USB 3.2 Gen 2 (3.1 Gen 2)",
+          "speed": "10 Gbps"
+        }
+      ],
+      "signals": [
+        "power-out",
+        "data"
+      ]
+    },
+    {
+      "id": "usb-c-out",
+      "name": "USB-C",
+      "group": "power-out",
+      "families": [
+        "power-outlets"
+      ],
+      "shape": "usb-c",
+      "gens": [
+        {
+          "id": "usb1.1",
+          "name": "USB 1.1",
+          "speed": "12 Mbps"
+        },
+        {
+          "id": "usb2",
+          "name": "USB 2.0",
+          "speed": "480 Mbps"
+        },
+        {
+          "id": "usb3.2g1",
+          "name": "USB 3.2 Gen 1 (3.0 / 3.1 Gen 1)",
+          "speed": "5 Gbps"
+        },
+        {
+          "id": "usb3.2g2",
+          "name": "USB 3.2 Gen 2 (3.1 Gen 2)",
+          "speed": "10 Gbps"
+        },
+        {
+          "id": "usb3.2g2x2",
+          "name": "USB 3.2 Gen 2×2",
+          "speed": "20 Gbps"
+        },
+        {
+          "id": "usb4",
+          "name": "USB4",
+          "speed": "40 Gbps"
+        },
+        {
+          "id": "usb4v2",
+          "name": "USB4 v2",
+          "speed": "80 Gbps"
+        },
+        {
+          "id": "tb3",
+          "name": "Thunderbolt 3",
+          "speed": "40 Gbps"
+        },
+        {
+          "id": "tb4",
+          "name": "Thunderbolt 4",
+          "speed": "40 Gbps"
+        },
+        {
+          "id": "tb5",
+          "name": "Thunderbolt 5",
+          "speed": "80 Gbps"
+        }
+      ],
+      "signals": [
+        "power-out",
+        "data"
+      ]
+    },
+    {
+      "id": "10base-t",
+      "name": "10BASE-T",
+      "group": "copper",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "10 Mbps",
+      "shape": "rj45"
+    },
+    {
+      "id": "100base-tx",
+      "name": "100BASE-TX",
+      "group": "copper",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "100 Mbps",
+      "shape": "rj45"
+    },
+    {
+      "id": "100base-t1",
+      "name": "100BASE-T1",
+      "group": "copper",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "100 Mbps",
+      "shape": "rj45"
+    },
+    {
+      "id": "1000base-t",
+      "name": "1000BASE-T",
+      "group": "copper",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "1 Gbps",
+      "shape": "rj45"
+    },
+    {
+      "id": "1000base-tx",
+      "name": "1000BASE-TX",
+      "group": "copper",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "1 Gbps",
+      "shape": "rj45"
+    },
+    {
+      "id": "2.5gbase-t",
+      "name": "2.5GBASE-T",
+      "group": "copper",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "2,5 Gbps",
+      "shape": "rj45"
+    },
+    {
+      "id": "5gbase-t",
+      "name": "5GBASE-T",
+      "group": "copper",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "5 Gbps",
+      "shape": "wifi"
+    },
+    {
+      "id": "10gbase-t",
+      "name": "10GBASE-T",
+      "group": "copper",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "10 Gbps",
+      "shape": "rj45"
+    },
+    {
+      "id": "10gbase-cx4",
+      "name": "10GBASE-CX4",
+      "group": "copper",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "10 Gbps",
+      "shape": "sfp"
+    },
+    {
+      "id": "1000base-x-gbic",
+      "name": "GBIC",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "1 Gbps",
+      "shape": "sfp"
+    },
+    {
+      "id": "1000base-x-sfp",
+      "name": "SFP",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "1 Gbps",
+      "shape": "sfp"
+    },
+    {
+      "id": "10gbase-x-sfpp",
+      "name": "SFP+",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "10 Gbps",
+      "shape": "sfp"
+    },
+    {
+      "id": "10gbase-x-xfp",
+      "name": "XFP",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "10 Gbps",
+      "shape": "sfp"
+    },
+    {
+      "id": "10gbase-x-x2",
+      "name": "X2",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "10 Gbps",
+      "shape": "sfp"
+    },
+    {
+      "id": "10gbase-x-xenpak",
+      "name": "XENPAK",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "10 Gbps",
+      "shape": "sfp"
+    },
+    {
+      "id": "25gbase-x-sfp28",
+      "name": "SFP28",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "25 Gbps",
+      "shape": "sfp"
+    },
+    {
+      "id": "50gbase-x-sfp56",
+      "name": "SFP56",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "50 Gbps",
+      "shape": "sfp"
+    },
+    {
+      "id": "40gbase-x-qsfpp",
+      "name": "QSFP+",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "40 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "50gbase-x-sfp28",
+      "name": "QSFP28 (50G)",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "50 Gbps",
+      "shape": "sfp"
+    },
+    {
+      "id": "100gbase-x-cfp",
+      "name": "CFP",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "100 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "100gbase-x-cfp2",
+      "name": "CFP2",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "100 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "100gbase-x-cfp4",
+      "name": "CFP4",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "100 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "100gbase-x-qsfp28",
+      "name": "QSFP28",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "100 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "200gbase-x-qsfp56",
+      "name": "QSFP56",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "200 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "200gbase-x-cfp2",
+      "name": "CFP2 (200G)",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "200 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "400gbase-x-qsfpdd",
+      "name": "QSFP-DD",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "400 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "400gbase-x-osfp",
+      "name": "OSFP",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "400 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "800gbase-x-qsfpdd",
+      "name": "QSFP-DD (800G)",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "800 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "800gbase-x-osfp",
+      "name": "OSFP (800G)",
+      "group": "fibre",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "800 Gbps",
+      "shape": "qsfp"
+    },
+    {
+      "id": "ieee802.11a",
+      "name": "Wi-Fi 802.11a",
+      "group": "wireless",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "54 Mbps",
+      "shape": "wifi"
+    },
+    {
+      "id": "ieee802.11g",
+      "name": "Wi-Fi 802.11g",
+      "group": "wireless",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "54 Mbps",
+      "shape": "wifi"
+    },
+    {
+      "id": "ieee802.11n",
+      "name": "Wi-Fi 4 (802.11n)",
+      "group": "wireless",
+      "families": [
+        "interfaces"
+      ],
+      "speed": "600 Mbps",
+      "shape": "wifi"
+    },
+    {
+      "id": "ieee802.11ac",
+      "name": "Wi-Fi 5 (802.11ac)",
+      "group": "wireless",
+      "families": [
+        "interfaces"
+      ],
+      "shape": "wifi"
+    },
+    {
+      "id": "ieee802.11ax",
+      "name": "Wi-Fi 6 (802.11ax)",
+      "group": "wireless",
+      "families": [
+        "interfaces"
+      ],
+      "shape": "wifi"
+    },
+    {
+      "id": "ieee802.11be",
+      "name": "Wi-Fi 7 (802.11be)",
+      "group": "wireless",
+      "families": [
+        "interfaces"
+      ],
+      "shape": "wifi"
+    },
+    {
+      "id": "gsm",
+      "name": "GSM",
+      "group": "wireless",
+      "families": [
+        "interfaces"
+      ],
+      "shape": "wifi"
+    },
+    {
+      "id": "lte",
+      "name": "LTE",
+      "group": "wireless",
+      "families": [
+        "interfaces"
+      ],
+      "shape": "wifi"
+    },
+    {
+      "id": "5g",
+      "name": "5G",
+      "group": "wireless",
+      "families": [
+        "interfaces"
+      ],
+      "shape": "wifi"
+    },
+    {
+      "id": "rj-45",
+      "name": "RJ-45",
+      "group": "console",
+      "families": [
+        "console-ports",
+        "console-server-ports"
+      ],
+      "note": {
+        "es_ES": "La consola con forma de boca de red. No es una boca de red.",
+        "en_EN": "A console port shaped like a network socket. It is not one."
+      },
+      "shape": "rj45",
+      "signals": [
+        "ethernet",
+        "data",
+        "power-out"
+      ]
+    },
+    {
+      "id": "rj-12",
+      "name": "RJ-12",
+      "group": "console",
+      "families": [
+        "console-ports",
+        "console-server-ports"
+      ],
+      "shape": "rj12"
+    },
+    {
+      "id": "de-9",
+      "name": "DE-9",
+      "group": "console",
+      "families": [
+        "console-ports",
+        "console-server-ports"
+      ],
+      "note": {
+        "es_ES": "El serie de nueve pines, el que todos llaman «DB9».",
+        "en_EN": "The nine-pin serial, the one everybody calls \"DB9\"."
+      },
+      "shape": "dsub"
+    },
+    {
+      "id": "db-25",
+      "name": "DB-25",
+      "group": "console",
+      "families": [
+        "console-ports",
+        "console-server-ports"
+      ],
+      "shape": "dsub"
+    },
+    {
+      "id": "other",
+      "name": {
+        "es_ES": "Otro",
+        "en_EN": "Other"
+      },
+      "group": "other",
+      "families": [
+        "console-ports",
+        "console-server-ports",
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "other"
+    },
+    {
+      "id": "displayport",
+      "name": "DisplayPort",
+      "group": "video",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "dp",
+      "gens": [
+        {
+          "id": "dp1.2",
+          "name": "DisplayPort 1.2",
+          "speed": "21,6 Gbps"
+        },
+        {
+          "id": "dp1.4",
+          "name": "DisplayPort 1.4",
+          "speed": "32,4 Gbps"
+        },
+        {
+          "id": "dp2.0",
+          "name": "DisplayPort 2.0",
+          "speed": "80 Gbps"
+        },
+        {
+          "id": "dp2.1",
+          "name": "DisplayPort 2.1",
+          "speed": "80 Gbps"
+        }
+      ],
+      "signals": [
+        "dp",
+        "audio"
+      ]
+    },
+    {
+      "id": "mini-displayport",
+      "name": "Mini DisplayPort",
+      "group": "video",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "dp",
+      "gens": [
+        {
+          "id": "dp1.2",
+          "name": "DisplayPort 1.2",
+          "speed": "21,6 Gbps"
+        },
+        {
+          "id": "dp1.4",
+          "name": "DisplayPort 1.4",
+          "speed": "32,4 Gbps"
+        },
+        {
+          "id": "dp2.0",
+          "name": "DisplayPort 2.0",
+          "speed": "80 Gbps"
+        },
+        {
+          "id": "dp2.1",
+          "name": "DisplayPort 2.1",
+          "speed": "80 Gbps"
+        }
+      ],
+      "signals": [
+        "dp",
+        "audio"
+      ]
+    },
+    {
+      "id": "hdmi",
+      "name": "HDMI",
+      "group": "video",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "hdmi",
+      "gens": [
+        {
+          "id": "hdmi1.4",
+          "name": "HDMI 1.4",
+          "speed": "10,2 Gbps"
+        },
+        {
+          "id": "hdmi2.0",
+          "name": "HDMI 2.0",
+          "speed": "18 Gbps"
+        },
+        {
+          "id": "hdmi2.1",
+          "name": "HDMI 2.1",
+          "speed": "48 Gbps"
+        }
+      ],
+      "signals": [
+        "hdmi",
+        "audio"
+      ]
+    },
+    {
+      "id": "mini-hdmi",
+      "name": "Mini HDMI",
+      "group": "video",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "hdmi",
+      "gens": [
+        {
+          "id": "hdmi1.4",
+          "name": "HDMI 1.4",
+          "speed": "10,2 Gbps"
+        },
+        {
+          "id": "hdmi2.0",
+          "name": "HDMI 2.0",
+          "speed": "18 Gbps"
+        },
+        {
+          "id": "hdmi2.1",
+          "name": "HDMI 2.1",
+          "speed": "48 Gbps"
+        }
+      ],
+      "signals": [
+        "hdmi",
+        "audio"
+      ]
+    },
+    {
+      "id": "micro-hdmi",
+      "name": "Micro HDMI",
+      "group": "video",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "hdmi",
+      "gens": [
+        {
+          "id": "hdmi1.4",
+          "name": "HDMI 1.4",
+          "speed": "10,2 Gbps"
+        },
+        {
+          "id": "hdmi2.0",
+          "name": "HDMI 2.0",
+          "speed": "18 Gbps"
+        },
+        {
+          "id": "hdmi2.1",
+          "name": "HDMI 2.1",
+          "speed": "48 Gbps"
+        }
+      ],
+      "signals": [
+        "hdmi",
+        "audio"
+      ]
+    },
+    {
+      "id": "dvi-d",
+      "name": "DVI-D",
+      "group": "video",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "dvi"
+    },
+    {
+      "id": "dvi-i",
+      "name": "DVI-I",
+      "group": "video",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "dvi"
+    },
+    {
+      "id": "vga",
+      "name": {
+        "es_ES": "VGA (DE-15)",
+        "en_EN": "VGA (DE-15)"
+      },
+      "group": "video",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "dsub"
+    },
+    {
+      "id": "audio-3-5mm",
+      "name": {
+        "es_ES": "Jack 3,5 mm",
+        "en_EN": "3.5 mm jack"
+      },
+      "group": "video",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "jack"
+    },
+    {
+      "id": "8p8c",
+      "name": "8P8C",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "note": {
+        "es_ES": "El conector del latiguillo de red. «RJ-45» es como se le llama.",
+        "en_EN": "The network patch lead connector. \"RJ-45\" is what people call it."
+      },
+      "shape": "rj45"
+    },
+    {
+      "id": "8p6c",
+      "name": "8P6C",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "rj12"
+    },
+    {
+      "id": "8p4c",
+      "name": "8P4C",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "rj12"
+    },
+    {
+      "id": "8p2c",
+      "name": "8P2C",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "rj12"
+    },
+    {
+      "id": "gg45",
+      "name": "GG45",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "rj45"
+    },
+    {
+      "id": "tera-4p",
+      "name": "TERA 4P",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "rj45"
+    },
+    {
+      "id": "110-punch",
+      "name": {
+        "es_ES": "Regleta 110",
+        "en_EN": "110 punch-down"
+      },
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "punch"
+    },
+    {
+      "id": "bnc",
+      "name": "BNC",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "coax"
+    },
+    {
+      "id": "f",
+      "name": {
+        "es_ES": "Conector F",
+        "en_EN": "F connector"
+      },
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "coax"
+    },
+    {
+      "id": "n",
+      "name": {
+        "es_ES": "Conector N",
+        "en_EN": "N connector"
+      },
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "coax"
+    },
+    {
+      "id": "sma",
+      "name": "SMA",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "coax"
+    },
+    {
+      "id": "splice",
+      "name": {
+        "es_ES": "Empalme",
+        "en_EN": "Splice"
+      },
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "splice"
+    },
+    {
+      "id": "lc",
+      "name": "LC",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "lc"
+    },
+    {
+      "id": "lc-pc",
+      "name": "LC/PC",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "lc"
+    },
+    {
+      "id": "lc-upc",
+      "name": "LC/UPC",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "lc"
+    },
+    {
+      "id": "lc-apc",
+      "name": "LC/APC",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "lc"
+    },
+    {
+      "id": "sc",
+      "name": "SC",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "sc"
+    },
+    {
+      "id": "sc-pc",
+      "name": "SC/PC",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "sc"
+    },
+    {
+      "id": "sc-upc",
+      "name": "SC/UPC",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "sc"
+    },
+    {
+      "id": "sc-apc",
+      "name": "SC/APC",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "sc"
+    },
+    {
+      "id": "st",
+      "name": "ST",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "st"
+    },
+    {
+      "id": "fc",
+      "name": "FC",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "st"
+    },
+    {
+      "id": "mtrj",
+      "name": "MTRJ",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "lc"
+    },
+    {
+      "id": "mpo",
+      "name": "MPO",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "mpo"
+    },
+    {
+      "id": "urm-p2",
+      "name": "URM-P2",
+      "group": "fibre",
+      "families": [
+        "front-ports",
+        "rear-ports"
+      ],
+      "shape": "mpo"
+    },
+    {
+      "id": "module-bay",
+      "name": {
+        "es_ES": "Bahía de módulo",
+        "en_EN": "Module bay"
+      },
+      "group": "bay",
+      "families": [
+        "module-bays"
+      ],
+      "shape": "bay"
+    },
+    {
+      "id": "psu-bay",
+      "name": {
+        "es_ES": "Bahía de fuente",
+        "en_EN": "PSU bay"
+      },
+      "group": "bay",
+      "families": [
+        "module-bays"
+      ],
+      "shape": "bay"
+    },
+    {
+      "id": "fan-bay",
+      "name": {
+        "es_ES": "Bahía de ventilador",
+        "en_EN": "Fan bay"
+      },
+      "group": "bay",
+      "families": [
+        "module-bays"
+      ],
+      "shape": "fan"
+    },
+    {
+      "id": "drive-bay",
+      "name": {
+        "es_ES": "Bahía de disco",
+        "en_EN": "Drive bay"
+      },
+      "group": "bay",
+      "families": [
+        "module-bays"
+      ],
+      "shape": "drive"
+    },
+    {
+      "id": "sfp-cage",
+      "name": {
+        "es_ES": "Jaula SFP",
+        "en_EN": "SFP cage"
+      },
+      "group": "bay",
+      "families": [
+        "module-bays"
+      ],
+      "shape": "sfp"
+    },
+    {
+      "id": "device-bay",
+      "name": {
+        "es_ES": "Bahía de dispositivo",
+        "en_EN": "Device bay"
+      },
+      "group": "bay",
+      "families": [
+        "device-bays"
+      ],
+      "note": {
+        "es_ES": "Donde entra un nodo entero: una cuchilla, un servidor de un chasis.",
+        "en_EN": "Where a whole node goes: a blade, a node of a multi-node chassis."
+      },
+      "shape": "bay"
+    }
+  ],
+  "signals": [
+    {
+      "id": "data",
+      "name": {
+        "es_ES": "Datos",
+        "en_EN": "Data"
+      }
+    },
+    {
+      "id": "ethernet",
+      "name": "Ethernet"
+    },
+    {
+      "id": "dp",
+      "name": "DisplayPort"
+    },
+    {
+      "id": "hdmi",
+      "name": "HDMI"
+    },
+    {
+      "id": "thunderbolt",
+      "name": "Thunderbolt"
+    },
+    {
+      "id": "audio",
+      "name": {
+        "es_ES": "Audio",
+        "en_EN": "Audio"
+      }
+    },
+    {
+      "id": "power-in",
+      "name": {
+        "es_ES": "Se alimenta",
+        "en_EN": "Takes power"
+      }
+    },
+    {
+      "id": "power-out",
+      "name": {
+        "es_ES": "Alimenta",
+        "en_EN": "Supplies power"
+      }
+    }
+  ]
+}

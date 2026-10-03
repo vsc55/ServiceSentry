@@ -25,7 +25,7 @@
    list: one entry, one reading, and none of them is written into the render.
    ================================================================ #}
 
-//: How to split the fleet. `of(host)` returns the groups a machine belongs to — a LIST,
+//: How to split the fleet. `of(device)` returns the groups a machine belongs to — a LIST,
 //: because a machine has one device type and any number of tags, and a tagged fleet where a
 //: box appears under both `prod` and `nas` is the point rather than a problem.
 //:
@@ -33,23 +33,23 @@
 //: groups keep the icons the rest of the panel gives them and the tag groups do not pretend
 //: to have any.
 const _INFRA_GROUPERS = [
-    { key: 'device_type', label_key: 'col_host_type',
+    { key: 'device_type', label_key: 'col_device_type',
       of: h => [h.device_type || ''],
-      label: v => v ? hostTypeLabel(v) : t('host_type_unset'),
-      icon:  v => v ? hostTypeIcon(v) : 'bi-question-circle' },
-    { key: 'tags', label_key: 'col_host_tags',
+      label: v => v ? deviceTypeLabel(v) : t('device_type_unset'),
+      icon:  v => v ? deviceTypeIcon(v) : 'bi-question-circle' },
+    { key: 'tags', label_key: 'col_device_tags',
       of: h => (h.tags || []).length ? h.tags.slice() : [''],
       label: v => v || t('infra_group_untagged'),
       icon:  () => 'bi-tag' },
-    { key: 'os', label_key: 'col_host_os',
+    { key: 'os', label_key: 'col_device_os',
       of: h => [h.os || ''],
       label: v => v || t('infra_group_unknown'),
       icon:  () => 'bi-cpu' },
-    { key: 'kind', label_key: 'col_host_kind',
-      of: h => [hostKind(h.kind)],
-      label: v => t('host_kind_' + v),
+    { key: 'kind', label_key: 'col_device_kind',
+      of: h => [deviceKind(h.kind)],
+      label: v => t('device_kind_' + v),
       icon:  () => 'bi-plug' },
-    { key: 'status', label_key: 'col_host_status',
+    { key: 'status', label_key: 'col_device_status',
       of: h => [h.maintenance ? 'maintenance' : (h.status || '')],
       label: v => _INFRA_STATE_LABEL[v] ? _INFRA_STATE_LABEL[v]() : v,
       icon:  () => 'bi-activity' },
@@ -122,7 +122,7 @@ function setInfraRailPick(key) {
  *  question nobody asked with the answer to one they did.
  */
 function _infraGroups(uids) {
-    const by = Object.fromEntries(_infraHosts.map(h => [h.uid, h]));
+    const by = Object.fromEntries(_infraDevices.map(h => [h.uid, h]));
     const g = _infraGrouper();
     const out = new Map();
     for (const uid of uids) {
@@ -203,10 +203,10 @@ function _infraGroupedBody(uids) {
             </td></tr>`;
         if (folded) continue;
         for (const uid of g.uids) {
-            h += `<tr style="cursor:pointer" title="${escAttr(t('infra_open_host'))}"
+            h += `<tr style="cursor:pointer" title="${escAttr(t('infra_open_device'))}"
                       onclick="if(!event.target.closest('button,a,input,select,label')) infraOpen(${jsStr(uid)})">
                 ${cols.map(c => _infraCell(uid, c.id)).join('')}
-                <td class="ss-td-actions">${_infraRowActions(uid)}</td>
+                <td class="ss-td-actions">${_infraRowActions(uid, _infraCtx())}</td>
             </tr>`;
         }
     }
@@ -231,7 +231,7 @@ function _infraRailBody(uids) {
     const picked = _infraRailPick !== null && groups.some(g => g.value === _infraRailPick);
     const pick = picked ? _infraRailPick : groups[0].value;
     const cur = groups.find(g => g.value === pick);
-    const by = Object.fromEntries(_infraHosts.map(h => [h.uid, h]));
+    const by = Object.fromEntries(_infraDevices.map(h => [h.uid, h]));
     const cols = _infraOrderedCols();
 
     const rail = groups.map(g => `
@@ -247,10 +247,10 @@ function _infraRailBody(uids) {
         </button>`).join('');
 
     const rows = cur.uids.map(uid => `
-        <tr style="cursor:pointer" title="${escAttr(t('infra_open_host'))}"
+        <tr style="cursor:pointer" title="${escAttr(t('infra_open_device'))}"
             onclick="if(!event.target.closest('button,a,input,select,label')) infraOpen(${jsStr(uid)})">
             ${cols.map(c => _infraCell(uid, c.id)).join('')}
-            <td class="ss-td-actions">${_infraRowActions(uid)}</td>
+            <td class="ss-td-actions">${_infraRowActions(uid, _infraCtx())}</td>
         </tr>`).join('');
 
     return _infraGroupPicker() + `<div class="d-flex gap-3 px-3 pb-3 pt-2 align-items-start">
@@ -283,12 +283,12 @@ function _infraRailBody(uids) {
  *  noise a triage screen exists to remove.
  */
 function _infraBoardBody(uids) {
-    const by = Object.fromEntries(_infraHosts.map(h => [h.uid, h]));
+    const by = Object.fromEntries(_infraDevices.map(h => [h.uid, h]));
     const lanes = [..._INFRA_STATES, 'maintenance'];
-    // The shared colours (see `HOST_STATE_COLORS`). It kept its own, and maintenance came out
+    // The shared colours (see `DEVICE_STATE_COLORS`). It kept its own, and maintenance came out
     // grey here and orange on the fleet list — reported from the screen, twice, for the badge
     // and then for these cards.
-    const tone = s => hostStateColor(s, s === 'maintenance');
+    const tone = s => deviceStateColor(s, s === 'maintenance');
     const held = Object.fromEntries(lanes.map(s => [s, []]));
     for (const uid of uids) {
         const h = by[uid];
@@ -315,7 +315,7 @@ function _infraBoardBody(uids) {
                     <div style="height:3px;background:${tone(s)}"></div>
                     <div class="px-2 py-2">
                         <div class="d-flex align-items-center gap-2">
-                            <i class="bi ${escAttr(hostTypeIcon(h.device_type))} text-muted"></i>
+                            <i class="bi ${escAttr(deviceTypeIcon(h.device_type))} text-muted"></i>
                             <span class="fw-semibold text-truncate">${esc(h.name || '')}</span>
                         </div>
                         <div class="text-muted ss-fs-2 text-truncate">

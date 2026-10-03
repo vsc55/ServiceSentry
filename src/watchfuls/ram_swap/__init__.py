@@ -22,10 +22,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-"""Watchful to check RAM and SWAP usage on the bound host (local or over SSH).
+"""Watchful to check RAM and SWAP usage on the bound device (local or over SSH).
 
-Host-centric: each check binds to a host (``host_uid``).  Memory stats are read
-on that host via :meth:`ModuleBase.host_exec` using an OS-appropriate command
+Device-centric: each check binds to a device (``device_uid``).  Memory stats are read
+on that device via :meth:`ModuleBase.device_exec` using an OS-appropriate command
 (``/proc/meminfo`` on Linux, ``wmic`` on Windows, ``vm_stat``/``sysctl`` on
 macOS, ``sysctl``/``swapinfo`` on FreeBSD) and compared with per-check
 thresholds.
@@ -57,7 +57,7 @@ _MEM_CMDS = {
 
 
 class Watchful(ModuleBase):
-    """Check RAM/SWAP usage per host against percentage thresholds."""
+    """Check RAM/SWAP usage per device against percentage thresholds."""
 
     ITEM_SCHEMA = _SCHEMA
 
@@ -86,11 +86,11 @@ class Watchful(ModuleBase):
         return v if 0 <= v <= 100 else int(default)
 
     def _mem_check(self, key, raw):
-        item = self.resolve_host(raw)
-        if item.get('_host_maintenance') or not item.get('enabled', True):
+        item = self.resolve_device(raw)
+        if item.get('_device_maintenance') or not item.get('enabled', True):
             return
         label = (item.get('label') or '').strip() or key
-        os_ = self.host_os(item)
+        os_ = self.device_os(item)
         if os_ not in _MEM_CMDS:
             self.dict_return.set(f'{key}_ram', False,
                                  self._msg('mem_unsupported_os', label, os_),
@@ -99,7 +99,7 @@ class Watchful(ModuleBase):
         timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
         outs = []
         for cmd in _MEM_CMDS[os_]:
-            out, err, code = self.host_exec(item, cmd, timeout=timeout)
+            out, err, code = self.device_exec(item, cmd, timeout=timeout)
             if code != 0 and not out:
                 raise OSError((err or '').strip() or f'memory query exited {code}')
             outs.append(out)
@@ -131,7 +131,7 @@ class Watchful(ModuleBase):
         msg = self._msg('mem_high' if warning else 'mem_ok', caption, label, f'{used:.1f}')
         # 'name' is the display name for status views, since the result key is a
         # derived UID ("<item>_ram"/"_swap") — e.g. "NS1 - RAM".
-        # A usage-threshold breach is a warning (host reachable), not a down.
+        # A usage-threshold breach is a warning (device reachable), not a down.
         self.dict_return.set(result_key, not warning, msg,
                              other_data={'used': used, 'alert': float(alert),
                                          'name': f'{label} - {caption}'},

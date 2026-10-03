@@ -4,20 +4,20 @@
    Two screens and one pane. The fleet is a list (infra/_list.html, built by the shared
    factory like every other list in the panel); opening a machine replaces it with that
    machine's own view and a way back. No URL of its own yet — a core section has one path,
-   and a per-host path is worth having only once there is more on this screen than a host
+   and a per-device path is worth having only once there is more on this screen than a device
    fits in.
 
    WHAT THIS SECTION IS NOT: it does not compute anything. Every number on it was produced by
-   a module and every state by the host registry; the section arranges them by MACHINE, which
+   a module and every state by the device registry; the section arranges them by MACHINE, which
    is the one arrangement neither of those two can offer. That is also why it edits nothing —
    see lib/core/infra/routes.py. The one button that acts, "Collect now", does not edit either:
    it asks the modules to produce their numbers again, on the spot, and carries its own
    permission so looking at a wall screen is not the same as being able to start it.
    ================================================================ #}
 
-let _infraHosts   = [];          // the fleet, worst first (the server orders it)
+let _infraDevices   = [];          // the fleet, worst first (the server orders it)
 let _infraSummary = {};          // counts by state, for the header
-let _infraHost    = '';          // the machine that is open, '' = the fleet
+let _infraDevice    = '';          // the machine that is open, '' = the fleet
 let _infraDetail  = null;        // its payload, kept so a redraw does not refetch
 let _infraTimer   = null;        // auto-refresh {_id, _interval}
 
@@ -39,26 +39,35 @@ async function renderInfra() {
     // Whatever was expanded is about to stop existing: this rewrites the markup it lives in,
     // and a card given back after that is given back to a parent that is no longer there.
     if (typeof _infraZoomOut === 'function') _infraZoomOut(true);
-    const data = await apiGet('/api/v1/infra/hosts');
+    // The registry too, for whoever may see it: the fleet list carries its actions, its origin
+    // badge and its coverage view, all read from the registry's own record. Asked in parallel —
+    // the fleet must not wait on it.
+    const _perms = new Set(currentUser.permissions || []);
+    const [data] = await Promise.all([
+        apiGet('/api/v1/infra/devices'),
+        (_perms.has('devices_view') || [..._perms].some(p => p.startsWith('server.')))
+            ? loadDevices() : Promise.resolve(null),
+    ]);
     if (data) {
-        _infraHosts   = data.hosts || [];
+        _infraDevices   = data.devices || [];
         _infraSummary = data.summary || {};
     }
     // A reload lands here with no device open; the URL is what remembers which one it was.
-    // Only on the FIRST render — after that `_infraHost` is the answer, and re-reading the
+    // Only on the FIRST render — after that `_infraDevice` is the answer, and re-reading the
     // URL would reopen a device somebody had just closed.
-    if (!_infraHost && !_infraUrlRead) {
+    if (!_infraDevice && !_infraUrlRead) {
         _infraUrlRead = true;
         try {
-            const want = new URLSearchParams(window.location.search).get(_INFRA_URL_KEY);
-            if (want && _infraHosts.some(h => h.uid === want)) _infraHost = want;
+            const q = new URLSearchParams(window.location.search);
+            const want = q.get(_INFRA_URL_KEY) || q.get(_INFRA_URL_KEY_OLD);
+            if (want && _infraDevices.some(h => h.uid === want)) _infraDevice = want;
         } catch (_) { /* ignore */ }
     }
     // A collection that was already running when this page loaded: F5 does not stop it, so
     // the screen has to be able to find it again. Not awaited — the section must draw now,
     // and the bar appears a moment later when the server has answered.
     _infraCollectAdopt();
-    if (_infraHost) return _infraOpenView(pane);
+    if (_infraDevice) return _infraOpenView(pane);
     // The factory owns its own container INSIDE the pane, so switching to a machine and back
     // does not tear down the table's state (columns, filters, page) along with the markup.
     if (!document.getElementById('infra-fleet')) pane.innerHTML = '<div id="infra-fleet"></div>';
@@ -69,7 +78,10 @@ async function renderInfra() {
 //: is one somebody keeps open, refreshes, and sends to a colleague — and until this was
 //: here, F5 on a device answered by going back to the list of forty. Same shape the History
 //: section already uses for a series (`/history?module=&key=`).
-const _INFRA_URL_KEY = 'host';
+const _INFRA_URL_KEY = 'device';
+//: Y la de antes, que se sigue leyendo: un enlace guardado o compartido con `?device=` tiene que
+//: seguir abriendo lo que abría. Se escribe la nueva y se aceptan las dos.
+const _INFRA_URL_KEY_OLD = 'host';
 
 /** Put the open device in the URL (or take it out), without adding a history entry.
  *
@@ -80,15 +92,24 @@ const _INFRA_URL_KEY = 'host';
 function _infraSyncUrl() {
     try {
         const url = new URL(window.location.href);
-        if (_infraHost) url.searchParams.set(_INFRA_URL_KEY, _infraHost);
+        if (_infraDevice) url.searchParams.set(_INFRA_URL_KEY, _infraDevice);
         else url.searchParams.delete(_INFRA_URL_KEY);
+        url.searchParams.delete(_INFRA_URL_KEY_OLD);
         history.replaceState(history.state, '', url.pathname + url.search + url.hash);
     } catch (_) { /* a URL we cannot rewrite is not a reason to fail to open a device */ }
 }
 
 /** Open one machine (or, with no uid, go back to the fleet). */
+/** Abrir la ficha de un dispositivo desde cualquier sección: se cambia a Infraestructura y
+ *  se abre — en ese orden, o el redibujado de la pestaña llegaría después y enseñaría la flota. */
+function openDeviceSheet(uid) {
+    if (!uid) return;
+    if (typeof _navTab === 'function') _navTab('#tab-infra');
+    infraOpen(uid);
+}
+
 async function infraOpen(uid) {
-    _infraHost   = uid || '';
+    _infraDevice   = uid || '';
     _infraDetail = null;
     // The drill-down belongs to the device that was open. Kept, and the next machine's
     // Details tab would open on a count of the previous one's ports.
@@ -97,7 +118,7 @@ async function infraOpen(uid) {
     _infraSyncUrl();
     const pane = document.getElementById('infra-container');
     if (!pane) return;
-    if (!_infraHost) {
+    if (!_infraDevice) {
         pane.innerHTML = '<div id="infra-fleet"></div>';
         return _infraRender();
     }
@@ -125,10 +146,10 @@ async function _infraOpenView(pane) {
         // what made every refresh blink the whole page, which is worse than a stale second.
         if (!pane.querySelector('.ss-vfill'))
             pane.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
-        _infraDetail = await apiGet(`/api/v1/infra/hosts/${encodeURIComponent(_infraHost)}`);
-        if (!_infraDetail) { _infraHost = ''; return renderInfra(); }
+        _infraDetail = await apiGet(`/api/v1/infra/devices/${encodeURIComponent(_infraDevice)}`);
+        if (!_infraDetail) { _infraDevice = ''; return renderInfra(); }
     }
-    pane.innerHTML = _infraHostHtml(_infraDetail);
+    pane.innerHTML = _infraDeviceHtml(_infraDetail);
     // …and if somebody arrived here by pressing a PORT on the link map, go to it. After the
     // paint, because it repaints: the drill-down is a change of view over a payload that has
     // to be in hand first.
@@ -143,7 +164,7 @@ async function _infraOpenView(pane) {
  *  something that was already in memory. */
 function _infraPaint() {
     const pane = document.getElementById('infra-container');
-    if (pane && _infraDetail) pane.innerHTML = _infraHostHtml(_infraDetail);
+    if (pane && _infraDetail) pane.innerHTML = _infraDeviceHtml(_infraDetail);
 }
 
 /** Re-read what is on screen, without taking it away first.
@@ -154,14 +175,14 @@ function _infraPaint() {
  *  asks for the one thing that is being looked at and swaps the markup when the answer is
  *  already in hand, so the only thing that changes is what changed. */
 async function _infraReload() {
-    if (!_infraHost) { _infraDetail = null; return renderInfra(); }
-    const data = await apiGet(`/api/v1/infra/hosts/${encodeURIComponent(_infraHost)}`);
+    if (!_infraDevice) { _infraDetail = null; return renderInfra(); }
+    const data = await apiGet(`/api/v1/infra/devices/${encodeURIComponent(_infraDevice)}`);
     if (!data) return;                      // a failed refresh keeps the screen it had
     _infraDetail = data;
     const pane = document.getElementById('infra-container');
     // The same reason as in `renderInfra`: what is expanded is about to stop existing.
     if (typeof _infraZoomOut === 'function') _infraZoomOut(true);
-    if (pane) pane.innerHTML = _infraHostHtml(data);
+    if (pane) pane.innerHTML = _infraDeviceHtml(data);
     if (typeof _infraCollectPaint === 'function') _infraCollectPaint();
 }
 
@@ -194,7 +215,7 @@ function _infraAutoTick() {
     if (typeof _infraZoom !== 'undefined' && _infraZoom) return;
     // The open machine ages too — but it is refreshed in place, or the wall screen this
     // control exists for would blink every interval.
-    if (_infraHost) return _infraReload();
+    if (_infraDevice) return _infraReload();
     renderInfra();
 }
 
@@ -205,24 +226,24 @@ function _infraAutoTick() {
     if (saved > 0) setTimeout(() => setInfraAutoRefresh(saved), 0);
 })();
 
-/** The state of a machine, as a badge — the shared one (see `HOST_STATE_BADGES`).
+/** The state of a machine, as a badge — the shared one (see `DEVICE_STATE_BADGES`).
  *
- *  It had its own, which is how the same host in maintenance came out orange with a cone on
+ *  It had its own, which is how the same device in maintenance came out orange with a cone on
  *  the fleet list and grey with a spanner here. Two badges for one state is two states as far
  *  as anybody reading them can tell.
  *
- *  What is this section's own is the LAST line: `''` is not "fine". A host with no enabled
+ *  What is this section's own is the LAST line: `''` is not "fine". A device with no enabled
  *  check has no state at all, and painting it green would be the section telling you something
  *  nobody is checking. */
 function _infraStateBadge(status, maintenance) {
-    return hostStateBadge(status, maintenance,
+    return deviceStateBadge(status, maintenance,
         `<span class="badge text-bg-secondary"><i class="bi bi-dash-circle me-1"></i>${
             esc(t('infra_unwatched'))}</span>`);
 }
 
 /** One machine: what it is, what it measures, and what its checks said. */
-function _infraHostHtml(d) {
-    const h = d.host || {};
+function _infraDeviceHtml(d) {
+    const h = d.device || {};
     const metrics = d.metrics || [];
     const results = d.results || [];
     const perms = new Set(currentUser.permissions || []);
@@ -242,14 +263,17 @@ function _infraHostHtml(d) {
                   the screen with the duplicate underlined. The fleet list, the board cards and
                   the two maps keep it — none of them has a column to read. */''}
             ${_infraStateBadge(h.status, h.maintenance)}
-            ${h.virtual ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"><i class="bi bi-hdd-stack me-1"></i>${esc(t('host_virtual') || 'virtual')}</span>` : ''}
+            ${h.virtual ? `<span class="badge bg-body-secondary text-body-secondary border fw-normal"><i class="bi bi-hdd-stack me-1"></i>${esc(t('device_virtual') || 'virtual')}</span>` : ''}
             ${tags}
             <div class="ms-auto d-flex gap-1">
                 ${canCollect ? `<span id="infraCollectSlot">${_infraCollectSlotHtml(h.uid)}</span>` : ''}
                 <button class="btn btn-sm btn-secondary" onclick="_infraReload()"
                     title="${escAttr(t('infra_reload_tt'))}"><i class="bi bi-arrow-clockwise"></i></button>
-                ${canRegistry ? `<a class="btn btn-sm btn-secondary" href="/admin?tab=servers" data-nav-section
-                    title="${escAttr(t('infra_registry'))}"><i class="bi bi-gear"></i></a>` : ''}
+                ${/* THIS device's configuration, not the registry's list: the button used to
+                      drop the reader at the top of every device there is, to find this one
+                      again by hand. */''}
+                ${canRegistry ? `<button class="btn btn-sm btn-secondary" onclick="_infraEditDevice(${jsStr(h.uid)})"
+                    title="${escAttr(t('infra_registry'))}"><i class="bi bi-gear"></i></button>` : ''}
             </div>
         </div>
         <div class="d-flex flex-wrap gap-3 px-3 py-3 align-items-start">

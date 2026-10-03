@@ -1,0 +1,95 @@
+{#
+   Trabajos › la cabecera: el título, la cifra y las tres pestañas.
+
+   Aparte del render principal por la convención de tamaño —un fichero de pantalla se parte en
+   sub-secciones, como ipban/_bans|_history|_whitelist—. Y se parte por aquí porque esto es lo
+   único de la pantalla que **no** depende de qué lista se está mirando: es lo que decide cuál.
+
+   Cuidado al mover algo de aquí: partir este fichero es lo que ya perdió `_jobsEvery` y
+   `_jobsRefreshCall`, y una llamada a una función que no existe se analiza perfectamente y
+   revienta al primer clic. `tests/integration/test_wa_jobs_render.py` dibuja las tres pestañas
+   de verdad justamente por eso.
+#}
+//: El título y la cifra de cada pestaña. Un mapa y no tres ternarios: el día que haya una
+//: cuarta se añade aquí, que es donde ya están el icono y la palabra.
+const _JOBS_HEAD = {
+    live:   {icon: 'bi-hourglass-split', key: 'jobs_title'},
+    past:   {icon: 'bi-clock-history',   key: 'jobs_past_title'},
+    timers: {icon: 'bi-stopwatch',       key: 'jobs_timers_title'},
+};
+
+/** La cabecera de la sección, que es la de la pestaña que estás mirando.
+ *
+ *  Se quedó quieta cuando la sección pasó de una lista a tres: el título decía «Trabajos» y los
+ *  dos contadores —*en marcha* y *con error*— eran de la primera lista, mientras mirabas
+ *  Temporizadores. Un número que habla de otra pantalla es la misma clase de error que el
+ *  «Apagado» sobre un cron que corre: no es que sobre, es que contesta otra pregunta.
+ *
+ *  La línea de ayuda de debajo ya cambiaba con la pestaña desde el primer día; esto es la parte
+ *  que se quedó sin hacer. */
+function _jobsHead(sum) {
+    const h = _JOBS_HEAD[_jobsTab] || _JOBS_HEAD.live;
+    return `<h5 class="mb-0"><i class="bi ${h.icon} me-2"></i>${esc(t(h.key))}</h5>
+        ${_jobsHeadCounts(sum)}`;
+}
+
+/** La cifra que es noticia en la pestaña que se está mirando, o ninguna.
+ *
+ *  El historial no lleva: cuántos hay lo dice la propia pestaña y cuántos se guardan lo dice el
+ *  pie de la tabla, y repetirlo aquí sería el mismo número tres veces en la misma pantalla. */
+function _jobsHeadCounts(sum) {
+    if (_jobsTab === 'past') return '';
+    if (_jobsTab === 'timers') {
+        const tarde = ((_jobsTimers || {}).summary || {}).overdue || 0;
+        return _jobsCount(tarde, 'text-bg-warning',
+                          t(tarde === 1 ? 'jobs_overdue_one' : 'jobs_overdue_n'));
+    }
+    return _jobsCount(sum.running || 0, 'text-bg-primary', t('jobs_running'))
+         + _jobsCount(sum.failed || 0, 'text-bg-danger', t('jobs_failed'));
+}
+
+/** The two halves, as tabs: what is happening and what happened.
+ *
+ *  Two questions from two places — one is the packages' own memory, the other a table written
+ *  where each piece of work ENDED — so they are two lists and not one with a mixed order that
+ *  puts a finished backup between two running collections. */
+function _jobsTabsHtml(sum) {
+    // The count comes with the LIVE answer (a `COUNT(*)`, not the rows), so the badge is
+    // right before the tab has ever been opened — which is the only time it is news. The
+    // loaded list wins once there is one: it is the same number, one refresh newer.
+    const past = _jobsPast ? (_jobsPast.total || (_jobsPast.jobs || []).length)
+                           : (sum.history || 0);
+    const tab = (id, label, badge) => `<li class="nav-item">
+        <button class="nav-link${_jobsTab === id ? ' active' : ''}"
+                onclick="setJobsTab(${jsStr(id)})">${esc(label)}${badge
+            ? `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ms-1"
+                >${esc(badge)}</span>` : ''}</button></li>`;
+    // El distintivo de los temporizadores cuenta lo ATRASADO, no cuántos hay. Un número que
+    // dice «cinco» sobre algo que siempre son cinco no es noticia y se deja de leer; uno que
+    // aparece sólo cuando algo lleva sin dar señales es lo que hace que alguien entre.
+    const tarde = ((_jobsTimers || {}).summary || {}).overdue || '';
+    return `<ul class="nav nav-tabs mb-3">
+        ${tab('live', t('jobs_tab_live'), sum.running || '')}
+        ${tab('past', t('jobs_tab_past'), past || '')}
+        ${tab('timers', t('jobs_timers_title'), tarde)}
+    </ul>`;
+}
+
+/** A cuál de las tres listas refresca el botón.
+ *
+ *  Una función y no un objeto suelto en la plantilla: un dólar y una llave, seguidos de otra
+ *  llave, abren una expresión de **Jinja** — así que un diccionario JavaScript pegado a la
+ *  interpolación rompe la página entera antes de que el navegador vea una línea. Y este
+ *  comentario no puede escribir la secuencia ni para explicarla, que es como se descubrió. */
+function _jobsRefreshCall() {
+    if (_jobsTab === 'past') return '_jobsPastRefresh()';
+    if (_jobsTab === 'timers') return '_jobsTimersRefresh()';
+    return 'renderJobs()';
+}
+
+/** Una cifra con su palabra, o nada. Cero no se enseña: un «0 con error» ocupa el mismo sitio
+ *  que el que importa y entrena a no mirar esa esquina. */
+function _jobsCount(n, cls, label) {
+    if (!n) return '';
+    return `<span class="badge ${cls}">${esc(n)} ${esc(label)}</span>`;
+}

@@ -1,0 +1,397 @@
+{# ================================================================
+   Freshservice: los dos botones de su tarjeta de configuración.
+
+   Probar y traer, en ese orden y separados a propósito: comprobar la conexión mientras se teclea
+   la clave es una PREGUNTA, e importar es un ACTO — y con un solo botón, quien sólo quería saber
+   si la clave vale se encuentra con cuarenta empresas creadas.
+
+   Y traer enseña primero lo que va a pasar. Una importación que crea y corrige en silencio es una
+   que, el día que el dominio esté mal escrito o el filtro mal puesto, deja media docena de
+   sociedades duplicadas y ninguna forma de saber cuál era la buena.
+
+   El panel dibuja los botones a partir de lo que declara `manifest.py` y no sabe nada de esto:
+   lo único que sabe es que hay que llamar a una función con este nombre.
+   ================================================================ #}
+
+//: Lo último que contestó la vista previa, para poder decir CUÁNTO se va a hacer en el botón que
+//: lo hace — y sobre qué se está eligiendo.
+let _fsPlan = null;
+
+//: Lo marcado, por su identificador en Freshservice. Un conjunto y no una marca en cada fila:
+//: la lista se vuelve a dibujar al emparejar una, y lo elegido tiene que sobrevivir a eso.
+let _fsPick = new Set();
+
+//: Los emparejamientos a mano: `{external_id: uid de aquí}`. Es lo que el panel no puede
+//: deducir — que «Amixalan Energy Supplies, S.L.» de allí y «Amixalan» de aquí son la misma
+//: casa lo sabe quien lo mira, y ningún parecido de nombres lo va a decir nunca.
+let _fsLink = {};
+
+//: Lo que se ha escrito en el buscador. Fuera de la tabla a propósito: la tabla se redibuja al
+//: marcar una casilla, y una caja de texto que se redibuja pierde el cursor a mitad de palabra.
+let _fsQuery = '';
+
+/** Probar la conexión: si la clave vale, y qué se ve con ella.
+ *
+ *  En un cuadro y no en un aviso que se va solo: hay tres cosas que mirar —a qué dominio se ha
+ *  llegado, cuánto cupo queda y qué dice su página de estado— y las tres se leen despacio,
+ *  normalmente porque algo va raro. */
+async function freshserviceTest() {
+    // El cuadro PRIMERO, y la espera dentro. Al revés —pedir y abrir al contestar— el botón se
+    // pulsa y no pasa nada durante unos segundos, que es exactamente lo que hace que alguien lo
+    // pulse otra vez. Es la misma regla que ya sigue la comprobación de permisos.
+    _fsOpen('fsTestModal', 'fsTestBody');
+    const r = await apiSend('POST', '/api/v1/providers/freshservice/test', {});
+    const caja = document.getElementById('fsTestBody');
+    if (!caja) return;
+    // El fallo se cuenta DENTRO, no en un aviso que se va solo: el cuadro ya está abierto, y un
+    // cuadro vacío con un aviso pasando por detrás es la peor forma de decir que algo falló.
+    caja.innerHTML = r.ok ? _fsTestHtml(r.data || {})
+                          : _fsFalloHtml(r.error || t('fs_err_net'));
+}
+
+/** Abrir un cuadro con la rueda puesta. Lo que se enseña mientras se espera es una frase y una
+ *  rueda: «Consultando Freshservice…» dice qué se está haciendo, que es lo que quita las ganas
+ *  de volver a pulsar. */
+function _fsOpen(modalId, bodyId) {
+    const caja = document.getElementById(bodyId);
+    if (caja) {
+        caja.innerHTML = `<div class="d-flex align-items-center gap-2 py-4 justify-content-center
+                                    text-muted">
+            <div class="spinner-border spinner-border-sm"></div>
+            <span>${esc(t('fs_working'))}</span>
+        </div>`;
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById(modalId)).show();
+}
+
+function _fsFalloHtml(mensaje) {
+    return `<div class="alert alert-danger py-2 px-3 mb-0">${esc(mensaje)}</div>`;
+}
+
+/** El resultado, en tres bloques. */
+function _fsTestHtml(d) {
+    const cupo = d.rate || {};
+    // El cupo sólo si lo mandan: no todas las respuestas traen esas cabeceras, y un «0 de 0»
+    // se lee como «no te queda nada», que es lo contrario de lo que pasa.
+    const cupoHtml = cupo.total
+        ? `<div class="small text-muted mt-1">${esc(tf('fs_test_rate',
+            String(cupo.remaining || 0), String(cupo.total)))}</div>` : '';
+    const st = d.status || {};
+    const lista = (filas, vacio) => (filas || []).length
+        ? `<div class="d-flex flex-wrap gap-1 mt-1">${filas.map(f =>
+            `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
+                >${esc(f.name)}${f.status ? ` · ${esc(f.status)}` : ''}</span>`).join('')}</div>`
+        : `<div class="small text-muted mt-1">${esc(vacio)}</div>`;
+    // Su página de estado es opcional: no está en todos los planes y la clave puede no
+    // alcanzarla. Que no se pueda leer no dice nada de la clave, y por eso se cuenta aparte.
+    const estado = st.available
+        ? `<div class="mt-3">
+            <div class="fw-semibold ss-fs-2">${esc(t('fs_status_incidents'))}</div>
+            ${lista(st.incidents, t('fs_status_no_incidents'))}
+            <div class="fw-semibold ss-fs-2 mt-2">${esc(t('fs_status_components'))}</div>
+            ${lista(st.components, t('fs_status_none'))}
+            <div class="fw-semibold ss-fs-2 mt-2">${esc(t('fs_status_pages'))}</div>
+            ${lista(st.pages, t('fs_status_none'))}
+        </div>`
+        : `<div class="alert alert-secondary py-2 px-3 mt-3 mb-0 small">
+            ${esc(t('fs_status_unavailable'))}${st.error
+                ? `<div class="text-muted mt-1">${esc(st.error)}</div>` : ''}</div>`;
+    return `<div class="d-flex align-items-center gap-2">
+            <i class="bi bi-check-circle-fill text-success"></i>
+            <span>${esc(tf('fs_test_ok', d.host || ''))}</span>
+        </div>${cupoHtml}${estado}`;
+}
+
+/** Traer las empresas: primero lo que pasaría, y sólo si se acepta, lo que pasa. */
+async function freshserviceImport() {
+    // Igual que la prueba: el cuadro se abre al pulsar. Aquí se nota más —son las 59 empresas de
+    // una casa, y su API contesta de cien en cien— y ahí es donde un botón que no reacciona se
+    // pulsa tres veces.
+    _fsOpen('fsPlanModal', 'fsPlanBody');
+    const btn = document.getElementById('btnFsApply');
+    if (btn) btn.disabled = true;         // no se acepta un plan que todavía no se ha visto
+    const d = await apiGet('/api/v1/providers/freshservice/preview');
+    const cuerpo = document.getElementById('fsPlanBody');
+    if (!d) {                             // la conexión, no la pantalla: el aviso ya está puesto
+        if (cuerpo) cuerpo.innerHTML = _fsFalloHtml(t('fs_err_net'));
+        return;
+    }
+    if (d.error) {
+        if (cuerpo) cuerpo.innerHTML = _fsFalloHtml(d.error);
+        return;
+    }
+    _fsPlan = d;
+    _fsLink = {};
+    _fsQuery = '';
+    _fsPick = _fsDefaultPick(d.plan);
+    _fsDraw();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fsPlanModal')).show();
+}
+
+/** Redibujar la lista y el botón. Junto, porque el botón dice cuántas se van a traer y eso
+ *  cambia con cada casilla: dos sitios que se actualizan por separado son un botón que promete
+ *  un número que ya no es. */
+function _fsDraw() {
+    // Sólo las FILAS cuando ya está pintado: el buscador vive en la cabecera, y redibujarla al
+    // marcar una casilla le quitaría el cursor a quien está escribiendo. Es la misma razón por
+    // la que la tabla compartida del panel deja su barra de filtro fuera del cuerpo.
+    const filas = document.getElementById('fsPlanRows');
+    if (filas) {
+        filas.innerHTML = _fsRowsHtml(_fsPlan || {});
+        _fsSyncHead();
+    } else {
+        const cuerpo = document.getElementById('fsPlanBody');
+        if (cuerpo) cuerpo.innerHTML = _fsPlanHtml(_fsPlan || {});
+    }
+    const btn = document.getElementById('btnFsApply');
+    if (!btn) return;
+    const n = _fsPick.size;
+    // Sin nada marcado, el botón de hacerlo no se ofrece: pulsarlo no cambiaría nada, y un botón
+    // que no cambia nada es uno que enseña a no leer los avisos.
+    btn.disabled = !n;
+    btn.innerHTML = `<i class="bi bi-cloud-download me-1"></i>${esc(t('fs_import'))}${
+        n ? ` (${n})` : ''}`;
+}
+
+/** Marcar o desmarcar una. */
+function _fsToggle(ext, on) {
+    const k = String(ext);
+    if (on) _fsPick.add(k); else _fsPick.delete(k);
+    _fsDraw();
+}
+
+/** Todas o ninguna — de las que hacen algo: marcar las que no cambian no las cambia. */
+function _fsToggleAll(on) {
+    // Sobre lo que se VE: con un filtro puesto, «todas» son las que se están mirando. Marcar
+    // también las que el filtro esconde es marcar a ciegas, que es justo lo que el filtro
+    // estaba evitando. Lo de fuera del filtro se queda como estaba.
+    const visibles = ((_fsPlan || {}).plan || []).filter(_fsMatch)
+        .filter(p => p.action !== 'same' || _fsLink[String(p.external_id)])
+        .map(p => String(p.external_id));
+    for (const ext of visibles) {
+        if (on) _fsPick.add(ext); else _fsPick.delete(ext);
+    }
+    _fsDraw();
+}
+
+/** Emparejar a mano un departamento con una empresa de aquí — o deshacerlo.
+ *
+ *  Es lo que el panel no puede deducir. Al elegir una, la fila pasa a decir «se adopta»: no se
+ *  crea nada, se le pone el origen a la que ya estaba. */
+function _fsSetLink(ext, uid) {
+    const k = String(ext);
+    const fila = (( _fsPlan || {}).plan || []).find(p => String(p.external_id) === k) || {};
+    // Elegir la que el plan ya había encontrado no es un emparejamiento a mano: es dejarlo como
+    // estaba. Guardarlo como si lo fuera haría que la fila dijera «se adopta» cuando no cambia
+    // de empresa — y que se marcara sola una que no había nada que hacerle.
+    if (uid && uid === String(fila.uid || '')) { delete _fsLink[k]; _fsDraw(); return; }
+    if (uid) { _fsLink[k] = uid; _fsPick.add(k); } else { delete _fsLink[k]; }
+    _fsDraw();
+}
+
+/** El plan, en una tabla: una fila por departamento y qué se haría con él.
+ *
+ *  Con la fila que CAMBIA marcada y diciendo de qué a qué. «12 se corrigen» es un número; lo que
+ *  alguien mira antes de aceptar es cuál de sus sociedades va a cambiar de nombre. */
+/** Sólo las filas: se rehacen al marcar, al emparejar y al filtrar. */
+/** Si esta fila es de una empresa que ya existe aquí: la trajo una importación anterior, o
+ *  alguien la acaba de emparejar a mano. Es la línea que parte la lista en dos. */
+function _fsLinked(p) {
+    return !!(String((p || {}).uid || '') || _fsLink[String((p || {}).external_id)]);
+}
+
+/** Las filas, **en dos grupos**: primero lo que ya está vinculado y luego lo demás.
+ *
+ *  Con cincuenta y nueve departamentos, las tres que ya se mantienen aquí —que son las que se
+ *  vienen a mirar— salían repartidas por orden alfabético entre cincuenta y seis que no. Son dos
+ *  preguntas distintas: «¿qué le pasa a lo mío?» y «¿qué más hay?».
+ *
+ *  Cada grupo dice cuántos tiene, y el separador sólo aparece si hay de los dos: un título sobre
+ *  una lista entera no separa nada. */
+function _fsRowsHtml(d) {
+    const todo = ((d || {}).plan || []).filter(_fsMatch);
+    const vinculadas = todo.filter(_fsLinked);
+    const nuevas = todo.filter(p => !_fsLinked(p));
+    const cabecera = (clave, n) => `<tr class="table-active"><td colspan="6"
+        class="fw-semibold ss-fs-2 text-muted">${esc(t(clave))} (${n})</td></tr>`;
+    const parte = (filas, clave) => (filas.length
+        ? ((vinculadas.length && nuevas.length) ? cabecera(clave, filas.length) : '')
+          + _fsRowsOf(d, filas)
+        : '');
+    return parte(vinculadas, 'fs_group_linked') + parte(nuevas, 'fs_group_new');
+}
+
+function _fsRowsOf(d, plan) {
+    const tono = {create: 'text-bg-success', update: 'text-bg-warning',
+                  adopt: 'text-bg-info', same: 'text-bg-secondary'};
+    const ofrecidas = (uid) => ((d || {}).orgs || []).filter(
+        o => o.uid === uid || !(o.source === 'freshservice' && o.external_id));
+    return plan.map(p => {
+        const ext = String(p.external_id);
+        // A quién está atada AHORA: lo que se haya elegido a mano, y si no, la que el plan ya
+        // encontró. Sin esto, una fila que lleva meses atada salía como «crear una nueva» — que
+        // es justo lo contrario de lo que iba a pasar.
+        const suya = String(p.uid || '');
+        const atada = (ext in _fsLink) ? _fsLink[ext] : suya;
+        const accion = (atada && atada !== suya) ? 'adopt' : p.action;
+        const puede = accion !== 'same' || (atada && atada !== suya);
+        const marcada = _fsPick.has(ext);
+        // Lo que cambia, dicho como cambio: antes → ahora. Meter el nombre viejo en la columna
+        // de la descripción hacía que la fila pareciera traer los datos de aquí — reportado
+        // desde la pantalla, y era exactamente eso: se leía «Amixalan» donde se esperaba la
+        // descripción de Freshservice.
+        const antes = (p.was || {});
+        const cambia = (campo) => (accion === 'update' || accion === 'adopt')
+            && String(antes[campo] || '') !== String(p[campo] || '')
+            && String(antes[campo] || '');
+        const viejo = (campo) => cambia(campo)
+            ? `<div class="text-muted ss-fs-1 text-decoration-line-through">${
+                esc(antes[campo])}</div>` : '';
+        return `<tr${marcada ? '' : ' class="opacity-50"'}>
+        <td class="text-center"><input type="checkbox" class="form-check-input"
+                ${marcada ? 'checked' : ''}${puede ? '' : ' disabled'}
+                onchange="_fsToggle(${jsStr(ext)}, this.checked)"></td>
+        <td><span class="badge ${tono[accion] || 'text-bg-secondary'}">${
+            esc(t('fs_act_' + accion))}</span></td>
+        <td class="fw-semibold">${esc(p.name)}${viejo('name')}</td>
+        <td>${p.short ? `<span class="badge bg-body-secondary text-body-secondary border
+            fw-normal">${esc(p.short)}</span>` : ''}${viejo('short')}</td>
+        <td class="text-muted small">${esc(p.description || '')}${viejo('description')}</td>
+        <td><select class="form-select form-select-sm"
+                onchange="_fsSetLink(${jsStr(ext)}, this.value)">
+            ${suya ? '' : `<option value=""${atada ? '' : ' selected'}>${
+                esc(t('fs_link_none'))}</option>`}
+            ${ofrecidas(suya).map(o => `<option value="${escAttr(o.uid)}"${
+                atada === o.uid ? ' selected' : ''}>${esc(o.name)}${
+                o.short ? ` (${esc(o.short)})` : ''}</option>`).join('')}
+        </select></td>
+    </tr>`;
+    }).join('');
+}
+
+/** La tabla entera: resumen, buscador y filas. Se pinta UNA vez por vista previa; a partir de
+ *  ahí sólo se rehacen las filas. */
+function _fsPlanHtml(d) {
+    const plan = (d && d.plan) || [];
+    if (!plan.length) return `<div class="text-muted">${esc(t('fs_preview_none'))}</div>`;
+    const c = d.counts || {};
+    const tono = {create: 'text-bg-success', update: 'text-bg-warning',
+                  adopt: 'text-bg-info', same: 'text-bg-secondary'};
+    const filas = _fsRowsHtml(d);
+    const huerfanas = (d.orphans || []).length
+        ? `<div class="alert alert-warning py-2 px-3 mt-3 mb-0 small">${
+            esc(tf('fs_orphans', String(d.orphans.length)))}
+            <div class="mt-1">${d.orphans.map(o =>
+                `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1"
+                    >${esc(o.name)}</span>`).join('')}</div></div>`
+        : '';
+    return `<div class="small text-muted mb-2">${esc(tf('fs_preview_summary',
+            String(d.total || plan.length), String(c.create || 0), String(c.update || 0),
+            String(c.adopt || 0), String(c.same || 0)))}</div>
+    <div class="d-flex align-items-center gap-2 mb-2">
+        <input type="search" class="form-control form-control-sm" style="max-width:22rem"
+               placeholder="${escAttr(t('fs_filter_ph'))}" value="${escAttr(_fsQuery)}"
+               oninput="_fsFilter(this.value)">
+        <span class="small text-muted flex-grow-1" id="fsPlanCount"></span>
+        <button class="btn btn-sm btn-secondary" id="fsPlanAll"
+            onclick="_fsToggleAll(true)">${esc(t('select_all'))}</button>
+        <button class="btn btn-sm btn-secondary" id="fsPlanNone"
+            onclick="_fsToggleAll(false)">${esc(t('clear_selection'))}</button>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead><tr class="text-muted ss-fs-1 text-uppercase">
+                <th style="width:2.5rem"></th>
+                <th style="width:7rem"></th>
+                <th>${esc(t('orgs_name'))}</th>
+                <th style="width:6rem">${esc(t('orgs_short'))}</th>
+                <th>${esc(t('orgs_desc'))}</th>
+                <th style="width:14rem">${esc(t('fs_link_col'))}</th>
+            </tr></thead>
+            <tbody id="fsPlanRows">${filas}</tbody>
+        </table>
+    </div>${huerfanas}`;
+}
+
+/** Aplicarlo. El servidor vuelve a pedir la lista en vez de fiarse de lo que se enseñó: entre
+ *  mirar y aceptar pasa un rato, y lo que se escribe tiene que ser lo que hay ahora. */
+async function freshserviceApply() {
+    // Y mientras escribe, el botón lo dice y no se deja pulsar otra vez: son sesenta filas y un
+    // segundo clic las escribiría dos veces.
+    const btn = document.getElementById('btnFsApply');
+    const antes = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>${
+            esc(t('fs_working'))}`;
+    }
+    // Lo marcado y lo emparejado, no el plan: el servidor lo vuelve a calcular sobre lo que hay
+    // ahora, y lo que esta pantalla puede decirle es qué se eligió, no qué había.
+    const r = await apiSend('POST', '/api/v1/providers/freshservice/import',
+                            {pick: Array.from(_fsPick), link: _fsLink});
+    if (btn) { btn.disabled = false; btn.innerHTML = antes; }
+    if (!r.ok) return showToast(r.error || t('fs_err_net'), 'danger');
+    const h = r.data || {};
+    showToast(tf('fs_done', String(h.created || 0), String(h.updated || 0),
+                 String(h.adopted || 0)), 'success');
+    // Lo que no entró se dice aparte y en rojo: un aviso verde con un «y tres fallaron» dentro
+    // se lee como que fue bien.
+    if ((h.failed || []).length) {
+        showToast(tf('fs_done_failed', String(h.failed.length)), 'danger');
+    }
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('fsPlanModal')).hide();
+    // Y si la pantalla de empresas está delante, que enseñe lo que ha quedado.
+    if (typeof renderOrgs === 'function' && document.getElementById('orgs-list-container')) {
+        _orgsData.loaded = false;
+        renderOrgs();
+    }
+}
+
+
+/** Buscar por nombre, abreviatura o descripción. Las tres a la vez y sin distinguir mayúsculas:
+ *  quien busca «amixalan» no sabe si lo que recuerda era el nombre o la chapa.
+ *
+ *  Lo que se filtra es lo que se VE. Lo marcado no se toca —vive en `_fsPick`, por identificador—
+ *  así que filtrar, marcar tres, cambiar el filtro y marcar otras dos deja las cinco marcadas.
+ *  Al revés sería un cuadro donde escribir en el buscador borra trabajo. */
+function _fsMatch(p) {
+    const q = _fsQuery.trim().toLowerCase();
+    if (!q) return true;
+    return `${p.name || ''} ${p.short || ''} ${p.description || ''}`.toLowerCase().includes(q);
+}
+
+function _fsFilter(q) {
+    _fsQuery = String(q || '');
+    const filas = document.getElementById('fsPlanRows');
+    if (filas) filas.innerHTML = _fsRowsHtml(_fsPlan || {});
+    _fsSyncHead();
+}
+
+/** Poner al día lo que la cabecera dice sin volver a dibujarla: cuántas se ven, cuántas están
+ *  marcadas y si los dos botones tienen algo que hacer. */
+function _fsSyncHead() {
+    const plan = ((_fsPlan || {}).plan || []).filter(_fsMatch);
+    const hacen = plan.filter(p => p.action !== 'same' || _fsLink[String(p.external_id)]);
+    const marcadas = hacen.filter(p => _fsPick.has(String(p.external_id))).length;
+    const el = document.getElementById('fsPlanCount');
+    if (el) el.textContent = tf('fs_shown', String(plan.length), String(marcadas));
+    const todos = document.getElementById('fsPlanAll');
+    if (todos) todos.disabled = !hacen.length || marcadas === hacen.length;
+    const ninguna = document.getElementById('fsPlanNone');
+    if (ninguna) ninguna.disabled = !marcadas;
+}
+
+/** Qué sale marcado al abrir: **sólo lo que ya es de esta casa y ha cambiado** (`update`).
+ *
+ *  Refrescar lo que ya se mantiene aquí es rutina; traer una empresa nueva es una decisión —
+ *  cincuenta y nueve departamentos no son cincuenta y nueve sociedades de las que aquí se quiera
+ *  saber nada. Marcarlas todas de serie hacía que la rutina creara cincuenta y seis filas que
+ *  nadie pidió, salvo que alguien se acordara de desmarcarlas.
+ *
+ *  Con nombre y en un solo sitio porque es una REGLA, no un detalle del dibujado: la prueba que
+ *  la vigilaba se escribió repitiéndola en vez de llamándola, y así podía cambiarse sin que
+ *  fallara nada. Encontrado por mutación. */
+function _fsDefaultPick(plan) {
+    return new Set((plan || []).filter(p => p.action === 'update')
+                               .map(p => String(p.external_id)));
+}

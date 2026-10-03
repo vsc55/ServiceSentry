@@ -154,7 +154,7 @@ function _eventModalForm() {
             <div class="tab-pane fade show active" id="evm-pane-general" role="tabpanel">
                 <div class="row g-2 mb-2">
                     <div class="col-sm-6"><label class="form-label small mb-1">${esc(t('event_name'))}${_evHelp('event_name_hint')}</label>
-                        <input id="evm-name" class="form-control form-control-sm" value="${escAttr(d.name || '')}"
+                        <input id="evm-name" class="form-control form-control-sm" required value="${escAttr(d.name || '')}"
                             oninput="_eventDraft.name=this.value;this.classList.remove('is-invalid')">
                         <div class="invalid-feedback" id="evm-name-error"></div></div>
                     <div class="col-sm-3"><label class="form-label small mb-1">${esc(t('event_source'))}${_evHelp('event_source_hint')}</label>

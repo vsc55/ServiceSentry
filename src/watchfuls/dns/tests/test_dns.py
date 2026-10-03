@@ -330,56 +330,56 @@ class TestDnsDiscovery:
 
 
 class _FakeStore:
-    def __init__(self, hosts):
-        self._h = hosts
+    def __init__(self, devices):
+        self._h = devices
     def get(self, uid, **_kw):
         return self._h.get(uid)
 
 
-def _remote_host(os='linux'):
+def _remote_device(os='linux'):
     return {'uid': 'h1', 'address': '10.0.0.9', 'kind': 'remote', 'os': os,
             'maintenance': False, 'profiles': {'ssh': {'ssh_user': 'root'}}}
 
 
-def _local_host(os='linux'):
+def _local_device(os='linux'):
     return {'uid': 'h1', 'address': '127.0.0.1', 'kind': 'local', 'os': os,
             'maintenance': False, 'profiles': {}}
 
 
 class TestDnsRemote:
-    """Host-aware DNS: the query runs ON the bound host via SSH (dig/nslookup)."""
+    """Device-aware DNS: the query runs ON the bound device via SSH (dig/nslookup)."""
 
-    def _w(self, items, host=None):
+    def _w(self, items, device=None):
         from watchfuls.dns import Watchful
         mm = create_mock_monitor({'watchfuls.dns': {'list': items}})
-        mm._hosts_store = _FakeStore({'h1': host or _remote_host()})
+        mm._devices_store = _FakeStore({'h1': device or _remote_device()})
         return Watchful(mm)
 
     def test_remote_a_via_dig_targets_nameserver(self):
         w = self._w({'c': {'enabled': True, 'host': 'cerebelum.lan', 'record_type': 'A',
-                           'host_uid': 'h1', 'nameserver': '192.168.110.253'}})
-        with patch.object(w, 'host_exec', return_value=('192.168.110.10\n', '', 0)) as he:
+                           'device_uid': 'h1', 'nameserver': '192.168.110.253'}})
+        with patch.object(w, 'device_exec', return_value=('192.168.110.10\n', '', 0)) as he:
             items = w.check().list
         cmd = he.call_args.args[1]
         assert 'dig' in cmd and '@192.168.110.253' in cmd
         assert items['c']['status'] is True
         assert items['c']['other_data']['resolved'] == ['192.168.110.10']
 
-    def test_local_host_also_uses_dig(self):
+    def test_local_device_also_uses_dig(self):
         from watchfuls.dns import Watchful
         mm = create_mock_monitor({'watchfuls.dns': {'list': {
-            'c': {'enabled': True, 'host': 'x.lan', 'record_type': 'A', 'host_uid': 'h1'}}}})
-        mm._hosts_store = _FakeStore({'h1': _local_host()})
+            'c': {'enabled': True, 'host': 'x.lan', 'record_type': 'A', 'device_uid': 'h1'}}}})
+        mm._devices_store = _FakeStore({'h1': _local_device()})
         w = Watchful(mm)
-        with patch.object(w, 'host_exec', return_value=('1.2.3.4\n', '', 0)) as he:
+        with patch.object(w, 'device_exec', return_value=('1.2.3.4\n', '', 0)) as he:
             items = w.check().list
-        assert 'dig' in he.call_args.args[1]   # local host runs dig too (not dnspython)
+        assert 'dig' in he.call_args.args[1]   # local device runs dig too (not dnspython)
         assert items['c']['status'] is True
 
     def test_remote_failure_reports_error(self):
         w = self._w({'c': {'enabled': True, 'host': 'x.lan', 'record_type': 'NS',
-                           'host_uid': 'h1'}})
-        with patch.object(w, 'host_exec', return_value=('', ';; connection timed out', 9)):
+                           'device_uid': 'h1'}})
+        with patch.object(w, 'device_exec', return_value=('', ';; connection timed out', 9)):
             items = w.check().list
         assert items['c']['status'] is False
         assert 'timed out' in items['c']['message'].lower()
@@ -394,17 +394,17 @@ class TestDnsRemote:
     def test_discover_probe_remote_parses_combined(self):
         from watchfuls.dns import Watchful
         out = "##A##\n1.2.3.4\n##AAAA##\n##MX##\n10 mail.x.\n"
-        with patch('lib.core.hosts.runner.run', return_value=(out, '', 0)):
-            recs = Watchful._discover_probe_remote(_remote_host(), 'x.lan', 5)
+        with patch('lib.core.devices.runner.run', return_value=(out, '', 0)):
+            recs = Watchful._discover_probe_remote(_remote_device(), 'x.lan', 5)
         types = {r['record_type'] for r in recs}
         assert 'A' in types and 'MX' in types and 'AAAA' not in types
         assert next(r for r in recs if r['record_type'] == 'A')['fill_value'] == '1.2.3.4'
 
-    def test_discover_uses_host_via_ssh_when_remote(self):
+    def test_discover_uses_device_via_ssh_when_remote(self):
         from watchfuls.dns import Watchful
-        with patch('lib.core.hosts.runner.run', return_value=('##A##\n9.9.9.9\n', '', 0)):
+        with patch('lib.core.devices.runner.run', return_value=('##A##\n9.9.9.9\n', '', 0)):
             recs = Watchful.discover({'_discovery_input': {'domain': 'x.lan'},
-                                      '__host__': _remote_host()})
+                                      '__device__': _remote_device()})
         assert any(r['record_type'] == 'A' and r['fill_value'] == '9.9.9.9' for r in recs)
 
 

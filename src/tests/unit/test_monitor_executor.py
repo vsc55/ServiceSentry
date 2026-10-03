@@ -69,8 +69,8 @@ class _Monitor:
     def _get_enabled_modules(self):
         return list(self._delays)
 
-    def check_module(self, name, only_host=''):
-        self.scopes.append(only_host)
+    def check_module(self, name, only_device=''):
+        self.scopes.append(only_device)
         time.sleep(self._delays[name])
         return True, name, _Result({f'{name}-item': (True, 'ok', {'v': 1})})
 
@@ -239,10 +239,10 @@ class TestSayingWhereItIs:
                     cb('running', module_name, detail,
                        {'step': step, 'n': n, 'total': total})
 
-            def check_module(self, name, only_host=''):
+            def check_module(self, name, only_device=''):
                 self.report_progress(name, 'erebor — Synology disks',
                                      step='Leyendo las métricas', n=3, total=24)
-                return super().check_module(name, only_host)
+                return super().check_module(name, only_device)
 
         run_checks(_Chatty({'snmp': 0}), ['snmp'], timeout=5,
                    progress_cb=lambda s, m, d='', x=None: seen.append((s, m, d, x)))
@@ -262,9 +262,9 @@ class TestSayingWhereItIs:
                     cb('running', module_name, detail,
                        {'step': step, 'n': n, 'total': total})
 
-            def check_module(self, name, only_host=''):
+            def check_module(self, name, only_device=''):
                 self.report_progress(name, '', step='una fase que nadie del núcleo conoce')
-                return super().check_module(name, only_host)
+                return super().check_module(name, only_device)
 
         run_checks(_Phased({'snmp': 0}), ['snmp'], timeout=5,
                    progress_cb=lambda s, m, d='', x=None: seen.append(x))
@@ -400,7 +400,7 @@ class TestARunAboutOneMachine:
 
     def test_the_machine_reaches_the_module(self):
         mon = _Monitor({'ping': 0})
-        run_checks(mon, ['ping'], timeout=5, only_host='h1')
+        run_checks(mon, ['ping'], timeout=5, only_device='h1')
         assert mon.scopes == ['h1']
 
     def test_and_a_narrowed_run_never_prunes(self):
@@ -408,5 +408,5 @@ class TestARunAboutOneMachine:
         it was never asked about them, and treating the two the same is how a button that
         refreshes one device empties the screen for thirty-nine."""
         mon = _Monitor({'ping': 0})
-        run_checks(mon, ['ping'], timeout=5, only_host='h1')
+        run_checks(mon, ['ping'], timeout=5, only_device='h1')
         assert mon.prunes == [False]

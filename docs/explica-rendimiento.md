@@ -66,12 +66,12 @@ Todos `daemon=True`, por lo que no impiden el cierre del proceso:
 ### El ciclo de monitorización
 
 - El tiempo de un ciclo ≈ el módulo/item **más lento** (los rápidos esperan en el `wait`).
-  Ejemplos de checks lentos por naturaleza: SSH a hosts remotos, HTTP con timeouts,
+  Ejemplos de checks lentos por naturaleza: SSH a dispositivos remotos, HTTP con timeouts,
   resolución DNS, SNMP con reintentos.
 - Con muchos módulos, el tope de **16 workers** entre módulos puede serializar parcialmente.
   El paralelismo por-item dentro de cada módulo lo compensa para módulos con muchos items.
 - **Recomendación**: ajustar el `interval` del scheduler por encima del tiempo típico de
-  ciclo; usar `workers` por módulo para módulos con muchos items (p. ej. muchos hosts SSH).
+  ciclo; usar `workers` por módulo para módulos con muchos items (p. ej. muchos dispositivos SSH).
 
 ### Base de datos
 
@@ -80,11 +80,27 @@ Todos `daemon=True`, por lo que no impiden el cierre del proceso:
   (modo microservicios, HA) usar **PostgreSQL/MySQL**, que manejan concurrencia real de
   escritura. Ver [ref-esquema-bd.md](ref-esquema-bd.md) y [explica-servicios.md](explica-servicios.md).
 - **Índices**: las tablas de series y de alto volumen llevan índices compuestos pensados para
-  sus consultas (p. ej. `history` por `(item_uid, ts)` y `(module, key, ts)`; `syslog` por
+  sus consultas (`history` por `(series_id, ts, status)`; `syslog` por
   `ts`/`severity`/`hostname`/`app`/`facility`). Ver el detalle en [ref-esquema-bd.md](ref-esquema-bd.md).
+- **El catálogo de series no recorre el histórico.** `get_index` y `latest_by_series` leen el
+  resumen que guarda `history_series` (cuántas muestras, cuántas buenas, qué dijo la última). Es
+  la diferencia entre una pregunta de coste fijo y una que crece con los datos: medido sobre 30
+  días de una instalación real (5.266.008 muestras, 1.465 series), **235.674 → 35 ms** y
+  **69.100 → 30 ms**. Lo mantiene `record()` en el `UPDATE` que ya hacía; lo repara `prune()`.
+- **Las medidas son filas, no un documento** (`history_fact`, una por valor medido). Leer
+  **una** serie cuesta algo más que antes —8 → 16 ms sobre 30 días de una instalación real— y a
+  cambio las preguntas que cruzan series pasan a ser posibles: los diez que más de 1.264 a 97 ms,
+  «cuáles dieron errores» de 915 a 1. El precio es disco: 2.474 MB contra 877. Ver
+  [ref-esquema-bd.md](ref-esquema-bd.md) y el paso 12 de [explica-snmp.md](explica-snmp.md).
+- **Escribir en autocommit no es escribir.** El conector SQLite abre con `isolation_level=None`,
+  así que cada sentencia se sincroniza a disco por su cuenta. Todo lo que escriba en volumen
+  —migrar, podar— tiene que ir dentro de `with db.transaction()`, y **nada de lo que llame desde
+  dentro puede confirmar**: medido, 427 s contra 93 al podar 3,1 millones de medidas, y una
+  migración siete veces más lenta por un `commit()` escondido tres llamadas más abajo
+  ([caso-diagnostico.md](caso-diagnostico.md)).
 - **Downsampling de historial**: las gráficas agregan por buckets con
   `CAST(FLOOR((ts - ?) / ?) AS <int>)` en SQL (portable), evitando traer todas las filas al
-  cliente ([history/store.py:253](../src/lib/core/history/store.py#L253)).
+  cliente ([history/store.py:461](../src/lib/core/history/store.py#L461)).
 
 ### Reconcile de esquema en el arranque
 
@@ -160,7 +176,7 @@ insertar, el store poda las filas más antiguas por encima del tope:
 
 ## Recomendaciones de escalado
 
-1. **Muchos hosts/items** → subir `workers` por módulo y separar el monitor a un proceso
+1. **Muchos dispositivos/items** → subir `workers` por módulo y separar el monitor a un proceso
    **standalone** (modo microservicios) con BD PostgreSQL/MySQL compartida.
 2. **Alta disponibilidad** → varios monitores con lease de líder (`service_leader`); solo el
    líder ejecuta, el resto en espera. Ver [explica-servicios.md](explica-servicios.md) y [caso-kubernetes.md](caso-kubernetes.md).

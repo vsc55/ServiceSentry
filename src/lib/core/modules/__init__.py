@@ -14,10 +14,10 @@ What the routes call is Flask-free and split by concept:
 * ``items`` — an item's identity: its uid, its name, its schema, and keeping them in step
   (rekeying, duplicates, the clone mark, where a row came from).
 * ``authz`` — may this save touch this item. The module save crosses domains — a check
-  belongs to a module and is bound to a host or a cluster — so it is its own file.
-* ``provisioning`` — credentials kept out of the payload, and the hosts a module declares.
+  belongs to a module and is bound to a device or a cluster — so it is its own file.
+* ``provisioning`` — credentials kept out of the payload, and the devices a module declares.
 * ``actions`` — the config a watchful ACTION runs with, resolved the way a scheduled check
-  would: bound host, restored secrets, referenced credential.
+  would: bound device, restored secrets, referenced credential.
 
 The store/facade are also imported by the standalone monitoring service (core layer).
 Kept light (no import of ``store`` here) so permission discovery stays cheap.

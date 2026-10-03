@@ -50,7 +50,7 @@ class TestApiRunChecks:
 
     def test_run_all_routes_notifications_through_host_router(self, admin, monkeypatch, tmp_path):
         """On-demand "Run all" must notify like the daemon: the transient monitor gets a
-        cycle notifier routed through the host's core notification router (wa._notify)."""
+        cycle notifier routed through the device's core notification router (wa._notify)."""
         import lib
         import lib.services.monitoring.executor as _executor
         captured = {}

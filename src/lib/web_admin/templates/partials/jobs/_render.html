@@ -21,7 +21,26 @@ let _jobsTimer = null;
 //: tick — a table of finished work does not change while you read it, and re-asking for a
 //: hundred rows every two seconds to watch a running job is traffic for nothing.
 let _jobsPast = null;
-let _jobsTab = 'live';
+//: Y la tercera: lo que se mueve por detrás sin que nadie lo haya pedido. Se pide al abrir la
+//: pestaña, como el pasado — la respuesta es la misma con el panel parado que trabajando, que
+//: es justamente por lo que merece una lista: lo que no se ve es lo que nadie revisa.
+let _jobsTimers = null;
+//: Cuál de las tres está delante. **Recordada**, porque esta sección se recarga: se abre el
+//: histórico o los temporizadores, se pulsa F5 —o se vuelve desde otra sección— y sin esto
+//: aparece siempre «En marcha», que es la que menos falta hace mirar dos veces. La convención
+//: es la del resto del panel: `ss_active_subtab_<sección>`.
+let _jobsTab = _jobsSavedTab();
+
+function _jobsSavedTab() {
+    try {
+        const v = localStorage.getItem('ss_active_subtab_jobs');
+        return ['past', 'timers'].includes(v) ? v : 'live';
+    } catch (_) {
+        // Una ventana privada, o el almacenamiento del sitio bloqueado: se pierde la comodidad
+        // de recordar la pestaña, no la pantalla.
+        return 'live';
+    }
+}
 //: The running job whose progress is open in the dialog, if any. Kept so the poll can keep
 //: the dialog fresh: opening one and watching it stop moving is the same complaint the whole
 //: screen exists to answer, one level down.
@@ -37,7 +56,10 @@ async function renderJobs() {
     const pane = document.getElementById('jobs-container');
     if (!pane) return;
     await _jobsLoad();
+    // Lo que pida la pestaña recordada. Sin esto, recargar sobre «Temporizadores» abría esa
+    // pestaña con la lista vacía: la pinta quien la recuerda, pero la pide quien la pulsa.
     if (_jobsTab === 'past' && !_jobsPast) await _jobsPastLoad();
+    if (_jobsTab === 'timers' && !_jobsTimers) await _jobsTimersLoad();
     _jobsPaint();
     _jobsSchedule();
 }
@@ -46,11 +68,26 @@ async function _jobsPastLoad() {
     _jobsPast = await apiGet('/api/v1/jobs/history?limit=100') || {jobs: [], kept: true};
 }
 
+async function _jobsTimersLoad() {
+    _jobsTimers = await apiGet('/api/v1/jobs/timers') || {timers: [], summary: {}, now: 0};
+    // La diferencia entre los dos relojes, guardada UNA vez. El servidor manda `now`
+    // precisamente para esto: el del navegador puede ir un minuto adelantado, y una cuenta
+    // atrás calculada sobre él enseña como pendiente algo que ya corrió.
+    _jobsTimerSkew = (_jobsTimers.now || 0) - Date.now() / 1000;
+}
+
 async function setJobsTab(which) {
-    _jobsTab = which === 'past' ? 'past' : 'live';
+    _jobsTab = ['past', 'timers'].includes(which) ? which : 'live';
+    try { localStorage.setItem('ss_active_subtab_jobs', _jobsTab); } catch (_) { /* da igual */ }
     if (_jobsTab === 'past' && !_jobsPast) await _jobsPastLoad();
+    if (_jobsTab === 'timers' && !_jobsTimers) await _jobsTimersLoad();
     _jobsPaint();
 }
+
+/** Volver a preguntar por los temporizadores. Tiene botón por lo mismo que el pasado: esta
+ *  lista no se refresca sola —cambia cuando alguien toca un ajuste o se reparte un arriendo,
+ *  no cada dos segundos— y sin botón habría que salir de la sección y volver. */
+async function _jobsTimersRefresh() { _jobsTimers = null; await _jobsTimersLoad(); _jobsPaint(); }
 
 /** Re-ask for the history — the only half of this screen with a refresh button, because the
  *  live one refreshes itself. */
@@ -90,6 +127,9 @@ function _jobsPaint() {
         if (box && box.classList.contains('show')) _jobsShowLive(_jobsWatching);
         else _jobsWatching = '';
     }
+    // Y la cuenta atrás, que corre en el navegador entre una pedida y la siguiente: un número
+    // quieto que dice «dentro de 3 min» lleva mintiendo desde que se pintó.
+    _jobsTimersSchedule();
 }
 
 /** One running job's checklist, in a dialog.
@@ -172,45 +212,23 @@ function _jobsHtml(d) {
     const sum = d.summary || {};
     return `<div class="p-3">
         <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
-            <h5 class="mb-0"><i class="bi bi-hourglass-split me-2"></i>${esc(t('jobs_title'))}</h5>
-            ${_jobsCount(sum.running || 0, 'text-bg-primary', t('jobs_running'))}
-            ${_jobsCount(sum.failed || 0, 'text-bg-danger', t('jobs_failed'))}
+            ${_jobsHead(sum)}
             <button class="btn btn-sm btn-secondary ms-auto"
-                onclick="${_jobsTab === 'past' ? '_jobsPastRefresh()' : 'renderJobs()'}">
+                onclick="${_jobsRefreshCall()}">
                 <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh'))}</button>
         </div>
         ${_jobsTabsHtml(sum)}
         <div class="text-muted ss-fs-2 mb-3">
             <i class="bi bi-info-circle me-1"></i>${esc(
-                _jobsTab === 'past' ? t('jobs_past_note') : t('jobs_note'))}</div>
-        ${_jobsTab === 'past' ? _jobsPastHtml() : (jobs.length
+                {past: t('jobs_past_note'), timers: t('jobs_timers_note')
+                }[_jobsTab] || t('jobs_note'))}</div>
+        ${_jobsTab === 'timers' ? _jobsTimersHtml()
+          : _jobsTab === 'past' ? _jobsPastHtml() : (jobs.length
           ? `<div class="d-flex flex-column gap-2">
                 ${jobs.map(j => _jobsRow(j, d.now)).join('')}</div>`
           : `<div class="text-center text-muted py-5">
                 <i class="bi bi-cup-hot ss-empty-icon"></i>${esc(t('jobs_empty'))}</div>`)}
     </div>`;
-}
-
-/** The two halves, as tabs: what is happening and what happened.
- *
- *  Two questions from two places — one is the packages' own memory, the other a table written
- *  where each piece of work ENDED — so they are two lists and not one with a mixed order that
- *  puts a finished backup between two running collections. */
-function _jobsTabsHtml(sum) {
-    // The count comes with the LIVE answer (a `COUNT(*)`, not the rows), so the badge is
-    // right before the tab has ever been opened — which is the only time it is news. The
-    // loaded list wins once there is one: it is the same number, one refresh newer.
-    const past = _jobsPast ? (_jobsPast.total || (_jobsPast.jobs || []).length)
-                           : (sum.history || 0);
-    const tab = (id, label, badge) => `<li class="nav-item">
-        <button class="nav-link${_jobsTab === id ? ' active' : ''}"
-                onclick="setJobsTab(${jsStr(id)})">${esc(label)}${badge
-            ? `<span class="badge rounded-pill bg-body-secondary text-body-secondary fw-normal ms-1"
-                >${esc(badge)}</span>` : ''}</button></li>`;
-    return `<ul class="nav nav-tabs mb-3">
-        ${tab('live', t('jobs_tab_live'), sum.running || '')}
-        ${tab('past', t('jobs_tab_past'), past || '')}
-    </ul>`;
 }
 
 /** What has finished. A TABLE and not cards: these are read down a column — when, what, how
@@ -293,10 +311,6 @@ async function _jobsOpenLog(uid) {
           : `<div class="text-muted small">${esc(t('jobs_log_empty'))}</div>`}`, 'primary');
 }
 
-function _jobsCount(n, cls, label) {
-    if (!n) return '';
-    return `<span class="badge ${cls}">${esc(n)} ${esc(label)}</span>`;
-}
 
 //: What each state looks like. One map, so a badge and a bar can never disagree about
 //: whether something is still going.

@@ -139,13 +139,13 @@ class TestWhichDevicesAreSampled:
         res, _mon = env.run(_server(device_profiles='gone'), dev)
         assert res == {} and dev.asked == []
 
-    def test_a_host_in_maintenance_is_not_charted(self, env):
+    def test_a_device_in_maintenance_is_not_charted(self, env):
         """Somebody is working on it, and a graph of the work is not a graph of the machine."""
         env.profile('p1', [GAUGE])
         dev = _Dev(gets={GAUGE['oid']: ('41', None)})
         srv = _server()
-        with patch.object(Watchful, 'resolve_host',
-                          lambda self, item: {**item, '_host_maintenance': True}):
+        with patch.object(Watchful, 'resolve_device',
+                          lambda self, item: {**item, '_device_maintenance': True}):
             res, _mon = env.run(srv, dev)
         assert res == {} and dev.asked == []
 
@@ -790,13 +790,13 @@ class TestAProbeProvesItAnswersAndStopsThere:
             return {'1': '41'}, None
 
         cfg = {'watchfuls.snmp': {'servers': {'srv': {
-            'enabled': True, 'device_profiles': ','.join(cat), 'host_uid': 'h1',
+            'enabled': True, 'device_profiles': ','.join(cat), 'device_uid': 'h1',
             'community': 'public', 'version': '2c'}}}}
         with patch('watchfuls.snmp._startup_compile_mibs'), \
              patch.object(Watchful, '_snmp_walk_oid', _walk), \
              patch.object(Watchful, '_profile_catalog', lambda _s: cat), \
              patch.object(Watchful, 'is_probe', property(lambda _s: probe)):
-            res = check_runner.run_module_check('snmp', cfg, hosts_store=_Store(),
+            res = check_runner.run_module_check('snmp', cfg, devices_store=_Store(),
                                                 modules_dir='watchfuls')
         return res, walks['n']
 
@@ -823,13 +823,13 @@ class TestAProbeProvesItAnswersAndStopsThere:
 
         cat = self._many(2, 2)
         cfg = {'watchfuls.snmp': {'servers': {'srv': {
-            'enabled': True, 'device_profiles': ','.join(cat), 'host_uid': 'h1',
+            'enabled': True, 'device_profiles': ','.join(cat), 'device_uid': 'h1',
             'community': 'public', 'version': '2c'}}}}
         with patch('watchfuls.snmp._startup_compile_mibs'), \
              patch.object(Watchful, '_snmp_walk_oid', lambda *_a, **_k: ({}, 'timeout')), \
              patch.object(Watchful, '_profile_catalog', lambda _s: cat), \
              patch.object(Watchful, 'is_probe', property(lambda _s: True)):
-            res = check_runner.run_module_check('snmp', cfg, hosts_store=_Store(),
+            res = check_runner.run_module_check('snmp', cfg, devices_store=_Store(),
                                                 modules_dir='watchfuls')
         assert res and res[0]['key'] == 'srv/metrics'
 
@@ -843,7 +843,7 @@ class TestAProbeProvesItAnswersAndStopsThere:
 
 
 class TestTheProbeThePanelRuns:
-    """"Test" in the host modal does not go through the monitor: it builds a throwaway
+    """"Test" in the device modal does not go through the monitor: it builds a throwaway
     Watchful with one item and reports whatever came back. A server with profiles and no OID
     checks used to produce nothing there, and "nothing" is rendered as "nothing to test" —
     which reads as a misconfiguration rather than as a feature that was not wired.
@@ -861,13 +861,13 @@ class TestTheProbeThePanelRuns:
         env.profile('p1', [GAUGE])
         dev = _Dev(gets={GAUGE['oid']: ('41', None)})
         cfg = {'watchfuls.snmp': {'servers': {'srv': {
-            'enabled': True, 'device_profiles': 'p1', 'host_uid': 'h1',
+            'enabled': True, 'device_profiles': 'p1', 'device_uid': 'h1',
             'community': 'public', 'version': '2c'}}}}
         # The probe builds its own monitor with NO data directory, so only the shipped
         # catalogue is visible there — the profile has to come from a place it can reach.
         with patch('watchfuls.snmp._startup_compile_mibs'),              patch.object(Watchful, '_snmp_get', dev.get),              patch.object(Watchful, '_snmp_walk_oid', dev.walk),              patch.object(Watchful, '_profile_catalog',
                           lambda self: {'p1': _profile('p1', [GAUGE])}):
-            res = check_runner.run_module_check('snmp', cfg, hosts_store=_Store(),
+            res = check_runner.run_module_check('snmp', cfg, devices_store=_Store(),
                                                 modules_dir='watchfuls')
         assert [r['key'] for r in res] == ['srv/metrics']
         assert res[0]['other_data']['cpu'] == 41
@@ -880,8 +880,8 @@ class TestTheProbeThePanelRuns:
         assert 'sys_generic' in _p.catalog()
 
 
-class TestAHostIsADeviceOnItsOwn:
-    """The point of the whole move: a host that carries an SNMP profile with device profiles
+class TestADeviceIsADeviceOnItsOwn:
+    """The point of the whole move: a device that carries an SNMP profile with device profiles
     assigned is sampled, with no entry in the module pointing back at it.
 
     Before this, that configuration bought nothing until a second thing existed. The device
@@ -889,17 +889,17 @@ class TestAHostIsADeviceOnItsOwn:
     """
 
     class _Store:
-        def __init__(self, hosts):
-            self._hosts = hosts
+        def __init__(self, devices):
+            self._devices = devices
 
         def list(self, decrypt=True):        # noqa: A003
-            return self._hosts
+            return self._devices
 
         def get(self, uid):
-            return next((h for h in self._hosts if h.get('uid') == uid), None)
+            return next((h for h in self._devices if h.get('uid') == uid), None)
 
     @staticmethod
-    def _host(uid='h1', name='erebor', profiles=None, **kw):
+    def _device(uid='h1', name='erebor', profiles=None, **kw):
         h = {'uid': uid, 'name': name, 'address': '10.0.0.9', 'kind': 'local',
              'os': 'auto', 'maintenance': False, 'modules': [],
              'profiles': profiles if profiles is not None else {
@@ -907,85 +907,85 @@ class TestAHostIsADeviceOnItsOwn:
         h.update(kw)
         return h
 
-    def _run(self, env, hosts, servers=None, gets=None):
+    def _run(self, env, devices, servers=None, gets=None):
         env.profile('p1', [GAUGE])
         dev = _Dev(gets=gets if gets is not None else {GAUGE['oid']: ('41', None)})
         mon = create_mock_monitor({'watchfuls.snmp': {'servers': servers or {}}})
         mon.dir_var = env.monitor({}).dir_var
-        mon._hosts_store = self._Store(hosts)
+        mon._devices_store = self._Store(devices)
         with patch('watchfuls.snmp._startup_compile_mibs'), \
              patch.object(Watchful, '_snmp_get', dev.get), \
              patch.object(Watchful, '_snmp_walk_oid', dev.walk):
             res = Watchful(mon).check()
         return res, dev
 
-    def test_a_configured_host_is_sampled_with_no_module_entry(self, env):
-        res, dev = self._run(env, [self._host()])
+    def test_a_configured_device_is_sampled_with_no_module_entry(self, env):
+        res, dev = self._run(env, [self._device()])
         assert 'host.h1/metrics' in res.list
         assert res.get_other_data('host.h1/metrics')['cpu'] == 41
         assert ('get', GAUGE['oid']) in dev.asked
 
-    def test_the_device_is_named_after_the_host(self, env):
+    def test_the_device_is_named_after_the_device(self, env):
         """A chart legend and an alert both read this; `host.h1` is not a machine anybody
         recognises."""
-        res, _dev = self._run(env, [self._host(name='erebor')])
+        res, _dev = self._run(env, [self._device(name='erebor')])
         assert res.get_name('host.h1/metrics') == 'erebor'
 
-    def test_the_connection_comes_from_the_host_profile(self, env):
-        """Nothing carries the community but the host, so a device that answers proves the
+    def test_the_connection_comes_from_the_device_profile(self, env):
+        """Nothing carries the community but the device, so a device that answers proves the
         profile was resolved — address included, since the item has no address at all."""
-        res, dev = self._run(env, [self._host()])
+        res, dev = self._run(env, [self._device()])
         assert dev.asked, 'the device was never asked anything'
         assert res.get_status('host.h1/metrics') is True
 
-    def test_a_host_in_maintenance_is_not_read(self, env):
-        """Decided by resolve_host, the same gate a check goes through: a graph of a machine
+    def test_a_device_in_maintenance_is_not_read(self, env):
+        """Decided by resolve_device, the same gate a check goes through: a graph of a machine
         somebody is working on is a graph of the work."""
-        _res, dev = self._run(env, [self._host(maintenance=True)])
+        _res, dev = self._run(env, [self._device(maintenance=True)])
         assert dev.asked == []
 
-    def test_a_host_an_item_already_covers_is_not_sampled_twice(self, env):
-        servers = {'srv': {'enabled': True, 'host_uid': 'h1', 'device_profiles': 'p1',
+    def test_a_device_an_item_already_covers_is_not_sampled_twice(self, env):
+        servers = {'srv': {'enabled': True, 'device_uid': 'h1', 'device_profiles': 'p1',
                            'label': 'nas-01'}}
-        res, _dev = self._run(env, [self._host()], servers)
+        res, _dev = self._run(env, [self._device()], servers)
         assert 'srv/metrics' in res.list
         assert 'host.h1/metrics' not in res.list
 
     def test_a_device_switched_off_stays_off(self, env):
         """A disabled item is somebody saying "not this one". Resuming it from the other end
-        because the configuration also lives on the host would be an upgrade undoing a
+        because the configuration also lives on the device would be an upgrade undoing a
         decision nobody was asked about."""
-        servers = {'srv': {'enabled': False, 'host_uid': 'h1', 'device_profiles': 'p1'}}
-        _res, dev = self._run(env, [self._host()], servers)
+        servers = {'srv': {'enabled': False, 'device_uid': 'h1', 'device_profiles': 'p1'}}
+        _res, dev = self._run(env, [self._device()], servers)
         assert dev.asked == []
 
-    def test_an_item_that_samples_nothing_does_not_claim_the_host(self, env):
+    def test_an_item_that_samples_nothing_does_not_claim_the_device(self, env):
         """Reported from the panel, and it is the whole reason "covered" is about PROFILES and
         not about the binding.
 
         A switch had an SNMP item bound to it carrying OID checks and no device profiles. The
-        item claimed the host — so the registry fallback skipped it — and then sampled nothing,
+        item claimed the device — so the registry fallback skipped it — and then sampled nothing,
         because it had nothing to sample. The device was collected by NOBODY: no error, no log
         line, and no row on any screen. Its own connection test kept returning OIDs the whole
         time, which is what made it unreadable from outside.
         """
-        servers = {'srv': {'enabled': True, 'host_uid': 'h1', 'label': 'SW',
+        servers = {'srv': {'enabled': True, 'device_uid': 'h1', 'label': 'SW',
                            'checks': {'c1': {'enabled': True, 'oid': '1.1'}}}}
-        res, dev = self._run(env, [self._host()], servers)
+        res, dev = self._run(env, [self._device()], servers)
         assert 'host.h1/metrics' in res.list, 'the device is sampled by nobody'
         assert dev.asked, 'and nothing was ever asked of it'
 
     def test_an_item_with_profiles_still_claims_it(self, env):
         """The other half: two samplers on one machine would chart every series against
         itself."""
-        servers = {'srv': {'enabled': True, 'host_uid': 'h1', 'device_profiles': 'p1',
+        servers = {'srv': {'enabled': True, 'device_uid': 'h1', 'device_profiles': 'p1',
                            'checks': {'c1': {'enabled': True, 'oid': '1.1'}}}}
-        res, _dev = self._run(env, [self._host()], servers)
+        res, _dev = self._run(env, [self._device()], servers)
         assert 'srv/metrics' in res.list and 'host.h1/metrics' not in res.list
 
-    def test_a_host_with_no_assignment_is_left_alone(self, env):
-        hosts = [self._host(profiles={'snmp': {'community': 'public', 'version': '2c'}})]
-        _res, dev = self._run(env, hosts)
+    def test_a_device_with_no_assignment_is_left_alone(self, env):
+        devices = [self._device(profiles={'snmp': {'community': 'public', 'version': '2c'}})]
+        _res, dev = self._run(env, devices)
         assert dev.asked == []
 
 
@@ -1075,7 +1075,7 @@ class TestTheProfileIsTheVerdict:
     def _switch(self, env, watched):
         """Two ports, both down; *watched* is what somebody said matters."""
         env.profile('p1', [self.PORTS])
-        srv = _server(device_profiles='p1', host_uid='h1')
+        srv = _server(device_profiles='p1', device_uid='h1')
         mon = env.monitor(srv)
 
         class _Store:
@@ -1086,7 +1086,7 @@ class TestTheProfileIsTheVerdict:
                         'os': 'auto', 'maintenance': False, 'profiles': {'snmp': {}},
                         'modules': [], 'watch': []}
 
-        mon._hosts_store = _Store()
+        mon._devices_store = _Store()
         dev = _Dev(walks={'1.2.3': ({'1': '2', '2': '2'}, None),
                           '1.2.4': ({'1': 'gi1', '2': 'gi3'}, None)})
         return env.run(srv, dev, monitor=mon)[0]
@@ -1103,7 +1103,7 @@ class TestTheProfileIsTheVerdict:
             'marking one port made every port on the switch report')
 
     def test_a_marked_row_says_so_IN_the_row(self, env):
-        """The mark lives in the host registry and the screens that read a SAMPLE never open
+        """The mark lives in the device registry and the screens that read a SAMPLE never open
         it — so a fact about the row has to travel with the row, or "which of these thirty
         ports did somebody ask to be told about" is unanswerable from the recorded state.
 
@@ -1121,14 +1121,14 @@ class TestTheProfileIsTheVerdict:
         """It turns a verdict back ON. An empty answer is the behaviour without the feature,
         which is the right way for a preference to fail."""
         env.profile('p1', [self.PORTS])
-        srv = _server(device_profiles='p1', host_uid='h1')
+        srv = _server(device_profiles='p1', device_uid='h1')
         mon = env.monitor(srv)
 
         class _Broken:
             def watch(self_inner, uid):        # noqa: N805
                 raise RuntimeError('no database today')
 
-        mon._hosts_store = _Broken()
+        mon._devices_store = _Broken()
         dev = _Dev(walks={'1.2.3': ({'1': '2'}, None), '1.2.4': ({'1': 'gi1'}, None)})
         res = env.run(srv, dev, monitor=mon)[0]
         assert res['srv/gi1']['status'] is True

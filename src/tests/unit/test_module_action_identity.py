@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """Where a module action gets its address and its identity from.
 
-An action posted as one flat form carries ``host_uid`` and ``cred_uid`` at the top level, and
+An action posted as one flat form carries ``device_uid`` and ``cred_uid`` at the top level, and
 the route resolves them there.  A discovery scoped to a parent item is a different shape: the
 UI posts ``{module scalars…, "<collection>": {"<key>": {…the item…}}}``, and the item is where
 those two keys live.
 
 Resolving only the top level handed the action an item with an empty address and no identity.
 Reported as "you launch OID discovery against a server and get nothing back": the SNMP server
-took its address from a bound host and its community from a credential, so `discover` saw
+took its address from a bound device and its community from a credential, so `discover` saw
 ``host: ''`` and skipped it before sending a packet — while the checks on that same server ran
 fine, because the check path resolves per item and this one did not. Nothing said so; an empty
 result reads as "this device has no OIDs".
@@ -22,7 +22,7 @@ import pytest
 from lib.core.modules.actions import apply_item_identities
 
 
-class _Hosts:
+class _Devices:
     def __init__(self, rows):
         self._rows = rows
 
@@ -41,19 +41,19 @@ class _Creds:
 class _WA:
     _modules_dir = ''
 
-    def __init__(self, hosts=None, creds=None):
-        self._hosts_store = _Hosts(hosts or {})
+    def __init__(self, devices=None, creds=None):
+        self._devices_store = _Devices(devices or {})
         self._credentials_store = _Creds(creds or {})
 
 
-HOST = {'h1': {'uid': 'h1', 'address': 'pve01.example.lan', 'kind': 'remote',
+DEVICE = {'h1': {'uid': 'h1', 'address': 'pve01.example.lan', 'kind': 'remote',
                'os': 'linux', 'profiles': {}}}
 CRED = {'c1': {'enabled': True, 'data': {'version': '2c', 'community': 's3cret'}}}
 
 
 @pytest.fixture
 def wa():
-    return _WA(HOST, CRED)
+    return _WA(DEVICE, CRED)
 
 
 class TestAnItemBringsItsOwnIdentity:
@@ -70,23 +70,23 @@ class TestAnItemBringsItsOwnIdentity:
         another when posted as an item would be the harder bug of the two to see.
 
         The item keeps whatever the credential does not speak for (a blank field there is not
-        an answer), which is why the address filled from the bound host survives below."""
+        an answer), which is why the address filled from the bound device survives below."""
         cfg = {'servers': {'PVE01': {'cred_uid': 'c1', 'version': '3', 'port': 1610}}}
         apply_item_identities(wa, 'snmp', cfg)
         assert cfg['servers']['PVE01']['version'] == '2c'
         assert cfg['servers']['PVE01']['port'] == 1610
 
-    def test_the_bound_host_fills_an_empty_address(self, wa):
+    def test_the_bound_device_fills_an_empty_address(self, wa):
         """The case it was reported from: the server's own `host` is blank because the address
-        comes from the host it is bound to."""
-        cfg = {'servers': {'PVE01': {'host_uid': 'h1', 'host': '', 'cred_uid': 'c1'}}}
+        comes from the device it is bound to."""
+        cfg = {'servers': {'PVE01': {'device_uid': 'h1', 'host': '', 'cred_uid': 'c1'}}}
         apply_item_identities(wa, 'snmp', cfg)
         assert cfg['servers']['PVE01']['host'] == 'pve01.example.lan'
 
-    def test_an_address_typed_on_the_item_beats_the_bound_host(self, wa):
-        """The host FILLS, it does not overrule: a per-check override is the reason that field
+    def test_an_address_typed_on_the_item_beats_the_bound_device(self, wa):
+        """The device FILLS, it does not overrule: a per-check override is the reason that field
         stays editable on a bound item."""
-        cfg = {'servers': {'PVE01': {'host_uid': 'h1', 'host': '10.0.0.9'}}}
+        cfg = {'servers': {'PVE01': {'device_uid': 'h1', 'host': '10.0.0.9'}}}
         apply_item_identities(wa, 'snmp', cfg)
         assert cfg['servers']['PVE01']['host'] == '10.0.0.9'
 
@@ -104,10 +104,10 @@ class TestAnItemBringsItsOwnIdentity:
         assert cfg['servers']['PVE01']['community'] == 's3cret'
 
     def test_a_dunder_key_is_never_walked(self, wa):
-        """`__host__` and `__connector__` are injected by the route and are not items."""
-        cfg = {'__host__': {'address': 'x'}, 'servers': {'PVE01': {'cred_uid': 'c1'}}}
+        """`__device__` and `__connector__` are injected by the route and are not items."""
+        cfg = {'__device__': {'address': 'x'}, 'servers': {'PVE01': {'cred_uid': 'c1'}}}
         apply_item_identities(wa, 'snmp', cfg)
-        assert cfg['__host__'] == {'address': 'x'}
+        assert cfg['__device__'] == {'address': 'x'}
 
     def test_a_disabled_credential_supplies_nothing(self, wa):
         wa._credentials_store = _Creds({'c1': {'enabled': False,
@@ -118,10 +118,10 @@ class TestAnItemBringsItsOwnIdentity:
 
     def test_a_missing_store_is_not_an_error(self):
         """A slimmed process may have neither store. Raising here would turn every action on
-        a host-bound item into a 500."""
-        cfg = {'servers': {'PVE01': {'cred_uid': 'c1', 'host_uid': 'h1'}}}
+        a device-bound item into a 500."""
+        cfg = {'servers': {'PVE01': {'cred_uid': 'c1', 'device_uid': 'h1'}}}
         wa = _WA()
-        wa._hosts_store = None
+        wa._devices_store = None
         wa._credentials_store = None
         apply_item_identities(wa, 'snmp', cfg)
         assert cfg['servers']['PVE01']['cred_uid'] == 'c1'

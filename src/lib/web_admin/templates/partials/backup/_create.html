@@ -1,0 +1,79 @@
+{#
+   Copias › el diálogo de hacer una: el nombre que se propone, qué entra y los secretos.
+
+   A su propio fichero por la convención de tamaño, y por simetría con `_restore.html`: las dos
+   mitades de esta pantalla son «hacer una copia» y «poner una de vuelta», y una vivía en el
+   cascarón mientras la otra ya tenía el suyo.
+
+   `_bkKeyNote` viaja aquí porque **los dos diálogos** la usan: es lo que dice dónde está la
+   clave que descifra los secretos cuando la clave es un fichero, que es la forma que usa la
+   instalación por defecto.
+#}
+function openBackupModal() {
+    const pad = n => String(n).padStart(2, '0');
+    const d = new Date();
+    // Seconds included, like the scheduler's own names. `create_backup` refuses to overwrite,
+    // so two copies started inside the same minute would suggest the same name and the second
+    // would fail on a collision the operator did not cause and cannot see — and the moment you
+    // take two by hand is the moment you are trying something and repeating it.
+    const suggested = `copia-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+                    + `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    _openBackupModal(t('backup_create'), `
+        <div class="mb-3">
+            <label class="form-label small" for="backupName">${esc(t('backup_col_name'))}</label>
+            <input type="text" class="form-control form-control-sm" id="backupName"
+                   value="${escAttr(suggested)}">
+        </div>
+        <div class="mb-3">
+            <div class="small text-muted mb-1">${esc(t('backup_col_contents'))}</div>
+            ${_backupPartChecks('bkNew', _backupParts, null)}
+        </div>
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" role="switch" id="backupSecrets" checked>
+            <label class="form-check-label small" for="backupSecrets">${esc(t('backup_secrets'))}</label>
+        </div>
+        <div class="small text-muted mt-1">${esc(t('backup_secrets_hint'))}</div>
+        ${_bkKeyNote('backup_key_file')}`,
+        t('backup_create'), 'primary', _createBackup);
+}
+
+/** Dónde está la clave que descifra los secretos de una copia — cuando es un fichero.
+ *
+ *  El aviso de al lado nombraba `SS_SECRET_KEY` y sólo eso, que es la forma que **no** usa la
+ *  instalación por defecto: sin esa variable la clave es un fichero en la carpeta de
+ *  configuración, y nadie decía que hubiera que guardarlo. Restaurar en otra máquina devuelve
+ *  credenciales ilegibles, y se descubre al usarlas.
+ *
+ *  Con la variable puesta no se dice nada más: la clave la pone el operador en cada proceso, y
+ *  repetirle dónde está sería ruido sobre algo que ya administra él. */
+function _bkKeyNote(clave) {
+    if ((_bkKey || {}).source !== 'file' || !_bkKey.path) return '';
+    return `<div class="alert alert-warning py-2 px-3 small mt-2 mb-0">
+        <i class="bi bi-key me-1"></i>${esc(tf(clave, _bkKey.path))}</div>`;
+}
+
+// The API helpers do NOT share one shape, and both halves of that have now cost a bug:
+//   apiGet / apiPut     -> the parsed BODY
+//   apiPost / apiDelete -> {status, data}
+// Reading `res.ok` off the second pair, or `res.status` off the first, is reading a key that
+// is never there — so a request that worked reported failure. Delete said "error" with the
+// file already gone; saving a task said it with the task already created. This understands
+// both, because the alternative is remembering which helper is which at each call site.
+
+/** Start the copy the form describes, and watch it like any other.
+ *
+ *  It used to await the request and show nothing at all until it came back — on an install
+ *  whose syslog table is six figures of rows, that is a minute of a screen that looks broken.
+ *  It goes through the same job the schedule does now: a row in the list at once, the dialog
+ *  for whoever wants to watch it, and a toast when it lands. */
+async function _createBackup() {
+    const name = (document.getElementById('backupName')?.value || '').trim();
+    const res  = await apiPost('/api/v1/backups', {
+        name,
+        parts: _checkedParts('bkNew', _backupParts),
+        secrets: !!document.getElementById('backupSecrets')?.checked,
+    });
+    const jobId = _apiOk(res) && (res.data || {}).job_id;
+    if (!jobId) { showToast(_apiErr(res), 'danger'); return; }
+    _bkStartWatching({taskId: '', taskName: name, manual: true}, jobId);
+}

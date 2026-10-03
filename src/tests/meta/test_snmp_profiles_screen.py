@@ -34,7 +34,7 @@ UI = os.path.join(WEB, 'profiles_ui.html')
 MODALS = os.path.join(WEB, 'profiles_modals.html')
 FIELD_RENDER = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
                             'core', '_field_render.html')
-HOST_MODAL = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
+DEVICE_MODAL = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
                           'servers', '_save.html')
 
 # The field that carries the assignment, and the key a picker must be registered under for
@@ -397,8 +397,8 @@ class TestTheFieldThatAssignsThem:
         assert '_mFp' in multi or '_fieldPickerBtn' in multi
 
 
-class TestTheHostModalIsWhereItIsActuallyBound:
-    """The Modules tab edits a module's own config; the host modal is where somebody says
+class TestTheDeviceModalIsWhereItIsActuallyBound:
+    """The Modules tab edits a module's own config; the device modal is where somebody says
     "this box is a NAS". It draws the same schema fields through a DIFFERENT renderer, and
     that renderer knew nothing about multi-value fields or pickers — so the field that had
     chips and a picker on one screen was a bare text box on the one that matters.
@@ -407,32 +407,32 @@ class TestTheHostModalIsWhereItIsActuallyBound:
     def test_a_multi_value_field_is_chips_here_too(self):
         """A list rendered as a text box is a list nobody can pick from, and the values are
         ids: typed from memory, a misspelt one is a device that measures nothing."""
-        js = _strip_comments(_read(HOST_MODAL))
-        assert 'f.multi' in js, 'the host modal ignores schema multi fields'
+        js = _strip_comments(_read(DEVICE_MODAL))
+        assert 'f.multi' in js, 'the device modal ignores schema multi fields'
         multi = js.split('f.multi')[1].split('return fieldCtl')[1].split(');')[0]
         assert "kind: 'multi'" in multi
 
     def test_it_offers_the_picker_from_the_same_registry(self):
         """One registration has to serve both panes; a second registry would be two places
         for the same module to be wrong in."""
-        js = _strip_comments(_read(HOST_MODAL))
+        js = _strip_comments(_read(DEVICE_MODAL))
         assert '_fieldPickerFor(' in js
-        assert 'function _hostFieldPickerOpen(' in js
+        assert 'function _deviceFieldPickerOpen(' in js
 
     def test_the_key_is_module_collection_field(self):
-        """The same identity the Modules tab arrives at through _schemaKeyOf. A host draft has
+        """The same identity the Modules tab arrives at through _schemaKeyOf. A device draft has
         no path into modulesData, so the key has to be built rather than derived."""
-        js = _strip_comments(_read(HOST_MODAL))
-        fn = _fn(js, '_hostFieldSchemaKey')
+        js = _strip_comments(_read(DEVICE_MODAL))
+        fn = _fn(js, '_deviceFieldSchemaKey')
         assert 'collection' in fn and '${mod}|${coll}|${name}' in fn
 
     def test_the_picker_is_opened_with_a_callback(self):
-        """The host modal edits a draft that has not been saved: a picker that wrote straight
+        """The device modal edits a draft that has not been saved: a picker that wrote straight
         into modulesData would put the value somewhere this pane never reads, and the field
         would come back empty the moment the modal repainted."""
-        js = _strip_comments(_read(HOST_MODAL))
-        fn = _fn(js, '_hostFieldPickerOpen')
-        assert 'fp.open(' in fn and '_setHostCheckField(' in fn
+        js = _strip_comments(_read(DEVICE_MODAL))
+        fn = _fn(js, '_deviceFieldPickerOpen')
+        assert 'fp.open(' in fn and '_setDeviceCheckField(' in fn
 
     def test_the_profile_picker_honours_that_callback(self):
         """Otherwise the button opens, the ticks look right, and nothing is bound."""
@@ -444,7 +444,7 @@ class TestTheHostModalIsWhereItIsActuallyBound:
 
 class TestTheDeviceIsWhereTheDeviceIsConfigured:
     """What a device IS — the profiles it carries and who you have to be to ask it — is a
-    property of the device, so it is edited on the host, not on each check bound to it.
+    property of the device, so it is edited on the device, not on each check bound to it.
 
     That moves the same field onto a third renderer: the per-protocol PROFILE form, which
     has no check index to hang a value on and, until now, no identity of its own to speak of
@@ -453,15 +453,15 @@ class TestTheDeviceIsWhereTheDeviceIsConfigured:
     """
 
     def test_the_snmp_profile_carries_the_identity_not_just_the_address(self):
-        from lib.core.hosts.resolve import host_profile_specs   # noqa: PLC0415
-        hp = _schema().get('__host_profile__') or {}
+        from lib.core.devices.resolve import device_profile_specs   # noqa: PLC0415
+        hp = _schema().get('__device_profile__') or {}
         # Resolved, not as written: the module names the protocol and the core says what it
         # holds, so the answer is what the panel acts on rather than what the file repeats.
-        fields = set(host_profile_specs(hp)[0].get('fields') or [])
+        fields = set(device_profile_specs(hp)[0].get('fields') or [])
         assert hp.get('key') == 'snmp' and hp.get('address_field') == 'host'
         assert {'community', 'version', 'device_profiles'} <= fields
         # …and NOT how long we wait for it: two entries for one box would then migrate
-        # into two hosts because one of them had a longer timeout.
+        # into two devices because one of them had a longer timeout.
         assert not ({'timeout', 'retries'} & fields)
 
     def test_a_multi_value_field_works_on_a_profile_too(self):
@@ -469,30 +469,30 @@ class TestTheDeviceIsWhereTheDeviceIsConfigured:
         without a branch of its own the field falls through to a text box holding a
         comma-separated list — which looks editable and is the one thing nobody should
         type by hand."""
-        js = _strip_comments(_read(HOST_MODAL))
+        js = _strip_comments(_read(DEVICE_MODAL))
         assert 'ctx.idx == null && ctx.proto' in js, 'no profile branch for multi fields'
         branch = js.split('ctx.idx == null && ctx.proto')[1].split('return fieldCtl')[1]
         assert "kind: 'multi'" in branch.split(');')[0]
-        assert '_setProfileField(' in _fn(js, '_hostProfilePickerOpen')
+        assert '_setProfileField(' in _fn(js, '_deviceProfilePickerOpen')
 
     def test_the_actions_beside_the_picker_come_with_it(self):
         """The picker and "test against the device" are registered together against the same
         field; a pane that drew one and not the other would answer "which profiles" and not
         "and does the device agree", which is the half that is not guessable."""
-        js = _strip_comments(_read(HOST_MODAL))
-        fn = _fn(js, '_hostProfilePickerBtn')
-        assert 'fp.actions' in fn and '_hostProfileActionRun' in fn
+        js = _strip_comments(_read(DEVICE_MODAL))
+        fn = _fn(js, '_deviceProfilePickerBtn')
+        assert 'fp.actions' in fn and '_deviceProfileActionRun' in fn
 
-    def test_an_action_run_from_a_host_says_which_device(self):
+    def test_an_action_run_from_a_device_says_which_device(self):
         """A form the user is in the middle of filling in IS the device under test — and its
         secrets are masks, so the draft travels and the server resolves it exactly as it
         resolves a scheduled check."""
-        js = _strip_comments(_read(HOST_MODAL))
-        fn = _fn(js, '_hostProfileActionCfg')
-        assert '_host' in fn and 'host_uid' in fn and 'profiles' in fn
+        js = _strip_comments(_read(DEVICE_MODAL))
+        fn = _fn(js, '_deviceProfileActionCfg')
+        assert '_device' in fn and 'device_uid' in fn and 'profiles' in fn
 
     def test_both_panes_reach_the_device_through_one_place(self):
-        """`_snmpDeviceCfg` is state, and stale state here means asking the last host
+        """`_snmpDeviceCfg` is state, and stale state here means asking the last device
         somebody looked at. Both entry points must set it — to a provider or to null."""
         js = _strip_comments(_read(UI))
         for fname in ('_snmpProfOpenFor', '_snmpTestOpen'):
@@ -515,20 +515,20 @@ class TestTheDeviceIsWhereTheDeviceIsConfigured:
             SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_checks.html')))
         monitoring = _strip_comments(_read(os.path.join(
             SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_monitoring.html')))
-        block = _fn(checks, '_hostProfileBlock')
+        block = _fn(checks, '_deviceProfileBlock')
         assert '_renderProfileFields(' in block, 'the block does not draw the fields'
         assert 'hmProfFields_' in block, 'nothing creates the element the repaint looks up'
-        # Called from both card shapes — one check per host, and several.
-        assert '_hostProfileBlock(' in _fn(checks, '_renderSingleCheck')
-        assert '_hostProfileBlock(' in monitoring, 'multi-check cards draw no profile'
+        # Called from both card shapes — one check per device, and several.
+        assert '_deviceProfileBlock(' in _fn(checks, '_renderSingleCheck')
+        assert '_deviceProfileBlock(' in monitoring, 'multi-check cards draw no profile'
         # …and kept on the repaint, or editing a check silently drops the connection form.
-        assert '_hostProfileBlock(' in _fn(checks, '_refreshSingleCheck')
+        assert '_deviceProfileBlock(' in _fn(checks, '_refreshSingleCheck')
 
     def test_a_credential_is_offered_for_any_protocol_that_declares_one(self):
         """SSH had a credential picker and nothing else did. The device's identity is the
         same kind of thing whatever the protocol, and an SNMP community reused across forty
         switches is exactly what the credential manager is for."""
-        js = _strip_comments(_read(HOST_MODAL))
+        js = _strip_comments(_read(DEVICE_MODAL))
         fn = _fn(js, '_renderProfileFields')
         assert '_credTypeForModule(' in fn, 'the profile form knows only about ssh'
         assert "'cred_uid'" in fn and 'credentialOptions(' in fn
@@ -540,7 +540,7 @@ class TestTheDeviceIsWhereTheDeviceIsConfigured:
 class TestTheChipsReadAsNames:
     """The field stores profile ids, which is the right thing to store — they survive a
     rename, they are what the API speaks and what a bug report quotes. They are not what a
-    person reads: a row of `hr_storage`, `if_generic`, `ucd_linux` on a host form says nothing
+    person reads: a row of `hr_storage`, `if_generic`, `ucd_linux` on a device form says nothing
     about what is being measured, by somebody who is deciding whether the assignment is right.
     """
 
@@ -551,7 +551,7 @@ class TestTheChipsReadAsNames:
         assert '_chipLabel(key, v)' in js
 
     def test_the_key_is_module_and_field_so_both_panes_hit_it(self):
-        """The Modules tab path carries the item's uid and the host modal's carries its index;
+        """The Modules tab path carries the item's uid and the device modal's carries its index;
         neither is part of what the FIELD is, and a registry keyed by either would work on one
         screen and not the other."""
         js = _strip_comments(_read(os.path.join(
@@ -777,7 +777,7 @@ class TestWhereAConnectionProfileIsDrawn:
     """
 
     def _modal(self):
-        # `_modal.html` and not HOST_MODAL: the constant points at `_save.html`, which is
+        # `_modal.html` and not DEVICE_MODAL: the constant points at `_save.html`, which is
         # where the shared field renderer lives. The cards are drawn in the modal body.
         return _strip_comments(_read(os.path.join(
             SRC, 'lib', 'web_admin', 'templates', 'partials', 'servers', '_modal.html')))
@@ -789,7 +789,7 @@ class TestWhereAConnectionProfileIsDrawn:
     def test_the_core_owns_the_snmp_connection(self):
         """The premise of everything below: if SNMP stopped being core-declared, its editor
         would belong back with the module and this whole placement would be wrong."""
-        from lib.core.hosts.profiles import core_profiles     # noqa: PLC0415
+        from lib.core.devices.profiles import core_profiles     # noqa: PLC0415
         assert set(core_profiles()) == {'ssh', 'snmp'}, (
             'the set of connections the core owns changed — check where each is drawn')
 
@@ -805,7 +805,7 @@ class TestWhereAConnectionProfileIsDrawn:
         assert '_renderCoreProfileCard(' in fn
 
     def test_and_the_module_form_draws_the_rest(self):
-        fn = _fn(self._checks(), '_hostProfileBlock')
+        fn = _fn(self._checks(), '_deviceProfileBlock')
         assert '!spec.builtin' in fn, (
             'the module form draws core profiles too, so the same editor appears twice — '
             'two forms writing one draft, and only one of them repainted')
@@ -814,7 +814,7 @@ class TestWhereAConnectionProfileIsDrawn:
         """It used to read `proto !== 'ssh'`: the same rule with one protocol's name in it.
         That is what stopped being true the day SNMP moved to the core, silently — the code
         went on doing exactly what it said and what it said was no longer the rule."""
-        for fn in (_fn(self._checks(), '_hostProfileBlock'),
+        for fn in (_fn(self._checks(), '_deviceProfileBlock'),
                    _fn(self._modal(), '_renderCoreProfileCards')):
             for name in ("'ssh'", '"ssh"', "'snmp'", '"snmp"'):
                 assert name not in fn, f'{name} is written into the rule'
@@ -823,7 +823,7 @@ class TestWhereAConnectionProfileIsDrawn:
         """The Local/Remote selector already draws it, and it IS that selector's answer —
         not a second opinion about how the box is reached."""
         fn = _fn(self._modal(), '_renderCoreProfileCards')
-        assert "'__host__'" in fn, 'nothing excludes the profile the selector governs'
+        assert "'__device__'" in fn, 'nothing excludes the profile the selector governs'
         assert '_renderSshConnection' in self._modal()
 
     def test_the_card_reuses_the_one_field_renderer(self):
@@ -837,8 +837,8 @@ class TestWhereAConnectionProfileIsDrawn:
         """Named by the declaration, so the button knows what to run without anything here
         knowing what SNMP is."""
         fn = _fn(self._modal(), '_renderCoreProfileCard')
-        assert 'spec.module' in fn and '_testHostProfile(' in fn
-        assert 'testHostModule(' in _fn(self._modal(), '_testHostProfile'), (
+        assert 'spec.module' in fn and '_testDeviceProfile(' in fn
+        assert 'testDeviceModule(' in _fn(self._modal(), '_testDeviceProfile'), (
             'a second test endpoint is a second answer free to disagree with the module card')
 
     def test_the_two_type_fields_are_not_both_called_type(self):
@@ -848,12 +848,12 @@ class TestWhereAConnectionProfileIsDrawn:
         for lang in ('es_ES', 'en_EN'):
             src = _read(os.path.join(SRC, 'lib', 'i18n', 'lang', lang + '.py'))
             words = {}
-            for key in ('host_type', 'host_kind'):
+            for key in ('device_type', 'device_kind'):
                 line = next(ln for ln in src.splitlines()
                             if ln.strip().startswith(f"'{key}':"))
                 words[key] = line.split(':', 1)[1].strip().rstrip(',')
-            assert words['host_type'] != words['host_kind'], (
-                f'{lang}: both fields are labelled {words["host_type"]}')
+            assert words['device_type'] != words['device_kind'], (
+                f'{lang}: both fields are labelled {words["device_type"]}')
 
 
 class TestAskingTheDeviceOneThingIsOnTheScreen:
@@ -861,7 +861,7 @@ class TestAskingTheDeviceOneThingIsOnTheScreen:
     whether it serves a table is a strange thing to need in front of it.
 
     It is a third tab of the dialog that is already open on one server, and not a screen of its
-    own: the connection, the credential and the bound host are all resolved there already, and
+    own: the connection, the credential and the bound device are all resolved there already, and
     a second place to pick a device is a second answer to "which device".
     """
 

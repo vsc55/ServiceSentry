@@ -21,11 +21,11 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""Watchful to check temperature sensors on the bound host (local or over SSH).
+"""Watchful to check temperature sensors on the bound device (local or over SSH).
 
-Host-centric: each check binds to a host (``host_uid``) and a sensor.  Sensor
-temperatures are read on that host from Linux ``/sys/class/thermal`` via
-:meth:`ModuleBase.host_exec` and compared with a per-check threshold.
+Device-centric: each check binds to a device (``device_uid``) and a sensor.  Sensor
+temperatures are read on that device from Linux ``/sys/class/thermal`` via
+:meth:`ModuleBase.device_exec` and compared with a per-check threshold.
 """
 
 import json
@@ -46,7 +46,7 @@ _THERMAL_CMD = (
 
 
 class Watchful(ModuleBase):
-    """Check temperature sensors per host against a threshold (Linux)."""
+    """Check temperature sensors per device against a threshold (Linux)."""
 
     ITEM_SCHEMA = _SCHEMA
     WATCHFUL_ACTIONS: frozenset[str] = frozenset({'discover'})
@@ -67,20 +67,20 @@ class Watchful(ModuleBase):
         return self.dict_return
 
     def _temp_check(self, key, raw):
-        item = self.resolve_host(raw)
-        if item.get('_host_maintenance') or not item.get('enabled', True):
+        item = self.resolve_device(raw)
+        if item.get('_device_maintenance') or not item.get('enabled', True):
             return
         # Resolved BEFORE the OS check so the unsupported-OS result is named like every
         # other one — it used to report the raw item UID.
         sensor = (item.get('sensor', '') or '').strip() or key
         label = (item.get('label', '') or '').strip() or sensor
-        os_ = self.host_os(item)
+        os_ = self.device_os(item)
         if os_ != 'linux':
             self.dict_return.set(key, False,
                                  self._msg('temp_unsupported_os', label, os_),
                                  severity='warning', name=label)
             return
-        out, err, code = self.host_exec(
+        out, err, code = self.device_exec(
             item, _THERMAL_CMD, timeout=self.module_default('timeout', self._MODULE_DEFAULTS['timeout']))
         if code != 0 and not out:
             raise OSError((err or '').strip() or f'sensor read exited {code}')
@@ -97,7 +97,7 @@ class Watchful(ModuleBase):
                       or self._MODULE_DEFAULTS['alert'])
         warning = temp > alert
         msg = self._msg('temp_high' if warning else 'temp_ok', label, f'{temp:.1f}')
-        # An over-temperature is a warning (host reachable); a sensor read failure raises above.
+        # An over-temperature is a warning (device reachable); a sensor read failure raises above.
         self.dict_return.set(key, not warning, msg,
                              other_data={'type': sensor, 'temp': temp, 'alert': alert},
                              severity='warning', name=label)
@@ -134,10 +134,10 @@ class Watchful(ModuleBase):
 
     @classmethod
     def discover(cls, config=None) -> list:
-        """Temperature sensors on the host (Linux thermal zones)."""
-        from lib.core.hosts import runner as host_runner  # noqa: PLC0415
-        host = (config or {}).get('__host__') if isinstance(config, dict) else None
-        out, _err, code = host_runner.run(host, _THERMAL_CMD, timeout=15)
+        """Temperature sensors on the device (Linux thermal zones)."""
+        from lib.core.devices import runner as device_runner  # noqa: PLC0415
+        device = (config or {}).get('__device__') if isinstance(config, dict) else None
+        out, _err, code = device_runner.run(device, _THERMAL_CMD, timeout=15)
         if code != 0 and not out:
             return []
         return [{'name': name, 'display_name': name, 'status': f'{c:.1f}°C'}

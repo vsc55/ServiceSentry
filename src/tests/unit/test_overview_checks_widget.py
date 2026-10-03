@@ -11,8 +11,8 @@ import pytest
 # the package's own overview_widget.py (see lib/discovery.py).
 from lib.core.modules.manifest import OVERVIEW_WIDGETS as MOD_WIDGETS
 from lib.core.modules.overview_widget import _mod_checks, _modules_list_rows
-from lib.core.hosts.manifest import OVERVIEW_WIDGETS as HOST_WIDGETS
-from lib.core.hosts.overview_widget import _server_matches
+from lib.core.devices.manifest import OVERVIEW_WIDGETS as DEVICE_WIDGETS
+from lib.core.devices.overview_widget import _server_matches
 from lib.core.overview.filters import parse_severity_filter, severity_matches
 from lib.services.monitoring.overview_widget import checks_stat
 
@@ -233,9 +233,9 @@ class TestSeverityFilter:
         # Adding a level is descriptor-only (overview_widget.py) — the toolbar builds the
         # control from view.filter.levels, so this is the single source to guard.
         assert {'warning', 'error'} <= set(_filter_levels(MOD_WIDGETS, 'modules_list'))
-        assert {'warning', 'error'} <= set(_filter_levels(HOST_WIDGETS, 'servers_list'))
+        assert {'warning', 'error'} <= set(_filter_levels(DEVICE_WIDGETS, 'servers_list'))
         # servers declares the maintenance union; modules do not.
-        srv = next(w for w in HOST_WIDGETS if w['id'] == 'servers_list')['view']['filter']
+        srv = next(w for w in DEVICE_WIDGETS if w['id'] == 'servers_list')['view']['filter']
         mod = next(w for w in MOD_WIDGETS if w['id'] == 'modules_list')['view']['filter']
         assert srv['kind'] == 'severity' and srv['maintenance'] is True
         assert mod['kind'] == 'severity' and mod['maintenance'] is False
@@ -259,7 +259,7 @@ class TestServerMatcher:
     def test_ge_warning_includes_error_but_not_maintenance(self):
         assert self._sel('warning', 'ge', False) == ['w', 'e']
 
-    def test_maintenance_union_adds_maintenance_hosts(self):
+    def test_maintenance_union_adds_maintenance_devices(self):
         assert self._sel('warning', 'ge', True) == ['w', 'e', 'm']
 
     def test_maintenance_only(self):

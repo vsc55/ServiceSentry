@@ -94,7 +94,7 @@ function _permMatrixResRows(groupKey, roles) {
     if (shut) return h;
     for (const row of rows) {
         const sub = row.sub?.text ? `<span class="text-muted ss-fs-1 ms-1">${esc(row.sub.text)}</span>` : '';
-        for (const action of _PERM_ACTIONS) {
+        for (const action of _permActionsOf(spec)) {
             const key = `${spec.prefix}.${row.id}.${action}`;
             h += `<tr><td class="ps-4" title="${escAttr(key)}">${esc(row.name)}
                 <span class="text-muted">· ${esc(_permActionLabel(spec, action))}</span>${sub}</td>`;

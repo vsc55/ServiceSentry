@@ -26,7 +26,7 @@ from lib.modules import ModuleBase
 
 from .actions import ProxmoxActions
 from .checks import ClusterChecks
-from .client import PveClient, _split_hosts
+from .client import PveClient, _split_devices
 from .page import ProxmoxPage
 from .provision import ProxmoxProvision
 
@@ -141,20 +141,20 @@ class Watchful(ClusterChecks, PveClient, ProxmoxActions, ProxmoxPage,
         #   2. the configured/bound host(s) (the field accepts several addresses);
         #   3. the cluster node IPs discovered last cycle (cached in the cluster
         #      result) — so one node going down doesn't blind the whole check.
-        candidates = _split_hosts(it.get('vip', '') or '') + _split_hosts(it.get('host', '') or '')
+        candidates = _split_devices(it.get('vip', '') or '') + _split_devices(it.get('host', '') or '')
         candidates = list(dict.fromkeys(candidates)) or [name]   # dedupe, keep order
         prev = (self.get_status_find(f'{name}/cluster', self.name_module) or {}).get('other_data', {}) or {}
         for ip in (prev.get('node_ips') or []):
             if ip and str(ip) not in candidates:
                 candidates.append(str(ip))
-        # Cluster roster (host↔node mapping, set by resolve_host for a multi-host
-        # binding): correlate each API node with its host, derive the node
-        # maintenance set from each member host's maintenance state, and label
-        # nodes by host.  No manual node list — a node is "in maintenance" iff its
-        # mapped host is (host status + node mapping already express it).
+        # Cluster roster (device↔node mapping, set by resolve_device for a multi-device
+        # binding): correlate each API node with its device, derive the node
+        # maintenance set from each member device's maintenance state, and label
+        # nodes by device.  No manual node list — a node is "in maintenance" iff its
+        # mapped device is (device status + node mapping already express it).
         members = it.get('__cluster_members__') or []
-        node_host = {m['node']: m for m in members
-                     if isinstance(m, dict) and str(m.get('node') or '').strip()}
+        node_device = {m['node']: m for m in members
+                       if isinstance(m, dict) and str(m.get('node') or '').strip()}
         maint = {m['node'] for m in members
                  if isinstance(m, dict) and m.get('maintenance') and str(m.get('node') or '').strip()}
         try:
@@ -188,14 +188,14 @@ class Watchful(ClusterChecks, PveClient, ProxmoxActions, ProxmoxPage,
         if it.get('check_cluster', True):
             self._chk_cluster(conn, name, label)
         if it.get('check_nodes', True):
-            self._chk_nodes(conn, name, label, nodes, maint, node_host)
+            self._chk_nodes(conn, name, label, nodes, maint, node_device)
         if it.get('check_ceph', False):
             self._chk_ceph(conn, name, label)
         if it.get('check_network', False):
-            self._chk_network(conn, name, label, nodes, maint, node_host)
+            self._chk_network(conn, name, label, nodes, maint, node_device)
         if it.get('check_updates', True):
             threshold = int(it.get('updates_threshold', 1) or 0)
-            self._chk_updates(conn, name, label, nodes, threshold, maint, node_host)
+            self._chk_updates(conn, name, label, nodes, threshold, maint, node_device)
         if it.get('check_storage', False):
             st_threshold = int(it.get('storage_threshold', 90) or 0)
-            self._chk_storage(conn, name, label, nodes, st_threshold, maint, node_host)
+            self._chk_storage(conn, name, label, nodes, st_threshold, maint, node_device)

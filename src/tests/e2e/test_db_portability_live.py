@@ -18,7 +18,7 @@ relies on MySQL 8.0.13+ accepting a parenthesised default and MariaDB 10.2+ acce
 a claim that was worth checking on a real MariaDB rather than assuming.
 
 The target database must be a SCRATCH database: these tests CREATE and DROP the store tables
-(check_state/history/hosts/groups/groups_roles/audit/event_cursor/event_cooldowns). Run them
+(check_state/history/devices/groups/groups_roles/audit/event_cursor/event_cooldowns). Run them
 SERIALLY (``-n0``) — they use fixed table names, so parallel workers would collide.
 
 **Nothing here drops a table it did not create.** The full-panel test snapshots the schema
@@ -39,7 +39,9 @@ import pytest
 
 from lib.db import get_connector
 
-_STORE_TABLES = ('check_state', 'history', 'hosts', 'groups', 'groups_roles', 'audit',
+_STORE_TABLES = ('check_state', 'history', 'history_series', 'history_fact',
+                 'history_field', 'devices', 'groups',
+                 'groups_roles', 'audit',
                  'event_cursor', 'event_cooldowns', 'service_leader',
                  'users', 'users_groups', 'roles', 'config', 'entity_versions',
                  'ss_deftest', '__ssreb_ss_deftest', '__ssbak_ss_deftest')
@@ -113,9 +115,9 @@ def live_db(request):
 
 # ── the operations that were broken on MySQL/PostgreSQL before the quoting sweep ──
 
-def test_hosts_virtual_roundtrip(live_db):
-    from lib.core.hosts.store import HostsStore
-    s = HostsStore(live_db)
+def test_devices_virtual_roundtrip(live_db):
+    from lib.core.devices.stores import DevicesStore
+    s = DevicesStore(live_db)
     uid = s.create({'name': 'live-h1', 'address': '10.0.0.1', 'virtual': True}, actor='test')
     assert uid and any(h['uid'] == uid for h in s.list())
     assert s.get(uid)['virtual'] is True
@@ -302,8 +304,15 @@ def test_the_whole_panel_boots_and_serves_on_the_real_engine(live_db, tmp_path):
                         sig = inspect.signature(meth)
                     except (TypeError, ValueError):
                         continue
+                    # KEYWORD_ONLY cuenta igual que posicional: un parámetro obligatorio es
+                    # obligatorio se pase como se pase. Sin él, `ApiTokenStore.create(*,
+                    # user_uid, name, token_id, ...)` pasaba el filtro —no tiene ni uno
+                    # posicional— y se llamaba sin argumentos, que es un TypeError contado como
+                    # «lectura que falla en el motor vivo». El barrido es de lecturas SIN
+                    # parámetros; ésa tiene ocho.
                     if any(p.default is inspect.Parameter.empty
-                           and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+                           and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD,
+                                          p.KEYWORD_ONLY)
                            for p in sig.parameters.values()):
                         continue
                     try:

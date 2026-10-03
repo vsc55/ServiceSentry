@@ -14,6 +14,10 @@ function _toggleSidebar() {
     if (!layout) return;
     if (_sbIsMobile()) { layout.classList.toggle('ss-open'); return; }
     const mini = layout.classList.toggle('ss-mini');
+    // Lo que estuviera abierto se cierra: la columna cambia de ancho en .15s y un menú colocado
+    // contra el borde de antes se queda flotando en medio de la página mientras dura. Cerrarlo
+    // es más honesto que recolocarlo a mitad de una animación.
+    document.querySelectorAll('.ss-sb-flywrap.ss-fly-open').forEach(_closeFlyout);
     try { localStorage.setItem(_SB_MINI_KEY, mini ? '1' : '0'); } catch (e) { /* ignore */ }
 }
 function _openSidebar()  { document.getElementById('ss-layout')?.classList.add('ss-open'); }
@@ -29,20 +33,23 @@ function _closeSidebar() { document.getElementById('ss-layout')?.classList.remov
     } catch (e) { /* ignore */ }
 })();
 
-// Persist the Settings ("Administration panel") accordion open/closed state. It defaults to
+// Persist each group's accordion open/closed state — the Catalogue and System. Each defaults to
 // expanded (the `show` class in the template); if the user collapsed it, keep it collapsed on
-// the next load instead of always re-expanding.
-const _SB_SETTINGS_KEY = 'ss_sidebar_settings_open';
-(function _initSettingsAccordion() {
-    const el = document.getElementById('ss-sb-settings');
-    if (!el) return;
-    const parent = document.querySelector('[data-bs-target="#ss-sb-settings"]');
-    if (localStorage.getItem(_SB_SETTINGS_KEY) === '0') {
-        el.classList.remove('show');                       // start collapsed (default is open)
-        parent?.setAttribute('aria-expanded', 'false');
-    }
-    el.addEventListener('shown.bs.collapse',  () => { try { localStorage.setItem(_SB_SETTINGS_KEY, '1'); } catch (e) { /* ignore */ } });
-    el.addEventListener('hidden.bs.collapse', () => { try { localStorage.setItem(_SB_SETTINGS_KEY, '0'); } catch (e) { /* ignore */ } });
+// the next load instead of always re-expanding. The key is the group's own (`data-sb-store`), so
+// folding one never folds the other.
+(function _initGroupAccordions() {
+    document.querySelectorAll('#ss-sidebar .ss-sb-sub[data-sb-store]').forEach(el => {
+        const key = el.dataset.sbStore;
+        const parent = document.querySelector(`[data-bs-target="#${el.id}"]`);
+        try {
+            if (localStorage.getItem(key) === '0') {
+                el.classList.remove('show');               // start collapsed (default is open)
+                parent?.setAttribute('aria-expanded', 'false');
+            }
+        } catch (e) { /* a browser without storage starts it open */ }
+        el.addEventListener('shown.bs.collapse',  () => { try { localStorage.setItem(key, '1'); } catch (e) { /* ignore */ } });
+        el.addEventListener('hidden.bs.collapse', () => { try { localStorage.setItem(key, '0'); } catch (e) { /* ignore */ } });
+    });
 })();
 
 // The user menu opens to the RIGHT (dropend). The sidebar is overflow:hidden, so use Popper's
@@ -96,7 +103,6 @@ function _navSubtab(el, paneTarget, subTarget, storageKey, storageValue) {
     // Events/ipban pass an explicit key/value (their sub-tabs are built in JS); Infra/Access
     // store the full '#subtab-*' target under a per-section key derived from the pane.
     if (storageKey) localStorage.setItem(storageKey, storageValue);
-    else if (paneTarget === '#tab-servers') localStorage.setItem('ss_active_subtab_infra', subTarget);
     else if (paneTarget === '#tab-access')  localStorage.setItem('ss_active_subtab_access', subTarget);
     _navTab(paneTarget);                          // show the parent pane first
     // If the sub-tab button already exists (static, or the pane was already rendered),
@@ -186,7 +192,6 @@ function _sbUpdateBreadcrumb() {
 // No-value defaults mirror each pane's own restore. Sections without a flyout return null.
 function _sbStoredSub(paneId) {
     switch (paneId) {
-        case 'tab-servers': return localStorage.getItem('ss_active_subtab_infra')  || '#subtab-srv-hosts';
         case 'tab-access':  return localStorage.getItem('ss_active_subtab_access') || '#subtab-users';
         case 'tab-ipban':   return localStorage.getItem('ss_active_subtab_ipban')  || '#subtab-ipban-bans';
         case 'tab-events':  return '#ev-pane-' + (localStorage.getItem('ss_active_subtab_events') === 'log' ? 'log' : 'rules');
@@ -236,24 +241,81 @@ function _placeFlyout(wrap) {
         fly.style.maxHeight = (vh - gap * 2) + 'px';
         fly.style.overflowY = 'auto';
     }
+    // Pegado al CARRIL y no al borde de su fila. Con la barra desplegada es lo mismo —la fila
+    // ocupa la columna entera— pero plegada la fila mide lo que mide su contenido, que es un
+    // icono: el menú se abría a mitad de camino, con un hueco a la izquierda por el que se veía
+    // la página. El menú es de la barra, así que sale de donde acaba la barra.
+    const carril = document.getElementById('ss-sidebar');
+    const rc = carril ? carril.getBoundingClientRect() : null;
     // The same on the other axis, for the mirrored sidebar or a narrow window: past the right
     // edge the menu opens to the LEFT of its item instead of off-screen.
-    let left = r.right;
-    if (left + w + gap > vw) left = Math.max(gap, r.left - w);
+    let left = rc ? rc.right : r.right;
+    if (left + w + gap > vw) left = Math.max(gap, (rc ? rc.left : r.left) - w);
     fly.style.top = top + 'px';
     fly.style.left = left + 'px';
+    // Y lo que hay ENTRE la fila y el menú, que hay que poder cruzar.
+    //
+    // La fila se puede pisar hasta donde llega el CONTENIDO de la lista, no hasta donde llega el
+    // carril: cuando la lista desplaza, su barra se come unos píxeles por dentro y recorta ahí
+    // las filas. El menú, en cambio, sale del borde del carril. Entre los dos queda una franja
+    // que no es de nadie —es de la lista— y pisarla dispara `mouseleave`: el menú se oculta y,
+    // ya oculto, no queda nada bajo el ratón donde volver a entrar. Desaparecía a mitad de
+    // camino. Pasa con la barra desplegada y con ella plegada, y siempre mide lo que mida la
+    // barra de desplazamiento. Reportado desde la pantalla.
+    //
+    // Se mide de `clientWidth` —el ancho SIN la barra, que es justo donde acaba lo pisable— y lo
+    // tapa el `::before` del menú con una franja transparente de ese ancho.
+    const lista = document.querySelector('.ss-sb-nav');
+    const borde = lista
+        ? lista.getBoundingClientRect().left + lista.clientWidth
+        : r.right;
+    const puente = Math.max(0, Math.round(left - borde));
+    fly.style.setProperty('--ss-fly-puente', puente + 'px');
 }
 // One mechanism only (the .ss-fly-open class), driven by JS. Hover, focus and click all go
 // through _openFlyout/_closeFlyout so at most ONE flyout is ever open — no CSS :hover racing
 // the class and leaving a menu visible with no pointer on it (which overlapped neighbours).
 function _openFlyout(wrap) {
     document.querySelectorAll('.ss-sb-flywrap.ss-fly-open').forEach(w => {
-        if (w !== wrap) w.classList.remove('ss-fly-open');
+        if (w !== wrap) _closeFlyout(w);
     });
     wrap.classList.add('ss-fly-open');
+    // El globo del navegador, fuera mientras el menú está abierto. En modo icono el `title` es
+    // lo único que dice cómo se llama la fila, así que no se puede quitar del marcado — pero con
+    // el menú abierto lo dice el menú, y el globo se planta encima tapando la primera entrada.
+    const jefe = wrap.querySelector('.ss-sb-item');
+    if (jefe && jefe.title) {
+        jefe.dataset.ssTitle = jefe.title;
+        jefe.removeAttribute('title');
+    }
     _placeFlyout(wrap);
 }
-function _closeFlyout(wrap) { wrap.classList.remove('ss-fly-open'); }
+function _closeFlyout(wrap) {
+    wrap.classList.remove('ss-fly-open');
+    const jefe = wrap.querySelector('.ss-sb-item');
+    if (jefe && jefe.dataset.ssTitle) {
+        jefe.title = jefe.dataset.ssTitle;
+        delete jefe.dataset.ssTitle;
+    }
+}
+
+//: El menú abierto, si hay alguno. Se coloca **una vez, al abrirlo**, así que lo que mueva la
+//: fila de debajo —plegar la barra, cambiar el tamaño de la ventana, rodar la rueda sobre una
+//: lista de secciones larga— lo dejaba flotando donde estaba, apuntando a una fila que ya no
+//: está ahí.
+function _flyoutOpen() {
+    return document.querySelector('.ss-sb-flywrap.ss-fly-open');
+}
+
+function _replaceFlyout() {
+    const abierto = _flyoutOpen();
+    if (abierto) _placeFlyout(abierto);
+}
+
+window.addEventListener('resize', _replaceFlyout);
+// En la lista de secciones y no en la ventana: la barra tiene su propio desplazamiento, y la
+// página de detrás no mueve el carril.
+document.querySelector('.ss-sb-nav')?.addEventListener('scroll', _replaceFlyout);
 document.querySelectorAll('.ss-sb-flywrap').forEach(wrap => {
     // Moving onto the flyout does NOT fire mouseleave (it is a DOM child of the wrap); only
     // leaving the whole parent+flyout does, which then closes it so it can't overlap another.
@@ -284,7 +346,7 @@ function _sbPaneUrl(btn, paneId) {
     //
     // Reported from the panel: open a device in Infrastructure, press F5, and you land back
     // on the list of forty. The section does put the open device in the address bar
-    // (`?host=<uid>`) and does read it back — but this runs on the initial activation too,
+    // (`?device=<uid>`) and does read it back — but this runs on the initial activation too,
     // and it rebuilds the URL from the section and its view alone. So the landing URL was
     // replaced by `/infra/table` before the section ever looked at it, and the parameter was
     // gone: not lost by the section, swept away by the navigation that was only trying to

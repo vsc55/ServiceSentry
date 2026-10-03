@@ -76,7 +76,7 @@ function _dwBadge(b) {
     return `<span class="badge rounded-pill" style="background:${bs.bg};color:${bs.color};font-size:.72rem;${border}">${icon}${text}</span>`;
 }
 // Generic stat card from a descriptor `view` + its content {value, accent?, icon?, badges?}.
-// content == null → not fetched yet: render the shell with a spinner (filled by _dwStatFetch).
+// content == null → not fetched yet: render the shell with a spinner (filled by _dwFetchContent).
 function _dwRenderStat(view, content) {
     const loaded = content != null;
     content = content || {};
@@ -129,9 +129,11 @@ function _dwState(id, data, item) {
     if (_dwIsModuleWidget(id)) return _dwModuleState(id, data, item);
     const view = (_DW_DEFS[id] || {}).view;
     if (!view) return '';
-    if (view.kind === 'stat') return (_dwStatContent[id] || {}).state || '';
-    if (view.kind === 'table' && view.state_rows)
-        return (_dwTableRows[id] || []).length ? view.state_rows : '';
+    if (view.kind === 'table')
+        return view.state_rows && (_dwTableRows[id] || []).length ? view.state_rows : '';
+    // Todo lo demás lo dice en lo que sirve, que es lo que hace que un paquete pueda traer una
+    // tarjeta que se tiñe sin que este fichero aprenda su nombre.
+    return (_dwFetched[id] || {}).state || '';
     return '';
 }
 // The same answer as a class, for a re-render (a drag, a filter, a resize) that rebuilds the
@@ -146,18 +148,549 @@ function _dwStateClass(id, data, item) {
 function _dwRefreshState(dw) {
     if (dw) _dwApplyState(dw, _dwState(dw.dataset.wid, _lastOverviewData, null));
 }
+// ── La ficha de un punto ──────────────────────────────────────────────────────────
+//
+// Un punto de color dice que algo va mal. Lo que se pregunta a continuación es siempre lo
+// mismo —dónde está eso, a quién se llama, qué se ve al llegar— y hasta ahora había que abrir
+// tres pantallas para contestarlo. La ficha lo dice encima del mapa, sin salir de él.
+//
+// Lo que enseña es lo que trae cada punto, con la fila que falta simplemente ausente: una ficha
+// con «Contacto: —» en cuatro renglones enseña sobre todo lo que nadie ha escrito.
+
+/** Dónde vive la ficha de un mapa. Una por tarjeta, creada al vuelo: escribirla en el marcado
+ *  de cada mapa sería una caja vacía en el árbol de todos los que nadie está señalando. */
+function _dwMapCardBox(wid) {
+    const svg = document.querySelector(`svg[data-dwmap="${(window.CSS && CSS.escape) ? CSS.escape(wid) : wid}"]`);
+    const caja = svg && svg.parentNode;
+    if (!caja) return null;
+    let ficha = caja.querySelector('.dw-map-card');
+    if (!ficha) {
+        ficha = document.createElement('div');
+        ficha.className = 'dw-map-card';
+        ficha.hidden = true;
+        caja.appendChild(ficha);
+    }
+    return ficha;
+}
+
+/** Lo que un punto CONTIENE, dicho con las palabras de quien lo trae.
+ *
+ *  «Tres armarios en dos salas» es vocabulario del inventario, y este fichero dibuja mapas: en
+ *  cuanto lo escribe, el siguiente paquete con cosas situadas hereda una frase sobre armarios.
+ *  Así que la clave la declara la tarjeta (`view.count_key`) y los números vienen con el punto.
+ *  Sin clave declarada, ese renglón sencillamente no sale — como cualquier otro que no tenga
+ *  nada que decir.
+ *
+ *  Ya pasó una vez con la palabra «sin vigilar», y hay un guardián por eso; se le escapó esta
+ *  porque miraba una lista de funciones escrita a mano y esta se añadió después. Ahora mira
+ *  todas. */
+function _dwMapCount(s, view) {
+    const clave = (view || {}).count_key;
+    if (!clave || !(s.racks || s.rooms)) return '';
+    return tf(clave, s.racks || 0, s.rooms || 0);
+}
+
+/** Un renglón de la ficha, o nada si no hay qué decir. */
+function _dwMapRow(icon, texto, extra) {
+    if (!texto) return '';
+    return `<div class="d-flex gap-2 align-items-start"><i class="bi ${icon} mt-1 text-muted"></i>
+        <span>${esc(texto)}${extra || ''}</span></div>`;
+}
+
+function _dwMapCardHtml(s, view) {
+    const tono = _DW_MAP_TONE[s.state] || 'secondary';
+    const hora = ssLocalTime(s.timezone);
+    // El teléfono, marcable. En un móvil delante de una verja a las tres de la mañana, la
+    // diferencia entre un número escrito y uno que se pulsa es el número entero.
+    const tel = s.phone
+        ? `<a href="tel:${escAttr(String(s.phone).replace(/[^+\d]/g, ''))}"
+              class="ms-2 text-decoration-none">${esc(s.phone)}</a>` : '';
+    return `<div class="d-flex align-items-center gap-2 mb-2">
+            <span class="fw-semibold">${esc(s.name || s.uid)}</span>
+            <span class="badge text-bg-${tono} fw-normal ms-auto">${esc(_dwMapWord(s.state))}</span>
+        </div>
+        ${s.photo ? `<img src="${escAttr(s.photo)}" alt="" loading="lazy"
+             class="rounded-2 mb-2 d-block" style="width:100%;max-height:110px;object-fit:cover">` : ''}
+        <div class="d-flex flex-column gap-1 ss-fs-2">
+            ${_dwMapRow('bi-hdd-rack', _dwMapCount(s, view))}
+            ${_dwMapRow('bi-activity', `${s.ok || 0}/${s.total || 0}`)}
+            ${_dwMapRow('bi-geo-alt', s.address)}
+            ${_dwMapRow('bi-clock', hora)}
+            ${_dwMapRow('bi-building', s.operator)}
+            ${_dwMapRow('bi-person', s.contact, tel)}
+            ${!s.contact && s.phone ? _dwMapRow('bi-telephone', s.phone) : ''}
+            ${_dwMapRow('bi-card-text', s.description)}
+        </div>`;
+}
+
+function _dwMapCardShow(ev, wid, uid) {
+    const ficha = _dwMapCardBox(wid);
+    const s = ((_dwFetched[wid] || {}).sites || []).find(x => x.uid === uid);
+    if (!ficha || !s) return;
+    ficha.innerHTML = _dwMapCardHtml(s, ((_DW_DEFS[wid] || {}).view || {}));
+    ficha.hidden = false;
+    // Colocada dentro de la tarjeta y nunca fuera: una ficha que se sale por el borde derecho
+    // deja media dirección sin leer, y la tarjeta recorta lo que se salga.
+    const caja = ficha.parentNode.getBoundingClientRect();
+    const w = ficha.offsetWidth || 240, h = ficha.offsetHeight || 120;
+    let x = ev.clientX - caja.left + 14;
+    let y = ev.clientY - caja.top + 14;
+    if (x + w > caja.width) x = Math.max(4, ev.clientX - caja.left - w - 14);
+    if (y + h > caja.height) y = Math.max(4, ev.clientY - caja.top - h - 14);
+    ficha.style.left = x + 'px';
+    ficha.style.top = y + 'px';
+}
+
+function _dwMapCardHide(wid) {
+    const ficha = _dwMapCardBox(wid);
+    if (ficha) ficha.hidden = true;
+}
+
+//: La pulsación en curso sobre un mapa: sobre qué punto empezó y si ha viajado.
+let _dwMapPress = null;
+
+//: Cuánto puede moverse una pulsación y seguir siendo una pulsación. Cero no vale: un dedo
+//: sobre un cristal —y un ratón en la mano de cualquiera— se mueve uno o dos píxeles entre que
+//: baja y sube, y con cero exacto no se podría pulsar nada nunca.
+const _DW_MAP_SLOP = 4;
+
+/** Empezar. Se apunta sobre qué se ha pulsado y se deja arrastrar igual: las dos cosas se hacen
+ *  con el mismo botón, y cuál era se sabe al soltar. */
+function _dwMapDown(ev, cid, wid) {
+    const g = ev.target && ev.target.closest ? ev.target.closest('g[data-site]') : null;
+    _dwMapPress = {cid, wid, uid: g ? g.dataset.site : '',
+                   x: ev.clientX, y: ev.clientY, moved: false};
+    ssCanvasPanStart(cid, ev);
+}
+
+function _dwMapMove(ev, cid) {
+    if (_dwMapPress && (Math.abs(ev.clientX - _dwMapPress.x) > _DW_MAP_SLOP
+                        || Math.abs(ev.clientY - _dwMapPress.y) > _DW_MAP_SLOP))
+        _dwMapPress.moved = true;
+    ssCanvasPanMove(cid, ev);
+}
+
+/** Soltar. **Una pulsación que no viajó es un clic**, y aquí es donde se decide: no en un
+ *  `onclick` de la chincheta, porque no llega. El lienzo captura el puntero para poder arrastrar
+ *  fuera del dibujo, y con la captura puesta el navegador dispara el `click` en el `<svg>` — la
+ *  chincheta no lo ve pasar. Es la misma forma que ya usa el mapa de la sección, y por la misma
+ *  razón; reportado desde la pantalla, donde pulsar un punto no hacía nada. */
+function _dwMapUp(ev, cid, wid) {
+    const press = _dwMapPress;
+    _dwMapPress = null;
+    ssCanvasPanEnd(ev);
+    if (!press || press.moved || !press.uid || press.cid !== cid) return;
+    _dwMapPinGo(wid, press.uid);
+}
+
+/** Ir a la sede de un punto.
+ *
+ *  Adónde lleva lo dice quien trae los puntos (`view.pin_nav`), no este fichero: un mapa de
+ *  sedes va al inventario, y el que traiga mañana otra cosa irá a otro sitio. La pestaña
+ *  primero y la función después, porque lo que abre una sede es de una sección que hasta ese
+ *  momento no está dibujada. */
+function _dwMapPinGo(wid, uid) {
+    const fn = ((_DW_DEFS[wid] || {}).view || {}).pin_nav;
+    _dwNavigate(wid);
+    if (fn && typeof window[fn] === 'function') setTimeout(() => window[fn](uid), 0);
+}
+
+// ── Un mapa: dónde están las cosas, y cuáles van mal ──────────────────────────────
+//
+// La tercera clase de tarjeta, y la que contesta una pregunta que ninguna de las otras dos
+// contesta. Un recuento dice QUÉ está mal; un mapa dice DÓNDE, que es lo que decide a quién se
+// llama de madrugada.
+//
+// Genérica: dibuja cosas con latitud, longitud y un estado. Este fichero no sabe que las trae
+// el inventario, igual que no sabe de quién es cada tabla.
+
+//: Cuánto sitio se deja alrededor de las chinchetas, en tanto por uno de lo que ocupan. Sin
+//: holgura, las de los extremos caen justo en el borde y la mitad de su círculo se sale.
+const _DW_MAP_PAD = 0.35;
+//: Lo menos que puede abarcar el encuadre: medio continente. Dos sedes de la misma ciudad
+//: encuadradas a lo que ocupan salen con un zoom de calle donde no se distingue ni el país —y
+//: una sola, con un encuadre de tamaño cero, que no es un encuadre.
+const _DW_MAP_MIN = SS_GEO_WORLD / 64;
+//: A cuántos píxeles se cuenta que se ve la tarjeta para elegir el nivel de tesela. Una
+//: suposición, y sólo decide lo NÍTIDO que sale: la aritmética del dibujo va en coordenadas del
+//: mundo, así que equivocarse aquí no mueve ninguna chincheta.
+const _DW_MAP_PX = 520;
+//: Y cuántas teselas como mucho. Una tarjeta del panel de control no es una pantalla completa,
+//: y este dibujo se repinta en cada vuelta del refresco automático: pedirle sesenta imágenes a
+//: un servidor voluntario cada treinta segundos es abusar de quien te hace el favor.
+const _DW_MAP_TILE_CAP = 60;
+//: Cuánto se puede alejar: poco. El encuadre ya trae todas las sedes dentro, y más allá sólo
+//: hay océano. Lo de ACERCARSE no es un número fijo — sale de las teselas (`ssGeoZoomIn`), que
+//: es lo único que sabe dónde deja de haber más que ver.
+const _DW_MAP_ZOOM_OUT = 3;
+
+/** El nombre del lienzo de un mapa. Deriva del identificador del widget para que la ventana en
+ *  la que alguien estaba mirando sobreviva a que se repinte la tarjeta. */
+function _dwMapCanvasId(wid) { return 'dwmap-' + String(wid || ''); }
+
+//: Lo alto respecto a lo ancho MIENTRAS no se ha podido medir la tarjeta. Sólo eso: en cuanto
+//: está puesta en la pantalla se mide y se vuelve a encuadrar con su forma de verdad
+//: (`_dwMapFit`). El encuadre tiene que llevar la proporción de la caja porque `meet` no recorta
+//: —una chincheta escondida es un problema que no se ve— y entonces lo que sobra queda en
+//: bandas vacías a los lados: un mapa que no llena su tarjeta. Reportado desde la pantalla.
+const _DW_MAP_RATIO = 9 / 16;
+
+/** El encuadre que cubre todos los puntos, con holgura y con la forma de la caja. */
+function _dwMapBox(pts, ratio) {
+    ratio = ratio || _DW_MAP_RATIO;
+    if (!pts.length) return {x: 0, y: 0, w: SS_GEO_WORLD, h: SS_GEO_WORLD * ratio};
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    let w = Math.max(_DW_MAP_MIN, (Math.max(...xs) - Math.min(...xs)) * (1 + _DW_MAP_PAD));
+    let h = Math.max(_DW_MAP_MIN * ratio,
+                     (Math.max(...ys) - Math.min(...ys)) * (1 + _DW_MAP_PAD));
+    // A la proporción de la caja, ESTIRANDO y nunca encogiendo: encoger sacaría fuera lo que ya
+    // cabía.
+    if (w * ratio < h) w = h / ratio; else h = w * ratio;
+    return {x: cx - w / 2, y: cy - h / 2, w: w, h: h};
+}
+
+//: De qué color va cada estado. Las mismas cuatro palabras que usa el inventario, y el gris del
+//: final es «nadie está mirando esto», que no es «esto está bien».
+const _DW_MAP_TONE = {error: 'danger', warning: 'warning', ok: 'success'};
+
+//: Lo que mide un rótulo del mapa, en unidades del dibujo. Se escala con el zoom como todo lo
+//: demás, para que siga midiendo lo mismo en pantalla.
+const _DW_LABEL = {W: 150, TOP: 18, PASO: 14, PIE: 10, AIRE: 14};
+//: Cuánto pesa cada estado al repartir el sitio entre rótulos que se pisan. El que está peor es
+//: el que hay que poder leer.
+const _DW_MAP_RANK = {error: 3, warning: 2};
+
+/** Los renglones de un rótulo por debajo del nombre.
+ *
+ *  Porque el nombre solo no basta. «Home» en un mapa dice dónde ir y no dice a qué se va: si son
+ *  dos máquinas de trece o son las trece, si es un aviso o está caída. Eso decide si se llama a
+ *  alguien a las tres de la mañana, y estaba a un hover de distancia — que en un panel que se
+ *  mira de reojo desde la puerta es no estar. Reportado desde la pantalla.
+ *
+ *  Lo justo, eso sí: la ficha entera sigue saliendo al pasar por encima. Un rótulo con seis
+ *  renglones sobre un mapa es un mapa que no se ve. */
+function _dwMapLabelLines(s, view) {
+    const filas = [];
+    const cuenta = _dwMapCount(s, view);
+    if (cuenta) filas.push({texto: cuenta, color: 'var(--bs-secondary-color)'});
+    filas.push({texto: `${_dwMapWord(s.state)} · ${s.ok || 0}/${s.total || 0}`,
+                color: `var(--bs-${_DW_MAP_TONE[s.state] || 'secondary'})`});
+    return filas;
+}
+
+/** Lo que ocupa ese rótulo, para saber si choca con otro. */
+function _dwMapLabelSize(s, view, k) {
+    return {w: _DW_LABEL.W * k,
+            h: (_DW_LABEL.TOP + _DW_LABEL.PIE
+                + _dwMapLabelLines(s, view).length * _DW_LABEL.PASO) * k};
+}
+
+/** Si de esta sede hay algo que decir. Lo que nadie vigila no lleva rótulo: **seis rótulos que
+ *  dicen «sin vigilar» entierran el uno que dice «caída»**, que es el que se venía a ver. */
+function _dwMapBad(state) {
+    return state === 'error' || state === 'warning';
+}
+
+/** Una chincheta: un punto del color de su estado, y su rótulo cuando algo va mal.
+ *
+ *  El nombre sólo ahí a propósito. En una tarjeta de este tamaño, quince rótulos se pisan unos a
+ *  otros y no se lee ninguno; lo que hace falta leer es lo que está mal, y lo demás es un punto
+ *  verde que ya dice todo lo que tiene que decir. Lo que no se pinta se cuenta en el pie y se
+ *  dice entero al pasar por encima. */
+function _dwMapPin(s, at, k, wid, view, rotulo) {
+    const tono = _DW_MAP_TONE[s.state] || 'secondary';
+    const malo = _dwMapBad(s.state);
+    // Con rótulo si nadie ha dicho lo contrario: quien reparte el sitio es `_dwMapDraw`, y
+    // llamar a esto con una sede suelta tiene que dar la sede entera.
+    const conRotulo = malo && rotulo !== false;
+    const caja = _dwMapLabelSize(s, view, k);
+    const filas = _dwMapLabelLines(s, view);
+    // El rótulo va en tres capas y el suelo SÓLIDO primero: `--bs-danger-bg-subtle` no es un
+    // color en este panel, es un tinte del diez por ciento, y sobre un mapa no hay fondo de
+    // página debajo que lo sostenga. Costó tres rondas en el mapa de la sección, y está
+    // contado en docs/caso-diagnostico.md.
+    const titulo = `${s.name || s.uid} — ${_dwMapWord(s.state)} · ${s.ok || 0}/${s.total || 0}`;
+    // Señalar enseña la ficha; pulsar lleva allí. El `<title>` se queda como red: es lo que lee
+    // un lector de pantalla y lo que sale si la ficha no llegara a dibujarse.
+    const g = jsStr(wid || '');
+    // El identificador va en el MARCADO y no dentro de un `onclick`, porque aquí no hay
+    // `onclick` que valga: el lienzo captura el puntero al empezar a arrastrar, y con la captura
+    // puesta el navegador dispara el `click` en el `<svg>` y no en la chincheta. Quien decide es
+    // el `pointerup` de arriba, y lo que necesita es poder preguntarle a la chincheta quién es.
+    return `<g transform="translate(${at.x},${at.y})" style="cursor:pointer"
+               data-site="${escAttr(s.uid || '')}"
+               onpointerenter="_dwMapCardShow(event,${g},${jsStr(s.uid || '')})"
+               onpointerleave="_dwMapCardHide(${g})"><title>${esc(titulo)}</title>
+        ${malo ? `<circle r="${11 * k}" fill="var(--bs-${tono})" opacity=".28"></circle>` : ''}
+        <circle r="${5 * k}" fill="var(--bs-${tono})"
+                stroke="var(--bs-body-bg)" stroke-width="${2 * k}"></circle>
+        ${!conRotulo ? '' : `
+        <g transform="translate(${-caja.w / 2},${-caja.h - _DW_LABEL.AIRE * k})">
+            <rect width="${caja.w}" height="${caja.h}" rx="${6 * k}"
+                  fill="var(--bs-body-bg)"></rect>
+            <rect width="${caja.w}" height="${caja.h}" rx="${6 * k}"
+                  fill="var(--bs-${tono}-bg-subtle)"></rect>
+            <rect width="${caja.w}" height="${caja.h}" rx="${6 * k}" fill="none"
+                  stroke="var(--bs-${tono})" stroke-width="${2 * k}"></rect>
+            <text x="${9 * k}" y="${_DW_LABEL.TOP * k}" font-size="${12 * k}"
+                  font-weight="600" fill="var(--bs-body-color)">${
+                esc(_dwMapClip(s.name || s.uid, 18))}</text>
+            ${filas.map((f, n) => `<text x="${9 * k}"
+                  y="${(_DW_LABEL.TOP + (n + 1) * _DW_LABEL.PASO) * k}"
+                  font-size="${10 * k}" fill="${f.color}">${esc(f.texto)}</text>`).join('')}
+        </g>`}
+    </g>`;
+}
+
+/** Cómo se dice un estado. Del catálogo de idiomas y con las palabras del PANEL, no con las de
+ *  quien trae los puntos: este fichero dibuja mapas, no sabe de inventarios.
+ *
+ *  Una tabla y no una clave construida con `'status_' + state`: una clave así no la ve nadie —ni
+ *  el guardián de palabras ni un `grep`— y así es como cuatro llegaron a la pantalla sin existir
+ *  en ningún idioma. */
+function _dwMapWord(state) {
+    return t({error: 'status_error', warning: 'status_warning',
+              ok: 'status_ok'}[state] || 'status_unwatched');
+}
+
+/** Un nombre que no cabe se corta AQUÍ y no con CSS: dentro de un SVG no hay `text-overflow`. */
+function _dwMapClip(text, n) {
+    const s = String(text || '');
+    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+/** La tarjeta entera. `content == null` → todavía no ha llegado nada: la rueda. */
+/** El dibujo entero para una caja de *ancho* x *alto* píxeles: el encuadre, las teselas que lo
+ *  cubren y las chinchetas.
+ *
+ *  Aparte del marcado de la tarjeta porque se hace **dos veces**: una al escribir el HTML, con
+ *  una proporción supuesta, y otra en cuanto la tarjeta está puesta y se puede medir. Y hacerlo
+ *  dos veces es la única forma: lo ancha que es una tarjeta del panel de control depende de
+ *  cuántas columnas ocupe, de la pantalla y de lo que alguien haya arrastrado, y nada de eso se
+ *  sabe mientras se está construyendo una cadena de texto. */
+function _dwMapDraw(content, ancho, alto, ventana, view) {
+    const sitios = (content.sites || []).filter(s => ssGeoHas(s));
+    // De dónde salen las palabras de los rótulos. Se recibe cuando quien dibuja la tiene a mano
+    // y se busca por el widget cuando no —al repintar tras mover el mapa no hay más que el
+    // lienzo—, porque una tarjeta que pierde su vista pierde el renglón de los armarios.
+    view = view || ((_DW_DEFS[(content || {}).wid] || {}).view || {});
+    const pts = sitios.map(s => ssGeoProject(s.lat, s.lon));
+    const box = _dwMapBox(pts, (alto || 1) / (ancho || 1));
+    // Lo que se dibuja es lo que se está MIRANDO, que no siempre es el encuadre completo: en
+    // cuanto alguien gira la rueda, la ventana es otra y las teselas y el tamaño de las
+    // chinchetas salen de ella. Sin ventana —el primer dibujo, antes de medir— manda el
+    // encuadre, que es donde se abre.
+    const v = ventana || box;
+    // En coordenadas del mundo, un círculo de radio fijo crece al alejarse hasta tapar el país.
+    // `k` es lo que hay que agrandar lo dibujado para que se siga viendo del mismo tamaño — y
+    // sale del ancho de VERDAD en cuanto se ha podido medir.
+    const k = v.w / (ancho || _DW_MAP_PX);
+    return {
+        box: box,
+        teselas: ssGeoTiles(content.tiles, v,
+                            ssGeoZoom((ancho || _DW_MAP_PX) / v.w, content.zmax),
+                            _DW_MAP_TILE_CAP),
+        chinchetas: (() => {
+            // Quién se queda con el sitio: de peor a mejor, y el que choca se queda sin rótulo
+            // y con su punto. La misma regla que el mapa de la sección, repartida por el mismo
+            // sitio (`ssLabelsFit`).
+            const con = ssLabelsFit(sitios.map((s, i) => [s, i])
+                .filter(([s]) => _dwMapBad(s.state))
+                .sort((a, b) => (_DW_MAP_RANK[b[0].state] || 0) - (_DW_MAP_RANK[a[0].state] || 0))
+                .map(([s, i]) => {
+                    const caja = _dwMapLabelSize(s, view, k);
+                    return {key: s.uid, w: caja.w, h: caja.h,
+                            x: pts[i].x - caja.w / 2,
+                            y: pts[i].y - caja.h - _DW_LABEL.AIRE * k};
+                }));
+            return sitios.map((s, i) => _dwMapPin(s, pts[i], k, content.wid, view,
+                                                  !!con[s.uid])).join('');
+        })(),
+    };
+}
+
+function _dwRenderMap(id, view, content) {
+    const st = _DW_STYLES[view.accent || 'teal'] || _DW_STYLES.teal;
+    const icon = view.icon || 'bi-geo-alt';
+    const title = t(view.title_key || view.label_key);
+    if (content == null)
+        return _dwTableCard(st.accent, st.bg, st.color, icon, title,
+            `<div class="d-flex h-100 align-items-center justify-content-center">
+                <span class="spinner-border spinner-border-sm text-muted"></span></div>`,
+            'flex:1;overflow:hidden');
+    if (!(content.sites || []).filter(s => ssGeoHas(s)).length)
+        return _dwTableCard(st.accent, st.bg, st.color, icon, title,
+            `<div class="d-flex h-100 align-items-center justify-content-center text-muted small px-3 text-center">${
+                esc(t(view.empty_key || 'overview_map_empty'))}</div>`, 'flex:1;overflow:hidden');
+    const d = _dwMapDraw(content, _DW_MAP_PX, _DW_MAP_PX * _DW_MAP_RATIO, null, view);
+    // El mismo lienzo que el mapa de la sección: la rueda acerca, el arrastre mueve y dos
+    // pulsaciones vuelven al encuadre. Los atributos los pone él —y con ellos se recupera la
+    // ventana en la que estaba alguien cuando el refresco automático repinta la tarjeta, que si
+    // no le arrancaría el zoom de las manos cada treinta segundos—; los gestos son de aquí,
+    // porque qué significa una pulsación depende de lo que hay dibujado.
+    const cid = _dwMapCanvasId(id);
+    const g = jsStr(cid);
+    const cuerpo = `<div class="position-relative h-100" style="background:var(--bs-tertiary-bg)">
+        <svg ${ssCanvasAttrs(cid, {x: d.box.x, y: d.box.y, width: d.box.w, height: d.box.h})}
+             data-dwmap="${escAttr(id)}"
+             data-zoom-in="${ssGeoZoomIn(d.box.w, _DW_MAP_PX, content.zmax)}"
+             data-zoom-out="${_DW_MAP_ZOOM_OUT}"
+             onwheel="ssCanvasWheel(${g},event)"
+             onpointerdown="_dwMapDown(event,${g},${jsStr(id)})"
+             onpointermove="_dwMapMove(event,${g})"
+             onpointerup="_dwMapUp(event,${g},${jsStr(id)})"
+             onpointercancel="_dwMapUp(event,${g},${jsStr(id)})"
+             onpointerleave="_dwMapUp(event,${g},${jsStr(id)})"
+             ondblclick="ssCanvasFit(${g})"
+             aria-label="${escAttr(title)}">
+            <g class="dw-map-tiles">${d.teselas}</g>
+            <g class="dw-map-pins">${d.chinchetas}</g>
+        </svg>
+        ${_dwMapTally(content)}
+        <div class="ss-map-credit">${esc(_dwMapFoot(content))}</div>
+    </div>`;
+    return _dwTableCard(st.accent, st.bg, st.color, icon, title, cuerpo, 'flex:1;overflow:hidden');
+}
+
+/** Volver a encuadrar un mapa **con la forma que tiene de verdad**.
+ *
+ *  Un `viewBox` con otra proporción que su caja deja bandas vacías a los lados: `meet` encaja el
+ *  dibujo entero dentro y lo que sobra se queda vacío. Eso es lo que se veía —un mapa que no
+ *  llena su tarjeta— y no se puede arreglar al escribir el HTML, porque entonces la tarjeta
+ *  todavía no está en ninguna pantalla y no mide nada.
+ *
+ *  Recortar en vez de encajar (`slice`) sería la otra salida, y es peor: escondería chinchetas,
+ *  que en un mapa de sedes es esconder una sede. */
+function _dwMapFit(svg) {
+    if (!svg) return;
+    const content = _dwFetched[svg.dataset.dwmap];
+    const ancho = svg.clientWidth, alto = svg.clientHeight;
+    if (!content || !ancho || !alto) return;
+    const cid = _dwMapCanvasId(svg.dataset.dwmap);
+    const d = _dwMapDraw(content, ancho, alto);
+    // El encuadre completo pasa a ser LO QUE SE VE AL ABRIR y el tope del alejamiento, no lo
+    // que se dibuja: eso lo decide la ventana.
+    svg.dataset.x = d.box.x; svg.dataset.y = d.box.y;
+    svg.dataset.w = d.box.w; svg.dataset.h = d.box.h;
+    // Y hasta dónde se puede acercar, que depende de las dos cosas que acaban de cambiar: lo
+    // que abarca el encuadre y lo ancha que es la tarjeta.
+    svg.dataset.zoomIn = ssGeoZoomIn(d.box.w, ancho, content.zmax);
+    // Repintar cuando la ventana cambie —una rueda, un arrastre— y no repintar la pantalla
+    // entera en cada movimiento del ratón, que es una imagen que tiembla bajo la mano que la
+    // mueve. Se vuelve a apuntar en cada pasada porque el `<svg>` es otro después de repintar
+    // la tarjeta, y el apuntado viejo dibujaría en un nodo que ya no está en ninguna pantalla.
+    ssCanvasOnApply(cid, (v) => _dwMapPaint(svg, v));
+    // Si alguien estaba mirando un trozo, se le respeta: sólo se reencuadra lo que nadie ha
+    // tocado. Volver al encuadre completo en cada refresco sería quitarle el zoom de las manos.
+    if (ssCanvasWindowKept(cid)) ssCanvasApply(cid); else ssCanvasFit(cid);
+}
+
+/** Volver a pintar lo que hay dentro del `<svg>` para la ventana *v*. */
+function _dwMapPaint(svg, v) {
+    const content = _dwFetched[(svg || {}).dataset ? svg.dataset.dwmap : ''];
+    if (!svg || !content) return;
+    const d = _dwMapDraw(content, svg.clientWidth, svg.clientHeight, v);
+    const teselas = svg.querySelector('.dw-map-tiles');
+    const pines = svg.querySelector('.dw-map-pins');
+    if (teselas) teselas.innerHTML = d.teselas;
+    if (pines) pines.innerHTML = d.chinchetas;
+}
+
+/** Y con todos los que haya puestos, ahora y cada vez que cambien de tamaño.
+ *
+ *  Lo segundo hace falta porque una tarjeta del panel de control se estira: se arrastra su alto,
+ *  cambia de columnas, se gira una tableta. Sin eso, el mapa se queda encuadrado para el tamaño
+ *  que tenía cuando se pintó y vuelven las bandas. */
+function _dwMapFitAll(root) {
+    const donde = root || document;
+    if (!donde || !donde.querySelectorAll) return;
+    donde.querySelectorAll('svg[data-dwmap]').forEach(svg => {
+        _dwMapFit(svg);
+        if (svg.dataset.dwmapWatch || typeof ResizeObserver !== 'function') return;
+        svg.dataset.dwmapWatch = '1';
+        new ResizeObserver(() => _dwMapFit(svg)).observe(svg);
+    });
+}
+
+//: En qué orden se cuentan los estados en el resumen: lo peor primero. Se lee de izquierda a
+//: derecha, y lo que hay que ver es lo que está mal.
+const _DW_MAP_TALLY = ['error', 'warning', 'ok', ''];
+
+//: Y con que SIGNO se dibuja cada uno. Un punto de color no se lee de todas las formas en que la
+//: gente lee: quien no separa el rojo del verde ve cuatro puntos iguales con cuatro numeros, y
+//: en una pantalla en blanco y negro tampoco hay color que valga. Reportado desde la pantalla.
+//:
+//: Una tabla y no una clave construida con `'bi-' + estado`: una clave asi no la ve nadie, ni un
+//: `grep` ni un guardian, y asi es como cuatro llegaron a la pantalla sin existir.
+const _DW_MAP_ICON = {error: 'bi-exclamation-octagon-fill',
+                      warning: 'bi-exclamation-triangle-fill',
+                      ok: 'bi-check-circle-fill',
+                      '': 'bi-eye-slash-fill'};
+
+/** El resumen: **cuántas hay de cada**, encima del mapa.
+ *
+ *  El dibujo contesta «dónde», y muy bien. No contesta «cuántas»: para saber si son dos o siete
+ *  las que están mal hay que contar chinchetas a ojo, y a ojo se cuenta mal — dos puntos rojos
+ *  en la misma ciudad son un punto rojo. Reportado desde la pantalla.
+ *
+ *  Los cuatro estados **siempre**, incluido el que vale cero. «Ninguna caída» es una respuesta,
+ *  y la respuesta que más se viene a buscar; enseñarla sólo cuando hay alguna obligaría a
+ *  deducirla de una ausencia, que es justo lo que no se puede pedir a quien mira un panel de
+ *  reojo. En gris cuando es cero, para que el color quede para lo que sí pasa.
+ *
+ *  Encima del mapa y no debajo: en una tarjeta pequeña, un renglón más de tarjeta es un renglón
+ *  menos de mapa. */
+function _dwMapTally(content) {
+    const sedes = content.sites || [];
+    return `<div class="ss-map-tally">${_DW_MAP_TALLY.map(st => {
+        const n = sedes.filter(s => String(s.state || '') === st).length;
+        const tono = _DW_MAP_TONE[st] || 'secondary';
+        return `<span class="ss-map-tally-item${n ? '' : ' ss-map-tally-none'}"
+                      title="${escAttr(_dwMapWord(st))}">
+            <i class="bi ${_DW_MAP_ICON[st] || 'bi-circle-fill'} text-${tono}"></i>${
+                esc(String(n))}</span>`;
+    }).join('')}</div>`;
+}
+
+/** El pie: lo que el dibujo NO puede decir.
+ *
+ *  Las sedes sin coordenadas son la mitad de esta línea. Una sede que no se puede dibujar
+ *  desaparece del mapa, y una sede que desaparece parece una que está bien — que es justo lo que
+ *  no se puede dejar creer a quien mira el panel de control desde la puerta. Contarlas aquí es
+ *  también lo que hace que alguien vaya a escribir su latitud.
+ *
+ *  Y el crédito de las teselas, que no es decoración: la licencia de OpenStreetMap lo exige, y
+ *  quien apunte esto a otro servidor pondrá el suyo. */
+function _dwMapFoot(content) {
+    const partes = [tf('overview_map_sites', (content.sites || []).length)];
+    const malas = (content.sites || []).filter(s => s.state === 'error' || s.state === 'warning');
+    if (malas.length) partes.push(tf('overview_map_trouble', malas.length));
+    if (content.unplaced) partes.push(tf('overview_map_unplaced', content.unplaced));
+    // Un mapa configurado que no dibuja dice POR QUÉ. Sin esto, quien acaba de pegar su clave
+    // de Google ve el mismo cuadro vacío que antes de pegarla, y nada distingue «no lo he
+    // configurado» de «lo he configurado mal».
+    if (content.error) partes.push(t(content.error));
+    else if (!String(content.tiles || '').trim()) partes.push(t('overview_map_no_tiles'));
+    else if (content.attribution) partes.push(content.attribution);
+    return partes.join(' · ');
+}
+
 // Dispatch a data-driven widget by its `view.kind`.
 function _dwRenderView(id, view, content, item) {
     if (view.kind === 'stat')  return _dwRenderStat(view, content);
     if (view.kind === 'table') return _dwRenderTable(id, view, item);
+    if (view.kind === 'map')   return _dwRenderMap(id, view, content);
     return '';
 }
 
 // ── Data-driven widgets: each fetches its own data over AJAX ───────────────────────
-// Stat cards cache their fetched content; tables cache their fetched rows (so a sort
-// re-renders without a re-fetch).
-const _dwStatContent = {};
-const _dwStatBusy = {};
+// A card caches the content it fetched; a table caches its fetched rows (so a sort re-renders
+// without a re-fetch). `_dwFetched` and not `_dwStatContent`: what it holds is whatever the
+// widget serves — a stat card's fixed shape, or a map's sites.
+const _dwFetched = {};
+const _dwFetchBusy = {};
 const _dwTableRows = {};
 const _dwTableBusy = {};
 // Cell renderers: (row, col) => <td> HTML.  Generic types + a few reusable customs
@@ -192,12 +725,12 @@ const _DW_CELLS = {
             s + Object.values(cfg[k]).filter(v => typeof v !== 'object' || v === null || Array.isArray(v) || v.enabled !== false).length, 0);
         return `<td>${(r.items === 0 || activeItems === 0) ? '<span class="text-muted small">—</span>' : _dwChecksBadge(r.checks)}</td>`;
     },
-    // Coloured avatar + label (host / user / module) — `av` picks icon + hue.
-    host_name: (r) => `<td><span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
+    // Coloured avatar + label (device / user / module) — `av` picks icon + hue.
+    device_name: (r) => `<td><span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
         style="width:26px;height:26px;background:rgba(14,165,233,.14);color:#0ea5e9;font-size:.85rem;vertical-align:middle"><i class="bi bi-hdd-network"></i></span>${esc(r.name || '')}</td>`,
-    host_status:  (r) => `<td>${_dwSrvStatusBadge(r)}</td>`,
-    host_checks:  (r) => `<td>${_dwChecksBadge(r.checks)}</td>`,
-    host_modules: (r) => `<td>${_dwModulesBadge(r.modules_active, r.modules_total)}</td>`,
+    device_status:  (r) => `<td>${_dwSrvStatusBadge(r)}</td>`,
+    device_checks:  (r) => `<td>${_dwChecksBadge(r.checks)}</td>`,
+    device_modules: (r) => `<td>${_dwModulesBadge(r.modules_active, r.modules_total)}</td>`,
     session_user: (r) => `<td><span class="rounded-2 d-inline-flex align-items-center justify-content-center me-2"
         style="width:26px;height:26px;background:rgba(6,182,212,.14);color:#06b6d4;font-size:.85rem;vertical-align:middle"><i class="bi bi-person"></i></span>${esc(r.user || '')}</td>`,
     browser: (r) => `<td class="small text-muted text-nowrap" title="${escAttr(r.agent || '')}">${esc(_dwBrowser(r.agent))}</td>`,
@@ -222,8 +755,8 @@ const _DW_CELLS = {
             style="--mh:${_moduleHue(r.module)};width:26px;height:26px;font-size:.85rem;vertical-align:middle">${moduleIcon(r.module, cfg)}</span>${esc(modulePrettyName(r.module, cfg))}</td>`;
     },
     check_danger: (r) => `<td><span class="text-danger"><i class="bi bi-x-circle me-1"></i>${esc(r[/*key*/'check'] || '')}</span></td>`,
-    host_code: (r) => r.host
-        ? `<td><code style="font-size:.8rem">${esc(r.host)}</code></td>`
+    device_code: (r) => r.device
+        ? `<td><code style="font-size:.8rem">${esc(r.device)}</code></td>`
         : '<td><span class="text-muted small">—</span></td>',
     login_detail: (r) => {
         let d = r.detail;
@@ -241,7 +774,7 @@ const _DW_CELLS = {
     },
     syslog_host: (r) => {
         const host = r.hostname || r.source || '';
-        return `<td class="small text-nowrap pe-4" style="width:1%;max-width:12em;overflow:hidden;text-overflow:ellipsis" title="${escAttr(host)}">${esc(host)}</td>`;
+        return `<td class="small text-nowrap pe-4" style="width:1%;max-width:12em;overflow:hidden;text-overflow:ellipsis" title="${escAttr(device)}">${esc(device)}</td>`;
     },
     message: (r) => `<td class="small text-break">${esc(r.message || '')}</td>`,
     ipban_reason: (r) => {
@@ -262,9 +795,9 @@ const _DW_CELL_SORT = {
     module_name:  (r) => modulePrettyName(r.name, modulesData[r.name] || {}).toLowerCase(),
     on_badge:     (r) => (r.enabled ? 1 : 0),
     checks:       (r) => ((r.checks && r.checks.error) || 0) * 1000 + ((r.checks && r.checks.warning) || 0),
-    host_status:  (r) => _dwSrvStatusRank(r),
-    host_checks:  (r) => ((r.checks && r.checks.error) || 0) * 1000 + ((r.checks && r.checks.warning) || 0),
-    host_modules: (r) => r.modules_active || 0,
+    device_status:  (r) => _dwSrvStatusRank(r),
+    device_checks:  (r) => ((r.checks && r.checks.error) || 0) * 1000 + ((r.checks && r.checks.warning) || 0),
+    device_modules: (r) => r.modules_active || 0,
     session_user: (r) => (r.user || '').toLowerCase(),
     browser:      (r) => _dwBrowser(r.agent),
     event_badge:  (r) => ((I18N.audit_events || {})[r.event] || r.event || '').toLowerCase(),
@@ -342,7 +875,7 @@ function _dwViewFilterBadge(id, view, item) {
             parts.push(_dwFilterBadge(pre + t(lo.label_key || ''), b.color || '#6c757d', b.bg || 'rgba(108,117,125,.18)'));
         }
         if (d.maint)
-            parts.push(_dwFilterBadge(t('host_status_maintenance'), '#fd7e14', 'rgba(253,126,20,.18)'));
+            parts.push(_dwFilterBadge(t('device_status_maintenance'), '#fd7e14', 'rgba(253,126,20,.18)'));
         return parts.join('');
     }
     if (view.filter.badge_fn === 'sev') {
@@ -393,22 +926,27 @@ async function _dwTableFetch(id) {
     } catch (e) { /* leave the placeholder on error */ }
     finally { _dwTableBusy[id] = false; }
 }
-// Fetch a data-driven stat card's content, cache + re-render its card body.
-async function _dwStatFetch(id) {
+// Fetch a card's content (anything that is not a table), cache it + re-render its body.
+// Dibujado por su clase y no por «es una tarjeta de recuento»: así una clase nueva se sirve
+// sola en cuanto sabe dibujarse.
+async function _dwFetchContent(id) {
     const view = (_DW_DEFS[id] || {}).view;
-    if (!view || view.kind !== 'stat' || !view.data_url || _dwStatBusy[id]) return;
+    if (!view || view.kind === 'table' || !view.data_url || _dwFetchBusy[id]) return;
     const sel = `.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`;
     const dw = document.querySelector(sel);
     if (!dw || dw.style.display === 'none') return;
-    _dwStatBusy[id] = true;
+    _dwFetchBusy[id] = true;
     try {
         const data = await apiGet(view.data_url);
-        _dwStatContent[id] = (data && data.content) || {};
+        _dwFetched[id] = (data && data.content) || {};
         const cont = document.querySelector(`${sel} .dw-content`);
-        if (cont) cont.innerHTML = _dwRenderStat(view, _dwStatContent[id]);
-        _dwApplyState(document.querySelector(sel), _dwStatContent[id].state);
+        if (cont) cont.innerHTML = _dwRenderView(id, view, _dwFetched[id], null);
+        // Ya está puesto: ahora sí se puede medir, que es lo que un mapa necesita para
+        // encuadrarse con la forma de su tarjeta.
+        _dwMapFitAll(cont);
+        _dwApplyState(document.querySelector(sel), _dwFetched[id].state);
     } catch (e) { /* leave the placeholder on error */ }
-    finally { _dwStatBusy[id] = false; }
+    finally { _dwFetchBusy[id] = false; }
 }
 // Fetch every visible data-driven widget (stat card or table) — one request each, so the
 // page paints instantly and each widget fills at its own pace. Called after a render.
@@ -418,8 +956,12 @@ function _dwAsyncWidgets() {
         const v = (_DW_DEFS[id] || {}).view;
         if (dw.style.display === 'none' || !v) return;
         if (v.kind === 'table') _dwTableFetch(id);
-        else if (v.kind === 'stat') _dwStatFetch(id);
+        else _dwFetchContent(id);
     });
+    // Los que se pintaron de lo que ya estaba guardado no pasan por la petición, así que
+    // tampoco por su medida: un arrastre, un filtro o un cambio de columnas rehacen la rejilla
+    // sin pedir nada.
+    _dwMapFitAll(document);
 }
 
 // ──────────────────────── Sort state ─────────────────────────────
@@ -457,11 +999,11 @@ function _dwChecksBadge(checks) {
 
 function _dwSrvStatusBadge(h) {
     if (h.maintenance)
-        return `<span class="badge rounded-pill" style="background:#fd7e14;color:#fff;font-size:.72rem"><i class="bi bi-cone-striped me-1"></i>${esc(t('host_status_maintenance'))}</span>`;
+        return `<span class="badge rounded-pill" style="background:#fd7e14;color:#fff;font-size:.72rem"><i class="bi bi-cone-striped me-1"></i>${esc(t('device_status_maintenance'))}</span>`;
     const map = {
-        ok:      ['rgba(34,197,94,.15)',  'var(--ss-ok-text,#16a34a)',  'bi-check-circle',    'host_status_ok'],
-        error:   ['rgba(239,68,68,.15)',  'var(--ss-err-text,#dc2626)', 'bi-x-circle',        'host_status_error'],
-        warning: ['rgba(245,158,11,.18)', '#d97706',                    'bi-hourglass-split', 'host_status_warning'],
+        ok:      ['rgba(34,197,94,.15)',  'var(--ss-ok-text,#16a34a)',  'bi-check-circle',    'device_status_ok'],
+        error:   ['rgba(239,68,68,.15)',  'var(--ss-err-text,#dc2626)', 'bi-x-circle',        'device_status_error'],
+        warning: ['rgba(245,158,11,.18)', '#d97706',                    'bi-hourglass-split', 'device_status_warning'],
     };
     const m = map[h.status];
     if (!m) return '<span class="text-muted small">—</span>';
@@ -1042,13 +1584,13 @@ function _dwContent(id, data, item) {
     const perms   = new Set(currentUser.permissions || []);
 
     // Data-driven widget: its descriptor carries a `view` and fetches its own data over
-    // AJAX (stat content cached in _dwStatContent, table rows in _dwTableRows). On first
-    // render the cache is empty → a placeholder paints, then _dwAsyncWidgets fills it.
+    // AJAX (content cached in _dwFetched, table rows in _dwTableRows). On first render the
+    // cache is empty → a placeholder paints, then _dwAsyncWidgets fills it.
     const _def = _DW_DEFS[id];
     if (_def && _def.view) {
         if (_def.canShow && !_def.canShow(perms))
             return `<div class="rounded-3 border h-100 d-flex align-items-center justify-content-center text-muted small" style="background:var(--ss-surface-bg,var(--bs-body-bg))">${t('no_permission')}</div>`;
-        const content = _def.view.kind === 'stat' ? _dwStatContent[id] : null;
+        const content = _def.view.kind === 'table' ? null : _dwFetched[id];
         return _dwRenderView(id, _def.view, content, item);
     }
 

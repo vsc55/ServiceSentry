@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """SSRF guard for user-supplied URLs fetched server-side.
 
-ServiceSentry is a monitoring tool, so requests to private/internal hosts
+ServiceSentry is a monitoring tool, so requests to private/internal devices
 (RFC1918 10/8, 172.16/12, 192.168/16) are a *legitimate* use case and are NOT
 blocked.  What we do block is what is never a legitimate monitoring target and
 is a classic SSRF escalation vector:

@@ -62,7 +62,7 @@ function _itemMultiCheckModal() {
 // opens immediately (list + spinners) and each row resolves as its data arrives.
 function _runItemMultiCheck(mod, colSchema, itemKey, url, itemData, mc) {
     const enabled = mc.filter(s => itemData[s.toggle] === true);
-    if (!enabled.length) { showToast(t('host_test_none') || '—', 'secondary'); return; }
+    if (!enabled.length) { showToast(t('device_test_none') || '—', 'secondary'); return; }
     const _lbl = tog => {
         const f = colSchema[tog], li = f && f.label_i18n;
         return (li && (li[CURRENT_LANG] || li[SYSTEM_DEFAULT_LANG])) || tog;
@@ -407,13 +407,13 @@ function renderCollection(title, data, pathStr, target) {
     </div>
     <div class="d-flex flex-column gap-1">`;
 
-    // Order items by their bound host's label (then the item label, then the key)
-    // so host-bound checks read in a predictable, alphabetical order.
-    const _hostNames = (typeof hostsList === 'function')
-        ? Object.fromEntries(hostsList().map(hh => [hh.uid, hh.name || ''])) : {};
+    // Order items by their bound device's label (then the item label, then the key)
+    // so device-bound checks read in a predictable, alphabetical order.
+    const _deviceNames = (typeof devicesList === 'function')
+        ? Object.fromEntries(devicesList().map(hh => [hh.uid, hh.name || ''])) : {};
     const _sorted = Object.entries(data).sort((a, b) =>
-        _collSortKey(a[1], a[0], _hostNames).localeCompare(
-            _collSortKey(b[1], b[0], _hostNames), undefined, { numeric: true, sensitivity: 'base' }));
+        _collSortKey(a[1], a[0], _deviceNames).localeCompare(
+            _collSortKey(b[1], b[0], _deviceNames), undefined, { numeric: true, sensitivity: 'base' }));
     for (const [name, val] of _sorted) {
         h += renderCollectionItem(name, val, pathStr + '|' + name, pathStr, target);
     }
@@ -424,16 +424,16 @@ function renderCollection(title, data, pathStr, target) {
     return h;
 }
 
-// Header badge telling whether a (host-capable) item is bound to a host or runs
-// inline. Bound → host icon + name (or "first +N" for a multi-host binding);
-// host-capable but unbound → a muted "inline" chip; not host-capable → nothing.
-function _itemHostBadge(val, hostCapable) {
-    const huid  = (val && typeof val === 'object') ? (val.host_uid || '') : '';
-    const huids = (val && Array.isArray(val.host_uids)) ? val.host_uids.filter(Boolean) : [];
-    // Resolve to KNOWN hosts only — a dangling uid (deleted host) must never be
-    // shown as a host, nor leak a raw uid; such an item reads as inline.
+// Header badge telling whether a (device-capable) item is bound to a device or runs
+// inline. Bound → device icon + name (or "first +N" for a multi-device binding);
+// device-capable but unbound → a muted "inline" chip; not device-capable → nothing.
+function _itemDeviceBadge(val, deviceCapable) {
+    const huid  = (val && typeof val === 'object') ? (val.device_uid || '') : '';
+    const huids = (val && Array.isArray(val.device_uids)) ? val.device_uids.filter(Boolean) : [];
+    // Resolve to KNOWN devices only — a dangling uid (deleted device) must never be
+    // shown as a device, nor leak a raw uid; such an item reads as inline.
     const _name = (u) => {
-        const h = (typeof hostsList === 'function') ? hostsList().find(x => x.uid === u) : null;
+        const h = (typeof devicesList === 'function') ? devicesList().find(x => x.uid === u) : null;
         return (h && h.name) ? h.name : null;
     };
     const names = (huids.length ? huids : (huid ? [huid] : [])).map(_name).filter(Boolean);
@@ -441,21 +441,21 @@ function _itemHostBadge(val, hostCapable) {
         const label = names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0];
         return `<span class="badge rounded-pill text-bg-info flex-shrink-0 me-1" data-no-collapse="1"
             style="font-size:.64rem"
-            title="${escAttr(t('host_bind_label'))}: ${escAttr(label)}"><i class="bi bi-hdd-network me-1"></i>${esc(label)}</span>`;
+            title="${escAttr(t('device_bind_label'))}: ${escAttr(label)}"><i class="bi bi-hdd-network me-1"></i>${esc(label)}</span>`;
     }
-    if (!hostCapable) return '';
-    const _inlineTxt = t('host_inline_short');
+    if (!deviceCapable) return '';
+    const _inlineTxt = t('device_inline_short');
     return `<span class="badge rounded-pill text-bg-secondary flex-shrink-0 me-1" data-no-collapse="1"
         style="font-size:.64rem;opacity:.75"
-        title="${escAttr(t('host_inline'))}"><i class="bi bi-dash-circle me-1"></i>${esc(_inlineTxt && _inlineTxt !== 'host_inline_short' ? _inlineTxt : 'inline')}</span>`;
+        title="${escAttr(t('device_inline'))}"><i class="bi bi-dash-circle me-1"></i>${esc(_inlineTxt && _inlineTxt !== 'device_inline_short' ? _inlineTxt : 'inline')}</span>`;
 }
 
-// Sort key for a collection item: the bound host's label first (host_uid or the
-// first of a multi-host host_uids), else the item's own label, else the raw key.
-function _collSortKey(val, key, hostNames) {
+// Sort key for a collection item: the bound device's label first (device_uid or the
+// first of a multi-device device_uids), else the item's own label, else the raw key.
+function _collSortKey(val, key, deviceNames) {
     if (val && typeof val === 'object') {
-        const huid = val.host_uid || (Array.isArray(val.host_uids) ? val.host_uids[0] : '');
-        const hn = huid && hostNames[huid];
+        const huid = val.device_uid || (Array.isArray(val.device_uids) ? val.device_uids[0] : '');
+        const hn = huid && deviceNames[huid];
         if (hn) return String(hn).toLowerCase();
         if ((val.label || '').trim()) return String(val.label).toLowerCase();
     }
@@ -494,7 +494,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
     const editLabelBtn = (canEditItem && _titleEditable && _titleField)
         ? `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1" data-no-collapse="1"
         onclick="event.stopPropagation();editItemLabel(${tg},${sp},${pp})"
-        title="${escAttr(t('host_edit_name') || 'Edit name')}">
+        title="${escAttr(t('device_edit_name') || 'Edit name')}">
         <i class="bi bi-pencil"></i></button>`
         : '';
 
@@ -627,26 +627,26 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
         }
 
         const itemOpacity = itemOn ? '' : ';opacity:.6';
-        // Maintenance marker: when this check is bound to a host in maintenance,
+        // Maintenance marker: when this check is bound to a device in maintenance,
         // its monitoring and any auto-remediation are suspended — flag it so it's
-        // clear from the Modules list without opening the host.
+        // clear from the Modules list without opening the device.
         let _maintBadge = '';
-        const _hUid = (itemValue && typeof itemValue === 'object') ? (itemValue.host_uid || '') : '';
-        if (_hUid && typeof hostsList === 'function') {
-            const _h = hostsList().find(hh => hh.uid === _hUid);
+        const _hUid = (itemValue && typeof itemValue === 'object') ? (itemValue.device_uid || '') : '';
+        if (_hUid && typeof devicesList === 'function') {
+            const _h = devicesList().find(hh => hh.uid === _hUid);
             if (_h && _h.maintenance) {
                 _maintBadge = `<span class="badge rounded-pill flex-shrink-0 me-1" data-no-collapse="1"
                     style="background:#fd7e14;color:#fff;font-size:.62rem"
-                    title="${escAttr(t('host_status_maintenance'))}"><i class="bi bi-cone-striped me-1"></i>${esc(t('host_status_maintenance'))}</span>`;
+                    title="${escAttr(t('device_status_maintenance'))}"><i class="bi bi-cone-striped me-1"></i>${esc(t('device_status_maintenance'))}</span>`;
             }
         }
-        // Host-association indicator (only for host-capable collections).
+        // Device-association indicator (only for device-capable collections).
         const _modBare = _modNameItem.replace(/^watchfuls\./, '');
         const _collSuffix = parentPathStr.includes('|') ? parentPathStr.slice(parentPathStr.indexOf('|') + 1) : '';
-        const _hostColls = (typeof MODULE_HOST_COLLECTIONS !== 'undefined')
-            ? (MODULE_HOST_COLLECTIONS[_modBare] || MODULE_HOST_COLLECTIONS[_modNameItem]) : null;
-        const _hostCapable = !!(target === 'modules' && _hostColls && _collSuffix && _hostColls.includes(_collSuffix));
-        const _hostBadge = _itemHostBadge(itemValue, _hostCapable);
+        const _deviceColls = (typeof MODULE_DEVICE_COLLECTIONS !== 'undefined')
+            ? (MODULE_DEVICE_COLLECTIONS[_modBare] || MODULE_DEVICE_COLLECTIONS[_modNameItem]) : null;
+        const _deviceCapable = !!(target === 'modules' && _deviceColls && _collSuffix && _deviceColls.includes(_collSuffix));
+        const _deviceBadge = _itemDeviceBadge(itemValue, _deviceCapable);
 
         const isAutoExpand = (_autoExpandItemPath === pathStr);
         if (isAutoExpand) _autoExpandItemPath = null;
@@ -660,7 +660,7 @@ function renderCollectionItem(itemName, itemValue, pathStr, parentPathStr, targe
                     onchange="event.stopPropagation();_toggleItemSel(${sp},this.checked,${pp},${tg})"
                     title="${escAttr(t('select') || 'Select')}">` : ''}
                 <code class="flex-grow-1 min-w-0" style="font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(displayName)}${keyBadge}</code>
-                ${_hostBadge}${_maintBadge}${sw}${testBtn}${editLabelBtn}${renameBtn}${cloneBtn}${delBtn}
+                ${_deviceBadge}${_maintBadge}${sw}${testBtn}${editLabelBtn}${renameBtn}${cloneBtn}${delBtn}
                 <button class="btn btn-sm py-0 px-1 flex-shrink-0" type="button" data-no-collapse="1"
                     style="background:var(--bs-secondary-bg);border:1px solid var(--bs-border-color);color:var(--bs-secondary-color)"
                     data-bs-toggle="collapse" data-bs-target="#${id}" aria-expanded="${isAutoExpand}"

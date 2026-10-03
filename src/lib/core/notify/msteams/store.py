@@ -3,7 +3,7 @@
 """Relational store for Microsoft Teams *channel* destinations (Incoming Webhooks).
 
 Each record is one Teams channel ServiceSentry posts an Adaptive Card to on a
-status change.  Like webhooks/hosts/credentials, they live in their **own** DB
+status change.  Like webhooks/devices/credentials, they live in their **own** DB
 table, not in ``config.json``.  The ``webhook_url`` field inside ``data`` embeds a
 secret token, so it is encrypted at rest with :mod:`lib.security.secret_manager`;
 ``list``/``get`` return decrypted data so the dispatcher can post, and the API

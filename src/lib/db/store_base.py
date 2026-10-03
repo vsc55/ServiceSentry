@@ -81,19 +81,6 @@ class BaseStore:
         bump the version (i.e. if anything reloads it from another process)."""
         ensure_version_row(self._db, self._TABLE)
 
-    def _backfill_audit_columns(self) -> None:
-        """Give rows written before the audit columns existed a value.
-
-        Runs once per start and matches nothing afterwards: the WHERE clause selects the
-        empty ``created_at`` that only a pre-migration row has.
-        """
-        now = self._now()
-        self._db.execute(
-            f"UPDATE {self._sql_table} SET created_at=?, updated_at=?, updated_by=? "
-            "WHERE created_at=''",
-            (now, now, 'system'),
-        )
-
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def close(self) -> None:
@@ -105,7 +92,7 @@ class BaseStore:
 
 
 class EncryptedPayloadMixin:
-    """A store whose payload column holds secrets (credentials, host profiles).
+    """A store whose payload column holds secrets (credentials, device profiles).
 
     The two implementations were byte-identical apart from the parameter name.  Which keys
     count as secret comes from :mod:`lib.security.secret_manager`, so the rule lives with

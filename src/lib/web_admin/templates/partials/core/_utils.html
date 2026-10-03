@@ -59,10 +59,27 @@ function _buildItemsGrid(gridId, data, { q = '', match = null, render, empty = '
 
 /** Format an ISO-8601 string as local `YYYY-MM-DD HH:MM` (minute precision).
  *  Empty/missing → em dash; unparseable → the raw value. */
+/** Una fecha, venga como venga.
+ *
+ *  `new Date(numero)` cuenta MILISEGUNDOS, y media aplicación guarda **segundos**: el estado de
+ *  una comprobación y cada muestra del historial llevan un `ts` de época en segundos. Pasarlo
+ *  tal cual daba «1970-01-21» en toda la columna «Última actividad» de una máquina — una fecha
+ *  tan absurda que se lee como adorno roto y no como el dato que es. Reportado desde la
+ *  pantalla.
+ *
+ *  El corte en 1e12: en milisegundos eso es septiembre de 2001, y en segundos es el año 33.658.
+ *  Cualquier número por debajo son segundos, y cualquier cosa por encima ya son milisegundos.
+ *  Un texto —una fecha ISO, que es como viaja el resto— no se toca. */
+function _toDate(v) {
+    if (typeof v === 'number' && isFinite(v))
+        return new Date(v < 1e12 ? v * 1000 : v);
+    return new Date(v);
+}
+
 function _fmtDateTime(iso) {
     if (!iso) return '—';
     try {
-        const d = new Date(iso), p = n => String(n).padStart(2, '0');
+        const d = _toDate(iso), p = n => String(n).padStart(2, '0');
         if (isNaN(d.getTime())) return iso;   // Invalid Date doesn't throw → avoid "NaN-NaN-NaN"
         return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
     } catch (_) { return iso; }
@@ -469,7 +486,7 @@ function escAttr(s) {
 function jsStr(s) { return escAttr(JSON.stringify(s)); }
 
 //: How the panel runs commands on a device — the same three the store keeps
-//: (`HostsStore.KINDS`), and the one thing that decides which.
+//: (`DevicesStore.KINDS`), and the one thing that decides which.
 //:
 //: Here because it was written EIGHT times across the panel, as
 //: `kind === 'remote' ? 'remote' : 'local'` and as `kind || 'local'`, and every one of those
@@ -477,10 +494,10 @@ function jsStr(s) { return escAttr(JSON.stringify(s)); }
 //: why choosing None looked like it worked, said it had saved, and came back as Local: the
 //: value was correct in the draft, in the select and in the store, and was flattened on its
 //: way out of the browser.
-const HOST_KINDS = ['none', 'local', 'remote'];
-function hostKind(v) {
+const DEVICE_KINDS = ['none', 'local', 'remote'];
+function deviceKind(v) {
     const k = String(v || '').trim().toLowerCase();
-    return HOST_KINDS.includes(k) ? k : 'none';
+    return DEVICE_KINDS.includes(k) ? k : 'none';
 }
 
 // ── List/card view toggle (createListTable tables that offer both views) ─────
@@ -649,7 +666,7 @@ function ssDownloadBlob(blob, filename) {
 
 // ── Things several sections need, which is why they are here ────────────────
 // Each of these was defined inside whichever section wrote it first and then read from three
-// or four others — the same shape as a generic module runner living in the hosts domain. A
+// or four others — the same shape as a generic module runner living in the devices domain. A
 // section's file is for what only that section does.
 
 /** A stable hue (0–359) for a module name: the colour half the panel tints a module with.
@@ -663,7 +680,7 @@ function _moduleHue(name) {
 
 /** A random UUID for item keys (browsers expose crypto.randomUUID on secure origins incl.
  *  localhost; fall back to a v4 generator otherwise). Used wherever a new record needs an
- *  opaque key — clusters, host checks, module discovery. */
+ *  opaque key — clusters, device checks, module discovery. */
 function _genUuid() {
     try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (_) {}
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -841,7 +858,7 @@ async function generateToken(nBytes = 32) {
     }
 }
 
-// The effective public base URL (scheme://host, no trailing slash). Single source
+// The effective public base URL (scheme://device, no trailing slash). Single source
 // for every user-facing URL the JS builds (SSO redirect URIs, SCIM endpoint…).
 // A live edit of web_admin|public_url in the config form wins (so the UI updates as
 // you type); otherwise the value the server resolved (config override → proxy-aware
@@ -1048,4 +1065,91 @@ function fmtBytes(n) {
     let i = 0;
     while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
     return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
+}
+
+
+// ── Lo obligatorio se ve, y se ve mientras se teclea ─────────────────────────────────────
+//
+// El panel ya sabía qué campos no se pueden dejar en blanco: cada formulario lo comprueba al
+// guardar y suelta un aviso. Pero eso lo dice **después de pulsar**, cuando el renglón ya se dio
+// por terminado, y sin señalar en cuál de las ocho cajas falta.
+//
+// Aquí se pinta ANTES: una caja obligatoria vacía se marca en rojo. La regla es la misma en todo
+// el panel y está escrita una vez, así que el formulario que se escriba mañana la tiene con sólo
+// declarar `required` en su caja — que es el atributo de HTML de toda la vida, no un invento de
+// esta casa.
+//
+// Dos mitades, porque hay dos momentos en los que una caja puede quedarse vacía:
+//
+// * **al dibujarse** — un alta nace vacía, y ahí se ve de entrada qué hay que rellenar;
+// * **al teclear** — vaciar a mano el nombre de algo que ya existía. Esta es la que faltaba, y
+//   no se arregla redibujando: redibujar mientras alguien escribe le quita el cursor de debajo
+//   de los dedos. Se toca la clase del propio elemento y nada más.
+
+/** Marcar (o desmarcar) UNA caja obligatoria según esté vacía. */
+function ssReqMark(el) {
+    if (!el || !el.classList) return;
+    // `select` con opción vacía incluido; una casilla no se marca — su "vacío" es un estado
+    // legítimo y pintarlo en rojo diría que hay que marcarla, que es otra cosa.
+    if (el.type === 'checkbox' || el.type === 'radio') return;
+    el.classList.toggle('is-invalid', !String(el.value || '').trim());
+}
+
+/** Todas las de un trozo recién puesto en el documento. */
+function ssMarkRequired(root) {
+    const donde = root || document;
+    if (!donde.querySelectorAll) return;
+    donde.querySelectorAll('[required]').forEach(ssReqMark);
+}
+
+// Mientras se teclea: **delegado**, uno para todo el panel. Un `oninput` por caja serían
+// trescientos sitios donde acordarse, y el que se olvide no da ningún error: da una caja que no
+// avisa, que es indistinguible de una que no es obligatoria.
+// En la fase de BURBUJA y no en la de captura, a propósito: media docena de cajas de este panel
+// llevan un `oninput="this.classList.remove('is-invalid')"` de cuando la marca sólo servía para
+// señalar un guardado rechazado. Capturando, esto pintaría primero y esa línea lo borraría
+// después — la marca no saldría, y no habría nada que mirar para saber por qué.
+document.addEventListener('input', ev => {
+    const el = ev.target;
+    if (el && el.hasAttribute && el.hasAttribute('required')) ssReqMark(el);
+});
+document.addEventListener('change', ev => {
+    const el = ev.target;
+    if (el && el.hasAttribute && el.hasAttribute('required')) ssReqMark(el);
+});
+
+// Y al dibujarse: casi todo en este panel se pinta metiendo HTML en un contenedor, y no hay un
+// solo sitio por el que pase todo. Un observador lo ve igual —lo que se busca es lo que ENTRA en
+// el documento— y de paso vale para lo que se escriba mañana sin tener que acordarse de llamar a
+// nada. Sólo mira los nodos añadidos, así que no recorre el documento entero.
+if (typeof MutationObserver === 'function') {
+    new MutationObserver(muts => {
+        for (const m of muts) {
+            for (const n of (m.addedNodes || [])) {
+                if (!n || n.nodeType !== 1) continue;
+                if (n.hasAttribute && n.hasAttribute('required')) ssReqMark(n);
+                ssMarkRequired(n);
+            }
+        }
+    }).observe(document.documentElement, {childList: true, subtree: true});
+}
+
+/** Qué hora es en esa zona, o `''` si nadie la dijo o el navegador no la conoce.
+ *
+ *  No es adorno: «son las cuatro de la mañana allí» es lo que decide si se llama ahora o se
+ *  espera, y es la primera pregunta al mirar una sede que no es la de uno. Lo convierte el
+ *  navegador, que sabe hacerlo y no necesita preguntar; una zona que no conozca no rompe nada,
+ *  se calla.
+ *
+ *  Del panel y no de una sección porque ya la quieren dos —el cuadro del inventario y la ficha
+ *  del mapa—, y dos relojes son dos que pueden dar horas distintas de la misma sede. */
+function ssLocalTime(tz) {
+    const z = String(tz || '').trim();
+    if (!z) return '';
+    try {
+        return new Date().toLocaleTimeString(undefined,
+            {timeZone: z, hour: '2-digit', minute: '2-digit'});
+    } catch (e) {
+        return '';
+    }
 }

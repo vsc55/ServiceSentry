@@ -3,7 +3,7 @@
 """May this save touch this item?
 
 The module save is the one write in the panel that crosses domains: a check belongs to a
-module, but it is bound to a HOST or a CLUSTER, and the person editing it may hold the
+module, but it is bound to a DEVICE or a CLUSTER, and the person editing it may hold the
 permission for one and not the other. So "who may write here" cannot be answered by the module
 flag alone, and answering it wrong is an authorisation bug rather than a bad screen.
 
@@ -23,7 +23,7 @@ from .items import is_item_collection
 def has_any_module_write(perms) -> bool:
     """True if *perms* carry any write capability that could authorize a module save —
     module-level, per-module, or a server/cluster permission that can authorize a
-    host-bound check change.  Used to reject a no-write user before parsing the body."""
+    device-bound check change.  Used to reject a no-write user before parsing the body."""
     return (
         'modules_edit' in perms or 'modules_add' in perms or 'modules_delete' in perms or
         'devices_add' in perms or 'devices_edit' in perms or
@@ -37,20 +37,20 @@ def has_any_module_write(perms) -> bool:
     )
 
 
-def _item_host_uid(it) -> str:
-    """The host binding of ONE side of an item change (items can be non-dict shorthands).
+def _item_device_uid(it) -> str:
+    """The device binding of ONE side of an item change (items can be non-dict shorthands).
 
-    Deliberately not :func:`items.item_host_uid`, which answers for the pair and prefers the
+    Deliberately not :func:`items.item_device_uid`, which answers for the pair and prefers the
     new value: authorising a rebind needs the two bindings apart, not whichever exists.
     """
-    return str(it.get('host_uid') or '').strip() if isinstance(it, dict) else ''
+    return str(it.get('device_uid') or '').strip() if isinstance(it, dict) else ''
 
 
 def _is_cluster_item(o, n) -> bool:
-    """A cluster item is a multi-host-bound check — it carries ``host_uids`` (a
-    list), unlike an ordinary single-bound (``host_uid``) or unbound check."""
+    """A cluster item is a multi-device-bound check — it carries ``device_uids`` (a
+    list), unlike an ordinary single-bound (``device_uid``) or unbound check."""
     for it in (n, o):
-        if isinstance(it, dict) and isinstance(it.get('host_uids'), list):
+        if isinstance(it, dict) and isinstance(it.get('device_uids'), list):
             return True
     return False
 
@@ -64,23 +64,23 @@ def _cluster_authorized(perms, action: str, uid: str = '') -> bool:
     return bool(uid) and f'cluster.{uid}.{action}' in perms
 
 
-def _server_authorized(perms, action: str, host_uid: str) -> bool:
-    """True if *perms* authorize *action* on server *host_uid* — via the global
+def _server_authorized(perms, action: str, device_uid: str) -> bool:
+    """True if *perms* authorize *action* on server *device_uid* — via the global
     ``servers_*`` flag or a per-server ``server.{uid}.{action}`` override."""
     _g = {'view': 'devices_view', 'add': 'devices_add',
           'edit': 'devices_edit', 'delete': 'devices_delete'}
     if _g.get(action) in perms:
         return True
-    return bool(host_uid) and f'server.{host_uid}.{action}' in perms
+    return bool(device_uid) and f'server.{device_uid}.{action}' in perms
 
 
 def authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
     """Authorize a change to module *name* for a user lacking global module-write.
 
-    Host-bound item changes (items carrying ``host_uid``) may be authorized by
+    Device-bound item changes (items carrying ``device_uid``) may be authorized by
     per-server / global server permissions: adding an item needs server ``add``,
     modifying or removing one needs server ``edit``.  Module-level scalar changes
-    and non-host-bound items still require the module permissions.
+    and non-device-bound items still require the module permissions.
     """
     if old_mod == new_mod:
         return True
@@ -97,7 +97,7 @@ def authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
     new_mod = new_mod if isinstance(new_mod, dict) else {}
 
     # Module-level (non-collection) scalar changes require module edit — except on
-    # a brand-new module being scaffolded purely to hold host-bound items.
+    # a brand-new module being scaffolded purely to hold device-bound items.
     if not is_new:
         old_s = {k: v for k, v in old_mod.items() if not is_item_collection(v)}
         new_s = {k: v for k, v in new_mod.items() if not is_item_collection(v)}
@@ -105,7 +105,7 @@ def authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
             if old_s.get(k) != new_s.get(k):
                 return False
 
-    # Authorize each added/removed/modified item by its host binding.
+    # Authorize each added/removed/modified item by its device binding.
     coll_names = ({k for k, v in old_mod.items() if is_item_collection(v)}
                   | {k for k, v in new_mod.items() if is_item_collection(v)})
     saw_change = False
@@ -128,13 +128,13 @@ def authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
                     return False
                 continue
             # BOTH bindings, when there are two. A modification that moves a check from
-            # one host to another is an edit of the host it is taken FROM as much as of the
+            # one device to another is an edit of the device it is taken FROM as much as of the
             # one it lands on, and authorising only the destination let a `server.<mine>.edit`
-            # holder rebind any other host's check onto their own — which takes the check off
-            # that host. The permission exists to confine them to their host; this was the
+            # holder rebind any other device's check onto their own — which takes the check off
+            # that device. The permission exists to confine them to their device; this was the
             # one write that reached outside it. (Verified: the same edit made in place is
             # refused, so only the rebind got through.)
-            old_hu, new_hu = _item_host_uid(o), _item_host_uid(n)
+            old_hu, new_hu = _item_device_uid(o), _item_device_uid(n)
             if o is None:
                 if not _server_authorized(perms, 'add', new_hu):
                     return False
@@ -146,8 +146,8 @@ def authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
                     return False
                 if new_hu != old_hu and not _server_authorized(perms, 'edit', new_hu):
                     return False
-    # A change with no authorizable host-bound item diff (whole-module add/remove
-    # with no host-bound items, or only scalar churn) is not server-authorizable.
+    # A change with no authorizable device-bound item diff (whole-module add/remove
+    # with no device-bound items, or only scalar churn) is not server-authorizable.
     return saw_change
 
 

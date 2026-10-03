@@ -58,6 +58,18 @@ class TableSpec:
     # Emitted in CREATE TABLE; not diffed (created on fresh tables, never retro-added).
     unique_constraints: tuple[tuple[str, ...], ...] = ()
     renames: dict = field(default_factory=dict)  # {old_name: new_name}, applied first
+    # What this table used to be called, newest-first. Applied BEFORE anything else: if the
+    # table is not there under its own name but is there under one of these, it is renamed and
+    # keeps its rows, its indexes and its history. Declared and not done by hand in the store,
+    # for the same reason `renames` is — a rename written as "read it all, create the new one,
+    # copy, drop" is four chances to leave half a table behind, and the half it leaves is the
+    # half nobody looks at until a panel will not start.
+    former_names: tuple[str, ...] = ()
+    # And what its indexes used to be called. An index follows the table it is attached to, so
+    # after a table rename the old ones are still there under yesterday's names, beside the ones
+    # this spec declares: two indexes over the same column, the spare one written on every
+    # insert, for ever. Dropped when the table is reconciled.
+    former_indexes: tuple[str, ...] = ()
 
     @property
     def column_names(self) -> list[str]:

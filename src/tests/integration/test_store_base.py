@@ -38,7 +38,7 @@ except ImportError:
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 CORE_STORES = [
-    'audit', 'credentials', 'groups', 'history', 'hosts', 'roles', 'sessions', 'users',
+    'audit', 'credentials', 'groups', 'history', 'devices', 'roles', 'sessions', 'users',
 ]
 
 

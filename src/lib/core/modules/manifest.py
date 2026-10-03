@@ -51,7 +51,7 @@ OVERVIEW_WIDGETS = [
               'columns': [
                   {'key': 'module', 'label_key': 'col_module', 'sortable': True, 'cell': 'module_incident'},
                   {'key': 'check',  'label_key': 'col_check',  'sortable': True, 'cell': 'check_danger'},
-                  {'key': 'host',   'label_key': 'col_host',   'sortable': True, 'cell': 'host_code'},
+                  {'key': 'device', 'label_key': 'col_device', 'sortable': True, 'cell': 'device_code'},
               ]}},
     {'id': 'modules_list', 'icon': 'bi-puzzle', 'label_key': 'overview_modules',
      'cols': 4, 'h': 340, 'has_h': True, 'order': 160,
@@ -63,7 +63,7 @@ OVERVIEW_WIDGETS = [
      'view': {'kind': 'table', 'icon': 'bi-puzzle', 'title_key': 'overview_modules',
               'accent': 'indigo', 'data_url': '/api/v1/overview/widget/modules_list',
               # Compound severity filter: a level with a =/≥ operator (warning/error), plus
-              # the fixed 'active' option. No maintenance (a module isn't a host).
+              # the fixed 'active' option. No maintenance (a module isn't a device).
               'filter': {'kind': 'severity', 'store': 'modf', 'param': 'f', 'maintenance': False,
                          'levels': [
                   {'v': '',        'label_key': 'all'},
@@ -71,7 +71,7 @@ OVERVIEW_WIDGETS = [
                    'badge': {'color': '#16a34a', 'bg': 'rgba(34,197,94,.16)'}},
                   {'v': 'warning', 'label_key': 'status_warning', 'op': True,
                    'badge': {'color': '#d97706', 'bg': 'rgba(245,158,11,.18)'}},
-                  {'v': 'error',   'label_key': 'host_status_error', 'op': True,
+                  {'v': 'error',   'label_key': 'device_status_error', 'op': True,
                    'badge': {'color': '#dc3545', 'bg': 'rgba(220,53,69,.16)'}},
               ]},
               'columns': [

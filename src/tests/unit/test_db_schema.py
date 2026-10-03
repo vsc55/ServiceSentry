@@ -280,3 +280,92 @@ def test_diff_table_pure_function():
     diff = diff_table(spec, db.describe_table('t'), db.list_indexes('t'))
     assert diff.is_empty
     db.close()
+
+
+class TestATableThatChangedItsName:
+    """`former_names` adopta la tabla que **tiene las filas**, no la que falta.
+
+    La primera versión preguntaba «¿existe ya la tabla nueva?» y se rendía si la respuesta era
+    sí. Con eso, una tabla creada **vacía** por cualquier pasada de esquema anterior a la
+    declaración —un servidor de desarrollo reiniciándose a mitad de edición basta— bloqueaba la
+    adopción para siempre: la flota se quedó en `hosts` mientras `devices` contestaba «no hay
+    nada» a todas las lecturas, sin un solo error. De ahí salió también el uid en la columna del
+    nombre por media pantalla: quien no encuentra la ficha enseña lo único que tiene.
+    """
+
+    @staticmethod
+    def _crea(db, tabla, filas):
+        db.execute_ddl("CREATE TABLE %s (uid TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '')"
+                       % tabla)
+        with db.transaction():
+            for i in range(filas):
+                db.execute('INSERT INTO %s (uid, name) VALUES (?, ?)' % tabla,
+                           ('u%d' % i, 'n%d' % i))
+
+    @staticmethod
+    def _spec_nueva():
+        return TableSpec(name='nueva',
+                         columns=(Column('uid', 'TEXT', primary_key=True),
+                                  Column('name', 'TEXT', nullable=False, default="''")),
+                         former_names=('vieja',))
+
+    def test_la_adopta_cuando_no_hay_tabla_nueva(self):
+        db = SQLiteConnector(':memory:')
+        self._crea(db, 'vieja', 3)
+        db.reconcile_table(self._spec_nueva())
+        assert db.table_exists('nueva') and not db.table_exists('vieja')
+        assert db.fetchone('SELECT COUNT(*) FROM nueva')[0] == 3
+        db.close()
+
+    def test_y_TAMBIEN_cuando_la_nueva_ya_existe_vacia(self):
+        """El caso que se escapó. La vacía es un nonato: la que tiene las filas ocupa su sitio."""
+        db = SQLiteConnector(':memory:')
+        self._crea(db, 'vieja', 3)
+        self._crea(db, 'nueva', 0)
+        db.reconcile_table(self._spec_nueva())
+        assert not db.table_exists('vieja'), 'la vieja sigue ahí con los datos dentro'
+        assert db.fetchone('SELECT COUNT(*) FROM nueva')[0] == 3, 'las filas no han llegado'
+        db.close()
+
+    def test_pero_no_toca_nada_si_las_DOS_tienen_filas(self):
+        """Juntarlas es una decisión sobre datos, y ningún paso de esquema la toma solo."""
+        db = SQLiteConnector(':memory:')
+        self._crea(db, 'vieja', 3)
+        self._crea(db, 'nueva', 2)
+        db.reconcile_table(self._spec_nueva())
+        assert db.fetchone('SELECT COUNT(*) FROM vieja')[0] == 3
+        assert db.fetchone('SELECT COUNT(*) FROM nueva')[0] == 2
+        db.close()
+
+    def test_y_tira_la_vieja_cuando_se_queda_vacia(self):
+        """Un resto vacío no es un dato: es un nombre ocupado y una pregunta para el que mire."""
+        db = SQLiteConnector(':memory:')
+        self._crea(db, 'vieja', 0)
+        self._crea(db, 'nueva', 2)
+        db.reconcile_table(self._spec_nueva())
+        assert not db.table_exists('vieja')
+        assert db.fetchone('SELECT COUNT(*) FROM nueva')[0] == 2
+        db.close()
+
+    def test_y_pasar_dos_veces_no_cambia_nada(self):
+        db = SQLiteConnector(':memory:')
+        self._crea(db, 'vieja', 3)
+        spec = self._spec_nueva()
+        db.reconcile_table(spec)
+        db.reconcile_table(spec)
+        assert db.fetchone('SELECT COUNT(*) FROM nueva')[0] == 3
+        db.close()
+
+    def test_una_tabla_que_se_declara_su_propio_nombre_anterior_no_se_borra(self):
+        """Suena absurdo y pasó: un renombrado masivo reescribió la cadena dentro de la propia
+        declaración, y `devices` acabó diciendo que antes se llamaba `devices`. Sin este corte,
+        la rama del nonato se la encuentra a sí misma y tira la tabla con todo dentro."""
+        db = SQLiteConnector(':memory:')
+        self._crea(db, 'nueva', 2)
+        spec = TableSpec(name='nueva',
+                         columns=(Column('uid', 'TEXT', primary_key=True),
+                                  Column('name', 'TEXT', nullable=False, default="''")),
+                         former_names=('nueva',))
+        db.reconcile_table(spec)
+        assert db.fetchone('SELECT COUNT(*) FROM nueva')[0] == 2
+        db.close()

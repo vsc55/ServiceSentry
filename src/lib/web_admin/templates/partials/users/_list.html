@@ -319,7 +319,7 @@ function _umRenderSessions(username) {
     entries.sort((a, b) => {
         let va, vb;
         if (_umSessionsSort === 'ip')           { va = a.ip || '';      vb = b.ip || '';      }
-        else if (_umSessionsSort === 'created') { va = a.created || ''; vb = b.created || ''; }
+        else if (_umSessionsSort === 'created_at') { va = a.created || ''; vb = b.created || ''; }
         else                                    { va = a.last_seen||''; vb = b.last_seen||''; }
         return _umSessionsSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
     });
@@ -327,11 +327,11 @@ function _umRenderSessions(username) {
     let h = `<table class="table table-sm align-middle mb-0 ss-fs-3">
         <thead class="ss-thead"><tr>
             ${_thSort(t('col_ip'),        'ip',        s, d, '_umSortSessions')}
-            ${_thSort(t('col_created'),   'created',   s, d, '_umSortSessions')}
+            ${_thSort(t('col_created'),   'created_at',   s, d, '_umSortSessions')}
             ${_thSort(t('col_last_seen'), 'last_seen', s, d, '_umSortSessions')}
         </tr></thead><tbody>`;
     for (const sess of entries) {
-        const created  = new Date(sess.created).toLocaleString();
+        const created  = new Date(sess.created_at).toLocaleString();
         const lastSeen = new Date(sess.last_seen).toLocaleString();
         const cur = sess.is_current
             ? `<span class="badge text-bg-success rounded-pill ms-1 ss-fs-1">${t('session_current')}</span>` : '';
