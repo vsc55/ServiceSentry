@@ -10656,3 +10656,20 @@ Esta tanda también amplía ficheros existentes (`test_sampler.py`, `test_snmp_*
 | `TestBothPathsCallTheHook::test_a_rebuild_resynchronises_the_rebuilt_table` | Una reconstrucción de esquema resincroniza el generador de ids |
 | `TestBothPathsCallTheHook::test_a_restore_resynchronises_every_table_it_refills` | Una restauración resincroniza cada tabla que rellena |
 | `TestBothPathsCallTheHook::test_the_default_hook_is_a_no_op_and_sqlite_continues_past_the_maximum` | El gancho por defecto no hace nada y SQLite sigue por encima del máximo |
+
+---
+
+## 177. Meta — El lock instala lo que se pide
+
+**Archivo:** `tests/meta/test_requirements_lock.py` — 3 tests
+
+`requirements.txt` declara la intención y `requirements.lock` es lo que se instala (Docker,
+paquetes, CI). PyYAML entró en el primero para el importador del catálogo y el lock no se
+regeneró, así que toda instalación desde el lock iba sin él. Un suelo subido por un CVE y no
+cumplido en el lock sería el mismo error con peor final.
+
+| Test | Qué verifica |
+|------|--------------|
+| `TestTheLockHoldsWhatIsRequired::test_every_requirement_is_pinned` | Todo paquete de `requirements.txt` está fijado en `requirements.lock` |
+| `TestTheLockHoldsWhatIsRequired::test_every_floor_is_met_by_its_pin` | Ninguna versión fijada en el lock queda por debajo del suelo `>=` de `requirements.txt` |
+| `TestTheLockHoldsWhatIsRequired::test_the_guard_reads_the_real_files` | La guarda no es vacía: lee los dos ficheros y reconoce un paquete conocido |

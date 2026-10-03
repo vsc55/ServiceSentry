@@ -8,6 +8,24 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.134] - 2026-10-04
+
+### Security
+
+- **PyJWT 2.13.0 → 2.15.1 and urllib3 2.7.0 → 2.8.0 in the lock, closing 16 advisories.**
+  - PyJWT (13 advisories): algorithm confusion, HS256 accepted with an empty JWK, JWKS redirects
+    followed, and headers that skipped the JWKS fetch. It validates the Teams tab SSO and bot
+    tokens.
+  - urllib3 (3 advisories): unbounded decompression of streamed bodies, and the proxy's TLS
+    settings applied to the target. It is reached through `requests`.
+  - Only those two were moved (`pip-compile -P`), and their floors in `requirements.txt` were
+    raised with the reason beside them.
+- **The lock now carries PyYAML.** It was added to `requirements.txt` for the device-type
+  catalogue importer, but the lock was never regenerated, so every install built from the lock
+  shipped without it and the importer switched itself off silently.
+  `tests/meta/test_requirements_lock.py` now fails when a requirement is missing from the lock
+  or pinned below its floor.
+
 ## [0.0.1+build.133] - 2026-10-03
 
 ### Security

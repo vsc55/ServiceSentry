@@ -372,8 +372,8 @@ carpetas—, lo que puede molestar a una instalación que hoy delega la configur
 
 ### CVE abiertos en el lock
 
-**Ninguno.** Auditoría del 2026-08-05: los 4 avisos que había se cerraron subiendo el lock a la
-última estable de cada dependencia. Detalle en
+**Ninguno.** Auditoría del 2026-10-04: los 16 avisos de `pyjwt` y `urllib3` se cerraron subiendo
+solo esos dos paquetes (y antes, el 2026-08-05, los 4 de entonces). Detalle en
 [explica-seguridad.md → CVE de dependencias](explica-seguridad.md#cve-de-dependencias).
 
 Lo que queda es **hábito, no deuda**: volver a pasar `pip-audit` sobre el lock de vez en cuando

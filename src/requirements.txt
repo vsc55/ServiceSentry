@@ -10,6 +10,9 @@
 #      (añade los hashes a las versiones ya reconciliadas)
 # No edites requirements.lock a mano salvo para esa reconciliación.
 requests>=2.28
+urllib3>=2.8.0         # floor (comes via requests): <2.8 decompresses streamed bodies without a
+                       # bound and sends the proxy's TLS settings to the target
+                       # (CVE-2026-97687 / -97688 / -97689)
 paramiko>=5.0.0        # floor raised from 3.0: <5 allows SHA-1 in rsakey.py (CVE-2026-44405)
 PyMySQL>=1.0
 psycopg2-binary>=2.9
@@ -35,7 +38,10 @@ authlib>=1.3
 python3-saml>=1.16
 # Optional: Microsoft Teams integration — validates Teams SSO tokens (tab sign-in) and
 # the Bot Framework JWT (bot messaging endpoint). Absent → those features self-disable.
-PyJWT[crypto]>=2.8
+PyJWT[crypto]>=2.15.1  # floor raised from 2.8: <2.14 has algorithm confusion, empty-JWK HS256
+                       # acceptance, JWKS redirect following and more (CVE-2026-102265..102274);
+                       # <2.15 lets a token's header bypass the JWKS fetch (CVE-2026-101918).
+                       # Both reach the Teams tab SSO and the bot endpoint.
 # Optional: SNMP monitoring
 pysnmp>=6.0
 # Optional: SNMP MIB compilation (enables auto-compile of .mib files for SNMP discovery)

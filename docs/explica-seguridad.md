@@ -1463,9 +1463,30 @@ PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe -m pip_audit \
 `--requirement` sobre el **lock** y no sobre el entorno instalado: es lo que se despliega
 (imagen Docker, `.deb`/`.rpm`, `install.sh`), no lo que tenga una máquina de desarrollo.
 
-### Estado (auditoría de 2026-08-05, 41 paquetes)
+### Estado (auditoría de 2026-10-04, 42 paquetes)
 
-**Sin vulnerabilidades conocidas.** La auditoría de ese día encontró 4 avisos en 2 paquetes y
+**Sin vulnerabilidades conocidas.** La auditoría de ese día encontró **16 avisos en 2 paquetes**
+del lock (13 en `pyjwt` 2.13.0 y 3 en `urllib3` 2.7.0). Se cerraron subiendo solo esos dos con
+`pip-compile -P`, y sus suelos se subieron con el motivo al lado:
+
+| Paquete | Avisos cerrados | Qué eran | Alcance real |
+|---|---|---|---|
+| `pyjwt` 2.13.0 → **2.15.1** | ~~CVE-2026-102265 … -102274~~ (GHSA-ffc3-869f-jxw9, -9j54-fg26-wv3r, -9v7f-9g4p-ffgj, -p4g4-x82p-q773, -r6x4-923q-g947, -w2cx-738m-mc7w, -8wjv-2p76-3863, -hxm8-2xgr-2p9m, -jwrc-g2q2-pq5p, -w6j9-cwv2-h6wq), ~~CVE-2026-101917~~ (GHSA-2gx3-rcp4-g85q), ~~CVE-2026-101918~~ (GHSA-42vr-xj54-vc7v), ~~CVE-2026-103001~~ (GHSA-gvp8-978c-rx2q) | Confusión de algoritmos al mezclar simétricos y asimétricos, HS256 con un JWK vacío aceptado, `PyJWKClient` siguiendo redirecciones al pedir el JWKS, cabeceras que esquivaban la descarga del JWKS, firmas con caracteres fuera de Base64URL, ReDoS en `is_pem_format`, un JWK mal formado que tumbaba el conjunto entero | **Alcanzaba**: valida los tokens del SSO de la pestaña de Teams y los del endpoint del bot (`entraid/tab_sso.py`, `msteams/bot_inbound.py`) |
+| `urllib3` 2.7.0 → **2.8.0** | ~~CVE-2026-97687~~ (GHSA-8988-9cw3-xx77), ~~CVE-2026-97688~~ (GHSA-gh4c-6fx4-qh6g), ~~CVE-2026-97689~~ (GHSA-vxq7-64xx-v4gw) | La API de streaming descomprimía sin límite; la configuración TLS del proxy se aplicaba también al destino | Sí, por `requests`: webhooks, Graph, Freshservice y los checks HTTP |
+
+Esa misma regeneración destapó otro hueco: **`PyYAML` estaba en `requirements.txt` y no en el
+lock**. Se añadió para el importador del catálogo de modelos y el lock no se regeneró, así que
+toda instalación hecha desde el lock (imagen, `.deb`/`.rpm`) iba sin él y el importador se
+desactivaba sin decirlo. Ahora lo fija el lock, y `tests/meta/test_requirements_lock.py` falla si
+un paquete de `requirements.txt` falta en el lock o si el lock fija algo por debajo de su suelo.
+
+`anyio` también salía en el panel con avisos, pero no es del lock: llega por `watchfiles`, una
+dependencia de desarrollo (`requirements-dev.txt`). El CI instala la última; el venv local se
+subió a la 4.15.1.
+
+### Auditoría anterior (2026-08-05, 41 paquetes)
+
+La auditoría de ese día encontró 4 avisos en 2 paquetes y
 todos quedaron cerrados subiendo el lock entero a la última estable de cada dependencia
 (13 paquetes movidos, 4 de ellos de major, sin altas ni bajas transitivas):
 
