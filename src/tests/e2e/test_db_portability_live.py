@@ -44,7 +44,8 @@ _STORE_TABLES = ('check_state', 'history', 'history_series', 'history_fact',
                  'groups_roles', 'audit',
                  'event_cursor', 'event_cooldowns', 'service_leader',
                  'users', 'users_groups', 'roles', 'config', 'entity_versions',
-                 'ss_deftest', '__ssreb_ss_deftest', '__ssbak_ss_deftest')
+                 'ss_deftest', '__ssreb_ss_deftest', '__ssbak_ss_deftest',
+                 'ip_bans', 'syslog_drops', 'job_history')
 
 
 def _mysql_family_cfg(prefix: str):
@@ -196,6 +197,49 @@ def test_schema_rebuild_preserves_data(live_db):
     rows = live_db.fetchall(f'SELECT a, b FROM {q}')
     assert rows and rows[0][0] == 'keepme' and int(rows[0][1]) == 7
     assert {c.name: c for c in live_db.describe_table(t)}['a'].nullable is False
+    # And the table still takes rows: the copy carried id 1 across, and on PostgreSQL the new
+    # table's sequence did not see it — the next INSERT was handed id 1 again.
+    live_db.execute(f'INSERT INTO {q} (a, b) VALUES (?, ?)', ('after', 8)); live_db.commit()
+    ids = [int(r[0]) for r in live_db.fetchall(f'SELECT id FROM {q} ORDER BY id')]
+    assert len(ids) == 2 and ids[1] > ids[0]
+
+
+def test_restored_rows_leave_room_for_the_next_insert(live_db):
+    """A restore puts rows back WITH their ids; the next plain INSERT must not collide."""
+    from lib.core.backup import restore as bk_restore
+    from lib.db.schema import Column, TableSpec
+    t = 'ss_deftest'
+    q = live_db.quote_ident(t)
+    live_db.reconcile_table(TableSpec(name=t, columns=(
+        Column('id', 'AUTOINCREMENT', primary_key=True),
+        Column('a', 'TEXT'))))
+    with live_db.transaction():
+        rows, _dropped = bk_restore._load_table(       # pylint: disable=protected-access
+            live_db, t, {'columns': ['id', 'a'], 'rows': [[1, 'x'], [2, 'y'], [5, 'z']]})
+    assert rows == 3
+    live_db.execute(f'INSERT INTO {q} (a) VALUES (?)', ('new',)); live_db.commit()
+    assert int(live_db.fetchone(f'SELECT MAX(id) FROM {q}')[0]) > 5
+
+
+def test_text_defaults_reconcile_once_and_then_stay_put(live_db, monkeypatch):
+    """A table with TEXT defaults is in sync right after it is created. MySQL 8 reports such a
+    default as a `_utf8mb4` introducer plus backslash-escaped quotes; read raw, every boot saw
+    a drift and rebuilt the table."""
+    from lib.db.schema import Column, TableSpec, diff_table
+    t = 'ss_deftest'
+    spec = TableSpec(name=t, columns=(
+        Column('id', 'AUTOINCREMENT', primary_key=True),
+        Column('a', 'TEXT', nullable=False, default="''"),
+        Column('b', 'TEXT', nullable=False, default="'{}'"),
+        Column('c', 'TEXT', nullable=False, default="'local'"),
+        Column('n', 'INTEGER', nullable=False, default='0')))
+    live_db.reconcile_table(spec)
+    diff = diff_table(spec, live_db.describe_table(t), live_db.list_indexes(t))
+    assert diff.is_empty, f'drift reported right after creation: {diff}'
+    rebuilds = []
+    monkeypatch.setattr(live_db, '_apply_rebuild', lambda *a, **k: rebuilds.append(a))
+    live_db.reconcile_table(spec)
+    assert rebuilds == []
 
 
 def test_introspection_and_incremental_add_column(live_db):
@@ -452,3 +496,56 @@ def test_maintenance_actually_runs_on_the_real_engine(live_db):
     from lib.core.config.service import database_size
     size = database_size(live_db)
     assert size is None or size > 0, f'database_size answered {size!r}'
+
+
+# ── trims that ran inside the write's own transaction ─────────────────────────
+#
+# `DELETE … WHERE k IN (SELECT … LIMIT n)` (MySQL 1093 / MariaDB 1235) and `LIMIT -1 OFFSET n`
+# (SQLite only) both used to roll back the write beside them. The caps are lowered so the trim
+# runs on a handful of rows instead of thousands.
+
+def test_the_ban_cap_trims_without_losing_the_new_ban(live_db, monkeypatch):
+    from lib.services.ipban.store import bans as bans_mod
+    monkeypatch.setattr(bans_mod, '_MAX_ROWS', 3)
+    st = bans_mod.BansStore(live_db)
+    for i in range(5):
+        st.upsert(f'10.0.0.{i}', {'reason': 'r', 'category': 'auth', 'level': 1,
+                                  'offenses': 1, 'banned_at': 1000.0 + i, 'until': None,
+                                  'first_seen': 1000.0 + i, 'by': 'system'})
+    assert sorted(r['ip'] for r in st.query()) == ['10.0.0.2', '10.0.0.3', '10.0.0.4']
+
+
+def test_the_drop_cap_trims_without_losing_the_new_source(live_db, monkeypatch):
+    from lib.services.syslog.store import drops as drops_mod
+    monkeypatch.setattr(drops_mod, '_MAX_ROWS', 3)
+    st = drops_mod.SyslogDropsStore(live_db)
+    for i in range(5):
+        st.record(f'10.0.0.{i}', 'udp', 1, 1000.0 + i)
+    assert sorted(r['source'] for r in st.query()) == ['10.0.0.2', '10.0.0.3', '10.0.0.4']
+
+
+def test_the_job_history_ceiling_and_age_limit_both_apply(live_db):
+    from lib.core.jobs.history import JobHistoryStore
+    st = JobHistoryStore(live_db)
+    now = time.time()
+
+    def _job(jid, ended):
+        return {'id': jid, 'kind': 'collect', 'source': 'infra', 'label': jid,
+                'state': 'done', 'started': ended - 1, 'ended': ended, 'done': 1,
+                'total': 1, 'error': ''}
+    st.record(_job('old', now - 40 * 86400))
+    for i in range(6):
+        st.record(_job(f'x{i}', now - 100 + i))
+    assert st.prune(keep=4, days=30) == 3
+    assert [r['job_id'] for r in st.list()] == ['x5', 'x4', 'x3', 'x2']
+
+
+def test_the_audit_cap_trims_to_the_cap_even_after_it_is_lowered(live_db):
+    """`DELETE … WHERE id = (SELECT MIN(id) FROM audit)` is MySQL 8 error 1093, and it took one
+    row per insert. Now: the cutoff id is read first, then one plain `DELETE … WHERE id < ?`."""
+    from lib.core.audit.store import AuditStore
+    s = AuditStore(live_db)
+    for i in range(8):
+        s.insert(f'2026-01-01T00:00:0{i}Z', f'e{i}', 'u', 'ip', '')
+    s.insert('2026-01-01T00:00:09Z', 'e8', 'u', 'ip', '', max_entries=3)
+    assert [e['event'] for e in s.get_all()] == ['e8', 'e7', 'e6']

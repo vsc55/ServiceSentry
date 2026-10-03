@@ -74,8 +74,15 @@ SCHEMA = TableSpec(
         # que es justo la que puede haberse podado.
         Column('data',     'TEXT', nullable=False, default="'{}'"),
     ),
-    indexes=(Index('idx_dc_rev_ref', ('scope', 'ref_uid', 'seq')),),
+    # UNIQUE: the counter is only an order if no two versions of one record share a number.
+    # `keep` reads MAX(seq) and writes MAX+1; two snapshots of the same rack at the same moment
+    # read the same MAX, and without this both were written with it — and which one is "newer"
+    # was then up to the engine.
+    indexes=(Index('idx_dc_rev_ref', ('scope', 'ref_uid', 'seq'), unique=True),),
 )
+
+#: How many times `keep` tries again after losing the race for a number.
+SEQ_TRIES = 5
 
 
 def diff(antes: dict, despues: dict) -> dict:
@@ -127,7 +134,39 @@ class RevisionStore(BaseStore):
         # sencillamente no existe fuera de SQLite. No da un fallo visible: las rutas capturan,
         # y la ficha aparece sin ninguna versión, como si nadie la hubiera tocado nunca.
         self._sql_cols = ', '.join(db.quote_ident(c) for c in self._COLS)
+        self._renumber_duplicates()
         self._db.reconcile_table(SCHEMA)
+
+    def _renumber_duplicates(self) -> int:
+        """Give every version of a record its own `seq`, before the index demands it.
+
+        The index became unique after the race it closes could already have happened: an
+        installation with two versions sharing a number would fail to create it, and the panel
+        would not start over a history entry. Only the records that HAVE a repeated number are
+        renumbered — in their stored order, the clock breaking ties — which keeps the order
+        everybody saw.
+        """
+        try:
+            dobles = self._db.fetchall(
+                f'SELECT scope, ref_uid FROM {self._sql_table} '
+                'GROUP BY scope, ref_uid, seq HAVING COUNT(*) > 1') or ()
+        except Exception:                       # pylint: disable=broad-except
+            # No table yet — a fresh installation, which has nothing to renumber. Rolled back
+            # because PostgreSQL refuses every statement after a failed one until it is.
+            self._rollback()
+            return 0
+        hechos = 0
+        for scope, ref in {(str(a), str(b)) for a, b in dobles}:
+            filas = self._db.fetchall(
+                f'SELECT uid FROM {self._sql_table} WHERE scope = ? AND ref_uid = ? '
+                f'ORDER BY seq, {self._db.quote_ident("at")}, uid', (scope, ref)) or ()
+            for i, (uid,) in enumerate(filas, start=1):
+                self._db.execute(f'UPDATE {self._sql_table} SET seq = ? WHERE uid = ?',
+                                 (i, str(uid)))
+            hechos += 1
+        if hechos:
+            self._db.commit()
+        return hechos
 
     def _row(self, row) -> dict:
         out = {name: row[i] for i, name in enumerate(self._COLS)}
@@ -148,19 +187,47 @@ class RevisionStore(BaseStore):
         if not str(ref_uid or ''):
             return ''
         uid = new_uid()
-        fila = self._db.fetchone(
-            f'SELECT MAX(seq) FROM {self._sql_table} WHERE scope = ? AND ref_uid = ?',
-            (str(scope or 'type'), str(ref_uid)))
-        seq = int((fila or (0,))[0] or 0) + 1
-        self._db.execute(
-            f'INSERT INTO {self._sql_table} ({self._sql_cols}) '
-            f'VALUES ({", ".join("?" for _ in self._COLS)})',
-            (uid, str(scope or 'type'), str(ref_uid), BaseStore._now(), seq,
-             str(actor or ''), str(action or 'edit'),
-             json.dumps(data or {}, sort_keys=True, default=str)))
-        self._db.commit()
+        texto = json.dumps(data or {}, sort_keys=True, default=str)
+        # Read the next number and write it, and if somebody else took it in between — the
+        # unique index says so — read again. The read cannot be made safe across three engines
+        # (a transaction does not stop two readers seeing the same MAX); the index can, and the
+        # retry is what makes losing the race a second try instead of an error.
+        for intento in range(SEQ_TRIES):
+            fila = self._db.fetchone(
+                f'SELECT MAX(seq) FROM {self._sql_table} WHERE scope = ? AND ref_uid = ?',
+                (str(scope or 'type'), str(ref_uid)))
+            seq = int((fila or (0,))[0] or 0) + 1
+            try:
+                self._db.execute(
+                    f'INSERT INTO {self._sql_table} ({self._sql_cols}) '
+                    f'VALUES ({", ".join("?" for _ in self._COLS)})',
+                    (uid, str(scope or 'type'), str(ref_uid), BaseStore._now(), seq,
+                     str(actor or ''), str(action or 'edit'), texto))
+                self._db.commit()
+                break
+            except Exception:                   # pylint: disable=broad-except
+                self._rollback()
+                # Only a number somebody else took is worth a retry; anything else is a real
+                # error and goes up as it came.
+                if intento + 1 >= SEQ_TRIES or not self._taken(scope, ref_uid, seq):
+                    raise
         self._prune(scope, ref_uid)
         return uid
+
+    def _rollback(self) -> None:
+        try:
+            self._db.rollback()
+        except Exception:                       # pylint: disable=broad-except
+            pass
+
+    def _taken(self, scope: str, ref_uid: str, seq: int) -> bool:
+        """Whether that number of that record is already written."""
+        if not seq:
+            return False
+        fila = self._db.fetchone(
+            f'SELECT COUNT(*) FROM {self._sql_table} WHERE scope = ? AND ref_uid = ? AND seq = ?',
+            (str(scope or 'type'), str(ref_uid), int(seq)))
+        return bool(fila and int(fila[0] or 0))
 
     def _prune(self, scope: str, ref_uid: str) -> int:
         """Dejar solo las últimas :data:`KEEP`. Sin esto la tabla crece para siempre."""

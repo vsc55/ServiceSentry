@@ -25,6 +25,7 @@ Routes registered by this file:
     GET,POST /api/v1/modules/watchfuls/<module_name>/<action>   run a watchful module's declared action
 """
 
+import contextlib
 import importlib
 import os
 import re
@@ -37,11 +38,17 @@ from lib.security import secret_manager
 
 from lib.core.modules import actions as modules_actions
 from lib.core.modules import authz as modules_authz
+from lib.core.modules import facade as modules_facade
+from lib.core.modules.facade import StaleModulesConfig
 from lib.core.modules import items as modules_items
 from lib.core.modules import provisioning as modules_prov
 from lib.core.modules import service as modules_svc
 from lib.core.users.service import AdminOpError
 from lib.core.permissions import service as perms_svc
+
+
+#: Response header carrying the module configuration's version (what ``If-Match`` names).
+_VERSION_HEADER = 'X-Modules-Version'
 
 
 def register(app, wa):
@@ -60,18 +67,44 @@ def register(app, wa):
         no modules are accessible at all.
         """
         perms = wa._get_session_permissions()
-        all_data = wa._load_modules()
+        # The version the client will hand back on save (If-Match): taken with the data, under
+        # the facade lock, so the two describe the same configuration.
+        all_data, version = modules_facade.snapshot(wa)
         # Units were relabelled (GB -> GiB) without any number changing. Migrated on the way
         # out so a dropdown never shows a value it does not offer: a select whose value is
         # absent from its options displays the first one, and saving the item would then turn
         # a 100 GB threshold into 100 MiB.
         modules_svc.normalize_unit_fields(all_data)
         if 'modules_view' in perms:
-            return jsonify(secret_manager.mask_sensitive(all_data, wa._secret_keys))
+            return _with_version(
+                jsonify(secret_manager.mask_sensitive(all_data, wa._secret_keys)), version)
         visible = modules_svc.visible_modules(all_data, perms)
         if not visible:
             return jsonify({'error': wa._t('access_denied')}), 403
-        return jsonify(secret_manager.mask_sensitive(visible, wa._secret_keys))
+        return _with_version(
+            jsonify(secret_manager.mask_sensitive(visible, wa._secret_keys)), version)
+
+    def _with_version(resp, version):
+        """Stamp the configuration version on a response (header, so the body stays the
+        bare ``{module: config}`` document every caller already reads)."""
+        if version is not None:
+            resp.headers[_VERSION_HEADER] = str(version)
+        return resp
+
+    def _if_match():
+        """The version the client based its save on (``If-Match``), or ``None`` when it sent
+        none — an API client that predates the check keeps working, unchecked."""
+        raw = str(request.headers.get('If-Match') or '').strip().strip('"')
+        if raw.startswith('W/'):
+            raw = raw[2:].strip('"')
+        try:
+            return int(raw) if raw else None
+        except ValueError:
+            return None
+
+    def _stale(current):
+        return _with_version(jsonify({'error': wa._t('modules_config_stale'),
+                                      'stale': True, 'version': current}), current), 409
 
     @app.route('/api/v1/modules', methods=['PUT'])
     @login_required
@@ -93,9 +126,28 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
-        old_data = wa._load_modules()
+        # One save at a time in this process, from the load of what is stored to the write:
+        # the version check below covers writers in other processes.
+        facade = getattr(wa, '_modules_facade', None)
+        with getattr(facade, 'lock', None) or contextlib.nullcontext():
+            return _save_locked(perms, has_global_edit, data)
+
+    def _save_locked(perms, has_global_edit, data):
+        old_data, version = modules_facade.snapshot(wa)
+        # The body REPLACES the configuration, so a client that read it before someone else
+        # saved would silently undo that save. It names the version it read; a different
+        # one is a 409, and the client reloads instead of overwriting.
+        expected = _if_match()
+        if expected is not None and version is not None and expected != version:
+            return _stale(version)
         try:
             modules_svc.validate_modules_shape(data)
+            # A scoped user is SERVED only the modules they may view, and the client saves back
+            # what it was served. Without this, every module they cannot see arrived as
+            # "deleted", and the save was refused as an unauthorised removal the moment any
+            # other module existed. What they cannot see they cannot have meant to touch.
+            if 'modules_view' not in perms:
+                modules_svc.keep_unseen_modules(old_data, data, perms)
             # Restore masked secrets BEFORE authorization so an unchanged item with a
             # masked secret is not seen as "modified" (which would over-require edit).
             secret_manager.restore_sensitive(data, old_data, keys=wa._secret_keys)
@@ -124,8 +176,13 @@ def register(app, wa):
         # ssl_cert) can monitor that endpoint. Module-agnostic (discovery-driven).
         provisioned = modules_prov.sync_provisioned_devices(
             getattr(wa, '_devices_store', None), getattr(wa, '_modules_dir', None),
-            data, session.get('username', 'system'))
-        if wa._save_modules(data):
+            data, session.get('username', 'system'), old_data=old_data,
+            may_edit_device=lambda uid: wa._has_server_permission(uid, 'edit'))
+        try:
+            saved = modules_facade.save_versioned(wa, data, version)
+        except StaleModulesConfig as e:
+            return _stale(e.current)
+        if saved:
             changes = wa._diff_dicts(
                 old_data, data, sensitive=wa._sensitive_fields,
             )
@@ -172,7 +229,9 @@ def register(app, wa):
                 wa._purge_scoped_permissions('cluster', sorted(gone_clusters))
             # Round-trip any new device links so the client persists them (a later
             # save in this session then reuses the device instead of re-creating it).
-            return jsonify({'ok': True, 'provisioned': provisioned})
+            _, new_version = modules_facade.snapshot(wa)
+            return _with_version(jsonify({'ok': True, 'provisioned': provisioned,
+                                          'version': new_version}), new_version)
         return jsonify({'error': wa._t('save_file_error')}), 500
 
     # --- API: check state (read-only) -----------------------------
@@ -342,12 +401,19 @@ def register(app, wa):
                 # control fields and must never be client-controllable.
                 for _k in [k for k in config if k.startswith('__') and k.endswith('__')]:
                     del config[_k]
+                # Confine the config to what this caller may aim stored secrets with: a
+                # read-only action is open to modules_view, and everything below fills in
+                # secrets the client never sent while the client's own address wins.
+                scope = modules_actions.confine_action_config(wa, module_name, config)
                 # Fill anything the caller did not send from the stored item (a caller with
                 # no form knows only the key), then restore the check's own masked secrets
                 # from the stored config, so an action run after a reload (the UI only holds
                 # the masked placeholder) authenticates. Client values win in both.
-                modules_actions.fill_from_stored_item(wa, module_name, config)
-                modules_actions.restore_action_secrets(wa, module_name, config)
+                if scope['item_secrets']:
+                    modules_actions.fill_from_stored_item(wa, module_name, config)
+                modules_actions.restore_action_secrets(
+                    wa, module_name, config,
+                    module_level=scope['module_secrets'], item_level=scope['item_secrets'])
                 # Inject server-side context after stripping client values so the server value
                 # always wins regardless of what the client sent.
                 config['__var_dir__'] = wa._var_dir or ''

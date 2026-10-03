@@ -188,6 +188,11 @@ def register(app, wa):
 
         The challenge is kept in the session, never sent back to be echoed: a challenge the
         client is trusted to return is not a challenge.
+
+        **An account that already has a factor proves it first** — a current code, the same
+        rule as starting over, regenerating the recovery codes or turning it off. Registering
+        a key is adding a way in (and replaces the key there was), and on the session alone a
+        borrowed session was enough to enrol the borrower's own key and keep it.
         """
         username, uid = _me()
         if not uid:
@@ -195,8 +200,18 @@ def register(app, wa):
         scope = wa._webauthn_scope()
         if not scope.get('ok'):
             return jsonify({'ok': False, 'error': scope.get('reason') or 'unavailable'}), 400
+        proved = False
+        if wa._mfa_enrolled(username):
+            code = str((request.get_json(silent=True) or {}).get('code') or '')
+            if not mfa_service.verify(wa._mfa_store, uid, code):
+                wa._audit('mfa_failed', username, request.remote_addr,
+                          detail={'stage': 'webauthn_begin',
+                                  'error': 'empty' if not code else 'bad_code'})
+                wa._ipban_offense('login_failed')
+                return jsonify({'ok': False, 'error': 'bad_code'}), 403
+            proved = True
         challenge = webauthn.new_challenge()
-        session['webauthn_reg'] = {'challenge': challenge,
+        session['webauthn_reg'] = {'challenge': challenge, 'proved': proved,
                                    'expires': time.time() + WEBAUTHN_CHALLENGE_SECONDS}
         user = wa._users.get(username) or {}
         return jsonify({
@@ -227,6 +242,12 @@ def register(app, wa):
         held = session.pop('webauthn_reg', None) or {}   # one use, whatever the outcome
         if not held or float(held.get('expires') or 0) < time.time():
             return jsonify({'ok': False, 'error': 'no_challenge'}), 400
+        # A challenge issued while the account had no factor proves nothing once it has one
+        # — a factor enrolled between the two requests must not be stepped around.
+        if wa._mfa_enrolled(username) and not held.get('proved'):
+            wa._audit('mfa_failed', username, request.remote_addr,
+                      detail={'stage': 'webauthn_register', 'error': 'not_proved'})
+            return jsonify({'ok': False, 'error': 'bad_code'}), 403
         scope = wa._webauthn_scope()
         if not scope.get('ok'):
             return jsonify({'ok': False, 'error': scope.get('reason') or 'unavailable'}), 400
@@ -263,6 +284,12 @@ def register(app, wa):
         username, _rec = wa._uid_to_username(str(uid or ''))
         if not username:
             return jsonify({'ok': False, 'error': 'not_found'}), 404
+        # The hierarchy guard every other route on another account applies: a non-admin
+        # holding the flag must not strip an ADMINISTRATOR's factor — that is the first half
+        # of taking the account over, the second being its password.
+        from lib.core.users import service as users_svc     # noqa: PLC0415
+        if not wa._is_admin_requester() and users_svc.user_is_admin(_rec or {}, wa._groups):
+            return jsonify({'ok': False, 'error': 'insufficient_permissions'}), 403
         if not wa._mfa_reset(username, actor=session.get('username', ''),
                              reason=str((request.get_json(silent=True) or {}).get('reason') or '')):
             return jsonify({'ok': False, 'error': 'not_enrolled'}), 400

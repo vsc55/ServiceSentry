@@ -68,12 +68,15 @@ class TestResolveDeviceGeneric:
         item = {'device_uid': 'h1'}
         assert w.resolve_device(item) == item
 
-    def test_unknown_device_returns_item(self):
+    def test_unknown_device_is_marked_missing(self):
+        # Bound to a device that no longer exists: NOT returned as an inline item (which runs
+        # locally), but marked as running nowhere.
         mm = create_mock_monitor({'watchfuls.ping': {}})
         mm._devices_store = _FakeStore({})
         w = ping.Watchful(mm)
-        item = {'device_uid': 'h1'}
-        assert w.resolve_device(item) == item
+        out = w.resolve_device({'device_uid': 'h1'})
+        assert out['device_uid'] == 'h1'
+        assert out['device_kind'] == 'none' and out['_device_missing'] is True
 
     def test_address_injected_and_device_wins(self):
         w = _ping()
@@ -325,3 +328,43 @@ class TestMultiDeviceBinding:
                         'maintenance': True, 'profiles': {}}}
         out = self._pve(devices).resolve_device({'device_uid': 'n1', 'host': ''})
         assert out['enabled'] is False           # single-device maintenance disables
+
+
+class TestDeletedDeviceNeverRunsLocally:
+    """A check whose bound device was deleted (DELETE /api/v1/devices/<uid> without
+    ``with_checks``) must report the missing device, never run its command on the panel's own
+    machine and file those numbers under the deleted device's label."""
+
+    def _watchful(self, module):
+        import importlib
+        mod = importlib.import_module(f'watchfuls.{module}')
+        mm = create_mock_monitor({f'watchfuls.{module}': {}})
+        mm._devices_store = _FakeStore({})        # the device is gone
+        return mod.Watchful(mm)
+
+    def test_device_exec_refuses_for_a_missing_device(self):
+        from lib.core.devices.runner import DEVICE_MISSING, exec_error
+        w = self._watchful('ram_swap')
+        item = w.resolve_device({'device_uid': 'gone', 'enabled': True})
+        with patch('subprocess.run') as run:
+            out, err, code = w.device_exec(item, 'echo local')
+        run.assert_not_called()
+        assert (out, err, code) == exec_error(DEVICE_MISSING, lang=w._notify_lang())
+        assert err != DEVICE_MISSING, 'the key itself leaked out untranslated'
+
+    def test_every_member_missing_is_missing_too(self):
+        from watchfuls.proxmox import Watchful
+        mm = create_mock_monitor({'watchfuls.proxmox': {}})
+        mm._devices_store = _FakeStore({})
+        out = Watchful(mm).resolve_device({'device_uids': ['a', 'b'], 'host': ''})
+        assert out['_device_missing'] is True and out['device_kind'] == 'none'
+
+    def test_an_inline_item_still_runs_locally(self):
+        w = self._watchful('process')
+        item = w.resolve_device({'enabled': True})           # no device at all
+        assert '_device_missing' not in item
+        with patch('subprocess.run') as run:
+            run.return_value.stdout, run.return_value.stderr = 'ok', ''
+            run.return_value.returncode = 0
+            assert w.device_exec(item, 'echo ok') == ('ok', '', 0)
+        run.assert_called_once()

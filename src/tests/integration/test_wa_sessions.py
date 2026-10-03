@@ -333,3 +333,58 @@ class TestLastSeenReachesTheDatabase:
             client.get('/api/v1/me')
         assert _stored(admin, uid)['last_seen'] == first
         assert _entry(admin)['last_seen'] > first, 'memory stopped being the live value'
+
+
+class TestTheRegistryIsTheDatabaseNotOneProcess:
+    """Sessions were loaded once at boot and checked only against this process's dict. Across
+    replicas — or against the CLI — that meant a session revoked in one place kept working in
+    another, and a session created on one replica bounced to the login page on the next."""
+
+    def _now(self, admin):
+        admin._CACHE_RELOAD_SECS = 0           # re-confirm on every request
+
+    def test_a_row_deleted_elsewhere_stops_working_here(self, admin, client):
+        self._now(admin)
+        _login(client)
+        assert client.get('/api/v1/users').status_code == 200
+        # Another replica (or `user passwd` on the CLI) deletes the row.
+        admin._sessions_store.delete_by_user_uid(admin._users['admin']['uid'])
+        assert client.get('/api/v1/users').status_code in (302, 401)
+        assert not admin._sessions, 'the revoked entry is dropped here too'
+
+    def test_a_session_created_on_another_replica_is_accepted(self, admin, client):
+        self._now(admin)
+        _login(client)
+        admin._sessions.clear()                # this process never saw it
+        assert client.get('/api/v1/users').status_code == 200
+        assert len(admin._sessions) == 1, 'adopted from the table'
+
+    def test_a_database_that_cannot_answer_signs_nobody_out(self, admin, client):
+        self._now(admin)
+        _login(client)
+        from unittest.mock import patch
+        with patch.object(admin._sessions_store, 'get', return_value=None):
+            assert client.get('/api/v1/users').status_code == 200
+
+    def test_between_rechecks_it_does_not_query(self, admin, client):
+        admin._CACHE_RELOAD_SECS = 3600
+        _login(client)
+        client.get('/api/v1/me')                # first request confirms against the table
+        from unittest.mock import patch
+        with patch.object(admin._sessions_store, 'get',
+                          side_effect=AssertionError('queried inside the window')):
+            assert client.get('/api/v1/me').status_code == 200
+
+    def test_a_password_change_ends_the_sessions_of_other_replicas(self, admin, client):
+        """`_revoke_user_sessions(except_token=…)` deleted only the tokens this process held;
+        the account's sessions on another replica are rows there and nowhere here."""
+        _login(client)
+        with client.session_transaction() as s:
+            mine = s['session_token']
+        uid = admin._users['admin']['uid']
+        admin._sessions_store.upsert('elsewhere-token', {
+            'uid': str(uuid.uuid4()), 'user_uid': uid, 'created_at': '2026-01-01T00:00:00+00:00',
+            'last_seen': '2026-01-01T00:00:00+00:00', 'ip': '10.0.0.9', 'user_agent': 'x'})
+        admin._revoke_user_sessions('admin', except_token=mine)
+        assert admin._sessions_store.get('elsewhere-token') == {}
+        assert admin._sessions_store.get(mine), 'the session making the change survives'

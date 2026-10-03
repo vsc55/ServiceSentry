@@ -338,3 +338,42 @@ class TestSaml2LoginFlow:
 def test_saml_csrf_exempt_declared(admin):
     # The SAML2 provider declares its own CSRF-exempt ACS path in register().
     assert '/auth/saml2/acs' in admin._csrf_exempt_prefixes
+
+
+# ── The account is bound to a NameID, not to a name ───────────────────────────────
+
+class TestTheNameIdIsWhatBindsTheAccount:
+    """Found by a name attribute and then re-bound to whatever NameID arrived: a different
+    person carrying the same name took the account, role and all."""
+
+    def _bound(self, admin, source='saml2', sid='alice-nameid'):
+        admin._users['alice'] = {
+            'uid': 'uid-alice', 'auth_source': source, 'auth_source_id': sid,
+            'display_name': 'Alice', 'email': '', 'role': admin._role_name_to_uid('viewer'),
+            'groups': [], 'enabled': True}
+
+    def test_a_different_name_id_is_refused(self, admin, config_dir):
+        from lib.providers.saml import auth as saml_auth
+        _saml2_cfg(config_dir)
+        self._bound(admin)
+        attrs = _make_saml_attrs('alice', groups=['Admins'])
+        assert saml_auth.sync_user(admin, 'mallory-nameid', attrs) is None
+        assert admin._users['alice']['auth_source_id'] == 'alice-nameid'
+        assert admin._uid_to_role_name(admin._users['alice']['role']) == 'viewer'
+
+    def test_an_account_bound_to_another_provider_is_refused(self, admin, config_dir):
+        from lib.providers.saml import auth as saml_auth
+        _saml2_cfg(config_dir)
+        self._bound(admin, source='oidc', sid='sub-alice')
+        assert saml_auth.sync_user(admin, 'alice', _make_saml_attrs('alice')) is None
+        assert admin._users['alice']['auth_source'] == 'oidc'
+
+    def test_a_transient_name_id_cannot_be_compared_so_it_is_not(self, admin, config_dir):
+        """A transient NameID is different on every sign-in by design: comparing it would
+        lock the account out on the second one."""
+        from lib.providers.saml import auth as saml_auth
+        _saml2_cfg(config_dir)
+        self._bound(admin)
+        fmt = 'urn:oasis:names:tc:SAML:2.0:nameid-format:transient'
+        assert saml_auth.sync_user(admin, '_f3a9c1', _make_saml_attrs('alice'),
+                                   name_id_format=fmt) is not None

@@ -289,3 +289,49 @@ class TestAdoptarTraeLosDatos:
         plan = fs.build([_dep(7, 'Amixalan Energy Supplies, S.L.')], [vecina, suya])
         elegido, _r = fs.select(plan, pick=['7'], link={'7': 'u9'}, orgs=[vecina, suya])
         assert elegido[0]['short'] != 'AESSL'
+
+
+class TestDosDepartamentosNoSeQuedanConLaMismaEmpresa:
+    """Dos departamentos que se llaman igual (o dos emparejamientos a mano con la misma
+    empresa) salían los dos como `adopt` sobre la misma fila: el segundo le pisaba el
+    `external_id` al primero, y en cada importación la empresa cambiaba de dueño."""
+
+    def test_el_segundo_con_el_mismo_nombre_es_un_conflicto(self):
+        orgs = [_org('u1', 'Amixalan')]
+        plan = fs.build([_dep(1, 'Amixalan'), _dep(2, 'AMIXALAN')], orgs)
+        acciones = {p['external_id']: p['action'] for p in plan}
+        assert acciones == {'1': 'adopt', '2': 'conflict'}
+        assert [p['uid'] for p in plan if p['action'] == 'adopt'] == ['u1']
+
+    def test_y_el_conflicto_no_se_aplica_se_cuenta(self):
+        orgs = [_org('u1', 'Amixalan')]
+        plan = fs.build([_dep(1, 'Amixalan'), _dep(2, 'Amixalan')], orgs)
+        fuera, rechazos = fs.select(plan, orgs=orgs)
+        assert [p['external_id'] for p in fuera] == ['1']
+        assert rechazos == [{'name': 'Amixalan', 'reason': 'fs_link_taken'}]
+
+    def test_y_se_resuelve_emparejandolo_a_mano_con_otra(self):
+        orgs = [_org('u1', 'Amixalan'), _org('u2', 'Amixalan Energy')]
+        plan = fs.build([_dep(1, 'Amixalan'), _dep(2, 'Amixalan')], orgs)
+        fuera, rechazos = fs.select(plan, link={'2': 'u2'}, orgs=orgs)
+        assert sorted((p['external_id'], p['uid']) for p in fuera) == [('1', 'u1'), ('2', 'u2')]
+        assert rechazos == []
+
+    def test_dos_emparejamientos_a_mano_con_la_misma_empresa(self):
+        orgs = [_org('u1', 'Amixalan')]
+        plan = fs.build([_dep(1, 'Uno'), _dep(2, 'Dos')], orgs)
+        fuera, rechazos = fs.select(plan, link={'1': 'u1', '2': 'u1'}, orgs=orgs)
+        assert [p['uid'] for p in fuera] == ['u1'] and len(fuera) == 1
+        assert rechazos == [{'name': 'Dos', 'reason': 'fs_link_taken'}]
+
+    def test_uno_a_mano_contra_la_que_otro_adopta_solo(self):
+        orgs = [_org('u1', 'Amixalan')]
+        plan = fs.build([_dep(1, 'Amixalan'), _dep(2, 'Otra')], orgs)
+        fuera, rechazos = fs.select(plan, link={'2': 'u1'}, orgs=orgs)
+        assert [p['uid'] for p in fuera if p['uid']] == ['u1']
+        assert len(rechazos) == 1 and rechazos[0]['reason'] == 'fs_link_taken'
+
+    def test_el_resumen_cuenta_el_conflicto_solo_si_lo_hay(self):
+        orgs = [_org('u1', 'Amixalan')]
+        assert fs.counts(fs.build([_dep(1, 'Amixalan'), _dep(2, 'Amixalan')], orgs)) \
+            == {'create': 0, 'update': 0, 'adopt': 1, 'same': 0, 'conflict': 1}

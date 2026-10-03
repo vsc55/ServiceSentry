@@ -119,6 +119,16 @@ class _MfaPolicyMixin:
             return False
         return self._mfa_enrolled(username) or self._mfa_must_enrol(username, source)
 
+    def _mfa_step_endpoint(self, username: str, source: str = 'local') -> str:
+        """Which page finishes a parked sign-in: ``'login_mfa_enrol'`` or ``'login_mfa'``.
+
+        One answer for every door. The local form asked the right question and the OIDC, SAML
+        and Teams callbacks did not — they always sent the browser to the code page, which an
+        account with nothing to prove a code with can never pass. With the policy on, every SSO
+        account that had not enrolled yet was simply unable to sign in.
+        """
+        return 'login_mfa_enrol' if self._mfa_must_enrol(username, source) else 'login_mfa'
+
     # ── Where security keys are registered ───────────────────────────────────
 
     def _webauthn_scope(self) -> dict:

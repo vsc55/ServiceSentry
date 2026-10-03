@@ -264,3 +264,164 @@ class TestLoad:
             assert srv.running is True                   # burst didn't take the listener down
         finally:
             srv.stop()
+
+
+# ── connection bounds (handshake deadline, idle timeout, cap, prompt stop) ────────
+@pytest.fixture(scope='module')
+def tls_pair(tmp_path_factory):
+    """A throwaway self-signed cert + key for the TLS listener."""
+    import datetime
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'syslog-test')])
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+            .public_key(key.public_key()).serial_number(1)
+            .not_valid_before(datetime.datetime(2020, 1, 1))
+            .not_valid_after(datetime.datetime(2040, 1, 1))
+            .sign(key, hashes.SHA256()))
+    d = tmp_path_factory.mktemp('syslog-tls')
+    cert_p, key_p = d / 'cert.pem', d / 'key.pem'
+    cert_p.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_p.write_bytes(key.private_bytes(serialization.Encoding.PEM,
+                                        serialization.PrivateFormat.PKCS8,
+                                        serialization.NoEncryption()))
+    return str(cert_p), str(key_p)
+
+
+def _closed_by_peer(sock: socket.socket, within: float) -> bool:
+    """True when the server closes *sock* within *within* seconds (EOF or reset)."""
+    sock.settimeout(within)
+    try:
+        return sock.recv(1) == b''
+    except (ConnectionResetError, ConnectionAbortedError):
+        return True
+    except (socket.timeout, TimeoutError):
+        return False
+
+
+def _wait_until(pred, timeout=3.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if pred():
+            return True
+        time.sleep(0.02)
+    return pred()
+
+
+class TestConnectionBounds:
+    """An accepted TCP/TLS connection must never pin a thread for good: silent
+    peers are closed, a TLS handshake has a deadline, the number of live
+    connections is capped and stop() closes them instead of waiting on each."""
+
+    def test_idle_plain_tcp_connection_is_closed(self, sink):
+        port = _free_port()
+        srv = SyslogServer(sink=sink, bind_host='127.0.0.1', tcp_port=port, idle_timeout=0.5)
+        assert srv.start() == []
+        c = socket.create_connection(('127.0.0.1', port), timeout=2)
+        try:
+            assert _closed_by_peer(c, within=4.0)
+        finally:
+            c.close()
+            srv.stop()
+
+    def test_active_tcp_connection_survives_idle_timeout(self, sink):
+        # The idle clock restarts on every chunk: a sender that keeps talking stays.
+        port = _free_port()
+        srv = SyslogServer(sink=sink, bind_host='127.0.0.1', tcp_port=port, idle_timeout=0.8)
+        assert srv.start() == []
+        c = socket.create_connection(('127.0.0.1', port), timeout=2)
+        try:
+            for i in range(4):                       # 4 x 0.4 s > idle_timeout
+                c.sendall(b'<13>app: tick%d\n' % i)
+                time.sleep(0.4)
+            assert sink.wait(4, timeout=3)
+            assert {r['message'] for r in sink.recs} == {f'tick{i}' for i in range(4)}
+        finally:
+            c.close()
+            srv.stop()
+
+    def test_tls_handshake_has_a_deadline(self, sink, tls_pair):
+        # A peer that connects to the TLS port and never says a word is dropped
+        # once the handshake deadline passes (it used to block wrap_socket forever).
+        cert, key = tls_pair
+        port = _free_port()
+        srv = SyslogServer(sink=sink, bind_host='127.0.0.1', tls_port=port,
+                           tls_cert=cert, tls_key=key, handshake_timeout=0.5)
+        assert srv.start() == []
+        c = socket.create_connection(('127.0.0.1', port), timeout=2)
+        try:
+            assert _closed_by_peer(c, within=4.0)
+        finally:
+            c.close()
+            srv.stop()
+
+    def test_tls_message_still_received(self, sink, tls_pair):
+        import ssl
+        cert, key = tls_pair
+        port = _free_port()
+        srv = SyslogServer(sink=sink, bind_host='127.0.0.1', tls_port=port,
+                           tls_cert=cert, tls_key=key)
+        assert srv.start() == []
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            with socket.create_connection(('127.0.0.1', port), timeout=3) as raw:
+                with ctx.wrap_socket(raw) as c:
+                    c.sendall(b'<13>secure: over tls\n')
+                    assert sink.wait(1, timeout=3)
+            assert sink.recs[0]['message'] == 'over tls'
+        finally:
+            srv.stop()
+
+    def test_connection_cap_refuses_extra_and_frees_on_close(self, sink):
+        port = _free_port()
+        srv = SyslogServer(sink=sink, bind_host='127.0.0.1', tcp_port=port, max_connections=2)
+        assert srv.start() == []
+        c1 = socket.create_connection(('127.0.0.1', port), timeout=2)
+        c2 = socket.create_connection(('127.0.0.1', port), timeout=2)
+        extra = []
+        try:
+            assert _wait_until(lambda: len(srv._conns) == 2)
+            c3 = socket.create_connection(('127.0.0.1', port), timeout=2)
+            extra.append(c3)
+            assert _closed_by_peer(c3, within=3.0)          # over the cap → closed
+            c2.sendall(b'<13>app: kept\n')                  # the admitted ones still work
+            assert sink.wait(1, timeout=3)
+            c1.close()                                      # a slot frees on disconnect
+            assert _wait_until(lambda: len(srv._conns) == 1)
+            c4 = socket.create_connection(('127.0.0.1', port), timeout=2)
+            extra.append(c4)
+            c4.sendall(b'<13>app: after\n')
+            assert sink.wait(2, timeout=3)
+            assert {r['message'] for r in sink.recs} == {'kept', 'after'}
+        finally:
+            for s in (c1, c2, *extra):
+                s.close()
+            srv.stop()
+
+    def test_stop_closes_live_connections_promptly(self, sink, tls_pair):
+        # Three silent TLS peers used to block in the handshake: stop() waited 2 s on
+        # each (6 s, under the caller's listener lock) and the threads survived it.
+        cert, key = tls_pair
+        port = _free_port()
+        srv = SyslogServer(sink=sink, bind_host='127.0.0.1', tls_port=port,
+                           tls_cert=cert, tls_key=key)
+        assert srv.start() == []
+        clients = [socket.create_connection(('127.0.0.1', port), timeout=2) for _ in range(3)]
+        try:
+            assert _wait_until(lambda: len(srv._conns) == 3)
+            conn_threads = [t for t in list(srv._threads) if t.name == 'syslog-conn']
+            assert len(conn_threads) == 3
+            t0 = time.monotonic()
+            srv.stop()
+            assert time.monotonic() - t0 < 1.5
+            assert not any(t.is_alive() for t in conn_threads)
+            assert not srv._conns
+        finally:
+            for c in clients:
+                c.close()
+            srv.stop()

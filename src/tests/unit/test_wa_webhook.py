@@ -169,3 +169,37 @@ class TestWebhookDispatch:
 
 # ──────────────────────── Webhook CRUD routes ──────────────────────────────
 
+
+
+class TestWebhookValuesAreEscaped:
+    """Values were pasted raw into the JSON body: a syslog line with a quote (``Invalid user
+    "admin"``) made the body invalid JSON, the receiver rejected it and the alert was lost."""
+
+    def _body(self, **kw):
+        captured = {}
+
+        def fake_post(url, data, headers, timeout):
+            captured['body'] = data
+            return unittest.mock.Mock(status_code=200)
+
+        with unittest.mock.patch('requests.post', side_effect=fake_post):
+            webhook_notify._dispatch(_ENABLED_CFG, **kw)
+        return captured['body'].decode('utf-8')
+
+    def test_quotes_and_backslashes_keep_the_body_valid_json(self):
+        msg = 'sshd: Invalid user "admin" from C:\path'
+        payload = json.loads(self._body(kind='down', message=msg))
+        assert payload['message'] == msg
+
+    def test_a_value_cannot_inject_another_placeholder(self):
+        payload = json.loads(self._body(item='{message}', message='secret'))
+        assert payload['item'] == '{message}'
+
+    def test_get_values_are_url_encoded(self):
+        cfg = {**_ENABLED_CFG, 'method': 'GET',
+               'url': 'https://hooks.example.com/notify?m={message}&k={kind}'}
+        with unittest.mock.patch('requests.get') as mock_get:
+            mock_get.return_value = unittest.mock.Mock(status_code=200)
+            webhook_notify._dispatch(cfg, kind='down', message='a&b=c d')
+        called_url = mock_get.call_args[0][0]
+        assert called_url == 'https://hooks.example.com/notify?m=a%26b%3Dc%20d&k=down'

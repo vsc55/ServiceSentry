@@ -86,6 +86,12 @@ class _EmbeddedBase(_HeartbeatMixin):
             self._notify_service_control(action)
         return True, ''
 
+    # ── process exit ────────────────────────────────────────────────────────────
+    def on_shutdown(self) -> None:
+        """The web process is exiting (SIGTERM / Ctrl+C): stop whatever would lose work if
+        the process just died. Quiet — no audit or notification, it is not an operator stop.
+        Default: nothing to do."""
+
     # ── operator start/stop notification (opt-in matrix, default off) ─────────
     def _notify_service_control(self, action: str) -> None:
         """Dispatch a ``service_started`` / ``service_stopped`` notification synchronously

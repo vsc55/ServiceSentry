@@ -33,7 +33,9 @@ def _modules_list_rows(wa, f: str = '') -> list:
         items_obj = cfg.get('list')
         rows.append({
             'name':    name,
-            'enabled': bool(cfg.get('enabled', False)),
+            # Absent means on: the monitor runs a module with no `enabled` key
+            # (lib/modules/discovery/schemas.py), so the card must count it as running.
+            'enabled': bool(cfg.get('enabled', True)),
             'items':   len(items_obj) if isinstance(items_obj, dict) else 0,
             'checks':  _mod_checks(status_raw, name),
         })
@@ -107,7 +109,7 @@ def modules_stat(wa) -> dict:
     fetched over AJAX by the generic stat renderer."""
     mods = wa._load_modules() or {}
     total = sum(1 for c in mods.values() if isinstance(c, dict))
-    enabled = sum(1 for c in mods.values() if isinstance(c, dict) and c.get('enabled'))
+    enabled = sum(1 for c in mods.values() if isinstance(c, dict) and c.get('enabled', True))
     disabled = total - enabled
     badges = []
     if enabled:

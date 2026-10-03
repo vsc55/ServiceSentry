@@ -31,7 +31,28 @@ from lib.core.dcim.store import (CABLE_CATEGORIES, CABLE_COLORS, CABLE_KINDS,
                                  FEED_CATEGORIES, FEED_COLORS,
                                  FEEDS, LINK_KINDS, ROLES_MUDOS, SOURCE_KINDS)
 from lib.core.dcim import store as dcim_store
-from lib.core.dcim.routes._common import _without, scan_pages
+from lib.core.dcim.routes._common import (_NUM_MAX, _fresh, _num, _without, numbers_bad,
+                                          scan_pages)
+from lib.core.dcim.store.cabling import _CABLE, _LINK
+from lib.core.dcim.store.power import _PDU, _POWER, _SOURCE
+
+#: The table behind each writer here, for the numeric check.
+_SPECS = {'pdus': _PDU, 'feeds': _POWER, 'cables': _CABLE}
+
+
+def _bounds(spec) -> dict:
+    """Every number of these tables is a count, a length or watts: none is negative.
+
+    `bypass` is a switch, on or off — and `int(data['bypass'])` on anything else was a 500.
+    """
+    out = {c.name: (0, _NUM_MAX) for c in spec.columns if c.type == 'INTEGER'}
+    if 'bypass' in out:
+        out['bypass'] = (0, 1)
+    return out
+
+
+def _bad_number(wa, field):
+    return jsonify({'error': wa._t('dcim_bad_number'), 'field': field}), 400
 
 
 #: Cuántos colores ya usados se ofrecen. Una instalación tiene cinco o seis; un desplegable con
@@ -57,6 +78,23 @@ def register(app, wa, C):
             return store, None
         ok = C.may_write(store, store.owners_map(), C.seen(), 'rack', rack['uid'])
         return store, (rack if ok else False)
+
+    def _cable_end_bad(item_uid):
+        """Why a cable may NOT end at *item_uid*, as ``(error_key, status)``, or ``None``.
+
+        The rule the near end already follows through the CRUD's owner — the item must exist and
+        sit in a rack this caller may write — applied to whichever end is being set.
+        """
+        store = C.store()
+        item = store.items.get(str(item_uid or '')) if store else None
+        if not item:
+            return 'dcim_not_found', 404
+        _, rack = _rack_writable(item.get('rack_uid'))
+        if rack is None:
+            return 'dcim_not_found', 404
+        if rack is False:
+            return 'access_denied', 403
+        return None
 
     def _loop_bad(a_item, b_item, a_port, b_port):
         """Por qué ese cable NO puede ir de un equipo a sí mismo, o `''` si puede.
@@ -87,17 +125,20 @@ def register(app, wa, C):
         mirando una foto, y obligarle a inventarse un número sería peor dato que ninguno.
         """
         store = C.store()
-        n = int(outlet or 0)
+        # Through `_num`: `int("abc")` here was a 500 before any rule was asked. The routes
+        # refuse a bad number first; this only has to survive what is already stored.
+        n = int(_num(outlet))
         if n <= 0 or not store:
             return ''
         pdu = store.pdus.get(str(pdu_uid or '')) or {}
-        tomas = int(pdu.get('outlets') or 0)
+        tomas = int(_num(pdu.get('outlets')))
         # Sin tomas declaradas no se juzga: nadie ha dicho cuántas tiene, así que ningún número
         # se sale de una cuenta que no existe.
         if tomas and n > tomas:
             return wa._t('dcim_outlet_out_of_range')
         for cable in store.feeds_of([str(pdu_uid or '')]):
-            if int(cable.get('outlet') or 0) == n and str(cable.get('uid') or '') != str(mine):
+            if int(_num(cable.get('outlet'))) == n \
+                    and str(cable.get('uid') or '') != str(mine):
                 return wa._t('dcim_outlet_taken')
         return ''
 
@@ -180,9 +221,12 @@ def register(app, wa, C):
     @C.edit_req
     def api_dcim_source_new():
         store = C.store()
-        data = request.get_json(silent=True) or {}
+        data = _fresh(request.get_json(silent=True) or {})
         if str(data.get('kind') or 'panel') not in SOURCE_KINDS:
             return jsonify({'error': wa._t('dcim_source_kind_unknown')}), 400
+        malo = numbers_bad(_SOURCE, data, _bounds(_SOURCE))
+        if malo:
+            return _bad_number(wa, malo)
         sede = str(data.get('site_uid') or '')
         if sede:
             if not store.sites.get(sede):
@@ -207,6 +251,9 @@ def register(app, wa, C):
         data = _without(request.get_json(silent=True) or {}, ('site_uid',))
         if 'kind' in data and str(data['kind']) not in SOURCE_KINDS:
             return jsonify({'error': wa._t('dcim_source_kind_unknown')}), 400
+        malo = numbers_bad(_SOURCE, data, _bounds(_SOURCE))
+        if malo:
+            return _bad_number(wa, malo)
         if 'upstream_uid' in data:
             malo = _upstream_bad(store, uid, data.get('upstream_uid'))
             if malo:
@@ -361,18 +408,28 @@ def register(app, wa, C):
                    endpoint=f'api_dcim_{kind}_new')
         @puerta
         def _create():
-            data = request.get_json(silent=True) or {}
+            data = _fresh(request.get_json(silent=True) or {})
             store, rack = _rack_writable(dueno(C.store(), data))
             if not store or rack is None:
                 return jsonify({'error': wa._t('dcim_not_found')}), 404
             if rack is False:
                 return jsonify({'error': wa._t('access_denied')}), 403
+            malo = numbers_bad(_SPECS[part], data, _bounds(_SPECS[part]))
+            if malo:
+                return _bad_number(wa, malo)
             if kind == 'pdus' and str(data.get('feed') or 'a') not in FEEDS:
                 return jsonify({'error': wa._t('dcim_feed_unknown')}), 400
             # Y un cable de un equipo a sí mismo sólo vale como PUENTE: de una boca a otra. La
             # regla vivía sólo en el navegador, que es lo mismo que no vivir en ninguna parte —
             # la escritura entra por la API con o sin pantalla delante.
             if kind == 'cables':
+                # The far end too, by the same rule as the near one: a cable is written into
+                # BOTH racks it joins. Unchecked, a cable could name an item that does not exist,
+                # or one in a rack this caller may not touch — and the answer told them it
+                # existed.
+                malo = _cable_end_bad(data.get('b_item'))
+                if malo:
+                    return jsonify({'error': wa._t(malo[0])}), malo[1]
                 malo = _loop_bad(data.get('a_item'), data.get('b_item'),
                                  data.get('a_port'), data.get('b_port'))
                 if malo:
@@ -400,6 +457,9 @@ def register(app, wa, C):
                 return jsonify({'error': wa._t('access_denied')}), 403
             data = _without(request.get_json(silent=True) or {}, ('rack_uid', 'item_uid',
                                                                  'pdu_uid'))
+            malo = numbers_bad(_SPECS[part], data, _bounds(_SPECS[part]))
+            if malo:
+                return _bad_number(wa, malo)
             if 'feed' in data and str(data['feed']) not in FEEDS:
                 return jsonify({'error': wa._t('dcim_feed_unknown')}), 400
             # Con la regleta de la FILA y no la del cuerpo: `pdu_uid` no se puede cambiar por
@@ -407,6 +467,24 @@ def register(app, wa, C):
             # comprobar una toma de una regleta a la que el cable no se va a mover.
             if kind == 'feeds' and 'outlet' in data:
                 malo = _outlet_bad(row.get('pdu_uid'), data.get('outlet'), uid)
+                if malo:
+                    return jsonify({'error': malo}), 400
+            # A cable's ends CAN be changed here — re-plugging a lead is an edit — so they are
+            # checked as on creation, on what the cable will join afterwards: an end that
+            # changes must exist in a rack this caller may write, and a cable to itself is only a
+            # bridge between two ports. Checking only the end it had let a cable be rewritten
+            # to join two items of another company.
+            if kind == 'cables' and {'a_item', 'b_item', 'a_port', 'b_port'} & set(data):
+                merged = dict(row, **data)
+                for end in ('a_item', 'b_item'):
+                    # An end that is re-sent unchanged is not being written: a form posts the
+                    # whole cable, and the near end was already judged as the cable's owner.
+                    if str(merged.get(end) or '') != str(row.get(end) or ''):
+                        malo = _cable_end_bad(merged.get(end))
+                        if malo:
+                            return jsonify({'error': wa._t(malo[0])}), malo[1]
+                malo = _loop_bad(merged.get('a_item'), merged.get('b_item'),
+                                 merged.get('a_port'), merged.get('b_port'))
                 if malo:
                     return jsonify({'error': malo}), 400
             err = C.asset(part, data, uid)
@@ -901,9 +979,12 @@ def register(app, wa, C):
     @C.edit_req
     def api_dcim_link_new():
         store = C.store()
-        data = request.get_json(silent=True) or {}
+        data = _fresh(request.get_json(silent=True) or {})
         if not store:
             return jsonify({'error': wa._t('dcim_not_found')}), 404
+        malo = numbers_bad(_LINK, data, _bounds(_LINK))
+        if malo:
+            return _bad_number(wa, malo)
         if str(data.get('kind') or 'ipsec') not in LINK_KINDS:
             return jsonify({'error': wa._t('dcim_link_kind_unknown')}), 400
         said, allowed = store.owners_map(), C.seen()
@@ -940,6 +1021,9 @@ def register(app, wa, C):
         data = _without(request.get_json(silent=True) or {}, ('a_site', 'b_site'))
         if 'kind' in data and str(data['kind']) not in LINK_KINDS:
             return jsonify({'error': wa._t('dcim_link_kind_unknown')}), 400
+        malo = numbers_bad(_LINK, data, _bounds(_LINK))
+        if malo:
+            return _bad_number(wa, malo)
         store.links.update(uid, data, actor=C.actor())
         return jsonify({'ok': True})
 

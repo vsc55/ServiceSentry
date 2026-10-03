@@ -195,3 +195,51 @@ class TestElCatalogoDejaConstancia:
         uid = cat.create({'manufacturer': 'Dell', 'model': 'R740', 'part_number': 'PN-1'})
         datos = cat.revs.history(uid)[0]['data']
         assert datos['manufacturer'] == 'Dell' and datos['part_number'] == 'PN-1'
+
+
+class TestElNumeroDeVersionEsUnico:
+    """C15 — two versions of one record never share `seq`, even when two writes race."""
+
+    def test_el_indice_no_admite_dos_iguales(self, db, revs):
+        revs.keep('r1', {'a': 1}, scope='rack')
+        tabla = revisions.SCHEMA.name
+        with pytest.raises(Exception):
+            db.execute(f'INSERT INTO {tabla} (uid, scope, ref_uid, seq) VALUES (?, ?, ?, ?)',
+                       ('otra', 'rack', 'r1', 1))
+
+    def test_quien_pierde_la_carrera_coge_el_siguiente(self, db, revs, monkeypatch):
+        """The MAX read is stale — another writer took the number in between — and the
+        version still lands, with the next one."""
+        revs.keep('r1', {'a': 1}, scope='rack')
+        real = db.fetchone
+        tarde = {'n': 0}
+
+        def lectura_vieja(sql, params=()):
+            if 'MAX(seq)' in sql and tarde['n'] == 0:
+                tarde['n'] += 1
+                return (0,)                     # what it read before the other one wrote
+            return real(sql, params)
+
+        monkeypatch.setattr(db, 'fetchone', lectura_vieja)
+        revs.keep('r1', {'a': 2}, scope='rack')
+        seqs = [f['seq'] for f in revs.history('r1', scope='rack')]
+        assert seqs == [2, 1]
+
+    def test_una_base_con_numeros_repetidos_sigue_arrancando(self, db):
+        """The index became unique after the race could have happened: an installation that
+        already holds two versions with one number is renumbered, in order, and starts."""
+        import dataclasses
+        from lib.db.schema import Index
+        vieja = dataclasses.replace(revisions.SCHEMA, indexes=(
+            Index('idx_dc_rev_ref', ('scope', 'ref_uid', 'seq')),))
+        db.reconcile_table(vieja)
+        tabla = revisions.SCHEMA.name
+        for uid, seq, at in (('v1', 1, '2026-01-01'), ('v2', 2, '2026-01-02'),
+                             ('v3', 2, '2026-01-03')):
+            db.execute(f'INSERT INTO {tabla} (uid, scope, ref_uid, at, seq) '
+                       'VALUES (?, ?, ?, ?, ?)', (uid, 'rack', 'r1', at, seq))
+        db.commit()
+        revs = revisions.RevisionStore(db)
+        assert [(f['uid'], f['seq']) for f in revs.history('r1', scope='rack')] \
+            == [('v3', 3), ('v2', 2), ('v1', 1)]
+        assert revs.keep('r1', {'a': 1}, scope='rack')

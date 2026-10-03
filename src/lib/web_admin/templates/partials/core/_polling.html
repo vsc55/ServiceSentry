@@ -321,7 +321,7 @@ function showConfigUpdateDetail() {
         const valCell = item.isArray ? '<span class="text-muted">—</span>' : renderReadable(item.newValue);
         const goCell  = tabId
             ? `<button class="btn btn-sm btn-secondary py-0 px-2"
-                        onclick="_goCfgField(${jsStr(tabId)},${jsStr(item.isArray ? null : item.path)})">
+                        onclick="_goCfgField(${jsStr(tabId)},${jsStr(item.isArray ? null : item.path)},${jsStr(item.sec)})">
                    <i class="bi bi-arrow-right-circle me-1"></i>${esc(t('cfg_update_goto'))}</button>`
             : '';
         return `<tr>
@@ -350,33 +350,12 @@ function showConfigUpdateDetail() {
     bootstrap.Modal.getOrCreateInstance(modal).show();
 }
 
-function _goCfgField(tabId, pathStr) {
+function _goCfgField(tabId, pathStr, sec) {
     // Close the detail modal
     bootstrap.Modal.getInstance(document.getElementById('cfgUpdateDetailModal'))?.hide();
-    // Set target config sub-tab
-    if (typeof _activeCfgTab !== 'undefined') {
-        _activeCfgTab = tabId;
-        localStorage.setItem('cfg_active_tab', tabId);
-    }
-    // Helper: re-render config and optionally scroll to the field
-    const _doRenderAndScroll = () => {
-        renderConfig();
-        if (pathStr) {
-            setTimeout(() => {
-                const el = document.querySelector(`.cfg-field-wrap[data-cfg-path="${CSS.escape(pathStr)}"]`);
-                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 100);
-        }
-    };
-    // Navigate to the main Config tab if not already there
-    const cfgTabBtn = document.querySelector('[data-bs-target="#tab-config"]');
-    if (cfgTabBtn && !cfgTabBtn.classList.contains('active')) {
-        // Wait for Bootstrap's tab animation to finish before rendering/scrolling
-        cfgTabBtn.addEventListener('shown.bs.tab', _doRenderAndScroll, { once: true });
-        cfgTabBtn.click();
-    } else {
-        _doRenderAndScroll();
-    }
+    // `tabId` only labels the row now: Configuration is a rail of sections, and the section
+    // is found from the option's path (or, for a list that has no single row, its section).
+    openConfigField(pathStr, sec);
 }
 
 function _showRestartBanner() {

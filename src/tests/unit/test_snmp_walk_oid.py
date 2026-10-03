@@ -186,9 +186,88 @@ class TestABoundedTable:
         fetches them has to finish before the next cycle starts."""
         device(_rows([(f'1.3.6.1.2.1.2.2.1.10.{i}', str(i)) for i in range(1, 40)]))
         rows, err = _walk(max_rows=10)
-        assert len(rows) == 10 and err is None
+        # …and SAYS it stopped: a cut table that reads as the whole one is what made a store
+        # that replaces its contents throw the rest of a switch's forwarding table away.
+        assert len(rows) == 10 and isinstance(err, snmp_client.Truncated)
 
     def test_the_default_ceiling_is_generous_for_real_hardware(self):
         """A 48-port switch, a NAS with 24 disks and a router with a few hundred sub-interfaces
         all have to fit, or the cap is a silent data loss rather than a guard."""
         assert SnmpClient.WALK_MAX_ROWS >= 512
+
+    def test_a_table_exactly_at_the_ceiling_is_whole(self, device):
+        """One row PAST the ceiling is how a cut table is told from a full one; a table that
+        is exactly that long is not cut, and saying it was would keep a stale map for ever."""
+        device(_rows([(f'1.3.6.1.2.1.2.2.1.10.{i}', str(i)) for i in range(1, 11)]))
+        rows, err = _walk(max_rows=10)
+        assert len(rows) == 10 and err is None
+
+    def test_a_cut_table_is_still_an_answer(self, device):
+        """The rows that were read are real: `Truncated` is a string beside them, not a
+        `NoAnswer` — the sampler must not count it towards giving up on the device."""
+        device(_rows([(f'1.3.6.1.2.1.2.2.1.10.{i}', str(i)) for i in range(1, 40)]))
+        _rows_, err = _walk(max_rows=5)
+        assert isinstance(err, str) and not isinstance(err, snmp_client.NoAnswer)
+
+
+# ── What a value IS, as the device sent it ───────────────────────────────────
+
+def _typed(pairs):
+    """One PDU carrying real pysnmp values — the type is the whole question here."""
+    return [(None, 0, 0, list(pairs))]
+
+
+class TestTextArrivesAsText:
+    """pyasn1 prints any octet outside printable ASCII as ``0x…`` hex. An interface alias
+    "Oficina Señor" or a storage "Memoria física" reached the panel as a string of digits —
+    as a row NAME, so the row key, the chart legend and the mark somebody put on it were all
+    the hex."""
+
+    ROOT = '1.3.6.1.2.1.31.1.1.1.18'
+
+    def test_a_utf8_name_is_its_text(self, device):
+        from pysnmp.proto import rfc1902                  # noqa: PLC0415
+        device(_typed([(f'{self.ROOT}.1', rfc1902.OctetString('Oficina Señor'.encode())),
+                       (f'{self.ROOT}.2', rfc1902.OctetString('Memoria física'.encode()))]))
+        rows, err = _walk(oid=self.ROOT)
+        assert err is None
+        assert rows == {'1': 'Oficina Señor', '2': 'Memoria física'}
+
+    def test_ascii_is_as_it_always_was(self, device):
+        from pysnmp.proto import rfc1902                  # noqa: PLC0415
+        device(_typed([(f'{self.ROOT}.1', rfc1902.OctetString(b'uplink'))]))
+        rows, _err = _walk(oid=self.ROOT)
+        assert rows == {'1': 'uplink'}
+
+    def test_a_mac_stays_the_hex_the_mac_spelling_is_made_from(self, device):
+        """`metrics.attribute` turns ``0x94103e692443`` into ``94:10:3e:69:24:43``. Six octets
+        are never decoded, so a MAC whose bytes happen to be valid UTF-8 is not three accented
+        letters either."""
+        from pysnmp.proto import rfc1902                  # noqa: PLC0415
+        device(_typed([(f'{self.ROOT}.1', rfc1902.OctetString(bytes.fromhex('94103e692443'))),
+                       (f'{self.ROOT}.2', rfc1902.OctetString(bytes.fromhex('c4a9c3a9c3a9')))]))
+        rows, _err = _walk(oid=self.ROOT)
+        assert rows == {'1': '0x94103e692443', '2': '0xc4a9c3a9c3a9'}
+
+    def test_binary_that_is_not_utf8_stays_hex(self, device):
+        from pysnmp.proto import rfc1902                  # noqa: PLC0415
+        device(_typed([(f'{self.ROOT}.1', rfc1902.OctetString(b'\xff\xfe\x00\x01abc'))]))
+        rows, _err = _walk(oid=self.ROOT)
+        assert rows['1'] == '0xfffe0001616263'
+
+    def test_an_address_is_still_dotted(self, device):
+        """`IpAddress` is an OctetString underneath; decoding its four octets as text would
+        turn 192.168.1.10 into control characters."""
+        from pysnmp.proto import rfc1902                  # noqa: PLC0415
+        device(_typed([(f'{self.ROOT}.1', rfc1902.IpAddress('192.168.1.10'))]))
+        rows, _err = _walk(oid=self.ROOT)
+        assert rows == {'1': '192.168.1.10'}
+
+    def test_the_end_of_the_mib_is_not_a_row(self, device):
+        """An agent with nothing past the column answers `endOfMibView` in the binding; filed
+        as a row it was an empty value under an index that does not exist."""
+        from pysnmp.proto import rfc1902, rfc1905         # noqa: PLC0415
+        device(_typed([(f'{self.ROOT}.1', rfc1902.OctetString(b'uplink')),
+                       (f'{self.ROOT}.2', rfc1905.EndOfMibView())]))
+        rows, _err = _walk(oid=self.ROOT)
+        assert rows == {'1': 'uplink'}

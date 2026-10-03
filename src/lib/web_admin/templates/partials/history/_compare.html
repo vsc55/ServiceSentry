@@ -67,6 +67,7 @@ function _historyAfterCompareChange() {
 async function _historyLoadCompare(soft = false) {
     const area = document.getElementById('history-chart-area');
     if (!area) return;
+    const seq = ++_historyLoadSeq;          // see _historyLoadChart: only the newest load paints
     if (!_historyCompareSel.length) { _historyShowPlaceholder(); return; }
     if (!soft) area.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
 
@@ -90,6 +91,7 @@ async function _historyLoadCompare(soft = false) {
             (_historyCompareField ? `&field=${encodeURIComponent(_historyCompareField)}` : '');
         return apiGet(url).then(res => ({ sel, res })).catch(() => ({ sel, res: null }));
     }));
+    if (seq !== _historyLoadSeq) return;    // a newer load superseded this one
     if (!soft || _historyCompareData.length !== results.length) {
         _historyCompareData = [];
     }

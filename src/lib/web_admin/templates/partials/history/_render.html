@@ -148,9 +148,15 @@ async function _historyLoadIndex() {
     _historyIndex = await apiGet('/api/v1/history/index') || [];
 }
 
+// Request sequence shared by _historyLoadChart and _historyLoadCompare: every load takes a
+// ticket and only the newest one may paint. Picking series B while A's request is still in
+// flight (or an auto-refresh tick racing a click) used to draw A's points under B's title.
+let _historyLoadSeq = 0;
+
 async function _historyLoadChart(soft = false) {
     const chartArea = document.getElementById('history-chart-area');
     if (!chartArea) return;
+    const seq = ++_historyLoadSeq;
     // Auto-refresh ticks pass soft=true: no spinner (avoid flicker) and a
     // transient fetch error keeps the current chart instead of wiping it.
     if (!soft) chartArea.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
@@ -159,6 +165,7 @@ async function _historyLoadChart(soft = false) {
         (_historyUid   ? `&uid=${encodeURIComponent(_historyUid)}`     : '') +
         (_historyField ? `&field=${encodeURIComponent(_historyField)}`  : '');
     const res = await apiGet(url);
+    if (seq !== _historyLoadSeq) return;    // a newer load superseded this one
     if (!res) { if (!soft) _historyShowPlaceholder(); return; }
 
     _historyPoints     = res.points || [];

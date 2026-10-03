@@ -14,6 +14,8 @@ from lib.config.spec import cfg_default, cfg_get
 from lib.core.constants import is_reserved_username
 from lib.core.uids import new_uid
 from lib.debug import DebugLevel
+from lib.providers.identity import binding_conflict, note_refusal
+from lib.providers.scim.service import remember_provisioning
 
 _HAS_SAML2 = False
 try:
@@ -129,11 +131,14 @@ def get_auth(wa, req):
 
 # ── User sync ─────────────────────────────────────────────────────────────────
 
-def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
+def sync_user(wa, name_id: str, saml_attrs: dict, name_id_format: str = '') -> dict | None:
     """Create or update user from SAML2 assertion attributes.
 
     Returns the user dict, or None if auto_create_users is False and the
-    user does not already exist.
+    user does not already exist, or the account is bound to another identity.
+
+    *name_id_format* matters to that last check: a TRANSIENT NameID is different on every
+    sign-in by design, so it cannot be compared with the stored one — only the provider is.
     """
     cfg            = _get_config(wa)
     auto_create    = cfg_get(cfg, 'saml2|auto_create_users')
@@ -198,7 +203,19 @@ def sync_user(wa, name_id: str, saml_attrs: dict) -> dict | None:
             wa._dbg(f"> Auth/SAML2 >> username {username!r} collides with a local account; "
                     f"refusing auto-conversion to SSO", DebugLevel.warning)
             return None
+        # Found by a NAME attribute; the NameID is the subject. An account bound to another
+        # subject or provider is refused (see lib.providers.identity).
+        transient = str(name_id_format or '').endswith(':transient')
+        conflict = binding_conflict(existing, 'saml2', None if transient else name_id)
+        if conflict:
+            wa._dbg(f"> Auth/SAML2 >> {username!r} is bound to another identity ({conflict}); "
+                    f"refusing to re-link it", DebugLevel.warning)
+            note_refusal(f'saml2_{conflict}')
+            return None
         user = existing
+        # Who provisioned it survives the re-link: SCIM must still be able to
+        # deprovision an account that has since signed in here.
+        remember_provisioning(user)
         user['auth_source']    = 'saml2'
         user['auth_source_id'] = name_id
         user['display_name']   = display_name or user.get('display_name', '')

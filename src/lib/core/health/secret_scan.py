@@ -57,15 +57,16 @@ def days_left(value, *, now: float) -> float | None:
     return None if ts is None else (ts - now) / 86400
 
 
-from lib.core.health import default_text as _default_text  # noqa: E402
+from lib.core.health import ScannerThread, default_text as _default_text  # noqa: E402
+from lib.core.health.alert_state import AlertState  # noqa: E402
 
 
-class SecretExpiryScanner:
+class SecretExpiryScanner(ScannerThread):
     """Warn (and optionally rotate) an Entra client secret before it expires."""
 
     def __init__(self, *, config_getter, dispatch, rotate_fn, save_fn,
                  is_leader=lambda: True, dbg=lambda *a, **k: None, text_fn=None,
-                 label: str = 'Entra ID (OIDC)'):
+                 label: str = 'Entra ID (OIDC)', state=None):
         self._config = config_getter      # () -> dict (the 'oidc' section)
         self._dispatch = dispatch         # (kind, **fields) -> None
         self._rotate = rotate_fn          # () -> {'secret', 'expires_at'}; raises on failure
@@ -74,7 +75,9 @@ class SecretExpiryScanner:
         self._dbg = dbg
         self._text = text_fn or _default_text
         self._label = label
-        self._alerted: str = ''           # last alerted severity ('' | 'expiring' | 'expired')
+        # last alerted severity, under the key 'oidc'. An AlertState over `health_alerts` when
+        # the host gives one: in memory it was lost on every restart / lease move.
+        self._alerted = state if state is not None else AlertState(scope='secret')
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -113,7 +116,7 @@ class SecretExpiryScanner:
                 if not secret:
                     raise RuntimeError('empty secret returned')
                 self._save(secret, expires_at)
-                self._alerted = ''                      # re-arm: the secret is fresh again
+                self._alerted.pop('oidc', None)         # re-arm: the secret is fresh again
                 report['rotated'] = True
                 new_days = days_left(expires_at, now=now)
                 self._dispatch(
@@ -129,12 +132,12 @@ class SecretExpiryScanner:
         # ── warning (once per severity) ───────────────────────────────────────────────
         if not notify or days > warn_days:
             if days > warn_days:
-                self._alerted = ''                      # renewed/healthy → re-arm
+                self._alerted.pop('oidc', None)         # renewed/healthy → re-arm
             return report
         sev = 'expired' if days <= 0 else 'expiring'
-        if self._alerted == sev:
+        if self._alerted.get('oidc') == sev:
             return report                               # already alerted at this severity
-        self._alerted = sev
+        self._alerted.set('oidc', sev, now)
         report['alert'] = sev
         try:
             msg = (self._text('notif_msg_secret_expired', self._label, f'{abs(days):.0f}')
@@ -150,12 +153,9 @@ class SecretExpiryScanner:
 
     # ── background loop ──────────────────────────────────────────────────────────
     def start(self, *, poll_getter=lambda: 86400) -> None:
-        if self._thread is not None:
-            return
-        self._stop.clear()
-
-        def _loop():
-            if self._stop.wait(45):        # first check shortly after boot
+        def _loop(stop_ev):
+            interval = 86400
+            if stop_ev.wait(45):           # first check shortly after boot
                 return
             while True:
                 try:
@@ -164,13 +164,11 @@ class SecretExpiryScanner:
                     pass
                 try:
                     interval = max(3600, int(poll_getter() or 86400))
-                except (TypeError, ValueError):
-                    interval = 86400
-                if self._stop.wait(interval):
+                except Exception:  # pylint: disable=broad-except
+                    # A bad value or a failed config read (DB down) keeps the last
+                    # interval; it must not end the thread.
+                    pass
+                if stop_ev.wait(interval):
                     return
 
-        self._thread = threading.Thread(target=_loop, name='secret-scan', daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
+        self._spawn('secret-scan', _loop)

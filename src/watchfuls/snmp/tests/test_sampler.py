@@ -555,7 +555,9 @@ class TestATableKeepsItsNames:
         dev = _Dev(walks={COUNTER['walk']: ({'1': '10', '2': '20'}, None),
                           COUNTER['index_label']: ({'1': 'eth0', '2': 'eth1'}, None)})
         res, _mon = env.run(_server(), dev)
-        assert set(res) == {'srv/eth0', 'srv/eth1'}
+        # `srv/metrics` is the device's own result, emitted whenever it answered: it is where
+        # the counter baselines live, and without it they were pruned every other cycle.
+        assert set(res) == {'srv/metrics', 'srv/eth0', 'srv/eth1'}
         assert res['srv/eth0']['other_data']['_row'] == 'eth0'
 
     def test_a_row_with_no_name_falls_back_to_its_index(self, env):
@@ -1369,3 +1371,331 @@ class TestWhatTheFailureMessageSays:
         line = next((s for s in said if 'unanswered' in s), '')
         assert line, said
         assert 'Name' in line and 'sys_name' not in line, line
+
+
+# ── Fixes from the SNMP audit ────────────────────────────────────────────────
+
+class _Registry:
+    """A device registry with one machine in it, nothing marked unless the test says so."""
+
+    def __init__(self, watched=()):
+        self._watched = set(watched)
+
+    def watch(self, _uid):
+        return set(self._watched)
+
+    def watch_roles(self, _uid):
+        return {}
+
+    def get(self, uid, **_kw):
+        return {'uid': uid, 'name': 'sw', 'address': '10.0.0.9', 'kind': 'local',
+                'os': 'auto', 'maintenance': False, 'profiles': {'snmp': {}},
+                'modules': [], 'watch': []}
+
+
+class _Clock:
+    """`time` for the sampler, moved by hand."""
+
+    def __init__(self, at=1_000_000.0):
+        self.at = at
+
+    def time(self):
+        return self.at
+
+
+UPTIME = '1.3.6.1.2.1.1.3.0'
+
+
+class TestTheDeviceRowIsAlwaysThere:
+    """The counter baselines live under `{srv}/metrics`, and that key was only a RESULT when
+    the device had a scalar metric. For a device that is all tables — disk I/O, a Synology's
+    volume I/O, a forwarding table — the entry was status-less, stored with status 0, read
+    back as a failed result nobody reported any more and pruned by the monitor: every other
+    cycle was a first cycle, and a phantom "down" row sat between them."""
+
+    def test_a_device_that_is_all_tables_still_has_its_own_result(self, env):
+        env.profile('p1', [COUNTER])
+        dev = _Dev(walks={COUNTER['walk']: ({'1': '1000'}, None),
+                          COUNTER['index_label']: ({'1': 'eth0'}, None)})
+        res, _mon = env.run(_server(), dev)
+        assert res['srv/metrics']['status'] is True, 'an answer is not a failure'
+
+    def test_it_says_how_much_was_read_and_invents_no_data(self, env):
+        env.profile('p1', [COUNTER, {'key': 'temp', 'walk': '1.3.6.1.9', 'kind': 'gauge',
+                                     'index_label': COUNTER['index_label']}])
+        dev = _Dev(walks={COUNTER['walk']: ({'1': '1000'}, None),
+                          '1.3.6.1.9': ({'1': '7'}, None),
+                          COUNTER['index_label']: ({'1': 'eth0'}, None)})
+        res, _mon = env.run(_server(), dev)
+        assert res['srv/metrics']['other_data'] == {}, 'no row data is invented for it'
+        assert '1' in res['srv/metrics']['message']
+
+    def test_the_baselines_survive_the_real_status_store(self, env):
+        """Against `DbBackedStatus` and the monitor's own prune — the two things that lost
+        them. Three cycles: the second AND the third are rates."""
+        import types                                                     # noqa: PLC0415
+        from lib.db import get_connector                                 # noqa: PLC0415
+        from lib.services.monitoring.check_state import (                # noqa: PLC0415
+            CheckStateStore, DbBackedStatus)
+        from lib.services.monitoring.monitor import Monitor              # noqa: PLC0415
+
+        env.profile('p1', [COUNTER])
+        st = DbBackedStatus(CheckStateStore(get_connector(None, default_sqlite_path=':memory:')))
+        mon = env.monitor(_server())
+        mon.status = st
+        rates = []
+        for cycle in range(1, 4):
+            st.read()
+            dev = _Dev(walks={COUNTER['walk']: ({'1': str(cycle * 1000)}, None),
+                              COUNTER['index_label']: ({'1': 'eth0'}, None)})
+            res, _m = env.run(_server(), dev, monitor=mon)
+            for key, r in res.items():                   # what the monitor records …
+                st.set_conf(['watchfuls.snmp', key, 'status'], r['status'])
+            Monitor._prune_orphan_status(types.SimpleNamespace(status=st),   # … and prunes
+                                         'watchfuls.snmp', types.SimpleNamespace(keys=res.keys))
+            st.save_module('watchfuls.snmp')
+            rates.append('if_in' in res['srv/eth0']['other_data'])
+        assert rates == [False, True, True], f'baselines lost between cycles: {rates}'
+
+
+class TestACutTableIsNotTheWholeTable:
+    """A walk stopped at 512 rows said nothing, so the sightings store — which REPLACES what
+    it holds — got a partial forwarding table every cycle and every MAC past the cut vanished
+    from the map."""
+
+    FDB = {'key': 'fdb_port', 'walk': '1.3.6.1.2.1.17.4.3.1.2', 'kind': 'text',
+           'index_label': '1.3.6.1.2.1.17.4.3.1.1', 'evidence': 'fdb'}
+
+    def _run(self, env, walked, err):
+        from lib.core.infra.evidence import EvidenceStore                # noqa: PLC0415
+        from lib.db import get_connector                                 # noqa: PLC0415
+        env.profile('p1', [self.FDB])
+        srv = _server(device_uid='sw1')
+        mon = env.monitor(srv)
+        mon._devices_store = _Registry()
+        # A file and not `:memory:`: the sampler writes from its own thread, and an in-memory
+        # SQLite database is one per connection.
+        mon.db = get_connector(None, default_sqlite_path=f'{env.dir_var}/evidence.db')
+        store = EvidenceStore(mon.db)
+        store.replace('sw1', 'fdb', {'0xaa': '1', '0xbb': '2', '0xcc': '3'})
+        dev = _Dev(walks={self.FDB['walk']: (walked, err),
+                          self.FDB['index_label']: ({k: f'0x{k}' for k in walked}, None)})
+        env.run(srv, dev, monitor=mon)
+        return store.by_device('fdb').get('sw1', {})
+
+    def test_a_cut_walk_leaves_what_was_stored(self, env):
+        from lib.core.snmp.client import Truncated                      # noqa: PLC0415
+        kept = self._run(env, {'aa': '1'}, Truncated('more than 1 rows'))
+        assert set(kept) == {'0xaa', '0xbb', '0xcc'}, 'half a table replaced the whole one'
+
+    def test_a_whole_walk_still_replaces_it(self, env):
+        """Absence is information: a MAC that aged out is a machine no longer on that port."""
+        kept = self._run(env, {'aa': '1'}, None)
+        assert set(kept) == {'0xaa'}
+
+    def test_a_sightings_walk_asks_for_more_than_the_default(self, env):
+        from lib.core.snmp.client import SnmpClient                     # noqa: PLC0415
+        from lib.core.snmp.sampler import EVIDENCE_MAX_ROWS             # noqa: PLC0415
+        seen = []
+
+        class _Sized(_Dev):
+            def walk(self, **kw):
+                seen.append((kw['oid'], kw.get('max_rows')))
+                return super().walk(**kw)
+
+        env.profile('p1', [self.FDB])
+        dev = _Sized(walks={self.FDB['walk']: ({'aa': '1'}, None),
+                            self.FDB['index_label']: ({'aa': '0xaa'}, None)})
+        env.run(_server(), dev)
+        assert EVIDENCE_MAX_ROWS > SnmpClient.WALK_MAX_ROWS
+        assert dict(seen) == {self.FDB['walk']: EVIDENCE_MAX_ROWS,
+                              self.FDB['index_label']: EVIDENCE_MAX_ROWS}
+
+    def test_a_metric_can_say_its_own(self, env):
+        seen = []
+
+        class _Sized(_Dev):
+            def walk(self, **kw):
+                seen.append(kw.get('max_rows'))
+                return super().walk(**kw)
+
+        env.profile('p1', [{**COUNTER, 'max_rows': 3000}])
+        env.run(_server(), _Sized(walks={COUNTER['walk']: ({'1': '1'}, None)}))
+        assert seen and set(seen) == {3000}
+
+    def test_an_ordinary_metric_keeps_the_default(self, env):
+        seen = []
+
+        class _Sized(_Dev):
+            def walk(self, **kw):
+                seen.append('max_rows' in kw)
+                return super().walk(**kw)
+
+        env.profile('p1', [COUNTER])
+        env.run(_server(), _Sized(walks={COUNTER['walk']: ({'1': '1'}, None)}))
+        assert seen and not any(seen)
+
+
+class TestARebootIsNotTraffic:
+    """A 32-bit counter that went backwards on a reboot was read as a wrap: up to 4 GiB
+    added back and charted as one interval's traffic, on every 32-bit counter of the box.
+    The device's own `sysUpTime` says which it was."""
+
+    def _cycles(self, env, first, second, up1, up2, gap=300.0):
+        env.profile('p1', [COUNTER])
+        mon = env.monitor(_server())
+        clock = _Clock()
+        out = []
+        for value, up in ((first, up1), (second, up2)):
+            gets = {UPTIME: (str(up), None)} if up is not None else {}
+            dev = _Dev(gets=gets, walks={COUNTER['walk']: ({'1': str(value)}, None),
+                                         COUNTER['index_label']: ({'1': 'eth0'}, None)})
+            with patch('watchfuls.snmp.sampler.time', clock):
+                res, _m = env.run(_server(), dev, monitor=mon)
+            out.append(res['srv/eth0']['other_data'])
+            clock.at += gap
+        return out
+
+    def test_a_counter_reset_by_a_reboot_is_a_baseline(self, env):
+        # Ten days up, 4 000 000 000 octets in; five minutes later: 2 minutes up, 1 000 in.
+        _first, second = self._cycles(env, 4_000_000_000, 1_000, 86_400_000, 12_000)
+        assert 'if_in' not in second, f'a reboot was charted as {second.get("if_in")} B/s'
+
+    def test_a_wrap_on_a_box_that_kept_running_is_still_a_wrap(self, env):
+        _first, second = self._cycles(env, 2 ** 32 - 3_000, 27_000, 86_400_000, 86_430_000)
+        assert second['if_in'] == 100
+
+    def test_a_device_that_serves_no_uptime_keeps_the_width_rule(self, env):
+        _first, second = self._cycles(env, 2 ** 32 - 3_000, 27_000, None, None)
+        assert second['if_in'] == 100
+
+    def test_the_uptime_is_asked_once_and_only_when_a_counter_answered(self, env):
+        env.profile('p1', [COUNTER, COUNTER_OUT])
+        dev = _Dev(gets={UPTIME: ('100', None)},
+                   walks={COUNTER['walk']: ({'1': '1'}, None),
+                          COUNTER_OUT['walk']: ({'1': '1'}, None),
+                          COUNTER['index_label']: ({'1': 'eth0'}, None)})
+        env.run(_server(), dev)
+        assert dev.asked.count(('get', UPTIME)) == 1
+
+    def test_a_device_with_no_counters_is_not_asked(self, env):
+        env.profile('p1', [GAUGE])
+        dev = _Dev(gets={GAUGE['oid']: ('41', None), UPTIME: ('100', None)})
+        env.run(_server(), dev)
+        assert ('get', UPTIME) not in dev.asked
+
+
+class TestTwoRowsWithOneName:
+    """Rows were keyed by their name alone. Two the device calls the same thing — two `eth0`s
+    in two namespaces, a switch whose ports all say "Ethernet Interface" — shared one key, and
+    one row's counter was differentiated against the other's."""
+
+    NAMES = {'1': 'eth0', '2': 'eth0', '3': 'eth1'}
+
+    def test_they_are_two_rows(self, env):
+        env.profile('p1', [COUNTER])
+        dev = _Dev(walks={COUNTER['walk']: ({'1': '1', '2': '2', '3': '3'}, None),
+                          COUNTER['index_label']: (self.NAMES, None)})
+        res, _mon = env.run(_server(), dev)
+        assert {'srv/eth0', 'srv/eth0_2', 'srv/eth1'} <= set(res)
+        assert res['srv/eth0_2']['other_data']['_row'] == 'eth0 (2)'
+
+    def test_each_keeps_its_own_baseline(self, env):
+        env.profile('p1', [COUNTER])
+        mon = env.monitor(_server())
+        clock = _Clock()
+        for walked in ({'1': '1000', '2': '9000000'}, {'1': '4000', '2': '9003000'}):
+            dev = _Dev(walks={COUNTER['walk']: (walked, None),
+                              COUNTER['index_label']: (self.NAMES, None)})
+            with patch('watchfuls.snmp.sampler.time', clock):
+                res, _m = env.run(_server(), dev, monitor=mon)
+            clock.at += 30
+        assert res['srv/eth0']['other_data']['if_in'] == 100
+        assert res['srv/eth0_2']['other_data']['if_in'] == 100
+
+    def test_every_metric_of_the_table_agrees_which_is_which(self, env):
+        """Decided from the NAMING column, so a metric missing the first `eth0` still files
+        the second one where the other metrics do."""
+        env.profile('p1', [COUNTER, COUNTER_OUT])
+        dev = _Dev(walks={COUNTER['walk']: ({'1': '1', '2': '2'}, None),
+                          COUNTER_OUT['walk']: ({'2': '5'}, None),
+                          COUNTER['index_label']: (self.NAMES, None)})
+        clock = _Clock()
+        mon = env.monitor(_server())
+        for _ in range(2):
+            with patch('watchfuls.snmp.sampler.time', clock):
+                res, _m = env.run(_server(), dev, monitor=mon)
+            clock.at += 10
+        assert 'if_out' in res['srv/eth0_2']['other_data']
+        assert 'if_out' not in res['srv/eth0']['other_data']
+
+    def test_a_table_with_no_repeats_is_filed_as_before(self, env):
+        env.profile('p1', [COUNTER])
+        dev = _Dev(walks={COUNTER['walk']: ({'1': '1', '3': '3'}, None),
+                          COUNTER['index_label']: (self.NAMES, None)})
+        res, _mon = env.run(_server(), dev)
+        assert {'srv/eth0', 'srv/eth1'} <= set(res)
+
+
+class TestEachReadingIsTimedWhenItArrives:
+    """One timestamp for the whole cycle, taken before the first walk. A Synology with two
+    dozen profiles is minutes of walks, and the readings of a late profile were divided by an
+    interval that was not theirs."""
+
+    def test_a_late_metric_carries_its_own_time(self, env):
+        clock = _Clock()
+
+        class _Slow(_Dev):
+            def walk(self, **kw):
+                if kw['oid'] == COUNTER_OUT['walk']:
+                    clock.at += 120                  # two minutes of walking before it
+                return super().walk(**kw)
+
+        env.profile('p1', [COUNTER, COUNTER_OUT])
+        mon = env.monitor(_server())
+        dev = _Slow(walks={COUNTER['walk']: ({'1': '1'}, None),
+                           COUNTER_OUT['walk']: ({'1': '1'}, None),
+                           COUNTER['index_label']: ({'1': 'eth0'}, None)})
+        with patch('watchfuls.snmp.sampler.time', clock):
+            env.run(_server(), dev, monitor=mon)
+        kept = mon.status.get_conf(
+            ['watchfuls.snmp', 'srv/metrics', 'module_state', 'snmp_prev'], {})
+        assert kept['eth0']['if_out']['t'] - kept['eth0']['if_in']['t'] == 120
+
+
+class TestARowRenamedByTheDecodingKeepsWhatItHad:
+    """A walk now hands back "Oficina Señor" where it used to hand back `0x4f66…`. The row
+    key changes with it — and a mark somebody put on the row, and the counter baseline kept
+    under it, are filed under the hex."""
+
+    NAME = 'Oficina Señor'
+    HEX = '0x' + NAME.encode().hex()
+
+    def test_a_mark_on_the_hex_name_still_marks_the_row(self, env):
+        port = {'key': 'if_oper', 'walk': '1.2.3', 'kind': 'gauge', 'verdict': False,
+                'index_label': '1.2.4',
+                'states': {'2': {'label': 'Down', 'level': 'bad'}}}
+        env.profile('p1', [port])
+        srv = _server(device_uid='h1')
+        mon = env.monitor(srv)
+        mon._devices_store = _Registry({'snmp' + chr(0) + self.HEX})
+        dev = _Dev(walks={'1.2.3': ({'1': '2'}, None), '1.2.4': ({'1': self.NAME}, None)})
+        res, _m = env.run(srv, dev, monitor=mon)
+        row = res['srv/Oficina_Se_or']
+        assert row['status'] is False and row['other_data'].get('_watched') is True
+
+    def test_the_baseline_under_the_hex_key_is_carried_over(self, env):
+        env.profile('p1', [COUNTER])
+        mon = env.monitor(_server())
+        clock = _Clock()
+        mon.status.set_conf(['watchfuls.snmp', 'srv/metrics', 'module_state', 'snmp_prev'],
+                            {self.HEX: {'if_in': {'v': 1000.0, 't': clock.at - 10}}})
+        dev = _Dev(walks={COUNTER['walk']: ({'1': '2000'}, None),
+                          COUNTER['index_label']: ({'1': self.NAME}, None)})
+        with patch('watchfuls.snmp.sampler.time', clock):
+            res, _m = env.run(_server(), dev, monitor=mon)
+        assert res['srv/Oficina_Se_or']['other_data']['if_in'] == 100
+        kept = mon.status.get_conf(
+            ['watchfuls.snmp', 'srv/metrics', 'module_state', 'snmp_prev'], {})
+        assert 'if_in' not in (kept.get(self.HEX) or {}), (
+            'the old baseline was copied instead of moved')

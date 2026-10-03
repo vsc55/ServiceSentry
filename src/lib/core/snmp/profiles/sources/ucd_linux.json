@@ -192,6 +192,7 @@
             "unit": "core",
             "scale": 0.01,
             "width": 32,
+            "max_rate": 100000,
             "chart": "line"
         },
         {
@@ -205,6 +206,7 @@
             "unit": "core",
             "scale": 0.01,
             "width": 32,
+            "max_rate": 100000,
             "chart": "line"
         },
         {
@@ -218,6 +220,7 @@
             "unit": "core",
             "scale": 0.01,
             "width": 32,
+            "max_rate": 100000,
             "chart": "line"
         },
         {
@@ -231,6 +234,7 @@
             "unit": "core",
             "scale": 0.01,
             "width": 32,
+            "max_rate": 100000,
             "chart": "line"
         },
         {

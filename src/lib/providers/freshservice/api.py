@@ -42,8 +42,12 @@ persona a mirar el que no es.
 
 from __future__ import annotations
 
+import logging
+
 #: La versión que se llama. Existe una v1 y está documentada aparte; esto es v2 en todas partes.
 API_VERSION = 'v2'
+
+_log = logging.getLogger(__name__)
 
 #: El único sufijo por el que responde. Un CNAME propio de la casa resuelve, contesta, y no es
 #: esto: la documentación lo dice con todas las letras.
@@ -318,7 +322,7 @@ def page_all(sess, host: str, path: str, key: str, params=None, per_page: int = 
     página 500 que ellos mismos piden no pasar. Sin el tercero, un servidor que conteste siempre
     la misma página deja la petición dando vueltas para siempre.
     """
-    fuera: list = []
+    fuera = Paged()
     for pagina in range(1, DEEP_PAGE_LIMIT + 1):
         consulta = dict(params or {}, page=pagina, per_page=min(int(per_page), PER_PAGE_MAX))
         cuerpo, cabeceras = get(sess, host, path, consulta)
@@ -328,4 +332,16 @@ def page_all(sess, host: str, path: str, key: str, params=None, per_page: int = 
         fuera.extend(trozo)
         if not has_next(cabeceras) or len(trozo) < min(int(per_page), PER_PAGE_MAX):
             break
+    else:
+        # El tope, alcanzado con páginas todavía por delante. Callarlo era devolver una lista
+        # CORTA como si fuera la entera — y quien la usa para decir «esto ya no está allí»
+        # (los huérfanos) lo diría de todo lo que no llegó.
+        fuera.truncated = True
+        _log.warning('Freshservice %s: stopped at the %d-page limit with more pages left; '
+                     'the list is incomplete', path, DEEP_PAGE_LIMIT)
     return fuera
+
+
+class Paged(list):
+    """Una lista que además dice si se cortó en el tope de páginas (`truncated`)."""
+    truncated = False

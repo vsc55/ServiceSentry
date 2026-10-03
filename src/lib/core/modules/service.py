@@ -15,6 +15,7 @@ secret restore, persistence and audit. Most of it is pure over plain dicts and r
 
 from __future__ import annotations
 
+import copy
 import importlib
 import os
 import sys
@@ -27,6 +28,23 @@ def visible_modules(all_data: dict, perms) -> dict:
     """The subset of *all_data* the user may view via per-module ``module.{name}.view``
     permissions (used when the user lacks the global ``modules_view``)."""
     return {n: c for n, c in all_data.items() if f'module.{n}.view' in perms}
+
+
+def keep_unseen_modules(old_data: dict, data: dict, perms) -> list:
+    """Put back, in place, every stored module the user may not view and *data* left out.
+
+    The GET serves a scoped user only :func:`visible_modules`, and the save REPLACES the whole
+    configuration with what comes back — so the modules they were never shown arrived as
+    deleted, and authorising that removal failed every save. Absent-and-unseen means
+    untouched; a module the body DOES name is left to the authorisation like any other.
+    Returns the names restored."""
+    kept = []
+    for name, cfg in (old_data or {}).items():
+        if name in data or f'module.{name}.view' in perms:
+            continue
+        data[name] = copy.deepcopy(cfg)
+        kept.append(name)
+    return kept
 
 
 def validate_modules_shape(data: dict) -> None:

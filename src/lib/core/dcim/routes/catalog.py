@@ -623,7 +623,7 @@ def register(app, wa, C):
         if 'kit_qty' in data:
             try:
                 fuera['kit_qty'] = max(1, int(float(data.get('kit_qty') or 1)))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 fuera['kit_qty'] = 1
         elif not parcial:
             fuera['kit_qty'] = 1
@@ -631,7 +631,7 @@ def register(app, wa, C):
             try:
                 fuera['u_tenths'] = max(0, int(round(float(
                     data.get('u_tenths', float(data.get('u_height') or 0) * 10)))))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 pass
         elif not parcial:
             fuera['u_tenths'] = 10

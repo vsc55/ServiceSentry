@@ -238,8 +238,8 @@ class HistoryStore(BaseStore):
 
     # ── The series ────────────────────────────────────────────────────────────
 
-    def _touch_series(self, sid: int, identidad: dict, ts: float,
-                      status: bool, medidas: str) -> None:
+    def _touch_series(self, sid: int, ident: tuple, identidad: dict, ts: float,
+                      status: bool, medidas: str) -> int | None:
         """Guardar en la serie lo que la fila ES, cuándo se la vio y en qué estado queda.
 
         La identidad se escribe **sólo cuando cambia**: es lo mismo en muestra tras muestra
@@ -253,6 +253,11 @@ class HistoryStore(BaseStore):
 
         El COALESCE no es adorno: una serie creada por `series_id` todavía no tiene contador, y
         sumar uno a NULL da NULL en los tres motores.
+
+        Returns the rows updated — 0 means *sid* is no longer this series (another process
+        deleted it, or a restore refilled the table under it) — or ``None`` when the UPDATE
+        itself failed. The WHERE carries ``(module, key)`` besides the id so that an id the
+        engine handed out again to a different series also reads as 0, not as a hit.
         """
         crudo = json.dumps(identidad, ensure_ascii=False, sort_keys=True) if identidad else ''
         resumen = ('samples = COALESCE(samples, 0) + 1, '
@@ -260,17 +265,20 @@ class HistoryStore(BaseStore):
                    'last_status = ?, last_data = ?, '
                    'last_ts = ?, first_ts = COALESCE(first_ts, ?)')
         datos = (1 if status else 0, 1 if status else 0, medidas, ts, ts)
+        donde = f'WHERE id = ? AND module = ? AND {self._qk} = ?'
+        clave = (sid, ident[0], ident[1])
         try:
             if self._series_attrs.get(sid) == crudo:
-                self._db.execute(
-                    f'UPDATE {_TS} SET {resumen} WHERE id = ?', datos + (sid,))
-                return
-            self._db.execute(
-                f'UPDATE {_TS} SET attrs = ?, {resumen} WHERE id = ?',
-                (crudo or None,) + datos + (sid,))
-            self._series_attrs[sid] = crudo
+                return self._db.execute(
+                    f'UPDATE {_TS} SET {resumen} {donde}', datos + clave)
+            n = self._db.execute(
+                f'UPDATE {_TS} SET attrs = ?, {resumen} {donde}',
+                (crudo or None,) + datos + clave)
+            if n:
+                self._series_attrs[sid] = crudo
+            return n
         except Exception:  # pylint: disable=broad-except
-            pass
+            return None
 
     def _find_series(self, module: str, key: str, item_uid: str | None = None):
         """El id de una serie **sin crearla**, para quien lee. ``None`` si no existe.
@@ -394,7 +402,19 @@ class HistoryStore(BaseStore):
         # por serie —1.465 en una instalación real—, no una por muestra. Lo que no se puede
         # repetir cinco millones de veces se puede guardar mil veces sin pensarlo.
         crudo = json.dumps(medidas, ensure_ascii=False)
+        ident = (str(module or ''), str(key or ''))
         try:
+            if sid and self._touch_series(sid, ident, identidad, now, status, crudo) == 0:
+                # The id this process remembers is not this series any more: the web deleted
+                # it (or emptied the history, or a restore refilled the table) and only ITS
+                # cache was cleared. Writing on would file every new sample under a series
+                # that does not exist — invisible until a restart. So the caches go (field
+                # ids too: emptying the history empties the field dictionary with it) and
+                # the series is resolved again, which creates it afresh.
+                self._forget_series()
+                sid = self.series_id(module, key, item_uid=item_uid)
+                if sid:
+                    self._touch_series(sid, ident, identidad, now, status, crudo)
             self._db.execute(
                 f'INSERT INTO {_T}(ts, item_uid, status, series_id) '
                 'VALUES(?, ?, ?, ?)',
@@ -405,7 +425,6 @@ class HistoryStore(BaseStore):
                 # muestra: una muestra sin sus medidas sería un punto en la gráfica sin nada
                 # que dibujar, y las dos escrituras tienen que vivir o morir juntas.
                 self.facts.write(sid, now, medidas)
-                self._touch_series(sid, identidad, now, status, crudo)
             self._db.commit()
         except Exception as exc:  # pylint: disable=broad-except
             import sys  # noqa: PLC0415
@@ -728,6 +747,14 @@ class HistoryStore(BaseStore):
                 return k
         return None
 
+    def forget_cache(self) -> None:
+        """Forget the series and field ids this process remembers.
+
+        For whoever replaced the tables under it — a backup restore empties and refills
+        `history_series` and `history_field` with a plain DELETE/INSERT, and an id remembered
+        from before points a new sample at a row that is now another series, or none.
+        """
+        self._forget_series()
 
 
 # ── Module-level helpers ──────────────────────────────────────────────────────

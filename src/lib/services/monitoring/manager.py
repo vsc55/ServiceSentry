@@ -142,11 +142,32 @@ class _MonitoringMixin:
 
         An env var (SS_CHECK_INTERVAL) overrides the saved value and wins — so the
         embedded scheduler honours it in the monolithic Docker mode."""
-        ov = getattr(self, '_env_override_values', {}).get('monitoring|timer_check')
-        if ov is not None:
-            return max(10, int(ov))
-        cfg = self._read_config_file(self._CONFIG_FILE) or {}
-        return max(10, cfg_get(cfg.get('monitoring', {}), 'monitoring|timer_check', falsy=True))
+        try:
+            ov = getattr(self, '_env_override_values', {}).get('monitoring|timer_check')
+            if ov is not None:
+                value = max(10, int(ov))
+            else:
+                cfg = self._read_config_file(self._CONFIG_FILE) or {}
+                value = max(10, int(cfg_get(cfg.get('monitoring', {}),
+                                            'monitoring|timer_check', falsy=True)))
+        except Exception as exc:  # pylint: disable=broad-except
+            # Read on the scheduler and heartbeat threads: a config read that fails
+            # (DB down) must not kill them. Keep the last value that was read, or the
+            # registry default before any read succeeded.
+            value = getattr(self, '_monitoring_interval_last', None)
+            if value is None:
+                from lib.config.spec import cfg_default   # noqa: PLC0415
+                value = max(10, int(cfg_default('monitoring|timer_check') or 300))
+            dbg = getattr(self, '_dbg', None)
+            if dbg is not None:
+                try:
+                    dbg(f'> Monitor >> interval read failed ({exc}); using {value}s',
+                        DebugLevel.error)
+                except Exception:  # pylint: disable=broad-except
+                    pass
+            return value
+        self._monitoring_interval_last = value
+        return value
 
     @property
     def _monitoring_seconds_until_next(self) -> int | None:
@@ -218,6 +239,9 @@ class _MonitoringMixin:
         instance that hosts the monitor (embedded here or a remote worker), so the
         UI can trigger it regardless of where monitoring lives."""
         if action == 'run_now':
+            # Only the lease holder runs cycles: a standby's monitor state is stale.
+            if hasattr(self, '_work_allowed') and not self._work_allowed():
+                return False, 'not_leader'
             # Don't overlap with the scheduler / an on-demand check.
             if not self._check_lock.acquire(blocking=False):
                 return False, 'busy'

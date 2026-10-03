@@ -16,6 +16,33 @@ be able to take a page down with it.
 class _ScannersMixin:
     """Background scanners for :class:`WebAdmin`."""
 
+    def _hold_scanner_lease(self, key: str, inst_id: str) -> None:
+        """Remember which lease a scanner takes, so :meth:`stop_background` can give it back."""
+        held = getattr(self, '_scanner_leases', None)
+        if held is None:
+            held = self._scanner_leases = {}
+        held[key] = inst_id
+
+    def _scan_every(self, section: str, key: str, default: int, floor: int) -> int:
+        """A scanner's interval in seconds, as its loop reads it (never below *floor*)."""
+        try:
+            return max(floor, int(self._config_section(section).get(key) or default))
+        except (TypeError, ValueError):
+            return default
+
+    def _alert_state(self, scope: str):
+        """What an expiry scanner has already announced, kept in ``health_alerts`` so a
+        restart or a lease move does not announce it all again. In memory when the table
+        cannot be built (no connector)."""
+        from lib.core.health.alert_state import AlertState  # noqa: PLC0415
+        db = getattr(self, '_db_connector', None)
+        if db is not None:
+            try:
+                return AlertState(db, scope=scope)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        return AlertState(scope=scope)
+
     def _start_service_health_monitor(self) -> None:
         """Launch the background service-health notifier (emits service_down / service_up
         on heartbeat transitions).  Leader-gated so replicas don't double-alert; a no-op
@@ -31,6 +58,7 @@ class _ScannersMixin:
         from lib.services.heartbeat import hostname  # noqa: PLC0415
         from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
         _inst_id = f'health-{hostname()}-{_os.getpid()}'
+        self._hold_scanner_lease('svc_health', _inst_id)
 
         def _is_leader():
             ls = getattr(self, '_service_leader_store', None)
@@ -71,6 +99,7 @@ class _ScannersMixin:
         from lib.services.heartbeat import hostname  # noqa: PLC0415
         from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
         _inst_id = f'certscan-{hostname()}-{_os.getpid()}'
+        self._hold_scanner_lease('cert_scan', _inst_id)
 
         def _device_address(uid):
             store = getattr(self, '_devices_store', None)
@@ -91,8 +120,13 @@ class _ScannersMixin:
             ls = getattr(self, '_service_leader_store', None)
             if ls is None:
                 return True
+            # The lease is renewed once per scan, so it must outlive the interval between two
+            # (it was a flat hour against a daily scan: every replica took its turn, each with
+            # its own idea of what had already been said).
+            every = self._scan_every('certs', 'scan_every_secs', 86400, 3600)
             try:
-                return bool(ls.try_acquire('cert_scan', _inst_id, host=hostname(), ttl=3600))
+                return bool(ls.try_acquire('cert_scan', _inst_id, host=hostname(),
+                                           ttl=every * 3))
             except Exception:  # pylint: disable=broad-except
                 return True
 
@@ -106,6 +140,7 @@ class _ScannersMixin:
             is_leader=_is_leader,
             dbg=self._dbg,
             text_fn=self._notify_text,
+            state=self._alert_state('cert'),
         )
         self._cert_scanner.start(
             poll_getter=lambda: self._config_section('certs').get('scan_every_secs', 86400))
@@ -131,6 +166,7 @@ class _ScannersMixin:
         from lib.services.heartbeat import hostname  # noqa: PLC0415
         from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
         _inst_id = f'cablescan-{hostname()}-{_os.getpid()}'
+        self._hold_scanner_lease('cable_scan', _inst_id)
 
         def _check():
             """Lo mismo que la pestaña de cableado, pero de TODA la instalación.
@@ -226,13 +262,16 @@ class _ScannersMixin:
         from lib.services.heartbeat import hostname  # noqa: PLC0415
         from lib.core.notify.notification_dispatcher import dispatch as _dispatch  # noqa: PLC0415,E501
         _inst_id = f'secretscan-{hostname()}-{_os.getpid()}'
+        self._hold_scanner_lease('secret_scan', _inst_id)
 
         def _is_leader():
             ls = getattr(self, '_service_leader_store', None)
             if ls is None:
                 return True
+            every = self._scan_every('certs', 'scan_every_secs', 86400, 3600)
             try:
-                return bool(ls.try_acquire('secret_scan', _inst_id, host=hostname(), ttl=3600))
+                return bool(ls.try_acquire('secret_scan', _inst_id, host=hostname(),
+                                           ttl=every * 3))
             except Exception:  # pylint: disable=broad-except
                 return True
 
@@ -264,6 +303,7 @@ class _ScannersMixin:
             is_leader=_is_leader,
             dbg=self._dbg,
             text_fn=self._notify_text,
+            state=self._alert_state('secret'),
         )
         self._secret_scanner.start(
             poll_getter=lambda: self._config_section('certs').get('scan_every_secs', 86400))
@@ -272,7 +312,11 @@ class _ScannersMixin:
         """Stop every thread the panel started on its own: the scanners and the backup runner.
 
         Each loop holds the instance through its closures, so an instance whose threads are
-        left running is never freed. Safe to call twice and on a half-built instance."""
+        left running is never freed. Safe to call twice and on a half-built instance.
+
+        The references are dropped (the ``_start_*`` guards test them, so keeping them made a
+        restart impossible) and the scanners' leases are given back, so another replica takes
+        over now instead of when the lease runs out."""
         for name in ('_service_health', '_cert_scanner', '_cable_scanner', '_secret_scanner',
                      '_backup_runner'):
             worker = getattr(self, name, None)
@@ -282,3 +326,13 @@ class _ScannersMixin:
                 worker.stop()
             except Exception:  # pylint: disable=broad-except
                 pass
+            setattr(self, name, None)
+        held = getattr(self, '_scanner_leases', None) or {}
+        self._scanner_leases = {}
+        ls = getattr(self, '_service_leader_store', None)
+        if ls is not None:
+            for key, inst_id in held.items():
+                try:
+                    ls.release(key, inst_id)
+                except Exception:  # pylint: disable=broad-except
+                    pass

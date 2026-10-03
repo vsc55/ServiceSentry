@@ -75,7 +75,22 @@ def provision_device_decl(modules_dir: str, module_name: str) -> dict | None:
     return None
 
 
-def sync_provisioned_devices(devices_store, modules_dir: str, data: dict, actor: str) -> list:
+def _old_item(old_data, mod_key, coll, key):
+    """The stored version of an item (by module key, either spelling), or None."""
+    if not isinstance(old_data, dict):
+        return None
+    bare = str(mod_key).split('.')[-1]
+    for mk in (mod_key, bare, f'watchfuls.{bare}'):
+        mod = old_data.get(mk)
+        items = mod.get(coll) if isinstance(mod, dict) else None
+        item = items.get(key) if isinstance(items, dict) else None
+        if isinstance(item, dict):
+            return item
+    return None
+
+
+def sync_provisioned_devices(devices_store, modules_dir: str, data: dict, actor: str,
+                             old_data: dict | None = None, may_edit_device=None) -> list:
     """Auto-provision/link a device for every module item that declares one (mutates *data*
     in place).  **Writes** to *devices_store* (the one persisting function here — the store is
     injected explicitly, not reached through ``wa``).
@@ -96,7 +111,17 @@ def sync_provisioned_devices(devices_store, modules_dir: str, data: dict, actor:
     Returns the list of links established this call
     (``[{module, collection, item, field, uid}]``) so the caller can round-trip them to the
     client (which holds no ``link_field`` for a just-created device).  Best-effort: failures are
-    swallowed so they never block saving the config."""
+    swallowed so they never block saving the config.
+
+    The link is followed only into a device this item ALREADY linked (the ``link_field`` it has
+    in *old_data*) or one the caller may edit (*may_edit_device(uid)*) — see
+    :func:`lib.core.modules.authz.may_follow_provision_link`. Following whatever uid the client
+    put in the hidden field rewrote the address of ANY device, SSH secrets and all, so the
+    scheduler then sent those secrets to the address the client chose. A link that may not be
+    followed is dropped and the item provisions its own device. Adopting a device by name is
+    held to the same rule whenever adopting it would move its address. *may_edit_device*
+    ``None`` trusts every link (the caller has already authorised the write as a whole)."""
+    from lib.core.modules.authz import may_follow_provision_link  # noqa: PLC0415
     if devices_store is None or not modules_dir:
         return []
     from lib.core.devices.service import _create_unique_device  # noqa: PLC0415
@@ -120,6 +145,12 @@ def sync_provisioned_devices(devices_store, modules_dir: str, data: dict, actor:
             if not addr:
                 continue
             uid = str(item.get(link_f) or '').strip()
+            if uid and may_edit_device is not None:
+                old_link = str((_old_item(old_data, mod_key, coll, key) or {}).get(link_f)
+                               or '').strip()
+                if not may_follow_provision_link(old_link, uid, may_edit_device):
+                    item.pop(link_f, None)
+                    uid = ''
             try:
                 device = devices_store.get(uid) if uid else None
                 if device:
@@ -134,6 +165,10 @@ def sync_provisioned_devices(devices_store, modules_dir: str, data: dict, actor:
                     existing = devices_store.get_by_name(hostname)
                 except Exception:  # pylint: disable=broad-except
                     existing = None
+                if (existing and existing.get('uid') and may_edit_device is not None
+                        and str(existing.get('address') or '').strip() != addr
+                        and not may_edit_device(existing['uid'])):
+                    existing = None     # not ours to move: provision a device of its own
                 if existing and existing.get('uid'):
                     new_uid = existing['uid']
                     if str(existing.get('address') or '').strip() != addr:

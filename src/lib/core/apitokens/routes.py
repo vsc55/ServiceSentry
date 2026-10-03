@@ -611,9 +611,14 @@ def register(app, wa):
     def api_token_rotate_any(uid: str):
         """A new secret for somebody else's token, with the old one still working.
 
-        No scope changes here, so there is nothing to grant and the caller's own permissions do
-        not come into it — only the hierarchy, which decides whose credentials you may touch at
-        all. The lifetime carried over is the original SPAN, exactly as on your own.
+        The scope does not change, but the caller walks away holding the secret — so rotating
+        is minting, as far as the caller's own permissions go, and the same two rules apply:
+        the hierarchy decides whose credentials you may touch at all, and the token's scope
+        must be one the caller could have minted (`'*'` only for an administrator, a list only
+        within the caller's own set). Without the second rule, `users_edit` alone was a way to
+        take over any non-admin account's wider token: rotate it, receive the new secret, use
+        it. An administrator holds every permission, so incident response is unaffected.
+        The lifetime carried over is the original SPAN, exactly as on your own.
         """
         old = next((r for r in wa._api_token_store.list_all() if r.get('uid') == uid), None)
         if not old or old.get('revoked'):
@@ -624,6 +629,15 @@ def register(app, wa):
         _u, _r, err = _target(owner)
         if err:
             return err
+        if not wa._is_admin_requester():
+            scope = tok_svc.decode_permissions(old.get('permissions', '[]'))
+            if scope == tok_svc.ALL:
+                return jsonify({'error': wa._t('api_token_star_admin_only')}), 403
+            mine = wa._get_session_permissions()
+            over = sorted(p for p in scope if p not in mine)
+            if over:
+                return jsonify({'error': wa._t('api_token_perm_not_yours'),
+                                'detail': over}), 403
         span_days = 0
         if old.get('expires_at') and old.get('created_at'):
             try:

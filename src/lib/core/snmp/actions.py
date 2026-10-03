@@ -22,7 +22,7 @@ from lib.core.snmp import metrics as _metrics
 from lib.core.snmp.mibs import resolver as _mib_resolver
 from lib.core.snmp.profiles import store as _profile_store
 from lib.core.snmp import profiles as _profiles
-from lib.core.snmp.client import _HAS_PYSNMP, run_coroutine
+from lib.core.snmp.client import _HAS_PYSNMP, Truncated, run_coroutine
 from lib.core.snmp.defaults import CONN_DEFAULTS as _SERVER_DEFAULTS
 from lib.core.snmp.sampler import read_metric as _read_metric
 
@@ -414,7 +414,7 @@ class SnmpActions:
                        'chart': m.get('chart', 'line'),
                        'oid': m.get('oid', ''), 'walk': m.get('walk', '')}
                 for opt in ('index_label', 'value_label', 'from_index', 'row_index',
-                            'path', 'width', 'scale', 'max_rate', 'role'):
+                            'path', 'width', 'scale', 'max_rate', 'max_rows', 'role'):
                     if m.get(opt) not in (None, ''):
                         row[opt] = m[opt]
                 metrics.append(row)
@@ -866,7 +866,10 @@ class SnmpActions:
             'table': bool(m.get('walk')),
             'rows':  [cls._test_row(m, r) for r in rows[:_TEST_ROWS]],
             'rows_total': len(rows),
-            'error': str(err or ''),
+            # A table cut at the walk's ceiling is an answer with more to it, not a failure:
+            # counted as one, a 600-port switch would read as a profile that does not work.
+            'error': '' if isinstance(err, Truncated) else str(err or ''),
+            'truncated': isinstance(err, Truncated),
             'skipped': late,
             'unserved': not served,
         }
@@ -1141,7 +1144,7 @@ class SnmpActions:
             'rows': rows,
             # An empty table and a device that did not answer look identical in a list of no
             # rows, and they are the two different answers this exists to tell apart.
-            'answered': not err,
+            'answered': not err or isinstance(err, Truncated),
             'message': str(err or ''),
             'truncated': len(rows) >= limit,
             'elapsed_ms': int((time.time() - started) * 1000),

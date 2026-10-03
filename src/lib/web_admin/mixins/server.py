@@ -99,17 +99,87 @@ class _ServerMixin:
             t.start()
             threads.append(t)
 
+        stop_requested = threading.Event()
+        previous = self._install_stop_signals(stop_requested)
         try:
-            while any(t.is_alive() for t in threads):
-                time.sleep(0.5)
+            while any(t.is_alive() for t in threads) and not stop_requested.wait(0.5):
+                pass
+            if stop_requested.is_set():
+                print('  ' + self._t('web_stop_requested'))
         except KeyboardInterrupt:
             print('  ' + self._t('web_stop_requested'))
         finally:
+            self._restore_signals(previous)
+            # Services first, while the process is still whole: the syslog writer drains
+            # its queue, the leases are given back (a standby takes over now, not when they
+            # expire) and this instance's rows say it is down instead of "running".
+            self.shutdown_services()
             for _h, srv in servers:
                 try:
                     srv.shutdown()
                 except Exception:  # pylint: disable=broad-except
                     pass
+
+    @staticmethod
+    def _install_stop_signals(stop_requested: threading.Event) -> dict:
+        """Route SIGTERM (``docker stop``, systemd, Kubernetes) and SIGINT to *stop_requested*.
+
+        Only SIGINT used to be handled, as a KeyboardInterrupt: SIGTERM killed the process
+        where it stood. Signal handlers can only be installed from the main thread, so from
+        any other thread (a test, an embedding host) this is a no-op. Returns the previous
+        handlers for :meth:`_restore_signals`."""
+        import signal  # noqa: PLC0415
+        previous: dict = {}
+        if threading.current_thread() is not threading.main_thread():
+            return previous
+
+        def _handler(_signum, _frame):
+            stop_requested.set()
+
+        for name in ('SIGTERM', 'SIGINT'):
+            sig = getattr(signal, name, None)
+            if sig is None:
+                continue
+            try:
+                previous[sig] = signal.signal(sig, _handler)
+            except (ValueError, OSError):
+                pass                                   # unsupported on this platform
+        return previous
+
+    @staticmethod
+    def _restore_signals(previous: dict) -> None:
+        import signal  # noqa: PLC0415
+        for sig, handler in (previous or {}).items():
+            try:
+                signal.signal(sig, handler if handler is not None else signal.SIG_DFL)
+            except (ValueError, OSError, TypeError):
+                pass
+
+    def shutdown_services(self) -> None:
+        """Stop what this process runs in the background, for a clean exit. Idempotent.
+
+        Each embedded service gets ``on_shutdown()`` (the syslog listener drains its writer
+        queue) and then ``stop_heartbeat()`` (lease released, instance row marked down);
+        then the panel's own scanners and backup runner stop and give their leases back.
+        Every step is guarded: one that fails must not keep the others from running."""
+        if getattr(self, '_services_shut_down', False):
+            return
+        self._services_shut_down = True
+        for _svc in (getattr(self, '_embedded_services', None) or {}).values():
+            for step in ('on_shutdown', 'stop_heartbeat'):
+                fn = getattr(_svc, step, None)
+                if not callable(fn):
+                    continue
+                try:
+                    fn()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+        stop_bg = getattr(self, 'stop_background', None)
+        if callable(stop_bg):
+            try:
+                stop_bg()
+            except Exception:  # pylint: disable=broad-except
+                pass
 
     @staticmethod
     def _display_hosts(host):

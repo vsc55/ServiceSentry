@@ -129,3 +129,17 @@ class TestTheIndexedFieldsAreBounded:
                     '<13>1 2026-01-01T00:00:00Z ' + 'H' * 400 + ' a - - m'):
             r = parse_message(raw)
             assert len(r['hostname']) <= 255 and len(r['app']) <= 48, raw[:30]
+
+
+class TestNoNulReachesTheStore:
+    """PostgreSQL rejects any NUL in a text value; only trailing NULs were stripped, so one
+    datagram with an embedded NUL failed the INSERT of its whole writer batch."""
+
+    def test_embedded_nul_is_removed_from_bytes(self):
+        rec = parse_message(b'<34>Oct 11 22:14:15 host app: a\x00b\x00c', source='1.2.3.4')
+        assert '\x00' not in rec['message'] and '\x00' not in rec['raw']
+        assert rec['message'].endswith('abc')
+
+    def test_embedded_nul_is_removed_from_str(self):
+        rec = parse_message('<34>1 2026-01-01T00:00:00Z h\x00x app - - - m\x00sg')
+        assert all('\x00' not in str(v) for v in rec.values())

@@ -55,7 +55,12 @@ def opaque(item) -> dict:
     updated leaks one. Only one of those two failures is a security bug, so the code is written
     to fail the other way.
     """
-    keep = ('uid', 'rack_uid', 'u_start', 'u_height', 'face')
+    # The GEOMETRY and nothing else: where it is and how much of it. Without `placement` a
+    # UPS on the floor beside the rack came out as U 0 and was drawn at U1; without
+    # `parent_uid` a box mounted on a tray was drawn a second time on top of it; without the
+    # slot fields half a U was drawn as a whole one — an elevation that lies about what is free.
+    keep = ('uid', 'rack_uid', 'u_start', 'u_height', 'face', 'placement', 'parent_uid',
+            'u_slots', 'u_slot', 'u_slot_span', 'u_split')
     out = {k: item.get(k) for k in keep}
     out['foreign'] = True
     return out

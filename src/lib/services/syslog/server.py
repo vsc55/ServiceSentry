@@ -7,6 +7,11 @@ Design
 * One reader thread per transport (UDP, TCP, TLS); TCP/TLS spawn a short-lived
   thread per accepted connection.  Sockets use a short timeout so ``stop()`` is
   prompt.
+* An accepted connection is bounded on every side: at most ``max_connections``
+  live at once (the rest are closed on accept), a TLS handshake must finish within
+  ``handshake_timeout`` seconds, and a stream silent for ``idle_timeout`` seconds
+  is closed (a real sender reconnects on its next message).  ``stop()`` closes the
+  live connections itself instead of waiting for them.
 * Parsed records go on a bounded queue; a single writer thread batches them to
   the store (``add_many``) every ~1 s, so receiving never blocks on the DB.
 * An optional ``on_message`` callback runs per record (alert-rule evaluation).
@@ -34,6 +39,14 @@ _FLUSH_MAX = 500              # writer batch size cap
 _SOCK_TIMEOUT = 0.5            # so stop() is responsive
 _DROP_LOG_EVERY = 30.0        # min seconds between allowlist-drop logs per source
 _DROPS_MAX = 500              # cap distinct dropped sources tracked in memory
+# Per-connection bounds (TCP/TLS).  Without them any reachable peer could open
+# silent connections, each pinning a thread for good.
+_TLS_HANDSHAKE_TIMEOUT = 10.0  # whole TLS handshake deadline (s)
+_IDLE_TIMEOUT = 600.0          # close a stream silent this long (s)
+_MAX_CONNECTIONS = 2048        # concurrent TCP+TLS connections per listener: a fan-in
+                               # collector holds one per device; beyond it, refused
+_STOP_JOIN_SECS = 3.0          # total budget stop() spends joining threads
+_CAP_LOG_EVERY = 30.0          # min seconds between "connection cap reached" logs
 
 
 def build_server(cfg: dict, *, sink, on_message=None, dbg=None,
@@ -100,7 +113,9 @@ class SyslogServer:
     def __init__(self, *, sink, on_message=None, bind_host='0.0.0.0',
                  udp_port=0, tcp_port=0, tls_port=0, tls_cert='', tls_key='',
                  allowed_sources=None, dbg=None, dbg_warn=None, on_drop=None,
-                 is_banned=None, on_offense=None):
+                 is_banned=None, on_offense=None, idle_timeout=_IDLE_TIMEOUT,
+                 handshake_timeout=_TLS_HANDSHAKE_TIMEOUT,
+                 max_connections=_MAX_CONNECTIONS):
         self._sink = sink                       # callable(list[dict]) -> None  (batch store)
         self._on_message = on_message           # optional callable(dict) per message
         self._bind = bind_host or '0.0.0.0'
@@ -121,6 +136,13 @@ class SyslogServer:
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._socks: list[socket.socket] = []
+        self._idle_timeout = float(idle_timeout or _IDLE_TIMEOUT)
+        self._handshake_timeout = float(handshake_timeout or _TLS_HANDSHAKE_TIMEOUT)
+        self._max_conns = max(1, int(max_connections or _MAX_CONNECTIONS))
+        self._conn_slots = threading.BoundedSemaphore(self._max_conns)
+        self._conns: set = set()                # live connection sockets (closed by stop)
+        self._lock = threading.Lock()           # guards _threads / _conns
+        self._cap_last_log = 0.0
         self.running = False
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
@@ -156,19 +178,41 @@ class SyslogServer:
                 # Closing an already-closed or broken socket is not a failure, and stop()
                 # must keep going: the remaining sockets still need closing.
                 pass
-        for t in self._threads:
-            t.join(timeout=2.0)
-        self._threads.clear()
+        # Close the live connections too: a thread blocked in a handshake or a read
+        # returns at once instead of being waited for one by one (stop() runs under
+        # the caller's listener lock).
+        with self._lock:
+            conns = list(self._conns)
+            threads = list(self._threads)
+        for c in conns:
+            self._close_conn(c)
+        deadline = time.monotonic() + _STOP_JOIN_SECS
+        for t in threads:
+            t.join(timeout=max(0.0, deadline - time.monotonic()))
+        with self._lock:
+            self._threads.clear()
         self._socks.clear()
         self.running = False
+
+    @staticmethod
+    def _close_conn(conn) -> None:
+        try:
+            conn.shutdown(socket.SHUT_RDWR)
+        except (OSError, ValueError):
+            pass                                 # not connected / already closed
+        try:
+            conn.close()
+        except OSError:
+            pass
 
     def _spawn(self, target, *, name, args=()):
         # Prune finished per-connection threads first, so a long-lived listener with many
         # short TCP/TLS connections doesn't accumulate dead Thread objects without bound.
-        self._threads = [x for x in self._threads if x.is_alive()]
         t = threading.Thread(target=target, name=name, args=args, daemon=True)
+        with self._lock:
+            self._threads = [x for x in self._threads if x.is_alive()]
+            self._threads.append(t)
         t.start()
-        self._threads.append(t)
 
     # ── transports ─────────────────────────────────────────────────────────────
     def _new_socket(self, family: int, sock_type: int, addr: str, port: int):
@@ -319,23 +363,82 @@ class SyslogServer:
                     # The peer was rejected; a close that fails changes nothing about that.
                     pass
                 continue
-            self._spawn(self._tcp_conn_loop, name='syslog-conn', args=(conn, tls_ctx, ip))
+            # Cap concurrent connections: beyond it the newcomer is closed at once
+            # rather than given a thread (each one pins a thread while it lives).
+            if not self._conn_slots.acquire(blocking=False):
+                self._close_conn(conn)
+                now = time.monotonic()
+                if now - self._cap_last_log >= _CAP_LOG_EVERY:
+                    self._cap_last_log = now
+                    self._dbg_warn(f'> Syslog >> connection from {ip or "?"} refused: '
+                                   f'{self._max_conns} connections already open')
+                continue
+            try:
+                # Accepted sockets are blocking: bound them before anything reads.
+                conn.settimeout(_SOCK_TIMEOUT)
+                with self._lock:
+                    self._conns.add(conn)
+                self._spawn(self._tcp_conn_loop, name='syslog-conn', args=(conn, tls_ctx, ip))
+            except Exception:  # pylint: disable=broad-except
+                with self._lock:
+                    self._conns.discard(conn)
+                self._close_conn(conn)
+                self._conn_slots.release()
+
+    def _tls_handshake(self, conn: socket.socket, tls_ctx):
+        """Wrap *conn* server-side and handshake within ``handshake_timeout``.
+
+        The handshake runs in short slices so a stop is noticed, and against one
+        overall deadline so a peer trickling bytes can't stretch it.  The wrapped
+        socket replaces *conn* in the live set (stop() must close the one in use).
+        Raises ``TimeoutError`` past the deadline, ``OSError`` once stopped."""
+        tconn = tls_ctx.wrap_socket(conn, server_side=True, do_handshake_on_connect=False)
+        with self._lock:
+            self._conns.discard(conn)
+            self._conns.add(tconn)
+        deadline = time.monotonic() + self._handshake_timeout
+        try:
+            while True:
+                if self._stop.is_set():          # also covers a stop() that missed the swap
+                    raise OSError('listener stopping')
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError('TLS handshake timed out')
+                tconn.settimeout(min(_SOCK_TIMEOUT, left))
+                try:
+                    tconn.do_handshake()
+                    return tconn
+                except (socket.timeout, TimeoutError):
+                    continue
+        except BaseException:
+            # The caller only knows the raw socket (now detached): drop and close
+            # the wrapped one here.
+            with self._lock:
+                self._conns.discard(tconn)
+            self._close_conn(tconn)
+            raise
 
     def _tcp_conn_loop(self, conn: socket.socket, tls_ctx, ip: str) -> None:
         try:
             if tls_ctx is not None:
-                conn = tls_ctx.wrap_socket(conn, server_side=True)
+                conn = self._tls_handshake(conn, tls_ctx)
             conn.settimeout(_SOCK_TIMEOUT)
             buf = b''
+            last_rx = time.monotonic()
             while not self._stop.is_set():
                 try:
                     chunk = conn.recv(8192)
                 except (socket.timeout, TimeoutError):
+                    # A stream silent this long is closed: a live sender reconnects
+                    # on its next message; a dead or hostile one frees its thread.
+                    if time.monotonic() - last_rx >= self._idle_timeout:
+                        break
                     continue
                 except OSError:
                     break
                 if not chunk:
                     break
+                last_rx = time.monotonic()
                 buf += chunk
                 buf = self._consume_stream(buf, ip)
                 if len(buf) > _MAX_DATAGRAM:     # runaway frame → drop
@@ -354,6 +457,9 @@ class SyslogServer:
             except OSError:
                 # The connection is being discarded either way.
                 pass
+            with self._lock:
+                self._conns.discard(conn)
+            self._conn_slots.release()
 
     def _consume_stream(self, buf: bytes, ip: str) -> bytes:
         """Frame TCP syslog: octet-counted (RFC 6587 "N MSG") or newline-delimited."""

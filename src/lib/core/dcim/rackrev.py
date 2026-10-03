@@ -38,8 +38,14 @@ CAMPOS_RACK = ('name', 'u_height', 'desc_units', 'width_mm', 'depth_mm', 'room_u
 #: Cómo se llama esto en `dc_rev`.
 SCOPE = 'rack'
 
+#: The key of a snapshot that records what each item was SAID to belong to (``{uid: org}``,
+#: ``''`` for "nothing said, it inherits"). Not part of the comparison: who owns a box is not
+#: where it is. It exists for the reader of an old version, after the item and its claim are
+#: gone — see the rack history route.
+OWNERS = 'owners'
 
-def snapshot(rack: dict, items) -> dict:
+
+def snapshot(rack: dict, items, owners=None) -> dict:
     """La foto: el armario y lo que hay dentro, ordenado por U.
 
     **Ordenado**, y no en el orden en que la base los devolvió: dos fotos del mismo armario
@@ -50,6 +56,8 @@ def snapshot(rack: dict, items) -> dict:
     fuera['items'] = sorted(
         [{c: (it or {}).get(c) for c in CAMPOS} for it in (items or ())],
         key=lambda x: (int(x.get('u_start') or 0), str(x.get('uid') or '')))
+    if owners is not None:
+        fuera[OWNERS] = {str(k): str(v or '') for k, v in owners.items()}
     return fuera
 
 

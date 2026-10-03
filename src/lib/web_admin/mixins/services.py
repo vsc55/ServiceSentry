@@ -385,8 +385,16 @@ class _ServicesMixin:
         hosted_here = False
         try:
             if obj is not None and obj.status().get('state') != 'external':
-                obj._drain_commands()
-                hosted_here = True
+                # A standby leaves the queue to the lease holder, so learn whether this
+                # instance holds it now instead of waiting for the next beat: without this
+                # the fast path never ran a command before the first renewal.
+                renew = getattr(obj, '_renew_leadership', None)
+                if renew is not None:
+                    renew()
+                allowed = getattr(obj, '_work_allowed', None)
+                if allowed is None or allowed():
+                    obj._drain_commands()
+                    hosted_here = True
         except Exception:  # pylint: disable=broad-except
             pass
         if not hosted_here:

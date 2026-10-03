@@ -381,9 +381,14 @@ function _dceBesideHtml(items) {
     const fuera = (items || []).filter(
         i => !i.parent_uid && String(i.placement || 'u') !== 'u');
     if (!fuera.length) return '';
+    // Lo ajeno también está al lado —ocupa ese suelo— pero sin nombre y sin abrirse: un
+    // candado, como su fila de la tabla y su caja del dibujo.
     return `<div class="ss-fs-2 text-muted mt-1">
         <i class="bi bi-box-arrow-right me-1"></i>${esc(t('dcim_elev_beside'))}
-        ${fuera.map(i => `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1"
+        ${fuera.map(i => i.foreign
+            ? `<span class="badge text-bg-secondary ms-1"><i class="bi bi-lock me-1"></i>${
+                esc(t('dcim_foreign'))}</span>`
+            : `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1"
                 onclick="_dcimOpen('edit','item','',${jsStr(i.uid)})"
                 title="${escAttr(t('dcim_place_' + String(i.placement || 'u')))}">
             <span class="ss-dot me-1" style="background:${
@@ -576,17 +581,21 @@ function _dceKids(rack, padre, face) {
     const gut = _dceGut(caja.w, kids);
     return kids.map(kid => {
         const r = _dceKidRect(caja, kid, kids, gut, face);
-        const tone = deviceStateColor(kid.state || '');
+        // Lo ajeno montado en una bandeja propia ocupa su trozo y nada más: gris, sin foto y
+        // sin abrirse, igual que una caja ajena atornillada al armario.
+        const tone = kid.foreign ? 'var(--bs-secondary-bg)' : deviceStateColor(kid.state || '');
         const name = _dcimItemName(kid);
         return `<g class="ss-pointer" data-dce="${escAttr(kid.uid)}"
                    onpointerenter="_dceHover(${jsStr(kid.uid)})"
                    onpointerleave="_dceHover('')"
-                   onclick="_dcimOpen('edit','item','',${jsStr(kid.uid)})"
-                   ondblclick="event.stopPropagation();_dcPartsOpen(${jsStr(kid.uid)})">
+                   ${kid.foreign ? '' : `onclick="_dcimOpen('edit','item','',${
+                        jsStr(kid.uid)})"`}
+                   ${kid.foreign ? '' : `ondblclick="event.stopPropagation();_dcPartsOpen(${
+                        jsStr(kid.uid)})"`}>
             <title>${escAttr(name)}</title>
             <rect x="${r.x + 1}" y="${r.y}" width="${r.w - 2}" height="${r.h}" rx="2"
                   fill="var(--bs-body-bg)" stroke="${tone}"></rect>
-            ${_dceFoto(kid, face, r.x + 1, r.y - 2, r.w - 2, r.h + 4)}
+            ${kid.foreign ? '' : _dceFoto(kid, face, r.x + 1, r.y - 2, r.w - 2, r.h + 4)}
             <rect x="${r.x + 1}" y="${r.y}" width="3" height="${r.h}" rx="1.5"
                   fill="${tone}"></rect>
             ${_dceNames ? `<text x="${r.x + 9}" y="${r.y + r.h / 2 + 3.5}" font-size="9.5"

@@ -39,7 +39,37 @@ from lib.core.dcim import media as dcim_media
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
 from lib.core.dcim.store import FEATURE_KINDS, FEATURE_LAYERS
-from lib.core.dcim.routes._common import _num, _without
+from lib.core.dcim.store.features import _FEATURE
+from lib.core.dcim.store.floors import _FLOOR
+from lib.core.dcim.store.racks import _RACK
+from lib.core.dcim.store.rooms import _ROOM
+from lib.core.dcim.store.sites import _SITE
+from lib.core.dcim.routes._common import _NUM_MAX, _fresh, _num, _without, numbers_bad
+
+#: The tallest rack a request may declare. Real cabinets stop around 58U; a hundred leaves room
+#: for anything odd and still refuses the typo that would draw a rack three screens tall.
+RACK_U_MAX = 100
+
+#: Each container's table, for the numeric check of the generic CRUD.
+_SPECS = {'sites': _SITE, 'rooms': _ROOM, 'racks': _RACK}
+
+
+def _bounds(spec) -> dict:
+    """The range each numeric column of *spec* accepts from a request.
+
+    A length in millimetres is never negative; a rack has at least one U and a sane top; a
+    coordinate is a coordinate. Everything else takes the generic range of `numbers_bad`.
+    """
+    out = {c.name: (0, _NUM_MAX) for c in spec.columns if c.name.endswith('_mm')}
+    if spec is _RACK:
+        out['u_height'] = (1, RACK_U_MAX)
+    if spec is _SITE:
+        out.update(lat=(-90, 90), lon=(-180, 180))
+    return out
+
+
+def _bad_number(wa, field):
+    return jsonify({'error': wa._t('dcim_bad_number'), 'field': field}), 400
 
 
 def register(app, wa, C):
@@ -118,6 +148,12 @@ def register(app, wa, C):
         usados = set(taken.get('front') or {}) | set(taken.get('rear') or {})
         return len([u for u in usados if 1 <= int(u) <= height])
 
+    def _top_used(store, rack_uid) -> int:
+        """The highest U something occupies in a rack, by either face; 0 if nothing does."""
+        taken = store.occupancy(rack_uid)
+        usados = set(taken.get('front') or {}) | set(taken.get('rear') or {})
+        return max((int(u) for u in usados), default=0)
+
     def _room_floor_ok(store, data, room_uid=''):
         """Una sala solo se coloca en una planta de SU sede, o en ninguna.
 
@@ -154,7 +190,9 @@ def register(app, wa, C):
         @C.edit_req
         def _create():
             store = C.store()
-            data = _without(request.get_json(silent=True) or {}, minted)
+            # Without the row's identity and audit stamp: `Rows.create` keeps a `uid` it is
+            # given, so passing the request through let the client choose it.
+            data = _fresh(_without(request.get_json(silent=True) or {}, minted))
             for field in required:
                 if not str(data.get(field) or '').strip():
                     return jsonify({'error': wa._t('dcim_name_required')}), 400
@@ -169,6 +207,11 @@ def register(app, wa, C):
             # siguiente, y uno repetido no llega a escribirse. Después del permiso a propósito —
             # gastar un número de la numeración en una petición que va a acabar en 403 deja un
             # hueco en la cuenta que nadie sabe explicar.
+            # Numbers before the inventory number: a request refused for a bad height must not
+            # spend one of the numbering.
+            malo = numbers_bad(_SPECS[part], data, _bounds(_SPECS[part]))
+            if malo:
+                return _bad_number(wa, malo)
             err = C.asset(part, data)
             if err:
                 return jsonify({'error': wa._t(err)}), 400
@@ -184,11 +227,42 @@ def register(app, wa, C):
         @C.edit_req
         def _update(uid):
             store = C.store()
-            if not getattr(store, part).get(uid):
+            row = getattr(store, part).get(uid)
+            if not row:
                 return jsonify({'error': wa._t('dcim_not_found')}), 404
             if not C.may_write(store, store.owners_map(), C.seen(), scope, uid):
                 return jsonify({'error': wa._t('access_denied')}), 403
             data = _without(request.get_json(silent=True) or {}, minted)
+            # Moving it is writing into the DESTINATION too, the same check `_create` makes.
+            # Without it, somebody scoped to their company could not create a rack in another
+            # company's room but could create it in their own and then move it there — and
+            # what they own would turn up inside a container they cannot even list.
+            if parent and parent[1] in data:
+                p_scope, p_field = parent
+                p_uid = str(data.get(p_field) or '')
+                if p_uid != str(row.get(p_field) or ''):
+                    if not getattr(store, p_scope + 's').get(p_uid):
+                        return jsonify({'error': wa._t('dcim_not_found')}), 404
+                    if not C.may_write(store, store.owners_map(), C.seen(), p_scope, p_uid):
+                        return jsonify({'error': wa._t('access_denied')}), 403
+                    # A room that changes site leaves its floor behind: that floor is drawn in
+                    # the other building.
+                    if part == 'rooms' and 'floor_uid' not in data:
+                        data['floor_uid'] = ''
+            # The numbers, checked as on creation: stored unchecked, `u_height: "abc"` turned
+            # every read of the site tree and of the rack into a 500 until somebody fixed the
+            # row by hand.
+            malo = numbers_bad(_SPECS[part], data, _bounds(_SPECS[part]))
+            if malo:
+                return _bad_number(wa, malo)
+            # A rack is not made shorter than what is bolted into it. Shrunk under an item, the
+            # item stayed at its U outside the cabinet: not drawn, not counted, and its U never
+            # free again for anybody.
+            if part == 'racks' and 'u_height' in data:
+                top = _top_used(store, uid)
+                if int(data['u_height']) < top:
+                    return jsonify({'error': wa._t('dcim_rack_shrink_occupied'),
+                                    'top': top}), 409
             # Con el uid, que es lo que hace que guardar una ficha sin tocarle el número no
             # falle por chocar consigo misma.
             err = C.asset(part, data, uid)
@@ -210,13 +284,101 @@ def register(app, wa, C):
         @C.edit_req
         def _delete(uid):
             store = C.store()
+            row = getattr(store, part).get(uid) if store else None
+            if not row:
+                return jsonify({'error': wa._t('dcim_not_found')}), 404
             if not C.may_write(store, store.owners_map(), C.seen(), scope, uid):
                 return jsonify({'error': wa._t('access_denied')}), 403
+            # A container that still holds inventory is NOT deleted. Removing only the row left
+            # its rooms, racks and items behind with a chain that ended at the missing parent:
+            # the ownership declared on the site vanished with it, and every orphan became
+            # visible to anybody who may open the section. Same answer as an item that carries
+            # mounted ones — say what is inside and let a person empty it.
+            inside = _contents(store, scope, uid)
+            if inside:
+                return jsonify({'error': wa._t('dcim_container_not_empty'),
+                                'contains': inside}), 409
+            pictures = _drop_drawing(store, scope, uid, row)
             getattr(store, part).delete(uid)
             store.forget_scope(scope, uid)
+            # The files last, once nothing being deleted still points at them.
+            for name in pictures:
+                _forget_media(store, name)
             return jsonify({'ok': True})
 
-    _crud('sites', 'sites', 'site', ('name',))
+    def _empty_areas(store, site_uid) -> set:
+        """The general areas of a site's floors that hold nothing: they go with their floor.
+
+        The same rule as deleting one floor — a room that only existed to hold the loose things
+        of a floor, with nothing in it, is part of the drawing and not inventory.
+        """
+        out = set()
+        for floor in store.floors_of(site_uid):
+            area = str(floor.get('area_uid') or '')
+            if area and store.rooms.get(area) and not store.racks_of(area) \
+                    and not store.features_of(area) and not store.rows_of(area):
+                out.add(area)
+        return out
+
+    def _contents(store, scope, uid) -> dict:
+        """What a container still holds that is inventory, as ``{kind: count}``; empty if none."""
+        if scope == 'site':
+            areas = _empty_areas(store, uid)
+            found = {'rooms': len([r for r in store.rooms_of(uid) if r['uid'] not in areas]),
+                     'sources': len(store.sources_of(uid) or ()),
+                     'links': len(store.links_of([uid]) or ())}
+        elif scope == 'room':
+            found = {'racks': len(store.racks_of(uid) or ())}
+        elif scope == 'rack':
+            found = {'items': len(store.items_of(uid) or ()),
+                     'pdus': len(store.pdus_of(uid) or ())}
+        else:
+            found = {}
+        return {k: v for k, v in found.items() if v}
+
+    def _drop_drawing(store, scope, uid, row) -> list:
+        """Delete what goes WITH an empty container, and return the pictures it leaves.
+
+        Floors and their empty general areas for a site; the pieces and the rows drawn on a
+        room. None of it is inventory, and left behind it is rows nothing can reach and files
+        nothing points at. The picture names come back to be deleted after the container's own
+        row, which still points at its photo or plan until then.
+        """
+        pictures = []
+        if scope == 'site':
+            for area in _empty_areas(store, uid):
+                store.rooms.delete(area)
+                store.forget_scope('room', area)
+            for floor in store.floors_of(uid):
+                store.floors.delete(floor['uid'])
+                pictures.append(str(floor.get('plan') or ''))
+            pictures.append(str(row.get('photo') or ''))
+        elif scope == 'room':
+            for piece in store.features_of(uid):
+                store.features.delete(piece['uid'])
+            for fila in store.rows_of(uid):
+                store.rows.delete(fila['uid'])
+            pictures.append(str(row.get('plan') or ''))
+        return [p for p in pictures if p]
+
+    def _forget_media(store, name) -> None:
+        """Delete a picture of this section unless another site, room or floor still shows it.
+
+        `photo` and `plan` can only be set by the upload routes, which mint a fresh name; this
+        is for a reference written before that was enforced — deleting the file would blank the
+        picture of a record that never asked for it.
+        """
+        if not name:
+            return
+        for part, col in (('sites', 'photo'), ('rooms', 'plan'), ('floors', 'plan')):
+            if getattr(store, part).list(f'{col} = ?', (name,)):
+                return
+        dcim_media.forget(wa._var_dir or '', name, C.media_dir())
+
+    # `photo` is minted by its upload route, exactly like a room's `plan`: writable here, a
+    # request could point a site at another record's picture and then delete that file through
+    # DELETE /sites/<uid>/photo.
+    _crud('sites', 'sites', 'site', ('name',), minted=('photo',))
     # `plan` is MINTED by the upload route from what the file turned out to be. Left
     # writable here, a request could point a room at another room's picture without uploading
     # anything — and the check that is written once in the door is the check nobody forgets.
@@ -265,7 +427,7 @@ def register(app, wa, C):
         old = str(site.get('photo') or '')
         store.sites.update(uid, {'photo': name}, actor=C.actor())
         if old and old != name:
-            dcim_media.forget(wa._var_dir or '', old, C.media_dir())
+            _forget_media(store, old)
         return jsonify({'photo': name})
 
     @app.route('/api/v1/dcim/sites/<uid>/photo', methods=['DELETE'])
@@ -279,8 +441,9 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('access_denied')}), 403
         name = str(site.get('photo') or '')
         store.sites.update(uid, {'photo': ''}, actor=C.actor())
-        if name:
-            dcim_media.forget(wa._var_dir or '', name, C.media_dir())
+        # Only if no other record shows it: a reference written before `photo` was minted
+        # could name another record's picture.
+        _forget_media(store, name)
         return jsonify({'ok': True})
 
     # ── Las plantas de una sede ──────────────────────────────────────────────
@@ -319,7 +482,7 @@ def register(app, wa, C):
         store = C.store()
         # `plan` lo acuña la subida, como el de una sala: escrito aquí, una petición podría
         # apuntar una planta al dibujo de otra sin subir nada.
-        data = _without(request.get_json(silent=True) or {}, ('plan', 'area_uid'))
+        data = _fresh(_without(request.get_json(silent=True) or {}, ('plan', 'area_uid')))
         site = str(data.get('site_uid') or '')
         if not store or not store.sites.get(site):
             return jsonify({'error': wa._t('dcim_not_found')}), 404
@@ -327,7 +490,11 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('access_denied')}), 403
         if not str(data.get('name') or '').strip():
             return jsonify({'error': wa._t('dcim_name_required')}), 400
-        data['level'] = int(_num(data.get('level')))
+        # `level` is an integer: `nan` or `inf` reached `int()` and answered 500.
+        data.setdefault('level', 0)
+        malo = numbers_bad(_FLOOR, data, _bounds(_FLOOR))
+        if malo:
+            return _bad_number(wa, malo)
         return jsonify({'uid': store.floors.create(data, actor=C.actor())})
 
     @app.route('/api/v1/dcim/floors/<uid>', methods=['PUT'])
@@ -344,8 +511,9 @@ def register(app, wa, C):
         data = _without(request.get_json(silent=True) or {}, ('plan', 'site_uid', 'area_uid'))
         if 'name' in data and not str(data.get('name') or '').strip():
             return jsonify({'error': wa._t('dcim_name_required')}), 400
-        if 'level' in data:
-            data['level'] = int(_num(data.get('level')))
+        malo = numbers_bad(_FLOOR, data, _bounds(_FLOOR))
+        if malo:
+            return _bad_number(wa, malo)
         store.floors.update(uid, data, actor=C.actor())
         return jsonify({'ok': True})
 
@@ -570,7 +738,7 @@ def register(app, wa, C):
         Con la misma puerta que las piezas y por la misma razón: una fila no es de nadie —es una
         forma de ordenar la sala— así que quien puede ordenar la sala la declara.
         """
-        data = request.get_json(silent=True) or {}
+        data = _fresh(request.get_json(silent=True) or {})
         store, room = _room_writable(data.get('room_uid'))
         if not store or room is None:
             return jsonify({'error': wa._t('dcim_not_found')}), 404
@@ -625,9 +793,12 @@ def register(app, wa, C):
         spec = FEATURE_KINDS[kind]
         # Las medidas de fábrica si no vienen dadas: una pieza sin tamaño se dibuja como un punto
         # y hay que estirarla a mano para descubrir que era una mampara.
-        body = dict(data)
+        body = _fresh(data)
         body.setdefault('width_mm', spec['w'])
         body.setdefault('depth_mm', spec['d'])
+        malo = numbers_bad(_FEATURE, body, _bounds(_FEATURE))
+        if malo:
+            return _bad_number(wa, malo)
         return jsonify({'uid': store.features.create(body, actor=C.actor())})
 
     @app.route('/api/v1/dcim/features/<uid>', methods=['PUT'])
@@ -643,6 +814,9 @@ def register(app, wa, C):
         data = _without(request.get_json(silent=True) or {}, ('room_uid',))
         if 'kind' in data and str(data['kind']) not in FEATURE_KINDS:
             return jsonify({'error': wa._t('dcim_kind_unknown')}), 400
+        malo = numbers_bad(_FEATURE, data, _bounds(_FEATURE))
+        if malo:
+            return _bad_number(wa, malo)
         store.features.update(uid, data, actor=C.actor())
         return jsonify({'ok': True})
 
@@ -687,27 +861,36 @@ def register(app, wa, C):
         data = request.get_json(silent=True) or {}
         if not isinstance(data.get('features'), list) and not isinstance(data.get('racks'), list):
             return jsonify({'error': wa._t('dcim_import_not_a_plan')}), 400
+        # **The whole file is judged before anything is written.** The old pieces were deleted
+        # first and the file read after, so one entry that was not an object (`features: ["x"]`)
+        # answered 500 with the room already emptied. A list that holds something other than
+        # objects is not a plan, and nothing of the room is touched for it. (A piece of a kind
+        # this version does not know is still only skipped: that is a newer file, not a broken
+        # one.)
+        for clave in ('features', 'racks'):
+            lista = data.get(clave)
+            if lista is not None and (not isinstance(lista, list)
+                                      or not all(isinstance(r, dict) for r in lista)):
+                return jsonify({'error': wa._t('dcim_import_not_a_plan')}), 400
 
         actor = C.actor()
         # Las medidas de la sala, si el fichero las trae. Un plano sin ellas no se puede usar
         # para lo único que sirve un plano, así que si vienen se aplican.
-        medidas = {k: int(data['room'][k]) for k in ('width_mm', 'depth_mm', 'tile_mm')
+        medidas = {k: max(0, int(data['room'][k])) for k in ('width_mm', 'depth_mm', 'tile_mm')
                    if isinstance(data.get('room'), dict)
                    and str(data['room'].get(k, '')).lstrip('-').isdigit()}
         if medidas:
             store.rooms.update(uid, medidas, actor=actor)
 
-        # Las piezas, enteras.
-        piezas, saltadas = 0, 0
-        for old in store.features_of(uid):
-            store.features.delete(old['uid'])
+        # Las piezas, enteras: built first, swapped after — see `_replace_features`.
+        nuevas, saltadas = [], 0
         for row in (data.get('features') or []):
-            kind = str((row or {}).get('kind') or '')
+            kind = str(row.get('kind') or '')
             if kind not in FEATURE_KINDS:
                 saltadas += 1                    # un tipo que esta versión no conoce
                 continue
             spec = FEATURE_KINDS[kind]
-            store.features.create({
+            nuevas.append({
                 'room_uid': uid, 'kind': kind,
                 'label': str(row.get('label') or ''),
                 'pos_x': _num(row.get('pos_x')), 'pos_y': _num(row.get('pos_y')),
@@ -719,14 +902,16 @@ def register(app, wa, C):
                               if row.get('height_mm') not in (None, '') else None),
                 'base_mm': (max(0, int(_num(row.get('base_mm'))))
                             if row.get('base_mm') not in (None, '') else None),
-            }, actor=actor)
-            piezas += 1
+            })
+        _replace_features(store, uid, nuevas, actor)
+        piezas = len(nuevas)
 
         # Y los racks, por nombre y sin borrar ninguno.
         por_nombre = {str(r.get('name') or ''): r for r in store.racks_of(uid)}
         movidos = creados = 0
-        for row in (data.get('racks') or []):
-            nombre = str((row or {}).get('name') or '').strip()
+        filas_racks = data.get('racks') or []
+        for row in filas_racks:
+            nombre = str(row.get('name') or '').strip()
             if not nombre:
                 continue
             sitio = {'pos_x': _num(row.get('pos_x')), 'pos_y': _num(row.get('pos_y')),
@@ -740,17 +925,40 @@ def register(app, wa, C):
                 store.racks.update(por_nombre[nombre]['uid'], sitio, actor=actor)
                 movidos += 1
             else:
+                # Within what the rack form accepts: a file is not a way around the check.
+                alto = int(_num(row.get('u_height')) or 42)
                 store.racks.create(dict(sitio, room_uid=uid, name=nombre,
-                                        u_height=int(_num(row.get('u_height')) or 42),
-                                        width_mm=int(_num(row.get('width_mm')) or 600),
-                                        depth_mm=int(_num(row.get('depth_mm')) or 1000)),
+                                        u_height=max(1, min(RACK_U_MAX, alto)),
+                                        width_mm=max(0, int(_num(row.get('width_mm')) or 600)),
+                                        depth_mm=max(0, int(_num(row.get('depth_mm')) or 1000))),
                                    actor=actor)
                 creados += 1
+        nombrados = {str(r.get('name') or '').strip() for r in filas_racks}
         return jsonify({'features': piezas, 'skipped': saltadas,
                         'racks_moved': movidos, 'racks_new': creados,
-                        'racks_kept': len([n for n in por_nombre
-                                           if n not in {str((r or {}).get('name') or '').strip()
-                                                        for r in (data.get('racks') or [])}])})
+                        'racks_kept': len([n for n in por_nombre if n not in nombrados])})
+
+    def _replace_features(store, room_uid, nuevas, actor) -> None:
+        """Swap a room's pieces for *nuevas*, putting the old ones back if writing fails.
+
+        Each row commits on its own (`Rows` has no batch), so one transaction around the swap
+        would not hold; what holds is that the list is complete before the first delete, and
+        that a failure half-way restores what was there instead of leaving the room bare.
+        """
+        viejas = store.features_of(room_uid)
+        hechas = []
+        try:
+            for old in viejas:
+                store.features.delete(old['uid'])
+            for fila in nuevas:
+                hechas.append(store.features.create(fila, actor=actor))
+        except Exception:
+            for uid in hechas:
+                store.features.delete(uid)
+            for old in viejas:
+                if not store.features.get(old['uid']):
+                    store.features.create(old, actor=old.get('updated_by') or actor)
+            raise
 
     # ── Power ─────────────────────────────────────────────────────────────────
     #

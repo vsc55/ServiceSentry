@@ -24,6 +24,7 @@ import re
 import uuid
 
 from lib.core.devices.resolve import device_uid_from_key
+from lib.core.modules.facade import mutate_modules
 from lib.security import secret_manager
 
 
@@ -197,6 +198,13 @@ def build_clone_record(src: dict, body: dict, member_fields) -> dict:
     # A clone is a DIFFERENT machine → let the OS auto-detect rather than inheriting the
     # source's (possibly wrong) value.
     data['os'] = 'auto'
+    # What ties the record to ONE machine does not travel either. `source`/`external_id` say
+    # which asset of an importer this device IS: copied, the clone was "maintained by" that
+    # importer (a rename answered 409) and two devices claimed one external key, so the next
+    # import updated whichever it found first. `watch` marks rows (ports, disks) of the
+    # source machine; the clone's rows are other cables. Audit stamps are the store's to set.
+    for k in ('source', 'external_id', 'watch', 'created_at', 'updated_at', 'updated_by'):
+        data.pop(k, None)
     # The per-node cluster identity (which node this device IS) is unique to the machine;
     # a clone is a different node, so blank it.
     strip = {'node'} | set(member_fields)
@@ -214,7 +222,25 @@ _MOD_RE = re.compile(r'^[a-z][a-z0-9_]*$')
 # grow).  Secrets in ``profiles`` must already be restored before this comparison so an
 # unchanged profile is not seen as edited.
 _DEVICE_EDIT_FIELDS = ('name', 'address', 'kind', 'os', 'maintenance', 'virtual',
-                     'tags', 'description', 'profiles')
+                     'device_type', 'tags', 'description', 'profiles')
+
+# Fields the store KEEPS when the body leaves them out (``DevicesStore.update`` reads an
+# absent ``source``/``external_id`` as "unchanged"), so absence is not a change. They were
+# missing from the list above, which let an 'add'-only user re-class a device, tie it to an
+# importer or cut it loose from one through the "add a check" path.
+_DEVICE_KEPT_IF_ABSENT = ('source', 'external_id')
+
+
+def _same_field(old: dict, data: dict, f: str) -> bool:
+    """Whether *data* leaves device field *f* as *old* has it.
+
+    ``device_type`` compares as text: the form sends ``''`` for an unclassified device whose
+    record may carry ``''`` or nothing, and that is not an edit."""
+    if f in _DEVICE_KEPT_IF_ABSENT:
+        return data.get(f) is None or str(data.get(f) or '') == str(old.get(f) or '')
+    if f == 'device_type':
+        return str(data.get(f) or '') == str(old.get(f) or '')
+    return data.get(f) == old.get(f)
 
 
 def _bare(module_key: str) -> str:
@@ -261,37 +287,39 @@ def _delete_device_checks(wa, uid: str) -> int:
     removed; for a multi-device (cluster) check the device is just removed from ``device_uids`` (the
     check is deleted only if it had no other member).  Returns how many checks were deleted or
     unbound."""
+    # Load, edit and save as ONE step (see modules.facade.mutate_modules): done as three,
+    # a module save landing in between was overwritten by this stale copy.
+    def _apply(modules) -> int:
+        count = 0
+        for mod, mcfg in modules.items():
+            if str(mod).startswith('__') or not isinstance(mcfg, dict):
+                continue
+            for coll, items in list(mcfg.items()):
+                if str(coll).startswith('__') or not isinstance(items, dict):
+                    continue
+                for key in list(items.keys()):
+                    item = items[key]
+                    if not isinstance(item, dict):
+                        continue
+                    hu = item.get('device_uids')
+                    if isinstance(hu, list) and any(str(x).strip() for x in hu):
+                        remaining = [x for x in hu if str(x).strip() != str(uid)]
+                        if len(remaining) != len(hu):
+                            if remaining:
+                                item['device_uids'] = remaining      # still a member of the cluster
+                            else:
+                                del items[key]                     # last member → drop the check
+                            count += 1
+                        continue
+                    if str(item.get('device_uid') or '') == str(uid):
+                        del items[key]
+                        count += 1
+        return count
+
     try:
-        modules = wa._load_modules()
+        return mutate_modules(wa, _apply) or 0
     except Exception:  # pylint: disable=broad-except
         return 0
-    count = 0
-    for mod, mcfg in modules.items():
-        if str(mod).startswith('__') or not isinstance(mcfg, dict):
-            continue
-        for coll, items in list(mcfg.items()):
-            if str(coll).startswith('__') or not isinstance(items, dict):
-                continue
-            for key in list(items.keys()):
-                item = items[key]
-                if not isinstance(item, dict):
-                    continue
-                hu = item.get('device_uids')
-                if isinstance(hu, list) and any(str(x).strip() for x in hu):
-                    remaining = [x for x in hu if str(x).strip() != str(uid)]
-                    if len(remaining) != len(hu):
-                        if remaining:
-                            item['device_uids'] = remaining      # still a member of the cluster
-                        else:
-                            del items[key]                     # last member → drop the check
-                        count += 1
-                    continue
-                if str(item.get('device_uid') or '') == str(uid):
-                    del items[key]
-                    count += 1
-    if count:
-        wa._save_modules(modules)
-    return count
 
 
 def _clone_device_checks(wa, src_uid: str, new_uid: str, label: str = '',
@@ -311,59 +339,92 @@ def _clone_device_checks(wa, src_uid: str, new_uid: str, label: str = '',
 
     Items are loaded decrypted and saved re-encrypted, so inline secrets survive.  Returns the
     number of checks the clone was wired into."""
+    # Load, edit and save as ONE step (see modules.facade.mutate_modules): done as three,
+    # a module save landing in between was overwritten by this stale copy.
+    def _apply(modules) -> int:
+        count = 0
+        for mod, mcfg in modules.items():
+            if str(mod).startswith('__') or not isinstance(mcfg, dict):
+                continue
+            for coll, items in list(mcfg.items()):
+                if str(coll).startswith('__') or not isinstance(items, dict):
+                    continue
+                # The collection's label template (e.g. service_status "{device} - {name}") lets the
+                # clone keep its per-item part (service/partition) with the NEW device name; without
+                # one we just use the device name.
+                _meta = _coll_meta(wa._modules_dir, mod, coll)
+                _tpl = _meta.get('__discovery_label_template__')
+                _disc = _meta.get('__discovery_field__')
+                for ikey, item in list(items.items()):
+                    if not isinstance(item, dict):
+                        continue
+                    if only_keys is not None and str(ikey) not in only_keys:
+                        continue                       # the user did not pick this check
+                    # Multi-device (cluster) binding: the device is one member of a shared check.
+                    # Don't duplicate the check — add the clone as a NEW member of the SAME check
+                    # so it joins the cluster (even if a stale device_uid also matches).
+                    hu = item.get('device_uids')
+                    if isinstance(hu, list) and any(str(x).strip() for x in hu):
+                        members = [str(x).strip() for x in hu]
+                        if str(src_uid) in members and str(new_uid) not in members:
+                            hu.append(new_uid)
+                            count += 1
+                        continue
+                    if str(item.get('device_uid') or '') != str(src_uid):
+                        continue
+                    clone = copy.deepcopy(item)
+                    clone['device_uid'] = new_uid
+                    clone.pop('uid', None)
+                    # Re-format the label with the new device name (+ the item's own operative field
+                    # via the template), else just the device name.
+                    clone['label'] = (_format_item_label(_tpl, label, clone, _disc)
+                                      if _tpl else label)
+                    items[str(uuid.uuid4())] = clone
+                    count += 1
+        return count
+
     try:
-        modules = wa._load_modules()
+        return mutate_modules(wa, _apply) or 0
     except Exception:  # pylint: disable=broad-except
         return 0
-    count = 0
-    for mod, mcfg in modules.items():
-        if str(mod).startswith('__') or not isinstance(mcfg, dict):
+
+
+def forget_device_references(wa, uid: str, actor: str = '') -> None:
+    """Clear what other domains say about device *uid*, which has just been deleted.
+
+    Ownership (``org_owner`` rows of scope ``device``) is dropped; the DCIM rows that name it
+    as their managed side (``dc_item``, ``dc_pdu``, ``dc_source`` → ``device_uid``) keep
+    existing — a rack still holds the box, a PDU is still on the wall — but no longer point
+    at a device nobody can resolve. Through the stores' own APIs; each part is best-effort,
+    because the device is already gone and a failure here must not turn that into a 500."""
+    uid = str(uid or '').strip()
+    if not uid:
+        return
+    orgs = getattr(wa, '_orgs_store', None)
+    if orgs is not None:
+        try:
+            orgs.forget_scope('device', uid)
+        except Exception:  # pylint: disable=broad-except
+            pass
+    dcim = getattr(wa, '_dcim_store', None)
+    if dcim is None:
+        return
+    for table in ('items', 'pdus', 'sources'):
+        rows = getattr(dcim, table, None)
+        if rows is None:
             continue
-        for coll, items in list(mcfg.items()):
-            if str(coll).startswith('__') or not isinstance(items, dict):
-                continue
-            # The collection's label template (e.g. service_status "{device} - {name}") lets the
-            # clone keep its per-item part (service/partition) with the NEW device name; without
-            # one we just use the device name.
-            _meta = _coll_meta(wa._modules_dir, mod, coll)
-            _tpl = _meta.get('__discovery_label_template__')
-            _disc = _meta.get('__discovery_field__')
-            for ikey, item in list(items.items()):
-                if not isinstance(item, dict):
-                    continue
-                if only_keys is not None and str(ikey) not in only_keys:
-                    continue                       # the user did not pick this check
-                # Multi-device (cluster) binding: the device is one member of a shared check.
-                # Don't duplicate the check — add the clone as a NEW member of the SAME check
-                # so it joins the cluster (even if a stale device_uid also matches).
-                hu = item.get('device_uids')
-                if isinstance(hu, list) and any(str(x).strip() for x in hu):
-                    members = [str(x).strip() for x in hu]
-                    if str(src_uid) in members and str(new_uid) not in members:
-                        hu.append(new_uid)
-                        count += 1
-                    continue
-                if str(item.get('device_uid') or '') != str(src_uid):
-                    continue
-                clone = copy.deepcopy(item)
-                clone['device_uid'] = new_uid
-                clone.pop('uid', None)
-                # Re-format the label with the new device name (+ the item's own operative field
-                # via the template), else just the device name.
-                clone['label'] = (_format_item_label(_tpl, label, clone, _disc)
-                                  if _tpl else label)
-                items[str(uuid.uuid4())] = clone
-                count += 1
-    if count:
-        wa._save_modules(modules)
-    return count
+        try:
+            for row in rows.list('device_uid = ?', (uid,)):
+                rows.update(row['uid'], {'device_uid': ''}, actor=actor)
+        except Exception:  # pylint: disable=broad-except
+            pass
 
 
 def _only_modules_growth(old: dict, data: dict) -> bool:
     """True if *data* changes nothing on the device except adding entries to the ``modules``
     list (no field edits, no module removals)."""
-    for f in _DEVICE_EDIT_FIELDS:
-        if data.get(f) != old.get(f):
+    for f in _DEVICE_EDIT_FIELDS + _DEVICE_KEPT_IF_ABSENT:
+        if not _same_field(old, data, f):
             return False
     old_mods = set(old.get('modules') or [])
     new_mods = set(data.get('modules') or [])
@@ -408,10 +469,14 @@ def _probe_device_record(wa, body):
     return record
 
 
-def _restore_check_secrets(wa, bare_module, coll, key, fields):
+def _restore_check_secrets(wa, bare_module, coll, key, fields, may_restore=None):
     """Restore masked (null/'') secret fields in a check's *fields* from the stored
     module-config item, so a test run AFTER a reload (when the UI only holds masked secrets)
-    uses the real, stored values instead of empties."""
+    uses the real, stored values instead of empties.
+
+    *may_restore(stored_item)* says whether the caller may have THAT check's secrets: the key
+    is the client's to choose and the device the test runs against is too, so without it a
+    device editor could name any other check and have its password sent to their device."""
     if not isinstance(fields, dict):
         return
     modules = wa._load_modules()
@@ -420,6 +485,8 @@ def _restore_check_secrets(wa, bare_module, coll, key, fields):
         items = mod.get(coll) if isinstance(mod, dict) else None
         stored = items.get(key) if isinstance(items, dict) else None
         if isinstance(stored, dict):
+            if may_restore is not None and not may_restore(stored):
+                return
             secret_manager.restore_sensitive(fields, stored, keys=wa._secret_keys)
             return
 

@@ -110,7 +110,7 @@ async function _cloneDeviceSubmit(openEdit) {
     // Module checks bound to the source were duplicated server-side → refresh the
     // modules config so the editor (and Modules tab) show the cloned checks.
     if (data.checks_cloned) {
-        modulesData = await apiGet('/api/v1/modules') || modulesData;
+        modulesData = await apiGetModules() || modulesData;
         if (typeof renderModules === 'function') renderModules();
     }
     renderServers();

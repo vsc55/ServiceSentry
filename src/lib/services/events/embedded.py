@@ -125,6 +125,9 @@ class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
     def stop_worker(self) -> None:
         self._stop_event_worker()
 
+    def on_shutdown(self) -> None:
+        self._stop_event_worker()
+
     def on_config_changed(self, changed) -> None:
         # Master switch: disabling events from the config tab stops a running worker
         # (enabling does NOT auto-start — that is autostart/Services).

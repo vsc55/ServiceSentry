@@ -12,6 +12,7 @@ what the answer means; this decides how to ask it.
 
 import asyncio
 import threading
+import time
 
 from .mibs import resolver as _mib_resolver
 
@@ -92,6 +93,9 @@ try:
         usmHMAC384SHA512AuthProtocol,
         usm3DESEDEPrivProtocol,
     )
+    from pyasn1.type import univ as _univ           # type: ignore[import]
+    from pysnmp.proto import rfc1902 as _rfc1902    # type: ignore[import]
+    from pysnmp.proto import rfc1905 as _rfc1905    # type: ignore[import]
     _HAS_PYSNMP = True
 except ImportError:
     pass
@@ -147,50 +151,183 @@ _TARGETS: dict = {}
 _AUTHS: dict = {}
 _TARGET_LOCK = None
 
+#: Engines of their own, for the v3 credentials the shared one cannot hold at the same time.
+#:
+#: pysnmp's local configuration keys a USM user by its NAME. Two devices that both use the v3
+#: user `monitor` with DIFFERENT keys are therefore one row in the shared engine, and every
+#: request rewrites that row with its own keys — while the other device's request is still in
+#: flight on the same loop. What arrives is an authentication failure (or a wrong-key decrypt)
+#: that reads like the device, and which device gets it depends on timing. A `securityName` of
+#: our own does not separate them: pysnmp indexes the user table by it but looks the row up by
+#: `userName`, so the second row is never found.
+#:
+#: So the first credential seen under a user name keeps the shared engine — the common case,
+#: one credential per user name, still costs exactly one engine — and any OTHER credential
+#: under that same name gets an engine of its own, keyed by the whole credential.
+_ENGINES: dict = {}
+_V3_OWNERS: dict = {}
+
+#: How long a resolved transport is trusted. `UdpTransportTarget.create` is a DNS lookup, and
+#: a lookup kept for the life of the process is a device that changed address being polled at
+#: the old one until somebody restarts the panel. Five minutes is a handful of resolves per
+#: device per hour; a read that gets no answer at all forgets it at once (`_forget_target`).
+_TARGET_TTL = 300.0
+
 
 def _reset() -> None:
     """Forget the engine and everything resolved for it. For the loop going away, and tests."""
     global _ENGINE, _TARGET_LOCK         # pylint: disable=global-statement
-    engine, _ENGINE = _ENGINE, None
+    engines = [e for e in [_ENGINE, *_ENGINES.values()] if e is not None]
+    _ENGINE = None
+    _ENGINES.clear()
+    _V3_OWNERS.clear()
     _TARGETS.clear()
     _AUTHS.clear()
     _TARGET_LOCK = None
-    if engine is not None:
+    for engine in engines:
         try:
             engine.close_dispatcher()
         except Exception:  # pylint: disable=broad-except
             pass
 
 
-async def _engine():
-    """The shared engine, built on the loop thread the first time anything asks.
+def _engine_slot(v3) -> tuple | None:
+    """Which engine a credential is sent through: ``None`` for the shared one.
+
+    *v3* is ``(user, auth key, priv key, auth proto, priv proto)`` for a v3 request and empty
+    for anything else — a community string has no per-user row to collide on.
+    """
+    if not v3:
+        return None
+    cred = tuple(str(p or '') for p in v3)
+    user = cred[0] or 'public'
+    owner = _V3_OWNERS.setdefault(user, cred)
+    return None if owner == cred else cred
+
+
+def _v3_of(version, *v3) -> tuple:
+    """The credential `_engine` separates on — empty for anything that is not v3."""
+    return tuple(v3) if str(version) == '3' else ()
+
+
+async def _engine(v3=None):
+    """The engine for one request, built on the loop thread the first time anything asks.
 
     On the loop and not in the caller: the dispatcher binds to whatever loop is running when
     the first request opens its socket, and an engine bound to a loop that has gone answers
     nothing, silently.
+
+    The shared one for everything but a v3 credential whose user name another credential
+    already holds in it — see `_ENGINES`.
     """
     global _ENGINE                       # pylint: disable=global-statement
-    if _ENGINE is None:
-        _ENGINE = SnmpEngine()
-    return _ENGINE
+    slot = _engine_slot(v3)
+    engine = _ENGINE if slot is None else _ENGINES.get(slot)
+    if engine is None:
+        engine = SnmpEngine()
+        if slot is None:
+            _ENGINE = engine
+        else:
+            _ENGINES[slot] = engine
+    return engine
+
+
+def _target_key(host, port, timeout, retries) -> tuple:
+    return (str(host), int(port), int(timeout), int(retries))
+
+
+def _forget_target(host, port, timeout, retries) -> None:
+    """Drop one resolved transport, so the next request resolves the name again.
+
+    Called when a device did not answer at all: the commonest reason a name that used to
+    answer stops answering is that it now points somewhere else.
+    """
+    _TARGETS.pop(_target_key(host, port, timeout, retries), None)
 
 
 async def _target(host: str, port: int, timeout: int, retries: int):
-    """The transport for one device, resolved once. A resolve is a DNS lookup."""
+    """The transport for one device, resolved once per `_TARGET_TTL`. A resolve is a DNS
+    lookup."""
     global _TARGET_LOCK                  # pylint: disable=global-statement
-    key = (str(host), int(port), int(timeout), int(retries))
-    got = _TARGETS.get(key)
-    if got is not None:
-        return got
+    key = _target_key(host, port, timeout, retries)
+
+    def _fresh():
+        got = _TARGETS.get(key)
+        if got is not None and time.monotonic() - got[1] < _TARGET_TTL:
+            return got[0]
+        return None
+
+    found = _fresh()
+    if found is not None:
+        return found
     if _TARGET_LOCK is None:
         _TARGET_LOCK = asyncio.Lock()
     # Held across the await so that two metrics of the same device starting together resolve
     # the address once between them rather than once each.
     async with _TARGET_LOCK:
-        if key not in _TARGETS:
-            _TARGETS[key] = await UdpTransportTarget.create(
+        found = _fresh()
+        if found is None:
+            found = await UdpTransportTarget.create(
                 (host, port), timeout=timeout, retries=retries)
-        return _TARGETS[key]
+            _TARGETS[key] = (found, time.monotonic())
+        return found
+
+
+def _absent(val) -> str:
+    """The name of an SNMPv2 exception value (``noSuchObject`` …), or ``''`` for a reading.
+
+    v2c and v3 do not answer a missing OID with an error status: the PDU comes back with
+    status 0 and the variable binding carries one of these in place of a value. They are
+    `Null`s underneath, so ``str()`` of one is ``''`` — and an empty string read as the value
+    is an OID that "answers" for ever.
+    """
+    if not _HAS_PYSNMP:
+        return ''
+    if isinstance(val, (_rfc1905.NoSuchObject, _rfc1905.NoSuchInstance,
+                        _rfc1905.EndOfMibView)):
+        name = type(val).__name__
+        return name[:1].lower() + name[1:]
+    return ''
+
+
+def _utf8_text(val) -> str | None:
+    """An OctetString that is UTF-8 text with non-ASCII in it, as that text — else ``None``.
+
+    pyasn1 prints any octet outside printable ASCII as ``0x…`` hex, so an interface alias
+    "Oficina Señor" or a storage called "Memoria física" came back from a walk as a string of
+    digits, and from a GET decoded as Latin-1 ("SeÃ±or"). Only what decodes CLEANLY and is
+    printable throughout counts as text; anything else keeps the spelling it had — the hex is
+    what `metrics.attribute` turns into a MAC, and binary is what it is.
+
+    Six octets are left alone on purpose: that is the length of a MAC, and a MAC whose bytes
+    happen to be valid UTF-8, read as a few accented letters, would be a forwarding-table entry
+    nothing can match again. A six-byte accented name keeps the spelling it had before.
+    """
+    if not _HAS_PYSNMP or not isinstance(val, _univ.OctetString):
+        return None
+    if isinstance(val, (_univ.Null, _rfc1902.IpAddress, _rfc1902.Opaque, _rfc1902.Bits)):
+        return None
+    try:
+        raw = bytes(val.asOctets())
+    except Exception:  # pylint: disable=broad-except
+        return None
+    if not raw or len(raw) == 6 or all(b < 0x80 for b in raw):
+        return None                      # empty, MAC-shaped, or ASCII: the old path is right
+    try:
+        text = raw.decode('utf-8')
+    except UnicodeDecodeError:
+        return None
+    return text if text.isprintable() else None
+
+
+class Truncated(str):
+    """A walk that stopped at its row ceiling with more rows still to come.
+
+    A str subclass for the same reason as `NoAnswer`: the rows that were read are real, and
+    every caller that shows or logs the error goes on working. The caller that must not treat
+    a partial table as the whole one — the sightings store, which REPLACES what it held — can
+    tell, with `isinstance`.
+    """
 
 
 class NoAnswer(str):
@@ -283,7 +420,8 @@ class SnmpClient:
                 v3_auth_proto, v3_priv_proto,
             )
             transport = await _target(host, port, timeout, retries)
-            engine = await _engine()
+            engine = await _engine(_v3_of(version, v3_username, v3_auth_key, v3_priv_key,
+                                          v3_auth_proto, v3_priv_proto))
             error_indication, error_status, error_index, var_binds = await get_cmd(
                 engine, auth_data, transport, ContextData(),
                 ObjectType(ObjectIdentity(oid)),
@@ -291,17 +429,26 @@ class SnmpClient:
             if error_indication:
                 # The engine could not get an answer — a timeout, an unreachable host, a
                 # broken credential. Not the device saying no.
+                _forget_target(host, port, timeout, retries)
                 return None, NoAnswer(str(error_indication))
             if error_status:
                 idx = int(error_index) - 1
                 return None, f'{error_status.prettyPrint()} at index {idx}'
             for _, val in var_binds:
-                return str(val), None
+                # v2c/v3 say "not here" INSIDE a successful PDU. An answer, so a plain string
+                # and not `NoAnswer`: the device is on the network and the sampler must not
+                # count this towards giving up on it.
+                missing = _absent(val)
+                if missing:
+                    return None, f'{missing} at {oid}'
+                text = _utf8_text(val)
+                return (text if text is not None else str(val)), None
             return None, 'no OID data returned'
 
         try:
             return run_coroutine(_run())
         except Exception as exc:  # pylint: disable=broad-except
+            _forget_target(host, port, timeout, retries)
             return None, NoAnswer(str(exc))
 
     # ── SNMP Walk of ONE subtree (used by sampling) ────────────────────────────
@@ -309,7 +456,8 @@ class SnmpClient:
     # A table nobody bounded is a cycle nobody bounded: a chassis switch can answer thousands
     # of rows on one column, and the walk that fetches them is the same one that has to finish
     # before the next check runs. The ceiling is generous for real hardware and finite for the
-    # rest; a truncated walk says so instead of pretending it saw the whole table.
+    # rest; a truncated walk says so instead of pretending it saw the whole table — with a
+    # `Truncated` error beside the rows it did read.
     WALK_MAX_ROWS = 512
 
     @staticmethod
@@ -340,6 +488,10 @@ class SnmpClient:
         Keys are the OID **suffix** after the walked root, which is the table index: `"3"` for a
         plain table, `"1.3.6.1.4.1"` for one indexed by an OID. Rows come back in the order the
         device sent them.
+
+        A table longer than *max_rows* comes back as its first *max_rows* rows and a
+        `Truncated` error. It used to come back with no error at all, and a partial table read
+        as the whole one — which a store that REPLACES what it held turns into data loss.
         """
         if not _HAS_PYSNMP:
             return {}, 'pysnmp is not installed'
@@ -354,7 +506,8 @@ class SnmpClient:
                 v3_auth_proto, v3_priv_proto,
             )
             transport = await _target(host, port, timeout, retries)
-            engine  = await _engine()
+            engine  = await _engine(_v3_of(version, v3_username, v3_auth_key, v3_priv_key,
+                                           v3_auth_proto, v3_priv_proto))
             context = ContextData()
             target  = ObjectType(ObjectIdentity(root))
             rows: dict = {}
@@ -368,6 +521,8 @@ class SnmpClient:
                                lexicographicMode=False)
             async for err_ind, err_st, err_idx, var_binds in cmd:
                 if err_ind:
+                    if not rows:
+                        _forget_target(host, port, timeout, retries)
                     return rows, NoAnswer(str(err_ind))
                 if err_st:
                     return rows, f'{err_st.prettyPrint()} at index {int(err_idx) - 1}'
@@ -379,14 +534,22 @@ class SnmpClient:
                         index = oid_str[len(root) + 1:]
                     else:
                         return rows, None        # walked past the subtree: the table is done
-                    rows[index] = str(vb[1].prettyPrint())
-                    if len(rows) >= limit:
-                        return rows, None
+                    if _absent(vb[1]):
+                        continue                 # endOfMibView / noSuch*: not a row
+                    # Text as text: prettyPrint spells any octet outside ASCII as hex.
+                    text = _utf8_text(vb[1])
+                    rows[index] = text if text is not None else str(vb[1].prettyPrint())
+                    # One row PAST the ceiling is how a full table is told from a cut one.
+                    if len(rows) > limit:
+                        del rows[index]
+                        return rows, Truncated(
+                            f'more than {limit} rows; only the first {limit} were read')
             return rows, None
 
         try:
             return run_coroutine(_run())
         except Exception as exc:  # pylint: disable=broad-except
+            _forget_target(host, port, timeout, retries)
             return {}, NoAnswer(str(exc))
 
     # ── SNMP Walk (used by discover) ───────────────────────────────────────────
@@ -421,7 +584,8 @@ class SnmpClient:
 
         async def _walk_subtree(root_oid: str, limit: int) -> list[dict]:
             transport = await _target(host, port, timeout, retries)
-            engine  = await _engine()
+            engine  = await _engine(_v3_of(version, v3_username, v3_auth_key, v3_priv_key,
+                                           v3_auth_proto, v3_priv_proto))
             context = ContextData()
             root    = ObjectType(ObjectIdentity(root_oid))
             items: list[dict] = []

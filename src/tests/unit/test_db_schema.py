@@ -11,7 +11,7 @@ and diff, differing only in introspection.
 import pytest
 
 from lib.db.schema import (
-    Column, Index, TableSpec, canonical_default, canonical_type, create_table_ddl,
+    Column, ColumnInfo, Index, TableSpec, canonical_default, canonical_type, create_table_ddl,
     diff_table,
 )
 from lib.db.sqlite import SQLiteConnector
@@ -243,6 +243,33 @@ def test_canonical_type(raw, expected):
 ])
 def test_canonical_default(raw, expected):
     assert canonical_default(raw) == expected
+
+
+@pytest.mark.parametrize('raw,expected', [
+    # What MySQL 8 puts in information_schema.COLUMNS.COLUMN_DEFAULT for an EXPRESSION default
+    # — the parenthesised `DEFAULT ('')` a TEXT column needs there: charset introducer and
+    # backslash-escaped quotes, sometimes still inside its parentheses.
+    ("_utf8mb4\'\'", ''),
+    ("_utf8mb4\'{}\'", '{}'),
+    ("_utf8mb4\'local\'", 'local'),
+    ("(_utf8mb4\'local\')", 'local'),
+    ("_latin1'x'", 'x'),
+    ("('')", ''),
+    ('(0)', '0'),
+])
+def test_canonical_default_reads_mysql8_expression_defaults(raw, expected):
+    """Compared raw, `_utf8mb4\'\'` never equalled '', so every table with a TEXT default read
+    as drifted on MySQL 8 and was rebuilt on every boot."""
+    assert canonical_default(raw) == expected
+
+
+def test_a_mysql8_text_default_is_not_a_drift():
+    col = Column('a', 'TEXT', nullable=False, default="''")
+    spec = TableSpec(name='t', columns=(Column('id', 'AUTOINCREMENT', primary_key=True), col))
+    actual = [ColumnInfo('id', 'int', False, None, pk=1),
+              ColumnInfo('a', 'text', False, "_utf8mb4\'\'")]
+    diff = diff_table(spec, actual, [])
+    assert not diff.default_mismatches and not diff.needs_rebuild
 
 
 def test_keyed_text_uses_varchar_on_mysql():

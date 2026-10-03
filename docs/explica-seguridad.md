@@ -1390,7 +1390,7 @@ Los campos sensibles (`token`, `password`, claves de contraseña) se muestran co
 
 ### Límite de entradas
 
-El log se recorta automáticamente a `_AUDIT_MAX_ENTRIES` entradas (por defecto 500, configurable hasta 10 000 mediante `web_admin.audit_max_entries`) para evitar crecimiento ilimitado en disco.
+El log se recorta automáticamente a `_AUDIT_MAX_ENTRIES` entradas (por defecto 500, configurable hasta 10 000 mediante `web_admin.audit_max_entries`) para evitar crecimiento ilimitado en disco. Si se baja el tope, el exceso se recorta de golpe en la siguiente entrada (no de una en una), y el monitor respeta el tope configurado.
 
 ### Tests de auditoría
 

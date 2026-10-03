@@ -104,7 +104,7 @@ def _conn_with_secondary_groups(user_entry, group_entries=None):
 
 
 
-class TestLdapSyncUser:
+class TestLdapSyncUserRefusesLocal:
     def test_refuses_to_convert_local_account(self, admin, config_dir):
         """R5 (account-takeover): an LDAP login whose username collides with a LOCAL
         account must be refused — sync returns None (the caller rejects, no 500), and the
@@ -349,6 +349,89 @@ class TestLdapLoginFlow:
         assert not me.get_json().get('logged_in', False)
 
 
+class TestLdapCaseVariants:
+    """The directory does not care about case (AD matches sAMAccountName case-insensitively)
+    and, with e-mail login, not even about the name. The panel used to key the account by what
+    was TYPED: `JSmith` missed `jsmith`, the bind succeeded, and a second account was
+    provisioned with the group-derived role — no second factor, and enabled even when the
+    real one had been disabled."""
+
+    _DN = 'CN=jsmith,DC=example,DC=com'
+
+    def _attrs(self):
+        return {'dn': self._DN, 'display_name': 'J', 'email': 'j@example.com',
+                'groups': ['CN=Admins,DC=example,DC=com']}
+
+    def _seed(self, admin, name='jsmith', **extra):
+        admin._users[name] = {'uid': f'u-{name}', 'role': admin._role_name_to_uid('admin'),
+                              'enabled': True, 'auth_source': 'ldap',
+                              'auth_source_id': self._DN, 'groups': [], **extra}
+
+    def _login_as(self, admin, typed):
+        from lib.providers.ldap import auth as ldap_auth
+        c = admin.app.test_client()
+        with patch.object(ldap_auth, 'is_available', return_value=True), \
+             patch.object(ldap_auth, 'authenticate', return_value=(self._attrs(), None)):
+            c.post('/login', data={'username': typed, 'password': 'pw'})
+        with c.session_transaction() as s:
+            return bool(s.get('logged_in')), s.get('username')
+
+    def test_a_case_variant_still_owes_the_existing_accounts_second_factor(
+            self, admin, config_dir):
+        from lib.core.mfa import service as mfa_service, totp
+        _ldap_cfg(config_dir)
+        self._seed(admin)
+        out = mfa_service.enroll_begin(admin._mfa_store, 'u-jsmith', 'jsmith')
+        mfa_service.enroll_confirm(admin._mfa_store, 'u-jsmith',
+                                   totp.code_at(out['secret'], totp.current_step() - 1))
+        logged_in, _who = self._login_as(admin, 'JSmith')
+        assert not logged_in
+        assert [k for k in admin._users if k.lower() == 'jsmith'] == ['jsmith']
+
+    def test_a_case_variant_signs_in_as_the_existing_account(self, admin, config_dir):
+        _ldap_cfg(config_dir)
+        self._seed(admin)
+        logged_in, who = self._login_as(admin, 'JSMITH')
+        assert logged_in and who == 'jsmith'
+        assert [k for k in admin._users if k.lower() == 'jsmith'] == ['jsmith']
+
+    def test_a_case_variant_of_a_disabled_account_stays_out(self, admin, config_dir):
+        _ldap_cfg(config_dir)
+        self._seed(admin, enabled=False)
+        logged_in, _who = self._login_as(admin, 'JSmith')
+        assert not logged_in
+        assert 'JSmith' not in admin._users
+
+    def test_an_email_login_lands_on_the_account_bound_to_the_same_dn(self, admin, config_dir):
+        _ldap_cfg(config_dir, extra={'allow_email_login': True})
+        self._seed(admin, enabled=False)
+        logged_in, _who = self._login_as(admin, 'j@example.com')
+        assert not logged_in
+        assert 'j@example.com' not in admin._users
+
+    def test_a_case_variant_of_a_local_account_is_refused(self, admin, config_dir):
+        _ldap_cfg(config_dir)
+        admin._users['JDoe'] = {'uid': 'u-jdoe', 'role': admin._role_name_to_uid('viewer'),
+                                'enabled': True, 'auth_source': 'local', 'groups': []}
+        logged_in, _who = self._login_as(admin, 'jdoe')
+        assert not logged_in
+        assert 'jdoe' not in admin._users
+
+    def test_duplicates_left_behind_are_refused_not_guessed(self, admin, config_dir):
+        _ldap_cfg(config_dir)
+        self._seed(admin, 'jsmith')
+        self._seed(admin, 'JSmith')
+        logged_in, _who = self._login_as(admin, 'jsmith')
+        assert not logged_in
+
+    def test_sync_user_never_creates_a_case_variant(self, admin, config_dir):
+        from lib.providers.ldap import auth as ldap_auth
+        _ldap_cfg(config_dir)
+        self._seed(admin)
+        assert ldap_auth.sync_user(admin, 'JSmith', self._attrs()) is None
+        assert 'JSmith' not in admin._users
+
+
 # ── /api/ldap/test audit behaviour ───────────────────────────────────────────
 
 class TestLdapTestEndpoint:
@@ -389,3 +472,35 @@ class TestLdapTestEndpoint:
         assert r_conn.get_json()['ok'] is False
         # The message should contain the error detail, not just a generic string
         assert conn_msg  # not empty
+
+
+class TestAnotherProvidersAccountIsNotTheDirectorys:
+    """The directory vouches for a login NAME. An account with that name already bound to an
+    OIDC or SAML subject belongs to that identity, and a bind used to convert it — subject and
+    role overwritten — on the strength of the string alone."""
+
+    def test_an_oidc_bound_account_is_refused(self, admin, config_dir):
+        from lib.providers.ldap import auth as ldap_auth
+        _ldap_cfg(config_dir)
+        admin._users['john'] = {'uid': 'u-john', 'auth_source': 'oidc',
+                                'auth_source_id': 'sub-john', 'groups': [], 'enabled': True,
+                                'role': admin._role_name_to_uid('viewer')}
+        attrs = {'dn': 'CN=John,DC=example,DC=com', 'display_name': 'J', 'email': '',
+                 'groups': ['CN=Admins,DC=example,DC=com']}
+        assert ldap_auth.sync_user(admin, 'john', attrs) is None
+        assert admin._users['john']['auth_source'] == 'oidc'
+        assert admin._uid_to_role_name(admin._users['john']['role']) == 'viewer'
+
+    def test_a_dn_that_moved_inside_the_directory_still_signs_in(self, admin, config_dir):
+        """An OU move changes the DN; the directory has just accepted the password for the
+        same login name, so within LDAP the DN is not what binds the account."""
+        from lib.providers.ldap import auth as ldap_auth
+        _ldap_cfg(config_dir)
+        admin._users['john'] = {'uid': 'u-john', 'auth_source': 'ldap',
+                                'auth_source_id': 'CN=John,OU=Old,DC=example,DC=com',
+                                'groups': [], 'enabled': True,
+                                'role': admin._role_name_to_uid('viewer')}
+        attrs = {'dn': 'CN=John,OU=New,DC=example,DC=com', 'display_name': 'J', 'email': '',
+                 'groups': []}
+        user = ldap_auth.sync_user(admin, 'john', attrs)
+        assert user is not None and user['auth_source_id'].startswith('CN=John,OU=New')

@@ -14,6 +14,7 @@ Routes registered by this file:
 """
 
 from lib.config.spec import cfg_get
+from lib.providers.identity import refusal
 
 from . import auth as oidc_auth
 
@@ -69,7 +70,7 @@ def register(app, wa):
         if user is None:
             flash(wa._t('sso_user_not_allowed'), 'danger')
             wa._audit('login_failed', username or '', request.remote_addr,
-                      detail={'reason': 'oidc_auto_create_disabled',
+                      detail={'reason': refusal('oidc_auto_create_disabled'),
                               'groups_received': received_groups})
             return redirect(url_for('login'))
 
@@ -90,7 +91,8 @@ def register(app, wa):
         # False means the account owes a second factor: nothing has been created, and the
         # browser goes to the step that finishes the sign-in.
         if not wa._establish_session(username, user, source='oidc'):
-            return redirect(url_for('login_mfa'))
+            # Having a factor to prove and having to set one up are two different pages.
+            return redirect(url_for(wa._mfa_step_endpoint(username, 'oidc')))
         role_uid = user.get('role', '')
         assigned_role = wa._uid_to_role_name(role_uid) if wa._is_uid(role_uid) else role_uid
         wa._audit('login_ok', username, request.remote_addr,

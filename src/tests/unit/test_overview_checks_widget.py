@@ -10,7 +10,7 @@ import pytest
 # Descriptors live in each package's manifest.py; the data providers they bind stay in
 # the package's own overview_widget.py (see lib/discovery.py).
 from lib.core.modules.manifest import OVERVIEW_WIDGETS as MOD_WIDGETS
-from lib.core.modules.overview_widget import _mod_checks, _modules_list_rows
+from lib.core.modules.overview_widget import _mod_checks, _modules_list_rows, modules_stat
 from lib.core.devices.manifest import OVERVIEW_WIDGETS as DEVICE_WIDGETS
 from lib.core.devices.overview_widget import _server_matches
 from lib.core.overview.filters import parse_severity_filter, severity_matches
@@ -201,6 +201,28 @@ class TestTheCardSaysWhenSomethingIsWrong:
         claimed = {w['id'] for w in discover_overview_widgets()
                    if (w.get('view') or {}).get('state_rows')}
         assert claimed == {'incidents'}, f'unexpected widgets claiming state_rows: {claimed}'
+
+
+class TestAbsentEnabledMeansOn:
+    """A module with no ``enabled`` key RUNS (the monitor defaults it to True, see
+    lib/modules/discovery/schemas.py); the Overview must not count it as off."""
+
+    def _wa(self):
+        return _FakeWA({}, {'cpu': {'list': {}}, 'ping': {'enabled': False},
+                            'dns': {'enabled': True}})
+
+    def test_modules_list_reports_absent_as_enabled(self):
+        rows = {r['name']: r['enabled'] for r in _modules_list_rows(self._wa())}
+        assert rows == {'cpu': True, 'ping': False, 'dns': True}
+
+    def test_on_filter_includes_absent(self):
+        assert sorted(r['name'] for r in _modules_list_rows(self._wa(), 'on')) == ['cpu', 'dns']
+
+    def test_modules_card_counts_absent_as_enabled(self):
+        stat = modules_stat(self._wa())
+        counts = {b['key']: b['count'] for b in stat['badges']}
+        assert stat['value'] == 3
+        assert counts == {'overview_enabled': 2, 'overview_disabled': 1}
 
 
 class TestSeverityFilter:

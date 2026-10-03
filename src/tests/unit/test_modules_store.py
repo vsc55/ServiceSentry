@@ -231,3 +231,77 @@ class TestDbBackedModules:
         other.save(changed)
         fac.reload_if_changed()                              # version bumped → re-reads
         assert fac.data['cpu']['alert'] == 1
+
+
+class TestNoLostUpdates:
+    """The configuration is replaced whole on every save, so two writers working from the
+    same read must not silently undo each other, and a second process must SEE a write."""
+
+    def test_second_store_sees_the_write_of_another(self):
+        # Two ModulesStore instances over one database = two replicas. The version used to be a
+        # per-instance counter, so the reader never noticed the other's write.
+        db = get_connector(None, default_sqlite_path=':memory:')
+        reader = DbBackedModules(ModulesStore(db))
+        writer = DbBackedModules(ModulesStore(db))
+        writer.save(_sample())
+        reader.read()
+        changed = _sample()
+        changed['cpu']['alert'] = 7
+        writer.save(changed)
+        assert reader.reload_if_changed()['cpu']['alert'] == 7
+
+    def test_stale_expected_version_is_refused_and_writes_nothing(self):
+        import pytest
+        from lib.core.modules.store import StaleModulesConfig
+        s, _ = _store()
+        s.save_all(_sample())
+        seen = s.version()
+        winner = _sample()
+        winner['cpu']['alert'] = 1
+        s.save_all(winner)                                   # someone else saves first
+        loser = _sample()
+        loser['cpu']['alert'] = 2
+        with pytest.raises(StaleModulesConfig) as exc:
+            s.save_all(loser, expected_version=seen)
+        assert exc.value.current == s.version()
+        assert s.load_all()['cpu']['alert'] == 1             # the winner's change survives
+
+    def test_current_expected_version_saves_and_returns_the_new_one(self):
+        s, _ = _store()
+        s.save_all(_sample())
+        v = s.version()
+        assert s.save_all(_sample(), expected_version=v) == v + 1 == s.version()
+
+    def test_mutate_modules_retries_on_a_concurrent_write(self):
+        # A read-modify-write that lost the race runs again on the fresh copy instead of
+        # saving its stale one over the other writer's change.
+        from lib.core.modules.facade import mutate_modules
+        db = get_connector(None, default_sqlite_path=':memory:')
+        mine, other = DbBackedModules(ModulesStore(db)), DbBackedModules(ModulesStore(db))
+        mine.save(_sample())
+
+        class _WA:
+            _modules_facade = mine
+
+            def _load_modules(self):
+                return copy.deepcopy(mine.reload_if_changed())
+
+            def _save_modules(self, data):
+                return mine.save(copy.deepcopy(data))
+
+        calls = []
+
+        def _edit(mods):
+            calls.append(1)
+            if len(calls) == 1:                              # another process writes NOW
+                theirs = copy.deepcopy(mods)
+                theirs['extra'] = {'enabled': True}
+                other.save(theirs)
+            mods['cpu']['alert'] = 3
+            return True
+
+        assert mutate_modules(_WA(), _edit) is True
+        final = DbBackedModules(ModulesStore(db)).read()
+        assert final['cpu']['alert'] == 3 and 'extra' in final
+        assert len(calls) == 2
+

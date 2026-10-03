@@ -187,7 +187,10 @@ class SyslogService(_HeartbeatMixin, _StandaloneConfigMixin, _EventsMixin, _Sysl
     # ── standalone lifecycle (the shared bits live in _SyslogMixin) ────────────
     def _retention_loop(self) -> None:
         while not self._stop.wait(self.RETENTION_EVERY):
-            self._syslog_prune_once()
+            try:
+                self._syslog_prune_once()
+            except Exception as exc:  # pylint: disable=broad-except
+                self._dbg(f'> Syslog >> retention sweep failed: {exc}', DebugLevel.error)
 
     def _config_signature(self) -> str:
         """Stable string of the syslog config, to detect changes between polls."""
@@ -213,9 +216,18 @@ class SyslogService(_HeartbeatMixin, _StandaloneConfigMixin, _EventsMixin, _Sysl
         The config is edited from the web UI (a different process), so the
         standalone container polls for changes and reloads — enabling/disabling
         or changing ports/allowlist takes effect without a container restart."""
-        self._syslog_sig = self._config_signature()
+        try:
+            self._syslog_sig = self._config_signature()
+        except Exception as exc:  # pylint: disable=broad-except
+            self._dbg(f'> Syslog >> config watch: initial read failed: {exc}',
+                      DebugLevel.error)
         while not self._stop.wait(_CONFIG_WATCH_EVERY):
-            self._reconcile_once()
+            try:
+                self._reconcile_once()
+            except Exception as exc:  # pylint: disable=broad-except
+                # A failed poll (DB down) is retried next time; ending the watcher
+                # would freeze the listener on its current config until a restart.
+                self._dbg(f'> Syslog >> config watch failed: {exc}', DebugLevel.error)
 
     def stop(self, *_args) -> None:
         if not self._stop.is_set():

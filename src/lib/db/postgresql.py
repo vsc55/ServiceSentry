@@ -163,6 +163,30 @@ class PostgreSQLConnector(BaseConnector):
             for n, cols in grouped.items()
         ]
 
+    def sync_autoincrement(self, table: str) -> None:
+        """Set every serial/identity sequence of *table* to MAX(column) + 1.
+
+        PostgreSQL hands out ids from a sequence that only ``nextval`` moves; a row inserted
+        WITH its id (a rebuild copying the old table, a restore refilling it) leaves it where
+        it was. The sequence of a freshly rebuilt table is at 1, so the next plain INSERT on
+        `audit`, `history`, `history_series`… collided with a row already there — and the
+        stores that swallow write errors lost every new row from then on, silently.
+
+        The columns are found in the catalog, not passed in: a restore knows only the table
+        name, and the catalog is what actually owns a sequence.
+        """
+        q = self.quote_ident
+        cols = self.fetchall(
+            'SELECT column_name FROM information_schema.columns '
+            'WHERE table_name = ? AND table_schema = current_schema() '
+            "AND (column_default LIKE ? OR is_identity = 'YES')",
+            (table, 'nextval(%'))
+        for (col,) in cols:
+            self.fetchone(
+                f'SELECT setval(pg_get_serial_sequence(?, ?), '
+                f'COALESCE((SELECT MAX({q(col)}) FROM {q(table)}), 0) + 1, false)',
+                (q(table), col))
+
     # ── Read ──────────────────────────────────────────────────────────────────
 
     def fetchall(self, sql: str, params: tuple = ()) -> list[tuple]:

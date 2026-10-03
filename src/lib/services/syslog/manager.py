@@ -204,8 +204,10 @@ class _SyslogMixin:
         store = getattr(self, '_syslog_store', None)
         if store is None:
             return
-        cfg = self._syslog_cfg()
         try:
+            # The config read is inside the guard: it hits the DB, and an exception
+            # here would end the retention loop that calls this for good.
+            cfg = self._syslog_cfg()
             deleted = store.prune(retention_days=int(cfg.get('retention_days', 0) or 0),
                                   max_rows=int(cfg.get('max_messages', 0) or 0))
             if deleted:

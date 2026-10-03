@@ -270,6 +270,81 @@ function setConfigRailCard(id) {
     if (c) c.scrollTop = 0;
 }
 
+/** The section (rail card) that holds an option, by its `section|field` path.
+ *
+ *  The layout lists a generic card's fields, so most answers need no DOM at all — which is
+ *  what lets a link from ANOTHER section pick the card before Configuration has ever been
+ *  drawn. A card drawn by a renderer lists none: the rendered row is asked next, and failing
+ *  that the card that owns the option's section. */
+function _cfgCardOfPath(path, sec) {
+    const lay = (typeof CONFIG_LAYOUT !== 'undefined' && CONFIG_LAYOUT) || { cards: [] };
+    const cards = lay.cards || [];
+    let card = path ? cards.find(cd => (cd.fields || []).includes(path)) : null;
+    const c = document.getElementById('config-container');
+    if (!card && path && c) {
+        const el = c.querySelector(`.cfg-field-wrap[data-cfg-path="${CSS.escape(path)}"]`);
+        if (el) card = cards.find(cd => { const n = _cfgCardNode(c, cd); return n && n.contains(el); });
+    }
+    if (!card) {
+        const s = sec || String(path || '').split('|')[0];
+        if (s) card = cards.find(cd => (cd.section || cd.id) === s);
+    }
+    return card ? card.id : '';
+}
+
+/** Bring one option into view and put the cursor on it. Assumes its section is open. */
+function _cfgRevealField(path) {
+    if (!path) return;
+    const c = document.getElementById('config-container');
+    const el = c && c.querySelector(`.cfg-field-wrap[data-cfg-path="${CSS.escape(path)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const inp = el.querySelector('input:not([type=hidden]), select, textarea');
+    if (inp) inp.focus({ preventScroll: true });
+}
+
+/** Go to an option from anywhere in the panel: Configuration, the section that holds it, the
+ *  option itself.
+ *
+ *  Links into Configuration used to drive its old sub-tabs (`_activeCfgTab`, a
+ *  `cfg_active_tab` key and `#cfg-tab-…-btn` buttons), all gone since the sections became a
+ *  rail: they opened whichever section was open last, and scrolling to a field inside a card
+ *  that is `display:none` does nothing. The section is picked FIRST — it is remembered, so the
+ *  redraw the tab does on arrival keeps it — and the option is revealed after that redraw. */
+function openConfigField(path, sec) {
+    const card = _cfgCardOfPath(path, sec);
+    if (card) setConfigRailCard(card);
+    const btn = document.querySelector('[data-bs-target="#tab-config"]');
+    if (!btn || btn.classList.contains('active') || typeof bootstrap === 'undefined') {
+        _cfgRevealField(path);
+        return;
+    }
+    btn.addEventListener('shown.bs.tab', () => {
+        _cfgRevealField(path);       // dirty: nothing redraws, the rows on screen are the ones
+        // Clean, the tab's own handler re-fetches the configuration and redraws it — more than
+        // once: the path placeholders some sections resolve on arrival redraw again — and each
+        // redraw replaces the row just revealed. Reveal again after every redraw that lands in
+        // the next few seconds, until the person takes over (a click or a key).
+        const c = document.getElementById('config-container');
+        if (!c || (typeof _isDirty === 'function' && _isDirty('config'))) return;
+        let pending = 0;
+        const mo = new MutationObserver(() => {
+            clearTimeout(pending);
+            pending = setTimeout(() => _cfgRevealField(path), 30);
+        });
+        const stop = () => {
+            mo.disconnect();
+            document.removeEventListener('pointerdown', stop, true);
+            document.removeEventListener('keydown', stop, true);
+        };
+        mo.observe(c, { childList: true });
+        document.addEventListener('pointerdown', stop, true);
+        document.addEventListener('keydown', stop, true);
+        setTimeout(stop, 4000);
+    }, { once: true });
+    bootstrap.Tab.getOrCreateInstance(btn).show();
+}
+
 /** Draw the screen: restore, filter, index — and in that ORDER, which is the only reason this
  *  is one function instead of three callers each doing its bit.
  *

@@ -31,6 +31,32 @@ def register(app, wa):
 
     if not hasattr(wa, '_login_ratelimit'):
         wa._login_ratelimit = RateLimiter()
+    # Failed second factors, per ACCOUNT. Separate from the per-IP throttle above, which a
+    # pool of addresses walks around, and separate from the password lockout, which a correct
+    # password clears — and at this step the attacker HAS the password, so they could clear
+    # it between every batch of guesses. Same thresholds as the password lockout.
+    if not hasattr(wa, '_mfa_ratelimit'):
+        wa._mfa_ratelimit = RateLimiter()
+
+    def _rl_tag(username) -> str:
+        """Who a throttle hit is attributed to, so a success forgets only its own."""
+        return str(username or '').strip().lower()
+
+    def _mfa_key(username) -> str:
+        return wa._mfa_uid(username) or _rl_tag(username)
+
+    def _mfa_account_ok(username) -> bool:
+        ok, _retry = wa._mfa_ratelimit.peek(_mfa_key(username),
+                                            int(wa._LOCKOUT_MAX_ATTEMPTS or 0),
+                                            int(wa._LOCKOUT_DURATION_SECS or 0))
+        return ok
+
+    def _mfa_account_fail(username) -> None:
+        wa._mfa_ratelimit.hit(_mfa_key(username), int(wa._LOCKOUT_MAX_ATTEMPTS or 0),
+                              int(wa._LOCKOUT_DURATION_SECS or 0))
+
+    def _mfa_account_done(username) -> None:
+        wa._mfa_ratelimit.reset(_mfa_key(username))
 
     # Auth lives in web_admin (outside the notify-events discovery roots), so it declares
     # its notification events with the manual registry — the same escape hatch any code has.
@@ -83,13 +109,17 @@ def register(app, wa):
             # Per-IP brute-force throttle (before any credential work). Config-driven
             # thresholds (0 = disabled).
             _ip = request.remote_addr or '?'
-            _ok, _retry = wa._login_ratelimit.hit(_ip, wa._LOGIN_RATELIMIT_MAX, wa._LOGIN_RATELIMIT_WINDOW_SECS)
+            username = request.form.get('username', '').strip()
+            # Attributed to the name typed, so a later success forgets THIS account's hits
+            # and only those — see `_establish_session`.
+            _ok, _retry = wa._login_ratelimit.hit(_ip, wa._LOGIN_RATELIMIT_MAX,
+                                                  wa._LOGIN_RATELIMIT_WINDOW_SECS,
+                                                  tag=_rl_tag(username))
             if not _ok:
                 wa._audit('login_throttled', '', _ip, detail={'retry_after': _retry})
                 wa._ipban_offense('login_throttled')
                 flash(wa._t('login_throttled'), 'danger')
                 return redirect(url_for('login'))
-            username = request.form.get('username', '').strip()
             password = request.form.get('password', '')
             remember = request.form.get('remember_me') == 'on'
             wa._dbg(f"> Auth >> login attempt user={username!r} from {request.remote_addr}",
@@ -135,19 +165,38 @@ def register(app, wa):
             return redirect(url_for('dashboard'))
         if not held:
             return redirect(url_for('login'))
+        # An account with nothing to prove a code WITH belongs on the enrolment page. Every
+        # door that parks a sign-in is meant to send it there, and this is the backstop for
+        # one that does not: a code page in front of an account with no factor is a sign-in
+        # that can never finish, which is what an SSO account met with the policy on.
+        if (not wa._mfa_enrolled(held.get('username', ''))
+                and wa._mfa_step_endpoint(held.get('username', ''),
+                                          held.get('source', 'local')) == 'login_mfa_enrol'):
+            return redirect(url_for('login_mfa_enrol'))
         if request.method == 'POST':
             _ip = request.remote_addr or '?'
+            username = held.get('username', '')
             _ok, _retry = wa._login_ratelimit.hit(_ip, wa._LOGIN_RATELIMIT_MAX,
-                                                  wa._LOGIN_RATELIMIT_WINDOW_SECS)
+                                                  wa._LOGIN_RATELIMIT_WINDOW_SECS,
+                                                  tag=_rl_tag(username))
             if not _ok:
-                wa._audit('login_throttled', held.get('username', ''), _ip,
+                wa._audit('login_throttled', username, _ip,
                           detail={'retry_after': _retry, 'stage': 'mfa'})
                 wa._ipban_offense('login_throttled')
                 flash(wa._t('login_throttled'), 'danger')
                 return redirect(url_for('login_mfa'))
-            username = held.get('username', '')
+            # Per ACCOUNT as well as per address: the per-IP throttle is a speed bump for one
+            # machine, and six digits guessed from a pool of addresses against an account whose
+            # password is already known would otherwise never meet a limit.
+            if not _mfa_account_ok(username):
+                wa._mfa_clear()
+                wa._audit('login_throttled', username, _ip, detail={'stage': 'mfa_account'})
+                wa._ipban_offense('login_throttled')
+                flash(wa._t('login_throttled'), 'danger')
+                return redirect(url_for('login'))
             kind = wa._mfa_verify_pending(request.form.get('code', ''))
             if not kind:
+                _mfa_account_fail(username)
                 wa._dbg(f"> Auth/MFA >> second factor FAILED user={username!r} "
                         f"from {request.remote_addr}", DebugLevel.warning)
                 wa._audit('mfa_failed', username, request.remote_addr,
@@ -170,6 +219,7 @@ def register(app, wa):
                 left = wa._mfa_status(username).get('recovery_left', 0)
                 wa._audit('mfa_recovery_used', username, request.remote_addr,
                           detail={'remaining': left})
+            _mfa_account_done(username)
             wa._mfa_clear()
             wa._establish_session(username, user, bool(held.get('remember')),
                                   source=held.get('source', 'local'), second_factor_done=True)
@@ -228,14 +278,20 @@ def register(app, wa):
         if not held or session.get('logged_in'):
             return jsonify({'ok': False, 'error': 'no_pending'}), 403
         _ip = request.remote_addr or '?'
+        username = held.get('username', '')
         _ok, _retry = wa._login_ratelimit.hit(_ip, wa._LOGIN_RATELIMIT_MAX,
-                                              wa._LOGIN_RATELIMIT_WINDOW_SECS)
+                                              wa._LOGIN_RATELIMIT_WINDOW_SECS,
+                                              tag=_rl_tag(username))
         if not _ok:
-            wa._audit('login_throttled', held.get('username', ''), _ip,
+            wa._audit('login_throttled', username, _ip,
                       detail={'retry_after': _retry, 'stage': 'mfa_webauthn'})
             wa._ipban_offense('login_throttled')
             return jsonify({'ok': False, 'error': 'throttled', 'retry_after': _retry}), 429
-        username = held.get('username', '')
+        if not _mfa_account_ok(username):
+            wa._mfa_clear()
+            wa._audit('login_throttled', username, _ip, detail={'stage': 'mfa_account'})
+            wa._ipban_offense('login_throttled')
+            return jsonify({'ok': False, 'error': 'throttled'}), 429
         data = request.get_json(silent=True) or {}
         scope = wa._webauthn_scope()
         out = mfa_service.webauthn_verify(
@@ -247,6 +303,7 @@ def register(app, wa):
             challenge=str(held.get('webauthn_challenge') or ''),
             rp_id=scope.get('rp_id', ''), origin=scope.get('origin', ''))
         if not out.get('ok'):
+            _mfa_account_fail(username)
             wa._dbg(f"> Auth/MFA >> security key FAILED user={username!r} "
                     f"from {request.remote_addr}", DebugLevel.warning)
             wa._audit('mfa_failed', username, request.remote_addr,
@@ -259,6 +316,7 @@ def register(app, wa):
             wa._mfa_clear()
             _login_failed(username, 'account_disabled')
             return jsonify({'ok': False, 'error': 'invalid'}), 403
+        _mfa_account_done(username)
         wa._mfa_clear()
         wa._establish_session(username, user, bool(held.get('remember')),
                               source=held.get('source', 'local'), second_factor_done=True)
@@ -296,7 +354,8 @@ def register(app, wa):
         if request.method == 'POST':
             _ip = request.remote_addr or '?'
             _ok, _retry = wa._login_ratelimit.hit(_ip, wa._LOGIN_RATELIMIT_MAX,
-                                                  wa._LOGIN_RATELIMIT_WINDOW_SECS)
+                                                  wa._LOGIN_RATELIMIT_WINDOW_SECS,
+                                                  tag=_rl_tag(username))
             if not _ok:
                 wa._audit('login_throttled', username, _ip,
                           detail={'retry_after': _retry, 'stage': 'mfa_enrol'})

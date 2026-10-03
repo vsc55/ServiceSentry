@@ -80,7 +80,10 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
 
     def _retention_loop(self) -> None:
         while not self._syslog_retention_stop.wait(self.RETENTION_EVERY):
-            self._syslog_prune_once()
+            try:
+                self._syslog_prune_once()
+            except Exception as exc:  # pylint: disable=broad-except
+                self._dbg(f'> Syslog >> retention sweep failed: {exc}', DebugLevel.error)
 
     # ── boot ──────────────────────────────────────────────────────────────────
     def start_at_boot(self) -> None:
@@ -169,6 +172,11 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
         """Full shutdown: stop the retention loop *and* the listener (app exit)."""
         self._syslog_retention_stop.set()
         self.listener_stop()
+
+    def on_shutdown(self) -> None:
+        # The listener's writer drains its queue on stop(); without this, the messages
+        # received in the last second went down with the process.
+        self.stop()
 
     def on_config_changed(self, changed) -> None:
         # Re-apply a *running* listener when any syslog setting changed (new ports/

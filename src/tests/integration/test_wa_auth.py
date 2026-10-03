@@ -303,3 +303,42 @@ class TestAccountLockout:
         with admin.app.test_request_context():
             user, reason = admin._authenticate("ssoact", "any-password")
             assert user is None and reason == "invalid_credentials"
+
+
+class TestASuccessForgetsOnlyItsOwnFailures:
+    """A successful login cleared the WHOLE per-IP throttle. Holding one valid password — the
+    attacker's own account — reset the count of every guess made from that address against
+    every other account, so spraying went on at full speed between two logins."""
+
+    def _attempt(self, client, username, password='wrong-password'):
+        client.post('/login', data={'username': username, 'password': password})
+
+    def _throttled(self, admin):
+        return [e for e in admin._audit_store.get_all() if e['event'] == 'login_throttled']
+
+    def test_the_other_accounts_guesses_survive_a_success(self, admin, client):
+        admin._LOGIN_RATELIMIT_MAX = 3
+        admin._LOCKOUT_MAX_ATTEMPTS = 0             # isolate from the per-account lockout
+        admin._audit_store.delete_all()
+        self._attempt(client, 'victim')
+        self._attempt(client, 'victim')
+        self._attempt(client, 'admin', 'secret')     # a success from the same address
+        client.post('/logout')
+        self._attempt(client, 'victim')              # 3rd guess against victim: at the limit
+        assert not self._throttled(admin)
+        self._attempt(client, 'victim')              # 4th: over it, success or not
+        assert self._throttled(admin), 'the success wiped the guesses against another account'
+
+    def test_the_accounts_own_failures_are_forgotten(self, admin, client):
+        """The legitimate case the reset was for: somebody who mistyped and then got it right
+        is not penalised for it afterwards."""
+        admin._LOGIN_RATELIMIT_MAX = 3
+        admin._LOCKOUT_MAX_ATTEMPTS = 0
+        admin._audit_store.delete_all()
+        self._attempt(client, 'admin')
+        self._attempt(client, 'admin')
+        self._attempt(client, 'admin', 'secret')
+        client.post('/logout')
+        for _ in range(3):
+            self._attempt(client, 'admin')
+        assert not self._throttled(admin)

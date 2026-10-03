@@ -40,6 +40,7 @@ from lib.core.snmp import profiles as _profiles
 from lib.core.snmp.sampler import _row_factor, _safe_key, read_metric
 from lib.core.snmp import manifest as _manifest
 from lib.core.snmp.client import NoAnswer as _NoAnswer
+from lib.core.snmp.client import Truncated as _Truncated
 from lib.core.snmp.defaults import CONN_DEFAULTS as _SERVER_DEFAULTS
 
 def _skipped(metric: dict, text: str) -> bool:
@@ -94,6 +95,36 @@ _SAMPLE_ALERT = 2
 # Three and not one: a first timeout is a lost datagram, and the point is not to be quick to
 # judge a device — it is to stop asking one that has already answered nothing three times.
 _SILENT_GIVE_UP = 3
+
+# `sysUpTime.0`, and where its last reading is kept among the counter baselines. A row key is
+# never `_`-led (`_safe_key` strips them), so the two cannot meet.
+#
+# Read once per cycle, and only when a counter has answered: it is what tells a 32-bit counter
+# that went backwards because it WRAPPED from one that went backwards because the box
+# rebooted — the second used to be charted as up to 4 GiB in one interval.
+_UPTIME_OID = '1.3.6.1.2.1.1.3.0'
+_UPTIME_KEY = '_uptime'
+
+
+def _legacy_names(name: str) -> list:
+    """The spelling *name* had before the walk learned to decode UTF-8 text.
+
+    A walk used to hand back any value with a non-ASCII octet as ``0x…`` hex, so a port called
+    "Oficina Señor" was a row called `0x4f66…`, and a mark somebody put on that row — or the
+    counter baseline kept under it — is filed under the hex. Recomputed here rather than
+    migrated: the mapping is a pure function of the name, and it costs nothing for the rows
+    (nearly all of them) whose names are plain ASCII.
+
+    Six-octet parts are left as they are, because the walk leaves those as hex still.
+    """
+    if not name or name.isascii():
+        return []
+    parts = []
+    for part in name.split(' / '):
+        raw = part.encode('utf-8')
+        parts.append(part if part.isascii() or len(raw) == 6 else '0x' + raw.hex())
+    old = ' / '.join(parts)
+    return [old] if old != name else []
 
 
 class SnmpSampler:
@@ -182,10 +213,13 @@ class SnmpSampler:
                                  step=self._msg('snmp_step_resolve', lang=watching))
             return
 
-        now = time.time()
         state = self._sample_state(srv_key)
         rows: dict = {}          # row key → {'name': …, 'values': {}, 'attrs': {}}
         sightings: dict = {}     # evidence kind → {what was seen: where}
+        partial: set = set()     # evidence kinds whose walk was cut short this cycle
+        # Per-cycle facts about the device that every metric shares: whether it restarted
+        # since the last cycle (`None` until a counter makes it worth asking).
+        cycle: dict = {'restarted': None}
         answered = False
         errors: list = []
 
@@ -232,10 +266,13 @@ class SnmpSampler:
                                  step=self._msg('snmp_step_read', lang=watching),
                                  n=_i, total=len(assigned))
             for metric in prof.get('metrics') or ():
-                ok, err = self._sample_metric(metric, conn, now, state, rows, columns,
+                # No `now`: each reading is timed when it ARRIVES. A Synology with two dozen
+                # profiles is minutes of walks, and one timestamp for the whole cycle put the
+                # difference between two readings of a late profile over the wrong interval.
+                ok, err = self._sample_metric(metric, conn, None, state, rows, columns,
                                               source=str(prof.get('id') or ''), lang=lang,
                                               sightings=sightings, watched=watched,
-                                              roles=roles)
+                                              roles=roles, partial=partial, cycle=cycle)
                 answered = answered or ok
                 if err:
                     # The metric's NAME and the error, kept apart. `metric['key']` is the
@@ -264,7 +301,7 @@ class SnmpSampler:
                 break
 
         self._save_sample_state(srv_key, state)
-        self._save_sightings(server, sightings)
+        self._save_sightings(server, sightings, partial)
         self._emit_samples(srv_key, label, rows, answered, errors)
         # This device is finished, and whether it ANSWERED is the thing worth seeing on a
         # checklist somebody is watching. Without it the last phase of every device spun at
@@ -324,14 +361,27 @@ class SnmpSampler:
             self._debug(f'SNMP: watched roles not read: {exc}', DebugLevel.warning)
             return {}
 
-    def _sample_metric(self, metric: dict, conn: dict, now: float, state: dict, rows: dict,
-                       columns: dict, source: str = '', lang: str = '',
+    def _sample_metric(self, metric: dict, conn: dict, now: float | None, state: dict,
+                       rows: dict, columns: dict, source: str = '', lang: str = '',
                        sightings: dict | None = None, watched: set | None = None,
-                       roles: dict | None = None) -> tuple:
-        """Read one metric into *rows*. Returns ``(answered, error)``."""
+                       roles: dict | None = None, partial: set | None = None,
+                       cycle: dict | None = None) -> tuple:
+        """Read one metric into *rows*. Returns ``(answered, error)``.
+
+        *now* ``None`` means "when the reading arrived", which is what a rate needs.
+        """
         got, err = read_metric(metric, conn, self._snmp_get, self._snmp_walk_oid, columns)
+        if now is None:
+            now = time.time()
         if err and not got:
             return False, err
+        # A counter that answered is the moment to ask whether the box restarted since the
+        # last cycle — once per cycle, and never for a device that answers no counter at all.
+        reset = False
+        if cycle is not None and str(metric.get('kind') or '') == 'counter':
+            if cycle.get('restarted') is None:
+                cycle['restarted'] = self._restarted(conn, state)
+            reset = bool(cycle['restarted'])
         # Resolved once per metric, not once per row: an interface table is one metric and
         # forty rows, and the words are the same for all of them. Only the levels worth
         # reporting are kept — an `ok` or an `info` state is a badge and not a finding.
@@ -362,8 +412,8 @@ class SnmpSampler:
         if str(metric.get('aggregate') or '') == 'sum':
             total, seen = 0.0, False
             for r in got:
-                prev = (state.get(r['key']) or {}).get(metric['key'])
-                value, new_state = _metrics.sample(metric, r['raw'], prev, now)
+                prev = self._prev_state(state, r['key'], r['name'], metric['key'])
+                value, new_state = _metrics.sample(metric, r['raw'], prev, now, reset=reset)
                 if new_state is not None:
                     state.setdefault(r['key'], {})[metric['key']] = new_state
                 if value is not None:
@@ -376,6 +426,10 @@ class SnmpSampler:
             return True, (err or None)
         kind = str(metric.get('evidence') or '')
         if kind and sightings is not None:
+            # A table cut at its ceiling is not the whole table, and the store REPLACES what
+            # it holds: saved, every MAC past the cut would vanish from the map every cycle.
+            if isinstance(err, _Truncated) and partial is not None:
+                partial.add(kind)
             seen = sightings.setdefault(kind, {})
             for r in got:
                 key = str(r['name'] or r['index'] or '').strip()
@@ -396,18 +450,63 @@ class SnmpSampler:
                 mine = {v: dict(spec, level='bad') for v, spec in mine.items()}
             self._store_value(rows, r['key'], r['name'], metric, r['raw'], now, state,
                               factor=r['factor'], source=source, states=mine, marked=marked,
-                              role=role)
+                              role=role, reset=reset)
         return True, (err or None)
+
+    def _restarted(self, conn: dict, state: dict) -> bool:
+        """Whether the device's agent restarted since the last cycle, by its `sysUpTime`.
+
+        ``False`` when it cannot tell — no uptime served, no previous reading — which leaves
+        the counters to the width rule, exactly as before. The reading is kept for next time.
+        """
+        try:
+            raw, err = self._snmp_get(oid=_UPTIME_OID, **conn)
+        except Exception:             # pylint: disable=broad-except
+            return False
+        at = time.time()
+        try:
+            ticks = float(str(raw).strip())
+        except (TypeError, ValueError):
+            return False
+        if err:
+            return False
+        prev = state.get(_UPTIME_KEY)
+        state[_UPTIME_KEY] = {'v': ticks, 't': at}
+        went = _metrics.restarted(prev, ticks, at)
+        if went:
+            self._debug('SNMP: the agent restarted since the last cycle — counters re-baselined',
+                        DebugLevel.info)
+        return went
+
+    @staticmethod
+    def _prev_state(state: dict, row_key: str, row_name: str, metric_key: str):
+        """The last reading of one counter of one row, under its key — or the old one.
+
+        The old one is the hex spelling a non-ASCII name had before the walk decoded it
+        (`_legacy_names`); found there, it is MOVED to the new key, so a row that was renamed
+        by the fix loses no point and keeps no duplicate.
+        """
+        mine = state.get(row_key) or {}
+        if metric_key in mine or not row_key:
+            return mine.get(metric_key)
+        for old in _legacy_names(row_name):
+            old_key = _safe_key(old, old)
+            legacy = state.get(old_key) or {}
+            if metric_key in legacy:
+                got = legacy.pop(metric_key)
+                if not legacy:
+                    state.pop(old_key, None)
+                return got
+        return None
 
     def _role_of(self, roles, *names) -> str:
         """What this row was marked as, under whichever name it goes by — or ``''``."""
         if not roles:
             return ''
-        for n in names:
-            if n:
-                found = roles.get(self._devices_watch_key(n))
-                if found:
-                    return found
+        for n in self._aka(names):
+            found = roles.get(self._devices_watch_key(n))
+            if found:
+                return found
         return ''
 
     def _is_watched(self, watched, *names) -> bool:
@@ -419,7 +518,17 @@ class SnmpSampler:
         """
         if not watched:
             return False
-        return any(self._devices_watch_key(n) in watched for n in names if n)
+        return any(self._devices_watch_key(n) in watched for n in self._aka(names))
+
+    @staticmethod
+    def _aka(names) -> list:
+        """Every name a row goes by, with the hex spelling a mark may still be filed under."""
+        out = []
+        for n in names:
+            if n:
+                out.append(n)
+                out.extend(_legacy_names(n))
+        return out
 
     def _devices_watch_key(self, row: str) -> str:
         """The key the registry files a watched row under — ITS function, not a second copy
@@ -435,7 +544,7 @@ class SnmpSampler:
     def _store_value(self, rows: dict, row_key: str, row_name: str, metric: dict,
                      raw, now: float, state: dict, factor=1, source: str = '',
                      states: dict | None = None, marked: bool = False,
-                     role: str = '') -> None:
+                     role: str = '', reset: bool = False) -> None:
         """Put one reading where it belongs — a number in the series, a name beside it.
 
         *factor* is the per-row multiplier a ``scale_by`` column supplied. It is applied to the
@@ -483,8 +592,8 @@ class SnmpSampler:
                                         'states': [], 'marked': marked, 'role': role})
         row['marked'] = row.get('marked') or marked
         row['role'] = row.get('role') or role
-        prev = (state.get(row_key) or {}).get(metric['key'])
-        value, new_state = _metrics.sample(metric, raw, prev, now)
+        prev = self._prev_state(state, row_key, row_name, metric['key'])
+        value, new_state = _metrics.sample(metric, raw, prev, now, reset=reset)
         if new_state is not None:
             state.setdefault(row_key, {})[metric['key']] = new_state
         if value is not None:
@@ -553,6 +662,17 @@ class SnmpSampler:
             return
 
         self.fail_streak(f'{srv_key}/metrics', False)
+        # The device's OWN result, even when every profile it has is a table. The counter
+        # baselines are filed under `{srv}/metrics` (beside `fail_streak`), and an entry there
+        # with no result this cycle is an orphan to the monitor: it was stored with status 0,
+        # read back next cycle as a failed result nobody reports any more, and pruned — the
+        # baselines with it. So every other cycle was a first cycle for a disk-I/O or a
+        # forwarding-table device, and a phantom "down" row sat between them. An answer is
+        # an answer: the device row says how much it answered, under the device's name.
+        if '' not in rows:
+            total = sum(len(r['values']) for r in rows.values())
+            self._emit(f'{srv_key}/metrics', True, self._msg('snmp_sampled', label, total),
+                       {}, name=label)
         for row_key, row in rows.items():
             key = f'{srv_key}/metrics' if not row_key else f'{srv_key}/{row_key}'
             name = label if not row_key else f'{label} — {row["name"]}'
@@ -605,7 +725,8 @@ class SnmpSampler:
                         f'{"; ".join(f"{n}: {e}" for n, e in errors[:5])}',
                         DebugLevel.info)
 
-    def _save_sightings(self, server: dict, sightings: dict) -> None:
+    def _save_sightings(self, server: dict, sightings: dict,
+                        partial: set | None = None) -> None:
         """Hand what this device SAW to the store that keeps sightings.
 
         Filed under the DEVICE and not the server key: the map joins across machines, and a
@@ -615,6 +736,10 @@ class SnmpSampler:
         Written even when a kind came back empty — a switch that has forgotten every MAC is a
         switch whose forwarding table is empty, and leaving last cycle's in place would draw
         cables that were unplugged last week.
+
+        …but NOT when it came back cut (*partial*: the walk hit its row ceiling). A replace
+        with half a table is the other half deleted, every cycle; what was stored stays until
+        a cycle reads the table whole.
         """
         if not sightings:
             return
@@ -626,6 +751,10 @@ class SnmpSampler:
             from lib.core.infra.evidence import EvidenceStore   # noqa: PLC0415
             store = EvidenceStore(db)
             for kind, seen in sightings.items():
+                if partial and kind in partial:
+                    self._debug(f'SNMP: {kind} sightings of {uid} were cut short; the stored '
+                                f'ones are kept', DebugLevel.warning)
+                    continue
                 store.replace(uid, kind, seen)
         except Exception as exc:      # pylint: disable=broad-except
             # Evidence is a nicety on top of the cycle. A map that misses a link is a worse

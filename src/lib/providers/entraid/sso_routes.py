@@ -19,6 +19,7 @@ Routes registered by this file:
 
 from flask import jsonify, render_template, url_for
 
+from lib.core.constants import is_reserved_username
 from lib.debug import DebugLevel
 from lib.providers.entraid import tab_sso
 from lib.security.headers import _CSP_HEAD, _CSP_TAIL
@@ -40,12 +41,22 @@ def _tab_csp() -> str:
 def _resolve_user(wa, claims: dict):
     """Map validated Teams SSO claims to a ServiceSentry user (username, user) or (None, None).
 
-    Matches by username == UPN, else by email (case-insensitive)."""
+    Matches first by the directory object id (``oid``) of an SSO account bound to it, then by
+    username == UPN, else by email (case-insensitive). The ``oid`` goes first because it is the
+    one claim that names the PERSON rather than a label they currently carry: a UPN or a mail
+    address can be renamed, and handed to somebody else, in the directory."""
+    users = wa._users or {}
+    oid = str(claims.get('oid') or '').strip().lower()
+    if oid:
+        for uname, ud in users.items():
+            if (isinstance(ud, dict)
+                    and str(ud.get('auth_source') or 'local') not in ('', 'local')
+                    and str(ud.get('auth_source_id') or '').strip().lower() == oid):
+                return uname, ud
     upn = (claims.get('preferred_username') or claims.get('upn')
            or claims.get('email') or claims.get('unique_name') or '').strip()
     if not upn:
         return None, None
-    users = wa._users or {}
     if upn in users:
         return upn, users[upn]
     low = upn.lower()
@@ -116,11 +127,23 @@ def register(app, wa):
             return jsonify({'ok': False, 'error': wa._t('msteams_sso_local_account')}), 403
         if user.get('enabled') is False:
             return jsonify({'ok': False, 'error': wa._t('msteams_sso_no_user')}), 403
+        # The same two refusals the OIDC and SAML doors make. A built-in identity never signs
+        # in, whatever row carries its name; and a no-login (service) account stays one
+        # through Teams — this door used to skip both and hand either a full session.
+        if is_reserved_username(username):
+            wa._audit('msteams_sso_failed', detail={'error': 'reserved username',
+                                                    'user': username})
+            return jsonify({'ok': False, 'error': wa._t('msteams_sso_no_user')}), 403
+        if not user.get('login_enabled', True):
+            wa._audit('msteams_sso_failed', detail={'error': 'login disabled', 'user': username})
+            return jsonify({'ok': False, 'error': wa._t('login_disabled')}), 403
 
         # False means the account owes a second factor. This endpoint answers JSON to an
-        # embedded Teams tab, so it hands back the URL instead of redirecting.
+        # embedded Teams tab, so it hands back the URL instead of redirecting — to the code
+        # page, or to enrolment when the policy covers an account that has none yet.
         if not wa._establish_session(username, user, source='entraid'):
-            return jsonify({'ok': True, 'redirect': url_for('login_mfa')})
+            return jsonify({'ok': True,
+                            'redirect': url_for(wa._mfa_step_endpoint(username, 'entraid'))})
         wa._audit('msteams_sso_login', detail={'user': username})
         wa._dbg(f"> Auth/Teams >> SSO session established user={username!r}", DebugLevel.info)
         return jsonify({'ok': True, 'redirect': wa._landing_url(user)})

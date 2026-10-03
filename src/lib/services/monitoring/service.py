@@ -52,8 +52,17 @@ class MonitorService(_HeartbeatMixin, _StandaloneConfigMixin, _MonitoringMixin):
         return self._monitoring_running
 
     def _hb_detail(self) -> dict:
-        return {'interval': self._monitoring_interval,
-                'next_in': self._monitoring_seconds_until_next}
+        # Runs on the heartbeat thread: the interval is a config read, and a DB outage
+        # must cost the detail, not the beat (nor the lease renewal riding on it).
+        try:
+            interval = self._monitoring_interval
+        except Exception:  # pylint: disable=broad-except
+            interval = None
+        try:
+            next_in = self._monitoring_seconds_until_next
+        except Exception:  # pylint: disable=broad-except
+            next_in = None
+        return {'interval': interval, 'next_in': next_in}
 
     def _hb_last_cycle(self):
         return self._monitoring_last_run_ts
@@ -181,7 +190,12 @@ class MonitorService(_HeartbeatMixin, _StandaloneConfigMixin, _MonitoringMixin):
         process): start/stop the scheduler when ``enabled`` is toggled — so the
         standalone worker reacts to the web Services tab without a restart."""
         while not self._stop.wait(_CONFIG_WATCH_EVERY):
-            self._reconcile_once()
+            try:
+                self._reconcile_once()
+            except Exception as exc:  # pylint: disable=broad-except
+                # One failed poll (DB down) must not end the watcher: it is the only
+                # thing that starts/stops this worker's scheduler from the web UI.
+                self._dbg(f'> Monitor >> config watch failed: {exc}', DebugLevel.error)
 
     def run(self, once: bool = False) -> int:
         """Run the scheduler and block until stopped (SIGINT/SIGTERM).

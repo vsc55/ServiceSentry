@@ -110,6 +110,10 @@ def build(departments, orgs) -> list:
       origen en vez de crear una copia;
     * ``same``   — está y no cambió nada. Se devuelve igualmente: «no había nada que hacer» es
       una respuesta, y no verla deja a quien mira preguntándose si se importó.
+    * ``conflict`` — se adoptaría una empresa que OTRO departamento de la misma lista ya va a
+      adoptar (dos departamentos que se llaman igual). No se aplica: el segundo le pisaría el
+      `external_id` al primero, y en cada importación la empresa cambiaría de dueño. Queda en el
+      plan para que se vea, y se resuelve emparejándolo a mano con otra.
 
     Nada de esto escribe: quien lo aplica recorre esta lista. Que decidir y hacer estén
     separados es lo que permite enseñar el plan antes de aplicarlo.
@@ -122,6 +126,7 @@ def build(departments, orgs) -> list:
             por_nombre.setdefault(str(o.get('name') or '').strip().casefold(), o)
 
     cogidas = {str(o.get('short') or '').strip() for o in (orgs or ())}
+    adoptadas: dict = {}                    # uid local → external_id que ya la adopta
     plan = []
     for fila in (departments or ()):
         d = _dept(fila)
@@ -131,6 +136,12 @@ def build(departments, orgs) -> list:
         if ya is None:
             suya = por_nombre.get(d['name'].casefold())
             if suya is not None:
+                uid_suya = str(suya.get('uid') or '')
+                if adoptadas.get(uid_suya, d['external_id']) != d['external_id']:
+                    plan.append(dict(d, action='conflict', uid='', short='',
+                                     was={'name': str(suya.get('name') or '')}))
+                    continue
+                adoptadas[uid_suya] = d['external_id']
                 plan.append(dict(d, action='adopt', uid=str(suya.get('uid') or ''),
                                  short=str(suya.get('short') or ''),
                                  was={'name': str(suya.get('name') or ''),
@@ -170,13 +181,25 @@ def select(plan, pick=None, link=None, orgs=None):
 
     * la empresa elegida ya no existe — se borró entre mirar y aceptar;
     * ya está atada a OTRO departamento. Dos no pueden compartir una: el segundo le pisaría el
-      nombre al primero en cada importación, y la fila iría cambiando de nombre sola.
+      nombre al primero en cada importación, y la fila iría cambiando de nombre sola. Eso vale
+      también DENTRO de esta misma importación: dos emparejamientos a mano con la misma
+      empresa, o uno a mano con la que otro departamento adopta solo. Gana el primero y el
+      segundo se cuenta como rechazo;
+    * un ``conflict`` del plan que nadie emparejó a mano — ver :func:`build`.
     """
     por_uid = {str(o.get('uid') or ''): o for o in (orgs or ())}
     cogidas = {str(o.get('short') or '').strip() for o in (orgs or ()) if o.get('short')}
     elegidos = None if pick is None else {str(x) for x in pick}
     enlaces = {str(k): str(v) for k, v in (link or {}).items() if str(v or '')}
     fuera, rechazos = [], []
+    reclamadas: dict = {}                   # uid local → external_id al que se ata aquí
+
+    def _reclamar(uid, ext) -> bool:
+        if reclamadas.get(uid, ext) != ext:
+            return False
+        reclamadas[uid] = ext
+        return True
+
     for p in (plan or ()):
         ext = str(p.get('external_id') or '')
         if elegidos is not None and ext not in elegidos:
@@ -185,6 +208,12 @@ def select(plan, pick=None, link=None, orgs=None):
         if not uid:
             if p.get('action') == 'same':
                 continue                    # elegida y sin nada que hacerle: no es un rechazo
+            if p.get('action') == 'conflict':
+                rechazos.append({'name': p.get('name') or '', 'reason': 'fs_link_taken'})
+                continue
+            if p.get('action') in ('adopt', 'update') and not _reclamar(str(p.get('uid') or ''), ext):
+                rechazos.append({'name': p.get('name') or '', 'reason': 'fs_link_taken'})
+                continue
             fuera.append(p)
             continue
         suya = por_uid.get(uid)
@@ -193,6 +222,9 @@ def select(plan, pick=None, link=None, orgs=None):
             continue
         otro = str(suya.get('external_id') or '')
         if str(suya.get('source') or '') == SOURCE and otro and otro != ext:
+            rechazos.append({'name': p.get('name') or '', 'reason': 'fs_link_taken'})
+            continue
+        if not _reclamar(uid, ext):
             rechazos.append({'name': p.get('name') or '', 'reason': 'fs_link_taken'})
             continue
         # La abreviatura: Freshservice no tiene ese campo, así que no hay nada que «descargar».

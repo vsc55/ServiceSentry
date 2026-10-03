@@ -69,14 +69,9 @@ function _syslogCanConfig() {
     const p = currentUser.permissions || [];
     return p.includes('config_view') || p.includes('config_edit');
 }
-// Jump to Configuration > Syslog (where "Allowed Sources" lives).
+// Jump to Configuration > Syslog > Allowed sources (the option a dropped sender is missing from).
 function _gotoSyslogConfig() {
-    try { _activeCfgTab = 'cfg-tab-syslog'; localStorage.setItem('cfg_active_tab', 'cfg-tab-syslog'); } catch (e) {}
-    if (typeof bootstrap === 'undefined') return;
-    const cfgBtn = document.querySelector('#tab-config-li [data-bs-target="#tab-config"]');
-    if (cfgBtn) bootstrap.Tab.getOrCreateInstance(cfgBtn).show();
-    const sysBtn = document.getElementById('cfg-tab-syslog-btn');
-    if (sysBtn) bootstrap.Tab.getOrCreateInstance(sysBtn).show();
+    openConfigField('syslog|allowed_sources');
 }
 function _syslogToggleDrops() {
     const body = document.getElementById('sl-drops-body');

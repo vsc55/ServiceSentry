@@ -65,7 +65,7 @@ function _accMfaDraw() {
             esc(t('mfa_recovery_left').replace('{}', _accMfa.recovery_left))}</div>
         <div class="d-flex gap-2 flex-wrap">
           ${(_accMfa.webauthn_ok && !hasKey && _accKeySupported()) ? `<button type="button"
-            class="btn btn-sm btn-primary" onclick="_accKeyAdd(event)"
+            class="btn btn-sm btn-primary" onclick="_accKeyAdd()"
             ><i class="bi bi-key-fill me-1"></i>${esc(t('mfa_key_add'))}</button>` : ''}
           <button type="button" class="btn btn-sm btn-secondary" onclick="_accMfaRegen()"
             ><i class="bi bi-arrow-repeat me-1"></i>${esc(t('mfa_recovery_new'))}</button>
@@ -283,22 +283,32 @@ const _b64uToBytes = s => {
 const _bytesToB64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf)))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-/** Register a security key on this account.
+/** Register a security key on this account — after a current code, like every other change
+ *  to a factor that is already on.
+ *
+ *  The server refuses `begin` without one when the account has a factor: adding a key is
+ *  adding a way in, and on the session alone a borrowed session could enrol its own key.
+ *  A wrong code leaves the dialog open on the field, the same as regenerate and disable.
+ */
+function _accKeyAdd() {
+    _accMfaAskCode(t('mfa_key_add'), 'primary', async code => {
+        const res = await apiPost('/api/v1/account/mfa/webauthn/begin', {code});
+        const d = (res && res.data) || {};
+        if (!d.ok && d.error === 'bad_code') { _accMfaFieldError('accMfaAsk', 'bad_code'); return; }
+        hideInfoModal();
+        if (!d.ok) { showToast(_accKeyReason(d.error), 'danger'); return; }
+        await _accKeyCreate(d, () => {});
+    });
+}
+
+/** The ceremony itself, once the server has issued a challenge.
  *
  *  The challenge is never composed here: it comes from the server, is used once and is not
  *  echoed back for it to trust. What the browser returns is passed on as it arrived — this
  *  function reads none of it, because everything worth checking about those bytes is checked
  *  on the other side.
  */
-async function _accKeyAdd(ev) {
-    const done = ssBtnBusy(ev && ev.currentTarget);
-    const res = await apiPost('/api/v1/account/mfa/webauthn/begin', {});
-    const d = (res && res.data) || {};
-    if (!d.ok) {
-        done();
-        showToast(_accKeyReason(d.error), 'danger');
-        return;
-    }
+async function _accKeyCreate(d, done) {
     let cred = null;
     try {
         cred = await navigator.credentials.create({publicKey: {

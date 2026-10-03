@@ -27,12 +27,16 @@ class RateLimiter:
         self._lock = threading.Lock()
         self._last_gc = 0.0
 
-    def hit(self, key: str, max_hits: int, window_secs: float) -> tuple[bool, int]:
+    def hit(self, key: str, max_hits: int, window_secs: float,
+            tag: str = '') -> tuple[bool, int]:
         """Record a hit for *key*; return ``(allowed, retry_after_secs)``.
 
         ``allowed`` is False when this hit takes the trailing-window count past
         ``max_hits`` — the caller should then reject with 429 and ``Retry-After``.
-        ``max_hits <= 0`` disables the limit (always allowed)."""
+        ``max_hits <= 0`` disables the limit (always allowed).
+
+        *tag* attributes the hit to something inside the key — the account a login attempt
+        named — so :meth:`forget` can later drop exactly those hits and leave the rest."""
         if max_hits <= 0:
             return True, 0
         now = _time.time()
@@ -42,11 +46,11 @@ class RateLimiter:
             dq = self._buckets.get(key)
             if dq is None:
                 dq = self._buckets[key] = deque()
-            while dq and dq[0] <= cutoff:
+            while dq and dq[0][0] <= cutoff:
                 dq.popleft()
-            dq.append(now)
+            dq.append((now, str(tag or '')))
             if len(dq) > max_hits:
-                retry = int(dq[0] + window_secs - now) + 1
+                retry = int(dq[0][0] + window_secs - now) + 1
                 return False, max(1, retry)
             return True, 0
 
@@ -62,16 +66,34 @@ class RateLimiter:
             dq = self._buckets.get(key)
             if not dq:
                 return True, 0
-            while dq and dq[0] <= cutoff:
+            while dq and dq[0][0] <= cutoff:
                 dq.popleft()
             if len(dq) >= max_hits:
-                return False, max(1, int(dq[0] + window_secs - now) + 1)
+                return False, max(1, int(dq[0][0] + window_secs - now) + 1)
             return True, 0
 
     def reset(self, key: str) -> None:
-        """Forget a key's history (e.g. after a successful login)."""
+        """Forget a key's whole history."""
         with self._lock:
             self._buckets.pop(key, None)
+
+    def forget(self, key: str, tag: str) -> None:
+        """Forget only the hits of *key* that were recorded with *tag*.
+
+        What a successful login clears. Clearing the whole per-IP bucket meant that knowing
+        ONE password — the attacker's own account, say — wiped the count of every guess made
+        from that address against every other account, and the spraying went on unthrottled.
+        """
+        want = str(tag or '')
+        with self._lock:
+            dq = self._buckets.get(key)
+            if not dq:
+                return
+            kept = deque(h for h in dq if h[1] != want)
+            if kept:
+                self._buckets[key] = kept
+            else:
+                self._buckets.pop(key, None)
 
     def _gc(self, now: float, window_secs: float) -> None:
         # Occasionally drop stale buckets so a rotating-IP attacker can't grow the
@@ -80,5 +102,5 @@ class RateLimiter:
             return
         self._last_gc = now
         cutoff = now - window_secs
-        for k in [k for k, dq in self._buckets.items() if not dq or dq[-1] <= cutoff]:
+        for k in [k for k, dq in self._buckets.items() if not dq or dq[-1][0] <= cutoff]:
             self._buckets.pop(k, None)

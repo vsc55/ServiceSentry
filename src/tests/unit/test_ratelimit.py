@@ -97,3 +97,26 @@ class TestRateLimiter:
         rl.hit('new', 5, 30)                         # this hit triggers _gc()
         assert 'old' not in rl._buckets              # stale bucket pruned
         assert 'new' in rl._buckets
+
+
+class TestForgetOnlyWhatIsYours:
+    """A successful login used to `reset` the whole per-IP bucket: knowing ONE password wiped
+    the count of every guess made from that address against every other account."""
+
+    def test_forget_drops_only_the_hits_with_that_tag(self, clock):
+        rl = RateLimiter()
+        rl.hit('ip', 3, 60, tag='victim')
+        rl.hit('ip', 3, 60, tag='victim')
+        rl.hit('ip', 3, 60, tag='me')
+        rl.forget('ip', 'me')
+        assert rl.hit('ip', 3, 60, tag='victim')[0] is True     # 3rd victim hit: at the limit
+        assert rl.hit('ip', 3, 60, tag='victim')[0] is False    # 4th: over it
+
+    def test_forgetting_everything_drops_the_bucket(self, clock):
+        rl = RateLimiter()
+        rl.hit('ip', 3, 60, tag='me')
+        rl.forget('ip', 'me')
+        assert 'ip' not in rl._buckets
+
+    def test_forgetting_an_unknown_key_is_harmless(self, clock):
+        RateLimiter().forget('nobody', 'x')

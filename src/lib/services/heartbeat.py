@@ -171,6 +171,11 @@ class _HeartbeatMixin:
         apply_fn = getattr(self, '_apply_command', None)
         if store is None or not key or apply_fn is None:
             return
+        # A hot-standby replica of a single-owner service leaves the queue to the lease
+        # holder: claiming a `run_now` here ran a cycle on a stale in-memory monitor, beside
+        # the leader's own.
+        if not self._work_allowed():
+            return
         for _ in range(self._HB_DRAIN_MAX):
             cmd = store.claim_next(key, self._hb_instance_id())
             if cmd is None:
@@ -205,9 +210,49 @@ class _HeartbeatMixin:
         if store is None:
             self._is_leader = True          # back-compat: behave as sole owner
             return
-        self._is_leader = store.try_acquire(
-            self._hb_key(), self._hb_instance_id(),
-            host=hostname(), ttl=self._LEADER_TTL)
+        try:
+            self._is_leader = bool(store.try_acquire(
+                self._hb_key(), self._hb_instance_id(),
+                host=hostname(), ttl=self._LEADER_TTL))
+        except Exception as exc:  # pylint: disable=broad-except
+            # Fail safe: a lease that could not be renewed is not held. Keeping the old
+            # True would let this instance work on while the lease expires and a standby
+            # takes over — both running every check. Retried on the next beat.
+            self._is_leader = False
+            self._hb_log(f'leader lease renewal failed: {exc}')
+
+    # ── diagnostics + guarded beat ─────────────────────────────────────────────
+    def _hb_log(self, message: str) -> None:
+        """Report a heartbeat failure through the host's ``_dbg`` (never raises)."""
+        fn = getattr(self, '_dbg', None)
+        if fn is None:
+            return
+        try:
+            from lib.debug import DebugLevel  # noqa: PLC0415
+            fn(f'> Heartbeat > {self._hb_key()} >> {message}', DebugLevel.error)
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+    def _hb_guarded(self, fn, what: str) -> None:
+        """Run one beat step; an exception is logged, never propagated — so a DB
+        outage costs one beat, not the heartbeat thread."""
+        try:
+            fn()
+        except Exception as exc:  # pylint: disable=broad-except
+            self._hb_log(f'{what} failed: {exc}')
+
+    def _heartbeat_beat(self) -> None:
+        """One beat: renew the lease, publish the row, drain commands.  Each step is
+        guarded on its own, so a failing one does not skip the others.  Leadership is
+        renewed first and fails safe (see :meth:`_renew_leadership`)."""
+        try:
+            self._renew_leadership()
+        except Exception as exc:  # pylint: disable=broad-except
+            if self._LEADER_GATED:
+                self._is_leader = False
+            self._hb_log(f'leadership refresh failed: {exc}')
+        self._hb_guarded(self._heartbeat_write, 'heartbeat write')
+        self._hb_guarded(self._drain_commands, 'command drain')
 
     # ── write ───────────────────────────────────────────────────────────────────
     def _heartbeat_write(self) -> None:
@@ -276,20 +321,27 @@ class _HeartbeatMixin:
                                    self._hb_instance_id())
             except Exception:  # pylint: disable=broad-except
                 pass
+        # Claim the lease, appear immediately, pick up anything already queued — the
+        # same guarded beat the loop runs, so a DB hiccup at boot doesn't stop the
+        # thread from starting (it retries at the next beat).
         self._renew_leadership()         # claim the lease before the first beat
-        self._heartbeat_write()          # appear immediately, don't wait a full beat
+        self._hb_guarded(self._heartbeat_write, 'heartbeat write')
         self._publish_env()              # what this process runs on — once, after the row exists
-        self._drain_commands()           # pick up anything already queued
+        self._hb_guarded(self._drain_commands, 'command drain')
 
         def _loop():
             beat = 0
             while not stop_ev.wait(interval):
-                self._renew_leadership()
-                self._heartbeat_write()
-                self._drain_commands()
-                beat += 1
-                if beat % 6 == 0:        # ~once a minute: drop long-dead instances
-                    self._heartbeat_prune()
+                # Nothing inside one beat may end the thread: a dead heartbeat never
+                # refreshes _is_leader again, so this instance would either stop working
+                # for good or keep claiming a lease it no longer renews.
+                try:
+                    self._heartbeat_beat()
+                    beat += 1
+                    if beat % 6 == 0:    # ~once a minute: drop long-dead instances
+                        self._heartbeat_prune()
+                except Exception as exc:  # pylint: disable=broad-except
+                    self._hb_log(f'beat failed: {exc}')
 
         self._hb_thread = threading.Thread(
             target=_loop, name=f'hb-{self._hb_key()}', daemon=True)

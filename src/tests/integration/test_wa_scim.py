@@ -154,6 +154,82 @@ class TestScimUsers:
         assert n_after == n_before
 
 
+class TestScimKeepsOwnershipAcrossSso:
+    """SCIM ownership used to live in ``auth_source``, which every SSO sign-in rewrites: a
+    provisioned user who signed in once through OIDC/SAML/LDAP could no longer be deactivated
+    or deleted by the IdP (403), so deprovisioning silently stopped working for them."""
+
+    _PATCH_OFF = {'schemas': ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+                  'Operations': [{'op': 'replace', 'path': 'active', 'value': False}]}
+
+    def _provision(self, admin, config_dir, name='ann@corp'):
+        _scim_cfg(admin, config_dir)
+        client = admin.app.test_client()
+        uid = client.post('/scim/v2/Users', headers=_AUTH, json={
+            'userName': name, 'active': True, 'externalId': 'ext-1'}).get_json()['id']
+        return client, uid
+
+    def _deprovisions(self, admin, client, uid, name='ann@corp'):
+        r = client.patch(f'/scim/v2/Users/{uid}', headers=_AUTH, json=self._PATCH_OFF)
+        assert r.status_code == 200
+        assert admin._users[name]['enabled'] is False
+        assert client.delete(f'/scim/v2/Users/{uid}', headers=_AUTH).status_code == 204
+        assert name not in admin._users
+
+    def test_after_an_oidc_sign_in(self, admin, config_dir):
+        from lib.providers.oidc import auth as oidc_auth
+        client, uid = self._provision(admin, config_dir)
+        u = oidc_auth.sync_user(admin, {'preferred_username': 'ann@corp', 'sub': 's1'})
+        assert u['auth_source'] == 'oidc'
+        self._deprovisions(admin, client, uid)
+
+    def test_after_a_saml_sign_in(self, admin, config_dir):
+        from lib.providers.saml import auth as saml_auth
+        client, uid = self._provision(admin, config_dir)
+        u = saml_auth.sync_user(admin, 'ann@corp', {})
+        assert u['auth_source'] == 'saml2'
+        self._deprovisions(admin, client, uid)
+
+    def test_after_an_ldap_sign_in(self, admin, config_dir):
+        from lib.providers.ldap import auth as ldap_auth
+        client, uid = self._provision(admin, config_dir)
+        u = ldap_auth.sync_user(admin, 'ann@corp', {'dn': 'CN=ann,DC=corp', 'groups': []})
+        assert u['auth_source'] == 'ldap'
+        self._deprovisions(admin, client, uid)
+
+    def test_a_user_provisioned_before_the_marker_keeps_its_owner(self, admin, config_dir):
+        """Rows written before ``provisioned_by`` existed still say ``scim`` until their
+        first SSO sign-in — which is when the marker is pinned."""
+        from lib.providers.oidc import auth as oidc_auth
+        client, uid = self._provision(admin, config_dir)
+        admin._users['ann@corp'].pop('provisioned_by', None)
+        admin._users['ann@corp'].pop('scim_external_id', None)
+        oidc_auth.sync_user(admin, {'preferred_username': 'ann@corp', 'sub': 's1'})
+        self._deprovisions(admin, client, uid)
+
+    def test_the_external_id_survives_an_sso_sign_in(self, admin, config_dir):
+        from lib.providers.oidc import auth as oidc_auth
+        client, uid = self._provision(admin, config_dir)
+        oidc_auth.sync_user(admin, {'preferred_username': 'ann@corp', 'sub': 's1'})
+        assert client.get(f'/scim/v2/Users/{uid}', headers=_AUTH).get_json()['externalId'] == 'ext-1'
+        assert admin._users['ann@corp']['auth_source_id'] == 's1'
+
+    def test_an_sso_user_scim_never_provisioned_stays_out_of_reach(self, admin, config_dir):
+        _scim_cfg(admin, config_dir)
+        client = admin.app.test_client()
+        admin._users['olga'] = {'uid': 'u-olga', 'auth_source': 'oidc', 'auth_source_id': 's9',
+                                'role': '', 'groups': [], 'enabled': True}
+        r = client.patch('/scim/v2/Users/u-olga', headers=_AUTH, json=self._PATCH_OFF)
+        assert r.status_code == 403
+        assert admin._users['olga']['enabled'] is True
+
+    def test_an_account_an_admin_made_local_is_out_of_reach(self, admin, config_dir):
+        client, uid = self._provision(admin, config_dir)
+        admin._users['ann@corp']['auth_source'] = 'local'
+        r = client.patch(f'/scim/v2/Users/{uid}', headers=_AUTH, json=self._PATCH_OFF)
+        assert r.status_code == 403
+
+
 class TestScimGroups:
     def _c(self, admin, config_dir):
         _scim_cfg(admin, config_dir)

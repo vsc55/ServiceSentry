@@ -40,7 +40,7 @@ from lib.core.dcim import rackrev as dcim_rackrev
 from lib.core.dcim import service as dcim_svc
 from lib.core.dcim import store as dcim_store
 from lib.core.dcim.store import FACES, ITEM_ROLES, LINK_KINDS, PART_KINDS, PLACEMENTS
-from lib.core.dcim.routes._common import _num, _without, scan_pages
+from lib.core.dcim.routes._common import _fresh, _num, _without, scan_pages
 
 
 def register(app, wa, C):
@@ -223,7 +223,7 @@ def register(app, wa, C):
     @app.route('/api/v1/dcim/parts', methods=['POST'])
     @C.edit_req
     def api_dcim_part_new():
-        data = request.get_json(silent=True) or {}
+        data = _fresh(request.get_json(silent=True) or {})
         if str(data.get('kind') or 'other') not in PART_KINDS:
             return jsonify({'error': wa._t('dcim_part_kind_unknown')}), 400
         store, item = _item_writable(data.get('item_uid'))
@@ -532,7 +532,7 @@ def register(app, wa, C):
             de = max(1, int(data.get('u_slots') or 1))
             cual = int(data.get('u_slot') or 1)
             cuantos = max(1, int(data.get('u_slot_span') or 1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return 'dcim_bad_unit'
         if cual < 1 or cual > de or cual - 1 + cuantos > de:
             return 'dcim_bad_slot'
@@ -645,7 +645,9 @@ def register(app, wa, C):
             de = max(1, int(data.get('u_slots') or 1))
             cual = int(data.get('u_slot') or 1)
             cuantos = max(1, int(data.get('u_slot_span') or 1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # `OverflowError` too: JSON's `Infinity` parses, and `int()` of it is not a
+            # ValueError — it was a 500.
             return '', 'dcim_bad_unit'
         err = _slot_ok(data)
         if err:
@@ -721,7 +723,50 @@ def register(app, wa, C):
         if not dcim_owners.may_see(C.owner_of(store, store.owners_map(), 'rack', uid),
                                    C.seen()):
             return jsonify({'error': wa._t('access_denied')}), 403
-        filas = store.revs.history(uid, scope=dcim_rackrev.SCOPE)
+        # Every version through the SAME filter as the rack itself: an item this reader may
+        # not see is opaque in each snapshot — it occupied, and nothing else. Checking only the
+        # rack let the history hand over what GET /racks/<uid> hides: label, serial, asset and
+        # device of another company's server, in every version it was ever in. And the
+        # differences are computed between the FILTERED snapshots, so `changed` cannot name it
+        # either. The owner of an item is judged in THIS rack, where the snapshot found it —
+        # its item-level claim if it still has one, and the rack's chain otherwise.
+        said, allowed = store.owners_map(), C.seen()
+        rack_chain = store.chain_of('rack', uid)
+        crudas = store.revs.history(uid, scope=dcim_rackrev.SCOPE)
+        # What each item was SAID to belong to when a version was taken — the newest word wins.
+        # An item that still exists is judged by its claim today; one that was deleted has no
+        # claim any more (`forget_scope`), and judged by the rack's chain it became the rack
+        # owner's: the label of somebody else's deleted server, in every version it was in.
+        dichos: dict = {}
+        for f in reversed(crudas):
+            dichos.update((f.get('data') or {}).get(dcim_rackrev.OWNERS) or {})
+        juicio = {}
+
+        def _visible(item_uid):
+            if item_uid not in juicio:
+                if store.items.get(item_uid):
+                    org = dcim_owners.owner_of([('item', item_uid)] + rack_chain, said)
+                elif item_uid in dichos:
+                    org = str(dichos[item_uid] or '') or dcim_owners.owner_of(rack_chain, said)
+                else:
+                    # Gone, from a version older than the record of claims: nobody can say
+                    # whose it was, so only a reader who sees everything sees it.
+                    org = None
+                juicio[item_uid] = (allowed is None if org is None
+                                    else dcim_owners.may_see(org, allowed))
+            return juicio[item_uid]
+
+        def _filtrada(foto):
+            foto = dict(foto or {})
+            # The claims themselves never travel: they name the company of what is opaque.
+            foto.pop(dcim_rackrev.OWNERS, None)
+            foto['items'] = [
+                it if _visible(str((it or {}).get('uid') or ''))
+                else {c: v for c, v in dcim_owners.opaque(it).items() if c != 'rack_uid'}
+                for it in (foto.get('items') or ())]
+            return foto
+
+        filas = [dict(f, data=_filtrada(f.get('data'))) for f in crudas]
         fuera = []
         for i, f in enumerate(filas):
             # Contra la SIGUIENTE de la lista, que es la anterior en el tiempo: `history`
@@ -906,17 +951,21 @@ def register(app, wa, C):
                           'room': str(rack.get('room_name') or ''),
                           'site_uid': str(rack.get('site_uid') or ''),
                           'site': str(rack.get('site_name') or '')})
+        # The sites of the filter, narrowed like the site tree: every site's name, to a reader
+        # who may open one, was the list of the group's buildings.
+        sedes = C.filtered(store.sites.list(), store, said, allowed, 'site',
+                           dcim_svc.reachable(store, said, allowed))
         return jsonify({'items': fuera, 'capped': pag['capped'],
                         'next_offset': pag['next_offset'],
                         'roles': list(ITEM_ROLES),
                         'sites': [{'uid': x['uid'], 'name': str(x.get('name') or '')}
-                                  for x in store.sites.list()]})
+                                  for x in sedes]})
 
     @app.route('/api/v1/dcim/items', methods=['POST'])
     @C.edit_req
     def api_dcim_item_create():
         store = C.store()
-        data = request.get_json(silent=True) or {}
+        data = _fresh(request.get_json(silent=True) or {})
         # Desde una plantilla: la altura, el fondo, la cara, el rol y el modelo salen puestos, y
         # lo que queda por teclear es solo lo que tiene ESA caja y ninguna otra. Antes de
         # `_place` a propósito: la altura decide si cabe donde se pidió, y aplicarla después
@@ -987,9 +1036,21 @@ def register(app, wa, C):
             if str(data.get('parent_uid') or '') and store.children_of(uid):
                 return jsonify({'error': wa._t('dcim_mount_nested')}), 400
             merged = dict(item, **data)
-            _, err = _place(store, merged, ignore=uid)
+            destino, err = _place(store, merged, ignore=uid)
             if err:
                 return jsonify({'error': wa._t(err)}), 400
+            # …and against the DESTINATION, the check creating it there makes. Owning what is
+            # moved is not owning where it goes: without this, an item of one's own could be
+            # put into another company's rack, or onto another company's tray, that the same
+            # caller could not have created it in.
+            said, allowed = store.owners_map(), C.seen()
+            if destino != str(item.get('rack_uid') or '') \
+                    and not C.may_write(store, said, allowed, 'rack', destino):
+                return jsonify({'error': wa._t('access_denied')}), 403
+            padre = str(merged.get('parent_uid') or '')
+            if padre and padre != str(item.get('parent_uid') or '') \
+                    and not C.may_write(store, said, allowed, 'item', padre):
+                return jsonify({'error': wa._t('access_denied')}), 403
             # Colgarlo o descolgarlo arrastra su sitio, que `_place` ya ha resuelto.
             for campo in ('rack_uid', 'u_start', 'u_height', 'face'):
                 if campo in merged:
@@ -998,6 +1059,17 @@ def register(app, wa, C):
         if err:
             return jsonify({'error': wa._t(err)}), 400
         store.items.update(uid, data, actor=C.actor())
+        # What is mounted on it goes with it. Children inherit their place only when they are
+        # mounted, so moving a tray left them at the old rack and U: listed in a cabinet the tray
+        # had left, and drawn nowhere. They occupy nothing of their own, so where the tray fits,
+        # they fit — the check that matters was the tray's, made above.
+        if moving:
+            nuevo = store.items.get(uid) or {}
+            sitio = {c: nuevo.get(c) for c in
+                     ('rack_uid', 'u_start', 'u_height', 'face', 'placement')}
+            for hijo in store.children_of(uid):
+                if any(hijo.get(c) != v for c, v in sitio.items()):
+                    store.items.update(hijo['uid'], sitio, actor=C.actor())
         # De los DOS armarios cuando cambia de uno a otro: para el de origen, ese equipo se fue;
         # para el de destino, llegó. Guardar sólo el de destino dejaría el primero enseñando una
         # máquina que ya no está, que es exactamente lo que un historial no puede hacer.
@@ -1025,10 +1097,23 @@ def register(app, wa, C):
                             'mounted': len(encima)}), 400
         # De qué armario era, ANTES de borrarlo: después ya no hay a quién preguntárselo.
         era = str((store.items.get(uid) or {}).get('rack_uid') or '')
+        # And whose it said it was, for the same reason: the claim goes with `forget_scope`, and
+        # the rack's history must still judge this item by it — not by the rack's owner.
+        dijo = store.owner_said('item', uid)
+        # What hangs off it goes with it: its power leads, its cables and its components. Left
+        # behind, a lead kept its outlet taken for ever ("that outlet already has a cable in
+        # it") and a cable kept pointing at an item that is not there.
+        cables = store.cables_of([uid])
+        for fila in store.feeds.list('item_uid = ?', (uid,)):
+            store.feeds.delete(fila['uid'])
+        for fila in cables:
+            store.cables.delete(fila['uid'])
+        for fila in store.parts_of([uid]):
+            store.parts.delete(fila['uid'])
         store.items.delete(uid)
         store.forget_scope('item', uid)
         wa._audit('dcim_removed', detail={'item': uid})
-        C.snap(era, 'remove')
+        C.snap(era, 'remove', gone={uid: dijo})
         return jsonify({'ok': True})
 
     # Referenciadas para que un analizador no las dé por muertas: Flask se las

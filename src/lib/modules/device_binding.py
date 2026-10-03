@@ -119,7 +119,12 @@ class DeviceBinding:
             if h:
                 devices.append(h)
         if not devices:
-            return item
+            # Bound, but to nothing that resolves (the device was deleted without its checks).
+            # Returning the item unchanged made it read as an INLINE check, and `device_exec`
+            # then ran the command on the panel's own machine — a deleted server's ram/process/
+            # raid checks reported the panel's numbers under its label. Mark it instead: it
+            # runs nowhere and says why.
+            return {**item, 'device_kind': 'none', '_device_missing': True}
         primary = devices[0]
 
         specs = device_profile_specs(
@@ -280,26 +285,30 @@ class DeviceBinding:
         Never raises; transport/exec failures come back as
         ``('', <error>, -1)``.
         """
+        from lib.core.devices import runner as _r   # noqa: PLC0415
+        # A refusal is the check's message, read in the notification language.
+        lang = self._notify_lang()
         if not isinstance(item, dict) or not cmd:
-            return '', 'invalid item or command', -1
+            return _r.exec_error(_r.INVALID, lang=lang)
+        if item.get('_device_missing'):
+            return _r.exec_error(_r.DEVICE_MISSING, lang=lang)
         # …and nowhere, for a device that runs nothing. See `devices/runner.py::run` — the
         # same rule, because the two are the same decision reached from two sides.
         if str(item.get('device_kind') or '').strip().lower() == 'none':
-            from lib.core.devices.runner import NO_EXEC   # noqa: PLC0415
-            return '', NO_EXEC, -1
+            return _r.exec_error(_r.NO_EXEC, lang=lang)
         if str(item.get('device_kind') or '').strip().lower() == 'remote':
             from lib.core.devices import ssh_client  # noqa: PLC0415
             if not ssh_client.HAS_PARAMIKO:
-                return '', 'paramiko is not installed', -1
+                return _r.exec_error(_r.NO_PARAMIKO, lang=lang)
             address = str(item.get('ssh_host') or '').strip()
             if not address:
-                return '', 'remote device has no address', -1
+                return _r.exec_error(_r.NO_ADDRESS, lang=lang)
             client = None
             try:
                 client = ssh_client.connect_host(item, address, timeout=timeout)
                 return ssh_client.run_command(client, cmd, timeout=timeout)
             except Exception as exc:  # pylint: disable=broad-except
-                return '', f'SSH error: {exc}', -1
+                return _r.exec_error(_r.SSH_ERROR, exc, lang=lang)
             finally:
                 if client is not None:
                     try:

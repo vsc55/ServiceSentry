@@ -14,6 +14,8 @@ from lib.config.spec import cfg_default, cfg_get
 from lib.core.constants import is_reserved_username
 from lib.core.uids import new_uid
 from lib.debug import DebugLevel
+from lib.providers.identity import binding_conflict, note_refusal
+from lib.providers.scim.service import remember_provisioning
 from lib.providers.ldap.entry import attr_value, attr_values
 
 _HAS_LDAP3 = False
@@ -242,6 +244,42 @@ def _ldap_escape(s: str) -> str:
 
 # ── User sync ────────────────────────────────────────────────────────────────
 
+def canonical_username(wa, typed: str, attrs: dict) -> "str | None":
+    """The panel account a successful directory bind belongs to — or None when that is
+    ambiguous.
+
+    The directory decides who someone is, and it does not care about case: Active Directory
+    matches sAMAccountName case-insensitively, and with ``allow_email_login`` the same person
+    can sign in by mail. The panel's user table is keyed by an exact string. Using what was
+    TYPED as the key meant ``JSmith`` missed ``jsmith``, the bind succeeded anyway, and
+    ``sync_user`` provisioned a second account — with the group-derived role, no second
+    factor enrolled, and enabled even when ``jsmith`` had been disabled.
+
+    So the name is resolved against the accounts that exist: one whose name matches
+    case-insensitively, or an LDAP account bound to the same DN. Exactly one hit is that
+    account; none is a genuinely new user; more than one (the duplicates the old behaviour
+    left behind) is refused rather than guessed at, until an administrator removes the one
+    that should not exist.
+    """
+    want = str(attrs.get('username') or '').strip() or str(typed or '')
+    want_l = want.lower()
+    dn = str(attrs.get('dn') or '').strip().lower()
+    hits = []
+    for name, u in wa._users.items():
+        if str(name).lower() == want_l:
+            hits.append(name)
+        elif (dn and str((u or {}).get('auth_source') or '') == 'ldap'
+              and str((u or {}).get('auth_source_id') or '').strip().lower() == dn):
+            hits.append(name)
+    if not hits:
+        return want
+    if len(hits) == 1:
+        return hits[0]
+    wa._dbg(f"> Auth/LDAP >> {want!r} matches several accounts {sorted(hits)!r}; "
+            f"refusing to pick one", DebugLevel.warning)
+    return None
+
+
 def sync_user(wa, username: str, attrs: dict) -> "dict | None":
     """Create or update a user entry in wa._users from LDAP attributes.
 
@@ -267,6 +305,13 @@ def sync_user(wa, username: str, attrs: dict) -> "dict | None":
 
     existing = wa._users.get(username)
     if existing is None:
+        # Never provision an account that differs from an existing one only by case: the
+        # directory treats them as the same person, so the panel must not hold two of them
+        # (see canonical_username, which callers use to find the existing one).
+        if any(str(k).lower() == username.lower() for k in wa._users):
+            wa._dbg(f"> Auth/LDAP >> {username!r} differs only by case from an existing "
+                    f"account; refusing to create a second one", DebugLevel.warning)
+            return None
         user = {
             'uid':            new_uid(),
             'auth_source':    'ldap',
@@ -287,7 +332,19 @@ def sync_user(wa, username: str, attrs: dict) -> "dict | None":
             wa._dbg(f"> Auth/LDAP >> username {username!r} collides with a local account; "
                     f"refusing auto-conversion to SSO", DebugLevel.warning)
             return None
+        # An account bound to ANOTHER provider (an OIDC or SAML subject) is not the
+        # directory's to take over. Within LDAP the DN is not compared: it moves with an OU
+        # change, and the directory has just vouched for this login name with its password.
+        conflict = binding_conflict(existing, 'ldap', None)
+        if conflict:
+            wa._dbg(f"> Auth/LDAP >> {username!r} is bound to another identity ({conflict}); "
+                    f"refusing to re-link it", DebugLevel.warning)
+            note_refusal(f'ldap_{conflict}')
+            return None
         user = existing
+        # Who provisioned it survives the re-link: SCIM must still be able to
+        # deprovision an account that has since signed in here.
+        remember_provisioning(user)
         user['auth_source']    = 'ldap'
         user['auth_source_id'] = attrs.get('dn', '')
         user['display_name']   = attrs.get('display_name', '') or user.get('display_name', '')

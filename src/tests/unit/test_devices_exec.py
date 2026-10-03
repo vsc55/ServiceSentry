@@ -77,9 +77,25 @@ class TestADeviceThatRunsNothing:
         with patch('subprocess.run') as sr:
             out, err, code = runner.run({'kind': 'none', 'address': 'sw1'}, 'echo hi')
         assert (out, code) == ('', -1) and not sr.called
-        assert err == runner.NO_EXEC
-        _, err2, _ = _w().device_exec({'device_kind': 'none'}, 'echo hi')
-        assert err2 == runner.NO_EXEC, 'two wordings for one refusal'
+        w = _w()
+        assert err == runner.exec_error(runner.NO_EXEC)[1]
+        _, err2, _ = w.device_exec({'device_kind': 'none'}, 'echo hi')
+        assert err2 == runner.exec_error(runner.NO_EXEC, lang=w._notify_lang())[1],             'two wordings for one refusal'
+
+    def test_a_refusal_is_a_sentence_in_the_notification_language(self):
+        """It becomes the check's message and, from there, a notification: an English
+        constant there was a sentence no translation reached."""
+        from lib.core.devices import runner                      # noqa: PLC0415
+        from lib.i18n import translate                           # noqa: PLC0415
+        w = _w()
+        for lang in ('es_ES', 'en_EN'):
+            with patch.object(type(w), '_notify_lang', lambda self, _l=lang: _l):
+                _, err, _ = w.device_exec({'device_kind': 'none'}, 'echo hi')
+            assert err == translate(lang, runner.NO_EXEC)
+            assert err != runner.NO_EXEC, 'the key itself leaked out untranslated'
+        _, es, _ = runner.run({'kind': 'none'}, 'x', lang='es_ES')
+        _, en, _ = runner.run({'kind': 'none'}, 'x', lang='en_EN')
+        assert es != en
 
     def test_no_device_at_all_still_runs_here(self):
         """A classic inline check has always meant this machine, and says so by having no device

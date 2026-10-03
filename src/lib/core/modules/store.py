@@ -27,8 +27,8 @@ import uuid
 from lib.security import secret_manager
 from lib.config import ConfigControl
 from lib.db import BaseConnector
+from lib.db.freshness import VERSIONS_SCHEMA, ensure_version_row
 from lib.db.schema import Column, Index, TableSpec
-
 
 from lib.util.entity_audit import utc_now_iso as _now   # one timestamp format
 
@@ -106,6 +106,24 @@ def _is_collection(key, value) -> bool:
     return isinstance(value, dict) and not str(key).startswith('__')
 
 
+class StaleModulesConfig(Exception):
+    """A save was based on a configuration version that is no longer the current one.
+
+    Raised by :meth:`ModulesStore.save_all` when *expected_version* does not match: the
+    whole document is replaced on every save, so writing over a newer version silently
+    drops whatever the other writer changed. ``current`` is the version that won."""
+
+    def __init__(self, current) -> None:
+        super().__init__(f'module configuration changed (now at version {current})')
+        self.current = current
+
+
+#: The ``entity_versions`` row that counts writes to the module configuration. One counter for
+#: both tables: they are written together, in one transaction, by :meth:`save_all` only.
+_VERSION_KEY = _T_CONFIG
+_T_VERSIONS = VERSIONS_SCHEMA.name
+
+
 class ModulesStore:
     """Backend-agnostic store for the modules configuration."""
 
@@ -118,11 +136,29 @@ class ModulesStore:
     def _bootstrap(self) -> None:
         self._db.reconcile_table(_MODULE_CONFIG_SCHEMA)
         self._db.reconcile_table(_MODULE_CONFIG_ITEMS_SCHEMA)
+        ensure_version_row(self._db, _VERSION_KEY)
 
     # ── Meta ──────────────────────────────────────────────────────────────────
     def version(self) -> int:
-        """Monotonic counter bumped on every write — lets the facade invalidate
-        its cached dict cheaply."""
+        """The configuration's write counter, as the DATABASE has it.
+
+        It used to be a per-process integer, bumped only by this instance's own writes: a
+        second web replica (or the CLI) never saw the other's edits until a restart, and the
+        lost-update check had nothing shared to compare against. The counter now lives in
+        ``entity_versions`` and moves inside the same transaction as the rows
+        (:mod:`lib.db.freshness`). An unreadable answer keeps the last one seen — "no answer"
+        must not read as "everything changed"."""
+        try:
+            row = self._db.fetchone(
+                f'SELECT version FROM {_T_VERSIONS} WHERE name = ?', (_VERSION_KEY,))
+        except Exception:  # pylint: disable=broad-except
+            try:
+                self._db.rollback()   # PostgreSQL: a failed statement poisons the connection
+            except Exception:  # pylint: disable=broad-except
+                pass
+            return self._version
+        if row is not None and row[0] is not None:
+            self._version = int(row[0])
         return self._version
 
     def is_empty(self) -> bool:
@@ -169,13 +205,41 @@ class ModulesStore:
         return modules
 
     # ── Write (full transactional sync) ───────────────────────────────────────
-    def save_all(self, modules: dict, *, actor: str = '') -> None:
+    def _claim_version(self, expected_version) -> None:
+        """Bump the counter as the FIRST write of the transaction — compare-and-swap when
+        *expected_version* is given.
+
+        First, so it takes the write lock before anything is read: two writers that both
+        passed a separate "is it still N?" check would both save. ``UPDATE … WHERE version =
+        N`` lets exactly one of them through on every backend (SQLite's writer lock, the row
+        lock on PostgreSQL/MySQL, which re-evaluates the WHERE once the other commits)."""
+        if expected_version is None:
+            self._db.execute(
+                f'UPDATE {_T_VERSIONS} SET version = version + 1 WHERE name = ?',
+                (_VERSION_KEY,))
+            return
+        moved = self._db.execute(
+            f'UPDATE {_T_VERSIONS} SET version = version + 1 WHERE name = ? AND version = ?',
+            (_VERSION_KEY, int(expected_version)))
+        if moved:
+            return
+        row = self._db.fetchone(
+            f'SELECT version FROM {_T_VERSIONS} WHERE name = ?', (_VERSION_KEY,))
+        if row is None:
+            return          # no counter row to compare against: nothing to enforce
+        raise StaleModulesConfig(int(row[0] or 0))
+
+    def save_all(self, modules: dict, *, actor: str = '', expected_version=None) -> int:
         """Replace the whole configuration with *modules*: upsert what is present
         and delete what is absent, in one transaction.  Module UIDs are stable
-        (reused by name) so ``module_config_items.module_uid`` references stay valid."""
+        (reused by name) so ``module_config_items.module_uid`` references stay valid.
+
+        With *expected_version*, refuse (:class:`StaleModulesConfig`, nothing written) when
+        the stored configuration is no longer at that version. Returns the new version."""
         modules = modules if isinstance(modules, dict) else {}
         now = _now()
         with self._db.transaction():
+            self._claim_version(expected_version)
             existing = {m: u for (u, m) in
                         self._db.fetchall(f'SELECT uid, module FROM {_T_CONFIG}')}
             seen_modules: set = set()
@@ -232,7 +296,11 @@ class ModulesStore:
             for (iuid,) in self._db.fetchall(f'SELECT uid FROM {_T_ITEMS}'):
                 if iuid not in seen_items:
                     self._db.execute(f'DELETE FROM {_T_ITEMS} WHERE uid=?', (iuid,))
-        self._version += 1
+            row = self._db.fetchone(
+                f'SELECT version FROM {_T_VERSIONS} WHERE name = ?', (_VERSION_KEY,))
+            new_version = int(row[0]) if row and row[0] is not None else self._version + 1
+        self._version = new_version
+        return new_version
 
 
 def create(db: BaseConnector) -> ModulesStore:

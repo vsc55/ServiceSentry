@@ -256,3 +256,22 @@ def _login(client, username="admin", password="secret"):
     if tok:
         data["csrf_token"] = tok
     return client.post("/login", data=data, follow_redirects=True)
+
+
+def _login_as(admin, username, perms=None, role=None):
+    """A logged-in test client for *username*: a custom role holding exactly *perms*, or the
+    built-in *role*. For the authorisation tests, which each need a user scoped to one thing."""
+    from werkzeug.security import generate_password_hash  # noqa: PLC0415
+    if perms is not None:
+        role = f'r-{username}'
+        admin._custom_roles[role] = {
+            'uid': role, 'name': role, 'description': '', 'permissions': list(perms),
+            'enabled': True, 'created_at': '2026-10-03T00:00:00Z',
+            'updated_at': '2026-10-03T00:00:00Z', 'updated_by': 'test'}
+    admin._users[username] = {'uid': f'u-{username}', 'role': role, 'enabled': True,
+                              'password_hash': generate_password_hash('pw-secret')}
+    c = admin.app.test_client()
+    c.post('/login', data={'username': username, 'password': 'pw-secret'},
+           follow_redirects=True)
+    return c
+

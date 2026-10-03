@@ -2024,3 +2024,75 @@ class TestAValueThatIsAWholePath:
         assert stack['walk'] == '1.0.8802.1.1.2.1.3.7.1.4', 'not the local port table'
         assert stack['path'] == {'sep': '/', 'row': -1, 'value': -2}
         assert stack['role'] == 'aggregate', 'the aggregate join reads this by its role'
+
+
+class TestOnePortIsOneRow:
+    """`ifTable` and `ifXTable` are two tables with ONE index — ifIndex — so one port. The
+    64-bit traffic columns named their rows by ifName and every other column by ifDescr, and
+    on any device where the two differ ("GigabitEthernet0/1" against "Gi0/1") each port was
+    two rows: one with the 64-bit traffic and nothing else, one with everything else."""
+
+    IF_TABLES = ('1.3.6.1.2.1.2.2.1.', '1.3.6.1.2.1.31.1.1.1.')
+
+    def test_every_column_of_a_port_names_it_the_same_way(self):
+        for pid, prof in profiles.catalog().items():
+            labels = {str(m['index_label']) for m in prof.get('metrics') or ()
+                      if m.get('walk', '').startswith(self.IF_TABLES)
+                      and m.get('index_label') and not m.get('aggregate')}
+            assert len(labels) <= 1, f'{pid} names one port {len(labels)} ways: {labels}'
+
+    def test_and_it_is_the_name_the_rows_already_had(self):
+        """ifDescr: what every other column used, so the rows most installations have keep
+        their keys and only the stray 64-bit rows fold into them."""
+        m = {x['key']: x for x in profiles.catalog()['if_generic']['metrics']}
+        assert m['if_hc_in']['index_label'] == m['if_in']['index_label'] == '1.3.6.1.2.1.2.2.1.2'
+        assert m['if_hc_out']['index_label'] == '1.3.6.1.2.1.2.2.1.2'
+
+
+class TestACeilingForTheCountersThatHaveOne:
+    """`max_rate` is the fallback for an agent that does not serve its uptime: a 32-bit
+    counter that went backwards on a reboot is read as a wrap, and the wrap's rate is
+    impossible. Declared on the scalar counters whose real rate has a sane bound — ICMP, the
+    TCP/UDP error and connection counters, the IP error counters, the CPU ticks."""
+
+    def test_the_shipped_scalar_error_counters_declare_one(self):
+        cat = profiles.catalog()
+        wanted = {
+            'icmp_stats': None,                                     # all of them
+            'tcp_udp_stats': {'tcp_retrans', 'tcp_in_errs', 'tcp_resets', 'tcp_failed_opens',
+                              'udp_no_ports', 'udp_in_errors'},
+            'ip_stats': {'ip_hdr_errors', 'ip_in_discards', 'ip_no_routes'},
+            'ucd_linux': {'cpu_steal', 'cpu_wait'},
+        }
+        for pid, keys in wanted.items():
+            for m in cat[pid]['metrics']:
+                if m.get('kind') != 'counter' or m.get('width') != 32:
+                    continue
+                if keys is None or m['key'] in keys:
+                    assert m.get('max_rate'), f'{pid}.{m["key"]} has no ceiling'
+
+    def test_no_ceiling_is_low_enough_to_drop_a_real_reading(self):
+        for pid, prof in profiles.catalog().items():
+            for m in prof.get('metrics') or ():
+                if m.get('max_rate') is not None:
+                    assert m['max_rate'] >= 100_000, f'{pid}.{m["key"]}: {m["max_rate"]}'
+
+
+class TestARowCeilingOfItsOwn:
+    """A forwarding table on a core switch is thousands of rows; the walk's default ceiling
+    is 512. A column may say how many it needs."""
+
+    def test_it_is_kept_on_a_walk(self):
+        m = profiles.normalise_metric(_metric(key='fdb', oid=None, walk='1.3.6.1.2.1.17.4.3.1.2',
+                                              max_rows=4000))
+        assert m['max_rows'] == 4000
+
+    @pytest.mark.parametrize('bad', [0, -1, 'many', 10 ** 9, ''])
+    def test_a_ceiling_that_is_no_ceiling_is_dropped(self, bad):
+        m = profiles.normalise_metric(_metric(key='fdb', oid=None, walk='1.3.6.1.2.1.17.4.3.1.2',
+                                              max_rows=bad))
+        assert 'max_rows' not in m
+
+    def test_a_single_value_has_no_rows_to_cap(self):
+        m = profiles.normalise_metric(_metric(max_rows=4000))
+        assert 'max_rows' not in m

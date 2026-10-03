@@ -8,6 +8,8 @@ que hay que construir obligaría a construirlo para usarlas.
 
 from __future__ import annotations
 
+import math
+
 
 def _num(v) -> float:
     """Un número de un fichero que escribió cualquiera, o 0.
@@ -15,11 +17,69 @@ def _num(v) -> float:
     Un plano importado viene de fuera: puede traer `null`, un texto, una lista. Que
     reviente la importación entera por una coordenada mal escrita convierte un fichero
     casi bueno en ninguno, y dejar pasar el texto guarda una posición que ningún dibujo
-    sabe pintar."""
+    sabe pintar.
+
+    Non-finite values (`nan`, `inf`) are 0 too: `float()` accepts them, and the `int()` every
+    caller then applies raises on both — a 500 from a number that was never a number."""
     try:
-        return float(v)
+        out = float(v)
     except (TypeError, ValueError):
         return 0.0
+    return out if math.isfinite(out) else 0.0
+
+
+#: Columns no request may write: the row's identity and its audit stamp. `Rows.create` honours a
+#: `uid` in the payload, so a create that passed the request through let the CLIENT choose the
+#: identifier — and choosing an existing one was a 500 from the primary key.
+SERVER_COLS = ('uid', 'created_at', 'created_by', 'updated_at', 'updated_by')
+
+
+def _fresh(data) -> dict:
+    """*data* without :data:`SERVER_COLS` — what a create may take from a request."""
+    return {k: v for k, v in (data or {}).items() if k not in SERVER_COLS}
+
+
+#: The largest magnitude a numeric column accepts from a request. Far above any real
+#: measurement in millimetres, and far below what the engines' INTEGER can hold.
+_NUM_MAX = 10 ** 9
+
+
+def numbers_bad(spec, data: dict, bounds=None) -> str:
+    """Coerce the numeric columns of *spec* present in *data*, in place; ``''`` or the field.
+
+    A generic writer that stores whatever arrives put ``u_height: "abc"`` into an INTEGER
+    column — SQLite takes it — and every read that did ``int()`` on it was a 500 from then on.
+    So each INTEGER/REAL column the request names is checked here: a finite number, inside
+    *bounds* (``{col: (lo, hi)}``; otherwise ``±_NUM_MAX``), stored as ``int`` or ``float``.
+
+    Empty means "not said": the column's default, or ``None`` where the column admits it —
+    which is what an empty number box always amounted to.
+
+    Returns the name of the first bad column, so the answer can say which one.
+    """
+    bounds = bounds or {}
+    for col in spec.columns:
+        if col.name not in data or col.type not in ('INTEGER', 'REAL'):
+            continue
+        v = data[col.name]
+        if v is None or (isinstance(v, str) and not v.strip()):
+            if col.default is None and col.nullable:
+                data[col.name] = None
+                continue
+            v = col.default if col.default is not None else 0
+        if isinstance(v, (list, dict)):
+            return col.name
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return col.name
+        if not math.isfinite(f):
+            return col.name
+        lo, hi = bounds.get(col.name, (-_NUM_MAX, _NUM_MAX))
+        if f < lo or f > hi:
+            return col.name
+        data[col.name] = int(f) if col.type == 'INTEGER' else f
+    return ''
 
 
 def _without(data: dict, keys) -> dict:

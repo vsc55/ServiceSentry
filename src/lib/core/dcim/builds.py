@@ -196,7 +196,7 @@ def compare(wanted, have) -> list[dict]:
             # mirando lo que lleva la máquina.
             try:
                 n = int(p.get('qty') or 1) * max(1, int(p.get('kit_qty') or 1))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 n = 1
             k = _clave(p)
             fila = out.setdefault(k, {'kind': k[0], 'brand': str(p.get('brand') or ''),
@@ -263,7 +263,7 @@ def _piezas(p: dict) -> int:
     """Cuántas piezas son de verdad: las cajas por lo que trae cada una."""
     try:
         return max(1, int(p.get('qty') or 1)) * max(1, int(p.get('kit_qty') or 1))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 1
 
 
@@ -296,12 +296,12 @@ def summary(parts, models=None, base=None) -> dict:
             # esto y nada más.
             try:
                 puertos = json.loads(puertos or '{}')
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 puertos = {}
         for tipo, cuantos in ((puertos or {}).get('interfaces') or {}).items():
             try:
                 n = int(cuantos or 0)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 continue
             # El tipo de la biblioteca —`1000base-t`— es el nombre estándar del puerto y ya dice
             # su velocidad: traducirlo a «1 Gbps» sería una tabla que se queda corta y que
@@ -318,7 +318,7 @@ def summary(parts, models=None, base=None) -> dict:
             for campo in ('cores', 'threads'):
                 try:
                     fuera[campo] += int(float(extra.get(campo) or 0)) * n
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, OverflowError):
                     pass
             if not extra.get('cores'):
                 fuera['unknown'] += n
@@ -326,7 +326,7 @@ def summary(parts, models=None, base=None) -> dict:
         if clase == 'nic':
             try:
                 puertos = int(float(extra.get('ports') or 0)) * n
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 puertos = 0
             velocidad = str(extra.get('link_speed') or '')
             if puertos and velocidad:
@@ -371,7 +371,7 @@ def _leido(fila):
         if isinstance(v, str):
             try:
                 fuera[campo] = json.loads(v or '{}') or {}
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 fuera[campo] = {}
         elif not isinstance(v, dict):
             fuera[campo] = {}
@@ -687,7 +687,7 @@ class BuildStore:
             if campo in data or not parcial:
                 try:
                     fuera[campo] = max(suelo, int(float(data.get(campo) or suelo)))
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, OverflowError):
                     fuera[campo] = suelo
         return fuera
 
@@ -708,6 +708,6 @@ class BuildStore:
             if campo in data or not parcial:
                 try:
                     fuera[campo] = max(1, int(float(data.get(campo) or 1)))
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, OverflowError):
                     fuera[campo] = 1
         return fuera

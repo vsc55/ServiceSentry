@@ -46,6 +46,7 @@ from lib.core.devices import ssh_client
 from lib.core.devices import probe as device_probe
 from lib.modules import check_runner
 from lib.core.devices.migrate import apply_to_modules, build_migration_plan
+from lib.core.modules.facade import mutate_modules
 from lib.core.devices.service import (
     _MOD_RE, _bare, _probe_device_record, _restore_check_secrets,
     _apply_check_cred, _checks_for_device, _create_unique_device,
@@ -536,16 +537,47 @@ def register(app, wa):
         # The roles that scoped a permission to THIS device keep a key naming something that
         # no longer exists — dead weight nobody can see, and counted as a grant.
         wa._purge_scoped_permissions('server', [uid])
+        # …and so do the rows that point at it from other domains: the company that owned it
+        # (org_owner, scope 'device') and the rack item / PDU / power source it was the
+        # managed side of. Left behind, the company kept counting a device that no longer
+        # exists and the rack showed a status light for a uid nothing can resolve.
+        devices_svc.forget_device_references(wa, uid, session.get('username', SYSTEM_USER))
         return jsonify({'ok': True, 'checks_deleted': checks_deleted})
 
     # ── test / probe endpoints (run a check once without saving) ─────────────────
 
-    def _can_edit_body_device():
+    def _can_edit_body_device(field='device_uid'):
         """Edit gate for the test endpoints — allow the global ``devices_edit``
         or a per-server ``server.{uid}.edit`` when the body targets an existing
-        device (a new draft has no uid, so it needs the global permission)."""
-        uid = str((request.get_json(silent=True) or {}).get('uid') or '').strip()
+        device (a new draft has no uid, so it needs the global permission).
+
+        *field* is the body key the endpoint itself resolves the device from — ``device_uid``
+        for /test and /test_check (``_probe_device_record``), ``uid`` for /test_ssh. Gating on
+        a key the handler does not read authorised one device and tested another: the UI sends
+        only ``device_uid``, so per-server editors were refused, while a body carrying
+        ``uid: <mine>, device_uid: <theirs>`` restored THEIR stored password into a draft
+        pointed at any address."""
+        uid = str((request.get_json(silent=True) or {}).get(field) or '').strip()
         return wa._has_server_permission(uid, 'edit')
+
+    def _may_restore_check(module, device_uid):
+        """Whether a test aimed at *device_uid* may restore a stored check's secrets: the
+        check's key is the client's to name, so the check must be one the caller may edit —
+        bound to the device under test (already gated), to another device they may edit, a
+        cluster check that device is a member of, or any check for a module editor."""
+        def ok(stored):
+            if wa._has_module_permission(module, 'edit'):
+                return True
+            du = str(stored.get('device_uid') or '').strip()
+            if du:
+                return du == device_uid or wa._has_server_permission(du, 'edit')
+            members = stored.get('device_uids')
+            if isinstance(members, list):
+                if device_uid and device_uid in {str(m).strip() for m in members}:
+                    return True
+                return wa._has_server_permission('', 'edit')   # the global devices_edit
+            return False
+        return ok
 
     @app.route('/api/v1/devices/test_ssh', methods=['POST'])
     @login_required
@@ -565,7 +597,7 @@ def register(app, wa):
         semi-trusted role; every attempt is audited below (``device_ssh_tested`` with uid +
         address).  See memory ``project_bug_audit_2026_07``.
         """
-        if not _can_edit_body_device():
+        if not _can_edit_body_device('uid'):
             return jsonify({'error': wa._t('access_denied')}), 403
         if not ssh_client.HAS_PARAMIKO:
             return jsonify({'ok': False,
@@ -682,7 +714,8 @@ def register(app, wa):
         # outside its fields); fold it in so the credential is actually applied.
         if body.get('cred_uid') and not fields.get('cred_uid'):
             fields['cred_uid'] = body.get('cred_uid')
-        _restore_check_secrets(wa, module, coll, key, fields)
+        _restore_check_secrets(wa, module, coll, key, fields,
+                               may_restore=_may_restore_check(module, record['uid']))
         fields = _apply_check_cred(wa, fields)
         item = {**fields, 'device_uid': record['uid'], 'enabled': True}
         results = _run_checks(record, {(module, coll): {key: item}})
@@ -723,7 +756,8 @@ def register(app, wa):
                 fields = dict(c.get('fields') or {})
                 if c.get('cred_uid') and not fields.get('cred_uid'):
                     fields['cred_uid'] = c.get('cred_uid')
-                _restore_check_secrets(wa, bare, coll, key, fields)
+                _restore_check_secrets(wa, bare, coll, key, fields,
+                                       may_restore=_may_restore_check(bare, record['uid']))
                 fields = _apply_check_cred(wa, fields)
                 grouped.setdefault((bare, coll), {})[key] = {
                     **fields, 'device_uid': record['uid'], 'enabled': True}
@@ -802,8 +836,16 @@ def register(app, wa):
             })
 
         if applied:
-            apply_to_modules(modules, applied, wa._modules_dir)
-            if not wa._save_modules(modules):
+            # Applied to a FRESH copy, loaded and saved under the module-config lock: the
+            # plan was read before the devices were created, and saving that copy dropped
+            # any module save made in between. Members are addressed by module/collection/key,
+            # so they resolve the same on the fresh copy.
+            try:
+                ok = mutate_modules(
+                    wa, lambda mods: apply_to_modules(mods, applied, wa._modules_dir) or True)
+            except Exception:  # pylint: disable=broad-except
+                ok = False
+            if not ok:
                 return jsonify({'error': wa._t('save_file_error')}), 500
             wa._audit('devices_migrated', detail={
                 'devices': len(created),

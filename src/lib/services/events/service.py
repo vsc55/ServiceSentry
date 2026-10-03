@@ -158,7 +158,12 @@ class EventService(_HeartbeatMixin, _StandaloneConfigMixin, _EventsMixin):
     def _watch_loop(self) -> None:
         """Pick up rule edits made from the web UI (a different process)."""
         while not self._stop.wait(_CONFIG_WATCH_EVERY):
-            self._reconcile_once()
+            try:
+                self._reconcile_once()
+            except Exception as exc:  # pylint: disable=broad-except
+                # A failed poll (DB down) is retried next time; it must not end the
+                # watcher, or rule edits stop reaching this worker until a restart.
+                self._dbg(f'> Events >> config watch failed: {exc}', DebugLevel.error)
 
     def run(self) -> int:
         """Block running the worker loop until interrupted (SIGINT/SIGTERM)."""

@@ -280,7 +280,7 @@ try {
     _applyUserModalConfig(currentUser.modal_config || {});
     rolesData = await apiGet('/api/v1/roles') || {};
     groupsData = await apiGet('/api/v1/groups') || {};
-    modulesData = await apiGet('/api/v1/modules') || {};
+    modulesData = await apiGetModules() || {};
     applyModuleDefaults();
     syncModuleSections();   // which module sections the sidebar offers depends on this data
     _savedModulesData = deepClone(modulesData);

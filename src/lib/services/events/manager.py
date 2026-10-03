@@ -190,7 +190,15 @@ class _EventsMixin:
         self._dbg("> Events >> worker started", DebugLevel.info)
         poll = max(0.2, float(poll_secs or 2.0))
         while not stop_event.is_set():
-            self._event_worker_tick()
+            try:
+                self._event_worker_tick()
+            except Exception as exc:  # pylint: disable=broad-except
+                # The tick guards each source, but its gates (_events_enabled reads
+                # config) do not: a DB outage there must cost one tick, not the worker.
+                try:
+                    self._dbg(f"> Events >> worker tick failed: {exc}", DebugLevel.error)
+                except Exception:  # pylint: disable=broad-except
+                    pass
             if stop_event.wait(poll):
                 break
         self._dbg("> Events >> worker stopped", DebugLevel.info)

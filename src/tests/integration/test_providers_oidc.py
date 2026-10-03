@@ -277,3 +277,67 @@ class TestOidcLoginFlow:
 def test_oidc_csrf_exempt_declared(admin):
     # The OIDC provider declares its own CSRF-exempt path in register() (discovered, not hardcoded).
     assert '/auth/oidc/callback' in admin._csrf_exempt_prefixes
+
+
+# ── The account is bound to a subject, not to a name ─────────────────────────────
+
+class TestTheSubjectIsWhatBindsTheAccount:
+    """`sync_user` finds the account by `preferred_username`, which OIDC itself calls a label
+    an IdP may change and reassign — only `sub` is stable. It then overwrote the stored `sub`
+    and the role with whatever arrived, so whoever came to carry the name next (after a
+    rename, or in another provider using the same string) was signed into the first person's
+    account."""
+
+    def _bound(self, admin, source='oidc', sid='sub-alice'):
+        admin._users['alice'] = {
+            'uid': 'uid-alice', 'auth_source': source, 'auth_source_id': sid,
+            'display_name': 'Alice', 'email': 'alice@example.com',
+            'role': admin._role_name_to_uid('viewer'), 'groups': [], 'enabled': True}
+
+    def test_a_different_subject_under_the_same_name_is_refused(self, admin, config_dir):
+        from lib.providers.oidc import auth as oidc_auth
+        _oidc_cfg(config_dir)
+        self._bound(admin)
+        info = dict(_make_userinfo('alice', groups=['Admins']), sub='sub-mallory')
+        assert oidc_auth.sync_user(admin, info) is None
+        u = admin._users['alice']
+        assert u['auth_source_id'] == 'sub-alice'
+        assert admin._uid_to_role_name(u['role']) == 'viewer', 'the role was not re-synced'
+
+    def test_an_account_bound_to_another_provider_is_refused(self, admin, config_dir):
+        from lib.providers.oidc import auth as oidc_auth
+        _oidc_cfg(config_dir)
+        self._bound(admin, source='saml2', sid='alice-nameid')
+        assert oidc_auth.sync_user(admin, _make_userinfo('alice')) is None
+        assert admin._users['alice']['auth_source'] == 'saml2'
+
+    def test_the_same_subject_still_signs_in(self, admin, config_dir):
+        from lib.providers.oidc import auth as oidc_auth
+        _oidc_cfg(config_dir)
+        self._bound(admin)
+        assert oidc_auth.sync_user(admin, _make_userinfo('alice')) is not None
+
+    def test_an_account_never_bound_is_linked_by_its_first_sign_in(self, admin, config_dir):
+        from lib.providers.oidc import auth as oidc_auth
+        _oidc_cfg(config_dir)
+        self._bound(admin, sid='')
+        user = oidc_auth.sync_user(admin, _make_userinfo('alice'))
+        assert user is not None and user['auth_source_id'] == 'sub-alice'
+
+    def test_the_callback_records_why_it_refused(self, admin, client, config_dir):
+        from lib.providers.oidc import auth as oidc_auth
+        if not oidc_auth._HAS_AUTHLIB:
+            pytest.skip('authlib is not installed')
+        _oidc_cfg(config_dir)
+        self._bound(admin)
+        fake = MagicMock()
+        fake.authorize_access_token.return_value = {
+            'userinfo': dict(_make_userinfo('alice'), sub='sub-mallory')}
+        admin._audit_store.delete_all()
+        with patch.object(oidc_auth, 'get_client', return_value=fake):
+            res = client.get('/auth/oidc/callback')
+        assert res.status_code == 302 and res.headers['Location'].endswith('/login')
+        rows = [e for e in admin._audit_store.get_all() if e['event'] == 'login_failed']
+        assert rows and (rows[-1].get('detail') or {}).get('reason') == 'oidc_subject_mismatch'
+        with client.session_transaction() as s:
+            assert not s.get('logged_in')

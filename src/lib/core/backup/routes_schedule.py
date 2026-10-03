@@ -171,10 +171,21 @@ def register(app, wa, _var_dir, _backup_dir):
         store = getattr(wa, '_backup_tasks_store', None)
         if store is None:
             return jsonify({'ok': False, 'error': wa._t('not_found')}), 404
+        # Two tasks whose names reduce to the same slug write copies with the same names, and
+        # retention — which tells tasks apart by that slug — would count each one's copies as
+        # the other's and prune them together. Refused here, where it can still be renamed.
+        own_id = str(body.get('uid') or body.get('id') or '').strip()
+        slug = backup_svc_sched.task_slug(name)
+        clash = next((t for t in store.list_tasks()
+                      if str(t.get('id') or '') != own_id
+                      and backup_svc_sched.task_slug(t.get('name')) == slug), None)
+        if clash is not None:
+            return jsonify({'ok': False, 'error': wa._t('backup_task_slug_taken').replace(
+                '{}', str(clash.get('name') or ''))}), 409
         # `id`, not `uid`: that is the key JsonDocStore splits a record on. Sending `uid`
         # left the id absent, so every edit minted a new one and "save" quietly meant "add".
         doc = {
-            'id': str(body.get('uid') or body.get('id') or '').strip() or None,
+            'id': own_id or None,
             'name': name,
             'enabled': bool(body.get('enabled', True)),
             'mode': (str(body.get('mode') or '').strip()

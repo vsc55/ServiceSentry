@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~10.170 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~10.500 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -678,7 +678,7 @@ serie sin que **leer cree** —una gráfica de algo que nunca se midió no deja 
 que borrar una serie se lleve su identidad y olvide las cachés, que el filtro por módulo pase por
 la serie; y que estén los índices que se leen y no vuelva el que indexaba una columna vacía.
 
-**Archivo:** `tests/unit/test_history_series.py` — 34 tests
+**Archivo:** `tests/unit/test_history_series.py` — 37 tests
 
 ---
 
@@ -2776,7 +2776,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 38. BD — ModulesStore
 
-**Archivo:** `tests/unit/test_modules_store.py` — 17 tests
+**Archivo:** `tests/unit/test_modules_store.py` — 21 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -2800,7 +2800,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 
 ## 38b. Monitor — el módulo que llega tarde
 
-**Archivo:** `tests/unit/test_monitor_executor.py` — 26 tests
+**Archivo:** `tests/unit/test_monitor_executor.py` — 29 tests
 
 La ronda le da un plazo a cada módulo y sigue. Lo que **no** hace es matar el hilo —no puede—,
 así que el módulo vuelve, y al volver guarda su estado en vivo como siempre. Sus filas de
@@ -3057,7 +3057,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 42. Dispositivos — Ejecución local/SSH
 
-**Archivo:** `tests/unit/test_devices_exec.py` — 16 tests
+**Archivo:** `tests/unit/test_devices_exec.py` — 17 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3095,7 +3095,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 44. Dispositivos — Resolución dispositivo→check
 
-**Archivo:** `tests/unit/test_devices_config_resolution.py` — 27 tests
+**Archivo:** `tests/unit/test_devices_config_resolution.py` — 30 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3193,7 +3193,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 48. Syslog — Parser RFC 3164/5424
 
-**Archivo:** `tests/unit/test_syslog_parser.py` — 19 tests
+**Archivo:** `tests/unit/test_syslog_parser.py` — 21 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3215,7 +3215,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 49. Syslog — Listener UDP/TCP/TLS
 
-**Archivo:** `tests/unit/test_syslog_server.py` — 13 tests
+**Archivo:** `tests/unit/test_syslog_server.py` — 19 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3253,7 +3253,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 50. Syslog — SyslogStore
 
-**Archivo:** `tests/unit/test_syslog_store.py` — 18 tests
+**Archivo:** `tests/unit/test_syslog_store.py` — 21 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -3315,7 +3315,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 53. Panel Web — LDAP
 
-**Archivo:** `tests/integration/test_providers_ldap.py` — 17 tests
+**Archivo:** `tests/integration/test_providers_ldap.py` — 26 tests
 **Archivo:** `tests/unit/test_providers_ldap.py` — 5 tests
 
 | Test | Qué comprueba |
@@ -3341,10 +3341,17 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 | `test_connection_error_no_fallback_returns_error` | On LDAP connection error with fallback_to_local=False, login fails |
 | `test_connection_test_creates_audit_entry` | Connection test creates audit entry |
 | `test_connection_error_message_differs_from_credential_error` | Connection errors and credential errors return different messages |
+| `TestLdapCaseVariants::test_a_case_variant_still_owes_the_existing_accounts_second_factor` | Entrar como `JSmith` cae en la cuenta `jsmith` y sigue exigiendo su segundo factor |
+| `TestLdapCaseVariants::test_a_case_variant_signs_in_as_the_existing_account` | Una variante de mayúsculas inicia sesión como la cuenta existente, sin crear otra |
+| `TestLdapCaseVariants::test_a_case_variant_of_a_disabled_account_stays_out` | Una variante de mayúsculas de una cuenta deshabilitada no entra ni crea una nueva |
+| `TestLdapCaseVariants::test_an_email_login_lands_on_the_account_bound_to_the_same_dn` | El inicio de sesión por correo cae en la cuenta LDAP con el mismo DN |
+| `TestLdapCaseVariants::test_a_case_variant_of_a_local_account_is_refused` | Una variante de mayúsculas de una cuenta local se rechaza en lugar de crear una cuenta LDAP gemela |
+| `TestLdapCaseVariants::test_duplicates_left_behind_are_refused_not_guessed` | Si ya hay duplicados por mayúsculas, se rechaza el acceso en vez de elegir uno |
+| `TestLdapCaseVariants::test_sync_user_never_creates_a_case_variant` | `sync_user` nunca crea una cuenta que solo difiera en mayúsculas de otra |
 
 ## 54. Panel Web — OIDC/SSO
 
-**Archivo:** `tests/integration/test_providers_oidc.py` — 16 tests
+**Archivo:** `tests/integration/test_providers_oidc.py` — 21 tests
 **Archivo:** `tests/unit/test_providers_oidc.py` — 6 tests
 
 | Test | Qué comprueba |
@@ -3372,7 +3379,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 55. Panel Web — SAML2
 
-**Archivo:** `tests/integration/test_providers_saml.py` — 19 tests
+**Archivo:** `tests/integration/test_providers_saml.py` — 22 tests
 **Archivo:** `tests/unit/test_providers_saml.py` — 6 tests
 
 **Archivo:** `tests/unit/test_providers_github.py` — 16 tests
@@ -3550,7 +3557,7 @@ lleva puesto sale aunque no sea de los veinte de la lista corta.
 ## 58. Panel Web — Webhooks
 
 **Archivo:** `tests/integration/test_wa_webhook.py` — 19 tests
-**Archivo:** `tests/unit/test_wa_webhook.py` — 16 tests
+**Archivo:** `tests/unit/test_wa_webhook.py` — 19 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -4010,7 +4017,7 @@ tiraban, dejando una fila que decía «4 SKU» y no podía contestar cuál se es
 
 ## 66. Watchful: snmp
 
-**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 95 tests
+**Archivo:** `watchfuls/snmp/tests/test_sampler.py` — 115 tests
 
 **Donde un perfil deja de ser una declaración y se vuelve una serie.** Un check produce un
 veredicto; esto produce una gráfica, y una gráfica pide cosas que un veredicto no. Dos de ellas
@@ -4041,7 +4048,7 @@ cuando el dispositivo renumera).
 
 ---
 
-**Archivo:** `tests/unit/test_snmp_walk_oid.py` — 11 tests
+**Archivo:** `tests/unit/test_snmp_walk_oid.py` — 19 tests
 
 **Recorrer UNA columna**, que es lo que pide una métrica de perfil. El walk de descubrimiento
 barre dos subárboles fijos, trunca los valores a 120 caracteres y se traga los errores, porque
@@ -4060,7 +4067,7 @@ nombres recorridos de otra columna, y el tráfico del puerto 3 pasa a ser el del
 
 ---
 
-**Archivo:** `tests/unit/test_snmp_client_reuse.py` — 22 tests
+**Archivo:** `tests/unit/test_snmp_client_reuse.py` — 35 tests
 
 **Lo que cuesta un `SnmpEngine`**, y por qué sólo hay uno. Reportado desde la pantalla: la
 recogida SNMP tarda muchísimo y el panel va lento mientras corre. Nada de eso era la red.
@@ -4085,7 +4092,7 @@ fija aquí es la **cuenta de motores** y no ninguna respuesta.
 
 ---
 
-**Archivo:** `tests/unit/test_snmp_profiles.py` — 187 tests
+**Archivo:** `tests/unit/test_snmp_profiles.py` — 188 tests
 
 **La matriz de OIDs**: qué **es** un valor, para un protocolo que no lo dice. Dos propiedades
 deciden si el catálogo sirve: que **nada de lo que lee pueda parar el monitor** (los perfiles son
@@ -4387,7 +4394,7 @@ sería un dispositivo al que no se le asignó nada.
 
 ---
 
-**Archivo:** `tests/unit/test_snmp_metrics.py` — 25 tests
+**Archivo:** `tests/unit/test_snmp_metrics.py` — 32 tests
 
 **Los contadores, y las dos formas en que mienten.** Un contador de bytes es acumulativo:
 dibujado en crudo es una línea que sólo sube, en la que una caída de servicio es un tramo plano
@@ -4628,7 +4635,7 @@ los contenedores en los que el panel **no** se está ejecutando.
 
 ## 73. Servicios — Helpers de heartbeat (db_summary / app_version)
 
-**Archivo:** `tests/unit/test_heartbeat_helpers.py` — 6 tests
+**Archivo:** `tests/unit/test_heartbeat_helpers.py` — 10 tests
 
 ### `TestDbSummary`
 
@@ -4738,7 +4745,7 @@ los contenedores en los que el panel **no** se está ejecutando.
 ## 78. Panel Web — Política de bind del servidor web
 
 **Archivo:** `tests/integration/test_wa_server.py` — 4 tests
-**Archivo:** `tests/unit/test_wa_server.py` — 3 tests
+**Archivo:** `tests/unit/test_wa_server.py` — 8 tests
 
 | Test | Qué comprueba | OK | Error |
 |---|---|---|---|
@@ -4771,7 +4778,7 @@ algo va mal; un «NaN-NaN-NaN» no dice nada—.
 
 ## 79. Panel Web — SCIM 2.0 (aprovisionamiento)
 
-**Archivo:** `tests/integration/test_wa_scim.py` — 19 tests
+**Archivo:** `tests/integration/test_wa_scim.py` — 26 tests
 
 > Las pruebas unitarias del servicio SCIM (autenticación Bearer, parseo de filtros, mapeo de campos de usuario) están en `tests/unit/test_scim_service.py`, documentadas aparte en §85.
 
@@ -4803,6 +4810,13 @@ algo va mal; un «NaN-NaN-NaN» no dice nada—.
 | `test_create_group_with_members` | POST /Groups con miembros | 201; grupo con `source='scim'` (persiste tras recarga) y uid en `user.groups`; miembros en el GET | No crea, no vincula o no marca `source` |
 | `test_patch_remove_member` | PATCH `remove` de un miembro | 200; grupo fuera de `user.groups` | No lo quita |
 | `test_delete_group_unlinks_members` | DELETE /Groups/{id} | 204; grupo borrado y desvinculado de los miembros | No desvincula |
+| `TestScimKeepsOwnershipAcrossSso::test_after_an_oidc_sign_in` | SCIM puede desactivar y borrar a un usuario aprovisionado tras un inicio de sesión OIDC |
+| `TestScimKeepsOwnershipAcrossSso::test_after_a_saml_sign_in` | Igual tras un inicio de sesión SAML |
+| `TestScimKeepsOwnershipAcrossSso::test_after_an_ldap_sign_in` | Igual tras un inicio de sesión LDAP |
+| `TestScimKeepsOwnershipAcrossSso::test_a_user_provisioned_before_the_marker_keeps_its_owner` | Un usuario SCIM anterior a la marca la recibe en su primer SSO y SCIM lo sigue controlando |
+| `TestScimKeepsOwnershipAcrossSso::test_the_external_id_survives_an_sso_sign_in` | El externalId de SCIM se conserva aunque el SSO reescriba `auth_source_id` |
+| `TestScimKeepsOwnershipAcrossSso::test_an_sso_user_scim_never_provisioned_stays_out_of_reach` | SCIM sigue sin poder tocar a un usuario OIDC que no aprovisionó (403) |
+| `TestScimKeepsOwnershipAcrossSso::test_an_account_an_admin_made_local_is_out_of_reach` | Una cuenta aprovisionada por SCIM que un admin pasó a local queda fuera del alcance de SCIM |
 
 ## 80. Panel Web — Utilidades genéricas (`/api/v1/util/*`)
 
@@ -5481,7 +5495,7 @@ leído de sus cuatro cabeceras y en números, con los segundos de espera de un 4
 segundos» es una frase y «error» no. Y los siete códigos a siete claves distintas, con el
 `description` y los `errors` de su cuerpo en el detalle.
 
-**Archivo:** `tests/unit/test_freshservice_api.py` — 35 tests
+**Archivo:** `tests/unit/test_freshservice_api.py` — 37 tests
 
 ---
 
@@ -5501,7 +5515,7 @@ elegir qué se trae y emparejar a mano lo que el panel no puede deducir, con sus
 empresa no puede estar atada a dos departamentos, y un rechazo no es lo mismo que no haber elegido
 una fila.
 
-**Archivo:** `tests/unit/test_freshservice_plan.py` — 33 tests
+**Archivo:** `tests/unit/test_freshservice_plan.py` — 39 tests
 
 ---
 
@@ -6063,7 +6077,7 @@ Y **un comentario no puede cerrar una cadena**: un acento grave dentro de un `<!
 | `TestMatrixConfig::test_msteams_matrix_key_saves` | La clave de matriz se guarda |
 | `test_msteams_bot_csrf_exempt_declared` | El endpoint del bot declara su exención de CSRF **explícitamente** (lo llama Microsoft, no un navegador) |
 
-**Archivo:** `tests/integration/test_wa_msteams_sso.py` — 13 tests
+**Archivo:** `tests/integration/test_wa_msteams_sso.py` — 17 tests
 
 | Test | Qué comprueba |
 |---|---|
@@ -6131,7 +6145,7 @@ Un paquete puede aportar acciones a una sección de configuración describiéndo
 | `TestGroupLabel::*` (3) | La fila de acciones se titula por paquete cuando todas vienen del mismo, y esa clave es traducible y sobrevive a la normalización |
 | `TestI18nKeysExist::test_declared_label_keys_are_translatable` | Ninguna etiqueta declarada se queda sin traducir |
 
-**Archivo:** `tests/unit/test_ratelimit.py` — 9 tests
+**Archivo:** `tests/unit/test_ratelimit.py` — 12 tests
 
 Limitador de ventana deslizante en proceso (`lib.security.ratelimit`), con reloj inyectado.
 
@@ -7408,6 +7422,10 @@ servidor algo que el servidor va a rechazar.
 | `TestTheRowOffersWhatTheAccountScreenDoes::*` (3) | La fila salió **solo con revocar**, lo que convertía esta pantalla en un sitio para *cortar* acceso y no para gestionarlo: cualquier otra operación había que pedírsela a su dueño, que es justo lo que no funciona para un token del que ya no queda dueño. Ahora lleva las cuatro, cada una tras el permiso que le toca, y un **huérfano solo ofrece revocar** —no hay contra quién acotar un alcance nuevo, y rotarlo es mantener viva una credencial de resto en vez de limpiarla— |
 | `TestTheDialogFollowsTheAccount::*` (4) | Reportado desde la pantalla: «al crear salen todos los permisos». Ofrecía los de **quien llama** fuera para quien fuera el token, así que minteando para un *viewer* salían los setenta y cinco y podías marcar sesenta que ese viewer no tiene. No se rompía nada —la intersección en cada petición los tira—, que es exactamente el problema: la lista afirmaba que el token podía hacer cosas que no podría, y la primera prueba en contra era un 403 en algo automatizado. El conjunto lo da el **servidor** (rol, grupos, grupos deshabilitados: calcularlo otra vez en el navegador sería una segunda implementación del sistema de permisos, con las casillas colgando de la copia que se desviara), se redibuja al cambiar de cuenta, y la identidad interna —que no tiene con qué intersecar— queda acotada solo por quien llama |
 | `TestTheScreenCannotAskForWhatTheServerRefuses::*` (8) | `'*'` no se ofrece para otra cuenta ni se envía; la identidad `system` solo se ofrece a un administrador; y la pantalla **dice** lo que significa un token de `system` en vez de dejar que se descubra después |
+| `TestRotatingSomebodyElsesIsMinting::test_a_user_manager_cannot_rotate_a_wider_token_into_their_hands` | Un gestor con solo users_view+users_edit no puede rotar el token config_edit de otro (403, sin secreto, sin renombrar ni crear nada) |
+| `TestRotatingSomebodyElsesIsMinting::test_a_user_manager_cannot_rotate_a_star_token` | Un no-admin no puede rotar un token `*` ajeno |
+| `TestRotatingSomebodyElsesIsMinting::test_a_user_manager_may_rotate_one_within_their_own_set` | Un no-admin sí rota un token ajeno cuyo alcance está dentro del suyo |
+| `TestRotatingSomebodyElsesIsMinting::test_an_administrator_still_rotates_a_wide_one` | El administrador sigue pudiendo rotar cualquier token (respuesta a incidentes) |
 
 ---
 
@@ -8781,8 +8799,8 @@ cuando otra réplica no puede leer un secreto.
 
 **Archivo:** `tests/unit/test_backup_service.py` — 87 tests
 **Archivo:** `tests/unit/test_backup_module_parts.py` — 19 tests
-**Archivo:** `tests/unit/test_backup_schedule.py` — 64 tests
-**Archivo:** `tests/integration/test_wa_backup.py` — 104 tests
+**Archivo:** `tests/unit/test_backup_schedule.py` — 68 tests
+**Archivo:** `tests/integration/test_wa_backup.py` — 110 tests
 **Archivo:** `tests/unit/test_wa_backup_ui.py` — 126 tests
 
 Una copia es un **zip de JSON**, no un volcado del fichero de base de datos. El panel corre sobre
@@ -8847,7 +8865,7 @@ almacena de verdad.
 
 ## 147. Copias automáticas: cuándo toca una, y cuáles se van
 
-**Archivo:** `tests/unit/test_backup_schedule.py` — 64 tests
+**Archivo:** `tests/unit/test_backup_schedule.py` — 68 tests
 
 Un **intervalo**, no una hora del día, y la diferencia es todo el diseño: un panel apagado a las
 03:00 tiene que hacer su copia diaria al volver a las 09:00. «Cuánto hace de la última» sigue
@@ -9180,7 +9198,7 @@ por la app verifica. Un QR mal dibujado cuesta teclear el secreto, no una cuenta
 
 ## 155. Segundo factor: el escalón que pone delante de un login
 
-**Archivo:** `tests/integration/test_wa_mfa.py` — 80 tests
+**Archivo:** `tests/integration/test_wa_mfa.py` — 95 tests
 
 Las dos piezas puras se prueban contra números publicados (§154). Lo que se prueba **aquí** es
 lo que ninguna de las dos puede ver: que una contraseña, sola, deja de bastar.
@@ -9786,7 +9804,7 @@ alguien acaba desactivando.
 
 ---
 
-**Archivo:** `tests/integration/test_wa_api_tokens.py` — 105 tests
+**Archivo:** `tests/integration/test_wa_api_tokens.py` — 109 tests
 
 Todo menos SCIM se autenticaba con cookie de sesión + CSRF, así que automatizar algo obligaba a
 guardar una contraseña **real** — y en cuanto una cuenta lleva segundo factor, una contraseña ya
@@ -10241,7 +10259,7 @@ Llevarse modelos y plantillas a otra instalación: qué viaja en el sobre y qué
 
 Qué se pregunta de un componente de cada clase, y de dónde sale esa lista. Que es **un fichero y no una tabla de Python** —añadir el formato de una tarjeta nueva no tiene por qué ser una release, y quien lo sabe casi nunca es quien toca el código—; que cada clase pide lo suyo y el peso lo puede decir cualquiera, al final y no delante; que **el tamaño no es un atributo** porque es la columna que se lee en cada renglón y la que se copia a la pieza; que **donde no significa nada no se pregunta** —de una CPU el «tamaño» no es nada, y una casilla que no pregunta nada no se sabe rellenar—; que **el tamaño se llama como toca en cada clase** —la misma casilla es la capacidad de un disco, los gigas de un DIMM y los vatios de una fuente, y una palabra que vale para las tres no informa de ninguna— y no se repite además como atributo, que serían dos casillas sin ninguna que mandara; que **el número y su unidad son un dato** —`unit_of` empareja el desplegable con la magnitud que mide, y el tamaño dice en qué unidades se escribe— y que sin unidades sigue siendo texto libre, que es lo que hace falta donde el tamaño no es una magnitud; que un documento se limpia **al leerlo** —clases que no existen, controles que la pantalla no sabe dibujar, desplegables sin opciones— porque también se lee el que viene dentro, y una comprobación que solo corre en la puerta de entrada no protege del fichero que llega por la otra; que lo descartado **se dice**, o media pantalla se queda sin atributos y nadie se entera hasta que va a rellenar una ficha; y que los campos que no se explican solos **llevan ayuda**, y que la llevan en los dos idiomas o en ninguno —media traducción es una pantalla que cambia de idioma a mitad—; que una tarjeta de red **no siempre va dentro** —un adaptador USB existe y está enchufado ahora mismo en el portátil de alguien—; que la velocidad de un enlace **no se mide en gigabits** —un número obliga a escribir 0,1 para un puerto de 100 Mbps, y esos puertos existen— y que **no es la misma lista para todo**, porque una tarjeta de red habla Ethernet y una controladora habla SAS o Fibre Channel; que las denominaciones PC son **las impresas y no las calculadas** —`PC4-21300` parecen los 2666 MT/s por ocho, y calcularlas así produce cuatro que no existen, porque los MT/s ya vienen redondeados y el nombre comercial se redondeó por su cuenta—; que un módulo de memoria dice **si sirve en esa placa** —el formato y el tipo de módulo son dos ejes y no uno—; que una CPU dice **lo que hace falta para comprarla** —`cores` a secas dejó de significar algo el día que trae ocho núcleos grandes y dieciséis pequeños, y lo que se mira antes de decir que no vale es la memoria que admite y cuánta— sin perder la lista de zócalos al ampliarla, que sería tenerla dos veces y verlas separarse; que **las fechas de una vida son seis y no una** —fin de venta, fin de mantenimiento, fin de parches de seguridad, última alta de soporte, última renovación y fin de soporte— y que van en **su propio bloque**, porque seis casillas de fecha sueltas entre los atributos se leen igual que seis fechas cualesquiera; que un grupo mal escrito **no crea una sección**, que sería una pantalla entera que no sale en ningún sitio y que nadie echa de menos porque nunca existió; que las tiene cualquier componente, porque «¿esto todavía se compra?» se pregunta de un DIMM igual que de una CPU; que **lo que dice cualquiera cierra la lista** y las fechas la cierran del todo, porque lo primero que se teclea de un disco es si es M.2 o de 2,5"; que **lo que es una lista cerrada se elige** —el zócalo de una CPU y el cifrado de un disco, escritos a mano, son cuatro formas del mismo dato y ninguna forma de preguntar «qué CPU me sirve para esta placa»—; que **cada guardado deja versión** —de este documento sale el formulario de todos los componentes, así que «¿esto quién lo cambió?» es la pregunta del mes siguiente— y que el comparador dice qué se añadió y qué se fue **por clase y por campo**, porque a dos volcados de JSON uno al lado del otro no se les puede preguntar eso; que manda **la versión más alta**, que es para lo que sirve un número de versión: una actualización publicada supera a un parche local, y un parche local sigue en pie hasta que se publique algo más nuevo — **salvo en los comunes, que se suman**, porque ahí es donde el panel añade lo que pregunta de cualquier cosa y un documento guardado con un número más alto haría desaparecer sin aviso lo que se publique después, con el guardado mandando aun así campo a campo.
 
-**Archivo:** `tests/unit/test_dcim_revisions.py` — 22 tests
+**Archivo:** `tests/unit/test_dcim_revisions.py` — 25 tests
 
 Qué decía una ficha del catálogo antes, y quién la cambió. Que un número escrito de dos formas —`1` y `'1'`, uno de la base de datos y otro de un formulario— **no es un cambio**, ni lo son los campos que se reescriben en cada guardado; que el orden **no depende del reloj**, porque este proyecto guarda segundos y diez cambios seguidos caen en el mismo — sin un contador propio una versión aparece antes que la que la produjo y la diferencia sale del revés; que cada renglón trae lo que ese cambio hizo y el primero no compara contra nada; que se poda a las últimas, y se van las viejas y no las nuevas. Y del lado del catálogo: que crear, corregir y tocar una imagen dejan constancia —la acción, porque poner una foto no cambia ningún campo comparable—, que **importar no deja versiones** (reemplaza el origen entero con uid nuevos, y guardarlo haría crecer la tabla en ocho mil renglones por actualización), y que borrar una ficha se lleva su historial.
 
@@ -10278,7 +10296,7 @@ El número de inventario, que es único entre TODO lo inventariado y no dentro d
 
 **Archivo:** `tests/unit/test_dcim_assets.py` — 23 tests
 
-**Archivo:** `tests/unit/test_dcim_model.py` — 217 tests
+**Archivo:** `tests/unit/test_dcim_model.py` — 218 tests
 
 Inventario físico: la contención (sede→sala→rack→item) y la pertenencia (empresa) como dos árboles distintos; que un rack contiene *items* y solo algunos son dispositivos; que la cara es parte de la posición y dos cosas no caben en una U; la herencia de dueño con el más concreto mandando; y el rack compartido — quién ve qué, y que un item ajeno solo dice que ocupa. Y el vuelco de estado en vivo: que un item sin dispositivo **no está bien** sino sin vigilar, que un rack es lo peor que tiene dentro, y que el recuento cuenta solo lo que quien mira puede ver —el fallo del vecino no sube ni al rack, ni a la sala, ni a la sede—. Y **los mástiles**: que lo que decide si un servidor entra no es el fondo del armario sino la distancia entre mástiles, que entrar no es caber —hay que dejar sitio a los cables— y que sin una de las dos medidas no se contesta ni que sí ni que no. Y **por dónde se llega**: que el acceso es un hecho del sitio y no un tipo de armario, que lo no dicho es todo accesible —y no nada—, y que un equipo montado en una cara inalcanzable es una contradicción entre dos cosas declaradas que se dice sin corregir. Y **el cuadro de mando**: que cada fallo trae el camino entero —sede, sala, rack, U— y los uid con los que se llega de un clic; lo peor primero; que lo que nadie vigila se cuenta aparte en vez de sumarse a lo que está bien; que **el fallo del vecino no sale en el cuadro de la filial** —un cuadro es un sitio cómodo para filtrar de menos, porque la pantalla se ve perfecta con datos que no debería enseñar—; y que una lista recortada lo dice, porque una más corta que la realidad parece completa. Y **lo que hay en la sala que no es un rack**: que vive en su propia tabla y por tanto poner una columna no cambia el inventario —el recuento no incluye extintores ni «sin vigilar» devuelve mamparas—, que las capas salen ordenadas del modelo y no de quien pinta, que una sala sabe cuánto mide y cuánto su baldosa, y que el arranque **no nombra ninguna tabla**: nombrarlas era poder olvidarse de una, y olvidarse no fallaba al arrancar sino semanas después en la instalación de otro. Y **la potencia**, cuya pregunta no es cuántos vatios hay sino qué se apaga si cae una rama: que dos cables a la MISMA rama no son redundancia —contando cables lo parecerían, contando ramas no—, que un equipo sin enchufar no es un aviso porque un panel de parcheo no come, que la carga se mide contra la MITAD de lo que aguanta la regleta —tener dos ramas no sirve si una sola no puede con las dos—, y que sin capacidad declarada no se inventa un 0 %, que sería decirle a alguien que hay sitio de sobra. Y **lo declarado contra lo que se ve**, que es donde el inventario deja de ser documentación: que un cable visto en otro puerto se dice —es alguien que movió el latiguillo y no cambió la etiqueta—, que **un extremo pasivo no se juzga** porque un panel de parcheo es un trozo de metal y marcarlo como «no se ve» llenaría la pantalla de avisos irresolubles, que lo visto y no declarado sale aparte pero **solo entre máquinas que están en un armario**, que arreglar un cable no aumenta la lista de pendientes, y que sin mapa lo declarado se sigue leyendo — una pantalla que no abre porque una sonda no contestó es peor que una que dice menos. Y el **consumo por sociedad**, con el dueño llegando ya resuelto para no tener dos copias de la regla de herencia. Y **qué sede se queda sola**: que una sede con un solo enlace se dice y se dice CUÁL, que dos operadores por la misma zanja no son dos caminos —dos líneas en el mapa y un solo camino en el suelo—, que con un tercer enlace por otra ruta ya no se avisa porque sería mentir, que **no se avisa de lo que nadie escribió** —un aviso sacado de un campo vacío enseña a ignorar la pantalla—, y que el estado de un enlace es el de quien lo termina: un circuito es un contrato y no tiene estado. Y **dónde cabe esto**: que doce U sueltas no son un hueco de doce —el número parece una respuesta y no lo es—, que una rama sin tomas descarta aunque sobre sitio, que se cuentan RAMAS y no regletas, que sin capacidad declarada no se descarta por vatios —eso sería descartar un armario por una casilla vacía—, que los motivos se acumulan (arreglar uno y descubrir el siguiente son dos viajes al armario) y que entre los que valen gana el hueco más ajustado, porque meter un 1U en el tramo de veinte gasta el único sitio donde luego cabrá un chasis. Y **a dónde llega un lector**: o lo ve, o contiene algo suyo. Que se llega a la sede por tener 2U dentro pero no a otra donde no se tiene nada; que quien lo ve todo no necesita conjuntos; y que ese `None` **no** significa llegar a todo — darle dos significados hizo que cualquier filtro que no pasara los conjuntos dejara pasar todo, y los equipos ajenos de un rack compartido salieron enteros en vez de anónimos. Y **una fila es algo que se declara**: que una que aspira donde otra descarga se dice —el error de una sala mal ordenada que no se ve mirando el plano, porque las cajas están perfectamente alineadas—, que dos filas enfrentadas compartiendo pasillo frío NO son un aviso porque es la disposición correcta, que una fila sin pasillos dichos no se juzga, y que los racks sueltos salen aparte y no como error: el armario de un rincón no está en ninguna fila y nunca lo estará. Y **qué pierdo si echan el bypass**: que la cadena sube hasta la acometida, que con el bypass echado el SAI no está en ella pero **se puede preguntar cómo sería sin él** —lo que convierte la duda en una frase—, que una regleta que nunca pasa por un SAI no es un aviso porque eso es media sala técnica, que las dos ramas del mismo SAI sí lo son —dos colores y un punto de fallo tres metros más arriba—, que «nadie lo ha dicho» no es «no tiene», y que un ciclo declarado no cuelga el panel. Y **qué es cada cosa**: que un panel de parcheo deja de contar como «sin vigilar» —no es que nadie lo mire, es que no hay nada que mirar, y cuarenta deberes imposibles enseñan a saltarse la lista—, que un servidor sin máquina **sí** sigue siendo una pregunta, que un rol sin decir también lo es, y que el catálogo **sugiere** el tipo a partir de los puertos —tomas sin interfaces es una regleta, puertos por delante y detrás sin alimentación es un panel— saliendo VACÍO cuando no lo sabe, porque `other` sería una respuesta inventada.
 
@@ -10382,3 +10400,259 @@ sería un núcleo que hay que editar para enterarse del quinto.
 | `TestItDoesNotGrowForEver::*` (3) | El techo conserva los más nuevos; el límite de edad es una **segunda** pregunta (hasta dónde mira alguien, frente al techo que alcanza un día movido); y sin límites no se olvida nada |
 | `TestFilingItNeverBreaksTheWorkThatJustEnded::*` (3) | Un trabajo que terminó, terminó: que falle escribir la nota no puede convertir una copia hecha en una excepción dentro del hilo que la hizo. Sin base de datos atada no se escribe nada y se dice; y los límites son los de la instalación, con la basura rechazada en vez de pisando un límite real |
 | `TestTheWorkArchivesItselfWhereItEnds::*` (11) | Se archiva **donde el trabajo termina**, no donde alguien mira —archivar desde la pantalla haría que un trabajo que nadie abrió fuera un trabajo que nunca pasó, y las obtenciones se podan de memoria a la media hora—; una copia que lanzó excepción deja igual su nota (la fila que dice que falló es la que alguien viene a buscar); las rutas del historial son GET; y «no hay dónde guardarlo» se dice en voz alta, porque una lista vacía se lee como «aquí no ha corrido nunca nada» |
+
+---
+
+## 174. Auditoría 2026-10 — un permiso se comprueba sobre lo que de verdad se toca
+
+**Archivo:** `tests/integration/test_wa_authz_device_secrets.py` — 19 tests
+
+**Archivo:** `tests/integration/test_wa_dcim_authz.py` — 26 tests
+
+La auditoría de bugs latentes de octubre de 2026 encontró el mismo error en varios sitios: el
+permiso se comprobaba sobre un objeto y la acción se hacía sobre otro. Una acción de solo lectura
+rellenaba secretos guardados en una configuración cuya dirección ponía el cliente. Una prueba de
+dispositivo autorizaba `uid` y probaba `device_uid`. Un ítem de módulo movía la dirección de
+cualquier dispositivo que nombrara. Un clúster se autorizaba por el `uid` del cuerpo. En el
+inventario, se miraba lo que se movía y no el destino. Estas pruebas fallan con el código anterior
+y fijan cada caso, junto con los flujos legítimos que tienen que seguir funcionando.
+
+| Test | Qué verifica |
+|------|--------------|
+| `TestAReadOnlyActionRunsAStoredItemAsSaved::test_a_viewer_cannot_point_the_stored_token_at_another_host` | Un viewer que nombra un ítem guardado y manda su propio `host` ejecuta la acción con el host guardado, no con el suyo |
+| `TestAReadOnlyActionRunsAStoredItemAsSaved::test_a_viewer_refreshing_the_saved_item_still_authenticates` | El refresco de una página de módulo (ítem enmascarado + `_item_key`) sigue recibiendo el token guardado |
+| `TestAReadOnlyActionRunsAStoredItemAsSaved::test_a_viewer_cannot_borrow_a_device_ssh_password` | Un viewer que nombra `device_uid` (con o sin borrador `_device`) no recibe la contraseña SSH del dispositivo |
+| `TestAReadOnlyActionRunsAStoredItemAsSaved::test_a_viewer_cannot_borrow_a_credential` | Un viewer que nombra un `cred_uid` no recibe el secreto de esa credencial |
+| `TestAReadOnlyActionRunsAStoredItemAsSaved::test_a_module_editor_still_tests_an_unsaved_change` | El editor del módulo prueba un cambio sin guardar con el secreto guardado restaurado |
+| `TestAReadOnlyActionRunsAStoredItemAsSaved::test_a_module_editor_cannot_borrow_a_device_they_cannot_edit` | El editor del módulo no obtiene la contraseña SSH de un dispositivo que no puede editar |
+| `TestAReadOnlyActionRunsAStoredItemAsSaved::test_a_device_editor_still_tests_a_draft_of_their_device` | Quien edita el dispositivo prueba un borrador suyo y se restaura su contraseña enmascarada |
+| `TestAProvisioningLinkOnlyMovesItsOwnDevice::test_a_module_editor_cannot_retarget_another_device` | Un `link_field` que apunta a otro dispositivo no cambia su dirección; el ítem aprovisiona uno propio |
+| `TestAProvisioningLinkOnlyMovesItsOwnDevice::test_moving_the_vip_still_moves_the_items_own_device` | Cambiar la VIP de un ítem sigue moviendo la dirección de su propio dispositivo aprovisionado |
+| `TestAProvisioningLinkOnlyMovesItsOwnDevice::test_a_device_editor_may_link_a_device_they_edit` | Con `devices_edit` sí se puede enlazar un dispositivo existente y actualizar su dirección |
+| `TestTheDeviceTestGatesTheDeviceItTests::test_editing_mine_does_not_test_theirs` | `uid: A` + `device_uid: B` con solo `server.A.edit` da 403 y la contraseña de B no sale |
+| `TestTheDeviceTestGatesTheDeviceItTests::test_a_per_server_editor_may_test_their_device` | Un editor por dispositivo puede lanzar `/test` con solo `device_uid` (antes 403) |
+| `TestTheDeviceTestGatesTheDeviceItTests::test_a_per_server_editor_may_test_a_check_of_their_device` | Un editor por dispositivo puede lanzar `/test_check` de su dispositivo (antes 403) |
+| `TestTheDeviceTestGatesTheDeviceItTests::test_another_checks_secret_is_not_restored` | Nombrar la clave de otra comprobación no restaura su token en la prueba de mi dispositivo |
+| `TestTheDeviceTestGatesTheDeviceItTests::test_a_check_of_the_device_under_test_is_restored` | Los secretos de una comprobación ligada al dispositivo probado sí se restauran |
+| `TestAClusterEditorStaysOnTheirCluster::test_they_may_edit_their_cluster` | Con `cluster.CL_C.edit` se puede editar el clúster CL_C |
+| `TestAClusterEditorStaysOnTheirCluster::test_another_cluster_is_not_theirs_by_claiming_its_uid` | Enviar `uid: CL_C` dentro de otro clúster no autoriza a editarlo (403) |
+| `TestAClusterEditorStaysOnTheirCluster::test_a_device_check_cannot_become_their_cluster_item` | La comprobación ligada a un dispositivo ajeno no se puede convertir en ítem de su clúster (403) |
+| `TestAClusterEditorStaysOnTheirCluster::test_their_cluster_cannot_be_pinned_to_a_device` | No se puede fijar su clúster a un `device_uid` que no puede editar (403) |
+| `TestLaHistoriaDelRack::test_no_ensena_lo_ajeno_en_ninguna_version` | El historial del rack no deja ver etiqueta, serie, inventario ni dispositivo de un equipo de otra empresa en ninguna versión, y sí lo propio |
+| `TestLaHistoriaDelRack::test_lo_ajeno_sale_opaco_ocupando_su_sitio` | En cada versión el equipo ajeno sale opaco ocupando su U, y `changed` no cuenta sus campos ocultos |
+| `TestLaHistoriaDelRack::test_quien_lo_ve_todo_lo_sigue_viendo` | El operador con toda la flota sigue viendo el historial completo |
+| `TestMoverEsEscribirEnElDestino::test_un_equipo_propio_no_entra_en_un_rack_ajeno` | Mover un equipo propio a un rack de otra empresa da 403 y no lo mueve |
+| `TestMoverEsEscribirEnElDestino::test_un_rack_propio_no_entra_en_una_sala_ajena` | Mover un rack propio a una sala de otra empresa da 403 |
+| `TestMoverEsEscribirEnElDestino::test_una_sala_propia_no_entra_en_una_sede_ajena` | Mover una sala propia a una sede de otra empresa da 403 |
+| `TestMoverEsEscribirEnElDestino::test_un_destino_que_no_existe_es_404` | Mover un rack a una sala que no existe da 404 |
+| `TestMoverEsEscribirEnElDestino::test_moverlo_dentro_de_lo_suyo_sigue_valiendo` | Mover equipo y rack dentro de lo propio sigue funcionando, y reenviar el mismo padre no es mover |
+| `TestMoverEsEscribirEnElDestino::test_ni_montarlo_en_la_bandeja_de_otro` | Montar un equipo propio en la bandeja de otra empresa, en el mismo rack, da 403 |
+| `TestLasPuntasDeUnCable::test_no_se_crea_hacia_un_equipo_ajeno` | Crear un cable hacia un equipo de otra empresa da 403 |
+| `TestLasPuntasDeUnCable::test_ni_hacia_uno_que_no_existe` | Crear un cable hacia un equipo inexistente da 404 |
+| `TestLasPuntasDeUnCable::test_sus_puntas_no_se_reescriben_hacia_lo_ajeno` | Reescribir las puntas de un cable propio hacia equipos ajenos da 403 y el cable no cambia |
+| `TestLasPuntasDeUnCable::test_editarlo_no_salta_la_regla_del_puente` | Editar un cable para que vaya de un equipo a sí mismo sin puertos da 400 |
+| `TestLasPuntasDeUnCable::test_reenviar_el_cable_entero_sigue_valiendo` | Reenviar el cable entero y cambiar una punta a un equipo propio sigue funcionando |
+| `TestBorrarUnContenedor::test_una_sede_con_salas_no_se_borra` | Una sede con salas no se borra (409 con mensaje y recuento) y todo sigue en su sitio |
+| `TestBorrarUnContenedor::test_una_sala_con_racks_no_se_borra` | Una sala con racks no se borra (409) |
+| `TestBorrarUnContenedor::test_un_rack_con_equipos_no_se_borra` | Un rack con equipos no se borra (409) |
+| `TestBorrarUnContenedor::test_ni_uno_con_una_regleta` | Un rack con solo una regleta tampoco se borra (409) |
+| `TestBorrarUnContenedor::test_lo_ajeno_sigue_escondido_tras_intentarlo` | Tras intentar borrar la sede, el rack de A sigue oculto para B |
+| `TestBorrarUnContenedor::test_lo_que_no_existe_es_404` | Borrar una sede inexistente da 404 |
+| `TestBorrarUnContenedor::test_una_sala_vacia_se_lleva_su_dibujo` | Borrar una sala sin racks se lleva sus piezas del plano |
+| `TestBorrarUnContenedor::test_una_sede_vacia_se_lleva_sus_plantas_y_su_plano` | Borrar una sede vacía se lleva sus plantas, su zona general vacía y el fichero del plano |
+| `TestLaFotoDeUnaSede::test_no_se_escribe_por_put` | `photo` no se escribe ni al crear ni al editar una sede |
+| `TestLaFotoDeUnaSede::test_quitarla_no_borra_el_plano_de_otro` | Quitar la foto tras intentar apuntarla al plano de una sala no borra ese plano |
+| `TestLaFotoDeUnaSede::test_ni_con_una_referencia_de_antes` | Una referencia antigua al fichero de otro registro no hace que se borre |
+| `TestLaFotoDeUnaSede::test_la_suya_si_se_borra` | La foto subida por la propia sede sí se borra al quitarla |
+
+---
+
+## 175. Auditoría 2026-10 — lo que perdía datos y los hilos que morían sin avisar
+
+**Archivo:** `tests/unit/test_service_loops_resilience.py` — 17 tests
+
+**Archivo:** `tests/unit/test_sql_trim_portable.py` — 5 tests
+
+La segunda tanda de la auditoría de octubre de 2026 cubre dos tipos de fallo:
+
+- **Pérdida de datos.**
+  - La retención de una tarea de copias borraba las de otra cuyo nombre empezaba igual.
+  - Los recortes por tope de baneos, descartes de syslog e historial de trabajos usaban SQL que
+    MySQL y MariaDB rechazan, y el rechazo deshacía también la fila nueva.
+  - Una restauración quedaba tapada por cachés en memoria que nadie invalidaba.
+- **Servicios que se paraban en silencio.**
+  - Un solo error de base de datos mataba para siempre el latido, los bucles de vigilancia, el
+    planificador y la retención.
+  - El receptor TCP/TLS de syslog no tenía plazos ni tope de conexiones.
+
+Las pruebas nuevas de esta tanda se reparten entre estos dos ficheros y los ampliados:
+`test_backup_schedule.py` (§147), `test_wa_backup.py` (§146), `test_syslog_server.py` y
+`tests/e2e/test_db_portability_live.py`, que comprueba los recortes contra un motor real cuando
+están las variables `SS_TEST_*`.
+
+| Test | Qué verifica |
+|------|--------------|
+| `TestACopyKnowsWhichTaskTookIt::test_a_task_does_not_claim_one_whose_name_extends_its_own` | La tarea «db» no poda las copias de «db-full» |
+| `TestACopyKnowsWhichTaskTookIt::test_the_clock_of_a_task_ignores_the_copies_of_a_longer_name` | `last_auto_ts` de «db» no cuenta las copias de «db-full» |
+| `TestACopyKnowsWhichTaskTookIt::test_only_the_exact_stamp_belongs_to_a_task` | Solo `auto-<slug>-<fecha>` exacto pertenece a la tarea |
+| `TestACopyKnowsWhichTaskTookIt::test_the_unscoped_copies_do_not_claim_a_task_named_with_digits` | Las copias sin tarea no reclaman las de una tarea llamada «2024» |
+| `TestTheTaskApi::test_two_tasks_that_write_the_same_file_names_are_refused` | Se rechaza (409) una tarea cuyo nombre da el mismo slug que otra; reeditar la misma sí se acepta |
+| `TestARestoreIsNotShadowedByACache::test_a_restored_setting_survives_the_next_save` | Un ajuste restaurado se lee, se aplica en caliente y sobrevive a guardar otro campo |
+| `TestARestoreIsNotShadowedByACache::test_a_restored_module_config_is_what_the_panel_reads` | Tras restaurar `module_config`, el panel lee la configuración restaurada |
+| `TestARestoreIsNotShadowedByACache::test_the_restored_tables_move_their_change_counter` | La restauración incrementa `entity_versions` de cada tabla restaurada |
+| `TestARestoreIsNotShadowedByACache::test_a_user_the_restore_removed_is_gone_on_the_next_request` | Un usuario eliminado por la restauración desaparece de memoria en la siguiente petición |
+| `TestARestoreIsNotShadowedByACache::test_history_ids_remembered_before_a_restore_are_forgotten` | Los ids de serie en caché se olvidan tras restaurar el historial |
+| `TestTheBanListKeepsTakingBansWhenFull::test_a_new_ban_is_stored_past_the_cap` | Con la tabla llena, un baneo nuevo se guarda y se recorta el más antiguo (con un conector que rechaza el SQL que MySQL no acepta) |
+| `TestTheDropTallyKeepsTakingSourcesWhenFull::test_a_new_source_is_stored_past_the_cap` | Lo mismo para los orígenes de descartes de syslog |
+| `TestTheJobHistoryShrinksOnEveryEngine::test_the_ceiling_and_the_age_limit_both_apply` | El tope y la antigüedad del historial de trabajos se aplican sin `LIMIT -1` |
+| `TestTheJobHistoryShrinksOnEveryEngine::test_a_running_job_is_not_pruned_from_under_itself` | El tope no borra la fila de un trabajo aún en curso |
+| `test_the_strict_connector_really_refuses_them` | El conector estricto de la prueba rechaza de verdad ambas construcciones |
+| `test_the_ban_cap_trims_without_losing_the_new_ban` (e2e) | En un motor real, el tope de baneos recorta sin perder el baneo nuevo |
+| `test_the_drop_cap_trims_without_losing_the_new_source` (e2e) | En un motor real, el tope de descartes recorta sin perder el origen nuevo |
+| `test_the_job_history_ceiling_and_age_limit_both_apply` (e2e) | En un motor real, el historial de trabajos se poda por tope y por antigüedad |
+| `TestConnectionBounds::test_idle_plain_tcp_connection_is_closed` | Una conexión TCP que no envía nada se cierra al vencer `idle_timeout` |
+| `TestConnectionBounds::test_active_tcp_connection_survives_idle_timeout` | Un emisor que sigue enviando no se corta: el reloj de inactividad se reinicia con cada bloque |
+| `TestConnectionBounds::test_tls_handshake_has_a_deadline` | Un par que abre el puerto TLS y no negocia se cierra al vencer el plazo del handshake |
+| `TestConnectionBounds::test_tls_message_still_received` | Un cliente TLS legítimo sigue entregando mensajes con el handshake por tramos |
+| `TestConnectionBounds::test_connection_cap_refuses_extra_and_frees_on_close` | Por encima de `max_connections` la conexión se cierra al aceptarla; las admitidas funcionan y una plaza se libera al desconectar |
+| `TestConnectionBounds::test_stop_closes_live_connections_promptly` | `stop()` cierra tres conexiones TLS mudas en menos de 1,5 s y no deja hilos `syslog-conn` vivos |
+| `TestHeartbeatLoop::test_loop_survives_a_raising_beat` | El hilo del latido sobrevive a un latido que lanza (BD caída) y vuelve a escribir cuando la BD regresa |
+| `TestHeartbeatLoop::test_failed_renewal_drops_leadership_then_recovers` | Si la renovación del lease falla, la instancia deja de ser líder (no trabaja) y se recupera al volver la BD |
+| `TestHeartbeatLoop::test_start_survives_db_down_at_boot` | `start_heartbeat` no lanza con la BD caída al arrancar y el hilo se recupera después |
+| `TestMonitoringInterval::test_hb_detail_survives_config_read_failure` | `MonitorService._hb_detail` no lanza si falla la lectura de config y devuelve el intervalo por defecto del registro |
+| `TestMonitoringInterval::test_interval_falls_back_to_last_known_value` | `_monitoring_interval` conserva el último valor leído cuando la config deja de leerse |
+| `TestMonitoringInterval::test_scheduler_loop_survives_interval_read_failure` | El bucle del planificador no muere al leer el intervalo con la BD caída |
+| `TestWatchLoops::test_monitor_watch_loop_survives` | El vigilante de config del monitor sigue sondeando aunque `_reconcile_once` lance |
+| `TestWatchLoops::test_events_watch_loop_survives` | El vigilante de config del worker de eventos sigue sondeando aunque `_reconcile_once` lance |
+| `TestWatchLoops::test_syslog_watch_loop_survives_including_first_read` | El vigilante de syslog sobrevive a que fallen la firma inicial y cada reconciliación |
+| `TestSyslogRetention::test_prune_once_survives_config_read_failure` | `_syslog_prune_once` no lanza si falla `_syslog_cfg()` y registra el fallo |
+| `TestSyslogRetention::test_standalone_retention_loop_survives` | El bucle de retención del servicio dedicado sigue aunque el barrido lance |
+| `TestSyslogRetention::test_embedded_retention_loop_survives` | El bucle de retención del syslog embebido sigue aunque el barrido lance |
+| `TestEventWorkerLoop::test_worker_loop_survives_a_raising_tick` | El worker de eventos sobrevive a un tick que lanza (lectura de `events|enabled`) |
+| `TestHealthLoops::test_service_health_loop` | El bucle de salud de servicios mantiene el intervalo si `poll_getter` lanza |
+| `TestHealthLoops::test_cert_scan_loop` | El escáner de certificados mantiene el intervalo si `poll_getter` lanza |
+| `TestHealthLoops::test_secret_scan_loop` | El escáner de secretos mantiene el intervalo si `poll_getter` lanza |
+| `TestHealthLoops::test_cable_scan_loop` | El escáner de deriva de cableado mantiene el intervalo si `poll_getter` lanza |
+
+## 176. Auditoría 2026-10 — tercera tanda: lo medio y lo bajo
+
+**Archivo:** `tests/integration/test_wa_devices_modules_integrity.py` — 15 tests
+
+**Archivo:** `tests/integration/test_wa_dcim_integrity.py` — 22 tests
+
+**Archivo:** `tests/unit/test_background_scanners_lifecycle.py` — 9 tests
+
+**Archivo:** `tests/unit/test_teams_tab_sso.py` — 11 tests
+
+**Archivo:** `tests/meta/test_wa_frontend_races.py` — 14 tests
+
+**Archivo:** `tests/unit/test_audit_cap.py` — 7 tests
+
+**Archivo:** `tests/unit/test_db_autoincrement_sync.py` — 5 tests
+
+La tercera tanda de la auditoría de bugs latentes de octubre de 2026 baja a lo que quedaba tras
+lo grave: servicios, SNMP, dispositivos y módulos, integridad del inventario físico, identidad y
+carreras del front-end.
+
+- **Servicios.** Los exploradores de caducidad olvidaban lo ya avisado en cada reinicio o cambio
+  de arriendo, y no podían pararse y arrancarse de nuevo.
+- **Dispositivos y módulos.** Un usuario acotado guardaba solo el subconjunto de módulos que veía
+  y la edición de configuración no comprobaba versión.
+- **Integridad del DCIM.** Números sin validar, racks encogidos bajo su equipo y borrados que
+  dejaban tomas, cables y piezas huérfanas.
+- **Identidad.** El token de la pestaña de Teams no se comparaba con el inquilino configurado.
+- **Carreras del front-end.** Respuestas tardías que pintaban encima de lo que ya estaba en pantalla.
+
+Esta tanda también amplía ficheros existentes (`test_sampler.py`, `test_snmp_*.py`,
+`test_wa_mfa.py`, `test_wa_sessions.py`, `test_providers_*.py`, `test_monitor_executor.py`,
+`test_heartbeat_helpers.py`, `test_wa_ipban.py`, `test_wa_webhook.py`, `test_syslog_parser.py`,
+`test_syslog_store.py`, `test_wa_server.py`, `test_modules_store.py`,
+`test_overview_checks_widget.py`, `test_devices_config_resolution.py`, `test_dcim_revisions.py`,
+`test_dcim_model.py`, `test_cli.py`, `test_freshservice_*.py`, `test_ratelimit.py`,
+`test_wa_auth.py`, `test_wa_msteams_sso.py`) cuyos recuentos se han actualizado en su sección.
+
+| Test | Qué verifica |
+|------|--------------|
+| `TestScopedSaveKeepsUnseenModules::test_module_scoped_user_can_save_their_module` | Un usuario acotado a un módulo puede guardar ese módulo sin que los que no ve cuenten como borrados |
+| `TestScopedSaveKeepsUnseenModules::test_server_scoped_user_can_add_a_check_to_their_device` | Un usuario acotado a un dispositivo puede añadirle un check |
+| `TestScopedSaveKeepsUnseenModules::test_an_unseen_module_named_in_the_body_is_still_authorised` | Un módulo no visible que aparece en el cuerpo es un cambio y exige su permiso |
+| `TestAddOnlyDeviceEdit::test_device_type_change_is_refused` | Quien solo puede añadir no puede cambiar la clase de un dispositivo (403) |
+| `TestAddOnlyDeviceEdit::test_source_change_is_refused` | Ni enlazarlo a un importador cambiando `source` (403) |
+| `TestAddOnlyDeviceEdit::test_external_id_change_is_refused` | Ni cambiar su `external_id` (403) |
+| `TestAddOnlyDeviceEdit::test_modules_growth_with_the_ui_body_still_passes` | El cuerpo que envía el formulario del dispositivo, que añade módulos, sigue pasando |
+| `TestCloneDropsIdentity::test_clone_is_not_maintained_by_the_source_importer` | Un clon no hereda `source`/`external_id` del origen ni sus filas vigiladas |
+| `TestModulesConfigVersion::test_get_carries_the_version` | `GET /api/v1/modules` devuelve la versión de la configuración |
+| `TestModulesConfigVersion::test_stale_put_is_refused_with_409` | Un PUT con una versión vieja en `If-Match` se rechaza con 409 |
+| `TestModulesConfigVersion::test_current_put_saves_and_returns_the_next_version` | Un PUT con la versión vigente guarda y devuelve la siguiente |
+| `TestModulesConfigVersion::test_put_without_if_match_still_works` | Sin `If-Match` el guardado sigue funcionando |
+| `TestModulesConfigVersion::test_another_replica_write_is_seen` | La escritura de otra réplica (otro almacén sobre la misma BD) se ve en la versión |
+| `TestModulesConfigVersion::test_device_delete_does_not_overwrite_a_concurrent_module_save` | Borrar un dispositivo con sus checks no pisa un guardado de módulos concurrente |
+| `TestDeleteForgetsReferences::test_org_owner_and_dcim_device_links_are_cleared` | Borrar un dispositivo limpia su dueño de empresa y sus enlaces del inventario físico |
+| `TestLosNumerosDeUnContenedor::test_una_altura_de_texto_es_400_y_nada_se_rompe` | Un `u_height` de texto da 400 y las lecturas siguientes no dan 500 |
+| `TestLosNumerosDeUnContenedor::test_ni_al_crearlo` | Valores absurdos (`abc`, 0, 1000, `nan`, lista) se rechazan también al crear |
+| `TestLosNumerosDeUnContenedor::test_un_numero_escrito_como_texto_se_guarda_como_numero` | Un número escrito como texto se guarda como número |
+| `TestLosNumerosDeUnContenedor::test_una_planta_con_nivel_nan_es_400` | Una planta con nivel `nan`/`inf`/texto es 400 |
+| `TestLosNumerosDeUnContenedor::test_infinity_en_una_posicion_de_u_es_400` | `Infinity` en la posición de U de un equipo es 400 |
+| `TestLosNumerosDeUnContenedor::test_una_toma_de_texto_es_400` | Una toma de alimentación de texto es 400 |
+| `TestEncogerUnRack::test_no_queda_por_debajo_de_lo_montado` | Un rack no puede encogerse por debajo del equipo montado en él |
+| `TestEncogerUnRack::test_hasta_lo_mas_alto_que_hay_si` | Sí puede encogerse hasta justo la U más alta ocupada |
+| `TestBorrarUnEquipo::test_libera_su_toma` | Borrar un equipo libera la toma de alimentación que usaba |
+| `TestBorrarUnEquipo::test_se_lleva_sus_cables_y_sus_piezas` | Borrar un equipo se lleva sus cables y sus componentes |
+| `TestMoverUnaBandeja::test_lo_montado_va_con_ella` | Al mover una bandeja, lo montado en ella se mueve con ella |
+| `TestMoverUnaBandeja::test_tambien_a_otro_rack` | Lo mismo cuando la bandeja pasa a otro rack |
+| `TestLoAjenoConSuForma::test_conserva_donde_y_cuanto` | Lo de otra empresa conserva su posición y tamaño, para no dibujarse en otro sitio |
+| `TestLoAjenoConSuForma::test_y_sigue_sin_decir_que_es` | Y sigue sin revelar qué es |
+| `TestLasSedesDelBuscador::test_no_lista_sedes_ajenas` | El buscador no lista sedes de empresas que el usuario no ve |
+| `TestImportarUnPlano::test_una_pieza_que_no_es_un_objeto_no_vacia_la_sala` | Importar un plano con una pieza que no es un objeto no vacía la sala |
+| `TestImportarUnPlano::test_un_fichero_bueno_sigue_sustituyendo_las_piezas` | Un fichero correcto sigue sustituyendo las piezas de la sala |
+| `TestElUidLoPoneElPanel::test_un_uid_propuesto_no_se_usa` | El `uid` propuesto por el cliente se ignora; lo pone el panel |
+| `TestElUidLoPoneElPanel::test_uno_que_ya_existe_no_es_500` | Proponer un `uid` ya existente no produce 500 |
+| `TestElUidLoPoneElPanel::test_ni_en_un_equipo_ni_en_un_cable` | Lo mismo al crear un equipo o un cable |
+| `TestLaHistoriaDeUnEquipoBorrado::test_el_dueno_del_rack_no_ve_lo_ajeno_borrado` | El dueño del rack no ve en la historia lo borrado que era de otra empresa |
+| `TestLaHistoriaDeUnEquipoBorrado::test_quien_lo_ve_todo_lo_sigue_viendo` | Quien lo ve todo sigue viéndolo |
+| `TestWhatWasSaidSurvivesTheProcess::test_a_new_cert_scanner_on_the_same_database_does_not_alert_again` | Un explorador de certificados nuevo sobre la misma BD no repite lo ya avisado |
+| `TestWhatWasSaidSurvivesTheProcess::test_a_renewed_cert_re_arms_across_processes` | Un certificado renovado rearma el aviso aunque cambie el proceso |
+| `TestWhatWasSaidSurvivesTheProcess::test_escalation_is_still_announced` | Pasar de `expiring` a `expired` se sigue anunciando |
+| `TestWhatWasSaidSurvivesTheProcess::test_a_new_secret_scanner_on_the_same_database_does_not_alert_again` | Lo mismo para el explorador del secreto de Entra |
+| `TestWhatWasSaidSurvivesTheProcess::test_without_a_database_it_is_the_old_in_memory_behaviour` | Sin BD se conserva el comportamiento antiguo en memoria |
+| `TestAScannerCanBeStoppedAndStartedAgain::test_start_after_stop_runs_exactly_one_loop` | Tras `stop()` y `start()` cada explorador corre exactamente un bucle |
+| `TestTheHostLetsGo::test_the_expiry_leases_outlive_three_scans` | Los arriendos de los exploradores de caducidad duran más de tres exploraciones |
+| `TestTheHostLetsGo::test_the_expiry_scanners_remember_in_the_database` | Los exploradores reciben la BD para recordar lo avisado |
+| `TestTheHostLetsGo::test_stop_background_releases_the_leases_and_allows_a_restart` | Parar el segundo plano suelta los arriendos y permite arrancar de nuevo |
+| `TestCheckTenant::test_our_tenant_v2_issuer_passes` | El emisor v2 de nuestro inquilino pasa |
+| `TestCheckTenant::test_our_tenant_v1_issuer_passes` | El emisor v1 de nuestro inquilino pasa |
+| `TestCheckTenant::test_the_guid_is_compared_case_insensitively` | El GUID se compara sin distinguir mayúsculas |
+| `TestCheckTenant::test_another_tenant_is_refused` | Un token de otro inquilino se rechaza |
+| `TestCheckTenant::test_our_tid_with_another_tenants_issuer_is_refused` | Nuestro `tid` con el emisor de otro inquilino se rechaza |
+| `TestCheckTenant::test_a_token_with_no_tid_is_refused` | Un token sin `tid` se rechaza |
+| `TestCheckTenant::test_a_multi_tenant_authority_is_not_a_tenant` | Una autoridad multi-inquilino (`common`, etc.) no cuenta como inquilino |
+| `TestCheckTenant::test_a_domain_tenant_is_resolved_to_its_guid` | Un inquilino dado como dominio se resuelve a su GUID |
+| `TestCheckTenant::test_a_malformed_tenant_is_refused_before_any_fetch` | Un inquilino mal formado se rechaza antes de hacer ninguna consulta |
+| `TestValidateTabTokenChecksTheTenant::test_a_token_from_our_tenant_is_accepted` | `validate_tab_token` acepta un token de nuestro inquilino |
+| `TestValidateTabTokenChecksTheTenant::test_a_token_from_another_tenant_is_refused` | Y rechaza el de otro |
+| `TestInfraDeviceIgnoresALateAnswer::test_open_view_captures_the_uid_before_the_await` | `_infraOpenView` captura el uid antes del `await` |
+| `TestInfraDeviceIgnoresALateAnswer::test_open_view_drops_the_answer_when_another_device_opened` | Descarta la respuesta si entretanto se abrió otro dispositivo |
+| `TestInfraDeviceIgnoresALateAnswer::test_reload_drops_the_answer_when_another_device_opened` | `_infraReload` hace lo mismo |
+| `TestHistoryIgnoresASupersededLoad::test_the_chart_takes_a_ticket_and_checks_it_after_the_await` | La gráfica del historial toma un número de secuencia y lo comprueba tras el `await` |
+| `TestHistoryIgnoresASupersededLoad::test_compare_uses_the_same_sequence` | La comparación usa la misma secuencia |
+| `TestHistoryIgnoresASupersededLoad::test_the_placeholder_cancels_a_load_in_flight` | El marcador de «sin serie» cancela una carga en vuelo |
+| `TestSyslogIgnoresASupersededLoad::test_load_syslog_takes_a_ticket_and_checks_it_before_painting` | `loadSyslog` toma ticket y lo comprueba antes de pintar |
+| `TestLinksIntoConfigurationUseTheRail::test_no_partial_drives_the_old_config_sub_tabs` | Ningún parcial usa ya las sub-pestañas antiguas de configuración |
+| `TestLinksIntoConfigurationUseTheRail::test_open_config_field_picks_the_card_then_reveals` | `openConfigField` elige la tarjeta y después revela el campo |
+| `TestLinksIntoConfigurationUseTheRail::test_the_card_comes_from_the_layout_first` | La tarjeta de un campo sale primero del layout |
+| `TestLinksIntoConfigurationUseTheRail::test_the_syslog_link_goes_to_allowed_sources` | El enlace de syslog va a los orígenes permitidos |
+| `TestLinksIntoConfigurationUseTheRail::test_the_update_detail_link_goes_through_the_rail` | El enlace del detalle de actualización pasa por el carril |
+| `TestClusterLogsTab::test_the_state_declares_severity_max_and_q` | El estado de la pestaña de logs del clúster declara severidad, tope y búsqueda |
+| `TestClusterLogsTab::test_all_rows_is_not_sent_as_limit_zero` | «Todas las filas» no se envía como `limit=0` |
+| `TestTheCapHolds::test_a_capped_insert_works_where_mysql8_refuses_the_self_subquery` | El recorte de auditoría funciona donde MySQL 8 rechaza la autosubconsulta |
+| `TestTheCapHolds::test_a_lowered_cap_is_reached_on_the_next_insert` | Un tope rebajado se alcanza en la siguiente inserción |
+| `TestTheCapHolds::test_no_cap_keeps_everything` | Sin tope se conserva todo |
+| `TestTheMonitorUsesTheConfiguredCap::test_the_panel_setting_is_what_the_monitor_passes` | El monitor pasa el tope configurado en el panel |
+| `TestTheMonitorUsesTheConfiguredCap::test_zero_still_means_no_limit` | Cero sigue significando sin límite |
+| `TestTheMonitorUsesTheConfiguredCap::test_without_the_setting_the_registry_default_applies` | Sin ajuste rige el valor por defecto del registro |
+| `TestTheMonitorUsesTheConfiguredCap::test_a_system_event_does_not_cut_a_larger_configured_log` | Un evento de sistema no recorta un registro mayor configurado |
+| `TestPostgreSQLMovesTheSequence::test_each_serial_column_gets_a_setval_past_its_maximum` | En PostgreSQL cada columna serial recibe un `setval` por encima de su máximo |
+| `TestPostgreSQLMovesTheSequence::test_a_table_without_a_serial_column_emits_no_setval` | Una tabla sin columna serial no emite `setval` |
+| `TestBothPathsCallTheHook::test_a_rebuild_resynchronises_the_rebuilt_table` | Una reconstrucción de esquema resincroniza el generador de ids |
+| `TestBothPathsCallTheHook::test_a_restore_resynchronises_every_table_it_refills` | Una restauración resincroniza cada tabla que rellena |
+| `TestBothPathsCallTheHook::test_the_default_hook_is_a_no_op_and_sqlite_continues_past_the_maximum` | El gancho por defecto no hace nada y SQLite sigue por encima del máximo |

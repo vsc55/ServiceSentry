@@ -25,6 +25,7 @@ Every one of these is audited, download included: the archive holds the whole in
 """
 
 import os
+import uuid
 
 from flask import jsonify, request, send_file, session
 
@@ -300,14 +301,54 @@ def _invalidate_caches(wa) -> None:
     Best-effort and deliberately quiet throughout: a cache that cannot be cleared is a stale
     screen, and failing the restore over it would turn a cosmetic problem into a lost one. What
     it cannot fix, a reload of the page does.
+
+    The restore writes the rows with a plain DELETE/INSERT, behind the back of every store
+    that remembers what it last read — and a cache that survives is worse than stale: the
+    next save is built FROM it and writes the pre-restore values back over the restored rows.
+    This used to clear `_config_cache` and `_perm_cache`, two attributes that exist nowhere,
+    so nothing was dropped at all: a restored setting reverted the moment anybody saved any
+    other one. Each step below names a cache that is real.
     """
-    for attr in ('_config_cache', '_perm_cache'):
+    def _step(fn):
         try:
-            cache = getattr(wa, attr, None)
-            if isinstance(cache, dict):
-                cache.clear()
+            fn()
         except Exception:      # pylint: disable=broad-except
-            continue
+            pass
+
+    # The effective config, cached on the store's in-process version counter — which only
+    # moves when THIS process writes through the store, never on a restore.
+    _step(wa._invalidate_config_cache)
+    # …and the runtime attributes boot derived from it (language, policies, limits): the same
+    # pass a config save makes, so the restored settings take effect without a restart.
+    _step(lambda: wa._apply_config_attrs(wa._read_config_file(wa._CONFIG_FILE) or {},
+                                         live=True))
+
+    def _rotate_versions():
+        # Per-field tokens: a form opened before the restore must not save over it unasked.
+        token = str(uuid.uuid4())
+        fv = getattr(wa, '_field_versions', None)
+        if isinstance(fv, dict):
+            for path in list(fv):
+                fv[path] = token
+        wa._config_version = str(uuid.uuid4())
+    _step(_rotate_versions)
+    # The module configuration: the facade re-reads only when ModulesStore's own counter
+    # moves, and its next save prunes whatever it does not hold — the restored rows included.
+    _step(lambda: wa._modules_facade.read())
+
+    def _expire_probes():
+        # Roles, users and groups are dicts loaded at startup and re-read when their table's
+        # stamp moves (the restore bumps it). Expiring the last probe makes the very next
+        # request look, instead of serving the old accounts for one more TTL. Not reloaded
+        # HERE: this runs on the restore's thread, and a loader swapping a dict under a
+        # request mid-edit loses the edit — the freshness hook runs before a request starts.
+        state = wa._freshness_state()
+        for key in list(state):
+            state[key] = (state[key][0], 0.0)
+    _step(_expire_probes)
+    # History series/field ids remembered by this process point at rows the restore replaced:
+    # a sample written through a stale id lands on the wrong series, or on none.
+    _step(lambda: wa._history.forget_cache())
     # Every service, not the ones whose section "changed": a restore replaced all of them.
     try:
         for key in list(getattr(wa, '_embedded_services', {}) or {}):

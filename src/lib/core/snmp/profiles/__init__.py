@@ -403,6 +403,16 @@ def normalise_metric(raw) -> dict | None:
                 out[num] = cast(raw[num])
             except (TypeError, ValueError):
                 pass
+    # How many rows a walk of this column may read before it is cut — for a table the default
+    # ceiling is too small for (a forwarding table on a core switch). Positive and bounded: a
+    # profile is data an administrator writes, and "no ceiling" is a cycle with no end.
+    if walk and raw.get('max_rows') not in (None, ''):
+        try:
+            rows = int(raw['max_rows'])
+        except (TypeError, ValueError):
+            rows = 0
+        if 0 < rows <= 65536:
+            out['max_rows'] = rows
     # What this value IS about the machine, for the ones that are not measurements: a name, a
     # model, a serial. The section shows those as identity instead of as data.
     # What to draw beside it. A number has no picture — only whatever produced it knows that

@@ -107,6 +107,10 @@ class EmbeddedMonitor(_EmbeddedBase, _MonitoringMixin):
     def stop(self) -> bool:
         return self._monitoring_stop()
 
+    def on_shutdown(self) -> None:
+        # Quiet: the scheduler is told to end, without the operator-stop audit/notification.
+        self._monitoring_stop_event.set()
+
     @property
     def enabled(self) -> bool:
         return self._monitoring_enabled()

@@ -18,16 +18,39 @@ Never raises — failures come back as ``('', <error>, -1)``.
 from __future__ import annotations
 
 from lib.core.devices import ssh_client
+from lib.i18n import DEFAULT_LANG, translate
 
+
+# The refusals below end up as the message of a check, and from there in a notification, so
+# they are language keys and not English sentences. `run` and ModuleBase.device_exec translate
+# them at the edge — `exec_error` is the one place that does it.
 
 #: What a device with no way to run commands answers instead of running one somewhere else.
-NO_EXEC = 'this device has no connection for running commands'
+NO_EXEC = 'device_exec_no_exec'
+
+#: What a check bound to a device that no longer exists answers. Never run locally: the
+#: panel's own machine is not the device the check is about, and its numbers filed under that
+#: label are worse than an error.
+DEVICE_MISSING = 'device_exec_missing'
+
+NO_COMMAND = 'device_exec_no_command'
+INVALID = 'device_exec_invalid'
+NO_PARAMIKO = 'device_exec_no_paramiko'
+NO_ADDRESS = 'device_exec_no_address'
+SSH_ERROR = 'device_exec_ssh_error'
 
 
-def run(device: dict | None, cmd: str, timeout: int = 15) -> tuple:
-    """Run *cmd* on *device* and return ``(stdout, stderr, exit_code)``."""
+def exec_error(key: str, *args, lang: str = '') -> tuple:
+    """``('', <translated refusal>, -1)`` — the failure shape of :func:`run`."""
+    return '', translate(lang or DEFAULT_LANG, key, *args), -1
+
+
+def run(device: dict | None, cmd: str, timeout: int = 15, lang: str = '') -> tuple:
+    """Run *cmd* on *device* and return ``(stdout, stderr, exit_code)``.
+
+    A refusal comes back in *lang* (the default language when not given)."""
     if not cmd:
-        return '', 'no command', -1
+        return exec_error(NO_COMMAND, lang=lang)
     # A device that says it runs nothing runs nothing. Falling through to the local branch is
     # what `kind` used to do with every value that was not `remote`, and it made "no
     # connection" mean "the panel's own machine": a check bound to a switch measured the panel
@@ -35,20 +58,20 @@ def run(device: dict | None, cmd: str, timeout: int = 15) -> tuple:
     # is a classic inline check, which has always meant this machine and says so by having no
     # device to disagree with.
     if isinstance(device, dict) and str(device.get('kind') or '').strip().lower() == 'none':
-        return '', NO_EXEC, -1
+        return exec_error(NO_EXEC, lang=lang)
     if isinstance(device, dict) and str(device.get('kind') or '').strip().lower() == 'remote':
         if not ssh_client.HAS_PARAMIKO:
-            return '', 'paramiko is not installed', -1
+            return exec_error(NO_PARAMIKO, lang=lang)
         ssh = device.get('ssh') or {}
         address = str(device.get('address') or ssh.get('ssh_host') or '').strip()
         if not address:
-            return '', 'remote device has no address', -1
+            return exec_error(NO_ADDRESS, lang=lang)
         client = None
         try:
             client = ssh_client.connect_host(ssh, address, timeout=timeout)
             return ssh_client.run_command(client, cmd, timeout=timeout)
         except Exception as exc:  # pylint: disable=broad-except
-            return '', f'SSH error: {exc}', -1
+            return exec_error(SSH_ERROR, exc, lang=lang)
         finally:
             if client is not None:
                 try:

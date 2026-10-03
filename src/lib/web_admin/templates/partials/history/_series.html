@@ -1,6 +1,8 @@
 function _historyShowPlaceholder() {
-    // No series selected → nothing to auto-refresh.
+    // No series selected → nothing to auto-refresh, and a load still in flight must not
+    // paint over the placeholder when it lands.
     _historyStopTimer();
+    _historyLoadSeq++;
     const chartArea = document.getElementById('history-chart-area');
     if (chartArea) {
         chartArea.innerHTML = `

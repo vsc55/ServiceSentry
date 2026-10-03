@@ -1,4 +1,9 @@
+// Request sequence for _loadSyslog: a live/auto-refresh poll still in flight when a filter
+// changes must not land after the filtered answer and paint rows the chips do not describe.
+let _syslogLoadSeq = 0;
+
 async function _loadSyslog() {
+    const seq = ++_syslogLoadSeq;
     const qs = _syslogQS();
     // First use is where the configured value is picked up: at parse time the config has not
     // loaded yet, which is why this used to be stuck on whatever the declaration said.
@@ -23,6 +28,7 @@ async function _loadSyslog() {
         apiGet('/api/v1/syslog?' + qs.toString()),
         apiGet('/api/v1/syslog/status'),
     ]);
+    if (seq !== _syslogLoadSeq) return;     // a newer load superseded this one
     const total = (data && data.total) || 0;
     if (st) {
         const state = st.enabled ? (st.running ? t('syslog_running') : t('syslog_stopped')) : t('syslog_disabled');

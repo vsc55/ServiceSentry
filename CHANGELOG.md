@@ -8,6 +8,364 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.133] - 2026-10-03
+
+### Security
+
+- **A read-only watchful action no longer sends stored secrets to an address the caller
+  chose.**
+  - Before: `modules_view` was enough to call `test_connection`, `list_nodes` and the other
+    read-only actions with an `_item_key`, `device_uid`, `_device` draft or `cred_uid`. The stored
+    token, SSH password or credential was filled into a config whose `host` came from the client.
+  - Now:
+    - a caller who cannot edit the item runs it exactly as saved;
+    - a device's secrets reach only a caller who may edit that device;
+    - a caller with no write right gets no stored secret at all.
+- **Saving a module item no longer rewrites the address of any device its link field names.**
+  - Before: `sync_provisioned_devices` followed a keepalived `vip_device_uid` into any device and
+    moved it to the item's VIP, so the scheduler then sent that device's SSH password to the new
+    address.
+  - Now: the link is followed only into the device the item already linked, or one the caller may
+    edit. Otherwise the item provisions its own device.
+- **The device test endpoints authorise the device they actually test.**
+  - Before: `/api/v1/devices/test` and `/test_check` checked `uid` but tested `device_uid`.
+    `server.A.edit` could test device B against any address with B's password restored, and
+    per-device editors were refused, because the UI sends only `device_uid`.
+  - Now: both gate on `device_uid`, and a stored check's secrets are restored only for a check
+    whose device the caller may edit.
+- **A cluster permission is checked against the stored cluster, not the uid in the payload.**
+  - Before: with `cluster.C.edit` one could edit cluster D by sending `uid: C`, turn another
+    device's check into a cluster item, or pin the cluster to a device.
+  - Now:
+    - the stored uid is authorised;
+    - uid changes are refused;
+    - a side bound to one device also needs `server.<uid>.edit` on it.
+- **Rack history no longer leaks other companies' items.**
+  - Before: `GET /api/v1/dcim/racks/<uid>/history` checked only that the rack was visible and
+    returned every snapshot whole.
+  - Now: each version's items go through the same filter as `GET /racks/<uid>`, and `changed` is
+    computed between the filtered snapshots.
+- **Moving inventory requires write access to the destination.**
+  - Before: changing a rack's `room_uid`, a room's `site_uid`, or an item's `rack_uid`/`parent_uid`
+    checked only the owner of what moved.
+  - Now: the destination is checked the way creation checks it, with 404 if it is missing and 403
+    if it is not writable.
+- **Cable ends are checked on creation and on every edit.**
+  - Before: `b_item` was never checked, and a PUT could rewrite `a_item`/`b_item` to items of
+    another company.
+  - Now: a new end must exist in a rack the caller may write, and the self-loop rule is re-run on
+    the merged cable.
+- **Deleting a non-empty site, room or rack is refused (409).**
+  - Before: deleting only the row orphaned its rooms, racks and items. Their ownership chain then
+    stopped short, which made them visible to everyone.
+  - Now: the delete is refused while the container holds anything. An empty container also takes
+    its floors, plan pieces, rows and uploaded pictures with it.
+- **A site's `photo` can no longer be set by PUT/POST.**
+  - Before: pointing it at another record's file and then deleting the photo deleted that file.
+  - Now: the photo is set only by the upload route, like a room's `plan`. Deleting a picture also
+    skips a file another site, room or floor still references.
+- **Rotating another account's API token no longer hands over a scope the caller does not
+  hold.**
+  - Before: `POST /api/v1/tokens/<uid>/rotate` returned the new secret to anyone with
+    `users_edit`, whatever the token could do.
+  - Now: a non-admin gets 403 unless every permission on the token is one they hold, and `*`
+    tokens are admin-only. That is the rule minting and editing already apply.
+- **An LDAP login with a different letter case or by e-mail no longer creates a second account.**
+  - Before: with `ldap|username_attr` empty, `JSmith` missed the existing `jsmith`. The bind
+    succeeded, and a new account was provisioned with the group-derived role and no MFA. It was
+    enabled even if `jsmith` was disabled.
+  - Now:
+    - the bind resolves to the existing account, matched case-insensitively by name or by DN;
+    - ambiguous duplicates are refused;
+    - `sync_user` never creates a case variant.
+- **SCIM keeps control of the users it provisioned after they sign in through SSO.**
+  - Before: ownership was read from `auth_source`, which every OIDC, SAML or LDAP login
+    overwrites. After one SSO login the IdP could no longer deactivate or delete the user.
+  - Now: ownership is a separate `provisioned_by` marker, with `scim_external_id`, kept in the
+    user's `extra` data. No login rewrites either one.
+
+- **SSO sign-ins with no second factor are sent to enrolment.**
+  - Before: with `mfa_required` set to all/admins, the OIDC, SAML and Teams callbacks always
+    sent an unenrolled account to the code page, which it could never pass.
+  - Now: each door picks the step through `_mfa_step_endpoint`, and `/login/mfa` forwards to
+    enrolment when the account has nothing to prove.
+- **Teams SSO applies the same account checks as OIDC and SAML.**
+  - Before: `/auth/msteams/sso` ignored `login_enabled` and reserved usernames.
+  - Now: both are refused with 403 and audited.
+- **Registering a security key requires the current factor.**
+  - Before: `webauthn/begin` and `confirm` needed only the session, so a borrowed session could
+    add or replace a key.
+  - Now:
+    - an account that already has a factor must send a current TOTP or recovery code;
+    - a challenge issued before the account had a factor is refused;
+    - the account page asks for the code first.
+- **Session revocation reaches every replica.**
+  - Before: sessions were checked only in memory. A revocation, password change or logout on one
+    replica kept working on the others, and `user passwd` ended no session.
+  - Now:
+    - a token missing from memory is looked up in the database;
+    - live tokens are re-confirmed every `cache_reload_secs`;
+    - a password change deletes the user's sessions from the table;
+    - `user passwd` signs the account out.
+- **SSO accounts are bound to their subject, not their name.**
+  - Before: OIDC, SAML and LDAP found the account by a mutable name and overwrote its binding and
+    role, so another person or provider with the same name could take it over.
+  - Now:
+    - an account bound to another provider, or to a different OIDC `sub` or SAML NameID, is
+      refused and the reason is audited;
+    - unbound and SCIM-provisioned accounts still link on their first sign-in.
+- **Teams tab tokens must come from the configured tenant.**
+  - Before: only the issuer prefix was checked and `tid` was never compared.
+  - Now:
+    - `tid` and the issuer must match the configured tenant (a domain is resolved to its GUID);
+    - multi-tenant authorities are refused;
+    - an account bound to the token's `oid` is matched first.
+- **A TOTP code is accepted once, even under concurrency.**
+  - Before: two simultaneous requests with the same code both passed.
+  - Now: only the request that advanced the stored step succeeds.
+- **Resetting another account's MFA honours the admin hierarchy.**
+  - Before: a non-admin holding `mfa_reset_others` could strip an administrator's factor.
+  - Now: 403 unless the requester is an administrator.
+- **Login throttling is per account, with a limit at the MFA step.**
+  - Before: any successful login cleared the whole per-IP counter, and the MFA step had no
+    per-account limit.
+  - Now: a success forgets only that account's attempts, and failed second factors are limited
+    per account across addresses.
+- **The Freshservice import no longer lets two departments share one company, and says when a
+  list was cut.**
+  - Before:
+    - two departments with the same normalised name, or two manual links to one company, were
+      both adopted, and ownership flipped on every import;
+    - the paging stopped at 500 pages silently.
+  - Now:
+    - the second becomes a reported `conflict` and duplicate links are refused;
+    - a truncated list is flagged in the log and in the preview.
+
+### Fixed
+
+- **A backup task no longer prunes another task whose name starts with its own.**
+  - Before: retention matched copies by prefix, so task `db` claimed `auto-db-full-*`. With
+    `keep_last: 1` it deleted all of `db-full`'s copies, and counted them as its own "last copy".
+  - Now: copies are matched by the exact `auto-<slug>-<YYYYmmdd-HHMMSS>` name, and saving a task
+    whose name reduces to another task's slug is refused.
+- **On MySQL/MariaDB, IP bans and syslog drop sources stopped being stored once their table was
+  full.**
+  - Before: the row cap was trimmed with `DELETE … WHERE k IN (SELECT … LIMIT n)`, which MySQL
+    (1093) and MariaDB (1235) reject. Inside the same transaction that rolled back the INSERT too,
+    and the error was swallowed.
+  - Now: the keys are selected first and deleted one by one.
+- **The job history now shrinks on MySQL, MariaDB and PostgreSQL.**
+  - Before: the `keep` ceiling used SQLite-only `LIMIT -1 OFFSET ?`, which also rolled back the
+    age-based purge in the same transaction, so the table grew forever.
+  - Now: finished rows past `keep` are selected portably, and a job still running is not deleted
+    by the ceiling.
+- **A restore is no longer undone by the next config save.**
+  - Before: cache invalidation cleared two attributes that do not exist. The effective config,
+    module config, in-memory users/roles/groups and history series ids kept their pre-restore
+    values, and the next save wrote them back over the restored rows.
+  - Now, a restore:
+    - drops each real cache;
+    - re-applies runtime settings;
+    - rotates the config field tokens;
+    - bumps `entity_versions` for every restored table, so other replicas reload too.
+- **The heartbeat thread no longer dies on one failed beat, and leadership fails safe.**
+  - Before: one exception killed the thread for good. The worker either stopped checking or kept
+    running checks next to the standby that took over.
+  - Now: each step of a beat is guarded on its own, and a lease renewal that raises gives up
+    leadership instead of keeping it.
+- **Background service loops survive a database outage instead of exiting for good.** These are
+  now guarded on every iteration:
+  - the config watchers (monitor, events, syslog);
+  - the syslog retention sweeps (standalone and embedded);
+  - the event worker and the scheduler's interval read;
+  - the scanners' poll intervals.
+
+  An interval that cannot be read falls back to the last value read, or to the registry default
+  before any read.
+- **The syslog TCP/TLS listener bounds every connection.**
+  - Before: any reachable peer could pin a thread per silent connection, and three of them made
+    `stop()` take 6 s under the listener lock.
+  - Now:
+    - TLS handshakes have a 10 s deadline;
+    - a stream idle for 10 minutes is closed;
+    - live connections are capped at 2048, and extras are closed on accept;
+    - `stop()` closes live connections and spends at most 3 s joining threads.
+- **An LDAP sync test never ran.** `tests/integration/test_providers_ldap.py` defined
+  `TestLdapSyncUser` twice, and the second definition hid the first. The first is now
+  `TestLdapSyncUserRefusesLocal`.
+- **A module still running from the previous cycle is not started again.**
+  - Before: an overrunning module was relaunched every cycle (concurrent writes, duplicate
+    alerts, threads piling up), and modules cancelled in the queue were reported as timeouts.
+  - Now: it is skipped and logged until its run ends, and cancelled ones are reported as skipped.
+- **Certificate and secret expiry alerts are not repeated after a restart or a lease move.**
+  - Before: the "already alerted" state lived in memory, and the lease lasted one hour against a
+    daily scan.
+  - Now: the state is kept in the new `health_alerts` table, and the lease lasts three scan
+    intervals.
+- **Webhook values are escaped.**
+  - Before: a value containing `"` or `\` produced an invalid JSON body and the alert was lost,
+    and GET values were not URL-encoded.
+  - Now: values are JSON-escaped in the body and percent-encoded in the URL, in a single pass, so
+    a value cannot inject another placeholder.
+- **A syslog message with an embedded NUL no longer loses its batch.**
+  - Before: PostgreSQL rejected the NUL and the whole batch of up to 500 messages was dropped.
+  - Now: NULs are stripped, and a failing batch is retried row by row.
+- **A standby replica no longer runs queued commands.**
+  - Before: a non-leader could claim `run_now` and run a cycle on stale state.
+  - Now: a standby leaves the queue to the leader, and `run_now` is refused off the leader. A
+    command sent from the panel to a service embedded in it renews the lease first, so it still
+    runs at once when this instance holds it.
+- **IPv4-mapped client addresses are normalised in IP bans.**
+  - Before: behind a dual-stack `::` listener, `::ffff:127.0.0.1` missed the whitelist and one
+    client had two keys.
+  - Now: mapped addresses are reduced to their IPv4 form everywhere the jail keys an address.
+- **The web process shuts down cleanly on SIGTERM.**
+  - Before: only Ctrl+C was handled. `docker stop` lost the syslog writer queue, kept the leases
+    and left instances marked "running".
+  - Now: SIGTERM and SIGINT stop the embedded services (syslog drained, leases released, rows
+    marked down) and the scanners before the HTTP servers.
+- **Background scanners can be stopped and started again.**
+  - Before: `stop()` left the thread set, so a restart did nothing, or reused the same event and
+    left two loops. `stop_background` kept references and leases.
+  - Now: each start gets a fresh event and `stop()` joins with a bound. `stop_background` clears
+    the references and releases the leases.
+- **SNMP returns non-ASCII text as text.**
+  - Before: a walk returned any OctetString with a non-ASCII byte as `0x…` hex, so "Memoria
+    física" became a hex row name. A GET decoded it as Latin-1.
+  - Now: values that decode cleanly to printable UTF-8 are text. Binary values, MAC-length
+    values and addresses keep their spelling, and marks and baselines filed under the old hex name
+    carry over.
+- **A missing OID on SNMP v2c/v3 is an error, not an empty value.**
+  - Before: `noSuchObject`, `noSuchInstance` and `endOfMibView` came back as `''`, so checks with
+    any, ne or regex stayed up for ever.
+  - Now: the GET returns an error naming what the device said, and walks skip those bindings.
+- **Table-only SNMP devices keep their counter baselines.**
+  - Before: `{srv}/metrics` was emitted only when the device had a scalar metric, so the monitor
+    pruned it every other cycle. The baselines were lost and a phantom down row remained.
+  - Now: a device that answered always gets its own green `{srv}/metrics` result.
+- **A truncated SNMP walk says so, and does not wipe stored sightings.**
+  - Before: a walk that hit the 512-row ceiling looked complete, so a large forwarding table
+    replaced the stored evidence with a partial one every cycle.
+  - Now:
+    - the walk reports `Truncated`, and a truncated evidence kind is not replaced;
+    - evidence walks allow 8192 rows;
+    - a metric can declare its own `max_rows`.
+- **Interface 64-bit traffic no longer splits each port into two rows.**
+  - Before: `if_hc_in` and `if_hc_out` named rows by ifName and every other column by ifDescr.
+  - Now: every `if_generic` column names its rows by ifDescr.
+- **A device reboot is no longer charted as a traffic spike.**
+  - Before: a 32-bit counter that went backwards after a reboot was taken as a wrap.
+  - Now: `sysUpTime` is read once per cycle, and a restarted agent re-baselines every counter.
+    Scalar 32-bit error counters and CPU ticks declare a `max_rate` fallback.
+- **Duplicate row names in one SNMP table no longer share counter state.**
+  - Before: two rows with the same name shared one key and produced garbage rates.
+  - Now: the first row keeps the name and the others become `name (index)`, the same way for
+    every metric of the table.
+- **A resolved SNMP target address expires.**
+  - Before: a hostname that changed IP was polled at the old address until restart.
+  - Now: it is resolved again after five minutes, and at once after a read that got no answer.
+- **SNMPv3 devices that share a user name but have different keys no longer swap keys.**
+  - Before: the shared engine keyed USM users by name, so the credentials overwrote each other.
+  - Now: a second credential under a name already in use gets an engine of its own.
+- **SNMP counter rates use the time each reading arrived.**
+  - Before: one timestamp taken at the start of the cycle served every counter, although walks can
+    take minutes.
+  - Now: each reading is timestamped when it returns.
+- **A user with scoped module or device permissions can save the module configuration again.**
+  - Before: the modules they could not see arrived as deleted, so every save was refused with 403.
+  - Now: stored modules they cannot see and did not send are kept untouched.
+- **A check bound to a deleted device no longer measures the panel's own machine.**
+  - Before: the item fell back to local execution and reported the panel host's numbers under the
+    deleted device's label.
+  - Now: the check reports that the bound device no longer exists.
+- **The reasons a check could not run a command are translated.**
+  - Before: "this device has no connection for running commands", "paramiko is not installed",
+    "SSH error: …" and the other refusals of `device_exec` and `devices.runner.run` were English
+    constants. They became the check's message, and the notification text, in every language.
+  - Now: they are language keys (`device_exec_*`), translated into the notification language.
+- **An 'add'-only user can no longer change a device's class or importer link.**
+  - Before: `device_type`, `source` and `external_id` were not among the fields an 'add'-only
+    edit checks.
+  - Now: changing any of them needs `edit`.
+- **Cloning a device no longer copies its importer identity or its watched rows.**
+  - Before: the clone was "maintained by" the importer, so renaming it answered 409, and two
+    devices shared one external key.
+  - Now: `source`, `external_id`, `watch` and the audit stamps are dropped from the clone.
+- **Module configuration saves no longer overwrite each other.**
+  - Before:
+    - the PUT replaced the whole configuration without a version check;
+    - server-side delete, clone and migrate saved stale copies;
+    - other replicas never saw the change.
+  - Now:
+    - the version lives in `entity_versions`, and the GET returns `X-Modules-Version`;
+    - a PUT with a stale `If-Match` gets 409, and the screen reloads with a warning;
+    - server-side read-modify-write runs under a lock with retry.
+- **Deleting a device clears what other domains say about it.**
+  - Before: its company ownership and the `device_uid` of DCIM items, PDUs and sources kept
+    pointing at the deleted uid.
+  - Now: the ownership is forgotten and those references are blanked.
+- **The Overview counts a module with no `enabled` key as enabled, as the monitor does.**
+- **A rack, room or site no longer accepts a number that is not one.**
+  - Before: `u_height: "abc"` was stored, and from then on the site tree and the rack answered
+    500.
+  - Now: numeric columns must be finite and in range, otherwise 400 `dcim_bad_number` names the
+    field.
+- **Deleting an item takes its power leads, cables and parts with it**, so its outlet is free
+  again.
+- **Moving a tray moves what is mounted on it.**
+- **Another company's item keeps its geometry in a shared rack.**
+  - Before: the opaque copy lost its placement, parent and U split. A UPS beside the rack was
+    drawn at U1 and a mounted item was drawn twice.
+  - Now: the geometry is kept, without its identity, and foreign items are drawn as locked,
+    non-clickable boxes.
+- **The item search lists only the sites the reader may see.**
+- **A rack cannot be shrunk below its own equipment** (409 `dcim_rack_shrink_occupied`).
+- **A malformed room import no longer empties the room.** The file is validated before anything
+  is touched, and the old pieces are put back if writing fails.
+- **Non-finite numbers no longer crash DCIM writes.** `nan` and `Infinity` are rejected with 400.
+- **The panel, not the client, chooses the uid of new inventory rows.** `uid` and the audit
+  columns are dropped from create payloads.
+- **Rack and catalogue versions never share a sequence number.** `idx_dc_rev_ref` is unique, the
+  writer retries when it loses the race, and duplicates already stored are renumbered at startup.
+- **A deleted item keeps its owner in the rack history.**
+  - Before: deleting an item dropped its ownership, so the rack owner saw another company's label
+    in old versions.
+  - Now: each snapshot records the owners of its items (never returned to the client).
+- **The Infrastructure device sheet no longer paints a device that is no longer open.** The answer
+  is dropped if another device was opened meanwhile.
+- **History no longer draws one series' points under another series' title.** Only the newest load
+  paints.
+- **The cluster Logs tab no longer sends `severity_max=undefined` or shows "undefined" in its
+  search box.** A trailing comment had swallowed both keys.
+- **"All" rows in the cluster Logs tab shows all rows, not 200.**
+- **Syslog "Configure" on dropped senders opens Syslog › Allowed sources**, and "go to field" in
+  the config-updated detail reaches the field. Both still drove the removed config sub-tabs;
+  they now go through `openConfigField`.
+- **The Syslog list no longer shows rows that do not match the active filters**, when a slow
+  poll lands after a newer request.
+- **PostgreSQL id sequences move past restored and rebuilt rows.**
+  - Before: a schema rebuild or a backup restore copied rows with their ids, but the sequence
+    stayed behind. The next insert into audit or history failed on the primary key, and the error
+    was swallowed.
+  - Now: a connector hook, `sync_autoincrement`, runs `setval(…, MAX(id)+1)` on PostgreSQL after
+    both paths. It does nothing on the other engines.
+- **History samples no longer go to a series another process deleted.**
+  - Before: the monitor kept writing under a series id the web had deleted, so its samples were
+    invisible until a restart.
+  - Now: an update that matches no series (by id, module and key) drops the cache and recreates
+    the series before the sample is written.
+- **The audit cap works on MySQL 8 and applies at once when it is lowered.**
+  - Before:
+    - `DELETE … WHERE id = (SELECT MIN(id) FROM audit)` failed on MySQL 8 (error 1093);
+    - it removed one row per insert, so a table over a lowered cap never shrank;
+    - the monitor passed a fixed cap of 500.
+  - Now: one portable `DELETE … WHERE id < ?` keeps exactly the newest N rows, and the monitor
+    uses the configured `audit_max_entries`.
+- **MySQL 8 TEXT defaults no longer trigger a table rebuild on every boot.**
+  - Before: MySQL 8 reports `DEFAULT ('')` as `_utf8mb4''`, which never matched `''`.
+  - Now: `canonical_default` strips the charset introducer, the escaped quotes and the outer
+    parentheses before comparing.
+
 ## [0.0.1+build.132] - 2026-10-03
 
 ### Changed

@@ -25,6 +25,12 @@ import re
 # split the key (`/`) or read as a path has to go, or a port called "eth0/1" becomes two.
 _KEY_SAFE = re.compile(r'[^0-9A-Za-z._:-]+')
 
+#: The row ceiling for a column read as SIGHTINGS (`evidence`). A forwarding table is one row
+#: per MAC the switch has learned, and a core switch knows thousands — at the ordinary ceiling
+#: (`SnmpClient.WALK_MAX_ROWS`) the table was cut at 512 and the rest of the building vanished
+#: from the map. A profile can still say its own with `max_rows`.
+EVIDENCE_MAX_ROWS = 8192
+
 
 def _safe_key(text: str, fallback: str) -> str:
     out = _KEY_SAFE.sub('_', str(text or '').strip()).strip('_')
@@ -37,6 +43,48 @@ def _text(raw) -> str:
     if isinstance(raw, bytes):
         return raw.decode('utf-8', 'replace').strip()
     return str(raw if raw is not None else '').strip()
+
+
+def _walk_cap(metric: dict) -> int:
+    """The row ceiling to walk *metric* with: its own, the sightings one, or 0 (the default)."""
+    try:
+        own = int(metric.get('max_rows') or 0)
+    except (TypeError, ValueError):
+        own = 0
+    if own > 0:
+        return own
+    return EVIDENCE_MAX_ROWS if metric.get('evidence') else 0
+
+
+def _row_name(columns: dict, idx_oids: list, at: str) -> str:
+    """What the naming column(s) call row *at* — ``''`` when they say nothing."""
+    parts = [str((columns.get(o) or {}).get(at, '') or '').strip() for o in idx_oids]
+    return ' / '.join(p for p in parts if p)
+
+
+def _name_owners(columns: dict, idx_oids: list) -> dict:
+    """``{name: the row that keeps it}`` — the FIRST row, in the device's order, to answer it.
+
+    Two rows the device calls the same thing are not one row. A Linux box with two `eth0`s in
+    two namespaces, a switch whose ports all say "Ethernet Interface": filed under the name
+    alone they shared one key, so one row's counter was differentiated against the other's and
+    the chart was the difference between two unrelated ports. Taken from the NAMING column and
+    not from the metric's own walk, so every metric of the table agrees on which row is which
+    even when one of them is missing a row the others have.
+    """
+    order: list = []
+    seen: set = set()
+    for o in idx_oids:
+        for at in (columns.get(o) or {}):
+            if at not in seen:
+                seen.add(at)
+                order.append(at)
+    owners: dict = {}
+    for at in order:
+        name = _row_name(columns, idx_oids, at)
+        if name:
+            owners.setdefault(name, at)
+    return owners
 
 
 def _row_factor(column, index):
@@ -101,7 +149,9 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
             return [], err
         return [{'index': '', 'key': '', 'name': '', 'raw': raw, 'factor': 1}], None
 
-    walked, err = walk(oid=metric['walk'], **conn)
+    cap = _walk_cap(metric)
+    sized = {'max_rows': cap} if cap else {}
+    walked, err = walk(oid=metric['walk'], **sized, **conn)
     if err and not walked:
         return [], err
     idx = metric.get('index_label') or ''
@@ -124,9 +174,10 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
     for extra in (idx_oids + ([by_oid] if by_oid else []) + ([w_oid] if w_oid else [])
                   + ([p_oid] if p_oid else []) + ([v_oid] if v_oid else [])):
         if extra not in columns:
-            found, _e = walk(oid=extra, **conn)
+            found, _e = walk(oid=extra, **sized, **conn)
             columns[extra] = found or {}
     grp = metric.get('group') or ''
+    owners = _name_owners(columns, idx_oids) if idx_oids else {}
     out = []
     for index, raw in walked.items():
         # Filtered on the OTHER column's value, per row. A row the filter column says nothing
@@ -174,12 +225,14 @@ def read_metric(metric: dict, conn: dict, get, walk, columns: dict) -> tuple:
             at = bits[row_at - 1] if row_at - 1 < len(bits) else ''
             if not at:
                 continue
-        parts = [str((columns.get(o) or {}).get(at, '') or '').strip()
-                 for o in idx_oids]
         # The value's own path wins over the naming column: it is the device's word for this
         # row in the same breath as the reading, and it does not depend on two tables using
         # the same index — which is exactly what fails on the agents this exists for.
-        name = named if named is not None else ' / '.join(p for p in parts if p)
+        name = named if named is not None else _row_name(columns, idx_oids, at)
+        # A name another row already answers to: this one is told apart by its index. The
+        # first keeps the bare name, so a table with no repeats is filed exactly as before.
+        if named is None and name and owners.get(name, at) != at:
+            name = f'{name} ({at})'
         # …and a row the naming table says nothing about is not a row of this device. Only
         # where the profile pointed at one: everywhere else a nameless row is filed by its
         # index, which is the existing behaviour and is what a table of anonymous rows needs.

@@ -153,6 +153,10 @@ def cmd_user_passwd(ctx, args) -> int:
     password is validated against the configured policy and hashed via
     :func:`lib.core.users.service.set_password`, then persisted. Returns 0 on
     success, 1 on error.
+
+    Every session of the account is ended too, as the panel does when an administrator
+    resets a password. This is the command somebody runs when they believe the old password
+    leaked — and a browser already signed in with it would otherwise stay signed in.
     """
     password = args.password or getpass.getpass('New password: ')
     try:
@@ -161,7 +165,22 @@ def cmd_user_passwd(ctx, args) -> int:
     except AdminOpError as e:
         return _err(_t(ctx, e.key, *e.args))
     ctx.persist_users()
-    return _ok(f"password updated for '{args.username}'")
+    ended = _end_sessions(ctx, user)
+    return _ok(f"password updated for '{args.username}'"
+               + (f" ({ended} session(s) signed out)" if ended else ""))
+
+
+def _end_sessions(ctx, user: dict) -> int:
+    """Delete every session row of *user*. The running panel notices on its next check of
+    that session (see ``_SessionsMixin._session_in_db``) — no restart, no signal."""
+    from lib.core.sessions.store import SessionsStore   # noqa: PLC0415
+    uid = str((user or {}).get('uid') or '')
+    if not uid:
+        return 0
+    try:
+        return int(SessionsStore(ctx.db).delete_by_user_uid(uid) or 0)
+    except Exception:  # pylint: disable=broad-except
+        return 0
 
 
 def cmd_user_role(ctx, args) -> int:

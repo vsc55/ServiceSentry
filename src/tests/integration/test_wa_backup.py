@@ -201,6 +201,82 @@ class TestRestoringOnlyTheTablesYouChose:
         assert "'only_tables': 'all'" in str(line.get('detail') or line)
 
 
+class TestARestoreIsNotShadowedByACache:
+    """The restore refills tables with a plain DELETE/INSERT, behind the back of every store
+    that remembers what it read. It used to "clear" `_config_cache` and `_perm_cache`, which
+    exist nowhere — so the effective config kept serving the pre-restore values, and the next
+    save was built from them and wrote them back over the restored rows."""
+
+    @staticmethod
+    def _set(admin, field, value):
+        cfg = admin._read_config_file(admin._CONFIG_FILE) or {}
+        cfg.setdefault('web_admin', {})[field] = value
+        assert admin._write_config(cfg)
+
+    def test_a_restored_setting_survives_the_next_save(self, client, admin):
+        _login(client)
+        self._set(admin, 'default_lang', 'es_ES')
+        _create(client)
+        self._set(admin, 'default_lang', 'en_EN')
+
+        job = _restore(client, 'copia', tables=['config'])
+        assert not job.get('error'), job
+        cfg = admin._read_config_file(admin._CONFIG_FILE)
+        assert cfg['web_admin']['default_lang'] == 'es_ES', 'read() served the cached config'
+        assert admin._DEFAULT_LANG == 'es_ES', 'the runtime attribute kept the old value'
+
+        # Saving ANOTHER field is what wrote the stale value back over the restored row.
+        self._set(admin, 'public_url', 'https://panel.example')
+        assert admin._config_store.get('web_admin|default_lang') == 'es_ES'
+
+    def test_a_restored_module_config_is_what_the_panel_reads(self, client, admin):
+        _login(client)
+        admin._save_modules({'ping': {'enabled': False, 'threads': 3}})
+        _create(client)
+        admin._save_modules({'ping': {'enabled': True, 'threads': 9}})
+
+        job = _restore(client, 'copia', tables=['module_config', 'module_config_items'])
+        assert not job.get('error'), job
+        assert admin._load_modules()['ping']['threads'] == 3,             'the facade kept serving the pre-restore modules'
+
+    def test_the_restored_tables_move_their_change_counter(self, client, admin):
+        """The counter is how another web replica — and this process's own freshness probe —
+        knows to re-read users, roles and groups; a DELETE/INSERT never moved it."""
+        _login(client)
+        con = admin._db_connector
+        _create(client)
+        before = con.fetchone("SELECT version FROM entity_versions WHERE name = 'users'")[0]
+        job = _restore(client, 'copia', tables=['users'])
+        assert not job.get('error'), job
+        after = con.fetchone("SELECT version FROM entity_versions WHERE name = 'users'")[0]
+        assert after > before
+
+    def test_a_user_the_restore_removed_is_gone_on_the_next_request(self, client, admin):
+        _login(client)
+        _create(client)
+        admin._users['bob'] = {'password_hash': admin._users['admin']['password_hash'],
+                               'role': 'viewer', 'display_name': 'Bob'}
+        assert admin._persist_users()
+        admin._mark_fresh('users', admin._users_store)
+
+        job = _restore(client, 'copia', tables=['users'])
+        assert not job.get('error'), job
+        client.get('/api/v1/backups')
+        assert 'bob' not in admin._users, 'the in-memory accounts survived the restore'
+
+    def test_history_ids_remembered_before_a_restore_are_forgotten(self, client, admin):
+        _login(client)
+        _create(client, parts=['core', 'history'])
+        sid = admin._history.series_id('probe', 'k')
+        assert sid
+
+        job = _restore(client, 'copia', parts=['history'])
+        assert not job.get('error'), job
+        sid2 = admin._history.series_id('probe', 'k')
+        con = admin._db_connector
+        assert con.fetchone('SELECT COUNT(*) FROM history_series WHERE id = ?', (sid2,))[0] == 1,             'the cached series id points at a row the restore removed'
+
+
 class TestEachOneHasItsOwnPermission:
     """A viewer may see that copies exist and nothing else — not fetch one, not apply one."""
 
@@ -549,6 +625,18 @@ class TestTheTaskApi:
         for bad in ('', '   ', '../', '...'):
             assert client.put('/api/v1/backups/tasks',
                               json={'name': bad}).status_code == 400
+
+    def test_two_tasks_that_write_the_same_file_names_are_refused(self, client):
+        """"Diaria" and "diaria!" reduce to the same slug, so both would write
+        `auto-diaria-<stamp>` and each one's retention would prune the other's copies."""
+        _login(client)
+        uid = client.put('/api/v1/backups/tasks', json={'name': 'Diaria'}).get_json()['uid']
+        res = client.put('/api/v1/backups/tasks', json={'name': 'diaria!'})
+        assert res.status_code == 409 and 'Diaria' in res.get_json()['error']
+        assert len(client.get('/api/v1/backups/tasks').get_json()['tasks']) == 1
+        # Saving the SAME task again under its own name is an edit, not a clash.
+        assert client.put('/api/v1/backups/tasks',
+                          json={'uid': uid, 'name': 'DIARIA'}).status_code == 200
 
     def test_the_missing_fields_come_back_filled(self, client):
         """Normalised by the store, so the form and the scheduler read a task the same way — a

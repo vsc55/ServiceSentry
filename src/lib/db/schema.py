@@ -16,6 +16,7 @@ so all three connectors share one builder.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 
@@ -122,6 +123,10 @@ def canonical_type(raw: str) -> str:
     return t or 'TEXT'
 
 
+# `_utf8mb4'…'`, `_latin1'…'`: a MySQL charset introducer in front of a string literal.
+_CHARSET_INTRODUCER = re.compile(r"^_[A-Za-z0-9]+(?=\\?['\"])")
+
+
 def canonical_default(raw) -> str | None:
     """Normalise a DEFAULT literal to a bare value for cross-engine comparison.
 
@@ -133,6 +138,15 @@ def canonical_default(raw) -> str | None:
         return None
     s = str(raw).strip()
     s = s.split('::', 1)[0].strip()  # drop PG cast suffix
+    # MySQL 8 reports an EXPRESSION default — the parenthesised form TEXT columns need there —
+    # as the expression, not as the value: `DEFAULT ('')` comes back from information_schema
+    # as `_utf8mb4\'\'` (charset introducer, backslash-escaped quotes), sometimes still in
+    # its parentheses. Compared raw it never equals '', so every table with a TEXT default
+    # read as drifted and was rebuilt on every boot.
+    if len(s) >= 2 and s[0] == '(' and s[-1] == ')':
+        s = s[1:-1].strip()
+    s = _CHARSET_INTRODUCER.sub('', s, count=1)
+    s = s.replace("\\'", "'")
     if s == '':
         # A driver reporting '' (e.g. MySQL) means DEFAULT '' — an empty string.
         return ''

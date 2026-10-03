@@ -130,6 +130,32 @@ class SessionsStore(BaseStore):
             for r in rows
         }
 
+    def get(self, token: str):
+        """One session by its token: the row as a dict, ``{}`` when there is none, and
+        ``None`` when the database could not be asked.
+
+        Three answers and not two, because the caller does opposite things with them: no row
+        means the session was revoked (by another replica, the CLI, a password change) and must
+        stop working; no ANSWER means keep what is already known rather than sign everybody
+        out over a database blip.
+        """
+        if not token:
+            return {}
+        try:
+            r = self._db.fetchone(
+                'SELECT token, uid, user_uid, created_at, last_seen, ip, user_agent, remember '
+                f'FROM {_T} WHERE token = ?', (str(token),))
+        except Exception:  # pylint: disable=broad-except
+            try:
+                self._db.rollback()
+            except Exception:  # pylint: disable=broad-except
+                pass
+            return None
+        if not r:
+            return {}
+        return {'uid': r[1], 'user_uid': r[2], 'created_at': r[3], 'last_seen': r[4],
+                'ip': r[5], 'user_agent': r[6], 'remember': bool(r[7])}
+
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def save_all(self, sessions: dict) -> bool:
@@ -226,13 +252,20 @@ class SessionsStore(BaseStore):
         except Exception:  # pylint: disable=broad-except
             return False
 
-    def delete_by_user_uid(self, user_uid: str) -> int:
-        """Delete all sessions for a given user UID.  Returns count deleted."""
+    def delete_by_user_uid(self, user_uid: str, except_token: str | None = None) -> int:
+        """Delete all sessions for a given user UID — but *except_token*, when given.
+        Returns count deleted.
+
+        By the table and not by a list of tokens a caller happens to hold in memory: the
+        sessions of the same account opened on ANOTHER replica are rows here and nowhere in
+        this process, and a password change has to end them too."""
+        keep = str(except_token or '')
         try:
             with self._db.transaction():
-                uids = self._db.fetchall(f'SELECT uid FROM {_T} WHERE user_uid = ?',
-                                         (user_uid,)) or ()
-                deleted = self._db.execute(f'DELETE FROM {_T} WHERE user_uid = ?', (user_uid,))
+                uids = self._db.fetchall(f'SELECT uid FROM {_T} WHERE user_uid = ? AND token <> ?',
+                                         (user_uid, keep)) or ()
+                deleted = self._db.execute(f'DELETE FROM {_T} WHERE user_uid = ? AND token <> ?',
+                                           (user_uid, keep))
                 for r in uids:
                     self._db.execute(f'DELETE FROM {_A} WHERE session_uid = ?', (r[0],))
             return deleted

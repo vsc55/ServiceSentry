@@ -15,6 +15,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from lib.core.constants import is_reserved_username
 from lib.debug import DebugLevel
 from lib.i18n import SUPPORTED_LANGS
+from lib.providers.identity import refusal
 from ..constants import home_pages, landing_pages
 
 # i18n key per ``auth_source`` for the login-notification method label (translated in the
@@ -158,12 +159,20 @@ class _AuthMixin:
             if existing.get('auth_source', 'local') != 'local' or not existing:
                 attrs, reason = ldap_auth.authenticate(self, username, password)
                 if attrs:
-                    canonical = attrs.get('username') or username
+                    # The account the DIRECTORY identity belongs to, not the string typed:
+                    # a case variant or an e-mail login must land on the existing account
+                    # (its MFA, its enabled flag), never provision a second one.
+                    canonical = ldap_auth.canonical_username(self, username, attrs)
+                    if canonical is None:
+                        return LoginResult(None, '', username, 'invalid_credentials',
+                                           'ldap_account_ambiguous')
                     user = ldap_auth.sync_user(self, canonical, attrs)
                     if user is None:
-                        # sync refused (username collides with a local account) — generic reject.
+                        # sync refused (username collides with a local account, or the account
+                        # is bound to another identity provider) — generic reject, exact
+                        # reason in the audit log.
                         return LoginResult(None, '', canonical, 'invalid_credentials',
-                                           'ldap_account_conflict')
+                                           refusal('ldap_account_conflict'))
                     if not user.get('enabled', True):
                         return LoginResult(None, '', canonical, 'account_disabled',
                                            'account_disabled')
@@ -258,11 +267,12 @@ class _AuthMixin:
         if not second_factor_done and self._mfa_required(username, source):
             self._mfa_hold(username, source, remember)
             return False
-        # A successful auth clears the per-IP login throttle (legit users on a shared
-        # NAT are never penalised by earlier failures).
+        # A successful auth clears THIS account's hits from the per-IP login throttle, and
+        # only those. Clearing the whole address let anyone holding one valid password reset
+        # the count of every guess made from there against every other account.
         rl = getattr(self, '_login_ratelimit', None)
         if rl is not None:
-            rl.reset(request.remote_addr or '?')
+            rl.forget(request.remote_addr or '?', str(username or '').strip().lower())
         session.permanent = remember
         token, uid = self._create_session(
             username, request.remote_addr, request.user_agent.string, remember,

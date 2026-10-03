@@ -12,6 +12,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json as _json
+import re as _re
+from urllib.parse import quote as _quote
 
 from lib.config.spec import cfg_get
 from lib.debug import DebugLevel
@@ -30,6 +32,28 @@ _DEFAULT_BODY_TPL = (
 )
 
 _PLACEHOLDERS = ('kind', 'module', 'item', 'status', 'message', 'timestamp')
+
+_PLACEHOLDER_RE = _re.compile(r'\{(' + '|'.join(_PLACEHOLDERS) + r')\}')
+
+
+def _json_escape(value: str) -> str:
+    """*value* escaped to sit inside a JSON string literal (quotes, backslashes,
+    control characters) — without the surrounding quotes the template already has."""
+    return _json.dumps(str(value), ensure_ascii=False)[1:-1]
+
+
+def _url_escape(value: str) -> str:
+    """*value* percent-encoded for a URL component."""
+    return _quote(str(value), safe='')
+
+
+def render_template(tpl: str, vals: dict, escape) -> str:
+    """Substitute ``{placeholder}`` in *tpl* with ``escape(vals[name])`` in ONE pass.
+
+    A raw ``str.replace`` per key broke the JSON body on any value with a ``"`` or a backslash
+    (a syslog line saying ``Invalid user "admin"``), so the receiver rejected the alert;
+    and replacing key after key let a value carrying ``{message}`` be expanded again."""
+    return _PLACEHOLDER_RE.sub(lambda m: escape(vals.get(m.group(1), '') or ''), tpl)
 
 
 def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
@@ -110,15 +134,11 @@ def _dispatch(cfg: dict, *, kind: str = 'test', module: str = '',
 
     try:
         if method == 'GET':
-            req_url = url
-            for k, v in vals.items():
-                req_url = req_url.replace(f'{{{k}}}', v)
+            req_url = render_template(url, vals, _url_escape)
             resp = _req.get(req_url, headers=extra_headers or None, timeout=timeout)
         else:
             tpl = (cfg.get('body_template') or '').strip() or _DEFAULT_BODY_TPL
-            body = tpl
-            for k, v in vals.items():
-                body = body.replace(f'{{{k}}}', v)
+            body = render_template(tpl, vals, _json_escape)
             body_bytes = body.encode('utf-8')
 
             headers = {'Content-Type': 'application/json'}

@@ -29,6 +29,8 @@ from __future__ import annotations
 import threading
 import time
 
+from lib.core.health import ScannerThread
+
 #: Un cable cuyo puerto declarado no está entre los que los dispositivos nombran.
 MOVED = 'cable_moved'
 #: Dos equipos que se ven y que nadie ha declarado unidos.
@@ -121,7 +123,7 @@ def _boca(v) -> str:
     return str(v or '')
 
 
-class CableDriftScanner:
+class CableDriftScanner(ScannerThread):
     """Mira el cableado cada tanto y avisa de lo que ha cambiado.
 
     *check_provider* devuelve lo mismo que la pantalla de contraste —``cable_check`` con las
@@ -219,15 +221,12 @@ class CableDriftScanner:
     # ── El hilo ──────────────────────────────────────────────────────────────────
 
     def start(self, *, poll_getter=lambda: DEFAULT_EVERY) -> None:
-        if self._thread is not None:
-            return
-        self._stop.clear()
-
-        def _loop():
+        def _loop(stop_ev):
             # La primera vuelta no al arrancar: un pod que acaba de levantarse todavía no tiene
             # el mapa de la flota armado, y preguntar entonces devuelve «no se ve nada» sobre
             # todo — que con el estado vacío sería anunciarlo todo y luego desdecirse.
-            if self._stop.wait(120):
+            cada = DEFAULT_EVERY
+            if stop_ev.wait(120):
                 return
             while True:
                 try:
@@ -236,14 +235,11 @@ class CableDriftScanner:
                     pass
                 try:
                     cada = max(300, int(poll_getter() or DEFAULT_EVERY))
-                except (TypeError, ValueError):
-                    cada = DEFAULT_EVERY
-                if self._stop.wait(cada):
+                except Exception:  # pylint: disable=broad-except
+                    # A bad value or a failed config read (DB down) keeps the last
+                    # interval; it must not end the thread.
+                    pass
+                if stop_ev.wait(cada):
                     return
 
-        self._thread = threading.Thread(target=_loop, name='cable-scan', daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
-        self._thread = None
+        self._spawn('cable-scan', _loop)

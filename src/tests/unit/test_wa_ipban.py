@@ -127,3 +127,27 @@ class TestIpBanManager:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
+
+
+class TestIpv4MappedAddresses:
+    """Behind a dual-stack ``::`` listener every IPv4 client arrives as ``::ffff:a.b.c.d``:
+    loopback and the reverse proxy then missed the whitelist and could be jailed, and one
+    client had two jail keys."""
+
+    def test_mapped_loopback_is_whitelisted(self):
+        assert IpBanManager().is_whitelisted('::ffff:127.0.0.1') is True
+
+    def test_mapped_loopback_is_never_jailed(self):
+        m = IpBanManager()
+        m.configure(auth_threshold=1)
+        assert m.register_offense('::ffff:127.0.0.1', 'login_failed') is False
+        assert m.is_banned('::ffff:127.0.0.1')[0] is False
+
+    def test_mapped_and_plain_forms_are_one_client(self):
+        m = IpBanManager()
+        m.configure(auth_threshold=2)
+        m.register_offense('::ffff:203.0.113.9', 'login_failed')
+        assert m.register_offense('203.0.113.9', 'login_failed') is True
+        assert m.is_banned('::ffff:203.0.113.9')[0] is True
+        assert m.unban('::ffff:203.0.113.9') is True
+        assert m.is_banned('203.0.113.9')[0] is False

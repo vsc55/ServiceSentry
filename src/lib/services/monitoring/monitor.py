@@ -35,7 +35,7 @@ import tempfile
 import time
 
 from lib.config import ConfigControl, load_config, secret_key_path
-from lib.config.spec import cfg_default, normalize_url
+from lib.config.spec import cfg_default, cfg_get, normalize_url
 from lib.debug import DebugLevel
 from lib.modules import ReturnModuleCheck
 from lib.core.object_base import ObjectBase
@@ -64,6 +64,8 @@ class Monitor(ObjectBase):
     _DEFAULT_THREADS = 5     # Number of threads to use for parallel processing as default value.
     _DEFAULT_ENABLED = True
 
+    # Only the fallback for a monitor with no configuration: the cap that applies is the one
+    # the panel configured, read in `_audit_max_entries`.
     _AUDIT_MAX_ENTRIES = 500
 
     # Set by ModuleBase.fail_streak when a consecutive-failure counter changes:
@@ -322,6 +324,19 @@ class Monitor(ObjectBase):
 
     # ── Audit helpers ─────────────────────────────────────────────────────────
 
+    def _audit_max_entries(self) -> int:
+        """The audit cap the panel configured (`web_admin|audit_max_entries`, 0 = no limit).
+
+        Both processes write to the same table and each insert trims it to the cap it is
+        given, so the monitor must pass the panel's number: with a fixed 500 here, a panel
+        set to keep 5000 entries had its log cut back to 500 by the next system event.
+        """
+        try:
+            section = self.config.get_conf(['web_admin'], {}) or {}
+            return max(0, cfg_get(section, 'web_admin|audit_max_entries'))
+        except Exception:  # pylint: disable=broad-except
+            return self._AUDIT_MAX_ENTRIES
+
     def _audit_system(self, event: str, detail: str | dict = '') -> None:
         """Append a system-generated audit entry without Flask context.
 
@@ -336,7 +351,7 @@ class Monitor(ObjectBase):
                 store.insert(
                     ts=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     event=event, user='system', ip='internal', detail=detail,
-                    max_entries=self._AUDIT_MAX_ENTRIES,
+                    max_entries=self._audit_max_entries(),
                 )
                 return
             except Exception as exc:  # pylint: disable=broad-except
@@ -367,7 +382,9 @@ class Monitor(ObjectBase):
                 'ip':     'internal',
                 'detail': detail,
             })
-            log = log[-self._AUDIT_MAX_ENTRIES:]
+            cap = self._audit_max_entries()
+            if cap:
+                log = log[-cap:]
 
             # Atomic write
             with tempfile.NamedTemporaryFile(

@@ -122,6 +122,16 @@ class BaseConnector(ABC):
         """
         raise NotImplementedError
 
+    def sync_autoincrement(self, table: str) -> None:
+        """Move *table*'s id generator past the ids already in it.  Default: no-op.
+
+        Call it after rows went in WITH their ids — a rebuild's copy, a restore's refill. On
+        SQLite and MySQL/MariaDB the engine does this by itself (the next id is derived from
+        the table's maximum). PostgreSQL keeps a separate sequence that an explicit id never
+        touches, so it overrides this: without it the next plain INSERT is handed id 1 and
+        fails on the primary key.
+        """
+
     def adopt_former_name(self, spec: TableSpec) -> bool:
         """Take over whichever of this table's ``former_names`` still holds the rows. Idempotent.
 
@@ -481,6 +491,10 @@ class BaseConnector(ABC):
             self.execute(f'DROP TABLE {q(spec.name)}')
             self.execute(f'ALTER TABLE {q(tmp)} RENAME TO {q(spec.name)}')
             self._recreate_indexes_after_rebuild(spec, actual_indexes)
+            # The copy carried the ids across; the new table's sequence (PostgreSQL) did not
+            # see them and would start at 1.
+            if has_common:
+                self.sync_autoincrement(spec.name)
 
     def _recreate_indexes_after_rebuild(
         self, spec: TableSpec, actual_indexes: list[IndexInfo],

@@ -18,6 +18,7 @@ import os
 import zipfile
 
 from lib import APP_NAME
+from lib.db import freshness as _freshness
 from lib.debug.debug_level import DebugLevel
 
 from .archive import (archive_path, DB_DIR, FILES_DIR, _log, member_tables, PARTS_PREFIX,
@@ -198,6 +199,8 @@ def restore_backup(connector, var_dir: str, name: str, *, parts=None, tables=Non
                             else:
                                 _log(f'> Backup > restore >> {table}: {rows} rows',
                                      DebugLevel.debug)
+                    _bump_versions(target, [t for _pid, tabs in group for t in tabs
+                                            if t in restored])
             if cfg_step:
                 _say(total, 'config.json')
                 step = {'part': 'config_file', 'ok': True, 'tables': 0, 'rows': 0, 'error': ''}
@@ -269,6 +272,23 @@ def _by_database(by_part: list, connector, connectors=None) -> list:
     return [groups[k] for k in order]
 
 
+def _bump_versions(connector, tables) -> None:
+    """Move the change counter of every table just refilled, inside the restore's transaction.
+
+    The rows went in with a plain DELETE/INSERT, which no store's write path saw — so a
+    process holding users, roles or groups in memory (a second web replica, or this one) had
+    only the row count and newest `updated_at` to notice by, and a restore that put back the
+    same number of rows, or older ones, could leave it serving the accounts it had before.
+    After the tables, so a restored `entity_versions` cannot overwrite the bump; and only
+    where the counters table exists — a part in a database of its own has none, and on
+    PostgreSQL a failed UPDATE would abort the whole restore.
+    """
+    if not tables or not connector.table_exists(_freshness.VERSIONS_SCHEMA.name):
+        return
+    for table in tables:
+        _freshness.bump_version(connector, table)
+
+
 def _load_table(connector, table: str, payload: dict):
     """Empty *table* and refill it from *payload*.
 
@@ -299,6 +319,9 @@ def _load_table(connector, table: str, payload: dict):
     if rows:
         connector.executemany(
             f'INSERT INTO {connector.quote_ident(table)} ({quoted}) VALUES ({marks})', rows)
+        # The rows came back with their ids. PostgreSQL's sequence did not see them, and the
+        # next audit entry or history sample would have been handed an id already taken.
+        connector.sync_autoincrement(table)
     return len(rows), dropped
 
 

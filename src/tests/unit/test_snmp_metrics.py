@@ -134,6 +134,54 @@ class TestOneSample:
         assert value == 102400
 
 
+class TestARebootIsNotAWrap:
+    """The one case the width cannot settle: a 32-bit counter that went backwards because
+    the machine REBOOTED was read as a wrap, and the 4 GiB added back was charted as the
+    busiest interval in the box's life — on every reboot, on every 32-bit counter it has.
+    The agent's own uptime settles it."""
+
+    def test_an_uptime_shorter_than_it_should_be_is_a_restart(self):
+        # 10 000 s up, sampled again 300 s later: it should say ~10 300 s. It says 2 minutes.
+        assert metrics.restarted({'v': 1_000_000, 't': 1000.0}, 12_000, 1300.0) is True
+
+    def test_an_uptime_that_kept_counting_is_not(self):
+        assert metrics.restarted({'v': 1_000_000, 't': 1000.0}, 1_030_000, 1300.0) is False
+
+    def test_two_clocks_disagreeing_a_little_is_not(self):
+        """The agent's ticks and this machine's clock are not the same clock."""
+        assert metrics.restarted({'v': 1_000_000, 't': 1000.0}, 1_027_000, 1300.0) is False
+
+    def test_the_497_day_wrap_of_timeticks_is_not(self):
+        """sysUpTime is 32 bits of hundredths: it goes back to zero after ~497 days, on its
+        own, with every counter of the box still counting."""
+        prev = {'v': 2 ** 32 - 10_000, 't': 1000.0}
+        assert metrics.restarted(prev, 20_000, 1300.0) is False
+
+    def test_not_knowing_is_never_a_restart(self):
+        """No previous reading, no time between them, a value that is not a number: the
+        counters then follow the width rule, which is what they did before."""
+        assert metrics.restarted(None, 100, 1300.0) is False
+        assert metrics.restarted({'v': 5, 't': 1300.0}, 1, 1300.0) is False
+        assert metrics.restarted({'v': 5, 't': 1000.0}, 'n/a', 1300.0) is False
+        assert metrics.restarted({'t': 1000.0}, 1, 1300.0) is False
+
+    def test_a_reset_sample_is_a_baseline_whichever_way_it_moved(self):
+        """Backwards (the reboot spike) and forwards (a counter that grew past its old value
+        since the reboot) are both a difference against a number from before it."""
+        prev = {'v': 4_000_000_000, 't': 90.0}
+        value, state = metrics.sample({'kind': 'counter', 'width': 32}, 1000, prev, 100.0,
+                                      reset=True)
+        assert value is None and state == {'v': 1000.0, 't': 100.0}
+        value, _s = metrics.sample({'kind': 'counter', 'width': 32}, 5000, {'v': 10, 't': 90.0},
+                                   100.0, reset=True)
+        assert value is None
+
+    def test_without_it_the_width_rule_is_unchanged(self):
+        value, _s = metrics.sample({'kind': 'counter', 'width': 32}, 100,
+                                   {'v': 2 ** 32 - 100, 't': 90.0}, 100.0)
+        assert value == 20
+
+
 class TestAttributes:
 
     def test_bytes_become_a_name(self):

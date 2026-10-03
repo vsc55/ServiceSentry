@@ -23,6 +23,7 @@ from __future__ import annotations
 import io
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0])
 
@@ -506,3 +507,56 @@ class TestRellenarLoQueSeGraboAntes:
         st._fill_summary()
         st._resummarise = original
         assert llamadas == [], 'volvió a recalcular con el resumen ya puesto'
+
+
+class TestOtroProcesoBorraLaSerie:
+    """El monitor y la web tienen cada uno su `HistoryStore` y su caché de ids. Cuando la web
+    borraba una serie (o vaciaba el histórico) sólo se limpiaba SU caché: el monitor seguía
+    escribiendo con el id viejo, el UPDATE de la serie tocaba 0 filas y las muestras nuevas
+    quedaban colgadas de una serie que no existía — invisibles hasta reiniciar."""
+
+    @staticmethod
+    def _dos(tmp_path):
+        # En fichero y no en memoria: vaciar el histórico hace VACUUM, y una base en memoria
+        # no sobrevive a que el conector reabra la conexión.
+        db = get_connector(None, default_sqlite_path=str(tmp_path / 'h.db'))
+        return HistoryStore(db), HistoryStore(db)       # monitor, web: misma base
+
+    def test_la_serie_borrada_por_la_web_vuelve_con_la_siguiente_muestra(self, tmp_path):
+        monitor, web = self._dos(tmp_path)
+        monitor.record('cpu', 'srv1', status=True, data={'used': 1})
+        web.delete_series('cpu', 'srv1')
+        monitor.record('cpu', 'srv1', status=False, data={'used': 2})
+        resumen = _resumen(web)
+        assert ('cpu', 'srv1') in resumen, 'la serie no volvió'
+        assert resumen[('cpu', 'srv1')][:3] == (1, 0, 0)
+        huerfanas = web._db.fetchone(
+            'SELECT COUNT(*) FROM history WHERE series_id NOT IN (SELECT id FROM history_series)')
+        assert huerfanas == (0,)
+        assert [r['count'] for r in web.get_index() if r['key'] == 'srv1'] == [1]
+
+    def test_vaciar_el_historico_no_deja_las_medidas_sin_nombre(self, tmp_path):
+        """Vaciarlo borra también el diccionario de campos; con la caché de campos vieja, las
+        medidas nuevas apuntaban a un `field_id` que ya no existía y no se podían leer."""
+        monitor, web = self._dos(tmp_path)
+        monitor.record('cpu', 'srv1', status=True, data={'used': 1})
+        web.delete_all()
+        monitor.record('cpu', 'srv1', status=True, data={'used': 42})
+        puntos = web.query('cpu', 'srv1', 0, time.time() + 1)
+        assert [p['data'].get('used') for p in puntos] == [42]
+
+    def test_un_id_que_ahora_es_otra_serie_no_se_lleva_las_muestras(self, tmp_path):
+        """Una restauración puede devolver el mismo id a otra serie: el UPDATE pide también
+        módulo y clave, así que eso cuenta como «ya no es la mía», no como acierto."""
+        monitor, web = self._dos(tmp_path)
+        monitor.record('cpu', 'srv1', status=True)
+        sid = monitor.series_id('cpu', 'srv1')
+        web._db.execute('DELETE FROM history_series WHERE id = ?', (sid,))
+        web._db.execute(
+            f'INSERT INTO history_series(id, module, {web._qk}, samples, up_samples) '
+            'VALUES(?, ?, ?, 5, 5)', (sid, 'disk', 'otro'))
+        web._db.commit()
+        monitor.record('cpu', 'srv1', status=False)
+        resumen = _resumen(web)
+        assert resumen[('disk', 'otro')][:2] == (5, 5), 'la muestra fue a parar a otra serie'
+        assert resumen[('cpu', 'srv1')][:2] == (1, 0)

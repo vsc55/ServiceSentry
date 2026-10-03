@@ -846,16 +846,17 @@ class TestASecurityKeyThroughTheApp:
                             return_value={'ok': True, 'rp_id': fab.RP_ID,
                                           'origin': fab.ORIGIN, 'reason': ''})
 
-    def _challenge(self, client, url='/api/v1/account/mfa/webauthn/begin'):
-        res = client.post(url, json={})
+    def _challenge(self, client, url='/api/v1/account/mfa/webauthn/begin', code=''):
+        res = client.post(url, json={'code': code} if code else {})
         body = res.get_json() or {}
         assert body.get('ok'), body
         return body
 
-    def _register(self, admin, client):
-        """A signed-in account registers a key. Returns its private half."""
+    def _register(self, admin, client, code=''):
+        """A signed-in account registers a key. Returns its private half. An account that
+        already has a factor proves it with *code* first."""
         with self._scoped(admin):
-            opts = self._challenge(client)
+            opts = self._challenge(client, code=code)
             priv, _key, att, cdj = fab._registration(opts['challenge'])
             out = client.post('/api/v1/account/mfa/webauthn/confirm', json={
                 'attestation_object': webauthn.b64u_encode(att),
@@ -974,13 +975,12 @@ class TestASecurityKeyThroughTheApp:
     def test_the_page_offers_the_key_only_when_there_is_one(self, admin, client):
         """Decided on the SERVER: a button the server would refuse teaches people the feature
         is broken."""
-        _enrol(admin)
+        secret, _codes = _enrol(admin)
         _login(client)
         with self._scoped(admin):
             assert b'mfaKeyBtn' not in client.get('/login/mfa').data
-        _post_mfa(client, _code(admin._mfa_store.factor(
-            admin._users['admin']['uid'], decrypt=True)['secret']))
-        self._register(admin, client)
+        _post_mfa(client, _code(secret))
+        self._register(admin, client, code=_code(secret, 1))
         client.post('/logout', follow_redirects=True)
         _login(client)
         with self._scoped(admin):
@@ -995,3 +995,223 @@ class TestASecurityKeyThroughTheApp:
                           return_value={'ok': False, 'reason': 'not_https'}):
             body = client.get('/api/v1/account/mfa').get_json() or {}
         assert body['webauthn_ok'] is False and body['webauthn_reason'] == 'not_https'
+
+
+# ─────────────────────── A key needs the factor that is already there ──────────────────────
+class TestAKeyIsAddedOnlyByWhoeverHoldsTheFactor:
+    """Registering a security key is adding a way in — and it replaced the key there was. On
+    the session alone, a borrowed session enrolled the borrower's own key and kept the account
+    afterwards. Same rule now as starting over, regenerating the codes or turning it off."""
+
+    def _scoped(self, admin):
+        return patch.object(admin, '_webauthn_scope',
+                            return_value={'ok': True, 'rp_id': fab.RP_ID,
+                                          'origin': fab.ORIGIN, 'reason': ''})
+
+    def _signed_in_with_factor(self, admin, client):
+        secret, _codes = _enrol(admin)
+        _login(client)
+        _post_mfa(client, _code(secret))
+        return secret
+
+    def test_an_enrolled_account_cannot_begin_without_a_code(self, admin, client):
+        self._signed_in_with_factor(admin, client)
+        with self._scoped(admin):
+            res = client.post('/api/v1/account/mfa/webauthn/begin', json={})
+        assert res.status_code == 403
+        assert (res.get_json() or {}).get('error') == 'bad_code'
+        with client.session_transaction() as s:
+            assert not s.get('webauthn_reg'), 'no challenge may be issued without the proof'
+
+    def test_a_wrong_code_is_refused_and_audited(self, admin, client):
+        self._signed_in_with_factor(admin, client)
+        admin._audit_store.delete_all()
+        with self._scoped(admin):
+            res = client.post('/api/v1/account/mfa/webauthn/begin', json={'code': '000000'})
+        assert res.status_code == 403
+        rows = [e for e in admin._audit_store.get_all() if e['event'] == 'mfa_failed']
+        assert rows and (rows[-1].get('detail') or {}).get('stage') == 'webauthn_begin'
+
+    def test_with_a_current_code_the_key_is_registered(self, admin, client):
+        secret = self._signed_in_with_factor(admin, client)
+        with self._scoped(admin):
+            opts = client.post('/api/v1/account/mfa/webauthn/begin',
+                               json={'code': _code(secret, 1)}).get_json() or {}
+            assert opts.get('ok'), opts
+            _priv, _key, att, cdj = fab._registration(opts['challenge'])
+            out = client.post('/api/v1/account/mfa/webauthn/confirm', json={
+                'attestation_object': webauthn.b64u_encode(att),
+                'client_data_json': webauthn.b64u_encode(cdj)})
+        assert (out.get_json() or {}).get('ok'), out.get_json()
+        assert 'webauthn' in admin._mfa_store.methods_of(admin._users['admin']['uid'])
+
+    def test_a_challenge_from_before_the_factor_does_not_cover_after_it(self, admin, client):
+        """Begin while the account had nothing, enrol a factor, then confirm: the challenge
+        carries no proof, and the factor that now exists must not be stepped around."""
+        _login(client)
+        with self._scoped(admin):
+            opts = client.post('/api/v1/account/mfa/webauthn/begin', json={}).get_json() or {}
+            assert opts.get('ok'), opts
+            _enrol(admin)
+            _priv, _key, att, cdj = fab._registration(opts['challenge'])
+            out = client.post('/api/v1/account/mfa/webauthn/confirm', json={
+                'attestation_object': webauthn.b64u_encode(att),
+                'client_data_json': webauthn.b64u_encode(cdj)})
+        assert out.status_code == 403
+        assert 'webauthn' not in admin._mfa_store.methods_of(admin._users['admin']['uid'])
+
+    def test_the_account_card_asks_for_the_code_before_the_key(self):
+        """The card has to send it, or the button the server refuses is a broken button."""
+        src = _strip_comments(_read(os.path.join(
+            SRC_ROOT, 'lib', 'web_admin', 'templates', 'partials', 'account', '_mfa.html')))
+        body = _fn(src, '_accKeyAdd')
+        assert '_accMfaAskCode(' in body
+        assert "'/api/v1/account/mfa/webauthn/begin', {code}" in body
+
+
+# ─────────────────────── Two requests, one code ───────────────────────────────────────────
+class TestTwoRequestsRacingWithOneCode:
+    """`note_step` only moves a row whose step is still below the new one, so of two requests
+    that both read the factor before either wrote, exactly one changes it. `verify` ignored
+    that answer and told both of them yes."""
+
+    def test_only_one_of_them_is_a_yes(self, admin):
+        uid = admin._users['admin']['uid']
+        secret, _codes = _enrol(admin)
+        code = _code(secret)
+        snap = admin._mfa_store.factor(uid, decrypt=True)    # both read before either writes
+        with patch.object(admin._mfa_store, 'factor', lambda *a, **k: dict(snap)):
+            a = mfa_service.verify(admin._mfa_store, uid, code)
+            b = mfa_service.verify(admin._mfa_store, uid, code)
+        assert sorted([a, b]) == ['', 'totp']
+
+
+# ─────────────────────── The hierarchy guard on taking a factor off ────────────────────────
+class TestResettingAnAdministratorsFactorNeedsAnAdministrator:
+    """Every other route on another account refuses a non-admin acting on an administrator.
+    This one did not — and stripping the factor is the first half of taking the account."""
+
+    def _operator(self, admin, perms):
+        from werkzeug.security import generate_password_hash
+        admin._custom_roles['r-ops'] = {'uid': 'r-ops', 'name': 'ops', 'enabled': True,
+                                        'permissions': perms}
+        admin._users['ops'] = {'uid': 'u-ops', 'role': 'r-ops', 'enabled': True, 'groups': [],
+                               'password_hash': generate_password_hash('pw-secret-1')}
+        c = admin.app.test_client()
+        c.post('/login', data={'username': 'ops', 'password': 'pw-secret-1'})
+        return c
+
+    def test_a_non_admin_with_the_flag_cannot_reset_an_admin(self, admin):
+        _enrol(admin)
+        ops = self._operator(admin, ['mfa_reset_others', 'users_view', 'users_edit'])
+        uid = admin._users['admin']['uid']
+        res = ops.delete(f'/api/v1/users/{uid}/mfa')
+        assert res.status_code == 403
+        assert admin._mfa_status('admin')['enrolled'] is True
+
+    def test_it_can_still_reset_a_non_admin(self, admin):
+        from werkzeug.security import generate_password_hash
+        admin._users['bob'] = {'uid': 'u-bob', 'role': admin._role_name_to_uid('viewer'),
+                               'enabled': True, 'groups': [],
+                               'password_hash': generate_password_hash('pw-secret-1')}
+        _enrol(admin, 'bob')
+        ops = self._operator(admin, ['mfa_reset_others', 'users_view', 'users_edit'])
+        assert ops.delete('/api/v1/users/u-bob/mfa').status_code == 200
+        assert admin._mfa_status('bob')['enrolled'] is False
+
+
+# ─────────────────────── An SSO sign-in with nothing to prove ──────────────────────────────
+class TestAnSsoAccountWithNoFactorIsSentToEnrol:
+    """With the policy on, an SSO account that had not enrolled yet could not sign in at all:
+    the OIDC, SAML and Teams doors always sent it to the CODE page, which an account with no
+    factor can never pass. The local form asked the right question; the others now ask it too,
+    and the code page forwards anything that reaches it without a factor."""
+
+    def _park(self, admin, client, username='admin', source='oidc'):
+        with admin.app.test_request_context('/'):
+            from flask import session
+            assert admin._establish_session(username, admin._users[username],
+                                            source=source) is False
+            held = dict(session['mfa_pending'])
+        with client.session_transaction() as s:
+            s['mfa_pending'] = held
+
+    def test_the_step_is_enrolment_for_every_provider(self, admin):
+        _set_policy(admin, 'all')
+        for source in ('local', 'oidc', 'saml2', 'entraid', 'ldap'):
+            assert admin._mfa_step_endpoint('admin', source) == 'login_mfa_enrol', source
+
+    def test_the_step_is_the_code_once_there_is_a_factor(self, admin):
+        _set_policy(admin, 'all')
+        _enrol(admin)
+        assert admin._mfa_step_endpoint('admin', 'oidc') == 'login_mfa'
+
+    def test_the_code_page_forwards_to_enrolment(self, admin, client):
+        _set_policy(admin, 'all')
+        admin._users['admin']['auth_source'] = 'oidc'
+        self._park(admin, client)
+        res = client.get('/login/mfa')
+        assert res.status_code == 302
+        assert res.headers['Location'].endswith('/login/mfa/enrol')
+
+    def test_the_oidc_callback_goes_to_enrolment(self, admin, client):
+        from lib.providers.oidc import auth as oidc_auth
+        if not oidc_auth._HAS_AUTHLIB:
+            pytest.skip('authlib is not installed')
+        _set_policy(admin, 'all')
+        admin._users['admin']['auth_source'] = 'oidc'
+        admin._users['admin']['auth_source_id'] = 'sub-admin'
+
+        class _Client:
+            def authorize_access_token(self):
+                return {'userinfo': {'sub': 'sub-admin', 'preferred_username': 'admin'}}
+
+        with patch.object(oidc_auth, 'get_client', return_value=_Client()), \
+             patch.object(oidc_auth, 'sync_user', return_value=admin._users['admin']):
+            res = client.get('/auth/oidc/callback')
+        assert res.status_code == 302
+        assert res.headers['Location'].endswith('/login/mfa/enrol')
+
+    def test_the_teams_sign_in_goes_to_enrolment(self, admin, client):
+        from lib.providers.entraid import sso_routes
+        _set_policy(admin, 'all')
+        admin._users['admin']['auth_source'] = 'oidc'
+        with patch.object(sso_routes.tab_sso, 'available', return_value=True), \
+             patch.object(sso_routes.tab_sso, 'validate_tab_token',
+                          return_value={'preferred_username': 'admin'}):
+            res = client.post('/auth/msteams/sso', json={'token': 'x'})
+        assert res.status_code == 200
+        assert (res.get_json() or {}).get('redirect', '').endswith('/login/mfa/enrol')
+
+
+# ─────────────────────── A limit per account at the second step ────────────────────────────
+class TestTheSecondStepHasALimitPerAccount:
+    """The per-IP throttle is a speed bump for ONE address, and the password lockout is
+    cleared by a correct password — which, at this step, the attacker has. Six digits guessed
+    from a pool of addresses met no limit at all."""
+
+    def test_after_the_limit_even_the_right_code_is_refused(self, admin, client):
+        admin._LOGIN_RATELIMIT_MAX = 0                 # isolate the per-account limit
+        admin._LOCKOUT_MAX_ATTEMPTS = 3
+        secret, _codes = _enrol(admin)
+        _login(client)
+        for i in range(3):
+            client.environ_base['REMOTE_ADDR'] = f'10.9.0.{i + 1}'
+            _post_mfa(client, '000000')
+        client.environ_base['REMOTE_ADDR'] = '10.9.0.99'
+        res = _post_mfa(client, _code(secret))
+        assert res.status_code == 302 and res.headers['Location'].endswith('/login')
+        with client.session_transaction() as s:
+            assert not s.get('logged_in')
+            assert not s.get('mfa_pending'), 'the parked sign-in is dropped, not kept for more'
+
+    def test_a_success_under_the_limit_clears_it(self, admin, client):
+        admin._LOGIN_RATELIMIT_MAX = 0
+        admin._LOCKOUT_MAX_ATTEMPTS = 3
+        secret, _codes = _enrol(admin)
+        _login(client)
+        _post_mfa(client, '000000')
+        _post_mfa(client, _code(secret))
+        with client.session_transaction() as s:
+            assert s.get('logged_in')
+        assert admin._mfa_ratelimit.peek(admin._users['admin']['uid'], 1, 3600)[0] is True

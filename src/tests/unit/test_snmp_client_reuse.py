@@ -329,3 +329,143 @@ class TestWhichKindOfFailureItWas:
         monkeypatch.setattr(_client, 'bulk_walk_cmd', lambda *a, **k: _bulk())
         rows, err = _client.SnmpClient._snmp_walk_oid('h', 161, '2c', 'public', 1, 0, '1.1')
         assert rows == {} and isinstance(err, _client.NoAnswer)
+
+
+def _answers(monkeypatch, fake, *values):
+    """Make the device answer *values* in turn, through the counting fake."""
+    queue = list(values)
+
+    async def _get(engine, _auth, transport, _ctx, *_vb):
+        fake.asked.append((engine, transport, 1))
+        val = queue.pop(0) if queue else '42'
+        if isinstance(val, tuple):
+            return val                      # a whole (indication, status, index, binds)
+        return None, 0, 0, [('1.3.6.1.2.1.1.1.0', val)]
+    monkeypatch.setattr(_client, 'get_cmd', _get)
+
+
+@_needs_pysnmp
+class TestAMissingOidIsNotAValue:
+    """v2c and v3 answer a missing OID INSIDE a successful PDU: status 0 and a `noSuchObject`
+    in the binding. ``str()`` of one is ``''``, which was returned as the value — so a check
+    of an OID the device does not serve read as an answer for ever, and with any/ne/regex
+    it was UP for ever."""
+
+    @pytest.mark.parametrize('cls_name', ['NoSuchObject', 'NoSuchInstance', 'EndOfMibView'])
+    def test_it_is_an_error_naming_what_the_device_said(self, monkeypatch, fake, cls_name):
+        from pysnmp.proto import rfc1905                  # noqa: PLC0415
+        _answers(monkeypatch, fake, getattr(rfc1905, cls_name)())
+        val, err = _client.SnmpClient._snmp_get(oid='1.3.6.1.4.1.9.9.9.0', **CONN)
+        assert val is None
+        assert err and cls_name[:1].lower() + cls_name[1:] in err
+
+    def test_and_it_is_an_answer_not_silence(self, monkeypatch, fake):
+        """The device is on the network and said "not here": the sampler's give-up counter
+        must not see this as a timeout."""
+        from pysnmp.proto import rfc1905                  # noqa: PLC0415
+        _answers(monkeypatch, fake, rfc1905.NoSuchObject())
+        _val, err = _client.SnmpClient._snmp_get(oid='1.3.6.1.4.1.9.9.9.0', **CONN)
+        assert isinstance(err, str) and not isinstance(err, _client.NoAnswer)
+
+    def test_an_empty_string_the_device_DID_send_is_still_a_value(self, monkeypatch, fake):
+        from pysnmp.proto import rfc1902                  # noqa: PLC0415
+        _answers(monkeypatch, fake, rfc1902.OctetString(b''))
+        assert _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.6.0', **CONN) == ('', None)
+
+
+@_needs_pysnmp
+class TestAGetDecodesTextLikeTheWalk:
+    """A GET was ``str(value)``, which pyasn1 decodes as Latin-1: "Señor" arrived as
+    "SeÃ±or". The walk and the GET now read text the same way."""
+
+    def test_utf8_text_is_its_text(self, monkeypatch, fake):
+        from pysnmp.proto import rfc1902                  # noqa: PLC0415
+        _answers(monkeypatch, fake, rfc1902.OctetString('Oficina Señor'.encode()))
+        assert _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.6.0', **CONN) == (
+            'Oficina Señor', None)
+
+    def test_a_number_is_still_its_digits(self, monkeypatch, fake):
+        from pysnmp.proto import rfc1902                  # noqa: PLC0415
+        _answers(monkeypatch, fake, rfc1902.TimeTicks(123456))
+        assert _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.3.0', **CONN) == ('123456', None)
+
+
+@_needs_pysnmp
+class TestAnAddressIsNotKeptForEver:
+    """The resolved transport was cached for the life of the process: a device whose name
+    moved to another address went on being polled at the old one until a restart."""
+
+    def test_it_is_resolved_again_once_it_is_old(self, fake):
+        _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.1.0', **CONN)
+        key = next(iter(_client._TARGETS))
+        target, at = _client._TARGETS[key]
+        _client._TARGETS[key] = (target, at - _client._TARGET_TTL - 1)
+        _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.1.0', **CONN)
+        assert len(fake.targets) == 2, 'an expired address was used again'
+
+    def test_but_not_while_it_is_fresh(self, fake):
+        for _ in range(3):
+            _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.1.0', **CONN)
+        assert len(fake.targets) == 1
+
+    def test_a_device_that_did_not_answer_is_resolved_again(self, monkeypatch, fake):
+        """No answer at all is the commonest symptom of a name now pointing elsewhere."""
+        _answers(monkeypatch, fake, ('No SNMP response received before timeout', 0, 0, []),
+                 '42')
+        _v, err = _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.1.0', **CONN)
+        assert isinstance(err, _client.NoAnswer)
+        assert _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.1.0', **CONN) == ('42', None)
+        assert len(fake.targets) == 2
+
+    def test_an_error_the_device_returned_keeps_the_address(self, monkeypatch, fake):
+        class _St:
+            def __bool__(self): return True
+            def prettyPrint(self): return 'noSuchName'   # noqa: N802
+        _answers(monkeypatch, fake, (None, _St(), 1, []), '42')
+        _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.1.0', **CONN)
+        _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.1.0', **CONN)
+        assert len(fake.targets) == 1, 'it answered; its address is right'
+
+
+@_needs_pysnmp
+class TestTwoKeysUnderOneUserName:
+    """pysnmp keys a v3 user by its NAME. Two devices with the user `monitor` and different
+    keys were one row in the shared engine, rewritten by each request while the other was in
+    flight — an authentication failure that read like the device, decided by timing."""
+
+    V3 = {**CONN, 'version': '3', 'v3_username': 'monitor', 'v3_auth_proto': 'SHA',
+          'v3_priv_proto': 'AES-128'}
+
+    def _ask(self, host, auth, priv):
+        _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.1.0', **{
+            **self.V3, 'host': host, 'v3_auth_key': auth, 'v3_priv_key': priv})
+
+    def test_they_are_sent_through_two_engines(self, fake):
+        self._ask('10.0.0.1', 'authkey-one', 'privkey-one')
+        self._ask('10.0.0.2', 'authkey-two', 'privkey-two')
+        assert fake.engines == 2
+        assert len({a[0] for a in fake.asked}) == 2
+
+    def test_and_each_keeps_its_own(self, fake):
+        for _ in range(3):
+            self._ask('10.0.0.1', 'authkey-one', 'privkey-one')
+            self._ask('10.0.0.2', 'authkey-two', 'privkey-two')
+        assert fake.engines == 2
+        by_host = {}
+        for engine, transport, _n in fake.asked:
+            by_host.setdefault(transport, set()).add(engine)
+        assert all(len(e) == 1 for e in by_host.values()), by_host
+
+    def test_one_credential_on_many_devices_is_still_one_engine(self, fake):
+        """The common case keeps what the shared engine was for: one MIB compile."""
+        for host in ('10.0.0.1', '10.0.0.2', '10.0.0.3'):
+            self._ask(host, 'authkey-one', 'privkey-one')
+        _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.1.0', **CONN)       # and a v2c one
+        assert fake.engines == 1
+
+    def test_different_user_names_share_it_too(self, fake):
+        self._ask('10.0.0.1', 'authkey-one', 'privkey-one')
+        _client.SnmpClient._snmp_get(oid='1.3.6.1.2.1.1.1.0', **{
+            **self.V3, 'v3_username': 'other', 'v3_auth_key': 'authkey-two',
+            'v3_priv_key': 'privkey-two'})
+        assert fake.engines == 1

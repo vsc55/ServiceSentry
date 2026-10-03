@@ -5,6 +5,7 @@
 import logging
 import os
 import secrets
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -180,7 +181,7 @@ class _SessionsMixin:
         if not session.get('logged_in'):
             return False
         token = session.get('session_token')
-        if not token or token not in self._sessions:
+        if not token or not self._session_in_db(token):
             session.clear()
             return False
         entry     = self._sessions[token]
@@ -248,6 +249,41 @@ class _SessionsMixin:
             entry['ip'] = current_ip
         entry['last_seen'] = now.isoformat()
         self._touch_session(entry, now)
+        return True
+
+    def _session_in_db(self, token: str) -> bool:
+        """Is *token* a live session — as the DATABASE says, not just this process's memory?
+
+        The registry is loaded once at boot, and checking only the dict made it a
+        single-replica registry: a session revoked on another replica (or by the CLI, or by a
+        password change made there) kept working here, and a session created there bounced to
+        the login page here. So:
+
+        * **a miss** asks the table, and a row there is adopted — it was created elsewhere;
+        * **a hit** is re-confirmed against the table at most every ``_CACHE_RELOAD_SECS``
+          (the same knob that keeps users, roles and groups fresh), and a row that is gone is
+          a revocation: it is dropped here too.
+
+        A database that cannot answer (``None``) keeps what is known rather than signing every
+        browser out over a blip — the same rule the freshness probe follows.
+        """
+        store = getattr(self, '_sessions_store', None)
+        entry = self._sessions.get(token)
+        if store is None:
+            return entry is not None
+        ttl = float(getattr(self, '_CACHE_RELOAD_SECS', 5) or 0)
+        mono = time.monotonic()
+        if entry is not None and ttl and (mono - entry.get('_db_checked', 0.0)) < ttl:
+            return True
+        row = store.get(token)
+        if row is None:                         # no answer: trust what we have
+            return entry is not None
+        if not row:                             # revoked elsewhere
+            self._sessions.pop(token, None)
+            return False
+        if entry is None:                       # created elsewhere: adopt it
+            entry = self._sessions[token] = row
+        entry['_db_checked'] = mono
         return True
 
     def _touch_session(self, entry: dict, now: datetime) -> None:
@@ -350,13 +386,11 @@ class _SessionsMixin:
         ]
         for t in tokens:
             del self._sessions[t]
-        if tokens:
-            if except_token is None:
-                self._sessions_store.delete_by_user_uid(user_uid)   # single query
-            else:
-                for t in tokens:
-                    self._sessions_store.delete(t)
-        return len(tokens)
+        # By the TABLE, always — not only the tokens this process holds. The account's
+        # sessions on another replica are rows there and nowhere here, and leaving them was a
+        # password change that signed the account out of one replica only.
+        deleted = self._sessions_store.delete_by_user_uid(user_uid, except_token=except_token)
+        return max(len(tokens), int(deleted or 0))
 
     def _revoke_all_sessions(self) -> int:
         """Remove every session from the registry. Returns count."""

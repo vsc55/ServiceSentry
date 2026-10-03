@@ -180,10 +180,16 @@ class JobHistoryStore(BaseStore):
                         f'DELETE FROM {_T} WHERE ended_at > 0 AND ended_at < ?',
                         (cutoff,)) or 0)
                 if keep > 0:
+                    # Every finished uid, newest first, and the tail past *keep* sliced off
+                    # HERE. `LIMIT -1 OFFSET ?` is SQLite's own spelling of "no limit": MySQL,
+                    # MariaDB and PostgreSQL reject it, and in this transaction that rolled
+                    # back the age-based DELETE as well, so the history never shrank there.
+                    # Only finished rows: a `running` one (ended_at 0) sorts last and would be
+                    # the first to go, under the job that is still writing to it.
                     rows = self._db.fetchall(
-                        f'SELECT uid FROM {_T} ORDER BY ended_at DESC LIMIT -1 OFFSET ?',
-                        (int(keep),))
-                    for row in rows or ():
+                        f'SELECT uid FROM {_T} WHERE ended_at > 0 '
+                        'ORDER BY ended_at DESC, uid')
+                    for row in list(rows or ())[int(keep):]:
                         self._db.execute(f'DELETE FROM {_T} WHERE uid = ?', (row[0],))
                         gone += 1
         except Exception:  # pylint: disable=broad-except

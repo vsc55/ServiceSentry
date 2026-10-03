@@ -36,6 +36,13 @@ range", a reset means "this sample is meaningless, start again". The rule here u
 
 Either way the new baseline is stored. Dropping a sample costs one point on a chart; inventing
 one costs the chart.
+
+**What the width cannot tell, the device can.** A 32-bit counter that went backwards because the
+machine rebooted was read as a wrap, and the range added back was a spike of up to 4 GiB in one
+interval — on every reboot, on every 32-bit counter of the box. `sysUpTime` settles it: an
+agent whose uptime is SHORTER than the last one plus the time since is an agent that started
+again, and every counter it serves started with it (`restarted`). Such a cycle is a baseline
+for every counter, whichever way each one moved.
 """
 
 from __future__ import annotations
@@ -103,7 +110,40 @@ def counter_rate(current, previous, seconds, *, width=DEFAULT_WIDTH, max_rate=No
     return rate
 
 
-def sample(metric: dict, raw, previous: dict | None, now: float) -> tuple:
+#: `sysUpTime` is TimeTicks: hundredths of a second, in 32 bits — it wraps after ~497 days.
+UPTIME_RANGE = 2 ** 32
+
+
+def restarted(previous: dict | None, ticks, now: float, *, slack: float = 60.0) -> bool:
+    """Whether an agent's uptime says it restarted since *previous* (``{'v': ticks, 't': ts}``).
+
+    The uptime it SHOULD have is the last one plus the time since; one clearly shorter than
+    that is an agent that started again. *slack* (seconds, or 5 % of the interval when that is
+    more) absorbs the two clocks disagreeing a little. The 497-day wrap of TimeTicks is
+    expected and is not a restart.
+
+    ``False`` whenever it cannot tell — no previous reading, no time between them, a value that
+    is not a number. Not knowing must cost nothing: the counters then follow the width rule,
+    which is what they did before anybody asked.
+    """
+    try:
+        prev_v = float((previous or {})['v'])
+        prev_t = float((previous or {})['t'])
+        cur = float(ticks)
+        dt = float(now) - prev_t
+    except (KeyError, TypeError, ValueError):
+        return False
+    if dt <= 0 or cur < 0:
+        return False
+    expected = (prev_v + dt * 100.0) % UPTIME_RANGE
+    tolerance = max(float(slack), dt * 0.05) * 100.0
+    if expected < tolerance:
+        return False                    # right at the wrap: not a question worth guessing
+    return cur < expected - tolerance
+
+
+def sample(metric: dict, raw, previous: dict | None, now: float, *,
+           reset: bool = False) -> tuple:
     """Apply one metric declaration to one raw reading.
 
     Returns ``(value, state)``: the number to record (or ``None`` — see above, and for a
@@ -111,6 +151,9 @@ def sample(metric: dict, raw, previous: dict | None, now: float) -> tuple:
     cycle (``None`` when this kind keeps none).
 
     *previous* is what this function returned as *state* last time: ``{'v': raw, 't': ts}``.
+
+    *reset* says the device restarted since then (see `restarted`): the reading is a new
+    baseline and nothing else, whichever way the counter moved.
     """
     kind = str((metric or {}).get('kind') or 'gauge').lower()
     if kind == 'text':
@@ -119,7 +162,7 @@ def sample(metric: dict, raw, previous: dict | None, now: float) -> tuple:
         state = {'v': _num(raw), 't': float(now)}
         if state['v'] is None:
             return None, None           # nothing usable to compare against next time either
-        if not previous or previous.get('v') is None:
+        if reset or not previous or previous.get('v') is None:
             return None, state          # the first sample of a counter is only a baseline
         rate = counter_rate(state['v'], previous.get('v'), state['t'] - float(previous.get('t') or 0),
                             width=metric.get('width') or DEFAULT_WIDTH,

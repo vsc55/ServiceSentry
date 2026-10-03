@@ -177,3 +177,26 @@ class TestSyslogStats:
         assert st['total'] == 2
         # by_device excludes its own filter → all three devices still listed
         assert {d['value'] for d in st['by_device']} == {'a', 'b', 'c'}
+
+
+class TestOneBadRecordDoesNotTakeTheBatch:
+    """The writer stores up to 500 messages in one transaction; one record the database
+    refused rolled back all of them, and the writer dropped the batch."""
+
+    def test_the_good_rows_of_a_failing_batch_are_kept(self):
+        s = _store()
+        n = s.add_many([_rec(message='a'), _rec(severity='not-a-number'), _rec(message='b')])
+        assert n == 2
+        assert sorted(r['message'] for r in s.query()) == ['a', 'b']
+
+    def test_a_batch_where_nothing_can_be_stored_still_raises(self):
+        import pytest
+        s = _store()
+        with pytest.raises(ValueError):
+            s.add_many([_rec(severity='x'), _rec(severity='y')])
+
+    def test_nul_never_reaches_the_insert(self):
+        s = _store()
+        s.add_many([_rec(message='a\x00b', hostname='h\x001')])
+        row = s.query()[0]
+        assert row['message'] == 'ab' and row['hostname'] == 'h1'

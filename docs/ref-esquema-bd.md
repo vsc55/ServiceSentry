@@ -6,7 +6,7 @@
 > módulos (definición de campos de configuración), **no** la base de datos.
 
 **Fuente de verdad:** cada tabla se declara **una sola vez** como un `TableSpec`
-([lib/db/schema.py:51](../src/lib/db/schema.py#L51)) compuesto de `Column` / `Index`, y se
+([lib/db/schema.py:52](../src/lib/db/schema.py#L52)) compuesto de `Column` / `Index`, y se
 reconcilia en el arranque de cada *store* mediante `connector.reconcile_table(spec)`
 ([lib/db/base.py:308](../src/lib/db/base.py#L308)). Los tipos simbólicos (`TEXT`, `INTEGER`,
 `REAL`, `AUTOINCREMENT`) se traducen a DDL nativo por motor (ver
@@ -31,7 +31,7 @@ Lo vigila `tests/meta/test_docs_db_schema.py::TestLaAuditoriaVaAlFinal`, sobre l
 
 ## Índice de tablas
 
-Hay **73 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **74 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -50,7 +50,7 @@ Hay **73 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
 | Empresas | `org` (las sociedades del grupo), `org_owner` (de quién es cada cosa, en cualquier ámbito que un paquete declare) |
 | Inventario físico (DCIM) | `dc_site`, `dc_floor` (una planta de la sede, con su plano), `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
-| Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs` |
+| Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs`, `health_alerts` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
 | SNMP | `snmp_catalog` (perfiles de dispositivo escritos en el panel), `snmp_mib_versions` (historial de ediciones de fuentes MIB) |
@@ -397,7 +397,7 @@ mandando basura.
 | name | TEXT | no | — | PK — la tabla vigilada |
 | version | INTEGER | no | `0` | se incrementa en cada escritura |
 
-Una fila por tabla vigilada (`users`, `groups`, `roles`). Cada escritor la incrementa
+Una fila por tabla vigilada (`users`, `groups`, `roles`) y una más, `module_config`, que usa el almacén de módulos como versión de la configuración para la comprobación `If-Match`. Cada escritor la incrementa
 **dentro de su misma transacción**, así que la versión y las filas que describe se hacen
 visibles a la vez: ningún lector puede ver una sin las otras.
 
@@ -1507,6 +1507,18 @@ Lo escribe el explorador de [cable_scan.py](../src/lib/core/health/cable_scan.py
 cuarto de los que el panel corre por su cuenta. **No escribe en el inventario**: el
 descubrimiento propone.
 
+### `health_alerts` — lo que ya avisaron los exploradores de caducidad
+[lib/core/health/alert_state.py](../src/lib/core/health/alert_state.py)
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | — | — | PK |
+| alert_key | TEXT | no | `''` | **único** — `cert:<clave del check>` o `secret:oidc` |
+| severity | TEXT | no | `''` | `expiring` / `expired` (la última avisada) |
+| alerted_at | REAL | no | `0` | |
+
+Los exploradores de certificados y del secreto de Entra avisan una vez por severidad y se rearman al renovarse. Ese «ya lo dije» vivía en memoria: cada reinicio o cambio de arriendo lo anunciaba todo otra vez. Ahora es una fila (mismo motivo que `dc_drift` y `event_cooldowns`); se borra al renovarse, que es lo que vuelve a armar el aviso. `alert_key` y no `key`: palabra reservada en MySQL.
+
 ### `dc_rev` — qué decía una ficha antes, y quién la cambió
 
 [lib/core/dcim/revisions.py](../src/lib/core/dcim/revisions.py)
@@ -1522,7 +1534,7 @@ cosa» y no hay forma de saber si tiene razón.
 |---|---|---|---|---|
 | uid | TEXT | no | — | PK |
 | scope | TEXT | no | `'type'` | de qué clase de cosa es la versión: `type` (un modelo del catálogo), **`build`** (una plantilla) o el documento de perfiles. Una tabla por cada una serían tres almacenes haciendo estas mismas cuatro cosas. Misma forma que `org_owner` |
-| ref_uid | TEXT | no | — | la ficha; índice `idx_dc_rev_ref` con `scope` y `seq` |
+| ref_uid | TEXT | no | — | la ficha; índice `idx_dc_rev_ref` (`scope`, `ref_uid`, `seq`) **único**: dos versiones de una misma ficha nunca comparten número; el escritor reintenta si pierde la carrera y los duplicados anteriores se renumeran al arrancar |
 | at | TEXT | no | `''` | |
 | seq | INTEGER | no | `0` | **el orden**, que no lo puede dar la fecha: este proyecto guarda segundos, y dos cambios del mismo segundo se ordenarían al azar — que es como una versión aparece antes que la que la produjo y la diferencia sale del revés. Un contador por ficha lo resuelve y no depende del reloj de nadie |
 | by | TEXT | no | `''` | **quién** |
@@ -2098,7 +2110,7 @@ parte de un índice lo usa (MySQL no puede indexar TEXT sin límite → `VARCHAR
 - `KIND` (`'sqlite'`/`'mysql'`/`'postgresql'`) decide el last-insert-id y la extracción JSON.
 - `quote_ident`: comillas dobles por defecto, backtick en MySQL.
 - Normalización de tipos para el diff: `canonical_type` / `canonical_default`
-  ([schema.py:107](../src/lib/db/schema.py#L107)).
+  ([schema.py:108](../src/lib/db/schema.py#L108)).
 
 ### Notas
 

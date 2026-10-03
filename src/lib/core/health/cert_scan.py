@@ -85,15 +85,16 @@ def cert_days_left(target: dict, *, timeout: float = 10) -> float | None:
         return None
 
 
-from lib.core.health import default_text as _default_text  # noqa: E402
+from lib.core.health import ScannerThread, default_text as _default_text  # noqa: E402
+from lib.core.health.alert_state import AlertState  # noqa: E402
 
 
-class CertExpiryScanner:
+class CertExpiryScanner(ScannerThread):
     """Periodically scan cert targets and emit cert_expiring on the expiring/expired edge."""
 
     def __init__(self, *, targets_provider, dispatch, config_getter,
                  days_fn=cert_days_left, is_leader=lambda: True, dbg=lambda *a, **k: None,
-                 text_fn=None):
+                 text_fn=None, state=None):
         text_fn = text_fn or _default_text
         self._targets = targets_provider     # () -> list[target]
         self._dispatch = dispatch            # (kind, **fields) -> None
@@ -102,7 +103,10 @@ class CertExpiryScanner:
         self._is_leader = is_leader
         self._dbg = dbg
         self._text = text_fn                 # (key, *args) -> localized text with admin override
-        self._alerted: dict[str, str] = {}   # target key -> last alerted severity
+        # target key -> last alerted severity. An AlertState over `health_alerts` when the host
+        # gives one: in memory it was lost on every restart / lease move, and every cert inside
+        # the window was announced again.
+        self._alerted = state if state is not None else AlertState(scope='cert')
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -129,7 +133,7 @@ class CertExpiryScanner:
             sev = 'expired' if days <= 0 else 'expiring'
             if self._alerted.get(t['key']) == sev:
                 continue                              # already alerted at this severity
-            self._alerted[t['key']] = sev
+            self._alerted.set(t['key'], sev, now)
             emitted[t['key']] = days
             try:
                 msg = (self._text('notif_msg_cert_expired', t['label'], f'{abs(days):.0f}')
@@ -145,13 +149,10 @@ class CertExpiryScanner:
 
     # ── background loop ──────────────────────────────────────────────────────────
     def start(self, *, poll_getter=lambda: 86400) -> None:
-        if self._thread is not None:
-            return
-        self._stop.clear()
-
-        def _loop():
+        def _loop(stop_ev):
             # First scan shortly after boot, then every scan_every_secs.
-            if self._stop.wait(30):
+            interval = 86400
+            if stop_ev.wait(30):
                 return
             while True:
                 try:
@@ -160,13 +161,11 @@ class CertExpiryScanner:
                     pass
                 try:
                     interval = max(3600, int(poll_getter() or 86400))
-                except (TypeError, ValueError):
-                    interval = 86400
-                if self._stop.wait(interval):
+                except Exception:  # pylint: disable=broad-except
+                    # A bad value or a failed config read (DB down) keeps the last
+                    # interval; it must not end the thread.
+                    pass
+                if stop_ev.wait(interval):
                     return
 
-        self._thread = threading.Thread(target=_loop, name='cert-scan', daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
+        self._spawn('cert-scan', _loop)

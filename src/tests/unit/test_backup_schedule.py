@@ -154,10 +154,41 @@ class TestACopyKnowsWhichTaskTookIt:
 
     def test_retention_never_crosses_tasks(self):
         """The bug this whole redesign exists to avoid."""
-        rows = [_b('auto-diaria-1', 1), _b('auto-diaria-2', 2), _b('auto-diaria-3', 3),
-                _b('auto-mensual-1', 4)]
-        assert sched.prune(rows, 1, 'diaria') == ['auto-diaria-1', 'auto-diaria-2']
+        rows = [_b('auto-diaria-20260801-030000', 1), _b('auto-diaria-20260802-030000', 2),
+                _b('auto-diaria-20260803-030000', 3), _b('auto-mensual-20260801-030000', 4)]
+        assert sched.prune(rows, 1, 'diaria') == ['auto-diaria-20260801-030000',
+                                                  'auto-diaria-20260802-030000']
         assert sched.prune(rows, 1, 'mensual') == []
+
+    def test_a_task_does_not_claim_one_whose_name_extends_its_own(self):
+        """Task "db" and task "db-full": a prefix test on `auto-db-` also matched
+        `auto-db-full-<stamp>`, so "db" keeping one copy deleted every copy "db-full" had."""
+        t0 = 1_780_000_000
+        rows = [_b(sched.auto_name(dt.datetime.fromtimestamp(t0 + i * HOUR), 'db-full'),
+                   t0 + i * HOUR) for i in range(5)]
+        rows.append(_b(sched.auto_name(dt.datetime.fromtimestamp(t0 + 9 * HOUR), 'db'),
+                       t0 + 9 * HOUR))
+        assert sched.prune(rows, {'keep_last': 1}, 'db') == []
+        assert sched.prune(rows, {'keep_last': 1}, 'db-full') == [b['name'] for b in rows[:4]]
+
+    def test_the_clock_of_a_task_ignores_the_copies_of_a_longer_name(self):
+        """`last_auto_ts` reported db-full's copies as db's latest, so "db" never ran."""
+        rows = [_b('auto-db-full-20260809-030000', 900)]
+        assert sched.last_auto_ts(rows, 'db') is None
+        assert sched.last_auto_ts(rows, 'db-full') == 900
+
+    def test_only_the_exact_stamp_belongs_to_a_task(self):
+        assert sched.is_auto('auto-db-20260809-030000', 'db') is True
+        assert sched.is_auto('auto-db-full-20260809-030000', 'db') is False
+        assert sched.is_auto('auto-db-20260809-030000-extra', 'db') is False
+        assert sched.is_auto('auto-db-2026', 'db') is False
+
+    def test_the_unscoped_copies_do_not_claim_a_task_named_with_digits(self):
+        """`auto-<stamp>` was recognised by "a digit after the prefix", which also matched the
+        copies of a task called `2024`."""
+        assert sched.is_auto('auto-2024-20260809-030000', '') is False
+        assert sched.is_auto('auto-2024-20260809-030000', '2024') is True
+        assert sched.is_auto('auto-20260809-030000', '') is True
 
 
 class TestSayingWhenByTheCalendar:

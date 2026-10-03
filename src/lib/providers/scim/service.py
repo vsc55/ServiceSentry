@@ -46,6 +46,41 @@ def parse_filter_eq(filter_str: str, attr: str):
     return None
 
 
+# Who PROVISIONED an account is a different fact from how it last signed in. ``auth_source``
+# answers the second — every SSO sign-in rewrites it — so SCIM ownership kept there was lost
+# the first time a provisioned user signed in through OIDC/SAML/LDAP, and from then on the IdP
+# could no longer deactivate or delete them: the deprovisioning push answered 403 and the
+# account (with its API tokens and remember-me sessions) stayed alive. These two fields live
+# in the users store's ``extra`` JSON and no sign-in path writes them.
+PROVISIONED_BY = 'provisioned_by'
+SCIM_EXTERNAL_ID = 'scim_external_id'
+
+
+def remember_provisioning(user: dict) -> None:
+    """Pin a SCIM-provisioned account's ownership before a sign-in re-links it.
+
+    Called by every SSO ``sync_user`` right before it overwrites ``auth_source`` /
+    ``auth_source_id``. Accounts created by SCIM already carry the marker; this covers the
+    ones provisioned before it existed, while ``auth_source`` still says ``scim``.
+    """
+    if not isinstance(user, dict) or user.get(PROVISIONED_BY):
+        return
+    if str(user.get('auth_source') or '') == 'scim':
+        user[PROVISIONED_BY] = 'scim'
+        user.setdefault(SCIM_EXTERNAL_ID, user.get('auth_source_id', '') or '')
+
+
+def is_scim_managed(user: dict) -> bool:
+    """True when SCIM owns this account's lifecycle: provisioned by SCIM (whatever it signs
+    in with now) or still marked ``scim``. An account an administrator explicitly turned
+    back into a LOCAL one is not — that is a decision to take it out of the IdP's hands."""
+    u = user or {}
+    src = str(u.get('auth_source') or 'local')
+    if src == 'scim':
+        return True
+    return u.get(PROVISIONED_BY) == 'scim' and src not in ('', 'local')
+
+
 def scim_user_fields(body: dict):
     """Extract ``(email, display_name, active)`` from a SCIM User payload."""
     emails = body.get('emails') or []
@@ -55,6 +90,15 @@ def scim_user_fields(body: dict):
                  or {}).get('value', '') if isinstance(emails[0], dict) else ''
     name = body.get('displayName') or (body.get('name') or {}).get('formatted') or ''
     return email, name, bool(body.get('active', True))
+
+
+def _external_id(u: dict) -> str:
+    """The IdP's externalId for a user — kept apart from ``auth_source_id`` once SCIM
+    provisioned it, since an SSO sign-in overwrites the latter with its own subject."""
+    u = u or {}
+    if SCIM_EXTERNAL_ID in u:
+        return u.get(SCIM_EXTERNAL_ID) or ''
+    return u.get('auth_source_id', '') or ''
 
 
 class ScimService:
@@ -121,8 +165,10 @@ class ScimService:
 
     def deny_user_write(self, u):
         """SCIM may only mutate the users it provisioned — never local/LDAP/OIDC/SAML2
-        accounts (e.g. the local Administrator)."""
-        if (u or {}).get('auth_source') != 'scim':
+        accounts (e.g. the local Administrator). "Provisioned" is the ``provisioned_by``
+        marker, not ``auth_source``, which each SSO sign-in rewrites (see
+        :func:`is_scim_managed`)."""
+        if not is_scim_managed(u):
             return self.err(403, 'Only SCIM-provisioned users can be modified via SCIM', 'mutability')
         return None
 
@@ -166,7 +212,7 @@ class ScimService:
             'schemas':    [USER_SCHEMA],
             'id':         u.get('uid', ''),
             'userName':   username,
-            'externalId': u.get('auth_source_id', '') or '',
+            'externalId': _external_id(u),
             'name':       {'formatted': name},
             'displayName': name,
             'emails':     ([{'value': u['email'], 'primary': True}] if u.get('email') else []),
@@ -195,7 +241,7 @@ class ScimService:
         return {'display_name': u.get('display_name', ''), 'email': u.get('email', ''),
                 'enabled': bool(u.get('enabled', True)), 'role': u.get('role', ''),
                 'groups': sorted(u.get('groups') or []),
-                'external_id': u.get('auth_source_id', '')}
+                'external_id': _external_id(u)}
 
     def _group_snap(self, gid, g):
         return {'name': g.get('name', ''), 'source': g.get('source', 'local'),
@@ -299,6 +345,8 @@ class ScimService:
             'uid':            new_uid(),
             'auth_source':    'scim',
             'auth_source_id': body.get('externalId', '') or '',
+            PROVISIONED_BY:   'scim',
+            SCIM_EXTERNAL_ID: body.get('externalId', '') or '',
             'display_name':   name,
             'email':          email,
             'role':           self._default_role_uid(),
@@ -326,7 +374,12 @@ class ScimService:
         u['display_name']   = name
         u['email']          = email
         u['enabled']        = active if self._auto_disable() or active else u.get('enabled', True)
-        u['auth_source_id'] = body.get('externalId', u.get('auth_source_id', ''))
+        ext = body.get('externalId', _external_id(u))
+        u[SCIM_EXTERNAL_ID] = ext
+        if u.get('auth_source') == 'scim':
+            # Only while SCIM is also how it signs in: after an SSO sign-in this is the
+            # IdP's subject/DN, and overwriting it would unlink the account from its IdP.
+            u['auth_source_id'] = ext
         self.wa._persist_users()
         after = self._user_snap(u)
         if after != before:

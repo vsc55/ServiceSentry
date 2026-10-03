@@ -74,9 +74,10 @@ class AuditStore(BaseStore):
     ) -> None:
         """Insert one audit entry.
 
-        When *max_entries* > 0 the table is kept within that bound using a
-        **sliding-window** strategy: only the single oldest entry is removed
-        after each insert, so historical data is never wiped out all at once.
+        When *max_entries* > 0 the table is kept within that bound as a sliding
+        window: after each insert, whatever is older than the newest *max_entries*
+        rows is removed — usually the one row the insert pushed out, and the whole
+        excess at once after the cap has been lowered.
         """
         raw_detail = (
             json.dumps(detail, ensure_ascii=False)
@@ -88,7 +89,7 @@ class AuditStore(BaseStore):
         )
         self._db.commit()
         if max_entries > 0:
-            self._prune_one(max_entries)
+            self._prune(max_entries)
 
     def delete_all(self) -> int:
         """Delete every entry.  Returns the number deleted."""
@@ -155,11 +156,20 @@ class AuditStore(BaseStore):
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    def _prune_one(self, max_entries: int) -> None:
-        """Delete the single oldest entry if the table exceeds *max_entries*."""
-        row = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
-        if row and row[0] > max_entries:
-            self._db.execute(f'DELETE FROM {_T} WHERE id = (SELECT MIN(id) FROM {_T})')
+    def _prune(self, max_entries: int) -> None:
+        """Keep only the newest *max_entries* rows.
+
+        The id of the oldest row to keep is read first and everything below it goes in one
+        plain ``DELETE … WHERE id < ?``. The previous form, ``DELETE … WHERE id = (SELECT
+        MIN(id) FROM audit)``, names the target table in its own subquery — MySQL 8 refuses
+        that (error 1093), so every capped insert there raised after its row was committed —
+        and it removed ONE row per insert, so a table above a cap that had just been lowered
+        never came back down to it.
+        """
+        row = self._db.fetchone(
+            f'SELECT id FROM {_T} ORDER BY id DESC LIMIT 1 OFFSET ?', (int(max_entries) - 1,))
+        if row and row[0] is not None:
+            self._db.execute(f'DELETE FROM {_T} WHERE id < ?', (int(row[0]),))
             self._db.commit()
 
 

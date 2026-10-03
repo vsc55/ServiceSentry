@@ -410,3 +410,40 @@ class TestARunAboutOneMachine:
         mon = _Monitor({'ping': 0})
         run_checks(mon, ['ping'], timeout=5, only_device='h1')
         assert mon.prunes == [False]
+
+
+class TestAModuleStillOutIsNotStartedAgain:
+    """A module that overran its deadline keeps running on its own thread. The next cycle
+    used to start it again on top of it: two runs racing on the same live status, duplicate
+    transition alerts, and one more stuck thread per cycle for a module that hangs."""
+
+    def test_the_next_cycle_skips_it_while_it_is_still_running(self):
+        mon = _Monitor({'slow': 2.0})
+        run_checks(mon, ['slow'], timeout=0.3)
+        _results, errors = run_checks(mon, ['slow'], timeout=0.3)
+        assert mon.scopes == [''], 'the module was started a second time while still out'
+        assert any('skipped' in e and 'still in progress' in e for e in errors), errors
+
+    def test_it_runs_again_once_it_has_landed(self):
+        mon = _Monitor({'slow': 0.6})
+        run_checks(mon, ['slow'], timeout=0.2)
+        for _ in range(100):
+            if mon.saved:
+                break
+            time.sleep(0.05)
+        time.sleep(0.1)
+        mon._delays['slow'] = 0
+        results, errors = run_checks(mon, ['slow'], timeout=5)
+        assert 'slow' in results and not errors, errors
+        assert len(mon.scopes) == 2
+
+    def test_a_queued_module_that_never_started_is_skipped_not_timed_out(self):
+        """More modules than workers: the ones still queued at the deadline are cancelled.
+        They never ran, so "timeout … still working" was a lie — and they must be free to run
+        on the next cycle."""
+        delays = {f'm{i:02d}': 1.0 for i in range(17)}
+        mon = _Monitor(delays)
+        _results, errors = run_checks(mon, list(delays), timeout=0.3)
+        assert 'm16: skipped, not started before the 0.3s deadline' in errors, errors
+        assert not any(e.startswith('m16:') and 'timeout' in e for e in errors), errors
+        assert 'm16' not in mon._inflight_modules

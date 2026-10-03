@@ -125,10 +125,15 @@ def register(app, wa):
         except fs_client.FreshserviceError as exc:
             return None, _fallo(exc)
         orgs = store.orgs.list()
+        # Una lista cortada en el tope de páginas no es la lista entera: se dice, y no se
+        # cuentan huérfanos sobre ella — todo lo que no llegó saldría como «ya no está allí».
+        cortada = bool(getattr(deps, 'truncated', False))
         return {'orgs': orgs,
                 'plan': fs_plan.build(deps, orgs),
-                'orphans': [{'uid': o['uid'], 'name': o['name'], 'short': o.get('short') or ''}
-                            for o in fs_plan.orphans(deps, orgs)],
+                'orphans': [] if cortada else [
+                    {'uid': o['uid'], 'name': o['name'], 'short': o.get('short') or ''}
+                    for o in fs_plan.orphans(deps, orgs)],
+                'truncated': cortada,
                 'total': len(deps)}, None
 
     @app.route('/api/v1/providers/freshservice/preview', methods=['GET'])

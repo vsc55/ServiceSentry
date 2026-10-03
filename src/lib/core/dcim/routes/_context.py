@@ -125,7 +125,7 @@ def build(app, wa):
         if 'kit_qty' in fuera:
             try:
                 fuera['kit_qty'] = max(1, int(float(fuera['kit_qty'] or 1)))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 fuera['kit_qty'] = 1
         uid = str(fuera.get('type_uid') or '').strip()
         if not uid:
@@ -145,7 +145,7 @@ def build(app, wa):
         # Y nunca por debajo de uno: una unidad que trae cero piezas no es una unidad.
         try:
             fuera['kit_qty'] = max(1, int(fuera.get('kit_qty') or 1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             fuera['kit_qty'] = 1
         # Y la clase, si el modelo la sabe y quien pide no la ha dicho: un modelo de
         # `component-types` está clasificado con el mismo vocabulario que una pieza.
@@ -230,7 +230,7 @@ def build(app, wa):
                 fuera[campo] = build[campo]
         fuera['build_uid'] = build['uid']
         return fuera
-    def _snap(rack_uid: str, action: str = 'edit') -> None:
+    def _snap(rack_uid: str, action: str = 'edit', gone=None) -> None:
         """Guardar cómo queda el armario **después** de un cambio.
 
         Una foto por cambio contesta las dos preguntas que se le hacen a un armario con un año
@@ -248,7 +248,14 @@ def build(app, wa):
         rack = store.racks.get(str(rack_uid or '')) if store else None
         if not rack:
             return
-        foto = dcim_rackrev.snapshot(rack, store.items_of(str(rack_uid or '')))
+        dentro = store.items_of(str(rack_uid or ''))
+        # Y de quién dice ser cada uno, más lo que se acaba de ir (*gone*): borrado un equipo,
+        # su declaración desaparece con él, y sin apuntarla aquí el historial lo juzgaría por
+        # el dueño del armario.
+        said = store.owners_map()
+        dichos = {it['uid']: said.get(('item', it['uid']), '') for it in dentro}
+        dichos.update(gone or {})
+        foto = dcim_rackrev.snapshot(rack, dentro, dichos)
         historial = store.revs.history(str(rack_uid or ''), scope=dcim_rackrev.SCOPE)
         # Una escritura que no cambió nada no es una versión. Un formulario manda la ficha
         # entera cada vez que se pulsa guardar, y doce renglones idénticos no dicen qué pasó:

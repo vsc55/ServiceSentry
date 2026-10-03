@@ -118,3 +118,49 @@ def test_msteams_sso_csrf_and_embed_declared(admin):
     profiles = dict(admin._embed_profiles)
     assert '_EMBED_IN_TEAMS' in profiles
     assert 'https://teams.microsoft.com' in profiles['_EMBED_IN_TEAMS']
+
+
+# ─────────────────────────── the refusals the other doors make ───────────────────────
+class TestTheSameRefusalsAsOidcAndSaml:
+    """The Teams door skipped two checks the OIDC and SAML callbacks make: a no-login
+    (service) account and a reserved built-in name both got a full session through it."""
+
+    def _post(self, client, claims=_CLAIMS):
+        with unittest.mock.patch.object(sso_routes.tab_sso, 'available', return_value=True), \
+             unittest.mock.patch.object(sso_routes.tab_sso, 'validate_tab_token',
+                                        return_value=claims):
+            return client.post('/auth/msteams/sso', json={'token': 'x'})
+
+    def test_a_no_login_account_is_refused(self, admin, client):
+        _add_sso_user(admin)
+        admin._users['sso.user@example.com']['login_enabled'] = False
+        r = self._post(client)
+        assert r.status_code == 403
+        with client.session_transaction() as s:
+            assert not s.get('logged_in')
+
+    def test_a_reserved_name_is_refused(self, admin, client):
+        _add_sso_user(admin, username='system', email='sso.user@example.com')
+        r = self._post(client)
+        assert r.status_code == 403
+        with client.session_transaction() as s:
+            assert not s.get('logged_in')
+
+
+class TestTheObjectIdNamesThePerson:
+    """A UPN or a mail address is a label the directory can rename and reassign; the `oid`
+    is the person. An account bound to the oid is found by it first."""
+
+    def test_an_account_bound_to_the_oid_wins_over_a_upn_match(self, admin):
+        _add_sso_user(admin)                                      # matches by UPN
+        admin._users['the-real-one'] = {'uid': 'u-real', 'auth_source': 'entraid',
+                                        'auth_source_id': 'AAD-OID-1', 'email': '',
+                                        'role': 'viewer', 'enabled': True, 'groups': []}
+        uname, _user = sso_routes._resolve_user(admin, _CLAIMS)
+        assert uname == 'the-real-one'
+
+    def test_a_local_account_is_never_matched_by_oid(self, admin):
+        admin._users['loc'] = {'uid': 'u-loc', 'auth_source': 'local',
+                               'auth_source_id': 'aad-oid-1', 'enabled': True}
+        uname, _user = sso_routes._resolve_user(admin, _CLAIMS)
+        assert uname is None

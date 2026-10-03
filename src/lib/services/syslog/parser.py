@@ -39,9 +39,16 @@ def _now_iso() -> str:
 
 
 def _decode(data) -> str:
+    """The datagram as text, with every NUL removed.
+
+    Trailing NULs were stripped, embedded ones were not — and PostgreSQL refuses any NUL in
+    a text value, so one such datagram failed the INSERT of the whole writer batch (up to
+    500 messages) with it."""
     if isinstance(data, (bytes, bytearray)):
-        return data.decode('utf-8', errors='replace')
-    return str(data)
+        text = data.decode('utf-8', errors='replace')
+    else:
+        text = str(data)
+    return text.replace('\x00', '')
 
 
 # RFC 5424 §6.2 caps HOSTNAME at 255 characters and APP-NAME at 48. Both are INDEXED columns

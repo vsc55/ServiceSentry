@@ -22,6 +22,25 @@ import threading
 
 from lib.debug import DebugLevel
 
+#: Guards the creation of a monitor's in-flight set (the set itself is then guarded by it too).
+_INFLIGHT_LOCK = threading.Lock()
+
+
+def _inflight_set(monitor) -> set:
+    """The modules of *monitor* whose last run has not landed yet.
+
+    A module that overran the deadline keeps running on its own thread (it cannot be
+    killed). Without this, the next cycle started it AGAIN while the first run was still
+    writing the same live status — two runs of one module racing on ``monitor.status``,
+    duplicate transition alerts, and one more stuck thread per cycle for a hung module.
+    """
+    with _INFLIGHT_LOCK:
+        cur = getattr(monitor, '_inflight_modules', None)
+        if not isinstance(cur, set):
+            cur = set()
+            monitor._inflight_modules = cur
+        return cur
+
 
 def run_checks(monitor, module_names, *, timeout: int, history=None,
                progress_cb=None, lang: str = '', only_device: str = '') -> tuple[dict, list]:
@@ -171,6 +190,8 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
             _tell('error', mod_name, f'{type(exc).__name__}: {exc}')
             return mod_name, None, f'{mod_name}: {type(exc).__name__}: {exc}'
         finally:
+            with _INFLIGHT_LOCK:
+                _inflight.discard(mod_name)
             # This runs in a short-lived pool worker thread; close its per-thread DB
             # connection cleanly (server engines only) so it isn't logged as an
             # 'aborted connection' when the thread ends.
@@ -202,15 +223,49 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
     # the button: reported as a Spanish dialog with "Reading the metrics" inside it.
     monitor._progress_lang = str(lang or '') if progress_cb is not None else ''
 
-    workers = min(len(module_names), 16)
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
-    try:
-        future_to_mod = {executor.submit(_run_one, m): m for m in module_names}
-        done, not_done = concurrent.futures.wait(future_to_mod.keys(), timeout=timeout)
-    finally:
-        # wait=False: return immediately without joining still-blocking threads
-        # (they cannot be forcibly killed in Python).
-        executor.shutdown(wait=False, cancel_futures=True)
+    # A module whose previous run is still out (it overran an earlier deadline) is not
+    # started again: it is skipped and said so, and runs on the next cycle after it lands.
+    _inflight = _inflight_set(monitor)
+    _to_run: list = []
+    with _INFLIGHT_LOCK:
+        for _m in module_names:
+            if _m in _inflight:
+                errors.append(f'{_m}: skipped, previous run still in progress')
+                monitor.debug.print(
+                    f"> Check > {_m} >> skipped: previous run still in progress",
+                    DebugLevel.warning)
+            else:
+                _inflight.add(_m)
+                _to_run.append(_m)
+    for _m in module_names:
+        if _m not in _to_run:
+            _tell('error', _m, 'skipped: previous run still in progress')
+
+    future_to_mod: dict = {}
+    done: set = set()
+    not_done: set = set()
+    if _to_run:
+        workers = min(len(_to_run), 16)
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+        try:
+            future_to_mod = {executor.submit(_run_one, m): m for m in _to_run}
+            done, not_done = concurrent.futures.wait(future_to_mod.keys(), timeout=timeout)
+        finally:
+            # wait=False: return immediately without joining still-blocking threads
+            # (they cannot be forcibly killed in Python). Futures still queued are
+            # cancelled — they never started, so they are not "still working".
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    # Queued behind the worker cap and cancelled at the deadline: never ran. Reported as
+    # skipped (not as a timeout that will land later) and released for the next cycle.
+    _cancelled = {f for f in not_done if f.cancelled()}
+    not_done = not_done - _cancelled
+    for _f in _cancelled:
+        _m = future_to_mod[_f]
+        with _INFLIGHT_LOCK:
+            _inflight.discard(_m)
+        errors.append(f'{_m}: skipped, not started before the {timeout}s deadline')
+        _tell('error', _m, f'skipped: not started before the {timeout}s deadline')
 
     def _unhook() -> None:
         """Put back whatever was listening before this batch."""

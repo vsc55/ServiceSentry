@@ -171,9 +171,11 @@ def verify(store, user_uid: str, code: str, *, now: float | None = None) -> str:
     step = totp.verify(factor['secret'], code, now=now, after_step=factor['last_step'])
     if step is not None:
         # Recorded before the caller is told yes: the window this code sits in is still open,
-        # and a second request presenting it must lose.
-        store.note_step(user_uid, step)
-        return 'totp'
+        # and a second request presenting it must lose. `note_step` only moves a row whose
+        # step is still BELOW this one, so of two requests that both read the factor before
+        # either wrote, exactly one changes the row — and only that one is a yes. Ignoring its
+        # answer let both through.
+        return 'totp' if store.note_step(user_uid, step) else ''
     got = _normalise(code)
     if not got:
         return ''

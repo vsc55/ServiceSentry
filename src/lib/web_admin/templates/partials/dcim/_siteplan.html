@@ -509,8 +509,8 @@ async function _dcsItemTurn() {
     _dcsRedraw();
 }
 
-/** Quitarlo, con la confirmación del panel. Un rack se lleva lo que tiene dentro; por eso se
- *  pregunta con su nombre. */
+/** Quitarlo, con la confirmación del panel y por su nombre. A rack that still holds items or
+ *  strips is refused by the server (409), and its message is what the toast shows. */
 function _dcsItemDrop() {
     const x = _dcsItemRow();
     if (!x) return;

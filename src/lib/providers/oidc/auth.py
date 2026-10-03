@@ -14,6 +14,8 @@ from lib.config.spec import cfg_default, cfg_get
 from lib.core.constants import is_reserved_username
 from lib.core.uids import new_uid
 from lib.debug import DebugLevel
+from lib.providers.identity import binding_conflict, note_refusal
+from lib.providers.scim.service import remember_provisioning
 
 _HAS_AUTHLIB = False
 try:
@@ -168,7 +170,19 @@ def sync_user(wa, userinfo: dict) -> dict | None:
             wa._dbg(f"> Auth/OIDC >> username {username!r} collides with a local account; "
                     f"refusing auto-conversion to SSO", DebugLevel.warning)
             return None
+        # Found by NAME, which the IdP may rename and reassign; `sub` is what is stable.
+        # An account already bound to another subject — or to another provider — is not
+        # this person's, whatever the name says (see lib.providers.identity).
+        conflict = binding_conflict(existing, 'oidc', sub)
+        if conflict:
+            wa._dbg(f"> Auth/OIDC >> {username!r} is bound to another identity ({conflict}); "
+                    f"refusing to re-link it", DebugLevel.warning)
+            note_refusal(f'oidc_{conflict}')
+            return None
         user = existing
+        # Who provisioned it survives the re-link: SCIM must still be able to
+        # deprovision an account that has since signed in here.
+        remember_provisioning(user)
         user['auth_source']    = 'oidc'
         user['auth_source_id'] = sub
         user['display_name']   = display_name or user.get('display_name', '')

@@ -50,7 +50,8 @@
             "oid": "1.3.6.1.2.1.4.8.0",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         },
         {
             "key": "ip_out_discards",
@@ -58,7 +59,8 @@
             "oid": "1.3.6.1.2.1.4.11.0",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         },
         {
             "key": "ip_hdr_errors",
@@ -66,7 +68,8 @@
             "oid": "1.3.6.1.2.1.4.4.0",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         },
         {
             "key": "ip_addr_errors",
@@ -74,7 +77,8 @@
             "oid": "1.3.6.1.2.1.4.5.0",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         },
         {
             "key": "ip_no_routes",
@@ -82,7 +86,8 @@
             "oid": "1.3.6.1.2.1.4.12.0",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         },
         {
             "key": "ip_reasm_fails",
@@ -90,7 +95,8 @@
             "oid": "1.3.6.1.2.1.4.16.0",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         },
         {
             "key": "ip_frag_fails",
@@ -98,7 +104,8 @@
             "oid": "1.3.6.1.2.1.4.18.0",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         },
         {
             "key": "ip4_in_octets",
@@ -138,7 +145,8 @@
             "oid": "1.3.6.1.2.1.4.31.1.1.17.1",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         },
         {
             "key": "ip4_out_discards",
@@ -146,7 +154,8 @@
             "oid": "1.3.6.1.2.1.4.31.1.1.25.1",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         },
         {
             "key": "ip6_in_octets",
@@ -186,7 +195,8 @@
             "oid": "1.3.6.1.2.1.4.31.1.1.17.2",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         },
         {
             "key": "ip6_out_discards",
@@ -194,7 +204,8 @@
             "oid": "1.3.6.1.2.1.4.31.1.1.25.2",
             "kind": "counter",
             "unit": "pkt/s",
-            "width": 32
+            "width": 32,
+            "max_rate": 1000000
         }
     ]
 }

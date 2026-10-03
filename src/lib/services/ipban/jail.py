@@ -83,6 +83,21 @@ def parse_manual_ban(data: dict, *, max_reason: int = 200) -> tuple:
     return ip, dur, reason, None
 
 
+def normalize_ip(ip):
+    """The canonical key for a client address: an IPv4-mapped IPv6 address
+    (``::ffff:127.0.0.1``, what a dual-stack ``::`` listener reports for an IPv4 client)
+    becomes its IPv4 form, so the whitelist matches it and one client is one jail key.
+    Anything else (another address, or a string that does not parse) is returned as is."""
+    if not ip or not isinstance(ip, str):
+        return ip
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except ValueError:
+        return ip
+    mapped = getattr(addr, 'ipv4_mapped', None)
+    return str(mapped) if mapped is not None else ip
+
+
 def _parse_nets(values) -> list:
     """Turn a list / comma-or-space string of IPs / CIDRs into ip_network objects."""
     if isinstance(values, str):
@@ -197,6 +212,7 @@ class IpBanManager:
 
     # ── whitelist / helpers ─────────────────────────────────────────────────────
     def is_whitelisted(self, ip: str) -> bool:
+        ip = normalize_ip(ip)
         if not ip:
             return False
         try:
@@ -234,6 +250,7 @@ class IpBanManager:
     def is_banned(self, ip: str) -> tuple[bool, int, str]:
         """Return ``(banned, retry_after_secs, reason)``.  A permanent ban reports a
         conventional large ``retry_after`` (a year).  Whitelisted / disabled ⇒ never."""
+        ip = normalize_ip(ip)
         if not self._enabled or not ip or self.is_whitelisted(ip):
             return False, 0, ''
         now = _time.time()
@@ -260,6 +277,7 @@ class IpBanManager:
                          detail: str = '') -> bool:
         """Record an abusive event for *ip*.  Returns True if it triggered a (new or
         escalated) ban.  No-op for whitelisted IPs or when disabled."""
+        ip = normalize_ip(ip)
         if not self._enabled or not ip or weight <= 0 or self.is_whitelisted(ip):
             return False
         track = self._track_for(category)
@@ -318,6 +336,7 @@ class IpBanManager:
 
         ``duration_secs=None`` follows the escalation ladder; ``0`` ⇒ permanent; a
         positive value forces that exact term.  Whitelisted IPs are refused."""
+        ip = normalize_ip(ip)
         if not ip or self.is_whitelisted(ip):
             return None
         with self._lock:
@@ -378,6 +397,7 @@ class IpBanManager:
 
         ``reason`` (why the ban is being lifted) is recorded on the ``unbanned`` history
         event; when omitted the event keeps the original ban reason."""
+        ip = normalize_ip(ip)
         if not ip:
             return False
         if self._store is not None:
@@ -419,6 +439,7 @@ class IpBanManager:
     def set_block_action(self, ip: str, action: str) -> bool:
         """Set a per-ban block-action override for a jailed *ip* ('' / invalid ⇒ clear
         the override, so the global default applies). Returns True if the IP is jailed."""
+        ip = normalize_ip(ip)
         action = action if action in self._BLOCK_ACTIONS else ''
         if self._store is not None:
             rec = self._store.get_ban(ip)
@@ -437,6 +458,7 @@ class IpBanManager:
 
     def block_action(self, ip: str) -> str:
         """The per-ban block-action override for *ip* ('' = use the global default)."""
+        ip = normalize_ip(ip)
         if not ip:
             return ''
         now = _time.time()
@@ -448,6 +470,7 @@ class IpBanManager:
         """Drop an IP from the watchlist: forget its accumulated offenses + history.
         Does NOT touch an active ban (use :meth:`unban` for that). Returns True if
         the IP had any tracked offenses."""
+        ip = normalize_ip(ip)
         if not ip:
             return False
         if self._store is not None:
@@ -459,6 +482,7 @@ class IpBanManager:
 
     def history(self, ip: str, *, limit: int = 200) -> list[dict]:
         """Recent recorded attempts for *ip* (most recent first): ``{ts, category}``."""
+        ip = normalize_ip(ip)
         if self._store is not None:
             return self._store.history(ip, limit=limit)
         with self._lock:

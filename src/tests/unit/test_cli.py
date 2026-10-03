@@ -279,3 +279,28 @@ class TestTheLastAdminCanBeOneThroughAGroup:
         with pytest.raises(users_svc.AdminOpError) as exc:
             users_svc.set_role(users, 'root', BUILTIN_ROLE_UIDS['viewer'], {}, groups={})
         assert exc.value.key == 'must_have_admin'
+
+
+class TestPasswdSignsTheAccountOut:
+    """`user passwd` is what somebody runs when they think the password leaked. It changed the
+    hash and left every browser already signed in with the old one signed in."""
+
+    def test_the_accounts_sessions_are_deleted(self, tmp_path):
+        from lib.cli.context import CliContext
+        from lib.core.sessions.store import SessionsStore
+        d = str(tmp_path)
+        _run('user', 'add', d, username='bob', password='Abcd1234', role='none',
+             display='', email='', group=None, disabled=False)
+        _run('user', 'add', d, username='ann', password='Abcd1234', role='none',
+             display='', email='', group=None, disabled=False)
+        ctx = CliContext(d, d)
+        store = SessionsStore(ctx.db)
+        for token, who in (('t-bob', 'bob'), ('t-ann', 'ann')):
+            store.upsert(token, {'uid': f'u-{token}', 'user_uid': ctx.users[who]['uid'],
+                                 'created_at': '2026-01-01T00:00:00+00:00',
+                                 'last_seen': '2026-01-01T00:00:00+00:00'})
+        ctx.db.close()
+        assert _run('user', 'passwd', d, username='bob', password='Newpass9') == 0
+        after = SessionsStore(CliContext(d, d).db)
+        assert after.get('t-bob') == {}
+        assert after.get('t-ann'), "another account's session is untouched"

@@ -358,3 +358,26 @@ class _Sesion:
 
     def __exit__(self, *a):
         return False
+
+
+class TestUnaListaCortadaLoDice:
+    """El tope de 500 páginas se alcanzaba en silencio: la lista volvía CORTA como si fuera la
+    entera, y quien la usa para decir «esto ya no está allí» lo diría de todo lo que no llegó."""
+
+    def _siempre_llena(self, monkeypatch, paginas):
+        monkeypatch.setattr(api, 'DEEP_PAGE_LIMIT', paginas)
+        llena = {'departments': [{'id': n} for n in range(100)]}
+        return _Sess([_Resp(body=llena, headers={'link': '<x>;rel="next"'})
+                      for _ in range(paginas)])
+
+    def test_al_llegar_al_tope_con_mas_por_delante_se_marca(self, monkeypatch, caplog):
+        sess = self._siempre_llena(monkeypatch, 3)
+        with caplog.at_level('WARNING'):
+            fuera = api.page_all(sess, 'h', 'departments', 'departments')
+        assert len(fuera) == 300 and fuera.truncated is True
+        assert any('page limit' in r.getMessage() for r in caplog.records)
+
+    def test_una_lista_que_termina_antes_no(self):
+        sess = _Sess([_Resp(body={'departments': [{'id': 1}]}, headers={})])
+        fuera = api.page_all(sess, 'h', 'departments', 'departments')
+        assert fuera.truncated is False and fuera == [{'id': 1}]

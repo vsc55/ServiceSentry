@@ -146,8 +146,13 @@ async function _infraOpenView(pane) {
         // what made every refresh blink the whole page, which is worse than a stale second.
         if (!pane.querySelector('.ss-vfill'))
             pane.innerHTML = `<div class="text-center py-5"><div class="spinner-border spinner-border-sm"></div></div>`;
-        _infraDetail = await apiGet(`/api/v1/infra/devices/${encodeURIComponent(_infraDevice)}`);
-        if (!_infraDetail) { _infraDevice = ''; return renderInfra(); }
+        // The uid is captured BEFORE the await: open A, then B (or go back to the fleet)
+        // before A answers, and A's late answer must not paint A over what is now on screen.
+        const uid = _infraDevice;
+        const data = await apiGet(`/api/v1/infra/devices/${encodeURIComponent(uid)}`);
+        if (_infraDevice !== uid) return;   // somebody opened another meanwhile
+        if (!data) { _infraDevice = ''; return renderInfra(); }
+        _infraDetail = data;
     }
     pane.innerHTML = _infraDeviceHtml(_infraDetail);
     // …and if somebody arrived here by pressing a PORT on the link map, go to it. After the
@@ -176,7 +181,9 @@ function _infraPaint() {
  *  already in hand, so the only thing that changes is what changed. */
 async function _infraReload() {
     if (!_infraDevice) { _infraDetail = null; return renderInfra(); }
-    const data = await apiGet(`/api/v1/infra/devices/${encodeURIComponent(_infraDevice)}`);
+    const uid = _infraDevice;
+    const data = await apiGet(`/api/v1/infra/devices/${encodeURIComponent(uid)}`);
+    if (_infraDevice !== uid) return;       // somebody opened another meanwhile
     if (!data) return;                      // a failed refresh keeps the screen it had
     _infraDetail = data;
     const pane = document.getElementById('infra-container');

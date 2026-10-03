@@ -70,18 +70,21 @@ class SyslogStore:
     # ── Write ─────────────────────────────────────────────────────────────────
     @staticmethod
     def _row_values(rec: dict) -> tuple:
+        def _t(v) -> str:
+            # No NUL in a text value: PostgreSQL rejects it outright.
+            return str(v or '').replace('\x00', '')
         return (
             float(rec.get('ts') or time.time()),
-            str(rec.get('received_at') or ''),
-            str(rec.get('source') or ''),
-            str(rec.get('hostname') or ''),
-            str(rec.get('app') or ''),
-            str(rec.get('procid') or ''),
+            _t(rec.get('received_at')),
+            _t(rec.get('source')),
+            _t(rec.get('hostname')),
+            _t(rec.get('app')),
+            _t(rec.get('procid')),
             int(rec.get('severity', 5)),
             int(rec.get('facility', 1)),
-            str(rec.get('msgid') or ''),
-            str(rec.get('message') or '')[:16384],
-            str(rec.get('raw') or '')[:16384],
+            _t(rec.get('msgid')),
+            _t(rec.get('message'))[:16384],
+            _t(rec.get('raw'))[:16384],
         )
 
     def add(self, rec: dict) -> None:
@@ -91,15 +94,34 @@ class SyslogStore:
             self._row_values(rec))
         self._db.commit()
 
-    def add_many(self, recs: list[dict]) -> None:
-        """Insert a batch of messages in one transaction (listener buffering)."""
+    def add_many(self, recs: list[dict]) -> int:
+        """Insert a batch of messages in one transaction (listener buffering).
+
+        If the batch fails, it is retried row by row so one bad record costs itself and
+        not the up-to-500 messages around it. Returns how many rows were stored; raises
+        only when not one could be."""
         if not recs:
-            return
-        with self._db.transaction():
-            for rec in recs:
-                self._db.execute(
-                    f'INSERT INTO {_T} ({", ".join(_COLS)}) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                    self._row_values(rec))
+            return 0
+        sql = f'INSERT INTO {_T} ({", ".join(_COLS)}) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+        try:
+            with self._db.transaction():
+                for rec in recs:
+                    self._db.execute(sql, self._row_values(rec))
+            return len(recs)
+        except Exception:  # pylint: disable=broad-except
+            if len(recs) == 1:
+                raise
+        stored, last_exc = 0, None
+        for rec in recs:
+            try:
+                with self._db.transaction():
+                    self._db.execute(sql, self._row_values(rec))
+                stored += 1
+            except Exception as exc:  # pylint: disable=broad-except
+                last_exc = exc
+        if stored == 0 and last_exc is not None:
+            raise last_exc
+        return stored
 
     # ── Read ──────────────────────────────────────────────────────────────────
     @staticmethod

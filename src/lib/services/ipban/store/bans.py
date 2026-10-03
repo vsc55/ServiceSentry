@@ -74,10 +74,15 @@ class BansStore:
                         (str(uuid.uuid4()), ip, *vals))
                     cnt = self._db.fetchone(f'SELECT COUNT(*) FROM {_T}')
                     if cnt and cnt[0] > _MAX_ROWS:
-                        self._db.execute(
-                            f'DELETE FROM {_T} WHERE ip IN '
-                            f'(SELECT ip FROM {_T} ORDER BY banned_at ASC LIMIT ?)',
+                        # Read the keys first, delete them second. `DELETE … WHERE k IN
+                        # (SELECT … LIMIT n)` is refused by MySQL (1093) and MariaDB (1235);
+                        # inside this transaction that rolled back the INSERT too, so once
+                        # the table was full nothing new was ever stored again.
+                        doomed = self._db.fetchall(
+                            f'SELECT ip FROM {_T} ORDER BY banned_at ASC LIMIT ?',
                             (cnt[0] - _MAX_ROWS,))
+                        for (old,) in doomed or ():
+                            self._db.execute(f'DELETE FROM {_T} WHERE ip = ?', (old,))
         except Exception:  # pylint: disable=broad-except
             try:
                 self._db.rollback()

@@ -223,7 +223,7 @@ function _fsRowsHtml(d) {
 
 function _fsRowsOf(d, plan) {
     const tono = {create: 'text-bg-success', update: 'text-bg-warning',
-                  adopt: 'text-bg-info', same: 'text-bg-secondary'};
+                  adopt: 'text-bg-info', same: 'text-bg-secondary', conflict: 'text-bg-danger'};
     const ofrecidas = (uid) => ((d || {}).orgs || []).filter(
         o => o.uid === uid || !(o.source === 'freshservice' && o.external_id));
     return plan.map(p => {
@@ -276,8 +276,13 @@ function _fsPlanHtml(d) {
     if (!plan.length) return `<div class="text-muted">${esc(t('fs_preview_none'))}</div>`;
     const c = d.counts || {};
     const tono = {create: 'text-bg-success', update: 'text-bg-warning',
-                  adopt: 'text-bg-info', same: 'text-bg-secondary'};
+                  adopt: 'text-bg-info', same: 'text-bg-secondary', conflict: 'text-bg-danger'};
     const filas = _fsRowsHtml(d);
+    // La lista llegó cortada en el tope de páginas de Freshservice: lo que falta no está en el
+    // plan, y decirlo es la diferencia entre «no hay más» y «no se trajo más».
+    const cortada = d.truncated
+        ? `<div class="alert alert-warning py-2 px-3 mb-2 small">${esc(t('fs_truncated'))}</div>`
+        : '';
     const huerfanas = (d.orphans || []).length
         ? `<div class="alert alert-warning py-2 px-3 mt-3 mb-0 small">${
             esc(tf('fs_orphans', String(d.orphans.length)))}
@@ -285,7 +290,7 @@ function _fsPlanHtml(d) {
                 `<span class="badge bg-body-secondary text-body-secondary border fw-normal me-1"
                     >${esc(o.name)}</span>`).join('')}</div></div>`
         : '';
-    return `<div class="small text-muted mb-2">${esc(tf('fs_preview_summary',
+    return `${cortada}<div class="small text-muted mb-2">${esc(tf('fs_preview_summary',
             String(d.total || plan.length), String(c.create || 0), String(c.update || 0),
             String(c.adopt || 0), String(c.same || 0)))}</div>
     <div class="d-flex align-items-center gap-2 mb-2">

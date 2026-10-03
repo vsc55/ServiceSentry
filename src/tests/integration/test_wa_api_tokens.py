@@ -26,6 +26,7 @@ except ImportError:
 
 from werkzeug.security import generate_password_hash
 
+from lib.core.apitokens import service as tok_svc
 from tests.conftest import _login
 
 pytestmark = pytest.mark.skipif(not _HAS_FLASK, reason="Flask is not installed")
@@ -874,6 +875,60 @@ class TestActingOnSomebodyElsesToken:
         events = {e.get('event') for e in admin._audit_log}
         assert 'api_token_edited_by_admin' in events
         assert 'api_token_rotated_by_admin' in events
+
+
+class TestRotatingSomebodyElsesIsMinting:
+    """Rotating somebody else's token hands the caller the new secret, so it is held to the
+    rule minting is: the token's scope must be one the caller could have minted.
+
+    Before, `users_edit` alone rotated any non-admin account's token — a `config_edit` one
+    included — and walked away with the secret: an escalation from managing users to
+    whatever any of them could script.
+    """
+
+    @staticmethod
+    def _setup(admin, ops_perms, token_perms):
+        admin._custom_roles['r-mgr'] = {'uid': 'r-mgr', 'name': 'mgr', 'enabled': True,
+                                        'permissions': ['users_view', 'users_edit']}
+        admin._custom_roles['r-ops'] = {'uid': 'r-ops', 'name': 'ops', 'enabled': True,
+                                        'permissions': ops_perms}
+        mgr = _as(admin, 'mgr', role='r-mgr', password='mgr-secret')
+        _as(admin, 'ops', role='r-ops', password='ops-secret')
+        _raw, tid, th = tok_svc.mint()
+        admin._api_token_store.create(
+            user_uid='u-ops', name='ops-ci', token_id=tid, token_hash=th,
+            permissions=tok_svc.encode_permissions(token_perms), expires_at='',
+            created_at='2026-01-01T00:00:00+00:00', created_by='ops')
+        return mgr, admin._api_token_store.by_token_id(tid)['uid']
+
+    def test_a_user_manager_cannot_rotate_a_wider_token_into_their_hands(self, admin):
+        mgr, uid = self._setup(admin, ['config_view', 'config_edit'],
+                               ['config_view', 'config_edit'])
+        assert mgr.get('/api/v1/config').status_code == 403
+        r = mgr.post(f'/api/v1/tokens/{uid}/rotate')
+        assert r.status_code == 403
+        assert 'token' not in (r.get_json() or {})
+        # Nothing happened to the row either: not renamed, no sibling minted.
+        rows = [t for t in admin._api_token_store.list_all() if t.get('user_uid') == 'u-ops']
+        assert [t['name'] for t in rows] == ['ops-ci']
+
+    def test_a_user_manager_cannot_rotate_a_star_token(self, admin):
+        mgr, uid = self._setup(admin, ['users_view'], '*')
+        assert mgr.post(f'/api/v1/tokens/{uid}/rotate').status_code == 403
+
+    def test_a_user_manager_may_rotate_one_within_their_own_set(self, admin):
+        mgr, uid = self._setup(admin, ['users_view'], ['users_view'])
+        r = mgr.post(f'/api/v1/tokens/{uid}/rotate')
+        assert r.status_code == 200
+        assert r.get_json()['token']
+
+    def test_an_administrator_still_rotates_a_wide_one(self, client, admin):
+        """Incident response: the administrator holds every permission, so nothing changes."""
+        _login(client)
+        _mgr, uid = self._setup(admin, ['config_view', 'config_edit'], '*')
+        r = client.post(f'/api/v1/tokens/{uid}/rotate')
+        assert r.status_code == 200
+        assert _bearer(admin, r.get_json()['token']).get('/api/v1/config').status_code == 200
 
 
 class TestWhatATokenHasBeenDoing:

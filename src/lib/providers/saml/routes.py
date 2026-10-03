@@ -17,6 +17,8 @@ Routes registered by this file:
 import threading
 import time
 
+from lib.providers.identity import refusal
+
 from . import auth as saml_auth
 
 
@@ -119,12 +121,13 @@ def register(app, wa) -> None:
 
         name_id    = auth.get_nameid()
         saml_attrs = auth.get_attributes()
-        user       = saml_auth.sync_user(wa, name_id, saml_attrs)
+        user       = saml_auth.sync_user(wa, name_id, saml_attrs,
+                                         name_id_format=auth.get_nameid_format() or '')
 
         if user is None:
             flash(wa._t('sso_user_not_allowed'), 'danger')
             wa._audit('login_failed', '', request.remote_addr,
-                      detail={'reason': 'saml2_auto_create_disabled'})
+                      detail={'reason': refusal('saml2_auto_create_disabled')})
             return redirect(url_for('login'))
 
         cfg           = saml_auth._get_config(wa)
@@ -150,7 +153,7 @@ def register(app, wa) -> None:
 
         # False means the account owes a second factor — see the OIDC callback.
         if not wa._establish_session(username, user, source='saml2'):
-            return redirect(url_for('login_mfa'))
+            return redirect(url_for(wa._mfa_step_endpoint(username, 'saml2')))
         wa._audit('login_ok', username, request.remote_addr,
                   detail={'auth_source': 'saml2'})
         return redirect(wa._landing_url(user))

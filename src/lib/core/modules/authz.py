@@ -122,9 +122,28 @@ def authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
                 # per-cluster cluster.{uid}.{action} override), with a distinct
                 # delete (removal) action.
                 c_action = 'add' if o is None else ('delete' if n is None else 'edit')
-                cl_uid = ((n or {}).get('uid') if isinstance(n, dict) else None) \
-                    or ((o or {}).get('uid') if isinstance(o, dict) else None) or ik
+                # The cluster is the one STORED under this key, never the uid the client
+                # wrote into the new payload: reading the new uid first let a
+                # `cluster.<mine>.edit` holder edit any other cluster by sending `uid: <mine>`.
+                # And a cluster keeps its uid — changing it is not an edit of either one.
+                if isinstance(o, dict):
+                    cl_uid = str(o.get('uid') or '').strip() or ik
+                    new_uid = str(n.get('uid') or '').strip() if isinstance(n, dict) else ''
+                    if new_uid and new_uid != cl_uid:
+                        return False
+                else:
+                    cl_uid = str((n or {}).get('uid') or '').strip() or ik
                 if not _cluster_authorized(perms, c_action, cl_uid):
+                    return False
+                # A side bound to ONE device is that device's check as much as the cluster's:
+                # turning a device's check into a cluster item takes it off the device, and
+                # pinning a cluster item to a device puts it on one. Neither is a cluster
+                # permission's to grant on its own.
+                old_hu, new_hu = _item_device_uid(o), _item_device_uid(n)
+                if old_hu and not _server_authorized(perms, 'edit', old_hu):
+                    return False
+                if new_hu and new_hu != old_hu and not _server_authorized(
+                        perms, 'add' if o is None else 'edit', new_hu):
                     return False
                 continue
             # BOTH bindings, when there are two. A modification that moves a check from
@@ -149,6 +168,21 @@ def authorize_module_write(name: str, old_mod, new_mod, perms) -> bool:
     # A change with no authorizable device-bound item diff (whole-module add/remove
     # with no device-bound items, or only scalar churn) is not server-authorizable.
     return saw_change
+
+
+def may_follow_provision_link(old_link: str, new_link: str, may_edit_device) -> bool:
+    """May a save follow an item's provisioning link (``__provision_device__``'s
+    ``link_field``) into device *new_link*, rewriting that device's address?
+
+    Only into the device the stored item already linked, or one the caller may edit
+    (*may_edit_device(uid)*). The link field is hidden in the form but still the client's to
+    write, and the device it names keeps its own SSH profile: following any uid let a module
+    editor move another device's address to a host of their choosing, and the scheduler then
+    carried that device's password there."""
+    new_link = str(new_link or '').strip()
+    if not new_link or new_link == str(old_link or '').strip():
+        return True
+    return bool(may_edit_device(new_link))
 
 
 def authorize_modules_save(old_data: dict, data: dict, perms) -> None:

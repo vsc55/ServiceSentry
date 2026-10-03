@@ -214,7 +214,21 @@ class TestElRackCompartidoEsElCasoDuro:
                 'type_uid': 't-dell-r640', 'description': 'nómina'}
         out = owners.opaque(item)
         assert out == {'uid': 'i1', 'rack_uid': 'r1', 'u_start': 12, 'u_height': 2,
-                       'face': 'full', 'foreign': True}
+                       'face': 'full', 'placement': None, 'parent_uid': None,
+                       'u_slots': None, 'u_slot': None, 'u_slot_span': None,
+                       'u_split': None, 'foreign': True}
+
+    def test_conserva_su_geometria_entera(self):
+        """Dónde está y cuánto ocupa, entero: sin `placement` un SAI en el suelo salía en la
+        U 1, sin `parent_uid` lo montado en una bandeja se dibujaba dos veces y sin el reparto
+        del U medio U se dibujaba entero."""
+        item = {'uid': 'i1', 'rack_uid': 'r1', 'u_start': 0, 'u_height': 0, 'face': 'full',
+                'placement': 'near', 'parent_uid': 'p1', 'u_slots': 2, 'u_slot': 2,
+                'u_slot_span': 1, 'u_split': 'height', 'label': 'SAI'}
+        out = owners.opaque(item)
+        assert (out['placement'], out['parent_uid'], out['u_slots'], out['u_slot'],
+                out['u_slot_span'], out['u_split']) == ('near', 'p1', 2, 2, 1, 'height')
+        assert 'label' not in out
 
     def test_y_nada_de_lo_que_identifica_sobrevive(self):
         """Escrito como lista de lo que se QUEDA y no de lo que se quita: el día que se añade

@@ -27,9 +27,57 @@ function applySavedField(path, version) {
         _serverConfigData[sec][field] = configData[sec][field];
 }
 
+// --- Module configuration: read and write with its version ---
+// The module save REPLACES the whole configuration, so a page that read it before someone
+// else saved would undo that save without either of them knowing. The server stamps every
+// read with the version it served (X-Modules-Version); the save names it back (If-Match) and
+// a stale one is refused with 409 instead of overwriting. `var`, not `let`: init reads it
+// from a later partial and must not hit the temporal dead zone.
+var _modulesVersion = null;
+async function apiGetModules() {
+    const url = '/api/v1/modules';
+    try {
+        const r = await fetch(url);
+        if (r.status === 401 || r.status === 302) { _onSessionTerminated(); return null; }
+        if (!r.ok) { console.error(`[api] GET ${url} -> HTTP ${r.status}`); return null; }
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) { _onSessionTerminated(); return null; }
+        const v = r.headers.get('X-Modules-Version');
+        if (v) _modulesVersion = v;
+        return await r.json();
+    } catch (e) {
+        console.error(`[api] GET ${url} failed before a response arrived`, e);
+        return null;                /* the fetch wrapper flags the connection-lost overlay */
+    }
+}
+// Same answer shape as apiPut (the body), plus `stale: true` on a 409.
+async function apiPutModules(data) {
+    const url = '/api/v1/modules';
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (_modulesVersion) headers['If-Match'] = _modulesVersion;
+        const r = await fetch(url, { method: 'PUT', headers, body: JSON.stringify(data) });
+        if (r.status === 401) { _onSessionTerminated(); return null; }
+        const body = (await _readJson(r, 'PUT', url)).data;
+        if (r.ok && body && body.version != null) _modulesVersion = String(body.version);
+        if (r.status === 409 && body) body.stale = true;
+        return body;
+    } catch (e) {
+        console.error(`[api] PUT ${url} failed before a response arrived`, e);
+        return null;                /* the fetch wrapper flags the connection-lost overlay */
+    }
+}
+
 // --- Save ---
 async function saveModules() {
-    const r = await apiPut('/api/v1/modules', modulesData);
+    const r = await apiPutModules(modulesData);
+    if (r && r.stale) {
+        // Someone saved first. Overwriting would drop their change, so this copy is
+        // discarded and the current configuration loaded in its place.
+        showToast(r.error || t('modules_config_stale'), 'warning');
+        await reloadModules(true);
+        return;
+    }
     if (r && r.ok) {
         // The server may have provisioned linked devices (e.g. an endpoint device for a
         // module that declares __provision_device__) and stamped their uid on the item.
@@ -151,7 +199,7 @@ function _refreshTableRowChoices() {
 // silent=true: no "reloaded" toast — used by the load-on-access tab handlers, which re-fetch
 // every time the section is opened (the manual Reload button keeps the toast).
 async function reloadModules(silent = false) {
-    const data = await apiGet('/api/v1/modules');
+    const data = await apiGetModules();
     if (!data) return;
     modulesData = data;
     applyModuleDefaults();

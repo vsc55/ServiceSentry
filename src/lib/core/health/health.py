@@ -27,7 +27,7 @@ import threading
 import time
 
 
-from lib.core.health import default_text as _default_text  # noqa: E402
+from lib.core.health import ScannerThread, default_text as _default_text  # noqa: E402
 
 
 def classify(instances: list, *, now: float, down_after_secs: float) -> dict:
@@ -50,7 +50,7 @@ def classify(instances: list, *, now: float, down_after_secs: float) -> dict:
     return out
 
 
-class ServiceHealthMonitor:
+class ServiceHealthMonitor(ScannerThread):
     """Periodically classify service liveness and emit up/down transitions once.
 
     Collaborators are injected as callables so this stays host-agnostic and testable:
@@ -116,25 +116,20 @@ class ServiceHealthMonitor:
 
     # ── background loop ──────────────────────────────────────────────────────────
     def start(self, *, poll_getter=lambda: 30) -> None:
-        if self._thread is not None:
-            return
-        self._stop.clear()
-
-        def _loop():
+        def _loop(stop_ev):
+            interval = 30
             while True:
                 try:
                     interval = max(5, int(poll_getter() or 30))
-                except (TypeError, ValueError):
-                    interval = 30
-                if self._stop.wait(interval):
+                except Exception:  # pylint: disable=broad-except
+                    # A bad value or a failed config read (DB down) keeps the last
+                    # interval; it must not end the thread.
+                    pass
+                if stop_ev.wait(interval):
                     return
                 try:
                     self.evaluate_once(now=time.time())
                 except Exception:  # pylint: disable=broad-except
                     pass
 
-        self._thread = threading.Thread(target=_loop, name='svc-health', daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop.set()
+        self._spawn('svc-health', _loop)

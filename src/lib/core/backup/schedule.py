@@ -62,6 +62,13 @@ def auto_name(now, task: str = '') -> str:
     return f'{AUTO_PREFIX}{slug}-{stamp}' if slug else f'{AUTO_PREFIX}{stamp}'
 
 
+# The stamp :func:`auto_name` puts after the slug — `%Y%m%d-%H%M%S`, the only shape it has
+# ever written. Matching it EXACTLY is what tells task "db" from task "db-full": a prefix test
+# on `auto-db-` also claims `auto-db-full-<stamp>`, and retention then deletes the other task's
+# copies as if they were its own.
+_STAMP = r'\d{8}-\d{6}'
+
+
 def is_auto(name: str, task: str | None = None) -> bool:
     """Was *name* produced by the scheduler — and, when *task* is given, by that task?
 
@@ -74,11 +81,11 @@ def is_auto(name: str, task: str | None = None) -> bool:
         return True
     slug = task_slug(task)
     if not slug:
-        # The unscoped name from before tasks existed: `auto-<date>`, where the character after
-        # the prefix is a digit. A task WITH a slug must not claim those.
-        rest = n[len(AUTO_PREFIX):]
-        return bool(rest) and rest[0].isdigit()
-    return n.startswith(f'{AUTO_PREFIX}{slug}-')
+        # The unscoped name from before tasks existed: `auto-<stamp>` and nothing else. A task
+        # WITH a slug must not claim those, and they must not claim a task whose slug happens
+        # to start with a digit.
+        return re.fullmatch(re.escape(AUTO_PREFIX) + _STAMP, n) is not None
+    return re.fullmatch(re.escape(f'{AUTO_PREFIX}{slug}-') + _STAMP, n) is not None
 
 
 def is_due(every_hours, now_ts: float, last_ts: float | None) -> bool:
