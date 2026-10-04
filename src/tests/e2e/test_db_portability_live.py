@@ -45,7 +45,8 @@ _STORE_TABLES = ('check_state', 'history', 'history_series', 'history_fact',
                  'event_cursor', 'event_cooldowns', 'service_leader',
                  'users', 'users_groups', 'roles', 'config', 'entity_versions',
                  'ss_deftest', '__ssreb_ss_deftest', '__ssbak_ss_deftest',
-                 'ip_bans', 'syslog_drops', 'job_history')
+                 'ip_bans', 'syslog_drops', 'job_history',
+                 'SystemEvents', 'SystemEventsProperties')
 
 
 def _mysql_family_cfg(prefix: str):
@@ -549,3 +550,134 @@ def test_the_audit_cap_trims_to_the_cap_even_after_it_is_lowered(live_db):
         s.insert(f'2026-01-01T00:00:0{i}Z', f'e{i}', 'u', 'ip', '')
     s.insert('2026-01-01T00:00:09Z', 'e8', 'u', 'ip', '', max_entries=3)
     assert [e['event'] for e in s.get_all()] == ['e8', 'e7', 'e6']
+
+
+# ── rsyslog's own table, created by rsyslog's own script ─────────────────────
+# plugins/ommysql/createDB.sql and plugins/ompgsql/createDB.sql, minus the CREATE DATABASE.
+_RSYSLOG_COLS = """
+        CustomerID bigint,
+        ReceivedAt {dt} NULL,
+        DeviceReportedTime {dt} NULL,
+        Facility smallint NULL,
+        Priority smallint NULL,
+        FromHost varchar(60) NULL,
+        Message text,
+        NTSeverity int NULL,
+        Importance int NULL,
+        EventSource varchar(60),
+        EventUserID varchar(60) NULL,
+        EventCategory int NULL,
+        EventID int NULL,
+        EventBinaryData text NULL,
+        MaxAvailable int NULL,
+        CurrUsage int NULL,
+        MinUsage int NULL,
+        MaxUsage int NULL,
+        InfoUnitID int NULL ,
+        SysLogTag varchar(60),
+        EventLogType varchar(60),
+        GenericFileName VarChar(60),
+        SystemID int NULL"""
+
+
+def _rsyslog_create(db):
+    pg = db.KIND == 'postgresql'
+    key = 'ID serial not null primary key' if pg else \
+        'ID int unsigned not null auto_increment primary key'
+    dt = 'timestamp without time zone' if pg else 'datetime'
+    db.execute_ddl(f'CREATE TABLE SystemEvents ( {key},{_RSYSLOG_COLS.format(dt=dt)} )')
+    pkey = key
+    db.execute_ddl(f'CREATE TABLE SystemEventsProperties ( {pkey}, SystemEventID int NULL , '
+                   'ParamName varchar(255) NULL , ParamValue text NULL )')
+
+
+def test_rsyslogs_table_is_adopted_and_both_sides_read_each_other(live_db):
+    """rsyslog created the table and wrote to it with its stock template, on the real engine:
+    the store must adopt it without a rebuild and read those rows; what the store writes must
+    be what rsyslog's readers find. PostgreSQL folds rsyslog's unquoted names to lower case,
+    MySQL needs a VARCHAR for every indexed column the store adds — both only show here."""
+    from datetime import datetime, timezone
+    from lib.services.syslog.store import SyslogStore
+    from lib.services.syslog.store import messages as msgs
+
+    _rsyslog_create(live_db)
+    now = int(time.time())
+    utc = datetime.fromtimestamp(now, timezone.utc)
+    # The stock template's dates: `date-mysql` is YYYYMMDDHHMMSS, `date-pgsql` ISO.
+    when = utc.strftime('%Y-%m-%d %H:%M:%S' if live_db.KIND == 'postgresql' else '%Y%m%d%H%M%S')
+    live_db.execute('INSERT INTO SystemEvents (Message, Facility, FromHost, Priority, '
+                    'DeviceReportedTime, ReceivedAt, InfoUnitID, SysLogTag) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    ('Accepted password', 4, 'web01', 6, when, when, 1, 'sshd[812]:'))
+    live_db.commit()
+
+    diff = live_db.reconcile_table(msgs._SCHEMA)
+    assert not diff.needs_rebuild, diff
+    store = SyslogStore(live_db)
+    assert live_db.reconcile_table(msgs._SCHEMA).is_empty     # and a second boot: nothing
+
+    row = store.query()[0]
+    assert (row['hostname'], row['app'], row['procid'], row['severity'], row['ts']) == \
+        ('web01', 'sshd', '812', 6, now)
+
+    store.add({'ts': now + 1, 'source': '10.0.0.9', 'hostname': 'fw1', 'app': 'kernel',
+               'procid': '', 'severity': 3, 'facility': 0, 'msgid': '', 'message': 'ours',
+               'raw': '<3>ours', 'timestamp': ''})
+    assert [r['message'] for r in store.query()] == ['ours', 'Accepted password']
+    assert [r['message'] for r in store.query({'app': 'kernel'})] == ['ours']
+    assert [r['message'] for r in store.query({'since': now + 1})] == ['ours']
+    got = live_db.fetchone('SELECT Message, Priority, FromHost, SysLogTag, InfoUnitID '
+                           'FROM SystemEvents WHERE FromHostIP = ?', ('10.0.0.9',))
+    assert tuple(got) == ('ours', 3, 'fw1', 'kernel:', 1)
+    st = store.stats()
+    assert st['total'] == 2 and {s['value'] for s in st['by_severity']} == {3, 6}
+
+
+def test_rsyslogs_database_is_read_without_being_touched(live_db):
+    """`syslog_db|mode = external` on the real engine: rsyslog's table as its script made it,
+    read with the columns it has — and after that, still exactly as its script made it."""
+    from lib.services.syslog.store import SyslogStore
+
+    _rsyslog_create(live_db)
+    when = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+    live_db.execute('INSERT INTO SystemEvents (Message, Facility, FromHost, Priority, '
+                    'DeviceReportedTime, ReceivedAt, InfoUnitID, SysLogTag) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    ('read only', 4, 'web01', 6, when, when, 1, 'sshd[812]:'))
+    live_db.commit()
+    before = [c.name for c in live_db.describe_table('SystemEvents')]
+
+    store = SyslogStore(live_db, read_only=True)
+    assert [r['app'] for r in store.query()] == ['sshd']
+    assert store.query({'source': '10.0.0.1'}) == []
+    assert len(store.query(sort='source')) == 1          # PostgreSQL refuses ORDER BY NULL
+    st = store.stats()
+    assert st['total'] == 1 and st['by_device'][0]['value'] == 'web01'
+    assert [c.name for c in live_db.describe_table('SystemEvents')] == before
+    assert live_db.list_indexes('SystemEvents') == []
+
+
+def test_an_external_source_never_blocks_its_owners_ddl(live_db):
+    """Reported while trying it on MariaDB: after the panel READ an external source, the
+    owner's `DROP TABLE` hung. The connector ran without autocommit, so every SELECT left a
+    transaction open, and on MySQL that holds a metadata lock on the table — the DBA adding an
+    index waited on the panel's idle connection for as long as it stayed open. External
+    sources now read in autocommit."""
+    import threading
+    from lib.services.syslog import sources as srcmod
+
+    _rsyslog_create(live_db)
+    cfg = dict(live_db._config)
+    store = srcmod.open_source({'name': 'live', 'time_zone': 'UTC', 'data': cfg})
+    assert store.count() == 0                         # the read that used to leave the lock
+    done = []
+
+    def ddl():
+        live_db.execute_ddl('CREATE INDEX idx_live_dba ON SystemEvents (ReceivedAt)')
+        done.append(True)
+
+    worker = threading.Thread(target=ddl, daemon=True)
+    worker.start()
+    worker.join(15)
+    store._db.close()
+    assert done, "the owner's CREATE INDEX waited on the panel's idle read"

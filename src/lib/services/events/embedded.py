@@ -41,6 +41,10 @@ class EmbeddedEvents(_EmbeddedBase, _EventsMixin):
         return getattr(self._host, '_syslog_store', None)
 
     @property
+    def _syslog_sources(self):
+        return getattr(self._host, '_syslog_sources', None)
+
+    @property
     def _audit_store(self):
         return getattr(self._host, '_audit_store', None)
 

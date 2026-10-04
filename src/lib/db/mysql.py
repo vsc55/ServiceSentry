@@ -24,6 +24,18 @@ except ImportError:  # pragma: no cover
     _HAS_PYMYSQL = False
 
 
+def _timeouts(cfg: dict) -> dict:
+    out = {}
+    for key in ('connect_timeout', 'read_timeout'):
+        try:
+            v = int(cfg.get(key) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        if v > 0:
+            out[key] = v
+    return out
+
+
 class MySQLConnector(BaseConnector):
     """Thread-safe MySQL/MariaDB connector via PyMySQL."""
 
@@ -32,6 +44,7 @@ class MySQLConnector(BaseConnector):
     DDL_REAL          = 'DOUBLE'
     DDL_TEXT          = 'TEXT'
     DDL_INTEGER       = 'INT'
+    DDL_DATETIME      = 'DATETIME'
     NEEDS_THREAD_CLEANUP = True    # per-thread network connection → close on thread exit
     # MySQL/MariaDB can't index a TEXT/BLOB column without a prefix length, so a
     # TEXT column that is a key/index gets a bounded VARCHAR instead (utf8mb4
@@ -61,7 +74,11 @@ class MySQLConnector(BaseConnector):
             'user':    cfg.get('user', ''),
             'password': cfg.get('password', ''),
             'charset': 'utf8mb4',
-            'autocommit': False,
+            # `autocommit` is for a database the panel only READS (an external syslog source):
+            # without it every SELECT leaves a transaction open, and on MySQL an open
+            # transaction holds a metadata lock on the table it read — the owner's next ALTER or
+            # DROP (an index the DBA adds) waits on the panel's idle connection for ever.
+            'autocommit': bool(cfg.get('autocommit')),
             # Report MATCHED rows (not just CHANGED) from UPDATE, matching SQLite/PostgreSQL —
             # so the "UPDATE; if rowcount == 0: INSERT" upsert pattern (event cursor/cooldowns)
             # doesn't wrongly INSERT (→ UNIQUE violation) when re-writing an unchanged value.
@@ -79,6 +96,10 @@ class MySQLConnector(BaseConnector):
             # ``CONCAT``) is handled per-dialect in the queries that need it (see
             # history.get_index), NOT by flipping sql_mode here.
             'init_command': 'SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED',
+            # Optional bounds, in seconds — set for a database the panel only visits (an
+            # external syslog source), where an unreachable server must cost a request a few
+            # seconds, not the driver's indefinite wait. Absent: the driver's defaults.
+            **_timeouts(cfg),
         }
 
     def _conn(self):

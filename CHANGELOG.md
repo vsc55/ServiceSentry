@@ -8,6 +8,76 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.135] - 2026-10-04
+
+### Changed
+
+- **The syslog message table is rsyslog's `SystemEvents`, so rsyslog can be the source.**
+  - The table matches rsyslog's `createDB.sql` column for column and in the same order.
+    `SystemEventsProperties` is declared beside it. rsyslog's `ommysql`/`ompgsql` can write
+    to it with the stock template, and the panel shows those rows next to its own receiver's.
+  - `syslog_db` can point at a database rsyslog (or LogAnalyzer) already fills. The panel
+    adopts the table and does not rebuild it.
+  - What rsyslog has no column for goes in five columns of our own, appended after rsyslog's.
+    They are the sender IP, program, PID, MSGID and raw line. All are nullable and have no
+    default, so an insert that names only rsyslog's columns still works, and adding them to
+    an existing table is an `ADD COLUMN`.
+  - The API keeps its keys (`ts`, `hostname`, `app`, …). For a stock-template row, the program
+    and PID come from `SysLogTag`.
+- **New setting `syslog|time_zone` (`UTC` or `local`).** rsyslog's dates carry no zone, and
+  its stock template writes the machine's local time. The setting is applied both when
+  storing and when reading. It has its own card in Configuration > Syslog.
+- **The `syslog` backup part copies `SystemEvents`, `SystemEventsProperties` and
+  `syslog_drops`.** Tables are matched without case, because PostgreSQL lists
+  `systemevents`.
+- Existing rows of the old `syslog` table were converted by hand; there is no migration in
+  code (nothing is in production yet).
+
+### Added
+
+- **External syslog sources: other programs' log databases, read beside the panel's own.**
+  - A source is a connection to a database rsyslog or LogAnalyzer fills. They are added in
+    Configuration > Syslog > External sources with a connection test, and stored in the new
+    `syslog_sources` table with the password encrypted.
+  - Sources are only read. Their schema is never touched, nothing is written, pruned or
+    emptied (clearing answers 409), and an account that may only SELECT is enough.
+  - Any of our columns that a source's table lacks come back empty.
+  - Each one is opened on demand with a 5 s connect and a 30 s query timeout. One that cannot
+    be reached answers 503 with the reason and is not retried for 30 s.
+  - The Syslog page, a device's Logs tab and the two syslog Overview cards each get a "Source"
+    selector; the internal source stays the default. The API takes `src=<uid>`.
+  - New flag `syslog_sources_all_view` (every source) and per-source key
+    `syslogsrc.<uid>.view`, granted per row in the role editor. `syslog_view` alone is the
+    internal source only. Removing a source prunes its keys from every role.
+  - A syslog event rule has a "Log source": the internal one (the default, as before), one
+    external source, or all of them. A source marked "watch" is drained by the event worker
+    under its own cursor (`syslog:<uid>`), and the notification names the source.
+  - A source may log in with a stored credential of the new built-in "Database" type
+    (`db_user`/`db_password`, the password encrypted) instead of its own fields. A deleted or
+    switched-off credential is an error, not a silent fallback, and a credential's usage lists
+    the sources using it.
+  - The MySQL and PostgreSQL connectors take optional `connect_timeout`, `read_timeout`
+    and `autocommit`. External sources read in autocommit: without it every SELECT left a
+    transaction open, which on MySQL holds a metadata lock. The owner's next `ALTER`,
+    `DROP` or `CREATE INDEX` on `SystemEvents` then waited on the panel's idle connection,
+    and rsyslog's inserts queued behind that DDL.
+- **`DATETIME` schema type.** It maps to `DATETIME` on SQLite and MySQL and to `TIMESTAMP`
+  on PostgreSQL, and `timestamp without time zone` compares equal to it.
+- **The PostgreSQL connector folds identifiers to lower case** in `quote_ident`, in its
+  introspection, and over the whole `TableSpec` through `fold_spec`. This is what PostgreSQL
+  does to rsyslog's unquoted SQL. All of the panel's own tables are already lower case.
+
+- **`syslog_db|mode` (`own` / `external`).** With `external` the syslog database itself is
+  rsyslog's and is only read. Nothing in its schema changes and nothing is written, pruned or
+  emptied (clearing answers 409). The listener does not start and the Services tab refuses to
+  start it. Requires a restart.
+
+### Fixed
+
+- **MySQL: an indexed TEXT column added to an existing table now gets `VARCHAR(255)`.**
+  `CREATE TABLE` already used `TEXT_KEY` for indexed columns, but `ADD COLUMN` did not. The
+  column was added as `TEXT`, and the index that followed it failed on MySQL/MariaDB.
+
 ## [0.0.1+build.134] - 2026-10-04
 
 ### Security

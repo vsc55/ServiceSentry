@@ -27,6 +27,9 @@ MODULE_PERMISSIONS = {
     'order': 20,                    # ordering among discovered (service-owned) groups
     'permissions': (
         {'flag': 'syslog_view',   'roles': ('editor', 'viewer')},  # view received syslog messages
+        # Every EXTERNAL source (other programs' log databases); one at a time is
+        # syslogsrc.<uid>.view. The internal one is syslog_view's.
+        {'flag': 'syslog_sources_all_view', 'roles': ('editor', 'viewer')},
         {'flag': 'syslog_delete', 'roles': ()},                    # clear stored syslog messages
     ),
 }
@@ -47,20 +50,26 @@ CONFIG_ACTIONS = [
 # ── Overview widgets this package contributes ────────────────────
 from .overview_widget import syslog_rows, syslog_stats_stat  # noqa: F401
 
+# Both widgets read the internal source unless the card is set to another one: `view.source`
+# names where the choices come from (what THIS viewer may read), the query parameter the
+# data request carries, and the instance key the choice is kept under on the card.
+_SOURCE = {'list_url': '/api/v1/syslog/sources', 'param': 'src', 'store': 'slsrc'}
+
 OVERVIEW_WIDGETS = [
     {'id': 'syslog_stats', 'icon': 'bi-card-list', 'label_key': 'overview_syslog_stats',
      'cols': 2, 'h': 'auto', 'has_h': False, 'order': 110,
      'perms': {'any': ['syslog_view']}, 'nav': {'url': '/syslog'},
      'stat': syslog_stats_stat,
      'view': {'kind': 'stat', 'icon': 'bi-card-list', 'label_key': 'overview_syslog_stats',
-              'accent': 'blue', 'data_url': '/api/v1/overview/widget/syslog_stats'}},
+              'accent': 'blue', 'data_url': '/api/v1/overview/widget/syslog_stats',
+              'source': _SOURCE}},
     {'id': 'syslog', 'icon': 'bi-card-list', 'label_key': 'overview_syslog',
      'cols': 12, 'h': 200, 'has_h': True, 'order': 190,
      'perms': {'any': ['syslog_view']}, 'nav': {'url': '/syslog'},
      'rows': syslog_rows,
      'view': {'kind': 'table', 'icon': 'bi-card-list', 'title_key': 'overview_syslog',
               'accent': 'blue', 'data_url': '/api/v1/overview/widget/syslog',
-              'empty_key': 'syslog_empty', 'row_class': 'syslog_sev',
+              'empty_key': 'syslog_empty', 'row_class': 'syslog_sev', 'source': _SOURCE,
               'filter': {'store': 'sev', 'param': 'severity_max', 'badge_fn': 'sev'},
               'columns': [
                   {'key': 'when',     'label_key': 'syslog_time',     'cell': 'syslog_when'},
@@ -93,4 +102,7 @@ AUDIT_EVENTS = [
     {'key': 'syslog_drops_cleared', 'severity': 'danger'},
     {'key': 'syslog_started', 'severity': 'success'},
     {'key': 'syslog_stopped', 'severity': 'warning'},
+    {'key': 'syslog_source_created', 'severity': 'success'},
+    {'key': 'syslog_source_updated', 'severity': 'info'},
+    {'key': 'syslog_source_deleted', 'severity': 'danger'},
 ]

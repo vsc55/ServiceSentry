@@ -8,6 +8,7 @@ const _SYSLOG_FILTER_SCHEMA = {
     clearLabel: () => t('syslog_clear_filters'),
     footerHtml: () => `<div id="sl-active-filters" class="mt-2 d-flex flex-wrap align-items-center gap-1"></div>`,
     fields: [
+        { id: 'sl-src',  key: 'src',          label: () => t('syslog_source_label'), type: 'select',         minWidth: '150px' },
         { id: 'sl-host', key: 'hostname',     label: () => t('syslog_host'),         type: 'select',         minWidth: '140px' },
         { id: 'sl-sev',  key: 'severity_max', label: () => t('syslog_min_severity'), type: 'select',         minWidth: '130px' },
         { id: 'sl-app',  key: 'app',          label: () => t('syslog_app'),          type: 'select',         minWidth: '130px' },
@@ -70,6 +71,8 @@ async function renderSyslog() {
         clearTimeout(_qTimer);
         _qTimer = setTimeout(() => { _syslogFilters.q = e.target.value.trim(); _syslogFilterChanged(); }, 350);
     };
+    document.getElementById('sl-src').onchange = (e) => _syslogSetSource(e.target.value);
+    _loadSyslogSources();
     // Facets (DISTINCT host/app) fill the filter dropdowns; load them in the
     // background so a slow DISTINCT never blocks the message list from showing.
     _loadSyslogFacets();
@@ -77,8 +80,42 @@ async function renderSyslog() {
     _syslogInitAutoRefresh();
 }
 
+// The source selector: the internal source, then the external ones this user may read.
+// Hidden while there is nothing to choose between.
+async function _loadSyslogSources() {
+    const d = await apiGet('/api/v1/syslog/sources');
+    _syslogSources = (d && d.sources) || [{ uid: 'internal', name: '', internal: true }];
+    const el = document.getElementById('sl-src');
+    if (!el) return;
+    if (!_syslogSources.some(s => s.uid === _syslogSrc)) {
+        // Gone, switched off, or no longer granted: back to the internal one.
+        _syslogSetSource('internal');
+    }
+    el.innerHTML = _syslogSources.map(s => {
+        const label = s.internal ? t('syslog_source_internal') : (s.name + (s.error ? ' ⚠' : ''));
+        return `<option value="${escAttr(s.uid)}">${esc(label)}</option>`;
+    }).join('');
+    el.value = _syslogSrc;
+    if (el.parentElement) el.parentElement.classList.toggle('d-none', _syslogSources.length <= 1);
+}
+
+function _syslogSetSource(uid) {
+    uid = uid || 'internal';
+    if (uid === _syslogSrc) return;
+    _syslogSrc = uid;
+    try { localStorage.setItem('ss_syslog_src', uid); } catch (_) { /* per-browser convenience */ }
+    // Hosts and programs are another table's: a filter chosen in one means nothing in the next.
+    _syslogFilters.hostname = [];
+    _syslogFilters.app = [];
+    _syslogPage = 1;
+    const st = document.getElementById('sl-stats');
+    if (st) delete st.dataset.loaded;
+    _loadSyslogFacets();
+    _loadSyslog();
+}
+
 async function _loadSyslogFacets() {
-    const f = await apiGet('/api/v1/syslog/facets');
+    const f = await apiGet('/api/v1/syslog/facets' + _syslogSrcParam('?'));
     if (!f) return;
     const fill = (id, vals, cur) => {
         const el = document.getElementById(id);
@@ -120,6 +157,7 @@ function _syslogQS() {
         if (Array.isArray(v)) { for (const x of v) if (x !== '' && x != null) qs.append(k, x); }
         else if (v !== '' && v != null) qs.set(k, v);
     }
+    if (_syslogSrc && _syslogSrc !== 'internal') qs.set('src', _syslogSrc);
     return qs;
 }
 

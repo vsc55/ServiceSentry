@@ -22,7 +22,7 @@ from contextlib import contextmanager
 
 from .schema import (
     ColumnInfo, IndexInfo, SchemaDiff, TableSpec,
-    create_index_ddl, create_table_ddl, default_clause, diff_table,
+    _index_key_cols, create_index_ddl, create_table_ddl, default_clause, diff_table,
 )
 
 _log = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ class BaseConnector(ABC):
     DDL_REAL:          str = 'REAL'
     DDL_TEXT:          str = 'TEXT'
     DDL_INTEGER:       str = 'INTEGER'
+    DDL_DATETIME:      str = 'DATETIME'
     # Type for a TEXT column that is part of a key/index.  SQLite/PostgreSQL index
     # TEXT fine, so this defaults to TEXT; MySQL/MariaDB can't index TEXT without a
     # prefix length, so it overrides this to a bounded VARCHAR.
@@ -312,6 +313,7 @@ class BaseConnector(ABC):
             'TEXT_KEY':      self.DDL_TEXT_KEY,
             'INTEGER':       self.DDL_INTEGER,
             'REAL':          self.DDL_REAL,
+            'DATETIME':      self.DDL_DATETIME,
             'AUTOINCREMENT': self.DDL_AUTOINCREMENT,
         }
 
@@ -399,7 +401,7 @@ class BaseConnector(ABC):
             bits.append('idx~=' + ','.join(i.name for i in diff.changed_indexes))
         return '; '.join(bits) or 'no-op'
 
-    def _column_type_clause(self, col) -> str:
+    def _column_type_clause(self, col, keyed: bool = False) -> str:
         """Native type + inline constraints for a single ADD COLUMN on an EXISTING table.
 
         Retro-adding a column to a *populated* table is constrained across engines:
@@ -411,8 +413,14 @@ class BaseConnector(ABC):
         * ``UNIQUE`` is **never** inlined here — :meth:`_apply_incremental` adds a separate
           unique index after the column, so a table with duplicates fails on the index (a
           clear, recoverable error) rather than mid-ALTER.
+
+        *keyed* is a column an index will cover: a TEXT one takes ``TEXT_KEY`` (a bounded
+        VARCHAR on MySQL), as it would in CREATE TABLE.
         """
-        native = self._type_map.get(col.type.upper(), col.type)
+        token = col.type.upper()
+        if keyed and token == 'TEXT':
+            token = 'TEXT_KEY'
+        native = self._type_map.get(token, col.type)
         parts = [native]
         if not col.nullable and col.default is not None:
             parts.append('NOT NULL')
@@ -426,6 +434,10 @@ class BaseConnector(ABC):
 
     def _apply_incremental(self, spec: TableSpec, diff: SchemaDiff) -> None:
         """Add trailing columns and reconcile indexes without a rebuild."""
+        # A column an index is about to cover has to be of a type the engine can index: plain
+        # TEXT is not, on MySQL. CREATE TABLE already knew (`keyed`); ADD COLUMN did not, so the
+        # first indexed TEXT column added to a table that already existed failed its index there.
+        indexed = {c for idx in spec.indexes for c in _index_key_cols(idx.columns)}
         for col in diff.missing_columns:
             if not col.nullable and col.default is None:
                 _log.warning(
@@ -433,7 +445,8 @@ class BaseConnector(ABC):
                     'default cannot be added to a populated table on all engines; backfill '
                     'and tighten separately if required', spec.name, col.name)
             self.add_column_if_missing(
-                spec.name, col.name, self._column_type_clause(col))
+                spec.name, col.name,
+                self._column_type_clause(col, keyed=col.name in indexed or col.unique))
             if col.unique:   # separate unique index (not inlined on ADD COLUMN)
                 self.execute_ddl(create_index_ddl(
                     f'ux_{spec.name}_{col.name}', spec.name, [col.name], True, self.quote_ident))

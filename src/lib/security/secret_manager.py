@@ -33,6 +33,7 @@ ENC_PREFIX = 'enc:'
 # key set via the ``keys=`` parameter of the functions below.
 ENCRYPT_KEYS: frozenset[str] = frozenset({
     'password', 'ssh_password', 'token', 'secret',
+    'db_password',          # a "database" credential's password (external syslog sources)
     'api_key',              # Freshservice API key (Basic auth: opens the ticket system)
     'bind_password',        # LDAP service-account password
     'client_secret',        # OIDC client secret

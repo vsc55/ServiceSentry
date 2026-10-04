@@ -254,6 +254,7 @@ Las claves equivalen a la sección `syslog_db` del `config.json` y replican las 
 | Variable | Equivale a | Ejemplo |
 |----------|------------|---------|
 | `SS_SYSLOG_DB_ENABLED` | `syslog_db.enabled` | `1` |
+| `SS_SYSLOG_DB_MODE` | `syslog_db.mode` | `own` (la mantiene el panel) o `external` (la de rsyslog, solo lectura) |
 | `SS_SYSLOG_DB_DRIVER` | `syslog_db.driver` | `mysql` |
 | `SS_SYSLOG_DB_HOST` | `syslog_db.host` | `syslog-db` |
 | `SS_SYSLOG_DB_PORT` | `syslog_db.port` | `3306` |
@@ -682,8 +683,9 @@ el esquema de *tags*/placeholders y los endpoints) en
 
 ServiceSentry puede actuar como **servidor de syslog**, recibiendo eventos (RFC
 3164 / RFC 5424) de servidores externos por **UDP/TCP(+TLS)**, almacenándolos en
-la tabla `syslog` de la base de datos y mostrándolos en la pestaña **Syslog** del
-panel. Las notificaciones de syslog se gestionan con el **Gestor de eventos**
+la tabla `SystemEvents` de la base de datos (la de rsyslog, ver
+[rsyslog en la misma tabla](#rsyslog-en-la-misma-tabla)) y mostrándolos en la pestaña
+**Syslog** del panel. Las notificaciones de syslog se gestionan con el **Gestor de eventos**
 (reglas con `source='syslog'`, ver [Gestor de eventos](#gestor-de-eventos)), no con
 campos de alerta en esta sección.
 
@@ -702,6 +704,7 @@ solo-admin). Campos:
 | `allowed_sources` | str | `''` | IPs **o** CIDRs permitidos (coma/espacio/líneas), como lista de chips validada. Vacío = todos. |
 | `retention_days` | int | 30 | Borra mensajes más antiguos (0 = sin límite). |
 | `max_rows` | int | 500000 | Tope de filas; rota las más antiguas (0 = sin tope). |
+| `time_zone` | str | `UTC` | Zona de las fechas de la tabla, que no la llevan: `UTC` o `local` (la hora del servidor). Se aplica al guardar y al leer. Ver [rsyslog en la misma tabla](#rsyslog-en-la-misma-tabla). |
 
 Los orígenes que no pasan el `allowed_sources` se descartan y quedan registrados en
 el **registro de descartes** (panel colapsable en la pestaña Syslog, con
@@ -711,6 +714,93 @@ retención se aplica periódicamente. Soporta escuchar en **varias interfaces**
 (IPv4 e IPv6). Los mensajes pueden almacenarse en una **BD dedicada** (ver
 [Base de datos de syslog](#base-de-datos-de-syslog-ss_syslog_db_)). Permisos:
 `syslog_view` (ver) y `syslog_delete` (vaciar).
+
+### rsyslog en la misma tabla
+
+La tabla de mensajes es la `SystemEvents` de rsyslog, la que crea su `createDB.sql`. Eso
+permite tres montajes:
+
+- **El panel recibe y rsyslog no interviene.** Es lo de siempre.
+- **rsyslog recibe y escribe con `ommysql`/`ompgsql`** en la base de syslog del panel. Se
+  configura `syslog_db` apuntando a esa base y el panel muestra lo que rsyslog guarda. Se puede
+  tener el receptor del panel apagado o los dos a la vez.
+- **Ya hay una base de rsyslog**, por ejemplo la de LogAnalyzer. Se apunta `syslog_db` a ella,
+  con uno de los dos modos de `syslog_db|mode` (selector «Modo» de la tarjeta):
+  - `own` (**Propia**): el panel adopta su `SystemEvents`. Le añade sus cinco columnas al
+    final y los índices, no la reconstruye y no toca ninguna fila. Su receptor puede escribir
+    en ella.
+  - `external` (**Externa**): el panel **solo la lee**, igual que una fuente externa. No toca
+    su esquema, no escribe, no purga ni vacía («Vaciar» responde 409) y su receptor no arranca:
+    quien recibe es rsyslog. Servicios no deja iniciarlo. Requiere reiniciar.
+- **Una base de rsyslog que el panel lee junto a la suya**: una
+  [fuente externa](#fuentes-externas-de-syslog).
+
+Con la plantilla de serie de rsyslog funciona tal cual:
+
+```text
+module(load="ommysql")
+action(type="ommysql" server="db" db="servicesentry_syslog" uid="rsyslog" pwd="…")
+```
+
+Esa plantilla guarda la **hora local** de la máquina de rsyslog. En ese caso hay que poner
+`time_zone` = `local`, siempre que el panel esté en la misma zona horaria. Además deja vacías
+nuestras columnas: la IP del emisor no se ve, y en los filtros la app aparece como el tag
+entero (`sshd[812]:`). Para tenerlo todo, y en UTC, se usa esta plantilla:
+
+```text
+template(name="ServiceSentry" type="string" option.sql="on"
+  string="INSERT INTO SystemEvents (Message, Facility, FromHost, Priority, DeviceReportedTime, ReceivedAt, InfoUnitID, SysLogTag, FromHostIP, ProgramName, ProcessID, MsgID, RawMessage) VALUES ('%msg%', %syslogfacility%, '%HOSTNAME%', %syslogpriority%, '%timereported:::date-mysql,date-utc%', '%timegenerated:::date-mysql,date-utc%', %iut%, '%syslogtag%', '%fromhost-ip%', '%programname%', '%procid%', '%msgid%', '%rawmsg%')")
+action(type="ommysql" server="db" db="servicesentry_syslog" uid="rsyslog" pwd="…"
+       template="ServiceSentry")
+```
+
+Para PostgreSQL (`ompgsql`) es la misma plantilla con `option.stdsql="on"` y `date-pgsql` en
+lugar de `date-mysql`. `date-utc` necesita rsyslog 8.18 o posterior.
+
+- `Priority` es la **severidad** (0–7), como en rsyslog, y no el PRI completo.
+- `FromHost` y `SysLogTag` son `varchar(60)` en la tabla de rsyslog. El receptor del panel
+  recorta a 60 caracteres lo que escribe en ellas.
+- Las reglas del Gestor de eventos con `source='syslog'` también ven las filas de rsyslog: el
+  cursor avanza por `ID`.
+
+### Fuentes externas de syslog
+
+Además de su tabla propia, el panel puede leer las bases de datos de otros programas: la
+`SystemEvents` de rsyslog o la de LogAnalyzer. Cada una es una **fuente externa** y se
+configura en **Configuración > Syslog > Fuentes externas**: nombre, motor (MySQL, MariaDB,
+PostgreSQL o un fichero SQLite), conexión, zona horaria de sus fechas y si la vigilan las
+reglas de eventos. «Probar conexión» dice si responde, si tiene la tabla y cuántos mensajes
+hay. Se guardan en la tabla `syslog_sources` de la base principal, con la contraseña cifrada.
+
+El usuario y la contraseña pueden escribirse en la fuente o salir de una **credencial
+guardada** de tipo «Base de datos» (sección Credenciales; tipo de serie, como `ssh`). Con una
+credencial elegida, su usuario y contraseña sustituyen a los de la fuente. Si se borra o se
+desactiva, la fuente da error en vez de conectar sin ellos, y el uso de la credencial lista las
+fuentes que entran con ella.
+
+- **Solo se leen.** El panel no toca su esquema: ni columnas, ni índices, ni
+  `SystemEventsProperties`. No escribe, no purga y no vacía. Basta un usuario con permiso de
+  `SELECT`. Las columnas nuestras que falten salen vacías; la app y el PID salen del
+  `SysLogTag`.
+- **Una cada vez.** La página Syslog, la pestaña Logs de un dispositivo y las tarjetas de
+  syslog del Overview tienen un selector «Fuente», que por defecto es la interna. Solo aparece
+  cuando el usuario puede ver más de una.
+- **Permisos.** `syslog_view` da la interna. Las externas piden además
+  `syslog_sources_all_view` (todas) o `syslogsrc.<uid>.view` (una concreta), que se conceden
+  en **Acceso > Permisos**.
+- **Reglas de eventos.** Una regla de syslog tiene «Fuente de logs»: la interna (lo de
+  siempre), una externa o todas. Una externa solo se evalúa si tiene marcado «Vigilar con
+  reglas»; entonces el gestor de eventos recorre sus filas nuevas por `ID` con su propio
+  cursor (`syslog:<uid>`), y la notificación lleva el nombre de la fuente.
+- **Una fuente que no responde** solo afecta a quien la está mirando: la página lo dice, con
+  el motivo, y no se reintenta la conexión durante 30 s. La conexión tiene un tiempo de espera
+  de 5 s y cada consulta de 30 s.
+- **Rendimiento.** Sin índices propios, filtrar o agrupar una tabla de rsyslog grande la
+  recorre entera; la lista va por la clave primaria. Si la tabla es grande, conviene que el
+  DBA cree índices en `ReceivedAt`, `Priority` y `FromHost`.
+- **Lo que no hacen:** el receptor del panel nunca escribe en ellas, la retención no las toca y
+  «Vaciar» responde 409. Quitar una fuente no toca su base de datos; retira los permisos que la
+  nombraban.
 
 ### Receptor syslog como servicio independiente
 

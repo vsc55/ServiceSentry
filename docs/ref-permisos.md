@@ -9,8 +9,8 @@
 >   [explica-web-admin.md](explica-web-admin.md).
 > - Los **endpoints** de roles/grupos/usuarios están en [ref-api.md](ref-api.md).
 
-El sistema usa **93 flags granulares** por acción y recurso. `PERMISSIONS` (tupla en el
-código) tiene exactamente esos 93 flags. Cada paquete declara los suyos en su `manifest.py`
+El sistema usa **94 flags granulares** por acción y recurso. `PERMISSIONS` (tupla en el
+código) tiene exactamente esos 94 flags. Cada paquete declara los suyos en su `manifest.py`
 (`MODULE_PERMISSIONS`: un grupo, o una lista de grupos cuando sus pantallas viven en dos sitios
 del menú), y la pantalla **Acceso → Permisos** los enseña agrupados con el nombre y la
 descripción de `permission_labels` / `permission_hints` de cada idioma.
@@ -21,9 +21,9 @@ descripción de `permission_labels` / `permission_hints` de cada idioma.
 
 | Rol | Permisos |
 |-----|----------|
-| `admin` | Todos los permisos (93 flags), `mfa_reset_others` incluido |
-| `editor` | 52 flags: `services_view`, `services_control`, `checks_view`, `checks_run`, `syslog_view`, `ipban_ban_view`, `ipban_ban_edit`, `ipban_whitelist_view`, `ipban_history_view`, `ipban_service_edit`, `ipban_config_edit`, `events_view`, `events_edit`, `events_notify_view`, `infra_view`, `infra_collect`, `infra_watch`, `infra_metrics_view`, `infra_results_view`, `infra_raw_view`, `dcim_view`, `dcim_edit`, `dcim_cable_edit`, `dcim_catalog_view`, `dcim_catalog_manage`, `dcim_build_edit`, `orgs_view`, `orgs_all_view`, `sessions_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit`, `audit_view`, `jobs_view`, `modules_view`, `modules_edit`, `devices_view`, `devices_edit`, `snmp_view`, `snmp_manage`, `clusters_view`, `clusters_edit`, `credentials_view`, `credentials_edit`, `config_view`, `config_edit`, `overview_view`, `overview_edit`, `history_view` |
-| `viewer` | 28 flags, solo lectura: `services_view`, `checks_view`, `syslog_view`, `ipban_ban_view`, `ipban_whitelist_view`, `ipban_history_view`, `events_view`, `events_notify_view`, `infra_view`, `infra_metrics_view`, `infra_results_view`, `dcim_view`, `dcim_catalog_view`, `orgs_view`, `orgs_all_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `audit_view`, `jobs_view`, `modules_view`, `devices_view`, `snmp_view`, `clusters_view`, `credentials_view`, `overview_view`, `history_view` (sin `config_view`, que expone secretos sin enmascarar, ni `infra_raw_view`) |
+| `admin` | Todos los permisos (94 flags), `mfa_reset_others` incluido |
+| `editor` | 53 flags: `services_view`, `services_control`, `checks_view`, `checks_run`, `syslog_view`, `syslog_sources_all_view`, `ipban_ban_view`, `ipban_ban_edit`, `ipban_whitelist_view`, `ipban_history_view`, `ipban_service_edit`, `ipban_config_edit`, `events_view`, `events_edit`, `events_notify_view`, `infra_view`, `infra_collect`, `infra_watch`, `infra_metrics_view`, `infra_results_view`, `infra_raw_view`, `dcim_view`, `dcim_edit`, `dcim_cable_edit`, `dcim_catalog_view`, `dcim_catalog_manage`, `dcim_build_edit`, `orgs_view`, `orgs_all_view`, `sessions_view`, `users_view`, `users_edit`, `roles_view`, `roles_edit`, `groups_view`, `groups_edit`, `audit_view`, `jobs_view`, `modules_view`, `modules_edit`, `devices_view`, `devices_edit`, `snmp_view`, `snmp_manage`, `clusters_view`, `clusters_edit`, `credentials_view`, `credentials_edit`, `config_view`, `config_edit`, `overview_view`, `overview_edit`, `history_view` |
+| `viewer` | 29 flags, solo lectura: `services_view`, `checks_view`, `syslog_view`, `syslog_sources_all_view`, `ipban_ban_view`, `ipban_whitelist_view`, `ipban_history_view`, `events_view`, `events_notify_view`, `infra_view`, `infra_metrics_view`, `infra_results_view`, `dcim_view`, `dcim_catalog_view`, `orgs_view`, `orgs_all_view`, `sessions_view`, `users_view`, `roles_view`, `groups_view`, `audit_view`, `jobs_view`, `modules_view`, `devices_view`, `snmp_view`, `clusters_view`, `credentials_view`, `overview_view`, `history_view` (sin `config_view`, que expone secretos sin enmascarar, ni `infra_raw_view`) |
 
 > Los roles integrados **no pueden eliminarse** ni cambiar sus permisos vía API. Sí permiten
 > actualizar la **etiqueta** (`label`) y gestionar qué usuarios/grupos lo tienen asignado. El
@@ -32,7 +32,7 @@ descripción de `permission_labels` / `permission_hints` de cada idioma.
 
 ## Roles personalizados
 
-Se crean desde **Acceso → Roles** asignando cualquier combinación de los 93 permisos. Se
+Se crean desde **Acceso → Roles** asignando cualquier combinación de los 94 permisos. Se
 persisten en la tabla `roles`.
 
 Sus permisos se editan en **un** sitio: la sub-sección **Acceso → Permisos**, que pone todos los
@@ -55,7 +55,7 @@ desde el campo de pertenencia en la BD, ver [ref-esquema-bd.md](ref-esquema-bd.m
 
 ---
 
-## Catálogo de permisos (93 flags)
+## Catálogo de permisos (94 flags)
 
 Los grupos son los de la pantalla de permisos, con su nombre. Los que no dicen rol no se conceden
 a `editor` ni a `viewer` (sí a `admin`, que los tiene todos).
@@ -121,8 +121,9 @@ a `editor` ni a `viewer` (sí a `admin`, que los tiene todos).
 | | `checks_delete` | Vaciar la tabla de estado de los checks (Config › Mantenimiento). **Sin rol por defecto**: antes iba con `checks_run` —que tiene `editor`— y eso dejaba una acción destructiva al alcance de un rol pensado para *operar* la monitorización, no para borrar lo que reportó |
 | **Historial** | `history_view` | Ver gráficas y series del historial |
 | | `history_delete` | Borrar datos del historial |
-| **Syslog** | `syslog_view` | Ver mensajes syslog y descartes |
-| | `syslog_delete` | Vaciar mensajes / descartes |
+| **Syslog** | `syslog_view` | Ver mensajes syslog y descartes (la fuente interna) |
+| | `syslog_sources_all_view` | Leer **todas** las fuentes externas (bases de datos de otros programas, como rsyslog). Sin esta bandera solo las concedidas una a una (`syslogsrc.<uid>.view`); en cualquier caso hace falta también `syslog_view` |
+| | `syslog_delete` | Vaciar mensajes / descartes (solo la fuente interna: una externa nunca se vacía) |
 | **Servicios** | `services_view` | Ver el estado de los servicios |
 | | `services_control` | Iniciar/detener servicios |
 | **Eventos** | `events_view` | Ver la sección Eventos y sus reglas de notificación |
@@ -171,6 +172,7 @@ Además de los flags globales, existen permisos **dinámicos** por recurso concr
 - `server.<uid>.<acción>` — permiso por dispositivo (ver [explica-dispositivos.md](explica-dispositivos.md)). `add` es añadir checks a **ese** dispositivo, no dar de alta uno.
 - `cluster.<uid>.<acción>` — permiso por clúster.
 - `org.<uid>.view` — **qué empresas ve** alguien en el inventario físico, para el rack que comparten varias sociedades de un grupo (ver [explica-dcim.md](explica-dcim.md#7-permisos)). **Solo `view`**, a diferencia de los tres de arriba: hoy solo se estrecha la lectura, y una clave para una acción que nadie ejecuta es una casilla que no concede nada y lo parece. Se concede en **Acceso → Permisos**, en las filas por empresa del grupo Empresas.
+- `syslogsrc.<uid>.view` — **qué fuentes externas de syslog lee** alguien: bases de datos de otros programas (rsyslog, LogAnalyzer) que el panel consulta sin escribir en ellas. **Solo `view`**, porque una fuente externa nunca se escribe. Se concede en **Acceso → Permisos**, en las filas por fuente del grupo Syslog; `syslog_sources_all_view` las da todas. Al quitar una fuente se retiran de los roles las claves que la nombraban.
 
 > **Mueren con su recurso.** Borrar un dispositivo, quitar un módulo de la configuración, eliminar
 > un clúster o eliminar una empresa **poda** sus claves de todos los roles personalizados, con entrada de auditoría
@@ -189,7 +191,7 @@ Además de los flags globales, existen permisos **dinámicos** por recurso concr
   son identidad, la nombran users/groups/roles/resolución/SCIM/CLI, y no las posee ningún dominio.
 - `ROLES` — las claves de rol integrado, mayor privilegio primero. **Derivada** de
   `BUILTIN_ROLE_UIDS`, no escrita otra vez.
-- `PERMISSIONS` — tupla con los 93 flags.
+- `PERMISSIONS` — tupla con los 94 flags.
 - `PERMISSION_GROUPS` — lista de `(key_i18n, [perms])` con la que **Acceso → Permisos** (y los
   diálogos de tokens de API) agrupan los flags.
 - `BUILTIN_ROLE_PERMISSIONS` — dict `{role: frozenset}` de los roles integrados.

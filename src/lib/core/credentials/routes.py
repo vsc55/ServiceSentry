@@ -39,6 +39,14 @@ def register(app, wa):
     def _store():
         return getattr(wa, '_credentials_store', None)
 
+    def _syslog_sources():
+        """The external syslog sources (they may log in with a credential), or none."""
+        reg = getattr(wa, '_syslog_sources', None)
+        try:
+            return reg.list() if reg is not None else []
+        except Exception:  # pylint: disable=broad-except
+            return []
+
     @app.route('/api/v1/credentials', methods=['GET'])
     @login_required
     def api_get_credentials():
@@ -127,7 +135,8 @@ def register(app, wa):
             return jsonify({'error': wa._t('access_denied')}), 403
         hs = getattr(wa, '_devices_store', None)
         devices = hs.list(decrypt=False) if hs is not None else []
-        return jsonify({'usage': cred_svc.find_all_credential_usage(devices, wa._load_modules())})
+        return jsonify({'usage': cred_svc.find_all_credential_usage(
+            devices, wa._load_modules(), _syslog_sources())})
 
     @app.route('/api/v1/credentials/<uid>/usage', methods=['GET'])
     @login_required
@@ -140,7 +149,8 @@ def register(app, wa):
             return jsonify({'error': wa._t('access_denied')}), 403
         hs = getattr(wa, '_devices_store', None)
         devices = hs.list(decrypt=False) if hs is not None else []
-        return jsonify(cred_svc.find_credential_usage(uid, devices, wa._load_modules()))
+        return jsonify(cred_svc.find_credential_usage(uid, devices, wa._load_modules(),
+                                                      _syslog_sources()))
 
     @app.route('/api/v1/credentials/<uid>', methods=['PUT'])
     @login_required

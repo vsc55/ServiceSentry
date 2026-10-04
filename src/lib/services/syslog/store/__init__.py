@@ -9,6 +9,6 @@ Importa desde aquí: ``from lib.services.syslog.store import SyslogStore, Syslog
 """
 
 from .drops import SyslogDropsStore
-from .messages import SyslogStore
+from .messages import ReadOnlyStore, SyslogStore, is_read_only
 
-__all__ = ['SyslogStore', 'SyslogDropsStore']
+__all__ = ['SyslogStore', 'SyslogDropsStore', 'ReadOnlyStore', 'is_read_only']

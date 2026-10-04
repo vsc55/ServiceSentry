@@ -291,6 +291,14 @@ def build_config_schema() -> dict:
                                      'all': 'mfa_req_all'}),
         'default': cfg_default('web_admin|mfa_required'),
     }
+    # The zone of the syslog table's times: two values, because those are the two rsyslog
+    # writes — UTC with a `date-utc` template, the machine's local time with its stock one.
+    schema['syslog|time_zone'] = {
+        **cfg_meta('syslog|time_zone'),
+        'options': ['UTC', 'local'],
+        'options_i18n': _opt_labels({'UTC': 'syslog_tz_utc', 'local': 'syslog_tz_local'}),
+        'default': cfg_default('syslog|time_zone'),
+    }
     schema['web_admin|audit_sort'] = {
         'options': ['time', 'event', 'user', 'ip'],
         'options_i18n': _opt_labels({'time': 'col_time', 'event': 'col_event',
@@ -413,6 +421,14 @@ def build_config_schema() -> dict:
         'placeholder_map_field': 'driver', 'placeholder_map': _DB_PORT_DEFAULTS,
     }
     schema['syslog_db|driver'] = {**cfg_meta('syslog_db|driver'), 'options': _DB_DRIVERS}
+    schema['syslog_db|mode'] = {
+        **cfg_meta('syslog_db|mode'),
+        'options': ['own', 'external'],
+        'options_i18n': _opt_labels({'own': 'syslog_db_mode_own',
+                                     'external': 'syslog_db_mode_external'}),
+        'default': cfg_default('syslog_db|mode'),
+    }
+
     schema['syslog_db|port'] = {
         **cfg_meta('syslog_db|port'), 'min': 1, 'max': 65535, 'nullable': True,
         'placeholder_map_field': 'driver', 'placeholder_map': _DB_PORT_DEFAULTS,

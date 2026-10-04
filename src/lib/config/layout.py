@@ -147,8 +147,12 @@ CARDS: tuple[dict, ...] = (
     {'tab': 'syslog', 'id': 'syslog_conn',      'title_key': 'syslog_sec_connection', 'icon': 'bi-ethernet'},
     {'tab': 'syslog', 'id': 'syslog_security',  'title_key': 'syslog_sec_security',   'icon': 'bi-shield-lock'},
     {'tab': 'syslog', 'id': 'syslog_retention', 'title_key': 'syslog_sec_retention',  'icon': 'bi-archive'},
+    {'tab': 'syslog', 'id': 'syslog_table',     'title_key': 'syslog_sec_table',      'icon': 'bi-table'},
     {'tab': 'syslog', 'id': 'syslog_db', 'section': 'syslog_db', 'icon': 'bi-database-gear',
      'renderer': 'syslog_db'},
+    # Other programs' log databases (rsyslog), read beside the panel's own; their own API.
+    {'tab': 'syslog', 'id': 'syslog_sources', 'title_key': 'syslog_sec_sources',
+     'icon': 'bi-diagram-3', 'renderer': 'syslog_sources'},
 
     # ══ Authentication ══════════════════════════════════════════════════════
     {'tab': 'auth', 'id': 'pw_policy',      'title_key': 'pw_policy_section',      'icon': 'bi-shield-lock'},

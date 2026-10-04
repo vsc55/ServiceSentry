@@ -45,12 +45,12 @@ def db(tmp_path):
     con = SQLiteConnector(str(tmp_path / 'data.db'))
     con.reconcile_table(_spec('devices', ['uid', 'name', 'address']))
     con.reconcile_table(_spec('credentials', ['uid', 'name', 'data']))
-    con.reconcile_table(_spec('syslog', ['uid', 'msg']))
+    con.reconcile_table(_spec('SystemEvents', ['uid', 'msg']))
     con.reconcile_table(_spec('audit', ['uid', 'event']))
     con.execute("INSERT INTO devices (uid, name, address) VALUES ('h1','PVE01','10.0.0.1')")
     con.execute("INSERT INTO credentials (uid, name, data) VALUES ('c1','SNMP',?)",
                 (json.dumps({'version': '2c', 'community': 'enc:gAAAAAsecret'}),))
-    con.execute("INSERT INTO syslog (uid, msg) VALUES ('s1','noisy')")
+    con.execute("INSERT INTO SystemEvents (uid, msg) VALUES ('s1','noisy')")
     con.execute("INSERT INTO audit (uid, event) VALUES ('a1','login_ok')")
     con.commit()
     yield con
@@ -74,11 +74,11 @@ class TestWhatGoesIn:
         assert res['ok'], res.get('message')
         tables = set(res['manifest']['tables'])
         assert {'devices', 'credentials'} <= tables
-        assert 'syslog' not in tables and 'audit' not in tables
+        assert 'SystemEvents' not in tables and 'audit' not in tables
 
     def test_the_bulky_parts_are_opt_in(self, db, tmp_path):
         res = _make(db, tmp_path, parts=['core', 'syslog', 'audit'])
-        assert {'syslog', 'audit'} <= set(res['manifest']['tables'])
+        assert {'SystemEvents', 'audit'} <= set(res['manifest']['tables'])
 
     def test_a_required_part_goes_in_whether_asked_for_or_not(self, db, tmp_path):
         """A copy without `core` restores nothing, and the caller finds that out later."""
@@ -162,10 +162,10 @@ class TestPuttingItBack:
     def test_restoring_one_part_leaves_the_others_alone(self, db, tmp_path):
         _make(db, tmp_path, parts=['core', 'syslog'])
         db.execute("DELETE FROM devices")
-        db.execute("DELETE FROM syslog")
+        db.execute("DELETE FROM SystemEvents")
         db.commit()
         bk_restore.restore_backup(db, str(tmp_path), 'copia', parts=['syslog'])
-        assert db.fetchone('SELECT COUNT(*) FROM syslog')[0] == 1
+        assert db.fetchone('SELECT COUNT(*) FROM SystemEvents')[0] == 1
         assert db.fetchone('SELECT COUNT(*) FROM devices')[0] == 0
 
     def test_a_column_the_schema_dropped_does_not_sink_the_restore(self, db, tmp_path):
@@ -667,7 +667,7 @@ class TestChoosingWhichTablesComeBack:
         by_id = {p['id']: [tb['name'] for tb in p['tables']] for p in out['parts']}
         assert by_id['core'] == ['credentials', 'devices']
         assert by_id['audit'] == ['audit']
-        assert by_id['syslog'] == ['syslog']
+        assert by_id['syslog'] == ['SystemEvents']
 
     def test_the_catalogue_carries_the_row_counts(self, db, tmp_path):
         """What is in the box before it is put back. They come from the manifest, the only
@@ -763,9 +763,9 @@ class TestSyslogInADatabaseOfItsOwn:
         main.execute("INSERT INTO devices (uid, name) VALUES ('h1','PVE01')")
         main.commit()
         side = SQLiteConnector(str(tmp_path / 'syslog.db'))
-        side.reconcile_table(_spec('syslog', ['uid', 'msg']))
+        side.reconcile_table(_spec('SystemEvents', ['uid', 'msg']))
         side.reconcile_table(_spec('syslog_drops', ['uid', 'reason']))
-        side.execute("INSERT INTO syslog (uid, msg) VALUES ('s1','noisy')")
+        side.execute("INSERT INTO SystemEvents (uid, msg) VALUES ('s1','noisy')")
         side.execute("INSERT INTO syslog_drops (uid, reason) VALUES ('d1','rate')")
         side.commit()
         yield main, side
@@ -779,7 +779,7 @@ class TestSyslogInADatabaseOfItsOwn:
                                       include_secrets=True,
                                       connectors={'syslog': side})
         assert res['ok'], res.get('message')
-        assert res['manifest']['tables'].get('syslog') == 1, res['manifest']['tables']
+        assert res['manifest']['tables'].get('SystemEvents') == 1, res['manifest']['tables']
         assert res['manifest']['tables'].get('syslog_drops') == 1
 
     def test_without_the_map_the_part_comes_back_empty(self, two, tmp_path):
@@ -789,18 +789,18 @@ class TestSyslogInADatabaseOfItsOwn:
         res = bk_create.create_backup(main, 'copia', var_dir=str(tmp_path),
                                       config_dir=str(tmp_path), parts=['core', 'syslog'],
                                       include_secrets=True)
-        assert 'syslog' not in res['manifest']['tables']
+        assert 'SystemEvents' not in res['manifest']['tables']
 
     def test_the_restore_puts_them_back_where_they_live(self, two, tmp_path):
         main, side = two
         bk_create.create_backup(main, 'copia', var_dir=str(tmp_path), config_dir=str(tmp_path),
                                 parts=['core', 'syslog'], include_secrets=True,
                                 connectors={'syslog': side})
-        side.execute('DELETE FROM syslog')
+        side.execute('DELETE FROM SystemEvents')
         side.commit()
         out = bk_restore.restore_backup(main, str(tmp_path), 'copia', connectors={'syslog': side})
         assert out['ok'], out.get('message')
-        assert side.fetchone('SELECT msg FROM syslog')[0] == 'noisy'
+        assert side.fetchone('SELECT msg FROM SystemEvents')[0] == 'noisy'
         assert main.fetchone('SELECT name FROM devices')[0] == 'PVE01'
 
     def test_the_second_database_does_not_pollute_core(self, two, tmp_path):
@@ -810,20 +810,20 @@ class TestSyslogInADatabaseOfItsOwn:
         by_part = {pid: tabs for pid, tabs, _err in
                    bk_parts.tables_by_part(main, {'core', 'syslog'}, {'syslog': side})}
         assert by_part['core'] == ['devices']
-        assert by_part['syslog'] == ['syslog', 'syslog_drops']
+        assert by_part['syslog'] == ['SystemEvents', 'syslog_drops']
 
     def test_each_database_gets_its_own_transaction(self, two):
         """Two databases cannot share one, and the guarantee that matters — the system tables
         land together or not at all — is kept where it means something."""
         main, side = two
-        groups = bk_restore._by_database([('core', ['devices']), ('syslog', ['syslog'])], main,
+        groups = bk_restore._by_database([('core', ['devices']), ('syslog', ['SystemEvents'])], main,
                                          {'syslog': side})
         assert [c for c, _g in groups] == [main, side]
 
     def test_one_database_stays_one_transaction(self, db):
         """With `syslog_db` off the web admin hands back the main connector for both, and a
         restore that split them into two transactions would give up the atomicity for nothing."""
-        groups = bk_restore._by_database([('core', ['devices']), ('syslog', ['syslog'])], db, {})
+        groups = bk_restore._by_database([('core', ['devices']), ('syslog', ['SystemEvents'])], db, {})
         assert len(groups) == 1
 
     def test_an_unreachable_second_database_costs_only_its_part(self, two, tmp_path):

@@ -18,6 +18,8 @@
 // with no code of their own.
 //: The companies the per-company rows are drawn from, fetched by `renderPermissions`.
 let _permOrgs = null;
+//: The external syslog sources, for their per-source rows — fetched the same way.
+let _permSyslogSources = null;
 
 const _PERM_RES_SPECS = [
     {
@@ -80,6 +82,17 @@ const _PERM_RES_SPECS = [
         items() {
             return (_permOrgs || []).map(o => ({ id: o.uid, name: o.name || o.uid,
                                                  sub: { type: 'text', text: o.short || '' } }))
+                .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        },
+    },
+    // External syslog sources (other programs' log databases): which of them somebody may
+    // read. View only — a source is never written. The internal one is `syslog_view`'s.
+    {
+        prefix: 'syslogsrc', group: 'perm_group_syslog', actions: ['view'],
+        info: () => t('syslogsrc_perms_info'), colLabel: () => t('syslog_source_label'),
+        globalFor: { view: 'syslog_sources_all_view' },
+        items() {
+            return (_permSyslogSources || []).map(s => ({ id: s.uid, name: s.name || s.uid }))
                 .sort((a, b) => String(a.name).localeCompare(String(b.name)));
         },
     },

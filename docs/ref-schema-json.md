@@ -1063,7 +1063,8 @@ y [explica-arquitectura.md → Base de datos de syslog dedicada](explica-arquite
 
 | Tabla | PK | Columnas clave | Índices | Store |
 |-------|----|----------------|---------|-------|
-| `syslog` | `id` (auto) | `ts` (REAL), `received_at`, `source`, `hostname`, `app`, `procid`, `severity`, `facility`, `msgid`, `message`, `raw` | `idx_syslog_ts`, `idx_syslog_sev_ts`, `idx_syslog_host_ts`, `idx_syslog_app_ts`, `idx_syslog_fac_ts` | `services/syslog/store/messages.py` |
+| `SystemEvents` (la de rsyslog) | `ID` (auto) | `ReceivedAt`/`DeviceReportedTime` (DATETIME), `Facility`, `Priority` (severidad), `FromHost`, `Message`, `SysLogTag`, `InfoUnitID` y el resto del `createDB.sql`; detrás, las nuestras: `FromHostIP`, `ProgramName`, `ProcessID`, `MsgID`, `RawMessage` | `idx_systemevents_received`, `idx_systemevents_prio`, `idx_systemevents_host`, `idx_systemevents_program`, `idx_systemevents_facility` | `services/syslog/store/messages.py` |
+| `SystemEventsProperties` (la de rsyslog) | `ID` (auto) | `SystemEventID`, `ParamName`, `ParamValue` | — | `services/syslog/store/messages.py` |
 | `syslog_drops` | `uid` | `source` (UNIQUE), `transport`, `count`, `first_seen`, `last_seen` | `idx_syslog_drops_last` | `services/syslog/store/drops.py` |
 
 ### Tablas dinámicas por módulo (`mod_<módulo>_<name>`)

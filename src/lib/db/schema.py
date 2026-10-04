@@ -17,7 +17,7 @@ so all three connectors share one builder.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 
 # ── Desired-schema specification ────────────────────────────────────────────
@@ -26,8 +26,8 @@ from dataclasses import dataclass, field
 class Column:
     """A desired column.
 
-    ``type`` is a symbolic token — ``'TEXT'``, ``'INTEGER'``, ``'REAL'`` or
-    ``'AUTOINCREMENT'`` — mapped to the backend's native type by the connector.
+    ``type`` is a symbolic token — ``'TEXT'``, ``'INTEGER'``, ``'REAL'``, ``'DATETIME'``
+    or ``'AUTOINCREMENT'`` — mapped to the backend's native type by the connector.
     ``default`` is the raw SQL literal exactly as it would appear after
     ``DEFAULT`` (e.g. ``"''"``, ``"1"``, ``"'local'"``); ``None`` means no
     default.
@@ -83,6 +83,39 @@ class TableSpec:
         return tuple(c.name for c in self.columns if c.primary_key)
 
 
+def fold_spec(spec: TableSpec) -> TableSpec:
+    """*spec* with every identifier in lower case — table, columns, keys, indexes, renames.
+
+    For an engine that folds unquoted names (PostgreSQL): a table declared as another program
+    spells it (rsyslog's `SystemEvents`, `ReceivedAt`) is, there, the lower-case table that
+    program's unquoted SQL created. Compared unfolded, every column would read as missing."""
+    lo = str.lower
+
+    def idx_cols(cols):
+        out = []
+        for c in cols:
+            text = str(c).strip()
+            if text.upper().endswith((' ASC', ' DESC')):
+                name, direction = text.rsplit(' ', 1)
+                out.append(f'{lo(name.strip())} {direction}')
+            else:
+                out.append(lo(text))
+        return tuple(out)
+
+    return replace(
+        spec,
+        name=lo(spec.name),
+        columns=tuple(replace(c, name=lo(c.name)) for c in spec.columns),
+        indexes=tuple(replace(i, name=lo(i.name), columns=idx_cols(i.columns))
+                      for i in spec.indexes),
+        composite_pk=tuple(lo(c) for c in spec.composite_pk),
+        unique_constraints=tuple(tuple(lo(c) for c in u) for u in spec.unique_constraints),
+        renames={lo(k): lo(v) for k, v in (spec.renames or {}).items()},
+        former_names=tuple(lo(n) for n in spec.former_names),
+        former_indexes=tuple(lo(n) for n in spec.former_indexes),
+    )
+
+
 # ── Introspection results ───────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -106,8 +139,13 @@ class IndexInfo:
 # ── Normalisation (best-effort, cross-engine) ───────────────────────────────
 
 def canonical_type(raw: str) -> str:
-    """Reduce a backend type name to one of TEXT / INTEGER / REAL."""
+    """Reduce a backend type name to one of TEXT / INTEGER / REAL / DATETIME."""
     t = (raw or '').strip().upper().split('(')[0].strip()
+    # A date and time with no zone. Only a table shaped after another program's (rsyslog's
+    # `SystemEvents`) uses it: everything of our own keeps a unix REAL. PostgreSQL reports
+    # `timestamp without time zone`, MySQL `datetime`, SQLite whatever was declared.
+    if t in ('DATETIME', 'TIMESTAMP', 'TIMESTAMP WITHOUT TIME ZONE'):
+        return 'DATETIME'
     if t in ('AUTOINCREMENT',):
         return 'INTEGER'
     if t in ('INT', 'INTEGER', 'BIGINT', 'SMALLINT', 'TINYINT', 'MEDIUMINT',

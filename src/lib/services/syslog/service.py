@@ -39,7 +39,7 @@ from lib.core.config.store import ConfigStore
 from lib.services.events.store import EventRulesStore, NotificationLogStore
 from lib.services.manager.instances import ServiceInstancesStore
 from lib.services.manager.commands import ServiceCommandsStore
-from lib.services.syslog.store import SyslogStore, SyslogDropsStore
+from lib.services.syslog.store import SyslogStore, is_read_only, SyslogDropsStore
 from lib.core.notify.context import NotifyContext
 from lib.core.notify.router import NotificationRouter
 from lib.services.heartbeat import _HeartbeatMixin, db_summary
@@ -115,8 +115,16 @@ class SyslogService(_HeartbeatMixin, _StandaloneConfigMixin, _EventsMixin, _Sysl
         self._syslog_db_connector = build_syslog_connector(
             _sdb, main_connector=self._db_connector,
             default_sqlite_path=os.path.join(self._var_dir, 'syslog.db'))
-        self._syslog_store = SyslogStore(self._syslog_db_connector)
+        self._syslog_store = SyslogStore(
+            self._syslog_db_connector,
+            time_zone=lambda: self._config_section('syslog').get('time_zone'),
+            read_only=is_read_only(_sdb))
         self._syslog_drops_store = SyslogDropsStore(self._syslog_db_connector)
+
+        # External syslog sources (other programs' databases): read here too, because the
+        # event worker this process runs watches the ones marked for it.
+        self._syslog_sources = _open_syslog_sources(
+            self._db_connector, self._fernet, self._secret_keys)
         self._hb_db_main = db_summary(db_cfg, os.path.basename(db_path))
         self._hb_db_syslog = (db_summary(_sdb, 'syslog.db')
                               if (_sdb or {}).get('enabled') else None)
@@ -283,3 +291,17 @@ def run_standalone(args, config_dir: str, var_dir: str, modules_dir=None) -> int
         device_override=getattr(args, 'syslog_host', None),
         port_override=getattr(args, 'syslog_port', None),
         log_level=getattr(args, 'log_level', None)).run()
+
+
+def _open_syslog_sources(db, fernet, secret_keys):
+    """The external-source registry over the main database, or None if it cannot be had."""
+    try:
+        from lib.core.credentials.store import CredentialsStore  # noqa: PLC0415
+        from lib.services.syslog.sources import SyslogSources  # noqa: PLC0415
+        from lib.services.syslog.store.sources import SyslogSourcesStore  # noqa: PLC0415
+        return SyslogSources(
+            SyslogSourcesStore(db, fernet=fernet, secret_keys=secret_keys),
+            # A source may log in with a stored "database" credential (its cred_uid).
+            credentials=CredentialsStore(db, fernet=fernet, secret_keys=secret_keys))
+    except Exception:  # pylint: disable=broad-except
+        return None

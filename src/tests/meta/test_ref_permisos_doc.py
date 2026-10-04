@@ -56,8 +56,11 @@ class TestEveryScopedGrantCanBeGiven:
     def test_the_screen_has_rows_for_each_prefix(self):
         res = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials',
                                  'permissions', '_resources.html'))
-        for prefix in ('module', 'server', 'cluster', 'org'):
+        for prefix in ('module', 'server', 'cluster', 'org', 'syslogsrc'):
             assert "prefix: '%s'" % prefix in res, prefix
         org = res.split("prefix: 'org'", 1)[1].split('},\n    },', 1)[0]
         assert "actions: ['view']" in org, 'a company is only ever narrowed for reading'
         assert "globalFor: { view: 'orgs_all_view' }" in org
+        src = res.split("prefix: 'syslogsrc'", 1)[1].split('},\n    },', 1)[0]
+        assert "actions: ['view']" in src, 'an external syslog source is only ever read'
+        assert "globalFor: { view: 'syslog_sources_all_view' }" in src

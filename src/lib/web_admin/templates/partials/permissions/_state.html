@@ -417,6 +417,13 @@ function renderPermissions() {
             if (_permOrgs.length) renderPermissions();
         });
     }
+    if (_permSyslogSources === null) {
+        _permSyslogSources = [];
+        apiGetSilent('/api/v1/syslog/sources').then(d => {
+            _permSyslogSources = ((d && d.sources) || []).filter(s => !s.internal);
+            if (_permSyslogSources.length) renderPermissions();
+        });
+    }
     _permReady = true;
     for (const view of ['matrix', 'split']) {
         document.getElementById('permViewBtn_' + view)

@@ -61,6 +61,20 @@ _BUILTIN_SSH = {
 }
 
 
+# Built-in database credential type — the account a connection to somebody else's database
+# logs in with (an external syslog source: rsyslog's own database). Core-owned, like `ssh`.
+_BUILTIN_DB = {
+    'type': 'db',
+    'label': 'cred_type_db',
+    'fields': [
+        {'name': 'db_user', 'kind': 'text', 'autocomplete': 'off',
+         'label': 'cred_user', 'hint': 'cred_db_user_hint'},
+        {'name': 'db_password', 'kind': 'password', 'secret': True,
+         'label': 'cred_password', 'hint': 'cred_db_password_hint'},
+    ],
+}
+
+
 def _watchfuls_dir(watchfuls_dir: str | None) -> str:
     if watchfuls_dir:
         return watchfuls_dir
@@ -171,7 +185,7 @@ def _field_out(decl: dict, label_i18n: dict | None = None, hint_i18n: dict | Non
 def credential_schemas(watchfuls_dir: str | None = None) -> dict:
     """Return ``{type: {module, builtin?, label_i18n, fields:[…]}}``.
 
-    Always includes the core ``ssh`` type; each module's ``__credential__`` /
+    Always includes the core ``ssh`` and ``db`` types; each module's ``__credential__`` /
     ``__credentials__`` adds a type.  The declaration carries only the data
     shape (field name + type + secret); the field **labels and help texts**,
     and the type's display name, are read from the module's ``lang/`` files
@@ -180,6 +194,10 @@ def credential_schemas(watchfuls_dir: str | None = None) -> dict:
         'type': 'ssh', 'builtin': True, 'module': '__core__',
         'label': _BUILTIN_SSH['label'],
         'fields': [_field_out(f) for f in _BUILTIN_SSH['fields']],
+    }, 'db': {
+        'type': 'db', 'builtin': True, 'module': '__core__',
+        'label': _BUILTIN_DB['label'],
+        'fields': [_field_out(f) for f in _BUILTIN_DB['fields']],
     }}
     base = _watchfuls_dir(watchfuls_dir)
     if not os.path.isdir(base):

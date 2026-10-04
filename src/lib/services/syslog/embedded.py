@@ -117,15 +117,21 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
         tcp = int(cfg.get('tcp_port') or 0)
         tls = int(cfg.get('tls_port') or 0)
         count = self._syslog_store.count() if self._syslog_store else 0
+        # A database rsyslog owns: there is no listener to run here, whatever the config says.
+        read_only = bool(getattr(self._syslog_store, 'read_only', False))
+        if read_only:
+            state = 'disabled'
         return {
             'state': state, 'running': running, 'enabled': enabled,
             # Controllable when hosted here + enabled, OR when a dedicated container
             # owns it (start/stop then edits the shared desired-state it reconciles).
-            'embedded': embedded, 'controllable': (not embedded) or enabled,
+            'embedded': embedded,
+            'controllable': not read_only and ((not embedded) or enabled),
             'udp_port': udp, 'tcp_port': tcp, 'tls_port': tls, 'count': count,
             'detail': [
                 {'label_key': 'svc_mode',
-                 'value_key': 'svc_mode_embedded' if embedded else 'svc_mode_container'},
+                 'value_key': ('svc_mode_syslog_read_only' if read_only
+                               else 'svc_mode_embedded' if embedded else 'svc_mode_container')},
                 {'label_key': 'svc_ports',
                  'value': f"UDP {udp or '—'} · TCP {tcp or '—'} · TLS {tls or '—'}"},
                 {'label_key': 'svc_messages', 'value': count},
@@ -142,6 +148,8 @@ class EmbeddedSyslog(_EmbeddedBase, _SyslogMixin):
             return True, ''
         if not bool(self._syslog_cfg().get('enabled')):
             return False, 'disabled'
+        if getattr(self._syslog_store, 'read_only', False):
+            return False, 'syslog_read_only'
         self._syslog_apply_config()
         ok = bool(self._syslog_server and self._syslog_server.running)
         if ok:

@@ -915,7 +915,7 @@ async function _dwTableFetch(id) {
     try {
         const f = _dwViewFilter(id, view, null);
         const p = (view.filter && view.filter.param) || 'f';
-        const data = await apiGet(`${view.data_url}?${p}=${encodeURIComponent(f)}`);
+        const data = await apiGet(`${view.data_url}?${p}=${encodeURIComponent(f)}${_dwSourceQS(id, '&')}`);
         _dwTableRows[id] = (data && data.rows) || [];
         const cur = document.querySelector(`.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
         const tb = cur && cur.querySelector('tbody');
@@ -937,7 +937,7 @@ async function _dwFetchContent(id) {
     if (!dw || dw.style.display === 'none') return;
     _dwFetchBusy[id] = true;
     try {
-        const data = await apiGet(view.data_url);
+        const data = await apiGet(view.data_url + _dwSourceQS(id, '?'));
         _dwFetched[id] = (data && data.content) || {};
         const cont = document.querySelector(`${sel} .dw-content`);
         if (cont) cont.innerHTML = _dwRenderView(id, view, _dwFetched[id], null);
@@ -948,9 +948,36 @@ async function _dwFetchContent(id) {
     } catch (e) { /* leave the placeholder on error */ }
     finally { _dwFetchBusy[id] = false; }
 }
+// `view.source`: the source a card reads, as the query parameter its data request carries.
+// Nothing for the default one.
+function _dwSourceQS(id, sep) {
+    const src = ((_DW_DEFS[id] || {}).view || {}).source;
+    const dw = document.querySelector(`.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
+    const v = src && dw ? (dw.dataset[src.store] || '') : '';
+    return v ? `${sep}${src.param}=${encodeURIComponent(v)}` : '';
+}
+// The source selects of the cards on screen, filled from their list_url (once per page load —
+// what a viewer may read does not change while they look). Shown only with something to choose.
+const _dwSourceLists = {};
+async function _dwFillSourceSelects() {
+    const sels = document.querySelectorAll('select.dw-src[data-srcurl]');
+    for (const sel of sels) {
+        const url = sel.dataset.srcurl;
+        if (!(url in _dwSourceLists)) {
+            const d = await apiGetSilent(url);
+            _dwSourceLists[url] = (d && d.sources) || [];
+        }
+        const list = _dwSourceLists[url];
+        const cur = sel.dataset.cur || 'internal';
+        sel.innerHTML = list.map(s => `<option value="${escAttr(s.uid)}"${s.uid === cur ? ' selected' : ''}>`
+            + `${esc(s.internal ? t('syslog_source_internal') : s.name)}</option>`).join('');
+        sel.classList.toggle('d-none', list.length <= 1);
+    }
+}
 // Fetch every visible data-driven widget (stat card or table) — one request each, so the
 // page paints instantly and each widget fills at its own pace. Called after a render.
 function _dwAsyncWidgets() {
+    _dwFillSourceSelects();
     document.querySelectorAll('.dw[data-wid]').forEach(dw => {
         const id = dw.dataset.wid;
         const v = (_DW_DEFS[id] || {}).view;

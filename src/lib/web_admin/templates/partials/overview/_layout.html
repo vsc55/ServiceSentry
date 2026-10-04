@@ -340,7 +340,7 @@ function _syncRemoteDashboard(me) {
 //: ONE list, because it was three copies of the same spread — the local save, the account
 //: save and the one that reads a layout back — and a fourth key added to two of them is a
 //: setting that survives a reload and is lost on the next machine, with nothing said.
-const _DW_INSTANCE_KEYS = ['sev', 'srvf', 'modf', 'mws', 'mwchart', 'mwlvl', 'mwfig', 'mwh'];
+const _DW_INSTANCE_KEYS = ['sev', 'srvf', 'modf', 'mws', 'mwchart', 'mwlvl', 'mwfig', 'mwh', 'slsrc'];
 
 /** The same settings, written back ONTO the element a render builds.
  *
@@ -480,6 +480,19 @@ function _dwBeginDrag(e, grid, el) {
 }
 
 // ──────────────────────── Toolbar actions ─────────────────────────
+// A card whose descriptor declares `view.source`: which source it reads. Empty = the default
+// one, which is not stored at all, so a layout saved before sources existed means the same.
+function _dwSetSource(sel) {
+    const dw = sel.closest('.dw[data-wid]');
+    const src = ((_DW_DEFS[dw && dw.dataset.wid] || {}).view || {}).source;
+    if (!dw || !src) return;
+    if (!sel.value || sel.value === 'internal') delete dw.dataset[src.store];
+    else dw.dataset[src.store] = sel.value;
+    const kind = ((_DW_DEFS[dw.dataset.wid] || {}).view || {}).kind;
+    if (kind === 'table') _dwTableFetch(dw.dataset.wid); else _dwFetchContent(dw.dataset.wid);
+    _dwSave();
+}
+
 // Set the syslog table widget's minimum severity (live preview + persist).
 function _dwSetSyslogSev(sel) {
     const dw = sel.closest('.dw[data-wid]');
@@ -896,6 +909,15 @@ function _dwToolbar(id, cols, h, item) {
     // so a new filter option needs NO change here — only the backend descriptor. (Syslog's
     // severity filter has no `options` — it uses badge_fn:'sev' above — so it's skipped here.)
     const _tv = (_DW_DEFS[id] || {}).view;
+    // A card that can read another source (`view.source`): the choices arrive later, from the
+    // descriptor's list_url — `_dwFillSourceSelects` fills this and shows it when there is
+    // more than one.
+    if (_tv && _tv.source) {
+        const cur = item ? (item[_tv.source.store] ?? '') : '';
+        tb += `<select class="form-select form-select-sm py-0 d-none dw-src" data-srcurl="${escAttr(_tv.source.list_url)}"
+            data-cur="${escAttr(cur)}" style="width:auto;min-width:6em;font-size:.72rem"
+            onchange="_dwSetSource(this)" title="${escAttr(t('syslog_source_label'))}"></select>`;
+    }
     if (_tv && _tv.kind === 'table' && _tv.filter && Array.isArray(_tv.filter.options)) {
         const store = _tv.filter.store;
         const f = item ? (item[store] ?? '') : '';

@@ -172,6 +172,7 @@ function renderConfig() {
             // connection fields apply only when "enabled" is on (used at startup).
             _cardHtml[sec] = cfgCardOpen(cfgId, '<i class="bi bi-database-gear me-1"></i>', lbl)
                 + renderField('enabled', data.enabled === true, 'syslog_db|enabled', 'config')
+                + renderField('mode', data.mode || 'own', 'syslog_db|mode', 'config')
                 + _renderDatabaseSection(data, 'syslog_db')
                 + cfgCardClose;
             continue;
@@ -267,6 +268,7 @@ function renderConfig() {
     _cardHtml['email']           = _renderEmailSection(cfgCardOpen, cfgCardClose);
     _cardHtml['msteams']         = _renderMsTeamsSection(cfgCardOpen, cfgCardClose);
     _cardHtml['webhook']         = _renderWebhooksSection(cfgCardOpen, cfgCardClose);
+    _cardHtml['syslog_sources']  = _renderSyslogSourcesCard(cfgCardOpen, cfgCardClose);
     // Templates is two cards that belong together; the wrapper is what the index points at.
     // It renders as "Loading…" and fills itself from the API, so it declares its loader:
     // `data-cfg-load` is called when the section is shown. It used to hang off the click on

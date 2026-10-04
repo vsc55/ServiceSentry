@@ -93,6 +93,10 @@ def clean_rule(data: dict) -> dict:
         if tg and tg.lower() not in _seen:
             _seen.add(tg.lower())
             tags.append(tg)
+    # Which syslog source a syslog rule watches: '' the internal one, '*' every one, or an
+    # external source's uid. Kept as given — a uid of a source deleted since simply matches
+    # nothing, which the rule editor shows.
+    log_source = str(data.get('log_source') or '').strip()[:64] if source == 'syslog' else ''
     return {
         'name': (data.get('name') or '').strip() or 'Rule',
         'description': (data.get('description') or '').strip()[:500],
@@ -103,6 +107,7 @@ def clean_rule(data: dict) -> dict:
         'severity_max': sev,
         'host': (data.get('host') or '').strip(),
         'app': (data.get('app') or '').strip(),
+        'log_source': log_source,
         'match_groups': clean_match_groups(data),
         'channels': channels,
         'webhook_ids': webhook_ids,

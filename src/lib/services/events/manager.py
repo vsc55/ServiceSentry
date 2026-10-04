@@ -121,13 +121,25 @@ class _EventsMixin:
 
     # ── worker (cursor over the source tables) ────────────────────────────────────
     def _event_sources(self) -> list:
-        """[(source, store)] the worker consumes — only stores that are present and
-        expose the cursor API (query_since/max_id)."""
+        """``[(cursor_key, source, store, log_source)]`` the worker consumes — only stores
+        that are present and expose the cursor API (query_since/max_id).
+
+        *source* is the kind a rule names (``syslog``/``audit``). The external syslog sources
+        a rule may watch come after the internal one, each under its own cursor
+        (``syslog:<uid>``) and with *log_source* = its uid; the internal one's is ``''``."""
         out = []
         for source, attr in (('syslog', '_syslog_store'), ('audit', '_audit_store')):
             store = getattr(self, attr, None)
             if store is not None and hasattr(store, 'query_since') and hasattr(store, 'max_id'):
-                out.append((source, store))
+                out.append((source, source, store, ''))
+        sources = getattr(self, '_syslog_sources', None)
+        if sources is not None:
+            try:
+                for uid, name, store in sources.watched():
+                    out.append((f'syslog:{uid}', 'syslog', store, (uid, name)))
+            except Exception as exc:  # pylint: disable=broad-except
+                self._dbg(f"> Events >> external syslog sources unavailable: {exc}",
+                          DebugLevel.warning)
         return out
 
     def _event_worker_tick(self) -> int:
@@ -163,26 +175,29 @@ class _EventsMixin:
         if not self._events_enabled():
             return 0
         processed = 0
-        for source, store in self._event_sources():
+        for key, source, store, log_source in self._event_sources():
             try:
-                last = st.cursor(source)
+                last = st.cursor(key)
                 if last is None:                 # first run → start at the tail (no replay)
                     last = store.max_id()
-                    st.set_cursor(source, last)
+                    st.set_cursor(key, last)
                 id_key = '_id' if source == 'audit' else 'id'
+                uid, name = log_source if log_source else ('', '')
                 while True:
                     rows = store.query_since(last, limit=500)
                     if not rows:
                         break
                     for rec in rows:
-                        self._eval_event(source, rec)
+                        if uid:
+                            rec['log_source'], rec['log_source_name'] = uid, name
+                        self._eval_event(source, rec, log_source=uid)
                         processed += 1
                     last = rows[-1].get(id_key, last)
-                    st.set_cursor(source, last)
+                    st.set_cursor(key, last)
                     if len(rows) < 500:
                         break
             except Exception as exc:  # pylint: disable=broad-except
-                self._dbg(f"> Events >> worker tick ({source}) failed: {exc}", DebugLevel.error)
+                self._dbg(f"> Events >> worker tick ({key}) failed: {exc}", DebugLevel.error)
         return processed
 
     def _event_worker_loop(self, stop_event, poll_secs: float = 2.0) -> None:
@@ -223,9 +238,19 @@ class _EventsMixin:
         return self._event_worker_stop is not None
 
     # ── evaluation ──────────────────────────────────────────────────────────────
-    def _eval_event(self, source: str, ctx: dict) -> None:
+    @staticmethod
+    def _rule_watches(rule: dict, log_source: str) -> bool:
+        """Whether a syslog rule looks at the source a row came from: its ``log_source`` is
+        ``''`` (the internal one — every rule written before there were others), ``'*'``
+        (all of them) or one external source's uid."""
+        want = str(rule.get('log_source') or '')
+        return want == '*' or want == (log_source or '')
+
+    def _eval_event(self, source: str, ctx: dict, log_source: str = '') -> None:
         """Evaluate every enabled rule of *source* against *ctx* and notify on a
-        match (honouring each rule's per-rule cooldown).  Never raises."""
+        match (honouring each rule's per-rule cooldown).  Never raises.
+
+        *log_source* is the external syslog source the row came from (``''`` = internal)."""
         try:
             rules = self._events_rules()
             if not rules:
@@ -234,6 +259,8 @@ class _EventsMixin:
             default_cd = self._event_default_cooldown()
             for r in rules:
                 if not r.get('enabled') or (r.get('source') or 'audit') != source:
+                    continue
+                if source == 'syslog' and not self._rule_watches(r, log_source):
                     continue
                 if not self._event_matches(source, r, ctx):
                     continue
@@ -393,6 +420,8 @@ class _EventsMixin:
             status = ctx.get('severity_name') or str(ctx.get('severity', ''))
             message = ctx.get('message', '')
             item = ctx.get('hostname') or ctx.get('source') or name
+            if ctx.get('log_source_name'):
+                item = f"{item} ({ctx['log_source_name']})"   # which external source
             ts = ctx.get('received_at', '')
         else:  # audit
             event = ctx.get('event', '')

@@ -745,6 +745,10 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # far past any real retention and still short of "the disk fills before you notice".
     Cfg('syslog|max_messages',    int, 500000, min=0, max=100000000, admin_only=True,
         nullable=True, card='syslog_retention'),
+    # The zone of the times in the message table (rsyslog's `SystemEvents`), which carries
+    # none: `UTC`, or `local` — the machine's own, which is what rsyslog's stock template
+    # writes. Applied both ways: to what the receiver stores and to what is read back.
+    Cfg('syslog|time_zone',       str, 'UTC', admin_only=True, card='syslog_table'),
     # Syslog→notification routing is handled by the Event-rules manager (Events
     # tab), not a built-in alert here — one place owns event→notification.
 
@@ -770,6 +774,9 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # high-volume ingestion from the system DB).  Otherwise they share it.
     # Mirrors the ``database`` section's fields; the password is encrypted at rest.
     Cfg('syslog_db|enabled',  bool, False, admin_only=True, env='SS_SYSLOG_DB_ENABLED'),
+    # `own`: the panel's database, kept by it (columns, indexes, retention). `external`:
+    # somebody else's — rsyslog's — read and never written or altered; the listener stays off.
+    Cfg('syslog_db|mode',     str, 'own', admin_only=True, no_rule=True, env='SS_SYSLOG_DB_MODE'),
     Cfg('syslog_db|driver',   str, 'sqlite', admin_only=True, no_rule=True, env='SS_SYSLOG_DB_DRIVER'),
     Cfg('syslog_db|path',     str, '', admin_only=True, no_rule=True, env='SS_SYSLOG_DB_PATH'),
     Cfg('syslog_db|host',     str, 'localhost', admin_only=True, no_rule=True, env='SS_SYSLOG_DB_HOST'),

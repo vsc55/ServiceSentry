@@ -43,10 +43,12 @@ PARTS: tuple = (
     {'id': 'audit', 'kind': 'db', 'tables': ('audit',),
      'default': False, 'required': False, 'label_key': 'backup_part_audit'},
     # `db: syslog` and not the main connector: a high-volume feed can be sent to a database of
-    # its OWN (`syslog_db|enabled`), and then these two tables are not in the system database
+    # its OWN (`syslog_db|enabled`), and then these tables are not in the system database
     # at all. Read from the main one they simply are not there — the part copies nothing and
     # says so in no way an operator notices until a restore comes back empty.
-    {'id': 'syslog', 'kind': 'db', 'tables': ('syslog', 'syslog_drops'), 'db': 'syslog',
+    # The first two are rsyslog's own (`SystemEvents`), spelled as rsyslog spells them.
+    {'id': 'syslog', 'kind': 'db',
+     'tables': ('SystemEvents', 'SystemEventsProperties', 'syslog_drops'), 'db': 'syslog',
      'default': False, 'required': False, 'label_key': 'backup_part_syslog'},
     # A directory of the CORE's own — the first one. Floor plans are files somebody uploaded,
     # and the database holds only their names: a copy without them restores rooms whose plans
@@ -65,6 +67,19 @@ PARTS: tuple = (
 PART_IDS: tuple = tuple(p['id'] for p in PARTS)
 _CLAIMED_TABLES: frozenset = frozenset(
     t for p in PARTS if p['kind'] == 'db' and p['tables'] for t in p['tables'])
+# Compared without case: PostgreSQL lists `SystemEvents` as `systemevents`, and so does MySQL
+# on a server with `lower_case_table_names`. Matched exactly, the syslog part found nothing
+# there and the core part, which takes every table nobody claimed, took it instead.
+_CLAIMED_LOWER: frozenset = frozenset(t.lower() for t in _CLAIMED_TABLES)
+
+
+def _pick(p: dict, names) -> list:
+    """The tables of part *p* among *names* — a declared part's own, or (the core) every one
+    no part claims. Without regard to case; the part's spelling wins where it has one."""
+    if p['tables'] is None:
+        return [t for t in names if t.lower() not in _CLAIMED_LOWER]
+    low = {t.lower() for t in names}
+    return [t for t in p['tables'] if t.lower() in low]
 
 
 def dir_parts() -> list:
@@ -216,9 +231,7 @@ def tables_by_part(connector, parts: set, connectors=None) -> list:
             # the copy of everything else is still worth having. What it must not cost is the
             # truth about itself.
             present, fallo = [], str(exc)[:200] or exc.__class__.__name__
-        tabs = ([t for t in present if t not in _CLAIMED_TABLES] if p['tables'] is None
-                else [t for t in p['tables'] if t in present])
-        tabs = [t for t in tabs if t not in seen]
+        tabs = [t for t in _pick(p, present) if t not in seen]
         seen.update(tabs)
         out.append((p['id'], sorted(tabs), fallo))
     return out
@@ -247,9 +260,7 @@ def tables_in_archive_by_part(in_zip: list, want: set) -> list:
     for p in PARTS:
         if p['kind'] != 'db' or p['id'] not in want:
             continue
-        tabs = ([t for t in in_zip if t not in _CLAIMED_TABLES] if p['tables'] is None
-                else [t for t in p['tables'] if t in in_zip])
-        tabs = [t for t in tabs if t not in seen]
+        tabs = [t for t in _pick(p, in_zip) if t not in seen]
         seen.update(tabs)
         out.append((p['id'], sorted(tabs)))
     return out

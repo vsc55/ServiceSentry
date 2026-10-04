@@ -181,3 +181,47 @@ def panel_bundle(client) -> str:
     trozos = _re.findall(r'<script[^>]*>(.*?)</script>', html, _re.S)
     assert trozos, '/admin no sirvió ningún guion'
     return max(trozos, key=len)
+
+
+# ── rsyslog's own table (the syslog store adopts or reads it) ───────────────
+# rsyslog's plugins/ommysql/createDB.sql, with the one change SQLite needs for its key.
+RSYSLOG_CREATE = """
+CREATE TABLE SystemEvents
+(
+        ID integer primary key autoincrement,
+        CustomerID bigint,
+        ReceivedAt datetime NULL,
+        DeviceReportedTime datetime NULL,
+        Facility smallint NULL,
+        Priority smallint NULL,
+        FromHost varchar(60) NULL,
+        Message text,
+        NTSeverity int NULL,
+        Importance int NULL,
+        EventSource varchar(60),
+        EventUserID varchar(60) NULL,
+        EventCategory int NULL,
+        EventID int NULL,
+        EventBinaryData text NULL,
+        MaxAvailable int NULL,
+        CurrUsage int NULL,
+        MinUsage int NULL,
+        MaxUsage int NULL,
+        InfoUnitID int NULL ,
+        SysLogTag varchar(60),
+        EventLogType varchar(60),
+        GenericFileName VarChar(60),
+        SystemID int NULL
+)
+"""
+
+# rsyslog's stock ommysql template, as the INSERT it produces.
+STOCK_INSERT = ('INSERT INTO SystemEvents (Message, Facility, FromHost, Priority, '
+                'DeviceReportedTime, ReceivedAt, InfoUnitID, SysLogTag) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+
+
+def rsyslog_utc(epoch) -> str:
+    """A unix time as rsyslog's `date-pgsql` (and the store, in UTC) writes it."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+    return datetime.fromtimestamp(epoch, timezone.utc).strftime('%Y-%m-%d %H:%M:%S')

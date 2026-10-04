@@ -14,7 +14,7 @@ import threading
 
 from lib.config.spec import cfg_get
 from .base import BaseConnector
-from .schema import ColumnInfo, IndexInfo
+from .schema import ColumnInfo, IndexInfo, SchemaDiff, TableSpec, fold_spec
 
 try:
     import psycopg2
@@ -32,6 +32,7 @@ class PostgreSQLConnector(BaseConnector):
     DDL_REAL          = 'DOUBLE PRECISION'
     DDL_TEXT          = 'TEXT'
     DDL_INTEGER       = 'INTEGER'
+    DDL_DATETIME      = 'TIMESTAMP'
     NEEDS_THREAD_CLEANUP = True    # per-thread network connection → close on thread exit
 
     def __init__(self, config: dict) -> None:
@@ -47,24 +48,57 @@ class PostgreSQLConnector(BaseConnector):
 
     def _dsn(self) -> dict:
         cfg = self._config
-        return {
+        dsn = {
             'host':     cfg_get(cfg, 'database|host'),
             'port':     int(cfg.get('port', 5432)),  # driver-specific default
             'dbname':   cfg_get(cfg, 'database|name'),
             'user':     cfg.get('user', ''),
             'password': cfg.get('password', ''),
         }
+        # Optional bounds, in seconds — set for a database the panel only visits (an external
+        # syslog source). `read_timeout` becomes the server-side statement_timeout, the
+        # nearest thing PostgreSQL has. Absent: the driver's defaults.
+        try:
+            connect = int(cfg.get('connect_timeout') or 0)
+            read = int(cfg.get('read_timeout') or 0)
+        except (TypeError, ValueError):
+            connect = read = 0
+        if connect > 0:
+            dsn['connect_timeout'] = connect
+        if read > 0:
+            dsn['options'] = f'-c statement_timeout={read * 1000}'
+        return dsn
 
     def _conn(self):
         conn = getattr(self._local, 'conn', None)
         if conn is None or conn.closed:
             conn = psycopg2.connect(**self._dsn())
-            conn.autocommit = False
+            # Autocommit only for a database the panel only reads (see MySQLConnector): an idle
+            # transaction there holds a lock its owner's DDL would wait on.
+            conn.autocommit = bool(self._config.get('autocommit'))
             self._local.conn = conn
         return conn
 
     def _adapt_sql(self, sql: str) -> str:
         return sql.replace('?', '%s')
+
+    # ── Identifier case ───────────────────────────────────────────────────────
+    # PostgreSQL folds an unquoted name to lower case, and everything that writes to a table
+    # this panel shares with another program writes unquoted: rsyslog's `INSERT INTO
+    # SystemEvents (ReceivedAt, …)` lands in `systemevents (receivedat, …)`. A spec spelled the
+    # way that program spells it (`SystemEvents`) has to name the same table here, so every
+    # identifier this connector quotes or looks up is folded first — which changes nothing for
+    # the panel's own tables, all of them lower case already.
+
+    @staticmethod
+    def _fold(name: str) -> str:
+        return str(name).lower()
+
+    def quote_ident(self, name: str) -> str:
+        return f'"{str(name).lower()}"'
+
+    def reconcile_table(self, spec: TableSpec) -> SchemaDiff:
+        return super().reconcile_table(fold_spec(spec))
 
     # ── Schema ────────────────────────────────────────────────────────────────
 
@@ -80,6 +114,7 @@ class PostgreSQLConnector(BaseConnector):
     def add_column_if_missing(
         self, table: str, column: str, col_type: str
     ) -> None:
+        table, column = self._fold(table), self._fold(column)
         conn = self._conn()
         with conn.cursor() as cur:
             cur.execute(
@@ -94,6 +129,7 @@ class PostgreSQLConnector(BaseConnector):
         conn.commit()
 
     def list_columns(self, table: str) -> set[str]:
+        table = self._fold(table)
         conn = self._conn()
         with conn.cursor() as cur:
             cur.execute(
@@ -107,6 +143,7 @@ class PostgreSQLConnector(BaseConnector):
         """Introspect *table*'s columns from ``information_schema.columns`` (current
         schema), ordered by ``ordinal_position``. PK membership is resolved
         separately from ``pg_index``/``pg_attribute`` and flagged on each column."""
+        table = self._fold(table)
         conn = self._conn()
         with conn.cursor() as cur:
             cur.execute(
@@ -137,6 +174,7 @@ class PostgreSQLConnector(BaseConnector):
         """List *table*'s secondary indexes from the ``pg_index``/``pg_class``/
         ``pg_attribute`` catalogs (current schema), preserving column order via the
         unnested ``indkey`` ordinality. Primary-key indexes are excluded."""
+        table = self._fold(table)
         conn = self._conn()
         grouped: dict[str, list] = {}
         unique_flag: dict[str, bool] = {}
@@ -176,6 +214,7 @@ class PostgreSQLConnector(BaseConnector):
         name, and the catalog is what actually owns a sequence.
         """
         q = self.quote_ident
+        table = self._fold(table)
         cols = self.fetchall(
             'SELECT column_name FROM information_schema.columns '
             'WHERE table_name = ? AND table_schema = current_schema() '

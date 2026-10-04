@@ -77,7 +77,8 @@ def _specs_from_doc() -> dict:
     """``{table: [column names]}`` from each ``### `name`` section's column table."""
     text = io.open(DOC, encoding='utf-8').read()
     out: dict = {}
-    parts = re.split(r'^### `([a-z_0-9]+)`', text, flags=re.M)
+    # Mixed case allowed: `SystemEvents` is rsyslog's name and is kept as rsyslog spells it.
+    parts = re.split(r'^### `([A-Za-z_0-9]+)`', text, flags=re.M)
     for i in range(1, len(parts), 2):
         # Stop at the next heading of ANY level: without this the last table section swallows
         # the rest of the document, and the per-engine type map is a markdown table too.

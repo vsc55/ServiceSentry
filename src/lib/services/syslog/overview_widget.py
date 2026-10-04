@@ -7,12 +7,33 @@ import logging
 log = logging.getLogger(__name__)
 
 
+def _store(wa):
+    """The store this widget instance reads: the internal one, or the external source its
+    ``?src=`` names — when the viewer may read that one. None when it may not, or when the
+    source cannot be reached: the tile then shows nothing rather than another source's data."""
+    try:
+        from flask import request  # noqa: PLC0415
+        src = (request.args.get('src') or '').strip()
+    except Exception:  # pylint: disable=broad-except   (outside a request)
+        src = ''
+    from lib.services.syslog import sources as _sources  # noqa: PLC0415
+    if not src or src == _sources.INTERNAL:
+        return getattr(wa, '_syslog_store', None)
+    if not _sources.may_see(src, wa._get_session_permissions()):
+        return None
+    registry = getattr(wa, '_syslog_sources', None)
+    try:
+        return registry.get(src) if registry is not None else None
+    except (KeyError, _sources.SourceUnavailable):
+        return None
+
+
 def syslog_stats_stat(wa) -> dict:
     """Stat content for the ``syslog_stats`` card: total messages + a per-severity
     breakdown (severity badges resolved client-side)."""
     total, by_sev = 0, []
     try:
-        store = getattr(wa, '_syslog_store', None)
+        store = _store(wa)
         if store is not None:
             # Only the breakdown this card shows: each one is its own GROUP BY over the
             # whole message table, and asking for host/app/facility too made the card slow
@@ -40,7 +61,7 @@ def syslog_stats_stat(wa) -> dict:
 def syslog_rows(wa, f: str = '') -> list:
     """Latest syslog messages for the syslog table, at severity *f* or MORE severe when a
     minimum is set (``f`` = ``severity_max``; empty = all severities)."""
-    store = getattr(wa, '_syslog_store', None)
+    store = _store(wa)
     if store is None:
         return []
     try:

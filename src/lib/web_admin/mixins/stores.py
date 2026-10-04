@@ -250,14 +250,33 @@ class _StoresMixin:
             return
         try:
             from lib.db import build_syslog_connector  # noqa: PLC0415
-            from lib.services.syslog.store import SyslogStore, SyslogDropsStore  # noqa: PLC0415
+            from lib.services.syslog.store import (  # noqa: PLC0415
+                SyslogStore, SyslogDropsStore, is_read_only)
             from lib.config.manager import overlay_section_env  # noqa: PLC0415
             var = self._var_dir or self._config_dir or ''
             sdb = overlay_section_env('syslog_db', self._config_section('syslog_db'))
             self._syslog_db_connector = build_syslog_connector(
                 sdb, main_connector=connector,
                 default_sqlite_path=os.path.join(var, 'syslog.db'))
-            self._syslog_store = SyslogStore(self._syslog_db_connector)
+            # The zone the table's times are in (rsyslog writes them without one), and
+            # whether the table is rsyslog's own database, read and never written.
+            self._syslog_store = SyslogStore(
+                self._syslog_db_connector,
+                time_zone=lambda: self._config_section('syslog').get('time_zone'),
+                read_only=is_read_only(sdb))
             self._syslog_drops_store = SyslogDropsStore(self._syslog_db_connector)
+        except Exception:  # pylint: disable=broad-except
+            pass
+        # External syslog sources (other programs' databases, only read): their list lives
+        # in the main database; each is opened when somebody first asks for it.
+        self._syslog_sources = None
+        try:
+            from lib.services.syslog.sources import SyslogSources  # noqa: PLC0415
+            from lib.services.syslog.store.sources import SyslogSourcesStore  # noqa: PLC0415
+            self._syslog_sources = SyslogSources(
+                SyslogSourcesStore(connector, fernet=self._get_fernet(),
+                                   secret_keys=getattr(self, '_secret_keys', None)),
+                # A source may log in with a stored "database" credential (its cred_uid).
+                credentials=getattr(self, '_credentials_store', None))
         except Exception:  # pylint: disable=broad-except
             pass

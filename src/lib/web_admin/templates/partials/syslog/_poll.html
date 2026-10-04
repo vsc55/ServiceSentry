@@ -26,11 +26,35 @@ async function _loadSyslog() {
     // below, so they never block the message list.
     const [data, st] = await Promise.all([
         apiGet('/api/v1/syslog?' + qs.toString()),
-        apiGet('/api/v1/syslog/status'),
+        apiGet('/api/v1/syslog/status' + _syslogSrcParam('?')),
     ]);
     if (seq !== _syslogLoadSeq) return;     // a newer load superseded this one
+    if (!data && _syslogSrc !== 'internal') {
+        // An external source that did not answer: say which and why, here and nowhere else.
+        let detail = '';
+        try {
+            const r = await fetch('/api/v1/syslog/status' + _syslogSrcParam('?'));
+            const j = await r.json();
+            detail = (j && (j.detail || j.error)) || '';
+        } catch (_) { /* the reason is optional */ }
+        if (seq !== _syslogLoadSeq) return;
+        const name = ((_syslogSources || []).find(s => s.uid === _syslogSrc) || {}).name || '';
+        if (_wrap) _wrap.innerHTML = `<div class="alert alert-warning m-3 mb-0"><i class="bi bi-plug me-1"></i>`
+            + `${esc(t('syslog_source_unavailable'))}${name ? ': <strong>' + esc(name) + '</strong>' : ''}`
+            + (detail ? `<div class="small text-muted mt-1">${esc(detail)}</div>` : '') + `</div>`;
+        for (const pid of ['sl-pager-top', 'sl-pager']) {
+            const el = document.getElementById(pid);
+            if (el) el.innerHTML = '';
+        }
+        _slRowsData = [];
+        return;
+    }
     const total = (data && data.total) || 0;
-    if (st) {
+    if (st && st.read_only) {
+        // rsyslog's own database: no listener here, the messages are what rsyslog stored.
+        document.getElementById('sl-status').innerHTML =
+            `${esc(t('syslog_listener'))}: <strong>${esc(t('syslog_read_only_source'))}</strong>`;
+    } else if (st) {
         const state = st.enabled ? (st.running ? t('syslog_running') : t('syslog_stopped')) : t('syslog_disabled');
         const ports = [st.udp_port && `UDP ${st.udp_port}`, st.tcp_port && `TCP ${st.tcp_port}`,
                        st.tls_port && `TLS ${st.tls_port}`].filter(Boolean).join(' · ');
@@ -195,6 +219,8 @@ function _syslogClear() {
         if (r && r.data && r.data.ok) {
             showToast(t('syslog_cleared'), 'success');
             if (document.getElementById('sl-table-wrap')) _loadSyslog();
+        } else if (r && r.data && r.data.error) {
+            showToast(t('svc_err_' + r.data.error) || r.data.error, 'warning');
         }
     });
 }

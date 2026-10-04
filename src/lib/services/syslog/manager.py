@@ -107,6 +107,12 @@ class _SyslogMixin:
                 return []
             if getattr(self, '_syslog_store', None) is None:
                 return []
+            if getattr(self._syslog_store, 'read_only', False):
+                # rsyslog receives and writes; this panel reads its database. A listener here
+                # would accept messages it has nowhere to put.
+                self._dbg('> Syslog >> syslog_db is in external mode (read-only): the '
+                          'listener is not started; rsyslog receives', DebugLevel.warning)
+                return []
             if not self._syslog_can_bind():
                 self._dbg('> Syslog >> listener not bound here (a dedicated process '
                           'owns the ports); serving stored data only', DebugLevel.info)

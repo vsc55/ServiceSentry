@@ -71,6 +71,10 @@ _CLUSTER_PERM_RE = re.compile(r'^cluster\.[a-zA-Z0-9_\-.]+\.(view|add|edit|delet
 # grants nothing and reads as though it does. The day an `org.<uid>.edit` means something, it
 # goes here with the code that honours it.
 _ORG_PERM_RE = re.compile(r'^org\.[a-zA-Z0-9_\-.]+\.view$')
+# Per-source key for the external syslog sources (syslogsrc.{uid}.view) — which of the other
+# programs' log databases somebody may read. `view` only, for the reason `org` gives: an
+# external source is never written, so there is no other action to grant.
+_SYSLOGSRC_PERM_RE = re.compile(r'^syslogsrc\.[a-zA-Z0-9_\-.]+\.view$')
 
 
 def is_module_perm(p: str) -> bool:
@@ -91,6 +95,11 @@ def is_cluster_perm(p: str) -> bool:
 def is_org_perm(p: str) -> bool:
     """Return True if *p* is a valid per-company permission key (org.{uid}.view)."""
     return bool(_ORG_PERM_RE.match(p))
+
+
+def is_syslogsrc_perm(p: str) -> bool:
+    """Return True if *p* is a valid per-syslog-source key (syslogsrc.{uid}.view)."""
+    return bool(_SYSLOGSRC_PERM_RE.match(p))
 
 
 # ── Built-in RBAC model ─────────────────────────────────────────────────────────────
@@ -167,7 +176,7 @@ BUILTIN_ROLE_PERMISSIONS: dict[str, frozenset] = {
 def is_valid_perm(p: str) -> bool:
     """True if *p* is a known flag or a well-formed per-instance key."""
     return (p in PERMISSIONS or is_module_perm(p) or is_server_perm(p)
-            or is_cluster_perm(p) or is_org_perm(p))
+            or is_cluster_perm(p) or is_org_perm(p) or is_syslogsrc_perm(p))
 
 
 def filter_valid_permissions(perms) -> list:

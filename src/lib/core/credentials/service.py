@@ -12,7 +12,8 @@ resolving the identity for a test connection.  Pure functions over plain dicts; 
 from __future__ import annotations
 
 
-def find_all_credential_usage(devices: list, modules: dict) -> dict:
+def find_all_credential_usage(devices: list, modules: dict,
+                              syslog_sources: list | None = None) -> dict:
     """Every credential's references, in ONE pass: ``{uid: {'devices': […], 'checks': […]}}``.
 
     The scan cost is the same whether it answers about one credential or all of them — it
@@ -47,13 +48,23 @@ def find_all_credential_usage(devices: list, modules: dict) -> dict:
                 if uid:
                     _bucket(uid, 'checks').append({'module': bare, 'key': key,
                                                    'label': str(item.get('label') or key)})
+    # External syslog sources that log in with a stored "database" credential. Listed with the
+    # checks, under `syslog`, so every view that shows a credential's consumers shows them
+    # too — and nobody deletes a credential believing nothing uses it.
+    for src in (syslog_sources or []):
+        uid = ((src or {}).get('data') or {}).get('cred_uid')
+        if uid:
+            _bucket(uid, 'checks').append({'module': 'syslog', 'key': src.get('uid'),
+                                           'label': str(src.get('name') or src.get('uid'))})
     return out
 
 
-def find_credential_usage(uid: str, devices: list, modules: dict) -> dict:
+def find_credential_usage(uid: str, devices: list, modules: dict,
+                          syslog_sources: list | None = None) -> dict:
     """Where credential *uid* is referenced: devices (ssh profile ``cred_uid``) and module
     checks (inline ``cred_uid``).  Returns ``{'devices': [...], 'checks': [...]}``."""
-    return find_all_credential_usage(devices, modules).get(uid) or {'devices': [], 'checks': []}
+    return (find_all_credential_usage(devices, modules, syslog_sources).get(uid)
+            or {'devices': [], 'checks': []})
 
 
 def clone_payload(src: dict) -> dict:

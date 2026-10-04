@@ -31,7 +31,7 @@ Lo vigila `tests/meta/test_docs_db_schema.py::TestLaAuditoriaVaAlFinal`, sobre l
 
 ## Índice de tablas
 
-Hay **74 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **76 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -54,12 +54,13 @@ Hay **74 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
 | SNMP | `snmp_catalog` (perfiles de dispositivo escritos en el panel), `snmp_mib_versions` (historial de ediciones de fuentes MIB) |
-| Syslog | `syslog`, `syslog_drops` |
+| Syslog | `SystemEvents` y `SystemEventsProperties` (las de rsyslog), `syslog_drops`, `syslog_sources` (las bases de otros programas que se leen) |
 | Plano de control distribuido | `service_instances`, `service_leader`, `service_commands` |
 
 > **Telegram no tiene tabla**: sus destinatarios viven en la configuración.
-> **`syslog` / `syslog_drops`** pueden vivir en un **conector dedicado** (BD de syslog
-> separada) si se configura `syslog_db`; el resto usa el conector principal.
+> **`SystemEvents` / `SystemEventsProperties` / `syslog_drops`** pueden vivir en un
+> **conector dedicado** (BD de syslog separada) si se configura `syslog_db`; el resto usa el
+> conector principal.
 
 ---
 
@@ -1889,29 +1890,103 @@ Restricción única: `(ip, track)`. Índices: `idx_ip_offc_updated(updated_at)`.
 
 ## Syslog
 
-> `syslog` y `syslog_drops` pueden residir en un **conector dedicado** (BD separada) si se
-> configura `syslog_db`. Ver [ref-configuracion.md](ref-configuracion.md) y [explica-servicios.md](explica-servicios.md).
+> `SystemEvents`, `SystemEventsProperties` y `syslog_drops` pueden residir en un **conector
+> dedicado** (BD separada) si se configura `syslog_db`. Ver [ref-configuracion.md](ref-configuracion.md) y [explica-servicios.md](explica-servicios.md).
 
-### `syslog` — mensajes recibidos
-[lib/services/syslog/store/messages.py:22](../src/lib/services/syslog/store/messages.py#L22)
+### `SystemEvents` — mensajes recibidos (la tabla de rsyslog)
+[lib/services/syslog/store/messages.py:38](../src/lib/services/syslog/store/messages.py#L38)
+
+Es, columna por columna y en el mismo orden, la tabla que crea el `createDB.sql` de rsyslog para
+`ommysql`/`ompgsql`, y la que lee LogAnalyzer. Así rsyslog puede escribir en ella con su
+plantilla de serie y el panel muestra esas filas junto a las de su propio receptor; y
+`syslog_db` puede apuntar a una base que rsyslog ya llena. El nombre se escribe como lo escribe
+rsyslog: en PostgreSQL, donde su SQL sin comillas lo pasa a minúsculas, el conector también lo
+pliega (`systemevents`, `receivedat`…).
+
+Las cinco últimas son **nuestras**, añadidas detrás de las de rsyslog, y todas admiten nulo y
+no tienen valor por defecto. Por eso un `INSERT` que solo nombre las de rsyslog sigue
+funcionando, y añadirlas a una tabla que creó rsyslog es un `ADD COLUMN`. Nunca se reconstruye
+una tabla que puede tener millones de filas mientras rsyslog sigue escribiendo en ella. Ninguna
+columna lleva `NOT NULL` ni valor por defecto, porque la tabla de rsyslog tampoco: si se
+pusieran, el diff vería diferencias y reconstruiría la tabla.
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
-| id | AUTOINCREMENT | — | — | PK |
-| ts | REAL | no | — | |
-| received_at | TEXT | no | `''` | |
-| source | TEXT | no | `''` | |
-| hostname | TEXT | no | `''` | |
-| app | TEXT | no | `''` | |
-| procid | TEXT | no | `''` | |
-| severity | INTEGER | no | `5` | |
-| facility | INTEGER | no | `1` | |
-| msgid | TEXT | no | `''` | |
-| message | TEXT | no | `''` | |
-| raw | TEXT | no | `''` | |
+| ID | AUTOINCREMENT | — | — | PK |
+| CustomerID | INTEGER | sí | — | |
+| ReceivedAt | DATETIME | sí | — | cuándo llegó (zona: `syslog\|time_zone`) |
+| DeviceReportedTime | DATETIME | sí | — | la hora del emisor; sin ella, la de llegada |
+| Facility | INTEGER | sí | — | 0–23 |
+| Priority | INTEGER | sí | — | la **severidad** 0–7 (`%syslogpriority%` en rsyslog) |
+| FromHost | TEXT | sí | — | el hostname del mensaje (máx. 60, el `varchar(60)` de rsyslog) |
+| Message | TEXT | sí | — | |
+| NTSeverity | INTEGER | sí | — | de rsyslog (Windows); sin uso |
+| Importance | INTEGER | sí | — | de rsyslog; sin uso |
+| EventSource | TEXT | sí | — | de rsyslog (Windows); sin uso |
+| EventUserID | TEXT | sí | — | de rsyslog (Windows); sin uso |
+| EventCategory | INTEGER | sí | — | de rsyslog (Windows); sin uso |
+| EventID | INTEGER | sí | — | de rsyslog (Windows); sin uso |
+| EventBinaryData | TEXT | sí | — | de rsyslog; sin uso |
+| MaxAvailable | INTEGER | sí | — | de rsyslog; sin uso |
+| CurrUsage | INTEGER | sí | — | de rsyslog; sin uso |
+| MinUsage | INTEGER | sí | — | de rsyslog; sin uso |
+| MaxUsage | INTEGER | sí | — | de rsyslog; sin uso |
+| InfoUnitID | INTEGER | sí | — | `1` = syslog |
+| SysLogTag | TEXT | sí | — | `app[pid]:` (máx. 60) |
+| EventLogType | TEXT | sí | — | de rsyslog (Windows); sin uso |
+| GenericFileName | TEXT | sí | — | de rsyslog; sin uso |
+| SystemID | INTEGER | sí | — | de rsyslog; sin uso |
+| FromHostIP | TEXT | sí | — | **nuestra**: IP del emisor (`%fromhost-ip%`) |
+| ProgramName | TEXT | sí | — | **nuestra**: la app (`%programname%`) |
+| ProcessID | TEXT | sí | — | **nuestra**: el PID (`%procid%`) |
+| MsgID | TEXT | sí | — | **nuestra**: MSGID de RFC 5424 (`%msgid%`) |
+| RawMessage | TEXT | sí | — | **nuestra**: la línea tal cual llegó (`%rawmsg%`) |
 
-Índices: `idx_syslog_ts`, `idx_syslog_sev_ts(severity, ts)`, `idx_syslog_host_ts(hostname, ts)`,
-`idx_syslog_app_ts(app, ts)`, `idx_syslog_fac_ts(facility, ts)`.
+Índices: `idx_systemevents_received(ReceivedAt)`, `idx_systemevents_prio(Priority, ReceivedAt)`,
+`idx_systemevents_host(FromHost, ReceivedAt)`, `idx_systemevents_program(ProgramName, ReceivedAt)`,
+`idx_systemevents_facility(Facility, ReceivedAt)`. rsyslog no crea ninguno: sobre una tabla
+suya llena, la primera vez que arranca el panel los crea, y puede tardar.
+
+La API sigue sacando las claves de siempre (`ts`, `received_at`, `source`, `hostname`, `app`,
+`procid`, `severity`, `facility`, `msgid`, `message`, `raw`). En una fila escrita con la
+plantilla de serie de rsyslog, la app y el PID salen del `SysLogTag`.
+
+### `SystemEventsProperties` — pares nombre/valor de rsyslog
+[lib/services/syslog/store/messages.py:86](../src/lib/services/syslog/store/messages.py#L86)
+
+La segunda tabla del `createDB.sql` de rsyslog. Se declara para que la base que crea el panel
+sea la que rsyslog espera; el panel no escribe en ella, solo borra las filas de los eventos que
+la retención elimina.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| ID | AUTOINCREMENT | — | — | PK |
+| SystemEventID | INTEGER | sí | — | → `SystemEvents.ID` |
+| ParamName | TEXT | sí | — | |
+| ParamValue | TEXT | sí | — | |
+
+### `syslog_sources` — fuentes externas (bases de datos de otros programas)
+[lib/services/syslog/store/sources.py:31](../src/lib/services/syslog/store/sources.py#L31)
+
+Las bases de datos de rsyslog o LogAnalyzer que el panel lee junto a su tabla propia, sin
+escribir en ellas (ver [ref-configuracion.md](ref-configuracion.md#fuentes-externas-de-syslog)).
+Vive en la base **principal**, no en la de syslog. La conexión va en `data` como JSON
+(`driver`, `host`, `port`, `name`, `user`, `password`, `path`) y la contraseña se guarda
+cifrada.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | — | — | PK |
+| name | TEXT | no | `''` | UNIQUE |
+| enabled | INTEGER | no | `1` | 0 = guardada pero no se ofrece ni se lee |
+| watch | INTEGER | no | `0` | 1 = las reglas de eventos evalúan sus filas nuevas |
+| time_zone | TEXT | no | `'UTC'` | `UTC` o `local` |
+| data | TEXT | no | `'{}'` | JSON de la conexión |
+| created_at | TEXT | no | `''` | |
+| updated_at | TEXT | no | `''` | |
+| updated_by | TEXT | no | `''` | |
+
+Índices: `idx_syslog_sources_name(name)`.
 
 ### `syslog_drops` — emisores rechazados por allowlist
 [lib/services/syslog/store/drops.py:20](../src/lib/services/syslog/store/drops.py#L20)
@@ -2091,10 +2166,10 @@ default, primary_key, unique) e `Index`, más `composite_pk`, `unique_constraint
 
 Crear-copiar-borrar-renombrar en una transacción (SQLite/PostgreSQL, DDL transaccional).
 `COALESCE(col, default)` rellena columnas recién NOT NULL. MySQL lo sobreescribe
-([mysql.py:100](../src/lib/db/mysql.py#L100)) porque su DDL auto-commitea: construye la tabla
+([mysql.py:101](../src/lib/db/mysql.py#L101)) porque su DDL auto-commitea: construye la tabla
 de reemplazo y hace un `RENAME TABLE` atómico.
 
-### Mapa de tipos por motor — `_type_map` ([base.py:298](../src/lib/db/base.py#L298))
+### Mapa de tipos por motor — `_type_map` ([base.py:309](../src/lib/db/base.py#L309))
 
 | Token simbólico | SQLite | MySQL | PostgreSQL |
 |---|---|---|---|
@@ -2102,13 +2177,22 @@ de reemplazo y hace un `RENAME TABLE` atómico.
 | `REAL` | `REAL` | `DOUBLE` | `DOUBLE PRECISION` |
 | `TEXT` | `TEXT` | `TEXT` | `TEXT` |
 | `INTEGER` | `INTEGER` | `INT` | `INTEGER` |
+| `DATETIME` | `DATETIME` | `DATETIME` | `TIMESTAMP` |
 | `TEXT_KEY` (TEXT indexado) | `TEXT` | `VARCHAR(255)` | `TEXT` |
 
 `TEXT_KEY` es el tipo de columna clave/indexada: cualquier columna TEXT que sea PK, única o
-parte de un índice lo usa (MySQL no puede indexar TEXT sin límite → `VARCHAR(255)`).
+parte de un índice lo usa (MySQL no puede indexar TEXT sin límite → `VARCHAR(255)`). También
+al **añadir** una columna indexada a una tabla que ya existe: antes el `ADD COLUMN` la creaba
+como `TEXT` y el índice fallaba en MySQL.
+
+`DATETIME` (fecha y hora sin zona) solo lo usa `SystemEvents`, porque así la crea rsyslog.
+Todo lo nuestro sigue guardando instantes como `REAL` (unix).
 
 - `KIND` (`'sqlite'`/`'mysql'`/`'postgresql'`) decide el last-insert-id y la extracción JSON.
-- `quote_ident`: comillas dobles por defecto, backtick en MySQL.
+- `quote_ident`: comillas dobles por defecto, backtick en MySQL. En PostgreSQL además **pliega
+  a minúsculas** cada identificador (y `reconcile_table` pliega el `TableSpec` entero con
+  `fold_spec`), como hace PostgreSQL con el SQL sin comillas de rsyslog. Para las tablas propias,
+  que ya están todas en minúsculas, no cambia nada.
 - Normalización de tipos para el diff: `canonical_type` / `canonical_default`
   ([schema.py:108](../src/lib/db/schema.py#L108)).
 

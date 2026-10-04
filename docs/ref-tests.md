@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~10.500 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~10.600 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -10673,3 +10673,99 @@ cumplido en el lock sería el mismo error con peor final.
 | `TestTheLockHoldsWhatIsRequired::test_every_requirement_is_pinned` | Todo paquete de `requirements.txt` está fijado en `requirements.lock` |
 | `TestTheLockHoldsWhatIsRequired::test_every_floor_is_met_by_its_pin` | Ninguna versión fijada en el lock queda por debajo del suelo `>=` de `requirements.txt` |
 | `TestTheLockHoldsWhatIsRequired::test_the_guard_reads_the_real_files` | La guarda no es vacía: lee los dos ficheros y reconoce un paquete conocido |
+
+---
+
+## 178. Unit — La tabla de syslog es la de rsyslog
+
+**Archivo:** `tests/unit/test_syslog_rsyslog.py` — 25 tests
+
+La tabla de mensajes es `SystemEvents`, la que crea el `createDB.sql` de rsyslog, para que
+rsyslog escriba en ella con su plantilla de serie y el panel lea esas filas como las suyas.
+Estas pruebas fijan lo que hace falta para que eso sea verdad. La versión viva, contra el
+motor real, es `test_rsyslogs_table_is_adopted_and_both_sides_read_each_other` en
+`tests/e2e/test_db_portability_live.py` (§81). Crea la tabla con el script de rsyslog
+(MySQL/MariaDB o PostgreSQL), inserta con la plantilla de serie y comprueba los dos sentidos.
+
+| Test | Qué verifica |
+|------|--------------|
+| `TestATableRsyslogCreatedIsAdopted::test_its_rows_survive_and_it_is_not_rebuilt` | Sobre la tabla del `createDB.sql`, el reconcile solo añade nuestras cinco columnas al final (sin reconstruir) y las filas de rsyslog siguen ahí |
+| `TestATableRsyslogCreatedIsAdopted::test_a_second_boot_finds_nothing_to_change` | Tras adoptarla, el siguiente arranque no encuentra diferencias |
+| `TestWhatRsyslogWritesTheUIReads::test_a_stock_template_row_comes_out_like_ours` | Una fila de la plantilla de serie sale con hostname, app y PID (sacados del `SysLogTag`), severidad, familia y `ts` correctos |
+| `TestWhatRsyslogWritesTheUIReads::test_the_event_worker_cursor_sees_it` | El cursor del gestor de eventos (por `ID`) ve las filas de los dos lados |
+| `TestWhatRsyslogWritesTheUIReads::test_a_row_without_priority_does_not_break_the_charts` | Una fila con `Priority` nula no rompe las estadísticas (cuenta como 5) |
+| `TestWhatWeWriteRsyslogsReadersFind::test_the_columns_logAnalyzer_reads` | Lo que guarda el receptor rellena las columnas de rsyslog (`SysLogTag` `app[pid]:`, `InfoUnitID` 1, `ReceivedAt` en UTC) y las nuestras |
+| `TestWhatWeWriteRsyslogsReadersFind::test_rsyslogs_varchar_60_is_respected` | `FromHost` y `SysLogTag` se recortan a 60, el `varchar(60)` de rsyslog |
+| `TestWhatWeWriteRsyslogsReadersFind::test_the_senders_own_time_goes_to_device_reported_time` | La hora del emisor (con su zona) va a `DeviceReportedTime`; sin ella, la de llegada |
+| `TestTheZoneOfTheDates::test_utc_is_the_default` | Por defecto las fechas se guardan en UTC |
+| `TestTheZoneOfTheDates::test_local_writes_and_reads_the_machines_time` | Con `local` se guarda la hora de la máquina y se lee de vuelta al mismo instante |
+| `TestTheZoneOfTheDates::test_since_and_until_compare_in_that_zone` | Los filtros `since`/`until` comparan sobre `ReceivedAt` |
+| `TestTheZoneOfTheDates::test_retention_by_age_reads_received_at` | La retención por días borra por `ReceivedAt` |
+| `TestTheZoneOfTheDates::test_rsyslogs_mysql_date_form_is_read` | Se lee la forma `YYYYMMDDHHMMSS` de `date-mysql` |
+| `TestEveryEngineReachesTheSameTable::test_datetime_is_one_type_under_every_engines_name` | `datetime`, `timestamp` y `timestamp without time zone` son el mismo tipo para el diff |
+| `TestEveryEngineReachesTheSameTable::test_postgresql_folds_the_spec_as_rsyslogs_unquoted_sql_does` | En PostgreSQL el spec y `quote_ident` se pliegan a minúsculas, y `DATETIME` es `TIMESTAMP` |
+| `TestEveryEngineReachesTheSameTable::test_mysql_adds_an_indexed_text_column_as_varchar` | Un `ADD COLUMN` de una columna TEXT indexada usa `VARCHAR(255)` en MySQL |
+| `TestEveryEngineReachesTheSameTable::test_the_reconcile_asks_for_the_keyed_type` | El reconcile pide ese tipo para las columnas que cubre un índice, y solo para ellas |
+| `TestTheBackupFindsItInAnyCase::test_a_lower_case_listing_still_belongs_to_the_syslog_part` | La copia de seguridad reconoce `systemevents` (PostgreSQL) como tabla de la parte syslog, y la parte core no se la queda |
+| `TestTheTag::test_split` | `sshd[123]:` → (`sshd`, `123`), `kernel:` → (`kernel`, ``) |
+| `TestExternalModeOnlyReads::test_the_schema_is_not_touched` | En solo lectura (una fuente externa) el almacén no añade columnas ni índices ni crea `SystemEventsProperties` |
+| `TestExternalModeOnlyReads::test_its_rows_are_read_without_our_columns` | Las filas de rsyslog se leen sin nuestras columnas (app y PID del tag; IP y bruto vacíos) |
+| `TestExternalModeOnlyReads::test_filters_sorts_and_facets_on_a_missing_column_do_not_fail` | Filtrar, ordenar y agrupar por una columna que falta no da error |
+| `TestExternalModeOnlyReads::test_nothing_is_written_pruned_or_emptied` | Insertar lanza `ReadOnlyStore`; purgar y vaciar devuelven 0 y no borran nada |
+| `TestExternalModeOnlyReads::test_a_table_that_is_not_there_reads_as_empty` | Sin tabla, todo se lee como vacío |
+| `TestExternalModeOnlyReads::test_the_syslog_database_mode_needs_the_dedicated_database` | `syslog_db|mode = external` solo cuenta con `syslog_db` activado |
+
+Las fuentes externas que usan ese modo de solo lectura están en §179. En §81 hay una prueba
+viva más, `test_rsyslogs_database_is_read_without_being_touched`.
+
+---
+
+## 179. Fuentes externas de syslog: configuradas, elegidas, protegidas y vigiladas
+
+Una fuente externa es la base de datos de otro programa (la `SystemEvents` de rsyslog). El
+panel la lee junto a su tabla propia y nunca escribe en ella. Las pantallas de Syslog, la
+pestaña Logs de un dispositivo y las tarjetas del Overview eligen de qué fuente leer, y las
+reglas de eventos pueden vigilar las que tengan marcado «Vigilar con reglas».
+
+**Archivo:** `tests/unit/test_syslog_sources.py` — 20 tests
+
+| Test | Qué verifica |
+|------|--------------|
+| `TestTheStore::test_the_password_is_encrypted_at_rest` | La contraseña de la conexión se guarda cifrada y se lee descifrada |
+| `TestTheStore::test_names_are_unique_and_required` | El nombre es obligatorio y no se repite |
+| `TestTheStore::test_the_connection_keeps_only_what_it_knows` | La conexión solo guarda las claves conocidas, con un motor y un puerto válidos |
+| `TestTheRegistry::test_a_source_is_opened_once_and_read` | Una fuente se abre una vez, en solo lectura, y se reutiliza |
+| `TestTheRegistry::test_an_edit_reopens_it` | Tras editarla se abre de nuevo con la conexión nueva |
+| `TestTheRegistry::test_a_switched_off_or_unknown_source_is_not_opened` | Una fuente apagada o desconocida da `KeyError` |
+| `TestTheRegistry::test_a_missing_sqlite_file_is_refused_not_created` | Un fichero SQLite que no existe se rechaza y no se crea vacío |
+| `TestTheRegistry::test_a_failure_is_not_retried_on_every_request` | Tras un fallo de conexión no se reintenta en cada petición |
+| `TestTheRegistry::test_only_the_watched_ones_are_watched` | Solo se vigilan las marcadas, y las que no se pueden abrir se saltan |
+| `TestTheRegistry::test_probe_says_what_it_found` | «Probar conexión» dice si conecta, si está la tabla y cuántos mensajes hay |
+| `TestWhoMayReadWhat::test_the_general_flag_grants_every_source` | `syslog_sources_all_view` da todas las fuentes externas |
+| `TestWhoMayReadWhat::test_a_per_source_grant_grants_that_one` | `syslogsrc.<uid>.view` da esa fuente y ninguna más |
+| `TestWhoMayReadWhat::test_syslog_view_alone_grants_no_external_source` | `syslog_view` solo no da ninguna fuente externa |
+| `TestWhoMayReadWhat::test_the_key_is_a_permission_a_role_can_hold` | `syslogsrc.<uid>.view` es una clave válida para un rol; `.edit` no |
+| `TestAStoredCredential::test_its_user_and_password_win` | Con `cred_uid`, el usuario y la contraseña salen de la credencial |
+| `TestAStoredCredential::test_a_missing_or_switched_off_credential_is_an_error_not_a_fallback` | Una credencial borrada o desactivada es un error, no se conecta sin ella |
+| `TestAStoredCredential::test_without_one_the_fields_are_used_as_typed` | Sin credencial se usan los campos escritos en la fuente |
+| `TestAStoredCredential::test_the_database_type_is_built_in_and_its_password_is_secret` | El tipo de credencial `db` es de serie y su contraseña se cifra |
+| `TestAStoredCredential::test_a_credentials_usage_names_the_sources_using_it` | El uso de una credencial lista las fuentes que entran con ella |
+| `TestTheConnection::test_an_external_source_is_bounded_and_reads_in_autocommit` | Una fuente se abre con tiempos de espera (5 s / 30 s) y en autocommit, para no dejar bloqueos en la base ajena (ver la prueba viva `test_an_external_source_never_blocks_its_owners_ddl`, §81) |
+
+**Archivo:** `tests/integration/test_wa_syslog_sources.py` — 13 tests
+
+| Test | Qué verifica |
+|------|--------------|
+| `TestConfiguringASource::test_add_list_edit_remove` | Alta, lista con la contraseña enmascarada, edición que conserva la contraseña y baja que retira los permisos |
+| `TestConfiguringASource::test_a_source_needs_what_its_driver_needs` | Sin nombre, o sin servidor y base para un motor de red, se rechaza |
+| `TestConfiguringASource::test_the_connection_test_reports` | «Probar conexión» funciona con el formulario sin guardar |
+| `TestReadingASource::test_the_reads_answer_from_it` | Lista, estadísticas, facetas y estado con `?src=` leen de la fuente, y la interna no cambia |
+| `TestReadingASource::test_it_is_never_cleared` | Vaciar una fuente externa responde 409 y no borra nada |
+| `TestReadingASource::test_unknown_and_unreachable_say_so` | Una fuente desconocida da 404 y una que no responde 503 con el motivo |
+| `TestWhoMayReadIt::test_syslog_view_alone_is_the_internal_source` | Con solo `syslog_view` se lee la interna y se rechaza la externa (403); el selector solo ofrece la interna |
+| `TestWhoMayReadIt::test_a_per_source_grant_opens_that_one` | Con `syslogsrc.<uid>.view` se lee esa fuente y no otra |
+| `TestTheRulesWatchIt::test_a_watched_source_feeds_the_rules_that_name_it` | Una fuente vigilada alimenta la regla que la nombra (cursor `syslog:<uid>`), y no la de la interna |
+| `TestAStoredCredential::test_a_source_logs_in_with_one_and_shows_in_its_usage` | Una fuente con credencial guardada se lee, y el uso de la credencial la nombra |
+| `TestTheSyslogDatabaseInExternalMode::test_the_page_lists_its_rows_and_says_so` | Con `syslog_db|mode = external`, la página lista las filas de rsyslog y el estado dice `read_only` |
+| `TestTheSyslogDatabaseInExternalMode::test_clearing_is_refused` | Vaciar la base de syslog en modo externo responde 409 y no borra nada |
+| `TestTheSyslogDatabaseInExternalMode::test_the_listener_does_not_start` | En modo externo el receptor no arranca y Servicios no deja iniciarlo |

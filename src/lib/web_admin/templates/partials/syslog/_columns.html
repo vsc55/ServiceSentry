@@ -7,6 +7,15 @@ const _SYSLOG_SEV_CLS = {0:'danger',1:'danger',2:'danger',3:'danger',
 let _syslogFilters = {severity_max:'', severity:[], hostname:[], app:[], facility:[], q:'', since:'', until:''};
 const _SL_MULTI_KEYS = ['hostname', 'app', 'severity', 'facility'];
 let _syslogPage = 1;
+// Which source the page reads: 'internal' (the panel's own table) or an external source's uid
+// (another program's database). Remembered per browser; the list of what THIS user may pick
+// comes from /api/v1/syslog/sources.
+let _syslogSrc = (() => { try { return localStorage.getItem('ss_syslog_src') || 'internal'; } catch (_) { return 'internal'; } })();
+let _syslogSources = null;
+// `?src=…` for the reads — nothing for the internal source, so its URLs stay as they were.
+function _syslogSrcParam(sep) {
+    return (_syslogSrc && _syslogSrc !== 'internal') ? `${sep}src=${encodeURIComponent(_syslogSrc)}` : '';
+}
 // Lazily, like every other table: read at PARSE time this saw `_tableRowsDefault` before the
 // config had loaded, so the admin's choice never reached it. `|| 50` made it worse — 0 is
 // "show all", a real answer, and it was being turned into fifty.

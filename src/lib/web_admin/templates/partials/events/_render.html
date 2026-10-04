@@ -204,6 +204,14 @@ function _eventMatchSummary(r) {
     if ((r.source || 'audit') === 'audit')
         return (r.events && r.events.length) ? tf('event_n_events', r.events.length) : t('all');
     const bits = [];
+    if (r.log_source === '*') bits.push(t('event_log_source_all'));
+    else if (r.log_source) {
+        // The names arrive with the rule editor; before it is first opened, say only that it
+        // is an external source rather than calling a perfectly good one unknown.
+        const list = (typeof _evLogSources !== 'undefined') ? _evLogSources : null;
+        const s = (list || []).find(x => x.uid === r.log_source);
+        bits.push(s ? s.name : t(list === null ? 'event_log_source_external' : 'event_log_source_unknown'));
+    }
     if (r.severity_max !== '' && r.severity_max != null)
         bits.push('≤ ' + ((typeof _SYSLOG_SEV !== 'undefined' && _SYSLOG_SEV[r.severity_max]) || r.severity_max));
     if (r.host) bits.push('host=' + r.host);

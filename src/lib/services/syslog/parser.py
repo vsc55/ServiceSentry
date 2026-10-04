@@ -52,7 +52,7 @@ def _decode(data) -> str:
 
 
 # RFC 5424 §6.2 caps HOSTNAME at 255 characters and APP-NAME at 48. Both are INDEXED columns
-# (idx_syslog_host_ts), which on MySQL makes them VARCHAR(255) — an index needs a bounded
+# (idx_systemevents_host), which on MySQL makes them VARCHAR(255) — an index needs a bounded
 # type. Their content arrives over the network from anyone who can reach the listener, and
 # nothing between the socket and the INSERT bounded it: a sender emitting a 1000-character
 # hostname hits "Data too long for column" on a strict-mode MySQL, and writes are batched 500

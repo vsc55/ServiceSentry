@@ -1,0 +1,221 @@
+// ──────────────────── External syslog sources (Configuration → Syslog) ────────────────────
+// Other programs' log databases — rsyslog's `SystemEvents` — that the Syslog page, a device's
+// Logs tab, the Overview cards and the event rules can read beside the panel's own table.
+// Never written: the panel only reads them. Kept by their own API (/api/v1/syslog/sources*),
+// not in the config document, so the card fills itself (`data-cfg-load`).
+
+let _slsrcRows = [];
+let _slsrcEditId = null;
+
+// Read-only viewers of the configuration see the list and can test it; only an editor changes it.
+function _slsrcCanEdit() {
+    return ((typeof currentUser !== 'undefined' && currentUser && currentUser.permissions) || []).includes('config_edit');
+}
+
+function _renderSyslogSourcesCard(cfgCardOpen, cfgCardClose) {
+    return `<div id="cfgcol_syslog_sources" data-cfg-load="_slsrcLoad">`
+        + cfgCardOpen('cfgcol_syslog_sources_card', '<i class="bi bi-diagram-3 me-1"></i>', t('syslog_sec_sources'))
+        + `<div class="cfg-field-wrap"><div id="slsrc-body" class="small text-muted">${esc(t('loading'))}</div>
+            ${_slsrcCanEdit() ? `<button class="btn btn-secondary btn-sm mt-2" onclick="showSyslogSourceModal()">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('syslog_source_add'))}</button>` : ''}</div>`
+        + cfgCardClose + `</div>`;
+}
+
+async function _slsrcLoad() {
+    const d = await apiGet('/api/v1/syslog/sources/config');
+    _slsrcRows = (d && d.sources) || [];
+    _slsrcDraw();
+}
+
+function _slsrcWhere(s) {
+    const c = s.data || {};
+    if (c.driver === 'sqlite') return c.path || '—';
+    const who = c.cred_uid ? (((_slsrcCreds || []).find(x => x.uid === c.cred_uid) || {}).name || t('syslog_source_cred'))
+                           : (c.user || '');
+    return `${who ? who + '@' : ''}${c.host || '—'}${c.port ? ':' + c.port : ''} / ${c.name || '—'}`;
+}
+
+function _slsrcDraw() {
+    const body = document.getElementById('slsrc-body');
+    if (!body) return;
+    if (!_slsrcRows.length) {
+        body.innerHTML = esc(t('syslog_sources_empty'));
+        return;
+    }
+    const yes = (on) => on ? '<i class="bi bi-check-lg text-success"></i>' : '<span class="text-muted">—</span>';
+    body.innerHTML = `<table class="table table-sm table-bordered mb-0 align-middle ss-fs-4">
+        <thead><tr>
+            <th>${esc(t('syslog_source_name'))}</th>
+            <th>${esc(t('syslog_source_where'))}</th>
+            <th class="text-center">${esc(t('syslog_source_tz'))}</th>
+            <th class="text-center">${esc(t('syslog_source_watch'))}</th>
+            <th class="text-center">${esc(t('enabled'))}</th>
+            <th style="width:8rem"></th>
+        </tr></thead><tbody>${_slsrcRows.map(s => `<tr>
+            <td>${esc(s.name)}${s.error ? ` <i class="bi bi-exclamation-triangle text-warning" title="${escAttr(s.error)}"></i>` : ''}</td>
+            <td class="text-truncate" style="max-width:220px" title="${escAttr(_slsrcWhere(s))}">
+                <span class="badge bg-secondary me-1">${esc((s.data || {}).driver || '')}</span>${esc(_slsrcWhere(s))}</td>
+            <td class="text-center">${esc(s.time_zone === 'local' ? t('syslog_tz_local') : 'UTC')}</td>
+            <td class="text-center">${yes(s.watch)}</td>
+            <td class="text-center">${yes(s.enabled)}</td>
+            <td class="text-end text-nowrap">
+                <button class="btn btn-info btn-sm me-1" onclick="_slsrcTest(${jsStr(s.uid)})"
+                    title="${escAttr(t('syslog_source_test'))}"><i class="bi bi-plug"></i></button>
+                ${_slsrcCanEdit() ? `<button class="btn btn-secondary btn-sm me-1" onclick="showSyslogSourceModal(${jsStr(s.uid)})"
+                    title="${escAttr(t('edit_tt'))}"><i class="bi bi-pencil"></i></button>
+                <button class="btn btn-danger btn-sm" onclick="_slsrcDelete(${jsStr(s.uid)})"
+                    title="${escAttr(t('delete_tt'))}"><i class="bi bi-trash3"></i></button>` : ''}
+            </td></tr>`).join('')}</tbody></table>`;
+}
+
+function _slsrcReport(r, name) {
+    if (r && r.ok && r.has_table) showToast(tf('syslog_source_test_ok', name || '', r.count), 'success');
+    else showToast(tf('syslog_source_test_fail', name || '', (r && r.error) || t('error')), 'danger');
+}
+
+async function _slsrcTest(uid) {
+    const s = _slsrcRows.find(x => x.uid === uid);
+    if (!s) return;
+    // The stored row, by uid: the server fills in the password the list does not carry.
+    const r = await apiPost('/api/v1/syslog/sources/test', { ...s, uid });
+    _slsrcReport(r && r.data, s.name);
+}
+
+function _slsrcDelete(uid) {
+    const s = _slsrcRows.find(x => x.uid === uid);
+    showConfirmModal(tf('syslog_source_delete_confirm', (s && s.name) || uid), async () => {
+        const r = await apiDelete('/api/v1/syslog/sources/' + encodeURIComponent(uid));
+        if (r && r.data && r.data.ok) {
+            showToast(t('syslog_source_deleted'), 'success');
+            _slsrcLoad();
+        } else {
+            showToast((r && r.data && r.data.error) || t('error'), 'danger');
+        }
+    });
+}
+
+// The connection fields a driver uses: a file for SQLite, a server for the rest — and, for a
+// server, the user and password typed here only when no stored credential is chosen.
+function _slsrcDriverChanged() {
+    const sqlite = (document.getElementById('slsrcDriver') || {}).value === 'sqlite';
+    const cred = !!(document.getElementById('slsrcCred') || {}).value;
+    document.querySelectorAll('#modalSyslogSource [data-slsrc-net]').forEach(el => el.classList.toggle('d-none', sqlite));
+    document.querySelectorAll('#modalSyslogSource [data-slsrc-file]').forEach(el => el.classList.toggle('d-none', !sqlite));
+    document.querySelectorAll('#modalSyslogSource [data-slsrc-manual]').forEach(el => el.classList.toggle('d-none', sqlite || cred));
+}
+
+// The stored credentials a source can log in with: the "database" ones (Credentials section).
+let _slsrcCreds = null;
+async function _slsrcLoadCreds(current) {
+    if (_slsrcCreds === null) {
+        const d = await apiGetSilent('/api/v1/credentials');
+        _slsrcCreds = ((d && d.credentials) || []).filter(c => c.ctype === 'db');
+    }
+    const sel = document.getElementById('slsrcCred');
+    if (!sel) return;
+    const opts = [`<option value="">${esc(t('syslog_source_cred_none'))}</option>`]
+        .concat(_slsrcCreds.map(c => `<option value="${escAttr(c.uid)}">${esc(c.name)}${c.enabled === false ? ' (' + esc(t('syslog_source_cred_off')) + ')' : ''}</option>`));
+    // A credential deleted since (or not visible to this editor) still shows as what it is.
+    if (current && !_slsrcCreds.some(c => c.uid === current))
+        opts.push(`<option value="${escAttr(current)}">${esc(t('event_log_source_unknown'))}</option>`);
+    sel.innerHTML = opts.join('');
+    sel.value = current || '';
+    _slsrcDriverChanged();
+}
+
+function showSyslogSourceModal(uid) {
+    _slsrcEditId = uid || null;
+    const s = uid ? _slsrcRows.find(x => x.uid === uid) : null;
+    const c = (s && s.data) || { driver: 'mysql' };
+    const row = (label, ctl, attr) => `<div class="row mb-2 align-items-center"${attr || ''}>
+        <label class="col-sm-4 col-form-label col-form-label-sm fw-semibold">${esc(label)}</label>
+        <div class="col-sm-8">${ctl}</div></div>`;
+    const drv = ['mysql', 'mariadb', 'postgresql', 'sqlite'].map(d =>
+        `<option value="${d}"${c.driver === d ? ' selected' : ''}>${d}</option>`).join('');
+    const tz = [['UTC', t('syslog_tz_utc')], ['local', t('syslog_tz_local')]].map(([v, l]) =>
+        `<option value="${v}"${((s && s.time_zone) || 'UTC') === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
+    document.getElementById('modalSyslogSourceWrap')?.remove();
+    document.body.insertAdjacentHTML('beforeend', `
+<div id="modalSyslogSourceWrap">
+<div class="modal fade" id="modalSyslogSource" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-diagram-3 me-2"></i>${esc(s ? t('syslog_source_edit') : t('syslog_source_add'))}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="small text-muted mb-3">${esc(t('syslog_source_intro'))}</div>
+        ${row(t('syslog_source_name'), `<input id="slsrcName" class="form-control form-control-sm" value="${escAttr((s && s.name) || '')}">`)}
+        ${row(t('enabled'), `<input type="checkbox" id="slsrcEnabled" class="form-check-input"${(!s || s.enabled) ? ' checked' : ''}>`)}
+        ${row(t('syslog_source_watch'), `<input type="checkbox" id="slsrcWatch" class="form-check-input"${(s && s.watch) ? ' checked' : ''}>
+            <div class="form-text">${esc(t('syslog_source_watch_hint'))}</div>`)}
+        ${row(t('syslog_source_tz'), `<select id="slsrcTz" class="form-select form-select-sm">${tz}</select>
+            <div class="form-text">${esc(t('syslog_source_tz_hint'))}</div>`)}
+        <hr class="my-2">
+        ${row(t('syslog_source_driver'), `<select id="slsrcDriver" class="form-select form-select-sm" onchange="_slsrcDriverChanged()">${drv}</select>`)}
+        ${row(t('syslog_source_host'), `<input id="slsrcHost" class="form-control form-control-sm" value="${escAttr(c.host || '')}">`, ' data-slsrc-net')}
+        ${row(t('syslog_source_port'), `<input id="slsrcPort" type="number" min="1" max="65535" class="form-control form-control-sm"
+            value="${escAttr(c.port ? String(c.port) : '')}" placeholder="3306 / 5432">`, ' data-slsrc-net')}
+        ${row(t('syslog_source_db'), `<input id="slsrcDb" class="form-control form-control-sm" value="${escAttr(c.name || '')}" placeholder="Syslog">`, ' data-slsrc-net')}
+        ${row(t('syslog_source_cred'), `<select id="slsrcCred" class="form-select form-select-sm" onchange="_slsrcDriverChanged()">
+            <option value="">${esc(t('syslog_source_cred_none'))}</option></select>
+            <div class="form-text">${esc(t('syslog_source_cred_hint'))}</div>`, ' data-slsrc-net')}
+        ${row(t('syslog_source_user'), `<input id="slsrcUser" class="form-control form-control-sm" value="${escAttr(c.user || '')}" autocomplete="off">`, ' data-slsrc-manual')}
+        ${row(t('syslog_source_password'), secretInput(` id="slsrcPassword" placeholder="${escAttr(c.password === null ? t('webhook_secret_keep') : '')}"`, ' form-control-sm'), ' data-slsrc-manual')}
+        ${row(t('syslog_source_path'), `<input id="slsrcPath" class="form-control form-control-sm" value="${escAttr(c.path || '')}">`, ' data-slsrc-file')}
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">${esc(t('cancel'))}</button>
+        <button class="btn btn-info" onclick="_slsrcTestForm()"><i class="bi bi-plug me-1"></i>${esc(t('syslog_source_test'))}</button>
+        <button class="btn btn-primary" onclick="saveSyslogSource()"><i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+      </div>
+    </div>
+  </div>
+</div>
+</div>`);
+    _slsrcDriverChanged();
+    _slsrcLoadCreds(c.cred_uid || '');
+    new bootstrap.Modal(document.getElementById('modalSyslogSource')).show();
+}
+
+function _slsrcFormData() {
+    const v = (id) => (document.getElementById(id)?.value || '').trim();
+    return {
+        name: v('slsrcName'),
+        enabled: document.getElementById('slsrcEnabled')?.checked ?? true,
+        watch: document.getElementById('slsrcWatch')?.checked ?? false,
+        time_zone: v('slsrcTz') || 'UTC',
+        data: {
+            driver: v('slsrcDriver') || 'mysql',
+            host: v('slsrcHost'), port: parseInt(v('slsrcPort'), 10) || null,
+            name: v('slsrcDb'), user: v('slsrcUser'),
+            password: document.getElementById('slsrcPassword')?.value || null,   // null = keep
+            path: v('slsrcPath'),
+            cred_uid: v('slsrcCred'),
+        },
+    };
+}
+
+async function _slsrcTestForm() {
+    const data = _slsrcFormData();
+    if (_slsrcEditId) data.uid = _slsrcEditId;
+    const r = await apiPost('/api/v1/syslog/sources/test', data);
+    _slsrcReport(r && r.data, data.name);
+}
+
+async function saveSyslogSource() {
+    const data = _slsrcFormData();
+    const r = _slsrcEditId
+        ? await apiPut('/api/v1/syslog/sources/' + encodeURIComponent(_slsrcEditId), data)
+        : await apiPost('/api/v1/syslog/sources', data);
+    // apiPut answers with the body; apiPost with {status, data}.
+    const body = _slsrcEditId ? r : (r && r.data);
+    if (body && body.ok) {
+        bootstrap.Modal.getInstance(document.getElementById('modalSyslogSource'))?.hide();
+        showToast(t('syslog_source_saved'), 'success');
+        _slsrcLoad();
+    } else {
+        showToast((body && body.error) || t('save_error'), 'danger');
+    }
+}

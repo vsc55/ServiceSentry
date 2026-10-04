@@ -123,8 +123,15 @@ function _hmlOrderedCols() {
     return _hmlColOrder().map(id => by[id]).filter(Boolean);
 }
 
+// The source the device's logs are read from: the internal one unless the reader picked
+// another (an external program's database) — remembered per browser, like the Syslog page's.
+function _deviceLogsSavedSrc() {
+    try { return localStorage.getItem('ss_devicelogs_src') || 'internal'; } catch (_) { return 'internal'; }
+}
+
 function _deviceLogsReset(addr) {
-    _deviceLogsState = { addr, page: 1, pageSize: _tableRowsDefault,   // not `|| 50`: 0 is "all", a real answer
+    _deviceLogsState = { addr, src: _deviceLogsSavedSrc(),
+                       page: 1, pageSize: _tableRowsDefault,   // not `|| 50`: 0 is "all", a real answer
                        severity_max: '', q: '', since: '', until: '', auto: 0,
                        // The API's default, said out loud: newest first. Held here so the
                        // header can show WHICH column is sorted and which way.
@@ -231,6 +238,8 @@ async function _loadDeviceLogs(containerId, address) {
                 <input id="hml-to" type="datetime-local" class="form-control form-control-sm" style="min-width:165px"></div>
             <div class="flex-grow-1"><label class="form-label small mb-1">${esc(t('syslog_search'))}</label>
                 <input id="hml-q" type="search" class="form-control form-control-sm" placeholder="${escAttr(t('syslog_search'))}"></div>
+            <div class="d-none" id="hml-src-wrap"><label class="form-label small mb-1">${esc(t('syslog_source_label'))}</label>
+                <select id="hml-src" class="form-select form-select-sm" style="min-width:140px"></select></div>
             <div class="d-flex align-items-end"><span id="hml-auto-refresh"></span></div>
         </div>
         <div id="hml-pager-top" class="mb-1"></div>
@@ -254,11 +263,34 @@ async function _loadDeviceLogs(containerId, address) {
         clearTimeout(qTimer);
         qTimer = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; _deviceLogsFetch(); }, 350);
     };
+    _deviceLogsLoadSources();
     // Nothing to unbind from a dialog: this table is drawn by the Infrastructure section,
     // and the tick above stops itself the moment the table is no longer on the page.
     _deviceLogsRenderAutoRefresh();
     _deviceLogsApplyTimer();
     _deviceLogsFetch();
+}
+
+// The source selector: offered only when this user can read more than the internal source.
+async function _deviceLogsLoadSources() {
+    const d = await apiGet('/api/v1/syslog/sources');
+    const list = (d && d.sources) || [];
+    const sel = document.getElementById('hml-src'), wrap = document.getElementById('hml-src-wrap');
+    const st = _deviceLogsState;
+    if (!sel || !wrap || !st) return;
+    if (!list.some(s => s.uid === st.src)) {
+        if (st.src !== 'internal') { st.src = 'internal'; _deviceLogsFetch(); }
+    }
+    sel.innerHTML = list.map(s => `<option value="${escAttr(s.uid)}">${esc(s.internal
+        ? t('syslog_source_internal') : s.name)}</option>`).join('');
+    sel.value = st.src;
+    wrap.classList.toggle('d-none', list.length <= 1);
+    sel.onchange = (e) => {
+        st.src = e.target.value || 'internal';
+        try { localStorage.setItem('ss_devicelogs_src', st.src); } catch (_) { /* convenience */ }
+        st.page = 1;
+        _deviceLogsFetch();
+    };
 }
 
 // Fetch + render rows/pager for the current device-logs state (no shell rebuild).
@@ -279,7 +311,16 @@ async function _deviceLogsFetch() {
     const qs = new URLSearchParams({ device: st.addr, limit: String(limit), offset: String(offset),
                                      sort: st.sort || 'ts', order: st.order || 'desc' });
     for (const k of ['severity_max', 'q', 'since', 'until']) if (st[k] !== '' && st[k] != null) qs.set(k, st[k]);
+    if (st.src && st.src !== 'internal') qs.set('src', st.src);
     const data = await apiGet('/api/v1/syslog?' + qs.toString());
+    if (!data && st.src && st.src !== 'internal' && stateEl) {
+        // The external source did not answer: say so instead of "no messages".
+        st.rows = [];
+        _deviceLogsDrawTable();
+        stateEl.style.display = '';
+        stateEl.innerHTML = `<i class="bi bi-plug"></i><div>${esc(t('syslog_source_unavailable'))}</div>`;
+        return;
+    }
     const msgs = (data && data.messages) || [];
     const total = (data && data.total) || 0;
     if (!all) {

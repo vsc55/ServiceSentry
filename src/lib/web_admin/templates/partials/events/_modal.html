@@ -2,9 +2,11 @@ function openEventRuleModal(rid) {
     const found = rid ? _eventRules.find(r => r.id === rid) : null;
     _eventDraft = found ? JSON.parse(JSON.stringify(found))
         : { id: null, name: '', description: '', enabled: true, source: 'audit', events: [],
-            severity_max: '', host: '', app: '', match_groups: [], tags: [],
+            severity_max: '', host: '', app: '', log_source: '', match_groups: [], tags: [],
             channels: [], webhook_ids: [], cooldown: null };
+    if (_eventDraft.log_source == null) _eventDraft.log_source = '';
     _evEnsureConditions(_eventDraft);
+    _evLoadLogSources();
     _eventAuditFilter = '';
     document.getElementById('eventRuleModalTitle').textContent =
         found ? (t('event_edit') + ': ' + (found.name || '')) : t('event_add');
@@ -101,9 +103,32 @@ function _eventConditionsHtml() {
             <div class="form-text mb-0 flex-shrink-0">${esc(t('event_audit_hint'))}</div></div>`;
     }
     return `<div class="row g-2">
+            <div class="col-sm-5"><label class="form-label small mb-1">${esc(t('event_log_source'))}${_evHelp('event_log_source_hint')}</label>
+                <select id="evm-logsrc" class="form-select form-select-sm"
+                    onchange="_eventDraft.log_source=this.value">${_evLogSourceOptions()}</select></div>
             <div class="col-12"><label class="form-label small mb-1">${esc(t('event_conditions'))}${_evHelp('event_conditions_hint')}</label>
                 <div id="evm-match-wrap">${_evConditionsEditorHtml()}</div></div>
         </div>`;
+}
+
+// Which syslog source a syslog rule watches: '' the internal one, '*' all of them, or one
+// external source. The external ones are only evaluated while marked "watch" in their config.
+let _evLogSources = null;
+async function _evLoadLogSources() {
+    if (_evLogSources !== null) return;
+    const d = await apiGetSilent('/api/v1/syslog/sources');
+    _evLogSources = ((d && d.sources) || []).filter(s => !s.internal);
+    const sel = document.getElementById('evm-logsrc');
+    if (sel) sel.innerHTML = _evLogSourceOptions();
+}
+function _evLogSourceOptions() {
+    const cur = (_eventDraft && _eventDraft.log_source) || '';
+    const opts = [['', t('syslog_source_internal')], ['*', t('event_log_source_all')]]
+        .concat((_evLogSources || []).map(s => [s.uid, s.name]));
+    // A source deleted since (or not visible to this editor) stays selectable as what it is.
+    if (cur && !opts.some(o => o[0] === cur)) opts.push([cur, t('event_log_source_unknown')]);
+    return opts.map(([v, lbl]) =>
+        `<option value="${escAttr(v)}"${v === cur ? ' selected' : ''}>${esc(lbl)}</option>`).join('');
 }
 
 // Notifications tab body. Re-rendered on its own when a channel toggles so the

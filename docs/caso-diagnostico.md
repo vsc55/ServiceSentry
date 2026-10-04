@@ -5,6 +5,39 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## La lectura que bloqueaba el `DROP TABLE` del dueño de la base
+
+**Síntoma.** Probando una fuente externa de syslog contra MariaDB, el script leía la tabla
+`SystemEvents` de rsyslog y después hacía `DROP TABLE` para limpiar. El `DROP` no terminaba
+nunca: sin error, sin tiempo de espera, más de dos minutos parado.
+
+**Diagnóstico.** Repetido paso a paso con marcas de tiempo: conectar, crear, insertar, probar
+la conexión y leer, todo por debajo de un segundo. Solo se quedaba colgado el `DROP` lanzado
+por *otra* conexión mientras seguía abierta la del almacén que había leído. Con esa conexión
+cerrada, el `DROP` salía al momento.
+
+**Causa raíz.** El conector MySQL abre las conexiones con `autocommit=False`, que es lo
+correcto para las bases propias: las escrituras van en transacciones. Pero en InnoDB un
+`SELECT` dentro de una transacción la deja abierta, y una transacción abierta mantiene un
+**bloqueo de metadatos** sobre cada tabla que leyó, hasta el `COMMIT` o el `ROLLBACK`. Una
+fuente externa solo lee y nunca confirma nada, así que el bloqueo duraba lo que durase la
+conexión, que el registro reutiliza indefinidamente. Cualquier DDL del dueño de la base sobre
+`SystemEvents` (un `ALTER`, un `DROP` o el `CREATE INDEX` que la documentación le recomienda
+al DBA) se ponía en cola detrás de la conexión ociosa del panel. Peor aún: con un DDL en cola,
+MySQL hace esperar también a los `INSERT` que llegan después, así que el propio rsyslog dejaba
+de poder escribir.
+
+**Solución.** Las fuentes externas se abren con `autocommit=True`
+([`sources.py` → `connector_config`](../src/lib/services/syslog/sources.py)). Los conectores
+MySQL y PostgreSQL aceptan ahora `autocommit` en su configuración; por defecto sigue apagado.
+`test_an_external_source_never_blocks_its_owners_ddl`, en
+`tests/e2e/test_db_portability_live.py`, lee y después crea un índice desde otra conexión con
+15 s de margen. Sin el arreglo, falla.
+
+**Lección.** Una conexión que solo lee a la base de otro no es inofensiva. Sin autocommit,
+leer también bloquea, y el bloqueo dura lo que dure la conexión. En SQLite y en las pruebas
+con una sola conexión no se ve: hace falta un segundo cliente haciendo DDL.
+
 ## Lo que un renombrado mecánico se llevó por delante con la suite en verde
 
 **Síntoma.** Con la suite completa en local (ya sin la fuga de memoria, ficha siguiente), 28 fallos
