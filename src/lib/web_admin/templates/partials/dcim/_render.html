@@ -39,6 +39,7 @@ let _dcimUrlRoom = '';
 let _dcimUrlBoard = false;
 const _DCIM_URL_RACK = 'rack';
 const _DCIM_URL_ROOM = 'room';
+
 //: El cuadro de mando en la dirección. Es la pantalla que alguien pega en un chat a las tres de
 //: la mañana, y una URL que no lo recuerda convierte ese mensaje en «abre el inventario y dale
 //: al botón de arriba».
@@ -110,7 +111,12 @@ function _dcimMay(flag) {
  *  un `const` se evalúa en su sitio — si este trozo entrara antes que `_api.html`, sería un
  *  ReferenceError al cargar la página entera. Así se resuelve al llamar. */
 async function _dcimSend(metodo, url, cuerpo) {
-    return apiSend(metodo, url, cuerpo);
+    // Un cambio a algo del plano abierto se apunta para poder deshacerlo (`_undo.html`).
+    const antes = metodo === 'PUT' && typeof _dcUndoBefore === 'function'
+        ? _dcUndoBefore(url, cuerpo) : null;
+    const r = await apiSend(metodo, url, cuerpo);
+    if (antes && r && r.ok) _dcUndoRecord(url, antes, cuerpo);
+    return r;
 }
 
 //: Volver a esta sección vuelve a pedir el armario que estuviera abierto.
@@ -192,7 +198,10 @@ async function renderDcim() {
                 if (data && data.rack) _dcimRack = data;
             }
             _dcimUrlRoom = q.get(_DCIM_URL_ROOM) || '';
+            if (q.get(_DCIM_URL_SITE))
+                _dcimUrlSite = {site: q.get(_DCIM_URL_SITE), floor: q.get(_DCIM_URL_FLOOR) || ''};
             if (q.get(_DCIM_URL_VIEW) === 'board') _dcimUrlBoard = true;
+            _dcimUrlReadSel(q);
         } catch (_) { /* ignore */ }
     }
     // A `/dcim/catalog` se llega sin pulsar nada: pegando la dirección o volviendo con el
@@ -224,6 +233,12 @@ async function renderDcim() {
         _dcimUrlRoom = '';
         if (!_dcimRack && _dcimFindRoom(want)) return _dcimOpenPlan(want);
     }
+    if (_dcimUrlSite) {
+        const want = _dcimUrlSite;
+        _dcimUrlSite = null;
+        if (!_dcimRack && !_dcimPlan && (_dcimData.sites || []).some(s => s.uid === want.site))
+            return _dcsOpen(want.site, want.floor);
+    }
     // El cuadro manda sobre todo lo demás: se abre para ir a un sitio, y si hay uno abierto
     // es que todavía no se ha ido.
     pane.innerHTML = (
@@ -252,6 +267,7 @@ async function renderDcim() {
     // Y el visor 3D, por lo mismo: un `<canvas>` que todavía no está en el documento mide
     // cero píxeles, y WebGL sobre cero píxeles es una pantalla negra sin ningún error.
     if (typeof _dc3dMount === 'function') _dc3dMount();
+    _dcimRevealCameFrom();
     const first = document.getElementById('dcim-f-0');
     if (first) first.focus();
 }
@@ -275,23 +291,6 @@ async function _dcimLoadZones() {
     } catch (_) {
         return [];                              // ni una ni otra: el campo sigue siendo libre
     }
-}
-
-/** Where the reader is, in the URL. Same rule the fleet follows: what is on screen is a fact
- *  about this tab, and a pasted link should land on it. */
-function _dcimUrl() {
-    try {
-        const url = new URL(window.location.href);
-        const rack = (_dcimRack || {}).rack && _dcimRack.rack.uid;
-        if (rack) url.searchParams.set(_DCIM_URL_RACK, rack);
-        else url.searchParams.delete(_DCIM_URL_RACK);
-        const room = (_dcimPlan || {}).room && _dcimPlan.room.uid;
-        if (room && !rack) url.searchParams.set(_DCIM_URL_ROOM, room);
-        else url.searchParams.delete(_DCIM_URL_ROOM);
-        window.history.replaceState({}, '', url);
-        if (_dcimBoard) url.searchParams.set(_DCIM_URL_VIEW, 'board');
-        else url.searchParams.delete(_DCIM_URL_VIEW);
-    } catch (_) { /* a URL that cannot be written is not worth failing a render for */ }
 }
 
 // ── The one form: new and edit are the same thing on different columns ──────
@@ -347,6 +346,15 @@ function _dcimViewWanted() {
     const donde = _dcWire ? 'wiring'
                 : _dcDev ? 'devices'
                 : _dcSrc ? 'sources' : _dcimBoard ? 'board' : 'inventory';
+    // Pedida desde el menú la vista en la que ya se está, con un rack o un plano abierto
+    // dentro: es volver a ella, a su lista. Si no, «Inventario» no hacía nada desde un rack.
+    const pulsado = window._ssNavPicked;
+    window._ssNavPicked = null;
+    if (pulsado && pulsado.pageId === 'dcim' && pulsado.slug === donde && donde === 'inventory'
+            && (_dcimRack || _dcimPlan || _dcsPlan)) {
+        _dcimGo('inventory');
+        return true;
+    }
     if (!quiere || quiere === donde) return false;
     _dcimGo(quiere);
     return true;
@@ -387,7 +395,8 @@ function _dcimGo(donde) {
     if (donde === 'sources') return _dcSrcOpen();
     if (donde === 'board') return _dcimOpenBoard();
     // Al inventario se vuelve del todo: si se quedara el rack abierto, «Inventario» llevaría al
-    // rack, que es donde ya se estaba.
+    // rack, que es donde ya se estaba. Con lo que se estaba mirando elegido.
+    _dcimRemember();
     _dcimRack = null;
     _dcimPlan = null;
     _dcsPlan = null;

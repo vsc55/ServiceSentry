@@ -53,7 +53,8 @@ from lib.db.store_base import BaseStore
 
 from .cabling import (CABLE_CATEGORIES, CABLE_COLORS, CABLE_KINDS, LINK_KINDS,
                       _CABLE, _LINK)
-from .features import FEATURE_KINDS, FEATURE_LAYERS, _FEATURE
+from .features import (FEATURE_KINDS, FEATURE_LAYERS, SHELVED_KINDS, SHELVES_MAX, _FEATURE,
+                       _SHELF_ITEM)
 from .floors import _FLOOR
 from .items import FACES, ITEM_ROLES, PLACEMENTS, ROLES_MUDOS, _ITEM
 from .parts import (PART_KINDS, PORT_FAMILIES, PORT_LIST_MAX, PORT_SIGNALS_MAX,
@@ -78,13 +79,13 @@ from .sites import _SITE
 OWNER_SCOPES = ('site', 'room', 'rack', 'item')
 
 SCHEMAS = (_SITE, _FLOOR, _ROOM, _RACK, _ITEM, _FEATURE, _PDU, _POWER, _CABLE,
-           _LINK, _ROW, _SOURCE, _PART)
+           _LINK, _ROW, _SOURCE, _PART, _SHELF_ITEM)
 
 #: Lo que este paquete ofrece hacia fuera. Escrito y no deducido: casi todo se importa aquí
 #: sólo para volver a exportarlo, y sin esta lista cualquier herramienta lo llamaría muerto.
 __all__ = ['DcimStore', 'SCHEMAS', 'OWNER_SCOPES', 'FACES', 'ITEM_ROLES', 'ROLES_MUDOS',
            'PLACEMENTS', 'PART_KINDS', 'SIDES', 'COOLING', 'ROOM_HEIGHT_MM',
-           'FEATURE_KINDS', 'FEATURE_LAYERS', 'FEEDS', 'SOURCE_KINDS', 'FEED_COLORS',
+           'FEATURE_KINDS', 'FEATURE_LAYERS', 'SHELVED_KINDS', 'SHELVES_MAX', 'FEEDS', 'SOURCE_KINDS', 'FEED_COLORS',
            'FEED_CATEGORIES', 'CABLE_KINDS', 'CABLE_CATEGORIES', 'CABLE_COLORS',
            'LINK_KINDS', 'PORT_FAMILIES', 'PORT_LIST_MAX', 'PORT_SIGNALS_MAX',
            'WATTS_MAX', 'clean_port_list', 'like_esc', 'like_clause', 'Rows', 'rank']
@@ -182,6 +183,7 @@ class DcimStore:
         self.racks = Rows(db, _RACK)
         self.items = Rows(db, _ITEM)
         self.features = Rows(db, _FEATURE)
+        self.shelf_items = Rows(db, _SHELF_ITEM)
         self.pdus = Rows(db, _PDU)
         self.feeds = Rows(db, _POWER)
         self.cables = Rows(db, _CABLE)
@@ -402,6 +404,19 @@ class DcimStore:
             capa = (kind or {}).get('layer', 'room')
             return FEATURE_LAYERS.index(capa) if capa in FEATURE_LAYERS else 1
         return sorted(rows, key=_peso)
+
+    def shelf_items_of(self, feature_uid: str) -> list[dict]:
+        """Lo que hay en un armario, por estantería y por nombre."""
+        rows = self.shelf_items.list('feature_uid = ?', (str(feature_uid or ''),))
+        return sorted(rows, key=lambda r: (int(r.get('shelf') or 0),
+                                           str(r.get('label') or '').lower()))
+
+    def delete_feature(self, uid: str) -> None:
+        """Quitar una pieza con lo que guarda: el material de un armario borrado no tiene
+        dónde estar, y dejarlo sería una lista de cosas en un sitio que ya no existe."""
+        for row in self.shelf_items_of(uid):
+            self.shelf_items.delete(row['uid'])
+        self.features.delete(uid)
 
     def items_of(self, rack_uid: str) -> list[dict]:
         return self.items.list('rack_uid = ?', (str(rack_uid or ''),))

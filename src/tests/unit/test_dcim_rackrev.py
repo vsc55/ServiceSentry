@@ -86,3 +86,17 @@ class TestQueCuentaComoUnCambio:
         cambios = rackrev.compare({}, self._foto(_it('pc', parent_uid='bandeja', u_start=4)))
         llego = next(c for c in cambios if c['kind'] == 'add')
         assert llego['to'] == 'mounted'
+
+    def test_y_lo_que_no_ocupa_U_dice_su_sitio_y_no_U0(self):
+        """Un SAI al lado del armario salía como «U0»: una U que no existe. Se dice su sitio."""
+        cambios = rackrev.compare({}, self._foto(_it('sai', placement='near', u_start=0)))
+        llego = next(c for c in cambios if c['kind'] == 'add')
+        assert llego['to'] == 'place:near'
+
+    def test_una_foto_de_antes_de_guardar_el_sitio_no_lo_cuenta_como_cambio(self):
+        """Las fotos viejas no traen `placement`. Compararlas con una nueva no puede decir que
+        todo cambió de sitio — ni lo de los mástiles ni lo que está al lado."""
+        vieja = {'items': [{c: v for c, v in _it('a').items()},
+                           {c: v for c, v in _it('sai', u_start=0).items()}]}
+        nueva = rackrev.snapshot({}, [_it('a'), _it('sai', u_start=0, placement='near')])
+        assert [c for c in rackrev.compare(vieja, nueva) if c['kind'] == 'edit'] == []

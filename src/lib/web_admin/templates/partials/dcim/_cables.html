@@ -84,22 +84,31 @@ function _dcCablesHtml() {
     const d = _dcCables || {};
     if (d.loading) return _dcRackSkeleton(4);
     const c = d.counts || {};
+    // The five figures as chips with their colour, as the design draws them: a sentence of five
+    // numbers is read once; five coloured chips are read at a glance, and the red one first.
+    const chip = (n, key, tone) => `<span class="badge rounded-pill fw-normal ${tone}"><strong>${
+        esc(String(n || 0))}</strong> ${esc(t(key))}</span>`;
     return `<div class="ss-toolrow mb-2">
-            <span class="text-muted ss-fs-2 ss-tabular ss-toolrow-text">${
+            <span class="d-flex flex-wrap gap-1 ss-toolrow-text">${
                 d.checked
-                    ? esc(tf('dcim_cables_note', c.seen || 0, c.via || 0, c.unseen || 0,
-                             c.other_port || 0, c.undeclared || 0))
-                    : `<span class="spinner-border spinner-border-sm me-1"
+                    ? chip(c.seen, 'dcim_cables_n_seen', 'bg-success-subtle text-success-emphasis')
+                      + chip(c.via, 'dcim_cables_n_via', 'bg-success-subtle text-success-emphasis')
+                      + chip(c.unseen, 'dcim_cables_n_unseen', 'bg-body-secondary text-body-secondary')
+                      + chip(c.other_port, 'dcim_cables_n_other', 'bg-danger-subtle text-danger-emphasis')
+                      + chip(c.undeclared, 'dcim_cables_n_undeclared', 'bg-warning-subtle text-warning-emphasis')
+                    : `<span class="text-muted ss-fs-2"><span class="spinner-border spinner-border-sm me-1"
                             role="status" aria-hidden="true"></span>${
-                        esc(t('dcim_cables_checking'))}`}</span>
-            <label class="form-check form-switch ss-fs-2 mb-0">
-                <input class="form-check-input" type="checkbox"${_dcCablePorts ? ' checked' : ''}
-                       onchange="_dcCablePorts=this.checked;renderDcim()">
-                <span class="form-check-label">${esc(t('dcim_cable_show_ports'))}</span>
-            </label>
-            ${_dcimMay('dcim_cable_edit') ? `<button class="btn btn-sm btn-secondary"
-                    onclick="_dcCableNew()"><i class="bi bi-plus-lg me-1"></i>${
-                    esc(t('dcim_cable'))}</button>` : ''}
+                        esc(t('dcim_cables_checking'))}</span>`}</span>
+            <div class="ss-toolrow-tools">
+                <label class="form-check form-switch ss-fs-2 mb-0">
+                    <input class="form-check-input" type="checkbox"${_dcCablePorts ? ' checked' : ''}
+                           onchange="_dcCablePorts=this.checked;renderDcim()">
+                    <span class="form-check-label">${esc(t('dcim_cable_show_ports'))}</span>
+                </label>
+                ${_dcimMay('dcim_cable_edit') ? `<button class="btn btn-sm btn-primary"
+                        onclick="_dcCableNew()"><i class="bi bi-plus-lg me-1"></i>${
+                        esc(t('dcim_cable'))}</button>` : ''}
+            </div>
         </div>
         ${_dcCableTable(d.cables || [])}
         ${_dcUndeclared(d.undeclared || [])}`;
@@ -924,10 +933,12 @@ function _dcSeenTip(c) {
  *  portátil de alguien no es cableado de sala y llenaría la lista de ruido. */
 function _dcUndeclared(filas) {
     if (!filas.length) return '';
-    return `<div class="mt-3">
-        <div class="ss-fs-2 text-muted mb-1">
+    // In its own amber box: it is the one thing on this tab that is work to do, and a muted line
+    // under the table is where work to do goes to be missed.
+    return `<div class="mt-3 ss-warn-box">
+        <div class="fw-semibold mb-1">
             <i class="bi bi-question-circle me-1"></i>${esc(t('dcim_undeclared'))}</div>
-        <table class="${_DC_TBL}"><tbody>${filas.map((f, i) => `<tr>
+        <table class="${_DC_TBL} mb-0"><tbody>${filas.map((f, i) => `<tr>
             <td class="ss-fs-2">${esc(_dcimDeviceName(f.from))}</td>
             <td class="ss-fs-2">${esc(_dcimDeviceName(f.to))}</td>
             <td class="text-muted ss-fs-1 ss-tabular">${

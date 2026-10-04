@@ -334,12 +334,15 @@ function _dcimElevation(rack, items) {
     // y borran cosas—, pero puestos encima del dibujo tapaban parte de él y competían con la
     // tarjeta de la lupa por la misma esquina. Una barra es su sitio: manda sobre lo que hay
     // debajo y no le quita nada.
-    return `<div class="ss-toolrow mb-1">
+    return `<div class="ss-toolrow">
         ${_dceTools(rack)}
-        <button class="btn btn-sm ${_dceWide ? 'btn-warning' : 'btn-secondary'}"
-                onclick="_dceWideToggle()"
-                title="${escAttr(t(_dceWide ? 'dcim_elev_narrow' : 'dcim_elev_wide'))}">
-            <i class="bi bi-arrows-angle-${_dceWide ? 'contract' : 'expand'}"></i></button>
+        <div class="ss-toolrow-tools">
+            ${_dceMarksLegend()}
+            <button class="btn btn-sm ${_dceWide ? 'btn-warning' : 'btn-secondary'}"
+                    onclick="_dceWideToggle()"
+                    title="${escAttr(t(_dceWide ? 'dcim_elev_narrow' : 'dcim_elev_wide'))}">
+                <i class="bi bi-arrows-angle-${_dceWide ? 'contract' : 'expand'}"></i></button>
+        </div>
     </div>
     <div class="border rounded-3 overflow-hidden ss-canvas-fit position-relative"
          style="width:100%${_dceWide ? '' : `;aspect-ratio:${width}/${height}`}">
@@ -359,8 +362,21 @@ function _dcimElevation(rack, items) {
          Con su hueco reservado aunque no haya nada señalado: si apareciera y desapareciera, el
          dibujo daría un salto de dos centímetros cada vez que el ratón entra y sale de una caja,
          que es la clase de temblor que hace imposible apuntar. -->
-    <div id="dcimElevPanel" class="ss-elev-info"></div>
+    <div id="dcimElevPanel" class="ss-elev-info">${_dceCard()}</div>
     ${_dceBesideHtml(items)}`;
+}
+
+/** What the small marks on each box mean: a dot per cable, a bar per power branch. Said once,
+ *  beside the tools, because a mark nobody can read is decoration. */
+function _dceMarksLegend() {
+    return `<span class="d-inline-flex align-items-center gap-2 ss-fs-2 text-body-secondary">
+        ${esc(t('dcim_marks'))}:
+        <span class="d-inline-flex align-items-center gap-1"><span class="ss-rv-dot"
+            style="background:var(--bs-primary)"></span>${esc(t('dcim_mark_cable'))}</span>
+        <span class="d-inline-flex align-items-center gap-1"><span class="ss-mark-bar"
+            style="background:var(--bs-primary)"></span><span class="ss-mark-bar"
+            style="background:var(--bs-warning)"></span>${esc(t('dcim_mark_branch'))}</span>
+    </span>`;
 }
 
 function _dceContent(rack, items) {
@@ -383,12 +399,14 @@ function _dceBesideHtml(items) {
     if (!fuera.length) return '';
     // Lo ajeno también está al lado —ocupa ese suelo— pero sin nombre y sin abrirse: un
     // candado, como su fila de la tabla y su caja del dibujo.
-    return `<div class="ss-fs-2 text-muted mt-1">
+    return `<div class="ss-fs-2 text-muted d-flex align-items-center flex-wrap gap-1">
         <i class="bi bi-box-arrow-right me-1"></i>${esc(t('dcim_elev_beside'))}
         ${fuera.map(i => i.foreign
             ? `<span class="badge text-bg-secondary ms-1"><i class="bi bi-lock me-1"></i>${
                 esc(t('dcim_foreign'))}</span>`
-            : `<button class="btn btn-sm btn-secondary py-0 px-1 ms-1"
+            : `<button class="btn btn-sm btn-secondary ms-1"
+                onpointerenter="_dceHover(${jsStr(i.uid)})" onpointerleave="_dceHover('')"
+                onfocus="_dceHover(${jsStr(i.uid)})" onblur="_dceHover('')"
                 onclick="_dcimOpen('edit','item','',${jsStr(i.uid)})"
                 title="${escAttr(t('dcim_place_' + String(i.placement || 'u')))}">
             <span class="ss-dot me-1" style="background:${
@@ -644,34 +662,61 @@ function _dceHoverFromList(uid) {
     if (document.getElementById('dcimElevPanel')) _dceHover(uid);
 }
 
-/** Reading one item — what it is, whose it is, and what it is doing. */
+/** Reading one item — what it is, whose it is, what it is doing, and what hangs off it.
+ *
+ *  Always there, as the design draws it: with nothing pointed at it says how to fill it, so the
+ *  space under the drawing never reads as a box that failed to load. */
 function _dceCard() {
-    if (!_dceOn || !_dcimRack) return '';
-    const item = (_dcimRack.items || []).find(i => i.uid === _dceOn);
-    if (!item) return '';
+    if (!_dcimRack) return '';
+    const item = _dceOn ? (_dcimRack.items || []).find(i => i.uid === _dceOn) : null;
+    if (!item)
+        return `<div class="ss-elev-card ss-elev-card-idle"><i class="bi bi-cursor me-1"></i>${
+            esc(t('dcim_elev_hover_hint'))}</div>`;
     if (item.foreign)
-        return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
+        return `<div class="ss-elev-card">
             <i class="bi bi-lock me-1"></i>${esc(t('dcim_foreign'))}
             <span class="text-muted ms-2">${esc(_dceSpan(item))}</span>
         </div>`;
-    return `<div class="border rounded-3 p-2 ss-fs-2 ss-infra-linkinfo">
-        <div class="d-flex align-items-center gap-2 flex-wrap">
-            <span class="fw-semibold">${esc(_dcimItemName(item))}</span>
-            ${item.state ? _infraStateBadge(item.state) : `<span class="text-muted ss-fs-3">${
-                esc(t('dcim_unwatched'))}</span>`}
-            ${_dcimOrgBadge(item.org_uid)}
-            <span class="text-muted ss-fs-3">${esc(_dceSpan(item))}</span>
-            ${item.serial ? `<code class="ss-fs-3">${esc(item.serial)}</code>` : ''}
-            ${item.device_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2"
-                onclick="_dcimOpenDevice(${jsStr(item.device_uid)})">${
-                esc(t('dcim_open_device'))}</button>` : ''}
-        </div>
+    const padre = item.parent_uid ? (_dcimRack.items || []).find(i => i.uid === item.parent_uid) : null;
+    const where = padre ? `${_dceSpan(padre)} · ${tf('dcim_on_tray', _dcimItemName(padre))}` : _dceSpan(item);
+    const nCables = _dcRvCablesOf(item.uid).length;
+    const luz = _dcRvPowerOf(item.uid);
+    const nFeeds = ((luz || {}).feeds || []).length;
+    const ramas = ((luz || {}).branches || []).map(b => String(b).toUpperCase()).join('+');
+    const warr = _dcRvWarr(item.warranty_until);
+    // A UPS says which source it is, and whether it is bypassed right now.
+    const pw = (typeof _dcPower !== 'undefined' && _dcPower) || {};
+    const ups = (pw.ups_items || []).find(u => u.uid === item.uid);
+    const fuente = ups && ups.source ? (pw.sources || []).find(f => f.uid === ups.source) : null;
+    const fuenteTxt = ups ? (fuente ? `<span class="text-body-secondary ss-fs-2">${
+            esc(tf('dcim_card_source', fuente.name))}</span>${fuente.bypass
+            ? ` <span class="badge text-bg-warning fw-normal">${esc(t('dcim_bypassed'))}</span>` : ''}`
+        : `<span class="badge text-bg-warning fw-normal">${esc(t('dcim_card_source_none'))}</span>`) : '';
+    return `<div class="ss-elev-card">
+        ${item.state ? _infraStateBadge(item.state) : `<span class="text-muted ss-fs-2">${
+            esc(t('dcim_unwatched'))}</span>`}
+        <span class="fw-semibold">${esc(_dcimItemName(item))}</span>
+        ${_dcimOrgBadge(item.org_uid)}
+        <span class="text-body-secondary ss-fs-2">${esc(where)}</span>
+        ${item.serial ? `<code class="ss-fs-2">${esc(item.serial)}</code>` : ''}
+        ${warr === 'expired' ? `<span class="badge bg-danger">${
+            esc(tf('dcim_card_warranty', item.warranty_until))}</span>` : ''}
+        ${(nCables || nFeeds) ? `<span class="text-body-secondary ss-fs-2">${
+            esc(tf('dcim_card_links', nCables, nFeeds))}${ramas ? ' (' + esc(ramas) + ')' : ''}</span>` : ''}
+        ${fuenteTxt}
+        <span class="flex-grow-1"></span>
+        ${item.device_uid ? `<button class="btn btn-sm btn-secondary"
+            onclick="_dcimOpenDevice(${jsStr(item.device_uid)})">${
+            esc(t('dcim_open_device'))}</button>` : ''}
     </div>`;
 }
 
 function _dceSpan(item) {
+    // What takes no U says where it is instead: «U0» reads as a U that does not exist.
+    if (String(item.placement || 'u') !== 'u')
+        return t('dcim_place_col_' + item.placement) + ' · ' + t('dcim_face_' + (item.face || 'full'));
     const u = Number(item.u_start || 0);
     const h = Number(item.u_height || 1);
-    return (h > 1 ? u + '–' + (u + h - 1) : String(u)) + 'U · '
+    return 'U' + (h > 1 ? u + '–' + (u + h - 1) : String(u)) + ' · '
            + t('dcim_face_' + (item.face || 'full'));
 }

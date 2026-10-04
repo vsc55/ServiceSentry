@@ -1217,6 +1217,9 @@ html.ss-nocss body { visibility: visible; }
    first, and "what does a draggable element look like" is not a fact about that map. */
 .ss-grab { cursor: grab; }
 .ss-grab:active { cursor: grabbing; }
+/* A drawing element sent to the back while editing: faint, and the pointer goes through it to
+   whatever it covers. */
+.ss-dcp-back { opacity: .3; pointer-events: none; }
 /* .ss-factgrid : the facts that identify a thing — a disk's bay, model and serial — above
    whatever is being measured about it.
    A GRID and not a flex row, which is what it was: with flex, each pair takes the width of its
@@ -1590,6 +1593,20 @@ html.ss-nocss body { visibility: visible; }
 .ss-tree-row:hover, .ss-tree-row:focus-visible { background: var(--bs-tertiary-bg); }
 .ss-tree-row.ss-tree-sub { padding: .25rem .75rem .25rem 2.6rem; font-size: .85rem; }
 .ss-tree-row.is-picked { background: var(--bs-primary); color: #fff; }
+/* What the inventory was left from — a rack, a room or a site — marked on coming back. */
+/* The names over the 3D viewer: a layer the pointer goes through, one tag per labelled thing,
+   moved by the viewer to where its point falls on screen. */
+.ss-3d-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+.ss-3d-label { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: .72rem;
+               line-height: 1.2; padding: 0 .3rem; border-radius: .25rem;
+               background: rgba(0, 0, 0, .6); color: #fff; }
+.ss-3d-label-room { font-size: .85rem; font-weight: 600; background: rgba(13, 110, 253, .75); }
+/* The compass rose in a corner of a plan or of the 3D viewer. */
+.ss-compass { position: absolute; top: .5rem; right: .5rem; z-index: 2; pointer-events: none;
+              background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
+              border-radius: 50%; padding: 2px; opacity: .9; line-height: 0; }
+#dc3d-box .ss-compass { top: 3rem; }
+.ss-came-from { outline: 2px solid var(--bs-primary); outline-offset: 2px; border-radius: .4rem; }
 .ss-tree-row.is-picked .text-muted { color: rgba(255, 255, 255, .75) !important; }
 .ss-tree-row > .bi-chevron-down, .ss-tree-row > .bi-chevron-right { font-size: .7rem; width: .8rem; }
 /* .ss-led : a status light — a dot of the state's colour. One that has something wrong glows,
@@ -3274,7 +3291,10 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
        lee; el panel de listas es texto y con veinticuatro caracteres de ancho ya dice lo que
        tiene que decir. Al revés —el dibujo pidiendo lo justo y el panel quedándose el resto—
        dejaba un alzado pequeño al lado de una tabla con la mitad de las celdas vacías. */
-    grid-template-columns: minmax(0, 42rem) minmax(28rem, 1fr);
+    /* Las pestañas se llevan la parte mayor, como en el diseño: la tabla de dispositivos tiene
+       ocho columnas y a 28 rem se cortaba la garantía y se escondían las acciones. El dibujo es
+       un SVG que se escala, y a 33 rem sigue leyéndose. */
+    grid-template-columns: minmax(0, 1fr) minmax(34rem, 1.2fr);
     gap: .75rem;
     align-items: start;
 }
@@ -3667,3 +3687,127 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 .ss-dropdown-sm .dropdown-item i { font-size: .95rem; }
 .ss-dropdown-sm .dropdown-divider { margin: .25rem 0; }
 
+
+/* ═══ The rack's four views (partials/dcim/_rackviews.html) ═══════════════════════════════════
+   Generic pieces, named for what they are and not for the screen: a square icon button the size
+   of a text one, a status dot, a mark bar, a ring, a KPI card, a face cell, a mini elevation, an
+   attention row, a warning box. The colours are the theme's, so light and dark both read. */
+
+/* An icon-only button as tall and as wide as the text buttons beside it. */
+.ss-btn-sq { width: 2.4rem; height: 2.4rem; padding: 0; display: inline-flex;
+             align-items: center; justify-content: center; }
+
+/* A small status dot, and a larger one for a list of things to attend to. */
+.ss-rv-dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; flex: 0 0 auto;
+              box-shadow: 0 0 0 1px var(--bs-secondary-color); }
+.ss-rv-dot-lg { width: .7rem; height: .7rem; margin-top: .35rem; }
+.ss-rv-swatch { display: inline-block; width: .75rem; height: .75rem; border-radius: 3px;
+                border: 1px solid var(--bs-border-color); }
+/* The power mark the elevation draws, as the legend shows it. */
+.ss-mark-bar { display: inline-block; width: 3px; height: .75rem; border-radius: 1px; }
+
+/* The card under the drawing: what the pointer is on. */
+.ss-elev-card { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+                border: 1px solid var(--bs-primary-border-subtle); border-radius: .5rem;
+                background: var(--bs-tertiary-bg); padding: .5rem .75rem; }
+.ss-elev-card-idle { border-style: dashed; border-color: var(--bs-border-color);
+                     color: var(--bs-secondary-color); font-size: .85rem; }
+
+/* A box of work to do (amber) or of all being well (green). */
+.ss-warn-box { border: 1px solid var(--bs-warning-border-subtle); background: var(--bs-warning-bg-subtle);
+               color: var(--bs-warning-text-emphasis); border-radius: .5rem; padding: .5rem .75rem; }
+.ss-ok-box { border: 1px solid var(--bs-success-border-subtle); background: var(--bs-success-bg-subtle);
+             color: var(--bs-success-text-emphasis); border-radius: .5rem; padding: .5rem .75rem;
+             font-size: .85rem; }
+
+/* Three figures with their bars (Alimentación). */
+.ss-pw-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .5rem; }
+.ss-pw-fig { display: flex; flex-direction: column; gap: .15rem; background: var(--bs-tertiary-bg);
+             border-radius: .5rem; padding: .5rem .75rem; }
+.ss-pw-bar { display: block; height: .4rem; border-radius: .2rem; background: var(--bs-secondary-bg);
+             overflow: hidden; }
+.ss-pw-bar > span { display: block; height: 100%; border-radius: .2rem; }
+/* The power chain box: each strip with its path up to the mains. */
+.ss-pw-chain { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .75rem;
+               background: var(--bs-tertiary-bg); font-size: .85rem; }
+
+/* «Por U»: one grid row per U. The columns are declared once here, so the head and every row
+   agree; the box scrolls sideways on a narrow screen instead of squeezing the cells. */
+.ss-byu-scroll { overflow-x: auto; }
+.ss-byu { min-width: 73rem; }
+.ss-byu-row { display: grid; align-items: center; gap: 0 .75rem; padding: .4rem .9rem;
+              border-bottom: 1px solid var(--bs-border-color-translucent); min-height: 2.6rem;
+              grid-template-columns: 3rem minmax(6rem, 10rem) minmax(6rem, 10rem) minmax(8rem, 1.3fr)
+                                     4.5rem 7rem 6rem 7.5rem 6rem 5.5rem 6.25rem; gap: 0 .6rem; }
+.ss-byu-head { font-size: .78rem; font-weight: 600; color: var(--bs-secondary-color);
+               border-bottom: 1px solid var(--bs-border-color); min-height: 0;
+               padding-top: .6rem; padding-bottom: .6rem; }
+.ss-byu-kid { background: var(--bs-tertiary-bg); }
+.ss-byu-free { background: repeating-linear-gradient(135deg, transparent 0 10px,
+               var(--bs-tertiary-bg) 10px 20px); }
+.ss-byu-group { padding: .55rem .9rem; font-weight: 600; background: var(--bs-secondary-bg);
+                border-bottom: 1px solid var(--bs-border-color); }
+.ss-byu-span { grid-column: 4 / -1; }
+
+/* A face in one cell: filled with its colour (`--c`), a share of it (`--a`..`--b`), or free. */
+.ss-ufc { height: 1.6rem; border-radius: .25rem; font-size: .72rem; display: flex; align-items: center;
+          padding: 0 .5rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+          border: 1px solid var(--bs-border-color);
+          background: color-mix(in srgb, var(--c, var(--bs-secondary-bg)) 32%, var(--bs-body-bg));
+          box-shadow: inset 3px 0 0 var(--c, var(--bs-secondary-bg)); }
+.ss-ufc-part { box-shadow: none;
+               background: linear-gradient(90deg, var(--bs-body-bg) 0 var(--a),
+                   color-mix(in srgb, var(--c, var(--bs-primary)) 55%, var(--bs-body-bg)) var(--a) var(--b),
+                   var(--bs-body-bg) var(--b) 100%); }
+.ss-ufc-free { background: transparent; box-shadow: none; border-style: dashed;
+               color: var(--bs-secondary-color); }
+
+/* «Cuadro»: KPI cards with a ring, the coloured mini elevation, and what needs attention. */
+.ss-kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+@media (max-width: 68rem) { .ss-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 36rem) { .ss-kpi-grid { grid-template-columns: minmax(0, 1fr); } }
+.ss-kpi .card-body { padding: .9rem 1rem; }
+.ss-ring { width: 3.5rem; height: 3.5rem; border-radius: 50%; flex: 0 0 auto; display: flex;
+           align-items: center; justify-content: center;
+           background: conic-gradient(var(--c) calc(var(--p) * 1%), var(--bs-secondary-bg) 0); }
+.ss-ring > span { width: 2.75rem; height: 2.75rem; border-radius: 50%; background: var(--bs-body-bg);
+                  display: flex; align-items: center; justify-content: center; font-size: .78rem;
+                  font-weight: 600; }
+.ss-board-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(18rem, 1fr); gap: .75rem;
+                 align-items: start; }
+@media (max-width: 68rem) { .ss-board-grid { grid-template-columns: minmax(0, 1fr); } }
+.ss-board-faces { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.ss-uel { display: flex; flex-direction: column; gap: 3px; background: var(--bs-tertiary-bg);
+          border: 2px solid var(--bs-border-color); border-radius: .4rem; padding: .4rem .5rem .4rem .2rem; }
+.ss-uel-row { display: flex; gap: 4px; height: 1.9rem; }
+.ss-uel-u { width: 1.6rem; flex: 0 0 auto; font-size: .7rem; color: var(--bs-secondary-color);
+            display: flex; align-items: center; justify-content: flex-end;
+            font-variant-numeric: tabular-nums; }
+.ss-uel-box { flex: 1 1 0; min-width: 0; border: 1px solid var(--bs-border-color); border-radius: .25rem;
+              font-size: .72rem; text-align: left; padding: 0 .4rem; overflow: hidden; white-space: nowrap;
+              text-overflow: ellipsis; color: var(--bs-body-color);
+              background: color-mix(in srgb, var(--c) 45%, var(--bs-body-bg)); }
+.ss-uel-box:hover { outline: 2px solid var(--bs-primary); }
+.ss-uel-free { flex: 1 1 0; border: 1px dashed var(--bs-border-color); border-radius: .25rem; }
+.ss-att-row { display: flex; gap: .6rem; align-items: flex-start; padding: .55rem .6rem;
+              background: var(--bs-tertiary-bg); border-radius: .5rem; }
+
+/* «Compacta»: one column, U by U, with the four tabs at its foot. */
+.ss-cmp { width: 100%; max-width: 30rem; margin: 0 auto; display: flex; flex-direction: column;
+          border: 1px solid var(--bs-border-color); border-radius: .75rem; overflow: hidden; }
+.ss-cmp-body { padding: .75rem; min-height: 20rem; }
+.ss-cmp-row { display: flex; align-items: center; gap: .6rem; width: 100%; min-height: 2.75rem;
+              padding: .5rem .75rem; border-radius: .5rem; border: 1px solid var(--bs-border-color);
+              background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
+.ss-cmp-row:hover { border-color: var(--bs-primary); }
+.ss-cmp-kid { margin-left: 1.5rem; width: calc(100% - 1.5rem); background: var(--bs-body-bg); }
+.ss-cmp-free { border-style: dashed; background: transparent; }
+.ss-cmp-u { width: 1.6rem; font-size: .75rem; color: var(--bs-secondary-color); flex: 0 0 auto; }
+.ss-cmp-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+               border-top: 1px solid var(--bs-border-color); background: var(--bs-tertiary-bg);
+               position: sticky; bottom: 0; z-index: 2; }
+.ss-cmp-body { overflow-x: auto; }
+.ss-cmp-tab { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+              min-height: 3.5rem; border: 0; background: transparent; color: var(--bs-secondary-color);
+              font-size: .8rem; }
+.ss-cmp-tab.active { color: var(--bs-primary); box-shadow: inset 0 2px 0 var(--bs-primary); }

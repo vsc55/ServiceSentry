@@ -293,6 +293,9 @@ function _dcimRefresh() {
  *  it is where the screen goes. Unfolded, because going to a folded site shows nothing of it. */
 async function _dcimPickSite(uid, room) {
     _dcimSel = {site: uid, room: room || ''};
+    // Elegir otra cosa es dejar de señalar aquello de lo que se volvió.
+    _dcimCameFrom = null;
+    _dcimUrl();
     _dcimFold.delete(uid);
     _dcimTreeOpen.add(uid);
     if (_dcimInvShown() && document.getElementById('dcimInvBody')) _dcimInvBody();
@@ -307,6 +310,7 @@ async function _dcimPickSite(uid, room) {
 /** Open a site in the detail view: from a card or from a table row. */
 function _dcimShowSite(uid) {
     _dcimSel = {site: uid, room: ''};
+    _dcimUrl();
     _dcimTreeOpen.add(uid);
     _dcimSetLayout('detail');
 }
@@ -481,6 +485,7 @@ function _dcimDetailRoom(room, site) {
 function _dcimDetailRack(rack, room, site) {
     const empresa = rack.org_uid || room.org_uid || site.org_uid;
     return `<button type="button" class="ss-tile-btn d-flex gap-3 align-items-stretch"
+            data-dcim-rack="${escAttr(rack.uid)}"
             style="width:13.75rem" onclick="_dcimLoadRack(${jsStr(rack.uid)})">
         ${_dcimUBarV(rack.used_u || 0, rack.u_height || 0)}
         <span class="d-flex flex-column gap-1 flex-grow-1 ss-min-0">
@@ -644,7 +649,8 @@ function _dcimTableRows(sites) {
                     where: (s.name || '') + ' › ' + (r.name || ''),
                     cap: (k.u_height || 0) + 'U', used: k.used_u || 0, u: k.u_height || 0,
                     cool: '', org: k.org_uid || r.org_uid || s.org_uid, roll: k.roll,
-                    open: `_dcimLoadRack(${jsStr(k.uid)})`, menu: _dcimMenu('rack', k.uid, k.name, '')});
+                    open: `_dcimLoadRack(${jsStr(k.uid)})`, menu: _dcimMenu('rack', k.uid, k.name, ''),
+                    rack: k.uid});
             }
         }
     }
@@ -706,7 +712,8 @@ function _dcimTableRow(f) {
             aria-label="${escAttr(f.folded ? t('dcim_unfold') : t('dcim_fold'))}">
         <i class="bi bi-chevron-${f.folded ? 'right' : 'down'}"></i></button>` : '';
     const pct = _dcimPct(f.used, f.u);
-    return `<tr ${f.id ? `id="${escAttr(f.id)}"` : ''} class="${f.kind === 'site' && f.fold
+    return `<tr ${f.id ? `id="${escAttr(f.id)}"` : ''} ${f.rack ? `data-dcim-rack="${escAttr(f.rack)}"` : ''}
+            class="${f.kind === 'site' && f.fold
                                                               ? 'table-active' : ''} ss-hover-host">
         <td><div class="${sangria} d-flex align-items-center gap-1">
             ${pliegue}<i class="bi ${f.icon} text-muted me-1"></i>

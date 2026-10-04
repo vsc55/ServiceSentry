@@ -36,6 +36,28 @@ let _dcpView = 'top';
 //: Las paredes en el orden en que se gira: norte (arriba en el plano), este, sur, oeste.
 const _DCP_SIDES = ['N', 'E', 'S', 'W'];
 
+//: Si se ve el plano de fondo —el de la sala y el de la planta, en 2D y en 3D—. Encima de un
+//: plano cargado de detalle no se distingue lo que se ha colocado, y quitarlo para mirar no es
+//: borrarlo. Una preferencia de quien mira, así que se recuerda en el navegador.
+let _dcPlanBg = (() => {
+    try { return localStorage.getItem('ss.dcim.planbg') !== '0'; } catch (_) { return true; }
+})();
+
+function _dcPlanBgToggle() {
+    _dcPlanBg = !_dcPlanBg;
+    try { localStorage.setItem('ss.dcim.planbg', _dcPlanBg ? '1' : '0'); } catch (_) { /* sin almacén */ }
+    renderDcim();
+}
+
+/** El botón, para quien mira y no solo para quien edita: ocultarlo no cambia nada guardado.
+ *  Amarillo mientras está oculto, como los demás interruptores de la barra. */
+function _dcPlanBgButton() {
+    const texto = t(_dcPlanBg ? 'dcim_plan_bg_hide' : 'dcim_plan_bg_show');
+    return `<button class="btn btn-sm ${_dcPlanBg ? 'btn-secondary' : 'btn-warning'}"
+        onclick="_dcPlanBgToggle()" title="${escAttr(texto)}" aria-label="${escAttr(texto)}">
+        <i class="bi ${_dcPlanBg ? 'bi-eye' : 'bi-eye-slash'}"></i></button>`;
+}
+
 //: Which room's plan is open, and the racks on it. Its own state and not `_dcimRack`'s: a plan
 //: is a room, and the rack view is one rack.
 let _dcimPlan = null;
@@ -54,7 +76,7 @@ function _dcimPlanSvg() { return ssCanvasSvg(_DCP_SVG); }
  *  Failing is not an error to show: it is a room with no plan, which is the ordinary state. */
 async function _dcpLoadPlan(room) {
     const name = (room || {}).plan || '';
-    if (!name) return;
+    if (!name) return _dcpLoadFloorPlan(room);
     try {
         const resp = await fetch(`${_dcimMediaUrl(name)}`,
                                  {credentials: 'same-origin'});
@@ -76,6 +98,27 @@ async function _dcpLoadPlan(room) {
         if (_dcimPlan && _dcimPlan.room && _dcimPlan.room.uid === room.uid)
             _dcimPlan.image = {data, ratio: ratio || 0.7};
     } catch (e) { /* a room with no plan is the ordinary state */ }
+}
+
+/** La zona general de una planta es la planta misma —en (0, 0) y sin girar—, así que sin
+ *  plano propio lleva el de su planta, con la calibración de la planta. Se perdía al entrar en
+ *  ella, que es donde se colocan y se estiran las piezas sueltas: sin el plano debajo, no hay
+ *  contra qué ajustarlas. */
+async function _dcpLoadFloorPlan(room) {
+    if (!room || !room.site_uid) return;
+    let plantas = (_dcsPlan && _dcsPlan.site && _dcsPlan.site.uid === room.site_uid)
+        ? _dcsPlan.floors : null;
+    if (!plantas) {
+        const d = await apiGet(`/api/v1/dcim/sites/${encodeURIComponent(room.site_uid)}/floors`);
+        plantas = (d || {}).floors || [];
+    }
+    const f = plantas.find(x => x.area_uid === room.uid);
+    if (!f || !f.plan) return;
+    const img = await _dcsFetchImage(f);
+    if (img && _dcimPlan && _dcimPlan.room && _dcimPlan.room.uid === room.uid) {
+        _dcimPlan.image = img;
+        _dcimPlan.planFloor = f;
+    }
 }
 
 /** Upload one. The server decides what it is by looking INSIDE the file — an extension is
@@ -129,8 +172,12 @@ async function _dcimOpenPlan(roomUid) {
     const data = await apiGet(`/api/v1/dcim/racks?room=${encodeURIComponent(roomUid)}`);
     const room = _dcimFindRoom(roomUid);
     if (!room) return;
+    // Entrando desde el 3D de la sede: ese visor es de la sede, no de esta sala.
+    if (_dc3d && _dc3d.build) _dc3dStop();
+    if (!_dcimPlan || _dcimPlan.room.uid !== room.uid) { _dcpBack.clear(); _dcCal = null; }
     _dcimPlan = {room, racks: (data || {}).racks || []};
     await Promise.all([_dcpLoadPlan(room), _dcpLoadFeatures(roomUid)]);
+    _dcUndoPrime();
     _dcpListen(true);
     _dcimRack = null;
     _dcimForm = null;
@@ -145,11 +192,14 @@ function _dcimFindRoom(uid) {
 }
 
 function _dcimClosePlan() {
+    _dcimRemember();
     _dcpListen(false);
     if (typeof _dc3dStop === 'function') _dc3dStop();
     _dcimPlan = null;
     _dcpFeat = null;
     _dcpSel = null;
+    _dcpBack.clear();
+    _dcCal = null;
     _dcimUrl();
     renderDcim();
 }
@@ -176,6 +226,7 @@ function _dcimPlanHtml() {
             <div class="ss-toolrow-tools">
                 ${_dcpViewSwitcher()}
                 <span class="text-muted ss-fs-2 ss-tabular me-1" id="dcp-readout">—</span>
+                ${_dcpBackChip()}
                 ${edita ? `<button class="btn btn-sm ${_dcpMagnet ? 'btn-warning' : 'btn-secondary'}"
                         onclick="_dcpMagnet=!_dcpMagnet;renderDcim()"
                         title="${escAttr(t('dcim_magnet'))}" aria-label="${escAttr(t('dcim_magnet'))}">
@@ -197,6 +248,9 @@ function _dcimPlanHtml() {
                 ${room.plan ? `<button class="btn btn-sm btn-warning" onclick="_dcpDropPlan()"
                         title="${escAttr(t('dcim_plan_drop'))}">
                     <i class="bi bi-trash"></i></button>` : ''}
+                ${room.plan || _dcimPlan.planFloor ? _dcPlanBgButton() : ''}
+                ${room.plan && edita ? _dcCalButton('room') : ''}
+                ${_dcUndoButtons()}
                 <input type="file" id="dcpImportFile" class="d-none"
                        accept=".json,application/json" onchange="_dcpImport(this)">
                 <button class="btn btn-sm ${_dc3d ? 'btn-warning' : 'btn-secondary'}"
@@ -212,10 +266,12 @@ function _dcimPlanHtml() {
                 ${ssCanvasTools(_DCP_SVG, 'room_plan')}
             </div>
         </div>
+        ${_dcCalBar('room')}
         ${_dc3d ? _dc3dHtml() : ''}
         ${_dcpRowWarnings()}
         <div class="ss-editor">
             <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
+                ${_dcCompass(_dcNorthOf((_dcimPlan || {}).planFloor || (_dcimPlan || {}).room))}
                 ${planta ? _dcpPaletteHtml() : ''}
                 <div id="dcimPlanPanel" class="position-absolute ss-passthru"
                      style="left:.5rem;bottom:.5rem;right:.5rem;z-index:2"></div>
@@ -280,11 +336,15 @@ function _dcpExtent(racks) {
     let maxX = 4000, maxY = 3000;               // a small room, so an empty plan is not a dot
     // The plan picture is one more box. Not counting it is exactly the trap that had both
     // maps exporting cut off: a frame that does not know about one of its own drawings.
-    const img = (_dcimPlan || {}).image;
-    const planMm = Number(((_dcimPlan || {}).room || {}).plan_mm || 0);
-    if (img && planMm > 0) {
-        maxX = Math.max(maxX, planMm);
-        maxY = Math.max(maxY, planMm * (img.ratio || 0.7));
+    // Con su sitio: un plano calibrado puede empezar antes de la sala (su margen), y un marco
+    // que empieza en 0 lo cortaba.
+    let minX = 0, minY = 0;
+    if ((_dcimPlan || {}).image) {
+        const b = _dcpPlanBox();
+        minX = Math.min(minX, b.x);
+        minY = Math.min(minY, b.y);
+        maxX = Math.max(maxX, b.x + b.w);
+        maxY = Math.max(maxY, b.y + b.h);
     }
     for (const r of racks) {
         maxX = Math.max(maxX, Number(r.pos_x || 0) + Number(r.width_mm || 600));
@@ -307,10 +367,11 @@ function _dcpExtent(racks) {
     // Y a la izquierda, sitio para la paleta, que flota sobre el lienzo: sin él tapaba el
     // borde izquierdo de la sala y su cota. En proporción al ancho y no en píxeles, porque el
     // marco está en unidades del dibujo y el encuadre lo escala a la pantalla. Solo si hay paleta.
-    const izq = pad + (_dcimMay('dcim_edit') ? (maxX * _DCP_SCALE + pad * 2) * 0.07 : 0);
-    return {x: -izq, y: -pad,
-            width: maxX * _DCP_SCALE + pad + izq,
-            height: maxY * _DCP_SCALE + pad * 2};
+    const ancho = (maxX - minX) * _DCP_SCALE;
+    const izq = pad + (_dcimMay('dcim_edit') ? (ancho + pad * 2) * 0.07 : 0);
+    return {x: minX * _DCP_SCALE - izq, y: minY * _DCP_SCALE - pad,
+            width: ancho + pad + izq,
+            height: (maxY - minY) * _DCP_SCALE + pad * 2};
 }
 
 function _dcpContent(racks) {
@@ -320,7 +381,8 @@ function _dcpContent(racks) {
     return _dcpPlanImage(racks) + _dcpGrid(racks) + _dcpRoomOutline()
          + _dcpFeaturesSvg('floor') + _dcpFeaturesSvg('room')
          + racks.map(_dcpRack).join('')
-         + _dcpFeaturesSvg('air');
+         + _dcpFeaturesSvg('air')
+         + _dcCalMarks('room');
 }
 
 /** El contorno de la sala y sus cotas, si alguien dijo cuánto mide.
@@ -349,14 +411,13 @@ function _dcpRoomOutline() {
  *  it is faded so nobody measures against it believing it is to scale. */
 function _dcpPlanImage(racks) {
     const img = (_dcimPlan || {}).image;
-    if (!img || !img.data) return '';
-    const box = _dcpExtent(racks);
-    const scaled = Number((_dcimPlan.room || {}).plan_mm || 0) > 0;
-    const wmm = scaled ? Number(_dcimPlan.room.plan_mm) : box.width / _DCP_SCALE;
-    const w = wmm * _DCP_SCALE;
-    return `<image href="${escAttr(img.data)}" x="0" y="0" width="${w}"
-                   height="${w * img.ratio}" opacity="${scaled ? '.85' : '.45'}"
-                   preserveAspectRatio="xMinYMin meet"></image>`;
+    if (!img || !img.data || !_dcPlanBg) return '';
+    // Donde dice la calibración, y del tamaño que dice. Sin escala tomaba el ancho del MARCO
+    // del dibujo, que lleva márgenes y cambia al mover un rack: la imagen se estiraba sola.
+    const b = _dcpPlanBox(), S = _DCP_SCALE;
+    return `<image href="${escAttr(img.data)}" x="${b.x * S}" y="${b.y * S}" width="${b.w * S}"
+                   height="${b.h * S}" opacity="${b.scaled ? '.85' : '.45'}"
+                   preserveAspectRatio="none"></image>`;
 }
 
 /** La rejilla: la BALDOSA de esta sala, con el metro marcado por encima.
@@ -398,7 +459,7 @@ function _dcpRack(rack) {
     const roll = rack.roll || {};
     const tone = roll.state ? deviceStateColor(roll.state) : 'var(--bs-secondary-bg)';
     const puesto = _dcpSel && _dcpSel.kind === 'rack' && _dcpSel.uid === rack.uid;
-    return `<g class="ss-grab" data-dcp="${escAttr(rack.uid)}"
+    return `<g class="ss-grab${_dcpIsBack('rack', rack.uid) ? ' ss-dcp-back' : ''}" data-dcp="${escAttr(rack.uid)}"
                transform="rotate(${rot} ${x + w / 2} ${y + d / 2})"
                onpointerenter="_dcpHover(${jsStr(rack.uid)});_dcpFloatShow(${jsStr(rack.uid)},this,'rack')"
                onpointerleave="_dcpHover('');_dcpFloatLater()">
@@ -408,6 +469,7 @@ function _dcpRack(rack) {
         <rect x="${x}" y="${y}" width="${w}" height="${Math.max(1.5, d * 0.08)}"
               fill="${tone}"></rect>
         <text x="${x + w / 2}" y="${y + d / 2 + 3}" font-size="7" text-anchor="middle"
+              ${_dcpUpright(rot, x + w / 2, y + d / 2 + 3 - 7 * 0.35)}
               fill="currentColor">${esc(_dceClip(rack.name || '', 10))}</text>
         ${puesto ? `<rect x="${x - 1}" y="${y - 1}" width="${w + 2}" height="${d + 2}" fill="none"
             stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
@@ -419,12 +481,16 @@ function _dcpRack(rack) {
 
 function _dcpDown(ev) {
     _dcpFloatHide();
+    // Calibrando el plano, el puntero es de la calibración: no se coge ni se suelta nada.
+    if (_dcCal && _dcCal.kind === 'room') return _dcCalDown(ev);
+    // Lo que hay bajo el dedo, todo, de arriba abajo; y a cuál se refiere esta pulsación.
+    const hit = _dcpHit(ev);
     // De frente, pulsar selecciona, y arrastrar mueve lo que se ve: a lo largo de la pared, y
     // un rack además arriba y abajo. La distancia a la pared no: de frente no se ve, y una mano
     // que la cambiara sin verla movería las cosas a donde nadie las ha mirado.
     if (_dcpView !== 'top') {
         // Un asa antes que la cosa, igual que en planta: está dentro de ella.
-        const asa = ev.target.closest('[data-dcph]');
+        const asa = hit.asa;
         const ga = asa && asa.closest('g[data-dcpf], g[data-dcp]');
         if (ga && _dcimMay('dcim_edit')) {
             const rack = !ga.dataset.dcpf;
@@ -442,10 +508,13 @@ function _dcpDown(ev) {
                 return;
             }
         }
-        const g = ev.target.closest('g[data-dcpf], g[data-dcp]');
+        const g = hit.g;
         if (g) {
             const rack = !g.dataset.dcpf;
             const uid = rack ? g.dataset.dcp : g.dataset.dcpf;
+            // Quien solo mira no arrastra, así que no hay que esperar a ver si se mueve: la
+            // segunda pulsación pasa ya a lo de debajo.
+            if (!_dcimMay('dcim_edit') && _dcpCycle({cycle: hit.cycle})) return;
             _dcpSel = {kind: rack ? 'rack' : 'feature', uid};
             const o = rack ? _dcpRack1(uid) : _dcpFeatures().find(x => x.uid === uid);
             const p = ssCanvasPoint(_DCP_SVG, ev);
@@ -454,7 +523,8 @@ function _dcpDown(ev) {
                             side: _dcpView, moved: false, rot: Number(o.rotation || 0),
                             w: Number(o.width_mm || 600), d: Number(o.depth_mm || (rack ? 1000 : 600)),
                             base: rack ? Math.max(0, Number(o.base_mm) || 0) : _dcpPieceZ(o).base,
-                            at: {x: Number(o.pos_x || 0), y: Number(o.pos_y || 0)}};
+                            at: {x: Number(o.pos_x || 0), y: Number(o.pos_y || 0)},
+                            cycle: hit.cycle};
                 ev.currentTarget.setPointerCapture?.(ev.pointerId);
             }
             _dcpRedraw();
@@ -467,7 +537,7 @@ function _dcpDown(ev) {
     }
     // Un asa antes que la pieza: el asa está DENTRO de la pieza, y preguntar primero por la
     // pieza convierte cada intento de estirarla en moverla.
-    const asa = ev.target.closest('[data-dcph]');
+    const asa = hit.asa;
     if (asa && _dcimMay('dcim_edit')) {
         const g = asa.closest('g[data-dcpf]');
         const f = g && _dcpFeatures().find(x => x.uid === g.dataset.dcpf);
@@ -483,14 +553,16 @@ function _dcpDown(ev) {
     }
     // Una pieza de la sala: se coge igual que un rack, y por eso el arrastre es uno solo. Lo
     // que cambia es a qué tabla va lo que se suelte, y eso lo decide `_dcpUp`.
-    const pieza = ev.target.closest('g[data-dcpf]');
+    // Lo que se coge es lo de ARRIBA, salvo que lo seleccionado esté también bajo el dedo: una
+    // mesa elegida bajo una bandeja se arrastra a ella, no a la bandeja que la tapa.
+    const pieza = hit.kind === 'feature' ? hit.g : null;
     if (pieza && _dcimMay('dcim_edit')) {
         const f = _dcpFeatures().find(x => x.uid === pieza.dataset.dcpf);
         const p = ssCanvasPoint(_DCP_SVG, ev);
         if (f && p) {
             _dcpSel = {kind: 'feature', uid: f.uid};
             _dcpDrag = {uid: f.uid, what: 'feature', moved: false, from: p,
-                        at: {x: Number(f.pos_x || 0), y: Number(f.pos_y || 0)}};
+                        at: {x: Number(f.pos_x || 0), y: Number(f.pos_y || 0)}, cycle: hit.cycle};
             ev.currentTarget.setPointerCapture?.(ev.pointerId);
             // Solo el DIBUJO, no la pantalla: repintar la sección entera aquí sustituye el
             // `<svg>` que acaba de capturar el puntero, y con él se va la mano que está
@@ -499,13 +571,13 @@ function _dcpDown(ev) {
             return;
         }
     }
-    const box = ev.target.closest('g[data-dcp]');
+    const box = hit.kind === 'rack' ? hit.g : null;
     if (box && _dcimMay('dcim_edit')) {
         const rack = (_dcimPlan.racks || []).find(r => r.uid === box.dataset.dcp);
         const p = ssCanvasPoint(_DCP_SVG, ev);
         if (rack && p) {
             _dcpDrag = {uid: rack.uid, moved: false, from: p,
-                        at: {x: Number(rack.pos_x || 0), y: Number(rack.pos_y || 0)}};
+                        at: {x: Number(rack.pos_x || 0), y: Number(rack.pos_y || 0)}, cycle: hit.cycle};
             ev.currentTarget.setPointerCapture?.(ev.pointerId);
             return;
         }
@@ -635,7 +707,8 @@ function _dcpBoxes() {
         const z = _dcpPieceZ(f);
         out.push({kind: 'feature', uid: f.uid, what: f.kind, layer: spec.layer || 'room',
                   name: f.label || t('dcim_kind_' + f.kind), x0, x1: x0 + w - 2 * o.x,
-                  z0, z1: z0 + d - 2 * o.y, y0: z.base, y1: z.base + z.h});
+                  z0, z1: z0 + d - 2 * o.y, y0: z.base, y1: z.base + z.h,
+                  shelves: f.kind === 'cabinet' ? Math.max(1, Number(f.shelves) || 1) : 0});
     }
     return out;
 }
@@ -707,7 +780,8 @@ function _dcpElevationSvg() {
         const attr = it.kind === 'rack' ? `data-dcp="${escAttr(it.uid)}"`
                                         : `data-dcpf="${escAttr(it.uid)}"`;
         const tam = Math.min(5, Math.max(2.6, Math.min(w, alto) * 0.3));
-        h += `<g ${attr} style="cursor:pointer" opacity="${op.toFixed(2)}">
+        h += `<g ${attr} style="cursor:pointer" opacity="${op.toFixed(2)}"${
+            _dcpIsBack(it.kind, it.uid) ? ' class="ss-dcp-back"' : ''}>
             <title>${esc(it.name)}</title>
             <rect x="${x}" y="${top}" width="${w}" height="${alto}" rx=".6"
                   fill="${look.fill === 'none' ? 'transparent' : look.fill}" stroke="${look.line === 'none' ? 'var(--bs-secondary-color)' : look.line}"
@@ -716,6 +790,7 @@ function _dcpElevationSvg() {
                 font-size="${tam}" text-anchor="middle"
                 fill="${look.dark ? 'var(--bs-dark)' : 'var(--bs-body-color)'}"
                 style="pointer-events:none">${esc(_dceClip(it.name, Math.max(3, Math.floor(w / (tam * 0.6)))))}</text>` : ''}
+            ${_dcpElevShelves(it, x, top, w, alto)}
             ${puesto ? `<rect x="${x - 1}" y="${top - 1}" width="${w + 2}" height="${alto + 2}"
                 fill="none" stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
                 vector-effect="non-scaling-stroke"></rect>` : ''}
@@ -736,6 +811,21 @@ function _dcpElevationSvg() {
  *  `_dcpPlace`, así que el imán y el tope de la pared son los mismos que en planta — y solo se
  *  toca ese eje: el otro, la distancia a la pared, no se ve desde aquí. Y la altura desde el
  *  suelo, en un rack y en una pieza: a pasos de 50 mm y nunca bajo el suelo. */
+/** Las baldas de un armario, de frente: una línea entre estantería y estantería, repartidas
+ *  a partes iguales en su alto. */
+function _dcpElevShelves(it, x, top, w, alto) {
+    const n = Number(it.shelves) || 0;
+    if (n < 2) return '';
+    let h = '';
+    for (let k = 1; k < n; k++) {
+        const y = top + alto * k / n;
+        h += `<line x1="${x}" x2="${x + w}" y1="${y}" y2="${y}" stroke="var(--bs-body-color)"
+                    stroke-width="1" vector-effect="non-scaling-stroke" opacity=".7"
+                    style="pointer-events:none"></line>`;
+    }
+    return h;
+}
+
 function _dcpElevApply(g, du, dh) {
     const eje = (g.side === 'N' || g.side === 'S') ? 'x' : 'y';
     const signo = (g.side === 'N' || g.side === 'E') ? 1 : -1;
@@ -827,6 +917,7 @@ function _dcpResize(g, dx, dy, snap) {
 }
 
 function _dcpMove(ev) {
+    if (_dcCal && _dcCal.press) return _dcCalMove(ev);
     // La posición bajo el puntero, siempre: es lo que se lee en la barra mientras se coloca, y
     // «B7» es lo que alguien dirá por teléfono cuando esté dentro de la sala.
     const bajo = ssCanvasPoint(_DCP_SVG, ev);
@@ -916,6 +1007,7 @@ function _dcpMove(ev) {
 }
 
 async function _dcpUp(ev) {
+    if (_dcCal && _dcCal.press) return _dcCalUp(ev);
     _dcpSizeHide();
     const drag = _dcpDrag;
     if (drag && drag.what === 'elevsize') {
@@ -939,7 +1031,7 @@ async function _dcpUp(ev) {
     if (drag && drag.what === 'elev') {
         _dcpDrag = null;
         ssCanvasPanEnd(ev);
-        if (!drag.moved) return;
+        if (!drag.moved) return void _dcpCycle(drag);
         const o = drag.kind === 'rack' ? _dcpRack1(drag.uid)
                                        : _dcpFeatures().find(x => x.uid === drag.uid);
         if (!o) return;
@@ -983,7 +1075,7 @@ async function _dcpUp(ev) {
         // Una pulsación que no viajó es una selección: el contorno y las asas se pintaron al bajar
         // el dedo, y lo que queda es que el inspector hable de ESTA pieza. Solo el inspector: la
         // pantalla entera rehace el dibujo y lo que se estaba mirando.
-        if (!drag.moved) return _dcpInspectorDraw();
+        if (!drag.moved) return _dcpCycle(drag) || _dcpInspectorDraw();
         _dcpInspectorDraw();
         return _dcpSave(f.uid, {pos_x: f.pos_x, pos_y: f.pos_y});
     }
@@ -993,6 +1085,7 @@ async function _dcpUp(ev) {
     // every mis-aimed click. It shows the rack's bar instead — opening is one of its buttons —
     // which is also the only way to reach that bar on a screen without a pointer to hover.
     if (!drag.moved) {
+        if (_dcpCycle(drag)) return;
         // Seleccionarlo, como una pieza: marcado en el plano y con sus campos en el inspector.
         // Solo sacaba su barra flotante, así que las mesas y las puertas se editaban desde el
         // inspector y el rack —lo que más se toca de una sala— no.

@@ -123,6 +123,11 @@ function _navSubtab(el, paneTarget, subTarget, storageKey, storageValue) {
  *  Infrastructure and Access, so coming back lands where you left.
  */
 function _navPageView(pageId, slug) {
+    // That somebody ASKED for this view, for the section that draws it. When it is already the
+    // current one the URL does not change, and a section with something open inside it — a
+    // rack inside the inventory — could not tell "back to the view" from any other redraw:
+    // the menu entry did nothing.
+    window._ssNavPicked = {pageId, slug};
     localStorage.setItem('ss_active_view_' + pageId, slug);
     _navTab('#tab-' + pageId);
     // From the registry, never composed from the id: where a section lives is the server's

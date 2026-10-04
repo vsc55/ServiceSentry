@@ -707,6 +707,17 @@ function ssCanvasZoom(id, factor) {
     if (v) ssCanvasZoomAt(id, factor, v.x + v.w / 2, v.y + v.h / 2);
 }
 
+/** How the window `v` sits in the box `r` on screen: pixels per drawing unit, and the empty
+ *  band on each side. The `<svg>` keeps the drawing's proportions (`xMidYMid meet`, the
+ *  default), so when the pane is wider or taller than the window the drawing is centred with a
+ *  band either side — and a conversion that stretched the window over the whole box put every
+ *  click off by up to that band, along that axis only. A plan calibrated through it landed
+ *  1.7 m off; a rack dropped landed beside the cursor. */
+function _ssFit(r, v) {
+    const k = Math.min(r.width / v.w, r.height / v.h);
+    return {k, ox: (r.width - v.w * k) / 2, oy: (r.height - v.h * k) / 2};
+}
+
 /** Client pixels → the drawing's coordinates. Every interaction needs this: the SVG is
  *  scaled to whatever size the pane happens to have, so a pixel on screen is not a unit in
  *  the picture and treating them as the same is a zoom that lands somewhere else. */
@@ -715,9 +726,10 @@ function ssCanvasPoint(id, ev) {
     const v = ssCanvasWindow(id);
     if (!svg || !v) return null;
     const r = svg.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
-    return {x: v.x + (ev.clientX - r.left) / r.width * v.w,
-            y: v.y + (ev.clientY - r.top) / r.height * v.h};
+    if (!r.width || !r.height || !v.w || !v.h) return null;
+    const f = _ssFit(r, v);
+    return {x: v.x + (ev.clientX - r.left - f.ox) / f.k,
+            y: v.y + (ev.clientY - r.top - f.oy) / f.k};
 }
 
 function ssCanvasWheel(id, ev) {
@@ -747,11 +759,12 @@ function ssCanvasPanMove(id, ev) {
     if (!r.width || !r.height) return;
     // Measured against the window the drag STARTED in: reading the live one would compound
     // its own movement and the map would slide away under the cursor.
+    // The same fit as `ssCanvasPoint`: stretched over the box, the drawing slid faster than
+    // the cursor along the axis with the empty band.
     const at = _ssPan.at;
-    const dx = (ev.clientX - (r.left + (_ssPan.from.x - at.x) / at.w * r.width))
-               / r.width * at.w;
-    const dy = (ev.clientY - (r.top + (_ssPan.from.y - at.y) / at.h * r.height))
-               / r.height * at.h;
+    const f = _ssFit(r, at);
+    const dx = (ev.clientX - (r.left + f.ox + (_ssPan.from.x - at.x) * f.k)) / f.k;
+    const dy = (ev.clientY - (r.top + f.oy + (_ssPan.from.y - at.y) * f.k)) / f.k;
     _ssVB[id] = {...at, x: at.x - dx, y: at.y - dy};
     ssCanvasApply(id);
 }

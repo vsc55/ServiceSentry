@@ -57,7 +57,7 @@ function _dcHistHtml() {
             <td class="ss-hug"><input type="checkbox" class="form-check-input"
                 ${_dcHistPick.indexOf(f.uid) >= 0 ? 'checked' : ''}
                 onchange="_dcHistPickToggle(${jsStr(f.uid)})"></td>
-            <td class="ss-tabular ss-nowrap">${esc(String(f.at || ''))}</td>
+            <td class="ss-tabular ss-nowrap">${esc(_fmtDateTime(f.at))}</td>
             <td class="ss-nowrap">${esc(String(f.by || ''))}</td>
             <td class="ss-tabular ss-hug">${esc(String(f.items || 0))}</td>
             <td>${_dcHistChanges(f)}</td>
@@ -93,7 +93,9 @@ function _dcHistOne(c) {
         return `<span class="badge bg-danger-subtle text-danger-emphasis border fw-normal"
             >− ${quien} · ${esc(_dcHistWhere(c.from))}</span>`;
     const campo = esc(_dcHistField(c.field));
-    const de = esc(_dcHistVal(c.from)), a = esc(_dcHistVal(c.to));
+    // Where something is placed is a choice of three, said with its words and not its code.
+    const val = (v) => c.field === 'placement' ? t('dcim_place_col_' + (v || 'u')) : _dcHistVal(v);
+    const de = esc(val(c.from)), a = esc(val(c.to));
     if (c.kind === 'rack')
         return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
             >${campo}: ${de} → ${a}</span>`;
@@ -104,7 +106,10 @@ function _dcHistOne(c) {
 /** `mounted` no es un sitio, es «encima de otra cosa»: sale traducido y lo demás tal cual, que
  *  ya viene escrito como se lee (`U4`, `U4–U6`). */
 function _dcHistWhere(v) {
-    return String(v || '') === 'mounted' ? t('dcim_item_on') : String(v || '');
+    const s = String(v || '');
+    if (s === 'mounted') return t('dcim_item_on');
+    if (s.startsWith('place:')) return t('dcim_place_col_' + s.slice(6));
+    return s;
 }
 
 function _dcHistVal(v) {
@@ -123,6 +128,7 @@ function _dcHistField(k) {
 //: derivado porque los dos nombres no coinciden —`name` es el del armario y `label` el del
 //: equipo— y adivinarlo sería acertar en unos y poner el identificador en los otros.
 const _DC_HIST_FIELD = {
+    placement: 'dcim_item_place',
     label: 'dcim_item_label', u_start: 'dcim_u_start', u_height: 'dcim_u_size',
     face: 'dcim_face', role: 'dcim_role', serial: 'dcim_serial',
     asset: 'dcim_item_asset', device_uid: 'dcim_device', parent_uid: 'dcim_item_parent',
@@ -142,12 +148,14 @@ function _dcHistDiffHtml(filas) {
     const dos = _dcHistPick.map(u => filas.find(f => f.uid === u)).filter(Boolean);
     if (dos.length !== 2) return '';
     // De la más vieja a la más nueva, se hayan marcado en el orden que se hayan marcado: una
-    // diferencia leída al revés dice que se retiró lo que se puso.
-    dos.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    // diferencia leída al revés dice que se retiró lo que se puso. **Por su sitio en la lista**
+    // y no por la hora: dos cambios del mismo segundo empataban, y el empate lo deshacía el orden
+    // de los clics. La lista viene de la más nueva a la más vieja, así que la vieja es la de abajo.
+    dos.sort((a, b) => filas.indexOf(b) - filas.indexOf(a));
     const cambios = _dcRevCompare(dos[0].data || {}, dos[1].data || {});
     return `<div class="card mb-2"><div class="card-body py-2">
         <div class="ss-fs-2 text-muted mb-1">${esc(tf('dcim_hist_between',
-            String(dos[0].at || ''), String(dos[1].at || '')))}</div>
+            _fmtDateTime(dos[0].at), _fmtDateTime(dos[1].at)))}</div>
         ${cambios.length ? `<div class="d-flex gap-1 flex-wrap">${
             cambios.map(_dcHistOne).join('')}</div>`
             : `<div class="ss-fs-2">${esc(t('dcim_hist_same'))}</div>`}
@@ -178,6 +186,8 @@ function _dcRevCompare(antes, ahora) {
     Object.keys(b).forEach(uid => {
         if (!a[uid]) return;
         Object.keys(b[uid]).forEach(k => {
+            // A photo from before `placement` was kept has no such key: not a change (as the server).
+            if (k === 'placement' && !(k in a[uid])) return;
             if (k !== 'uid' && a[uid][k] !== b[uid][k])
                 fuera.push({kind: 'edit', label: b[uid].label || a[uid].label,
                             field: k, from: a[uid][k], to: b[uid][k]});
@@ -188,6 +198,8 @@ function _dcRevCompare(antes, ahora) {
 
 function _dcRevWhere(it) {
     if (String((it || {}).parent_uid || '')) return 'mounted';
+    const sitio = String((it || {}).placement || 'u');
+    if (sitio !== 'u') return 'place:' + sitio;          // la misma regla que el servidor
     const u = Number((it || {}).u_start || 0);
     const alto = Math.max(1, Number((it || {}).u_height || 1));
     return alto === 1 ? `U${u}` : `U${u}–U${u + alto - 1}`;

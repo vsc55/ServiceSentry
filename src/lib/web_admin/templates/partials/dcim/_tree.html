@@ -209,7 +209,8 @@ function _dcimCoord(v) {
  *  el hueco para uno más, que es la otra cosa que se viene a hacer aquí. */
 function _dcimRoomRow(room) {
     const racks = room.rackList || [];
-    return `<div class="d-flex flex-wrap align-items-center gap-3 pt-2 ss-hover-host">
+    return `<div class="d-flex flex-wrap align-items-center gap-3 pt-2 ss-hover-host"
+                 id="dcim-room-${escAttr(room.uid)}">
         <div class="d-flex align-items-center gap-2 ss-col-label">
             ${_dcimLed((room.roll || {}).state)}
             <i class="bi bi-door-open text-muted"></i>
@@ -246,7 +247,7 @@ function _dcimCoolBadge(room) {
  *  an answer into a question. Reported from the screen. */
 function _dcimRackChip(rack) {
     return `<button type="button" class="ss-tile-btn d-flex flex-column gap-1 ss-rack-w"
-            onclick="_dcimLoadRack(${jsStr(rack.uid)})"
+            data-dcim-rack="${escAttr(rack.uid)}" onclick="_dcimLoadRack(${jsStr(rack.uid)})"
             title="${escAttr(tf('dcim_u_used_tt', rack.used_u || 0, rack.u_height || 0))}">
         <span class="d-flex align-items-center gap-2 w-100">
             ${_dcimLed((rack.roll || {}).state)}

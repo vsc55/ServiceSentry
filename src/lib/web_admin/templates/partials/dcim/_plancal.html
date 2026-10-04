@@ -1,0 +1,597 @@
+{# ================================================================
+   DCIM — dónde cae el plano de fondo, y a qué escala.
+
+   El plano de una sala y el de una planta se colocaban con UN número, «Ancho del plano»: lo
+   ancho que es de verdad la imagen entera, y su esquina de arriba a la izquierda pegada al
+   (0, 0). Las dos cosas fallan con un plano de verdad: la imagen lleva márgenes y cajetín, así
+   que su ancho real es un dato que nadie tiene, y lo que dibuja no empieza en su esquina, así
+   que todo quedaba desplazado lo que midiera el margen.
+
+   Se calibra como en cualquier programa de planos: dos puntos de una distancia que se conoce
+   (los extremos de una pared, una cota) dan la escala; y luego el plano se ENCAJA con lo que
+   ya está dibujado —arrastrándolo, o llevando un punto suyo a una esquina de una sala, un
+   rack o una pieza—. Pedir «el punto que está en (0, 0)» obligaba a que el plano tuviera una
+   esquina ahí, y un edificio en L, o una sala en medio de su plano, no la tiene. Lo que se
+   guarda sigue siendo el ancho de la imagen (`plan_mm`) y, nuevo, dónde cae su esquina
+   (`plan_x`, `plan_y`): el dibujo no cambia de forma de leerse, solo de estar bien.
+   ================================================================ #}
+
+//: Lo que mide una imagen de sala sin escala dicha, si la sala tampoco dice cuánto mide.
+const _DC_PLAN_ROOM_MM = 10000;
+
+/** Dónde está el plano de fondo y cuánto ocupa, en milímetros de la sala o de la planta:
+ *  `{x, y, w, h, scaled}`. Sin ancho dicho, `fallback` —el ancho de la sala, o un tamaño fijo
+ *  en una planta—: nunca el del marco del dibujo, que cambia al mover cualquier cosa y
+ *  arrastraba la imagen con él. */
+function _dcPlanBox(rec, img, fallback) {
+    const dicho = Number((rec || {}).plan_mm) || 0;
+    const w = dicho > 0 ? dicho : fallback;
+    return {x: Number((rec || {}).plan_x) || 0, y: Number((rec || {}).plan_y) || 0,
+            w, h: w * ((img && img.ratio) || 0.7), scaled: dicho > 0};
+}
+
+/** El de la sala abierta: el suyo, o —en la zona general de una planta sin plano propio— el
+ *  de la planta, con su calibración, que es la misma cosa en las mismas coordenadas. */
+function _dcpPlanBox() {
+    const room = (_dcimPlan || {}).room || {};
+    const planta = (_dcimPlan || {}).planFloor;
+    if (planta) return _dcPlanBox(planta, (_dcimPlan || {}).image, _DCS_PLAN_MM);
+    return _dcPlanBox(room, (_dcimPlan || {}).image, Number(room.width_mm) || _DC_PLAN_ROOM_MM);
+}
+
+/** El de la planta abierta. */
+function _dcsPlanBox() {
+    return _dcPlanBox(_dcsFloor() || {}, (_dcsPlan || {}).image, _DCS_PLAN_MM);
+}
+
+// ── La calibración ───────────────────────────────────────────────────────────
+
+//: La calibración en curso, o `null`: `{kind: 'room'|'floor', step, a, b, dist, from, press}`.
+//: `from` es el punto del plano elegido para llevarlo a su sitio, en el paso 3; `press`, la
+//: pulsación en curso.
+//: `a` y `b` son puntos DE LA IMAGEN —fracciones de su ancho y su alto—, no de la sala: así
+//: siguen siendo los mismos puntos del dibujo cuando la escala cambia entre un paso y otro.
+let _dcCal = null;
+
+/** A qué se está calibrando: la sala o la planta abiertas, con su plano. `null` si ya no hay. */
+function _dcCalTarget() {
+    if (!_dcCal) return null;
+    if (_dcCal.kind === 'floor') {
+        const f = _dcsPlan && _dcsFloor();
+        if (!f || !_dcsPlan.image) return null;
+        return {rec: f, box: _dcsPlanBox(), img: _dcsPlan.image, svg: _DCS_SVG,
+                url: `/api/v1/dcim/floors/${encodeURIComponent(f.uid)}`, redraw: _dcsRedraw};
+    }
+    const room = (_dcimPlan || {}).room;
+    if (!room || !_dcimPlan.image) return null;
+    return {rec: room, box: _dcpPlanBox(), img: _dcimPlan.image, svg: _DCP_SVG,
+            url: `/api/v1/dcim/rooms/${encodeURIComponent(room.uid)}`, redraw: _dcpRedraw};
+}
+
+function _dcCalStart(kind) {
+    // Lo que había, para devolverlo al cancelar: la escala se aplica en pantalla antes de
+    // guardarse, y cancelar dejaba el plano a la escala a medio hacer hasta recargar. «Volver a
+    // marcar» empieza otra vez desde lo que había al principio, no desde lo ya aplicado.
+    const previa = _dcCal && _dcCal.kind === kind ? _dcCal.orig : null;
+    _dcCal = {kind, step: 'a', a: null, b: null, dist: '', from: null, press: null,
+              movePlan: false};
+    // El visor 3D, encima del lienzo, lo empujaba media pantalla abajo: se calibra en el plano.
+    if (typeof _dc3d !== 'undefined' && _dc3d) _dc3dStop();
+    const d = _dcCalTarget();
+    _dcCal.orig = previa || (d ? {plan_mm: d.rec.plan_mm, plan_x: d.rec.plan_x,
+                                  plan_y: d.rec.plan_y, north_deg: d.rec.north_deg} : null);
+    if (previa && d) Object.assign(d.rec, previa);
+    // Calibrar un plano que no se ve, o desde una pared, no tiene sentido: se enseña, en planta.
+    _dcPlanBg = true;
+    if (kind === 'room' && _dcpView !== 'top') _dcpView = 'top';
+    renderDcim();
+}
+
+function _dcCalCancel() {
+    const d = _dcCalTarget();
+    if (d && _dcCal.orig) Object.assign(d.rec, _dcCal.orig);
+    _dcCal = null;
+    _dcCalReframe(d);
+    renderDcim();
+}
+
+/** El plano cambió de tamaño o de sitio: el lienzo vuelve a encuadrar el dibujo entero. Si
+ *  no, el plano encogido o desplazado quedaba fuera de la vista, o debajo de la paleta. */
+function _dcCalReframe(d) {
+    if (d && typeof ssCanvasReset === 'function') ssCanvasReset(d.svg);
+}
+
+/** Un clic quieto en el lienzo, durante la calibración: un punto del plano. */
+async function _dcCalClick(ev) {
+    const d = _dcCalTarget();
+    if (!d) { _dcCal = null; return renderDcim(); }
+    const p = ssCanvasPoint(d.svg, ev);
+    if (!p) return;
+    const u = (p.x / _DCP_SCALE - d.box.x) / d.box.w, v = (p.y / _DCP_SCALE - d.box.y) / d.box.h;
+    if (_dcCal.step === 'a') {
+        Object.assign(_dcCal, {a: {u, v}, step: 'b'});
+    } else if (_dcCal.step === 'b') {
+        Object.assign(_dcCal, {b: {u, v}, step: 'dist'});
+        // El cuadro de la distancia, con el foco: lo siguiente es escribir. DESPUÉS de
+        // repintar —que pide datos al servidor antes de dibujar—: enfocarlo antes era enfocar el
+        // cuadro que el repintado iba a sustituir, y Enter no hacía nada.
+        await renderDcim();
+        document.querySelector('[data-dccal-dist]')?.focus();
+        return;
+    } else if (_dcCal.step === 'north') {
+        // La flecha del norte del plano: primero su cola, después su punta. El ángulo, en el
+        // sentido del reloj desde arriba del dibujo.
+        const q = {x: p.x / _DCP_SCALE, y: p.y / _DCP_SCALE};
+        if (!_dcCal.n0) {
+            _dcCal.n0 = q;
+        } else {
+            const dx = q.x - _dcCal.n0.x, dy = q.y - _dcCal.n0.y;
+            if (Math.hypot(dx, dy) > 1) {
+                d.rec.north_deg = Math.round(((Math.atan2(dx, -dy) * 180 / Math.PI) + 360) % 360);
+                _dcCal.northSet = true;
+            }
+            _dcCal.n0 = null;
+            _dcCal.step = 'origin';
+        }
+    } else if (_dcCal.step === 'origin') {
+        if (!_dcCal.from) {
+            // Primero, un punto del plano: algo que se reconozca, la esquina de una sala.
+            _dcCal.from = {u, v};
+        } else {
+            // Después, dónde debe caer en el mapa —pegado a una esquina de lo dibujado, si se
+            // pulsó cerca de una—: el plano se mueve para que ese punto suyo caiga ahí.
+            // Contra otra planta se pulsa sobre SU plano —una imagen, sin esquinas a las que
+            // pegarse—; pegarse a una sala de esta planta llevaría el punto a otro sitio.
+            const q = {x: p.x / _DCP_SCALE, y: p.y / _DCP_SCALE};
+            const ok = _dcCal.ref ? q : _dcCalSnap(d, q);
+            d.rec.plan_x = Math.round(ok.x - _dcCal.from.u * d.box.w);
+            d.rec.plan_y = Math.round(ok.y - _dcCal.from.v * d.box.h);
+            _dcCal.from = null;
+        }
+    } else {
+        return;
+    }
+    renderDcim();
+}
+
+/** Una pulsación en el lienzo, calibrando. En el paso 3, arrastrar mueve el PLANO —es como
+ *  se encaja a ojo—; en los otros, desplaza el lienzo, que es como se busca el punto. Una
+ *  pulsación que no viaja es un clic (`_dcCalClick`). */
+function _dcCalDown(ev) {
+    const d = _dcCalTarget();
+    if (!d) return;
+    const p = ssCanvasPoint(d.svg, ev);
+    // Un asa de una esquina del plano: se estira o se encoge, con su proporción, y la esquina
+    // contraria se queda quieta. Con otra planta ya colocada debajo, ajustar a ojo es esto.
+    const asa = _dcCal.step === 'origin' && p && ev.target && ev.target.closest
+        ? ev.target.closest('[data-dccalh]') : null;
+    if (asa) {
+        const b = d.box, lado = asa.dataset.dccalh;
+        const sx = lado.includes('e') ? 1 : -1, sy = lado.includes('s') ? 1 : -1;
+        _dcCal.press = {x: ev.clientX, y: ev.clientY, moved: false,
+                        scale: {sx, sy, w0: b.w, h0: b.h,
+                                ax: sx > 0 ? b.x : b.x + b.w, ay: sy > 0 ? b.y : b.y + b.h}};
+        ev.currentTarget?.setPointerCapture?.(ev.pointerId);
+        return;
+    }
+    // Mover el plano solo con su botón encendido: en los pasos 1 y 2 arrastrar desplaza el
+    // lienzo, y quien volvía a arrastrar en el 3 «para mirar» se llevaba el plano consigo.
+    const plano = _dcCal.step === 'origin' && _dcCal.movePlan && p;
+    _dcCal.press = {x: ev.clientX, y: ev.clientY, moved: false,
+                    plan: plano ? {p0: p, px: Number(d.rec.plan_x) || 0,
+                                   py: Number(d.rec.plan_y) || 0} : null};
+    if (plano) ev.currentTarget?.setPointerCapture?.(ev.pointerId);
+    else ssCanvasPanStart(d.svg, ev);
+}
+
+function _dcCalMove(ev) {
+    const d = _dcCalTarget(), pr = _dcCal.press;
+    if (!d || !pr) return;
+    if (Math.hypot(ev.clientX - pr.x, ev.clientY - pr.y) >= 4) pr.moved = true;
+    if (pr.scale) {
+        if (!pr.moved) return;
+        const p = ssCanvasPoint(d.svg, ev);
+        if (!p) return;
+        Object.assign(d.rec, _dcCalScaleTo(pr.scale, p.x / _DCP_SCALE, p.y / _DCP_SCALE));
+        return d.redraw();
+    }
+    if (!pr.plan) return ssCanvasPanMove(d.svg, ev);
+    if (!pr.moved) return;
+    const p = ssCanvasPoint(d.svg, ev);
+    if (!p) return;
+    d.rec.plan_x = Math.round(pr.plan.px + (p.x - pr.plan.p0.x) / _DCP_SCALE);
+    d.rec.plan_y = Math.round(pr.plan.py + (p.y - pr.plan.p0.y) / _DCP_SCALE);
+    d.redraw();
+}
+
+function _dcCalUp(ev) {
+    const pr = _dcCal && _dcCal.press;
+    if (!pr) return;
+    _dcCal.press = null;
+    ssCanvasPanEnd(ev);
+    if (!pr.moved) return ev.type === 'pointerup' ? _dcCalClick(ev) : undefined;
+    // El plano arrastrado o estirado: la franja tiene que decir dónde y cuánto ha quedado.
+    if (pr.plan || pr.scale) renderDcim();
+}
+
+/** El plano estirado desde una esquina hasta (`mx`, `my`) mm: la esquina contraria (`ax`, `ay`)
+ *  quieta, y la proporción de la imagen guardada —un plano deformado mediría distinto a lo
+ *  ancho que a lo largo—. Lo que manda es cuánto se ha avanzado a lo largo de su diagonal, que
+ *  es lo natural al tirar de una esquina. */
+function _dcCalScaleTo(g, mx, my) {
+    const dx = g.sx * g.w0, dy = g.sy * g.h0;
+    const largo = Math.hypot(dx, dy) || 1;
+    const avance = ((mx - g.ax) * dx + (my - g.ay) * dy) / largo;
+    const k = Math.max(0.02, avance / largo);
+    const w = Math.max(_DC_CAL_MIN_MM, g.w0 * k), h = w * (g.h0 / g.w0);
+    return {plan_mm: Math.round(w),
+            plan_x: Math.round(g.sx > 0 ? g.ax : g.ax - w),
+            plan_y: Math.round(g.sy > 0 ? g.ay : g.ay - h)};
+}
+
+/** Las cuatro asas del plano, en el paso 3. Aparte de las marcas, que no se pueden pulsar. */
+function _dcCalHandles(kind) {
+    const d = (_dcCal && _dcCal.kind === kind && _dcCal.step === 'origin') ? _dcCalTarget() : null;
+    if (!d || !_dcimMay('dcim_edit')) return '';
+    const S = _DCP_SCALE, b = d.box;
+    // Del tamaño de lo que se ve, no del dibujo: un asa de medio metro es invisible mirando un
+    // edificio entero y tapa media sala mirando de cerca.
+    const v = typeof ssCanvasWindow === 'function' ? ssCanvasWindow(d.svg) : null;
+    const t = v && v.w ? v.w / 70 : 6;
+    const asa = (id, x, y, cursor) => `<rect data-dccalh="${id}" x="${x * S - t / 2}" y="${y * S - t / 2}"
+        width="${t}" height="${t}" fill="var(--bs-warning)"
+        stroke="var(--bs-dark)" stroke-width="1" vector-effect="non-scaling-stroke"
+        style="cursor:${cursor}"></rect>`;
+    return `<g>${asa('nw', b.x, b.y, 'nwse-resize')}${asa('ne', b.x + b.w, b.y, 'nesw-resize')}${
+        asa('sw', b.x, b.y + b.h, 'nesw-resize')}${asa('se', b.x + b.w, b.y + b.h, 'nwse-resize')}</g>`;
+}
+
+/** El ancho del plano, escrito: el dibujo cambia al teclear, con su esquina quieta. */
+function _dcCalSetWidth(valor) {
+    const d = _dcCalTarget();
+    const m = parseFloat(String(valor).replace(',', '.'));
+    if (!d || !Number.isFinite(m) || m * 1000 < _DC_CAL_MIN_MM) return;
+    d.rec.plan_mm = Math.round(m * 1000);
+    d.redraw();
+}
+
+/** Las esquinas de lo que ya está dibujado, en milímetros: con lo que se encaja el plano.
+ *  En una sala, la sala misma y sus racks y piezas; en una planta, sus salas. Giradas como
+ *  están, que una esquina sin girar es un punto donde no hay nada. */
+function _dcCalAnchors(kind) {
+    const esquinas = (x, y, w, d, rot) => {
+        const a = (Number(rot) || 0) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+        const cx = x + w / 2, cy = y + d / 2;
+        return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) => {
+            const lx = i * w / 2, ly = j * d / 2;
+            return {x: cx + lx * c - ly * s, y: cy + lx * s + ly * c};
+        });
+    };
+    const out = [];
+    if (kind === 'floor') {
+        for (const r of (typeof _dcsHereRooms === 'function' && _dcsPlan ? _dcsHereRooms() : [])) {
+            const f = _dcsFrame(r);
+            out.push(...esquinas(f.x, f.y, f.w, f.d, f.rot));
+        }
+        return out;
+    }
+    const room = (_dcimPlan || {}).room || {};
+    const W = Number(room.width_mm) || 0, D = Number(room.depth_mm) || 0;
+    if (W && D) out.push(...esquinas(0, 0, W, D, 0));
+    for (const k of ((_dcimPlan || {}).racks || [])) {
+        out.push(...esquinas(Number(k.pos_x) || 0, Number(k.pos_y) || 0,
+                             Number(k.width_mm) || 600, Number(k.depth_mm) || 1000, k.rotation));
+    }
+    for (const f of (typeof _dcpFeatures === 'function' ? _dcpFeatures() : [])) {
+        out.push(...esquinas(Number(f.pos_x) || 0, Number(f.pos_y) || 0,
+                             Number(f.width_mm) || 600, Number(f.depth_mm) || 600, f.rotation));
+    }
+    return out;
+}
+
+/** El punto pulsado, pegado a la esquina más cercana si está a menos de 14 px en pantalla:
+ *  acertar a mano la esquina exacta de una sala es imposible, y fallarla por un píxel es
+ *  dejar el plano torcido esos centímetros. */
+function _dcCalSnap(d, p) {
+    let mm = Infinity;
+    const svg = typeof ssCanvasSvg === 'function' ? ssCanvasSvg(d.svg) : null;
+    const v = typeof ssCanvasWindow === 'function' ? ssCanvasWindow(d.svg) : null;
+    if (svg && v && svg.getBoundingClientRect) {
+        const r = svg.getBoundingClientRect();
+        if (r.width && r.height) mm = 14 / _ssFit(r, v).k / _DCP_SCALE;
+    }
+    let mejor = null, dist = mm;
+    for (const a of _dcCalAnchors(_dcCal.kind)) {
+        const dd = Math.hypot(a.x - p.x, a.y - p.y);
+        if (dd <= dist) { dist = dd; mejor = a; }
+    }
+    return mejor || p;
+}
+
+/** Escribir dónde cae la esquina del plano: el dibujo se mueve al teclear. */
+function _dcCalSetXY(eje, valor) {
+    const d = _dcCalTarget();
+    // A medio escribir —«-», vacío— no se mueve nada: saltaba a 0 antes de llegar al número.
+    if (!d || !Number.isFinite(parseFloat(valor))) return;
+    d.rec[eje === 'x' ? 'plan_x' : 'plan_y'] = Number(valor);
+    d.redraw();
+}
+
+// ── Encajar una planta contra otra ───────────────────────────────────────────
+//
+// En el edificio, cada planta se apila sobre las demás en las coordenadas de su plano. Si cada
+// una se coloca por su cuenta, nada hace que la escalera de la primera caiga encima de la de la
+// baja: se veían desplazadas. Se encaja contra otra planta como se encaja contra una sala: su
+// plano, ya colocado, se ve en transparencia y teñido, y un punto común a las dos —la escalera,
+// el ascensor, un patio— se lleva de un plano al otro.
+
+/** Las otras plantas de la sede con plano: contra las que se puede encajar esta. */
+function _dcCalRefFloors() {
+    if (!_dcCal || _dcCal.kind !== 'floor' || !_dcsPlan) return [];
+    return (_dcsPlan.floors || []).filter(f => f.uid !== _dcsPlan.floor && f.plan);
+}
+
+/** Elegir la planta de referencia, y traer su plano si no se tiene ya. */
+async function _dcCalSetRef(uid) {
+    _dcCal.ref = uid || '';
+    _dcCal.refImg = null;
+    _dcCal.from = null;
+    if (uid) {
+        const f = _dcCalRefFloors().find(x => x.uid === uid);
+        const guardada = typeof _ds3Images !== 'undefined' ? _ds3Images[uid] : null;
+        const img = guardada || (f ? await _dcsFetchImage(f) : null);
+        if (!_dcCal || _dcCal.ref !== uid) return;
+        _dcCal.refImg = img;
+        if (img && typeof _ds3Images !== 'undefined') _ds3Images[uid] = img;
+    }
+    const d = _dcCalTarget();
+    if (d) _dcCalFrameFit(d);
+    renderDcim();
+}
+
+/** El plano de la planta de referencia, en su sitio, translúcido y teñido de rojo: dos planos
+ *  de un mismo edificio se parecen demasiado para distinguirlos en gris sobre gris. */
+function _dcCalRefSvg() {
+    if (!_dcCal || _dcCal.kind !== 'floor' || !_dcCal.ref || !_dcCal.refImg) return '';
+    const f = (_dcsPlan.floors || []).find(x => x.uid === _dcCal.ref);
+    if (!f) return '';
+    const b = _dcPlanBox(f, _dcCal.refImg, _DCS_PLAN_MM), S = _DCP_SCALE;
+    return `<defs><filter id="dcCalRefTint"><feColorMatrix type="matrix"
+            values="1 0 0 0 0  0 .25 0 0 0  0 0 .25 0 0  0 0 0 1 0"></feColorMatrix></filter></defs>
+        <image href="${escAttr(_dcCal.refImg.data)}" x="${b.x * S}" y="${b.y * S}"
+               width="${b.w * S}" height="${b.h * S}" opacity=".5" filter="url(#dcCalRefTint)"
+               preserveAspectRatio="none" style="pointer-events:none"></image>`;
+}
+
+/** Saltar la escala, que ya está bien, y pasar a encajar el plano. */
+function _dcCalSkipScale() {
+    const d = _dcCalTarget();
+    if (!d || !(Number(d.rec.plan_mm) > 0)) return;
+    Object.assign(_dcCal, {step: 'origin', a: null, b: null, from: null});
+    _dcCalFrameFit(d);
+    renderDcim();
+}
+
+/** Entrar a marcar el norte, o volver al paso 3 sin marcarlo. */
+function _dcCalNorth(entrar) {
+    _dcCal.step = entrar ? 'north' : 'origin';
+    _dcCal.n0 = null;
+    _dcCal.from = null;
+    renderDcim();
+}
+
+function _dcCalToggleMove() {
+    _dcCal.movePlan = !_dcCal.movePlan;
+    renderDcim();
+}
+
+/** La escala, de la distancia escrita entre los dos puntos: el ancho que tiene que tener la
+ *  imagen entera para que ellos queden a esa distancia. Se aplica ya —el paso siguiente se
+ *  pulsa sobre el plano a su tamaño nuevo— y se guarda al final. */
+function _dcCalApply() {
+    const d = _dcCalTarget();
+    if (!d || !_dcCal.a || !_dcCal.b) return;
+    // En METROS, con decimales: una fachada se dice en metros, y el cuadro en milímetros hacía
+    // que «42» dejara el plano de 52 mm de ancho —un píxel—, que es «el plano desaparece».
+    const dist = Number(String(_dcCal.dist).replace(',', '.')) * 1000;
+    const ratio = d.box.h / d.box.w;
+    const fraccion = Math.hypot(_dcCal.b.u - _dcCal.a.u, (_dcCal.b.v - _dcCal.a.v) * ratio);
+    if (!(dist > 0) || !(fraccion > 1e-4)) return showToast(t('dcim_cal_bad'), 'warning');
+    const ancho = Math.round(dist / fraccion);
+    // Y un plano de menos de un metro o de más de cinco kilómetros es una unidad equivocada,
+    // no un edificio: se dice cuánto saldría en vez de aplicarlo.
+    if (ancho < _DC_CAL_MIN_MM || ancho > _DC_CAL_MAX_MM)
+        return showToast(tf('dcim_cal_absurd', (ancho / 1000).toLocaleString()), 'warning');
+    d.rec.plan_mm = ancho;
+    _dcCal.step = 'origin';
+    _dcCalFrameFit(d);
+    renderDcim();
+}
+
+//: Lo que puede medir de ancho un plano, en mm: por debajo o por encima, la distancia se
+//: escribió en otra unidad.
+const _DC_CAL_MIN_MM = 1000;
+const _DC_CAL_MAX_MM = 5000000;
+
+/** Para encajar hay que ver las dos cosas: el lienzo se encuadra sobre el plano Y lo dibujado
+ *  —sus esquinas—, con un margen. El encuadre general de la planta abarca al menos 20×15 m,
+ *  y un plano pequeño quedaba en una esquina, del tamaño de un sello. */
+function _dcCalFrameFit(d) {
+    // El tamaño de AHORA: el `box` de `d` es de antes de aplicar la escala.
+    const b = (_dcCalTarget() || d).box;
+    let x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h;
+    const puntos = _dcCalAnchors(_dcCal.kind).slice();
+    // Y el plano de la planta de referencia, si se encaja contra una: hay que ver los dos.
+    const fr = _dcCal.ref && _dcCal.refImg && (_dcsPlan.floors || []).find(x => x.uid === _dcCal.ref);
+    if (fr) {
+        const rb = _dcPlanBox(fr, _dcCal.refImg, _DCS_PLAN_MM);
+        puntos.push({x: rb.x, y: rb.y}, {x: rb.x + rb.w, y: rb.y + rb.h});
+    }
+    for (const a of puntos) {
+        x0 = Math.min(x0, a.x); y0 = Math.min(y0, a.y);
+        x1 = Math.max(x1, a.x); y1 = Math.max(y1, a.y);
+    }
+    const S = _DCP_SCALE, m = Math.max(x1 - x0, y1 - y0) * 0.06;
+    _ssVB[d.svg] = {x: (x0 - m) * S, y: (y0 - m) * S, w: (x1 - x0 + m * 2) * S,
+                    h: (y1 - y0 + m * 2) * S};
+}
+
+/** Guardar lo calibrado: la escala siempre, y dónde cae si se llegó a decir. */
+async function _dcCalSave(conSitio) {
+    const d = _dcCalTarget();
+    const northSet = !!(_dcCal && _dcCal.northSet);
+    _dcCal = null;
+    if (!d) return renderDcim();
+    const cuerpo = {plan_mm: d.rec.plan_mm};
+    if (conSitio) Object.assign(cuerpo, {plan_x: Number(d.rec.plan_x) || 0,
+                                         plan_y: Number(d.rec.plan_y) || 0});
+    if (northSet) cuerpo.north_deg = d.rec.north_deg;
+    const r = await _dcimSend('PUT', d.url, cuerpo);
+    if (!r.ok) showToast(r.error || t('save_failed'), 'danger');
+    else showToast(t('dcim_cal_done'), 'success');
+    _dcCalReframe(d);
+    renderDcim();
+}
+
+/** La franja de la calibración, encima del lienzo: qué hacer ahora, y cómo salir. */
+function _dcCalBar(kind) {
+    if (!_dcCal || _dcCal.kind !== kind) return '';
+    const salir = `<button type="button" class="btn btn-sm btn-secondary" onclick="_dcCalCancel()">
+        ${esc(t('cancel'))}</button>`;
+    let cuerpo;
+    if (_dcCal.step === 'a' || _dcCal.step === 'b') {
+        // Con la escala ya puesta, ir directo a encajar: un plano bien medido y mal colocado
+        // —dos plantas que no coinciden— obligaba a volver a medir para llegar al paso 3.
+        const dt = _dcCalTarget();
+        const conEscala = _dcCal.step === 'a' && dt && Number(dt.rec.plan_mm) > 0;
+        cuerpo = `<span>${esc(t(_dcCal.step === 'a' ? 'dcim_cal_a' : 'dcim_cal_b'))}</span>
+            ${conEscala ? `<button type="button" class="btn btn-sm btn-secondary" onclick="_dcCalSkipScale()">
+                <i class="bi bi-skip-forward me-1"></i>${esc(t('dcim_cal_skip_scale'))}</button>` : ''}`;
+    } else if (_dcCal.step === 'dist') {
+        cuerpo = `<label class="d-flex align-items-center gap-2 mb-0">${esc(t('dcim_cal_dist'))}
+            <input type="number" min="0" step="0.01" class="form-control form-control-sm ss-tabular"
+                   style="width:8rem" value="${escAttr(String(_dcCal.dist || ''))}" data-dccal-dist
+                   oninput="_dcCal.dist=this.value"
+                   onkeydown="if(event.key==='Enter')_dcCalApply()"></label>
+            <button type="button" class="btn btn-sm btn-primary" onclick="_dcCalApply()">
+                ${esc(t('dcim_cal_apply'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcCalStart(${jsStr(kind)})">
+                ${esc(t('dcim_cal_again'))}</button>`;
+    } else {
+        const d = _dcCalTarget();
+        const caja = (eje, valor) => `<input type="number" step="100"
+            class="form-control form-control-sm ss-tabular" style="width:7rem"
+            value="${escAttr(String(Math.round(Number(valor) || 0)))}" aria-label="${escAttr(eje)}"
+            oninput="_dcCalSetXY(${jsStr(eje)},this.value)">`;
+        // Sin nada dibujado no hay con qué encajarlo: se dice, y lo que procede es guardar la
+        // escala y colocar las salas encima del plano.
+        const vacio = !_dcCalAnchors(kind).length;
+        const otras = _dcCalRefFloors();
+        const ref = _dcCal.ref ? otras.find(f => f.uid === _dcCal.ref) : null;
+        const texto = ref ? (_dcCal.from ? tf('dcim_cal_fit_ref_to', ref.name || '')
+                                         : tf('dcim_cal_fit_ref', ref.name || ''))
+                    : t(_dcCal.from ? 'dcim_cal_fit_to' : vacio ? 'dcim_cal_fit_empty' : 'dcim_cal_fit');
+        cuerpo = `<span>${esc(texto)}</span>
+            ${otras.length ? `<label class="d-inline-flex align-items-center gap-1 mb-0"
+                    title="${escAttr(t('dcim_cal_ref_tt'))}">${esc(t('dcim_cal_ref'))}
+                <select class="form-select form-select-sm w-auto" onchange="_dcCalSetRef(this.value)">
+                    <option value="">${esc(t('dcim_cal_ref_none'))}</option>${otras.map(f =>
+                    `<option value="${escAttr(f.uid)}"${f.uid === _dcCal.ref ? ' selected' : ''}>${
+                        esc(f.name || f.uid)}</option>`).join('')}
+                </select></label>` : ''}
+            <span class="d-inline-flex align-items-center gap-1"
+                  title="${escAttr(t('dcim_plan_xy_tt'))}">${esc(t('dcim_cal_corner'))}
+                X ${caja('x', d ? d.rec.plan_x : 0)} Y ${caja('y', d ? d.rec.plan_y : 0)} mm</span>
+            <label class="d-inline-flex align-items-center gap-1 mb-0" title="${escAttr(t('dcim_cal_width_tt'))}">${
+                esc(t('dcim_cal_width'))}
+                <input type="number" step="0.01" min="1" class="form-control form-control-sm ss-tabular"
+                       style="width:7rem" value="${escAttr(d ? (Number(d.rec.plan_mm) / 1000).toFixed(2) : '')}"
+                       oninput="_dcCalSetWidth(this.value)"></label>
+            <button type="button" class="btn btn-sm ${_dcCal.movePlan ? 'btn-warning' : 'btn-secondary'}"
+                onclick="_dcCalToggleMove()" title="${escAttr(t('dcim_cal_move_tt'))}">
+                <i class="bi bi-arrows-move me-1"></i>${esc(t('dcim_cal_move'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcCalNorth(true)"
+                title="${escAttr(t('dcim_cal_north_tt'))}">
+                <i class="bi bi-compass me-1"></i>${esc(d && d.rec.north_deg !== null && d.rec.north_deg !== undefined
+                    ? tf('dcim_cal_north_is', d.rec.north_deg) : t('dcim_cal_north'))}</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="_dcCalSave(true)">
+                ${esc(t('save'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcCalSave(false)">
+                ${esc(t('dcim_cal_skip'))}</button>`;
+    }
+    if (_dcCal.step === 'north') {
+        cuerpo = `<span>${esc(t(_dcCal.n0 ? 'dcim_cal_north_tip' : 'dcim_cal_north_tail'))}</span>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcCalNorth(false)">
+                ${esc(t('dcim_cal_north_back'))}</button>`;
+    }
+    const paso = {a: 1, b: 1, dist: 2, origin: 3, north: 3}[_dcCal.step] || 1;
+    return `<div class="ss-warn-box mb-2 ss-fs-2 d-flex flex-wrap align-items-center gap-2">
+        <i class="bi bi-rulers"></i>
+        <span class="fw-semibold">${esc(tf('dcim_cal_step', paso))}</span>
+        ${cuerpo}<span class="ms-auto">${salir}</span></div>`;
+}
+
+/** Los puntos ya marcados, encima del dibujo: sin verlos, el segundo se pulsa a ciegas. */
+function _dcCalMarks(kind) {
+    const d = (_dcCal && _dcCal.kind === kind) ? _dcCalTarget() : null;
+    if (!d) return '';
+    const S = _DCP_SCALE;
+    const sitio = (q) => [(d.box.x + q.u * d.box.w) * S, (d.box.y + q.v * d.box.h) * S];
+    const punto = (q) => {
+        const [x, y] = sitio(q);
+        return `<circle cx="${x}" cy="${y}" r="2.2" fill="var(--bs-danger)" stroke="#fff"
+                    stroke-width="1.5" vector-effect="non-scaling-stroke"></circle>`;
+    };
+    let h = '';
+    if (_dcCal.a && _dcCal.b && _dcCal.step === 'dist') {
+        const [x1, y1] = sitio(_dcCal.a), [x2, y2] = sitio(_dcCal.b);
+        h += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--bs-danger)"
+                    stroke-width="2" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"></line>`;
+    }
+    if (_dcCal.step !== 'origin') {
+        if (_dcCal.a) h += punto(_dcCal.a);
+        if (_dcCal.b) h += punto(_dcCal.b);
+    } else if (_dcCal.step === 'north' && _dcCal.n0) {
+        h += `<circle cx="${_dcCal.n0.x * S}" cy="${_dcCal.n0.y * S}" r="2.2" fill="var(--bs-danger)"
+                  stroke="#fff" stroke-width="1.5" vector-effect="non-scaling-stroke"></circle>`;
+    } else if (_dcCal.from) {
+        // Las esquinas a las que se puede llevar, para que se vea dónde se pega.
+        for (const a of _dcCalAnchors(kind)) {
+            h += `<circle cx="${a.x * S}" cy="${a.y * S}" r="1.6" fill="none"
+                      stroke="var(--bs-warning)" stroke-width="1.5"
+                      vector-effect="non-scaling-stroke"></circle>`;
+        }
+        h += punto(_dcCal.from);
+    }
+    return `<g style="pointer-events:none">${h}</g>${_dcCalHandles(kind)}`;
+}
+
+/** El norte de un plano, o `null` si nadie lo ha dicho. */
+function _dcNorthOf(rec) {
+    const v = (rec || {}).north_deg;
+    return (v === null || v === undefined || v === '') ? null : Number(v);
+}
+
+/** La rosa de los vientos, en una esquina del lienzo: una flecha que apunta al norte, girada
+ *  `deg` grados en el sentido del reloj. Nada si no se sabe dónde está: una rosa con el norte
+ *  arriba por defecto sería el dibujo afirmando algo que nadie ha dicho. */
+function _dcCompass(deg, id) {
+    if (deg === null || deg === undefined || !Number.isFinite(Number(deg))) return '';
+    return `<div class="ss-compass" ${id ? `id="${escAttr(id)}"` : ''}
+            title="${escAttr(tf('dcim_cal_north_is', Math.round(Number(deg))))}">
+        <svg viewBox="-20 -20 40 40" width="40" height="40" aria-hidden="true">
+            <g ${id ? 'data-compass-needle' : ''} transform="rotate(${Number(deg)})">
+                <path d="M0 -15 L5 4 L0 1 L-5 4 Z" fill="var(--bs-danger)"></path>
+                <text x="0" y="-16.5" text-anchor="middle" font-size="8" font-weight="700"
+                      fill="currentColor">N</text>
+            </g>
+        </svg></div>`;
+}
+
+/** El botón de la barra, para quien edita y con un plano que calibrar. */
+function _dcCalButton(kind) {
+    return `<button class="btn btn-sm ${_dcCal && _dcCal.kind === kind ? 'btn-warning' : 'btn-secondary'}"
+        onclick="${_dcCal ? '_dcCalCancel()' : `_dcCalStart(${jsStr(kind)})`}"
+        title="${escAttr(t('dcim_cal'))}" aria-label="${escAttr(t('dcim_cal'))}">
+        <i class="bi bi-rulers"></i></button>`;
+}

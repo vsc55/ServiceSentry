@@ -35,6 +35,16 @@ _ROOM = TableSpec(
         # with the picture and stretch it, which would put a rack where it is not. 0 means
         # nobody has scaled it, and then it is drawn to fit and says so.
         Column('plan_mm', 'INTEGER', nullable=False, default='0'),
+        # Where the picture's top-left corner lands in the room, in millimetres — negative when
+        # the drawing has a margin before the room starts, which an architect's plan always has.
+        # Pinned to (0, 0), a plan with a margin put every rack that far off. Set by the
+        # calibration in the plan (two points of known distance, then one point of known place).
+        Column('plan_x',  'REAL', nullable=False, default='0'),
+        Column('plan_y',  'REAL', nullable=False, default='0'),
+        # Where north points on the plan: degrees clockwise from the top of the drawing. NULL is
+        # "nobody has said", which is not "north is up" — a compass drawn on that guess would
+        # be the drawing claiming a fact it does not know. Set by the calibration.
+        Column('north_deg', 'REAL'),
         # Cuánto mide la sala, y cuánto mide su baldosa. Un plano sin las medidas de la sala se
         # puede dibujar y no se puede usar para lo único que sirve un plano: contestar si cabe
         # otra fila. 0 = nadie las ha dicho, y entonces el dibujo se encuadra a lo que hay.

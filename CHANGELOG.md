@@ -8,6 +8,192 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.136] - 2026-10-04
+
+### Added
+
+- **A rack can be looked at four ways.** A switch under the header picks one of three, and
+  the choice is remembered per browser. The fourth, Compacta, is not a choice: it is what a
+  phone gets.
+  - **Rack y pestañas** is the drawing with its four tabs. The elevation toolbar explains its
+    marks, and the card of the item pointed at is always shown under the drawing. The tabs
+    flag undeclared links and single-branch devices without being opened.
+  - **Por U** has one grid row per U, top to bottom, free ones included, with «Colocar aquí».
+    Each row shows front and rear in miniature, with the share a tray item takes, mirrored at
+    the rear. It also carries cables coloured by the check, branches A/B, state, serial,
+    warranty and company. It has a search box and «Colorear por».
+  - **Cuadro** has ring figures for occupancy, devices, warranties, power, cabling and
+    history. Both faces can be coloured by state, warranty, company, cabling or branch.
+    «Requiere atención» is computed from the data, with an action on every row, and the
+    latest changes are listed.
+  - **Compacta** is a U-by-U list of one face, with the four tabs at its foot. It is shown
+    automatically below the phone breakpoint (576 px), with the switch hidden. The chosen view
+    comes back on a wider screen without a reload.
+- **The rack header shared by the four views:** where the rack is above its name, «Colocar
+  algo» as a button with its word, and edit, company and delete as full-size buttons.
+
+- **Power sources linked to the rack.** Previously a strip's `source_uid` could only be set
+  through the API, and no screen showed it.
+  - Each strip picks its source (panel or UPS) in the Alimentación tab, and the tab shows each
+    strip's chain up to the mains as it is now. A bypassed UPS is marked, and the chain
+    warnings (a strip through no UPS because of a bypass, both branches through one UPS) sit
+    with the rack's own warnings. The rack Dashboard lists them under «Requiere atención».
+  - A UPS standing in the rack can BE a source (new `dc_source.item_uid`, one source per item,
+    same site). An undeclared one is flagged in the tab, with «declare it» or «it is source…».
+    Its card under the drawing says which source it is and whether it is bypassed.
+  - The Fuentes section lists under each source the strips hanging off it, with their branch
+    and rack, as links to that rack. Its form now takes the device it is, the machine that
+    monitors it, where the bypass switch is, and a description.
+  - The API checks a strip's source: it must exist and belong to the rack's site, or to none.
+    A UPS of another company in a shared rack is not named in these lists.
+- **Calibrating the background plan of a room or a floor.** Previously it was placed by
+  one number, the real width of the WHOLE picture (margins and title block included), with
+  its top-left corner pinned to (0, 0), so a plan with a margin was off by that margin.
+  - «Calibrate plan» (the ruler in the toolbar) takes two points of a known distance for the
+    scale, then fits the plan to what is already drawn: drag it, or click a point of the plan
+    and then where it belongs, snapping to the nearest corner of a room, rack or piece. It
+    needs no corner at (0, 0), which an L-shaped building does not have. It saves `plan_mm` and the
+    new `plan_x`/`plan_y` (mm, negative allowed) on `dc_room` and `dc_floor`.
+  - The plan is drawn there in 2D and in 3D, the room's plan now also on its 3D floor, and
+    the drawing frame takes it in whole. The three numbers can be corrected by hand.
+  - While calibrating, the palette is hidden and clicks only mark points; «Cancel» puts back
+    any scale already applied on screen, and the canvas reframes when the plan changes size.
+  - The distance is typed in metres, and a scale that would make the plan under 1 m or over
+    5 km wide is refused with the width it would give: «42» typed into a box that asked for
+    millimetres left the plan one pixel wide, which read as the plan disappearing.
+  - Step 3 frames the canvas on the plan and what is drawn; dragging pans unless «Move the
+    plan» is on; calibrating closes the 3D viewer, which pushed the canvas off screen.
+- **Undo and redo in the room and floor plans.** Moving, turning, resizing, editing a field
+  in the inspector or calibrating the plan is saved on release, so a wrong move was already
+  on the server. The toolbar now has undo and redo (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z), naming
+  what they would undo. Changes are recorded in `_dcimSend` with their saved previous values;
+  quick successive changes to one thing are one step; opening another plan starts afresh.
+  Creating and deleting are not undone: deleting already asks first.
+- **Cabinets have shelves, and what is on each one.** A cabinet says how many shelves it has
+  (new `dc_feature.shelves`, 1 on creation), and its card — in the room plan and the floor
+  plan — lists them top to bottom with the material on each: name, quantity and note, in the
+  new table `dc_shelf_item` (`GET /features/<uid>/shelf`, `/shelf-items`). Removing a shelf
+  that holds something is refused, naming it; deleting the cabinet takes its material and the
+  confirmation says how much; importing a plan never deletes a cabinet that holds something
+  (one of the same name in the file takes its place and size instead).
+- **Names in the 3D viewer.** Each rack, each piece with a label and each room of a floor
+  carries its name over it — Rack01, MesaTaller — as text placed where its point falls on
+  screen, sharp at any zoom and only moved when the camera moves. Hidden for pieces with no
+  label and for the faint floors of the building; a button in the viewer hides them all,
+  remembered per browser.
+- **Pieces show their front and back, and a cabinet its shelves.** Cabinets, workbenches,
+  electrical panels, UPS units and CRACs now say which way they face (`front` in
+  `FEATURE_KINDS`): a blue strip at the front and a dashed line at the back in the room and
+  floor plans, and the strip on their front face in 3D. The front is the side that was on top
+  before turning, as for a rack. A cabinet is drawn open at the front in 3D with one board per
+  shelf, and the wall view draws a line between shelves; it used to be a solid block.
+- **A cabinet piece for rooms and floors.** The palette had no storage cabinet (spare parts,
+  supplies, files) — only racks and room fittings. New feature kind `cabinet`, 1000 × 500 mm
+  and 2 m high by default, drawn in 2D and 3D. A guard now checks that every feature kind has
+  its drawing, its palette icon, its 3D colour and its name in both languages.
+- **Fitting a floor's plan against another floor.** In the building view each floor was
+  stacked in its own plan's coordinates, so nothing made the stairs of one land over the
+  stairs of another. The calibration's step 3 on a floor can now pick another floor with a
+  plan: it is drawn over this one, translucent and tinted red, and a point both share — the
+  stairs, the lift — clicked on each plan brings them together. A plan already scaled can
+  skip straight to this step («The scale is right: fit it»), without measuring again. In
+  this step the plan has a handle at each corner: pulling one scales it, keeping its
+  proportions and the opposite corner still, and its width can be typed in metres — so with
+  one floor in place, the others can be fitted by eye over it.
+- **North on the plan.** The calibration's step 3 can mark north by clicking the plan's north
+  arrow from tail to tip, saved as the new nullable `north_deg` on `dc_room` and `dc_floor`
+  (degrees clockwise from the top; empty means not said, not «north is up»). A compass rose
+  shows it on the room and floor plans and in the 3D viewer, where it turns with the camera.
+  It can also be typed in the room form and the floor inspector.
+- **The 3D wheel zooms towards the cursor.** It always zoomed towards the centre of the view;
+  now the point on the floor under the cursor stays under it.
+- **Hiding the background plan.** An eye in the room and floor toolbars hides it, in 2D and
+  3D, for whoever is looking, remembered per browser.
+- **A floor, or the whole building, in 3D.** The site plan has the 3D button the room plan
+  has, on the same viewer.
+  - «Planta» raises every room of the open floor with what it holds, turned and placed as in
+    the 2D floor plan. Each room is built by the same code as its own viewer, and its walls
+    turn to glass by whether the camera is inside or outside that room. The general area has
+    no walls, a room with no size is faint in its shell only, and tile lines are left out.
+  - The architect's plan lies on the floor as a texture, at the stated width (fainter when the
+    width is assumed). An SVG plan works too: it is rasterised to a canvas first.
+  - «Edificio» stacks the floors by level, 4 m apart with basements below the street. The
+    floor chosen in the toolbar is solid and those above it are faint; «Separar plantas» pulls
+    them apart.
+  - A click on a room names it and a second click opens it, as the double click in the plan.
+  - New `GET /api/v1/dcim/sites/<uid>/contents`: the racks and pieces of every placed room in
+    one answer, filtered as the per-room ones. The site plan uses it too: it was two requests
+    per room, each rack list walking the whole state tree again.
+- **The room plan can select what is covered.** Previously a cable tray over a table hid the
+  table: the click reached the tray, and the table could never be selected.
+  - A second press, without moving, on what is already selected selects the next thing under
+    the pointer, wrapping round, in the plan and in the wall views.
+  - The selected piece keeps being the one dragged, handles included, even under another.
+  - «Send to back», in a piece's or rack's inspector and in its hover bar, makes it faint and
+    click-through for this session. The toolbar shows how many are at the back, with a button to bring them all
+    forward; picking one from the list brings it forward too. Nothing is saved: the layer
+    order stays the model's.
+
+### Changed
+
+- **A rack's cabling, power and history are fetched in the background when it opens.**
+  Previously they were fetched only when their tab was opened. The marks on the drawing and
+  the warnings on the tabs are now there from the start.
+- **Cableado:** its five figures are coloured chips instead of a sentence, «+ Cable» is the
+  primary button, and the undeclared links sit in an amber box.
+- **Alimentación:** declared watts and branches A/B are three figures with bars. The warnings
+  sit in a box. «+ Dispositivo nuevo, ya enchufado» and «+ Regleta» share one row titled
+  «Regletas».
+
+### Fixed
+
+- **Names in the room plan are never upside down.** A piece or a rack turned half round had
+  its name upside down, as it turned with the piece. It still runs along the piece, and is
+  flipped about its centre when the turn would leave it upside down.
+- **A rack no longer blends into the wall in the 3D viewer.** Both were almost the same dark
+  grey (0.20 against 0.22); the walls are now a light wall grey and racks a darker cabinet
+  black, and a guard keeps them apart.
+- **A loose piece of a floor can be resized, and the floor's general area shows its plan.**
+  Previously, in the floor plan only rooms had handles, so a door could not be made wider;
+  and on a thin piece in a room plan the four corner handles covered the side ones. The
+  selected piece now has handles in the floor plan too (the movement turned into its room's
+  frame), thin pieces carry only the side handles, and the general area of a floor, with no
+  plan of its own, shows the floor's plan with the floor's calibration and north.
+- **The floor of the 3D viewer no longer breaks into stripes when the camera moves.** The
+  near clipping plane was fixed at 5 cm, which spent the depth precision on the first metres;
+  seen from 70 m, the floor plan and the room floors a few centimetres above it fought for
+  each pixel. The near plane now grows with the camera distance, and the floor layers sit
+  about ten centimetres apart.
+- **A refresh in a site plan stays in it, and coming back to the inventory keeps your place.**
+  Previously the site plan was not in the address, so F5 went back to the inventory; and
+  coming back from a rack, a room plan or a site plan left nothing picked, the site folded
+  and the list scrolled to the top. Now the site plan and its floor are in the address
+  (`?siteplan=…&floor=…`), and on coming back the site (and room) is picked and unfolded,
+  and what was left is scrolled into view once, in the four inventory views, and outlined
+  when it is a rack, or a room outside the detail view (a whole site is never outlined).
+  «Inventory» in the sidebar now leaves an open rack or plan: when the view asked for was
+  already the current one the address did not change, and the entry did nothing. The sidebar
+  now tells the section that a view was picked (`window._ssNavPicked`). The site and room
+  picked in the inventory are in the address too (`?site=…&site_room=…`): after F5 the
+  detail view showed the first site again. The dashboard's `view=board`
+  also reaches the address now: it was set after the address had been written.
+- **A click on a map or plan lands where the drawing is.** Previously, when the pane's
+  proportions differed from the drawing's, the SVG centred the drawing with an empty band
+  and the click-to-drawing conversion ignored it: clicks were off by up to that band on one
+  axis, and panning moved the drawing faster than the cursor on that axis. It hit every map
+  on the shared canvas (room plan, floor plan, rack elevation, site and infrastructure maps).
+  Found when a calibrated plan landed 1.7 m off.
+- **A room's unscaled background plan no longer stretches with the drawing.** Without a
+  stated width it took the width of the drawing frame, margins included, which changed every
+  time a rack moved. It now takes the room's own width (10 m if none), as a floor takes 50 m.
+- **The 3D viewer no longer goes black when the section is redrawn.** Previously it was
+  mounted only once and kept drawing on a canvas that was no longer in the page. It now drops
+  the old context, mounts on the new canvas with the scene rebuilt from the latest data, and
+  keeps the camera when the same thing is being looked at.
+- **The resize cursor of a turned piece in the room plan points the right way.** Previously
+  the handles turned with the piece but their cursors did not: at 90° the width handle showed
+  the vertical arrow and the height handle the horizontal one.
+
 ## [0.0.1+build.135] - 2026-10-04
 
 ### Changed

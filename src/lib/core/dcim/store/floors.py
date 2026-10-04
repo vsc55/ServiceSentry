@@ -32,6 +32,14 @@ _FLOOR = TableSpec(
         # tamaño de lo que haya.
         Column('plan',        'TEXT', nullable=False, default="''"),
         Column('plan_mm',     'INTEGER', nullable=False, default='0'),
+        # Dónde cae la esquina de arriba a la izquierda del plano en la planta, en milímetros:
+        # negativo cuando el dibujo tiene margen antes de empezar el edificio. Lo pone la
+        # calibración, igual que en una sala.
+        Column('plan_x',      'REAL', nullable=False, default='0'),
+        Column('plan_y',      'REAL', nullable=False, default='0'),
+        # Hacia dónde apunta el norte en el plano: grados en el sentido del reloj desde arriba
+        # del dibujo. NULL es «nadie lo ha dicho», que no es «el norte está arriba».
+        Column('north_deg',   'REAL'),
         Column('description', 'TEXT', nullable=False, default="''"),
         # La «zona general» de la planta: una sala que ocupa la planta entera, en (0, 0) y sin
         # girar, donde va lo que se pone en la planta sin estar en ninguna sala —un rack en un

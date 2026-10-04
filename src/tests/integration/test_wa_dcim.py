@@ -2039,6 +2039,96 @@ class TestLaCadenaElectricaAguasArriba:
         assert r.status_code == 403
 
 
+class TestElArmarioDiceDeQueFuenteCuelga:
+    """Enlazar las fuentes —cuadros y SAI de la sección Fuentes— con el armario.
+
+    Cada regleta dice de qué fuente cuelga, y el armario enseña la cadena hasta la acometida y lo
+    que el bypass deja al aire. Un SAI que está dentro del armario se enlaza con su fuente: es UNA
+    cosa descrita dos veces, como una regleta que ocupa U."""
+
+    def _fuentes(self, c, site):
+        red = c.post('/api/v1/dcim/sources', json={'site_uid': site, 'name': 'Acometida',
+                                                    'kind': 'mains'}).get_json()['uid']
+        sai = c.post('/api/v1/dcim/sources', json={'site_uid': site, 'name': 'SAI 1', 'kind': 'ups',
+                                                    'upstream_uid': red}).get_json()['uid']
+        return red, sai
+
+    def test_la_regleta_solo_cuelga_de_una_fuente_que_existe_y_es_de_su_sede(self, client, fleet):
+        _login(client)
+        _, sai = self._fuentes(client, fleet['site'])
+        otra = client.post('/api/v1/dcim/sites', json={'name': 'DC Sur'}).get_json()['uid']
+        ajena = client.post('/api/v1/dcim/sources', json={'site_uid': otra, 'name': 'SAI Sur',
+                                                          'kind': 'ups'}).get_json()['uid']
+        nueva = lambda src: client.post('/api/v1/dcim/pdus', json={
+            'rack_uid': fleet['rack'], 'feed': 'a', 'name': 'PDU', 'source_uid': src})
+        assert nueva('no-existe').status_code == 400
+        assert nueva(ajena).status_code == 400
+        pdu = nueva(sai).get_json()['uid']
+        assert client.put(f'/api/v1/dcim/pdus/{pdu}', json={'source_uid': ajena}).status_code == 400
+        assert client.put(f'/api/v1/dcim/pdus/{pdu}', json={'source_uid': ''}).status_code == 200
+
+    def test_el_armario_trae_la_cadena_de_cada_regleta_y_lo_que_deja_el_bypass(self, client, fleet):
+        _login(client)
+        red, sai = self._fuentes(client, fleet['site'])
+        pdu = client.post('/api/v1/dcim/pdus', json={'rack_uid': fleet['rack'], 'feed': 'a',
+                                                      'name': 'PDU-A', 'source_uid': sai}).get_json()['uid']
+        d = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}/power').get_json()
+        fila = next(p for p in d['pdus'] if p['uid'] == pdu)
+        assert fila['source_uid'] == sai
+        assert [n['name'] for n in fila['path']['now']] == ['SAI 1', 'Acometida']
+        assert {f['uid'] for f in d['sources']} == {red, sai}
+        assert d['source_warnings'] == []
+        client.put(f'/api/v1/dcim/sources/{sai}', json={'bypass': 1})
+        d = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}/power').get_json()
+        assert [w['kind'] for w in d['source_warnings']] == ['on_bypass']
+
+    def test_un_sai_del_armario_se_enlaza_con_su_fuente_una_sola_vez(self, client, fleet):
+        _login(client)
+        ups = client.post('/api/v1/dcim/items', json={
+            'rack_uid': fleet['rack'], 'label': 'Back-UPS', 'role': 'ups',
+            'placement': 'near'}).get_json()['uid']
+        d = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}/power').get_json()
+        assert [(u['uid'], u['source']) for u in d['ups_items']] == [(ups, '')]
+        src = client.post('/api/v1/dcim/sources', json={
+            'site_uid': fleet['site'], 'name': 'Back-UPS', 'kind': 'ups', 'item_uid': ups}).get_json()['uid']
+        d = client.get(f'/api/v1/dcim/racks/{fleet["rack"]}/power').get_json()
+        assert d['ups_items'][0]['source'] == src
+        otra = client.post('/api/v1/dcim/sources', json={
+            'site_uid': fleet['site'], 'name': 'Otra', 'kind': 'ups', 'item_uid': ups})
+        assert otra.status_code == 400, 'un equipo es UNA fuente, no dos'
+
+    def test_un_equipo_de_otra_sede_no_puede_ser_la_fuente(self, client, fleet):
+        _login(client)
+        ups = client.post('/api/v1/dcim/items', json={
+            'rack_uid': fleet['rack'], 'label': 'UPS', 'role': 'ups', 'placement': 'near'}).get_json()['uid']
+        otra = client.post('/api/v1/dcim/sites', json={'name': 'DC Sur'}).get_json()['uid']
+        r = client.post('/api/v1/dcim/sources', json={'site_uid': otra, 'name': 'X', 'kind': 'ups',
+                                                       'item_uid': ups})
+        assert r.status_code == 400
+
+    def test_las_fuentes_dicen_que_cuelga_de_cada_una_y_en_que_armario(self, client, fleet):
+        _login(client)
+        _, sai = self._fuentes(client, fleet['site'])
+        pdu = client.post('/api/v1/dcim/pdus', json={'rack_uid': fleet['rack'], 'feed': 'b',
+                                                      'name': 'PDU-B', 'source_uid': sai}).get_json()['uid']
+        d = client.get(f'/api/v1/dcim/sources?site={fleet["site"]}').get_json()
+        assert d['hangs'][sai] == [{'pdu': pdu, 'name': 'PDU-B', 'feed': 'b',
+                                    'rack': fleet['rack'], 'rack_name': 'R3'}]
+
+    def test_el_sai_de_otra_empresa_no_se_nombra(self, admin, fleet):
+        """En un armario compartido, el SAI de la filial no sale con su nombre a quien no la ve."""
+        root = admin.app.test_client()
+        _login(root)
+        ups = root.post('/api/v1/dcim/items', json={
+            'rack_uid': fleet['rack'], 'label': 'UPS-FILIAL', 'role': 'ups',
+            'placement': 'near'}).get_json()['uid']
+        root.post('/api/v1/orgs/owner', json={'scope': 'item', 'uid': ups, 'org_uid': fleet['b']})
+        c = _as(admin, 'solo-it', ['dcim_view', f'org.{fleet["it"]}.view'])
+        r = c.get(f'/api/v1/dcim/racks/{fleet["rack"]}/power')
+        assert r.status_code == 200, 'sin poder leer el armario la prueba no prueba nada'
+        assert 'UPS-FILIAL' not in r.data.decode()
+
+
 class TestLoQueLlevaDentroUnEquipo:
     """Los componentes cuelgan de un equipo, así que el permiso es el del equipo — y eso importa
     en un armario compartido: los discos del servidor de la filial no son cosa del departamento,
@@ -5887,3 +5977,181 @@ class TestElNumeroDeSerieQueDiceElDispositivo:
         _login(client)
         r = client.get('/api/v1/dcim/said?device=no-existe')
         assert r.status_code == 404
+
+
+class TestLoQueHayEnLaSedeDeUnaVez:
+    """El plano de la sede y el edificio en 3D lo dibujan todo a la vez. Sala a sala eran dos
+    peticiones por sala y una vuelta al árbol de estados por cada una; ahora es una respuesta
+    por sede, filtrada como las de siempre."""
+
+    def _colocada(self, client, fleet):
+        p = client.post('/api/v1/dcim/floors', json={'site_uid': fleet['site'], 'name': 'Baja',
+                                                     'level': 0}).get_json()['uid']
+        client.put(f'/api/v1/dcim/rooms/{fleet["room"]}', json={'floor_uid': p})
+        client.post('/api/v1/dcim/features', json={'room_uid': fleet['room'], 'kind': 'door'})
+        return p
+
+    def test_racks_y_piezas_por_sala(self, client, fleet):
+        _login(client)
+        self._colocada(client, fleet)
+        d = client.get(f'/api/v1/dcim/sites/{fleet["site"]}/contents').get_json()
+        sala = d['rooms'][fleet['room']]
+        assert [r['name'] for r in sala['racks']] == ['R3']
+        assert 'roll' in sala['racks'][0], 'sin estado, el 3D no colorea el frente del rack'
+        assert [f['kind'] for f in sala['features']] == ['door']
+        assert 'door' in d['kinds']
+
+    def test_una_sala_sin_planta_no_viene(self, client, fleet):
+        """Lo que no está en ninguna planta no se dibuja en ninguna."""
+        _login(client)
+        d = client.get(f'/api/v1/dcim/sites/{fleet["site"]}/contents').get_json()
+        assert d['rooms'] == {}
+
+    def test_dice_lo_mismo_que_la_lista_de_racks_de_cada_sala(self, admin, client, fleet):
+        """El mismo filtro que `/racks?room=`: quien solo ve su parte no ve aquí más."""
+        _login(client)
+        self._colocada(client, fleet)
+        c = _as(admin, 'filial-3d', ['dcim_view'])
+        sala = c.get(f'/api/v1/dcim/sites/{fleet["site"]}/contents')
+        sede = c.get(f'/api/v1/dcim/sites/{fleet["site"]}/floors')
+        assert sala.status_code == sede.status_code
+        if sala.status_code == 200:
+            una = c.get(f'/api/v1/dcim/racks?room={fleet["room"]}').get_json()['racks']
+            assert ([r['uid'] for r in sala.get_json()['rooms'].get(fleet['room'], {}).get('racks', [])]
+                    == [r['uid'] for r in una])
+
+    def test_una_sede_que_no_existe(self, client):
+        _login(client)
+        assert client.get('/api/v1/dcim/sites/no-existe/contents').status_code == 404
+
+
+class TestDondeCaeElPlanoDeFondo:
+    """El plano de fondo se calibra: además de su ancho, dónde cae su esquina. Negativo cuando
+    el dibujo tiene margen antes de empezar la sala, que es lo normal en un plano de verdad."""
+
+    def test_una_sala_guarda_donde_cae_su_plano(self, client, fleet):
+        _login(client)
+        r = client.put(f'/api/v1/dcim/rooms/{fleet["room"]}',
+                       json={'plan_mm': 20000, 'plan_x': -1500, 'plan_y': -2000})
+        assert r.status_code == 200, r.get_json()
+        sites = client.get('/api/v1/dcim/sites').get_json()['sites']
+        sala = [x for s in sites for x in s['rooms'] if x['uid'] == fleet['room']][0]
+        assert (sala['plan_x'], sala['plan_y']) == (-1500, -2000)
+
+    def test_una_planta_tambien(self, client, fleet):
+        _login(client)
+        p = client.post('/api/v1/dcim/floors', json={'site_uid': fleet['site'], 'name': 'Baja',
+                                                     'level': 0}).get_json()['uid']
+        assert client.put(f'/api/v1/dcim/floors/{p}',
+                          json={'plan_x': -300.5, 'plan_y': 120}).status_code == 200
+        f = client.get(f'/api/v1/dcim/sites/{fleet["site"]}/floors').get_json()['floors'][0]
+        assert (f['plan_x'], f['plan_y']) == (-300.5, 120)
+
+    def test_lo_que_no_es_un_numero_no_entra(self, client, fleet):
+        _login(client)
+        r = client.put(f'/api/v1/dcim/rooms/{fleet["room"]}', json={'plan_x': 'nan'})
+        assert r.status_code == 400
+
+    def test_el_norte_se_guarda_y_se_borra(self, client, fleet):
+        """Vacío es «nadie lo ha dicho» (NULL), no 0: 0 es «el norte está arriba»."""
+        _login(client)
+        assert client.put(f'/api/v1/dcim/rooms/{fleet["room"]}', json={'north_deg': 37}).status_code == 200
+        sala = lambda: [x for s in client.get('/api/v1/dcim/sites').get_json()['sites']  # noqa: E731
+                        for x in s['rooms'] if x['uid'] == fleet['room']][0]
+        assert sala()['north_deg'] == 37
+        assert client.put(f'/api/v1/dcim/rooms/{fleet["room"]}', json={'north_deg': ''}).status_code == 200
+        assert sala()['north_deg'] is None
+
+
+class TestLasEstanteriasDeUnArmario:
+    """Se pidió: un armario con su número de estanterías, y el material de cada una."""
+
+    def _armario(self, client, fleet, **extra):
+        r = client.post('/api/v1/dcim/features', json=dict({'room_uid': fleet['room'],
+                                                            'kind': 'cabinet', 'label': 'A1'}, **extra))
+        assert r.status_code == 200, r.get_json()
+        return r.get_json()['uid']
+
+    def _pon(self, client, cab, shelf, label='Latiguillos', qty=10):
+        return client.post('/api/v1/dcim/shelf-items', json={'feature_uid': cab, 'shelf': shelf,
+                                                             'label': label, 'qty': qty})
+
+    def test_nace_con_una_estanteria(self, client, fleet):
+        _login(client)
+        cab = self._armario(client, fleet)
+        d = client.get(f'/api/v1/dcim/features/{cab}/shelf').get_json()
+        assert d == {'shelves': 1, 'items': []}
+
+    def test_material_por_estanteria_ordenado(self, client, fleet):
+        _login(client)
+        cab = self._armario(client, fleet, shelves=3)
+        assert self._pon(client, cab, 3, 'Tornillos').status_code == 200
+        assert self._pon(client, cab, 1, 'SFP de repuesto', 4).status_code == 200
+        items = client.get(f'/api/v1/dcim/features/{cab}/shelf').get_json()['items']
+        assert [(i['shelf'], i['label'], i['qty']) for i in items] == [(1, 'SFP de repuesto', 4),
+                                                                       (3, 'Tornillos', 10)]
+
+    def test_no_en_una_estanteria_que_no_tiene(self, client, fleet):
+        _login(client)
+        cab = self._armario(client, fleet, shelves=2)
+        assert self._pon(client, cab, 3).status_code == 400
+        assert self._pon(client, cab, 0).status_code == 400
+
+    def test_sin_nombre_no(self, client, fleet):
+        _login(client)
+        cab = self._armario(client, fleet)
+        assert self._pon(client, cab, 1, '  ').status_code == 400
+
+    def test_solo_los_armarios(self, client, fleet):
+        _login(client)
+        puerta = client.post('/api/v1/dcim/features', json={'room_uid': fleet['room'],
+                                                            'kind': 'door'}).get_json()['uid']
+        assert client.get(f'/api/v1/dcim/features/{puerta}/shelf').status_code == 400
+        assert self._pon(client, puerta, 1).status_code == 400
+
+    def test_quitar_estanterias_con_material_se_niega(self, client, fleet):
+        _login(client)
+        cab = self._armario(client, fleet, shelves=4)
+        self._pon(client, cab, 4)
+        r = client.put(f'/api/v1/dcim/features/{cab}', json={'shelves': 2})
+        assert r.status_code == 400 and '4' in r.get_json()['error']
+        assert client.put(f'/api/v1/dcim/features/{cab}', json={'shelves': 5}).status_code == 200
+
+    def test_editar_y_quitar_material(self, client, fleet):
+        _login(client)
+        cab = self._armario(client, fleet, shelves=2)
+        uid = self._pon(client, cab, 1).get_json()['uid']
+        assert client.put(f'/api/v1/dcim/shelf-items/{uid}', json={'shelf': 2, 'qty': 3}).status_code == 200
+        item = client.get(f'/api/v1/dcim/features/{cab}/shelf').get_json()['items'][0]
+        assert (item['shelf'], item['qty']) == (2, 3)
+        assert client.delete(f'/api/v1/dcim/shelf-items/{uid}').status_code == 200
+        assert client.get(f'/api/v1/dcim/features/{cab}/shelf').get_json()['items'] == []
+
+    def test_borrar_el_armario_se_lleva_su_material(self, client, fleet):
+        _login(client)
+        cab = self._armario(client, fleet)
+        uid = self._pon(client, cab, 1).get_json()['uid']
+        client.delete(f'/api/v1/dcim/features/{cab}')
+        assert client.put(f'/api/v1/dcim/shelf-items/{uid}', json={'qty': 1}).status_code == 404
+
+    def test_importar_no_borra_un_armario_con_material(self, client, fleet):
+        """El material no viaja en el fichero: borrar el armario para crear otro lo perdería."""
+        _login(client)
+        cab = self._armario(client, fleet, shelves=2)
+        self._pon(client, cab, 2)
+        r = client.post(f'/api/v1/dcim/rooms/{fleet["room"]}/import', json={'features': [
+            {'kind': 'cabinet', 'label': 'A1', 'pos_x': 3000, 'pos_y': 1000, 'shelves': 3},
+            {'kind': 'door', 'pos_x': 0, 'pos_y': 0}]})
+        assert r.status_code == 200, r.get_json()
+        d = client.get(f'/api/v1/dcim/features/{cab}/shelf').get_json()
+        assert d['shelves'] == 3 and len(d['items']) == 1
+        piezas = client.get(f'/api/v1/dcim/rooms/{fleet["room"]}/features').get_json()['features']
+        assert sorted(p['kind'] for p in piezas) == ['cabinet', 'door']
+
+    def test_quien_solo_mira_no_toca_el_material(self, admin, client, fleet):
+        _login(client)
+        cab = self._armario(client, fleet)
+        c = _as(admin, 'mira-armario', ['dcim_view', 'orgs_all_view'])
+        assert c.get(f'/api/v1/dcim/features/{cab}/shelf').status_code == 200
+        assert c.post('/api/v1/dcim/shelf-items', json={'feature_uid': cab, 'shelf': 1,
+                                                        'label': 'x'}).status_code == 403

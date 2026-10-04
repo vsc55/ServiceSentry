@@ -175,7 +175,99 @@ def register(app, wa, C):
         out = dcim_svc.power_path(fuentes, pdus)
         out['sources'] = fuentes
         out['kinds'] = list(SOURCE_KINDS)
+        # Lo que cuelga de cada una, DIRECTAMENTE: la regleta y su armario, para poder ir a él.
+        # Sólo de las regletas que esta persona puede ver — las mismas que la cadena de arriba.
+        racks = {}
+        cuelgan: dict = {}
+        for pdu in pdus:
+            src = str(pdu.get('source_uid') or '')
+            if not src:
+                continue
+            ruid = str(pdu.get('rack_uid') or '')
+            if ruid not in racks:
+                racks[ruid] = store.racks.get(ruid) or {}
+            cuelgan.setdefault(src, []).append({
+                'pdu': pdu['uid'], 'name': str(pdu.get('name') or ''),
+                'feed': str(pdu.get('feed') or 'none'),
+                'rack': ruid, 'rack_name': str(racks[ruid].get('name') or ruid)})
+        out['hangs'] = cuelgan
+        # Y los SAI que hay dentro de esos armarios, para poder decir cuál ES cada fuente.
+        out['ups_items'] = _ups_items(store, racks.keys() | _visible_racks(store, site))
         return jsonify(out)
+
+    def _visible_racks(store, site):
+        """The racks of *site* (or of all sites) this caller may see."""
+        said, allowed = store.owners_map(), C.seen()
+        reach = dcim_svc.reachable(store, said, allowed)
+        out = set()
+        for sitio in store.sites.list():
+            if site and sitio['uid'] != site:
+                continue
+            for sala in store.rooms_of(sitio['uid']):
+                for rack in store.racks_of(sala['uid']):
+                    if dcim_owners.may_see(C.owner_of(store, said, 'rack', rack['uid']), allowed) \
+                            or dcim_svc.llega(reach, 'rack', rack['uid']):
+                        out.add(rack['uid'])
+        return out
+
+    def _ups_items(store, rack_uids):
+        """The rack items that are a UPS (role `ups`), with the rack they are in and the source
+        that says it is them — `''` when none does yet."""
+        ligado = {str(s.get('item_uid') or ''): s['uid'] for s in store.sources.list()
+                  if s.get('item_uid')}
+        said, allowed = store.owners_map(), C.seen()
+        out = []
+        for ruid in sorted(rack_uids):
+            rack = store.racks.get(ruid) or {}
+            for it in store.items_of(ruid):
+                if str(it.get('role') or '') != 'ups':
+                    continue
+                # Another company's UPS in a shared rack is not named to this caller: the same
+                # rule as every other item of theirs.
+                if not dcim_owners.may_see(C.owner_of(store, said, 'item', it['uid']), allowed):
+                    continue
+                out.append({'uid': it['uid'], 'label': str(it.get('label') or ''),
+                            'rack': ruid, 'rack_name': str(rack.get('name') or ruid),
+                            'source': ligado.get(it['uid'], '')})
+        return out
+
+    def _site_of_rack(store, rack_uid):
+        rack = store.racks.get(str(rack_uid or '')) or {}
+        room = store.rooms.get(str(rack.get('room_uid') or '')) or {}
+        return str(room.get('site_uid') or '')
+
+    def _source_for_rack_bad(store, rack_uid, source_uid):
+        """Why a strip of *rack_uid* cannot hang off *source_uid*, or `''` if it can.
+
+        The source must exist, and be of the rack's site — or of none, which is a source written
+        down before deciding where it is. A strip hanging off another building's panel is a typo,
+        and the chain it draws would cross a street."""
+        src = str(source_uid or '')
+        if not src:
+            return ''
+        fila = store.sources.get(src)
+        if not fila:
+            return 'dcim_not_found'
+        sede = str(fila.get('site_uid') or '')
+        if sede and sede != _site_of_rack(store, rack_uid):
+            return 'dcim_source_other_site'
+        return ''
+
+    def _source_item_bad(store, uid, item_uid, site_uid):
+        """Why a source cannot BE the rack item *item_uid*, or `''` if it can: the item must
+        exist, be in a rack of the source's site, and not be another source already."""
+        item = str(item_uid or '')
+        if not item:
+            return ''
+        fila = store.items.get(item)
+        if not fila:
+            return 'dcim_not_found'
+        if site_uid and _site_of_rack(store, fila.get('rack_uid')) != site_uid:
+            return 'dcim_source_other_site'
+        for otra in store.sources.list('item_uid = ?', (item,)):
+            if str(otra.get('uid') or '') != str(uid or ''):
+                return 'dcim_source_item_taken'
+        return ''
 
     def _upstream_bad(store, uid, nuevo):
         """Por qué NO puede colgar de *nuevo*, o `''` si puede.
@@ -238,6 +330,9 @@ def register(app, wa, C):
         malo = _upstream_bad(store, '', data.get('upstream_uid'))
         if malo:
             return jsonify({'error': malo}), 400
+        malo = _source_item_bad(store, '', data.get('item_uid'), sede)
+        if malo:
+            return jsonify({'error': wa._t(malo)}), 400
         return jsonify({'uid': store.sources.create(data, actor=C.actor())})
 
     @app.route('/api/v1/dcim/sources/<uid>', methods=['PUT'])
@@ -258,6 +353,10 @@ def register(app, wa, C):
             malo = _upstream_bad(store, uid, data.get('upstream_uid'))
             if malo:
                 return jsonify({'error': malo}), 400
+        if 'item_uid' in data:
+            malo = _source_item_bad(store, uid, data.get('item_uid'), str(row.get('site_uid') or ''))
+            if malo:
+                return jsonify({'error': wa._t(malo)}), 400
         store.sources.update(uid, data, actor=C.actor())
         # Echar o quitar un bypass no es editar un campo: es una maniobra eléctrica, y quién la
         # hizo y cuándo es lo primero que se pregunta cuando algo se apaga.
@@ -389,6 +488,24 @@ def register(app, wa, C):
         # Y de qué par de conectores puede ser un cable de corriente, por lo mismo que los
         # colores: la pantalla no lleva una segunda copia de qué es un C13 a C14.
         out['categories'] = list(FEED_CATEGORIES)
+        # Y de dónde viene la corriente de cada regleta: su fuente, la cadena hasta la acometida
+        # tal como está AHORA (con los bypass echados) y lo que eso deja al aire. La misma
+        # cuenta que la sección de fuentes, sobre las regletas de este armario.
+        sede = _site_of_rack(store, uid)
+        fuentes = [f for f in store.sources.list()
+                   if str(f.get('site_uid') or '') in (sede, '')]
+        camino = dcim_svc.power_path(fuentes, pdus)
+        por_uid = {str(p['uid']): p for p in pdus}
+        for fila in out.get('pdus') or []:
+            fila['source_uid'] = str((por_uid.get(str(fila['uid'])) or {}).get('source_uid') or '')
+            fila['path'] = (camino['paths'] or {}).get(str(fila['uid'])) or {}
+        out['source_warnings'] = camino['warnings']
+        out['sources'] = [{'uid': f['uid'], 'name': str(f.get('name') or ''),
+                           'kind': str(f.get('kind') or ''), 'bypass': int(f.get('bypass') or 0),
+                           'item_uid': str(f.get('item_uid') or '')}
+                          for f in sorted(fuentes, key=lambda f: str(f.get('name') or ''))]
+        out['site_uid'] = sede
+        out['ups_items'] = _ups_items(store, {uid})
         return jsonify(out)
 
     def _power_crud(kind, part, dueno, guard=None):
@@ -419,6 +536,10 @@ def register(app, wa, C):
                 return _bad_number(wa, malo)
             if kind == 'pdus' and str(data.get('feed') or 'a') not in FEEDS:
                 return jsonify({'error': wa._t('dcim_feed_unknown')}), 400
+            if kind == 'pdus':
+                malo = _source_for_rack_bad(store, data.get('rack_uid'), data.get('source_uid'))
+                if malo:
+                    return jsonify({'error': wa._t(malo)}), 400
             # Y un cable de un equipo a sí mismo sólo vale como PUENTE: de una boca a otra. La
             # regla vivía sólo en el navegador, que es lo mismo que no vivir en ninguna parte —
             # la escritura entra por la API con o sin pantalla delante.
@@ -462,6 +583,10 @@ def register(app, wa, C):
                 return _bad_number(wa, malo)
             if 'feed' in data and str(data['feed']) not in FEEDS:
                 return jsonify({'error': wa._t('dcim_feed_unknown')}), 400
+            if kind == 'pdus' and 'source_uid' in data:
+                malo = _source_for_rack_bad(store, row.get('rack_uid'), data.get('source_uid'))
+                if malo:
+                    return jsonify({'error': wa._t(malo)}), 400
             # Con la regleta de la FILA y no la del cuerpo: `pdu_uid` no se puede cambiar por
             # aquí —está en la lista de lo que se quita—, así que comprobar la del cuerpo sería
             # comprobar una toma de una regleta a la que el cable no se va a mover.

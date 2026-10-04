@@ -52,6 +52,12 @@ const _DCIM_KIND = {
         // numbers could disagree and stretch the drawing, which is lying about distances in
         // the one place somebody is going to measure them. 0 = nobody has scaled it.
         {name: 'plan_mm', label: 'dcim_plan_mm', type: 'number', w: '10rem'},
+        // Where the plan's top-left corner lands in the room. Normally set by calibrating in the
+        // plan, and here to be corrected by hand.
+        {name: 'plan_x', label: 'dcim_plan_x', type: 'number', w: '8rem'},
+        {name: 'plan_y', label: 'dcim_plan_y', type: 'number', w: '8rem'},
+        // Where north points on the plan, clockwise from the top; empty = nobody has said.
+        {name: 'north_deg', label: 'dcim_north_deg', type: 'number', w: '8rem'},
         {name: 'description', label: 'dcim_description', w: '18rem'},
     ]},
     rack: {url: 'racks', parent: 'room_uid', title: 'dcim_rack', fields: [

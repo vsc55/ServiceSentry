@@ -1,0 +1,231 @@
+{# ================================================================
+   DCIM — una planta, o el edificio entero, en 3D.
+
+   El mismo visor que la sala (`_room3d.html`) con otra escena: cada sala de la planta levantada
+   con lo que tiene dentro, girada y en su sitio, sobre el plano del arquitecto pegado al suelo.
+   Y el edificio: las plantas apiladas por su nivel, la que se mira maciza y las de encima
+   tenues, que desde arriba taparían justo esa.
+
+   Lo que NO hay aquí es otra forma de levantar una sala: la de cada una sale de
+   `_dc3dRoomBoxes`, la misma cuenta que su propio visor. Dos cuentas de lo mismo serían una sala
+   que mide distinto según desde dónde se la mire.
+   ================================================================ #}
+
+//: Qué enseña el visor de la sede: `'floor'`, la planta abierta, o `'building'`, todas. Se
+//: recuerda en el navegador: es una preferencia de quien mira, no un hecho del edificio.
+let _ds3Mode = (() => {
+    try { return localStorage.getItem('ss.ds3.mode') === 'building' ? 'building' : 'floor'; }
+    catch (_) { return 'floor'; }
+})();
+//: Las plantas separadas, para ver lo que hay en cada una sin que la de encima lo tape.
+let _ds3Explode = false;
+//: Los planos de fondo de las OTRAS plantas, para el edificio: `{uid de planta: {data, ratio}}`,
+//: o `null` la que no tiene. El de la planta abierta ya lo tiene `_dcsPlan.image`.
+let _ds3Images = {};
+//: La última sala señalada, `{uid, t}`: el doble clic se reconoce aquí, como en el plano.
+let _ds3LastPick = null;
+
+//: De suelo a suelo, en metros: los tres de una sala más el forjado y el falso techo. Una
+//: planta no dice cuánto mide de alto, y para apilarlas basta con que no se pisen.
+const _DS3_STOREY = 4.0;
+//: Lo mismo con las plantas separadas: lo bastante para mirar entre dos.
+const _DS3_APART = 10.0;
+
+/** Abrir o cerrar el visor en el plano de la sede. */
+function _dcsToggle3d() {
+    if (_dc3d) { _dc3dStop(); return renderDcim(); }
+    _dc3d = {on: true, build: _ds3Scene, keyOf: _ds3Key, onPick: _ds3Pick};
+    renderDcim();
+    if (_ds3Mode === 'building') _ds3LoadImages();
+}
+
+/** Qué se está mirando, para saber si la cámara se conserva al repintar: lo mismo, sí; otra
+ *  planta u otro modo, vuelve a su vista de partida. Separar las plantas no la cambia. */
+function _ds3Key() {
+    return _dcsPlan ? `${_ds3Mode}:${_dcsPlan.site.uid}:${_dcsPlan.floor}` : '';
+}
+
+function _ds3SetMode(m) {
+    _ds3Mode = m === 'building' ? 'building' : 'floor';
+    try { localStorage.setItem('ss.ds3.mode', _ds3Mode); } catch (_) { /* sin almacén */ }
+    renderDcim();
+    if (_ds3Mode === 'building') _ds3LoadImages();
+}
+
+function _ds3ToggleExplode() {
+    _ds3Explode = !_ds3Explode;
+    renderDcim();
+}
+
+/** Los planos de las otras plantas, que el plano de la sede no ha necesitado hasta ahora. Uno
+ *  por planta y una sola vez; al llegar, la escena se rehace sin mover la cámara. */
+async function _ds3LoadImages() {
+    if (!_dcsPlan) return;
+    const faltan = _dcsPlan.floors.filter(f => f.plan && f.uid !== _dcsPlan.floor
+                                              && !(f.uid in _ds3Images));
+    if (!faltan.length) return;
+    const leidas = await Promise.all(faltan.map(f => _dcsFetchImage(f)));
+    faltan.forEach((f, i) => { _ds3Images[f.uid] = leidas[i]; });
+    _dc3dRebuild();
+}
+
+function _ds3Img(floor) {
+    if (!_dcsPlan || !floor) return null;
+    return floor.uid === _dcsPlan.floor ? _dcsPlan.image : (_ds3Images[floor.uid] || null);
+}
+
+/** Lo que hay que pintar: la planta abierta, o el edificio. */
+function _ds3Scene() {
+    const vacia = {cajas: [], planos: [], salas: [], W: 12, D: 8, H: 3};
+    if (!_dcsPlan) return vacia;
+    const actual = _dcsFloor();
+    if (_ds3Mode !== 'building') return actual ? _ds3FloorScene(actual, _ds3Img(actual)) : vacia;
+    return _ds3BuildingScene(actual);
+}
+
+/** Una planta, en metros y con su suelo en y = 0.
+ *
+ *  De abajo arriba: la losa de la planta, el plano del arquitecto encima de ella, el suelo de
+ *  cada sala encima del plano —que lo tapa donde hay sala— y lo que hay en cada una. A una
+ *  decena de centímetros una de otra: a la misma altura, o a tres centímetros, el suelo de la
+ *  sala y el plano pelean por cada píxel y se cruzan a franjas al mover la cámara desde lejos. */
+function _ds3FloorScene(floor, img) {
+    const M = 0.001;
+    const kinds = _dcsPlan.kinds || {};
+    const content = _dcsPlan.content || {};
+    const area = floor.area_uid || '';
+    const salasAqui = _dcsRooms().filter(r => r.floor_uid === floor.uid);
+    // Dónde y cuánto: lo mismo que el plano de la planta, para que las dos vistas cuadren.
+    const b = _dcPlanBox(floor, img, _DCS_PLAN_MM);
+    let maxX = 20000, maxY = 15000;
+    if (img) {
+        maxX = Math.max(maxX, b.x + b.w);
+        maxY = Math.max(maxY, b.y + b.h);
+    }
+    for (const r of salasAqui) {
+        if (r.uid === area) continue;
+        const s = _dcsSize(r);
+        maxX = Math.max(maxX, (Number(r.pos_x) || 0) + s.w);
+        maxY = Math.max(maxY, (Number(r.pos_y) || 0) + s.d);
+    }
+    const W = maxX * M, D = maxY * M, pad = 1;
+    const cajas = [{color: _DC3_COLOR.ground, lee: null,
+                    m: _dc3model(-pad, -0.4, -pad, W + pad * 2, 0.15, D + pad * 2, 0)}];
+    const planos = [];
+    if (img && img.data && _dcPlanBg) {
+        // Sin escala dicha, más tenue: es un dibujo de referencia estirado a un tamaño
+        // supuesto, igual que en el plano de la planta.
+        planos.push({data: img.data, alpha: b.scaled ? 0.95 : 0.6,
+                     m: _dc3model(b.x * M, -0.12, b.y * M, b.w * M, 1, b.h * M, 0)});
+    }
+    const salas = [], rotulos = [];
+    for (const r of salasAqui) {
+        const c = content[r.uid] || {racks: [], features: []};
+        if (r.uid === area) {
+            // La zona general es la planta misma: en (0, 0), sin girar, sin muros ni suelo.
+            const sub = _dc3dRoomBoxes({}, c.racks, c.features, kinds,
+                                       {walls: false, floor: false, tiles: false});
+            cajas.push(...sub.cajas);
+            continue;
+        }
+        const s = _dcsSize(r);
+        const sub = _dc3dRoomBoxes(Object.assign({}, r, {width_mm: s.w, depth_mm: s.d}),
+                                   c.racks, c.features, kinds,
+                                   {tiles: false, floorY: -0.03, ghost: !s.real});
+        const x = (Number(r.pos_x) || 0) * M, z = (Number(r.pos_y) || 0) * M;
+        const rot = Number(r.rotation) || 0;
+        cajas.push(..._dc3dPlace(sub, x, 0, z, rot, 1).cajas);
+        salas.push({uid: r.uid, name: r.name || '', y: 0,
+                    frame: {x, z, W: sub.W, D: sub.D, rot}});
+        // El nombre de la sala, en su centro y por encima de sus muros: el giro de la sala no
+        // mueve su centro.
+        if (r.name) rotulos.push({name: r.name, p: [x + sub.W / 2, _DC3_ROOM_H * M + 0.3, z + sub.D / 2]});
+    }
+    // La cámara, más cerca que en una sala: con la de la sala, una planta de 30 m quedaba en una
+    // franja del centro y el 90 % de la pantalla era fondo.
+    return {cajas, planos, salas, rotulos, W, D, H: _DC3_ROOM_H * M, X0: -pad, Z0: -pad,
+            radio: Math.max(W, D) * 0.85, Rmax: Math.max(W, D) * 3};
+}
+
+/** El edificio: cada planta a la altura de su nivel —el sótano por debajo de la calle—, la
+ *  que se mira maciza y las de encima tenues. Se señalan solo las salas de la que se mira: un
+ *  clic que atravesara su suelo para abrir una sala de abajo abriría algo que no se ve. */
+function _ds3BuildingScene(actual) {
+    const plantas = _dcsPlan.floors.slice()
+        .sort((a, b) => (Number(a.level) || 0) - (Number(b.level) || 0));
+    const nivelActual = Number((actual || {}).level) || 0;
+    const paso = _ds3Explode ? _DS3_APART : _DS3_STOREY;
+    const todo = {cajas: [], planos: [], salas: [], rotulos: []};
+    let W = 12, D = 8, Y0 = 0, arriba = 3, mira = null;
+    for (const f of plantas) {
+        const nivel = Number(f.level) || 0, Y = nivel * paso;
+        const e = _ds3FloorScene(f, _ds3Img(f));
+        const tenue = nivel > nivelActual;
+        // 0,25: con menos, la planta de encima apenas se distinguía del fondo.
+        const puesta = _dc3dPlace(e, 0, Y, 0, 0, tenue ? 0.25 : 1);
+        todo.cajas.push(...puesta.cajas);
+        todo.planos.push(...puesta.planos);
+        todo.rotulos.push(...puesta.rotulos);
+        if (actual && f.uid === actual.uid) {
+            todo.salas.push(...e.salas.map(s => Object.assign({}, s, {y: Y})));
+            mira = [e.W / 2, Y + 1, e.D / 2];
+        }
+        W = Math.max(W, e.W);
+        D = Math.max(D, e.D);
+        Y0 = Math.min(Y0, Y - 0.4);
+        arriba = Math.max(arriba, Y + e.H);
+    }
+    return Object.assign(todo, {W, D, H: arriba, Y0, X0: -1, Z0: -1, mira,
+                                radio: Math.max(W, D, arriba - Y0) * 0.95,
+                                Rmax: Math.max(W, D, arriba) * 3});
+}
+
+/** Lo señalado con un clic: el nombre de la sala bajo el ratón, y con un segundo clic, abrirla
+ *  —el mismo doble clic que en el plano de la planta—. El rayo se corta con el suelo de la
+ *  planta y el punto se lleva a las coordenadas de cada sala, giro incluido. */
+function _ds3Pick(rayo) {
+    const e = (_dc3d || {}).escena || {};
+    let mejor = null;
+    for (const s of (e.salas || [])) {
+        if (Math.abs(rayo.d[1]) < 1e-6) continue;
+        const t0 = (s.y - rayo.o[1]) / rayo.d[1];
+        if (t0 <= 0 || (mejor && t0 >= mejor.t)) continue;
+        const px = rayo.o[0] + rayo.d[0] * t0, pz = rayo.o[2] + rayo.d[2] * t0;
+        const f = s.frame, a = f.rot * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a);
+        const dx = px - (f.x + f.W / 2), dz = pz - (f.z + f.D / 2);
+        const lx = dx * c + dz * sn + f.W / 2, lz = -dx * sn + dz * c + f.D / 2;
+        if (lx >= 0 && lx <= f.W && lz >= 0 && lz <= f.D) mejor = {t: t0, sala: s};
+    }
+    const el = document.getElementById('dc3d-read');
+    const ahora = Date.now();
+    if (!mejor) {
+        _ds3LastPick = null;
+        if (el) el.textContent = t('dcim_3d_site_hint');
+        return null;
+    }
+    const uid = mejor.sala.uid;
+    if (_ds3LastPick && _ds3LastPick.uid === uid && ahora - _ds3LastPick.t < 450) {
+        _ds3LastPick = null;
+        _dcimOpenPlan(uid);
+        return uid;
+    }
+    _ds3LastPick = {uid, t: ahora};
+    if (el) el.textContent = tf('dcim_3d_room_pick', mejor.sala.name || uid);
+    return uid;
+}
+
+/** Encima del visor: planta o edificio, y en el edificio, separar las plantas. */
+function _ds3Bar() {
+    const modo = (m, icono, texto) => `<button type="button"
+        class="btn btn-sm ${_ds3Mode === m ? 'btn-warning' : 'btn-secondary'}"
+        onclick="_ds3SetMode(${jsStr(m)})"><i class="bi ${icono} me-1"></i>${esc(t(texto))}</button>`;
+    return `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+        <div class="btn-group btn-group-sm">${modo('floor', 'bi-layers', 'dcim_3d_floor')}${
+            modo('building', 'bi-building', 'dcim_3d_building')}</div>
+        ${_ds3Mode === 'building' ? `<button type="button"
+            class="btn btn-sm ${_ds3Explode ? 'btn-warning' : 'btn-secondary'}"
+            onclick="_ds3ToggleExplode()"><i class="bi bi-arrows-expand me-1"></i>${
+            esc(t('dcim_3d_apart'))}</button>
+            <span class="text-muted ss-fs-2">${esc(t('dcim_3d_building_hint'))}</span>` : ''}
+    </div>`;
+}

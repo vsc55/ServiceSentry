@@ -50,6 +50,12 @@ _SOURCE = TableSpec(
         # medida de todo esto.
         Column('device_uid', 'TEXT', nullable=False, default="''"),
         Column('description', 'TEXT', nullable=False, default="''"),
+        # Y qué equipo del inventario ES, cuando está en un armario: el SAI de suelo al lado del
+        # rack es UNA cosa descrita dos veces —una fila que dice dónde está y otra que dice qué
+        # sostiene—, igual que una regleta que ocupa U (`dc_pdu.item_uid`). Sin este enlace el
+        # armario no podía decir de qué SAI concreto cuelga, y la sección de fuentes no podía
+        # llevar a ese SAI.
+        Column('item_uid', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

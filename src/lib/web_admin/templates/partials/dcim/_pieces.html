@@ -24,6 +24,11 @@ let _dcpFeat = null;
 //: Qué está seleccionado: `{kind: 'feature'|'rack', uid}` o `null`. Seleccionar es lo que
 //: hace un clic: el contorno, las asas y los atajos del teclado.
 let _dcpSel = null;
+//: Lo enviado al fondo, como `'feature:<uid>'` / `'rack:<uid>'`: se pinta tenue y el puntero lo
+//: atraviesa, para llegar a lo que tapa. Solo en esta pantalla y solo mientras se edita: el orden
+//: de las capas —suelo, sala, racks, aire— está pensado (una bandeja debajo de un rack se
+//: escondería justo donde hay que mirarla) y no es algo que una persona deba cambiar para todas.
+const _dcpBack = new Set();
 //: Si el inspector —la columna de la derecha— está desplegado. Se recuerda en el navegador: es
 //: una preferencia de quien mira, no un hecho de la sala. Desplegado si no se sabe.
 let _dcpPanelOpen = (() => {
@@ -82,8 +87,10 @@ function _dcpKinds() { return (_dcpFeat || {}).kinds || {}; }
 /** Lo alto que es una pieza y a qué altura empieza: lo suyo si lo tiene, y si no lo de su tipo.
  *  En UN sitio, porque lo usan el alzado, el 3D y el inspector, y dos cuentas de lo mismo son
  *  dos piezas que miden distinto según desde dónde se miren. */
-function _dcpPieceZ(f) {
-    const spec = _dcpKinds()[f.kind] || {};
+function _dcpPieceZ(f, kinds) {
+    // `kinds`, el catálogo de otra pantalla: el plano de la sede y el edificio en 3D no tienen
+    // abierto el de la sala, y la cuenta tiene que ser la misma.
+    const spec = (kinds || _dcpKinds())[f.kind] || {};
     const h = (f.height_mm !== null && f.height_mm !== undefined && f.height_mm !== '')
         ? Number(f.height_mm) : (Number(spec.h) || 1000);
     const base = (f.base_mm !== null && f.base_mm !== undefined && f.base_mm !== '')
@@ -107,6 +114,7 @@ const _DCP_LOOK = {
     ups:          {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-secondary-color)'},
     crac:         {fill: 'var(--bs-info-bg-subtle)', line: 'var(--bs-info)'},
     bench:        {fill: 'var(--bs-tertiary-bg)', line: 'var(--bs-secondary-color)'},
+    cabinet:      {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-body-color)'},
     extinguisher: {fill: 'var(--bs-danger)', line: 'var(--bs-danger)', dark: true},
     tray:         {fill: 'var(--bs-warning-bg-subtle)', line: 'var(--bs-warning)', dash: '6 3'},
     label:        {fill: 'none', line: 'none'},
@@ -127,7 +135,7 @@ function _dcpFeature(f) {
     const puesto = _dcpSel && _dcpSel.kind === 'feature' && _dcpSel.uid === f.uid;
     const texto = f.label || (f.kind === 'label' ? t('dcim_kind_label') : '');
     const tam = Math.min(5.6, Math.max(3.2, Math.min(w, h) * 0.42));
-    return `<g class="ss-grab" data-dcpf="${escAttr(f.uid)}"
+    return `<g class="ss-grab${_dcpIsBack('feature', f.uid) ? ' ss-dcp-back' : ''}" data-dcpf="${escAttr(f.uid)}"
                onpointerenter="_dcpFloatShow(${jsStr(f.uid)},this)"
                onpointerleave="_dcpFloatLater()"
                transform="translate(${x},${y}) rotate(${rot} ${w / 2} ${h / 2})">
@@ -135,18 +143,41 @@ function _dcpFeature(f) {
             fill="${look.fill}" stroke="${look.line}" stroke-width="1.2"
             ${look.dash ? `stroke-dasharray="${look.dash}"` : ''}
             vector-effect="non-scaling-stroke"></rect>`}
+        ${_dcpFrontBack((_dcpKinds()[f.kind] || {}).front, w, h, look)}
         ${look.cross ? `<line x1="0" y1="0" x2="${w}" y2="${h}" stroke="${look.line}"
                 stroke-width=".6" vector-effect="non-scaling-stroke"></line>
             <line x1="${w}" y1="0" x2="0" y2="${h}" stroke="${look.line}"
                 stroke-width=".6" vector-effect="non-scaling-stroke"></line>` : ''}
         ${texto ? `<text x="${w / 2}" y="${h / 2 + tam * 0.35}" text-anchor="middle"
             font-size="${tam}" fill="${look.dark ? 'var(--bs-dark)' : 'var(--bs-body-color)'}"
-            style="pointer-events:none">${esc(texto)}</text>` : ''}
+            ${_dcpUpright(rot, w / 2, h / 2)} style="pointer-events:none">${esc(texto)}</text>` : ''}
         ${puesto ? `<rect x="-1" y="-1" width="${w + 2}" height="${h + 2}" fill="none"
             stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
             vector-effect="non-scaling-stroke"></rect>` : ''}
-        ${puesto && _dcimMay('dcim_edit') ? _dcpHandles(w, h) : ''}
+        ${puesto && _dcimMay('dcim_edit') ? _dcpHandles(w, h, rot) : ''}
     </g>`;
+}
+
+/** El texto de algo girado, para que nunca quede boca abajo: va a lo largo de la pieza, como
+ *  ella, pero si el giro lo deja del revés —entre 90° y 270°— se voltea sobre su centro. Una
+ *  mesa girada media vuelta tenía el nombre cabeza abajo. */
+function _dcpUpright(rot, cx, cy) {
+    const r = ((Number(rot) || 0) % 360 + 360) % 360;
+    return r > 90 && r <= 270 ? `transform="rotate(180 ${cx} ${cy})"` : '';
+}
+
+/** El delante y el detrás de una pieza que los tiene, en sus coordenadas (0..w × 0..h): una
+ *  franja maciza en el lado de delante —el de arriba antes de girar, como en un rack— y una
+ *  línea a trazos en el de detrás. Sin esto, una mesa o un armario eran un rectángulo que no
+ *  decía hacia dónde se abre ni por dónde se usa. */
+function _dcpFrontBack(tiene, w, h, look) {
+    if (!tiene) return '';
+    const banda = Math.max(0.6, Math.min(h * 0.12, 2.4));
+    const color = 'var(--bs-primary)';
+    return `<rect x="0" y="0" width="${w}" height="${banda}" fill="${color}" style="pointer-events:none"></rect>
+        <line x1="0" y1="${h - banda / 2}" x2="${w}" y2="${h - banda / 2}" stroke="${color}"
+              stroke-width="1" stroke-dasharray="3 2" vector-effect="non-scaling-stroke"
+              style="pointer-events:none"></line>`;
 }
 
 /** Las asas para cambiar el tamaño: los cuatro lados y las cuatro esquinas.
@@ -156,15 +187,31 @@ function _dcpFeature(f) {
  *  tiene enfrente —el lado opuesto, o la esquina opuesta—, que es lo que se espera de un asa:
  *  con solo las de abajo y la derecha, llevar una mampara hasta la pared de la izquierda era
  *  estirarla hacia el otro lado y luego moverla. */
-function _dcpHandles(w, h) {
+function _dcpHandles(w, h, rot) {
     const t = Math.max(2.4, Math.min(4, Math.min(w, h) * 0.45));
-    const asa = (id, x, y, cursor) => `<rect data-dcph="${id}" x="${x - t / 2}" y="${y - t / 2}"
+    const asa = (id, x, y) => `<rect data-dcph="${id}" x="${x - t / 2}" y="${y - t / 2}"
         width="${t}" height="${t}" rx=".6" fill="var(--bs-warning)" stroke="var(--bs-dark)"
-        stroke-width="1" vector-effect="non-scaling-stroke" style="cursor:${cursor}"></rect>`;
-    return asa('n', w / 2, 0, 'ns-resize') + asa('s', w / 2, h, 'ns-resize')
-         + asa('w', 0, h / 2, 'ew-resize') + asa('e', w, h / 2, 'ew-resize')
-         + asa('nw', 0, 0, 'nwse-resize') + asa('se', w, h, 'nwse-resize')
-         + asa('ne', w, 0, 'nesw-resize') + asa('sw', 0, h, 'nesw-resize');
+        stroke-width="1" vector-effect="non-scaling-stroke"
+        style="cursor:${_dcpHandleCursor(id, rot)}"></rect>`;
+    // En una pieza delgada —una puerta: un metro por doce centímetros— las cuatro esquinas
+    // tapaban las asas de los lados, y lo que se cogía era una esquina. Ahí, solo los lados.
+    const fino = Math.min(w, h) < t * 3;
+    return asa('n', w / 2, 0) + asa('s', w / 2, h)
+         + asa('w', 0, h / 2) + asa('e', w, h / 2)
+         + (fino ? '' : asa('nw', 0, 0) + asa('se', w, h) + asa('ne', w, 0) + asa('sw', 0, h));
+}
+
+//: Hacia dónde apunta cada asa con la pieza sin girar, en grados (y hacia abajo, como el SVG).
+const _DCP_HANDLE_DEG = {e: 0, se: 45, s: 90, sw: 135, w: 180, nw: 225, n: 270, ne: 315};
+
+/** El cursor de un asa, contando el giro de la pieza. Las asas giran con ella pero el cursor
+ *  del navegador no: con la pieza a 90° el asa de la derecha queda abajo y estira hacia abajo,
+ *  y enseñaba la flecha de los lados —la de estirar a lo ancho en la de alto y al revés—.
+ *  Se gira la dirección y se toma la flecha más cercana de las cuatro que hay. */
+function _dcpHandleCursor(id, rot) {
+    const deg = ((_DCP_HANDLE_DEG[id] || 0) + Number(rot || 0)) % 180;
+    const paso = Math.round(((deg + 180) % 180) / 45) % 4;
+    return ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'][paso];
 }
 
 /** Todas las piezas, por capas y respetando el interruptor del aire. */
@@ -185,7 +232,8 @@ function _dcpFeaturesSvg(capa) {
  *  pasar por encima: es lo que se lee UNA vez, y el icono lo que se busca cada vez. Fuera del
  *  `<svg>`: dentro, pulsar un botón sería también empezar un arrastre. */
 function _dcpPaletteHtml() {
-    if (!_dcimMay('dcim_edit')) return '';
+    // Calibrando el plano, fuera: un clic que cae en un botón de la paleta creaba una pieza.
+    if (!_dcimMay('dcim_edit') || (_dcCal && _dcCal.kind === 'room')) return '';
     const kinds = _dcpKinds();
     const boton = (onclick, icono, texto) =>
         `<button type="button" class="btn btn-sm btn-secondary" onclick="${onclick}"
@@ -202,7 +250,7 @@ function _dcpPaletteHtml() {
 const _DCP_ICON = {
     aisle: 'bi-distribute-vertical', zone: 'bi-bounding-box', column: 'bi-x-diamond',
     wall: 'bi-square-half', door: 'bi-door-open', panel: 'bi-lightning-charge',
-    ups: 'bi-battery-charging', crac: 'bi-snow', bench: 'bi-table',
+    ups: 'bi-battery-charging', crac: 'bi-snow', bench: 'bi-table', cabinet: 'bi-archive',
     extinguisher: 'bi-fire', tray: 'bi-bezier2', label: 'bi-tag',
 };
 
@@ -326,10 +374,12 @@ function _dcpInspectorBody() {
             <button type="button" class="btn btn-sm btn-secondary"
                 onclick="_dcpDuplicate(${jsStr(f.uid)})" title="${escAttr(t('dcim_piece_duplicate'))}">
                 <i class="bi bi-files"></i></button>
+            ${_dcpBackButton('feature', f.uid)}
             <button type="button" class="btn btn-sm btn-danger"
                 onclick="_dcpDropFeature(${jsStr(f.uid)})" title="${escAttr(t('delete'))}">
                 <i class="bi bi-trash"></i></button>
-        </div>`;
+        </div>
+        ${_dcShelfBox(f)}`;
 }
 
 /** Un rack en el inspector: lo que decide dónde está y cómo ocupa la sala.
@@ -375,6 +425,7 @@ function _dcpRackPanelHtml(k, plegar) {
             ${accion('_dcpRackEdit', 'bi-pencil', t('dcim_rack_all_fields'), 'btn-secondary')}
             ${accion('_dcpTurn', 'bi-arrow-clockwise', t('dcim_turn'), 'btn-secondary')}
             ${accion('_dcpRackDuplicate', 'bi-files', t('dcim_piece_duplicate'), 'btn-secondary')}
+            ${_dcpBackButton('rack', k.uid)}
             ${accion('_dcpRackDrop', 'bi-trash', t('delete'), 'btn-danger')}
         </div>`;
 }
@@ -457,6 +508,8 @@ function _dcpElementsHtml() {
  *  enciende la capa: seleccionar algo que no se dibuja es seleccionar a ciegas. */
 function _dcpPick(kind, uid) {
     _dcpSel = {kind, uid: String(uid)};
+    // Lo que estaba al fondo vuelve al frente: elegido desde la lista, es lo que se quiere tocar.
+    if (_dcpBack.delete(_dcpBackKey(kind, String(uid)))) return renderDcim();
     const f = kind === 'feature' ? _dcpFeatures().find(x => x.uid === uid) : null;
     if (f && ((_dcpKinds()[f.kind] || {}).layer === 'air') && !_dcpAir) {
         _dcpAir = true;
@@ -464,6 +517,98 @@ function _dcpPick(kind, uid) {
     }
     _dcpRedraw();
     _dcpInspectorDraw();
+}
+
+// ── Lo que queda tapado ─────────────────────────────────────────────────────
+//
+// Una bandeja de cables encima de una mesa tapaba la mesa: el clic llega a lo de arriba, y la
+// mesa no se podía seleccionar nunca. Dos salidas: pulsar OTRA VEZ en el mismo sitio pasa a lo
+// de debajo, en vuelta, como en cualquier editor de dibujo; y «Enviar al fondo» deja lo de
+// arriba tenue y transparente al puntero mientras se trabaja debajo.
+
+function _dcpBackKey(kind, uid) { return kind + ':' + uid; }
+
+function _dcpIsBack(kind, uid) { return _dcpBack.has(_dcpBackKey(kind, String(uid))); }
+
+/** Lo que hay bajo el puntero, de arriba abajo y sin repetir, a partir de los elementos que el
+ *  navegador encuentra en ese punto (cada pieza son varios: su rectángulo, su texto, su asa). */
+function _dcpStackOf(els) {
+    const out = [], visto = new Set();
+    for (const el of els || []) {
+        const g = el && el.closest ? el.closest('g[data-dcpf], g[data-dcp]') : null;
+        if (!g) continue;
+        const kind = g.dataset.dcpf ? 'feature' : 'rack';
+        const uid = String(g.dataset.dcpf || g.dataset.dcp);
+        if (visto.has(_dcpBackKey(kind, uid))) continue;
+        visto.add(_dcpBackKey(kind, uid));
+        out.push({kind, uid, g});
+    }
+    return out;
+}
+
+/** A qué se refiere una pulsación. Lo de arriba — salvo que lo SELECCIONADO esté también bajo
+ *  el dedo, que entonces es eso: lo elegido se sigue arrastrando aunque algo lo tape. Y el asa
+ *  de lo seleccionado, también si queda debajo de otra pieza. `cycle` es lo que necesita
+ *  `_dcpCycle` para pasar a lo de debajo si la pulsación no se mueve. */
+function _dcpHit(ev) {
+    const els = (typeof document.elementsFromPoint === 'function' && Number.isFinite(ev.clientX))
+        ? document.elementsFromPoint(ev.clientX, ev.clientY) : [];
+    const todos = els.length ? els : [ev.target];
+    const asaEl = todos.find(e => e && e.closest && e.closest('[data-dcph]'));
+    const asa = asaEl ? asaEl.closest('[data-dcph]') : null;
+    const pila = _dcpStackOf(todos);
+    if (!pila.length) return {g: null, kind: '', uid: '', asa, cycle: null};
+    const elegido = _dcpSel && pila.find(p => p.kind === _dcpSel.kind && p.uid === String(_dcpSel.uid));
+    const cual = elegido || pila[0];
+    return {g: cual.g, kind: cual.kind, uid: cual.uid, asa,
+            cycle: {again: !!elegido, kind: cual.kind, uid: cual.uid,
+                    pila: pila.map(p => ({kind: p.kind, uid: p.uid}))}};
+}
+
+/** Una pulsación quieta sobre lo que YA estaba seleccionado, con algo más debajo: selecciona lo
+ *  siguiente de la pila, y tras lo último vuelve a lo primero. `true` si lo hizo. */
+function _dcpCycle(drag) {
+    const c = drag && drag.cycle;
+    if (!c || !c.again || drag.moved || c.pila.length < 2) return false;
+    const i = c.pila.findIndex(p => p.kind === c.kind && p.uid === c.uid);
+    _dcpSel = {...c.pila[(i + 1) % c.pila.length]};
+    _dcpRedraw();
+    _dcpInspectorDraw();
+    return true;
+}
+
+function _dcpBackButton(kind, uid) {
+    return `<button type="button" class="btn btn-sm btn-secondary"
+        onclick="_dcpSendBack(${jsStr(kind)},${jsStr(uid)})"
+        title="${escAttr(t('dcim_send_back'))}" aria-label="${escAttr(t('dcim_send_back'))}">
+        <i class="bi bi-layer-backward"></i></button>`;
+}
+
+/** Al fondo: tenue, y el puntero lo atraviesa. Se suelta la selección — lo que se quería era lo
+ *  de debajo, y una pieza seleccionada que no se puede pulsar es una selección a ciegas. */
+function _dcpSendBack(kind, uid) {
+    _dcpFloatHide();
+    _dcpBack.add(_dcpBackKey(kind, String(uid)));
+    if (_dcpSel && _dcpSel.kind === kind && String(_dcpSel.uid) === String(uid)) _dcpSel = null;
+    renderDcim();
+}
+
+// Los de la barra flotante, que llaman con el uid solo.
+function _dcpSendBackFeature(uid) { _dcpSendBack('feature', uid); }
+function _dcpSendBackRack(uid) { _dcpSendBack('rack', uid); }
+
+function _dcpBringAll() {
+    _dcpBack.clear();
+    renderDcim();
+}
+
+/** En la barra, mientras haya algo al fondo: cuántas, y traerlas de vuelta. Sin esto, lo
+ *  enviado al fondo no se podría volver a pulsar nunca, y nadie sabría por qué. */
+function _dcpBackChip() {
+    if (!_dcpBack.size) return '';
+    return `<button type="button" class="btn btn-sm btn-warning" onclick="_dcpBringAll()"
+        title="${escAttr(t('dcim_bring_all'))}">
+        <i class="bi bi-layer-forward me-1"></i>${esc(tf('dcim_n_back', _dcpBack.size))}</button>`;
 }
 
 /** Soltar la pieza: el cuadro se va y el plano vuelve a ser solo el plano. Lo mismo que Escape,
@@ -540,7 +685,7 @@ function _dcpDropFeature(uid) {
     _dcpFloatHide();
     const f = _dcpFeatures().find(x => x.uid === uid);
     if (!f) return;
-    showConfirmModal(tf('dcim_drop_piece_q', t('dcim_kind_' + f.kind)), async () => {
+    showConfirmModal(tf('dcim_drop_piece_q', t('dcim_kind_' + f.kind)) + _dcShelfDropWarning(uid), async () => {
         const r = await _dcimSend('DELETE',
                                   `/api/v1/dcim/features/${encodeURIComponent(uid)}`);
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
@@ -622,6 +767,8 @@ function _dcpFloatHtml(uid, kind) {
             ${edita ? boton('_dcpTurn', 'bi-arrow-clockwise', t('dcim_turn'), 'btn-secondary') : ''}
             ${edita ? boton('_dcpRackDuplicate', 'bi-files', t('dcim_piece_duplicate'),
                             'btn-secondary') : ''}
+            ${edita ? boton('_dcpSendBackRack', 'bi-layer-backward', t('dcim_send_back'),
+                            'btn-secondary') : ''}
             ${edita ? boton('_dcpRackDrop', 'bi-trash', t('delete'), 'btn-danger') : ''}
         </div>`;
     }
@@ -629,6 +776,7 @@ function _dcpFloatHtml(uid, kind) {
         ${boton('_dcpEdit', 'bi-pencil', t('edit'), 'btn-secondary')}
         ${boton('_dcpTurnFeature', 'bi-arrow-clockwise', t('dcim_turn'), 'btn-secondary')}
         ${boton('_dcpDuplicate', 'bi-files', t('dcim_piece_duplicate'), 'btn-secondary')}
+        ${boton('_dcpSendBackFeature', 'bi-layer-backward', t('dcim_send_back'), 'btn-secondary')}
         ${boton('_dcpDropFeature', 'bi-trash', t('delete'), 'btn-danger')}
     </div>`;
 }
@@ -769,6 +917,7 @@ function _dcpExportJson() {
             width_mm: Number(f.width_mm) || 0, depth_mm: Number(f.depth_mm) || 0,
             rotation: Number(f.rotation) || 0,
             height_mm: f.height_mm ?? null, base_mm: f.base_mm ?? null,
+            shelves: f.shelves ?? null,
         })),
     };
 }

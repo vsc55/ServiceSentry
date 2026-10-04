@@ -1,0 +1,782 @@
+{# ================================================================
+   One rack, four ways — and one switch to go between them.
+
+   - **Rack y pestañas** (`_rack.html`): the drawing with its four tabs beside it. What this
+     screen always was, laid out as the design asked.
+   - **Por U**: one row per U, front and rear side by side, with what each one carries — cables,
+     power, state, serial, warranty, company. The drawing and the table in a single grid, for
+     reading both at once without looking from one panel to the other.
+   - **Cuadro**: the rack's figures, what needs attention and the drawing coloured by what is
+     being asked about (state, warranty, company, cabling, branches).
+   - **Compacta**: a vertical list per U, front or rear, with the four tabs at the bottom. **Not
+     a choice**: it is what a phone gets. Below the phone breakpoint the rack is always shown this
+     way and the switch is hidden — the three views above need a width a phone does not have, and
+     offering them there would be offering a screen that does not fit.
+
+   They share everything that is not layout: the rack, its cables, its power and its history are
+   loaded once (`_dcRackPrefetch`) and every view reads the same objects the tabs read, so
+   switching views never shows a different rack.
+   ================================================================ #}
+
+//: Which view, remembered in this browser: how this person likes to look at a rack. The three
+//: that can be chosen; «compacta» is not one of them (see `_dcRackNarrow`).
+const _DC_RACKVIEW_KEY = 'ss_dcim_rack_view';
+const _DC_RACKVIEWS = ['rack', 'byu', 'board'];
+let _dcRackView = (() => {
+    try {
+        const v = localStorage.getItem(_DC_RACKVIEW_KEY);
+        return _DC_RACKVIEWS.includes(v) ? v : 'rack';
+    } catch (_) { return 'rack'; }
+})();
+//: «Por U»: what is typed in its search box, and what the faces are coloured by.
+let _dcByUQuery = '';
+let _dcByUColor = 'state';
+//: «Cuadro»: what the drawing is coloured by.
+let _dcBoardColor = 'state';
+//: «Compacta»: which face is listed.
+let _dcCompactFace = 'front';
+
+//: The phone breakpoint — Bootstrap's `sm`. Below it the rack is shown compact, whatever view
+//: was chosen on a wider screen: the choice is kept and comes back when there is room again.
+const _DC_RACK_NARROW = '(max-width: 575.98px)';
+
+function _dcRackNarrow() {
+    try { return !!(window.matchMedia && window.matchMedia(_DC_RACK_NARROW).matches); }
+    catch (_) { return false; }
+}
+
+/** The view actually drawn: the chosen one, or the compact one on a phone. */
+function _dcRackViewNow() {
+    return _dcRackNarrow() ? 'compact' : _dcRackView;
+}
+
+// Turning the phone or resizing the window across the breakpoint redraws an open rack, so the
+// view follows the screen without a reload.
+try {
+    const mq = window.matchMedia && window.matchMedia(_DC_RACK_NARROW);
+    if (mq && mq.addEventListener) mq.addEventListener('change', () => {
+        if ((typeof _dcimRack !== 'undefined') && _dcimRack && _dcimRack.rack) renderDcim();
+    });
+} catch (_) { /* no media queries: the chosen view is drawn, which is fine */ }
+
+function _dcRackViewSet(v) {
+    _dcRackView = _DC_RACKVIEWS.includes(v) ? v : 'rack';
+    try { localStorage.setItem(_DC_RACKVIEW_KEY, _dcRackView); } catch (_) { /* not remembered */ }
+    _dcRackPrefetch();
+    renderDcim();
+}
+
+/** Go to one tab of the «Rack y pestañas» view, from any other view. */
+function _dcRackJump(tab) {
+    _dcRackView = 'rack';
+    try { localStorage.setItem(_DC_RACKVIEW_KEY, 'rack'); } catch (_) { /* not remembered */ }
+    _dcRackGo(tab);
+}
+
+/** Everything the views read beyond the rack itself, asked for once per rack.
+ *
+ *  The marks on the drawing, the warnings on the tabs, the cables and power columns of «Por U»
+ *  and the attention list of «Cuadro» all come from the same three answers the tabs use — so
+ *  they are fetched when the rack opens, in the background, and every view repaints as they
+ *  arrive. Each one is asked only while it is `null`: a second view does not ask again. */
+function _dcRackPrefetch() {
+    if (!(_dcimRack || {}).rack) return;
+    if (_dcCables === null) _dcCablesOpen();
+    if (_dcPower === null) _dcPowerOpen();
+    if (_dcHist === null) _dcHistLoad();
+}
+
+/** The switch. Icons with their word, as the inventory's: four icons alone are a quiz. */
+function _dcRackViewPicker() {
+    const vistas = [
+        ['rack', 'bi-layout-split', t('dcim_rv_rack'), t('dcim_rv_rack_tt')],
+        ['byu', 'bi-table', t('dcim_rv_byu'), t('dcim_rv_byu_tt')],
+        ['board', 'bi-speedometer2', t('dcim_rv_board'), t('dcim_rv_board_tt')],
+    ];
+    return `<div class="btn-group btn-group-sm" role="group" aria-label="${escAttr(t('dcim_rack_views'))}">
+        ${vistas.map(([k, icono, nombre, ayuda]) => `<button type="button"
+            class="btn ${k === _dcRackView ? 'btn-primary' : 'btn-secondary'}"
+            aria-pressed="${k === _dcRackView}" title="${escAttr(ayuda)}"
+            aria-label="${escAttr(nombre)}"
+            onclick="_dcRackViewSet(${jsStr(k)})"><i class="bi ${icono}"></i><span
+            class="d-none d-sm-inline ms-1">${esc(nombre)}</span></button>`).join('')}
+    </div>`;
+}
+
+// ── What every view reads ───────────────────────────────────────────────────
+
+/** Top-level items placed in U, top to bottom — the order the drawing has. */
+function _dcRvPlaced(rack, items) {
+    return (items || []).filter(i => !i.parent_uid && String(i.placement || 'u') === 'u')
+        .sort((a, b) => _dcRvTopRow(rack, a) - _dcRvTopRow(rack, b));
+}
+
+/** Top-level items that take no U: beside the rack, or in it without a U. */
+function _dcRvBeside(items) {
+    return (items || []).filter(i => !i.parent_uid && String(i.placement || 'u') !== 'u')
+        .sort((a, b) => String(_dcimItemName(a)).localeCompare(String(_dcimItemName(b))));
+}
+
+/** How many rows below the top edge an item's TOP U is. */
+function _dcRvTopRow(rack, item) {
+    const u = Number(item.u_start || 1);
+    const h = Math.max(1, Number(item.u_height || 1));
+    return Math.min(_dcimUFromTop(rack, u), _dcimUFromTop(rack, u + h - 1));
+}
+
+/** Its U, as a table writes it: `12`, `12–14`, or where it is when it takes none. */
+function _dcRvSpan(item) {
+    if (String(item.placement || 'u') !== 'u') return t('dcim_place_col_' + item.placement);
+    const u = Number(item.u_start || 0);
+    const h = Number(item.u_height || 1);
+    return h > 1 ? u + '–' + (u + h - 1) : String(u);
+}
+
+/** Whether a warranty has run out, runs out within 90 days, holds, or is not known. */
+function _dcRvWarr(v) {
+    const s = String(v || '');
+    if (!s) return '';
+    const hoy = new Date().toISOString().slice(0, 10);
+    if (s <= hoy) return 'expired';
+    const pronto = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
+    return s <= pronto ? 'soon' : 'ok';
+}
+
+function _dcRvCablesOf(uid) {
+    return ((_dcCables || {}).cables || []).filter(c => c.a_item === uid || c.b_item === uid);
+}
+
+function _dcRvPowerOf(uid) {
+    return ((_dcPower || {}).items || []).find(p => p.uid === uid) || null;
+}
+
+/** A cable's colour as the check sees it: confirmed, wrong port, or not confirmable. */
+function _dcRvCableTone(c) {
+    if (c.seen === 'seen' || c.seen === 'via') return 'var(--bs-success)';
+    if (c.seen === 'other_port') return 'var(--bs-danger)';
+    // Not checked yet (the check arrives after the list): its own colour, not a verdict.
+    if (!c.seen) return c.color || 'var(--bs-secondary-color)';
+    return 'var(--bs-secondary-color)';
+}
+
+//: A company's colour, picked from its uid so it is the same on every screen and every load.
+const _DC_ORG_TONES = ['#3d8bfd', '#20c997', '#e8892b', '#a970ff', '#d63384', '#6f9e3b'];
+
+function _dcRvOrgTone(uid) {
+    if (!uid) return 'var(--bs-secondary-bg)';
+    let h = 0;
+    for (const ch of String(uid)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return _DC_ORG_TONES[h % _DC_ORG_TONES.length];
+}
+
+/** What an item is painted with, for the question being asked. */
+function _dcRvTone(item, mode) {
+    if (item.foreign) return 'var(--bs-secondary-bg)';
+    if (mode === 'warranty') {
+        const w = _dcRvWarr(item.warranty_until);
+        return w === 'expired' ? 'var(--bs-danger)' : w === 'soon' ? 'var(--bs-warning)'
+            : w === 'ok' ? 'var(--bs-success)' : 'var(--bs-secondary-bg)';
+    }
+    if (mode === 'org') return _dcRvOrgTone(item.org_uid);
+    if (mode === 'cables') {
+        const cs = _dcRvCablesOf(item.uid);
+        if (!cs.length) return 'var(--bs-secondary-bg)';
+        if (cs.some(c => c.seen === 'other_port')) return 'var(--bs-danger)';
+        if (cs.some(c => c.seen === 'seen' || c.seen === 'via')) return 'var(--bs-success)';
+        return 'var(--bs-secondary-color)';
+    }
+    if (mode === 'branch') {
+        const p = _dcRvPowerOf(item.uid);
+        if (!p || !(p.feeds || []).length) return 'var(--bs-secondary-bg)';
+        return (p.branches || []).length >= 2 ? 'var(--bs-success)' : 'var(--bs-warning)';
+    }
+    return deviceStateColor(item.state || '');
+}
+
+/** The legend under a coloured drawing: what each colour means for that question. */
+function _dcRvLegend(mode, items) {
+    const sw = (c, txt) => `<span class="d-inline-flex align-items-center gap-1"><span
+        class="ss-rv-swatch" style="background:${escAttr(c)}"></span>${esc(txt)}</span>`;
+    let filas = [];
+    if (mode === 'warranty') filas = [['var(--bs-danger)', t('dcim_legend_expired')],
+        ['var(--bs-warning)', t('dcim_legend_soon')], ['var(--bs-success)', t('dcim_legend_valid')],
+        ['var(--bs-secondary-bg)', t('dcim_legend_none')]];
+    else if (mode === 'cables') filas = [['var(--bs-success)', t('dcim_cable_seen')],
+        ['var(--bs-danger)', t('dcim_cable_other_port')],
+        ['var(--bs-secondary-color)', t('dcim_cable_passive')],
+        ['var(--bs-secondary-bg)', t('dcim_legend_no_cables')]];
+    else if (mode === 'branch') filas = [['var(--bs-success)', t('dcim_legend_two_branches')],
+        ['var(--bs-warning)', t('dcim_legend_one_branch')],
+        ['var(--bs-secondary-bg)', t('dcim_unplugged')]];
+    else if (mode === 'org') {
+        const vistos = [];
+        (items || []).forEach(i => { if (i.org_uid && !vistos.includes(i.org_uid)) vistos.push(i.org_uid); });
+        filas = vistos.map(o => [_dcRvOrgTone(o), _dcRvOrgName(o)])
+            .concat([['var(--bs-secondary-bg)', t('dcim_legend_no_org')]]);
+    } else filas = [['var(--bs-success)', t('dcim_state_ok')], ['var(--bs-warning)', t('dcim_state_warning')],
+        ['var(--bs-danger)', t('dcim_state_error')], [deviceStateColor(''), t('dcim_state_unwatched')]];
+    return `<div class="d-flex flex-wrap gap-3 ss-fs-2 text-body-secondary">${
+        filas.map(([c, txt]) => sw(c, txt)).join('')}</div>`;
+}
+
+function _dcRvOrgName(uid) {
+    const o = ((typeof _dcimData !== 'undefined' && _dcimData.orgs) || []).find(x => x.uid === uid);
+    return (o && (o.short || o.name)) || uid;
+}
+
+/** The «Colorear por» switch, for the view that owns *varName*. */
+function _dcRvColorPicker(current, setter, modes) {
+    const nombres = {state: t('dcim_color_state'), warranty: t('dcim_color_warranty'),
+                     org: t('dcim_color_org'), cables: t('dcim_color_cables'),
+                     branch: t('dcim_color_branch')};
+    return `<div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="ss-fs-2 text-body-secondary">${esc(t('dcim_color_by'))}</span>
+        <div class="btn-group btn-group-sm" role="group" aria-label="${escAttr(t('dcim_color_by'))}">
+        ${modes.map(m => `<button type="button" class="btn ${m === current ? 'btn-primary' : 'btn-secondary'}"
+            aria-pressed="${m === current}" onclick="${setter}(${jsStr(m)})">${
+            esc(nombres[m])}</button>`).join('')}</div></div>`;
+}
+
+/** The links to the tabs, with their counts — what «Por U» and «Cuadro» lead to. */
+function _dcRvTabLinks() {
+    const n = ((_dcimRack || {}).counts) || {};
+    const nc = _dcCables && _dcCables.cables ? _dcCables.cables.length : (n.cables || 0);
+    const np = _dcPower && _dcPower.items ? _dcPowerN(_dcPower) : (n.power || 0);
+    const nh = _dcHist && _dcHist.rows ? _dcHist.rows.length : (n.hist || 0);
+    const a = (tab, txt, cuenta) => `<a href="#" class="ss-fs-2" onclick="event.preventDefault();_dcRackJump(${
+        jsStr(tab)})">${esc(txt)} (${esc(String(cuenta))})</a>`;
+    return `<div class="d-flex gap-3 flex-wrap">${a('cables', t('dcim_cables'), nc)}${
+        a('power', t('dcim_power'), np)}${a('hist', t('dcim_cat_tab_history'), nh)}</div>`;
+}
+
+/** Put something at U *u*: the new-item form, with that U already written in. */
+function _dcRackPlaceAt(u) {
+    const rack = (_dcimRack || {}).rack;
+    if (!rack) return;
+    _dcimOpen('new', 'item', rack.uid, '');
+    if (_dcimForm && _dcimForm.mode === 'new') {
+        _dcimForm.row = Object.assign({}, _dcimForm.row || {}, {u_start: Number(u) || 1});
+        _dcimFormDraw();
+    }
+}
+
+// ═══ B · Por U ═══════════════════════════════════════════════════════════════
+
+function _dcByUSearch(v) {
+    _dcByUQuery = String(v || '');
+    const el = document.getElementById('dcByUBody');
+    if (el) el.innerHTML = _dcByUGrid();
+    else renderDcim();
+}
+
+function _dcByUColorSet(m) { _dcByUColor = m; renderDcim(); }
+
+/** One face, in one cell: filled with the item, a share of it, or free. */
+function _dcByUFace(item, face, part, tone) {
+    if (!item) return `<div class="ss-ufc ss-ufc-free">${esc(t('dcim_face_free'))}</div>`;
+    const f = String(item.face || 'full');
+    if (f !== 'full' && f !== face)
+        return `<div class="ss-ufc ss-ufc-free">${esc(t('dcim_face_free_rear'))}</div>`;
+    const name = _dcimItemName(item);
+    if (part) {
+        // A share of the U (a half-width box, or one of the things on a tray). By the rear it
+        // is mirrored: the first one in front is the last one behind.
+        const a = face === 'rear' ? 100 - part.b : part.a;
+        const b = face === 'rear' ? 100 - part.a : part.b;
+        return `<div class="ss-ufc ss-ufc-part" style="--a:${a}%;--b:${b}%;--c:${escAttr(tone)}"
+            title="${escAttr(name)}">${esc(name)}</div>`;
+    }
+    return `<div class="ss-ufc" style="--c:${escAttr(tone)}" title="${escAttr(name)}">${esc(name)}</div>`;
+}
+
+/** Where a box sits across its U (or its tray), as two percentages — or null for the whole. */
+function _dcByUPart(item, siblings) {
+    if (siblings && siblings.length > 1) {
+        const i = Math.max(0, siblings.findIndex(k => k.uid === item.uid));
+        return {a: i * 100 / siblings.length, b: (i + 1) * 100 / siblings.length};
+    }
+    const de = Math.max(1, Number(item.u_slots || 1));
+    if (de <= 1 || String(item.u_split || 'width') === 'height') return null;
+    const cual = Math.min(de, Math.max(1, Number(item.u_slot || 1)));
+    const toma = Math.max(1, Math.min(de - cual + 1, Number(item.u_slot_span || 1)));
+    return {a: (cual - 1) * 100 / de, b: (cual - 1 + toma) * 100 / de};
+}
+
+function _dcByUCables(item) {
+    const cs = _dcRvCablesOf(item.uid);
+    return cs.slice(0, 8).map(c => `<span class="ss-rv-dot" style="background:${
+        escAttr(_dcRvCableTone(c))}" title="${escAttr(c.label || '')}"></span>`).join('')
+        + (cs.length > 8 ? `<span class="ss-fs-1 text-body-secondary">+${esc(String(cs.length - 8))}</span>` : '');
+}
+
+function _dcByUPower(item) {
+    const p = _dcRvPowerOf(item.uid);
+    if (!p || !(p.feeds || []).length) return '';
+    const pdus = (_dcPower || {}).pdus || [];
+    const ramas = [];
+    (p.feeds || []).forEach(f => {
+        const pdu = pdus.find(x => x.uid === f.pdu_uid) || {};
+        const rama = String(pdu.feed || '').toUpperCase() || '·';
+        if (!ramas.some(r => r[0] === rama)) ramas.push([rama, _dcPduColor(f.pdu_uid, pdus)]);
+    });
+    return ramas.map(([r, c]) => `<span class="badge fw-semibold" style="background:${
+        escAttr(c)};color:#fff">${esc(r)}</span>`).join(' ')
+        + ((p.branches || []).length === 1 ? ` <span class="badge text-bg-warning fw-normal">${
+            esc(t('dcim_one_branch_short'))}</span>` : '');
+}
+
+function _dcByUActions(item) {
+    if (!_dcimMay('dcim_edit')) return '';
+    const name = _dcimItemName(item);
+    return `<div class="d-flex gap-1 justify-content-end">
+        <button type="button" class="btn btn-sm btn-secondary" title="${escAttr(t('edit'))}"
+            aria-label="${escAttr(t('edit'))}"
+            onclick="_dcimOpen('edit','item','',${jsStr(item.uid)})"><i class="bi bi-pencil"></i></button>
+        <div class="dropdown">
+            <button type="button" class="btn btn-sm btn-secondary" data-bs-toggle="dropdown"
+                aria-expanded="false" title="${escAttr(t('dcim_more_actions'))}"
+                aria-label="${escAttr(t('dcim_more_actions'))}"><i class="bi bi-three-dots"></i></button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                ${item.device_uid ? `<li><button class="dropdown-item" type="button"
+                    onclick="_dcimOpenDevice(${jsStr(item.device_uid)})"><i class="bi bi-hdd me-2"></i>${
+                    esc(t('dcim_open_device'))}</button></li>` : ''}
+                <li><button class="dropdown-item" type="button" onclick="_dcPartsOpen(${jsStr(item.uid)})"
+                    ><i class="bi bi-cpu me-2"></i>${esc(t('dcim_parts'))}</button></li>
+                ${_dcimMay('orgs_edit') ? `<li><button class="dropdown-item" type="button"
+                    onclick="_dcimOwnerAsk('item',${jsStr(item.uid)},${jsStr(name)})"><i
+                    class="bi bi-building-check me-2"></i>${esc(t('dcim_owner'))}</button></li>` : ''}
+                <li><hr class="dropdown-divider"></li>
+                <li><button class="dropdown-item text-danger" type="button"
+                    onclick="_dcimDelete('item',${jsStr(item.uid)},${jsStr(name)})"><i
+                    class="bi bi-trash3 me-2"></i>${esc(t('delete'))}</button></li>
+            </ul>
+        </div>
+    </div>`;
+}
+
+/** One row of the grid. *kind*: `item`, `kid` (on a tray), `free` (an empty U). */
+function _dcByURow(kind, item, uText, front, rear) {
+    const cls = kind === 'kid' ? ' ss-byu-kid' : kind === 'free' ? ' ss-byu-free' : '';
+    if (kind === 'free') {
+        return `<div class="ss-byu-row${cls}">
+            <span class="ss-tabular text-body-secondary">${esc(uText)}</span>
+            ${front}${rear}
+            <span class="fst-italic text-body-secondary">${esc(t('dcim_u_free'))}</span>
+            <span></span><span></span><span></span><span></span><span></span><span></span>
+            <span class="text-end">${_dcimMay('dcim_edit') ? `<button type="button"
+                class="btn btn-sm btn-primary ss-nowrap" onclick="_dcRackPlaceAt(${jsStr(uText)})">${
+                esc(t('dcim_place_here'))}</button>` : ''}</span>
+        </div>`;
+    }
+    if (item.foreign) {
+        return `<div class="ss-byu-row${cls} text-body-secondary">
+            <span class="ss-tabular">${esc(uText)}</span>${front}${rear}
+            <span class="ss-byu-span"><i class="bi bi-lock me-1"></i>${esc(t('dcim_foreign'))}</span>
+        </div>`;
+    }
+    const kids = _dceKidsOf(item);
+    const what = kind === 'kid' ? '└ ' + _dcimItemName(item) : _dcimItemName(item);
+    return `<div class="ss-byu-row${cls}" data-dci="${escAttr(item.uid)}">
+        <span class="ss-tabular text-body-secondary">${esc(uText)}</span>
+        ${front}${rear}
+        <span class="fw-semibold text-truncate${kind === 'kid' ? ' ps-3' : ''}"
+            title="${escAttr(_dcimItemName(item))}">${esc(what)}</span>
+        <span class="d-flex gap-1 align-items-center flex-wrap">${_dcByUCables(item)}</span>
+        <span class="d-flex gap-1 align-items-center ss-nowrap">${_dcByUPower(item)}</span>
+        <span>${item.state ? _infraStateBadge(item.state)
+            : kids.length ? `<span class="text-body-secondary ss-fs-2">${
+                esc(tf('dcim_n_items_short', kids.length))}</span>`
+            : '<span class="text-body-secondary">—</span>'}</span>
+        <span class="ss-tabular ss-fs-2">${_dcimDash(item.serial)}</span>
+        <span class="ss-fs-2">${_dcimWarranty(item.warranty_until)}</span>
+        <span>${_dcimOrgBadge(item.org_uid) || _dcimDash('')}</span>
+        ${_dcByUActions(item)}
+    </div>`;
+}
+
+function _dcByUMatch(item) {
+    const q = _dcByUQuery.trim().toLowerCase();
+    if (!q) return true;
+    return [_dcimItemName(item), item.serial, item.asset].some(
+        v => String(v || '').toLowerCase().includes(q));
+}
+
+/** The grid: every U top to bottom, the free ones too, then what takes no U. */
+function _dcByUGrid() {
+    const rack = (_dcimRack || {}).rack || {};
+    const items = (_dcimRack || {}).items || [];
+    const h = Number(rack.u_height || 0);
+    const placed = _dcRvPlaced(rack, items);
+    const filtering = !!_dcByUQuery.trim();
+    const rows = [];
+    const covered = new Set();
+    placed.forEach(it => {
+        const u = Number(it.u_start || 1), n = Math.max(1, Number(it.u_height || 1));
+        for (let k = 0; k < n; k++) covered.add(u + k);
+    });
+    const face = (it, f, part) => _dcByUFace(it, f, part, _dcRvTone(it, _dcByUColor));
+    const emit = (it) => {
+        const kids = _dceKidsOf(it);
+        const showKids = kids.filter(_dcByUMatch);
+        if (!_dcByUMatch(it) && !showKids.length) return;
+        const part = _dcByUPart(it, null);
+        rows.push(_dcByURow('item', it, _dcRvSpan(it), face(it, 'front', part), face(it, 'rear', part)));
+        (filtering ? showKids : kids).forEach(k => {
+            const kp = _dcByUPart(k, kids);
+            const kf = Object.assign({}, k, {face: it.face || 'full'});
+            rows.push(_dcByURow('kid', k, '', face(kf, 'front', kp), face(kf, 'rear', kp)));
+        });
+    };
+    for (let row = 0; row < h; row++) {
+        const u = _dcimUAtRow(rack, row);
+        const starting = placed.filter(it => _dcRvTopRow(rack, it) === row);
+        starting.forEach(emit);
+        if (!covered.has(u) && !filtering) {
+            rows.push(_dcByURow('free', null, String(u),
+                `<div class="ss-ufc ss-ufc-free">${esc(t('dcim_face_free'))}</div>`,
+                `<div class="ss-ufc ss-ufc-free">${esc(t('dcim_face_free'))}</div>`));
+        }
+    }
+    const beside = _dcRvBeside(items).filter(_dcByUMatch);
+    const free = `<div class="ss-ufc ss-ufc-free">—</div>`;
+    const besideRows = beside.map(it => _dcByURow('item', it, _dcRvSpan(it), free, free)).join('');
+    const head = `<div class="ss-byu-row ss-byu-head">
+        <span>${esc(t('dcim_u'))}</span><span>${esc(t('dcim_face_front'))}</span>
+        <span>${esc(t('dcim_face_rear'))}</span><span>${esc(t('dcim_what'))}</span>
+        <span>${esc(t('dcim_col_cables'))}</span><span>${esc(t('dcim_col_power'))}</span>
+        <span>${esc(t('dcim_col_state'))}</span><span>${esc(t('dcim_serial'))}</span>
+        <span>${esc(t('dcim_item_warranty_col'))}</span><span>${esc(t('dcim_owner'))}</span><span></span>
+    </div>`;
+    const grupo = beside.length ? `<div class="ss-byu-group">${esc(t('dcim_elev_beside'))}
+        <span class="text-body-secondary fw-normal ms-1">${esc(String(beside.length))}</span></div>` : '';
+    return `${head}${rows.join('') || `<div class="p-3 text-body-secondary">${esc(t('dcim_rack_empty'))}</div>`}${
+        grupo}${besideRows}`;
+}
+
+function _dcRackByUHtml() {
+    return `<div class="card mb-3"><div class="card-body p-2 d-flex flex-wrap align-items-end gap-3">
+            <label class="d-flex flex-column gap-1 flex-grow-1 ss-fs-2 text-body-secondary" style="min-width:16rem">
+                ${esc(t('dcim_byu_search'))}
+                <input type="search" class="form-control" value="${escAttr(_dcByUQuery)}"
+                    placeholder="${escAttr(t('dcim_byu_search_ph'))}" oninput="_dcByUSearch(this.value)">
+            </label>
+            ${_dcRvColorPicker(_dcByUColor, '_dcByUColorSet', ['state', 'warranty', 'org'])}
+            <div class="pb-1">${_dcRvTabLinks()}</div>
+        </div></div>
+        <div class="card"><div class="ss-byu-scroll"><div class="ss-byu" id="dcByUBody">${
+            _dcByUGrid()}</div></div></div>`;
+}
+
+// ═══ C · Cuadro ══════════════════════════════════════════════════════════════
+
+function _dcBoardColorSet(m) { _dcBoardColor = m; renderDcim(); }
+
+/** A ring: how much of something, at a glance. */
+function _dcRvRing(pct, color, inner) {
+    const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+    return `<div class="ss-ring" style="--p:${p};--c:${escAttr(color)}"><span>${esc(String(inner))}</span></div>`;
+}
+
+function _dcRvKpi(ring, label, value, sub, subTone) {
+    return `<div class="card ss-kpi"><div class="card-body d-flex align-items-center gap-3">
+        ${ring}
+        <div class="d-flex flex-column min-w-0">
+            <span class="ss-fs-2 text-body-secondary">${esc(label)}</span>
+            <span class="fs-5 fw-semibold">${esc(value)}</span>
+            <span class="ss-fs-2 ${subTone || 'text-body-secondary'}">${esc(sub)}</span>
+        </div></div></div>`;
+}
+
+function _dcBoardKpis() {
+    const rack = (_dcimRack || {}).rack || {};
+    const items = (_dcimRack || {}).items || [];
+    const free = ((_dcimRack || {}).free || {}).front || [];
+    const h = Number(rack.u_height || 0);
+    const used = Math.max(0, h - free.length);
+    const roll = (_dcimRack || {}).roll || {};
+    const caducadas = items.filter(i => !i.foreign && _dcRvWarr(i.warranty_until) === 'expired');
+    const out = [];
+    out.push(_dcRvKpi(_dcRvRing(h ? used * 100 / h : 0, 'var(--bs-primary)', h ? Math.round(used * 100 / h) + '%' : '—'),
+        t('dcim_kpi_occupancy'), `${used} / ${h} U`, tf('dcim_free', free.length)));
+    // The same rule as the header's badge (`_dcimRollBadge`): with nothing watched it is grey and
+    // says so — a green «13 bien» beside a header saying «13 sin vigilar» is two screens arguing.
+    const vigilado = !!(roll.total && roll.state);
+    out.push(_dcRvKpi(_dcRvRing(vigilado ? (roll.total - (roll.bad || 0)) * 100 / roll.total : 0,
+            roll.bad ? 'var(--bs-danger)' : 'var(--bs-success)', String(items.length)),
+        t('dcim_kpi_items'), String(items.length),
+        !vigilado ? tf('dcim_unwatched_n', roll.total || items.length)
+            : roll.bad ? tf('dcim_roll_bad', roll.bad, roll.total) : tf('dcim_roll_ok', roll.total),
+        !vigilado ? '' : roll.bad ? 'text-danger' : 'text-success'));
+    out.push(_dcRvKpi(_dcRvRing(items.length ? caducadas.length * 100 / items.length : 0, 'var(--bs-danger)',
+            String(caducadas.length)),
+        t('dcim_kpi_warranty'), caducadas.length ? tf('dcim_kpi_warranty_val', caducadas.length) : t('dcim_kpi_warranty_none'),
+        caducadas.map(_dcimItemName).join(' · ') || '—', caducadas.length ? 'text-danger' : ''));
+    const p = _dcPower || {};
+    if (!p.loading && p.pdus) {
+        const pico = Math.max(0, ...(p.pdus || []).map(x => Number(x.load || 0) * 100));
+        const solas = (p.warnings || []).filter(w => w.kind === 'single_branch').length;
+        out.push(_dcRvKpi(_dcRvRing(pico, pico > 45 ? 'var(--bs-warning)' : 'var(--bs-success)', Math.round(pico) + '%'),
+            t('dcim_kpi_power'), (p.watts_said || 0) + ' W',
+            tf('dcim_kpi_power_sub', (p.by_branch || {}).a || 0, (p.by_branch || {}).b || 0)
+                + (solas ? ' · ' + tf('dcim_kpi_power_single', solas) : ''),
+            solas ? 'text-warning-emphasis' : ''));
+    }
+    const c = _dcCables || {};
+    if (!c.loading && c.cables) {
+        const k = c.counts || {};
+        const ok = (k.seen || 0) + (k.via || 0);
+        const total = (c.cables || []).length;
+        out.push(_dcRvKpi(_dcRvRing(total ? ok * 100 / total : 0, 'var(--bs-success)', total ? ok + '/' + total : '0'),
+            t('dcim_kpi_cables'), tf('dcim_kpi_cables_val', total),
+            c.checked ? tf('dcim_kpi_cables_sub', ok, k.other_port || 0, k.undeclared || 0) : t('dcim_cables_checking'),
+            (k.other_port || k.undeclared) ? 'text-danger' : ''));
+    }
+    const hs = _dcHist || {};
+    if (!hs.loading && hs.rows) {
+        out.push(_dcRvKpi(_dcRvRing(100, 'var(--bs-secondary-color)', String(hs.rows.length)),
+            t('dcim_kpi_hist'), tf('dcim_kpi_hist_val', hs.rows.length),
+            hs.rows.length ? tf('dcim_kpi_hist_sub', _fmtDateTime(hs.rows[0].at)) : '—'));
+    }
+    return `<div class="ss-kpi-grid mb-3">${out.join('')}</div>`;
+}
+
+/** One face of the rack in HTML, coloured by the question asked. Clicking a box opens it. */
+function _dcBoardFace(rack, items, face) {
+    const h = Number(rack.u_height || 0);
+    const placed = _dcRvPlaced(rack, items).filter(i => {
+        const f = String(i.face || 'full');
+        return f === 'full' || f === face;
+    });
+    const filas = [];
+    for (let row = 0; row < h; row++) {
+        const u = _dcimUAtRow(rack, row);
+        const aqui = placed.filter(it => {
+            const s = Number(it.u_start || 1), n = Math.max(1, Number(it.u_height || 1));
+            return u >= s && u < s + n;
+        });
+        const parts = [];
+        aqui.forEach(it => {
+            const kids = _dceKidsOf(it);
+            const lista = kids.length ? kids : [it];
+            const orden = face === 'rear' ? lista.slice().reverse() : lista;
+            orden.forEach(x => {
+                const tone = _dcRvTone(x, _dcBoardColor);
+                const open = x.foreign ? '' : ` onclick="_dcimOpen('edit','item','',${jsStr(x.uid)})"`;
+                parts.push(`<button type="button" class="ss-uel-box" style="--c:${escAttr(tone)}"${open}
+                    title="${escAttr(x.foreign ? t('dcim_foreign') : _dcimItemName(x))}">${
+                    x.foreign ? '<i class="bi bi-lock"></i>' : esc(_dcimItemName(x))}</button>`);
+            });
+        });
+        filas.push(`<div class="ss-uel-row"><span class="ss-uel-u">${esc(String(u))}</span>${
+            parts.length ? parts.join('') : '<span class="ss-uel-free"></span>'}</div>`);
+    }
+    return `<div class="d-flex flex-column gap-1 min-w-0">
+        <span class="ss-fs-2 text-body-secondary">${esc(t('dcim_face_' + face))}</span>
+        <div class="ss-uel">${filas.join('')}</div></div>`;
+}
+
+/** What needs attention in this rack, from what is already loaded — every row has its action. */
+function _dcBoardAttention() {
+    const items = ((_dcimRack || {}).items || []).filter(i => !i.foreign);
+    const out = [];
+    const add = (tone, title, sub, action, fn) => out.push({tone, title, sub, action, fn});
+    items.forEach(i => {
+        const w = _dcRvWarr(i.warranty_until);
+        const where = i.parent_uid ? t('dcim_item_on') : _dcRvSpan(i);
+        if (w === 'expired') add('danger', tf('dcim_att_warranty_expired', _dcimItemName(i)),
+            tf('dcim_att_warranty_sub', i.warranty_until, where), t('dcim_att_open'),
+            `_dcimOpen('edit','item','',${jsStr(i.uid)})`);
+        else if (w === 'soon') add('warning', tf('dcim_att_warranty_soon', _dcimItemName(i)),
+            tf('dcim_att_warranty_sub', i.warranty_until, where), t('dcim_att_open'),
+            `_dcimOpen('edit','item','',${jsStr(i.uid)})`);
+        if (i.state === 'error' || i.state === 'warning' || i.state === 'maintenance')
+            add(i.state === 'error' ? 'danger' : 'warning',
+                tf('dcim_att_state', _dcimItemName(i), _dcimStateWord(i.state)), where,
+                i.device_uid ? t('dcim_open_device') : t('dcim_att_open'),
+                i.device_uid ? `_dcimOpenDevice(${jsStr(i.device_uid)})`
+                    : `_dcimOpen('edit','item','',${jsStr(i.uid)})`);
+    });
+    ((_dcCables || {}).cables || []).filter(c => c.seen === 'other_port').forEach(c => add('danger',
+        tf('dcim_att_other_port', c.label || '—'),
+        tf('dcim_att_other_port_sub',
+           _dcimNameOf(c.a_item, {label: c.a_label}) + ' ' + (c.a_port || ''),
+           _dcimNameOf(c.b_item, {label: c.b_label}) + ' ' + (c.b_port || ''),
+           (c.ports_seen || []).join(', ') || '—'),
+        t('dcim_att_cables'), `_dcCableInfo(${jsStr(c.uid)})`));
+    ((_dcCables || {}).undeclared || []).forEach((f, i) => add('warning', t('dcim_att_undeclared'),
+        `${_dcimDeviceName(f.from)} ↔ ${_dcimDeviceName(f.to)} · ${Object.values(f.ports || {}).flat().join(', ')}`,
+        t('dcim_undeclared_add'),
+        (_dcimMay('dcim_cable_edit') && f.a_item && f.b_item) ? `_dcCableFromSeen(${i})` : `_dcRackJump('cables')`));
+    ((_dcPower || {}).warnings || []).forEach(w => {
+        if (w.kind === 'single_branch') add('warning',
+            tf('dcim_att_single', _dcimNameOf(w.item, w), String(w.branch || '—').toUpperCase()),
+            t('dcim_att_single_sub'), t('dcim_att_plug'), `_dcRackJump('power')`);
+        else add('warning', tf('dcim_att_load', w.label || '', Math.round((w.load || 0) * 100)),
+            t('dcim_warn_one_branch_tt'), t('dcim_power'), `_dcRackJump('power')`);
+    });
+    // Upstream of the strips: a UPS left out by a bypass, both branches through one UPS, and a
+    // UPS standing in the rack that no source says it is.
+    const pw = _dcPower || {};
+    const nombreFuente = (uid) => (((pw.sources || []).find(f => f.uid === uid) || {}).name) || uid;
+    (pw.source_warnings || []).forEach(w => {
+        if (w.kind === 'on_bypass') add('danger', tf('dcim_att_on_bypass', w.label || ''),
+            tf('dcim_att_on_bypass_sub', (w.ups || []).join(', ')), t('dcim_power'), `_dcRackJump('power')`);
+        else if (w.kind === 'same_ups') add('warning',
+            tf('dcim_att_same_ups', (w.ups || []).map(nombreFuente).join(', ')),
+            (w.labels || []).join(' · '), t('dcim_power'), `_dcRackJump('power')`);
+    });
+    (pw.ups_items || []).filter(u => !u.source).forEach(u => add('warning',
+        tf('dcim_att_ups_undeclared', u.label), t('dcim_ups_undeclared'),
+        t('dcim_ups_declare'), `_dcRackJump('power')`));
+    const free = (((_dcimRack || {}).free || {}).front || []);
+    if (free.length) add('secondary', tf('dcim_free', free.length), t('dcim_att_free_sub'),
+        t('dcim_place_here'), `_dcRackPlaceAt(${jsStr(String(free[0]))})`);
+    const order = {danger: 0, warning: 1, secondary: 2};
+    out.sort((a, b) => order[a.tone] - order[b.tone]);
+    const filas = out.map(o => `<div class="ss-att-row">
+        <span class="ss-rv-dot ss-rv-dot-lg" style="background:var(--bs-${o.tone})"></span>
+        <div class="d-flex flex-column flex-grow-1 min-w-0">
+            <span class="fw-semibold">${esc(o.title)}</span>
+            <span class="ss-fs-2 text-body-secondary">${esc(o.sub)}</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-link text-nowrap" onclick="${o.fn}">${esc(o.action)}</button>
+    </div>`);
+    return `<div class="card mb-3"><div class="card-body d-flex flex-column gap-2">
+        <div class="d-flex align-items-center gap-2"><span class="fw-semibold">${esc(t('dcim_attention'))}</span>
+            <span class="badge rounded-pill text-bg-secondary">${esc(String(out.length))}</span></div>
+        ${filas.length ? filas.join('') : `<div class="text-success ss-fs-2"><i class="bi bi-check-circle me-1"></i>${
+            esc(t('dcim_attention_none'))}</div>`}
+    </div></div>`;
+}
+
+function _dcBoardHistory() {
+    const hs = _dcHist || {};
+    const filas = (hs.rows || []).slice(0, 3).map(f => `<div class="d-flex gap-2 align-items-start py-1 border-bottom">
+        <span class="ss-tabular ss-fs-2 text-body-secondary ss-nowrap">${esc(_fmtDateTime(f.at))}</span>
+        <span class="flex-grow-1 ss-fs-2">${_dcHistChanges(f)}</span>
+        <span class="ss-fs-2 text-body-secondary ss-nowrap">${esc(String(f.by || ''))}</span>
+    </div>`);
+    return `<div class="card"><div class="card-body d-flex flex-column gap-2">
+        <div class="d-flex align-items-center gap-2"><span class="fw-semibold">${esc(t('dcim_last_changes'))}</span>
+            <span class="flex-grow-1"></span>
+            <a href="#" class="ss-fs-2" onclick="event.preventDefault();_dcRackJump('hist')">${
+                esc(t('dcim_cat_tab_history'))} (${esc(String((hs.rows || []).length))})</a></div>
+        ${hs.loading || hs.rows === undefined ? _dcRackSkeleton(3)
+            : filas.length ? filas.join('') : `<div class="text-body-secondary ss-fs-2">${esc(t('dcim_hist_none'))}</div>`}
+    </div></div>`;
+}
+
+function _dcRackBoardHtml() {
+    const rack = (_dcimRack || {}).rack || {};
+    const items = (_dcimRack || {}).items || [];
+    const go = [['items', t('dcim_items')], ['cables', t('dcim_cables')], ['power', t('dcim_power')],
+                ['hist', t('dcim_cat_tab_history')]];
+    return `${_dcBoardKpis()}
+        <div class="ss-board-grid">
+            <div class="card"><div class="card-body d-flex flex-column gap-3">
+                <div class="d-flex flex-wrap align-items-center gap-2">
+                    <span class="fw-semibold">${esc(t('dcim_elevation'))}</span>
+                    <span class="flex-grow-1"></span>
+                    ${_dcRvColorPicker(_dcBoardColor, '_dcBoardColorSet', ['state', 'warranty', 'org', 'cables', 'branch'])}
+                </div>
+                <div class="ss-board-faces">${_dcBoardFace(rack, items, 'front')}${_dcBoardFace(rack, items, 'rear')}</div>
+                ${_dcRvLegend(_dcBoardColor, items)}
+                <div class="d-flex align-items-center gap-2 flex-wrap ss-fs-2">
+                    <span class="text-body-secondary">${esc(t('dcim_go_to'))}</span>
+                    ${go.map(([tab, txt]) => `<button type="button" class="btn btn-sm btn-secondary"
+                        onclick="_dcRackJump(${jsStr(tab)})">${esc(txt)}</button>`).join('')}
+                </div>
+            </div></div>
+            <div class="d-flex flex-column min-w-0">${_dcBoardAttention()}${_dcBoardHistory()}</div>
+        </div>`;
+}
+
+// ═══ D · Compacta ════════════════════════════════════════════════════════════
+
+function _dcCompactFaceSet(f) { _dcCompactFace = f === 'rear' ? 'rear' : 'front'; renderDcim(); }
+
+function _dcCompactRow(item, kid) {
+    const w = _dcRvWarr(item.warranty_until);
+    const sub = [kid ? t('dcim_item_on') : t('dcim_face_' + (item.face || 'full')), item.serial || '']
+        .filter(Boolean).join(' · ');
+    const open = item.foreign ? '' : ` onclick="_dcimOpen('edit','item','',${jsStr(item.uid)})"`;
+    return `<button type="button" class="ss-cmp-row${kid ? ' ss-cmp-kid' : ''}"${open}>
+        <span class="ss-cmp-u ss-tabular">${kid ? '' : esc(_dcRvSpan(item))}</span>
+        <span class="ss-rv-dot" style="background:${escAttr(item.foreign ? 'var(--bs-secondary-bg)'
+            : deviceStateColor(item.state || ''))}"></span>
+        <span class="d-flex flex-column flex-grow-1 min-w-0 text-start">
+            <span class="fw-semibold text-truncate">${item.foreign ? esc(t('dcim_foreign')) : esc(_dcimItemName(item))}</span>
+            <span class="ss-fs-2 text-body-secondary text-truncate">${esc(sub)}</span>
+        </span>
+        ${w === 'expired' ? `<span class="badge bg-danger">${esc(t('dcim_warranty_expired_short'))}</span>` : ''}
+        <i class="bi bi-chevron-right text-body-secondary"></i>
+    </button>`;
+}
+
+function _dcCompactList(rack, items) {
+    const h = Number(rack.u_height || 0);
+    const placed = _dcRvPlaced(rack, items).filter(i => {
+        const f = String(i.face || 'full');
+        return f === 'full' || f === _dcCompactFace;
+    });
+    const covered = new Set();
+    placed.forEach(it => {
+        const u = Number(it.u_start || 1), n = Math.max(1, Number(it.u_height || 1));
+        for (let k = 0; k < n; k++) covered.add(u + k);
+    });
+    const filas = [];
+    for (let row = 0; row < h; row++) {
+        const u = _dcimUAtRow(rack, row);
+        placed.filter(it => _dcRvTopRow(rack, it) === row).forEach(it => {
+            filas.push(_dcCompactRow(it, false));
+            const kids = _dceKidsOf(it);
+            (_dcCompactFace === 'rear' ? kids.slice().reverse() : kids)
+                .forEach(k => filas.push(_dcCompactRow(k, true)));
+        });
+        if (!covered.has(u)) filas.push(`<button type="button" class="ss-cmp-row ss-cmp-free"
+            ${_dcimMay('dcim_edit') ? `onclick="_dcRackPlaceAt(${jsStr(String(u))})"` : 'disabled'}>
+            <span class="ss-cmp-u ss-tabular">${esc(String(u))}</span>
+            <span class="d-flex flex-column flex-grow-1 text-start">
+                <span class="fst-italic text-body-secondary">${esc(t('dcim_u_free'))}</span>
+                ${_dcimMay('dcim_edit') ? `<span class="ss-fs-2 text-body-secondary">${
+                    esc(t('dcim_place_here'))}</span>` : ''}</span></button>`);
+    }
+    const beside = _dcRvBeside(items);
+    return `${filas.join('')}
+        ${beside.length ? `<div class="ss-fs-2 text-body-secondary pt-2">${esc(t('dcim_elev_beside'))} ${
+            esc(String(beside.length))}</div>
+            <div class="d-flex flex-wrap gap-1">${beside.map(i => `<button type="button"
+                class="btn btn-sm ${i.state === 'maintenance' ? 'btn-warning' : 'btn-secondary'} rounded-pill"
+                ${i.foreign ? 'disabled' : `onclick="_dcimOpen('edit','item','',${jsStr(i.uid)})"`}>${
+                i.foreign ? esc(t('dcim_foreign')) : esc(_dcimItemName(i))}</button>`).join('')}</div>` : ''}`;
+}
+
+function _dcRackCompactHtml() {
+    const rack = (_dcimRack || {}).rack || {};
+    const items = (_dcimRack || {}).items || [];
+    const tab = ['items', 'cables', 'power', 'hist'].includes(_dcRackTab) ? _dcRackTab : 'items';
+    const n = ((_dcimRack || {}).counts) || {};
+    const pest = [
+        ['items', 'bi-hdd-stack', t('dcim_items'), items.length],
+        ['cables', 'bi-ethernet', t('dcim_cables'), _dcCables && _dcCables.cables ? _dcCables.cables.length : (n.cables || 0)],
+        ['power', 'bi-plug', t('dcim_power'), _dcPower && _dcPower.items ? _dcPowerN(_dcPower) : (n.power || 0)],
+        ['hist', 'bi-clock-history', t('dcim_cat_tab_history'), _dcHist && _dcHist.rows ? _dcHist.rows.length : (n.hist || 0)],
+    ];
+    const cuerpo = tab === 'cables' ? _dcCableFormHtml() + _dcCablesHtml()
+        : tab === 'power' ? _dcPowerHtml()
+        : tab === 'hist' ? _dcHistHtml()
+        : `<div class="btn-group w-100 mb-2" role="group" aria-label="${escAttr(t('dcim_face'))}">
+               <button type="button" class="btn ${_dcCompactFace === 'front' ? 'btn-primary' : 'btn-secondary'}"
+                   aria-pressed="${_dcCompactFace === 'front'}" onclick="_dcCompactFaceSet('front')">${esc(t('dcim_face_front'))}</button>
+               <button type="button" class="btn ${_dcCompactFace === 'rear' ? 'btn-primary' : 'btn-secondary'}"
+                   aria-pressed="${_dcCompactFace === 'rear'}" onclick="_dcCompactFaceSet('rear')">${esc(t('dcim_face_rear'))}</button>
+           </div>
+           <div class="d-flex flex-column gap-1">${_dcCompactList(rack, items)}</div>`;
+    return `<div class="ss-cmp">
+        <div class="ss-cmp-body">${cuerpo}</div>
+        <nav class="ss-cmp-tabs" aria-label="${escAttr(t('dcim_rack_views'))}">${pest.map(([id, icono, txt, cuenta]) =>
+            `<button type="button" class="ss-cmp-tab${tab === id ? ' active' : ''}" aria-pressed="${tab === id}"
+                onclick="_dcRackGo(${jsStr(id)})"><i class="bi ${icono}"></i><span>${esc(txt)}</span>
+                <span class="ss-fs-1 text-body-secondary">${esc(String(cuenta))}</span></button>`).join('')}</nav>
+    </div>`;
+}

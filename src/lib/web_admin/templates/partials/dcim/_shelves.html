@@ -1,0 +1,180 @@
+{# ================================================================
+   DCIM — las estanterías de un armario y lo que hay en cada una.
+
+   Un armario de una sala guarda material suelto —un rollo de cable, cajas de tornillos, un
+   switch de repuesto sin montar— y la pregunta es «¿dónde está?». Su ficha, en el plano de la
+   sala y en el de la planta, dice cuántas estanterías tiene y qué hay en cada una, contando
+   desde arriba, que es como se cuenta delante de un armario abierto.
+
+   Un solo bloque para las dos pantallas: se pinta en un hueco propio (`#dcShelfBox`) que se
+   rellena al llegar los datos, así que ninguna de las dos tiene que saber de él más que dónde
+   ponerlo.
+   ================================================================ #}
+
+//: El armario cuyo contenido se enseña: `{uid, shelves, items, adding, editing}`, o `null`.
+//: `adding` es la estantería en la que se está escribiendo algo nuevo (0 = ninguna) y
+//: `editing`, la cosa que se está cambiando.
+let _dcShelf = null;
+//: El que se está pidiendo, para no pedirlo dos veces mientras llega.
+let _dcShelfLoading = '';
+
+/** El hueco del contenido, en la ficha de una pieza. Nada si no es un armario. */
+function _dcShelfBox(f) {
+    if (!f || f.kind !== 'cabinet') return '';
+    if (!_dcShelf || _dcShelf.uid !== f.uid) {
+        _dcShelfLoad(f.uid);
+        return `<div id="dcShelfBox" class="mt-3 text-muted ss-fs-2">${esc(t('loading'))}</div>`;
+    }
+    return `<div id="dcShelfBox" class="mt-3">${_dcShelfInner()}</div>`;
+}
+
+async function _dcShelfLoad(uid) {
+    if (_dcShelfLoading === uid) return;
+    _dcShelfLoading = uid;
+    const d = await apiGet(`/api/v1/dcim/features/${encodeURIComponent(uid)}/shelf`);
+    _dcShelfLoading = '';
+    if (!d) return;
+    const antes = _dcShelf && _dcShelf.uid === uid ? _dcShelf : null;
+    _dcShelf = {uid, shelves: Number(d.shelves) || 1, items: d.items || [],
+                adding: antes ? antes.adding : 0, editing: antes ? antes.editing : ''};
+    _dcShelfPaint();
+}
+
+function _dcShelfPaint() {
+    const el = document.getElementById('dcShelfBox');
+    if (el && _dcShelf) el.innerHTML = _dcShelfInner();
+}
+
+/** Las estanterías, de arriba abajo, con lo que hay en cada una. */
+function _dcShelfInner() {
+    const s = _dcShelf;
+    const edita = _dcimMay('dcim_edit');
+    const cab = `<div class="d-flex align-items-center gap-2 mb-2">
+        <i class="bi bi-archive text-muted"></i>
+        <span class="fw-semibold">${esc(t('dcim_shelves'))}</span>
+        ${edita ? `<input type="number" min="1" max="50" step="1" class="form-control form-control-sm ss-tabular ms-auto"
+                style="width:5rem" value="${s.shelves}" aria-label="${escAttr(t('dcim_shelves'))}"
+                onchange="_dcShelfCount(this.value)">`
+               : `<span class="ms-auto ss-tabular">${s.shelves}</span>`}
+    </div>`;
+    const filas = [];
+    for (let n = 1; n <= s.shelves; n++) {
+        const aqui = s.items.filter(i => Number(i.shelf) === n);
+        filas.push(`<div class="border rounded-2 p-2 mb-2">
+            <div class="d-flex align-items-center gap-2 ss-fs-2 mb-1">
+                <span class="fw-semibold">${esc(tf('dcim_shelf_n', n))}</span>
+                <span class="text-muted">${aqui.length ? esc(tf('dcim_shelf_things', aqui.length)) : esc(t('dcim_shelf_empty'))}</span>
+                ${edita && s.adding !== n ? `<button type="button" class="btn btn-sm btn-secondary py-0 ms-auto"
+                    onclick="_dcShelfStartAdd(${n})"><i class="bi bi-plus-lg me-1"></i>${esc(t('add'))}</button>` : ''}
+            </div>
+            ${aqui.map(i => s.editing === i.uid ? _dcShelfForm(i, n) : _dcShelfRow(i, edita)).join('')}
+            ${s.adding === n ? _dcShelfForm(null, n) : ''}
+        </div>`);
+    }
+    return cab + filas.join('');
+}
+
+function _dcShelfRow(i, edita) {
+    return `<div class="d-flex align-items-start gap-2 ss-fs-2 py-1 border-top">
+        <span class="badge bg-body-secondary text-body-secondary border ss-tabular">×${esc(String(i.qty ?? 1))}</span>
+        <span class="flex-grow-1 ss-min-0"><span class="d-block text-truncate">${esc(i.label || '')}</span>${
+            i.notes ? `<span class="d-block text-muted text-truncate">${esc(i.notes)}</span>` : ''}</span>
+        ${edita ? `<button type="button" class="btn btn-sm btn-secondary py-0" onclick="_dcShelfEdit(${jsStr(i.uid)})"
+                title="${escAttr(t('edit'))}" aria-label="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>
+            <button type="button" class="btn btn-sm btn-danger py-0" onclick="_dcShelfDrop(${jsStr(i.uid)})"
+                title="${escAttr(t('delete'))}" aria-label="${escAttr(t('delete'))}"><i class="bi bi-trash"></i></button>` : ''}
+    </div>`;
+}
+
+/** Escribir una cosa nueva (`i` vacío) o cambiar una que ya está, con su estantería. */
+function _dcShelfForm(i, n) {
+    const s = _dcShelf;
+    const opciones = Array.from({length: s.shelves}, (_, k) => k + 1).map(k =>
+        `<option value="${k}"${k === n ? ' selected' : ''}>${esc(tf('dcim_shelf_n', k))}</option>`).join('');
+    return `<div class="d-flex flex-column gap-1 py-1 border-top">
+        <input id="dcsh-l" class="form-control form-control-sm" placeholder="${escAttr(t('dcim_shelf_what'))}"
+               value="${escAttr(i ? i.label || '' : '')}"
+               onkeydown="if(event.key==='Enter')_dcShelfSave(${jsStr(i ? i.uid : '')})">
+        <div class="d-flex gap-1">
+            <input id="dcsh-q" type="number" min="0" step="1" class="form-control form-control-sm ss-tabular"
+                   style="width:5rem" aria-label="${escAttr(t('dcim_shelf_qty'))}" title="${escAttr(t('dcim_shelf_qty'))}"
+                   value="${escAttr(String(i ? (i.qty ?? 1) : 1))}">
+            <select id="dcsh-s" class="form-select form-select-sm" aria-label="${escAttr(t('dcim_shelves'))}">${opciones}</select>
+        </div>
+        <input id="dcsh-n" class="form-control form-control-sm" placeholder="${escAttr(t('dcim_shelf_notes'))}"
+               value="${escAttr(i ? i.notes || '' : '')}">
+        <div class="d-flex gap-1 justify-content-end">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcShelfCancel()">${esc(t('cancel'))}</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="_dcShelfSave(${jsStr(i ? i.uid : '')})">${esc(t('save'))}</button>
+        </div>
+    </div>`;
+}
+
+function _dcShelfStartAdd(n) {
+    _dcShelf.adding = n;
+    _dcShelf.editing = '';
+    _dcShelfPaint();
+    document.getElementById('dcsh-l')?.focus();
+}
+
+function _dcShelfEdit(uid) {
+    _dcShelf.editing = uid;
+    _dcShelf.adding = 0;
+    _dcShelfPaint();
+    document.getElementById('dcsh-l')?.focus();
+}
+
+function _dcShelfCancel() {
+    _dcShelf.adding = 0;
+    _dcShelf.editing = '';
+    _dcShelfPaint();
+}
+
+/** Guardar lo escrito: nuevo si `uid` está vacío. */
+async function _dcShelfSave(uid) {
+    const val = (id) => (document.getElementById(id) || {}).value || '';
+    const cuerpo = {label: val('dcsh-l').trim(), qty: Number(val('dcsh-q')) || 0,
+                    shelf: Number(val('dcsh-s')) || 1, notes: val('dcsh-n').trim()};
+    if (!cuerpo.label) return showToast(t('dcim_name_required'), 'warning');
+    const r = uid
+        ? await _dcimSend('PUT', `/api/v1/dcim/shelf-items/${encodeURIComponent(uid)}`, cuerpo)
+        : await _dcimSend('POST', '/api/v1/dcim/shelf-items', Object.assign({feature_uid: _dcShelf.uid}, cuerpo));
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcShelf.adding = 0;
+    _dcShelf.editing = '';
+    _dcShelfLoad(_dcShelf.uid);
+}
+
+function _dcShelfDrop(uid) {
+    const i = (_dcShelf.items || []).find(x => x.uid === uid);
+    showConfirmModal(tf('dcim_shelf_drop_q', (i || {}).label || ''), async () => {
+        const r = await _dcimSend('DELETE', `/api/v1/dcim/shelf-items/${encodeURIComponent(uid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcShelfLoad(_dcShelf.uid);
+    });
+}
+
+/** Cambiar cuántas estanterías tiene. Quitar una con material encima lo niega el servidor, y
+ *  dice cuál: se devuelve el número que había. */
+async function _dcShelfCount(valor) {
+    const n = Math.max(1, Math.min(50, Math.round(Number(valor) || 1)));
+    const uid = _dcShelf.uid;
+    const r = await _dcimSend('PUT', `/api/v1/dcim/features/${encodeURIComponent(uid)}`, {shelves: n});
+    if (!r.ok) {
+        showToast(r.error || t('save_failed'), 'danger');
+        return _dcShelfPaint();
+    }
+    // El número también en la pieza que tiene la pantalla, para que el dibujo y la exportación
+    // lo sepan sin volver a pedir la sala.
+    const lista = (typeof _dcpFeatures === 'function' ? _dcpFeatures() : [])
+        .concat(...Object.values(((typeof _dcsPlan !== 'undefined' && _dcsPlan) || {}).content || {})
+            .map(c => c.features || []));
+    for (const f of lista) if (f.uid === uid) f.shelves = n;
+    _dcShelfLoad(uid);
+}
+
+/** Lo que dice la confirmación de quitar un armario: también lo que se lleva dentro. */
+function _dcShelfDropWarning(uid) {
+    if (!_dcShelf || _dcShelf.uid !== uid || !(_dcShelf.items || []).length) return '';
+    return ' ' + tf('dcim_cabinet_drop_items', _dcShelf.items.length);
+}

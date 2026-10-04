@@ -30,7 +30,7 @@ from __future__ import annotations
 #: tabla de versiones y lo que se le pregunta a un armario de hace seis meses es qué había, dónde
 #: y con qué número de serie — no el fondo en milímetros de cada caja.
 CAMPOS = ('uid', 'label', 'u_start', 'u_height', 'face', 'role', 'serial', 'asset',
-          'device_uid', 'parent_uid', 'u_slots', 'u_slot', 'u_slot_span', 'u_split')
+          'device_uid', 'parent_uid', 'u_slots', 'u_slot', 'u_slot_span', 'u_split', 'placement')
 
 #: Y del armario. Su nombre y su altura son lo que cambia de sitio a las demás cosas.
 CAMPOS_RACK = ('name', 'u_height', 'desc_units', 'width_mm', 'depth_mm', 'room_uid')
@@ -54,11 +54,21 @@ def snapshot(rack: dict, items, owners=None) -> dict:
     """
     fuera = {c: (rack or {}).get(c) for c in CAMPOS_RACK}
     fuera['items'] = sorted(
-        [{c: (it or {}).get(c) for c in CAMPOS} for it in (items or ())],
+        [_item_photo(it) for it in (items or ())],
         key=lambda x: (int(x.get('u_start') or 0), str(x.get('uid') or '')))
     if owners is not None:
         fuera[OWNERS] = {str(k): str(v or '') for k, v in owners.items()}
     return fuera
+
+
+def _item_photo(it: dict) -> dict:
+    """One item's fields for the photo. `placement` only when it is NOT the rails (`u`): the
+    photos taken before it was kept say nothing, and «nothing» has to read as the rails — or every
+    item of every old version would compare as moved."""
+    foto = {c: (it or {}).get(c) for c in CAMPOS}
+    if str(foto.get('placement') or 'u') == 'u':
+        foto['placement'] = None
+    return foto
 
 
 def _by_uid(foto: dict) -> dict:
@@ -69,6 +79,11 @@ def _where(item: dict) -> str:
     """Dónde está algo, dicho como se lee: ``U4`` o ``U4–U6``, y ``encima`` si va montado."""
     if str((item or {}).get('parent_uid') or ''):
         return 'mounted'
+    # Lo que no ocupa U se dice con su sitio y no con «U0»: un SAI al lado del armario no está
+    # en ninguna U, y «U0» se lee como una U que no existe.
+    sitio = str((item or {}).get('placement') or 'u')
+    if sitio != 'u':
+        return 'place:' + sitio
     u = int((item or {}).get('u_start') or 0)
     alto = max(1, int((item or {}).get('u_height') or 1))
     return f'U{u}' if alto == 1 else f'U{u}–U{u + alto - 1}'
@@ -107,6 +122,9 @@ def compare(antes: dict, ahora: dict) -> list[dict]:
             continue
         for campo in CAMPOS:
             if campo == 'uid' or viejo.get(campo) == nuevo.get(campo):
+                continue
+            # A photo from before `placement` was kept has no such key: that is not a change.
+            if campo == 'placement' and campo not in viejo:
                 continue
             fuera.append({'kind': 'edit', 'uid': uid,
                           'label': str(nuevo.get('label') or viejo.get('label') or ''),

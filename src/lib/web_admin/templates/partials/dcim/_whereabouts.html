@@ -1,0 +1,129 @@
+{# ================================================================
+   DCIM — dónde está quien mira, en la dirección y al volver.
+
+   Aparte de `_render.html`, que es el armazón y no debe crecer: la dirección (`?rack=`,
+   `?room=`, `?siteplan=&floor=`, `?view=board`) que hace que un F5 o un enlace pegado lleguen
+   a la misma pantalla, y lo que se deja elegido al volver al inventario.
+   ================================================================ #}
+
+//: El plano de una sede pedido por la URL, `{site, floor}`, o `null`. Como la sala: después del
+//: árbol. Sin esto, un F5 en el plano de una sede volvía al inventario.
+let _dcimUrlSite = null;
+const _DCIM_URL_SITE = 'siteplan';
+const _DCIM_URL_FLOOR = 'floor';
+//: Lo elegido en el inventario —la sede y su sala—, para que un F5 vuelva a ello. Vivía solo en
+//: memoria: tras recargar, la ficha enseñaba otra vez la primera sede.
+const _DCIM_URL_SEL = 'site';
+const _DCIM_URL_SEL_ROOM = 'site_room';
+
+//: De dónde se acaba de volver al inventario —`{site, room, rack}`—, para dejarlo elegido,
+//: desplegado y a la vista. Se volvía a la lista arriba del todo, con la sede plegada, y había
+//: que buscar otra vez el armario del que se venía. Hasta que se elija otra cosa.
+let _dcimCameFrom = null;
+//: Si ya se llevó la vista hasta él: una vez, al volver; no en cada repintado.
+let _dcimCameScrolled = false;
+
+/** Where the reader is, in the URL. Same rule the fleet follows: what is on screen is a fact
+ *  about this tab, and a pasted link should land on it. */
+function _dcimUrl() {
+    try {
+        const url = new URL(window.location.href);
+        const rack = (_dcimRack || {}).rack && _dcimRack.rack.uid;
+        if (rack) url.searchParams.set(_DCIM_URL_RACK, rack);
+        else url.searchParams.delete(_DCIM_URL_RACK);
+        const room = (_dcimPlan || {}).room && _dcimPlan.room.uid;
+        if (room && !rack) url.searchParams.set(_DCIM_URL_ROOM, room);
+        else url.searchParams.delete(_DCIM_URL_ROOM);
+        // El plano de una sede, con su planta.
+        const sede = !rack && !room && _dcsPlan ? _dcsPlan.site.uid : '';
+        if (sede) {
+            url.searchParams.set(_DCIM_URL_SITE, sede);
+            if (_dcsPlan.floor) url.searchParams.set(_DCIM_URL_FLOOR, _dcsPlan.floor);
+            else url.searchParams.delete(_DCIM_URL_FLOOR);
+        } else {
+            url.searchParams.delete(_DCIM_URL_SITE);
+            url.searchParams.delete(_DCIM_URL_FLOOR);
+        }
+        // Lo elegido en el inventario, mientras se mira el inventario: con un rack o un plano
+        // abierto, la dirección es la de ellos.
+        const elegida = !rack && !room && !sede && !_dcimBoard ? _dcimSel.site : '';
+        if (elegida) url.searchParams.set(_DCIM_URL_SEL, elegida);
+        else url.searchParams.delete(_DCIM_URL_SEL);
+        if (elegida && _dcimSel.room) url.searchParams.set(_DCIM_URL_SEL_ROOM, _dcimSel.room);
+        else url.searchParams.delete(_DCIM_URL_SEL_ROOM);
+        // ANTES de escribir la dirección: se ponía después, y el cuadro de mando no llegaba
+        // nunca a la URL.
+        if (_dcimBoard) url.searchParams.set(_DCIM_URL_VIEW, 'board');
+        else url.searchParams.delete(_DCIM_URL_VIEW);
+        window.history.replaceState({}, '', url);
+    } catch (_) { /* a URL that cannot be written is not worth failing a render for */ }
+}
+
+/** Al cargar: lo elegido que diga la dirección, elegido otra vez y desplegado, y la vista
+ *  llevada hasta ello una vez —sin marcarlo, que no es de donde se vuelve—. */
+function _dcimUrlReadSel(q) {
+    const site = q.get(_DCIM_URL_SEL) || '';
+    if (!site) return;
+    const room = q.get(_DCIM_URL_SEL_ROOM) || '';
+    _dcimSel = {site, room};
+    // Ya decidida: si no, el plegado de la primera vez la volvería a plegar al verla.
+    _dcimFoldSeen.add(site);
+    _dcimFold.delete(site);
+    _dcimTreeOpen.add(site);
+    _dcimScrollTo = {site, room};
+}
+
+//: Adónde llevar la vista en el próximo dibujado del inventario, sin marcar nada, o `null`.
+let _dcimScrollTo = null;
+
+/** Apuntar de dónde se vuelve: el armario, la sala o la sede abiertos ahora mismo. La sede
+ *  y la sala se sacan del árbol, que es lo que tiene la cadena entera. Deja elegida esa sede
+ *  —y esa sala— y desplegada, que es lo que hace pulsarla. */
+function _dcimRemember() {
+    let site = '', room = '', rack = '';
+    if (_dcimRack && _dcimRack.rack) {
+        rack = _dcimRack.rack.uid;
+        room = String(_dcimRack.rack.room_uid || '');
+    } else if (_dcimPlan && _dcimPlan.room) {
+        room = _dcimPlan.room.uid;
+    } else if (_dcsPlan && _dcsPlan.site) {
+        site = _dcsPlan.site.uid;
+    }
+    if (room && !site) {
+        const s = (_dcimData.sites || []).find(x => (x.rooms || []).some(r => r.uid === room));
+        site = s ? s.uid : '';
+    }
+    if (!site) return;
+    _dcimCameFrom = {site, room, rack};
+    _dcimCameScrolled = false;
+    _dcimSel = {site, room};
+    _dcimFold.delete(site);
+    _dcimTreeOpen.add(site);
+}
+
+/** Después de pintar el inventario: marcar lo que se acaba de dejar —el armario si se vino de
+ *  uno, si no la sala, si no la sede— y, la primera vez, llevar la vista hasta él. */
+function _dcimRevealCameFrom() {
+    if (_dcimRack || _dcimPlan || _dcsPlan) return;
+    if (_dcimScrollTo) {
+        const s = _dcimScrollTo;
+        const el = (s.room && document.getElementById('dcim-room-' + s.room))
+            || document.getElementById('dcim-site-' + s.site);
+        if (el) { _dcimScrollTo = null; el.scrollIntoView({block: 'center'}); }
+    }
+    const c = _dcimCameFrom;
+    if (!c) return;
+    const deRack = c.rack && document.querySelector(`[data-dcim-rack="${CSS.escape(c.rack)}"]`);
+    const deSala = !deRack && c.room && document.getElementById('dcim-room-' + c.room);
+    const el = deRack || deSala || document.getElementById('dcim-site-' + c.site);
+    if (!el) return;
+    // El contorno, solo en lo pequeño y concreto. Una sede es un bloque entero —en la ficha, el
+    // panel de la derecha completo— y rodearla dejaba un borde azul sobre todo; ya queda
+    // elegida y desplegada. Y en la ficha, la sala elegida ya lleva su propio borde.
+    if (deRack || (deSala && _dcimLayout !== 'detail')) el.classList.add('ss-came-from');
+    if (!_dcimCameScrolled) {
+        _dcimCameScrolled = true;
+        el.scrollIntoView({block: 'center'});
+    }
+}
+

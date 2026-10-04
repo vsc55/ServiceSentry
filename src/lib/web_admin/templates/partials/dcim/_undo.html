@@ -1,0 +1,173 @@
+{# ================================================================
+   DCIM — deshacer y rehacer en los planos.
+
+   En el plano de una sala y en el de una planta, todo se guarda al soltar: arrastrar un rack
+   un metro de más, girar lo que no era o estirar una sala con el asa equivocada ya está en el
+   servidor cuando uno se da cuenta. Esto lo devuelve.
+
+   Se apoya en el único sitio por el que esos cambios salen, `_dcimSend`. Antes de mandar un
+   cambio (`PUT`) a algo del plano abierto se mira cómo estaba según lo último GUARDADO —una
+   copia tomada al abrir el plano y puesta al día con cada cambio que el servidor acepta—, no
+   según el dibujo, que al soltar ya enseña lo nuevo. Deshacer es mandar lo de antes.
+
+   Lo que NO se deshace aquí: crear y borrar. Borrar ya pregunta antes, y un rack borrado se
+   lleva lo que tenía dentro, que no se recupera reenviando su fila.
+   ================================================================ #}
+
+//: Lo guardado de cada cosa del plano abierto, por su dirección en la API: la base para saber
+//: cómo estaba antes de un cambio.
+const _dcUndoShadow = new Map();
+//: Lo hecho y lo deshecho: `{url, before, after, at}`. Del plano abierto y de nada más.
+let _dcUndoStack = [];
+let _dcRedoStack = [];
+//: De qué plano son: abrir otro empieza de cero.
+let _dcUndoCtx = '';
+//: Mientras se deshace o se rehace, lo que se manda no es un cambio nuevo que apuntar.
+let _dcUndoBusy = false;
+//: Dos cambios a la misma cosa así de seguidos son uno: escribir «1200» en el inspector, o las
+//: flechas del teclado, no deben costar cuatro deshacer.
+const _DC_UNDO_MERGE_MS = 1500;
+const _DC_UNDO_MAX = 100;
+
+/** Las cosas del plano abierto, con su dirección: lo que se puede deshacer. */
+function _dcUndoItems() {
+    const out = [];
+    const add = (tipo, lista) => (lista || []).forEach(o => {
+        if (o && o.uid) out.push([`/api/v1/dcim/${tipo}/${encodeURIComponent(o.uid)}`, o]);
+    });
+    if (_dcimPlan) {
+        add('rooms', [_dcimPlan.room]);
+        add('racks', _dcimPlan.racks);
+        add('features', typeof _dcpFeatures === 'function' ? _dcpFeatures() : []);
+    } else if (_dcsPlan) {
+        add('floors', _dcsPlan.floors);
+        add('rooms', (_dcsPlan.site || {}).rooms);
+        for (const c of Object.values(_dcsPlan.content || {})) {
+            add('racks', c.racks);
+            add('features', c.features);
+        }
+    }
+    return out;
+}
+
+/** Tomar la foto de lo guardado al abrir un plano (o al volver a cargarlo). Otro plano es otra
+ *  historia: lo de deshacer del anterior se olvida. */
+function _dcUndoPrime() {
+    const ctx = _dcimPlan ? 'room:' + _dcimPlan.room.uid
+              : _dcsPlan ? 'site:' + _dcsPlan.site.uid : '';
+    if (ctx !== _dcUndoCtx) {
+        _dcUndoCtx = ctx;
+        _dcUndoStack = [];
+        _dcRedoStack = [];
+    }
+    _dcUndoShadow.clear();
+    for (const [url, o] of _dcUndoItems()) _dcUndoShadow.set(url, JSON.parse(JSON.stringify(o)));
+    _dcUndoPaint();
+}
+
+/** Cómo estaba lo que va a cambiar, campo a campo, o `null` si no es algo del plano. */
+function _dcUndoBefore(url, cuerpo) {
+    if (_dcUndoBusy || !cuerpo || typeof cuerpo !== 'object') return null;
+    const sombra = _dcUndoShadow.get(url);
+    if (!sombra) return null;
+    const antes = {};
+    for (const k of Object.keys(cuerpo)) if (k in sombra) antes[k] = sombra[k];
+    return Object.keys(antes).length ? antes : null;
+}
+
+/** Apuntar un cambio que el servidor aceptó. */
+function _dcUndoRecord(url, antes, cuerpo) {
+    const sombra = _dcUndoShadow.get(url);
+    const despues = {};
+    for (const k of Object.keys(antes)) despues[k] = cuerpo[k];
+    if (sombra) Object.assign(sombra, despues);
+    // Lo que no cambió nada no se apunta: un clic que no movió es un deshacer que no hace nada.
+    if (Object.keys(antes).every(k => JSON.stringify(antes[k]) === JSON.stringify(despues[k]))) return;
+    const ahora = Date.now();
+    const top = _dcUndoStack[_dcUndoStack.length - 1];
+    if (top && top.url === url && ahora - top.at < _DC_UNDO_MERGE_MS) {
+        for (const k of Object.keys(antes)) if (!(k in top.before)) top.before[k] = antes[k];
+        Object.assign(top.after, despues);
+        top.at = ahora;
+    } else {
+        _dcUndoStack.push({url, before: antes, after: despues, at: ahora});
+        if (_dcUndoStack.length > _DC_UNDO_MAX) _dcUndoStack.shift();
+    }
+    _dcRedoStack = [];
+    _dcUndoPaint();
+}
+
+/** Deshacer (`dir` = 'undo') o rehacer ('redo') lo último. */
+async function _dcUndo(dir) {
+    const de = dir === 'redo' ? _dcRedoStack : _dcUndoStack;
+    const a = dir === 'redo' ? _dcUndoStack : _dcRedoStack;
+    const e = de.pop();
+    if (!e) return;
+    // Lo pendiente de escribir sale antes: si no, llegaría DESPUÉS y desharía el deshacer.
+    if (typeof _dcpFlush === 'function') await _dcpFlush();
+    const valores = dir === 'redo' ? e.after : e.before;
+    _dcUndoBusy = true;
+    let r;
+    try { r = await _dcimSend('PUT', e.url, valores); } finally { _dcUndoBusy = false; }
+    if (!r || !r.ok) {
+        de.push(e);
+        _dcUndoPaint();
+        return showToast((r && r.error) || t('save_failed'), 'danger');
+    }
+    _dcUndoDone(e, valores, a);
+    renderDcim();
+}
+
+/** Lo deshecho (o rehecho) ya está en el servidor: lo mismo en lo guardado y en el dibujo, y
+ *  la entrada a la otra pila. */
+function _dcUndoDone(e, valores, destino) {
+    const sombra = _dcUndoShadow.get(e.url);
+    if (sombra) Object.assign(sombra, JSON.parse(JSON.stringify(valores)));
+    for (const [url, o] of _dcUndoItems()) if (url === e.url) Object.assign(o, JSON.parse(JSON.stringify(valores)));
+    e.at = 0;           // lo deshecho no se junta con lo siguiente que se haga
+    destino.push(e);
+    _dcUndoPaint();
+}
+
+/** Qué se desharía: el nombre de la cosa, para el título del botón. */
+function _dcUndoWhat(e) {
+    if (!e) return '';
+    const o = (_dcUndoItems().find(([url]) => url === e.url) || [])[1] || {};
+    return o.name || o.label || o.uid || '';
+}
+
+/** Los dos botones de la barra, para quien edita. En su propio hueco, que se repinta solo: un
+ *  cambio guardado no repinta la pantalla entera, y el botón tiene que encenderse igual. */
+function _dcUndoButtons() {
+    if (!_dcimMay('dcim_edit')) return '';
+    return `<span class="btn-group btn-group-sm" id="dcUndoBtns">${_dcUndoButtonsInner()}</span>`;
+}
+
+function _dcUndoButtonsInner() {
+    const u = _dcUndoStack[_dcUndoStack.length - 1], r = _dcRedoStack[_dcRedoStack.length - 1];
+    const boton = (dir, icono, e, clave) => {
+        const texto = e ? tf(clave, _dcUndoWhat(e)) : t(clave + '_none');
+        return `<button type="button" class="btn btn-sm btn-secondary" ${e ? '' : 'disabled'}
+            onclick="_dcUndo(${jsStr(dir)})" title="${escAttr(texto)}" aria-label="${escAttr(texto)}">
+            <i class="bi ${icono}"></i></button>`;
+    };
+    return boton('undo', 'bi-arrow-counterclockwise', u, 'dcim_undo')
+         + boton('redo', 'bi-arrow-clockwise', r, 'dcim_redo');
+}
+
+function _dcUndoPaint() {
+    const el = document.getElementById('dcUndoBtns');
+    if (el) el.innerHTML = _dcUndoButtonsInner();
+}
+
+/** Ctrl+Z, y Ctrl+Y o Ctrl+Mayús+Z, con un plano abierto y fuera de un campo de texto: dentro
+ *  de uno, deshacer es del campo. */
+document.addEventListener('keydown', (ev) => {
+    if (!(ev.ctrlKey || ev.metaKey) || !(_dcimPlan || _dcsPlan) || _dcimRack) return;
+    const pane = document.getElementById('dcim-container');
+    if (!pane || !pane.offsetParent) return;
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '')) return;
+    const k = (ev.key || '').toLowerCase();
+    if (k === 'z' && !ev.shiftKey) { ev.preventDefault(); _dcUndo('undo'); }
+    else if (k === 'y' || (k === 'z' && ev.shiftKey)) { ev.preventDefault(); _dcUndo('redo'); }
+});

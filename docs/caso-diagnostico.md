@@ -5,6 +5,37 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## El clic que caía al lado: el lienzo con bandas
+
+**Síntoma.** Al calibrar el plano de fondo de una planta, la escala salía exacta y el plano
+quedaba 1,7 m desplazado en vertical; en la sala, 14 cm. Los puntos rojos que marca la
+calibración se dibujaban unos píxeles al lado de donde se había pulsado.
+
+**Diagnóstico.** Comparando, sobre el mismo píxel de la imagen, lo que devolvía `ssCanvasPoint`
+con lo que da `svg.getScreenCTM().inverse()`. En la sala, el `<svg>` medía 1046×868 px (proporción
+1,21) y su `viewBox` 231×159 (1,46): `ssCanvasPoint` decía y = 305 mm y la matriz del navegador
+y = −137. En la planta las proporciones eran otras y el error estaba en X. El eje que fallaba, y
+cuánto, dependían del zoom y del tamaño de la ventana. La escala salía bien solo porque los dos
+puntos estaban a la misma altura y el eje erróneo era el otro.
+
+**Causa raíz.** El `<svg>` del lienzo compartido usa el encuadre por defecto,
+`preserveAspectRatio="xMidYMid meet"`: guarda la proporción del dibujo y, si la caja es más ancha
+o más alta que el `viewBox`, lo centra con bandas vacías. `ssCanvasPoint` estiraba el `viewBox`
+sobre la caja entera, así que un clic caía desplazado hasta el ancho de esa banda, y solo en ese
+eje. `ssCanvasPanMove` hacía la misma cuenta: en el eje con banda, el dibujo se movía a otra
+velocidad que el ratón.
+
+**Solución.** `_ssFit` en [`_canvas.html`](../src/lib/web_admin/templates/partials/infra/_canvas.html)
+calcula el encuadre de verdad: un solo factor de escala, el menor de los dos ejes, y la banda a
+cada lado. Lo usan las dos conversiones. `TestElLienzoConBandas`, en
+`tests/integration/test_wa_dcim_plancal.py`, prueba una caja de 1000×500 px con una ventana
+cuadrada. Con la cuenta vieja, falla.
+
+**Lección.** Pasar de píxeles a coordenadas del dibujo no es dividir por el tamaño de la caja
+mientras el SVG conserve la proporción. Se nota poco: con la ventana casi del mismo tamaño que la
+caja el error son unos píxeles, y arrastrar un rack parece «un poco impreciso». Hace falta algo
+que mida contra una referencia conocida, como una calibración, para verlo entero.
+
 ## La lectura que bloqueaba el `DROP TABLE` del dueño de la base
 
 **Síntoma.** Probando una fuente externa de syslog contra MariaDB, el script leía la tabla

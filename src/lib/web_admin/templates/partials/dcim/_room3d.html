@@ -86,8 +86,10 @@ function _dc3dStop() {
     _dc3d = null;
 }
 
-function _dc3dHtml() {
-    return `<div id="dc3d-box" class="border rounded-3 overflow-hidden ss-infra-canvas position-relative mb-3"
+function _dc3dHtml(hint) {
+    // `flex-shrink-0`: dentro de una columna flexible el visor se encogía a 280 px, y a un alto
+    // distinto según la planta.
+    return `<div id="dc3d-box" class="border rounded-3 overflow-hidden ss-infra-canvas position-relative mb-3 flex-shrink-0"
                  style="height:26rem">
         <button type="button" class="btn btn-sm btn-secondary position-absolute" id="dc3d-full"
                 style="top:.5rem;right:.5rem;z-index:2" onclick="_dc3dFull()"
@@ -99,8 +101,29 @@ function _dc3dHtml() {
                 onpointerdown="_dc3dDown(event)" onpointermove="_dc3dMove(event)"
                 onpointerup="_dc3dUp(event)" onpointercancel="_dc3dUp(event)"
                 oncontextmenu="return false"></canvas>
-        <div class="ss-map-credit" id="dc3d-read">${esc(t('dcim_3d_hint'))}</div>
+        <div id="dc3d-labels" class="ss-3d-labels${_dc3dShowLabels ? '' : ' d-none'}" aria-hidden="true"></div>
+        <button type="button" class="btn btn-sm ${_dc3dShowLabels ? 'btn-warning' : 'btn-secondary'} position-absolute"
+                id="dc3d-labels-btn" style="top:.5rem;right:3rem;z-index:2" onclick="_dc3dToggleLabels()"
+                title="${escAttr(t('dcim_3d_labels'))}" aria-label="${escAttr(t('dcim_3d_labels'))}">
+            <i class="bi bi-tag"></i></button>
+        <div class="ss-map-credit" id="dc3d-read">${esc(hint || t('dcim_3d_hint'))}</div>
+        ${_dc3dNorth() !== null ? _dcCompass(0, 'dc3d-compass') : ''}
     </div>`;
+}
+
+//: Si se ven los rótulos —el nombre de cada rack, de cada pieza con etiqueta y de cada sala—.
+//: Se recuerda en el navegador: es cómo le gusta mirar a cada uno.
+let _dc3dShowLabels = (() => {
+    try { return localStorage.getItem('ss.dc3d.labels') !== '0'; } catch (_) { return true; }
+})();
+
+function _dc3dToggleLabels() {
+    _dc3dShowLabels = !_dc3dShowLabels;
+    try { localStorage.setItem('ss.dc3d.labels', _dc3dShowLabels ? '1' : '0'); } catch (_) { /* sin almacén */ }
+    document.getElementById('dc3d-labels')?.classList.toggle('d-none', !_dc3dShowLabels);
+    const b = document.getElementById('dc3d-labels-btn');
+    if (b) b.className = `btn btn-sm ${_dc3dShowLabels ? 'btn-warning' : 'btn-secondary'} position-absolute`;
+    if (_dc3d) _dc3d.labelsKey = '';
 }
 
 // ── La geometría: un cubo, y ya ──────────────────────────────────────────────
@@ -213,14 +236,20 @@ const _dc3norm = (v) => {
 //: una sala real se ve a través de ellos, y un pasillo confinado opaco esconde justo la fila de
 //: racks que se quería mirar.
 const _DC3_COLOR = {
-    floor: [0.30, 0.32, 0.35, 1], wallroom: [0.22, 0.24, 0.27, 1],
+    // El muro, claro como una pared, y el rack, oscuro como un armario: eran casi el mismo gris
+    // —0,22 contra 0,20— y un rack contra la pared se confundía con ella.
+    floor: [0.30, 0.32, 0.35, 1], wallroom: [0.50, 0.52, 0.55, 1],
+    ground: [0.24, 0.25, 0.28, 1],
     tile: [0.40, 0.42, 0.46, 1],
-    rack:  [0.20, 0.22, 0.26, 1],
+    rack:  [0.13, 0.14, 0.17, 1],
     aisle: [0.62, 0.68, 1.00, 0.16], zone: [0.35, 0.38, 0.43, 0.35],
     column: [0.36, 0.37, 0.40, 1], wall: [0.60, 0.66, 1.00, 0.22],
     door: [0.95, 0.76, 0.05, 1], panel: [0.82, 0.80, 0.74, 1],
     ups: [0.30, 0.32, 0.37, 1], crac: [0.20, 0.44, 0.50, 1],
     bench: [0.46, 0.37, 0.27, 1], extinguisher: [0.72, 0.16, 0.16, 1],
+    cabinet: [0.42, 0.44, 0.48, 1],
+    // La franja del delante de una pieza que lo tiene: el azul del tema, como en el plano.
+    front: [0.23, 0.48, 0.92, 1],
     tray: [0.95, 0.76, 0.05, 0.85], label: [0.35, 0.38, 0.43, 0.5],
 };
 
@@ -234,44 +263,77 @@ const _DC3_STATE = {
 /** Todo lo que hay que pintar, como una lista de cajas en METROS.
  *
  *  Se construye una vez por apertura y no en cada fotograma: son doscientas cajas y sesenta
- *  fotogramas por segundo, y recalcularlas es trabajo que no cambia de resultado. */
+ *  fotogramas por segundo, y recalcularlas es trabajo que no cambia de resultado. La sala
+ *  abierta, salvo que quien abrió el visor diga otra cosa (`_dc3d.build`): el plano de la sede
+ *  lo abre con una planta, o con el edificio entero. */
 function _dc3dScene() {
-    const room = (_dcimPlan || {}).room || {};
-    const kinds = _dcpKinds();
+    if (_dc3d && typeof _dc3d.build === 'function') return _dc3d.build();
+    const escena = _dc3dRoomBoxes((_dcimPlan || {}).room || {}, (_dcimPlan || {}).racks || [],
+                                  _dcpFeatures(), _dcpKinds(), {air: _dcpAir});
+    // Y el plano de la sala en su suelo, donde lo pone la calibración: unos milímetros por
+    // encima de él, que a la misma altura pelearían por cada píxel.
+    const img = (_dcimPlan || {}).image;
+    if (img && img.data && _dcPlanBg) {
+        const b = _dcpPlanBox(), M = 0.001;
+        escena.planos = [{data: img.data, alpha: b.scaled ? 0.85 : 0.5,
+                          m: _dc3model(b.x * M, 0.01, b.y * M, b.w * M, 1, b.h * M, 0)}];
+    }
+    return escena;
+}
+
+/** Las cajas de UNA sala, en sus coordenadas: la esquina en (0, 0) y sin girar.
+ *
+ *  Una función de los datos y no de la sala abierta, porque la misma sala se pinta sola —su
+ *  visor— y dentro de una planta, girada y en su sitio (`_dc3dPlace`). Dos cuentas de cómo se
+ *  levanta una sala serían dos salas que no se parecen según desde dónde se miren.
+ *
+ *  `o`: `tiles` (las líneas de baldosa: en una planta son la mayor parte de las cajas y no se
+ *  leen desde lejos), `air` (lo que cuelga), `walls` y `floor` (la zona general de una planta
+ *  no tiene ni lo uno ni lo otro: es la planta misma), `floorY` (dónde empieza su suelo; en una
+ *  planta, encima del de la planta y no a la misma altura, que pelearían por el mismo píxel) y
+ *  `ghost` (una sala que no ha dicho cuánto mide: tenue, para que no parezca medida). */
+function _dc3dRoomBoxes(room, racks, features, kinds, o) {
+    o = Object.assign({tiles: true, air: true, walls: true, floor: true, floorY: -0.02,
+                       ghost: false}, o || {});
     const M = 0.001;                                  // milímetros → metros
     const W = (Number(room.width_mm) || 0) * M;
     const D = (Number(room.depth_mm) || 0) * M;
     const H = _DC3_ROOM_H * M;
     const cajas = [];
+    const tenue = (c) => (o.ghost ? [c[0], c[1], c[2], Math.min(c[3], 0.3)] : c);
     const push = (color, x, y, z, w, h, d, rot, lee, pivot) =>
         cajas.push({color, m: _dc3model(x, y, z, w, h, d, rot, pivot), lee});
 
     // El suelo, del tamaño de la sala si alguien lo dijo y del de lo que hay si no: una sala sin
     // medidas dibujada sobre la nada deja los racks flotando.
     const cx = W || 12, cz = D || 8;
-    push(_DC3_COLOR.floor, 0, -0.02, 0, cx, 0.02, cz, 0, null);
+    // Tenue, si la sala no ha dicho cuánto mide, solo lo que la delimita —su suelo y sus muros—:
+    // lo de dentro sí está, y medido.
+    if (o.floor) push(tenue(_DC3_COLOR.floor), 0, o.floorY, 0, cx, -o.floorY, cz, 0, null);
     // Los cuatro muros, cada uno con el lado de la sala en que queda FUERA: el que se interpone
     // entre la cámara y la sala se dibuja de cristal (`_dc3dWallAlpha`). Antes solo había los
     // dos del fondo —los cuatro tapaban la vista desde fuera—, y cruzar uno de ellos dejaba la
     // pantalla en gris: se miraba la sala a través de su muro, por detrás.
     const muro = (x, z, w, d, lado) =>
-        cajas.push({color: _DC3_COLOR.wallroom, m: _dc3model(x, 0, z, w, H, d, 0), lee: null,
-                    muro: lado});
-    muro(0, -0.06, cx, 0.06, 'z0');
-    muro(-0.06, 0, 0.06, cz, 'x0');
-    muro(0, cz, cx, 0.06, 'z1');
-    muro(cx, 0, 0.06, cz, 'x1');
+        cajas.push({color: tenue(_DC3_COLOR.wallroom), m: _dc3model(x, 0, z, w, H, d, 0),
+                    lee: null, muro: lado});
+    if (o.walls) {
+        muro(0, -0.06, cx, 0.06, 'z0');
+        muro(-0.06, 0, 0.06, cz, 'x0');
+        muro(0, cz, cx, 0.06, 'z1');
+        muro(cx, 0, 0.06, cz, 'x1');
+    }
     // Las baldosas, como líneas en el suelo: sin ellas no hay con qué medir a ojo, y en una
     // vista en perspectiva «a dos baldosas» es la única distancia que se lee.
     const baldosa = (Number(room.tile_mm) || 600) * M;
-    if (baldosa > 0.1 && cx / baldosa < 200 && cz / baldosa < 200) {
+    if (o.tiles && baldosa > 0.1 && cx / baldosa < 200 && cz / baldosa < 200) {
         for (let x = baldosa; x < cx - 1e-6; x += baldosa)
             push(_DC3_COLOR.tile, x - 0.004, 0, 0, 0.008, 0.001, cz, 0, null);
         for (let z = baldosa; z < cz - 1e-6; z += baldosa)
             push(_DC3_COLOR.tile, 0, 0, z - 0.004, cx, 0.001, 0.008, 0, null);
     }
 
-    for (const r of (_dcimPlan.racks || [])) {
+    for (const r of (racks || [])) {
         const w = (Number(r.width_mm) || 600) * M, d = (Number(r.depth_mm) || 1000) * M;
         // Lo alto que es un rack sale de sus U, no de una constante: un armario de 42U y uno de
         // 12 son dos cosas distintas y en planta se ven iguales.
@@ -293,20 +355,87 @@ function _dc3dScene() {
              [rx + w / 2, rz + d / 2]);
     }
 
-    for (const f of _dcpFeatures()) {
-        const spec = kinds[f.kind] || {};
-        if ((spec.layer === 'air') && !_dcpAir) continue;
+    for (const f of (features || [])) {
+        const spec = (kinds || {})[f.kind] || {};
+        if ((spec.layer === 'air') && !o.air) continue;
         const w = (Number(f.width_mm) || 600) * M, d = (Number(f.depth_mm) || 600) * M;
         // Lo suyo si lo tiene, lo de su tipo si no: la misma cuenta que el alzado.
-        const z = _dcpPieceZ(f);
+        const z = _dcpPieceZ(f, kinds || {});
         const h = Math.max(0.01, z.h * M);
         const base = z.base * M;
-        push(_DC3_COLOR[f.kind] || [0.3, 0.32, 0.36, 1],
-             (Number(f.pos_x) || 0) * M, base, (Number(f.pos_y) || 0) * M,
-             w, h, d, Number(f.rotation) || 0,
-             {name: f.label || '', kind: t('dcim_kind_' + f.kind), w, d, h, state: ''});
+        const fx = (Number(f.pos_x) || 0) * M, fz = (Number(f.pos_y) || 0) * M;
+        const rot = Number(f.rotation) || 0;
+        const lee = {name: f.label || '', kind: t('dcim_kind_' + f.kind), w, d, h, state: ''};
+        const color = _DC3_COLOR[f.kind] || [0.3, 0.32, 0.36, 1];
+        if (f.kind === 'cabinet') {
+            _dc3dCabinet(push, color, fx, base, fz, w, h, d, rot, Math.max(1, Number(f.shelves) || 1), lee);
+        } else {
+            push(color, fx, base, fz, w, h, d, rot, lee);
+            // El delante, como en un rack: una franja en la cara del lado de `pos_y`, girando
+            // con la pieza alrededor de SU centro.
+            if (spec.front) push(_DC3_COLOR.front, fx, base + h * 0.02, fz - 0.012, w, h * 0.96, 0.012,
+                                 rot, null, [fx + w / 2, fz + d / 2]);
+        }
     }
-    return {cajas, W: cx, D: cz, H};
+    return {cajas, W: cx, D: cz, H, planos: []};
+}
+
+/** Un armario abierto por delante —el lado de `pos_y`—: laterales, fondo, techo y suelo, y
+ *  una balda por cada estantería. Macizo era un bloque que no dejaba ver que tiene baldas ni
+ *  cuántas, que es lo que se le pregunta. Todas las tablas giran alrededor del centro del
+ *  armario, no del suyo: girando cada una sobre sí misma se desmontaría. */
+function _dc3dCabinet(push, color, x, y, z, w, h, d, rot, baldas, lee) {
+    const g = Math.min(0.025, w / 10, d / 10, h / 10);          // el grueso de una tabla
+    const centro = [x + w / 2, z + d / 2];
+    const tabla = (c, tx, ty, tz, tw, th, td, l) => push(c, tx, ty, tz, tw, th, td, rot, l || null, centro);
+    const claro = [Math.min(1, color[0] * 1.35), Math.min(1, color[1] * 1.35), Math.min(1, color[2] * 1.35), 1];
+    tabla(color, x, y, z + d - g, w, h, g, lee);                // el fondo
+    tabla(color, x, y, z, g, h, d);                             // los lados
+    tabla(color, x + w - g, y, z, g, h, d);
+    tabla(color, x, y + h - g, z, w, g, d);                     // el techo
+    for (let k = 0; k < baldas; k++) {                           // el suelo y las baldas
+        tabla(claro, x + g, y + (h - g) * k / baldas, z, w - 2 * g, g, d - g);
+    }
+}
+
+/** Las cajas de una escena llevadas a otro sitio: movidas a `(x, y, z)` y giradas `rot` grados
+ *  sobre su centro —como gira una sala en el plano de su planta—, y con su opacidad
+ *  multiplicada por `alpha` (una planta por encima de la que se mira, tenue).
+ *
+ *  Cada muro se lleva su MARCO: dónde está y cómo está girada la sala a la que pertenece, que es
+ *  lo que hace falta para saber si la cámara está dentro o fuera de ESA sala. Un muro que ya lo
+ *  tenía —una sala ya colocada en su planta, y la planta subida a su altura— solo se desplaza:
+ *  apilar plantas no las gira. */
+function _dc3dPlace(escena, x, y, z, rot, alpha) {
+    const a = alpha === undefined ? 1 : alpha;
+    const T = _dc3model(x, y, z, 1, 1, 1, rot || 0, [x + escena.W / 2, z + escena.D / 2]);
+    const marco = {x, y, z, W: escena.W, D: escena.D, rot: rot || 0};
+    const color = (c) => (a < 1 ? [c[0], c[1], c[2], c[3] * a] : c);
+    const cajas = escena.cajas.map(k => Object.assign({}, k, {
+        m: _dc3mul(T, k.m), color: color(k.color),
+        frame: k.muro ? (k.frame ? Object.assign({}, k.frame, {x: k.frame.x + x, y: k.frame.y + y,
+                                                               z: k.frame.z + z})
+                                 : marco) : undefined}));
+    const planos = (escena.planos || []).map(p => Object.assign({}, p, {
+        m: _dc3mul(T, p.m), alpha: p.alpha * a}));
+    const punto = (q) => [T[0] * q[0] + T[4] * q[1] + T[8] * q[2] + T[12],
+                          T[1] * q[0] + T[5] * q[1] + T[9] * q[2] + T[13],
+                          T[2] * q[0] + T[6] * q[1] + T[10] * q[2] + T[14]];
+    const rotulos = (escena.rotulos || []).map(r => Object.assign({}, r, {
+        p: punto(r.p), tenue: r.tenue || a < 1}));
+    return {cajas, planos, rotulos};
+}
+
+/** Lo opaco que se dibuja un muro, con la opacidad que ya tenga su color: la de una sala sin
+ *  medidas, o la de una planta tenue. Para un muro con marco —una sala colocada en su planta—
+ *  la cámara se lleva antes a las coordenadas de esa sala: dentro y fuera son de ella. */
+function _dc3dWallAlphaOf(k, ojo, escena) {
+    const base = k.color[3];
+    if (!k.frame) return base * _dc3dWallAlpha(k.muro, ojo, escena);
+    const f = k.frame, a = f.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    const dx = ojo[0] - (f.x + f.W / 2), dz = ojo[2] - (f.z + f.D / 2);
+    return base * _dc3dWallAlpha(k.muro, [dx * c + dz * s + f.W / 2, ojo[1] - f.y,
+                                          -dx * s + dz * c + f.D / 2], f);
 }
 
 /** Lo opaco que se dibuja un muro visto desde `ojo`.
@@ -322,11 +451,24 @@ function _dc3dWallAlpha(lado, ojo, escena) {
 
 // ── El motor ─────────────────────────────────────────────────────────────────
 
-/** Montar el visor sobre el `<canvas>` que acaba de pintarse. */
+/** Montar el visor sobre el `<canvas>` que acaba de pintarse.
+ *
+ *  Cada vez que la sección se repinta, el `<canvas>` es otro: el de antes ya no está en la
+ *  página. Se montaba solo la primera vez, y el visor seguía dibujando en el lienzo
+ *  desaparecido —uno nuevo, en negro, sin ningún error—. Ahora se suelta el contexto viejo y se
+ *  monta en el nuevo, con la escena rehecha (lo que se acabe de guardar sale) y la cámara donde
+ *  estaba si se sigue mirando lo mismo (`keyOf`). */
 function _dc3dMount() {
-    if (!_dc3d || _dc3d.gl) return;
+    if (!_dc3d) return;
     const cv = document.getElementById('dc3d-canvas');
     if (!cv) return;
+    if (_dc3d.gl && _dc3d.cv === cv) return;
+    if (_dc3d.gl) {
+        if (_dc3d.raf) cancelAnimationFrame(_dc3d.raf);
+        const viejo = _dc3d.gl.getExtension('WEBGL_lose_context');
+        if (viejo) viejo.loseContext();
+        _dc3d.gl = null;
+    }
     const gl = cv.getContext('webgl', {antialias: true, alpha: false});
     if (!gl) {
         // Sin WebGL se dice y se sigue: el plano en planta no depende de esto, y una pantalla
@@ -342,10 +484,13 @@ function _dc3dMount() {
         nor: _dc3dBuffer(gl, gl.ARRAY_BUFFER, _DC3_CUBE.nor),
         idx: _dc3dBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, _DC3_CUBE.idx),
     };
-    const escena = _dc3dScene();
+    const escena = _dc3dPrepare(_dc3dScene());
+    const clave = typeof _dc3d.keyOf === 'function' ? _dc3d.keyOf() : 'room';
     Object.assign(_dc3d, {
         gl, prog, buf, escena, cv,
-        cam: _dc3dCamHome(escena),
+        cam: (_dc3d.cam && _dc3d.camKey === clave) ? _dc3d.cam : _dc3dCamHome(escena),
+        camKey: clave,
+        quad: _dc3dQuadProgram(gl),
         loc: {
             pos: gl.getAttribLocation(prog, 'aPos'),
             nor: gl.getAttribLocation(prog, 'aNor'),
@@ -354,7 +499,190 @@ function _dc3dMount() {
             color: gl.getUniformLocation(prog, 'uColor'),
         },
     });
+    _dc3dTextures();
+    _dc3dLabelsBuild();
     _dc3dLoop();
+}
+
+/** Rehacer la escena sin tocar la cámara ni el contexto: llegaron datos que faltaban (los
+ *  planos de las otras plantas) o cambió cómo se miran (las plantas separadas). */
+function _dc3dRebuild() {
+    if (!_dc3d || !_dc3d.gl) return;
+    _dc3d.escena = _dc3dPrepare(_dc3dScene());
+    _dc3dTextures();
+    _dc3dLabelsBuild();
+}
+
+/** La escena, repartida para dibujarla: lo opaco, los muros —cuya opacidad depende de dónde
+ *  esté la cámara— y lo translúcido. Una vez por escena y no en cada fotograma: ordenar tres
+ *  mil cajas sesenta veces por segundo es trabajo que no cambia de resultado. */
+function _dc3dPrepare(escena) {
+    const cajas = escena.cajas || [];
+    escena.opacos = cajas.filter(k => !k.muro && k.color[3] >= 1);
+    escena.muros = cajas.filter(k => k.muro);
+    escena.vidrios = cajas.filter(k => !k.muro && k.color[3] < 1);
+    escena.planos = escena.planos || [];
+    escena.etiquetas = _dc3dLabelsOf(escena);
+    return escena;
+}
+
+/** Lo que lleva rótulo y dónde: cada caja con nombre —un rack, una pieza con etiqueta— sobre
+ *  el centro de su techo, y los rótulos que la escena traiga hechos (las salas de una planta).
+ *  Lo tenue no: una planta por encima de la que se mira llenaría la vista de nombres que no
+ *  se están mirando. */
+function _dc3dLabelsOf(escena) {
+    const out = [];
+    for (const k of escena.cajas || []) {
+        if (!k.lee || !k.lee.name || k.color[3] < 0.5) continue;
+        const m = k.m;
+        out.push({name: k.lee.name, p: [m[0] * 0.5 + m[4] + m[8] * 0.5 + m[12],
+                                         m[1] * 0.5 + m[5] + m[9] * 0.5 + m[13],
+                                         m[2] * 0.5 + m[6] + m[10] * 0.5 + m[14]]});
+    }
+    for (const r of escena.rotulos || []) if (!r.tenue) out.push({name: r.name, p: r.p, sala: true});
+    return out;
+}
+
+/** Montar los rótulos en su capa, una vez por escena. */
+function _dc3dLabelsBuild() {
+    const capa = document.getElementById('dc3d-labels');
+    if (!capa || !_dc3d || !_dc3d.escena) return;
+    capa.innerHTML = _dc3d.escena.etiquetas.map(e =>
+        `<span class="ss-3d-label${e.sala ? ' ss-3d-label-room' : ''}">${esc(e.name)}</span>`).join('');
+    _dc3d.labelEls = Array.from(capa.children);
+    _dc3d.labelsKey = '';
+}
+
+/** Llevar cada rótulo a donde cae su punto en pantalla. Solo cuando la cámara o el tamaño han
+ *  cambiado: sesenta veces por segundo cientos de nombres quietos es trabajo para nada. Lo que
+ *  queda detrás de la cámara o fuera del lienzo, oculto. */
+function _dc3dLabelsTurn(S, vp) {
+    if (!_dc3dShowLabels || !S.labelEls || !S.escena.etiquetas) return;
+    const w = S.cv.clientWidth, h = S.cv.clientHeight;
+    const clave = [S.ojo.map(v => v.toFixed(3)), S.cam.mira.map(v => v.toFixed(3)), w, h].join('|');
+    if (clave === S.labelsKey) return;
+    S.labelsKey = clave;
+    S.escena.etiquetas.forEach((e, i) => {
+        const el = S.labelEls[i];
+        if (!el) return;
+        const [x, y, z] = e.p;
+        const cw = vp[3] * x + vp[7] * y + vp[11] * z + vp[15];
+        if (cw <= 0.05) { el.style.display = 'none'; return; }
+        const sx = ((vp[0] * x + vp[4] * y + vp[8] * z + vp[12]) / cw + 1) / 2 * w;
+        const sy = (1 - (vp[1] * x + vp[5] * y + vp[9] * z + vp[13]) / cw) / 2 * h;
+        if (sx < -50 || sx > w + 50 || sy < -20 || sy > h + 20) { el.style.display = 'none'; return; }
+        el.style.display = '';
+        el.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px) translate(-50%, -100%)`;
+    });
+}
+
+// ── Los planos de fondo, en el suelo ─────────────────────────────────────────
+//
+// El plano del arquitecto pegado al suelo de su planta: lo único del visor que no es una caja
+// de un color. Un rectángulo plano con la imagen encima, con su propio programa —el de las
+// cajas no sabe de imágenes— y dibujado entre lo opaco y lo translúcido: debajo de las salas,
+// que lo tapan donde están, y visible a través del vidrio.
+
+//: Un cuadrado en el suelo, de (0, 0, 0) a (1, 0, 1): la imagen se estira sobre él con su
+//: esquina de arriba a la izquierda en el origen, que es donde la pone el plano de la planta.
+const _DC3_QUAD = {pos: new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1]),
+                   idx: new Uint16Array([0, 1, 2, 0, 2, 3])};
+
+const _DC3_QVS = `
+attribute vec3 aPos;
+uniform mat4 uMVP; uniform mat4 uModel;
+varying vec2 vUV;
+void main(){
+  vUV = aPos.xz;
+  gl_Position = uMVP * uModel * vec4(aPos, 1.0);
+}`;
+
+// Un poco más oscuro que la imagen: un plano en blanco puro sobre el fondo del visor deslumbra
+// y se come el contraste de lo que hay encima.
+const _DC3_QFS = `
+precision mediump float;
+uniform sampler2D uTex; uniform float uAlpha;
+varying vec2 vUV;
+void main(){
+  vec4 c = texture2D(uTex, vUV);
+  gl_FragColor = vec4(c.rgb * 0.82, c.a * uAlpha);
+}`;
+
+function _dc3dQuadProgram(gl) {
+    const compila = (tipo, src) => {
+        const sh = gl.createShader(tipo);
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        if (gl.getShaderParameter(sh, gl.COMPILE_STATUS)) return sh;
+        console.error('WebGL:', gl.getShaderInfoLog(sh));
+        return null;
+    };
+    const vs = compila(gl.VERTEX_SHADER, _DC3_QVS), fs = compila(gl.FRAGMENT_SHADER, _DC3_QFS);
+    if (!vs || !fs) return null;
+    const p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) return null;
+    return {prog: p,
+            pos: _dc3dBuffer(gl, gl.ARRAY_BUFFER, _DC3_QUAD.pos),
+            idx: _dc3dBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, _DC3_QUAD.idx),
+            loc: {pos: gl.getAttribLocation(p, 'aPos'), mvp: gl.getUniformLocation(p, 'uMVP'),
+                  model: gl.getUniformLocation(p, 'uModel'),
+                  tex: gl.getUniformLocation(p, 'uTex'), alpha: gl.getUniformLocation(p, 'uAlpha')}};
+}
+
+//: Las imágenes ya pasadas a un lienzo, por su `data:`: volver a montar el visor —se hace en
+//: cada repintado— no tiene por qué volver a decodificar un plano de varios megas.
+const _DC3_IMG = new Map();
+
+/** Un plano como lienzo de 2048 px de ancho como mucho, que es lo que cualquier tarjeta acepta
+ *  de textura. Pasar por un lienzo es también lo que hace que un plano en SVG sirva: WebGL no
+ *  sabe de vectores, y el lienzo lo rasteriza. `null` si la imagen no se puede leer. */
+function _dc3dImageCanvas(data) {
+    if (!_DC3_IMG.has(data)) {
+        _DC3_IMG.set(data, new Promise(ok => {
+            const img = new Image();
+            img.onload = () => {
+                const w0 = img.naturalWidth || 1024, h0 = img.naturalHeight || 768;
+                const k = Math.min(1, 2048 / Math.max(w0, h0));
+                const cv = document.createElement('canvas');
+                cv.width = Math.max(1, Math.round(w0 * k));
+                cv.height = Math.max(1, Math.round(h0 * k));
+                const g = cv.getContext('2d');
+                if (!g) return ok(null);
+                g.drawImage(img, 0, 0, cv.width, cv.height);
+                ok(cv);
+            };
+            img.onerror = () => ok(null);
+            img.src = data;
+        }));
+    }
+    return _DC3_IMG.get(data);
+}
+
+/** Subir a la tarjeta los planos de la escena que aún no estén. Asíncrono —una imagen tarda en
+ *  decodificarse— y se descarta si entretanto el visor se cerró o se montó en otro lienzo. */
+function _dc3dTextures() {
+    const S = _dc3d;
+    if (!S || !S.gl || !S.quad) return;
+    const gl = S.gl;
+    for (const p of S.escena.planos) {
+        if (p.tex || !p.data) continue;
+        _dc3dImageCanvas(p.data).then(cv => {
+            if (!cv || !_dc3d || _dc3d.gl !== gl) return;
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            // Sin mipmaps y con los bordes sujetos: así vale una imagen de cualquier tamaño, no
+            // solo las de potencias de dos.
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
+            p.tex = tex;
+        });
+    }
 }
 
 /** La cámara de partida, en coordenadas de órbita: a dónde mira, a qué distancia y desde qué
@@ -364,8 +692,8 @@ function _dc3dMount() {
  *  la sala sale orientada como en planta: lo de abajo del plano, más cerca. En una función
  *  porque se vuelve a ella con Inicio: moviéndose con libertad, perderse es cuestión de tiempo. */
 function _dc3dCamHome(escena) {
-    return {mira: [escena.W / 2, 1.0, escena.D / 2],
-            radio: Math.max(escena.W, escena.D) * 1.4 || 14,
+    return {mira: escena.mira ? escena.mira.slice() : [escena.W / 2, 1.0, escena.D / 2],
+            radio: escena.radio || Math.max(escena.W, escena.D) * 1.4 || 14,
             theta: Math.PI / 3, phi: 0.95};
 }
 
@@ -386,9 +714,11 @@ function _dc3dAxes(c) {
 function _dc3dShift(c, dx, dy, dz) {
     const e = (_dc3d && _dc3d.escena) || {};
     const W = e.W || 12, D = e.D || 8, H = e.H || 3, fuera = 0.3;
-    c.mira[0] = Math.max(-fuera, Math.min(W + fuera, c.mira[0] + dx));
-    c.mira[1] = Math.max(0.05, Math.min(H + 2, c.mira[1] + dy));
-    c.mira[2] = Math.max(-fuera, Math.min(D + fuera, c.mira[2] + dz));
+    // Lo que empieza antes de 0: el margen de una planta, y los sótanos de un edificio.
+    const X0 = e.X0 || 0, Y0 = e.Y0 || 0, Z0 = e.Z0 || 0;
+    c.mira[0] = Math.max(X0 - fuera, Math.min(W + fuera, c.mira[0] + dx));
+    c.mira[1] = Math.max(Y0 + 0.05, Math.min(H + 2, c.mira[1] + dy));
+    c.mira[2] = Math.max(Z0 - fuera, Math.min(D + fuera, c.mira[2] + dz));
 }
 
 function _dc3dProgram(gl) {
@@ -443,11 +773,78 @@ function _dc3dDraw() {
     const ojo = [c.mira[0] + c.radio * Math.sin(c.phi) * Math.cos(c.theta),
                  // Nunca por debajo del suelo: mirando desde abajo —bajo un rack de pared— el ojo
                  // se apoya en el suelo en vez de atravesarlo y ver la sala del revés.
-                 Math.max(0.05, c.mira[1] + c.radio * Math.cos(c.phi)),
+                 Math.max((S.escena.Y0 || 0) + 0.05, c.mira[1] + c.radio * Math.cos(c.phi)),
                  c.mira[2] + c.radio * Math.sin(c.phi) * Math.sin(c.theta)];
-    const vp = _dc3mul(_dc3perspective(0.96, ancho / alto, 0.05, 400),
+    S.ojo = ojo;
+    _dc3dCompassTurn(S);
+    // El plano lejano, a la medida de la escena: un edificio de 50 m mirado desde lejos se
+    // cortaba por el fondo con el de una sala.
+    const lejos = Math.max(400, ((S.escena.W || 0) + (S.escena.D || 0)) * 4);
+    // Y el cercano, a la medida de lo lejos que está la cámara. Fijo en 5 cm —lo que pide
+    // andar dentro de una sala— gastaba la precisión de profundidad en los primeros metros, y
+    // mirando un edificio desde 70 m el plano del suelo y el de las salas, a centímetros uno de
+    // otro, se cruzaban a franjas al mover la cámara.
+    const cerca = Math.min(5, Math.max(0.05, c.radio * 0.04));
+    const vp = _dc3mul(_dc3perspective(0.96, ancho / alto, cerca, lejos),
                        _dc3lookAt(ojo, c.mira));
+    _dc3dLabelsTurn(S, vp);
 
+    _dc3dUseCube(S, vp);
+    const caja = (m, r, g, b, a) => {
+        gl.uniformMatrix4fv(S.loc.model, false, m);
+        gl.uniform4f(S.loc.color, r, g, b, a);
+        gl.depthMask(a >= 1);
+        gl.drawElements(gl.TRIANGLES, _DC3_CUBE.idx.length, gl.UNSIGNED_SHORT, 0);
+    };
+    // Lo opaco primero y lo translúcido después: al revés, el vidrio escribe profundidad y borra
+    // lo que hay detrás, que es justo lo que se quería ver a través de él.
+    for (const k of S.escena.opacos) caja(k.m, k.color[0], k.color[1], k.color[2], k.color[3]);
+    // Los muros, según dónde esté la cámara: el que queda entre ella y la sala, de cristal. Se
+    // decide en cada fotograma porque la cámara se mueve en cada fotograma.
+    const muros = S.escena.muros.map(k => [k, _dc3dWallAlphaOf(k, ojo, S.escena)]);
+    for (const [k, a] of muros) if (a >= 1) caja(k.m, k.color[0], k.color[1], k.color[2], a);
+    // Los planos de fondo, encima de lo opaco y debajo del vidrio.
+    if (S.escena.planos.length && S.quad) {
+        _dc3dDrawPlans(S, vp);
+        _dc3dUseCube(S, vp);
+    }
+    for (const [k, a] of muros) if (a < 1) caja(k.m, k.color[0], k.color[1], k.color[2], a);
+    for (const k of S.escena.vidrios) caja(k.m, k.color[0], k.color[1], k.color[2], k.color[3]);
+    gl.depthMask(true);
+}
+
+/** El norte de lo que se mira: el de la sala, o el de la planta abierta. `null` si no se
+ *  sabe. */
+function _dc3dNorth() {
+    if (_dc3d && typeof _dc3d.build === 'function')
+        return typeof _dcsFloor === 'function' ? _dcNorthOf(_dcsFloor()) : null;
+    return _dcNorthOf((_dcimPlan || {}).planFloor || (_dcimPlan || {}).room);
+}
+
+/** Hacia dónde queda el norte EN PANTALLA, en grados en el sentido del reloj desde arriba: el
+ *  del plano, visto desde donde mira la cámara. Arriba de la pantalla es hacia donde mira. */
+function _dc3dCompassAngle(cam, north) {
+    const a = north * Math.PI / 180;
+    const n = [Math.sin(a), -Math.cos(a)];                  // el norte, en el suelo (x, z)
+    const f = _dc3dAxes(cam);
+    return Math.atan2(n[0] * f.right[0] + n[1] * f.right[2],
+                      n[0] * f.fwd[0] + n[1] * f.fwd[2]) * 180 / Math.PI;
+}
+
+function _dc3dCompassTurn(S) {
+    const g = document.querySelector('#dc3d-compass [data-compass-needle]');
+    const north = _dc3dNorth();
+    if (!g || north === null) return;
+    const ang = Math.round(_dc3dCompassAngle(S.cam, north));
+    if (S.compassAng === ang) return;       // sesenta veces por segundo: solo si cambió
+    S.compassAng = ang;
+    g.setAttribute('transform', `rotate(${ang})`);
+}
+
+/** El programa de las cajas, con su cubo puesto: se vuelve a él después de pintar los planos,
+ *  que usan otro programa y otros búferes. */
+function _dc3dUseCube(S, vp) {
+    const gl = S.gl;
     gl.useProgram(S.prog);
     gl.bindBuffer(gl.ARRAY_BUFFER, S.buf.pos);
     gl.enableVertexAttribArray(S.loc.pos);
@@ -457,23 +854,45 @@ function _dc3dDraw() {
     gl.vertexAttribPointer(S.loc.nor, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, S.buf.idx);
     gl.uniformMatrix4fv(S.loc.mvp, false, vp);
+}
 
-    // Los muros, según dónde esté la cámara: el que queda entre ella y la sala, de cristal. Se
-    // decide en cada fotograma porque la cámara se mueve en cada fotograma.
-    const cajas = S.escena.cajas.map(k => (k.muro
-        ? Object.assign({}, k, {color: [k.color[0], k.color[1], k.color[2],
-                                        _dc3dWallAlpha(k.muro, ojo, S.escena)]})
-        : k));
-    // Lo opaco primero y lo translúcido después: al revés, el vidrio escribe profundidad y borra
-    // lo que hay detrás, que es justo lo que se quería ver a través de él.
-    const orden = cajas.sort((a, b) => (a.color[3] < 1) - (b.color[3] < 1));
-    for (const caja of orden) {
-        gl.uniformMatrix4fv(S.loc.model, false, caja.m);
-        gl.uniform4fv(S.loc.color, caja.color);
-        gl.depthMask(caja.color[3] >= 1);
-        gl.drawElements(gl.TRIANGLES, _DC3_CUBE.idx.length, gl.UNSIGNED_SHORT, 0);
+function _dc3dDrawPlans(S, vp) {
+    const gl = S.gl, Q = S.quad;
+    gl.useProgram(Q.prog);
+    // El programa de los planos no usa normales: se apaga ese atributo para que no apunte a un
+    // búfer que este dibujo no ha puesto.
+    if (S.loc.nor >= 0) gl.disableVertexAttribArray(S.loc.nor);
+    gl.bindBuffer(gl.ARRAY_BUFFER, Q.pos);
+    gl.enableVertexAttribArray(Q.loc.pos);
+    gl.vertexAttribPointer(Q.loc.pos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, Q.idx);
+    gl.uniformMatrix4fv(Q.loc.mvp, false, vp);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(Q.loc.tex, 0);
+    gl.depthMask(false);
+    for (const p of S.escena.planos) {
+        if (!p.tex) continue;
+        gl.bindTexture(gl.TEXTURE_2D, p.tex);
+        gl.uniformMatrix4fv(Q.loc.model, false, p.m);
+        gl.uniform1f(Q.loc.alpha, p.alpha);
+        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
     }
-    gl.depthMask(true);
+}
+
+/** El rayo que sale de la cámara por un punto de la pantalla: de dónde sale y hacia dónde va,
+ *  en metros de la escena. Lo que hace falta para saber qué hay bajo el ratón al pulsar. */
+function _dc3dRay(S, clientX, clientY) {
+    const r = S.cv.getBoundingClientRect();
+    if (!r.width || !r.height || !S.ojo) return null;
+    const nx = ((clientX - r.left) / r.width) * 2 - 1;
+    const ny = 1 - ((clientY - r.top) / r.height) * 2;
+    const c = S.cam, o = S.ojo;
+    const f = _dc3norm([c.mira[0] - o[0], c.mira[1] - o[1], c.mira[2] - o[2]]);
+    const x = _dc3norm(_dc3cross(f, [0, 1, 0]));
+    const y = _dc3cross(x, f);
+    const tg = Math.tan(0.48), asp = r.width / r.height;
+    const d = _dc3norm([0, 1, 2].map(i => f[i] + x[i] * nx * tg * asp + y[i] * ny * tg));
+    return {o: o.slice(), d};
 }
 
 // ── Mover la cámara ──────────────────────────────────────────────────────────
@@ -482,6 +901,7 @@ function _dc3dDown(ev) {
     if (!_dc3d) return;
     ev.currentTarget.focus?.({preventScroll: true});
     ev.currentTarget.setPointerCapture?.(ev.pointerId);
+    _dc3d.pulsado = {x: ev.clientX, y: ev.clientY};
     _dc3d.arrastre = {x: ev.clientX, y: ev.clientY,
                       // El botón derecho desplaza en vez de girar, como en cualquier visor.
                       pan: ev.button === 2 || ev.shiftKey};
@@ -514,6 +934,15 @@ function _dc3dMove(ev) {
 function _dc3dUp(ev) {
     if (!_dc3d) return;
     _dc3d.arrastre = null;
+    // Pulsar sin arrastrar es señalar: quien abrió el visor decide qué hacer con lo señalado
+    // (`onPick`). Cuatro píxeles de margen, lo que tiembla una mano.
+    const p = _dc3d.pulsado;
+    _dc3d.pulsado = null;
+    if (p && ev.type === 'pointerup' && typeof _dc3d.onPick === 'function'
+            && Math.hypot(ev.clientX - p.x, ev.clientY - p.y) < 4) {
+        const rayo = _dc3dRay(_dc3d, ev.clientX, ev.clientY);
+        if (rayo) _dc3d.onPick(rayo);
+    }
     if (ev.currentTarget) ev.currentTarget.style.cursor = 'grab';
 }
 
@@ -528,18 +957,42 @@ function _dc3dWheel(ev) {
     if (!_dc3d || !_dc3d.cam) return;
     ev.preventDefault();
     const c = _dc3d.cam;
+    const r0 = c.radio;
     if (ev.deltaY > 0) {
-        c.radio = Math.min(90, c.radio * 1.12);
+        c.radio = Math.min(Math.max(90, (_dc3d.escena || {}).Rmax || 0), c.radio * 1.12);
     } else if (c.radio > 0.5) {
         c.radio = Math.max(0.5, c.radio * 0.89);
-    } else {
-        // Hacia delante y en horizontal, como andar con W: siguiendo la mirada —que casi siempre
-        // va hacia abajo— la rueda hundía la cámara en el suelo en tres vueltas. Para subir y
-        // bajar están Q y E.
+    }
+    if (c.radio !== r0) {
+        // Hacia donde apunta el ratón, no hacia el centro: el punto del suelo bajo el cursor se
+        // queda bajo el cursor, y el que se mueve es el centro de la vista. Acercar siempre al
+        // centro obligaba a desplazar después hasta donde se quería ir.
+        const p = _dc3dCursorGround(ev, c.mira[1]);
+        if (p) {
+            const k = 1 - c.radio / r0;
+            _dc3dShift(c, (p[0] - c.mira[0]) * k, 0, (p[2] - c.mira[2]) * k);
+        }
+        return;
+    }
+    // Acercando con la cámara ya pegada a lo que mira: hacia delante y en horizontal, como andar
+    // con W. Siguiendo la mirada —que casi siempre va hacia abajo— la rueda hundía la cámara en
+    // el suelo en tres vueltas. Para subir y bajar están Q y E. Alejando al tope, nada.
+    if (ev.deltaY < 0) {
         const paso = (ev.shiftKey ? 1.2 : 0.3);
         const f = _dc3dAxes(c).fwd;
         _dc3dShift(c, f[0] * paso, 0, f[2] * paso);
     }
+}
+
+/** El punto donde el rayo del cursor corta el plano horizontal de altura `y`, o `null` (sin
+ *  lienzo, sin cursor, o mirando por encima del horizonte). */
+function _dc3dCursorGround(ev, y) {
+    if (!_dc3d || !_dc3d.cv || !Number.isFinite(ev.clientX)) return null;
+    const rayo = _dc3dRay(_dc3d, ev.clientX, ev.clientY);
+    if (!rayo || Math.abs(rayo.d[1]) < 1e-6) return null;
+    const t0 = (y - rayo.o[1]) / rayo.d[1];
+    if (!(t0 > 0)) return null;
+    return [rayo.o[0] + rayo.d[0] * t0, y, rayo.o[2] + rayo.d[2] * t0];
 }
 
 /** Andar con el teclado, con el visor enfocado —se enfoca al pulsarlo—.

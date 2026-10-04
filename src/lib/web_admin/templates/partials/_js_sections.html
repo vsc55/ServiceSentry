@@ -183,6 +183,7 @@
    Infrastructure answers "is this all right"; this answers "where do I walk".
    ================================================================ #}
 {% include "partials/dcim/_render.html" %}
+{% include "partials/dcim/_whereabouts.html" %}
 {# Detrás de `_render.html`: el vocabulario con el que las tres pantallas de conectores leen una boca. #}
 {% include "partials/dcim/_conns.html" %}
 {% include "partials/dcim/_pieces.html" %}
@@ -210,10 +211,17 @@
 {# After _rack.html: the elevation is what its view draws, and it reads the canvas that the
    two maps already share — included above with them. #}
 {% include "partials/dcim/_elevation.html" %}
+{# The rack's other three views (Por U, Cuadro, Compacta) and the switch between the four. After
+   the rack and its elevation, whose helpers they read. #}
+{% include "partials/dcim/_rackviews.html" %}
 {# The room from above. After the elevation, which it borrows `_dceClip` from — and after the
    canvas, which both draw on. #}
 {% include "partials/dcim/_plan.html" %}
 {% include "partials/dcim/_siteplan.html" %}
+{% include "partials/dcim/_site3d.html" %}
+{% include "partials/dcim/_plancal.html" %}
+{% include "partials/dcim/_undo.html" %}
+{% include "partials/dcim/_shelves.html" %}
 {% include "partials/infra/_list.html" %}
 {# After _list.html: the grouping views read its cell renderer and column state. #}
 {% include "partials/infra/_group_views.html" %}

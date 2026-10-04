@@ -44,6 +44,9 @@ async function _dcsOpen(siteUid, floorUid) {
     const site = (_dcimData.sites || []).find(s => s.uid === siteUid);
     if (!site) return;
     const d = await apiGet(`/api/v1/dcim/sites/${encodeURIComponent(siteUid)}/floors`) || {};
+    if (_dc3d) _dc3dStop();
+    _ds3Images = {};
+    _dcCal = null;
     _dcsPlan = {site, floors: d.floors || [], floor: '', image: null, kinds: d.kinds || {},
                 content: {}};
     const pedida = _dcsPlan.floors.find(f => f.uid === floorUid) || _dcsPlan.floors[0] || {};
@@ -52,33 +55,32 @@ async function _dcsOpen(siteUid, floorUid) {
     _dcsItem = null;
     ssCanvasReset(_DCS_SVG);
     await Promise.all([_dcsLoadImage(), _dcsLoadContents()]);
+    _dcUndoPrime();
+    _dcimUrl();
     renderDcim();
 }
 
-/** Lo que hay dentro de cada sala de esta planta —sus racks y sus piezas—, zona general
- *  incluida. Una petición por sala: son pocas por planta, y lo que devuelven es lo mismo que
- *  pinta el plano de cada una. */
+/** Lo que hay dentro de cada sala de la sede —sus racks y sus piezas—, zona general incluida,
+ *  de TODAS las plantas y en una petición. Eran dos por sala de la planta abierta, y cada una
+ *  recalculaba el estado del árbol entero; el edificio en 3D necesita además las de las otras
+ *  plantas, que así ya están. */
 async function _dcsLoadContents() {
     if (!_dcsPlan) return;
-    const salas = _dcsHere();
-    const res = await Promise.all(salas.map(r => Promise.all([
-        apiGet(`/api/v1/dcim/racks?room=${encodeURIComponent(r.uid)}`),
-        apiGet(`/api/v1/dcim/rooms/${encodeURIComponent(r.uid)}/features`)])));
-    const content = {};
-    salas.forEach((r, i) => {
-        const [k, f] = res[i];
-        content[r.uid] = {racks: (k || {}).racks || [], features: (f || {}).features || []};
-        if (f && f.kinds && !Object.keys(_dcsPlan.kinds).length) _dcsPlan.kinds = f.kinds;
-    });
-    _dcsPlan.content = content;
+    const d = await apiGet(`/api/v1/dcim/sites/${encodeURIComponent(_dcsPlan.site.uid)}/contents`) || {};
+    _dcsPlan.content = d.rooms || {};
+    if (d.kinds && !Object.keys(_dcsPlan.kinds).length) _dcsPlan.kinds = d.kinds;
 }
 
 /** La sala que es la zona general de esta planta, si ya existe. */
 function _dcsAreaUid() { return (_dcsFloor() || {}).area_uid || ''; }
 
 function _dcsClose() {
+    _dcimRemember();
+    if (_dc3d) _dc3dStop();
+    _dcCal = null;
     _dcsPlan = null;
     _dcsSel = '';
+    _dcimUrl();
     renderDcim();
 }
 
@@ -104,7 +106,14 @@ async function _dcsLoadImage() {
     if (!_dcsPlan) return;
     _dcsPlan.image = null;
     const f = _dcsFloor();
-    if (!f || !f.plan) return;
+    const img = await _dcsFetchImage(f);
+    if (img && _dcsPlan && _dcsPlan.floor === f.uid) _dcsPlan.image = img;
+}
+
+/** El plano de fondo de una planta cualquiera, `{data, ratio}`, o `null`. Aparte de
+ *  `_dcsLoadImage` porque el edificio en 3D pide también los de las plantas que no se miran. */
+async function _dcsFetchImage(f) {
+    if (!f || !f.plan) return null;
     try {
         const resp = await fetch(_dcimMediaUrl(f.plan), {credentials: 'same-origin'});
         if (!resp.ok) return;
@@ -115,15 +124,15 @@ async function _dcsLoadImage() {
             fr.onerror = () => ok('');
             fr.readAsDataURL(blob);
         });
-        if (!data) return;
+        if (!data) return null;
         const ratio = await new Promise(ok => {
             const img = new Image();
             img.onload = () => ok(img.naturalWidth ? img.naturalHeight / img.naturalWidth : 0);
             img.onerror = () => ok(0);
             img.src = data;
         });
-        if (_dcsPlan && _dcsPlan.floor === f.uid) _dcsPlan.image = {data, ratio: ratio || 0.7};
-    } catch (e) { /* una planta sin plano es lo normal al empezar */ }
+        return {data, ratio: ratio || 0.7};
+    } catch (e) { return null; /* una planta sin plano es lo normal al empezar */ }
 }
 
 /** Cambiar de planta: otro dibujo, otro encuadre, y nada seleccionado de la anterior. */
@@ -132,11 +141,14 @@ async function _dcsGo(floorUid) {
     // Lo tecleado en la planta que se deja sale antes: el dibujado siguiente pide los datos al
     // servidor, y sin esto volvería con lo de antes de teclear.
     await _dcpFlush();
+    _dcCal = null;
     _dcsPlan.floor = floorUid;
     _dcsSel = '';
     _dcsItem = null;
     ssCanvasReset(_DCS_SVG);
     await Promise.all([_dcsLoadImage(), _dcsLoadContents()]);
+    _dcUndoPrime();
+    _dcimUrl();
     renderDcim();
 }
 
@@ -147,21 +159,16 @@ function _dcsSize(r) {
     return (w > 0 && d > 0) ? {w, d, real: true} : {w: _DCS_NOSIZE.w, d: _DCS_NOSIZE.d, real: false};
 }
 
-/** Lo ancho que es el plano de fondo en milímetros: lo dicho, o si no, un tamaño FIJO. Nunca
- *  lo que midan las salas: el plano es la referencia sobre la que se colocan, y una referencia
- *  que se mueve con lo que se coloca no sirve para colocar nada. */
-function _dcsImageMm() {
-    const dicho = Number((_dcsFloor() || {}).plan_mm) || 0;
-    return dicho > 0 ? {mm: dicho, scaled: true} : {mm: _DCS_PLAN_MM, scaled: false};
-}
 
 function _dcsExtent() {
-    let maxX = 20000, maxY = 15000;
+    let maxX = 20000, maxY = 15000, minX = 0, minY = 0;
     const img = _dcsPlan && _dcsPlan.image;
     if (img) {
-        const {mm} = _dcsImageMm();
-        maxX = Math.max(maxX, mm);
-        maxY = Math.max(maxY, mm * img.ratio);
+        const b = _dcsPlanBox();
+        minX = Math.min(minX, b.x);
+        minY = Math.min(minY, b.y);
+        maxX = Math.max(maxX, b.x + b.w);
+        maxY = Math.max(maxY, b.y + b.h);
     }
     for (const r of _dcsHereRooms()) {
         const s = _dcsSize(r);
@@ -169,8 +176,9 @@ function _dcsExtent() {
         maxY = Math.max(maxY, (Number(r.pos_y) || 0) + s.d);
     }
     const pad = _DCP.PAD * 2 * _DCP_SCALE;
-    return {x: -pad, y: -pad, width: maxX * _DCP_SCALE + pad * 2,
-            height: maxY * _DCP_SCALE + pad * 2};
+    return {x: minX * _DCP_SCALE - pad, y: minY * _DCP_SCALE - pad,
+            width: (maxX - minX) * _DCP_SCALE + pad * 2,
+            height: (maxY - minY) * _DCP_SCALE + pad * 2};
 }
 
 // ── El dibujo ──────────────────────────────────────────────────────────────────────────────
@@ -179,12 +187,14 @@ function _dcsContent() {
     const S = _DCP_SCALE;
     let h = '';
     const img = _dcsPlan && _dcsPlan.image;
-    if (img) {
-        const {mm, scaled} = _dcsImageMm();
-        h += `<image href="${escAttr(img.data)}" x="0" y="0" width="${mm * S}"
-                     height="${mm * S * img.ratio}" opacity="${scaled ? '.85' : '.5'}"
-                     preserveAspectRatio="xMinYMin meet"></image>`;
+    if (img && _dcPlanBg) {
+        const b = _dcsPlanBox();
+        h += `<image href="${escAttr(img.data)}" x="${b.x * S}" y="${b.y * S}" width="${b.w * S}"
+                     height="${b.h * S}" opacity="${b.scaled ? '.85' : '.5'}"
+                     preserveAspectRatio="none"></image>`;
     }
+    // Calibrando contra otra planta, su plano encima, translúcido: con qué se encaja este.
+    h += _dcCalRefSvg();
     // Primero las cajas de las salas y ENCIMA todo lo que contienen, lo de la zona general
     // incluido. Al revés, un rack suelto en la zona general que quedara debajo de una sala no se
     // podía pulsar nunca: el ratón agarraba la sala. La caja se sigue agarrando por lo que no
@@ -194,7 +204,7 @@ function _dcsContent() {
     const area = _dcsRooms().find(r => r.uid === _dcsAreaUid());
     if (area) h += _dcsInside(area);
     for (const r of salas) h += _dcsInside(r);
-    return h;
+    return h + _dcCalMarks('floor');
 }
 
 /** Dónde está una sala en la planta y cuánto mide: lo que convierte sus coordenadas —en las
@@ -225,7 +235,8 @@ function _dcsInside(r) {
     for (const x of c.features) {
         if (((kinds[x.kind] || {}).layer === 'air')) continue;
         h += _dcsThing('feature', x, r.uid, Number(x.width_mm) || 600, Number(x.depth_mm) || 600,
-                       _dcpLook(x.kind), x.label || t('dcim_kind_' + x.kind));
+                       Object.assign({}, _dcpLook(x.kind), {frontBack: !!(kinds[x.kind] || {}).front}),
+                       x.label || t('dcim_kind_' + x.kind));
     }
     for (const x of c.racks) {
         const tone = (x.roll || {}).state ? deviceStateColor(x.roll.state) : 'var(--bs-secondary-color)';
@@ -258,9 +269,12 @@ function _dcsThing(kind, x, room, wmm, dmm, look, nombre) {
                   stroke-width="1.2" vector-effect="non-scaling-stroke"></rect>
             ${look.front ? `<rect x="${px}" y="${py}" width="${w}" height="${Math.max(1, d * 0.08)}"
                   fill="${look.front}"></rect>` : ''}
+            ${look.frontBack ? `<g transform="translate(${px},${py})">${_dcpFrontBack(true, w, d, look)}</g>` : ''}
             ${puesto ? `<rect x="${px - 1}" y="${py - 1}" width="${w + 2}" height="${d + 2}" fill="none"
                 stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
                 vector-effect="non-scaling-stroke"></rect>` : ''}
+            ${puesto && kind === 'feature' && _dcimMay('dcim_edit')
+                ? `<g transform="translate(${px},${py})">${_dcpHandles(w, d, rot + _dcsRoomRot(room))}</g>` : ''}
         </g>
         ${ancho > 4 ? `<text x="${px + w / 2}" y="${py + d / 2 + tam * 0.35}" font-size="${tam}"
               text-anchor="middle" fill="var(--bs-body-color)" stroke="var(--bs-body-bg)"
@@ -309,6 +323,12 @@ function _dcsRoom(r) {
     </g>`;
 }
 
+/** El giro de una sala de la planta; 0 en la zona general, que no gira. */
+function _dcsRoomRot(roomUid) {
+    if (roomUid === _dcsAreaUid()) return 0;
+    return Number((_dcsRooms().find(r => r.uid === roomUid) || {}).rotation) || 0;
+}
+
 /** Las asas de una sala: las mismas ocho que las de una pieza, puestas donde está la sala —la
  *  sala se dibuja en su sitio dentro de su `<g>`, y una pieza desde el origen del suyo—. */
 function _dcsHandles(x, y, w, d) {
@@ -354,11 +374,20 @@ function _dcsHtml() {
                     <i class="bi bi-image"></i></button>
                 ${f.plan ? `<button class="btn btn-sm btn-warning" onclick="_dcsDropPlan()"
                         title="${escAttr(t('dcim_plan_drop'))}"><i class="bi bi-trash"></i></button>` : ''}` : ''}
+                ${f && f.plan ? _dcPlanBgButton() : ''}
+                ${edita && f && f.plan ? _dcCalButton('floor') : ''}
+                ${f ? _dcUndoButtons() : ''}
+                ${f ? `<button class="btn btn-sm ${_dc3d ? 'btn-warning' : 'btn-secondary'}"
+                        onclick="_dcsToggle3d()" title="${escAttr(t('dcim_3d'))}"
+                        aria-label="${escAttr(t('dcim_3d'))}"><i class="bi bi-box"></i></button>` : ''}
                 ${ssCanvasTools(_DCS_SVG, 'site_plan')}
             </div>
         </div>
+        ${_dcCalBar('floor')}
+        ${f && _dc3d ? _ds3Bar() + _dc3dHtml(t('dcim_3d_site_hint')) : ''}
         ${f ? `<div class="ss-editor">
             <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
+                ${_dcCompass(_dcNorthOf(_dcsFloor()))}
                 ${_dcsPaletteHtml()}
                 <div id="dcsFloat" class="position-absolute d-none"
                      style="z-index:3;transform:translate(-100%,calc(-100% - 4px))"
@@ -386,7 +415,8 @@ function _dcsHtml() {
 /** Lo que se puede poner en la planta: un rack y cada tipo de pieza. Cae en la sala que haya
  *  en el centro de lo que se mira, o en la zona general de la planta si no hay ninguna. */
 function _dcsPaletteHtml() {
-    if (!_dcimMay('dcim_edit')) return '';
+    // Calibrando el plano, fuera: un clic que cae en un botón de la paleta creaba una pieza.
+    if (!_dcimMay('dcim_edit') || (_dcCal && _dcCal.kind === 'floor')) return '';
     const kinds = (_dcsPlan || {}).kinds || {};
     const boton = (onclick, icono, texto) =>
         `<button type="button" class="btn btn-sm btn-secondary" onclick="${onclick}"
@@ -489,7 +519,8 @@ function _dcsItemPanel(x) {
                 title="${escAttr(t('dcim_turn'))}"><i class="bi bi-arrow-clockwise"></i></button>
             <button type="button" class="btn btn-sm btn-danger" onclick="_dcsItemDrop()"
                 title="${escAttr(t('delete'))}"><i class="bi bi-trash"></i></button>
-        </div>`;
+        </div>
+        ${rack ? '' : _dcShelfBox(x)}`;
 }
 
 function _dcsItemOpen() {
@@ -516,7 +547,7 @@ function _dcsItemDrop() {
     if (!x) return;
     const rack = _dcsItem.kind === 'rack';
     const nombre = rack ? (x.name || '') : (x.label || t('dcim_kind_' + x.kind));
-    showConfirmModal(tf('dcim_delete_confirm', nombre), async () => {
+    showConfirmModal(tf('dcim_delete_confirm', nombre) + (rack ? '' : _dcShelfDropWarning(x.uid)), async () => {
         const url = `/api/v1/dcim/${rack ? 'racks' : 'features'}/${encodeURIComponent(x.uid)}`;
         const r = await _dcimSend('DELETE', url);
         if (!r.ok) return showToast(r.error || t('delete_error'), 'danger');
@@ -719,6 +750,18 @@ function _dcsFloorPanel() {
                 <input class="form-control form-control-sm ss-tabular" type="number" step="100" min="0"
                        value="${escAttr(String(f.plan_mm || 0))}"
                        oninput="_dcsFloorSet('plan_mm',this.value)"></label>
+            ${f.plan ? `<label class="ss-fs-2 text-muted" title="${escAttr(t('dcim_plan_xy_tt'))}">${esc(t('dcim_plan_x'))}
+                <input class="form-control form-control-sm ss-tabular" type="number" step="100"
+                       value="${escAttr(String(f.plan_x || 0))}"
+                       oninput="_dcsFloorSet('plan_x',this.value)"></label>
+            <label class="ss-fs-2 text-muted" title="${escAttr(t('dcim_plan_xy_tt'))}">${esc(t('dcim_plan_y'))}
+                <input class="form-control form-control-sm ss-tabular" type="number" step="100"
+                       value="${escAttr(String(f.plan_y || 0))}"
+                       oninput="_dcsFloorSet('plan_y',this.value)"></label>
+            <label class="ss-fs-2 text-muted" title="${escAttr(t('dcim_cal_north_tt'))}">${esc(t('dcim_north_deg'))}
+                <input class="form-control form-control-sm ss-tabular" type="number" step="1" min="0" max="359"
+                       value="${escAttr(f.north_deg === null || f.north_deg === undefined ? '' : String(f.north_deg))}"
+                       oninput="_dcsFloorSet('north_deg',this.value)"></label>` : ''}
         </div>
         ${f.plan && !(Number(f.plan_mm) > 0) ? `<div class="text-warning-emphasis ss-fs-2 mb-3">
             <i class="bi bi-rulers me-1"></i>${esc(tf('dcim_floor_plan_mm_unset', _DCS_PLAN_MM / 1000))}</div>` : ''}
@@ -756,8 +799,10 @@ async function _dcsFloorNew() {
 function _dcsFloorSet(campo, valor) {
     const f = _dcsFloor();
     if (!f) return;
-    f[campo] = campo === 'name' ? String(valor) : Number(valor);
-    if (campo === 'plan_mm') _dcsRedraw();
+    f[campo] = campo === 'name' ? String(valor)
+             : (campo === 'north_deg' && String(valor).trim() === '') ? null : Number(valor);
+    if (campo.startsWith('plan_')) _dcsRedraw();
+    if (campo === 'north_deg') renderDcim();
     // El nombre también arriba, en el selector de plantas: si no, el inspector dice un nombre y
     // el botón de la planta otro hasta el siguiente dibujado.
     if (campo === 'name') {
@@ -848,6 +893,7 @@ async function _dcsReload() {
         _dcsPlan.floor = (_dcsPlan.floors[0] || {}).uid || '';
     await renderDcim();
     await Promise.all([_dcsLoadImage(), _dcsLoadContents()]);
+    _dcUndoPrime();
     _dcsRedraw();
     _dcsInspectorDraw();
 }
@@ -886,9 +932,28 @@ function _dcsDropPlan() {
 
 function _dcsDown(ev) {
     _dcsFloatHide();
+    // Calibrando el plano, el puntero es de la calibración: no se coge ni se suelta nada.
+    if (_dcCal && _dcCal.kind === 'floor') return _dcCalDown(ev);
     // Un asa antes que la sala, igual que en una sala: está dentro de ella, y preguntar primero
     // por la sala convierte cada intento de estirarla en moverla.
     const asa = ev.target.closest('[data-dcph]');
+    // El asa de una pieza: se estira como en el plano de su sala. Las piezas de la planta —una
+    // puerta en la zona general— no tenían asas, y no había forma de hacerlas más grandes.
+    const gai = asa && asa.closest('g[data-dcsi]');
+    if (gai && _dcimMay('dcim_edit') && gai.dataset.dcsi === 'feature') {
+        _dcsItem = {kind: 'feature', uid: gai.dataset.uid, room: gai.dataset.room};
+        const x = _dcsItemRow();
+        const p = ssCanvasPoint(_DCS_SVG, ev);
+        if (x && p) {
+            _dcsDrag = {what: 'itemresize', uid: x.uid, handle: asa.dataset.dcph, from: p,
+                        moved: false, roomRot: _dcsRoomRot(gai.dataset.room),
+                        rot: Number(x.rotation) || 0,
+                        w0: Number(x.width_mm) || 600, d0: Number(x.depth_mm) || 600,
+                        at: {x: Number(x.pos_x) || 0, y: Number(x.pos_y) || 0}};
+            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+            return;
+        }
+    }
     const ga = asa && asa.closest('g[data-dcs]');
     if (ga && _dcimMay('dcim_edit')) {
         const r = _dcsRooms().find(x => x.uid === ga.dataset.dcs);
@@ -955,6 +1020,7 @@ function _dcsDown(ev) {
 }
 
 function _dcsMove(ev) {
+    if (_dcCal && _dcCal.press) return _dcCalMove(ev);
     const p = ssCanvasPoint(_DCS_SVG, ev);
     if (_dcsDrag && _dcsDrag.what === 'item') {
         const x = _dcsItemRow();
@@ -967,6 +1033,20 @@ function _dcsMove(ev) {
         x.pos_x = _dcsSnap(_dcsDrag.at.x + dx * c + dy * s);
         x.pos_y = _dcsSnap(_dcsDrag.at.y - dx * s + dy * c);
         _dcsDrag.moved = true;
+        _dcsRedraw();
+        return;
+    }
+    if (_dcsDrag && _dcsDrag.what === 'itemresize') {
+        const x = _dcsItemRow();
+        if (!p || !x) return;
+        // El movimiento de la mano está en la planta y la pieza en su sala: primero a las
+        // coordenadas de la sala (su giro), y la cuenta de siempre hace el resto.
+        const dx = (p.x - _dcsDrag.from.x) / _DCP_SCALE, dy = (p.y - _dcsDrag.from.y) / _DCP_SCALE;
+        const a = _dcsDrag.roomRot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+        Object.assign(x, _dcpResize(_dcsDrag, dx * c + dy * s, -dx * s + dy * c, _dcsSnap));
+        _dcsDrag.moved = true;
+        const el = document.getElementById('dcs-readout');
+        if (el) el.textContent = `${x.width_mm} × ${x.depth_mm} mm`;
         _dcsRedraw();
         return;
     }
@@ -1002,6 +1082,7 @@ function _dcsMove(ev) {
 }
 
 async function _dcsUp(ev) {
+    if (_dcCal && _dcCal.press) return _dcCalUp(ev);
     const drag = _dcsDrag;
     _dcsDrag = null;
     ssCanvasPanEnd(ev);
@@ -1014,6 +1095,18 @@ async function _dcsUp(ev) {
         return;
     }
     if (!drag.moved) return;
+    if (drag.what === 'itemresize') {
+        const x = _dcsItemRow();
+        if (!x) return;
+        const resp = await _dcimSend('PUT', `/api/v1/dcim/features/${encodeURIComponent(x.uid)}`,
+                                     {width_mm: x.width_mm, depth_mm: x.depth_mm,
+                                      pos_x: x.pos_x, pos_y: x.pos_y});
+        if (!resp.ok) {
+            showToast(resp.error || t('save_failed'), 'danger');
+            return _dcsReload();
+        }
+        return _dcsInspectorDraw();
+    }
     if (drag.what === 'item') {
         const x = _dcsItemRow();
         if (!x) return;

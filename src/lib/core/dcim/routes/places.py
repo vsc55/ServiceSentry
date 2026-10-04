@@ -19,12 +19,17 @@ Rutas:
     GET     /api/v1/dcim/media/<path:name>
     GET     /api/v1/dcim/orgs
     GET     /api/v1/dcim/rooms/<uid>/features
+    GET     /api/v1/dcim/features/<uid>/shelf
+    POST    /api/v1/dcim/shelf-items
+    PUT     /api/v1/dcim/shelf-items/<uid>
+    DELETE  /api/v1/dcim/shelf-items/<uid>
     POST    /api/v1/dcim/rooms/<uid>/import
     POST    /api/v1/dcim/rooms/<uid>/plan
     DELETE  /api/v1/dcim/rooms/<uid>/plan
     POST    /api/v1/dcim/sites/<uid>/photo
     DELETE  /api/v1/dcim/sites/<uid>/photo
     GET     /api/v1/dcim/sites/<uid>/floors
+    GET     /api/v1/dcim/sites/<uid>/contents
     POST    /api/v1/dcim/rows
     PUT     /api/v1/dcim/rows/<uid>
     DELETE  /api/v1/dcim/rows/<uid>
@@ -38,8 +43,8 @@ from flask import jsonify, request
 from lib.core.dcim import media as dcim_media
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
-from lib.core.dcim.store import FEATURE_KINDS, FEATURE_LAYERS
-from lib.core.dcim.store.features import _FEATURE
+from lib.core.dcim.store import FEATURE_KINDS, FEATURE_LAYERS, SHELVED_KINDS, SHELVES_MAX
+from lib.core.dcim.store.features import _FEATURE, _SHELF_ITEM
 from lib.core.dcim.store.floors import _FLOOR
 from lib.core.dcim.store.racks import _RACK
 from lib.core.dcim.store.rooms import _ROOM
@@ -65,6 +70,10 @@ def _bounds(spec) -> dict:
         out['u_height'] = (1, RACK_U_MAX)
     if spec is _SITE:
         out.update(lat=(-90, 90), lon=(-180, 180))
+    if spec is _FEATURE:
+        out['shelves'] = (1, SHELVES_MAX)
+    if spec is _SHELF_ITEM:
+        out.update(shelf=(1, SHELVES_MAX), qty=(0, _NUM_MAX))
     return out
 
 
@@ -355,7 +364,7 @@ def register(app, wa, C):
             pictures.append(str(row.get('photo') or ''))
         elif scope == 'room':
             for piece in store.features_of(uid):
-                store.features.delete(piece['uid'])
+                store.delete_feature(piece['uid'])
             for fila in store.rows_of(uid):
                 store.rows.delete(fila['uid'])
             pictures.append(str(row.get('plan') or ''))
@@ -475,6 +484,38 @@ def register(app, wa, C):
         # Con los tipos de pieza y sus medidas: la paleta del plano de la sede los necesita
         # aunque la planta no tenga todavía ninguna sala a la que preguntárselos.
         return jsonify({'floors': store.floors_of(uid), 'kinds': FEATURE_KINDS})
+
+    @app.route('/api/v1/dcim/sites/<uid>/contents', methods=['GET'])
+    @C.view_req
+    def api_dcim_site_contents(uid):
+        """What is inside every room of a site that sits on a floor — racks and pieces — in one
+        answer, keyed by room.
+
+        The floor plan and the building in 3D draw all of it at once. Asked room by room it was
+        two requests per room, and every rack list recomputed the state of the whole tree: a
+        building of thirty rooms was sixty requests and thirty identical passes. Filtered exactly
+        as those two answers are — racks one by one, pieces by whether the room can be seen.
+        """
+        store = C.store()
+        site = store.sites.get(uid) if store else None
+        if not site:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        said, allowed = store.owners_map(), C.seen()
+        reach = dcim_svc.reachable(store, said, allowed)
+        if not C.filtered([site], store, said, allowed, 'site', reach):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        roll = dcim_svc.tree_roll(store, C.states(), said, allowed)
+        rooms = {}
+        for room in store.rooms_of(uid):
+            if not room.get('floor_uid'):
+                continue
+            racks = C.filtered(store.racks_of(room['uid']), store, said, allowed, 'rack', reach)
+            for rack in racks:
+                rack['roll'] = roll['rack'].get(rack['uid']) or {}
+            seen = dcim_owners.may_see(C.owner_of(store, said, 'room', room['uid']), allowed)
+            rooms[room['uid']] = {'racks': racks,
+                                  'features': store.features_of(room['uid']) if seen else []}
+        return jsonify({'rooms': rooms, 'kinds': FEATURE_KINDS})
 
     @app.route('/api/v1/dcim/floors', methods=['POST'])
     @C.edit_req
@@ -795,6 +836,8 @@ def register(app, wa, C):
         # y hay que estirarla a mano para descubrir que era una mampara.
         body = _fresh(data)
         body.setdefault('width_mm', spec['w'])
+        if kind in SHELVED_KINDS:
+            body.setdefault('shelves', 1)
         body.setdefault('depth_mm', spec['d'])
         malo = numbers_bad(_FEATURE, body, _bounds(_FEATURE))
         if malo:
@@ -817,6 +860,11 @@ def register(app, wa, C):
         malo = numbers_bad(_FEATURE, data, _bounds(_FEATURE))
         if malo:
             return _bad_number(wa, malo)
+        # Quitar estanterías con material encima es perderlo de vista: se dice cuál tiene algo.
+        if data.get('shelves') is not None:
+            usadas = [int(r.get('shelf') or 0) for r in store.shelf_items_of(uid)]
+            if usadas and max(usadas) > int(data['shelves']):
+                return jsonify({'error': wa._t('dcim_shelves_in_use').format(max(usadas))}), 400
         store.features.update(uid, data, actor=C.actor())
         return jsonify({'ok': True})
 
@@ -830,7 +878,93 @@ def register(app, wa, C):
         _, room = _room_writable(row.get('room_uid'))
         if room is False or room is None:
             return jsonify({'error': wa._t('access_denied')}), 403
-        store.features.delete(uid)
+        store.delete_feature(uid)
+        return jsonify({'ok': True})
+
+    # ── Lo que hay en un armario ─────────────────────────────────────────────
+    #
+    # Con la misma puerta que sus piezas: mirarlo, quien ve la sala; cambiarlo, quien puede
+    # ordenar la sala. Un armario no es de nadie aparte de su sala.
+
+    def _cabinet(uid):
+        """El armario y su sala, o la respuesta de error."""
+        store = C.store()
+        row = store.features.get(str(uid or '')) if store else None
+        if not row:
+            return store, None, (jsonify({'error': wa._t('dcim_not_found')}), 404)
+        if str(row.get('kind') or '') not in SHELVED_KINDS:
+            return store, None, (jsonify({'error': wa._t('dcim_not_a_cabinet')}), 400)
+        return store, row, None
+
+    def _shelves_of(row) -> int:
+        return max(1, int(row.get('shelves') or 1))
+
+    @app.route('/api/v1/dcim/features/<uid>/shelf', methods=['GET'])
+    @C.view_req
+    def api_dcim_shelf(uid):
+        store, row, err = _cabinet(uid)
+        if err:
+            return err
+        if not dcim_owners.may_see(C.owner_of(store, store.owners_map(), 'room',
+                                              row.get('room_uid')), C.seen()):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        return jsonify({'shelves': _shelves_of(row), 'items': store.shelf_items_of(uid)})
+
+    def _shelf_item_body(data, row):
+        """Lo que se puede escribir de una cosa del armario, comprobado."""
+        body = _without(data, ('feature_uid',))
+        if 'label' in body:
+            body['label'] = str(body.get('label') or '').strip()
+            if not body['label']:
+                return None, (jsonify({'error': wa._t('dcim_name_required')}), 400)
+        if 'notes' in body:
+            body['notes'] = str(body.get('notes') or '')
+        malo = numbers_bad(_SHELF_ITEM, body, _bounds(_SHELF_ITEM))
+        if malo:
+            return None, _bad_number(wa, malo)
+        if 'shelf' in body and int(body['shelf']) > _shelves_of(row):
+            return None, (jsonify({'error': wa._t('dcim_shelf_bad')}), 400)
+        return body, None
+
+    @app.route('/api/v1/dcim/shelf-items', methods=['POST'])
+    @C.edit_req
+    def api_dcim_shelf_item_new():
+        data = request.get_json(silent=True) or {}
+        store, row, err = _cabinet(data.get('feature_uid'))
+        if err:
+            return err
+        _, room = _room_writable(row.get('room_uid'))
+        if room is False or room is None:
+            return jsonify({'error': wa._t('access_denied')}), 403
+        body, err = _shelf_item_body(_fresh(data), row)
+        if err:
+            return err
+        if not body.get('label'):
+            return jsonify({'error': wa._t('dcim_name_required')}), 400
+        body['feature_uid'] = row['uid']
+        body.setdefault('shelf', 1)
+        return jsonify({'uid': store.shelf_items.create(body, actor=C.actor())})
+
+    @app.route('/api/v1/dcim/shelf-items/<uid>', methods=['PUT', 'DELETE'])
+    @C.edit_req
+    def api_dcim_shelf_item_edit(uid):
+        store = C.store()
+        item = store.shelf_items.get(uid) if store else None
+        if not item:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        _, row, err = _cabinet(item.get('feature_uid'))
+        if err:
+            return err
+        _, room = _room_writable(row.get('room_uid'))
+        if room is False or room is None:
+            return jsonify({'error': wa._t('access_denied')}), 403
+        if request.method == 'DELETE':
+            store.shelf_items.delete(uid)
+            return jsonify({'ok': True})
+        body, err = _shelf_item_body(request.get_json(silent=True) or {}, row)
+        if err:
+            return err
+        store.shelf_items.update(uid, body, actor=C.actor())
         return jsonify({'ok': True})
 
     @app.route('/api/v1/dcim/rooms/<uid>/import', methods=['POST'])
@@ -902,6 +1036,9 @@ def register(app, wa, C):
                               if row.get('height_mm') not in (None, '') else None),
                 'base_mm': (max(0, int(_num(row.get('base_mm'))))
                             if row.get('base_mm') not in (None, '') else None),
+                'shelves': (min(SHELVES_MAX, max(1, int(_num(row.get('shelves')))))
+                            if kind in SHELVED_KINDS and row.get('shelves') not in (None, '')
+                            else None),
             })
         _replace_features(store, uid, nuevas, actor)
         piezas = len(nuevas)
@@ -945,12 +1082,25 @@ def register(app, wa, C):
         would not hold; what holds is that the list is complete before the first delete, and
         that a failure half-way restores what was there instead of leaving the room bare.
         """
-        viejas = store.features_of(room_uid)
+        # Un armario con material NO se borra: lo que guarda no está en el fichero, y borrarlo
+        # para crear otro igual perdería el material. Si el fichero trae un armario con su
+        # mismo nombre, se le ponen el sitio y la medida del fichero; si no, se queda.
+        con_material = {o['uid'] for o in store.features_of(room_uid)
+                        if str(o.get('kind') or '') in SHELVED_KINDS and store.shelf_items_of(o['uid'])}
+        viejas = [o for o in store.features_of(room_uid) if o['uid'] not in con_material]
+        guardados = {str(o.get('label') or ''): o['uid'] for o in store.features_of(room_uid)
+                     if o['uid'] in con_material}
         hechas = []
         try:
             for old in viejas:
                 store.features.delete(old['uid'])
             for fila in nuevas:
+                igual = (fila.get('kind') in SHELVED_KINDS
+                         and guardados.pop(str(fila.get('label') or ''), None))
+                if igual:
+                    store.features.update(igual, {k: v for k, v in fila.items() if k != 'room_uid'},
+                                          actor=actor)
+                    continue
                 hechas.append(store.features.create(fila, actor=actor))
         except Exception:
             for uid in hechas:

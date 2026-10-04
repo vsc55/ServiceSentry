@@ -117,11 +117,48 @@ function _dcSrcTree(fuentes, puede) {
                 esc(tf('dcim_autonomy', f.autonomy_min))}</span>` : ''}
             ${f.bypass ? `<span class="badge text-bg-warning fw-normal">${
                 esc(t('dcim_bypassed'))}</span>` : ''}
+            ${_dcSrcItemChip(f)}
             <div class="ms-auto d-flex gap-1 flex-shrink-0">${manos}</div>
         </div>
+        ${_dcSrcHangs(suyo, guias)}
         ${pinta(suyo, nivel + 1)}`;
     }).join('');
     return `<div class="card"><div class="card-body py-0">${pinta('', 0)}</div></div>`;
+}
+
+/** The rack item a source IS — the UPS on the floor beside a rack — as a link to that rack. */
+function _dcSrcItemChip(f) {
+    if (!f.item_uid) return '';
+    const it = ((_dcSrc || {}).ups_items || []).find(x => x.uid === f.item_uid);
+    if (!it) return '';
+    return `<button type="button" class="btn btn-sm btn-secondary py-0"
+        title="${escAttr(t('dcim_source_item'))}" onclick="_dcSrcGoRack(${jsStr(it.rack)})">
+        <i class="bi bi-hdd-rack me-1"></i>${esc(tf('dcim_source_is_item', it.label, it.rack_name))}</button>`;
+}
+
+/** What hangs off a source directly: each strip with its branch and its rack, the rack a link.
+ *  Without this, the chain could only be read upwards from a rack, never downwards from a
+ *  panel — and «what goes off if this panel trips» is the question asked of a panel. */
+function _dcSrcHangs(uid, guias) {
+    const filas = (((_dcSrc || {}).hangs || {})[uid]) || [];
+    if (!filas.length) return '';
+    return `<div class="ss-treerow ss-fs-2 text-body-secondary">${guias}<span class="ss-treeline"></span>
+        <i class="bi bi-arrow-return-right"></i>
+        <span class="d-flex flex-wrap gap-1 align-items-center">${filas.map(h => `<button type="button"
+            class="btn btn-sm btn-secondary py-0" onclick="_dcSrcGoRack(${jsStr(h.rack)})"
+            title="${escAttr(t('dcim_open_rack'))}">${esc(h.name)} · ${esc(_dcBranchWord(h.feed))} · ${
+            esc(h.rack_name)}</button>`).join('')}</span></div>`;
+}
+
+/** To a rack, from the sources view: the inventory, with that rack open on its Alimentación tab. */
+function _dcSrcGoRack(rackUid) {
+    if (!rackUid) return;
+    _dcSrc = null;
+    _dcimMark('inventory');
+    _dcRackTab = 'power';               // if this rack is already the open one
+    _dcRackTabNext = 'power';           // if it is not: the load would reset the tab
+    _dcRackView = 'rack';
+    _dcimLoadRack(rackUid);
 }
 
 function _dcSrcIcon(kind) {
@@ -197,7 +234,7 @@ function _dcSrcForm() {
                     `<option value="${escAttr(x.uid)}">${esc(x.name)}</option>`).join('')}
             </select></label>`;
     return `<div class="d-flex align-items-end gap-2 flex-wrap p-2 rounded bg-body-secondary mb-3">
-        <label class="ss-fs-2 text-muted">${esc(t('name'))}
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_source_name'))}
             <input id="dcs-name" class="form-control form-control-sm" style="max-width:12rem"
                    value="${escAttr(String(f.name || ''))}"
                    onkeydown="if(event.key==='Enter')_dcSrcSave()"></label>
@@ -222,6 +259,24 @@ function _dcSrcForm() {
             <input id="dcs-aut" type="number" min="0" class="form-control form-control-sm
                    ss-tabular" style="max-width:6rem"
                    value="${escAttr(String(f.autonomy_min || ''))}"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_source_item'))}
+            <select id="dcs-item" class="form-select form-select-sm" style="max-width:14rem">
+                <option value="">${esc(t('dcim_source_item_none'))}</option>${
+                (d.ups_items || []).filter(x => !x.source || x.source === f.uid).map(x =>
+                    `<option value="${escAttr(x.uid)}"${String(f.item_uid || '') === x.uid ? ' selected' : ''}>${
+                    esc(x.label)} · ${esc(x.rack_name)}</option>`).join('')}
+            </select></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_device'))}
+            ${_dcimDatalist('devices')}
+            <input id="dcs-dev" class="form-control form-control-sm" style="max-width:11rem"
+                   ${(_dcimDevices || []).length ? 'list="dcim-devices" autocomplete="off"' : ''}
+                   value="${escAttr(String(f.device_uid || ''))}"></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_source_bypass_at'))}
+            <input id="dcs-bat" class="form-control form-control-sm" style="min-width:16rem"
+                   value="${escAttr(String(f.bypass_at || ''))}"></label>
+        <label class="ss-fs-2 text-muted flex-grow-1">${esc(t('dcim_description'))}
+            <input id="dcs-desc" class="form-control form-control-sm"
+                   value="${escAttr(String(f.description || ''))}"></label>
         <button class="btn btn-sm btn-primary" onclick="_dcSrcSave()">
             <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
         <button class="btn btn-sm btn-secondary"
@@ -235,7 +290,9 @@ async function _dcSrcSave() {
     const cuerpo = {name: val('dcs-name'), kind: val('dcs-kind'),
                     upstream_uid: val('dcs-up'),
                     capacity_w: Number(val('dcs-cap')) || 0,
-                    autonomy_min: Number(val('dcs-aut')) || 0};
+                    autonomy_min: Number(val('dcs-aut')) || 0,
+                    item_uid: val('dcs-item'), device_uid: val('dcs-dev').trim(),
+                    bypass_at: val('dcs-bat').trim(), description: val('dcs-desc').trim()};
     // La sede solo al declararla: al corregir, la ruta la descarta —cambiarla cambiaría quién
     // puede tocar la fila— así que mandarla sería mandar algo que se tira.
     if (!_dcSrcEdit) cuerpo.site_uid = val('dcs-site');

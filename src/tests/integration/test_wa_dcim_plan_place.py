@@ -207,7 +207,7 @@ casos.estFrente = {
 _dcpMagnet = true;
 casos.salaEstirada = _dcpResize({handle: 'se', w0: 4000, d0: 3000, rot: 0, at: {x: 1000, y: 1000}},
                                 1234, 567, _dcsSnap);
-casos.planoSinAncho = [_dcsImageMm().mm];
+casos.planoSinAncho = [_dcsPlanBox().w];
 // A point on the floor, in the coordinates of a room turned a quarter: what places a rack INSIDE
 // a turned room where it was dropped.
 const girada = {pos_x: 10000, pos_y: 5000, width_mm: 6000, depth_mm: 4000, rotation: 90};

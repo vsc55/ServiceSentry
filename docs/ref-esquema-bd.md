@@ -31,7 +31,7 @@ Lo vigila `tests/meta/test_docs_db_schema.py::TestLaAuditoriaVaAlFinal`, sobre l
 
 ## Índice de tablas
 
-Hay **76 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **77 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -49,7 +49,7 @@ Hay **76 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 
 | Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
 | Empresas | `org` (las sociedades del grupo), `org_owner` (de quién es cada cosa, en cualquier ámbito que un paquete declare) |
-| Inventario físico (DCIM) | `dc_site`, `dc_floor` (una planta de la sede, con su plano), `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
+| Inventario físico (DCIM) | `dc_site`, `dc_floor` (una planta de la sede, con su plano), `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_shelf_item` (lo que hay en cada estantería de un armario), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs`, `health_alerts` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
@@ -922,6 +922,9 @@ la sede. Quitarla **no** borra sus salas: se quedan en la sede, sin colocar.
 | level | INTEGER | no | `0` | contando desde la calle: 0 la baja, 1 la primera, -1 el sótano. Es el orden en que se enseñan |
 | plan | TEXT | no | `''` | **nombre** del plano de fondo en el almacén de medios, nunca una ruta; lo acuña la subida |
 | plan_mm | INTEGER | no | `0` | lo ancho que es de verdad lo que dibuja el plano, en mm; el alto sale de la proporción de la imagen. 0 = sin decir, y el plano se estira a lo que haya |
+| plan_x | REAL | no | `0` | dónde cae la esquina de arriba a la izquierda del plano en la planta, en mm; negativo si el dibujo tiene margen antes de empezar. Lo pone la calibración |
+| plan_y | REAL | no | `0` | |
+| north_deg | REAL | sí | — | hacia dónde apunta el norte en el plano, en grados en el sentido del reloj desde arriba. NULL = nadie lo ha dicho, que no es «el norte está arriba»: sin él no se dibuja la rosa de los vientos. Lo pone la calibración |
 | description | TEXT | no | `''` | |
 | area_uid | TEXT | no | `''` | su **zona general**: la sala, en (0, 0) y sin girar, donde va lo que se pone en la planta sin estar en ninguna sala —un rack en un pasillo, un cuadro eléctrico—. Una sala y no un rack sin sala, porque todo el inventario cuelga de una. Vacío hasta la primera vez; lo acuña `POST /floors/<uid>/area` y no se escribe a mano |
 | created_at | TEXT | no | `''` | auditoría |
@@ -939,6 +942,9 @@ la sede. Quitarla **no** borra sus salas: se quedan en la sede, sin colocar.
 | description | TEXT | no | `''` | |
 | cooling | TEXT | no | `''` | cómo se enfría; vacío = **nadie lo ha dicho**, que no es `none` |
 | plan_mm | INTEGER | no | `0` | ancho del plano **en la sala**, en mm; el alto sale de la proporción de la imagen. 0 = sin escalar |
+| plan_x | REAL | no | `0` | dónde cae la esquina de arriba a la izquierda del plano en la sala, en mm; negativo si el dibujo tiene margen antes de empezar. Lo pone la calibración |
+| plan_y | REAL | no | `0` | |
+| north_deg | REAL | sí | — | hacia dónde apunta el norte en el plano, en grados en el sentido del reloj desde arriba. NULL = nadie lo ha dicho, que no es «el norte está arriba»: sin él no se dibuja la rosa de los vientos. Lo pone la calibración |
 | width_mm | INTEGER | no | `0` | cuánto mide la sala; 0 = nadie lo ha dicho y el plano se encuadra a lo que hay |
 | depth_mm | INTEGER | no | `0` | |
 | tile_mm | INTEGER | no | `600` | la baldosa del suelo técnico. Es un dato de la sala y no una constante —hay suelos de 500 y de 610— y de ahí salen el imán del editor y los nombres de posición («B7»), que es como se dan por teléfono |
@@ -1103,6 +1109,7 @@ si lo echan?» antes de que lo echen**.
 | autonomy_min | INTEGER | no | `0` | minutos de batería. Sin ellos un SAI es un nombre; con ellos es «tengo ocho minutos para apagar cuarenta máquinas» |
 | device_uid | TEXT | no | `''` | la máquina, si el SAI contesta: dice si está en batería AHORA |
 | description | TEXT | no | `''` | |
+| item_uid | TEXT | no | `''` | el equipo del inventario que ES esta fuente, cuando está en un armario (el SAI de suelo al lado del rack). Uno por fuente: la misma cosa descrita dos veces, como `dc_pdu.item_uid` |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -1175,6 +1182,26 @@ columna.
 | rotation | INTEGER | no | `0` | grados |
 | height_mm | INTEGER | sí | — | lo alto que es ESTA pieza, en mm. Vacío = el de su tipo (`FEATURE_KINDS`), que es lo que eran todas antes de existir la columna |
 | base_mm | INTEGER | sí | — | a qué altura del suelo empieza, en mm. Vacío = la de su tipo (una bandeja cuelga a 2720). Vacío y no cero, porque cero es una medida: una bandeja en el suelo |
+| shelves | INTEGER | sí | — | cuántas estanterías tiene, si es un armario (`cabinet`); 1 al crearlo. Vacío en lo que no es un armario. No se puede bajar por debajo de la estantería más alta con material |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
+
+### `dc_shelf_item` — lo que hay en una estantería de un armario
+
+Material suelto —un rollo de cable, cajas de tornillos, un switch de repuesto sin montar— con su
+cantidad, en la estantería de un armario de la sala. **No es inventario de equipos**: lo que tiene
+número de serie y se monta va a un rack (`dc_item`). Se borra con su armario; importar un plano
+nunca borra un armario que tenga algo dentro.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| feature_uid | TEXT | no | — | el armario (`dc_feature`); índice `idx_dc_shelf_item_feature` |
+| shelf | INTEGER | no | `1` | qué estantería, contando desde **arriba** |
+| label | TEXT | no | `''` | qué es; obligatorio al escribir |
+| qty | INTEGER | no | `1` | cuántos |
+| notes | TEXT | no | `''` | |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |

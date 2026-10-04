@@ -495,7 +495,10 @@ class TestUnaPiezaSeEstiraArrastrando:
         """El asa está dentro de la pieza: preguntar primero por la pieza convierte cada intento
         de estirarla en moverla."""
         abajo = _fn(_section(), '_dcpDown')
-        assert abajo.index("closest('[data-dcph]')") < abajo.index("closest('g[data-dcpf]')")
+        assert abajo.index('const asa = hit.asa') < abajo.index('const pieza =')
+        # Y el asa se busca entre TODO lo que hay bajo el dedo: la de una mesa seleccionada bajo
+        # una bandeja también se coge.
+        assert "closest('[data-dcph]')" in _fn(_section(), '_dcpHit')
 
     def test_y_lo_estirado_se_guarda_en_el_servidor(self):
         arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
@@ -534,7 +537,8 @@ class TestElPlanoEsUnEditor:
         y lo que se estaba mirando."""
         arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
         tramo = arriba.split("drag.what === 'feature'")[1]
-        assert 'if (!drag.moved) return _dcpInspectorDraw();' in tramo
+        # Sin viaje: pasar a lo de debajo si se pulsó otra vez, o solo el inspector.
+        assert 'if (!drag.moved) return _dcpCycle(drag) || _dcpInspectorDraw();' in tramo
 
     def test_sin_nada_seleccionado_enseña_la_sala(self):
         """Las medidas y las filas de la sala, que eran dos franjas encima del plano."""
@@ -659,7 +663,7 @@ class TestUnRackDePared:
         assert "name: 'base_mm'" in campos
 
     def test_el_3d_lo_levanta(self):
-        tres_d = _section().split('for (const r of (_dcimPlan.racks || []))')[1][:1200]
+        tres_d = _fn(_section(), '_dc3dRoomBoxes').split('for (const r of (racks || []))')[1][:1200]
         assert 'r.base_mm' in tres_d, 'el 3D sigue poniendo en el suelo un rack colgado'
 
     def test_la_tarjeta_del_plano_lo_dice(self):
@@ -775,7 +779,7 @@ class TestDeFrenteTambienSeEstira:
     def test_el_asa_se_pregunta_antes_que_la_cosa(self):
         abajo = _fn(_section(), '_dcpDown')
         tramo = abajo.split("if (_dcpView !== 'top') {")[1]
-        assert tramo.index("closest('[data-dcph]')") < tramo.index("closest('g[data-dcpf], g[data-dcp]');\n        if (g)")
+        assert tramo.index('const asa = hit.asa') < tramo.index('const g = hit.g')
 
     def test_y_soltar_lo_guarda_o_lo_devuelve(self):
         arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
@@ -826,7 +830,11 @@ class TestLaSedeTienePlantas:
 
     def test_el_plano_no_se_mide_con_las_salas(self):
         """Una referencia que se mueve con lo que se coloca encima no sirve para colocar."""
-        assert '_dcsHere()' not in _fn(_section(), '_dcsImageMm')
+        # Lo que mide el plano sale de lo dicho, o de un tamaño fijo: ni de las salas ni del
+        # marco del dibujo, que cambian al mover lo que hay encima.
+        for caja in ('_dcPlanBox', '_dcsPlanBox', '_dcpPlanBox'):
+            cuerpo = _fn(_section(), caja)
+            assert '_dcsHere()' not in cuerpo and '_dcpExtent' not in cuerpo, caja
 
     def test_colocar_varias_no_las_apila(self):
         assert 'pisa(' in _fn(_section(), '_dcsPlace')
@@ -942,7 +950,7 @@ class TestElMarcoNoMezclaUnidades:
         """Un marco que no cuenta una de sus cajas deja esa caja donde ya no se puede agarrar.
         Este panel lo ha pisado tres veces: los dos mapas de infraestructura y este plano."""
         cuerpo = self._extent()
-        for lo_que_hay in ('racks', '_dcpFeatures', 'width_mm', 'plan_mm'):
+        for lo_que_hay in ('racks', '_dcpFeatures', 'width_mm', '_dcpPlanBox()'):
             assert lo_que_hay in cuerpo, lo_que_hay
 
 
@@ -1357,7 +1365,9 @@ class TestUnaColumnaQueNadiePuedeEscribir:
     def _columnas(self):
         """Las de `dc_item`, leídas de su propio `TableSpec`."""
         src = _store_src()
-        i = src.index('_ITEM = TableSpec(')
+        # Desde el principio de la línea: `_SHELF_ITEM = TableSpec(` también contiene el texto, y
+        # se leían las columnas de la tabla equivocada.
+        i = src.index('\n_ITEM = TableSpec(')
         return set(re.findall(r"Column\('(\w+)'", src[i:src.index('\n)', i)]))
 
     def _campos(self):
@@ -1752,7 +1762,9 @@ class TestElArmarioSeEnteraDeLoQuePasaFuera:
     def test_hay_boton_para_pedirlo(self):
         js = _read(os.path.join(DCIM, '_rack.html'))
         assert 'function _dcimReloadRack(' in js, 'no se puede refrescar el armario'
-        assert '_dcimReloadRack()' in _fn(js, '_dcimRackHtml'), 'no hay nada que pulsar'
+        # En la cabecera común de las cuatro vistas, que es donde vive desde que hay vistas.
+        assert '_dcimReloadRack()' in _fn(js, '_dcRackHeader'), 'no hay nada que pulsar'
+        assert '_dcRackHeader(' in _fn(js, '_dcimRackHtml'), 'la cabecera ya no se dibuja'
 
     def test_y_volver_a_la_seccion_tambien_lo_pide(self):
         """En `shown.bs.tab` y no dentro de `renderDcim`, que se llama en cada redibujado de la
@@ -3898,3 +3910,68 @@ class TestModelosYPlantillasSonDelCatalogo:
         feats = _read(os.path.join(base, '_table_features.html'))
         assert "modelsLi.style.display = perms.has('dcim_catalog_view')" in feats
         assert "buildsLi.style.display = perms.has('dcim_view')" in feats
+
+
+class TestDeshacerEnLosPlanos:
+    """Se pidió poder deshacer lo movido por error en un plano. Lo de cada paso lo prueba
+    `tests/integration/test_wa_dcim_undo.py`; aquí, que está enchufado donde tiene que estar."""
+
+    def test_todo_cambio_pasa_por_el_apunte(self):
+        envio = _fn(_section(), '_dcimSend')
+        assert envio.index('_dcUndoBefore(') < envio.index('apiSend(') < envio.index('_dcUndoRecord(')
+
+    def test_los_dos_planos_toman_la_foto_al_cargar(self):
+        assert '_dcUndoPrime()' in _fn(_section(), '_dcimOpenPlan')
+        assert '_dcUndoPrime()' in _fn(_section(), '_dcsOpen')
+        assert '_dcUndoPrime()' in _fn(_section(), '_dcsGo')
+
+    def test_y_llevan_los_botones(self):
+        assert '_dcUndoButtons()' in _fn(_section(), '_dcimPlanHtml')
+        assert '_dcUndoButtons()' in _fn(_section(), '_dcsHtml')
+
+
+class TestElSueloDel3DNoSeCruza:
+    """Reportado: al moverse por el 3D de una planta, el plano del suelo se rompía a franjas."""
+
+    def test_el_plano_cercano_crece_con_la_distancia(self):
+        assert 'c.radio * 0.04' in _fn(_section(), '_dc3dDraw')
+
+    def test_las_capas_del_suelo_separadas(self):
+        planta = _fn(_section(), '_ds3FloorScene')
+        assert '-0.12, b.y * M' in planta and 'floorY: -0.03' in planta
+
+
+class TestCadaTipoDePiezaEstaCompleto:
+    """Se pidió el armario como pieza de sala. Un tipo nuevo tiene que llegar a todas partes: sin
+    su dibujo sale como una caja gris sin explicar, sin icono no está en la paleta, sin color en
+    3D sale del color por defecto, y sin nombre la ficha dice su clave."""
+
+    def test_dibujo_icono_color_y_nombre(self):
+        from lib.core.dcim.store import FEATURE_KINDS                # noqa: PLC0415
+        from lib.i18n.lang.es_ES import LANG as ES                   # noqa: PLC0415
+        from lib.i18n.lang.en_EN import LANG as EN                   # noqa: PLC0415
+        sec = _section()
+        bloque = lambda nombre: sec.split(nombre + ' = {')[1].split('};')[0]  # noqa: E731
+        for tabla in ('_DCP_LOOK', '_DCP_ICON', '_DC3_COLOR'):
+            claves = set(re.findall(r'\b(\w+):', bloque(tabla)))
+            faltan = [k for k in FEATURE_KINDS if k not in claves]
+            if tabla == '_DC3_COLOR':
+                faltan = [k for k in faltan if k != 'label']   # una etiqueta no se levanta
+            assert not faltan, f'{tabla}: {faltan}'
+        for k in FEATURE_KINDS:
+            assert 'dcim_kind_' + k in ES and 'dcim_kind_' + k in EN, k
+
+    def test_el_armario_esta(self):
+        from lib.core.dcim.store import FEATURE_KINDS                # noqa: PLC0415
+        assert FEATURE_KINDS['cabinet']['layer'] == 'room'
+
+
+class TestElRackSeDistingueDelMuro:
+    """Reportado: en el 3D un rack contra la pared no se distinguía de ella; los dos eran casi el
+    mismo gris oscuro."""
+
+    def test_muro_claro_y_rack_oscuro(self):
+        tabla = _section().split('const _DC3_COLOR = {')[1].split('};')[0]
+        gris = lambda clave: sum(float(v) for v in re.search(  # noqa: E731
+            clave + r':\s*\[([\d.]+), ([\d.]+), ([\d.]+)', tabla).groups()) / 3
+        assert gris('wallroom') - gris(r'\brack') > 0.25

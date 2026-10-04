@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~10.600 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~10.750 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -9901,7 +9901,7 @@ existe para encontrar. Cuatro copias de esa regla se desvían, y la que dejara d
 
 ---
 
-**Archivo:** `tests/integration/test_wa_dcim.py` — 469 tests
+**Archivo:** `tests/integration/test_wa_dcim.py` — 493 tests
 
 Rutas del inventario físico y, sobre todo, **el rack compartido**: quien solo tiene una empresa ve el rack y ve que la U está ocupada, y de lo ajeno no sale ni nombre, ni serie, ni dispositivo; el hueco libre sí es de todos; no puede mover lo ajeno pero sí lo suyo; decir de quién es algo es otra bandera; la U solo admite una cosa por cara; y borrar una empresa no deja pertenencias colgando. Y **el plano de la sala**, que es lo único de la sección donde el nombre lo elige quien sube: que lo guardado no se llama como lo subido, que un script con extensión `.png` no entra, que un SVG se sirve como descarga, que cambiar el plano se lleva el anterior —si no, la carpeta crece durante toda la vida de la instalación— y que el nombre no se puede escribir por el CRUD genérico, que dejaría apuntar una sala a la imagen de otra sin subir nada. Y **el cuadro de mando**: que las tarjetas cuentan por sede, que una sede que no se puede ver no sale —la misma regla que el listado, porque un cuadro que contase una sede que el árbol no enseña serían dos pantallas discrepando sobre la misma flota— y que el desglose por empresa solo cuenta lo visible. Y **diseñar la sala**: que una pieza viene con sus medidas de fábrica y el catálogo viaja con la lista —una paleta con las suyas sería una segunda verdad sobre lo que mide una puerta—, que un tipo inventado no entra ni al crear ni al editar, que una pieza no se muda de sala por el cuerpo de un PUT, y sobre todo que **el permiso se mira en la sala y no en la pieza**: una columna no es de nadie, así que preguntarle a ella daría que puede moverla cualquiera. Y **traerse un plano de un fichero**, que es la operación que puede destruir trabajo de otro: que las piezas se reemplazan enteras, que **un rack que el fichero no nombra NO se borra** —dentro hay equipos, y un JSON de hace dos meses no puede tirar el inventario de nadie—, que los racks se emparejan por nombre y solo se les mueve, que un tipo desconocido se salta **y se dice**, y que una coordenada mal escrita no tumba la importación entera. Y **la potencia en un armario compartido**, que es donde está la arista: los totales de una regleta los ve la filial —sin ellos no puede saber si le cabe otro servidor, igual que «la U 12 está ocupada»—, de quién es cada cable no, y el aviso sobre el equipo del vecino no se le cuenta: ni puede arreglarlo ni tiene por qué saber que existe. Y **el color y la máquina de una regleta**: que una nueva toma el de su rama —azul y rojo, que se distinguen desde la puerta de la sala—, que el suyo manda cuando lo tiene, que lo resuelve el servidor en un solo sitio, y que enlazarla con una máquina del registro es lo que convierte una fila de inventario en un dato vivo. Y **el cableado**: que un cable del vecino no es suyo que reconciliar —su etiqueta diría de qué máquina es—, que declararlo es **su propia bandera** (`dcim_cable_edit`), y que la pantalla abre aunque no haya nada con lo que contrastar. Y **los enlaces entre sedes**: que hacen falta dos sedes distintas, que el permiso se pide sobre **las dos puntas** —si no, se podrían dibujar líneas hasta sedes que quien las dibuja no puede ni abrir—, que una punta no se cambia por el cuerpo de un PUT, y que un enlace a una sede que no se ve no se dibuja: una línea a una caja que no está sale al vacío. Y **la previsión**: que la U ocupada por otro **sigue ocupada** aunque quien pregunta no pueda ver qué la ocupa —decir que está libre mandaría a alguien con un servidor a un sitio donde no entra—, que se piden dos ramas por defecto, y que un armario que no se ve no sale. Y que la **zona horaria viaja con la sede** —la hora local la convierte el navegador— y que sin zona es una cadena vacía y no un hueco: que falte la clave y que esté vacía se leen distinto, y solo una de las dos es cierta. Y que **no se crea dentro de lo ajeno**: meter una sala en una sede es escribir en esa sede, y el alta genérica no lo miraba — alguien acotado a su sociedad podía crear una sala dentro de una sede que ni siquiera puede listar, y desde ahí un rack y equipos. Salió de auditar la sección ruta por ruta. Y las dos fugas que salieron de auditar la sección ruta por ruta: que **el nombre del vecino no sale por el otro extremo de un cable** —un equipo ajeno conserva su uid porque el dibujo lo necesita, y declarar un cable hacia él devolvía su etiqueta— y que **un armario que el listado esconde tampoco se abre por uid**, con la regla fina que el caso del holding exige: o lo ves, o tienes algo dentro. Y **las filas de una sala**: que viajan con el plano, que deshacer una **no deshace sus armarios** —los deja sueltos, que es un estado real— y que declararlas es ordenar la sala, con su misma puerta. Y **la cadena eléctrica**: que echar el bypass saca al SAI de la cadena y lo dice, que **esa maniobra queda en la auditoría** —quién la hizo y cuándo es lo primero que se pregunta cuando algo se apaga tres meses después— y que borrar un cuadro deja lo de abajo *sin decir* de qué cuelga en vez de apuntando a algo que no existe. Y **lo que lleva dentro un equipo**: que seis discos son una fila con un seis, que de un equipo ajeno no se lista ni un componente —un disco no ocupa nada que nadie más necesite saber—, que un componente no se muda de equipo por el cuerpo de un PUT, y que meter un panel de parcheo en un armario ya **no añade un desatendido**. Y **las plantillas**, que son el escalón entre lo que un fabricante vende y la caja del U 12: que crear un equipo desde una copia sus componentes y **no su número de serie** —heredarlo serían veinte máquinas con el mismo, que es peor que ninguno—; que la altura sale de la plantilla y, si no la fija, del modelo del catálogo; que **lo tecleado manda** sobre las dos, porque el fondo que alguien acaba de medir vale más que el del estándar de hace un año; que las piezas del equipo son suyas desde que existen —añadir una a la plantilla después no cambia una máquina que nadie ha tocado—; que el equipo recuerda de cuál nació y que retirarla no los toca; que la diferencia entre lo que lleva y lo que decía se puede leer, porque no es un error sino un dato; y que escribir el estándar de compra pide **su propia bandera**, porque con una sola quien monta un rack rescribe lo que compra la empresa. Más el cuarto árbol del catálogo, el de los componentes: que usa las clases de una PIEZA y no las de los que ocupan U, que corregir la clase sin mandar el árbol sigue valiendo, y que el filtro por forma acota también la rejilla de fabricantes. Y **las marcas**, que son la raíz de todo lo anterior: que se dan de alta solas al importar y que dos formas de escribir el mismo nombre son una y no dos; que renombrar una **no pierde sus modelos**, porque lo que los acota es la fila y no el texto; que retirar su ficha se niega mientras los tenga —el nombre volvería solo en el siguiente arranque y lo único perdido sería lo que escribimos nosotros—; que el `slug` no llega por la petición, que sería dejar que dos marcas se hicieran pasar por la misma; y que **leerlas no pide el permiso de importar**, porque la dirección por la que se abre un ticket es la que hace falta a las tres de la mañana. Que **corregir una pieza no pierde lo que no se toca** —el rodeo de quitarla y volver a añadirla se lleva el número de serie— y que la de una plantilla también se corrige. Que un kit **dice cuántas piezas trae**, en la plantilla y en la máquina, y que lo que se compra suelto trae una sin tener que declararlo. Y que **un componente sale del catálogo**: que la marca, el nombre y el tamaño los pone el modelo y no la petición —dejar ganar a quien pide sería dejar que la misma pieza se llamara de dos formas según por qué pantalla entrara—, que la bahía y la cantidad sí son de la pieza, que un modelo que no existe no se apunta, y que el mismo camino vale para la plantilla y para la máquina, que es lo que permite contarlas juntas. A mano sigue valiendo para el disco que salió del cajón. Y los **adjuntos**, que es lo que no es una foto —el manual, la hoja, el zip del firmware—: que entra lo que no es una imagen, que **sale siempre como descarga** con tipo genérico y `nosniff` —lo que permite no tener lista blanca: un HTML subido no se ejecuta en este origen porque no llega a renderizarse—, que ni el nombre del fichero toca el disco ni parte la cabecera de la descarga, que quitarlo borra el fichero y que borrar el modelo se lleva los suyos, que **clonar se los lleva copiados** y no compartidos —dos fichas apuntando al mismo fichero significa que borrar cualquiera deja a la otra sin manual sin que nada haya fallado—, y que leerlos no pide el permiso de importar: buscar el manual a las once de la noche no es administrar el catálogo. Y **el historial de una ficha**: que dice quién y qué —los nombres de los campos, porque una línea del registro se lee de un vistazo entre doscientas y volcar veinte valores la haría ilegible—, que mirarlo no pide el permiso de importar, que volver a una versión escribe sus valores y **es un cambio más y no un deshacer** (si borrara lo de en medio, la respuesta a «quién dejó esto así» sería distinta según cuándo se preguntara), y que una versión de otra ficha no vale. Más los **atributos de un componente**, que salen de un documento y no del código: que se pueden cambiar sin publicar una versión del panel, que lo descartado se dice, que sin `version` no entra, y que quitarlo vuelve al que viene dentro.
 
@@ -10054,7 +10054,7 @@ caracteres tras una escucha daba por buena la de al lado.
 
 ---
 
-**Archivo:** `tests/meta/test_wa_dcim_section.py` — 392 tests
+**Archivo:** `tests/meta/test_wa_dcim_section.py` — 400 tests
 
 El cableado que hace que la sección `/dcim` exista —registro de páginas, pane, bundle, la función que el registro nombra y las rutas— más las convenciones que se rompen sin que nada falle: nada de diálogos del navegador, nada de botones transparentes, lo que teclea una persona sale escapado, y **lo ajeno no se dibuja con nombre**. Y que **dónde está un rack no es la vista de nadie**: soltarlo escribe en el servidor, no en la disposición guardada del navegador, y un rechazo lo devuelve a donde el servidor lo tiene. Y **las coordenadas**: que no son campos numéricos —un `<input type=number>` descarta un texto con coma, así que un pegado de «41.53, 0.42» se perdería entero y la caja se quedaría en blanco—, que cada una sabe cuál es la otra, que el par se reparte al escribir y también al guardar, que un texto que no es un par se deja en paz, y que la insignia no las redondea a cuatro decimales: son once metros, o sea toda la sede, presentados como el dato guardado. Y **que el marco del plano no mezcle unidades**: el origen en milímetros con el tamaño en unidades de dibujo daba una ventana válida mirando a veinte metros de donde estaba el dibujo —todo pintado y la pantalla en blanco, sin un error en la consola—; y que el marco cuente todo lo que se dibuja, que es la trampa que este panel ha pisado tres veces. Y **que el visor 3D no pide nada a fuera**: ni CDN ni librería empotrada, WebGL del propio navegador, con una frase cuando no lo hay —una pantalla negra sin explicación es peor— y soltando el contexto al cerrar, porque un navegador aguanta unos pocos y deja el undécimo en negro sin ningún error. Y que lo exportado no lleva lo que hay DENTRO de un rack: un plano describe una sala. Y que **la inversa de la altura es exacta**: `_dceUAt` y `_dceY` tienen que ser inversas de verdad o arrastrar un servidor lo deja una U por encima —sin ningún error, con el dibujo confirmando el número equivocado—; escrito con `round` fallaban las 84 comprobaciones, porque el centro de una fila cae en `.5`. Y que lo ajeno no se arrastra: moverlo sería reorganizar el armario de otra sociedad sin verlo. Y que **el alzado dice qué sale de cada equipo** con marcas y no con cables —cuarenta latiguillos dibujados son una maraña que tapa lo que se venía a mirar—, sacadas de lo ya cargado y no de una petición por fila, acotadas para que no tapen el nombre, y **sin marcas en lo ajeno**: de qué color es el latiguillo de otra sociedad también es un dato suyo. Y —la que encontró cuatro pantallas que faltaban— que **todo lo que se escribe tiene donde escribirse**: cada verbo de escritura de la sección tiene que aparecer en alguna plantilla, porque una ruta que solo existe en la API es una función que no existe. Los tests no lo ven porque prueban la API, que es justo la mitad que sí estaba. Y **que toda función que se llama esté escrita**, más que ningún `async` se quede colgando: los dos fallos que un comprobador de sintaxis da por buenos y que dejan la pantalla en blanco — reescribiendo un bloque me llevé por delante dos funciones que seguían llamándose desde tres sitios, y al insertar otra delante de un `async function` quedó un `async` suelto que el navegador leyó como una variable que no existe. Los dos rompieron el guion entero, no solo su parte. Y que **mirar una plataforma no sea editarla**: la tabla enseña cinco columnas de quince campos, así que para leer los otros diez había que abrir el formulario — y abrir el formulario para leer es la forma de cambiar algo sin querer. La línea abre una ficha de solo lectura (y se vigila que lo siga siendo: un `<input>` colado ahí escribiría en el borrador del formulario), marcar y borrar cortan la propagación para no abrirla, y del mirar se pasa al escribir con un botón. Y que **un conector se pueda añadir desde donde se echa en falta**: la lista llevaba al editor por ninguna parte y remataba diciendo que se edita un fichero del disco; ahora tiene su botón, la ficha lleva al formulario, la foto que alguien suba manda sobre el dibujo genérico —al revés no serviría de nada: el conector añadido tiene forma `other`, que es justo el genérico—, las formas que se ofrecen salen del propio SVG en vez de una lista copiada, y **un filtro no puede renumerar las filas**: el formulario escribe en `doc.connectors[i]`, así que filtrar sin conservar el índice real editaría el conector de al lado sin decirlo. Y **el historial de un armario**: una foto por cambio contesta las dos preguntas que se le hacen —cómo estaba en marzo y qué le pasó— porque de una lista de acontecimientos no se reconstruye un estado sin reproducirlos todos; se vigila que **ninguna escritura se olvide de dejar la suya**, porque una que falte no deja un hueco: mezcla dos cambios en un renglón y se lo atribuye a quien hizo el segundo, y eso se lee perfectamente bien contando otra cosa. Y que **la fila diga qué es y no lo diga todo**: diez columnas de formulario no entran en ningún diálogo, y ensancharlo hasta que quepan es perseguir el ancho de la pantalla de otro — la fila contesta cómo se llama, de qué tipo, qué cara tiene y en qué casillas se ofrece, y la letra pequeña (velocidad, generaciones, qué lleva, qué es) se pliega, con el galón diciendo **si hay** para no tener que abrir los ciento veintiocho — si hay y no cuánta: un número que suma una velocidad, tres generaciones, dos señales y una nota no cuenta nada, porque «1» no dice cuál de las cuatro cosas es. Y **el formulario de inventario**: que ninguna columna de `dc_item` se quede sin campo que la escriba (`device_uid` primero, `asset` y `description` después: se guardan, se devuelven, y valían siempre su valor por defecto), que lo obligatorio lo declare el campo y no su posición en la lista, que guardar diga por qué no guarda, que una lista cerrada se elija de un desplegable en vez de dejar un uid escrito en la caja, que un valor que no está en esa lista no se pierda al abrir la ficha, y que el formulario abra en un cuadro con rótulos en vez de incrustarse entre las tarjetas. Y **la pantalla de un armario**: que el dibujo y sus cuatro listas vayan en columnas y no apilados —insertadas encima, cada botón movía lo que estabas mirando—, que el alzado mida lo que mide el armario (`aspect-ratio`, no `flex:1 1 auto`: cinco U son ciento cincuenta píxeles y la caja crecía hasta el borde), que lo cargado se olvide al cambiar de rack —los cables de uno bajo el nombre del otro no lo diría nadie—, que un botón que tarda **dibuje su hueco antes de pedir nada**, y que la tabla diga lo que el dibujo no puede: serie, inventario y garantía, con la vencida en rojo. Y el alzado: **a su tamaño** (un U mide 22 px y los nombres están escritos para esa altura; encogido a la mitad es una miniatura que se lee con lupa), que **un dibujo distinto no herede la ventana de zoom del anterior** —vive en el lienzo compartido y no se borra sola: un armario de 5 U abierto detrás de uno de 42 salía diminuto en una esquina— y que haya **botón para volver**, porque una rueda de más no tiene gesto que la deshaga —y dentro del propio dibujo, que es sobre lo que actúan—. Y que **el dibujo y la lista señalen lo mismo**: uno dice dónde está y la otra qué es, y sin unirlos hay que buscar a mano en el segundo lo que se acaba de señalar en el primero; más que la tarjeta de la lupa se aparte cuando describe la última U, porque pegada al borde de abajo tapaba justo lo que estaba explicando — y colocada **midiendo la pantalla**, que es lo único que sigue siendo cierto con el zoom puesto: la U que se ve abajo del todo no es la que tiene la coordenada más grande. Y que el armario **se pueda agrandar** sobre la lista cuando hace falta, reencuadrando al hacerlo: el mismo trozo en un hueco del doble es no haber agrandado nada. Y **lo que va sobre una bandeja se dibuja dentro de ella**: «Bandeja (+2)» era lo que se podía decir sin sitio, y un recuento no enseña cuál de los dos mini PC está en aviso. Se comprueba que se pinten como hermanos y no dentro del `<g>` de la bandeja (`pointerenter` no burbujea, así que salir de un mini PC hacia ella dejaría la tarjeta vacía con el ratón encima de algo), que el rectángulo se calcule una sola vez, que la bandeja conserve sitio para su nombre, y que las cajas midan contra SU ancho y no contra el de la cara — desde que algo puede tomar media U, `_DCE.W` dibujaba el engranaje encima de la caja de al lado.
 
@@ -10267,7 +10267,7 @@ Qué decía una ficha del catálogo antes, y quién la cambió. Que un número e
 
 Las marcas: la raíz del catálogo, que hasta ahora era una cadena de texto repetida ocho mil quinientas veces. Que `HP`, `H.P.` y `hp` son **una** marca y no tres —el slug es la identidad y el nombre solo lo que se lee—; que reimportar la biblioteca no da de alta trescientas más; que dar de alta una que ya está **no pisa lo que alguien escribió**, porque la web de soporte y el número de contrato son de esta casa y una importación no tiene por qué saber nada de ellos; que el slug no se escribe desde fuera; que renombrar es una fila y no ocho mil, y que el modelo sigue diciendo lo que decía su fichero de origen; y que lo ya importado **recibe su marca sin volver a descargar nada** —`ADD COLUMN` no puede inventarse el valor, y nadie se baja ochocientos cincuenta megas otra vez para que salga una lista— con el repaso haciéndose una sola vez.
 
-**Archivo:** `tests/unit/test_dcim_rackrev.py` — 8 tests
+**Archivo:** `tests/unit/test_dcim_rackrev.py` — 10 tests
 **Archivo:** `tests/unit/test_dcim_connectors.py` — 51 tests
 
 El catálogo de conectores: por dónde se enchufa cada cosa, con un nombre que se reconoce. Que `iec-60320-c19` es lo que dice la biblioteca y «IEC C19» lo que dice alguien en una sala, y que **c19 y c20 se distinguen en un carácter** siendo el macho y la hembra de otra cosa —veinte amperios en vez de diez—, así que confundirlos es pedir el latiguillo que no entra; que **está en un JSON y no en el código**, como los perfiles y los básicos, porque la lista de conectores que existen en el mundo crece y añadir uno no puede ser publicar una versión —antes vivía en una constante del navegador, que es el peor sitio: no se lee desde el servidor y nadie que sepa que falta el DisplayPort la encuentra—; que **cada uno dice en qué familias se ofrece**, porque una C14 es una toma de entrada y nunca una boca de red y ofrecer los ciento y pico en las nueve familias sería no haber ordenado nada; que **uno puede ir en varias** —una `usb-c` es toma de entrada en un mini-PC y puerto de consola en un switch, y es el mismo conector, y repetirlo serían dos filas que se separan—; que **solo dice la velocidad donde el conector la fija**, porque un RJ-45 no dice a cuánto va y una `10gbase-t` sí, e inventársela al primero es afirmar algo que el conector no dice; que el nombre se lee en el idioma que se pida y lo que no hace falta traducir viene como cadena; que **lo que no está no se inventa** —vacío y no el identificador, porque quien pinta enseña entonces lo que alguien tecleó—; que salen **en el orden del documento** y no ordenados, que es lo que hace que la primera opción de la lista sea casi siempre la buena; y que **uno roto no tumba la sección** —sin fichero, con basura dentro o con una fila sin `id`, salen cero o las demás, que es un formulario más pobre y no uno que no abre, porque lo que se teclee se sigue guardando— y que **se relee cuando cambia**, o «editar un JSON» sería «editar un JSON y reiniciar» sin que eso esté escrito en ninguna parte. Y que **se puede sustituir sin publicar una versión**, como el documento de perfiles y sobre la misma tabla —`dc_profile` lleva un `name` desde el primer día justo para el segundo documento que lo necesitara—: que manda la versión más alta entre el guardado y el que viene con el panel, que sin número de versión no se guarda —es lo único que decide cuál de los dos manda—, que volver atrás devuelve el de dentro, que cada guardado deja versión con su autor y que **su historial no se mezcla con el de los perfiles** aunque compartan tabla. Y que **lo que se descarta se dice**: una familia que ninguna pantalla dibuja, un identificador repetido —gana el que pille el bucle— y un grupo inventado, que cae en «otro» sin llevarse la fila por delante, porque perder el conector por no reconocer su etiqueta sería tirar el dato.
@@ -10769,3 +10769,246 @@ reglas de eventos pueden vigilar las que tengan marcado «Vigilar con reglas».
 | `TestTheSyslogDatabaseInExternalMode::test_the_page_lists_its_rows_and_says_so` | Con `syslog_db|mode = external`, la página lista las filas de rsyslog y el estado dice `read_only` |
 | `TestTheSyslogDatabaseInExternalMode::test_clearing_is_refused` | Vaciar la base de syslog en modo externo responde 409 y no borra nada |
 | `TestTheSyslogDatabaseInExternalMode::test_the_listener_does_not_start` | En modo externo el receptor no arranca y Servicios no deja iniciarlo |
+
+---
+
+## 180. Integración — Las cuatro vistas de un armario
+
+**Archivo:** `tests/integration/test_wa_dcim_rackviews.py` — 34 tests
+
+Ejecuta en `node` el guion de verdad del panel sobre un armario como el Rack01: U1 arriba, dos
+bandejas con equipos encima, una U ocupada solo por detrás, lo que no ocupa U, una garantía
+caducada, un cable en otro puerto, un enlace sin declarar y un equipo de una sola rama.
+
+| Test | Qué verifica |
+|------|--------------|
+| `TestElSelectorYLaCabecera::test_ofrece_las_tres_vistas_y_no_la_compacta` | El selector lleva Rack y pestañas, Por U y Cuadro; la compacta no se elige |
+| `TestElSelectorYLaCabecera::test_en_un_movil_sale_la_compacta_sin_selector` | En pantalla de móvil sale la compacta, sin selector, y la vista elegida se conserva |
+| `TestElSelectorYLaCabecera::test_colocar_algo_abre_el_formulario_en_este_armario` | «Colocar algo» de la cabecera abre el formulario de un equipo nuevo en ESTE armario |
+| `TestElSelectorYLaCabecera::test_la_ficha_bajo_el_dibujo_existe_sin_senalar_nada` | La ficha bajo el alzado se dibuja aunque no se señale nada |
+| `TestElSelectorYLaCabecera::test_el_dibujo_explica_sus_marcas` | La barra del alzado explica qué son los puntos y las barras |
+| `TestElSelectorYLaCabecera::test_alimentacion_avisa_de_la_rama_unica_sin_abrirla` | La pestaña Alimentación lleva la cifra de equipos de una sola rama |
+| `TestElSelectorYLaCabecera::test_la_vista_se_recuerda_y_una_inventada_no_entra` | La vista se guarda en el navegador; una que no existe, o la compacta, vuelve a «Rack y pestañas» |
+| `TestPorU::test_de_arriba_abajo` | Las filas siguen el orden del dibujo |
+| `TestPorU::test_las_u_libres_salen_y_una_ocupada_por_detras_no` | Una U ocupada solo por detrás no sale como libre |
+| `TestPorU::test_lo_montado_va_debajo_de_su_bandeja` | Lo montado en una bandeja va en subfilas, debajo de ella |
+| `TestPorU::test_cables_y_ramas_en_cada_fila` | Cada fila lleva sus cables coloreados por el contraste y sus ramas, con «una rama» |
+| `TestPorU::test_lo_que_no_ocupa_u_va_al_final_en_su_grupo` | Lo que no ocupa U va al final, en el grupo «Sin ocupar U» |
+| `TestPorU::test_el_buscador_filtra` | El buscador deja solo lo que coincide |
+| `TestCuadro::test_requiere_atencion_sale_de_los_datos` | «Requiere atención» incluye la garantía caducada, el cable en otro puerto, el enlace sin declarar, la rama única, el mantenimiento y la U libre |
+| `TestCuadro::test_lo_rojo_primero` | Lo grave va antes que lo informativo |
+| `TestCuadro::test_colorea_por_garantia` | Con «Garantía», la caducada sale en rojo |
+| `TestCuadro::test_por_detras_la_bandeja_va_al_reves` | Por detrás, los equipos de una bandeja salen en el orden inverso |
+| `TestCuadro::test_las_seis_cifras` | Las seis cifras con anillo, cuando el cableado, la alimentación y el historial han llegado |
+| `TestLoQueEncontroElNavegador::test_equipos_sin_vigilar_no_sale_en_verde` | Con nada vigilado, la cifra «Equipos» dice «sin vigilar» en gris, como la cabecera |
+| `TestLoQueEncontroElNavegador::test_alimentacion_sin_u_suelta` | Lo que no ocupa U no lleva una «U» suelta delante en Alimentación |
+| `TestLoQueEncontroElNavegador::test_comparar_no_depende_del_orden_de_los_clics` | Comparar dos versiones del mismo segundo lee de la vieja a la nueva, se marquen como se marquen |
+| `TestLoQueEncontroElNavegador::test_lo_que_no_ocupa_u_no_sale_como_u0` | El historial no dice «U0» de lo que no ocupa U |
+| `TestLoQueEncontroElNavegador::test_el_cambio_de_sitio_se_dice_con_palabras` | Un cambio de colocación sale como «Cómo está puesto: Sin U → Al lado», no como `placement: side → near` |
+| `TestLasFuentesEnlazadasConElArmario::test_alimentacion_ensena_la_cadena_de_cada_regleta` | Alimentación enseña la cadena de cada regleta, con el SAI en bypass marcado y «nadie ha dicho de qué cuelga» cuando no se sabe |
+| `TestLasFuentesEnlazadasConElArmario::test_cada_regleta_elige_su_fuente` | Cada regleta tiene su selector de fuente, con la actual elegida |
+| `TestLasFuentesEnlazadasConElArmario::test_un_sai_del_armario_sin_fuente_se_ofrece_para_declarar` | Un SAI del armario que ninguna fuente dice ser se ofrece para declararlo |
+| `TestLasFuentesEnlazadasConElArmario::test_los_avisos_de_la_cadena_salen_en_la_pestana_y_en_el_cuadro` | El aviso de bypass sale en la pestaña, y el bypass y el SAI suelto en «Requiere atención» |
+| `TestLasFuentesEnlazadasConElArmario::test_la_ficha_de_un_sai_dice_que_fuente_es` | La ficha de un SAI dice qué fuente es, o que no está declarado |
+| `TestLasFuentesEnlazadasConElArmario::test_lo_que_esta_al_lado_dice_donde_y_su_chip_rellena_la_ficha` | Lo que no ocupa U dice «Al lado» o «Sin U», no «U0», y su chip rellena la ficha al pasar por encima |
+| `TestLasFuentesEnlazadasConElArmario::test_desde_fuentes_el_rack_se_abre_en_alimentacion` | Desde Fuentes, el rack se abre en Alimentación aunque no fuera el abierto |
+| `TestCompacta::test_una_cara_cada_vez` | Frontal no lista lo que solo está detrás, y Trasera al revés |
+| `TestCompacta::test_sus_pestanas_son_las_de_verdad` | Las pestañas de abajo abren las pestañas reales |
+| `TestLasPestanasConLaFormaDelDiseno::test_cableado_resume_en_fichas_y_destaca_lo_sin_declarar` | Cableado resume en fichas de color y pone lo sin declarar en una caja destacada |
+| `TestLasPestanasConLaFormaDelDiseno::test_alimentacion_con_sus_tres_cifras_y_los_avisos_en_caja` | Alimentación lleva sus tres cifras con barra y los avisos en caja |
+
+## 181. Integración — Lo que queda tapado en el plano de una sala
+
+**Archivo:** `tests/integration/test_wa_dcim_plan_stack.py` — 13 tests
+
+Ejecuta en `node` el guion de verdad del panel con una bandeja de cables encima de una mesa, que
+a su vez tapa un rack, y un navegador de mentira que devuelve los tres bajo el puntero.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestLoQueQuedaTapado::test_la_pila_va_de_arriba_abajo_sin_repetir` | La pila bajo el puntero sale de arriba abajo, una vez cada cosa |
+| `TestLoQueQuedaTapado::test_el_primer_clic_coge_lo_de_arriba` | El primer clic selecciona lo de arriba |
+| `TestLoQueQuedaTapado::test_pulsar_otra_vez_pasa_a_lo_de_debajo` | Pulsar otra vez sin moverse selecciona la mesa, y luego el rack |
+| `TestLoQueQuedaTapado::test_y_tras_lo_ultimo_vuelve_a_lo_primero` | Tras lo último vuelve a lo de arriba |
+| `TestLoQueQuedaTapado::test_lo_seleccionado_se_arrastra_aunque_este_tapado` | La mesa elegida se arrastra aunque la bandeja la tape, y soltar no cambia de pieza |
+| `TestEnviarAlFondo::test_la_ficha_lleva_el_boton` | La ficha de la pieza lleva «Enviar al fondo» |
+| `TestEnviarAlFondo::test_al_fondo_suelta_la_seleccion_y_se_pinta_tenue` | Enviarla al fondo suelta la selección y la pinta tenue, solo a ella |
+| `TestEnviarAlFondo::test_la_barra_dice_cuantas_y_las_trae` | La barra dice cuántas hay al fondo y «traer todo» las trae |
+| `TestEnviarAlFondo::test_elegirla_en_la_lista_la_trae_al_frente` | Elegirla desde la lista la trae al frente |
+| `TestEnviarAlFondo::test_un_rack_tambien` | Un rack también se puede enviar al fondo |
+| `TestEnviarAlFondo::test_la_barra_flotante_tambien` | La barra que sale al pasar por una pieza o un rack también lo envía al fondo |
+| `TestElCursorDeLasAsasGira::test_sin_girar_cada_asa_su_flecha` | Sin girar, cada asa enseña su flecha: lados, arriba y esquinas |
+| `TestElCursorDeLasAsasGira::test_girada_90_el_ancho_y_el_alto_se_cambian` | Con la pieza girada 90° o 270°, el asa de ancho enseña la flecha vertical y la de alto la horizontal |
+
+## 182. Integración — Una planta, o el edificio entero, en 3D
+
+**Archivo:** `tests/integration/test_wa_dcim_site3d.py` — 25 tests
+
+Ejecuta en `node` el guion de verdad del panel sobre una sede de tres plantas (sótano, baja y
+primera). La baja tiene un plano de 30 m, una sala girada 90° con un rack, una sala sin medidas
+y su zona general con un rack de pasillo y una columna.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestUnaPlantaEn3D::test_cada_rack_en_el_mismo_sitio_que_en_el_plano_de_la_planta` | El rack de una sala girada sale en 3D donde lo pone el plano de la planta |
+| `TestUnaPlantaEn3D::test_se_senalan_las_salas_y_no_la_zona_general` | Se pueden señalar las salas, no la zona general |
+| `TestUnaPlantaEn3D::test_la_zona_general_sin_muros_pero_con_lo_de_dentro` | La zona general no lleva muros, pero sí su rack y su columna |
+| `TestUnaPlantaEn3D::test_cada_muro_sabe_de_que_sala_es` | Cada muro lleva el marco de su sala |
+| `TestUnaPlantaEn3D::test_sin_medidas_tenue_lo_que_la_delimita_no_lo_de_dentro` | Una sala sin medidas sale tenue en suelo y muros, y su rack macizo |
+| `TestUnaPlantaEn3D::test_el_plano_del_arquitecto_al_suelo_con_su_tamano` | El plano va al suelo con los metros dichos y su proporción |
+| `TestUnaPlantaEn3D::test_sin_lineas_de_baldosa` | La planta no dibuja las líneas de baldosa de cada sala |
+| `TestLosMurosDeUnaSalaGirada::test_desde_dentro_todo_macizo` | Con la cámara dentro de la sala girada, los cuatro muros macizos |
+| `TestLosMurosDeUnaSalaGirada::test_desde_fuera_el_de_delante_de_cristal` | Desde fuera, solo el muro que queda delante se vuelve cristal |
+| `TestElEdificio::test_las_plantas_apiladas_por_su_nivel` | Las plantas se apilan por su nivel, con el sótano bajo cero |
+| `TestElEdificio::test_las_de_encima_tenues_las_de_debajo_macizas` | Las plantas de encima de la que se mira salen tenues; las de debajo, macizas |
+| `TestElEdificio::test_se_senalan_solo_las_salas_de_la_planta_que_se_mira` | Solo se señalan las salas de la planta que se mira, y la cámara mira a ella |
+| `TestElEdificio::test_separar_las_aleja` | «Separar plantas» las aleja |
+| `TestSenalarYAbrir::test_un_clic_dice_cual_y_otro_la_abre` | Un clic dice qué sala es y el segundo la abre |
+| `TestSenalarYAbrir::test_fuera_de_las_salas_nada` | Pulsar fuera de las salas no señala nada |
+| `TestLaRuedaAcercaHaciaElCursor::test_en_el_centro_no_se_mueve` | Con el cursor en el centro, acercar no mueve el centro de la vista |
+| `TestLaRuedaAcercaHaciaElCursor::test_a_un_lado_se_acerca_a_lo_que_hay_bajo_el_cursor` | Con el cursor a un lado, el punto bajo él se queda y la vista se le acerca en la misma proporción que el zoom |
+| `TestLaRuedaAcercaHaciaElCursor::test_alejando_al_tope_no_anda` | Alejando al tope, la rueda no anda hacia delante |
+| `TestLosRotulos::test_lo_que_tiene_nombre_y_nada_mas` | Llevan rótulo el rack y la pieza con etiqueta; una puerta sin etiqueta, no |
+| `TestLosRotulos::test_encima_de_lo_que_nombra` | El rótulo de un rack va sobre su techo |
+| `TestLosRotulos::test_las_salas_por_su_nombre` | En la planta, cada sala lleva su nombre |
+| `TestLosRotulos::test_en_el_edificio_no_las_de_las_plantas_tenues` | En el edificio, las salas de las plantas tenues no llevan rótulo |
+| `TestLosRotulos::test_en_pantalla_donde_cae_y_lo_de_detras_oculto` | En pantalla, el rótulo va donde cae su punto, y lo que queda detrás de la cámara se oculta |
+| `TestLaSalaSigueIgual::test_su_visor_conserva_baldosas_y_muros` | El visor de una sala conserva sus baldosas y sus cuatro muros |
+| `TestLoDeLaSedeDeUnaVez::test_una_peticion_por_sede` | El contenido de la sede se pide en una sola petición |
+
+## 183. Integración — El plano de fondo: dónde cae, a qué escala y ocultarlo
+
+**Archivo:** `tests/integration/test_wa_dcim_plancal.py` — 38 tests
+
+Ejecuta en `node` el guion de verdad del panel. Reportado desde la pantalla: el plano de fondo
+no cuadraba con las medidas reales. Sin ancho, la imagen de una sala tomaba el del marco del
+dibujo; con él, había que saber el ancho de la imagen entera; y su esquina iba pegada al
+(0, 0).
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestSinAnchoDicho::test_una_sala_usa_su_ancho` | Sin ancho dicho, la imagen de una sala mide lo que la sala, o 10 m si la sala tampoco lo dice |
+| `TestSinAnchoDicho::test_una_planta_un_tamano_fijo` | Sin ancho dicho, la de una planta mide 50 m |
+| `TestSinAnchoDicho::test_mover_un_rack_no_estira_el_plano` | Un rack lejos no estira el plano |
+| `TestDondeCaeElPlano::test_se_dibuja_donde_dice_su_sitio` | La imagen se dibuja donde dicen `plan_x`/`plan_y` y del tamaño de `plan_mm` |
+| `TestDondeCaeElPlano::test_el_marco_lo_abarca_entero` | El marco del dibujo abarca un plano que empieza en negativo |
+| `TestCalibrar::test_dos_puntos_y_su_distancia_dan_la_escala` | Dos puntos y su distancia real dan el ancho de la imagen |
+| `TestCalibrar::test_un_punto_del_plano_se_lleva_a_una_esquina_de_lo_dibujado` | En el paso 3, un punto del plano se lleva a una esquina de lo dibujado, a la que se pega; las esquinas se ven y no se guarda todavía |
+| `TestCalibrar::test_arrastrar_mueve_el_plano_solo_con_su_boton` | En el paso 3, arrastrar desplaza la vista; con «Mover el plano», mueve el plano |
+| `TestCalibrar::test_teclear_un_menos_no_lo_hace_saltar` | Escribir «-» en X/Y no hace saltar el plano a 0 |
+| `TestCalibrar::test_el_paso_3_se_encuadra_sobre_el_plano` | El paso 3 encuadra el lienzo sobre el plano a su tamaño nuevo y lo dibujado |
+| `TestCalibrar::test_la_distancia_va_en_metros` | La distancia se escribe en metros (reportado: «42» en milímetros dejaba el plano de un píxel) |
+| `TestCalibrar::test_una_unidad_equivocada_se_rechaza` | Una distancia que daría un plano de menos de 1 m se rechaza sin cambiar nada |
+| `TestCalibrar::test_calibrar_cierra_el_3d` | Calibrar cierra el visor 3D, que empujaba el lienzo fuera de la pantalla |
+| `TestCalibrar::test_guardar_guarda_escala_y_sitio` | «Guardar» guarda la escala y dónde cae la esquina, en la sala |
+| `TestCalibrar::test_se_puede_guardar_solo_la_escala` | Se puede guardar solo la escala; en vertical cuenta la proporción de la imagen |
+| `TestCalibrar::test_dos_veces_el_mismo_punto_no_cambia_nada` | Dos veces el mismo punto no cambia la escala |
+| `TestCalibrar::test_en_una_planta_igual` | En una planta calibra igual y guarda en la planta; sin salas, dice que no hay con qué encajarlo |
+| `TestCalibrar::test_la_franja_es_de_su_pantalla` | La franja de pasos sale solo en la pantalla que se calibra |
+| `TestOcultarElPlano::test_se_oculta_en_2d_y_en_3d` | Ocultar el plano lo quita del plano de la sala, del de la planta y del 3D |
+| `TestOcultarElPlano::test_y_se_recuerda` | La elección se recuerda en el navegador |
+| `TestOcultarElPlano::test_y_vuelve` | Mostrarlo lo vuelve a poner |
+| `TestOcultarElPlano::test_calibrar_lo_ensena` | Calibrar con el plano oculto lo enseña |
+| `TestEncajarConOtraPlanta::test_se_elige_entre_las_otras_plantas_con_plano` | En el paso 3 se puede elegir otra planta de la sede con plano, no la propia |
+| `TestEncajarConOtraPlanta::test_su_plano_se_ve_en_su_sitio_tenido` | Su plano se dibuja en su sitio, teñido, y la franja explica qué pulsar |
+| `TestEncajarConOtraPlanta::test_con_la_escala_hecha_se_salta_directo_a_encajar` | Con la escala ya puesta, «La escala ya está bien: encajar» va al paso 3 sin tocarla |
+| `TestEncajarConOtraPlanta::test_el_plano_se_estira_por_sus_esquinas` | En el paso 3 el plano lleva cuatro asas: estirarlo desde una esquina guarda su proporción y deja quieta la contraria |
+| `TestEncajarConOtraPlanta::test_y_su_ancho_se_escribe` | Su ancho también se escribe en metros, y a medio escribir no cambia |
+| `TestEncajarConOtraPlanta::test_un_punto_comun_lleva_un_plano_sobre_el_otro` | Un punto común (la escalera) pulsado en los dos planos los hace coincidir |
+| `TestElNorte::test_se_marca_con_la_flecha_del_plano` | El norte se marca pulsando la cola y la punta de la flecha del plano, y vuelve al paso 3 |
+| `TestElNorte::test_se_guarda_con_lo_demas` | El norte se guarda con la calibración |
+| `TestElNorte::test_cancelar_devuelve_el_de_antes` | Cancelar devuelve el norte que había, también «sin decir» |
+| `TestElNorte::test_la_rosa_solo_si_se_sabe_y_girada` | La rosa de los vientos solo sale con el norte dicho, y girada con él |
+| `TestElNorte::test_en_el_3d_gira_con_la_camara` | En el 3D la rosa gira con la cámara |
+| `TestElLienzoConBandas::test_un_clic_cae_donde_esta_el_dibujo` | Con la caja más ancha que el dibujo, un clic se convierte contando la banda vacía de cada lado |
+| `TestElLienzoConBandas::test_desplazar_va_con_el_raton_en_los_dos_ejes` | Desplazar mueve el dibujo lo mismo que el ratón en los dos ejes |
+| `TestCancelarYLaPaleta::test_cancelar_deshace_la_escala_aplicada` | Cancelar después de aplicar la escala la deshace |
+| `TestCancelarYLaPaleta::test_volver_a_marcar_parte_de_lo_de_antes` | «Volver a marcar» parte de la escala de antes, no de la ya aplicada |
+| `TestCancelarYLaPaleta::test_sin_paleta_mientras_se_calibra` | La paleta no está mientras se calibra, y vuelve al acabar |
+
+## 184. Integración — Recargar y volver al inventario sin perder el sitio
+
+**Archivo:** `tests/integration/test_wa_dcim_return.py` — 13 tests
+
+Ejecuta en `node` el guion de verdad del panel. Reportado desde la pantalla: un F5 en el plano
+de una sede volvía al inventario, y al volver al inventario no quedaba elegido nada.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestLaDireccion::test_el_plano_de_una_sede_va_en_la_direccion` | El plano de una sede, con su planta, va en la dirección |
+| `TestLaDireccion::test_y_se_quita_al_salir` | Y se quita al salir de él |
+| `TestLaDireccion::test_el_cuadro_de_mando_llega_a_la_direccion` | El cuadro de mando llega a la dirección (se añadía después de guardarla) |
+| `TestVolverAlInventario::test_de_un_armario_queda_elegida_su_sede_y_su_sala` | Al volver de un armario quedan elegidas su sede y su sala, y la sede desplegada |
+| `TestVolverAlInventario::test_se_marca_y_se_lleva_a_la_vista_una_vez` | Lo que se dejó se marca y la vista se lleva hasta él una sola vez |
+| `TestVolverAlInventario::test_de_una_sala_y_de_una_sede` | Igual al volver de una sala o del plano de una sede |
+| `TestVolverAlInventario::test_una_sede_no_se_rodea` | Al volver de una sede no se rodea su bloque entero (reportado: un borde azul sobre toda la ficha) |
+| `TestVolverAlInventario::test_elegir_otra_cosa_quita_la_marca` | Elegir otra sede quita la marca |
+| `TestLoElegidoSobreviveAlF5::test_va_en_la_direccion` | La sede y la sala elegidas en el inventario van en la dirección (`site`, `site_room`) |
+| `TestLoElegidoSobreviveAlF5::test_se_vuelve_a_elegir_desplegada` | Tras un F5 se vuelven a elegir, y el plegado de la primera vez no la pliega |
+| `TestLoElegidoSobreviveAlF5::test_y_la_vista_va_hasta_ella` | Y la vista va hasta la sala elegida |
+| `TestLoElegidoSobreviveAlF5::test_con_un_rack_abierto_la_direccion_es_la_del_rack` | Con un rack abierto, la dirección es la del rack |
+| `TestVolverAlInventario::test_inventario_en_el_menu_sale_del_rack` | «Inventario» en el menú lateral, con un rack abierto, vuelve a la lista y lo marca; un repintado cualquiera no |
+
+## 185. Integración — Deshacer y rehacer en los planos
+
+**Archivo:** `tests/integration/test_wa_dcim_undo.py` — 9 tests
+
+Ejecuta en `node` el guion de verdad del panel. Se pidió desde la pantalla: en el plano todo se
+guarda al soltar, y mover algo que no se debía ya estaba en el servidor. El envío es asíncrono y
+el arnés no espera a las promesas, así que se prueba cada paso; las guardas
+`TestDeshacerEnLosPlanos` de `tests/meta/test_wa_dcim_section.py` comprueban que `_dcimSend` los
+llama y que los dos planos llevan los botones.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestSeApunta::test_lo_de_antes_sale_de_lo_guardado_no_del_dibujo` | Lo de antes de un cambio sale de lo guardado, no del dibujo que ya enseña lo nuevo |
+| `TestSeApunta::test_dos_cambios_seguidos_son_uno` | Dos cambios seguidos a la misma cosa son una entrada |
+| `TestSeApunta::test_lo_que_no_cambia_ni_lo_ajeno_se_apunta` | Lo que no cambia nada, y lo que no es del plano abierto, no se apunta |
+| `TestSeApunta::test_el_boton_dice_que_desharia` | El botón dice qué desharía, y sin nada que deshacer los dos están apagados |
+| `TestDeshacerYRehacer::test_deshacer_devuelve_el_dibujo_y_lo_guardado` | Deshacer devuelve los valores al dibujo y a lo guardado |
+| `TestDeshacerYRehacer::test_rehacer_lo_vuelve_a_poner` | Rehacer los vuelve a poner |
+| `TestDeshacerYRehacer::test_un_cambio_nuevo_olvida_lo_rehacible` | Un cambio nuevo vacía lo que se podía rehacer |
+| `TestDeshacerYRehacer::test_otro_plano_empieza_de_cero` | Abrir otro plano empieza sin nada que deshacer |
+| `TestDeshacerYRehacer::test_en_el_plano_de_una_sede_tambien` | En el plano de una sede cuentan sus salas, sus plantas y lo que hay dentro |
+
+## 186. Integración — Las piezas sueltas de una planta
+
+**Archivo:** `tests/integration/test_wa_dcim_sitepieces.py` — 8 tests
+
+Ejecuta en `node` el guion de verdad del panel. Reportado desde la pantalla: en el plano de la
+planta no se podía hacer más grande una puerta, y al entrar en la zona general de la planta el
+plano de fondo desaparecía.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestUnaPiezaDelgada::test_solo_las_asas_de_los_lados` | Una pieza delgada (una puerta) lleva solo las cuatro asas de los lados; una mesa, las ocho |
+| `TestEstirarEnElPlanoDeLaPlanta::test_la_pieza_elegida_lleva_asas_y_un_rack_no` | En el plano de la planta, la pieza elegida lleva asas y un rack no |
+| `TestEstirarEnElPlanoDeLaPlanta::test_se_estira_desde_su_asa` | Arrastrar el asa de la derecha un metro la hace un metro más ancha, sin moverla |
+| `TestEstirarEnElPlanoDeLaPlanta::test_y_se_guarda_medida_y_sitio` | Al soltar se guardan su medida y su sitio |
+| `TestEstirarEnElPlanoDeLaPlanta::test_dentro_de_una_sala_girada` | Dentro de una sala girada, la mano se lleva a las coordenadas de la sala |
+| `TestLaZonaGeneralLlevaElPlanoDeSuPlanta::test_con_la_calibracion_de_la_planta` | La zona general sin plano propio usa el de su planta, con la calibración de la planta |
+| `TestLaZonaGeneralLlevaElPlanoDeSuPlanta::test_y_su_norte` | Y el norte de la planta |
+| `TestLaZonaGeneralLlevaElPlanoDeSuPlanta::test_y_el_ojo_para_ocultarlo` | Y el botón para ocultarlo |
+
+## 187. Integración — Las estanterías de un armario
+
+**Archivo:** `tests/integration/test_wa_dcim_shelves.py` — 12 tests
+
+Ejecuta en `node` el guion de verdad del panel. Se pidió un armario con su número de
+estanterías y el material de cada una; la API la fija `TestLasEstanteriasDeUnArmario` en
+`tests/integration/test_wa_dcim.py`.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestLaFichaDelArmario::test_solo_un_armario_y_se_pide_una_vez` | Solo la ficha de un armario lleva el bloque, y su contenido se pide una vez |
+| `TestLaFichaDelArmario::test_todas_sus_estanterias_de_arriba_abajo` | Salen todas sus estanterías en orden, cada una con su material y su cantidad, o «vacía» |
+| `TestLaFichaDelArmario::test_quien_edita_tiene_los_controles` | Quien edita ve el número de estanterías y los botones de añadir |
+| `TestLaFichaDelArmario::test_quien_solo_mira_no` | Quien solo mira ve el contenido sin controles |
+| `TestGuardarYQuitar::test_guardar_manda_lo_escrito` | Guardar manda el nombre recortado, la cantidad, la estantería y la nota |
+| `TestGuardarYQuitar::test_sin_nombre_no_sale` | Una cosa sin nombre no se manda |
+| `TestGuardarYQuitar::test_quitar_el_armario_avisa_de_lo_que_guarda` | Quitar el armario avisa de cuántas cosas se lleva |
+| `TestElDibujo::test_en_planta_el_delante_y_el_detras_de_lo_que_los_tiene` | En planta, una mesa marca su delante (franja) y su detrás (a trazos); una puerta no |
+| `TestElDibujo::test_de_frente_las_baldas` | De frente, un armario de tres estanterías lleva dos líneas entre ellas; uno de una, ninguna |
+| `TestElDibujo::test_en_3d_el_armario_abierto_con_sus_baldas` | En 3D, el armario es fondo, dos lados, techo y una tabla por estantería |
+| `TestElDibujo::test_en_3d_la_franja_del_delante` | En 3D, una pieza con delante lleva su franja |
+| `TestElDibujo::test_el_nombre_nunca_boca_abajo` | En planta, el nombre de una pieza o un rack girados entre 90° y 270° se voltea para leerse derecho |

@@ -23,11 +23,20 @@ async function _dcimLoadRack(uid) {
         _dcParts = null;
         _dcHist = null;
         _dcHistPick = [];
-        _dcRackTab = 'items';
+        // The first tab — unless whoever opened the rack asked for one (a strip in «Fuentes»
+        // opens its rack on Alimentación): that wish is taken once and forgotten.
+        _dcRackTab = _dcRackTabNext || 'items';
     }
+    _dcRackTabNext = '';
     _dcimRack = data;
     _dcimUrl();
-    return renderDcim();
+    const r = renderDcim();
+    // Lo que las cuatro vistas leen además del armario —cables, corriente, historial—, pedido
+    // ya y en segundo plano: las marcas del dibujo, los avisos de las pestañas y las columnas de
+    // «Por U» salen de ahí, y esperar a que alguien abra una pestaña para tenerlos es enseñar un
+    // armario sin marcas que de pronto las tiene.
+    _dcRackPrefetch();
+    return r;
 }
 
 /** Volver a pedir el armario que está abierto.
@@ -46,49 +55,82 @@ function _dcimReloadRack() {
 }
 
 function _dcimCloseRack() {
+    _dcimRemember();
     _dcimRack = null;
     _dcimForm = null;
     _dcimUrl();
     renderDcim();
 }
 
+/** The rack's own header, the same in the four views: where it is, what it is, how it is, and
+ *  what can be done to it. As the design has it — the place above the name, the two figures
+ *  beside it, and «Colocar algo» as a button with its word, because it is the one thing this
+ *  screen is opened to do. */
+function _dcRackHeader(rack, items, free) {
+    const may = _dcimMay('dcim_edit');
+    const name = String(rack.name || rack.uid || '');
+    const big = (fn, icon, key, tone) => `<button type="button" class="btn ${tone || 'btn-secondary'} ss-btn-sq"
+        onclick="${fn}" title="${escAttr(t(key))}" aria-label="${escAttr(t(key))}"><i class="bi ${icon}"></i></button>`;
+    return `<div class="ss-toolrow mb-2">
+        <button type="button" class="btn btn-secondary" onclick="_dcimCloseRack()"
+                title="${escAttr(_dcimPlan ? t('dcim_plan') : t('dcim_back'))}">
+            <i class="bi bi-arrow-left me-1"></i>${esc(t('dcim_back'))}</button>
+        <div class="d-flex flex-column ss-toolrow-text">
+            <span class="ss-fs-1 text-body-secondary">${esc(t('tab_dcim'))} / ${esc(name)}</span>
+            <span class="d-flex align-items-baseline gap-2 flex-wrap">
+                <span class="fw-semibold fs-5">${esc(name)}</span>
+                ${_dcimOrgBadge(rack.org_uid)}
+                <span class="text-body-secondary ss-fs-2">${
+                    esc(tf('dcim_rack_note', Number(rack.u_height || 0), items.length))}</span>
+            </span>
+        </div>
+        ${_dcimRollBadge(_dcimRack.roll)}
+        <span class="badge bg-body-secondary text-body-secondary border fw-normal"
+            title="${escAttr(t('dcim_free_tt'))}">${
+            esc(tf('dcim_free', (free.front || []).length))}</span>
+        <div class="ss-toolrow-tools">
+            ${big('_dcimReloadRack()', 'bi-arrow-clockwise', 'refresh')}
+            ${may ? `<button type="button" class="btn btn-primary"
+                onclick="_dcimOpen('new','item',${jsStr(rack.uid)},'')"><i class="bi bi-plus-lg me-1"></i>${
+                esc(t('dcim_new_item'))}</button>` : ''}
+            ${may ? big(`_dcimOpen('edit','rack','',${jsStr(rack.uid)})`, 'bi-pencil', 'edit') : ''}
+            ${may && _dcimMay('orgs_edit') ? big(`_dcimOwnerAsk('rack',${jsStr(rack.uid)},${jsStr(name)})`,
+                'bi-building-check', 'dcim_owner') : ''}
+            ${may ? big(`_dcimDelete('rack',${jsStr(rack.uid)},${jsStr(name)})`, 'bi-trash3', 'delete',
+                'btn-danger') : ''}
+        </div>
+    </div>
+    <div class="ss-toolrow mb-3">
+        <div class="d-flex flex-wrap gap-2 ss-toolrow-text">
+            ${_dcimDepths(_dcimRack.depths, rack)}
+            ${_dcimAccess(_dcimRack.access, rack)}
+        </div>
+        ${_dcRackNarrow() ? '' : `<div class="ss-toolrow-tools">${_dcRackViewPicker()}</div>`}
+    </div>`;
+}
+
 function _dcimRackHtml() {
     const rack = _dcimRack.rack || {};
     const items = _dcimRack.items || [];
     const free = _dcimRack.free || {front: [], rear: []};
-    return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad ss-rack-pane${
-            _dceWide ? ' ss-rack-over' : ''}">
-        <div class="ss-toolrow mb-3">
-            <button class="btn btn-sm btn-secondary" onclick="_dcimCloseRack()"
-                    title="${escAttr(_dcimPlan ? t('dcim_plan') : t('dcim_back'))}">
-                <i class="bi bi-arrow-left me-1"></i>${esc(t('dcim_back'))}</button>
-            <span class="fw-semibold ss-fs-5">${esc(rack.name || rack.uid)}</span>
-            ${_dcimOrgBadge(rack.org_uid)}
-            <span class="text-muted ss-fs-2 ss-toolrow-text">${
-                esc(tf('dcim_rack_note', Number(rack.u_height || 0), items.length))}</span>
-            <div class="ss-toolrow-tools">
-                ${_dcimRollBadge(_dcimRack.roll)}
-                <span class="badge bg-body-secondary text-body-secondary border fw-normal"
-                    title="${escAttr(t('dcim_free_tt'))}">${
-                    esc(tf('dcim_free', (free.front || []).length))}</span>
-                <button class="btn btn-sm btn-secondary" onclick="_dcimReloadRack()"
-                        title="${escAttr(t('refresh'))}">
-                    <i class="bi bi-arrow-clockwise"></i></button>
-                ${_dcimActions('rack', rack.uid, rack.name, 'item')}
-            </div>
-        </div>
-        <div class="ss-rack-grid">
+    const vista = _dcRackViewNow();             // the compact one on a phone, the chosen one elsewhere
+    const body = vista === 'byu' ? _dcRackByUHtml()
+        : vista === 'board' ? _dcRackBoardHtml()
+        : vista === 'compact' ? _dcRackCompactHtml()
+        : `<div class="ss-rack-grid">
             <!-- Agrandar el armario NO mueve la tabla: la tapa. Lo que se pide al pulsarlo es
                  sitio para mirar un armario de cerca durante un rato, y una tabla que se va
                  abajo obliga a devolverla a su sitio para volver a donde se estaba. Pasa a
                  primer plano, ocupa lo visible, y al cerrarlo todo está donde se dejó. -->
-            <div class="${_dceWide ? 'ss-elev-over' : ''}">
-                ${_dcimAccess(_dcimRack.access, rack)}
-                ${_dcimDepths(_dcimRack.depths, rack)}
+            <div class="card ${_dceWide ? 'ss-elev-over' : ''}"><div class="card-body p-2 d-flex flex-column gap-2">
                 ${_dcimElevation(rack, items)}
-            </div>
+            </div></div>
             ${_dcRackPanelHtml(items)}
-        </div>
+        </div>`;
+    return `<div class="px-3 py-3 ss-vfill ss-vscroll ss-scroll-pad ss-rack-pane${
+            _dceWide && vista === 'rack' ? ' ss-rack-over' : ''}">
+        ${_dcRackHeader(rack, items, free)}
+        ${body}
     </div>`;
 }
 
@@ -97,6 +139,8 @@ function _dcimRackHtml() {
 //: tres tarjetas que se insertaban ENCIMA del dibujo y lo empujaban hacia abajo: se pulsaba un
 //: botón y lo que estabas mirando se movía.
 let _dcRackTab = 'items';
+//: The tab to open the NEXT rack on, set by whoever opens it from elsewhere; '' = the first one.
+let _dcRackTabNext = '';
 
 /** Cambiar de pestaña, y pedir lo que haga falta.
  *
@@ -118,7 +162,7 @@ function _dcRackGo(tab) {
  *  dibujo fuera de la pantalla es tener que acordarse de lo que se acaba de ver. */
 function _dcRackPanelHtml(items) {
     const pest = (id, icono, texto, n, aviso) => `<li class="nav-item">
-        <button class="nav-link py-1 px-2 ss-fs-2${_dcRackTab === id ? ' active' : ''}"
+        <button class="nav-link py-2 px-2 ss-fs-2 ss-nowrap${_dcRackTab === id ? ' active fw-semibold' : ''}"
                 onclick="_dcRackGo(${jsStr(id)})">
             <i class="bi ${escAttr(icono)} me-1"></i>${esc(texto)}${
             n === null ? '' : _dcTabN(n)}${aviso ? _dcTabWarn(aviso) : ''}</button></li>`;
@@ -134,7 +178,7 @@ function _dcRackPanelHtml(items) {
         : _dcRackTab === 'hist' ? _dcHistHtml()
         : _dcimItemsTable(items);
     return `<div class="card ss-rack-panel">
-        <div class="card-header py-1 px-2">
+        <div class="card-header pt-2 pb-0 px-2">
             <ul class="nav nav-tabs card-header-tabs mb-0">
                 ${pest('items', 'bi-hdd-stack', t('dcim_items'), items.length)}
                 ${pest('cables', 'bi-ethernet', t('dcim_cables'),
@@ -145,7 +189,10 @@ function _dcRackPanelHtml(items) {
                        // pestaña sin número, que es exactamente lo que enseña uno terminado.
                        _dcCables ? (_dcCables.undeclared || []).length : 0)}
                 ${pest('power', 'bi-plug', t('dcim_power'),
-                       _dcPower ? _dcPowerN(_dcPower) : (n.power || 0))}
+                       _dcPower ? _dcPowerN(_dcPower) : (n.power || 0),
+                       // Y los equipos de una sola rama: lo que esa pestaña existe para decir,
+                       // visto sin abrirla.
+                       ((_dcPower || {}).warnings || []).filter(w => w.kind === 'single_branch').length)}
                 ${_dcParts ? pest('parts', 'bi-cpu', t('dcim_parts'),
                                   (_dcParts.parts || []).length) : ''}
                 ${pest('hist', 'bi-clock-history', t('dcim_cat_tab_history'),
@@ -180,7 +227,7 @@ function _dcimAccess(warn, rack) {
     const all = sides.length === 4;
     const rows = warn || [];
     if (all && !rows.length) return '';         // nada que decir: se llega por todas partes
-    return `<div class="d-flex align-items-center gap-2 flex-wrap mb-3 ss-fs-2">
+    return `<div class="d-flex align-items-center gap-2 flex-wrap ss-fs-2">
         <i class="bi bi-box-arrow-in-right text-muted"></i>
         <span class="badge bg-body-secondary text-body-secondary border fw-normal"
             title="${escAttr(t('dcim_access_tt'))}">${esc(t('dcim_access'))}:
@@ -209,7 +256,7 @@ function _dcimDepths(d, rack) {
         strong ? 'text-bg-primary' : 'bg-body-secondary text-body-secondary border'
         } fw-normal ss-tabular" title="${escAttr(t(key + '_tt'))}">${
         esc(t(key))}: ${esc(String(mm))} mm</span>` : '');
-    return `<div class="d-flex align-items-center gap-2 flex-wrap mb-3 ss-fs-2">
+    return `<div class="d-flex align-items-center gap-2 flex-wrap ss-fs-2">
         <i class="bi bi-rulers text-muted"></i>
         ${chip('dcim_width_mm', rack.width_mm)}
         ${chip('dcim_depth_mm', x.total)}
@@ -364,7 +411,7 @@ function _dcimItemRow(item) {
     return `<tr data-dci="${escAttr(item.uid)}"
             onpointerenter="_dceHoverFromList(${jsStr(item.uid)})"
             onpointerleave="_dceHoverFromList('')">
-        <td class="ss-tabular">${item.parent_uid
+        <td class="ss-tabular ss-nowrap">${item.parent_uid
             ? `<span class="text-muted">${esc(t('dcim_item_on'))}</span>` : esc(span)}</td>
         <td class="ss-nowrap">${esc(t('dcim_face_' + (item.face || 'full')))}</td>
         <td${item.parent_uid ? ' class="ps-4 ss-nowrap"' : ' class="ss-nowrap"'}>

@@ -247,6 +247,26 @@ metidos en el fichero**. Cuatro dibujos nuevos y ninguno de ellos vuelve a resol
 | **Mapa de sede** | Salas dentro de un datacenter | Igual |
 | **Mapa entre sedes** | Datacenters y los enlaces que los unen | El mapa de enlaces actual, con nodos de otro tipo |
 
+### Las cuatro vistas de un armario
+
+Un armario abierto se puede mirar de cuatro maneras. Tres se eligen con el selector que hay
+bajo la cabecera, y la elegida se recuerda en el navegador. La cuarta, «Compacta», no se elige:
+es la del móvil. En una pantalla estrecha (por debajo de 576 px) el armario sale siempre así y el
+selector no se enseña. Al volver a una pantalla ancha vuelve la vista elegida, sin recargar. Las cuatro comparten la cabecera, con el
+nombre, el estado, las U libres y los botones Actualizar, «Colocar algo», Editar, Empresa y
+Eliminar. También comparten los datos: al abrir el armario se piden en segundo plano su
+cableado, su alimentación y su historial, y las cuatro leen lo mismo que leen las pestañas
+([partials/dcim/_rackviews.html](../src/lib/web_admin/templates/partials/dcim/_rackviews.html)).
+
+| Vista | Para qué | Qué enseña |
+| --- | --- | --- |
+| **Rack y pestañas** | Trabajar en el armario | El alzado de las dos caras sobre el lienzo compartido: zoom, PNG/SVG, nombres y arrastre. Cada equipo lleva un punto por cable y una barra por rama. Debajo, la ficha de lo señalado. Al lado, las pestañas Dispositivos, Cableado, Alimentación e Historial, que avisan sin abrirlas: los enlaces sin declarar y los equipos de una sola rama. |
+| **Por U** | Leer el dibujo y los datos a la vez | Una fila por U, de arriba abajo, también las libres, con «Colocar aquí». Cada fila tiene frontal y trasera en miniatura, con la mitad que ocupa cada equipo de una bandeja, y por detrás al revés. Además: cables coloreados por el contraste, ramas A/B, estado, nº de serie, garantía y empresa. Tiene buscador y «Colorear por» (estado, garantía o empresa). |
+| **Cuadro** | Saber qué hay que atender | Cifras con anillo: ocupación, equipos, garantías, alimentación, cableado e historial. El alzado se colorea por lo que se pregunte: estado, garantía, empresa, cableado o ramas. «Requiere atención» sale de los datos: garantías caducadas o a punto, equipos en aviso, error o mantenimiento, cables en otro puerto, enlaces sin declarar, ramas únicas, regletas cargadas y U libres, cada uno con su acción. Debajo, los últimos cambios. |
+| **Compacta** | El móvil (automática) | Una lista por U de una cara cada vez, con las bandejas desplegadas y la garantía caducada marcada, y abajo las cuatro pestañas de siempre. |
+
+Los colores son los del tema, así que las cuatro se leen igual en claro y en oscuro.
+
 ### La restricción que decide el mapa geográfico
 
 Un mapa del mundo con teselas exige un servidor de teselas, que es una petición a un tercero
@@ -551,8 +571,8 @@ de la información que habrá cuando toque.
       sobre distancias justo donde alguien las va a medir
 - [x] Colocar un rack **nuevo** desde el plano, sin pasar por el formulario
 - [x] **Diseñar la sala**: lo que hay en ella además de los racks —pasillos confinados, zonas
-      libres, columnas, mamparas, puertas, cuadros, SAI, climatizadores, mesas, extintores,
-      bandejas y etiquetas— en su propia tabla (`dc_feature`), porque un rack es un registro
+      libres, columnas, mamparas, puertas, cuadros, SAI, climatizadores, mesas, armarios,
+      extintores, bandejas y etiquetas— en su propia tabla (`dc_feature`), porque un rack es un registro
       con equipos y estado y una columna no: juntarlos haría que el recuento de una sala
       incluyera extintores y que «sin vigilar» devolviera mamparas
 - [x] Rejilla de **baldosa** (la de esta sala: hay suelos de 500 y de 610) con el metro marcado
@@ -561,6 +581,13 @@ de la información que habrá cuando toque.
       descubre que hacen falta: se está colocando la tercera fila y hay que saber si llega
 - [x] Tres capas —suelo, sala, aire— sacadas del modelo y no de quien pinta: un pasillo va
       debajo de los racks y una bandeja por encima, y al revés tapan lo que se venía a mirar
+- [x] **Lo que queda tapado se puede seleccionar.** Una bandeja encima de una mesa tapaba la
+      mesa: el clic llega a lo de arriba. Pulsar otra vez, sin moverse, sobre lo ya
+      seleccionado pasa a lo que hay debajo (en planta y de frente), y tras lo último vuelve a lo
+      primero. Lo seleccionado se sigue arrastrando, con sus asas, aunque otra pieza lo tape.
+      «Enviar al fondo», en la ficha de la pieza o del rack y en su barra flotante, la deja tenue y transparente al
+      clic; la barra dice cuántas hay al fondo y las trae con un botón. No se guarda: el orden
+      de las capas es del modelo, y esto es una ayuda para editar que se olvida al cerrar la sala
 - [x] Girar, mover con las flechas (Shift = una baldosa), borrar, y el panel de la pieza con los
       mismos campos que tiene su fila y ni uno más
 - [x] **Llevarse el plano y traerlo**: exportar a JSON e importarlo. La base de datos sigue
@@ -576,6 +603,78 @@ de la información que habrá cuando toque.
       altura que dicen sus U, columnas, mamparas translúcidas y bandejas colgadas. Con el
       **color en vivo** en el frente de cada rack, que es lo único que ninguna librería podía
       dar: sale de las sondas
+- [x] **El plano de fondo, calibrado** ([_plancal.html](../src/lib/web_admin/templates/partials/dcim/_plancal.html)).
+      Se colocaba con un número, «Ancho del plano», el de la imagen ENTERA —márgenes y
+      cajetín incluidos, un dato que nadie tiene— y con su esquina pegada al (0, 0), así que un
+      plano con margen quedaba desplazado; y una sala sin ese número estiraba la imagen al
+      marco del dibujo, que cambia al mover un rack. Ahora «Calibrar plano» (la regla de la
+      barra, en la sala y en la planta) lo hace como cualquier programa de planos: dos puntos de
+      una distancia conocida dan la escala, y después el plano se **encaja con lo dibujado**:
+      arrastrándolo, o pulsando un punto suyo (la esquina de una sala dibujada en él) y luego
+      dónde debe caer, pegado a la esquina más cercana de una sala, un rack o una pieza. No
+      depende de que el plano tenga una esquina en el (0, 0): un edificio en L no la tiene.
+      Se guarda dónde cae su esquina (`plan_x`, `plan_y`, que pueden ser negativos). En una
+      planta se puede **encajar contra otra planta**: su plano se ve encima, teñido de rojo, y
+      un punto común a las dos —la escalera, el ascensor— se lleva de un plano al otro; o se
+      ajusta a ojo, moviéndolo y **estirándolo por las asas de sus esquinas** (guarda su
+      proporción, y la esquina contraria se queda quieta), o escribiendo su ancho. Es lo
+      que hace que en el edificio las plantas coincidan: cada una apilada en las coordenadas
+      de su plano, y la escalera de todas en el mismo sitio. En el
+      mismo paso se puede **marcar el norte** con la flecha del plano, de la cola a la punta
+      (`north_deg`, en grados desde arriba; vacío = sin decir): una rosa de los vientos lo
+      enseña en el plano y en el 3D, donde gira con la cámara. Las vistas de pared siguen
+      llamando «norte» a la de arriba del dibujo Se ve igual en 2D y en 3D, y los tres
+      números se pueden corregir a mano. Sin escala, una sala usa su propio ancho y una planta
+      50 m: nunca el marco
+- [x] **Armarios con estanterías** ([_shelves.html](../src/lib/web_admin/templates/partials/dcim/_shelves.html)):
+      la pieza «Armario» dice cuántas estanterías tiene, y en su ficha —en el plano de la sala
+      y en el de la planta— se apunta el material de cada una, contando desde arriba
+      (`dc_shelf_item`: nombre, cantidad, nota). No es inventario de equipos: lo que se monta
+      va a un rack. Quitar una estantería con algo encima se niega, borrar el armario se lleva
+      su material avisándolo, e importar un plano nunca borra un armario que tenga algo. Se
+      dibuja con sus baldas: de frente, una línea entre estanterías; en 3D, abierto por delante
+- [x] **Los nombres en el 3D**: cada rack, cada pieza con etiqueta y cada sala de la planta
+      llevan su rótulo encima, en una capa de texto que el visor coloca donde cae su punto en
+      pantalla (nítido a cualquier zoom, y no se repinta si la cámara no se mueve). Un botón
+      del visor los oculta; se recuerda en el navegador
+- [x] **El delante y el detrás de las piezas que los tienen** (armario, mesa, cuadro, SAI,
+      climatizador: `front` en `FEATURE_KINDS`): en planta, una franja azul delante y una línea a
+      trazos detrás; en 3D, la franja en su cara de delante. Delante es el lado de arriba antes
+      de girar, el mismo que el de un rack: girarla es cambiar hacia dónde mira
+- [x] **Deshacer y rehacer** en el plano de una sala y en el de una planta
+      ([_undo.html](../src/lib/web_admin/templates/partials/dcim/_undo.html)): mover, girar,
+      estirar, cambiar un campo del inspector o calibrar el plano se deshace con el botón de la
+      barra o con Ctrl+Z (Ctrl+Y rehace). Se apunta en `_dcimSend`, el único sitio por el que
+      salen esos cambios, con cómo estaba según lo guardado. Crear y borrar no se deshacen:
+      borrar ya pregunta, y un rack borrado se lleva lo que tenía dentro
+- [x] **Ocultar el plano de fondo** (el ojo de la barra), en la sala y en la planta, en 2D y en
+      3D. Encima de un plano cargado de detalle no se distingue lo colocado; es una preferencia
+      de quien mira y se recuerda en su navegador
+- [x] **Una planta, o el edificio entero, en 3D**, desde el plano de la sede y con el mismo
+      visor ([_site3d.html](../src/lib/web_admin/templates/partials/dcim/_site3d.html)). Cada sala
+      se levanta con la misma cuenta que su propio visor (`_dc3dRoomBoxes`) y se coloca girada y
+      en su sitio, como en el plano de la planta. Sus muros se vuelven cristal según la cámara
+      esté dentro o fuera de ESA sala. La zona general no lleva muros ni suelo, y una sala sin
+      medidas sale tenue en lo que la delimita, no en lo que tiene dentro. Las líneas de
+      baldosa no se dibujan: en una planta son la mayor parte de las cajas y desde lejos no se
+      leen
+  - **El plano del arquitecto, en el suelo**, con los metros dichos (o más tenue con el tamaño
+    supuesto, como en 2D). Es lo único del visor que no es una caja: un segundo programa con
+    textura, y la imagen pasa por un lienzo de 2048 px como mucho, que es lo que hace que un
+    plano en SVG también sirva
+  - **«Edificio»** apila las plantas por su nivel, 4 m de suelo a suelo y el sótano por debajo
+    de la calle. La planta elegida en la barra se ve maciza y las de encima tenues, que desde
+    arriba la taparían; «Separar plantas» las aleja para mirar entre dos. La planta no tiene
+    columna de altura: para apilarlas basta con que no se pisen
+  - **Un clic sobre una sala dice cuál es, y otro la abre**, como el doble clic del plano. Solo
+    las salas de la planta que se mira: atravesar su suelo para abrir una de abajo abriría algo
+    que no se ve
+  - **Lo de la sede, de una vez** (`GET /sites/<uid>/contents`): eran dos peticiones por sala, y
+    cada lista de racks recalculaba el estado del árbol entero
+  - De paso, el visor **se vuelve a montar cuando la sección se repinta**: el `<canvas>` es otro
+    cada vez, y se seguía dibujando en el que ya no estaba —el nuevo, en negro, sin error—.
+    Ahora se suelta el contexto viejo, se rehace la escena con lo último guardado y la cámara se
+    queda donde estaba si se sigue mirando lo mismo
 - [x] **Filas declaradas** (`dc_row`), no deducidas de que los racks caigan alineados —eso
       falla de las dos formas: dos racks alineados por casualidad parecen una fila, y una
       fila con un hueco deja de parecerlo. Y no es una etiqueta: de la fila cuelga a qué
@@ -667,6 +766,19 @@ de la información que habrá cuando toque.
 - [x] Echar o quitar un bypass **se audita** (`dcim_bypass`, severidad aviso): no es editar un
       campo, es una maniobra eléctrica, y quién la hizo y cuándo es lo primero que se pregunta
       cuando algo se apaga tres meses después
+- [x] **La cadena, vista desde el armario.** Cada regleta elige su fuente en la pestaña
+      Alimentación (solo de la sede del armario, o de ninguna), y la pestaña enseña la cadena de
+      cada una hasta la acometida tal como está ahora. El SAI que el bypass deja fuera aparece
+      marcado, y los avisos de la cadena salen en la misma caja que los del armario: regleta que
+      no pasa por ningún SAI por un bypass, y las dos ramas por el mismo SAI. El Cuadro del armario
+      los cuenta en «Requiere atención»
+- [x] **Un SAI del armario es una fuente** (`dc_source.item_uid`): el de suelo al lado del rack es
+      UNA cosa descrita dos veces. Si hay uno que ninguna fuente dice ser, la pestaña lo avisa y
+      ofrece declararlo o enlazarlo con una fuente que ya exista. Su ficha en el dibujo dice qué
+      fuente es y si está en bypass. Un equipo es una sola fuente, de la misma sede
+- [x] **Las fuentes dicen qué cuelga de ellas**: bajo cada una, las regletas con su rama y su
+      armario, que llevan a él. Su formulario recoge además qué equipo es, qué máquina la vigila,
+      dónde está el conmutador de bypass y una descripción
 - [ ] Dibujar la cadena, que hoy se lee como lista
 **Fase 5 — Cableado**
 
