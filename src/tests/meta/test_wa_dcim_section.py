@@ -59,6 +59,12 @@ def _section():
                      for f in sorted(os.listdir(DCIM)) if f.endswith('.html'))
 
 
+def _viewer3d():
+    """El motor del visor 3D, que no es del inventario: lo usan la sala, la planta y el edificio,
+    y lo usarán el rack y los circuitos."""
+    return _read(os.path.join(TPL, 'partials', 'infra', '_viewer3d.html'))
+
+
 def _store_src() -> str:
     """El fuente del almacén del inventario, esté repartido como esté.
 
@@ -678,22 +684,23 @@ class TestEl3dSeAbreAPantallaCompleta:
     """26 rem dan para asomarse, no para moverse por una sala. Reportado desde la pantalla."""
 
     def test_el_visor_tiene_su_boton(self):
-        html = _fn(_section(), '_dc3dHtml')
-        assert 'onclick="_dc3dFull()"' in html and 'id="dc3d-box"' in html
+        assert 'onclick="ss3dFull(' in _fn(_viewer3d(), 'ss3dHtml')
+        assert 'ss3dHtml(_DC3D_BOX' in _fn(_section(), '_dc3dHtml')
 
     def test_y_donde_no_hay_pantalla_completa_ocupa_la_ventana(self):
         """Safari en iPhone no tiene la API: sin la alternativa, el botón no haría nada."""
-        assert "classList.add('ss-fill-screen')" in _fn(_section(), '_dc3dFull')
+        assert "classList.add('ss-fill-screen')" in _fn(_viewer3d(), 'ss3dFull')
         css = _read(os.path.join(SRC, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'))
         assert '.ss-fill-screen {' in css
 
     def test_cerrar_el_visor_sale_de_la_pantalla_completa(self):
         """Si no, queda una pantalla negra de la que solo sale quien sabe que Esc funciona."""
-        assert 'exitFullscreen' in _fn(_section(), '_dc3dStop')
+        assert 'exitFullscreen' in _fn(_viewer3d(), 'ss3dStop')
+        assert 'ss3dStop(' in _fn(_section(), '_dc3dStop')
 
     def test_y_el_lienzo_recibe_el_teclado(self):
-        html = _fn(_section(), '_dc3dHtml')
-        assert 'tabindex="0"' in html and 'onkeydown="_dc3dKey(event)"' in html
+        assert 'tabindex="0"' in _fn(_viewer3d(), 'ss3dHtml')
+        assert "addEventListener('keydown'" in _fn(_viewer3d(), 'ss3dMount')
 
 
 class TestUnRackSeSeleccionaComoUnaPieza:
@@ -964,7 +971,7 @@ class TestElVisor3dNoPideNadaAFuera:
     """
 
     def _js(self):
-        return _read(os.path.join(DCIM, '_room3d.html'))
+        return _viewer3d()
 
     def test_no_carga_ninguna_libreria(self):
         js = self._js()
@@ -979,7 +986,7 @@ class TestElVisor3dNoPideNadaAFuera:
     def test_y_dice_algo_cuando_no_hay_webgl(self):
         """Una pantalla negra sin explicación es peor que una frase: el plano en planta sigue
         funcionando y quien mira tiene que saberlo."""
-        assert 'dcim_3d_no_webgl' in self._js()
+        assert 'view3d_no_webgl' in self._js()
 
     def test_suelta_el_contexto_al_cerrar(self):
         """Un navegador aguanta unos pocos contextos WebGL y va tirando los viejos. Abrir y
@@ -3934,7 +3941,7 @@ class TestElSueloDel3DNoSeCruza:
     """Reportado: al moverse por el 3D de una planta, el plano del suelo se rompía a franjas."""
 
     def test_el_plano_cercano_crece_con_la_distancia(self):
-        assert 'c.radio * 0.04' in _fn(_section(), '_dc3dDraw')
+        assert 'c.radio * 0.04' in _fn(_viewer3d(), 'ss3dDraw')
 
     def test_las_capas_del_suelo_separadas(self):
         planta = _fn(_section(), '_ds3FloorScene')

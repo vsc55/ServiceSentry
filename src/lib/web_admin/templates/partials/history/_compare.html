@@ -325,10 +325,28 @@ function _historyForgetSelection() {
 }
 
 // ── Clear ONE series: pick it first (there is no "current series" in the config panel)
+//
+// The dialog opens AT ONCE, saying it is loading, and fills in when the index arrives. It
+// used to wait for the index first — on a large history a few seconds in which the button
+// seemed to do nothing. Reported from the screen.
 async function showHistoryClearSeriesModal() {
+    const modal = document.getElementById('historyClearModal');
+    const cargando = `<option value="" disabled selected>${esc(t('loading'))}</option>`;
+    for (const id of ['hcsModule', 'hcsItem', 'hcsSeries']) {
+        const sel = document.getElementById(id);
+        if (sel) { sel.innerHTML = cargando; sel.disabled = true; }
+    }
+    _historyClearSyncBtn();
+    if (modal) bootstrap.Modal.getOrCreateInstance(modal).show();
     _historyClearIndex = await apiGet('/api/v1/history/index') || [];
-    if (!_historyClearFillModules()) { showToast(t('history_empty'), 'info'); return; }
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('historyClearModal')).show();
+    for (const id of ['hcsModule', 'hcsItem', 'hcsSeries']) {
+        const sel = document.getElementById(id);
+        if (sel) sel.disabled = false;
+    }
+    if (!_historyClearFillModules()) {
+        if (modal) bootstrap.Modal.getOrCreateInstance(modal).hide();
+        showToast(t('history_empty'), 'info');
+    }
 }
 
 /** Fill the module select; returns false when there is nothing to delete at all. */
@@ -342,44 +360,86 @@ function _historyClearFillModules() {
     sel.innerHTML = mods.map(([m, pretty]) =>
         `<option value="${escAttr(m)}">${esc(pretty)}</option>`).join('');
     if (prev && mods.some(([m]) => m === prev)) sel.value = prev;   // keep the choice
-    _historyClearFillSeries();
+    _historyClearFillItems();
     return mods.length > 0;
+}
+
+//: The series choice that means "every series of the item". A key is never empty, so this
+//: one cannot be a real series.
+const _HCS_ALL = '';
+
+/** The items of the chosen module: what the series hang from. An SNMP host is twenty or
+ *  thirty series, and forgetting it one series at a time was twenty or thirty deletions. */
+function _historyClearFillItems() {
+    const mod = document.getElementById('hcsModule')?.value || '';
+    const sel = document.getElementById('hcsItem');
+    if (!sel) return _historyClearFillSeries();
+    const prev = sel.value;
+    const items = new Map();
+    for (const s of _historyClearIndex) {
+        if (s.module !== mod) continue;
+        const it = s.item || s.key;
+        const e = items.get(it) || {label: s.item_label || it, n: 0};
+        e.n++;
+        items.set(it, e);
+    }
+    const lista = [...items].sort((a, b) => String(a[1].label).localeCompare(String(b[1].label)));
+    sel.innerHTML = lista.map(([it, e]) =>
+        `<option value="${escAttr(it)}">${esc(e.label)}${e.n > 1 ? ` (${e.n})` : ''}</option>`).join('');
+    if (prev && items.has(prev)) sel.value = prev;
+    _historyClearFillSeries();
 }
 
 function _historyClearFillSeries() {
     const mod = document.getElementById('hcsModule')?.value || '';
+    const item = document.getElementById('hcsItem')?.value || '';
     const sel = document.getElementById('hcsSeries');
     if (!sel) return;
-    sel.innerHTML = _historyClearIndex.filter(s => s.module === mod).map(s =>
-        `<option value="${escAttr(s.key)}">${esc(s.label || s.key)}</option>`).join('');
+    // Without the item picker (a page loaded before it existed), every series of the module.
+    const conElemento = !!document.getElementById('hcsItem');
+    const series = _historyClearIndex.filter(s => s.module === mod
+        && (!conElemento || (s.item || s.key) === item));
+    // Every series of the item first, when there is more than one: it is what is asked for
+    // when an item is gone, and the one choice that was missing.
+    sel.innerHTML = (conElemento && series.length > 1
+        ? `<option value="${_HCS_ALL}">${esc(tf('history_clear_item_all', series.length))}</option>` : '')
+        + series.map(s => `<option value="${escAttr(s.key)}">${esc(s.label || s.key)}</option>`).join('');
     _historyClearSyncBtn();
 }
 
 function _historyClearSyncBtn() {
     const btn = document.getElementById('hcsDelete');
     const sel = document.getElementById('hcsSeries');
-    if (btn) btn.disabled = !(sel && sel.value);
+    // An empty value is the "every series of the item" choice; no options at all, or the
+    // loading line, is nothing.
+    if (btn) btn.disabled = !(sel && !sel.disabled && sel.options && sel.options.length);
 }
 
 async function _historyClearSeriesConfirmed() {
     const mod = document.getElementById('hcsModule')?.value || '';
     const key = document.getElementById('hcsSeries')?.value || '';
-    if (!mod || !key) return;
+    const item = document.getElementById('hcsItem')?.value || '';
+    const todo = key === _HCS_ALL;
+    if (!mod || (todo && !item)) return;
     const entry = _historyClearIndex.find(s => s.module === mod && s.key === key);
     // Pass params as query string — DELETE body is unreliable across proxies.
-    const url = `/api/v1/history?module=${encodeURIComponent(mod)}&key=${encodeURIComponent(key)}` +
-        (entry?.item_uid ? `&uid=${encodeURIComponent(entry.item_uid)}` : '');
+    const url = todo
+        ? `/api/v1/history/item?module=${encodeURIComponent(mod)}&item=${encodeURIComponent(item)}`
+        : `/api/v1/history?module=${encodeURIComponent(mod)}&key=${encodeURIComponent(key)}` +
+          (entry?.item_uid ? `&uid=${encodeURIComponent(entry.item_uid)}` : '');
     const res = await apiDelete(url);
     if (!res?.data?.ok) { showToast(t('save_failed'), 'danger'); return; }
 
-    showToast(t('history_cleared'), 'success');
-    if (_historyMod === mod && _historyKey === key) _historyForgetSelection();
-    // Keep the picker honest for a second deletion in the same visit; close it once the
-    // last series is gone.
-    _historyClearIndex = await apiGet('/api/v1/history/index') || [];
-    if (!_historyClearFillModules()) {
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('historyClearModal')).hide();
-    }
+    showToast(todo ? tf('history_cleared_item', res.data.series || 0) : t('history_cleared'), 'success');
+    // The series on screen, if it was this one — or one of this item's.
+    const enPantalla = !!_historyKey && (todo
+        ? (_historyKey === item || _historyKey.startsWith(item + '/'))
+        : _historyKey === key);
+    if (_historyMod === mod && enPantalla) _historyForgetSelection();
+    // Closed at once, with the toast. It used to stay open re-reading the whole history index
+    // to refill itself for a second deletion — seconds on a large history in which the dialog
+    // still showed what had just been deleted. Opening it again reads a fresh index anyway.
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('historyClearModal')).hide();
     if (_historyIsLive()) {
         await _historyLoadIndex();
         _historyRenderSeriesList();

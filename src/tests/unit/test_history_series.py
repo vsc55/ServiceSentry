@@ -315,6 +315,33 @@ class TestBorrarUnaSerieSeLaLlevaEntera:
         assert st._db.fetchone('SELECT series_id FROM history')[0] == st.series_id('cpu', 'srv1')
 
 
+class TestBorrarUnElementoEntero:
+    """Un host SNMP son veinte o treinta series bajo `host.<uuid>/…`; se pidió poder olvidarlo
+    de una vez y no serie a serie."""
+
+    def test_se_lleva_el_elemento_y_lo_que_cuelga_de_el(self):
+        st = _store()
+        for key in ('host.h1', 'host.h1/eth0', 'host.h1/eth1', 'host.h10/eth0'):
+            st.record('snmp', key, status=True, data={'if_in': 1})
+        assert st.delete_item('snmp', 'host.h1') == (3, 3)
+        assert set(_series(st)) == {('snmp', 'host.h10/eth0')}
+        assert st._db.fetchone('SELECT COUNT(*) FROM history')[0] == 1
+
+    def test_un_guion_bajo_no_es_un_comodin(self):
+        """Con `LIKE`, `a_b` cubriría `axb`: borrar un elemento se llevaría el de al lado."""
+        st = _store()
+        st.record('snmp', 'a_b/x', status=True)
+        st.record('snmp', 'axb/x', status=True)
+        st.delete_item('snmp', 'a_b')
+        assert set(_series(st)) == {('snmp', 'axb/x')}
+
+    def test_sin_elemento_no_borra_nada(self):
+        st = _store()
+        st.record('snmp', 'h/x', status=True)
+        assert st.delete_item('snmp', '') == (0, 0)
+        assert len(_series(st)) == 1
+
+
 class TestLosIndicesDicenComoSeLee:
     """Paso 7."""
 

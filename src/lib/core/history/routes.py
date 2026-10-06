@@ -11,6 +11,7 @@ Routes registered by this file:
     GET    /api/v1/history/index       Metadata for all recorded series
     GET    /api/v1/history             Time-series data for one (module, key)
     DELETE /api/v1/history             Delete all history for a (module, key)
+    DELETE /api/v1/history/item        Delete every series of one item of a module
     DELETE /api/v1/history/all         Delete the entire history database
     POST   /api/v1/history/test-write  Write a test record and read it back
     GET    /api/v1/history/diag        Diagnostic: internal history store state
@@ -117,6 +118,26 @@ def register(app, wa):
             'module': module, 'key': key, 'item_uid': item_uid or '', 'deleted': deleted,
         })
         return jsonify({'ok': True, 'deleted': deleted})
+
+    @app.route('/api/v1/history/item', methods=['DELETE'])
+    @history_delete_req
+    def api_history_delete_item():
+        """Delete every series of one item of a module (``<item>`` and ``<item>/…``).
+
+        Query parameters, like the single-series delete: DELETE + body is unreliable across
+        proxies.
+        """
+        if not wa._history:
+            return jsonify({'ok': True, 'series': 0, 'deleted': 0})
+        module = request.args.get('module', '').strip()
+        item   = request.args.get('item', '').strip()
+        if not module or not item:
+            return jsonify({'error': wa._t('history_module_key_required')}), 400
+        series, deleted = wa._history.delete_item(module, item)
+        wa._audit('history_deleted', detail={
+            'module': module, 'item': item, 'series': series, 'deleted': deleted,
+        })
+        return jsonify({'ok': True, 'series': series, 'deleted': deleted})
 
     @app.route('/api/v1/history/all', methods=['DELETE'])
     @history_delete_req

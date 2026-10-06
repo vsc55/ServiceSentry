@@ -175,6 +175,9 @@
 {# The window over a drawing — pan, zoom, fit. Before both maps, because both are
    drawn on it. #}
 {% include "partials/infra/_canvas.html" %}
+{# The 3D viewer — WebGL, camera, name tags. The inventory's rooms, floors and building are
+   drawn on it. #}
+{% include "partials/infra/_viewer3d.html" %}
 {% include "partials/infra/_map.html" %}
 {# After _map.html: the link map reads its loader, its cache and its drawing helpers. #}
 {% include "partials/infra/_links.html" %}

@@ -67,10 +67,9 @@ async function _daemonSyncModuleCards() {
 
     _daemonLastModuleStatus = JSON.parse(currentStr);
 
-    // Re-render the cards area with the updated status data.
-    // Preserve non-waiting cards that are NOT in the new status snapshot
-    // (modules currently running an on-demand check keep their waiting card).
-    area.innerHTML = _renderStatusCards(current);
+    // Through the chosen view, with its header and filters: painting the bare grid here
+    // dropped both on every scheduler tick (`_stShowData`).
+    _stShowData(current);
 }
 
 function _daemonApply(st) {

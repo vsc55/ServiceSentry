@@ -1,0 +1,879 @@
+{# ================================================================
+   A 3D viewer — the part that is not about what is drawn.
+
+   **Plain WebGL, no library.** The prototype this comes from loaded three.js from a CDN, and
+   that cannot be here: the panel's content policy runs no third-party script, and it is
+   deployed where there is no way out to the internet, where a script tag pointing at a CDN is a
+   screen that never loads. Vendoring the library would be six hundred kilobytes of somebody
+   else's code to draw boxes.
+
+   And what this panel draws in 3D is boxes. A room, a rack, a building: floors, walls, racks,
+   shelves, cable runs — all of them the same cube at another size, place and colour. What that
+   takes is a perspective matrix, a cube, and a fake light that shades each face by where it
+   faces, plus one flat textured square for a plan on the ground. It fits in this file.
+
+   It was written for one room, then reused for a floor and a whole building, and the rack and
+   the circuits want it too. So it lives here, and every viewer on the page is its OWN instance
+   keyed by the id of its box: the first version kept one global viewer, fixed element ids and
+   one camera, so a second viewer on the same page would have drawn into the first one's canvas.
+
+   What a caller hands over is a SCENE, in metres:
+
+     {cajas:   [{color: [r, g, b, a], m: model matrix, lee?: {name, …}, muro?: 'x0'|'x1'|'z0'|'z1',
+                 frame?: {x, y, z, W, D, rot}}],
+      planos:  [{data: 'data:…', alpha, m}],          an image on a unit square of the ground
+      rotulos: [{name, p: [x, y, z], tenue?}],         area names, drawn bigger
+      W, D, H, X0?, Y0?, Z0?,                          the bounds the camera stays inside
+      mira?, radio?, Rmax?}                            where the camera starts, and how far out
+
+   A box with `lee.name` carries a name tag over its top; a box with `muro` is a wall that turns
+   to glass when the camera is outside it. What is NOT here is anything that knows what a box
+   MEANS — a rack, a room, a circuit — or what happens when one is clicked (`onPick`).
+   ================================================================ #}
+
+//: The viewers on the page, by the id of their box.
+const _SS3D = new Map();
+
+//: Whether the name tags show. One preference for every viewer: it is how somebody likes to
+//: look, not a fact about one drawing. Read once from the old DCIM key too, so nobody's choice
+//: is lost when the viewer moved here.
+let ss3dShowLabels = (() => {
+    try {
+        const v = localStorage.getItem('ss.3d.labels');
+        return (v === null ? localStorage.getItem('ss.dc3d.labels') : v) !== '0';
+    } catch (_) { return true; }
+})();
+
+/** The box a viewer draws in: the canvas, the name-tag layer, full screen and name-tag buttons,
+ *  and a line of text under it. `o`: `hint` (that line), `height`, and `extra` (more markup in
+ *  the box — a compass). Nothing in it is found by a fixed id: two viewers, two boxes. */
+function ss3dHtml(id, o) {
+    o = o || {};
+    const q = jsStr(id);
+    // `flex-shrink-0`: inside a flex column the viewer shrank to 280 px, and to a different
+    // height on every page.
+    return `<div id="${escAttr(id)}" data-ss3d
+                 class="border rounded-3 overflow-hidden ss-infra-canvas position-relative mb-3 flex-shrink-0"
+                 style="height:${escAttr(o.height || '26rem')}">
+        <button type="button" class="btn btn-sm btn-secondary position-absolute" data-ss3d-full
+                style="top:.5rem;right:.5rem;z-index:2" onclick="ss3dFull(${q})"
+                title="${escAttr(t('view3d_full'))}" aria-label="${escAttr(t('view3d_full'))}">
+            <i class="bi bi-arrows-fullscreen"></i></button>
+        <canvas data-ss3d-canvas tabindex="0" style="display:block;width:100%;height:100%;
+                touch-action:none;cursor:grab;outline:none" oncontextmenu="return false"></canvas>
+        <div data-ss3d-labels class="ss-3d-labels${ss3dShowLabels ? '' : ' d-none'}" aria-hidden="true"></div>
+        <button type="button" class="btn btn-sm ${ss3dShowLabels ? 'btn-warning' : 'btn-secondary'} position-absolute"
+                data-ss3d-labels-btn style="top:.5rem;right:3rem;z-index:2" onclick="ss3dToggleLabels()"
+                title="${escAttr(t('view3d_labels'))}" aria-label="${escAttr(t('view3d_labels'))}">
+            <i class="bi bi-tag"></i></button>
+        <div class="ss-map-credit" data-ss3d-read>${esc(o.hint || t('view3d_hint'))}</div>
+        ${o.extra || ''}
+    </div>`;
+}
+
+/** One part of a viewer's box, or `null`. */
+function _ss3dPart(id, part) {
+    const box = document.getElementById(id);
+    return box ? box.querySelector(`[data-ss3d-${part}]`) : null;
+}
+
+/** Say something on the line under the viewer: what was picked, or why nothing is drawn. */
+function ss3dSay(id, text) {
+    const el = _ss3dPart(id, 'read');
+    if (el) el.textContent = text;
+}
+
+/** The viewer of a box, or `null`. */
+function ss3dGet(id) {
+    return _SS3D.get(id) || null;
+}
+
+/** Full screen, and back.
+ *
+ *  The browser's full screen and not another page: leaving it — Esc, or the same button —
+ *  puts you exactly where you were, camera included, because it is the same canvas that grew.
+ *  Where there is no full screen (Safari on an iPhone) the box fills the window with
+ *  `.ss-fill-screen`, which is the most there is. The canvas measures itself every frame. */
+function ss3dFull(id) {
+    const box = document.getElementById(id);
+    if (!box) return;
+    const dentro = document.fullscreenElement === box || box.classList.contains('ss-fill-screen');
+    if (dentro) {
+        if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+        box.classList.remove('ss-fill-screen');
+    } else if (box.requestFullscreen) {
+        box.requestFullscreen().catch(() => box.classList.add('ss-fill-screen'));
+    } else {
+        box.classList.add('ss-fill-screen');
+    }
+    // The keyboard, to the canvas: in full screen the first thing wanted is to walk.
+    setTimeout(() => {
+        const cv = _ss3dPart(id, 'canvas');
+        if (cv) cv.focus({preventScroll: true});
+        _ss3dFullIcons();
+    }, 50);
+}
+
+/** Each full screen button says what it will do. Also on Esc, which the browser resolves
+ *  without asking anybody. */
+function _ss3dFullIcons() {
+    for (const box of document.querySelectorAll('[data-ss3d]')) {
+        const i = box.querySelector('[data-ss3d-full] i');
+        if (!i) continue;
+        const dentro = document.fullscreenElement === box || box.classList.contains('ss-fill-screen');
+        i.className = 'bi ' + (dentro ? 'bi-fullscreen-exit' : 'bi-arrows-fullscreen');
+    }
+}
+document.addEventListener('fullscreenchange', _ss3dFullIcons);
+
+function ss3dToggleLabels() {
+    ss3dShowLabels = !ss3dShowLabels;
+    try { localStorage.setItem('ss.3d.labels', ss3dShowLabels ? '1' : '0'); } catch (_) { /* no storage */ }
+    for (const box of document.querySelectorAll('[data-ss3d]')) {
+        const capa = box.querySelector('[data-ss3d-labels]');
+        if (capa) capa.classList.toggle('d-none', !ss3dShowLabels);
+        const b = box.querySelector('[data-ss3d-labels-btn]');
+        if (b) b.className = `btn btn-sm ${ss3dShowLabels ? 'btn-warning' : 'btn-secondary'} position-absolute`;
+    }
+    for (const V of _SS3D.values()) V.labelsKey = '';
+}
+
+// ── Mounting and stopping ────────────────────────────────────────────────────
+
+/** Mount the viewer of box `id` on the canvas just painted, and return it.
+ *
+ *  Every repaint of a section paints a NEW canvas: the old one is no longer in the page. It
+ *  used to be mounted only the first time, and kept drawing into the canvas that had gone — a
+ *  new one, black, without a single error. Now the old context is let go and the viewer is
+ *  mounted on the new canvas with the scene rebuilt (what was just saved shows), and the camera
+ *  kept where it was if the same thing is being looked at (`o.key`).
+ *
+ *  `o`: `scene()` (returns the scene), `key`, `onPick(rayo, viewer)` (a click without a drag),
+ *  `north()` (degrees, or `null`: turns a compass in the box, if there is one). */
+function ss3dMount(id, o) {
+    o = o || {};
+    const cv = _ss3dPart(id, 'canvas');
+    if (!cv) return null;
+    let V = _SS3D.get(id);
+    if (V && V.gl && V.cv === cv) { V.opts = o; return V; }
+    const key = o.key || '';
+    const cam = V && V.cam && V.key === key ? V.cam : null;
+    if (V) _ss3dRelease(V);
+    V = {id, cv, box: document.getElementById(id), opts: o, key, gl: null};
+    _SS3D.set(id, V);
+    const gl = cv.getContext('webgl', {antialias: true, alpha: false});
+    if (!gl) {
+        // Without WebGL, say so and carry on: the rest of the page does not depend on this, and a
+        // black box with no explanation is worse than a sentence.
+        ss3dSay(id, t('view3d_no_webgl'));
+        return V;
+    }
+    const prog = _ss3dCompile(gl, _SS3D_VS, _SS3D_FS);
+    if (!prog) return V;
+    Object.assign(V, {
+        gl, prog,
+        buf: {
+            pos: _ss3dBuffer(gl, gl.ARRAY_BUFFER, _SS3D_CUBE.pos),
+            nor: _ss3dBuffer(gl, gl.ARRAY_BUFFER, _SS3D_CUBE.nor),
+            idx: _ss3dBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, _SS3D_CUBE.idx),
+        },
+        quad: _ss3dQuadProgram(gl),
+        loc: {
+            pos: gl.getAttribLocation(prog, 'aPos'),
+            nor: gl.getAttribLocation(prog, 'aNor'),
+            mvp: gl.getUniformLocation(prog, 'uMVP'),
+            model: gl.getUniformLocation(prog, 'uModel'),
+            color: gl.getUniformLocation(prog, 'uColor'),
+        },
+    });
+    V.escena = ss3dPrepare(typeof o.scene === 'function' ? o.scene() : {cajas: []});
+    V.cam = cam || ss3dCamHome(V.escena);
+    // On the element and not as global listeners: the wheel inside the viewer must not scroll
+    // the page, and to stop it you have to be there — which a passive listener is not.
+    cv.addEventListener('pointerdown', ev => ss3dDown(V, ev));
+    cv.addEventListener('pointermove', ev => ss3dMove(V, ev));
+    cv.addEventListener('pointerup', ev => ss3dUp(V, ev));
+    cv.addEventListener('pointercancel', ev => ss3dUp(V, ev));
+    cv.addEventListener('wheel', ev => ss3dWheel(V, ev), {passive: false});
+    cv.addEventListener('keydown', ev => ss3dKey(V, ev));
+    _ss3dTextures(V);
+    _ss3dLabelsBuild(V);
+    _ss3dLoop(V);
+    return V;
+}
+
+/** Rebuild the scene without touching the camera or the context: data that was missing has
+ *  arrived, or the way of looking changed. */
+function ss3dRebuild(id) {
+    const V = _SS3D.get(id);
+    if (!V || !V.gl) return;
+    V.escena = ss3dPrepare(typeof V.opts.scene === 'function' ? V.opts.scene() : {cajas: []});
+    _ss3dTextures(V);
+    _ss3dLabelsBuild(V);
+}
+
+/** Stop a viewer for good: the loop cancelled and the context let go.
+ *
+ *  A live `requestAnimationFrame` behind a closed pane is a graphics card working for nobody.
+ *  And closing from inside full screen must not leave the browser there with the canvas gone:
+ *  a black screen only left by somebody who knows that Esc works. */
+function ss3dStop(id) {
+    const box = document.getElementById(id);
+    if (box && document.fullscreenElement === box && document.exitFullscreen) document.exitFullscreen();
+    const V = _SS3D.get(id);
+    if (V) _ss3dRelease(V);
+    _SS3D.delete(id);
+}
+
+function _ss3dRelease(V) {
+    if (V.raf) cancelAnimationFrame(V.raf);
+    V.raf = 0;
+    if (V.gl) {
+        // On purpose: a browser keeps a handful of WebGL contexts alive and drops the oldest.
+        // Opening and closing a viewer ten times without letting go leaves the eleventh black,
+        // with no error at all.
+        const ext = V.gl.getExtension('WEBGL_lose_context');
+        if (ext) ext.loseContext();
+    }
+    V.gl = null;
+}
+
+// ── The geometry: one cube ───────────────────────────────────────────────────
+//
+// Twenty-four vertices and not eight: each face needs its own normal, and an eight-vertex cube
+// shares every corner between three faces, so the three would come out equally lit and the
+// cube would look flat. It is the difference between a box and a smudge.
+
+const _SS3D_CUBE = (() => {
+    const caras = [
+        {n: [0, 0, 1],  v: [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]]},   // front (+Z)
+        {n: [0, 0, -1], v: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]]},
+        {n: [1, 0, 0],  v: [[1, 0, 1], [1, 0, 0], [1, 1, 0], [1, 1, 1]]},
+        {n: [-1, 0, 0], v: [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]]},
+        {n: [0, 1, 0],  v: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]]},   // top
+        {n: [0, -1, 0], v: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]]},
+    ];
+    const pos = [], nor = [], idx = [];
+    caras.forEach((c, i) => {
+        c.v.forEach(p => { pos.push(...p); nor.push(...c.n); });
+        const b = i * 4;
+        idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    });
+    return {pos: new Float32Array(pos), nor: new Float32Array(nor),
+            idx: new Uint16Array(idx)};
+})();
+
+const _SS3D_VS = `
+attribute vec3 aPos; attribute vec3 aNor;
+uniform mat4 uMVP; uniform mat4 uModel;
+varying vec3 vNor;
+void main(){
+  vNor = mat3(uModel) * aNor;
+  gl_Position = uMVP * uModel * vec4(aPos, 1.0);
+}`;
+
+// Three cheap lights and no shadow. A key light from above and in front, which is what tells
+// apart the three visible faces of a box; a fill from the other side, so the face the key does
+// not reach is not black; and a sky-and-ground ambient — lighter looking up than down — so the
+// top of a rack does not read like its side. With one directional light and colours around
+// 0.1, a whole room came out black on black.
+const _SS3D_FS = `
+precision mediump float;
+uniform vec4 uColor;
+varying vec3 vNor;
+void main(){
+  vec3 n = normalize(vNor);
+  float key = max(dot(n, normalize(vec3(0.45, 0.85, 0.30))), 0.0);
+  float fill = max(dot(n, normalize(vec3(-0.60, 0.35, -0.50))), 0.0);
+  float sky = 0.5 + 0.5 * n.y;
+  float l = 0.32 + 0.22 * sky + 0.55 * key + 0.20 * fill;
+  gl_FragColor = vec4(min(uColor.rgb * l, vec3(1.0)), uColor.a);
+}`;
+
+// ── Matrices, the four that are needed ───────────────────────────────────────
+
+function ss3dMul(a, b) {
+    const o = new Float32Array(16);
+    for (let c = 0; c < 4; c++)
+        for (let r = 0; r < 4; r++)
+            o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1]
+                         + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+    return o;
+}
+
+function ss3dPerspective(fov, aspect, near, far) {
+    const f = 1 / Math.tan(fov / 2), d = near - far;
+    return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0,
+                             0, 0, (far + near) / d, -1, 0, 0, 2 * far * near / d, 0]);
+}
+
+function ss3dLookAt(ojo, mira) {
+    const z = ss3dNorm([ojo[0] - mira[0], ojo[1] - mira[1], ojo[2] - mira[2]]);
+    const x = ss3dNorm(ss3dCross([0, 1, 0], z));
+    const y = ss3dCross(z, x);
+    return new Float32Array([
+        x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
+        -(x[0] * ojo[0] + x[1] * ojo[1] + x[2] * ojo[2]),
+        -(y[0] * ojo[0] + y[1] * ojo[1] + y[2] * ojo[2]),
+        -(z[0] * ojo[0] + z[1] * ojo[1] + z[2] * ojo[2]), 1]);
+}
+
+/** The box `x..x+w` × `y..y+h` × `z..z+d`, turned about Y by `rotDeg` around `pivot` — its own
+ *  centre unless told otherwise — the way a plan turns a piece: the position is the corner of
+ *  the box UNturned and the turn is about the centre. Turned about the corner, any turned piece
+ *  landed somewhere else than on the plan, and a door against a wall came off it by 44 cm. And
+ *  in the plan's sense of turning: the other way, what faces right on the plan faced left. */
+function ss3dModel(x, y, z, w, h, d, rotDeg, pivot) {
+    const a = (rotDeg || 0) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    const px = pivot ? pivot[0] : x + w / 2, pz = pivot ? pivot[1] : z + d / 2;
+    return new Float32Array([
+        w * c, 0, w * s, 0,
+        0, h, 0, 0,
+        -d * s, 0, d * c, 0,
+        px + (x - px) * c - (z - pz) * s, y, pz + (x - px) * s + (z - pz) * c, 1]);
+}
+
+const ss3dCross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
+                             a[0] * b[1] - a[1] * b[0]];
+const ss3dNorm = (v) => {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / l, v[1] / l, v[2] / l];
+};
+
+// ── Scenes ───────────────────────────────────────────────────────────────────
+
+/** A scene moved somewhere else: to `(x, y, z)` and turned `rot` degrees about its centre — as
+ *  a room turns on the plan of its floor — with its opacity multiplied by `alpha` (a floor above
+ *  the one looked at, faint).
+ *
+ *  Each wall takes its FRAME along: where the scene it belongs to is and how it is turned, which
+ *  is what it takes to know whether the camera is inside or outside THAT room. A wall that
+ *  already had one — a room already placed on its floor, and the floor lifted to its level — is
+ *  only moved: stacking floors does not turn them. */
+function ss3dPlace(escena, x, y, z, rot, alpha) {
+    const a = alpha === undefined ? 1 : alpha;
+    const T = ss3dModel(x, y, z, 1, 1, 1, rot || 0, [x + escena.W / 2, z + escena.D / 2]);
+    const marco = {x, y, z, W: escena.W, D: escena.D, rot: rot || 0};
+    const color = (c) => (a < 1 ? [c[0], c[1], c[2], c[3] * a] : c);
+    const cajas = escena.cajas.map(k => Object.assign({}, k, {
+        m: ss3dMul(T, k.m), color: color(k.color),
+        frame: k.muro ? (k.frame ? Object.assign({}, k.frame, {x: k.frame.x + x, y: k.frame.y + y,
+                                                               z: k.frame.z + z})
+                                 : marco) : undefined}));
+    const planos = (escena.planos || []).map(p => Object.assign({}, p, {
+        m: ss3dMul(T, p.m), alpha: p.alpha * a}));
+    const punto = (q) => [T[0] * q[0] + T[4] * q[1] + T[8] * q[2] + T[12],
+                          T[1] * q[0] + T[5] * q[1] + T[9] * q[2] + T[13],
+                          T[2] * q[0] + T[6] * q[1] + T[10] * q[2] + T[14]];
+    const rotulos = (escena.rotulos || []).map(r => Object.assign({}, r, {
+        p: punto(r.p), tenue: r.tenue || a < 1}));
+    return {cajas, planos, rotulos};
+}
+
+/** The scene sorted for drawing: the opaque, the walls — whose opacity depends on where the
+ *  camera is — and the see-through. Once per scene and not every frame: sorting three thousand
+ *  boxes sixty times a second is work that does not change its result. */
+function ss3dPrepare(escena) {
+    const cajas = escena.cajas || [];
+    escena.cajas = cajas;
+    escena.opacos = cajas.filter(k => !k.muro && k.color[3] >= 1);
+    escena.muros = cajas.filter(k => k.muro);
+    escena.vidrios = cajas.filter(k => !k.muro && k.color[3] < 1);
+    escena.planos = escena.planos || [];
+    escena.etiquetas = ss3dLabelsOf(escena);
+    return escena;
+}
+
+/** What carries a name tag, and where: each named box over the centre of its top, and the area
+ *  names the scene brings (`area`, drawn bigger). Not what is faint: a floor above the one
+ *  looked at would fill the view with names nobody is looking at. */
+function ss3dLabelsOf(escena) {
+    const out = [];
+    for (const k of escena.cajas || []) {
+        if (!k.lee || !k.lee.name || k.color[3] < 0.5) continue;
+        const m = k.m;
+        out.push({name: k.lee.name, p: [m[0] * 0.5 + m[4] + m[8] * 0.5 + m[12],
+                                         m[1] * 0.5 + m[5] + m[9] * 0.5 + m[13],
+                                         m[2] * 0.5 + m[6] + m[10] * 0.5 + m[14]]});
+    }
+    for (const r of escena.rotulos || []) if (!r.tenue) out.push({name: r.name, p: r.p, area: true});
+    return out;
+}
+
+/** How opaque a wall is drawn from `ojo`, times the opacity its colour already has. For a wall
+ *  with a frame — a room placed on its floor — the camera is first taken to that room's
+ *  coordinates: inside and outside are its own. */
+function ss3dWallAlphaOf(k, ojo, escena) {
+    const base = k.color[3];
+    if (!k.frame) return base * ss3dWallAlpha(k.muro, ojo, escena);
+    const f = k.frame, a = f.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    const dx = ojo[0] - (f.x + f.W / 2), dz = ojo[2] - (f.z + f.D / 2);
+    return base * ss3dWallAlpha(k.muro, [dx * c + dz * s + f.W / 2, ojo[1] - f.y,
+                                         -dx * s + dz * c + f.D / 2], f);
+}
+
+/** Solid when the camera is on the inside, nearly clear when it is outside: from outside, a
+ *  solid wall is exactly what stands between whoever looks and what they want to see. Nearly
+ *  and not fully: a faint pane still says where the room ends. */
+function ss3dWallAlpha(lado, ojo, escena) {
+    const fuera = (lado === 'z0' && ojo[2] < 0) || (lado === 'x0' && ojo[0] < 0)
+               || (lado === 'z1' && ojo[2] > escena.D) || (lado === 'x1' && ojo[0] > escena.W);
+    return fuera ? 0.12 : 1;
+}
+
+// ── Name tags ────────────────────────────────────────────────────────────────
+
+/** The tags in their layer, once per scene. */
+function _ss3dLabelsBuild(V) {
+    const capa = _ss3dPart(V.id, 'labels');
+    if (!capa || !V.escena) return;
+    capa.innerHTML = V.escena.etiquetas.map(e =>
+        `<span class="ss-3d-label${e.area ? ' ss-3d-label-area' : ''}">${esc(e.name)}</span>`).join('');
+    V.labelEls = Array.from(capa.children);
+    V.labelsKey = '';
+}
+
+/** Each tag to where its point falls on screen. Only when the camera or the size changed: sixty
+ *  times a second for hundreds of names standing still is work for nothing. What falls behind
+ *  the camera or off the canvas is hidden. */
+function ss3dLabelsTurn(V, vp) {
+    if (!ss3dShowLabels || !V.labelEls || !V.escena.etiquetas) return;
+    const w = V.cv.clientWidth, h = V.cv.clientHeight;
+    const clave = [V.ojo.map(v => v.toFixed(3)), V.cam.mira.map(v => v.toFixed(3)), w, h].join('|');
+    if (clave === V.labelsKey) return;
+    V.labelsKey = clave;
+    V.escena.etiquetas.forEach((e, i) => {
+        const el = V.labelEls[i];
+        if (!el) return;
+        const [x, y, z] = e.p;
+        const cw = vp[3] * x + vp[7] * y + vp[11] * z + vp[15];
+        if (cw <= 0.05) { el.style.display = 'none'; return; }
+        const sx = ((vp[0] * x + vp[4] * y + vp[8] * z + vp[12]) / cw + 1) / 2 * w;
+        const sy = (1 - (vp[1] * x + vp[5] * y + vp[9] * z + vp[13]) / cw) / 2 * h;
+        if (sx < -50 || sx > w + 50 || sy < -20 || sy > h + 20) { el.style.display = 'none'; return; }
+        el.style.display = '';
+        el.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px) translate(-50%, -100%)`;
+    });
+}
+
+// ── Images on the ground ─────────────────────────────────────────────────────
+//
+// An architect's plan stuck to the floor: the one thing in the viewer that is not a box of one
+// colour. A flat square with the image on it, with its own program — the boxes' one knows
+// nothing of images — drawn between the opaque and the see-through: under what stands on it,
+// and visible through glass.
+
+//: A square on the ground, (0, 0, 0) to (1, 0, 1): the image stretched over it with its top
+//: left corner at the origin, where a plan puts it.
+const _SS3D_QUAD = {pos: new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1]),
+                    idx: new Uint16Array([0, 1, 2, 0, 2, 3])};
+
+const _SS3D_QVS = `
+attribute vec3 aPos;
+uniform mat4 uMVP; uniform mat4 uModel;
+varying vec2 vUV;
+void main(){
+  vUV = aPos.xz;
+  gl_Position = uMVP * uModel * vec4(aPos, 1.0);
+}`;
+
+// A little darker than the image: a plan in pure white on the viewer's background dazzles and
+// eats the contrast of what stands on it.
+const _SS3D_QFS = `
+precision mediump float;
+uniform sampler2D uTex; uniform float uAlpha;
+varying vec2 vUV;
+void main(){
+  vec4 c = texture2D(uTex, vUV);
+  gl_FragColor = vec4(c.rgb * 0.82, c.a * uAlpha);
+}`;
+
+function _ss3dQuadProgram(gl) {
+    const p = _ss3dCompile(gl, _SS3D_QVS, _SS3D_QFS);
+    if (!p) return null;
+    return {prog: p,
+            pos: _ss3dBuffer(gl, gl.ARRAY_BUFFER, _SS3D_QUAD.pos),
+            idx: _ss3dBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, _SS3D_QUAD.idx),
+            loc: {pos: gl.getAttribLocation(p, 'aPos'), mvp: gl.getUniformLocation(p, 'uMVP'),
+                  model: gl.getUniformLocation(p, 'uModel'),
+                  tex: gl.getUniformLocation(p, 'uTex'), alpha: gl.getUniformLocation(p, 'uAlpha')}};
+}
+
+//: Images already turned into a canvas, by their `data:`: remounting a viewer — done on every
+//: repaint — has no reason to decode a plan of several megabytes again.
+const _SS3D_IMG = new Map();
+
+/** An image as a canvas at most 2048 px wide, which any card takes as a texture. Going through
+ *  a canvas is also what makes an SVG plan work: WebGL knows nothing of vectors, and the canvas
+ *  rasterises it. `null` if the image cannot be read. */
+function _ss3dImageCanvas(data) {
+    if (!_SS3D_IMG.has(data)) {
+        _SS3D_IMG.set(data, new Promise(ok => {
+            const img = new Image();
+            img.onload = () => {
+                const w0 = img.naturalWidth || 1024, h0 = img.naturalHeight || 768;
+                const k = Math.min(1, 2048 / Math.max(w0, h0));
+                const cv = document.createElement('canvas');
+                cv.width = Math.max(1, Math.round(w0 * k));
+                cv.height = Math.max(1, Math.round(h0 * k));
+                const g = cv.getContext('2d');
+                if (!g) return ok(null);
+                g.drawImage(img, 0, 0, cv.width, cv.height);
+                ok(cv);
+            };
+            img.onerror = () => ok(null);
+            img.src = data;
+        }));
+    }
+    return _SS3D_IMG.get(data);
+}
+
+/** Upload the scene's images not yet on the card. Asynchronous — an image takes a while to
+ *  decode — and dropped if the viewer closed or moved to another canvas meanwhile.
+ *
+ *  Kept per context by their `data:` (`V.texs`): a rebuilt scene brings the same plan again,
+ *  and a rebuild is what follows every edit of a plan. Uploading it each time filled the card
+ *  with copies of one image that nothing freed. */
+function _ss3dTextures(V) {
+    if (!V.gl || !V.quad) return;
+    const gl = V.gl;
+    if (!V.texs || V.texs.gl !== gl) V.texs = Object.assign(new Map(), {gl});
+    for (const p of V.escena.planos) {
+        if (p.tex || !p.data) continue;
+        if (V.texs.has(p.data)) { p.tex = V.texs.get(p.data); continue; }
+        _ss3dImageCanvas(p.data).then(cv => {
+            if (!cv || V.gl !== gl) return;
+            if (V.texs.has(p.data)) { p.tex = V.texs.get(p.data); return; }
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            // No mipmaps and clamped edges: then an image of any size works, not only powers of
+            // two.
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
+            V.texs.set(p.data, tex);
+            p.tex = tex;
+        });
+    }
+}
+
+// ── The camera ───────────────────────────────────────────────────────────────
+
+/** The starting camera, in orbit terms: where it looks, how far, and from what angle. The
+ *  centre from a high corner — the front right one, so the far walls are behind what is
+ *  looked at and not in front of it, and what is at the bottom of the plan is nearest. In a
+ *  function because Home goes back to it: moving freely, getting lost is a matter of time. */
+function ss3dCamHome(escena) {
+    return {mira: escena.mira ? escena.mira.slice() : [escena.W / 2, 1.0, escena.D / 2],
+            radio: escena.radio || Math.max(escena.W, escena.D) * 1.4 || 14,
+            theta: Math.PI / 3, phi: 0.95};
+}
+
+/** Where the camera faces, on the ground, and its right. What walking with the keyboard and
+ *  panning with the right button use: both have to move relative to what is SEEN, not to the
+ *  axes of the scene. */
+function ss3dAxes(c) {
+    const f = [-Math.cos(c.theta), 0, -Math.sin(c.theta)];
+    return {fwd: f, right: [-f[2], 0, f[0]]};
+}
+
+/** Move the point looked at, which moves the camera with it.
+ *
+ *  Inside the scene's bounds and no further: without a stop, the wheel went through the room
+ *  and on into the void behind its wall, with nothing to see and nothing to find the way back.
+ *  Looking from outside is not walking, it is backing off: the wheel the other way does that. */
+function ss3dShift(V, c, dx, dy, dz) {
+    const e = (V && V.escena) || {};
+    const W = e.W || 12, D = e.D || 8, H = e.H || 3, fuera = 0.3;
+    // What starts below 0: the margin round a floor, and the basements of a building.
+    const X0 = e.X0 || 0, Y0 = e.Y0 || 0, Z0 = e.Z0 || 0;
+    c.mira[0] = Math.max(X0 - fuera, Math.min(W + fuera, c.mira[0] + dx));
+    c.mira[1] = Math.max(Y0 + 0.05, Math.min(H + 2, c.mira[1] + dy));
+    c.mira[2] = Math.max(Z0 - fuera, Math.min(D + fuera, c.mira[2] + dz));
+}
+
+/** Where north is ON SCREEN, in degrees clockwise from up: the plan's north, seen from where
+ *  the camera looks. Up the screen is where it looks. */
+function ss3dCompassAngle(cam, north) {
+    const a = north * Math.PI / 180;
+    const n = [Math.sin(a), -Math.cos(a)];                  // north, on the ground (x, z)
+    const f = ss3dAxes(cam);
+    return Math.atan2(n[0] * f.right[0] + n[1] * f.right[2],
+                      n[0] * f.fwd[0] + n[1] * f.fwd[2]) * 180 / Math.PI;
+}
+
+function _ss3dCompassTurn(V) {
+    const north = typeof V.opts.north === 'function' ? V.opts.north() : null;
+    const g = V.box ? V.box.querySelector('[data-compass-needle]') : null;
+    if (!g || north === null) return;
+    const ang = Math.round(ss3dCompassAngle(V.cam, north));
+    if (V.compassAng === ang) return;       // sixty times a second: only when it changed
+    V.compassAng = ang;
+    g.setAttribute('transform', `rotate(${ang})`);
+}
+
+// ── Drawing ──────────────────────────────────────────────────────────────────
+
+function _ss3dCompile(gl, vsSrc, fsSrc) {
+    const compila = (tipo, src) => {
+        const sh = gl.createShader(tipo);
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        if (gl.getShaderParameter(sh, gl.COMPILE_STATUS)) return sh;
+        // A shader that does not compile leaves the screen black and says nothing; so this says.
+        console.error('WebGL:', gl.getShaderInfoLog(sh));
+        return null;
+    };
+    const vs = compila(gl.VERTEX_SHADER, vsSrc), fs = compila(gl.FRAGMENT_SHADER, fsSrc);
+    if (!vs || !fs) return null;
+    const p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    return gl.getProgramParameter(p, gl.LINK_STATUS) ? p : null;
+}
+
+function _ss3dBuffer(gl, tipo, datos) {
+    const b = gl.createBuffer();
+    gl.bindBuffer(tipo, b);
+    gl.bufferData(tipo, datos, gl.STATIC_DRAW);
+    return b;
+}
+
+function _ss3dLoop(V) {
+    if (!V.gl) return;
+    V.raf = requestAnimationFrame(() => _ss3dLoop(V));
+    ss3dDraw(V);
+}
+
+function ss3dDraw(V) {
+    const gl = V.gl, cv = V.cv;
+    // The canvas size in real pixels, every frame: the pane can be resized, and a canvas the
+    // size it was yesterday draws stretched.
+    const ancho = Math.max(1, Math.floor(cv.clientWidth * Math.min(devicePixelRatio || 1, 2)));
+    const alto = Math.max(1, Math.floor(cv.clientHeight * Math.min(devicePixelRatio || 1, 2)));
+    if (cv.width !== ancho || cv.height !== alto) { cv.width = ancho; cv.height = alto; }
+    gl.viewport(0, 0, ancho, alto);
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(0.08, 0.09, 0.11, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    const c = V.cam;
+    const ojo = [c.mira[0] + c.radio * Math.sin(c.phi) * Math.cos(c.theta),
+                 // Never below the ground: looking from below — under a wall-hung rack — the eye
+                 // rests on the floor instead of going through it and seeing the scene upside down.
+                 Math.max((V.escena.Y0 || 0) + 0.05, c.mira[1] + c.radio * Math.cos(c.phi)),
+                 c.mira[2] + c.radio * Math.sin(c.phi) * Math.sin(c.theta)];
+    V.ojo = ojo;
+    _ss3dCompassTurn(V);
+    // The far plane, to the size of the scene: a 50 m building seen from afar was cut off at
+    // the back by a room's.
+    const lejos = Math.max(400, ((V.escena.W || 0) + (V.escena.D || 0)) * 4);
+    // And the near one, to how far the camera is. Fixed at 5 cm — what walking inside a room
+    // needs — it spent the depth precision on the first metres, and looking at a building from
+    // 70 m the ground's plan and the rooms' floors, centimetres apart, crossed in stripes as the
+    // camera moved.
+    const cerca = Math.min(5, Math.max(0.05, c.radio * 0.04));
+    const vp = ss3dMul(ss3dPerspective(0.96, ancho / alto, cerca, lejos), ss3dLookAt(ojo, c.mira));
+    ss3dLabelsTurn(V, vp);
+
+    _ss3dUseCube(V, vp);
+    const caja = (m, r, g, b, a) => {
+        gl.uniformMatrix4fv(V.loc.model, false, m);
+        gl.uniform4f(V.loc.color, r, g, b, a);
+        gl.depthMask(a >= 1);
+        gl.drawElements(gl.TRIANGLES, _SS3D_CUBE.idx.length, gl.UNSIGNED_SHORT, 0);
+    };
+    // Opaque first and see-through after: the other way, glass writes depth and wipes what is
+    // behind it, which is exactly what was to be seen through it.
+    for (const k of V.escena.opacos) caja(k.m, k.color[0], k.color[1], k.color[2], k.color[3]);
+    // The walls, by where the camera is: the one between it and the room, glass. Every frame,
+    // because the camera moves every frame.
+    const muros = V.escena.muros.map(k => [k, ss3dWallAlphaOf(k, ojo, V.escena)]);
+    for (const [k, a] of muros) if (a >= 1) caja(k.m, k.color[0], k.color[1], k.color[2], a);
+    // The images on the ground, over the opaque and under the glass.
+    if (V.escena.planos.length && V.quad) {
+        _ss3dDrawPlans(V, vp);
+        _ss3dUseCube(V, vp);
+    }
+    for (const [k, a] of muros) if (a < 1) caja(k.m, k.color[0], k.color[1], k.color[2], a);
+    for (const k of V.escena.vidrios) caja(k.m, k.color[0], k.color[1], k.color[2], k.color[3]);
+    gl.depthMask(true);
+}
+
+/** The boxes' program with its cube bound: back to it after drawing the images, which use
+ *  another program and other buffers. */
+function _ss3dUseCube(V, vp) {
+    const gl = V.gl;
+    gl.useProgram(V.prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, V.buf.pos);
+    gl.enableVertexAttribArray(V.loc.pos);
+    gl.vertexAttribPointer(V.loc.pos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, V.buf.nor);
+    gl.enableVertexAttribArray(V.loc.nor);
+    gl.vertexAttribPointer(V.loc.nor, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, V.buf.idx);
+    gl.uniformMatrix4fv(V.loc.mvp, false, vp);
+}
+
+function _ss3dDrawPlans(V, vp) {
+    const gl = V.gl, Q = V.quad;
+    gl.useProgram(Q.prog);
+    // The images' program has no normals: that attribute is switched off so it does not point
+    // at a buffer this drawing has not bound.
+    if (V.loc.nor >= 0) gl.disableVertexAttribArray(V.loc.nor);
+    gl.bindBuffer(gl.ARRAY_BUFFER, Q.pos);
+    gl.enableVertexAttribArray(Q.loc.pos);
+    gl.vertexAttribPointer(Q.loc.pos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, Q.idx);
+    gl.uniformMatrix4fv(Q.loc.mvp, false, vp);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(Q.loc.tex, 0);
+    gl.depthMask(false);
+    for (const p of V.escena.planos) {
+        if (!p.tex) continue;
+        gl.bindTexture(gl.TEXTURE_2D, p.tex);
+        gl.uniformMatrix4fv(Q.loc.model, false, p.m);
+        gl.uniform1f(Q.loc.alpha, p.alpha);
+        gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_SHORT, 0);
+    }
+}
+
+/** The ray from the camera through a point of the screen: where it starts and where it goes,
+ *  in metres of the scene. What it takes to know what is under the pointer on a click. */
+function ss3dRay(V, clientX, clientY) {
+    const r = V.cv.getBoundingClientRect();
+    if (!r.width || !r.height || !V.ojo) return null;
+    const nx = ((clientX - r.left) / r.width) * 2 - 1;
+    const ny = 1 - ((clientY - r.top) / r.height) * 2;
+    const c = V.cam, o = V.ojo;
+    const f = ss3dNorm([c.mira[0] - o[0], c.mira[1] - o[1], c.mira[2] - o[2]]);
+    const x = ss3dNorm(ss3dCross(f, [0, 1, 0]));
+    const y = ss3dCross(x, f);
+    const tg = Math.tan(0.48), asp = r.width / r.height;
+    const d = ss3dNorm([0, 1, 2].map(i => f[i] + x[i] * nx * tg * asp + y[i] * ny * tg));
+    return {o: o.slice(), d};
+}
+
+/** Where the pointer's ray cuts the level plane at height `y`, or `null` (no canvas, no
+ *  pointer, or looking above the horizon). */
+function ss3dCursorGround(V, ev, y) {
+    if (!V || !V.cv || !Number.isFinite(ev.clientX)) return null;
+    const rayo = ss3dRay(V, ev.clientX, ev.clientY);
+    if (!rayo || Math.abs(rayo.d[1]) < 1e-6) return null;
+    const t0 = (y - rayo.o[1]) / rayo.d[1];
+    if (!(t0 > 0)) return null;
+    return [rayo.o[0] + rayo.d[0] * t0, y, rayo.o[2] + rayo.d[2] * t0];
+}
+
+// ── Moving the camera ────────────────────────────────────────────────────────
+
+function ss3dDown(V, ev) {
+    const el = ev.currentTarget;
+    if (el && el.focus) el.focus({preventScroll: true});
+    if (el && el.setPointerCapture) el.setPointerCapture(ev.pointerId);
+    V.pulsado = {x: ev.clientX, y: ev.clientY};
+    // The right button pans instead of turning, as in any viewer.
+    V.arrastre = {x: ev.clientX, y: ev.clientY, pan: ev.button === 2 || ev.shiftKey};
+    if (el) el.style.cursor = 'grabbing';
+}
+
+function ss3dMove(V, ev) {
+    if (!V.arrastre) return;
+    const a = V.arrastre, c = V.cam;
+    const dx = ev.clientX - a.x, dy = ev.clientY - a.y;
+    if (a.pan) {
+        // The ground is grabbed: dragging right takes the scene right, and down brings it
+        // closer. A floor on the factor: with the camera close to what it looks at, `radio` is
+        // almost nothing and the drag would move nothing.
+        const k = Math.max(c.radio, 1.5) * 0.0016;
+        const e = ss3dAxes(c);
+        ss3dShift(V, c, (e.right[0] * -dx + e.fwd[0] * dy) * k, 0,
+                  (e.right[2] * -dx + e.fwd[2] * dy) * k);
+    } else {
+        c.theta += dx * 0.006;
+        // Bounded, but past the horizontal: below it you look from underneath, which is how a
+        // rack hung on a wall is seen. Never to the zenith or the nadir, where the camera
+        // flips and the scene shows upside down.
+        c.phi = Math.max(0.08, Math.min(Math.PI - 0.15, c.phi - dy * 0.006));
+    }
+    V.arrastre = {x: ev.clientX, y: ev.clientY, pan: a.pan};
+}
+
+function ss3dUp(V, ev) {
+    V.arrastre = null;
+    // A press without a drag is pointing: whoever mounted the viewer decides what to do with
+    // it (`onPick`). Four pixels of slack, what a hand trembles.
+    const p = V.pulsado;
+    V.pulsado = null;
+    const onPick = (V.opts || {}).onPick;
+    if (p && ev.type === 'pointerup' && typeof onPick === 'function'
+            && Math.hypot(ev.clientX - p.x, ev.clientY - p.y) < 4) {
+        const rayo = ss3dRay(V, ev.clientX, ev.clientY);
+        if (rayo) onPick(rayo, V);
+    }
+    if (ev.currentTarget) ev.currentTarget.style.cursor = 'grab';
+}
+
+/** The wheel zooms in and out.
+ *
+ *  Towards where the pointer is, not towards the centre: the point of the ground under the
+ *  cursor stays under the cursor and the centre of the view is what moves. Zooming always to
+ *  the centre meant panning afterwards to where you wanted to go. And zooming in stopped at
+ *  1.2 m from what was looked at, so the far wall could never be reached: now, at half a metre,
+ *  the wheel goes on and carries the point looked at forward — and the camera with it —
+ *  levelled. A room is crossed with the wheel, as in any viewer. */
+function ss3dWheel(V, ev) {
+    if (!V.cam) return;
+    ev.preventDefault();
+    const c = V.cam;
+    const r0 = c.radio;
+    if (ev.deltaY > 0) {
+        c.radio = Math.min(Math.max(90, (V.escena || {}).Rmax || 0), c.radio * 1.12);
+    } else if (c.radio > 0.5) {
+        c.radio = Math.max(0.5, c.radio * 0.89);
+    }
+    if (c.radio !== r0) {
+        const p = ss3dCursorGround(V, ev, c.mira[1]);
+        if (p) {
+            const k = 1 - c.radio / r0;
+            ss3dShift(V, c, (p[0] - c.mira[0]) * k, 0, (p[2] - c.mira[2]) * k);
+        }
+        return;
+    }
+    // Zooming in with the camera already up against what it looks at: forward and level, like
+    // walking with W. Following the gaze — nearly always downwards — the wheel sank the camera
+    // into the floor in three turns. Q and E go up and down. Zooming out at the stop, nothing.
+    if (ev.deltaY < 0) {
+        const paso = (ev.shiftKey ? 1.2 : 0.3);
+        const f = ss3dAxes(c).fwd;
+        ss3dShift(V, c, f[0] * paso, 0, f[2] * paso);
+    }
+}
+
+/** Walking with the keyboard, with the viewer focused — a press focuses it.
+ *
+ *  W A S D or the arrows, forward and sideways; Q and E, or PgDn and PgUp, down and up; Shift,
+ *  four times faster; Home or F, back to the starting view. Only with the focus on the canvas:
+ *  outside it, arrows and letters belong to the page and to whatever is being typed. */
+function ss3dKey(V, ev) {
+    if (!V.cam) return;
+    const c = V.cam, e = ss3dAxes(c);
+    const paso = ev.shiftKey ? 0.6 : 0.15;
+    const k = (ev.key || '').toLowerCase();
+    let dx = 0, dy = 0, dz = 0;
+    if (k === 'w' || k === 'arrowup') { dx = e.fwd[0]; dz = e.fwd[2]; }
+    else if (k === 's' || k === 'arrowdown') { dx = -e.fwd[0]; dz = -e.fwd[2]; }
+    else if (k === 'a' || k === 'arrowleft') { dx = -e.right[0]; dz = -e.right[2]; }
+    else if (k === 'd' || k === 'arrowright') { dx = e.right[0]; dz = e.right[2]; }
+    else if (k === 'e' || k === 'pageup') dy = 1;
+    else if (k === 'q' || k === 'pagedown') dy = -1;
+    else if (k === 'home' || k === 'f') { V.cam = ss3dCamHome(V.escena); ev.preventDefault(); return; }
+    else return;
+    ev.preventDefault();
+    ss3dShift(V, c, dx * paso, dy * paso, dz * paso);
+}

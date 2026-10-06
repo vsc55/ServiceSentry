@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~10.750 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~10.790 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -677,8 +677,11 @@ la que era verdad ese día, y que la identidad se reescriba **sólo cuando cambi
 serie sin que **leer cree** —una gráfica de algo que nunca se midió no deja una serie fantasma—,
 que borrar una serie se lleve su identidad y olvide las cachés, que el filtro por módulo pase por
 la serie; y que estén los índices que se leen y no vuelva el que indexaba una columna vacía.
+Y que borrar un elemento entero (`delete_item`) se lleve sus series —`<elemento>` y
+`<elemento>/…`— y ninguna otra: ni la de un vecino que empieza igual (`host.h10`) ni la de un
+elemento cuyo nombre lleva `_`, que con `LIKE` sería un comodín.
 
-**Archivo:** `tests/unit/test_history_series.py` — 37 tests
+**Archivo:** `tests/unit/test_history_series.py` — 40 tests
 
 ---
 
@@ -3547,12 +3550,15 @@ lleva puesto sale aunque no sea de los veinte de la lista corta.
 
 ## 57. Panel Web — Historial
 
-**Archivo:** `tests/integration/test_wa_history.py` — 2 tests
+**Archivo:** `tests/integration/test_wa_history.py` — 5 tests
 
 | Test | Qué comprueba |
 |---|---|
 | `test_index_label_from_item_label` | A series whose key matches a configured item shows that item's label |
 | `test_index_label_falls_back_to_record_name` | ram_swap emits derived keys ("<uid>_ram") that are not real item keys, so |
+| `test_index_groups_each_series_under_its_item` | El índice dice de qué elemento cuelga cada serie (`host.h1/eth0` → `host.h1`) |
+| `test_delete_item_forgets_every_series_of_that_item_only` | `DELETE /api/v1/history/item` borra todas las series del elemento y ninguna de otro elemento ni de otro módulo |
+| `test_delete_item_needs_both_and_the_permission` | Sin módulo o sin elemento es un 400; sin sesión no se borra nada |
 
 ## 58. Panel Web — Webhooks
 
@@ -7321,7 +7327,7 @@ la lista luego se negaría a configurar. Ahora ambos preguntan a `_modAvailabili
 
 ## 116. Status — cuatro layouts que tienen que coincidir en qué está fallando
 
-**Archivo:** `tests/meta/test_wa_status_views.py` — 32 tests
+**Archivo:** `tests/meta/test_wa_status_views.py` — 35 tests
 
 El **Resumen** estuvo a punto de no tener nombre propio: al mover la barra de totales a una
 cabecera que dibujan las cuatro vistas, se quedó siendo la rejilla de tarjetas en otro orden —
@@ -7385,6 +7391,9 @@ página que se auto-refresca, un redibujado que pide datos además compite con s
 | `TestLookingIsNotFetching::test_filtering_redraws_too` | |
 | `TestLookingIsNotFetching::test_the_payload_is_kept_for_that` | |
 | `TestLookingIsNotFetching::test_the_draw_step_is_separate_from_the_load` | |
+| `TestARefreshKeepsTheView::test_every_refresh_draws_through_the_chosen_view` | El refresco suave, el del planificador y el final de una ejecución dibujan con la vista elegida, su cabecera y sus filtros |
+| `TestARefreshKeepsTheView::test_nothing_paints_the_bare_grid_any_more` | Nada pinta ya la rejilla de tarjetas sin vista (una tarjeta toda OK se abría vacía con «Solo problemas») |
+| `TestARefreshKeepsTheView::test_a_card_opened_by_hand_stays_open` | Una tarjeta abierta o cerrada a mano sigue así tras cada refresco |
 | `TestTheOrderIsPartOfTheAnswer::test_problems_come_first` | Una página con la primera pantalla verde y el fallo tres filas más abajo te ha hecho scrollear para saber algo que ya sabía |
 | `TestTheOrderIsPartOfTheAnswer::test_the_baseline_view_is_not_reordered` | Las tarjetas son la referencia contra la que se comparan las otras tres; reordenarlas cambiaría lo comparado |
 | `TestTheOrderIsPartOfTheAnswer::test_the_filter_still_applies_to_it` | Filtrar es estado de la sección, no propiedad de un layout |
@@ -10842,7 +10851,7 @@ a su vez tapa un rack, y un navegador de mentira que devuelve los tres bajo el p
 
 ## 182. Integración — Una planta, o el edificio entero, en 3D
 
-**Archivo:** `tests/integration/test_wa_dcim_site3d.py` — 25 tests
+**Archivo:** `tests/integration/test_wa_dcim_site3d.py` — 27 tests
 
 Ejecuta en `node` el guion de verdad del panel sobre una sede de tres plantas (sótano, baja y
 primera). La baja tiene un plano de 30 m, una sala girada 90° con un rack, una sala sin medidas
@@ -10875,6 +10884,8 @@ y su zona general con un rack de pasillo y una columna.
 | `TestLosRotulos::test_en_pantalla_donde_cae_y_lo_de_detras_oculto` | En pantalla, el rótulo va donde cae su punto, y lo que queda detrás de la cámara se oculta |
 | `TestLaSalaSigueIgual::test_su_visor_conserva_baldosas_y_muros` | El visor de una sala conserva sus baldosas y sus cuatro muros |
 | `TestLoDeLaSedeDeUnaVez::test_una_peticion_por_sede` | El contenido de la sede se pide en una sola petición |
+| `TestElTresDSigueAlPlano::test_sin_3d_no_se_programa_nada` | Con el 3D cerrado, repintar el plano no programa nada |
+| `TestElTresDSigueAlPlano::test_se_rehace_una_vez_cuando_el_plano_para` | Con el 3D abierto, una ráfaga de cambios rehace la escena una sola vez, cuando el plano para |
 
 ## 183. Integración — El plano de fondo: dónde cae, a qué escala y ocultarlo
 
@@ -11012,3 +11023,64 @@ estanterías y el material de cada una; la API la fija `TestLasEstanteriasDeUnAr
 | `TestElDibujo::test_en_3d_el_armario_abierto_con_sus_baldas` | En 3D, el armario es fondo, dos lados, techo y una tabla por estantería |
 | `TestElDibujo::test_en_3d_la_franja_del_delante` | En 3D, una pieza con delante lleva su franja |
 | `TestElDibujo::test_el_nombre_nunca_boca_abajo` | En planta, el nombre de una pieza o un rack girados entre 90° y 270° se voltea para leerse derecho |
+
+---
+
+## 188. Meta — El motor del visor 3D, compartido
+
+**Archivo:** `tests/meta/test_wa_viewer3d.py` — 7 tests
+
+El visor 3D se escribió dentro del inventario para una sala, con un único visor global y ids
+fijos; al pedirse también el rack y los circuitos en 3D pasó a `infra/_viewer3d.html`, con una
+instancia por caja. Estas guardas impiden que el reparto se deshaga.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestOneViewerPerBox::test_no_part_is_found_by_a_fixed_id` | El motor no busca ninguna parte por un id fijo: las encuentra dentro de su caja |
+| `TestOneViewerPerBox::test_the_viewers_are_kept_by_box` | Los visores se guardan por el id de su caja, uno por caja |
+| `TestTheEngineKnowsNothingOfTheInventory::test_no_inventory_name_in_its_code` | El código del motor no nombra nada del inventario |
+| `TestWebGlLivesInTheEngineOnly::test_no_section_of_the_inventory_draws_by_itself` | Ningún fichero del inventario llama a WebGL ni repite las matrices |
+| `TestWebGlLivesInTheEngineOnly::test_the_engine_is_loaded_before_what_draws_on_it` | El motor se incluye antes que la sala y la sede |
+| `TestThePlansKeepTheViewerCurrent::test_both_plans_rebuild_the_3d_when_they_redraw` | El plano de la sala y el de la sede rehacen el 3D al repintar su dibujo |
+| `TestThePlansKeepTheViewerCurrent::test_a_rebuilt_scene_reuses_its_images` | Rehacer la escena reutiliza las imágenes ya subidas a la tarjeta |
+
+---
+
+## 189. Integración — Una tarjeta de Estado abierta a mano enseña sus comprobaciones
+
+**Archivo:** `tests/integration/test_wa_status_cards.py` — 5 tests
+
+Ejecuta en `node` el guion de verdad del panel. Reportado: en Sistema › Estado una tarjeta toda OK
+(Ping, 15/15) giraba la flecha al pulsarla y no enseñaba nada, porque su cuerpo se dibujaba ya
+filtrado por «Solo problemas».
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestTheFilterSaysWhatItHides::test_an_all_ok_card_lists_nothing_and_says_so` | Con el filtro, una tarjeta toda OK no lista nada, dice cuántas oculta y empieza cerrada |
+| `TestTheFilterSaysWhatItHides::test_a_card_with_a_problem_lists_it_and_counts_the_rest` | Una tarjeta con un problema lo lista y cuenta las correctas que oculta |
+| `TestOpeningACardShowsEveryCheck::test_opened_by_hand_it_lists_all_fifteen` | Abierta a mano se vuelve a dibujar con todas sus comprobaciones |
+| `TestOpeningACardShowsEveryCheck::test_closed_again_it_goes_back_to_the_filter` | Cerrada otra vez vuelve a lo que enseña el filtro |
+| `TestWithoutTheFilter::test_nothing_hidden_nothing_said` | Sin el filtro no se oculta nada ni se avisa de nada |
+
+---
+
+## 190. Integración — Borrar el historial: el diálogo, por elemento
+
+**Archivo:** `tests/integration/test_wa_history_clear.py` — 9 tests
+
+Ejecuta en `node` el guion de verdad del panel y lee el HTML que sirve `/admin`. Se pidió borrar
+de una vez las veinte o treinta series de un elemento; y se reportó que el diálogo tardaba en
+salir —parecía no hacer nada— y que cambiar de módulo no cambiaba los elementos y dejaba las
+series vacías.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestItOpensAtOnce::test_before_the_index_arrives` | El diálogo se abre antes de que llegue el índice del histórico |
+| `TestItOpensAtOnce::test_saying_it_is_loading_with_nothing_to_press` | Mientras carga lo dice y el botón de borrar está apagado |
+| `TestTheModuleDrivesTheItemsAndTheSeries::test_filled_when_the_index_arrives` | Al llegar el índice se rellenan módulo, elemento y serie |
+| `TestTheModuleDrivesTheItemsAndTheSeries::test_changing_the_module_changes_the_items` | Cambiar de módulo cambia los elementos, cada uno con su nombre y cuántas series tiene |
+| `TestTheModuleDrivesTheItemsAndTheSeries::test_and_the_series_of_the_item` | Y las series son las del elemento elegido |
+| `TestEverySeriesOfTheItem::test_offered_first` | «Todas las series del elemento» sale la primera y se puede pulsar |
+| `TestEverySeriesOfTheItem::test_deletes_the_item` | Elegida, llama a `DELETE /api/v1/history/item` con el módulo y el elemento |
+| `TestTheServedDialog::test_the_module_picker_refreshes_the_items` | En el HTML servido, el selector de módulo refresca los elementos |
+| `TestTheServedDialog::test_and_closes_at_once_without_re_reading_the_index` | Tras borrar, el diálogo se cierra con el aviso sin volver a leer el índice entero |

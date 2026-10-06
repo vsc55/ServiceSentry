@@ -338,6 +338,7 @@ function _dcsHandles(x, y, w, d) {
 function _dcsRedraw() {
     const svg = ssCanvasSvg(_DCS_SVG);
     if (svg) svg.innerHTML = _dcsContent();
+    _dc3dSoon();
 }
 
 // ── La pantalla ────────────────────────────────────────────────────────────────────────────

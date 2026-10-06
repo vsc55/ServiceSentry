@@ -86,7 +86,7 @@ function esquinaPlano(x, y, w, d, rot, u, t) {
 }
 casos.tresd = {};
 for (const rot of [0, 30, 90, 180, 270]) {
-    const m = _dc3model(-0.44, 0, 2.0, 1.0, 2.1, 0.12, rot);
+    const m = ss3dModel(-0.44, 0, 2.0, 1.0, 2.1, 0.12, rot);
     casos.tresd[rot] = [[1, 0], [0, 1], [1, 1]].map(([u, t]) => ({
         tres: esquina3d(m, u, t), plano: esquinaPlano(-440, 2000, 1000, 120, rot, u, t)}));
 }
@@ -112,39 +112,39 @@ const franjas = escena.cajas.filter(k => !k.lee && k.color !== _DC3_COLOR.floor
                                         && k.color !== _DC3_COLOR.tile);
 casos.franja = {rack0: caja3d(conNombre[0].m), franja0: caja3d(franjas[0].m),
                 rack90: caja3d(conNombre[1].m), franja90: caja3d(franjas[1].m)};
-// Moving about the room in 3D: the camera lives in `_dc3d.cam`, and the handlers only need an
-// event with the fields they read.
+// Moving about the room in 3D: the camera lives in the viewer (`v3.cam`), and the handlers
+// only need a viewer with a camera and a scene, and an event with the fields they read.
 const escena3 = {W: 6, D: 5, H: 3};
-_dc3d = {cam: _dc3dCamHome(escena3), escena: escena3};
+const v3 = {cam: ss3dCamHome(escena3), escena: escena3};
 const ev = (extra) => Object.assign({preventDefault() {}, shiftKey: false}, extra);
-const mira0 = _dc3d.cam.mira.slice();
-for (let i = 0; i < 60; i++) _dc3dWheel(ev({deltaY: -1}));
-casos.rueda = {radio: _dc3d.cam.radio, antes: mira0, despues: _dc3d.cam.mira.slice()};
-for (let i = 0; i < 400; i++) _dc3dWheel(ev({deltaY: -1, shiftKey: true}));
-casos.ruedaSinFin = _dc3d.cam.mira.slice();
-_dc3d.cam = _dc3dCamHome(escena3);
-const w0 = _dc3d.cam.mira.slice(), e = _dc3dAxes(_dc3d.cam);
-_dc3dKey(ev({key: 'w'}));
-const w1 = _dc3d.cam.mira.slice();
-_dc3dKey(ev({key: 'e'}));
-const e1 = _dc3d.cam.mira.slice();
-for (let i = 0; i < 100; i++) _dc3dKey(ev({key: 'q'}));
-const suelo = _dc3d.cam.mira[1];
-_dc3dKey(ev({key: 'Home'}));
+const mira0 = v3.cam.mira.slice();
+for (let i = 0; i < 60; i++) ss3dWheel(v3, ev({deltaY: -1}));
+casos.rueda = {radio: v3.cam.radio, antes: mira0, despues: v3.cam.mira.slice()};
+for (let i = 0; i < 400; i++) ss3dWheel(v3, ev({deltaY: -1, shiftKey: true}));
+casos.ruedaSinFin = v3.cam.mira.slice();
+v3.cam = ss3dCamHome(escena3);
+const w0 = v3.cam.mira.slice(), e = ss3dAxes(v3.cam);
+ss3dKey(v3, ev({key: 'w'}));
+const w1 = v3.cam.mira.slice();
+ss3dKey(v3, ev({key: 'e'}));
+const e1 = v3.cam.mira.slice();
+for (let i = 0; i < 100; i++) ss3dKey(v3, ev({key: 'q'}));
+const suelo = v3.cam.mira[1];
+ss3dKey(v3, ev({key: 'Home'}));
 casos.teclas = {avance: [w1[0] - w0[0], w1[2] - w0[2]], fwd: [e.fwd[0], e.fwd[2]],
-                sube: e1[1] - w1[1], suelo, casa: _dc3d.cam.mira};
+                sube: e1[1] - w1[1], suelo, casa: v3.cam.mira};
 // Looking from below: dragging down far enough takes the camera past the horizontal.
-_dc3d.cam = _dc3dCamHome(escena3);
-_dc3d.arrastre = {x: 0, y: 0, pan: false};
-_dc3dMove({clientX: 0, clientY: -2000});
-casos.desdeAbajo = _dc3d.cam.phi;
+v3.cam = ss3dCamHome(escena3);
+v3.arrastre = {x: 0, y: 0, pan: false};
+ss3dMove(v3, {clientX: 0, clientY: -2000});
+casos.desdeAbajo = v3.cam.phi;
 // The walls: all four, and the one between the camera and the room turns to glass.
 const sala = {W: 6, D: 5, H: 3};
 casos.muros = {
     lados: _dc3dScene().cajas.filter(k => k.muro).map(k => k.muro).sort(),
-    dentro: ['z0', 'x0', 'z1', 'x1'].map(l => _dc3dWallAlpha(l, [3, 1.5, 2.5], sala)),
-    detrasDelFondo: _dc3dWallAlpha('z0', [3, 1.5, -1], sala),
-    delanteDerecha: ['z0', 'x0', 'z1', 'x1'].map(l => _dc3dWallAlpha(l, [9, 4, 8], sala)),
+    dentro: ['z0', 'x0', 'z1', 'x1'].map(l => ss3dWallAlpha(l, [3, 1.5, 2.5], sala)),
+    detrasDelFondo: ss3dWallAlpha('z0', [3, 1.5, -1], sala),
+    delanteDerecha: ['z0', 'x0', 'z1', 'x1'].map(l => ss3dWallAlpha(l, [9, 4, 8], sala)),
 };
 // Typing several fields in a row saves ALL of them: the second must not cancel the first.
 const enviados = [];

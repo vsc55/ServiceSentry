@@ -454,6 +454,47 @@ class HistoryStore(BaseStore):
         except Exception:  # pylint: disable=broad-except
             return 0
 
+    def item_series(self, module: str, item: str) -> list[int]:
+        """The ids of every series of one item of a module.
+
+        An item's series are the key that IS the item and every ``<item>/<metric>`` under it —
+        an SNMP host is ``host.<uuid>/<row>``, one series per interface, disk and sensor, so
+        twenty or thirty of them. Matched here and not with ``LIKE``: an item key may hold
+        ``_`` or ``%``, which ``LIKE`` would read as wildcards and widen to another item.
+        """
+        item = str(item or '')
+        if not item:
+            return []
+        k = self._qk
+        try:
+            filas = self._db.fetchall(
+                f'SELECT id, {k} FROM {_TS} WHERE module = ?', (str(module or ''),)) or ()
+        except Exception:  # pylint: disable=broad-except
+            return []
+        return [int(r[0]) for r in filas
+                if r[1] == item or str(r[1] or '').startswith(item + '/')]
+
+    def delete_item(self, module: str, item: str) -> tuple[int, int]:
+        """Delete every series of one item of a module, and their samples: ``(series,
+        samples)``. One series at a time from the screen was twenty or thirty confirmations
+        to forget one host. All of it in one transaction: half an item forgotten is an item
+        whose graphs lie about what it measured."""
+        sids = self.item_series(module, item)
+        if not sids:
+            return 0, 0
+        marcas = ','.join('?' * len(sids))
+        try:
+            with self._db.transaction():
+                for sid in sids:
+                    self.facts.delete_series(sid)
+                deleted = self._db.execute(
+                    f'DELETE FROM {_T} WHERE series_id IN ({marcas})', tuple(sids))
+                self._db.execute(f'DELETE FROM {_TS} WHERE id IN ({marcas})', tuple(sids))
+            self._forget_series()
+            return len(sids), deleted
+        except Exception:  # pylint: disable=broad-except
+            return 0, 0
+
     def delete_all(self) -> int:
         """Delete all rows and reclaim disk space."""
         try:

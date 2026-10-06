@@ -642,6 +642,7 @@ y los otros identificadores del mismo fallo.
 | GET | `/api/v1/history/index` | `history_view` | Metadatos de todas las series |
 | GET | `/api/v1/history` | `history_view` | Serie temporal de un (module, key) |
 | DELETE | `/api/v1/history` | `history_delete` | Borrar historial de un (module, key) |
+| DELETE | `/api/v1/history/item` | `history_delete` | Borrar todas las series de un elemento de un módulo (`?module=&item=`: `<item>` y `<item>/…`) |
 | DELETE | `/api/v1/history/all` | `history_delete` | Vaciar toda la BD de historial |
 | POST | `/api/v1/history/test-write` | `history_view` | Test de escritura + lectura |
 | GET | `/api/v1/history/diag` | `history_view` | Estado interno de diagnóstico |

@@ -97,8 +97,8 @@ __out.sinBaldosas = !planta.cajas.some(k => k.color === _DC3_COLOR.tile);
 // Girada 90°, la sala de 4×3 m ocupa en la planta x 5.5–8.5, z 1.5–5.5. Con la cámara en su
 // centro, todo macizo; desde muy a la izquierda (x = 0), uno de cristal.
 const muros = planta.cajas.filter(k => k.muro && k.frame && cerca(k.frame.x, 5));
-const dentro = muros.map(k => _dc3dWallAlphaOf(k, [7, 1.5, 3.5], planta));
-const fuera = muros.map(k => _dc3dWallAlphaOf(k, [0, 1.5, 3.5], planta));
+const dentro = muros.map(k => ss3dWallAlphaOf(k, [7, 1.5, 3.5], planta));
+const fuera = muros.map(k => ss3dWallAlphaOf(k, [0, 1.5, 3.5], planta));
 __out.murosDentro = dentro.every(a => a === 1);
 __out.murosFueraUnoDeCristal = fuera.filter(a => a < 1).length === 1;
 
@@ -123,15 +123,15 @@ _ds3Explode = false;
 
 // ── Señalar y abrir ─────────────────────────────────────────────────────────────
 _ds3Mode = 'floor';
-_dc3d = {escena: planta};
+const vPick = {escena: planta};
 let abierta = '';
 _dcimOpenPlan = (uid) => { abierta = uid; };
 const abajo = {o: [7, 30, 3.5], d: [0, -1, 0]};
-__out.primerClic = _ds3Pick(abajo);
+__out.primerClic = _ds3Pick(abajo, vPick);
 __out.noAbreAlPrimero = abierta === '';
-_ds3Pick(abajo);
+_ds3Pick(abajo, vPick);
 __out.abreAlSegundo = abierta;
-__out.fueraDeTodo = _ds3Pick({o: [-0.5, 30, -0.5], d: [0, -1, 0]});
+__out.fueraDeTodo = _ds3Pick({o: [-0.5, 30, -0.5], d: [0, -1, 0]}, vPick);
 
 // ── La rueda acerca hacia el cursor ─────────────────────────────────────────────
 const escZ = {W: 40, D: 30, H: 3};
@@ -140,24 +140,24 @@ const ojoDe = (c) => [c.mira[0] + c.radio * Math.sin(c.phi) * Math.cos(c.theta),
                       c.mira[1] + c.radio * Math.cos(c.phi),
                       c.mira[2] + c.radio * Math.sin(c.phi) * Math.sin(c.theta)];
 const lienzo = {getBoundingClientRect: () => ({left: 0, top: 0, width: 1000, height: 500})};
-_dc3d = {cam: camZ, escena: escZ, cv: lienzo};
-_dc3d.ojo = ojoDe(camZ);
+const vZ = {cam: camZ, escena: escZ, cv: lienzo};
+vZ.ojo = ojoDe(camZ);
 // En el centro de la pantalla el punto bajo el cursor es el centro: acercar no lo mueve.
 const rueda = (x, y) => ({clientX: x, clientY: y, deltaY: -1, preventDefault() {}});
-_dc3dWheel(rueda(500, 250));
+ss3dWheel(vZ, rueda(500, 250));
 __out.centroQuieto = Math.hypot(camZ.mira[0] - 20, camZ.mira[2] - 15) < 1e-6;
 // A un lado: el punto bajo el cursor se queda donde estaba y el centro se le acerca en la
 // misma proporción que el radio.
-_dc3d.ojo = ojoDe(camZ);
-const p = _dc3dCursorGround({clientX: 850, clientY: 300}, camZ.mira[1]);
+vZ.ojo = ojoDe(camZ);
+const p = ss3dCursorGround(vZ, {clientX: 850, clientY: 300}, camZ.mira[1]);
 const d0 = Math.hypot(p[0] - camZ.mira[0], p[2] - camZ.mira[2]), r0 = camZ.radio;
-_dc3dWheel(rueda(850, 300));
+ss3dWheel(vZ, rueda(850, 300));
 const d1 = Math.hypot(p[0] - camZ.mira[0], p[2] - camZ.mira[2]);
 __out.haciaElCursor = d0 > 0.5 && Math.abs(d1 / d0 - camZ.radio / r0) < 1e-6;
 // Alejando al tope, la rueda no anda hacia delante.
 camZ.radio = 90;
 const antesTope = camZ.mira.slice();
-_dc3dWheel({clientX: 500, clientY: 250, deltaY: 1, preventDefault() {}});
+ss3dWheel(vZ, {clientX: 500, clientY: 250, deltaY: 1, preventDefault() {}});
 __out.topeQuieto = camZ.mira.every((v, i) => Math.abs(v - antesTope[i]) < 1e-9);
 
 // ── Los rótulos ─────────────────────────────────────────────────────────────────
@@ -166,25 +166,25 @@ const salaR = _dc3dRoomBoxes({width_mm: 6000, depth_mm: 5000},
     [{uid: 'm', kind: 'bench', label: 'MesaTaller', pos_x: 3000, pos_y: 3000},
      {uid: 'd', kind: 'door', label: '', pos_x: 0, pos_y: 0}],
     {bench: {h: 750, layer: 'room'}, door: {h: 2100, layer: 'room'}}, {});
-const rot = _dc3dLabelsOf(salaR);
+const rot = ss3dLabelsOf(salaR);
 __out.rotulos = rot.map(e => e.name).sort().join(',');
 const r01 = rot.find(e => e.name === 'Rack01');
 __out.rackArriba = Math.abs(r01.p[1] - 42 * 44.45 * 0.001) < 1e-6;
 // En la planta, las salas por su nombre; en el edificio, no las de las plantas tenues.
-__out.rotulosPlanta = _dc3dLabelsOf(planta).filter(e => e.sala).map(e => e.name).sort().join(',');
+__out.rotulosPlanta = ss3dLabelsOf(planta).filter(e => e.area).map(e => e.name).sort().join(',');
 _ds3Mode = 'building';
 const edif = _ds3Scene();
-__out.rotulosEdificio = _dc3dLabelsOf(edif).filter(e => e.sala).map(e => e.name).sort().join(',');
+__out.rotulosEdificio = ss3dLabelsOf(edif).filter(e => e.area).map(e => e.name).sort().join(',');
 _ds3Mode = 'floor';
 // En pantalla: lo de delante de la cámara se coloca; lo de detrás se oculta.
 const camL = {mira: [3, 1, 2.5], radio: 8, theta: Math.PI / 3, phi: 0.95};
 const ojoL = [camL.mira[0] + camL.radio * Math.sin(camL.phi) * Math.cos(camL.theta),
               camL.mira[1] + camL.radio * Math.cos(camL.phi),
               camL.mira[2] + camL.radio * Math.sin(camL.phi) * Math.sin(camL.theta)];
-const vpL = _dc3mul(_dc3perspective(0.96, 2, 0.05, 400), _dc3lookAt(ojoL, camL.mira));
+const vpL = ss3dMul(ss3dPerspective(0.96, 2, 0.05, 400), ss3dLookAt(ojoL, camL.mira));
 const elDelante = {style: {}}, elDetras = {style: {}};
-_dc3dShowLabels = true;
-_dc3dLabelsTurn({cv: {clientWidth: 1000, clientHeight: 500}, ojo: ojoL, cam: camL,
+ss3dShowLabels = true;
+ss3dLabelsTurn({cv: {clientWidth: 1000, clientHeight: 500}, ojo: ojoL, cam: camL,
                  escena: {etiquetas: [{name: 'A', p: camL.mira}, {name: 'B', p: [ojoL[0] * 3, ojoL[1], ojoL[2] * 3]}]},
                  labelEls: [elDelante, elDetras]}, vpL);
 __out.delante = elDelante.style.display === '' && /translate\(500\.0px, 250\.0px\)/.test(elDelante.style.transform || '');
@@ -204,6 +204,20 @@ const pedidas = [];
 apiGet = async (url) => { pedidas.push(url); return {rooms: {s1: {racks: [], features: []}}}; };
 _dcsLoadContents();
 __out.unaPeticion = pedidas.join('|');
+
+// ── El 3D sigue a lo que se cambia en el plano ──────────────────────────────────
+// Reportado: una mesa arrastrada se guardaba, y el 3D la seguía enseñando en su sitio viejo.
+const relojes = [];
+let quitados = 0;
+setTimeout = (f, ms) => { relojes.push({f, ms}); return relojes.length; };
+clearTimeout = () => { quitados++; };
+_dc3d = null;
+_dc3dSoon();
+__out.soonApagado = relojes.length;
+_dc3d = {on: true};
+for (let i = 0; i < 20; i++) _dc3dSoon();
+__out.soon = {programados: relojes.length, quitados, rehace: relojes[0].f === _dc3dRebuild,
+              espera: relojes[0].ms};
 """
 
 
@@ -329,3 +343,16 @@ class TestLaSalaSigueIgual:
 class TestLoDeLaSedeDeUnaVez:
     def test_una_peticion_por_sede(self, out):
         assert out['unaPeticion'] == '/api/v1/dcim/sites/sede/contents'
+
+
+class TestElTresDSigueAlPlano:
+    """Reportado: una pieza arrastrada en el plano se guardaba, pero el 3D abierto la seguía
+    enseñando en su sitio viejo hasta el siguiente repintado completo."""
+
+    def test_sin_3d_no_se_programa_nada(self, out):
+        assert out['soonApagado'] == 0
+
+    def test_se_rehace_una_vez_cuando_el_plano_para(self, out):
+        s = out['soon']
+        assert s['rehace'] and s['espera'] > 0
+        assert s['quitados'] >= 19, 'cada cambio aplaza el anterior: un arrastre rehace una vez'

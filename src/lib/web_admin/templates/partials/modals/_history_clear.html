@@ -18,6 +18,11 @@
                 <div class="mb-2">
                     <label class="form-label small mb-1" for="hcsModule">{{ i18n.col_module }}</label>
                     <select class="form-select form-select-sm" id="hcsModule"
+                            onchange="_historyClearFillItems()"></select>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small mb-1" for="hcsItem">{{ i18n.history_item }}</label>
+                    <select class="form-select form-select-sm" id="hcsItem"
                             onchange="_historyClearFillSeries()"></select>
                 </div>
                 <div class="mb-2">

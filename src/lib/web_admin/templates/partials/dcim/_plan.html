@@ -1140,6 +1140,7 @@ function _dcpRedraw() {
     const svg = _dcimPlanSvg();
     if (!svg || !_dcimPlan) return;
     svg.innerHTML = _dcpView === 'top' ? _dcpContent(_dcimPlan.racks || []) : _dcpElevationSvg();
+    _dc3dSoon();
 }
 
 //: What the pointer is on.

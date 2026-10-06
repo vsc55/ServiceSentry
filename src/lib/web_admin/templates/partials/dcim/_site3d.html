@@ -110,13 +110,13 @@ function _ds3FloorScene(floor, img) {
     }
     const W = maxX * M, D = maxY * M, pad = 1;
     const cajas = [{color: _DC3_COLOR.ground, lee: null,
-                    m: _dc3model(-pad, -0.4, -pad, W + pad * 2, 0.15, D + pad * 2, 0)}];
+                    m: ss3dModel(-pad, -0.4, -pad, W + pad * 2, 0.15, D + pad * 2, 0)}];
     const planos = [];
     if (img && img.data && _dcPlanBg) {
         // Sin escala dicha, más tenue: es un dibujo de referencia estirado a un tamaño
         // supuesto, igual que en el plano de la planta.
         planos.push({data: img.data, alpha: b.scaled ? 0.95 : 0.6,
-                     m: _dc3model(b.x * M, -0.12, b.y * M, b.w * M, 1, b.h * M, 0)});
+                     m: ss3dModel(b.x * M, -0.12, b.y * M, b.w * M, 1, b.h * M, 0)});
     }
     const salas = [], rotulos = [];
     for (const r of salasAqui) {
@@ -134,7 +134,7 @@ function _ds3FloorScene(floor, img) {
                                    {tiles: false, floorY: -0.03, ghost: !s.real});
         const x = (Number(r.pos_x) || 0) * M, z = (Number(r.pos_y) || 0) * M;
         const rot = Number(r.rotation) || 0;
-        cajas.push(..._dc3dPlace(sub, x, 0, z, rot, 1).cajas);
+        cajas.push(...ss3dPlace(sub, x, 0, z, rot, 1).cajas);
         salas.push({uid: r.uid, name: r.name || '', y: 0,
                     frame: {x, z, W: sub.W, D: sub.D, rot}});
         // El nombre de la sala, en su centro y por encima de sus muros: el giro de la sala no
@@ -162,7 +162,7 @@ function _ds3BuildingScene(actual) {
         const e = _ds3FloorScene(f, _ds3Img(f));
         const tenue = nivel > nivelActual;
         // 0,25: con menos, la planta de encima apenas se distinguía del fondo.
-        const puesta = _dc3dPlace(e, 0, Y, 0, 0, tenue ? 0.25 : 1);
+        const puesta = ss3dPlace(e, 0, Y, 0, 0, tenue ? 0.25 : 1);
         todo.cajas.push(...puesta.cajas);
         todo.planos.push(...puesta.planos);
         todo.rotulos.push(...puesta.rotulos);
@@ -183,8 +183,8 @@ function _ds3BuildingScene(actual) {
 /** Lo señalado con un clic: el nombre de la sala bajo el ratón, y con un segundo clic, abrirla
  *  —el mismo doble clic que en el plano de la planta—. El rayo se corta con el suelo de la
  *  planta y el punto se lleva a las coordenadas de cada sala, giro incluido. */
-function _ds3Pick(rayo) {
-    const e = (_dc3d || {}).escena || {};
+function _ds3Pick(rayo, visor) {
+    const e = (visor || _dc3dView() || {}).escena || {};
     let mejor = null;
     for (const s of (e.salas || [])) {
         if (Math.abs(rayo.d[1]) < 1e-6) continue;
@@ -196,11 +196,10 @@ function _ds3Pick(rayo) {
         const lx = dx * c + dz * sn + f.W / 2, lz = -dx * sn + dz * c + f.D / 2;
         if (lx >= 0 && lx <= f.W && lz >= 0 && lz <= f.D) mejor = {t: t0, sala: s};
     }
-    const el = document.getElementById('dc3d-read');
     const ahora = Date.now();
     if (!mejor) {
         _ds3LastPick = null;
-        if (el) el.textContent = t('dcim_3d_site_hint');
+        ss3dSay(_DC3D_BOX, t('dcim_3d_site_hint'));
         return null;
     }
     const uid = mejor.sala.uid;
@@ -210,7 +209,7 @@ function _ds3Pick(rayo) {
         return uid;
     }
     _ds3LastPick = {uid, t: ahora};
-    if (el) el.textContent = tf('dcim_3d_room_pick', mejor.sala.name || uid);
+    ss3dSay(_DC3D_BOX, tf('dcim_3d_room_pick', mejor.sala.name || uid));
     return uid;
 }
 

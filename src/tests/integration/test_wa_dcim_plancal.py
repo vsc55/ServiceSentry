@@ -299,8 +299,8 @@ __out.rosaSin = _dcCompass(null) === '' && _dcCompass(undefined) === '';
 __out.rosaCon = _dcCompass(90).includes('rotate(90)');
 // En el 3D gira con la cámara: mirando hacia arriba del plano, el norte (0°) arriba; mirando
 // al este, a la izquierda.
-__out.rosa3d = [Math.round(_dc3dCompassAngle({theta: Math.PI / 2}, 0)),
-                Math.round(_dc3dCompassAngle({theta: Math.PI}, 0))];
+__out.rosa3d = [Math.round(ss3dCompassAngle({theta: Math.PI / 2}, 0)),
+                Math.round(ss3dCompassAngle({theta: Math.PI}, 0))];
 
 // ── Ocultar el plano ────────────────────────────────────────────────────────────
 _dcPlanBg = true;

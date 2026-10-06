@@ -1600,7 +1600,7 @@ html.ss-nocss body { visibility: visible; }
 .ss-3d-label { position: absolute; left: 0; top: 0; white-space: nowrap; font-size: .72rem;
                line-height: 1.2; padding: 0 .3rem; border-radius: .25rem;
                background: rgba(0, 0, 0, .6); color: #fff; }
-.ss-3d-label-room { font-size: .85rem; font-weight: 600; background: rgba(13, 110, 253, .75); }
+.ss-3d-label-area { font-size: .85rem; font-weight: 600; background: rgba(13, 110, 253, .75); }
 /* The compass rose in a corner of a plan or of the 3D viewer. */
 .ss-compass { position: absolute; top: .5rem; right: .5rem; z-index: 2; pointer-events: none;
               background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);

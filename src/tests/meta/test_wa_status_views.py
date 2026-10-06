@@ -216,6 +216,29 @@ class TestLookingIsNotFetching:
         assert '_stDrawResults();' in _fn(checks, 'renderStatus')
 
 
+class TestARefreshKeepsTheView:
+    """Reported from the screen: after the first refresh the header and the filters were gone,
+    every module was back, and an all-OK card (Ping, 15/15) opened onto nothing — the refreshes
+    painted a bare grid of cards while "only problems" still hid each card's passing checks."""
+
+    def test_every_refresh_draws_through_the_chosen_view(self):
+        checks = _read('_checks.html')
+        assert '_stShowData(' in _fn(checks, '_softRefreshStatus')
+        assert '_stShowData(' in _read('_daemon.html')
+        assert '_stDrawResults()' in _fn(checks, '_stShowData')
+
+    def test_nothing_paints_the_bare_grid_any_more(self):
+        for name in ('_checks.html', '_daemon.html'):
+            assert '_renderStatusCards' not in _strip_comments(_read(name)), name
+
+    def test_a_card_opened_by_hand_stays_open(self):
+        """The scheduler refreshes every few seconds; folding back the card being read on
+        each tick is the page arguing with its reader."""
+        checks = _read('_checks.html')
+        assert '_stCardOpen.set(' in _fn(checks, '_toggleStatusCard')
+        assert '_stCardOpen.has(mod)' in _fn(checks, '_renderOneStatusCard')
+
+
 class TestTheOrderIsPartOfTheAnswer:
 
     def test_problems_come_first(self):

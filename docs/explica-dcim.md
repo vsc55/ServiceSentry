@@ -603,6 +603,13 @@ de la información que habrá cuando toque.
       altura que dicen sus U, columnas, mamparas translúcidas y bandejas colgadas. Con el
       **color en vivo** en el frente de cada rack, que es lo único que ninguna librería podía
       dar: sale de las sondas
+- [x] **El motor del visor, compartido** ([infra/_viewer3d.html](../src/lib/web_admin/templates/partials/infra/_viewer3d.html)).
+      WebGL, la cámara (órbita, rueda hacia el cursor, andar con el teclado), los rótulos, los
+      planos en el suelo y la pantalla completa no son del inventario: el inventario solo dice
+      qué cajas hay (`_room3d.html`, `_site3d.html`). Cada visor es una instancia guardada por
+      el id de su caja (`ss3dMount(id, {scene, key, onPick, north})`); el primero era uno solo,
+      global y con ids fijos, así que dos visores en la misma página habrían dibujado en el
+      mismo lienzo. Es lo que necesitan el rack y los circuitos en 3D
 - [x] **El plano de fondo, calibrado** ([_plancal.html](../src/lib/web_admin/templates/partials/dcim/_plancal.html)).
       Se colocaba con un número, «Ancho del plano», el de la imagen ENTERA —márgenes y
       cajetín incluidos, un dato que nadie tiene— y con su esquina pegada al (0, 0), así que un

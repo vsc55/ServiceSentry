@@ -8,6 +8,74 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.137] - 2026-10-04
+
+### Changed
+
+- **The 3D viewer is a shared engine, one instance per viewer.** WebGL, the orbit camera
+  (wheel towards the cursor, keyboard walking), name tags, images on the ground, the compass
+  and full screen moved from the inventory's `dcim/_room3d.html` to
+  `infra/_viewer3d.html` (`ss3dMount(id, {scene, key, onPick, north})`, `ss3dStop`,
+  `ss3dRebuild`, `ss3dGet`, `ss3dSay`). The inventory now only builds scenes: the room, the
+  floor and the building.
+- It kept one global viewer, found its canvas by fixed ids and wired its events inline, so a
+  second viewer on the same page would have drawn into the first one's canvas. Each viewer now
+  lives under the id of its box and finds its parts inside it. This is what the rack and the
+  circuits in 3D need.
+- The camera of a room's viewer is kept per room, not shared by every room.
+- The name-tag preference is one for every viewer (`ss.3d.labels`; the old key is still read).
+  The texts are `view3d_*` instead of `dcim_3d_*`, and the area tag class is
+  `.ss-3d-label-area`.
+
+### Added
+
+- **Delete the whole history of one item of a module.** An SNMP host is twenty or thirty
+  series (`host.<uuid>/<row>`), and the history could only be forgotten one series at a time.
+  The «Borrar Una Serie» dialog (Configuración › Mantenimiento) now picks the module, then the
+  item (with its number of series), then one series or «Todas las series del elemento».
+  - New `DELETE /api/v1/history/item?module=&item=` (`history_delete`) removes `<item>` and
+    every `<item>/…` series with their samples in one transaction, and is audited as
+    `history_deleted`.
+  - The keys are matched exactly, not with `LIKE`, so an `_` in an item key is not a
+    wildcard and `host.h10` is not taken with `host.h1`.
+  - The history index now says which item each series belongs to (`item`, `item_label`).
+  - The dialog opens at once, saying it is loading, instead of waiting for the history index
+    first — on a large history a few seconds in which the button seemed to do nothing.
+  - After a delete it closes with the toast, instead of staying up while it re-read the whole
+    history index to refill itself.
+
+### Fixed
+
+- **The open 3D now follows what is changed on the plan.** Dragging, turning, the inspector
+  and undo repaint only the plan's drawing, and the 3D kept showing a moved piece in its old
+  place until the next full repaint. Both plans now rebuild the scene once the plan stops
+  changing (150 ms), not on every frame of a drag.
+- **Status cards no longer open onto nothing after a refresh.** The scheduler tick, the soft
+  refresh and the end of a run painted a bare grid of every module straight into the results,
+  dropping the chosen view, its header and its filters. "Only problems" still hid each card's
+  passing checks, so an all-OK card (Ping, 15/15) showed its chevron down and no rows. Every
+  refresh now draws through the chosen view (`_stShowData`), the unused bare renderer is gone,
+  and a card opened or closed by hand stays that way across refreshes. The search box keeps
+  its focus when a refresh lands while typing.
+- **A status card opened by hand lists every check.** Its body was drawn with "only problems"
+  already applied and the header click only showed it, so an all-OK card opened onto an empty
+  body. Opening a card now draws it again with all its checks; closing it goes back to the
+  filter, and a filtered card says how many passing checks it leaves out.
+- **A rebuilt scene reuses the images already on the card.** Every rebuild uploaded the
+  background plan again, leaving copies nothing freed.
+
+### Tests
+
+- `tests/meta/test_wa_viewer3d.py`: the engine finds nothing by a fixed id, names nothing of
+  the inventory, and is the only place that calls WebGL. Both plans rebuild the 3D when they
+  redraw.
+- `test_wa_dcim_site3d.py`: the rebuild is scheduled only with the 3D open, and once per burst
+  of changes.
+- `test_wa_status_views.py`: every refresh draws through the chosen view, nothing paints the
+  bare grid, and a card opened by hand stays open.
+- `tests/integration/test_wa_status_cards.py`: a card opened by hand lists every check, and a
+  filtered one says how many it hides.
+
 ## [0.0.1+build.136] - 2026-10-04
 
 ### Added

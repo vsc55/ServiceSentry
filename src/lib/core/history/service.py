@@ -186,6 +186,13 @@ def enrich_index(index: list, modules_dir: str | None, modules_cfg: dict, lang: 
             if isinstance(last_data, dict):
                 label = str(last_data.get('name') or '').strip()
         entry['label'] = label
+        # The item the series belongs to: an SNMP host is ``host.<uuid>/<row>``, twenty or
+        # thirty series under one item. What lets the screen forget a whole item at once.
+        key = str(entry.get('key') or '')
+        item = key.split('/', 1)[0] if '/' in key else key
+        entry['item'] = item
+        entry['item_label'] = (check_label(modules_cfg, mod, item, '') if item != key
+                               else label) or item
     return index
 
 

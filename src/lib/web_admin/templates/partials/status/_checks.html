@@ -45,12 +45,7 @@ async function _softRefreshStatus() {
     if (!area) return renderStatus();
     const data = await apiGet('/api/v1/modules/status');
     if (!data) return;                 // transient error → keep current view
-    area.innerHTML = Object.keys(data).length
-        ? _renderStatusCards(data)
-        : `<div class="text-center py-5 text-muted">
-            <i class="bi bi-inbox ss-empty-icon"></i>
-            <span>${t('status_empty')}</span>
-          </div>`;
+    _stShowData(data);
     _startStatusCountdown(_statusTimer?._interval || 0);
 }
 
@@ -168,7 +163,24 @@ function _stDrawResults() {
     if (!Object.keys(data).length) { area.innerHTML = _stEmptyState(); return; }
     const view = STATUS_VIEWS.find(v => v.id === _stViewId()) || STATUS_VIEWS[0];
     const draw = window[view.render];
+    // A refresh redraws the search box too: whoever was typing in it keeps typing.
+    const busca = document.activeElement && document.activeElement.id === 'stSearch'
+        ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     (typeof draw === 'function' ? draw : _stViewCards)(area, data);
+    const el = busca && document.getElementById('stSearch');
+    if (el) { el.focus(); el.setSelectionRange(busca[0], busca[1]); }
+}
+
+/** New status from a refresh — the timer, the scheduler, the end of a run — drawn the way the
+ *  page is being read.
+ *
+ *  They used to paint a bare grid of every card straight into the area:
+ *  the chosen view, its header and its filters were gone after the first refresh, every module
+ *  came back, and "only problems" still hid each card's passing checks — so an all-OK card
+ *  opened onto nothing. Reported from the screen: Ping, 15/15 OK, its chevron down and no rows. */
+function _stShowData(data) {
+    _stLastData = data || null;
+    _stDrawResults();
 }
 
 // ── View: cards ───────────────────────────────────────────────────────────────
@@ -260,7 +272,14 @@ function _renderOneStatusCard(mod, checks) {
         // (Re-applied on every render, incl. after a run.)  Only cards with rows
         // are collapsible.
         const hasRows   = total > 0;
-        const collapsed = allOk;
+        // What the reader opened or closed by hand wins: a refresh every few seconds must
+        // not fold back the card someone is reading.
+        const collapsed = _stCardOpen.has(mod) ? !_stCardOpen.get(mod) : allOk;
+        // And a card opened by hand lists EVERY check. "Only problems" decides what a card
+        // shows unasked; opening one is asking. Filtered, an all-OK card opened onto nothing:
+        // its chevron turned and there was not one row to show. Reported from the screen.
+        const lista  = _stCardOpen.get(mod) === true ? st.rows : _stShownRows(st);
+        const ocultas = total - lista.length;
 
         const _pal = ST_PAL[st.state];
         const accentGrad = _pal.grad;
@@ -311,7 +330,7 @@ function _renderOneStatusCard(mod, checks) {
         // decoration all come from the shared facts, so this card cannot describe a check
         // differently from the table or the heatmap showing the same one.
         h += `<div class="ss-card-checks"${collapsed ? ' style="display:none"' : ''}>`;
-        for (const f of _stShownRows(st)) {
+        for (const f of lista) {
             h += `<div class="d-flex align-items-start gap-2 px-3 py-2" style="border-top:1px solid var(--bs-border-color);font-size:.865rem">
                 <span class="mt-1">${_stStateIcon(f)}</span>
                 <div class="flex-grow-1" style="min-width:0">
@@ -322,11 +341,21 @@ function _renderOneStatusCard(mod, checks) {
                 <span class="mt-1">${_stStatePill(f)}</span>
             </div>`;
         }
+        // What the filter left out is said, not just left out: a card listing two checks
+        // under a header that counts fifteen owes the other thirteen a line.
+        if (ocultas > 0) {
+            h += `<div class="px-3 py-2 text-muted ss-fs-2" style="border-top:1px solid var(--bs-border-color)">
+                <i class="bi bi-eye-slash me-1"></i>${esc(tf('st_rows_hidden', ocultas))}</div>`;
+        }
         h += `</div>`; // .ss-card-checks (collapsible body)
 
         h += `</div>`; // card
         return h;
 }
+
+//: The cards opened or closed by hand, `{module: open}`. In memory only: what someone is
+//: reading now, not a setting.
+const _stCardOpen = new Map();
 
 // Collapse/expand a status card's check list (header click).
 function _toggleStatusCard(headerEl) {
@@ -334,18 +363,20 @@ function _toggleStatusCard(headerEl) {
     const body = card && card.querySelector('.ss-card-checks');
     if (!body) return;
     const isCollapsed = body.style.display === 'none';
+    const mod = card.getAttribute('data-status-card');
+    _stCardOpen.set(mod, isCollapsed);
+    // Drawn again rather than just shown: the body was drawn with the filter applied, and the
+    // checks it left out are not there to show. Without the data (a card painted mid-run),
+    // the body that is there is all there is.
+    const checks = (_stLastData || {})[mod];
+    if (checks && typeof checks === 'object') {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = _renderOneStatusCard(mod, checks);
+        if (tmp.firstElementChild) { card.replaceWith(tmp.firstElementChild); return; }
+    }
     body.style.display = isCollapsed ? '' : 'none';
     const chev = headerEl.querySelector('.ss-card-chevron');
     if (chev) chev.style.transform = isCollapsed ? '' : 'rotate(-90deg)';
-}
-
-function _renderStatusCards(data) {
-    const entries = Object.entries(data).filter(([, v]) => v && typeof v === 'object');
-    if (!entries.length) return `<div class="alert alert-info">${t('status_empty')}</div>`;
-    let h = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:.85rem">`;
-    for (const [mod, checks] of entries) h += _renderOneStatusCard(mod, checks);
-    h += `</div>`;
-    return h;
 }
 
 // Build the per-module checklist shown inside the Run-Selected split button's
@@ -558,7 +589,7 @@ async function _doRunChecks(modules) {
             for (const m of runMods) {
                 if (!(m in finalStatus)) finalStatus[m] = {};
             }
-            area.innerHTML = _renderStatusCards(finalStatus);
+            _stShowData(finalStatus);
         }
     } finally {
         // Safety net — ensure UI is unlocked even if an exception occurred above.
