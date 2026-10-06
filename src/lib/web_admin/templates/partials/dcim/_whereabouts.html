@@ -88,6 +88,10 @@ function _dcimRemember() {
         room = _dcimPlan.room.uid;
     } else if (_dcsPlan && _dcsPlan.site) {
         site = _dcsPlan.site.uid;
+        // Y la planta que se miraba, que en el inventario es una fila como una sala: su zona
+        // general si la tiene, `floor-<uid>` si no (`_dcimByFloor`).
+        const f = (_dcsPlan.floors || []).find(x => x.uid === _dcsPlan.floor);
+        if (f) room = f.area_uid || 'floor-' + f.uid;
     }
     if (room && !site) {
         const s = (_dcimData.sites || []).find(x => (x.rooms || []).some(r => r.uid === room));

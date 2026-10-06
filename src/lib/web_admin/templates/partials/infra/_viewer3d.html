@@ -27,7 +27,8 @@
       mira?, radio?, Rmax?}                            where the camera starts, and how far out
 
    A box with `lee.name` carries a name tag over its top; a box with `muro` is a wall that turns
-   to glass when the camera is outside it. What is NOT here is anything that knows what a box
+   to glass when the camera is outside it; a see-through box with `bajo` lies UNDER the images
+   on the ground (a floor slab) and is drawn before them. What is NOT here is anything that knows what a box
    MEANS — a rack, a room, a circuit — or what happens when one is clicked (`onPick`).
    ================================================================ #}
 
@@ -378,7 +379,12 @@ function ss3dPrepare(escena) {
     escena.cajas = cajas;
     escena.opacos = cajas.filter(k => !k.muro && k.color[3] >= 1);
     escena.muros = cajas.filter(k => k.muro);
-    escena.vidrios = cajas.filter(k => !k.muro && k.color[3] < 1);
+    // What is see-through and lies under the images on the ground — a floor slab made
+    // translucent to look at the floor below — goes BEFORE them. With the rest of the glass,
+    // after them, a slab under a plan was blended over it and the plan vanished as soon as the
+    // slab stopped being solid. Reported from the screen: at 99 % the plan was gone.
+    escena.bajos = cajas.filter(k => !k.muro && k.bajo && k.color[3] < 1);
+    escena.vidrios = cajas.filter(k => !k.muro && !k.bajo && k.color[3] < 1);
     escena.planos = escena.planos || [];
     escena.etiquetas = ss3dLabelsOf(escena);
     return escena;
@@ -695,6 +701,7 @@ function ss3dDraw(V) {
     // because the camera moves every frame.
     const muros = V.escena.muros.map(k => [k, ss3dWallAlphaOf(k, ojo, V.escena)]);
     for (const [k, a] of muros) if (a >= 1) caja(k.m, k.color[0], k.color[1], k.color[2], a);
+    for (const k of V.escena.bajos) caja(k.m, k.color[0], k.color[1], k.color[2], k.color[3]);
     // The images on the ground, over the opaque and under the glass.
     if (V.escena.planos.length && V.quad) {
         _ss3dDrawPlans(V, vp);

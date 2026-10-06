@@ -139,8 +139,12 @@ def register(app, wa, C):
                 room['roll'] = roll['room'].get(room['uid']) or {}
             # Las plantas, de abajo arriba: cuántas, y cuáles —con su plano, que es la miniatura
             # de la tarjeta de la sede y lo que abre cada botón de planta del panel del mapa—.
+            # Y su zona general (`area_uid`): la sala que ES la planta, donde va lo suelto. Las
+            # pantallas la enseñan como la planta, con las salas de esa planta dentro, y no como
+            # una sala más al lado de las suyas.
             plantas = [{'uid': f['uid'], 'name': f['name'], 'level': f['level'],
-                        'plan': f['plan']} for f in store.floors_of(site['uid'])]
+                        'plan': f['plan'], 'area_uid': f.get('area_uid') or ''}
+                       for f in store.floors_of(site['uid'])]
             out.append(dict(site, rooms=rooms, floors=len(plantas), floor_list=plantas,
                             roll=roll['site'].get(site['uid']) or {}))
         return jsonify({'sites': out})

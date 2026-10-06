@@ -119,7 +119,31 @@ __out.sotanoBajoCero = edificio.Y0 < -4;
 _ds3Explode = true;
 const separadas = _ds3Scene();
 __out.separadas = separadas.cajas.some(k => k.muro && k.frame && cerca(k.frame.y, 10));
+_ds3Apart = 20;
+const a20 = _ds3Scene();
+__out.separacion = a20.cajas.some(k => k.muro && k.frame && cerca(k.frame.y, 20))
+    && a20.cajas.some(k => k.muro && k.frame && cerca(k.frame.y, -20));
 _ds3Explode = false;
+__out.juntasNoCambian = _ds3Scene().cajas.some(k => k.muro && k.frame && cerca(k.frame.y, 4));
+_ds3Apart = 10;
+_ds3Explode = false;
+// Ver la planta de abajo desde arriba: las losas y los planos, tan opacos como diga el
+// deslizador; las salas y lo que tienen, no.
+const losas = (e) => e.cajas.filter(k => k.color[0] === _DC3_COLOR.ground[0] && k.color[1] === _DC3_COLOR.ground[1]);
+_ds3Veil = 0.3;
+const velado = _ds3Scene();
+__out.veloLosas = losas(velado).length > 0 && losas(velado).every(k => k.color[3] <= 0.3 + 1e-9);
+__out.veloPlanos = velado.planos.length > 0 && velado.planos.every(p => p.alpha <= 0.3);
+__out.veloSalasMacizas = velado.cajas.filter(k => k.muro && k.frame && cerca(k.frame.y, -4)).every(k => k.color[3] === 1);
+const prep = ss3dPrepare(velado);
+__out.losasAntesDelPlano = prep.bajos.length === losas(velado).length && !prep.vidrios.some(k => k.bajo);
+_ds3Veil = 1;
+__out.sinVeloLosas = losas(_ds3Scene()).filter(k => k.color[3] === 1).length > 0;
+_ds3Mode = 'floor';
+_ds3Veil = 0.3;
+__out.plantaSolaSinVelo = losas(_ds3Scene()).every(k => k.color[3] === 1);
+_ds3Veil = 1;
+_ds3Mode = 'building';
 
 // ── Señalar y abrir ─────────────────────────────────────────────────────────────
 _ds3Mode = 'floor';
@@ -356,3 +380,32 @@ class TestElTresDSigueAlPlano:
         s = out['soon']
         assert s['rehace'] and s['espera'] > 0
         assert s['quitados'] >= 19, 'cada cambio aplaza el anterior: un arrastre rehace una vez'
+
+
+class TestVerLaPlantaDeAbajo:
+    """Se pidió poder ver desde arriba la planta de abajo en el edificio: la losa y el plano de
+    cada planta la tapaban entera."""
+
+    def test_las_losas_y_los_planos_tan_opacos_como_el_deslizador(self, out):
+        assert out['veloLosas'] and out['veloPlanos']
+
+    def test_las_salas_siguen_macizas(self, out):
+        assert out['veloSalasMacizas']
+
+    def test_sin_velo_como_estaba_y_la_planta_sola_no_cambia(self, out):
+        assert out['sinVeloLosas']
+        assert out['plantaSolaSinVelo']
+
+    def test_la_losa_translucida_se_dibuja_antes_que_el_plano(self, out):
+        """Reportado: al 99 % el plano desaparecía — la losa, debajo de él, se dibujaba encima."""
+        assert out['losasAntesDelPlano']
+
+
+class TestLaSeparacionSeAjusta:
+    """Se pidió ajustar la separación entre plantas como la opacidad."""
+
+    def test_separadas_cada_planta_a_la_distancia_del_deslizador(self, out):
+        assert out['separacion']
+
+    def test_juntas_siguen_a_la_altura_de_una_planta(self, out):
+        assert out['juntasNoCambian']

@@ -1592,6 +1592,8 @@ html.ss-nocss body { visibility: visible; }
                background: var(--bs-body-bg); border-radius: var(--bs-border-radius); }
 .ss-tree-row:hover, .ss-tree-row:focus-visible { background: var(--bs-tertiary-bg); }
 .ss-tree-row.ss-tree-sub { padding: .25rem .75rem .25rem 2.6rem; font-size: .85rem; }
+/* …and one level further in: a room inside a floor. */
+.ss-tree-row.ss-tree-sub.ss-tree-sub2 { padding-left: 4.2rem; }
 .ss-tree-row.is-picked { background: var(--bs-primary); color: #fff; }
 /* What the inventory was left from — a rack, a room or a site — marked on coming back. */
 /* The names over the 3D viewer: a layer the pointer goes through, one tag per labelled thing,

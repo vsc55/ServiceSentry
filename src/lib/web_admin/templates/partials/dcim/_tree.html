@@ -173,10 +173,37 @@ function _dcimSiteCard(site) {
             </span>
         </div>
         ${plegada ? '' : `<div class="px-3 pb-3 ps-5 ss-fold-body border-top">
-            ${rooms.length ? rooms.map(_dcimRoomRow).join('')
+            ${rooms.length || (site.floor_list || []).length ? _dcimListRooms(site)
                            : `<div class="text-muted ss-fs-2 py-2">${esc(t('dcim_no_rooms'))}</div>`}
         </div>`}
     </div>`;
+}
+
+/** The rooms of a site in the list: the ones on no floor, then each floor — its loose racks
+ *  on its own line — with its rooms indented under it. */
+function _dcimListRooms(site) {
+    const g = _dcimByFloor(site);
+    return g.loose.map(_dcimRoomRow).join('') + g.floors.map(p => {
+        const racks = p.area ? p.area.rackList || [] : [];
+        return `<div class="d-flex flex-wrap align-items-center gap-3 pt-2 ss-hover-host"
+                     id="dcim-room-${escAttr(p.key)}">
+            <div class="d-flex align-items-center gap-2 ss-col-label">
+                ${_dcimLed(_dcimFloorState(p))}
+                <i class="bi bi-layers text-muted"></i>
+                <a href="#" class="fw-semibold link-body-emphasis text-decoration-none"
+                   onclick="_dcsOpen(${jsStr(site.uid)},${jsStr(p.floor.uid)});return false"
+                   title="${escAttr(t('dcim_plan'))}">${esc(_dcimFloorName(p))}</a>
+            </div>
+            <div class="d-flex flex-wrap gap-2 flex-grow-1 align-items-stretch">
+                ${racks.map(_dcimRackChip).join('')}
+                ${p.area && _dcimMay('dcim_edit') ? `<button type="button" class="ss-add-tile"
+                        onclick="_dcimOpen('new','rack',${jsStr(p.area.uid)},'')"
+                        title="${escAttr(t('dcim_new_rack'))}" aria-label="${escAttr(t('dcim_new_rack'))}">
+                    <i class="bi bi-plus-lg"></i></button>` : ''}
+            </div>
+        </div>
+        ${p.rooms.length ? `<div class="ps-4">${p.rooms.map(_dcimRoomRow).join('')}</div>` : ''}`;
+    }).join('');
 }
 
 /** Where a site is, when somebody has said. Shown because it is the one field of a site nobody

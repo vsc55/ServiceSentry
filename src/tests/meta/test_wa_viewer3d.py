@@ -87,3 +87,12 @@ class TestThePlansKeepTheViewerCurrent:
         """A rebuild follows every edit of a plan; uploading the same plan again each time
         filled the card with copies nothing freed."""
         assert 'V.texs.has(p.data)' in _engine()
+
+
+class TestWhatLiesUnderThePlansIsDrawnFirst:
+
+    def test_translucent_slabs_before_the_images(self):
+        """Reported: a floor slab made see-through was blended over the plan on it, and the plan
+        vanished at 99 %. Translucent `bajo` boxes go before the images, the rest after."""
+        body = _fn(_engine(), 'ss3dDraw')
+        assert body.index('V.escena.bajos') < body.index('_ss3dDrawPlans(') < body.index('V.escena.vidrios')

@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~10.790 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~10.810 tests** (10.986 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -10851,7 +10851,7 @@ a su vez tapa un rack, y un navegador de mentira que devuelve los tres bajo el p
 
 ## 182. Integración — Una planta, o el edificio entero, en 3D
 
-**Archivo:** `tests/integration/test_wa_dcim_site3d.py` — 27 tests
+**Archivo:** `tests/integration/test_wa_dcim_site3d.py` — 33 tests
 
 Ejecuta en `node` el guion de verdad del panel sobre una sede de tres plantas (sótano, baja y
 primera). La baja tiene un plano de 30 m, una sala girada 90° con un rack, una sala sin medidas
@@ -10886,6 +10886,12 @@ y su zona general con un rack de pasillo y una columna.
 | `TestLoDeLaSedeDeUnaVez::test_una_peticion_por_sede` | El contenido de la sede se pide en una sola petición |
 | `TestElTresDSigueAlPlano::test_sin_3d_no_se_programa_nada` | Con el 3D cerrado, repintar el plano no programa nada |
 | `TestElTresDSigueAlPlano::test_se_rehace_una_vez_cuando_el_plano_para` | Con el 3D abierto, una ráfaga de cambios rehace la escena una sola vez, cuando el plano para |
+| `TestVerLaPlantaDeAbajo::test_las_losas_y_los_planos_tan_opacos_como_el_deslizador` | En el edificio, la losa y el plano de cada planta toman la opacidad del deslizador |
+| `TestVerLaPlantaDeAbajo::test_las_salas_siguen_macizas` | Las salas y lo que tienen no se vuelven transparentes |
+| `TestVerLaPlantaDeAbajo::test_sin_velo_como_estaba_y_la_planta_sola_no_cambia` | Al 100 % queda como estaba, y la vista de una planta sola no cambia |
+| `TestVerLaPlantaDeAbajo::test_la_losa_translucida_se_dibuja_antes_que_el_plano` | La losa translúcida va con lo que se dibuja antes que el plano (al 99 % el plano desaparecía) |
+| `TestLaSeparacionSeAjusta::test_separadas_cada_planta_a_la_distancia_del_deslizador` | Con las plantas separadas, cada una queda a la distancia del deslizador |
+| `TestLaSeparacionSeAjusta::test_juntas_siguen_a_la_altura_de_una_planta` | Sin separar, siguen a la altura de una planta |
 
 ## 183. Integración — El plano de fondo: dónde cae, a qué escala y ocultarlo
 
@@ -11028,7 +11034,7 @@ estanterías y el material de cada una; la API la fija `TestLasEstanteriasDeUnAr
 
 ## 188. Meta — El motor del visor 3D, compartido
 
-**Archivo:** `tests/meta/test_wa_viewer3d.py` — 7 tests
+**Archivo:** `tests/meta/test_wa_viewer3d.py` — 8 tests
 
 El visor 3D se escribió dentro del inventario para una sala, con un único visor global y ids
 fijos; al pedirse también el rack y los circuitos en 3D pasó a `infra/_viewer3d.html`, con una
@@ -11043,6 +11049,7 @@ instancia por caja. Estas guardas impiden que el reparto se deshaga.
 | `TestWebGlLivesInTheEngineOnly::test_the_engine_is_loaded_before_what_draws_on_it` | El motor se incluye antes que la sala y la sede |
 | `TestThePlansKeepTheViewerCurrent::test_both_plans_rebuild_the_3d_when_they_redraw` | El plano de la sala y el de la sede rehacen el 3D al repintar su dibujo |
 | `TestThePlansKeepTheViewerCurrent::test_a_rebuilt_scene_reuses_its_images` | Rehacer la escena reutiliza las imágenes ya subidas a la tarjeta |
+| `TestWhatLiesUnderThePlansIsDrawnFirst::test_translucent_slabs_before_the_images` | Lo translúcido que va bajo los planos (`bajo`) se dibuja antes que ellos, el resto del vidrio después |
 
 ---
 
@@ -11084,3 +11091,28 @@ series vacías.
 | `TestEverySeriesOfTheItem::test_deletes_the_item` | Elegida, llama a `DELETE /api/v1/history/item` con el módulo y el elemento |
 | `TestTheServedDialog::test_the_module_picker_refreshes_the_items` | En el HTML servido, el selector de módulo refresca los elementos |
 | `TestTheServedDialog::test_and_closes_at_once_without_re_reading_the_index` | Tras borrar, el diálogo se cierra con el aviso sin volver a leer el índice entero |
+
+---
+
+## 191. Integración — Las salas de una sede, por planta
+
+**Archivo:** `tests/integration/test_wa_dcim_byfloor.py` — 12 tests
+
+Ejecuta en `node` el guion de verdad del panel y pregunta a la API. Reportado: «Planta 0 · zona
+general» —la sala que ES la planta 0— salía como una sala más al lado de «Expediciones», que está
+en esa planta.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestTheSplit::test_rooms_on_no_floor_stay_first` | Las salas sin planta van primero, como estaban |
+| `TestTheSplit::test_each_floor_lowest_first_with_its_area_and_rooms` | Cada planta, de abajo arriba, con su zona general y sus salas dentro |
+| `TestTheSplit::test_a_floor_adds_up_its_area_and_its_rooms` | Una planta suma sus racks sueltos y los de sus salas, y lleva el peor estado |
+| `TestTheSplit::test_the_general_area_is_not_a_room` | La zona general no cuenta como sala |
+| `TestEveryLayoutSaysTheSame::test_the_tree` | El árbol: sin «zona general», la planta y sus salas un nivel más dentro |
+| `TestEveryLayoutSaysTheSame::test_the_detail` | La ficha: la planta como tarjeta con sus racks sueltos, su plano y sus salas dentro |
+| `TestEveryLayoutSaysTheSame::test_the_list` | La lista, igual |
+| `TestEveryLayoutSaysTheSame::test_the_cards` | Las tarjetas, igual |
+| `TestEveryLayoutSaysTheSame::test_the_table_by_tree` | La tabla en árbol: sede › planta › sala › rack, con los racks sueltos bajo la planta |
+| `TestEveryLayoutSaysTheSame::test_the_table_flat_says_the_floor_in_where` | La tabla plana no tiene filas de planta: cada sala dice su planta en «Dónde» |
+| `TestSearching::test_a_floor_with_nothing_found_is_hidden` | Buscando, una planta sin nada encontrado no sale |
+| `TestTheListingSaysTheArea::test_each_floor_carries_its_general_area` | `/api/v1/dcim/sites` dice la zona general de cada planta (`area_uid`) |

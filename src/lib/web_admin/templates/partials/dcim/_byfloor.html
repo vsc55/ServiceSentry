@@ -1,0 +1,69 @@
+{# ================================================================
+   DCIM — las salas de una sede, por planta.
+
+   El inventario listaba todas las salas de una sede al mismo nivel, y la «zona general» de una
+   planta —la sala que ES la planta, donde va lo que no está en ninguna sala— salía como una
+   sala más, al lado de las que tiene dentro: «Planta 0 · zona general» y «Expediciones» como
+   hermanas, cuando Expediciones está EN la planta 0. Reportado desde la pantalla.
+
+   Ahora las cinco vistas (el árbol, la lista, la ficha, las tarjetas y la tabla) preguntan aquí
+   cómo se reparte una sede: primero las salas que no dicen planta, como estaban; después cada
+   planta de abajo arriba, con su zona general convertida en la planta misma —sus racks sueltos
+   y su plano— y sus salas dentro. Una sola cuenta para las cinco: dos repartos distintos serían
+   una sala que está en una planta según desde dónde se mire.
+   ================================================================ #}
+
+/** El reparto de una sede: `{loose: [sala], floors: [{floor, area, rooms, key}]}`.
+ *
+ *  `area` es la zona general de la planta (`null` si nada suelto la ha creado aún) y `key` lo
+ *  que identifica la planta en la selección y en el documento: la zona general si la hay —es
+ *  la sala que se elige—, `floor-<uid>` si no. Buscando, una planta sin nada que enseñar no
+ *  sale: la búsqueda contesta con lo que encontró. */
+function _dcimByFloor(site) {
+    const rooms = site.rooms || [];
+    const floors = (site.floor_list || []).slice()
+        .sort((a, b) => (Number(a.level) || 0) - (Number(b.level) || 0));
+    const known = new Set(floors.map(f => f.uid));
+    const areas = new Set(floors.map(f => f.area_uid).filter(Boolean));
+    const loose = rooms.filter(r => !areas.has(r.uid) && !(r.floor_uid && known.has(r.floor_uid)));
+    const buscando = !!(typeof _dcimQuery === 'string' && _dcimQuery.trim());
+    const out = [];
+    for (const f of floors) {
+        const area = (f.area_uid && rooms.find(r => r.uid === f.area_uid)) || null;
+        const dentro = rooms.filter(r => r.floor_uid === f.uid && r.uid !== f.area_uid);
+        if (buscando && !area && !dentro.length) continue;
+        out.push({floor: f, area, rooms: dentro, key: area ? area.uid : 'floor-' + f.uid});
+    }
+    return {loose, floors: out};
+}
+
+/** Si una sala es la zona general de alguna planta de su sede: no es una sala que contar. */
+function _dcimIsArea(site, room) {
+    return (site.floor_list || []).some(f => f.area_uid && f.area_uid === room.uid);
+}
+
+/** Lo que suma una planta: sus racks sueltos y los de sus salas. */
+function _dcimFloorTotals(g) {
+    const out = {rooms: g.rooms.length, racks: 0, u: 0, used: 0, things: 0, quiet: 0};
+    for (const r of (g.area ? [g.area] : []).concat(g.rooms)) {
+        const t = _dcimRoomTotals(r);
+        for (const k of ['racks', 'u', 'used', 'things', 'quiet']) out[k] += t[k];
+    }
+    return out;
+}
+
+/** El peor estado de una planta: el de su zona general o el de cualquiera de sus salas. */
+function _dcimFloorState(g) {
+    const rango = {error: 4, warning: 3, maintenance: 2, ok: 1};
+    let peor = '';
+    for (const r of (g.area ? [g.area] : []).concat(g.rooms)) {
+        const s = (r.roll || {}).state || '';
+        if ((rango[s] || 0) > (rango[peor] || 0)) peor = s;
+    }
+    return peor;
+}
+
+/** El nombre de una planta como se lee. */
+function _dcimFloorName(g) {
+    return g.floor.name || tf('dcim_floor_new_name', g.floor.level || 0);
+}

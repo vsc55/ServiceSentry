@@ -59,7 +59,9 @@ let _dcimTableCols = (() => {
  *  The equipment is what each rack's roll counts — already narrowed to what this reader may see,
  *  so a shared rack never adds somebody else's machines to the number. */
 function _dcimSiteTotals(site) {
-    const out = {rooms: (site.rooms || []).length, racks: 0, u: 0, used: 0, things: 0, quiet: 0};
+    // La zona general de una planta no es una sala: es la planta (`_byfloor.html`).
+    const out = {rooms: (site.rooms || []).filter(r => !_dcimIsArea(site, r)).length,
+                 racks: 0, u: 0, used: 0, things: 0, quiet: 0};
     for (const r of site.rooms || []) {
         const t = _dcimRoomTotals(r);
         out.racks += t.racks;
@@ -398,14 +400,27 @@ function _dcimDetailNav(s, site) {
         <span class="flex-grow-1 text-truncate">${esc(s.name || s.uid)}</span>
         ${_dcimOrgBadge(s.org_uid)}
     </button>
-    ${abierta ? (s.rooms || []).map(r => `<button type="button"
-            class="ss-tree-row ss-tree-sub ${_dcimSel.room === r.uid ? 'is-picked' : ''}"
-            onclick="_dcimPickSite(${jsStr(s.uid)},${jsStr(r.uid)})">
-        ${_dcimLed((r.roll || {}).state)}
-        <i class="bi bi-door-open"></i>
-        <span class="flex-grow-1 text-truncate">${esc(r.name || r.uid)}</span>
-        <span class="text-muted text-nowrap ss-fs-2">${esc(tf('dcim_racks', (r.rackList || []).length))}</span>
-    </button>`).join('') : ''}`;
+    ${abierta ? _dcimNavRooms(s) : ''}`;
+}
+
+/** The rooms of a site in the tree: the ones on no floor, then each floor with its rooms
+ *  one step further in. */
+function _dcimNavRooms(s) {
+    const linea = (key, led, icono, nombre, racks, dentro) => `<button type="button"
+            class="ss-tree-row ss-tree-sub${dentro ? ' ss-tree-sub2' : ''} ${_dcimSel.room === key ? 'is-picked' : ''}"
+            onclick="_dcimPickSite(${jsStr(s.uid)},${jsStr(key)})">
+        ${_dcimLed(led)}
+        <i class="bi ${icono}"></i>
+        <span class="flex-grow-1 text-truncate">${esc(nombre)}</span>
+        <span class="text-muted text-nowrap ss-fs-2">${esc(tf('dcim_racks', racks))}</span>
+    </button>`;
+    const sala = (r, dentro) => linea(r.uid, (r.roll || {}).state, 'bi-door-open', r.name || r.uid,
+                                      (r.rackList || []).length, dentro);
+    const g = _dcimByFloor(s);
+    return g.loose.map(r => sala(r, false)).join('')
+        + g.floors.map(p => linea(p.key, _dcimFloorState(p), 'bi-layers', _dcimFloorName(p),
+                                  _dcimFloorTotals(p).racks, false)
+                            + p.rooms.map(r => sala(r, true)).join('')).join('');
 }
 
 function _dcimDetailSite(site) {
@@ -447,8 +462,48 @@ function _dcimDetailSite(site) {
             ${kpi(t('dcim_kpi_u'), tf('dcim_u_used', tot.used, tot.u))}
             ${kpi(t('dcim_kpi_devices'), tot.things)}
         </div>
-        ${(site.rooms || []).length ? (site.rooms || []).map(r => _dcimDetailRoom(r, site)).join('')
+        ${(site.rooms || []).length || (site.floor_list || []).length ? _dcimDetailRooms(site)
             : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_rooms'))}</div>`}
+    </div>`;
+}
+
+/** The rooms of a site in the detail: the ones on no floor, then each floor as a card of its
+ *  own — its loose racks, its plan — with its rooms inside it. */
+function _dcimDetailRooms(site) {
+    const g = _dcimByFloor(site);
+    return g.loose.map(r => _dcimDetailRoom(r, site)).join('')
+        + g.floors.map(p => _dcimDetailFloor(p, site)).join('');
+}
+
+/** A floor: what was «Planta 0 · zona general», a room beside its own rooms, is the floor —
+ *  its loose racks and the floor's plan — and its rooms are inside it. */
+function _dcimDetailFloor(p, site) {
+    const tot = _dcimFloorTotals(p);
+    const racks = p.area ? p.area.rackList || [] : [];
+    const elegida = _dcimSel.room === p.key;
+    const edita = _dcimMay('dcim_edit');
+    return `<div class="card ${elegida ? 'border-primary' : ''}" id="dcim-room-${escAttr(p.key)}">
+        <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+            ${_dcimLed(_dcimFloorState(p))}
+            <i class="bi bi-layers"></i>
+            <span class="fw-semibold">${esc(_dcimFloorName(p))}</span>
+            <span class="text-muted ss-fs-2 flex-grow-1">${esc(tf('dcim_rooms', tot.rooms))} · ${
+                esc(tf('dcim_racks', tot.racks))}</span>
+            <button class="btn btn-sm btn-secondary"
+                    onclick="_dcsOpen(${jsStr(site.uid)},${jsStr(p.floor.uid)})">
+                <i class="bi bi-map me-1"></i>${esc(t('dcim_open_plan'))}</button>
+            ${edita && p.area ? `<button class="btn btn-sm btn-secondary"
+                    onclick="_dcimOpen('new','rack',${jsStr(p.area.uid)},'')"
+                    title="${escAttr(t('dcim_new_rack'))}" aria-label="${escAttr(t('dcim_new_rack'))}">
+                <i class="bi bi-plus-lg"></i></button>` : ''}
+        </div>
+        <div class="card-body d-flex flex-column gap-3">
+            ${racks.length ? `<div class="d-flex flex-wrap gap-3">
+                ${racks.map(k => _dcimDetailRack(k, p.area, site)).join('')}</div>` : ''}
+            ${p.rooms.map(r => _dcimDetailRoom(r, site)).join('')}
+            ${!racks.length && !p.rooms.length
+                ? `<span class="text-muted ss-fs-2">${esc(t('dcim_floor_empty'))}</span>` : ''}
+        </div>
     </div>`;
 }
 
@@ -560,17 +615,7 @@ function _dcimCard(site) {
                 <span class="text-muted ss-fs-1">${esc(tf('dcim_pct_used', pct))}${
                     tot.quiet ? ' · ' + esc(tf('dcim_unwatched_n', tot.quiet)) : ''}</span>
             </div>` : ''}
-            <div class="border-top pt-1">
-                ${(site.rooms || []).map(r => `<a href="#"
-                        class="d-flex align-items-center gap-2 py-1 ss-fs-3 link-body-emphasis text-decoration-none"
-                        onclick="_dcimOpenPlan(${jsStr(r.uid)});return false" title="${escAttr(t('dcim_plan'))}">
-                    ${_dcimLed((r.roll || {}).state)}
-                    <i class="bi bi-door-open text-muted"></i>
-                    <span class="flex-grow-1 text-truncate">${esc(r.name || r.uid)}</span>
-                    <span class="text-muted ss-fs-2">${esc(tf('dcim_racks', (r.rackList || []).length))}${
-                        r.cooling ? ' · ' + esc(t('dcim_cooling_' + r.cooling)) : ''}</span>
-                </a>`).join('')}
-            </div>
+            <div class="border-top pt-1">${_dcimCardRooms(site)}</div>
         </div>
         <div class="card-footer d-flex gap-2">
             <button class="btn btn-sm btn-primary flex-grow-1"
@@ -580,6 +625,28 @@ function _dcimCard(site) {
             ${_dcimMenu('site', site.uid, site.name, 'room')}
         </div>
     </div>`;
+}
+
+/** The rooms on a site's card: the ones on no floor, then each floor with its rooms indented. */
+function _dcimCardRooms(site) {
+    const enlace = (abrir, led, icono, nombre, detalle, dentro) => `<a href="#"
+            class="d-flex align-items-center gap-2 py-1 ss-fs-3 link-body-emphasis text-decoration-none${dentro ? ' ps-4' : ''}"
+            onclick="${abrir};return false" title="${escAttr(t('dcim_plan'))}">
+        ${_dcimLed(led)}
+        <i class="bi ${icono} text-muted"></i>
+        <span class="flex-grow-1 text-truncate">${esc(nombre)}</span>
+        <span class="text-muted ss-fs-2">${esc(detalle)}</span>
+    </a>`;
+    const sala = (r, dentro) => enlace(`_dcimOpenPlan(${jsStr(r.uid)})`, (r.roll || {}).state,
+        'bi-door-open', r.name || r.uid,
+        tf('dcim_racks', (r.rackList || []).length) + (r.cooling ? ' · ' + t('dcim_cooling_' + r.cooling) : ''),
+        dentro);
+    const g = _dcimByFloor(site);
+    return g.loose.map(r => sala(r, false)).join('')
+        + g.floors.map(p => enlace(`_dcsOpen(${jsStr(site.uid)},${jsStr(p.floor.uid)})`,
+                                   _dcimFloorState(p), 'bi-layers', _dcimFloorName(p),
+                                   tf('dcim_racks', _dcimFloorTotals(p).racks), false)
+                            + p.rooms.map(r => sala(r, true)).join('')).join('');
 }
 
 // ── Tabla ──────────────────────────────────────────────────────────────────────────────────
@@ -632,26 +699,43 @@ function _dcimTableRows(sites) {
             used: tot.used, u: tot.u, cool: '', org: s.org_uid, roll: s.roll,
             open: `_dcimShowSite(${jsStr(s.uid)})`, menu: _dcimMenu('site', s.uid, s.name, 'room')});
         if (plegada) continue;
-        const plantas = Object.fromEntries((s.floor_list || []).map(f => [f.uid, f.name]));
-        for (const r of s.rooms || []) {
-            const rt = _dcimRoomTotals(r);
-            if (quiere('room')) filas.push({
-                id: 'dcim-room-' + r.uid, kind: 'room', depth: plano ? 0 : 1, icon: 'bi-door-open',
-                name: r.name || r.uid,
-                where: (s.name || '') + (plantas[r.floor_uid] ? ' › ' + plantas[r.floor_uid] : ''),
-                cap: tf('dcim_racks', rt.racks), used: rt.used, u: rt.u,
-                cool: r.cooling ? t('dcim_cooling_' + r.cooling) : '', org: r.org_uid || s.org_uid,
-                roll: r.roll, open: `_dcimOpenPlan(${jsStr(r.uid)})`,
-                menu: _dcimMenu('room', r.uid, r.name, 'rack')});
+        // By floor, like the other layouts: the rooms on no floor, then each floor — its general
+        // area drawn as the floor itself — with its rooms one step in. Flat, there are no floor
+        // rows: each room and rack says its floor in «where».
+        const racks = (r, donde, depth) => {
             for (const k of r.rackList || []) {
                 if (quiere('rack')) filas.push({
-                    kind: 'rack', depth: plano ? 0 : 2, icon: 'bi-hdd-rack', name: k.name || k.uid,
-                    where: (s.name || '') + ' › ' + (r.name || ''),
-                    cap: (k.u_height || 0) + 'U', used: k.used_u || 0, u: k.u_height || 0,
+                    kind: 'rack', depth: plano ? 0 : depth, icon: 'bi-hdd-rack', name: k.name || k.uid,
+                    where: donde, cap: (k.u_height || 0) + 'U', used: k.used_u || 0, u: k.u_height || 0,
                     cool: '', org: k.org_uid || r.org_uid || s.org_uid, roll: k.roll,
                     open: `_dcimLoadRack(${jsStr(k.uid)})`, menu: _dcimMenu('rack', k.uid, k.name, ''),
                     rack: k.uid});
             }
+        };
+        const sala = (r, planta, depth) => {
+            const rt = _dcimRoomTotals(r);
+            const donde = (s.name || '') + (planta ? ' › ' + planta : '');
+            if (quiere('room')) filas.push({
+                id: 'dcim-room-' + r.uid, kind: 'room', depth: plano ? 0 : depth, icon: 'bi-door-open',
+                name: r.name || r.uid, where: donde,
+                cap: tf('dcim_racks', rt.racks), used: rt.used, u: rt.u,
+                cool: r.cooling ? t('dcim_cooling_' + r.cooling) : '', org: r.org_uid || s.org_uid,
+                roll: r.roll, open: `_dcimOpenPlan(${jsStr(r.uid)})`,
+                menu: _dcimMenu('room', r.uid, r.name, 'rack')});
+            racks(r, donde + ' › ' + (r.name || ''), depth + 1);
+        };
+        const g = _dcimByFloor(s);
+        for (const r of g.loose) sala(r, '', 1);
+        for (const p of g.floors) {
+            const nombre = _dcimFloorName(p);
+            const pt = _dcimFloorTotals(p);
+            if (!plano && !_dcimTableKind) filas.push({
+                id: 'dcim-room-' + p.key, kind: 'floor', depth: 1, icon: 'bi-layers', name: nombre,
+                where: s.name || '', cap: tf('dcim_rooms', pt.rooms) + ' · ' + tf('dcim_racks', pt.racks),
+                used: pt.used, u: pt.u, cool: '', org: s.org_uid, roll: {state: _dcimFloorState(p)},
+                open: `_dcsOpen(${jsStr(s.uid)},${jsStr(p.floor.uid)})`, menu: ''});
+            if (p.area) racks(p.area, (s.name || '') + ' › ' + nombre, 2);
+            for (const r of p.rooms) sala(r, nombre, 2);
         }
     }
     return filas;
@@ -659,6 +743,7 @@ function _dcimTableRows(sites) {
 
 function _dcimKindWord(kind) {
     if (kind === 'site') return t('dcim_kind_site');
+    if (kind === 'floor') return t('dcim_floor');
     if (kind === 'room') return t('dcim_kind_room');
     return t('dcim_kind_rack');
 }
@@ -706,7 +791,7 @@ function _dcimTableHtml(sites) {
 
 function _dcimTableRow(f) {
     const ver = (id) => _dcimTableCols.has(id);
-    const sangria = ['', 'ps-4', 'ps-5'][f.depth] || '';
+    const sangria = ['', 'ps-4', 'ps-5', 'ps-5 ms-4'][f.depth] || '';
     const pliegue = f.fold ? `<button class="btn btn-sm btn-secondary py-0 px-1 me-1"
             onclick="_dcimFoldToggle(${jsStr(f.fold)})" aria-expanded="${!f.folded}"
             aria-label="${escAttr(f.folded ? t('dcim_unfold') : t('dcim_fold'))}">

@@ -22,14 +22,41 @@ let _ds3Explode = false;
 //: Los planos de fondo de las OTRAS plantas, para el edificio: `{uid de planta: {data, ratio}}`,
 //: o `null` la que no tiene. El de la planta abierta ya lo tiene `_dcsPlan.image`.
 let _ds3Images = {};
+//: Lo opaco que es cada planta en el edificio —su losa y su plano—, de 0,1 a 1. Se pidió poder
+//: ver la planta de abajo desde arriba: una losa maciza y un plano opaco encima la tapaban
+//: entera. Se recuerda en el navegador: es cómo le gusta mirar a cada uno.
+let _ds3Veil = (() => {
+    try {
+        const v = Number(localStorage.getItem('ss.ds3.veil'));
+        return v >= 0.1 && v <= 1 ? v : 1;
+    } catch (_) { return 1; }
+})();
 //: La última sala señalada, `{uid, t}`: el doble clic se reconoce aquí, como en el plano.
 let _ds3LastPick = null;
 
 //: De suelo a suelo, en metros: los tres de una sala más el forjado y el falso techo. Una
 //: planta no dice cuánto mide de alto, y para apilarlas basta con que no se pisen.
 const _DS3_STOREY = 4.0;
-//: Lo mismo con las plantas separadas: lo bastante para mirar entre dos.
+//: Lo mismo con las plantas separadas: lo bastante para mirar entre dos. Lo que sale la primera
+//: vez; después, lo que diga su deslizador, entre 5 y 40 m. Se pidió poder ajustarla como la
+//: opacidad: diez metros son mucho para un edificio de dos plantas y poco para uno de doce.
 const _DS3_APART = 10.0;
+let _ds3Apart = (() => {
+    try {
+        const v = Number(localStorage.getItem('ss.ds3.apart'));
+        return v >= 5 && v <= 40 ? v : _DS3_APART;
+    } catch (_) { return _DS3_APART; }
+})();
+
+/** Cambiar la separación: como la opacidad, la escena se rehace una vez cuando el deslizador
+ *  para (`_dc3dSoon`), sin repintar la barra que se está arrastrando. */
+function _ds3SetApart(m) {
+    _ds3Apart = Math.max(5, Math.min(40, Number(m) || _DS3_APART));
+    try { localStorage.setItem('ss.ds3.apart', String(_ds3Apart)); } catch (_) { /* sin almacén */ }
+    const el = document.getElementById('ds3-apart-n');
+    if (el) el.textContent = _ds3Apart + ' m';
+    _dc3dSoon();
+}
 
 /** Abrir o cerrar el visor en el plano de la sede. */
 function _dcsToggle3d() {
@@ -50,6 +77,16 @@ function _ds3SetMode(m) {
     try { localStorage.setItem('ss.ds3.mode', _ds3Mode); } catch (_) { /* sin almacén */ }
     renderDcim();
     if (_ds3Mode === 'building') _ds3LoadImages();
+}
+
+/** Cambiar lo opaco de las plantas: el deslizador lo manda en cada paso, y la escena se
+ *  rehace una vez cuando para (`_dc3dSoon`), sin repintar la barra que se está arrastrando. */
+function _ds3SetVeil(pct) {
+    _ds3Veil = Math.max(0.1, Math.min(1, (Number(pct) || 100) / 100));
+    try { localStorage.setItem('ss.ds3.veil', String(_ds3Veil)); } catch (_) { /* sin almacén */ }
+    const el = document.getElementById('ds3-veil-n');
+    if (el) el.textContent = Math.round(_ds3Veil * 100) + ' %';
+    _dc3dSoon();
 }
 
 function _ds3ToggleExplode() {
@@ -89,7 +126,10 @@ function _ds3Scene() {
  *  cada sala encima del plano —que lo tapa donde hay sala— y lo que hay en cada una. A una
  *  decena de centímetros una de otra: a la misma altura, o a tres centímetros, el suelo de la
  *  sala y el plano pelean por cada píxel y se cruzan a franjas al mover la cámara desde lejos. */
-function _ds3FloorScene(floor, img) {
+function _ds3FloorScene(floor, img, veil) {
+    // Lo opaco de la losa y del plano: 1 en la planta sola; en el edificio, lo que diga el
+    // deslizador, para ver a través de ellas las plantas de abajo.
+    const v = veil === undefined ? 1 : veil;
     const M = 0.001;
     const kinds = _dcsPlan.kinds || {};
     const content = _dcsPlan.content || {};
@@ -109,13 +149,16 @@ function _ds3FloorScene(floor, img) {
         maxY = Math.max(maxY, (Number(r.pos_y) || 0) + s.d);
     }
     const W = maxX * M, D = maxY * M, pad = 1;
-    const cajas = [{color: _DC3_COLOR.ground, lee: null,
+    const losa = v < 1 ? [_DC3_COLOR.ground[0], _DC3_COLOR.ground[1], _DC3_COLOR.ground[2], v]
+                       : _DC3_COLOR.ground;
+    // `bajo`: translúcida, va debajo del plano y se dibuja antes que él (`ss3dPrepare`).
+    const cajas = [{color: losa, lee: null, bajo: true,
                     m: ss3dModel(-pad, -0.4, -pad, W + pad * 2, 0.15, D + pad * 2, 0)}];
     const planos = [];
     if (img && img.data && _dcPlanBg) {
         // Sin escala dicha, más tenue: es un dibujo de referencia estirado a un tamaño
         // supuesto, igual que en el plano de la planta.
-        planos.push({data: img.data, alpha: b.scaled ? 0.95 : 0.6,
+        planos.push({data: img.data, alpha: (b.scaled ? 0.95 : 0.6) * v,
                      m: ss3dModel(b.x * M, -0.12, b.y * M, b.w * M, 1, b.h * M, 0)});
     }
     const salas = [], rotulos = [];
@@ -154,12 +197,12 @@ function _ds3BuildingScene(actual) {
     const plantas = _dcsPlan.floors.slice()
         .sort((a, b) => (Number(a.level) || 0) - (Number(b.level) || 0));
     const nivelActual = Number((actual || {}).level) || 0;
-    const paso = _ds3Explode ? _DS3_APART : _DS3_STOREY;
+    const paso = _ds3Explode ? _ds3Apart : _DS3_STOREY;
     const todo = {cajas: [], planos: [], salas: [], rotulos: []};
     let W = 12, D = 8, Y0 = 0, arriba = 3, mira = null;
     for (const f of plantas) {
         const nivel = Number(f.level) || 0, Y = nivel * paso;
-        const e = _ds3FloorScene(f, _ds3Img(f));
+        const e = _ds3FloorScene(f, _ds3Img(f), _ds3Veil);
         const tenue = nivel > nivelActual;
         // 0,25: con menos, la planta de encima apenas se distinguía del fondo.
         const puesta = ss3dPlace(e, 0, Y, 0, 0, tenue ? 0.25 : 1);
@@ -225,6 +268,20 @@ function _ds3Bar() {
             class="btn btn-sm ${_ds3Explode ? 'btn-warning' : 'btn-secondary'}"
             onclick="_ds3ToggleExplode()"><i class="bi bi-arrows-expand me-1"></i>${
             esc(t('dcim_3d_apart'))}</button>
+            ${_ds3Explode ? `<label class="d-inline-flex align-items-center gap-2 ss-fs-2 mb-0">
+                <i class="bi bi-arrows-vertical text-muted"></i>${esc(t('dcim_3d_apart_by'))}
+                <input type="range" class="form-range" style="width:8rem" min="5" max="40" step="1"
+                       value="${_ds3Apart}" oninput="_ds3SetApart(this.value)"
+                       aria-label="${escAttr(t('dcim_3d_apart_by'))}">
+                <span id="ds3-apart-n" class="ss-tabular text-muted">${_ds3Apart} m</span>
+            </label>` : ''}
+            <label class="d-inline-flex align-items-center gap-2 ss-fs-2 mb-0">
+                <i class="bi bi-transparency text-muted"></i>${esc(t('dcim_3d_veil'))}
+                <input type="range" class="form-range" style="width:8rem" min="10" max="100" step="5"
+                       value="${Math.round(_ds3Veil * 100)}" oninput="_ds3SetVeil(this.value)"
+                       aria-label="${escAttr(t('dcim_3d_veil'))}">
+                <span id="ds3-veil-n" class="ss-tabular text-muted">${Math.round(_ds3Veil * 100)} %</span>
+            </label>
             <span class="text-muted ss-fs-2">${esc(t('dcim_3d_building_hint'))}</span>` : ''}
     </div>`;
 }

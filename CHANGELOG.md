@@ -8,6 +8,37 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.138] - 2026-10-06
+
+### Added
+
+- **The inventory groups the rooms of a site by floor.** A floor's general area — the room that
+  IS the floor, where what is in no room goes — was listed as «Planta 0 · zona general», a room
+  beside the rooms that are on that floor.
+  - The tree, list, detail, cards and table now show the rooms on no floor first, then each
+    floor, lowest first. The general area is drawn as the floor itself, with its loose racks
+    and «Abrir plano» opening the floor's plan, and the floor's rooms sit inside it.
+  - The general area no longer counts as a room. The flat table says each room's floor in
+    «Dónde». Coming back from a floor plan picks that floor.
+  - One split for the five layouts (`dcim/_byfloor.html`). `/api/v1/dcim/sites` now says each
+    floor's `area_uid`.
+- **The building in 3D can be seen through.** A «Opacidad de las plantas» slider (10–100 %,
+  remembered per browser) makes each floor's slab and plan see-through, so the floor below shows
+  from above. Rooms and what is in them stay solid, and the single-floor view is unchanged.
+  The viewer draws a see-through box marked `bajo` (a slab) before the images on the ground:
+  drawn with the rest of the glass, after them, the slab covered the plan lying on it, which
+  vanished as soon as the slider left 100 %.
+- **The spacing between separated floors is adjustable.** With «Separar plantas» on, a
+  «Separación» slider sets the distance from 5 to 40 m, remembered per browser. It used to be a
+  fixed 10 m. The button stays as it was, and together the floors keep the real storey height.
+
+### Tests
+
+- `tests/integration/test_wa_dcim_byfloor.py`: the split by floor, the same in all five
+  layouts, searching, and the listing's `area_uid`.
+- `test_wa_dcim_site3d.py`: the building's slabs and plans take the slider's opacity, rooms
+  stay solid, the single floor is unchanged.
+
 ## [0.0.1+build.137] - 2026-10-04
 
 ### Changed
