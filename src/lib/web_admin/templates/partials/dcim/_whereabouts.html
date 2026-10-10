@@ -55,6 +55,8 @@ function _dcimUrl() {
         // nunca a la URL.
         if (_dcimBoard) url.searchParams.set(_DCIM_URL_VIEW, 'board');
         else url.searchParams.delete(_DCIM_URL_VIEW);
+        // El 3D abierto y su cámara (`_look3d.html`): un F5 o un enlace abren la misma vista.
+        if (typeof _dc3dUrlWrite === 'function') _dc3dUrlWrite(url);
         window.history.replaceState({}, '', url);
     } catch (_) { /* a URL that cannot be written is not worth failing a render for */ }
 }

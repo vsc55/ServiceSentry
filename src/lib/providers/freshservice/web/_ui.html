@@ -22,7 +22,7 @@ let _fsPlan = null;
 let _fsPick = new Set();
 
 //: Los emparejamientos a mano: `{external_id: uid de aquí}`. Es lo que el panel no puede
-//: deducir — que «Amixalan Energy Supplies, S.L.» de allí y «Amixalan» de aquí son la misma
+//: deducir — que «Avellana Energy Supplies, S.L.» de allí y «Avellana» de aquí son la misma
 //: casa lo sabe quien lo mira, y ningún parecido de nombres lo va a decir nunca.
 let _fsLink = {};
 
@@ -238,7 +238,7 @@ function _fsRowsOf(d, plan) {
         const marcada = _fsPick.has(ext);
         // Lo que cambia, dicho como cambio: antes → ahora. Meter el nombre viejo en la columna
         // de la descripción hacía que la fila pareciera traer los datos de aquí — reportado
-        // desde la pantalla, y era exactamente eso: se leía «Amixalan» donde se esperaba la
+        // desde la pantalla, y era exactamente eso: se leía «Avellana» donde se esperaba la
         // descripción de Freshservice.
         const antes = (p.was || {});
         const cambia = (campo) => (accion === 'update' || accion === 'adopt')
@@ -354,7 +354,7 @@ async function freshserviceApply() {
 
 
 /** Buscar por nombre, abreviatura o descripción. Las tres a la vez y sin distinguir mayúsculas:
- *  quien busca «amixalan» no sabe si lo que recuerda era el nombre o la chapa.
+ *  quien busca «avellana» no sabe si lo que recuerda era el nombre o la chapa.
  *
  *  Lo que se filtra es lo que se VE. Lo marcado no se toca —vive en `_fsPick`, por identificador—
  *  así que filtrar, marcar tres, cambiar el filtro y marcar otras dos deja las cinco marcadas.

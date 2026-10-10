@@ -186,7 +186,7 @@ class TestDnsCheck:
         fake_mod.NXDOMAIN = type('NXDOMAIN', (Exception,), {})
         fake_mod.NoAnswer = type('NoAnswer', (Exception,), {})
         with patch('watchfuls.dns.deps._load_dns_resolver', return_value=fake_mod):
-            out = dns_mod._resolve_dns('cerebelum.lan', 'A', 5, '192.168.110.253')
+            out = dns_mod._resolve_dns('example.lan', 'A', 5, '192.168.110.253')
         assert fake_resolver.nameservers == ['192.168.110.253']
         assert out == ['1.2.3.4']
 
@@ -356,7 +356,7 @@ class TestDnsRemote:
         return Watchful(mm)
 
     def test_remote_a_via_dig_targets_nameserver(self):
-        w = self._w({'c': {'enabled': True, 'host': 'cerebelum.lan', 'record_type': 'A',
+        w = self._w({'c': {'enabled': True, 'host': 'example.lan', 'record_type': 'A',
                            'device_uid': 'h1', 'nameserver': '192.168.110.253'}})
         with patch.object(w, 'device_exec', return_value=('192.168.110.10\n', '', 0)) as he:
             items = w.check().list

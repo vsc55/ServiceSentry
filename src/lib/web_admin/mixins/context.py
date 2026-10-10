@@ -20,7 +20,7 @@ import os
 
 from flask import session
 
-from lib import APP_NAME
+from lib import APP_NAME as _PRODUCT_NAME
 from lib.config.layout import config_layout
 from lib.config.spec import CONFIG_FIELDS as _CONFIG_FIELDS, registry_defaults
 from lib.core.audit.events import audit_severity as _audit_severity
@@ -105,10 +105,19 @@ class _ContextMixin:
         dark_mode = session.get('dark_mode', self._DEFAULT_DARK_MODE)
         return {
             'asset_v': self._asset_version(app),
-            # The product's name, from its one home in `lib/__init__.py`. Every page that signs
+            # The name the panel signs with: the installation's own (Configuración › Marca, or
+            # SS_BRAND_NAME), else the product's from `lib/__init__.py`. Every page that signs
             # itself — the title, the sidebar head, the boot screen, the status page — reads it
             # from here rather than spelling it out, so the name lives in exactly one place.
-            'app_name': APP_NAME,
+            'app_name': self._brand_name(),
+            # The product's own, which is what the brand falls back to: the placeholder of the
+            # empty name field says what an empty name means.
+            'product_name': _PRODUCT_NAME,
+            # And its pictures: `brand_src('logo')` is the versioned URL of a slot,
+            # `brand_own('mark')` whether it is the installation's own.
+            'brand_src': self._brand_src,
+            'brand_mime': self._brand_mime,
+            'brand_own': self._brand_own,
             'lang': lang,
             'default_lang': self._DEFAULT_LANG,
             'dark_mode': dark_mode,

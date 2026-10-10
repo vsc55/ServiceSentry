@@ -140,6 +140,7 @@ class TestThePageDeclaresIt:
         nobody thinks to hard-refresh."""
         for line in self._base().splitlines():
             if 'rel="icon"' in line or 'rel="alternate icon"' in line:
-                assert 'asset_v' in line, line
+                # An installation's own icon goes through the brand, versioned by its content.
+                assert 'asset_v' in line or "brand_src('favicon')" in line, line
 
 

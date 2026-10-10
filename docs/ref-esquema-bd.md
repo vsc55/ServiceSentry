@@ -31,7 +31,7 @@ Lo vigila `tests/meta/test_docs_db_schema.py::TestLaAuditoriaVaAlFinal`, sobre l
 
 ## Índice de tablas
 
-Hay **77 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **79 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -43,13 +43,13 @@ Hay **77 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | ----- | ------ |
 | Identidad / control de acceso | `users`, `users_groups`, `groups`, `groups_roles`, `roles`, `sessions`, `session_access`, `mfa_factors`, `mfa_recovery`, `api_tokens`, `api_token_access` |
 | Coordinación entre procesos | `entity_versions` |
-| Configuración | `config`, `module_config`, `module_config_items` |
+| Configuración | `config`, `module_config`, `module_config_items`, `brand_asset` (las imágenes propias de la marca) |
 | Activos / secretos | `credentials`, `devices` |
 | Auditoría / historial / estado | `audit`, `history`, `check_state`, `job_history` (qué hizo cada trabajo en segundo plano, después de hacerlo) |
 
 | Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
 | Empresas | `org` (las sociedades del grupo), `org_owner` (de quién es cada cosa, en cualquier ámbito que un paquete declare) |
-| Inventario físico (DCIM) | `dc_site`, `dc_floor` (una planta de la sede, con su plano), `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_shelf_item` (lo que hay en cada estantería de un armario), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
+| Inventario físico (DCIM) | `dc_site`, `dc_floor` (una planta de la sede, con su plano), `dc_floor_wall` (los muros de una planta, leídos de su plano), `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_shelf_item` (lo que hay en cada estantería de un armario), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs`, `health_alerts` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
@@ -461,6 +461,33 @@ config.json (solo lectura/arranque) → BD (editable).
 | updated_by | TEXT | no | `''` | |
 
 Índices: `idx_module_config_items_moduid(module_uid)`, `idx_module_config_items_device(device_uid)`.
+
+### `brand_asset` — las imágenes propias de la marca
+[lib/core/brand/store.py:35](../src/lib/core/brand/store.py#L35)
+
+Las cuatro imágenes que una instalación puede cambiar en Configuración › Marca (`favicon`,
+`logo`, `mark`, `email`); un hueco sin filas muestra la de serie de `static/img/`. En la base de
+datos y no en una carpeta: todos los procesos la comparten y la copia de seguridad la lleva sin
+declararla. **En trozos**: no hay columna binaria común a los cuatro motores y un `TEXT` de
+MySQL guarda 64 KB, así que cada imagen va en base64 repartida en filas de 48 000 caracteres
+numeradas por `part`. Todas las filas de un hueco repiten `mime`, `sha`, tamaño y dimensiones.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| slot | TEXT | no | `''` | `favicon` \| `logo` \| `mark` \| `email` |
+| part | INTEGER | no | `0` | número de trozo |
+| mime | TEXT | no | `''` | |
+| sha | TEXT | no | `''` | sha256 de la imagen entera: su versión en la URL |
+| size | INTEGER | no | `0` | bytes de la imagen entera |
+| width | INTEGER | no | `0` | `0` = no se sabe (SVG, ICO) |
+| height | INTEGER | no | `0` | |
+| data | TEXT | no | `''` | trozo en base64 |
+| created_at | TEXT | no | `''` | |
+| updated_at | TEXT | no | `''` | |
+| updated_by | TEXT | no | `''` | |
+
+Índices: `idx_brand_asset_slot(slot, part)`.
 
 ---
 
@@ -927,9 +954,37 @@ la sede. Quitarla **no** borra sus salas: se quedan en la sede, sin colocar.
 | north_deg | REAL | sí | — | hacia dónde apunta el norte en el plano, en grados en el sentido del reloj desde arriba. NULL = nadie lo ha dicho, que no es «el norte está arriba»: sin él no se dibuja la rosa de los vientos. Lo pone la calibración |
 | description | TEXT | no | `''` | |
 | area_uid | TEXT | no | `''` | su **zona general**: la sala, en (0, 0) y sin girar, donde va lo que se pone en la planta sin estar en ninguna sala —un rack en un pasillo, un cuadro eléctrico—. Una sala y no un rack sin sala, porque todo el inventario cuelga de una. Vacío hasta la primera vez; lo acuña `POST /floors/<uid>/area` y no se escribe a mano |
+| core_kind | TEXT | no | `''` | el **núcleo** de la planta: `stairs` (escalera) o `lift` (ascensor); vacío = sin marcar. En el edificio en 3D, las columnas de cada planta forman el hueco que las atraviesa |
+| core_x | REAL | no | `0` | dónde está el núcleo en la planta, en mm |
+| core_y | REAL | no | `0` | |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
+
+### `dc_floor_wall` — los muros de una planta
+[lib/core/dcim/store/floors.py:77](../src/lib/core/dcim/store/floors.py#L77)
+
+Los muros del **edificio**, no los de las salas: salen del plano del arquitecto —el panel los
+propone leyendo la imagen y alguien los revisa— o se dibujan a mano, y el 3D de la planta y del
+edificio los levanta. Un tramo recto en milímetros de la planta; una puerta o una ventana es un
+tramo del mismo muro que se deja abierto o con cristal. Se guardan **enteros por planta**
+(`PUT /floors/<uid>/walls` reemplaza todos) y se van con la planta.
+
+| Columna | Tipo | Null | Default | Clave |
+|---|---|---|---|---|
+| uid | TEXT | no | — | PK |
+| floor_uid | TEXT | no | `''` | → `dc_floor.uid` |
+| kind | TEXT | no | `'wall'` | `wall` \| `door` \| `window` |
+| x1 | REAL | no | `0` | un extremo, mm de la planta |
+| y1 | REAL | no | `0` | |
+| x2 | REAL | no | `0` | el otro extremo |
+| y2 | REAL | no | `0` | |
+| thick_mm | REAL | no | `150` | grueso |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | |
+| updated_by | TEXT | no | `''` | |
+
+Índices: `idx_dc_floor_wall_floor(floor_uid)`.
 
 ### `dc_room` — sala
 
@@ -1183,6 +1238,14 @@ columna.
 | height_mm | INTEGER | sí | — | lo alto que es ESTA pieza, en mm. Vacío = el de su tipo (`FEATURE_KINDS`), que es lo que eran todas antes de existir la columna |
 | base_mm | INTEGER | sí | — | a qué altura del suelo empieza, en mm. Vacío = la de su tipo (una bandeja cuelga a 2720). Vacío y no cero, porque cero es una medida: una bandeja en el suelo |
 | shelves | INTEGER | sí | — | cuántas estanterías tiene, si es un armario (`cabinet`); 1 al crearlo. Vacío en lo que no es un armario. No se puede bajar por debajo de la estantería más alta con material |
+| lock | TEXT | no | `''` | la cerradura de una pieza del control de accesos (`door`, `cabinet`, `turnstile`): `cylinder` (cilindro electrónico, como el Neo de Salto), `escutcheon`, `locker` (de taquilla, como el XS4 Locker) o `reader` (el lector de un torno); vacío si no lleva |
+| type_uid | TEXT | no | `''` | su modelo en el CATÁLOGO, como el de un equipo: de ahí salen la marca y la foto, y por él se cuenta. De las clases del control de accesos (`access_gateway`, `access_lock`, `access_reader`, `turnstile`) |
+| model | TEXT | no | `''` | su modelo como texto: «Salto Neo Cylinder». Se rellena con el del catálogo al elegirlo, y sirve para lo que no está en él |
+| serial | TEXT | no | `''` | su número de serie |
+| hub_uid | TEXT | no | `''` | la puerta de enlace a la que se conecta: otra pieza de la misma sede, de tipo `reader` (un IQ). Es lo que deja preguntar qué puertas y taquillas cuelgan de un IQ |
+| device_uid | TEXT | no | `''` | el dispositivo vigilado del que sale su estado, como el de un equipo |
+| demo_state | TEXT | no | `''` | el estado de una pieza de la DEMO (`ok`, `warning`, `error`) cuando no tiene dispositivo; solo lo escribe `main.py dcim demo`, ninguna ruta |
+| demo_reason | TEXT | no | `''` | por qué está así esa pieza de la DEMO («pila baja»): lo que se enseña al pulsarla. Mismas reglas que `demo_state` |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -1233,6 +1296,8 @@ nunca borra un armario que tenga algo dentro.
 | u_split | TEXT | no | `'width'` | por dónde se parte: `width` (uno al lado del otro — dos mini PC, ocho Raspberry) o `height` (uno encima del otro — dos patch panel de 0,5 U). A la rejilla le da igual, porque lo que comprueba es si el trozo está libre; al **dibujo** no, que existe para parecerse a lo que se ve al abrir el armario |
 | parent_uid | TEXT | no | `''` | montado **en** otro elemento (los mini PC sobre una bandeja); índice `idx_dc_item_parent`. El que lo lleva ocupa el U y el montado **no**, porque ese U ya está pagado — y hereda su rack, su U, su altura y su cara, para que el alzado y los recuentos sigan leyendo lo mismo sin saber que esto va montado. Un solo nivel: una bandeja sobre una bandeja no es una sala. Y **no se retira lo que lleva algo encima**, porque quitarlo dejaría tres máquinas colgando de un sitio que ya no está |
 | placement | TEXT | no | `'u'` | cómo está puesto: uno de `PLACEMENTS`. `u` se atornilla a los mástiles y ocupa `u_start`..`u_height`; `side` está en el armario sin ocupar U (la regleta del lateral, la bandeja colgada) y `near`, al lado (el SAI en el suelo, el cuadro en la pared). Lo que no ocupa U sigue estando EN el armario para todo lo demás —se alimenta, se cablea, tiene estado— y por eso no entra en la ocupación ni en el alzado |
+| demo_state | TEXT | no | `''` | el estado de un equipo de la DEMO (`main.py dcim demo`): `ok`, `warning` o `error`; vacío en todo lo demás. Solo cuenta si el equipo no tiene dispositivo vinculado —con uno, manda su vigilancia— y ninguna ruta lo escribe: la demo no crea dispositivos ni comprobaciones, y aun así enseña cómo se ve un equipo en aviso o caído |
+| demo_reason | TEXT | no | `''` | por qué está así un equipo de la DEMO: lo que diría la comprobación que lo puso en aviso o caído («Fuente de alimentación 2 sin tensión»). Se enseña al pulsar el equipo, como las comprobaciones que fallan de uno con dispositivo. Mismas reglas que `demo_state` |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -1273,6 +1338,7 @@ descripción no se le puede preguntar.
 | brand | TEXT | no | `''` | la MARCA, aparte del modelo. «Samsung PM9A3» en una sola casilla son once formas de escribir lo mismo que no se pueden contar juntas — y contar juntas es la única pregunta que se le hace a esto. Como texto y no como `brand_uid`, igual que `dc_type.manufacturer`: el vínculo bueno lo tiene el modelo del catálogo, que es a quien apunta `type_uid` |
 | kit_qty | INTEGER | no | `1` | cuántas piezas trae una unidad de lo que se compró. Estampada como lo demás: una máquina que dice llevar dos kits sigue diciendo cuántos módulos son aunque alguien borre el modelo del catálogo |
 | mount | TEXT | no | `''` | dentro de la caja o **colgando de ella**. `''` = dentro, que es lo que eran todas las que ya había: una columna nueva no puede inventarse el valor. Aparte de `kind` porque son dos preguntas —`kind` dice **qué es** (un disco, una fuente, un adaptador) y esto **dónde está**— y en un solo campo habría que inventar `nic_externa` el día que alguien enchufe una tarjeta de red por USB, que es el caso que trajo esto. Lo de dentro va en una bahía; lo que cuelga, enchufado a un puerto que se ve. Se estampa al equipo con lo demás: el día de la mudanza, lo externo es justo lo que hay que acordarse de meter en la caja |
+| place | TEXT | no | `''` | dónde está la pieza en una vista interior del modelo de su equipo, cuando no va en una bahía situada: `{"v": "<id de la vista>", "x": 0..1, "y": 0..1}` como JSON; vacío si no se ha dicho. Para lo que el modelo no describe —una tarjeta en un riser sin bahías, un disco en una jaula sin foto de bahías—, equipo a equipo |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -1474,6 +1540,8 @@ siguen apuntando.
 | rev | INTEGER | no | `1` | por qué **versión** va. El historial (`dc_rev`) las tiene una a una; esto es el resumen que quiere una ficha —cuándo y cuántas— sin abrirlo. Columnas y no una consulta al historial porque la lista enseña doscientas filas, y contar versiones de doscientas fichas para pintar dos casillas sería pagar el resumen a precio del detalle |
 | kit_qty | INTEGER | no | `1` | cuántas piezas trae **una** de estas. Un kit de dos módulos se compra como uno y se monta como dos; una caja de cincuenta tornillos, igual. «Cuántos DIMM de 16 GB tengo» quiere la segunda cifra y «cuántos pedí» quiere la primera, y con una sola casilla hay que elegir cuál se contesta mal. Columna y no atributo del documento porque el panel **multiplica por ella**, y lo que se multiplica no puede depender de que nadie renombre una clave en un JSON |
 | power_type | TEXT | no | `''` | por dónde se alimenta: `internal` \| `external` \| `poe`. `is_powered` dice **si** consume y no dice cómo, y la diferencia entre una fuente dentro y un alimentador externo decide si hace falta una toma en la regleta o un enchufe en la pared — y si al mover el equipo hay que acordarse de llevarse algo que no está atornillado. `none` no es un valor de aquí: eso lo dice `is_powered` en cero, y tenerlo en dos sitios serían dos respuestas a la misma pregunta |
+| port_map | TEXT | no | `'{}'` | dónde está cada boca en la cara del equipo: `{"familia|nombre": {"f": "front"|"rear", "x": 0..1, "y": 0..1}}`, la cara y el sitio como fracción de su foto. Ninguna biblioteca lo trae; lo sitúa una persona (Catálogo › modelo › «Situar puertos») y una reimportación lo conserva por el nombre normalizado del modelo. Es lo que hace que en el rack un cable salga de su puerto |
+| views | TEXT | no | `'[]'` | las vistas de DENTRO del modelo: `[{"id", "name", "image"}]` —«Placa», «Riser 1», «Jaula de discos»—, cada una con su foto. Sobre ellas se sitúan las bahías (`port_map` con la cara `v:<id>`), y en un equipo se ve qué pieza hay en cada una. Quitar una vista se lleva su foto y lo situado en ella; una reimportación las conserva por el nombre normalizado del modelo |
 | updated_at | TEXT | no | `''` | cuándo se tocó por última vez |
 | updated_by | TEXT | no | `''` | y quién |
 

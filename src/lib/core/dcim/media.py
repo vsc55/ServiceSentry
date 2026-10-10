@@ -55,9 +55,11 @@ SIGNATURES = (
     ('.webp', b'RIFF'),                          # …plus 'WEBP' at offset 8, checked below
 )
 
-#: Uploaded images are capped before they are read. Two megabytes is a generous floor plan and a
-#: long way from what a request can be made to swallow.
-MAX_BYTES = 2 * 1024 * 1024
+#: Uploaded images are capped before they are read. Sixteen megabytes: a photo taken with a phone
+#: —of a model's face, of the inside of a chassis, of a room— is 3 to 8, and two refused every one
+#: of them. Still a fifth of what a request may carry at all (`MAX_CONTENT_LENGTH`, 80 MiB), and
+#: the 3D views scale what they draw down to 2048 px whatever comes in.
+MAX_BYTES = 16 * 1024 * 1024
 
 #: De dónde vino un fichero, y en qué subcarpeta vive. `library` es lo que trajo una importación
 #: —mil doscientas imágenes de alzado que se vuelven a bajar con un botón— y `own` es lo que

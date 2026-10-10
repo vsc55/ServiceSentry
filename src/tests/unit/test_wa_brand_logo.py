@@ -98,13 +98,15 @@ class TestTheFilesAreThereAndUsable:
 class TestThePagesUseThem:
 
     def test_the_login_card_shows_the_lockup(self):
+        # Through the brand (Configuración › Marca): the stock lockup until an installation
+        # uploads its own, at a versioned URL either way.
         src = _read(os.path.join(TPL, 'login.html'))
-        assert '/static/img/logo.png' in src
+        assert "brand_src('logo')" in src
         assert 'bi-shield-check' not in src, 'the placeholder icon is still there'
 
     def test_the_boot_ring_shows_the_mark(self):
         src = _read(os.path.join(TPL, 'dashboard.html'))
-        assert '/static/img/logo-mark.png' in src
+        assert "brand_src('mark')" in src
         block = src[src.index('ss-boot-logo'):src.index('ss-boot-name')]
         assert 'bi-shield-check' not in block
 
@@ -124,11 +126,15 @@ class TestThePagesUseThem:
 
     def test_both_are_cache_busted_like_the_stylesheet(self):
         """An image the browser pinned forever is the one nobody thinks to hard-refresh — the
-        same reason the favicon carries `asset_v`."""
+        same reason the favicon carries `asset_v`. Through the brand now: `brand_src` versions
+        each picture by its own content (or the stock file's date), and no page spells a bare
+        `/static/img/logo` any more."""
         for page in ('login.html', 'dashboard.html'):
             for line in _read(os.path.join(TPL, page)).splitlines():
                 if '/static/img/logo' in line:
                     assert 'asset_v' in line, line
+        body = _read(os.path.join(SRC, 'lib', 'core', 'brand', 'mixin.py'))
+        assert "f'/brand/{slot}?v={v}'" in body
 
     def test_the_declared_box_is_the_file_s_own(self):
         """`width`/`height` reserve the space before the image arrives. Wrong, the login card
@@ -136,7 +142,7 @@ class TestThePagesUseThem:
         for page, path in (('login.html', LOCKUP), ('dashboard.html', MARK)):
             src = _read(os.path.join(TPL, page))
             meta = _png(path)
-            line = next(ln for ln in src.splitlines() if '/static/img/logo' in ln)
+            line = next(ln for ln in src.splitlines() if 'brand_src(' in ln)
             tag = src[src.index(line):src.index(line) + 400]
             assert f'width="{meta["w"]}"' in tag, (page, meta['w'])
             assert f'height="{meta["h"]}"' in tag, (page, meta['h'])
@@ -163,7 +169,7 @@ class TestTheDiagnosticsSectionShowsItToo:
 
     def test_the_lockup_heads_the_section(self):
         src = _read(os.path.join(TPL, 'partials', 'diagnostics', '_render.html'))
-        assert '/static/img/logo.png' in src
+        assert 'BRAND_SRC.logo' in src
         assert 'ss-diag-logo' in src
 
     def test_it_has_a_width_of_its_own_and_does_not_widen_the_login(self):
@@ -189,7 +195,7 @@ class TestTheSidebarFootShowsTheLockup:
         src = _read(os.path.join(TPL, 'partials', '_sidebar.html'))
         nav = src[src.index('<nav class="ss-sb-nav">'):src.index('</nav>')]
         assert 'ss-sb-art' in nav, 'it sits outside the nav and steals room from the list'
-        assert '/static/img/logo.png' in nav and 'asset_v' in nav
+        assert "brand_src('logo')" in nav
         assert 'aria-hidden' in nav[nav.index('ss-sb-art'):], 'it is decorative, not a heading'
 
     def test_the_head_of_the_column_keeps_its_glyph(self):

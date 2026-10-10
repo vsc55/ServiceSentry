@@ -27,9 +27,10 @@ function _dcimToggle3d() {
 //: La caja del visor de esta sección: una sola a la vez, la de la sala o la de la sede.
 const _DC3D_BOX = 'dc3d-box';
 
-function _dc3dHtml(hint) {
-    return ss3dHtml(_DC3D_BOX, {hint: hint || t('view3d_hint'),
-                                extra: _dc3dNorth() !== null ? _dcCompass(0, 'dc3d-compass') : ''});
+function _dc3dHtml(hint, ctx) {
+    return _dc3dToolsBar(ctx || 'room') + ss3dHtml(_DC3D_BOX, {hint: hint || t('view3d_hint'),
+        extra: _dc3dNorth() !== null ? _dcCompass(0, 'dc3d-compass') : '',
+        file: 'vista-3d'});
 }
 
 /** Montar el visor sobre el lienzo recién pintado (cada repintado pinta otro). La cámara se
@@ -38,7 +39,9 @@ function _dc3dMount() {
     if (!_dc3d) return;
     const clave = typeof _dc3d.keyOf === 'function' ? _dc3d.keyOf()
         : 'room:' + (((_dcimPlan || {}).room || {}).uid || '');
-    ss3dMount(_DC3D_BOX, {scene: _dc3dScene, key: clave, onPick: _dc3d.onPick, north: _dc3dNorth});
+    ss3dMount(_DC3D_BOX, {scene: _dc3dScene, key: clave, onPick: _dc3d.onPick || _dc3dPickThing,
+                          onHover: _dc3d.onHover || _dc3dHoverThing,
+                          north: _dc3dNorth, cam: _dc3dCamTake(), onRest: _dc3dRest});
 }
 
 /** Rehacer la escena sin tocar la cámara: llegaron datos que faltaban (los planos de las otras
@@ -47,8 +50,124 @@ function _dc3dRebuild() {
     ss3dRebuild(_DC3D_BOX);
 }
 
+/** Pulsar algo en 3D: un rack o una pieza. La cámara vuela hasta ello y una ficha dice qué es,
+ *  cómo está y qué se puede hacer —abrir el rack, abrir su sala—. Antes solo se podía pulsar
+ *  una sala, y en la sala misma nada. `true` si dio con algo. */
+function _dc3dPickThing(rayo, visor) {
+    // Lo que tiene ficha, aunque sea de cristal: el núcleo de una planta lo es, y se pulsa igual.
+    const hit = ss3dPickBox(visor, rayo, k => k.lee && (k.color[3] >= 0.5 || k.lee.tipo === 'core'));
+    if (!hit) { ss3dCard(visor.id, ''); return false; }
+    // A un recorrido no se vuela: es largo, y lo que se quiere es leer de qué es.
+    if (!['run', 'power'].includes(hit.caja.lee.tipo)) ss3dFlyToBox(visor, hit.caja);
+    ss3dCard(visor.id, _dc3dCardHtml(hit.caja.lee));
+    return true;
+}
+
+//: Los racks abiertos en el 3D de la sala o del edificio: `uid → {data, cables, power}`.
+const _dc3dOpenRacks = new Map();
+
+/** Abrir un rack en el 3D en el que se está: traer lo que lleva dentro —el armario, sus cables y
+ *  su alimentación— y dibujarlo en su sitio. Otra vez lo cierra. */
+async function _dc3dOpenRack(uid) {
+    uid = String(uid || '');
+    if (_dc3dOpenRacks.has(uid)) {
+        _dc3dOpenRacks.delete(uid);
+        ss3dRebuild(_DC3D_BOX);
+        ss3dCard(_DC3D_BOX, '');
+        return;
+    }
+    const base = `/api/v1/dcim/racks/${encodeURIComponent(uid)}`;
+    const [data, cables, power] = await Promise.all([apiGet(base), apiGet(base + '/cables'),
+                                                     apiGet(base + '/power')]);
+    if (!data || data.error) return showToast((data || {}).error || t('dcim_not_found'), 'warning');
+    _dc3dOpenRacks.set(uid, {data, cables: cables || {}, power: power || {}});
+    ss3dRebuild(_DC3D_BOX);
+    ss3dCard(_DC3D_BOX, '');
+    // Y se acerca a él, de frente, que es por donde se mira dentro de un armario.
+    const V = ss3dGet(_DC3D_BOX);
+    const caja = V && ((V.escena || {}).cajas || []).find(k => k.lee && k.lee.tipo === 'rack'
+                                                             && String(k.lee.uid) === uid);
+    if (!caja) return;
+    // El frente es el lado contrario a su eje de fondo (la `z` de la caja): de ahí sale el
+    // ángulo de la cámara. Acercarse sin girar dejaba a quien lo abrió mirando la trasera.
+    const m = caja.m, fx = -m[8], fz = -m[10];
+    ss3dFlyToBox(V, caja);
+    if (Math.hypot(fx, fz) > 1e-6 && V.anim)
+        V.anim.hasta.theta = V.anim.desde.theta + ((((Math.atan2(fz, fx) - V.anim.desde.theta)
+                                                    % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
+}
+
+/** Lo que hay bajo el puntero, dicho junto a él: qué es, cómo se llama, dónde está y cómo está.
+ *  Lo mismo que daría pulsarlo, en corto y sin pulsar. */
+function _dc3dHoverThing(rayo, visor) {
+    const hit = ss3dPickBox(visor, rayo, k => k.lee && (k.color[3] >= 0.5 || k.lee.tipo === 'core'));
+    return hit ? _dc3dTipHtml(hit.caja.lee) : '';
+}
+
+function _dc3dTipHtml(lee) {
+    const nombre = lee.name || lee.kind || '';
+    const partes = [];
+    if (lee.name && lee.kind && lee.kind !== lee.name) partes.push(esc(lee.kind));
+    if (lee.model) partes.push(esc(lee.model));
+    if (lee.lock) partes.push(esc(t('dcim_lock_' + lee.lock)));
+    if (lee.tipo === 'item' && lee.u)
+        partes.push(esc(lee.u > 1 ? `U${lee.u0}–U${lee.u0 + lee.u - 1}` : `U${lee.u0}`));
+    if (lee.tipo === 'rack' && lee.u) partes.push(esc(`${lee.used || 0}/${lee.u} U`));
+    if (lee.roomName) partes.push(esc(lee.roomName));
+    const estado = lee.state ? `<div>${_dcimLed(lee.state, true)}</div>` : '';
+    return `<div class="fw-semibold">${esc(nombre)}</div>${
+        partes.length ? `<div class="opacity-75">${partes.join(' · ')}</div>` : ''}${estado}`;
+}
+
+/** La ficha de lo pulsado: nombre, qué es, estado, U ocupadas, y el botón que lleva a ello. */
+function _dc3dCardHtml(lee) {
+    const fila = (k, v) => `<div class="d-flex justify-content-between gap-3"><span class="opacity-75">${esc(k)}</span><span class="ss-tabular">${v}</span></div>`;
+    const enSala = !!(_dcimPlan && _dcimPlan.room && _dcimPlan.room.uid === lee.room);
+    if (['run', 'power', 'source'].includes(lee.tipo))
+        return `<div class="fw-semibold mb-1">${esc(lee.name || '')}</div><div>${esc(lee.kind || '')}</div>`;
+    if (lee.tipo === 'item') {
+        const us = lee.u ? (lee.u > 1 ? `U${lee.u0}–U${lee.u0 + lee.u - 1}` : `U${lee.u0}`) : '';
+        // Un equipo de un rack abierto en este 3D: desde él se cierra, que la caja del rack es
+        // de cristal y no se puede pulsar.
+        const cerrar = lee.rack && _dc3dOpenRacks.has(String(lee.rack))
+            ? `<button type="button" class="btn btn-sm btn-secondary" onclick="_dc3dOpenRack(${jsStr(lee.rack)})">
+                   <i class="bi bi-x-lg me-1"></i>${esc(t('dcim_3d_close_inside'))}</button>` : '';
+        return `<div class="fw-semibold mb-1">${esc(lee.name || lee.kind || '')}</div>
+            ${fila(t('dcim_col_kind'), esc(lee.kind || ''))}
+            ${us ? fila('U', esc(us)) : ''}
+            ${_dcimWhyHtml({state: lee.state, device_uid: lee.device, demo_reason: lee.reason}, 'dc3d-why')}
+            ${lee.state || lee.device ? fila(t('dcim_col_state'), _dcimLed(lee.state, true)) : ''}
+            ${lee.device ? '' : _dcimNoDeviceHtml()}
+            <div class="d-flex flex-wrap gap-1 mt-2">
+                ${_dcimGoDeviceBtn(lee.device)}
+                <button type="button" class="btn btn-sm btn-secondary" onclick="_dcimOpen('edit','item','',${jsStr(lee.uid)})">
+                    <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>
+                ${cerrar}
+            </div>`;
+    }
+    // Un rack: abrirlo aquí mismo —lo de dentro, en su sitio— o ir a su ficha.
+    const boton = lee.tipo === 'rack'
+        ? `<div class="d-flex flex-wrap gap-1 mt-2">
+               <button type="button" class="btn btn-sm btn-primary" title="${escAttr(t('dcim_3d_open_inside_tt'))}"
+                   onclick="_dc3dOpenRack(${jsStr(lee.uid)})"><i class="bi bi-box-arrow-in-down me-1"></i>${esc(t('dcim_3d_open_inside'))}</button>
+               <button type="button" class="btn btn-sm btn-secondary" onclick="_dcimLoadRack(${jsStr(lee.uid)})">
+                   <i class="bi bi-hdd-rack me-1"></i>${esc(t('dcim_3d_open_rack'))}</button></div>`
+        : (lee.room && !enSala ? `<button type="button" class="btn btn-sm btn-primary mt-2"
+               onclick="_dcimOpenPlan(${jsStr(lee.room)})"><i class="bi bi-map me-1"></i>${esc(t('dcim_open_plan'))}</button>` : '');
+    return `<div class="fw-semibold mb-1">${esc(lee.name || lee.kind || '')}</div>
+        ${fila(t('dcim_col_kind'), esc(lee.kind || ''))}
+        ${lee.tipo === 'rack' ? fila(t('dcim_col_state'), _dcimLed(lee.state, true)) : ''}
+        ${lee.tipo === 'feature' && lee.state ? fila(t('dcim_col_state'), _dcimLed(lee.state, true)) : ''}
+        ${lee.tipo === 'feature' ? _dcimWhyHtml({state: lee.state, device_uid: lee.device,
+                                                 demo_reason: lee.reason}, 'dc3d-why') : ''}
+        ${lee.tipo === 'feature' && lee.device ? `<div class="mt-2">${_dcimGoDeviceBtn(lee.device)}</div>` : ''}
+        ${lee.u ? fila('U', esc(lee.used !== undefined && lee.used !== null ? `${lee.used} / ${lee.u}` : String(lee.u))) : ''}
+        ${boton}`;
+}
+
 function _dc3dStop() {
     ss3dStop(_DC3D_BOX);
+    _dc3dOpenRacks.clear();
     _dc3d = null;
 }
 
@@ -83,6 +202,10 @@ const _DC3_COLOR = {
     rack:  [0.13, 0.14, 0.17, 1],
     aisle: [0.62, 0.68, 1.00, 0.16], zone: [0.35, 0.38, 0.43, 0.35],
     column: [0.36, 0.37, 0.40, 1], wall: [0.60, 0.66, 1.00, 0.22],
+    turnstile: [0.55, 0.58, 0.64, 1], reader: [0.18, 0.40, 0.85, 1],
+    hose_reel: [0.80, 0.16, 0.16, 1], fire_alarm: [0.86, 0.15, 0.15, 1],
+    emergency_light: [0.20, 0.70, 0.35, 1], smoke_detector: [0.92, 0.92, 0.92, 1],
+    first_aid: [0.15, 0.62, 0.30, 1], aed: [0.15, 0.62, 0.30, 1],
     door: [0.95, 0.76, 0.05, 1], panel: [0.82, 0.80, 0.74, 1],
     ups: [0.30, 0.32, 0.37, 1], crac: [0.20, 0.44, 0.50, 1],
     bench: [0.46, 0.37, 0.27, 1], extinguisher: [0.72, 0.16, 0.16, 1],
@@ -114,9 +237,13 @@ function _dc3dScene() {
     const img = (_dcimPlan || {}).image;
     if (img && img.data && _dcPlanBg) {
         const b = _dcpPlanBox(), M = 0.001;
+        // Delante de las fotos de los racks abiertos, no en su lugar.
         escena.planos = [{data: img.data, alpha: b.scaled ? 0.85 : 0.5,
-                          m: ss3dModel(b.x * M, 0.01, b.y * M, b.w * M, 1, b.h * M, 0)}];
+                          m: ss3dModel(b.x * M, 0.01, b.y * M, b.w * M, 1, b.h * M, 0)},
+                         ...(escena.planos || [])];
     }
+    _dc3dAddCircuits(escena);
+    _dc3dAddFoco(escena);
     return escena;
 }
 
@@ -133,12 +260,14 @@ function _dc3dScene() {
  *  `ghost` (una sala que no ha dicho cuánto mide: tenue, para que no parezca medida). */
 function _dc3dRoomBoxes(room, racks, features, kinds, o) {
     o = Object.assign({tiles: true, air: true, walls: true, floor: true, floorY: -0.02,
-                       ghost: false}, o || {});
+                       ghost: false, estado: '', wallH: 0}, o || {});
     const M = 0.001;                                  // milímetros → metros
     const W = (Number(room.width_mm) || 0) * M;
     const D = (Number(room.depth_mm) || 0) * M;
     const H = _DC3_ROOM_H * M;
-    const cajas = [];
+    const cajas = [], planos = [];
+    // Lo alto de cada rack, con su nombre: de ahí salen y ahí llegan los circuitos.
+    const puntos = {}, nombres = {};
     const tenue = (c) => (o.ghost ? [c[0], c[1], c[2], Math.min(c[3], 0.3)] : c);
     const push = (color, x, y, z, w, h, d, rot, lee, pivot) =>
         cajas.push({color, m: ss3dModel(x, y, z, w, h, d, rot, pivot), lee});
@@ -148,13 +277,19 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
     const cx = W || 12, cz = D || 8;
     // Tenue, si la sala no ha dicho cuánto mide, solo lo que la delimita —su suelo y sus muros—:
     // lo de dentro sí está, y medido.
-    if (o.floor) push(tenue(_DC3_COLOR.floor), 0, o.floorY, 0, cx, -o.floorY, cz, 0, null);
+    // `estado`: el suelo teñido del peor estado de la sala —en una planta o en el edificio, lo
+    // que se ve desde lejos es el suelo, no la franja de cada rack—. Mezclado y no sustituido:
+    // un suelo rojo entero sería una alarma más fuerte que la del propio rack.
+    const tinte = _DC3_STATE[o.estado];
+    const suelo = tinte ? _DC3_COLOR.floor.map((v, i) => (i < 3 ? v * 0.6 + tinte[i] * 0.4 : v))
+                        : _DC3_COLOR.floor;
+    if (o.floor) push(tenue(suelo), 0, o.floorY, 0, cx, -o.floorY, cz, 0, null);
     // Los cuatro muros, cada uno con el lado de la sala en que queda FUERA: el que se interpone
     // entre la cámara y la sala se dibuja de cristal (`ss3dWallAlpha`). Antes solo había los
     // dos del fondo —los cuatro tapaban la vista desde fuera—, y cruzar uno de ellos dejaba la
     // pantalla en gris: se miraba la sala a través de su muro, por detrás.
     const muro = (x, z, w, d, lado) =>
-        cajas.push({color: tenue(_DC3_COLOR.wallroom), m: ss3dModel(x, 0, z, w, H, d, 0),
+        cajas.push({color: tenue(_DC3_COLOR.wallroom), m: ss3dModel(x, 0, z, w, o.wallH || H, d, 0),
                     lee: null, muro: lado});
     if (o.walls) {
         muro(0, -0.06, cx, 0.06, 'z0');
@@ -182,14 +317,34 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
         const base = Math.max(0, Number(r.base_mm) || 0) * M;
         const rx = (Number(r.pos_x) || 0) * M, rz = (Number(r.pos_y) || 0) * M;
         const rot = Number(r.rotation) || 0;
-        push(_DC3_COLOR.rack, rx, base, rz, w, h, d, rot,
-             {name: r.name || '', kind: t('dcim_rack'), w, d, h, state: estado});
+        puntos['rack:' + r.uid] = [rx + w / 2, base + h + 0.05, rz + d / 2];
+        nombres['rack:' + r.uid] = r.name || '';
+        // Abierto desde su ficha: lo de DENTRO en su sitio —sus equipos, sus fotos y sus
+        // cables, la misma escena que su vista 3D—, girado como él. Y la caja, de cristal, para
+        // que siga pudiéndose pulsar y cerrar.
+        const abierto = _dc3dOpenRacks.get(String(r.uid));
+        if (abierto && abierto.data && typeof _dcr3dScene === 'function') {
+            const dentro = _dcr3dScene(abierto.data, {por: 'state', estado: _dc3dLook.stateRack,
+                redes: true, energia: true, cables: abierto.cables, power: abierto.power});
+            const puesto = ss3dPlace(Object.assign({}, dentro, {W: w, D: d}), rx, base, rz, rot);
+            for (const k of puesto.cajas)
+                cajas.push(k.lee ? Object.assign(k, {lee: Object.assign({}, k.lee,
+                                                                         {roomName: room.name || ''})}) : k);
+            for (const p of puesto.planos || []) planos.push(p);
+        }
+        push(abierto ? [0.6, 0.66, 1.0, 0.12] : _dc3dDim(_dc3dRackColor(r), estado),
+             rx, base, rz, w, h, d, rot,
+             {name: r.name || '', kind: t('dcim_rack'), w, d, h, state: estado, open: !!abierto,
+              uid: r.uid, tipo: 'rack', room: room.uid || r.room_uid || '',
+              roomName: room.name || '', u: Number(r.u_height) || 0, used: r.used_u});
         // La franja del frente, que es lo que dice cuál es el pasillo frío. En el MISMO lado que
         // en planta —el de `pos_y`, donde el plano pinta su franja—: estaba en el de atrás, y el
         // plano y el 3D decían cosas contrarias sobre hacia dónde sopla el rack. Un poco por
         // delante de la cara para que no pelee con ella por el mismo píxel, y girando con el
         // rack, alrededor de SU centro: sobre el suyo propio se iría a otro lado.
-        push(_DC3_STATE[estado] || [0.95, 0.76, 0.05, 1],
+        // Abierto, la franja no: maciza delante de la puerta, tapaba justo lo que se abrió
+        // para ver. El estado lo dice cada equipo dentro.
+        if (!abierto) push(_dc3dDim(_DC3_STATE[estado] || [0.95, 0.76, 0.05, 1], estado),
              rx, base + h * 0.02, rz - 0.012, w, h * 0.96, 0.012, rot, null,
              [rx + w / 2, rz + d / 2]);
     }
@@ -204,8 +359,11 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
         const base = z.base * M;
         const fx = (Number(f.pos_x) || 0) * M, fz = (Number(f.pos_y) || 0) * M;
         const rot = Number(f.rotation) || 0;
-        const lee = {name: f.label || '', kind: t('dcim_kind_' + f.kind), w, d, h, state: ''};
-        const color = _DC3_COLOR[f.kind] || [0.3, 0.32, 0.36, 1];
+        const lee = {name: f.label || '', kind: t('dcim_kind_' + f.kind), w, d, h, state: f.state || '',
+                     uid: f.uid, tipo: 'feature', room: room.uid || f.room_uid || '',
+                     roomName: room.name || '', model: f.model || '', lock: f.lock || '',
+                     device: f.device_uid || '', reason: f.demo_reason || ''};
+        const color = _dc3dDim(_DC3_COLOR[f.kind] || [0.3, 0.32, 0.36, 1], '');
         if (f.kind === 'cabinet') {
             _dc3dCabinet(push, color, fx, base, fz, w, h, d, rot, Math.max(1, Number(f.shelves) || 1), lee);
         } else {
@@ -215,8 +373,15 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
             if (spec.front) push(_DC3_COLOR.front, fx, base + h * 0.02, fz - 0.012, w, h * 0.96, 0.012,
                                  rot, null, [fx + w / 2, fz + d / 2]);
         }
+        // El estado de lo que lleva control de accesos —una cerradura, un torno, un IQ—: un
+        // piloto de su color encima, como el LED de un equipo en el rack.
+        if (_DC3_STATE[f.state] && (f.kind === 'reader' || f.kind === 'turnstile' || f.lock)) {
+            const p = Math.min(0.08, w * 0.6, d * 0.6);
+            push(_DC3_STATE[f.state], fx + w / 2 - p / 2, base + h + 0.01, fz + d / 2 - p / 2, p, p, p,
+                 rot, null, [fx + w / 2, fz + d / 2]);
+        }
     }
-    return {cajas, W: cx, D: cz, H, planos: []};
+    return {cajas, W: cx, D: cz, H, planos, puntos, nombres};
 }
 
 /** Un armario abierto por delante —el lado de `pos_y`—: laterales, fondo, techo y suelo, y
@@ -226,7 +391,9 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
 function _dc3dCabinet(push, color, x, y, z, w, h, d, rot, baldas, lee) {
     const g = Math.min(0.025, w / 10, d / 10, h / 10);          // el grueso de una tabla
     const centro = [x + w / 2, z + d / 2];
-    const tabla = (c, tx, ty, tz, tw, th, td, l) => push(c, tx, ty, tz, tw, th, td, rot, l || null, centro);
+    // Cada tabla responde al pulsarla como el armario entero; el rótulo, solo en una.
+    const otra = Object.assign({}, lee, {sinRotulo: true});
+    const tabla = (c, tx, ty, tz, tw, th, td, l) => push(c, tx, ty, tz, tw, th, td, rot, l || otra, centro);
     const claro = [Math.min(1, color[0] * 1.35), Math.min(1, color[1] * 1.35), Math.min(1, color[2] * 1.35), 1];
     tabla(color, x, y, z + d - g, w, h, g, lee);                // el fondo
     tabla(color, x, y, z, g, h, d);                             // los lados

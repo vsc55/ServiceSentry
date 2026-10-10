@@ -141,7 +141,7 @@ class TestTheRowOpensTheDevice:
 
 
 class TestWhatEachMeasurementIsCalled:
-    """Reported from the screen: every card said "erebor" — on erebor's own page.
+    """Reported from the screen: every card said "atlas" — on atlas's own page.
 
     It is the ITEM's label, and one SNMP item files a result per disk, per volume, per share,
     so the device's own name was printed a thousand times in the one place it cannot tell you
@@ -244,7 +244,7 @@ class TestWhichPartOfTheDeviceAMeasurementIsOf:
 
     def test_it_reaches_a_measurement(self):
         from lib.core.infra.service import metrics                 # noqa: PLC0415
-        rows = [{'module': 'snmp', 'key': 'k', 'name': 'erebor', 'row': 'Drive 1',
+        rows = [{'module': 'snmp', 'key': 'k', 'name': 'atlas', 'row': 'Drive 1',
                  'data': {'syno_disk_temp': 39}}]
         fields = {'snmp': {'syno_disk_temp': {'label': 'Temperatura', 'unit': 'C',
                                               'source': 'synology_disks',
@@ -953,7 +953,7 @@ class TestAPileIsNotAnIdentity:
         """Reported from the screen: the pile sat above the three correct cards, and every
         fact in it was already in one of them, attributed. A device that has answered once
         with sources has answered with all of them — so beside them the pile is not a
-        fallback, it is a stale duplicate that contradicts them ("Modelo: Linux erebor…"
+        fallback, it is a stale duplicate that contradicts them ("Modelo: Linux atlas…"
         over "Modelo: DS916+"). Obsolete and wrong, which is the worst pair."""
         assert "if (groups.size > 1) groups.delete('');" in self._fn()
 

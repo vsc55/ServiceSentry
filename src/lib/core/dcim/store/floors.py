@@ -49,9 +49,45 @@ _FLOOR = TableSpec(
         # que se pone algo suelto por primera vez: una planta sin nada suelto no tiene por qué
         # tener una sala más en el árbol.
         Column('area_uid',    'TEXT', nullable=False, default="''"),
+        # El núcleo de la planta: su escalera o su ascensor (`stairs` | `lift`, vacío = no
+        # marcado) y dónde está en el plano, en milímetros. Es lo que las plantas de un edificio
+        # tienen en común: en 3D, las columnas de cada planta forman el hueco que las atraviesa.
+        Column('core_kind',   'TEXT', nullable=False, default="''"),
+        Column('core_x',      'REAL', nullable=False, default='0'),
+        Column('core_y',      'REAL', nullable=False, default='0'),
         Column('created_at',  'TEXT', nullable=False, default="''"),
         Column('updated_at',  'TEXT', nullable=False, default="''"),
         Column('updated_by',  'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_floor_site', ('site_uid',)),),
+)
+
+
+#: Las clases de tramo de un muro de planta: muro, y los huecos que se dejan en él.
+WALL_KINDS = ('wall', 'door', 'window')
+
+#: Cuántos tramos puede tener una planta: un edificio grande ronda unos cientos; más es un
+#: plano mal leído, y guardarlo sería guardar ruido.
+WALLS_MAX = 5000
+
+#: Los muros de una planta: los del EDIFICIO, no los de las salas. Salen del plano del
+#: arquitecto —detectados y revisados, o dibujados a mano— y se levantan en el 3D de la planta y
+#: del edificio. Un tramo recto de (x1, y1) a (x2, y2) en milímetros de la planta, con su grueso;
+#: una puerta o una ventana es un tramo del mismo muro que se deja abierto (o con cristal).
+_FLOOR_WALL = TableSpec(
+    name='dc_floor_wall',
+    columns=(
+        Column('uid',        'TEXT', primary_key=True),
+        Column('floor_uid',  'TEXT', nullable=False, default="''"),
+        Column('kind',       'TEXT', nullable=False, default="'wall'"),   # wall | door | window
+        Column('x1',         'REAL', nullable=False, default='0'),
+        Column('y1',         'REAL', nullable=False, default='0'),
+        Column('x2',         'REAL', nullable=False, default='0'),
+        Column('y2',         'REAL', nullable=False, default='0'),
+        Column('thick_mm',   'REAL', nullable=False, default='150'),
+        Column('created_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_at', 'TEXT', nullable=False, default="''"),
+        Column('updated_by', 'TEXT', nullable=False, default="''"),
+    ),
+    indexes=(Index('idx_dc_floor_wall_floor', ('floor_uid',)),),
 )

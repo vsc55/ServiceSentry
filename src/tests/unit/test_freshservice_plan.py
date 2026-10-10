@@ -30,11 +30,11 @@ class TestLaAbreviaturaSeSacaDelNombre:
     alzado, donde el nombre legal de una sociedad no entra."""
 
     def test_las_iniciales_cuando_hay_varias_palabras(self):
-        assert fs.short_for('Montarto Food', []) == 'MF'
+        assert fs.short_for('Mirasol Food', []) == 'MF'
         assert fs.short_for('3D Modular', []) == '3M'
 
     def test_y_las_primeras_letras_cuando_es_una(self):
-        assert fs.short_for('Amixalan', []) == 'AMIXALAN'
+        assert fs.short_for('Avellana', []) == 'AVELLANA'
 
     def test_y_nunca_mas_larga_de_lo_que_cabe(self):
         larga = fs.short_for('Sociedad Anonima De Trabajos Y Obras Del Levante Español', [])
@@ -48,11 +48,11 @@ class TestLaAbreviaturaSeSacaDelNombre:
 
     def test_y_si_ya_está_cogida_no_se_repite(self):
         """Dos chapas iguales en un armario compartido no dicen de quién es cada equipo."""
-        assert fs.short_for('Montarto Food', ['MF']) == 'MF2'
-        assert fs.short_for('Montarto Food', ['MF', 'MF2']) == 'MF3'
+        assert fs.short_for('Mirasol Food', ['MF']) == 'MF2'
+        assert fs.short_for('Mirasol Food', ['MF', 'MF2']) == 'MF3'
 
     def test_y_da_igual_como_esté_escrita_la_que_ya_estaba(self):
-        assert fs.short_for('Montarto Food', [' mf ']) == 'MF2'
+        assert fs.short_for('Mirasol Food', [' mf ']) == 'MF2'
 
     def test_y_un_nombre_sin_letras_no_deja_a_nadie_sin_abreviatura(self):
         assert fs.short_for('###', []) == 'ORG'
@@ -115,7 +115,7 @@ class TestLoQueTecleoUnaPersonaNoSePisa:
         assert [x['action'] for x in p] == ['create']
 
     def test_y_la_abreviatura_de_la_nueva_no_choca_con_las_que_ya_hay(self):
-        p = fs.build([_dep(1, 'Montarto Food')], [_org('u1', 'Mar y Fondo', 'MF')])
+        p = fs.build([_dep(1, 'Mirasol Food')], [_org('u1', 'Mar y Fondo', 'MF')])
         assert p[0]['short'] == 'MF2'
 
 
@@ -205,13 +205,13 @@ class TestSeEligeQueSeTrae:
 
 
 class TestEmparejarAManoLoQueElPanelNoPuedeSaber:
-    """Que «Amixalan Energy Supplies, S.L.» de allí y «Amixalan» de aquí son la misma casa lo
+    """Que «Avellana Energy Supplies, S.L.» de allí y «Avellana» de aquí son la misma casa lo
     sabe quien lo mira. Ningún parecido de nombres lo va a decir nunca — y adivinarlo sería
     peor: uniría dos que sólo se parecen."""
 
     def test_una_nueva_pasa_a_adoptar_la_que_se_le_diga(self):
-        suya = _org('u9', 'Amixalan', 'AMX')
-        plan = fs.build([_dep(7, 'Amixalan Energy Supplies, S.L.')], [suya])
+        suya = _org('u9', 'Avellana', 'AVL')
+        plan = fs.build([_dep(7, 'Avellana Energy Supplies, S.L.')], [suya])
         assert plan[0]['action'] == 'create'
         elegido, rechazos = fs.select(plan, pick=['7'], link={'7': 'u9'}, orgs=[suya])
         assert rechazos == []
@@ -260,18 +260,18 @@ class TestAdoptarTraeLosDatos:
     llegara el día que nadie lo estaba mirando."""
 
     def test_el_nombre_y_la_descripcion_son_los_de_alli(self):
-        suya = _org('u9', 'Amixalan', 'AMX', 'lo de siempre')
-        plan = fs.build([_dep(7, 'Amixalan Energy Supplies, S.L.', 'fotovoltaica')], [suya])
+        suya = _org('u9', 'Avellana', 'AVL', 'lo de siempre')
+        plan = fs.build([_dep(7, 'Avellana Energy Supplies, S.L.', 'fotovoltaica')], [suya])
         elegido, _r = fs.select(plan, pick=['7'], link={'7': 'u9'}, orgs=[suya])
-        assert elegido[0]['name'] == 'Amixalan Energy Supplies, S.L.'
+        assert elegido[0]['name'] == 'Avellana Energy Supplies, S.L.'
         assert elegido[0]['description'] == 'fotovoltaica'
 
     def test_y_la_abreviatura_se_rehace_si_el_nombre_cambia(self):
         """Freshservice no tiene ese campo, así que no hay nada que descargar — pero una
-        abreviatura son las iniciales de un nombre, y dejar «AMX» sobre «Amixalan Energy
+        abreviatura son las iniciales de un nombre, y dejar «AVL» sobre «Avellana Energy
         Supplies, S.L.» es una chapa que ya no dice lo que pone la fila."""
-        suya = _org('u9', 'Amixalan', 'AMX')
-        plan = fs.build([_dep(7, 'Amixalan Energy Supplies, S.L.')], [suya])
+        suya = _org('u9', 'Avellana', 'AVL')
+        plan = fs.build([_dep(7, 'Avellana Energy Supplies, S.L.')], [suya])
         elegido, _r = fs.select(plan, pick=['7'], link={'7': 'u9'}, orgs=[suya])
         assert elegido[0]['short'] == 'AESSL'
 
@@ -284,9 +284,9 @@ class TestAdoptarTraeLosDatos:
         assert elegido[0]['short'] == 'FB'
 
     def test_y_no_choca_con_las_que_ya_hay(self):
-        vecina = _org('u1', 'Amixalan Energy Solutions', 'AESSL')
-        suya = _org('u9', 'Amixalan', 'AMX')
-        plan = fs.build([_dep(7, 'Amixalan Energy Supplies, S.L.')], [vecina, suya])
+        vecina = _org('u1', 'Avellana Energy Solutions', 'AESSL')
+        suya = _org('u9', 'Avellana', 'AVL')
+        plan = fs.build([_dep(7, 'Avellana Energy Supplies, S.L.')], [vecina, suya])
         elegido, _r = fs.select(plan, pick=['7'], link={'7': 'u9'}, orgs=[vecina, suya])
         assert elegido[0]['short'] != 'AESSL'
 
@@ -297,41 +297,41 @@ class TestDosDepartamentosNoSeQuedanConLaMismaEmpresa:
     `external_id` al primero, y en cada importación la empresa cambiaba de dueño."""
 
     def test_el_segundo_con_el_mismo_nombre_es_un_conflicto(self):
-        orgs = [_org('u1', 'Amixalan')]
-        plan = fs.build([_dep(1, 'Amixalan'), _dep(2, 'AMIXALAN')], orgs)
+        orgs = [_org('u1', 'Avellana')]
+        plan = fs.build([_dep(1, 'Avellana'), _dep(2, 'AVELLANA')], orgs)
         acciones = {p['external_id']: p['action'] for p in plan}
         assert acciones == {'1': 'adopt', '2': 'conflict'}
         assert [p['uid'] for p in plan if p['action'] == 'adopt'] == ['u1']
 
     def test_y_el_conflicto_no_se_aplica_se_cuenta(self):
-        orgs = [_org('u1', 'Amixalan')]
-        plan = fs.build([_dep(1, 'Amixalan'), _dep(2, 'Amixalan')], orgs)
+        orgs = [_org('u1', 'Avellana')]
+        plan = fs.build([_dep(1, 'Avellana'), _dep(2, 'Avellana')], orgs)
         fuera, rechazos = fs.select(plan, orgs=orgs)
         assert [p['external_id'] for p in fuera] == ['1']
-        assert rechazos == [{'name': 'Amixalan', 'reason': 'fs_link_taken'}]
+        assert rechazos == [{'name': 'Avellana', 'reason': 'fs_link_taken'}]
 
     def test_y_se_resuelve_emparejandolo_a_mano_con_otra(self):
-        orgs = [_org('u1', 'Amixalan'), _org('u2', 'Amixalan Energy')]
-        plan = fs.build([_dep(1, 'Amixalan'), _dep(2, 'Amixalan')], orgs)
+        orgs = [_org('u1', 'Avellana'), _org('u2', 'Avellana Energy')]
+        plan = fs.build([_dep(1, 'Avellana'), _dep(2, 'Avellana')], orgs)
         fuera, rechazos = fs.select(plan, link={'2': 'u2'}, orgs=orgs)
         assert sorted((p['external_id'], p['uid']) for p in fuera) == [('1', 'u1'), ('2', 'u2')]
         assert rechazos == []
 
     def test_dos_emparejamientos_a_mano_con_la_misma_empresa(self):
-        orgs = [_org('u1', 'Amixalan')]
+        orgs = [_org('u1', 'Avellana')]
         plan = fs.build([_dep(1, 'Uno'), _dep(2, 'Dos')], orgs)
         fuera, rechazos = fs.select(plan, link={'1': 'u1', '2': 'u1'}, orgs=orgs)
         assert [p['uid'] for p in fuera] == ['u1'] and len(fuera) == 1
         assert rechazos == [{'name': 'Dos', 'reason': 'fs_link_taken'}]
 
     def test_uno_a_mano_contra_la_que_otro_adopta_solo(self):
-        orgs = [_org('u1', 'Amixalan')]
-        plan = fs.build([_dep(1, 'Amixalan'), _dep(2, 'Otra')], orgs)
+        orgs = [_org('u1', 'Avellana')]
+        plan = fs.build([_dep(1, 'Avellana'), _dep(2, 'Otra')], orgs)
         fuera, rechazos = fs.select(plan, link={'2': 'u1'}, orgs=orgs)
         assert [p['uid'] for p in fuera if p['uid']] == ['u1']
         assert len(rechazos) == 1 and rechazos[0]['reason'] == 'fs_link_taken'
 
     def test_el_resumen_cuenta_el_conflicto_solo_si_lo_hay(self):
-        orgs = [_org('u1', 'Amixalan')]
-        assert fs.counts(fs.build([_dep(1, 'Amixalan'), _dep(2, 'Amixalan')], orgs)) \
+        orgs = [_org('u1', 'Avellana')]
+        assert fs.counts(fs.build([_dep(1, 'Avellana'), _dep(2, 'Avellana')], orgs)) \
             == {'create': 0, 'update': 0, 'adopt': 1, 'same': 0, 'conflict': 1}

@@ -36,7 +36,7 @@ __out = {};
 currentUser = {permissions: ['dcim_view', 'dcim_edit']};
 const rack = (uid) => ({uid, name: uid, u_height: 42, used_u: 0, roll: {}});
 const site = {
-    uid: 's', name: 'Montarto', org_uid: '',
+    uid: 's', name: 'Mirasol', org_uid: '',
     floor_list: [{uid: 'f1', name: 'Planta 1', level: 1, area_uid: ''},
                  {uid: 'f0', name: 'Planta 0', level: 0, area_uid: 'z0'}],
     rooms: [{uid: 'cpd', name: 'CPD', floor_uid: '', rackList: [rack('R01')], roll: {}},
@@ -135,7 +135,7 @@ class TestEveryLayoutSaysTheSame:
 
     def test_the_table_by_tree(self, out):
         assert out['table'] == [
-            ['site', 'Montarto', 0],
+            ['site', 'Mirasol', 0],
             ['room', 'CPD', 1], ['rack', 'R01', 2],
             ['floor', 'Planta 0', 1], ['rack', 'R09', 2],
             ['room', 'Expediciones', 2], ['rack', 'R02', 3], ['rack', 'R03', 3],
@@ -143,7 +143,7 @@ class TestEveryLayoutSaysTheSame:
         ]
 
     def test_the_table_flat_says_the_floor_in_where(self, out):
-        assert ['room', 'Expediciones', 'Montarto › Planta 0'] in out['tableFlat']
+        assert ['room', 'Expediciones', 'Mirasol › Planta 0'] in out['tableFlat']
         assert not any(k == 'floor' or 'zona general' in n for k, n, _ in out['tableFlat'])
 
 

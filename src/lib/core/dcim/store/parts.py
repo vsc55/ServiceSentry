@@ -82,12 +82,45 @@ _PART = TableSpec(
         # adaptador de red que el estándar dice que lleva sigue siendo externo en la máquina que
         # sale de él, y el día de la mudanza eso es lo que hay que acordarse de meter en la caja.
         Column('mount',   'TEXT', nullable=False, default="''"),
+        # Dónde está en una vista interior del modelo de SU equipo, cuando no va en una bahía
+        # situada: ``{"v": "<id de la vista>", "x": 0..1, "y": 0..1}`` como JSON, vacío si no se
+        # ha dicho. Lo que va en una bahía se ve en la bahía y no necesita esto; esto es para
+        # lo que el modelo no describe —una tarjeta en un riser sin bahías declaradas, un disco
+        # en una jaula sin foto de bahías— y se dice equipo a equipo.
+        Column('place',   'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_part_item', ('item_uid',)),),
 )
+
+def clean_place(value) -> str:
+    """El sitio libre de una pieza en una vista interior, como lo guarda la columna: JSON
+    ``{"v", "x", "y"}`` o vacío. Lo que no sea una vista con forma de vista y un punto dentro de
+    la foto se queda en vacío — que es «no dicho», no un sitio inventado."""
+    import json                                  # noqa: PLC0415
+    import math                                  # noqa: PLC0415
+    import re                                    # noqa: PLC0415
+    if isinstance(value, str):
+        if not value.strip():
+            return ''
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return ''
+    if not isinstance(value, dict):
+        return ''
+    vista = str(value.get('v') or '')
+    try:
+        x, y = float(value.get('x')), float(value.get('y'))
+    except (TypeError, ValueError):
+        return ''
+    if not re.fullmatch(r'[0-9a-f]{8}', vista) or not (math.isfinite(x) and math.isfinite(y)):
+        return ''
+    return json.dumps({'v': vista, 'x': round(min(1.0, max(0.0, x)), 4),
+                       'y': round(min(1.0, max(0.0, y)), 4)}, sort_keys=True)
+
 
 def clean_port_list(value) -> dict:
     """``{familia: [{'name', 'type', 'gen', 'signals'}, …]}`` — lo que se guarda, y nada más.

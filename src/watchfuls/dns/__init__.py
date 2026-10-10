@@ -148,7 +148,7 @@ class Watchful(DnsDiscovery, ModuleBase):
         host = item['host']
         record_type = item['record_type']
         nameserver = item.get('nameserver', '')
-        # Editable display name (e.g. "MX cerebelum.lan"); the key is an opaque UID.
+        # Editable display name (e.g. "MX example.lan"); the key is an opaque UID.
         label = (item.get('label', '') or '').strip() or f'{record_type} {host}'
         expected = item['expected']
         timeout = item['timeout']

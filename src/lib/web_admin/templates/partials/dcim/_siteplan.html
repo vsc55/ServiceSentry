@@ -68,6 +68,7 @@ async function _dcsLoadContents() {
     if (!_dcsPlan) return;
     const d = await apiGet(`/api/v1/dcim/sites/${encodeURIComponent(_dcsPlan.site.uid)}/contents`) || {};
     _dcsPlan.content = d.rooms || {};
+    _dcsPlan.walls = d.walls || {};
     if (d.kinds && !Object.keys(_dcsPlan.kinds).length) _dcsPlan.kinds = d.kinds;
 }
 
@@ -195,6 +196,9 @@ function _dcsContent() {
     }
     // Calibrando contra otra planta, su plano encima, translúcido: con qué se encaja este.
     h += _dcCalRefSvg();
+    // Los muros de la planta, encima del plano y debajo de las salas; revisándolos, encima de
+    // todo (abajo), que es donde se pulsan.
+    if (!_dcw) h += _dcwSvg();
     // Primero las cajas de las salas y ENCIMA todo lo que contienen, lo de la zona general
     // incluido. Al revés, un rack suelto en la zona general que quedara debajo de una sala no se
     // podía pulsar nunca: el ratón agarraba la sala. La caja se sigue agarrando por lo que no
@@ -204,7 +208,7 @@ function _dcsContent() {
     const area = _dcsRooms().find(r => r.uid === _dcsAreaUid());
     if (area) h += _dcsInside(area);
     for (const r of salas) h += _dcsInside(r);
-    return h + _dcCalMarks('floor');
+    return h + _dcCalMarks('floor') + (_dcw ? _dcwSvg() : '');
 }
 
 /** Dónde está una sala en la planta y cuánto mide: lo que convierte sus coordenadas —en las
@@ -377,6 +381,7 @@ function _dcsHtml() {
                         title="${escAttr(t('dcim_plan_drop'))}"><i class="bi bi-trash"></i></button>` : ''}` : ''}
                 ${f && f.plan ? _dcPlanBgButton() : ''}
                 ${edita && f && f.plan ? _dcCalButton('floor') : ''}
+                ${edita && f && f.plan ? _dcwButton() : ''}
                 ${f ? _dcUndoButtons() : ''}
                 ${f ? `<button class="btn btn-sm ${_dc3d ? 'btn-warning' : 'btn-secondary'}"
                         onclick="_dcsToggle3d()" title="${escAttr(t('dcim_3d'))}"
@@ -385,7 +390,8 @@ function _dcsHtml() {
             </div>
         </div>
         ${_dcCalBar('floor')}
-        ${f && _dc3d ? _ds3Bar() + _dc3dHtml(t('dcim_3d_site_hint')) : ''}
+        <div id="dcwBar">${_dcwBar()}</div>
+        ${f && _dc3d ? _ds3Bar() + _dc3dHtml(t('dcim_3d_site_hint'), 'site') : ''}
         ${f ? `<div class="ss-editor">
             <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
                 ${_dcCompass(_dcNorthOf(_dcsFloor()))}
@@ -764,6 +770,7 @@ function _dcsFloorPanel() {
                        value="${escAttr(f.north_deg === null || f.north_deg === undefined ? '' : String(f.north_deg))}"
                        oninput="_dcsFloorSet('north_deg',this.value)"></label>` : ''}
         </div>
+        ${_dcsCoreRow(f)}
         ${f.plan && !(Number(f.plan_mm) > 0) ? `<div class="text-warning-emphasis ss-fs-2 mb-3">
             <i class="bi bi-rulers me-1"></i>${esc(tf('dcim_floor_plan_mm_unset', _DCS_PLAN_MM / 1000))}</div>` : ''}
         <div class="fw-semibold ss-fs-2 mb-1">${esc(t('dcim_floor_rooms'))}
@@ -931,8 +938,60 @@ function _dcsDropPlan() {
 
 // ── El ratón ───────────────────────────────────────────────────────────────────────────────
 
+//: Marcando el núcleo de la planta: el siguiente clic en el plano dice dónde está.
+let _dcsCoreMark = false;
+
+/** El núcleo de la planta en el inspector: qué es (escalera, ascensor, nada) y marcarlo. */
+function _dcsCoreRow(f) {
+    const edita = _dcimMay('dcim_edit');
+    const kind = f.core_kind || '';
+    const opcion = (v, k) => `<option value="${v}"${v === kind ? ' selected' : ''}>${esc(t(k))}</option>`;
+    return `<div class="d-flex align-items-end gap-2 flex-wrap mb-3">
+        <label class="ss-fs-2 text-muted" title="${escAttr(t('dcim_core_tt'))}">${esc(t('dcim_core'))}
+            <select class="form-select form-select-sm" ${edita ? '' : 'disabled'}
+                    onchange="_dcsFloorSetCore(this.value)">
+                ${opcion('', 'dcim_core_none')}${opcion('stairs', 'dcim_core_stairs')}${opcion('lift', 'dcim_core_lift')}
+            </select></label>
+        ${kind && edita ? `<button type="button" class="btn btn-sm ${_dcsCoreMark ? 'btn-warning' : 'btn-secondary'}"
+                onclick="_dcsCoreMarkToggle()"><i class="bi bi-geo me-1"></i>${esc(t('dcim_core_mark'))}</button>` : ''}
+        ${kind ? `<span class="text-muted ss-fs-2 ss-tabular">${esc(tf('dcim_core_at',
+            ((Number(f.core_x) || 0) / 1000).toFixed(1), ((Number(f.core_y) || 0) / 1000).toFixed(1)))}</span>` : ''}
+    </div>`;
+}
+
+function _dcsFloorSetCore(v) {
+    const f = _dcsFloor();
+    if (!f) return;
+    f.core_kind = v;
+    _dcpQueue(`/api/v1/dcim/floors/${encodeURIComponent(f.uid)}`, {core_kind: v});
+    _dcsCoreMark = !!v && !(Number(f.core_x) || Number(f.core_y));
+    _dcsInspectorDraw();
+    if (_dcsCoreMark) showToast(t('dcim_core_mark_hint'), 'info');
+}
+
+function _dcsCoreMarkToggle() {
+    _dcsCoreMark = !_dcsCoreMark;
+    _dcsInspectorDraw();
+    if (_dcsCoreMark) showToast(t('dcim_core_mark_hint'), 'info');
+}
+
 function _dcsDown(ev) {
     _dcsFloatHide();
+    // Revisando los muros: el plano es suyo.
+    if (_dcw) return _dcwDown(ev);
+    // Marcando el núcleo: el clic es su sitio, en milímetros de la planta.
+    if (_dcsCoreMark) {
+        const f = _dcsFloor(), p = ssCanvasPoint(_DCS_SVG, ev);
+        _dcsCoreMark = false;
+        if (f && p) {
+            f.core_x = Math.round(p.x / _DCP_SCALE);
+            f.core_y = Math.round(p.y / _DCP_SCALE);
+            _dcpQueue(`/api/v1/dcim/floors/${encodeURIComponent(f.uid)}`, {core_x: f.core_x, core_y: f.core_y});
+            if (_dc3d) _dc3dSoon();
+        }
+        _dcsInspectorDraw();
+        return;
+    }
     // Calibrando el plano, el puntero es de la calibración: no se coge ni se suelta nada.
     if (_dcCal && _dcCal.kind === 'floor') return _dcCalDown(ev);
     // Un asa antes que la sala, igual que en una sala: está dentro de ella, y preguntar primero
@@ -1022,6 +1081,7 @@ function _dcsDown(ev) {
 
 function _dcsMove(ev) {
     if (_dcCal && _dcCal.press) return _dcCalMove(ev);
+    if (_dcw) return _dcwMove(ev);
     const p = ssCanvasPoint(_DCS_SVG, ev);
     if (_dcsDrag && _dcsDrag.what === 'item') {
         const x = _dcsItemRow();
@@ -1084,6 +1144,7 @@ function _dcsMove(ev) {
 
 async function _dcsUp(ev) {
     if (_dcCal && _dcCal.press) return _dcCalUp(ev);
+    if (_dcw) return _dcwUp(ev);
     const drag = _dcsDrag;
     _dcsDrag = null;
     ssCanvasPanEnd(ev);

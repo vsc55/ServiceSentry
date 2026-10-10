@@ -1,0 +1,859 @@
+{# ================================================================
+   DCIM — dónde está cada puerto de un modelo, sobre su foto.
+
+   Las bibliotecas de modelos dicen cuántas bocas tiene un equipo y cómo se llaman, no dónde
+   están. Esto deja situarlas una a una sobre la cara delantera o trasera —el puerto 1, el 2,
+   la entrada de corriente—, o de golpe en una fila o en dos (impares arriba, como casi todos los
+   switches). Lo situado es lo que hace que en el armario un cable salga de su boca.
+
+   Se guarda entero (`PUT /api/v1/dcim/catalog/<uid>/portmap`), por nombre de boca.
+   ================================================================ #}
+
+//: El editor abierto: `{row, face, map, sel, marked, mode, clicks, undo}`. `map` es
+//: `{"familia|nombre": {f, x, y}}`; `sel` el índice de la boca elegida en `row.port_slots`, y
+//: `marked` las seleccionadas para moverlas o quitarlas juntas (incluye `sel`); `mode` cómo
+//: coloca un clic (`one`, `row`, `rows2`) y `clicks` los que lleva una fila.
+let _dcPm = null;
+
+//: Los colores de las marcas, por familia: lo de datos azul, lo de corriente rojo.
+const _DCPM_TONE = {'interfaces': '#2563eb', 'power-ports': '#dc2626', 'power-outlets': '#f97316',
+                    'console-ports': '#06b6d4', 'console-server-ports': '#06b6d4',
+                    'front-ports': '#a855f7', 'rear-ports': '#a855f7',
+                    'module-bays': '#16a34a', 'device-bays': '#ca8a04'};
+
+/** Las caras de un modelo: delante, detrás y cada vista interior, con su foto. */
+function _dcPmFaces(r) {
+    return [{f: 'front', name: t('dcim_cat_front'), image: r.front_image || ''},
+            {f: 'rear', name: t('dcim_cat_rear'), image: r.rear_image || ''}]
+        .concat((r.views || []).map(v => ({f: 'v:' + v.id, name: v.name || '', image: v.image || '',
+                                           inside: true})));
+}
+
+function _dcPmFaceOf(r, f) {
+    return _dcPmFaces(r).find(x => x.f === f) || _dcPmFaces(r)[0];
+}
+
+/** Lo que dice la tabla de un modelo: si tiene los puertos situados. Nada si no tiene puertos. */
+function _dcPmBadge(r) {
+    // Los conectores y las bahías, juntos: quien solo situó las bahías de la placa leía «sin
+    // situar» y creía que no se había guardado.
+    const total = Number(r.ports_total || 0) + Number(r.bays_total || 0);
+    const hechos = Number(r.ports_placed || 0) + Number(r.bays_placed || 0);
+    if (!total) return '';
+    const [cls, icono, texto] = hechos >= total
+        ? ['bg-success', 'bi-check2', t('dcim_pm_done')]
+        : hechos > 0 ? ['bg-warning text-dark', 'bi-geo', `${hechos}/${total}`]
+                     : ['bg-secondary', 'bi-geo', t('dcim_pm_none')];
+    const puede = _dcimMay('dcim_catalog_manage');
+    return ` <span class="badge ${cls} fw-normal${puede ? ' ss-pointer' : ''}"
+        title="${escAttr(tf('dcim_pm_badge_tt', Number(r.ports_placed || 0), Number(r.ports_total || 0),
+                             Number(r.bays_placed || 0), Number(r.bays_total || 0)))}"${puede
+            ? ` onclick="event.stopPropagation();_dcPmOpen(${jsStr(String(r.uid || ''))})"` : ''}>
+        <i class="bi ${icono} me-1"></i>${esc(texto)}</span>`;
+}
+
+/** El editor dentro de la pestaña «Puertos» del formulario de un modelo: el mismo, sobre la
+ *  fila que se edita, y lo situado se guarda con el «Guardar» del formulario. Se conserva al
+ *  cambiar de pestaña: el formulario se redibuja entero, y lo situado no puede irse con él. */
+function _dcPmEmbed(r) {
+    if (!r || !(r.port_slots || []).length || !document.getElementById('dcPmBody')) return;
+    if (!_dcPm || !_dcPm.embedded || String(_dcPm.row.uid) !== String(r.uid)) _dcPmStart(r, true);
+    _dcPmDraw();
+}
+
+/** En qué cara abrir: la delantera si tiene algo situado o no lo tiene ninguna; si no, la
+ *  primera que lo tenga. Abrir siempre delante con todo situado en «Placa» enseñaba una foto sin
+ *  marcas, y lo que se leía era que no se había guardado. */
+function _dcPmStartFace(r, map) {
+    const usadas = new Set(Object.values(map || {}).map(p => p.f));
+    if (usadas.has('front') || !usadas.size) return r.front_image || !r.rear_image ? 'front' : 'rear';
+    return _dcPmFaces(r).map(x => x.f).find(f => usadas.has(f)) || 'front';
+}
+
+function _dcPmStart(r, embedded) {
+    const map = JSON.parse(JSON.stringify(r.port_map || {}));
+    _dcPm = {row: r, face: _dcPmStartFace(r, map), map,
+             sel: 0, mode: 'one', clicks: [], undo: [], embedded: !!embedded, dirty: false};
+    _dcPm.sel = _dcPmFirst(_dcPm);
+    _dcPm.marked = [_dcPm.sel];
+}
+
+/** Abrir el editor de un modelo de la lista que hay en pantalla. */
+function _dcPmOpen(uid) {
+    const r = ((_dcCat || {}).rows || []).find(x => String(x.uid) === String(uid));
+    if (!r) return;
+    const slots = r.port_slots || [];
+    if (!slots.length) { showToast(t('dcim_pm_no_ports'), 'warning'); return; }
+    _dcPmStart(r, false);
+    showHtmlModal(t('dcim_pm_title') + ' · ' + `${r.manufacturer || ''} ${r.model || ''}`.trim(),
+                  '<div id="dcPmBody"></div>', 'primary',
+                  `<span class="me-auto text-muted ss-fs-2" id="dcPmCount"></span>
+                   <button class="btn btn-secondary" onclick="hideInfoModal()">${esc(t('cancel'))}</button>
+                   <button class="btn btn-primary" onclick="_dcPmSave()">
+                       <i class="bi bi-check2 me-1"></i>${esc(t('save'))}</button>`, 'wide');
+    _dcPmDraw();
+}
+
+//: Las familias que ya dicen su cara (`FACE_OF_FAMILY` en el servidor, que es quien manda).
+const _DCPM_FACE_OF = {'front-ports': 'front', 'rear-ports': 'rear'};
+
+/** Si la boca `i` va en la cara que se mira: su familia lo permite, y no está ya situada en la
+ *  otra. Lo que está en la otra cara no se ofrece aquí: salía en las dos listas, y situarlo
+ *  desde la equivocada lo cambiaba de cara sin querer. */
+function _dcPmFits(P, i, cara) {
+    const s = (P.row.port_slots || [])[i];
+    if (!s) return false;
+    const f = cara || P.face;
+    const suya = _DCPM_FACE_OF[s.split('|')[0]];
+    if (suya && suya !== f) return false;
+    const p = P.map[s];
+    return !p || p.f === f;
+}
+
+/** Las bocas que van en esta cara, en su orden: lo que recorren la lista, el «siguiente» al
+ *  situar una y el reparto de una fila. */
+function _dcPmFaceSlots(P) {
+    return (P.row.port_slots || []).map((s, i) => i).filter(i => _dcPmFits(P, i));
+}
+
+/** La primera boca sin situar de esta cara —o la primera de la cara— para empezar por ella. */
+function _dcPmFirst(P) {
+    const aqui = _dcPmFaceSlots(P);
+    const libre = aqui.find(i => !P.map[P.row.port_slots[i]]);
+    return libre !== undefined ? libre : (aqui.length ? aqui[0] : 0);
+}
+
+/** Cómo se llama una boca para enseñarla. Si no tiene nombre propio (el modelo solo dice
+ *  cuántas hay de cada tipo), su tipo y su número dentro de él: «USB 3.1 Gen 2 Type C 1». Si lo
+ *  tiene, su nombre, y su familia delante si no es un puerto de red. */
+function _dcPmName(slot, row) {
+    const [fam, nombre] = String(slot).split('|');
+    const tipo = ((row || (_dcPm || {}).row || {}).port_slot_types || {})[slot] || '';
+    const m = String(nombre || '').match(/^(.*)#(\d+)$/);
+    if (m) return `${_dcSpeedLabel(m[1] || tipo)} ${m[2]}`;
+    return fam === 'interfaces' ? nombre : `${_dcPortName(fam)} ${nombre}`;
+}
+
+/** El nombre de un tipo de conector, o el tipo tal cual si el catálogo de conectores no lo
+ *  conoce o no se ha cargado. */
+function _dcSpeedLabel(tipo) {
+    try { return (typeof _dcSpeedName === 'function' && _dcSpeedName(tipo)) || String(tipo || ''); }
+    catch (_) { return String(tipo || ''); }
+}
+
+/** El tipo de una boca CON nombre propio, para enseñarlo a su lado: el nombre de un puerto no
+ *  siempre dice qué es (`eth0`). Vacío para las que se nombran por su tipo. */
+function _dcPmType(slot, row) {
+    if (/#\d+$/.test(String(slot))) return '';
+    const tipo = ((row || {}).port_slot_types || {})[slot] || '';
+    return tipo ? _dcSpeedLabel(tipo) : '';
+}
+
+function _dcPmDraw() {
+    const P = _dcPm, el = document.getElementById('dcPmBody');
+    if (!P || !el) return;
+    const r = P.row, slots = r.port_slots || [];
+    const cara = _dcPmFaceOf(r, P.face), img = cara.image;
+    // Sin foto, la cara en su proporción: 19 pulgadas por sus U —o una vista de dentro, en
+    // apaisado—. Se puede situar igual, y la posición vale para cuando alguien le ponga la foto.
+    const u = Math.max(0.5, Number(r.u_tenths || 10) / 10);
+    const proporcion = cara.inside ? '4 / 3' : `${482.6} / ${(u * 44.45).toFixed(2)}`;
+    const caja = img ? `<img src="${_dcimMediaUrl(img)}" alt="" class="ss-pm-img" draggable="false">`
+                     : `<div class="ss-pm-blank" style="aspect-ratio:${proporcion}">
+                            ${esc(t('dcim_pm_no_image'))}</div>`;
+    const marcas = slots.map((s, i) => {
+        const p = P.map[s];
+        if (!p || p.f !== P.face) return '';
+        return `<button type="button" data-i="${i}" class="ss-pm-dot${i === P.sel ? ' ss-pm-sel' : ''}${
+                P.marked.includes(i) ? ' ss-pm-marked' : ''}"
+            style="left:${(p.x * 100).toFixed(3)}%;top:${(p.y * 100).toFixed(3)}%;--c:${
+                escAttr(_DCPM_TONE[s.split('|')[0]] || '#6b7280')}"
+            title="${escAttr(_dcPmName(s, r))}" onpointerdown="_dcPmGrab(event, ${i})"></button>`;
+    }).join('');
+    const fila = (s, i) => {
+        const p = P.map[s];
+        const donde = p ? _dcPmFaceOf(r, p.f).name : '';
+        const marcada = P.marked.includes(i);
+        return `<button type="button" class="list-group-item list-group-item-action py-1 px-2 ss-fs-2
+                    d-flex align-items-center gap-2${i === P.sel ? ' active' : marcada ? ' list-group-item-primary' : ''}"
+                    onclick="_dcPmPick(${i}, event)">
+            <span class="ss-pm-chip" style="--c:${escAttr(_DCPM_TONE[s.split('|')[0]] || '#6b7280')}${
+                p ? '' : ';opacity:.25'}"></span>
+            <span class="flex-grow-1 text-truncate" title="${escAttr(_dcPortName(s.split('|')[0]))}">${
+                esc(_dcPmName(s, r))}${_dcPmType(s, r) ? ` <span class="text-muted ss-fs-1">${
+                esc(_dcPmType(s, r))}</span>` : ''}</span>
+            <span class="${i === P.sel ? '' : 'text-muted '}ss-fs-1">${esc(donde)}</span></button>`;
+    };
+    const modo = (m, icono) => `<button type="button" class="btn btn-sm ${P.mode === m ? 'btn-primary' : 'btn-secondary'}"
+        onclick="_dcPmMode(${jsStr(m)})" title="${escAttr(t('dcim_pm_mode_' + m + '_tt'))}">
+        <i class="bi ${icono} me-1"></i>${esc(t('dcim_pm_mode_' + m))}</button>`;
+    const boton = (x) => `<button type="button" class="btn btn-sm ${P.face === x.f ? 'btn-primary' : 'btn-secondary'}"
+        onclick="_dcPmFace(${jsStr(x.f)})">${x.inside ? '<i class="bi bi-motherboard me-1"></i>' : ''}${
+            esc(x.name)}</button>`;
+    const aqui = _dcPmFaceSlots(P);
+    const quedan = Math.max(2, aqui.filter(i => i >= P.sel).length);
+    const hasta = P.mode === 'one' ? '' : `<label class="d-inline-flex align-items-center gap-1 ss-fs-2 mb-0">
+        <span class="text-muted">${esc(t('dcim_pm_count'))}</span>
+        <input type="number" min="2" max="${quedan}" class="form-control form-control-sm"
+               style="width:5rem" id="dcPmN" value="${esc(String(P.n || Math.min(24, quedan)))}"
+               onchange="_dcPm.n = Math.max(2, Number(this.value) || 2)"></label>`;
+    const ayuda = P.mode === 'one' ? t('dcim_pm_help_one')
+        : P.clicks.length ? t('dcim_pm_help_second') : t('dcim_pm_help_' + P.mode);
+    el.innerHTML = `<div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+            <div class="btn-group flex-wrap">${_dcPmFaces(r).map(boton).join('')}</div>
+            <div class="btn-group">${modo('one', 'bi-cursor')}${modo('row', 'bi-three-dots')}${
+                modo('rows2', 'bi-grid-3x2')}</div>
+            ${hasta}
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcPmSelectFace()"
+                    title="${escAttr(t('dcim_pm_select_all_tt'))}"><i class="bi bi-check2-all me-1"></i>${
+                esc(t('dcim_pm_select_all'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcPmUnplace()"
+                    title="${escAttr(t('dcim_pm_unplace_tt'))}"><i class="bi bi-eraser me-1"></i>${
+                esc(P.marked.length > 1 ? tf('dcim_pm_unplace_n', P.marked.length) : t('dcim_pm_unplace'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcPmUndo()"
+                    ${P.undo.length ? '' : 'disabled'} title="${escAttr(t('dcim_pm_undo'))}">
+                <i class="bi bi-arrow-counterclockwise"></i></button>
+            ${P.embedded ? '<span class="ms-auto text-muted ss-fs-2" id="dcPmCount"></span>' : ''}
+        </div>
+        <div class="row g-2">
+            <div class="col-12 col-md-3"><div class="list-group ss-pm-list">${
+                aqui.map(i => fila(slots[i], i)).join('')
+                || `<div class="text-muted ss-fs-2 p-2">${esc(t('dcim_pm_face_empty'))}</div>`}</div>
+                <div class="text-muted ss-fs-1 mt-1">${esc(tf('dcim_pm_other_face',
+                    slots.length - aqui.length))}</div></div>
+            <div class="col-12 col-md-9">
+                <div class="text-muted ss-fs-2 mb-1">${esc(ayuda)}</div>
+                <div class="ss-pm-stage" id="dcPmStage" tabindex="0" onclick="_dcPmClick(event)"
+                     onpointerdown="_dcPmBoxStart(event)" onkeydown="_dcPmKey(event)">${caja}${marcas}${
+                    P.clicks.map(c => `<span class="ss-pm-dot ss-pm-ghost" style="left:${(c.x * 100).toFixed(3)}%;top:${
+                        (c.y * 100).toFixed(3)}%"></span>`).join('')}</div>
+            </div>
+        </div>`;
+    const n = slots.filter(s => P.map[s]).length;
+    if (P.mode === 'one' && !aqui.includes(P.sel) && aqui.length) { P.sel = aqui[0]; P.marked = [P.sel]; }
+    const cuenta = document.getElementById('dcPmCount');
+    if (cuenta) cuenta.textContent = tf('dcim_pm_progress', n, slots.length);
+    const activa = el.querySelector('.ss-pm-list .active');
+    if (activa) activa.scrollIntoView({block: 'nearest'});
+}
+
+/** Elegir una boca en la lista. Con Ctrl se suma o se quita de la selección; con Mayúsculas se
+ *  selecciona el tramo desde la elegida; sin nada, es la única. */
+function _dcPmPick(i, ev) {
+    const P = _dcPm;
+    P.clicks = [];
+    if (ev && (ev.ctrlKey || ev.metaKey)) {
+        P.marked = P.marked.includes(i) ? P.marked.filter(k => k !== i) : P.marked.concat([i]);
+        if (P.marked.includes(i)) P.sel = i;
+        else if (P.sel === i) P.sel = P.marked.length ? P.marked[P.marked.length - 1] : i;
+    } else if (ev && ev.shiftKey) {
+        const [a, b] = [Math.min(P.sel, i), Math.max(P.sel, i)];
+        const tramo = [];
+        for (let k = a; k <= b; k++) tramo.push(k);
+        P.marked = Array.from(new Set(P.marked.concat(tramo)));
+        P.sel = i;
+    } else {
+        P.sel = i;
+        P.marked = [i];
+    }
+    if (!P.marked.length) P.marked = [P.sel];
+    _dcPmDraw();
+}
+
+/** Seleccionar todas las bocas situadas en la cara que se mira. */
+function _dcPmSelectFace() {
+    const P = _dcPm, slots = P.row.port_slots || [];
+    const todas = slots.map((s, i) => (P.map[s] && P.map[s].f === P.face) ? i : -1).filter(i => i >= 0);
+    if (!todas.length) return;
+    P.marked = todas;
+    P.sel = todas[0];
+    _dcPmDraw();
+}
+
+/** Las marcas que caen dentro de un rectángulo de la cara (en fracciones), en esta cara. Aparte
+ *  para poder probarla sin pantalla. */
+function _dcPmInBox(P, a, b) {
+    const [x0, x1] = [Math.min(a.x, b.x), Math.max(a.x, b.x)];
+    const [y0, y1] = [Math.min(a.y, b.y), Math.max(a.y, b.y)];
+    return (P.row.port_slots || []).map((s, i) => {
+        const p = P.map[s];
+        return p && p.f === P.face && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 ? i : -1;
+    }).filter(i => i >= 0);
+}
+
+/** Arrastrar sobre una zona vacía de la foto dibuja un recuadro y selecciona lo que queda
+ *  dentro; con Mayúsculas lo suma a lo que ya había. Un clic sin arrastrar sigue siendo un clic
+ *  —sitúa la boca elegida—: el recuadro empieza a partir de unos píxeles. */
+function _dcPmBoxStart(ev) {
+    const P = _dcPm;
+    if (!P || ev.button !== 0 || ev.target.classList.contains('ss-pm-dot')) return;
+    const st = document.getElementById('dcPmStage');
+    if (st && st.focus) st.focus();
+    const x0 = ev.clientX, y0 = ev.clientY, a = _dcPmAt(ev);
+    let caja = null;
+    const mover = (e) => {
+        if (!caja && Math.hypot(e.clientX - x0, e.clientY - y0) < 5) return;
+        const b = _dcPmAt(e);
+        if (!caja) {
+            caja = document.createElement('div');
+            caja.className = 'ss-pm-box';
+            st.appendChild(caja);
+        }
+        caja.style.left = (Math.min(a.x, b.x) * 100) + '%';
+        caja.style.top = (Math.min(a.y, b.y) * 100) + '%';
+        caja.style.width = (Math.abs(b.x - a.x) * 100) + '%';
+        caja.style.height = (Math.abs(b.y - a.y) * 100) + '%';
+    };
+    const soltar = (e) => {
+        document.removeEventListener('pointermove', mover);
+        document.removeEventListener('pointerup', soltar);
+        if (!caja) return;
+        // El clic que sigue a soltar no sitúa nada: era el final de un recuadro.
+        P.boxed = true;
+        const dentro = _dcPmInBox(P, a, _dcPmAt(e));
+        P.marked = e.shiftKey ? Array.from(new Set(P.marked.concat(dentro))) : dentro;
+        if (P.marked.length) P.sel = P.marked[0];
+        else P.marked = [P.sel];
+        _dcPmDraw();
+    };
+    document.addEventListener('pointermove', mover);
+    document.addEventListener('pointerup', soltar);
+}
+
+/** Supr quita las seleccionadas, las flechas las mueven un poco (más con Mayúsculas) y Ctrl+A
+ *  selecciona todas las de esta cara. */
+function _dcPmKey(ev) {
+    const P = _dcPm;
+    if (!P) return;
+    if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); _dcPmUnplace(); return; }
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'a' || ev.key === 'A')) {
+        ev.preventDefault(); _dcPmSelectFace(); return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'z' || ev.key === 'Z')) {
+        ev.preventDefault(); _dcPmUndo(); return;
+    }
+    const paso = ev.shiftKey ? 0.01 : 0.002;
+    const d = {ArrowLeft: [-paso, 0], ArrowRight: [paso, 0], ArrowUp: [0, -paso], ArrowDown: [0, paso]}[ev.key];
+    if (!d) return;
+    ev.preventDefault();
+    _dcPmNudge(d[0], d[1]);
+    _dcPmDraw();
+}
+
+/** Mover las seleccionadas de esta cara, todas lo mismo, sin salirse de la foto. */
+function _dcPmNudge(dx, dy, keep = true) {
+    const P = _dcPm, slots = P.row.port_slots || [];
+    const mias = P.marked.map(i => slots[i]).filter(s => P.map[s] && P.map[s].f === P.face);
+    if (!mias.length) return;
+    if (keep) _dcPmKeep();
+    for (const s of mias) {
+        const p = P.map[s];
+        P.map[s] = {f: p.f, x: Math.min(1, Math.max(0, p.x + dx)), y: Math.min(1, Math.max(0, p.y + dy))};
+    }
+}
+function _dcPmFace(f) {
+    _dcPm.face = f;
+    _dcPm.clicks = [];
+    // Al cambiar de cara se sigue por su primera boca sin situar: la elegida en la otra cara no
+    // se puede situar en esta, y seguir con ella era situarla en la cara equivocada.
+    if (!_dcPmFits(_dcPm, _dcPm.sel)) _dcPm.sel = _dcPmFirst(_dcPm);
+    _dcPm.marked = [_dcPm.sel];
+    _dcPmDraw();
+}
+function _dcPmMode(m) { _dcPm.mode = m; _dcPm.clicks = []; _dcPmDraw(); }
+
+function _dcPmKeep() {
+    _dcPm.dirty = true;
+    _dcPm.undo.push(JSON.stringify(_dcPm.map));
+    if (_dcPm.undo.length > 50) _dcPm.undo.shift();
+}
+
+function _dcPmUndo() {
+    if (!_dcPm || !_dcPm.undo.length) return;
+    _dcPm.map = JSON.parse(_dcPm.undo.pop());
+    _dcPmDraw();
+}
+
+/** Quitar la posición de las seleccionadas. */
+function _dcPmUnplace() {
+    const slots = _dcPm.row.port_slots || [];
+    const fuera = _dcPm.marked.map(i => slots[i]).filter(s => s && _dcPm.map[s]);
+    if (!fuera.length) return;
+    _dcPmKeep();
+    for (const s of fuera) delete _dcPm.map[s];
+    _dcPmDraw();
+}
+
+/** Dónde cae un punto de la pantalla en la cara, como fracción. */
+function _dcPmAt(ev) {
+    const st = document.getElementById('dcPmStage');
+    const r = st.getBoundingClientRect();
+    return {x: Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)),
+            y: Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height))};
+}
+
+/** Las posiciones de una fila: `n` bocas desde la elegida, de `a` a `b`. En dos filas, las
+ *  impares en la de `a` y las pares en la de `b`, en columnas — la 1 arriba y la 2 debajo, como
+ *  los rotula casi cualquier switch. Aparte para poder probarla sin pantalla. */
+function _dcPmSpread(n, a, b, dos) {
+    const out = [];
+    if (dos) {
+        const cols = Math.ceil(n / 2);
+        for (let i = 0; i < n; i++) {
+            const c = Math.floor(i / 2), t2 = cols > 1 ? c / (cols - 1) : 0;
+            out.push({x: a.x + (b.x - a.x) * t2, y: i % 2 ? b.y : a.y});
+        }
+    } else {
+        for (let i = 0; i < n; i++) {
+            const t2 = n > 1 ? i / (n - 1) : 0;
+            out.push({x: a.x + (b.x - a.x) * t2, y: a.y + (b.y - a.y) * t2});
+        }
+    }
+    return out;
+}
+
+function _dcPmClick(ev) {
+    const P = _dcPm;
+    if (!P || ev.target.classList.contains('ss-pm-dot')) return;
+    if (P.boxed) { P.boxed = false; return; }
+    const slots = P.row.port_slots || [];
+    const at = _dcPmAt(ev);
+    if (P.mode === 'one') {
+        const s = slots[P.sel];
+        if (!s || !_dcPmFits(P, P.sel)) return;
+        _dcPmKeep();
+        P.map[s] = {f: P.face, x: at.x, y: at.y};
+        // Y a la siguiente sin situar de esta cara: situar cuarenta y ocho puertos son cuarenta
+        // y ocho clics, no noventa y seis.
+        const aqui = _dcPmFaceSlots(P);
+        const sig = aqui.find(i => i > P.sel && !P.map[slots[i]]);
+        const otra = aqui.find(i => i > P.sel);
+        P.sel = sig !== undefined ? sig : otra !== undefined ? otra : P.sel;
+        P.marked = [P.sel];
+        _dcPmDraw();
+        return;
+    }
+    P.clicks.push(at);
+    if (P.clicks.length < 2) { _dcPmDraw(); return; }
+    // Las bocas de esta cara desde la elegida, en su orden: las de la otra no entran en la fila.
+    const tanda = _dcPmFaceSlots(P).filter(i => i >= P.sel);
+    const n = Math.max(2, Math.min(tanda.length, Number(P.n || Math.min(24, tanda.length))));
+    const pos = _dcPmSpread(n, P.clicks[0], P.clicks[1], P.mode === 'rows2');
+    _dcPmKeep();
+    pos.forEach((p, i) => { if (tanda[i] !== undefined) P.map[slots[tanda[i]]] = {f: P.face, x: p.x, y: p.y}; });
+    P.clicks = [];
+    const luego = tanda[Math.min(tanda.length - 1, n)];
+    P.sel = luego !== undefined ? luego : P.sel;
+    P.marked = [P.sel];
+    _dcPmDraw();
+}
+
+/** Arrastrar una marca para moverla —y con ella todas las seleccionadas, lo mismo—; soltarla
+ *  sin moverla la elige. Con Ctrl, se suma o se quita de la selección. */
+function _dcPmGrab(ev, i) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const P = _dcPm, s = (P.row.port_slots || [])[i];
+    if (!s) return;
+    const st = document.getElementById('dcPmStage');
+    if (st && st.focus) st.focus();
+    if (ev.ctrlKey || ev.metaKey) { _dcPmPick(i, {ctrlKey: true}); return; }
+    if (!P.marked.includes(i)) P.marked = [i];
+    P.sel = i;
+    let antes = _dcPmAt(ev), movida = false;
+    const mover = (e) => {
+        if (!movida) { _dcPmKeep(); movida = true; }
+        const at = _dcPmAt(e);
+        _dcPmNudge(at.x - antes.x, at.y - antes.y, false);
+        antes = at;
+        for (const k of P.marked) {
+            const p = P.map[(P.row.port_slots || [])[k]];
+            const dot = document.querySelector(`#dcPmStage .ss-pm-dot[data-i="${k}"]`);
+            if (p && dot) { dot.style.left = (p.x * 100) + '%'; dot.style.top = (p.y * 100) + '%'; }
+        }
+    };
+    const soltar = () => {
+        document.removeEventListener('pointermove', mover);
+        document.removeEventListener('pointerup', soltar);
+        _dcPmDraw();
+    };
+    document.addEventListener('pointermove', mover);
+    document.addEventListener('pointerup', soltar);
+}
+
+async function _dcPmSave() {
+    const P = _dcPm;
+    if (!P) return;
+    const res = await _dcimSend('PUT', `/api/v1/dcim/catalog/${encodeURIComponent(P.row.uid)}/portmap`,
+                                {map: P.map});
+    if (!res || !res.ok) { showToast((res && res.error) || t('error'), 'danger'); return; }
+    // La fila de la lista, al día sin volver a pedirla: el indicador cambia en cuanto se cierra.
+    const d = res.data || {};
+    P.row.port_map = P.map;
+    P.row.ports_placed = Number(d.ports_placed || 0);
+    P.row.bays_placed = Number(d.bays_placed || 0);
+    _dcPm = null;
+    hideInfoModal();
+    showToast(tf('dcim_pm_saved', Number(d.placed || 0), Number(d.total || 0)), 'success');
+    renderDcim();
+}
+
+
+// ── Las vistas interiores de un modelo (pestaña «Imágenes» del formulario) ────────────────────
+
+/** Las vistas de dentro del modelo que se edita: cada una con su nombre, su foto y con qué
+ *  cambiarla o quitarla, y abajo cómo añadir otra. */
+function _dcCatViewsHtml(r) {
+    const vistas = (r || {}).views || [];
+    const una = (v) => `<div class="col-12 col-md-6">
+        <div class="input-group input-group-sm mb-1">
+            <span class="input-group-text"><i class="bi bi-motherboard"></i></span>
+            <input class="form-control" value="${escAttr(v.name || '')}"
+                   onchange="_dcCatViewRename(${jsStr(v.id)}, this.value)">
+            <button class="btn btn-danger" title="${escAttr(t('delete'))}"
+                    onclick="_dcCatViewDrop(${jsStr(v.id)})"><i class="bi bi-trash"></i></button>
+        </div>
+        ${v.image ? `<img src="${_dcimMediaUrl(v.image)}" alt="" class="ss-face-img border rounded mb-1">`
+                  : `<div class="text-muted ss-fs-2 mb-1">${esc(t('dcim_cat_no_image'))}</div>`}
+        <input type="file" accept="image/*" class="form-control form-control-sm"
+               onchange="_dcCatViewImg(${jsStr(v.id)}, this)">
+    </div>`;
+    return `<div class="fw-semibold ss-fs-2 mt-3"><i class="bi bi-motherboard me-1"></i>${
+            esc(t('dcim_view_title'))}</div>
+        <div class="text-muted ss-fs-1 mb-2">${esc(t('dcim_view_hint'))}</div>
+        ${vistas.length ? `<div class="row g-3 mb-2">${vistas.map(una).join('')}</div>` : ''}
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            <input class="form-control form-control-sm" style="max-width:14rem" id="dcCatViewName"
+                   placeholder="${escAttr(t('dcim_view_name_ph'))}">
+            <input type="file" accept="image/*" class="form-control form-control-sm"
+                   style="max-width:16rem" id="dcCatViewFile">
+            <button class="btn btn-sm btn-secondary" onclick="_dcCatViewAdd()">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_view_add'))}</button>
+        </div>`;
+}
+
+/** Mandar un formulario con un fichero: `fetch` a pelo, como las caras —el envoltorio de JSON
+ *  convertiría el fichero en "[object File]"—. Devuelve `{ok, data, error}`. */
+async function _dcCatViewPost(url, fd) {
+    let resp;
+    try { resp = await fetch(url, {method: 'POST', body: fd}); }
+    catch (e) { return {ok: false, error: t('save_failed')}; }
+    const d = await resp.json().catch(() => ({}));
+    return {ok: resp.ok && !d.error, data: d, error: d.error || `HTTP ${resp.status}`};
+}
+
+function _dcCatViewBase() {
+    return `/api/v1/dcim/catalog/${encodeURIComponent(_dcCatEditing.uid)}/views`;
+}
+
+async function _dcCatViewAdd() {
+    if (!_dcCatEditing) return;
+    const nombre = String((document.getElementById('dcCatViewName') || {}).value || '').trim();
+    if (!nombre) return showToast(t('dcim_view_need_name'), 'warning');
+    const fichero = ((document.getElementById('dcCatViewFile') || {}).files || [])[0];
+    const fd = new FormData();
+    fd.append('name', nombre);
+    if (fichero) fd.append('file', fichero);
+    const r = await _dcCatViewPost(_dcCatViewBase(), fd);
+    if (!r.ok) return showToast(r.error, 'danger', 8000);
+    // Lo situado y sin guardar se queda: el editor trabaja sobre esta misma fila, que ya trae la
+    // vista nueva. Antes se descartaba, y «Guardar» ya no mandaba las posiciones —sin avisar—.
+    _dcCatEditing.views = (_dcCatEditing.views || []).concat(
+        [{id: r.data.id, name: nombre, image: r.data.image || ''}]);
+    showToast(t('saved'), 'success');
+    _dcCatFormDraw();
+    _dcCatOpen();
+}
+
+async function _dcCatViewImg(vid, inp) {
+    const fichero = ((inp || {}).files || [])[0];
+    if (!fichero || !_dcCatEditing) return;
+    const fd = new FormData();
+    fd.append('file', fichero);
+    const r = await _dcCatViewPost(`${_dcCatViewBase()}/${encodeURIComponent(vid)}/image`, fd);
+    if (!r.ok) return showToast(r.error, 'danger', 8000);
+    (_dcCatEditing.views || []).forEach(v => { if (v.id === vid) v.image = r.data.image || ''; });
+    showToast(t('saved'), 'success');
+    _dcCatFormDraw();
+    _dcCatOpen();
+}
+
+async function _dcCatViewRename(vid, nombre) {
+    if (!_dcCatEditing || !String(nombre || '').trim()) return;
+    const r = await _dcimSend('PUT', `${_dcCatViewBase()}/${encodeURIComponent(vid)}`,
+                              {name: String(nombre).trim()});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    (_dcCatEditing.views || []).forEach(v => { if (v.id === vid) v.name = String(nombre).trim(); });
+    _dcCatOpen();
+}
+
+function _dcCatViewDrop(vid) {
+    if (!_dcCatEditing) return;
+    const v = (_dcCatEditing.views || []).find(x => x.id === vid) || {};
+    showConfirmModal(tf('dcim_view_drop_q', v.name || ''), async () => {
+        const r = await _dcimSend('DELETE', `${_dcCatViewBase()}/${encodeURIComponent(vid)}`);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcCatEditing.views = (_dcCatEditing.views || []).filter(x => x.id !== vid);
+        // Lo situado en ella se fue con ella en el servidor; aquí también.
+        Object.keys(_dcCatEditing.port_map || {}).forEach(k => {
+            if (_dcCatEditing.port_map[k].f === 'v:' + vid) delete _dcCatEditing.port_map[k];
+        });
+        // Y del editor, sin tirar lo demás que haya situado y sin guardar.
+        if (_dcPm) {
+            Object.keys(_dcPm.map).forEach(k => { if (_dcPm.map[k].f === 'v:' + vid) delete _dcPm.map[k]; });
+            if (_dcPm.face === 'v:' + vid) _dcPm.face = 'front';
+        }
+        showToast(t('deleted'), 'success');
+        _dcCatFormDraw();
+        _dcCatOpen();
+    });
+}
+
+// ── Lo de dentro de un equipo (pestaña «Componentes») ─────────────────────────────────────────
+
+/** Cómo se llama una bahía del modelo para casarla con el hueco de una pieza: el MISMO nombre
+ *  que siembra la lista de huecos al elegir dónde va (`_dcBaySeed`): su nombre si el modelo lo
+ *  tiene, o su tipo y número si solo dice cuántas hay. Dos nombres distintos para el mismo hueco
+ *  dejarían la ranura diciendo que está libre con un módulo dentro. */
+function _dcPmBayName(slot, model) {
+    const [fam, nombre] = String(slot).split('|');
+    const m = String(nombre || '').match(/^(.*)#(\d+)$/);
+    if (m) return `${m[1] ? _dcSpeedLabel(m[1]) : (typeof _dcBayT === 'function'
+        ? _dcBayT(fam, 'dcim_bay_name') : fam)} ${m[2]}`;
+    if (/^\d+$/.test(String(nombre || '')) && typeof _dcBayT === 'function')
+        return `${_dcBayT(fam, 'dcim_bay_name')} ${nombre}`;
+    return String(nombre || '');
+}
+
+/** Qué hay en cada bahía situada de un equipo: ``[{slot, name, view, x, y, part}]``. La pieza,
+ *  por su hueco normalizado (`_dcBaySlug`), como en el resto del inventario. Aparte para poder
+ *  probarla sin pantalla. */
+function _dcPmInsideOf(model, parts) {
+    const porHueco = {};
+    (parts || []).forEach(p => String(p.slot || '').split(',').map(x => x.trim()).filter(Boolean)
+        .forEach(h => { porHueco[_dcBaySlug(h)] = p; }));
+    const mapa = (model || {}).port_map || {};
+    return ((model || {}).port_slots || []).filter(s => {
+        const fam = s.split('|')[0];
+        return (fam === 'module-bays' || fam === 'device-bays') && mapa[s]
+            && String(mapa[s].f || '').startsWith('v:');
+    }).map(s => {
+        const name = _dcPmBayName(s, model);
+        return {slot: s, name, view: mapa[s].f.slice(2), x: mapa[s].x, y: mapa[s].y,
+                part: porHueco[_dcBaySlug(name)] || null};
+    });
+}
+
+//: La pieza elegida en «Por dentro» de un equipo, para ponerla donde se pulse.
+let _dcPmIn = {sel: ''};
+
+/** El sitio libre de una pieza (`place`), o `null`. */
+function _dcPmPlaceOf(p) {
+    let v = (p || {}).place;
+    if (!v) return null;
+    if (typeof v === 'string') { try { v = JSON.parse(v); } catch (_) { return null; } }
+    return v && v.v ? v : null;
+}
+
+/** Dónde está cada pieza de un equipo por dentro: en una bahía situada (`bay`), en un sitio
+ *  libre de una vista (`free`), con un hueco que no está dibujado en ninguna vista (`slot`), o
+ *  sin decir (`none`). Aparte para poder probarla sin pantalla. */
+function _dcPmPartsWhere(model, parts) {
+    const bahias = _dcPmInsideOf(model, parts);
+    const vistas = new Set(((model || {}).views || []).map(v => v.id));
+    return (parts || []).map(p => {
+        const en = bahias.filter(b => b.part && String(b.part.uid) === String(p.uid)).map(b => b.name);
+        const sitio = _dcPmPlaceOf(p);
+        if (en.length) return {part: p, where: 'bay', bays: en};
+        if (sitio && vistas.has(sitio.v)) return {part: p, where: 'free', place: sitio};
+        if (String(p.slot || '').trim()) return {part: p, where: 'slot'};
+        return {part: p, where: 'none'};
+    });
+}
+
+/** Las vistas de dentro de un equipo: sus bahías —verde lo ocupado, discontinuo lo libre— y
+ *  las piezas situadas libres. Arriba, las piezas del equipo: se elige una y se pulsa una
+ *  bahía libre para ponerla ahí, o cualquier punto de la foto para dejarla libre ahí; o se
+ *  arrastra a la foto. Sin nada elegido, una bahía libre empieza a poner una pieza nueva en ella
+ *  y una ocupada abre la suya. */
+function _dcPmInsideHtml(d) {
+    const model = (d || {}).model || {};
+    const vistas = model.views || [];
+    if (!vistas.length) return '';
+    const parts = (d || {}).parts || [];
+    const bahias = _dcPmInsideOf(model, parts);
+    const donde = _dcPmPartsWhere(model, parts);
+    const puede = _dcimMay('dcim_edit');
+    if (_dcPmIn.sel && !parts.some(p => String(p.uid) === _dcPmIn.sel)) _dcPmIn.sel = '';
+    const nombre = (p) => [p.brand, p.model].filter(Boolean).join(' ') || t('dcim_kind_' + p.kind) || p.kind;
+    const icono = {bay: 'bi-check2-circle', free: 'bi-geo-alt', slot: 'bi-dash-circle', none: 'bi-question-circle'};
+    const ficha = (w) => {
+        const p = w.part, uid = String(p.uid), elegida = _dcPmIn.sel === uid;
+        const dice = w.where === 'bay' ? w.bays.join(', ')
+            : w.where === 'free' ? t('dcim_in_free') : w.where === 'slot' ? String(p.slot || '')
+            : t('dcim_in_none');
+        return `<button type="button" class="btn btn-sm ${elegida ? 'btn-primary' : 'btn-secondary'} ss-fs-2"
+            ${puede ? `draggable="true" ondragstart="_dcPmInDrag(event, ${jsStr(uid)})"
+                      onclick="_dcPmInPick(${jsStr(uid)})"` : 'disabled'}
+            title="${escAttr(t('dcim_in_where_' + w.where))}">
+            <i class="bi ${icono[w.where]} me-1"></i>${esc(nombre(p))}
+            <span class="ms-1 opacity-75">${esc(dice)}</span></button>`;
+    };
+    const usadas = bahias.filter(b => b.part).length;
+    return `<div class="fw-semibold ss-fs-2 mt-3 mb-1"><i class="bi bi-motherboard me-1"></i>${
+            esc(t('dcim_view_inside'))}
+            ${bahias.length ? `<span class="text-muted fw-normal ss-fs-1">${esc(tf('dcim_view_used',
+                usadas, bahias.length))}</span>` : ''}</div>
+        ${puede && parts.length ? `<div class="text-muted ss-fs-1 mb-1">${esc(t('dcim_in_help'))}</div>` : ''}
+        ${parts.length ? `<div class="d-flex flex-wrap gap-1 mb-2">${donde.map(ficha).join('')}
+            ${puede && _dcPmIn.sel ? `<button type="button" class="btn btn-sm btn-warning ss-fs-2"
+                onclick="_dcPmInClear()"><i class="bi bi-eraser me-1"></i>${esc(t('dcim_in_clear'))}</button>` : ''}
+            </div>` : ''}
+        <div class="row g-2">${vistas.map(v => `<div class="col-12 col-lg-6">
+            <div class="text-muted ss-fs-2 mb-1">${esc(v.name || '')}</div>
+            <div class="ss-pm-stage ss-pm-view${_dcPmIn.sel ? ' ss-pm-aim' : ''}" data-v="${escAttr(v.id)}"
+                 ${puede ? `onclick="_dcPmInClick(event, ${jsStr(v.id)})"
+                            ondragover="event.preventDefault()"
+                            ondrop="_dcPmInDrop(event, ${jsStr(v.id)})"` : ''}>${v.image
+                ? `<img src="${_dcimMediaUrl(v.image)}" alt="" class="ss-pm-img" draggable="false">`
+                : '<div class="ss-pm-blank" style="aspect-ratio:4 / 3"></div>'}${
+                bahias.filter(b => b.view === v.id).map(b => {
+                    const que = b.part ? nombre(b.part) : t('dcim_view_free');
+                    return `<button type="button" class="ss-pm-dot${b.part ? ' ss-pm-full' : ' ss-pm-free'}"
+                        data-bay="${escAttr(b.name)}"
+                        style="left:${(b.x * 100).toFixed(3)}%;top:${(b.y * 100).toFixed(3)}%"
+                        title="${escAttr(b.name + ' · ' + que)}"${puede
+                            ? ` onclick="event.stopPropagation();_dcPmInBay(${jsStr(b.name)})"` : ''}></button>`;
+                }).join('')}${
+                donde.filter(w => w.where === 'free' && w.place.v === v.id).map(w => `<span
+                    class="ss-pm-dot ss-pm-part${_dcPmIn.sel === String(w.part.uid) ? ' ss-pm-sel' : ''}"
+                    style="left:${(w.place.x * 100).toFixed(3)}%;top:${(w.place.y * 100).toFixed(3)}%"
+                    title="${escAttr(nombre(w.part))}"${puede
+                        ? ` onpointerdown="_dcPmInGrab(event, ${jsStr(String(w.part.uid))}, ${jsStr(v.id)})"` : ''}></span>`
+                ).join('')}</div></div>`).join('')}</div>`;
+}
+
+function _dcPmInPick(uid) {
+    _dcPmIn.sel = _dcPmIn.sel === uid ? '' : uid;
+    renderDcim();
+}
+
+function _dcPmInDrag(ev, uid) {
+    _dcPmIn.sel = uid;
+    try { ev.dataTransfer.setData('text/plain', uid); } catch (_) { /* sin datos: vale la elegida */ }
+}
+
+function _dcPmInPart(uid) {
+    return (((_dcParts || {}).parts) || []).find(p => String(p.uid) === String(uid)) || null;
+}
+
+/** Guardar el sitio de una pieza y redibujar con él, sin volver a pedir la lista. */
+async function _dcPmInSave(uid, cuerpo) {
+    const r = await _dcimSend('PUT', `/api/v1/dcim/parts/${encodeURIComponent(uid)}`, cuerpo);
+    if (!r.ok) { showToast(r.error || t('save_failed'), 'danger'); return false; }
+    const p = _dcPmInPart(uid);
+    if (p) Object.assign(p, cuerpo);
+    renderDcim();
+    return true;
+}
+
+/** Los huecos de una pieza después de ponerla en `bahia`: se quita si ya estaba en ella, se
+ *  añade si le quedan unidades sin hueco —un kit de dos módulos va en dos ranuras— y si no,
+ *  sustituye a su último hueco. Aparte para poder probarla sin pantalla. */
+function _dcPmInSlots(p, bahia) {
+    let huecos = _dcSlotsOf(p);
+    const k = _dcBaySlug(bahia);
+    if (huecos.some(h => _dcBaySlug(h) === k)) return huecos.filter(h => _dcBaySlug(h) !== k);
+    if (huecos.length < _dcPartUnits(p)) return huecos.concat([bahia]);
+    return huecos.slice(0, -1).concat([bahia]);
+}
+
+/** Una bahía pulsada: con una pieza elegida, ponerla ahí; sin nada, lo de siempre. */
+function _dcPmInBay(bahia) {
+    const d = _dcParts || {};
+    const ocupa = _dcPmInsideOf(d.model || {}, d.parts || []).find(b => b.name === bahia);
+    if (!_dcPmIn.sel) {
+        if (ocupa && ocupa.part) _dcCompEditFrom('item', String(ocupa.part.uid));
+        else _dcPmPutIn(bahia);
+        return;
+    }
+    const p = _dcPmInPart(_dcPmIn.sel);
+    if (!p) return;
+    if (ocupa && ocupa.part && String(ocupa.part.uid) !== String(p.uid)) {
+        showToast(tf('dcim_in_taken', bahia, [ocupa.part.brand, ocupa.part.model].filter(Boolean).join(' ')
+                                              || ocupa.part.kind), 'warning');
+        return;
+    }
+    _dcPmInSave(p.uid, {slot: _dcPmInSlots(p, bahia).join(', '), place: ''});
+}
+
+/** Un punto vacío de la foto pulsado con una pieza elegida: dejarla libre ahí. */
+function _dcPmInClick(ev, vid) {
+    if (!_dcPmIn.sel) return;
+    const st = ev.currentTarget, r = st.getBoundingClientRect();
+    _dcPmInSave(_dcPmIn.sel, {place: JSON.stringify({
+        v: vid, x: Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)),
+        y: Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height))})});
+}
+
+/** Soltar una pieza arrastrada: sobre una bahía, en la bahía; en otro sitio, libre ahí. */
+function _dcPmInDrop(ev, vid) {
+    ev.preventDefault();
+    let uid = '';
+    try { uid = ev.dataTransfer.getData('text/plain'); } catch (_) { uid = ''; }
+    if (uid) _dcPmIn.sel = uid;
+    const bahia = ev.target && ev.target.getAttribute ? ev.target.getAttribute('data-bay') : '';
+    if (bahia) { _dcPmInBay(bahia); return; }
+    _dcPmInClick({currentTarget: ev.currentTarget, clientX: ev.clientX, clientY: ev.clientY}, vid);
+}
+
+/** Mover una pieza situada libre arrastrando su marca. */
+function _dcPmInGrab(ev, uid, vid) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const st = ev.target.parentElement, dot = ev.target;
+    let at = null;
+    const mover = (e) => {
+        const r = st.getBoundingClientRect();
+        at = {x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+              y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))};
+        dot.style.left = (at.x * 100) + '%';
+        dot.style.top = (at.y * 100) + '%';
+    };
+    const soltar = () => {
+        document.removeEventListener('pointermove', mover);
+        document.removeEventListener('pointerup', soltar);
+        if (at) _dcPmInSave(uid, {place: JSON.stringify({v: vid, x: at.x, y: at.y})});
+        else _dcPmInPick(uid);
+    };
+    document.addEventListener('pointermove', mover);
+    document.addEventListener('pointerup', soltar);
+}
+
+/** Sacar la pieza elegida de donde estaba: ni bahía ni sitio libre. */
+function _dcPmInClear() {
+    if (_dcPmIn.sel) _dcPmInSave(_dcPmIn.sel, {slot: '', place: ''});
+}
+
+/** Empezar a poner una pieza en esa bahía: el alta de siempre, con el hueco ya elegido. */
+function _dcPmPutIn(bahia) {
+    _dcCompDraft = null;
+    _dcCompStart('item');
+    if (_dcCompDraft) _dcCompDraft.slot = bahia;
+    renderDcim();
+}
+
+
+// ── 4. Cerrar con lo situado sin guardar ─────────────────────────────────────────────────────
+
+//: Cerrar el diálogo con posiciones sin guardar las tiraba en silencio —la X, un clic fuera—.
+//: Ahora se pregunta; «Guardar» vacía el editor antes de cerrar, así que no pregunta.
+document.addEventListener('hide.bs.modal', (ev) => {
+    if (!ev.target || ev.target.id !== 'infoModal') return;
+    if (!_dcPm || !_dcPm.dirty) return;
+    ev.preventDefault();
+    showConfirmModal(t('dcim_pm_discard_q'), () => {
+        _dcPm = null;
+        hideInfoModal();
+    });
+});

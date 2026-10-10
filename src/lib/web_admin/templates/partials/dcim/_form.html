@@ -365,12 +365,14 @@ function _dcimFormBody() {
         .filter(k => spec.fields.some(x => x.list === k))
         .map(_dcimDatalist).join('');
     const zonas = _DCIM_ZONES[f.kind];
+    // Un equipo en aviso o caído dice por qué, arriba: es lo primero que se busca al pulsarlo.
+    const porque = f.kind === 'item' ? _dcimWhyHtml(row, 'dcim-form-why') : '';
     // Sin zonas declaradas, como siempre: una sede tiene cuatro casillas y partirlas en grupos
     // sería poner cinco rótulos para ordenar cuatro cosas.
-    if (!zonas) return `${lists}<div class="d-flex flex-wrap gap-3 align-items-end">
+    if (!zonas) return `${porque}${lists}<div class="d-flex flex-wrap gap-3 align-items-end">
         ${spec.fields.map((fld, i) => _dcimAsks(fld, f, row) ? caja(fld, i) : '').join('')}
     </div>`;
-    return lists + zonas.map(
+    return porque + lists + zonas.map(
         z => _dcimZoneHtml(z, spec, f, row, caja, zonas[0].id)).join('');
 }
 

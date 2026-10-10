@@ -162,7 +162,7 @@ class TestMirarYAplicarSonDosCosas:
         """Una importación que crea y corrige en silencio es una que, el día que el filtro esté
         mal, deja media docena de sociedades duplicadas y ninguna forma de saber cuál era la
         buena."""
-        freshservice['set']([_dep(1, 'Filial B'), _dep(2, 'Montarto Food')])
+        freshservice['set']([_dep(1, 'Filial B'), _dep(2, 'Mirasol Food')])
         r = client.get('/api/v1/providers/freshservice/preview')
         assert r.status_code == 200
         d = r.get_json()
@@ -375,10 +375,10 @@ class TestSeEligeQueEmpresasSeTraen:
     def test_y_la_vista_previa_manda_las_de_aqui_para_poder_emparejar(self, client,
                                                                      freshservice):
         """Sin ellas no hay con qué emparejar a mano: el desplegable de cada fila sale de aquí."""
-        client.post('/api/v1/orgs', json={'name': 'Amixalan', 'short': 'AMX'})
-        freshservice['set']([_dep(7, 'Amixalan Energy Supplies, S.L.')])
+        client.post('/api/v1/orgs', json={'name': 'Avellana', 'short': 'AVL'})
+        freshservice['set']([_dep(7, 'Avellana Energy Supplies, S.L.')])
         d = client.get('/api/v1/providers/freshservice/preview').get_json()
-        assert [o['name'] for o in d['orgs']] == ['Amixalan']
+        assert [o['name'] for o in d['orgs']] == ['Avellana']
         # Sólo lo justo para elegir en un desplegable: el resto de la fila no pinta nada aquí.
         assert set(d['orgs'][0]) == {'uid', 'name', 'short', 'source', 'external_id'}
 
@@ -387,8 +387,8 @@ class TestEmparejarAManoConUnaEmpresaDeAqui:
 
     def test_ata_la_de_alli_a_la_que_se_diga(self, admin, client, freshservice):
         uid = client.post('/api/v1/orgs',
-                          json={'name': 'Amixalan', 'short': 'AMX'}).get_json()['uid']
-        freshservice['set']([_dep(7, 'Amixalan Energy Supplies, S.L.')])
+                          json={'name': 'Avellana', 'short': 'AVL'}).get_json()['uid']
+        freshservice['set']([_dep(7, 'Avellana Energy Supplies, S.L.')])
         r = client.post('/api/v1/providers/freshservice/import',
                         json={'pick': ['7'], 'link': {'7': uid}})
         assert r.get_json() == {'created': 0, 'updated': 0, 'adopted': 1,
@@ -399,14 +399,14 @@ class TestEmparejarAManoConUnaEmpresaDeAqui:
         # Y sus datos son los de allí: atarla es decir «estas dos son la misma», y a partir de
         # ahí la mantiene el origen. Respetar el nombre de aquí sólo retrasaría el cambio a la
         # siguiente importación, que es cuando nadie lo está mirando.
-        assert filas[0]['name'] == 'Amixalan Energy Supplies, S.L.'
+        assert filas[0]['name'] == 'Avellana Energy Supplies, S.L.'
         assert filas[0]['short'], 'se ha quedado sin abreviatura, que aquí es obligatoria'
 
     def test_y_volver_a_importar_la_reconoce_por_el_atado(self, admin, client, freshservice):
         """Que es para lo que sirve atarla: la segunda vez ya no es una nueva."""
         uid = client.post('/api/v1/orgs',
-                          json={'name': 'Amixalan', 'short': 'AMX'}).get_json()['uid']
-        freshservice['set']([_dep(7, 'Amixalan Energy Supplies, S.L.')])
+                          json={'name': 'Avellana', 'short': 'AVL'}).get_json()['uid']
+        freshservice['set']([_dep(7, 'Avellana Energy Supplies, S.L.')])
         client.post('/api/v1/providers/freshservice/import',
                     json={'pick': ['7'], 'link': {'7': uid}})
         d = client.get('/api/v1/providers/freshservice/preview').get_json()
@@ -417,7 +417,7 @@ class TestEmparejarAManoConUnaEmpresaDeAqui:
         """Dos departamentos no pueden compartir una empresa: la fila iría cambiando de nombre
         sola en cada importación."""
         uid = client.post('/api/v1/orgs',
-                          json={'name': 'Amixalan', 'short': 'AMX'}).get_json()['uid']
+                          json={'name': 'Avellana', 'short': 'AVL'}).get_json()['uid']
         freshservice['set']([_dep(7, 'La primera')])
         client.post('/api/v1/providers/freshservice/import',
                     json={'pick': ['7'], 'link': {'7': uid}})

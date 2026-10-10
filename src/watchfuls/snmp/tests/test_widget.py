@@ -62,7 +62,7 @@ class TestOneRowPerDevice:
         """An agent says "1" and only the MIB it came from says that 1 is Normal. The colour
         comes from the same declaration, so a card the profile called a failure is red here
         exactly as it is everywhere else."""
-        got = _run({'host.nas/metrics': _dev('erebor', syno_status=1)})
+        got = _run({'host.nas/metrics': _dev('atlas', syno_status=1)})
         chip = got['entries'][0]['stats'][0]
         assert chip['value'] == 'Normal' and chip['state'] == 'ok'
 
@@ -73,11 +73,11 @@ class TestOneRowPerDevice:
             'host.sw/metrics': _dev('SW02', mt_temp=62),
             'host.sw/e11': {'status': False, 'severity': 'warning', 'name': 'ether11',
                             'message': 'link down'},
-            'host.nas/metrics': _dev('erebor'),
+            'host.nas/metrics': _dev('atlas'),
             'host.nas/d1': {'status': False, 'name': 'Drive 1', 'message': 'SMART'},
         })
         state = {e['name']: e['state'] for e in got['entries']}
-        assert state == {'SW02': 'warn', 'erebor': 'error'}
+        assert state == {'SW02': 'warn', 'atlas': 'error'}
         assert got['aggregate']['counts'] == {'ok': 0, 'warn': 1, 'error': 1, 'total': 2}
 
     def test_a_switchs_eleven_hundred_PORTS_do_not_travel(self):

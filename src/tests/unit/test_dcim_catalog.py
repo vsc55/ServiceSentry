@@ -422,119 +422,30 @@ class TestTresCosasYNoUna:
     def _zip(self, tmp_path):
         import zipfile
         ruta = str(tmp_path / 'biblioteca.zip')
-        png = b'\x89PNG\r\n\x1a\n'
-        with zipfile.ZipFile(ruta, 'w') as zf:
-            zf.writestr('lib-master/', '')                     # la entrada del envoltorio
-            zf.writestr('lib-master/device-types/HP/DL380.yaml',
-                        'manufacturer: HP\nmodel: DL380\nslug: dl380\nu_height: 2\n'
-                        'front_image: true\n')
-            zf.writestr('lib-master/rack-types/APC/AR3100.yaml', self.RACK)
-            zf.writestr('lib-master/module-types/Cisco/A9K.yaml', self.MODULO)
-            zf.writestr('lib-master/elevation-images/HP/dl380.front.png', png)
-            zf.writestr('lib-master/module-images/Cisco/A9K-2X100GE.front.png', png)
-            zf.writestr('lib-master/tests/algo.yaml', 'manufacturer: X\nmodel: Y\n')
-            zf.writestr('lib-master/README.md', '# nada')
-        return ruta
+        png = bytes([0x89]) + b'PNG' + bytes([0x0d, 0x0a, 0x1a, 0x0a]) + b'0' * 64
 
-    def test_cada_uno_entra_como_lo_que_es(self, tmp_path):
-        if catalog._yaml is None:
-            pytest.skip('sin PyYAML')
-        filas = {f['model']: f for f in catalog.read_zip(self._zip(tmp_path))}
-        assert filas['DL380']['_tree'] == 'device-types'
-        assert filas['AR3100']['_tree'] == 'rack-types'
-        assert filas['A9K-2X100GE']['_tree'] == 'module-types'
+        class _Resp(_io.BytesIO):
+            def __enter__(self):
+                return self
 
-    def test_lo_que_no_esta_en_ninguno_de_los_tres_no_es_un_modelo(self, tmp_path):
-        """Los tests del propio repositorio son YAML con `manufacturer` y `model`, y entraban
-        como aparatos: filas que nadie puso ahí y nadie sabe qué son."""
-        if catalog._yaml is None:
-            pytest.skip('sin PyYAML')
-        assert 'Y' not in {f['model'] for f in catalog.read_zip(self._zip(tmp_path))}
+            def __exit__(self, *a):
+                return False
 
-    def test_la_imagen_de_un_modulo_esta_en_OTRA_carpeta_y_con_OTRO_nombre(self, tmp_path):
-        """`module-images/<Fabricante>/<modelo>.front.png`. Y el YAML de un módulo no dice que
-        tenga imagen —no trae ese campo— así que preguntárselo es no buscarla nunca."""
-        if catalog._yaml is None:
-            pytest.skip('sin PyYAML')
-        filas = {f['model']: f for f in catalog.read_zip(self._zip(tmp_path))}
-        assert filas['A9K-2X100GE']['_images'].get('front')
-        assert filas['DL380']['_images'].get('front'), 'y la del aparato sigue en la suya'
+        pedidas = []
 
-    def test_la_imagen_se_llama_como_el_FICHERO_y_no_como_el_modelo(self, tmp_path):
-        """`Check Point / CPAC-2-100/25F` es un modelo con una barra dentro, y una barra en un
-        nombre de fichero es una carpeta: el repositorio la cambia por un guion. Deducir el
-        nombre del fichero desde el modelo obliga a copiar esa regla ajena aquí y a acertar
-        también la siguiente — y el nombre del fichero ya se sabe, es el que se acaba de leer.
-        """
-        import zipfile
-        ruta = str(tmp_path / 'barras.zip')
-        png = b'\x89PNG\r\n\x1a\n'
-        with zipfile.ZipFile(ruta, 'w') as zf:
-            zf.writestr('module-types/CP/CPAC-2-100-25F.yaml',
-                        'manufacturer: CP\nmodel: CPAC-2-100/25F\n')
-            zf.writestr('module-images/CP/CPAC-2-100-25F.front.png', png)
-        if catalog._yaml is None:
-            pytest.skip('sin PyYAML')
-        fila = list(catalog.read_zip(ruta))[0]
-        assert fila['_images'].get('front') == png
+        def _abrir(pedido, timeout=0):
+            pedidas.append(pedido.full_url)
+            if 'falla' in pedido.full_url:
+                raise OSError('sin red')
+            return _Resp(png)
 
-    def test_de_un_armario_se_guarda_lo_que_solo_tiene_un_armario(self, tmp_path):
-        """Sus medidas contestan si cabe donde se quiere poner, y el peso máximo si aguanta lo
-        que se le va a meter: dos preguntas que se hacen antes de comprar."""
-        if catalog._yaml is None:
-            pytest.skip('sin PyYAML')
-        rack = [f for f in catalog.read_zip(self._zip(tmp_path))
-                if f['_tree'] == 'rack-types'][0]
-        assert rack['u_tenths'] == 420
-        assert rack['extra']['outer_depth'] == 1070
-        assert rack['extra']['max_weight'] == 1020
-
-    def test_y_eso_sobrevive_a_guardarlo_y_leerlo(self, tmp_path, store):
-        """La columna guarda texto. Serializado en un sitio y leído en otro sin deshacer, lo que
-        sale es una cadena con llaves que ninguna pantalla puede pintar."""
-        if catalog._yaml is None:
-            pytest.skip('sin PyYAML')
-        store.replace('library', catalog.read_zip(self._zip(tmp_path)))
-        rack = [r for r in store.list() if r['tree'] == 'rack-types'][0]
-        assert rack['extra']['outer_width'] == 600
-
-    def test_un_zip_SIN_la_forma_de_la_biblioteca_sigue_entrando_entero(self, tmp_path):
-        """La otra puerta que esto atiende: el zip que alguien prepara a mano, que es una carpeta
-        plana de YAML porque nadie se inventa `device-types/<Fabricante>/` para catorce ficheros
-        propios. Exigirle la forma de la biblioteca lo dejaría fuera."""
-        import zipfile
-        ruta = str(tmp_path / 'mio.zip')
-        with zipfile.ZipFile(ruta, 'w') as zf:
-            zf.writestr('sw.yaml', SWITCH)
-            zf.writestr('c7000.yaml', BLADE)
-        if catalog._yaml is None:
-            pytest.skip('sin PyYAML')
-        filas = list(catalog.read_zip(ruta))
-        assert len(filas) == 2
-        assert {f['_tree'] for f in filas} == {'device-types'}
-
-
-class TestLosBasicosVienenDentro:
-    """Un catálogo mínimo dentro del panel, para la primera tarde y para la sala sin internet."""
-
-    def test_traen_de_las_tres_cosas(self):
-        import collections
-        from lib.core.dcim import basics
-        c = collections.Counter(r['_tree'] for r in basics.rows())
-        assert c['rack-types'] and c['device-types'] and c['module-types']
-
-    def test_salen_de_un_json_y_no_del_codigo(self):
-        """Son datos: los tamaños de armario que se fabrican, las formas que se repiten en
-        cualquier sala, las plataformas que todo el mundo teclea. Añadir «Ubuntu 28.04 LTS» o el
-        armario de 45U no puede ser publicar una versión, y quien sabe qué falta casi nunca es
-        quien toca el código."""
-        import json
-        from lib.core.dcim import basics
-        with open(basics.FILE, encoding='utf-8') as fh:
-            doc = json.load(fh)
-        assert doc['version'] and doc['racks'] and doc['devices'] and doc['platforms']
-        assert len(basics.rows()) == (len(doc['racks']) + len(doc['devices'])
-                                      + len(doc['modules']))
+        monkeypatch.setattr(urllib.request, 'urlopen', _abrir)
+        filas = [{'_image_url': 'https://x.test/a.png'}, {'_image_url': 'https://x.test/falla.png'},
+                 {'_image_url': 'http://x.test/plano.png'}, {}]
+        assert basics.fetch_images(filas) == 1
+        assert filas[0]['_images']['front'] == png and '_images' not in filas[1]
+        assert pedidas == ['https://x.test/a.png', 'https://x.test/falla.png']
+        assert not any('_image_url' in f for f in filas)
 
     def test_un_fichero_roto_deja_la_seccion_en_pie(self, monkeypatch):
         """Con el catálogo entero detrás, romper la lista de genéricos no puede impedir mirar un

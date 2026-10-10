@@ -47,7 +47,7 @@ _SEDES = [
      'ok': 0, 'total': 4, 'rooms': 1, 'racks': 1},
     {'uid': 's3', 'name': 'Planta Sur', 'state': 'warning', 'lat': 41.65, 'lon': -0.88,
      'ok': 2, 'total': 3, 'rooms': 2, 'racks': 3},
-    {'uid': 's4', 'name': 'Azure Francia', 'state': '', 'lat': 48.85, 'lon': 2.35,
+    {'uid': 's4', 'name': 'Nube París', 'state': '', 'lat': 48.85, 'lon': 2.35,
      'ok': 0, 'total': 0, 'rooms': 1, 'racks': 0},
 ]
 

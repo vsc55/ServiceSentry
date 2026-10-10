@@ -53,12 +53,13 @@ from lib.db.store_base import BaseStore
 
 from .cabling import (CABLE_CATEGORIES, CABLE_COLORS, CABLE_KINDS, LINK_KINDS,
                       _CABLE, _LINK)
-from .features import (FEATURE_KINDS, FEATURE_LAYERS, SHELVED_KINDS, SHELVES_MAX, _FEATURE,
+from .features import (ACCESS_KINDS, LOCK_KINDS,
+                       FEATURE_KINDS, FEATURE_LAYERS, SHELVED_KINDS, SHELVES_MAX, _FEATURE,
                        _SHELF_ITEM)
-from .floors import _FLOOR
+from .floors import WALL_KINDS, WALLS_MAX, _FLOOR, _FLOOR_WALL
 from .items import FACES, ITEM_ROLES, PLACEMENTS, ROLES_MUDOS, _ITEM
 from .parts import (PART_KINDS, PORT_FAMILIES, PORT_LIST_MAX, PORT_SIGNALS_MAX,
-                    WATTS_MAX, _PART, clean_port_list)
+                    WATTS_MAX, _PART, clean_place, clean_port_list)
 from .power import (FEED_CATEGORIES, FEED_COLORS, FEEDS, SOURCE_KINDS, _PDU, _POWER,
                     _SOURCE)
 from .racks import SIDES, _RACK, _ROW
@@ -79,16 +80,16 @@ from .sites import _SITE
 OWNER_SCOPES = ('site', 'room', 'rack', 'item')
 
 SCHEMAS = (_SITE, _FLOOR, _ROOM, _RACK, _ITEM, _FEATURE, _PDU, _POWER, _CABLE,
-           _LINK, _ROW, _SOURCE, _PART, _SHELF_ITEM)
+           _LINK, _ROW, _SOURCE, _PART, _SHELF_ITEM, _FLOOR_WALL)
 
 #: Lo que este paquete ofrece hacia fuera. Escrito y no deducido: casi todo se importa aquí
 #: sólo para volver a exportarlo, y sin esta lista cualquier herramienta lo llamaría muerto.
 __all__ = ['DcimStore', 'SCHEMAS', 'OWNER_SCOPES', 'FACES', 'ITEM_ROLES', 'ROLES_MUDOS',
            'PLACEMENTS', 'PART_KINDS', 'SIDES', 'COOLING', 'ROOM_HEIGHT_MM',
-           'FEATURE_KINDS', 'FEATURE_LAYERS', 'SHELVED_KINDS', 'SHELVES_MAX', 'FEEDS', 'SOURCE_KINDS', 'FEED_COLORS',
+           'ACCESS_KINDS', 'LOCK_KINDS', 'FEATURE_KINDS', 'FEATURE_LAYERS', 'SHELVED_KINDS', 'SHELVES_MAX', 'FEEDS', 'SOURCE_KINDS', 'FEED_COLORS',
            'FEED_CATEGORIES', 'CABLE_KINDS', 'CABLE_CATEGORIES', 'CABLE_COLORS',
            'LINK_KINDS', 'PORT_FAMILIES', 'PORT_LIST_MAX', 'PORT_SIGNALS_MAX',
-           'WATTS_MAX', 'clean_port_list', 'like_esc', 'like_clause', 'Rows', 'rank']
+           'WATTS_MAX', 'clean_place', 'clean_port_list', 'like_esc', 'like_clause', 'Rows', 'rank']
 
 #: El carácter con el que se escapa un `%` o un `_` dentro de una búsqueda. Una barra invertida
 #: es lo que entienden los tres motores con `ESCAPE`, y hace falta: sin ella, teclear `_` en el
@@ -179,6 +180,7 @@ class DcimStore:
         self.owners = self._orgs.owners
         self.sites = Rows(db, _SITE)
         self.floors = Rows(db, _FLOOR)
+        self.floor_walls = Rows(db, _FLOOR_WALL)
         self.rooms = Rows(db, _ROOM)
         self.racks = Rows(db, _RACK)
         self.items = Rows(db, _ITEM)
@@ -404,6 +406,20 @@ class DcimStore:
             capa = (kind or {}).get('layer', 'room')
             return FEATURE_LAYERS.index(capa) if capa in FEATURE_LAYERS else 1
         return sorted(rows, key=_peso)
+
+    def walls_of(self, floor_uid: str) -> list[dict]:
+        """Los tramos de muro de una planta."""
+        return self.floor_walls.list('floor_uid = ?', (str(floor_uid or ''),))
+
+    def set_walls(self, floor_uid: str, tramos: list[dict], *, actor: str = '') -> int:
+        """Los muros de una planta, enteros: los que había se van y quedan estos. Se guarda el
+        resultado de una revisión —lo que el plano dio y alguien aceptó, retocó o dibujó—, no un
+        tramo suelto: a medias, la planta tendría muros de dos lecturas distintas."""
+        for row in self.walls_of(floor_uid):
+            self.floor_walls.delete(row['uid'])
+        for t in tramos:
+            self.floor_walls.create(dict(t, floor_uid=str(floor_uid)), actor=actor)
+        return len(tramos)
 
     def shelf_items_of(self, feature_uid: str) -> list[dict]:
         """Lo que hay en un armario, por estantería y por nombre."""

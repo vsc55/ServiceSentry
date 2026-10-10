@@ -12,7 +12,7 @@
         "expected":    "Valor esperado"
     },
     "hints": {
-        "label":       "Nombre mostrado en Módulos, la página de estado y las notificaciones (p. ej. \"MX cerebelum.lan\"). Editable; se rellena desde el descubrimiento.",
+        "label":       "Nombre mostrado en Módulos, la página de estado y las notificaciones (p. ej. \"MX example.lan\"). Editable; se rellena desde el descubrimiento.",
         "enabled":     "Habilitar o deshabilitar la monitorización DNS para esta entrada.",
         "threads":     "Número de entradas a comprobar en paralelo.",
         "timeout":     "Timeout de resolución en segundos. El valor por ítem anula el valor global del módulo.",

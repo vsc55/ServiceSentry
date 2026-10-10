@@ -18,6 +18,7 @@ registered; every listed file's own header lists its exact per-endpoint routes.
                                                 off another's)
     audit            /api/v1/audit*
     backup           /api/v1/backups*
+    brand            /brand/<slot> (public picture), /api/v1/brand*
     diagnostics      /api/v1/diagnostics*       (read-only; the update check is the one call
                                                 that leaves the machine, and only on a click)
     config           /api/v1/config*            (+ /config/versions, /config/layout, /config/schema,
@@ -96,6 +97,7 @@ from lib.core.roles.routes import register as _roles
 from lib.core.groups.routes import register as _groups
 from lib.core.sessions.routes import register as _sessions
 from lib.core.apitokens.routes import register as _apitokens
+from lib.core.brand.routes import register as _brand
 from lib.core.mfa.routes import register as _mfa
 from lib.core.audit.routes import register as _audit
 from lib.core.backup.routes import register as _backup
@@ -156,6 +158,7 @@ def register_all(app, wa):
     _sessions(app, wa)
     _mfa(app, wa)
     _apitokens(app, wa)
+    _brand(app, wa)
     _audit(app, wa)
     _backup(app, wa)
     _diagnostics(app, wa)

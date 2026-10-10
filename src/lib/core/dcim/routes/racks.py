@@ -39,7 +39,8 @@ from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import rackrev as dcim_rackrev
 from lib.core.dcim import service as dcim_svc
 from lib.core.dcim import store as dcim_store
-from lib.core.dcim.store import FACES, ITEM_ROLES, LINK_KINDS, PART_KINDS, PLACEMENTS
+from lib.core.dcim.store import (FACES, ITEM_ROLES, LINK_KINDS, PART_KINDS, PLACEMENTS,
+                                 clean_place)
 from lib.core.dcim.routes._common import _fresh, _num, _without, scan_pages
 
 
@@ -69,7 +70,7 @@ def register(app, wa, C):
             'branches': _num(request.args.get('branches')
                              if request.args.get('branches') is not None else 2),
         }
-        said, allowed = store.owners_map(), C.seen()
+        said, allowed, estados = store.owners_map(), C.seen(), C.states()
         caps, por_uid = [], {}
         for site in store.sites.list():
             if not dcim_owners.may_see(C.owner_of(store, said, 'site', site['uid']), allowed):
@@ -85,7 +86,7 @@ def register(app, wa, C):
                     pdus = store.pdus_of(rack['uid'])
                     cap = dcim_svc.rack_capacity(rack, store.occupancy(rack['uid']), pdus,
                                                  store.feeds_of([p['uid'] for p in pdus]),
-                                                 C.states())
+                                                 estados)
                     cap['site'] = site.get('name') or site['uid']
                     cap['room'] = room.get('name') or room['uid']
                     caps.append(cap)
@@ -111,8 +112,12 @@ def register(app, wa, C):
         store = C.store()
         if not store:
             return jsonify({'sites': [], 'orgs': [], 'trouble': [], 'totals': {}})
+        # El estado de la flota, el mapa de dueños y lo que ve este lector, leídos UNA vez para
+        # toda la petición: cada uno es una lectura entera, y pedidos por equipo eran tres por
+        # cada uno de los cientos de la sede de demostración — el cuadro tardaba una eternidad.
+        estados, duenos, visto = C.states(), store.owners_map(), C.seen()
         out = dcim_svc.board(
-            store, C.states(), store.owners_map(), C.seen(), store.orgs.list(),
+            store, estados, duenos, visto, store.orgs.list(),
             # Con qué NOMBRAR lo que está mal: el hueco de un armario no siempre lleva
             # etiqueta, y una fila que dice el uid de la máquina no dice nada.
             device_names=C.names())
@@ -132,10 +137,9 @@ def register(app, wa, C):
             for sala in store.rooms_of(sitio['uid']):
                 for rack in store.racks_of(sala['uid']):
                     for it in store.items_of(rack['uid']):
-                        if dcim_owners.may_see(
-                                C.owner_of(store, store.owners_map(), 'item', it['uid']),
-                                C.seen()):
-                            por_item[it['uid']] = dcim_svc.item_state(it, C.states())
+                        if dcim_owners.may_see(C.owner_of(store, duenos, 'item', it['uid']),
+                                               visto):
+                            por_item[it['uid']] = dcim_svc.item_state(it, estados)
         out.update(dcim_svc.links_roll(enlaces, out['sites'], por_item))
         out['link_kinds'] = list(LINK_KINDS)
         # Con qué se dibuja, preguntado al catálogo: para Google hay que minar una sesión, y
@@ -208,7 +212,13 @@ def register(app, wa, C):
         if fila:
             salida['model'] = {'uid': str(fila.get('uid') or modelo),
                                'ports': fila.get('ports') or {},
-                               'port_list': fila.get('port_list') or {}}
+                               'port_list': fila.get('port_list') or {},
+                               # Y su interior: las vistas y dónde está cada bahía en ellas, que
+                               # es lo que deja ver qué pieza hay en cada hueco de ESTE equipo.
+                               'views': fila.get('views') or [],
+                               'port_map': fila.get('port_map') or {},
+                               'port_slots': fila.get('port_slots') or [],
+                               'port_slot_types': fila.get('port_slot_types') or {}}
         # Y lo que su plantilla decía, si nació de una. Ninguna de las dos partes es «el error»:
         # que una máquina se separe de su estándar es un hecho sobre esa máquina —le cambiaron
         # los discos— y la diferencia ES el dato, igual que en el contraste de cableado.
@@ -246,6 +256,10 @@ def register(app, wa, C):
         data = _without(request.get_json(silent=True) or {}, ('item_uid',))
         if 'kind' in data and str(data['kind']) not in PART_KINDS:
             return jsonify({'error': wa._t('dcim_part_kind_unknown')}), 400
+        # Su sitio libre en una vista interior, limpio: un JSON llegado del navegador no se
+        # guarda tal cual en una columna que luego se pinta.
+        if 'place' in data:
+            data['place'] = clean_place(data.get('place'))
         store.parts.update(uid, C.from_type(data), actor=C.actor())
         return jsonify({'ok': True})
 
@@ -423,6 +437,9 @@ def register(app, wa, C):
         roll = dcim_svc.tree_roll(store, C.states(), said, allowed)
         for rack in racks:
             rack['roll'] = roll['rack'].get(rack['uid']) or {}
+            # Y lo lleno que está: el 3D de la sala colorea por ocupación con esto, y sin ello
+            # cada rack salía en el gris de «no se sabe».
+            rack['used_u'] = dcim_svc.used_u(store, rack)
         return jsonify({'racks': racks})
 
     @app.route('/api/v1/dcim/racks/<uid>', methods=['GET'])
@@ -468,13 +485,19 @@ def register(app, wa, C):
         # porque el alzado ya recibe los items: pedir el catálogo aparte para pintar cuarenta
         # cajas sería una petición para saber si hay una foto.
         cat = getattr(wa, '_dcim_catalog', None)
-        fotos, nombres = {}, {}
+        fotos, nombres, bocas = {}, {}, {}
         for item in items:
             tipo = str(item.get('type_uid') or '')
             if tipo and cat and tipo not in fotos:
                 fila = cat.get(tipo) if hasattr(cat, 'get') else None
                 fotos[tipo] = {'front': str((fila or {}).get('front_image') or ''),
                                'rear': str((fila or {}).get('rear_image') or '')}
+                # Dónde está cada puerto en la cara, si alguien lo situó: es lo que hace que
+                # un cable salga de su boca y no del centro de la caja. Con la lista de bocas en
+                # su orden, para que «Gi1/0/7» encuentre la séptima aunque se llame `gi7`.
+                situadas = (fila or {}).get('port_map') or {}
+                bocas[tipo] = ({'map': situadas, 'slots': dcim_catalog.port_slots(fila or {})}
+                               if situadas else None)
                 nombres[tipo] = ' '.join(
                     x for x in (str((fila or {}).get('manufacturer') or ''),
                                 str((fila or {}).get('model') or '')) if x)
@@ -484,6 +507,8 @@ def register(app, wa, C):
                 # …y de un equipo ajeno tampoco sale su foto: la foto dice el modelo, y el
                 # modelo es de las cosas que un armario compartido no cuenta.
                 item['images'] = fotos.get(str(item.get('type_uid') or '')) or {}
+                if bocas.get(str(item.get('type_uid') or '')):
+                    item['ports_at'] = bocas[str(item.get('type_uid') or '')]
                 # Y cómo se LLAMA ese modelo. La ficha lo tiene que enseñar, y sin el nombre
                 # sólo puede enseñar el identificador — treinta y seis caracteres que no dicen
                 # nada, que es lo que ya pasaba con las plantillas.
@@ -1023,7 +1048,8 @@ def register(app, wa, C):
         # `build_uid` no se edita: dice de qué plantilla NACIÓ, y eso ya ocurrió. Cambiarlo
         # sería reescribir el origen de una máquina sin tocar ni una de sus piezas — una fila
         # que afirma algo que no pasó, y encima difícil de descubrir.
-        data = _without(request.get_json(silent=True) or {}, ('build_uid',))
+        data = _without(request.get_json(silent=True) or {},
+                        ('build_uid', 'demo_state', 'demo_reason'))
         # Cambiar CÓMO está puesto es moverlo: pasar de los mástiles al suelo es dejar de
         # ocupar una U, y sin contarlo entre lo que mueve, la comprobación no corría y el equipo
         # se quedaba con la U que tenía — un SAI al lado del armario listado en la U 1.

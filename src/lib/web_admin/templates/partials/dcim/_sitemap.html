@@ -161,7 +161,7 @@ function _dcimMapHtml(sites) {
     // Google ve el mismo dibujo vacío que antes de pegarla y no tiene por dónde empezar: la
     // tarjeta del panel de control ya lo decía y esta pantalla se callaba.
     const fallo = String((_dcmData().map || {}).error || '');
-    return `<div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative mb-3">
+    return `<div class="border rounded-3 overflow-hidden ss-infra-canvas ss-canvas-tall position-relative mb-3">
         <svg ${ssCanvasAttrs(_DCM_SVG, box)}
              data-zoom-in="${ssGeoZoomIn(box.width, _DCM_PX, _dcmZMax())}"
              data-zoom-out="${_DCM_ZOOM_OUT}"

@@ -48,7 +48,10 @@ class CliContext:
             self._config_store, config_path(config_dir),
             fernet=fernet, secret_keys=secret_manager.ENCRYPT_KEYS)
         self.cfg = self._config_mgr.read() or {}
-        self.lang = (self.cfg.get('web_admin') or {}).get('lang') or DEFAULT_LANG
+        # The panel's language is `web_admin|default_lang`. This read `web_admin.lang`, which
+        # no setting writes, so every command spoke the fallback whatever the panel was set to.
+        wa = self.cfg.get('web_admin') or {}
+        self.lang = wa.get('default_lang') or wa.get('lang') or DEFAULT_LANG
 
         self.users_store = UsersStore(self.db)
         self.groups_store = GroupsStore(self.db)

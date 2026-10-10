@@ -1367,6 +1367,9 @@ class TestUnaColumnaQueNadiePuedeEscribir:
         'rack_uid',                 # dónde se está creando, no un campo
         'type_uid',                 # lo estampa la plantilla o el catálogo
         'created_at', 'updated_at', 'updated_by',   # el registro, no el equipo
+        'demo_state',               # lo escribe solo la demo: por un campo, cualquiera pintaría
+                                    # de rojo un equipo de verdad (`SERVER_COLS`)
+        'demo_reason',              # su motivo: lo mismo
     }
 
     def _columnas(self):

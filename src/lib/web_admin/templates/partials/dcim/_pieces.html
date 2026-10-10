@@ -110,7 +110,9 @@ const _DCP_LOOK = {
     column:       {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-body-color)', cross: true},
     wall:         {fill: 'var(--bs-info-bg-subtle)', line: 'var(--bs-info)'},
     door:         {fill: 'var(--bs-warning)', line: 'var(--bs-warning)', dark: true},
-    panel:        {fill: 'var(--bs-body-secondary-bg)', line: 'var(--bs-body-color)'},
+    // `--bs-secondary-bg`: `--bs-body-secondary-bg` no existe, y un `fill` con una variable
+    // que no existe se pinta negro —el cuadro salía negro con el rótulo oscuro encima—.
+    panel:        {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-body-color)'},
     ups:          {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-secondary-color)'},
     crac:         {fill: 'var(--bs-info-bg-subtle)', line: 'var(--bs-info)'},
     bench:        {fill: 'var(--bs-tertiary-bg)', line: 'var(--bs-secondary-color)'},
@@ -118,6 +120,14 @@ const _DCP_LOOK = {
     extinguisher: {fill: 'var(--bs-danger)', line: 'var(--bs-danger)', dark: true},
     tray:         {fill: 'var(--bs-warning-bg-subtle)', line: 'var(--bs-warning)', dash: '6 3'},
     label:        {fill: 'none', line: 'none'},
+    turnstile:    {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-primary)', cross: true},
+    reader:       {fill: 'var(--bs-primary)', line: 'var(--bs-primary)', dark: true},
+    hose_reel:    {fill: 'var(--bs-danger-bg-subtle)', line: 'var(--bs-danger)'},
+    fire_alarm:   {fill: 'var(--bs-danger)', line: 'var(--bs-danger)', dark: true},
+    emergency_light: {fill: 'var(--bs-success-bg-subtle)', line: 'var(--bs-success)'},
+    smoke_detector:  {fill: 'var(--bs-body-bg)', line: 'var(--bs-secondary-color)'},
+    first_aid:    {fill: 'var(--bs-success)', line: 'var(--bs-success)', dark: true},
+    aed:          {fill: 'var(--bs-success)', line: 'var(--bs-success)', dark: true},
 };
 
 function _dcpLook(kind) {
@@ -154,8 +164,88 @@ function _dcpFeature(f) {
         ${puesto ? `<rect x="-1" y="-1" width="${w + 2}" height="${h + 2}" fill="none"
             stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
             vector-effect="non-scaling-stroke"></rect>` : ''}
+        ${_dcpAccessDot(f, w, h)}
         ${puesto && _dcimMay('dcim_edit') ? _dcpHandles(w, h, rot) : ''}
     </g>`;
+}
+
+/** El estado de una pieza del control de accesos —una cerradura, un torno, un IQ—, como un
+ *  punto en su esquina: el mismo color que un equipo del rack. Solo si lleva cerradura o es un
+ *  lector, y solo si tiene estado: una puerta normal no dice nada. */
+function _dcpAccessDot(f, w, h) {
+    const lleva = f.kind === 'reader' || f.kind === 'turnstile' || String(f.lock || '');
+    if (!lleva || !f.state) return '';
+    const r = Math.max(1.6, Math.min(3, Math.min(w, h) * 0.45));
+    return `<circle cx="${w - r}" cy="${r}" r="${r}" fill="${escAttr(deviceStateColor(f.state))}"
+        stroke="var(--bs-body-bg)" stroke-width="1" vector-effect="non-scaling-stroke"
+        style="pointer-events:none"><title>${esc(t('dcim_access_state') + ': ' + _dcpStateName(f.state))}</title></circle>`;
+}
+
+function _dcpStateName(st) {
+    const k = 'dcim_state_' + String(st || '');
+    const txt = t(k);
+    return txt && txt !== k ? txt : String(st || '');
+}
+
+/** El control de accesos de una pieza, en el inspector: qué cerradura, qué modelo y serie, a qué
+ *  IQ se conecta y a qué dispositivo vigilado, de donde sale su estado. En un lector o IQ, además,
+ *  lo que cuelga de él en toda la sede. */
+function _dcpAccessHtml(f) {
+    const d = _dcpFeat || {};
+    if (!(d.access_kinds || []).includes(f.kind)) return '';
+    const puede = _dcimMay('dcim_edit');
+    const dis = puede ? '' : ' disabled';
+    const set = (campo) => `onchange="_dcpSet(${jsStr(f.uid)},${jsStr(campo)},this.value)"`;
+    const texto = (campo, etiqueta) => `<label class="ss-fs-2 text-muted">${esc(t(etiqueta))}
+        <input class="form-control form-control-sm" value="${escAttr(String(f[campo] || ''))}"${dis}
+               ${set(campo)}></label>`;
+    const cerradura = f.kind === 'reader' ? '' : `<label class="ss-fs-2 text-muted">${esc(t('dcim_lock'))}
+        <select class="form-select form-select-sm"${dis} ${set('lock')}>
+            <option value="">${esc(t('dcim_lock_none'))}</option>
+            ${(d.locks || []).map(k => `<option value="${escAttr(k)}"${f.lock === k ? ' selected' : ''}>${
+                esc(t('dcim_lock_' + k))}</option>`).join('')}
+        </select></label>`;
+    const iq = f.kind === 'reader' ? '' : `<label class="ss-fs-2 text-muted">${esc(t('dcim_hub'))}
+        <select class="form-select form-select-sm"${dis} ${set('hub_uid')}>
+            <option value="">${esc(t('dcim_hub_none'))}</option>
+            ${(d.hubs || []).filter(x => x.uid !== f.uid).map(x => `<option value="${escAttr(x.uid)}"${
+                f.hub_uid === x.uid ? ' selected' : ''}>${esc(x.label || x.uid)}${
+                x.room ? ' · ' + esc(x.room) : ''}</option>`).join('')}
+        </select></label>`;
+    // El modelo del catálogo, de los de su clase: de ahí salen la marca y el nombre.
+    const tipos = (d.access_types || {})[f.kind] || [];
+    const modelo = `<label class="ss-fs-2 text-muted d-block mb-1">${esc(t('dcim_access_type'))}
+        <select class="form-select form-select-sm"${dis}
+                onchange="_dcpAccessType(${jsStr(f.uid)}, this.value)">
+            <option value="">${esc(t('dcim_access_type_none'))}</option>
+            ${tipos.map(x => `<option value="${escAttr(x.uid)}"${f.type_uid === x.uid ? ' selected' : ''}>${
+                esc(x.name)} · ${esc(_dcCatKindName(x.kind))}</option>`).join('')}
+        </select></label>`;
+    const devs = _dcimDevices || [];
+    const disp = `<label class="ss-fs-2 text-muted">${esc(t('dcim_device'))}
+        <select class="form-select form-select-sm"${dis} ${set('device_uid')}>
+            <option value="">${esc(t('dcim_access_no_device'))}</option>
+            ${devs.map(x => `<option value="${escAttr(x.uid)}"${f.device_uid === x.uid ? ' selected' : ''}>${
+                esc(x.name || x.uid)}</option>`).join('')}
+        </select></label>`;
+    const estado = f.state ? `<span class="badge fw-normal" style="background:${
+        escAttr(deviceStateColor(f.state))}">${esc(_dcpStateName(f.state))}</span>
+        ${f.device_uid ? '' : `<span class="text-muted ss-fs-1">${esc(t('dcim_access_demo'))}</span>`}` : '';
+    const cuelgan = f.kind === 'reader' ? `<div class="ss-fs-2 mt-2"><span class="text-muted">${
+            esc(tf('dcim_hub_hanging', (f.hanging || []).length))}</span>
+        <ul class="list-unstyled mb-0 ss-fs-2">${(f.hanging || []).map(g => `<li>
+            <span class="ss-dot" style="background:${escAttr(deviceStateColor(g.state || ''))}"></span>
+            ${esc(g.label || t('dcim_kind_' + g.kind))}<span class="text-muted"> · ${esc(g.room || '')}</span></li>`).join('')}</ul>
+        </div>` : '';
+    return `<div class="border-top pt-2 mt-2">
+        <div class="fw-semibold ss-fs-2 mb-1"><i class="bi bi-shield-lock me-1"></i>${esc(t('dcim_access_control'))} ${estado}</div>
+        ${modelo}
+        <div class="ss-grid-2 mb-1">${cerradura}${texto('model', 'dcim_access_model')}
+            ${texto('serial', 'dcim_serial')}${iq}</div>
+        ${disp}
+        ${_dcimWhyHtml(f, 'dcp-why')}
+        ${cuelgan}
+    </div>`;
 }
 
 /** El texto de algo girado, para que nunca quede boca abajo: va a lo largo de la pieza, como
@@ -252,6 +342,9 @@ const _DCP_ICON = {
     wall: 'bi-square-half', door: 'bi-door-open', panel: 'bi-lightning-charge',
     ups: 'bi-battery-charging', crac: 'bi-snow', bench: 'bi-table', cabinet: 'bi-archive',
     extinguisher: 'bi-fire', tray: 'bi-bezier2', label: 'bi-tag',
+    turnstile: 'bi-sign-turn-right', reader: 'bi-broadcast-pin',
+    hose_reel: 'bi-droplet-half', fire_alarm: 'bi-bell', emergency_light: 'bi-lightbulb',
+    smoke_detector: 'bi-record-circle', first_aid: 'bi-bandaid', aed: 'bi-heart-pulse',
 };
 
 /** Poner una pieza. Cae en el centro de lo que se está mirando y no en el origen: en el origen
@@ -379,7 +472,8 @@ function _dcpInspectorBody() {
                 onclick="_dcpDropFeature(${jsStr(f.uid)})" title="${escAttr(t('delete'))}">
                 <i class="bi bi-trash"></i></button>
         </div>
-        ${_dcShelfBox(f)}`;
+        ${_dcShelfBox(f)}
+        ${_dcpAccessHtml(f)}`;
 }
 
 /** Un rack en el inspector: lo que decide dónde está y cómo ocupa la sala.
@@ -651,10 +745,35 @@ async function _dcpFlush() {
     }
 }
 
+//: Los campos de una pieza que son texto; el resto son medidas.
+const _DCP_TEXT = ['label', 'lock', 'model', 'serial', 'hub_uid', 'device_uid', 'type_uid'];
+
+/** Elegir el modelo del catálogo de una pieza: su nombre pasa al campo «Modelo», que es lo que
+ *  se lee en el plano y en la búsqueda. */
+function _dcpAccessType(uid, tipo) {
+    const f = _dcpFeatures().find(x => x.uid === uid);
+    if (!f) return;
+    const elegido = (((_dcpFeat || {}).access_types || {})[f.kind] || []).find(x => x.uid === tipo);
+    f.type_uid = String(tipo || '');
+    const cuerpo = {type_uid: f.type_uid};
+    if (elegido) { f.model = elegido.name; cuerpo.model = elegido.name; }
+    _dcpSave(uid, cuerpo).then(() => _dcpRedraw());
+    renderDcim();
+}
+
 function _dcpSet(uid, campo, valor) {
     const f = _dcpFeatures().find(x => x.uid === uid);
     if (!f) return;
-    f[campo] = campo === 'label' ? valor : Number(valor);
+    f[campo] = _DCP_TEXT.includes(campo) ? String(valor || '') : Number(valor);
+    // A qué IQ se conecta y a qué dispositivo: de ahí salen su estado y la lista de lo que cuelga
+    // de cada IQ, que calcula el servidor. Se guarda ya y se vuelve a pedir la sala.
+    if (campo === 'hub_uid' || campo === 'device_uid' || campo === 'lock') {
+        _dcpSave(uid, {[campo]: f[campo]}).then(async () => {
+            const room = (_dcimPlan || {}).room;
+            if (room) { await _dcpLoadFeatures(room.uid); renderDcim(); }
+        });
+        return;
+    }
     _dcpRedraw();
     _dcpQueue(`/api/v1/dcim/features/${encodeURIComponent(uid)}`, {[campo]: f[campo]});
 }

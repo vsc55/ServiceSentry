@@ -15,7 +15,7 @@
     <div class="card login-card shadow-sm">
         <div class="card-body p-4">
             <div class="text-center mb-4">
-                <img src="/static/img/logo.png?v={{ asset_v }}" alt="{{ app_name }}"
+                <img src="{{ brand_src('logo') }}" alt="{{ app_name }}"
                      class="login-logo" width="640" height="427">
             </div>
             {% with messages = get_flashed_messages(with_categories=true) %}

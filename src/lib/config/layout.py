@@ -179,6 +179,10 @@ CARDS: tuple[dict, ...] = (
      'icon': 'bi-hdd-network', 'renderer': 'ipban_services'},
 
     # ══ Interface (UI presentation) ═════════════════════════════════════════
+    # The brand first: the name and the pictures the panel shows. Bespoke — the pictures are
+    # uploads, not fields (partials/cfg/_brand.html).
+    {'tab': 'interface', 'id': 'brand',       'title_key': 'brand_section',         'icon': 'bi-award',
+     'renderer': 'brand'},
     {'tab': 'interface', 'id': 'pub_status',  'title_key': 'public_status_section', 'icon': 'bi-globe',
      'renderer': 'pub_status'},
     {'tab': 'interface', 'id': 'audit',       'title_key': 'tab_audit',             'icon': 'bi-journal-text',

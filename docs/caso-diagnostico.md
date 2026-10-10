@@ -5,6 +5,42 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## Los puertos de la placa que «no se guardaban»
+
+**Síntoma.** Se situaban las bahías (CPU, memoria, M.2) sobre la foto de la vista interior
+«Placa» de un modelo, se pulsaba «Guardar», salía «Guardado», y al volver a abrir el editor no
+había ninguna marca. Unas veces sí se había guardado y otras no.
+
+**Diagnóstico.** La base tenía las posiciones del usuario guardadas, con la cara `v:<id>` de la
+vista, y el editor, cargado en node con esa misma fila, las dibujaba. El fallo tenía que estar en
+un camino concreto del navegador, así que se probaron todos en una instancia desechable con
+Playwright, guardando cada petición. Cinco caminos guardaban. Uno no: añadir una vista interior,
+o cambiar la foto de una vista, después de situar y antes de guardar. En ese caso «Guardar» solo
+mandaba `PUT /catalog/<uid>`, sin `PUT …/portmap`, y respondía 200.
+
+**Causa raíz.** Hubo tres problemas superpuestos:
+- `_dcCatViewAdd`, `_dcCatViewImg` y `_dcCatViewDrop` hacían `_dcPm = null` para que el editor
+  se rehiciera con las vistas nuevas. Eso tiraba también lo situado y sin guardar, y el guardado
+  del formulario solo manda las posiciones si el editor existe y tiene cambios.
+- Los casos en que sí se guardaba parecían fallidos por dos motivos:
+  - el editor siempre abría en la cara frontal, y lo situado estaba en «Placa»;
+  - el indicador y el aviso contaban solo conectores: situar solo bahías decía «sin situar» y
+    «0 de 7».
+
+**Solución.** Las funciones de las vistas ya no descartan el editor: trabaja sobre la misma fila,
+que ya trae la vista nueva. Quitar una vista solo borra lo situado en ella. Además:
+- el editor abre en la primera cara que tenga algo situado;
+- el indicador y el aviso suman conectores y bahías;
+- cerrar el diálogo con posiciones sin guardar pregunta antes de descartarlas.
+
+Lo prueban `TestWhatLookedUnsaved` y `TestEachFaceItsOwn` en
+`tests/integration/test_dcim_portmap.py`.
+
+**Lección.** Rehacer un estado de pantalla poniéndolo a `null` borra también lo que el usuario
+ha hecho y no ha guardado. Si un guardado posterior depende de ese estado, el fallo es
+silencioso: el guardado dice que funciona y no manda nada. Y un «no se guarda» puede ser un «no
+se ve»: hay que comprobar primero qué hay en la base antes de buscar el fallo en el guardado.
+
 ## El clic que caía al lado: el lienzo con bandas
 
 **Síntoma.** Al calibrar el plano de fondo de una planta, la escala salía exacta y el plano
@@ -1784,7 +1820,7 @@ llevaban desde el primer día en rojo sin que nadie lo supiera.
 
 **Fecha:** 2026-08-24 · **Área:** `lib/core/devices/service.py::_device_statuses`
 
-**Síntoma.** «¿Por qué los NAS erebor e isen salen en warning?» En la lista de Infraestructura
+**Síntoma.** «¿Por qué los NAS atlas e isen salen en warning?» En la lista de Infraestructura
 los dos con la insignia ámbar. Ningún check fallando, ninguna severidad, ningún mensaje. El
 resto de la flota —switches, routers, hipervisores— correcta.
 
@@ -1810,7 +1846,7 @@ elif a['has_warn'] or a['known'] == 0:
 
 ```text
 warning  PVE01      <- de verdad (el disco ceph)
-warning  erebor     <- el fantasma
+warning  atlas     <- el fantasma
 warning  isen       <- el fantasma
 ```
 
@@ -1818,7 +1854,7 @@ Faltaba por qué. La agregación busca el estado del check por su **clave pelada
 item). Y al mirar cómo se archivan las lecturas de esos dos:
 
 ```text
-erebor   checks OID: 0   perfiles: 12   filas: 295   clave pelada: NO
+atlas   checks OID: 0   perfiles: 12   filas: 295   clave pelada: NO
 isen     checks OID: 0   perfiles: 12   filas: 140   clave pelada: NO
          se archivan como  <item_uid>/<fila>   (metric='/AFP', '/Cached_memory', …)
 ```

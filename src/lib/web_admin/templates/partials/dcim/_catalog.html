@@ -508,7 +508,7 @@ function _dcCatTable(rows) {
             <td class="ss-fs-2"><span class="badge bg-body-secondary
                 text-body-secondary border fw-normal">${
                 esc(_dcCatKindName(r.kind))}</span></td>
-            <td class="text-muted ss-fs-1">${esc(_dcCatPorts(r))}</td>
+            <td class="text-muted ss-fs-1">${esc(_dcCatPorts(r))}${_dcPmBadge(r)}</td>
             <td class="text-muted ss-fs-1">${esc(r.source || '')}</td>
             <td class="text-end" style="width:7rem">${
                 _dcimMay('dcim_catalog_manage') ? `<div class="btn-group btn-group-sm"
@@ -752,9 +752,12 @@ function _dcCatProgressHtml(job) {
  *  decirlo antes y no después. */
 function _dcCatBasics() {
     showConfirmModal(t('dcim_cat_basics_ask'), async () => {
-        const r = await _dcimSend('POST', '/api/v1/dcim/catalog/basics', {});
+        // Con las fotos de los modelos con marca, que se bajan de la web del fabricante.
+        const r = await _dcimSend('POST', '/api/v1/dcim/catalog/basics', {images: true});
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-        showToast(tf('dcim_cat_done', (r.data || {}).count || 0), 'success');
+        showToast(tf('dcim_cat_done', (r.data || {}).count || 0)
+                  + ((r.data || {}).images ? ' · ' + tf('dcim_cat_images_got', r.data.images) : ''),
+                  'success');
         _dcCatFresh();
     });
 }
@@ -1149,7 +1152,10 @@ async function _dcCatShow(uid) {
     // que se llame `3" rack` rompiéndolos.
     _dcCatShown = r;
     const acciones = _dcimMay('dcim_catalog_manage')
-        ? `<button class="btn btn-secondary" onclick="_dcCatCloneShown()">
+        ? `${Number(r.ports_total || 0) ? `<button class="btn btn-secondary"
+                onclick="_dcPmOpen(${jsStr(String(r.uid || ''))})">
+               <i class="bi bi-geo me-1"></i>${esc(t('dcim_pm_open'))}</button>` : ''}
+           <button class="btn btn-secondary" onclick="_dcCatCloneShown()">
                <i class="bi bi-files me-1"></i>${esc(t('dcim_cat_clone'))}</button>
            <button class="btn btn-secondary" onclick="_dcCatEditShown()">
                <i class="bi bi-pencil me-1"></i>${esc(t('edit'))}</button>
@@ -1188,8 +1194,11 @@ function _dcCatExtraRows(r) {
     if (!claves.length) return '';
     // De un armario son medidas; de un componente son sus atributos, y llamarlos «medidas»
     // sería llamar medida a que un DIMM lleve ECC.
-    const titulo = String(r.tree || '') === 'component-types'
-        ? t('dcim_cat_attrs') : t('dcim_cat_measures');
+    // Y de un dispositivo, sus características —lo que dice el fabricante—: «medidas» de una
+    // cerradura sería llamar medida a su protocolo de radio.
+    const arbol = String(r.tree || '');
+    const titulo = arbol === 'component-types' ? t('dcim_cat_attrs')
+        : arbol === 'rack-types' ? t('dcim_cat_measures') : t('dcim_cat_specs');
     return `<div class="fw-semibold ss-fs-2 mb-1 mt-2">${esc(titulo)}</div>
         <table class="table table-sm align-middle mb-0 ss-fs-3"><tbody>${claves.map(k =>
         `<tr><td class="text-muted" style="white-space:nowrap">${esc(_dcAttrName(k))}</td>
@@ -1331,6 +1340,7 @@ function _dcCatEditShown() {
 function _dcCatEdit(r, clonar) {
     _dcCatPreview = false;
     _dcCatFormTab = 'data';
+    _dcPm = null;
     _dcCatCloneFrom = clonar && r ? r.uid : '';
     _dcCatEditing = clonar ? null : r;
     _dcCatForm = Object.assign({
@@ -1873,10 +1883,18 @@ function _dcCatFormDraw() {
                oninput="_dcCatFormExtra['${k}']=this.value" ${extra}></label>`;
 
     const conFila = !!(_dcCatEditing && _dcCatEditing.uid);
+    // Los datos, en cuatro: qué es, cómo es por fuera, por dónde se conecta y cuándo deja de
+    // tener soporte. Todo en una pestaña era una columna de veinte casillas donde los puertos
+    // quedaban debajo de la flujo de aire y las fechas fuera de la pantalla.
+    const vida = (((_dcCat || {}).lifecycle_fields) || []).length > 0;
+    const pest = (k, icono, clave) => `<li class="nav-item"><button class="nav-link${
+            _dcCatFormTab === k ? ' active' : ''}" onclick="_dcCatFormGo('${k}')">
+            ${icono ? `<i class="bi ${icono} me-1"></i>` : ''}${esc(t(clave))}</button></li>`;
     const pestanas = _dcCatPreview ? '' : `<ul class="nav nav-tabs mb-2">
-        <li class="nav-item"><button class="nav-link${
-            _dcCatFormTab === 'data' ? ' active' : ''}" onclick="_dcCatFormGo('data')">
-            ${esc(t('dcim_cat_tab_data'))}</button></li>
+        ${pest('data', '', 'dcim_cat_tab_data')}
+        ${pest('phys', 'bi-rulers', 'dcim_cat_tab_phys')}
+        ${pest('ports', 'bi-ethernet', 'dcim_cat_tab_ports')}
+        ${vida ? pest('life', 'bi-calendar-event', 'dcim_cat_tab_life') : ''}
         <li class="nav-item"><button class="nav-link${
             _dcCatFormTab === 'images' ? ' active' : ''}" onclick="_dcCatFormGo('images')">
             <i class="bi bi-image me-1"></i>${esc(t('dcim_cat_tab_images'))}</button></li>
@@ -1901,8 +1919,10 @@ function _dcCatFormDraw() {
     const marcas = ((_dcBrands || {}).rows || []);
     const lista = marcas.length ? `<datalist id="dc-cat-brands">${marcas.map(
         b => `<option value="${escAttr(b.name || '')}"></option>`).join('')}</datalist>` : '';
+    const tab = _dcCatPreview ? 'all' : _dcCatFormTab;
+    const ve = (k) => tab === 'all' || tab === k;
     const html = `${pestanas}${lista}<div class="d-flex flex-column gap-2">
-        <div class="d-flex gap-2 flex-wrap">
+        ${ve('data') ? `<div class="d-flex gap-2 flex-wrap">
             ${txt('manufacturer', t('dcim_cat_maker'),
                   marcas.length ? 'list="dc-cat-brands" autocomplete="off"' : '')}
             ${txt('model', t('dcim_cat_model'))}
@@ -1936,16 +1956,19 @@ ${/* Sin clases que ofrecer, ninguna casilla: un armario no es «un switch o un 
                         f.kind === k ? ' selected' : ''}>${
                         esc(_dcCatKindName(k))}</option>`).join('')}
                 </select></label>` : ''}
-            ${esModulo ? '' : num('u', 'U')}
             ${txt('part_number', t('dcim_cat_part_number'), 'style="max-width:12rem"')}
-            ${esComponente ? _dcCatCompCommon(d) : ''}
         </div>
         ${_dcCatTreeMismatch(f)}
+        ${_dcCatSchemaFields()}` : ''}
+        ${ve('phys') ? `<div class="d-flex gap-2 flex-wrap align-items-end">
+            ${esModulo ? '' : num('u', 'U')}
+            ${esComponente ? _dcCatCompCommon(d) : ''}
+        </div>
         ${/* Un componente también se enchufa por algún sitio: un cargador tiene una entrada
               de corriente y una salida de continua, y un adaptador USB-C a red tiene un USB-C
               de entrada y una RJ-45 de salida. Estaba solo en la rama de los chasis, así que la
               pregunta «¿qué latiguillo le hace falta a esto?» no tenía dónde contestarse. */
-          esComponente ? _dcCatCompFields(d, f) + _dcCatPortsBox()
+          esComponente ? _dcCatCompFields(d, f)
           : esRack ? _dcCatRackFields(ex, num) : `
         <div class="d-flex gap-2 flex-wrap align-items-end">
             ${check('is_powered', t('dcim_cat_powered'))}
@@ -1977,16 +2000,28 @@ ${/* Sin clases que ofrecer, ninguna casilla: un armario no es «un switch o un 
                 </select></label>`}
             ${ex('weight', t('dcim_cat_weight'), 'type="number" step="0.01" min="0"')}
             ${ex('weight_unit', t('dcim_cat_weight_unit'))}
-        </div>
-        ${_dcCatPortsBox()}`}
-        ${_dcCatLifeFields()}
-        ${_dcCatSchemaFields()}
+        </div>`}` : ''}
+        ${ve('ports') && !esRack ? _dcCatPortsBox() + _dcCatPlaceBox(conFila) : ''}
+        ${ve('life') ? _dcCatLifeFields() : ''}
         <div class="text-muted ss-fs-1">${esc(_dcCatPreview ? t('dcim_sch_preview_hint')
                                               : _dcCatEditing ? t('dcim_cat_edit_hint')
                                               : _dcCatCloneFrom ? t('dcim_cat_clone_hint')
                                                                 : t('dcim_cat_new_hint'))}</div>
     </div>`;
     _dcCatFormShow(html);
+    if (ve('ports') && conFila) _dcPmEmbed(_dcCatEditing);
+}
+
+/** Dónde situar los puertos sobre la foto, debajo de su lista. Sobre lo GUARDADO: lo que se
+ *  acaba de añadir arriba todavía no es una boca del modelo, y aparece aquí al guardar. */
+function _dcCatPlaceBox(conFila) {
+    const slots = conFila ? ((_dcCatEditing || {}).port_slots || []) : [];
+    return `<div class="fw-semibold ss-fs-2 mt-2"><i class="bi bi-geo me-1"></i>${
+        esc(t('dcim_pm_title'))}</div>
+        ${slots.length ? `<div class="text-muted ss-fs-1">${esc(t('dcim_pm_save_first'))}</div>
+                          <div id="dcPmBody"></div>`
+                       : `<div class="text-muted ss-fs-2">${esc(t(conFila ? 'dcim_pm_no_ports'
+                                                                          : 'dcim_pm_new_model'))}</div>`}`;
 }
 
 function _dcCatFormGo(tab) {
@@ -2033,8 +2068,10 @@ function _dcCatImagesHtml(conFila) {
         const nombre = String(r[face + '_image'] || '');
         return `<div class="col-12 col-md-6">
             <div class="fw-semibold ss-fs-2 mb-1">${esc(etiqueta)}</div>
-            ${nombre ? `<img src="${_dcimMediaUrl(nombre)}" alt=""
-                    class="img-fluid border rounded mb-2" style="max-height:10rem">`
+            ${/* Las dos al mismo ancho, el de su columna: son las dos caras del mismo chasis.
+                  Limitadas por alto, la de proporción más alta salía más estrecha que la otra. */
+              nombre ? `<img src="${_dcimMediaUrl(nombre)}" alt=""
+                    class="ss-face-img border rounded mb-2">`
                 : `<div class="text-muted ss-fs-2 mb-2">${esc(t('dcim_cat_no_image'))}</div>`}
             <div class="d-flex gap-2 align-items-center flex-wrap">
                 <input type="file" accept="image/*" class="form-control form-control-sm"
@@ -2050,7 +2087,8 @@ function _dcCatImagesHtml(conFila) {
             ${cara('front', t('dcim_cat_front'))}
             ${cara('rear', t('dcim_cat_rear'))}
         </div>
-        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_cat_img_hint'))}</div>`;
+        <div class="text-muted ss-fs-1 mt-2">${esc(t('dcim_cat_img_hint'))}</div>
+        ${_dcCatViewsHtml(r)}`;
 }
 
 async function _dcCatImgUp(face, inp) {
@@ -2698,6 +2736,13 @@ async function _dcCatEditSave() {
             encodeURIComponent(_dcCatEditing.uid)}`, cuerpo)
         : await _dcimSend('POST', '/api/v1/dcim/catalog', cuerpo);
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    // Y dónde están los puertos, si se tocaron en su pestaña: el mismo «Guardar».
+    if (_dcPm && _dcPm.embedded && _dcPm.dirty && _dcCatEditing && _dcCatEditing.uid) {
+        const pm = await _dcimSend('PUT', `/api/v1/dcim/catalog/${
+            encodeURIComponent(_dcCatEditing.uid)}/portmap`, {map: _dcPm.map});
+        if (!pm.ok) return showToast(pm.error || t('save_failed'), 'danger');
+    }
+    _dcPm = null;                      // antes de cerrar: si no, la guarda preguntaría
     hideInfoModal();
     showToast(t('saved'), 'success');
     _dcCatEditing = null;

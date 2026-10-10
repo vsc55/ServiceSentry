@@ -8,6 +8,446 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.139] - 2026-10-06
+
+### Added
+
+- **A brand layer: the platform's name, icon and logos.** It lives in Configuración ›
+  Interfaz › «Marca».
+  - The name is a config field, `brand|name`. `SS_BRAND_NAME` fixes it from the deployment and
+    locks the field. When empty the product's name is used, and the field shows it as its
+    placeholder.
+  - Four pictures can be replaced:
+    - the icon (tab and shortcuts);
+    - the main logo (sign-in and «About»);
+    - the square mark (boot screen, and the sidebar header in place of the generic icon);
+    - the email logo.
+  - Each slot falls back to the stock file until one is uploaded, and again when it is reset.
+- **What the name reaches.** It reaches what people see: the panel's title, sidebar, boot and
+  sign-in screens, the status page, emails, Teams cards, and the label an authenticator app
+  shows for the second factor.
+  - In emails it covers the sender name (unless somebody chose another), the subject prefix,
+    the header and the built-in strings. Administrator-typed strings are left alone, and custom
+    HTML templates get `{app_name}`.
+  - It does not reach what machines see: User-Agent, backup format, CLI.
+  - Saving the name applies it at once to the tab title, sidebar head, mobile top bar and
+  boot screen, without a reload.
+- **Each slot has its own rules.** They cover the accepted kinds, the weight, and the shape:
+  square, landscape, or square-to-4:1 for the email.
+  - They also cover the resolution: smallest and largest side, and a recommended size.
+  - A picture is judged by its bytes. One that does not fit is refused with its reason and its
+    measurements.
+  - An SVG with anything active is refused: script, event handlers, `javascript:`,
+    `foreignObject`, entities or external references. The ones that pass are served under a
+    content policy that runs nothing.
+- **Pictures are adjusted before they go up.** Picking a file opens a dialog with the picture
+  beside what the slot asks.
+  - A box that keeps the slot's shape picks the part to keep, or the whole picture is fitted
+    with transparent margins.
+  - The output size starts at the recommended one. The result is measured and weighed before it
+    is sent, falling back to WebP or JPEG only where the slot takes them.
+  - It all runs in the browser on a canvas, with no library. An SVG goes up as it is.
+- **The pictures live in the main database.** They go in a new table, `brand_asset`, so every
+  process shares them and backups carry them without being told.
+  - They are stored as base64 in 48 000-character chunks, because a MySQL `TEXT` holds 64 KB.
+  - `GET /brand/<slot>` serves them publicly. The URL is versioned by content and cached for a
+    year.
+  - `/api/v1/brand` reads them (`config_view`); upload and reset need `config_edit` and are
+    audited.
+  - `/favicon.ico` serves the installation's own icon when there is one.
+- **The stock pictures can be copied in as the installation's own.** «Copiar la de serie» per
+  slot, and «Copiar las de serie» for every slot still showing the stock one
+  (`POST /api/v1/brand/<slot>/stock`). This gives a starting point that stays even if the
+  product's pictures change.
+- **An own picture can be downloaded.** «Descargar» on a slot with its own picture gets the
+  stored one — the adjusted result, which nothing else keeps — as `brand-<slot>.<ext>`
+  (`/brand/<slot>?download=1`).
+
+- **A better 3D viewer for the floor and the building.**
+  - **It draws only when the picture changes.** It redrew sixty frames a second for a picture
+    standing still. Now each frame compares the camera, the size and the scene with the last
+    one drawn, and after a third of a second of nothing the loop stops until something wakes
+    it: input, a rebuild, a texture arriving, a resize (`ResizeObserver`).
+  - **Solid boxes are baked into a few buffers.** Their corners and colours are computed once
+    per scene, so a building is a handful of draw calls instead of thousands. Walls and glass
+    stay one by one, because their opacity follows the camera. Named boxes (racks, pieces) get
+    darker edges, so two racks side by side no longer read as one block. This lives in
+    `infra/_viewer3d_tools.html`.
+  - **Pointing at things.**
+    - Clicking a rack or a piece flies the camera to it and opens a card in the viewer: its
+      name, what it is, its state, its U used, and «Abrir el rack» or «Abrir el plano».
+    - In the floor and building views, a room picked once is flown to (after the double-click
+      window, so the second click still opens it).
+    - Every board of a cabinet answers as the cabinet; its name appears once.
+  - **Navigating.**
+    - Quick views in the corner, each a short flight: «Encuadrar todo», «Desde arriba» and
+      «Isométrica».
+    - «Isométrica» is a true isometric: no perspective (orthographic projection), 45° round
+      and 35.26° up. It stays so while it is turned and zoomed, and clicks still land, the
+      rays now all parallel. It was first a perspective view 15° from «Encuadrar todo», and
+      the two looked the same.
+    - Two fingers pinch to zoom and move together to pan.
+    - Name tags that would overlap a nearer one, or sit far beyond what is looked at, are left
+      out; area names go first.
+  - **Reading state from a distance.**
+    - In the floor and building views each room's floor is tinted by its worst state.
+    - «Muros bajos» drops the room walls to one metre to see inside from above.
+    - «Ocultar las de encima» leaves out the floors above the chosen one.
+    - Both are remembered per browser.
+
+- **One rack in 3D** (the rack view's fourth view, «3D»).
+  - Each item with a catalogue model shows the model's front photo on its front and its rear
+    photo on its back, right way up from either side. A rear-only item shows its front photo to
+    the rear door; a foreign item shows none. They were plain boxes, although the rack already
+    brought the photos for the elevation.
+  - A shared U and a tray are drawn as the elevation draws them. Slots were counted from 0, so
+    the second half of a U fell outside the rack, and the halves came out mirrored. Items
+    mounted on a tray were not drawn at all; now the tray is the plate under them and they
+    share it out (each with its own photo) as they say, or in equal parts.
+  - The state no longer covers the model's photo: the 6 cm block it was is replaced by a
+    design chosen in the toolbar («Estado»): an LED with its glow in the top corner (the
+    default), a 5 mm left edge as in the elevation, a top bar, a thin frame, a see-through tint
+    over the face, or none. The choice is remembered in the browser.
+  - **Its cables.** «Cables de red» and «Cables eléctricos» in the toolbar draw them as thin
+    tubes. A network cable goes from its port to the plane where cables are gathered (the rear,
+    or the front when both ends are patched from the front), along it to the side channel, up
+    or down to the other end, and leaves through the roof when the other end is in another
+    rack; in its own colour, or its kind's. A power cord goes from the item to its outlet on
+    the PDU, at that outlet's height on a side strip, along the strip's own plane; the cord is
+    dark and its plug carries the branch's colour (a blue branch A was the copper's blue). Very
+    dark cables are lifted so they show on a dark rack. Both are on by default, and the scene is
+    rebuilt when the cables and the power arrive after the rack.
+  - Seen in the browser and fixed: names sit on the item's face (on the lid they fell on the
+    item above); the network channel runs inside the right rail, where the rear post hid it; an
+    item nobody watches shows its mark in grey, so the design shows on any rack; something on a
+    tray without a depth is 30 cm deep, not the tray's; the camera starts closer.
+  - Each item sits in its U at its height, from the front or rear rail, and as deep as measured
+    (`depth_mm`) or as its kind usually is. Rack numbering from the top is honoured.
+  - Partial-U and half-width items keep their slot. 0U strips stand at the rear sides, «near»
+    items on the floor beside the rack, and another company's items stay anonymous.
+  - The state shows on the face to the aisle. Clicking an item flies to it and opens a card with
+    «Editar» and its device.
+  - It has its own viewer (`dcim/_rack3d.html`), so a room and a rack can be open at once.
+- **Circuits as layers over the room, floor and building in 3D** (`dcim/_look3d.html`).
+  - **Network** («Red»): one run per pair of racks, routed like a tray over the racks, as thick as
+    its cable count and coloured by what it mostly carries (fiber, copper, DAC…).
+  - **Power** («Energía»): each rack to the source of each of its strips, coloured by branch
+    (A blue, B red, amber when the source is bypassed), and each source to the one above it.
+  - A source that is a UPS item in a rack starts from that rack. Sources with no physical place
+    stand in a named row at the edge.
+  - Clicking a run tells what it carries. Data comes from the new
+    `GET /api/v1/dcim/sites/<uid>/circuits` (aggregated per rack pair, filtered as everywhere).
+- **Tools over the inventory's 3D:**
+  - **Search:** by name in what is drawn, with Enter for the next. Otherwise it asks the site's
+    items and points at the rack holding one. What is found gets a halo, a flight and its card.
+  - **Colour by:**
+    - in the room, floor and building: state, occupancy (U used: green, amber, red) or company;
+    - in the rack: state, kind, company or warranty. A legend line explains each.
+  - **Only problems:** dims everything without a warning or an error.
+  - **Live:** every 30 s, with the tab in view, the states of what is shown are fetched again
+    and the scene rebuilt without moving the camera.
+  - **The camera in the address** (`v3d`, `cam`): F5 or a pasted link opens the same 3D view
+    from the same place. It is written when the camera comes to rest.
+  - **Engine buttons:** a PNG of the view with its names, measuring between two clicks, and
+    walking at eye height.
+- **A floor's core.** Its stairs or lift are set in the floor inspector and marked by clicking
+  the plan. New columns `core_kind`, `core_x` and `core_y` on `dc_floor`. In 3D it is a glass
+  column with its name; stacked floors show the shaft through the building.
+- **A floor's walls read from its plan.** «Muros» in the floor plan's toolbar opens a review.
+  - **Detection:** «Detectar en el plano» reads the background image in the browser, with no
+    library. Dark strokes as thick as a wall (6–70 cm, from the calibration), straight and longer
+    than 60 cm, are proposed in orange. Thinner strokes (dimensions, text), short ones and solid
+    blobs are left out, and walls cut by a small gap are joined. Darkness and minimum thickness
+    can be tuned.
+  - **Review:** proposals can be accepted all at once, picked one by one (touching one accepts
+    it), deleted, or adjusted by dragging their ends. Walls, doors and windows can be drawn by
+    clicking corners, squared and snapping to wall ends.
+  - **Saved:** the walls are kept per floor in a new table `dc_floor_wall`
+    (`GET/PUT /api/v1/dcim/floors/<uid>/walls`, saved as a whole and removed with the floor) and
+    served with the site's contents.
+  - **In 3D:** the floor and the building raise them. A wall goes floor to ceiling, a door
+    becomes its lintel, a window becomes sill, glass and lintel. «Muros bajos» lowers them too.
+  - **Two kinds of plan.** «Doble línea (CAD)», the default, is for plans that draw a wall as two
+    thin parallel lines. Only pairs of long lines 5–45 cm apart are taken, each pair becoming one
+    wall, centred and as thick as it really is. A line alone is left out: hatching, furniture and
+    text. «Muros rellenos» is for plans that draw walls as thick strokes.
+  - «Mixto», the default, reads plans that mix both styles, as most do: the perimeter as a
+    double line and interior partitions as one thick stroke. Pairs become walls first; of what
+    is left unpaired, only strokes of 8 cm or more stay.
+  - A wall read twice, as a pair and as a loose stroke, comes out once: the longer one, as
+    thick as the thicker. Changing mode reads the plan again instead of keeping the previous
+    mode's proposals, and the darkness slider moves in steps of 1 so it can show the automatic
+    value exactly.
+  - In every mode, a line with four or more parallels within 1.5 m is dropped: roof hatching,
+    stair treads, shelving grids. It was half of what a real plan proposed.
+  - The darkness slider shows the automatic threshold it is using until somebody moves it, and
+    can go back to «auto».
+  - A door or window drawn on a wall opens it in 3D, splitting the wall around the opening.
+  - Saved walls are drawn in cyan, doors in amber and windows in violet; dark grey was lost
+    over a plan of black lines.
+  - **Limits:** diagonal or curved walls are not detected and are drawn by hand. An uncalibrated
+    plan still gives walls, with a warning that their metres will be wrong.
+- `GET /sites/<uid>/contents` and `GET /racks?room=` now carry each rack's `used_u`, counted
+  once in the service (`used_u`). Without it «Ocupación» left a room's racks grey.
+- **A demonstration site: `main.py dcim demo`.** It builds a site called «Demo» holding
+  everything the physical inventory can hold (`lib/core/dcim/demo.py`).
+  - Five floors with an SVG background plan, walls, doors (towards the corridor), windows and a
+    stair core in the same place on each; 29 rooms placed on them, and a rack and a panel in a
+    floor's general area.
+  - A whole building: reception and a large meeting room on the ground floor; an office floor
+    with a 24-desk open office, four private offices, two meeting rooms, a training room, a
+    kitchen and the floor's communications room; a technical floor with a server room cooled by
+    wall splits, an HPC room on a contained hot aisle with in-row coolers between the racks, its
+    communications room, an 18-desk office, a meeting room and an office; a battery room in the
+    basement. Desks are named by floor and number («P2.07», short enough to read on the desk).
+    Every door gives onto a corridor at least 1.2 m wide, and nothing in a room overlaps; the
+    room names on the floor plans are sized to fit their room.
+  - Every kind of cooling (contained cold aisle with room CRACs, contained hot aisle with in-row
+    coolers, wall splits, none), and the models say their airflow (servers front to rear,
+    switches rear to front).
+  - Items in warning and in error: most active items of the data rooms and the communications
+    rooms are ok, a few are in warning and a few in error, and the lab and the recovery site stay
+    unwatched. It is a demo state (new column `dc_item.demo_state`), read by the same
+    `item_state` every screen uses, only for an item with no device, and written by no route:
+    the demo creates no devices or checks, so the monitor probes nothing and no alert can be
+    sent about a machine that does not exist. Each such item says so in its description.
+  - Access control, with the general catalogue's models (Salto's IQ, Neo Cylinder, XS4 Locker,
+    and a generic tripod turnstile), brought in from the basics if missing and kept when the demo
+    goes: a Salto IQ per floor on a wall, Neo cylinders on the doors of the technical
+    rooms and private offices, XS4 Locker locks on the reception lockers and floor cabinets, and
+    two turnstiles with readers at the entrance — each lock hanging from its floor's IQ. Most are
+    ok; a cylinder has a low battery, a turnstile lost contact with its IQ and a locker reports
+    tampering.
+  - The whole building on the map. What hangs on a wall —the IQ gateways, extinguishers, panels,
+    hose reels, call points, emergency lights, first aid kit, AED— is on a wall, facing into its
+    room (the IQs were loose in the middle of the room). Every room has smoke detectors on the
+    ceiling (one every 6 m), an emergency light over its door and an extinguisher beside it; every
+    corridor has, on the walls that give onto it, an emergency light over each door and, taking
+    turns, an extinguisher with a call point or a hose reel; each floor's panel is on the façade,
+    and the reception has a first aid kit and an AED. Wall pieces sit on the wall's inner face,
+    half a partition in from the room's edge (its centre line), and wall splits are moved onto
+    their wall too, keeping their height. Nothing on a corridor wall falls in a door's gap; each
+    floor's corridor extinguishers carry its floor's name; emergency lights and smoke detectors
+    go unnamed on the plan, so their names no longer cover the door's or the detector itself.
+  - Each floor's communications room has its rack with desk patch panels cabled port for port to
+    their PoE access switches, a UPS beside it, and fibre to both cores; each floor has its panel.
+  - A data centre with two rows facing across a confined cold aisle, a network row, CRACs,
+    trays, columns and a reserved zone; racks full, half full and empty.
+  - Items of every placement: bolted, half-width, mounted on a shelf, front and rear, side PDUs,
+    a UPS on the floor beside a rack. Some servers carry parts.
+  - Power from the mains through the panels to UPS A and B (B in bypass), each rack's A/B PDUs
+    and their outlets, with two cases the power view flags: a server on one branch only and a
+    GPU rack past the safe load.
+  - Cabling within racks, between racks, between floors over fibre, and two WAN links to a small
+    second site, «Demo · Respaldo» («Demo · DR» in English). Two companies: the operator, and a customer that rents two
+    racks. Cabinets with their shelves, benches, doors, extinguishers.
+  - Its items look like what they are: the demo brings its own catalogue models (maker «Demo»,
+    origin `demo`) with front and rear faces as SVG files in the repository
+    (`lib/core/dcim/data/demo/faces/`, read by `lib/core/dcim/demo_faces.py`):
+    servers with drive bays, 48- and 24-port switches, a core switch, router, firewall, patch
+    and fibre panels, storage array, console server, KVM, mini PC. Removing the demo removes
+    them with their pictures, except one somebody put to use on an item of their own.
+  - Its words come from `lib/core/dcim/data/demo/<lang>.json` (Spanish and English), so it is
+    built in the installation's language; only «Demo» itself is the same in all of them.
+  - Each PDU's outlets follow the U they feed, so a cord runs to the outlet beside its item.
+  - It refuses to build twice; `--replace` rebuilds it and `--remove` deletes it with its plan
+    files. Only the two demo sites are touched, found by name. Every bolted item is checked with
+    the same fit rule the API applies before it is written.
+
+- **The building's safety on the map.** New room piece kinds, each at the height it really hangs:
+  fire hose reel (BIE), fire alarm call point, emergency light, smoke detector (on the ceiling),
+  first aid kit and defibrillator (AED), with their look on the plan, icon and 3D colour.
+- **Access control in the physical inventory** (asked for: a system like Salto KS, with its IQ
+  gateways, Neo electronic cylinders on doors, XS4 Locker locks on lockers, and turnstiles).
+  - Two new room piece kinds: «Torno» (turnstile, with its entry side) and «Lector / IQ» (a reader
+    or a gateway on a wall, at the height it hangs).
+  - A door, a cabinet, a turnstile or a reader can carry access control (new `dc_feature`
+    columns): the lock —electronic cylinder, escutcheon, locker lock, reader—, its model and
+    serial, and the gateway it connects to (`hub_uid`, a reader of the same site).
+  - Its state, like an item's: from a linked watched device or, in the demo, a demo state
+    (`dc_feature.demo_state`, written by no route). Shown as a dot on the room plan, a light on
+    top in the room's 3D, and a badge in the inspector.
+  - Access control models live in the catalogue like any other, under four new device kinds
+    (access gateway, electronic lock, access reader, turnstile): a room piece points at its model
+    (`dc_feature.type_uid`), chosen in the inspector among the models of its kind, and its brand
+    and picture come from there.
+  - The general catalogue's basics (`data/basics.json`, «Traer los básicos») bring them: generic
+    ones (tripod turnstile, access gateway, electronic cylinder, locker lock, wall reader) and
+    the Salto KS range as Salto's website lists it — IQ 2.0, Neo Cylinder, XS4 One, XS4 Original,
+    XS4 Mini, XS4 Locker, Neoxx Padlock, Design XS Reader, Glass XS Reader, BLUEnet Door
+    Controller, and Gantner's NET.Lock. Each with its product page and the characteristics the
+    website states, shown in a «Características» block (the IQ's: 16 doors, radio, indoor range,
+    connection, 12 V power, 0–40 °C, security, certifications); no part numbers. A new kind,
+    door controller. A basics row may now say its maker, description, page, characteristics and
+    picture.
+  - The makers' pictures are not in the repository: they are downloaded from the maker's website
+    into the installation when the basics are brought in (the catalogue button asks for them,
+    `{"images": true}`; `main.py dcim demo` too, unless `--no-images`). Only `https` addresses
+    from the basics file, capped in time and size; without internet the models come without a
+    picture.
+  - The inspector's «Control de accesos» section edits all of it; a gateway lists what hangs from
+    it across the whole site, with each one's state. Unknown locks, and gateways that are not a
+    reader of the same site, are refused.
+- **Where each port is on a model** (Catálogo › modelo › «Situar puertos»). Libraries say how
+  many ports a model has and what they are called, not where they are, so they are placed by hand
+  on the front or rear picture, or on the face in its proportion when there is none.
+  - One by one (each click places the chosen port and moves to the next unplaced one), in a row
+    (two clicks, first and last), or in two rows, odd on top as on most switches. Markers are
+    dragged to move them; there is undo and «Quitar».
+  - Several at once: Ctrl or Shift in the list, a box dragged on the picture (Shift adds),
+    «Todas de esta cara» or Ctrl+A. Dragging one moves all the selected together, the arrow
+    keys nudge them (Shift for a longer step), and «Quitar» or Delete removes them.
+  - Each face lists only what can go on it: a front port (`front-ports`) only in front, a rear
+    port only behind (the server refuses the other face too), and a port placed on one face no
+    longer on the other. Placing one by one, a row and «next» all follow that face's ports.
+  - A port is listed by what it is. A model that only counts its ports ("2 × USB-A, 1 × USB-C")
+    gets them numbered within their type —«USB 3.1 Gen 2 Type C 1»— instead of «Puertos
+    frontales 1, 2, 3»; a named port shows its type beside its name.
+  - Saved whole in a new column `dc_type.port_map`, by port name
+    (`PUT /api/v1/dcim/catalog/<uid>/portmap`); only ports the model has are kept, and a
+    re-import of the library keeps the positions by the model's normalised name.
+  - The table marks each model with ports: «sin situar», «12/48» or «situados»; clicking it opens
+    the editor. It is also in the model's card and in its form's «Puertos» tab, where what is placed
+    is saved with the form's own «Guardar».
+- **Inside views of a model, and which part is in each bay** (asked for: where the CPU and the
+  memory go, on the board or on a part of a server's chassis).
+  - A model can have several named inside views —«Placa», «Riser 1», «Jaula de discos»— each with
+    its picture, in its form's «Imágenes» tab: added with a name and a file, renamed, picture
+    replaced, removed (with its picture and what was placed on it). New column `dc_type.views`
+    and `POST/PUT/DELETE /api/v1/dcim/catalog/<uid>/views[/<vid>[/image]]`.
+  - Each view is one more face of the port editor, where the bays (module and device bays: CPU
+    socket, memory, M.2, PCIe, drive bays) are placed like the ports. Bays are counted apart
+    from connectors, so the table's mark still speaks of ports.
+  - An item's «Componentes» tab shows its model's inside views with their bays: green the ones a
+    part is in (by the same slot name the slot list uses, matched loosely), dashed the free ones.
+    Clicking a free bay starts adding a part with that slot chosen; clicking a full one opens
+    its part.
+  - A re-import keeps the views and what is placed on them.
+  - **And the parts of each item, placed on them.** In «Por dentro» the item's parts are listed
+    with where each one is (in a bay, placed freely, with a slot not drawn, or nowhere). Choose
+    one and click a free bay to put it there —a kit of two takes a second bay, a full part moves,
+    the same bay again takes it out— or any point of the picture to leave it there; parts can also
+    be dragged onto the picture, and a freely placed one dragged to move it. «Sacar de su sitio»
+    clears both. A freely placed part is stored per item in a new column `dc_part.place`.
+- **The model form in tabs.** «Datos» held twenty fields in one column, with the ports below the
+  airflow and the lifecycle dates off the screen. Now: «Datos» (what it is), «Físico» (U, power,
+  depth, airflow, weight; a rack's or a component's measures), «Puertos» (the port rows and where
+  each one is on the picture) and «Vida» (the lifecycle dates).
+  - In the rack in 3D a network cable leaves its own port —by name, by the number its port ends
+    in («Gi1/0/7» is the seventh), on its face— and a power cord leaves the item's inlet.
+  - The demo's models bring their ports —how many, of what type and what each is called— already
+    placed where their pictures draw them, named as its cables name them.
+- **The inventory's 3D says what is under the pointer, and a rack opens where it stands.**
+  - Moving the mouse over anything —a door, a cabinet, a rack, an item, an extinguisher— shows a
+    label beside the pointer: its name (or what it is, if it has none), its kind, its model and
+    lock, its U, its room and its state. In a floor or the building, over an empty floor, the
+    room's name. The engine asks whoever mounted the viewer (`onHover`), once per frame at most,
+    and only while no button is pressed; touch has no hover and keeps the tap.
+  - A rack's card in the room, floor or building 3D has «Abrir aquí»: the rack's own 3D scene
+    —its items, their photos, its cables— is drawn in its place, turned as it is, inside a glass
+    box. Its items can be pointed at and clicked; an item's card closes it again.
+  - Checked in a browser, and fixed there: an open rack's item labels were drawn at the room's
+    corner (`ss3dPlace` moved the boxes but not their `lee.at`); the opaque front state stripe
+    hid what was opened, and is left out while open; opening flew to the rack keeping the
+    camera's angle and could end at its back, now it faces its front; an item's label inside
+    says its room; and «Bien» in the label was dark grey on near-black.
+
+- **A site's summary counts its devices by state.** Beside floors, rooms, racks, U and devices,
+  a row of cards says how many are down, warning, fine, in maintenance and unwatched. The down
+  and warning cards are highlighted —border, background and icon— when there are any, and lead
+  to the board; at zero they stay muted, because a red zero shouts as loud as a red thirty.
+  The tree's rolls (`rack_roll`, and each room and site in `tree_roll`) carry `counts`.
+
+- **Clicking a device in error or warning says why.** A device with a machine behind it lists
+  its failing checks, each with its level and message, asked of the device modal's own route
+  and under its permissions (without them, it says so). A demo item says the reason the demo
+  gave it —new `demo_reason` on `dc_item` and `dc_feature`, written only by the demo, like
+  `demo_state`: «Both power supplies have no input power», «GPU 5 at 88 °C»…—. It is said in
+  the 3D card (items and pieces), from the state badge in the rack's list, on top of the item's
+  form (what clicking it in the elevation opens), under each row of the board and in the plan's
+  inspector for an access piece.
+- **«Go to device» wherever a device is shown.** Its page in Infrastructure —SNMP results,
+  modules, charts— from the 3D card (items and access pieces, first, before Edit), the «why»
+  window and each row of the board. The 3D card had a button only when a device was linked,
+  labelled just «Device»; with none it showed Edit alone and said nothing. Now it says that
+  no device is linked and that Edit is where to link one.
+
+### Fixed
+- The inventory's board took «an eternity» to open with the demo site built. Its route read the
+  whole fleet's state, the owners map and the reader's reach once per item —451 reads of the
+  fleet's state for one request— to colour the links between sites. Each is read once per
+  request now; the rack capacity route had the same read once per rack.
+- The board's map sat at the canvas's 240px floor, a strip across the screen. It takes half the
+  screen now (360–720px), through a generic `.ss-canvas-tall`.
+- A site tile with a long name («Demo · Respaldo») pushed its state badge out of the card. The
+  tile is a grid (a second `.ss-tile` rule), and a grid item does not shrink below its widest
+  unbreakable line: the card body is `min-w-0` too now, so the name truncates and the badge
+  stays inside.
+- Company names, a host name and an internal domain taken from a real installation are replaced
+  by fictional ones across tests, code comments, docs and this changelog's earlier sections.
+- The demo's corridor rack stood loose in the middle of the ground floor's entrance hall. It is
+  now a 12U wall rack («Rack mural P0»), hung at 1.2 m on the corridor face of the meeting room's
+  wall, near its corner and clear of its door and of the extinguisher beside it.
+
+- **Port positions on an inside view were lost, or looked unsaved.** Adding an inside view or
+  changing a view's picture after placing and before saving threw the placed positions away,
+  and «Guardar» then saved the model without them, silently. The editor now keeps them; removing
+  a view drops only what was placed on it. It also opens on the first face that has something
+  placed, the table's mark and the saved notice count bays as well as ports («0 of 7» when only
+  bays had been placed), and closing the dialog with positions not saved asks before discarding
+  them.
+- **A rack with a single branch no longer warns «if its pair goes down».** The over-half-load
+  warning assumed an A/B pair; a floor communications rack hanging from one UPS got a warning
+  about a pair it does not have. It now needs both branches; the single-branch warning still says
+  what is true of such a rack.
+- **An electrical panel on a room plan was painted black**, its name dark on top and unreadable:
+  its fill used `--bs-body-secondary-bg`, which Bootstrap does not define. It is
+  `--bs-secondary-bg` now.
+- **Inventory pictures up to 16 MB, not 2.** Models' front, rear and inside pictures, room and
+  floor plans and site photos were refused above 2 MB, which is every photo taken with a phone
+  (3 to 8 MB). The request itself may still carry up to 80 MiB.
+- **`main.py` no longer dies when its output cannot carry a character.** On Windows with the
+  output redirected the encoding is the ANSI code page, and the default-credentials banner's «⚠»
+  raised `UnicodeEncodeError` at start-up. Standard output and error now replace what they cannot
+  encode.
+- **A model's front and rear pictures show at the same width** in its «Imágenes» tab. They were
+  capped by height, so the one with the taller proportion came out narrower (`.ss-face-img`).
+- **An item's name reads over its model's photo in the rack elevation:** a halo of the page
+  background behind the letters (`.ss-svg-halo`).
+- **The command line spoke the panel's language at last.** It read `web_admin.lang`, which no
+  setting writes, instead of `web_admin|default_lang`, so every command fell back to English;
+  and `-l/--lang` never reached the commands. Both now apply, `-l` first.
+- **Config section descriptions use the header's whole width.** They were capped at 62
+  characters per line, so a short one broke in two beside empty space.
+- `docs/explica-rendimiento.md` gave `MAX_CONTENT_LENGTH` as 8 MiB on a line that had moved; it
+  is 80 MiB.
+
+### Tests
+
+- `tests/unit/test_brand_service.py`: the name, what a picture may be, resolution and shape, the
+  chunked store, the email logo.
+- `tests/integration/test_wa_brand.py`: uploading, serving, resetting, permissions, the pages
+  and the favicon following the brand.
+- `tests/integration/test_wa_dcim_walls.py`: reading walls off synthetic plans, the review's
+  snapping, walls/doors/windows in 3D, and the walls API.
+- `tests/integration/test_wa_dcim_circuits.py` (circuits API, the floor core) and
+  `tests/integration/test_wa_dcim_3d_more.py` (the rack in 3D, circuits drawn, colour by, only
+  problems, search, the camera in the address, measuring, the core).
+- `tests/integration/test_wa_viewer3d_tools.py`: the loop sleeps, baked boxes and their edges,
+  flying, picking a turned box, name tags that do not pile up, the pinch, and the inventory on
+  top (state tint, low walls, cabinets, the card). `test_wa_viewer3d.py` guards the tools file
+  too.
+- `tests/integration/test_wa_brand_crop.py`: the box keeps the slot's shape, the result starts at
+  the recommended size, the name's placeholder. A picked picture is read as a `data:` URL —
+  through `blob:`, which the content policy does not allow, it never loaded.
+- The stock-logo, favicon, app-name and email-logo tests now follow the brand.
+- `tests/integration/test_dcim_demo.py`: the demo fills every inventory table, nothing bolted
+  overlaps, power reaches the mains, cabling crosses racks, floors and sites, it refuses to
+  duplicate itself, and removing it leaves no row, file or company behind.
+- `tests/integration/test_wa_dcim_3d_hover.py`: the label each thing gives under the pointer,
+  that the engine asks only while nothing is dragged, and an open rack drawn in its place and
+  turned with it.
+
 ## [0.0.1+build.138] - 2026-10-06
 
 ### Added
@@ -2322,8 +2762,8 @@ All notable changes to **ServiceSentry** are documented in this file.
   short form or description, groups what is already linked ahead of the rest, and pre-selects
   **only what is already linked and has changed** — fifty-nine departments are not fifty-nine
   companies this house wants to know about. Rows can be linked by hand to a local company, which
-  is the one thing the panel cannot deduce: that "Amixalan Energy Supplies, S.L." over there and
-  "Amixalan" here are the same house is known by the person looking, and guessing it from
+  is the one thing the panel cannot deduce: that "Avellana Energy Supplies, S.L." over there and
+  "Avellana" here are the same house is known by the person looking, and guessing it from
   similar names would join two that merely resemble each other.
 
   Testing the connection answers the other half too: it reads their status page — incidents,
@@ -2805,7 +3245,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   Checked before writing, and separately for the short form: two companies with one name are one
   company typed twice, and two with the same short form put a badge on an elevation that does not
   say whose the cabinet is — which is the only thing a short form is for. Compared stripped and
-  case-folded, because "Amixalan" and "amixalan " are two rows and one company; an empty short
+  case-folded, because "Avellana" and "avellana " are two rows and one company; an empty short
   form is never a collision, since not having one is the normal case. The unique index stays as
   what it is, a backstop: another request fits between the check and the INSERT, and that one is
   answered with the same sentence instead of the trace.
@@ -7450,7 +7890,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   wrong on its own.
 - **…and the dialog it opens now draws the columns the collection dialog draws** — which
   device, what is being done to it, how far through. A step travels as `{state, text, scope,
-  n, total, note}` instead of one flattened sentence: "erebor · Reading the metrics · 2/24
+  n, total, note}` instead of one flattened sentence: "atlas · Reading the metrics · 2/24
   Disks" is the same words with the thing that makes forty of them scannable taken away.
 - **A dialog closed with the X reopened itself on the next visit to the section.** It was
   checked against a variable rather than against the dialog, and closing one tells this file
@@ -7784,7 +8224,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   drawn as the stronger statement it is.
 - **A neighbour nobody registered is not acquired as inventory.** It is real, and the map is
   the wrong place to add machines to the fleet.
-- **"erebor" and "erebor.cerebelum.lan" are one machine.** LLDP reports a hostname and the
+- **"atlas" and "atlas.example.lan" are one machine.** LLDP reports a hostname and the
   registry holds whatever somebody typed; refusing to join them would draw every link missing
   on precisely the fleets that have a search domain.
 
@@ -7911,7 +8351,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   showed one line reading `snmp · Ejecutando…` and nothing else, which is exactly as much as a
   spinner says. Each line is now a thing being done, with its mark and its state, and under a
   module that counts its own work the phases IT named, each with how far along it is
-  ("Leyendo las métricas 7/24, erebor — Synology discos"). Same visual language as the device
+  ("Leyendo las métricas 7/24, atlas — Synology discos"). Same visual language as the device
   test's checklist: it is the same question asked of the same machine, and answering it two
   ways is two things to learn instead of one. Modules read by their name now, not their id in
   a `<code>` — a list of "ssl_cert, ram_swap, snmp" reads as a log line.
@@ -8102,7 +8542,7 @@ All notable changes to **ServiceSentry** are documented in this file.
 
 ### Fixed
 - **A profile that names itself per language is read, not printed.** `label_of` was skipped in
-  the new progress line, so it said "erebor — {'en_EN': 'Synology — SMART attributes…'} (3/24)".
+  the new progress line, so it said "atlas — {'en_EN': 'Synology — SMART attributes…'} (3/24)".
 - **And `label_of` no longer raises on a plain-string label**, which the format explicitly
   allows. It is called on normalised profiles and on raw ones — a probe builds its catalogue
   straight from the files — and on the second kind it threw an `AttributeError` that the
@@ -8132,7 +8572,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   they must be properties, and nothing may call them.
 - **Every measurement on a device's page was labelled with the device's own name.** It is the
   ITEM's label, and one SNMP item files a result per disk, per volume, per share — so
-  "erebor" was printed a thousand times on erebor's page, in the one place a name cannot tell
+  "atlas" was printed a thousand times on atlas's page, in the one place a name cannot tell
   you anything. The ROW is what identifies a measurement there ("Drive 1", "/volume1"), taken
   from what the module recorded (`_row`) or from the `<item>/<detail>` key the product already
   speaks; nothing is inferred from a message or a field name. With no row the measurement is
@@ -8219,7 +8659,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   NAS through its device profiles is minutes of round trips inside a single module, so a dialog
   watching start/finish reads "snmp — running, 0 %" for five minutes and is indistinguishable
   from a hang. Reported from the panel in exactly those words.
-- The SNMP sampler now names the device and which of its profiles it is on ("erebor — Synology
+- The SNMP sampler now names the device and which of its profiles it is on ("atlas — Synology
   disks (3/24)"), and every module's shared item loop reports "3/40 — <item>" for free. The
   text is the MODULE's: a core vocabulary of steps would fit whichever module was in front of
   whoever wrote it and be a lie for the other twenty.
@@ -8248,7 +8688,7 @@ All notable changes to **ServiceSentry** are documented in this file.
 - **And beside sourced cards it is dropped altogether.** Reported from the screen: the pile sat
   above the three correct ones, and every fact in it was already in one of them, attributed. A
   device that has answered once with sources has answered with all of them, so there the pile
-  is not a fallback — it is a stale duplicate that contradicts them, "Modelo: Linux erebor…"
+  is not a fallback — it is a stale duplicate that contradicts them, "Modelo: Linux atlas…"
   directly above "Modelo: DS916+". It still shows when it is all there is: a module that records
   attributes without naming what answered is not stale, it is a module with one answerer.
 - **The identity cards are named, not filed.** The headings were raw source ids
@@ -8401,7 +8841,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   be worse than the integer it replaces.
 - Filled in for the enumerations that are not in doubt: IF-MIB's operational and administrative
   state, and Synology's system, power, fans, update, disk status, disk health and array state.
-  Erebor's 50 enumerated measurements all resolve. The rest keep their numbers on purpose —
+  Atlas's 50 enumerated measurements all resolve. The rest keep their numbers on purpose —
   `chart: "value"` is not a state (a link speed and an MTU are drawn that way too), so nothing
   is inferred from it.
 - **A measurement remembers which part of the device it is of.** A NAS answers sixty-four
@@ -8415,7 +8855,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   drawing a badge and cannot be guessed from a number that has no unit. The whitelist in
   `module_history_fields` grew to carry both: a module still cannot put arbitrary keys into a
   core structure, but a whitelist that never grew is how the answer was lost at the last step.
-- The Measurements tab draws a rail of families: erebor's 1014 measurements are 18 of them.
+- The Measurements tab draws a rail of families: atlas's 1014 measurements are 18 of them.
   Alphabetical and not by size — a rail is an index, and an index you can use is one whose
   order does not change because a device grew a disk. It does not open on the 704-attribute
   SMART block, which is the family somebody was least likely to have come for. A device whose
@@ -8508,7 +8948,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   profile the first is buried under a thousand of the second and the third is below the fold.
   They are not sections of one answer, they are four answers — the fourth being what it has
   been SAYING, which arrived with the logs above.
-- **`sysDescr` was declared as the device's MODEL.** It is free text — "Linux erebor 3.10.108
+- **`sysDescr` was declared as the device's MODEL.** It is free text — "Linux atlas 3.10.108
   #86009 SMP Wed Nov 26…" — and on a Synology it beat the actual model (DS916+) on screen,
   because MIB-II is sampled after the vendor profile. On anything else it put a kernel build
   line under the heading "Model". It has its own role now (`description`), which also takes
@@ -8517,7 +8957,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   a NAS and the UPS plugged into it, both worth showing and no longer colliding. A NEW
   collision now has to be a deliberate edit rather than something nobody noticed.
 - **A device's identity was mixing two different machines — and losing one of them.**
-  Reported from the screen: erebor's vendor, model and version were its UPS's, not its own.
+  Reported from the screen: atlas's vendor, model and version were its UPS's, not its own.
   One registry entry fronts several pieces of equipment and several of them answer the same
   questions, so filed flat the second profile sampled overwrote the first. Which survived
   depended on the order the profiles happened to be read in. Nothing was reported wrong; a
@@ -8551,7 +8991,7 @@ All notable changes to **ServiceSentry** are documented in this file.
   the page: you lost the device you were looking at to see one of its numbers over time. One
   range picker for the page, not one per chart — two numbers of the same device over different
   windows is a comparison that invites itself and cannot be supported.
-- The results table is capped and says how many it is holding back, worst rows first: erebor's
+- The results table is capped and says how many it is holding back, worst rows first: atlas's
   is 295 rows, and a cap over an arbitrary order would hide news instead of the quiet tail.
 - The whole row opens a device in the Infrastructure table, the way a card does — a table
   where only the last 2rem of a row is clickable teaches you to aim. Guarded on the target, so

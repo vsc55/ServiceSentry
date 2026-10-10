@@ -16,7 +16,7 @@ import io
 import os
 import re
 
-from flask import jsonify, redirect, request, send_from_directory, session
+from flask import Response, jsonify, redirect, request, send_from_directory, session
 
 from lib.debug import DebugLevel
 from lib.i18n import SUPPORTED_LANGS
@@ -98,6 +98,15 @@ def register(app, wa):
         session for it would 302 the browser to the login page and hand it an HTML document
         where an icon belongs.
         """
+        # An installation's own icon (Configuración › Marca), whatever kind it is: a browser
+        # takes a PNG or an SVG at this address as readily as an ICO.
+        store = getattr(wa, '_brand_store', None)
+        own = store.get('favicon') if store is not None and 'favicon' in store.meta() else None
+        if own:
+            resp = Response(own[0], mimetype=own[1])
+            resp.headers['X-Content-Type-Options'] = 'nosniff'
+            resp.headers['Cache-Control'] = 'public, max-age=3600'
+            return resp
         resp = send_from_directory(
             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          'static', 'img'),

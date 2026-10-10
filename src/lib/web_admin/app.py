@@ -41,6 +41,7 @@ from lib.services.monitoring.checks_mixin import _ChecksMixin
 from lib.core.permissions.mixin import _PermissionsMixin
 from lib.core.sessions.mixin import _SessionsMixin
 from lib.core.apitokens.mixin import _ApiTokenMixin
+from lib.core.brand.mixin import _BrandMixin
 from lib.core.mfa.mixin import _MfaMixin
 from lib.core.mfa.policy import _MfaPolicyMixin
 from lib.core.users.mixin import _UsersMixin
@@ -61,7 +62,7 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                _ChecksMixin, _ServicesMixin,
                _IpBanMixin, _FreshnessMixin, _StoresMixin, _ConfigMixin,
                _ScannersMixin, _EmbedMixin, _ContextMixin, _ServerMixin,
-               _HooksMixin, _GuardsMixin):
+               _HooksMixin, _GuardsMixin, _BrandMixin):
     """Web administration server for ServiceSentry configuration.
 
     Provides a browser-based UI for editing the configuration and managing

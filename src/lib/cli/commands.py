@@ -362,6 +362,31 @@ def cmd_reload(ctx, args) -> int:
     return 0
 
 
+# ── DCIM demo site ──────────────────────────────────────────────────────────────
+def cmd_dcim_demo(ctx, args) -> int:
+    """Build the demonstration site (``dcim demo``), or remove it (``--remove``).
+
+    Refuses when the demo already exists unless ``--replace`` says to rebuild it. Only the
+    sites named by :mod:`lib.core.dcim.demo` are ever touched. Returns 0 on success.
+    """
+    from lib.core.dcim import demo                      # noqa: PLC0415
+    from lib.core.dcim.store import DcimStore           # noqa: PLC0415
+    store = DcimStore(ctx.db)
+    media_dir = str((ctx.cfg.get('web_admin') or {}).get('dcim_media_dir') or '')
+    if getattr(args, 'remove', False):
+        gone = demo.remove(store, var_dir=ctx.var_dir, media_dir=media_dir)
+        return _ok(f"demo removed ({gone} sites)" if gone else 'there is no demo to remove')
+    try:
+        made = demo.build(store, actor='cli', var_dir=ctx.var_dir, media_dir=media_dir,
+                          area_word=_t(ctx, 'dcim_floor_area'), lang=ctx.lang,
+                          images=not getattr(args, 'no_images', False),
+                          replace=bool(getattr(args, 'replace', False)))
+    except demo.DemoError as exc:
+        return _err(f"{exc} (use --replace to rebuild it, or --remove)")
+    counts = ', '.join(f"{k} {v}" for k, v in made.items() if k not in ('site', 'site_dr'))
+    return _ok(f"demo site '{demo.SITE}' created: {counts}")
+
+
 # ── dispatch ────────────────────────────────────────────────────────────────────
 _HANDLERS = {
     ('user', 'add'):        cmd_user_add,
@@ -378,6 +403,7 @@ _HANDLERS = {
     ('group', 'del'):       cmd_group_del,
     ('status', None):       cmd_status,
     ('reload', None):       cmd_reload,
+    ('dcim', 'demo'):       cmd_dcim_demo,
 }
 
 
@@ -393,4 +419,7 @@ def run(args, config_dir: str, var_dir: str) -> int:
         ctx = CliContext(config_dir, var_dir)
     except Exception as exc:  # pylint: disable=broad-except
         return _err(f"could not open {APP_NAME} data ({config_dir}): {exc}")
+    # `-l/--lang` (or SS_LANG) wins over the panel's setting, as it does for the services.
+    if getattr(args, 'lang', None):
+        ctx.lang = args.lang
     return handler(ctx, args)

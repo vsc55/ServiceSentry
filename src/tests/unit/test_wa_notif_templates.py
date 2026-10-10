@@ -25,7 +25,20 @@ class TestGetStrings:
     def test_default_returns_english(self):
         s = email_templates.get_strings()
         assert s['badge_down'] == 'DOWN'
-        assert s is email_templates._DEFAULT_STRINGS
+        assert {k: s[k] for k in email_templates._DEFAULT_STRINGS} == email_templates._DEFAULT_STRINGS
+        from lib import APP_NAME                                     # noqa: PLC0415
+        assert s['app_name'] == APP_NAME
+
+    def test_the_brand_name_signs_the_built_in_strings(self):
+        """An installation's own name (lib.core.brand) replaces the product's in the strings
+        that ship — never in the ones an administrator typed."""
+        from lib import APP_NAME                                     # noqa: PLC0415
+        s = email_templates.get_strings('', overrides={'test_title': f'{APP_NAME} prueba'},
+                                        app_name='Acme NOC')
+        assert s['app_name'] == 'Acme NOC'
+        assert 'Acme NOC' in s['footer'] and APP_NAME not in s['footer']
+        assert s['test_subject'].startswith('Acme NOC')
+        assert s['test_title'] == f'{APP_NAME} prueba'
 
     def test_unknown_lang_falls_back_to_english(self):
         s = email_templates.get_strings('zz_ZZ')

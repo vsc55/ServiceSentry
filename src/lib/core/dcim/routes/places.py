@@ -16,6 +16,8 @@ Rutas:
     POST    /api/v1/dcim/floors/<uid>/plan
     DELETE  /api/v1/dcim/floors/<uid>/plan
     POST    /api/v1/dcim/floors/<uid>/area
+    GET     /api/v1/dcim/floors/<uid>/walls
+    PUT     /api/v1/dcim/floors/<uid>/walls
     GET     /api/v1/dcim/media/<path:name>
     GET     /api/v1/dcim/orgs
     GET     /api/v1/dcim/rooms/<uid>/features
@@ -30,6 +32,7 @@ Rutas:
     DELETE  /api/v1/dcim/sites/<uid>/photo
     GET     /api/v1/dcim/sites/<uid>/floors
     GET     /api/v1/dcim/sites/<uid>/contents
+    GET     /api/v1/dcim/sites/<uid>/circuits
     POST    /api/v1/dcim/rows
     PUT     /api/v1/dcim/rows/<uid>
     DELETE  /api/v1/dcim/rows/<uid>
@@ -38,14 +41,18 @@ Rutas:
 
 from __future__ import annotations
 
+import math
+
 from flask import jsonify, request
 
+from lib.core.dcim import catalog as dcim_catalog
 from lib.core.dcim import media as dcim_media
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
-from lib.core.dcim.store import FEATURE_KINDS, FEATURE_LAYERS, SHELVED_KINDS, SHELVES_MAX
+from lib.core.dcim.store import (ACCESS_KINDS, FEATURE_KINDS, FEATURE_LAYERS, LOCK_KINDS,
+                                 SHELVED_KINDS, SHELVES_MAX)
 from lib.core.dcim.store.features import _FEATURE, _SHELF_ITEM
-from lib.core.dcim.store.floors import _FLOOR
+from lib.core.dcim.store.floors import WALL_KINDS, WALLS_MAX, _FLOOR
 from lib.core.dcim.store.racks import _RACK
 from lib.core.dcim.store.rooms import _ROOM
 from lib.core.dcim.store.sites import _SITE
@@ -150,16 +157,7 @@ def register(app, wa, C):
         return jsonify({'sites': out})
 
     def _used_u(store, rack):
-        """Cuántos U de un rack están ocupados, por cualquiera de las dos caras.
-
-        Por las dos: un panel de parcheo atornillado solo detrás ocupa ese U igual, y contarlo
-        libre sería ofrecer un hueco donde no cabe nada. Lo ajeno cuenta: está ahí, ocupando,
-        aunque este lector no pueda saber qué es — que es lo mismo que dibuja el alzado.
-        """
-        taken = store.occupancy(rack['uid'])
-        height = int(taken.get('height') or 0)
-        usados = set(taken.get('front') or {}) | set(taken.get('rear') or {})
-        return len([u for u in usados if 1 <= int(u) <= height])
+        return dcim_svc.used_u(store, rack)
 
     def _top_used(store, rack_uid) -> int:
         """The highest U something occupies in a rack, by either face; 0 if nothing does."""
@@ -363,6 +361,7 @@ def register(app, wa, C):
                 store.rooms.delete(area)
                 store.forget_scope('room', area)
             for floor in store.floors_of(uid):
+                store.set_walls(floor['uid'], [])
                 store.floors.delete(floor['uid'])
                 pictures.append(str(floor.get('plan') or ''))
             pictures.append(str(row.get('photo') or ''))
@@ -516,10 +515,114 @@ def register(app, wa, C):
             racks = C.filtered(store.racks_of(room['uid']), store, said, allowed, 'rack', reach)
             for rack in racks:
                 rack['roll'] = roll['rack'].get(rack['uid']) or {}
+                # How full it is: the 3D can colour a building's racks by occupancy.
+                rack['used_u'] = _used_u(store, rack)
             seen = dcim_owners.may_see(C.owner_of(store, said, 'room', room['uid']), allowed)
             rooms[room['uid']] = {'racks': racks,
                                   'features': store.features_of(room['uid']) if seen else []}
-        return jsonify({'rooms': rooms, 'kinds': FEATURE_KINDS})
+        # Y los muros de cada planta: el 3D de la planta y del edificio los levanta.
+        walls = {f['uid']: [_wall_out(w) for w in store.walls_of(f['uid'])]
+                 for f in store.floors_of(uid)}
+        return jsonify({'rooms': rooms, 'kinds': FEATURE_KINDS, 'walls': walls})
+
+    def _wall_out(w):
+        return {k: w.get(k) for k in ('uid', 'kind', 'x1', 'y1', 'x2', 'y2', 'thick_mm')}
+
+    @app.route('/api/v1/dcim/floors/<uid>/walls', methods=['GET'])
+    @C.view_req
+    def api_dcim_floor_walls(uid):
+        """Los muros de una planta."""
+        store = C.store()
+        floor, site = _floor_site(store, uid)
+        if not floor:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        said, allowed = store.owners_map(), C.seen()
+        if not C.filtered([store.sites.get(site)], store, said, allowed, 'site',
+                          dcim_svc.reachable(store, said, allowed)):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        return jsonify({'walls': [_wall_out(w) for w in store.walls_of(uid)]})
+
+    @app.route('/api/v1/dcim/floors/<uid>/walls', methods=['PUT'])
+    @C.edit_req
+    def api_dcim_floor_walls_set(uid):
+        """Guardar los muros de una planta, todos a la vez: `{walls: [{kind, x1, y1, x2, y2,
+        thick_mm}]}`. Lo que manda la revisión del plano; un tramo sin largo, con números que no
+        lo son o de una clase que no existe se rechaza entero, con el número de tramo."""
+        store = C.store()
+        floor, site = _floor_site(store, uid)
+        if not floor:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if not _site_writable(store, site):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        tramos = (request.get_json(silent=True) or {}).get('walls')
+        if not isinstance(tramos, list) or len(tramos) > WALLS_MAX:
+            return jsonify({'error': wa._t('dcim_walls_bad')}), 400
+        limpios = []
+        for n, t in enumerate(tramos, 1):
+            try:
+                x1, y1, x2, y2 = (float(t[k]) for k in ('x1', 'y1', 'x2', 'y2'))
+                grueso = float(t.get('thick_mm') or 150)
+            except (TypeError, ValueError, KeyError):
+                return jsonify({'error': wa._t('dcim_wall_bad').replace('{}', str(n), 1)}), 400
+            kind = str(t.get('kind') or 'wall')
+            numeros = (x1, y1, x2, y2, grueso)
+            if (kind not in WALL_KINDS or not all(math.isfinite(v) and abs(v) <= 10_000_000 for v in numeros)
+                    or not 10 <= grueso <= 3000 or math.hypot(x2 - x1, y2 - y1) < 10):
+                return jsonify({'error': wa._t('dcim_wall_bad').replace('{}', str(n), 1)}), 400
+            limpios.append({'kind': kind, 'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2, 'thick_mm': grueso})
+        store.set_walls(uid, limpios, actor=C.actor())
+        return jsonify({'ok': True, 'walls': len(limpios)})
+
+    @app.route('/api/v1/dcim/sites/<uid>/circuits', methods=['GET'])
+    @C.view_req
+    def api_dcim_site_circuits(uid):
+        """The site's circuits as the 3D draws them: which racks are cabled to which, and where
+        each rack's power comes from.
+
+        Aggregated, not cable by cable: the 3D draws one run between two racks however many
+        cables share it, with how many and of what kind — a floor of fifty racks has thousands of
+        patch cords, and drawing each one would be a hairball nobody could read. Cables inside
+        one rack are not runs and are left out. Only what this reader may see: racks and items
+        filtered as everywhere else, so a cable to somebody else's machine is not a line on
+        your screen.
+
+        ``net``: ``[{a, b, total, kinds: {kind: n}}]`` — rack uids, ``a < b``.
+        ``power``: ``[{rack, pdu, name, feed, source}]`` — every strip with its source.
+        ``sources``: ``[{uid, name, kind, upstream, bypass, rack}]`` — ``rack`` is the rack of
+        the UPS item a source is (its only physical place), or ``''``.
+        """
+        store = C.store()
+        site = store.sites.get(uid) if store else None
+        if not site:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        said, allowed = store.owners_map(), C.seen()
+        reach = dcim_svc.reachable(store, said, allowed)
+        if not C.filtered([site], store, said, allowed, 'site', reach):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        rack_of_item, power = {}, []
+        for room in store.rooms_of(uid):
+            for rack in C.filtered(store.racks_of(room['uid']), store, said, allowed, 'rack', reach):
+                for it in C.filtered(store.items_of(rack['uid']), store, said, allowed, 'item', reach):
+                    rack_of_item[it['uid']] = rack['uid']
+                for p in store.pdus_of(rack['uid']):
+                    power.append({'rack': rack['uid'], 'pdu': p['uid'], 'name': p.get('name') or '',
+                                  'feed': p.get('feed') or 'none', 'source': p.get('source_uid') or ''})
+        runs = {}
+        for c in store.cables_of(list(rack_of_item)):
+            ra, rb = rack_of_item.get(c.get('a_item')), rack_of_item.get(c.get('b_item'))
+            if not ra or not rb or ra == rb:
+                continue
+            a, b = sorted((ra, rb))
+            run = runs.setdefault((a, b), {'a': a, 'b': b, 'total': 0, 'kinds': {}})
+            run['total'] += 1
+            kind = c.get('kind') or 'other'
+            run['kinds'][kind] = run['kinds'].get(kind, 0) + 1
+        sources = [{'uid': s['uid'], 'name': s.get('name') or '', 'kind': s.get('kind') or '',
+                    'upstream': s.get('upstream_uid') or '', 'bypass': bool(s.get('bypass')),
+                    'rack': rack_of_item.get(s.get('item_uid') or '', '')}
+                   for s in store.sources_of(uid)]
+        return jsonify({'net': sorted(runs.values(), key=lambda r: (r['a'], r['b'])),
+                        'power': power, 'sources': sources})
 
     @app.route('/api/v1/dcim/floors', methods=['POST'])
     @C.edit_req
@@ -556,6 +659,8 @@ def register(app, wa, C):
         data = _without(request.get_json(silent=True) or {}, ('plan', 'site_uid', 'area_uid'))
         if 'name' in data and not str(data.get('name') or '').strip():
             return jsonify({'error': wa._t('dcim_name_required')}), 400
+        if 'core_kind' in data and str(data.get('core_kind') or '') not in ('', 'stairs', 'lift'):
+            return jsonify({'error': wa._t('dcim_core_bad')}), 400
         malo = numbers_bad(_FLOOR, data, _bounds(_FLOOR))
         if malo:
             return _bad_number(wa, malo)
@@ -583,6 +688,7 @@ def register(app, wa, C):
             store.forget_scope('room', area)
         for room in store.rooms.list('floor_uid = ?', (uid,)):
             store.rooms.update(room['uid'], {'floor_uid': ''}, actor=C.actor())
+        store.set_walls(uid, [])            # sus muros se van con ella
         store.floors.delete(uid)
         name = str(floor.get('plan') or '')
         if name:
@@ -771,9 +877,65 @@ def register(app, wa, C):
         # Las filas van con las piezas: es la misma pantalla y el mismo plano, y pedirlas
         # aparte sería una petición más para dibujar lo que ya se está dibujando.
         filas = dcim_svc.rows_roll(store.rows_of(uid), store.racks_of(uid))
-        return jsonify(dict({'features': store.features_of(uid),
+        piezas = store.features_of(uid)
+        acceso = _access_of(store, room, piezas)
+        return jsonify(dict({'features': piezas,
                              'kinds': FEATURE_KINDS,
-                             'layers': list(FEATURE_LAYERS)}, **filas))
+                             'layers': list(FEATURE_LAYERS),
+                             'locks': list(LOCK_KINDS), 'access_kinds': list(ACCESS_KINDS)},
+                            **filas, **acceso))
+
+    def _access_of(store, room, piezas) -> dict:
+        """El control de accesos de una sala, puesto en sus piezas: el estado de cada una que lo
+        lleva —el de su dispositivo vigilado, o el de la demo—, y de cada lector o puerta de
+        enlace, qué cuelga de él en TODA la sede, que es donde un IQ tiene sus cerraduras —una
+        planta entera, no una sala—. Y los de la sede, para elegir a cuál se conecta una pieza."""
+        estados = C.states()
+        site = str(room.get('site_uid') or '')
+        de_sede = [f for r in store.rooms_of(site) for f in store.features_of(r['uid'])]
+        nombre_sala = {r['uid']: r.get('name') or '' for r in store.rooms_of(site)}
+        for f in piezas:
+            if f.get('kind') in ACCESS_KINDS:
+                f['state'] = dcim_svc.item_state(f, estados)
+            if f.get('kind') == 'reader':
+                f['hanging'] = [{'uid': g['uid'], 'kind': g.get('kind') or '',
+                                 'label': g.get('label') or '',
+                                 'room': nombre_sala.get(g.get('room_uid'), ''),
+                                 'state': dcim_svc.item_state(g, estados)}
+                                for g in de_sede if str(g.get('hub_uid') or '') == f['uid']]
+        # Y los modelos del catálogo que puede usar cada tipo de pieza, para elegirlo.
+        cat = getattr(wa, '_dcim_catalog', None)
+        modelos = {}
+        if cat is not None:
+            for pieza, clases in dcim_catalog.ACCESS_TYPE_KINDS.items():
+                marcas = ', '.join('?' for _ in clases)
+                modelos[pieza] = [{'uid': r['uid'], 'name': ' '.join(
+                    x for x in (r.get('manufacturer') or '', r.get('model') or '') if x),
+                    'kind': r.get('kind') or '', 'front_image': r.get('front_image') or ''}
+                    for r in cat.list(f'kind IN ({marcas})', tuple(clases))]
+        return {'hubs': [{'uid': f['uid'], 'label': f.get('label') or '',
+                          'room': nombre_sala.get(f.get('room_uid'), '')}
+                         for f in de_sede if f.get('kind') == 'reader'],
+                'access_types': modelos}
+
+    def _access_bad(store, room, data) -> str:
+        """Lo que no vale del control de accesos de una petición: una cerradura que no existe, o
+        una puerta de enlace que no es un lector de esta misma sede. Vacío si está bien."""
+        if str(data.get('lock') or '') not in ('',) + LOCK_KINDS:
+            return 'dcim_lock_unknown'
+        tipo = str(data.get('type_uid') or '')
+        if tipo:
+            cat = getattr(wa, '_dcim_catalog', None)
+            if cat is None or not cat.get(tipo):
+                return 'dcim_type_unknown'
+        hub = str(data.get('hub_uid') or '')
+        if hub:
+            fila = store.features.get(hub)
+            sala = store.rooms.get(str((fila or {}).get('room_uid') or '')) or {}
+            if not fila or fila.get('kind') != 'reader' \
+                    or str(sala.get('site_uid') or '') != str(room.get('site_uid') or ''):
+                return 'dcim_hub_unknown'
+        return ''
 
     @app.route('/api/v1/dcim/rows', methods=['POST'])
     @C.edit_req
@@ -839,6 +1001,9 @@ def register(app, wa, C):
         # Las medidas de fábrica si no vienen dadas: una pieza sin tamaño se dibuja como un punto
         # y hay que estirarla a mano para descubrir que era una mampara.
         body = _fresh(data)
+        malo_acceso = _access_bad(store, room, body)
+        if malo_acceso:
+            return jsonify({'error': wa._t(malo_acceso)}), 400
         body.setdefault('width_mm', spec['w'])
         if kind in SHELVED_KINDS:
             body.setdefault('shelves', 1)
@@ -858,9 +1023,15 @@ def register(app, wa, C):
         _, room = _room_writable(row.get('room_uid'))
         if room is False or room is None:
             return jsonify({'error': wa._t('access_denied')}), 403
-        data = _without(request.get_json(silent=True) or {}, ('room_uid',))
+        # El estado de la demo no lo escribe nadie más: por una petición, cualquiera podría
+        # pintar de rojo una cerradura de verdad.
+        data = _without(request.get_json(silent=True) or {},
+                        ('room_uid', 'demo_state', 'demo_reason'))
         if 'kind' in data and str(data['kind']) not in FEATURE_KINDS:
             return jsonify({'error': wa._t('dcim_kind_unknown')}), 400
+        malo_acceso = _access_bad(store, store.rooms.get(row.get('room_uid')) or {}, data)
+        if malo_acceso:
+            return jsonify({'error': wa._t(malo_acceso)}), 400
         malo = numbers_bad(_FEATURE, data, _bounds(_FEATURE))
         if malo:
             return _bad_number(wa, malo)

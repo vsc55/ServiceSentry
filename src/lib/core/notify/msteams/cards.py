@@ -27,15 +27,17 @@ def _colour(kind: str) -> str:
     return _COLOURS.get((kind or '').lower(), _COLOURS['info'])
 
 
-def _title(kind: str, item: str) -> str:
+def _title(kind: str, item: str, app_name: str = '') -> str:
     label = {'down': 'DOWN', 'warn': 'WARNING', 'recovery': 'RECOVERED',
              'syslog': 'SYSLOG', 'test': 'TEST'}.get((kind or '').lower(), (kind or 'INFO').upper())
-    return f'[{label}] {item}' if item else f'[{label}] {APP_NAME}'
+    return f'[{label}] {item}' if item else f'[{label}] {app_name or APP_NAME}'
 
 
 def message_card(*, kind: str = 'info', module: str = '', item: str = '',
-                 status: str = '', message: str = '', timestamp: str = '') -> dict:
-    """A MessageCard for a Teams Incoming Webhook connector."""
+                 status: str = '', message: str = '', timestamp: str = '',
+                 app_name: str = '') -> dict:
+    """A MessageCard for a Teams Incoming Webhook connector, signed with *app_name* (the
+    installation's own, ``lib.core.brand``) or the product's."""
     facts = []
     if module:    facts.append({'name': 'Module', 'value': module})
     if item:      facts.append({'name': 'Item', 'value': item})
@@ -45,10 +47,10 @@ def message_card(*, kind: str = 'info', module: str = '', item: str = '',
         '@type': 'MessageCard',
         '@context': 'https://schema.org/extensions',
         'themeColor': _colour(kind),
-        'summary': _title(kind, item),
+        'summary': _title(kind, item, app_name),
         'sections': [{
-            'activityTitle': _title(kind, item),
-            'activitySubtitle': APP_NAME,
+            'activityTitle': _title(kind, item, app_name),
+            'activitySubtitle': app_name or APP_NAME,
             'text': message or '',
             'facts': facts,
             'markdown': True,

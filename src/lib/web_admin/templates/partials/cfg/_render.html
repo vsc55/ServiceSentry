@@ -336,6 +336,10 @@ function renderConfig() {
                       'web_admin|table_rows_options', 'config')
         + cfgCardClose;
 
+    // Brand card — the name (a config field, saved with the rest) and the four pictures
+    // (uploads, saved on their own; partials/cfg/_brand.html).
+    _cardHtml['brand'] = _renderBrandCard(cfgCardOpen, cfgCardClose);
+
     // Live updates card — poll intervals + session timers
     _cardHtml['live_update'] = cfgCardOpen('cfgcol_live_update', '<i class="bi bi-arrow-repeat me-1"></i>', t('live_update_section'));
     _cardHtml['live_update'] += renderField('config_poll_secs', wa.config_poll_secs, 'web_admin|config_poll_secs', 'config');

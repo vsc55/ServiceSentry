@@ -31,9 +31,16 @@
        density, the .ico covers the ones that only take a bitmap — and it is the file the
        browser requests from the site root on its own, whether or not these tags exist
        (which is why /favicon.ico is served as a route too). #}
+    {# An installation's own icon (Configuración › Marca) is ONE file of whatever kind it was
+       uploaded as, so it gets one link with its own type; the stock pair stays as it was. #}
+    {% if brand_own('favicon') %}
+    <link rel="icon" type="{{ brand_mime('favicon') }}" href="{{ brand_src('favicon') }}">
+    <link rel="apple-touch-icon" href="{{ brand_src('favicon') }}">
+    {% else %}
     <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg?v={{ asset_v }}">
     <link rel="alternate icon" href="/static/img/favicon.ico?v={{ asset_v }}" sizes="16x16 32x32 48x48">
     <link rel="apple-touch-icon" href="/static/img/favicon.svg?v={{ asset_v }}">
+    {% endif %}
     {# Versioned like our own, so they can be cached for a year instead of revalidated on
        every load: half a megabyte of CSS costs a round trip each before anything is drawn,
        and that wait is the whole reason a browser gives up and paints the page bare. #}

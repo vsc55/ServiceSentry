@@ -117,6 +117,7 @@ function _dcimRackHtml() {
     const body = vista === 'byu' ? _dcRackByUHtml()
         : vista === 'board' ? _dcRackBoardHtml()
         : vista === 'compact' ? _dcRackCompactHtml()
+        : vista === '3d' ? `<div class="d-flex flex-column gap-3">${_dcr3dHtml()}${_dcRackPanelHtml(items)}</div>`
         : `<div class="ss-rack-grid">
             <!-- Agrandar el armario NO mueve la tabla: la tapa. Lo que se pide al pulsarlo es
                  sitio para mirar un armario de cerca durante un rato, y una tabla que se va
@@ -415,7 +416,12 @@ function _dcimItemRow(item) {
             ? `<span class="text-muted">${esc(t('dcim_item_on'))}</span>` : esc(span)}</td>
         <td class="ss-nowrap">${esc(t('dcim_face_' + (item.face || 'full')))}</td>
         <td${item.parent_uid ? ' class="ps-4 ss-nowrap"' : ' class="ss-nowrap"'}>
-            ${item.state ? _infraStateBadge(item.state) + ' ' : ''}
+            ${item.state === 'error' || item.state === 'warning'
+                ? `<span role="button" tabindex="0" title="${escAttr(t('dcim_why_title'))}"
+                        onclick="_dcimWhyOpenUid(${jsStr(item.uid)})"
+                        onkeydown="if(event.key==='Enter')_dcimWhyOpenUid(${jsStr(item.uid)})">${
+                    _infraStateBadge(item.state)}</span> `
+                : item.state ? _infraStateBadge(item.state) + ' ' : ''}
             ${_dcimFitBadge(item.depth)}
             ${item.device_uid ? `<button class="btn btn-sm btn-secondary py-0 px-2 me-1"
                 onclick="_dcimOpenDevice(${jsStr(item.device_uid)})"

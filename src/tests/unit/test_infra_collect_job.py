@@ -46,7 +46,7 @@ class _WA:
         self.audited.append({'event': event, 'user': user, 'ip': ip, 'detail': detail})
 
 
-def _start(wa, uid='u1', name='erebor', modules=('ping',), actor='javier', ip='10.0.0.2',
+def _start(wa, uid='u1', name='atlas', modules=('ping',), actor='javier', ip='10.0.0.2',
            lang='es_ES'):
     """Start a job with the lock held, exactly as the route does."""
     assert wa._check_lock.acquire(blocking=False)
@@ -64,7 +64,7 @@ def _until(job_id, cond, wait=5.0):
     raise AssertionError(f'never happened: {jobs.job_status(job_id)}')
 
 
-def _finish(wa, uid='u1', name='erebor', modules=('ping',), actor='javier', ip='10.0.0.2',
+def _finish(wa, uid='u1', name='atlas', modules=('ping',), actor='javier', ip='10.0.0.2',
             wait=5.0):
     """Start a job and wait for it to end."""
     job_id = _start(wa, uid, name, modules, actor, ip)
@@ -86,7 +86,7 @@ class TestItReportsWhileItRuns:
 
         wa = _WA(behaviour=slow)
         assert wa._check_lock.acquire(blocking=False)
-        job_id = jobs.start_collect(wa, 'u1', 'erebor', ['ping', 'snmp'])
+        job_id = jobs.start_collect(wa, 'u1', 'atlas', ['ping', 'snmp'])
         assert started.wait(5)
         job = jobs.job_status(job_id)
         assert job['total'] == 2 and job['completed'] == 0
@@ -110,7 +110,7 @@ class TestItReportsWhileItRuns:
 
         wa = _WA(behaviour=stepwise)
         assert wa._check_lock.acquire(blocking=False)
-        job_id = jobs.start_collect(wa, 'u1', 'erebor', ['a', 'b', 'c'])
+        job_id = jobs.start_collect(wa, 'u1', 'atlas', ['a', 'b', 'c'])
         seen = []
         for _ in range(3):
             assert stepped.wait(5)
@@ -178,7 +178,7 @@ class TestItReportsWhileItRuns:
         def pooled(mods, cb):
             cb('running', mods[0], 'sistema', {'step': 'Leyendo', 'scope': 'isen',
                                                'n': 3, 'total': 24})
-            cb('running', mods[0], 'discos', {'step': 'Leyendo', 'scope': 'erebor',
+            cb('running', mods[0], 'discos', {'step': 'Leyendo', 'scope': 'atlas',
                                               'n': 7, 'total': 24})
             cb('running', mods[0], 'SMART', {'step': 'Leyendo', 'scope': 'isen',
                                              'n': 4, 'total': 24})
@@ -187,14 +187,14 @@ class TestItReportsWhileItRuns:
         _jid, job = _finish(_WA(behaviour=pooled), modules=('snmp',))
         steps = job['modules'][0]['steps']
         assert [(x['scope'], x['note']) for x in steps] == [
-            ('isen', 'SMART'), ('erebor', 'discos')], steps
+            ('isen', 'SMART'), ('atlas', 'discos')], steps
 
     def test_a_phase_ending_does_not_close_another_machines(self):
         """Each machine's phases follow each other; another machine's line is none of their
         business, and closing it would tick a device that is still working."""
         def pooled(mods, cb):
             cb('running', mods[0], '', {'step': 'Resolviendo', 'scope': 'isen'})
-            cb('running', mods[0], '', {'step': 'Resolviendo', 'scope': 'erebor'})
+            cb('running', mods[0], '', {'step': 'Resolviendo', 'scope': 'atlas'})
             cb('running', mods[0], '', {'step': 'Leyendo', 'scope': 'isen', 'n': 1, 'total': 9})
             return {m: {} for m in mods}, []
 
@@ -202,7 +202,7 @@ class TestItReportsWhileItRuns:
         job = _until(jid, lambda j: len(j['modules'][0].get('steps') or []) == 3)
         by = {(x['scope'], x['key']): x['state'] for x in job['modules'][0]['steps']}
         assert by[('isen', 'Resolviendo')] == 'done'
-        assert by[('erebor', 'Resolviendo')] == 'run', 'the other machine was ticked off'
+        assert by[('atlas', 'Resolviendo')] == 'run', 'the other machine was ticked off'
 
     def test_room_is_made_by_forgetting_something_that_ended(self):
         """A fleet of forty machines must not grow the polled answer without bound. The list
@@ -377,9 +377,9 @@ class TestWhatItRecords:
 
     def test_the_entry_names_the_device_and_the_modules(self):
         wa = _WA()
-        _finish(wa, uid='u9', name='erebor', modules=('ping', 'snmp'))
+        _finish(wa, uid='u9', name='atlas', modules=('ping', 'snmp'))
         detail = wa.audited[0]['detail']
-        assert detail['uid'] == 'u9' and detail['name'] == 'erebor'
+        assert detail['uid'] == 'u9' and detail['name'] == 'atlas'
         assert detail['modules'] == ['ping', 'snmp']
 
 
@@ -506,15 +506,15 @@ class TestItCollectsTheDeviceItWasOpenedFor:
 
     def test_the_uid_is_what_the_run_is_narrowed_to(self):
         wa = _WA()
-        job_id = _start(wa, uid='u-erebor')
+        job_id = _start(wa, uid='u-atlas')
         _until(job_id, lambda j: j['done'])
-        assert wa.scope_seen == ['u-erebor']
+        assert wa.scope_seen == ['u-atlas']
 
     def test_it_is_the_machine_and_not_its_name(self):
         """The name is what a person recognises and the uid is what survives a rename; a
         collection narrowed by the label would follow the wrong machine after one."""
         wa = _WA()
-        job_id = _start(wa, uid='u1', name='erebor')
+        job_id = _start(wa, uid='u1', name='atlas')
         _until(job_id, lambda j: j['done'])
         assert wa.scope_seen == ['u1']
 

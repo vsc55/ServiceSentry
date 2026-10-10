@@ -202,6 +202,7 @@ async function renderDcim() {
                 _dcimUrlSite = {site: q.get(_DCIM_URL_SITE), floor: q.get(_DCIM_URL_FLOOR) || ''};
             if (q.get(_DCIM_URL_VIEW) === 'board') _dcimUrlBoard = true;
             _dcimUrlReadSel(q);
+            _dc3dUrlTake(q);
         } catch (_) { /* ignore */ }
     }
     // A `/dcim/catalog` se llega sin pulsar nada: pegando la dirección o volviendo con el
@@ -231,13 +232,13 @@ async function renderDcim() {
     if (_dcimUrlRoom) {
         const want = _dcimUrlRoom;
         _dcimUrlRoom = '';
-        if (!_dcimRack && _dcimFindRoom(want)) return _dcimOpenPlan(want);
+        if (!_dcimRack && _dcimFindRoom(want)) return _dc3dUrlOpen('room', () => _dcimOpenPlan(want));
     }
     if (_dcimUrlSite) {
         const want = _dcimUrlSite;
         _dcimUrlSite = null;
         if (!_dcimRack && !_dcimPlan && (_dcimData.sites || []).some(s => s.uid === want.site))
-            return _dcsOpen(want.site, want.floor);
+            return _dc3dUrlOpen('site', () => _dcsOpen(want.site, want.floor));
     }
     // El cuadro manda sobre todo lo demás: se abre para ir a un sitio, y si hay uno abierto
     // es que todavía no se ha ido.
@@ -267,6 +268,7 @@ async function renderDcim() {
     // Y el visor 3D, por lo mismo: un `<canvas>` que todavía no está en el documento mide
     // cero píxeles, y WebGL sobre cero píxeles es una pantalla negra sin ningún error.
     if (typeof _dc3dMount === 'function') _dc3dMount();
+    if (typeof _dcr3dMount === 'function') _dcr3dMount();
     _dcimRevealCameFrom();
     const first = document.getElementById('dcim-f-0');
     if (first) first.focus();

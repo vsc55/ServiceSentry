@@ -18,9 +18,9 @@
            lockup shrunk into that is a wordmark nobody can read. Empty `alt` because the
            element is decorative — the status text below carries the meaning. #}
         <div class="ss-boot-logo" aria-hidden="true">
-            <img src="/static/img/logo-mark.png?v={{ asset_v }}" alt="" width="256" height="256">
+            <img src="{{ brand_src('mark') }}" alt="" width="256" height="256">
         </div>
-        <div class="ss-boot-name">{{ app_name }}</div>
+        <div class="ss-boot-name" data-brand-name>{{ app_name }}</div>
         <div class="ss-boot-bar" aria-hidden="true"><span></span></div>
         <div class="ss-boot-text">{{ i18n.loading }}</div>
     </div>
@@ -43,7 +43,8 @@
     <div class="ss-topbar d-md-none">
         <button type="button" class="btn btn-sm btn-light" onclick="_openSidebar()"
                 aria-label="Open menu"><i class="bi bi-list"></i></button>
-        <span class="ss-topbar-brand"><i class="bi bi-shield-check me-1"></i>{{ app_name }}</span>
+        <span class="ss-topbar-brand">{% if brand_own('mark') %}<img class="ss-brand-mark me-1"
+              src="{{ brand_src('mark') }}" alt="">{% else %}<i class="bi bi-shield-check me-1"></i>{% endif %}<span data-brand-name>{{ app_name }}</span></span>
     </div>
 
     <!-- Breadcrumb: the path you would follow in the sidebar to reach the active section

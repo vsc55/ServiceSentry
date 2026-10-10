@@ -58,7 +58,7 @@ class TestWhereAnAddressLives:
 class TestWhatEndsUpOnThePicture:
 
     def test_a_machine_is_placed_by_what_it_answered(self):
-        out = topology.build([_device('a', 'erebor')],
+        out = topology.build([_device('a', 'atlas')],
                              {'a': _attrs('192.168.250.21/24, 172.20.0.1/16')})
         node = out['nodes'][0]
         assert node['networks'] == ['172.20.0.0/16', '192.168.250.0/24']
@@ -92,7 +92,7 @@ class TestTheEdgesSayWhatKindTheyAre:
 
     def test_a_gateway_that_is_a_machine_we_know_joins_two_nodes(self):
         out = topology.build(
-            [_device('a', 'erebor'), _device('g', 'router')],
+            [_device('a', 'atlas'), _device('g', 'router')],
             {'a': _attrs('192.168.250.21/24', '192.168.250.254'),
              'g': _attrs('192.168.250.254/24')})
         assert out['edges'] == [{'from': 'a', 'to': 'g', 'address': '192.168.250.254',
@@ -216,7 +216,7 @@ class TestTheEdgesThatAreNotInferred:
         """`from` and `to` are the two ENDS, in a stable order, and not a direction: being
         plugged together is symmetric and the drawing has no arrowhead on it."""
         out = topology.build(
-            [_device('a', 'erebor'), _device('s', 'sw01')],
+            [_device('a', 'atlas'), _device('s', 'sw01')],
             {'a': _attrs('10.0.0.1/24') + _neigh(('sw01', 'Gi1/0/3')),
              's': _attrs('10.0.0.2/24')})
         wired = [e for e in out['edges'] if e['kind'] == 'lldp']
@@ -228,9 +228,9 @@ class TestTheEdgesThatAreNotInferred:
         """A cable with an agent at both ends is reported twice, once from each side. Two
         lines between two boxes would say there are two cables."""
         out = topology.build(
-            [_device('a', 'erebor'), _device('s', 'sw01')],
+            [_device('a', 'atlas'), _device('s', 'sw01')],
             {'a': _attrs('10.0.0.1/24') + _neigh(('sw01', 'Gi1/0/3')),
-             's': _attrs('10.0.0.2/24') + _neigh(('erebor', 'eth0'))})
+             's': _attrs('10.0.0.2/24') + _neigh(('atlas', 'eth0'))})
         wired = [e for e in out['edges'] if e['kind'] == 'lldp']
         assert len(wired) == 1
         assert wired[0]['ports'] == {'s': ['Gi1/0/3'], 'a': ['eth0']}, (
@@ -242,9 +242,9 @@ class TestTheEdgesThatAreNotInferred:
         """The far end may run no LLDP agent. That is not a reason to leave the cable out —
         it is a reason to draw it as the weaker statement it is."""
         out = topology.build(
-            [_device('a', 'erebor'), _device('s', 'sw01')],
+            [_device('a', 'atlas'), _device('s', 'sw01')],
             {'a': _attrs('10.0.0.1/24'),
-             's': _attrs('10.0.0.2/24') + _neigh(('erebor', 'eth0'))})
+             's': _attrs('10.0.0.2/24') + _neigh(('atlas', 'eth0'))})
         wired = [e for e in out['edges'] if e['kind'] == 'lldp']
         assert len(wired) == 1 and wired[0]['confirmed'] is False
         assert wired[0]['by'] == ['s']
@@ -257,21 +257,21 @@ class TestTheEdgesThatAreNotInferred:
 
     def test_the_domain_is_not_a_difference(self):
         """LLDP reports a hostname and the registry holds whatever somebody typed. Refusing to
-        join "erebor" to "erebor.cerebelum.lan" would draw every link missing on precisely the
+        join "atlas" to "atlas.example.lan" would draw every link missing on precisely the
         fleets that have a search domain."""
         out = topology.build(
-            [_device('a', 'erebor'), _device('s', 'sw01')],
-            {'a': _attrs('10.0.0.1/24') + [{'key': 'name', 'value': 'erebor.cerebelum.lan',
+            [_device('a', 'atlas'), _device('s', 'sw01')],
+            {'a': _attrs('10.0.0.1/24') + [{'key': 'name', 'value': 'atlas.example.lan',
                                             'row': ''}],
-             's': _attrs('10.0.0.2/24') + _neigh(('EREBOR.cerebelum.lan', 'Gi1/0/3'))})
+             's': _attrs('10.0.0.2/24') + _neigh(('ATLAS.example.lan', 'Gi1/0/3'))})
         wired = [e for e in out['edges'] if e['kind'] == 'lldp']
         assert len(wired) == 1 and {wired[0]['from'], wired[0]['to']} == {'a', 's'}
 
     def test_a_machine_seeing_itself_is_not_a_link(self):
         """A cable back into the same box, or a name index that matched the reporter. Either
         way a line from a node to itself is a drawing artefact, not a fact."""
-        out = topology.build([_device('a', 'erebor')],
-                             {'a': _attrs('10.0.0.1/24') + _neigh(('erebor', 'eth1'))})
+        out = topology.build([_device('a', 'atlas')],
+                             {'a': _attrs('10.0.0.1/24') + _neigh(('atlas', 'eth1'))})
         assert [e for e in out['edges'] if e['kind'] == 'lldp'] == []
 
     def test_every_port_of_a_trunk_is_kept_and_counted(self):
@@ -283,7 +283,7 @@ class TestTheEdgesThatAreNotInferred:
         thing that was said, and `bundle` is how many cables either side could see.
         """
         out = topology.build(
-            [_device('a', 'erebor'), _device('s', 'sw01')],
+            [_device('a', 'atlas'), _device('s', 'sw01')],
             {'a': _attrs('10.0.0.1/24') + _neigh(('sw01', 'Gi1/0/4'), ('sw01', 'Gi1/0/3'),
                                                  ('sw01', 'Gi1/0/12'), ('sw01', 'Gi1/0/2')),
              's': _attrs('10.0.0.2/24')})
@@ -300,7 +300,7 @@ class TestTheEdgesThatAreNotInferred:
         identically — so a device that did not say leaves the map with a count and no claim.
         """
         out = topology.build(
-            [_device('a', 'erebor'), _device('s', 'sw01')],
+            [_device('a', 'atlas'), _device('s', 'sw01')],
             {'a': _attrs('10.0.0.1/24') + _neigh(('sw01', 'Gi1/0/3'), ('sw01', 'Gi1/0/4')),
              's': _attrs('10.0.0.2/24')})
         wired = [e for e in out['edges'] if e['kind'] == 'lldp'][0]
@@ -314,7 +314,7 @@ class TestTheEdgesThatAreNotInferred:
         path, beside four bare `gigabitethernet` chips on the switch, which names nothing.
         """
         out = topology.build(
-            [_device('a', 'erebor'), _device('s', 'sw01')],
+            [_device('a', 'atlas'), _device('s', 'sw01')],
             {'a': _attrs('10.0.0.1/24') + _neigh(('sw01', 'Gi1/0/3'), ('sw01', 'Gi1/0/4')),
              's': _attrs('10.0.0.2/24') + _agg(**{'Gi1/0/3': 'Po1', 'Gi1/0/4': 'Po1'})})
         wired = [e for e in out['edges'] if e['kind'] == 'lldp'][0]
@@ -325,7 +325,7 @@ class TestTheEdgesThatAreNotInferred:
         looking at one pair of machines. Every port the device named would put the other
         cable's LAG on this cable's banner."""
         out = topology.build(
-            [_device('a', 'erebor'), _device('s', 'sw01')],
+            [_device('a', 'atlas'), _device('s', 'sw01')],
             {'a': _attrs('10.0.0.1/24') + _neigh(('sw01', 'Gi1/0/3')),
              's': _attrs('10.0.0.2/24') + _agg(**{'Gi1/0/3': 'Po1', 'Gi1/0/9': 'Po2'})})
         wired = [e for e in out['edges'] if e['kind'] == 'lldp'][0]
@@ -336,7 +336,7 @@ class TestTheEdgesThatAreNotInferred:
         as a reason to stay quiet. A port present with an empty aggregate would make the
         banner draw a nameless LAG chip."""
         out = topology.build(
-            [_device('a', 'erebor'), _device('s', 'sw01')],
+            [_device('a', 'atlas'), _device('s', 'sw01')],
             {'a': _attrs('10.0.0.1/24') + _neigh(('sw01', 'Gi1/0/3'), ('sw01', 'Gi1/0/4')),
              's': _attrs('10.0.0.2/24') + _agg(**{'Gi1/0/3': 'Po1'})})
         wired = [e for e in out['edges'] if e['kind'] == 'lldp'][0]
@@ -345,10 +345,10 @@ class TestTheEdgesThatAreNotInferred:
     def test_the_larger_side_is_the_count(self):
         """A side that reported fewer is a side that SAW fewer, not a rack with fewer wires."""
         out = topology.build(
-            [_device('a', 'erebor'), _device('s', 'sw01')],
+            [_device('a', 'atlas'), _device('s', 'sw01')],
             {'a': _attrs('10.0.0.1/24') + _neigh(('sw01', 'Gi1/0/3'), ('sw01', 'Gi1/0/4'),
                                                  ('sw01', 'Gi1/0/5')),
-             's': _attrs('10.0.0.2/24') + _neigh(('erebor', 'eth0'))})
+             's': _attrs('10.0.0.2/24') + _neigh(('atlas', 'eth0'))})
         wired = [e for e in out['edges'] if e['kind'] == 'lldp'][0]
         assert wired['bundle'] == 3
 
@@ -388,7 +388,7 @@ class TestAMachineThatSpeaksNoLldpCanStillBePlaced:
 
     def test_a_mac_alone_on_a_port_is_a_machine_on_that_port(self):
         out = topology.build(
-            [_device('nas', 'erebor'), _device('sw', 'sw01')],
+            [_device('nas', 'atlas'), _device('sw', 'sw01')],
             {'nas': _attrs('10.0.0.5/24') + _macs('bc:24:11:0e:90:5f'),
              'sw': _attrs('10.0.0.2/24')},
             self._ev({'bc:24:11:0e:90:5f': '8'}, {'8': '8'}, {'8': 'GigabitEthernet1/0/8'}))
@@ -404,7 +404,7 @@ class TestAMachineThatSpeaksNoLldpCanStillBePlaced:
         for written in ('0xbc24110e905f', 'BC-24-11-0E-90-5F', 'bc24.110e.905f',
                         'bc:24:11:e:90:5f'):
             out = topology.build(
-                [_device('nas', 'erebor'), _device('sw', 'sw01')],
+                [_device('nas', 'atlas'), _device('sw', 'sw01')],
                 {'nas': _attrs('10.0.0.5/24') + _macs('bc:24:11:0e:90:5f'),
                  'sw': _attrs('10.0.0.2/24')},
                 self._ev({written: '8'}))
@@ -446,7 +446,7 @@ class TestAMachineThatSpeaksNoLldpCanStillBePlaced:
         """Both are true and they are one link. The neighbour identifying itself is the
         stronger of the two, and two lines between two boxes would say there are two cables."""
         out = topology.build(
-            [_device('a', 'erebor'), _device('sw', 'sw01')],
+            [_device('a', 'atlas'), _device('sw', 'sw01')],
             {'a': _attrs('10.0.0.5/24') + _macs('aa:aa:aa:aa:aa:aa') + _neigh(('sw01', 'Gi1/0/8')),
              'sw': _attrs('10.0.0.2/24')},
             self._ev({'aa:aa:aa:aa:aa:aa': '8'}))
@@ -456,7 +456,7 @@ class TestAMachineThatSpeaksNoLldpCanStillBePlaced:
     def test_the_switch_has_to_be_a_machine_we_know(self):
         """Evidence filed under a uid nobody has registered is evidence about nothing — and
         the far end of those edges would be a box the map invented."""
-        out = topology.build([_device('nas', 'erebor')],
+        out = topology.build([_device('nas', 'atlas')],
                              {'nas': _attrs('10.0.0.5/24') + _macs('aa:aa:aa:aa:aa:aa')},
                              self._ev({'aa:aa:aa:aa:aa:aa': '8'}))
         assert [e for e in out['edges'] if e['kind'] == 'port'] == []
@@ -487,10 +487,10 @@ class TestTwoMachinesCannotHoldOneAddress:
         return topology.build(devices, {u: self._attrs(ip) for u, ip in pairs})
 
     def test_the_same_address_twice_is_not_one_network(self):
-        out = self._map(('erebor', '172.17.0.1/16'), ('isen', '172.17.0.1/16'))
+        out = self._map(('atlas', '172.17.0.1/16'), ('isen', '172.17.0.1/16'))
         net = [n for n in out['networks'] if n['net'] == '172.17.0.0/16'][0]
         assert net['private'] is True
-        assert sorted(net['members']) == ['erebor', 'isen'], (
+        assert sorted(net['members']) == ['atlas', 'isen'], (
             'the machines were dropped instead of the claim about them')
 
     def test_a_real_network_is_still_a_real_network(self):
@@ -507,7 +507,7 @@ class TestTwoMachinesCannotHoldOneAddress:
 
     def test_the_flag_is_per_network_and_not_per_fleet(self):
         """A fleet with one contradictory range must not have its real networks marked too."""
-        out = self._map(('erebor', '172.17.0.1/16'), ('isen', '172.17.0.1/16'),
+        out = self._map(('atlas', '172.17.0.1/16'), ('isen', '172.17.0.1/16'),
                         ('pve', '192.168.180.10/24'))
         flags = {n['net']: n['private'] for n in out['networks']}
         assert flags['172.17.0.0/16'] is True

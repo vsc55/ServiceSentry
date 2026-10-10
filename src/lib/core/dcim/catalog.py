@@ -169,6 +169,20 @@ SCHEMA = TableSpec(
         # y no una consulta al historial porque la lista enseña doscientas filas, y contar
         # versiones de doscientas fichas para pintar dos casillas sería pagar el resumen a precio
         # del detalle.
+        # Dónde está cada boca en la cara del equipo: ``{"interfaces|gi1": {"f": "front",
+        # "x": 0.12, "y": 0.4}}`` — la cara, y el sitio como fracción de lo ancho y lo alto de
+        # su foto. Ninguna biblioteca lo trae: NetBox dice cuántas bocas hay y cómo se llaman,
+        # no dónde están, y es lo que hace falta para que un cable salga del puerto 7 y no del
+        # centro de la caja. Lo sitúa una persona (`set_port_map`), por nombre y no por posición
+        # en la lista, para que una reimportación que reordene los puertos no los cambie de
+        # sitio — y se rescata por el modelo en cada reimportación, como una clase corregida.
+        Column('port_map', 'TEXT', nullable=False, default="'{}'"),
+        # Las vistas de DENTRO: ``[{"id", "name", "image"}]`` — «Placa», «Riser 1», «Jaula de
+        # discos». Una foto con la tapa quitada no basta en un servidor: los risers y las jaulas
+        # están en otro plano, y cada una tiene sus bahías. Sobre cada vista se sitúan las bahías
+        # del modelo (`port_map`, con la cara `v:<id>`), y en un equipo se ve qué pieza hay en
+        # cada una. Se rescatan en cada reimportación, como las posiciones.
+        Column('views', 'TEXT', nullable=False, default="'[]'"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
@@ -269,7 +283,16 @@ POWER_TYPES = ('internal', 'external', 'poe')
 #: catálogo: un armario, y los módulos que no son un dispositivo entero.
 KINDS = ('server', 'switch', 'router', 'firewall', 'storage', 'patch_panel', 'fiber_panel',
          'ups', 'pdu', 'shelf', 'kvm', 'console', 'blank',
-         'rack', 'transceiver', 'psu', 'nic', 'module', 'other')
+         'rack', 'transceiver', 'psu', 'nic', 'module',
+         # El control de accesos: no va en un armario, va en una puerta, en una taquilla o en
+         # una pared, pero es un modelo que se compra, tiene marca y número de parte, y se
+         # elige igual que un servidor. Lo que lo pone en su sitio es la pieza de sala que lo usa.
+         'access_gateway', 'access_lock', 'access_reader', 'access_controller', 'turnstile',
+         'other')
+#: Las clases del control de accesos, y qué piezas de sala las usan.
+ACCESS_TYPE_KINDS = {'door': ('access_lock',), 'cabinet': ('access_lock',),
+                     'turnstile': ('turnstile', 'access_reader'),
+                     'reader': ('access_gateway', 'access_reader', 'access_controller')}
 
 #: El cuarto árbol, y el único que no viene de ninguna biblioteca: los **modelos de componente**
 #: —memoria, discos, CPU, tarjetas—. Ninguna pública los trae: los `module-types` de NetBox son
@@ -496,6 +519,120 @@ def walk(root: str):
                 yield os.path.join(base, name)
 
 
+#: Las familias que se sitúan sobre una cara del equipo: los conectores, por fuera, y las
+#: bahías, por dentro.
+CONNECTORS = ('interfaces', 'power-ports', 'power-outlets', 'console-ports',
+              'console-server-ports', 'front-ports', 'rear-ports')
+#: Y las bahías: no son un conector a la vista, son el hueco donde va una pieza —la CPU, un
+#: módulo de memoria, un M.2—, y se sitúan sobre una vista interior.
+BAYS = ('module-bays', 'device-bays')
+PLACEABLE = CONNECTORS + BAYS
+#: Cuántas vistas interiores puede tener un modelo.
+VIEWS_MAX = 12
+#: Las familias que ya dicen en qué cara están: el lado de delante y el de detrás de un panel
+#: de parcheo. Las demás pueden estar en cualquiera de las dos.
+FACE_OF_FAMILY = {'front-ports': 'front', 'rear-ports': 'rear'}
+#: Cuántas posiciones se guardan como mucho en un modelo: un chasis de verdad no llega.
+PORT_MAP_MAX = 4000
+
+
+def port_slot_info(row: dict) -> list:
+    """Las bocas situables de un modelo, en su orden: ``[(clave, tipo)]`` con la clave
+    ``familia|nombre``.
+
+    Por su nombre si la lista los trae (`port_list`). Si solo hay recuento (`ports`) —un modelo
+    escrito a mano, que dice «2 × USB-A y 1 × USB-C» y no cómo se llama cada uno—, numeradas
+    dentro de SU TIPO: ``front-ports|usb-a#1``. Numeradas solo dentro de la familia eran
+    «Puertos frontales 1, 2, 3», y no había forma de saber cuál de los tres era el USB-C.
+    """
+    fuera = []
+    lista = row.get('port_list') or {}
+    cuentas = row.get('ports') or {}
+    for fam in PLACEABLE:
+        filas = lista.get(fam) if isinstance(lista, dict) else None
+        if isinstance(filas, list) and filas:
+            fuera += [('%s|%s' % (fam, str(x.get('name') or '')), str(x.get('type') or ''))
+                      for x in filas if isinstance(x, dict) and x.get('name')]
+            continue
+        tipos = cuentas.get(fam) if isinstance(cuentas, dict) else None
+        if not isinstance(tipos, dict):
+            continue
+        for tipo, n in tipos.items():
+            try:
+                n = max(0, min(int(n or 0), PORT_MAP_MAX))
+            except (TypeError, ValueError):
+                continue
+            tipo = str(tipo or '')
+            fuera += [(('%s|%s#%d' % (fam, tipo, k + 1)) if tipo else ('%s|%d' % (fam, k + 1)),
+                       tipo) for k in range(n)]
+    return fuera[:PORT_MAP_MAX]
+
+
+def port_slots(row: dict) -> list:
+    """Las claves de :func:`port_slot_info`, que es lo que se sitúa y se guarda."""
+    return [k for k, _t in port_slot_info(row)]
+
+
+def clean_views(value) -> list:
+    """``[{"id", "name", "image"}]`` — las vistas interiores que se guardan, y nada más."""
+    import re                                    # noqa: PLC0415
+    fuera, vistos = [], set()
+    for v in (value if isinstance(value, list) else []):
+        if not isinstance(v, dict):
+            continue
+        vid = str(v.get('id') or '')
+        if not re.fullmatch(r'[0-9a-f]{8}', vid) or vid in vistos:
+            continue
+        vistos.add(vid)
+        imagen = str(v.get('image') or '')
+        fuera.append({'id': vid, 'name': str(v.get('name') or '').strip()[:60],
+                      'image': imagen if media.is_name(imagen) else ''})
+        if len(fuera) >= VIEWS_MAX:
+            break
+    return fuera
+
+
+def faces_of(row: dict) -> set:
+    """Las caras donde se puede situar algo en este modelo: delante, detrás y cada vista."""
+    vistas = row.get('views') or []
+    return {'front', 'rear'} | {'v:' + str(v.get('id')) for v in vistas if isinstance(v, dict)}
+
+
+def clean_port_map(value, slots=None, faces=None) -> dict:
+    """``{"familia|nombre": {"f": "front"|"rear", "x": 0..1, "y": 0..1}}`` — lo que se guarda.
+
+    Lo que llega es un JSON del navegador: la cara tiene que ser una de las dos, el sitio un
+    número finito dentro de la foto, y la boca una que el modelo tenga (*slots*, si se da).
+    Lo demás se cae aquí, en silencio, que es donde se puede.
+    """
+    import math                                  # noqa: PLC0415
+    fuera: dict = {}
+    if not isinstance(value, dict):
+        return fuera
+    for clave, pos in value.items():
+        clave = str(clave or '')[:200]
+        fam = clave.split('|', 1)[0]
+        if fam not in PLACEABLE or '|' not in clave or not isinstance(pos, dict):
+            continue
+        if slots is not None and clave not in slots:
+            continue
+        cara = str(pos.get('f') or '')
+        if cara not in (faces if faces is not None else ('front', 'rear')) \
+                or FACE_OF_FAMILY.get(fam, cara) != cara:
+            continue
+        try:
+            x, y = float(pos.get('x')), float(pos.get('y'))
+        except (TypeError, ValueError):
+            continue
+        if not (math.isfinite(x) and math.isfinite(y)):
+            continue
+        fuera[clave] = {'f': cara, 'x': round(min(1.0, max(0.0, x)), 4),
+                        'y': round(min(1.0, max(0.0, y)), 4)}
+        if len(fuera) >= PORT_MAP_MAX:
+            break
+    return fuera
+
+
 class CatalogStore(BaseStore):
     """The models, and the one import that replaces them."""
 
@@ -647,11 +784,33 @@ class CatalogStore(BaseStore):
         # Las dos columnas de JSON se deshacen AQUÍ, en el único sitio por el que sale una fila:
         # quien la reciba trabaja con diccionarios y no con texto, y dejar que cada pantalla
         # decida cuándo interpretarlo es tener dos que se olvidan.
-        for campo in ('ports', 'port_list', 'extra'):
+        for campo in ('ports', 'port_list', 'extra', 'port_map'):
             try:
                 out[campo] = json.loads(out.get(campo) or '{}')
             except Exception:                   # pylint: disable=broad-except
                 out[campo] = {}
+        try:
+            out['views'] = clean_views(json.loads(out.get('views') or '[]'))
+        except Exception:                       # pylint: disable=broad-except
+            out['views'] = []
+        # Cuántas bocas tiene y cuántas están situadas: lo que la tabla enseña para saber qué
+        # modelos faltan por preparar. Aquí y no en la pantalla, que solo vería la página que
+        # tiene delante y tendría que repetir la regla de qué cuenta como boca.
+        info = port_slot_info(out)
+        bocas = [k for k, _t in info]
+        out['port_slots'] = bocas
+        # Y de qué tipo es cada una, para decirlo al situarla: «USB 3.1 Gen 2 Type C 1», no
+        # «Puertos frontales 3».
+        out['port_slot_types'] = {k: t for k, t in info if t}
+        # Los conectores y las bahías, contados aparte: la marca de la tabla habla de puertos, y
+        # un mini PC con todos sus USB situados no está «a medias» porque su placa no tenga foto.
+        situadas = out.get('port_map') or {}
+        conectores = [b for b in bocas if b.split('|', 1)[0] in CONNECTORS]
+        bahias = [b for b in bocas if b.split('|', 1)[0] in BAYS]
+        out['ports_total'] = len(conectores)
+        out['ports_placed'] = sum(1 for b in conectores if b in situadas)
+        out['bays_total'] = len(bahias)
+        out['bays_placed'] = sum(1 for b in bahias if b in situadas)
         return out
 
     def list(self, where: str = '', params: tuple = (), limit: int = 0,
@@ -723,6 +882,9 @@ class CatalogStore(BaseStore):
             nombre = str(fila.get(cara) or '')
             if nombre:
                 media.forget(var_dir, nombre, media_dir)
+        for vista in fila.get('views') or []:
+            if vista.get('image'):
+                media.forget(var_dir, vista['image'], media_dir)
         return True
 
     #: Lo que se puede escribir a mano en un modelo. Ni `uid`, ni `source`, ni la fecha: son
@@ -869,6 +1031,53 @@ class CatalogStore(BaseStore):
         self.revs.keep(uid, self.get(uid) or {}, action='edit', actor=actor)
         return True
 
+    def set_port_map(self, uid: str, value, *, actor: str = '') -> bool:
+        """Dónde está cada boca, entero: lo que había se sustituye por esto. `True` si había
+        fila. Solo las bocas que el modelo TIENE (:func:`port_slots`): una posición para un
+        puerto que no existe no la dibuja nadie y nadie la puede quitar."""
+        import json                              # noqa: PLC0415
+        actual = self.get(uid)
+        if not actual:
+            return False
+        limpio = clean_port_map(value, set(port_slots(actual)), faces_of(actual))
+        try:
+            rev = int(actual.get('rev') or 1) + 1
+        except (TypeError, ValueError):
+            rev = 2
+        self._db.execute(
+            f'UPDATE {self._sql_table} SET port_map = ?, updated_at = ?, updated_by = ?, rev = ? '
+            'WHERE uid = ?',
+            (json.dumps(limpio, sort_keys=True), BaseStore._now(), str(actor or ''), rev,
+             str(uid)))
+        self._db.commit()
+        self.revs.keep(uid, self.get(uid) or {}, action='port_map', actor=actor)
+        return True
+
+    def set_views(self, uid: str, views: list, *, actor: str = '', action: str = 'views') -> bool:
+        """Las vistas interiores, enteras. Las posiciones de una vista que ya no está se van con
+        ella: una bahía situada en una foto que no existe no la ve nadie y nadie la puede quitar.
+        Las imágenes que dejan de usarse las borra quien llama, que sabe dónde están."""
+        import json                              # noqa: PLC0415
+        actual = self.get(uid)
+        if not actual:
+            return False
+        limpias = clean_views(views)
+        caras = faces_of({'views': limpias})
+        mapa = {k: v for k, v in (actual.get('port_map') or {}).items()
+                if str((v or {}).get('f') or '') in caras}
+        try:
+            rev = int(actual.get('rev') or 1) + 1
+        except (TypeError, ValueError):
+            rev = 2
+        self._db.execute(
+            f'UPDATE {self._sql_table} SET views = ?, port_map = ?, updated_at = ?, '
+            'updated_by = ?, rev = ? WHERE uid = ?',
+            (json.dumps(limpias), json.dumps(mapa, sort_keys=True), BaseStore._now(),
+             str(actor or ''), rev, str(uid)))
+        self._db.commit()
+        self.revs.keep(uid, self.get(uid) or {}, action=action, actor=actor)
+        return True
+
     def drop_many(self, uids, var_dir: str = '', media_dir: str = '') -> int:
         """Quitar varios. Devuelve cuántos había.
 
@@ -1012,6 +1221,15 @@ class CatalogStore(BaseStore):
                 'WHERE source = ? AND kind_set = 1', (source,)) or ()):
             if r[0]:
                 suyas[str(r[0])] = str(r[1] or '')
+        # Y dónde puso alguien cada puerto, por lo mismo: es trabajo de una persona que ninguna
+        # biblioteca trae, y una reimportación que lo borrara obligaría a volver a hacerlo.
+        situadas = {}
+        for r in (self._db.fetchall(
+                f"SELECT match_key, port_map, views FROM {self._sql_table} "
+                "WHERE source = ? AND ((port_map <> '{}' AND port_map <> '') "
+                "OR (views <> '[]' AND views <> ''))", (source,)) or ()):
+            if r[0]:
+                situadas[str(r[0])] = (str(r[1] or '{}'), str(r[2] or '[]'))
         if alcance is None:
             self._db.execute(f'DELETE FROM {self._sql_table} WHERE source = ?', (source,))
         else:
@@ -1065,6 +1283,8 @@ class CatalogStore(BaseStore):
             if corregida:
                 values['kind'] = corregida
                 values['kind_set'] = 1
+            if str(values.get('match_key') or '') in situadas:
+                values['port_map'], values['views'] = situadas[str(values['match_key'])]
             for face in ('front', 'rear'):
                 datos = (row.get('_images') or {}).get(face)
                 nombre = ''

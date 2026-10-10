@@ -555,7 +555,7 @@ class TestARoleSaysWhatAValueIS:
     """
 
     def test_the_system_description_is_not_a_model(self):
-        """`sysDescr` is free text — "Linux erebor 3.10.108 #86009 SMP Wed Nov 26…" — and it
+        """`sysDescr` is free text — "Linux atlas 3.10.108 #86009 SMP Wed Nov 26…" — and it
         was declared as the device's model. On a Synology that string then beat the actual
         model (DS916+) on screen, and on anything else it put a kernel build line under the
         heading "Model"."""
@@ -652,7 +652,7 @@ class TestHowADevicesIdentityReads:
         for pid in ('synology_system', 'synology_ups', 'sys_generic'):
             fields.update(profiles.history_fields(cat[pid], 'es_ES'))
         srcs = infra.sources_of({'snmp': fields})
-        rows = [{'module': 'snmp', 'key': 'k', 'name': 'erebor', 'row': '', 'ts': 't',
+        rows = [{'module': 'snmp', 'key': 'k', 'name': 'atlas', 'row': '', 'ts': 't',
                  'data': {'_attrs': {'synology_system': {'model': 'DS916+'},
                                      'synology_ups': {'model': 'Back-UPS'},
                                      'sys_generic': {'description': 'Linux'}}}}]
@@ -707,7 +707,7 @@ class TestHowADevicesIdentityReads:
         RAM, VIRT, OTHER, DISK = ('1.3.6.1.2.1.25.2.1.' + n for n in '2314')
 
         def store(name, kind):
-            return {'module': 'snmp', 'key': f'srv/{name}', 'name': 'erebor', 'row': name,
+            return {'module': 'snmp', 'key': f'srv/{name}', 'name': 'atlas', 'row': name,
                     'ts': 't', 'data': {'fs_used': 1, 'fs_size': 2,
                                         '_attrs': {'hr_storage': {'kind': kind}}}}
         rows = [store('Physical memory', RAM), store('Swap space', VIRT),
@@ -724,7 +724,7 @@ class TestHowADevicesIdentityReads:
         from lib.core.infra import service as infra          # noqa: PLC0415
         meta = {'label': 'CPU', 'unit': '%', 'headline': True,
                 'headline_rows': {'role': 'kind', 'any': ['x']}, 'source': 'p'}
-        rows = [{'module': 'snmp', 'key': 'k', 'name': 'erebor', 'row': '', 'ts': 't',
+        rows = [{'module': 'snmp', 'key': 'k', 'name': 'atlas', 'row': '', 'ts': 't',
                  'data': {'cpu': 87}}]
         assert infra.metrics(rows, {'snmp': {'cpu': meta}})[0]['headline'] is True
 

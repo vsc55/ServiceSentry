@@ -27,7 +27,6 @@ import time
 
 from flask import jsonify, request, session
 
-from lib import APP_NAME
 from lib.core.mfa import cose, webauthn
 from lib.core.mfa import service as mfa_service
 
@@ -87,7 +86,7 @@ def register(app, wa):
             # current code — silently overwriting a working factor from a borrowed session is
             # the whole attack this endpoint would otherwise be.
             return jsonify({'ok': False, 'error': 'already_enrolled'}), 409
-        out = mfa_service.enroll_begin(wa._mfa_store, uid, username, APP_NAME)
+        out = mfa_service.enroll_begin(wa._mfa_store, uid, username, wa._brand_name())
         if not out.get('ok'):
             return jsonify(out), 503 if out.get('error') == 'no_key' else 400
         return jsonify(out)
@@ -217,7 +216,7 @@ def register(app, wa):
         return jsonify({
             'ok': True,
             'rp_id': scope['rp_id'],
-            'rp_name': APP_NAME,
+            'rp_name': wa._brand_name(),
             'challenge': challenge,
             # base64url of the uid, because a WebAuthn user handle is BYTES. The uid and not
             # the name: a rename must not detach the key, exactly as for the TOTP row.

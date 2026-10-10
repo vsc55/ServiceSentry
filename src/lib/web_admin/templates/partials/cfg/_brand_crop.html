@@ -1,0 +1,370 @@
+{# ================================================================
+   Config — the brand's adjust dialog: crop and resize a picture before it goes up.
+
+   Asked from the screen: a picture picked for a slot was sent as it was, and the slot's rules
+   — its shape, its resolution, its weight — only spoke up afterwards, as a refusal. Now the
+   picture opens here first, beside what the slot asks; a box that keeps the slot's shape picks
+   the part to keep (or the whole picture is fitted inside with transparent margins), the size
+   it comes out at starts at the recommended one, and what goes up is the result — measured and
+   weighed before it is sent.
+
+   All of it in the browser, on a canvas, with no library: the panel runs no third-party script.
+   An SVG is shown and sent as it is — it has no pixels to crop, and rasterising a vector logo
+   to make it smaller would make it worse.
+   ================================================================ #}
+
+//: The picture being adjusted: `{slot, spec, file, img, W, H, rect, mode, out, blob}`. `rect`
+//: is the part kept, in the picture's own pixels; `mode` is `crop` or `fit`.
+let _bc = null;
+
+// ── The rules, pure (tested in node) ─────────────────────────────────────────
+
+/** A box that keeps the slot's shape: square, landscape (as wide or wider than tall) or wide
+ *  (from square to four times as wide as tall). */
+function _bcShape(w, h, shape) {
+    if (shape === 'square') { const s = Math.min(w, h); return [s, s]; }
+    if (shape === 'landscape') return [w, Math.min(h, w)];
+    if (shape === 'wide') {
+        if (w < h) return [w, w];
+        if (w > 4 * h) return [4 * h, h];
+    }
+    return [w, h];
+}
+
+/** The largest box of the slot's shape, centred in a W×H picture: where cropping starts. */
+function _bcInitial(shape, W, H) {
+    const [w, h] = _bcShape(W, H, shape);
+    return {x: Math.round((W - w) / 2), y: Math.round((H - h) / 2), w, h};
+}
+
+/** A box resized from the corner opposite `anchor` (`[ax, ay]`, a fixed corner) to the point
+ *  `[px, py]`: kept inside the picture, at least 8 px, and of the slot's shape. */
+function _bcResize(anchor, p, shape, W, H) {
+    const [ax, ay] = anchor;
+    const dx = p[0] >= ax ? 1 : -1, dy = p[1] >= ay ? 1 : -1;
+    const roomW = dx > 0 ? W - ax : ax, roomH = dy > 0 ? H - ay : ay;
+    let w = Math.max(8, Math.min(Math.abs(p[0] - ax), roomW));
+    let h = Math.max(8, Math.min(Math.abs(p[1] - ay), roomH));
+    [w, h] = _bcShape(w, h, shape);
+    // The shape can ask for more than the room on the other side: shrink both, keeping it.
+    const k = Math.min(1, roomW / w, roomH / h);
+    w = Math.max(1, Math.round(w * k));
+    h = Math.max(1, Math.round(h * k));
+    return {x: dx > 0 ? ax : ax - w, y: dy > 0 ? ay : ay - h, w, h};
+}
+
+/** The size the result comes out at: the recommended width, at the kept part's proportions,
+ *  then brought inside the slot's smallest and largest side. */
+function _bcOutSize(spec, aspect) {
+    let w = (spec.rec || [512])[0], h = Math.round(w / aspect);
+    const lado = (a, b) => Math.min(a, b);
+    if (lado(w, h) < spec.min_px) { const k = spec.min_px / lado(w, h); w = Math.round(w * k); h = Math.round(h * k); }
+    if (Math.max(w, h) > spec.max_px) { const k = spec.max_px / Math.max(w, h); w = Math.round(w * k); h = Math.round(h * k); }
+    return {w, h};
+}
+
+/** The aspect of the result: the kept part's when cropping; when fitting the whole picture,
+ *  the closest one the slot's shape allows. */
+function _bcAspect(b) {
+    if (b.mode === 'crop') return b.rect.w / b.rect.h;
+    const [w, h] = _bcShape(b.W, b.H, b.spec.shape);
+    if (b.spec.shape === 'square') return 1;
+    if (b.spec.shape === 'landscape') return Math.max(1, b.W / b.H);
+    return w / h;
+}
+
+/** What is wrong with a size for a slot, in words, or `''`. The server checks again; this is
+ *  so the dialog says it BEFORE anything is sent. */
+function _bcSizeProblem(spec, w, h) {
+    if (!w || !h) return '';
+    if (Math.min(w, h) < spec.min_px) return tf('brand_too_small', w, h, spec.min_px);
+    if (Math.max(w, h) > spec.max_px) return tf('brand_too_large', w, h, spec.max_px);
+    if (spec.shape === 'square' && Math.abs(w - h) > Math.max(2, 0.02 * Math.max(w, h))) return tf('brand_not_square', w, h);
+    if (spec.shape === 'landscape' && w < h) return tf('brand_not_landscape', w, h);
+    if (spec.shape === 'wide' && !(h * 0.98 <= w && w <= h * 4)) return tf('brand_not_wide', w, h);
+    return '';
+}
+
+/** The formats to try, in order: PNG first (it keeps transparency); if it comes out heavier
+ *  than the slot takes, WebP and then JPEG where the slot accepts them. */
+function _bcFormats(spec) {
+    const out = [['image/png', 1, 'png']];
+    if ((spec.kinds || []).includes('webp')) out.push(['image/webp', 0.9, 'webp']);
+    if ((spec.kinds || []).includes('jpg')) out.push(['image/jpeg', 0.9, 'jpg']);
+    return out;
+}
+
+// ── The dialog ───────────────────────────────────────────────────────────────
+
+function _bcModal() {
+    let m = document.getElementById('brandCropModal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.className = 'modal fade';
+    m.id = 'brandCropModal';
+    m.tabIndex = -1;
+    m.innerHTML = `<div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content">
+        <div class="modal-header py-2"><h6 class="modal-title" id="bcTitle"></h6>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="${escAttr(t('close'))}"></button></div>
+        <div class="modal-body" id="bcBody"></div>
+        <div class="modal-footer py-1">
+            <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">${esc(t('cancel'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="bcOriginal" onclick="_bcSendOriginal()">
+                <i class="bi bi-file-earmark-image me-1"></i>${esc(t('brand_crop_original'))}</button>
+            <button type="button" class="btn btn-sm btn-primary" id="bcApply" onclick="_bcSendAdjusted()">
+                <i class="bi bi-upload me-1"></i>${esc(t('brand_crop_apply'))}</button>
+        </div></div></div>`;
+    document.body.appendChild(m);
+    return m;
+}
+
+/** Open a picked file for a slot.
+ *
+ *  Read as a `data:` URL and not as an object URL: the panel's content policy lets
+ *  images come from itself and from `data:`, and a `blob:` URL is neither — the picture never
+ *  loaded and the dialog said the slot did not take that kind of image. Reported from the
+ *  screen, with a perfectly good PNG. */
+function _brandCropOpen(slot, file) {
+    const spec = ((_brandData || {}).slots || {})[slot];
+    if (!spec) return;
+    const lector = new FileReader();
+    lector.onerror = () => showToast(t('brand_wrong_kind'), 'danger');
+    lector.onload = () => _bcLoad(slot, spec, file, String(lector.result || ''));
+    lector.readAsDataURL(file);
+}
+
+function _bcLoad(slot, spec, file, url) {
+    const img = new Image();
+    img.onload = () => {
+        const svg = (file.type === 'image/svg+xml') || /\.svg$/i.test(file.name || '');
+        const W = img.naturalWidth || 0, H = img.naturalHeight || 0;
+        _bc = {slot, spec, file, img, url, svg, W, H, mode: 'crop',
+               rect: _bcInitial(spec.shape, W || 1, H || 1), out: null, blob: null};
+        _bc.out = _bcOutSize(spec, _bcAspect(_bc));
+        const m = _bcModal();
+        document.getElementById('bcTitle').textContent = tf('brand_crop_title', t('brand_slot_' + slot));
+        _bcDraw();
+        m.addEventListener('hidden.bs.modal', () => { _bc = null; }, {once: true});
+        bootstrap.Modal.getOrCreateInstance(m).show();
+        setTimeout(_bcPlace, 200);
+    };
+    img.onerror = () => showToast(t('brand_wrong_kind'), 'danger');
+    img.src = url;
+}
+
+/** The dialog's body: the picture with its box on the left; on the right what the slot asks,
+ *  what the picture is, and what will go up. */
+function _bcDraw() {
+    const b = _bc, s = b.spec;
+    const fila = (k, v) => `<div class="d-flex justify-content-between gap-2"><span class="text-muted">${esc(k)}</span><span class="ss-tabular text-end">${esc(v)}</span></div>`;
+    const tipos = (s.kinds || []).map(k => k.toUpperCase()).join(', ');
+    const problemaOriginal = b.svg ? '' : _bcSizeProblem(s, b.W, b.H);
+    document.getElementById('bcBody').innerHTML = `<div class="row g-3">
+        <div class="col-lg-8">
+            <div class="w-100" id="bcWrap"><div class="ss-brand-stage" id="bcStage">
+                <img src="${escAttr(b.url)}" alt="" id="bcImg" draggable="false">
+                ${b.svg || b.mode !== 'crop' ? '' : `<div class="ss-brand-cropbox" id="bcBox" onpointerdown="_bcDown(event,'move')">
+                    ${['nw', 'ne', 'sw', 'se'].map(c => `<span class="ss-brand-handle" data-corner="${c}"
+                        onpointerdown="event.stopPropagation();_bcDown(event,'${c}')"></span>`).join('')}
+                </div>`}
+            </div></div>
+        </div>
+        <div class="col-lg-4 d-flex flex-column gap-3 ss-fs-2">
+            <div><div class="fw-semibold mb-1">${esc(t('brand_crop_asks'))}</div>
+                ${fila(t('brand_crop_shape'), t('brand_shape_' + s.shape))}
+                ${fila(t('brand_crop_rec'), (s.rec || []).join('×') + ' px')}
+                ${fila(t('brand_crop_side'), s.min_px + '–' + s.max_px + ' px')}
+                ${fila(t('brand_crop_weight'), fmtBytes(s.max))}
+                ${fila(t('brand_crop_kinds'), tipos)}</div>
+            <div><div class="fw-semibold mb-1">${esc(t('brand_crop_yours'))}</div>
+                ${fila(t('brand_crop_size'), b.svg ? t('brand_crop_vector') : b.W + '×' + b.H + ' px')}
+                ${fila(t('brand_crop_weight'), fmtBytes(b.file.size))}
+                ${problemaOriginal ? `<div class="text-warning mt-1"><i class="bi bi-exclamation-triangle me-1"></i>${esc(problemaOriginal)}</div>` : ''}</div>
+            ${b.svg ? `<div class="text-muted">${esc(t('brand_crop_svg'))}</div>` : `
+            <div><div class="fw-semibold mb-1">${esc(t('brand_crop_result'))}</div>
+                <div class="btn-group btn-group-sm w-100 mb-2" role="group">
+                    <button type="button" class="btn ${b.mode === 'crop' ? 'btn-primary' : 'btn-secondary'}" onclick="_bcMode('crop')">
+                        <i class="bi bi-crop me-1"></i>${esc(t('brand_crop_mode_crop'))}</button>
+                    <button type="button" class="btn ${b.mode === 'fit' ? 'btn-primary' : 'btn-secondary'}" onclick="_bcMode('fit')">
+                        <i class="bi bi-aspect-ratio me-1"></i>${esc(t('brand_crop_mode_fit'))}</button>
+                </div>
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <label class="text-muted mb-0" for="bcW">${esc(t('brand_crop_width'))}</label>
+                    <input type="number" id="bcW" class="form-control form-control-sm ss-tabular" style="width:6rem"
+                           min="${s.min_px}" max="${s.max_px}" value="${b.out.w}" oninput="_bcWidth(this.value)">
+                    <span class="text-muted ss-tabular" id="bcH">× ${b.out.h} px</span>
+                    <button type="button" class="btn btn-sm btn-secondary ms-auto" onclick="_bcRecommended()"
+                            title="${escAttr(t('brand_crop_rec'))}">${esc(t('brand_crop_use_rec'))}</button>
+                </div>
+                <div class="ss-brand-preview ss-brand-result"><canvas id="bcOut"></canvas></div>
+                <div class="mt-1" id="bcInfo"></div>
+            </div>`}
+        </div>
+    </div>`;
+    _bcPlace();
+    if (!b.svg) _bcRender();
+    const orig = document.getElementById('bcOriginal');
+    if (orig) orig.disabled = !!problemaOriginal || b.file.size > s.max;
+    // A vector goes up as it is: the main button sends it.
+    const apply = document.getElementById('bcApply');
+    if (apply && b.svg) apply.disabled = b.file.size > s.max;
+}
+
+/** Scale of the picture on screen, and the box put where `rect` says. */
+function _bcPlace() {
+    const b = _bc;
+    const wrap = document.getElementById('bcWrap'), img = document.getElementById('bcImg');
+    if (!b || !wrap || !img) return;
+    // Measured on the full-width wrapper and not on the stage: the stage is as wide as the
+    // picture in it, so measuring it gave back whatever the picture already was — 600 px, the
+    // fallback, however much room the dialog had.
+    const ancho = wrap.clientWidth || 600, alto = (window.innerHeight || 800) * 0.6;
+    if (b.svg) {
+        // A vector has no pixels to fit: drawn as large as there is room for. One with only a
+        // viewBox has no size of its own either, and left to itself collapsed to nothing.
+        const ratio = b.W && b.H ? b.W / b.H : 1;
+        const w = Math.round(Math.min(ancho, 480, alto * ratio));
+        img.style.width = w + 'px';
+        img.style.height = Math.round(w / ratio) + 'px';
+        return;
+    }
+    const k = Math.min(ancho / b.W, alto / b.H, 1e9);
+    b.k = k;
+    img.style.width = Math.round(b.W * k) + 'px';
+    img.style.height = Math.round(b.H * k) + 'px';
+    const box = document.getElementById('bcBox');
+    if (!box) return;
+    box.style.left = (b.rect.x * k) + 'px';
+    box.style.top = (b.rect.y * k) + 'px';
+    box.style.width = (b.rect.w * k) + 'px';
+    box.style.height = (b.rect.h * k) + 'px';
+}
+
+function _bcMode(m) {
+    _bc.mode = m;
+    _bc.out = _bcOutSize(_bc.spec, _bcAspect(_bc));
+    _bcDraw();
+}
+
+function _bcRecommended() {
+    _bc.out = _bcOutSize(_bc.spec, _bcAspect(_bc));
+    const el = document.getElementById('bcW');
+    if (el) el.value = _bc.out.w;
+    _bcRender();
+}
+
+function _bcWidth(v) {
+    const w = Math.max(1, Math.round(Number(v) || 0));
+    _bc.out = {w, h: Math.max(1, Math.round(w / _bcAspect(_bc)))};
+    _bcRender();
+}
+
+// ── Moving and resizing the box ──────────────────────────────────────────────
+
+function _bcDown(ev, what) {
+    const b = _bc;
+    if (!b) return;
+    ev.preventDefault();
+    const r = b.rect;
+    const opuesta = {nw: [r.x + r.w, r.y + r.h], ne: [r.x, r.y + r.h],
+                     sw: [r.x + r.w, r.y], se: [r.x, r.y]}[what];
+    b.drag = {what, x: ev.clientX, y: ev.clientY, r: Object.assign({}, r), anchor: opuesta};
+    const mover = (e) => _bcMove(e);
+    const soltar = () => {
+        window.removeEventListener('pointermove', mover);
+        window.removeEventListener('pointerup', soltar);
+        if (_bc) { _bc.drag = null; _bcRender(); }
+    };
+    window.addEventListener('pointermove', mover);
+    window.addEventListener('pointerup', soltar);
+}
+
+function _bcMove(ev) {
+    const b = _bc;
+    if (!b || !b.drag) return;
+    const d = b.drag, k = b.k || 1;
+    const dx = (ev.clientX - d.x) / k, dy = (ev.clientY - d.y) / k;
+    if (d.what === 'move') {
+        b.rect = {x: Math.round(Math.max(0, Math.min(b.W - d.r.w, d.r.x + dx))),
+                  y: Math.round(Math.max(0, Math.min(b.H - d.r.h, d.r.y + dy))), w: d.r.w, h: d.r.h};
+    } else {
+        const esquina = {nw: [d.r.x, d.r.y], ne: [d.r.x + d.r.w, d.r.y],
+                         sw: [d.r.x, d.r.y + d.r.h], se: [d.r.x + d.r.w, d.r.y + d.r.h]}[d.what];
+        b.rect = _bcResize(d.anchor, [esquina[0] + dx, esquina[1] + dy], b.spec.shape, b.W, b.H);
+        b.out = {w: b.out.w, h: Math.max(1, Math.round(b.out.w / _bcAspect(b)))};
+    }
+    _bcPlace();
+    const hEl = document.getElementById('bcH');
+    if (hEl) hEl.textContent = `× ${b.out.h} px`;
+}
+
+// ── The result ───────────────────────────────────────────────────────────────
+
+/** Draw the result at its real size, show it small, and weigh it (`_bc.blob`). */
+function _bcRender() {
+    const b = _bc;
+    const cv = document.getElementById('bcOut');
+    if (!b || !cv || b.svg) return;
+    const {w, h} = b.out;
+    cv.width = w;
+    cv.height = h;
+    const g = cv.getContext('2d');
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.clearRect(0, 0, w, h);
+    if (b.mode === 'crop') {
+        g.drawImage(b.img, b.rect.x, b.rect.y, b.rect.w, b.rect.h, 0, 0, w, h);
+    } else {
+        const k = Math.min(w / b.W, h / b.H);
+        const dw = b.W * k, dh = b.H * k;
+        g.drawImage(b.img, 0, 0, b.W, b.H, (w - dw) / 2, (h - dh) / 2, dw, dh);
+    }
+    const hEl = document.getElementById('bcH');
+    if (hEl) hEl.textContent = `× ${h} px`;
+    _bcWeigh();
+}
+
+async function _bcWeigh() {
+    const b = _bc;
+    const info = document.getElementById('bcInfo'), apply = document.getElementById('bcApply');
+    const cv = document.getElementById('bcOut');
+    if (!b || !cv) return;
+    const problema = _bcSizeProblem(b.spec, b.out.w, b.out.h);
+    const fuente = b.mode === 'crop' ? Math.min(b.rect.w, b.rect.h) : Math.min(b.W, b.H);
+    const ampliada = Math.min(b.out.w, b.out.h) > fuente;
+    let elegido = null;
+    for (const [mime, q, ext] of _bcFormats(b.spec)) {
+        const blob = await new Promise(ok => cv.toBlob(ok, mime, q));
+        if (blob && blob.type === mime && blob.size <= b.spec.max) { elegido = {blob, ext}; break; }
+        if (!elegido && blob) elegido = {blob, ext, pesado: true};
+    }
+    if (_bc !== b) return;
+    b.blob = elegido && !elegido.pesado ? elegido : null;
+    const avisos = [];
+    if (problema) avisos.push(`<div class="text-danger"><i class="bi bi-x-circle me-1"></i>${esc(problema)}</div>`);
+    if (elegido && elegido.pesado) avisos.push(`<div class="text-danger"><i class="bi bi-x-circle me-1"></i>${esc(tf('brand_crop_heavy', fmtBytes(elegido.blob.size), fmtBytes(b.spec.max)))}</div>`);
+    if (ampliada) avisos.push(`<div class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>${esc(t('brand_crop_upscaled'))}</div>`);
+    if (info) info.innerHTML = (elegido ? `<div class="text-muted">${esc(tf('brand_crop_will_be',
+        b.out.w + '×' + b.out.h + ' px', elegido.ext.toUpperCase(), fmtBytes(elegido.blob.size)))}</div>` : '') + avisos.join('');
+    if (apply) apply.disabled = !b.blob || !!problema;
+}
+
+async function _bcSendAdjusted() {
+    const b = _bc;
+    if (!b) return;
+    if (b.svg) return _bcSendOriginal();
+    if (!b.blob) return;
+    const base = (b.file.name || 'brand').replace(/\.[^.]+$/, '');
+    if (await _brandSend(b.slot, b.blob.blob, `${base}.${b.blob.ext}`)) _bcClose();
+}
+
+async function _bcSendOriginal() {
+    const b = _bc;
+    if (!b) return;
+    if (await _brandSend(b.slot, b.file, b.file.name)) _bcClose();
+}
+
+function _bcClose() {
+    const m = document.getElementById('brandCropModal');
+    if (m) bootstrap.Modal.getOrCreateInstance(m).hide();
+}

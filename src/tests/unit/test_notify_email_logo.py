@@ -205,7 +205,9 @@ class TestItIsTheSameFileThePanelServes:
         resolving, every email quietly loses its header."""
         assert os.path.isfile(brand.LOGO_PATH), brand.LOGO_PATH
         assert brand.LOGO_PATH.endswith(os.path.join('static', 'img', 'logo-email.png'))
-        assert brand.LOGO_URL.endswith('/static/img/logo-email.png')
+        # The preview asks the brand route, which answers with this same file until an
+        # installation uploads its own email logo.
+        assert brand.LOGO_URL == '/brand/email'
 
     def test_it_is_the_cut_out_badge_and_not_the_boot_mark(self):
         """The boot ring's mark is a square crop WITH a background — on a white email card

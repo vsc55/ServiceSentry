@@ -33,7 +33,8 @@ except ImportError:
 
 def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
              status: str = '', message: str = '', timestamp: str = '',
-             cfg: dict | None = None, channel_ids=None, lang: str = '') -> tuple[bool, str]:
+             cfg: dict | None = None, channel_ids=None, lang: str = '',
+             app_name: str = '') -> tuple[bool, str]:
     """Send to every enabled Teams channel + (if enabled) directly to users.
 
     Returns ``(all_ok, summary)``.  ``channel_ids`` optionally restricts the channel
@@ -54,7 +55,8 @@ def send_all(wa, kind: str = 'info', module: str = '', item: str = '',
         wanted = {str(i) for i in channel_ids}
         channels = [c for c in channels if str(c.get('id') or c.get('uid') or '') in wanted]
     card = cards.message_card(kind=kind, module=module, item=item,
-                              status=status, message=message, timestamp=timestamp)
+                              status=status, message=message, timestamp=timestamp,
+                              app_name=app_name)
     for ch in channels:
         ok, msg = _post_card(ch['webhook_url'], card)
         results.append((ok, msg, ch.get('name') or ch.get('id', '?')))

@@ -63,7 +63,8 @@ _DEFAULT_STRINGS: dict[str, str] = {
 }
 
 
-def get_strings(lang: str = '', overrides: 'dict | None' = None) -> dict[str, str]:
+def get_strings(lang: str = '', overrides: 'dict | None' = None,
+                app_name: str = '') -> dict[str, str]:
     """Return the template string dict for *lang*, merged over the English baseline.
 
     Parameters
@@ -74,6 +75,11 @@ def get_strings(lang: str = '', overrides: 'dict | None' = None) -> dict[str, st
         Optional ``{key: value}`` dict of admin-configured template strings that
         take precedence over both the baseline and any built-in language overlay.
         Unknown keys are silently ignored.
+    app_name:
+        The installation's own name (``lib.core.brand``). The built-in strings that sign with
+        the product's name sign with this one instead, and it is in the result as
+        ``app_name`` — the header reads it, and a custom HTML template may write
+        ``{app_name}``. Strings an administrator typed are theirs and are not touched.
     """
     # 1. Start from built-in defaults (English)
     base: dict[str, str] = _DEFAULT_STRINGS
@@ -90,6 +96,13 @@ def get_strings(lang: str = '', overrides: 'dict | None' = None) -> dict[str, st
             # in the built-in English rather than the operator's language. Raising — or
             # logging on every send — would be a worse outcome than the wrong language.
             pass
+
+    # 2b. The installation's own name where the built-in strings say the product's.
+    nombre = (app_name or '').strip() or APP_NAME
+    if nombre != APP_NAME:
+        base = {k: v.replace(APP_NAME, nombre) if isinstance(v, str) else v
+                for k, v in base.items()}
+    base = {**base, 'app_name': nombre}
 
     # 3. Apply admin-configured overrides (highest priority)
     if overrides:
@@ -157,7 +170,7 @@ def _wrap(kind: str, title: str, body_html: str, footer_html: str = '',
                     <table cellpadding="0" cellspacing="0" role="presentation"><tr>
                       {"<td style='padding-right:10px'>" + _logo + "</td>" if _logo else ""}
                       <td style="font-size:18px;font-weight:700;color:#212529;letter-spacing:-.3px">
-                        {APP_NAME}
+                        {html.escape(s.get('app_name') or APP_NAME)}
                       </td>
                     </tr></table>
                   </td>
@@ -291,7 +304,7 @@ HTML_TPL_VARS: dict[str, list[str]] = {
 
 # ── Public template functions ────────────────────────────────────────────────
 
-def render_test(sender_name: str = APP_NAME, lang: str = '',
+def render_test(sender_name: str = '', lang: str = '',
                 strings: 'dict | None' = None,
                 html_override: 'str | None' = None) -> str:
     """HTML for the test email sent from the web admin configuration panel."""
@@ -303,6 +316,7 @@ def render_test(sender_name: str = APP_NAME, lang: str = '',
             sender_name=sender_name, sender=sender_name,
         )
     s = strings if strings is not None else get_strings(lang)
+    sender_name = sender_name or s.get('app_name') or APP_NAME
     sender_bold = f'<strong>{html.escape(sender_name)}</strong>'
     body = (
         f'<p>{s["test_body_1"].replace("{sender}", sender_bold)}</p>'

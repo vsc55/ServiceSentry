@@ -24,6 +24,7 @@ from tests.helpers import _fn, _strip_comments
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 PARTIALS = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials')
 ENGINE = os.path.join(PARTIALS, 'infra', '_viewer3d.html')
+TOOLS = os.path.join(PARTIALS, 'infra', '_viewer3d_tools.html')
 DCIM = os.path.join(PARTIALS, 'dcim')
 
 
@@ -33,7 +34,8 @@ def _read(path: str) -> str:
 
 
 def _engine() -> str:
-    return _strip_comments(_read(ENGINE))
+    # Both halves: the viewer's grammar and what was added once whole buildings were drawn.
+    return _strip_comments(_read(ENGINE) + chr(10) + _read(TOOLS))
 
 
 class TestOneViewerPerBox:
@@ -96,3 +98,15 @@ class TestWhatLiesUnderThePlansIsDrawnFirst:
         vanished at 99 %. Translucent `bajo` boxes go before the images, the rest after."""
         body = _fn(_engine(), 'ss3dDraw')
         assert body.index('V.escena.bajos') < body.index('_ss3dDrawPlans(') < body.index('V.escena.vidrios')
+
+
+class TestItDrawsOnlyWhenSomethingChanged:
+
+    def test_the_loop_compares_before_drawing_and_sleeps(self):
+        """It drew sixty frames a second for a picture standing still — a laptop's battery
+        spent on an open pane nobody was looking at."""
+        loop = _fn(_engine(), '_ss3dLoop')
+        assert '_ss3dFirma(V)' in loop and 'V.idle < 20' in loop
+
+    def test_the_solid_boxes_are_baked(self):
+        assert '_ss3dBatchDraw(V, vp)' in _fn(_engine(), 'ss3dDraw')

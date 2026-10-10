@@ -115,6 +115,12 @@ class _StoresMixin:
         # the only way to reach the API at all once that account carries a second factor.
         from lib.core.apitokens.store import ApiTokenStore  # noqa: PLC0415
         self._api_token_store = ApiTokenStore(self._db_connector)
+        # The brand's pictures (Configuración › Marca). The email logo is read from it too, so a
+        # test email sent from here carries the installation's own logo.
+        from lib.core.brand.store import BrandStore  # noqa: PLC0415
+        from lib.core.notify.email import brand as _email_brand  # noqa: PLC0415
+        self._brand_store = BrandStore(self._db_connector)
+        _email_brand.set_loader(lambda: self._brand_store.get('email'))
         # Reusable named credentials (SSH identities referenced by devices/checks).
         from lib.core.credentials.store import CredentialsStore  # noqa: PLC0415
         self._credentials_store = CredentialsStore(

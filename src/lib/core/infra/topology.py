@@ -263,7 +263,7 @@ def build(devices: list, attrs_by_device: dict, evidence: dict | None = None) ->
         # What this machine answers to. LLDP names a neighbour by its OWN hostname, which is
         # what `sysName` says and is usually — but not always — what the registry calls it.
         # Both are indexed, because a machine registered as "nas" and calling itself
-        # "erebor.cerebelum.lan" is one machine and the map must not draw it as two.
+        # "atlas.example.lan" is one machine and the map must not draw it as two.
         for name in (facts.get('name'), device.get('name')):
             for form in _name_forms(name):
                 by_name.setdefault(form, uid)
@@ -482,8 +482,8 @@ def _name_forms(name) -> tuple:
     """The ways one machine's name can be written, for matching one against another.
 
     LLDP reports a hostname and the registry holds whatever somebody typed. Case is not a
-    difference — SNMP agents disagree about it freely — and neither is the domain: "erebor"
-    and "erebor.cerebelum.lan" are the same machine, and refusing to join them would draw the
+    difference — SNMP agents disagree about it freely — and neither is the domain: "atlas"
+    and "atlas.example.lan" are the same machine, and refusing to join them would draw the
     map with every link missing on precisely the fleets that have a search domain.
     """
     text = str(name or '').strip().lower()

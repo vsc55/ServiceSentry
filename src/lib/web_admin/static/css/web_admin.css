@@ -1508,6 +1508,9 @@ html.ss-nocss body { visibility: visible; }
    surface takes whatever is left; on a phone the panel drops underneath instead of squeezing it. */
 .ss-editor { display: flex; gap: .5rem; flex: 1 1 auto; min-height: 360px; }
 .ss-editor > .ss-infra-canvas { min-width: 0; }
+/* A canvas inside a page that scrolls: there is no remaining height for `flex` to give it, so
+   it says its own — half the screen, within reason. The board's map sat at the 240px floor. */
+.ss-canvas-tall { min-height: clamp(360px, 55vh, 720px); }
 @media (max-width: 767.98px) { .ss-editor { flex-direction: column; }
                                .ss-editor > .ss-side-panel { flex-basis: auto; } }
 /* .ss-side-panel : a fixed-width column that scrolls on its own; .is-collapsed leaves only the
@@ -1596,6 +1599,31 @@ html.ss-nocss body { visibility: visible; }
 .ss-tree-row.ss-tree-sub.ss-tree-sub2 { padding-left: 4.2rem; }
 .ss-tree-row.is-picked { background: var(--bs-primary); color: #fff; }
 /* What the inventory was left from — a rack, a room or a site — marked on coming back. */
+/* The brand (Configuración › Marca). .ss-brand-mark: an installation's own square mark where
+   the stock panel draws an icon — as big as the icon it replaces, never stretched.
+   .ss-brand-preview: a slot's picture in the brand card, over a checkerboard so a transparent
+   one shows that it is. */
+.ss-brand-mark { width: 1.6em; height: 1.6em; object-fit: contain; flex-shrink: 0; }
+.ss-brand-preview { width: 6rem; height: 3.5rem; flex-shrink: 0; display: flex; align-items: center;
+                    justify-content: center; border-radius: .375rem; border: 1px solid var(--bs-border-color);
+                    background: repeating-conic-gradient(var(--bs-tertiary-bg) 0% 25%, transparent 0% 50%) 0 0 / 12px 12px; }
+.ss-brand-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+/* The adjust dialog: the picture, a box that keeps the slot's shape over it (the rest dimmed),
+   its four corner handles, and the result drawn small on the same checkerboard. */
+.ss-brand-stage { position: relative; display: inline-block; max-width: 100%; overflow: hidden;
+                  user-select: none; touch-action: none;
+                  background: repeating-conic-gradient(var(--bs-tertiary-bg) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px; }
+.ss-brand-stage > img { display: block; max-width: none; }
+.ss-brand-cropbox { position: absolute; border: 2px solid var(--bs-warning); cursor: move;
+                    box-shadow: 0 0 0 9999px rgba(0, 0, 0, .55); }
+.ss-brand-handle { position: absolute; width: 14px; height: 14px; background: var(--bs-warning);
+                   border: 2px solid #000; border-radius: 2px; }
+.ss-brand-handle[data-corner="nw"] { left: -8px; top: -8px; cursor: nwse-resize; }
+.ss-brand-handle[data-corner="ne"] { right: -8px; top: -8px; cursor: nesw-resize; }
+.ss-brand-handle[data-corner="sw"] { left: -8px; bottom: -8px; cursor: nesw-resize; }
+.ss-brand-handle[data-corner="se"] { right: -8px; bottom: -8px; cursor: nwse-resize; }
+.ss-brand-preview.ss-brand-result { width: 100%; height: 10rem; }
+.ss-brand-result canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
 /* The names over the 3D viewer: a layer the pointer goes through, one tag per labelled thing,
    moved by the viewer to where its point falls on screen. */
 .ss-3d-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
@@ -1603,6 +1631,19 @@ html.ss-nocss body { visibility: visible; }
                line-height: 1.2; padding: 0 .3rem; border-radius: .25rem;
                background: rgba(0, 0, 0, .6); color: #fff; }
 .ss-3d-label-area { font-size: .85rem; font-weight: 600; background: rgba(13, 110, 253, .75); }
+/* What was pointed at in the 3D viewer: a card in its lower left corner, over the picture. */
+.ss-3d-card { position: absolute; left: .5rem; bottom: 2rem; z-index: 3; min-width: 13rem; max-width: 22rem;
+              padding: .5rem .65rem; border-radius: .5rem; font-size: .82rem;
+              background: rgba(20, 22, 26, .92); color: #fff; box-shadow: 0 2px 10px rgba(0, 0, 0, .4); }
+/* The card is dark in either theme: the page's muted grey on it was all but invisible — the
+   state read «Sin vigilar» in dark grey on near black. */
+.ss-3d-card .text-muted { color: rgba(255, 255, 255, .75) !important; }
+/* What is under the pointer in a 3D viewer, beside it. */
+.ss-3d-tip { position: absolute; z-index: 4; pointer-events: none; max-width: 20rem;
+             padding: .3rem .5rem; border-radius: .375rem; font-size: .8rem; line-height: 1.3;
+             background: rgba(17, 24, 39, .88); color: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, .35); }
+.ss-3d-tip .opacity-75 { color: rgba(255, 255, 255, .8); }
+.ss-3d-tip .text-muted { color: rgba(255, 255, 255, .75) !important; }
 /* The compass rose in a corner of a plan or of the 3D viewer. */
 .ss-compass { position: absolute; top: .5rem; right: .5rem; z-index: 2; pointer-events: none;
               background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
@@ -2640,8 +2681,9 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
                    color: var(--bs-warning-text-emphasis); }
 .cfg-sheet-count:hover { filter: brightness(1.08); }
 .cfg-sheet-count.active { background: var(--bs-warning); color: #000; }
-.cfg-sheet-desc { font-size: .82rem; color: var(--bs-secondary-color); margin-top: .15rem;
-                  max-width: 62ch; }
+/* The whole width of the header: capped at 62ch for line length, a one-line description broke
+   in two beside half a header of empty space. Asked from the screen. */
+.cfg-sheet-desc { font-size: .82rem; color: var(--bs-secondary-color); margin-top: .15rem; }
 /* The row is the unit: a hairline between options and a hover that marks the whole of one.
    `mb-2` on the inner row is what the card spacing needed and the sheet does not. */
 .cfg-sheet .cfg-fields .cfg-field-wrap { padding: .3rem .5rem; border-radius: .25rem;
@@ -3813,3 +3855,78 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
               min-height: 3.5rem; border: 0; background: transparent; color: var(--bs-secondary-color);
               font-size: .8rem; }
 .ss-cmp-tab.active { color: var(--bs-primary); box-shadow: inset 0 2px 0 var(--bs-primary); }
+
+/* SVG text that must read over a picture (an item's name over its model's photo in the rack
+   elevation): a halo of the page background behind each glyph. Drawn under the fill
+   (`paint-order`), so the letters keep their colour and width. */
+.ss-svg-halo {
+    paint-order: stroke;
+    stroke: var(--bs-body-bg);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+    stroke-opacity: .85;
+}
+
+/* Where each port is on a model's face (catalogue › model › «Situar puertos»). The stage is the
+   face picture with the markers over it, placed by percentage so they follow the picture at any
+   width. */
+.ss-pm-stage {
+    position: relative;
+    cursor: crosshair;
+    user-select: none;
+    line-height: 0;
+    border: 1px solid var(--bs-border-color);
+    border-radius: .375rem;
+    overflow: hidden;
+    background: var(--bs-tertiary-bg);
+}
+.ss-pm-img { width: 100%; height: auto; display: block; pointer-events: none; }
+.ss-pm-blank {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1.2;
+    color: var(--bs-secondary-color);
+    background: repeating-linear-gradient(45deg, var(--bs-tertiary-bg) 0 10px, var(--bs-secondary-bg) 10px 20px);
+}
+.ss-pm-dot {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    margin: -6px 0 0 -6px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    background: var(--c, #6b7280);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .55);
+    cursor: grab;
+}
+.ss-pm-dot.ss-pm-sel { width: 16px; height: 16px; margin: -8px 0 0 -8px; box-shadow: 0 0 0 3px var(--bs-warning); }
+.ss-pm-dot.ss-pm-ghost { background: var(--bs-warning); pointer-events: none; }
+.ss-pm-dot.ss-pm-marked { box-shadow: 0 0 0 2px var(--bs-primary), 0 0 0 4px rgba(255, 255, 255, .6); }
+.ss-pm-dot.ss-pm-sel.ss-pm-marked { box-shadow: 0 0 0 3px var(--bs-warning); }
+.ss-pm-stage:focus { outline: 2px solid var(--bs-primary); outline-offset: 1px; }
+.ss-pm-box {
+    position: absolute;
+    border: 1px dashed var(--bs-primary);
+    background: rgba(13, 110, 253, .12);
+    pointer-events: none;
+}
+/* An item's inside view (rack › item › Componentes): the bays, full or free; no crosshair, it
+   is looked at and clicked, not drawn on. */
+.ss-pm-stage.ss-pm-view { cursor: default; }
+.ss-pm-stage.ss-pm-view.ss-pm-aim { cursor: crosshair; }
+.ss-pm-dot.ss-pm-part { border-radius: 3px; background: var(--bs-info); cursor: grab; }
+.ss-pm-dot.ss-pm-full { background: var(--bs-success); cursor: pointer; }
+.ss-pm-dot.ss-pm-free { background: transparent; border: 2px dashed var(--bs-secondary-color);
+                        box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); cursor: pointer; }
+/* A small round state mark beside a name in a list (the locks hanging from an access gateway). */
+.ss-dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%;
+          margin-right: .3rem; vertical-align: middle; background: var(--bs-secondary-color); }
+.ss-pm-chip { width: .7rem; height: .7rem; border-radius: 50%; background: var(--c, #6b7280); flex: none; }
+.ss-pm-list { max-height: 26rem; overflow-y: auto; }
+
+/* A model's face picture beside its other face: both as wide as their column, whatever their
+   proportions, so the front and the rear of one chassis read at the same scale. */
+.ss-face-img { display: block; width: 100%; height: auto; }

@@ -45,15 +45,15 @@ const D = {
   counts: {create: 1, update: 1, adopt: 0, same: 0},
   orphans: [],
   orgs: [
-    {uid: 'u-amx', name: 'Amixalan', short: 'AXL',
+    {uid: 'u-avl', name: 'Avellana', short: 'AVN',
      source: 'freshservice', external_id: '7'},
     {uid: 'u-libre', name: 'Tecleada aquí', short: 'TA', source: '', external_id: ''},
     {uid: 'u-otro', name: 'De otro departamento', short: 'DOD',
      source: 'freshservice', external_id: '99'}],
   plan: [
-    {action: 'update', external_id: '7', uid: 'u-amx', name: 'Amixalan, S.L.',
-     short: 'AXL', description: 'Holding del grupo',
-     was: {name: 'Amixalan', short: 'AXL', description: 'lo de antes'}},
+    {action: 'update', external_id: '7', uid: 'u-avl', name: 'Avellana, S.L.',
+     short: 'AVN', description: 'Holding del grupo',
+     was: {name: 'Avellana', short: 'AVN', description: 'lo de antes'}},
     {action: 'create', external_id: '8', uid: '', name: 'Alfa Co, S.A.C.',
      short: 'ACSAC', description: '', was: {}}],
 };
@@ -66,12 +66,12 @@ __out = {};
 __out.html = _fsPlanHtml(D);
 // La fila de cada uno, para poder mirarlas por separado.
 const trozos = __out.html.split('<tr');
-__out.atada = trozos.find(x => x.indexOf('Amixalan, S.L.') >= 0) || '';
+__out.atada = trozos.find(x => x.indexOf('Avellana, S.L.') >= 0) || '';
 __out.nueva = trozos.find(x => x.indexOf('Alfa Co') >= 0) || '';
 
 // Y qué pasa al elegir a mano la que el plan ya traía: no es un emparejamiento, es dejarlo como
 // estaba.
-_fsSetLink('7', 'u-amx');
+_fsSetLink('7', 'u-avl');
 __out.linkTrasElegirLaSuya = JSON.stringify(_fsLink);
 _fsSetLink('7', 'u-libre');
 __out.linkTrasCambiarla = JSON.stringify(_fsLink);
@@ -81,8 +81,8 @@ __out.htmlCambiada = _fsPlanHtml(D);
 const D2 = {
   total: 4, counts: {create: 1, update: 1, adopt: 1, same: 1}, orphans: [], orgs: [],
   plan: [
-    {action: 'update', external_id: '1', uid: 'u1', name: 'Amixalan, S.L.', short: 'AXL',
-     description: 'holding', was: {name: 'Amixalan', short: 'AXL', description: ''}},
+    {action: 'update', external_id: '1', uid: 'u1', name: 'Avellana, S.L.', short: 'AVN',
+     description: 'holding', was: {name: 'Avellana', short: 'AVN', description: ''}},
     {action: 'create', external_id: '2', uid: '', name: 'Alfa Co, S.A.C.', short: 'ACSAC',
      description: 'nueva del todo', was: {}},
     {action: 'adopt', external_id: '3', uid: 'u3', name: 'Behar Consultores', short: 'BC',
@@ -98,7 +98,7 @@ __out.marcadasDeSerie = JSON.stringify(Array.from(_fsPick).sort());
 
 // El filtro: por nombre, por abreviatura y por descripción.
 const conFiltro = (q) => { _fsQuery = q; return _fsRowsHtml(D2); };
-__out.porNombre = conFiltro('amixalan');
+__out.porNombre = conFiltro('avellana');
 __out.porAbreviatura = conFiltro('acsac');
 __out.porDescripcion = conFiltro('holding');
 __out.sinFiltro = conFiltro('');
@@ -139,9 +139,9 @@ class TestLaFilaYaAtadaDiceAQuien:
 
     def test_su_empresa_sale_elegida(self, tabla):
         fila = tabla['atada']
-        assert 'u-amx' in fila, 'su empresa ni siquiera se ofrece'
+        assert 'u-avl' in fila, 'su empresa ni siquiera se ofrece'
         # La opción de SU empresa es la marcada.
-        trozo = fila.split('value="u-amx"')[1][:20]
+        trozo = fila.split('value="u-avl"')[1][:20]
         assert 'selected' in trozo, 'sale sin elegir, como si fuera nueva'
 
     def test_y_no_se_le_ofrece_crear_otra(self, tabla):
@@ -179,15 +179,15 @@ class TestLaFilaEnseñaLoQueSeVaATraer:
         descripción."""
         fila = tabla['atada']
         assert 'text-decoration-line-through' in fila
-        nombre = fila.split('Amixalan, S.L.')[1].split('</td>')[0]
-        assert 'Amixalan<' in nombre or '>Amixalan' in nombre, 'el nombre viejo no está donde va'
+        nombre = fila.split('Avellana, S.L.')[1].split('</td>')[0]
+        assert 'Avellana<' in nombre or '>Avellana' in nombre, 'el nombre viejo no está donde va'
         desc = fila.split('Holding del grupo')[1].split('</td>')[0]
         assert 'lo de antes' in desc
 
     def test_y_lo_que_no_cambia_no_se_tacha(self, tabla):
         """La abreviatura es la misma: tacharla diría que se va a perder algo que se queda."""
         fila = tabla['atada']
-        corta = fila.split('AXL')[1].split('</td>')[0]
+        corta = fila.split('AVN')[1].split('</td>')[0]
         assert 'line-through' not in corta
 
 
@@ -225,23 +225,23 @@ class TestSeMarcaDeSerieLoQueYaSeMantieneAqui:
 
 
 class TestElBuscadorMiraLasTresCosas:
-    """Quien busca «amixalan» no sabe si lo que recuerda era el nombre, la chapa o la
+    """Quien busca «avellana» no sabe si lo que recuerda era el nombre, la chapa o la
     descripción."""
 
     def test_por_nombre(self, tabla):
-        assert 'Amixalan, S.L.' in tabla['porNombre']
+        assert 'Avellana, S.L.' in tabla['porNombre']
         assert 'Alfa Co' not in tabla['porNombre']
 
     def test_por_abreviatura(self, tabla):
         assert 'Alfa Co' in tabla['porAbreviatura']
-        assert 'Amixalan, S.L.' not in tabla['porAbreviatura']
+        assert 'Avellana, S.L.' not in tabla['porAbreviatura']
 
     def test_y_por_descripcion(self, tabla):
-        assert 'Amixalan, S.L.' in tabla['porDescripcion']
+        assert 'Avellana, S.L.' in tabla['porDescripcion']
         assert 'Behar' not in tabla['porDescripcion']
 
     def test_y_sin_nada_escrito_salen_todas(self, tabla):
-        for nombre in ('Amixalan, S.L.', 'Alfa Co', 'Behar Consultores', 'Sin tocar'):
+        for nombre in ('Avellana, S.L.', 'Alfa Co', 'Behar Consultores', 'Sin tocar'):
             assert nombre in tabla['sinFiltro'], nombre
 
     def test_y_lo_que_no_está_no_sale(self, tabla):
@@ -263,7 +263,7 @@ class TestPrimeroLoQueYaEstaVinculado:
 
     def test_las_vinculadas_van_delante(self, tabla):
         html = tabla['grupos']
-        assert html.index('Amixalan, S.L.') < html.index('Alfa Co'), 'no van primero'
+        assert html.index('Avellana, S.L.') < html.index('Alfa Co'), 'no van primero'
 
     def test_y_cada_grupo_dice_cuantos_tiene(self, tabla):
         """«(3)» y «(56)» es la mitad de la respuesta: cuánto de esto es mío y cuánto no."""

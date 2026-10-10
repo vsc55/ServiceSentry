@@ -53,8 +53,8 @@ def short_for(name: str, taken) -> str:
     deja corregir después — que es lo que va a pasar, porque una abreviatura la elige quien la
     va a leer en una chapa a dos metros.
 
-    Las iniciales de las palabras cuando hay varias («Montarto Food» → `MF`), y las primeras
-    letras cuando es una sola («Amixalan» → `AMIXALAN`). Si eso ya está cogido, se le pone un
+    Las iniciales de las palabras cuando hay varias («Mirasol Food» → `MF`), y las primeras
+    letras cuando es una sola («Avellana» → `AVELLANA`). Si eso ya está cogido, se le pone un
     número: dos chapas iguales en un armario compartido no dicen de quién es.
     """
     palabras = [p for p in _NO_PALABRA.split(ascii_fold(name)) if p]
@@ -170,8 +170,8 @@ def select(plan, pick=None, link=None, orgs=None):
     * *pick* — los `external_id` que se han marcado. `None` es «todo», que es lo que esto hacía
       antes de que se pudiera elegir.
     * *link* — ``{external_id: uid}``, los emparejamientos que ha hecho una persona. Es la
-      diferencia entre lo que el panel puede deducir y lo que sólo sabe quien lo mira: «Amixalan
-      Energy Supplies, S.L.» de allí y «Amixalan» de aquí pueden ser la misma casa, y ningún
+      diferencia entre lo que el panel puede deducir y lo que sólo sabe quien lo mira: «Avellana
+      Energy Supplies, S.L.» de allí y «Avellana» de aquí pueden ser la misma casa, y ningún
       emparejamiento automático por nombre lo va a decir nunca.
 
     Un emparejamiento a mano **manda sobre lo que se hubiera deducido**: si alguien dice que esas
@@ -229,7 +229,7 @@ def select(plan, pick=None, link=None, orgs=None):
             continue
         # La abreviatura: Freshservice no tiene ese campo, así que no hay nada que «descargar».
         # Se rehace del nombre nuevo **sólo si el nombre cambia** — una abreviatura es las
-        # iniciales de un nombre, y dejar «AMX» sobre «Amixalan Energy Supplies, S.L.» es una
+        # iniciales de un nombre, y dejar «AVL» sobre «Avellana Energy Supplies, S.L.» es una
         # chapa que ya no dice lo que pone la fila. Si el nombre no cambia, la de aquí se queda:
         # la eligió una persona para leerla en un armario a dos metros.
         corta = str(suya.get('short') or '')

@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 7,
   "racks": [
     {
       "model": {
@@ -422,6 +422,275 @@
         }
       },
       "kind": "kvm"
+    },
+    {
+      "model": {
+        "es_ES": "Torno trípode",
+        "en_EN": "Tripod turnstile"
+      },
+      "u": 0,
+      "full_depth": false,
+      "kind": "turnstile",
+      "description": {
+        "es_ES": "Torno de control de acceso de tres brazos, con lector.",
+        "en_EN": "Three-arm access control turnstile, with a reader."
+      }
+    },
+    {
+      "model": {
+        "es_ES": "Puerta de enlace de accesos",
+        "en_EN": "Access gateway"
+      },
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_gateway",
+      "description": {
+        "es_ES": "Puerta de enlace a la que se conectan las cerraduras y los lectores.",
+        "en_EN": "Gateway the locks and readers connect to."
+      }
+    },
+    {
+      "model": {
+        "es_ES": "Cilindro electrónico",
+        "en_EN": "Electronic cylinder"
+      },
+      "u": 0,
+      "full_depth": false,
+      "powered": false,
+      "kind": "access_lock"
+    },
+    {
+      "model": {
+        "es_ES": "Cerradura de taquilla",
+        "en_EN": "Locker lock"
+      },
+      "u": 0,
+      "full_depth": false,
+      "powered": false,
+      "kind": "access_lock"
+    },
+    {
+      "model": {
+        "es_ES": "Lector de pared",
+        "en_EN": "Wall reader"
+      },
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_reader"
+    },
+    {
+      "maker": "Salto",
+      "model": "IQ 2.0",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_gateway",
+      "url": "https://saltosystems.com/es-es/productos/iq/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/solution-products/salto-ks-products-iq-hardware.png?itok=lCAJ8Xz-",
+      "description": {
+        "es_ES": "Puerta de enlace de Salto KS: conecta las cerraduras inalámbricas de hasta 16 puertas con la nube de Salto KS.",
+        "en_EN": "Salto KS gateway: connects the wireless locks of up to 16 doors to the Salto KS cloud."
+      },
+      "power_type": "external",
+      "specs": {
+        "max_doors": "16",
+        "radio": "IEEE 802.15.4 2,4 GHz (ZigBee) · Bluetooth",
+        "range_indoor": "10–15 m",
+        "uplink": {
+          "es_ES": "Ethernet; también Wi-Fi, PoE o red móvil 2G/3G/4G",
+          "en_EN": "Ethernet; also Wi-Fi, PoE or 2G/3G/4G mobile"
+        },
+        "power": {
+          "es_ES": "12 V · 800 mA, con adaptador y cable de 3 m",
+          "en_EN": "12 V · 800 mA, with adapter and 3 m cable"
+        },
+        "temperature": "0–40 °C",
+        "security": {
+          "es_ES": "AES de 128 bits · TLS · firmware por el aire (OTA)",
+          "en_EN": "128-bit AES · TLS · over-the-air firmware (OTA)"
+        },
+        "certifications": "CE, UKCA, EAC, CMI, SRRC, NCC, IMDA, TDRA, CMIM, SUBTEL, NTRA, NOM, CRA, MPT, NBTC"
+      }
+    },
+    {
+      "maker": "Salto",
+      "model": "Neo Cylinder",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_lock",
+      "url": "https://saltosystems.com/es-es/productos/cilindros-electronicos/cilindro-neo/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/neo-cylinder-list-ok.png?itok=Wmhb0KIJ",
+      "description": {
+        "es_ES": "Cilindro electrónico inalámbrico de pilas.",
+        "en_EN": "Battery-powered wireless electronic cylinder."
+      },
+      "powered": false,
+      "specs": {
+        "variants": {
+          "es_ES": "Europeo · medio cilindro para armarios rack · cerradura de levas (la leva gira de 90 a 180°)",
+          "en_EN": "Euro profile · half cylinder for rack cabinets · cam lock (the cam turns 90 to 180°)"
+        },
+        "power": {
+          "es_ES": "Pilas",
+          "en_EN": "Batteries"
+        }
+      }
+    },
+    {
+      "maker": "Salto",
+      "model": "XS4 One",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_lock",
+      "url": "https://saltosystems.com/es-es/productos/cerraduras-electronicas/xs4-one/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-one-list-ok.png?itok=27oXgqyn",
+      "description": {
+        "es_ES": "Escudo electrónico inalámbrico para puertas.",
+        "en_EN": "Wireless electronic escutcheon for doors."
+      },
+      "powered": false,
+      "specs": {
+        "variants": "EU · S Euro · S Heavy Duty · S Double Reader · S Wide · S Keypad · DIN · S DIN · S Double Reader DIN",
+        "standards": {
+          "es_ES": "Heavy Duty: EN 1627 RC3 · DIN: puertas DIN 18250/18251, conserva la resistencia al fuego",
+          "en_EN": "Heavy Duty: EN 1627 RC3 · DIN: DIN 18250/18251 doors, keeps the fire rating"
+        }
+      }
+    },
+    {
+      "maker": "Salto",
+      "model": "XS4 Original",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_lock",
+      "url": "https://saltosystems.com/es-es/productos/cerraduras-electronicas/xs4-original/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-original-plus-euro-list-ok.png?itok=FpdzFuwt",
+      "description": {
+        "es_ES": "Escudo electrónico de la gama XS4.",
+        "en_EN": "Electronic escutcheon of the XS4 range."
+      },
+      "powered": false
+    },
+    {
+      "maker": "Salto",
+      "model": "XS4 Mini",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_lock",
+      "url": "https://saltosystems.com/es-es/productos/cerraduras-electronicas/xs4-mini/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-mini-list-ok.png?itok=T2ZUbyUF",
+      "description": {
+        "es_ES": "Escudo electrónico compacto de la gama XS4.",
+        "en_EN": "Compact electronic escutcheon of the XS4 range."
+      },
+      "powered": false
+    },
+    {
+      "maker": "Salto",
+      "model": "XS4 Locker",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_lock",
+      "url": "https://saltosystems.com/es-es/productos/electronic-locker-locks/xs4-locker/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-locker-list-ok.png?itok=uNThdvMJ",
+      "description": {
+        "es_ES": "Cerradura electrónica inalámbrica para taquillas, armarios, cajas fuertes y maletines; se abre con la tarjeta.",
+        "en_EN": "Wireless electronic lock for lockers, cabinets, safes and cases; opened with the card."
+      },
+      "powered": false,
+      "specs": {
+        "credentials": {
+          "es_ES": "Tarjeta",
+          "en_EN": "Card"
+        },
+        "uplink": {
+          "es_ES": "Red virtual Salto (SVN), sin cables",
+          "en_EN": "Salto virtual network (SVN), no wiring"
+        }
+      }
+    },
+    {
+      "maker": "Salto",
+      "model": "Neoxx Padlock",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_lock",
+      "url": "https://saltosystems.com/es-es/productos/electronic-padlocks/candado-neoxx/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/neoxx-padlock-list-ok.png?itok=fDWlC_z6",
+      "description": {
+        "es_ES": "Candado electrónico.",
+        "en_EN": "Electronic padlock."
+      },
+      "powered": false
+    },
+    {
+      "maker": "Gantner",
+      "model": "NET.Lock",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_lock",
+      "url": "https://saltosystems.com/es-es/productos/electronic-locker-locks/gantner-net-lock/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/gat-net-lock-list-ok.png?itok=Orx9xkNM",
+      "description": {
+        "es_ES": "Cerradura electrónica para taquillas.",
+        "en_EN": "Electronic locker lock."
+      },
+      "powered": false
+    },
+    {
+      "maker": "Salto",
+      "model": "Design XS Reader",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_reader",
+      "url": "https://saltosystems.com/es-es/productos/wall-readers/lector-diseno-xs/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/design-xs-reader-list-ok.png?itok=BHM650FK",
+      "description": {
+        "es_ES": "Lector de pared para cajas eléctricas estándar; con las controladoras de Salto abre ascensores, puertas correderas y puertas motorizadas.",
+        "en_EN": "Wall reader for standard electrical boxes; with Salto controllers it opens lifts, sliding doors and motorised doors."
+      },
+      "specs": {
+        "variants": {
+          "es_ES": "Europeo · con teclado (PIN, doble autenticación) · Mullion, empotrado en perfiles estrechos",
+          "en_EN": "Euro · with keypad (PIN, two-factor) · Mullion, flush in narrow frames"
+        }
+      }
+    },
+    {
+      "maker": "Salto",
+      "model": "Glass XS Reader",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_reader",
+      "url": "https://saltosystems.com/es-es/productos/wall-readers/lector-glass-xs/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/glass-xs-reader-list-ok.png?itok=8BRCFNDf",
+      "description": {
+        "es_ES": "Lector de pared de la gama XS.",
+        "en_EN": "Wall reader of the XS range."
+      }
+    },
+    {
+      "maker": "Salto",
+      "model": "BLUEnet Door Controller",
+      "u": 0,
+      "full_depth": false,
+      "kind": "access_controller",
+      "url": "https://saltosystems.com/es-es/productos/controladoras-cus/controlador-de-puertas-bluenet/",
+      "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/bluenet-door-controller-list-ok.png?itok=zy34MXBN",
+      "description": {
+        "es_ES": "Controladora de puerta compacta en carril DIN, con relés y entradas, para puertas automáticas y cualquier punto de acceso.",
+        "en_EN": "Compact DIN-rail door controller, with relays and inputs, for automatic doors and any access point."
+      },
+      "specs": {
+        "uplink": "BLUEnet",
+        "mounting": {
+          "es_ES": "Carril DIN",
+          "en_EN": "DIN rail"
+        },
+        "relays": {
+          "es_ES": "Relés y entradas; placa de ampliación de 4 relés; unidad de salida con conexión para un segundo lector",
+          "en_EN": "Relays and inputs; 4-relay expansion board; exit unit with a connection for a second reader"
+        }
+      }
     }
   ],
   "modules": [

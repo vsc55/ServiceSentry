@@ -102,6 +102,100 @@ function _dcimIsFolded(uid) {
     return _dcimFold.has(uid) && !_dcimQuery.trim();
 }
 
+//: Las comprobaciones de cada dispositivo ya preguntadas: `uid → {t, data}`. Medio minuto: lo
+//: bastante para que redibujar una ficha no vuelva a preguntar, y poco para que lo que se lee
+//: siga siendo lo de ahora.
+const _dcimWhyCache = new Map();
+
+/** Por qué está mal un equipo —o una pieza—, para enseñarlo al pulsarlo: el aviso o el error
+ *  que lo puso así, y no solo el color.
+ *
+ *  Con dispositivo vinculado, sus comprobaciones que fallan, cada una con su mensaje: las pide
+ *  a la misma ruta que el modal del dispositivo, y con sus permisos —quien no puede ver la
+ *  máquina lee que no puede, no un hueco—. Sin dispositivo, el motivo que trae la fila (el de
+ *  la demo). Nada si no está en aviso ni caído. `id` es el del recuadro, para rellenarlo luego;
+ *  se rellena solo, en cuanto está en la página. */
+function _dcimWhyHtml(item, id) {
+    const st = String((item || {}).state || '');
+    if (st !== 'error' && st !== 'warning') return '';
+    const dev = String(item.device_uid || item.device || '');
+    const motivo = dev ? '' : String(item.demo_reason || item.reason || '');
+    const tono = st === 'error' ? 'danger' : 'warning';
+    const cuerpo = motivo ? `<div>${esc(motivo)}</div>`
+        : dev ? `<div class="opacity-75" data-why-wait>${esc(t('loading'))}</div>`
+        : `<div class="opacity-75">${esc(t('dcim_why_unknown'))}</div>`;
+    if (dev) setTimeout(() => _dcimWhyFill(id, item), 0);
+    return `<div id="${escAttr(id)}" class="alert alert-${tono} py-1 px-2 my-2 ss-fs-2 text-start">
+        <div class="fw-semibold"><i class="bi bi-${st === 'error' ? 'x-octagon-fill' : 'exclamation-triangle-fill'} me-1"></i>${
+            esc(t('dcim_why_title'))}</div>${cuerpo}</div>`;
+}
+
+async function _dcimWhyFill(id, item) {
+    const dev = String((item || {}).device_uid || (item || {}).device || '');
+    if (!dev) return;
+    let hit = _dcimWhyCache.get(dev);
+    if (!hit || Date.now() - hit.t > 30000) {
+        const data = await apiGetSilent(`/api/v1/devices/${encodeURIComponent(dev)}/status`);
+        hit = {t: Date.now(), data};
+        _dcimWhyCache.set(dev, hit);
+    }
+    const caja = document.getElementById(id);
+    const espera = caja && caja.querySelector ? caja.querySelector('[data-why-wait]') : null;
+    if (!espera) return;
+    const r = hit.data;
+    if (!r || !Array.isArray(r.results)) {
+        espera.textContent = t('dcim_why_noperm');
+        return;
+    }
+    const malas = r.results.filter(x => !x.ok);
+    espera.outerHTML = malas.length
+        ? `<ul class="mb-0 ps-3">${malas.map(x => {
+            const nivel = x.level === 'warning' ? 'warning' : 'error';
+            return `<li><span class="badge text-bg-${nivel === 'warning' ? 'warning' : 'danger'} fw-normal me-1">${
+                esc(_dcimStateWord(nivel))}</span><span class="fw-semibold">${esc(x.name || x.key || '')}</span>${
+                x.message ? ': ' + esc(x.message) : ''}</li>`;
+        }).join('')}</ul>`
+        : `<div class="opacity-75">${esc(t('dcim_why_none'))}</div>`;
+}
+
+/** «Ir al dispositivo»: a su página en Infraestructura, donde están sus resultados —SNMP,
+ *  módulos, gráficas—, que es lo que se quiere después de ver que algo está mal. Uno solo para
+ *  todas las fichas, para que se llame igual y lleve al mismo sitio desde cualquiera. Sin
+ *  dispositivo vinculado, `''`: quien lo pinta decide si lo dice (`_dcimNoDeviceHtml`). */
+function _dcimGoDeviceBtn(uid, extra) {
+    if (!uid) return '';
+    return `<button type="button" class="btn btn-sm btn-primary ${extra || ''}"
+                title="${escAttr(t('dcim_go_device_tt'))}"
+                onclick="event.stopPropagation();hideInfoModal();_dcimOpenDevice(${jsStr(uid)})">
+            <i class="bi bi-box-arrow-up-right me-1"></i>${esc(t('dcim_go_device'))}</button>`;
+}
+
+/** Y por qué no está el botón: sin esto, una ficha con solo «Editar» no decía que lo que falta
+ *  es vincularle una máquina. */
+function _dcimNoDeviceHtml() {
+    return `<div class="ss-fs-2 opacity-75 mt-1"><i class="bi bi-link-45deg me-1"></i>${
+        esc(t('dcim_no_device_linked'))}</div>`;
+}
+
+/** El porqué en su propia ventana: para donde se pulsa una insignia y no hay ficha que lo
+ *  lleve dentro —la lista del rack, el cuadro de mando—. Con «Ir al dispositivo» al pie si
+ *  tiene uno. */
+function _dcimWhyOpen(item, title) {
+    if (!item) return;
+    showHtmlModal(title || _dcimItemName(item), _dcimWhyHtml(item, 'dcim-why-modal'),
+                  item.state === 'error' ? 'danger' : 'warning',
+                  _dcimGoDeviceBtn(item.device_uid || item.device || ''));
+}
+
+/** Lo mismo, desde un uid: un equipo del rack abierto o una fila del cuadro de mando. */
+function _dcimWhyOpenUid(uid) {
+    uid = String(uid || '');
+    const enRack = ((_dcimRack || {}).items || []).find(i => String(i.uid) === uid);
+    const enCuadro = ((_dcimBoard || {}).trouble || []).find(r => String(r.item_uid) === uid);
+    if (enRack) return _dcimWhyOpen(enRack);
+    if (enCuadro) return _dcimWhyOpen(enCuadro, enCuadro.name || enCuadro.device_uid || t('dcim_item'));
+}
+
 /** A status light: green when it is fine, amber with a warning, red when something is down, grey
  *  when nothing in it is watched — and that grey is NOT green, for the same reason a rack of patch
  *  panels gets no green badge: a light that says "fine" about what nobody checks is a lie seen
@@ -423,6 +517,33 @@ function _dcimNavRooms(s) {
                             + p.rooms.map(r => sala(r, true)).join('')).join('');
 }
 
+/** Cuántos dispositivos hay en cada estado, una tarjeta por estado y de su color: lo caído y
+ *  lo que avisa, primero y resaltado —fondo y borde, no solo el número— cuando hay alguno, que
+ *  es lo que se busca al abrir una sede. A cero se quedan apagadas: un cero rojo grita igual
+ *  que un treinta. Las de algo mal llevan al cuadro de mando, donde está cada uno con su camino.
+ *  Nada si no llegó recuento. */
+function _dcimStateKpis(c) {
+    if (!c) return '';
+    const caja = (n, palabra, tono, icono, ir) => {
+        const hay = Number(n) > 0;
+        const clase = hay ? `border-${tono} border-2 bg-${tono}-subtle` : '';
+        const accion = hay && ir ? ` role="button" tabindex="0" onclick="_dcimOpenBoard()"
+            onkeydown="if(event.key==='Enter')_dcimOpenBoard()" title="${escAttr(t('dcim_board'))}"` : '';
+        return `<div class="card ${clase}"${accion}><div class="card-body py-2 px-3">
+            <div class="ss-fs-2 ${hay ? `text-${tono}-emphasis fw-semibold` : 'text-muted'}">
+                <i class="bi bi-${icono} me-1"></i>${esc(palabra)}</div>
+            <div class="ss-fs-6 fw-semibold ss-tabular ${hay ? `text-${tono}-emphasis` : 'text-muted'}">${
+                esc(String(Number(n) || 0))}</div></div></div>`;
+    };
+    return `<div class="ss-kpis">
+        ${caja(c.error, t('dcim_state_error'), 'danger', 'x-octagon-fill', true)}
+        ${caja(c.warning, t('dcim_state_warning'), 'warning', 'exclamation-triangle-fill', true)}
+        ${caja(c.ok, t('dcim_state_ok'), 'success', 'check-circle-fill', false)}
+        ${Number(c.maintenance) > 0 ? caja(c.maintenance, t('device_status_maintenance'), 'info', 'tools', false) : ''}
+        ${caja(c.unwatched, t('dcim_state_unwatched'), 'secondary', 'eye-slash', false)}
+    </div>`;
+}
+
 function _dcimDetailSite(site) {
     const tot = _dcimSiteTotals(site);
     const kpi = (label, value) => `<div class="card"><div class="card-body py-2 px-3">
@@ -462,6 +583,7 @@ function _dcimDetailSite(site) {
             ${kpi(t('dcim_kpi_u'), tf('dcim_u_used', tot.used, tot.u))}
             ${kpi(t('dcim_kpi_devices'), tot.things)}
         </div>
+        ${_dcimStateKpis((site.roll || {}).counts)}
         ${(site.rooms || []).length || (site.floor_list || []).length ? _dcimDetailRooms(site)
             : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_rooms'))}</div>`}
     </div>`;

@@ -158,6 +158,9 @@ async function saveConfig() {
     const hasConflicts = Object.keys(_configConflicts).length > 0;
     if (hasSaved) {
         _refreshTableRowChoices();
+        // The platform's name is on screen outside this sheet: apply it now, not after F5.
+        if ((_saveResp.saved || []).includes('brand|name') && typeof _brandApplyName === 'function')
+            _brandApplyName((configData.brand || {}).name);
         if (_needsRestart.length > 0) { showToast(t('config_saved_restart'), 'warning'); _showRestartBanner(); }
         // Recargar lo pide el SERVIDOR y no una lista de aquí: quien sabe con qué política se
         // sirvió esta página es él, y desde que una instalación con mapa abre todos los

@@ -31,7 +31,10 @@ def _num(v) -> float:
 #: Columns no request may write: the row's identity and its audit stamp. `Rows.create` honours a
 #: `uid` in the payload, so a create that passed the request through let the CLIENT choose the
 #: identifier — and choosing an existing one was a 500 from the primary key.
-SERVER_COLS = ('uid', 'created_at', 'created_by', 'updated_at', 'updated_by')
+SERVER_COLS = ('uid', 'created_at', 'created_by', 'updated_at', 'updated_by',
+               # El estado de demostración de un equipo lo escribe solo la demo: por una
+               # petición, cualquiera podría pintar de rojo un equipo de verdad.
+               'demo_state', 'demo_reason')
 
 
 def _fresh(data) -> dict:

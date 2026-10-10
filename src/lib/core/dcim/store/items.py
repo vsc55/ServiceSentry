@@ -113,6 +113,17 @@ _ITEM = TableSpec(
         #
         # Last, because a missing column can only be added by ADD COLUMN when it is trailing,
         # which is how an existing database gets this one without a migration.
+        # El estado de un equipo de la DEMO (`main.py dcim demo`): `ok`, `warning` o `error`,
+        # vacío en todo lo demás. El estado de verdad sale de la vigilancia del dispositivo
+        # vinculado; la demo no crea dispositivos ni comprobaciones —eso pondría al monitor a
+        # vigilar máquinas que no existen y podría mandar alertas de ellas— y aun así tiene que
+        # enseñar cómo se ve un equipo en aviso o caído. Solo cuenta si el equipo no tiene
+        # dispositivo (`item_state`), y ninguna ruta lo escribe (`SERVER_COLS`).
+        Column('demo_state', 'TEXT', nullable=False, default="''"),
+        # Y por qué: lo que diría la comprobación que lo puso así («fuente 2 sin tensión»). Al
+        # pulsar un equipo en aviso o caído se enseña esto; uno con dispositivo enseña sus
+        # comprobaciones que fallan. Lo mismo que `demo_state`: solo la demo lo escribe.
+        Column('demo_reason', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

@@ -49,11 +49,43 @@ LOGO_PATH = os.path.join(
         os.path.abspath(__file__))))),
     'web_admin', 'static', 'img', 'logo-email.png')
 
-#: The URL the SAME file has in the panel — for a preview, which is rendered in a browser
-#: where a `cid:` resolves to nothing.
-LOGO_URL = '/static/img/logo-email.png'
+#: The URL the logo has in the panel — for a preview, which is rendered in a browser where a
+#: `cid:` resolves to nothing. The brand route, which answers with an installation's own email
+#: logo when it has one and with this same shipped file when it does not.
+LOGO_URL = '/brand/email'
 
 _CACHE: list = []          # [(bytes, subtype)] or [None] once we know there is nothing
+
+#: Where an installation's own email logo comes from: a callable returning ``(bytes, mime)`` or
+#: ``None``, set by whoever holds the database (the web process, and the email channel in a
+#: worker). Unset, there is only the shipped file.
+_LOADER = None
+#: ``[(at, value)]``: the last answer of the loader, trusted for :data:`_TTL` seconds — an alert
+#: storm must not be a query per message, and a new logo must not need a restart.
+_CUSTOM: list = []
+_TTL = 60.0
+
+
+def set_loader(loader) -> None:
+    """Let the email logo come from the brand store (see ``lib/core/brand``)."""
+    global _LOADER  # noqa: PLW0603
+    _LOADER = loader
+    _CUSTOM.clear()
+
+
+def _custom() -> tuple[bytes, str] | None:
+    if _LOADER is None:
+        return None
+    import time  # noqa: PLC0415
+    if _CUSTOM and time.monotonic() - _CUSTOM[0][0] < _TTL:
+        return _CUSTOM[0][1]
+    try:
+        got = _LOADER()
+    except Exception:  # pylint: disable=broad-except
+        got = None
+    valor = (got[0], 'png') if got and got[0] else None
+    _CUSTOM[:] = [(time.monotonic(), valor)]
+    return valor
 
 
 def logo() -> tuple[bytes, str] | None:
@@ -64,6 +96,9 @@ def logo() -> tuple[bytes, str] | None:
     goes out without its logo is a small thing, and one that does not go out because a PNG
     was missing is not.
     """
+    propio = _custom()
+    if propio is not None:
+        return propio
     if not _CACHE:
         try:
             with open(LOGO_PATH, 'rb') as fh:
@@ -82,11 +117,21 @@ def img_tag(height: int = 26) -> str:
     Sized in the attribute as well as the style because Outlook ignores CSS dimensions on
     images, and a 256-pixel mark at its natural size would be the whole header.
     """
-    if logo() is None:
+    got = logo()
+    if got is None:
         return ''
     h = max(8, int(height))
-    return (f'<img src="cid:{LOGO_CID}" width="{h}" height="{h}" alt="" '
-            f'style="display:block;width:{h}px;height:{h}px;border:0;outline:none;'
+    # As high as asked, and as wide as the picture's own proportions say: an installation's
+    # logo need not be square, and squeezed into a square box it would be a different logo.
+    w = h
+    data = got[0]
+    if len(data) >= 24 and data[1:4] == b'PNG' and data[12:16] == b'IHDR':
+        import struct  # noqa: PLC0415
+        pw, ph = struct.unpack('>II', data[16:24])
+        if pw and ph:
+            w = max(8, round(h * pw / ph))
+    return (f'<img src="cid:{LOGO_CID}" width="{w}" height="{h}" alt="" '
+            f'style="display:block;width:{w}px;height:{h}px;border:0;outline:none;'
             f'text-decoration:none">')
 
 

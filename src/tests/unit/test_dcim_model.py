@@ -346,7 +346,19 @@ class TestUnRackEsLoPeorQueTieneDentro:
         # `passive` se añadió con los roles: lo que no contesta POR NATURALEZA deja de
         # contarse entre los desatendidos. Aquí no hay ninguno, y eso también es un dato.
         assert roll == {'state': 'error', 'total': 4, 'bad': 2, 'unwatched': 1,
-                        'passive': 0}
+                        'passive': 0,
+                        'counts': {'ok': 1, 'warning': 1, 'error': 1, 'maintenance': 0,
+                                   'unwatched': 1}}
+
+    def test_cuantos_hay_en_cada_estado_y_se_suman_hacia_arriba(self):
+        """Pedido: el resumen de una sede debe decir cuántos están bien, avisan o están caídos,
+        no solo el peor. Lo mudo (un panel) no cuenta como «sin vigilar»; lo desconocido sí."""
+        from lib.core.dcim import service
+        c = service.state_counts(['ok', 'ok', 'error', '', 'maintenance', 'raro'], passive=1)
+        assert c == {'ok': 2, 'warning': 0, 'error': 1, 'maintenance': 1, 'unwatched': 1}
+        suma = service.add_counts(c, {'warning': 3, 'error': 1}, None)
+        assert suma == {'ok': 2, 'warning': 3, 'error': 2, 'maintenance': 1, 'unwatched': 1}
+        assert service.state_counts([], passive=5)['unwatched'] == 0
 
     def test_un_rack_de_paneles_no_sale_verde(self):
         from lib.core.dcim import service
@@ -927,6 +939,25 @@ class TestSiSeCaeUnaRamaQueSeApaga:
         r = service.power_of_rack(pdus, feeds, [{'uid': 'i1', 'label': 'x'}])
         assert {w['kind'] for w in r['warnings']} == {'over_half'}
         assert len([w for w in r['warnings'] if w['kind'] == 'over_half']) == 2
+
+    def test_el_estado_de_la_demo_solo_vale_sin_dispositivo(self, store):
+        """La demo da a sus equipos un estado sin crear dispositivos ni comprobaciones. Solo vale
+        para un equipo sin dispositivo: con uno, manda lo que diga su vigilancia."""
+        from lib.core.dcim import service
+        assert service.item_state({'demo_state': 'error'}, {}) == 'error'
+        assert service.item_state({'demo_state': 'raro'}, {}) == ''
+        assert service.item_state({'demo_state': 'error', 'device_uid': 'd'}, {'d': 'ok'}) == 'ok'
+        assert service.item_state({'demo_state': 'error', 'device_uid': 'd'}, {}) == ''
+
+    def test_pero_sin_pareja_no_hay_media_carga_que_valga(self, store):
+        """Un rack con una sola rama —el de comunicaciones de una planta, colgado de su SAI— no
+        tiene a quién pasarle la carga. «Si cae su pareja, esta no puede con las dos» era un aviso
+        sobre algo que no existe; lo que sí pasa lo dice `single_branch`. Visto en un navegador."""
+        from lib.core.dcim import service
+        pdus = [{'uid': 'a', 'name': 'PDU-A', 'feed': 'a', 'outlets': 8, 'capacity_w': 2000}]
+        feeds = [{'uid': 'c1', 'item_uid': 'i1', 'pdu_uid': 'a', 'watts_said': 1900}]
+        r = service.power_of_rack(pdus, feeds, [{'uid': 'i1', 'label': 'x'}])
+        assert [w['kind'] for w in r['warnings']] == ['single_branch']
 
     def test_las_tomas_ocupadas_son_cables_y_no_equipos(self, store):
         """Un equipo con dos cables en la misma regleta ocupa dos tomas. Contar equipos diría

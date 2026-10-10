@@ -584,6 +584,9 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     # Log verbosity: 'off' disables debug output; otherwise a DebugLevel name
     # ('debug'/'info'/'warning'/'error') used as the minimum level shown.
     Cfg('global|log_level', str, 'off', no_rule=True, card='global'),
+    # The name the panel shows instead of the product's (Configuración › Marca). Empty = the
+    # product's. SS_BRAND_NAME fixes it from the deployment and locks the field.
+    Cfg('brand|name', str, '', env='SS_BRAND_NAME', no_rule=True, nullable=True),
 
     # ══ database (port is driver-specific → no single default) ═══════════════
     # Bootstrap section: read before the DB connector exists, so the env vars are

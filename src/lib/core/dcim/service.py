@@ -62,8 +62,15 @@ def item_state(item, statuses) -> str:
     """
     uid = str((item or {}).get('device_uid') or '')
     if not uid:
-        return ''
+        # Un equipo de la demo sin dispositivo lleva el suyo de mentira, para enseñar cómo se ve
+        # uno en aviso o caído. Con dispositivo manda la vigilancia, siempre.
+        demo = str((item or {}).get('demo_state') or '')
+        return demo if demo in DEMO_STATES else ''
     return str((statuses or {}).get(uid) or '')
+
+
+#: Los estados que la demo puede dar a un equipo (`dc_item.demo_state`).
+DEMO_STATES = ('ok', 'warning', 'error')
 
 
 def states_for(wa, perms) -> dict:
@@ -180,7 +187,34 @@ def rack_roll(items, statuses) -> dict:
         'unwatched': len([s for s in states if not s]) - len(mudos),
         # Dicho aparte, no escondido: son inventario y salen en los pedidos.
         'passive': len(mudos),
+        # Cuántos hay en cada estado: el peor dice de qué color es el rack, y esto cuántos lo
+        # ponen así — «caído» con uno o con treinta no es la misma mañana.
+        'counts': state_counts(states, len(mudos)),
     }
+
+
+#: Los estados que se cuentan uno a uno, en el orden en que se enseñan.
+COUNTED = ('ok', 'warning', 'error', 'maintenance', 'unwatched')
+
+
+def state_counts(states, passive=0) -> dict:
+    """``{ok, warning, error, maintenance, unwatched}``: cuántos de *states* hay en cada uno.
+    `unwatched` deja fuera los *passive* —lo que no contesta por naturaleza—, como `rack_roll`."""
+    out = dict.fromkeys(COUNTED, 0)
+    for st in states or ():
+        st = str(st or '')
+        out[st if st in out else 'unwatched'] += 1
+    out['unwatched'] = max(0, out['unwatched'] - int(passive or 0))
+    return out
+
+
+def add_counts(*many) -> dict:
+    """Varios recuentos de `state_counts`, sumados: los racks de una sala, las salas de una sede."""
+    out = dict.fromkeys(COUNTED, 0)
+    for c in many:
+        for k in COUNTED:
+            out[k] += int((c or {}).get(k) or 0)
+    return out
 
 
 def free_units(rack, taken) -> dict:
@@ -299,16 +333,20 @@ def tree_roll(store, statuses, said, allowed) -> dict:
     """
     racks, rooms, sites = {}, {}, {}
     for site, rooms_seen in walk(store, said, allowed):
-        s_states = []
+        s_states, s_counts = [], []
         for room, racks_seen in rooms_seen:
-            r_states = []
+            r_states, r_counts = [], []
             for rack, mine in racks_seen:
                 roll = rack_roll(mine, statuses)
                 racks[rack['uid']] = roll
                 r_states.append(roll['state'])
-            rooms[room['uid']] = {'state': worst(r_states), 'racks': len(r_states)}
+                r_counts.append(roll['counts'])
+            rooms[room['uid']] = {'state': worst(r_states), 'racks': len(r_states),
+                                  'counts': add_counts(*r_counts)}
             s_states.append(rooms[room['uid']]['state'])
-        sites[site['uid']] = {'state': worst(s_states), 'rooms': len(s_states)}
+            s_counts.append(rooms[room['uid']]['counts'])
+        sites[site['uid']] = {'state': worst(s_states), 'rooms': len(s_states),
+                              'counts': add_counts(*s_counts)}
     return {'rack': racks, 'room': rooms, 'site': sites}
 
 
@@ -460,6 +498,9 @@ def board(store, statuses, said, allowed, orgs=None, device_names=None) -> dict:
                                  or devices.get(str(item.get('device_uid') or '')) or ''),
                         'device_uid': item.get('device_uid') or '',
                         'item_uid': item['uid'],
+                        # Por qué, cuando se sabe sin preguntar: el de la demo. El de un
+                        # dispositivo son sus comprobaciones, y se piden al pulsar.
+                        'reason': '' if item.get('device_uid') else (item.get('demo_reason') or ''),
                     })
         # Lo que se pregunta delante de un punto rojo, y que hasta ahora no contestaba
         # ninguna pantalla sin abrir la ficha: dónde está, a quién se llama y qué se ve al
@@ -636,7 +677,14 @@ def power_of_rack(pdus, feeds, items, statuses=None, owners=None) -> dict:
 
     # Una regleta tan cargada que su pareja no podría con las dos. Es la aritmética de la
     # redundancia: tener dos ramas no sirve de nada si una sola no aguanta el total.
+    #
+    # Solo si HAY pareja: un rack con una sola rama —el de comunicaciones de una planta, con su
+    # regleta colgada de un SAI— no tiene a quién pasarle la carga, y decirle «si cae su pareja»
+    # era avisar de un fallo que no puede ocurrir. Lo que sí le pasa ya lo dice `single_branch`.
+    ramas = {f['feed'] for f in filas}
     for fila in filas:
+        if not {'a', 'b'} <= ramas:
+            break
         if fila['load'] is not None and fila['load'] > PDU_SAFE_LOAD:
             avisos.append({'kind': 'over_half', 'pdu': fila['uid'], 'label': fila['name'],
                            'load': fila['load']})
@@ -1460,3 +1508,18 @@ def power_path(sources, pdus) -> dict:
                            'ups': sorted(comunes),
                            'labels': sorted(p.get('name') or '' for p in suyas)})
     return {'paths': caminos, 'warnings': avisos}
+
+
+def used_u(store, rack) -> int:
+    """Cuántos U de un rack están ocupados, por cualquiera de las dos caras.
+
+    Por las dos: un panel de parcheo atornillado solo detrás ocupa ese U igual, y contarlo
+    libre sería ofrecer un hueco donde no cabe nada. Lo ajeno cuenta: está ahí, ocupando,
+    aunque este lector no pueda saber qué es — que es lo mismo que dibuja el alzado. Aquí y no
+    en una ruta: lo piden la lista de sedes, el contenido de una sede y los racks de una sala, y
+    el 3D colorea por ocupación con cualquiera de las tres.
+    """
+    taken = store.occupancy(rack['uid'])
+    height = int(taken.get('height') or 0)
+    usados = set(taken.get('front') or {}) | set(taken.get('rear') or {})
+    return len([u for u in usados if 1 <= int(u) <= height])

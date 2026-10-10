@@ -111,6 +111,11 @@
     DELETE /api/v1/dcim/files/<uid>            …take it off
     POST   /api/v1/dcim/catalog/<uid>/image/<face>   put a picture on one
     DELETE /api/v1/dcim/catalog/<uid>/image/<face>   take it off
+    PUT    /api/v1/dcim/catalog/<uid>/portmap        where each port is on its faces
+    POST   /api/v1/dcim/catalog/<uid>/views          an inside view (board, riser, cage)
+    PUT    /api/v1/dcim/catalog/<uid>/views/<vid>    …rename it
+    DELETE /api/v1/dcim/catalog/<uid>/views/<vid>    …drop it, with its picture
+    POST   /api/v1/dcim/catalog/<uid>/views/<vid>/image  …its picture
     DELETE /api/v1/dcim/catalog/<uid>         drop ONE model, with its pictures
     POST   /api/v1/dcim/catalog/drop          drop the ticked ones, or a whole source
     POST   /api/v1/dcim/catalog/basics        the generics that ship with the panel

@@ -11,7 +11,7 @@ Routes registered by this file:
 
 from flask import jsonify
 
-from lib import APP_NAME
+from lib.core.brand import service as brand_svc
 
 
 def register(app, wa):
@@ -63,12 +63,14 @@ def register(app, wa):
         lang = notify_lang(full_cfg)          # global notification language
         lang_key = lang or 'en_EN'
         str_overrides = (full_cfg.get('notif_templates') or {}).get(lang_key) or None
-        strings = email_templates.get_strings(lang, overrides=str_overrides)
+        nombre = wa._brand_name()
+        cfg = brand_svc.email_cfg_for(cfg, nombre)
+        strings = email_templates.get_strings(lang, overrides=str_overrides, app_name=nombre)
         html_override = (
             (full_cfg.get('notif_html_templates') or {}).get('test', {}).get(lang_key)
         ) or None
         body = email_templates.render_test(
-            sender_name=cfg.get('from_name') or APP_NAME, lang=lang, strings=strings,
+            sender_name=cfg.get('from_name') or nombre, lang=lang, strings=strings,
             html_override=html_override)
         return cfg, test_to, lang, strings['test_subject'], body
 

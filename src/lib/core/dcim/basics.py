@@ -161,8 +161,13 @@ def _dev(d: dict, lang: str = '') -> dict:
     NUESTROS y aquí sí se sabe lo que son.
     """
     model = _text(d.get('model'), lang)
-    row = {'manufacturer': MAKER, 'model': model,
-           'slug': _slug('generic-', _text(d.get('model'), DEFAULT_LANG)),
+    # Su fabricante, si la fila lo dice: los de una marca concreta —el control de accesos de
+    # Salto— son modelos de verdad con su nombre, no cajas genéricas, y no los trae ninguna
+    # biblioteca. Sin foto ni número de parte: de una marca solo se escribe lo que es seguro.
+    marca = _text(d.get('maker')) or MAKER
+    prefijo = 'generic-' if marca == MAKER else _NO_SLUG.sub('-', marca.lower()).strip('-') + '-'
+    row = {'manufacturer': marca, 'model': model,
+           'slug': _slug(prefijo, _text(d.get('model'), DEFAULT_LANG)),
            'u_tenths': int(round(float(d.get('u') or 0) * 10)),
            'full_depth': 0 if d.get('full_depth') is False else 1,
            'part_number': '', 'airflow': '', 'subdevice': '',
@@ -170,6 +175,20 @@ def _dev(d: dict, lang: str = '') -> dict:
            'ports': d.get('ports') or {}, '_tree': 'device-types'}
     if d.get('kind'):
         row['kind'] = str(d['kind'])
+    if d.get('description'):
+        row['description'] = _text(d.get('description'), lang)
+    # Lo que publica el fabricante y nada más: la página del producto, sus características
+    # —las que dice la web, una por casilla— y de dónde sale su foto. La foto NO viaja en este
+    # repositorio: es del fabricante y se baja a la instalación al traer los básicos
+    # (`fetch_images`), si hay internet.
+    if d.get('url'):
+        row['url'] = str(d['url'])
+    if isinstance(d.get('specs'), dict):
+        row['extra'] = {k: _text(v, lang) for k, v in d['specs'].items()}
+    if d.get('power_type'):
+        row['power_type'] = str(d['power_type'])
+    if d.get('image_url'):
+        row['_image_url'] = str(d['image_url'])
     return row
 
 
@@ -182,6 +201,33 @@ def _mod(d: dict, lang: str = '') -> dict:
     if d.get('kind'):
         row['kind'] = str(d['kind'])
     return row
+
+
+def fetch_images(rows, timeout: float = 8.0) -> int:
+    """Bajar la foto de cada fila que diga de dónde (`_image_url`), para que `replace` la guarde.
+    Devuelve cuántas se bajaron.
+
+    Solo las direcciones de este fichero —las escribe quien mantiene el panel, no una petición—
+    y solo `https`. Con tope de tiempo y de tamaño, y sin fallar: sin internet se traen los
+    modelos sin foto, que es lo que eran antes, y la próxima vez que se pulse se intenta otra vez.
+    """
+    import urllib.request                        # noqa: PLC0415
+    from lib.core.dcim import media              # noqa: PLC0415
+    n = 0
+    for row in rows or ():
+        url = str(row.pop('_image_url', '') or '')
+        if not url.startswith('https://'):
+            continue
+        try:
+            pedido = urllib.request.Request(url, headers={'User-Agent': 'ServiceSentry'})
+            with urllib.request.urlopen(pedido, timeout=timeout) as resp:   # noqa: S310
+                datos = resp.read(media.MAX_BYTES + 1)
+        except Exception:                        # pylint: disable=broad-except
+            continue
+        if datos and len(datos) <= media.MAX_BYTES and media.kind_of(datos):
+            row['_images'] = {'front': datos}
+            n += 1
+    return n
 
 
 def rows(lang: str = ''):

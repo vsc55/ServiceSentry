@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 
-from lib import APP_NAME
+from lib.core.brand import service as brand_svc
 from lib.core.notify.formatting import notify_lang, plain
 from lib.core.notify.recipients import RecipientResolver
 from lib.core.notify.registry import Channel, register_channel
@@ -28,19 +28,36 @@ def _resolve_recipients(router, email_cfg) -> list:
     return res['emails']
 
 
+def _brand_name(router, cfg) -> str:
+    """The installation's name for this message, and its email logo made available.
+
+    The configuration a channel gets already has env laid over it, so the name is read from
+    it. The logo lives in the database: the brand store is built once per router — in a
+    worker as well as in the web — and handed to the email logo as where to look first."""
+    try:
+        from lib.core.brand.store import BrandStore  # noqa: PLC0415
+        from lib.core.notify.email import brand as email_brand  # noqa: PLC0415
+        store = router.store('brand', lambda ctx: BrandStore(ctx.db))
+        email_brand.set_loader(lambda: store.get('email'))
+    except Exception:  # pylint: disable=broad-except
+        pass
+    return brand_svc.display_name(cfg)
+
+
 def send(router, cfg, *, kind='', module='', item='', status='', message='',
          timestamp='', **_extra) -> tuple:
     from lib.core.notify.email import notify as email_notify, templates as email_templates  # noqa: PLC0415,E501
-    email_cfg = cfg.get('email') or {}
+    nombre = _brand_name(router, cfg)
+    email_cfg = brand_svc.email_cfg_for(cfg.get('email'), nombre)
     lang = notify_lang(cfg)
     lang_key = lang or 'en_EN'
     # Admin-configured text-string overrides + HTML body override for alert emails.
     _tpl_overrides = (cfg.get('notif_templates') or {}).get(lang_key) or None
-    strings = email_templates.get_strings(lang, overrides=_tpl_overrides)
+    strings = email_templates.get_strings(lang, overrides=_tpl_overrides, app_name=nombre)
     _html_override = (
         (cfg.get('notif_html_templates') or {}).get('alert', {}).get(lang_key)
     ) or None
-    prefix = email_cfg.get('subject_prefix') or f'[{APP_NAME}]'
+    prefix = email_cfg.get('subject_prefix') or f'[{nombre}]'
     subject = f'{prefix} {kind.upper()}: {item}'
     body_html = email_templates.render_alert(
         kind=kind, module=module, item=item, status=status,
@@ -56,18 +73,20 @@ def send(router, cfg, *, kind='', module='', item='', status='', message='',
 
 def flush(router, cfg, alerts, hostname, public_url) -> tuple:
     from lib.core.notify.email import notify as email_notify, templates as email_templates  # noqa: PLC0415,E501
-    email_cfg = cfg.get('email') or {}
+    nombre = _brand_name(router, cfg)
+    email_cfg = brand_svc.email_cfg_for(cfg.get('email'), nombre)
     lang = notify_lang(cfg)
     lang_key = lang or 'en_EN'
     strings = email_templates.get_strings(
-        lang, overrides=(cfg.get('notif_templates') or {}).get(lang_key) or None)
+        lang, overrides=(cfg.get('notif_templates') or {}).get(lang_key) or None,
+        app_name=nombre)
     html_override = (cfg.get('notif_html_templates') or {}).get('summary', {}).get(lang_key) or None
     items = [{'module': a['module'], 'item': a['item'],
               'status': a['kind'], 'message': plain(a['message'])} for a in alerts]
     body_html = email_templates.render_summary(
         items=items, timestamp=time.strftime('%Y-%m-%d %H:%M:%S'),
         public_url=public_url, lang=lang, strings=strings, html_override=html_override)
-    prefix = email_cfg.get('subject_prefix') or f'[{APP_NAME}]'
+    prefix = email_cfg.get('subject_prefix') or f'[{nombre}]'
     subject = f'{prefix} {hostname}: {len(alerts)} alert(s)'
     return email_notify._dispatch(email_cfg, subject=subject, body_html=body_html,
                                   recipients=_resolve_recipients(router, email_cfg), lang=lang)

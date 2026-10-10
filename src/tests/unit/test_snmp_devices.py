@@ -37,12 +37,12 @@ _SNMP = {'community': 'public', 'version': '2c', 'device_profiles': 'sys_generic
 class TestWhatCountsAsADevice:
 
     def test_a_device_with_profiles_assigned_is_sampled(self):
-        out = devices_to_sample(_Store([_device('h1', 'erebor', {'snmp': _SNMP})]))
+        out = devices_to_sample(_Store([_device('h1', 'atlas', {'snmp': _SNMP})]))
         assert len(out) == 1
         key, item = out[0]
         assert key == device_key('h1')
         assert item['device_uid'] == 'h1' and item['enabled'] is True
-        assert item['label'] == 'erebor'
+        assert item['label'] == 'atlas'
 
     def test_a_device_with_a_community_but_nothing_assigned_is_not(self):
         """Reachable is not the same as worth charting. A community with no profiles is a
@@ -76,8 +76,8 @@ class TestWhatItRefusesToDecide:
         assert devices_to_sample(store, covered={'h1'}) == []
 
     def test_covering_is_by_uid_and_not_by_name(self):
-        store = _Store([_device('h1', 'erebor', {'snmp': _SNMP})])
-        assert len(devices_to_sample(store, covered={'erebor'})) == 1
+        store = _Store([_device('h1', 'atlas', {'snmp': _SNMP})])
+        assert len(devices_to_sample(store, covered={'atlas'})) == 1
 
     def test_maintenance_is_not_decided_here(self):
         """It is decided by resolve_device, which every sampled item goes through — one place
@@ -135,10 +135,10 @@ class TestTheKeyIsStable:
 class TestNarrowingToOneDevice:
     """A collection asked for by hand is about ONE machine. The module items are narrowed by
     the module's own config resolution; these are the devices that have no item to narrow —
-    so without this, "collect erebor" still walked every switch in the rack."""
+    so without this, "collect atlas" still walked every switch in the rack."""
 
     def test_only_the_one_asked_for_comes_back(self):
-        devices = [_device('h1', 'erebor', {'snmp': _SNMP}),
+        devices = [_device('h1', 'atlas', {'snmp': _SNMP}),
                  _device('h2', 'isen', {'snmp': _SNMP}),
                  _device('h3', 'switch', {'snmp': _SNMP})]
         out = devices_to_sample(_Store(devices), only='h2')
@@ -147,7 +147,7 @@ class TestNarrowingToOneDevice:
     def test_asking_for_a_machine_that_is_not_a_device_yields_nothing(self):
         """It narrows; it does not promote. A device with no profiles assigned is not sampled
         because somebody asked about it by name."""
-        devices = [_device('h1', 'erebor', {'snmp': _SNMP}),
+        devices = [_device('h1', 'atlas', {'snmp': _SNMP}),
                  _device('h2', 'plain', {'ssh': {'ssh_user': 'r'}})]
         assert devices_to_sample(_Store(devices), only='h2') == []
 

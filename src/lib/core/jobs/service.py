@@ -38,11 +38,11 @@ _SHAPE = {
     #   state   one of STEP_STATES. The package's own words do not travel — a screen cannot
     #           colour a word it has never seen — so anything else arrives blank.
     #   text    what is being done      ("Reading the metrics")
-    #   scope   what it is being done TO ("erebor"), when one step covers several things
+    #   scope   what it is being done TO ("atlas"), when one step covers several things
     #   n/total how far through that scope        (2 of 24)
     #   note    what the count is OF               ("Disks")
     #
-    # Flattened to one sentence it read "erebor · Reading the metrics · 2/24 Disks", which is
+    # Flattened to one sentence it read "atlas · Reading the metrics · 2/24 Disks", which is
     # the same words with the columns taken away — and the columns are what makes forty of
     # them scannable.
     'steps': [],

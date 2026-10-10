@@ -1,0 +1,359 @@
+{# ================================================================
+   DCIM — cómo se mira el inventario en 3D: buscar, colorear, los circuitos, en vivo.
+
+   Lo común a los tres visores del inventario —la sala, la planta o el edificio, y el armario—:
+   la barra de encima (buscar, colorear por, solo lo que tiene problemas, las capas de energía y
+   de red), el halo de lo encontrado, los circuitos dibujados entre racks, el estado puesto al
+   día mientras se mira, y la cámara guardada en la dirección para que un F5 o un enlace abran
+   lo mismo.
+   ================================================================ #}
+
+//: Cómo se mira: `{power, net}` las capas, `by` qué colorea un rack de la sala (`state`,
+//: `occupancy`, `org`), `byRack` qué colorea un equipo en el armario (`state`, `role`, `org`,
+//: `warranty`), `stateRack` cómo se dibuja el estado de un equipo (`_DCR3_MARKS`),
+//: `wiresNet`/`wiresPower` si el armario dibuja sus cables de red y de corriente, y `bad` si
+//: solo lo que tiene problemas se ve entero. Se recuerda en el navegador.
+let _dc3dLook = (() => {
+    const base = {power: false, net: false, by: 'state', byRack: 'state', bad: false,
+                  stateRack: 'led', wiresNet: true, wiresPower: true};
+    try { return Object.assign(base, JSON.parse(localStorage.getItem('ss.dc3d.look') || '{}')); }
+    catch (_) { return base; }
+})();
+//: Lo encontrado con la búsqueda: el `uid` de lo que lleva el halo.
+let _dc3dFoco = '';
+//: La última búsqueda, para recorrer sus resultados con Intro: `{q, i}`.
+let _dc3dFind = {q: '', i: -1};
+//: Los circuitos de la sede que se mira: `{site, data}` (`/sites/<uid>/circuits`).
+let _dc3dCirc = {site: '', data: null, loading: ''};
+
+function _dc3dLookSet(k, v) {
+    _dc3dLook[k] = v;
+    try { localStorage.setItem('ss.dc3d.look', JSON.stringify(_dc3dLook)); } catch (_) { /* sin almacén */ }
+    if ((k === 'power' || k === 'net') && v) _dc3dCircuitsLoad();
+    _dc3dRebuildAll();
+    _dc3dToolsPaint();
+}
+
+function _dc3dRebuildAll() {
+    ss3dRebuild(_DC3D_BOX);
+    ss3dRebuild(_DCR3D_BOX);
+}
+
+// ── La barra ─────────────────────────────────────────────────────────────────
+
+/** Encima de un visor del inventario. `ctx`: `room`, `site` o `rack`. */
+function _dc3dToolsBar(ctx) {
+    return `<div class="d-flex flex-wrap gap-2 align-items-center mb-2" id="dc3dTools" data-ctx="${escAttr(ctx)}">
+        ${_dc3dToolsInner(ctx)}</div>`;
+}
+
+function _dc3dToolsPaint() {
+    const el = document.getElementById('dc3dTools');
+    if (el) el.innerHTML = _dc3dToolsInner(el.getAttribute('data-ctx') || 'room');
+}
+
+function _dc3dToolsInner(ctx) {
+    const L = _dc3dLook, rack = ctx === 'rack';
+    const opciones = rack ? ['state', 'role', 'org', 'warranty'] : ['state', 'occupancy', 'org'];
+    const actual = rack ? L.byRack : L.by;
+    const capa = (k, icono) => `<button type="button" class="btn btn-sm ${L[k] ? 'btn-warning' : 'btn-secondary'}"
+        onclick="_dc3dLookSet(${jsStr(k)}, ${!L[k]})" title="${escAttr(t('dcim_3d_layer_' + k + '_tt'))}">
+        <i class="bi ${icono} me-1"></i>${esc(t('dcim_3d_layer_' + k))}</button>`;
+    return `<div class="input-group input-group-sm" style="width:15rem">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="search" class="form-control" placeholder="${escAttr(t('dcim_3d_search'))}"
+                   aria-label="${escAttr(t('dcim_3d_search'))}" value="${escAttr(_dc3dFind.q)}"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();_dc3dSearch(this.value, ${jsStr(ctx)})}">
+        </div>
+        <label class="d-inline-flex align-items-center gap-1 ss-fs-2 mb-0">
+            <span class="text-muted">${esc(t('dcim_3d_color_by'))}</span>
+            <select class="form-select form-select-sm w-auto" onchange="_dc3dLookSet(${jsStr(rack ? 'byRack' : 'by')}, this.value)">
+                ${opciones.map(o => `<option value="${o}"${o === actual ? ' selected' : ''}>${esc(t('dcim_3d_by_' + o))}</option>`).join('')}
+            </select></label>
+        ${rack && actual === 'state' ? `<label class="d-inline-flex align-items-center gap-1 ss-fs-2 mb-0">
+            <span class="text-muted">${esc(t('dcim_3d_state_style'))}</span>
+            <select class="form-select form-select-sm w-auto" onchange="_dc3dLookSet('stateRack', this.value)">
+                ${_DCR3_MARKS.map(o => `<option value="${o}"${o === L.stateRack ? ' selected' : ''}>${
+                    esc(t('dcim_3d_state_' + o))}</option>`).join('')}
+            </select></label>` : ''}
+        <button type="button" class="btn btn-sm ${L.bad ? 'btn-warning' : 'btn-secondary'}"
+                onclick="_dc3dLookSet('bad', ${!L.bad})" title="${escAttr(t('dcim_3d_only_bad_tt'))}">
+            <i class="bi bi-exclamation-triangle me-1"></i>${esc(t('dcim_3d_only_bad'))}</button>
+        ${rack ? capa('wiresNet', 'bi-ethernet') + capa('wiresPower', 'bi-plug')
+               : capa('power', 'bi-lightning-charge') + capa('net', 'bi-diagram-3')}
+        <span class="text-muted ss-fs-2">${esc(_dc3dLegend(actual))}</span>`;
+}
+
+/** Una línea que dice qué significa el color, cuando no es el estado. */
+function _dc3dLegend(por) {
+    if (por === 'occupancy') return t('dcim_3d_legend_occupancy');
+    if (por === 'warranty') return t('dcim_3d_legend_warranty');
+    if (por === 'org') return t('dcim_3d_legend_org');
+    return '';
+}
+
+// ── Colores ──────────────────────────────────────────────────────────────────
+
+/** Un color fijo por empresa: el mismo en cada visita, distinto entre empresas. */
+function _dc3dOrgColor(uid) {
+    if (!uid) return [0.36, 0.36, 0.40, 1];
+    let h = 0;
+    for (const ch of String(uid)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    const tono = (h % 360) / 360, s = 0.55, l = 0.48;
+    const f = (n) => {
+        const k = (n + tono * 12) % 12, a = s * Math.min(l, 1 - l);
+        return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    };
+    return [f(0), f(8), f(4), 1];
+}
+
+/** El cuerpo de un rack en la sala según lo que se colorea: oscuro (su estado va en la franja),
+ *  por ocupación —verde, ámbar, rojo— o por empresa. */
+function _dc3dRackColor(r) {
+    const por = _dc3dLook.by;
+    if (por === 'org') return _dc3dOrgColor(r.org_uid);
+    if (por === 'occupancy') {
+        const u = Number(r.u_height) || 0, usadas = Number(r.used_u);
+        if (!u || !Number.isFinite(usadas)) return [0.36, 0.36, 0.40, 1];
+        const k = usadas / u;
+        return k >= 0.8 ? _DC3_STATE.error : k >= 0.5 ? _DC3_STATE.warning : _DC3_STATE.ok;
+    }
+    return _DC3_COLOR.rack;
+}
+
+/** Tenue si solo se miran los problemas y esto no tiene ninguno. */
+function _dc3dDim(color, estado) {
+    if (!_dc3dLook.bad || estado === 'error' || estado === 'warning') return color;
+    return [color[0], color[1], color[2], Math.min(color[3], 0.15)];
+}
+
+// ── Buscar ───────────────────────────────────────────────────────────────────
+
+/** El halo amarillo alrededor de lo encontrado, si está en la escena. */
+function _dc3dAddFoco(escena) {
+    if (!_dc3dFoco) return;
+    const k = (escena.cajas || []).find(c => c.lee && c.lee.uid === _dc3dFoco && !c.lee.sinRotulo)
+        || (escena.cajas || []).find(c => c.lee && c.lee.uid === _dc3dFoco);
+    if (k) escena.cajas.push({color: [1, 0.85, 0.1, 0.35], m: ss3dGrow(k.m, 1.12), lee: null});
+}
+
+/** Buscar por nombre en lo que hay dibujado; con Intro otra vez, el siguiente. Si no está a la
+ *  vista y se mira una sala o una sede, se pregunta por los equipos de la sede: el que se
+ *  busca está DENTRO de algún rack, y es ese rack el que se señala. */
+async function _dc3dSearch(q, ctx) {
+    const id = ctx === 'rack' ? _DCR3D_BOX : _DC3D_BOX;
+    const V = ss3dGet(id);
+    q = String(q || '').trim();
+    if (!V || !q) { _dc3dFoco = ''; _dc3dFind = {q: '', i: -1}; ss3dRebuild(id); return; }
+    const bajo = q.toLowerCase();
+    const vistos = new Set();
+    const hay = (V.escena.cajas || []).filter(k => k.lee && k.lee.uid && k.lee.name
+        && String(k.lee.name).toLowerCase().includes(bajo) && !vistos.has(k.lee.uid) && vistos.add(k.lee.uid));
+    if (hay.length) {
+        const i = _dc3dFind.q === q ? (_dc3dFind.i + 1) % hay.length : 0;
+        _dc3dFind = {q, i};
+        return _dc3dGoTo(V, id, hay[i].lee.uid, tf('dcim_3d_found', i + 1, hay.length, hay[i].lee.name));
+    }
+    _dc3dFind = {q, i: -1};
+    const site = _dc3dSiteUid();
+    if (ctx === 'rack' || !site) return ss3dSay(id, tf('dcim_3d_not_found', q));
+    const d = await apiGet(`/api/v1/dcim/items?q=${encodeURIComponent(q)}&site=${encodeURIComponent(site)}&limit=20`);
+    const fila = ((d || {}).items || []).find(x => (V.escena.cajas || []).some(k => k.lee && k.lee.uid === x.rack_uid));
+    if (!fila) return ss3dSay(id, tf('dcim_3d_not_found', q));
+    _dc3dGoTo(V, id, fila.rack_uid, tf('dcim_3d_found_in', fila.label || q, fila.rack || '', fila.u_start || ''));
+}
+
+function _dc3dGoTo(V, id, uid, texto) {
+    _dc3dFoco = uid;
+    ss3dRebuild(id);
+    const k = (V.escena.cajas || []).find(c => c.lee && c.lee.uid === uid);
+    if (k) { ss3dFlyToBox(V, k); ss3dCard(id, _dc3dCardHtml(k.lee)); }
+    ss3dSay(id, texto);
+}
+
+/** La sede de lo que se mira: la del plano de la sede, la de la sala, la del armario. */
+function _dc3dSiteUid() {
+    if (_dcsPlan && _dcsPlan.site) return _dcsPlan.site.uid;
+    if (_dcimPlan && _dcimPlan.room) return _dcimPlan.room.site_uid || '';
+    return '';
+}
+
+// ── Los circuitos ────────────────────────────────────────────────────────────
+//
+// La red: una tirada por cada par de racks cableados entre sí, por encima de ellos como una
+// bandeja, del grosor de cuántos cables lleva y del color de lo que más lleva. La energía: de
+// cada rack a la fuente de cada una de sus regletas, del color de su rama, y de cada fuente a
+// la que cuelga. Una fuente que es un SAI dentro de un rack sale de ese rack; las demás —una
+// acometida, un cuadro— no tienen sitio en el inventario y se plantan en fila al borde, con
+// su nombre.
+
+async function _dc3dCircuitsLoad() {
+    const site = _dc3dSiteUid();
+    if (!site || _dc3dCirc.site === site && _dc3dCirc.data || _dc3dCirc.loading === site) return;
+    _dc3dCirc.loading = site;
+    const d = await apiGet(`/api/v1/dcim/sites/${encodeURIComponent(site)}/circuits`);
+    _dc3dCirc = {site, data: d || {net: [], power: [], sources: []}, loading: ''};
+    _dc3dRebuildAll();
+}
+
+const _DC3_RUN_COLOR = {fiber: [0.98, 0.55, 0.10, 1], copper: [0.20, 0.60, 0.95, 1], dac: [0.62, 0.42, 0.92, 1],
+                        console: [0.70, 0.70, 0.72, 1], power: [0.84, 0.27, 0.27, 1], other: [0.55, 0.55, 0.58, 1]};
+const _DC3_FEED_COLOR = {a: [0.18, 0.44, 0.93, 1], b: [0.84, 0.27, 0.27, 1], none: [0.55, 0.55, 0.58, 1]};
+const _DC3_SOURCE_COLOR = {mains: [0.50, 0.50, 0.55, 1], panel: [0.82, 0.80, 0.74, 1],
+                           ups: [0.30, 0.32, 0.37, 1], generator: [0.85, 0.60, 0.10, 1]};
+
+/** Un recorrido en escuadra de `p` a `q` a la altura `y`: sube, va en X, va en Z y baja. */
+function _dc3dRoute(cajas, p, q, y, t, color, lee) {
+    const pts = [p, [p[0], y, p[2]], [q[0], y, p[2]], [q[0], y, q[2]], q];
+    for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1];
+        if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 1e-4) continue;
+        cajas.push({color, m: ss3dTube(a, b, t), lee, borde: false});
+    }
+}
+
+/** Los circuitos de la sede, sobre una escena que trae `puntos` (`rack:<uid>` → lo alto del rack)
+ *  y `nombres`. Lo que no tiene rack en esta escena no se dibuja: en el visor de una sala, una
+ *  tirada a otra sala acaba donde acaba la sala. */
+function _dc3dAddCircuits(escena) {
+    const L = _dc3dLook;
+    if (!L.power && !L.net) return;
+    const site = _dc3dSiteUid();
+    if (!_dc3dCirc.data || _dc3dCirc.site !== site) { _dc3dCircuitsLoad(); return; }
+    const P = escena.puntos || {}, N = escena.nombres || {}, cajas = escena.cajas;
+    const d = _dc3dCirc.data;
+    if (L.net) {
+        (d.net || []).forEach((r, i) => {
+            const a = P['rack:' + r.a], b = P['rack:' + r.b];
+            if (!a || !b) return;
+            const kinds = Object.entries(r.kinds || {}).sort((x, y) => y[1] - x[1]);
+            const color = _DC3_RUN_COLOR[(kinds[0] || ['other'])[0]] || _DC3_RUN_COLOR.other;
+            const grueso = 0.02 + 0.012 * Math.log2(1 + (r.total || 1));
+            // Por nombre y no por uid: «R1 ↔ R2», no al revés porque el uid de R2 sea menor.
+            const ends = [N['rack:' + r.a] || '', N['rack:' + r.b] || ''].sort((x, y) => x.localeCompare(y));
+            const lee = {name: ends[0] + ' ↔ ' + ends[1],
+                         kind: tf(r.total === 1 ? 'dcim_3d_run_one' : 'dcim_3d_run', r.total,
+                                  kinds.map(([k, n]) => `${n} ${t('dcim_cable_' + k)}`).join(', ')),
+                         tipo: 'run', sinRotulo: true};
+            _dc3dRoute(cajas, a, b, Math.max(a[1], b[1]) + 0.3 + (i % 6) * 0.05, grueso, color, lee);
+        });
+    }
+    if (L.power) {
+        // Dónde está cada fuente: en su rack si es un SAI montado, si no en fila al borde.
+        const lugar = {};
+        let fila = 0;
+        const x0 = (escena.X0 || 0) - 0.8;
+        for (const s of d.sources || []) {
+            const enRack = s.rack && P['rack:' + s.rack];
+            if (enRack) { lugar[s.uid] = enRack; continue; }
+            const p = [x0, 1.6, (escena.Z0 || 0) + 0.6 + (fila++) * 1.4];
+            lugar[s.uid] = p;
+            cajas.push({color: _DC3_SOURCE_COLOR[s.kind] || _DC3_SOURCE_COLOR.mains,
+                        m: ss3dModel(p[0] - 0.3, 0, p[2] - 0.3, 0.6, 1.6, 0.6, 0),
+                        lee: {name: s.name, kind: t('dcim_source_' + s.kind), tipo: 'source', uid: s.uid}});
+        }
+        const hechos = new Set();
+        for (const p of d.power || []) {
+            const desde = P['rack:' + p.rack], hasta = lugar[p.source];
+            const clave = `${p.rack}|${p.source}|${p.feed}`;
+            if (!desde || !hasta || hechos.has(clave)) continue;
+            hechos.add(clave);
+            const s = (d.sources || []).find(x => x.uid === p.source) || {};
+            const color = s.bypass ? _DC3_STATE.warning : _DC3_FEED_COLOR[p.feed] || _DC3_FEED_COLOR.none;
+            _dc3dRoute(cajas, desde, hasta, Math.max(desde[1], hasta[1]) + 0.75 + (p.feed === 'b' ? 0.08 : 0),
+                       0.035, color, {name: (N['rack:' + p.rack] || '') + ' ← ' + (s.name || ''),
+                                      kind: tf('dcim_3d_feed', (p.feed || 'none').toUpperCase(), p.name),
+                                      tipo: 'power', sinRotulo: true});
+        }
+        for (const s of d.sources || []) {
+            const a = lugar[s.uid], b = lugar[s.upstream];
+            if (a && b) _dc3dRoute(cajas, a, b, Math.max(a[1], b[1]) + 0.4, 0.04, [0.6, 0.6, 0.64, 1],
+                                   {name: s.name, kind: t('dcim_upstream'), tipo: 'power', sinRotulo: true});
+        }
+    }
+}
+
+// ── En vivo ──────────────────────────────────────────────────────────────────
+//
+// El color de un rack sale de sus sondas, y el 3D lo pintaba como estaba al abrirlo: una
+// pantalla dejada abierta en la sala seguía en verde con el rack ya en rojo. Cada medio minuto,
+// con la pestaña a la vista, se piden otra vez los estados de lo que se mira y se rehace la
+// escena —la cámara no se mueve—.
+const _DC3D_LIVE_MS = 30000;
+setInterval(async () => {
+    if (document.hidden) return;
+    try {
+        if (_dcimRack && _dcimRack.rack && ss3dGet(_DCR3D_BOX)) {
+            const d = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(_dcimRack.rack.uid)}`);
+            if (d && d.rack && _dcimRack && _dcimRack.rack && d.rack.uid === _dcimRack.rack.uid) {
+                _dcimRack.items = d.items;
+                _dcimRack.roll = d.roll;
+                ss3dRebuild(_DCR3D_BOX);
+            }
+        } else if (_dc3d && _dcsPlan && ss3dGet(_DC3D_BOX)) {
+            await _dcsLoadContents();
+            ss3dRebuild(_DC3D_BOX);
+        } else if (_dc3d && _dcimPlan && _dcimPlan.room && ss3dGet(_DC3D_BOX)) {
+            const d = await apiGet(`/api/v1/dcim/racks?room=${encodeURIComponent(_dcimPlan.room.uid)}`);
+            if (d && d.racks && _dcimPlan) { _dcimPlan.racks = d.racks; ss3dRebuild(_DC3D_BOX); }
+        }
+    } catch (_) { /* el siguiente intento lo hará */ }
+}, _DC3D_LIVE_MS);
+
+// ── La cámara en la dirección ────────────────────────────────────────────────
+
+//: La cámara pedida por la dirección, para el primer montaje: `[x, y, z, radio, theta, phi, orto]`.
+let _dc3dPendingCam = null;
+//: Qué visor pide la dirección (`room`, `floor`, `building`, `rack`), o `''`.
+let _dc3dUrlMode = '';
+
+/** Al cargar: el visor y la cámara que diga la dirección. */
+function _dc3dUrlTake(q) {
+    _dc3dUrlMode = q.get('v3d') || '';
+    const c = (q.get('cam') || '').split(',');
+    if (c.length >= 6 && c.slice(0, 6).every(v => Number.isFinite(Number(v))))
+        _dc3dPendingCam = {mira: c.slice(0, 3).map(Number), radio: Number(c[3]), theta: Number(c[4]),
+                           phi: Number(c[5]), orto: c[6] === 'o'};
+    if (_dc3dUrlMode === 'rack') _dcRackView = '3d';
+}
+
+/** Abrir lo que pide la dirección y, si era con su 3D, con él. */
+async function _dc3dUrlOpen(kind, abrir) {
+    const modo = _dc3dUrlMode;
+    _dc3dUrlMode = '';
+    if (kind === 'room' && modo === 'room') _dc3d = {on: true};
+    const r = await abrir();
+    if (kind === 'site' && (modo === 'floor' || modo === 'building')) {
+        _ds3Mode = modo;
+        _dcsToggle3d();
+    }
+    return r;
+}
+
+/** La cámara pendiente, una vez. */
+function _dc3dCamTake() {
+    const c = _dc3dPendingCam;
+    _dc3dPendingCam = null;
+    return c;
+}
+
+/** El visor abierto y su cámara, en la dirección. */
+function _dc3dUrlWrite(url) {
+    let modo = '', id = _DC3D_BOX;
+    if (_dcimRack && _dcimRack.rack && ss3dGet(_DCR3D_BOX)) { modo = 'rack'; id = _DCR3D_BOX; }
+    else if (_dc3d && _dcsPlan && !_dcimPlan) modo = _ds3Mode;
+    else if (_dc3d && _dcimPlan) modo = 'room';
+    if (!modo) { url.searchParams.delete('v3d'); url.searchParams.delete('cam'); return; }
+    url.searchParams.set('v3d', modo);
+    const V = ss3dGet(id);
+    if (V && V.cam) {
+        const c = V.cam;
+        url.searchParams.set('cam', c.mira.concat([c.radio, c.theta, c.phi]).map(v => Number(v).toFixed(2)).join(',')
+                                    + (c.orto ? ',o' : ''));
+    }
+}
+
+/** La cámara se quedó quieta: a la dirección. */
+function _dc3dRest() {
+    if (typeof _dcimUrl === 'function') _dcimUrl();
+}

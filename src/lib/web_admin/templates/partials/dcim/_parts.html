@@ -59,6 +59,7 @@ function _dcPartsHtml() {
         </div>
         ${(d.parts || []).length ? _dcPartsTable(d.parts, puede)
             : `<div class="text-muted ss-fs-2">${esc(t('dcim_no_parts'))}</div>`}
+        ${_dcPmInsideHtml(d)}
         ${_dcPartsDiffHtml(d)}`;
 }
 

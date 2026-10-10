@@ -511,9 +511,35 @@ def args_init() -> argparse.Namespace:
     sub.add_parser('status', help='show background service status')
     sub.add_parser('reload',
                    help='reload config + reconcile services on the running daemon')
+    dp = sub.add_parser('dcim', help='physical inventory').add_subparsers(
+        dest='sub', metavar='ACTION', required=True)
+    _p = dp.add_parser('demo', help="create the 'Demo' site with floors, rooms, walls, racks, "
+                                    'cabling and power')
+    _g = _p.add_mutually_exclusive_group()
+    _g.add_argument('--replace', action='store_true', help='rebuild it if it already exists')
+    _g.add_argument('--remove', action='store_true', help='delete the demo site')
+    _p.add_argument('--no-images', action='store_true',
+                    help="do not download the makers' pictures of the catalogue basics")
     return ap.parse_args()
 
+def _tolerant_output() -> None:
+    """Make stdout/stderr replace what their encoding cannot carry instead of raising.
+
+    On Windows, with the output redirected to a file or a pipe, the encoding is the ANSI code
+    page (cp1252), which has no «⚠»: the default-credentials banner raised UnicodeEncodeError
+    and the panel died at start-up — under a service manager, which is exactly when output is
+    redirected. A replaced character in a log line is a cosmetic loss; a panel that will not
+    start is not.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors='replace')
+        except (AttributeError, ValueError):   # not a TextIOWrapper (tests, embedded)
+            pass
+
+
 if __name__ == "__main__":
+    _tolerant_output()
     _args = args_init()
     if getattr(_args, 'nocolor', False):
         from lib.debug import Debug as _Debug

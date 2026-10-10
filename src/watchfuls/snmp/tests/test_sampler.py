@@ -282,11 +282,11 @@ class TestSayingWhereItIs:
         env.profile('p2', [{'key': 'b', 'oid': '2.1', 'kind': 'gauge'}], label='System')
         dev = _Dev(gets={'1.1': (1, None), '2.1': (2, None)})
         got = []
-        for name in ('isen', 'erebor'):
+        for name in ('isen', 'atlas'):
             got += self._reports(env, monkeypatch,
                                  _server(label=name, device_profiles='p1,p2'), dev)
         by_machine = {r['scope'] for r in got}
-        assert by_machine == {'isen', 'erebor'}, by_machine
+        assert by_machine == {'isen', 'atlas'}, by_machine
         for name in by_machine:
             counts = [(r['n'], r['total']) for r in got if r['scope'] == name and r['total']]
             assert counts == [(1, 2), (2, 2)], (name, counts)
@@ -856,7 +856,7 @@ class TestTheProbeThePanelRuns:
 
         class _Store:
             def get(self, uid):
-                return {'uid': uid, 'name': 'erebor', 'address': '10.0.0.9', 'kind': 'local',
+                return {'uid': uid, 'name': 'atlas', 'address': '10.0.0.9', 'kind': 'local',
                         'os': 'auto', 'maintenance': False, 'profiles': {'snmp': {}},
                         'modules': []}
 
@@ -901,7 +901,7 @@ class TestADeviceIsADeviceOnItsOwn:
             return next((h for h in self._devices if h.get('uid') == uid), None)
 
     @staticmethod
-    def _device(uid='h1', name='erebor', profiles=None, **kw):
+    def _device(uid='h1', name='atlas', profiles=None, **kw):
         h = {'uid': uid, 'name': name, 'address': '10.0.0.9', 'kind': 'local',
              'os': 'auto', 'maintenance': False, 'modules': [],
              'profiles': profiles if profiles is not None else {
@@ -930,8 +930,8 @@ class TestADeviceIsADeviceOnItsOwn:
     def test_the_device_is_named_after_the_device(self, env):
         """A chart legend and an alert both read this; `host.h1` is not a machine anybody
         recognises."""
-        res, _dev = self._run(env, [self._device(name='erebor')])
-        assert res.get_name('host.h1/metrics') == 'erebor'
+        res, _dev = self._run(env, [self._device(name='atlas')])
+        assert res.get_name('host.h1/metrics') == 'atlas'
 
     def test_the_connection_comes_from_the_device_profile(self, env):
         """Nothing carries the community but the device, so a device that answers proves the
@@ -1018,7 +1018,7 @@ class TestTheProfileIsTheVerdict:
         assert st is False, f'a device reporting Failed was recorded as {st!r}'
 
     def test_the_message_names_the_measurement_and_what_it_said(self, env):
-        """"SNMP: erebor" is not actionable. "Estado del sistema: Fallo" is."""
+        """"SNMP: atlas" is not actionable. "Estado del sistema: Fallo" is."""
         self._prof(env, {2: ('Failed', 'bad')})
         res, _mon = env.run(_server(), _Dev(gets={'1.1': (2, None)}))
         msg = _one(res)['message']

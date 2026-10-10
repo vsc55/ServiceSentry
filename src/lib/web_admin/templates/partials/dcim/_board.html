@@ -112,14 +112,14 @@ function _dcimBoardTiles(sites) {
                      onfocus="_dcmRaise(${jsStr(s.uid)})"
                      onclick="_dcimBoardGoSite(${jsStr(s.uid)})"
                      onkeydown="if(event.key==='Enter')_dcimBoardGoSite(${jsStr(s.uid)})">
-            <div class="card-body py-2 px-3">
+            <div class="card-body py-2 px-3 min-w-0">
                 <div class="d-flex align-items-center gap-2">
                     ${malo ? `<i class="bi bi-${s.state === 'error' ? 'exclamation-octagon-fill'
                                                                     : 'exclamation-triangle-fill'
                                               } text-${tone}-emphasis"></i>` : ''}
-                    <span class="fw-semibold text-truncate" title="${escAttr(s.name)}">${
+                    <span class="fw-semibold text-truncate min-w-0" title="${escAttr(s.name)}">${
                         esc(s.name)}</span>
-                    <span class="badge text-bg-${tone} fw-normal ms-auto">${
+                    <span class="badge text-bg-${tone} fw-normal ms-auto flex-shrink-0">${
                         esc(_dcimStateWord(s.state))}</span>
                 </div>
                 <div class="ss-tabular ss-fs-6 mt-1">${esc(String(s.ok))}<span
@@ -184,14 +184,18 @@ function _dcimBoardTrouble(b) {
 function _dcimTroubleRow(r) {
     const tone = r.state === 'warning' ? 'warning' : 'danger';
     return `<tr role="button" onclick="_dcimBoardGoRack(${jsStr(r.rack_uid)})">
-        <td style="width:1%"><span class="badge text-bg-${tone} fw-normal">${
+        <td style="width:1%"><span class="badge text-bg-${tone} fw-normal" role="button" tabindex="0"
+                title="${escAttr(t('dcim_why_title'))}"
+                onclick="event.stopPropagation();_dcimWhyOpenUid(${jsStr(r.item_uid)})">${
             esc(_dcimStateWord(r.state))}</span></td>
-        <td class="fw-semibold">${esc(r.name || r.device_uid || t('dcim_item'))}</td>
+        <td><div class="fw-semibold">${esc(r.name || r.device_uid || t('dcim_item'))}</div>${
+            r.reason ? `<div class="ss-fs-2 text-${tone}-emphasis">${esc(r.reason)}</div>` : ''}</td>
         <td class="text-muted ss-fs-2">${esc(r.site)} <i class="bi bi-chevron-right ss-fs-1"></i>
             ${esc(r.room)} <i class="bi bi-chevron-right ss-fs-1"></i> ${esc(r.rack)}</td>
         <td class="text-muted ss-fs-2 ss-tabular" style="width:1%">${
             r.u ? esc('U' + r.u) : ''}${
             r.face && r.face !== 'full' ? ' · ' + esc(t('dcim_face_' + r.face)) : ''}</td>
+        <td class="text-end text-nowrap" style="width:1%">${_dcimGoDeviceBtn(r.device_uid, 'py-0')}</td>
     </tr>`;
 }
 

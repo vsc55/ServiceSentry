@@ -12,7 +12,7 @@
         "expected":    "Expected value"
     },
     "hints": {
-        "label":       "Display name shown in Modules, the status page and notifications (e.g. \"MX cerebelum.lan\"). Editable; defaults from discovery.",
+        "label":       "Display name shown in Modules, the status page and notifications (e.g. \"MX example.lan\"). Editable; defaults from discovery.",
         "enabled":     "Enable or disable DNS monitoring for this entry.",
         "threads":     "Number of entries to check in parallel.",
         "timeout":     "Resolution timeout in seconds. Per-item value overrides the module-level default.",

@@ -1,0 +1,459 @@
+{# ================================================================
+   DCIM — un rack, en 3D.
+
+   La cuarta vista del armario. El dibujo de frente dice en qué U está cada cosa; lo que no dice
+   es lo hondo que es: si el servidor de la U 12 llega hasta el fondo, si lo que está montado
+   detrás choca con lo de delante, dónde van las regletas verticales y qué hay en el suelo al
+   lado. Aquí cada equipo es una caja en su U, con su fondo —el medido, o el de su clase— desde
+   el raíl de delante o desde el de detrás, las regletas de 0U por detrás a los lados y lo de
+   «junto al armario» en el suelo, al lado.
+
+   El mismo motor que la sala (`infra/_viewer3d.html`), con su propio visor: el armario y la sala
+   pueden estar abiertos a la vez sin pisarse.
+   ================================================================ #}
+
+const _DCR3D_BOX = 'dcr3d-box';
+
+//: Un U, en metros: 1,75 pulgadas.
+const _DCR3_U = 0.04445;
+//: Lo ancho que es lo que va en los raíles: 19 pulgadas.
+const _DCR3_RAILS = 0.4826;
+//: Los diseños del estado de un equipo en el armario, el primero el de por defecto.
+const _DCR3_MARKS = ['led', 'edge', 'top', 'frame', 'tint', 'none'];
+//: El piloto de lo que nadie vigila: apagado.
+const _DCR3_OFF = [0.42, 0.44, 0.48, 1];
+
+/** Las cajas que dicen el estado de un equipo sobre su cara: `[x, y, z, ancho, alto, fondo,
+ *  opacidad]`. La cara está en `zCara` y lo que se pone sobresale hacia quien mira —hacia `-z`
+ *  por delante, `+z` por detrás—, y su izquierda es la `x` mayor por delante y la menor por
+ *  detrás. Todos dejan ver la foto: un piloto en la esquina, un filo, una barra, un marco, o un
+ *  tinte translúcido que la colorea sin taparla. */
+function _dcr3dMarks(estilo, x, y, w, h, zCara, atras) {
+    const g = 0.004, z = atras ? zCara : zCara - g, m = 0.004;
+    const izq = (a) => atras ? x + m : x + w - m - a;
+    switch (estilo) {
+    case 'none': return [];
+    case 'edge': {
+        const a = Math.min(0.005, w / 4);
+        return [[izq(a), y + m, z, a, Math.max(0.006, h - 2 * m), g, 1]];
+    }
+    case 'top': {
+        const a = Math.min(0.004, h / 4);
+        return [[x + m, y + h - a - 0.002, z, Math.max(0.006, w - 2 * m), a, g, 1]];
+    }
+    case 'frame': {
+        const a = 0.0025;
+        return [[x, y, z, w, a, g, 1], [x, y + h - a, z, w, a, g, 1],
+                [x, y, z, a, h, g, 1], [x + w - a, y, z, a, h, g, 1]];
+    }
+    case 'tint':
+        return [[x, y, atras ? zCara + 0.001 : zCara - 0.005, w, h, 0.004, 0.32]];
+    default: {
+        // Un piloto: el LED de 7 mm en la esquina de arriba a la izquierda, y su halo.
+        const a = Math.min(0.007, h / 3, w / 4), halo = a * 2.2;
+        const lx = izq(a) + (atras ? 0.004 : -0.004), ly = y + h - a - 0.007;
+        return [[lx - (halo - a) / 2, ly - (halo - a) / 2, atras ? z : z + 0.001, halo, halo, g - 0.001, 0.30],
+                [lx, ly, z, a, a, g, 1]];
+    }
+    }
+}
+
+//: Color por clase de equipo, para cuando se colorea «por clase» y como fondo «por estado».
+const _DCR3_ROLE = {
+    server: [0.32, 0.38, 0.48, 1], storage: [0.34, 0.33, 0.52, 1], switch: [0.18, 0.44, 0.44, 1],
+    router: [0.20, 0.40, 0.52, 1], firewall: [0.52, 0.26, 0.26, 1], patch_panel: [0.24, 0.24, 0.27, 1],
+    fiber_panel: [0.42, 0.32, 0.16, 1], ups: [0.30, 0.32, 0.37, 1], pdu: [0.46, 0.22, 0.22, 1],
+    shelf: [0.50, 0.50, 0.53, 1], kvm: [0.30, 0.30, 0.36, 1], console: [0.30, 0.30, 0.36, 1],
+    blank: [0.14, 0.14, 0.16, 1], other: [0.36, 0.36, 0.40, 1],
+};
+
+//: Lo hondo que suele ser cada clase, en metros, cuando nadie ha medido el equipo.
+const _DCR3_DEPTH = {server: 0.72, storage: 0.72, switch: 0.32, router: 0.36, firewall: 0.42,
+                     patch_panel: 0.12, fiber_panel: 0.25, ups: 0.62, pdu: 0.08, shelf: 0.55,
+                     kvm: 0.45, console: 0.4, blank: 0.02, other: 0.45};
+
+/** El color de un equipo según lo que se colorea: su estado sobre su clase, su clase, su
+ *  empresa o su garantía. */
+function _dcr3dColor(it, por) {
+    const base = _DCR3_ROLE[it.role] || _DCR3_ROLE.other;
+    if (por === 'org') return _dc3dOrgColor(it.org_uid);
+    if (por === 'warranty') {
+        const hasta = it.warranty_until ? Date.parse(it.warranty_until) : NaN;
+        if (!Number.isFinite(hasta)) return [0.36, 0.36, 0.40, 1];
+        const dias = (hasta - Date.now()) / 86400000;
+        return dias < 0 ? _DC3_STATE.error : dias < 90 ? _DC3_STATE.warning : _DC3_STATE.ok;
+    }
+    return base;
+}
+
+/** Dónde va una foto de frente: el cuadrado de imagen del motor —tumbado en el suelo, con la
+ *  primera fila de la imagen en `z = 0`— puesto de pie sobre la cara de un equipo, a `z`. Su
+ *  arriba arriba y su izquierda a la izquierda de quien la mira: desde delante se mira hacia
+ *  `+z`, y su izquierda es la `x` mayor; desde detrás, al revés. */
+function _dcr3dFace(x, y, w, h, z, detras) {
+    return detras
+        ? new Float32Array([w, 0, 0, 0, 0, 0, 1, 0, 0, -h, 0, 0, x, y + h, z, 1])
+        : new Float32Array([-w, 0, 0, 0, 0, 0, -1, 0, 0, -h, 0, 0, x + w, y + h, z, 1]);
+}
+
+//: El color de un cable según su clase, cuando no dice el suyo.
+const _DCR3_WIRE = {copper: [0.15, 0.39, 0.92, 1], fiber: [0.02, 0.71, 0.83, 1],
+                    dac: [0.16, 0.16, 0.18, 1], console: [0.55, 0.75, 1.0, 1],
+                    power: [0.12, 0.12, 0.13, 1], other: [0.6, 0.6, 0.62, 1]};
+//: Los que se conectan por delante: los paneles y lo que se parchea desde ellos.
+const _DCR3_FRONT = ['patch_panel', 'fiber_panel', 'switch', 'router', 'firewall', 'console', 'kvm'];
+
+/** `#rrggbb` —o el nombre de un color de latiguillo, con la tabla que trae `/cables`— como
+ *  color del motor. `null` si no se entiende. */
+function _dcr3dRgb(c, nombres) {
+    const v = String(c || '').trim();
+    const par = (nombres || []).find(x => x[0] === v);
+    const h = (par ? par[1] : v).replace('#', '');
+    if (!/^[0-9a-f]{6}$/i.test(h)) return null;
+    return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255).concat([1]);
+}
+
+/** Dónde está una boca de un equipo según su modelo (`ports_at` de la carga del armario):
+ *  por su nombre exacto; si no, por el nombre sin distinguir mayúsculas; si no, por el número
+ *  en que acaba —«Gi1/0/7» es la séptima de su familia—, que es como se escribe un puerto en un
+ *  cable y como no se llama en la biblioteca. `n`, si se da, es la enésima de la familia (las
+ *  entradas de corriente de un equipo no tienen nombre en sus cables). `null` si no se sabe. */
+function _dcr3dPortAt(pa, fam, port, n) {
+    if (!pa || !pa.map) return null;
+    const slots = (pa.slots || []).filter(s => s.startsWith(fam + '|'));
+    let clave = null;
+    if (n) clave = slots[n - 1] || null;
+    else {
+        const p = String(port || '').trim();
+        if (!p) return null;
+        clave = slots.find(s => s === fam + '|' + p)
+            || slots.find(s => s.slice(fam.length + 1).toLowerCase() === p.toLowerCase()) || null;
+        if (!clave) {
+            const m = p.match(/(\d+)\D*$/);
+            if (m) clave = slots[Number(m[1]) - 1] || null;
+        }
+    }
+    return clave ? (pa.map[clave] || null) : null;
+}
+
+/** El punto de una boca situada, en metros: su sitio en la foto llevado a la cara de la caja.
+ *  La foto delantera se mira hacia `+z`, con su izquierda en la `x` mayor; la trasera, al
+ *  revés (`_dcr3dFace`). */
+function _dcr3dPortPoint(e, pos) {
+    const detras = pos.f === 'rear';
+    return [detras ? e.x + e.w * pos.x : e.x + e.w * (1 - pos.x), e.y + e.h * (1 - pos.y),
+            detras ? e.z + e.fondo + 0.004 : e.z - 0.004];
+}
+
+/** Los cables, dentro del armario: los de red (`o.cables`, lo que da `/racks/<uid>/cables`) y
+ *  los de corriente (`o.power`, lo que da `/racks/<uid>/power`), si `o.redes` y `o.energia`.
+ *
+ *  Por donde van en un armario de verdad: del equipo al plano donde se recogen —detrás, o
+ *  delante si los dos extremos se parchean por delante—, por él hasta el canal del lateral,
+ *  por el canal hasta la U del otro extremo y de vuelta a él. Lo que acaba en otro armario sale
+ *  por el techo. El de corriente va del equipo a su toma en la regleta, a la altura de esa toma
+ *  y con el color de su rama. Tubos y no líneas: una línea de un píxel no se ve en un armario
+ *  de cuarenta equipos. */
+function _dcr3dWires(cajas, sitio, g, o) {
+    const tenue = o.mal ? 0.25 : 1;
+    const tubo = (pts, color, t) => {
+        // Un cable negro sobre un armario negro no se ve: lo muy oscuro se aclara lo justo.
+        const luz = Math.max(color[0], color[1], color[2]);
+        const k = luz < 0.3 ? 0.3 - luz : 0;
+        const c = [color[0] + k, color[1] + k, color[2] + k, (color[3] || 1) * tenue];
+        for (let i = 0; i + 1 < pts.length; i++) {
+            const p = pts[i], q = pts[i + 1];
+            if (Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 1e-4) continue;
+            cajas.push({color: c, m: ss3dTube(p, q, t), lee: null, cable: true});
+        }
+    };
+    const cuantos = {};
+    const turno = (uid, lado) => {
+        const k = uid + lado;
+        cuantos[k] = (cuantos[k] || 0) + 1;
+        return cuantos[k];
+    };
+    const derecha = g.x0 + _DCR3_RAILS;
+    if (o.redes) {
+        const lista = ((o.cables || {}).cables) || [];
+        const nombres = (o.cables || {}).colors || [];
+        lista.forEach((c, i) => {
+            const a = sitio[c.a_item], b = sitio[c.b_item];
+            if (!a && !b) return;
+            // La boca de cada extremo, si su modelo la tiene situada: entonces se sabe en qué
+            // cara está y sale de ahí; si no, se deduce de qué clase de equipo es.
+            const qa = a ? _dcr3dPortAt(a.pa, 'interfaces', c.a_port) : null;
+            const qb = b ? _dcr3dPortAt(b.pa, 'interfaces', c.b_port) : null;
+            const delante = (e, q) => !e || (q ? q.f === 'front'
+                                                : _DCR3_FRONT.includes(e.role) && e.face !== 'rear');
+            const porDelante = delante(a, qa) && delante(b, qb);
+            // El plano donde se recogen: delante de las caras, o detrás de los equipos y por
+            // delante de los postes de atrás —detrás de los postes, el poste los tapaba—. El
+            // canal, por dentro del raíl derecho: fuera de él, en un armario de 600, no hay sitio
+            // y quedaba escondido detrás del poste.
+            const zRun = porDelante ? g.zf - 0.03 - (i % 3) * 0.006 : g.D - 0.13 - (i % 3) * 0.006;
+            const canal = derecha - 0.02 - (i % 5) * 0.006;
+            const boca = (e, uid, q) => {
+                if (q) return _dcr3dPortPoint(e, q);
+                const n = turno(uid, porDelante ? 'f' : 'r');
+                const x = e.x + e.w * (0.1 + ((n * 0.137) % 0.8));
+                return [x, e.y + e.h / 2, porDelante ? e.z - 0.004 : e.z + e.fondo + 0.004];
+            };
+            const pa = a ? boca(a, c.a_item, qa) : null, pb = b ? boca(b, c.b_item, qb) : null;
+            const color = _dcr3dRgb(c.color, nombres) || _DCR3_WIRE[c.kind] || _DCR3_WIRE.other;
+            const ida = (p) => [p, [p[0], p[1], zRun], [canal, p[1], zRun]];
+            const techo = g.alto + 0.12;
+            // Del primer extremo al canal, por el canal, y del canal al segundo: si falta uno de
+            // los dos, ese lado es el techo.
+            const pts = pa ? ida(pa) : [[canal, techo, zRun]];
+            if (pb) pts.push(...ida(pb).reverse());
+            else pts.push([canal, techo, zRun]);
+            tubo(pts, color, c.kind === 'fiber' ? 0.004 : 0.005);
+        });
+    }
+    if (o.energia) {
+        const pw = o.power || {};
+        const pdus = {};
+        for (const p of pw.pdus || []) pdus[p.uid] = p;
+        let k = 0;
+        for (const it of pw.items || []) {
+            const e = sitio[it.uid];
+            if (!e || e.side) continue;
+            (it.feeds || []).forEach((f, nf) => {
+                const pdu = pdus[f.pdu_uid] || {};
+                const r = sitio[pdu.item_uid] || null;
+                // El cable, negro como son; la rama, en la clavija que entra en la toma. Del
+                // color de la rama entero, el de la A se confundía con el cobre azul.
+                const rama = _dcr3dRgb(pdu.color) || _DCR3_WIRE.power;
+                const color = _DCR3_WIRE.power;
+                const fuera = e.z + e.fondo + 0.004;
+                // Por el plano de la regleta, justo delante de ella: del equipo hacia atrás, de
+                // lado hasta la regleta y por ella hasta la toma. No por el aire de detrás.
+                const zP = r && r.side ? r.z - 0.012 - (k++ % 3) * 0.004
+                                       : Math.min(g.D - 0.13, fuera + 0.04) - (k++ % 3) * 0.004;
+                const n = Math.max(1, Number(pdu.outlets) || 24), toma = Math.max(1, Number(f.outlet) || 1);
+                let fin;
+                if (r && r.side) {
+                    // La toma, a su altura en la regleta: la 1 abajo.
+                    fin = [r.x + r.w / 2, r.y + r.h * Math.min(1, (toma - 0.5) / n), r.z + r.fondo];
+                } else if (r) {
+                    fin = [r.x + r.w * Math.min(1, (toma - 0.5) / n), r.y + r.h / 2, r.z + r.fondo + 0.004];
+                } else {
+                    fin = [e.x + e.w / 2, 0.06, zP];           // una toma fuera del armario: al suelo
+                }
+                // De su entrada de corriente si el modelo la tiene situada —la primera toma del
+                // equipo a su primer cable, la segunda al segundo—; si no, del lado de la regleta.
+                const q = _dcr3dPortAt(e.pa, 'power-ports', '', nf + 1);
+                const sale = q ? _dcr3dPortPoint(e, q) : null;
+                const x = sale ? sale[0]
+                    : fin[0] < e.x ? e.x + 0.02 : fin[0] > e.x + e.w ? e.x + e.w - 0.02 : e.x + e.w / 2;
+                const y = sale ? sale[1] : e.y + e.h * 0.35;
+                tubo([[x, y, sale ? sale[2] : fuera], [x, y, zP], [fin[0], y, zP],
+                      [fin[0], fin[1], zP], fin], color, 0.006);
+                // La clavija, del color de su rama, donde entra en la toma.
+                cajas.push({color: [rama[0], rama[1], rama[2], tenue],
+                            m: ss3dModel(fin[0] - 0.009, fin[1] - 0.009, zP - 0.006, 0.018, 0.018,
+                                         Math.max(0.01, fin[2] - zP + 0.006), 0),
+                            lee: null, cable: true});
+            });
+        }
+    }
+}
+
+/** La escena de un armario, en metros: el armario con su esquina en (0, 0), el delante en
+ *  z = 0 —el lado de `pos_y`, como en la sala— y cada equipo en su sitio.
+ *
+ *  `o`: `por` (qué colorea: `state`, `role`, `org`, `warranty`) y `mal` (solo lo que tiene
+ *  problemas, el resto tenue). */
+function _dcr3dScene(data, o) {
+    o = Object.assign({por: 'state', mal: false}, o || {});
+    const M = 0.001;
+    const rack = data.rack || {};
+    const W = (Number(rack.width_mm) || 600) * M, D = (Number(rack.depth_mm) || 1000) * M;
+    const nU = Number(rack.u_height) || 42;
+    const pie = 0.08, alto = pie + nU * _DCR3_U + 0.05;
+    const cajas = [], planos = [];
+    const push = (color, x, y, z, w, h, d, lee, extra) =>
+        cajas.push(Object.assign({color, m: ss3dModel(x, y, z, w, h, d, 0), lee}, extra || {}));
+    const acero = [0.20, 0.21, 0.24, 1], poste = 0.045;
+    // El armazón: cuatro postes, el zócalo y el techo; los laterales de cristal.
+    for (const [x, z] of [[0, 0], [W - poste, 0], [0, D - poste], [W - poste, D - poste]])
+        push(acero, x, 0, z, poste, alto, poste, null);
+    push(acero, 0, 0, 0, W, 0.05, D, null);
+    push(acero, 0, alto - 0.04, 0, W, 0.04, D, null);
+    push([0.6, 0.66, 1.0, 0.10], 0, 0.05, 0, 0.006, alto - 0.09, D, null);
+    push([0.6, 0.66, 1.0, 0.10], W - 0.006, 0.05, 0, 0.006, alto - 0.09, D, null);
+    // Los raíles: dos pletinas por delante y dos por detrás, donde se atornilla.
+    const x0 = (W - _DCR3_RAILS) / 2;
+    const zf = Math.max(0.03, (Number(rack.rail_front_mm) || 50) * M);
+    const zr = D - Math.max(0.03, (Number(rack.rail_rear_mm) || 50) * M);
+    for (const z of [zf, zr]) for (const x of [x0 - 0.016, x0 + _DCR3_RAILS])
+        push([0.32, 0.33, 0.36, 1], x, pie, z - 0.002, 0.016, nU * _DCR3_U, 0.004, null);
+
+    const uY = (it) => {
+        // La fila más baja que ocupa, contada desde abajo: la numeración del armario puede ir
+        // de arriba abajo (`desc_units`), y entonces la U 1 es la de arriba.
+        const h = Math.max(1, Number(it.u_height) || 1), u0 = Number(it.u_start) || 1;
+        let abajo = Infinity;
+        for (let u = u0; u < u0 + h; u++) abajo = Math.min(abajo, nU - 1 - _dcimUFromTop(rack, u));
+        return pie + Math.max(0, abajo) * _DCR3_U;
+    };
+    const malo = (s) => s === 'error' || s === 'warning';
+    // Un trozo de un hueco, con la misma regla que el alzado: `de` partes, la `cual`-ésima
+    // contando desde 1, `toma` de ancho; a lo alto, la primera es la de arriba. Desde delante
+    // se mira hacia `+z` y la izquierda de quien mira es la `x` mayor: la primera parte va ahí,
+    // como en el alzado. Contada desde 0 y desde la `x` menor, la segunda mitad de un U caía
+    // fuera del armario y la primera donde dibuja el alzado la segunda.
+    const trozo = (r, de, cual, toma, aLoAlto) => {
+        de = Math.max(1, Number(de) || 1);
+        cual = Math.min(de, Math.max(1, Number(cual) || 1));
+        toma = Math.max(1, Math.min(de - cual + 1, Number(toma) || 1));
+        const resto = (de - cual + 1 - toma) / de;
+        return aLoAlto ? {x: r.x, w: r.w, y: r.y + r.h * resto, h: r.h * toma / de}
+                       : {y: r.y, h: r.h, x: r.x + r.w * resto, w: r.w * toma / de};
+    };
+    const colorDe = (it) => {
+        const c = it.foreign ? [0.22, 0.22, 0.25, 1] : _dcr3dColor(it, o.por);
+        return o.mal && !malo(it.state) ? [c[0], c[1], c[2], 0.15] : c;
+    };
+    const leeDe = (it) => it.foreign ? null : {
+        name: it.label || it.type_name || '', kind: t('dcim_role_' + (it.role || '')), uid: it.uid,
+        tipo: 'item', state: it.state || '', device: it.device_uid || '', reason: it.demo_reason || '',
+        u: Number(it.u_height) || 0, u0: Number(it.u_start) || 0, rack: rack.uid};
+    // Una caja atornillada —o montada en otra— con su foto y su franja de estado.
+    // Dónde quedó cada cosa, para que los cables sepan de dónde salen y adónde llegan.
+    const sitio = {};
+    const pinta = (it, r, z, fondo, atras) => {
+        const w = Math.max(0.004, r.w - 0.002), hh = Math.max(0.004, r.h - 0.002);
+        sitio[it.uid] = {x: r.x, y: r.y, w, h: hh, z, fondo, role: it.role, face: it.face,
+                         pa: it.ports_at || null};
+        // El nombre, en la cara que da al pasillo y no sobre la tapa: la tapa queda debajo de
+        // la cara del de arriba, y en perspectiva el rótulo caía sobre el equipo vecino.
+        const lee = leeDe(it);
+        if (lee) lee.at = [r.x + w / 2, r.y + hh / 2, atras ? z + fondo + 0.02 : z - 0.02];
+        push(colorDe(it), r.x, r.y, z, w, hh, fondo, lee, it.foreign ? {borde: true} : null);
+        // La foto del modelo, si el catálogo la tiene, pegada a la cara que se ve: la frontal
+        // delante y la trasera detrás. Lo que va solo detrás enseña su frontal a la puerta de
+        // atrás, y lo que va solo delante no tiene trasera a la vista. Un equipo ajeno no la
+        // trae: la foto dice el modelo.
+        const fotos = it.foreign ? {} : (it.images || {});
+        const tenue = o.mal && !malo(it.state);
+        const cara = (nombre, detras) => {
+            if (!nombre) return;
+            planos.push({data: _dcimMediaUrl(nombre), alpha: tenue ? 0.15 : 1,
+                         m: _dcr3dFace(r.x, r.y, w, hh, detras ? z + fondo + 0.003 : z - 0.003,
+                                       detras)});
+        };
+        if (atras) cara(fotos.front, true);
+        else {
+            cara(fotos.front, false);
+            if (it.face !== 'front') cara(fotos.rear, true);
+        }
+        // Su estado, en la cara que da al pasillo, con el diseño elegido (`_dcr3dMarks`). Nunca
+        // un bloque opaco: el de 6 cm tapaba la foto del modelo, que es lo que se viene a mirar.
+        const mudo = ['patch_panel', 'fiber_panel', 'shelf', 'blank'].includes(it.role);
+        const estilo = o.estado || 'led';
+        // Lo que nadie vigila lleva su piloto apagado, en gris: el diseño se ve igual y dice
+        // la verdad. El tinte no: teñir de gris toda la cara solo apagaría la foto.
+        const visto = _DC3_STATE[it.state];
+        if (o.por === 'state' && !mudo && !it.foreign && (visto || estilo !== 'tint')) {
+            const c = visto || _DCR3_OFF;
+            for (const k of _dcr3dMarks(estilo, r.x, r.y, w, hh,
+                                        atras ? z + fondo : z, atras)) {
+                const a = k[6] * (tenue ? 0.15 : 1);
+                push([c[0], c[1], c[2], a], k[0], k[1], k[2], k[3], k[4], k[5], null);
+            }
+        }
+    };
+    const todos = data.items || [];
+    let lado = 0, junto = 0;
+    for (const it of todos) {
+        if (it.parent_uid) continue;                    // lo montado en otro va con él, abajo
+        const fondo = Math.min(D - 0.08, (Number(it.depth_mm) || 0) * M
+            || (it.face === 'full' ? D - 0.16 : _DCR3_DEPTH[it.role] || _DCR3_DEPTH.other));
+        const placement = String(it.placement || 'u');
+        if (placement === 'side') {
+            // Una regleta vertical de 0U: por detrás, a un lado y al otro.
+            const x = (lado++ % 2) ? W - poste - 0.06 : poste + 0.01;
+            push(colorDe(it), x, pie, D - 0.16, 0.05, nU * _DCR3_U, 0.06, leeDe(it));
+            sitio[it.uid] = {x, y: pie, w: 0.05, h: nU * _DCR3_U, z: D - 0.16, fondo: 0.06,
+                             side: true, role: it.role};
+            continue;
+        }
+        if (placement === 'near') {
+            // Junto al armario, en el suelo: un SAI de pie, un cuadro.
+            const h = Math.max(0.3, (Number(it.u_height) || 0) * _DCR3_U || 0.8);
+            sitio[it.uid] = {x: W + 0.1, y: 0, w: 0.5, h, z: junto * 0.75, fondo: 0.65,
+                             near: true, role: it.role};
+            push(colorDe(it), W + 0.1, 0, (junto++) * 0.75, 0.5, h, 0.65, leeDe(it));
+            continue;
+        }
+        const hueco = {x: x0, y: uY(it), w: _DCR3_RAILS,
+                       h: Math.max(1, Number(it.u_height) || 1) * _DCR3_U};
+        const r = trozo(hueco, it.u_slots, it.u_slot, it.u_slot_span, it.u_split === 'height');
+        const atras = it.face === 'rear';
+        const z = atras ? zr - fondo : zf;
+        const hijos = it.foreign ? [] : todos.filter(k => String(k.parent_uid || '') === String(it.uid))
+            .sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')));
+        if (!hijos.length) { pinta(it, r, z, fondo, atras); continue; }
+        // Una bandeja con cosas encima: la bandeja es la chapa de abajo y lo que lleva se
+        // reparte encima, con el reparto que digan —o lo dicen todos, o a partes iguales—, igual
+        // que en el alzado. Antes no se dibujaban: una bandeja con dos mini PC era una caja
+        // vacía.
+        const chapa = 0.006;
+        push(colorDe(it), r.x, r.y, z, Math.max(0.004, r.w - 0.002), chapa, fondo, leeDe(it));
+        sitio[it.uid] = {x: r.x, y: r.y, w: r.w, h: chapa, z, fondo, role: it.role, face: it.face};
+        const encima = {x: r.x, y: r.y + chapa, w: r.w, h: r.h - chapa};
+        const dicen = hijos.every(k => Number(k.u_slots || 1) > 1);
+        hijos.forEach((k, i) => {
+            const rk = dicen ? trozo(encima, k.u_slots, k.u_slot, k.u_slot_span, k.u_split === 'height')
+                             : trozo(encima, hijos.length, i + 1, 1, false);
+            // Lo montado en una bandeja es pequeño casi siempre —un mini PC, un router de
+            // sobremesa—: sin medida, 30 cm y no el fondo de la bandeja entera.
+            const fk = Math.min(fondo, (Number(k.depth_mm) || 0) * M || 0.3);
+            pinta(Object.assign({}, k, {face: it.face}), rk, atras ? zr - fk : zf, fk, atras);
+        });
+    }
+    _dcr3dWires(cajas, sitio, {x0, W, D, alto, pie, nU, zf}, o);
+    const escena = {cajas, W: W + (junto ? 0.7 : 0), D: Math.max(D, junto * 0.75), H: alto,
+                    X0: -1, Z0: -1, planos,
+                    mira: [W / 2, alto / 2, D / 2], radio: Math.max(alto, W, D) * 1.15,
+                    // De frente y un poco a la derecha, desde algo más arriba que el centro:
+                    // como se mira un armario al abrir su puerta.
+                    theta: -Math.PI / 2 + 0.55, phi: 1.25};
+    _dc3dAddFoco(escena);
+    return escena;
+}
+
+/** El visor del armario, si la vista elegida es la 3D. */
+function _dcr3dHtml() {
+    const r = (_dcimRack || {}).rack || {};
+    // Los nombres van a la ficha y a los rótulos, que los escapan; el del fichero de la captura,
+    // a una cadena de JS escapada por `jsStr`.
+    return _dc3dToolsBar('rack') + ss3dHtml(_DCR3D_BOX, {height: '34rem', hint: t('dcim_r3d_hint'),
+                                                         file: 'rack-' + (r.name || r.uid || '')});
+}
+
+/** Montarlo tras pintar, o soltarlo si ya no se mira (otro armario, otra vista, otra pantalla). */
+function _dcr3dMount() {
+    const visible = !!(_dcimRack && _dcimRack.rack && typeof _dcRackViewNow === 'function'
+                       && _dcRackViewNow() === '3d' && document.getElementById(_DCR3D_BOX));
+    if (!visible) { if (ss3dGet(_DCR3D_BOX)) ss3dStop(_DCR3D_BOX); return; }
+    const V = ss3dMount(_DCR3D_BOX, {
+        scene: () => _dcr3dScene(_dcimRack, {por: _dc3dLook.byRack, mal: _dc3dLook.bad,
+                                             estado: _dc3dLook.stateRack,
+                                             redes: _dc3dLook.wiresNet, energia: _dc3dLook.wiresPower,
+                                             cables: _dcCables, power: _dcPower}),
+        key: 'rack:' + _dcimRack.rack.uid,
+        onPick: _dc3dPickThing,
+        onHover: _dc3dHoverThing,
+        onRest: _dc3dRest,
+        cam: _dc3dCamTake(),
+    });
+    // Los cables y las tomas llegan después del armario, cada uno en su petición. El visor ya
+    // montado no rehace la escena por volver a montarse, así que se le dice cuando llegan: sin
+    // esto los cables solo salían tras tocar algo de la barra.
+    const firma = [_dcCables && !_dcCables.loading, _dcPower && !_dcPower.loading].join();
+    if (V && V.gl && V._dcr3dFirma !== undefined && V._dcr3dFirma !== firma) ss3dRebuild(_DCR3D_BOX);
+    if (V) V._dcr3dFirma = firma;
+}

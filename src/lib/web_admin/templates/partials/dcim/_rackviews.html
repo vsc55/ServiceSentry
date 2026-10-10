@@ -21,7 +21,7 @@
 //: Which view, remembered in this browser: how this person likes to look at a rack. The three
 //: that can be chosen; «compacta» is not one of them (see `_dcRackNarrow`).
 const _DC_RACKVIEW_KEY = 'ss_dcim_rack_view';
-const _DC_RACKVIEWS = ['rack', 'byu', 'board'];
+const _DC_RACKVIEWS = ['rack', 'byu', 'board', '3d'];
 let _dcRackView = (() => {
     try {
         const v = localStorage.getItem(_DC_RACKVIEW_KEY);
@@ -92,6 +92,7 @@ function _dcRackViewPicker() {
         ['rack', 'bi-layout-split', t('dcim_rv_rack'), t('dcim_rv_rack_tt')],
         ['byu', 'bi-table', t('dcim_rv_byu'), t('dcim_rv_byu_tt')],
         ['board', 'bi-speedometer2', t('dcim_rv_board'), t('dcim_rv_board_tt')],
+        ['3d', 'bi-badge-3d', t('dcim_rv_3d'), t('dcim_rv_3d_tt')],
     ];
     return `<div class="btn-group btn-group-sm" role="group" aria-label="${escAttr(t('dcim_rack_views'))}">
         ${vistas.map(([k, icono, nombre, ayuda]) => `<button type="button"

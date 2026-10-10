@@ -93,8 +93,8 @@ class OrgsStore:
     def taken(self, col: str, value: str, skip: str = '') -> str:
         """The uid of the company already using this *value* in *col*, or ``''``.
 
-        Compared **stripped and case-folded**, because two companies called "Amixalan" and
-        "amixalan " are two rows and one company: the second one gets created by whoever types
+        Compared **stripped and case-folded**, because two companies called "Avellana" and
+        "avellana " are two rows and one company: the second one gets created by whoever types
         it a second time without looking, and from then on half the racks are filed under a name
         that does not appear in the dropdown they are looking at.
 

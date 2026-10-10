@@ -156,8 +156,8 @@ insertar, el store poda las filas más antiguas por encima del tope:
 
 - **`history`** y **`syslog`** (mensajes) **no** llevan un tope fijo de filas: crecen según la
   retención configurada. Revisar la retención en [ref-configuracion.md](ref-configuracion.md).
-- **`MAX_CONTENT_LENGTH = 8 MiB`** limita el tamaño de request entrante
-  ([app.py:472](../src/lib/web_admin/app.py#L472)).
+- **`MAX_CONTENT_LENGTH = 80 MiB`** limita el tamaño de request entrante
+  ([app.py:517](../src/lib/web_admin/app.py#L517)).
 
 ---
 

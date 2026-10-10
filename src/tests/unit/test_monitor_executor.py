@@ -240,13 +240,13 @@ class TestSayingWhereItIs:
                        {'step': step, 'n': n, 'total': total})
 
             def check_module(self, name, only_device=''):
-                self.report_progress(name, 'erebor — Synology disks',
+                self.report_progress(name, 'atlas — Synology disks',
                                      step='Leyendo las métricas', n=3, total=24)
                 return super().check_module(name, only_device)
 
         run_checks(_Chatty({'snmp': 0}), ['snmp'], timeout=5,
                    progress_cb=lambda s, m, d='', x=None: seen.append((s, m, d, x)))
-        assert ('running', 'snmp', 'erebor — Synology disks',
+        assert ('running', 'snmp', 'atlas — Synology disks',
                 {'step': 'Leyendo las métricas', 'n': 3, 'total': 24}) in seen
 
     def test_the_phase_a_module_names_reaches_the_watcher_untouched(self):

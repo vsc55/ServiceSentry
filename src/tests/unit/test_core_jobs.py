@@ -253,12 +253,12 @@ class TestOpeningARunningJob:
         assert jobs_svc.normalise('x', {'steps': ['', '   ', {'text': ''}]})['steps'] == []
 
     def test_a_step_keeps_its_columns(self):
-        """Flattened to one sentence it read "erebor · Reading the metrics · 2/24 Disks" —
+        """Flattened to one sentence it read "atlas · Reading the metrics · 2/24 Disks" —
         the same words with the thing that makes forty of them scannable taken away."""
         got = jobs_svc.normalise('x', {'steps': [
-            {'state': 'running', 'text': 'Reading', 'scope': 'erebor',
+            {'state': 'running', 'text': 'Reading', 'scope': 'atlas',
              'n': 2, 'total': 24, 'note': 'Disks'}]})['steps'][0]
-        assert got['scope'] == 'erebor' and got['note'] == 'Disks'
+        assert got['scope'] == 'atlas' and got['note'] == 'Disks'
         assert (got['n'], got['total']) == (2, 24)
 
     def test_a_counter_with_nothing_to_compare_it_to_is_not_a_counter(self):
@@ -283,7 +283,7 @@ class TestOpeningARunningJob:
         infra_jobs._JOBS['j'] = {
             'id': 'j', 'device_name': 'SW', 'done': False, 'error': '', '_started': 1.0,
             'modules': [{'module': 'snmp', 'label': 'SNMP', 'state': 'running', 'detail': '',
-                         'steps': [{'key': 'Reading', 'scope': 'erebor', 'state': 'run',
+                         'steps': [{'key': 'Reading', 'scope': 'atlas', 'state': 'run',
                                     'n': 2, 'total': 24, 'note': 'Disks'}]}]}
         try:
             steps = jobs_svc.live(None)[0]['steps']
@@ -291,7 +291,7 @@ class TestOpeningARunningJob:
             infra_jobs._JOBS.clear()
             infra_jobs._JOBS.update(real)
         assert steps[0]['text'] == 'SNMP' and not steps[0].get('sub')
-        assert steps[1] == {'state': 'running', 'text': 'Reading', 'scope': 'erebor',
+        assert steps[1] == {'state': 'running', 'text': 'Reading', 'scope': 'atlas',
                             'note': 'Disks', 'n': 2, 'total': 24, 'sub': True}, (
             'a step lost a column between the package and the screen')
 
@@ -304,7 +304,7 @@ class TestWhoWasRunningIt:
     def test_the_owner_is_a_name_somebody_can_look_up(self):
         assert jobs_record._identity('').count(':') >= 1, (
             'the owner stopped being host:pid:role')
-        assert jobs_record._identity('erebor:9:web') == 'erebor:9:web', (
+        assert jobs_record._identity('atlas:9:web') == 'atlas:9:web', (
             'a caller that knows who it is was overruled')
 
     def test_it_is_new_on_every_start(self):
@@ -314,14 +314,14 @@ class TestWhoWasRunningIt:
 
     def test_the_row_remembers_it(self):
         st = _hist()
-        uid = st.begin(_job(), owner='erebor:4120:web')
-        assert st.get(uid)['owner'] == 'erebor:4120:web'
+        uid = st.begin(_job(), owner='atlas:4120:web')
+        assert st.get(uid)['owner'] == 'atlas:4120:web'
 
     def test_a_panel_that_is_up_keeps_its_job(self):
         """Two panels sharing a database must not declare each other's work dead: one of them
         starting would close a job the other is running."""
         st = _hist()
-        mine = st.begin(_job(id='mine'), owner='erebor:1:web')
+        mine = st.begin(_job(id='mine'), owner='atlas:1:web')
         theirs = st.begin(_job(id='theirs'), owner='isen:2:web')
         assert st.reap(alive={'isen:2:web'}) == 1
         assert st.get(mine)['state'] == 'interrupted'
@@ -331,7 +331,7 @@ class TestWhoWasRunningIt:
         """The single panel is the normal case, and leaving rows open for ever is how they
         became invisible in the first place."""
         st = _hist()
-        uid = st.begin(_job(), owner='erebor:1:web')
+        uid = st.begin(_job(), owner='atlas:1:web')
         assert st.reap(alive=None) == 1
         assert st.get(uid)['state'] == 'interrupted'
 
@@ -403,7 +403,7 @@ def _hist():
 
 
 def _job(**over):
-    job = {'id': 'j1', 'kind': 'collect', 'source': 'infra', 'label': 'erebor',
+    job = {'id': 'j1', 'kind': 'collect', 'source': 'infra', 'label': 'atlas',
            'state': 'done', 'started': 100.0, 'ended': 160.0, 'done': 24, 'total': 24,
            'error': ''}
     job.update(over)
@@ -419,7 +419,7 @@ class TestWhatEachJobDid:
         st = _hist()
         uid = st.record(_job(), ['leyendo 1/24', 'leyendo 24/24'])
         got = st.get(uid)
-        assert got['label'] == 'erebor' and got['state'] == 'done'
+        assert got['label'] == 'atlas' and got['state'] == 'done'
         assert got['done'] == 24 and got['total'] == 24
         assert got['log'] == ['leyendo 1/24', 'leyendo 24/24']
         assert got['ended_at'] - got['started_at'] == 60.0, 'how long it took is derivable'

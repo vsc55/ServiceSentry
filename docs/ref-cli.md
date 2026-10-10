@@ -2,7 +2,7 @@
 
 `main.py` es a la vez el **lanzador de servicios** (panel web / monitor / syslog / eventos) y una
 **herramienta de administración one-shot** (gestión de usuarios y grupos, estado y recarga de
-servicios). Este documento cubre los **subcomandos de gestión**; los *modos de servicio*
+servicios, sede de demostración). Este documento cubre los **subcomandos de gestión**; los *modos de servicio*
 (`--web` / `--monitor` / `--syslog` / `--events`) están en
 [ref-configuracion.md → Opciones de Línea de Comandos](ref-configuracion.md#opciones-de-línea-de-comandos).
 
@@ -79,6 +79,83 @@ python3 main.py reload
 `reload` no reinicia el proceso: recarga la configuración y deja que cada servicio converja al
 estado deseado. Los cambios que sí requieren reinicio del proceso (puerto, proxy_count, BD de
 syslog) los indica el panel con su banner de reinicio.
+
+## Sede de demostración (`dcim demo`)
+
+| Comando | Descripción |
+|---|---|
+| `dcim demo` | Crea la sede **Demo** con todo lo que admite el inventario físico. Se niega si ya existe. |
+| `dcim demo --replace` | La borra y la vuelve a crear. |
+| `dcim demo --remove` | La borra con todo lo que cuelga de ella: filas, ficheros de plano y las dos empresas de ejemplo, si nada más las usa. |
+| `dcim demo --no-images` | La crea sin bajar las fotos del fabricante de los básicos del catálogo que use (por defecto se bajan si hay internet). |
+
+```bash
+python3 main.py dcim demo
+python3 main.py dcim demo --replace
+python3 main.py dcim demo --remove
+```
+
+La sede tiene:
+
+- **Cinco plantas** (sótano, baja, primera, segunda y tercera), cada una con su plano de fondo en
+  SVG, sus muros, puertas hacia el pasillo y ventanas, y una escalera en el mismo punto de todas,
+  que en 3D forma un único hueco.
+- **Un edificio de verdad**, con 29 salas colocadas:
+  - sótano: energía, grupo electrógeno y sala de baterías;
+  - baja: comunicaciones de operadores, laboratorio, expediciones, recepción y una sala de
+    reuniones grande, y un rack y un cuadro sueltos en la zona general;
+  - primera: el CPD principal, el NOC y el almacén técnico;
+  - segunda: oficina abierta de 24 puestos, cuatro despachos, dos salas de reuniones, sala de
+    formación, office y la sala de comunicaciones de la planta;
+  - tercera: sala de servidores refrigerada por splits de pared, sala HPC con pasillo caliente
+    confinado y climatizadores en fila, comunicaciones de planta, oficina de 18 puestos, sala de
+    reuniones y despacho.
+- **Refrigeración de cada tipo**: pasillo frío confinado con CRAC de sala, pasillo caliente con
+  climatizadores en fila, splits de pared y sin climatización. Los modelos dicen su flujo de aire
+  (servidores de delante a detrás, switches de detrás a delante).
+- **Equipos en aviso y en error**: la mayoría de los equipos activos de los CPD y de las salas de
+  comunicaciones salen en verde, unos cuantos en aviso y otros en error; el laboratorio y la sede
+  de respaldo quedan sin vigilar. Es un estado de demostración (`dc_item.demo_state`): la demo no
+  crea dispositivos ni comprobaciones, así que el monitor no vigila nada y no puede llegar ninguna
+  alerta de máquinas que no existen. Cada uno lo dice en su descripción.
+- **Seguridad en el mapa**: todo lo que va en pared —los IQ, extintores, cuadros, BIE, pulsadores,
+  alumbrado de emergencia, botiquín y DEA— está pegado a su pared y mirando a la sala. Cada sala
+  tiene detectores de humo en el techo, alumbrado de emergencia sobre la puerta y extintor; cada
+  pasillo, alumbrado sobre cada puerta, extintores, pulsadores y BIE; cada planta, su cuadro en la
+  fachada; y recepción, botiquín y desfibrilador.
+- **Control de accesos**, con modelos del catálogo general (los de Salto y un torno genérico de los
+  básicos del panel, que la demo trae si faltan y que se quedan al borrarla): un IQ de Salto por planta, cilindros Neo en las puertas de las salas
+  técnicas y los despachos, cerraduras XS4 Locker en las taquillas de recepción y los armarios de
+  planta, y dos tornos con lector en la entrada. Cada cerradura cuelga del IQ de su planta; casi
+  todas en verde, un cilindro con la pila baja, un torno sin comunicación y una taquilla con aviso
+  de manipulación.
+- **Comunicaciones de planta**: cada una con su rack, paneles de puestos cableados puerto a puerto a
+  sus switches de acceso, SAI junto al rack y fibra a los dos núcleos.
+- **Un CPD** con dos filas enfrentadas sobre un pasillo frío confinado, una fila de red con los
+  dos núcleos, CRAC, bandejas, pilares y una zona de reserva. Hay racks medio vacíos y uno vacío,
+  para que la vista «Ocupación» tenga contraste.
+- **Equipos de todas las formas**: atornillados, de medio ancho, montados sobre una bandeja,
+  delante y detrás, regletas en el lateral y un SAI en el suelo junto al rack. Algunos servidores
+  llevan componentes (memoria, discos, fuentes).
+- **Energía completa**: acometida → cuadro general → cuadro CPD → SAI A y SAI B (este en
+  bypass) → regletas A/B de cada rack → tomas. Hay dos casos que la vista de energía señala: un
+  servidor con los dos cables en la rama A y un rack de GPU por encima de la carga segura.
+- **Cableado** dentro de los racks, entre racks, entre plantas por fibra, y dos enlaces WAN
+  (MPLS e IPsec) con una segunda sede pequeña, **Demo · Respaldo**, que existe solo para que los
+  enlaces tengan dónde llegar.
+- **Dos empresas**: la operadora de la sede y un cliente que tiene dos racks alquilados.
+- **Modelos propios con foto**: la demo trae sus modelos de catálogo (fabricante «Demo», origen
+  `demo`) con sus puertos —cuántos, de qué tipo y dónde está cada uno— y con el frontal y la
+  trasera en SVG, ficheros del repositorio en `lib/core/dcim/data/demo/faces/`, así que el alzado y el rack en 3D enseñan bahías
+  de discos, puertos y fuentes en vez de cajas lisas. Se borran con la demo, salvo los que use
+  algún equipo propio.
+
+Se crea en el idioma de la instalación: los textos están en `lib/core/dcim/data/demo/<idioma>.json`
+(castellano e inglés), y solo «Demo» se llama igual en todos. Solo toca las dos sedes que crea,
+buscándolas por su nombre en cualquiera de los idiomas. Se escribe directamente en el
+almacén, sin pasar por el panel, y cada equipo atornillado se comprueba antes con la misma regla
+de hueco que aplica la API. Los equipos no están vinculados a ningún dispositivo vigilado, así
+que su estado sale gris.
 
 ---
 

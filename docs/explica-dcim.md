@@ -564,7 +564,7 @@ de la información que habrá cuando toque.
       las MIB, configurable como la de las copias (`web_admin|dcim_media_dir`, vacío =
       `<var_dir>/dcim_media`), el tipo decidido por **el contenido** y no por la extensión, el
       nombre acuñado por el panel —lo que traía el fichero no llega nunca a un disco—, tope de
-      2 MB cortado antes de leer, y **su parte en la copia**: el registro solo guarda el
+      16 MB cortado antes de leer (eran 2, y una foto de móvil pesa de 3 a 8), y **su parte en la copia**: el registro solo guarda el
       nombre, así que una copia sin los ficheros restaura salas cuyos planos se han perdido.
       Se escala con un solo número —los milímetros que abarca de ancho— y el alto sale de la
       propia imagen: dos números podrían contradecirse y estirar el dibujo, que es mentir

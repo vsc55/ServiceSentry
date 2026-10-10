@@ -1,0 +1,559 @@
+{# ================================================================
+   The 3D viewer, continued — drawing only when something changed, all the solid boxes in a
+   handful of draw calls, flying the camera, pointing at a box, and two fingers.
+
+   Apart from `_viewer3d.html` because that file is the viewer's grammar — the matrices, the
+   cube, the camera, the input — and this is what was added once a whole building was being
+   drawn on it: a building is thousands of boxes, sixty times a second, for a screen that is
+   usually standing still.
+   ================================================================ #}
+
+// ── Drawing only when something changed ──────────────────────────────────────
+//
+// The viewer drew sixty frames a second whether anybody touched it or not: a pane left open on
+// a floor kept a graphics card and a laptop's battery busy drawing the same picture. Now each
+// frame compares what the picture depends on — the camera, the canvas size, the scene's version,
+// whether the names show — with the last one drawn, and after a third of a second of nothing
+// changing the loop stops altogether. Anything that changes the picture wakes it.
+
+/** Start the loop if it is stopped. Cheap: called on every input and every rebuild. */
+function _ss3dWake(V) {
+    if (!V || !V.gl) return;
+    V.idle = 0;
+    if (!V.raf) V.raf = requestAnimationFrame(() => _ss3dLoop(V));
+}
+
+/** Wake every viewer on the page: the window changed size, full screen came or went. */
+function _ss3dWakeAll() {
+    for (const V of _SS3D.values()) { V.labelsKey = ''; _ss3dWake(V); }
+}
+window.addEventListener('resize', _ss3dWakeAll);
+document.addEventListener('fullscreenchange', _ss3dWakeAll);
+
+/** What the picture depends on, as one string. */
+function _ss3dFirma(V) {
+    const c = V.cam || {};
+    return [(c.mira || []).join(','), c.radio, c.theta, c.phi, !!c.orto, V.cv.clientWidth, V.cv.clientHeight,
+            (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), V.ver || 0,
+            ss3dShowLabels].join('|');
+}
+
+function _ss3dLoop(V) {
+    V.raf = 0;
+    if (!V.gl) return;
+    _ss3dAnimate(V);
+    const firma = _ss3dFirma(V);
+    if (firma !== V.firma) {
+        V.firma = firma;
+        V.idle = 0;
+        ss3dDraw(V);
+    } else {
+        V.idle = (V.idle || 0) + 1;
+        // The picture has settled: whoever mounted the viewer may want to know where the camera
+        // came to rest — to keep it in the address, so a reload opens the same view.
+        if (V.idle === 20 && typeof (V.opts || {}).onRest === 'function') {
+            try { V.opts.onRest(V); } catch (_) { /* a listener's fault is not the viewer's */ }
+        }
+    }
+    // A few more frames after the last change, then nothing until something wakes it.
+    if (V.anim || V.idle < 20) V.raf = requestAnimationFrame(() => _ss3dLoop(V));
+}
+
+/** Something in the scene changed that the camera does not show: draw again. */
+function _ss3dTouched(V) {
+    V.ver = (V.ver || 0) + 1;
+    _ss3dWake(V);
+}
+
+// ── All the solid boxes in a few draw calls ──────────────────────────────────
+//
+// One draw call per box was fine for a room — two hundred — and not for a building: three
+// thousand boxes is three thousand calls a frame, each setting its matrix and colour. The solid
+// ones never change while a scene is shown, so they are baked once per scene into big buffers
+// with their corners already in place and their colour on every vertex, and drawn in a handful
+// of calls. Walls and glass stay one by one: they are few, and their opacity follows the camera.
+//
+// And their edges, as lines a shade darker than the box: two racks side by side of the same
+// colour read as one long block, and a dark rack against a dark floor as nothing.
+
+const _SS3D_BVS = `
+attribute vec3 aPos; attribute vec3 aNor; attribute vec3 aCol;
+uniform mat4 uMVP;
+varying vec3 vNor; varying vec3 vCol;
+void main(){
+  vNor = aNor; vCol = aCol;
+  gl_Position = uMVP * vec4(aPos, 1.0);
+}`;
+
+// The same three lights as the one-by-one program, so a batched box and a box drawn alone look
+// the same. `uFlat` draws the edges in their colour, unlit.
+const _SS3D_BFS = `
+precision mediump float;
+uniform float uFlat;
+varying vec3 vNor; varying vec3 vCol;
+void main(){
+  if (uFlat > 0.5) { gl_FragColor = vec4(vCol, 1.0); return; }
+  vec3 n = normalize(vNor);
+  float key = max(dot(n, normalize(vec3(0.45, 0.85, 0.30))), 0.0);
+  float fill = max(dot(n, normalize(vec3(-0.60, 0.35, -0.50))), 0.0);
+  float sky = 0.5 + 0.5 * n.y;
+  float l = 0.32 + 0.22 * sky + 0.55 * key + 0.20 * fill;
+  gl_FragColor = vec4(min(vCol * l, vec3(1.0)), 1.0);
+}`;
+
+//: The twelve edges of the unit cube, as pairs of corners.
+const _SS3D_EDGES = (() => {
+    const c = [];
+    for (let i = 0; i < 8; i++) c.push([i & 1, (i >> 1) & 1, (i >> 2) & 1]);
+    const out = [];
+    for (let a = 0; a < 8; a++)
+        for (let b = a + 1; b < 8; b++) {
+            const d = Math.abs(c[a][0] - c[b][0]) + Math.abs(c[a][1] - c[b][1]) + Math.abs(c[a][2] - c[b][2]);
+            if (d === 1) out.push(c[a], c[b]);
+        }
+    return out;
+})();
+
+//: Boxes per buffer: 24 corners each and 16-bit indices, so under 65 536 corners.
+const _SS3D_PER_BATCH = 2700;
+
+/** A point of the unit cube taken to where the box's matrix puts it. */
+function _ss3dAt(m, x, y, z) {
+    return [m[0] * x + m[4] * y + m[8] * z + m[12],
+            m[1] * x + m[5] * y + m[9] * z + m[13],
+            m[2] * x + m[6] * y + m[10] * z + m[14]];
+}
+
+/** The solid boxes as arrays, ready for buffers: triangles (position, normal, colour, index)
+ *  and edges (position, colour), in batches. Pure — the arithmetic, tested in node. */
+function ss3dBatchArrays(cajas) {
+    const out = {tris: [], lines: []};
+    for (let i = 0; i < cajas.length; i += _SS3D_PER_BATCH) {
+        const parte = cajas.slice(i, i + _SS3D_PER_BATCH);
+        const n = parte.length;
+        const pos = new Float32Array(n * 72), nor = new Float32Array(n * 72), col = new Float32Array(n * 72);
+        const idx = new Uint16Array(n * 36);
+        parte.forEach((k, b) => {
+            const m = k.m;
+            for (let v = 0; v < 24; v++) {
+                const p = _ss3dAt(m, _SS3D_CUBE.pos[v * 3], _SS3D_CUBE.pos[v * 3 + 1], _SS3D_CUBE.pos[v * 3 + 2]);
+                const nx = _SS3D_CUBE.nor[v * 3], ny = _SS3D_CUBE.nor[v * 3 + 1], nz = _SS3D_CUBE.nor[v * 3 + 2];
+                const q = ss3dNorm([m[0] * nx + m[4] * ny + m[8] * nz, m[1] * nx + m[5] * ny + m[9] * nz,
+                                    m[2] * nx + m[6] * ny + m[10] * nz]);
+                const o = (b * 24 + v) * 3;
+                pos.set(p, o); nor.set(q, o); col.set(k.color.slice(0, 3), o);
+            }
+            for (let j = 0; j < 36; j++) idx[b * 36 + j] = b * 24 + _SS3D_CUBE.idx[j];
+        });
+        out.tris.push({pos, nor, col, idx, count: n * 36});
+        const conBorde = parte.filter(k => k.lee || k.borde);
+        if (conBorde.length) {
+            const lp = new Float32Array(conBorde.length * 72), lc = new Float32Array(conBorde.length * 72);
+            const ln = new Float32Array(conBorde.length * 72);
+            conBorde.forEach((k, b) => {
+                const oscuro = k.color.slice(0, 3).map(v => v * 0.45);
+                _SS3D_EDGES.forEach((e, j) => {
+                    const o = (b * 24 + j) * 3;
+                    lp.set(_ss3dAt(k.m, e[0], e[1], e[2]), o);
+                    lc.set(oscuro, o);
+                    ln.set([0, 1, 0], o);
+                });
+            });
+            out.lines.push({pos: lp, nor: ln, col: lc, count: conBorde.length * 24});
+        }
+    }
+    return out;
+}
+
+function _ss3dBatchProgram(gl) {
+    const p = _ss3dCompile(gl, _SS3D_BVS, _SS3D_BFS);
+    if (!p) return null;
+    return {prog: p, loc: {pos: gl.getAttribLocation(p, 'aPos'), nor: gl.getAttribLocation(p, 'aNor'),
+                           col: gl.getAttribLocation(p, 'aCol'), mvp: gl.getUniformLocation(p, 'uMVP'),
+                           flat: gl.getUniformLocation(p, 'uFlat')}};
+}
+
+/** Bake the scene's solid boxes into buffers, letting go of the last scene's. */
+function _ss3dBatchBuild(V) {
+    const gl = V.gl;
+    if (!gl) return;
+    if (!V.bprog) V.bprog = _ss3dBatchProgram(gl);
+    for (const b of (V.batch ? V.batch.tris.concat(V.batch.lines) : []))
+        for (const k of ['pos', 'nor', 'col', 'idx']) if (b[k]) gl.deleteBuffer(b[k]);
+    V.batch = null;
+    if (!V.bprog) return;
+    const a = ss3dBatchArrays(V.escena.opacos || []);
+    const subir = (x, tipo) => _ss3dBuffer(gl, tipo, x);
+    V.batch = {
+        tris: a.tris.map(t => ({pos: subir(t.pos, gl.ARRAY_BUFFER), nor: subir(t.nor, gl.ARRAY_BUFFER),
+                                col: subir(t.col, gl.ARRAY_BUFFER), idx: subir(t.idx, gl.ELEMENT_ARRAY_BUFFER),
+                                count: t.count})),
+        lines: a.lines.map(l => ({pos: subir(l.pos, gl.ARRAY_BUFFER), nor: subir(l.nor, gl.ARRAY_BUFFER),
+                                  col: subir(l.col, gl.ARRAY_BUFFER), count: l.count})),
+    };
+}
+
+/** Draw the baked boxes and their edges. `false` when there is nothing baked (no program): the
+ *  caller then draws them one by one, as before. */
+function _ss3dBatchDraw(V, vp) {
+    const gl = V.gl, B = V.bprog;
+    if (!B || !V.batch) return false;
+    gl.useProgram(B.prog);
+    gl.uniformMatrix4fv(B.loc.mvp, false, vp);
+    const atar = (b) => {
+        gl.bindBuffer(gl.ARRAY_BUFFER, b.pos);
+        gl.enableVertexAttribArray(B.loc.pos);
+        gl.vertexAttribPointer(B.loc.pos, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, b.nor);
+        gl.enableVertexAttribArray(B.loc.nor);
+        gl.vertexAttribPointer(B.loc.nor, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, b.col);
+        gl.enableVertexAttribArray(B.loc.col);
+        gl.vertexAttribPointer(B.loc.col, 3, gl.FLOAT, false, 0, 0);
+    };
+    gl.depthMask(true);
+    // The faces pushed back a hair, so the edges drawn on them win the depth test.
+    gl.enable(gl.POLYGON_OFFSET_FILL);
+    gl.polygonOffset(1, 1);
+    gl.uniform1f(B.loc.flat, 0);
+    for (const t of V.batch.tris) {
+        atar(t);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, t.idx);
+        gl.drawElements(gl.TRIANGLES, t.count, gl.UNSIGNED_SHORT, 0);
+    }
+    gl.disable(gl.POLYGON_OFFSET_FILL);
+    gl.uniform1f(B.loc.flat, 1);
+    for (const l of V.batch.lines) {
+        atar(l);
+        gl.drawArrays(gl.LINES, 0, l.count);
+    }
+    // The colour attribute off again: left on, pointing at this buffer, the next program's draw
+    // would read past its end.
+    if (B.loc.col >= 0) gl.disableVertexAttribArray(B.loc.col);
+    return true;
+}
+
+// ── Flying the camera ────────────────────────────────────────────────────────
+
+/** Move the camera to `dest` (any of `mira`, `radio`, `theta`, `phi`) over `ms` milliseconds,
+ *  easing out. A jump loses where you were; a short flight keeps it. */
+function ss3dFlyTo(V, dest, ms) {
+    if (!V || !V.cam) return;
+    const c = V.cam;
+    const desde = {mira: c.mira.slice(), radio: c.radio, theta: c.theta, phi: c.phi};
+    const hasta = Object.assign({}, desde, dest || {});
+    if (dest && dest.mira) hasta.mira = dest.mira.slice();
+    // The short way round: from 350° to 10° is 20°, not 340°.
+    const vuelta = 2 * Math.PI;
+    hasta.theta = desde.theta + ((((hasta.theta - desde.theta) % vuelta) + 3 * Math.PI) % vuelta - Math.PI);
+    V.anim = {desde, hasta, t0: _ss3dNow(), ms: ms === undefined ? 600 : ms};
+    _ss3dWake(V);
+}
+
+function _ss3dNow() {
+    return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+}
+
+/** One step of the flight, if there is one. */
+function _ss3dAnimate(V) {
+    const a = V.anim;
+    if (!a) return;
+    const k = a.ms > 0 ? Math.min(1, (_ss3dNow() - a.t0) / a.ms) : 1;
+    const e = 1 - Math.pow(1 - k, 3);
+    const mezcla = (x, y) => x + (y - x) * e;
+    V.cam.mira = a.desde.mira.map((v, i) => mezcla(v, a.hasta.mira[i]));
+    V.cam.radio = mezcla(a.desde.radio, a.hasta.radio);
+    V.cam.theta = mezcla(a.desde.theta, a.hasta.theta);
+    V.cam.phi = mezcla(a.desde.phi, a.hasta.phi);
+    if (k >= 1) V.anim = null;
+}
+
+//: The isometric elevation: the camera 35.26° above the horizontal, where the three edges of a
+//: box come out at the same scale — measured from the vertical, as `phi` is.
+const _SS3D_ISO_PHI = Math.PI / 2 - Math.atan(1 / Math.SQRT2);
+
+/** The quick views: the whole scene as it opens (`fit`), straight down like the plan (`top`),
+ *  and a true isometric (`iso`).
+ *
+ *  The isometric was a perspective view 15° round from `fit` — the two could hardly be told
+ *  apart, and neither was what the name promised. Now it is the drawing-board one: no
+ *  perspective, 45° round and 35.26° up, so a rack at the back measures what one at the front
+ *  does. It stays isometric while it is turned and zoomed; the other two views go back to
+ *  perspective. Asked from the screen. */
+function ss3dPreset(id, cual) {
+    const V = _SS3D.get(id);
+    if (!V || !V.escena) return;
+    const casa = ss3dCamHome(V.escena);
+    V.cam.orto = cual === 'iso';
+    if (cual === 'top') ss3dFlyTo(V, {mira: casa.mira, radio: casa.radio * 1.15, phi: 0.08, theta: Math.PI / 2});
+    else if (cual === 'iso') ss3dFlyTo(V, {mira: casa.mira, radio: casa.radio, phi: _SS3D_ISO_PHI,
+                                           theta: Math.PI / 4});
+    else ss3dFlyTo(V, casa);
+}
+
+/** Fly to a box: centred on it, as close as its size asks. */
+function ss3dFlyToBox(V, k) {
+    const m = k.m;
+    const centro = _ss3dAt(m, 0.5, 0.5, 0.5);
+    const lado = Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]),
+                          Math.hypot(m[8], m[9], m[10]));
+    ss3dFlyTo(V, {mira: centro, radio: Math.max(2.5, lado * 2.6)});
+}
+
+// ── Pointing at a box ────────────────────────────────────────────────────────
+
+/** The inverse of a box's matrix (an affine one: a 3×3 part and a translation). */
+function _ss3dInvert(m) {
+    const a = m[0], b = m[4], c = m[8], d = m[1], e = m[5], f = m[9], g = m[2], h = m[6], i = m[10];
+    const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+    const det = a * A + b * B + c * C;
+    if (Math.abs(det) < 1e-12) return null;
+    const r = 1 / det;
+    const inv = [A * r, -(b * i - c * h) * r, (b * f - c * e) * r,
+                 B * r, (a * i - c * g) * r, -(a * f - c * d) * r,
+                 C * r, -(a * h - b * g) * r, (a * e - b * d) * r];
+    const tx = m[12], ty = m[13], tz = m[14];
+    return {m: inv, t: [-(inv[0] * tx + inv[1] * ty + inv[2] * tz),
+                        -(inv[3] * tx + inv[4] * ty + inv[5] * tz),
+                        -(inv[6] * tx + inv[7] * ty + inv[8] * tz)]};
+}
+
+/** The nearest box with something to say (`lee`) that a ray goes through, or `null`:
+ *  `{caja, t}`. The ray is taken into each box's own space, where the box is the unit cube. */
+function ss3dPickBox(V, rayo, filtro) {
+    const quiere = filtro || (k => k.lee && k.color[3] >= 0.5);
+    let mejor = null;
+    for (const k of (V.escena || {}).cajas || []) {
+        if (!quiere(k)) continue;
+        const inv = _ss3dInvert(k.m);
+        if (!inv) continue;
+        const M = inv.m, o = rayo.o, d = rayo.d;
+        const lo = [M[0] * o[0] + M[1] * o[1] + M[2] * o[2] + inv.t[0],
+                    M[3] * o[0] + M[4] * o[1] + M[5] * o[2] + inv.t[1],
+                    M[6] * o[0] + M[7] * o[1] + M[8] * o[2] + inv.t[2]];
+        const ld = [M[0] * d[0] + M[1] * d[1] + M[2] * d[2],
+                    M[3] * d[0] + M[4] * d[1] + M[5] * d[2],
+                    M[6] * d[0] + M[7] * d[1] + M[8] * d[2]];
+        let t0 = 0, t1 = Infinity;
+        for (let ax = 0; ax < 3 && t0 <= t1; ax++) {
+            if (Math.abs(ld[ax]) < 1e-12) {
+                if (lo[ax] < 0 || lo[ax] > 1) t0 = Infinity;
+                continue;
+            }
+            let a = (0 - lo[ax]) / ld[ax], b = (1 - lo[ax]) / ld[ax];
+            if (a > b) [a, b] = [b, a];
+            t0 = Math.max(t0, a);
+            t1 = Math.min(t1, b);
+        }
+        if (t0 <= t1 && t0 < Infinity && (!mejor || t0 < mejor.t)) mejor = {caja: k, t: t0};
+    }
+    return mejor;
+}
+
+// ── A card over the viewer ───────────────────────────────────────────────────
+
+/** Show what was pointed at in a card in the viewer's corner; `''` hides it. */
+function ss3dCard(id, html) {
+    const el = _ss3dPart(id, 'card');
+    if (!el) return;
+    el.innerHTML = html ? `<button type="button" class="btn-close btn-close-white float-end ms-2"
+        onclick="ss3dCard(${jsStr(id)}, '')" aria-label="${escAttr(t('close'))}"></button>${html}` : '';
+    el.classList.toggle('d-none', !html);
+}
+
+// ── Two fingers ──────────────────────────────────────────────────────────────
+//
+// On a phone the viewer could only turn: one finger orbited, and a pinch — what every map
+// app has taught — did nothing. Now two fingers pinch to zoom and move together to pan.
+
+/** A finger down; `true` when it makes two (the pinch takes over from the drag). */
+function _ss3dTouchDown(V, ev) {
+    if (!V.ptrs) V.ptrs = new Map();
+    V.ptrs.set(ev.pointerId, {x: ev.clientX, y: ev.clientY});
+    if (V.ptrs.size !== 2) return false;
+    const [a, b] = Array.from(V.ptrs.values());
+    V.pinch = {d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2,
+               radio: V.cam.radio};
+    V.arrastre = null;
+    V.pulsado = null;
+    return true;
+}
+
+/** A finger moved; `true` when it was part of a pinch. */
+function _ss3dTouchMove(V, ev) {
+    if (!V.ptrs || !V.ptrs.has(ev.pointerId)) return false;
+    V.ptrs.set(ev.pointerId, {x: ev.clientX, y: ev.clientY});
+    if (!V.pinch || V.ptrs.size < 2) return false;
+    const [a, b] = Array.from(V.ptrs.values());
+    const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    const c = V.cam;
+    c.radio = Math.max(0.5, Math.min(Math.max(90, (V.escena || {}).Rmax || 0), V.pinch.radio * V.pinch.d / d));
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const k = Math.max(c.radio, 1.5) * 0.0016, e = ss3dAxes(c);
+    const dx = mx - V.pinch.mx, dy = my - V.pinch.my;
+    ss3dShift(V, c, (e.right[0] * -dx + e.fwd[0] * dy) * k, 0, (e.right[2] * -dx + e.fwd[2] * dy) * k);
+    V.pinch.mx = mx;
+    V.pinch.my = my;
+    return true;
+}
+
+function _ss3dTouchUp(V, ev) {
+    if (!V.ptrs) return;
+    V.ptrs.delete(ev.pointerId);
+    if (V.ptrs.size < 2) V.pinch = null;
+}
+
+// ── Names that do not pile up ────────────────────────────────────────────────
+
+/** Which name tags to show, given where each falls on screen: `[{i, x, y, dist, area}]` →
+ *  the set of `i` to show. Area names first, then the nearest; a tag that would overlap one
+ *  already placed is left out, and so is a thing's name farther than the camera is from what
+ *  it looks at, times three. Pure — tested in node. */
+function ss3dLabelsChoose(cands, radio, size) {
+    const lejos = Math.max(25, (radio || 10) * 3);
+    const orden = cands.slice().sort((a, b) => (b.area - a.area) || (a.dist - b.dist));
+    const puestos = [], mostrar = new Set();
+    for (const c of orden) {
+        if (!c.area && c.dist > lejos) continue;
+        const [w, h] = size(c.i);
+        const r = {x0: c.x - w / 2, x1: c.x + w / 2, y0: c.y - h, y1: c.y};
+        if (puestos.some(p => r.x0 < p.x1 && r.x1 > p.x0 && r.y0 < p.y1 && r.y1 > p.y0)) continue;
+        puestos.push(r);
+        mostrar.add(c.i);
+    }
+    return mostrar;
+}
+
+// ── Segments: a box from one point to another ────────────────────────────────
+
+/** The matrix of a square bar of side `t` from `p` to `q`: what a cable run, a power line or a
+ *  measurement is drawn with. Any direction — the boxes of a room only ever turn about Y. */
+function ss3dTube(p, q, t) {
+    const u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+    const largo = Math.hypot(u[0], u[1], u[2]) || 1e-6;
+    const n = ss3dNorm(u);
+    const ref = Math.abs(n[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const a = ss3dNorm(ss3dCross(n, ref)), b = ss3dNorm(ss3dCross(n, a));
+    const o = [p[0] - (a[0] + b[0]) * t / 2, p[1] - (a[1] + b[1]) * t / 2, p[2] - (a[2] + b[2]) * t / 2];
+    return new Float32Array([n[0] * largo, n[1] * largo, n[2] * largo, 0,
+                             a[0] * t, a[1] * t, a[2] * t, 0,
+                             b[0] * t, b[1] * t, b[2] * t, 0,
+                             o[0], o[1], o[2], 1]);
+}
+
+/** A box's matrix grown by `k` about its own centre: the halo drawn round what was found. */
+function ss3dGrow(m, k) {
+    const c = _ss3dAt(m, 0.5, 0.5, 0.5);
+    const out = new Float32Array(m);
+    for (const i of [0, 1, 2, 4, 5, 6, 8, 9, 10]) out[i] = m[i] * k;
+    const o = _ss3dAt(out, 0.5, 0.5, 0.5);
+    out[12] += c[0] - o[0]; out[13] += c[1] - o[1]; out[14] += c[2] - o[2];
+    return out;
+}
+
+// ── Measuring ────────────────────────────────────────────────────────────────
+//
+// Two clicks and the distance between them: whether a rack fits between two others, how long a
+// cable run is. A click lands on whatever solid is under the pointer — a rack's top, a floor —
+// and failing that on the ground.
+
+function ss3dMeasureToggle(id) {
+    const V = _SS3D.get(id);
+    if (!V) return;
+    V.medir = V.medir ? null : {pts: []};
+    V.extras = [];
+    const b = _ss3dPart(id, 'measure');
+    if (b) b.className = `btn ${V.medir ? 'btn-warning' : 'btn-secondary'}`;
+    ss3dSay(id, V.medir ? t('view3d_measure_hint') : (V.opts.hint || t('view3d_hint')));
+    _ss3dTouched(V);
+}
+
+/** Where a ray lands: on the nearest solid box, else on the ground plane. */
+function ss3dLand(V, rayo) {
+    const hit = ss3dPickBox(V, rayo, k => k.color[3] >= 0.5 && !k.muro);
+    if (hit) return [0, 1, 2].map(i => rayo.o[i] + rayo.d[i] * hit.t);
+    const y = (V.escena && V.escena.Y0 > 0 ? V.escena.Y0 : 0);
+    if (Math.abs(rayo.d[1]) < 1e-6) return null;
+    const t0 = (y - rayo.o[1]) / rayo.d[1];
+    return t0 > 0 ? [0, 1, 2].map(i => rayo.o[i] + rayo.d[i] * t0) : null;
+}
+
+/** One click of the measuring tool: the first point, the second (and the distance), or a new
+ *  first. Returns the distance in metres once there are two. */
+function _ss3dMeasureClick(V, rayo) {
+    const p = ss3dLand(V, rayo);
+    if (!p) return null;
+    const m = V.medir;
+    if (m.pts.length >= 2) m.pts = [];
+    m.pts.push(p);
+    const amarillo = [0.98, 0.78, 0.1, 1];
+    V.extras = m.pts.map(q => ({color: amarillo, m: ss3dModel(q[0] - 0.05, q[1], q[2] - 0.05, 0.1, 0.1, 0.1, 0)}));
+    let d = null;
+    if (m.pts.length === 2) {
+        const [a, b] = m.pts;
+        d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        V.extras.push({color: amarillo, m: ss3dTube(a, b, 0.03)});
+        ss3dSay(V.id, tf('view3d_measure_is', d.toFixed(2)));
+    } else {
+        ss3dSay(V.id, t('view3d_measure_second'));
+    }
+    _ss3dTouched(V);
+    return d;
+}
+
+// ── On foot ──────────────────────────────────────────────────────────────────
+
+/** Stand in the scene at eye height, looking level: dragging looks round, W A S D and the wheel
+ *  walk. The orbit camera with almost no radius is exactly a head turning. */
+function ss3dWalk(id) {
+    const V = _SS3D.get(id);
+    if (!V || !V.escena) return;
+    const casa = ss3dCamHome(V.escena);
+    V.cam.orto = false;
+    ss3dFlyTo(V, {mira: [casa.mira[0], casa.mira[1] + 0.7, casa.mira[2]], radio: 0.02,
+                  phi: Math.PI / 2 - 0.05});
+}
+
+// ── A picture of it ──────────────────────────────────────────────────────────
+
+/** The view as a PNG, names included: the 3D drawn once more and read back at once (the
+ *  drawing buffer is not kept between frames), and the name tags — HTML over the canvas — drawn
+ *  onto a copy where they stand. */
+function ss3dSnapshot(id, nombre) {
+    const V = _SS3D.get(id);
+    if (!V || !V.gl) return;
+    ss3dDraw(V);
+    const cv = V.cv;
+    const out = document.createElement('canvas');
+    out.width = cv.width;
+    out.height = cv.height;
+    const g = out.getContext('2d');
+    g.drawImage(cv, 0, 0);
+    const k = cv.width / (cv.clientWidth || cv.width);
+    g.font = `${Math.round(12 * k)}px sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'bottom';
+    for (const el of V.labelEls || []) {
+        if (!ss3dShowLabels || el.style.display === 'none') continue;
+        const m = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(el.style.transform || '');
+        if (!m) continue;
+        const x = Number(m[1]) * k, y = Number(m[2]) * k, w = g.measureText(el.textContent).width + 8 * k;
+        g.fillStyle = 'rgba(0,0,0,.6)';
+        g.fillRect(x - w / 2, y - 16 * k, w, 16 * k);
+        g.fillStyle = '#fff';
+        g.fillText(el.textContent, x, y - 2 * k);
+    }
+    out.toBlob(blob => { if (blob) ssDownloadBlob(blob, (nombre || 'vista-3d') + '.png'); }, 'image/png');
+}
+
+/** The matrix of an upright slab on the ground: from (x1, z1) to (x2, z2), `t` thick, from
+ *  height `y0` up `h`. What a wall drawn on a plan becomes. */
+function ss3dBar(x1, z1, x2, z2, t, y0, h) {
+    const dx = x2 - x1, dz = z2 - z1, largo = Math.hypot(dx, dz) || 1e-6;
+    const ux = dx / largo, uz = dz / largo;           // along the wall
+    const nx = -uz, nz = ux;                           // across it
+    return new Float32Array([dx, 0, dz, 0,
+                             0, h, 0, 0,
+                             nx * t, 0, nz * t, 0,
+                             x1 - nx * t / 2, y0, z1 - nz * t / 2, 1]);
+}

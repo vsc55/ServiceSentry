@@ -51,8 +51,11 @@
     {# A glyph and not the mark: the artwork is at the FOOT of this column at full width, and
        the same badge again at 28px over the name is the brand twice in one column — the small
        copy losing, because that is the one nobody can read. #}
-        <i class="bi bi-shield-check ss-sb-logo"></i>
-        <span class="ss-sb-label ss-sb-brand-text">{{ app_name }}</span>
+        {# An installation's own square mark replaces the icon; the stock panel keeps the
+           icon, for the reason above. #}
+        {% if brand_own('mark') %}<img class="ss-sb-logo ss-brand-mark" src="{{ brand_src('mark') }}" alt="">
+        {% else %}<i class="bi bi-shield-check ss-sb-logo"></i>{% endif %}
+        <span class="ss-sb-label ss-sb-brand-text" data-brand-name>{{ app_name }}</span>
         <button type="button" class="ss-sb-toggle" onclick="_toggleSidebar()"
                 title="{{ i18n.sidebar_toggle or 'Toggle sidebar' }}" aria-label="Toggle sidebar">
             <i class="bi bi-list"></i>
@@ -290,7 +293,7 @@
            (`margin-top: auto`); once the entries fill the column it just scrolls below the last
            one. #}
         <div class="ss-sb-art" aria-hidden="true">
-            <img src="/static/img/logo.png?v={{ asset_v }}" alt="" width="640" height="427">
+            <img src="{{ brand_src('logo') }}" alt="" width="640" height="427">
         </div>
     </nav>
 

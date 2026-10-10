@@ -1,0 +1,173 @@
+{# ================================================================
+   Config — the brand card: the name the panel shows, and its four pictures.
+
+   The name is an ordinary config field (`brand|name`, or SS_BRAND_NAME, which locks it) and is
+   saved with the rest of the page. The pictures are uploads and are saved as soon as they are
+   picked: a file is not a value the form could hold until «Guardar», and a picture that was
+   chosen but not kept because somebody navigated away would be the one thing on this screen
+   that silently did nothing.
+
+   Each slot shows what is in it now — the installation's own or the stock one — what it takes,
+   and the two things to do with it. The list is filled when /api/v1/brand answers; the card
+   itself is drawn at once with the rest of the page.
+   ================================================================ #}
+
+// An empty name means the product's: the box says so instead of looking unset.
+FIELD_PICKERS['brand|name'] = {placeholder: PRODUCT_NAME};
+
+//: The name the page is showing now: what the server rendered it with, until a save changes it.
+let _brandShown = APP_NAME;
+
+/** Show a newly saved name everywhere this page already shows the old one — the tab title,
+ *  the sidebar head, the mobile top bar, the boot screen — without a reload.
+ *
+ *  Reported from the screen: the name was saved, and nothing changed until F5. Everything
+ *  else in this panel applies on save; a brand that waits for a reload is a setting that looks
+ *  as if it did not take. Empty means the product's name; a name fixed by SS_BRAND_NAME is not
+ *  this field's to change. */
+function _brandApplyName(name) {
+    if (typeof ENV_LOCKED !== 'undefined' && ENV_LOCKED.has('brand|name')) return;
+    const nuevo = String(name || '').trim().slice(0, 60) || PRODUCT_NAME;
+    if (nuevo === _brandShown) return;
+    document.querySelectorAll('[data-brand-name]').forEach(el => { el.textContent = nuevo; });
+    if (_brandShown && document.title.includes(_brandShown))
+        document.title = document.title.split(_brandShown).join(nuevo);
+    _brandShown = nuevo;
+}
+
+function _brandMayEdit() {
+    return ((typeof currentUser !== 'undefined' && currentUser && currentUser.permissions) || [])
+        .includes('config_edit');
+}
+
+//: The last answer of /api/v1/brand: what each slot asks, for the adjust dialog.
+let _brandData = null;
+
+function _renderBrandCard(open, close) {
+    const brand = (configData && configData.brand) || {};
+    setTimeout(_brandLoad, 0);
+    return open('cfgcol_brand', '<i class="bi bi-award me-1"></i>', t('brand_section'))
+        + renderField('brand_name', brand.name || '', 'brand|name', 'config')
+        + `<div class="mt-3">
+            <div class="fw-semibold mb-1">${esc(t('brand_pictures'))}</div>
+            <div class="d-flex align-items-start gap-2 mb-2">
+                <div class="text-muted ss-fs-2 flex-grow-1">${esc(t('brand_pictures_hint'))}</div>
+                ${_brandMayEdit() ? `<button type="button" class="btn btn-sm btn-secondary flex-shrink-0"
+                        onclick="_brandStockAll()"><i class="bi bi-files me-1"></i>${esc(t('brand_stock_all'))}</button>` : ''}
+            </div>
+            <div id="brandSlots" class="d-flex flex-column gap-2">
+                <span class="text-muted ss-fs-2">${esc(t('loading'))}</span></div>
+        </div>`
+        + close;
+}
+
+async function _brandLoad() {
+    const box = document.getElementById('brandSlots');
+    if (!box) return;
+    const d = await apiGet('/api/v1/brand');
+    if (!d || !d.slots) { box.innerHTML = ''; return; }
+    _brandData = d;
+    box.innerHTML = ['favicon', 'logo', 'mark', 'email']
+        .filter(s => d.slots[s]).map(s => _brandSlotRow(s, d.slots[s])).join('');
+}
+
+/** One slot: the picture as it is now, what it is for, what it takes, and its buttons. */
+function _brandSlotRow(slot, s) {
+    const edita = _brandMayEdit();
+    const tipos = (s.kinds || []).map(k => k.toUpperCase()).join(', ');
+    return `<div class="d-flex align-items-center gap-3 border rounded-3 p-2" data-brand-slot="${escAttr(slot)}">
+        <div class="ss-brand-preview"><img src="${escAttr(s.src)}" alt="" loading="lazy"></div>
+        <div class="flex-grow-1 ss-min-0">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <span class="fw-semibold">${esc(t('brand_slot_' + slot))}</span>
+                <span class="badge ${s.own ? 'bg-primary' : 'bg-body-secondary text-body-secondary border'}">${
+                    esc(t(s.own ? 'brand_own' : 'brand_stock'))}</span>
+            </div>
+            <div class="text-muted ss-fs-2">${esc(t('brand_slot_' + slot + '_desc'))}</div>
+            <div class="text-muted ss-fs-1">${esc(tf('brand_accepts', tipos, fmtBytes(s.max)))}</div>
+            <div class="text-muted ss-fs-1">${esc(_brandSizeText(s))}</div>
+        </div>
+        ${s.own ? `<a class="btn btn-sm btn-secondary flex-shrink-0" download
+                href="/brand/${encodeURIComponent(slot)}?download=1"
+                title="${escAttr(t('brand_download_tt'))}" aria-label="${escAttr(t('brand_download'))}">
+            <i class="bi bi-download me-1"></i>${esc(t('brand_download'))}</a>` : ''}
+        ${edita ? `<div class="d-flex gap-1 flex-shrink-0">
+            <input type="file" class="d-none" id="brandFile-${escAttr(slot)}"
+                   accept="${escAttr((s.kinds || []).map(k => '.' + k).join(','))}"
+                   onchange="_brandUpload(${jsStr(slot)}, this)">
+            <button type="button" class="btn btn-sm btn-secondary"
+                    onclick="document.getElementById('brandFile-${escAttr(slot)}').click()">
+                <i class="bi bi-upload me-1"></i>${esc(t('brand_upload'))}</button>
+            ${s.own ? `<button type="button" class="btn btn-sm btn-warning"
+                    onclick="_brandReset(${jsStr(slot)})">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('brand_reset'))}</button>`
+                : `<button type="button" class="btn btn-sm btn-secondary" onclick="_brandStock([${jsStr(slot)}])"
+                    title="${escAttr(t('brand_stock_copy_tt'))}">
+                <i class="bi bi-files me-1"></i>${esc(t('brand_stock_copy'))}</button>`}
+        </div>` : ''}
+    </div>`;
+}
+
+/** What a slot asks of a picture's pixels, and what the one shown now measures. */
+function _brandSizeText(s) {
+    const forma = t('brand_shape_' + (s.shape || 'square'));
+    const rec = (s.rec || []).join('×');
+    const ahora = (s.now || [])[0] ? tf('brand_size_now', s.now.join('×')) : t('brand_size_vector');
+    return tf('brand_size_rule', forma, rec, s.min_px, s.max_px) + ' · ' + ahora;
+}
+
+/** A file picked for a slot: not sent as it is, but opened in the adjust dialog
+ *  (`_brand_crop.html`), which shows it against what the slot asks and lets it be cropped or
+ *  resized before it goes up. */
+function _brandUpload(slot, input) {
+    const file = (input.files || [])[0];
+    input.value = '';
+    if (!file) return;
+    _brandCropOpen(slot, file);
+}
+
+/** Send a picture — the adjusted one, or the original — to its slot. */
+async function _brandSend(slot, blob, name) {
+    const body = new FormData();
+    body.append('file', blob, name || 'brand');
+    const resp = await fetch(`/api/v1/brand/${encodeURIComponent(slot)}`,
+                             {method: 'POST', body, credentials: 'same-origin'});
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) { showToast(data.error || t('error'), 'danger'); return false; }
+    showToast(t('brand_saved'), 'success');
+    _brandLoad();
+    return true;
+}
+
+/** Copy the stock pictures of *slots* in as the installation's own. */
+async function _brandStock(slots) {
+    let hechas = 0;
+    for (const slot of slots) {
+        const resp = await fetch(`/api/v1/brand/${encodeURIComponent(slot)}/stock`,
+                                 {method: 'POST', credentials: 'same-origin'});
+        if (resp.ok) hechas++;
+        else {
+            const d = await resp.json().catch(() => ({}));
+            showToast(d.error || t('error'), 'danger');
+        }
+    }
+    if (hechas) showToast(tf('brand_stock_done', hechas), 'success');
+    _brandLoad();
+}
+
+/** Every slot that still shows the stock picture, copied in at once. */
+function _brandStockAll() {
+    const slots = Object.entries((_brandData || {}).slots || {}).filter(([, s]) => !s.own).map(([k]) => k);
+    if (!slots.length) return showToast(t('brand_stock_none'), 'info');
+    showConfirmModal(tf('brand_stock_all_q', slots.length), () => _brandStock(slots));
+}
+
+function _brandReset(slot) {
+    showConfirmModal(tf('brand_reset_q', t('brand_slot_' + slot)), async () => {
+        const resp = await fetch(`/api/v1/brand/${encodeURIComponent(slot)}`,
+                                 {method: 'DELETE', credentials: 'same-origin'});
+        if (!resp.ok) { showToast(t('error'), 'danger'); return; }
+        showToast(t('brand_reset_done'), 'success');
+        _brandLoad();
+    });
+}

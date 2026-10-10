@@ -17,6 +17,11 @@ Rutas:
     GET     /api/v1/dcim/catalog/<uid>/history
     POST    /api/v1/dcim/catalog/<uid>/image/<face>
     DELETE  /api/v1/dcim/catalog/<uid>/image/<face>
+    PUT     /api/v1/dcim/catalog/<uid>/portmap
+    POST    /api/v1/dcim/catalog/<uid>/views
+    PUT     /api/v1/dcim/catalog/<uid>/views/<vid>
+    DELETE  /api/v1/dcim/catalog/<uid>/views/<vid>
+    POST    /api/v1/dcim/catalog/<uid>/views/<vid>/image
     POST    /api/v1/dcim/catalog/<uid>/restore
     POST    /api/v1/dcim/catalog/basics
     GET     /api/v1/dcim/catalog/browse
@@ -647,6 +652,131 @@ def register(app, wa, C):
             fuera['extra'] = data['extra']
         return fuera
 
+    @app.route('/api/v1/dcim/catalog/<uid>/portmap', methods=['PUT'])
+    @C.catalog_manage_req
+    def api_dcim_catalog_portmap(uid):
+        """Dónde está cada puerto en la cara del modelo, entero: ``{"map": {...}}``.
+
+        Ninguna biblioteca lo trae, así que lo sitúa una persona sobre la foto. Se guarda solo
+        lo que el modelo tiene; lo que no, se descarta en la puerta.
+        """
+        cat = getattr(wa, '_dcim_catalog', None)
+        if cat is None or not cat.get(uid):
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data.get('map'), dict):
+            return jsonify({'error': wa._t('dcim_portmap_bad')}), 400
+        cat.set_port_map(uid, data['map'], actor=C.actor())
+        fila = cat.get(uid) or {}
+        wa._audit('dcim_catalog_edit',
+                  detail={'action': 'port_map', 'maker': fila.get('manufacturer'),
+                          'model': fila.get('model'), 'placed': fila.get('ports_placed'),
+                          'total': fila.get('ports_total')})
+        # Los dos recuentos y su suma: conectores y bahías. La suma es lo que dice el aviso;
+        # con solo los conectores, situar las bahías de una placa decía «0 de 7».
+        return jsonify({'ok': True,
+                        'placed': fila.get('ports_placed', 0) + fila.get('bays_placed', 0),
+                        'total': fila.get('ports_total', 0) + fila.get('bays_total', 0),
+                        'ports_placed': fila.get('ports_placed', 0),
+                        'bays_placed': fila.get('bays_placed', 0)})
+
+    def _view_file():
+        """La imagen que trae la petición, guardada: ``(nombre, error)``; ``('', '')`` si no
+        trae ninguna."""
+        up = (request.files or {}).get('file')
+        if up is None:
+            return '', ''
+        blob = up.read(dcim_media.MAX_BYTES + 1)
+        if not blob:
+            return '', ''
+        return dcim_media.save(wa._var_dir or '', blob, C.media_dir())
+
+    @app.route('/api/v1/dcim/catalog/<uid>/views', methods=['POST'])
+    @C.catalog_manage_req
+    def api_dcim_catalog_view_new(uid):
+        """Una vista interior nueva: su nombre (campo `name`) y, si se manda, su foto
+        (`file`). Devuelve su `id`."""
+        import secrets                               # noqa: PLC0415
+        cat = getattr(wa, '_dcim_catalog', None)
+        fila = cat.get(uid) if cat else None
+        if not fila:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        vistas = list(fila.get('views') or [])
+        if len(vistas) >= dcim_catalog.VIEWS_MAX:
+            return jsonify({'error': wa._t('dcim_view_too_many')}), 400
+        nombre = str((request.form or {}).get('name') or (request.get_json(silent=True) or {}).get('name')
+                     or '').strip()
+        if not nombre:
+            return jsonify({'error': wa._t('dcim_view_need_name')}), 400
+        imagen, err = _view_file()
+        if err:
+            return jsonify({'error': wa._t(err)}), 400
+        vid = secrets.token_hex(4)
+        vistas.append({'id': vid, 'name': nombre, 'image': imagen})
+        cat.set_views(uid, vistas, actor=C.actor(), action='view_add')
+        wa._audit('dcim_catalog_edit', detail={'action': 'view_add', 'view': nombre,
+                                               'maker': fila.get('manufacturer'),
+                                               'model': fila.get('model')})
+        return jsonify({'id': vid, 'image': imagen})
+
+    @app.route('/api/v1/dcim/catalog/<uid>/views/<vid>', methods=['PUT'])
+    @C.catalog_manage_req
+    def api_dcim_catalog_view_edit(uid, vid):
+        """Renombrar una vista interior: ``{"name"}``."""
+        cat = getattr(wa, '_dcim_catalog', None)
+        fila = cat.get(uid) if cat else None
+        vistas = list((fila or {}).get('views') or [])
+        if not fila or not any(v['id'] == vid for v in vistas):
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        nombre = str((request.get_json(silent=True) or {}).get('name') or '').strip()
+        if not nombre:
+            return jsonify({'error': wa._t('dcim_view_need_name')}), 400
+        for v in vistas:
+            if v['id'] == vid:
+                v['name'] = nombre
+        cat.set_views(uid, vistas, actor=C.actor(), action='view_edit')
+        return jsonify({'ok': True})
+
+    @app.route('/api/v1/dcim/catalog/<uid>/views/<vid>/image', methods=['POST'])
+    @C.catalog_manage_req
+    def api_dcim_catalog_view_image(uid, vid):
+        """Poner o cambiar la foto de una vista interior (`file`). La que sustituye se borra."""
+        cat = getattr(wa, '_dcim_catalog', None)
+        fila = cat.get(uid) if cat else None
+        vistas = list((fila or {}).get('views') or [])
+        if not fila or not any(v['id'] == vid for v in vistas):
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        imagen, err = _view_file()
+        if err or not imagen:
+            return jsonify({'error': wa._t(err or 'dcim_media_empty')}), 400
+        vieja = ''
+        for v in vistas:
+            if v['id'] == vid:
+                vieja, v['image'] = v.get('image') or '', imagen
+        cat.set_views(uid, vistas, actor=C.actor(), action='view_image')
+        if vieja and vieja != imagen:
+            dcim_media.forget(wa._var_dir or '', vieja, C.media_dir())
+        return jsonify({'image': imagen})
+
+    @app.route('/api/v1/dcim/catalog/<uid>/views/<vid>', methods=['DELETE'])
+    @C.catalog_manage_req
+    def api_dcim_catalog_view_del(uid, vid):
+        """Quitar una vista interior, con su foto y lo que hubiera situado en ella."""
+        cat = getattr(wa, '_dcim_catalog', None)
+        fila = cat.get(uid) if cat else None
+        vistas = list((fila or {}).get('views') or [])
+        esta = next((v for v in vistas if v['id'] == vid), None)
+        if not fila or not esta:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        cat.set_views(uid, [v for v in vistas if v['id'] != vid], actor=C.actor(),
+                      action='view_drop')
+        if esta.get('image'):
+            dcim_media.forget(wa._var_dir or '', esta['image'], C.media_dir())
+        wa._audit('dcim_catalog_edit', detail={'action': 'view_drop', 'view': esta.get('name'),
+                                               'maker': fila.get('manufacturer'),
+                                               'model': fila.get('model')})
+        return jsonify({'ok': True})
+
     @app.route('/api/v1/dcim/catalog/<uid>/image/<face>', methods=['POST'])
     @C.catalog_manage_req
     def api_dcim_catalog_image(uid, face):
@@ -877,8 +1007,13 @@ def register(app, wa, C):
         cat = getattr(wa, '_dcim_catalog', None)
         if cat is None:
             return jsonify({'error': wa._t('dcim_not_found')}), 404
-        n = cat.replace(dcim_basics.SOURCE, dcim_basics.rows(wa._lang()),
-                        wa._var_dir or '', C.media_dir())
+        filas = dcim_basics.rows(wa._lang())
+        # Y las fotos de los modelos con marca, si se piden: se bajan de la web del fabricante y
+        # se quedan en esta instalación. Sin pedirlas —o sin internet— se traen sin foto.
+        fotos = 0
+        if (request.get_json(silent=True) or {}).get('images'):
+            fotos = dcim_basics.fetch_images(filas)
+        n = cat.replace(dcim_basics.SOURCE, filas, wa._var_dir or '', C.media_dir())
         # Y las plataformas que se van a teclear igual. **Se añaden, no se reemplazan**: volver
         # a pulsar el botón no puede pisar la fecha de fin de soporte ni las notas que alguien
         # escribió sobre la suya, y `ensure` devuelve la que ya está sin tocarla.
@@ -924,7 +1059,7 @@ def register(app, wa, C):
         wa._audit('dcim_catalog_import',
                   detail={'source': dcim_basics.SOURCE, 'kind': 'basics', 'count': n,
                           'platforms': p})
-        return jsonify({'ok': True, 'count': n, 'platforms': p})
+        return jsonify({'ok': True, 'count': n, 'platforms': p, 'images': fotos})
 
     @app.route('/api/v1/dcim/catalog/drop', methods=['POST'])
     @C.catalog_manage_req

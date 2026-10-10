@@ -36,8 +36,32 @@ FEATURE_KINDS = {
     'cabinet':   {'w': 1000, 'd': 500,  'h': 2000, 'layer': 'room', 'front': True},  # armario: repuestos, material
     'extinguisher': {'w': 300, 'd': 300, 'h': 900, 'layer': 'room'},
     'tray':      {'w': 6000, 'd': 300,  'h': 140,  'base': 2720, 'layer': 'air'},
+    # El control de accesos. Un torno —trípode o de pasillo—, con su delante, que es el lado por
+    # el que se entra. Y lo que va en una pared: un lector de tarjetas, o la puerta de enlace a la
+    # que se conectan las cerraduras (el IQ de Salto KS), a la altura a la que se cuelga.
+    'turnstile': {'w': 1000, 'd': 1600, 'h': 1000, 'layer': 'room', 'front': True},
+    'reader':    {'w': 200,  'd': 80,   'h': 200,  'base': 1300, 'layer': 'room'},
+    # La seguridad del edificio, que también se dibuja y se cuenta: dónde está la boca de
+    # incendio más cercana es una pregunta de plano, no de inventario. Casi todo va en una
+    # PARED, a la altura a la que se cuelga, con su delante hacia la sala; el detector, en el
+    # techo.
+    'hose_reel':  {'w': 700, 'd': 250, 'h': 700, 'base': 900,  'layer': 'room', 'front': True},  # BIE
+    'fire_alarm': {'w': 120, 'd': 60,  'h': 120, 'base': 1400, 'layer': 'room', 'front': True},  # pulsador
+    'emergency_light': {'w': 350, 'd': 80, 'h': 120, 'base': 2200, 'layer': 'room', 'front': True},
+    'smoke_detector':  {'w': 120, 'd': 120, 'h': 60, 'base': 2940, 'layer': 'air'},
+    'first_aid':  {'w': 400, 'd': 150, 'h': 500, 'base': 1200, 'layer': 'room', 'front': True},  # botiquín
+    'aed':        {'w': 450, 'd': 200, 'h': 450, 'base': 1200, 'layer': 'room', 'front': True},  # desfibrilador
     'label':     {'w': 1600, 'd': 400,  'h': 10,   'layer': 'air'},     # una nota sobre el plano
 }
+
+#: Qué cerradura lleva una pieza del control de accesos. Un cilindro electrónico (el Neo de
+#: Salto) o un escudo en una puerta; una cerradura de taquilla (XS4 Locker) en un armario; un
+#: lector en un torno o en una pared. Cerrado por lo mismo que los tipos de pieza: es lo que se
+#: cuenta y lo que se pregunta —«¿qué puertas tienen cilindro?»—.
+LOCK_KINDS = ('cylinder', 'escutcheon', 'locker', 'reader')
+#: Las piezas que pueden llevar control de accesos: las que se cierran o se cruzan, y el lector
+#: o la puerta de enlace en sí.
+ACCESS_KINDS = ('door', 'cabinet', 'turnstile', 'reader')
 
 #: Las capas, de abajo arriba. El orden ES el dato: quien dibuje recorre esto y no inventa.
 FEATURE_LAYERS = ('floor', 'room', 'air')
@@ -69,6 +93,24 @@ _FEATURE = TableSpec(
         # Cuántas estanterías tiene, si es un armario: 1, 2, 5. VACÍO en lo que no es un
         # armario —una puerta no tiene baldas—, y uno en un armario que no lo dice.
         Column('shelves', 'INTEGER'),
+        # El control de accesos, en las piezas que lo llevan (`ACCESS_KINDS`): qué cerradura es
+        # (`LOCK_KINDS`), qué modelo y con qué número de serie, y a qué puerta de enlace se
+        # conecta —`hub_uid`, otra pieza de la sede, de tipo `reader`—, que es lo que deja
+        # preguntar qué puertas cuelgan de un IQ. Vacíos en todo lo demás.
+        Column('lock',     'TEXT', nullable=False, default="''"),
+        # Su modelo del CATÁLOGO, como el de un equipo (`dc_item.type_uid`): de ahí salen su
+        # marca y su foto, y por él se cuenta «cuántos Neo hay». `model` se queda como texto
+        # para lo que no está en el catálogo, y se rellena con el del catálogo al elegirlo.
+        Column('type_uid', 'TEXT', nullable=False, default="''"),
+        Column('model',    'TEXT', nullable=False, default="''"),
+        Column('serial',   'TEXT', nullable=False, default="''"),
+        Column('hub_uid',  'TEXT', nullable=False, default="''"),
+        # Y su estado, como el de un equipo: el del dispositivo vigilado al que se vincula, y si
+        # no tiene, el de la demo (`demo_state`, que solo escribe `main.py dcim demo`). El mismo
+        # `item_state` lo lee para las dos cosas.
+        Column('device_uid', 'TEXT', nullable=False, default="''"),
+        Column('demo_state', 'TEXT', nullable=False, default="''"),
+        Column('demo_reason', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

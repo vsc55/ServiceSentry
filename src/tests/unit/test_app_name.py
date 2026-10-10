@@ -100,9 +100,12 @@ class TestTheNameHasOneHome:
             'declared after the submodule imports, so an early importer cannot read it'
 
     def test_the_pages_are_handed_it(self):
-        """One context key, so no template has to know where the name comes from."""
+        """One context key, so no template has to know where the name comes from — and it is
+        the brand's (Configuración › Marca, or SS_BRAND_NAME), which falls back to `APP_NAME`."""
         ctx = _read(os.path.join(SRC, 'lib', 'web_admin', 'mixins', 'context.py'))
-        assert "'app_name': APP_NAME," in ctx
+        assert "'app_name': self._brand_name()," in ctx
+        brand = _read(os.path.join(SRC, 'lib', 'core', 'brand', 'service.py'))
+        assert 'return name or APP_NAME' in brand
         consts = _read(os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials', 'core',
                                     '_constants.html'))
         assert 'const APP_NAME = {{ app_name | tojson }};' in consts, \
@@ -115,7 +118,7 @@ class TestTheNameHasOneHome:
         for rel, needle in (
                 ('base.html', '<title>{% block title %}{{ app_name }}{% endblock %}</title>'),
                 (os.path.join('partials', '_sidebar.html'), '>{{ app_name }}</span>'),
-                ('dashboard.html', '<div class="ss-boot-name">{{ app_name }}</div>'),
+                ('dashboard.html', '<div class="ss-boot-name" data-brand-name>{{ app_name }}</div>'),
                 (os.path.join('partials', '_status_body.html'),
                  '<h1 class="hero-title">{{ app_name }}</h1>')):
             assert needle in _read(os.path.join(tpl, rel)), rel

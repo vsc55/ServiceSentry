@@ -51,7 +51,6 @@ from __future__ import annotations
 
 from flask import jsonify, request
 
-from lib import APP_NAME
 from lib.core.notify.email import brand as _brand
 
 _VALID_HTML_TYPES = {'test', 'alert', 'summary'}
@@ -295,13 +294,14 @@ def register(app, wa):
         # Load current string overrides so preview reflects customised text
         cfg = wa._read_config_file(wa._CONFIG_FILE) or {}
         str_overrides = (cfg.get('notif_templates') or {}).get(lang_key) or None
-        strings = email_templates.get_strings(lang, overrides=str_overrides)
+        strings = email_templates.get_strings(lang, overrides=str_overrides,
+                                              app_name=wa._brand_name())
 
         html_override = html_tpl.strip() or None
 
         if tpl_type == 'test':
             html_out = email_templates.render_test(
-                sender_name=APP_NAME, lang=lang, strings=strings,
+                sender_name=strings['app_name'], lang=lang, strings=strings,
                 html_override=html_override)
         elif tpl_type == 'alert':
             html_out = email_templates.render_alert(

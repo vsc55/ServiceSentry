@@ -11,6 +11,10 @@ function tf(k, ...a) { let s = t(k); a.forEach(v => { s = s.replace('{}', v); })
 // The product's name, from its one home in lib/__init__.py (context processor → app_name).
 // Anything in the JS that has to SAY the name reads this instead of spelling it out.
 const APP_NAME = {{ app_name | tojson }};
+// The product's name, which an empty brand name falls back to (Configuración › Marca).
+const PRODUCT_NAME = {{ product_name | tojson }};
+// The brand's pictures, versioned (Configuración › Marca): for what the script draws itself.
+const BRAND_SRC = {logo: {{ brand_src('logo') | tojson }}, mark: {{ brand_src('mark') | tojson }}};
 const LABELS = I18N.labels || {};
 const SECTION_LABELS = I18N.sections || {};
 const SENSITIVE   = new Set({{ wa_sensitive_fields | tojson }});

@@ -45,7 +45,7 @@ async function renderDiagnostics() {
  *  no plate behind it in either theme. */
 function _dgBrand() {
     return `<div class="text-center py-3" aria-hidden="true">
-        <img src="/static/img/logo.png" alt="" class="ss-diag-logo"
+        <img src="${escAttr(BRAND_SRC.logo)}" alt="" class="ss-diag-logo"
              width="640" height="427">
     </div>`;
 }
