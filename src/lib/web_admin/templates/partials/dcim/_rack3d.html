@@ -156,7 +156,7 @@ function _dcr3dPortPoint(e, pos) {
  *  de cuarenta equipos. */
 function _dcr3dWires(cajas, sitio, g, o) {
     const tenue = o.mal ? 0.25 : 1;
-    const tubo = (pts, color, t) => {
+    const tubo = (pts, color, t, lee) => {
         // Un cable negro sobre un armario negro no se ve: lo muy oscuro se aclara lo justo.
         const luz = Math.max(color[0], color[1], color[2]);
         const k = luz < 0.3 ? 0.3 - luz : 0;
@@ -164,7 +164,7 @@ function _dcr3dWires(cajas, sitio, g, o) {
         for (let i = 0; i + 1 < pts.length; i++) {
             const p = pts[i], q = pts[i + 1];
             if (Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 1e-4) continue;
-            cajas.push({color: c, m: ss3dTube(p, q, t), lee: null, cable: true});
+            cajas.push({color: c, m: ss3dTube(p, q, t), lee: lee || null, cable: true});
         }
     };
     const cuantos = {};
@@ -208,7 +208,11 @@ function _dcr3dWires(cajas, sitio, g, o) {
             const pts = pa ? ida(pa) : [[canal, techo, zRun]];
             if (pb) pts.push(...ida(pb).reverse());
             else pts.push([canal, techo, zRun]);
-            tubo(pts, color, c.kind === 'fiber' ? 0.004 : 0.005);
+            // Con su ficha: se pulsa, y se resalta él solo (`_select3d.html`).
+            tubo(pts, color, c.kind === 'fiber' ? 0.004 : 0.005,
+                 {tipo: 'cable', uid: c.uid, a: c.a_item, b: c.b_item, sinRotulo: true,
+                  name: [c.label, `${c.a_port || ''} ↔ ${c.b_port || ''}`].filter(Boolean).join(' · '),
+                  kind: t('dcim_cable_' + (c.kind || 'other'))});
         });
     }
     if (o.energia) {
@@ -351,7 +355,7 @@ function _dcr3dScene(data, o) {
         }
         // Su estado, en la cara que da al pasillo, con el diseño elegido (`_dcr3dMarks`). Nunca
         // un bloque opaco: el de 6 cm tapaba la foto del modelo, que es lo que se viene a mirar.
-        const mudo = ['patch_panel', 'fiber_panel', 'shelf', 'blank'].includes(it.role);
+        const mudo = _DC_QUIET_ROLES.includes(it.role);
         const estilo = o.estado || 'led';
         // Lo que nadie vigila lleva su piloto apagado, en gris: el diseño se ve igual y dice
         // la verdad. El tinte no: teñir de gris toda la cara solo apagaría la foto.

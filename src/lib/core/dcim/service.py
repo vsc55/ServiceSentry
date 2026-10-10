@@ -1523,3 +1523,96 @@ def used_u(store, rack) -> int:
     height = int(taken.get('height') or 0)
     usados = set(taken.get('front') or {}) | set(taken.get('rear') or {})
     return len([u for u in usados if 1 <= int(u) <= height])
+
+
+def trace(store, item_uid: str, port: str = '', visible=None, limit: int = 24) -> list:
+    """Where each cable of an item ends, through the passive items on the way.
+
+    One path per cable that leaves the item (or only those at *port*): a list of hops, each
+    ``{item, label, role, port, where, rack, room, cable}`` — the item reached, at which port,
+    where it is (its rack's name, or its room's for a desk's PC or a wall outlet; and the uids of
+    both, which the 3D highlights) and the cable that got there. A
+    patch panel or an outlet (`PASS_THROUGH`) joins its front port ``N`` with its back ``N-R``,
+    so the walk goes on through it: a PC reads «outlet A → patch panel 7 → switch Gi1/0/7».
+
+    Stops where the cabling stops, at an item *visible* says may not be seen (named as hidden,
+    and nothing beyond it), or after *limit* hops — a loop of patch cords is a real mistake of a
+    real installation, and it must not hang the screen that shows it.
+    """
+    from lib.core.dcim.store import PASS_THROUGH, REAR_SUFFIX     # noqa: PLC0415
+    visible = visible or (lambda _u: True)
+    items, racks, rooms = {}, {}, {}
+
+    def item(uid):
+        if uid not in items:
+            items[uid] = store.items.get(uid) or {}
+        return items[uid]
+
+    def where(it):
+        ru = str(it.get('rack_uid') or '')
+        if ru:
+            if ru not in racks:
+                racks[ru] = store.racks.get(ru) or {}
+            return str(racks[ru].get('name') or '')
+        rm = str(it.get('room_uid') or '')
+        if rm and rm not in rooms:
+            rooms[rm] = store.rooms.get(rm) or {}
+        return str(rooms.get(rm, {}).get('name') or '')
+
+    def pareja(p):
+        p = str(p or '')
+        return p[:-len(REAR_SUFFIX)] if p.endswith(REAR_SUFFIX) else p + REAR_SUFFIX
+
+    def lado(c, uid, p):
+        """The far end of cable *c* seen from item *uid* at port *p*: ``(item, port)``."""
+        if str(c.get('a_item')) == uid and str(c.get('a_port') or '') == p:
+            return str(c.get('b_item') or ''), str(c.get('b_port') or '')
+        return str(c.get('a_item') or ''), str(c.get('a_port') or '')
+
+    def salto(uid, p, c):
+        it = item(uid)
+        if not visible(uid):
+            return {'item': '', 'hidden': True, 'cable': _cable_brief(c)}
+        return {'item': uid, 'label': str(it.get('label') or ''), 'role': str(it.get('role') or ''),
+                'port': p, 'where': where(it), 'rack': str(it.get('rack_uid') or ''),
+                'room': str(it.get('room_uid') or ''), 'cable': _cable_brief(c)}
+
+    inicio = item(item_uid)
+    paths = []
+    for c in store.cables_of([item_uid]):
+        mio = str(c.get('a_port') if str(c.get('a_item')) == item_uid else c.get('b_port') or '')
+        if port and mio != port:
+            continue
+        hops = [{'item': item_uid, 'label': str(inicio.get('label') or ''),
+                 'role': str(inicio.get('role') or ''), 'port': mio, 'where': where(inicio),
+                 'rack': str(inicio.get('rack_uid') or ''),
+                 'room': str(inicio.get('room_uid') or ''), 'cable': None}]
+        actual, en, por = c, item_uid, mio
+        vistos = {str(c.get('uid'))}
+        for _ in range(limit):
+            sig, sp = lado(actual, en, por)
+            hop = salto(sig, sp, actual)
+            hops.append(hop)
+            if hop.get('hidden') or str(item(sig).get('role') or '') not in PASS_THROUGH:
+                break
+            sale = pareja(sp)
+            siguiente = next((x for x in store.cables_of([sig]) if str(x.get('uid')) not in vistos
+                              and ((str(x.get('a_item')) == sig and str(x.get('a_port') or '') == sale)
+                                   or (str(x.get('b_item')) == sig and str(x.get('b_port') or '') == sale))),
+                             None)
+            if not siguiente:
+                hop['open'] = sale                      # nothing patched at the other side
+                break
+            vistos.add(str(siguiente.get('uid')))
+            hop['out'] = sale                           # through it: in at the front, out the back
+            actual, en, por = siguiente, sig, sale
+        paths.append(hops)
+    return paths
+
+
+def _cable_brief(c) -> dict | None:
+    if not c:
+        return None
+    return {'uid': c.get('uid'), 'kind': c.get('kind') or '', 'category': c.get('category') or '',
+            'color': c.get('color') or '', 'label': c.get('label') or '',
+            'length_mm': int(c.get('length_mm') or 0)}

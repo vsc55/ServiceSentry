@@ -361,7 +361,8 @@ class TestColourBy:
 
 class TestTheCircuits:
     def test_each_rack_leaves_an_anchor_on_its_top(self, out):
-        assert out['puntos'] == ['rack:r1', 'rack:r2']
+        # And the room one on its ceiling, where its horizontal cabling comes down from.
+        assert out['puntos'] == ['rack:r1', 'rack:r2', 'room:s']
 
     def test_network_runs_in_the_colour_of_what_they_carry(self, out):
         c = out['circuitos']

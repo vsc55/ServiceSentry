@@ -431,7 +431,9 @@ class TestElArrastreMideLoQueSeVe:
 
     def test_las_dos_ramas_pasan_por_el_mismo_sitio(self):
         cuerpo = _section().split('function _dcpMove(')[1].split(chr(10) + chr(125))[0]
-        assert cuerpo.count('_dcpPlace(') == 2, 'una rama del arrastre no cuenta el giro'
+        # Tres ramas: un rack, una pieza y un equipo de sala (un PC, una roseta). Cada una pasa
+        # por `_dcpPlace`, la que cuenta el giro.
+        assert cuerpo.count('_dcpPlace(') == 3, 'una rama del arrastre no cuenta el giro'
 
     def test_y_ninguna_topa_la_esquina_sin_girar(self):
         cuerpo = _section().split('function _dcpMove(')[1].split(chr(10) + chr(125))[0]
@@ -1370,6 +1372,9 @@ class TestUnaColumnaQueNadiePuedeEscribir:
         'demo_state',               # lo escribe solo la demo: por un campo, cualquiera pintaría
                                     # de rojo un equipo de verdad (`SERVER_COLS`)
         'demo_reason',              # su motivo: lo mismo
+        # Dónde está un equipo de SALA (un PC, una roseta): no lo escribe la ficha del rack sino
+        # el plano de la sala, como a una pieza (`PUT /room-items/<uid>`).
+        'room_uid', 'pos_x', 'pos_y', 'rotation', 'base_mm', 'mount',
     }
 
     def _columnas(self):
@@ -3422,7 +3427,9 @@ class TestLosEquiposPorEstado:
     def test_esa_lista_no_se_separa_de_la_del_nucleo(self):
         """Está copiada en la pantalla porque ésta no pide un armario; copiada y comprobada, que
         es distinto de copiada y olvidada."""
-        js = self._js()
+        # De toda la sección: la lista vive en `_render.html`, que `/3d` incluye, porque el 3D
+        # de un rack abierto también la usa.
+        js = _section()
         i = js.index('_DC_QUIET_ROLES = [')
         en_pantalla = set(re.findall(r"'([a-z_]+)'", js[i:js.index(']', i)]))
         store = _store_src()
@@ -3526,7 +3533,9 @@ class TestLoQueNoOcupaUSeDiceIgual:
         assert 'PLACEMENTS = ' in store
         i = store.index('PLACEMENTS = (')
         vals = set(re.findall(r"'([a-z]+)'", store[i:store.index(')', i)]))
-        assert vals == {'u', 'side', 'near'}, vals
+        # Y `room`: en una SALA y no en un armario —un PC en su mesa, una roseta—, con su sitio
+        # en el plano. Es el cuarto caso de la misma decisión, no un quinto camino aparte.
+        assert vals == {'u', 'side', 'near', 'room'}, vals
         # Y una sola comprobación decide: ni la ocupación ni el alzado saben de casos.
         assert store.count("placement') or 'u') != 'u'") == 1
 

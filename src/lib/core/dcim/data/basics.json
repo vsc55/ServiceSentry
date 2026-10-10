@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "racks": [
     {
       "model": {
@@ -486,6 +486,7 @@
       "kind": "access_gateway",
       "url": "https://saltosystems.com/es-es/productos/iq/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/solution-products/salto-ks-products-iq-hardware.png?itok=lCAJ8Xz-",
+      "image_svg": "salto-iq-2-0.svg",
       "description": {
         "es_ES": "Puerta de enlace de Salto KS: conecta las cerraduras inalámbricas de hasta 16 puertas con la nube de Salto KS.",
         "en_EN": "Salto KS gateway: connects the wireless locks of up to 16 doors to the Salto KS cloud."
@@ -519,6 +520,7 @@
       "kind": "access_lock",
       "url": "https://saltosystems.com/es-es/productos/cilindros-electronicos/cilindro-neo/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/neo-cylinder-list-ok.png?itok=Wmhb0KIJ",
+      "image_svg": "salto-neo-cylinder.svg",
       "description": {
         "es_ES": "Cilindro electrónico inalámbrico de pilas.",
         "en_EN": "Battery-powered wireless electronic cylinder."
@@ -543,6 +545,7 @@
       "kind": "access_lock",
       "url": "https://saltosystems.com/es-es/productos/cerraduras-electronicas/xs4-one/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-one-list-ok.png?itok=27oXgqyn",
+      "image_svg": "salto-xs4-one.svg",
       "description": {
         "es_ES": "Escudo electrónico inalámbrico para puertas.",
         "en_EN": "Wireless electronic escutcheon for doors."
@@ -564,6 +567,7 @@
       "kind": "access_lock",
       "url": "https://saltosystems.com/es-es/productos/cerraduras-electronicas/xs4-original/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-original-plus-euro-list-ok.png?itok=FpdzFuwt",
+      "image_svg": "salto-xs4-original.svg",
       "description": {
         "es_ES": "Escudo electrónico de la gama XS4.",
         "en_EN": "Electronic escutcheon of the XS4 range."
@@ -578,6 +582,7 @@
       "kind": "access_lock",
       "url": "https://saltosystems.com/es-es/productos/cerraduras-electronicas/xs4-mini/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-mini-list-ok.png?itok=T2ZUbyUF",
+      "image_svg": "salto-xs4-mini.svg",
       "description": {
         "es_ES": "Escudo electrónico compacto de la gama XS4.",
         "en_EN": "Compact electronic escutcheon of the XS4 range."
@@ -592,6 +597,7 @@
       "kind": "access_lock",
       "url": "https://saltosystems.com/es-es/productos/electronic-locker-locks/xs4-locker/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/xs4-locker-list-ok.png?itok=uNThdvMJ",
+      "image_svg": "salto-xs4-locker.svg",
       "description": {
         "es_ES": "Cerradura electrónica inalámbrica para taquillas, armarios, cajas fuertes y maletines; se abre con la tarjeta.",
         "en_EN": "Wireless electronic lock for lockers, cabinets, safes and cases; opened with the card."
@@ -616,6 +622,7 @@
       "kind": "access_lock",
       "url": "https://saltosystems.com/es-es/productos/electronic-padlocks/candado-neoxx/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/neoxx-padlock-list-ok.png?itok=fDWlC_z6",
+      "image_svg": "salto-neoxx-padlock.svg",
       "description": {
         "es_ES": "Candado electrónico.",
         "en_EN": "Electronic padlock."
@@ -630,6 +637,7 @@
       "kind": "access_lock",
       "url": "https://saltosystems.com/es-es/productos/electronic-locker-locks/gantner-net-lock/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/gat-net-lock-list-ok.png?itok=Orx9xkNM",
+      "image_svg": "gantner-net-lock.svg",
       "description": {
         "es_ES": "Cerradura electrónica para taquillas.",
         "en_EN": "Electronic locker lock."
@@ -644,6 +652,7 @@
       "kind": "access_reader",
       "url": "https://saltosystems.com/es-es/productos/wall-readers/lector-diseno-xs/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/design-xs-reader-list-ok.png?itok=BHM650FK",
+      "image_svg": "salto-design-xs-reader.svg",
       "description": {
         "es_ES": "Lector de pared para cajas eléctricas estándar; con las controladoras de Salto abre ascensores, puertas correderas y puertas motorizadas.",
         "en_EN": "Wall reader for standard electrical boxes; with Salto controllers it opens lifts, sliding doors and motorised doors."
@@ -663,6 +672,7 @@
       "kind": "access_reader",
       "url": "https://saltosystems.com/es-es/productos/wall-readers/lector-glass-xs/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/glass-xs-reader-list-ok.png?itok=8BRCFNDf",
+      "image_svg": "salto-glass-xs-reader.svg",
       "description": {
         "es_ES": "Lector de pared de la gama XS.",
         "en_EN": "Wall reader of the XS range."
@@ -676,6 +686,7 @@
       "kind": "access_controller",
       "url": "https://saltosystems.com/es-es/productos/controladoras-cus/controlador-de-puertas-bluenet/",
       "image_url": "https://saltosystems.com/sites/default/files/styles/breakpoint_1920/public/images/products/bluenet-door-controller-list-ok.png?itok=zy34MXBN",
+      "image_svg": "salto-bluenet-door-controller.svg",
       "description": {
         "es_ES": "Controladora de puerta compacta en carril DIN, con relés y entradas, para puertas automáticas y cualquier punto de acceso.",
         "en_EN": "Compact DIN-rail door controller, with relays and inputs, for automatic doors and any access point."

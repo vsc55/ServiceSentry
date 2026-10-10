@@ -381,6 +381,8 @@ function _dcpContent(racks) {
     return _dcpPlanImage(racks) + _dcpGrid(racks) + _dcpRoomOutline()
          + _dcpFeaturesSvg('floor') + _dcpFeaturesSvg('room')
          + racks.map(_dcpRack).join('')
+         // Lo que está en la sala y no en un rack: los puestos, las rosetas, los AP.
+         + _dcriSvg()
          + _dcpFeaturesSvg('air')
          + _dcCalMarks('room');
 }
@@ -567,6 +569,21 @@ function _dcpDown(ev) {
             // Solo el DIBUJO, no la pantalla: repintar la sección entera aquí sustituye el
             // `<svg>` que acaba de capturar el puntero, y con él se va la mano que está
             // arrastrando. El panel de la pieza aparece al soltar, en `_dcpUp`.
+            _dcpRedraw();
+            return;
+        }
+    }
+    // Un equipo de la sala: se coge y se arrastra como una pieza, y lo que se suelte va a su
+    // ruta (`PUT /room-items`).
+    if (hit.kind === 'item') {
+        const i = _dcri1(hit.uid);
+        const p = ssCanvasPoint(_DCP_SVG, ev);
+        if (i && p) {
+            _dcpSel = {kind: 'item', uid: String(i.uid)};
+            _dcpDrag = {uid: String(i.uid), what: 'item', moved: false, from: p,
+                        at: {x: Number((i.box || {}).x || 0), y: Number((i.box || {}).y || 0)},
+                        cycle: hit.cycle, may: _dcimMay('dcim_edit')};
+            ev.currentTarget.setPointerCapture?.(ev.pointerId);
             _dcpRedraw();
             return;
         }
@@ -969,6 +986,21 @@ function _dcpMove(ev) {
         _dcpSizeShow(f);
         return;
     }
+    if (_dcpDrag && _dcpDrag.what === 'item') {
+        const p = ssCanvasPoint(_DCP_SVG, ev);
+        const i = _dcri1(_dcpDrag.uid);
+        if (!p || !i || !_dcpDrag.may) return;
+        const b = i.box || {};
+        const sitio = _dcpPlace(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
+                                (p.y - _dcpDrag.from.y) / _DCP_SCALE,
+                                Number(b.w || 200), Number(b.d || 200), b.rot || 0);
+        i.pos_x = b.x = sitio.x;
+        i.pos_y = b.y = sitio.y;
+        _dcpDrag.moved = true;
+        _dcpReadout(sitio.x + Number(b.w || 0) / 2, sitio.y + Number(b.d || 0) / 2);
+        _dcpRedraw();
+        return;
+    }
     if (_dcpDrag && _dcpDrag.what === 'feature') {
         const p = ssCanvasPoint(_DCP_SVG, ev);
         const f = _dcpFeatures().find(x => x.uid === _dcpDrag.uid);
@@ -1068,6 +1100,12 @@ async function _dcpUp(ev) {
         }
         // The inspector's width and depth fields have to say what the piece now measures.
         return _dcpInspectorDraw();
+    }
+    if (drag.what === 'item') {
+        if (!drag.moved) return _dcpCycle(drag) || _dcpInspectorDraw();
+        const i = _dcri1(drag.uid);
+        _dcpInspectorDraw();
+        return i ? _dcriSave(i.uid, {pos_x: i.pos_x, pos_y: i.pos_y}) : undefined;
     }
     if (drag.what === 'feature') {
         const f = _dcpFeatures().find(x => x.uid === drag.uid);

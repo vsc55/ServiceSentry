@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~11.030 tests** (11.020 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-09-13). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~11.100 tests** (11.296 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-10-10). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -4881,10 +4881,10 @@ algo va mal; un «NaN-NaN-NaN» no dice nada—.
 > LDAP exacto, la toma de cuenta SSO y `parse_manual_ban` con duración negativa.
 
 ### `test_db_portability.py` — portabilidad SQL (offline)
-Un conector-stub que **graba el SQL** con `KIND='mysql'` verifica que el SQL crudo de los stores **cita los identificadores reservados** (`key`/`virtual`/tabla `groups`/`user`) con `quote_ident`, y que `quote_ident` es dialect-aware (backticks MySQL / comillas SQLite+PG). Caza cualquier futura reservada sin comillas sin necesidad de un motor real.
+Un conector-stub que **graba el SQL** con `KIND='mysql'` verifica que el SQL crudo de los stores **cita los identificadores reservados** (`key`/`virtual`/tabla `groups`/`user`/`by`/`stored`/`lock`) con `quote_ident` —`lock`, la cerradura de una pieza, a través de `Rows`, que ahora entrecomilla todas sus columnas—, y que `quote_ident` es dialect-aware (backticks MySQL / comillas SQLite+PG). Caza cualquier futura reservada sin comillas sin necesidad de un motor real.
 
 ### `test_db_portability_live.py` — verificación contra MySQL/PostgreSQL reales (opt-in)
-Corre los stores contra **MySQL/MariaDB** y/o **PostgreSQL** reales (los motores de producción), cubriendo lo que SQLite no detecta: reservadas, `CAST`, `json_extract`/concat por dialecto, upsert por rowcount (`FOUND_ROWS`), rebuild de migración que preserva datos, introspección de esquema y elección de líder. **Opt-in por variables de entorno** (si no están, se salta entero):
+Corre los stores contra **MySQL/MariaDB** y/o **PostgreSQL** reales (los motores de producción), cubriendo lo que SQLite no detecta: reservadas (una puerta con su cerradura, `dc_feature.lock`, de ida y vuelta), `CAST`, `json_extract`/concat por dialecto, upsert por rowcount (`FOUND_ROWS`), rebuild de migración que preserva datos, introspección de esquema y elección de líder. **Opt-in por variables de entorno** (si no están, se salta entero):
 
 Variables (una por conexión; si falta el `*_HOST`, ese motor se salta):
 
@@ -5796,7 +5796,12 @@ pulsable, que las sedes que no se pisan lo conserven —lo que no puede romperse
 otro— y que sin mapa no se reparta nada, porque ahí las cajas van en rejilla y quitar un rótulo
 sería quitar la sede.
 
-**Archivo:** `tests/integration/test_wa_dcim_sitemap.py` — 38 tests
+**Archivo:** `tests/integration/test_wa_dcim_sitemap.py` — 40 tests
+
+Y **una sede con error o aviso late** (reportado: con solo el borde de su color no llamaba la
+atención en el mapa): su caja lleva un halo de su color que se enciende y se apaga —más deprisa un
+error que un aviso—, su punto un aro que crece como un radar, y su tarjeta de debajo un halo que
+late; la que está bien, quieta. Con menos movimiento pedido en el sistema, nada se mueve.
 
 ---
 
@@ -6063,7 +6068,7 @@ Y **un comentario no puede cerrar una cadena**: un acento grave dentro de un `<!
 | `TestNaming::test_no_ambiguous_table_partial` | `_table` significaba dos cosas distintas (la lista entera vs el estado de columnas) |
 | `TestNaming::test_one_render_shell_per_section_folder` | Un `_render.html` por carpeta: el único punto de entrada de la sección |
 | `TestWiring::test_no_orphan_partials` | Todo partial lo incluye alguien. Un huérfano es código muerto que parece vivo |
-| `TestWiring::test_script_partials_are_included_once` | El bundle JS es **un** `<script>`: incluir dos veces redeclararía sus constantes |
+| `TestWiring::test_script_partials_are_included_once` | El bundle JS de cada página es **un** `<script>`: incluir dos veces en la misma página redeclararía sus constantes. Se cuenta **por página**, siguiendo los includes de cada plantilla raíz: `/3d` carga una parte del panel en su propio `<script>` |
 | `TestSize::test_render_shells_stay_thin` | Un `_render.html` que engorda es una sección escondiendo subsecciones dentro | Y **el modal de confirmación recibe una función**: `showConfirmModal(msg, callback)` no devuelve promesa, así que `await` sobre él deja `undefined` y todo lo que viene después no ocurre — el modal pregunta, el usuario confirma, y no pasa nada, sin error ni petición. Se rechaza esperarlo, guardar su resultado, y pasar como segundo argumento algo que no sea una función.
 
 ---
@@ -10296,7 +10301,7 @@ Las plantillas: lo que de verdad se compra, entre el catálogo y el inventario. 
 
 **Archivo:** `tests/unit/test_dcim_catalog.py` — 130 tests
 
-Catálogo de modelos (devicetype-library, CC0): qué subconjunto se guarda de cada YAML y por qué no el fichero entero; que los puertos se **cuentan** por tipo y no se listan; media U sin redondear; casar un modelo con lo que dijo el dispositivo como **propuesta**; importar de directorio y de zip **sin extraerlo nunca**; reimportar por origen sin arrasar lo tecleado a mano; y el trabajo de fondo — hilo, estado, uno solo a la vez y sin denominador inventado. Y **las imágenes vienen con la biblioteca**: `front_image: true` no es una imagen, es la afirmación de que existe una —y existe, en el mismo repositorio— así que se lee de al lado; que sin ella el modelo entra igual, porque fallar la importación entera por una foto sería cambiar mil modelos por una imagen; que no se busca la que el YAML dice que no hay; que lo guardado es el NOMBRE y no la afirmación, que no se puede dibujar; y que reimportar **no deja la carpeta creciendo** con ficheros a los que ya no apunta nadie. Y **de GitHub sin bajarse GitHub**: el repositorio pesa ochocientos cincuenta megas porque lleva una imagen de alzado por dispositivo, así que lo que se pide es el índice —una petición— y de sus nombres salen los fabricantes y sus cuentas sin descargar un solo modelo; que dispositivos y módulos se cuentan por separado, porque sumarlos haría parecer que un fabricante trae siete dispositivos cuando trae dos y cinco tarjetas; que el README y el esquema no inventan fabricantes; que al importar se piden **solo los elegidos**; que un modelo roto no se lleva por delante los otros cinco mil; y que hay un tope, porque cada fichero es una petición y seis mil seguidas son media hora. Y **las tres formas**: el repositorio trae dispositivos, módulos y armarios, que son la misma forma con tres sentidos —sin distinguirlas un transceptor ocupa U en un alzado y un armario de 42U figura como un equipo de 42U—; que las imágenes de módulo están en OTRA carpeta y con OTRO nombre, y que su YAML no dice que existan, así que preguntárselo es no buscarlas nunca; que lo que no cuelga de ninguno de los tres árboles no es un modelo (los tests del propio repositorio entraban como dispositivos); que de un armario se guardan sus medidas y sobreviven a guardarlo y leerlo; y que un zip SIN la forma de la biblioteca —el que alguien prepara a mano, plano— sigue entrando entero. Más los **básicos que vienen dentro del panel**, con su propia etiqueta para que reimportar la biblioteca no se los lleve por delante; y que **va diciendo por dónde va mientras lo hace**, con su fase, porque las filas no salen hasta el final y contar lo entregado contaba cero justo mientras duraba todo el trabajo. Y **traerlo todo por otro camino**: para los trescientos fabricantes son diez mil ochocientos ficheros y tres cuartos de hora, mientras que el mismo contenido en un zip baja en poco más de un minuto — así que existen los dos caminos, y se comprueba que el archivo se borra al acabar **también cuando la lectura revienta**, que es justo cuando alguien va a volver a intentarlo con el giga todavía puesto.
+Catálogo de modelos (devicetype-library, CC0) y sus básicos —que los de marca (Salto, Gantner) traen un dibujo SVG propio que viaja con el repositorio y que la foto del fabricante, si se baja, sustituye—: qué subconjunto se guarda de cada YAML y por qué no el fichero entero; que los puertos se **cuentan** por tipo y no se listan; media U sin redondear; casar un modelo con lo que dijo el dispositivo como **propuesta**; importar de directorio y de zip **sin extraerlo nunca**; reimportar por origen sin arrasar lo tecleado a mano; y el trabajo de fondo — hilo, estado, uno solo a la vez y sin denominador inventado. Y **las imágenes vienen con la biblioteca**: `front_image: true` no es una imagen, es la afirmación de que existe una —y existe, en el mismo repositorio— así que se lee de al lado; que sin ella el modelo entra igual, porque fallar la importación entera por una foto sería cambiar mil modelos por una imagen; que no se busca la que el YAML dice que no hay; que lo guardado es el NOMBRE y no la afirmación, que no se puede dibujar; y que reimportar **no deja la carpeta creciendo** con ficheros a los que ya no apunta nadie. Y **de GitHub sin bajarse GitHub**: el repositorio pesa ochocientos cincuenta megas porque lleva una imagen de alzado por dispositivo, así que lo que se pide es el índice —una petición— y de sus nombres salen los fabricantes y sus cuentas sin descargar un solo modelo; que dispositivos y módulos se cuentan por separado, porque sumarlos haría parecer que un fabricante trae siete dispositivos cuando trae dos y cinco tarjetas; que el README y el esquema no inventan fabricantes; que al importar se piden **solo los elegidos**; que un modelo roto no se lleva por delante los otros cinco mil; y que hay un tope, porque cada fichero es una petición y seis mil seguidas son media hora. Y **las tres formas**: el repositorio trae dispositivos, módulos y armarios, que son la misma forma con tres sentidos —sin distinguirlas un transceptor ocupa U en un alzado y un armario de 42U figura como un equipo de 42U—; que las imágenes de módulo están en OTRA carpeta y con OTRO nombre, y que su YAML no dice que existan, así que preguntárselo es no buscarlas nunca; que lo que no cuelga de ninguno de los tres árboles no es un modelo (los tests del propio repositorio entraban como dispositivos); que de un armario se guardan sus medidas y sobreviven a guardarlo y leerlo; y que un zip SIN la forma de la biblioteca —el que alguien prepara a mano, plano— sigue entrando entero. Más los **básicos que vienen dentro del panel**, con su propia etiqueta para que reimportar la biblioteca no se los lleve por delante; y que **va diciendo por dónde va mientras lo hace**, con su fase, porque las filas no salen hasta el final y contar lo entregado contaba cero justo mientras duraba todo el trabajo. Y **traerlo todo por otro camino**: para los trescientos fabricantes son diez mil ochocientos ficheros y tres cuartos de hora, mientras que el mismo contenido en un zip baja en poco más de un minuto — así que existen los dos caminos, y se comprueba que el archivo se borra al acabar **también cuando la lectura revienta**, que es justo cuando alguien va a volver a intentarlo con el giga todavía puesto.
 
 **Archivo:** `tests/unit/test_dcim_media.py` — 35 tests
 
@@ -10852,7 +10857,7 @@ a su vez tapa un rack, y un navegador de mentira que devuelve los tres bajo el p
 
 ## 182. Integración — Una planta, o el edificio entero, en 3D
 
-**Archivo:** `tests/integration/test_wa_dcim_site3d.py` — 33 tests
+**Archivo:** `tests/integration/test_wa_dcim_site3d.py` — 34 tests
 
 Ejecuta en `node` el guion de verdad del panel sobre una sede de tres plantas (sótano, baja y
 primera). La baja tiene un plano de 30 m, una sala girada 90° con un rack, una sala sin medidas
@@ -10878,6 +10883,7 @@ y su zona general con un rack de pasillo y una columna.
 | `TestLaRuedaAcercaHaciaElCursor::test_en_el_centro_no_se_mueve` | Con el cursor en el centro, acercar no mueve el centro de la vista |
 | `TestLaRuedaAcercaHaciaElCursor::test_a_un_lado_se_acerca_a_lo_que_hay_bajo_el_cursor` | Con el cursor a un lado, el punto bajo él se queda y la vista se le acerca en la misma proporción que el zoom |
 | `TestLaRuedaAcercaHaciaElCursor::test_alejando_al_tope_no_anda` | Alejando al tope, la rueda no anda hacia delante |
+| `TestLaRuedaAcercaHaciaElCursor::test_with_the_floors_apart_the_wheel_reaches_the_floor_under_the_pointer` | Reportado: con las plantas separadas y el sótano elegido, la rueda dejaba de acercar a metros de él —apuntaba a la altura del punto mirado, que flota en el aire—. Ahora apunta a la caja bajo el cursor y llega al suelo; reanclar no mueve nada en pantalla. Sin el ajuste, cae |
 | `TestLosRotulos::test_lo_que_tiene_nombre_y_nada_mas` | Llevan rótulo el rack y la pieza con etiqueta; una puerta sin etiqueta, no |
 | `TestLosRotulos::test_encima_de_lo_que_nombra` | El rótulo de un rack va sobre su techo |
 | `TestLosRotulos::test_las_salas_por_su_nombre` | En la planta, cada sala lleva su nombre |
@@ -11323,7 +11329,7 @@ de fondo diera los muros.
 
 ## 199. Integración — La sede de demostración
 
-**Archivo:** `tests/integration/test_dcim_demo.py` — 30 tests
+**Archivo:** `tests/integration/test_dcim_demo.py` — 31 tests
 
 `main.py dcim demo` sobre una base desechable. Se pidió una sede completa, con todo lo que ofrece el
 inventario, para enseñarlo.
@@ -11346,7 +11352,8 @@ inventario, para enseñarlo.
 | `TestWhatTheDemoHolds::test_nothing_in_a_room_overlaps_and_every_door_gives_onto_a_corridor` | Nada de una sala pisa a otra pieza de la misma sala, y delante de cada puerta hay al menos 1,2 m antes de la sala de enfrente |
 | `TestWhatTheDemoHolds::test_some_items_in_warning_and_in_error_without_watching_anything` | Equipos de la demo en aviso y en error con un estado de demostración: sin dispositivo ni comprobación, leído por `item_state`, y dicho en su descripción |
 | `TestWhatTheDemoHolds::test_access_control_a_gateway_per_floor_cylinders_lockers_and_turnstiles` | Control de accesos en la demo: un IQ por planta, cilindros en las puertas, cerraduras de taquilla, dos tornos; cada cerradura cuelga del IQ de su planta; algunas en aviso o en error |
-| `TestWhatTheDemoHolds::test_the_whole_building_on_the_map_with_what_hangs_on_its_walls` | El edificio entero en el mapa: lo que va en pared (IQ, extintores, cuadros, BIE, pulsadores, alumbrado, botiquín, DEA) toca una pared de su sala; cada sala tiene detector, alumbrado de emergencia y extintor; cada planta, BIE, pulsadores y su cuadro; recepción, botiquín y DEA |
+| `TestWhatTheDemoHolds::test_the_whole_building_on_the_map_with_what_hangs_on_its_walls` | El edificio entero en el mapa: lo que va en pared (IQ, extintores, cuadros, BIE, pulsadores, alumbrado, botiquín, DEA) toca una pared de su sala; cada sala tiene detector, alumbrado de emergencia y extintor (los aseos no: les sirve el del pasillo); cada planta, BIE, pulsadores y su cuadro; recepción, botiquín y DEA |
+| `TestWhatTheDemoHolds::test_every_source_has_its_place_rack_or_plan_piece` | Visto en el 3D: la acometida, los cuadros y los SAI salían en columna fuera del edificio. Cada fuente de la sede principal es su equipo de rack o su pieza del plano, una pieza por fuente |
 | `TestThePanelOverIt::test_the_site_summary_counts_its_devices_by_state` | El resumen de una sede trae cuántos dispositivos hay caídos, en aviso y bien, y los pinta en tarjetas de su color —resaltadas cuando hay alguno, apagadas a cero—; las de algo mal llevan al cuadro de mando |
 | `TestThePanelOverIt::test_the_board_and_the_capacity_read_the_fleet_state_once` | Con la demo creada, el cuadro de mando y la capacidad leen el estado de la flota una vez por petición, no una por equipo (eran 451) |
 | `TestWhatTheDemoHolds::test_a_rack_in_a_corridor_hangs_on_a_wall` | Un rack fuera de una sala va colgado de una pared —la trasera contra un tabique, fuera del hueco de sus puertas—, no suelto en mitad del pasillo |
@@ -11434,7 +11441,7 @@ taquilla: de qué IQ cuelga y su estado. Se pidió un sistema de acceso como Sal
 
 ## 203. Integración — Lo que hay bajo el puntero en el 3D, y un rack abierto en su sitio
 
-**Archivo:** `tests/integration/test_wa_dcim_3d_hover.py` — 18 tests
+**Archivo:** `tests/integration/test_wa_dcim_3d_hover.py` — 21 tests
 
 Se pidió que al pasar el ratón por el 3D se diga qué es cada cosa (la puerta con su nombre, los
 armarios, los racks…) y que un rack al que se llega navegando se pueda abrir para ver lo de dentro.
@@ -11452,9 +11459,12 @@ armarios, los racks…) y que un rack al que se llega navegando se pueda abrir p
 | `TestWhatIsUnderThePointer::test_nothing_says_nothing` | Sin nada debajo, nada |
 | `TestWhatIsUnderThePointer::test_an_open_rack_is_glass` | Un rack abierto es de cristal: el puntero lo atraviesa |
 | `TestWhatIsUnderThePointer::test_in_a_floor_the_room_under_it` | En una planta, la sala por cuyo suelo pasa |
+| `TestDoorsInWalls::test_a_door_cuts_its_gap_and_a_lintel_only_under_a_taller_wall` | Reportado desde la pantalla: con muros bajos, un trozo de muro cruzaba la puerta. Cada muro de la sala se parte donde hay una puerta (también girada, en un muro lateral), con dintel solo si el muro es más alto que ella; y el muro del plano no pinta dintel sobre una puerta cuando no queda muro encima |
+| `TestAReservedZone::test_off_the_floor_and_marked_as_reserved` | Reportado desde la pantalla: la zona reservada salía con rayas que cambiaban con el ángulo —su cara de abajo, en el plano del suelo, se peleaba con él—. Lo transparente que nace en el suelo (zona, pasillo confinado) empieza 3 cm por encima, y una zona lleva borde a trazos y rayado diagonal, dentro de ella |
+| `TestTheBuilding::test_only_the_chosen_floors_labels_and_the_rest_still_pointable` | Reportado desde la pantalla: con las plantas de encima ocultas se leían los rótulos de todas las de debajo a la vez, mezclados. En el edificio solo lleva rótulos la planta elegida; las demás se siguen señalando y pulsando |
 | `TestARackOpenedWhereItStands::test_closed_it_is_a_box` | Cerrado, es una caja sin nada dentro |
 | `TestARackOpenedWhereItStands::test_open_it_holds_its_items_in_its_place` | Abierto, sus equipos en su sitio y la caja de cristal |
-| `TestARackOpenedWhereItStands::test_its_labels_go_with_it_and_no_stripe_hides_it` | Visto en el navegador: los rótulos de sus equipos van con él (salían en la esquina de la sala), abierto no lleva la franja maciza delante, y la etiqueta de un equipo dice su sala |
+| `TestARackOpenedWhereItStands::test_its_labels_go_with_it_and_no_stripe_hides_it` | Visto en el navegador: los rótulos de sus equipos van con él (salían en la esquina de la sala), abierto no lleva nada delante, y la etiqueta de un equipo dice su sala. Y el frente cerrado es una puerta —hoja más clara que el cuerpo, banda de estado arriba, tirador— y no una plancha del color del estado: desde el extremo de una fila, el pasillo frío se leía como el de las traseras |
 | `TestARackOpenedWhereItStands::test_opening_it_flies_to_its_front` | Al abrirlo, la cámara va a su frente y no se queda mirando la trasera |
 | `TestARackOpenedWhereItStands::test_turned_its_items_turn_with_it` | Girado, lo de dentro gira con él |
 | `TestARackOpenedWhereItStands::test_the_cards_open_and_close_it` | La ficha del rack lo abre; la de un equipo dentro lo cierra |
@@ -11479,3 +11489,176 @@ ruta del modal del dispositivo, con sus permisos—; uno de la demo, el motivo q
 | `TestTheScreensSayIt::test_without_permission_it_says_so` | Sin permiso para ver la máquina, lo dice en vez de dejar un hueco |
 | `TestTheScreensSayIt::test_go_to_device_from_every_card_that_has_one` | «Ir al dispositivo» —a su página en Infraestructura, con sus resultados SNMP y sus módulos— en la ficha del 3D (equipos y piezas), en la ventana del motivo y en cada fila del cuadro de mando, delante de Editar; sin dispositivo vinculado, la ficha dice por qué no está |
 | `TestTheScreensSayIt::test_said_wherever_it_is_clicked` | Lo dicen la ficha del 3D (equipos y piezas), la lista del rack, el formulario del equipo, el cuadro de mando y el inspector del plano |
+
+## 205. Integración — `/3d`, el inventario en 3D como página propia
+
+**Archivo:** `tests/integration/test_wa_dcim_explore3d.py` — 11 tests
+
+Se pidió sacar el 3D a una página aparte, como la de estado pero con sesión: las sedes en un mapa
+con su estado, al pulsar una la sede como edificio, y desde ahí el edificio o planta a planta,
+recorriendo plantas y sedes. Sin tocar lo que ya hace el panel: la página reutiliza sus piezas y
+redefine, solo para sí, las funciones por las que esas piezas vuelven al panel.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestTheRoute::test_a_guest_goes_to_the_login` | Sin sesión, al login |
+| `TestTheRoute::test_without_dcim_view_the_panel_instead` | Sin `dcim_view`, al panel: la página solo dibujaría negativas |
+| `TestTheRoute::test_the_page_its_stage_and_not_the_panel` | La página con su escenario, el motor 3D y el 3D de la sede, sin las secciones del panel y sin caché |
+| `TestThePage::test_the_maps_header_sums_the_sites_by_state` | Pedido: junto a «Sedes», cuántas hay bien, en aviso, caídas y sin vigilar (para que las cuentas cuadren). Las caídas laten; un estado sin ninguna no se puede pulsar; cada botón señala en el mapa la siguiente sede de su estado |
+| `TestThePage::test_the_panels_pieces_redraw_this_page` | `renderDcim`, `_dcimUrl`, ir a una sede y planta/edificio repintan ESTA página; el muñeco de la barra del visor arranca el paseo de juego (el del motor solo oía el teclado con el lienzo enfocado y su F era «vista inicial»), y el ratón se captura dentro del clic, antes de esperar al cambio de vista |
+| `TestThePage::test_a_rack_or_a_device_opens_in_the_panel` | Abrir un rack o un dispositivo lo abre en el panel, en otra pestaña |
+| `TestThePage::test_where_one_is_sites_the_site_and_its_floors` | Arriba, Sedes › la sede (con las demás para saltar) › sus plantas de abajo arriba, la actual marcada y sin bajar de la primera |
+| `TestThePage::test_the_address_says_where_one_is` | La dirección dice sede, planta y modo: un enlace o un F5 vuelven al mismo sitio |
+| `TestThePage::test_walking_a_click_opens_a_rack_and_f_toggles_the_one_ahead` | Reportado desde la pantalla: paseando, pulsar un rack no daba forma de abrirlo (el ratón capturado no deja pulsar la ficha). Un clic en un rack cerrado lo abre en su sitio; F abre o cierra el de delante, también desde uno de sus equipos; lo demás saca su ficha |
+| `TestThePage::test_the_crosshair_says_what_can_be_done` | Se pidió un aviso de qué tecla pulsar sobre lo que se puede usar: abrir o cerrar el rack que se mira (con su nombre), y en la escalera E/Q; sobre nada, nada |
+| `TestThePage::test_changing_floor_enters_the_history` | Visto en el navegador: cambiar de planta no entraba en el historial y «atrás» se saltaba la página. `_dcimUrl`, al que llama `_dcsGo` a mitad del cambio, no escribe la dirección |
+
+## 207. Integración — Una fuente de energía es una pieza del plano
+
+**Archivo:** `tests/integration/test_dcim_source_piece.py` — 3 tests
+
+Reportado desde la pantalla: en el 3D, la acometida, los cuadros y los SAI salían en columna fuera
+del edificio, al lado de ellos mismos dibujados dentro como piezas. Una fuente no tenía sitio; ahora
+dice qué pieza del plano es (`dc_source.feature_uid`) y el 3D la dibuja ahí.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestTheRoutes::test_a_source_is_a_panel_of_its_site` | Una fuente es un cuadro de su sede; la lista de fuentes ofrece las piezas candidatas con la fuente que ya es cada una, y los circuitos dicen la pieza |
+| `TestTheRoutes::test_not_a_door_not_another_sites_and_not_twice` | Ni una puerta, ni una pieza de otra sede, ni una que no existe, ni una que ya es otra fuente; volver a poner la suya o quitarla, sí |
+| `TestThe3D::test_a_source_is_drawn_at_its_piece_and_only_the_unplaced_one_outside` | Cada pieza publica su punto; la fuente que es una pieza no lleva caja aparte y su línea sale de la pieza; solo la que no tiene sitio sigue en la fila de fuera |
+
+## 208. Integración — El 3D realista y el paseo como en un juego (prototipo en `/3d`)
+
+**Archivo:** `tests/integration/test_wa_viewer3d_real.py` — 10 tests
+
+Se pidió un modo 3D realista «como en los juegos», con paseo en primera persona y puertas que se
+abren. Prototipo con el motor propio y solo en `/3d`: otro pintor para la misma escena
+(`infra/_viewer3d_real.html`) al que el motor cede el fotograma cuando el visor lo pide, y un paseo
+con choques. Se fija la aritmética —materiales, puertas, qué para a quien camina— y que el panel ni
+lo carga ni cambia; la imagen se miró en un navegador.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestWhereItLives::test_only_the_3d_page_loads_it` | Solo `/3d` carga el modo realista; el panel no |
+| `TestWhereItLives::test_the_engine_hands_the_frame_over_only_when_asked` | El motor cede el fotograma solo si el visor pide `realista` y el pintor existe |
+| `TestTheArithmetic::test_each_thing_has_its_material` | Suelo, muro, rack, equipo, mesa (madera), cuadro (metal) y cable, cada uno con su material |
+| `TestTheArithmetic::test_the_tile_lines_give_way_to_the_floors_own` | Las líneas de baldosa de la maqueta se quitan: el suelo dibuja las suyas |
+| `TestTheArithmetic::test_an_open_racks_glass_is_not_a_layer_over_what_it_shows` | Reportado desde el paseo: un rack abierto parecía tener una lámina de puntos encima. Su caja de cristal —para pulsarlo y cerrarlo— se pintaba con el material de la puerta perforada; ya no se pinta (pulsar mira la escena, no el dibujo) |
+| `TestTheArithmetic::test_walking_the_sun_looks_at_what_is_round_the_walker` | Reportado desde el paseo: los bordes de las sombras salían en escalones. Desde la órbita, el sol cubre la planta entera; paseando, 18 m alrededor de quien camina, recentrados cada 2 m: el doble de nítido |
+| `TestTheArithmetic::test_a_door_turns_on_its_hinge_and_away_from_who_comes` | Una puerta gira un cuarto de vuelta sobre su bisagra, que no se mueve, y hacia el lado contrario a quien llega |
+| `TestTheArithmetic::test_leaving_the_walk_gives_the_camera_a_radius_and_walking_again_resumes` | Reportado desde la pantalla: tras Esc no se podía alejar la vista —la cámara se quedaba con los 2 cm de radio de quien camina, y la rueda los multiplica—. Al salir vuela a una vista orbital a 8 m, detrás de donde se estaba; y volver a pasear sigue en el mismo punto |
+| `TestTheArithmetic::test_zoom_narrows_the_view_and_the_pointing` | Se pidió zoom al pasear, para ver los puertos de detrás de un servidor: el campo de visión llega a la cámara, y el rayo de señalar lo usa, para que con zoom el clic caiga en el punto de mira |
+| `TestTheArithmetic::test_what_stops_a_walker` | Paran un rack y un muro, pero no el muro en el hueco de su puerta, ni una zona, ni la escalera, ni lo que va por encima de la cabeza |
+
+## 206. Meta — Lo que `/3d` ejecuta al cargar no puede necesitar lo que no incluye
+
+**Archivo:** `tests/meta/test_explore3d_includes.py` — 3 tests
+
+`explore3d.html` no carga el paquete entero del panel, sino una parte. Una sentencia al nivel
+superior de un parcial se ejecuta al cargar, y si nombra algo de un fichero que la página no
+incluye, la página se para con un `ReferenceError` y no dibuja nada, mientras el panel sigue
+funcionando. Pasó dos veces al escribirla (`FIELD_PICKERS`, `createListTable`).
+
+| Test | Qué verifica |
+|------|-------------|
+| `test_the_page_includes_files_that_exist` | Todo lo que incluye existe |
+| `test_nothing_it_runs_on_load_needs_a_file_it_does_not_include` | Ninguna sentencia de nivel superior de lo incluido usa un nombre definido solo en un parcial no incluido; si lo hace, dice el fichero, la línea y de dónde es el nombre |
+| `test_no_constant_it_reads_lives_in_a_file_it_does_not_include` | Reportado desde la pantalla: abrir un rack en `/3d` no hacía nada —su 3D leía `_DC_QUIET_ROLES`, de la pantalla de dispositivos, que `/3d` no incluye— y el `ReferenceError` llegaba al pulsar, no al cargar. Ninguna constante (`_MAYUSCULAS`) usada en lo incluido, también dentro de una función, puede estar definida solo en un parcial no incluido |
+
+## 209. Integración — Lo que está en una sala y no en un rack: puestos, rosetas y su rastreo
+
+**Archivo:** `tests/integration/test_wa_dcim_room_items.py` — 13 tests
+
+Un PC de un puesto, su teléfono, una impresora, un AP del techo, una roseta de pared: un `dc_item`
+con `placement = 'room'`, su sitio medido como una pieza del plano. Sus rutas propias, de quién es
+(el de la sala), el cable de la roseta al panel de parcheo, el rastreo que lo sigue por la roseta
+y el panel hasta el puerto del switch, el mazo horizontal (`hnet`) de los circuitos, y cómo lo
+pintan el plano y el 3D.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestTheRoutes::test_listed_with_their_box_and_their_role_defaults` | Se listan con su caja (sitio, tamaño, montaje) y los valores de su clase donde la fila no dice otra: el PC sobre la mesa, la roseta en la pared |
+| `TestTheRoutes::test_moved_turned_renamed_but_never_into_a_rack` | Se mueven, giran y renombran; los campos del rack (rack, U, `placement`) no son de esta ruta, y un equipo de rack no es un equipo de sala |
+| `TestTheRoutes::test_bad_values_are_refused` | Una clase o un montaje que no existen, un número que no lo es o es absurdo, una sala que no existe |
+| `TestTheRoutes::test_carried_to_another_room_of_the_same_site_only` | A otra sala de la misma sede sí; a una de otra sede, no |
+| `TestTheRoutes::test_deleted_with_its_cables` | Borrarlo se lleva sus cables |
+| `TestTheRoutes::test_the_plan_and_the_3d_get_them` | Las piezas de la sala (el plano) y el contenido de la sede (el 3D) los traen |
+| `TestWhoseItIs::test_somebody_elses_room_is_not_read_nor_written` | En la sala de otra empresa, ni se listan, ni se ponen, ni se mueven, ni se rastrean |
+| `TestTheTrace::test_from_the_pc_through_outlet_and_panel_to_the_switch_port` | PC → roseta A (sale por A-R) → panel 7 (sale por 7-R) → switch Gi1/0/7, cada salto con dónde está y el cable que llega |
+| `TestTheTrace::test_and_back_from_the_switch_to_the_pc` | El mismo camino desde el switch |
+| `TestTheTrace::test_one_port_only` | `?port=` solo sigue ese puerto |
+| `TestTheTrace::test_a_loop_of_patch_cords_does_not_hang_it` | Un bucle de latiguillos —un error real de una instalación real— no cuelga el rastreo |
+| `TestTheHorizontalBundle::test_from_the_room_to_its_rack` | Los cables de la sala al rack salen en `hnet`, agrupados por sala y rack, y no como troncal entre racks |
+| `TestTheScreen::test_the_plan_draws_them_and_the_3d_stands_them_up` | El plano los dibuja agarrables con su abreviatura y su estado; el 3D los levanta a su altura con su ficha y un punto de donde sale el cable; el techo de la sala tiene el suyo; la ficha ofrece el rastreo |
+
+## 210. Integración — El cableado estructurado de la demo
+
+**Archivo:** `tests/integration/test_dcim_demo_cabling.py` — 12 tests
+
+Se pidió que la demo fuera una oficina real cableada como la dejaría un instalador: cada puesto con
+su roseta doble (PC en A, teléfono en B), su tirada horizontal al panel de su repartidor, el panel
+al switch de acceso, el switch al núcleo, un anillo de fibra entre repartidores y una troncal de
+cobre entre los dos racks de red del CPD. Se comprueba que el cableado se sostiene.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestTheDesks::test_an_office_full_of_end_devices` | Hay PC, teléfonos, impresoras, AP, cámaras y pantallas, y una roseta por PC al menos |
+| `TestTheDesks::test_every_end_device_reaches_a_switch_port` | Todo equipo final, rastreado, acaba en un switch |
+| `TestTheDesks::test_a_pc_goes_through_its_outlet_and_a_patch_panel` | Un PC pasa por su roseta y por un panel de parcheo antes del switch |
+| `TestTheCables::test_no_port_takes_two_cables` | Ningún puerto lleva dos cables |
+| `TestTheCables::test_every_outlet_jack_is_a_horizontal_run_of_90_m_at_most` | Las dos tomas de cada roseta van cableadas a un panel de parcheo, y ninguna tirada pasa de los 90 m de la norma |
+| `TestTheCables::test_a_fibre_ring_that_closes_and_a_trunk_between_the_network_racks` | El anillo de fibra se cierra (dos fibras en cada panel) y la troncal tiene sus 12 cables |
+| `TestTheCables::test_every_access_switch_has_an_uplink` | Cada switch de acceso de un repartidor sube al núcleo |
+| `TestWhereTheyStand::test_inside_their_room` | Ningún equipo de sala queda fuera de su sala |
+| `TestTheCCTV::test_cameras_where_it_is_worth_recording_and_not_over_the_desks` | Se pidió el CCTV que faltaba. Cámaras en el aparcamiento, el vestíbulo, la fachada de la entrada, el muelle, el CPD, la HPC, servidores y energía; ninguna en oficinas ni despachos (LOPDGDD art. 89: no se graba a la gente trabajando) |
+| `TestTheCCTV::test_a_recorder_in_the_data_centre_to_both_cores_with_its_disks` | El grabador (NVR) en el CPD, con un enlace a cada núcleo, sus ocho discos y la retención de 30 días dicha (LOPDGDD art. 22.3); en aviso por un disco degradado |
+| `TestTheCCTV::test_watched_from_reception_and_the_noc` | Se mira desde recepción y desde el videowall del NOC, cada pantalla con su roseta y su camino al switch |
+| `TestTheCCTV::test_the_signs_where_one_comes_in` | Los carteles de zona videovigilada donde se entra: la calle, el aparcamiento, el muelle (LOPDGDD art. 22.4) |
+
+## 211. Integración — Las plantas de la demo, conforme a la normativa española
+
+**Archivo:** `tests/integration/test_dcim_demo_floors.py` — 12 tests
+
+Reportado desde la pantalla: la segunda planta tenía «pasillos enanísimos» —salas separadas
+500 mm, una rendija de 380 mm entre dos tabiques que parecía un pasillo— y la única salida de una
+planta de 30 m era una escalera en una esquina. Se pidió pensar como arquitecto, diseñador e
+instalador, cada uno con su normativa. Se comprueba lo que esas normas miden en un plano.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestCorridors::test_two_rooms_share_a_wall_or_leave_a_corridor_between_them` | Dos salas comparten tabique o dejan entre ellas un pasillo de 1,20 m libres (CTE DB-SUA 9); ninguna rendija. Probado volviendo a abrir 500 mm entre dos salas: cae |
+| `TestCorridors::test_every_room_opens_onto_the_corridor` | La puerta de cada sala da al pasillo |
+| `TestCorridors::test_nothing_hung_in_the_corridor_sticks_out_below_2_20_m` | Un rack colgado en el pasillo va por encima de 2,20 m (CTE DB-SUA 2: nada sobresale más de 150 mm entre 0,15 y 2,20 m) |
+| `TestWaysOut::test_two_exits_from_every_floor` | Dos salidas por planta: el núcleo de escalera al este y una puerta en la fachada oeste al final del pasillo (escalera exterior; la calle en la planta baja) |
+| `TestWaysOut::test_no_route_is_longer_than_50_m` | Desde la esquina más lejana de cada sala, por su puerta y por el pasillo, hasta la salida más cercana: 50 m como mucho (CTE DB-SI 3, con dos salidas) |
+| `TestWaysOut::test_no_room_stands_in_the_stair_core` | Ninguna sala ocupa el hueco de la escalera |
+| `TestForEveryone::test_an_accessible_lift_on_every_floor` | Ascensor accesible en todas las plantas (CTE DB-SUA 9) |
+| `TestForEveryone::test_toilets_with_an_accessible_one_where_people_work` | Aseos en cada planta con puestos, en el mismo sitio en todas (las bajantes rectas), con uno accesible donde gira una silla de ruedas (Ø 1,50 m) |
+| `TestFireAndCables::test_special_risk_rooms_behind_a_fire_door` | Los locales de riesgo especial —energía, grupo, baterías, bombas PCI, CPD, HPC, servidores— tienen puerta EI2 45-C5 (CTE DB-SI 1) |
+| `TestFireAndCables::test_data_and_power_in_separate_trays_along_the_corridor` | Datos y fuerza por el pasillo en bandejas distintas y separadas (UNE-EN 50174-2) |
+| `TestWhichWayThingsFace::test_nothing_faces_a_wall` | Reportado desde la pantalla: racks, armarios y mesas de la demo miraban a la pared (un rack del laboratorio con el frente a 30 cm de ella, un armario mural colgado del revés, los bastidores de baterías, los SAI, las encimeras). Todo lo que tiene frente mira a su sala, con delante el espacio desde el que se trabaja: 1 m un rack, un SAI o un cuadro (UNE-EN 50600 / TIA-942), 0,7 m un armario, 0,6 m una mesa. Con el rack del laboratorio como estaba, cae |
+| `TestWhichWayThingsFace::test_a_desks_pc_and_outlet_are_at_its_back` | El PC y la roseta de un puesto, al fondo de la mesa y no en el borde donde uno se sienta. Con el cálculo de antes, cae |
+
+## 212. Integración — Resaltar en el 3D lo que se pulsa
+
+**Archivo:** `tests/integration/test_wa_dcim_3d_select.py` — 12 tests
+
+Se pidió poder elegir en el mapa 3D una línea de red o de corriente, un servidor o un dispositivo
+y que se resalte: el cable de un servidor a su switch, o un enlace de una planta a otra, solo ese
+cable. Lo pulsado y lo suyo se quedan; lo demás se apaga. Un equipo trae su camino entero (el
+rastreo); un recorrido lista sus cables y uno se dibuja solo encima del mazo apagado.
+
+| Test | Qué verifica |
+|------|-------------|
+| `TestTheData::test_a_run_between_floors_lists_its_cable_with_both_ends_named` | Un recorrido entre plantas lista su cable con los dos extremos nombrados y sus puertos |
+| `TestTheData::test_each_hop_of_a_trace_says_its_rack_and_room` | Cada salto del rastreo dice su rack y su sala |
+| `TestTheArithmetic::test_a_rack_brings_its_runs_and_its_power` | Un rack: sus recorridos (también el horizontal) y sus líneas de corriente con su fuente |
+| `TestTheArithmetic::test_a_run_brings_its_cables_its_racks_and_their_ends` | Un recorrido: sus cables, sus dos racks y los equipos de los extremos |
+| `TestTheArithmetic::test_a_cable_is_itself_and_its_two_ends` | Un cable: él, sus dos extremos y sus racks; no el mazo entero |
+| `TestTheArithmetic::test_power_a_line_or_a_source_with_its_racks` | Una línea de corriente o una fuente, con sus racks |
+| `TestTheArithmetic::test_a_device_brings_its_cables_and_its_whole_path` | Un equipo: sus cables y, por el rastreo, el camino hasta el núcleo |
+| `TestTheArithmetic::test_the_rest_fades_and_stays_pickable_and_the_line_thickens` | Lo demás se apaga y se sigue pudiendo pulsar; la línea resaltada engorda sin alargarse; las paredes no cambian; los extremos llevan halo; y los tres visores lo aplican (sin la llamada en `_dc3dAddFoco`, cae) |
+| `TestTheArithmetic::test_one_cable_of_a_bundle_is_drawn_alone_over_it` | Un cable de un mazo se dibuja solo encima; con el recorrido entero elegido, no hace falta |
+| `TestTheArithmetic::test_a_device_lists_its_connections_and_one_port_shows_only_its_own` | Se pidió: al seleccionar un dispositivo, todo lo conectado con él; al seleccionar uno de sus puertos, solo lo conectado por ese. Su ficha lista una conexión por puerto, de su puerto a lo que hay al otro lado; pulsando una se queda solo ese camino, y «Todas las conexiones» vuelve |
+| `TestTheArithmetic::test_opening_the_selected_rack_shows_what_is_inside` | Reportado: abrir un rack solo funcionaba paseando. En las otras vistas el clic lo seleccionaba antes, y su contenido —fuera de la selección— salía apagado: un rack abierto que parecía vacío. Abrirlo quita su propia selección; la de otra cosa se mantiene |
+| `TestTheArithmetic::test_a_runs_card_lists_its_cables_and_offers_to_clear` | La ficha de un recorrido lista sus cables para elegir uno, y ofrece quitar el resaltado |

@@ -1,0 +1,457 @@
+{# ================================================================
+   /3d — la página del inventario en 3D (`explore3d.html`).
+
+   Las sedes en un mapa con su estado; al pulsar una, la sede en 3D, el edificio entero; y desde
+   ahí, el edificio o planta a planta, subiendo y bajando de planta y pasando a otra sede sin
+   volver al mapa. La dirección dice dónde se está (`?site=…&floor=…&mode=…`), así que un
+   enlace o un F5 vuelven al mismo sitio y «atrás» del navegador desanda.
+
+   **Nada de lo que dibuja es nuevo.** El mapa es el del cuadro de mando (`_sitemap.html`), el
+   3D es el de la sede (`_site3d.html`) con sus fichas, su etiqueta al pasar el ratón y sus
+   racks que se abren en su sitio. Esas piezas, cuando cambia algo, llaman a `renderDcim()` y
+   escriben la dirección con `_dcimUrl()`; aquí no hay sección del inventario que repintar, así
+   que esta página define esas funciones otra vez —va la última, y la última definición es la
+   que vale— para repintar ESTA página. Lo que en el panel abre una pantalla del panel (la
+   ficha de un rack, la de un dispositivo, editar un equipo) aquí la abre en el panel, en otra
+   pestaña: esta página es para mirar.
+   ================================================================ #}
+
+//: Qué se mira: `'map'`, las sedes en el mapa, o `'site'`, una sede en 3D.
+let _x3View = 'map';
+//: Cargando una sede: se pinta un aviso en vez del visor de la anterior.
+let _x3Busy = false;
+//: El modo realista (`_viewer3d_real.html`): luz, sombras y materiales. Se recuerda en el
+//: navegador, como las demás preferencias de cómo se mira.
+let _x3Real = (() => { try { return localStorage.getItem('ss.x3.real') === '1'; } catch (_) { return false; } })();
+
+const _X3_MAIN = 'x3-main';
+const _X3_CRUMBS = 'x3-crumbs';
+const _X3_Q_SITE = 'site', _X3_Q_FLOOR = 'floor', _X3_Q_MODE = 'mode';
+
+// ── Lo que en el panel lleva a la sección del inventario, aquí lleva a esta página ──────────
+
+function renderDcim() { _x3Render(); }
+// La dirección la escribe solo esta página, al navegar (`_x3Url`). Las piezas del panel llaman
+// a `_dcimUrl` en mitad de un cambio —`_dcsGo` lo hace al cambiar de planta—, y escribir ahí la
+// planta nueva dejaba el `push` de después sin nada que añadir: cambiar de planta no entraba
+// en el historial, y «atrás» se saltaba la página entera.
+function _dcimUrl() { /* nada: ver `_x3Url` */ }
+function _dcimRemember() { /* sin árbol del inventario que recordar */ }
+function _dcimBoardGoSite(uid) { return _x3OpenSite(uid); }
+
+/** Planta o edificio, desde la barra del visor: lo mismo que en el panel —y recordado igual—,
+ *  y además escrito en la dirección. */
+function _ds3SetMode(m) {
+    try { localStorage.setItem('ss.ds3.mode', m === 'building' ? 'building' : 'floor'); }
+    catch (_) { /* sin almacén */ }
+    return _x3Go('', m);
+}
+function dcimGoSite(uid) { return _x3OpenSite(uid); }
+
+/** Pulsar dos veces una sala: en el edificio, ir a SU planta; en una planta, abrir su plano
+ *  en el panel, que es donde se trabaja con él. */
+async function _dcimOpenPlan(roomUid) {
+    const sala = _x3Room(roomUid);
+    if (_ds3Mode === 'building' && sala && sala.floor_uid) return _x3Go(sala.floor_uid, 'floor');
+    _x3Panel('/dcim?room=' + encodeURIComponent(roomUid));
+}
+
+function _dcimLoadRack(uid) { _x3Panel('/dcim?rack=' + encodeURIComponent(uid)); }
+function _dcimOpenDevice(uid) { _x3Panel('/infra?device=' + encodeURIComponent(uid)); }
+
+/** «Editar» en la ficha de un equipo: su rack en el panel, donde está el formulario. */
+function _dcimOpen(_modo, kind, _padre, uid) {
+    const V = ss3dGet(_DC3D_BOX);
+    const caja = V && ((V.escena || {}).cajas || []).find(k => k.lee && String(k.lee.uid) === String(uid));
+    const rack = kind === 'rack' ? uid : (caja && caja.lee.rack) || '';
+    _x3Panel(rack ? '/dcim?rack=' + encodeURIComponent(rack) : '/dcim');
+}
+
+function _x3Panel(url) {
+    window.open(url, '_blank', 'noopener');
+}
+
+// ── Los datos ────────────────────────────────────────────────────────────────────────────
+
+/** Las sedes con su estado y su mapa (el cuadro de mando) y el árbol de sedes y salas, que
+ *  es de donde abre una sede `_dcsOpen`. */
+async function _x3Load() {
+    const [me, cuadro, arbol] = await Promise.all([
+        apiGet('/api/v1/me'), apiGet('/api/v1/dcim/board'), apiGet('/api/v1/dcim/sites')]);
+    currentUser = me || {};
+    _dcimBoard = cuadro || {sites: []};
+    _dcimMap = true;
+    _dcimData = Object.assign(_dcimData || {}, {sites: (arbol || {}).sites || []});
+}
+
+/** Volver a preguntar: el estado de las sedes y, con una abierta, lo que hay dentro. */
+async function _x3Refresh() {
+    await _x3Load();
+    if (_x3View === 'site' && _dcsPlan) {
+        const site = _dcimData.sites.find(s => s.uid === _dcsPlan.site.uid);
+        if (site) _dcsPlan.site = site;
+        await _dcsLoadContents();
+        _x3Stop3d();
+        _x3Start3d();
+    }
+    _x3Render();
+    showToast(t('x3_refreshed'), 'success');
+}
+
+function _x3Room(uid) {
+    for (const s of (_dcimData.sites || []))
+        for (const r of (s.rooms || [])) if (String(r.uid) === String(uid)) return r;
+    return null;
+}
+
+function _x3SiteState(uid) {
+    return (((_dcimBoard || {}).sites || []).find(s => s.uid === uid) || {}).state || '';
+}
+
+// ── Ir de un sitio a otro ────────────────────────────────────────────────────────────────
+
+/** Abrir una sede en 3D: el edificio entero, salvo que se pida una planta. */
+async function _x3OpenSite(uid, floorUid, mode, desdeDireccion) {
+    if (!(_dcimData.sites || []).some(s => s.uid === uid)) return _x3ShowMap(desdeDireccion);
+    _ds3Mode = mode === 'floor' ? 'floor' : 'building';
+    _x3View = 'site';
+    _x3Busy = true;
+    _x3Render();
+    // `_dcsOpen` trae las plantas, el plano y lo que hay dentro, y cierra el visor anterior.
+    await _dcsOpen(uid, floorUid);
+    _x3Busy = false;
+    _x3Start3d();
+    _x3Url(!desdeDireccion);
+    _x3Render();
+}
+
+/** Ir a una planta de la sede abierta, y cómo mirarla. */
+async function _x3Go(floorUid, mode) {
+    if (!_dcsPlan) return;
+    if (mode) _ds3Mode = mode === 'floor' ? 'floor' : 'building';
+    if (floorUid && floorUid !== _dcsPlan.floor) {
+        _x3Stop3d();
+        await _dcsGo(floorUid);
+        _x3Start3d();
+    }
+    if (_ds3Mode === 'building') _ds3LoadImages();
+    _x3Url(true);
+    _x3Render();
+}
+
+/** La planta de arriba (+1) o la de abajo (-1). */
+function _x3Step(paso) {
+    const plantas = _x3Floors();
+    const i = plantas.findIndex(f => f.uid === (_dcsPlan || {}).floor);
+    const otra = plantas[i + paso];
+    if (otra) _x3Go(otra.uid, _ds3Mode);
+}
+
+function _x3ShowMap(desdeDireccion) {
+    if (ss3dFpsOn()) ss3dFpsStop();
+    _x3Stop3d();
+    _dcsPlan = null;
+    _x3View = 'map';
+    if (!desdeDireccion) _x3Url(true);
+    _x3Render();
+}
+
+function _x3Start3d() {
+    _dc3d = {on: true, build: _ds3Scene, keyOf: _ds3Key, onPick: _ds3Pick, onHover: _ds3Hover};
+    if (_ds3Mode === 'building') _ds3LoadImages();
+}
+
+function _x3Stop3d() {
+    if (_dc3d) _dc3dStop();
+}
+
+/** Las plantas de la sede abierta, de abajo arriba. */
+function _x3Floors() {
+    return ((_dcsPlan || {}).floors || []).slice()
+        .sort((a, b) => (Number(a.level) || 0) - (Number(b.level) || 0));
+}
+
+// ── La dirección ─────────────────────────────────────────────────────────────────────────
+
+/** Escribir dónde se está. `nueva`: una entrada más en el historial —otra sede, otra planta,
+ *  el mapa— para que «atrás» la deshaga; si no, se corrige la de ahora (cambiar el modo desde
+ *  la barra del visor, que es mirar lo mismo de otra forma). */
+function _x3Url(nueva) {
+    try {
+        const url = new URL(window.location.href);
+        [_X3_Q_SITE, _X3_Q_FLOOR, _X3_Q_MODE].forEach(k => url.searchParams.delete(k));
+        if (_x3View === 'site' && _dcsPlan) {
+            url.searchParams.set(_X3_Q_SITE, _dcsPlan.site.uid);
+            if (_dcsPlan.floor) url.searchParams.set(_X3_Q_FLOOR, _dcsPlan.floor);
+            url.searchParams.set(_X3_Q_MODE, _ds3Mode);
+        }
+        const destino = url.pathname + url.search + url.hash;
+        if (destino === window.location.pathname + window.location.search + window.location.hash) return;
+        if (nueva) history.pushState({x3: true}, '', destino);
+        else history.replaceState({x3: true}, '', destino);
+    } catch (_) { /* sin historial: se mira igual */ }
+}
+
+/** Ir adonde dice la dirección: al abrir la página, y con «atrás» y «adelante». */
+async function _x3FromUrl() {
+    const q = new URLSearchParams(window.location.search);
+    const site = q.get(_X3_Q_SITE) || '';
+    if (!site) return _x3ShowMap(true);
+    const floor = q.get(_X3_Q_FLOOR) || '';
+    const mode = q.get(_X3_Q_MODE) || 'building';
+    if (_dcsPlan && _dcsPlan.site.uid === site) {
+        _ds3Mode = mode === 'floor' ? 'floor' : 'building';
+        if (floor && floor !== _dcsPlan.floor) {
+            _x3Stop3d();
+            await _dcsGo(floor);
+            _x3Start3d();
+        }
+        if (_ds3Mode === 'building') _ds3LoadImages();
+        return _x3Render();
+    }
+    return _x3OpenSite(site, floor, mode, true);
+}
+
+// ── Pintar ───────────────────────────────────────────────────────────────────────────────
+
+/** Dónde se está, arriba: Sedes › la sede (y a qué otra ir) › sus plantas. */
+//: El orden y el color de cada estado en el resumen de la cabecera.
+const _X3_SUM = [['ok', 'success', 'bi-check-circle-fill'], ['warning', 'warning', 'bi-exclamation-triangle-fill'],
+                 ['error', 'danger', 'bi-exclamation-octagon-fill'], ['', 'secondary', 'bi-eye-slash']];
+
+/** Cuántas sedes hay en cada estado: `{ok, warning, error, '': sin vigilar}`. Puro. */
+function _x3SumCounts(sites) {
+    const n = {ok: 0, warning: 0, error: 0, '': 0};
+    for (const s of sites || []) {
+        const e = ['ok', 'warning', 'error'].includes(s.state) ? s.state : '';
+        n[e] += 1;
+    }
+    return n;
+}
+
+/** El resumen de las sedes en la cabecera del mapa: cuántas bien, en aviso, caídas y sin
+ *  vigilar, cada una un botón que señala en el mapa las de ese estado (una tras otra, a cada
+ *  pulsación). Las caídas laten si hay alguna. Pedido: se veía el estado de cada sede, y no
+ *  cuántas había de cada uno sin contarlas. */
+function _x3SumHtml() {
+    const n = _x3SumCounts((_dcimBoard || {}).sites);
+    return `<div class="d-flex flex-wrap gap-1 ms-2" role="group" aria-label="${escAttr(t('x3_sum'))}">${
+        _X3_SUM.map(([e, tono, icono]) => `<button type="button"
+            class="btn btn-sm btn-${tono}${e === 'error' && n.error ? ' ss-glow-danger' : ''}"
+            ${n[e] ? '' : 'disabled'} onclick="_x3SumGo(${jsStr(e)})"
+            title="${escAttr(tf('x3_sum_tt', _dcimStateWord(e)))}">
+            <i class="bi ${icono} me-1"></i>${esc(_dcimStateWord(e))} <span class="ss-tabular fw-semibold">${n[e]}</span>
+        </button>`).join('')}</div>`;
+}
+
+//: Por dónde va el recorrido de cada estado al pulsar su botón del resumen.
+const _x3SumTurn = {};
+
+/** Señalar en el mapa la siguiente sede de un estado. */
+function _x3SumGo(estado) {
+    const de = ((_dcimBoard || {}).sites || []).filter(s =>
+        (['ok', 'warning', 'error'].includes(s.state) ? s.state : '') === estado);
+    if (!de.length) return;
+    const i = ((estado in _x3SumTurn ? _x3SumTurn[estado] : -1) + 1) % de.length;
+    _x3SumTurn[estado] = i;
+    if (typeof _dcmRaise === 'function') _dcmRaise(de[i].uid);
+}
+
+function _x3CrumbsHtml() {
+    const sedes = `<button type="button" class="btn btn-sm ${_x3View === 'map' ? 'btn-warning' : 'btn-secondary'}"
+            onclick="_x3ShowMap()"><i class="bi bi-globe-europe-africa me-1"></i>${esc(t('x3_sites'))}</button>`;
+    if (_x3View !== 'site' || !_dcsPlan) return sedes + _x3SumHtml();
+    const sitios = (_dcimData.sites || []).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    const sede = `<i class="bi bi-chevron-right text-muted"></i>
+        ${_dcimLed(_x3SiteState(_dcsPlan.site.uid))}
+        <select class="form-select form-select-sm w-auto fw-semibold" aria-label="${escAttr(t('x3_site_pick'))}"
+                title="${escAttr(t('x3_site_pick'))}" onchange="_x3OpenSite(this.value)">
+            ${sitios.map(s => `<option value="${escAttr(s.uid)}"${s.uid === _dcsPlan.site.uid ? ' selected' : ''}>${
+                esc(s.name || s.uid)}</option>`).join('')}
+        </select>`;
+    const plantas = _x3Floors();
+    // Cómo se mira: realista o maqueta, y pasear.
+    const vista = `<div class="btn-group btn-group-sm ms-2" role="group">
+        <button type="button" class="btn btn-sm ${_x3Real ? 'btn-warning' : 'btn-secondary'}"
+                onclick="_x3ToggleReal()" title="${escAttr(t('x3_real_tt'))}">
+            <i class="bi bi-brightness-high me-1"></i>${esc(t('x3_real'))}</button>
+        <button type="button" class="btn btn-sm ${ss3dFpsOn() ? 'btn-warning' : 'btn-secondary'}"
+                onclick="_x3Walk()" title="${escAttr(t('x3_walk_tt'))}">
+            <i class="bi bi-person-walking me-1"></i>${esc(t('x3_walk'))}</button></div>`;
+    if (!plantas.length) return sedes + sede;
+    const i = plantas.findIndex(f => f.uid === _dcsPlan.floor);
+    // Las plantas, en el modo en que se mira: en el edificio, cuál se resalta —las de encima
+    // salen tenues, que es lo que dice la barra del visor—; en planta, cuál se ve.
+    const piso = (f) => `<button type="button"
+        class="btn btn-sm ${f.uid === _dcsPlan.floor ? 'btn-primary' : 'btn-secondary'}"
+        onclick="_x3Go(${jsStr(f.uid)}, '')">${esc(f.name || f.uid)}</button>`;
+    return `${sedes}${sede}
+        <i class="bi bi-chevron-right text-muted"></i>
+        <div class="btn-group btn-group-sm" role="group" aria-label="${escAttr(t('x3_floors'))}">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_x3Step(-1)"
+                    ${i <= 0 ? 'disabled' : ''} title="${escAttr(t('x3_floor_down'))}"
+                    aria-label="${escAttr(t('x3_floor_down'))}"><i class="bi bi-arrow-down"></i></button>
+            ${plantas.map(piso).join('')}
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_x3Step(1)"
+                    ${i < 0 || i >= plantas.length - 1 ? 'disabled' : ''} title="${escAttr(t('x3_floor_up'))}"
+                    aria-label="${escAttr(t('x3_floor_up'))}"><i class="bi bi-arrow-up"></i></button>
+        </div>${vista}`;
+}
+
+/** Solo la cabecera: dónde se está y los botones de cómo se mira. */
+function _x3RenderCrumbs() {
+    const crumbs = document.getElementById(_X3_CRUMBS);
+    if (crumbs) crumbs.innerHTML = _x3CrumbsHtml();
+}
+
+function _x3Render() {
+    _x3RenderCrumbs();
+    const main = document.getElementById(_X3_MAIN);
+    if (!main) return;
+    if (_x3View === 'map') {
+        const sitios = (_dcimBoard || {}).sites || [];
+        if (!sitios.length) {
+            main.innerHTML = `<div class="text-muted p-4">${esc(t('dcim_no_sites'))}</div>`;
+            return;
+        }
+        // El mapa ocupa lo que haya, y las sedes debajo, con su estado: las que no tienen
+        // coordenadas no están en el mapa, y en la tira sí.
+        main.innerHTML = `<div class="ss-stage">${_dcimMapHtml(sitios)}</div>
+            <div class="ss-strip">${_dcimBoardTiles(sitios)}</div>`;
+        _dcimMapMounted();
+        return;
+    }
+    if (_x3Busy || !_dcsPlan) {
+        main.innerHTML = `<div class="text-muted p-4"><span class="spinner-border spinner-border-sm me-2"></span>${
+            esc(t('loading'))}</div>`;
+        return;
+    }
+    if (!(_dcsPlan.floors || []).length) {
+        main.innerHTML = `<div class="text-muted p-4">${esc(t('x3_no_floors'))}</div>`;
+        return;
+    }
+    if (!_dc3d) _x3Start3d();
+    main.innerHTML = `${_ds3Bar()}<div class="ss-stage">${_dc3dHtml(t('dcim_3d_site_hint'), 'site')}</div>`;
+    _dc3dMount();
+    // Lo que el visor de esta página hace además: el modo realista, la escalera del paseo, y
+    // seguir paseando si se estaba (un cambio de planta redibuja el visor).
+    const V = ss3dGet(_DC3D_BOX);
+    if (V) {
+        V.opts.realista = _x3Real;
+        // The realistic light per pixel, at the screen's own resolution and not twice it.
+        V.opts.pixelScale = _x3Real ? 1 : 0;
+        V.opts.onStairs = _x3Stairs;
+        V.opts.onUse = _x3Use;
+        V.opts.onAim = _x3AimHint;
+        // Al dejar de pasear cambia el botón de arriba, no el visor: repintar el visor tiraba
+        // el lienzo en el que iba a salir la ficha de lo que se acababa de pulsar.
+        V.opts.onWalkEnd = _x3RenderCrumbs;
+        _ss3dTouched(V);
+        if (ss3dFpsOn(_DC3D_BOX)) ss3dFpsAttach(_DC3D_BOX);
+    }
+}
+
+function _x3ToggleReal() {
+    _x3Real = !_x3Real;
+    try { localStorage.setItem('ss.x3.real', _x3Real ? '1' : '0'); } catch (_) { /* sin almacén */ }
+    _x3Render();
+}
+
+/** Pasear: en la planta, a la altura de los ojos, como en un juego. Desde el edificio se baja
+ *  antes a la planta elegida: entre plantas no se anda, se sube por la escalera. */
+async function _x3Walk() {
+    if (ss3dFpsOn()) return ss3dFpsStop();
+    const main = document.getElementById(_X3_MAIN);
+    // El ratón, capturado YA, dentro del clic: después de esperar al cambio de vista el navegador
+    // lo niega —ya no es la respuesta a un gesto—, y sin ratón capturado el paseo quedaba a
+    // medias.
+    try {
+        if (main && main.requestPointerLock && document.pointerLockElement !== main) main.requestPointerLock();
+    } catch (_) { /* sin captura, arrastrar gira la cabeza */ }
+    if (_ds3Mode !== 'floor') await _x3Go('', 'floor');
+    ss3dFpsStart(_DC3D_BOX, null, main);
+    _x3RenderCrumbs();
+}
+
+/** El muñeco de la barra del visor: aquí, el paseo de juego. El del motor —la cámara orbital sin
+ *  radio— solo oía el teclado con el lienzo enfocado, andaba a saltos y su F era «vista inicial»:
+ *  quien lo usaba no podía andar hasta pulsar en el lienzo, y F para abrir un rack le cambiaba la
+ *  vista. */
+function ss3dWalk(_id) {
+    return _x3Walk();
+}
+
+/** Usar lo que se tiene delante al pasear: un clic en un rack cerrado lo abre en su sitio; F
+ *  abre o cierra el que se mira. Lo demás —un equipo de dentro, una puerta— no se «usa»: el
+ *  motor suelta el ratón y saca su ficha. Devuelve si hizo algo. */
+function _x3Use(lee, como) {
+    if (!lee) return false;
+    const rack = lee.tipo === 'rack' ? String(lee.uid)
+        : (como === 'toggle' && lee.tipo === 'item' && lee.rack ? String(lee.rack) : '');
+    if (!rack) return false;
+    const abierto = _dc3dOpenRacks.has(rack);
+    if (como === 'click' && abierto) return false;      // a click on an open one: its card
+    _x3OpenRack(rack);
+    return true;
+}
+
+/** Lo que se puede hacer con lo que se mira al pasear, dicho junto al punto de mira: abrir o
+ *  cerrar un rack (y con qué tecla), la ficha de un equipo, y en la escalera subir o bajar. */
+function _x3AimHint(lee, ctx) {
+    const partes = [];
+    if (lee && lee.tipo === 'rack') {
+        partes.push(tf(_dc3dOpenRacks.has(String(lee.uid)) ? 'x3_aim_rack_close' : 'x3_aim_rack_open',
+                       lee.name || ''));
+    } else if (lee && lee.tipo === 'item') {
+        if (lee.rack && _dc3dOpenRacks.has(String(lee.rack)))
+            partes.push(tf('x3_aim_rack_close', (_x3RackName(lee.rack))));
+        partes.push(tf('x3_aim_card', lee.name || lee.kind || ''));
+    } else if (lee && lee.name && lee.tipo !== 'core') {
+        partes.push(tf('x3_aim_card', lee.name));
+    }
+    if (ctx && ctx.stairs) partes.push(t('view3d_fps_stairs_keys'));
+    return partes.join(' · ');
+}
+
+function _x3RackName(uid) {
+    const V = ss3dGet(_DC3D_BOX);
+    const k = V && ((V.escena || {}).cajas || []).find(c => c.lee && c.lee.tipo === 'rack'
+                                                       && String(c.lee.uid) === String(uid));
+    return k ? k.lee.name : '';
+}
+
+/** Abrir o cerrar un rack en su sitio, sin mover la cámara: `_dc3dOpenRack` del panel vuela
+ *  hasta él, y paseando eso es arrancar a quien camina de donde está. */
+async function _x3OpenRack(uid) {
+    if (_dc3dOpenRacks.has(uid)) {
+        _dc3dOpenRacks.delete(uid);
+        ss3dRebuild(_DC3D_BOX);
+        return;
+    }
+    const base = `/api/v1/dcim/racks/${encodeURIComponent(uid)}`;
+    const [data, cables, power] = await Promise.all([apiGet(base), apiGet(base + '/cables'),
+                                                     apiGet(base + '/power')]);
+    if (!data || data.error) return showToast((data || {}).error || t('dcim_not_found'), 'warning');
+    _dc3dOpenRacks.set(uid, {data, cables: cables || {}, power: power || {}});
+    _dc3dSelOpening(uid);
+    ss3dRebuild(_DC3D_BOX);
+}
+
+/** E / Q en la escalera: la planta de arriba o la de abajo, en el mismo punto y mirando igual. */
+async function _x3Stairs(paso, donde) {
+    const plantas = _x3Floors();
+    const i = plantas.findIndex(f => f.uid === (_dcsPlan || {}).floor);
+    const otra = plantas[i + paso];
+    if (!otra) return showToast(t(paso > 0 ? 'x3_no_floor_up' : 'x3_no_floor_down'), 'info');
+    await _x3Go(otra.uid, 'floor');
+    ss3dFpsStart(_DC3D_BOX, donde, document.getElementById(_X3_MAIN));
+}
+
+// ── Arrancar ─────────────────────────────────────────────────────────────────────────────
+
+window.addEventListener('popstate', () => { _x3FromUrl(); });
+
+(async () => {
+    await _x3Load();
+    await _x3FromUrl();
+})();

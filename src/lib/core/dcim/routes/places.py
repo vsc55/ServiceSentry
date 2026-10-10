@@ -49,7 +49,7 @@ from lib.core.dcim import catalog as dcim_catalog
 from lib.core.dcim import media as dcim_media
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
-from lib.core.dcim.store import (ACCESS_KINDS, FEATURE_KINDS, FEATURE_LAYERS, LOCK_KINDS,
+from lib.core.dcim.store import (ACCESS_KINDS, FEATURE_KINDS, FEATURE_LAYERS, LOCK_KINDS, room_item_box,
                                  SHELVED_KINDS, SHELVES_MAX)
 from lib.core.dcim.store.features import _FEATURE, _SHELF_ITEM
 from lib.core.dcim.store.floors import WALL_KINDS, WALLS_MAX, _FLOOR
@@ -507,7 +507,8 @@ def register(app, wa, C):
         reach = dcim_svc.reachable(store, said, allowed)
         if not C.filtered([site], store, said, allowed, 'site', reach):
             return jsonify({'error': wa._t('access_denied')}), 403
-        roll = dcim_svc.tree_roll(store, C.states(), said, allowed)
+        estados = C.states()
+        roll = dcim_svc.tree_roll(store, estados, said, allowed)
         rooms = {}
         for room in store.rooms_of(uid):
             if not room.get('floor_uid'):
@@ -519,7 +520,11 @@ def register(app, wa, C):
                 rack['used_u'] = _used_u(store, rack)
             seen = dcim_owners.may_see(C.owner_of(store, said, 'room', room['uid']), allowed)
             rooms[room['uid']] = {'racks': racks,
-                                  'features': store.features_of(room['uid']) if seen else []}
+                                  'features': store.features_of(room['uid']) if seen else [],
+                                  # Y lo que está en la sala y no en un rack: los puestos, los
+                                  # AP, las rosetas — el 3D los pone en su sitio.
+                                  'items': _room_items(store, room['uid'], said, allowed, reach,
+                                                       estados)}
         # Y los muros de cada planta: el 3D de la planta y del edificio los levanta.
         walls = {f['uid']: [_wall_out(w) for w in store.walls_of(f['uid'])]
                  for f in store.floors_of(uid)}
@@ -588,8 +593,15 @@ def register(app, wa, C):
 
         ``net``: ``[{a, b, total, kinds: {kind: n}}]`` — rack uids, ``a < b``.
         ``power``: ``[{rack, pdu, name, feed, source}]`` — every strip with its source.
-        ``sources``: ``[{uid, name, kind, upstream, bypass, rack}]`` — ``rack`` is the rack of
-        the UPS item a source is (its only physical place), or ``''``.
+        ``hnet``: ``[{room, rack, total, kinds}]`` — the horizontal cabling: cables from a room's
+        items (its wall outlets, access points, cameras) to a rack, grouped by room and rack —
+        the bundle that runs along the trays from the room to its IDF.
+        Each run of ``net`` and ``hnet`` lists its ``cables``: ``[{uid, label, kind, a, ap, an,
+        b, bp, bn}]`` — the 3D highlights one cable of a bundle, and its card lists them.
+        ``sources``: ``[{uid, name, kind, upstream, bypass, rack, feature}]`` — ``rack`` is the
+        rack of the UPS item a source is, ``feature`` the room piece it is (a panel, a room UPS,
+        the generator's zone); either is where the 3D draws it, and with neither it goes in a
+        row beside the building.
         """
         store = C.store()
         site = store.sites.get(uid) if store else None
@@ -599,29 +611,56 @@ def register(app, wa, C):
         reach = dcim_svc.reachable(store, said, allowed)
         if not C.filtered([site], store, said, allowed, 'site', reach):
             return jsonify({'error': wa._t('access_denied')}), 403
-        rack_of_item, power = {}, []
+        rack_of_item, power, room_of_item, label_of = {}, [], {}, {}
         for room in store.rooms_of(uid):
+            for it in C.filtered(store.items_in_room(room['uid']), store, said, allowed, 'item', reach):
+                room_of_item[it['uid']] = room['uid']
+                label_of[it['uid']] = it.get('label') or ''
             for rack in C.filtered(store.racks_of(room['uid']), store, said, allowed, 'rack', reach):
                 for it in C.filtered(store.items_of(rack['uid']), store, said, allowed, 'item', reach):
                     rack_of_item[it['uid']] = rack['uid']
+                    label_of[it['uid']] = it.get('label') or ''
                 for p in store.pdus_of(rack['uid']):
                     power.append({'rack': rack['uid'], 'pdu': p['uid'], 'name': p.get('name') or '',
                                   'feed': p.get('feed') or 'none', 'source': p.get('source_uid') or ''})
-        runs = {}
-        for c in store.cables_of(list(rack_of_item)):
+        runs, hnet = {}, {}
+
+        def uno(c):
+            # Un cable de un recorrido, con sus dos extremos nombrados: lo que lista su ficha.
+            return {'uid': c['uid'], 'label': c.get('label') or '', 'kind': c.get('kind') or 'other',
+                    'a': c.get('a_item') or '', 'ap': c.get('a_port') or '',
+                    'an': label_of.get(c.get('a_item'), ''),
+                    'b': c.get('b_item') or '', 'bp': c.get('b_port') or '',
+                    'bn': label_of.get(c.get('b_item'), '')}
+
+        for c in store.cables_of(list(rack_of_item) + list(room_of_item)):
             ra, rb = rack_of_item.get(c.get('a_item')), rack_of_item.get(c.get('b_item'))
+            # From a room to a rack: the horizontal cabling, one bundle per room and rack.
+            sa, sb = room_of_item.get(c.get('a_item')), room_of_item.get(c.get('b_item'))
+            if (sa and rb) or (sb and ra):
+                sala, rk = (sa, rb) if sa and rb else (sb, ra)
+                h = hnet.setdefault((sala, rk), {'room': sala, 'rack': rk, 'total': 0, 'kinds': {},
+                                                 'cables': []})
+                h['total'] += 1
+                h['cables'].append(uno(c))
+                kind = c.get('kind') or 'other'
+                h['kinds'][kind] = h['kinds'].get(kind, 0) + 1
+                continue
             if not ra or not rb or ra == rb:
                 continue
             a, b = sorted((ra, rb))
-            run = runs.setdefault((a, b), {'a': a, 'b': b, 'total': 0, 'kinds': {}})
+            run = runs.setdefault((a, b), {'a': a, 'b': b, 'total': 0, 'kinds': {}, 'cables': []})
             run['total'] += 1
+            run['cables'].append(uno(c))
             kind = c.get('kind') or 'other'
             run['kinds'][kind] = run['kinds'].get(kind, 0) + 1
         sources = [{'uid': s['uid'], 'name': s.get('name') or '', 'kind': s.get('kind') or '',
                     'upstream': s.get('upstream_uid') or '', 'bypass': bool(s.get('bypass')),
-                    'rack': rack_of_item.get(s.get('item_uid') or '', '')}
+                    'rack': rack_of_item.get(s.get('item_uid') or '', ''),
+                    'feature': s.get('feature_uid') or ''}
                    for s in store.sources_of(uid)]
         return jsonify({'net': sorted(runs.values(), key=lambda r: (r['a'], r['b'])),
+                        'hnet': sorted(hnet.values(), key=lambda r: (r['room'], r['rack'])),
                         'power': power, 'sources': sources})
 
     @app.route('/api/v1/dcim/floors', methods=['POST'])
@@ -879,11 +918,19 @@ def register(app, wa, C):
         filas = dcim_svc.rows_roll(store.rows_of(uid), store.racks_of(uid))
         piezas = store.features_of(uid)
         acceso = _access_of(store, room, piezas)
-        return jsonify(dict({'features': piezas,
+        said, allowed = store.owners_map(), C.seen()
+        equipos = _room_items(store, uid, said, allowed, dcim_svc.reachable(store, said, allowed),
+                              C.states())
+        return jsonify(dict({'features': piezas, 'items': equipos,
                              'kinds': FEATURE_KINDS,
                              'layers': list(FEATURE_LAYERS),
                              'locks': list(LOCK_KINDS), 'access_kinds': list(ACCESS_KINDS)},
                             **filas, **acceso))
+
+    def _room_items(store, room_uid, said, allowed, reach, estados) -> list:
+        """A room's items (`placement = 'room'`) this reader may see, with their state and box."""
+        return [dict(i, state=dcim_svc.item_state(i, estados), box=room_item_box(i))
+                for i in C.filtered(store.items_in_room(room_uid), store, said, allowed, 'item', reach)]
 
     def _access_of(store, room, piezas) -> dict:
         """El control de accesos de una sala, puesto en sus piezas: el estado de cada una que lo

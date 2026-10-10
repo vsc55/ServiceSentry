@@ -1,0 +1,312 @@
+{# ================================================================
+   DCIM — resaltar en el 3D lo que se pulsa: un rack, un equipo, un recorrido de red, una línea
+   de corriente, una fuente, un cable. Lo elegido y lo que le pertenece se queda como está —las
+   líneas, más gruesas—; todo lo demás se apaga. Así se sigue un cable entre plantas.
+
+   Lo que pertenece a cada cosa:
+   * un rack: sus recorridos de red y sus líneas de corriente;
+   * un equipo (del rack o de la sala): sus cables y, por el rastreo, el camino entero hasta
+     donde acaba —el PC, su roseta, el panel y el switch; el switch, la fibra y el núcleo—. Su
+     ficha lista sus conexiones, una por puerto, con lo que hay al otro lado; pulsando un puerto
+     queda resaltado solo ese camino, y «Todas las conexiones» vuelve al equipo entero;
+   * un recorrido: sus cables, sus dos racks (o su sala y su rack) y los equipos de los extremos;
+   * un cable: él solo. Si va dentro de un mazo, el mazo se apaga y se dibuja ese cable encima;
+   * una línea de corriente o una fuente: la línea, su rack y su fuente.
+
+   Las paredes y los suelos no se apagan: son el sitio donde está lo que se mira.
+   ================================================================ #}
+
+//: Lo resaltado, o `null`: `{key, items, racks, cables, runs, power, sources, rooms}` (conjuntos).
+let _dc3dSel = null;
+
+function _dc3dSelNew(key) {
+    return {key, items: new Set(), racks: new Set(), cables: new Set(), runs: new Set(),
+            power: new Set(), sources: new Set(), rooms: new Set()};
+}
+
+/** Las claves de un recorrido y de una línea de corriente: con ellas se reconocen al dibujarse. */
+function _dc3dRunKey(r) { return r.room ? `hnet:${r.room}|${r.rack}` : `run:${r.a}|${r.b}`; }
+function _dc3dPowerKey(rack, source) { return `pw:${rack}|${source}`; }
+
+/** Los cables de un recorrido; `[]` si no lo hay. */
+function _dc3dRunCables(key, circ) {
+    const d = circ || {};
+    const r = [...(d.net || []), ...(d.hnet || [])].find(x => _dc3dRunKey(x) === key);
+    return (r && r.cables) || [];
+}
+
+/** Un recorrido en el que va un cable, o `null`. */
+function _dc3dRunOf(cable, circ) {
+    const d = circ || {};
+    return [...(d.net || []), ...(d.hnet || [])].find(r => (r.cables || []).some(c => c.uid === cable))
+        || null;
+}
+
+/** Lo que se resalta al pulsar `lee` —sin el camino de un equipo, que pide el rastreo—, con los
+ *  circuitos de la sede `circ`. Puro: se prueba en node. */
+function _dc3dSelFrom(lee, circ) {
+    const d = circ || {};
+    const runs = [...(d.net || []), ...(d.hnet || [])];
+    const tipo = lee.tipo;
+    if (tipo === 'rack') {
+        const s = _dc3dSelNew('rack:' + lee.uid);
+        s.racks.add(lee.uid);
+        for (const r of runs) if (r.a === lee.uid || r.b === lee.uid || r.rack === lee.uid) s.runs.add(_dc3dRunKey(r));
+        for (const p of d.power || []) if (p.rack === lee.uid) {
+            s.power.add(_dc3dPowerKey(p.rack, p.source));
+            if (p.source) s.sources.add(p.source);
+        }
+        return s;
+    }
+    if (tipo === 'run') {
+        const s = _dc3dSelNew(lee.key);
+        s.runs.add(lee.key);
+        const r = runs.find(x => _dc3dRunKey(x) === lee.key) || {};
+        for (const u of [r.a, r.b, r.rack]) if (u) s.racks.add(u);
+        if (r.room) s.rooms.add(r.room);
+        for (const c of r.cables || []) { s.cables.add(c.uid); s.items.add(c.a); s.items.add(c.b); }
+        return s;
+    }
+    if (tipo === 'cable') {
+        const s = _dc3dSelNew('cable:' + lee.uid);
+        s.cables.add(lee.uid);
+        const r = _dc3dRunOf(lee.uid, d);
+        const c = r ? r.cables.find(x => x.uid === lee.uid) : null;
+        for (const u of [lee.a, lee.b, c && c.a, c && c.b]) if (u) s.items.add(u);
+        if (r) for (const u of [r.a, r.b, r.rack]) if (u) s.racks.add(u);
+        return s;
+    }
+    if (tipo === 'power' || tipo === 'source') {
+        const s = _dc3dSelNew(tipo === 'power' ? lee.key : 'source:' + lee.uid);
+        const fuente = tipo === 'source' ? lee.uid : lee.source;
+        if (fuente) s.sources.add(fuente);
+        for (const p of d.power || []) {
+            const k = _dc3dPowerKey(p.rack, p.source);
+            if ((tipo === 'power' && k === lee.key) || (tipo === 'source' && p.source === fuente)) {
+                s.power.add(k);
+                s.racks.add(p.rack);
+            }
+        }
+        return s;
+    }
+    if (tipo === 'item') {
+        const s = _dc3dSelNew('item:' + lee.uid);
+        s.items.add(lee.uid);
+        if (lee.rack) s.racks.add(lee.rack);
+        if (lee.room && lee.ritem) s.rooms.add(lee.room);
+        for (const r of runs) for (const c of r.cables || []) {
+            if (c.a === lee.uid || c.b === lee.uid) { s.cables.add(c.uid); s.items.add(c.a); s.items.add(c.b); }
+        }
+        return s;
+    }
+    // Una pieza, el núcleo: ella sola.
+    const s = _dc3dSelNew((tipo || 'x') + ':' + (lee.uid || lee.name || ''));
+    s.items.add(lee.uid || '');
+    return s;
+}
+
+/** Y el camino de un equipo, del rastreo: los equipos, los cables, sus racks y sus salas. */
+function _dc3dSelAddPaths(s, paths) {
+    for (const p of paths || []) for (const h of p) {
+        if (h.hidden) continue;
+        if (h.item) s.items.add(h.item);
+        if (h.rack) s.racks.add(h.rack);
+        if (h.room && !h.rack) s.rooms.add(h.room);
+        if (h.cable && h.cable.uid) s.cables.add(h.cable.uid);
+    }
+    return s;
+}
+
+/** Si lo dibujado con `lee` es de lo resaltado. */
+function _dc3dSelHas(s, lee) {
+    if (!s || !lee) return false;
+    switch (lee.tipo) {
+        case 'rack': return s.racks.has(lee.uid);
+        case 'item': return s.items.has(lee.uid);
+        case 'cable': return s.cables.has(lee.uid);
+        case 'run': return s.runs.has(lee.key);
+        case 'power': return s.power.has(lee.key);
+        case 'source': return s.sources.has(lee.uid);
+        default: return s.items.has(lee.uid || '') && s.key === lee.tipo + ':' + (lee.uid || lee.name || '');
+    }
+}
+
+/** Una línea más gruesa: sus dos ejes cortos, por `k`; el largo, igual. */
+function _dc3dThicker(m, k) {
+    const out = m.slice();
+    const largos = [0, 4, 8].map(i => Math.hypot(m[i], m[i + 1], m[i + 2]));
+    const mayor = Math.max(...largos);
+    [0, 4, 8].forEach((i, n) => {
+        if (largos[n] >= mayor * 0.5) return;
+        for (let j = 0; j < 3; j++) out[i + j] = m[i + j] * k;
+        // Que siga centrada: lo que crece, la mitad hacia cada lado.
+        for (let j = 0; j < 3; j++) out[12 + j] -= m[i + j] * (k - 1) / 2;
+    });
+    return out;
+}
+
+//: Lo apagado: casi nada. A una décima, mil cajas de un edificio superpuestas seguían siendo
+//: una niebla que tapaba lo resaltado.
+const _DC3_SEL_DIM = 0.05;
+const _DC3_SEL_LINES = ['run', 'power', 'cable'];
+//: El color de un cable resaltado solo: ni el amarillo de las bandejas ni el de un estado.
+const _DC3_SEL_COLOR = [1, 0.15, 0.75, 1];
+//: El halo de los extremos —racks y equipos—: el mismo que pone la búsqueda.
+const _DC3_SEL_HALO = [1, 0.85, 0.1, 0.35];
+
+/** Sobre una escena ya hecha: lo que no es de lo resaltado, apagado; las líneas que sí, más
+ *  gruesas. El alfa de antes se guarda (`a0`): lo apagado se sigue pudiendo pulsar. */
+function _dc3dSelApply(escena) {
+    const s = _dc3dSel;
+    if (!s) return;
+    const halos = [];
+    for (const k of escena.cajas || []) {
+        const L = k.lee;
+        if (!L || L.tipo === 'core') continue;
+        if (_dc3dSelHas(s, L)) {
+            if (_DC3_SEL_LINES.includes(L.tipo)) k.m = _dc3dThicker(k.m, 2.5);
+            // Dónde empieza y dónde acaba: un halo en cada rack y cada equipo de lo resaltado
+            // —el macizo, no cada tabla de un armario—.
+            else if ((L.tipo === 'rack' || L.tipo === 'item') && !L.sinRotulo && k.color[3] >= 0.5)
+                halos.push({color: _DC3_SEL_HALO, m: ss3dGrow(k.m, 1.12), lee: null});
+            continue;
+        }
+        k.a0 = k.color[3];
+        k.color = [k.color[0], k.color[1], k.color[2], Math.min(k.color[3], _DC3_SEL_DIM)];
+    }
+    escena.cajas.push(...halos);
+}
+
+/** Lo que se puede pulsar: lo que tiene ficha y es macizo —o lo era antes de apagarse—. */
+function _dc3dPickable(k) {
+    return !!(k.lee && ((k.a0 !== undefined ? k.a0 : k.color[3]) >= 0.5 || k.lee.tipo === 'core'));
+}
+
+/** Resaltar lo pulsado. De un equipo, además, su camino: llega del rastreo y se añade. */
+async function _dc3dSelect(lee) {
+    if (!lee) return _dc3dSelClear();
+    const s = _dc3dSelFrom(lee, (_dc3dCirc || {}).data);
+    s.lee = lee;
+    _dc3dSel = s;
+    _dc3dSelRedraw();
+    if (lee.tipo !== 'item' || !lee.uid) return;
+    const d = await apiGet(`/api/v1/dcim/items/${encodeURIComponent(lee.uid)}/trace`);
+    if (_dc3dSel !== s || !d || d.error) return;
+    s.paths = d.paths || [];
+    _dc3dSelAddPaths(s, s.paths);
+    _dc3dSelRedraw();
+    // Y su ficha, ahora con sus conexiones: llegan con el rastreo.
+    _dc3dSelCard();
+}
+
+/** Solo un puerto de un equipo resaltado: su camino y nada más. `base` es la selección del
+ *  equipo entero (con sus `paths`), a la que se vuelve. Puro. */
+function _dc3dSelPort(base, i) {
+    const camino = (base.paths || [])[i] || [];
+    const s = _dc3dSelNew('port:' + ((base.lee || {}).uid || '') + '|' + ((camino[0] || {}).port || i));
+    const lee = base.lee || {};
+    if (lee.uid) s.items.add(lee.uid);
+    if (lee.rack) s.racks.add(lee.rack);
+    _dc3dSelAddPaths(s, [camino]);
+    return Object.assign(s, {lee, paths: base.paths, port: i, base});
+}
+
+function _dc3dSelectPort(i) {
+    const s = _dc3dSel;
+    if (!s || !s.paths) return;
+    _dc3dSel = _dc3dSelPort(s.base || s, i);
+    _dc3dSelRedraw();
+    _dc3dSelCard();
+}
+
+/** Volver de un puerto al equipo entero. */
+function _dc3dSelectAll() {
+    if (!_dc3dSel || !_dc3dSel.base) return;
+    _dc3dSel = _dc3dSel.base;
+    _dc3dSelRedraw();
+    _dc3dSelCard();
+}
+
+/** Las conexiones de un equipo resaltado, en su ficha: una por puerto —de su puerto a lo que hay
+ *  al otro lado, y cuántos saltos en medio—; pulsando una, solo esa. Puro. */
+function _dc3dPortsHtml(s) {
+    if (!s || !s.paths) return '';
+    if (!s.paths.length) return `<div class="mt-2 ss-fs-2 opacity-75">${esc(t('dcim_3d_sel_noports'))}</div>`;
+    const fin = (p) => p.slice(1).reverse().find(h => !h.hidden) || {};
+    const filas = s.paths.map((p, i) => {
+        const a = p[0] || {}, z = fin(p);
+        const medio = Math.max(0, p.length - 2);
+        const texto = (a.port || '?') + ' → ' + [z.label, z.port].filter(Boolean).join(' ')
+            + (medio ? ' (' + tf('dcim_3d_sel_via', medio) + ')' : '');
+        const activa = s.port === i;
+        return `<button type="button" class="btn btn-sm ${activa ? 'btn-warning' : 'btn-secondary'} text-start text-truncate flex-shrink-0"
+            onclick="_dc3dSelectPort(${i})">${esc(texto)}</button>`;
+    }).join('');
+    const todas = s.base ? `<button type="button" class="btn btn-sm btn-primary" onclick="_dc3dSelectAll()">
+        <i class="bi bi-diagram-3 me-1"></i>${esc(t('dcim_3d_sel_all'))}</button>` : '';
+    return `<div class="mt-2 ss-fs-2 opacity-75">${esc(t('dcim_3d_sel_ports'))}</div>
+        <div class="d-flex flex-column gap-1 mt-1 ss-vscroll" style="max-height:14rem">${filas}</div>
+        ${todas ? `<div class="mt-1">${todas}</div>` : ''}`;
+}
+
+/** La ficha de lo resaltado, otra vez: con sus conexiones cuando las hay. En el visor que esté. */
+function _dc3dSelCard() {
+    const s = _dc3dSel;
+    if (!s || !s.lee) return;
+    const html = _dc3dCardHtml(s.lee) + _dc3dPortsHtml(s) + _dc3dSelBar();
+    for (const id of [_DC3D_BOX, _DCR3D_BOX]) if (ss3dGet(id)) ss3dCard(id, html);
+}
+
+/** Rehacer el visor que esté montado: el de la sala o la sede, o el de un armario. */
+function _dc3dSelRedraw() {
+    for (const id of [_DC3D_BOX, _DCR3D_BOX]) if (ss3dGet(id)) ss3dRebuild(id);
+}
+
+/** Abrir un rack es mirar dentro: si lo resaltado es ese mismo rack, se quita. Si no, su
+ *  contenido —que no es de la selección— salía apagado, y el rack abierto parecía vacío
+ *  (reportado: «abrir el rack solo funciona en primera persona», donde pulsar abre sin elegir).
+ *  Con otra cosa resaltada —un recorrido— se mantiene: lo de dentro que sea suyo, encendido. */
+function _dc3dSelOpening(uid) {
+    if (_dc3dSel && _dc3dSel.key === 'rack:' + uid) _dc3dSel = null;
+}
+
+function _dc3dSelClear() {
+    if (!_dc3dSel) return;
+    _dc3dSel = null;
+    _dc3dSelRedraw();
+}
+
+/** Resaltar un cable de la lista de un recorrido: él solo, encima de su mazo apagado. */
+function _dc3dSelectCable(uid) {
+    const r = _dc3dRunOf(uid, (_dc3dCirc || {}).data);
+    const c = r ? r.cables.find(x => x.uid === uid) : null;
+    if (!c) return;
+    const lee = {tipo: 'cable', uid, a: c.a, b: c.b, name: _dc3dCableName(c),
+                 kind: t('dcim_cable_' + (c.kind || 'other'))};
+    _dc3dSelect(lee);
+    ss3dCard(_DC3D_BOX, _dc3dCardHtml(lee) + _dc3dSelBar());
+}
+
+function _dc3dCableName(c) {
+    const ext = (n, p) => [n, p].filter(Boolean).join(' ');
+    return [c.label, `${ext(c.an, c.ap)} ↔ ${ext(c.bn, c.bp)}`].filter(Boolean).join(' · ');
+}
+
+/** Los cables de un recorrido, en su ficha: pulsando uno se resalta solo ese. */
+function _dc3dRunCablesHtml(key) {
+    const lista = _dc3dRunCables(key, (_dc3dCirc || {}).data);
+    if (!lista.length) return '';
+    const max = 40;
+    return `<div class="mt-2 ss-fs-2 opacity-75">${esc(t('dcim_3d_sel_cables'))}</div>
+        <div class="d-flex flex-column gap-1 mt-1 ss-vscroll" style="max-height:14rem">${
+        lista.slice(0, max).map(c => `<button type="button" class="btn btn-sm btn-secondary text-start text-truncate flex-shrink-0"
+            onclick="_dc3dSelectCable(${jsStr(c.uid)})">${esc(_dc3dCableName(c))}</button>`).join('')}${
+        lista.length > max ? `<div class="opacity-75">${esc(tf('dcim_3d_sel_more', lista.length - max))}</div>` : ''}</div>`;
+}
+
+/** Bajo la ficha, mientras haya algo resaltado: quitarlo. */
+function _dc3dSelBar() {
+    if (!_dc3dSel) return '';
+    return `<div class="mt-2"><button type="button" class="btn btn-sm btn-warning" onclick="_dc3dSelClear(); ss3dCard(_DC3D_BOX, ''); ss3dCard(_DCR3D_BOX, '')">
+        <i class="bi bi-eraser me-1"></i>${esc(t('dcim_3d_sel_clear'))}</button></div>`;
+}

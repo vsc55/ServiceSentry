@@ -107,9 +107,12 @@ function caja3d(m) {
     return {x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs)};
 }
 const conNombre = escena.cajas.filter(k => k.lee);
+// The front: since it is a door (leaf, state band, handle), the LEAF — the tall one — is what
+// covers the front and turns with the rack.
 const franjas = escena.cajas.filter(k => !k.lee && k.color !== _DC3_COLOR.floor
                                         && k.color !== _DC3_COLOR.wallroom
-                                        && k.color !== _DC3_COLOR.tile);
+                                        && k.color !== _DC3_COLOR.tile
+                                        && Math.hypot(k.m[4], k.m[5], k.m[6]) > 0.5);
 casos.franja = {rack0: caja3d(conNombre[0].m), franja0: caja3d(franjas[0].m),
                 rack90: caja3d(conNombre[1].m), franja90: caja3d(franjas[1].m)};
 // Moving about the room in 3D: the camera lives in the viewer (`v3.cam`), and the handlers

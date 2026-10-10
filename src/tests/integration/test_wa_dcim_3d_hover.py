@@ -67,6 +67,63 @@ const P = {id: 'p', escena: {cajas: [], salas: [{uid: 's', name: 'Sala de reunio
 __out.sala = _ds3Hover({o: [2, 10, 1], d: [0, -1, 0]}, P).includes('Sala de reuniones');
 __out.fuera = _ds3Hover({o: [9, 10, 9], d: [0, -1, 0]}, P);
 
+// ── The building: only the chosen floor's labels ────────────────────────────────
+// Reported from the screen: with the floors above hidden, the names of every floor below
+// were drawn at once and mixed. Each floor here is one named box and one room label.
+const _planta = (f) => ({W: 10, D: 8, H: 3, salas: [], nombres: {}, puntos: {}, planos: [],
+    cajas: [{color: [0.5, 0.5, 0.5, 1], m: ss3dModel(1, 0, 1, 1, 1, 1, 0),
+             lee: {name: 'rack-' + f.uid, tipo: 'rack', uid: 'k' + f.uid}}],
+    rotulos: [{name: 'sala-' + f.uid, p: [5, 3, 4]}]});
+const _ds3FloorSceneReal = _ds3FloorScene;
+_ds3FloorScene = (f) => _planta(f);
+_ds3Img = () => null;
+_dcsPlan = {floors: [{uid: 'b', level: -1}, {uid: 'p0', level: 0}, {uid: 'p1', level: 1}, {uid: 'p2', level: 2}]};
+const _rotulos = (hide) => {
+    _ds3HideAbove = hide;
+    const e = _ds3BuildingScene(_dcsPlan.floors[2]);
+    return {nombres: ss3dLabelsOf(e).map(l => l.name).sort(),
+            cajas: e.cajas.filter(k => k.lee).length};
+};
+__out.edificio = [_rotulos(false), _rotulos(true)];
+_ds3FloorScene = _ds3FloorSceneReal;
+
+// ── Doors cut their gap in the room's walls ───────────────────────────────────────
+// Reported from the screen: with low walls a strip of wall crossed the door. The walls were four
+// whole boxes with the door inside them; now each wall is cut where a door stands on it, with a
+// lintel over it only when the wall is taller than the door.
+const _salaP = {uid: 'rp', name: 'P', width_mm: 6000, depth_mm: 4000};
+const _puerta = {uid: 'pp', kind: 'door', label: 'Puerta', pos_x: 2000, pos_y: -60, width_mm: 1000,
+                 depth_mm: 120, rotation: 0, height_mm: 2100};
+const _kinds = {door: {h: 2100, layer: 'room'}};
+__out.huecos = _dc3dWallGaps([_puerta, Object.assign({}, _puerta, {uid: 'p2', pos_x: 5500, pos_y: 1440,
+                                                                   rotation: 90})], _kinds, 6, 4);
+const _muros = (o) => _dc3dRoomBoxes(_salaP, [], [_puerta], _kinds, o).cajas.filter(k => k.muro === 'z0');
+const _enHueco = (ks) => ks.some(k => { const x0 = k.m[12], x1 = k.m[12] + k.m[0];
+                                       return k.m[13] < 1.0 && x0 < 2.9 && x1 > 2.1; });
+__out.muroAlto = {tramos: _muros({}).length, tapaHueco: _enHueco(_muros({}))};
+__out.muroBajo = {tramos: _muros({wallH: 1}).length, tapaHueco: _enHueco(_muros({wallH: 1}))};
+// And the plan's walls: no lintel over a door when there is no wall above it.
+_dcsPlan = Object.assign({}, _dcsPlan || {}, {walls: {fz: [{x1: 0, y1: 0, x2: 1000, y2: 0, thick_mm: 150, kind: 'door'}]}});
+const _dint = (alto) => { const c = []; _dcwBoxes({uid: 'fz'}, c, alto); return c.length; };
+__out.dintel = [_dint(3.0), _dint(1.0)];
+
+// ── A reserved zone: off the floor, and marked as reserved ─────────────────────────
+// Reported from the screen: the zone was a grey slab whose bottom face lay in the floor's plane
+// and fought it for every pixel (stripes that changed with the angle). See-through pieces born
+// on the floor start 3 cm above it; a zone carries a dashed edge and a diagonal hatch.
+const _zona = {uid: 'z', kind: 'zone', label: 'Ampliación', pos_x: 1000, pos_y: 1000, width_mm: 3000,
+               depth_mm: 2000, rotation: 0, height_mm: 20};
+const _pasillo = {uid: 'a', kind: 'aisle', label: 'Pasillo', pos_x: 500, pos_y: 3200, width_mm: 4000,
+                  depth_mm: 1200, rotation: 0, height_mm: 2200};
+const _ez = _dc3dRoomBoxes(_salaP, [], [_zona, _pasillo], {zone: {h: 20, layer: 'floor'},
+                                                       aisle: {h: 2200, layer: 'floor'}}, {});
+const _de = (uid) => _ez.cajas.find(k => k.lee && k.lee.uid === uid);
+const _marcas = _ez.cajas.filter(k => !k.lee && (k.color[0] === 0.82 || (k.color[0] === 0.6 && k.color[3] === 0.55)));
+__out.zona = {sueloZona: Math.round(_de('z').m[13] * 1000) / 1000,
+              suelopasillo: Math.round(_de('a').m[13] * 1000) / 1000,
+              marcas: _marcas.length,
+              dentro: _marcas.every(k => k.m[12] > 0.95 && k.m[12] < 4.05 && k.m[14] > 0.95 && k.m[14] < 3.05)};
+
 // ── A rack opened where it stands ───────────────────────────────────────────────
 const dentro = {rack: {uid: 'k', name: 'R01', u_height: 10, width_mm: 600, depth_mm: 1000},
                 items: [{uid: 'a', label: 'srv1', role: 'server', u_start: 1, u_height: 2,
@@ -94,6 +151,20 @@ _dc3dOpenRacks.clear();
 const _cerrado = _dc3dRoomBoxes(sala, racks(0), [], {}, {});
 _dc3dOpenRacks.set('k', {data: dentro, cables: {}, power: {}});
 __out.franja = [franja(_cerrado), franja(abierto)];
+// Reported from the screen: the front was a slab of the state's colour over the whole face, and
+// seen from the end of a row the cold aisle read as the backs. The front is a door now: a leaf a
+// shade lighter than the body, the state in a band at the top, a handle.
+const _finas = (sc) => sc.cajas.filter(k => !k.lee && k.m[13] > 0.005 && Math.hypot(k.m[8], k.m[9], k.m[10]) < 0.03);
+const _frente = _finas(_cerrado);
+const _alto = (k) => Math.hypot(k.m[4], k.m[5], k.m[6]);
+const _ancho = (k) => Math.hypot(k.m[0], k.m[1], k.m[2]);
+const _hoja = _frente.slice().sort((x, y) => _alto(y) - _alto(x))[0];
+const _banda = _frente.filter(k => _ancho(k) > 0.3 && k !== _hoja)[0];
+__out.frente = {piezas: _frente.length,
+                hojaClara: !!_hoja && _hoja.color[0] > _DC3_COLOR.rack[0],
+                banda: !!_banda && _alto(_banda) < _alto(_hoja) * 0.2 && _banda.color[1] > 0.5,
+                tirador: _frente.filter(k => _ancho(k) < 0.05).length,
+                abierto: _finas(abierto).filter(k => Math.abs(k.m[14] - 2.9) < 0.2).length};
 __out.salaEquipo = srv ? srv.lee.roomName : '';
 // Turned a quarter: what it holds turns with it, about the rack's centre.
 const girado = delRack(_dc3dRoomBoxes(sala, racks(90), [], {}, {}))[0];
@@ -188,6 +259,34 @@ class TestWhatIsUnderThePointer:
         assert out['sala'] is True and out['fuera'] == ''
 
 
+class TestDoorsInWalls:
+    def test_a_door_cuts_its_gap_and_a_lintel_only_under_a_taller_wall(self, out):
+        assert out['huecos']['z0'] == [[2, 3, 2.1]] and out['huecos']['x1'] == [[1, 2, 2.1]]
+        assert out['huecos']['x0'] == [] and out['huecos']['z1'] == []
+        assert out['muroAlto'] == {'tramos': 3, 'tapaHueco': False}     # two sides and a lintel
+        assert out['muroBajo'] == {'tramos': 2, 'tapaHueco': False}     # no lintel at 1 m
+        assert out['dintel'] == [1, 0]
+
+
+class TestAReservedZone:
+    def test_off_the_floor_and_marked_as_reserved(self, out):
+        z = out['zona']
+        assert z['sueloZona'] == 0.03 and z['suelopasillo'] == 0.03
+        assert z['marcas'] > 10 and z['dentro']
+
+
+class TestTheBuilding:
+    def test_only_the_chosen_floors_labels_and_the_rest_still_pointable(self, out):
+        """Reported from the screen: hiding the floors above, every floor's labels showed at
+        once and mixed. Only the chosen floor's now; the others keep their boxes, so they are
+        still pointed at and clicked."""
+        todas, ocultas = out['edificio']
+        assert todas['nombres'] == ['rack-p1', 'sala-p1']
+        assert todas['cajas'] == 4          # every floor, above (faint) and below, pointable
+        assert ocultas['nombres'] == ['rack-p1', 'sala-p1']
+        assert ocultas['cajas'] == 3        # the one above, hidden
+
+
 class TestARackOpenedWhereItStands:
     def test_closed_it_is_a_box(self, out):
         assert out['cerrado'] == 0
@@ -198,6 +297,8 @@ class TestARackOpenedWhereItStands:
     def test_its_labels_go_with_it_and_no_stripe_hides_it(self, out):
         assert out['rotulos'] is True
         assert out['franja'][0] >= 1 and out['franja'][1] == 0
+        f = out['frente']
+        assert f['piezas'] == 3 and f['hojaClara'] and f['banda'] and f['tirador'] == 1
         assert out['salaEquipo'] == 'CPD'
 
     def test_opening_it_flies_to_its_front(self, out):

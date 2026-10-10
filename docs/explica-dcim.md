@@ -325,6 +325,52 @@ sin saber por qué.
 libre por rama, puertos libres por switch. Las tres salen de datos que ya estarán ahí, y las tres
 son preguntas que se hacen antes de comprar.
 
+### 5.1 Lo que no está en un rack: los puestos y el cableado horizontal
+
+El cable de red de un edificio no acaba en el rack. Acaba en una **roseta** de la pared o de la
+mesa, y de ahí un latiguillo va al PC, al teléfono IP, a la impresora; el AP y la cámara del
+techo tiran su cable directamente. Sin eso, el inventario sabía que el puerto 7 del panel iba a
+Gi1/0/7 del switch y no sabía a qué mesa.
+
+- Un **equipo de sala** es un `dc_item` como los del rack, con `placement = 'room'`: sin rack ni
+  U, con su sala (`room_uid`) y su sitio medido como una pieza del plano (`pos_x`, `pos_y`,
+  `rotation`), su montaje (`mount`: mesa, pared, techo, suelo) y su altura (`base_mm`). Las
+  clases nuevas —`pc`, `phone`, `printer`, `ap`, `camera`, `display`, `outlet`— traen su tamaño y
+  su altura por defecto (`ROOM_ITEM_DEFAULTS`). Es de quien sea la sala (`chain_of`: item → sala).
+- Rutas propias (`/rooms/<uid>/items`, `/room-items/<uid>`) y no las del rack, porque todo lo que
+  esas comprueban —U libre, cara, bandeja— es de un armario, y una mesa no tiene nada de eso.
+- **Los pasivos se atraviesan**: un panel de parcheo y una roseta (`PASS_THROUGH`) unen su puerto
+  delantero `N` con el trasero `N-R`. El **rastreo** (`GET /items/<uid>/trace`) sigue cada cable
+  a través de ellos: «PC → roseta A → panel 7 → switch Gi1/0/7», con el cable y su longitud en
+  cada tramo. Se corta en lo que el lector no puede ver y a los 24 saltos: un bucle de
+  latiguillos es un error real de una instalación real y no puede colgar la pantalla.
+- En el **plano** se ponen desde la paleta y se arrastran como una pieza; en el **3D** se levantan
+  a su altura, y los cables de una sala a su rack salen como un mazo por sala y rack (`hnet` de
+  los circuitos), que es lo que va por la bandeja.
+
+El **edificio de la demo** está trazado como lo haría un arquitecto según la normativa española:
+un pasillo central de 1,88 m libres (CTE DB-SUA 9 pide 1,20; DB-SI 3, 1,00) y las salas a cada
+lado, pared con pared y con la puerta al pasillo; dos salidas por planta —el núcleo de escalera
+con el ascensor accesible y el vestíbulo al este, y una escalera exterior al oeste (la calle en la
+planta baja)—, con lo que ningún recorrido pasa de 50 m (DB-SI 3); aseos apilados en todas las
+plantas con puestos, uno accesible (DB-SUA 9; RD 486/1997); puertas EI2 45-C5 en los locales de
+riesgo especial (DB-SI 1); el rack mural del pasillo por encima de 2,20 m (DB-SUA 2); el aljibe y
+el grupo de presión de las BIE en el sótano (RIPCI), y el aparcamiento con su plaza accesible.
+Por el techo del pasillo van dos bandejas separadas, una de datos y otra de fuerza
+(UNE-EN 50174-2). `test_dcim_demo_floors.py` comprueba lo que esas normas miden en el plano.
+
+La **demo** (`demo_cabling.py`) es una oficina cableada como la dejaría un instalador: cada mesa
+con roseta doble —PC en A, teléfono en B—, una impresora por zona de impresión, un AP en el techo
+de cada sala grande, pantalla y teléfono de conferencia en las salas de reuniones, cámaras en los
+pasillos y en la puerta del CPD. Cada roseta tira su horizontal al repartidor de su planta, sin
+pasar de los 90 m de la norma; los paneles y los switches de acceso se añaden de 24 en 24 según
+los puestos que haya, los switches suben al núcleo por la fibra, un anillo de fibra une los
+repartidores y una troncal de cobre los dos racks de red del CPD. Y el **CCTV** (UNE-EN 62676):
+cámaras en accesos, aparcamiento, muelle, CPD y salas técnicas —ninguna sobre los puestos,
+LOPDGDD art. 89—, cada una con su tirada y PoE del switch de planta; un grabador de 64 canales en
+el CPD con 30 días de retención; un monitor en recepción y un videowall en el NOC, y los carteles
+de zona videovigilada en cada entrada.
+
 ---
 
 ## 6. Enlaces entre datacenters
@@ -657,6 +703,26 @@ de la información que habrá cuando toque.
 - [x] **Ocultar el plano de fondo** (el ojo de la barra), en la sala y en la planta, en 2D y en
       3D. Encima de un plano cargado de detalle no se distingue lo colocado; es una preferencia
       de quien mira y se recuerda en su navegador
+- [x] **Modo realista y paseo como en un juego (prototipo, solo en `/3d`)**
+      ([infra/_viewer3d_real.html](../src/lib/web_admin/templates/partials/infra/_viewer3d_real.html)):
+      cielo, sol con sombras, luz por píxel, materiales por tipo calculados en el sombreador
+      (suelo técnico, chapa perforada, madera, metal, enlucido, cristal), aristas y contacto con
+      el suelo, niebla. Y a pie: WASD y ratón capturado, choques con muros y racks salvo en las
+      puertas, puertas que se abren al llegar, E/Q en la escalera para cambiar de planta. El
+      motor solo gana una línea —ceder el fotograma si el visor pide `realista`—; el panel no
+      carga el parcial
+- [x] **`/3d`: el inventario en 3D como página propia**, como `/status` pero con sesión y
+      `dcim_view` ([explore3d.html](../src/lib/web_admin/templates/explore3d.html),
+      [explore3d/_page.html](../src/lib/web_admin/templates/partials/explore3d/_page.html)).
+      Las sedes en el mapa con su estado y debajo en tarjetas; al pulsar una, la sede como
+      edificio; arriba, Sedes › la sede (con las demás para saltar) › sus plantas, con subir y
+      bajar; la barra del visor pasa de edificio a planta. La dirección dice sede, planta y modo,
+      así que un enlace o un F5 vuelven al mismo sitio y «atrás» desanda. **No hay dibujo nuevo**:
+      reutiliza el mapa del cuadro de mando y el 3D de la sede tal cual, y redefine solo para sí
+      `renderDcim`, `_dcimUrl` y las funciones que abren una pantalla del panel (un rack, un
+      dispositivo, editar), que aquí la abren en el panel en otra pestaña. Carga una parte del
+      paquete del panel; `tests/meta/test_explore3d_includes.py` vigila que nada de lo que
+      ejecuta al cargar necesite un fichero que no carga
 - [x] **Una planta, o el edificio entero, en 3D**, desde el plano de la sede y con el mismo
       visor ([_site3d.html](../src/lib/web_admin/templates/partials/dcim/_site3d.html)). Cada sala
       se levanta con la misma cuenta que su propio visor (`_dc3dRoomBoxes`) y se coloca girada y

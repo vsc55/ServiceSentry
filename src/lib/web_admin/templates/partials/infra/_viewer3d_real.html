@@ -1,0 +1,888 @@
+{# ================================================================
+   The 3D viewer's realistic mode, and walking it like a game — a prototype, loaded by /3d only.
+
+   The engine (`_viewer3d.html`) draws flat-coloured boxes with a fixed light per face: a model,
+   readable and fast. This draws the SAME scene another way when the viewer asks for it
+   (`V.opts.realista`): sky, a sun that casts shadows (a depth map seen from it), light per
+   pixel with highlights, a material per kind of thing worked out in the shader —raised-floor
+   tiles, perforated rack doors, wood, brushed metal, plastered walls—, dark edges and contact
+   with the ground, fog, and a tone curve. Nothing about the scene changes: the same boxes, the
+   same picking, labels and cards.
+
+   And on foot: W A S D and the mouse (pointer captured), Shift to run, walls and racks that
+   stop you, doors that open as you reach them, and E / Q to go up or down when standing on the
+   stairs (`V.opts.onStairs`). Esc lets go.
+
+   The engine knows nothing of this file but one line: `ss3dDraw` hands the frame over when
+   `V.opts.realista` is set and `ss3dRealDraw` exists. The panel does not load this file, so
+   nothing changes there.
+   ================================================================ #}
+
+// ── Materials ────────────────────────────────────────────────────────────────
+
+//: What each kind of thing is made of, as the shader's material number.
+const SS3D_MAT = {plain: 0, floor: 1, wall: 2, rack: 3, device: 4, wood: 5, metal: 6, glass: 7,
+                  gloss: 8};
+const _SS3D_MAT_OF_PIECE = {
+    bench: 'wood', door: 'wood', table: 'wood',
+    cabinet: 'metal', panel: 'metal', ups: 'metal', crac: 'metal', tray: 'metal',
+    turnstile: 'metal', reader: 'gloss', column: 'wall', wall: 'wall',
+    extinguisher: 'gloss', hose_reel: 'gloss', fire_alarm: 'gloss', aed: 'gloss',
+    first_aid: 'gloss', emergency_light: 'gloss', smoke_detector: 'gloss',
+};
+
+/** A box's size in metres: the lengths of its matrix's three axes. */
+function _ss3dRealSize(m) {
+    return [Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10])];
+}
+
+/** The material of a box, from what the scene says about it. Pure: tested in node. */
+function ss3dRealMat(k) {
+    if (k.muro) return SS3D_MAT.wall;
+    if (k.cable) return SS3D_MAT.gloss;
+    const L = k.lee, s = _ss3dRealSize(k.m);
+    if (!L) return (s[1] < 0.05 && s[0] > 1 && s[2] > 1) ? SS3D_MAT.floor : SS3D_MAT.plain;
+    if (L.tipo === 'rack') return SS3D_MAT.rack;
+    if (L.tipo === 'item') return SS3D_MAT.device;
+    if (L.tipo === 'core') return SS3D_MAT.glass;
+    if (L.tipo === 'feature') return SS3D_MAT[_SS3D_MAT_OF_PIECE[L.fk] || 'plain'];
+    return SS3D_MAT.plain;
+}
+
+/** What the realistic picture leaves out: the tile lines a model needs to measure by eye
+ *  (the floor's own pattern draws them now). */
+function ss3dRealSkip(k) {
+    if (k.lee || k.muro) return false;
+    const s = _ss3dRealSize(k.m);
+    return s[1] <= 0.002 && Math.min(s[0], s[2]) <= 0.01;
+}
+
+/** The glass box of an open rack: there to be clicked and closed, not to be seen. Drawn with
+ *  the rack's material it was a sheet of perforated door between the eye and what the rack was
+ *  opened to show (reported from the walk: «a layer over everything»). Picking reads the scene,
+ *  not the picture, so leaving it out of the drawing changes nothing else. Pure. */
+function ss3dRealHidden(k) {
+    return !!(k.lee && k.lee.tipo === 'rack' && k.lee.open);
+}
+
+/** Where the sun looks from, and how much it covers: the whole scene, or —walking— the 9 m
+ *  round the walker, snapped to a 2 m grid so the shadow is redrawn only every couple of steps.
+ *  The whole of a 30 m floor in a 2048-pixel map is 2 cm a pixel, and from eye height on foot the
+ *  edge of every shadow came out in steps. ``{c: [x, y, z], r}``. Pure. */
+function ss3dRealSunBox(e, ojo, walking) {
+    const X0 = e.X0 || 0, Z0 = e.Z0 || 0, Y0 = e.Y0 || 0;
+    const W = e.W || 12, D = e.D || 8, H = e.H || 3;
+    const c = [(X0 + W) / 2, (Y0 + H) / 2, (Z0 + D) / 2];
+    const r = Math.hypot(W - X0, D - Z0, H - Y0) / 2 + 1;
+    if (!walking || r <= 9) return {c, r};
+    return {c: [Math.round(ojo[0] / 2) * 2, c[1], Math.round(ojo[2] / 2) * 2], r: 9};
+}
+
+/** A door: a piece of kind `door`. Drawn on its own, turning on its hinge. */
+function ss3dRealIsDoor(k) {
+    return !!(k.lee && k.lee.tipo === 'feature' && k.lee.fk === 'door');
+}
+
+// ── Shaders ──────────────────────────────────────────────────────────────────
+
+// Baked boxes: position, normal and colour per vertex, as the engine's batches, plus where the
+// vertex is on its box (0..1 per axis) and the box's size — what the edges and the contact
+// with the ground are worked out from — and its material.
+const _SS3D_RVS_BATCH = `
+attribute vec3 aPos; attribute vec3 aNor; attribute vec3 aCol;
+attribute vec3 aLoc; attribute vec3 aSiz; attribute float aMat;
+uniform mat4 uVP;
+varying vec3 vW; varying vec3 vN; varying vec3 vC; varying vec3 vL; varying vec3 vS; varying float vM;
+void main(){
+  vW = aPos; vN = aNor; vC = aCol; vL = aLoc; vS = aSiz; vM = aMat;
+  gl_Position = uVP * vec4(aPos, 1.0);
+}`;
+
+// One box at a time — a wall whose glass follows the camera, a door that turns.
+const _SS3D_RVS_ONE = `
+attribute vec3 aPos; attribute vec3 aNor;
+uniform mat4 uVP; uniform mat4 uModel; uniform vec3 uCol; uniform vec3 uSiz; uniform float uMat;
+varying vec3 vW; varying vec3 vN; varying vec3 vC; varying vec3 vL; varying vec3 vS; varying float vM;
+void main(){
+  vec4 w = uModel * vec4(aPos, 1.0);
+  vW = w.xyz; vN = normalize(mat3(uModel) * aNor); vC = uCol; vL = aPos; vS = uSiz; vM = uMat;
+  gl_Position = uVP * w;
+}`;
+
+const _SS3D_RFS = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+varying vec3 vW; varying vec3 vN; varying vec3 vC; varying vec3 vL; varying vec3 vS; varying float vM;
+uniform vec3 uEye; uniform vec3 uSun; uniform mat4 uLVP; uniform sampler2D uShadow;
+uniform float uTexel; uniform float uAlpha; uniform vec3 uSky; uniform vec3 uGround; uniform float uFog;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float unpackDepth(vec4 c){ return dot(c, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0)); }
+float shadowAt(vec3 w, float ndl){
+  vec4 p = uLVP * vec4(w, 1.0);
+  vec3 q = p.xyz / p.w * 0.5 + 0.5;
+  if (q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0 || q.z > 1.0) return 1.0;
+  float bias = 0.0006 + 0.0025 * (1.0 - ndl);
+  // Four samples, half a texel apart: soft enough at the edge, and a ninth of the per-pixel
+  // cost of nine was most of what made walking slow.
+  float s = 0.0;
+  for (int i = 0; i < 2; i++)
+    for (int j = 0; j < 2; j++)
+      s += (q.z - bias > unpackDepth(texture2D(uShadow, q.xy + (vec2(float(i), float(j)) - 0.5) * uTexel))) ? 0.0 : 1.0;
+  return s / 4.0;
+}
+void main(){
+  vec3 n = normalize(vN);
+  vec3 an = abs(n);
+  vec2 uv = an.y > 0.5 ? vW.xz : (an.x > 0.5 ? vW.zy : vW.xy);
+  vec3 col = vC;
+  float spec = 0.08, shine = 24.0;
+  float m = vM;
+  // The fine patterns fade with distance: far away and at a grazing angle a 60 cm grid or a wood
+  // grain is finer than a pixel, and what is left of it is stripes that crawl as the camera moves.
+  float lejos = 1.0 - smoothstep(6.0, 22.0, length(uEye - vW));
+  if (m > 0.5 && m < 1.5) {                       // raised floor: 60 cm tiles
+    vec2 t = vW.xz / 0.6; vec2 f = fract(t);
+    float line = max(max(step(f.x, 0.012), step(0.988, f.x)), max(step(f.y, 0.012), step(0.988, f.y)));
+    col *= 0.94 + (0.08 * hash(floor(t)) + 0.04 * noise(vW.xz * 9.0)) * lejos;
+    col = mix(col, col * 0.55, line * lejos);
+    spec = 0.22; shine = 60.0;
+  } else if (m > 1.5 && m < 2.5) {                // plaster
+    col *= 0.95 + 0.07 * noise(uv * 7.0);
+    spec = 0.03; shine = 8.0;
+  } else if (m > 2.5 && m < 3.5) {                // rack: painted steel, perforated doors
+    col *= 0.96 + 0.05 * noise(uv * 30.0);
+    if (vL.z < 0.002 || vL.z > 0.998) {
+      vec2 g = fract(vec2(vL.x * vS.x, vL.y * vS.y) * 70.0);
+      col *= 1.0 - 0.5 * step(length(g - 0.5), 0.27) * lejos;
+    }
+    spec = 0.3; shine = 40.0;
+  } else if (m > 3.5 && m < 4.5) {                // a device: metal with a fine grain
+    col *= 0.93 + 0.08 * noise(vec2(uv.x * 4.0, uv.y * 160.0)) * lejos;
+    spec = 0.4; shine = 55.0;
+  } else if (m > 4.5 && m < 5.5) {                // wood
+    float g = noise(vec2(uv.x * 1.2, uv.y * 24.0)) * 0.6 + noise(vec2(uv.x * 3.0, uv.y * 70.0)) * 0.4 * lejos;
+    col *= 0.86 + 0.24 * g * (0.4 + 0.6 * lejos);
+    spec = 0.12; shine = 18.0;
+  } else if (m > 5.5 && m < 6.5) {                // brushed metal
+    col *= 0.9 + 0.12 * noise(vec2(uv.x * 2.0, uv.y * 140.0)) * lejos;
+    spec = 0.55; shine = 80.0;
+  } else if (m > 6.5 && m < 7.5) {                // glass
+    spec = 0.7; shine = 120.0;
+  } else if (m > 7.5) {                           // glossy paint, cables
+    spec = 0.6; shine = 90.0;
+  }
+  // The edges darker, as a bevel would: the distance to the nearest edge of THIS face.
+  vec3 e = min(vL, 1.0 - vL) * vS;
+  float mn = min(min(e.x, e.y), e.z), mx = max(max(e.x, e.y), e.z);
+  float s2 = e.x + e.y + e.z - mn - mx;
+  col *= 0.8 + 0.2 * smoothstep(0.0, 0.03, s2);
+  // And darker where a side meets the ground.
+  if (an.y < 0.5) col *= 0.72 + 0.28 * smoothstep(0.0, 0.3, vL.y * vS.y);
+  float ndl = max(dot(n, uSun), 0.0);
+  // What is see-through receives none: a zone 2 cm over the floor compared its depth with the
+  // floor's under it, too close to tell apart, and came out in crawling diagonal stripes.
+  float sh = ndl > 0.0 ? (uAlpha < 0.99 ? 1.0 : shadowAt(vW, ndl)) : 0.0;
+  vec3 v = normalize(uEye - vW), h = normalize(uSun + v);
+  float sp = pow(max(dot(n, h), 0.0), shine) * spec * (0.25 + 0.75 * sh);
+  vec3 amb = mix(uGround, uSky, 0.5 + 0.5 * n.y);
+  vec3 lit = col * (amb * 0.42 + vec3(1.0, 0.95, 0.86) * ndl * sh * 1.05) + vec3(sp);
+  float alpha = uAlpha;
+  if (m > 6.5 && m < 7.5) alpha = min(1.0, uAlpha + 0.35 * pow(1.0 - max(dot(n, v), 0.0), 3.0));
+  float d = length(uEye - vW);
+  lit = mix(lit, uSky, smoothstep(uFog * 0.4, uFog, d) * 0.65);
+  lit = lit * (1.0 + lit / 4.0) / (1.0 + lit);    // a soft shoulder: no white blown out
+  gl_FragColor = vec4(pow(lit * 1.25, vec3(0.92)), alpha);
+}`;
+
+// The sun's view: depth, packed into four bytes (WebGL 1 has no depth texture everywhere).
+const _SS3D_SVS_BATCH = `
+attribute vec3 aPos; uniform mat4 uVP;
+void main(){ gl_Position = uVP * vec4(aPos, 1.0); }`;
+const _SS3D_SVS_ONE = `
+attribute vec3 aPos; uniform mat4 uVP; uniform mat4 uModel;
+void main(){ gl_Position = uVP * uModel * vec4(aPos, 1.0); }`;
+const _SS3D_SFS = `
+precision highp float;
+void main(){
+  vec4 enc = fract(vec4(1.0, 255.0, 65025.0, 16581375.0) * gl_FragCoord.z);
+  enc -= enc.yzww * vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
+  gl_FragColor = enc;
+}`;
+
+// The sky behind everything: lighter at the horizon.
+const _SS3D_KVS = `
+attribute vec2 aPos; varying float vY;
+void main(){ vY = aPos.y * 0.5 + 0.5; gl_Position = vec4(aPos, 0.9999, 1.0); }`;
+const _SS3D_KFS = `
+precision mediump float; varying float vY; uniform vec3 uSky; uniform vec3 uHorizon;
+void main(){ gl_FragColor = vec4(mix(uHorizon, uSky, smoothstep(0.2, 1.0, vY)), 1.0); }`;
+
+const _SS3D_SUN = (() => { const v = [0.32, 1.0, 0.22], l = Math.hypot(...v); return v.map(x => x / l); })();
+const _SS3D_SHADOW_SIZE = 2048;
+
+// ── Building what it draws ───────────────────────────────────────────────────
+
+/** The solid boxes as arrays for the realistic program: the engine's position, normal and
+ *  colour, plus where each vertex is on its box, the box's size and its material. Pure. */
+function ss3dRealArrays(cajas) {
+    const out = [];
+    for (let i = 0; i < cajas.length; i += _SS3D_PER_BATCH) {
+        const parte = cajas.slice(i, i + _SS3D_PER_BATCH);
+        const n = parte.length;
+        const pos = new Float32Array(n * 72), nor = new Float32Array(n * 72), col = new Float32Array(n * 72);
+        const loc = new Float32Array(n * 72), siz = new Float32Array(n * 72), mat = new Float32Array(n * 24);
+        const idx = new Uint16Array(n * 36);
+        parte.forEach((k, b) => {
+            const m = k.m, s = _ss3dRealSize(m), mt = ss3dRealMat(k);
+            for (let v = 0; v < 24; v++) {
+                const lx = _SS3D_CUBE.pos[v * 3], ly = _SS3D_CUBE.pos[v * 3 + 1], lz = _SS3D_CUBE.pos[v * 3 + 2];
+                const nx = _SS3D_CUBE.nor[v * 3], ny = _SS3D_CUBE.nor[v * 3 + 1], nz = _SS3D_CUBE.nor[v * 3 + 2];
+                const o = (b * 24 + v) * 3;
+                pos.set(_ss3dAt(m, lx, ly, lz), o);
+                nor.set(ss3dNorm([m[0] * nx + m[4] * ny + m[8] * nz, m[1] * nx + m[5] * ny + m[9] * nz,
+                                  m[2] * nx + m[6] * ny + m[10] * nz]), o);
+                col.set(k.color.slice(0, 3), o);
+                loc.set([lx, ly, lz], o);
+                siz.set(s, o);
+                mat[b * 24 + v] = mt;
+            }
+            for (let j = 0; j < 36; j++) idx[b * 36 + j] = b * 24 + _SS3D_CUBE.idx[j];
+        });
+        out.push({pos, nor, col, loc, siz, mat, idx, count: n * 36});
+    }
+    return out;
+}
+
+function _ss3dRealInit(V) {
+    const gl = V.gl;
+    const R = {};
+    const p = (vs, fs) => _ss3dCompile(gl, vs, fs);
+    R.batch = p(_SS3D_RVS_BATCH, _SS3D_RFS);
+    R.one = p(_SS3D_RVS_ONE, _SS3D_RFS);
+    R.sbatch = p(_SS3D_SVS_BATCH, _SS3D_SFS);
+    R.sone = p(_SS3D_SVS_ONE, _SS3D_SFS);
+    R.sky = p(_SS3D_KVS, _SS3D_KFS);
+    if (!R.batch || !R.one || !R.sbatch || !R.sone || !R.sky) return null;
+    R.skyBuf = _ss3dBuffer(gl, gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]));
+    // The sun's depth: a colour texture it writes packed depth into, and a depth buffer.
+    R.tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, R.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, _SS3D_SHADOW_SIZE, _SS3D_SHADOW_SIZE, 0, gl.RGBA,
+                  gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    R.depth = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, R.depth);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, _SS3D_SHADOW_SIZE, _SS3D_SHADOW_SIZE);
+    R.fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, R.tex, 0);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, R.depth);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (!ok) return null;
+    R.loc = {};
+    for (const [nombre, prog] of Object.entries({batch: R.batch, one: R.one, sbatch: R.sbatch, sone: R.sone, sky: R.sky})) {
+        const L = {};
+        for (const a of ['aPos', 'aNor', 'aCol', 'aLoc', 'aSiz', 'aMat']) L[a] = gl.getAttribLocation(prog, a);
+        for (const u of ['uVP', 'uModel', 'uCol', 'uSiz', 'uMat', 'uEye', 'uSun', 'uLVP', 'uShadow', 'uTexel',
+                         'uAlpha', 'uSky', 'uGround', 'uFog', 'uHorizon'])
+            L[u] = gl.getUniformLocation(prog, u);
+        R.loc[nombre] = L;
+    }
+    return R;
+}
+
+/** Bake the scene for this mode when it is a new scene: the solid boxes but the doors (they
+ *  turn) and the tile lines (the floor draws its own). */
+function _ss3dRealBake(V) {
+    const R = V.real, gl = V.gl, e = V.escena;
+    if (R.escena === e) return;
+    for (const b of R.tris || []) for (const k of ['pos', 'nor', 'col', 'loc', 'siz', 'mat', 'idx']) gl.deleteBuffer(b[k]);
+    R.escena = e;
+    const solidos = (e.opacos || []).filter(k => !ss3dRealSkip(k) && !ss3dRealIsDoor(k));
+    R.doors = (e.cajas || []).filter(ss3dRealIsDoor).map(k => ({k, f: (R.open || {})[(k.lee || {}).uid] || 0}));
+    R.tris = ss3dRealArrays(solidos).map(t => ({
+        pos: _ss3dBuffer(gl, gl.ARRAY_BUFFER, t.pos), nor: _ss3dBuffer(gl, gl.ARRAY_BUFFER, t.nor),
+        col: _ss3dBuffer(gl, gl.ARRAY_BUFFER, t.col), loc: _ss3dBuffer(gl, gl.ARRAY_BUFFER, t.loc),
+        siz: _ss3dBuffer(gl, gl.ARRAY_BUFFER, t.siz), mat: _ss3dBuffer(gl, gl.ARRAY_BUFFER, t.mat),
+        idx: _ss3dBuffer(gl, gl.ELEMENT_ARRAY_BUFFER, t.idx), count: t.count}));
+    R.solid = null;                                   // the collision boxes, rebuilt on demand
+}
+
+// ── Doors ────────────────────────────────────────────────────────────────────
+
+/** A door's matrix, open by `f` (0 shut, 1 open): turned up to 90° on its hinge —the left
+ *  edge of the leaf, half way through its thickness— about the vertical, to the side `lado`
+ *  (+1 or -1). Pure. */
+function ss3dDoorMatrix(m, f, lado) {
+    if (!f) return m;
+    const h = _ss3dAt(m, 0, 0, 0.5);
+    const a = (lado || 1) * f * Math.PI / 2, c = Math.cos(a), s = Math.sin(a);
+    const R = new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0,
+                                h[0] - c * h[0] - s * h[2], 0, h[2] + s * h[0] - c * h[2], 1]);
+    return ss3dMul(R, m);
+}
+
+/** Which way a door swings: away from whoever comes. Turning by +90° takes the leaf's
+ *  direction (x, z) to (z, -x); if that points at the eye, the other way. Pure. */
+function ss3dDoorSide(m, ojo) {
+    const h = _ss3dAt(m, 0, 0, 0.5);
+    const ux = [m[0], m[2]], perp = [ux[1], -ux[0]];
+    return perp[0] * (ojo[0] - h[0]) + perp[1] * (ojo[2] - h[2]) > 0 ? -1 : 1;
+}
+
+/** How open each door should be: the eye within reach of it opens it, then it shuts behind.
+ *  Returns whether any is still moving (so the loop keeps drawing). */
+function _ss3dRealDoors(V, ojo) {
+    const R = V.real, ahora = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const dt = Math.min(0.1, Math.max(0, (ahora - (R.t || ahora)) / 1000));
+    R.t = ahora;
+    R.open = R.open || {};
+    let moving = false;
+    for (const d of R.doors || []) {
+        const c = _ss3dAt(d.k.m, 0.5, 0.5, 0.5);
+        const cerca = Math.hypot(ojo[0] - c[0], ojo[2] - c[2]) < 1.8 && Math.abs(ojo[1] - c[1]) < 2.2;
+        const meta = cerca ? 1 : 0;
+        // The side is chosen as it starts to open, and kept: walking through, the eye changes
+        // side, and a door that changed its mind would hit whoever is in it.
+        if (!d.f && meta) d.lado = ss3dDoorSide(d.k.m, ojo);
+        if (d.f !== meta) {
+            d.f = meta > d.f ? Math.min(1, d.f + dt * 2.2) : Math.max(0, d.f - dt * 1.6);
+            moving = true;
+        }
+        R.open[(d.k.lee || {}).uid] = d.f;
+    }
+    return moving;
+}
+
+// ── Drawing ──────────────────────────────────────────────────────────────────
+
+/** The frame, realistic. `true` when drawn; `false` when it cannot be (no float precision, a
+ *  framebuffer refused): the engine then draws it its own way. */
+function ss3dRealDraw(V, vp, ojo) {
+    const gl = V.gl;
+    if (V.real === undefined) V.real = _ss3dRealInit(V);
+    if (!V.real) return false;
+    const R = V.real, e = V.escena;
+    _ss3dRealBake(V);
+    const moviendo = _ss3dRealDoors(V, ojo);
+    // The sun: an orthographic view of the scene's box —or, walking, of what is round the
+    // walker— from the sun's side.
+    const X0 = e.X0 || 0, Z0 = e.Z0 || 0;
+    const W = e.W || 12, D = e.D || 8;
+    const andando = _SS3D_FPS.on && _SS3D.get(_SS3D_FPS.id) === V;
+    const caja = ss3dRealSunBox(e, ojo, andando);
+    const [cx, cy, cz] = caja.c, r = caja.r;
+    const sol = _SS3D_SUN;
+    const desde = [cx + sol[0] * r * 2, cy + sol[1] * r * 2, cz + sol[2] * r * 2];
+    const lvp = ss3dMul(ss3dOrtho(-r, r, -r, r, 0.1, r * 4), ss3dLookAt(desde, [cx, cy, cz]));
+    const puertas = (R.doors || []).map(d => ({k: d.k, m: ss3dDoorMatrix(d.k.m, d.f, d.lado)}));
+    const muros = (e.muros || []).map(k => [k, ss3dWallAlphaOf(k, ojo, e)]);
+
+    // 1. The sun's depth — only when what casts shadows changed: the sun does not move, so a
+    // frame where only the camera did reuses the last one. Redrawn every frame it was most of
+    // the cost of walking, and walking stuttered.
+    const sombraClave = (R.doors || []).map(d => d.f.toFixed(2) + (d.lado || '')).join(',')
+        + '|' + cx + ',' + cz + ',' + r;
+    if (R.sombraDe !== e || R.sombraClave !== sombraClave) {
+    R.sombraDe = e;
+    R.sombraClave = sombraClave;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo);
+    gl.viewport(0, 0, _SS3D_SHADOW_SIZE, _SS3D_SHADOW_SIZE);
+    gl.disable(gl.BLEND);
+    gl.clearColor(1, 1, 1, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.depthMask(true);
+    _ss3dRealDrawBatches(V, R.sbatch, R.loc.sbatch, lvp, true);
+    _ss3dRealUseOne(V, R.sone, R.loc.sone, lvp);
+    for (const p of puertas) _ss3dRealOne(V, R.loc.sone, p.m);
+    for (const [k, a] of muros) if (a >= 1) _ss3dRealOne(V, R.loc.sone, k.m);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
+
+    // 2. The sky.
+    gl.viewport(0, 0, V.cv.width, V.cv.height);
+    gl.enable(gl.BLEND);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    const cielo = [0.56, 0.68, 0.84], horizonte = [0.86, 0.88, 0.9], suelo = [0.42, 0.4, 0.37];
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(R.sky);
+    _ss3dRealAttrsOff(gl);
+    gl.bindBuffer(gl.ARRAY_BUFFER, R.skyBuf);
+    gl.enableVertexAttribArray(R.loc.sky.aPos);
+    gl.vertexAttribPointer(R.loc.sky.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform3fv(R.loc.sky.uSky, cielo);
+    gl.uniform3fv(R.loc.sky.uHorizon, horizonte);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.enable(gl.DEPTH_TEST);
+
+    // 3. The scene, lit.
+    const comunes = (L) => {
+        gl.uniformMatrix4fv(L.uVP, false, vp);
+        gl.uniform3fv(L.uEye, ojo);
+        gl.uniform3fv(L.uSun, sol);
+        gl.uniformMatrix4fv(L.uLVP, false, lvp);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, R.tex);
+        gl.uniform1i(L.uShadow, 1);
+        gl.uniform1f(L.uTexel, 1 / _SS3D_SHADOW_SIZE);
+        gl.uniform3fv(L.uSky, cielo);
+        gl.uniform3fv(L.uGround, suelo);
+        gl.uniform1f(L.uFog, Math.max(60, Math.max(W - X0, D - Z0) * 2.5));
+    };
+    gl.useProgram(R.batch);
+    comunes(R.loc.batch);
+    gl.uniform1f(R.loc.batch.uAlpha, 1);
+    gl.depthMask(true);
+    _ss3dRealDrawBatches(V, R.batch, R.loc.batch, vp, false);
+    _ss3dRealUseOne(V, R.one, R.loc.one, vp);
+    comunes(R.loc.one);
+    const uno = (k, m, a) => {
+        const L = R.loc.one;
+        gl.uniform3fv(L.uCol, k.color.slice(0, 3));
+        gl.uniform3fv(L.uSiz, _ss3dRealSize(m));
+        gl.uniform1f(L.uMat, ss3dRealMat(k));
+        gl.uniform1f(L.uAlpha, a);
+        gl.depthMask(a >= 1);
+        _ss3dRealOne(V, L, m);
+    };
+    for (const p of puertas) uno(p.k, p.m, p.k.color[3]);
+    for (const [k, a] of muros) if (a >= 1) uno(k, k.m, a);
+    for (const k of e.bajos || []) uno(k, k.m, k.color[3]);
+    // The plans on the ground, by the engine's own program; then back to this one.
+    if ((e.planos || []).length && V.quad) {
+        _ss3dDrawPlans(V, vp);
+        _ss3dRealUseOne(V, R.one, R.loc.one, vp);
+        comunes(R.loc.one);
+    }
+    for (const [k, a] of muros) if (a < 1) uno(k, k.m, a);
+    for (const k of e.vidrios || []) if (!ss3dRealHidden(k)) uno(k, k.m, k.color[3]);
+    for (const k of V.extras || []) uno(k, k.m, k.color[3]);
+    gl.depthMask(true);
+    _ss3dRealAttrsOff(gl);
+    // The texture unit the engine's images use, back where it expects it.
+    gl.activeTexture(gl.TEXTURE0);
+    if (moviendo && typeof requestAnimationFrame === 'function')
+        requestAnimationFrame(() => _ss3dTouched(V));
+    return true;
+}
+
+/** Every vertex attribute off: one left on from another program, pointing at a smaller
+ *  buffer —the engine's 24-corner cube— makes WebGL refuse the next big draw, silently. */
+function _ss3dRealAttrsOff(gl) {
+    const n = gl.getParameter(gl.MAX_VERTEX_ATTRIBS) || 8;
+    for (let i = 0; i < n; i++) gl.disableVertexAttribArray(i);
+}
+
+function _ss3dRealAttr(gl, loc, buf, n) {
+    if (loc < 0) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, n, gl.FLOAT, false, 0, 0);
+}
+
+function _ss3dRealDrawBatches(V, prog, L, vp, sombra) {
+    const gl = V.gl;
+    gl.useProgram(prog);
+    _ss3dRealAttrsOff(gl);
+    gl.uniformMatrix4fv(L.uVP, false, vp);
+    for (const t of V.real.tris || []) {
+        _ss3dRealAttr(gl, L.aPos, t.pos, 3);
+        if (!sombra) {
+            _ss3dRealAttr(gl, L.aNor, t.nor, 3);
+            _ss3dRealAttr(gl, L.aCol, t.col, 3);
+            _ss3dRealAttr(gl, L.aLoc, t.loc, 3);
+            _ss3dRealAttr(gl, L.aSiz, t.siz, 3);
+            _ss3dRealAttr(gl, L.aMat, t.mat, 1);
+        }
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, t.idx);
+        gl.drawElements(gl.TRIANGLES, t.count, gl.UNSIGNED_SHORT, 0);
+    }
+    _ss3dRealAttrsOff(gl);
+}
+
+function _ss3dRealUseOne(V, prog, L, vp) {
+    const gl = V.gl;
+    gl.useProgram(prog);
+    _ss3dRealAttrsOff(gl);
+    gl.uniformMatrix4fv(L.uVP, false, vp);
+    _ss3dRealAttr(gl, L.aPos, V.buf.pos, 3);
+    if (L.aNor >= 0) _ss3dRealAttr(gl, L.aNor, V.buf.nor, 3);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, V.buf.idx);
+}
+
+function _ss3dRealOne(V, L, m) {
+    const gl = V.gl;
+    gl.uniformMatrix4fv(L.uModel, false, m);
+    gl.drawElements(gl.TRIANGLES, _SS3D_CUBE.idx.length, gl.UNSIGNED_SHORT, 0);
+}
+
+// ── On foot, like a game ─────────────────────────────────────────────────────
+
+//: The walk: which viewer, where, which way, which keys are down. One at a time on a page.
+const _SS3D_FPS = {id: '', on: false, pos: [0, 0, 0], yaw: 0, pitch: 0, keys: new Set(), raf: 0,
+                   t: 0, lock: null, floorY: 0, vel: [0, 0], labels: null, fov: 0.96, aimT: 0,
+                   aim: ''};
+//: The walk's zoom: the field of view, from the engine's own (no zoom) down to a pair of
+//: binoculars' — enough to read the ports at the back of a server from the aisle.
+const _SS3D_FOV = 0.96, _SS3D_FOV_MIN = 0.12;
+const _SS3D_EYE = 1.65, _SS3D_BODY = 0.25;
+//: Metres a second, walking and running — a game's pace, not a stroll: at 1.6 it felt slow.
+const _SS3D_WALK = 3.2, _SS3D_RUN = 6.5;
+
+/** The boxes that stop a walker, as boxes on the ground plan with their height: the solid ones
+ *  between the knees and the head, but not what is walked on or through —floors, zones, labels,
+ *  the stairs, cables, doors—. Pure: tested in node. */
+function ss3dRealSolids(cajas, y0) {
+    const out = [];
+    for (const k of cajas || []) {
+        if (k.cable || ss3dRealIsDoor(k) || k.color[3] < 0.5 && !k.muro) continue;
+        const L = k.lee;
+        if (L && (L.tipo === 'core' || L.tipo === 'run' || L.tipo === 'power' || L.tipo === 'source')) continue;
+        if (L && L.tipo === 'feature' && ['zone', 'aisle', 'label', 'tray', 'smoke_detector'].includes(L.fk)) continue;
+        const pts = [];
+        for (let i = 0; i < 8; i++) pts.push(_ss3dAt(k.m, i & 1, (i >> 1) & 1, (i >> 2) & 1));
+        const a = [0, 1, 2].map(j => Math.min(...pts.map(p => p[j])));
+        const b = [0, 1, 2].map(j => Math.max(...pts.map(p => p[j])));
+        if (b[1] - a[1] < 0.05) continue;                    // a floor, a slab
+        if (b[1] < y0 + 0.3 || a[1] > y0 + 1.8) continue;     // under the knees or over the head
+        out.push({a, b, muro: !!k.muro});
+    }
+    return out;
+}
+
+/** Whether a walker standing at (x, z) runs into a box: a wall does not stop where a door is. */
+function ss3dRealBlocked(solidos, puertas, x, z) {
+    const r = _SS3D_BODY;
+    for (const s of solidos) {
+        if (x + r < s.a[0] || x - r > s.b[0] || z + r < s.a[2] || z - r > s.b[2]) continue;
+        if (s.muro && puertas.some(p => x > p.a[0] - 0.3 && x < p.b[0] + 0.3 && z > p.a[2] - 0.3 && z < p.b[2] + 0.3))
+            continue;
+        return true;
+    }
+    return false;
+}
+
+function _ss3dFpsSolids(V) {
+    // Its own store, not `V.real`: walking without the realistic mode would leave an empty
+    // `V.real`, and the painter would take it for one already set up.
+    const R = V.walk || (V.walk = {});
+    if (R.solidOf === V.escena && R.solid) return R.solid;
+    const cajas = V.escena.cajas || [];
+    R.solid = ss3dRealSolids(cajas, _SS3D_FPS.floorY);
+    R.doorBoxes = cajas.filter(ss3dRealIsDoor).map(k => {
+        const pts = [];
+        for (let i = 0; i < 8; i++) pts.push(_ss3dAt(k.m, i & 1, (i >> 1) & 1, (i >> 2) & 1));
+        return {a: [0, 1, 2].map(j => Math.min(...pts.map(p => p[j]))),
+                b: [0, 1, 2].map(j => Math.max(...pts.map(p => p[j])))};
+    });
+    R.cores = cajas.filter(k => k.lee && k.lee.tipo === 'core').map(k => {
+        const p0 = _ss3dAt(k.m, 0, 0, 0), p1 = _ss3dAt(k.m, 1, 1, 1);
+        return {a: [Math.min(p0[0], p1[0]), 0, Math.min(p0[2], p1[2])],
+                b: [Math.max(p0[0], p1[0]), 0, Math.max(p0[2], p1[2])]};
+    });
+    R.solidOf = V.escena;
+    return R.solid;
+}
+
+/** Put the engine's camera where the walker is and looking where it looks. `ahora`: draw it in
+ *  this very frame —the walk's own— instead of waking the engine's loop for the next one: a
+ *  frame late every frame is a picture that lags the keys. */
+function _ss3dFpsCamera(V, ahora) {
+    const F = _SS3D_FPS, r = 0.02;
+    const L = [Math.cos(F.pitch) * Math.cos(F.yaw), Math.sin(F.pitch), Math.cos(F.pitch) * Math.sin(F.yaw)];
+    V.cam = {mira: [F.pos[0] + L[0] * r, F.pos[1] + L[1] * r, F.pos[2] + L[2] * r], radio: r,
+             theta: F.yaw + Math.PI, phi: Math.acos(Math.max(-1, Math.min(1, -L[1]))), orto: false,
+             fov: F.fov};
+    if (ahora && V.gl && V.escena) {
+        const firma = _ss3dFirma(V);
+        if (firma !== V.firma) { V.firma = firma; ss3dDraw(V); }
+        return;
+    }
+    _ss3dTouched(V);
+}
+
+/** Start walking in viewer `id`: at `at` ({x, z, yaw}) or where the camera looks. `lockEl`: what
+ *  captures the pointer — something that outlives a redraw of the viewer, so going up a floor
+ *  does not let go of the mouse. */
+function ss3dFpsStart(id, at, lockEl) {
+    const V = _SS3D.get(id);
+    if (!V || !V.escena) return;
+    const F = _SS3D_FPS, c = V.cam || ss3dCamHome(V.escena);
+    F.id = id;
+    F.on = true;
+    F.floorY = 0;
+    F.yaw = at && Number.isFinite(at.yaw) ? at.yaw : c.theta + Math.PI;
+    F.pitch = 0;
+    // Where it was asked; if not, on the floor's stairs —where one arrives at a floor—, facing
+    // the middle; and if the floor has none, where the camera looks.
+    const solidos = _ss3dFpsSolids(V);
+    const core = (V.walk.cores || [])[0];
+    let x = c.mira[0], z = c.mira[2];
+    if (at && Number.isFinite(at.x)) { x = at.x; z = at.z; }
+    // Already standing (the camera is a walker's: no radius) — carry on from there.
+    else if (c.radio < 0.1) F.yaw = c.theta + Math.PI;
+    // Walked this same view before and left it (Esc, a card): back where one left off.
+    else if (F.last && F.last.key === V.key) { x = F.last.x; z = F.last.z; F.yaw = F.last.yaw; }
+    else if (core) {
+        x = (core.a[0] + core.b[0]) / 2;
+        z = (core.a[2] + core.b[2]) / 2;
+        const e = V.escena;
+        F.yaw = Math.atan2(((e.Z0 || 0) + (e.D || 0)) / 2 - z, ((e.X0 || 0) + (e.W || 0)) / 2 - x);
+    }
+    F.pos = [x, F.floorY + _SS3D_EYE, z];
+    // Not inside a rack: from there, out to the nearest free spot.
+    if (ss3dRealBlocked(solidos, V.walk.doorBoxes || [], x, z)) {
+        let hecho = false;
+        for (let r = 0.5; r < 12 && !hecho; r += 0.5)
+            for (let a = 0; a < 16 && !hecho; a++) {
+                const nx = x + Math.cos(a * Math.PI / 8) * r, nz = z + Math.sin(a * Math.PI / 8) * r;
+                if (!ss3dRealBlocked(solidos, V.walk.doorBoxes || [], nx, nz)) { F.pos = [nx, F.pos[1], nz]; hecho = true; }
+            }
+    }
+    // The names off while walking, for real: hidden, they were still placed every frame —
+    // reading each one's width — and that alone made the walk stutter.
+    if (F.labels === null) { F.labels = ss3dShowLabels; ss3dShowLabels = false; }
+    F.lock = lockEl || V.box;
+    if (F.lock && F.lock.requestPointerLock && document.pointerLockElement !== F.lock) {
+        try { F.lock.requestPointerLock(); } catch (_) { /* without it, dragging looks round */ }
+    }
+    _ss3dFpsHud(V, true);
+    _ss3dFpsCamera(V);
+    if (!F.raf) { F.t = 0; F.raf = requestAnimationFrame(_ss3dFpsStep); }
+}
+
+/** Rebind the walk to a redrawn viewer with the same id (a new canvas, the same walker). */
+function ss3dFpsAttach(id) {
+    const F = _SS3D_FPS, V = _SS3D.get(id);
+    if (!F.on || F.id !== id || !V) return;
+    _ss3dFpsHud(V, true);
+    _ss3dFpsCamera(V);
+}
+
+function ss3dFpsStop() {
+    const F = _SS3D_FPS;
+    if (!F.on) return;
+    F.on = false;
+    F.keys.clear();
+    F.vel = [0, 0];
+    if (F.labels !== null) { ss3dShowLabels = F.labels; F.labels = null; }
+    if (F.raf) cancelAnimationFrame(F.raf);
+    F.raf = 0;
+    if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock();
+    const V = _SS3D.get(F.id);
+    if (V) _ss3dFpsHud(V, false);
+    if (V) F.last = {key: V.key, x: F.pos[0], z: F.pos[2], yaw: F.yaw};
+    // Back to an orbit camera, pulled back behind and above where one stood and looking the same
+    // way. Left as it was —the walker's, with no radius— the wheel multiplies a radius of 2 cm and
+    // could not take one away from there.
+    F.fov = _SS3D_FOV;
+    if (V && V.cam) delete V.cam.fov;
+    if (V && V.cam && V.cam.radio < 0.1) {
+        ss3dFlyTo(V, {mira: [F.pos[0], F.floorY + 1, F.pos[2]], radio: 8, theta: F.yaw + Math.PI,
+                      phi: 0.95}, 450);
+    }
+    if (V && typeof (V.opts || {}).onWalkEnd === 'function') V.opts.onWalkEnd();
+}
+
+function ss3dFpsOn(id) { return _SS3D_FPS.on && (!id || _SS3D_FPS.id === id); }
+
+/** Where the walker is, to carry it to another floor: `{x, z, yaw}`. */
+function ss3dFpsWhere() {
+    const F = _SS3D_FPS;
+    return {x: F.pos[0], z: F.pos[2], yaw: F.yaw};
+}
+
+function _ss3dFpsHud(V, on) {
+    if (!V.box) return;
+    // Walking, the names of everything through every wall are not what one sees: hidden.
+    V.box.classList.toggle('ss-3d-walking', !!on);
+    let h = V.box.querySelector('[data-ss3d-fps]');
+    if (!on) { if (h) h.remove(); return; }
+    if (h) return;
+    h = document.createElement('div');
+    h.setAttribute('data-ss3d-fps', '');
+    h.className = 'ss-3d-fps';
+    h.innerHTML = `<div class="ss-3d-cross" aria-hidden="true"></div>
+        <div class="ss-3d-fps-aim d-none" data-ss3d-fps-aim role="status" aria-live="polite"></div>
+        <div class="ss-3d-fps-hint">${esc(t('view3d_fps_hint'))}</div>`;
+    _SS3D_FPS.aim = '';
+    V.box.appendChild(h);
+}
+
+function _ss3dFpsStep(ahora) {
+    const F = _SS3D_FPS;
+    F.raf = 0;
+    if (!F.on) return;
+    const V = _SS3D.get(F.id);
+    if (!V || !V.escena) { F.raf = requestAnimationFrame(_ss3dFpsStep); return; }
+    // Up to a quarter of a second per frame: on a slow machine a frame takes long, and capping
+    // it lower made walking slower than the speed it says.
+    const dt = F.t ? Math.min(0.25, (ahora - F.t) / 1000) : 0;
+    F.t = ahora;
+    // Without the pointer captured, the engine's drag turns the head: read it back.
+    if (document.pointerLockElement !== F.lock && V.cam) {
+        F.yaw = V.cam.theta + Math.PI;
+        F.pitch = Math.asin(Math.max(-1, Math.min(1, -Math.cos(V.cam.phi))));
+    }
+    const k = F.keys;
+    const adelante = (k.has('w') || k.has('arrowup') ? 1 : 0) - (k.has('s') || k.has('arrowdown') ? 1 : 0);
+    const lado = (k.has('d') || k.has('arrowright') ? 1 : 0) - (k.has('a') || k.has('arrowleft') ? 1 : 0);
+    // The velocity it wants, and the one it has easing towards it: starting and stopping in a
+    // fraction of a second instead of at once, which is what made each key press a jolt.
+    const fx = Math.cos(F.yaw), fz = Math.sin(F.yaw);
+    let qx = fx * adelante - fz * lado, qz = fz * adelante + fx * lado;
+    const ql = Math.hypot(qx, qz);
+    const rapido = k.has('shift') ? _SS3D_RUN : _SS3D_WALK;
+    if (ql) { qx = qx / ql * rapido; qz = qz / ql * rapido; }
+    const suave = 1 - Math.exp(-dt * (ql ? 12 : 16));
+    F.vel[0] += (qx - F.vel[0]) * suave;
+    F.vel[1] += (qz - F.vel[1]) * suave;
+    if (Math.hypot(F.vel[0], F.vel[1]) < 0.01) F.vel = [0, 0];
+    const dx = F.vel[0] * dt, dz = F.vel[1] * dt;
+    if (dx || dz) {
+        const solidos = _ss3dFpsSolids(V), puertas = V.walk.doorBoxes || [];
+        if (!ss3dRealBlocked(solidos, puertas, F.pos[0] + dx, F.pos[2])) F.pos[0] += dx;
+        else F.vel[0] = 0;
+        if (!ss3dRealBlocked(solidos, puertas, F.pos[0], F.pos[2] + dz)) F.pos[2] += dz;
+        else F.vel[1] = 0;
+    }
+    _ss3dFpsCamera(V, true);
+    _ss3dFpsAimShow(V, false);
+    F.raf = requestAnimationFrame(_ss3dFpsStep);
+}
+
+/** On the stairs: inside the footprint of the floor's core. */
+function _ss3dFpsOnStairs(V) {
+    _ss3dFpsSolids(V);
+    const F = _SS3D_FPS;
+    return (V.walk.cores || []).some(c => F.pos[0] > c.a[0] - 0.3 && F.pos[0] < c.b[0] + 0.3
+                                          && F.pos[2] > c.a[2] - 0.3 && F.pos[2] < c.b[2] + 0.3);
+}
+
+const _SS3D_FPS_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright',
+                                'shift', 'e', 'q', 'pageup', 'pagedown', 'f']);
+
+window.addEventListener('keydown', (ev) => {
+    const F = _SS3D_FPS;
+    if (!F.on) return;
+    const k = (ev.key || '').toLowerCase();
+    if (k === 'escape') { ss3dFpsStop(); return; }
+    if (!_SS3D_FPS_KEYS.has(k)) return;
+    // Before the canvas's own keys, which would walk the orbit camera as well.
+    ev.preventDefault();
+    ev.stopPropagation();
+    const V = _SS3D.get(F.id);
+    if (V && k === 'f') {
+        const hit = _ss3dFpsAim(V, true);
+        if (!ev.repeat && hit && typeof (V.opts || {}).onUse === 'function') V.opts.onUse(hit.caja.lee, 'toggle');
+        return;
+    }
+    if (V && (k === 'e' || k === 'q' || k === 'pageup' || k === 'pagedown')) {
+        if (!ev.repeat && typeof (V.opts || {}).onStairs === 'function') {
+            if (_ss3dFpsOnStairs(V)) V.opts.onStairs(k === 'e' || k === 'pageup' ? 1 : -1, ss3dFpsWhere());
+            else showToast(t('view3d_fps_stairs'), 'info');
+        }
+        return;
+    }
+    F.keys.add(k);
+}, true);
+window.addEventListener('keyup', (ev) => {
+    _SS3D_FPS.keys.delete((ev.key || '').toLowerCase());
+}, true);
+window.addEventListener('blur', () => _SS3D_FPS.keys.clear());
+document.addEventListener('mousemove', (ev) => {
+    const F = _SS3D_FPS;
+    if (!F.on || document.pointerLockElement !== F.lock) return;
+    // Slower the more zoomed: at binoculars' magnification the normal speed overshoots everything.
+    const k = 0.0022 * F.fov / _SS3D_FOV;
+    F.yaw += (ev.movementX || 0) * k;
+    F.pitch = Math.max(-1.3, Math.min(1.3, F.pitch - (ev.movementY || 0) * k));
+});
+/** What is under the crosshair: `{caja, t}` or `null`. `cristal`: an open rack too —glass, so
+ *  a click goes through it to what it holds, but F is about the rack itself. */
+function _ss3dFpsAim(V, cristal) {
+    if (!V || !V.cv) return null;
+    const r = V.cv.getBoundingClientRect();
+    const rayo = ss3dRay(V, r.left + r.width / 2, r.top + r.height / 2);
+    if (!rayo) return null;
+    const hit = ss3dPickBox(V, rayo, k => k.lee && (k.color[3] >= 0.5 || k.lee.tipo === 'core'
+                                                    || (cristal && k.lee.tipo === 'rack')));
+    return hit ? Object.assign(hit, {rayo}) : null;
+}
+
+/** Let go of the mouse but keep walking where one is: to click a card's buttons. Pressing
+ *  «walk» again carries on from the same spot. */
+function ss3dFpsRelease() {
+    ss3dFpsStop();
+}
+
+// A click while walking USES what is in front: whoever mounted the viewer says how
+// (`opts.onUse(lee, 'click')`, true when it did something — a rack opens where it stands). If
+// not, the mouse is let go and the card shows, as a click on the canvas would: with the
+// pointer captured its buttons could not be pressed.
+document.addEventListener('mousedown', (ev) => {
+    const F = _SS3D_FPS;
+    if (!F.on || document.pointerLockElement !== F.lock) return;
+    const V = _SS3D.get(F.id);
+    if (!V) return;
+    ev.preventDefault();
+    const hit = _ss3dFpsAim(V, false);
+    if (!hit) return;
+    if (typeof (V.opts || {}).onUse === 'function' && V.opts.onUse(hit.caja.lee, 'click')) return;
+    if (typeof (V.opts || {}).onPick !== 'function') return;
+    ss3dFpsRelease();
+    V.opts.onPick(hit.rayo, V);
+});
+// The wheel, walking, zooms: the field of view, not the place. Before the canvas's own wheel,
+// which would move an orbit camera the walker does not have.
+window.addEventListener('wheel', (ev) => {
+    const F = _SS3D_FPS;
+    if (!F.on) return;
+    const V = _SS3D.get(F.id);
+    if (!V || !V.box || !V.box.contains(ev.target) && document.pointerLockElement !== F.lock) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    F.fov = Math.max(_SS3D_FOV_MIN, Math.min(_SS3D_FOV, F.fov * (ev.deltaY > 0 ? 1.15 : 0.87)));
+    // The engine redraws when its signature changes, and the field of view is not in it.
+    V.firma = '';
+    _ss3dFpsCamera(V, true);
+    _ss3dFpsAimShow(V, true);
+}, {capture: true, passive: false});
+
+/** What can be done with what the crosshair is on, said above it: whoever mounted the viewer
+ *  says it (`opts.onAim(lee, {stairs})` → text, or ''). And on the stairs, the keys for them.
+ *  A few times a second, not every frame: pointing at a box walks the scene's list. */
+function _ss3dFpsAimShow(V, ya) {
+    const F = _SS3D_FPS;
+    const ahora = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    if (!ya && ahora - F.aimT < 150) return;
+    F.aimT = ahora;
+    let texto = '';
+    const enEscalera = typeof (V.opts || {}).onStairs === 'function' && _ss3dFpsOnStairs(V);
+    if (typeof (V.opts || {}).onAim === 'function') {
+        const hit = _ss3dFpsAim(V, true);
+        texto = V.opts.onAim(hit ? hit.caja.lee : null, {stairs: enEscalera}) || '';
+    } else if (enEscalera) texto = t('view3d_fps_stairs_keys');
+    if (F.fov < _SS3D_FOV - 0.01) texto = (texto ? texto + ' · ' : '') + `×${(_SS3D_FOV / F.fov).toFixed(1)}`;
+    if (texto === F.aim) return;
+    F.aim = texto;
+    const el = V.box && V.box.querySelector('[data-ss3d-fps-aim]');
+    if (el) { el.textContent = texto; el.classList.toggle('d-none', !texto); }
+}
+
+document.addEventListener('pointerlockchange', () => {
+    const F = _SS3D_FPS;
+    // Esc gives the pointer back: that is the way out of the walk.
+    if (F.on && F.lock && document.pointerLockElement !== F.lock) ss3dFpsStop();
+});

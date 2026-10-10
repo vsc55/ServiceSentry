@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 150 70"><defs>
+<linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#8d939c"/><stop offset=".45" stop-color="#e3e6ea"/>
+<stop offset=".55" stop-color="#cfd3d8"/><stop offset="1" stop-color="#7c828b"/></linearGradient>
+<linearGradient id="steelv" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#e6e9ec"/><stop offset="1" stop-color="#9aa0a8"/></linearGradient>
+<linearGradient id="white" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#fbfbfc"/><stop offset="1" stop-color="#dcdfe3"/></linearGradient>
+<linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2b3036"/><stop offset=".5" stop-color="#121519"/>
+<stop offset="1" stop-color="#1d2126"/></linearGradient>
+<radialGradient id="knob" cx=".4" cy=".35" r=".7">
+<stop offset="0" stop-color="#f1f3f5"/><stop offset=".7" stop-color="#aab0b8"/>
+<stop offset="1" stop-color="#6f757d"/></radialGradient>
+</defs><path d="M38 22 h52 a0 0 0 0 1 0 0 v14 l-6 10 v8 a4 4 0 0 1 -4 4 h-32 a4 4 0 0 1 -4 -4 v-8 l-6 -10 z" fill="url(#steelv)" stroke="#6b7078" stroke-width=".6"/><circle cx="64" cy="31" r="8" fill="url(#steelv)" stroke="#6b7078" stroke-width=".5"/><rect x="60" y="44" width="8" height="10" rx="1" fill="#aab0b8" stroke="#6b7078" stroke-width=".4"/><rect x="90" y="14" width="44" height="42" rx="6" fill="url(#steel)" stroke="#5f656d" stroke-width=".7"/><rect x="132" y="16" width="6" height="38" rx="3" fill="#1f2328"/><rect x="133.2" y="25" width="3.6" height="20" rx="1.8" fill="#3b82f6" opacity=".85"/><line x1="96" y1="16" x2="96" y2="54" stroke="#9aa0a8" stroke-width=".5"/><line x1="100" y1="16" x2="100" y2="54" stroke="#9aa0a8" stroke-width=".5"/><line x1="104" y1="16" x2="104" y2="54" stroke="#9aa0a8" stroke-width=".5"/><line x1="108" y1="16" x2="108" y2="54" stroke="#9aa0a8" stroke-width=".5"/><line x1="112" y1="16" x2="112" y2="54" stroke="#9aa0a8" stroke-width=".5"/><line x1="116" y1="16" x2="116" y2="54" stroke="#9aa0a8" stroke-width=".5"/><line x1="120" y1="16" x2="120" y2="54" stroke="#9aa0a8" stroke-width=".5"/><line x1="124" y1="16" x2="124" y2="54" stroke="#9aa0a8" stroke-width=".5"/><line x1="128" y1="16" x2="128" y2="54" stroke="#9aa0a8" stroke-width=".5"/><rect x="14" y="18" width="24" height="34" rx="5" fill="url(#steel)" stroke="#5f656d" stroke-width=".6"/><rect x="6" y="29" width="10" height="12" rx="2" fill="url(#steelv)" stroke="#5f656d" stroke-width=".5"/></svg>

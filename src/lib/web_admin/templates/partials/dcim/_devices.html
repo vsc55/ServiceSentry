@@ -116,10 +116,8 @@ function setDcDevView(id) { _dcdView.set(id); }
 //: misma decisión que ya toma el recuento de un armario con sus pasivos.
 const _DCD_STATE_ORDER = ['error', 'warning', 'ok', 'maintenance', '', 'mudo'];
 
-//: Los que no llevan nada que vigilar. Copiada aquí y no pedida al servidor porque esta pantalla
-//: no pide un armario: es la misma lista que `ROLES_MUDOS`, y una guarda comprueba que no se
-//: separen.
-const _DC_QUIET_ROLES = ['patch_panel', 'fiber_panel', 'shelf', 'blank'];
+//: (Los que no llevan nada que vigilar, `_DC_QUIET_ROLES`, están en `_render.html`: el 3D de un
+//: rack también la usa, y la página `/3d` no incluye este fichero.)
 
 /** En qué carril de ESTADO va un equipo. `''` es **sin vigilar**, que no es «bien»: un equipo
  *  sin máquina enganchada no está correcto, está sin mirar — y esa distinción es la mitad de

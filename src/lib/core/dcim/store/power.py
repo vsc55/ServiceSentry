@@ -20,6 +20,10 @@ FEEDS = ('a', 'b', 'none')
 #: es donde acaba la responsabilidad de esta casa y empieza la de la compañía.
 SOURCE_KINDS = ('mains', 'panel', 'ups', 'generator')
 
+#: Las piezas del plano que pueden SER una fuente (`dc_source.feature_uid`): un cuadro, un SAI de
+#: sala, o la zona de un grupo electrógeno. Una mesa o una puerta no conducen corriente.
+SOURCE_PIECE_KINDS = ('panel', 'ups', 'zone')
+
 _SOURCE = TableSpec(
     name='dc_source',
     columns=(
@@ -56,6 +60,11 @@ _SOURCE = TableSpec(
         # armario no podía decir de qué SAI concreto cuelga, y la sección de fuentes no podía
         # llevar a ese SAI.
         Column('item_uid', 'TEXT', nullable=False, default="''"),
+        # Y dónde está en el plano, cuando no está en un armario: el cuadro, el SAI de sala o la
+        # zona del grupo electrógeno, piezas de una sala de su sede (`SOURCE_PIECE_KINDS`). Sin
+        # esto una fuente no tenía sitio, y el 3D dibujaba la acometida, los cuadros y los SAI en
+        # fila FUERA del edificio, al lado de las mismas cosas dibujadas como piezas dentro.
+        Column('feature_uid', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

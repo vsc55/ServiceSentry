@@ -722,8 +722,11 @@ function ss3dDraw(V) {
     const gl = V.gl, cv = V.cv;
     // The canvas size in real pixels, every frame: the pane can be resized, and a canvas the
     // size it was yesterday draws stretched.
-    const ancho = Math.max(1, Math.floor(cv.clientWidth * Math.min(devicePixelRatio || 1, 2)));
-    const alto = Math.max(1, Math.floor(cv.clientHeight * Math.min(devicePixelRatio || 1, 2)));
+    // `opts.pixelScale`: fewer pixels for a viewer that asks — the realistic mode of /3d, whose
+    // light per pixel costs several times this one's; nobody else sets it.
+    const escala = V.opts.pixelScale || Math.min(devicePixelRatio || 1, 2);
+    const ancho = Math.max(1, Math.floor(cv.clientWidth * escala));
+    const alto = Math.max(1, Math.floor(cv.clientHeight * escala));
     if (cv.width !== ancho || cv.height !== alto) { cv.width = ancho; cv.height = alto; }
     gl.viewport(0, 0, ancho, alto);
     gl.enable(gl.DEPTH_TEST);
@@ -753,12 +756,18 @@ function ss3dDraw(V) {
     // is the one the perspective would show at the distance looked at, so switching between
     // the two keeps the framing; and the depth runs both ways from the eye, so a camera inside
     // a room still sees what is behind it in the plane of the screen.
-    const media = c.radio * Math.tan(0.48);
+    // `cam.fov`: the field of view, when a camera says one — the walk of /3d zooms with it.
+    // Nobody else sets it, and without it the view is the one it always was.
+    const fov = c.fov || 0.96;
+    const media = c.radio * Math.tan(fov / 2);
     const proy = c.orto
         ? ss3dOrtho(-media * ancho / alto, media * ancho / alto, -media, media, -lejos, lejos)
-        : ss3dPerspective(0.96, ancho / alto, cerca, lejos);
+        : ss3dPerspective(fov, ancho / alto, cerca, lejos);
     const vp = ss3dMul(proy, ss3dLookAt(ojo, c.mira));
     ss3dLabelsTurn(V, vp);
+    // Another painter for the same scene —the realistic mode of `_viewer3d_real.html`, which
+    // only /3d loads— when this viewer asked for it. If it cannot draw, this one does.
+    if (V.opts.realista && typeof ss3dRealDraw === 'function' && ss3dRealDraw(V, vp, ojo)) return;
 
     _ss3dUseCube(V, vp);
     const caja = (m, r, g, b, a) => {
@@ -838,7 +847,7 @@ function ss3dRay(V, clientX, clientY) {
     const f = ss3dNorm([c.mira[0] - o[0], c.mira[1] - o[1], c.mira[2] - o[2]]);
     const x = ss3dNorm(ss3dCross(f, [0, 1, 0]));
     const y = ss3dCross(x, f);
-    const tg = Math.tan(0.48), asp = r.width / r.height;
+    const tg = Math.tan((c.fov || 0.96) / 2), asp = r.width / r.height;
     if (c.orto) {
         // Without perspective every ray goes the same way, straight into the screen; what the
         // point under the pointer changes is where it starts.
@@ -954,6 +963,30 @@ function ss3dUp(V, ev) {
     if (ev.currentTarget) ev.currentTarget.style.cursor = 'grab';
 }
 
+/** Before zooming in: the point looked at, to the depth of what is really under the pointer.
+ *
+ *  The zoom aims at a plane at the height of the point looked at. In a building with its floors
+ *  apart that point floats metres above the basement, and the wheel stopped half a metre from
+ *  it, in the air, unable to get any closer to the floor under it (reported: «it comes to a
+ *  point where I cannot zoom in any more»). So the box the pointer's ray hits first —a floor, a
+ *  rack, a wall— sets the depth: the point looked at slides along the line of sight to it, the
+ *  distance shrinks by as much, and the eye and where it looks stay exactly where they were —
+ *  nothing jumps on screen—. Only what is solid: a floor seen through is not where one aims. */
+function ss3dWheelDepth(V, ev) {
+    const c = V.cam;
+    if (!c || c.orto || !V.ojo || !V.cv || !Number.isFinite(ev.clientX)) return;
+    const rayo = ss3dRay(V, ev.clientX, ev.clientY);
+    if (!rayo) return;
+    const hit = ss3dPickBox(V, rayo, k => k.color && k.color[3] >= 0.5);
+    if (!hit || !(hit.t > 0.05)) return;
+    const o = V.ojo;
+    const f = ss3dNorm([c.mira[0] - o[0], c.mira[1] - o[1], c.mira[2] - o[2]]);
+    const prof = hit.t * (rayo.d[0] * f[0] + rayo.d[1] * f[1] + rayo.d[2] * f[2]);
+    if (!(prof > 0.3) || Math.abs(prof - c.radio) < c.radio * 0.05) return;
+    c.mira = [o[0] + f[0] * prof, o[1] + f[1] * prof, o[2] + f[2] * prof];
+    c.radio = prof;
+}
+
 /** The wheel zooms in and out.
  *
  *  Towards where the pointer is, not towards the centre: the point of the ground under the
@@ -968,6 +1001,7 @@ function ss3dWheel(V, ev) {
     V.anim = null;
     _ss3dWake(V);
     const c = V.cam;
+    if (ev.deltaY < 0) ss3dWheelDepth(V, ev);
     const r0 = c.radio;
     if (ev.deltaY > 0) {
         c.radio = Math.min(Math.max(90, (V.escena || {}).Rmax || 0), c.radio * 1.12);

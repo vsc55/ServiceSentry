@@ -18,11 +18,55 @@ FACES = ('full', 'front', 'rear')
 #: `blank` es una tapa ciega: ocupa U a propósito, para que el aire no se cuele por el hueco. Es
 #: inventario de verdad — sale en los pedidos — y es lo que más se olvida al documentar.
 ITEM_ROLES = ('server', 'switch', 'router', 'firewall', 'storage', 'patch_panel',
-              'fiber_panel', 'ups', 'pdu', 'shelf', 'kvm', 'console', 'blank', 'other')
+              'fiber_panel', 'ups', 'pdu', 'shelf', 'kvm', 'console', 'blank', 'other',
+              # Lo que está en una SALA y no en un armario (`placement = 'room'`): los puestos y
+              # lo que cuelga de la red del edificio, y la roseta de pared donde acaba el cable
+              # horizontal.
+              'pc', 'phone', 'printer', 'ap', 'camera', 'display', 'outlet')
 
 #: Los que no contestan porque no tienen a qué: no es que estén sin vigilar, es que no hay nada
 #: que vigilar. Contarlos entre los desatendidos llena la pantalla de deberes imposibles.
-ROLES_MUDOS = ('patch_panel', 'fiber_panel', 'shelf', 'blank')
+ROLES_MUDOS = ('patch_panel', 'fiber_panel', 'shelf', 'blank', 'outlet')
+
+#: Los PASIVOS por los que pasa un cable sin acabar en ellos: un panel de parcheo o una roseta
+#: unen por dentro su puerto de delante `N` con el de detrás `N-R`. Es la regla con la que se
+#: rastrea un puesto hasta su switch (`dcim.service.trace`).
+PASS_THROUGH = ('patch_panel', 'fiber_panel', 'outlet')
+REAR_SUFFIX = '-R'
+
+#: Cómo va montado un equipo de sala: en una mesa, en la pared, en el techo o en el suelo.
+MOUNTS = ('desk', 'wall', 'ceiling', 'floor')
+
+#: Lo que mide y dónde va, por defecto, cada clase de equipo de sala: ``(ancho, fondo, alto,
+#: altura del suelo, montaje)`` en milímetros. Con esto se dibuja un puesto sin pedir medidas
+#: —un PC en una mesa, un AP en el techo, una roseta a 30 cm del suelo— y quien las tenga, las
+#: escribe en su modelo del catálogo.
+ROOM_ITEM_DEFAULTS = {
+    'pc':      (180, 300, 330, 750, 'desk'),
+    'phone':   (190, 200, 110, 750, 'desk'),
+    'printer': (520, 480, 420, 0, 'floor'),
+    'ap':      (230, 230, 45, 2950, 'ceiling'),
+    'camera':  (130, 130, 120, 2750, 'wall'),
+    'display': (1450, 90, 830, 900, 'wall'),
+    'outlet':  (86, 45, 86, 300, 'wall'),
+}
+_ROOM_ITEM_FALLBACK = (300, 300, 300, 0, 'floor')
+
+
+def room_item_box(item: dict) -> dict:
+    """Where a room item is and how big, in millimetres: ``{x, y, w, d, h, base, rot, mount}``.
+    Its role's defaults (`ROOM_ITEM_DEFAULTS`) unless the row says otherwise (`depth_mm`,
+    `base_mm`, `mount`). Pure: the 3D, the plan and the demo read the same box."""
+    w, d, h, base, mount = ROOM_ITEM_DEFAULTS.get(str(item.get('role') or ''), _ROOM_ITEM_FALLBACK)
+    def num(k, por_defecto):
+        v = item.get(k)
+        try:
+            return float(v) if v not in (None, '') else por_defecto
+        except (TypeError, ValueError):
+            return por_defecto
+    return {'x': num('pos_x', 0.0), 'y': num('pos_y', 0.0), 'w': w,
+            'd': num('depth_mm', 0.0) or d, 'h': h, 'base': num('base_mm', base),
+            'rot': int(num('rotation', 0.0)) % 360, 'mount': str(item.get('mount') or '') or mount}
 
 #: **Cómo está puesto algo en un armario.** Casi todo se atornilla a los mástiles y ocupa un
 #: número de U; el resto no, y hasta ahora no cabía en el modelo — un SAI en el suelo al lado, un
@@ -36,7 +80,7 @@ ROLES_MUDOS = ('patch_panel', 'fiber_panel', 'shelf', 'blank')
 #:
 #: `u` es lo de siempre y es el valor por defecto: todo lo escrito antes de esta columna se
 #: atornilló a los mástiles, que es lo que de verdad hizo.
-PLACEMENTS = ('u', 'side', 'near')
+PLACEMENTS = ('u', 'side', 'near', 'room')
 
 _ITEM = TableSpec(
     name='dc_item',
@@ -124,11 +168,24 @@ _ITEM = TableSpec(
         # pulsar un equipo en aviso o caído se enseña esto; uno con dispositivo enseña sus
         # comprobaciones que fallan. Lo mismo que `demo_state`: solo la demo lo escribe.
         Column('demo_reason', 'TEXT', nullable=False, default="''"),
+        # **En una sala y no en un armario** (`placement = 'room'`): un PC en su mesa, el
+        # teléfono al lado, la impresora del pasillo, un AP en el techo, la roseta de la pared.
+        # `rack_uid` vacío y `room_uid` la sala; dónde está, en milímetros de la sala como una
+        # pieza del plano (`pos_x`, `pos_y`, `rotation`), a qué altura (`base_mm`, vacío = la de
+        # su clase) y cómo va montado (`MOUNTS`). Sin esto, todo lo que no cabía en un rack —
+        # los puestos, que son la mitad de una red— no se podía cablear.
+        Column('room_uid', 'TEXT', nullable=False, default="''"),
+        Column('pos_x', 'REAL', nullable=False, default='0'),
+        Column('pos_y', 'REAL', nullable=False, default='0'),
+        Column('rotation', 'INTEGER', nullable=False, default='0'),
+        Column('base_mm', 'INTEGER'),
+        Column('mount', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),
     ),
     indexes=(Index('idx_dc_item_rack', ('rack_uid',)),
+             Index('idx_dc_item_room', ('room_uid',)),
              Index('idx_dc_item_device', ('device_uid',)),
              Index('idx_dc_item_parent', ('parent_uid',)),
              Index('idx_dc_item_build', ('build_uid',))),

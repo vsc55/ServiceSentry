@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1920" viewBox="0 0 90 240"><defs>
+<linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+<stop offset="0" stop-color="#8d939c"/><stop offset=".45" stop-color="#e3e6ea"/>
+<stop offset=".55" stop-color="#cfd3d8"/><stop offset="1" stop-color="#7c828b"/></linearGradient>
+<linearGradient id="steelv" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#e6e9ec"/><stop offset="1" stop-color="#9aa0a8"/></linearGradient>
+<linearGradient id="white" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#fbfbfc"/><stop offset="1" stop-color="#dcdfe3"/></linearGradient>
+<linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2b3036"/><stop offset=".5" stop-color="#121519"/>
+<stop offset="1" stop-color="#1d2126"/></linearGradient>
+<radialGradient id="knob" cx=".4" cy=".35" r=".7">
+<stop offset="0" stop-color="#f1f3f5"/><stop offset=".7" stop-color="#aab0b8"/>
+<stop offset="1" stop-color="#6f757d"/></radialGradient>
+</defs><rect x="25" y="5" width="40" height="230" rx="20" fill="url(#steelv)" stroke="#6b7078" stroke-width=".8"/><rect x="30" y="12" width="30" height="62" rx="15" fill="#1c2026"/><circle cx="37.80" cy="42" r="1.54" fill="#9ca3af"/><path d="M42.10 37.70 A6.08 6.08 0 0 1 42.10 46.30" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round"/><path d="M45.27 34.53 A10.56 10.56 0 0 1 45.27 49.47" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round"/><path d="M48.43 31.37 A15.04 15.04 0 0 1 48.43 52.63" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-linecap="round"/><circle cx="45" cy="66" r="2.8600000000000003" fill="#22c55e" opacity=".18"/><circle cx="45" cy="66" r="1.3" fill="#22c55e"/><circle cx="45" cy="132" r="7" fill="url(#knob)" stroke="#6b7078" stroke-width=".5"/><rect x="45" y="129" width="42" height="6" rx="3" fill="url(#steelv)" stroke="#6b7078" stroke-width=".5"/><circle cx="45" cy="132" r="3.2" fill="#c9cdd2" stroke="#7a8088" stroke-width=".4"/><circle cx="45" cy="200" r="4.5" fill="#2a2e34"/><rect x="43.6" y="200" width="2.8" height="9" fill="#2a2e34"/></svg>

@@ -131,6 +131,9 @@ function _dc3dDim(color, estado) {
 
 /** El halo amarillo alrededor de lo encontrado, si está en la escena. */
 function _dc3dAddFoco(escena) {
+    // Y lo resaltado al pulsar (`_select3d.html`): lo demás, apagado. Aquí porque es lo último
+    // que hacen los tres visores con su escena.
+    _dc3dSelApply(escena);
     if (!_dc3dFoco) return;
     const k = (escena.cajas || []).find(c => c.lee && c.lee.uid === _dc3dFoco && !c.lee.sinRotulo)
         || (escena.cajas || []).find(c => c.lee && c.lee.uid === _dc3dFoco);
@@ -202,6 +205,20 @@ const _DC3_FEED_COLOR = {a: [0.18, 0.44, 0.93, 1], b: [0.84, 0.27, 0.27, 1], non
 const _DC3_SOURCE_COLOR = {mains: [0.50, 0.50, 0.55, 1], panel: [0.82, 0.80, 0.74, 1],
                            ups: [0.30, 0.32, 0.37, 1], generator: [0.85, 0.60, 0.10, 1]};
 
+/** Un cable resaltado que va dentro de un mazo: el mazo se apaga con lo demás, y ese cable solo
+ *  se dibuja encima, por el mismo camino y un poco más arriba, para que se vea cuál es. */
+function _dc3dOneCable(cajas, r, a, b, y) {
+    const s = _dc3dSel;
+    if (!s || s.runs.has(_dc3dRunKey(r))) return;
+    const c = (r.cables || []).find(x => s.cables.has(x.uid));
+    if (!c) return;
+    const lee = {tipo: 'cable', uid: c.uid, a: c.a, b: c.b, name: _dc3dCableName(c),
+                 kind: t('dcim_cable_' + (c.kind || 'other')), sinRotulo: true};
+    _dc3dRoute(cajas, a, b, y + 0.12, 0.016, _DC3_SEL_COLOR, lee);
+    // Y su halo, que se vea desde lejos entre el resto apagado.
+    _dc3dRoute(cajas, a, b, y + 0.12, 0.06, [_DC3_SEL_COLOR[0], _DC3_SEL_COLOR[1], _DC3_SEL_COLOR[2], 0.3], null);
+}
+
 /** Un recorrido en escuadra de `p` a `q` a la altura `y`: sube, va en X, va en Z y baja. */
 function _dc3dRoute(cajas, p, q, y, t, color, lee) {
     const pts = [p, [p[0], y, p[2]], [q[0], y, p[2]], [q[0], y, q[2]], q];
@@ -234,18 +251,45 @@ function _dc3dAddCircuits(escena) {
             const lee = {name: ends[0] + ' ↔ ' + ends[1],
                          kind: tf(r.total === 1 ? 'dcim_3d_run_one' : 'dcim_3d_run', r.total,
                                   kinds.map(([k, n]) => `${n} ${t('dcim_cable_' + k)}`).join(', ')),
-                         tipo: 'run', sinRotulo: true};
-            _dc3dRoute(cajas, a, b, Math.max(a[1], b[1]) + 0.3 + (i % 6) * 0.05, grueso, color, lee);
+                         tipo: 'run', key: _dc3dRunKey(r), a: r.a, b: r.b, sinRotulo: true};
+            const y = Math.max(a[1], b[1]) + 0.3 + (i % 6) * 0.05;
+            _dc3dRoute(cajas, a, b, y, grueso, color, lee);
+            _dc3dOneCable(cajas, r, a, b, y);
+        });
+        // El cableado horizontal: de cada sala —sus rosetas, sus AP— al rack donde acaba, un
+        // mazo por recorrido y no un cable por puesto, por el techo como van las bandejas.
+        (d.hnet || []).forEach((r, i) => {
+            const a = P['room:' + r.room], b = P['rack:' + r.rack];
+            if (!a || !b) return;
+            const kinds = Object.entries(r.kinds || {}).sort((x, y) => y[1] - x[1]);
+            const color = _DC3_RUN_COLOR[(kinds[0] || ['other'])[0]] || _DC3_RUN_COLOR.other;
+            const grueso = 0.015 + 0.01 * Math.log2(1 + (r.total || 1));
+            const lee = {name: (N['room:' + r.room] || '') + ' → ' + (N['rack:' + r.rack] || ''),
+                         kind: tf(r.total === 1 ? 'dcim_3d_run_one' : 'dcim_3d_run', r.total,
+                                  kinds.map(([k, n]) => `${n} ${t('dcim_cable_' + k)}`).join(', ')),
+                         tipo: 'run', key: _dc3dRunKey(r), room: r.room, rack: r.rack, sinRotulo: true};
+            const y = Math.max(a[1], b[1]) + 0.1 + (i % 6) * 0.04;
+            _dc3dRoute(cajas, a, b, y, grueso, color, lee);
+            _dc3dOneCable(cajas, r, a, b, y);
         });
     }
     if (L.power) {
-        // Dónde está cada fuente: en su rack si es un SAI montado, si no en fila al borde.
+        // Dónde está cada fuente: en su rack si es un SAI montado, en su pieza del plano si es
+        // un cuadro o un SAI de sala —la pieza ya está dibujada, así que no lleva otra caja—, y
+        // si no, en fila al borde. Sin la pieza, la acometida, los cuadros y los SAI salían en
+        // esa fila, fuera del edificio, al lado de ellos mismos dibujados dentro.
         const lugar = {};
         let fila = 0;
         const x0 = (escena.X0 || 0) - 0.8;
         for (const s of d.sources || []) {
             const enRack = s.rack && P['rack:' + s.rack];
             if (enRack) { lugar[s.uid] = enRack; continue; }
+            const enPieza = s.feature && P['feature:' + s.feature];
+            if (enPieza) { lugar[s.uid] = enPieza; continue; }
+            // Con rack o pieza que no están en esta escena, está en otra planta del edificio: aquí
+            // no se dibuja. La fila de fuera es para la que no tiene sitio en ninguna parte; en
+            // la vista de una planta, el cuadro y el SAI de otra salían ahí, fuera del edificio.
+            if (s.rack || s.feature) continue;
             const p = [x0, 1.6, (escena.Z0 || 0) + 0.6 + (fila++) * 1.4];
             lugar[s.uid] = p;
             cajas.push({color: _DC3_SOURCE_COLOR[s.kind] || _DC3_SOURCE_COLOR.mains,
@@ -263,7 +307,8 @@ function _dc3dAddCircuits(escena) {
             _dc3dRoute(cajas, desde, hasta, Math.max(desde[1], hasta[1]) + 0.75 + (p.feed === 'b' ? 0.08 : 0),
                        0.035, color, {name: (N['rack:' + p.rack] || '') + ' ← ' + (s.name || ''),
                                       kind: tf('dcim_3d_feed', (p.feed || 'none').toUpperCase(), p.name),
-                                      tipo: 'power', sinRotulo: true});
+                                      tipo: 'power', key: _dc3dPowerKey(p.rack, p.source),
+                                      rack: p.rack, source: p.source, sinRotulo: true});
         }
         for (const s of d.sources || []) {
             const a = lugar[s.uid], b = lugar[s.upstream];

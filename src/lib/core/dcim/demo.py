@@ -41,8 +41,9 @@ _BASE_LANG = 'es_ES'
 #: The building: 30 × 20 m, a 300 mm outer wall, interior partitions of 120 mm.
 _W, _D = 30000, 20000
 _OUTER, _INNER = 300, 120
-#: The stair core, at the same point on every floor so it forms one shaft in 3D.
-_CORE = (27000, 16500)
+#: The stair core, at the same point on every floor so it forms one shaft in 3D: at the east
+#: end of the corridor, with the floor lobby and the lift in front of it.
+_CORE = (27700, 15800)
 
 _WATTS = {'server': 450, 'storage': 900, 'switch': 150, 'router': 120, 'firewall': 200,
           'console': 30, 'kvm': 40, 'other': 60}
@@ -106,6 +107,7 @@ def remove(store, *, var_dir: str = '', media_dir: str = '') -> int:
         store.links.delete(link['uid'])
     for site in sites:
         for room in store.rooms_of(site['uid']):
+            _remove_room_items(store, room['uid'])
             for rack in store.racks_of(room['uid']):
                 _remove_rack(store, rack)
             for feature in store.features_of(room['uid']):
@@ -167,6 +169,23 @@ def _remove_rack(store, rack: dict) -> None:
         store.forget_scope('item', item['uid'])
     store.racks.delete(rack['uid'])
     store.forget_scope('rack', rack['uid'])
+
+
+def _remove_room_items(store, room_uid: str) -> None:
+    """What is in the room and not in a rack —the desks' PCs and phones, the outlets, the APs—
+    with its cables, its feeds and its parts."""
+    items = store.items_in_room(room_uid)
+    item_uids = [i['uid'] for i in items]
+    for item_uid in item_uids:
+        for feed in store.feeds.list('item_uid = ?', (item_uid,)):
+            store.feeds.delete(feed['uid'])
+    for cable in store.cables_of(item_uids):
+        store.cables.delete(cable['uid'])
+    for part in store.parts_of(item_uids):
+        store.parts.delete(part['uid'])
+    for item in items:
+        store.items.delete(item['uid'])
+        store.forget_scope('item', item['uid'])
 
 
 def _forget_plan(row: dict, var_dir: str, media_dir: str) -> None:
@@ -295,11 +314,14 @@ class _Builder:
         data.update(extra)
         return self.new('features', data)
 
-    def door(self, room: str, w: int, d: int, top: bool = False) -> None:
+    def door(self, room: str, w: int, d: int, top: bool = False, fire: bool = False) -> None:
         """The room's door, where the floor's walls leave its gap: the middle of the side that
         gives onto the corridor — the bottom one, or the top one for a room against the
-        building's back wall (`_door_on_top`)."""
-        self.feature(room, 'door', self.w['door'], w / 2 - 500, 0 if top else d - 120)
+        building's back wall (`_door_on_top`). ``fire``: a special-risk room's (CTE DB-SI 1,
+        table 2.2), a self-closing fire door, and its label says its class — which is what the
+        plan shows and what an inspector looks for."""
+        etiqueta = self.w['door_fire'] if fire else self.w['door']
+        self.feature(room, 'door', etiqueta, w / 2 - 500, 0 if top else d - 120)
 
     def shelf_items(self, cabinet: str, rows: list) -> None:
         for shelf, label, qty, notes in rows:
@@ -400,12 +422,20 @@ def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
     _second(b, site, floors['floor_second'], src, net)
     _third(b, site, floors['floor_third'], src, net)
     _dr(b, site, site_dr, net)
+    _common(b, floors)
+    # El cableado estructurado de toda la oficina: los puestos, sus rosetas, el cable horizontal,
+    # las subidas, el anillo de fibra (`demo_cabling`). Antes de ordenar
+    # los enchufes de las PDU: los switches de acceso que pone también tiran de ellas.
+    from lib.core.dcim import demo_cabling                 # noqa: PLC0415
+    demo_cabling.build(b, site, floors, net)
     for room in [r for s in (site, site_dr) for r in store.rooms_of(s)]:
         for rack in store.racks_of(room['uid']):
             b.tidy_outlets(rack['uid'])
     _states(b, site)
     _access(b, floors)
     _safety(b, floors)
+    _place_sources(b, site)
+    _room_states(b, site)
     return {'site': site, 'site_dr': site_dr, 'floors': len(floors),
             **_counts(store, [site, site_dr])}
 
@@ -413,7 +443,7 @@ def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
 def _counts(store, site_uids: list) -> dict:
     rooms = [r for s in site_uids for r in store.rooms_of(s)]
     racks = [k for r in rooms for k in store.racks_of(r['uid'])]
-    items = [i for k in racks for i in store.items_of(k['uid'])]
+    items = [i for k in racks for i in store.items_of(k['uid'])]         + [i for r in rooms for i in store.items_in_room(r['uid'])]
     pdus = [p for k in racks for p in store.pdus_of(k['uid'])]
     return {'rooms': len(rooms), 'racks': len(racks), 'items': len(items), 'pdus': len(pdus),
             'feeds': len(store.feeds_of([p['uid'] for p in pdus])),
@@ -454,71 +484,125 @@ def _power_chain(b: _Builder, site: str) -> dict:
 
 # ── Floors, plans and walls ──────────────────────────────────────────────────────────────────
 
-#: Each floor: its text key, level, rooms ``(key, x, y, w, d)``, windows on the top wall (x
-#: ranges) and whether the building's entrance is on it. A room's name is ``room_<key>``.
+#: The corridor down the middle of every floor: between the centre lines of its two walls. 2 m
+#: apart, 1.88 m clear — over the 1.20 m of an accessible route (CTE DB-SUA 9, room for a
+#: wheelchair to turn, Ø 1.50 m) and the 1.00 m of an evacuation one (CTE DB-SI 3).
+_HALL = (9000, 11000)
+#: A room's depth, from the façade to the corridor: every room on a floor reaches both.
+_BAND = _HALL[0] - _OUTER
+#: The toilets, at the same place on every floor where people work, so their drains go straight
+#: down (RD 486/1997, annex V; one of them accessible, CTE DB-SUA 9).
+_WC = ('wc', 25700, _OUTER, 4000, _BAND)
+#: The second way out of every floor, at the west end of the corridor: the exterior escape stair
+#: (the street door on the ground floor). With the stair core at the east end, two exits: the
+#: longest route may then be 50 m, and none here passes 40 (CTE DB-SI 3, table 3.1).
+_EXIT_W = ('W', _HALL[0] + 500, _HALL[1] - 500)
+
+#: Each floor: its text key, level, rooms ``(key, x, y, w, d)``, windows (x ranges on the north
+#: façade, ``(x1, x2, 'S')`` on the south one) and its doors in the façade (``('S', x1, x2)``,
+#: ``('N', x1, x2)`` or ``('W', y1, y2)``). A room's name is ``room_<key>``.
+#:
+#: Laid out as an architect would, to the rules in force in Spain: the rooms on either side of
+#: the corridor, wall to wall —a partition is shared, there is no gap between two rooms that
+#: could pass for a corridor—, each with its door on the corridor; the stair core, the lift and
+#: the floor lobby at the east end (`_CORE`); natural light for whoever works at a desk
+#: (RD 486/1997), none for the technical rooms; and one telecommunications room per floor
+#: within 90 m of every outlet (UNE-EN 50173-1, UNE-EN 50174-1).
+_S = _HALL[1]
 _FLOORS = (
-    ('floor_ground', 0, (('com', 300, 300, 6000, 5000),
-                         ('lab', 6800, 300, 9000, 7000),
-                         ('exp', 16300, 300, 13400, 9000),
-                         ('recep', 300, 13800, 9000, 5900),
-                         ('meet0', 17500, 13800, 7500, 5900)),
-     ((8000, 10000), (12000, 14000), (19000, 22000), (25000, 28000)), True),
-    ('floor_first', 1, (('cpd', 300, 300, 16000, 11000),
-                        ('alm', 16800, 300, 6000, 5000),
-                        ('noc', 23300, 300, 6400, 7000)),
-     ((18000, 21000), (24000, 28500)), False),
-    ('floor_second', 2, (('open2', 300, 300, 14000, 9000),
-                         ('meet_a', 14800, 300, 6000, 5000),
-                         ('meet_b', 21300, 300, 4000, 5000),
-                         ('idf2', 25800, 300, 3900, 4000),
-                         ('off_dir', 14800, 6800, 3500, 4000),
-                         ('off_fin', 18800, 6800, 3500, 4000),
-                         ('off_rrhh', 22800, 6800, 3400, 4000),
-                         ('off_it', 26700, 6800, 3000, 4000),
-                         ('kitchen', 300, 14000, 5500, 5700),
-                         ('train', 6300, 14000, 9000, 5700)),
-     ((1000, 5000), (6000, 10000), (11000, 14000), (16000, 20000), (22000, 24500)), False),
-    ('floor_third', 3, (('srv', 300, 300, 7000, 6000),
-                        ('hpc', 7800, 300, 12000, 8000),
-                        ('idf3', 20300, 300, 3500, 4000),
-                        ('meet3', 24300, 300, 5400, 4000),
-                        ('open3', 20300, 5800, 9400, 6000),
-                        ('off_cto', 300, 7800, 4000, 4000)),
-     ((25000, 29000),), False),
-    ('floor_basement', -1, (('ene', 300, 300, 12000, 8000),
-                            ('gen', 12800, 300, 7000, 6000),
-                            ('bat', 20300, 300, 5000, 5000)),
-     (), False),
+    ('floor_ground', 0, (('com', 300, 300, 6000, _BAND),
+                         ('lab', 6300, 300, 9000, _BAND),
+                         ('exp', 15300, 300, 10400, _BAND),
+                         _WC,
+                         ('meet0', 300, _S, 7000, _BAND),
+                         ('recep', 7300, _S, 4500, _BAND),
+                         ('meet0b', 18200, _S, 6300, _BAND)),
+     ((8000, 10000), (12000, 14000), (16500, 19500), (26500, 28500),
+      (1500, 6000, 'S'), (8300, 10800, 'S'), (19200, 23500, 'S')),
+     (('S', 14000, 16000), _EXIT_W, ('N', 21000, 24000))),
+    ('floor_first', 1, (('cpd', 300, 300, 16000, _BAND),
+                        ('alm', 16300, 300, 5000, _BAND),
+                        ('off_ops', 21300, 300, 4400, _BAND),
+                        _WC,
+                        ('noc', 300, _S, 9000, _BAND),
+                        ('stage', 9300, _S, 8000, _BAND),
+                        ('meet1', 17300, _S, 7200, _BAND)),
+     ((22300, 24700), (26500, 28500),
+      (1800, 7800, 'S'), (10500, 16000, 'S'), (18800, 23000, 'S')),
+     (_EXIT_W,)),
+    ('floor_second', 2, (('open2', 300, 300, 14000, _BAND),
+                         ('meet_a', 14300, 300, 4400, _BAND),
+                         ('meet_b', 18700, 300, 4000, _BAND),
+                         ('idf2', 22700, 300, 3000, _BAND),
+                         _WC,
+                         ('off_dir', 300, _S, 2800, _BAND),
+                         ('off_fin', 3100, _S, 2800, _BAND),
+                         ('off_rrhh', 5900, _S, 2800, _BAND),
+                         ('off_it', 8700, _S, 2800, _BAND),
+                         ('kitchen', 11500, _S, 4200, _BAND),
+                         ('train', 15700, _S, 8800, _BAND)),
+     ((1000, 5000), (6000, 10000), (11000, 14000), (15000, 18000), (19500, 22000),
+      (26500, 28500), (1000, 2400, 'S'), (3800, 5200, 'S'), (6600, 8000, 'S'),
+      (9400, 10800, 'S'), (12500, 15000, 'S'), (17000, 23500, 'S')),
+     (_EXIT_W,)),
+    ('floor_third', 3, (('srv', 300, 300, 7000, _BAND),
+                        ('hpc', 7300, 300, 12000, _BAND),
+                        ('idf3', 19300, 300, 3000, _BAND),
+                        ('off_cto', 22300, 300, 3400, _BAND),
+                        _WC,
+                        ('open3', 300, _S, 13400, _BAND),
+                        ('meet3', 13700, _S, 5400, _BAND),
+                        ('kitchen', 19100, _S, 5400, _BAND)),
+     ((22800, 25200), (26500, 28500), (1000, 5000, 'S'), (6000, 10000, 'S'),
+      (10500, 13200, 'S'), (14500, 18500, 'S'), (20000, 23500, 'S')),
+     (_EXIT_W,)),
+    ('floor_basement', -1, (('ene', 300, 300, 13400, _BAND),
+                            ('gen', 13700, 300, 7000, _BAND),
+                            ('bat', 20700, 300, 5000, _BAND),
+                            ('pci', 25700, 300, 4000, _BAND)),
+     (),
+     (_EXIT_W,)),
 )
 
 
-def _walls(rooms: tuple, windows: tuple, entrance: bool) -> list[dict]:
-    """The walls of a floor, as the editor stores them: centre lines in millimetres."""
+def _walls(rooms: tuple, windows: tuple, doors: tuple) -> list[dict]:
+    """The walls of a floor, as the editor stores them: centre lines in millimetres. Two rooms
+    side by side share one partition: it is written once."""
     h = _OUTER / 2
     out = [{'kind': 'wall', 'x1': h, 'y1': h, 'x2': _W - h, 'y2': h, 'thick_mm': _OUTER},
            {'kind': 'wall', 'x1': _W - h, 'y1': h, 'x2': _W - h, 'y2': _D - h, 'thick_mm': _OUTER},
            {'kind': 'wall', 'x1': _W - h, 'y1': _D - h, 'x2': h, 'y2': _D - h, 'thick_mm': _OUTER},
            {'kind': 'wall', 'x1': h, 'y1': _D - h, 'x2': h, 'y2': h, 'thick_mm': _OUTER}]
-    for x1, x2 in windows:
-        out.append({'kind': 'window', 'x1': x1, 'y1': h, 'x2': x2, 'y2': h, 'thick_mm': _OUTER})
-    if entrance:
-        out.append({'kind': 'door', 'x1': 14000, 'y1': _D - h, 'x2': 16000, 'y2': _D - h,
+    for win in windows:
+        y = _D - h if len(win) > 2 and win[2] == 'S' else h
+        out.append({'kind': 'window', 'x1': win[0], 'y1': y, 'x2': win[1], 'y2': y,
                     'thick_mm': _OUTER})
+    for side, a, z in doors:
+        if side == 'W':
+            out.append({'kind': 'door', 'x1': h, 'y1': a, 'x2': h, 'y2': z, 'thick_mm': _OUTER})
+        else:
+            y = _D - h if side == 'S' else h
+            out.append({'kind': 'door', 'x1': a, 'y1': y, 'x2': z, 'y2': y, 'thick_mm': _OUTER})
     edge = _OUTER + 10
+    vistos = set()
+
+    def tabique(x1, y1, x2, y2):
+        clave = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+        if clave not in vistos:
+            vistos.add(clave)
+            out.append({'kind': 'wall', 'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2,
+                        'thick_mm': _INNER})
+
     for _key, x, y, w, d in rooms:
         # Only the sides that are not the building's own wall.
         if x + w < _W - edge:
-            out.append({'kind': 'wall', 'x1': x + w, 'y1': y, 'x2': x + w, 'y2': y + d,
-                        'thick_mm': _INNER})
+            tabique(x + w, y, x + w, y + d)
         if x > edge:
-            out.append({'kind': 'wall', 'x1': x, 'y1': y, 'x2': x, 'y2': y + d,
-                        'thick_mm': _INNER})
+            tabique(x, y, x, y + d)
         if y > edge:
-            out.append({'kind': 'wall', 'x1': x, 'y1': y, 'x2': x + w, 'y2': y,
-                        'thick_mm': _INNER})
+            tabique(x, y, x + w, y)
         if y + d < _D - edge:
-            out.append({'kind': 'wall', 'x1': x, 'y1': y + d, 'x2': x + w, 'y2': y + d,
-                        'thick_mm': _INNER})
+            tabique(x, y + d, x + w, y + d)
         # The door, on the side that gives onto the corridor.
         mid, ly = x + w / 2, (y if _door_on_top(y, d) else y + d)
         out.append({'kind': 'door', 'x1': mid - 500, 'y1': ly, 'x2': mid + 500, 'y2': ly,
@@ -554,6 +638,12 @@ def _svg(title: str, rooms: list, walls: list) -> str:
         if wall['kind'] == 'window':
             for off in (-0.8, 0.8):
                 parts.append(line % (x1, y1 + off, x2, y2 + off, '#60a5fa', 0.6))
+        elif x1 == x2:
+            # In a side façade: the leaf opens inwards, across the corridor.
+            r = abs(y2 - y1)
+            parts.append('<path d="M %g %g L %g %g A %g %g 0 0 0 %g %g" fill="none" '
+                         'stroke="#9ca3af" stroke-width="0.8"/>'
+                         % (x1, y1, x1 + r, y1, r, r, x1, y1 + r))
         else:
             r = abs(x2 - x1)
             parts.append('<path d="M %g %g L %g %g A %g %g 0 0 1 %g %g" fill="none" '
@@ -587,9 +677,9 @@ def _floors(b: _Builder, site: str) -> dict:
     """The floors with plan, walls, stair core and their rooms. Returns, by the floor's text
     key, ``{'uid', 'name', 'site', 'rooms': {key: uid}, 'size': {key: (w, d, door on top)}}``."""
     out = {}
-    for key, level, rooms, windows, entrance in _FLOORS:
+    for key, level, rooms, windows, doors in _FLOORS:
         name = b.w[key]
-        walls = _walls(rooms, windows, entrance)
+        walls = _walls(rooms, windows, doors)
         named = [(b.w['room_' + rk], x, y, w, d) for rk, x, y, w, d in rooms]
         floor = b.new('floors', {'site_uid': site, 'name': name, 'level': level,
                                  'plan': b.plan(_svg('%s · %s' % (SITE, name), named, walls)),
@@ -602,7 +692,8 @@ def _floors(b: _Builder, site: str) -> dict:
                                        'name': b.w['room_' + rk], 'width_mm': w, 'depth_mm': d,
                                        'pos_x': x, 'pos_y': y, 'rotation': 0})
             size[rk] = (w, d, _door_on_top(y, d))
-        out[key] = {'uid': floor, 'name': name, 'site': site, 'rooms': uids, 'size': size}
+        out[key] = {'uid': floor, 'name': name, 'site': site, 'rooms': uids, 'size': size,
+                    'key': key}
     return out
 
 
@@ -623,26 +714,36 @@ def _basement(b: _Builder, floor: dict) -> None:
     ene, gen = floor['rooms']['ene'], floor['rooms']['gen']
     b.s.rooms.update(ene, {'cooling': 'room', 'description': w['room_ene_desc']}, actor=b.actor)
     b.s.rooms.update(gen, {'cooling': 'none'}, actor=b.actor)
+    # La acometida: el cuadro de la compañía, a la izquierda del general (se lleva a la pared).
+    b.feature(ene, 'panel', w['src_mains'], 300, 2600, 900, 400)
     b.feature(ene, 'panel', w['src_cgbt'], 600, 400, 2400, 600)
     b.feature(ene, 'panel', w['src_cpd'], 3400, 400, 1600, 600)
-    b.feature(ene, 'ups', w['src_ups_a'], 6000, 400)
-    b.feature(ene, 'ups', w['src_ups_b'], 7600, 400)
+    b.feature(ene, 'ups', w['src_ups_a'], 6000, 300, rot=180)
+    b.feature(ene, 'ups', w['src_ups_b'], 7600, 300, rot=180)
     b.feature(ene, 'zone', w['ene_batteries'], 8000, 5200, 3000, 2000)
     b.feature(ene, 'crac', w['ene_crac'], 11200, 3000, rot=270)
     b.feature(ene, 'extinguisher', w['extinguisher_co2'], 300, 7300)
     b.feature(ene, 'label', w['ene_sign'], 1000, 5500)
-    b.door(ene, 12000, 8000)
+    b.door(ene, *floor['size']['ene'][:2], fire=True)
     b.feature(gen, 'zone', w['src_gen'], 1000, 3800, 4000, 1800)
     b.feature(gen, 'extinguisher', w['extinguisher_powder'], 6400, 300)
-    b.door(gen, 7000, 6000)
+    b.door(gen, *floor['size']['gen'][:2], fire=True)
     bat = floor['rooms']['bat']
     b.s.rooms.update(bat, {'cooling': 'room', 'description': w['room_bat_desc']}, actor=b.actor)
     for i in range(3):
         b.feature(bat, 'cabinet', '%s %d' % (w['bat_racks'], i + 1), 600 + i * 1300, 600,
-                  1100, 700, shelves=4)
+                  1100, 700, rot=180, shelves=4)
     b.feature(bat, 'crac', w['bat_fan'], 4300, 2200, 600, 400, rot=270, base_mm=2300, height_mm=400)
     b.feature(bat, 'extinguisher', w['extinguisher_co2'], 300, 4300)
-    b.door(bat, 5000, 5000)
+    b.door(bat, *floor['size']['bat'][:2], fire=True)
+    # Lo que alimenta las BIE de todo el edificio: un aljibe y su grupo de presión (RIPCI, RD
+    # 513/2017; UNE 23500), en su propio local.
+    pci = floor['rooms']['pci']
+    b.s.rooms.update(pci, {'cooling': 'none', 'description': w['room_pci_desc']}, actor=b.actor)
+    b.feature(pci, 'zone', w['pci_tank'], 300, 300, 3400, 4200)
+    b.feature(pci, 'zone', w['pci_pumps'], 300, 5000, 2400, 1600)
+    b.feature(pci, 'panel', w['pci_panel'], 3000, 5000, 600, 300)
+    b.door(pci, *floor['size']['pci'][:2], fire=True)
 
 
 # ── Ground floor: communications, lab, dispatch, a rack in the corridor ──────────────────────
@@ -656,7 +757,7 @@ def _ground(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
 
     # Communications room: the operators' rack, with a UPS on the floor beside it.
     rack = b.new('racks', {'room_uid': com, 'name': 'COM-01', 'u_height': 42, 'width_mm': 800,
-                           'depth_mm': 1000, 'pos_x': 800, 'pos_y': 800, 'rotation': 0,
+                           'depth_mm': 1000, 'pos_x': 800, 'pos_y': 800, 'rotation': 180,
                            'access': 'front,rear,right', 'description': w['rack_com_desc']})
     ups_item = b.item(rack, w['ups_com_item'], 'ups', placement='near')
     ups = b.new('sources', {'site_uid': site, 'name': w['src_ups_com'], 'kind': 'ups',
@@ -666,7 +767,12 @@ def _ground(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
                          'capacity_w': 2700, 'source_uid': ups,
                          'item_uid': b.item(rack, 'PDU-COM', 'pdu', placement='side')})
     b.item(rack, w['fiber_operators'], 'fiber_panel', 42, face='front', model='fiber')
-    b.item(rack, w['fiber_floors'], 'fiber_panel', 41, face='front', model='fiber')
+    fibra_plantas = b.item(rack, w['fiber_floors'], 'fiber_panel', 41, face='front', model='fiber')
+    # El repartidor de la planta baja y del sótano: sus paneles y switches de acceso los pone el
+    # cableado estructurado (`demo_cabling`) según los puestos que tenga que servir.
+    net.setdefault('dists', {})['com'] = {'kind': 'com', 'tag': 'P0', 'rack': rack, 'power': pdu,
+                                          'fiber': fibra_plantas, 'floor': 'floor_ground',
+                                          'pairs': []}
     ont = b.item(rack, w['ont'], 'router', 38, u_slots=2, u_slot=1, model='cpe')
     cpe = b.item(rack, w['cpe'], 'router', 38, u_slots=2, u_slot=2, model='cpe')
     sw = b.item(rack, 'SW-COM', 'switch', 36, model='access')
@@ -678,18 +784,18 @@ def _ground(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
     net['com_sw'], net['ont'], net['cpe'] = sw, ont, cpe
     b.feature(com, 'crac', w['split'], 5000, 3500, 800, 300, base_mm=2200, height_mm=300)
     b.feature(com, 'extinguisher', w['extinguisher_co2'], 300, 4400)
-    b.door(com, 6000, 5000)
+    b.door(com, *floor['size']['com'][:2])
 
     # Lab: a wall-mounted cabinet and a small rack.
     wall = b.new('racks', {'room_uid': lab, 'name': 'LAB-W1', 'u_height': 12, 'width_mm': 600,
-                           'depth_mm': 450, 'pos_x': 300, 'pos_y': 150, 'rotation': 0,
+                           'depth_mm': 450, 'pos_x': 300, 'pos_y': _FACE, 'rotation': 180,
                            'base_mm': 1200, 'access': 'front', 'description': w['rack_wall_desc']})
     b.item(wall, w['patch'] % 'LAB', 'patch_panel', 12, face='front', model='patch')
     lab_sw = b.item(wall, 'SW-LAB', 'switch', 11, model='access')
     b.item(wall, w['wall_strip'], 'pdu', 1)
     lab_rack = b.new('racks', {'room_uid': lab, 'name': 'LAB-01', 'u_height': 24,
-                               'width_mm': 600, 'depth_mm': 800, 'pos_x': 2000, 'pos_y': 300,
-                               'rotation': 0})
+                               'width_mm': 600, 'depth_mm': 800, 'pos_x': 2000, 'pos_y': 600,
+                               'rotation': 180})
     pdus = b.pdus(lab_rack, 'LAB-01', (src['a'], src['b']), capacity=3700)
     lab_tor = b.item(lab_rack, 'SW-LAB-01', 'switch', 24, model='tor')
     b.dual(lab_tor, 'switch', pdus)
@@ -706,26 +812,28 @@ def _ground(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
     b.cable(lab_tor, 'Gi1/0/48', lab_sw, 'Gi1/0/1', color='green', length=4000)
     b.feature(lab, 'bench', w['lab_bench_test'], 4000, 4500, 2400, 900)
     b.feature(lab, 'bench', w['lab_bench_solder'], 6800, 4500)
-    b.feature(lab, 'cabinet', w['lab_cabinet'], 7800, 300, shelves=3)
-    b.door(lab, 9000, 7000)
+    b.feature(lab, 'cabinet', w['lab_cabinet'], 7800, 100, rot=180, shelves=3)
+    b.door(lab, *floor['size']['lab'][:2])
 
-    # Dispatch: the loading bay and the packing material.
-    b.feature(exp, 'zone', w['exp_dock'], 9000, 5500, 4000, 3000)
+    # Dispatch: the loading bay, at its door in the façade, and the packing material.
+    b.feature(exp, 'zone', w['exp_dock'], 5700, 300, 3000, 2500)
     b.feature(exp, 'bench', w['exp_bench'], 1500, 1500, 2400, 900)
     cab = b.feature(exp, 'cabinet', w['exp_cabinet'], 600, 4000, shelves=2)
     b.shelf_items(cab, [(1, w['exp_boxes'], 30, ''), (2, w['exp_film'], 6, '')])
-    b.door(exp, 13400, 9000)
+    b.door(exp, *floor['size']['exp'][:2])
 
     # The floor's general area: a wall rack in the corridor and the floor's electrical panel.
     # Hung on the corridor face of the meeting room's wall, near its corner: clear of its door
     # (the wall's middle) and of the extinguisher and call point (its start). A rack standing
-    # loose in the middle of the hall is not where anyone puts one.
+    # loose in the middle of the hall is not where anyone puts one. And above 2.20 m: lower, its
+    # 450 mm would stick out into an evacuation route where someone walks into it (CTE DB-SUA 2,
+    # 1.1 — nothing may project more than 150 mm between 0.15 and 2.20 m).
     area = _area(b, floor)
     mx, my, mw, _md = next(g[1:] for g in _FLOORS[0][2] if g[0] == 'meet0')
     hall = b.new('racks', {'room_uid': area, 'name': w['rack_hall'], 'u_height': 12,
                            'width_mm': 600, 'depth_mm': 450,
                            'pos_x': mx + mw - 1100, 'pos_y': my - _INNER / 2 - 450,
-                           'rotation': 0, 'base_mm': 1200, 'access': 'front'})
+                           'rotation': 0, 'base_mm': 2250, 'access': 'front'})
     hall_pdu = b.new('pdus', {'rack_uid': hall, 'name': w['pdu_hall'], 'feed': 'a', 'outlets': 8,
                               'capacity_w': 3600, 'source_uid': src['cgbt'],
                               'item_uid': b.item(hall, 'PDU-P0', 'pdu', 1)})
@@ -746,18 +854,22 @@ def _ground(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
     recep, meet0 = floor['rooms']['recep'], floor['rooms']['meet0']
     b.s.rooms.update(recep, {'cooling': 'split'}, actor=b.actor)
     b.s.rooms.update(meet0, {'cooling': 'split'}, actor=b.actor)
-    b.feature(recep, 'bench', w['recep_counter'], 3000, 2600, 3200, 800, rot=180)
-    b.feature(recep, 'zone', w['recep_wait'], 500, 3900, 3000, 1600)
-    b.feature(recep, 'cabinet', w['recep_lockers'], 7700, 4900, 1000, 500, shelves=3)
-    b.feature(recep, 'label', w['room_recep'], 5600, 1000)
+    b.feature(recep, 'bench', w['recep_counter'], 600, 2600, 3200, 800, rot=180)
+    b.feature(recep, 'zone', w['recep_wait'], 600, 4400, 3000, 1600)
+    b.feature(recep, 'cabinet', w['recep_lockers'], 3300, 7600, 1000, 500, shelves=3)
+    b.feature(recep, 'label', w['room_recep'], 2000, 1300)
     b.door(recep, *floor['size']['recep'][:2], top=True)
     b.feature(meet0, 'bench', w['table'] % 12, 1700, 2200, 4000, 1400)
     b.feature(meet0, 'label', w['screen'], 2900, 5200, 1600, 400)
     # Girado sobre su centro: para que quede pegado a la pared derecha, el centro va a 125 mm de
     # ella —la mitad de su fondo—, y la caja sin girar empieza 450 mm a su izquierda.
-    b.feature(meet0, 'crac', w['split_n'] % 1, 7500 - 125 - 450, 2500, 900, 250, rot=90,
-              base_mm=2200, height_mm=300)
+    b.feature(meet0, 'crac', w['split_n'] % 1, floor['size']['meet0'][0] - 125 - 450, 2500,
+              900, 250, rot=90, base_mm=2200, height_mm=300)
     b.door(meet0, *floor['size']['meet0'][:2], top=True)
+    _meeting(b, floor, 'meet0b', 8, (1300, 3000, 3600, 1200))
+    # Beside the turnstiles, a gate a wheelchair goes through (CTE DB-SUA 9: an accessible way
+    # in where the others are turnstiles).
+    b.feature(area, 'door', w['gate_accessible'], 16400, 15800, rot=180)
 
 
 # ── First floor: the data centre, the technical store and the NOC ────────────────────────────
@@ -787,8 +899,16 @@ def _first(b: _Builder, floor: dict, src: dict, net: dict, customer: str) -> Non
                                'pos_y': 7000, 'rotation': 0, 'row_uid': row_n,
                                'rail_front_mm': 100, 'rail_depth_mm': 740, 'rail_rear_mm': 160})
         pdus = b.pdus(rack, name, (src['a'], src['b']))
-        b.item(rack, w['fiber_trunk'], 'fiber_panel', 42, face='front', model='fiber')
-        b.item(rack, w['patch'] % name, 'patch_panel', 41, face='front', model='patch')
+        net.setdefault('cpd_fiber', []).append(
+            b.item(rack, w['fiber_trunk'], 'fiber_panel', 42, face='front', model='fiber'))
+        net.setdefault('cpd_patch', []).append(
+            b.item(rack, w['patch'] % name, 'patch_panel', 41, face='front', model='patch'))
+        if n == 1:
+            # Y el repartidor de la primera planta —el NOC, el almacén—, en la fila de red.
+            net['cpd_rack'] = rack
+            net.setdefault('dists', {})['cpd'] = {'kind': 'cpd', 'tag': 'P1', 'rack': rack,
+                                                  'power': pdus, 'fiber': None,
+                                                  'floor': 'floor_first', 'pairs': []}
         core = b.item(rack, 'CORE-%d' % n, 'switch', 38, 2, depth_mm=500, model='core')
         rtr = b.item(rack, 'RTR-%d' % n, 'router', 36, model='router')
         fw = b.item(rack, 'FW-%d' % n, 'firewall', 34, model='firewall')
@@ -839,22 +959,36 @@ def _first(b: _Builder, floor: dict, src: dict, net: dict, customer: str) -> Non
     b.feature(cpd, 'column', w['column'], 9000, 7000)
     b.feature(cpd, 'column', w['column'], 13000, 7000)
     b.feature(cpd, 'zone', w['cpd_reserve'], 9500, 1000, 5000, 3500)
-    b.feature(cpd, 'panel', w['cpd_panel'], 300, 9500)
-    b.feature(cpd, 'extinguisher', w['extinguisher_co2'], 15300, 10300)
-    b.feature(cpd, 'label', w['room_cpd'], 10000, 9000)
-    b.door(cpd, 16000, 11000)
+    b.feature(cpd, 'panel', w['cpd_panel'], 300, 7900)
+    b.feature(cpd, 'extinguisher', w['extinguisher_co2'], 15300, 7900)
+    b.feature(cpd, 'label', w['room_cpd'], 10000, 5600)
+    b.door(cpd, *floor['size']['cpd'][:2], fire=True)
 
     # The technical store: spares and tools on shelves.
-    b.shelf_items(b.feature(alm, 'cabinet', w['alm_spares'], 300, 300, shelves=5), w['spares'])
-    b.shelf_items(b.feature(alm, 'cabinet', w['alm_tools'], 1500, 300, shelves=3), w['tools'])
-    b.feature(alm, 'bench', w['alm_bench'], 3900, 3800)
-    b.door(alm, 6000, 5000)
+    b.shelf_items(b.feature(alm, 'cabinet', w['alm_spares'], 300, 100, rot=180, shelves=5),
+                  w['spares'])
+    b.shelf_items(b.feature(alm, 'cabinet', w['alm_tools'], 1500, 100, rot=180, shelves=3),
+                  w['tools'])
+    b.feature(alm, 'bench', w['alm_bench'], 3000, 3800)
+    b.door(alm, *floor['size']['alm'][:2])
 
     # The NOC.
     for i in range(3):
         b.feature(noc, 'bench', w['noc_desk'] % (i + 1), 500 + i * 1900, 5200)
-    b.feature(noc, 'label', w['noc_sign'], 2400, 800)
-    b.door(noc, 6400, 7000)
+    b.feature(noc, 'label', w['noc_sign'], 2400, 7600)
+    b.door(noc, *floor['size']['noc'][:2], top=True)
+
+    # The operations manager's office, the staging room where servers are unpacked and tested
+    # before they go into the data centre, and a meeting room.
+    _private_office(b, floor, 'off_ops')
+    stage = floor['rooms']['stage']
+    b.s.rooms.update(stage, {'cooling': 'split', 'description': w['room_stage_desc']},
+                     actor=b.actor)
+    for n, (x, y) in enumerate(((800, 2200), (4400, 2200), (800, 5200), (4400, 5200))):
+        b.feature(stage, 'bench', w['stage_bench'] % (n + 1), x, y, 2400, 900)
+    b.feature(stage, 'cabinet', w['alm_spares'], 6800, 7900, 1000, 500, shelves=4)
+    b.door(stage, *floor['size']['stage'][:2], top=True)
+    _meeting(b, floor, 'meet1', 10, (1800, 3000, 3600, 1200))
 
 
 def _compute_rack(b: _Builder, rack: str, name: str, many: int, pdus: tuple, cores: list,
@@ -933,8 +1067,9 @@ def _private_office(b: _Builder, floor: dict, key: str, extra: str = '') -> None
     ancho, fondo, arriba = floor['size'][key]
     b.s.rooms.update(room, {'cooling': 'split', 'description': w['room_office_desc']}, actor=b.actor)
     b.feature(room, 'bench', w['desk_named'] % w['room_' + key], 600, 1500, 1800, 800)
-    b.feature(room, 'cabinet', w['floor_cabinet'], 300, 300 if not arriba else fondo - 800,
-              1000, 500, shelves=2)
+    # Against the façade, its front into the office: up from the bottom wall, down from the top.
+    b.feature(room, 'cabinet', w['floor_cabinet'], 300, 100 if not arriba else fondo - 600,
+              1000, 500, rot=0 if arriba else 180, shelves=2)
     if extra == 'round':
         # Debajo del puesto y a un lado de la puerta: encima, se pisaban.
         b.feature(room, 'zone', w['round_table'], ancho - 1400, fondo - 1500, 1200, 1200)
@@ -954,8 +1089,63 @@ def _meeting(b: _Builder, floor: dict, key: str, people: int, table: tuple) -> N
     b.door(room, ancho, fondo, top=arriba)
 
 
+def _kitchen(b: _Builder, floor: dict) -> None:
+    """The floor's kitchen: the counter against the façade, the tables between it and the door."""
+    w = b.w
+    kitchen = floor['rooms']['kitchen']
+    ancho, fondo, arriba = floor['size']['kitchen']
+    b.s.rooms.update(kitchen, {'cooling': 'none'}, actor=b.actor)
+    b.feature(kitchen, 'bench', w['kitchen_counter'], 300, fondo - 700 if arriba else 100,
+              ancho - 600, 600, rot=0 if arriba else 180)
+    b.feature(kitchen, 'zone', w['kitchen_tables'], 600, 3000, ancho - 1200, 2400)
+    b.door(kitchen, ancho, fondo, top=arriba)
+
+
+def _toilets(b: _Builder, floor: dict) -> None:
+    """The floor's toilets: women's, men's and an accessible one with the turning circle of a
+    wheelchair inside (Ø 1.50 m, CTE DB-SUA 9, annex A), the washbasins by the door and the
+    cleaning cupboard. Mechanical extraction, no air conditioning."""
+    w = b.w
+    room = floor['rooms']['wc']
+    ancho, fondo, arriba = floor['size']['wc']
+    b.s.rooms.update(room, {'cooling': 'none', 'description': w['room_wc_desc']}, actor=b.actor)
+    b.feature(room, 'zone', w['wc_women'], 150, 150, 1800, 3000)
+    b.feature(room, 'zone', w['wc_men'], 2050, 150, 1800, 3000)
+    b.feature(room, 'zone', w['wc_accessible'], 150, 3400, 2200, 2400)
+    b.feature(room, 'zone', w['wc_cleaning'], 2550, 3400, 1300, 1400)
+    b.feature(room, 'zone', w['wc_basins'], 2550, 5100, 1300, 700)
+    b.door(room, ancho, fondo, top=arriba)
+
+
+def _common(b: _Builder, floors: dict) -> None:
+    """What every floor has outside its rooms, in its general area: the lobby with the lift in
+    front of the stair core (an accessible lift, CTE DB-SUA 9, as there is more than one floor
+    above the entrance), the second way out at the west end of the corridor, and the two trays
+    along the corridor's ceiling — data and power apart, as UNE-EN 50174-2 asks of a horizontal
+    run beside power. The basement's south half is the car park, with an accessible space by
+    the lift (CTE DB-SUA 9). And the toilets of every floor where people work."""
+    w = b.w
+    for fkey, floor in floors.items():
+        area = b.s.floors.get(floor['uid']).get('area_uid') or _area(b, floor)
+        b.feature(area, 'zone', w['lift'], _CORE[0] - 3100, _CORE[1] - 1500, 1600, 1800)
+        b.feature(area, 'label', w['lobby'], _CORE[0] - 1500, _HALL[1] + 600)
+        salida = w['exit_street'] if fkey == 'floor_ground' else w['exit_stair']
+        b.feature(area, 'label', salida, _OUTER + 300, _HALL[0] + 150)
+        b.feature(area, 'tray', w['tray_data'], _OUTER, _HALL[0] + 150, _CORE[0] - 3500 - _OUTER,
+                  300)
+        b.feature(area, 'tray', w['tray_power'], _OUTER, _HALL[1] - 450, _CORE[0] - 3500 - _OUTER,
+                  300)
+        if 'wc' in floor['rooms']:
+            _toilets(b, floor)
+        if fkey == 'floor_basement':
+            for n in range(6):
+                b.feature(area, 'zone', w['parking'] % (n + 1), 1000 + n * 2600, _S + 3200,
+                          2400, 5000)
+            b.feature(area, 'zone', w['parking_accessible'], 1000 + 6 * 2600, _S + 3200, 3600, 5000)
+
+
 def _idf(b: _Builder, site: str, floor: dict, key: str, tag: str, panel: str, desks: int,
-         cores: list, core_port: int) -> None:
+         cores: list, core_port: int, net: dict) -> None:
     """A floor's communications room: one rack with the fibre up to the core, a patch panel
     per 24 desks and an access switch behind each, a UPS on the floor beside it, and a wall
     split. Each panel's ports are cabled to its switch, port for port."""
@@ -974,23 +1164,13 @@ def _idf(b: _Builder, site: str, floor: dict, key: str, tag: str, panel: str, de
     pdu = b.new('pdus', {'rack_uid': rack, 'name': w['pdu_single'] % tag, 'feed': 'a',
                          'outlets': 12, 'capacity_w': 1350, 'source_uid': ups,
                          'item_uid': b.item(rack, 'PDU-%s' % tag, 'pdu', placement='side')})
-    b.item(rack, w['fiber_trunk'], 'fiber_panel', 42, face='front', model='fiber')
-    paneles = max(1, (desks + 23) // 24)
-    for k in range(paneles):
-        u_panel = 40 - 3 * k
-        pp = b.item(rack, w['patch_desks'] % ('%s-%s' % (tag, 'ABCD'[k])), 'patch_panel', u_panel,
-                    face='front', model='patch')
-        b.item(rack, w['cable_manager'], 'blank', u_panel - 1, face='front')
-        sw = b.item(rack, 'SW-%s-%d' % (tag, k + 1), 'switch', 30 - k, model='tor')
-        b.feed(sw, pdu, 370)                                   # PoE: the phones and the APs
-        for port in range(1, 25):
-            b.cable(pp, str(port), sw, 'Gi1/0/%d' % port, category='cat6a',
-                    color='blue' if port % 2 else 'grey', length=500,
-                    label='%s-%s%02d' % (tag, 'ABCD'[k], port))
-        for n, core in enumerate(cores):
-            b.cable(sw, 'Te1/1/%d' % (n + 1), core, 'Te1/0/%d' % (core_port + k), kind='fiber',
-                    category='os2', color='yellow', length=30000,
-                    label='%s-CORE%d-%d' % (tag, n + 1, k + 1))
+    fibra = b.item(rack, w['fiber_trunk'], 'fiber_panel', 42, face='front', model='fiber')
+    # Los paneles de los puestos y sus switches de acceso, y sus subidas al núcleo por la fibra,
+    # los pone el cableado estructurado (`demo_cabling`), 24 puertos cada vez según los puestos
+    # que haya en la planta. `desks`, `cores` y `core_port` quedan de cuando se ponían aquí.
+    _ = (desks, cores, core_port)
+    net.setdefault('dists', {})[tag] = {'kind': 'idf', 'tag': tag, 'rack': rack, 'power': pdu,
+                                        'fiber': fibra, 'floor': floor['key'], 'pairs': []}
     b.feature(room, 'crac', w['split_n'] % 1, ancho - 1300, 150 if not arriba else fondo - 400,
               800, 250, base_mm=2200, height_mm=300)
     b.feature(room, 'extinguisher', w['extinguisher_co2'], ancho - 500, fondo - 600)
@@ -1006,21 +1186,17 @@ def _second(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
                      actor=b.actor)
     _desks(b, open2, [(1000, 1500), (7000, 1500), (1000, 5000), (7000, 5000)], 2)
     b.feature(open2, 'zone', w['printer'], 12500, 6800, 1200, 1000)
-    b.feature(open2, 'cabinet', w['floor_cabinet'], 12600, 1000, 1000, 500, shelves=4)
+    b.feature(open2, 'cabinet', w['floor_cabinet'], 12600, 100, 1000, 500, rot=180, shelves=4)
     b.feature(open2, 'column', w['column'], 6200, 4300)
     b.feature(open2, 'extinguisher', w['extinguisher_co2'], 300, 8400)
     b.door(open2, *floor['size']['open2'][:2])
-    _meeting(b, floor, 'meet_a', 10, (1200, 1900, 3600, 1200))
+    _meeting(b, floor, 'meet_a', 10, (400, 1900, 3600, 1200))
     _meeting(b, floor, 'meet_b', 4, (800, 2000, 2400, 1000))
     _private_office(b, floor, 'off_dir', 'round')
     _private_office(b, floor, 'off_fin')
     _private_office(b, floor, 'off_rrhh')
     _private_office(b, floor, 'off_it', 'bench')
-    kitchen = floor['rooms']['kitchen']
-    b.s.rooms.update(kitchen, {'cooling': 'none'}, actor=b.actor)
-    b.feature(kitchen, 'bench', w['kitchen_counter'], 300, 4800, 4900, 600, rot=180)
-    b.feature(kitchen, 'zone', w['kitchen_tables'], 1000, 1700, 3000, 2000)
-    b.door(kitchen, *floor['size']['kitchen'][:2], top=True)
+    _kitchen(b, floor)
     train = floor['rooms']['train']
     b.s.rooms.update(train, {'cooling': 'split'}, actor=b.actor)
     for r in range(3):
@@ -1030,7 +1206,7 @@ def _second(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
     b.feature(train, 'bench', w['trainer'], 3700, 4600, 1600, 700, rot=180)
     b.feature(train, 'label', w['whiteboard'], 3700, 5300)
     b.door(train, *floor['size']['train'][:2], top=True)
-    _idf(b, site, floor, 'idf2', 'P2', src['p2'], 36, net['cores'], 33)
+    _idf(b, site, floor, 'idf2', 'P2', src['p2'], 36, net['cores'], 33, net)
 
 
 def _third(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
@@ -1078,7 +1254,7 @@ def _third(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
     b.cable(st, 'ctrlB-0', tor, 'Te1/1/4', kind='fiber', category='om4', color='cyan', length=4000)
     b.feature(srv, 'label', w['srv_sign'], 2000, 4300, 3000, 400)
     b.feature(srv, 'extinguisher', w['extinguisher_co2'], 6400, 5400)
-    b.door(srv, *floor['size']['srv'][:2])
+    b.door(srv, *floor['size']['srv'][:2], fire=True)
 
     # The HPC room: two rows back to back on a contained hot aisle, in-row coolers between racks.
     hpc = floor['rooms']['hpc']
@@ -1129,17 +1305,20 @@ def _third(b: _Builder, site: str, floor: dict, src: dict, net: dict) -> None:
     b.feature(hpc, 'column', w['column'], 6600, 6300)
     b.feature(hpc, 'panel', w['cpd_panel'], 300, 6800)
     b.feature(hpc, 'extinguisher', w['extinguisher_co2'], 11300, 7300)
-    b.door(hpc, *floor['size']['hpc'][:2])
+    b.door(hpc, *floor['size']['hpc'][:2], fire=True)
 
-    _idf(b, site, floor, 'idf3', 'P3', src['p3'], 20, cores, 37)
+    _idf(b, site, floor, 'idf3', 'P3', src['p3'], 20, cores, 37, net)
     _meeting(b, floor, 'meet3', 8, (1100, 1500, 3200, 1200))
     open3 = floor['rooms']['open3']
     b.s.rooms.update(open3, {'cooling': 'split', 'description': w['room_office_desc']},
                      actor=b.actor)
-    _desks(b, open3, [(300, 600), (4900, 600), (300, 3000)], 3, width=1400)
-    b.feature(open3, 'zone', w['printer'], 6000, 3400, 1200, 1000)
-    b.door(open3, *floor['size']['open3'][:2])
+    # The door is on top (the corridor): the islands start 1.8 m below it.
+    _desks(b, open3, [(300, 1800), (4700, 1800), (9100, 1800), (300, 5200), (4700, 5200)], 3,
+           width=1400)
+    b.feature(open3, 'zone', w['printer'], 10000, 5600, 1200, 1000)
+    b.door(open3, *floor['size']['open3'][:2], top=True)
     _private_office(b, floor, 'off_cto', 'round')
+    _kitchen(b, floor)
 
 
 # ── States: some items in warning and in error ───────────────────────────────────────────────
@@ -1153,6 +1332,7 @@ _TROUBLE = {
     'srv-a01-03': 'error', 'gpu-h05-02': 'error', 'SW-B04': 'error', 'srv-s02-04': 'error',
     'srv-a02-01': 'warning', 'srv-b06-05': 'warning', 'gpu-h09-07': 'warning',
     'gpu-h02-08': 'warning', 'SW-P2-2': 'warning', 'FW-S01': 'warning', 'CORE-2': 'warning',
+    'NVR-01': 'warning',
 }
 #: And why: what the check that put it there would have said. Clicking an item in trouble
 #: shows it, as a real device shows its failing checks.
@@ -1160,7 +1340,7 @@ _WHY = {
     'srv-a01-03': 'why_ping', 'gpu-h05-02': 'why_gpu_xid', 'SW-B04': 'why_psu_both',
     'srv-s02-04': 'why_raid_failed', 'srv-a02-01': 'why_disk_smart', 'srv-b06-05': 'why_psu_one',
     'gpu-h09-07': 'why_gpu_temp', 'gpu-h02-08': 'why_ecc', 'SW-P2-2': 'why_port_errors',
-    'FW-S01': 'why_ha_sync', 'CORE-2': 'why_uplink_down',
+    'FW-S01': 'why_ha_sync', 'CORE-2': 'why_uplink_down', 'NVR-01': 'why_nvr_disk',
 }
 #: What does not answer by nature: no state, it is not watched for a reason.
 _MUTE = ('patch_panel', 'fiber_panel', 'shelf', 'blank', 'pdu', 'ups')
@@ -1189,17 +1369,60 @@ def _states(b: _Builder, site: str) -> None:
                                  actor=b.actor)
 
 
+#: The room items in trouble, and why: what their device would say.
+_ROOM_TROUBLE = {'IMP-P2': ('warning', 'why_toner'), 'AP-P2-OPEN2': ('warning', 'why_ap_clients'),
+                 'CAM-P0-2': ('error', 'why_cam_signal')}
+
+
+def _room_states(b: _Builder, site: str) -> None:
+    """A demo state for what is in the rooms —the PCs, the phones, the APs—: ok, but for a
+    printer low on toner, an access point with clients on a weak signal and a camera with no
+    picture. The outlets have none: a wall socket does not answer."""
+    w = b.w
+    for room in b.s.rooms_of(site):
+        for it in b.s.items_in_room(room['uid']):
+            if it['role'] == 'outlet':
+                continue
+            estado, por = _ROOM_TROUBLE.get(str(it.get('label') or ''), ('ok', ''))
+            b.s.items.update(it['uid'], {'demo_state': estado, 'demo_reason': w[por] if por else '',
+                                         'description': w['demo_state_desc'] % w['state_' + estado]},
+                             actor=b.actor)
+
+
+def _place_sources(b: _Builder, site: str) -> None:
+    """Each source of the power chain IS a piece of the plan: the mains, the panels and the
+    room UPSs in the energy room, the generator's zone, each floor's panel in its corridor. Linked
+    (`dc_source.feature_uid`), the 3D draws the source at its piece instead of in a row beside the
+    building. By name, as the chain and the pieces are written with the same words; a floor's
+    panel is «Floor panel P2» on the plan and «Floor 2 panel» in the chain."""
+    from lib.core.dcim.store import SOURCE_PIECE_KINDS        # noqa: PLC0415
+    w = b.w
+    piezas = {}
+    for room in b.s.rooms_of(site):
+        for f in b.s.features_of(room['uid']):
+            if f['kind'] in SOURCE_PIECE_KINDS and f.get('label'):
+                piezas.setdefault(f['label'], f['uid'])
+    alias = {w['src_p2']: w['floor_panel_n'] % _IQ_TAG['floor_second'],
+             w['src_p3']: w['floor_panel_n'] % _IQ_TAG['floor_third']}
+    for s in b.s.sources_of(site):
+        if s.get('item_uid'):
+            continue                                   # a UPS in a rack is drawn in its rack
+        pieza = piezas.get(alias.get(s['name'], s['name']))
+        if pieza:
+            b.s.sources.update(s['uid'], {'feature_uid': pieza}, actor=b.actor)
+
+
 # ── Access control: a gateway per floor, cylinders, lockers, turnstiles ──────────────────────
 
 #: Where each floor's gateway hangs: the room, and a free spot on its wall.
 _IQ = {'floor_basement': ('ene', 11500, 6500), 'floor_ground': ('com', 300, 2500),
-       'floor_first': ('noc', 6000, 3000), 'floor_second': ('idf2', 3500, 1800),
-       'floor_third': ('idf3', 3100, 1800)}
+       'floor_first': ('noc', 6000, 3000), 'floor_second': ('idf2', 2600, 1800),
+       'floor_third': ('idf3', 2600, 1800)}
 _IQ_TAG = {'floor_basement': 'S', 'floor_ground': 'P0', 'floor_first': 'P1',
            'floor_second': 'P2', 'floor_third': 'P3'}
 #: The rooms whose door has an electronic cylinder: the technical ones and the private offices.
 _LOCKED = ('cpd', 'hpc', 'srv', 'idf2', 'idf3', 'com', 'noc', 'alm', 'ene', 'bat', 'gen',
-           'off_dir', 'off_fin', 'off_rrhh', 'off_it', 'off_cto')
+           'pci', 'off_dir', 'off_fin', 'off_rrhh', 'off_it', 'off_cto', 'off_ops')
 #: The cabinets with a locker lock.
 _LOCKERS = ('recep_lockers', 'floor_cabinet')
 #: What is in trouble, and why: the battery of a cylinder, a turnstile that lost its gateway,
@@ -1238,7 +1461,8 @@ def _access(b: _Builder, floors: dict) -> None:
         for key, room in floor['rooms'].items():
             for f in b.s.features_of(room):
                 # La puerta de la sala, no las del confinamiento de un pasillo.
-                if f['kind'] == 'door' and key in _LOCKED and f['label'] == w['door']:
+                if f['kind'] == 'door' and key in _LOCKED and f['label'] in (w['door'],
+                                                                              w['door_fire']):
                     b.s.features.update(f['uid'], estado('door', key, {
                         'lock': 'cylinder', 'model': 'Salto Neo Cylinder',
                         'type_uid': b.models['access_neo'],
@@ -1335,7 +1559,8 @@ def _safety(b: _Builder, floors: dict) -> None:
             # Sin rótulo: va justo encima de la puerta, y el suyo tapaba el de la puerta. Lo
             # que es lo dice su tipo, en su icono y en el inspector.
             pieza(room, 'emergency_light', '', W, D, lado, W / 2 - 175)
-            if not any(f['kind'] == 'extinguisher' for f in piezas):
+            # (Ni en los aseos: les sirve el del pasillo, a menos de 15 m — DB-SI 4.)
+            if rk != 'wc' and not any(f['kind'] == 'extinguisher' for f in piezas):
                 pieza(room, 'extinguisher', w['extinguisher_co2'], W, D, lado, W / 2 + 700)
             nx, ny = max(1, -(-int(W) // 6000)), max(1, -(-int(D) // 6000))
             for i in range(nx):
@@ -1365,7 +1590,14 @@ def _safety(b: _Builder, floors: dict) -> None:
 
             junto('emergency_light', '', x + ww / 2 - 175)
             # A un lado de la puerta y nunca en su hueco (la mitad de la sala ± 500 mm).
-            if i % 2 == 0 or ww < 2800:
+            if ww < 3500:
+                # Delante de una sala estrecha —un despacho de 2,8 m— solo cabe una pieza junto a
+                # su puerta: un extintor o un pulsador, por turnos.
+                if i % 2 == 0:
+                    junto('extinguisher', w['extinguisher_n'] % _IQ_TAG[fkey], x + 150)
+                else:
+                    junto('fire_alarm', w['pushbutton'], x + 300)
+            elif i % 2 == 0:
                 junto('extinguisher', w['extinguisher_n'] % _IQ_TAG[fkey], x + 400)
                 junto('fire_alarm', w['pushbutton'], x + 800)
             else:
@@ -1392,7 +1624,7 @@ def _dr(b: _Builder, demo: str, site: str, net: dict) -> None:
     room = b.new('rooms', {'site_uid': site, 'name': w['room_dr'], 'width_mm': 5000,
                            'depth_mm': 4000, 'cooling': 'split'})
     rack = b.new('racks', {'room_uid': room, 'name': 'R-01', 'u_height': 42, 'width_mm': 600,
-                           'depth_mm': 1000, 'pos_x': 1000, 'pos_y': 800, 'rotation': 0})
+                           'depth_mm': 1000, 'pos_x': 1000, 'pos_y': 800, 'rotation': 180})
     pdus = b.pdus(rack, 'R-01', (ups, ups))
     rtr = b.item(rack, 'RTR-DR', 'router', 40, model='router')
     fw = b.item(rack, 'FW-DR', 'firewall', 38, model='firewall')

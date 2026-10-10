@@ -562,7 +562,9 @@ function _dcwBoxes(floor, cajas, alto) {
         const a = [s.x1 * M, s.y1 * M], b = [s.x2 * M, s.y2 * M], g = (Number(s.thick_mm) || 150) * M;
         const trozo = (y0, h, color) => cajas.push({color, m: ss3dBar(a[0], a[1], b[0], b[1], g, y0, h),
                                                      lee: null, borde: color[3] >= 1});
-        if (s.kind === 'door') trozo(Math.min(2.1, alto), Math.max(0.01, alto - 2.1), gris);
+        // El dintel, solo si hay muro encima de la puerta. Con muros bajos (1 m) se pintaba una
+        // lámina de 1 cm a esa altura, con su borde, cruzando la puerta por la mitad.
+        if (s.kind === 'door') { if (alto > 2.11) trozo(2.1, alto - 2.1, gris); }
         else if (s.kind === 'window') {
             trozo(0, Math.min(0.9, alto), gris);
             if (alto > 0.9) trozo(0.9, Math.min(1.2, alto - 0.9), [0.6, 0.66, 1.0, 0.25]);

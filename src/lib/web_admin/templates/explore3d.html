@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{# ================================================================
+   /3d — the inventory in 3D, as a page of its own (lib/core/dcim/routes/explore.py).
+
+   The whole screen: a head with where one is (Sites › a site › its floors) and a stage below,
+   either the sites map or the site in 3D. No panel around it, like /status — but with a
+   session, because it draws every rack and lock of the installation.
+
+   It loads only what it draws with: the core (texts, utilities, notices, the API), the canvas
+   and the 3D engine, and the inventory's pieces. Those are the panel's own files, untouched;
+   what this page needs to behave differently it redefines in partials/explore3d/_page.html,
+   which goes last so its definitions are the ones that stand.
+   ================================================================ #}
+{% block title %}{{ page_title }} · {{ app_name }}{% endblock %}
+{% block body_class %}ss-page-fill{% endblock %}
+{% block body %}
+<header class="d-flex align-items-center gap-2 px-3 py-2 border-bottom flex-wrap">
+    <a href="/admin" class="d-inline-flex align-items-center gap-2 text-decoration-none text-body fw-semibold me-2"
+       title="{{ i18n.x3_to_panel }}">
+        <img src="{{ brand_src('mark') }}" alt="" style="height:1.4rem">
+        <span>{{ app_name }}</span>
+    </a>
+    <nav id="x3-crumbs" class="d-flex align-items-center gap-2 flex-wrap" aria-label="breadcrumb"></nav>
+    <div class="ms-auto d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-sm btn-secondary" onclick="_x3Refresh()"
+                title="{{ i18n.x3_refresh }}" aria-label="{{ i18n.x3_refresh }}">
+            <i class="bi bi-arrow-clockwise"></i></button>
+        <a class="btn btn-sm btn-secondary" href="/dcim" title="{{ i18n.x3_to_inventory_tt }}">
+            <i class="bi bi-diagram-3 me-1"></i>{{ i18n.x3_to_inventory }}</a>
+    </div>
+</header>
+<main id="x3-main" class="ss-page-main"></main>
+
+{% include "partials/_modals.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.SS_STANDALONE_PAGE = '';
+    window.SS_STANDALONE_PAGES = [];
+{% include "partials/core/_constants.html" %}
+{% include "partials/core/_utils.html" %}
+{% include "partials/core/_toast.html" %}
+{% include "partials/core/_geo.html" %}
+{% include "partials/core/_api.html" %}
+{% include "partials/core/_list_table.html" %}
+{% include "partials/infra/_canvas.html" %}
+{% include "partials/infra/_viewer3d.html" %}
+{% include "partials/infra/_viewer3d_tools.html" %}
+{% include "partials/infra/_viewer3d_real.html" %}
+{% include "partials/dcim/_render.html" %}
+{% include "partials/dcim/_whereabouts.html" %}
+{% include "partials/dcim/_conns.html" %}
+{% include "partials/dcim/_pieces.html" %}
+{% include "partials/dcim/_roomitems.html" %}
+{% include "partials/dcim/_room3d.html" %}
+{% include "partials/dcim/_look3d.html" %}
+{% include "partials/dcim/_select3d.html" %}
+{% include "partials/dcim/_rack3d.html" %}
+{% include "partials/dcim/_power.html" %}
+{% include "partials/dcim/_cables.html" %}
+{% include "partials/dcim/_form.html" %}
+{% include "partials/dcim/_board.html" %}
+{% include "partials/dcim/_sitemap.html" %}
+{% include "partials/dcim/_layouts.html" %}
+{% include "partials/dcim/_rack.html" %}
+{% include "partials/dcim/_elevation.html" %}
+{% include "partials/dcim/_plan.html" %}
+{% include "partials/dcim/_siteplan.html" %}
+{% include "partials/dcim/_walls.html" %}
+{% include "partials/dcim/_site3d.html" %}
+{% include "partials/dcim/_plancal.html" %}
+{% include "partials/dcim/_undo.html" %}
+{% include "partials/explore3d/_page.html" %}
+</script>
+{% endblock %}

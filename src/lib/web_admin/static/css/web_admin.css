@@ -1511,6 +1511,18 @@ html.ss-nocss body { visibility: visible; }
 /* A canvas inside a page that scrolls: there is no remaining height for `flex` to give it, so
    it says its own — half the screen, within reason. The board's map sat at the 240px floor. */
 .ss-canvas-tall { min-height: clamp(360px, 55vh, 720px); }
+/* A page that is one working surface (/3d): the screen's height, a head, and a main column
+   that takes the rest. */
+.ss-page-fill { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+.ss-page-main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+                gap: .5rem; padding: .75rem; }
+/* .ss-stage : the canvas of that column takes the height left, whatever height the viewer
+   declares for itself inside the panel (26rem for the 3D, a floor for the map). */
+.ss-stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ss-stage > .ss-infra-canvas, .ss-stage > [data-ss3d] {
+    flex: 1 1 auto; height: auto !important; min-height: 0 !important; margin-bottom: 0 !important; }
+/* .ss-strip : a band under a stage that keeps its own height and scrolls inside it. */
+.ss-strip { flex: 0 0 auto; max-height: 30vh; overflow: auto; }
 @media (max-width: 767.98px) { .ss-editor { flex-direction: column; }
                                .ss-editor > .ss-side-panel { flex-basis: auto; } }
 /* .ss-side-panel : a fixed-width column that scrolls on its own; .is-collapsed leaves only the
@@ -1519,6 +1531,8 @@ html.ss-nocss body { visibility: visible; }
 .ss-side-panel.is-collapsed { flex-basis: 2.6rem; padding: .25rem; }
 /* .ss-float-tools : a vertical strip of tool buttons floating over a canvas, top-left; it wraps
    into a second column when the canvas is shorter than the strip. */
+/* .ss-float-sep : a thin line between two groups of a floating tool strip. */
+.ss-float-sep { height: 1px; margin: .15rem .25rem; background: var(--bs-border-color); }
 .ss-float-tools { position: absolute; top: .5rem; left: .5rem; z-index: 2; display: flex;
                   flex-direction: column; flex-wrap: wrap; align-content: flex-start; gap: .25rem;
                   max-height: calc(100% - 1rem); }
@@ -1644,6 +1658,18 @@ html.ss-nocss body { visibility: visible; }
              background: rgba(17, 24, 39, .88); color: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, .35); }
 .ss-3d-tip .opacity-75 { color: rgba(255, 255, 255, .8); }
 .ss-3d-tip .text-muted { color: rgba(255, 255, 255, .75) !important; }
+/* Walking a 3D viewer like a game: a crosshair in the middle and the keys at the bottom. */
+.ss-3d-fps { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.ss-3d-walking [data-ss3d-labels] { display: none !important; }
+.ss-3d-fps-aim { position: absolute; left: 50%; top: calc(50% + 18px); transform: translateX(-50%);
+                 padding: .25rem .6rem; border-radius: .375rem; font-size: .85rem; font-weight: 600;
+                 background: rgba(17, 24, 39, .85); color: #fff; white-space: nowrap; }
+.ss-3d-cross { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px;
+               border: 2px solid rgba(255, 255, 255, .85); border-radius: 50%;
+               box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); }
+.ss-3d-fps-hint { position: absolute; left: 50%; bottom: .6rem; transform: translateX(-50%);
+                  padding: .25rem .6rem; border-radius: .375rem; font-size: .8rem;
+                  background: rgba(17, 24, 39, .8); color: #fff; white-space: nowrap; }
 /* The compass rose in a corner of a plan or of the 3D viewer. */
 .ss-compass { position: absolute; top: .5rem; right: .5rem; z-index: 2; pointer-events: none;
               background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
@@ -3930,3 +3956,27 @@ body.ss-kiosk .ss-sidebar, body.ss-kiosk .ss-topbar { display: none !important; 
 /* A model's face picture beside its other face: both as wide as their column, whatever their
    proportions, so the front and the rear of one chassis read at the same scale. */
 .ss-face-img { display: block; width: 100%; height: auto; }
+
+/* ── Something that asks to be looked at: an alert that beats ─────────────────────────────── */
+/* A coloured border says how a thing is to whoever looks at it; from across the room, on a map
+   with the satellite under it, nobody looks. What moves is seen. Generic, for any alert:
+   .ss-pulse    — an SVG halo (or anything) that fades in and out; .ss-pulse-fast for an error.
+   .ss-ping     — a ring that grows from its centre and fades, like a radar blip (SVG).
+   .ss-glow-danger / .ss-glow-warning — a card's halo that beats in its colour.
+   With reduced motion asked for, they stand still: the colour and the symbol still say it. */
+@keyframes ss-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .15; } }
+@keyframes ss-ping  { 0% { transform: scale(1); opacity: .85; } 100% { transform: scale(3); opacity: 0; } }
+@keyframes ss-glow-danger  { 0%, 100% { box-shadow: 0 0 0 0 rgba(var(--bs-danger-rgb), 0); }
+                             50% { box-shadow: 0 0 0 .4rem rgba(var(--bs-danger-rgb), .6); } }
+@keyframes ss-glow-warning { 0%, 100% { box-shadow: 0 0 0 0 rgba(var(--bs-warning-rgb), 0); }
+                             50% { box-shadow: 0 0 0 .4rem rgba(var(--bs-warning-rgb), .6); } }
+.ss-pulse { animation: ss-pulse 1.6s ease-in-out infinite; }
+.ss-pulse.ss-pulse-fast { animation-duration: .9s; }
+.ss-ping { transform-box: fill-box; transform-origin: center; animation: ss-ping 1.6s ease-out infinite; }
+.ss-ping.ss-pulse-fast { animation-duration: 1s; }
+.ss-glow-danger  { animation: ss-glow-danger .9s ease-in-out infinite; }
+.ss-glow-warning { animation: ss-glow-warning 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+    .ss-pulse, .ss-ping, .ss-glow-danger, .ss-glow-warning { animation: none; }
+    .ss-ping { opacity: 0; }
+}

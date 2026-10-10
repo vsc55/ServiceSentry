@@ -183,6 +183,23 @@ camZ.radio = 90;
 const antesTope = camZ.mira.slice();
 ss3dWheel(vZ, {clientX: 500, clientY: 250, deltaY: 1, preventDefault() {}});
 __out.topeQuieto = camZ.mira.every((v, i) => Math.abs(v - antesTope[i]) < 1e-9);
+// Con las plantas separadas, el punto mirado flota metros por encima del sótano: la rueda se
+// paraba a medio metro de él, en el aire. Ahora apunta a lo que de verdad hay bajo el cursor
+// —el suelo del sótano, 13 m más abajo— y llega a él; y al reanclar no se mueve nada en pantalla.
+const escHondo = {W: 40, D: 30, H: 3, Y0: -14, cajas: [
+    {color: [0.5, 0.5, 0.5, 1], m: ss3dModel(0, -12.2, 0, 40, 0.2, 30, 0), lee: null}]};
+const camS = {mira: [20, 1, 15], radio: 12, theta: Math.PI / 3, phi: 0.6};
+const vS = {cam: camS, escena: escHondo, cv: lienzo};
+vS.ojo = ojoDe(camS);
+const ojoAntes = vS.ojo.slice();
+ss3dWheelDepth(vS, {clientX: 500, clientY: 250});
+__out.reanclaQuieto = ojoDe(camS).every((v, i) => Math.abs(v - ojoAntes[i]) < 1e-6);
+__out.miraEnElSuelo = Math.abs(camS.mira[1] - (-12)) < 1e-6;
+// Y la rueda sola, con otra cámara igual: sesenta vueltas, y llega al suelo.
+const camR = {mira: [20, 1, 15], radio: 12, theta: Math.PI / 3, phi: 0.6};
+const vR = {cam: camR, escena: escHondo, cv: lienzo};
+for (let n = 0; n < 60; n++) { vR.ojo = ojoDe(camR); ss3dWheel(vR, rueda(500, 250)); }
+__out.llegaAlSuelo = ojoDe(camR)[1] - (-12) < 1;
 
 // ── Los rótulos ─────────────────────────────────────────────────────────────────
 const salaR = _dc3dRoomBoxes({width_mm: 6000, depth_mm: 5000},
@@ -336,6 +353,12 @@ class TestLaRuedaAcercaHaciaElCursor:
     def test_alejando_al_tope_no_anda(self, out):
         assert out['topeQuieto']
 
+    def test_with_the_floors_apart_the_wheel_reaches_the_floor_under_the_pointer(self, out):
+        """Reported: with the floors apart and the basement chosen, the wheel stopped zooming
+        metres above it — it aimed at the height of the point looked at, which floats in the
+        air. It aims at the box under the pointer now; re-anchoring moves nothing on screen."""
+        assert out['reanclaQuieto'] and out['miraEnElSuelo'] and out['llegaAlSuelo']
+
 
 class TestLosRotulos:
     """Se pidió ver en el 3D el nombre de cada cosa: Rack01, MesaTaller…"""
@@ -350,8 +373,10 @@ class TestLosRotulos:
         assert out['rotulosPlanta'].split(',') == ['Almacén', 'CPD']
 
     def test_en_el_edificio_no_las_de_las_plantas_tenues(self, out):
+        """Ni las de encima (tenues) ni, desde que se mezclaban, las de debajo: en el edificio
+        solo lleva rótulos la planta elegida."""
         assert 'Despachos' not in out['rotulosEdificio']
-        assert 'CPD' in out['rotulosEdificio'] and 'Archivo' in out['rotulosEdificio']
+        assert 'CPD' in out['rotulosEdificio'] and 'Archivo' not in out['rotulosEdificio']
 
     def test_en_pantalla_donde_cae_y_lo_de_detras_oculto(self, out):
         assert out['delante'], 'el punto que se mira cae en el centro de la pantalla'

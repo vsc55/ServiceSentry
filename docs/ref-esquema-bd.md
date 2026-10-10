@@ -1165,6 +1165,7 @@ si lo echan?» antes de que lo echen**.
 | device_uid | TEXT | no | `''` | la máquina, si el SAI contesta: dice si está en batería AHORA |
 | description | TEXT | no | `''` | |
 | item_uid | TEXT | no | `''` | el equipo del inventario que ES esta fuente, cuando está en un armario (el SAI de suelo al lado del rack). Uno por fuente: la misma cosa descrita dos veces, como `dc_pdu.item_uid` |
+| feature_uid | TEXT | no | `''` | la pieza del plano que ES esta fuente cuando no está en un armario: un cuadro, un SAI de sala o la zona del grupo electrógeno (`SOURCE_PIECE_KINDS`), de una sala de su sede. Una por fuente. El 3D la dibuja ahí y sus cables llegan a ella; sin pieza ni equipo, va en fila al borde del edificio |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -1298,6 +1299,12 @@ nunca borra un armario que tenga algo dentro.
 | placement | TEXT | no | `'u'` | cómo está puesto: uno de `PLACEMENTS`. `u` se atornilla a los mástiles y ocupa `u_start`..`u_height`; `side` está en el armario sin ocupar U (la regleta del lateral, la bandeja colgada) y `near`, al lado (el SAI en el suelo, el cuadro en la pared). Lo que no ocupa U sigue estando EN el armario para todo lo demás —se alimenta, se cablea, tiene estado— y por eso no entra en la ocupación ni en el alzado |
 | demo_state | TEXT | no | `''` | el estado de un equipo de la DEMO (`main.py dcim demo`): `ok`, `warning` o `error`; vacío en todo lo demás. Solo cuenta si el equipo no tiene dispositivo vinculado —con uno, manda su vigilancia— y ninguna ruta lo escribe: la demo no crea dispositivos ni comprobaciones, y aun así enseña cómo se ve un equipo en aviso o caído |
 | demo_reason | TEXT | no | `''` | por qué está así un equipo de la DEMO: lo que diría la comprobación que lo puso en aviso o caído («Fuente de alimentación 2 sin tensión»). Se enseña al pulsar el equipo, como las comprobaciones que fallan de uno con dispositivo. Mismas reglas que `demo_state` |
+| room_uid | TEXT | no | `''` | la SALA de un equipo que no está en un armario (`placement = 'room'`, `rack_uid` vacío): un PC en su mesa, un teléfono IP, una impresora, un AP en el techo, una roseta de pared. Quién lo ve y quién lo toca siguen a la sala (`DcimStore.chain_of`) |
+| pos_x | REAL | no | `0` | dónde está en su sala, en mm, como una pieza del plano (esquina sin girar) |
+| pos_y | REAL | no | `0` | ídem |
+| rotation | INTEGER | no | `0` | su giro, en grados, sobre su centro |
+| base_mm | INTEGER | sí | — | a qué altura del suelo, en mm; vacío = la de su clase (`ROOM_ITEM_DEFAULTS`: un AP a 2950, una roseta a 300) |
+| mount | TEXT | no | `''` | cómo va montado: `desk`, `wall`, `ceiling` o `floor` (`MOUNTS`); vacío = el de su clase |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |

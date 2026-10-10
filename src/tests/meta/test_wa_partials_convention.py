@@ -98,14 +98,26 @@ class TestWiring:
             assert rel in haystack, f'{rel} is included by nobody — dead partial?'
 
     def test_script_partials_are_included_once(self):
-        """The JS bundle is ONE <script>, so including a partial twice would redeclare its
-        consts and throw at load. Only `{% include %}` emits content — a macro library pulled
-        in with `{% from … import %}` is legitimately imported by several templates."""
-        haystack = '\n'.join(_all_template_text().values())
-        includes = re.findall(r'{%-?\s*include\s+[\'"]([^\'"]+)[\'"]', haystack)
-        for rel in _partials():
-            n = includes.count(rel)
-            assert n <= 1, f'{rel} is included {n} times'
+        """A page's JS bundle is ONE <script>, so including a partial twice IN A PAGE would
+        redeclare its consts and throw at load. Only `{% include %}` emits content — a macro
+        library pulled in with `{% from … import %}` is legitimately imported by several
+        templates.
+
+        Counted per page, following each top-level template's includes: there is more than
+        one page with a bundle now. `/3d` (`explore3d.html`) loads a part of the panel's — the
+        core, the 3D engine, the inventory — in a <script> of its own, so those partials are
+        included once by the panel and once by it, which is right."""
+        def contar(rel, cuenta, pila):
+            texto = io.open(os.path.join(TPL, rel), encoding='utf-8', errors='replace').read()
+            for inc in re.findall(r'{%-?\s*include\s+[\'"]([^\'"]+)[\'"]', texto):
+                cuenta[inc] = cuenta.get(inc, 0) + 1
+                if inc not in pila and os.path.isfile(os.path.join(TPL, inc)):
+                    contar(inc, cuenta, pila | {inc})
+        for pagina in sorted(f for f in os.listdir(TPL) if f.endswith('.html')):
+            cuenta = {}
+            contar(pagina, cuenta, frozenset({pagina}))
+            for rel, n in cuenta.items():
+                assert n <= 1, f'{rel} is included {n} times in {pagina}'
 
 
 class TestSize:

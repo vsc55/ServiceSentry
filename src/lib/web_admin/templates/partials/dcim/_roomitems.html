@@ -1,0 +1,189 @@
+{# ================================================================
+   DCIM — lo que está en una sala y no en un rack: los puestos (PC, teléfono IP), las impresoras,
+   los AP del techo, las cámaras, las pantallas y las rosetas de pared donde acaba el cable
+   horizontal. Un equipo como los del rack (`dc_item`), con `placement = 'room'` y su sitio en el
+   plano.
+
+   En el plano se dibuja, se arrastra y se elige como una pieza (`_plan.html` lo engancha: la
+   clase `item` de `_dcpSel`); su ficha va en el inspector, y desde ella se rastrea: por dónde va
+   cada cable, a través de la roseta y del panel de parcheo, hasta el puerto del switch.
+   ================================================================ #}
+
+//: Lo que se dice de cada clase en el plano: una abreviatura y un color. Escrito uno a uno, como
+//: los iconos de las piezas: lo que se adivina acaba siendo el gris por defecto para la mitad.
+const _DCRI_LOOK = {
+    pc:      {abbr: 'PC',  fill: '#3b82f6', icon: 'bi-pc-display'},
+    phone:   {abbr: 'Tel', fill: '#14b8a6', icon: 'bi-telephone'},
+    printer: {abbr: 'Imp', fill: '#a855f7', icon: 'bi-printer'},
+    ap:      {abbr: 'AP',  fill: '#f59e0b', icon: 'bi-wifi'},
+    camera:  {abbr: 'Cam', fill: '#6366f1', icon: 'bi-camera-video'},   // no rojo: el rojo es «caído»
+    display: {abbr: 'TV',  fill: '#64748b', icon: 'bi-tv'},
+    outlet:  {abbr: '',    fill: '#94a3b8', icon: 'bi-ethernet'},   // visible sobre el plano claro
+};
+//: Las clases que se ponen desde la paleta del plano, en ese orden.
+const _DCRI_ROLES = ['pc', 'phone', 'printer', 'ap', 'camera', 'display', 'outlet'];
+
+function _dcriLook(role) {
+    return _DCRI_LOOK[role] || {abbr: '?', fill: '#9ca3af', icon: 'bi-hdd'};
+}
+
+/** Los equipos de la sala abierta, con su caja (`box`, en mm). */
+function _dcriItems() { return (_dcpFeat || {}).items || []; }
+
+function _dcri1(uid) { return _dcriItems().find(i => String(i.uid) === String(uid)) || null; }
+
+/** Un equipo en el plano: su caja del color de su clase, su abreviatura, su estado y, elegido,
+ *  el contorno. Se coge y se arrastra como una pieza (`data-dcpi`). */
+function _dcriItemSvg(i) {
+    const b = i.box || {};
+    const look = _dcriLook(i.role);
+    const w = Number(b.w || 200) * _DCP_SCALE, h = Number(b.d || 200) * _DCP_SCALE;
+    const x = Number(b.x || 0) * _DCP_SCALE, y = Number(b.y || 0) * _DCP_SCALE;
+    const rot = Number(b.rot || 0);
+    const puesto = _dcpSel && _dcpSel.kind === 'item' && String(_dcpSel.uid) === String(i.uid);
+    const tam = Math.max(1.6, Math.min(w, h) * 0.55);
+    const st = deviceStateColor(i.state || '');
+    return `<g class="ss-grab" data-dcpi="${escAttr(i.uid)}"
+               transform="translate(${x},${y}) rotate(${rot} ${w / 2} ${h / 2})">
+        <title>${esc((i.label || '') + ' · ' + t('dcim_role_' + (i.role || '')))}</title>
+        <rect width="${w}" height="${h}" rx="0.6" fill="${look.fill}" stroke="var(--bs-body-color)"
+              stroke-width=".8" vector-effect="non-scaling-stroke"></rect>
+        ${look.abbr ? `<text x="${w / 2}" y="${h / 2 + tam * 0.35}" text-anchor="middle" font-size="${tam}"
+            fill="#fff" style="pointer-events:none">${esc(look.abbr)}</text>` : ''}
+        ${i.state ? `<circle cx="${w}" cy="0" r="${Math.max(0.8, tam * 0.3)}" fill="${escAttr(st)}"
+            stroke="var(--bs-body-bg)" stroke-width=".4" vector-effect="non-scaling-stroke"></circle>` : ''}
+        ${puesto ? `<rect x="-1" y="-1" width="${w + 2}" height="${h + 2}" fill="none"
+            stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
+            vector-effect="non-scaling-stroke"></rect>` : ''}
+    </g>`;
+}
+
+function _dcriSvg() {
+    return _dcriItems().map(_dcriItemSvg).join('');
+}
+
+/** Los botones de la paleta para poner equipos de sala, tras los de las piezas. */
+function _dcriPaletteHtml(boton) {
+    return `<div class="ss-float-sep"></div>` + _DCRI_ROLES.map(r =>
+        boton(`_dcriAdd(${jsStr(r)})`, _dcriLook(r).icon, t('dcim_role_' + r))).join('');
+}
+
+/** Poner un equipo en la sala, en el centro de lo que se mira (como una pieza). */
+async function _dcriAdd(role) {
+    const room = (_dcimPlan || {}).room;
+    if (!room) return;
+    const v = ssCanvasWindow(_DCP_SVG) || {x: 0, y: 0, w: 4000, h: 3000};
+    const r = await _dcimSend('POST', `/api/v1/dcim/rooms/${encodeURIComponent(room.uid)}/items`, {
+        role, label: '',
+        pos_x: Math.max(0, _dcpSnap((v.x + v.w / 2) / _DCP_SCALE)),
+        pos_y: Math.max(0, _dcpSnap((v.y + v.h / 2) / _DCP_SCALE)),
+    });
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    _dcpSel = {kind: 'item', uid: String((r.data || {}).uid || '')};
+    _dcimOpenPlan(room.uid);
+}
+
+/** Guardar lo que cambió de un equipo de sala: dónde está, cómo se llama, cómo va montado. */
+async function _dcriSave(uid, cambios) {
+    const r = await _dcimSend('PUT', `/api/v1/dcim/room-items/${encodeURIComponent(uid)}`, cambios);
+    if (!r.ok) {
+        showToast(r.error || t('save_failed'), 'danger');
+        return _dcimOpenPlan(_dcimPlan.room.uid);
+    }
+    const i = _dcri1(uid);
+    if (i) {
+        Object.assign(i, cambios);
+        if (i.box) Object.assign(i.box, {x: Number(i.pos_x) || 0, y: Number(i.pos_y) || 0,
+                                         rot: Number(i.rotation) || 0});
+    }
+    _dcpRedraw();
+}
+
+function _dcriSet(uid, campo, valor) {
+    const v = ['base_mm', 'rotation', 'pos_x', 'pos_y'].includes(campo)
+        ? (valor === '' ? null : Number(valor)) : valor;
+    return _dcriSave(uid, {[campo]: v});
+}
+
+function _dcriDrop(uid) {
+    const i = _dcri1(uid);
+    showConfirmModal(tf('dcim_ritem_drop_confirm', (i && i.label) || t('dcim_role_' + ((i || {}).role || ''))),
+        async () => {
+            const r = await _dcimSend('DELETE', `/api/v1/dcim/items/${encodeURIComponent(uid)}`);
+            if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+            _dcpSel = null;
+            _dcimOpenPlan(_dcimPlan.room.uid);
+        });
+}
+
+/** La ficha de un equipo de sala en el inspector. */
+function _dcriPanelHtml(i, plegar) {
+    const puede = _dcimMay('dcim_edit');
+    const dis = puede ? '' : ' disabled';
+    const look = _dcriLook(i.role);
+    const b = i.box || {};
+    return `<div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi ${look.icon} text-muted"></i>
+            <span class="fw-semibold text-truncate">${esc(t('dcim_role_' + (i.role || '')))}</span>
+            ${i.state ? _dcimLed(i.state, true) : ''}
+            <span class="ms-auto">${plegar}</span></div>
+        ${_dcimWhyHtml(i, 'dcri-why')}
+        <label class="ss-fs-2 text-muted w-100">${esc(t('dcim_cable_label'))}
+            <input class="form-control form-control-sm" value="${escAttr(i.label || '')}"${dis}
+                   onchange="_dcriSet(${jsStr(i.uid)},'label',this.value)"></label>
+        <div class="ss-grid-2 mt-1">
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_ritem_mount'))}
+                <select class="form-select form-select-sm"${dis}
+                        onchange="_dcriSet(${jsStr(i.uid)},'mount',this.value)">
+                    ${['desk', 'wall', 'ceiling', 'floor'].map(m => `<option value="${m}"${b.mount === m ? ' selected' : ''}>${
+                        esc(t('dcim_mount_' + m))}</option>`).join('')}
+                </select></label>
+            <label class="ss-fs-2 text-muted">${esc(t('dcim_ritem_base'))}
+                <input class="form-control form-control-sm ss-tabular" type="number" step="50" min="0"${dis}
+                       value="${escAttr(String(Math.round(b.base || 0)))}"
+                       onchange="_dcriSet(${jsStr(i.uid)},'base_mm',this.value)"></label>
+        </div>
+        <div class="d-flex flex-wrap gap-1 mt-2">
+            <button type="button" class="btn btn-sm btn-primary" onclick="_dcriTrace(${jsStr(i.uid)})">
+                <i class="bi bi-signpost-split me-1"></i>${esc(t('dcim_trace'))}</button>
+            ${_dcimGoDeviceBtn(i.device_uid)}
+            ${puede ? `<button type="button" class="btn btn-sm btn-danger" onclick="_dcriDrop(${jsStr(i.uid)})">
+                <i class="bi bi-trash me-1"></i>${esc(t('delete'))}</button>` : ''}
+        </div>`;
+}
+
+// ── El rastreo ───────────────────────────────────────────────────────────────
+
+/** Un salto del camino: el equipo, su puerto (y por cuál sale si es un pasivo) y dónde está. */
+function _dcriHopHtml(h) {
+    if (h.hidden) return `<span class="badge text-bg-secondary fw-normal">${esc(t('dcim_trace_hidden'))}</span>`;
+    const look = _dcriLook(h.role);
+    const puerto = h.out ? `${h.port} → ${h.out}` : (h.port || '');
+    return `<span class="d-inline-flex flex-column border rounded px-2 py-1 ss-fs-2">
+        <span class="fw-semibold"><i class="bi ${_DCRI_LOOK[h.role] ? look.icon : 'bi-hdd'} me-1"></i>${
+            esc(h.label || t('dcim_role_' + (h.role || '')))}</span>
+        <span class="text-muted">${esc(puerto)}${h.where ? ' · ' + esc(h.where) : ''}</span>
+        ${h.open ? `<span class="text-warning-emphasis">${esc(tf('dcim_trace_open', h.open))}</span>` : ''}
+    </span>`;
+}
+
+function _dcriCableHtml(c) {
+    if (!c) return '';
+    const txt = [c.category || t('dcim_cable_' + (c.kind || 'other')), c.length_mm ? (c.length_mm / 1000).toFixed(1) + ' m' : '',
+                 c.label].filter(Boolean).join(' · ');
+    return `<span class="d-inline-flex align-items-center gap-1 ss-fs-1 text-muted mx-1">
+        <span class="ss-dot border" style="background:${escAttr(c.color || '#888')}"></span>
+        ${esc(txt)} <i class="bi bi-arrow-right"></i></span>`;
+}
+
+/** Por dónde va cada cable de un equipo, hasta donde acaba: en una ventana, un camino por cable. */
+async function _dcriTrace(uid, nombre) {
+    const d = await apiGet(`/api/v1/dcim/items/${encodeURIComponent(uid)}/trace`);
+    const caminos = (d || {}).paths || [];
+    const i = _dcri1(uid) || {label: nombre || ''};
+    const html = caminos.length
+        ? caminos.map(p => `<div class="d-flex flex-wrap align-items-center gap-1 mb-2">${
+            p.map((h, k) => (k ? _dcriCableHtml(h.cable) : '') + _dcriHopHtml(h)).join('')}</div>`).join('')
+        : `<div class="text-muted">${esc(t('dcim_trace_none'))}</div>`;
+    showHtmlModal(tf('dcim_trace_title', i.label || t('dcim_role_' + (i.role || ''))), html, 'primary', '', 'lg');
+}

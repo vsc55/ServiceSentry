@@ -55,6 +55,14 @@ class Rows(BaseStore):
         self._TABLE = spec.name
         self._cols = tuple(c.name for c in spec.columns)
 
+    def _q(self, col: str) -> str:
+        """Una columna como la escribe ESTE motor: entrecomillada. Todas y no las que hoy se
+        sabe que están reservadas: `dc_feature.lock` entró cruda en cada SELECT de las piezas, y
+        en MySQL `SELECT …, lock, …` es un error de sintaxis — el control de accesos no habría
+        abierto una sala. Qué palabras reserva cada versión de cada motor no lo elige este
+        código, así que no se le pregunta."""
+        return self._db.quote_ident(col)
+
     def bootstrap(self) -> None:
         self._db.reconcile_table(self._spec)
 
@@ -79,8 +87,9 @@ class Rows(BaseStore):
         """
         if not self.has(col):
             return {}
-        sql = (f"SELECT {col}, COUNT(*) AS n FROM {self._sql_table} "
-               f"WHERE {col} <> '' GROUP BY {col}")
+        q = self._q(col)
+        sql = (f"SELECT {q}, COUNT(*) AS n FROM {self._sql_table} "
+               f"WHERE {q} <> '' GROUP BY {q}")
         return {r[0]: int(r[1] or 0) for r in (self._db.fetchall(sql) or ()) if r and r[0]}
 
     def in_use(self, col: str, limit: int = 0) -> list:
@@ -117,7 +126,7 @@ class Rows(BaseStore):
         porque es el único que existe en todas estas tablas y es único: un orden estable es lo
         que hace que la página dos sea la página dos.
         """
-        sql = f'SELECT {", ".join(self._cols)} FROM {self._sql_table}'
+        sql = f'SELECT {", ".join(self._q(c) for c in self._cols)} FROM {self._sql_table}'
         if where:
             sql += f' WHERE {where}'
         if limit or offset:
@@ -136,7 +145,7 @@ class Rows(BaseStore):
                        'updated_by': str(actor or '')})
         cols = [c for c in self._cols if c in values]
         self._db.execute(
-            f'INSERT INTO {self._sql_table} ({", ".join(cols)}) '
+            f'INSERT INTO {self._sql_table} ({", ".join(self._q(c) for c in cols)}) '
             f'VALUES ({", ".join("?" for _ in cols)})',
             tuple(values[c] for c in cols))
         self._db.commit()
@@ -152,7 +161,8 @@ class Rows(BaseStore):
         values['updated_by'] = str(actor or '')
         cols = list(values)
         self._db.execute(
-            f'UPDATE {self._sql_table} SET {", ".join(f"{c} = ?" for c in cols)} WHERE uid = ?',
+            f'UPDATE {self._sql_table} SET {", ".join(f"{self._q(c)} = ?" for c in cols)} '
+            f'WHERE uid = ?',
             tuple(values[c] for c in cols) + (str(uid or ''),))
         self._db.commit()
         self._stamp()

@@ -5,6 +5,61 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## Un rack que en `/3d` se abría sin abrirse
+
+**Síntoma.** En `/3d`, pulsar un rack o apuntarle y pulsar F dejó de abrirlo. No salía ningún
+aviso. En el inventario del panel, el mismo rack se abría bien.
+
+**Diagnóstico.** La prueba en el navegador que ya existía para F («¿está abierto?») seguía
+pasando: el rack quedaba marcado como abierto (`_dc3dOpenRacks`). Lo que no llegaba era el
+dibujo, y en la consola de la página había un `ReferenceError: _DC_QUIET_ROLES is not defined`.
+
+**Causa raíz.** Al añadir las rosetas, el 3D de un rack abierto (`_rack3d.html`) pasó a usar
+`_DC_QUIET_ROLES`, la lista de lo que no se vigila, definida en la pantalla de dispositivos
+(`_devices.html`). El panel incluye los dos ficheros; `/3d` carga una parte elegida del panel y
+no incluye aquel. La guarda de `/3d` solo miraba lo que se ejecuta **al cargar**, y esto se
+ejecuta al pulsar, dentro de una función: el `ReferenceError` cortaba el redibujo después de
+haber marcado el rack.
+
+**Solución.** La lista vive en `_render.html`, que incluyen las dos páginas. Una guarda nueva
+(`test_no_constant_it_reads_lives_in_a_file_it_does_not_include`) mira toda constante
+`_MAYÚSCULAS` que lea lo que `/3d` incluye, también dentro de funciones. Con la lista devuelta a
+`_devices.html`, la guarda cae y señala la línea de `_rack3d.html`.
+
+**Lección.** Una página que carga una parte de otra hereda las dependencias de esa parte, y las
+de dentro de una función solo fallan al usarse. Comprobar que algo «ha cambiado de estado» no
+prueba que se vea: la prueba de F miraba el estado y no el error de consola. Las constantes no
+se protegen con `typeof`, así que pueden vigilarse todas sin excepción.
+
+## Las piezas de una sala que solo funcionaban en SQLite
+
+**Síntoma.** La ejecución de CI tras build.139 falló con dos pruebas de 12.200. Una era
+`test_every_reserved_column_name_has_a_guard_here`: la columna `lock` de `dc_feature` —la
+cerradura de una puerta o una taquilla, del control de accesos— es palabra reservada en MySQL y
+no tenía guarda. En local todo estaba en verde.
+
+**Diagnóstico.** Parecía faltar solo la prueba. Al escribirla —el almacén contra el conector que
+graba el SQL con `KIND='mysql'`— salió el SQL de verdad: `SELECT uid, room_uid, …, shelves, lock,
+type_uid …`, con `lock` sin comillas. Contra el MariaDB de pruebas, crear una puerta con
+cerradura respondía `1064: You have an error in your SQL syntax … near 'lock, created_at …'`.
+
+**Causa raíz.** `Rows` (`lib/db/rows.py`), el ayudante de las tablas del inventario, de las
+empresas y de las plantillas, escribía los nombres de columna tal cual en el `SELECT`, el
+`INSERT`, el `UPDATE` y los recuentos. Nunca había tenido una columna reservada, y SQLite —donde
+corre la suite— acepta las palabras reservadas sin comillas, así que nada lo delataba. En MySQL o
+MariaDB, el control de accesos no habría dejado abrir una sala.
+
+**Solución.** `Rows` entrecomilla todas sus columnas con `quote_ident` del conector, no solo las
+que hoy se sabe que están reservadas. Lo prueban `test_features_quotes_lock_on_mysql`, contra el
+SQL grabado, y `test_a_room_piece_with_a_lock_roundtrips`, contra el motor real, que falla con el
+`Rows` anterior.
+
+**Lección.** Un nombre de columna corriente en el vocabulario del producto («lock», «by»,
+«key») puede ser reservado en otro motor, y una suite sobre SQLite no lo ve nunca. Un ayudante
+genérico que monta SQL debe entrecomillar siempre, porque qué palabras reserva cada versión de
+cada motor no lo decide el código. Y cuando una guarda pide «una prueba», hay que escribirla de
+verdad: aquí era la que destapaba el fallo.
+
 ## Los puertos de la placa que «no se guardaban»
 
 **Síntoma.** Se situaban las bahías (CPU, memoria, M.2) sobre la foto de la vista interior

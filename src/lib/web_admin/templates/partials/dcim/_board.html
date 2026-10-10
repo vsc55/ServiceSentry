@@ -105,8 +105,9 @@ function _dcimBoardTiles(sites) {
         // Fondo, borde y símbolo, no solo color: quien no separa el rojo del verde sigue
         // viendo qué tarjeta hay que mirar.
         const malo = s.state === 'error' || s.state === 'warning';
+        // Y un halo que late, como su caja en el mapa (`ss-glow-*`).
         return `<div class="card ss-tile border-${tone} ${
-                         malo ? `border-2 bg-${tone}-subtle` : ''}"
+                         malo ? `border-2 bg-${tone}-subtle ss-glow-${tone}` : ''}"
                      role="button" tabindex="0"
                      onmouseenter="_dcmRaise(${jsStr(s.uid)})"
                      onfocus="_dcmRaise(${jsStr(s.uid)})"

@@ -122,6 +122,20 @@ def test_files_quotes_stored_on_mysql():
     assert '`stored`' in sql and not _bare('stored', sql)
 
 
+def test_features_quotes_lock_on_mysql():
+    """`dc_feature.lock` —la cerradura de una puerta o una taquilla, del control de accesos— es
+    palabra reservada en MySQL (`LOCK TABLES`). Lo destapó la guarda de abajo en CI: la columna
+    entró sin su prueba. Cada lectura y escritura de una pieza la nombra, entrecomillada."""
+    from lib.core.dcim.store.features import _FEATURE
+    from lib.db.rows import Rows
+    c = _RecConn(); s = Rows(c, _FEATURE)
+    s.list('room_uid = ?', ('r1',)); s.get('u1')
+    s.create({'room_uid': 'r1', 'kind': 'door', 'lock': 'cylinder'}, actor='a')
+    s.update('u1', {'lock': 'locker'}, actor='a'); s.delete('u1')
+    sql = '\n'.join(c.sql)
+    assert '`lock`' in sql and not _bare('lock', sql)
+
+
 def test_every_reserved_column_name_has_a_guard_here():
     """La guarda de la clase, no del caso.
 

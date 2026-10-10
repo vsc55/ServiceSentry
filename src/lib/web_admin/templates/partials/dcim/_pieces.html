@@ -332,6 +332,7 @@ function _dcpPaletteHtml() {
         ${boton('_dcpAddRack()', 'bi-hdd-rack', `${t('dcim_rack')} · ${t('dcim_a_record')}`)}
         ${Object.keys(kinds).map(k => boton(`_dcpAdd(${jsStr(k)})`, _DCP_ICON[k] || 'bi-square',
             `${t('dcim_kind_' + k)} · ${kinds[k].w} × ${kinds[k].d} mm`)).join('')}
+        ${_dcriPaletteHtml(boton)}
     </div>`;
 }
 
@@ -418,6 +419,11 @@ function _dcpInspectorBody() {
     if (_dcpSel && _dcpSel.kind === 'rack') {
         const k = _dcpRack1(_dcpSel.uid);
         if (k) return _dcpRackPanelHtml(k, plegar);
+    }
+    // Un equipo de la sala —un PC, una roseta—: su ficha (`_roomitems.html`).
+    if (_dcpSel && _dcpSel.kind === 'item') {
+        const i = _dcri1(_dcpSel.uid);
+        if (i) return _dcriPanelHtml(i, plegar);
     }
     const f = (_dcpSel && _dcpSel.kind === 'feature')
         ? _dcpFeatures().find(x => x.uid === _dcpSel.uid) : null;
@@ -629,10 +635,10 @@ function _dcpIsBack(kind, uid) { return _dcpBack.has(_dcpBackKey(kind, String(ui
 function _dcpStackOf(els) {
     const out = [], visto = new Set();
     for (const el of els || []) {
-        const g = el && el.closest ? el.closest('g[data-dcpf], g[data-dcp]') : null;
+        const g = el && el.closest ? el.closest('g[data-dcpf], g[data-dcp], g[data-dcpi]') : null;
         if (!g) continue;
-        const kind = g.dataset.dcpf ? 'feature' : 'rack';
-        const uid = String(g.dataset.dcpf || g.dataset.dcp);
+        const kind = g.dataset.dcpf ? 'feature' : g.dataset.dcpi ? 'item' : 'rack';
+        const uid = String(g.dataset.dcpf || g.dataset.dcpi || g.dataset.dcp);
         if (visto.has(_dcpBackKey(kind, uid))) continue;
         visto.add(_dcpBackKey(kind, uid));
         out.push({kind, uid, g});

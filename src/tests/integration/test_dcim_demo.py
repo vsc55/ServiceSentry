@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from lib.cli import commands
+from lib.core.dcim import basics as dcim_basics
 from lib.core.dcim import demo
 from lib.core.dcim import demo_faces
 from lib.core.dcim.store import DcimStore
@@ -20,9 +21,12 @@ _TABLES = ('dc_site', 'dc_floor', 'dc_floor_wall', 'dc_room', 'dc_rack', 'dc_ite
            'dc_shelf_item', 'dc_pdu', 'dc_feed', 'dc_cable', 'dc_link', 'dc_row', 'dc_source',
            'dc_part', 'org', 'org_owner', 'dc_type')
 
-#: The files the demo leaves: a plan per floor and the faces of its own models.
+#: The drawings of the catalogue's branded basics (the access control the demo brings in):
+#: the core catalogue's, not the demo's, so they stay when the demo goes.
+_CORE = len([f for f in os.listdir(dcim_basics.FACES_DIR) if f.endswith('.svg')])
+#: The files the demo leaves: a plan per floor, the faces of its own models, and those drawings.
 _FILES = len(demo._FLOORS) + sum(1 for k in demo_faces.MODELS
-                                  for side in ('front', 'rear') if demo_faces.face(k, side))
+                                  for side in ('front', 'rear') if demo_faces.face(k, side)) + _CORE
 
 
 @pytest.fixture()
@@ -231,11 +235,11 @@ class TestWhatTheDemoHolds:
             assert w[key] in rooms, key
         refrigeracion = {r['cooling'] for r in rooms.values()}
         assert {'split', 'cold_aisle', 'hot_aisle', 'room', 'none'} <= refrigeracion
-        # Desks: 24 on the second floor and 18 on the third, each named by floor and number.
+        # Desks: 24 on the second floor and 30 on the third, each named by floor and number.
         puestos = [f for r in rooms.values() for f in store.features_of(r['uid'])
                    if f['kind'] == 'bench']
         assert len([f for f in puestos if f['label'].startswith('P2.')]) == 24
-        assert len([f for f in puestos if f['label'].startswith('P3.')]) == 18
+        assert len([f for f in puestos if f['label'].startswith('P3.')]) == 30
         # The HPC room: its racks on a contained hot aisle with in-row coolers between them.
         hpc = rooms[w['room_hpc']]
         piezas = store.features_of(hpc['uid'])
@@ -376,7 +380,9 @@ class TestWhatTheDemoHolds:
                 if not W:                                # the corridors: the floor's general area
                     continue
                 tipos = {f['kind'] for f in piezas}
-                assert {'smoke_detector', 'emergency_light', 'extinguisher'} <= tipos, room['name']
+                # The toilets have none of their own: the corridor's, within 15 m, serves them.
+                propio = set() if room['name'] == w['room_wc'] else {'extinguisher'}
+                assert {'smoke_detector', 'emergency_light'} | propio <= tipos, room['name']
                 for f in piezas:
                     if f['kind'] not in en_pared:
                         continue
@@ -446,6 +452,18 @@ class TestWhatTheDemoHolds:
                 assert any(m['kind'] != 'door' and sobre(m) for m in muros), r['name']
                 assert not any(m['kind'] == 'door' and hueco(m) for m in muros), r['name']
         assert vistos >= 1
+
+    def test_every_source_has_its_place_rack_or_plan_piece(self, built):
+        """Seen in the 3D: the mains, the panels and the UPSs stood in a column outside the
+        building, beside themselves drawn inside as room pieces. Every source of the main site
+        is now its rack item or its plan piece, so none is left for that column."""
+        store, made, _path = built
+        fuentes = store.sources_of(made['site'])
+        assert len(fuentes) >= 9
+        sin_sitio = [s['name'] for s in fuentes if not s['item_uid'] and not s['feature_uid']]
+        assert not sin_sitio, sin_sitio
+        piezas = {s['feature_uid'] for s in fuentes if s['feature_uid']}
+        assert len(piezas) == len([s for s in fuentes if s['feature_uid']])   # one piece each
 
     def test_two_racks_belong_to_the_customer(self, built):
         store, _made, _path = built
@@ -565,7 +583,9 @@ class TestBuildingItAgain:
         store, _made, path = built
         assert demo.remove(store, var_dir=str(path)) == 2
         assert not any(_counts(path).values())
-        assert not _media(path)
+        # What stays is the core catalogue's: the drawings of its access-control models.
+        quedan = _media(path)
+        assert len(quedan) == _CORE and all(f.endswith('.svg') for f in quedan)
 
     def test_remove_keeps_what_is_not_the_demo(self, built):
         """Other sites and companies stay, and so does a demo model somebody put to use on an

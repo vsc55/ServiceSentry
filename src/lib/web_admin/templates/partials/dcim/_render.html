@@ -18,6 +18,10 @@
 //: What is on screen. The open rack lives in the URL, so a reload — and a link somebody pastes
 //: to a colleague — lands where it was.
 let _dcimData = {sites: [], orgs: []};
+
+//: Los que no llevan nada que vigilar: la misma lista que `ROLES_MUDOS` (una guarda lo comprueba).
+//: Aquí y no en `_devices.html`: también la usa el 3D de un rack abierto, y `/3d` no incluye aquel.
+const _DC_QUIET_ROLES = ['patch_panel', 'fiber_panel', 'shelf', 'blank', 'outlet'];
 //: Las zonas horarias, pedidas una vez. `null` = todavía no; `[]` = no hay ninguna en ninguna
 //: de las dos fuentes, y entonces el campo vuelve a ser texto libre en vez de un desplegable
 //: vacío que no deja escribir nada.

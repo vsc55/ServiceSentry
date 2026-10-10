@@ -266,6 +266,15 @@ function _dcSrcForm() {
                     `<option value="${escAttr(x.uid)}"${String(f.item_uid || '') === x.uid ? ' selected' : ''}>${
                     esc(x.label)} · ${esc(x.rack_name)}</option>`).join('')}
             </select></label>
+        <label class="ss-fs-2 text-muted">${esc(t('dcim_source_piece'))}
+            <select id="dcs-piece" class="form-select form-select-sm" style="max-width:16rem"
+                    title="${escAttr(t('dcim_source_piece_tt'))}">
+                <option value="">${esc(t('dcim_source_item_none'))}</option>${
+                (d.plan_pieces || []).filter(x => (!x.source || x.source === f.uid)
+                                              && (!f.site_uid || x.site === f.site_uid)).map(x =>
+                    `<option value="${escAttr(x.uid)}"${String(f.feature_uid || '') === x.uid ? ' selected' : ''}>${
+                    esc(x.label || t('dcim_kind_' + x.kind))} · ${esc(x.room_name)}</option>`).join('')}
+            </select></label>
         <label class="ss-fs-2 text-muted">${esc(t('dcim_device'))}
             ${_dcimDatalist('devices')}
             <input id="dcs-dev" class="form-control form-control-sm" style="max-width:11rem"
@@ -291,7 +300,8 @@ async function _dcSrcSave() {
                     upstream_uid: val('dcs-up'),
                     capacity_w: Number(val('dcs-cap')) || 0,
                     autonomy_min: Number(val('dcs-aut')) || 0,
-                    item_uid: val('dcs-item'), device_uid: val('dcs-dev').trim(),
+                    item_uid: val('dcs-item'), feature_uid: val('dcs-piece'),
+                    device_uid: val('dcs-dev').trim(),
                     bypass_at: val('dcs-bat').trim(), description: val('dcs-desc').trim()};
     // La sede solo al declararla: al corregir, la ruta la descarta —cambiarla cambiaría quién
     // puede tocar la fila— así que mandarla sería mandar algo que se tira.

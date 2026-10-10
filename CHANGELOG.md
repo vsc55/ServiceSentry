@@ -8,6 +8,292 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.140] - 2026-10-10
+
+### Added
+
+- **What is in a room and not in a rack: desks' PCs and phones, printers, access points,
+  cameras, displays and wall outlets.** A `dc_item` with `placement = 'room'`, no rack and a room
+  (`room_uid`), placed like a plan piece (`pos_x`, `pos_y`, `rotation`) with a mount (desk,
+  wall, ceiling, floor) and a height (`base_mm`); each new role brings its size and height
+  (`ROOM_ITEM_DEFAULTS`). Whose it is follows the room. Its own routes —
+  `GET/POST /api/v1/dcim/rooms/<uid>/items`, `PUT /api/v1/dcim/room-items/<uid>`— because
+  everything the rack routes check (a free U, a face) is about a cabinet. The plan places and
+  drags them from its palette, with their card in the inspector; the room, floor and building
+  3D stand them up at their height with their state and a card.
+- **Tracing a cable end to end.** `GET /api/v1/dcim/items/<uid>/trace` follows each of an
+  item's cables through the passive items on the way —a patch panel or an outlet joins its
+  front port `N` with its back `N-R`—: «PC → outlet A → patch panel 7 → switch Gi1/0/7», with
+  each cable and its length. It stops at what the reader may not see and after 24 hops, so a
+  loop of patch cords cannot hang it. «Rastrear» in the plan's inspector and in the 3D card.
+  The circuits add `hnet`, the horizontal cabling as one bundle per room and rack, drawn in the
+  3D's network layer.
+- **The demo is a cabled office.** Every desk has a double outlet with the PC on A and the phone
+  on B; a printer per printing zone, an access point on the ceiling of every large room, a
+  display and a conference phone in the meeting rooms, cameras in the corridors and on the data
+  centre's door. Each outlet runs to its floor's distribution rack (90 m at most); patch panels
+  and access switches are added 24 ports at a time, the switches go up to the core over fibre,
+  a fibre ring joins the distribution racks and a copper trunk the data centre's two network
+  racks (`demo_cabling.py`). A printer low on toner, an access point with weak clients and a
+  corridor camera with no picture give the floors something to look at.
+- **The sites map says how many sites are in each state, and the ones in trouble beat.**
+  - Asked for: beside «Sedes» in `/3d`, a summary of the sites ok, in warning, down and
+    unwatched. Each is a button that points out on the map, one after another, the sites in
+    that state; the «down» one beats while there is any.
+  - Reported: a site in error or warning had only a border of its colour, which did not catch
+    the eye on a map. Its box now has a halo of its colour that fades in and out, faster for an
+    error than for a warning; its pin a ring that grows like a radar blip; and its card below a
+    beating glow.
+  - Generic classes in `web_admin.css` (`ss-pulse`, `ss-ping`, `ss-glow-danger`,
+    `ss-glow-warning`), still under `prefers-reduced-motion`.
+- **The demo has its CCTV.** Asked for: the video surveillance side was missing; it is laid out
+  as installed (UNE-EN 62676).
+  - Cameras where it is worth recording: the car park, the entrance hall and its turnstiles,
+    the façade at the entrance, the loading dock, both ends of the data centre's and the HPC
+    room's aisles, the server and energy rooms, besides the corridors'. None over the desks:
+    people at work are not filmed (LOPDGDD art. 89). Each camera is on its own horizontal run,
+    PoE from its floor's access switch.
+  - A 64-channel recorder (NVR-01) in the data centre's second network rack, linked to both
+    cores, with eight disks in RAID 6 and 30 days of retention (LOPDGDD art. 22.3). It is in
+    warning with a degraded disk.
+  - A monitor in reception and a two-screen video wall in the NOC, each on its own outlet.
+  - «Zona videovigilada» signs where one comes in: the street door, the car park and the dock
+    (LOPDGDD art. 22.4).
+- **Highlight in the 3D what is clicked.** A click on a rack, a device, a room item, a network
+  run, a power line, a source or a cable inside an open rack selects it.
+  - What belongs to it keeps its colour, with the lines thicker and a halo on the racks and
+    devices at its ends; everything else fades to almost nothing. Walls and floors stay, as the
+    place it is in.
+  - A device brings its whole path, from the trace: a PC → its outlet → the panel → the switch,
+    or a switch → the fibre → the core on another floor.
+  - A run's card lists its cables. Choosing one draws that cable alone, magenta, over the faded
+    bundle, so one link from a floor to another can be followed.
+  - A device's card lists its connections, one per port, from its port to what is at the far
+    end («Gi1/0/1 → PC-P2.01 eth0 (2 in between)»). Choosing one leaves only what that port
+    connects lit; «Todas las conexiones» goes back to the whole device.
+  - Clicking empty space or «Quitar resaltado» clears it. Opening the selected rack clears it
+    too: its content, not part of the selection, came out faded and the rack looked empty
+    (reported as «opening a rack only works on foot»).
+  - `GET /sites/<uid>/circuits` lists each run's cables with both ends named, and each hop of
+    `GET /items/<uid>/trace` says its rack and room (`_select3d.html`).
+- **The demo building is laid out to the Spanish regulations.** Reported: the second floor had
+  «dwarf corridors» — rooms 500 mm apart, leaving a 380 mm slot between two partitions — and the
+  only way out of a 30 m floor was a stair in one corner. Every floor now has a corridor down
+  the middle, 1.88 m clear (CTE DB-SUA 9 asks 1.20, DB-SI 3 1.00), with the rooms on either side
+  wall to wall and their doors on it. There are two exits per floor: the stair core with the
+  lobby and an accessible lift at the east end, and an exterior escape stair at the west end
+  (the street door on the ground floor). No route is longer than 50 m (DB-SI 3).
+  - The floors with desks have toilets, stacked, one of them accessible (DB-SUA 9, RD 486/1997).
+  - The special-risk rooms have EI2 45-C5 fire doors (DB-SI 1).
+  - The corridor wall rack hangs above 2.20 m (DB-SUA 2).
+  - The basement has the fire hose reels' tank and pump room (RIPCI) and a car park with an
+    accessible space.
+  - Data and power run in separate trays along the corridor (UNE-EN 50174-2).
+  - New rooms: a staging room, an operations office, two meeting rooms and a third-floor
+    kitchen.
+  - Natural light on both façades where people work.
+- **A realistic 3D mode and walking it like a game — a prototype, on `/3d` only.** Two buttons
+  in its head: «Realista» and «Paseo».
+  - «Realista» draws the same scene another way (`infra/_viewer3d_real.html`): a sky, a sun
+    casting shadows (a depth map seen from it, packed into RGBA for WebGL 1), light per pixel
+    with highlights, a material per kind of thing worked out in the shader —60 cm raised-floor
+    tiles, perforated rack doors, wood, brushed metal, plaster, glass—, darker edges and contact
+    with the ground, fog and a tone curve. Picking, labels and cards are the same.
+  - «Paseo» walks the floor at eye height: W A S D, the mouse captured (dragging turns the head
+    when it cannot be), Shift to run, walls and racks that stop you —but not at a door—, doors
+    that open as you reach them, away from you, and E / Q on the stairs for the floor above or
+    below, at the same spot. It starts on the floor's stairs. A click points at what is in
+    front; Esc lets go. Names are hidden while walking.
+  - Walking was jerky and slow, and is no longer: 3.2 m/s and 6.5 running instead of 1.6,
+    easing in and out instead of jumping to full speed on each key; each frame drawn as the
+    walker moves instead of a frame later; the sun's shadow map drawn once per scene (and while
+    a door moves) instead of every frame; the names, hidden, no longer placed every frame —
+    reading each one's width —; shadows sampled four times a pixel instead of nine, and the
+    realistic mode at the screen's own resolution (`opts.pixelScale`, a new optional setting
+    of the engine that nothing else sets).
+  - The engine gains one line: `ss3dDraw` hands the frame over when the viewer asks
+    (`opts.realista`) and the painter is loaded. The panel does not load it, so nothing changes
+    there. Room pieces carry their raw kind (`lee.fk`), which picks the material.
+- **`/3d`: the inventory in 3D as a page of its own.** Like `/status`, the whole screen with no
+  panel around it, but behind a session and `dcim_view` (a guest goes to the login; without
+  the permission, to the panel). The sites on a map with their state, and their tiles below; a
+  click opens the site as a building; at the top, Sites › the site (with the others to jump
+  to) › its floors, with up and down; the viewer's own bar switches building and floor, and
+  everything the site's 3D does —labels under the pointer, cards, racks opened in place— is
+  there. The address carries site, floor and mode (`?site=&floor=&mode=`), so a link or F5
+  comes back to the same place and the browser's back retraces it. A rack, a device or «Edit»
+  open in the panel, in another tab.
+  - Nothing already built was changed. The page (`explore3d.html`, `explore3d/_page.html`,
+    route in `lib/core/dcim/routes/explore.py`) loads part of the panel's script —the core,
+    the canvas and 3D engine, the inventory's pieces— and redefines, for itself only,
+    `renderDcim`, `_dcimUrl` and the few functions through which those pieces go back to the
+    panel.
+  - Generic layout classes for a page that is one working surface: `.ss-page-fill`,
+    `.ss-page-main`, `.ss-stage` (a canvas takes the height left) and `.ss-strip`.
+
+- **The branded access-control basics bring a drawing of their own.** The eleven Salto and
+  Gantner models in the catalogue basics had a picture only if the maker's photo could be
+  downloaded at import — and the photo cannot travel in this repository, it is the maker's.
+  Each now has a schematic SVG of its own in `src/lib/core/dcim/data/faces/` (`image_svg` in
+  `basics.json`): its shape —an escutcheon with its lever, a cylinder and its knob, a padlock, a
+  gateway, a wall reader, a DIN-rail controller— with no logo or brand mark, so a catalogue
+  without internet, or imported with `--no-images`, still shows what each one is. When the
+  photo downloads it replaces the drawing.
+
+- **A power source is a piece of the plan** (`dc_source.feature_uid`). A source had no place
+  —only a rack item, when it was a UPS in a cabinet— so the 3D power layer drew the mains, the
+  panels and the room UPSs in a column OUTSIDE the building, beside themselves drawn inside as
+  room pieces, with the cables going to the ones outside. A source now says which piece it is
+  —a panel, a room UPS or a zone (the generator's), of a room of its site, one piece per source,
+  checked on create and edit— chosen in its form («Es la pieza del plano»). The 3D draws it at
+  that piece, no extra box, and its cables reach it; only a source with neither rack nor piece
+  stays in the row. `GET /sources` brings the candidate pieces (`plan_pieces`) and the circuits
+  each source's `feature`. The demo links every source of its main site, and gets the mains
+  cabinet it lacked.
+
+### Fixed
+
+- **Nothing in the demo faces a wall.** Reported from the screen: racks, cabinets and desks
+  faced the wall. A thing's front is its `pos_y` side before turning, and 16 pieces had it
+  against a wall: the lab rack (30 cm from it), the lab's wall cabinet hung front to the
+  wall, the operators' rack, the UPSs, the battery racks, the store's and the north offices'
+  cabinets, the kitchen counters and the recovery site's rack. Each now faces its room with
+  its working space in front (1 m for a rack, a UPS or a panel, 0.7 m for a cabinet), and the
+  racks keep 0.6 m behind them for rear access. And a desk's PC and outlet go at its back,
+  not on the edge where one sits.
+- **The wheel zooms all the way to what is under the pointer.** With the floors apart and the
+  basement chosen, zooming stopped metres above it: the wheel aimed at a plane at the height of
+  the point looked at, which floats in the air there, and halted half a metre from that point.
+  Before zooming in, the point looked at now slides along the line of sight to the first solid
+  box the pointer's ray hits — a floor, a rack, a wall — with the eye and the view unchanged
+  (`ss3dWheelDepth`). In a browser: from 8–11 m short of the basement floor to 0.5 m.
+- **An open rack in the realistic walk is no longer seen through a dotted sheet, and shadows
+  lose their steps.** The open rack's glass box (there to be clicked and closed) was painted
+  with the perforated door's material; it is not drawn now — picking reads the scene, not the
+  picture. Walking, the sun's shadow map covers the 18 m round the walker, recentred every 2 m,
+  instead of the whole floor: twice as sharp where one is looking.
+- **Opening a rack in `/3d` works again, with a click or with F.** The rack's 3D read
+  `_DC_QUIET_ROLES`, defined in the devices screen, which `/3d` does not include: the rack was
+  marked open and the redraw stopped on a `ReferenceError`. The list moves to `_render.html`,
+  which both pages include.
+- **A floor's 3D no longer puts another floor's power sources outside the building.** A source
+  whose piece or rack is on another floor was not found in that floor's scene and fell into the
+  row meant for sources with no place at all; now it is simply not drawn there.
+- **A rack's front in the room 3D reads as a front.** It was a slab of the state's colour over
+  the whole face; seen from the end of a row —the sides dark, the fronts edge-on colour— the
+  cold aisle read as the backs (reported in the demo's HPC room, whose geometry was right). The
+  front is a door now: a leaf a shade lighter than the body, the state in a band at the top
+  (amber when unwatched, which is what marked the front before) and a handle.
+- **Zoom while walking, and a prompt for what can be done.** The wheel narrows the field of
+  view, like binoculars (up to ×8), without moving: the ports at the back of a server can be read
+  from the aisle; the mouse turns slower the more zoomed, and leaving the walk resets it. The
+  engine takes an optional field of view on its camera (`cam.fov`), used by the picture and by
+  the ray that points, so a click lands on the crosshair; nothing else sets it. Above the
+  crosshair, what can be done with what it is on: «Click or F: open rack H08», «F: close rack
+  H08 · Click: card of …», «E: up · Q: down» on the stairs, and the zoom.
+- **A door's gap in the walls.** A room's walls were four whole boxes with its doors inside them:
+  with 3 m walls they fought for the same pixels, and with low walls the wall ran across the
+  door. Each wall is now cut where a door stands on it (`_dc3dWallGaps`), with a lintel over the
+  door only when the wall is taller; and the plan's walls draw no lintel when there is no wall
+  above a door (with low walls it was a 1 cm sheet with a dark edge across the door).
+- **A reserved zone looked like a stain that flickered.** Its bottom face lay in the floor's
+  own plane, and see-through faces are drawn on both sides: the two fought for every pixel, in
+  stripes that changed with the angle, in both modes. See-through pieces born on the floor (a
+  zone, a contained aisle) start 3 cm above it. And a zone now reads as reserved, as on a plan:
+  a dashed light edge and a soft diagonal hatch (`_dc3dZoneMarks`), following the zone however
+  it is turned.
+- **The realistic floor crawled.** Seen far and at a grazing angle, the tile grid and the wood
+  grain were finer than a pixel and came out as moving stripes; the fine patterns now fade with
+  distance. And what is see-through —a reserved zone 2 cm over the floor— receives no shadow:
+  its depth against the floor's under it was too close to tell, and it came out striped.
+- **After leaving the walk (Esc) the view could not be zoomed out.** The camera kept the
+  walker's —an orbit with a 2 cm radius— and the wheel multiplies the radius: ten turns took it
+  to 6 cm. Leaving now flies to an orbit view 8 m behind and above where one stood, looking the
+  same way; walking again carries on from where one left off (it remembered it by that tiny
+  radius, which no longer stays).
+- **The viewer's own walking button walked the old way.** On `/3d` the person icon of the
+  viewer's bar started the engine's orbit walk: keys only with the canvas focused (nothing
+  happened until a click on it), a step per key repeat, and F meaning «home view» — so F to open
+  a rack threw the view away. It starts the game walk now, like «Walk». And the pointer is
+  captured inside the click: from the building view it was asked for after switching to the
+  floor, when the browser no longer takes it as an answer to a gesture.
+- **Walking, a rack can be opened.** With the pointer captured, a click showed the rack's card
+  but its «Open here» could not be pressed. A click on a closed rack now opens it where it stands
+  (without flying the camera away from the walker); F opens or closes the rack ahead, also
+  through one of its items; a click on anything else lets the mouse go and shows its card, and
+  «Walk» again carries on from the same spot.
+- **The building in 3D labelled every floor at once.** Only the floors above the chosen one were
+  left unlabelled (they are faint); the ones below are solid and kept theirs, so from above
+  —and the more with «hide the ones above» on— the names of every floor showed together, mixed.
+  Only the chosen floor is labelled now; the others are still drawn, pointed at (their label
+  under the pointer) and clicked. In the panel and in `/3d` alike.
+- **Room pieces failed on MySQL and MariaDB.** `dc_feature.lock` —the lock a door or a locker
+  carries, added with access control— is a reserved word there (`LOCK TABLES`), and `Rows`, the
+  helper behind the inventory's tables, the companies and the templates, wrote every column
+  bare: MariaDB answered error 1064 to listing, creating or changing any piece of a room.
+  `Rows` now quotes every column through the connector's `quote_ident`, so the next reserved
+  name cannot do the same. SQLite tolerates bare reserved words, which is why the suite was
+  green; CI's reserved-column guard caught it.
+- The catalogue's photo download spelled the product name in its `User-Agent` instead of
+  reading `APP_NAME` (caught by the `test_app_name` guard in CI).
+
+### Tests
+
+- `tests/integration/test_wa_dcim_room_items.py`: room items listed with their box, moved but
+  never into a rack, bad values refused, carried only within the site, deleted with their
+  cables, read and written only by whoever may touch the room; the trace from the PC to the
+  switch port and back, one port, a loop that does not hang; `hnet`; the plan and the 3D.
+- `tests/integration/test_wa_dcim_site3d.py`: with the floors apart, the wheel reaches the floor
+  under the pointer, and re-anchoring moves nothing on screen (it fails without the fix).
+- `tests/integration/test_wa_dcim_3d_select.py`: what each kind of selection brings (a rack, a
+  run, a cable, power, a device with its traced path), the rest faded and still clickable, the
+  lines thicker, one cable drawn alone over its bundle, the run's card, and the three viewers
+  applying it (it fails without the hook).
+- `tests/integration/test_wa_dcim_sitemap.py`: a site in error or warning beats on the map and
+  in its card, the ok one does not, and nothing moves with reduced motion asked for.
+- `tests/integration/test_wa_dcim_explore3d.py`: the map's header sums the sites by state, and
+  each button points out the next site in its state.
+- `tests/integration/test_dcim_demo_cabling.py`: the CCTV — cameras where it is worth recording
+  and none over the desks, the recorder on both cores with its disks and retention, the
+  monitoring points on their outlets, and the signs.
+- `tests/integration/test_dcim_demo_floors.py`: nothing with a front faces a wall, and a desk's
+  PC is at its back (both fail with the old placement).
+- `tests/integration/test_dcim_demo_floors.py`: two rooms share a wall or leave a 1.20 m
+  corridor (it fails with the old 500 mm gaps), every door on the corridor, nothing hung in it
+  below 2.20 m, two exits and no route over 50 m, nothing in the stair core, an accessible lift
+  and toilets on every working floor, fire doors on the special-risk rooms, and separate data
+  and power trays.
+- `tests/integration/test_dcim_demo_cabling.py`: every end device of the demo reaches a switch
+  through its outlet and a patch panel, no port takes two cables, every horizontal run is
+  90 m at most, the fibre ring closes, the trunk has its 12 cables, every access switch has an
+  uplink, and nothing stands outside its room.
+- `tests/integration/test_dcim_demo.py`: removing the demo takes its room items and their
+  cables too.
+- `tests/integration/test_wa_viewer3d_real.py`: an open rack's glass is not drawn, and walking
+  the sun looks at what is round the walker.
+- `tests/integration/test_wa_viewer3d_real.py`: only /3d loads the realistic mode, the engine
+  hands over only when asked, materials, doors on their hinge and away from who comes, and what
+  stops a walker.
+- `tests/integration/test_dcim_source_piece.py`: a source is a piece of its site, not a door,
+  not another site's and not twice; the 3D draws it at its piece, and a source placed on another floor is
+  not drawn outside this one.
+- `tests/integration/test_dcim_demo.py`: every source of the demo's main site has its place.
+- `tests/integration/test_wa_dcim_explore3d.py`: the route's session and permission, the page
+  and not the panel, the panel's pieces redrawing this page, racks and devices opening in the
+  panel, the crumbs with sites and floors, and the address.
+- `tests/meta/test_explore3d_includes.py`: nothing the page runs on load may need a partial it
+  does not include — it stopped twice on that while being written —, and no constant it reads,
+  even inside a function, may live in a partial it does not include.
+- `tests/meta/test_wa_partials_convention.py`: a partial included twice is counted per page,
+  following each top-level template's includes, now that `/3d` has a script of its own.
+- `tests/unit/test_db_portability.py`: `dc_feature.lock` is quoted in every read and write.
+- `tests/e2e/test_db_portability_live.py`: a door with its lock round-trips on a real engine
+  (checked on MariaDB: without the fix, error 1064).
+- `tests/unit/test_dcim_catalog.py`: every branded basic carries its SVG drawing, nothing in it
+  points outside, a downloaded photo replaces it, and a drawing name cannot leave its folder.
+- `tests/integration/test_dcim_demo.py`: the drawings are the core catalogue's, so they are
+  counted among the files the demo brings in and stay when it is removed.
+
 ## [0.0.1+build.139] - 2026-10-06
 
 ### Added

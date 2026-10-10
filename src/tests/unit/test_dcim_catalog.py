@@ -447,6 +447,37 @@ class TestTresCosasYNoUna:
         assert pedidas == ['https://x.test/a.png', 'https://x.test/falla.png']
         assert not any('_image_url' in f for f in filas)
 
+    def test_los_de_marca_traen_un_dibujo_propio_que_viaja_con_el_repositorio(self, monkeypatch):
+        """Pedido: que los de Salto tengan imagen también sin bajar la foto del fabricante —que
+        no puede viajar en el repositorio—. Cada uno trae un esquema propio en `data/faces/`, y la
+        foto, si se baja, lo sustituye."""
+        import os
+        import urllib.request
+        from lib.core.dcim import basics, media
+        filas = [r for r in basics.rows('es_ES') if r.get('_image_url')]
+        assert len(filas) == 11
+        for r in filas:
+            dibujo = r['_images']['front']
+            assert media.kind_of(dibujo) == '.svg', r['slug']
+            assert b'<image' not in dibujo and b'href' not in dibujo, r['slug']   # nada de fuera
+        assert sorted(os.listdir(basics.FACES_DIR)) == sorted(r['slug'] + '.svg' for r in filas)
+        png = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + b'0' * 40
+
+        class _R:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self, n):
+                return png
+        monkeypatch.setattr(urllib.request, 'urlopen', lambda *a, **k: _R())
+        uno = filas[:1]
+        assert basics.fetch_images(uno) == 1 and uno[0]['_images']['front'] == png
+        # Y solo un nombre de esa carpeta: un `..` no sale de ella.
+        assert basics._face('../basics.json') == b'' and basics._face('no-existe.svg') == b''
+
     def test_un_fichero_roto_deja_la_seccion_en_pie(self, monkeypatch):
         """Con el catálogo entero detrás, romper la lista de genéricos no puede impedir mirar un
         modelo: salen cero y el botón no trae nada."""

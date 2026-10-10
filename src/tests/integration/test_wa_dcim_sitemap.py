@@ -195,6 +195,10 @@ document.getElementById = _getOrig2;
 __out.ordenPrimerDibujo = orden(__out.html);
 __out.cajaMala = _dcmSite(SEDES[1], 1);      // «Oficina», caída
 __out.cajaBuena = _dcmSite(SEDES[0], 0);     // «Nave Norte», bien
+__out.cajaAviso = _dcmSite(Object.assign({}, SEDES[0], {state: 'warning'}), 0);
+__out.tarjetas = _dcimBoardTiles([Object.assign({}, SEDES[1], {state: 'error'}),
+                                  Object.assign({}, SEDES[0], {state: 'warning'}),
+                                  Object.assign({}, SEDES[0], {uid: 'z', state: 'ok'})]);
 
 // ── Varias sedes de la misma ciudad no son varios rótulos ───────────────────────
 // Tres a un kilómetro unas de otras caen en el mismo píxel, y cada rótulo mide ciento noventa:
@@ -422,6 +426,26 @@ class TestLoPeorSeDibujaEncima:
         assert 'var(--bs-danger-bg-subtle)' in mapa['cajaMala']
         assert 'bg-subtle' not in mapa['cajaBuena']
         assert 'var(--bs-body-bg)' in mapa['cajaBuena']
+
+    def test_y_late_para_que_se_vea_desde_lejos(self, mapa):
+        """Reportado: con solo el borde de su color, una sede con error o aviso no llamaba la
+        atención en el mapa. Un halo de su color que se enciende y se apaga —más deprisa un
+        error que un aviso—; la que está bien, quieta. Y en las tarjetas de debajo, igual."""
+        assert 'ss-pulse ss-pulse-fast' in mapa['cajaMala']
+        assert 'ss-pulse' in mapa['cajaAviso'] and 'ss-pulse-fast' not in mapa['cajaAviso']
+        assert 'ss-pulse' not in mapa['cajaBuena']
+        t = mapa['tarjetas']
+        assert t.count('ss-glow-danger') == 1 and t.count('ss-glow-warning') == 1
+
+    def test_y_quieta_si_se_pide_menos_movimiento(self):
+        """Quien tiene pedido menos movimiento en su sistema no lo ve latir: el color y el
+        «!» siguen diciendo cuál es."""
+        src = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
+        css = io.open(os.path.join(src, 'lib', 'web_admin', 'static', 'css', 'web_admin.css'),
+                      encoding='utf-8').read()
+        i = css.index('@keyframes ss-pulse')
+        bloque = css[i:css.index('@media (prefers-reduced-motion: reduce)', i) + 200]
+        assert '.ss-pulse, .ss-ping, .ss-glow-danger, .ss-glow-warning { animation: none; }' in bloque
 
     def test_y_lleva_un_simbolo_ademas_del_color(self, mapa):
         """Quien no separa el rojo del verde tiene que saber igual qué caja hay que mirar."""

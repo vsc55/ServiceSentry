@@ -29,7 +29,8 @@ from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
 from lib.core.dcim.store import (CABLE_CATEGORIES, CABLE_COLORS, CABLE_KINDS,
                                  FEED_CATEGORIES, FEED_COLORS,
-                                 FEEDS, LINK_KINDS, ROLES_MUDOS, SOURCE_KINDS)
+                                 FEEDS, LINK_KINDS, ROLES_MUDOS, SOURCE_KINDS,
+                                 SOURCE_PIECE_KINDS)
 from lib.core.dcim import store as dcim_store
 from lib.core.dcim.routes._common import (_NUM_MAX, _fresh, _num, _without, numbers_bad,
                                           scan_pages)
@@ -89,12 +90,39 @@ def register(app, wa, C):
         item = store.items.get(str(item_uid or '')) if store else None
         if not item:
             return 'dcim_not_found', 404
+        # A room's item —a PC on a desk, a wall outlet— has no rack: the room is where it is,
+        # and whoever may write the room may cable it.
+        if not item.get('rack_uid') and item.get('room_uid'):
+            if not store.rooms.get(str(item['room_uid'])):
+                return 'dcim_not_found', 404
+            if not C.may_write(store, store.owners_map(), C.seen(), 'item', item['uid']):
+                return 'access_denied', 403
+            return None
         _, rack = _rack_writable(item.get('rack_uid'))
         if rack is None:
             return 'dcim_not_found', 404
         if rack is False:
             return 'access_denied', 403
         return None
+
+    def _cable_writable(row):
+        """Whom a cable answers to: the rack of either end —the near one first—, and when both
+        ends are in a room and not in a rack (a desk's PC and its wall outlet), the near end's
+        room. ``(store, rack-or-item)``, the second ``None`` when there is nothing and ``False``
+        when this caller may not write it, like `_rack_writable`. Through the near end's rack
+        alone, every cable to a desk or a wall outlet was «not found»."""
+        store = C.store()
+        if not store:
+            return None, None
+        ends = [store.items.get(str((row or {}).get(k) or '')) for k in ('a_item', 'b_item')]
+        for it in ends:
+            if it and it.get('rack_uid'):
+                return _rack_writable(it['rack_uid'])
+        it = ends[0]
+        if not it or not it.get('room_uid'):
+            return store, None
+        ok = C.may_write(store, store.owners_map(), C.seen(), 'item', it['uid'])
+        return store, (it if ok else False)
 
     def _loop_bad(a_item, b_item, a_port, b_port):
         """Por qué ese cable NO puede ir de un equipo a sí mismo, o `''` si puede.
@@ -193,7 +221,32 @@ def register(app, wa, C):
         out['hangs'] = cuelgan
         # Y los SAI que hay dentro de esos armarios, para poder decir cuál ES cada fuente.
         out['ups_items'] = _ups_items(store, racks.keys() | _visible_racks(store, site))
+        # Y las piezas del plano que pueden serlo: dónde está en el plano lo que no está en un
+        # armario —un cuadro, un SAI de sala, la zona del grupo—.
+        out['plan_pieces'] = _plan_pieces(store, site)
         return jsonify(out)
+
+    def _plan_pieces(store, site):
+        """The room pieces that may BE a source (`SOURCE_PIECE_KINDS`), of *site* or of every
+        site, in the rooms this caller may see: with their room and site, and the source that
+        says it is them — `''` when none does yet."""
+        ligado = {str(s.get('feature_uid') or ''): s['uid'] for s in store.sources.list()
+                  if s.get('feature_uid')}
+        said, allowed = store.owners_map(), C.seen()
+        reach = dcim_svc.reachable(store, said, allowed)
+        out = []
+        for sitio in store.sites.list():
+            if site and sitio['uid'] != site:
+                continue
+            for sala in C.filtered(store.rooms_of(sitio['uid']), store, said, allowed, 'room', reach):
+                for f in store.features_of(sala['uid']):
+                    if str(f.get('kind') or '') not in SOURCE_PIECE_KINDS:
+                        continue
+                    out.append({'uid': f['uid'], 'label': str(f.get('label') or ''),
+                                'kind': f['kind'], 'room': sala['uid'],
+                                'room_name': str(sala.get('name') or ''),
+                                'site': sitio['uid'], 'source': ligado.get(f['uid'], '')})
+        return out
 
     def _visible_racks(store, site):
         """The racks of *site* (or of all sites) this caller may see."""
@@ -269,6 +322,26 @@ def register(app, wa, C):
                 return 'dcim_source_item_taken'
         return ''
 
+    def _source_piece_bad(store, uid, feature_uid, site_uid):
+        """Why a source cannot BE the room piece *feature_uid*, or `''` if it can: the piece must
+        exist, be of a kind that conducts (`SOURCE_PIECE_KINDS`), be in a room of the source's
+        site, and not be another source already."""
+        pieza = str(feature_uid or '')
+        if not pieza:
+            return ''
+        fila = store.features.get(pieza)
+        if not fila:
+            return 'dcim_not_found'
+        if str(fila.get('kind') or '') not in SOURCE_PIECE_KINDS:
+            return 'dcim_source_piece_kind'
+        sala = store.rooms.get(str(fila.get('room_uid') or '')) or {}
+        if site_uid and str(sala.get('site_uid') or '') != site_uid:
+            return 'dcim_source_other_site'
+        for otra in store.sources.list('feature_uid = ?', (pieza,)):
+            if str(otra.get('uid') or '') != str(uid or ''):
+                return 'dcim_source_piece_taken'
+        return ''
+
     def _upstream_bad(store, uid, nuevo):
         """Por qué NO puede colgar de *nuevo*, o `''` si puede.
 
@@ -330,7 +403,8 @@ def register(app, wa, C):
         malo = _upstream_bad(store, '', data.get('upstream_uid'))
         if malo:
             return jsonify({'error': malo}), 400
-        malo = _source_item_bad(store, '', data.get('item_uid'), sede)
+        malo = (_source_item_bad(store, '', data.get('item_uid'), sede)
+                or _source_piece_bad(store, '', data.get('feature_uid'), sede))
         if malo:
             return jsonify({'error': wa._t(malo)}), 400
         return jsonify({'uid': store.sources.create(data, actor=C.actor())})
@@ -355,6 +429,11 @@ def register(app, wa, C):
                 return jsonify({'error': malo}), 400
         if 'item_uid' in data:
             malo = _source_item_bad(store, uid, data.get('item_uid'), str(row.get('site_uid') or ''))
+            if malo:
+                return jsonify({'error': wa._t(malo)}), 400
+        if 'feature_uid' in data:
+            malo = _source_piece_bad(store, uid, data.get('feature_uid'),
+                                     str(row.get('site_uid') or ''))
             if malo:
                 return jsonify({'error': wa._t(malo)}), 400
         store.sources.update(uid, data, actor=C.actor())
@@ -526,7 +605,8 @@ def register(app, wa, C):
         @puerta
         def _create():
             data = _fresh(request.get_json(silent=True) or {})
-            store, rack = _rack_writable(dueno(C.store(), data))
+            store, rack = (_cable_writable(data) if kind == 'cables'
+                           else _rack_writable(dueno(C.store(), data)))
             if not store or rack is None:
                 return jsonify({'error': wa._t('dcim_not_found')}), 404
             if rack is False:
@@ -573,7 +653,7 @@ def register(app, wa, C):
             row = getattr(store, part).get(uid) if store else None
             if not row:
                 return jsonify({'error': wa._t('dcim_not_found')}), 404
-            _, rack = _rack_writable(dueno(store, row))
+            _, rack = _cable_writable(row) if kind == 'cables' else _rack_writable(dueno(store, row))
             if rack is False or rack is None:
                 return jsonify({'error': wa._t('access_denied')}), 403
             data = _without(request.get_json(silent=True) or {}, ('rack_uid', 'item_uid',
@@ -626,7 +706,7 @@ def register(app, wa, C):
             row = getattr(store, part).get(uid) if store else None
             if not row:
                 return jsonify({'error': wa._t('dcim_not_found')}), 404
-            _, rack = _rack_writable(dueno(store, row))
+            _, rack = _cable_writable(row) if kind == 'cables' else _rack_writable(dueno(store, row))
             if rack is False or rack is None:
                 return jsonify({'error': wa._t('access_denied')}), 403
             if kind == 'pdus':

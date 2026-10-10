@@ -165,6 +165,21 @@ def test_groups_reserved_table(live_db):
     assert s.count() >= 1
 
 
+def test_a_room_piece_with_a_lock_roundtrips(live_db):
+    """`dc_feature.lock` is reserved on MySQL/MariaDB (`LOCK TABLES`), and `Rows` wrote every
+    column bare: a door with its cylinder could not be listed, created or changed there."""
+    from lib.core.dcim.store.features import _FEATURE
+    from lib.db.rows import Rows
+    s = Rows(live_db, _FEATURE)
+    s.bootstrap()
+    uid = s.create({'room_uid': 'r1', 'kind': 'door', 'label': 'CPD', 'lock': 'cylinder'},
+                   actor='test')
+    assert s.get(uid)['lock'] == 'cylinder'
+    s.update(uid, {'lock': 'locker'}, actor='test')
+    assert [f['lock'] for f in s.list('room_uid = ?', ('r1',))] == ['locker']
+    assert s.counts('lock') == {'locker': 1}
+
+
 def test_events_upsert_same_value(live_db):
     from lib.services.events.store.cursor import CursorStore
     from lib.services.events.store.cooldowns import CooldownsStore

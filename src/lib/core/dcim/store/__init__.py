@@ -57,10 +57,11 @@ from .features import (ACCESS_KINDS, LOCK_KINDS,
                        FEATURE_KINDS, FEATURE_LAYERS, SHELVED_KINDS, SHELVES_MAX, _FEATURE,
                        _SHELF_ITEM)
 from .floors import WALL_KINDS, WALLS_MAX, _FLOOR, _FLOOR_WALL
-from .items import FACES, ITEM_ROLES, PLACEMENTS, ROLES_MUDOS, _ITEM
+from .items import (FACES, ITEM_ROLES, MOUNTS, PASS_THROUGH, PLACEMENTS, REAR_SUFFIX,
+                    ROLES_MUDOS, ROOM_ITEM_DEFAULTS, _ITEM, room_item_box)
 from .parts import (PART_KINDS, PORT_FAMILIES, PORT_LIST_MAX, PORT_SIGNALS_MAX,
                     WATTS_MAX, _PART, clean_place, clean_port_list)
-from .power import (FEED_CATEGORIES, FEED_COLORS, FEEDS, SOURCE_KINDS, _PDU, _POWER,
+from .power import (FEED_CATEGORIES, FEED_COLORS, FEEDS, SOURCE_KINDS, SOURCE_PIECE_KINDS, _PDU, _POWER,
                     _SOURCE)
 from .racks import SIDES, _RACK, _ROW
 from .rooms import COOLING, ROOM_HEIGHT_MM, _ROOM
@@ -85,8 +86,9 @@ SCHEMAS = (_SITE, _FLOOR, _ROOM, _RACK, _ITEM, _FEATURE, _PDU, _POWER, _CABLE,
 #: Lo que este paquete ofrece hacia fuera. Escrito y no deducido: casi todo se importa aquí
 #: sólo para volver a exportarlo, y sin esta lista cualquier herramienta lo llamaría muerto.
 __all__ = ['DcimStore', 'SCHEMAS', 'OWNER_SCOPES', 'FACES', 'ITEM_ROLES', 'ROLES_MUDOS',
+           'MOUNTS', 'PASS_THROUGH', 'REAR_SUFFIX', 'ROOM_ITEM_DEFAULTS', 'room_item_box',
            'PLACEMENTS', 'PART_KINDS', 'SIDES', 'COOLING', 'ROOM_HEIGHT_MM',
-           'ACCESS_KINDS', 'LOCK_KINDS', 'FEATURE_KINDS', 'FEATURE_LAYERS', 'SHELVED_KINDS', 'SHELVES_MAX', 'FEEDS', 'SOURCE_KINDS', 'FEED_COLORS',
+           'ACCESS_KINDS', 'LOCK_KINDS', 'FEATURE_KINDS', 'FEATURE_LAYERS', 'SHELVED_KINDS', 'SHELVES_MAX', 'FEEDS', 'SOURCE_KINDS', 'SOURCE_PIECE_KINDS', 'FEED_COLORS',
            'FEED_CATEGORIES', 'CABLE_KINDS', 'CABLE_CATEGORIES', 'CABLE_COLORS',
            'LINK_KINDS', 'PORT_FAMILIES', 'PORT_LIST_MAX', 'PORT_SIGNALS_MAX',
            'WATTS_MAX', 'clean_place', 'clean_port_list', 'like_esc', 'like_clause', 'Rows', 'rank']
@@ -437,6 +439,11 @@ class DcimStore:
     def items_of(self, rack_uid: str) -> list[dict]:
         return self.items.list('rack_uid = ?', (str(rack_uid or ''),))
 
+    def items_in_room(self, room_uid: str) -> list[dict]:
+        """What is in a ROOM and not in a rack (`placement = 'room'`): the desks' PCs and phones,
+        the printers, the access points, the wall outlets."""
+        return self.items.list("placement = 'room' AND room_uid = ?", (str(room_uid or ''),))
+
     def items_of_build(self, build_uid: str) -> list[dict]:
         """Los equipos que salieron de una plantilla.
 
@@ -469,8 +476,13 @@ class DcimStore:
             out.append((scope, uid))
             seen.add((scope, uid))
             if scope == 'item':
-                row = self.items.get(uid)
-                scope, uid = 'rack', str((row or {}).get('rack_uid') or '')
+                row = self.items.get(uid) or {}
+                # In a rack, its rack; in a room (a PC on a desk, an outlet), its room — whose
+                # it is and who may touch it follow the room then, as for a piece of the plan.
+                if not row.get('rack_uid') and row.get('room_uid'):
+                    scope, uid = 'room', str(row.get('room_uid') or '')
+                else:
+                    scope, uid = 'rack', str(row.get('rack_uid') or '')
             elif scope == 'rack':
                 row = self.racks.get(uid)
                 scope, uid = 'room', str((row or {}).get('room_uid') or '')

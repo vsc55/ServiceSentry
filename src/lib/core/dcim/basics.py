@@ -189,7 +189,30 @@ def _dev(d: dict, lang: str = '') -> dict:
         row['power_type'] = str(d['power_type'])
     if d.get('image_url'):
         row['_image_url'] = str(d['image_url'])
+    # Y un dibujo propio que SÍ viaja: un esquema de su forma, sin marcas, en `data/faces/`.
+    # Es la imagen del modelo mientras no se baje la foto —sin internet, o sin pedirla—, y la
+    # foto lo sustituye cuando llega (`fetch_images`).
+    dibujo = _face(d.get('image_svg'))
+    if dibujo:
+        row['_images'] = {'front': dibujo}
     return row
+
+
+#: Los dibujos de los básicos con marca: esquemas propios, no fotos del fabricante.
+FACES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'faces')
+
+
+def _face(name) -> bytes:
+    """El dibujo *name* de `data/faces/`, o `b''`. Solo un nombre de fichero de esa carpeta:
+    lo escribe quien mantiene el panel, pero un `..` no tiene por qué salir de ella."""
+    name = os.path.basename(str(name or ''))
+    if not name.endswith('.svg'):
+        return b''
+    try:
+        with open(os.path.join(FACES_DIR, name), 'rb') as fh:
+            return fh.read()
+    except OSError:
+        return b''
 
 
 def _mod(d: dict, lang: str = '') -> dict:
@@ -212,6 +235,7 @@ def fetch_images(rows, timeout: float = 8.0) -> int:
     modelos sin foto, que es lo que eran antes, y la próxima vez que se pulse se intenta otra vez.
     """
     import urllib.request                        # noqa: PLC0415
+    from lib import APP_NAME                     # noqa: PLC0415
     from lib.core.dcim import media              # noqa: PLC0415
     n = 0
     for row in rows or ():
@@ -219,13 +243,13 @@ def fetch_images(rows, timeout: float = 8.0) -> int:
         if not url.startswith('https://'):
             continue
         try:
-            pedido = urllib.request.Request(url, headers={'User-Agent': 'ServiceSentry'})
+            pedido = urllib.request.Request(url, headers={'User-Agent': APP_NAME})
             with urllib.request.urlopen(pedido, timeout=timeout) as resp:   # noqa: S310
                 datos = resp.read(media.MAX_BYTES + 1)
         except Exception:                        # pylint: disable=broad-except
             continue
         if datos and len(datos) <= media.MAX_BYTES and media.kind_of(datos):
-            row['_images'] = {'front': datos}
+            row['_images'] = {'front': datos}         # la foto, en lugar del dibujo
             n += 1
     return n
 

@@ -185,8 +185,8 @@ function _ds3FloorScene(floor, img, veil) {
         const c = content[r.uid] || {racks: [], features: []};
         if (r.uid === area) {
             // La zona general es la planta misma: en (0, 0), sin girar, sin muros ni suelo.
-            const sub = _dc3dRoomBoxes({uid: r.uid}, c.racks, c.features, kinds,
-                                       {walls: false, floor: false, tiles: false});
+            const sub = _dc3dRoomBoxes({uid: r.uid, name: r.name || ''}, c.racks, c.features, kinds,
+                                       {walls: false, floor: false, tiles: false, items: c.items});
             cajas.push(...sub.cajas);
             planos.push(...(sub.planos || []));
             Object.assign(puntos, sub.puntos);
@@ -198,7 +198,7 @@ function _ds3FloorScene(floor, img, veil) {
                                    c.racks, c.features, kinds,
                                    {tiles: false, floorY: -0.03, ghost: !s.real,
                                     estado: (r.roll || {}).state || '',
-                                    wallH: _ds3LowWalls ? 1.0 : 0});
+                                    wallH: _ds3LowWalls ? 1.0 : 0, items: c.items});
         const x = (Number(r.pos_x) || 0) * M, z = (Number(r.pos_y) || 0) * M;
         const rot = Number(r.rotation) || 0;
         const puesta = ss3dPlace(sub, x, 0, z, rot, 1);
@@ -239,6 +239,16 @@ function _ds3BuildingScene(actual) {
         if (tenue && _ds3HideAbove) continue;
         // 0,25: con menos, la planta de encima apenas se distinguía del fondo.
         const puesta = ss3dPlace(e, 0, Y, 0, 0, tenue ? 0.25 : 1);
+        // Los rótulos, solo de la planta elegida. Las de debajo son opacas y llevaban los suyos:
+        // desde arriba —y más con las de encima ocultas— se leían los nombres de todas las
+        // plantas a la vez, mezclados. Se siguen viendo, señalando y pulsando; lo que pierden
+        // es el texto encima, que es lo que no se podía leer.
+        const elegida = !actual || f.uid === actual.uid;
+        if (!elegida) {
+            puesta.cajas = puesta.cajas.map(k => (k.lee ? Object.assign({}, k, {
+                lee: Object.assign({}, k.lee, {sinRotulo: true})}) : k));
+            puesta.rotulos = puesta.rotulos.map(r => Object.assign({}, r, {tenue: true}));
+        }
         todo.cajas.push(...puesta.cajas);
         todo.planos.push(...puesta.planos);
         todo.rotulos.push(...puesta.rotulos);

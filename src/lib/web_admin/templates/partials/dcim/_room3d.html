@@ -55,11 +55,16 @@ function _dc3dRebuild() {
  *  una sala, y en la sala misma nada. `true` si dio con algo. */
 function _dc3dPickThing(rayo, visor) {
     // Lo que tiene ficha, aunque sea de cristal: el núcleo de una planta lo es, y se pulsa igual.
-    const hit = ss3dPickBox(visor, rayo, k => k.lee && (k.color[3] >= 0.5 || k.lee.tipo === 'core'));
-    if (!hit) { ss3dCard(visor.id, ''); return false; }
+    // Y lo apagado por un resaltado: se pulsa para resaltarlo a él.
+    const hit = ss3dPickBox(visor, rayo, _dc3dPickable);
+    if (!hit) { _dc3dSelClear(); ss3dCard(visor.id, ''); return false; }
+    const lee = hit.caja.lee;
     // A un recorrido no se vuela: es largo, y lo que se quiere es leer de qué es.
-    if (!['run', 'power'].includes(hit.caja.lee.tipo)) ss3dFlyToBox(visor, hit.caja);
-    ss3dCard(visor.id, _dc3dCardHtml(hit.caja.lee));
+    if (!['run', 'power', 'cable'].includes(lee.tipo)) ss3dFlyToBox(visor, hit.caja);
+    // Lo pulsado se resalta, y lo demás se apaga (`_select3d.html`).
+    _dc3dSelect(lee);
+    ss3dCard(visor.id, _dc3dCardHtml(lee) + (lee.tipo === 'run' ? _dc3dRunCablesHtml(lee.key) : '')
+                       + _dc3dSelBar());
     return true;
 }
 
@@ -81,6 +86,7 @@ async function _dc3dOpenRack(uid) {
                                                      apiGet(base + '/power')]);
     if (!data || data.error) return showToast((data || {}).error || t('dcim_not_found'), 'warning');
     _dc3dOpenRacks.set(uid, {data, cables: cables || {}, power: power || {}});
+    _dc3dSelOpening(uid);
     ss3dRebuild(_DC3D_BOX);
     ss3dCard(_DC3D_BOX, '');
     // Y se acerca a él, de frente, que es por donde se mira dentro de un armario.
@@ -100,7 +106,7 @@ async function _dc3dOpenRack(uid) {
 /** Lo que hay bajo el puntero, dicho junto a él: qué es, cómo se llama, dónde está y cómo está.
  *  Lo mismo que daría pulsarlo, en corto y sin pulsar. */
 function _dc3dHoverThing(rayo, visor) {
-    const hit = ss3dPickBox(visor, rayo, k => k.lee && (k.color[3] >= 0.5 || k.lee.tipo === 'core'));
+    const hit = ss3dPickBox(visor, rayo, _dc3dPickable);
     return hit ? _dc3dTipHtml(hit.caja.lee) : '';
 }
 
@@ -123,8 +129,24 @@ function _dc3dTipHtml(lee) {
 function _dc3dCardHtml(lee) {
     const fila = (k, v) => `<div class="d-flex justify-content-between gap-3"><span class="opacity-75">${esc(k)}</span><span class="ss-tabular">${v}</span></div>`;
     const enSala = !!(_dcimPlan && _dcimPlan.room && _dcimPlan.room.uid === lee.room);
-    if (['run', 'power', 'source'].includes(lee.tipo))
+    if (['run', 'power', 'source', 'cable'].includes(lee.tipo))
         return `<div class="fw-semibold mb-1">${esc(lee.name || '')}</div><div>${esc(lee.kind || '')}</div>`;
+    // Un equipo de sala —un PC, una roseta—: su ficha, con su rastreo y su sitio en el plano. Su
+    // «Editar» no es el formulario del rack: se edita en el plano de su sala, como una pieza.
+    if (lee.tipo === 'item' && lee.ritem) {
+        return `<div class="fw-semibold mb-1">${esc(lee.name || lee.kind || '')}</div>
+            ${fila(t('dcim_col_kind'), esc(lee.kind || ''))}
+            ${lee.roomName ? fila(t('dcim_room'), esc(lee.roomName)) : ''}
+            ${_dcimWhyHtml({state: lee.state, device_uid: lee.device, demo_reason: lee.reason}, 'dc3d-why')}
+            ${lee.state || lee.device ? fila(t('dcim_col_state'), _dcimLed(lee.state, true)) : ''}
+            <div class="d-flex flex-wrap gap-1 mt-2">
+                <button type="button" class="btn btn-sm btn-primary" onclick="_dcriTrace(${jsStr(lee.uid)}, ${jsStr(lee.name || lee.kind || '')})">
+                    <i class="bi bi-signpost-split me-1"></i>${esc(t('dcim_trace'))}</button>
+                ${_dcimGoDeviceBtn(lee.device)}
+                ${lee.room && !enSala ? `<button type="button" class="btn btn-sm btn-secondary"
+                    onclick="_dcimOpenPlan(${jsStr(lee.room)})"><i class="bi bi-map me-1"></i>${esc(t('dcim_open_plan'))}</button>` : ''}
+            </div>`;
+    }
     if (lee.tipo === 'item') {
         const us = lee.u ? (lee.u > 1 ? `U${lee.u0}–U${lee.u0 + lee.u - 1}` : `U${lee.u0}`) : '';
         // Un equipo de un rack abierto en este 3D: desde él se cierra, que la caja del rack es
@@ -231,7 +253,7 @@ const _DC3_STATE = {
 function _dc3dScene() {
     if (_dc3d && typeof _dc3d.build === 'function') return _dc3d.build();
     const escena = _dc3dRoomBoxes((_dcimPlan || {}).room || {}, (_dcimPlan || {}).racks || [],
-                                  _dcpFeatures(), _dcpKinds(), {air: _dcpAir});
+                                  _dcpFeatures(), _dcpKinds(), {air: _dcpAir, items: _dcriItems()});
     // Y el plano de la sala en su suelo, donde lo pone la calibración: unos milímetros por
     // encima de él, que a la misma altura pelearían por cada píxel.
     const img = (_dcimPlan || {}).image;
@@ -245,6 +267,32 @@ function _dc3dScene() {
     _dc3dAddCircuits(escena);
     _dc3dAddFoco(escena);
     return escena;
+}
+
+/** Dónde se abre cada muro de una sala: las puertas que están sobre él. ``{z0, x0, z1, x1}``,
+ *  cada uno una lista de ``[desde, hasta, techo]`` en metros a lo largo del muro —el vano de la
+ *  puerta y lo alto que llega—, ordenada. Una puerta está sobre un muro si va a lo largo de él
+ *  (su giro) y su centro cae a menos de 35 cm de la línea del muro. Pura: probada en node. */
+function _dc3dWallGaps(features, kinds, W, D) {
+    const M = 0.001, out = {z0: [], x0: [], z1: [], x1: []};
+    for (const f of (features || [])) {
+        if (f.kind !== 'door') continue;
+        const w = (Number(f.width_mm) || 1000) * M, d = (Number(f.depth_mm) || 120) * M;
+        const ccx = (Number(f.pos_x) || 0) * M + w / 2, ccz = (Number(f.pos_y) || 0) * M + d / 2;
+        const z = _dcpPieceZ(f, kinds || {});
+        const techo = (z.base + z.h) * M;
+        const aLoLargoX = ((((Number(f.rotation) || 0) % 180) + 180) % 180) < 45;
+        const tramo = (c) => [Math.max(0, c - w / 2), c + w / 2, techo];
+        if (aLoLargoX) {
+            if (Math.abs(ccz) < 0.35) out.z0.push(tramo(ccx));
+            else if (Math.abs(ccz - D) < 0.35) out.z1.push(tramo(ccx));
+        } else {
+            if (Math.abs(ccx) < 0.35) out.x0.push(tramo(ccz));
+            else if (Math.abs(ccx - W) < 0.35) out.x1.push(tramo(ccz));
+        }
+    }
+    for (const k of Object.keys(out)) out[k].sort((a, b) => a[0] - b[0]);
+    return out;
 }
 
 /** Las cajas de UNA sala, en sus coordenadas: la esquina en (0, 0) y sin girar.
@@ -288,14 +336,32 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
     // entre la cámara y la sala se dibuja de cristal (`ss3dWallAlpha`). Antes solo había los
     // dos del fondo —los cuatro tapaban la vista desde fuera—, y cruzar uno de ellos dejaba la
     // pantalla en gris: se miraba la sala a través de su muro, por detrás.
-    const muro = (x, z, w, d, lado) =>
-        cajas.push({color: tenue(_DC3_COLOR.wallroom), m: ss3dModel(x, 0, z, w, o.wallH || H, d, 0),
-                    lee: null, muro: lado});
+    // Cada muro, por tramos: con el HUECO de cada puerta que tiene encima, y un dintel sobre él
+    // si el muro es más alto que la puerta. Eran cuatro cajas enteras de esquina a esquina con la
+    // puerta metida dentro: con muros de 3 m la puerta y el muro se peleaban por los mismos
+    // píxeles, y con muros bajos el muro cruzaba el vano por delante de la puerta.
+    const alto = o.wallH || H;
+    const huecos = _dc3dWallGaps(features, kinds, cx, cz);
+    const muro = (lado, largo, caja) => {
+        const pieza = (desde, hasta, y0, y1) => {
+            if (hasta - desde < 0.01 || y1 - y0 < 0.01) return;
+            const [x, z, w, d] = caja(desde, hasta - desde);
+            cajas.push({color: tenue(_DC3_COLOR.wallroom), m: ss3dModel(x, y0, z, w, y1 - y0, d, 0),
+                        lee: null, muro: lado});
+        };
+        let desde = 0;
+        for (const [a, b, techo] of huecos[lado]) {
+            pieza(desde, a, 0, alto);
+            pieza(a, b, techo, alto);                    // el dintel, si queda muro encima
+            desde = Math.max(desde, b);
+        }
+        pieza(desde, largo, 0, alto);
+    };
     if (o.walls) {
-        muro(0, -0.06, cx, 0.06, 'z0');
-        muro(-0.06, 0, 0.06, cz, 'x0');
-        muro(0, cz, cx, 0.06, 'z1');
-        muro(cx, 0, 0.06, cz, 'x1');
+        muro('z0', cx, (s, l) => [s, -0.06, l, 0.06]);
+        muro('x0', cz, (s, l) => [-0.06, s, 0.06, l]);
+        muro('z1', cx, (s, l) => [s, cz, l, 0.06]);
+        muro('x1', cz, (s, l) => [cx, s, 0.06, l]);
     }
     // Las baldosas, como líneas en el suelo: sin ellas no hay con qué medir a ojo, y en una
     // vista en perspectiva «a dos baldosas» es la única distancia que se lee.
@@ -344,9 +410,23 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
         // rack, alrededor de SU centro: sobre el suyo propio se iría a otro lado.
         // Abierto, la franja no: maciza delante de la puerta, tapaba justo lo que se abrió
         // para ver. El estado lo dice cada equipo dentro.
-        if (!abierto) push(_dc3dDim(_DC3_STATE[estado] || [0.95, 0.76, 0.05, 1], estado),
-             rx, base + h * 0.02, rz - 0.012, w, h * 0.96, 0.012, rot, null,
-             [rx + w / 2, rz + d / 2]);
+        //
+        // Una PUERTA y no una plancha del color del estado: la franja ocupaba todo el frente, y
+        // mirando la fila desde un extremo se veían de canto unas planchas de color y de cara los
+        // costados lisos — se leía al revés, el pasillo frío parecía el de las traseras. Ahora el
+        // frente es una puerta, algo más clara que el cuerpo, con su tirador, y el estado va en
+        // una banda arriba (ámbar sin vigilar, que es lo que marcaba el frente).
+        if (!abierto) {
+            const pivote = [rx + w / 2, rz + d / 2];
+            const cuerpo = _dc3dRackColor(r);
+            const hoja = [cuerpo[0] * 0.7 + 0.2, cuerpo[1] * 0.7 + 0.2, cuerpo[2] * 0.7 + 0.22, 1];
+            push(_dc3dDim(hoja, estado), rx + 0.01, base + h * 0.02, rz - 0.012, w - 0.02, h * 0.96,
+                 0.012, rot, null, pivote);
+            push(_dc3dDim(_DC3_STATE[estado] || [0.95, 0.76, 0.05, 1], estado),
+                 rx + 0.02, base + h * 0.88, rz - 0.017, w - 0.04, h * 0.07, 0.005, rot, null, pivote);
+            push(_dc3dDim([0.78, 0.8, 0.84, 1], estado), rx + w - 0.08, base + h * 0.42, rz - 0.035,
+                 0.025, Math.min(0.35, h * 0.2), 0.023, rot, null, pivote);
+        }
     }
 
     for (const f of (features || [])) {
@@ -359,15 +439,26 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
         const base = z.base * M;
         const fx = (Number(f.pos_x) || 0) * M, fz = (Number(f.pos_y) || 0) * M;
         const rot = Number(f.rotation) || 0;
+        // Lo alto de cada pieza, como el de cada rack: de ahí salen y ahí llegan los cables de
+        // una fuente que ES esta pieza (`dc_source.feature_uid`), un cuadro o un SAI de sala.
+        puntos['feature:' + f.uid] = [fx + w / 2, base + h + 0.05, fz + d / 2];
+        nombres['feature:' + f.uid] = f.label || '';
         const lee = {name: f.label || '', kind: t('dcim_kind_' + f.kind), w, d, h, state: f.state || '',
                      uid: f.uid, tipo: 'feature', room: room.uid || f.room_uid || '',
-                     roomName: room.name || '', model: f.model || '', lock: f.lock || '',
+                     roomName: room.name || '', model: f.model || '', lock: f.lock || '', fk: f.kind,
                      device: f.device_uid || '', reason: f.demo_reason || ''};
         const color = _dc3dDim(_DC3_COLOR[f.kind] || [0.3, 0.32, 0.36, 1], '');
         if (f.kind === 'cabinet') {
             _dc3dCabinet(push, color, fx, base, fz, w, h, d, rot, Math.max(1, Number(f.shelves) || 1), lee);
         } else {
-            push(color, fx, base, fz, w, h, d, rot, lee);
+            // Lo transparente que nace en el suelo —una zona, un pasillo confinado—, 3 cm por
+            // encima: su cara de abajo, en el mismo plano que el suelo, se peleaba con él por cada
+            // píxel, y salían rayas que cambiaban con el ángulo (las caras transparentes se pintan
+            // por los dos lados).
+            const y0 = color[3] < 1 && base < 0.03 ? 0.03 : base;
+            const hh = y0 > base ? Math.max(0.005, h - (y0 - base)) : h;
+            push(color, fx, y0, fz, w, hh, d, rot, lee);
+            if (f.kind === 'zone') _dc3dZoneMarks(cajas, ss3dModel(fx, y0, fz, w, hh, d, rot), w, d);
             // El delante, como en un rack: una franja en la cara del lado de `pos_y`, girando
             // con la pieza alrededor de SU centro.
             if (spec.front) push(_DC3_COLOR.front, fx, base + h * 0.02, fz - 0.012, w, h * 0.96, 0.012,
@@ -381,7 +472,68 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
                  rot, null, [fx + w / 2, fz + d / 2]);
         }
     }
+    // Lo que está en la sala y no en un rack —los puestos, la impresora, los AP del techo, las
+    // rosetas de pared—, en su sitio y a su altura (`box`, la de su clase si no dijo otra), del
+    // color con que el plano lo pinta. Y su punto, para que el cable horizontal tenga de dónde
+    // salir.
+    for (const it of (o.items || [])) {
+        const b = it.box || {};
+        const w = (Number(b.w) || 200) * M, d = (Number(b.d) || 200) * M;
+        const h = (Number(b.h) || 200) * M, y0 = (Number(b.base) || 0) * M;
+        const x = (Number(b.x) || 0) * M, z = (Number(b.y) || 0) * M;
+        const rgb = _dc3dHex(_dcriLook(it.role).fill);
+        push(tenue([rgb[0], rgb[1], rgb[2], 1]), x, y0, z, w, h, d, Number(b.rot) || 0, {
+            name: it.label || '', kind: t('dcim_role_' + (it.role || '')), tipo: 'item', ritem: true,
+            uid: it.uid, state: it.state || '', device: it.device_uid || '', reason: it.demo_reason || '',
+            room: room.uid || it.room_uid || '', roomName: room.name || '', sinRotulo: it.role === 'outlet'});
+        if (_DC3_STATE[it.state] && it.role !== 'outlet') {
+            // El piloto del estado, que se vea desde lejos: el cuerpo es del color de su clase.
+            const p = Math.max(0.08, Math.min(0.15, w * 0.5));
+            push(_DC3_STATE[it.state], x + w / 2 - p / 2, y0 + h + 0.005, z + d / 2 - p / 2, p, p * 0.4, p,
+                 Number(b.rot) || 0, null, [x + w / 2, z + d / 2]);
+        }
+        puntos['item:' + it.uid] = [x + w / 2, y0 + h, z + d / 2];
+    }
+    // Y el techo de la sala, de donde baja el cable horizontal de sus rosetas (`hnet`).
+    puntos['room:' + (room.uid || '')] = [cx / 2, H - 0.25, cz / 2];
+    nombres['room:' + (room.uid || '')] = room.name || '';
     return {cajas, W: cx, D: cz, H, planos, puntos, nombres};
+}
+
+/** `#rrggbb` → `[r, g, b]` de 0 a 1. */
+function _dc3dHex(hex) {
+    const h = String(hex || '#999999').replace('#', '');
+    const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16) || 0x999999;
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
+/** Lo que dice «reservado» sobre una zona, como en un plano: el borde a trazos y un rayado
+ *  diagonal suave. Calculado en el cuadrado de la propia zona (`m` lleva el cubo unidad a ella)
+ *  y dibujado con tubos entre dos puntos, así que sigue a la zona girada sin hacer cuentas de
+ *  giro. Un rectángulo gris liso no decía qué era. */
+function _dc3dZoneMarks(cajas, m, w, d) {
+    const borde = [0.82, 0.84, 0.88, 1], raya = [0.6, 0.63, 0.68, 0.55];
+    // 4 mm por encima de la cara de arriba, y no un tanto por ciento de su grosor: con 5 mm
+    // de zona volvería a pelearse con ella por el mismo píxel.
+    const P = (x, z) => { const p = _ss3dAt(m, x / w, 1, z / d); return [p[0], p[1] + 0.004, p[2]]; };
+    const tubo = (a, b, t, c) => cajas.push({color: c, m: ss3dTube(a, b, t), lee: null, borde: false});
+    // El borde, a trazos de 30 cm con huecos de 20.
+    const lado = (x0, z0, x1, z1) => {
+        const L = Math.hypot(x1 - x0, z1 - z0);
+        for (let s = 0; s < L; s += 0.5) {
+            const e = Math.min(L, s + 0.3);
+            tubo(P(x0 + (x1 - x0) * s / L, z0 + (z1 - z0) * s / L),
+                 P(x0 + (x1 - x0) * e / L, z0 + (z1 - z0) * e / L), 0.03, borde);
+        }
+    };
+    lado(0, 0, w, 0); lado(w, 0, w, d); lado(w, d, 0, d); lado(0, d, 0, 0);
+    // El rayado: líneas a 45° cada 60 cm, recortadas al rectángulo.
+    for (let c = -d + 0.6; c < w; c += 0.6) {
+        // x - z = c, con 0 <= x <= w y 0 <= z <= d
+        const za = Math.max(0, -c), zb = Math.min(d, w - c);
+        if (zb - za < 0.05) continue;
+        tubo(P(c + za, za), P(c + zb, zb), 0.012, raya);
+    }
 }
 
 /** Un armario abierto por delante —el lado de `pos_y`—: laterales, fondo, techo y suelo, y
