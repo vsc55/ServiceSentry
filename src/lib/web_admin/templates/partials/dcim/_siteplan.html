@@ -208,7 +208,51 @@ function _dcsContent() {
     const area = _dcsRooms().find(r => r.uid === _dcsAreaUid());
     if (area) h += _dcsInside(area);
     for (const r of salas) h += _dcsInside(r);
-    return h + _dcCalMarks('floor') + (_dcw ? _dcwSvg() : '');
+    return h + _dcsCoreSvg() + _dcCalMarks('floor') + (_dcw ? _dcwSvg() : '');
+}
+
+//: El lado del núcleo de una planta, en mm: el mismo que levanta el 3D (`_ds3Core`).
+const _DCS_CORE_MM = {stairs: 3000, lift: 2000};
+
+/** El núcleo de la planta —su escalera o su ascensor— en el plano: un cuadrado de su tamaño, con
+ *  los peldaños o la cruz del ascensor, y su nombre. Reportado: «añadir escalera» no aparecía en
+ *  ningún sitio, porque el núcleo solo lo levantaba el 3D y el plano no lo dibujaba. Se arrastra
+ *  para moverlo (`data-dcscore`). */
+function _dcsCoreSvg() {
+    const f = _dcsFloor();
+    if (!f || !f.core_kind || !(Number(f.core_x) || Number(f.core_y))) return '';
+    const S = _DCP_SCALE, lado = (_DCS_CORE_MM[f.core_kind] || 2500) * S;
+    const x = Number(f.core_x) * S - lado / 2, y = Number(f.core_y) * S - lado / 2;
+    let dentro = '';
+    if (f.core_kind === 'stairs') {
+        for (let i = 1; i < 10; i++)
+            dentro += `<line x1="${x + lado * i / 10}" y1="${y}" x2="${x + lado * i / 10}" y2="${y + lado}"
+                stroke="var(--bs-success)" stroke-width=".8" vector-effect="non-scaling-stroke"></line>`;
+    } else {
+        dentro = `<line x1="${x}" y1="${y}" x2="${x + lado}" y2="${y + lado}" stroke="var(--bs-success)"
+                stroke-width="1" vector-effect="non-scaling-stroke"></line>
+            <line x1="${x + lado}" y1="${y}" x2="${x}" y2="${y + lado}" stroke="var(--bs-success)"
+                stroke-width="1" vector-effect="non-scaling-stroke"></line>`;
+    }
+    const tam = Math.max(3, lado * 0.12);
+    return `<g class="${_dcimMay('dcim_edit') ? 'ss-grab' : ''}" data-dcscore="1">
+        <title>${esc(t('dcim_core_' + f.core_kind))}</title>
+        <rect x="${x}" y="${y}" width="${lado}" height="${lado}" fill="rgba(25,135,84,.18)"
+              stroke="var(--bs-success)" stroke-width="2" vector-effect="non-scaling-stroke"></rect>
+        ${dentro}
+        <text x="${x + lado / 2}" y="${y + lado / 2 + tam * 0.35}" font-size="${tam}" text-anchor="middle"
+              fill="var(--bs-body-color)" stroke="var(--bs-body-bg)" stroke-width="${tam * 0.2}"
+              paint-order="stroke" style="pointer-events:none">${esc(t('dcim_core_' + f.core_kind))}</text>
+    </g>`;
+}
+
+/** El botón de la paleta: la escalera o el ascensor, y el siguiente clic en el plano dice dónde.
+ *  Siempre, también si ya tenía sitio: es la forma de ponerla donde se quiere. */
+function _dcsCoreAdd(kind) {
+    _dcsFloorSetCore(kind);
+    _dcsCoreMark = true;
+    _dcsInspectorDraw();
+    showToast(t('dcim_core_mark_hint'), 'info');
 }
 
 /** Dónde está una sala en la planta y cuánto mide: lo que convierte sus coordenadas —en las
@@ -236,11 +280,21 @@ function _dcsInside(r) {
     const f = _dcsFrame(r), S = _DCP_SCALE;
     const kinds = (_dcsPlan || {}).kinds || {};
     let h = '';
-    for (const x of c.features) {
-        if (((kinds[x.kind] || {}).layer === 'air')) continue;
+    // Lo del suelo primero y lo del techo —detectores, alumbrado, bandejas— después: lo que se
+    // pone en la planta tiene que verse en la planta (reportado: la demo tenía impresoras, cámaras
+    // y detectores que en el plano de la planta no salían, y no había cómo ponerlos).
+    const capa = (x) => ((kinds[x.kind] || {}).layer === 'air' ? 1 : 0);
+    for (const x of c.features.slice().sort((p, q) => capa(p) - capa(q))) {
         h += _dcsThing('feature', x, r.uid, Number(x.width_mm) || 600, Number(x.depth_mm) || 600,
                        Object.assign({}, _dcpLook(x.kind), {frontBack: !!(kinds[x.kind] || {}).front}),
                        x.label || t('dcim_kind_' + x.kind));
+    }
+    // Los equipos de la sala: el PC de un puesto, la impresora, el AP, la cámara, la roseta.
+    for (const it of c.items || []) {
+        const b = it.box || {}, look = _dcriLook(it.role);
+        h += _dcsThing('ritem', it, r.uid, Number(b.w) || 200, Number(b.d) || 200,
+                       {fill: look.fill, line: 'var(--bs-body-color)'},
+                       it.label || t('dcim_role_' + (it.role || '')));
     }
     for (const x of c.racks) {
         const tone = (x.roll || {}).state ? deviceStateColor(x.roll.state) : 'var(--bs-secondary-color)';
@@ -383,15 +437,11 @@ function _dcsHtml() {
                 ${edita && f && f.plan ? _dcCalButton('floor') : ''}
                 ${edita && f && f.plan ? _dcwButton() : ''}
                 ${f ? _dcUndoButtons() : ''}
-                ${f ? `<button class="btn btn-sm ${_dc3d ? 'btn-warning' : 'btn-secondary'}"
-                        onclick="_dcsToggle3d()" title="${escAttr(t('dcim_3d'))}"
-                        aria-label="${escAttr(t('dcim_3d'))}"><i class="bi bi-box"></i></button>` : ''}
                 ${ssCanvasTools(_DCS_SVG, 'site_plan')}
             </div>
         </div>
         ${_dcCalBar('floor')}
         <div id="dcwBar">${_dcwBar()}</div>
-        ${f && _dc3d ? _ds3Bar() + _dc3dHtml(t('dcim_3d_site_hint'), 'site') : ''}
         ${f ? `<div class="ss-editor">
             <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
                 ${_dcCompass(_dcNorthOf(_dcsFloor()))}
@@ -428,12 +478,25 @@ function _dcsPaletteHtml() {
     const boton = (onclick, icono, texto) =>
         `<button type="button" class="btn btn-sm btn-secondary" onclick="${onclick}"
             title="${escAttr(texto)}" aria-label="${escAttr(texto)}"><i class="bi ${icono}"></i></button>`;
+    // Lo mismo que en el plano de una sala: cada tipo de pieza —también las del techo— y los
+    // equipos de sala. Y el núcleo de la planta, la escalera o el ascensor, que no es una pieza:
+    // es un punto de la planta, y su botón lo marca donde se pulse después.
     return `<div class="ss-float-tools">
         ${boton("_dcsAdd('rack')", 'bi-hdd-rack', t('dcim_rack'))}
-        ${Object.keys(kinds).filter(k => (kinds[k] || {}).layer !== 'air').map(k =>
+        ${Object.keys(kinds).map(k =>
             boton(`_dcsAdd(${jsStr(k)})`, _DCP_ICON[k] || 'bi-square',
                   `${t('dcim_kind_' + k)} · ${kinds[k].w} × ${kinds[k].d} mm`)).join('')}
+        ${_dcriPaletteHtml((onclick, icono, texto) => boton(onclick.replace('_dcriAdd(', '_dcsAddItem('), icono, texto))}
+        <div class="ss-float-sep"></div>
+        ${boton("_dcsCoreAdd('stairs')", 'bi-ladder', `${t('dcim_core_stairs')} · ${t('dcim_core_mark')}`)}
+        ${boton("_dcsCoreAdd('lift')", 'bi-arrow-down-up', `${t('dcim_core_lift')} · ${t('dcim_core_mark')}`)}
     </div>`;
+}
+
+/** Poner un equipo de sala —una impresora, un PC, un AP…— en la planta: en la sala que haya bajo
+ *  el centro de la vista, o en la zona general. */
+function _dcsAddItem(role) {
+    return _dcsAdd('ritem:' + role);
 }
 
 /** Poner algo en la planta. En la sala que haya bajo el centro de la vista —en sus propias
@@ -456,6 +519,15 @@ async function _dcsAdd(kind) {
         sala = {uid: f.area_uid, pos_x: 0, pos_y: 0, rotation: 0, width_mm: 0, depth_mm: 0};
     }
     const p = _dcsToLocal(sala, cx, cy);
+    if (kind.startsWith('ritem:')) {
+        const role = kind.slice(6);
+        const r = await _dcimSend('POST', `/api/v1/dcim/rooms/${encodeURIComponent(sala.uid)}/items`,
+                                  {role, label: '', pos_x: _dcsSnap(p.x), pos_y: _dcsSnap(p.y)});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcsSel = '';
+        _dcsItem = {kind: 'ritem', uid: String((r.data || {}).uid || ''), room: sala.uid};
+        return _dcsReload();
+    }
     const spec = kind === 'rack' ? {w: 600, d: 1000} : ((_dcsPlan.kinds || {})[kind] || {w: 600, d: 600});
     const at = {pos_x: _dcsSnap(p.x - spec.w / 2), pos_y: _dcsSnap(p.y - spec.d / 2)};
     const r = kind === 'rack'
@@ -494,8 +566,23 @@ function _dcsInspectorBody() {
 function _dcsItemRow() {
     if (!_dcsItem || !_dcsPlan) return null;
     const c = (_dcsPlan.content || {})[_dcsItem.room] || {};
-    const lista = _dcsItem.kind === 'rack' ? (c.racks || []) : (c.features || []);
+    const lista = _dcsItem.kind === 'rack' ? (c.racks || [])
+        : _dcsItem.kind === 'ritem' ? (c.items || []) : (c.features || []);
     return lista.find(x => x.uid === _dcsItem.uid) || null;
+}
+
+/** Dónde se escribe lo elegido: un rack, una pieza o un equipo de sala (`delete` para quitarlo,
+ *  que un equipo de sala se quita como cualquier equipo). */
+function _dcsItemUrl(kind, uid, borrar) {
+    const ruta = kind === 'rack' ? 'racks' : kind === 'ritem' ? (borrar ? 'items' : 'room-items') : 'features';
+    return `/api/v1/dcim/${ruta}/${encodeURIComponent(uid)}`;
+}
+
+/** El nombre de lo elegido, para el inspector y la confirmación de quitarlo. */
+function _dcsItemName(kind, x) {
+    if (kind === 'rack') return x.name || '';
+    if (kind === 'ritem') return x.label || t('dcim_role_' + (x.role || ''));
+    return x.label || t('dcim_kind_' + x.kind);
 }
 
 /** Un rack o una pieza en el plano de la sede: de qué sala es y las tres cosas que se hacen
@@ -506,9 +593,10 @@ function _dcsItemPanel(x) {
     const rack = _dcsItem.kind === 'rack';
     const sala = _dcsItem.room === _dcsAreaUid() ? t('dcim_floor_area')
         : ((_dcsRooms().find(r => r.uid === _dcsItem.room) || {}).name || '');
-    const nombre = rack ? (x.name || '') : (x.label || t('dcim_kind_' + x.kind));
+    const nombre = _dcsItemName(_dcsItem.kind, x);
+    const icono = rack ? 'bi-hdd-rack' : _dcsItem.kind === 'ritem' ? _dcriLook(x.role).icon : (_DCP_ICON[x.kind] || 'bi-square');
     return `<div class="d-flex align-items-center gap-2 mb-2">
-            <i class="bi ${rack ? 'bi-hdd-rack' : (_DCP_ICON[x.kind] || 'bi-square')} text-muted"></i>
+            <i class="bi ${icono} text-muted"></i>
             <span class="fw-semibold text-truncate">${esc(nombre)}</span>
             ${rack ? _dcimRollBadge(x.roll) : ''}
             <button type="button" class="btn btn-sm btn-secondary ms-auto" onclick="_dcsPick('')"
@@ -540,7 +628,7 @@ async function _dcsItemTurn() {
     const x = _dcsItemRow();
     if (!x) return;
     const rot = ((Number(x.rotation) || 0) + 90) % 360;
-    const url = `/api/v1/dcim/${_dcsItem.kind === 'rack' ? 'racks' : 'features'}/${encodeURIComponent(x.uid)}`;
+    const url = _dcsItemUrl(_dcsItem.kind, x.uid);
     const r = await _dcimSend('PUT', url, {rotation: rot});
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
     x.rotation = rot;
@@ -552,10 +640,10 @@ async function _dcsItemTurn() {
 function _dcsItemDrop() {
     const x = _dcsItemRow();
     if (!x) return;
-    const rack = _dcsItem.kind === 'rack';
-    const nombre = rack ? (x.name || '') : (x.label || t('dcim_kind_' + x.kind));
-    showConfirmModal(tf('dcim_delete_confirm', nombre) + (rack ? '' : _dcShelfDropWarning(x.uid)), async () => {
-        const url = `/api/v1/dcim/${rack ? 'racks' : 'features'}/${encodeURIComponent(x.uid)}`;
+    const rack = _dcsItem.kind === 'rack', pieza = _dcsItem.kind === 'feature';
+    const nombre = _dcsItemName(_dcsItem.kind, x);
+    showConfirmModal(tf('dcim_delete_confirm', nombre) + (pieza ? _dcShelfDropWarning(x.uid) : ''), async () => {
+        const url = _dcsItemUrl(_dcsItem.kind, x.uid, true);
         const r = await _dcimSend('DELETE', url);
         if (!r.ok) return showToast(r.error || t('delete_error'), 'danger');
         _dcsItem = null;
@@ -678,6 +766,17 @@ async function _dcsItemDuplicate() {
     const x = _dcsItemRow();
     if (!x) return;
     const rack = _dcsItem.kind === 'rack';
+    if (_dcsItem.kind === 'ritem') {
+        // Un equipo de sala igual, al lado: su clase, su montaje y su altura; no su nombre ni su
+        // dispositivo, que son de ESE equipo.
+        const b = x.box || {};
+        const r = await _dcimSend('POST', `/api/v1/dcim/rooms/${encodeURIComponent(_dcsItem.room)}/items`, {
+            role: x.role, pos_x: (Number(x.pos_x) || 0) + (Number(b.w) || 300) + 200, pos_y: Number(x.pos_y) || 0,
+            rotation: Number(x.rotation) || 0, mount: x.mount || '', base_mm: x.base_mm});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcsItem = {kind: 'ritem', uid: String((r.data || {}).uid || ''), room: _dcsItem.room};
+        return _dcsReload();
+    }
     const ancho = Number(x.width_mm) || (rack ? 600 : 600);
     const cuerpo = {room_uid: _dcsItem.room, pos_x: (Number(x.pos_x) || 0) + ancho + 200,
                     pos_y: Number(x.pos_y) || 0};
@@ -989,8 +1088,19 @@ function _dcsDown(ev) {
             _dcpQueue(`/api/v1/dcim/floors/${encodeURIComponent(f.uid)}`, {core_x: f.core_x, core_y: f.core_y});
             if (_dc3d) _dc3dSoon();
         }
+        _dcsRedraw();
         _dcsInspectorDraw();
         return;
+    }
+    // El núcleo, cogido para moverlo.
+    if (ev.target.closest && ev.target.closest('[data-dcscore]') && _dcimMay('dcim_edit')) {
+        const f = _dcsFloor(), p = ssCanvasPoint(_DCS_SVG, ev);
+        if (f && p) {
+            _dcsDrag = {what: 'core', from: p, moved: false,
+                        at: {x: Number(f.core_x) || 0, y: Number(f.core_y) || 0}};
+            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+            return;
+        }
     }
     // Calibrando el plano, el puntero es de la calibración: no se coge ni se suelta nada.
     if (_dcCal && _dcCal.kind === 'floor') return _dcCalDown(ev);
@@ -1083,6 +1193,15 @@ function _dcsMove(ev) {
     if (_dcCal && _dcCal.press) return _dcCalMove(ev);
     if (_dcw) return _dcwMove(ev);
     const p = ssCanvasPoint(_DCS_SVG, ev);
+    if (_dcsDrag && _dcsDrag.what === 'core') {
+        const f = _dcsFloor();
+        if (!p || !f) return;
+        f.core_x = Math.round(_dcsSnap(_dcsDrag.at.x + (p.x - _dcsDrag.from.x) / _DCP_SCALE));
+        f.core_y = Math.round(_dcsSnap(_dcsDrag.at.y + (p.y - _dcsDrag.from.y) / _DCP_SCALE));
+        _dcsDrag.moved = true;
+        _dcsRedraw();
+        return;
+    }
     if (_dcsDrag && _dcsDrag.what === 'item') {
         const x = _dcsItemRow();
         if (!p || !x) return;
@@ -1157,6 +1276,11 @@ async function _dcsUp(ev) {
         return;
     }
     if (!drag.moved) return;
+    if (drag.what === 'core') {
+        const f = _dcsFloor();
+        if (f) _dcpQueue(`/api/v1/dcim/floors/${encodeURIComponent(f.uid)}`, {core_x: f.core_x, core_y: f.core_y});
+        return _dcsInspectorDraw();
+    }
     if (drag.what === 'itemresize') {
         const x = _dcsItemRow();
         if (!x) return;
@@ -1172,7 +1296,7 @@ async function _dcsUp(ev) {
     if (drag.what === 'item') {
         const x = _dcsItemRow();
         if (!x) return;
-        const url = `/api/v1/dcim/${_dcsItem.kind === 'rack' ? 'racks' : 'features'}/${encodeURIComponent(x.uid)}`;
+        const url = _dcsItemUrl(_dcsItem.kind, x.uid);
         const resp = await _dcimSend('PUT', url, {pos_x: x.pos_x, pos_y: x.pos_y});
         if (!resp.ok) {
             showToast(resp.error || t('save_failed'), 'danger');

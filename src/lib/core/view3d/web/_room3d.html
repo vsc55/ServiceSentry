@@ -17,13 +17,6 @@ let _dc3d = null;
 //: servidor; escrito aquí porque el dibujo tiene que poder empezar antes de preguntar nada.
 const _DC3_ROOM_H = 3000;
 
-/** Abrir o cerrar el visor. */
-function _dcimToggle3d() {
-    if (_dc3d) { _dc3dStop(); renderDcim(); return; }
-    _dc3d = {on: true};
-    renderDcim();
-}
-
 //: La caja del visor de esta sección: una sola a la vez, la de la sala o la de la sede.
 const _DC3D_BOX = 'dc3d-box';
 

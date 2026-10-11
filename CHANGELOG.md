@@ -8,6 +8,116 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.141] - 2026-10-10
+
+### Changed
+
+- **All the 3D lives in its own package, `lib/core/view3d/`.** It was spread across
+  `partials/infra` (the engine), `partials/dcim` (the room, floor and building, layers,
+  highlight and rack scenes), `partials/explore3d` and `templates/explore3d.html` (the `/3d`
+  page) and `lib/core/dcim/routes/explore.py` (its route).
+  - Now `lib/core/view3d/web/` holds every partial and the page; the panel and `/3d` include
+    them by path (`core/view3d/web/…`).
+  - `lib/core/view3d/routes.py` serves `/3d`.
+  - The loader reaches a core package's `web/` folder even when it injects nothing of its own.
+  - No behaviour changes. The guards follow the files: the inventory section's conventions
+    still cover its 3D scenes, and `/3d`'s include guard resolves both roots.
+
+### Removed
+
+- **The 3D viewer of the room and floor plan editors.** Asked for: the plan editors keep their
+  plan, and the 3D of a room, a floor or the building is looked at in `/3d`. The cube button and
+  the viewer embedded under each plan are gone, and an old link that asked for one (`v3d=room`,
+  `floor`, `building`) opens the plan without it. The rack's 3D view stays.
+
+### Security
+
+Three holes in the DCIM files, found by a security audit (2026-10), all reachable by the
+built-in `editor` role:
+
+- **Importing the catalogue from a folder or a zip on the server is for administrators only.**
+  - With `dcim_catalog_manage` (which `editor` has) any path was accepted. That gave an oracle
+    of what exists on the server, a walk of the whole disk (`path=/`), and any model-shaped
+    YAML read into the catalogue.
+  - The answer is now 403, the same whether the path exists or not; uploading a zip from the
+    browser is unchanged.
+  - The pictures a model brings are read only from inside the folder being imported: a
+    `manufacturer: ../../x` in the YAML read one from outside it (`media.confined`).
+- **A template's pictures are set by the server, not by a request's body.** `front_image` and
+  `rear_image` were accepted in `POST/PUT /builds`. Given the name of somebody else's file —a
+  site's photo, a floor's plan, the only copy of it— «remove the picture» deleted that file.
+- **A connector keeps the picture its own route gave it.** The same through `PUT /connectors`:
+  each connector's `image` is now kept from the stored document by its `id`
+  (`connectors.keep_images`), and only `/connectors/<id>/image` sets or removes it.
+
+### Fixed
+
+- **The floor plan can place everything a room plan can, and the stairs.** Reported: printers,
+  stairs and other things the demo has could not be added in the floor plan.
+  - Its palette now has every kind of piece, the ceiling's too (detectors, emergency lights,
+    trays), and the room items (printer, PC, phone, access point, camera, display, outlet).
+    They are dropped in the room under the centre of the view, or in the floor's general area.
+  - Two buttons set the floor's core —the stairs or the lift— and mark it where the plan is
+    clicked next, also on a floor that already had one. Reported: «add stairs» showed nowhere —
+    the floor plan did not draw the core, only the 3D did. It is drawn now, the size the 3D
+    gives it (3 m stairs with their steps, a 2 m lift with its cross), and dragged to move it.
+  - The room items and the ceiling's pieces are drawn on the floor plan, and are chosen,
+    dragged, turned, duplicated and removed like a rack or a piece.
+- **Several walls can be chosen at once in the walls review.** Asked for. Shift or Ctrl + click
+  adds a wall to the choice or takes it out; Shift + dragging in empty space draws a box that
+  adds every wall it touches; Ctrl+A takes them all, Escape none. «Eliminar» (and Delete) deletes
+  all the chosen ones in a single undo step. The ends to drag show only when one is chosen, and
+  the review's hint says how.
+- **Everything done to a floor's walls can be undone.** Reported: a wall deleted in the walls
+  review could not be undone. The review lives in memory until «Guardar», and the plans' undo
+  only knew what goes to the server.
+  - The review has its own undo and redo (Ctrl+Z / Ctrl+Y, and two buttons in its bar) for
+    deleting, drawing, moving an end, accepting one or all, dropping the proposals and reading
+    the plan again.
+  - Saving, which replaces the floor's walls whole, is a step of the plan's undo
+    (`_dcUndoPush`): undoing it puts back the walls that were there.
+  - Inside the review, Ctrl+Z belongs to the review, not to the plan.
+- **The walls read from a plan: the partitions that were missing, and none where there is no
+  wall.** Reported with a real plan: the office partitions were missing and door leaves came out
+  as little walls.
+  - Each partition ends in a drawn solid pillar, wider than it. Joined to the stroke, the pillar
+    made it twelve pixels thick and it was dropped as too thick. Strokes are now joined only
+    when they overlap over half the longer one.
+  - At 9 cm a pixel, a two-pixel line passed for an 18 cm partition. A single-stroke partition
+    is now at least three pixels (`_DCW_SOLO_PX`); door leaves, furniture and leader lines are
+    drawing, not walls.
+- **The plan can be moved around while reviewing its walls.** With the walls review open, every
+  press went to the walls and the plan could not be dragged to reach another area. Choosing,
+  a press away from every wall and its handles now drags the plan (a press on a wall still
+  selects it); the middle button drags it with any tool, also while drawing, without placing a
+  point. The review's hint says so.
+
+### Tests
+
+- `tests/integration/test_security_regressions.py` (`TestDcimFilesAudit202610`): an editor
+  cannot import from a server folder and learns nothing of what exists, an admin still can, a
+  template or a connector cannot adopt and delete a site's photo, and a connector keeps the
+  picture its route gave it — each fails with its fix undone.
+- `tests/unit/test_dcim_catalog.py`: reading a library folder does not follow a maker out of it.
+- `tests/integration/test_wa_dcim_sitepieces.py`: the stairs are marked where the plan is
+  clicked, drawn with their steps, and moved and saved when dragged.
+- `tests/integration/test_wa_dcim_sitepieces.py`: the floor's palette brings the ceiling's
+  pieces, the room items and the core (it fails if it hides the ceiling again); room items are
+  drawn on the floor plan, saved by their route, and placed in the room looked at.
+- `tests/integration/test_wa_dcim_walls.py`: several walls chosen at once — Ctrl + click, a
+  Shift box, Ctrl+A —, deleted in one undo step (it fails without Ctrl + click).
+- `tests/integration/test_wa_dcim_walls.py`: everything in the walls review can be undone and
+  redone (it fails if deleting records no step), and saving them can be undone from the plan.
+- `tests/integration/test_wa_dcim_walls.py`: a partition ending in a pillar is still a wall (it
+  fails with the old joining rule), and a two-pixel line is not a partition.
+- `tests/integration/test_wa_dcim_walls.py`: choosing, a press away from every wall drags the
+  plan and one on a wall selects it; the middle button drags while drawing (it fails without
+  the drag).
+- `tests/meta/test_wa_viewer3d.py`, `tests/meta/test_wa_dcim_section.py` and
+  `tests/meta/test_explore3d_includes.py` follow the files to `lib/core/view3d/web/`: the
+  engine's guards read it there, the inventory section's conventions still cover its 3D
+  scenes, and `/3d`'s include guard resolves both `partials/…` and `core/…`.
+
 ## [0.0.1+build.140] - 2026-10-10
 
 ### Added

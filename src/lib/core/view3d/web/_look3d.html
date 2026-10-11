@@ -362,17 +362,12 @@ function _dc3dUrlTake(q) {
     if (_dc3dUrlMode === 'rack') _dcRackView = '3d';
 }
 
-/** Abrir lo que pide la dirección y, si era con su 3D, con él. */
+/** Abrir lo que pide la dirección. Un enlace viejo que pedía el 3D de una sala o de una planta
+ *  abre su plano sin él: los editores de planos ya no llevan visor 3D —se mira en `/3d`—, y
+ *  solo el de un rack sigue en el panel (`_dcRackView`). */
 async function _dc3dUrlOpen(kind, abrir) {
-    const modo = _dc3dUrlMode;
     _dc3dUrlMode = '';
-    if (kind === 'room' && modo === 'room') _dc3d = {on: true};
-    const r = await abrir();
-    if (kind === 'site' && (modo === 'floor' || modo === 'building')) {
-        _ds3Mode = modo;
-        _dcsToggle3d();
-    }
-    return r;
+    return abrir();
 }
 
 /** La cámara pendiente, una vez. */

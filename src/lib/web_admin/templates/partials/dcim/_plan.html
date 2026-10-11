@@ -253,9 +253,6 @@ function _dcimPlanHtml() {
                 ${_dcUndoButtons()}
                 <input type="file" id="dcpImportFile" class="d-none"
                        accept=".json,application/json" onchange="_dcpImport(this)">
-                <button class="btn btn-sm ${_dc3d ? 'btn-warning' : 'btn-secondary'}"
-                        onclick="_dcimToggle3d()" title="${escAttr(t('dcim_3d'))}">
-                    <i class="bi bi-box"></i></button>
                 <button class="btn btn-sm btn-secondary" onclick="_dcpExport()"
                         title="${escAttr(t('dcim_export'))}">
                     <i class="bi bi-filetype-json"></i></button>
@@ -267,7 +264,6 @@ function _dcimPlanHtml() {
             </div>
         </div>
         ${_dcCalBar('room')}
-        ${_dc3d ? _dc3dHtml() : ''}
         ${_dcpRowWarnings()}
         <div class="ss-editor">
             <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">

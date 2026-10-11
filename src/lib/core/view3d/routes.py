@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""The inventory's 3D as a page of its own: ``/3d``
+"""The 3D viewer's page: ``/3d``
 
     GET    /3d    the sites on a map with their state; a site in 3D, the whole building or
                   floor by floor, to walk its floors and go from one site to another
@@ -10,9 +10,9 @@ something to leave open on a wall or hand to whoever walks the building. Unlike 
 needs a session and ``dcim_view``: it draws every rack, door and lock of the installation.
 
 It reuses the panel's own pieces — the sites map, the site's 3D, the room's and the rack's —
-and serves them in a template of its own (``explore3d.html``) that loads only the core, the 3D
-engine and the inventory. Its data comes from the same ``/api/v1/dcim/*`` routes the panel
-uses, under the same permissions.
+and serves them in a template of its own (``core/view3d/web/explore3d.html``) that loads only
+the core, the 3D engine and the inventory. Its data comes from the same ``/api/v1/dcim/*``
+routes the panel uses, under the same permissions.
 """
 
 from __future__ import annotations
@@ -20,9 +20,8 @@ from __future__ import annotations
 from flask import make_response, redirect, render_template, session, url_for
 
 
-def register(app, wa, C):           # pylint: disable=unused-argument
-    """The page's one route. `C` is taken like every other area's, and not needed: the page
-    asks the API for everything it draws."""
+def register(app, wa):
+    """The page's one route: the page asks the API for everything it draws."""
 
     @app.route('/3d')
     @wa._login_required
@@ -37,7 +36,7 @@ def register(app, wa, C):           # pylint: disable=unused-argument
         if 'dcim_view' not in set(wa._get_session_permissions() or ()):
             return redirect(url_for('dashboard'))
         html = render_template(
-            'explore3d.html',
+            'core/view3d/web/explore3d.html',
             username=session.get('username', ''),
             page_title=wa._t('x3_title'),
         )

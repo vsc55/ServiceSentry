@@ -22,6 +22,11 @@ from tests.helpers import _fn, _strip_comments
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 TPL = os.path.join(SRC, 'lib', 'web_admin', 'templates')
 DCIM = os.path.join(TPL, 'partials', 'dcim')
+#: The 3D viewer's own package (`lib/core/view3d`): its engine, and the inventory's scenes —
+#: a room, a floor and the building, the layers, the highlight, a rack—, which are as much a
+#: part of this section as the plans they draw and keep its conventions.
+VIEW3D = os.path.join(SRC, 'lib', 'core', 'view3d', 'web')
+_DCIM_3D = ('_look3d.html', '_rack3d.html', '_room3d.html', '_select3d.html', '_site3d.html')
 BUNDLE = os.path.join(TPL, 'partials', '_js_sections.html')
 SHELL = os.path.join(TPL, 'dashboard.html')
 CONSTANTS = os.path.join(SRC, 'lib', 'web_admin', 'constants.py')
@@ -55,14 +60,15 @@ def _section():
     Se partió en tres —el armazón, el árbol y un rack— porque una `_render.html` que crece es
     una sección escondiendo sub-secciones dentro. Una guarda que apunte a un fichero deja de
     mirar el día que ese fichero se divide, y lo hace **en silencio**: sigue pasando."""
-    return '\n'.join(_read(os.path.join(DCIM, f))
-                     for f in sorted(os.listdir(DCIM)) if f.endswith('.html'))
+    return '\n'.join([_read(os.path.join(DCIM, f))
+                      for f in sorted(os.listdir(DCIM)) if f.endswith('.html')]
+                     + [_read(os.path.join(VIEW3D, f)) for f in _DCIM_3D])
 
 
 def _viewer3d():
     """El motor del visor 3D, que no es del inventario: lo usan la sala, la planta y el edificio,
     y lo usarán el rack y los circuitos."""
-    return _read(os.path.join(TPL, 'partials', 'infra', '_viewer3d.html'))
+    return _read(os.path.join(VIEW3D, '_viewer3d.html'))
 
 
 def _store_src() -> str:

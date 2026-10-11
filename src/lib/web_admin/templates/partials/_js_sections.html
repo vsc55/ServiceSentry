@@ -179,8 +179,8 @@
 {% include "partials/infra/_canvas.html" %}
 {# The 3D viewer — WebGL, camera, name tags. The inventory's rooms, floors and building are
    drawn on it. #}
-{% include "partials/infra/_viewer3d.html" %}
-{% include "partials/infra/_viewer3d_tools.html" %}
+{% include "core/view3d/web/_viewer3d.html" %}
+{% include "core/view3d/web/_viewer3d_tools.html" %}
 {% include "partials/infra/_map.html" %}
 {# After _map.html: the link map reads its loader, its cache and its drawing helpers. #}
 {% include "partials/infra/_links.html" %}
@@ -194,12 +194,12 @@
 {% include "partials/dcim/_conns.html" %}
 {% include "partials/dcim/_pieces.html" %}
 {% include "partials/dcim/_roomitems.html" %}
-{% include "partials/dcim/_room3d.html" %}
+{% include "core/view3d/web/_room3d.html" %}
 {# What the inventory's three 3D viewers share — search, colours, circuits, live state, the
    camera in the address — and the rack's own viewer. #}
-{% include "partials/dcim/_look3d.html" %}
-{% include "partials/dcim/_select3d.html" %}
-{% include "partials/dcim/_rack3d.html" %}
+{% include "core/view3d/web/_look3d.html" %}
+{% include "core/view3d/web/_select3d.html" %}
+{% include "core/view3d/web/_rack3d.html" %}
 {% include "partials/dcim/_power.html" %}
 {% include "partials/dcim/_cables.html" %}
 {% include "partials/dcim/_devices.html" %}
@@ -235,7 +235,7 @@
 {# A floor's walls read from its plan: detection, review, and the walls in 3D. #}
 {% include "partials/dcim/_walls.html" %}
 {% include "partials/dcim/_portmap.html" %}
-{% include "partials/dcim/_site3d.html" %}
+{% include "core/view3d/web/_site3d.html" %}
 {% include "partials/dcim/_plancal.html" %}
 {% include "partials/dcim/_undo.html" %}
 {% include "partials/dcim/_shelves.html" %}

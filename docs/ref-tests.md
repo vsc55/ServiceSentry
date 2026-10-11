@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~11.100 tests** (11.296 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-10-10). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~11.120 tests** (11.312 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-10-10). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -3150,7 +3150,7 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 ## 47. Seguridad — Regresión
 
-**Archivo:** `tests/integration/test_security_regressions.py` — 35 tests
+**Archivo:** `tests/integration/test_security_regressions.py` — 40 tests
 **Archivo:** `tests/unit/test_security_regressions.py` — 4 tests
 
 > Eran **dos** ficheros, `test_security_regression.py` y `test_security_regressions.py`
@@ -3163,6 +3163,11 @@ servidor y un hipervisor es las dos cosas. Se guarda, se filtra y se dibuja; nun
 
 | Test | Qué comprueba |
 |---|---|
+| `TestDcimFilesAudit202610::test_an_editor_cannot_import_from_a_server_folder_and_learns_nothing` | Auditoría 2026-10: importar el catálogo desde una carpeta del servidor era del rol `editor` —oráculo de qué rutas existen, recorrido del disco entero, cualquier YAML con forma de modelo dentro del catálogo—. Ahora es solo de administradores, y la respuesta es la misma exista la ruta o no. Sin la comprobación, cae |
+| `TestDcimFilesAudit202610::test_an_admin_still_can` | Un administrador sigue pudiendo importar de una carpeta del servidor |
+| `TestDcimFilesAudit202610::test_a_template_cannot_adopt_and_delete_a_sites_photo` | Una plantilla no puede tomar por nombre la foto de una sede —ni al crearse ni al editarse— y borrarla al quitar «su» imagen: sus imágenes las pone el servidor. Sin el filtro, cae |
+| `TestDcimFilesAudit202610::test_a_connector_cannot_adopt_and_delete_a_sites_photo` | Lo mismo con la imagen de un conector en el documento guardado. Sin conservar la imagen de cada conector, cae |
+| `TestDcimFilesAudit202610::test_a_connector_keeps_the_picture_it_was_given_by_its_route` | Guardar el documento de conectores sin la imagen no le quita la que le puso su ruta |
 | `test_safe_filename_rejects_path_separator` | Safe filename rejects path separator |
 | `test_safe_filename_rejects_dot_prefix` | Safe filename rejects dot prefix |
 | `test_safe_filename_rejects_shell_metacharacters` | Safe filename rejects shell metacharacters |
@@ -10299,7 +10304,7 @@ Las plataformas: con qué sale un equipo, escrito una vez. Que **el slug es la i
 
 Las plantillas: lo que de verdad se compra, entre el catálogo y el inventario. Que lo que sale de una son piezas **de un equipo** —sin `uid`, sin plantilla y sin número de serie, que es lo único que tiene esa unidad y ninguna otra—; que la diferencia con lo que la máquina lleva es **una sola tabla** y no dos, porque cambiar un disco de 4 TB por uno de 8 es un renglón que falta y otro que sobra y separarlos obliga a leer las dos para entender que fue un cambio; que la **bahía no cuenta** como diferencia —nadie llena veinte máquinas en el mismo orden, y comparar por bahía convertiría los mismos ocho discos en dieciséis diferencias— ni las mayúsculas ni los espacios de sobra; que dos filas de lo mismo se suman antes de comparar. Y del almacén: que sin nombre no hay plantilla y que dos con el mismo no se distinguen donde se eligen —ni renombrando una encima de otra—; que clonar se lleva las piezas y que las del clon **son suyas**, porque compartirlas haría que cambiar los discos de la copia cambiara los del original, que es justo lo que se clona para no hacer; que un clon sin nombre se inventa uno libre, porque un nombre que generó el panel no es un nombre que alguien tecleó; y que la altura en cero significa **la del modelo**, que un 1 por defecto sería una mentira sobre el noventa por ciento. Más el cuarto árbol del catálogo: que **el árbol decide el vocabulario** —un DIMM no es «switch, servidor u otro», y ofrecerle esa clase acabaría ofreciendo el DIMM en un alzado—, que lo que la fila diga manda sobre el nombre, y que ese árbol no se descarga de ninguna parte, porque los `module-types` de NetBox son tarjetas de línea y no memoria. Y **qué máquina sale de una plantilla**: que la memoria y el almacenamiento se suman contando las piezas y **cada familia con su factor** —la memoria se vende en potencias de dos y los discos en potencias de diez, y un factor para las dos haría que la mitad de los totales no coincidieran con ninguna etiqueta—, que los núcleos salen del modelo del catálogo y no de la pieza, y que **lo que no se puede contar se dice**: un total al que le faltan tres discos y no lo dice es peor que no dar el total, porque se cree. Que **los puertos del chasis también cuentan** —un mini-PC trae una tarjeta en la placa y el catálogo la tenía contada desde el primer día— y que **por dónde come** es del chasis: `is_powered` dice si come y no dice cómo. Y que **un kit de dos cuenta como dos**: se compra como uno y se monta como dos, y lo que se compara es lo que lleva la máquina — dos kits de dos y cuatro módulos sueltos son la misma memoria puesta. Y que **la marca forma parte de lo que se compara**: dos discos de 4 TB de dos fabricantes no son el mismo disco, y sustituir uno por otro es justo el cambio que hay que poder ver — la marca se estampa con lo demás y el número de serie no, porque uno es de esa unidad y la otra es del modelo.
 
-**Archivo:** `tests/unit/test_dcim_catalog.py` — 130 tests
+**Archivo:** `tests/unit/test_dcim_catalog.py` — 131 tests
 
 Catálogo de modelos (devicetype-library, CC0) y sus básicos —que los de marca (Salto, Gantner) traen un dibujo SVG propio que viaja con el repositorio y que la foto del fabricante, si se baja, sustituye—: qué subconjunto se guarda de cada YAML y por qué no el fichero entero; que los puertos se **cuentan** por tipo y no se listan; media U sin redondear; casar un modelo con lo que dijo el dispositivo como **propuesta**; importar de directorio y de zip **sin extraerlo nunca**; reimportar por origen sin arrasar lo tecleado a mano; y el trabajo de fondo — hilo, estado, uno solo a la vez y sin denominador inventado. Y **las imágenes vienen con la biblioteca**: `front_image: true` no es una imagen, es la afirmación de que existe una —y existe, en el mismo repositorio— así que se lee de al lado; que sin ella el modelo entra igual, porque fallar la importación entera por una foto sería cambiar mil modelos por una imagen; que no se busca la que el YAML dice que no hay; que lo guardado es el NOMBRE y no la afirmación, que no se puede dibujar; y que reimportar **no deja la carpeta creciendo** con ficheros a los que ya no apunta nadie. Y **de GitHub sin bajarse GitHub**: el repositorio pesa ochocientos cincuenta megas porque lleva una imagen de alzado por dispositivo, así que lo que se pide es el índice —una petición— y de sus nombres salen los fabricantes y sus cuentas sin descargar un solo modelo; que dispositivos y módulos se cuentan por separado, porque sumarlos haría parecer que un fabricante trae siete dispositivos cuando trae dos y cinco tarjetas; que el README y el esquema no inventan fabricantes; que al importar se piden **solo los elegidos**; que un modelo roto no se lleva por delante los otros cinco mil; y que hay un tope, porque cada fichero es una petición y seis mil seguidas son media hora. Y **las tres formas**: el repositorio trae dispositivos, módulos y armarios, que son la misma forma con tres sentidos —sin distinguirlas un transceptor ocupa U en un alzado y un armario de 42U figura como un equipo de 42U—; que las imágenes de módulo están en OTRA carpeta y con OTRO nombre, y que su YAML no dice que existan, así que preguntárselo es no buscarlas nunca; que lo que no cuelga de ninguno de los tres árboles no es un modelo (los tests del propio repositorio entraban como dispositivos); que de un armario se guardan sus medidas y sobreviven a guardarlo y leerlo; y que un zip SIN la forma de la biblioteca —el que alguien prepara a mano, plano— sigue entrando entero. Más los **básicos que vienen dentro del panel**, con su propia etiqueta para que reimportar la biblioteca no se los lleve por delante; y que **va diciendo por dónde va mientras lo hace**, con su fase, porque las filas no salen hasta el final y contar lo entregado contaba cero justo mientras duraba todo el trabajo. Y **traerlo todo por otro camino**: para los trescientos fabricantes son diez mil ochocientos ficheros y tres cuartos de hora, mientras que el mismo contenido en un zip baja en poco más de un minuto — así que existen los dos caminos, y se comprueba que el archivo se borra al acabar **también cuando la lectura revienta**, que es justo cuando alguien va a volver a intentarlo con el giga todavía puesto.
 
@@ -10997,7 +11002,7 @@ llama y que los dos planos llevan los botones.
 
 ## 186. Integración — Las piezas sueltas de una planta
 
-**Archivo:** `tests/integration/test_wa_dcim_sitepieces.py` — 8 tests
+**Archivo:** `tests/integration/test_wa_dcim_sitepieces.py` — 13 tests
 
 Ejecuta en `node` el guion de verdad del panel. Reportado desde la pantalla: en el plano de la
 planta no se podía hacer más grande una puerta, y al entrar en la zona general de la planta el
@@ -11005,6 +11010,11 @@ plano de fondo desaparecía.
 
 | Test | Qué verifica |
 |------|-------------|
+| `TestLaPaletaDeLaPlanta::test_la_paleta_trae_el_techo_los_equipos_y_el_nucleo` | Reportado: en el plano de una planta no había cómo poner impresoras, escaleras ni otras cosas que la demo sí tiene. La paleta trae las piezas del techo, los siete equipos de sala y los botones de la escalera y el ascensor. Si vuelve a esconder las del techo, cae |
+| `TestLaPaletaDeLaPlanta::test_los_equipos_y_el_techo_se_dibujan_en_la_planta` | Los equipos de sala y las piezas del techo se dibujan en el plano de la planta y se eligen |
+| `TestLaPaletaDeLaPlanta::test_un_equipo_se_guarda_y_se_quita_por_su_ruta` | Un equipo de sala se mueve y gira por `/room-items/<uid>` y se quita por `/items/<uid>` |
+| `TestLaPaletaDeLaPlanta::test_la_escalera_se_marca_se_dibuja_y_se_mueve` | Reportado: «añadir escalera» no aparecía en ningún sitio —el plano no dibujaba el núcleo, solo el 3D, y el botón solo pedía sitio si la planta no tenía—. Ahora siempre lo pide, el clic lo pone ahí, el plano lo dibuja con sus peldaños, y arrastrado se mueve y se guarda |
+| `TestLaPaletaDeLaPlanta::test_poner_una_impresora_la_pone_en_la_sala_que_se_mira` | Poner una impresora la crea en la sala que hay en el centro de la vista |
 | `TestUnaPiezaDelgada::test_solo_las_asas_de_los_lados` | Una pieza delgada (una puerta) lleva solo las cuatro asas de los lados; una mesa, las ocho |
 | `TestEstirarEnElPlanoDeLaPlanta::test_la_pieza_elegida_lleva_asas_y_un_rack_no` | En el plano de la planta, la pieza elegida lleva asas y un rack no |
 | `TestEstirarEnElPlanoDeLaPlanta::test_se_estira_desde_su_asa` | Arrastrar el asa de la derecha un metro la hace un metro más ancha, sin moverla |
@@ -11297,7 +11307,7 @@ núcleo de la planta…).
 
 ## 198. Integración — Los muros de una planta, leídos de su plano
 
-**Archivo:** `tests/integration/test_wa_dcim_walls.py` — 22 tests
+**Archivo:** `tests/integration/test_wa_dcim_walls.py` — 28 tests
 
 La detección en `node`, con imágenes hechas a medida, y el almacén por la API. Se pidió que el plano
 de fondo diera los muros.
@@ -11309,6 +11319,12 @@ de fondo diera los muros.
 | `TestReadingThePlan::test_a_wall_cut_by_a_gap_is_joined` | Un muro cortado por un hueco pequeño se junta |
 | `TestReadingThePlan::test_otsu_finds_the_ink` | El umbral automático separa la tinta del papel |
 | `TestReadingThePlan::test_what_to_look_for_comes_from_the_scale` | Lo que se busca, en píxeles, sale de la escala del plano |
+| `TestARealPlanSecondPass::test_a_partition_ending_in_a_pillar_is_still_a_wall` | Reportado con un plano real: faltaban todos los tabiques de las oficinas. Cada uno acaba en un pilar macizo dibujado, más ancho que él; unido al trazo, lo engordaba a doce píxeles y se descartaba por grueso. Solo se unen trazos que se solapan en la mitad del más largo: el tabique sale con sus cuatro píxeles. Con la regla de antes, cae |
+| `TestARealPlanSecondPass::test_a_two_pixel_line_is_not_a_partition` | Reportado con un plano real a 9 cm por píxel: «muros donde no hay» —hojas de puerta, muebles, líneas de cota de dos píxeles pasaban por tabiques de 18 cm—. Un tabique de un trazo tiene al menos tres píxeles |
+| `TestTheReview::test_everything_in_the_review_can_be_undone` | Reportado: un muro borrado en la revisión no se podía deshacer —la revisión vive en memoria hasta «Guardar» y el deshacer de los planos solo conoce lo que va al servidor—. Borrar, dibujar, aceptar y lo demás son pasos del deshacer propio de la revisión, con rehacer; coger un extremo sin moverlo no es un paso. Sin apuntar el paso al borrar, cae |
+| `TestTheReview::test_several_walls_can_be_chosen_at_once` | Pedido: elegir varios muros a la vez. Ctrl + clic añade uno y lo vuelve a quitar; Mayús + arrastrar en vacío los encierra en un recuadro (se suman a lo elegido); Ctrl+A, todos. Borrar varios es un solo paso de deshacer. Los extremos para arrastrar salen solo con uno elegido. Sin el Ctrl + clic, cae |
+| `TestTheReview::test_saving_the_walls_can_be_undone_from_the_plan` | Y guardar, que reemplaza los muros de la planta enteros, es un paso del deshacer del plano: deshacerlo devuelve los que había |
+| `TestTheReview::test_the_plan_can_be_moved_around_while_reviewing` | Reportado: con la revisión de muros abierta el plano no se podía arrastrar para ir a otra zona —cada pulsación era de los muros—. Eligiendo, pulsar lejos de todo muro arrastra el plano y sobre uno lo elige; el botón central arrastra también dibujando, sin poner punto. Sin el arrastre en vacío, cae |
 | `TestTheReview::test_snaps_to_a_nearby_end_and_squares_a_near_straight_wall` | Al dibujar se pega a un extremo cercano y endereza lo casi recto |
 | `TestIn3D::test_wall_door_lintel_window_sill_glass_lintel` | En 3D: muro de suelo a techo; puerta, su dintel; ventana, antepecho, cristal y dintel |
 | `TestIn3D::test_as_long_and_thick_as_drawn` | Tan largo y tan grueso como se dibujó |

@@ -649,13 +649,19 @@ de la información que habrá cuando toque.
       altura que dicen sus U, columnas, mamparas translúcidas y bandejas colgadas. Con el
       **color en vivo** en el frente de cada rack, que es lo único que ninguna librería podía
       dar: sale de las sondas
-- [x] **El motor del visor, compartido** ([infra/_viewer3d.html](../src/lib/web_admin/templates/partials/infra/_viewer3d.html)).
+- [x] **El motor del visor, compartido** ([_viewer3d.html](../src/lib/core/view3d/web/_viewer3d.html)).
       WebGL, la cámara (órbita, rueda hacia el cursor, andar con el teclado), los rótulos, los
       planos en el suelo y la pantalla completa no son del inventario: el inventario solo dice
       qué cajas hay (`_room3d.html`, `_site3d.html`). Cada visor es una instancia guardada por
       el id de su caja (`ss3dMount(id, {scene, key, onPick, north})`); el primero era uno solo,
       global y con ids fijos, así que dos visores en la misma página habrían dibujado en el
       mismo lienzo. Es lo que necesitan el rack y los circuitos en 3D
+- [x] **Todo el 3D en su paquete**, [lib/core/view3d](../src/lib/core/view3d/): el motor, las
+      escenas del inventario (sala, planta y edificio, capas, resaltado, rack) y la página
+      `/3d` con su ruta. Estaba repartido entre `partials/infra`, `partials/dcim` y
+      `partials/explore3d`; las páginas lo incluyen por ruta (`core/view3d/web/…`). Los editores
+      de planos de sala y de planta ya no llevan visor: el 3D de una sala, una planta o el
+      edificio se mira en `/3d`, y en el panel queda solo la vista 3D de un rack
 - [x] **El plano de fondo, calibrado** ([_plancal.html](../src/lib/web_admin/templates/partials/dcim/_plancal.html)).
       Se colocaba con un número, «Ancho del plano», el de la imagen ENTERA —márgenes y
       cajetín incluidos, un dato que nadie tiene— y con su esquina pegada al (0, 0), así que un
@@ -704,7 +710,7 @@ de la información que habrá cuando toque.
       3D. Encima de un plano cargado de detalle no se distingue lo colocado; es una preferencia
       de quien mira y se recuerda en su navegador
 - [x] **Modo realista y paseo como en un juego (prototipo, solo en `/3d`)**
-      ([infra/_viewer3d_real.html](../src/lib/web_admin/templates/partials/infra/_viewer3d_real.html)):
+      ([_viewer3d_real.html](../src/lib/core/view3d/web/_viewer3d_real.html)):
       cielo, sol con sombras, luz por píxel, materiales por tipo calculados en el sombreador
       (suelo técnico, chapa perforada, madera, metal, enlucido, cristal), aristas y contacto con
       el suelo, niebla. Y a pie: WASD y ratón capturado, choques con muros y racks salvo en las
@@ -712,8 +718,8 @@ de la información que habrá cuando toque.
       motor solo gana una línea —ceder el fotograma si el visor pide `realista`—; el panel no
       carga el parcial
 - [x] **`/3d`: el inventario en 3D como página propia**, como `/status` pero con sesión y
-      `dcim_view` ([explore3d.html](../src/lib/web_admin/templates/explore3d.html),
-      [explore3d/_page.html](../src/lib/web_admin/templates/partials/explore3d/_page.html)).
+      `dcim_view` ([explore3d.html](../src/lib/core/view3d/web/explore3d.html),
+      [_page.html](../src/lib/core/view3d/web/_page.html)).
       Las sedes en el mapa con su estado y debajo en tarjetas; al pulsar una, la sede como
       edificio; arriba, Sedes › la sede (con las demás para saltar) › sus plantas, con subir y
       bajar; la barra del visor pasa de edificio a planta. La dirección dice sede, planta y modo,
@@ -724,7 +730,7 @@ de la información que habrá cuando toque.
       paquete del panel; `tests/meta/test_explore3d_includes.py` vigila que nada de lo que
       ejecuta al cargar necesite un fichero que no carga
 - [x] **Una planta, o el edificio entero, en 3D**, desde el plano de la sede y con el mismo
-      visor ([_site3d.html](../src/lib/web_admin/templates/partials/dcim/_site3d.html)). Cada sala
+      visor ([_site3d.html](../src/lib/core/view3d/web/_site3d.html)). Cada sala
       se levanta con la misma cuenta que su propio visor (`_dc3dRoomBoxes`) y se coloca girada y
       en su sitio, como en el plano de la planta. Sus muros se vuelven cristal según la cámara
       esté dentro o fuera de ESA sala. La zona general no lleva muros ni suelo, y una sala sin
@@ -955,7 +961,9 @@ convertir en inventario.*
 - [x] **Y las tres puertas**, porque son tres situaciones: de GitHub, **subiendo un zip** —esto es
       una aplicación web, y pedir una ruta del disco del servidor es pedir un acceso que quien
       administra desde un navegador no tiene por qué tener— y una carpeta del servidor para quien
-      sí lo tiene. Con el catálogo como **vista propia** que el menú despliega, en vez de un botón
+      sí lo tiene, que es un **administrador** (auditoría 2026-10: con solo `dcim_catalog_manage`,
+      que también tiene el rol `editor`, era un oráculo de qué rutas existen y un recorrido del
+      disco entero). Las imágenes que trae cada modelo se leen solo de dentro de esa carpeta. Con el catálogo como **vista propia** que el menú despliega, en vez de un botón
       en una barra de herramientas que desaparecía al abrir un rack
 - [x] **Quitar**, que era la otra mitad que faltaba: un modelo, los marcados, o un origen entero.
       Importar reemplaza una importación **completa**, así que deshacer una equivocada era

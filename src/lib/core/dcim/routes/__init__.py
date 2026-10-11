@@ -143,7 +143,6 @@ the other three. Each area lists its own endpoints in its own header.
     library.py   brands and platforms
     builds.py    the templates: what a machine is bought as
     catalog.py   the model catalogue, its import and the portable file
-    explore.py   ``/3d``: the inventory in 3D as a page of its own, outside the panel
     roomitems.py what is in a room and not in a rack (a desk's PC, a wall outlet), and tracing
                  an item's cables through patch panels and outlets
 
@@ -155,7 +154,7 @@ the other three. Each area lists its own endpoints in its own header.
 
 from __future__ import annotations
 
-from lib.core.dcim.routes import (builds, catalog, docs, explore, library, places, power,
+from lib.core.dcim.routes import (builds, catalog, docs, library, places, power,
                                   racks, roomitems)
 from lib.core.dcim.routes._context import build as _context
 
@@ -165,5 +164,5 @@ def register(app, wa):
     `from lib.core.dcim.routes import register` y no tiene por qué saber que dentro hay
     siete áreas."""
     C = _context(app, wa)
-    for area in (places, power, racks, docs, library, builds, catalog, explore, roomitems):
+    for area in (places, power, racks, docs, library, builds, catalog, roomitems):
         area.register(app, wa, C)

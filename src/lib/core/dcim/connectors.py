@@ -73,6 +73,34 @@ _CACHE: dict | None = None
 _SEEN: tuple = ()
 
 
+def keep_images(doc: dict, current: dict) -> dict:
+    """*doc* with each connector's picture as it is in *current* —by its ``id``—, whatever the
+    document sent says: a new connector has none.
+
+    The picture is set and removed by its own routes (``/connectors/<id>/image``), which mint
+    the name. Taken from a saved document, a name of somebody else's file —a site's photo, a
+    floor's plan— became a connector's, and «remove the picture» deleted that file (security
+    audit 2026-10).
+    """
+    tenian = {str(c.get('id') or ''): c.get('image') for c in (current or {}).get('connectors') or []
+              if isinstance(c, dict)}
+    fuera = dict(doc or {})
+    lista = []
+    for c in fuera.get('connectors') or []:
+        if not isinstance(c, dict):
+            lista.append(c)
+            continue
+        c = dict(c)
+        c.pop('image', None)
+        img = tenian.get(str(c.get('id') or ''))
+        if img:
+            c['image'] = img
+        lista.append(c)
+    if 'connectors' in fuera:
+        fuera['connectors'] = lista
+    return fuera
+
+
 def effective(store=None) -> dict:
     """El documento **en vigor**: el guardado si es más nuevo, y si no el que viene con el panel.
 

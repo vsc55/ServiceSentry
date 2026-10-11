@@ -92,6 +92,57 @@ const b = _dcpPlanBox();
 __out.zona = [b.w, b.x, b.y, b.scaled];
 __out.zonaNorte = _dc3dNorth();
 __out.zonaOjo = _dcimPlanHtml().includes('_dcPlanBgToggle()');
+
+// ── The floor's palette: everything a room's has, and the stairs and the lift ───
+_dcimPlan = null;
+const impresora = {uid: 'i1', role: 'printer', label: 'IMP-1', pos_x: 500, pos_y: 500, rotation: 0,
+                   box: {w: 520, d: 480}};
+const detector = {uid: 'f9', kind: 'smoke_detector', pos_x: 100, pos_y: 100, width_mm: 120, depth_mm: 120,
+                  rotation: 0};
+_dcsPlan = {site: {uid: 's', rooms: [{uid: 'rc', floor_uid: 'p', pos_x: 0, pos_y: 0, width_mm: 40000,
+                                      depth_mm: 30000, rotation: 0}]},
+            floors: [{uid: 'p', area_uid: ''}], floor: 'p', image: null,
+            kinds: {zone: {w: 2000, d: 2000, layer: 'floor'}, smoke_detector: {w: 120, d: 120, layer: 'air'}},
+            content: {rc: {racks: [], features: [detector], items: [impresora]}}};
+const paleta = _dcsPaletteHtml();
+__out.paleta = {aire: paleta.includes('_dcsAdd("smoke_detector")') || paleta.includes("_dcsAdd('smoke_detector')")
+                      || paleta.includes('_dcsAdd(&quot;smoke_detector&quot;)'),
+                equipos: (paleta.match(/_dcsAddItem\(/g) || []).length,
+                escalera: paleta.includes("_dcsCoreAdd('stairs')"),
+                ascensor: paleta.includes("_dcsCoreAdd('lift')")};
+const dentro = _dcsInside(_dcsPlan.site.rooms[0]);
+__out.dibuja = {equipo: dentro.includes('data-dcsi="ritem"') && dentro.includes('data-uid="i1"'),
+                techo: dentro.includes('data-uid="f9"')};
+__out.urls = [_dcsItemUrl('ritem', 'i1'), _dcsItemUrl('ritem', 'i1', true), _dcsItemUrl('feature', 'f9')];
+_dcsItem = {kind: 'ritem', uid: 'i1', room: 'rc'};
+__out.fila = (_dcsItemRow() || {}).label;
+enviados.length = 0;
+_dcsReload = async () => {};
+ssCanvasWindow = () => ({x: 0, y: 0, w: 20000 * S, h: 15000 * S});
+_dcsAddItem('printer');
+__out.puesta = enviados.map(e => [e.url, (e.cuerpo || {}).role]);
+// The stairs: the palette's button asks where, the click puts it there, and the plan draws it —
+// also on a floor that already had one. Dragged, it moves and is saved.
+const encolados = [];
+_dcpQueue = (url, cuerpo) => encolados.push([url, cuerpo]);
+_dcsInspectorDraw = () => {};
+_dcsRedraw = () => {};
+showToast = () => {};
+_dcsPlan.floors[0] = {uid: 'p', area_uid: '', core_kind: 'lift', core_x: 1000, core_y: 1000};
+_dcsCoreAdd('stairs');
+const marcando = _dcsCoreMark;
+_dcsDown({target: {closest: () => null}, p: {x: 12000 * S, y: 8000 * S}, currentTarget: {style: {}}});
+const f = _dcsFloor();
+const tras = [f.core_kind, f.core_x, f.core_y];
+const dibujo = _dcsCoreSvg();
+// Dragged two metres to the right.
+_dcsDown({target: {closest: (sel) => (sel === '[data-dcscore]' ? {} : null)}, p: {x: 12000 * S, y: 8000 * S},
+          currentTarget: {style: {}, setPointerCapture() {}}, pointerId: 1});
+_dcsMove({p: {x: 14000 * S, y: 8000 * S}});
+_dcsUp({type: 'pointerup', clientX: 0, clientY: 0, currentTarget: {style: {}}});
+__out.escalera = {marcando, tras, dibuja: dibujo.includes('data-dcscore'),
+                  peldanos: (dibujo.match(/<line/g) || []).length, movida: [f.core_x, f.core_y],
+                  guardada: encolados.filter(e => 'core_x' in e[1]).pop()};
 """
 
 
@@ -110,6 +161,40 @@ def out():
     c = wa.app.test_client()
     _login(c)
     return node_run(panel_bundle(c), _PRUEBA)
+
+
+class TestLaPaletaDeLaPlanta:
+    """Reportado: en el plano de una planta no había cómo poner impresoras, escaleras ni otras
+    cosas que la demo sí tiene. Su paleta trae ahora lo mismo que la de una sala —cada tipo de
+    pieza, también las del techo, y los equipos de sala— y los botones de la escalera y el
+    ascensor (el núcleo de la planta). Los equipos de sala se dibujan en la planta, se eligen y se
+    guardan por su ruta."""
+
+    def test_la_paleta_trae_el_techo_los_equipos_y_el_nucleo(self, out):
+        p = out['paleta']
+        assert p['aire'] and p['equipos'] == 7 and p['escalera'] and p['ascensor']
+
+    def test_los_equipos_y_el_techo_se_dibujan_en_la_planta(self, out):
+        assert out['dibuja'] == {'equipo': True, 'techo': True}
+        assert out['fila'] == 'IMP-1'
+
+    def test_un_equipo_se_guarda_y_se_quita_por_su_ruta(self, out):
+        assert out['urls'] == ['/api/v1/dcim/room-items/i1', '/api/v1/dcim/items/i1',
+                               '/api/v1/dcim/features/f9']
+
+    def test_la_escalera_se_marca_se_dibuja_y_se_mueve(self, out):
+        """Reportado: «añadir escalera» no aparecía en ningún sitio. El plano no dibujaba el
+        núcleo —solo el 3D— y el botón solo pedía sitio si la planta no tenía. Ahora siempre lo
+        pide, el clic lo pone ahí, el plano lo dibuja con sus peldaños, y arrastrado se mueve y
+        se guarda."""
+        e = out['escalera']
+        assert e['marcando'] is True and e['tras'] == ['stairs', 12000, 8000]
+        assert e['dibuja'] and e['peldanos'] == 9
+        assert e['movida'] == [14000, 8000]
+        assert e['guardada'][0] == '/api/v1/dcim/floors/p' and e['guardada'][1] == {'core_x': 14000, 'core_y': 8000}
+
+    def test_poner_una_impresora_la_pone_en_la_sala_que_se_mira(self, out):
+        assert out['puesta'] == [['/api/v1/dcim/rooms/rc/items', 'printer']]
 
 
 class TestUnaPiezaDelgada:

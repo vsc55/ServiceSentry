@@ -479,3 +479,88 @@ class TestBugAudit202607:
         admin._apply_config_on_save({"database": {"host": "a"}}, {"database": {"host": "b"}},
                                     {"database": {"host": "b"}})
         assert admin._restart_pending is True
+
+
+class TestDcimFilesAudit202610:
+    """Security audit 2026-10, DCIM files. Three holes the `editor` role reached:
+
+    * importing the catalogue from a folder on the server took any path — an oracle of what
+      exists, a walk of the whole disk, any model-shaped YAML read into the catalogue;
+    * a template's picture could be set by name in its body, so «remove the picture» deleted
+      somebody else's file —a site's photo, a floor's plan— the only copy of it;
+    * the same through a connector's picture in the saved document.
+    """
+
+    def _site_photo(self, admin, client, name):
+        import os
+        from lib.core.dcim import media
+        _login(client)
+        site = client.post('/api/v1/dcim/sites', json={'name': name}).get_json()['uid']
+        photo = client.post(f'/api/v1/dcim/sites/{site}/photo', data=b'\x89PNG\r\n\x1a\n' + b'\0' * 64,
+                            content_type='application/octet-stream').get_json()['photo']
+        return os.path.join(media.where(admin._var_dir), *photo.split('/')), photo
+
+    def test_an_editor_cannot_import_from_a_server_folder_and_learns_nothing(self, admin, tmp_path):
+        from tests.conftest import _login_as
+        d = tmp_path / 'outside'
+        d.mkdir()
+        (d / 'x.yaml').write_text('manufacturer: A\nmodel: B\nu_height: 1\n', encoding='utf-8')
+        c = _login_as(admin, 'cat', perms=['dcim_catalog_manage', 'dcim_catalog_view'])
+        hay = c.post('/api/v1/dcim/catalog/import', json={'path': str(d)})
+        no_hay = c.post('/api/v1/dcim/catalog/import', json={'path': str(tmp_path / 'nope')})
+        assert hay.status_code == 403
+        # The same answer whether the path exists or not: no oracle.
+        assert (no_hay.status_code, no_hay.get_json()) == (hay.status_code, hay.get_json())
+
+    def test_an_admin_still_can(self, admin, client, tmp_path):
+        d = tmp_path / 'lib'
+        d.mkdir()
+        (d / 'x.yaml').write_text('manufacturer: A\nmodel: B\nu_height: 1\n', encoding='utf-8')
+        _login(client)
+        r = client.post('/api/v1/dcim/catalog/import', json={'path': str(d)})
+        assert r.status_code == 200 and r.get_json().get('job')
+
+    def test_a_template_cannot_adopt_and_delete_a_sites_photo(self, admin, client):
+        import os
+        from tests.conftest import _login_as
+        ruta, photo = self._site_photo(admin, client, 'Sede X')
+        c = _login_as(admin, 'b', perms=['dcim_build_edit', 'dcim_view'])
+        b = c.post('/api/v1/dcim/builds', json={'name': 'B1', 'front_image': photo}).get_json()['uid']
+        c.put(f'/api/v1/dcim/builds/{b}', json={'front_image': photo, 'rear_image': photo})
+        c.delete(f'/api/v1/dcim/builds/{b}/image/front')
+        c.delete(f'/api/v1/dcim/builds/{b}/image/rear')
+        assert os.path.isfile(ruta)
+        assert not (c.get(f'/api/v1/dcim/builds/{b}').get_json().get('build') or {}).get('front_image')
+
+    def test_a_connector_cannot_adopt_and_delete_a_sites_photo(self, admin, client):
+        import json
+        import os
+        from tests.conftest import _login_as
+        from lib.core.dcim import connectors
+        ruta, photo = self._site_photo(admin, client, 'Sede Y')
+        c = _login_as(admin, 'cm', perms=['dcim_catalog_manage', 'dcim_catalog_view'])
+        doc = json.loads(json.dumps(connectors.packaged()))
+        cid = doc['connectors'][0]['id']
+        doc['connectors'][0]['image'] = photo
+        doc['version'] = int(doc.get('version') or 0) + 1
+        assert c.put('/api/v1/dcim/connectors', json=doc).status_code == 200
+        c.delete(f'/api/v1/dcim/connectors/{cid}/image')
+        assert os.path.isfile(ruta)
+
+    def test_a_connector_keeps_the_picture_it_was_given_by_its_route(self, admin, client):
+        import json
+        from lib.core.dcim import connectors
+        _login(client)
+        doc = json.loads(json.dumps(connectors.packaged()))
+        cid = doc['connectors'][0]['id']
+        puesta = client.post(f'/api/v1/dcim/connectors/{cid}/image', data=b'\x89PNG\r\n\x1a\n' + b'\0' * 64,
+                             content_type='application/octet-stream').get_json()['image']
+        # Saving the document again —from the editor, without the picture in it— keeps it.
+        doc['version'] = int(doc.get('version') or 0) + 5
+        doc['connectors'][0].pop('image', None)
+        assert client.put('/api/v1/dcim/connectors', json=doc).status_code == 200
+        # Served grouped by family: {family: [connector, …]} (or a flat list).
+        por_familia = client.get('/api/v1/dcim/connectors').get_json()['connectors']
+        grupos = por_familia.values() if isinstance(por_familia, dict) else [por_familia]
+        lista = [x for g in grupos for x in (g if isinstance(g, list) else [g]) if isinstance(x, dict)]
+        assert next(x for x in lista if x.get('id') == cid).get('image') == puesta

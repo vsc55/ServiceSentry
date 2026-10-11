@@ -69,6 +69,16 @@ def register(app, wa, C):
     _STAMP_FROM_TYPE = ('manufacturer', 'model', 'full_depth', 'airflow', 'power_type',
                         'ports', 'port_list', 'extra', 'u_tenths')
 
+    #: What a request's body may not say about a template: its pictures. They are set by the
+    #: upload route, which mints the name, and by stamping from a model, which copies the
+    #: model's under a new one. Taken from the body, a name of somebody else's file —a site's
+    #: photo, a floor's plan— became the template's, and «remove the picture» deleted that file
+    #: (security audit 2026-10).
+    _NOT_FROM_BODY = ('front_image', 'rear_image')
+
+    def _from_body(data) -> dict:
+        return {k: v for k, v in (data or {}).items() if k not in _NOT_FROM_BODY}
+
     def _stamp_base(data: dict) -> dict:
         """Copiar en *data* lo que dice el modelo del catálogo que ha elegido.
 
@@ -232,7 +242,7 @@ def register(app, wa, C):
         plantillas = C.builds()
         if plantillas is None:
             return jsonify({'error': wa._t('dcim_not_found')}), 404
-        data = request.get_json(silent=True) or {}
+        data = _from_body(request.get_json(silent=True))
         desde = str(data.get('from') or '').strip()
         # Con modelo base, se trae lo suyo. Clonar no: la copia se lleva lo que tuviera la
         # original, que puede haberse corregido a mano desde que se estampó.
@@ -254,7 +264,7 @@ def register(app, wa, C):
         antes = plantillas.get(uid) if plantillas else None
         if not antes:
             return jsonify({'error': wa._t('dcim_not_found')}), 404
-        data = request.get_json(silent=True) or {}
+        data = _from_body(request.get_json(silent=True))
         # Cambiar de modelo base es volver a traerse lo suyo. Solo al CAMBIARLO: guardar la
         # ficha con el mismo de siempre no puede deshacer lo que alguien corrigió aquí, que es
         # la mitad de para lo que sirve haberlo copiado.

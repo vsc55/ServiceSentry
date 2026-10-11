@@ -5,7 +5,7 @@
 It was written inside the inventory for one room, then reused for a floor and a building, and
 the rack and the circuits want it too. It kept ONE global viewer with fixed element ids, so a
 second viewer on the same page would have drawn into the first one's canvas. It moved to
-`infra/_viewer3d.html` with one instance per box; these guards keep the split from eroding:
+`core/view3d/web/_viewer3d.html` with one instance per box; these guards keep the split from eroding:
 
 - the engine finds its parts inside its own box, never by a fixed id;
 - the engine names nothing of the inventory;
@@ -23,9 +23,14 @@ from tests.helpers import _fn, _strip_comments
 
 SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 PARTIALS = os.path.join(SRC, 'lib', 'web_admin', 'templates', 'partials')
-ENGINE = os.path.join(PARTIALS, 'infra', '_viewer3d.html')
-TOOLS = os.path.join(PARTIALS, 'infra', '_viewer3d_tools.html')
+VIEW3D = os.path.join(SRC, 'lib', 'core', 'view3d', 'web')
+ENGINE = os.path.join(VIEW3D, '_viewer3d.html')
+TOOLS = os.path.join(VIEW3D, '_viewer3d_tools.html')
 DCIM = os.path.join(PARTIALS, 'dcim')
+#: The inventory's scenes, in the viewer's package: they draw THROUGH the engine, never by
+#: themselves (the realistic painter, `_viewer3d_real.html`, is part of the engine).
+SCENES = ('_look3d.html', '_page.html', '_rack3d.html', '_room3d.html', '_select3d.html',
+          '_site3d.html')
 
 
 def _read(path: str) -> str:
@@ -62,19 +67,20 @@ class TestTheEngineKnowsNothingOfTheInventory:
 class TestWebGlLivesInTheEngineOnly:
 
     def test_no_section_of_the_inventory_draws_by_itself(self):
-        for name in sorted(os.listdir(DCIM)):
-            if not name.endswith('.html'):
-                continue
-            js = _strip_comments(_read(os.path.join(DCIM, name)))
+        rutas = [os.path.join(DCIM, n) for n in sorted(os.listdir(DCIM)) if n.endswith('.html')]
+        rutas += [os.path.join(VIEW3D, n) for n in SCENES]
+        for ruta in rutas:
+            name = os.path.basename(ruta)
+            js = _strip_comments(_read(ruta))
             for webgl in ("getContext('webgl'", 'createShader', 'drawElements',
                           'new Float32Array(16)'):
                 assert webgl not in js, f'{name}: {webgl}'
 
     def test_the_engine_is_loaded_before_what_draws_on_it(self):
         bundle = _read(os.path.join(PARTIALS, '_js_sections.html'))
-        engine = bundle.index('partials/infra/_viewer3d.html')
-        assert engine < bundle.index('partials/dcim/_room3d.html')
-        assert engine < bundle.index('partials/dcim/_site3d.html')
+        engine = bundle.index('core/view3d/web/_viewer3d.html')
+        assert engine < bundle.index('core/view3d/web/_room3d.html')
+        assert engine < bundle.index('core/view3d/web/_site3d.html')
 
 
 class TestThePlansKeepTheViewerCurrent:

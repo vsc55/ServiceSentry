@@ -1387,7 +1387,12 @@ def read_dir(root: str):
             if not _wants(row, face):
                 continue
             for rel in _image_names(row, face):
-                completo = _os.path.join(root, *rel.split('/'))
+                # Inside the root and nowhere else: the folder and the name come from the YAML
+                # (`manufacturer: ../../secret`), and joined as they were they read a picture
+                # from wherever the YAML said (security audit 2026-10).
+                completo = media.confined(root, rel)
+                if not completo:
+                    continue
                 try:
                     if _os.path.getsize(completo) > media.MAX_BYTES:
                         break

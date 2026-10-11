@@ -168,7 +168,9 @@ def register(app, wa, C):
         store = C.conns()
         if store is None:
             return jsonify({'error': wa._t('dcim_not_found')}), 404
-        doc = request.get_json(silent=True) or {}
+        # Each connector keeps the picture it has: the document cannot say which file is one.
+        doc = dcim_connectors.keep_images(request.get_json(silent=True) or {},
+                                          dcim_connectors.effective(store))
         tirado = dcim_connectors.problems(doc)
         version = store.save(doc, name=dcim_connectors.NAME, actor=C.actor())
         if not version:

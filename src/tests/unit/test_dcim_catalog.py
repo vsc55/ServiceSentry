@@ -1439,3 +1439,17 @@ class TestUnArmarioNoEsUnPanelDeParcheo:
         """`form_factor` es lo que aquí sería la clase, y está donde debe."""
         from lib.core.dcim import catalog
         assert 'form_factor' in catalog._RACK_FIELDS
+
+
+def test_read_dir_does_not_follow_a_maker_out_of_its_root(tmp_path):
+    """Security audit 2026-10: the picture's folder and name come from the YAML, and
+    `manufacturer: ../../secret` read a picture from outside the library being imported."""
+    from lib.core.dcim import catalog
+    root = tmp_path / 'lib'
+    root.mkdir()
+    (tmp_path / 'secret').mkdir()
+    (tmp_path / 'secret' / 'pic.front.png').write_bytes(b'\x89PNG\r\n\x1a\n' + b'0' * 32)
+    (root / 'e.yaml').write_text('manufacturer: ../../secret\nmodel: pic\nu_height: 1\n'
+                                 'front_image: true\n', encoding='utf-8')
+    rows = list(catalog.read_dir(str(root)))
+    assert rows and all(not (r.get('_images') or {}) for r in rows)

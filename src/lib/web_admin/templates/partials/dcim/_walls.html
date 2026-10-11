@@ -78,7 +78,12 @@ function dcwDetect(img, o) {
             }
             const siguen = [];
             for (const b of abiertas) {
-                const t = tramos.findIndex(([a, z]) => Math.min(z, b.z) - Math.max(a, b.a) >= Math.min(z - a, b.z - b.a) * 0.5);
+                // Solapándose en la mitad del MÁS LARGO, no del más corto. Reportado con un plano
+                // real: cada tabique acaba en un pilar macizo dibujado, un cuadrado de su ancho
+                // y algo más; con la mitad del más corto, el cuadrado se unía al trazo del muro,
+                // las columnas del pilar contaban como grueso, y el muro salía de doce píxeles
+                // —«demasiado grueso»— y se perdía. Faltaban todos los tabiques de las oficinas.
+                const t = tramos.findIndex(([a, z]) => Math.min(z, b.z) - Math.max(a, b.a) >= Math.max(z - a, b.z - b.a) * 0.5);
                 if (t >= 0) {
                     const [a, z] = tramos.splice(t, 1)[0];
                     b.a = Math.min(b.a, a); b.z = Math.max(b.z, z); b.fin = i;
@@ -211,6 +216,9 @@ function dcwPairs(segs, minGap, maxGap, sueltos) {
     return out;
 }
 
+//: El grueso mínimo, en píxeles, de un tabique dibujado de un solo trazo.
+const _DCW_SOLO_PX = 3;
+
 /** Lo que se busca en un plano, en sus píxeles, a partir de su calibración: `{minT, maxT,
  *  minLen, gap, k}` (`k`, milímetros por píxel). */
 function _dcwParams(k, o) {
@@ -225,6 +233,76 @@ function _dcwParams(k, o) {
 //: La revisión abierta, o `null`: `{floor, segs: [{kind, x1, y1, x2, y2, thick_mm, prop}],
 //: sel, tool, start, thresh, minCm, busy, drag}`. En milímetros de la planta.
 let _dcw = null;
+
+// ── Deshacer en la revisión ──────────────────────────────────────────────────
+
+//: Cuántos pasos se guardan para deshacer en una revisión.
+const _DCW_UNDO_MAX = 200;
+
+/** Apuntar cómo están los tramos antes de cambiarlos. Reportado: borrar un muro en la revisión
+ *  no se podía deshacer —lo de la revisión vive en memoria hasta «Guardar», y el deshacer de los
+ *  planos solo conoce lo que va al servidor—. Todo lo que cambia los tramos pasa por aquí:
+ *  borrar, dibujar, mover un extremo, aceptar uno o todos, descartar las propuestas, volver a
+ *  leer el plano. */
+function _dcwMark() {
+    const b = _dcw;
+    if (!b) return;
+    b.hist = b.hist || [];
+    b.hist.push(JSON.stringify(b.segs));
+    if (b.hist.length > _DCW_UNDO_MAX) b.hist.shift();
+    b.fut = [];
+}
+
+// ── Varios a la vez ──────────────────────────────────────────────────────────
+
+/** Los tramos elegidos, por su índice. Pedido: elegir varios muros a la vez —borrar una tanda de
+ *  muros que sobran de uno en uno era la mitad del tiempo de una revisión—. `sel` sigue siendo
+ *  el que tiene sus extremos para arrastrar, y solo cuando es el único elegido. */
+function _dcwSels() {
+    const b = _dcw;
+    if (!b) return [];
+    if (!b.sels) b.sels = new Set(b.sel >= 0 ? [b.sel] : []);
+    return [...b.sels].filter(i => i >= 0 && i < b.segs.length).sort((p, q) => p - q);
+}
+
+function _dcwSelSet(lista) {
+    const b = _dcw;
+    b.sels = new Set(lista);
+    b.sel = b.sels.size === 1 ? [...b.sels][0] : -1;
+}
+
+function _dcwSelAll() {
+    _dcwSelSet(_dcw.segs.map((_, i) => i));
+    _dcwPaint();
+}
+
+/** Los tramos que toca un recuadro (en mm de la planta): con cualquier trozo dentro. */
+function _dcwInBox(segs, x0, y0, x1, y1) {
+    const [a, z] = [Math.min(x0, x1), Math.max(x0, x1)], [c, d] = [Math.min(y0, y1), Math.max(y0, y1)];
+    const out = [];
+    segs.forEach((s, i) => {
+        for (let k = 0; k <= 20; k++) {
+            const x = s.x1 + (s.x2 - s.x1) * k / 20, y = s.y1 + (s.y2 - s.y1) * k / 20;
+            if (x >= a && x <= z && y >= c && y <= d) { out.push(i); return; }
+        }
+    });
+    return out;
+}
+
+/** Deshacer (`dir` = 'undo') o rehacer ('redo') un paso de la revisión. */
+function _dcwUndo(dir) {
+    const b = _dcw;
+    if (!b) return;
+    const de = dir === 'redo' ? (b.fut || []) : (b.hist || []);
+    const a = dir === 'redo' ? (b.hist = b.hist || []) : (b.fut = b.fut || []);
+    if (!de.length) return;
+    a.push(JSON.stringify(b.segs));
+    b.segs = JSON.parse(de.pop());
+    _dcwSelSet([]);
+    b.start = null;
+    b.drag = null;
+    _dcwPaint();
+}
 
 function _dcwButton() {
     return `<button class="btn btn-sm ${_dcw ? 'btn-warning' : 'btn-secondary'}"
@@ -253,8 +331,15 @@ function _dcwCancel() {
 
 function _dcwKey(ev) {
     if (!_dcw || ['INPUT', 'TEXTAREA', 'SELECT'].includes((ev.target || {}).tagName)) return;
+    if (ev.ctrlKey || ev.metaKey) {
+        const k = (ev.key || '').toLowerCase();
+        if (k === 'z' && !ev.shiftKey) { ev.preventDefault(); return _dcwUndo('undo'); }
+        if (k === 'y' || (k === 'z' && ev.shiftKey)) { ev.preventDefault(); return _dcwUndo('redo'); }
+    }
     if (ev.key === 'Escape') { _dcw.start = null; _dcwPaint(); }
-    if ((ev.key === 'Delete' || ev.key === 'Backspace') && _dcw.sel >= 0) { ev.preventDefault(); _dcwDelete(); }
+    if ((ev.key === 'Delete' || ev.key === 'Backspace') && _dcwSels().length) { ev.preventDefault(); _dcwDelete(); }
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key || '').toLowerCase() === 'a') { ev.preventDefault(); _dcwSelAll(); }
+    if (ev.key === 'Escape') { _dcwSelSet([]); _dcwPaint(); }
 }
 
 /** La barra de la revisión: leer el plano, las herramientas, y guardar. */
@@ -291,9 +376,16 @@ function _dcwBar() {
             ${esc(t('dcim_walls_min'))}
             <input type="number" class="form-control form-control-sm ss-tabular" style="width:4.5rem" min="2" max="60"
                    value="${b.minCm}" onchange="_dcw.minCm = Math.max(2, Number(this.value) || 6)"></label>` : ''}
+        <span class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcwUndo('undo')"
+                    ${(b.hist || []).length ? '' : 'disabled'} title="${escAttr(t('dcim_walls_undo'))}"
+                    aria-label="${escAttr(t('dcim_walls_undo'))}"><i class="bi bi-arrow-counterclockwise"></i></button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcwUndo('redo')"
+                    ${(b.fut || []).length ? '' : 'disabled'} title="${escAttr(t('dcim_walls_redo'))}"
+                    aria-label="${escAttr(t('dcim_walls_redo'))}"><i class="bi bi-arrow-clockwise"></i></button></span>
         ${herr('select', 'bi-cursor')}${herr('wall', 'bi-dash-lg')}${herr('door', 'bi-door-open')}${herr('window', 'bi-window')}
-        <button type="button" class="btn btn-sm btn-secondary" onclick="_dcwDelete()" ${b.sel < 0 ? 'disabled' : ''}>
-            <i class="bi bi-trash me-1"></i>${esc(t('delete'))}</button>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="_dcwDelete()" ${_dcwSels().length ? '' : 'disabled'}>
+            <i class="bi bi-trash me-1"></i>${esc(_dcwSels().length > 1 ? tf('dcim_walls_delete_n', _dcwSels().length) : t('delete'))}</button>
         ${prop ? `<button type="button" class="btn btn-sm btn-secondary" onclick="_dcwAcceptAll()">
             <i class="bi bi-check2-all me-1"></i>${esc(tf('dcim_walls_accept', prop))}</button>
             <button type="button" class="btn btn-sm btn-secondary" onclick="_dcwDropProposals()">
@@ -350,9 +442,12 @@ async function _dcwDetect() {
             maxT: Math.max(3, Math.round(500 / k)), minLen: Math.max(8, 1000 / k), gap: 200 / k});
         _dcw.otsu = leidas.otsu;
         const lineas = sinRayado(leidas);
-        // Un tabique de un trazo: de 8 cm o más, y nunca de un solo píxel.
+        // Un tabique de un trazo: de 8 cm o más, y nunca de menos de tres píxeles. En un plano
+        // de poca resolución —9 cm por píxel— una línea de dos ya pasaba por 18 cm, y las hojas
+        // de las puertas, los muebles y las cotas salían como tabiques (reportado con un plano
+        // real: «muros donde no hay»). Lo de uno o dos píxeles es trazo de dibujo.
         tramos = modo === 'cad' ? dcwPairs(lineas, 50 / k, 450 / k)
-                                : dcwMixed(lineas, 50 / k, 450 / k, Math.max(2, 80 / k));
+                                : dcwMixed(lineas, 50 / k, 450 / k, Math.max(_DCW_SOLO_PX, 80 / k));
     } else {
         const p = _dcwParams(k, {minCm: _dcw.minCm});
         const leidas = dcwDetect(lienzo, Object.assign({thresh: _dcw.thresh}, p));
@@ -360,12 +455,13 @@ async function _dcwDetect() {
         tramos = sinRayado(leidas);
     }
     const enMm = (x, y) => [b.x + x * k, b.y + y * k];
+    _dcwMark();
     // Los que ya hay se quedan; los propuestos de antes se van —se ha vuelto a leer—.
     _dcw.segs = _dcw.segs.filter(s => !s.prop).concat(tramos.map(s => {
         const [x1, y1] = enMm(s.x1, s.y1), [x2, y2] = enMm(s.x2, s.y2);
         return {kind: 'wall', x1, y1, x2, y2, thick_mm: Math.max(50, Math.round(s.t * k)), prop: true};
     }));
-    _dcw.sel = -1;
+    _dcwSelSet([]);
     _dcwPaint();
     showToast(tf('dcim_walls_found', tramos.length), tramos.length ? 'success' : 'warning');
 }
@@ -392,20 +488,25 @@ function _dcwPixels(data) {
 }
 
 function _dcwAcceptAll() {
+    _dcwMark();
     for (const s of _dcw.segs) s.prop = false;
     _dcwPaint();
 }
 
 function _dcwDropProposals() {
+    _dcwMark();
     _dcw.segs = _dcw.segs.filter(s => !s.prop);
-    _dcw.sel = -1;
+    _dcwSelSet([]);
     _dcwPaint();
 }
 
 function _dcwDelete() {
-    if (!_dcw || _dcw.sel < 0) return;
-    _dcw.segs.splice(_dcw.sel, 1);
-    _dcw.sel = -1;
+    const lista = _dcwSels();
+    if (!_dcw || !lista.length) return;
+    _dcwMark();
+    // De atrás adelante: cada uno que sale corre los índices de los que van detrás.
+    for (const i of lista.reverse()) _dcw.segs.splice(i, 1);
+    _dcwSelSet([]);
     _dcwPaint();
 }
 
@@ -414,8 +515,12 @@ async function _dcwSave() {
     if (!_dcw || !f) return;
     const walls = _dcw.segs.map(s => ({kind: s.kind, x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2,
                                        thick_mm: s.thick_mm}));
-    const r = await _dcimSend('PUT', `/api/v1/dcim/floors/${encodeURIComponent(f.uid)}/walls`, {walls});
+    const url = `/api/v1/dcim/floors/${encodeURIComponent(f.uid)}/walls`;
+    const antes = JSON.parse(JSON.stringify(((_dcsPlan || {}).walls || {})[f.uid] || []));
+    const r = await _dcimSend('PUT', url, {walls});
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    // Guardar reemplaza todos los muros de la planta: deshacerlo es volver a mandar los de antes.
+    if (typeof _dcUndoPush === 'function') _dcUndoPush(url, {walls: antes}, {walls});
     if (_dcsPlan) {
         _dcsPlan.walls = _dcsPlan.walls || {};
         _dcsPlan.walls[f.uid] = walls;
@@ -438,16 +543,24 @@ function _dcwSvg() {
     const segs = _dcw ? _dcw.segs : ((((_dcsPlan || {}).walls) || {})[f.uid] || []);
     let h = '';
     segs.forEach((s, i) => {
-        const elegido = _dcw && i === _dcw.sel;
+        const elegido = _dcw && (_dcw.sels ? _dcw.sels.has(i) : i === _dcw.sel);
         const color = elegido ? 'var(--bs-warning)' : (s.prop ? '#fd7e14' : _DCW_COLOR[s.kind] || _DCW_COLOR.wall);
         h += `<line x1="${s.x1 * S}" y1="${s.y1 * S}" x2="${s.x2 * S}" y2="${s.y2 * S}" stroke="${color}"
                     stroke-width="${Math.max(2, s.thick_mm * S)}" stroke-linecap="square"
                     ${s.kind !== 'wall' ? 'stroke-dasharray="6 4"' : ''} opacity="${_dcw ? 0.85 : 0.7}"
                     style="pointer-events:none"></line>`;
-        if (elegido) for (const [x, y] of [[s.x1, s.y1], [s.x2, s.y2]])
+        if (elegido && i === _dcw.sel) for (const [x, y] of [[s.x1, s.y1], [s.x2, s.y2]])
             h += `<circle cx="${x * S}" cy="${y * S}" r="6" fill="var(--bs-warning)" stroke="#000"
                           vector-effect="non-scaling-stroke" style="pointer-events:none"></circle>`;
     });
+    // El recuadro de elegir, mientras se arrastra.
+    if (_dcw && _dcw.box) {
+        const bx = _dcw.box;
+        h += `<rect x="${Math.min(bx.x0, bx.x1) * S}" y="${Math.min(bx.y0, bx.y1) * S}"
+                    width="${Math.abs(bx.x1 - bx.x0) * S}" height="${Math.abs(bx.y1 - bx.y0) * S}"
+                    fill="rgba(255,193,7,.12)" stroke="var(--bs-warning)" stroke-dasharray="6 4"
+                    vector-effect="non-scaling-stroke" style="pointer-events:none"></rect>`;
+    }
     if (_dcw && _dcw.start) h += `<circle cx="${_dcw.start[0] * S}" cy="${_dcw.start[1] * S}" r="5"
         fill="#fd7e14" style="pointer-events:none"></circle>`;
     return h;
@@ -479,26 +592,51 @@ function _dcwDown(ev) {
     const p = ssCanvasPoint(_DCS_SVG, ev);
     if (!p) return;
     const b = _dcw;
+    // Moverse por el plano mientras se revisa. Reportado: con la revisión abierta el plano no se
+    // podía arrastrar —cada pulsación era de los muros— y no había forma de ir a otra zona. El
+    // botón central arrastra siempre, también dibujando; y eligiendo, arrastrar donde no hay
+    // muro ni extremo mueve el plano, como fuera de la revisión.
+    const arrastrar = () => { b.pan = true; ssCanvasPanStart(_DCS_SVG, ev); };
+    if (ev.button === 1) { ev.preventDefault?.(); return arrastrar(); }
     if (b.tool === 'select') {
         const x = p.x / _DCP_SCALE, y = p.y / _DCP_SCALE;
         // Un extremo del elegido, para arrastrarlo; si no, el tramo más cercano.
         const s = b.segs[b.sel];
         if (s) {
             const extremo = [[s.x1, s.y1], [s.x2, s.y2]].findIndex(([ex, ey]) => Math.hypot(ex - x, ey - y) < 300);
-            if (extremo >= 0) { b.drag = {seg: b.sel, end: extremo}; return; }
+            if (extremo >= 0) { _dcwMark(); b.drag = {seg: b.sel, end: extremo}; return; }
         }
         let mejor = -1, md = Infinity;
         b.segs.forEach((q, i) => {
             const d = _dcwDist(q, x, y);
             if (d < md) { md = d; mejor = i; }
         });
-        b.sel = md < Math.max(400, ((b.segs[mejor] || {}).thick_mm || 0)) ? mejor : -1;
-        if (b.sel >= 0) b.segs[b.sel].prop = false;          // tocarlo es aceptarlo
+        const tocado = md < Math.max(400, ((b.segs[mejor] || {}).thick_mm || 0)) ? mejor : -1;
+        const sumar = ev.shiftKey || ev.ctrlKey || ev.metaKey;
+        if (tocado < 0) {
+            // En vacío. Con Mayús, un recuadro: lo que toque se añade a lo elegido. Sin ella,
+            // deselecciona y lo que siga de la pulsación arrastra el plano.
+            if (ev.shiftKey) { b.box = {x0: x, y0: y, x1: x, y1: y, base: _dcwSels()}; return; }
+            const habia = _dcwSels().length;
+            _dcwSelSet([]);
+            if (habia) _dcwPaint();
+            return arrastrar();
+        }
+        if (sumar) {
+            const ya = new Set(_dcwSels());
+            if (ya.has(tocado)) ya.delete(tocado); else ya.add(tocado);
+            _dcwSelSet([...ya]);
+        } else _dcwSelSet([tocado]);
+        if (_dcwSels().includes(tocado) && b.segs[tocado].prop) {    // tocarlo es aceptarlo
+            _dcwMark();
+            b.segs[tocado].prop = false;
+        }
         return _dcwPaint();
     }
     const q = _dcwSnap(p, b.start);
     if (!b.start) { b.start = q; return _dcwPaint(); }
     if (Math.hypot(q[0] - b.start[0], q[1] - b.start[1]) >= 10) {
+        _dcwMark();
         b.segs.push({kind: b.tool, x1: b.start[0], y1: b.start[1], x2: q[0], y2: q[1],
                      thick_mm: b.tool === 'wall' ? 150 : 150, prop: false});
     }
@@ -509,6 +647,14 @@ function _dcwDown(ev) {
 
 function _dcwMove(ev) {
     const b = _dcw;
+    if (b && b.pan) return ssCanvasPanMove(_DCS_SVG, ev);
+    if (b && b.box) {
+        const p = ssCanvasPoint(_DCS_SVG, ev);
+        if (!p) return;
+        b.box.x1 = p.x / _DCP_SCALE;
+        b.box.y1 = p.y / _DCP_SCALE;
+        return _dcsRedraw();
+    }
     if (!b || !b.drag) return;
     const p = ssCanvasPoint(_DCS_SVG, ev);
     if (!p) return;
@@ -519,8 +665,19 @@ function _dcwMove(ev) {
     _dcsRedraw();
 }
 
-function _dcwUp() {
-    if (_dcw) _dcw.drag = null;
+function _dcwUp(ev) {
+    if (!_dcw) return;
+    if (_dcw.box) {
+        const bx = _dcw.box;
+        _dcw.box = null;
+        _dcwSelSet([...new Set(bx.base.concat(_dcwInBox(_dcw.segs, bx.x0, bx.y0, bx.x1, bx.y1)))]);
+        return _dcwPaint();
+    }
+    // Un extremo cogido y soltado sin moverlo no es un paso que deshacer.
+    const h = _dcw.hist || [];
+    if (_dcw.drag && h.length && h[h.length - 1] === JSON.stringify(_dcw.segs)) h.pop();
+    _dcw.drag = null;
+    if (_dcw.pan) { _dcw.pan = false; ssCanvasPanEnd(ev); }
 }
 
 // ── En 3D ────────────────────────────────────────────────────────────────────

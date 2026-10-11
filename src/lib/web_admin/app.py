@@ -456,6 +456,10 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                 _web_dir = os.path.join(scan_dir, _pkg, 'web')
                 if not os.path.isdir(_web_dir):
                     continue
+                # A package with a web/ folder is addressable by path from any template
+                # ("core/view3d/web/_room3d.html") even when it injects nothing of its own:
+                # the 3D viewer's partials are included where they are needed, not everywhere.
+                found = True
                 for _f in sorted(f for f in os.listdir(_web_dir) if f.endswith('.html')):
                     _tpl = f'{prefix}{_pkg}/web/{_f}'
                     if _f.endswith('_modals.html'):
@@ -464,9 +468,6 @@ class WebAdmin(_UsersMixin, _RolesMixin, _GroupsMixin, _PermissionsMixin,
                         _module_web_ui.append(_tpl)
                     elif _f.endswith('_styles.html'):
                         _module_web_styles.append(_tpl)
-                    else:
-                        continue
-                    found = True
             if found and loader_root not in _loader_roots:
                 _loader_roots.append(loader_root)
 

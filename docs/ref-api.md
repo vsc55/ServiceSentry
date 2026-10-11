@@ -204,7 +204,7 @@ sesión. Ver [explica-mfa.md](explica-mfa.md#la-propiedad-de-la-que-cuelga-todo)
 | GET | `/admin` | sesión | Dashboard de administración | pages.py:76 |
 | GET | `/overview` | sesión | Dashboard Overview | pages.py:82 |
 | GET | `/status` | público\* | Estado público; invitados solo si `public_status=True` | status.py:84 |
-| GET | `/3d` | sesión + `dcim_view` | El inventario en 3D como página propia: las sedes en un mapa con su estado, y cada sede en 3D, el edificio o planta a planta (`?site=&floor=&mode=building\|floor`). Sin `dcim_view`, al panel | dcim/routes/explore.py |
+| GET | `/3d` | sesión + `dcim_view` | El inventario en 3D como página propia: las sedes en un mapa con su estado, y cada sede en 3D, el edificio o planta a planta (`?site=&floor=&mode=building\|floor`). Sin `dcim_view`, al panel | view3d/routes.py |
 | GET | `/lang/<code>` | público (GET) | Cambia idioma UI y lo persiste | ui.py:22 |
 | GET | `/api/v1/me` | sesión | Usuario actual + lista efectiva de `permissions` | ui.py:42 |
 | GET | `/api/v1/health` | **público** | `{startup_id}` para chequeo de versión cliente | ui.py:91 |

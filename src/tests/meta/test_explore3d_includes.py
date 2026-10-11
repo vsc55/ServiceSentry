@@ -19,21 +19,29 @@ import re
 
 _SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 _TPL = os.path.join(_SRC, 'lib', 'web_admin', 'templates')
+#: Where `core/…` includes resolve: the 3D viewer lives in its own package
+#: (`lib/core/view3d/web/`), which the template loader reaches through `lib`.
+_LIB = os.path.join(_SRC, 'lib')
+_PAGE = 'core/view3d/web/explore3d.html'
+
+
+def _path(rel):
+    return os.path.join(_LIB if rel.startswith('core/') else _TPL, rel)
 _DECL = re.compile(r'^(?:async\s+)?function\s+(\w+)|^(?:let|const|var)\s+(\w+)', re.M)
 
 
 def _text(rel):
-    s = io.open(os.path.join(_TPL, rel), encoding='utf-8').read()
+    s = io.open(_path(rel), encoding='utf-8').read()
     return re.sub(r'\{#.*?#\}', '', s, flags=re.S)
 
 
 def _included():
-    page = io.open(os.path.join(_TPL, 'explore3d.html'), encoding='utf-8').read()
-    return [p for p in re.findall(r'include "(partials/[^"]+)"', page) if '_modals' not in p]
+    page = io.open(_path(_PAGE), encoding='utf-8').read()
+    return [p for p in re.findall(r'include "((?:partials|core)/[^"]+)"', page) if '_modals' not in p]
 
 
 def test_the_page_includes_files_that_exist():
-    falta = [p for p in _included() if not os.path.isfile(os.path.join(_TPL, p))]
+    falta = [p for p in _included() if not os.path.isfile(_path(p))]
     assert not falta, falta
 
 
@@ -44,12 +52,13 @@ def test_nothing_it_runs_on_load_needs_a_file_it_does_not_include():
         definidos |= {a or b for a, b in _DECL.findall(_text(rel))}
     # Where each name of the panel is defined, to name the file that would be missing.
     donde = {}
-    for raiz, _dirs, ficheros in os.walk(os.path.join(_TPL, 'partials')):
-        for f in ficheros:
-            if f.endswith('.html'):
-                rel = os.path.relpath(os.path.join(raiz, f), _TPL).replace(os.sep, '/')
-                for a, b in _DECL.findall(_text(rel)):
-                    donde.setdefault(a or b, rel)
+    for base, sub in ((_TPL, 'partials'), (_LIB, os.path.join('core', 'view3d', 'web'))):
+        for raiz, _dirs, ficheros in os.walk(os.path.join(base, sub)):
+            for f in ficheros:
+                if f.endswith('.html'):
+                    rel = os.path.relpath(os.path.join(raiz, f), base).replace(os.sep, '/')
+                    for a, b in _DECL.findall(_text(rel)):
+                        donde.setdefault(a or b, rel)
     malos = []
     for rel in incluidos:
         nivel = 0
@@ -76,12 +85,13 @@ def test_no_constant_it_reads_lives_in_a_file_it_does_not_include():
     for rel in incluidos:
         definidos |= {a or b for a, b in _DECL.findall(_text(rel))}
     donde = {}
-    for raiz, _dirs, ficheros in os.walk(os.path.join(_TPL, 'partials')):
-        for f in ficheros:
-            if f.endswith('.html'):
-                rel = os.path.relpath(os.path.join(raiz, f), _TPL).replace(os.sep, '/')
-                for a, b in _DECL.findall(_text(rel)):
-                    donde.setdefault(a or b, rel)
+    for base, sub in ((_TPL, 'partials'), (_LIB, os.path.join('core', 'view3d', 'web'))):
+        for raiz, _dirs, ficheros in os.walk(os.path.join(base, sub)):
+            for f in ficheros:
+                if f.endswith('.html'):
+                    rel = os.path.relpath(os.path.join(raiz, f), base).replace(os.sep, '/')
+                    for a, b in _DECL.findall(_text(rel)):
+                        donde.setdefault(a or b, rel)
     malos = set()
     for rel in incluidos:
         for n, linea in enumerate(_text(rel).split('\n'), 1):

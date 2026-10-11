@@ -376,6 +376,13 @@ def register(app, wa, C):
         path = str(data.get('path') or '').strip()
         if not path:
             return jsonify({'error': wa._t('dcim_catalog_path_required')}), 400
+        # A folder or a zip ON THE SERVER is the server's disk, and that is an administrator's:
+        # `dcim_catalog_manage` is the `editor` role's too. With it, an editor could ask whether
+        # any path existed (400 or 200 told), have the whole disk walked (`/`) and any YAML that
+        # looked like a model read into the catalogue (security audit 2026-10). Refused before
+        # the path is even looked at, so the answer says nothing about what is there.
+        if not wa._is_admin_requester():
+            return jsonify({'error': wa._t('dcim_catalog_path_admin')}), 403
         # Resolved and checked HERE, once, because this is where a request's word becomes a
         # filesystem path — and the job module deliberately does not check it a second time,
         # which is how two checks come to disagree.

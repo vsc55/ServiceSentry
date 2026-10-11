@@ -74,14 +74,6 @@ function _ds3SetApart(m) {
     _dc3dSoon();
 }
 
-/** Abrir o cerrar el visor en el plano de la sede. */
-function _dcsToggle3d() {
-    if (_dc3d) { _dc3dStop(); return renderDcim(); }
-    _dc3d = {on: true, build: _ds3Scene, keyOf: _ds3Key, onPick: _ds3Pick, onHover: _ds3Hover};
-    renderDcim();
-    if (_ds3Mode === 'building') _ds3LoadImages();
-}
-
 /** Qué se está mirando, para saber si la cámara se conserva al repintar: lo mismo, sí; otra
  *  planta u otro modo, vuelve a su vista de partida. Separar las plantas no la cambia. */
 function _ds3Key() {

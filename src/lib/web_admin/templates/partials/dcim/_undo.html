@@ -10,6 +10,10 @@
    copia tomada al abrir el plano y puesta al día con cada cambio que el servidor acepta—, no
    según el dibujo, que al soltar ya enseña lo nuevo. Deshacer es mandar lo de antes.
 
+   Y los muros de una planta, que se guardan enteros al cerrar su revisión (`_dcUndoPush`):
+   deshacerlo devuelve los que había. Dentro de la revisión, cada paso tiene su propio deshacer
+   (`_dcwUndo`), porque ahí nada va al servidor hasta «Guardar».
+
    Lo que NO se deshace aquí: crear y borrar. Borrar ya pregunta antes, y un rack borrado se
    lleva lo que tenía dentro, que no se recupera reenviando su fila.
    ================================================================ #}
@@ -97,6 +101,15 @@ function _dcUndoRecord(url, antes, cuerpo) {
     _dcUndoPaint();
 }
 
+/** Apuntar un cambio que no pasa por la foto de lo guardado: el de un todo que se reemplaza
+ *  —los muros de una planta—, del que se sabe el antes y el después enteros. */
+function _dcUndoPush(url, antes, despues) {
+    _dcUndoStack.push({url, before: antes, after: despues, at: 0});
+    if (_dcUndoStack.length > _DC_UNDO_MAX) _dcUndoStack.shift();
+    _dcRedoStack = [];
+    _dcUndoPaint();
+}
+
 /** Deshacer (`dir` = 'undo') o rehacer ('redo') lo último. */
 async function _dcUndo(dir) {
     const de = dir === 'redo' ? _dcRedoStack : _dcUndoStack;
@@ -124,6 +137,12 @@ function _dcUndoDone(e, valores, destino) {
     const sombra = _dcUndoShadow.get(e.url);
     if (sombra) Object.assign(sombra, JSON.parse(JSON.stringify(valores)));
     for (const [url, o] of _dcUndoItems()) if (url === e.url) Object.assign(o, JSON.parse(JSON.stringify(valores)));
+    // Los muros de una planta: lo que dibujan el plano y el 3D.
+    const muros = /\/floors\/([^/]+)\/walls$/.exec(e.url);
+    if (muros && _dcsPlan && Array.isArray(valores.walls)) {
+        _dcsPlan.walls = _dcsPlan.walls || {};
+        _dcsPlan.walls[decodeURIComponent(muros[1])] = JSON.parse(JSON.stringify(valores.walls));
+    }
     e.at = 0;           // lo deshecho no se junta con lo siguiente que se haga
     destino.push(e);
     _dcUndoPaint();
@@ -132,6 +151,7 @@ function _dcUndoDone(e, valores, destino) {
 /** Qué se desharía: el nombre de la cosa, para el título del botón. */
 function _dcUndoWhat(e) {
     if (!e) return '';
+    if (/\/walls$/.test(e.url)) return t('dcim_walls');
     const o = (_dcUndoItems().find(([url]) => url === e.url) || [])[1] || {};
     return o.name || o.label || o.uid || '';
 }
@@ -164,6 +184,8 @@ function _dcUndoPaint() {
  *  de uno, deshacer es del campo. */
 document.addEventListener('keydown', (ev) => {
     if (!(ev.ctrlKey || ev.metaKey) || !(_dcimPlan || _dcsPlan) || _dcimRack) return;
+    // Con la revisión de muros abierta, Ctrl+Z es de la revisión (`_dcwKey`).
+    if (typeof _dcw !== 'undefined' && _dcw) return;
     const pane = document.getElementById('dcim-container');
     if (!pane || !pane.offsetParent) return;
     if (/^(INPUT|SELECT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '')) return;
