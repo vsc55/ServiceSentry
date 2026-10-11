@@ -1,0 +1,770 @@
+{# ================================================================
+   DCIM — el plano de una planta: varios a la vez, grupos, y la lista de lo que hay.
+
+   Lo mismo que en el plano de una sala (`_plangroup.html`), llevado a la planta, donde lo que se
+   elige vive en salas distintas y cada sala puede estar girada:
+
+   - **Elegir varios.** Mayús o Ctrl + clic añade o quita; en vacío, un recuadro elige —en modo
+     elegir (`_dcPointerMode`) arrastrando sin más, en modo mover con Mayús—. Lo que el recuadro
+     toca, si es un rack, una pieza o un equipo; una sala, solo si queda entera dentro: pasar el
+     recuadro por encima de una sala para elegir lo de dentro no debe llevársela.
+   - **Moverlos juntos.** El desplazamiento de la mano está en la planta; cada cosa lo recibe en
+     las coordenadas de su sala (girado de vuelta con el giro de la sala). Lo que está en una
+     sala que también se mueve no se mueve aparte: ya va con ella.
+   - **Grupos.** Los mismos de la sala (`group_uid`): coger algo agrupado coge su grupo, y
+     «Agrupar» / «Desagrupar» (Ctrl+G / Ctrl+Mayús+G) los hacen y deshacen desde aquí.
+   - **La lista.** El inspector de la planta lista también lo que hay en ella, sala a sala, como
+     el de una sala lista lo suyo: era solo la lista de salas.
+   ================================================================ #}
+
+//: Lo elegido además de lo del inspector, como `'kind|room|uid'` (`kind` = rack, feature,
+//: ritem o room; una sala lleva `room` vacío).
+const _dcsPicked = new Set();
+
+function _dcsKey(kind, room, uid) { return `${kind}|${room || ''}|${uid}`; }
+
+function _dcsUnkey(k) {
+    const [kind, room, uid] = k.split('|');
+    return {kind, room, uid};
+}
+
+/** La fila de algo de la planta, sea una sala o algo de dentro de una. */
+function _dcsRowOf(kind, room, uid) {
+    if (kind === 'room') return _dcsRooms().find(r => r.uid === uid) || null;
+    const c = ((_dcsPlan || {}).content || {})[room] || {};
+    const lista = kind === 'rack' ? (c.racks || []) : kind === 'ritem' ? (c.items || []) : (c.features || []);
+    return lista.find(x => String(x.uid) === String(uid)) || null;
+}
+
+/** Ancho, fondo y giro de algo de dentro de una sala. */
+function _dcsDims(kind, x) {
+    if (kind === 'ritem') {
+        const b = x.box || {};
+        return {w: Number(b.w) || 200, d: Number(b.d) || 200, rot: Number(x.rotation) || 0};
+    }
+    return {w: Number(x.width_mm) || 600, d: Number(x.depth_mm) || (kind === 'rack' ? 1000 : 600),
+            rot: Number(x.rotation) || 0};
+}
+
+/** El marco de una sala para pasar sus puntos a la planta; la zona general es la planta misma. */
+function _dcsFrameOf(room) {
+    const r = _dcsRooms().find(x => x.uid === room);
+    if (!r || room === _dcsAreaUid()) return {x: 0, y: 0, w: 0, d: 0, rot: 0};
+    return _dcsFrame(r);
+}
+
+/** Un punto de una sala en la planta: la transformación con la que se dibuja lo de dentro. */
+function _dcsToFloor(f, x, y) {
+    const a = f.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    const dx = x - f.w / 2, dy = y - f.d / 2;
+    return {x: f.x + f.w / 2 + dx * c - dy * s, y: f.y + f.d / 2 + dx * s + dy * c};
+}
+
+/** Las cuatro esquinas de algo, en mm de la planta. */
+function _dcsCornersOf(kind, room, x) {
+    let caja, rot, marco;
+    if (kind === 'room') {
+        const s = _dcsSize(x);
+        caja = {x: Number(x.pos_x) || 0, y: Number(x.pos_y) || 0, w: s.w, d: s.d};
+        rot = Number(x.rotation) || 0;
+        marco = {x: 0, y: 0, w: 0, d: 0, rot: 0};
+    } else {
+        const m = _dcsDims(kind, x);
+        caja = {x: Number(x.pos_x) || 0, y: Number(x.pos_y) || 0, w: m.w, d: m.d};
+        rot = m.rot;
+        marco = _dcsFrameOf(room);
+    }
+    const propio = {x: caja.x, y: caja.y, w: caja.w, d: caja.d, rot};
+    return [[0, 0], [caja.w, 0], [caja.w, caja.d], [0, caja.d]].map(([px, py]) => {
+        // Primero su propio giro (sobre su centro), luego el de su sala.
+        const p = _dcsToFloor(propio, px, py);
+        return _dcsToFloor(marco, p.x, p.y);
+    });
+}
+
+/** Todo lo de la planta: sus salas y lo que hay en ellas, la zona general incluida. */
+function _dcsAllThings() {
+    if (!_dcsPlan) return [];
+    const out = _dcsHereRooms().map(r => ({kind: 'room', room: '', uid: r.uid, x: r}));
+    for (const r of _dcsHere()) {
+        const c = (_dcsPlan.content || {})[r.uid] || {};
+        for (const x of c.racks || []) out.push({kind: 'rack', room: r.uid, uid: String(x.uid), x});
+        for (const x of c.features || []) out.push({kind: 'feature', room: r.uid, uid: String(x.uid), x});
+        for (const x of c.items || []) out.push({kind: 'ritem', room: r.uid, uid: String(x.uid), x});
+    }
+    return out;
+}
+
+/** Los de su grupo en la planta, él incluido. Las salas no se agrupan. */
+function _dcsGroupOf(kind, room, uid) {
+    const x = kind === 'room' ? null : _dcsRowOf(kind, room, uid);
+    const g = x && String(x.group_uid || '');
+    if (!g) return [{kind, room, uid: String(uid)}];
+    return _dcsAllThings().filter(t => t.kind !== 'room' && String(t.x.group_uid || '') === g)
+        .map(t => ({kind: t.kind, room: t.room, uid: t.uid}));
+}
+
+/** Lo del inspector como clave, o `''`. */
+function _dcsPrimaryKey() {
+    if (_dcsItem) return _dcsKey(_dcsItem.kind, _dcsItem.room, _dcsItem.uid);
+    if (_dcsSel) return _dcsKey('room', '', _dcsSel);
+    return '';
+}
+
+/** Lo elegido entero, grupos incluidos, sin repetir. */
+function _dcsPickedList() {
+    const claves = new Set(_dcsPicked);
+    const prim = _dcsPrimaryKey();
+    if (prim) claves.add(prim);
+    const out = new Map();
+    for (const k of claves) {
+        const m = _dcsUnkey(k);
+        if (!_dcsRowOf(m.kind, m.room, m.uid)) continue;
+        for (const g of _dcsGroupOf(m.kind, m.room, m.uid)) out.set(_dcsKey(g.kind, g.room, g.uid), g);
+    }
+    return [...out.values()];
+}
+
+/** Hacer de algo lo del inspector. */
+function _dcsMakePrimary(m) {
+    if (!m) { _dcsItem = null; _dcsSel = ''; return; }
+    if (m.kind === 'room') { _dcsItem = null; _dcsSel = m.uid; }
+    else { _dcsSel = ''; _dcsItem = {kind: m.kind, uid: m.uid, room: m.room}; }
+}
+
+function _dcsPickClear() { _dcsPicked.clear(); }
+
+// ── Pulsar, arrastrar, soltar ────────────────────────────────────────────────
+
+/** Al bajar el dedo. `true` si es de aquí: Mayús/Ctrl + clic, o coger algo que va con otros. */
+function _dcsManyDown(ev) {
+    const hit = _dcsHit(ev);
+    if (!hit) return false;
+    const clave = _dcsKey(hit.kind, hit.room, hit.uid);
+    if (ev.shiftKey || ev.ctrlKey || ev.metaKey) {
+        const lista = _dcsPickedList();
+        if (lista.some(m => _dcsKey(m.kind, m.room, m.uid) === clave)) {
+            const fuera = new Set(_dcsGroupOf(hit.kind, hit.room, hit.uid).map(m => _dcsKey(m.kind, m.room, m.uid)));
+            const quedan = lista.filter(m => !fuera.has(_dcsKey(m.kind, m.room, m.uid)));
+            _dcsPicked.clear();
+            quedan.forEach(m => _dcsPicked.add(_dcsKey(m.kind, m.room, m.uid)));
+            _dcsMakePrimary(quedan[0] || null);
+        } else {
+            const prim = _dcsPrimaryKey();
+            if (prim) _dcsPicked.add(prim);
+            _dcsPicked.add(clave);
+            _dcsMakePrimary(hit);
+        }
+        _dcsRedraw();
+        _dcsInspectorDraw();
+        return true;
+    }
+    let junto = _dcsPickedList();
+    if (!junto.some(m => _dcsKey(m.kind, m.room, m.uid) === clave)) {
+        _dcsPicked.clear();
+        junto = _dcsGroupOf(hit.kind, hit.room, hit.uid);
+    }
+    if (junto.length < 2) return false;
+    _dcsMakePrimary(hit);
+    const p = ssCanvasPoint(_DCS_SVG, ev);
+    if (p && _dcimMay('dcim_edit')) {
+        const fila = _dcsRowOf(hit.kind, hit.room, hit.uid);
+        _dcsDrag = {what: 'many', from: p, moved: false,
+                    box0: fila ? _dcsAabb(hit.kind, hit.room, fila) : null,
+                    members: junto.map(m => {
+                        const x = _dcsRowOf(m.kind, m.room, m.uid) || {};
+                        return Object.assign({}, m, {at: {x: Number(x.pos_x) || 0, y: Number(x.pos_y) || 0}});
+                    })};
+        ev.currentTarget.setPointerCapture?.(ev.pointerId);
+    }
+    _dcsRedraw();
+    _dcsInspectorDraw();
+    return true;
+}
+
+/** En vacío, en modo elegir o con Mayús: un recuadro. */
+function _dcsPickBoxStart(ev) {
+    const p = ssCanvasPoint(_DCS_SVG, ev);
+    if (!p) return false;
+    _dcsDrag = {what: 'pickbox', from: p, to: null, moved: false};
+    ev.currentTarget.setPointerCapture?.(ev.pointerId);
+    return true;
+}
+
+/** Mover lo cogido: el desplazamiento en la planta, a pasos de 10 cm; cada cosa lo recibe en
+ *  las coordenadas de su sala. */
+function _dcsManyMove(ev) {
+    const g = _dcsDrag;
+    const p = ssCanvasPoint(_DCS_SVG, ev);
+    if (!p) return;
+    if (g.what === 'pickbox') {
+        g.to = p;
+        g.moved = true;
+        return _dcsRedraw();
+    }
+    const d = _dcsNearDelta(g.members, g.box0, (p.x - g.from.x) / _DCP_SCALE, (p.y - g.from.y) / _DCP_SCALE,
+                            ev.altKey);
+    _dcsManyShift(g.members, d.dx, d.dy);
+    g.moved = true;
+    _dcsRedraw();
+}
+
+/** Poner cada uno de `members` (con su `at`) desplazado `dx`, `dy` mm de la planta. Lo de dentro
+ *  de una sala que también se mueve se queda: ya va con ella. */
+function _dcsManyShift(members, dx, dy) {
+    const salas = new Set(members.filter(m => m.kind === 'room').map(m => m.uid));
+    for (const m of members) {
+        const x = _dcsRowOf(m.kind, m.room, m.uid);
+        if (!x) continue;
+        if (m.kind === 'room') {
+            x.pos_x = m.at.x + dx;
+            x.pos_y = m.at.y + dy;
+            continue;
+        }
+        if (salas.has(m.room)) continue;
+        const a = _dcsFrameOf(m.room).rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+        x.pos_x = Math.round(m.at.x + dx * c + dy * s);
+        x.pos_y = Math.round(m.at.y - dx * s + dy * c);
+        if (x.box) { x.box.x = x.pos_x; x.box.y = x.pos_y; }
+    }
+}
+
+/** Lo que toca un recuadro (en unidades del dibujo): lo de dentro de las salas si lo toca, una
+ *  sala solo si queda entera dentro. */
+function _dcsInBox(a, b) {
+    const S = _DCP_SCALE;
+    const x0 = Math.min(a.x, b.x) / S, x1 = Math.max(a.x, b.x) / S;
+    const y0 = Math.min(a.y, b.y) / S, y1 = Math.max(a.y, b.y) / S;
+    return _dcsAllThings().filter(t => {
+        const pts = _dcsCornersOf(t.kind, t.room, t.x);
+        const xs = pts.map(q => q.x), ys = pts.map(q => q.y);
+        const bx0 = Math.min(...xs), bx1 = Math.max(...xs), by0 = Math.min(...ys), by1 = Math.max(...ys);
+        if (t.kind === 'room') return bx0 >= x0 && bx1 <= x1 && by0 >= y0 && by1 <= y1;
+        return bx0 < x1 && bx1 > x0 && by0 < y1 && by1 > y0;
+    }).map(t => ({kind: t.kind, room: t.room, uid: t.uid}));
+}
+
+/** Soltar: el recuadro elige; lo movido se guarda y se deshace de una vez. */
+async function _dcsManyUp(drag) {
+    if (drag.what === 'pickbox') {
+        if (!drag.to) { _dcsPickClear(); return _dcsPick(''); }
+        for (const m of _dcsInBox(drag.from, drag.to)) _dcsPicked.add(_dcsKey(m.kind, m.room, m.uid));
+        const lista = _dcsPickedList();
+        if (!_dcsPrimaryKey() && lista.length) _dcsMakePrimary(lista[0]);
+        _dcsRedraw();
+        return _dcsInspectorDraw();
+    }
+    _dcsRedraw();
+    _dcsInspectorDraw();
+    if (!drag.moved) return;
+    const salas = new Set(drag.members.filter(m => m.kind === 'room').map(m => m.uid));
+    await _dcsSaveMany(drag.members.filter(m => m.kind === 'room' || !salas.has(m.room)).map(m => {
+        const x = _dcsRowOf(m.kind, m.room, m.uid);
+        return x ? {url: _dcsThingUrl(m.kind, m.uid), body: {pos_x: x.pos_x, pos_y: x.pos_y}} : null;
+    }).filter(Boolean));
+}
+
+function _dcsThingUrl(kind, uid) {
+    return kind === 'room' ? `/api/v1/dcim/rooms/${encodeURIComponent(uid)}` : _dcsItemUrl(kind, uid);
+}
+
+/** Escribir varias cosas y juntar lo apuntado en un solo deshacer. */
+async function _dcsSaveMany(cambios) {
+    if (typeof _dcpFlush === 'function') await _dcpFlush();
+    const antes = _dcUndoStack.length;
+    let mal = '';
+    for (const c of cambios) {
+        const r = await _dcimSend('PUT', c.url, c.body);
+        if (!r.ok) { mal = r.error || t('save_failed'); break; }
+    }
+    _dcUndoBatch(antes);
+    if (mal) {
+        showToast(mal, 'danger');
+        return _dcsReload();
+    }
+}
+
+// ── Grupos ───────────────────────────────────────────────────────────────────
+
+/** Unir lo elegido —lo que no es una sala— en un grupo. */
+async function _dcsGroup() {
+    const lista = _dcsPickedList().filter(m => m.kind !== 'room');
+    if (lista.length < 2 || !_dcimMay('dcim_edit')) return;
+    const g = _dcpNewGroupId();
+    lista.forEach(m => { const x = _dcsRowOf(m.kind, m.room, m.uid); if (x) x.group_uid = g; });
+    _dcsRedraw();
+    _dcsInspectorDraw();
+    await _dcsSaveMany(lista.map(m => ({url: _dcsThingUrl(m.kind, m.uid), body: {group_uid: g}})));
+    showToast(tf('dcim_grouped_n', lista.length), 'success');
+}
+
+async function _dcsUngroup() {
+    const lista = _dcsPickedList().filter(m => m.kind !== 'room'
+        && String((_dcsRowOf(m.kind, m.room, m.uid) || {}).group_uid || ''));
+    if (!lista.length || !_dcimMay('dcim_edit')) return;
+    lista.forEach(m => { const x = _dcsRowOf(m.kind, m.room, m.uid); if (x) x.group_uid = ''; });
+    lista.forEach(m => _dcsPicked.add(_dcsKey(m.kind, m.room, m.uid)));
+    _dcsRedraw();
+    _dcsInspectorDraw();
+    await _dcsSaveMany(lista.map(m => ({url: _dcsThingUrl(m.kind, m.uid), body: {group_uid: ''}})));
+}
+
+// ── Lo que se ve ─────────────────────────────────────────────────────────────
+
+/** El contorno de cada cosa elegida (girado como ella) y el recuadro mientras se elige. */
+function _dcsPickedSvg() {
+    const S = _DCP_SCALE;
+    let h = '';
+    const lista = _dcsPickedList();
+    const agrupado = lista.some(m => m.kind !== 'room'
+        && String((_dcsRowOf(m.kind, m.room, m.uid) || {}).group_uid || ''));
+    if (lista.length > 1 || agrupado) {
+        for (const m of lista) {
+            const x = _dcsRowOf(m.kind, m.room, m.uid);
+            if (!x) continue;
+            const pts = _dcsCornersOf(m.kind, m.room, x).map(q => `${q.x * S},${q.y * S}`).join(' ');
+            h += `<polygon points="${pts}" fill="none" stroke="var(--bs-warning)" stroke-width="1.5"
+                    stroke-dasharray="3 2" vector-effect="non-scaling-stroke" style="pointer-events:none"
+                    data-dcspick="1"></polygon>`;
+        }
+    }
+    const b = _dcsDrag && _dcsDrag.what === 'pickbox' ? _dcsDrag : null;
+    if (b && b.to) h += `<rect x="${Math.min(b.from.x, b.to.x)}" y="${Math.min(b.from.y, b.to.y)}"
+        width="${Math.abs(b.to.x - b.from.x)}" height="${Math.abs(b.to.y - b.from.y)}"
+        fill="rgba(255,193,7,.12)" stroke="var(--bs-warning)" stroke-dasharray="6 4"
+        vector-effect="non-scaling-stroke" style="pointer-events:none"></rect>`;
+    return h;
+}
+
+/** Con varios elegidos, en el inspector: cuántos, y agrupar o desagrupar. */
+function _dcsManyPanelHtml() {
+    const lista = _dcsPickedList();
+    const cosas = lista.filter(m => m.kind !== 'room');
+    const agrupado = cosas.some(m => String((_dcsRowOf(m.kind, m.room, m.uid) || {}).group_uid || ''));
+    if (lista.length < 2 && !agrupado) return '';
+    const puede = _dcimMay('dcim_edit');
+    return `<div class="border rounded-3 p-2 mb-2 ss-fs-2" data-dcsmany="1">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-collection text-muted"></i>
+            <span class="fw-semibold">${esc(tf('dcim_n_selected', lista.length))}</span>
+            ${puede && cosas.length > 1 ? `<button type="button" class="btn btn-sm btn-secondary"
+                onclick="_dcsGroup()" title="${escAttr(t('dcim_group_hint'))}">
+                <i class="bi bi-link-45deg me-1"></i>${esc(t('dcim_plan_group'))}</button>` : ''}
+            ${puede && agrupado ? `<button type="button" class="btn btn-sm btn-secondary"
+                onclick="_dcsUngroup()" title="${escAttr(t('dcim_ungroup_hint'))}">
+                <i class="bi bi-scissors me-1"></i>${esc(t('dcim_plan_ungroup'))}</button>` : ''}
+        </div>
+        <div class="text-muted ss-fs-3 mt-1">${esc(t('dcim_many_hint_floor'))}</div>
+    </div>`;
+}
+
+/** Lo que hay en la planta, sala a sala —la zona general primero—: pulsar lo elige, y con Mayús
+ *  o Ctrl lo añade a lo elegido. Lo mismo que la lista de una sala, que en la planta no estaba. */
+function _dcsElementsHtml() {
+    if (!_dcsPlan) return '';
+    const area = _dcsAreaUid();
+    const salas = _dcsHere().slice().sort((a, b) => (a.uid === area ? -1 : b.uid === area ? 1 : 0)
+                                                  || String(a.name || '').localeCompare(String(b.name || '')));
+    let total = 0, h = '';
+    for (const r of salas) {
+        const c = (_dcsPlan.content || {})[r.uid] || {};
+        const cosas = [].concat(
+            (c.racks || []).map(x => ({kind: 'rack', x})),
+            (c.features || []).map(x => ({kind: 'feature', x})),
+            (c.items || []).map(x => ({kind: 'ritem', x})));
+        if (!cosas.length) continue;
+        total += cosas.length;
+        h += `<div class="text-muted ss-fs-1 mt-2 mb-1">${esc(r.uid === area ? t('dcim_floor_area') : (r.name || ''))}
+                <span class="ms-1">${cosas.length}</span></div>`;
+        h += cosas.map(({kind, x}) => {
+            const icono = kind === 'rack' ? 'bi-hdd-rack' : kind === 'ritem' ? _dcriLook(x.role).icon
+                : (_DCP_ICON[x.kind] || 'bi-square');
+            const elegido = _dcsPickedList().some(m => m.kind === kind && String(m.uid) === String(x.uid));
+            return `<button type="button" data-dcselem="${escAttr(kind)}"
+                onclick="_dcsPickThing(${jsStr(kind)},${jsStr(r.uid)},${jsStr(String(x.uid))},event)"
+                class="btn btn-sm ${elegido ? 'btn-warning' : 'btn-secondary'} w-100 text-start d-flex align-items-center gap-2 mb-1">
+                <i class="bi ${icono}"></i>
+                <span class="text-truncate">${esc(_dcsItemName(kind, x) || t('dcim_rack'))}</span>
+                ${x.group_uid ? `<i class="bi bi-link-45deg ms-auto text-muted" title="${escAttr(t('dcim_plan_group'))}"></i>` : ''}
+            </button>`;
+        }).join('');
+    }
+    if (!total) return '';
+    return `<div class="d-flex align-items-center gap-2 mt-3 mb-1">
+            <span class="fw-semibold ss-fs-2">${esc(t('dcim_elements'))}</span>
+            <span class="text-muted ss-fs-1">${total}</span>
+        </div>${h}`;
+}
+
+/** Elegir desde la lista: solo eso, o —con Mayús o Ctrl— además de lo elegido. */
+function _dcsPickThing(kind, room, uid, ev) {
+    const m = {kind, room, uid: String(uid)};
+    if (ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey)) {
+        const prim = _dcsPrimaryKey();
+        if (prim) _dcsPicked.add(prim);
+        _dcsPicked.add(_dcsKey(kind, room, uid));
+    } else _dcsPicked.clear();
+    _dcsMakePrimary(m);
+    _dcsRedraw();
+    _dcsInspectorDraw();
+}
+
+/** Ctrl+G / Ctrl+Mayús+G / Ctrl+A en la planta, y Escape suelta lo elegido. */
+document.addEventListener('keydown', (ev) => {
+    if (!_dcsPlan || _dcimPlan || _dcimRack || (typeof _dcw !== 'undefined' && _dcw)) return;
+    const pane = document.getElementById('dcim-container');
+    if (!pane || !pane.offsetParent) return;
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '')) return;
+    const k = (ev.key || '').toLowerCase();
+    if (_dcsKeyThing(ev)) { ev.preventDefault(); return; }
+    if (ev.key === 'Escape' && (_dcsPicked.size || _dcsPrimaryKey())) {
+        _dcsPickClear();
+        return _dcsPick('');
+    }
+    if (!(ev.ctrlKey || ev.metaKey)) return;
+    if (k === 'g') {
+        ev.preventDefault();
+        if (ev.shiftKey) _dcsUngroup(); else _dcsGroup();
+    } else if (k === 'a') {
+        ev.preventDefault();
+        _dcsAllThings().forEach(t => _dcsPicked.add(_dcsKey(t.kind, t.room, t.uid)));
+        if (!_dcsPrimaryKey()) _dcsMakePrimary(_dcsPickedList()[0] || null);
+        _dcsRedraw();
+        _dcsInspectorDraw();
+    }
+});
+
+// ── El imán entre cosas, en la planta ────────────────────────────────────────
+//
+// Lo mismo que en una sala (`_dcpNearSnap`), sobre las cajas que SE VEN en la planta: lo de
+// dentro de una sala girada se mide ya girado. La mano se mueve en la planta y cada cosa recibe
+// el desplazamiento en las coordenadas de su sala.
+
+//: Las guías mientras se arrastra en la planta.
+let _dcsGuides = [];
+
+/** La caja alineada con la planta que ocupa algo, en mm. */
+function _dcsAabb(kind, room, x) {
+    const pts = _dcsCornersOf(kind, room, x);
+    const xs = pts.map(q => q.x), ys = pts.map(q => q.y);
+    const x0 = Math.min(...xs), y0 = Math.min(...ys);
+    return {x: x0, y: y0, w: Math.max(...xs) - x0, h: Math.max(...ys) - y0};
+}
+
+/** El desplazamiento `dx`, `dy` (mm de la planta) de lo que se mueve —`movs`, `{kind, room,
+ *  uid}`—, con `caja` la del que lleva la mano al empezar: pegado a un vecino en el eje en que
+ *  llegue cerca, y si no a pasos de 10 cm. Vecino es todo lo que no se mueve, ni va dentro de una
+ *  sala que se mueve. `libre` (Alt) lo deja solo en los pasos. */
+function _dcsNearDelta(movs, caja, dx, dy, libre) {
+    _dcsGuides = [];
+    const base = {dx: _dcsSnap(dx), dy: _dcsSnap(dy)};
+    if (libre || !caja) return base;
+    const claves = new Set(movs.map(m => _dcsKey(m.kind, m.room, m.uid)));
+    const salas = new Set(movs.filter(m => m.kind === 'room').map(m => m.uid));
+    const otros = _dcsAllThings()
+        .filter(t => !claves.has(_dcsKey(t.kind, t.room, t.uid)) && !(t.kind !== 'room' && salas.has(t.room))
+                     && !_dcsIsBack(t.kind, t.room, t.uid))
+        .map(t => _dcsAabb(t.kind, t.room, t.x));
+    const s = _dcpNearSnap({x: caja.x + dx, y: caja.y + dy, w: caja.w, h: caja.h}, otros,
+                           _dcNearTol(_DCS_SVG));
+    _dcsGuides = s.guides;
+    return {dx: s.x !== null ? s.x - caja.x : base.dx, dy: s.y !== null ? s.y - caja.y : base.dy};
+}
+
+function _dcsGuidesSvg() {
+    return _dcsDrag ? _dcGuidesSvg(_dcsGuides) : '';
+}
+
+// ── Lo de debajo: pulsar otra vez, y «Enviar al fondo» ────────────────────────
+
+//: Lo enviado al fondo en la planta, como `_dcsKey`: tenue y transparente al puntero, como en
+//: una sala (`.ss-dcp-back`). Solo en esta pantalla y mientras se trabaja.
+const _dcsBack = new Set();
+
+function _dcsIsBack(kind, room, uid) { return _dcsBack.has(_dcsKey(kind, room, uid)); }
+
+/** Lo que hay bajo el puntero, de arriba abajo y sin repetir: cosas de las salas y salas. */
+function _dcsStack(ev) {
+    const els = (typeof document.elementsFromPoint === 'function' && Number.isFinite(ev.clientX))
+        ? document.elementsFromPoint(ev.clientX, ev.clientY) : [];
+    const todos = els.length ? els : [ev.target];
+    const out = [], visto = new Set();
+    for (const el of todos) {
+        const g = el && el.closest ? el.closest('g[data-dcsi], g[data-dcs]') : null;
+        if (!g) continue;
+        const m = g.dataset.dcsi ? {kind: g.dataset.dcsi, room: g.dataset.room, uid: g.dataset.uid}
+                                 : {kind: 'room', room: '', uid: g.dataset.dcs};
+        const k = _dcsKey(m.kind, m.room, m.uid);
+        if (visto.has(k)) continue;
+        visto.add(k);
+        out.push(Object.assign(m, {el: g}));
+    }
+    return out;
+}
+
+/** A qué se refiere una pulsación: lo de arriba, salvo que lo elegido esté también debajo del
+ *  dedo —entonces es eso, y se sigue arrastrando aunque algo lo tape—. `cycle`, para pasar a
+ *  lo de debajo si la pulsación no se mueve. */
+function _dcsHit(ev) {
+    const pila = _dcsStack(ev);
+    if (!pila.length) return null;
+    const prim = _dcsPrimaryKey();
+    const elegido = prim && pila.find(p => _dcsKey(p.kind, p.room, p.uid) === prim);
+    const cual = elegido || pila[0];
+    return Object.assign({}, cual, {cycle: {again: !!elegido, key: _dcsKey(cual.kind, cual.room, cual.uid),
+                                            pila: pila.map(p => ({kind: p.kind, room: p.room, uid: p.uid}))}});
+}
+
+/** Una pulsación quieta sobre lo que YA estaba elegido, con algo debajo: lo siguiente de la pila,
+ *  y tras lo último vuelta a lo primero. `true` si lo hizo. */
+function _dcsCycle(drag) {
+    const c = drag && drag.cycle;
+    if (!c || !c.again || drag.moved || c.pila.length < 2) return false;
+    const i = c.pila.findIndex(p => _dcsKey(p.kind, p.room, p.uid) === c.key);
+    _dcsPickClear();
+    _dcsMakePrimary(c.pila[(i + 1) % c.pila.length]);
+    _dcsRedraw();
+    _dcsInspectorDraw();
+    return true;
+}
+
+/** Al fondo: tenue y el puntero lo atraviesa; se suelta, que lo que se quería era lo de debajo. */
+function _dcsSendBack(kind, room, uid) {
+    _dcsFloatHide();
+    _dcsBack.add(_dcsKey(kind, room, uid));
+    _dcsPickClear();
+    _dcsMakePrimary(null);
+    _dcsRedraw();
+    _dcsInspectorDraw();
+    _dcsBackPaint();
+}
+
+function _dcsBringAll() {
+    _dcsBack.clear();
+    _dcsRedraw();
+    _dcsBackPaint();
+}
+
+/** En la barra, mientras haya algo al fondo: cuántas, y traerlas de vuelta. */
+function _dcsBackChip() {
+    return `<span id="dcsBackChip">${_dcsBack.size ? `<button type="button" class="btn btn-sm btn-warning"
+        onclick="_dcsBringAll()" title="${escAttr(t('dcim_bring_all'))}">
+        <i class="bi bi-layer-forward me-1"></i>${esc(tf('dcim_n_back', _dcsBack.size))}</button>` : ''}</span>`;
+}
+
+function _dcsBackPaint() {
+    const el = document.getElementById('dcsBackChip');
+    if (el) el.outerHTML = _dcsBackChip();
+}
+
+/** El botón «Enviar al fondo» del inspector. */
+function _dcsBackButton(kind, room, uid) {
+    return `<button type="button" class="btn btn-sm btn-secondary"
+        onclick="_dcsSendBack(${jsStr(kind)},${jsStr(room)},${jsStr(uid)})"
+        title="${escAttr(t('dcim_send_back'))}" aria-label="${escAttr(t('dcim_send_back'))}">
+        <i class="bi bi-layer-backward"></i></button>`;
+}
+
+// ── El teclado ───────────────────────────────────────────────────────────────
+
+//: Lo movido con las flechas se guarda al parar de pulsar, de una vez.
+let _dcsArrowTimer = null;
+let _dcsArrowMoved = null;
+
+/** Mover lo elegido con las flechas: 10 cm, o 1 m con Mayús (la planta no tiene baldosa). */
+function _dcsArrow(ev) {
+    const lista = _dcsPickedList();
+    if (!lista.length || !_dcimMay('dcim_edit')) return false;
+    const paso = ev.shiftKey ? 1000 : 100;
+    const dx = ev.key === 'ArrowLeft' ? -paso : ev.key === 'ArrowRight' ? paso : 0;
+    const dy = ev.key === 'ArrowUp' ? -paso : ev.key === 'ArrowDown' ? paso : 0;
+    _dcsManyShift(lista.map(m => {
+        const x = _dcsRowOf(m.kind, m.room, m.uid) || {};
+        return Object.assign({}, m, {at: {x: Number(x.pos_x) || 0, y: Number(x.pos_y) || 0}});
+    }), dx, dy);
+    _dcsArrowMoved = lista;
+    _dcsRedraw();
+    _dcsInspectorDraw();
+    clearTimeout(_dcsArrowTimer);
+    _dcsArrowTimer = setTimeout(_dcsArrowSave, 400);
+    return true;
+}
+
+async function _dcsArrowSave() {
+    const lista = _dcsArrowMoved || [];
+    _dcsArrowMoved = null;
+    const salas = new Set(lista.filter(m => m.kind === 'room').map(m => m.uid));
+    await _dcsSaveMany(lista.filter(m => m.kind === 'room' || !salas.has(m.room)).map(m => {
+        const x = _dcsRowOf(m.kind, m.room, m.uid);
+        return x ? {url: _dcsThingUrl(m.kind, m.uid), body: {pos_x: x.pos_x, pos_y: x.pos_y}} : null;
+    }).filter(Boolean));
+}
+
+/** R gira, Supr quita, las flechas mueven: lo elegido en la planta. `true` si era de aquí. */
+function _dcsKeyThing(ev) {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return false;
+    const prim = _dcsPrimaryKey();
+    if (!prim) return false;
+    if ((ev.key || '').startsWith('Arrow')) return _dcsArrow(ev);
+    if (!_dcimMay('dcim_edit')) return false;
+    const m = _dcsUnkey(prim);
+    const k = (ev.key || '').toLowerCase();
+    if (k === 'r') {
+        if (m.kind === 'room') _dcsTurn(m.uid); else _dcsItemTurn();
+        return true;
+    }
+    if (ev.key === 'Delete') {
+        if (m.kind !== 'room') { _dcsItemDrop(); return true; }
+        // Una sala no se borra desde un plano: se saca de la planta, preguntando antes.
+        const r = _dcsRooms().find(x => x.uid === m.uid);
+        showConfirmModal(tf('dcim_floor_unplace_q', (r || {}).name || ''), () => _dcsUnplace(m.uid));
+        return true;
+    }
+    return false;
+}
+
+// ── Las filas de las salas de la planta ──────────────────────────────────────
+
+/** Las filas de cada sala de la planta que tenga racks o filas, y los avisos del aire arriba:
+ *  lo mismo que el plano de la sala dice de la suya. */
+function _dcsRowsHtml() {
+    if (!_dcsPlan) return '';
+    const puede = _dcimMay('dcim_edit');
+    let avisos = [], h = '';
+    for (const r of _dcsHereRooms()) {
+        const c = (_dcsPlan.content || {})[r.uid] || {};
+        const filas = c.rows || [];
+        avisos = avisos.concat((c.warnings || []).map(w => Object.assign({room: r.name || ''}, w)));
+        if (!filas.length && !(c.racks || []).length) continue;
+        h += `<div class="text-muted ss-fs-1 mt-2 mb-1"><i class="bi bi-door-open me-1"></i>${esc(r.name || '')}</div>`
+           + _dcRowsListHtml(filas, (c.loose || []).length, puede ? {
+                nueva: `_dcsRowNew(${jsStr(r.uid)})`,
+                editar: uid => `_dcsRowEdit(${jsStr(r.uid)},${jsStr(uid)})`,
+                quitar: (uid, nombre) => `_dcRowDrop(${jsStr(uid)},${jsStr(nombre)},_dcsReload)`,
+            } : {});
+    }
+    if (!h) return '';
+    return `<div class="fw-semibold ss-fs-2 mt-3 mb-1">${esc(t('dcim_rows_title'))}</div>
+        ${avisos.map(w => `<div class="ss-fs-2 text-warning-emphasis" data-dcsrowwarn="1">
+            <i class="bi bi-thermometer-sun me-1"></i>${esc(w.room)}: ${
+            esc(tf('dcim_warn_hot_intake', w.label, w.aisle, w.other))}</div>`).join('')}
+        <div data-dcsrows="1">${h}</div>`;
+}
+
+function _dcsRowNew(roomUid) {
+    const c = ((_dcsPlan || {}).content || {})[roomUid] || {};
+    return _dcRowNew(roomUid, (c.rows || []).length, _dcsReload);
+}
+
+function _dcsRowEdit(roomUid, uid) {
+    const f = ((((_dcsPlan || {}).content || {})[roomUid] || {}).rows || []).find(x => x.uid === uid);
+    if (f) _dcRowEdit(f, _dcsReload);
+}
+
+// ── Llevarse la planta y traerla de vuelta ───────────────────────────────────
+
+/** Lo que se lleva un fichero de planta: la planta, y cada sala con su sitio, sus medidas, sus
+ *  racks (nombre y dónde) y sus piezas —las de un fichero de sala, sala a sala—. La zona general
+ *  va marcada como tal. */
+function _dcsExportJson() {
+    const f = _dcsFloor() || {};
+    const area = _dcsAreaUid();
+    return {
+        version: 1, kind: 'floor',
+        floor: {name: f.name || '', level: Number(f.level) || 0, core_kind: f.core_kind || '',
+                core_x: Number(f.core_x) || 0, core_y: Number(f.core_y) || 0},
+        rooms: _dcsHere().map(r => {
+            const c = (_dcsPlan.content || {})[r.uid] || {};
+            return {area: r.uid === area, name: r.name || '',
+                    pos_x: Number(r.pos_x) || 0, pos_y: Number(r.pos_y) || 0,
+                    width_mm: Number(r.width_mm) || 0, depth_mm: Number(r.depth_mm) || 0,
+                    rotation: Number(r.rotation) || 0, tile_mm: Number(r.tile_mm) || 600,
+                    racks: (c.racks || []).map(_dcPlanRackOut),
+                    features: (c.features || []).map(_dcPlanFeatureOut)};
+        }),
+    };
+}
+
+function _dcsExport() {
+    const f = _dcsFloor() || {};
+    const limpio = String(f.name || 'planta').replace(/[^\w.-]+/g, '-').slice(0, 40);
+    ssDownloadBlob(new Blob([JSON.stringify(_dcsExportJson(), null, 2)], {type: 'application/json'}),
+                   `planta-${limpio}.json`);
+}
+
+/** Si un fichero es una planta: `kind: 'floor'` y una lista de salas que son objetos. */
+function _dcsIsFloorFile(d) {
+    return !!(d && d.kind === 'floor' && Array.isArray(d.rooms) && d.rooms.every(r => r && typeof r === 'object'));
+}
+
+/** Traer una planta de un fichero. Cada sala del fichero va a la de la planta que se llama igual
+ *  (la zona general, a la zona general), y si no hay ninguna se crea en esta planta. Dentro de
+ *  cada una, lo que hace importar una sala (`/rooms/<uid>/import`): las piezas se reemplazan y
+ *  los racks se casan por nombre, sin borrar ninguno. */
+function _dcsImport(input) {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file || !_dcsPlan) return;
+    const lector = new FileReader();
+    lector.onload = () => {
+        let datos = null;
+        try { datos = JSON.parse(String(lector.result || '')); } catch (e) { datos = null; }
+        if (!_dcsIsFloorFile(datos)) return showToast(t('dcim_import_not_a_floor'), 'danger');
+        showConfirmModal(t('dcim_import_floor_q'), () => _dcsImportRun(datos));
+    };
+    lector.readAsText(file);
+}
+
+async function _dcsImportRun(datos) {
+    const f = _dcsFloor();
+    if (!f) return;
+    const cuenta = {rooms_new: 0, rooms_kept: 0, features: 0, racks: 0};
+    for (const s of datos.rooms) {
+        let uid = '';
+        if (s.area) {
+            if (!f.area_uid) {
+                const r = await _dcimSend('POST', `/api/v1/dcim/floors/${encodeURIComponent(f.uid)}/area`);
+                if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+                f.area_uid = String((r.data || {}).room_uid || '');
+            }
+            uid = f.area_uid;
+        } else {
+            const sitio = {pos_x: Number(s.pos_x) || 0, pos_y: Number(s.pos_y) || 0,
+                           width_mm: Math.max(0, Number(s.width_mm) || 0),
+                           depth_mm: Math.max(0, Number(s.depth_mm) || 0),
+                           rotation: (Number(s.rotation) || 0) % 360};
+            const ya = _dcsHereRooms().find(r => (r.name || '') === String(s.name || ''));
+            if (ya) {
+                uid = ya.uid;
+                const r = await _dcimSend('PUT', `/api/v1/dcim/rooms/${encodeURIComponent(uid)}`, sitio);
+                if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+                cuenta.rooms_kept++;
+            } else {
+                const r = await _dcimSend('POST', '/api/v1/dcim/rooms', Object.assign(
+                    {site_uid: _dcsPlan.site.uid, floor_uid: f.uid, name: String(s.name || t('dcim_room'))}, sitio));
+                if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+                uid = String((r.data || {}).uid || '');
+                cuenta.rooms_new++;
+            }
+        }
+        const r = await _dcimSend('POST', `/api/v1/dcim/rooms/${encodeURIComponent(uid)}/import`, {
+            racks: Array.isArray(s.racks) ? s.racks : [],
+            features: Array.isArray(s.features) ? s.features : []});
+        if (!r.ok) return showToast(r.error || t('dcim_import_not_a_plan'), 'danger');
+        const d = r.data || {};
+        cuenta.features += Number(d.features) || 0;
+        cuenta.racks += (Number(d.racks_moved) || 0) + (Number(d.racks_new) || 0);
+    }
+    // El núcleo de la planta, si el fichero lo dice.
+    const pl = datos.floor || {};
+    if (pl.core_kind !== undefined) {
+        await _dcimSend('PUT', `/api/v1/dcim/floors/${encodeURIComponent(f.uid)}`,
+                        {core_kind: String(pl.core_kind || ''), core_x: Number(pl.core_x) || 0,
+                         core_y: Number(pl.core_y) || 0});
+    }
+    showToast(tf('dcim_import_floor_done', cuenta.rooms_kept, cuenta.rooms_new, cuenta.features, cuenta.racks),
+              'success');
+    _dcsPickClear();
+    _dcsMakePrimary(null);
+    _dcsReload();
+}

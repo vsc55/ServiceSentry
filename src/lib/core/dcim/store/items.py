@@ -180,6 +180,9 @@ _ITEM = TableSpec(
         Column('rotation', 'INTEGER', nullable=False, default='0'),
         Column('base_mm', 'INTEGER'),
         Column('mount', 'TEXT', nullable=False, default="''"),
+        # Lo mismo que un rack o una pieza: el grupo con el que se mueve en el plano de la sala
+        # (un PC con su mesa). Solo lo usa un equipo de sala; en un rack se queda vacío.
+        Column('group_uid', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

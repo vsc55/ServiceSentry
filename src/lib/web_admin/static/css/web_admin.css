@@ -1508,6 +1508,10 @@ html.ss-nocss body { visibility: visible; }
    surface takes whatever is left; on a phone the panel drops underneath instead of squeezing it. */
 .ss-editor { display: flex; gap: .5rem; flex: 1 1 auto; min-height: 360px; }
 .ss-editor > .ss-infra-canvas { min-width: 0; }
+/* .ss-pick-mode : a canvas where dragging in empty space draws a choosing box instead of moving
+   the view. A crosshair over the empty space says so; what can be grabbed keeps its own hand
+   (`.ss-grab` sets it on the thing itself). */
+.ss-infra-canvas.ss-pick-mode { cursor: crosshair; }
 /* A canvas inside a page that scrolls: there is no remaining height for `flex` to give it, so
    it says its own — half the screen, within reason. The board's map sat at the 240px floor. */
 .ss-canvas-tall { min-height: clamp(360px, 55vh, 720px); }

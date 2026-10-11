@@ -1033,6 +1033,7 @@ tramo del mismo muro que se deja abierto o con cristal. Se guardan **enteros por
 | description | TEXT | no | `''` | |
 | asset | TEXT | no | `''` | su número de inventario. El mueble también se compra, y es el que sale por más dinero en el albarán |
 | base_mm | INTEGER | no | `0` | a qué altura del suelo empieza el armario, en mm. `0` = de suelo, casi todos; uno de pared cuelga a 1,2 o 1,8 m. Una columna y no una marca «de pared»: la marca es `base_mm > 0`, y sin la altura no dice dónde poner la escalera. La usan el 3D, que lo levanta, la tarjeta del plano y el fichero del plano |
+| group_uid | TEXT | no | `''` | grupo con el que se mueve junto en el plano de la sala o la planta: un id opaco compartido (`g-` y letras); vacío = sin grupo. El servidor rechaza lo que no case con `^[A-Za-z0-9_-]{0,64}$` |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -1247,6 +1248,7 @@ columna.
 | device_uid | TEXT | no | `''` | el dispositivo vigilado del que sale su estado, como el de un equipo |
 | demo_state | TEXT | no | `''` | el estado de una pieza de la DEMO (`ok`, `warning`, `error`) cuando no tiene dispositivo; solo lo escribe `main.py dcim demo`, ninguna ruta |
 | demo_reason | TEXT | no | `''` | por qué está así esa pieza de la DEMO («pila baja»): lo que se enseña al pulsarla. Mismas reglas que `demo_state` |
+| group_uid | TEXT | no | `''` | grupo con el que se mueve junto en el plano de la sala o la planta: un id opaco compartido (`g-` y letras); vacío = sin grupo. El servidor rechaza lo que no case con `^[A-Za-z0-9_-]{0,64}$` |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -1305,6 +1307,7 @@ nunca borra un armario que tenga algo dentro.
 | rotation | INTEGER | no | `0` | su giro, en grados, sobre su centro |
 | base_mm | INTEGER | sí | — | a qué altura del suelo, en mm; vacío = la de su clase (`ROOM_ITEM_DEFAULTS`: un AP a 2950, una roseta a 300) |
 | mount | TEXT | no | `''` | cómo va montado: `desk`, `wall`, `ceiling` o `floor` (`MOUNTS`); vacío = el de su clase |
+| group_uid | TEXT | no | `''` | grupo con el que se mueve junto en el plano de la sala o la planta: un id opaco compartido (`g-` y letras); vacío = sin grupo. El servidor rechaza lo que no case con `^[A-Za-z0-9_-]{0,64}$` |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |

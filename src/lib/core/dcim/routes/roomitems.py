@@ -24,14 +24,14 @@ from flask import jsonify, request
 
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
-from lib.core.dcim.routes._common import SERVER_COLS, _fresh, _without
+from lib.core.dcim.routes._common import SERVER_COLS, _fresh, _without, group_bad
 from lib.core.dcim.store import ITEM_ROLES, MOUNTS, room_item_box
 
 #: What a request may write on a room item. Not its rack, its U or its placement: a room item
 #: is in a room, and putting it in a rack is placing it there with the rack's routes.
 _EDITABLE = ('label', 'role', 'type_uid', 'device_uid', 'serial', 'asset', 'description',
              'pos_x', 'pos_y', 'rotation', 'base_mm', 'mount', 'depth_mm', 'room_uid',
-             'purchased_at', 'warranty_until', 'supplier')
+             'purchased_at', 'warranty_until', 'supplier', 'group_uid')
 
 
 def register(app, wa, C):
@@ -48,6 +48,8 @@ def register(app, wa, C):
             return 'dcim_role_unknown'
         if str(data.get('mount') or '') not in MOUNTS + ('',):
             return 'dcim_mount_unknown'
+        if group_bad(data):
+            return 'dcim_group_bad'
         for campo in ('pos_x', 'pos_y', 'rotation', 'base_mm', 'depth_mm'):
             if campo in data and data[campo] not in (None, ''):
                 try:

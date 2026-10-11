@@ -395,14 +395,15 @@ function _dcpInspectorHtml() {
                 <i class="bi bi-chevron-double-left"></i></button></aside>`;
     }
     return `<aside id="dcpInspector" class="ss-side-panel border rounded-3 p-2">${
-        _dcpInspectorBody()}</aside>`;
+        _dcpManyPanelHtml() + _dcpInspectorBody()}</aside>`;
 }
 
 /** Repintar solo el inspector: al seleccionar, al soltar un arrastre, al mover con las flechas.
  *  No la pantalla entera, que rehace el dibujo y con él el punto de vista. */
 function _dcpInspectorDraw() {
     const el = document.getElementById('dcpInspector');
-    if (el) el.innerHTML = _dcpInspectorBody();
+    // Con varios elegidos, primero cuántos y agruparlos (`_plangroup.html`).
+    if (el) el.innerHTML = _dcpManyPanelHtml() + _dcpInspectorBody();
 }
 
 /** Plegar o desplegar el inspector, y recordarlo. */
@@ -563,23 +564,9 @@ function _dcpRoomPanelHtml(plegar) {
             ${medida('depth_mm', 'dcim_room_depth')}
             ${medida('tile_mm', 'dcim_tile')}
         </div>
-        <div class="d-flex align-items-center gap-2 mb-1">
-            <span class="fw-semibold ss-fs-2">${esc(t('dcim_rows_title'))}</span>
-            <button type="button" class="btn btn-sm btn-secondary ms-auto" onclick="_dcpRowNew()">
-                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_row'))}</button>
-        </div>
-        ${filas.map(f => `<div class="d-flex align-items-center gap-1 ss-fs-2 py-1 border-bottom">
-            <span class="text-truncate">${esc(f.name || '—')}</span>
-            <span class="text-muted ss-fs-1 ms-auto">${esc(tf('dcim_n_racks', f.racks || 0))}</span>
-            <button type="button" class="btn btn-sm btn-secondary py-0 px-1"
-                title="${escAttr(t('dcim_row_aisles'))}" onclick="_dcpRowEdit(${jsStr(f.uid)})">
-                <i class="bi bi-pencil"></i></button>
-            <button type="button" class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
-                onclick="_dcpRowDrop(${jsStr(f.uid)},${jsStr(f.name || '')})">
-                <i class="bi bi-trash"></i></button>
-        </div>`).join('')}
-        ${sueltos ? `<div class="text-muted ss-fs-1 mt-1">${
-            esc(tf('dcim_loose_racks', sueltos))}</div>` : ''}
+        ${_dcRowsListHtml(filas, sueltos, {nueva: '_dcpRowNew()',
+            editar: uid => `_dcpRowEdit(${jsStr(uid)})`,
+            quitar: (uid, nombre) => `_dcpRowDrop(${jsStr(uid)},${jsStr(nombre)})`})}
         ${_dcpElementsHtml()}
         <div class="text-muted ss-fs-2 mt-3">${esc(t('dcim_piece_pick'))}</div>`;
 }
@@ -715,6 +702,7 @@ function _dcpBackChip() {
  *  que era la ÚNICA forma de cerrarlo — y un atajo que nadie ve no es una forma de hacer algo. */
 function _dcpDeselect() {
     _dcpSel = null;
+    _dcpPickClear();
     renderDcim();
 }
 
@@ -975,6 +963,7 @@ function _dcpFloatHide() {
  *  Solo con algo seleccionado y solo fuera de un campo de texto: una `r` escrita en el nombre de
  *  un rack no debe girar nada. */
 function _dcpKey(ev) {
+    if (_dcpManyKey(ev)) return;
     if (!_dcimPlan || !_dcpSel) return;
     const dentro = /^(INPUT|SELECT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '');
     if (dentro) return;
@@ -1030,20 +1019,30 @@ function _dcpExportJson() {
         version: 1,
         room: {name: room.name || '', width_mm: Number(room.width_mm) || 0,
                depth_mm: Number(room.depth_mm) || 0, tile_mm: _dcpTile()},
-        racks: (_dcimPlan.racks || []).map(r => ({
-            name: r.name || '', pos_x: Number(r.pos_x) || 0, pos_y: Number(r.pos_y) || 0,
-            rotation: Number(r.rotation) || 0, u_height: Number(r.u_height) || 42,
-            base_mm: Number(r.base_mm) || 0,
-            width_mm: Number(r.width_mm) || 600, depth_mm: Number(r.depth_mm) || 1000,
-        })),
-        features: _dcpFeatures().map(f => ({
-            kind: f.kind, label: f.label || '',
-            pos_x: Number(f.pos_x) || 0, pos_y: Number(f.pos_y) || 0,
-            width_mm: Number(f.width_mm) || 0, depth_mm: Number(f.depth_mm) || 0,
-            rotation: Number(f.rotation) || 0,
-            height_mm: f.height_mm ?? null, base_mm: f.base_mm ?? null,
-            shelves: f.shelves ?? null,
-        })),
+        racks: (_dcimPlan.racks || []).map(_dcPlanRackOut),
+        features: _dcpFeatures().map(_dcPlanFeatureOut),
+    };
+}
+
+/** Un rack en un fichero de plano: su nombre y dónde está, nada de lo que tiene dentro. */
+function _dcPlanRackOut(r) {
+    return {
+        name: r.name || '', pos_x: Number(r.pos_x) || 0, pos_y: Number(r.pos_y) || 0,
+        rotation: Number(r.rotation) || 0, u_height: Number(r.u_height) || 42,
+        base_mm: Number(r.base_mm) || 0,
+        width_mm: Number(r.width_mm) || 600, depth_mm: Number(r.depth_mm) || 1000,
+    };
+}
+
+/** Una pieza en un fichero de plano. */
+function _dcPlanFeatureOut(f) {
+    return {
+        kind: f.kind, label: f.label || '',
+        pos_x: Number(f.pos_x) || 0, pos_y: Number(f.pos_y) || 0,
+        width_mm: Number(f.width_mm) || 0, depth_mm: Number(f.depth_mm) || 0,
+        rotation: Number(f.rotation) || 0,
+        height_mm: f.height_mm ?? null, base_mm: f.base_mm ?? null,
+        shelves: f.shelves ?? null,
     };
 }
 
@@ -1098,12 +1097,17 @@ function _dcpImport(input) {
 async function _dcpRowNew() {
     const room = (_dcimPlan || {}).room;
     if (!room) return;
-    const cuantas = ((_dcpFeat || {}).rows || []).length;
+    return _dcRowNew(room.uid, ((_dcpFeat || {}).rows || []).length, () => _dcimOpenPlan(room.uid));
+}
+
+/** Una fila nueva en la sala `roomUid`, con la siguiente letra, y volver a leer con `luego`.
+ *  La misma para el plano de la sala y el de la planta. */
+async function _dcRowNew(roomUid, cuantas, luego) {
     const r = await _dcimSend('POST', '/api/v1/dcim/rows',
-                              {room_uid: room.uid,
+                              {room_uid: roomUid,
                                name: String.fromCharCode(65 + (cuantas % 26))});
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    _dcimOpenPlan(room.uid);
+    luego();
 }
 
 /** Decir a qué pasillo da cada cara. Es lo que convierte una fila en un dato sobre el aire y no
@@ -1111,7 +1115,12 @@ async function _dcpRowNew() {
     enfrente» no se puede calcular. */
 function _dcpRowEdit(uid) {
     const f = ((_dcpFeat || {}).rows || []).find(x => x.uid === uid);
-    if (!f) return;
+    if (f) _dcRowEdit(f, () => _dcimOpenPlan(_dcimPlan.room.uid));
+}
+
+/** Nombre y pasillos de la fila `f`, y volver a leer con `luego`. */
+function _dcRowEdit(f, luego) {
+    const uid = f.uid;
     // `showReasonModal` es el único modal con caja de texto que tiene el panel: se reutiliza
     // en vez de inventar otro, que sería un segundo sitio donde arreglar el foco y el Enter.
     showReasonModal(tf('dcim_row_aisles_of', f.name || ''), async (valor) => {
@@ -1122,14 +1131,40 @@ function _dcpRowEdit(uid) {
             rear_aisle: (partes[2] || '').trim(),
         });
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-        _dcimOpenPlan(_dcimPlan.room.uid);
+        luego();
     }, {placeholder: t('dcim_row_aisles_ph')});
 }
 
 function _dcpRowDrop(uid, nombre) {
+    _dcRowDrop(uid, nombre, () => _dcimOpenPlan(_dcimPlan.room.uid));
+}
+
+function _dcRowDrop(uid, nombre, luego) {
     showConfirmModal(tf('dcim_row_drop_q', nombre || ''), async () => {
         const r = await _dcimSend('DELETE', `/api/v1/dcim/rows/${encodeURIComponent(uid)}`);
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-        _dcimOpenPlan(_dcimPlan.room.uid);
+        luego();
     });
+}
+
+/** La lista de filas de una sala, con sus botones. `acc` dice qué llamar: `nueva` (el JS del
+ *  botón «Fila»), `editar(uid)` y `quitar(uid, nombre)`. La misma en la sala y en la planta. */
+function _dcRowsListHtml(filas, sueltos, acc) {
+    return `<div class="d-flex align-items-center gap-2 mb-1">
+            <span class="fw-semibold ss-fs-2">${esc(t('dcim_rows_title'))}</span>
+            ${acc.nueva ? `<button type="button" class="btn btn-sm btn-secondary ms-auto" onclick="${acc.nueva}">
+                <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_row'))}</button>` : ''}
+        </div>
+        ${filas.map(f => `<div class="d-flex align-items-center gap-1 ss-fs-2 py-1 border-bottom">
+            <span class="text-truncate">${esc(f.name || '—')}</span>
+            <span class="text-muted ss-fs-1 ms-auto">${esc(tf('dcim_n_racks', f.racks || 0))}</span>
+            ${acc.editar ? `<button type="button" class="btn btn-sm btn-secondary py-0 px-1"
+                title="${escAttr(t('dcim_row_aisles'))}" onclick="${acc.editar(f.uid)}">
+                <i class="bi bi-pencil"></i></button>` : ''}
+            ${acc.quitar ? `<button type="button" class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
+                onclick="${acc.quitar(f.uid, f.name || '')}">
+                <i class="bi bi-trash"></i></button>` : ''}
+        </div>`).join('')}
+        ${sueltos ? `<div class="text-muted ss-fs-1 mt-1">${
+            esc(tf('dcim_loose_racks', sueltos))}</div>` : ''}`;
 }

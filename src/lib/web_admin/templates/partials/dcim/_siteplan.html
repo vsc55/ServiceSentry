@@ -208,7 +208,8 @@ function _dcsContent() {
     const area = _dcsRooms().find(r => r.uid === _dcsAreaUid());
     if (area) h += _dcsInside(area);
     for (const r of salas) h += _dcsInside(r);
-    return h + _dcsCoreSvg() + _dcCalMarks('floor') + (_dcw ? _dcwSvg() : '');
+    // Lo elegido de más y el recuadro de elegir (`_siteplangroup.html`).
+    return h + _dcsCoreSvg() + _dcsPickedSvg() + _dcsGuidesSvg() + _dcCalMarks('floor') + (_dcw ? _dcwSvg() : '');
 }
 
 //: El lado del núcleo de una planta, en mm: el mismo que levanta el 3D (`_ds3Core`).
@@ -315,7 +316,7 @@ function _dcsThing(kind, x, room, wmm, dmm, look, nombre) {
     // El rótulo, FUERA del giro: gira la caja y no el texto, que girado con ella salía de lado
     // o boca abajo. El centro no se mueve al girar, así que el texto sigue donde está la caja.
     const ancho = Math.abs(rot % 180) === 90 ? d : w;
-    return `<g class="ss-grab" data-dcsi="${escAttr(kind)}" data-uid="${escAttr(x.uid)}"
+    return `<g class="ss-grab${_dcsIsBack(kind, room, x.uid) ? ' ss-dcp-back' : ''}" data-dcsi="${escAttr(kind)}" data-uid="${escAttr(x.uid)}"
                data-room="${escAttr(room)}"
                onpointerenter="_dcsFloatShow(${jsStr(kind)},${jsStr(x.uid)},${jsStr(room)},this)"
                onpointerleave="_dcsFloatLater()">
@@ -357,7 +358,7 @@ function _dcsRoom(r) {
     const puesto = _dcsSel === r.uid;
     const tone = (r.roll || {}).state ? deviceStateColor(r.roll.state) : 'var(--bs-info)';
     const tam = Math.min(12, Math.max(4, Math.min(w, d) * 0.16));
-    return `<g class="ss-grab" data-dcs="${escAttr(r.uid)}"
+    return `<g class="ss-grab${_dcsIsBack('room', '', r.uid) ? ' ss-dcp-back' : ''}" data-dcs="${escAttr(r.uid)}"
                transform="rotate(${rot} ${x + w / 2} ${y + d / 2})"
                onpointerenter="_dcsFloatShow('room',${jsStr(r.uid)},'',this)"
                onpointerleave="_dcsFloatLater()">
@@ -433,17 +434,28 @@ function _dcsHtml() {
                     <i class="bi bi-image"></i></button>
                 ${f.plan ? `<button class="btn btn-sm btn-warning" onclick="_dcsDropPlan()"
                         title="${escAttr(t('dcim_plan_drop'))}"><i class="bi bi-trash"></i></button>` : ''}` : ''}
+                ${f ? _dcPointerButtons() : ''}
                 ${f && f.plan ? _dcPlanBgButton() : ''}
                 ${edita && f && f.plan ? _dcCalButton('floor') : ''}
                 ${edita && f && f.plan ? _dcwButton() : ''}
                 ${f ? _dcUndoButtons() : ''}
+                ${f ? `${_dcsBackChip()}
+                <input type="file" id="dcsImportFile" class="d-none"
+                       accept=".json,application/json" onchange="_dcsImport(this)">
+                <button class="btn btn-sm btn-secondary" onclick="_dcsExport()"
+                        title="${escAttr(t('dcim_export_floor'))}" aria-label="${escAttr(t('dcim_export_floor'))}">
+                    <i class="bi bi-filetype-json"></i></button>
+                ${edita ? `<button class="btn btn-sm btn-secondary"
+                        onclick="document.getElementById('dcsImportFile').click()"
+                        title="${escAttr(t('dcim_import_floor'))}" aria-label="${escAttr(t('dcim_import_floor'))}">
+                    <i class="bi bi-upload"></i></button>` : ''}` : ''}
                 ${ssCanvasTools(_DCS_SVG, 'site_plan')}
             </div>
         </div>
         ${_dcCalBar('floor')}
         <div id="dcwBar">${_dcwBar()}</div>
         ${f ? `<div class="ss-editor">
-            <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
+            <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative${_dcPointerClass(!_dcw)}">
                 ${_dcCompass(_dcNorthOf(_dcsFloor()))}
                 ${_dcsPaletteHtml()}
                 <div id="dcsFloat" class="position-absolute d-none"
@@ -547,12 +559,13 @@ async function _dcsAdd(kind) {
 function _dcsInspectorHtml() {
     if (!_dcimMay('dcim_edit')) return '';
     return `<aside id="dcsInspector" class="ss-side-panel border rounded-3 p-2">${
-        _dcsInspectorBody()}</aside>`;
+        _dcsManyPanelHtml() + _dcsInspectorBody()}</aside>`;
 }
 
 function _dcsInspectorDraw() {
     const el = document.getElementById('dcsInspector');
-    if (el) el.innerHTML = _dcsInspectorBody();
+    // Con varios elegidos, primero cuántos y agruparlos (`_siteplangroup.html`).
+    if (el) el.innerHTML = _dcsManyPanelHtml() + _dcsInspectorBody();
 }
 
 function _dcsInspectorBody() {
@@ -612,6 +625,7 @@ function _dcsItemPanel(x) {
                 title="${escAttr(t('dcim_piece_duplicate'))}"><i class="bi bi-files"></i></button>
             <button type="button" class="btn btn-sm btn-secondary" onclick="_dcsItemTurn()"
                 title="${escAttr(t('dcim_turn'))}"><i class="bi bi-arrow-clockwise"></i></button>
+            ${_dcsBackButton(_dcsItem.kind, _dcsItem.room, String(x.uid))}
             <button type="button" class="btn btn-sm btn-danger" onclick="_dcsItemDrop()"
                 title="${escAttr(t('delete'))}"><i class="bi bi-trash"></i></button>
         </div>
@@ -821,6 +835,7 @@ function _dcsRoomPanel(r) {
                 <i class="bi bi-map me-1"></i>${esc(t('dcim_room_open_plan'))}</button>
             <button type="button" class="btn btn-sm btn-secondary" onclick="_dcsTurn(${jsStr(r.uid)})"
                 title="${escAttr(t('dcim_turn'))}"><i class="bi bi-arrow-clockwise"></i></button>
+            ${_dcsBackButton('room', '', r.uid)}
             <button type="button" class="btn btn-sm btn-warning" onclick="_dcsUnplace(${jsStr(r.uid)})"
                 title="${escAttr(t('dcim_floor_unplace'))}"><i class="bi bi-box-arrow-up"></i></button>
         </div>`;
@@ -877,12 +892,15 @@ function _dcsFloorPanel() {
         ${aqui.length ? lista(aqui, false) : `<div class="text-muted ss-fs-2 mb-1">—</div>`}
         <div class="fw-semibold ss-fs-2 mt-3 mb-1">${esc(t('dcim_floor_unplaced'))}
             <span class="text-muted ss-fs-1 ms-1">${sueltas.length}</span></div>
-        ${sueltas.length ? lista(sueltas, true) : `<div class="text-muted ss-fs-2">—</div>`}`;
+        ${sueltas.length ? lista(sueltas, true) : `<div class="text-muted ss-fs-2">—</div>`}
+        ${_dcsRowsHtml()}
+        ${_dcsElementsHtml()}`;
 }
 
 // ── Lo que se hace ─────────────────────────────────────────────────────────────────────────
 
 function _dcsPick(uid) {
+    _dcsPickClear();
     _dcsSel = String(uid || '');
     _dcsItem = null;
     _dcsRedraw();
@@ -1137,8 +1155,12 @@ function _dcsDown(ev) {
             return;
         }
     }
-    // Un rack o una pieza, antes que la sala en la que están: están encima de ella.
-    const gi = ev.target.closest('g[data-dcsi]');
+    // Varios a la vez: Mayús/Ctrl + clic, o coger algo que va con otros (`_siteplangroup.html`).
+    if (_dcsManyDown(ev)) return;
+    // Un rack o una pieza, antes que la sala en la que están: están encima de ella. Lo elegido,
+    // si también está bajo el dedo, aunque algo lo tape (`_dcsHit`).
+    const hit = _dcsHit(ev);
+    const gi = hit && hit.kind !== 'room' ? hit.el : null;
     if (gi) {
         const ahora = Date.now();
         const uid = gi.dataset.uid;
@@ -1148,6 +1170,8 @@ function _dcsDown(ev) {
             return _dcsItemOpen();
         }
         _dcsLastDown = {uid, t: ahora};
+        // Quien solo mira no arrastra: la segunda pulsación pasa ya a lo de debajo.
+        if (!_dcimMay('dcim_edit') && _dcsCycle({cycle: hit.cycle})) return;
         _dcsSel = '';
         _dcsItem = {kind: gi.dataset.dcsi, uid, room: gi.dataset.room};
         const x = _dcsItemRow();
@@ -1157,14 +1181,15 @@ function _dcsDown(ev) {
         const p = ssCanvasPoint(_DCS_SVG, ev);
         if (x && sala && p && _dcimMay('dcim_edit')) {
             _dcsDrag = {what: 'item', uid, from: p, moved: false, rot: Number(sala.rotation) || 0,
-                        at: {x: Number(x.pos_x) || 0, y: Number(x.pos_y) || 0}};
+                        at: {x: Number(x.pos_x) || 0, y: Number(x.pos_y) || 0}, cycle: hit.cycle,
+                        box0: _dcsAabb(gi.dataset.dcsi, gi.dataset.room, x)};
             ev.currentTarget.setPointerCapture?.(ev.pointerId);
         }
         _dcsRedraw();
         _dcsInspectorDraw();
         return;
     }
-    const g = ev.target.closest('g[data-dcs]');
+    const g = hit && hit.kind === 'room' ? hit.el : null;
     if (g) {
         _dcsItem = null;
         const ahora = Date.now();
@@ -1173,11 +1198,13 @@ function _dcsDown(ev) {
             return _dcimOpenPlan(g.dataset.dcs);
         }
         _dcsLastDown = {uid: g.dataset.dcs, t: ahora};
+        if (!_dcimMay('dcim_edit') && _dcsCycle({cycle: hit.cycle})) return;
         const r = _dcsRooms().find(x => x.uid === g.dataset.dcs);
         const p = ssCanvasPoint(_DCS_SVG, ev);
         _dcsSel = g.dataset.dcs;
         if (r && p && _dcimMay('dcim_edit')) {
-            _dcsDrag = {uid: r.uid, from: p, moved: false,
+            _dcsDrag = {uid: r.uid, from: p, moved: false, cycle: hit.cycle,
+                        box0: _dcsAabb('room', '', r),
                         at: {x: Number(r.pos_x) || 0, y: Number(r.pos_y) || 0}};
             ev.currentTarget.setPointerCapture?.(ev.pointerId);
         }
@@ -1185,6 +1212,8 @@ function _dcsDown(ev) {
         _dcsInspectorDraw();
         return;
     }
+    // En vacío, en modo elegir o con Mayús: un recuadro que elige lo que toque.
+    if (_dcPickBoxWanted(ev) && _dcsPickBoxStart(ev)) return;
     _dcsBlank = {x: ev.clientX, y: ev.clientY};
     ssCanvasPanStart(_DCS_SVG, ev);
 }
@@ -1192,6 +1221,7 @@ function _dcsDown(ev) {
 function _dcsMove(ev) {
     if (_dcCal && _dcCal.press) return _dcCalMove(ev);
     if (_dcw) return _dcwMove(ev);
+    if (_dcsDrag && (_dcsDrag.what === 'many' || _dcsDrag.what === 'pickbox')) return _dcsManyMove(ev);
     const p = ssCanvasPoint(_DCS_SVG, ev);
     if (_dcsDrag && _dcsDrag.what === 'core') {
         const f = _dcsFloor();
@@ -1208,10 +1238,14 @@ function _dcsMove(ev) {
         // El movimiento de la mano está en la planta; la posición, en la sala: se gira de vuelta
         // con el giro de la sala, o arrastrar a la derecha un rack de una sala girada lo movería
         // hacia arriba.
-        const dx = (p.x - _dcsDrag.from.x) / _DCP_SCALE, dy = (p.y - _dcsDrag.from.y) / _DCP_SCALE;
+        // Pegado a lo que tiene al lado si llega cerca (Alt lo suelta), y si no a pasos de 10 cm.
+        const d = _dcsNearDelta([{kind: _dcsItem.kind, room: _dcsItem.room, uid: String(x.uid)}], _dcsDrag.box0,
+                                (p.x - _dcsDrag.from.x) / _DCP_SCALE, (p.y - _dcsDrag.from.y) / _DCP_SCALE,
+                                ev.altKey);
         const a = _dcsDrag.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
-        x.pos_x = _dcsSnap(_dcsDrag.at.x + dx * c + dy * s);
-        x.pos_y = _dcsSnap(_dcsDrag.at.y - dx * s + dy * c);
+        x.pos_x = Math.round(_dcsDrag.at.x + d.dx * c + d.dy * s);
+        x.pos_y = Math.round(_dcsDrag.at.y - d.dx * s + d.dy * c);
+        if (x.box) { x.box.x = x.pos_x; x.box.y = x.pos_y; }
         _dcsDrag.moved = true;
         _dcsRedraw();
         return;
@@ -1249,8 +1283,12 @@ function _dcsMove(ev) {
         if (!p || !r) return;
         // A pasos de 10 cm: en el plano de un edificio nadie coloca una sala al milímetro, y
         // el número resultante sugeriría una exactitud que no existe.
-        r.pos_x = _dcsSnap(_dcsDrag.at.x + (p.x - _dcsDrag.from.x) / _DCP_SCALE);
-        r.pos_y = _dcsSnap(_dcsDrag.at.y + (p.y - _dcsDrag.from.y) / _DCP_SCALE);
+        // Y pegada a las salas de al lado si llega cerca (Alt lo suelta).
+        const d = _dcsNearDelta([{kind: 'room', room: '', uid: r.uid}], _dcsDrag.box0,
+                                (p.x - _dcsDrag.from.x) / _DCP_SCALE, (p.y - _dcsDrag.from.y) / _DCP_SCALE,
+                                ev.altKey);
+        r.pos_x = Math.round(_dcsDrag.at.x + d.dx);
+        r.pos_y = Math.round(_dcsDrag.at.y + d.dy);
         _dcsDrag.moved = true;
         _dcsRedraw();
         return;
@@ -1267,6 +1305,8 @@ async function _dcsUp(ev) {
     const drag = _dcsDrag;
     _dcsDrag = null;
     ssCanvasPanEnd(ev);
+    if (_dcsGuides.length) { _dcsGuides = []; _dcsRedraw(); }
+    if (drag && (drag.what === 'many' || drag.what === 'pickbox')) return _dcsManyUp(drag);
     const suelo = _dcsBlank;
     _dcsBlank = null;
     if (!drag) {
@@ -1275,7 +1315,7 @@ async function _dcsUp(ev) {
         if (quieto && (_dcsSel || _dcsItem)) _dcsPick('');
         return;
     }
-    if (!drag.moved) return;
+    if (!drag.moved) return void _dcsCycle(drag);
     if (drag.what === 'core') {
         const f = _dcsFloor();
         if (f) _dcpQueue(`/api/v1/dcim/floors/${encodeURIComponent(f.uid)}`, {core_x: f.core_x, core_y: f.core_y});

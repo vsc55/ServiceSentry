@@ -66,6 +66,10 @@ _RACK = TableSpec(
         # "wall-mounted" flag: the flag is `base_mm > 0`, and a flag without the height is the
         # half of the fact that does not tell you where to put the ladder.
         Column('base_mm', 'INTEGER', nullable=False, default='0'),
+        # The group it moves with on the room's plan, or ''. Several things put together —a row
+        # of racks and the aisle between them— are dragged as one; a shared opaque id, not a
+        # table of groups, because a group is nothing but the things in it.
+        Column('group_uid', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

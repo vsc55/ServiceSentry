@@ -111,6 +111,10 @@ _FEATURE = TableSpec(
         Column('device_uid', 'TEXT', nullable=False, default="''"),
         Column('demo_state', 'TEXT', nullable=False, default="''"),
         Column('demo_reason', 'TEXT', nullable=False, default="''"),
+        # El grupo con el que se mueve en el plano de la sala, o ''. Un pasillo y los racks que lo
+        # cierran se arrastran juntos; un id compartido y no una tabla de grupos, porque un grupo
+        # no es más que lo que tiene dentro.
+        Column('group_uid', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

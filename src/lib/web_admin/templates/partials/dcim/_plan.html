@@ -248,6 +248,7 @@ function _dcimPlanHtml() {
                 ${room.plan ? `<button class="btn btn-sm btn-warning" onclick="_dcpDropPlan()"
                         title="${escAttr(t('dcim_plan_drop'))}">
                     <i class="bi bi-trash"></i></button>` : ''}
+                ${planta ? _dcPointerButtons() : ''}
                 ${room.plan || _dcimPlan.planFloor ? _dcPlanBgButton() : ''}
                 ${room.plan && edita ? _dcCalButton('room') : ''}
                 ${_dcUndoButtons()}
@@ -266,7 +267,7 @@ function _dcimPlanHtml() {
         ${_dcCalBar('room')}
         ${_dcpRowWarnings()}
         <div class="ss-editor">
-            <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative">
+            <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative${_dcPointerClass(planta)}">
                 ${_dcCompass(_dcNorthOf((_dcimPlan || {}).planFloor || (_dcimPlan || {}).room))}
                 ${planta ? _dcpPaletteHtml() : ''}
                 <div id="dcimPlanPanel" class="position-absolute ss-passthru"
@@ -380,6 +381,8 @@ function _dcpContent(racks) {
          // Lo que está en la sala y no en un rack: los puestos, las rosetas, los AP.
          + _dcriSvg()
          + _dcpFeaturesSvg('air')
+         // Lo elegido de más y las guías del imán entre cosas (`_plangroup.html`).
+         + _dcpPickedSvg() + _dcpGuidesSvg()
          + _dcCalMarks('room');
 }
 
@@ -549,6 +552,9 @@ function _dcpDown(ev) {
             return;
         }
     }
+    // Varios a la vez: Mayús/Ctrl + clic, o coger algo que va con otros —lo elegido junto, o su
+    // grupo— (`_plangroup.html`).
+    if (_dcpManyDown(ev, hit)) return;
     // Una pieza de la sala: se coge igual que un rack, y por eso el arrastre es uno solo. Lo
     // que cambia es a qué tabla va lo que se suelte, y eso lo decide `_dcpUp`.
     // Lo que se coge es lo de ARRIBA, salvo que lo seleccionado esté también bajo el dedo: una
@@ -595,6 +601,8 @@ function _dcpDown(ev) {
             return;
         }
     }
+    // En el suelo, en modo elegir o con Mayús: un recuadro que elige lo que toque.
+    if (_dcPickBoxWanted(ev) && _dcpPickBoxStart(ev)) return;
     // En el suelo: lo que empieza aquí es desplazar el plano, o —si no se mueve— soltar lo
     // seleccionado. Se apunta dónde se bajó el dedo para distinguir las dos al levantarlo.
     _dcpBlank = {x: ev.clientX, y: ev.clientY};
@@ -934,6 +942,7 @@ function _dcpMove(ev) {
     // La posición bajo el puntero, siempre: es lo que se lee en la barra mientras se coloca, y
     // «B7» es lo que alguien dirá por teléfono cuando esté dentro de la sala.
     const bajo = ssCanvasPoint(_DCP_SVG, ev);
+    if (_dcpDrag && (_dcpDrag.what === 'many' || _dcpDrag.what === 'pickbox')) return _dcpManyMove(ev);
     if (_dcpDrag && _dcpDrag.what === 'elevsize') {
         const o = _dcpDrag.kind === 'rack' ? _dcpRack1(_dcpDrag.uid)
                                            : _dcpFeatures().find(x => x.uid === _dcpDrag.uid);
@@ -987,9 +996,10 @@ function _dcpMove(ev) {
         const i = _dcri1(_dcpDrag.uid);
         if (!p || !i || !_dcpDrag.may) return;
         const b = i.box || {};
-        const sitio = _dcpPlace(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
-                                (p.y - _dcpDrag.from.y) / _DCP_SCALE,
-                                Number(b.w || 200), Number(b.d || 200), b.rot || 0);
+        const sitio = _dcpPlaceNear(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
+                                    (p.y - _dcpDrag.from.y) / _DCP_SCALE,
+                                    Number(b.w || 200), Number(b.d || 200), b.rot || 0,
+                                    new Set([_dcpKey2('item', _dcpDrag.uid)]), ev.altKey);
         i.pos_x = b.x = sitio.x;
         i.pos_y = b.y = sitio.y;
         _dcpDrag.moved = true;
@@ -1001,9 +1011,10 @@ function _dcpMove(ev) {
         const p = ssCanvasPoint(_DCP_SVG, ev);
         const f = _dcpFeatures().find(x => x.uid === _dcpDrag.uid);
         if (!p || !f) return;
-        const sitio = _dcpPlace(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
-                                (p.y - _dcpDrag.from.y) / _DCP_SCALE,
-                                Number(f.width_mm || 600), Number(f.depth_mm || 600), f.rotation);
+        const sitio = _dcpPlaceNear(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
+                                    (p.y - _dcpDrag.from.y) / _DCP_SCALE,
+                                    Number(f.width_mm || 600), Number(f.depth_mm || 600), f.rotation,
+                                    new Set([_dcpKey2('feature', f.uid)]), ev.altKey);
         f.pos_x = sitio.x;
         f.pos_y = sitio.y;
         _dcpDrag.moved = true;
@@ -1019,10 +1030,11 @@ function _dcpMove(ev) {
         // Back to millimetres: the drawing is in scaled units and the RECORD is in the units
         // the room is measured in. Storing pixels would make the plan unreadable the day the
         // scale changes, and the scale is a decision about drawing, not about the room.
-        const sitio = _dcpPlace(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
-                                (p.y - _dcpDrag.from.y) / _DCP_SCALE,
-                                Number(rack.width_mm || 600), Number(rack.depth_mm || 1000),
-                                rack.rotation);
+        // Pegado a lo que tiene al lado si llega cerca (Alt lo suelta), y si no a la baldosa.
+        const sitio = _dcpPlaceNear(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
+                                    (p.y - _dcpDrag.from.y) / _DCP_SCALE,
+                                    Number(rack.width_mm || 600), Number(rack.depth_mm || 1000),
+                                    rack.rotation, new Set([_dcpKey2('rack', rack.uid)]), ev.altKey);
         rack.pos_x = sitio.x;
         rack.pos_y = sitio.y;
         _dcpDrag.moved = true;
@@ -1038,6 +1050,13 @@ async function _dcpUp(ev) {
     if (_dcCal && _dcCal.press) return _dcCalUp(ev);
     _dcpSizeHide();
     const drag = _dcpDrag;
+    if (drag && (drag.what === 'many' || drag.what === 'pickbox')) {
+        _dcpDrag = null;
+        ssCanvasPanEnd(ev);
+        return _dcpManyUp(drag);
+    }
+    // Las guías del imán se van con la mano.
+    if (_dcpGuides.length) { _dcpGuides = []; _dcpDrag = null; _dcpRedraw(); }
     if (drag && drag.what === 'elevsize') {
         _dcpDrag = null;
         ssCanvasPanEnd(ev);

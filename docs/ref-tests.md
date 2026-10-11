@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~11.120 tests** (11.312 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-10-10). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~11.161 tests** (11.312 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-10-10). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -11678,3 +11678,9 @@ rastreo); un recorrido lista sus cables y uno se dibuja solo encima del mazo apa
 | `TestTheArithmetic::test_a_device_lists_its_connections_and_one_port_shows_only_its_own` | Se pidió: al seleccionar un dispositivo, todo lo conectado con él; al seleccionar uno de sus puertos, solo lo conectado por ese. Su ficha lista una conexión por puerto, de su puerto a lo que hay al otro lado; pulsando una se queda solo ese camino, y «Todas las conexiones» vuelve |
 | `TestTheArithmetic::test_opening_the_selected_rack_shows_what_is_inside` | Reportado: abrir un rack solo funcionaba paseando. En las otras vistas el clic lo seleccionaba antes, y su contenido —fuera de la selección— salía apagado: un rack abierto que parecía vacío. Abrirlo quita su propia selección; la de otra cosa se mantiene |
 | `TestTheArithmetic::test_a_runs_card_lists_its_cables_and_offers_to_clear` | La ficha de un recorrido lista sus cables para elegir uno, y ofrece quitar el resaltado |
+
+## 213. Integración — Imán, selección múltiple y grupos en los planos
+
+**Archivo:** `tests/integration/test_wa_dcim_plangroup.py` — 41 tests
+
+Cubre el imán entre cosas en el plano de una sala, elegir varios (Mayús/Ctrl+clic, recuadro, modo elegir del puntero), los grupos guardados (`group_uid`) que se mueven juntos y se deshacen de una vez, el plano de una planta (varios en salas giradas, una sala solo si queda entera en el recuadro, la lista de elementos de la planta) y el servidor rechazando un `group_uid` que no es un id (`^[A-Za-z0-9_-]{0,64}$`).

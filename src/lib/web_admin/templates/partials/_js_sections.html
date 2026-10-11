@@ -231,7 +231,11 @@
 {# The room from above. After the elevation, which it borrows `_dceClip` from — and after the
    canvas, which both draw on. #}
 {% include "partials/dcim/_plan.html" %}
+{# Juntar lo que va junto en el plano de la sala: el imán entre cosas, varios a la vez y grupos. #}
+{% include "partials/dcim/_plangroup.html" %}
 {% include "partials/dcim/_siteplan.html" %}
+{# Varios a la vez, grupos y la lista de lo que hay, en el plano de una planta. #}
+{% include "partials/dcim/_siteplangroup.html" %}
 {# A floor's walls read from its plan: detection, review, and the walls in 3D. #}
 {% include "partials/dcim/_walls.html" %}
 {% include "partials/dcim/_portmap.html" %}

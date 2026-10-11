@@ -9,6 +9,7 @@ que hay que construir obligaría a construirlo para usarlas.
 from __future__ import annotations
 
 import math
+import re
 
 
 def _num(v) -> float:
@@ -83,6 +84,20 @@ def numbers_bad(spec, data: dict, bounds=None) -> str:
             return col.name
         data[col.name] = int(f) if col.type == 'INTEGER' else f
     return ''
+
+
+#: What a plan group's id may be: what the plan mints (`g-` and a few letters), with room to
+#: spare. Anything else —a list, a page of text— is refused rather than stored.
+_GROUP_RE = re.compile(r'^[A-Za-z0-9_-]{0,64}$')
+
+
+def group_bad(data: dict) -> bool:
+    """Whether *data* carries a ``group_uid`` that is not one: the group a rack, a piece or a
+    room item moves with on the room's plan. Empty is fine — it is how one leaves a group."""
+    if 'group_uid' not in data:
+        return False
+    v = data.get('group_uid')
+    return not (isinstance(v, str) and _GROUP_RE.match(v))
 
 
 def _without(data: dict, keys) -> dict:

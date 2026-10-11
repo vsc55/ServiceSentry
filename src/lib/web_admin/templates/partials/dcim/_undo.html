@@ -14,6 +14,9 @@
    deshacerlo devuelve los que había. Dentro de la revisión, cada paso tiene su propio deshacer
    (`_dcwUndo`), porque ahí nada va al servidor hasta «Guardar».
 
+   Y lo que se mueve junto —varios elegidos, o un grupo—: una escritura por cosa, juntadas en
+   una sola entrada (`_dcUndoBatch`), que se deshace de una vez.
+
    Lo que NO se deshace aquí: crear y borrar. Borrar ya pregunta antes, y un rack borrado se
    lleva lo que tenía dentro, que no se recupera reenviando su fila.
    ================================================================ #}
@@ -43,12 +46,14 @@ function _dcUndoItems() {
         add('rooms', [_dcimPlan.room]);
         add('racks', _dcimPlan.racks);
         add('features', typeof _dcpFeatures === 'function' ? _dcpFeatures() : []);
+        add('room-items', typeof _dcriItems === 'function' ? _dcriItems() : []);
     } else if (_dcsPlan) {
         add('floors', _dcsPlan.floors);
         add('rooms', (_dcsPlan.site || {}).rooms);
         for (const c of Object.values(_dcsPlan.content || {})) {
             add('racks', c.racks);
             add('features', c.features);
+            add('room-items', c.items);
         }
     }
     return out;
@@ -110,6 +115,15 @@ function _dcUndoPush(url, antes, despues) {
     _dcUndoPaint();
 }
 
+/** Juntar en una entrada lo apuntado desde la posición `desde` de la pila: lo que se escribió
+ *  de una vez —mover un grupo, agruparlo— se deshace de una vez. Con una sola, nada que juntar. */
+function _dcUndoBatch(desde) {
+    const partes = _dcUndoStack.splice(desde);
+    if (partes.length < 2) { _dcUndoStack.push(...partes); return _dcUndoPaint(); }
+    _dcUndoStack.push({url: partes[0].url, batch: partes, before: {}, after: {}, at: 0});
+    _dcUndoPaint();
+}
+
 /** Deshacer (`dir` = 'undo') o rehacer ('redo') lo último. */
 async function _dcUndo(dir) {
     const de = dir === 'redo' ? _dcRedoStack : _dcUndoStack;
@@ -121,7 +135,17 @@ async function _dcUndo(dir) {
     const valores = dir === 'redo' ? e.after : e.before;
     _dcUndoBusy = true;
     let r;
-    try { r = await _dcimSend('PUT', e.url, valores); } finally { _dcUndoBusy = false; }
+    try {
+        if (!e.batch) r = await _dcimSend('PUT', e.url, valores);
+        else {
+            // Al deshacer, de lo último a lo primero; al rehacer, en el orden en que se hizo.
+            const partes = dir === 'redo' ? e.batch : e.batch.slice().reverse();
+            for (const s of partes) {
+                r = await _dcimSend('PUT', s.url, dir === 'redo' ? s.after : s.before);
+                if (!r || !r.ok) break;
+            }
+        }
+    } finally { _dcUndoBusy = false; }
     if (!r || !r.ok) {
         de.push(e);
         _dcUndoPaint();
@@ -134,24 +158,42 @@ async function _dcUndo(dir) {
 /** Lo deshecho (o rehecho) ya está en el servidor: lo mismo en lo guardado y en el dibujo, y
  *  la entrada a la otra pila. */
 function _dcUndoDone(e, valores, destino) {
+    if (e.batch) {
+        const lado = valores === e.after ? 'after' : 'before';
+        for (const s of e.batch) _dcUndoSync(s, s[lado]);
+    } else _dcUndoSync(e, valores);
+    e.at = 0;           // lo deshecho no se junta con lo siguiente que se haga
+    destino.push(e);
+    _dcUndoPaint();
+}
+
+/** Poner lo guardado y el dibujo de una cosa como dicen `valores`. */
+function _dcUndoSync(e, valores) {
     const sombra = _dcUndoShadow.get(e.url);
     if (sombra) Object.assign(sombra, JSON.parse(JSON.stringify(valores)));
-    for (const [url, o] of _dcUndoItems()) if (url === e.url) Object.assign(o, JSON.parse(JSON.stringify(valores)));
+    for (const [url, o] of _dcUndoItems()) {
+        if (url !== e.url) continue;
+        Object.assign(o, JSON.parse(JSON.stringify(valores)));
+        // Un equipo de sala se dibuja de su caja.
+        if (o.box) {
+            if ('pos_x' in valores) o.box.x = Number(valores.pos_x) || 0;
+            if ('pos_y' in valores) o.box.y = Number(valores.pos_y) || 0;
+            if ('rotation' in valores) o.box.rot = Number(valores.rotation) || 0;
+        }
+    }
     // Los muros de una planta: lo que dibujan el plano y el 3D.
     const muros = /\/floors\/([^/]+)\/walls$/.exec(e.url);
     if (muros && _dcsPlan && Array.isArray(valores.walls)) {
         _dcsPlan.walls = _dcsPlan.walls || {};
         _dcsPlan.walls[decodeURIComponent(muros[1])] = JSON.parse(JSON.stringify(valores.walls));
     }
-    e.at = 0;           // lo deshecho no se junta con lo siguiente que se haga
-    destino.push(e);
-    _dcUndoPaint();
 }
 
 /** Qué se desharía: el nombre de la cosa, para el título del botón. */
 function _dcUndoWhat(e) {
     if (!e) return '';
     if (/\/walls$/.test(e.url)) return t('dcim_walls');
+    if (e.batch) return tf('dcim_n_things', e.batch.length);
     const o = (_dcUndoItems().find(([url]) => url === e.url) || [])[1] || {};
     return o.name || o.label || o.uid || '';
 }

@@ -603,6 +603,16 @@ de la información que habrá cuando toque.
       es un hecho de la sala, no la vista de quien lo mueve
 - [x] Girar un rack un cuarto de vuelta, con su propio botón: rotar arrastrando es un gesto que
       nadie descubre y todos disparan sin querer
+- [x] Juntar lo que va junto: al arrastrar, los bordes se pegan a lo que hay al lado (un rack al
+      pasillo frío, el siguiente rack al anterior; Alt lo suelta). Varios a la vez con Mayús o
+      Ctrl + clic o con un recuadro, y un botón para que arrastrar en vacío elija en vez de mover
+      la vista. «Agrupar» los deja unidos —`group_uid`, en el servidor— y se cogen y se mueven
+      juntos, también desde el plano de la planta, que además lista lo que hay en cada sala
+- [x] El plano de la planta es el mismo editor que el de la sala, con lo suyo: el imán entre
+      salas y entre lo que hay en ellas, pulsar otra vez para lo de debajo y «Enviar al fondo»,
+      el teclado (R, Supr —que en una sala la saca de la planta, preguntando—, flechas a 10 cm
+      o a 1 m con Mayús), las filas de cada sala con sus avisos, y exportar e importar la
+      planta en JSON: cada sala del fichero va a la que se llama igual, o se crea
 - [x] Color por el peor estado de lo que hay dentro, y el frente marcado — que es lo que dice
       cuál es el pasillo frío
 - [x] Se abre desde la sala y se vuelve; la URL recuerda en qué sala se estaba

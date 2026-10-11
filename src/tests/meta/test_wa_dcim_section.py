@@ -438,8 +438,11 @@ class TestElArrastreMideLoQueSeVe:
     def test_las_dos_ramas_pasan_por_el_mismo_sitio(self):
         cuerpo = _section().split('function _dcpMove(')[1].split(chr(10) + chr(125))[0]
         # Tres ramas: un rack, una pieza y un equipo de sala (un PC, una roseta). Cada una pasa
-        # por `_dcpPlace`, la que cuenta el giro.
-        assert cuerpo.count('_dcpPlace(') == 3, 'una rama del arrastre no cuenta el giro'
+        # por `_dcpPlaceNear` —el imán a lo que hay al lado—, que se apoya en `_dcpPlace`, la
+        # que cuenta el giro.
+        assert cuerpo.count('_dcpPlaceNear(') == 3, 'una rama del arrastre no cuenta el giro'
+        cerca = _section().split('function _dcpPlaceNear(')[1].split(chr(10) + chr(125))[0]
+        assert '_dcpPlace(' in cerca and '_dcpEdgeOffset(' in cerca
 
     def test_y_ninguna_topa_la_esquina_sin_girar(self):
         cuerpo = _section().split('function _dcpMove(')[1].split(chr(10) + chr(125))[0]
@@ -684,7 +687,9 @@ class TestUnRackDePared:
         assert 'dcim_rack_wall_at' in _fn(_section(), '_dcpCard')
 
     def test_viaja_en_el_fichero_del_plano_y_al_duplicar(self):
-        assert 'base_mm' in _fn(_section(), '_dcpExportJson')
+        # El rack de un fichero de plano se escribe en un sitio, para la sala y para la planta.
+        assert '_dcPlanRackOut' in _fn(_section(), '_dcpExportJson')
+        assert 'base_mm' in _fn(_section(), '_dcPlanRackOut')
         assert "'base_mm'" in _fn(_section(), '_dcpRackDuplicate')
 
 
@@ -841,7 +846,8 @@ class TestLaSedeTienePlantas:
 
     def test_el_asa_se_pregunta_antes_que_la_sala(self):
         abajo = _fn(_section(), '_dcsDown')
-        assert abajo.index("closest('[data-dcph]')") < abajo.index("closest('g[data-dcs]');" + chr(10) + "    if (g)")
+        # La sala sale de lo que hay bajo el dedo (`_dcsHit`), que se pregunta después del asa.
+        assert abajo.index("closest('[data-dcph]')") < abajo.index('const hit = _dcsHit(ev);')
 
     def test_el_plano_no_se_mide_con_las_salas(self):
         """Una referencia que se mueve con lo que se coloca encima no sirve para colocar."""
@@ -1171,7 +1177,10 @@ class TestTodoLoQueSeEscribeTieneDondeEscribirse:
 
         def pulsable(src):
             return ' '.join(re.findall(r'on\w+="([^"]*)"', src)
-                            + re.findall(r'btn\(\s*`([^`]*)`', src))
+                            + re.findall(r'btn\(\s*`([^`]*)`', src)
+                            # Los botones de una lista compartida (`_dcRowsListHtml`) reciben
+                            # lo que llaman como texto: `nueva: '_dcpRowNew()'`.
+                            + re.findall(r"\b(?:nueva|editar|quitar): [^\n]*", src))
 
         # Una VISTA —de las que `renderDcim` conmuta— solo es alcanzable si la abre alguien de
         # FUERA: sus propios botones de buscar y recargar no cuentan, porque para pulsarlos ya
@@ -1378,6 +1387,8 @@ class TestUnaColumnaQueNadiePuedeEscribir:
         'demo_state',               # lo escribe solo la demo: por un campo, cualquiera pintaría
                                     # de rojo un equipo de verdad (`SERVER_COLS`)
         'demo_reason',              # su motivo: lo mismo
+        'group_uid',                # el grupo con el que se mueve en el plano de la sala: lo
+                                    # escriben «Agrupar» y «Desagrupar» (`_plangroup.html`)
         # Dónde está un equipo de SALA (un PC, una roseta): no lo escribe la ficha del rack sino
         # el plano de la sala, como a una pieza (`PUT /room-items/<uid>`).
         'room_uid', 'pos_x', 'pos_y', 'rotation', 'base_mm', 'mount',

@@ -56,7 +56,7 @@ from lib.core.dcim.store.floors import WALL_KINDS, WALLS_MAX, _FLOOR
 from lib.core.dcim.store.racks import _RACK
 from lib.core.dcim.store.rooms import _ROOM
 from lib.core.dcim.store.sites import _SITE
-from lib.core.dcim.routes._common import _NUM_MAX, _fresh, _num, _without, numbers_bad
+from lib.core.dcim.routes._common import _NUM_MAX, _fresh, _num, _without, group_bad, numbers_bad
 
 #: The tallest rack a request may declare. Real cabinets stop around 58U; a hundred leaves room
 #: for anything odd and still refuses the typo that would draw a rack three screens tall.
@@ -223,6 +223,8 @@ def register(app, wa, C):
             malo = numbers_bad(_SPECS[part], data, _bounds(_SPECS[part]))
             if malo:
                 return _bad_number(wa, malo)
+            if part == 'racks' and group_bad(data):
+                return jsonify({'error': wa._t('dcim_group_bad')}), 400
             err = C.asset(part, data)
             if err:
                 return jsonify({'error': wa._t(err)}), 400
@@ -266,6 +268,8 @@ def register(app, wa, C):
             malo = numbers_bad(_SPECS[part], data, _bounds(_SPECS[part]))
             if malo:
                 return _bad_number(wa, malo)
+            if part == 'racks' and group_bad(data):
+                return jsonify({'error': wa._t('dcim_group_bad')}), 400
             # A rack is not made shorter than what is bolted into it. Shrunk under an item, the
             # item stayed at its U outside the cabinet: not drawn, not counted, and its U never
             # free again for anybody.
@@ -525,6 +529,10 @@ def register(app, wa, C):
                                   # AP, las rosetas — el 3D los pone en su sitio.
                                   'items': _room_items(store, room['uid'], said, allowed, reach,
                                                        estados)}
+            # Y sus filas, con lo que no cuadra del aire: el plano de la planta las lista y avisa
+            # como el de la sala, que las trae con sus piezas.
+            rooms[room['uid']].update(dcim_svc.rows_roll(store.rows_of(room['uid']), racks)
+                                      if seen else {'rows': [], 'loose': [], 'warnings': []})
         # Y los muros de cada planta: el 3D de la planta y del edificio los levanta.
         walls = {f['uid']: [_wall_out(w) for w in store.walls_of(f['uid'])]
                  for f in store.floors_of(uid)}
@@ -1058,6 +1066,8 @@ def register(app, wa, C):
         malo = numbers_bad(_FEATURE, body, _bounds(_FEATURE))
         if malo:
             return _bad_number(wa, malo)
+        if group_bad(body):
+            return jsonify({'error': wa._t('dcim_group_bad')}), 400
         return jsonify({'uid': store.features.create(body, actor=C.actor())})
 
     @app.route('/api/v1/dcim/features/<uid>', methods=['PUT'])
@@ -1082,6 +1092,8 @@ def register(app, wa, C):
         malo = numbers_bad(_FEATURE, data, _bounds(_FEATURE))
         if malo:
             return _bad_number(wa, malo)
+        if group_bad(data):
+            return jsonify({'error': wa._t('dcim_group_bad')}), 400
         # Quitar estanterías con material encima es perderlo de vista: se dice cuál tiene algo.
         if data.get('shelves') is not None:
             usadas = [int(r.get('shelf') or 0) for r in store.shelf_items_of(uid)]

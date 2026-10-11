@@ -8,6 +8,90 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.142] - 2026-10-11
+
+### Added
+
+- **Edges snap to what is next to them on a room's plan.** Asked for: a rack left a gap to the
+  cold aisle it stood against, and the next rack to the one beside it, because the tile magnet
+  does not know where an aisle starts.
+  - Dragging a rack, a piece or a room item, its edges now join the faces of its neighbours,
+    and line up with their edges, when they come within ten screen pixels. A dashed guide
+    shows where.
+  - Only things sharing a strip in the other axis count as neighbours, so nothing jumps to line
+    up with the far end of the room. Otherwise the tile magnet applies as before.
+  - The box that is seen is what snaps, so a turned piece lines up correctly. Alt while
+    dragging releases the snap to leave a gap on purpose.
+- **Several things at once, and groups, on the room's plan and the floor's.**
+  - Shift or Ctrl + click adds or removes; Shift + dragging in empty space chooses with a box;
+    Ctrl+A takes everything and Escape nothing. What is chosen is dragged together.
+  - «Agrupar» (Ctrl+G) keeps it together: a shared `group_uid`, stored on the server, so that
+    picking any of them picks the whole group; «Desagrupar» (Ctrl+Shift+G) breaks it. Moving
+    several, or grouping them, is a single step of the plans' undo (`_dcUndoBatch`).
+  - On a floor, a move made on the floor reaches each thing turned back by its room's rotation.
+    What is inside a room that also moves stays put, since it already goes with the room. A
+    box takes the things it touches, but a room only when the room is wholly inside it.
+- **A button for what dragging in empty space does**, on the room's plan and the floor's. In
+  move mode it moves the view (Shift + drag chooses); in choose mode it draws the choosing box
+  (the middle button still moves the view). Remembered in the browser. In choose mode the
+  canvas shows a crosshair over empty space (`.ss-pick-mode`), while what can be grabbed keeps
+  its hand: reported, switching modes did not change the cursor.
+  The choosing box shows from the first drag. Reported: after loading, the first box was not
+  drawn and the second was, because the drawing returned before the box while nothing was
+  chosen yet.
+- **The floor's inspector lists what is on the floor**, room by room, the general area first.
+  Before, it listed only the rooms; a room's inspector already listed its things. Clicking one
+  picks it, and Shift or Ctrl + click adds it.
+- **The floor editor has the room editor's tools.** Asked for: one editor, each screen with
+  its own things and properties.
+  - The snap to neighbours while dragging (Alt releases it). A room snaps to the rooms beside
+    it, and a rack, piece or item to what is next to it. It is measured on the boxes as seen
+    on the floor, so a turned room's contents line up too.
+  - A second press on what is chosen goes to what is underneath. «Send to back» leaves a thing
+    faint and transparent to the pointer, with a chip that brings everything back.
+  - Keys: R turns, Delete removes, and the arrows move what is chosen 10 cm, or 1 m with Shift
+    (a floor has no tile). Delete on a room asks before taking it off the floor; it is never
+    deleted from a plan.
+  - Each room's rows, with their buttons and the warning when a row breathes another's exhaust.
+    The site's contents now carry each room's `rows`, `loose` and `warnings`.
+  - Export and import of the floor in JSON. The file holds the floor and each room with its
+    place, size, racks and pieces, the general area marked. Importing puts each room into the
+    one of the same name, creating it when there is none, and does inside it what importing a
+    room does: pieces replaced, racks matched by name, none deleted.
+  - Shared with the room editor rather than copied: the rows list and its actions
+    (`_dcRowsListHtml`, `_dcRowNew/Edit/Drop`), a rack and a piece in a plan file
+    (`_dcPlanRackOut`, `_dcPlanFeatureOut`), the snap margin and its guides (`_dcNearTol`,
+    `_dcGuidesSvg`).
+- `group_uid` on `dc_rack`, `dc_feature` and `dc_item`. The rack, feature and room-item routes
+  refuse a value that is not an id (`^[A-Za-z0-9_-]{0,64}$`), on create and on edit.
+
+### Changed
+
+- The plans' undo also covers room items, and redraws them from their box.
+
+### Tests
+
+- `tests/integration/test_wa_dcim_plangroup.py`:
+  - the snap to the face and to the edges, and nothing beyond the margin or from far in the
+    other axis;
+  - Alt and turned pieces;
+  - Shift/Ctrl + click and the box;
+  - a group picked whole and moved together, and several moves undone at once;
+  - the pointer mode, and its cursor;
+  - on a floor: a turned room, a room only when whole, what moves with its room, and the
+    floor's list;
+  - the server refusing a `group_uid` that is not an id;
+  - the floor editor: a room and a rack snapping to their neighbours, Alt, a second press for
+    what is underneath, send to back, the arrows and Shift, Delete on a room asking first,
+    each room's rows and warnings (also in the site's contents), and the floor's JSON file.
+  - Each was shown to fail with its fix undone.
+- `tests/meta/test_wa_dcim_section.py`:
+  - the drag branches pass through `_dcpPlaceNear`, which counts the turn through `_dcpPlace`;
+  - `group_uid` is written by the plan, not the item form;
+  - a rack's `base_mm` travels in the plan file through `_dcPlanRackOut`;
+  - the floor's handle is asked before what is under the pointer (`_dcsHit`);
+  - a shared list's buttons count as something to press.
+
 ## [0.0.1+build.141] - 2026-10-10
 
 ### Changed
