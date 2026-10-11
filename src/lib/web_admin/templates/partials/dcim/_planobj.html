@@ -1,0 +1,375 @@
+{# ================================================================
+   DCIM — un objeto del plano, igual en la sala y en la planta.
+
+   Los dos planos —el de una sala y el de una planta— dibujaban, enseñaban y trataban un rack, una
+   pieza o un equipo de sala cada uno a su manera: la planta los pintaba sin el punto del control
+   de accesos ni el estado de un equipo, su inspector tenía un nombre y cuatro botones, y duplicar
+   en la sala ponía la copia una baldosa en diagonal con su rótulo y en la planta a la derecha sin
+   él. Aquí está una vez:
+
+   - **Dónde está**: el objeto se busca en el plano que esté abierto (`_dcObj`), y lo que se hace
+     después —repintar, volver a leer, elegir, soltar— va al plano abierto (`_dcPlan*`).
+   - **Qué se hace con él**: girar, duplicar y quitar (`_dcObjTurn`, `_dcObjDuplicate`,
+     `_dcObjDrop`). Los nombres de la sala (`_dcpTurn`, `_dcpDuplicate`…) y de la planta
+     (`_dcsItemTurn`…) llaman a estos.
+   - **Cómo se dibuja** (`_dcThingSvg`): su forma, su franja de delante, su cruz, el punto del
+     control de accesos, el estado y las letras de un equipo, el contorno de elegido y las asas.
+     Cada plano pone lo suyo: con qué atributos se le coge, qué hace al pasar por encima, y cómo
+     va el texto —en la sala gira con la cosa y nunca boca abajo; en la planta siempre recto—.
+   ================================================================ #}
+
+/** La clase en el nombre de la sala: la planta llama `ritem` a un equipo de sala. */
+function _dcObjKind(kind) { return kind === 'ritem' ? 'item' : kind; }
+
+/** La fila de algo del plano abierto: un rack, una pieza o un equipo de sala. */
+function _dcObj(kind, uid) {
+    const k = _dcObjKind(kind);
+    if (typeof _dcimPlan !== 'undefined' && _dcimPlan) return _dcpObj(k, uid) || null;
+    if (typeof _dcsPlan !== 'undefined' && _dcsPlan) {
+        const lista = k === 'rack' ? 'racks' : k === 'item' ? 'items' : 'features';
+        for (const c of Object.values(_dcsPlan.content || {})) {
+            const x = (c[lista] || []).find(r => String(r.uid) === String(uid));
+            if (x) return x;
+        }
+    }
+    return null;
+}
+
+/** La sala en la que está. */
+function _dcObjRoom(kind, uid) {
+    if (typeof _dcimPlan !== 'undefined' && _dcimPlan) return _dcimPlan.room.uid;
+    const k = _dcObjKind(kind);
+    const lista = k === 'rack' ? 'racks' : k === 'item' ? 'items' : 'features';
+    for (const [sala, c] of Object.entries(((typeof _dcsPlan !== 'undefined' && _dcsPlan) || {}).content || {})) {
+        if ((c[lista] || []).some(r => String(r.uid) === String(uid))) return sala;
+    }
+    return '';
+}
+
+/** Dónde se escribe (`borrar`: un equipo de sala se quita como cualquier equipo). */
+function _dcObjUrl(kind, uid, borrar) {
+    const k = _dcObjKind(kind);
+    const ruta = k === 'rack' ? 'racks' : k === 'item' ? (borrar ? 'items' : 'room-items') : 'features';
+    return `/api/v1/dcim/${ruta}/${encodeURIComponent(uid)}`;
+}
+
+// ── El plano abierto ────────────────────────────────────────────────────────
+
+function _dcPlanRedraw() {
+    if (typeof _dcimPlan !== 'undefined' && _dcimPlan) return _dcpRedraw();
+    if (typeof _dcsPlan !== 'undefined' && _dcsPlan) return _dcsRedraw();
+}
+
+function _dcPlanInspector() {
+    if (typeof _dcimPlan !== 'undefined' && _dcimPlan) return _dcpInspectorDraw();
+    if (typeof _dcsPlan !== 'undefined' && _dcsPlan) return _dcsInspectorDraw();
+}
+
+/** Volver a leer lo que tiene el servidor: tras crear, quitar, o un cambio que no aceptó. */
+function _dcPlanReload() {
+    if (typeof _dcimPlan !== 'undefined' && _dcimPlan) return _dcimOpenPlan(_dcimPlan.room.uid);
+    if (typeof _dcsPlan !== 'undefined' && _dcsPlan) return _dcsReload();
+    return renderDcim();
+}
+
+/** Dejar el plano abierto —cerrarlo, cambiar de planta, abrir otro plano o sede—: lo que estaba
+ *  a medias se deshace sin guardarse. La calibración vuelve a lo que había (su escala se aplicaba
+ *  en pantalla antes de guardarse, y el 3D y la detección de muros la usaban); la revisión de
+ *  muros se cierra —si no, lo revisado en una planta se guardaba en la siguiente, su tecla seguía
+ *  escuchando y el deshacer se quedaba en sus pasos—; y lo que se iba a poner se suelta. */
+function _dcPlanLeave() {
+    if (typeof P2DCAL !== 'undefined' && P2DCAL) {
+        const d = p2dCalTarget();
+        if (d && P2DCAL.orig) Object.assign(d.rec, P2DCAL.orig);
+        P2DCAL = null;
+    }
+    if (typeof _dcwEnd === 'function') _dcwEnd();
+    for (const P of Object.values(P2D)) p2dPlaceDrop(P);
+    if (typeof _dcriForget === 'function') _dcriForget();
+}
+
+/** El enlace «3D»: la sede, una planta, una sala o un rack en `/3d`, en otra pestaña. `q`:
+ *  `{site, floor, room, rack}` —lo que se sepa—; sin planta se mira el edificio entero, y una
+ *  sala o un rack sin planta no tienen sitio en él. `grande`: del tamaño de los botones de la
+ *  barra de un rack. Pedido: un botón en los mapas que abra eso mismo en 3D. Un enlace y no un
+ *  botón: «abrir en otra pestaña» es lo que hace un enlace, también con el botón central. */
+function _dc3dLinkHtml(q, grande) {
+    const p = new URLSearchParams();
+    if (!q || !q.site) return '';
+    p.set('site', q.site);
+    if (q.floor) {
+        p.set('floor', q.floor);
+        p.set('mode', 'floor');
+        if (q.room) p.set('room', q.room);
+        if (q.rack) p.set('rack', q.rack);
+    }
+    return `<a class="btn ${grande ? '' : 'btn-sm '}btn-secondary" href="/3d?${escAttr(p.toString())}"
+        target="_blank" rel="noopener" data-dc3dlink title="${escAttr(t('dcim_open_3d'))}"
+        aria-label="${escAttr(t('dcim_open_3d'))}"><i class="bi bi-badge-3d"></i></a>`;
+}
+
+/** Elegir algo en el plano abierto (`room`: su sala, que la planta necesita). */
+function _dcPlanSelect(kind, uid, room) {
+    const k = _dcObjKind(kind);
+    if (typeof _dcimPlan !== 'undefined' && _dcimPlan) { _dcpSel = {kind: k, uid: String(uid)}; return; }
+    if (typeof _dcsPlan !== 'undefined' && _dcsPlan) {
+        _dcsSel = '';
+        _dcsItem = {kind: k === 'item' ? 'ritem' : k, uid: String(uid), room: room || _dcObjRoom(k, uid)};
+    }
+}
+
+/** Soltar lo elegido, por el mismo camino que su botón de cerrar o Escape. */
+function _dcPlanDeselect() {
+    if (typeof _dcimPlan !== 'undefined' && _dcimPlan) return _dcpDeselect();
+    if (typeof _dcsPlan !== 'undefined' && _dcsPlan) return _dcsPick('');
+}
+
+function _dcPlanFloatHide() {
+    if (typeof _dcpFloatHide === 'function') _dcpFloatHide();
+    if (typeof _dcsFloatHide === 'function') _dcsFloatHide();
+}
+
+/** «Enviar al fondo», en el editor del plano abierto. */
+function _dcPlanBackButton(kind, uid) {
+    const k = _dcObjKind(kind);
+    if (typeof _dcimPlan !== 'undefined' && _dcimPlan) return p2dBackButton(_dcpP2d, k, '', uid);
+    return p2dBackButton(_dcsP2d, k === 'item' ? 'ritem' : k, _dcObjRoom(k, uid), uid);
+}
+
+// ── Lo que se hace con él ──────────────────────────────────────────────────
+
+/** Girarlo un cuarto de vuelta. */
+async function _dcObjTurn(kind, uid) {
+    _dcPlanFloatHide();
+    const k = _dcObjKind(kind);
+    const x = _dcObj(k, uid);
+    if (!x) return;
+    const antes = Number(x.rotation !== undefined ? x.rotation : (x.box || {}).rot) || 0;
+    const rot = (antes + 90) % 360;
+    const r = await _dcimSend('PUT', _dcObjUrl(k, uid), {rotation: rot});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    x.rotation = rot;
+    if (x.box) x.box.rot = rot;
+    _dcPlanRedraw();
+    _dcPlanInspector();
+}
+
+/** Uno igual, al lado —a su derecha, 20 cm más allá—, y elegido: lo siguiente que se hace con
+ *  una copia es moverla. Lo que es de la CLASE de cosa (medidas, giro, altura, estanterías, el
+ *  montaje de un equipo) y nada de lo que es de ESA cosa: ni su contenido, ni su número de
+ *  activo, ni el dispositivo de un equipo, ni su grupo. Un rack se llama «copia de …». */
+async function _dcObjDuplicate(kind, uid) {
+    _dcPlanFloatHide();
+    const k = _dcObjKind(kind);
+    const x = _dcObj(k, uid);
+    const sala = _dcObjRoom(k, uid);
+    if (!x || !sala) return;
+    let url, cuerpo;
+    if (k === 'item') {
+        const b = x.box || {};
+        url = `/api/v1/dcim/rooms/${encodeURIComponent(sala)}/items`;
+        cuerpo = {role: x.role, pos_x: (Number(b.x !== undefined ? b.x : x.pos_x) || 0) + (Number(b.w) || 300) + 200,
+                  pos_y: Number(b.y !== undefined ? b.y : x.pos_y) || 0,
+                  rotation: Number(x.rotation) || 0, mount: x.mount || '', base_mm: x.base_mm};
+    } else {
+        const ancho = Number(x.width_mm) || 600;
+        cuerpo = {room_uid: sala, pos_x: (Number(x.pos_x) || 0) + ancho + 200, pos_y: Number(x.pos_y) || 0};
+        const copia = k === 'rack'
+            ? ['u_height', 'width_mm', 'depth_mm', 'rotation', 'base_mm', 'desc_units',
+               'rail_front_mm', 'rail_depth_mm', 'rail_rear_mm', 'access', 'row_uid']
+            : ['kind', 'label', 'width_mm', 'depth_mm', 'rotation', 'height_mm', 'base_mm', 'shelves'];
+        for (const c of copia) if (x[c] !== undefined && x[c] !== null) cuerpo[c] = x[c];
+        if (k === 'rack') cuerpo.name = tf('dcim_rack_copy_name', x.name || '');
+        url = `/api/v1/dcim/${k === 'rack' ? 'racks' : 'features'}`;
+    }
+    const r = await _dcimSend('POST', url, cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    if (r.data && r.data.uid) _dcPlanSelect(k, r.data.uid, sala);
+    return _dcPlanReload();
+}
+
+/** Quitarlo, preguntando antes y diciendo lo que se lleva: un rack, lo que tiene dentro (por el
+ *  mismo camino que desde el árbol); un armario, lo que guarda en sus estanterías. */
+function _dcObjDrop(kind, uid) {
+    _dcPlanFloatHide();
+    const k = _dcObjKind(kind);
+    const x = _dcObj(k, uid);
+    if (!x) return;
+    if (k === 'rack') return _dcimDelete('rack', uid, x.name || '');
+    const pregunta = k === 'item'
+        ? tf('dcim_ritem_drop_confirm', x.label || _dcRoleName(x.role))
+        : tf('dcim_drop_piece_q', x.label || _dcPieceName(x.kind)) + _dcShelfDropWarning(uid);
+    showConfirmModal(pregunta, async () => {
+        const r = await _dcimSend('DELETE', _dcObjUrl(k, uid, true));
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        if (typeof _dcimPlan !== 'undefined' && _dcimPlan) _dcpSel = null;
+        else if (typeof _dcsPlan !== 'undefined' && _dcsPlan) _dcsItem = null;
+        return _dcPlanReload();
+    });
+}
+
+// ── Cómo se dibuja ─────────────────────────────────────────────────────────
+
+/** Un objeto del inventario en un plano. `kind`: `rack`, `feature` o `item`.
+ *
+ *  `o`: `attrs` —los atributos del `<g>` de fuera: con qué se le coge y qué hace al pasar por
+ *  encima—, `puesto` (elegido), `back` (enviado al fondo), `asas` (el HTML de sus asas, si las
+ *  lleva), `titulo`, y `texto`: `'gira'` (gira con la cosa y nunca boca abajo, la sala) o `'recto'`
+ *  (siempre horizontal y recortado a lo que se ve, la planta). */
+function _dcThingSvg(kind, x, o) {
+    const S = _DCP_SCALE;
+    let wmm, dmm, rot, pxm, pym;
+    if (kind === 'item') {
+        const b = x.box || {};
+        wmm = Number(b.w || 200);
+        dmm = Number(b.d || 200);
+        rot = Number(b.rot !== undefined ? b.rot : x.rotation) || 0;
+        pxm = Number(b.x !== undefined ? b.x : x.pos_x) || 0;
+        pym = Number(b.y !== undefined ? b.y : x.pos_y) || 0;
+    } else {
+        wmm = Number(x.width_mm) || 600;
+        dmm = Number(x.depth_mm) || (kind === 'rack' ? 1000 : 600);
+        rot = Number(x.rotation) || 0;
+        pxm = Number(x.pos_x) || 0;
+        pym = Number(x.pos_y) || 0;
+    }
+    const w = wmm * S, d = dmm * S, X = pxm * S, Y = pym * S;
+    const gira = (o.texto || 'gira') === 'gira';
+    let cuerpo = '', texto = '', tam, color = 'var(--bs-body-color)', recorte = 0;
+    if (kind === 'rack') {
+        const tone = (x.roll || {}).state ? deviceStateColor(x.roll.state) : 'var(--bs-secondary-bg)';
+        // El frente, como en cualquier pieza: la franja azul delante y la línea a trazos detrás
+        // (`_dcpFrontBack`). Reportado: no se sabía cuál era el frente y cuál la trasera —la
+        // franja era fina y del color del estado, gris en un rack sin vigilar—. El estado, en el
+        // borde.
+        cuerpo = `<rect width="${w}" height="${d}" rx="1" fill="var(--bs-tertiary-bg)" stroke="${tone}"
+                      stroke-width="2" vector-effect="non-scaling-stroke"></rect>
+            ${_dcpFrontBack(true, w, d)}`;
+        texto = x.name || '';
+        tam = gira ? 7 : Math.min(5, Math.max(2.4, Math.min(w, d) * 0.35));
+        recorte = gira ? 10 : 0;
+        color = 'currentColor';
+    } else if (kind === 'feature') {
+        const look = _dcpLook(x.kind);
+        const spec = p2dKind('dcim', x.kind) || _dcpKinds()[x.kind] || {};
+        cuerpo = `${look.fill === 'none' ? '' : `<rect width="${w}" height="${d}" rx="1"
+                fill="${look.fill}" stroke="${look.line}" stroke-width="1.2"
+                ${look.dash ? `stroke-dasharray="${look.dash}"` : ''}
+                vector-effect="non-scaling-stroke"></rect>`}
+            ${_dcpFrontBack(spec.front, w, d, look)}
+            ${look.cross ? `<line x1="0" y1="0" x2="${w}" y2="${d}" stroke="${look.line}"
+                    stroke-width=".6" vector-effect="non-scaling-stroke"></line>
+                <line x1="${w}" y1="0" x2="0" y2="${d}" stroke="${look.line}"
+                    stroke-width=".6" vector-effect="non-scaling-stroke"></line>` : ''}`;
+        texto = x.label || (x.kind === 'label' ? _dcPieceName('label') : '');
+        tam = gira ? Math.min(5.6, Math.max(3.2, Math.min(w, d) * 0.42))
+                   : Math.min(5, Math.max(2.4, Math.min(w, d) * 0.35));
+        if (look.dark && gira) color = 'var(--bs-dark)';
+    } else {
+        const look = _dcriItemLook(x);
+        const marca = Math.max(1.6, Math.min(w, d) * 0.55);
+        // Las letras, a la medida de la caja: a lo ancho (una letra mide unas 0,6 veces su alto).
+        // Con un tamaño fijo, «RJ45+» o una abreviatura larga del catálogo se salían de la roseta;
+        // y recortarlas en el catálogo era perder lo que alguien escribió.
+        const abbr = String(look.abbr || '');
+        const letras = Math.min(marca, w * 0.9 / (Math.max(1, abbr.length) * 0.6));
+        cuerpo = `<rect width="${w}" height="${d}" rx="0.6" fill="${look.fill}" stroke="var(--bs-body-color)"
+                stroke-width=".8" vector-effect="non-scaling-stroke"></rect>
+            ${abbr ? `<text x="${w / 2}" y="${d / 2 + letras * 0.35}" text-anchor="middle" font-size="${letras}"
+                fill="#fff" style="pointer-events:none">${esc(abbr)}</text>` : ''}
+            ${x.state ? `<circle cx="${w}" cy="0" r="${Math.max(0.8, marca * 0.3)}" fill="${escAttr(deviceStateColor(x.state))}"
+                stroke="var(--bs-body-bg)" stroke-width=".4" vector-effect="non-scaling-stroke"></circle>` : ''}`;
+    }
+    // El texto: girando con la cosa (y del derecho), o recto encima de ella.
+    let dentro = '', fuera = '';
+    if (texto && gira) {
+        const txt = recorte ? _dceClip(texto, recorte) : texto;
+        // Que quepa en lo que nombra: a lo ancho (una letra mide unas 0,6 veces su alto) y a lo
+        // hondo. Reportado: el nombre de un rack, a tamaño fijo, era más ancho que el rack y
+        // pisaba el del rack de al lado.
+        tam = Math.min(tam, w * 0.9 / (Math.max(1, txt.length) * 0.6), d * 0.45);
+        const yy = d / 2 + tam * 0.35;
+        dentro = `<text x="${w / 2}" y="${yy}" font-size="${tam}" text-anchor="middle" fill="${color}"
+            ${_dcpUpright(rot, w / 2, d / 2)} style="pointer-events:none">${esc(txt)}</text>`;
+    } else if (texto) {
+        const ancho = Math.abs(rot % 180) === 90 ? d : w;
+        if (ancho > 4) fuera = `<text x="${X + w / 2}" y="${Y + d / 2 + tam * 0.35}" font-size="${tam}"
+            text-anchor="middle" fill="var(--bs-body-color)" stroke="var(--bs-body-bg)"
+            stroke-width="${tam * 0.2}" paint-order="stroke" style="pointer-events:none">${
+            esc(_dceClip(texto, Math.max(3, Math.floor(ancho / (tam * 0.6)))))}</text>`;
+    }
+    return `<g class="ss-grab${o.back ? ' ss-dcp-back' : ''}" ${o.attrs || ''}>
+        ${o.titulo ? `<title>${esc(o.titulo)}</title>` : ''}
+        <g transform="translate(${X},${Y}) rotate(${rot} ${w / 2} ${d / 2})">
+            ${cuerpo}
+            ${dentro}
+            ${o.puesto ? `<rect x="-1" y="-1" width="${w + 2}" height="${d + 2}" fill="none"
+                stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
+                vector-effect="non-scaling-stroke"></rect>` : ''}
+            ${kind === 'feature' ? _dcpAccessDot(x, w, d) : ''}
+            ${o.asas || ''}
+        </g>
+        ${fuera}
+    </g>`;
+}
+
+// ── Su barra flotante ──────────────────────────────────────────────────────
+
+/** Los botones de la barra de un objeto, iguales en la sala y en la planta: abrirlo si es un rack
+ *  (lo único para quien solo mira), y para quien edita, editarlo, girarlo, duplicarlo, enviarlo al
+ *  fondo y quitarlo. Cada plano añade lo suyo (la planta, abrir la sala de una pieza). */
+function _dcObjFloatButtons(kind) {
+    const k = _dcObjKind(kind);
+    const out = [];
+    if (k === 'rack') out.push({act: 'open', icon: 'bi-box-arrow-in-right', text: t('dcim_open_rack')});
+    if (!_dcimMay('dcim_edit')) return out;
+    out.push({act: 'edit', icon: 'bi-pencil', text: t('edit')},
+             {act: 'turn', icon: 'bi-arrow-clockwise', text: t('dcim_turn')},
+             {act: 'dup', icon: 'bi-files', text: t('dcim_piece_duplicate')},
+             {act: 'back', icon: 'bi-layer-backward', text: t('dcim_send_back')});
+    if (k === 'rack') out.push({act: 'move', icon: 'bi-arrows-move', text: t('dcim_move_rack')});
+    out.push({act: 'drop', icon: 'bi-trash', text: t('delete'), tone: 'btn-danger'});
+    return out;
+}
+
+/** Lo que hace cada botón que no es del plano: girar, duplicar, quitar. `true` si era uno de esos. */
+function _dcObjFloatAct(act, kind, uid) {
+    if (act === 'turn') { _dcObjTurn(kind, uid); return true; }
+    if (act === 'dup') { _dcObjDuplicate(kind, uid); return true; }
+    if (act === 'drop') { _dcObjDrop(kind, uid); return true; }
+    if (act === 'move' && _dcObjKind(kind) === 'rack') { _dcPlanFloatHide(); _dcMoveRack(uid); return true; }
+    return false;
+}
+
+// ── Ponerlo ────────────────────────────────────────────────────────────────
+
+/** Poner un objeto del catálogo (`clave`; `rack` para un rack) en la sala `sala`, con su centro
+ *  en `p` (mm de la sala) —un equipo, con su esquina—, ajustado con `ajuste`; y elegirlo, que lo
+ *  siguiente es moverlo o nombrarlo. Un equipo va a los equipos de la sala; lo demás, a las
+ *  piezas; un rack es un rack. */
+async function _dcObjAdd(clave, sala, p, ajuste, tam) {
+    const base = clave === 'rack' ? {w: 600, d: 1000} : (p2dKind('dcim', clave) || {w: 600, d: 600});
+    // Una pieza dibujada con su recuadro mide lo dibujado; lo demás, lo de su clase.
+    const medida = tam && clave !== 'rack' && !base.device;
+    const spec = medida ? Object.assign({}, base, {w: tam.w, d: tam.d}) : base;
+    let url, cuerpo, kind;
+    if (clave === 'rack') {
+        kind = 'rack';
+        url = '/api/v1/dcim/racks';
+        cuerpo = {room_uid: sala, name: t('dcim_new_rack'), u_height: 42,
+                  pos_x: ajuste(p.x - spec.w / 2), pos_y: ajuste(p.y - spec.d / 2)};
+    } else if (spec.device) {
+        kind = 'item';
+        url = `/api/v1/dcim/rooms/${encodeURIComponent(sala)}/items`;
+        cuerpo = {role: clave, label: '', pos_x: ajuste(p.x), pos_y: ajuste(p.y)};
+    } else {
+        kind = 'feature';
+        url = '/api/v1/dcim/features';
+        cuerpo = {room_uid: sala, kind: clave, pos_x: ajuste(p.x - spec.w / 2), pos_y: ajuste(p.y - spec.d / 2)};
+        if (medida) Object.assign(cuerpo, {width_mm: spec.w, depth_mm: spec.d});
+    }
+    const r = await _dcimSend('POST', url, cuerpo);
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    if (r.data && r.data.uid) _dcPlanSelect(kind, r.data.uid, sala);
+    return _dcPlanReload();
+}

@@ -102,6 +102,47 @@ class TestTheCables:
             assert any(str(p).startswith('Te') for p in ports), racked[sw]['label']
 
 
+class TestTheJacksAndTheSockets:
+    """Asked for: power sockets in the demo, and the outlets with their jacks — two RJ45 at least
+    in each. Every desk has a socket beside its outlet; the sockets hang from the building's
+    sources, so the plan shows the three kinds (UPS, generator, mains)."""
+
+    def test_every_outlet_has_two_rj45_at_least_and_says_only_what_it_may(self, office):
+        from lib.core.dcim import connectors                         # noqa: PLC0415
+        puede = {c['id'] for c in connectors.jacks('outlet')}
+        malas = []
+        for it in office[1].values():
+            if it['role'] != 'outlet':
+                continue
+            bocas = dcim_svc.jack_list(it)
+            rj45 = sum(b['n'] for b in bocas if b['connector'] == '8p8c')
+            if rj45 < 2 or any(b['connector'] not in puede for b in bocas):
+                malas.append((it['label'], bocas))
+        assert malas == []
+
+    def test_a_meeting_rooms_display_outlet_has_its_hdmi(self, office):
+        tv = [it for it in office[1].values() if it['role'] == 'outlet' and str(it['label']).startswith('R-TV-')]
+        assert tv and all(any(b['connector'] == 'hdmi' for b in dcim_svc.jack_list(it)) for it in tv)
+
+    def test_a_socket_by_every_desk_on_a_source_of_the_site(self, office):
+        from lib.core.dcim import connectors                         # noqa: PLC0415
+        store, items, _racked, _cables = office
+        n = Counter(i['role'] for i in items.values())
+        assert n['power_outlet'] >= n['pc']
+        puede = {c['id'] for c in connectors.jacks('power_outlet')}
+        clases = Counter()
+        for it in items.values():
+            if it['role'] != 'power_outlet':
+                continue
+            bocas = dcim_svc.jack_list(it)
+            assert bocas and all(b['connector'] in puede for b in bocas), it['label']
+            src = store.sources.get(it['source_uid'])
+            room = store.rooms.get(it['room_uid'])
+            assert src and src['site_uid'] == room['site_uid'], it['label']
+            clases[src['kind']] += 1
+        assert clases['ups'] >= 1 and clases['generator'] == 1 and clases['panel'] >= n['pc'] // 2
+
+
 class TestWhereTheyStand:
 
     def test_inside_their_room(self, office):

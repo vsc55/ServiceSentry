@@ -22,7 +22,7 @@ const _DC3D_BOX = 'dc3d-box';
 
 function _dc3dHtml(hint, ctx) {
     return _dc3dToolsBar(ctx || 'room') + ss3dHtml(_DC3D_BOX, {hint: hint || t('view3d_hint'),
-        extra: _dc3dNorth() !== null ? _dcCompass(0, 'dc3d-compass') : '',
+        extra: _dc3dNorth() !== null ? p2dCompass(0, 'dc3d-compass') : '',
         file: 'vista-3d'});
 }
 
@@ -436,11 +436,14 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
         // una fuente que ES esta pieza (`dc_source.feature_uid`), un cuadro o un SAI de sala.
         puntos['feature:' + f.uid] = [fx + w / 2, base + h + 0.05, fz + d / 2];
         nombres['feature:' + f.uid] = f.label || '';
-        const lee = {name: f.label || '', kind: t('dcim_kind_' + f.kind), w, d, h, state: f.state || '',
+        const lee = {name: f.label || '', kind: _dcPieceName(f.kind), w, d, h, state: f.state || '',
                      uid: f.uid, tipo: 'feature', room: room.uid || f.room_uid || '',
                      roomName: room.name || '', model: f.model || '', lock: f.lock || '', fk: f.kind,
                      device: f.device_uid || '', reason: f.demo_reason || ''};
-        const color = _dc3dDim(_DC3_COLOR[f.kind] || [0.3, 0.32, 0.36, 1], '');
+        // Su color de 3D si lo tiene; uno creado desde la pantalla trae el de su dibujo.
+        const relleno = (p2dKindLook('dcim', f.kind) || {}).fill || '';
+        const color = _dc3dDim(_DC3_COLOR[f.kind]
+            || (/^#[0-9a-f]{6}$/i.test(relleno) ? [..._dc3dHex(relleno), 1] : [0.3, 0.32, 0.36, 1]), '');
         if (f.kind === 'cabinet') {
             _dc3dCabinet(push, color, fx, base, fz, w, h, d, rot, Math.max(1, Number(f.shelves) || 1), lee);
         } else {
@@ -476,7 +479,7 @@ function _dc3dRoomBoxes(room, racks, features, kinds, o) {
         const x = (Number(b.x) || 0) * M, z = (Number(b.y) || 0) * M;
         const rgb = _dc3dHex(_dcriLook(it.role).fill);
         push(tenue([rgb[0], rgb[1], rgb[2], 1]), x, y0, z, w, h, d, Number(b.rot) || 0, {
-            name: it.label || '', kind: t('dcim_role_' + (it.role || '')), tipo: 'item', ritem: true,
+            name: it.label || '', kind: _dcRoleName(it.role), tipo: 'item', ritem: true,
             uid: it.uid, state: it.state || '', device: it.device_uid || '', reason: it.demo_reason || '',
             room: room.uid || it.room_uid || '', roomName: room.name || '', sinRotulo: it.role === 'outlet'});
         if (_DC3_STATE[it.state] && it.role !== 'outlet') {
@@ -553,6 +556,6 @@ function _dc3dCabinet(push, color, x, y, z, w, h, d, rot, baldas, lee) {
  *  sabe. */
 function _dc3dNorth() {
     if (_dc3d && typeof _dc3d.build === 'function')
-        return typeof _dcsFloor === 'function' ? _dcNorthOf(_dcsFloor()) : null;
-    return _dcNorthOf((_dcimPlan || {}).planFloor || (_dcimPlan || {}).room);
+        return typeof _dcsFloor === 'function' ? p2dNorthOf(_dcsFloor()) : null;
+    return p2dNorthOf((_dcimPlan || {}).planFloor || (_dcimPlan || {}).room);
 }

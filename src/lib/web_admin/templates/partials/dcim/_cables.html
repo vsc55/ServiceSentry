@@ -739,7 +739,7 @@ function _dcSplitDraw() {
                 ${esc(_dcimItemName(r))}
                 <span class="text-muted ss-fs-1 ms-1">${esc([r.rack,
                     r.u_start ? 'U' + r.u_start : '',
-                    r.role ? t('dcim_role_' + r.role) : ''
+                    r.role ? _dcRoleName(r.role) : ''
                 ].filter(Boolean).join(' · '))}</span></button>`).join('')}</div>`
           : `<div class="text-muted ss-fs-2">${esc(t('dcim_cat_no_match'))}</div>`}`}
     </div>`, 'primary', '', 'fit');

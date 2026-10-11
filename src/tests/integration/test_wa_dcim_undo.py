@@ -42,50 +42,50 @@ _dcpFeat = {features: [{uid: 'f1', kind: 'tray', label: 'Bandeja', pos_x: 0}], k
 _dcsPlan = null;
 __out = {};
 _dcUndoPrime();
-__out.vacio = _dcUndoButtonsInner().split('disabled').length - 1;
+__out.vacio = p2duButtonsInner().split('disabled').length - 1;
 
 // El dibujo ya dice lo nuevo al soltar; lo de antes sale de lo guardado.
 const rack = _dcimPlan.racks[0];
 rack.pos_x = 2000;
-const antes1 = _dcUndoBefore(U('racks', 'k1'), {pos_x: 2000});
-_dcUndoRecord(U('racks', 'k1'), antes1, {pos_x: 2000});
+const antes1 = p2duBefore(U('racks', 'k1'), {pos_x: 2000});
+p2duRecord(U('racks', 'k1'), antes1, {pos_x: 2000});
 __out.antes = antes1;
 // Seguido, a la misma cosa: uno.
 rack.pos_x = 2500;
-_dcUndoRecord(U('racks', 'k1'), _dcUndoBefore(U('racks', 'k1'), {pos_x: 2500}), {pos_x: 2500});
-__out.juntos = _dcUndoStack.map(e => [e.before.pos_x, e.after.pos_x]);
+p2duRecord(U('racks', 'k1'), p2duBefore(U('racks', 'k1'), {pos_x: 2500}), {pos_x: 2500});
+__out.juntos = P2DU.stack.map(e => [e.before.pos_x, e.after.pos_x]);
 // Lo que no cambia nada, y lo que no es del plano, no se apuntan.
-_dcUndoRecord(U('racks', 'k1'), _dcUndoBefore(U('racks', 'k1'), {pos_x: 2500}), {pos_x: 2500});
-__out.ajeno = _dcUndoBefore(U('racks', 'otro'), {pos_x: 1});
-__out.tras = _dcUndoStack.length;
-__out.titulo = _dcUndoButtonsInner().includes(tf('dcim_undo', 'R01'));
+p2duRecord(U('racks', 'k1'), p2duBefore(U('racks', 'k1'), {pos_x: 2500}), {pos_x: 2500});
+__out.ajeno = p2duBefore(U('racks', 'otro'), {pos_x: 1});
+__out.tras = P2DU.stack.length;
+__out.titulo = p2duButtonsInner().includes(tf('plan2d_undo', 'R01'));
 
 // Deshacer: arriba sale la entrada, y al aceptarlo el servidor vuelve el dibujo.
-const e = _dcUndoStack.pop();
-_dcUndoDone(e, e.before, _dcRedoStack);
-__out.deshecho = [rack.pos_x, _dcUndoShadow.get(U('racks', 'k1')).pos_x, _dcRedoStack.length];
+const e = P2DU.stack.pop();
+p2duDone(e, e.before, P2DU.redo);
+__out.deshecho = [rack.pos_x, P2DU.shadow.get(U('racks', 'k1')).pos_x, P2DU.redo.length];
 // Rehacer.
-const r = _dcRedoStack.pop();
-_dcUndoDone(r, r.after, _dcUndoStack);
-__out.rehecho = [rack.pos_x, _dcUndoStack.length];
+const r = P2DU.redo.pop();
+p2duDone(r, r.after, P2DU.stack);
+__out.rehecho = [rack.pos_x, P2DU.stack.length];
 // Un cambio nuevo olvida lo rehacible.
-_dcRedoStack.push({url: 'x', before: {}, after: {}});
+P2DU.redo.push({url: 'x', before: {}, after: {}});
 const f = _dcpFeat.features[0];
 f.label = 'Mesa';
-_dcUndoRecord(U('features', 'f1'), _dcUndoBefore(U('features', 'f1'), {label: 'Mesa'}), {label: 'Mesa'});
-__out.sinRehacer = _dcRedoStack.length;
+p2duRecord(U('features', 'f1'), p2duBefore(U('features', 'f1'), {label: 'Mesa'}), {label: 'Mesa'});
+__out.sinRehacer = P2DU.redo.length;
 // Otro plano empieza de cero.
 _dcimPlan = {room: {uid: 'r2'}, racks: []};
 _dcpFeat = {features: [], kinds: {}};
 _dcUndoPrime();
-__out.otroPlano = [_dcUndoStack.length, _dcRedoStack.length];
+__out.otroPlano = [P2DU.stack.length, P2DU.redo.length];
 // En el plano de una sede: las salas, las plantas y lo de dentro.
 _dcimPlan = null;
 _dcsPlan = {site: {uid: 's1', rooms: [{uid: 'r9', name: 'Sala 9', pos_x: 0}]},
             floors: [{uid: 'p1', plan_x: 0}], floor: 'p1',
             content: {r9: {racks: [{uid: 'k9', pos_x: 0}], features: []}}};
 _dcUndoPrime();
-__out.sede = [U('rooms', 'r9'), U('floors', 'p1'), U('racks', 'k9')].every(u => _dcUndoShadow.has(u));
+__out.sede = [U('rooms', 'r9'), U('floors', 'p1'), U('racks', 'k9')].every(u => P2DU.shadow.has(u));
 """
 
 

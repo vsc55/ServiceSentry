@@ -1,0 +1,184 @@
+{# ================================================================
+   DCIM — el plano de una sala sobre el editor de planos (`plan2d`).
+
+   Lo que el motor no sabe y la sala sí: qué hay en ella —racks, piezas y equipos de sala—, que
+   todo está en un mismo marco (sin contenedores), que lo que se mueve se ajusta a la baldosa y no
+   pasa de la pared que se ve, y qué es girar o quitar cada clase. Elegir varios, el imán entre
+   cosas, los grupos, lo de debajo, el teclado y el deshacer de una vez son del motor.
+   ================================================================ #}
+
+function _dcpKey2(kind, uid) { return p2dKey(kind, '', uid); }
+
+/** La fila de algo del plano por su clase. */
+function _dcpObj(kind, uid) {
+    uid = String(uid);
+    if (kind === 'rack') return ((_dcimPlan || {}).racks || []).find(r => String(r.uid) === uid) || null;
+    if (kind === 'item') return _dcri1(uid);
+    return _dcpFeatures().find(f => String(f.uid) === uid) || null;
+}
+
+/** Todo lo del plano abierto, como lo pide el motor. */
+function _dcpAllThings() {
+    const out = [];
+    for (const r of (_dcimPlan || {}).racks || []) out.push({kind: 'rack', room: '', uid: String(r.uid), x: r});
+    for (const f of _dcpFeatures()) out.push({kind: 'feature', room: '', uid: String(f.uid), x: f});
+    for (const i of _dcriItems()) out.push({kind: 'item', room: '', uid: String(i.uid), x: i});
+    return out;
+}
+
+/** Ancho, fondo, giro y esquina guardada de algo, sea lo que sea. */
+function _dcpDims(kind, o) {
+    if (kind === 'item') {
+        const b = o.box || {};
+        // De su caja, que es de lo que se dibuja; `pos_x` va detrás de ella al soltar.
+        return {w: Number(b.w || 200), d: Number(b.d || 200), rot: Number(b.rot || 0),
+                x: Number(b.x || 0), y: Number(b.y || 0)};
+    }
+    return {w: Number(o.width_mm || 600), d: Number(o.depth_mm || (kind === 'rack' ? 1000 : 600)),
+            rot: Number(o.rotation || 0), x: Number(o.pos_x || 0), y: Number(o.pos_y || 0)};
+}
+
+/** Sus cuatro esquinas, giradas sobre su centro como se dibuja. */
+function _dcpCorners(kind, o) {
+    const m = _dcpDims(kind, o);
+    const marco = {x: m.x, y: m.y, w: m.w, d: m.d, rot: m.rot};
+    return [[0, 0], [m.w, 0], [m.w, m.d], [0, m.d]].map(([px, py]) => p2dTurn(marco, px, py));
+}
+
+/** Dónde se escribe cada clase. */
+function _dcpThingUrl(kind, uid) {
+    const ruta = kind === 'rack' ? 'racks' : kind === 'item' ? 'room-items' : 'features';
+    return `/api/v1/dcim/${ruta}/${encodeURIComponent(uid)}`;
+}
+
+/** Poner cada uno desplazado `dx`, `dy` mm desde su `at`, sin pasar la pared que se ve (el tope
+ *  de `_dcpPlace`, por el borde visible y no por la esquina sin girar). Un equipo lleva además
+ *  su caja, que es de lo que se dibuja. */
+function _dcpShift(members, dx, dy) {
+    for (const m of members) {
+        const o = _dcpObj(m.kind, m.uid);
+        if (!o) continue;
+        const d = _dcpDims(m.kind, o);
+        const e = _dcpEdgeOffset(d.w, d.d, d.rot);
+        o.pos_x = Math.max(-e.x, Math.round(m.at.x + dx));
+        o.pos_y = Math.max(-e.y, Math.round(m.at.y + dy));
+        if (m.kind === 'item' && o.box) { o.box.x = o.pos_x; o.box.y = o.pos_y; }
+    }
+}
+
+/** Dónde queda algo arrastrado `dx`, `dy` mm desde `at` (su esquina guardada): pegado a un
+ *  vecino si llega cerca de uno (`p2dNear`), y si no al imán de baldosa como siempre
+ *  (`_dcpPlace`). `fuera`, las claves que no son vecinas —él y lo que se mueve con él—; `libre`
+ *  (Alt) apaga el imán entre cosas. El borde que se ve nunca pasa de la pared. */
+function _dcpPlaceNear(at, dx, dy, w, d, rot, fuera, libre) {
+    const base = _dcpPlace(at, dx, dy, w, d, rot);
+    if (_dcpView !== 'top') { _dcpP2d.guides = []; return base; }
+    const e = _dcpEdgeOffset(w, d, rot);
+    const caja = {x: at.x + e.x, y: at.y + e.y, w: w - 2 * e.x, h: d - 2 * e.y};
+    const r = p2dNear(_dcpP2d, [...fuera].map(p2dUnkey), caja, dx, dy,
+                      {dx: base.x - at.x, dy: base.y - at.y}, libre);
+    return {x: Math.max(-e.x, Math.round(at.x + r.dx)), y: Math.max(-e.y, Math.round(at.y + r.dy))};
+}
+
+/** Girar algo un cuarto, según lo que es. */
+function _dcpTurnThing(m) {
+    if (m.kind === 'rack') return _dcpTurn(m.uid);
+    return _dcObjTurn(m.kind, m.uid);
+}
+
+/** Quitar algo, con la confirmación de su clase. */
+function _dcpDropThing(m) { return _dcObjDrop(m.kind, m.uid); }
+
+//: El plano de la sala en el motor.
+const _dcpP2d = p2dMake('room', {
+    svg: _DCP_SVG, scale: _DCP_SCALE, hint: 'plan2d_many_hint',
+    things: () => _dcpAllThings(),
+    row: (kind, room, uid) => _dcpObj(kind, uid),
+    corners: (kind, room, x) => _dcpCorners(kind, x),
+    at: (kind, room, x) => { const m = _dcpDims(kind, x); return {x: m.x, y: m.y}; },
+    shift: (members, dx, dy) => _dcpShift(members, dx, dy),
+    // Lo que lleva la mano va a la baldosa o a su vecino, y los demás le siguen.
+    dragDelta: (P, g, dx, dy, libre) => {
+        const o = _dcpObj(g.grab.kind, g.grab.uid);
+        if (!o) return {dx, dy};
+        const m = _dcpDims(g.grab.kind, o);
+        const s = _dcpPlaceNear(g.grab.at, dx, dy, m.w, m.d, m.rot, new Set(g.members.map(p2dKeyOf)), libre);
+        return {dx: s.x - g.grab.at.x, dy: s.y - g.grab.at.y};
+    },
+    primary: () => (_dcpSel ? {kind: _dcpSel.kind, room: '', uid: String(_dcpSel.uid)} : null),
+    setPrimary: (m) => { _dcpSel = m ? {kind: m.kind, uid: String(m.uid)} : null; },
+    stackOf: (el) => {
+        const g = el.closest ? el.closest('g[data-dcpf], g[data-dcp], g[data-dcpi]') : null;
+        if (!g) return null;
+        const kind = g.dataset.dcpf ? 'feature' : g.dataset.dcpi ? 'item' : 'rack';
+        return {kind, room: '', uid: String(g.dataset.dcpf || g.dataset.dcpi || g.dataset.dcp), el: g};
+    },
+    groupable: () => true,
+    wholeOnly: () => false,
+    url: (kind, uid) => _dcpThingUrl(kind, uid),
+    send: (metodo, url, cuerpo) => _dcimSend(metodo, url, cuerpo),
+    batchStart: async () => {
+        if (typeof _dcpFlush === 'function') await _dcpFlush();
+        return p2duMark();
+    },
+    batchEnd: (marca) => p2duBatch(marca),
+    may: () => _dcimMay('dcim_edit'),
+    redraw: () => _dcpRedraw(),
+    inspector: () => _dcpInspectorDraw(),
+    rerender: () => renderDcim(),
+    // El plano pudo cerrarse mientras se guardaba: entonces no hay nada que volver a leer.
+    reload: () => (_dcimPlan ? _dcimOpenPlan(_dcimPlan.room.uid) : undefined),
+    deselect: () => _dcpDeselect(),
+    active: () => !!_dcimPlan,
+    turn: (m) => _dcpTurnThing(m),
+    drop: (m) => _dcpDropThing(m),
+    // Mayús mueve una baldosa entera, que es como se coloca una fila; sin él, diez centímetros.
+    step: (mayus) => (mayus ? _dcpTile() : 100),
+    floatHide: () => _dcpFloatHide(),
+    // Lo que se puede poner en el plano: el catálogo del inventario, y volver a leer la sala
+    // cuando alguien crea o cambia uno de sus objetos.
+    kindsScreen: 'dcim',
+    kindsChanged: () => _dcimOpenPlan(_dcimPlan.room.uid),
+    // La barra flotante y la paleta.
+    floatId: 'dcpFloat',
+    dragging: () => !!_dcpDrag,
+    floatButtons: (m) => _dcObjFloatButtons(m.kind),
+    floatAct: (act, m) => _dcpFloatAct(act, m),
+    paletteOff: () => !!(P2DCAL && P2DCAL.kind === 'room'),
+    paletteBefore: () => [{onclick: "p2dPlaceStart('room','rack')", icon: 'bi-hdd-rack', key: 'rack',
+                           text: `${t('dcim_rack')} · ${t('dcim_a_record')}`}],
+    paletteTitle: () => t('dcim_pal_room'),
+    addAt: (clave, c, tam) => _dcObjAdd(clave, _dcimPlan.room.uid, c, (mm) => Math.max(0, _dcpSnap(mm)), tam),
+    // Pulsar sin mover: un rack queda elegido, con su ficha y su barra —en una pantalla sin ratón
+    // es la única forma de llegar a ella; abrirlo es uno de sus botones—. Una pieza o un equipo
+    // ya lo estaban: su ficha.
+    clicked: (m) => _dcpClicked(m),
+    // Mientras se arrastra, dónde está (la baldosa, «B7», que es lo que se dice por teléfono).
+    moved: (g) => {
+        const o = _dcpObj(g.grab.kind, g.grab.uid);
+        if (!o) return;
+        const d = _dcpDims(g.grab.kind, o);
+        _dcpReadout(d.x + d.w / 2, d.y + d.d / 2);
+    },
+});
+
+function _dcpClicked(m) {
+    if (m.kind !== 'rack') { _dcpRedraw(); return _dcpInspectorDraw(); }
+    _dcpSel = {kind: 'rack', uid: m.uid};
+    _dcpRedraw();
+    _dcpInspectorDraw();
+    const g = _dcimPlanSvg()?.querySelector(`g[data-dcp="${CSS.escape(String(m.uid))}"]`);
+    return _dcpFloatShow(m.uid, g, 'rack');
+}
+
+/** Lo que hacen los botones de la barra de la sala: abrir el rack, editar —el rack en su
+ *  ficha completa, la pieza en el inspector—, enviar al fondo; el resto, lo común. */
+function _dcpFloatAct(act, m) {
+    if (act === 'open') return _dcpRackOpen(m.uid);
+    if (act === 'edit') return m.kind === 'rack' ? _dcpRackEdit(m.uid) : _dcpEdit(m.uid);
+    if (act === 'back') return _dcpSendBack(m.kind, m.uid);
+    return _dcObjFloatAct(act, m.kind, m.uid);
+}
+
+//: Lo enviado al fondo en la sala: el del motor.
+const _dcpBack = _dcpP2d.back;

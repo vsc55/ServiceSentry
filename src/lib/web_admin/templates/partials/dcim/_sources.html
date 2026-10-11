@@ -136,18 +136,35 @@ function _dcSrcItemChip(f) {
         <i class="bi bi-hdd-rack me-1"></i>${esc(tf('dcim_source_is_item', it.label, it.rack_name))}</button>`;
 }
 
-/** What hangs off a source directly: each strip with its branch and its rack, the rack a link.
- *  Without this, the chain could only be read upwards from a rack, never downwards from a
- *  panel — and «what goes off if this panel trips» is the question asked of a panel. */
+/** What hangs off a source directly: each strip with its branch and its rack, the rack a link,
+ *  and each wall power socket with its room, a link to the room's plan with it chosen. Without
+ *  this, the chain could only be read upwards from a rack, never downwards from a panel — and
+ *  «what goes off if this panel trips» is the question asked of a panel. */
 function _dcSrcHangs(uid, guias) {
     const filas = (((_dcSrc || {}).hangs || {})[uid]) || [];
-    if (!filas.length) return '';
+    const tomas = (((_dcSrc || {}).sockets || {})[uid]) || [];
+    if (!filas.length && !tomas.length) return '';
     return `<div class="ss-treerow ss-fs-2 text-body-secondary">${guias}<span class="ss-treeline"></span>
         <i class="bi bi-arrow-return-right"></i>
         <span class="d-flex flex-wrap gap-1 align-items-center">${filas.map(h => `<button type="button"
             class="btn btn-sm btn-secondary py-0" onclick="_dcSrcGoRack(${jsStr(h.rack)})"
             title="${escAttr(t('dcim_open_rack'))}">${esc(h.name)} · ${esc(_dcBranchWord(h.feed))} · ${
-            esc(h.rack_name)}</button>`).join('')}</span></div>`;
+            esc(h.rack_name)}</button>`).join('')}${tomas.map(s => `<button type="button"
+            class="btn btn-sm btn-secondary py-0" data-dcsrc-socket="${escAttr(s.uid)}"
+            onclick="_dcSrcGoSocket(${jsStr(s.room)},${jsStr(s.uid)})" title="${escAttr(t('dcim_open_plan'))}">
+            <i class="bi bi-plug me-1"></i>${esc(s.label || t('plan2d_kind_power_outlet'))}${
+            (s.jacks || []).length ? ' · ' + esc(s.jacks.map(b => b.n + '×' + b.abbr).join(' ')) : ''} · ${
+            esc(s.room_name)}</button>`).join('')}</span></div>`;
+}
+
+/** To a wall socket, from the sources view: its room's plan, with the socket chosen. */
+async function _dcSrcGoSocket(roomUid, uid) {
+    if (!roomUid) return;
+    _dcSrc = null;
+    _dcimMark('inventory');
+    await _dcimOpenPlan(roomUid);
+    _dcPlanSelect('item', uid, roomUid);
+    renderDcim();
 }
 
 /** To a rack, from the sources view: the inventory, with that rack open on its Alimentación tab. */
@@ -273,7 +290,7 @@ function _dcSrcForm() {
                 (d.plan_pieces || []).filter(x => (!x.source || x.source === f.uid)
                                               && (!f.site_uid || x.site === f.site_uid)).map(x =>
                     `<option value="${escAttr(x.uid)}"${String(f.feature_uid || '') === x.uid ? ' selected' : ''}>${
-                    esc(x.label || t('dcim_kind_' + x.kind))} · ${esc(x.room_name)}</option>`).join('')}
+                    esc(x.label || _dcPieceName(x.kind))} · ${esc(x.room_name)}</option>`).join('')}
             </select></label>
         <label class="ss-fs-2 text-muted">${esc(t('dcim_device'))}
             ${_dcimDatalist('devices')}

@@ -5,6 +5,33 @@
 > changelog (eso vive en [`CHANGELOG.md`](../CHANGELOG.md)) ni un manual de uso:
 > aquí se documenta *por qué* fallaba algo y *qué patrón* lo evita.
 
+## Una ruta nueva que tapaba a otra que ya existía, y unos cuadros probados con datos inventados
+
+**Síntoma.** Tras añadir «qué tiene dentro» antes de borrar, siete pruebas de sitios distintos
+—el plano de una sede, sus circuitos, sus muros, los equipos de sala, las filas— fallaron a la vez
+en la batería amplia; las pruebas de lo nuevo pasaban. Y en otra parte, una revisión encontró que
+los dos cuadros de «Mover» (un equipo a otro rack, un rack a otra sala) no funcionaban con datos
+reales, aunque sus pruebas pasaban.
+
+**Diagnóstico.** Las siete pedían `/api/v1/dcim/sites/<uid>/contents` y recibían
+`{contains: …}` en vez de las salas, los racks y los muros. Los cuadros leían `room.racks` y en la
+respuesta de `/api/v1/dcim/sites` eso es un número; la lista es `room.rackList`.
+
+**Causa raíz.** La ruta nueva se declaró genérica, `/api/v1/dcim/{kind}/<uid>/contents`, para
+sedes, salas y racks. Con `kind = sites` es exactamente la ruta que ya existía con otro
+significado, y Flask atiende la que registra primero: ningún error, solo otra respuesta. Los
+cuadros se probaron con un `_dcimData` escrito a mano con la forma que se esperaba, no con la que
+manda el servidor.
+
+**Solución.** La ruta nueva se llama `…/holds`. La prueba de los cuadros pide primero
+`/api/v1/dcim/sites` de una aplicación de pruebas y le pasa al guion esa respuesta tal cual
+(`test_wa_dcim_move.py`).
+
+**Lección.** Una ruta con una parte variable delante (`{kind}`) se cruza con las fijas que ya
+existan con esa forma: antes de declararla, buscar las que coinciden al expandirla. Y una prueba
+de pantalla que fabrica sus datos prueba la forma que uno cree, no la que llega: los datos se
+piden al servidor de pruebas.
+
 ## Un rack que en `/3d` se abría sin abrirse
 
 **Síntoma.** En `/3d`, pulsar un rack o apuntarle y pulsar F dejó de abrirlo. No salía ningún

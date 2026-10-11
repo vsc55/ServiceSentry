@@ -629,7 +629,7 @@ function _dcPduNew() {
                 ${esc(_dcimItemName(i))}
                 <span class="text-muted ss-fs-1 ms-1">${esc(
                     [i.u_start ? 'U' + i.u_start : '',
-                     i.role ? t('dcim_role_' + i.role) : ''].filter(Boolean).join(' · '))}</span>
+                     i.role ? _dcRoleName(i.role) : ''].filter(Boolean).join(' · '))}</span>
             </button>`).join('')}</div>
         <button class="btn btn-sm btn-secondary text-start" onclick="_dcPduPlain()">
             <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_pdu_not_placed'))}</button>

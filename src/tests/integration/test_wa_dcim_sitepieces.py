@@ -23,7 +23,7 @@ import tempfile
 import pytest
 
 from tests.conftest import _login                                   # noqa: E402
-from tests.helpers import node_run, panel_bundle                    # noqa: E402
+from tests.helpers import node_run, panel_bundle, plan2d_catalog_js  # noqa: E402
 
 pytestmark = pytest.mark.skipif(shutil.which('node') is None,
                                 reason='sin node: no hay con qué ejecutar el guion')
@@ -104,10 +104,13 @@ _dcsPlan = {site: {uid: 's', rooms: [{uid: 'rc', floor_uid: 'p', pos_x: 0, pos_y
             floors: [{uid: 'p', area_uid: ''}], floor: 'p', image: null,
             kinds: {zone: {w: 2000, d: 2000, layer: 'floor'}, smoke_detector: {w: 120, d: 120, layer: 'air'}},
             content: {rc: {racks: [], features: [detector], items: [impresora]}}};
+p2dPaletteMode = 'all';
 const paleta = _dcsPaletteHtml();
-__out.paleta = {aire: paleta.includes('_dcsAdd("smoke_detector")') || paleta.includes("_dcsAdd('smoke_detector')")
-                      || paleta.includes('_dcsAdd(&quot;smoke_detector&quot;)'),
-                equipos: (paleta.match(/_dcsAddItem\(/g) || []).length,
+// La paleta es la del editor de planos (`p2dPaletteHtml`): cada objeto del catálogo, por su clave.
+const enPaleta = (k) => paleta.includes(`p2dPaletteAdd(&quot;floor&quot;,&quot;${k}&quot;)`);
+const cat = P2D_CAT.dcim.kinds;
+__out.paleta = {aire: enPaleta('smoke_detector'),
+                equipos: Object.keys(cat).filter(k => cat[k].device && enPaleta(k)).length,
                 escalera: paleta.includes("_dcsCoreAdd('stairs')"),
                 ascensor: paleta.includes("_dcsCoreAdd('lift')")};
 const dentro = _dcsInside(_dcsPlan.site.rooms[0]);
@@ -119,7 +122,7 @@ __out.fila = (_dcsItemRow() || {}).label;
 enviados.length = 0;
 _dcsReload = async () => {};
 ssCanvasWindow = () => ({x: 0, y: 0, w: 20000 * S, h: 15000 * S});
-_dcsAddItem('printer');
+p2dAdd('floor', 'printer');
 __out.puesta = enviados.map(e => [e.url, (e.cuerpo || {}).role]);
 // The stairs: the palette's button asks where, the click puts it there, and the plan draws it —
 // also on a floor that already had one. Dragged, it moves and is saved.
@@ -160,7 +163,7 @@ def out():
     wa.app.config['TESTING'] = True
     c = wa.app.test_client()
     _login(c)
-    return node_run(panel_bundle(c), _PRUEBA)
+    return node_run(panel_bundle(c), plan2d_catalog_js(c) + _PRUEBA)
 
 
 class TestLaPaletaDeLaPlanta:
@@ -172,7 +175,7 @@ class TestLaPaletaDeLaPlanta:
 
     def test_la_paleta_trae_el_techo_los_equipos_y_el_nucleo(self, out):
         p = out['paleta']
-        assert p['aire'] and p['equipos'] == 7 and p['escalera'] and p['ascensor']
+        assert p['aire'] and p['equipos'] == 8 and p['escalera'] and p['ascensor']
 
     def test_los_equipos_y_el_techo_se_dibujan_en_la_planta(self, out):
         assert out['dibuja'] == {'equipo': True, 'techo': True}

@@ -20,13 +20,24 @@ FACES = ('full', 'front', 'rear')
 ITEM_ROLES = ('server', 'switch', 'router', 'firewall', 'storage', 'patch_panel',
               'fiber_panel', 'ups', 'pdu', 'shelf', 'kvm', 'console', 'blank', 'other',
               # Lo que está en una SALA y no en un armario (`placement = 'room'`): los puestos y
-              # lo que cuelga de la red del edificio, y la roseta de pared donde acaba el cable
-              # horizontal.
-              'pc', 'phone', 'printer', 'ap', 'camera', 'display', 'outlet')
+              # lo que cuelga de la red del edificio, la roseta de pared donde acaba el cable
+              # horizontal y la toma de corriente, con la fuente de la que cuelga.
+              'pc', 'phone', 'printer', 'ap', 'camera', 'display', 'outlet', 'power_outlet')
 
 #: Los que no contestan porque no tienen a qué: no es que estén sin vigilar, es que no hay nada
 #: que vigilar. Contarlos entre los desatendidos llena la pantalla de deberes imposibles.
-ROLES_MUDOS = ('patch_panel', 'fiber_panel', 'shelf', 'blank', 'outlet')
+ROLES_MUDOS = ('patch_panel', 'fiber_panel', 'shelf', 'blank', 'outlet', 'power_outlet')
+
+#: Los de pared que tienen BOCAS: la roseta y la toma de corriente. Una placa no es de un solo
+#: tipo: dos RJ45, una de fibra y un HDMI; dos Schuko y una C13. Así que dicen una LISTA
+#: (`jacks`): cada boca, su conector del catálogo (`connectors.jacks`) y cuántas hay —un entero
+#: desde 1, sin máximo—. Pedido: una roseta de fibra y una RJ45 se dibujaban igual, y no había
+#: dónde enchufar un equipo a un SAI.
+JACK_ROLES = ('outlet', 'power_outlet')
+#: Lo que cabe: no son límites de uso, es no guardar como placa algo que no lo es —un número
+#: que no cabe en un entero, una lista de mil tipos—.
+JACKS_SANE = 2 ** 31 - 1
+JACK_TYPES_MAX = 32
 
 #: Los PASIVOS por los que pasa un cable sin acabar en ellos: un panel de parcheo o una roseta
 #: unen por dentro su puerto de delante `N` con el de detrás `N-R`. Es la regla con la que se
@@ -41,23 +52,17 @@ MOUNTS = ('desk', 'wall', 'ceiling', 'floor')
 #: altura del suelo, montaje)`` en milímetros. Con esto se dibuja un puesto sin pedir medidas
 #: —un PC en una mesa, un AP en el techo, una roseta a 30 cm del suelo— y quien las tenga, las
 #: escribe en su modelo del catálogo.
-ROOM_ITEM_DEFAULTS = {
-    'pc':      (180, 300, 330, 750, 'desk'),
-    'phone':   (190, 200, 110, 750, 'desk'),
-    'printer': (520, 480, 420, 0, 'floor'),
-    'ap':      (230, 230, 45, 2950, 'ceiling'),
-    'camera':  (130, 130, 120, 2750, 'wall'),
-    'display': (1450, 90, 830, 900, 'wall'),
-    'outlet':  (86, 45, 86, 300, 'wall'),
-}
+from lib.core.dcim.plankinds import ROOM_ITEM_DEFAULTS  # noqa: E402  (del catálogo de planos)
 _ROOM_ITEM_FALLBACK = (300, 300, 300, 0, 'floor')
 
 
-def room_item_box(item: dict) -> dict:
+def room_item_box(item: dict, defaults: dict | None = None) -> dict:
     """Where a room item is and how big, in millimetres: ``{x, y, w, d, h, base, rot, mount}``.
-    Its role's defaults (`ROOM_ITEM_DEFAULTS`) unless the row says otherwise (`depth_mm`,
+    Its role's defaults (`ROOM_ITEM_DEFAULTS`, or *defaults* —with the equipment created from the
+    plan's screen, `plankinds.device_defaults`—) unless the row says otherwise (`depth_mm`,
     `base_mm`, `mount`). Pure: the 3D, the plan and the demo read the same box."""
-    w, d, h, base, mount = ROOM_ITEM_DEFAULTS.get(str(item.get('role') or ''), _ROOM_ITEM_FALLBACK)
+    w, d, h, base, mount = (defaults or ROOM_ITEM_DEFAULTS).get(str(item.get('role') or ''),
+                                                                _ROOM_ITEM_FALLBACK)
     def num(k, por_defecto):
         v = item.get(k)
         try:
@@ -183,6 +188,13 @@ _ITEM = TableSpec(
         # Lo mismo que un rack o una pieza: el grupo con el que se mueve en el plano de la sala
         # (un PC con su mesa). Solo lo usa un equipo de sala; en un rack se queda vacío.
         Column('group_uid', 'TEXT', nullable=False, default="''"),
+        # Una roseta o una toma de pared (`JACK_ROLES`): sus bocas, una lista en JSON —cada una
+        # `{connector, n}`, un id del catálogo de conectores (`8p8c`, `lc-upc`, `cee-7-3`) y
+        # cuántas—. Vacío, sin decir.
+        Column('jacks', 'TEXT', nullable=False, default="''"),
+        # Una toma de corriente: la fuente de su sede de la que cuelga (`dc_source`: un SAI, un
+        # grupo, un cuadro). Con ella hereda la cadena entera: si va protegida o no.
+        Column('source_uid', 'TEXT', nullable=False, default="''"),
         Column('created_at', 'TEXT', nullable=False, default="''"),
         Column('updated_at', 'TEXT', nullable=False, default="''"),
         Column('updated_by', 'TEXT', nullable=False, default="''"),

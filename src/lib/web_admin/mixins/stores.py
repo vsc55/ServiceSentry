@@ -96,6 +96,11 @@ class _StoresMixin:
         # dispositivo físico: una máquina virtual corre lo mismo y pregunta lo mismo.
         from lib.core.dcim.platforms import PlatformStore  # noqa: PLC0415
         self._dcim_platforms = PlatformStore(self._db_connector)
+        # Los objetos que alguien crea desde la pantalla de un plano (un palé, una máquina de
+        # vending), además de los del catálogo en código. Del editor de planos y no del
+        # inventario: cada pantalla que edita un plano tiene los suyos (`lib.core.plan2d`).
+        from lib.core.plan2d.store import PlanKindStore  # noqa: PLC0415
+        self._plan2d_kinds = PlanKindStore(self._db_connector)
         # What the panel does in the background, after it has done it. The package is handed
         # the connector rather than going looking for one: a job finishes inside a worker
         # thread that has no web admin, no request and no handle of its own, and threading one

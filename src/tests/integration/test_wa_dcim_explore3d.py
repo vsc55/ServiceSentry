@@ -162,6 +162,15 @@ const senaladas = [];
 _dcmRaise = (uid) => senaladas.push(uid);
 _x3SumGo('error'); _x3SumGo('error'); _x3SumGo('error');
 __out.senaladas = senaladas;
+// The «3D» button of a plan or a rack: the camera flies to the room asked for, or the rack opens.
+const vuelos = [], abiertos3d = [];
+ss3dGet = () => ({escena: {cajas: [{}], salas: [{uid: 'r1', y: 3, frame: {x: 2, z: 4, W: 6, D: 8, rot: 0}}]}});
+ss3dFlyTo = (V, d) => vuelos.push(d);
+_dc3dOpenRack = (uid) => abiertos3d.push(uid);
+_x3Focus('r1', '');
+_x3Focus('', 'k7');
+_x3Focus('nada', '');
+__out.enfoque = {vuelos, abiertos: abiertos3d};
 """
 
 
@@ -196,6 +205,13 @@ class TestThePage:
     def test_where_one_is_sites_the_site_and_its_floors(self, out):
         assert out['migas'] == dict.fromkeys(('sedes', 'otraSede', 'orden', 'marcada', 'bajarNo'), True)
         assert out['plantas'] == ['f1', 'f2'] and out['sala'] == 'f2'
+
+    def test_it_goes_to_the_room_or_rack_the_address_asks_for(self, out):
+        """The «3D» link of a room's plan or a rack sends `room` or `rack`: the camera flies to
+        the room's middle, or the rack opens in its place; one that is not there does nothing."""
+        e = out['enfoque']
+        assert e['vuelos'] == [{'mira': [5, 4, 8], 'radio': 11.2}]
+        assert e['abiertos'] == ['k7']
 
     def test_the_address_says_where_one_is(self, out):
         assert out['direccion'].endswith('?site=s1&floor=f1&mode=floor')

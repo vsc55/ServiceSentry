@@ -66,38 +66,12 @@ let _dcpDrag = null;
 
 function _dcimPlanSvg() { return ssCanvasSvg(_DCP_SVG); }
 
-/** Fetch the floor plan, embedded and with its own proportions.
- *
- *  Embedded rather than by URL because this drawing gets EXPORTED: an SVG drawn inside an
- *  `<img>` cannot fetch external resources, so an `href` at the API would come out blank in the
- *  PNG and say nothing about it. And the ratio is read from the picture itself because that is
- *  the one source that cannot disagree with the file.
- *
- *  Failing is not an error to show: it is a room with no plan, which is the ordinary state. */
+/** El plano de la sala (`p2dPlanFetch`); sin plano propio, el de su planta si es su zona general. */
 async function _dcpLoadPlan(room) {
     const name = (room || {}).plan || '';
     if (!name) return _dcpLoadFloorPlan(room);
-    try {
-        const resp = await fetch(`${_dcimMediaUrl(name)}`,
-                                 {credentials: 'same-origin'});
-        if (!resp.ok) return;
-        const blob = await resp.blob();
-        const data = await new Promise(ok => {
-            const fr = new FileReader();
-            fr.onload = () => ok(String(fr.result || ''));
-            fr.onerror = () => ok('');
-            fr.readAsDataURL(blob);
-        });
-        if (!data) return;
-        const ratio = await new Promise(ok => {
-            const img = new Image();
-            img.onload = () => ok(img.naturalWidth ? img.naturalHeight / img.naturalWidth : 0);
-            img.onerror = () => ok(0);
-            img.src = data;
-        });
-        if (_dcimPlan && _dcimPlan.room && _dcimPlan.room.uid === room.uid)
-            _dcimPlan.image = {data, ratio: ratio || 0.7};
-    } catch (e) { /* a room with no plan is the ordinary state */ }
+    const img = await p2dPlanFetch(name);
+    if (img && _dcimPlan && _dcimPlan.room && _dcimPlan.room.uid === room.uid) _dcimPlan.image = img;
 }
 
 /** La zona general de una planta es la planta misma —en (0, 0) y sin girar—, así que sin
@@ -121,42 +95,9 @@ async function _dcpLoadFloorPlan(room) {
     }
 }
 
-/** Upload one. The server decides what it is by looking INSIDE the file — an extension is
- *  a claim by whoever uploaded it, and the first bytes of a PNG are not. */
-async function _dcpUpload(input) {
-    const file = (input.files || [])[0];
-    input.value = '';
-    if (!file || !_dcimPlan) return;
-    const room = _dcimPlan.room;
-    const body = new FormData();
-    body.append('file', file);
-    const resp = await fetch(`/api/v1/dcim/rooms/${encodeURIComponent(room.uid)}/plan`,
-                             {method: 'POST', body, credentials: 'same-origin'});
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) { showToast(data.error || t('error'), 'danger'); return; }
-    room.plan = data.plan || '';
-    _dcimPlan.image = null;
-    await _dcpLoadPlan(room);
-    showToast(t('dcim_plan_saved'), 'success');
-    renderDcim();
-}
 
-/** Take it away — the FILE goes, not just the reference to it. A record cleared while the
- *  file stays is a folder that grows for the life of the installation. */
-function _dcpDropPlan() {
-    if (!_dcimPlan) return;
-    const room = _dcimPlan.room;
-    // Una FUNCIÓN, no un `await`: `showConfirmModal` no devuelve promesa, así que esperarla
-    // daba `undefined` y todo lo de después no ocurría nunca.
-    showConfirmModal(t('dcim_plan_drop_q'), async () => {
-        const resp = await fetch(`/api/v1/dcim/rooms/${encodeURIComponent(room.uid)}/plan`,
-                                 {method: 'DELETE', credentials: 'same-origin'});
-        if (!resp.ok) { showToast(t('error'), 'danger'); return; }
-        room.plan = '';
-        _dcimPlan.image = null;
-        renderDcim();
-    });
-}
+
+
 
 /** Escuchar el teclado solo mientras el plano está abierto.
  *
@@ -174,7 +115,7 @@ async function _dcimOpenPlan(roomUid) {
     if (!room) return;
     // Entrando desde el 3D de la sede: ese visor es de la sede, no de esta sala.
     if (_dc3d && _dc3d.build) _dc3dStop();
-    if (!_dcimPlan || _dcimPlan.room.uid !== room.uid) { _dcpBack.clear(); _dcCal = null; }
+    if (!_dcimPlan || _dcimPlan.room.uid !== room.uid) { _dcpBack.clear(); _dcPlanLeave(); }
     _dcimPlan = {room, racks: (data || {}).racks || []};
     await Promise.all([_dcpLoadPlan(room), _dcpLoadFeatures(roomUid)]);
     _dcUndoPrime();
@@ -199,7 +140,7 @@ function _dcimClosePlan() {
     _dcpFeat = null;
     _dcpSel = null;
     _dcpBack.clear();
-    _dcCal = null;
+    _dcPlanLeave();
     _dcimUrl();
     renderDcim();
 }
@@ -235,48 +176,30 @@ function _dcimPlanHtml() {
                         onclick="_dcpAir=!_dcpAir;renderDcim()"
                         title="${escAttr(t('dcim_layer_air'))}" aria-label="${escAttr(t('dcim_layer_air'))}">
                     <i class="bi bi-bezier2"></i></button>` : ''}
-                <!-- The native file input is a transparent, system-bordered control, which is
-                     the one shape this panel does not use. So it is hidden behind a solid
-                     button that opens it. -->
-                <input type="file" id="dcpPlanFile" class="d-none"
-                       accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
-                       onchange="_dcpUpload(this)">
-                <button class="btn btn-sm btn-secondary"
-                        onclick="document.getElementById('dcpPlanFile').click()"
-                        title="${escAttr(t(room.plan ? 'dcim_plan_replace' : 'dcim_plan_upload'))}">
-                    <i class="bi bi-image"></i></button>
-                ${room.plan ? `<button class="btn btn-sm btn-warning" onclick="_dcpDropPlan()"
-                        title="${escAttr(t('dcim_plan_drop'))}">
-                    <i class="bi bi-trash"></i></button>` : ''}
-                ${planta ? _dcPointerButtons() : ''}
+                ${p2dPlanFileTools('rooms', room.uid, !!room.plan)}
+                ${planta ? p2dPointerButtons() : ''}
+                ${p2dKindsButton(_dcpP2d)}
                 ${room.plan || _dcimPlan.planFloor ? _dcPlanBgButton() : ''}
-                ${room.plan && edita ? _dcCalButton('room') : ''}
-                ${_dcUndoButtons()}
-                <input type="file" id="dcpImportFile" class="d-none"
-                       accept=".json,application/json" onchange="_dcpImport(this)">
-                <button class="btn btn-sm btn-secondary" onclick="_dcpExport()"
-                        title="${escAttr(t('dcim_export'))}">
-                    <i class="bi bi-filetype-json"></i></button>
-                ${edita ? `<button class="btn btn-sm btn-secondary"
-                        onclick="document.getElementById('dcpImportFile').click()"
-                        title="${escAttr(t('dcim_import'))}">
-                    <i class="bi bi-upload"></i></button>` : ''}
+                ${room.plan && edita ? p2dCalButton('room') : ''}
+                ${p2duButtons()}
+                ${p2dJsonTools({input: 'dcpImportFile', exportFn: '_dcpExport()',
+                    importFn: '_dcpImport(this)', canImport: edita,
+                    exportTt: t('dcim_export_room'), importTt: t('dcim_import_room')})}
+                ${_dc3dLinkHtml({site: room.site_uid, floor: room.floor_uid, room: room.uid})}
                 ${ssCanvasTools(_DCP_SVG, 'room_plan')}
             </div>
         </div>
-        ${_dcCalBar('room')}
+        ${p2dCalBar('room')}
         ${_dcpRowWarnings()}
         <div class="ss-editor">
-            <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative${_dcPointerClass(planta)}">
-                ${_dcCompass(_dcNorthOf((_dcimPlan || {}).planFloor || (_dcimPlan || {}).room))}
+            <div class="border rounded-3 overflow-hidden ss-infra-canvas position-relative${p2dPointerClass(planta)}">
+                ${p2dCompass(p2dNorthOf((_dcimPlan || {}).planFloor || (_dcimPlan || {}).room))}
                 ${planta ? _dcpPaletteHtml() : ''}
                 <div id="dcimPlanPanel" class="position-absolute ss-passthru"
                      style="left:.5rem;bottom:.5rem;right:.5rem;z-index:2"></div>
                 <div id="dcpSize" class="position-absolute d-none badge text-bg-warning ss-tabular"
                      style="z-index:3;pointer-events:none"></div>
-                <div id="dcpFloat" class="position-absolute d-none"
-                     style="z-index:3;transform:translate(-100%,calc(-100% - 4px))"
-                     onpointerenter="_dcpFloatKeep()" onpointerleave="_dcpFloatLater()"></div>
+                ${p2dFloatBoxHtml(_dcpP2d)}
                 <svg ${ssCanvasAttrs(_DCP_SVG, box)}
                      onwheel="_dcpFloatHide();ssCanvasWheel(${jsStr(_DCP_SVG)},event)"
                      onpointerdown="_dcpDown(event)" onpointermove="_dcpMove(event)"
@@ -330,32 +253,34 @@ function _dcpRoomSet(campo, valor) {
  *  whose size did not count one of its boxes, so dropping it outside the frame put it where it
  *  could no longer be grabbed. */
 function _dcpExtent(racks) {
-    let maxX = 4000, maxY = 3000;               // a small room, so an empty plan is not a dot
-    // The plan picture is one more box. Not counting it is exactly the trap that had both
-    // maps exporting cut off: a frame that does not know about one of its own drawings.
-    // Con su sitio: un plano calibrado puede empezar antes de la sala (su margen), y un marco
-    // que empieza en 0 lo cortaba.
-    let minX = 0, minY = 0;
-    if ((_dcimPlan || {}).image) {
-        const b = _dcpPlanBox();
-        minX = Math.min(minX, b.x);
-        minY = Math.min(minY, b.y);
-        maxX = Math.max(maxX, b.x + b.w);
-        maxY = Math.max(maxY, b.y + b.h);
-    }
-    for (const r of racks) {
-        maxX = Math.max(maxX, Number(r.pos_x || 0) + Number(r.width_mm || 600));
-        maxY = Math.max(maxY, Number(r.pos_y || 0) + Number(r.depth_mm || 1000));
-    }
-    // Las piezas y la sala son cajas más. La trampa que este panel pisó dos veces fue un marco
+    // Lo que HAY, caja a caja, y nada más. La trampa que este panel pisó dos veces fue un marco
     // que no contaba una de sus cajas: soltarla fuera la dejaba donde ya no se podía agarrar.
-    for (const f of (typeof _dcpFeatures === 'function' ? _dcpFeatures() : [])) {
-        maxX = Math.max(maxX, Number(f.pos_x || 0) + Number(f.width_mm || 0));
-        maxY = Math.max(maxY, Number(f.pos_y || 0) + Number(f.depth_mm || 0));
+    const cajas = [];
+    // The plan picture is one more box. Not counting it is exactly the trap that had both
+    // maps exporting cut off: a frame that does not know about one of its own drawings. Con su
+    // sitio: un plano calibrado puede empezar antes de la sala (su margen).
+    if ((_dcimPlan || {}).image) cajas.push(_dcpPlanBox());
+    for (const r of racks) {
+        cajas.push({x: Number(r.pos_x || 0), y: Number(r.pos_y || 0),
+                    w: Number(r.width_mm || 600), h: Number(r.depth_mm || 1000)});
     }
+    for (const f of (typeof _dcpFeatures === 'function' ? _dcpFeatures() : [])) {
+        cajas.push({x: Number(f.pos_x || 0), y: Number(f.pos_y || 0),
+                    w: Number(f.width_mm || 0), h: Number(f.depth_mm || 0)});
+    }
+    // La sala, desde su esquina (0, 0), si dice cuánto mide. Sin medidas —la zona general de una
+    // planta, que lleva el plano de la planta— el origen no es nada que mirar, y contarlo dejaba
+    // un plano calibrado lejos de él pegado a un borde y media ventana vacía (reportado).
     const sala = (_dcimPlan || {}).room || {};
-    maxX = Math.max(maxX, Number(sala.width_mm) || 0);
-    maxY = Math.max(maxY, Number(sala.depth_mm) || 0);
+    if (Number(sala.width_mm) > 0 || Number(sala.depth_mm) > 0) {
+        cajas.push({x: 0, y: 0, w: Number(sala.width_mm) || 0, h: Number(sala.depth_mm) || 0});
+    }
+    // Una sala pequeña si no hay nada, para que un plano vacío no sea un punto.
+    if (!cajas.length) cajas.push({x: 0, y: 0, w: 4000, h: 3000});
+    let minX = Math.min(...cajas.map(c => c.x)), minY = Math.min(...cajas.map(c => c.y));
+    let maxX = Math.max(...cajas.map(c => c.x + c.w)), maxY = Math.max(...cajas.map(c => c.y + c.h));
+    if (maxX - minX < 4000) maxX = minX + 4000;
+    if (maxY - minY < 3000) maxY = minY + 3000;
     // TODO EN LAS MISMAS UNIDADES. El margen está en milímetros como todo lo que se mide aquí,
     // pero el marco se expresa en unidades del DIBUJO —milímetros por la escala— y mezclarlos
     // ponía la ventana en (-400,-400) con un tamaño de 96×72: mirando a un sitio donde no hay
@@ -381,9 +306,9 @@ function _dcpContent(racks) {
          // Lo que está en la sala y no en un rack: los puestos, las rosetas, los AP.
          + _dcriSvg()
          + _dcpFeaturesSvg('air')
-         // Lo elegido de más y las guías del imán entre cosas (`_plangroup.html`).
-         + _dcpPickedSvg() + _dcpGuidesSvg()
-         + _dcCalMarks('room');
+         // Lo elegido de más y las guías del imán entre cosas (el editor de planos).
+         + p2dPickedSvg(_dcpP2d, _dcpView === 'top') + p2dGuidesSvg(_dcpP2d, _dcpDrag || _dcpP2d.drag)
+         + p2dCalMarks('room');
 }
 
 /** El contorno de la sala y sus cotas, si alguien dijo cuánto mide.
@@ -405,20 +330,12 @@ function _dcpRoomOutline() {
         ${cota(-6, D / 2, (d / 1000).toFixed(2) + ' m', true)}`;
 }
 
-/** The room's floor plan, under the grid and under the racks.
- *
- *  Scaled by `plan_mm` — how wide it is in the room — with the height following from the
- *  picture's proportions. With no scale it is drawn the width of the DRAWING, which is a guess:
- *  it is faded so nobody measures against it believing it is to scale. */
 function _dcpPlanImage(racks) {
     const img = (_dcimPlan || {}).image;
     if (!img || !img.data || !_dcPlanBg) return '';
     // Donde dice la calibración, y del tamaño que dice. Sin escala tomaba el ancho del MARCO
     // del dibujo, que lleva márgenes y cambia al mover un rack: la imagen se estiraba sola.
-    const b = _dcpPlanBox(), S = _DCP_SCALE;
-    return `<image href="${escAttr(img.data)}" x="${b.x * S}" y="${b.y * S}" width="${b.w * S}"
-                   height="${b.h * S}" opacity="${b.scaled ? '.85' : '.45'}"
-                   preserveAspectRatio="none"></image>`;
+    return p2dPlanImageSvg(_dcpPlanBox(), img);
 }
 
 /** La rejilla: la BALDOSA de esta sala, con el metro marcado por encima.
@@ -452,30 +369,11 @@ function _dcpGrid(racks) {
  *  aisle is the cold one, and a plan that does not show it cannot be used to reason about air
  *  at all. */
 function _dcpRack(rack) {
-    const w = Number(rack.width_mm || 600) * _DCP_SCALE;
-    const d = Number(rack.depth_mm || 1000) * _DCP_SCALE;
-    const x = Number(rack.pos_x || 0) * _DCP_SCALE;
-    const y = Number(rack.pos_y || 0) * _DCP_SCALE;
-    const rot = Number(rack.rotation || 0);
-    const roll = rack.roll || {};
-    const tone = roll.state ? deviceStateColor(roll.state) : 'var(--bs-secondary-bg)';
     const puesto = _dcpSel && _dcpSel.kind === 'rack' && _dcpSel.uid === rack.uid;
-    return `<g class="ss-grab${_dcpIsBack('rack', rack.uid) ? ' ss-dcp-back' : ''}" data-dcp="${escAttr(rack.uid)}"
-               transform="rotate(${rot} ${x + w / 2} ${y + d / 2})"
+    return _dcThingSvg('rack', rack, {puesto, back: _dcpIsBack('rack', rack.uid), titulo: rack.name || rack.uid,
+        attrs: `data-dcp="${escAttr(rack.uid)}"
                onpointerenter="_dcpHover(${jsStr(rack.uid)});_dcpFloatShow(${jsStr(rack.uid)},this,'rack')"
-               onpointerleave="_dcpHover('');_dcpFloatLater()">
-        <title>${escAttr(rack.name || rack.uid)}</title>
-        <rect x="${x}" y="${y}" width="${w}" height="${d}" rx="1"
-              fill="var(--bs-tertiary-bg)" stroke="${tone}" stroke-width="1.5"></rect>
-        <rect x="${x}" y="${y}" width="${w}" height="${Math.max(1.5, d * 0.08)}"
-              fill="${tone}"></rect>
-        <text x="${x + w / 2}" y="${y + d / 2 + 3}" font-size="7" text-anchor="middle"
-              ${_dcpUpright(rot, x + w / 2, y + d / 2 + 3 - 7 * 0.35)}
-              fill="currentColor">${esc(_dceClip(rack.name || '', 10))}</text>
-        ${puesto ? `<rect x="${x - 1}" y="${y - 1}" width="${w + 2}" height="${d + 2}" fill="none"
-            stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
-            vector-effect="non-scaling-stroke"></rect>` : ''}
-    </g>`;
+               onpointerleave="_dcpHover('');_dcpFloatLater()"`});
 }
 
 // ── Moving one, which writes to the server ──────────────────────────────────
@@ -483,7 +381,10 @@ function _dcpRack(rack) {
 function _dcpDown(ev) {
     _dcpFloatHide();
     // Calibrando el plano, el puntero es de la calibración: no se coge ni se suelta nada.
-    if (_dcCal && _dcCal.kind === 'room') return _dcCalDown(ev);
+    if (P2DCAL && P2DCAL.kind === 'room') return p2dCalDown(ev);
+    // Poniendo algo de la paleta: el clic es dónde (`p2dPlaceDown`). Solo desde arriba: de frente,
+    // un clic no dice en qué punto del suelo.
+    if (_dcpView === 'top' && p2dPlaceDown(_dcpP2d, ev)) return;
     // Lo que hay bajo el dedo, todo, de arriba abajo; y a cuál se refiere esta pulsación.
     const hit = _dcpHit(ev);
     // De frente, pulsar selecciona, y arrastrar mueve lo que se ve: a lo largo de la pared, y
@@ -553,56 +454,32 @@ function _dcpDown(ev) {
         }
     }
     // Varios a la vez: Mayús/Ctrl + clic, o coger algo que va con otros —lo elegido junto, o su
-    // grupo— (`_plangroup.html`).
-    if (_dcpManyDown(ev, hit)) return;
-    // Una pieza de la sala: se coge igual que un rack, y por eso el arrastre es uno solo. Lo
-    // que cambia es a qué tabla va lo que se suelte, y eso lo decide `_dcpUp`.
-    // Lo que se coge es lo de ARRIBA, salvo que lo seleccionado esté también bajo el dedo: una
-    // mesa elegida bajo una bandeja se arrastra a ella, no a la bandeja que la tapa.
-    const pieza = hit.kind === 'feature' ? hit.g : null;
-    if (pieza && _dcimMay('dcim_edit')) {
-        const f = _dcpFeatures().find(x => x.uid === pieza.dataset.dcpf);
-        const p = ssCanvasPoint(_DCP_SVG, ev);
-        if (f && p) {
-            _dcpSel = {kind: 'feature', uid: f.uid};
-            _dcpDrag = {uid: f.uid, what: 'feature', moved: false, from: p,
-                        at: {x: Number(f.pos_x || 0), y: Number(f.pos_y || 0)}, cycle: hit.cycle};
-            ev.currentTarget.setPointerCapture?.(ev.pointerId);
-            // Solo el DIBUJO, no la pantalla: repintar la sección entera aquí sustituye el
-            // `<svg>` que acaba de capturar el puntero, y con él se va la mano que está
-            // arrastrando. El panel de la pieza aparece al soltar, en `_dcpUp`.
+    // grupo— (el editor de planos).
+    if (hit.kind && p2dManyDown(_dcpP2d, ev, {kind: hit.kind, room: '', uid: hit.uid, cycle: hit.cycle})) return;
+    // Una pieza, un equipo de la sala o un rack: lo coge el editor de planos (`p2dGrab`), el mismo
+    // arrastre que el de varios con uno solo —el imán, la baldosa, guardar al soltar y deshacer—.
+    // Lo que se coge es lo de ARRIBA, salvo que lo elegido esté también bajo el dedo (`_dcpHit`):
+    // una mesa elegida bajo una bandeja se arrastra a ella, no a la bandeja que la tapa.
+    // Una pieza o un equipo quedan elegidos al bajar el dedo; un rack, al soltarlo sin moverlo
+    // (`clicked`), con su barra. Solo el DIBUJO se repinta: la pantalla entera sustituiría el
+    // `<svg>` que acaba de capturar el puntero, y con él se iría la mano que arrastra.
+    if (hit.kind && hit.g) {
+        const m = {kind: hit.kind, room: '', uid: String(hit.uid), cycle: hit.cycle};
+        if (p2dGrab(_dcpP2d, ev, m)) {
+            if (hit.kind !== 'rack') _dcpSel = {kind: hit.kind, uid: m.uid};
             _dcpRedraw();
             return;
         }
-    }
-    // Un equipo de la sala: se coge y se arrastra como una pieza, y lo que se suelte va a su
-    // ruta (`PUT /room-items`).
-    if (hit.kind === 'item') {
-        const i = _dcri1(hit.uid);
-        const p = ssCanvasPoint(_DCP_SVG, ev);
-        if (i && p) {
-            _dcpSel = {kind: 'item', uid: String(i.uid)};
-            _dcpDrag = {uid: String(i.uid), what: 'item', moved: false, from: p,
-                        at: {x: Number((i.box || {}).x || 0), y: Number((i.box || {}).y || 0)},
-                        cycle: hit.cycle, may: _dcimMay('dcim_edit')};
-            ev.currentTarget.setPointerCapture?.(ev.pointerId);
+        // Quien solo mira elige un equipo de sala para ver su ficha y rastrearlo.
+        if (hit.kind === 'item') {
+            if (_dcpCycle({cycle: hit.cycle})) return;
+            _dcpSel = {kind: 'item', uid: m.uid};
             _dcpRedraw();
-            return;
-        }
-    }
-    const box = hit.kind === 'rack' ? hit.g : null;
-    if (box && _dcimMay('dcim_edit')) {
-        const rack = (_dcimPlan.racks || []).find(r => r.uid === box.dataset.dcp);
-        const p = ssCanvasPoint(_DCP_SVG, ev);
-        if (rack && p) {
-            _dcpDrag = {uid: rack.uid, moved: false, from: p,
-                        at: {x: Number(rack.pos_x || 0), y: Number(rack.pos_y || 0)}, cycle: hit.cycle};
-            ev.currentTarget.setPointerCapture?.(ev.pointerId);
-            return;
+            return _dcpInspectorDraw();
         }
     }
     // En el suelo, en modo elegir o con Mayús: un recuadro que elige lo que toque.
-    if (_dcPickBoxWanted(ev) && _dcpPickBoxStart(ev)) return;
+    if (p2dBoxWanted(ev) && p2dBoxStart(_dcpP2d, ev)) return;
     // En el suelo: lo que empieza aquí es desplazar el plano, o —si no se mueve— soltar lo
     // seleccionado. Se apunta dónde se bajó el dedo para distinguir las dos al levantarlo.
     _dcpBlank = {x: ev.clientX, y: ev.clientY};
@@ -727,7 +604,7 @@ function _dcpBoxes() {
         const x0 = (Number(f.pos_x) || 0) + o.x, z0 = (Number(f.pos_y) || 0) + o.y;
         const z = _dcpPieceZ(f);
         out.push({kind: 'feature', uid: f.uid, what: f.kind, layer: spec.layer || 'room',
-                  name: f.label || t('dcim_kind_' + f.kind), x0, x1: x0 + w - 2 * o.x,
+                  name: f.label || _dcPieceName(f.kind), x0, x1: x0 + w - 2 * o.x,
                   z0, z1: z0 + d - 2 * o.y, y0: z.base, y1: z.base + z.h,
                   shelves: f.kind === 'cabinet' ? Math.max(1, Number(f.shelves) || 1) : 0});
     }
@@ -938,11 +815,12 @@ function _dcpResize(g, dx, dy, snap) {
 }
 
 function _dcpMove(ev) {
-    if (_dcCal && _dcCal.press) return _dcCalMove(ev);
+    if (P2DCAL && P2DCAL.press) return p2dCalMove(ev);
+    if (p2dPlaceMove(_dcpP2d, ev)) return;
     // La posición bajo el puntero, siempre: es lo que se lee en la barra mientras se coloca, y
     // «B7» es lo que alguien dirá por teléfono cuando esté dentro de la sala.
     const bajo = ssCanvasPoint(_DCP_SVG, ev);
-    if (_dcpDrag && (_dcpDrag.what === 'many' || _dcpDrag.what === 'pickbox')) return _dcpManyMove(ev);
+    if (p2dDragging(_dcpP2d)) return p2dMove(_dcpP2d, ev);
     if (_dcpDrag && _dcpDrag.what === 'elevsize') {
         const o = _dcpDrag.kind === 'rack' ? _dcpRack1(_dcpDrag.uid)
                                            : _dcpFeatures().find(x => x.uid === _dcpDrag.uid);
@@ -991,72 +869,20 @@ function _dcpMove(ev) {
         _dcpSizeShow(f);
         return;
     }
-    if (_dcpDrag && _dcpDrag.what === 'item') {
-        const p = ssCanvasPoint(_DCP_SVG, ev);
-        const i = _dcri1(_dcpDrag.uid);
-        if (!p || !i || !_dcpDrag.may) return;
-        const b = i.box || {};
-        const sitio = _dcpPlaceNear(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
-                                    (p.y - _dcpDrag.from.y) / _DCP_SCALE,
-                                    Number(b.w || 200), Number(b.d || 200), b.rot || 0,
-                                    new Set([_dcpKey2('item', _dcpDrag.uid)]), ev.altKey);
-        i.pos_x = b.x = sitio.x;
-        i.pos_y = b.y = sitio.y;
-        _dcpDrag.moved = true;
-        _dcpReadout(sitio.x + Number(b.w || 0) / 2, sitio.y + Number(b.d || 0) / 2);
-        _dcpRedraw();
-        return;
-    }
-    if (_dcpDrag && _dcpDrag.what === 'feature') {
-        const p = ssCanvasPoint(_DCP_SVG, ev);
-        const f = _dcpFeatures().find(x => x.uid === _dcpDrag.uid);
-        if (!p || !f) return;
-        const sitio = _dcpPlaceNear(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
-                                    (p.y - _dcpDrag.from.y) / _DCP_SCALE,
-                                    Number(f.width_mm || 600), Number(f.depth_mm || 600), f.rotation,
-                                    new Set([_dcpKey2('feature', f.uid)]), ev.altKey);
-        f.pos_x = sitio.x;
-        f.pos_y = sitio.y;
-        _dcpDrag.moved = true;
-        _dcpReadout(f.pos_x + Number(f.width_mm) / 2, f.pos_y + Number(f.depth_mm) / 2);
-        _dcpRedraw();
-        return;
-    }
-    if (_dcpDrag) {
-        const p = ssCanvasPoint(_DCP_SVG, ev);
-        if (!p) return;
-        const rack = (_dcimPlan.racks || []).find(r => r.uid === _dcpDrag.uid);
-        if (!rack) return;
-        // Back to millimetres: the drawing is in scaled units and the RECORD is in the units
-        // the room is measured in. Storing pixels would make the plan unreadable the day the
-        // scale changes, and the scale is a decision about drawing, not about the room.
-        // Pegado a lo que tiene al lado si llega cerca (Alt lo suelta), y si no a la baldosa.
-        const sitio = _dcpPlaceNear(_dcpDrag.at, (p.x - _dcpDrag.from.x) / _DCP_SCALE,
-                                    (p.y - _dcpDrag.from.y) / _DCP_SCALE,
-                                    Number(rack.width_mm || 600), Number(rack.depth_mm || 1000),
-                                    rack.rotation, new Set([_dcpKey2('rack', rack.uid)]), ev.altKey);
-        rack.pos_x = sitio.x;
-        rack.pos_y = sitio.y;
-        _dcpDrag.moved = true;
-        _dcpReadout(rack.pos_x + Number(rack.width_mm || 600) / 2,
-                    rack.pos_y + Number(rack.depth_mm || 1000) / 2);
-        _dcpRedraw();
-        return;
-    }
     ssCanvasPanMove(_DCP_SVG, ev);
 }
 
 async function _dcpUp(ev) {
-    if (_dcCal && _dcCal.press) return _dcCalUp(ev);
+    if (P2DCAL && P2DCAL.press) return p2dCalUp(ev);
+    if (p2dPlaceUp(_dcpP2d)) return;
     _dcpSizeHide();
-    const drag = _dcpDrag;
-    if (drag && (drag.what === 'many' || drag.what === 'pickbox')) {
-        _dcpDrag = null;
+    if (p2dDragging(_dcpP2d)) {
         ssCanvasPanEnd(ev);
-        return _dcpManyUp(drag);
+        return p2dUp(_dcpP2d);
     }
+    const drag = _dcpDrag;
     // Las guías del imán se van con la mano.
-    if (_dcpGuides.length) { _dcpGuides = []; _dcpDrag = null; _dcpRedraw(); }
+    if (p2dGuidesClear(_dcpP2d)) { _dcpDrag = null; _dcpRedraw(); }
     if (drag && drag.what === 'elevsize') {
         _dcpDrag = null;
         ssCanvasPanEnd(ev);
@@ -1116,62 +942,12 @@ async function _dcpUp(ev) {
         // The inspector's width and depth fields have to say what the piece now measures.
         return _dcpInspectorDraw();
     }
-    if (drag.what === 'item') {
-        if (!drag.moved) return _dcpCycle(drag) || _dcpInspectorDraw();
-        const i = _dcri1(drag.uid);
-        _dcpInspectorDraw();
-        return i ? _dcriSave(i.uid, {pos_x: i.pos_x, pos_y: i.pos_y}) : undefined;
-    }
-    if (drag.what === 'feature') {
-        const f = _dcpFeatures().find(x => x.uid === drag.uid);
-        if (!f) return;
-        // Una pulsación que no viajó es una selección: el contorno y las asas se pintaron al bajar
-        // el dedo, y lo que queda es que el inspector hable de ESTA pieza. Solo el inspector: la
-        // pantalla entera rehace el dibujo y lo que se estaba mirando.
-        if (!drag.moved) return _dcpCycle(drag) || _dcpInspectorDraw();
-        _dcpInspectorDraw();
-        return _dcpSave(f.uid, {pos_x: f.pos_x, pos_y: f.pos_y});
-    }
-    const rack = (_dcimPlan.racks || []).find(r => r.uid === drag.uid);
-    if (!rack) return;
-    // A press that did not travel used to OPEN the rack, which took you out of the plan for
-    // every mis-aimed click. It shows the rack's bar instead — opening is one of its buttons —
-    // which is also the only way to reach that bar on a screen without a pointer to hover.
-    if (!drag.moved) {
-        if (_dcpCycle(drag)) return;
-        // Seleccionarlo, como una pieza: marcado en el plano y con sus campos en el inspector.
-        // Solo sacaba su barra flotante, así que las mesas y las puertas se editaban desde el
-        // inspector y el rack —lo que más se toca de una sala— no.
-        _dcpSel = {kind: 'rack', uid: rack.uid};
-        _dcpRedraw();
-        _dcpInspectorDraw();
-        // Y su barra, que en una pantalla sin ratón es la única forma de llegar a ella.
-        const g = _dcimPlanSvg()?.querySelector(`g[data-dcp="${CSS.escape(String(rack.uid))}"]`);
-        return _dcpFloatShow(rack.uid, g, 'rack');
-    }
-    // …and where it ended up goes to the SERVER. Not the browser's arrangement store: a rack
-    // stands in one place for everybody, and the next person to open this plan must see where
-    // it actually is.
-    const r = await _dcimSend('PUT', `/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}`,
-                              {pos_x: rack.pos_x, pos_y: rack.pos_y});
-    if (!r.ok) {
-        showToast(r.error || t('save_failed'), 'danger');
-        return _dcimOpenPlan(_dcimPlan.room.uid);        // put it back where the server has it
-    }
-    _dcpInspectorDraw();                                 // its X and Y, where it now is
 }
 
 /** Turn a rack a quarter turn. Its own control and not a drag gesture: rotating by dragging is
  *  a gesture nobody discovers and everybody triggers by accident. */
 async function _dcpTurn(uid) {
-    const rack = (_dcimPlan.racks || []).find(r => r.uid === uid);
-    if (!rack) return;
-    const rot = (Number(rack.rotation || 0) + 90) % 360;
-    const r = await _dcimSend('PUT', `/api/v1/dcim/racks/${encodeURIComponent(uid)}`,
-                              {rotation: rot});
-    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    rack.rotation = rot;
-    _dcpRedraw();
+    await _dcObjTurn('rack', uid);
     _dcpHover(uid);
 }
 

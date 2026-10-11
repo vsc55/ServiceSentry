@@ -84,9 +84,16 @@ def _every(key: str) -> set:
 
 
 def find(store) -> list[dict]:
-    """The demo sites that exist now, by name."""
+    """The demo sites that exist now: by name AND run by the demo's operator company.
+
+    By name alone a real site somebody called «Demo» was the demo, and removing the demo —now a
+    button in Maintenance— deleted it with everything in it. The demo writes both sites with its
+    own operator, so that is what tells them apart."""
     names = {SITE} | _every('site_dr')
-    return [s for s in store.sites.list() if str(s.get('name') or '') in names]
+    operadores = {o['uid'] for o in store.orgs.list()
+                  if str(o.get('name') or '') in _every('org_operator')}
+    return [s for s in store.sites.list() if str(s.get('name') or '') in names
+            and str(s.get('operator_uid') or '') in operadores]
 
 
 # ── Removing ─────────────────────────────────────────────────────────────────────────────────
@@ -149,24 +156,8 @@ def _remove_models(store, var_dir: str, media_dir: str) -> None:
 
 
 def _remove_rack(store, rack: dict) -> None:
-    items = store.items_of(rack['uid'])
-    item_uids = [i['uid'] for i in items]
-    pdus = store.pdus_of(rack['uid'])
-    for feed in store.feeds_of([p['uid'] for p in pdus]):
-        store.feeds.delete(feed['uid'])
-    for item_uid in item_uids:
-        for feed in store.feeds.list('item_uid = ?', (item_uid,)):
-            store.feeds.delete(feed['uid'])
-    for cable in store.cables_of(item_uids):
-        store.cables.delete(cable['uid'])
-    for part in store.parts_of(item_uids):
-        store.parts.delete(part['uid'])
-    for pdu in pdus:
-        store.pdus.delete(pdu['uid'])
-    # Mounted ones first: their parent is another item of the same rack.
-    for item in sorted(items, key=lambda i: not i.get('parent_uid')):
-        store.items.delete(item['uid'])
-        store.forget_scope('item', item['uid'])
+    from lib.core.dcim import service as dcim_svc       # noqa: PLC0415
+    dcim_svc.empty_rack(store, rack['uid'])
     store.racks.delete(rack['uid'])
     store.forget_scope('rack', rack['uid'])
 
@@ -320,7 +311,9 @@ class _Builder:
         building's back wall (`_door_on_top`). ``fire``: a special-risk room's (CTE DB-SI 1,
         table 2.2), a self-closing fire door, and its label says its class — which is what the
         plan shows and what an inspector looks for."""
-        etiqueta = self.w['door_fire'] if fire else self.w['door']
+        # Una puerta normal, sin rótulo: el suyo sería «Puerta», que ya dice su tipo, y el plano lo
+        # toma del catálogo. La cortafuegos lo lleva porque dice algo más: su clase.
+        etiqueta = self.w['door_fire'] if fire else ''
         self.feature(room, 'door', etiqueta, w / 2 - 500, 0 if top else d - 120)
 
     def shelf_items(self, cabinet: str, rows: list) -> None:
@@ -427,6 +420,8 @@ def build(store, *, actor: str = 'demo', var_dir: str = '', media_dir: str = '',
     # las subidas, el anillo de fibra (`demo_cabling`). Antes de ordenar
     # los enchufes de las PDU: los switches de acceso que pone también tiran de ellas.
     from lib.core.dcim import demo_cabling                 # noqa: PLC0415
+    # Y las fuentes: las tomas de corriente de los puestos y las salas cuelgan de ellas.
+    net['sources'] = src
     demo_cabling.build(b, site, floors, net)
     for room in [r for s in (site, site_dr) for r in store.rooms_of(s)]:
         for rack in store.racks_of(room['uid']):
@@ -462,8 +457,8 @@ def _power_chain(b: _Builder, site: str) -> dict:
     w = b.w
     mains = b.new('sources', {'site_uid': site, 'name': w['src_mains'], 'kind': 'mains',
                               'capacity_w': 250000, 'description': w['src_mains_desc']})
-    b.new('sources', {'site_uid': site, 'name': w['src_gen'], 'kind': 'generator',
-                      'capacity_w': 200000, 'autonomy_min': 480, 'description': w['src_gen_desc']})
+    gen = b.new('sources', {'site_uid': site, 'name': w['src_gen'], 'kind': 'generator',
+                            'capacity_w': 200000, 'autonomy_min': 480, 'description': w['src_gen_desc']})
     cgbt = b.new('sources', {'site_uid': site, 'name': w['src_cgbt'], 'kind': 'panel',
                              'upstream_uid': mains, 'capacity_w': 250000})
     cpd = b.new('sources', {'site_uid': site, 'name': w['src_cpd'], 'kind': 'panel',
@@ -479,7 +474,8 @@ def _power_chain(b: _Builder, site: str) -> dict:
                            'upstream_uid': cgbt, 'capacity_w': 40000})
     p3 = b.new('sources', {'site_uid': site, 'name': w['src_p3'], 'kind': 'panel',
                            'upstream_uid': cgbt, 'capacity_w': 60000})
-    return {'mains': mains, 'cgbt': cgbt, 'cpd': cpd, 'a': ups_a, 'b': ups_b, 'p2': p2, 'p3': p3}
+    return {'mains': mains, 'gen': gen, 'cgbt': cgbt, 'cpd': cpd, 'a': ups_a, 'b': ups_b,
+            'p2': p2, 'p3': p3}
 
 
 # ── Floors, plans and walls ──────────────────────────────────────────────────────────────────
@@ -1377,11 +1373,11 @@ _ROOM_TROUBLE = {'IMP-P2': ('warning', 'why_toner'), 'AP-P2-OPEN2': ('warning', 
 def _room_states(b: _Builder, site: str) -> None:
     """A demo state for what is in the rooms —the PCs, the phones, the APs—: ok, but for a
     printer low on toner, an access point with clients on a weak signal and a camera with no
-    picture. The outlets have none: a wall socket does not answer."""
+    picture. The outlets and the power sockets have none: a wall socket does not answer."""
     w = b.w
     for room in b.s.rooms_of(site):
         for it in b.s.items_in_room(room['uid']):
-            if it['role'] == 'outlet':
+            if it['role'] in ('outlet', 'power_outlet'):
                 continue
             estado, por = _ROOM_TROUBLE.get(str(it.get('label') or ''), ('ok', ''))
             b.s.items.update(it['uid'], {'demo_state': estado, 'demo_reason': w[por] if por else '',
@@ -1461,8 +1457,7 @@ def _access(b: _Builder, floors: dict) -> None:
         for key, room in floor['rooms'].items():
             for f in b.s.features_of(room):
                 # La puerta de la sala, no las del confinamiento de un pasillo.
-                if f['kind'] == 'door' and key in _LOCKED and f['label'] in (w['door'],
-                                                                              w['door_fire']):
+                if f['kind'] == 'door' and key in _LOCKED and f['label'] in ('', w['door_fire']):
                     b.s.features.update(f['uid'], estado('door', key, {
                         'lock': 'cylinder', 'model': 'Salto Neo Cylinder',
                         'type_uid': b.models['access_neo'],
@@ -1610,7 +1605,7 @@ def _safety(b: _Builder, floors: dict) -> None:
         if fkey == 'floor_ground':
             recep = floor['rooms']['recep']
             W, D, _a = floor['size']['recep']
-            pieza(recep, 'first_aid', w['first_aid'], W, D, 'left', 1200)
+            pieza(recep, 'first_aid', '', W, D, 'left', 1200)       # «Botiquín»: su tipo
             pieza(recep, 'aed', w['aed'], W, D, 'left', 2000)
 
 

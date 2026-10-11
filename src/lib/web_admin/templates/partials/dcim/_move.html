@@ -1,0 +1,100 @@
+{# ================================================================
+   DCIM — mover: un equipo a otro rack (de la misma sala, de otra o de otra sede), y un rack a
+   otra sala de su sede.
+
+   Pedido: mover un servidor, un switch o un router a otro rack, o a un rack de otra sala; y un
+   rack a otra sala. El servidor dice lo que sigue al equipo y lo que deja (su alimentación se
+   desenchufa de las regletas del rack que deja; sus cables de datos se quedan, salvo que se
+   pida desconectarlos), y un rack que cambia de sala deja su fila y su grupo y entra por la
+   esquina de la sala nueva, para colocarlo en su plano.
+   ================================================================ #}
+
+/** Los racks a los que se puede llevar algo, de lo ya cargado: `[{label, racks}]`, por sede y
+ *  sala, sin `excluir`. */
+function _dcMoveRackGroups(excluir) {
+    const out = [];
+    for (const s of ((typeof _dcimData !== 'undefined' && _dcimData) || {}).sites || [])
+        for (const r of s.rooms || []) {
+            // `rackList`: en la lista de sedes `racks` es cuántos hay, no cuáles.
+            const racks = (r.rackList || []).filter(k => String(k.uid) !== String(excluir));
+            if (racks.length) out.push({label: (s.name || s.uid) + ' › ' + (r.name || r.uid), racks});
+        }
+    return out;
+}
+
+/** Mover un equipo del rack abierto a otro rack: elegir cuál y en qué U. */
+function _dcMoveItem(uid) {
+    const items = ((typeof _dcimRack !== 'undefined' && _dcimRack) || {}).items || [];
+    const it = items.find(i => String(i.uid) === String(uid));
+    const rack = ((_dcimRack || {}).rack) || {};
+    if (!it) return;
+    const grupos = _dcMoveRackGroups(rack.uid);
+    if (!grupos.length) return showToast(t('dcim_move_no_rack'), 'info');
+    const enU = (it.placement || 'u') === 'u' && !it.parent_uid;
+    const html = `<label class="form-label w-100">${esc(t('dcim_move_to_rack'))}
+            <select class="form-select" id="dcMoveRack">${grupos.map(g => `<optgroup label="${escAttr(g.label)}">${
+                g.racks.map(k => `<option value="${escAttr(k.uid)}">${esc(k.name || k.uid)}</option>`).join('')}</optgroup>`).join('')}
+            </select></label>
+        ${enU ? `<label class="form-label w-100 mt-2">${esc(t('dcim_move_u'))}
+            <input type="number" class="form-control ss-tabular" id="dcMoveU" min="1" step="1"
+                   value="${escAttr(String(it.u_start || 1))}"></label>` : ''}
+        <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="dcMoveCut">
+            <label class="form-check-label" for="dcMoveCut">${esc(t('dcim_move_disconnect'))}</label></div>
+        <div class="text-muted ss-fs-2 mt-2">${esc(t('dcim_move_item_note'))}</div>`;
+    showHtmlModal(tf('dcim_move_item_title', it.label || it.uid), html, 'primary',
+        `<button type="button" class="btn btn-primary" onclick="_dcMoveItemGo(${jsStr(uid)})">
+            <i class="bi bi-arrows-move me-1"></i>${esc(t('dcim_move_go'))}</button>`);
+}
+
+async function _dcMoveItemGo(uid) {
+    const destino = (document.getElementById('dcMoveRack') || {}).value || '';
+    const u = document.getElementById('dcMoveU');
+    const cuerpo = {rack_uid: destino, disconnect: !!(document.getElementById('dcMoveCut') || {}).checked};
+    if (u) cuerpo.u_start = Number(u.value) || 1;
+    const r = await _dcimSend('PUT', `/api/v1/dcim/items/${encodeURIComponent(uid)}`, cuerpo);
+    // Lo que no cabe se dice y el cuadro sigue abierto, para elegir otra U u otro rack.
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    hideInfoModal();
+    const m = (r.data || {}).moved || {};
+    showToast(tf('dcim_moved_item', m.unplugged || 0, m.cables_kept || 0), 'success');
+    const rack = ((_dcimRack || {}).rack) || {};
+    return rack.uid ? _dcimLoadRack(rack.uid) : renderDcim();
+}
+
+/** El rack, de lo ya cargado: `{rack, room, site}`. */
+function _dcMoveRackWhere(uid) {
+    for (const s of ((typeof _dcimData !== 'undefined' && _dcimData) || {}).sites || [])
+        for (const r of s.rooms || [])
+            for (const k of r.rackList || []) if (String(k.uid) === String(uid)) return {rack: k, room: r, site: s};
+    return null;
+}
+
+/** Mover un rack a otra sala de su sede. */
+function _dcMoveRack(uid) {
+    const w = _dcMoveRackWhere(uid);
+    if (!w) return;
+    const salas = (w.site.rooms || []).filter(r => String(r.uid) !== String(w.room.uid));
+    if (!salas.length) return showToast(t('dcim_move_no_room'), 'info');
+    const html = `<label class="form-label w-100">${esc(t('dcim_move_to_room'))}
+            <select class="form-select" id="dcMoveRoom">${salas.map(r =>
+                `<option value="${escAttr(r.uid)}">${esc(r.name || r.uid)}</option>`).join('')}</select></label>
+        <div class="text-muted ss-fs-2 mt-2">${esc(t('dcim_move_rack_note'))}</div>`;
+    showHtmlModal(tf('dcim_move_rack_title', w.rack.name || uid), html, 'primary',
+        `<button type="button" class="btn btn-primary" onclick="_dcMoveRackGo(${jsStr(uid)})">
+            <i class="bi bi-arrows-move me-1"></i>${esc(t('dcim_move_go'))}</button>`);
+}
+
+async function _dcMoveRackGo(uid) {
+    const sala = (document.getElementById('dcMoveRoom') || {}).value || '';
+    const r = await _dcimSend('PUT', `/api/v1/dcim/racks/${encodeURIComponent(uid)}`,
+                              {room_uid: sala, pos_x: 0, pos_y: 0});
+    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+    hideInfoModal();
+    showToast(t('dcim_moved_rack'), 'success');
+    // Lo que se estaba mirando: el rack sigue siendo el mismo; un plano ya no lo tiene.
+    if (typeof _dcimRack !== 'undefined' && _dcimRack && _dcimRack.rack.uid === uid) return _dcimLoadRack(uid);
+    if (typeof _dcimPlan !== 'undefined' && _dcimPlan) return _dcimOpenPlan(_dcimPlan.room.uid);
+    if (typeof _dcsPlan !== 'undefined' && _dcsPlan) return _dcsReload();
+    return renderDcim();
+}

@@ -895,8 +895,23 @@ function ssCanvasTools(id, name, keys) {
             ${btn(`ssCanvasZoom('${id}',1/1.25)`, 'bi-zoom-out', 'infra_link_zoom_out')}
             ${btn(`ssCanvasFit('${id}')`, 'bi-aspect-ratio', 'infra_link_fit')}
         </span>
-        <span class="btn-group btn-group-sm">
-            ${btn(out('png'), 'bi-image', 'infra_export_png')}
-            ${btn(out('svg'), 'bi-filetype-svg', 'infra_export_svg')}
-        </span>`;
+        ${ssCanvasSaveMenu(out)}`;
+}
+
+/** «Guardar como», UN botón con sus formatos: eran dos botones sueltos, uno por formato, y el
+ *  segundo no decía nada a quien no supiera qué es un SVG. `out(base)` es la llamada que guarda
+ *  en ese formato. */
+function ssCanvasSaveMenu(out) {
+    const opcion = (base, icono, clave, tt) => `<li><a class="dropdown-item" href="#"
+            onclick="${out(base)};return false;" title="${escAttr(t(tt))}">
+            <i class="bi ${icono} me-2"></i>${esc(t(clave))}</a></li>`;
+    return `<span class="btn-group btn-group-sm">
+            <button type="button" class="btn btn-sm btn-secondary dropdown-toggle"
+                    data-bs-toggle="dropdown" aria-expanded="false"
+                    title="${escAttr(t('infra_export_as'))}" aria-label="${escAttr(t('infra_export_as'))}">
+                <i class="bi bi-image"></i></button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                ${opcion('png', 'bi-filetype-png', 'infra_export_png_item', 'infra_export_png')}
+                ${opcion('svg', 'bi-filetype-svg', 'infra_export_svg_item', 'infra_export_svg')}
+            </ul></span>`;
 }

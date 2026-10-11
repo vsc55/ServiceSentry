@@ -346,6 +346,9 @@ function _dcByUActions(item) {
                 ${_dcimMay('orgs_edit') ? `<li><button class="dropdown-item" type="button"
                     onclick="_dcimOwnerAsk('item',${jsStr(item.uid)},${jsStr(name)})"><i
                     class="bi bi-building-check me-2"></i>${esc(t('dcim_owner'))}</button></li>` : ''}
+                <li><button class="dropdown-item" type="button" data-dcmove-item
+                    onclick="_dcMoveItem(${jsStr(item.uid)})"><i class="bi bi-arrows-move me-2"></i>${
+                    esc(t('dcim_move_item'))}</button></li>
                 <li><hr class="dropdown-divider"></li>
                 <li><button class="dropdown-item text-danger" type="button"
                     onclick="_dcimDelete('item',${jsStr(item.uid)},${jsStr(name)})"><i

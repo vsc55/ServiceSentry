@@ -1,232 +1,15 @@
 {# ================================================================
-   DCIM — los muros de una planta, leídos del plano del arquitecto.
+   DCIM — los muros de una planta, leídos del plano del arquitecto y revisados.
 
-   Se pidió que el plano de fondo diera los muros, en vez de tener que dibujarlos. Lo que se hace
-   aquí es proponerlos: el plano se lee en el navegador —sin librerías— buscando trazos oscuros
-   con el grosor de un muro, rectos y largos, y lo que sale se dibuja encima del plano en naranja.
-   Quien lo mira acepta, borra, alarga o dibuja lo que falte, y al guardar la planta tiene sus
-   muros: el 3D de la planta y del edificio los levanta.
+   Se pidió que el plano de fondo diera los muros, en vez de tener que dibujarlos. El plano se lee
+   con el detector del editor de planos (`lib/core/plan2d/web/_plan2d_walls.html`), y lo que sale
+   se dibuja encima del plano en naranja. Quien lo mira acepta, borra, alarga o dibuja lo que
+   falte, y al guardar la planta tiene sus muros: el 3D de la planta y del edificio los levanta.
 
-   Proponer y revisar, no generar y ya: un plano trae cotas, textos, rayados y muebles que se
-   parecen a un muro, y escaneado trae sombras. Lo que pasa los filtros es casi siempre un muro;
-   lo que falta o sobra se arregla en un minuto, y el plano no decide solo lo que el edificio es.
-
-   Lo que se busca, en píxeles del plano, sale de su calibración: con la escala dicha, un muro
-   mide de 6 a 70 cm de grueso y más de 60 cm de largo, y eso se pasa a píxeles. Sin calibrar,
-   unas medidas típicas — y un aviso, porque los metros saldrán mal.
+   La revisión es de la planta —sus muros, su ruta, su barra—, pero elige con el motor (el
+   conjunto elegido y su recuadro, `_dcwP2d`) y deshace con su historial (`p2duLocal`): nada va al
+   servidor hasta «Guardar», que reemplaza los muros de la planta de una vez y es un paso más.
    ================================================================ #}
-
-// ── Leer el plano ────────────────────────────────────────────────────────────
-
-/** El umbral de Otsu: el gris que mejor separa el trazo del fondo. */
-function _dcwOtsu(lum) {
-    const hist = new Array(256).fill(0);
-    for (let i = 0; i < lum.length; i++) hist[lum[i]]++;
-    const total = lum.length;
-    let suma = 0;
-    for (let i = 0; i < 256; i++) suma += i * hist[i];
-    let sB = 0, wB = 0, mejor = 0, umbral = 128;
-    for (let i = 0; i < 256; i++) {
-        wB += hist[i];
-        if (!wB) continue;
-        const wF = total - wB;
-        if (!wF) break;
-        sB += i * hist[i];
-        const mB = sB / wB, mF = (suma - sB) / wF;
-        const entre = wB * wF * (mB - mF) * (mB - mF);
-        if (entre > mejor) { mejor = entre; umbral = i; }
-    }
-    return umbral;
-}
-
-/** Los tramos de muro de una imagen: `[{x1, y1, x2, y2, t}]` en píxeles, `t` su grueso.
- *
- *  Horizontales y verticales por separado, con la misma cuenta girada: por cada fila, los trozos
- *  oscuros de al menos `minLen` seguidos; las filas contiguas cuyos trozos se solapan son el
- *  mismo trazo, y su número de filas es su grueso. Un trazo de entre `minT` y `maxT` filas es un
- *  muro; más fino es una cota, un texto subrayado, una línea de mobiliario; más grueso es una
- *  mancha —una columna rellena, un rayado—. Luego los tramos alineados con un hueco pequeño se
- *  juntan: un muro cortado por una mancha del escaneo es un muro. Los muros en diagonal no se
- *  leen: se dibujan a mano. Pura: probada en node con imágenes hechas a medida. */
-function dcwDetect(img, o) {
-    const W = img.width, H = img.height, d = img.data;
-    const lum = new Uint8Array(W * H);
-    for (let i = 0, p = 0; i < W * H; i++, p += 4) {
-        // Lo transparente es fondo, no negro.
-        lum[i] = d[p + 3] < 128 ? 255 : Math.round(0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]);
-    }
-    const otsu = _dcwOtsu(lum);
-    const umbral = o.thresh === null || o.thresh === undefined ? otsu : o.thresh;
-    const oscuro = (x, y) => lum[y * W + x] < umbral;
-    const minLen = Math.max(4, Math.round(o.minLen)), minT = Math.max(1, Math.round(o.minT));
-    const maxT = Math.max(minT, Math.round(o.maxT)), hueco = Math.max(0, Math.round(o.gap || 0));
-
-    // Los trazos de una orientación. `n` filas de `m` píxeles; `at(i, j)` es la fila i, columna j.
-    const bandas = (n, m, at) => {
-        const abiertas = [], hechas = [];
-        for (let i = 0; i <= n; i++) {
-            const tramos = [];
-            if (i < n) {
-                let j = 0;
-                while (j < m) {
-                    if (!at(i, j)) { j++; continue; }
-                    let k = j;
-                    while (k < m && at(i, k)) k++;
-                    if (k - j >= minLen) tramos.push([j, k - 1]);
-                    j = k;
-                }
-            }
-            const siguen = [];
-            for (const b of abiertas) {
-                // Solapándose en la mitad del MÁS LARGO, no del más corto. Reportado con un plano
-                // real: cada tabique acaba en un pilar macizo dibujado, un cuadrado de su ancho
-                // y algo más; con la mitad del más corto, el cuadrado se unía al trazo del muro,
-                // las columnas del pilar contaban como grueso, y el muro salía de doce píxeles
-                // —«demasiado grueso»— y se perdía. Faltaban todos los tabiques de las oficinas.
-                const t = tramos.findIndex(([a, z]) => Math.min(z, b.z) - Math.max(a, b.a) >= Math.max(z - a, b.z - b.a) * 0.5);
-                if (t >= 0) {
-                    const [a, z] = tramos.splice(t, 1)[0];
-                    b.a = Math.min(b.a, a); b.z = Math.max(b.z, z); b.fin = i;
-                    siguen.push(b);
-                } else hechas.push(b);
-            }
-            for (const [a, z] of tramos) siguen.push({ini: i, fin: i, a, z});
-            abiertas.length = 0;
-            abiertas.push(...siguen);
-        }
-        return hechas.map(b => ({c: (b.ini + b.fin) / 2, t: b.fin - b.ini + 1, a: b.a, z: b.z}))
-                     .filter(b => b.t >= minT && b.t <= maxT);
-    };
-    // Juntar tramos alineados (misma `c` a medio grueso) separados por menos de `hueco`.
-    const juntar = (lista) => {
-        lista.sort((p, q) => (p.c - q.c) || (p.a - q.a));
-        const out = [];
-        for (const b of lista) {
-            const prev = out.find(x => Math.abs(x.c - b.c) <= Math.max(2, Math.max(x.t, b.t) / 2)
-                                       && b.a - x.z <= hueco && x.a - b.z <= hueco);
-            if (prev) {
-                prev.a = Math.min(prev.a, b.a); prev.z = Math.max(prev.z, b.z);
-                prev.t = Math.max(prev.t, b.t);
-            } else out.push(Object.assign({}, b));
-        }
-        return out;
-    };
-    const horiz = juntar(bandas(H, W, (y, x) => oscuro(x, y)));
-    const vert = juntar(bandas(W, H, (x, y) => oscuro(x, y)));
-    const out = horiz.map(b => ({x1: b.a, y1: b.c, x2: b.z + 1, y2: b.c, t: b.t}))
-        .concat(vert.map(b => ({x1: b.c, y1: b.a, x2: b.c, y2: b.z + 1, t: b.t})));
-    out.umbral = umbral;                 // el gris que se usó
-    out.otsu = otsu;                     // y el automático, para decirlo aunque se usara otro
-    return out;
-}
-
-/** Quitar los rayados: una línea con muchas paralelas a su lado —de la misma orientación,
- *  solapándose con ella, a menos de `ventana`— no es un muro: es el rayado de una cubierta, los
- *  peldaños de una escalera, la retícula de unas estanterías. Un muro tiene a su lado, como
- *  mucho, su otra cara y el muro de enfrente. Reportado en la revisión con un plano real: la
- *  mitad de lo propuesto era rayado. */
-function dcwDropHatching(segs, ventana, vecinos) {
-    const horiz = (s) => s.y1 === s.y2;
-    const c = (s) => horiz(s) ? s.y1 : s.x1, a = (s) => horiz(s) ? s.x1 : s.y1, z = (s) => horiz(s) ? s.x2 : s.y2;
-    // Paralelas, cerca, solapándose, y de un largo parecido: las rayas de un rayado son iguales
-    // entre sí, y un muro junto a ellas —más largo— no cuenta como una más.
-    const largo = (s) => z(s) - a(s);
-    const cerca = (s, q) => horiz(q) === horiz(s) && Math.abs(c(q) - c(s)) <= ventana
-        && Math.min(z(s), z(q)) - Math.max(a(s), a(q)) >= 0.5 * Math.min(largo(s), largo(q))
-        && Math.abs(largo(q) - largo(s)) <= 0.3 * Math.max(largo(s), largo(q));
-    const rayado = new Set();
-    segs.forEach((s, i) => {
-        let n = 0;
-        for (let j = 0; j < segs.length && n < vecinos; j++) if (j !== i && cerca(s, segs[j])) n++;
-        if (n >= vecinos) rayado.add(i);
-    });
-    // Los bordes de un rayado tienen paralelas solo a un lado y no llegan a la cuenta: una línea
-    // pegada a dos que ya son rayado, y tan larga como ellas, también lo es.
-    segs.forEach((s, i) => {
-        if (rayado.has(i)) return;
-        let n = 0;
-        rayado.forEach(j => { if (cerca(s, segs[j])) n++; });
-        if (n >= 2) rayado.add(i);
-    });
-    return segs.filter((_, i) => !rayado.has(i));
-}
-
-/** Un plano que mezcla estilos —el perímetro en doble línea y los tabiques de dentro con un solo
- *  trazo grueso, que es lo corriente— leído de las dos maneras a la vez. Primero las parejas: dos
- *  líneas a la distancia de un muro son ese muro. De lo que queda sin pareja, solo lo grueso
- *  (`minT` o más): un tabique dibujado de un trazo. Una línea fina y sola no es un muro. Todo de
- *  una lectura: separando antes las finas de las gruesas por su grueso, la cara de un muro doble
- *  que el dibujo hiciera un píxel más gruesa salía como dos tabiques sueltos. */
-function dcwMixed(segs, minGap, maxGap, minT) {
-    const sueltos = [];
-    const muros = dcwPairs(segs, minGap, maxGap, sueltos);
-    return dcwDedupe(muros.concat(sueltos.filter(s => s.t >= minT)), maxGap);
-}
-
-/** Un muro, una vez. Dos tramos paralelos, a menos de `maxGap` y solapándose en el 60 % del más
- *  corto, son el mismo muro leído dos veces —como pareja de líneas y como trazo suelto, o sus
- *  dos caras en un plano de muros rellenos—: se queda el más largo, con el grueso del más
- *  grueso. Reportado en la revisión con un plano real: trece muros del perímetro salían dobles. */
-function dcwDedupe(segs, maxGap) {
-    const horiz = (s) => s.y1 === s.y2;
-    const c = (s) => horiz(s) ? s.y1 : s.x1, a = (s) => horiz(s) ? s.x1 : s.y1, z = (s) => horiz(s) ? s.x2 : s.y2;
-    const orden = segs.slice().sort((p, q) => (z(q) - a(q)) - (z(p) - a(p)));
-    const out = [];
-    for (const s of orden) {
-        const igual = out.find(q => horiz(q) === horiz(s) && Math.abs(c(q) - c(s)) <= maxGap
-            && Math.min(z(s), z(q)) - Math.max(a(s), a(q)) >= 0.6 * Math.min(z(s) - a(s), z(q) - a(q)));
-        if (igual) igual.t = Math.max(igual.t, s.t);
-        else out.push(Object.assign({}, s));
-    }
-    return out;
-}
-
-/** Un plano de CAD dibuja un muro como DOS líneas finas paralelas —sus dos caras—, no como un
- *  trazo grueso. Leído como trazos, cada muro salía dos veces, y cualquier línea recta —un
- *  rayado, un mueble, una letra— pasaba por muro. Aquí se buscan parejas: dos líneas de la
- *  misma orientación, a la distancia de un muro (`minGap`..`maxGap`) y que se solapen en al
- *  menos el 60 % de la más corta; cada pareja es UN muro, en medio de las dos y con su grueso
- *  de verdad. Lo que no tiene pareja se queda fuera: casi siempre es lo que no era un muro.
- *  Reportado en la revisión con un plano real: 589 tramos, la mitad de ellos rayados y muebles. */
-function dcwPairs(segs, minGap, maxGap, sueltos) {
-    const horiz = (s) => s.y1 === s.y2;
-    const usado = new Set(), out = [];
-    segs.forEach((s, i) => {
-        if (usado.has(i)) return;
-        const h = horiz(s), c = h ? s.y1 : s.x1, a = h ? s.x1 : s.y1, z = h ? s.x2 : s.y2;
-        let mejor = -1, md = Infinity;
-        segs.forEach((q, j) => {
-            if (j === i || usado.has(j) || horiz(q) !== h) return;
-            const cq = h ? q.y1 : q.x1, aq = h ? q.x1 : q.y1, zq = h ? q.x2 : q.y2;
-            const d = Math.abs(cq - c);
-            if (d < minGap || d > maxGap) return;
-            const solape = Math.min(z, zq) - Math.max(a, aq);
-            if (solape < 0.6 * Math.min(z - a, zq - aq)) return;
-            if (d < md) { md = d; mejor = j; }
-        });
-        if (mejor < 0) { if (sueltos) sueltos.push(s); return; }
-        usado.add(i);
-        usado.add(mejor);
-        const q = segs[mejor];
-        const cq = h ? q.y1 : q.x1, aq = h ? q.x1 : q.y1, zq = h ? q.x2 : q.y2;
-        const cm = (c + cq) / 2, a0 = Math.min(a, aq), z0 = Math.max(z, zq);
-        const t = md + (s.t + q.t) / 2;
-        out.push(h ? {x1: a0, y1: cm, x2: z0, y2: cm, t} : {x1: cm, y1: a0, x2: cm, y2: z0, t});
-    });
-    return out;
-}
-
-//: El grueso mínimo, en píxeles, de un tabique dibujado de un solo trazo.
-const _DCW_SOLO_PX = 3;
-
-/** Lo que se busca en un plano, en sus píxeles, a partir de su calibración: `{minT, maxT,
- *  minLen, gap, k}` (`k`, milímetros por píxel). */
-function _dcwParams(k, o) {
-    o = o || {};
-    const cm = (v) => v * 10 / k;
-    return {minT: Math.max(2, cm(o.minCm || 6)), maxT: Math.max(3, cm(o.maxCm || 70)),
-            minLen: Math.max(8, cm(o.lenCm || 60)), gap: cm(o.gapCm || 30), k};
-}
 
 // ── La revisión ──────────────────────────────────────────────────────────────
 
@@ -236,24 +19,45 @@ let _dcw = null;
 
 // ── Deshacer en la revisión ──────────────────────────────────────────────────
 
-//: Cuántos pasos se guardan para deshacer en una revisión.
-const _DCW_UNDO_MAX = 200;
-
-/** Apuntar cómo están los tramos antes de cambiarlos. Reportado: borrar un muro en la revisión
- *  no se podía deshacer —lo de la revisión vive en memoria hasta «Guardar», y el deshacer de los
- *  planos solo conoce lo que va al servidor—. Todo lo que cambia los tramos pasa por aquí:
+/** Apuntar cómo están los tramos antes de cambiarlos, como un paso del historial del plano que no
+ *  va al servidor (`p2duLocal`). Reportado: borrar un muro en la revisión no se podía deshacer —lo
+ *  de la revisión vive en memoria hasta «Guardar»—. Todo lo que cambia los tramos pasa por aquí:
  *  borrar, dibujar, mover un extremo, aceptar uno o todos, descartar las propuestas, volver a
- *  leer el plano. */
+ *  leer el plano. Ctrl+Z y los botones de deshacer de la barra son los del plano. */
 function _dcwMark() {
-    const b = _dcw;
-    if (!b) return;
-    b.hist = b.hist || [];
-    b.hist.push(JSON.stringify(b.segs));
-    if (b.hist.length > _DCW_UNDO_MAX) b.hist.shift();
-    b.fut = [];
+    if (!_dcw) return;
+    p2duLocal(() => (_dcw ? JSON.stringify(_dcw.segs) : '[]'), (estado) => {
+        if (!_dcw) return;
+        _dcw.segs = JSON.parse(estado);
+        _dcwSelSet([]);
+        _dcw.start = null;
+        _dcw.drag = null;
+        _dcwPaint();
+    }, t('dcim_walls'));
 }
 
 // ── Varios a la vez ──────────────────────────────────────────────────────────
+
+//: Los tramos de la revisión, para el motor de planos: lo que se elige —con Ctrl + clic, con un
+//: recuadro— es lo elegido del motor (`P.picked`, por el índice del tramo), y el recuadro es el
+//: suyo. Los tramos no se arrastran juntos ni se agrupan: se borran, se aceptan, se alargan.
+const _dcwP2d = p2dMake('walls', {
+    get svg() { return _DCS_SVG; },
+    get scale() { return _DCP_SCALE; },
+    things: () => (_dcw ? _dcw.segs.map((s, i) => ({kind: 'seg', room: '', uid: String(i), x: s})) : []),
+    row: (kind, room, uid) => (_dcw ? _dcw.segs[Number(uid)] || null : null),
+    corners: (kind, room, s) => [{x: s.x1, y: s.y1}, {x: s.x2, y: s.y2}],
+    touches: (c, x0, y0, x1, y1) => p2dSegInBox(c.x, x0, y0, x1, y1),
+    groupable: () => false,
+    wholeOnly: () => false,
+    primary: () => (_dcw && _dcw.sel >= 0 ? {kind: 'seg', room: '', uid: String(_dcw.sel)} : null),
+    // El que lleva asas lo decide `_dcwSelSet`: el único elegido.
+    setPrimary: () => {},
+    may: () => _dcimMay('dcim_edit'),
+    redraw: () => _dcsRedraw(),
+    inspector: () => {},
+    deselect: () => { _dcwSelSet([]); _dcwPaint(); },
+});
 
 /** Los tramos elegidos, por su índice. Pedido: elegir varios muros a la vez —borrar una tanda de
  *  muros que sobran de uno en uno era la mitad del tiempo de una revisión—. `sel` sigue siendo
@@ -261,46 +65,19 @@ function _dcwMark() {
 function _dcwSels() {
     const b = _dcw;
     if (!b) return [];
-    if (!b.sels) b.sels = new Set(b.sel >= 0 ? [b.sel] : []);
-    return [...b.sels].filter(i => i >= 0 && i < b.segs.length).sort((p, q) => p - q);
+    return p2dPickedList(_dcwP2d).map(m => Number(m.uid))
+        .filter(i => i >= 0 && i < b.segs.length).sort((p, q) => p - q);
 }
 
 function _dcwSelSet(lista) {
-    const b = _dcw;
-    b.sels = new Set(lista);
-    b.sel = b.sels.size === 1 ? [...b.sels][0] : -1;
+    const P = _dcwP2d;
+    P.picked.clear();
+    for (const i of lista) P.picked.add(p2dKey('seg', '', String(i)));
+    _dcw.sel = lista.length === 1 ? lista[0] : -1;
 }
 
 function _dcwSelAll() {
     _dcwSelSet(_dcw.segs.map((_, i) => i));
-    _dcwPaint();
-}
-
-/** Los tramos que toca un recuadro (en mm de la planta): con cualquier trozo dentro. */
-function _dcwInBox(segs, x0, y0, x1, y1) {
-    const [a, z] = [Math.min(x0, x1), Math.max(x0, x1)], [c, d] = [Math.min(y0, y1), Math.max(y0, y1)];
-    const out = [];
-    segs.forEach((s, i) => {
-        for (let k = 0; k <= 20; k++) {
-            const x = s.x1 + (s.x2 - s.x1) * k / 20, y = s.y1 + (s.y2 - s.y1) * k / 20;
-            if (x >= a && x <= z && y >= c && y <= d) { out.push(i); return; }
-        }
-    });
-    return out;
-}
-
-/** Deshacer (`dir` = 'undo') o rehacer ('redo') un paso de la revisión. */
-function _dcwUndo(dir) {
-    const b = _dcw;
-    if (!b) return;
-    const de = dir === 'redo' ? (b.fut || []) : (b.hist || []);
-    const a = dir === 'redo' ? (b.hist = b.hist || []) : (b.fut = b.fut || []);
-    if (!de.length) return;
-    a.push(JSON.stringify(b.segs));
-    b.segs = JSON.parse(de.pop());
-    _dcwSelSet([]);
-    b.start = null;
-    b.drag = null;
     _dcwPaint();
 }
 
@@ -313,29 +90,38 @@ function _dcwButton() {
 function _dcwStart() {
     const f = _dcsFloor();
     if (!f) return;
+    // Lo que se iba a poner, no: cada clic es de la revisión.
+    p2dPlaceDrop(_dcsP2d);
     if (typeof _dc3d !== 'undefined' && _dc3d) _dc3dStop();
     _dcw = {floor: f.uid, sel: -1, tool: 'select', start: null, thresh: null, minCm: 6, busy: false,
             modo: (() => { try { const m = localStorage.getItem('ss.dcw.mode');
                                  return ['cad', 'filled', 'mixed'].includes(m) ? m : 'mixed'; }
                            catch (_) { return 'mixed'; } })(), otsu: null,
             segs: (((_dcsPlan || {}).walls || {})[f.uid] || []).map(w => Object.assign({prop: false}, w))};
+    _dcwSelSet([]);
+    // Lo que se deshaga mientras, es de la revisión; al cerrarla, sus pasos se van.
+    p2duLocalOpen();
     document.addEventListener('keydown', _dcwKey);
     renderDcim();
 }
 
-function _dcwCancel() {
+/** Cerrar la revisión sin repintar: también al dejar la planta (`_dcPlanLeave`). */
+function _dcwEnd() {
+    if (!_dcw) return;
     _dcw = null;
+    p2duLocalClose();
+    p2dPickClear(_dcwP2d);
     document.removeEventListener('keydown', _dcwKey);
+}
+
+function _dcwCancel() {
+    _dcwEnd();
     renderDcim();
 }
 
 function _dcwKey(ev) {
+    // Ctrl+Z y Ctrl+Y no son de aquí: los lleva el historial del plano (`_plan2d_undo.html`).
     if (!_dcw || ['INPUT', 'TEXTAREA', 'SELECT'].includes((ev.target || {}).tagName)) return;
-    if (ev.ctrlKey || ev.metaKey) {
-        const k = (ev.key || '').toLowerCase();
-        if (k === 'z' && !ev.shiftKey) { ev.preventDefault(); return _dcwUndo('undo'); }
-        if (k === 'y' || (k === 'z' && ev.shiftKey)) { ev.preventDefault(); return _dcwUndo('redo'); }
-    }
     if (ev.key === 'Escape') { _dcw.start = null; _dcwPaint(); }
     if ((ev.key === 'Delete' || ev.key === 'Backspace') && _dcwSels().length) { ev.preventDefault(); _dcwDelete(); }
     if ((ev.ctrlKey || ev.metaKey) && (ev.key || '').toLowerCase() === 'a') { ev.preventDefault(); _dcwSelAll(); }
@@ -376,13 +162,6 @@ function _dcwBar() {
             ${esc(t('dcim_walls_min'))}
             <input type="number" class="form-control form-control-sm ss-tabular" style="width:4.5rem" min="2" max="60"
                    value="${b.minCm}" onchange="_dcw.minCm = Math.max(2, Number(this.value) || 6)"></label>` : ''}
-        <span class="btn-group btn-group-sm">
-            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcwUndo('undo')"
-                    ${(b.hist || []).length ? '' : 'disabled'} title="${escAttr(t('dcim_walls_undo'))}"
-                    aria-label="${escAttr(t('dcim_walls_undo'))}"><i class="bi bi-arrow-counterclockwise"></i></button>
-            <button type="button" class="btn btn-sm btn-secondary" onclick="_dcwUndo('redo')"
-                    ${(b.fut || []).length ? '' : 'disabled'} title="${escAttr(t('dcim_walls_redo'))}"
-                    aria-label="${escAttr(t('dcim_walls_redo'))}"><i class="bi bi-arrow-clockwise"></i></button></span>
         ${herr('select', 'bi-cursor')}${herr('wall', 'bi-dash-lg')}${herr('door', 'bi-door-open')}${herr('window', 'bi-window')}
         <button type="button" class="btn btn-sm btn-secondary" onclick="_dcwDelete()" ${_dcwSels().length ? '' : 'disabled'}>
             <i class="bi bi-trash me-1"></i>${esc(_dcwSels().length > 1 ? tf('dcim_walls_delete_n', _dcwSels().length) : t('delete'))}</button>
@@ -426,19 +205,19 @@ async function _dcwDetect() {
     if (!_dcw || !img || !img.data || !f) return;
     _dcw.busy = true;
     _dcwPaint();
-    const lienzo = await _dcwPixels(img.data);
+    const lienzo = await p2dWallsPixels(img.data);
     if (!_dcw) return;
     _dcw.busy = false;
     if (!lienzo) { _dcwPaint(); return showToast(t('dcim_walls_unreadable'), 'danger'); }
-    const b = _dcPlanBox(f, img, _DCS_PLAN_MM);
+    const b = p2dPlanBox(f, img, _DCS_PLAN_MM);
     const k = b.w / lienzo.width;                    // mm por píxel
     let tramos;
     // Un rayado: cuatro paralelas o más a menos de 1,5 m.
-    const sinRayado = (lista) => dcwDropHatching(lista, 1500 / k, 4);
+    const sinRayado = (lista) => p2dWallsDropHatching(lista, 1500 / k, 4);
     const modo = _dcw.modo;
     if (modo === 'cad' || modo === 'mixed') {
         // Todos los trazos largos (más de 1 m), de una línea fina a un muro de 50 cm, sin rayados.
-        const leidas = dcwDetect(lienzo, {thresh: _dcw.thresh, minT: 1,
+        const leidas = p2dWallsDetect(lienzo, {thresh: _dcw.thresh, minT: 1,
             maxT: Math.max(3, Math.round(500 / k)), minLen: Math.max(8, 1000 / k), gap: 200 / k});
         _dcw.otsu = leidas.otsu;
         const lineas = sinRayado(leidas);
@@ -446,11 +225,11 @@ async function _dcwDetect() {
         // de poca resolución —9 cm por píxel— una línea de dos ya pasaba por 18 cm, y las hojas
         // de las puertas, los muebles y las cotas salían como tabiques (reportado con un plano
         // real: «muros donde no hay»). Lo de uno o dos píxeles es trazo de dibujo.
-        tramos = modo === 'cad' ? dcwPairs(lineas, 50 / k, 450 / k)
-                                : dcwMixed(lineas, 50 / k, 450 / k, Math.max(_DCW_SOLO_PX, 80 / k));
+        tramos = modo === 'cad' ? p2dWallsPairs(lineas, 50 / k, 450 / k)
+                                : p2dWallsMixed(lineas, 50 / k, 450 / k, Math.max(P2D_WALLS_SOLO_PX, 80 / k));
     } else {
-        const p = _dcwParams(k, {minCm: _dcw.minCm});
-        const leidas = dcwDetect(lienzo, Object.assign({thresh: _dcw.thresh}, p));
+        const p = p2dWallsParams(k, {minCm: _dcw.minCm});
+        const leidas = p2dWallsDetect(lienzo, Object.assign({thresh: _dcw.thresh}, p));
         _dcw.otsu = leidas.otsu;
         tramos = sinRayado(leidas);
     }
@@ -464,27 +243,6 @@ async function _dcwDetect() {
     _dcwSelSet([]);
     _dcwPaint();
     showToast(tf('dcim_walls_found', tramos.length), tramos.length ? 'success' : 'warning');
-}
-
-/** Los píxeles del plano, a como mucho 3000 px de ancho: más no da más muros, y sí más espera. */
-function _dcwPixels(data) {
-    return new Promise(ok => {
-        const im = new Image();
-        im.onload = () => {
-            const k = Math.min(1, 3000 / Math.max(im.naturalWidth || 1, im.naturalHeight || 1));
-            const cv = document.createElement('canvas');
-            cv.width = Math.max(1, Math.round((im.naturalWidth || 1) * k));
-            cv.height = Math.max(1, Math.round((im.naturalHeight || 1) * k));
-            const g = cv.getContext('2d');
-            if (!g) return ok(null);
-            g.fillStyle = '#fff';
-            g.fillRect(0, 0, cv.width, cv.height);
-            g.drawImage(im, 0, 0, cv.width, cv.height);
-            try { ok(g.getImageData(0, 0, cv.width, cv.height)); } catch (_) { ok(null); }
-        };
-        im.onerror = () => ok(null);
-        im.src = data;
-    });
 }
 
 function _dcwAcceptAll() {
@@ -513,6 +271,9 @@ function _dcwDelete() {
 async function _dcwSave() {
     const f = _dcsFloor();
     if (!_dcw || !f) return;
+    // Los muros son de la planta en la que se revisaron: en otra, guardarlos sería borrar los
+    // suyos.
+    if (String(_dcw.floor) !== String(f.uid)) { _dcwEnd(); return renderDcim(); }
     const walls = _dcw.segs.map(s => ({kind: s.kind, x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2,
                                        thick_mm: s.thick_mm}));
     const url = `/api/v1/dcim/floors/${encodeURIComponent(f.uid)}/walls`;
@@ -520,7 +281,7 @@ async function _dcwSave() {
     const r = await _dcimSend('PUT', url, {walls});
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
     // Guardar reemplaza todos los muros de la planta: deshacerlo es volver a mandar los de antes.
-    if (typeof _dcUndoPush === 'function') _dcUndoPush(url, {walls: antes}, {walls});
+    if (typeof p2duPush === 'function') p2duPush(url, {walls: antes}, {walls});
     if (_dcsPlan) {
         _dcsPlan.walls = _dcsPlan.walls || {};
         _dcsPlan.walls[f.uid] = walls;
@@ -542,8 +303,9 @@ function _dcwSvg() {
     if (!f) return '';
     const segs = _dcw ? _dcw.segs : ((((_dcsPlan || {}).walls) || {})[f.uid] || []);
     let h = '';
+    const elegidos = new Set(_dcw ? _dcwSels() : []);
     segs.forEach((s, i) => {
-        const elegido = _dcw && (_dcw.sels ? _dcw.sels.has(i) : i === _dcw.sel);
+        const elegido = elegidos.has(i);
         const color = elegido ? 'var(--bs-warning)' : (s.prop ? '#fd7e14' : _DCW_COLOR[s.kind] || _DCW_COLOR.wall);
         h += `<line x1="${s.x1 * S}" y1="${s.y1 * S}" x2="${s.x2 * S}" y2="${s.y2 * S}" stroke="${color}"
                     stroke-width="${Math.max(2, s.thick_mm * S)}" stroke-linecap="square"
@@ -553,14 +315,8 @@ function _dcwSvg() {
             h += `<circle cx="${x * S}" cy="${y * S}" r="6" fill="var(--bs-warning)" stroke="#000"
                           vector-effect="non-scaling-stroke" style="pointer-events:none"></circle>`;
     });
-    // El recuadro de elegir, mientras se arrastra.
-    if (_dcw && _dcw.box) {
-        const bx = _dcw.box;
-        h += `<rect x="${Math.min(bx.x0, bx.x1) * S}" y="${Math.min(bx.y0, bx.y1) * S}"
-                    width="${Math.abs(bx.x1 - bx.x0) * S}" height="${Math.abs(bx.y1 - bx.y0) * S}"
-                    fill="rgba(255,193,7,.12)" stroke="var(--bs-warning)" stroke-dasharray="6 4"
-                    vector-effect="non-scaling-stroke" style="pointer-events:none"></rect>`;
-    }
+    // El recuadro de elegir, mientras se arrastra: el del motor.
+    if (_dcw) h += p2dBoxSvg(_dcwP2d);
     if (_dcw && _dcw.start) h += `<circle cx="${_dcw.start[0] * S}" cy="${_dcw.start[1] * S}" r="5"
         fill="#fd7e14" style="pointer-events:none"></circle>`;
     return h;
@@ -579,13 +335,6 @@ function _dcwSnap(p, desde) {
         else if (Math.abs(dx) < Math.abs(dy) * 0.1) x = desde[0];
     }
     return [Math.round(x), Math.round(y)];
-}
-
-/** La distancia de un punto a un tramo, en mm. */
-function _dcwDist(s, x, y) {
-    const dx = s.x2 - s.x1, dy = s.y2 - s.y1, l2 = dx * dx + dy * dy || 1;
-    const k = Math.max(0, Math.min(1, ((x - s.x1) * dx + (y - s.y1) * dy) / l2));
-    return Math.hypot(x - (s.x1 + k * dx), y - (s.y1 + k * dy));
 }
 
 function _dcwDown(ev) {
@@ -608,15 +357,15 @@ function _dcwDown(ev) {
         }
         let mejor = -1, md = Infinity;
         b.segs.forEach((q, i) => {
-            const d = _dcwDist(q, x, y);
+            const d = p2dSegDist(q, x, y);
             if (d < md) { md = d; mejor = i; }
         });
         const tocado = md < Math.max(400, ((b.segs[mejor] || {}).thick_mm || 0)) ? mejor : -1;
         const sumar = ev.shiftKey || ev.ctrlKey || ev.metaKey;
         if (tocado < 0) {
-            // En vacío. Con Mayús, un recuadro: lo que toque se añade a lo elegido. Sin ella,
-            // deselecciona y lo que siga de la pulsación arrastra el plano.
-            if (ev.shiftKey) { b.box = {x0: x, y0: y, x1: x, y1: y, base: _dcwSels()}; return; }
+            // En vacío. Con Mayús, o en el modo de elegir, el recuadro del motor: lo que toque
+            // se añade a lo elegido. Si no, deselecciona y lo que siga arrastra el plano.
+            if (p2dBoxWanted(ev)) { p2dBoxStart(_dcwP2d, ev); return; }
             const habia = _dcwSels().length;
             _dcwSelSet([]);
             if (habia) _dcwPaint();
@@ -648,13 +397,7 @@ function _dcwDown(ev) {
 function _dcwMove(ev) {
     const b = _dcw;
     if (b && b.pan) return ssCanvasPanMove(_DCS_SVG, ev);
-    if (b && b.box) {
-        const p = ssCanvasPoint(_DCS_SVG, ev);
-        if (!p) return;
-        b.box.x1 = p.x / _DCP_SCALE;
-        b.box.y1 = p.y / _DCP_SCALE;
-        return _dcsRedraw();
-    }
+    if (b && p2dDragging(_dcwP2d)) return p2dMove(_dcwP2d, ev);
     if (!b || !b.drag) return;
     const p = ssCanvasPoint(_DCS_SVG, ev);
     if (!p) return;
@@ -667,53 +410,25 @@ function _dcwMove(ev) {
 
 function _dcwUp(ev) {
     if (!_dcw) return;
-    if (_dcw.box) {
-        const bx = _dcw.box;
-        _dcw.box = null;
-        _dcwSelSet([...new Set(bx.base.concat(_dcwInBox(_dcw.segs, bx.x0, bx.y0, bx.x1, bx.y1)))]);
+    if (p2dDragging(_dcwP2d)) {
+        // Lo que tocó se añade a lo elegido (`p2dUp`); las asas, solo si queda uno.
+        p2dUp(_dcwP2d);
+        if (_dcw) _dcwSelSet(_dcwSels());
         return _dcwPaint();
     }
     // Un extremo cogido y soltado sin moverlo no es un paso que deshacer.
-    const h = _dcw.hist || [];
-    if (_dcw.drag && h.length && h[h.length - 1] === JSON.stringify(_dcw.segs)) h.pop();
+    if (_dcw.drag) p2duLocalUnchanged();
     _dcw.drag = null;
     if (_dcw.pan) { _dcw.pan = false; ssCanvasPanEnd(ev); }
 }
 
 // ── En 3D ────────────────────────────────────────────────────────────────────
 
-/** Los muros con sus huecos abiertos: una puerta o una ventana dibujada ENCIMA de un muro —que
- *  es como se dibuja— parte ese muro en dos, y el muro deja de tapar el hueco. Sin esto el muro
- *  seguía de suelo a techo por delante de la puerta y del cristal. Un hueco cuenta para un muro
- *  si está sobre su línea: los dos extremos a menos de su grueso (o 30 cm) de ella. */
-function _dcwCut(segs) {
-    const huecos = segs.filter(s => s.kind === 'door' || s.kind === 'window');
-    const out = [];
-    for (const s of segs) {
-        if (s.kind !== 'wall') { out.push(s); continue; }
-        const dx = s.x2 - s.x1, dy = s.y2 - s.y1, l2 = dx * dx + dy * dy;
-        if (!l2) continue;
-        const tol = Math.max(300, Number(s.thick_mm) || 0);
-        let trozos = [[0, 1]];
-        for (const h of huecos) {
-            if (_dcwDist(s, h.x1, h.y1) > tol || _dcwDist(s, h.x2, h.y2) > tol) continue;
-            const t1 = ((h.x1 - s.x1) * dx + (h.y1 - s.y1) * dy) / l2;
-            const t2 = ((h.x2 - s.x1) * dx + (h.y2 - s.y1) * dy) / l2;
-            const a = Math.min(t1, t2), b = Math.max(t1, t2);
-            trozos = trozos.flatMap(([p, q]) => (b <= p || a >= q) ? [[p, q]]
-                : [[p, Math.max(p, a)], [Math.min(q, b), q]].filter(([u, v]) => v - u > 1e-3));
-        }
-        for (const [p, q] of trozos)
-            out.push(Object.assign({}, s, {x1: s.x1 + dx * p, y1: s.y1 + dy * p, x2: s.x1 + dx * q, y2: s.y1 + dy * q}));
-    }
-    return out;
-}
-
 /** Los muros de una planta en su escena 3D: un muro de suelo a techo; una puerta, el dintel de
  *  encima del hueco; una ventana, el antepecho, el cristal y el dintel. `alto` en metros. */
 function _dcwBoxes(floor, cajas, alto) {
     const M = 0.001;
-    const segs = _dcwCut((((_dcsPlan || {}).walls) || {})[floor.uid] || []);
+    const segs = p2dWallsCut((((_dcsPlan || {}).walls) || {})[floor.uid] || []);
     const gris = [0.62, 0.64, 0.67, 1];
     for (const s of segs) {
         const a = [s.x1 * M, s.y1 * M], b = [s.x2 * M, s.y2 * M], g = (Number(s.thick_mm) || 150) * M;

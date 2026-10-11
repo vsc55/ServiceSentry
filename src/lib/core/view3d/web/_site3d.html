@@ -147,7 +147,7 @@ function _ds3FloorScene(floor, img, veil) {
     const area = floor.area_uid || '';
     const salasAqui = _dcsRooms().filter(r => r.floor_uid === floor.uid);
     // Dónde y cuánto: lo mismo que el plano de la planta, para que las dos vistas cuadren.
-    const b = _dcPlanBox(floor, img, _DCS_PLAN_MM);
+    const b = p2dPlanBox(floor, img, _DCS_PLAN_MM);
     let maxX = 20000, maxY = 15000;
     if (img) {
         maxX = Math.max(maxX, b.x + b.w);

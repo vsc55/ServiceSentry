@@ -344,6 +344,13 @@ Gi1/0/7 del switch y no sabía a qué mesa.
   a través de ellos: «PC → roseta A → panel 7 → switch Gi1/0/7», con el cable y su longitud en
   cada tramo. Se corta en lo que el lector no puede ver y a los 24 saltos: un bucle de
   latiguillos es un error real de una instalación real y no puede colgar la pantalla.
+- **Rosetas y tomas de corriente**: las dos son de pared, en el grupo «Tomas» de la paleta, y
+  dicen sus **bocas**: una placa no es de un solo tipo, así que es una lista, cada una con su
+  conector y cuántas. Qué conectores se ofrecen lo dice el catálogo de conectores: cada uno marca
+  si es «Boca de roseta» o «Boca de toma de corriente», y se cambia desde su pantalla (desde 1, sin máximo) —dos RJ45, una LC y un HDMI
+  en una roseta; dos Schuko y una C13 en una toma—. La toma dice además de qué **fuente** de la
+  sede cuelga —un SAI, un grupo, un cuadro— y con ella hereda la cadena entera; en el plano lleva
+  «SAI» en naranja o «GE», nunca en rojo, que en este panel es «caído».
 - En el **plano** se ponen desde la paleta y se arrastran como una pieza; en el **3D** se levantan
   a su altura, y los cables de una sala a su rack salen como un mazo por sala y rack (`hnet` de
   los circuitos), que es lo que va por la bandeja.
@@ -360,7 +367,9 @@ Por el techo del pasillo van dos bandejas separadas, una de datos y otra de fuer
 (UNE-EN 50174-2). `test_dcim_demo_floors.py` comprueba lo que esas normas miden en el plano.
 
 La **demo** (`demo_cabling.py`) es una oficina cableada como la dejaría un instalador: cada mesa
-con roseta doble —PC en A, teléfono en B—, una impresora por zona de impresión, un AP en el techo
+con roseta doble —dos RJ45, PC en A, teléfono en B— y una toma de corriente de dos Schuko al lado,
+del cuadro de su planta (las del NOC, del SAI del CPD); en el CPD, tomas de servicio de cuatro C13
+del SAI y de dos Schuko de su cuadro, y en la sala del grupo una toma CEE del propio grupo, una impresora por zona de impresión, un AP en el techo
 de cada sala grande, pantalla y teléfono de conferencia en las salas de reuniones, cámaras en los
 pasillos y en la puerta del CPD. Cada roseta tira su horizontal al repartidor de su planta, sin
 pasar de los 90 m de la norma; los paneles y los switches de acceso se añaden de 24 en 24 según
@@ -613,6 +622,31 @@ de la información que habrá cuando toque.
       el teclado (R, Supr —que en una sala la saca de la planta, preguntando—, flechas a 10 cm
       o a 1 m con Mayús), las filas de cada sala con sus avisos, y exportar e importar la
       planta en JSON: cada sala del fichero va a la que se llama igual, o se crea
+- [x] Los dos planos —sala y planta— corren sobre un mismo editor de planos 2D,
+      `lib/core/plan2d/` (como el 3D en `lib/core/view3d/`): el motor no nombra ninguna clase de
+      cosa, y cada pantalla le da un adaptador que dice qué hay, cómo se mueve, dónde se guarda y
+      qué es girarlo o quitarlo (`_plan2d_room.html`, `_plan2d_floor.html`)
+- [x] Lo que se puede poner en un plano es un catálogo del editor de planos, no del inventario:
+      los objetos base (puertas, columnas, mesas, extintores, PC, cámaras, impresoras…) en
+      `lib/core/plan2d/kinds.py`, y el inventario dice cuáles usa y añade los suyos (pasillo
+      confinado, cuadro, SAI, climatizador, bandeja, torno, lector) en
+      `lib/core/dcim/plankinds.py`. Desde el botón «Objetos del plano» se crean más, solo para
+      esta pantalla (tabla `plan2d_kind`): un equipo va a `dc_item` y se vincula y se rastrea
+      como cualquier otro; lo demás, a `dc_feature`. Uno colocado no se puede borrar
+- [x] Un rack, una pieza o un equipo de sala se dibujan, se editan y se duplican, giran o quitan
+      igual en el plano de la sala y en el de la planta (`_planobj.html`): la planta enseña el
+      control de accesos y el estado de un equipo, y su inspector tiene la ficha completa
+- [x] Y el resto del editor también es uno: la barra flotante, la paleta, el plano de fondo y
+      arrastrar —una cosa o varias— los lleva el editor de planos; cada pantalla dice solo qué
+      botones tiene cada clase, dónde cae lo que se añade y qué pasa al pulsar algo
+- [x] Y lo que no es del inventario de las plantillas de los planos también es del editor, en
+      `lib/core/plan2d/web/`: deshacer (`_plan2d_undo.html`), el plano de fondo con su
+      calibración (`_plan2d_bg.html`) y leer los muros del plano (`_plan2d_walls.html`). Cada
+      uno pregunta a la pantalla lo suyo por una «fuente» —rutas, permiso, qué se calibra, a
+      qué esquinas se pega, contra qué plantas se encaja—; la del inventario está en
+      `_undo.html` y `_plancal.html`. La revisión de muros sigue siendo de la planta, pero elige
+      con el conjunto y el recuadro del motor y deshace con su historial: mientras está abierta,
+      Ctrl+Z recorre solo sus pasos, y al cerrarla se van
 - [x] Color por el peor estado de lo que hay dentro, y el frente marcado — que es lo que dice
       cuál es el pasillo frío
 - [x] Se abre desde la sala y se vuelve; la URL recuerda en qué sala se estaba
@@ -672,7 +706,8 @@ de la información que habrá cuando toque.
       `partials/explore3d`; las páginas lo incluyen por ruta (`core/view3d/web/…`). Los editores
       de planos de sala y de planta ya no llevan visor: el 3D de una sala, una planta o el
       edificio se mira en `/3d`, y en el panel queda solo la vista 3D de un rack
-- [x] **El plano de fondo, calibrado** ([_plancal.html](../src/lib/web_admin/templates/partials/dcim/_plancal.html)).
+- [x] **El plano de fondo, calibrado** ([_plan2d_bg.html](../src/lib/core/plan2d/web/_plan2d_bg.html),
+      con lo del inventario en [_plancal.html](../src/lib/web_admin/templates/partials/dcim/_plancal.html)).
       Se colocaba con un número, «Ancho del plano», el de la imagen ENTERA —márgenes y
       cajetín incluidos, un dato que nadie tiene— y con su esquina pegada al (0, 0), así que un
       plano con margen quedaba desplazado; y una sala sin ese número estiraba la imagen al
@@ -711,7 +746,8 @@ de la información que habrá cuando toque.
       trazos detrás; en 3D, la franja en su cara de delante. Delante es el lado de arriba antes
       de girar, el mismo que el de un rack: girarla es cambiar hacia dónde mira
 - [x] **Deshacer y rehacer** en el plano de una sala y en el de una planta
-      ([_undo.html](../src/lib/web_admin/templates/partials/dcim/_undo.html)): mover, girar,
+      ([_plan2d_undo.html](../src/lib/core/plan2d/web/_plan2d_undo.html), con lo del inventario
+      en [_undo.html](../src/lib/web_admin/templates/partials/dcim/_undo.html)): mover, girar,
       estirar, cambiar un campo del inspector o calibrar el plano se deshace con el botón de la
       barra o con Ctrl+Z (Ctrl+Y rehace). Se apunta en `_dcimSend`, el único sitio por el que
       salen esos cambios, con cómo estaba según lo guardado. Crear y borrar no se deshacen:
@@ -733,7 +769,9 @@ de la información que habrá cuando toque.
       Las sedes en el mapa con su estado y debajo en tarjetas; al pulsar una, la sede como
       edificio; arriba, Sedes › la sede (con las demás para saltar) › sus plantas, con subir y
       bajar; la barra del visor pasa de edificio a planta. La dirección dice sede, planta y modo,
-      así que un enlace o un F5 vuelven al mismo sitio y «atrás» desanda. **No hay dibujo nuevo**:
+      así que un enlace o un F5 vuelven al mismo sitio y «atrás» desanda. Y una sala o un rack
+      (`room`, `rack`): el botón «3D» del plano de una sala, del de una planta y de un rack abre
+      ese sitio aquí en otra pestaña, con la cámara en la sala o el rack abierto y de frente. **No hay dibujo nuevo**:
       reutiliza el mapa del cuadro de mando y el 3D de la sede tal cual, y redefine solo para sí
       `renderDcim`, `_dcimUrl` y las funciones que abren una pantalla del panel (un rack, un
       dispositivo, editar), que aquí la abren en el panel en otra pestaña. Carga una parte del

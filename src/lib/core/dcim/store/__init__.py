@@ -57,7 +57,7 @@ from .features import (ACCESS_KINDS, LOCK_KINDS,
                        FEATURE_KINDS, FEATURE_LAYERS, SHELVED_KINDS, SHELVES_MAX, _FEATURE,
                        _SHELF_ITEM)
 from .floors import WALL_KINDS, WALLS_MAX, _FLOOR, _FLOOR_WALL
-from .items import (FACES, ITEM_ROLES, MOUNTS, PASS_THROUGH, PLACEMENTS, REAR_SUFFIX,
+from .items import (FACES, ITEM_ROLES, JACK_ROLES, JACK_TYPES_MAX, JACKS_SANE, MOUNTS, PASS_THROUGH, PLACEMENTS, REAR_SUFFIX,
                     ROLES_MUDOS, ROOM_ITEM_DEFAULTS, _ITEM, room_item_box)
 from .parts import (PART_KINDS, PORT_FAMILIES, PORT_LIST_MAX, PORT_SIGNALS_MAX,
                     WATTS_MAX, _PART, clean_place, clean_port_list)
@@ -85,7 +85,7 @@ SCHEMAS = (_SITE, _FLOOR, _ROOM, _RACK, _ITEM, _FEATURE, _PDU, _POWER, _CABLE,
 
 #: Lo que este paquete ofrece hacia fuera. Escrito y no deducido: casi todo se importa aquí
 #: sólo para volver a exportarlo, y sin esta lista cualquier herramienta lo llamaría muerto.
-__all__ = ['DcimStore', 'SCHEMAS', 'OWNER_SCOPES', 'FACES', 'ITEM_ROLES', 'ROLES_MUDOS',
+__all__ = ['DcimStore', 'SCHEMAS', 'OWNER_SCOPES', 'FACES', 'ITEM_ROLES', 'JACK_ROLES', 'JACK_TYPES_MAX', 'JACKS_SANE', 'ROLES_MUDOS',
            'MOUNTS', 'PASS_THROUGH', 'REAR_SUFFIX', 'ROOM_ITEM_DEFAULTS', 'room_item_box',
            'PLACEMENTS', 'PART_KINDS', 'SIDES', 'COOLING', 'ROOM_HEIGHT_MM',
            'ACCESS_KINDS', 'LOCK_KINDS', 'FEATURE_KINDS', 'FEATURE_LAYERS', 'SHELVED_KINDS', 'SHELVES_MAX', 'FEEDS', 'SOURCE_KINDS', 'SOURCE_PIECE_KINDS', 'FEED_COLORS',

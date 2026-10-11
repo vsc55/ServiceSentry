@@ -174,6 +174,18 @@ def node_run(bundle_js: str, probe_js: str) -> dict:
     return out
 
 
+def plan2d_catalog_js(client, screen: str = 'dcim') -> str:
+    """The plan catalogue of *screen*, as the line that loads it into `node`.
+
+    A plan draws its pieces and its palette from the 2D plan editor's catalogue
+    (`/api/v1/plan2d/<screen>/kinds`), fetched when the plan opens. `node` fetches nothing, so a
+    probe that draws a plan starts with this: the server's own answer, not a copy of it."""
+    import json                                                      # noqa: PLC0415
+    d = client.get(f'/api/v1/plan2d/{screen}/kinds').get_json()
+    assert d and d.get('kinds'), f'no catalogue for {screen}'
+    return f'P2D_CAT[{json.dumps(screen)}] = {json.dumps(d)};' + chr(10)
+
+
 def panel_bundle(client) -> str:
     """El `<script>` más grande de `/admin`: el paquete de todas las secciones."""
     import re as _re                                                 # noqa: PLC0415

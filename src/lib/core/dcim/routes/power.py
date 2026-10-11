@@ -219,12 +219,32 @@ def register(app, wa, C):
                 'feed': str(pdu.get('feed') or 'none'),
                 'rack': ruid, 'rack_name': str(racks[ruid].get('name') or ruid)})
         out['hangs'] = cuelgan
+        # Y las tomas de corriente de pared que cuelgan de cada una (`dc_item.source_uid`): «qué
+        # se queda sin corriente si salta este SAI» también son los puestos de una oficina. Solo
+        # las que esta persona puede ver, como las regletas.
+        out['sockets'] = _sockets_of(store, fuentes, said, allowed, reach)
         # Y los SAI que hay dentro de esos armarios, para poder decir cuál ES cada fuente.
         out['ups_items'] = _ups_items(store, racks.keys() | _visible_racks(store, site))
         # Y las piezas del plano que pueden serlo: dónde está en el plano lo que no está en un
         # armario —un cuadro, un SAI de sala, la zona del grupo—.
         out['plan_pieces'] = _plan_pieces(store, site)
         return jsonify(out)
+
+    def _sockets_of(store, fuentes, said, allowed, reach) -> dict:
+        """``{source_uid: [{uid, label, room, room_name, jacks}]}``: the wall sockets hanging
+        from each of *fuentes* that this caller may see, each jack ``{connector, n, abbr}``."""
+        mias = {str(f['uid']) for f in fuentes}
+        tomas = [i for i in store.items.list("source_uid != ''") if str(i.get('source_uid')) in mias]
+        salas, out = {}, {}
+        for i in C.filtered(tomas, store, said, allowed, 'item', reach):
+            ruid = str(i.get('room_uid') or '')
+            if ruid not in salas:
+                salas[ruid] = store.rooms.get(ruid) or {}
+            out.setdefault(str(i['source_uid']), []).append({
+                'uid': i['uid'], 'label': str(i.get('label') or ''), 'room': ruid,
+                'room_name': str(salas[ruid].get('name') or ruid),
+                'jacks': dcim_svc.jack_brief(None, i, C.conns()).get('jacks', [])})
+        return out
 
     def _plan_pieces(store, site):
         """The room pieces that may BE a source (`SOURCE_PIECE_KINDS`), of *site* or of every
@@ -511,6 +531,9 @@ def register(app, wa, C):
             store.sources.update(otra['uid'], {'upstream_uid': ''}, actor=C.actor())
         for pdu in store.pdus.list('source_uid = ?', (uid,)):
             store.pdus.update(pdu['uid'], {'source_uid': ''}, actor=C.actor())
+        # Y las tomas de pared que colgaban de ella, lo mismo: sin decir de qué cuelgan.
+        for toma in store.items.list('source_uid = ?', (uid,)):
+            store.items.update(toma['uid'], {'source_uid': ''}, actor=C.actor())
         store.sources.delete(uid)
         return jsonify({'ok': True})
 

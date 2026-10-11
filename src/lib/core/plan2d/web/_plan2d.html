@@ -1,0 +1,1251 @@
+{# ================================================================
+   plan2d — el editor de planos 2D, sin saber de qué es el plano.
+
+   Lo que hace igual cualquier plano en el que se colocan cosas: elegir una o varias (Mayús/Ctrl +
+   clic, un recuadro, el modo del puntero), moverlas juntas pegándose a lo que tienen al lado,
+   agruparlas, pasar a lo que queda debajo y enviar algo al fondo, el teclado, y guardar varias
+   cosas como un solo paso de deshacer. Nació de dos editores —el de una sala y el de una planta—
+   que hacían todo esto cada uno a su manera, y cada arreglo había que hacerlo dos veces.
+
+   **Lo que es de cada plano lo dice su adaptador** (`p2dMake(nombre, ad)`): qué elementos hay,
+   dónde está cada uno y cómo se mueve, cómo se guarda, qué se hace al girarlo o quitarlo. El motor
+   no nombra ninguna clase de cosa: un elemento es `{kind, room, uid}`, donde `room` es el
+   contenedor que lo lleva —vacío si no lo hay— y `kind: 'room'` es un contenedor que también se
+   coloca. Lo de dentro de un contenedor que se mueve va con él y no se mueve aparte.
+
+   El adaptador (`ad`), con lo que el motor le pide:
+     svg                    el id del lienzo (`ssCanvas*`)
+     scale                  unidades del dibujo por milímetro
+     things()               [{kind, room, uid, x}] — todo lo del plano; `x` es su fila
+     row(kind, room, uid)   la fila de uno
+     corners(kind, room, x) sus cuatro esquinas en mm del plano, giradas como se ven
+     at(kind, room, x)      su sitio guardado {x, y} (lo que mueve `shift`)
+     shift(members, dx, dy) poner cada `{kind, room, uid, at}` desplazado dx, dy mm del plano
+     dragDelta(P, g, dx, dy, libre)  cuánto se mueve lo cogido: con el imán (`p2dNear`) y el paso
+     primary() / setPrimary(m)       lo del inspector
+     stackOf(el)            el elemento de un nodo del DOM bajo el puntero, o null
+     groupable(kind)        si se agrupa; wholeOnly(kind): si un recuadro lo coge solo entero
+     touches(t, x0, y0, x1, y1)  opcional: si un recuadro (mm) toca `t`, cuando su caja no lo dice
+     url(kind, uid)         dónde se escribe; send(metodo, url, cuerpo) cómo
+     batchStart() / batchEnd(marca)  juntar lo escrito en un paso de deshacer
+     may()                  si quien mira puede editar
+     redraw(), inspector(), rerender(), reload(), deselect(), active()
+     turn(m), drop(m), step(mayus)   el teclado; floatHide() opcional; hint: clave de la ayuda
+     addAt(clave, punto, tam)  poner algo en `punto` (mm), con `tam` {w, d} si se dibujó su recuadro
+     dropped(drag)          opcional: `true` si la pantalla se queda con lo soltado y no se guarda
+     paletteTitle()         opcional: el título de lo que la pantalla pone suelto en la paleta
+   ================================================================ #}
+
+//: Los planos abiertos con el motor, por su nombre (el que llevan los `onclick`).
+const P2D = {};
+//: Cuánto acerca el imán entre cosas, en píxeles de pantalla: lo que se nota en la mano a
+//: cualquier zoom.
+const P2D_NEAR_PX = 10;
+
+/** Dar de alta un plano: su nombre y su adaptador. */
+function p2dMake(name, ad) {
+    P2D[name] = {name, ad, picked: new Set(), back: new Set(), guides: [], drag: null, palOpen: null, placing: null,
+                 arrowTimer: null, arrowMoved: null, floatTimer: null, floatPending: null};
+    return P2D[name];
+}
+
+function p2dKey(kind, room, uid) { return `${kind}|${room || ''}|${uid}`; }
+function p2dKeyOf(m) { return p2dKey(m.kind, m.room, m.uid); }
+function p2dUnkey(k) {
+    const [kind, room, uid] = String(k).split('|');
+    return {kind, room: room || '', uid};
+}
+
+// ── El catálogo: lo que se puede poner en un plano ───────────────────────────
+//
+// Por pantalla (`register_screen` en `lib/core/plan2d/kinds.py`): los objetos base que usa, los
+// suyos, y los que alguien ha creado desde ella. Cada uno con su nombre, su icono, su tamaño, su
+// capa y cómo se dibuja. Se pide una vez al abrir un plano y se vuelve a pedir al crear uno.
+
+//: Lo que vino de cada pantalla: `{kinds, icons, layers, mounts, devices, manage}`.
+const P2D_CAT = {};
+
+async function p2dLoadKinds(screen) {
+    const d = await apiGet(`/api/v1/plan2d/${encodeURIComponent(screen)}/kinds`);
+    if (d && d.kinds) P2D_CAT[screen] = d;
+    return P2D_CAT[screen] || {kinds: {}};
+}
+
+/** El catálogo de una pantalla si aún no está: una vez por sesión, no en cada plano que se
+ *  abre —el 3D de una sede se pide de una vez, y una petición más por carga sería otra—. Tras
+ *  crear o cambiar un objeto se vuelve a pedir con `p2dLoadKinds`. */
+function p2dEnsureKinds(screen) {
+    return P2D_CAT[screen] ? Promise.resolve(P2D_CAT[screen]) : p2dLoadKinds(screen);
+}
+
+function p2dKinds(screen) { return (P2D_CAT[screen] || {}).kinds || {}; }
+function p2dKind(screen, key) { return p2dKinds(screen)[key] || null; }
+
+/** El nombre de un objeto: el que se le dio al crearlo, o el de su clave de idioma. */
+function p2dKindName(screen, key) {
+    const s = p2dKind(screen, key);
+    if (!s) return String(key || '');
+    return s.name || t(s.label);
+}
+
+function p2dKindIcon(screen, key, siNo) {
+    const s = p2dKind(screen, key);
+    return (s && s.icon) || siNo || 'bi-square';
+}
+
+/** Cómo se dibuja: `{fill, line, dash, cross, dark, abbr}`, o `null` si no está en el catálogo. */
+function p2dKindLook(screen, key) {
+    const s = p2dKind(screen, key);
+    return (s && s.look) || null;
+}
+
+// ── El modo del puntero, el mismo para todos los planos ──────────────────────
+
+//: Qué hace arrastrar en vacío: `'pan'` mueve la vista (y Mayús + arrastrar elige), `'select'`
+//: elige con un recuadro (y el botón central mueve la vista). Una preferencia de quien mira.
+let p2dPointerMode = (() => {
+    try {
+        const v = localStorage.getItem('ss.plan2d.pointer') || localStorage.getItem('ss.dcim.pointer');
+        return v === 'select' ? 'select' : 'pan';
+    } catch (_) { return 'pan'; }
+})();
+
+function p2dPointerSet(modo) {
+    p2dPointerMode = modo === 'select' ? 'select' : 'pan';
+    try { localStorage.setItem('ss.plan2d.pointer', p2dPointerMode); } catch (_) { /* sin almacén */ }
+    for (const P of Object.values(P2D)) if (P.ad.active()) P.ad.rerender();
+}
+
+/** Los dos botones de la barra: mover la vista o elegir. El puesto, en amarillo. */
+function p2dPointerButtons() {
+    const boton = (modo, icono, clave) => `<button type="button"
+        class="btn btn-sm ${p2dPointerMode === modo ? 'btn-warning' : 'btn-secondary'}"
+        onclick="p2dPointerSet(${jsStr(modo)})" data-p2dpointer="${modo}"
+        title="${escAttr(t(clave))}" aria-label="${escAttr(t(clave))}"><i class="bi ${icono}"></i></button>`;
+    return `<span class="btn-group btn-group-sm">${boton('pan', 'bi-arrows-move', 'plan2d_pointer_pan')}${
+        boton('select', 'bi-bounding-box', 'plan2d_pointer_select')}</span>`;
+}
+
+/** La clase del lienzo: en modo elegir, una cruz sobre el vacío (`.ss-pick-mode`); lo que se
+ *  coge sigue con su mano. `on` = si el modo vale en esta vista. */
+function p2dPointerClass(on) {
+    return on && p2dPointerMode === 'select' ? ' ss-pick-mode' : '';
+}
+
+/** Si una pulsación en vacío empieza un recuadro: en modo elegir o con Mayús; nunca con el botón
+ *  central, que siempre mueve la vista. */
+function p2dBoxWanted(ev) {
+    return ev.button !== 1 && (ev.shiftKey || p2dPointerMode === 'select');
+}
+
+// ── Geometría ────────────────────────────────────────────────────────────────
+
+/** Un punto de un marco `{x, y, w, d, rot}` (girado sobre su centro) en el de fuera. */
+function p2dTurn(f, x, y) {
+    const a = (Number(f.rot) || 0) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    const dx = x - f.w / 2, dy = y - f.d / 2;
+    return {x: f.x + f.w / 2 + dx * c - dy * s, y: f.y + f.d / 2 + dx * s + dy * c};
+}
+
+/** La caja alineada con el plano que encierra unos puntos. */
+function p2dAabb(pts) {
+    const xs = pts.map(q => q.x), ys = pts.map(q => q.y);
+    const x0 = Math.min(...xs), y0 = Math.min(...ys);
+    return {x: x0, y: y0, w: Math.max(...xs) - x0, h: Math.max(...ys) - y0};
+}
+
+/** La caja que se ve de algo del plano. */
+function p2dBoxOf(P, kind, room, x) { return p2dAabb(P.ad.corners(kind, room, x)); }
+
+/** El margen del imán en mm, al zoom de ahora. Sin pantalla (en una prueba), 150. */
+function p2dTol(P) {
+    try {
+        const svg = ssCanvasSvg(P.ad.svg);
+        const v = ssCanvasWindow(P.ad.svg);
+        const px = svg && svg.getBoundingClientRect ? svg.getBoundingClientRect().width : 0;
+        if (v && v.w && px) return Math.max(20, P2D_NEAR_PX * v.w / px / P.ad.scale);
+    } catch (_) { /* sin pantalla */ }
+    return 150;
+}
+
+/** Pegar una caja (`{x, y, w, h}`, en mm) a lo que tiene al lado.
+ *
+ *  Por eje: en X se prueban sus dos bordes contra los dos de cada vecino —pegado (mi izquierda
+ *  con su derecha) y alineado (mi izquierda con su izquierda)—, y gana el más cerca dentro de
+ *  `tol`. Vecino en X es lo que comparte franja en Y (o queda a menos de `tol` de compartirla),
+ *  y al revés: alinear con algo de la otra punta del plano es un salto que nadie pidió. Devuelve
+ *  `{x, y}` —`null` en el eje que no se pegó— y las guías a dibujar. */
+function p2dNearSnap(box, otros, tol) {
+    const mejor = {x: null, y: null, dx: tol + 1, dy: tol + 1, gx: null, gy: null};
+    for (const b of otros) {
+        const franjaY = box.y < b.y + b.h + tol && b.y < box.y + box.h + tol;
+        const franjaX = box.x < b.x + b.w + tol && b.x < box.x + box.w + tol;
+        if (franjaY) {
+            for (const [mio, suyo] of [[0, b.x + b.w], [box.w, b.x], [0, b.x], [box.w, b.x + b.w]]) {
+                const d = Math.abs(box.x + mio - suyo);
+                if (d <= tol && d < mejor.dx) { mejor.dx = d; mejor.x = suyo - mio; mejor.gx = suyo; }
+            }
+        }
+        if (franjaX) {
+            for (const [mio, suyo] of [[0, b.y + b.h], [box.h, b.y], [0, b.y], [box.h, b.y + b.h]]) {
+                const d = Math.abs(box.y + mio - suyo);
+                if (d <= tol && d < mejor.dy) { mejor.dy = d; mejor.y = suyo - mio; mejor.gy = suyo; }
+            }
+        }
+    }
+    const guias = [];
+    if (mejor.gx !== null) guias.push({x: mejor.gx});
+    if (mejor.gy !== null) guias.push({y: mejor.gy});
+    return {x: mejor.x, y: mejor.y, guides: guias};
+}
+
+/** Cuánto se mueve lo que se arrastra (`movs`), con `caja` la de lo que lleva la mano al
+ *  empezar: pegado a un vecino en el eje en que llegue cerca, y si no `base` —el paso o la
+ *  baldosa del plano—. Vecino es lo que no se mueve, ni va dentro de un contenedor que se mueve,
+ *  ni está al fondo. `libre` (Alt) lo deja en `base`. Deja las guías en `P.guides`. */
+function p2dNear(P, movs, caja, dx, dy, base, libre) {
+    P.guides = [];
+    if (libre || !caja) return base;
+    const claves = new Set(movs.map(p2dKeyOf));
+    const otros = P.ad.things()
+        .filter(t => !claves.has(p2dKeyOf(t)) && !(t.room && claves.has(p2dKey('room', '', t.room)))
+                     && !P.back.has(p2dKeyOf(t)))
+        .map(t => p2dBoxOf(P, t.kind, t.room, t.x));
+    const s = p2dNearSnap({x: caja.x + dx, y: caja.y + dy, w: caja.w, h: caja.h}, otros, p2dTol(P));
+    P.guides = s.guides;
+    return {dx: s.x !== null ? s.x - caja.x : base.dx, dy: s.y !== null ? s.y - caja.y : base.dy};
+}
+
+/** Las guías del imán mientras `drag`: una línea de lado a lado del dibujo. */
+function p2dGuidesSvg(P, drag) {
+    if (!drag || !P.guides.length) return '';
+    const S = P.ad.scale, L = 1e6;
+    return P.guides.map(g => g.x !== undefined
+        ? `<line x1="${g.x * S}" y1="${-L}" x2="${g.x * S}" y2="${L}" stroke="var(--bs-info)"
+              stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"
+              style="pointer-events:none" data-p2dguide="x"></line>`
+        : `<line x1="${-L}" y1="${g.y * S}" x2="${L}" y2="${g.y * S}" stroke="var(--bs-info)"
+              stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"
+              style="pointer-events:none" data-p2dguide="y"></line>`).join('');
+}
+
+/** Quitar las guías al soltar. `true` si había, para repintar. */
+function p2dGuidesClear(P) {
+    const habia = P.guides.length > 0;
+    P.guides = [];
+    return habia;
+}
+
+// ── Lo elegido ───────────────────────────────────────────────────────────────
+
+/** Los de su grupo, él incluido; él solo si no tiene o no se agrupa. */
+function p2dGroupOf(P, m) {
+    const x = P.ad.groupable(m.kind) ? P.ad.row(m.kind, m.room, m.uid) : null;
+    const g = x && String(x.group_uid || '');
+    if (!g) return [{kind: m.kind, room: m.room || '', uid: String(m.uid)}];
+    return P.ad.things().filter(t => P.ad.groupable(t.kind) && String(t.x.group_uid || '') === g)
+        .map(t => ({kind: t.kind, room: t.room, uid: t.uid}));
+}
+
+/** Lo del inspector como clave, o `''`. */
+function p2dPrimaryKey(P) {
+    const m = P.ad.primary();
+    return m ? p2dKeyOf(m) : '';
+}
+
+/** Lo elegido entero: lo del inspector, lo añadido y los grupos de todo ello, sin repetir. */
+function p2dPickedList(P) {
+    const claves = new Set(P.picked);
+    const prim = p2dPrimaryKey(P);
+    if (prim) claves.add(prim);
+    const out = new Map();
+    for (const k of claves) {
+        const m = p2dUnkey(k);
+        if (!P.ad.row(m.kind, m.room, m.uid)) continue;
+        for (const g of p2dGroupOf(P, m)) out.set(p2dKeyOf(g), g);
+    }
+    return [...out.values()];
+}
+
+function p2dPickClear(P) {
+    P.picked.clear();
+    P.guides = [];
+}
+
+/** Si hay algo agrupado entre lo elegido. */
+function p2dAnyGrouped(P, lista) {
+    return lista.some(m => P.ad.groupable(m.kind)
+        && String((P.ad.row(m.kind, m.room, m.uid) || {}).group_uid || ''));
+}
+
+/** Elegir desde una lista: solo eso, o —con Mayús o Ctrl— además de lo elegido. */
+function p2dPick(name, kind, room, uid, ev) {
+    const P = P2D[name];
+    const m = {kind, room: room || '', uid: String(uid)};
+    if (ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey)) {
+        const prim = p2dPrimaryKey(P);
+        if (prim) P.picked.add(prim);
+        P.picked.add(p2dKeyOf(m));
+    } else P.picked.clear();
+    P.back.delete(p2dKeyOf(m));          // elegido desde la lista, es lo que se quiere tocar
+    P.ad.setPrimary(m);
+    P.ad.redraw();
+    P.ad.inspector();
+}
+
+// ── Lo que hay bajo el puntero ───────────────────────────────────────────────
+
+/** Lo que hay en unos nodos del DOM, de arriba abajo y sin repetir. */
+function p2dStackOf(P, els) {
+    const out = [], visto = new Set();
+    for (const el of els || []) {
+        const m = el ? P.ad.stackOf(el) : null;
+        if (!m) continue;
+        const k = p2dKeyOf(m);
+        if (visto.has(k)) continue;
+        visto.add(k);
+        out.push(m);
+    }
+    return out;
+}
+
+/** A qué se refiere una pulsación: lo de arriba, salvo que lo elegido esté también bajo el dedo
+ *  —entonces es eso, y se sigue arrastrando aunque algo lo tape—. `cycle`, para pasar a lo de
+ *  debajo si la pulsación no se mueve. `null` en vacío. */
+function p2dHit(P, ev) {
+    const els = (typeof document.elementsFromPoint === 'function' && Number.isFinite(ev.clientX))
+        ? document.elementsFromPoint(ev.clientX, ev.clientY) : [];
+    const pila = p2dStackOf(P, els.length ? els : [ev.target]);
+    if (!pila.length) return null;
+    const prim = p2dPrimaryKey(P);
+    const elegido = prim && pila.find(p => p2dKeyOf(p) === prim);
+    const cual = elegido || pila[0];
+    return Object.assign({}, cual, {cycle: {again: !!elegido, key: p2dKeyOf(cual),
+                                            pila: pila.map(p => ({kind: p.kind, room: p.room, uid: p.uid}))}});
+}
+
+/** Una pulsación quieta sobre lo que YA estaba elegido, con algo debajo: lo siguiente de la pila,
+ *  y tras lo último vuelta a lo primero. `true` si lo hizo. */
+function p2dCycle(P, drag) {
+    const c = drag && drag.cycle;
+    if (!c || !c.again || drag.moved || c.pila.length < 2) return false;
+    const i = c.pila.findIndex(p => p2dKeyOf(p) === c.key);
+    p2dPickClear(P);
+    P.ad.setPrimary(c.pila[(i + 1) % c.pila.length]);
+    P.ad.redraw();
+    P.ad.inspector();
+    return true;
+}
+
+// ── Al fondo ─────────────────────────────────────────────────────────────────
+
+function p2dIsBack(P, kind, room, uid) { return P.back.has(p2dKey(kind, room, uid)); }
+
+/** Al fondo: tenue y el puntero lo atraviesa (`.ss-dcp-back`). Si era lo elegido se suelta: lo
+ *  que se quería era lo de debajo. */
+function p2dSendBack(name, kind, room, uid) {
+    const P = P2D[name];
+    if (P.ad.floatHide) P.ad.floatHide();
+    const k = p2dKey(kind, room, uid);
+    P.back.add(k);
+    P.picked.delete(k);
+    if (p2dPrimaryKey(P) === k) P.ad.setPrimary(null);
+    P.ad.rerender();
+}
+
+function p2dBringAll(name) {
+    P2D[name].back.clear();
+    P2D[name].ad.rerender();
+}
+
+/** En la barra, mientras haya algo al fondo: cuántas, y traerlas de vuelta. Vacío si nada. */
+function p2dBackChip(P) {
+    if (!P.back.size) return '';
+    return `<button type="button" class="btn btn-sm btn-warning" onclick="p2dBringAll(${jsStr(P.name)})"
+        title="${escAttr(t('plan2d_bring_all'))}">
+        <i class="bi bi-layer-forward me-1"></i>${esc(tf('plan2d_n_back', P.back.size))}</button>`;
+}
+
+/** El botón «Enviar al fondo». */
+function p2dBackButton(P, kind, room, uid) {
+    return `<button type="button" class="btn btn-sm btn-secondary"
+        onclick="p2dSendBack(${jsStr(P.name)},${jsStr(kind)},${jsStr(room || '')},${jsStr(String(uid))})"
+        title="${escAttr(t('plan2d_send_back'))}" aria-label="${escAttr(t('plan2d_send_back'))}">
+        <i class="bi bi-layer-backward"></i></button>`;
+}
+
+// ── Pulsar, arrastrar y soltar varios ────────────────────────────────────────
+
+/** Al bajar el dedo sobre algo (`hit`, de `p2dHit`). `true` si es del motor: Mayús/Ctrl + clic
+ *  (añadir o quitar), o coger algo que va con otros —lo elegido junto, o su grupo—. Un clic sin
+ *  más sobre algo suelto deja lo elegido de antes y sigue por el camino de cada plano. */
+function p2dManyDown(P, ev, hit) {
+    if (!hit || !hit.kind) return false;
+    const clave = p2dKeyOf(hit);
+    if (ev.shiftKey || ev.ctrlKey || ev.metaKey) {
+        const lista = p2dPickedList(P);
+        if (lista.some(m => p2dKeyOf(m) === clave)) {
+            // Quitarlo, con su grupo: un grupo se elige entero o no se elige.
+            const fuera = new Set(p2dGroupOf(P, hit).map(p2dKeyOf));
+            const quedan = lista.filter(m => !fuera.has(p2dKeyOf(m)));
+            P.picked.clear();
+            quedan.forEach(m => P.picked.add(p2dKeyOf(m)));
+            P.ad.setPrimary(quedan[0] || null);
+        } else {
+            const prim = p2dPrimaryKey(P);
+            if (prim) P.picked.add(prim);
+            P.picked.add(clave);
+            P.ad.setPrimary({kind: hit.kind, room: hit.room || '', uid: String(hit.uid)});
+        }
+        P.ad.redraw();
+        P.ad.inspector();
+        return true;
+    }
+    let junto = p2dPickedList(P);
+    if (!junto.some(m => p2dKeyOf(m) === clave)) {
+        // Algo de fuera de lo elegido: empieza una elección nueva, la suya o la de su grupo.
+        P.picked.clear();
+        junto = p2dGroupOf(P, hit);
+    }
+    if (junto.length < 2) return false;
+    P.ad.setPrimary({kind: hit.kind, room: hit.room || '', uid: String(hit.uid)});
+    if (P.ad.may()) p2dDragStart(P, ev, hit, junto);
+    P.ad.redraw();
+    P.ad.inspector();
+    return true;
+}
+
+/** Empezar a arrastrar `members` llevando la mano `hit`: lo mismo para uno que para varios. */
+function p2dDragStart(P, ev, hit, members) {
+    const p = ssCanvasPoint(P.ad.svg, ev);
+    const x = P.ad.row(hit.kind, hit.room, hit.uid);
+    if (!p || !x) return false;
+    const conAt = (m) => Object.assign({}, m, {at: P.ad.at(m.kind, m.room, P.ad.row(m.kind, m.room, m.uid) || {})});
+    P.drag = {what: 'many', from: p, moved: false, cycle: hit.cycle,
+              grab: conAt({kind: hit.kind, room: hit.room || '', uid: String(hit.uid)}),
+              box0: p2dBoxOf(P, hit.kind, hit.room, x),
+              members: members.map(conAt)};
+    if (ev.currentTarget && ev.currentTarget.setPointerCapture) ev.currentTarget.setPointerCapture(ev.pointerId);
+    return true;
+}
+
+/** Coger UNA cosa para arrastrarla, para quien edita: el mismo arrastre que el de varios —el imán,
+ *  los pasos, lo que se guarda al soltar y cómo se deshace—, con un solo miembro. Quién queda
+ *  elegido lo decide la pantalla. `true` si la cogió. */
+function p2dGrab(P, ev, hit) {
+    if (!P.ad.may()) return false;
+    const m = {kind: hit.kind, room: hit.room || '', uid: String(hit.uid), cycle: hit.cycle};
+    return p2dDragStart(P, ev, m, [m]);
+}
+
+/** En vacío, en modo elegir o con Mayús: empezar un recuadro. */
+function p2dBoxStart(P, ev) {
+    const p = ssCanvasPoint(P.ad.svg, ev);
+    if (!p) return false;
+    P.drag = {what: 'pickbox', from: p, to: null, moved: false};
+    if (ev.currentTarget && ev.currentTarget.setPointerCapture) ev.currentTarget.setPointerCapture(ev.pointerId);
+    return true;
+}
+
+/** Si el motor lleva un arrastre en este plano. */
+function p2dDragging(P) { return !!P.drag; }
+
+/** Mover: el recuadro crece, o lo cogido se mueve junto. */
+function p2dMove(P, ev) {
+    const g = P.drag;
+    const p = ssCanvasPoint(P.ad.svg, ev);
+    if (!g || !p) return;
+    if (g.what === 'pickbox') {
+        g.to = p;
+        g.moved = true;
+        return P.ad.redraw();
+    }
+    const d = P.ad.dragDelta(P, g, (p.x - g.from.x) / P.ad.scale, (p.y - g.from.y) / P.ad.scale, !!ev.altKey);
+    P.ad.shift(g.members, d.dx, d.dy);
+    g.moved = true;
+    if (P.ad.moved) P.ad.moved(g);
+    P.ad.redraw();
+}
+
+/** Lo que toca un recuadro (en unidades del dibujo); lo que solo cuenta entero, si cabe entero. */
+function p2dInBox(P, a, b) {
+    const S = P.ad.scale;
+    const x0 = Math.min(a.x, b.x) / S, x1 = Math.max(a.x, b.x) / S;
+    const y0 = Math.min(a.y, b.y) / S, y1 = Math.max(a.y, b.y) / S;
+    return P.ad.things().filter(t => {
+        if (P.ad.touches) return P.ad.touches(t, x0, y0, x1, y1);
+        const c = p2dBoxOf(P, t.kind, t.room, t.x);
+        if (P.ad.wholeOnly(t.kind)) return c.x >= x0 && c.x + c.w <= x1 && c.y >= y0 && c.y + c.h <= y1;
+        return c.x < x1 && c.x + c.w > x0 && c.y < y1 && c.y + c.h > y0;
+    }).map(t => ({kind: t.kind, room: t.room, uid: t.uid}));
+}
+
+/** Lo que de verdad hay que escribir de `members`: lo de dentro de un contenedor que también se
+ *  mueve ya va con él. */
+function p2dOwnMoves(members) {
+    const salas = new Set(members.filter(m => m.kind === 'room').map(m => m.uid));
+    return members.filter(m => m.kind === 'room' || !salas.has(m.room));
+}
+
+/** Soltar: el recuadro elige; lo movido se guarda y se deshace de una vez. */
+async function p2dUp(P) {
+    const drag = P.drag;
+    P.drag = null;
+    P.guides = [];
+    if (!drag) return;
+    if (drag.what === 'pickbox') {
+        // Una pulsación quieta en vacío, en modo elegir: soltar lo elegido.
+        if (!drag.to) { p2dPickClear(P); return P.ad.deselect(); }
+        for (const m of p2dInBox(P, drag.from, drag.to)) P.picked.add(p2dKeyOf(m));
+        const lista = p2dPickedList(P);
+        if (!p2dPrimaryKey(P) && lista.length) P.ad.setPrimary(lista[0]);
+        P.ad.redraw();
+        return P.ad.inspector();
+    }
+    if (!drag.moved) {
+        if (p2dCycle(P, drag)) return;
+        // Una pulsación sin viaje: lo que la pantalla haga al pulsar algo (`ad.clicked`).
+        if (P.ad.clicked) return P.ad.clicked(drag.grab);
+        P.ad.redraw();
+        return P.ad.inspector();
+    }
+    P.ad.redraw();
+    P.ad.inspector();
+    // La pantalla puede quedarse con la suelta (`ad.dropped`): un rack soltado en otra sala de la
+    // planta no se guarda donde quedó, se pregunta si se cambia de sala.
+    if (P.ad.dropped && P.ad.dropped(drag)) return;
+    await p2dSavePositions(P, drag.members);
+}
+
+/** Guardar dónde quedó cada uno, de una vez. */
+function p2dSavePositions(P, members) {
+    return p2dSaveMany(P, p2dOwnMoves(members).map(m => {
+        const x = P.ad.row(m.kind, m.room, m.uid);
+        return x ? {kind: m.kind, uid: m.uid, body: {pos_x: x.pos_x, pos_y: x.pos_y}} : null;
+    }).filter(Boolean));
+}
+
+/** Escribir varias cosas, una petición cada una, juntas en un paso de deshacer. Si una falla,
+ *  el plano vuelve a lo que tiene el servidor. */
+async function p2dSaveMany(P, cambios) {
+    const marca = await P.ad.batchStart();
+    let mal = '';
+    for (const c of cambios) {
+        const r = await P.ad.send('PUT', P.ad.url(c.kind, c.uid), c.body);
+        if (!r || !r.ok) { mal = (r && r.error) || t('save_failed'); break; }
+    }
+    P.ad.batchEnd(marca);
+    if (mal) {
+        showToast(mal, 'danger');
+        return P.ad.reload();
+    }
+}
+
+// ── Agrupar ──────────────────────────────────────────────────────────────────
+
+/** Un id de grupo nuevo: `g-` y diez letras, lo que acepta el servidor. */
+function p2dNewGroupId() {
+    const letras = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let s = 'g-';
+    for (let i = 0; i < 10; i++) s += letras[Math.floor(Math.random() * letras.length)];
+    return s;
+}
+
+/** Unir lo elegido que se agrupa. Si alguno ya tenía grupo, ese grupo entero entra en el nuevo. */
+async function p2dGroup(name) {
+    const P = P2D[name];
+    const lista = p2dPickedList(P).filter(m => P.ad.groupable(m.kind));
+    if (lista.length < 2 || !P.ad.may()) return;
+    const g = p2dNewGroupId();
+    lista.forEach(m => { const x = P.ad.row(m.kind, m.room, m.uid); if (x) x.group_uid = g; });
+    P.ad.redraw();
+    P.ad.inspector();
+    await p2dSaveMany(P, lista.map(m => ({kind: m.kind, uid: m.uid, body: {group_uid: g}})));
+    showToast(tf('plan2d_grouped_n', lista.length), 'success');
+}
+
+/** Soltar los grupos de lo elegido: cada cosa vuelve a ir por su cuenta, y sigue elegida. */
+async function p2dUngroup(name) {
+    const P = P2D[name];
+    const lista = p2dPickedList(P).filter(m => P.ad.groupable(m.kind)
+        && String((P.ad.row(m.kind, m.room, m.uid) || {}).group_uid || ''));
+    if (!lista.length || !P.ad.may()) return;
+    lista.forEach(m => { const x = P.ad.row(m.kind, m.room, m.uid); if (x) x.group_uid = ''; });
+    lista.forEach(m => P.picked.add(p2dKeyOf(m)));
+    P.ad.redraw();
+    P.ad.inspector();
+    await p2dSaveMany(P, lista.map(m => ({kind: m.kind, uid: m.uid, body: {group_uid: ''}})));
+}
+
+// ── Lo que se ve ─────────────────────────────────────────────────────────────
+
+/** El contorno de lo elegido (girado como se ve), cuando es más de uno o un grupo, y el recuadro
+ *  mientras se elige —también la primera vez, con nada elegido aún—. `on`: si vale en la vista. */
+function p2dPickedSvg(P, on) {
+    if (on === false) return '';
+    const S = P.ad.scale;
+    let h = '';
+    const lista = p2dPickedList(P);
+    if (lista.length > 1 || p2dAnyGrouped(P, lista)) {
+        for (const m of lista) {
+            const x = P.ad.row(m.kind, m.room, m.uid);
+            if (!x) continue;
+            const pts = P.ad.corners(m.kind, m.room, x).map(q => `${q.x * S},${q.y * S}`).join(' ');
+            h += `<polygon points="${pts}" fill="none" stroke="var(--bs-warning)" stroke-width="1.5"
+                    stroke-dasharray="3 2" vector-effect="non-scaling-stroke" style="pointer-events:none"
+                    data-p2dpick="1"></polygon>`;
+        }
+    }
+    return h + p2dBoxSvg(P) + p2dPlaceSvg(P);
+}
+
+/** El recuadro de elegir, mientras se arrastra. */
+function p2dBoxSvg(P) {
+    const b = P.drag && P.drag.what === 'pickbox' ? P.drag : null;
+    if (!b || !b.to) return '';
+    return `<rect x="${Math.min(b.from.x, b.to.x)}" y="${Math.min(b.from.y, b.to.y)}"
+        width="${Math.abs(b.to.x - b.from.x)}" height="${Math.abs(b.to.y - b.from.y)}"
+        fill="rgba(255,193,7,.12)" stroke="var(--bs-warning)" stroke-dasharray="6 4"
+        vector-effect="non-scaling-stroke" style="pointer-events:none" data-p2dbox="1"></rect>`;
+}
+
+/** Con varios elegidos, en el inspector: cuántos, y agrupar o desagrupar. */
+function p2dManyPanelHtml(P) {
+    const lista = p2dPickedList(P);
+    const cosas = lista.filter(m => P.ad.groupable(m.kind));
+    const agrupado = p2dAnyGrouped(P, lista);
+    if (lista.length < 2 && !agrupado) return '';
+    const puede = P.ad.may();
+    return `<div class="border rounded-3 p-2 mb-2 ss-fs-2" data-p2dmany="1">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="bi bi-collection text-muted"></i>
+            <span class="fw-semibold">${esc(tf('plan2d_n_selected', lista.length))}</span>
+            ${puede && cosas.length > 1 ? `<button type="button" class="btn btn-sm btn-secondary"
+                onclick="p2dGroup(${jsStr(P.name)})" title="${escAttr(t('plan2d_group_hint'))}">
+                <i class="bi bi-link-45deg me-1"></i>${esc(t('plan2d_group'))}</button>` : ''}
+            ${puede && agrupado ? `<button type="button" class="btn btn-sm btn-secondary"
+                onclick="p2dUngroup(${jsStr(P.name)})" title="${escAttr(t('plan2d_ungroup_hint'))}">
+                <i class="bi bi-scissors me-1"></i>${esc(t('plan2d_ungroup'))}</button>` : ''}
+        </div>
+        <div class="text-muted ss-fs-3 mt-1">${esc(t(P.ad.hint || 'plan2d_many_hint'))}</div>
+    </div>`;
+}
+
+// ── El teclado ───────────────────────────────────────────────────────────────
+
+/** Mover lo elegido con las flechas: un paso, o el paso largo con Mayús (`ad.step`). Se guarda
+ *  al parar de pulsar, de una vez. */
+function p2dArrow(P, ev) {
+    const lista = p2dPickedList(P);
+    if (!lista.length || !P.ad.may()) return false;
+    const paso = P.ad.step(!!ev.shiftKey);
+    const dx = ev.key === 'ArrowLeft' ? -paso : ev.key === 'ArrowRight' ? paso : 0;
+    const dy = ev.key === 'ArrowUp' ? -paso : ev.key === 'ArrowDown' ? paso : 0;
+    P.ad.shift(lista.map(m => Object.assign({}, m, {at: P.ad.at(m.kind, m.room, P.ad.row(m.kind, m.room, m.uid) || {})})),
+               dx, dy);
+    // Lo movido con las flechas se va SUMANDO hasta que se guarda: elegir otra cosa y moverla
+    // antes de que salte el guardado dejaba la primera movida en pantalla y sin guardar.
+    const antes = new Map((P.arrowMoved || []).map(m => [p2dKeyOf(m), m]));
+    for (const m of lista) antes.set(p2dKeyOf(m), m);
+    P.arrowMoved = [...antes.values()];
+    P.ad.redraw();
+    P.ad.inspector();
+    clearTimeout(P.arrowTimer);
+    P.arrowTimer = setTimeout(() => {
+        const movidos = P.arrowMoved || [];
+        P.arrowMoved = null;
+        p2dSavePositions(P, movidos);
+    }, 400);
+    return true;
+}
+
+/** Una tecla en un plano. Fuera de un campo de texto: Ctrl+G agrupa, Ctrl+Mayús+G desagrupa,
+ *  Ctrl+A elige todo, Escape suelta lo elegido; con algo elegido, R gira, Supr quita y las
+ *  flechas mueven. `true` si era de aquí —quien llama hace `preventDefault`—. */
+function p2dKeyDown(P, ev) {
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '')) return false;
+    if (ev.key === 'Escape' && p2dPlaceCancel(P)) return true;
+    const k = (ev.key || '').toLowerCase();
+    if (ev.ctrlKey || ev.metaKey) {
+        if (k === 'g') {
+            if (ev.shiftKey) p2dUngroup(P.name); else p2dGroup(P.name);
+            return true;
+        }
+        if (k === 'a') {
+            P.ad.things().forEach(t => P.picked.add(p2dKeyOf(t)));
+            if (!p2dPrimaryKey(P)) P.ad.setPrimary(p2dPickedList(P)[0] || null);
+            P.ad.redraw();
+            P.ad.inspector();
+            return true;
+        }
+        return false;
+    }
+    // Escape suelta, antes que nada más: con cualquier cosa elegida, no solo con algunas.
+    if (ev.key === 'Escape') {
+        if (!P.picked.size && !p2dPrimaryKey(P)) return false;
+        p2dPickClear(P);
+        P.ad.deselect();
+        return true;
+    }
+    if (ev.altKey) return false;
+    const prim = p2dPrimaryKey(P);
+    if (!prim) return false;
+    if (k.startsWith('arrow')) return p2dArrow(P, ev);
+    if (!P.ad.may()) return false;
+    if (k === 'r') { P.ad.turn(p2dUnkey(prim)); return true; }
+    if (ev.key === 'Delete') { P.ad.drop(p2dUnkey(prim)); return true; }
+    return false;
+}
+
+// ── Los objetos propios de una pantalla: crearlos, cambiarlos, quitarlos ─────
+//
+// En el inspector del plano, en lugar de lo elegido mientras está abierto (`P.kindsOpen`). Solo
+// para quien puede (`manage` del catálogo, el permiso que la pantalla dijo). Lo de código —los
+// base y los de la pantalla— se ve en la paleta y no se toca aquí.
+
+//: Lo que se puede elegir como trazo del contorno.
+const P2D_DASHES = ['', '4 3', '2 2', '6 3'];
+
+/** El botón de la barra que abre el editor: solo si el catálogo dice que se puede gestionar. */
+function p2dKindsButton(P) {
+    const cat = P2D_CAT[P.ad.kindsScreen] || {};
+    if (!cat.manage) return '';
+    const texto = t('plan2d_kinds_title');
+    return `<button type="button" class="btn btn-sm ${P.kindsOpen ? 'btn-warning' : 'btn-secondary'}"
+        onclick="p2dKindsToggle(${jsStr(P.name)})" title="${escAttr(texto)}" aria-label="${escAttr(texto)}"
+        data-p2dkinds="1"><i class="bi bi-boxes"></i></button>`;
+}
+
+function p2dKindsToggle(name) {
+    const P = P2D[name];
+    P.kindsOpen = !P.kindsOpen;
+    P.kindEdit = null;
+    P.ad.rerender();
+}
+
+/** Lo que va en el inspector: el editor de objetos si está abierto; si no, lo de varios elegidos
+ *  y después lo de la pantalla (`cuerpo`, una función: no se calcula si no se enseña). */
+function p2dInspector(P, cuerpo) {
+    if (P.kindsOpen) return p2dKindsPanelHtml(P);
+    return p2dManyPanelHtml(P) + cuerpo();
+}
+
+/** Lo que se edita, partiendo de un objeto creado (`spec`) o de los valores de partida. */
+function p2dKindDraft(spec) {
+    if (!spec) {
+        return {name: '', icon: 'bi-square', device: 0, mount: 'floor', w_mm: 600, d_mm: 600,
+                h_mm: 1000, base_mm: 0, layer: 'room', front: 0, fill: '#94a3b8', line: '',
+                dash: '', abbr: ''};
+    }
+    const look = spec.look || {};
+    return {uid: spec.uid, name: spec.name || '', icon: spec.icon || 'bi-square',
+            device: spec.device ? 1 : 0, mount: spec.mount || 'floor', w_mm: spec.w, d_mm: spec.d,
+            h_mm: spec.h, base_mm: spec.base || 0, layer: spec.layer || 'room', front: spec.front ? 1 : 0,
+            fill: look.fill || '#94a3b8', line: look.line || '', dash: look.dash || '', abbr: look.abbr || ''};
+}
+
+function p2dKindNew(name) {
+    const P = P2D[name];
+    P.kindEdit = p2dKindDraft(null);
+    P.ad.inspector();
+}
+
+function p2dKindEdit(name, key) {
+    const P = P2D[name];
+    P.kindEdit = p2dKindDraft(p2dKind(P.ad.kindsScreen, key));
+    P.ad.inspector();
+}
+
+function p2dKindCancel(name) {
+    P2D[name].kindEdit = null;
+    P2D[name].ad.inspector();
+}
+
+/** Un campo del formulario. La casilla de equipo y el icono repintan: enseñan o esconden el
+ *  montaje, y el icono elegido. */
+function p2dKindField(name, campo, valor) {
+    const P = P2D[name];
+    if (!P.kindEdit) return;
+    const num = ['w_mm', 'd_mm', 'h_mm', 'base_mm'].includes(campo);
+    P.kindEdit[campo] = num ? Number(valor) : valor;
+    if (campo === 'device' || campo === 'icon') P.ad.inspector();
+}
+
+async function p2dKindSave(name) {
+    const P = P2D[name];
+    const e = P.kindEdit;
+    if (!e) return;
+    const screen = P.ad.kindsScreen;
+    const url = `/api/v1/plan2d/${encodeURIComponent(screen)}/kinds` + (e.uid ? `/${encodeURIComponent(e.uid)}` : '');
+    const cuerpo = Object.assign({}, e);
+    delete cuerpo.uid;
+    const r = await P.ad.send(e.uid ? 'PUT' : 'POST', url, cuerpo);
+    if (!r || !r.ok) return showToast((r && r.error) || t('save_failed'), 'danger');
+    await p2dLoadKinds(screen);
+    P.kindEdit = null;
+    showToast(t('plan2d_kind_saved'), 'success');
+    P.ad.kindsChanged();
+}
+
+function p2dKindDrop(name, key) {
+    const P = P2D[name];
+    const spec = p2dKind(P.ad.kindsScreen, key);
+    if (!spec || !spec.uid) return;
+    showConfirmModal(tf('plan2d_kind_drop_q', spec.name || key), async () => {
+        const screen = P.ad.kindsScreen;
+        const r = await P.ad.send('DELETE',
+            `/api/v1/plan2d/${encodeURIComponent(screen)}/kinds/${encodeURIComponent(spec.uid)}`);
+        if (!r || !r.ok) return showToast((r && r.error) || t('save_failed'), 'danger');
+        await p2dLoadKinds(screen);
+        P.ad.kindsChanged();
+    });
+}
+
+/** El editor: los objetos creados en esta pantalla, y el formulario de uno. */
+function p2dKindsPanelHtml(P) {
+    const cat = P2D_CAT[P.ad.kindsScreen] || {};
+    const propios = Object.entries(cat.kinds || {}).filter(([, s]) => s.source === 'custom');
+    const cabeza = `<div class="d-flex align-items-center gap-2 mb-2">
+            <i class="bi bi-boxes text-muted"></i>
+            <span class="fw-semibold">${esc(t('plan2d_kinds_title'))}</span>
+            <button type="button" class="btn btn-sm btn-secondary ms-auto" onclick="p2dKindsToggle(${jsStr(P.name)})"
+                title="${escAttr(t('close'))}" aria-label="${escAttr(t('close'))}"><i class="bi bi-x-lg"></i></button>
+        </div>`;
+    if (P.kindEdit) return cabeza + p2dKindFormHtml(P, cat);
+    const fila = ([k, s]) => `<div class="d-flex align-items-center gap-1 mb-1" data-p2dkind="${escAttr(k)}">
+            <span class="d-inline-block rounded-1 border" style="width:14px;height:14px;background:${
+                escAttr((s.look || {}).fill || '#94a3b8')}"></span>
+            <i class="bi ${escAttr(s.icon || 'bi-square')}"></i>
+            <span class="text-truncate">${esc(s.name || k)}</span>
+            ${s.device ? `<span class="badge text-bg-secondary">${esc(t('plan2d_kind_device_short'))}</span>` : ''}
+            <span class="text-muted ss-fs-1 ms-auto ss-tabular">${esc(`${s.w} × ${s.d}`)}</span>
+            <button type="button" class="btn btn-sm btn-secondary py-0 px-1" onclick="p2dKindEdit(${jsStr(P.name)},${jsStr(k)})"
+                title="${escAttr(t('edit'))}" aria-label="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>
+            <button type="button" class="btn btn-sm btn-danger py-0 px-1" onclick="p2dKindDrop(${jsStr(P.name)},${jsStr(k)})"
+                title="${escAttr(t('delete'))}" aria-label="${escAttr(t('delete'))}"><i class="bi bi-trash"></i></button>
+        </div>`;
+    return cabeza + `<div class="text-muted ss-fs-3 mb-2">${esc(t('plan2d_kinds_hint'))}</div>
+        ${propios.length ? propios.map(fila).join('') : `<div class="text-muted ss-fs-2 mb-2">${esc(t('plan2d_kinds_none'))}</div>`}
+        <button type="button" class="btn btn-sm btn-primary mt-2" onclick="p2dKindNew(${jsStr(P.name)})" data-p2dkindnew="1">
+            <i class="bi bi-plus-lg me-1"></i>${esc(t('plan2d_kind_new'))}</button>`;
+}
+
+/** El formulario de un objeto: nombre, icono, si es un equipo (y dónde se monta), medidas, capa,
+ *  delante, colores, trazo y letras. */
+function p2dKindFormHtml(P, cat) {
+    const e = P.kindEdit, n = jsStr(P.name);
+    const campo = (c) => `oninput="p2dKindField(${n},${jsStr(c)},this.value)"`;
+    const num = (c, clave, min) => `<label class="ss-fs-2 text-muted">${esc(t(clave))}
+        <input class="form-control form-control-sm ss-tabular" type="number" step="10" min="${min}"
+               value="${escAttr(String(e[c]))}" ${campo(c)}></label>`;
+    const opciones = (lista, actual, texto) => lista.map(v =>
+        `<option value="${escAttr(v)}"${v === actual ? ' selected' : ''}>${esc(texto(v))}</option>`).join('');
+    const casilla = (c, clave) => `<label class="form-check ss-fs-2 mb-1">
+        <input class="form-check-input" type="checkbox"${e[c] ? ' checked' : ''}
+               onchange="p2dKindField(${n},${jsStr(c)},this.checked ? 1 : 0)">
+        <span class="form-check-label">${esc(t(clave))}</span></label>`;
+    return `<div data-p2dkindform="1">
+        <label class="ss-fs-2 text-muted d-block mb-2">${esc(t('plan2d_kind_name'))}
+            <input class="form-control form-control-sm" maxlength="60" value="${escAttr(e.name)}" ${campo('name')}></label>
+        <label class="ss-fs-2 text-muted d-block mb-2">${esc(t('plan2d_kind_icon'))}
+            <span class="d-flex align-items-center gap-2"><i class="bi ${escAttr(e.icon)} fs-5"></i>
+            <select class="form-select form-select-sm" onchange="p2dKindField(${n},'icon',this.value)">${
+                opciones(cat.icons || [], e.icon, v => v.replace(/^bi-/, ''))}</select></span></label>
+        ${cat.devices ? casilla('device', 'plan2d_kind_device') : ''}
+        ${cat.devices && e.device ? `<label class="ss-fs-2 text-muted d-block mb-2">${esc(t('plan2d_kind_mount'))}
+            <select class="form-select form-select-sm" onchange="p2dKindField(${n},'mount',this.value)">${
+                opciones(cat.mounts || [], e.mount, v => t('plan2d_mount_' + v))}</select></label>` : ''}
+        <div class="ss-grid-2 mb-2">
+            ${num('w_mm', 'plan2d_kind_w', 10)}${num('d_mm', 'plan2d_kind_d', 10)}
+            ${num('h_mm', 'plan2d_kind_h', 1)}${num('base_mm', 'plan2d_kind_base', 0)}
+        </div>
+        <label class="ss-fs-2 text-muted d-block mb-2">${esc(t('plan2d_kind_layer'))}
+            <select class="form-select form-select-sm" onchange="p2dKindField(${n},'layer',this.value)">${
+                opciones(cat.layers || [], e.layer, v => t('plan2d_layer_' + v))}</select></label>
+        ${casilla('front', 'plan2d_kind_front')}
+        <div class="ss-grid-2 mb-2">
+            <label class="ss-fs-2 text-muted">${esc(t('plan2d_kind_fill'))}
+                <input class="form-control form-control-sm form-control-color w-100" type="color"
+                       value="${escAttr(e.fill)}" ${campo('fill')}></label>
+            <label class="ss-fs-2 text-muted">${esc(t('plan2d_kind_line'))}
+                <input class="form-control form-control-sm form-control-color w-100" type="color"
+                       value="${escAttr(e.line || e.fill)}" ${campo('line')}></label>
+            <label class="ss-fs-2 text-muted">${esc(t('plan2d_kind_dash'))}
+                <select class="form-select form-select-sm" onchange="p2dKindField(${n},'dash',this.value)">${
+                    opciones(P2D_DASHES, e.dash, v => v || t('plan2d_kind_dash_none'))}</select></label>
+            <label class="ss-fs-2 text-muted">${esc(t('plan2d_kind_abbr'))}
+                <input class="form-control form-control-sm" maxlength="4" value="${escAttr(e.abbr)}" ${campo('abbr')}></label>
+        </div>
+        <div class="d-flex gap-1">
+            <button type="button" class="btn btn-sm btn-primary" onclick="p2dKindSave(${n})" data-p2dkindsave="1">
+                <i class="bi bi-check-lg me-1"></i>${esc(t('save'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="p2dKindCancel(${n})">${esc(t('cancel'))}</button>
+        </div>
+    </div>`;
+}
+
+// ── La barra flotante: lo que se hace con algo, al pasar por encima ──────────
+//
+// Botones rápidos junto a la cosa, sin tener que elegirla antes. El motor la pone, la coloca y
+// la esconde; la pantalla dice qué botones lleva cada clase (`ad.floatButtons(m)`, `[{act, icon,
+// text, tone}]`, vacía = sin barra) y qué hace cada uno (`ad.floatAct(act, m)`). Vive fuera del
+// dibujo, en el marco del lienzo (`p2dFloatBoxHtml`): dentro del `<svg>`, pulsar un botón sería
+// también empezar un arrastre.
+
+function p2dFloatBoxHtml(P) {
+    return `<div id="${escAttr(P.ad.floatId)}" class="position-absolute d-none"
+         style="z-index:3;transform:translate(-100%,calc(-100% - 4px))"
+         onpointerenter="p2dFloatKeep(${jsStr(P.name)})" onpointerleave="p2dFloatLater(${jsStr(P.name)})"></div>`;
+}
+
+function p2dDraggingAny(P) {
+    return !!(P.drag || (P.ad.dragging && P.ad.dragging()));
+}
+
+/** Al entrar en algo. Saliendo de una cosa hacia su barra se cruza a veces su contenedor (un
+ *  rack está dentro de su sala): la barra de un contenedor (`ad.floatWait(kind)`) espera un
+ *  momento, y si el ratón llega a la barra que había, se queda esa. */
+function p2dFloatShow(P, m, el) {
+    if (p2dDraggingAny(P)) return;
+    clearTimeout(P.floatPending);
+    P.floatPending = null;
+    if (P.ad.floatWait && P.ad.floatWait(m.kind) && P.floatTimer) {
+        P.floatPending = setTimeout(() => {
+            P.floatPending = null;
+            p2dFloatPaint(P, m, el);
+        }, 320);
+        return;
+    }
+    p2dFloatPaint(P, m, el);
+}
+
+function p2dFloatPaint(P, m, el) {
+    if (p2dDraggingAny(P)) return;
+    const barra = document.getElementById(P.ad.floatId);
+    const marco = el && el.closest ? el.closest('.ss-infra-canvas') : null;
+    if (!barra || !marco || el.isConnected === false) return;
+    const botones = P.ad.floatButtons(m) || [];
+    if (!botones.length) return;
+    clearTimeout(P.floatTimer);
+    P.floatTimer = null;
+    const a = marco.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    barra.innerHTML = p2dFloatHtml(P, m, botones);
+    barra.style.left = `${Math.max(0, b.right - a.left)}px`;
+    barra.style.top = `${Math.max(0, b.top - a.top)}px`;
+    barra.classList.remove('d-none');
+}
+
+/** Los botones de la barra de `m`. */
+function p2dFloatHtml(P, m, botones) {
+    return `<div class="btn-group btn-group-sm shadow-sm">${botones.map(b => `<button type="button"
+        class="btn btn-sm ${b.tone || 'btn-secondary'} py-0 px-1" data-p2dact="${escAttr(b.act)}"
+        onclick="p2dFloatAct(${jsStr(P.name)},${jsStr(b.act)},${jsStr(m.kind)},${jsStr(m.room || '')},${jsStr(String(m.uid))})"
+        title="${escAttr(b.text)}" aria-label="${escAttr(b.text)}"><i class="bi ${b.icon}"></i></button>`).join('')}</div>`;
+}
+
+function p2dFloatAct(name, act, kind, room, uid) {
+    p2dFloatHide(name);
+    return P2D[name].ad.floatAct(act, {kind, room: room || '', uid: String(uid)});
+}
+
+function p2dFloatLater(name) {
+    const P = P2D[name];
+    clearTimeout(P.floatTimer);
+    P.floatTimer = setTimeout(() => p2dFloatHide(name), 250);
+}
+
+function p2dFloatKeep(name) {
+    const P = P2D[name];
+    clearTimeout(P.floatTimer);
+    P.floatTimer = null;
+    clearTimeout(P.floatPending);
+    P.floatPending = null;
+}
+
+function p2dFloatHide(name) {
+    const P = P2D[name];
+    if (!P) return;
+    clearTimeout(P.floatTimer);
+    P.floatTimer = null;
+    const barra = document.getElementById(P.ad.floatId);
+    if (barra) barra.classList.add('d-none');
+}
+
+// ── El plano en un fichero ───────────────────────────────────────────────────
+
+/** Exportar e importar el plano: UN grupo, con los iconos de la misma familia (bajar y subir).
+ *  Iban sueltos y cada uno de su estilo —un icono de fichero JSON y una flecha—, y no se leían
+ *  como las dos caras de lo mismo. `o`: `{input, exportFn, importFn, canImport, exportTt,
+ *  importTt}` — el id del control de fichero, lo que se llama y los títulos ya traducidos. El
+ *  control de fichero va FUERA del grupo: dentro, sería su último hijo y el botón de importar
+ *  perdería las esquinas redondeadas. */
+function p2dJsonTools(o) {
+    const exp = `<button type="button" class="btn btn-sm btn-secondary" onclick="${o.exportFn}"
+            title="${escAttr(o.exportTt)}" aria-label="${escAttr(o.exportTt)}">
+            <i class="bi bi-download"></i></button>`;
+    if (!o.canImport) return `<span class="btn-group btn-group-sm">${exp}</span>`;
+    return `<input type="file" id="${escAttr(o.input)}" class="d-none"
+               accept=".json,application/json" onchange="${o.importFn}">
+        <span class="btn-group btn-group-sm">${exp}
+            <button type="button" class="btn btn-sm btn-secondary"
+                    onclick="document.getElementById('${escAttr(o.input)}').click()"
+                    title="${escAttr(o.importTt)}" aria-label="${escAttr(o.importTt)}">
+                <i class="bi bi-upload"></i></button></span>`;
+}
+
+// ── La paleta: lo que se puede poner ─────────────────────────────────────────
+//
+// Los objetos del catálogo de la pantalla, por grupos (`groups` del catálogo: estructura,
+// mobiliario, seguridad, equipos…), con lo que la pantalla ponga suelto delante
+// (`ad.paletteBefore()` y `ad.paletteAfter()`, botones `{onclick, icon, text}`: lo más usado, un
+// rack, la escalera). Treinta iconos en una tira solo se distinguían pasando el ratón por cada
+// uno. Dos formas de verla, a elegir por quien mira y recordadas en su navegador:
+//   'groups'  un botón por grupo; pulsarlo abre a su lado sus objetos, con nombre y medidas
+//   'all'     todos a la vista, en bloques de tres columnas bajo el título de su grupo, plegables
+// Pulsar un objeto NO lo pone: deja el plano en «poner» (`p2dPlaceStart`), y lo pone el clic
+// siguiente en el plano, donde se pulsa. Lo que ocupa sitio —una pieza: una zona, una mesa, un
+// armario— también se puede dibujar arrastrando su recuadro, que fija su tamaño. Pedido: lo que
+// se añadía caía en el centro de la vista y había que llevarlo luego a su sitio.
+// `ad.addAt(clave, punto, tam)` decide cómo se guarda. Solo para quien edita, y no mientras algo
+// se apodera de los clics del plano (`ad.paletteOff()`, calibrar).
+
+//: Cómo se ve la paleta: 'groups' o 'all'.
+let p2dPaletteMode = (() => {
+    try { return localStorage.getItem('ss.plan2d.palette') === 'all' ? 'all' : 'groups'; }
+    catch (_) { return 'groups'; }
+})();
+//: Los grupos plegados en el modo 'all'.
+const P2D_PAL_FOLDED = new Set((() => {
+    try { return JSON.parse(localStorage.getItem('ss.plan2d.paletteFolded') || '[]'); }
+    catch (_) { return []; }
+})());
+
+function p2dPaletteButton(onclick, icono, texto) {
+    return `<button type="button" class="btn btn-sm btn-secondary" onclick="${onclick}"
+        title="${escAttr(texto)}" aria-label="${escAttr(texto)}"><i class="bi ${icono}"></i></button>`;
+}
+
+/** Los grupos de una pantalla que tienen algo, en su orden, cada uno con sus claves. Sin grupos
+ *  en el catálogo, todo en uno. */
+function p2dPaletteGroups(screen) {
+    const kinds = p2dKinds(screen);
+    const grupos = (P2D_CAT[screen] || {}).groups
+        || [{id: 'other', icon: 'bi-boxes', label: 'plan2d_pal_other'}];
+    const ids = new Set(grupos.map(g => g.id));
+    const de = (k) => (ids.has(kinds[k].group) ? kinds[k].group : grupos[grupos.length - 1].id);
+    return grupos.map(g => Object.assign({}, g, {keys: Object.keys(kinds).filter(k => de(k) === g.id)}))
+        .filter(g => g.keys.length);
+}
+
+function p2dPaletteHtml(P) {
+    if (!P.ad.may() || (P.ad.paletteOff && P.ad.paletteOff())) return '';
+    const scr = P.ad.kindsScreen;
+    const n = jsStr(P.name);
+    const boton = (b) => (P.placing && b.key && P.placing.key === b.key
+        ? p2dPaletteButton(b.onclick, b.icon, b.text).replace('btn-secondary', 'btn-warning')
+        : p2dPaletteButton(b.onclick, b.icon, b.text));
+    const sueltos = (P.ad.paletteBefore ? P.ad.paletteBefore() : [])
+        .concat(P.ad.paletteAfter ? P.ad.paletteAfter() : []).map(boton).join('');
+    const grupos = p2dPaletteGroups(scr);
+    const todos = p2dPaletteMode === 'all';
+    const otro = todos ? 'plan2d_pal_mode_groups' : 'plan2d_pal_mode_all';
+    const modo = `<button type="button" class="btn btn-sm btn-secondary" data-p2dpalmode="${todos ? 'all' : 'groups'}"
+        onclick="p2dPaletteModeSet(${n},${jsStr(todos ? 'groups' : 'all')})"
+        title="${escAttr(t(otro))}" aria-label="${escAttr(t(otro))}">
+        <i class="bi ${todos ? 'bi-chevron-double-left' : 'bi-chevron-double-right'}"></i></button>`;
+    const sep = '<div class="ss-float-sep"></div>';
+    if (todos) {
+        const de = (k) => {
+            const b = p2dPaletteButton(`p2dPaletteAdd(${n},${jsStr(k)})`, p2dKindIcon(scr, k), p2dKindName(scr, k));
+            return P.placing && P.placing.key === k ? b.replace('btn-secondary', 'btn-warning') : b;
+        };
+        const titulo = (texto) => `<div class="ss-pal-sec ss-pal-sec-fixed"><span>${esc(texto)}</span></div>`;
+        const bloques = grupos.map(g => {
+            const plegado = P2D_PAL_FOLDED.has(g.id);
+            return `<button type="button" class="ss-pal-sec${plegado ? ' ss-folded' : ''}" data-p2dpalsec="${escAttr(g.id)}"
+                    onclick="p2dPaletteFold(${n},${jsStr(g.id)})" aria-expanded="${!plegado}">
+                    <span>${esc(t(g.label))}</span><i class="bi bi-chevron-down"></i></button>
+                ${plegado ? '' : `<div class="ss-pal-grid">${g.keys.map(de).join('')}</div>`}`;
+        }).join('');
+        // El de desplegar y contraer, el primero: donde está en los dos modos, sin buscarlo.
+        return `<div class="ss-float-tools ss-pal-all" data-p2dpalette="${escAttr(P.name)}">
+            <div class="ss-pal-grid">${modo}</div>${sep}
+            ${sueltos ? `${titulo(P.ad.paletteTitle ? P.ad.paletteTitle() : t('plan2d_pal_main'))}
+                <div class="ss-pal-grid">${sueltos}</div>` : ''}${bloques}</div>`;
+    }
+    const abierto = grupos.find(g => g.id === P.palOpen) || null;
+    const panel = (g) => `<div class="ss-pal-fly" data-p2dpalfly="${escAttr(g.id)}">
+        <div class="ss-pal-fly-h"><span>${esc(t(g.label))}</span>
+            <button type="button" class="btn btn-sm btn-secondary py-0 px-1" onclick="p2dPaletteOpen(${n},'')"
+                title="${escAttr(t('close'))}" aria-label="${escAttr(t('close'))}"><i class="bi bi-x-lg"></i></button></div>
+        ${g.keys.map(k => `<button type="button" class="ss-pal-row" onclick="p2dPaletteAdd(${n},${jsStr(k)})"
+            title="${escAttr(p2dKindName(scr, k))}">
+            <i class="bi ${escAttr(p2dKindIcon(scr, k))}"></i><span>${esc(p2dKindName(scr, k))}</span></button>`).join('')}</div>`;
+    // El panel de un grupo, a la altura de SU botón: dentro de un hueco con él (`.ss-pal-anchor`).
+    // Reportado: salía siempre arriba de la tira, lejos del botón que lo había abierto.
+    const botones = grupos.map(g => {
+        const texto = t(g.label) + ' · ' + g.keys.length;
+        const boton = `<button type="button" class="btn btn-sm ${abierto === g ? 'btn-warning' : 'btn-secondary'}"
+            data-p2dpalgroup="${escAttr(g.id)}" onclick="p2dPaletteOpen(${n},${jsStr(g.id)})"
+            title="${escAttr(texto)}" aria-label="${escAttr(texto)}" aria-expanded="${abierto === g}">
+            <i class="bi ${escAttr(g.icon)}"></i></button>`;
+        return abierto === g ? `<div class="ss-pal-anchor">${boton}${panel(g)}</div>` : boton;
+    }).join('');
+    return `<div class="ss-float-tools" data-p2dpalette="${escAttr(P.name)}">
+        ${modo}${sep}${sueltos}${sueltos ? sep : ''}${botones}</div>`;
+}
+
+/** Volver a pintar la paleta de un plano, sin rehacer el plano. */
+function p2dPalettePaint(name) {
+    const P = P2D[name], el = document.querySelector('[data-p2dpalette="' + name + '"]');
+    if (P && el) el.outerHTML = p2dPaletteHtml(P) || '<div class="d-none"></div>';
+}
+
+/** Abrir el panel de un grupo, o cerrarlo si ya lo estaba (`''`, cerrar). */
+function p2dPaletteOpen(name, grupo) {
+    const P = P2D[name];
+    P.palOpen = grupo && P.palOpen !== grupo ? grupo : null;
+    p2dPalettePaint(name);
+}
+
+/** Cambiar de forma de ver la paleta, y recordarla. */
+function p2dPaletteModeSet(name, modo) {
+    p2dPaletteMode = modo === 'all' ? 'all' : 'groups';
+    try { localStorage.setItem('ss.plan2d.palette', p2dPaletteMode); } catch (_) { /* sin almacén */ }
+    P2D[name].palOpen = null;
+    p2dPalettePaint(name);
+}
+
+/** Plegar o desplegar un grupo, en el modo 'all'. */
+function p2dPaletteFold(name, grupo) {
+    if (P2D_PAL_FOLDED.has(grupo)) P2D_PAL_FOLDED.delete(grupo); else P2D_PAL_FOLDED.add(grupo);
+    try { localStorage.setItem('ss.plan2d.paletteFolded', JSON.stringify([...P2D_PAL_FOLDED])); }
+    catch (_) { /* sin almacén */ }
+    p2dPalettePaint(name);
+}
+
+/** Pulsar un objeto de la paleta: el plano queda en «poner» ese objeto, y el panel se cierra. */
+function p2dPaletteAdd(name, clave) {
+    return p2dPlaceStart(name, clave);
+}
+
+// ── Poner algo pulsando en el plano ──────────────────────────────────────────
+
+/** Elegir qué poner: lo pone el clic siguiente en el plano. Elegir otra vez lo mismo, o Escape,
+ *  lo deja. El cursor lo dice (`data-p2d-placing` en la raíz, `.ss-infra-canvas`). */
+function p2dPlaceStart(name, clave) {
+    const P = P2D[name];
+    if (!P || !P.ad.may()) return;
+    P.placing = P.placing && P.placing.key === clave ? null : {key: clave, from: null, to: null};
+    P.palOpen = null;
+    p2dPlaceCursor();
+    p2dPalettePaint(name);
+}
+
+/** Soltar lo que se iba a poner sin repintar: al dejar el plano —cerrarlo, cambiar de planta—,
+ *  que ya no está para repintarse. Sin esto el clic siguiente en OTRO plano lo ponía, y el cursor
+ *  de poner se quedaba puesto. */
+function p2dPlaceDrop(P) {
+    if (!P || !P.placing) return;
+    P.placing = null;
+    p2dPlaceCursor();
+}
+
+function p2dPlaceCancel(P) {
+    if (!P.placing) return false;
+    P.placing = null;
+    p2dPlaceCursor();
+    p2dPalettePaint(P.name);
+    P.ad.redraw();
+    return true;
+}
+
+/** Si un plano está esperando dónde poner algo. */
+function p2dPlacing(P) { return !!(P && P.placing); }
+
+/** El cursor de poner, mientras algún plano espera. */
+function p2dPlaceCursor() {
+    const el = document.documentElement;
+    if (!el || !el.toggleAttribute) return;
+    el.toggleAttribute('data-p2d-placing', Object.values(P2D).some(P => P.placing));
+}
+
+/** Si lo que se pone ocupa sitio y se puede dibujar su recuadro: una pieza, no un equipo ni lo
+ *  que la pantalla pone suelto (un rack mide lo que mide). */
+function p2dPlaceSizable(P, clave) {
+    const k = p2dKind(P.ad.kindsScreen, clave);
+    return !!(k && !k.device);
+}
+
+/** La pulsación en el plano, poniendo. El botón central sigue moviendo la vista (`false`). */
+function p2dPlaceDown(P, ev) {
+    if (!P.placing || ev.button === 1) return false;
+    const p = ssCanvasPoint(P.ad.svg, ev);
+    if (!p) return true;
+    P.placing.from = p;
+    P.placing.to = null;
+    if (ev.currentTarget && ev.currentTarget.setPointerCapture) ev.currentTarget.setPointerCapture(ev.pointerId);
+    return true;
+}
+
+/** Arrastrando: el recuadro de lo que ocupa sitio. */
+function p2dPlaceMove(P, ev) {
+    const g = P.placing;
+    if (!g || !g.from) return false;
+    const p = ssCanvasPoint(P.ad.svg, ev);
+    if (p && p2dPlaceSizable(P, g.key)) {
+        g.to = p;
+        P.ad.redraw();
+    }
+    return true;
+}
+
+//: Lo mínimo que mide un recuadro dibujado, en mm: menos es un clic que tembló.
+const P2D_PLACE_MIN_MM = 100;
+
+/** Soltar: se pone donde se pulsó —o en el recuadro dibujado, con su tamaño— y el plano deja de
+ *  estar en «poner». `true` si era de aquí. */
+function p2dPlaceUp(P) {
+    const g = P.placing;
+    if (!g || !g.from) return false;
+    const S = P.ad.scale, a = g.from, b = g.to;
+    P.placing = null;
+    p2dPlaceCursor();
+    p2dPalettePaint(P.name);
+    const w = b ? Math.abs(b.x - a.x) / S : 0, d = b ? Math.abs(b.y - a.y) / S : 0;
+    const dibujado = b && w >= P2D_PLACE_MIN_MM && d >= P2D_PLACE_MIN_MM;
+    const punto = dibujado ? {x: (a.x + b.x) / 2 / S, y: (a.y + b.y) / 2 / S} : {x: a.x / S, y: a.y / S};
+    P.ad.redraw();
+    Promise.resolve(P.ad.addAt(g.key, punto, dibujado ? {w: Math.round(w), d: Math.round(d)} : null));
+    return true;
+}
+
+/** El recuadro que se está dibujando. */
+function p2dPlaceSvg(P) {
+    const g = P.placing;
+    if (!g || !g.from || !g.to) return '';
+    return `<rect x="${Math.min(g.from.x, g.to.x)}" y="${Math.min(g.from.y, g.to.y)}"
+        width="${Math.abs(g.to.x - g.from.x)}" height="${Math.abs(g.to.y - g.from.y)}"
+        fill="rgba(13,202,240,.15)" stroke="var(--bs-info)" stroke-dasharray="6 4"
+        vector-effect="non-scaling-stroke" style="pointer-events:none" data-p2dplace="1"></rect>`;
+}
+
+// El panel de un grupo se cierra al pulsar fuera de su paleta, como un desplegable.
+document.addEventListener('pointerdown', (ev) => {
+    for (const P of Object.values(P2D)) {
+        if (!P.palOpen) continue;
+        const t0 = ev.target;
+        if (t0 && t0.closest && t0.closest('[data-p2dpalette="' + P.name + '"]')) continue;
+        P.palOpen = null;
+        p2dPalettePaint(P.name);
+    }
+});
+
+/** Poner `clave` en el centro de lo que se mira, en mm del plano. */
+function p2dAdd(name, clave) {
+    const P = P2D[name];
+    const v = ssCanvasWindow(P.ad.svg);
+    const centro = v ? {x: (v.x + v.w / 2) / P.ad.scale, y: (v.y + v.h / 2) / P.ad.scale} : {x: 2000, y: 1500};
+    return P.ad.addAt(clave, centro);
+}

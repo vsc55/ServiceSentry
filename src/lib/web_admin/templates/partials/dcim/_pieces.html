@@ -24,11 +24,10 @@ let _dcpFeat = null;
 //: Qué está seleccionado: `{kind: 'feature'|'rack', uid}` o `null`. Seleccionar es lo que
 //: hace un clic: el contorno, las asas y los atajos del teclado.
 let _dcpSel = null;
-//: Lo enviado al fondo, como `'feature:<uid>'` / `'rack:<uid>'`: se pinta tenue y el puntero lo
-//: atraviesa, para llegar a lo que tapa. Solo en esta pantalla y solo mientras se edita: el orden
-//: de las capas —suelo, sala, racks, aire— está pensado (una bandeja debajo de un rack se
-//: escondería justo donde hay que mirarla) y no es algo que una persona deba cambiar para todas.
-const _dcpBack = new Set();
+//: Lo enviado al fondo (`_dcpBack`, en `_plan2d_room.html`, el del motor): se pinta tenue y el
+//: puntero lo atraviesa, para llegar a lo que tapa. Solo en esta pantalla y solo mientras se
+//: edita: el orden de las capas —suelo, sala, racks, aire— está pensado (una bandeja debajo de un
+//: rack se escondería justo donde hay que mirarla) y no es algo que una persona deba cambiar.
 //: Si el inspector —la columna de la derecha— está desplegado. Se recuerda en el navegador: es
 //: una preferencia de quien mira, no un hecho de la sala. Desplegado si no se sabe.
 let _dcpPanelOpen = (() => {
@@ -78,7 +77,10 @@ function _dcpTileRef(x, y) {
 
 /** Traer lo que hay en la sala. Se pide con el plano, una vez. */
 async function _dcpLoadFeatures(roomUid) {
-    const d = await apiGet(`/api/v1/dcim/rooms/${encodeURIComponent(roomUid)}/features`);
+    // Con el catálogo de lo que se puede poner en el plano: de él salen el dibujo, el icono y el
+    // nombre de cada cosa (`p2dLoadKinds`).
+    const [d] = await Promise.all([apiGet(`/api/v1/dcim/rooms/${encodeURIComponent(roomUid)}/features`),
+                                   p2dEnsureKinds('dcim')]);
     _dcpFeat = d && d.kinds ? d : {features: [], kinds: {}, layers: ['floor', 'room', 'air']};
 }
 
@@ -99,74 +101,41 @@ function _dcpPieceZ(f, kinds) {
 }
 function _dcpFeatures() { return (_dcpFeat || {}).features || []; }
 
-/** Cómo se pinta cada tipo. Aquí y no en el servidor: el servidor decide qué tipos EXISTEN y
- *  cuánto miden —eso es el modelo— y de qué color se dibuja una puerta es de quien dibuja.
- *
- *  Los colores salen de las variables del tema, no de literales: esta pantalla se ve en claro y
- *  en oscuro, y un plano con los grises de un tema sobre el fondo del otro no se lee. */
-const _DCP_LOOK = {
-    aisle:        {fill: 'var(--bs-primary-bg-subtle)', line: 'var(--bs-primary)', dash: '4 3'},
-    zone:         {fill: 'var(--bs-body-bg)', line: 'var(--bs-secondary-color)', dash: '3 3'},
-    column:       {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-body-color)', cross: true},
-    wall:         {fill: 'var(--bs-info-bg-subtle)', line: 'var(--bs-info)'},
-    door:         {fill: 'var(--bs-warning)', line: 'var(--bs-warning)', dark: true},
-    // `--bs-secondary-bg`: `--bs-body-secondary-bg` no existe, y un `fill` con una variable
-    // que no existe se pinta negro —el cuadro salía negro con el rótulo oscuro encima—.
-    panel:        {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-body-color)'},
-    ups:          {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-secondary-color)'},
-    crac:         {fill: 'var(--bs-info-bg-subtle)', line: 'var(--bs-info)'},
-    bench:        {fill: 'var(--bs-tertiary-bg)', line: 'var(--bs-secondary-color)'},
-    cabinet:      {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-body-color)'},
-    extinguisher: {fill: 'var(--bs-danger)', line: 'var(--bs-danger)', dark: true},
-    tray:         {fill: 'var(--bs-warning-bg-subtle)', line: 'var(--bs-warning)', dash: '6 3'},
-    label:        {fill: 'none', line: 'none'},
-    turnstile:    {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-primary)', cross: true},
-    reader:       {fill: 'var(--bs-primary)', line: 'var(--bs-primary)', dark: true},
-    hose_reel:    {fill: 'var(--bs-danger-bg-subtle)', line: 'var(--bs-danger)'},
-    fire_alarm:   {fill: 'var(--bs-danger)', line: 'var(--bs-danger)', dark: true},
-    emergency_light: {fill: 'var(--bs-success-bg-subtle)', line: 'var(--bs-success)'},
-    smoke_detector:  {fill: 'var(--bs-body-bg)', line: 'var(--bs-secondary-color)'},
-    first_aid:    {fill: 'var(--bs-success)', line: 'var(--bs-success)', dark: true},
-    aed:          {fill: 'var(--bs-success)', line: 'var(--bs-success)', dark: true},
-};
-
+/** Cómo se pinta cada tipo: lo dice el catálogo del editor de planos (`p2dKindLook`), donde
+ *  cada objeto trae su relleno, su línea y su trazo —los base y los de esta pantalla, en código;
+ *  los que alguien crea, desde la pantalla—. Los colores de lo que viene en código son variables
+ *  del tema: esta pantalla se ve en claro y en oscuro. */
 function _dcpLook(kind) {
-    return _DCP_LOOK[kind] || {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-body-color)'};
+    return p2dKindLook('dcim', kind) || {fill: 'var(--bs-secondary-bg)', line: 'var(--bs-body-color)'};
 }
+
+/** El nombre de algo que va en un plano: el del catálogo; sin él (una pantalla que no ha abierto
+ *  ningún plano), el de los objetos base (`plan2d_kind_*`); y si no es uno de ellos, el de la
+ *  clave del inventario (`prefijo` + clave). Los objetos base solo tienen su nombre ahí: no hay
+ *  una segunda clave con el mismo texto. */
+function _dcPlanName(clave, prefijo) {
+    const k = String(clave || '');
+    if (p2dKind('dcim', k)) return p2dKindName('dcim', k);
+    const base = t('plan2d_kind_' + k);
+    return k && base !== 'plan2d_kind_' + k ? base : t(prefijo + k);
+}
+
+/** El nombre de una pieza. */
+function _dcPieceName(kind) { return _dcPlanName(kind, 'dcim_kind_'); }
+
+/** El nombre de la clase de un equipo: los de sala, del catálogo; los de rack, de su clave. */
+function _dcRoleName(role) { return _dcPlanName(role, 'dcim_role_'); }
 
 /** Una pieza vista desde arriba. */
 function _dcpFeature(f) {
-    const look = _dcpLook(f.kind);
-    const w = Number(f.width_mm || 600) * _DCP_SCALE;
-    const h = Number(f.depth_mm || 600) * _DCP_SCALE;
-    const x = Number(f.pos_x || 0) * _DCP_SCALE;
-    const y = Number(f.pos_y || 0) * _DCP_SCALE;
-    const rot = Number(f.rotation || 0);
     const puesto = _dcpSel && _dcpSel.kind === 'feature' && _dcpSel.uid === f.uid;
-    const texto = f.label || (f.kind === 'label' ? t('dcim_kind_label') : '');
-    const tam = Math.min(5.6, Math.max(3.2, Math.min(w, h) * 0.42));
-    return `<g class="ss-grab${_dcpIsBack('feature', f.uid) ? ' ss-dcp-back' : ''}" data-dcpf="${escAttr(f.uid)}"
+    const w = Number(f.width_mm || 600) * _DCP_SCALE, h = Number(f.depth_mm || 600) * _DCP_SCALE;
+    // Las asas DENTRO del giro (`_dcThingSvg` las pone en el grupo que gira): giran con la pieza.
+    return _dcThingSvg('feature', f, {puesto, back: _dcpIsBack('feature', f.uid),
+        attrs: `data-dcpf="${escAttr(f.uid)}"
                onpointerenter="_dcpFloatShow(${jsStr(f.uid)},this)"
-               onpointerleave="_dcpFloatLater()"
-               transform="translate(${x},${y}) rotate(${rot} ${w / 2} ${h / 2})">
-        ${look.fill === 'none' ? '' : `<rect width="${w}" height="${h}" rx="1"
-            fill="${look.fill}" stroke="${look.line}" stroke-width="1.2"
-            ${look.dash ? `stroke-dasharray="${look.dash}"` : ''}
-            vector-effect="non-scaling-stroke"></rect>`}
-        ${_dcpFrontBack((_dcpKinds()[f.kind] || {}).front, w, h, look)}
-        ${look.cross ? `<line x1="0" y1="0" x2="${w}" y2="${h}" stroke="${look.line}"
-                stroke-width=".6" vector-effect="non-scaling-stroke"></line>
-            <line x1="${w}" y1="0" x2="0" y2="${h}" stroke="${look.line}"
-                stroke-width=".6" vector-effect="non-scaling-stroke"></line>` : ''}
-        ${texto ? `<text x="${w / 2}" y="${h / 2 + tam * 0.35}" text-anchor="middle"
-            font-size="${tam}" fill="${look.dark ? 'var(--bs-dark)' : 'var(--bs-body-color)'}"
-            ${_dcpUpright(rot, w / 2, h / 2)} style="pointer-events:none">${esc(texto)}</text>` : ''}
-        ${puesto ? `<rect x="-1" y="-1" width="${w + 2}" height="${h + 2}" fill="none"
-            stroke="var(--bs-warning)" stroke-width="2" stroke-dasharray="3 2"
-            vector-effect="non-scaling-stroke"></rect>` : ''}
-        ${_dcpAccessDot(f, w, h)}
-        ${puesto && _dcimMay('dcim_edit') ? _dcpHandles(w, h, rot) : ''}
-    </g>`;
+               onpointerleave="_dcpFloatLater()"`,
+        asas: puesto && _dcimMay('dcim_edit') ? _dcpHandles(w, h, Number(f.rotation || 0)) : ''});
 }
 
 /** El estado de una pieza del control de accesos —una cerradura, un torno, un IQ—, como un
@@ -235,7 +204,7 @@ function _dcpAccessHtml(f) {
             esc(tf('dcim_hub_hanging', (f.hanging || []).length))}</span>
         <ul class="list-unstyled mb-0 ss-fs-2">${(f.hanging || []).map(g => `<li>
             <span class="ss-dot" style="background:${escAttr(deviceStateColor(g.state || ''))}"></span>
-            ${esc(g.label || t('dcim_kind_' + g.kind))}<span class="text-muted"> · ${esc(g.room || '')}</span></li>`).join('')}</ul>
+            ${esc(g.label || _dcPieceName(g.kind))}<span class="text-muted"> · ${esc(g.room || '')}</span></li>`).join('')}</ul>
         </div>` : '';
     return `<div class="border-top pt-2 mt-2">
         <div class="fw-semibold ss-fs-2 mb-1"><i class="bi bi-shield-lock me-1"></i>${esc(t('dcim_access_control'))} ${estado}</div>
@@ -315,69 +284,15 @@ function _dcpFeaturesSvg(capa) {
 
 // ── La paleta y el panel de la pieza ─────────────────────────────────────────
 
-/** La paleta: una columna de iconos que flota sobre el lienzo, arriba a la izquierda.
- *
- *  Eran dos filas de botones con nombre y medida encima del plano, que junto con las otras tres
- *  franjas dejaban el lienzo en la mitad de la pantalla. El nombre y la medida siguen ahí, al
- *  pasar por encima: es lo que se lee UNA vez, y el icono lo que se busca cada vez. Fuera del
- *  `<svg>`: dentro, pulsar un botón sería también empezar un arrastre. */
-function _dcpPaletteHtml() {
-    // Calibrando el plano, fuera: un clic que cae en un botón de la paleta creaba una pieza.
-    if (!_dcimMay('dcim_edit') || (_dcCal && _dcCal.kind === 'room')) return '';
-    const kinds = _dcpKinds();
-    const boton = (onclick, icono, texto) =>
-        `<button type="button" class="btn btn-sm btn-secondary" onclick="${onclick}"
-            title="${escAttr(texto)}" aria-label="${escAttr(texto)}"><i class="bi ${icono}"></i></button>`;
-    return `<div class="ss-float-tools">
-        ${boton('_dcpAddRack()', 'bi-hdd-rack', `${t('dcim_rack')} · ${t('dcim_a_record')}`)}
-        ${Object.keys(kinds).map(k => boton(`_dcpAdd(${jsStr(k)})`, _DCP_ICON[k] || 'bi-square',
-            `${t('dcim_kind_' + k)} · ${kinds[k].w} × ${kinds[k].d} mm`)).join('')}
-        ${_dcriPaletteHtml(boton)}
-    </div>`;
-}
+/** La paleta de la sala: la del editor de planos (`p2dPaletteHtml`), con el rack delante. */
+function _dcpPaletteHtml() { return p2dPaletteHtml(_dcpP2d); }
 
 //: Un icono por tipo. Escrito uno a uno y no derivado del nombre: un icono que se adivina acaba
 //: siendo el cuadrado por defecto para la mitad del catálogo, y nadie se entera.
-const _DCP_ICON = {
-    aisle: 'bi-distribute-vertical', zone: 'bi-bounding-box', column: 'bi-x-diamond',
-    wall: 'bi-square-half', door: 'bi-door-open', panel: 'bi-lightning-charge',
-    ups: 'bi-battery-charging', crac: 'bi-snow', bench: 'bi-table', cabinet: 'bi-archive',
-    extinguisher: 'bi-fire', tray: 'bi-bezier2', label: 'bi-tag',
-    turnstile: 'bi-sign-turn-right', reader: 'bi-broadcast-pin',
-    hose_reel: 'bi-droplet-half', fire_alarm: 'bi-bell', emergency_light: 'bi-lightbulb',
-    smoke_detector: 'bi-record-circle', first_aid: 'bi-bandaid', aed: 'bi-heart-pulse',
-};
+/** El icono de una pieza, del catálogo. */
+function _dcpIcon(kind) { return p2dKindIcon('dcim', kind); }
 
-/** Poner una pieza. Cae en el centro de lo que se está mirando y no en el origen: en el origen
- *  se apila con las demás y hay que ir a buscarla. */
-async function _dcpAdd(kind) {
-    const room = (_dcimPlan || {}).room;
-    if (!room) return;
-    const v = ssCanvasWindow(_DCP_SVG) || {x: 0, y: 0, w: 4000, h: 3000};
-    const spec = _dcpKinds()[kind] || {w: 600, d: 600};
-    const cx = (v.x + v.w / 2) / _DCP_SCALE - spec.w / 2;
-    const cy = (v.y + v.h / 2) / _DCP_SCALE - spec.d / 2;
-    const r = await _dcimSend('POST', '/api/v1/dcim/features', {
-        room_uid: room.uid, kind,
-        pos_x: Math.max(0, _dcpSnap(cx)), pos_y: Math.max(0, _dcpSnap(cy)),
-    });
-    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    _dcimOpenPlan(room.uid);
-}
 
-/** Y poner un RACK, que es lo mismo por fuera y un registro por dentro. */
-async function _dcpAddRack() {
-    const room = (_dcimPlan || {}).room;
-    if (!room) return;
-    const v = ssCanvasWindow(_DCP_SVG) || {x: 0, y: 0, w: 4000, h: 3000};
-    const r = await _dcimSend('POST', '/api/v1/dcim/racks', {
-        room_uid: room.uid, name: t('dcim_new_rack'), u_height: 42,
-        pos_x: Math.max(0, _dcpSnap((v.x + v.w / 2) / _DCP_SCALE - 300)),
-        pos_y: Math.max(0, _dcpSnap((v.y + v.h / 2) / _DCP_SCALE - 500)),
-    });
-    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    _dcimOpenPlan(room.uid);
-}
 
 /** El inspector: la columna de la derecha, plegable.
  *
@@ -395,7 +310,7 @@ function _dcpInspectorHtml() {
                 <i class="bi bi-chevron-double-left"></i></button></aside>`;
     }
     return `<aside id="dcpInspector" class="ss-side-panel border rounded-3 p-2">${
-        _dcpManyPanelHtml() + _dcpInspectorBody()}</aside>`;
+        p2dInspector(_dcpP2d, _dcpInspectorBody)}</aside>`;
 }
 
 /** Repintar solo el inspector: al seleccionar, al soltar un arrastre, al mover con las flechas.
@@ -403,7 +318,7 @@ function _dcpInspectorHtml() {
 function _dcpInspectorDraw() {
     const el = document.getElementById('dcpInspector');
     // Con varios elegidos, primero cuántos y agruparlos (`_plangroup.html`).
-    if (el) el.innerHTML = _dcpManyPanelHtml() + _dcpInspectorBody();
+    if (el) el.innerHTML = p2dInspector(_dcpP2d, _dcpInspectorBody);
 }
 
 /** Plegar o desplegar el inspector, y recordarlo. */
@@ -429,9 +344,17 @@ function _dcpInspectorBody() {
     const f = (_dcpSel && _dcpSel.kind === 'feature')
         ? _dcpFeatures().find(x => x.uid === _dcpSel.uid) : null;
     if (!f) return _dcpRoomPanelHtml(plegar);
+    return _dcpFeaturePanelHtml(f, plegar);
+}
+
+/** La ficha de una pieza, en el plano de su sala o en el de su planta: sus medidas, su altura,
+ *  girarla, duplicarla, enviarla al fondo, quitarla, sus estanterías si es un armario y, en su
+ *  sala, el control de accesos (que necesita lo que la sala sabe de sus lectores). */
+function _dcpFeaturePanelHtml(f, plegar) {
     // Alto y altura desde el suelo: lo que mide DE VERDAD, sea suyo o de su tipo. Un campo en
     // blanco diría «no tiene», y tiene: el de su tipo.
-    const z = _dcpPieceZ(f);
+    const z = _dcpPieceZ(f, _dcimPlan ? null : p2dKinds('dcim'));
+    const sala = !!_dcimPlan;
     const alto = (name, label, val) =>
         `<label class="ss-fs-2 text-muted">${esc(t(label))}
             <input class="form-control form-control-sm ss-tabular" type="number" step="50" min="0"
@@ -443,13 +366,13 @@ function _dcpInspectorBody() {
                    value="${escAttr(String(f[name] ?? 0))}"
                    oninput="_dcpSet(${jsStr(f.uid)},${jsStr(name)},this.value)"></label>`;
     return `<div class="d-flex align-items-center gap-2 mb-2">
-            <i class="bi ${_DCP_ICON[f.kind] || 'bi-square'} text-muted"></i>
-            <span class="fw-semibold text-truncate">${esc(t('dcim_kind_' + f.kind))}</span>
-            <span class="text-muted ss-fs-2 ss-tabular">${
+            <i class="bi ${_dcpIcon(f.kind)} text-muted"></i>
+            <span class="fw-semibold text-truncate">${esc(_dcPieceName(f.kind))}</span>
+            ${sala ? `<span class="text-muted ss-fs-2 ss-tabular">${
                 esc(_dcpTileRef(Number(f.pos_x) + Number(f.width_mm) / 2,
-                                Number(f.pos_y) + Number(f.depth_mm) / 2))}</span>
+                                Number(f.pos_y) + Number(f.depth_mm) / 2))}</span>` : ''}
             <div class="ms-auto d-flex gap-1">
-                <button type="button" class="btn btn-sm btn-secondary" onclick="_dcpDeselect()"
+                <button type="button" class="btn btn-sm btn-secondary" onclick="_dcPlanDeselect()"
                     title="${escAttr(t('close'))}" aria-label="${escAttr(t('close'))}">
                     <i class="bi bi-x-lg"></i></button>
                 ${plegar}
@@ -474,13 +397,13 @@ function _dcpInspectorBody() {
             <button type="button" class="btn btn-sm btn-secondary"
                 onclick="_dcpDuplicate(${jsStr(f.uid)})" title="${escAttr(t('dcim_piece_duplicate'))}">
                 <i class="bi bi-files"></i></button>
-            ${_dcpBackButton('feature', f.uid)}
+            ${_dcPlanBackButton('feature', f.uid)}
             <button type="button" class="btn btn-sm btn-danger"
                 onclick="_dcpDropFeature(${jsStr(f.uid)})" title="${escAttr(t('delete'))}">
                 <i class="bi bi-trash"></i></button>
         </div>
         ${_dcShelfBox(f)}
-        ${_dcpAccessHtml(f)}`;
+        ${sala ? _dcpAccessHtml(f) : ''}`;
 }
 
 /** Un rack en el inspector: lo que decide dónde está y cómo ocupa la sala.
@@ -503,7 +426,7 @@ function _dcpRackPanelHtml(k, plegar) {
             <span class="fw-semibold text-truncate">${esc(k.name || t('dcim_rack'))}</span>
             ${_dcimRollBadge(k.roll)}
             <div class="ms-auto d-flex gap-1">
-                <button type="button" class="btn btn-sm btn-secondary" onclick="_dcpDeselect()"
+                <button type="button" class="btn btn-sm btn-secondary" onclick="_dcPlanDeselect()"
                     title="${escAttr(t('close'))}" aria-label="${escAttr(t('close'))}">
                     <i class="bi bi-x-lg"></i></button>
                 ${plegar}
@@ -526,7 +449,7 @@ function _dcpRackPanelHtml(k, plegar) {
             ${accion('_dcpRackEdit', 'bi-pencil', t('dcim_rack_all_fields'), 'btn-secondary')}
             ${accion('_dcpTurn', 'bi-arrow-clockwise', t('dcim_turn'), 'btn-secondary')}
             ${accion('_dcpRackDuplicate', 'bi-files', t('dcim_piece_duplicate'), 'btn-secondary')}
-            ${_dcpBackButton('rack', k.uid)}
+            ${_dcPlanBackButton('rack', k.uid)}
             ${accion('_dcpRackDrop', 'bi-trash', t('delete'), 'btn-danger')}
         </div>`;
 }
@@ -535,12 +458,11 @@ function _dcpRackPanelHtml(k, plegar) {
  *  al parar, con lo demás que se haya tecleado. Si lo rechaza, el plano vuelve a lo que tiene el
  *  servidor: dejar a la vista lo que no se guardó es enseñar algo que no ha pasado. */
 function _dcpRackSet(uid, campo, valor) {
-    const k = _dcpRack1(uid);
+    const k = _dcObj('rack', uid);
     if (!k) return;
     k[campo] = campo === 'name' ? String(valor) : Number(valor);
-    _dcpRedraw();
-    _dcpQueue(`/api/v1/dcim/racks/${encodeURIComponent(uid)}`, {[campo]: k[campo]},
-              () => _dcimOpenPlan(_dcimPlan.room.uid));
+    _dcPlanRedraw();
+    _dcpQueue(`/api/v1/dcim/racks/${encodeURIComponent(uid)}`, {[campo]: k[campo]}, () => _dcPlanReload());
 }
 
 /** Lo que enseña el inspector sin nada seleccionado: la sala. Sus medidas y su baldosa, y sus
@@ -575,8 +497,19 @@ function _dcpRoomPanelHtml(plegar) {
  *  queda debajo de otra cosa —una pieza bajo un rack de pared, una zona bajo un pasillo—, que
  *  pulsando en el plano no se alcanza nunca. Los racks primero, que es lo que más se busca. */
 function _dcpElementsHtml() {
-    const cajas = _dcpBoxes().sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'rack' ? -1 : 1)
-                                         || String(a.name).localeCompare(String(b.name)));
+    // Y los equipos de sala —una roseta, una toma de corriente, un PC—, que no son cajas del
+    // alzado (`_dcpBoxes`) pero sí cosas de la sala. Reportado: una toma no salía en la lista, y
+    // tampoco ningún otro equipo de sala; en la de la planta, sí.
+    const equipos = _dcriItems().map(i => {
+        const b = i.box || {};
+        const x = Number(b.x) || 0, z = Number(b.y) || 0;
+        return {kind: 'item', uid: i.uid, icon: _dcriLook(i.role).icon,
+                name: i.label || _dcRoleName(i.role), x0: x, x1: x + (Number(b.w) || 0),
+                z0: z, z1: z + (Number(b.d) || 0)};
+    });
+    const cajas = _dcpBoxes().concat(equipos)
+        .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'rack' ? -1 : b.kind === 'rack' ? 1 : 0)
+                     || String(a.name).localeCompare(String(b.name)));
     if (!cajas.length) return '';
     return `<div class="d-flex align-items-center gap-2 mt-3 mb-1">
             <span class="fw-semibold ss-fs-2">${esc(t('dcim_elements'))}</span>
@@ -584,7 +517,7 @@ function _dcpElementsHtml() {
         </div>
         ${cajas.map(c => `<button type="button" onclick="_dcpPick(${jsStr(c.kind)},${jsStr(c.uid)})"
             class="btn btn-sm btn-secondary w-100 text-start d-flex align-items-center gap-2 mb-1">
-            <i class="bi ${c.kind === 'rack' ? 'bi-hdd-rack' : (_DCP_ICON[c.what] || 'bi-square')}"></i>
+            <i class="bi ${c.kind === 'rack' ? 'bi-hdd-rack' : c.kind === 'item' ? c.icon : _dcpIcon(c.what)}"></i>
             <span class="text-truncate">${esc(c.name || t('dcim_rack'))}</span>
             <span class="text-muted ss-fs-1 ms-auto ss-tabular">${
                 esc(_dcpTileRef((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2))}</span>
@@ -596,7 +529,7 @@ function _dcpElementsHtml() {
 function _dcpPick(kind, uid) {
     _dcpSel = {kind, uid: String(uid)};
     // Lo que estaba al fondo vuelve al frente: elegido desde la lista, es lo que se quiere tocar.
-    if (_dcpBack.delete(_dcpBackKey(kind, String(uid)))) return renderDcim();
+    if (_dcpBack.delete(p2dKey(kind, '', String(uid)))) return renderDcim();
     const f = kind === 'feature' ? _dcpFeatures().find(x => x.uid === uid) : null;
     if (f && ((_dcpKinds()[f.kind] || {}).layer === 'air') && !_dcpAir) {
         _dcpAir = true;
@@ -613,96 +546,49 @@ function _dcpPick(kind, uid) {
 // de debajo, en vuelta, como en cualquier editor de dibujo; y «Enviar al fondo» deja lo de
 // arriba tenue y transparente al puntero mientras se trabaja debajo.
 
-function _dcpBackKey(kind, uid) { return kind + ':' + uid; }
+// Lo hace el editor de planos (`p2dHit`, `p2dCycle`, `p2dSendBack`); estos son los nombres
+// con los que lo llama el plano de la sala.
 
-function _dcpIsBack(kind, uid) { return _dcpBack.has(_dcpBackKey(kind, String(uid))); }
+function _dcpIsBack(kind, uid) { return p2dIsBack(_dcpP2d, kind, '', String(uid)); }
 
-/** Lo que hay bajo el puntero, de arriba abajo y sin repetir, a partir de los elementos que el
- *  navegador encuentra en ese punto (cada pieza son varios: su rectángulo, su texto, su asa). */
+/** Lo que hay bajo el puntero, de arriba abajo y sin repetir. */
 function _dcpStackOf(els) {
-    const out = [], visto = new Set();
-    for (const el of els || []) {
-        const g = el && el.closest ? el.closest('g[data-dcpf], g[data-dcp], g[data-dcpi]') : null;
-        if (!g) continue;
-        const kind = g.dataset.dcpf ? 'feature' : g.dataset.dcpi ? 'item' : 'rack';
-        const uid = String(g.dataset.dcpf || g.dataset.dcpi || g.dataset.dcp);
-        if (visto.has(_dcpBackKey(kind, uid))) continue;
-        visto.add(_dcpBackKey(kind, uid));
-        out.push({kind, uid, g});
-    }
-    return out;
+    return p2dStackOf(_dcpP2d, els).map(m => ({kind: m.kind, uid: m.uid, g: m.el}));
 }
 
-/** A qué se refiere una pulsación. Lo de arriba — salvo que lo SELECCIONADO esté también bajo
- *  el dedo, que entonces es eso: lo elegido se sigue arrastrando aunque algo lo tape. Y el asa
- *  de lo seleccionado, también si queda debajo de otra pieza. `cycle` es lo que necesita
- *  `_dcpCycle` para pasar a lo de debajo si la pulsación no se mueve. */
+/** A qué se refiere una pulsación (`p2dHit`): lo de arriba, salvo que lo elegido también esté
+ *  bajo el dedo. Y el asa de lo seleccionado, también si queda debajo de otra pieza. */
 function _dcpHit(ev) {
     const els = (typeof document.elementsFromPoint === 'function' && Number.isFinite(ev.clientX))
         ? document.elementsFromPoint(ev.clientX, ev.clientY) : [];
     const todos = els.length ? els : [ev.target];
     const asaEl = todos.find(e => e && e.closest && e.closest('[data-dcph]'));
     const asa = asaEl ? asaEl.closest('[data-dcph]') : null;
-    const pila = _dcpStackOf(todos);
-    if (!pila.length) return {g: null, kind: '', uid: '', asa, cycle: null};
-    const elegido = _dcpSel && pila.find(p => p.kind === _dcpSel.kind && p.uid === String(_dcpSel.uid));
-    const cual = elegido || pila[0];
-    return {g: cual.g, kind: cual.kind, uid: cual.uid, asa,
-            cycle: {again: !!elegido, kind: cual.kind, uid: cual.uid,
-                    pila: pila.map(p => ({kind: p.kind, uid: p.uid}))}};
+    const h = p2dHit(_dcpP2d, ev);
+    if (!h) return {g: null, kind: '', uid: '', asa, cycle: null};
+    return {g: h.el, kind: h.kind, uid: h.uid, asa, cycle: h.cycle};
 }
 
-/** Una pulsación quieta sobre lo que YA estaba seleccionado, con algo más debajo: selecciona lo
- *  siguiente de la pila, y tras lo último vuelve a lo primero. `true` si lo hizo. */
-function _dcpCycle(drag) {
-    const c = drag && drag.cycle;
-    if (!c || !c.again || drag.moved || c.pila.length < 2) return false;
-    const i = c.pila.findIndex(p => p.kind === c.kind && p.uid === c.uid);
-    _dcpSel = {...c.pila[(i + 1) % c.pila.length]};
-    _dcpRedraw();
-    _dcpInspectorDraw();
-    return true;
-}
+function _dcpCycle(drag) { return p2dCycle(_dcpP2d, drag); }
 
-function _dcpBackButton(kind, uid) {
-    return `<button type="button" class="btn btn-sm btn-secondary"
-        onclick="_dcpSendBack(${jsStr(kind)},${jsStr(uid)})"
-        title="${escAttr(t('dcim_send_back'))}" aria-label="${escAttr(t('dcim_send_back'))}">
-        <i class="bi bi-layer-backward"></i></button>`;
-}
+function _dcpBackButton(kind, uid) { return p2dBackButton(_dcpP2d, kind, '', uid); }
 
-/** Al fondo: tenue, y el puntero lo atraviesa. Se suelta la selección — lo que se quería era lo
- *  de debajo, y una pieza seleccionada que no se puede pulsar es una selección a ciegas. */
-function _dcpSendBack(kind, uid) {
-    _dcpFloatHide();
-    _dcpBack.add(_dcpBackKey(kind, String(uid)));
-    if (_dcpSel && _dcpSel.kind === kind && String(_dcpSel.uid) === String(uid)) _dcpSel = null;
-    renderDcim();
-}
+function _dcpSendBack(kind, uid) { p2dSendBack('room', kind, '', String(uid)); }
 
 // Los de la barra flotante, que llaman con el uid solo.
 function _dcpSendBackFeature(uid) { _dcpSendBack('feature', uid); }
 function _dcpSendBackRack(uid) { _dcpSendBack('rack', uid); }
 
-function _dcpBringAll() {
-    _dcpBack.clear();
-    renderDcim();
-}
+function _dcpBringAll() { p2dBringAll('room'); }
 
-/** En la barra, mientras haya algo al fondo: cuántas, y traerlas de vuelta. Sin esto, lo
- *  enviado al fondo no se podría volver a pulsar nunca, y nadie sabría por qué. */
-function _dcpBackChip() {
-    if (!_dcpBack.size) return '';
-    return `<button type="button" class="btn btn-sm btn-warning" onclick="_dcpBringAll()"
-        title="${escAttr(t('dcim_bring_all'))}">
-        <i class="bi bi-layer-forward me-1"></i>${esc(tf('dcim_n_back', _dcpBack.size))}</button>`;
-}
+/** En la barra, mientras haya algo al fondo: cuántas, y traerlas de vuelta. */
+function _dcpBackChip() { return p2dBackChip(_dcpP2d); }
 
 /** Soltar la pieza: el cuadro se va y el plano vuelve a ser solo el plano. Lo mismo que Escape,
  *  que era la ÚNICA forma de cerrarlo — y un atajo que nadie ve no es una forma de hacer algo. */
 function _dcpDeselect() {
     _dcpSel = null;
-    _dcpPickClear();
+    p2dPickClear(_dcpP2d);
     renderDcim();
 }
 
@@ -745,7 +631,7 @@ const _DCP_TEXT = ['label', 'lock', 'model', 'serial', 'hub_uid', 'device_uid', 
 /** Elegir el modelo del catálogo de una pieza: su nombre pasa al campo «Modelo», que es lo que
  *  se lee en el plano y en la búsqueda. */
 function _dcpAccessType(uid, tipo) {
-    const f = _dcpFeatures().find(x => x.uid === uid);
+    const f = _dcObj('feature', uid);
     if (!f) return;
     const elegido = (((_dcpFeat || {}).access_types || {})[f.kind] || []).find(x => x.uid === tipo);
     f.type_uid = String(tipo || '');
@@ -756,19 +642,19 @@ function _dcpAccessType(uid, tipo) {
 }
 
 function _dcpSet(uid, campo, valor) {
-    const f = _dcpFeatures().find(x => x.uid === uid);
+    const f = _dcObj('feature', uid);
     if (!f) return;
     f[campo] = _DCP_TEXT.includes(campo) ? String(valor || '') : Number(valor);
     // A qué IQ se conecta y a qué dispositivo: de ahí salen su estado y la lista de lo que cuelga
-    // de cada IQ, que calcula el servidor. Se guarda ya y se vuelve a pedir la sala.
+    // de cada IQ, que calcula el servidor. Se guarda ya y se vuelve a pedir el plano.
     if (campo === 'hub_uid' || campo === 'device_uid' || campo === 'lock') {
         _dcpSave(uid, {[campo]: f[campo]}).then(async () => {
             const room = (_dcimPlan || {}).room;
-            if (room) { await _dcpLoadFeatures(room.uid); renderDcim(); }
+            if (room) { await _dcpLoadFeatures(room.uid); renderDcim(); } else _dcPlanReload();
         });
         return;
     }
-    _dcpRedraw();
+    _dcPlanRedraw();
     _dcpQueue(`/api/v1/dcim/features/${encodeURIComponent(uid)}`, {[campo]: f[campo]});
 }
 
@@ -777,15 +663,7 @@ async function _dcpSave(uid, body) {
     if (!r.ok) showToast(r.error || t('save_failed'), 'danger');
 }
 
-async function _dcpTurnFeature(uid) {
-    _dcpFloatHide();
-    const f = _dcpFeatures().find(x => x.uid === uid);
-    if (!f) return;
-    f.rotation = (Number(f.rotation || 0) + 90) % 360;
-    _dcpRedraw();
-    _dcpSave(uid, {rotation: f.rotation});
-    renderDcim();
-}
+function _dcpTurnFeature(uid) { return _dcObjTurn('feature', uid); }
 
 /** Quitar una pieza del plano.
  *
@@ -794,18 +672,7 @@ async function _dcpTurnFeature(uid) {
  *  «ha dicho que no» y no se borraba nada — sin error, sin aviso, y con el modal preguntando
  *  igualmente. Un `await` sobre algo que no es una promesa es la clase de equivocación que no
  *  falla: simplemente hace que el resto de la función no ocurra. */
-function _dcpDropFeature(uid) {
-    _dcpFloatHide();
-    const f = _dcpFeatures().find(x => x.uid === uid);
-    if (!f) return;
-    showConfirmModal(tf('dcim_drop_piece_q', t('dcim_kind_' + f.kind)) + _dcShelfDropWarning(uid), async () => {
-        const r = await _dcimSend('DELETE',
-                                  `/api/v1/dcim/features/${encodeURIComponent(uid)}`);
-        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-        _dcpSel = null;
-        _dcimOpenPlan(_dcimPlan.room.uid);
-    });
-}
+function _dcpDropFeature(uid) { return _dcObjDrop('feature', uid); }
 
 // ── Lo que se le hace a una pieza sin tener que seleccionarla ─────────────────────────────
 
@@ -814,22 +681,7 @@ function _dcpDropFeature(uid) {
  *  Una baldosa y no encima: una copia que cae exactamente sobre el original no se ve, y lo que
  *  se ve es que el botón no ha hecho nada. Seleccionada, porque lo siguiente que se hace con una
  *  copia es moverla o renombrarla. */
-async function _dcpDuplicate(uid) {
-    _dcpFloatHide();
-    const f = _dcpFeatures().find(x => x.uid === uid);
-    const room = (_dcimPlan || {}).room;
-    if (!f || !room) return;
-    const paso = _dcpTile();
-    const r = await _dcimSend('POST', '/api/v1/dcim/features', {
-        room_uid: room.uid, kind: f.kind, label: f.label || '',
-        width_mm: f.width_mm, depth_mm: f.depth_mm, rotation: f.rotation || 0,
-        pos_x: Number(f.pos_x || 0) + paso, pos_y: Number(f.pos_y || 0) + paso,
-    });
-    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    // Seleccionada: lo siguiente que se hace con una copia es moverla, estirarla o renombrarla.
-    if (r.data && r.data.uid) _dcpSel = {kind: 'feature', uid: String(r.data.uid)};
-    _dcimOpenPlan(room.uid);
-}
+function _dcpDuplicate(uid) { return _dcObjDuplicate('feature', uid); }
 
 /** El lápiz de la barra: seleccionar la pieza y asegurarse de que el inspector está a la vista.
  *  Plegado, el lápiz no haría nada que se viera. */
@@ -843,56 +695,15 @@ function _dcpEdit(uid) {
 
 //: El temporizador que esconde la barra. Con retraso, porque para llegar a ella hay que SALIR de
 //: la pieza, y sin él la barra desaparece justo cuando el ratón va a por ella.
-let _dcpFloatTimer = null;
 
-/** La barra flotante de lo que está bajo el ratón: una pieza de la sala o un rack.
- *
- *  Sobre la esquina derecha de lo que se VE —la caja girada, no la guardada— y en el marco del
- *  dibujo, fuera del `<svg>`: dentro, pulsar un botón sería también empezar un arrastre. Nunca
- *  mientras se arrastra: una barra que sigue a la mano tapa el sitio donde se está soltando.
- *
- *  Quien solo puede mirar ve la barra de un rack con un único botón, abrirlo, que es lo que
- *  puede hacer con él; la de una pieza no la ve, porque todo lo que tiene es editar. */
+/** La barra flotante de la sala: la del editor de planos (`p2dFloatShow`). */
 function _dcpFloatShow(uid, el, kind) {
-    const que = kind === 'rack' ? 'rack' : 'feature';
-    if (_dcpDrag || (que === 'feature' && !_dcimMay('dcim_edit'))) return;
-    const barra = document.getElementById('dcpFloat');
-    const marco = el && el.closest('.ss-infra-canvas');
-    if (!barra || !marco) return;
-    clearTimeout(_dcpFloatTimer);
-    const a = marco.getBoundingClientRect();
-    const b = el.getBoundingClientRect();
-    barra.innerHTML = _dcpFloatHtml(uid, que);
-    barra.style.left = `${Math.max(0, b.right - a.left)}px`;
-    barra.style.top = `${Math.max(0, b.top - a.top)}px`;
-    barra.classList.remove('d-none');
+    p2dFloatShow(_dcpP2d, {kind: kind === 'rack' ? 'rack' : 'feature', room: '', uid: String(uid)}, el);
 }
+function _dcpFloatLater() { p2dFloatLater('room'); }
+function _dcpFloatKeep() { p2dFloatKeep('room'); }
+function _dcpFloatHide() { p2dFloatHide('room'); }
 
-function _dcpFloatHtml(uid, kind) {
-    const boton = (fn, icono, texto, tono) =>
-        `<button type="button" class="btn btn-sm ${tono} py-0 px-1" onclick="${fn}(${jsStr(uid)})"
-            title="${escAttr(texto)}" aria-label="${escAttr(texto)}"><i class="bi ${icono}"></i></button>`;
-    if (kind === 'rack') {
-        const edita = _dcimMay('dcim_edit');
-        return `<div class="btn-group btn-group-sm shadow-sm">
-            ${boton('_dcpRackOpen', 'bi-box-arrow-in-right', t('dcim_open_rack'), 'btn-secondary')}
-            ${edita ? boton('_dcpRackEdit', 'bi-pencil', t('edit'), 'btn-secondary') : ''}
-            ${edita ? boton('_dcpTurn', 'bi-arrow-clockwise', t('dcim_turn'), 'btn-secondary') : ''}
-            ${edita ? boton('_dcpRackDuplicate', 'bi-files', t('dcim_piece_duplicate'),
-                            'btn-secondary') : ''}
-            ${edita ? boton('_dcpSendBackRack', 'bi-layer-backward', t('dcim_send_back'),
-                            'btn-secondary') : ''}
-            ${edita ? boton('_dcpRackDrop', 'bi-trash', t('delete'), 'btn-danger') : ''}
-        </div>`;
-    }
-    return `<div class="btn-group btn-group-sm shadow-sm">
-        ${boton('_dcpEdit', 'bi-pencil', t('edit'), 'btn-secondary')}
-        ${boton('_dcpTurnFeature', 'bi-arrow-clockwise', t('dcim_turn'), 'btn-secondary')}
-        ${boton('_dcpDuplicate', 'bi-files', t('dcim_piece_duplicate'), 'btn-secondary')}
-        ${boton('_dcpSendBackFeature', 'bi-layer-backward', t('dcim_send_back'), 'btn-secondary')}
-        ${boton('_dcpDropFeature', 'bi-trash', t('delete'), 'btn-danger')}
-    </div>`;
-}
 
 // ── Lo que se le hace a un rack desde el plano ─────────────────────────────────────────────
 
@@ -919,88 +730,21 @@ function _dcpRackEdit(uid) {
  *  Lo que es del ARMARIO —alto, medidas, giro, carriles, accesos, fila— y nada de lo que es de
  *  ESE armario: ni lo que tiene dentro ni su número de activo, que identifica una caja concreta y
  *  repetido deja de identificar ninguna. Es como se dibuja una fila: se pone uno y se copia. */
-async function _dcpRackDuplicate(uid) {
-    _dcpFloatHide();
-    const k = _dcpRack1(uid);
-    const room = (_dcimPlan || {}).room;
-    if (!k || !room) return;
-    const paso = _dcpTile();
-    const cuerpo = {room_uid: room.uid, name: tf('dcim_rack_copy_name', k.name || ''),
-                    pos_x: Number(k.pos_x || 0) + paso, pos_y: Number(k.pos_y || 0) + paso};
-    for (const c of ['u_height', 'width_mm', 'depth_mm', 'rotation', 'base_mm', 'desc_units',
-                     'rail_front_mm', 'rail_depth_mm', 'rail_rear_mm', 'access', 'row_uid']) {
-        if (k[c] !== undefined && k[c] !== null) cuerpo[c] = k[c];
-    }
-    const r = await _dcimSend('POST', '/api/v1/dcim/racks', cuerpo);
-    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    _dcimOpenPlan(room.uid);
-}
+function _dcpRackDuplicate(uid) { return _dcObjDuplicate('rack', uid); }
 
 /** Quitar un rack, con la confirmación del panel y por el mismo camino que desde el árbol. */
-function _dcpRackDrop(uid) {
-    _dcpFloatHide();
-    const k = _dcpRack1(uid);
-    if (k) _dcimDelete('rack', uid, k.name || '');
-}
+function _dcpRackDrop(uid) { return _dcObjDrop('rack', uid); }
 
-function _dcpFloatLater() {
-    clearTimeout(_dcpFloatTimer);
-    _dcpFloatTimer = setTimeout(_dcpFloatHide, 250);
-}
 
-function _dcpFloatKeep() {
-    clearTimeout(_dcpFloatTimer);
-}
 
-function _dcpFloatHide() {
-    clearTimeout(_dcpFloatTimer);
-    const barra = document.getElementById('dcpFloat');
-    if (barra) barra.classList.add('d-none');
-}
 
-/** Los atajos, que es lo que separa colocar veinte racks de colocar veinte racks a mano.
- *
- *  Solo con algo seleccionado y solo fuera de un campo de texto: una `r` escrita en el nombre de
- *  un rack no debe girar nada. */
+/** Los atajos, que es lo que separa colocar veinte racks de colocar veinte racks a mano: los del
+ *  editor de planos (`p2dKeyDown`) —Escape suelta lo elegido (`_dcpDeselect()`), R gira, Supr
+ *  quita, las flechas mueven a 10 cm o a una baldosa con Mayús, Ctrl+G agrupa—, solo fuera de un
+ *  campo de texto: una `r` escrita en el nombre de un rack no debe girar nada. */
 function _dcpKey(ev) {
-    if (_dcpManyKey(ev)) return;
-    if (!_dcimPlan || !_dcpSel) return;
-    const dentro = /^(INPUT|SELECT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '');
-    if (dentro) return;
-    // Escape suelta lo que sea que esté seleccionado; el resto de atajos son de las piezas.
-    if (ev.key === 'Escape') {
-        ev.preventDefault();
-        return _dcpDeselect();
-    }
-    if (_dcpSel.kind !== 'feature') return;
-    const f = _dcpFeatures().find(x => x.uid === _dcpSel.uid);
-    if (!f) return;
-    const k = (ev.key || '').toLowerCase();
-    if (k === 'r') {
-        _dcpTurnFeature(f.uid);
-    } else if (ev.key === 'Delete') {
-        _dcpDropFeature(f.uid);
-    } else if (ev.key === 'Escape') {
-        _dcpDeselect();
-    } else if (ev.key.startsWith && ev.key.startsWith('Arrow')) {
-        // Shift mueve una baldosa entera: es como se coloca una fila. Sin él, cien milímetros,
-        // que es como se corrige una fila ya colocada.
-        const d = ev.shiftKey ? _dcpTile() : 100;
-        // El tope es la pared que se VE, igual que al arrastrar: con `0` sobre la esquina sin
-        // girar, una puerta girada un cuarto se quedaba a 44 cm de la pared también con el teclado.
-        const o = _dcpEdgeOffset(Number(f.width_mm || 600), Number(f.depth_mm || 600), f.rotation);
-        if (ev.key === 'ArrowLeft') f.pos_x = Math.max(-o.x, Number(f.pos_x) - d);
-        if (ev.key === 'ArrowRight') f.pos_x = Number(f.pos_x) + d;
-        if (ev.key === 'ArrowUp') f.pos_y = Math.max(-o.y, Number(f.pos_y) - d);
-        if (ev.key === 'ArrowDown') f.pos_y = Number(f.pos_y) + d;
-        _dcpRedraw();
-        _dcpInspectorDraw();
-        _dcpQueue(`/api/v1/dcim/features/${encodeURIComponent(f.uid)}`,
-                  {pos_x: f.pos_x, pos_y: f.pos_y});
-    } else {
-        return;
-    }
-    ev.preventDefault();
+    if (!_dcimPlan) return;
+    if (p2dKeyDown(_dcpP2d, ev)) ev.preventDefault();
 }
 
 // ── Llevarse el plano y traerlo de vuelta ────────────────────────────────────

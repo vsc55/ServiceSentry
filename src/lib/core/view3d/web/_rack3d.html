@@ -321,7 +321,7 @@ function _dcr3dScene(data, o) {
         return o.mal && !malo(it.state) ? [c[0], c[1], c[2], 0.15] : c;
     };
     const leeDe = (it) => it.foreign ? null : {
-        name: it.label || it.type_name || '', kind: t('dcim_role_' + (it.role || '')), uid: it.uid,
+        name: it.label || it.type_name || '', kind: _dcRoleName((it.role || '')), uid: it.uid,
         tipo: 'item', state: it.state || '', device: it.device_uid || '', reason: it.demo_reason || '',
         u: Number(it.u_height) || 0, u0: Number(it.u_start) || 0, rack: rack.uid};
     // Una caja atornillada —o montada en otra— con su foto y su franja de estado.

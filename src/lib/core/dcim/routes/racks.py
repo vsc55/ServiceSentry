@@ -990,7 +990,9 @@ def register(app, wa, C):
     @C.edit_req
     def api_dcim_item_create():
         store = C.store()
-        data = _fresh(request.get_json(silent=True) or {})
+        # Las bocas y la fuente son de un equipo de pared y las escribe su ruta, que las comprueba
+        # (`/room-items`): por aquí se guardaban sin mirar —una fuente de otra sede, un JSON roto—.
+        data = _without(_fresh(request.get_json(silent=True) or {}), ('jacks', 'source_uid'))
         # Desde una plantilla: la altura, el fondo, la cara, el rol y el modelo salen puestos, y
         # lo que queda por teclear es solo lo que tiene ESA caja y ninguna otra. Antes de
         # `_place` a propósito: la altura decide si cabe donde se pidió, y aplicarla después
@@ -1049,7 +1051,11 @@ def register(app, wa, C):
         # sería reescribir el origen de una máquina sin tocar ni una de sus piezas — una fila
         # que afirma algo que no pasó, y encima difícil de descubrir.
         data = _without(request.get_json(silent=True) or {},
-                        ('build_uid', 'demo_state', 'demo_reason'))
+                        ('build_uid', 'demo_state', 'demo_reason', 'jacks', 'source_uid'))
+        # Si al cambiar de armario se desconectan también sus cables de datos: una petición, no
+        # una columna.
+        # Solo un `true` de verdad: con `bool()`, la cadena "false" desconectaba y borraba cables.
+        desconectar = data.pop('disconnect', False) is True
         # Cambiar CÓMO está puesto es moverlo: pasar de los mástiles al suelo es dejar de
         # ocupar una U, y sin contarlo entre lo que mueve, la comprobación no corría y el equipo
         # se quedaba con la U que tenía — un SAI al lado del armario listado en la U 1.
@@ -1101,10 +1107,66 @@ def register(app, wa, C):
         # máquina que ya no está, que es exactamente lo que un historial no puede hacer.
         antes = str(item.get('rack_uid') or '')
         ahora = str((store.items.get(uid) or {}).get('rack_uid') or '')
+        hecho = {}
+        if ahora and ahora != antes:
+            hecho = _follow_to_rack(store, uid, ahora, desconectar)
+            wa._audit('dcim_moved', detail=dict(hecho, item=uid, rack_from=antes, rack_to=ahora))
         C.snap(antes, 'move' if moving else 'edit')
         if ahora and ahora != antes:
             C.snap(ahora, 'move')
-        return jsonify({'ok': True, 'asset': str(data.get('asset') or '')})
+        return jsonify({'ok': True, 'asset': str(data.get('asset') or ''), 'moved': hecho})
+
+    def _follow_to_rack(store, uid, nuevo, desconectar) -> dict:
+        """What follows an item —and what is mounted on it— to another rack, and what it
+        leaves behind. Asked for: moving a server, a switch or a router to another rack, or to a
+        rack of another room.
+
+        - Its power leads to the strips of the rack it left are unplugged: a strip is part of
+          its rack. Left, the outlet stayed taken and the chain said it was fed from a rack it
+          is not in.
+        - A strip that IS this item goes with it, and what the old rack had plugged into it is
+          unplugged.
+        - A power source that says it is this item (a UPS) stays on its site: moved to another
+          site, it is no longer that source's box.
+        - Its data cables stay —they are what somebody wired, and re-patching is a decision—,
+          unless asked to disconnect them.
+        Returns ``{unplugged, disconnected, cables_kept, sources_cleared}``."""
+        uids = [uid] + [h['uid'] for h in store.children_of(uid)]
+        aqui = {p['uid'] for p in store.pdus_of(nuevo)}
+        out = {'unplugged': 0, 'disconnected': 0, 'cables_kept': 0, 'sources_cleared': 0}
+        for u in uids:
+            for f in store.feeds.list('item_uid = ?', (u,)):
+                if str(f.get('pdu_uid') or '') not in aqui:
+                    store.feeds.delete(f['uid'])
+                    out['unplugged'] += 1
+        sala_n = store.rooms.get(str((store.racks.get(nuevo) or {}).get('room_uid') or '')) or {}
+        sede_n = str(sala_n.get('site_uid') or '')
+        for pdu in store.pdus.list('item_uid = ?', (uid,)):
+            cambios = {'rack_uid': nuevo}
+            # Su fuente es de una sede: llevada a otra, deja de colgar de ella.
+            fuente = store.sources.get(str(pdu.get('source_uid') or '')) or {}
+            if fuente and str(fuente.get('site_uid') or '') not in ('', sede_n):
+                cambios['source_uid'] = ''
+                out['sources_cleared'] += 1
+            store.pdus.update(pdu['uid'], cambios, actor=C.actor())
+            for f in store.feeds_of([pdu['uid']]):
+                if str((store.items.get(f['item_uid']) or {}).get('rack_uid') or '') != nuevo:
+                    store.feeds.delete(f['uid'])
+                    out['unplugged'] += 1
+        sala = store.rooms.get(str((store.racks.get(nuevo) or {}).get('room_uid') or '')) or {}
+        sede = str(sala.get('site_uid') or '')
+        for s in store.sources.list('item_uid = ?', (uid,)):
+            if str(s.get('site_uid') or '') and str(s.get('site_uid') or '') != sede:
+                store.sources.update(s['uid'], {'item_uid': ''}, actor=C.actor())
+                out['sources_cleared'] += 1
+        cables = store.cables_of(uids)
+        if desconectar:
+            for c in cables:
+                store.cables.delete(c['uid'])
+            out['disconnected'] = len(cables)
+        else:
+            out['cables_kept'] = len(cables)
+        return out
 
     @app.route('/api/v1/dcim/items/<uid>', methods=['DELETE'])
     @C.edit_req

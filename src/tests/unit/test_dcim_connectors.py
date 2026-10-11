@@ -13,6 +13,7 @@ lo que se teclee se sigue guardando con catálogo o sin él.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -467,3 +468,59 @@ class TestLaVersionQueDeVerdadMANDA:
     def test_y_a_la_guardada_cuando_es_ella_la_que_manda(self):
         dentro = int(connectors.packaged().get('version') or 0)
         assert connectors.next_version(_Store({'version': dentro + 40})) == dentro + 41
+
+
+class TestLasLetrasDeUnaBocaSalenDelCatalogo:
+    """Cómo se lee un conector en una roseta o una toma del plano (`abbr`): lo dice el catálogo, no
+    una tabla en el código. Se preguntó: «¿estás usando la fuente de conectores del catálogo?».
+    Las bocas que se ofrecen salían de él, pero sus letras estaban escritas a mano."""
+
+    def test_las_dice_el_documento_y_se_conservan_al_limpiarlo(self):
+        assert connectors.jack_abbr('8p8c') == 'RJ45' and connectors.jack_abbr('6p4c') == 'RJ11'
+        limpio = connectors.normalise({'version': 9, 'connectors': [
+            {'id': 'x', 'families': ['front-ports'], 'abbr': 'SCHUKO2'}]})
+        assert limpio['connectors'][0]['abbr'] == 'SCHUKO2', 'what was written is kept whole'
+
+    def test_sin_letras_se_sacan_del_identificador(self):
+        assert connectors.jack_abbr('lc-upc') == 'LC'
+        assert connectors.jack_abbr('iec-60320-c13') == 'C13'
+        assert connectors.jack_abbr('8p4c') == '8P4C', 'un 8P4C no es un RJ11'
+
+    def test_una_version_guardada_manda_tambien_en_las_letras(self):
+        dentro = int(connectors.packaged().get('version') or 0)
+        doc = dict(connectors.packaged(), version=dentro + 1)
+        doc['connectors'] = [dict(c, abbr='R45') if c['id'] == '8p8c' else c for c in doc['connectors']]
+        assert connectors.jack_abbr('8p8c', _Store(doc)) == 'R45'
+        assert next(c for c in connectors.jacks('outlet', '', _Store(doc)) if c['id'] == '8p8c')['abbr'] == 'R45'
+
+    def test_y_no_queda_tabla_en_el_codigo(self):
+        src = io.open(connectors.__file__, encoding='utf-8').read()
+        assert '_JACK_ABBR' not in src and "'RJ45'" not in src
+
+
+class TestLasBocasDeParedLasDiceElCatalogo:
+    """Qué conectores se ofrecen en una roseta o una toma lo dice el catálogo (las familias
+    `outlet-jacks` y `socket-jacks`, marcadas en cada conector), no una lista en el código. Se
+    dijo: «esto no se debe definir aquí, se debería definir en el catálogo de conectores»."""
+
+    def test_salen_de_su_familia(self):
+        roseta = {c['id'] for c in connectors.jacks('outlet')}
+        toma = {c['id'] for c in connectors.jacks('power_outlet')}
+        assert {'8p8c', '6p4c', 'lc-upc', 'hdmi'} <= roseta and 'cee-7-3' not in roseta
+        assert {'cee-7-3', 'iec-60320-c13', 'iec-60320-c14'} <= toma
+        assert 'cee-7-7' not in toma and '10gbase-x-sfpp' not in roseta
+        assert connectors.jacks('pc') == []
+
+    def test_marcar_una_familia_en_una_version_guardada_la_ofrece(self):
+        dentro = int(connectors.packaged().get('version') or 0)
+        doc = dict(connectors.packaged(), version=dentro + 1)
+        doc['connectors'] = [dict(c, families=c['families'] + ['outlet-jacks']) if c['id'] == 'dvi-d' else c
+                             for c in doc['connectors']]
+        assert 'dvi-d' in {c['id'] for c in connectors.jacks('outlet', '', _Store(doc))}
+        assert 'dvi-d' not in {c['id'] for c in connectors.jacks('outlet')}
+
+    def test_y_no_queda_lista_en_el_codigo(self):
+        src = io.open(connectors.__file__, encoding='utf-8').read()
+        assert 'JACK_GROUPS' not in src and '_NOT_A_JACK' not in src
+        assert set(connectors.JACK_FAMILY.values()) <= set(connectors.FAMILIES)
+

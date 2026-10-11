@@ -82,7 +82,7 @@ function _dcDevGroupName(k) {
     if (_dcdBy === 'state') return _dcDevStateName(k);
     if (_dcdBy === 'site') return k || t('dcim_dev_no_site');
     if (_dcdBy === 'org') return k ? _dcimOrgName(k) : t('dcim_unclaimed');
-    return k ? t('dcim_role_' + k) : t('dcim_dev_no_role');
+    return k ? _dcRoleName(k) : t('dcim_dev_no_role');
 }
 
 /** El orden de los montones. Por gravedad cuando se agrupa por estado —de peor a mejor, que es
@@ -205,7 +205,7 @@ function _dcdCell(i, id) {
     if (id === 'state') return `<td class="ss-fs-2">${
         esc(_dcDevStateName(_dcDevState(i)))}</td>`;
     if (id === 'role') return `<td class="ss-fs-2">${
-        esc(i.role ? t('dcim_role_' + i.role) : '—')}</td>`;
+        esc(i.role ? _dcRoleName(i.role) : '—')}</td>`;
     if (id === 'model') return `<td class="ss-fs-2">${esc(i.type_name || '—')}</td>`;
     if (id === 'serial') return `<td class="ss-fs-2 ss-tabular">${esc(i.serial || '—')}</td>`;
     if (id === 'asset') return `<td class="ss-fs-2 ss-tabular">${esc(i.asset || '—')}</td>`;
@@ -261,7 +261,7 @@ createListTable({
             {key: 'role', label: () => t('dcim_role'), type: 'select', minWidth: '150px',
              options: () => [{value: '', label: t('all')}].concat(
                  (ctx.d.roles || []).filter(Boolean)
-                     .map(r => ({value: r, label: t('dcim_role_' + r)})))},
+                     .map(r => ({value: r, label: _dcRoleName(r)})))},
             {key: 'site', label: () => t('dcim_site'), type: 'select', minWidth: '150px',
              options: () => [{value: '', label: t('all')}].concat(
                  (ctx.d.sites || []).map(x => ({value: x.name, label: x.name})))},

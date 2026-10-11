@@ -6,8 +6,9 @@ Every floor has its distribution rack —the ground floor's and the basement's i
 communications room (COM-01), the first floor's in the data centre's network row (N01), the
 office floors' in their IDF— and every workstation is wired back to it:
 
-* a **double outlet** on each desk, the PC on jack A and the IP phone on jack B, each by a 2 m
-  patch cord;
+* a **double outlet** on each desk (two RJ45), the PC on jack A and the IP phone on jack B, each
+  by a 2 m patch cord, and a **power socket** beside it (two Schuko) on the floor's panel — the
+  NOC's desks on the data centre's UPS;
 * the **horizontal cable** (Cat 6A) from each jack's back (``A-R``) to the back of a port of a
   patch panel in the rack (``N-R``), its length the route along the ceiling trays;
 * the panel's **front** port to the access switch, port for port (`DcimStore` passes through
@@ -21,9 +22,16 @@ office floors' in their IDF— and every workstation is wired back to it:
   racks panel to panel, and a **copper trunk** between the two network racks.
 
 Patch panels and switches are added to each rack as the ports run out, 24 at a time.
+
+Every outlet says its jacks (two RJ45 at least; the meeting room's display outlet two RJ45 and an
+HDMI), and the power sockets their jacks and their source: two Schuko by each desk, display and
+printer; four C13 on the data centre's UPS and two Schuko on its panel at its wall; and a CEE
+socket on the generator in its room. So the plan shows the three kinds: «SAI», «GE» and mains.
 """
 
 from __future__ import annotations
+
+import json
 
 #: Where each distribution rack has room for a patch panel (with its cable manager under it)
 #: and its access switch, from the top down: ``(U of the panel, U of the switch)``.
@@ -145,6 +153,11 @@ def _room_item(b, room: str, role: str, label: str, x: float, y: float, rot: int
     return b.new('items', data)
 
 
+def _jacks(pairs) -> str:
+    """An outlet's or a socket's jacks as stored: ``[(connector, n), …]`` → its JSON list."""
+    return json.dumps([{'connector': c, 'n': n} for c, n in pairs], separators=(',', ':'))
+
+
 def _on_desk(desk: dict, fx: float, fy: float, w: int, d: int) -> tuple:
     """Where an item of ``w × d`` sits on a desk, at the fractions ``(fx, fy)`` of the desk —
     ``fy`` from the edge where one sits (the desk's front, its ``pos_y`` side before turning,
@@ -179,7 +192,8 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
                 rack_xy[r['uid']] = (ox + float(r['pos_x'] or 0), oy + float(r['pos_y'] or 0))
     cab = _Cabling(b, net, {'rack_xy': rack_xy})
     dists = net['dists']
-    cuenta = {'endpoints': 0, 'outlets': 0, 'aps': 0, 'cameras': 0, 'printers': 0, 'displays': 0}
+    cuenta = {'endpoints': 0, 'outlets': 0, 'aps': 0, 'cameras': 0, 'printers': 0, 'displays': 0,
+              'sockets': 0}
 
     def size(role):
         return ROOM_ITEM_DEFAULTS[role][:2]
@@ -188,8 +202,9 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
         ox, oy = room_xy[uid_room[room]]
         cab.horizontal(dists[_SERVED_BY[fkey]], item_uid, port, (ox + x, oy + y), fkey)
 
-    def outlet_for(fkey, room, label, x, y, rot, mount='desk', base=None):
-        extra = {'mount': mount}
+    def outlet_for(fkey, room, label, x, y, rot, mount='desk', base=None, jacks=None):
+        # Dos RJ45 como poco: las bocas A y B que cablea el horizontal.
+        extra = {'mount': mount, 'jacks': _jacks(jacks or [('8p8c', 2)])}
         if base is not None:
             extra['base_mm'] = base
         o = _room_item(b, room, 'outlet', label, x, y, rot, **extra)
@@ -197,6 +212,19 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
         for jack in ('A', 'B'):
             wire(fkey, room, o, jack + '-R', x, y)
         return o
+
+    fuentes = net.get('sources') or {}
+
+    def panel_of(fkey):
+        """The panel a floor's sockets hang from: its own, or the main one."""
+        return fuentes.get({'floor_second': 'p2', 'floor_third': 'p3'}.get(fkey, 'cgbt'), '')
+
+    def socket_for(room, label, x, y, rot, source, jacks, mount='desk', base=None):
+        extra = {'mount': mount, 'jacks': _jacks(jacks), 'source_uid': source or ''}
+        if base is not None:
+            extra['base_mm'] = base
+        cuenta['sockets'] += 1
+        return _room_item(b, room, 'power_outlet', label, x, y, rot, **extra)
 
     def patch(a, a_port, o, jack, color='grey'):
         b.cable(a, a_port, o, jack, category='cat6a', color=color, length=2000)
@@ -214,7 +242,9 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
                 tv = _room_item(b, room, 'display', 'TV-%s' % w['room_' + rk], (W - dw) / 2, 60,
                                 180)
                 o = outlet_for(fkey, room, 'R-TV-%s' % w['room_' + rk], W / 2 - 43, 60, 180,
-                               mount='wall')
+                               mount='wall', jacks=[('8p8c', 2), ('hdmi', 1)])
+                socket_for(room, 'T-TV-%s' % w['room_' + rk], W / 2 + 100, 60, 180, panel_of(fkey),
+                           [('cee-7-3', 2)], mount='wall')
                 patch(tv, 'hdmi-lan', o, 'A')
                 cuenta['displays'] += 1
                 if mesa:
@@ -231,6 +261,10 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
                     ow, od = size('outlet')
                     x, y = _on_desk(desk, 0.5, 0.95, ow, od)
                     o = outlet_for(fkey, room, nombre, x, y, rot)
+                    tw_, td_ = size('power_outlet')
+                    x, y = _on_desk(desk, 0.65, 0.95, tw_, td_)
+                    socket_for(room, 'T-%s' % nombre, x, y, rot,
+                               fuentes.get('a', '') if rk == 'noc' else panel_of(fkey), [('cee-7-3', 2)])
                     pw, pd = size('pc')
                     x, y = _on_desk(desk, 0.2, 0.75, pw, pd)
                     pc = _room_item(b, room, 'pc', 'PC-%s' % nombre, x, y, rot)
@@ -250,6 +284,8 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
                 y = float(zona['pos_y']) + (float(zona['depth_mm']) - idd) / 2
                 imp = _room_item(b, room, 'printer', 'IMP-%s' % lvl_tag, x, y)
                 o = outlet_for(fkey, room, 'R-IMP-%s' % lvl_tag, x + iw + 100, y, 0, mount='floor', base=0)
+                socket_for(room, 'T-IMP-%s' % lvl_tag, x + iw + 300, y, 0, panel_of(fkey),
+                           [('cee-7-3', 1)], mount='floor', base=0)
                 patch(imp, 'eth0', o, 'A')
                 cuenta['printers'] += 1
             # An access point in the middle of the ceiling of every room big enough to need one.
@@ -259,6 +295,16 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
                                 D / 2 - ad / 2)
                 wire(fkey, room, ap, 'eth0', W / 2, D / 2)
                 cuenta['aps'] += 1
+            # The data centre's service sockets at its wall: four C13 on its UPS and two Schuko
+            # on its panel. And the generator room's CEE socket, on the generator.
+            if rk == 'cpd':
+                socket_for(room, 'T-CPD-SAI', W / 2 - 1600, D - 150, 0, fuentes.get('a', ''),
+                           [('iec-60320-c13', 4)], mount='wall')
+                socket_for(room, 'T-CPD-1', W / 2 - 2000, D - 150, 0, fuentes.get('cpd', ''),
+                           [('cee-7-3', 2)], mount='wall')
+            if rk == 'gen':
+                socket_for(room, 'T-GEN', 600, 150, 0, fuentes.get('gen', ''),
+                           [('iec-60309-p-n-e-4h-out', 1)], mount='wall', base=1200)
             # And a camera on the data centre's door.
             if rk == 'cpd':
                 cw, cd = size('camera')

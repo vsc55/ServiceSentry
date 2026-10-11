@@ -53,6 +53,85 @@ def worst(states) -> str:
     return out
 
 
+def empty_rack(store, rack_uid: str) -> dict:
+    """Take everything out of a rack, and say what went: ``{items, pdus, cables, feeds, parts}``.
+
+    Bottom-up, so nothing is left pointing at a parent that is gone: the power leads to its strips
+    and from its items, its items' cables and components, its strips, and its items —the mounted
+    ones first, their parent is another item of the same rack—. A power source that said it WAS
+    one of these items (a UPS by the rack) stays, saying no item: the source is part of the
+    building's chain, the box was not. Whose each one was is forgotten with it. The rack itself
+    stays: deleting it is the caller's."""
+    items = store.items_of(rack_uid)
+    item_uids = [i['uid'] for i in items]
+    pdus = store.pdus_of(rack_uid)
+    hecho = {'items': len(items), 'pdus': len(pdus), 'cables': 0, 'feeds': 0, 'parts': 0}
+    feeds = list(store.feeds_of([p['uid'] for p in pdus]))
+    for item_uid in item_uids:
+        feeds += store.feeds.list('item_uid = ?', (item_uid,))
+    for feed in {f['uid']: f for f in feeds}.values():
+        store.feeds.delete(feed['uid'])
+        hecho['feeds'] += 1
+    for cable in store.cables_of(item_uids):
+        store.cables.delete(cable['uid'])
+        hecho['cables'] += 1
+    for part in store.parts_of(item_uids):
+        store.parts.delete(part['uid'])
+        hecho['parts'] += 1
+    for source in store.sources.list():
+        if str(source.get('item_uid') or '') in item_uids:
+            store.sources.update(source['uid'], {'item_uid': ''}, actor='')
+    # Y la regleta de OTRO armario que dijera ser uno de estos equipos: deja de decirlo.
+    mias = {p['uid'] for p in pdus}
+    for otra in store.pdus.list():
+        if otra['uid'] not in mias and str(otra.get('item_uid') or '') in item_uids:
+            store.pdus.update(otra['uid'], {'item_uid': ''}, actor='')
+    for pdu in pdus:
+        store.pdus.delete(pdu['uid'])
+    for item in sorted(items, key=lambda i: not i.get('parent_uid')):
+        store.items.delete(item['uid'])
+        store.forget_scope('item', item['uid'])
+    return hecho
+
+
+def jack_list(item) -> list:
+    """Las bocas de una roseta o una toma, de su columna (`jacks`, JSON): ``[{connector, n}]``.
+    Lo que no se lea como tal se ignora: una fila escrita a mano no tumba la ficha."""
+    import json as _json                                               # noqa: PLC0415
+    try:
+        crudo = _json.loads(str(item.get('jacks') or '') or '[]')
+    except ValueError:
+        return []
+    out = []
+    for b in crudo if isinstance(crudo, list) else ():
+        if isinstance(b, dict) and str(b.get('connector') or '').strip():
+            try:
+                n = int(b.get('n') or 1)
+            except (TypeError, ValueError):
+                n = 1
+            out.append({'connector': str(b['connector']).strip(), 'n': max(1, n)})
+    return out
+
+
+def jack_brief(store, item, conns=None) -> dict:
+    """Lo que un equipo de pared con bocas dice además de su fila: sus bocas como lista (cada una
+    con sus letras), las letras con que se lee en el plano (las de la primera, y `+` si hay más
+    tipos) y, una toma de corriente, la clase y el nombre de la fuente de la que cuelga. Nada
+    para lo demás."""
+    from lib.core.dcim import connectors as _conn                     # noqa: PLC0415
+    out = {}
+    if 'jacks' in item:
+        out['jacks'] = [dict(b, abbr=_conn.jack_abbr(b['connector'], conns)) for b in jack_list(item)]
+        if out['jacks']:
+            out['jacks_abbr'] = out['jacks'][0]['abbr'] + ('+' if len(out['jacks']) > 1 else '')
+    src = str(item.get('source_uid') or '')
+    fila = store.sources.get(src) if src and store is not None else None
+    if fila:
+        out['source_kind'] = str(fila.get('kind') or '')
+        out['source_name'] = str(fila.get('name') or '')
+    return out
+
+
 def item_state(item, statuses) -> str:
     """One item's state: its device's, or ``''`` if it has no device or nothing watches it.
 

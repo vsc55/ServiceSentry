@@ -43,7 +43,7 @@ rect(40, 200, 6, 6);         // a dot of text
 rect(300, 200, 60, 60);      // a filled column: too thick to be a wall
 rect(20, 270, 100, 8);       // a wall cut by a gap…
 rect(126, 270, 100, 8);      // …that goes on after it
-const tramos = dcwDetect(img, {thresh: 128, minT: 3, maxT: 20, minLen: 40, gap: 10});
+const tramos = p2dWallsDetect(img, {thresh: 128, minT: 3, maxT: 20, minLen: 40, gap: 10});
 const h = tramos.filter(s => s.y1 === s.y2).sort((a, b) => a.y1 - b.y1);
 const v = tramos.filter(s => s.x1 === s.x2);
 __out.detect = {
@@ -51,9 +51,9 @@ __out.detect = {
     verticales: v.map(s => [Math.round(s.x1), s.y1, s.y2, s.t]),
 };
 // Otsu finds a grey between paper and ink by itself.
-__out.otsu = _dcwOtsu(new Uint8Array([250, 250, 250, 250, 10, 10, 12]));
+__out.otsu = p2dWallsOtsu(new Uint8Array([250, 250, 250, 250, 10, 10, 12]));
 // From the calibration: millimetres per pixel → what to look for in pixels.
-__out.params = _dcwParams(10, {minCm: 6});
+__out.params = p2dWallsParams(10, {minCm: 6});
 
 // ── A CAD plan: a wall is two thin parallel lines ───────────────────────────────
 const lineas = [
@@ -62,29 +62,29 @@ const lineas = [
     {x1: 0, y1: 300, x2: 300, y2: 300, t: 1}, {x1: 0, y1: 340, x2: 300, y2: 340, t: 1},   // 40 px apart: too wide
     {x1: 50, y1: 0, x2: 50, y2: 90, t: 1}, {x1: 56, y1: 10, x2: 56, y2: 90, t: 1},         // a vertical wall
 ];
-__out.parejas = dcwPairs(lineas, 2, 12).map(w => [w.x1, w.y1, w.x2, w.y2, w.t]);
-__out.umbralDevuelto = typeof dcwDetect(img, {thresh: 128, minT: 3, maxT: 20, minLen: 40}).umbral === 'number';
-const manual = dcwDetect(img, {thresh: 200, minT: 3, maxT: 20, minLen: 40});
+__out.parejas = p2dWallsPairs(lineas, 2, 12).map(w => [w.x1, w.y1, w.x2, w.y2, w.t]);
+__out.umbralDevuelto = typeof p2dWallsDetect(img, {thresh: 128, minT: 3, maxT: 20, minLen: 40}).umbral === 'number';
+const manual = p2dWallsDetect(img, {thresh: 200, minT: 3, maxT: 20, minLen: 40});
 __out.otsuAparte = [manual.umbral, manual.otsu !== 200];
 
 // ── Hatching is not a wall ──────────────────────────────────────────────────────
 const rayado = Array.from({length: 8}, (_, i) => ({x1: 100 + i * 10, y1: 0, x2: 100 + i * 10, y2: 200, t: 1}));
 const muroSolo = {x1: 0, y1: 0, x2: 0, y2: 200, t: 1};
-__out.rayado = dcwDropHatching(rayado.concat([muroSolo, {x1: 6, y1: 0, x2: 6, y2: 200, t: 1}]), 30, 4)
+__out.rayado = p2dWallsDropHatching(rayado.concat([muroSolo, {x1: 6, y1: 0, x2: 6, y2: 200, t: 1}]), 30, 4)
     .map(s => s.x1).sort((p, q) => p - q);
 // A façade wall right beside a roof's hatching, longer than its strokes, stays.
 // …even with the strokes packed tight against it.
 const denso = Array.from({length: 12}, (_, i) => ({x1: 92 + i * 2, y1: 0, x2: 92 + i * 2, y2: 200, t: 1}));
-__out.fachada = dcwDropHatching(denso.concat([{x1: 90, y1: 0, x2: 90, y2: 600, t: 1}]), 30, 4).map(s => s.x1);
+__out.fachada = p2dWallsDropHatching(denso.concat([{x1: 90, y1: 0, x2: 90, y2: 600, t: 1}]), 30, 4).map(s => s.x1);
 
 // ── A mixed plan: double-line walls and single thick partitions ─────────────────
-__out.mixto = dcwMixed([
+__out.mixto = p2dWallsMixed([
     {x1: 0, y1: 100, x2: 400, y2: 100, t: 1}, {x1: 0, y1: 105, x2: 400, y2: 105, t: 2},   // a double wall
     {x1: 0, y1: 200, x2: 300, y2: 200, t: 3},                                              // a partition
     {x1: 0, y1: 300, x2: 300, y2: 300, t: 1},                                              // a lone thin line
 ], 2, 12, 2).map(w => [w.y1, w.t]);
 // The same wall read twice — as a pair and as a loose thick stroke — comes out once.
-__out.dobles = dcwMixed([
+__out.dobles = p2dWallsMixed([
     {x1: 0, y1: 100, x2: 400, y2: 100, t: 1}, {x1: 0, y1: 105, x2: 400, y2: 105, t: 1},
     {x1: 0, y1: 103, x2: 390, y2: 103, t: 3},
 ], 2, 12, 2).length;
@@ -97,14 +97,14 @@ const rect2 = (x0, y0, w, h) => { for (let y = y0; y < y0 + h; y++) for (let x =
     const p = (y * W2 + x) * 4; img2.data[p] = img2.data[p + 1] = img2.data[p + 2] = 0; } };
 rect2(58, 20, 4, 160);        // the partition, 4 px
 rect2(54, 168, 12, 12);       // its pillar at the foot
-__out.pilar = dcwDetect(img2, {thresh: 128, minT: 1, maxT: 5, minLen: 11, gap: 2})
+__out.pilar = p2dWallsDetect(img2, {thresh: 128, minT: 1, maxT: 5, minLen: 11, gap: 2})
     .filter(s => s.x1 === s.x2).map(s => [s.x1, s.t, s.y2 - s.y1 >= 140]);
 // And a two-pixel line is drawing, not a partition: the single-stroke minimum is 3 px.
-__out.soloPx = _DCW_SOLO_PX;
-__out.lineaFina = dcwMixed([{x1: 0, y1: 50, x2: 200, y2: 50, t: 2}], 1, 5, Math.max(_DCW_SOLO_PX, 0.86)).length;
+__out.soloPx = P2D_WALLS_SOLO_PX;
+__out.lineaFina = p2dWallsMixed([{x1: 0, y1: 50, x2: 200, y2: 50, t: 2}], 1, 5, Math.max(P2D_WALLS_SOLO_PX, 0.86)).length;
 
 // ── Openings cut their wall ─────────────────────────────────────────────────────
-__out.huecos = _dcwCut([
+__out.huecos = p2dWallsCut([
     {kind: 'wall', x1: 0, y1: 0, x2: 10000, y2: 0, thick_mm: 200},
     {kind: 'door', x1: 2000, y1: 50, x2: 3000, y2: 50, thick_mm: 200},
     {kind: 'window', x1: 6000, y1: 0, x2: 8000, y2: 0, thick_mm: 200},
@@ -115,7 +115,7 @@ __out.huecos = _dcwCut([
 _dcw = {segs: [{kind: 'wall', x1: 0, y1: 0, x2: 5000, y2: 0, thick_mm: 150}], tool: 'wall', start: null, sel: -1};
 __out.snapExtremo = _dcwSnap({x: 5100 * _DCP_SCALE, y: 120 * _DCP_SCALE}, null);
 __out.snapEscuadra = _dcwSnap({x: 3000 * _DCP_SCALE, y: 7000 * _DCP_SCALE}, [3100, 0]);
-__out.distancia = Math.round(_dcwDist(_dcw.segs[0], 2500, 300));
+__out.distancia = Math.round(p2dSegDist(_dcw.segs[0], 2500, 300));
 // Moving around while reviewing: choosing, a press away from every wall drags the plan; on a
 // wall it selects it; the middle button drags even while drawing, and places no point.
 const arrastres = [];
@@ -145,20 +145,20 @@ _dcw = {segs: [{kind: 'wall', x1: 0, y1: 0, x2: 5000, y2: 0, thick_mm: 150, prop
 const n = () => _dcw.segs.length;
 _dcwDelete();
 const trasBorrar = n();
-_dcwUndo('undo');
+p2du('undo');
 const deshecho = n();
-_dcwUndo('redo');
+p2du('redo');
 const rehecho = n();
-_dcwUndo('undo');
+p2du('undo');
 _dcwAcceptAll();
 const aceptadas = _dcw.segs.filter(x => x.prop).length;
-_dcwUndo('undo');
+p2du('undo');
 const propuestasOtraVez = _dcw.segs.filter(x => x.prop).length;
-const pasos = _dcw.hist.length;
+const pasos = P2DU.stack.length;
 _dcw.tool = 'select'; _dcw.sel = 0;
 _dcwDown(evAt(5000, 0)); _dcwUp(evAt(5000, 0));          // the end, taken and let go
 __out.deshacerRevision = {trasBorrar, deshecho, rehecho, aceptadas, propuestasOtraVez,
-                          sinPasoVacio: _dcw.hist.length === pasos};
+                          sinPasoVacio: P2DU.stack.length === pasos};
 // Several at once: Ctrl + click adds and removes, Shift + drag in empty space boxes them, Ctrl+A
 // takes all; deleting several is one step; the ends to drag show only with one chosen.
 _dcw = {segs: [0, 2000, 4000, 6000].map(y => ({kind: 'wall', x1: 0, y1: y, x2: 3000, y2: y, thick_mm: 150, prop: false})),
@@ -174,26 +174,56 @@ _dcwDown(con(1500, 2000, {ctrlKey: true})); _dcwUp(con(1500, 2000));
 const quitado = _dcwSels();
 _dcwDown(con(5000, 3000, {shiftKey: true})); _dcwMove(con(-500, 7000)); _dcwUp(con(-500, 7000));
 const recuadro = _dcwSels();
-const pasosAntes = (_dcw.hist || []).length;
+const pasosAntes = P2DU.stack.length;
 _dcwDelete();
 const quedan = _dcw.segs.map(x => x.y1);
-const unPaso = (_dcw.hist || []).length - pasosAntes;
-_dcwUndo('undo');
+const unPaso = P2DU.stack.length - pasosAntes;
+p2du('undo');
 const vuelven = _dcw.segs.length;
 _dcwSelAll();
 __out.varios = {dos, asasConDos, quitado, recuadro, quedan, unPaso, vuelven, todos: _dcwSels().length,
                 unoConAsas: (() => { _dcwSelSet([1]); return _dcwSvg().includes('<circle'); })()};
+// The box is the plan editor's, asking the wall itself: a box inside a diagonal wall's bounding
+// box but off its line takes nothing; one across the line takes it.
+_dcw = {segs: [{kind: 'wall', x1: 0, y1: 0, x2: 4000, y2: 4000, thick_mm: 150, prop: false}],
+        tool: 'select', start: null, sel: -1};
+_dcwSelSet([]);
+_dcwDown(con(3500, 500, {shiftKey: true})); _dcwMove(con(3900, 900)); _dcwUp(con(3900, 900));
+const diagonalFuera = _dcwSels().length;
+_dcwDown(con(2500, 1500, {shiftKey: true})); _dcwMove(con(1500, 2500)); _dcwUp(con(1500, 2500));
+__out.diagonal = [diagonalFuera, _dcwSels()];
+// The review's steps are the plan's history, but only they are walked while it is open —undoing
+// what is underneath would change what it is about to save—; closing it takes them away.
+P2DU.stack = []; P2DU.redo = [];
+const alServidor = [];
+const src0 = P2DU.src;
+P2DU.src = Object.assign({}, _dcUndoSrc, {flush: () => {}, rerender: () => {},
+    send: (m, u) => { alServidor.push(u); return Promise.resolve({ok: true}); }});
+P2DU.stack.push({url: '/api/v1/dcim/racks/k1', before: {pos_x: 0}, after: {pos_x: 9}, at: 0});
+_dcw = {segs: [{kind: 'wall', x1: 0, y1: 0, x2: 3000, y2: 0, thick_mm: 150, prop: false}],
+        tool: 'select', start: null, sel: 0};
+p2duLocalOpen();
+_dcwDelete();
+p2du('undo');
+const trasDeshacer = _dcw.segs.length;
+p2du('undo');
+const debajo = [alServidor.length, P2DU.stack.length,
+                p2duButtonsInner().split('</button>')[0].includes('disabled')];
+p2duLocalClose();
+__out.revisionAbierta = {trasDeshacer, debajo, quedan: P2DU.stack.map(e => !!e.local), rehacer: P2DU.redo.length};
+P2DU.src = src0;
 _dcsFloor = dcsFloor0;
 ssCanvasPoint = ssPoint0;
 _dcw = null;
 // Saving goes into the plan's undo, and undoing it puts the floor's walls back as they were.
 _dcsPlan = Object.assign({}, _dcsPlan || {}, {walls: {f9: [{kind: 'wall', x1: 0, y1: 0, x2: 9, y2: 0, thick_mm: 100}]}});
-_dcUndoStack = []; _dcRedoStack = [];
-_dcUndoPush('/api/v1/dcim/floors/f9/walls', {walls: [{kind: 'wall', x1: 0, y1: 0, x2: 1, y2: 0, thick_mm: 100}]},
+P2DU.stack = []; P2DU.redo = [];
+P2DU.src = _dcUndoSrc;      // the inventory's, as opening the floor sets it
+p2duPush('/api/v1/dcim/floors/f9/walls', {walls: [{kind: 'wall', x1: 0, y1: 0, x2: 1, y2: 0, thick_mm: 100}]},
             {walls: _dcsPlan.walls.f9});
-const entrada = _dcUndoStack[_dcUndoStack.length - 1];
-_dcUndoDone(_dcUndoStack.pop(), entrada.before, _dcRedoStack);
-__out.deshacerGuardado = {x2: _dcsPlan.walls.f9[0].x2, rehacer: _dcRedoStack.length, que: _dcUndoWhat(entrada)};
+const entrada = P2DU.stack[P2DU.stack.length - 1];
+p2duDone(P2DU.stack.pop(), entrada.before, P2DU.redo);
+__out.deshacerGuardado = {x2: _dcsPlan.walls.f9[0].x2, rehacer: P2DU.redo.length, que: p2duWhat(entrada)};
 
 // ── In 3D ───────────────────────────────────────────────────────────────────────
 _dcsPlan = {walls: {f1: [{kind: 'wall', x1: 0, y1: 0, x2: 4000, y2: 0, thick_mm: 200},
@@ -276,6 +306,20 @@ class TestTheReview:
         assert v['recuadro'] == [0, 2, 3]
         assert v['quedan'] == [2000] and v['unPaso'] == 1 and v['vuelven'] == 4
         assert v['todos'] == 4 and v['unoConAsas'] is True
+
+    def test_the_box_asks_the_wall_not_its_bounding_box(self, out):
+        """The review chooses with the plan editor's box, which asks each wall whether the box
+        touches it (`touches`): a diagonal wall's bounding box is mostly empty floor."""
+        assert out['diagonal'] == [0, [0]]
+
+    def test_while_reviewing_undo_walks_only_the_reviews_steps(self, out):
+        """The review's steps are steps of the plan's history (`p2duLocal`), undone without
+        sending anything. While it is open what lies underneath is not undone —it would change
+        what the review is about to save— and the button says so; closing it takes its steps."""
+        d = out['revisionAbierta']
+        assert d['trasDeshacer'] == 1
+        assert d['debajo'] == [0, 1, True]
+        assert d['quedan'] == [False] and d['rehacer'] == 0
 
     def test_saving_the_walls_can_be_undone_from_the_plan(self, out):
         """And saving, which replaces the floor's walls whole, is a step of the plan's undo:

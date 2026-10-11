@@ -32,6 +32,7 @@ Rutas:
     DELETE  /api/v1/dcim/sites/<uid>/photo
     GET     /api/v1/dcim/sites/<uid>/floors
     GET     /api/v1/dcim/sites/<uid>/contents
+    GET     /api/v1/dcim/{sites,rooms,racks}/<uid>/holds  what it still holds, asked before deleting it
     GET     /api/v1/dcim/sites/<uid>/circuits
     POST    /api/v1/dcim/rows
     PUT     /api/v1/dcim/rows/<uid>
@@ -49,7 +50,8 @@ from lib.core.dcim import catalog as dcim_catalog
 from lib.core.dcim import media as dcim_media
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
-from lib.core.dcim.store import (ACCESS_KINDS, FEATURE_KINDS, FEATURE_LAYERS, LOCK_KINDS, room_item_box,
+from lib.core.dcim import plankinds as dcim_plankinds
+from lib.core.dcim.store import (ACCESS_KINDS, FEATURE_LAYERS, LOCK_KINDS, room_item_box,
                                  SHELVED_KINDS, SHELVES_MAX)
 from lib.core.dcim.store.features import _FEATURE, _SHELF_ITEM
 from lib.core.dcim.store.floors import WALL_KINDS, WALLS_MAX, _FLOOR
@@ -285,7 +287,32 @@ def register(app, wa, C):
                 return jsonify({'error': wa._t(err)}), 400
             if part == 'rooms' and not _room_floor_ok(store, data, uid):
                 return jsonify({'error': wa._t('dcim_floor_other_site')}), 400
+            # A rack to another room —asked for—, of the same site: its strips' sources, its
+            # cables' runs and its owner's site are of that site, and a rack shipped to another
+            # building is taken out and put in again. It leaves its row and its group, which are
+            # of the room it left, and comes in at the room's corner unless it is told where.
+            sala_antes = str(row.get('room_uid') or '')
+            cambia_sala = part == 'racks' and 'room_uid' in data and str(data['room_uid']) != sala_antes
+            if cambia_sala:
+                nueva = store.rooms.get(str(data['room_uid'])) or {}
+                vieja = store.rooms.get(sala_antes) or {}
+                if str(nueva.get('site_uid') or '') != str(vieja.get('site_uid') or ''):
+                    return jsonify({'error': wa._t('dcim_rack_other_site')}), 400
+                data.setdefault('pos_x', 0)
+                data.setdefault('pos_y', 0)
+                data.setdefault('row_uid', '')
+                data.setdefault('group_uid', '')
             getattr(store, part).update(uid, data, actor=C.actor())
+            if cambia_sala:
+                wa._audit('dcim_moved', detail={'rack': uid, 'room_from': sala_antes,
+                                                'room_to': str(data['room_uid'])})
+            # Una sala que cambia de sede: sus tomas de corriente colgaban de fuentes de la sede
+            # que deja. Se quedan sin decir de qué cuelgan, que es la verdad.
+            if part == 'rooms' and 'site_uid' in data \
+                    and str(data['site_uid'] or '') != str(row.get('site_uid') or ''):
+                for toma in store.items_in_room(uid):
+                    if toma.get('source_uid'):
+                        store.items.update(toma['uid'], {'source_uid': ''}, actor=C.actor())
             # Y su foto, si lo editado ES un armario: renombrarlo o cambiarle la altura mueve de
             # sitio a todo lo que hay dentro, y eso es parte de su historia. Aquí y no en cada
             # llamada porque este CRUD es uno para cuatro cosas — la condición es el precio de
@@ -293,6 +320,20 @@ def register(app, wa, C):
             if scope == 'rack':
                 C.snap(uid, 'rack_edit')
             return jsonify({'ok': True})
+
+        @app.route(f'/api/v1/dcim/{kind}/<uid>/holds', methods=['GET'],
+                   endpoint=f'api_dcim_{kind}_holds')
+        @C.view_req
+        def _contents_of(uid):
+            """What it still holds, as ``{contains: {kind: count}}`` —empty if nothing—: what
+            the panel says before asking to delete it, so «it is not empty» is not the answer to
+            a question already confirmed."""
+            store = C.store()
+            if not store or not getattr(store, part).get(uid):
+                return jsonify({'error': wa._t('dcim_not_found')}), 404
+            if not dcim_owners.may_see(C.owner_of(store, store.owners_map(), scope, uid), C.seen()):
+                return jsonify({'error': wa._t('access_denied')}), 403
+            return jsonify({'contains': _contents(store, scope, uid)})
 
         @app.route(f'/api/v1/dcim/{kind}/<uid>', methods=['DELETE'],
                    endpoint=f'api_dcim_{kind}_del')
@@ -310,6 +351,19 @@ def register(app, wa, C):
             # visible to anybody who may open the section. Same answer as an item that carries
             # mounted ones — say what is inside and let a person empty it.
             inside = _contents(store, scope, uid)
+            # A rack, WITH what it holds, when asked for in so many words (`?contents=delete`).
+            # Every item in it must be the caller's to delete —a shared rack holds other
+            # companies' boxes—, the same check deleting one by one would make.
+            if inside and scope == 'rack' and request.args.get('contents') == 'delete':
+                said, allowed = store.owners_map(), C.seen()
+                ajenos = [i for i in store.items_of(uid)
+                          if not C.may_write(store, said, allowed, 'item', i['uid'])]
+                if ajenos:
+                    return jsonify({'error': wa._t('dcim_rack_foreign_items'),
+                                    'foreign': len(ajenos)}), 403
+                hecho = dcim_svc.empty_rack(store, uid)
+                wa._audit('dcim_rack_emptied', detail=dict(hecho, rack=uid, name=row.get('name') or ''))
+                inside = {}
             if inside:
                 return jsonify({'error': wa._t('dcim_container_not_empty'),
                                 'contains': inside}), 409
@@ -490,7 +544,7 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('access_denied')}), 403
         # Con los tipos de pieza y sus medidas: la paleta del plano de la sede los necesita
         # aunque la planta no tenga todavía ninguna sala a la que preguntárselos.
-        return jsonify({'floors': store.floors_of(uid), 'kinds': FEATURE_KINDS})
+        return jsonify({'floors': store.floors_of(uid), 'kinds': dcim_plankinds.feature_kinds(wa)})
 
     @app.route('/api/v1/dcim/sites/<uid>/contents', methods=['GET'])
     @C.view_req
@@ -536,7 +590,7 @@ def register(app, wa, C):
         # Y los muros de cada planta: el 3D de la planta y del edificio los levanta.
         walls = {f['uid']: [_wall_out(w) for w in store.walls_of(f['uid'])]
                  for f in store.floors_of(uid)}
-        return jsonify({'rooms': rooms, 'kinds': FEATURE_KINDS, 'walls': walls})
+        return jsonify({'rooms': rooms, 'kinds': dcim_plankinds.feature_kinds(wa), 'walls': walls})
 
     def _wall_out(w):
         return {k: w.get(k) for k in ('uid', 'kind', 'x1', 'y1', 'x2', 'y2', 'thick_mm')}
@@ -930,14 +984,16 @@ def register(app, wa, C):
         equipos = _room_items(store, uid, said, allowed, dcim_svc.reachable(store, said, allowed),
                               C.states())
         return jsonify(dict({'features': piezas, 'items': equipos,
-                             'kinds': FEATURE_KINDS,
+                             'kinds': dcim_plankinds.feature_kinds(wa),
                              'layers': list(FEATURE_LAYERS),
                              'locks': list(LOCK_KINDS), 'access_kinds': list(ACCESS_KINDS)},
                             **filas, **acceso))
 
     def _room_items(store, room_uid, said, allowed, reach, estados) -> list:
         """A room's items (`placement = 'room'`) this reader may see, with their state and box."""
-        return [dict(i, state=dcim_svc.item_state(i, estados), box=room_item_box(i))
+        cajas = dcim_plankinds.device_defaults(wa)
+        return [dict(i, state=dcim_svc.item_state(i, estados), box=room_item_box(i, cajas),
+                     **dcim_svc.jack_brief(store, i, C.conns()))
                 for i in C.filtered(store.items_in_room(room_uid), store, said, allowed, 'item', reach)]
 
     def _access_of(store, room, piezas) -> dict:
@@ -1045,14 +1101,16 @@ def register(app, wa, C):
     def api_dcim_feature_new():
         data = request.get_json(silent=True) or {}
         kind = str(data.get('kind') or '')
-        if kind not in FEATURE_KINDS:
+        # Las de código y las creadas desde la pantalla (`plankinds`).
+        piezas = dcim_plankinds.feature_kinds(wa)
+        if kind not in piezas:
             return jsonify({'error': wa._t('dcim_kind_unknown')}), 400
         store, room = _room_writable(data.get('room_uid'))
         if not store or room is None:
             return jsonify({'error': wa._t('dcim_not_found')}), 404
         if room is False:
             return jsonify({'error': wa._t('access_denied')}), 403
-        spec = FEATURE_KINDS[kind]
+        spec = piezas[kind]
         # Las medidas de fábrica si no vienen dadas: una pieza sin tamaño se dibuja como un punto
         # y hay que estirarla a mano para descubrir que era una mampara.
         body = _fresh(data)
@@ -1084,7 +1142,7 @@ def register(app, wa, C):
         # pintar de rojo una cerradura de verdad.
         data = _without(request.get_json(silent=True) or {},
                         ('room_uid', 'demo_state', 'demo_reason'))
-        if 'kind' in data and str(data['kind']) not in FEATURE_KINDS:
+        if 'kind' in data and str(data['kind']) not in dcim_plankinds.feature_kinds(wa):
             return jsonify({'error': wa._t('dcim_kind_unknown')}), 400
         malo_acceso = _access_bad(store, store.rooms.get(row.get('room_uid')) or {}, data)
         if malo_acceso:
@@ -1251,13 +1309,14 @@ def register(app, wa, C):
             store.rooms.update(uid, medidas, actor=actor)
 
         # Las piezas, enteras: built first, swapped after — see `_replace_features`.
+        piezas = dcim_plankinds.feature_kinds(wa)
         nuevas, saltadas = [], 0
         for row in (data.get('features') or []):
             kind = str(row.get('kind') or '')
-            if kind not in FEATURE_KINDS:
+            if kind not in piezas:
                 saltadas += 1                    # un tipo que esta versión no conoce
                 continue
-            spec = FEATURE_KINDS[kind]
+            spec = piezas[kind]
             nuevas.append({
                 'room_uid': uid, 'kind': kind,
                 'label': str(row.get('label') or ''),

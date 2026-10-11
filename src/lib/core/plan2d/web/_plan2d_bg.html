@@ -1,0 +1,638 @@
+{# ================================================================
+   plan2d — el plano de fondo de un plano: pedirlo, dibujarlo, subirlo, quitarlo, y dónde cae y
+   a qué escala.
+
+   Un plano de verdad se colocaba con UN número, «Ancho del plano»: lo ancho que es de verdad la
+   imagen entera, y su esquina de arriba a la izquierda pegada al (0, 0). Las dos cosas fallan:
+   la imagen lleva márgenes y cajetín, así que su ancho real es un dato que nadie tiene, y lo que
+   dibuja no empieza en su esquina, así que todo quedaba desplazado lo que midiera el margen.
+
+   Se calibra como en cualquier programa de planos: dos puntos de una distancia que se conoce
+   (los extremos de una pared, una cota) dan la escala; y luego el plano se ENCAJA con lo que ya
+   está dibujado —arrastrándolo, o llevando un punto suyo a una esquina de algo dibujado—, o con
+   otro plano ya colocado (otra planta del edificio). Lo que se guarda es el ancho de la imagen
+   (`plan_mm`), dónde cae su esquina (`plan_x`, `plan_y`) y, si se dice, el norte (`north_deg`).
+
+   Lo que es de cada pantalla lo dice su FUENTE (`p2dBgUse(src)`):
+     scale                       unidades del dibujo por milímetro
+     may()                       si quien mira puede editar
+     mediaUrl(nombre)            de dónde se lee una imagen guardada
+     planUrl(scope, uid)         dónde se sube (POST) y se quita (DELETE) el plano de algo
+     planSet(scope, uid, nombre) lo que tiene ahora, y volver a leer y pintar
+     target(kind)                lo que se calibra: {rec, box, img, svg, url, redraw}, o null
+     anchors(kind)               las esquinas de lo dibujado, [{x, y}] en mm
+     refs(kind)                  otros planos contra los que encajar; refImage(rec), refBox(rec, img)
+     start(kind)                 lo que hay que enseñar para calibrar (el plano, desde arriba)
+     save(url, cuerpo)           guardar lo calibrado; rerender() repintar
+   ================================================================ #}
+
+//: La fuente de la pantalla que usa el plano de fondo.
+const P2DBG = {src: null};
+
+/** Decir qué pantalla pone sus datos y sus rutas. */
+function p2dBgUse(src) { P2DBG.src = src; }
+
+/** Dónde está el plano de fondo y cuánto ocupa, en milímetros de la sala o de la planta:
+ *  `{x, y, w, h, scaled}`. Sin ancho dicho, `fallback` —el ancho de la sala, o un tamaño fijo
+ *  en una planta—: nunca el del marco del dibujo, que cambia al mover cualquier cosa y
+ *  arrastraba la imagen con él. */
+function p2dPlanBox(rec, img, fallback) {
+    const dicho = Number((rec || {}).plan_mm) || 0;
+    const w = dicho > 0 ? dicho : fallback;
+    return {x: Number((rec || {}).plan_x) || 0, y: Number((rec || {}).plan_y) || 0,
+            w, h: w * ((img && img.ratio) || 0.7), scaled: dicho > 0};
+}
+
+// ── El plano de fondo: pedirlo, dibujarlo, subirlo y quitarlo ──────────────
+//
+// Lo mismo para el plano de una sala y el de una planta, que lo hacían cada uno con su copia.
+
+/** La imagen de un plano guardado (`nombre`, en el almacén de medios) como `data:` y con su
+ *  proporción, o `null`. Embebida y no por URL porque el dibujo se EXPORTA: un SVG dentro de un
+ *  `<img>` no pide nada de fuera, y una `href` a la API saldría en blanco en el PNG. La
+ *  proporción se mide en la propia imagen, que es lo único que no puede contradecir al fichero.
+ *  Sin plano, o sin poder leerlo, no es un error: es lo normal al empezar. */
+async function p2dPlanFetch(nombre) {
+    if (!nombre) return null;
+    try {
+        const resp = await fetch(P2DBG.src.mediaUrl(nombre), {credentials: 'same-origin'});
+        if (!resp.ok) return null;
+        const blob = await resp.blob();
+        const data = await new Promise(ok => {
+            const fr = new FileReader();
+            fr.onload = () => ok(String(fr.result || ''));
+            fr.onerror = () => ok('');
+            fr.readAsDataURL(blob);
+        });
+        if (!data) return null;
+        const ratio = await new Promise(ok => {
+            const img = new Image();
+            img.onload = () => ok(img.naturalWidth ? img.naturalHeight / img.naturalWidth : 0);
+            img.onerror = () => ok(0);
+            img.src = data;
+        });
+        return {data, ratio: ratio || 0.7};
+    } catch (e) { return null; }
+}
+
+/** El plano dibujado donde dice su calibración (`b`, de `p2dPlanBox`) y del tamaño que dice;
+ *  más tenue mientras no tiene escala, que es una forma de decir «esto aún no mide». */
+function p2dPlanImageSvg(b, img) {
+    const S = P2DBG.src.scale;
+    return `<image href="${escAttr(img.data)}" x="${b.x * S}" y="${b.y * S}" width="${b.w * S}"
+                   height="${b.h * S}" opacity="${b.scaled ? '.85' : '.45'}"
+                   preserveAspectRatio="none"></image>`;
+}
+
+/** Subirlo, reemplazarlo y quitarlo: los botones de la barra, para quien edita. El control de
+ *  fichero nativo es transparente y con el borde del sistema, la única forma que este panel no
+ *  usa: va escondido detrás de un botón sólido que lo abre. `scope`: `rooms` o `floors`. */
+function p2dPlanFileTools(scope, uid, tiene) {
+    if (!P2DBG.src.may()) return '';
+    const id = `p2dPlanFile-${scope}`;
+    return `<input type="file" id="${id}" class="d-none"
+               accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+               onchange="p2dPlanUpload(this,${jsStr(scope)},${jsStr(uid)})">
+        <button class="btn btn-sm btn-secondary" onclick="document.getElementById('${id}').click()"
+                title="${escAttr(t(tiene ? 'plan2d_bg_replace' : 'plan2d_bg_upload'))}"
+                aria-label="${escAttr(t(tiene ? 'plan2d_bg_replace' : 'plan2d_bg_upload'))}">
+            <i class="bi bi-image"></i></button>
+        ${tiene ? `<button class="btn btn-sm btn-warning" onclick="p2dPlanDrop(${jsStr(scope)},${jsStr(uid)})"
+                title="${escAttr(t('plan2d_bg_drop'))}" aria-label="${escAttr(t('plan2d_bg_drop'))}">
+            <i class="bi bi-trash"></i></button>` : ''}`;
+}
+
+async function p2dPlanUpload(input, scope, uid) {
+    const file = (input.files || [])[0];
+    input.value = '';
+    if (!file) return;
+    const body = new FormData();
+    body.append('file', file);
+    const resp = await fetch(P2DBG.src.planUrl(scope, uid),
+                             {method: 'POST', body, credentials: 'same-origin'});
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) return showToast(data.error || t('error'), 'danger');
+    await P2DBG.src.planSet(scope, uid, data.plan || '');
+    showToast(t('plan2d_bg_saved'), 'success');
+}
+
+/** Quitarlo, preguntando. Una FUNCIÓN para el modal, no un `await`: `showConfirmModal` no
+ *  devuelve promesa, y esperarla dejaba sin hacer todo lo de después. */
+function p2dPlanDrop(scope, uid) {
+    showConfirmModal(t('plan2d_bg_drop_q'), async () => {
+        const resp = await fetch(P2DBG.src.planUrl(scope, uid),
+                                 {method: 'DELETE', credentials: 'same-origin'});
+        if (!resp.ok) return showToast(t('error'), 'danger');
+        await P2DBG.src.planSet(scope, uid, '');
+    });
+}
+
+// ── La calibración ───────────────────────────────────────────────────────────
+
+//: La calibración en curso, o `null`: `{kind: 'room'|'floor', step, a, b, dist, from, press}`.
+//: `from` es el punto del plano elegido para llevarlo a su sitio, en el paso 3; `press`, la
+//: pulsación en curso.
+//: `a` y `b` son puntos DE LA IMAGEN —fracciones de su ancho y su alto—, no de la sala: así
+//: siguen siendo los mismos puntos del dibujo cuando la escala cambia entre un paso y otro.
+let P2DCAL = null;
+
+/** A qué se está calibrando —`{rec, box, img, svg, url, redraw}`, lo que diga la pantalla—, o
+ *  `null` si ya no hay. */
+function p2dCalTarget() {
+    return P2DCAL ? P2DBG.src.target(P2DCAL.kind) : null;
+}
+
+/** Las esquinas de lo que ya está dibujado, en milímetros: con lo que se encaja el plano. */
+function p2dCalAnchors(kind) {
+    return P2DBG.src.anchors ? P2DBG.src.anchors(kind) : [];
+}
+
+/** Los otros planos contra los que se puede encajar este, si la pantalla tiene. */
+function p2dCalRefFloors() {
+    return P2DCAL && P2DBG.src.refs ? P2DBG.src.refs(P2DCAL.kind) : [];
+}
+
+function p2dCalStart(kind) {
+    // Lo que había, para devolverlo al cancelar: la escala se aplica en pantalla antes de
+    // guardarse, y cancelar dejaba el plano a la escala a medio hacer hasta recargar. «Volver a
+    // marcar» empieza otra vez desde lo que había al principio, no desde lo ya aplicado.
+    const previa = P2DCAL && P2DCAL.kind === kind ? P2DCAL.orig : null;
+    P2DCAL = {kind, step: 'a', a: null, b: null, dist: '', from: null, press: null,
+              movePlan: false};
+    // Lo que la pantalla tenga que dejar a la vista para calibrar: el plano, desde arriba.
+    if (P2DBG.src.start) P2DBG.src.start(kind);
+    const d = p2dCalTarget();
+    P2DCAL.orig = previa || (d ? {plan_mm: d.rec.plan_mm, plan_x: d.rec.plan_x,
+                                  plan_y: d.rec.plan_y, north_deg: d.rec.north_deg} : null);
+    if (previa && d) Object.assign(d.rec, previa);
+    P2DBG.src.rerender();
+}
+
+function p2dCalCancel() {
+    const d = p2dCalTarget();
+    if (d && P2DCAL.orig) Object.assign(d.rec, P2DCAL.orig);
+    P2DCAL = null;
+    p2dCalReframe(d);
+    P2DBG.src.rerender();
+}
+
+/** El plano cambió de tamaño o de sitio: el lienzo vuelve a encuadrar el dibujo entero. Si
+ *  no, el plano encogido o desplazado quedaba fuera de la vista, o debajo de la paleta. */
+function p2dCalReframe(d) {
+    if (d && typeof ssCanvasReset === 'function') ssCanvasReset(d.svg);
+}
+
+/** Un clic quieto en el lienzo, durante la calibración: un punto del plano. */
+async function p2dCalClick(ev) {
+    const d = p2dCalTarget();
+    if (!d) { P2DCAL = null; return P2DBG.src.rerender(); }
+    const p = ssCanvasPoint(d.svg, ev);
+    if (!p) return;
+    const u = (p.x / P2DBG.src.scale - d.box.x) / d.box.w, v = (p.y / P2DBG.src.scale - d.box.y) / d.box.h;
+    if (P2DCAL.step === 'a') {
+        Object.assign(P2DCAL, {a: {u, v}, step: 'b'});
+    } else if (P2DCAL.step === 'b') {
+        Object.assign(P2DCAL, {b: {u, v}, step: 'dist'});
+        // El cuadro de la distancia, con el foco: lo siguiente es escribir. DESPUÉS de
+        // repintar —que pide datos al servidor antes de dibujar—: enfocarlo antes era enfocar el
+        // cuadro que el repintado iba a sustituir, y Enter no hacía nada.
+        await P2DBG.src.rerender();
+        document.querySelector('[data-dccal-dist]')?.focus();
+        return;
+    } else if (P2DCAL.step === 'north') {
+        // La flecha del norte del plano: primero su cola, después su punta. El ángulo, en el
+        // sentido del reloj desde arriba del dibujo.
+        const q = {x: p.x / P2DBG.src.scale, y: p.y / P2DBG.src.scale};
+        if (!P2DCAL.n0) {
+            P2DCAL.n0 = q;
+        } else {
+            const dx = q.x - P2DCAL.n0.x, dy = q.y - P2DCAL.n0.y;
+            if (Math.hypot(dx, dy) > 1) {
+                d.rec.north_deg = Math.round(((Math.atan2(dx, -dy) * 180 / Math.PI) + 360) % 360);
+                P2DCAL.northSet = true;
+            }
+            P2DCAL.n0 = null;
+            P2DCAL.step = 'origin';
+        }
+    } else if (P2DCAL.step === 'origin') {
+        if (!P2DCAL.from) {
+            // Primero, un punto del plano: algo que se reconozca, la esquina de una sala.
+            P2DCAL.from = {u, v};
+        } else {
+            // Después, dónde debe caer en el mapa —pegado a una esquina de lo dibujado, si se
+            // pulsó cerca de una—: el plano se mueve para que ese punto suyo caiga ahí.
+            // Contra otra planta se pulsa sobre SU plano —una imagen, sin esquinas a las que
+            // pegarse—; pegarse a una sala de esta planta llevaría el punto a otro sitio.
+            const q = {x: p.x / P2DBG.src.scale, y: p.y / P2DBG.src.scale};
+            const ok = P2DCAL.ref ? q : p2dCalSnap(d, q);
+            d.rec.plan_x = Math.round(ok.x - P2DCAL.from.u * d.box.w);
+            d.rec.plan_y = Math.round(ok.y - P2DCAL.from.v * d.box.h);
+            P2DCAL.from = null;
+        }
+    } else {
+        return;
+    }
+    P2DBG.src.rerender();
+}
+
+/** Una pulsación en el lienzo, calibrando. En el paso 3, arrastrar mueve el PLANO —es como
+ *  se encaja a ojo—; en los otros, desplaza el lienzo, que es como se busca el punto. Una
+ *  pulsación que no viaja es un clic (`p2dCalClick`). */
+function p2dCalDown(ev) {
+    const d = p2dCalTarget();
+    if (!d) return;
+    const p = ssCanvasPoint(d.svg, ev);
+    // Un asa de una esquina del plano: se estira o se encoge, con su proporción, y la esquina
+    // contraria se queda quieta. Con otra planta ya colocada debajo, ajustar a ojo es esto.
+    const asa = P2DCAL.step === 'origin' && p && ev.target && ev.target.closest
+        ? ev.target.closest('[data-dccalh]') : null;
+    if (asa) {
+        const b = d.box, lado = asa.dataset.dccalh;
+        const sx = lado.includes('e') ? 1 : -1, sy = lado.includes('s') ? 1 : -1;
+        P2DCAL.press = {x: ev.clientX, y: ev.clientY, moved: false,
+                        scale: {sx, sy, w0: b.w, h0: b.h,
+                                ax: sx > 0 ? b.x : b.x + b.w, ay: sy > 0 ? b.y : b.y + b.h}};
+        ev.currentTarget?.setPointerCapture?.(ev.pointerId);
+        return;
+    }
+    // Mover el plano solo con su botón encendido: en los pasos 1 y 2 arrastrar desplaza el
+    // lienzo, y quien volvía a arrastrar en el 3 «para mirar» se llevaba el plano consigo.
+    const plano = P2DCAL.step === 'origin' && P2DCAL.movePlan && p;
+    P2DCAL.press = {x: ev.clientX, y: ev.clientY, moved: false,
+                    plan: plano ? {p0: p, px: Number(d.rec.plan_x) || 0,
+                                   py: Number(d.rec.plan_y) || 0} : null};
+    if (plano) ev.currentTarget?.setPointerCapture?.(ev.pointerId);
+    else ssCanvasPanStart(d.svg, ev);
+}
+
+function p2dCalMove(ev) {
+    const d = p2dCalTarget(), pr = P2DCAL.press;
+    if (!d || !pr) return;
+    if (Math.hypot(ev.clientX - pr.x, ev.clientY - pr.y) >= 4) pr.moved = true;
+    if (pr.scale) {
+        if (!pr.moved) return;
+        const p = ssCanvasPoint(d.svg, ev);
+        if (!p) return;
+        Object.assign(d.rec, p2dCalScaleTo(pr.scale, p.x / P2DBG.src.scale, p.y / P2DBG.src.scale));
+        return d.redraw();
+    }
+    if (!pr.plan) return ssCanvasPanMove(d.svg, ev);
+    if (!pr.moved) return;
+    const p = ssCanvasPoint(d.svg, ev);
+    if (!p) return;
+    d.rec.plan_x = Math.round(pr.plan.px + (p.x - pr.plan.p0.x) / P2DBG.src.scale);
+    d.rec.plan_y = Math.round(pr.plan.py + (p.y - pr.plan.p0.y) / P2DBG.src.scale);
+    d.redraw();
+}
+
+function p2dCalUp(ev) {
+    const pr = P2DCAL && P2DCAL.press;
+    if (!pr) return;
+    P2DCAL.press = null;
+    ssCanvasPanEnd(ev);
+    if (!pr.moved) return ev.type === 'pointerup' ? p2dCalClick(ev) : undefined;
+    // El plano arrastrado o estirado: la franja tiene que decir dónde y cuánto ha quedado.
+    if (pr.plan || pr.scale) P2DBG.src.rerender();
+}
+
+/** El plano estirado desde una esquina hasta (`mx`, `my`) mm: la esquina contraria (`ax`, `ay`)
+ *  quieta, y la proporción de la imagen guardada —un plano deformado mediría distinto a lo
+ *  ancho que a lo largo—. Lo que manda es cuánto se ha avanzado a lo largo de su diagonal, que
+ *  es lo natural al tirar de una esquina. */
+function p2dCalScaleTo(g, mx, my) {
+    const dx = g.sx * g.w0, dy = g.sy * g.h0;
+    const largo = Math.hypot(dx, dy) || 1;
+    const avance = ((mx - g.ax) * dx + (my - g.ay) * dy) / largo;
+    const k = Math.max(0.02, avance / largo);
+    const w = Math.max(P2D_CAL_MIN_MM, g.w0 * k), h = w * (g.h0 / g.w0);
+    return {plan_mm: Math.round(w),
+            plan_x: Math.round(g.sx > 0 ? g.ax : g.ax - w),
+            plan_y: Math.round(g.sy > 0 ? g.ay : g.ay - h)};
+}
+
+/** Las cuatro asas del plano, en el paso 3. Aparte de las marcas, que no se pueden pulsar. */
+function p2dCalHandles(kind) {
+    const d = (P2DCAL && P2DCAL.kind === kind && P2DCAL.step === 'origin') ? p2dCalTarget() : null;
+    if (!d || !P2DBG.src.may()) return '';
+    const S = P2DBG.src.scale, b = d.box;
+    // Del tamaño de lo que se ve, no del dibujo: un asa de medio metro es invisible mirando un
+    // edificio entero y tapa media sala mirando de cerca.
+    const v = typeof ssCanvasWindow === 'function' ? ssCanvasWindow(d.svg) : null;
+    const t = v && v.w ? v.w / 70 : 6;
+    const asa = (id, x, y, cursor) => `<rect data-dccalh="${id}" x="${x * S - t / 2}" y="${y * S - t / 2}"
+        width="${t}" height="${t}" fill="var(--bs-warning)"
+        stroke="var(--bs-dark)" stroke-width="1" vector-effect="non-scaling-stroke"
+        style="cursor:${cursor}"></rect>`;
+    return `<g>${asa('nw', b.x, b.y, 'nwse-resize')}${asa('ne', b.x + b.w, b.y, 'nesw-resize')}${
+        asa('sw', b.x, b.y + b.h, 'nesw-resize')}${asa('se', b.x + b.w, b.y + b.h, 'nwse-resize')}</g>`;
+}
+
+/** El ancho del plano, escrito: el dibujo cambia al teclear, con su esquina quieta. */
+function p2dCalSetWidth(valor) {
+    const d = p2dCalTarget();
+    const m = parseFloat(String(valor).replace(',', '.'));
+    if (!d || !Number.isFinite(m) || m * 1000 < P2D_CAL_MIN_MM) return;
+    d.rec.plan_mm = Math.round(m * 1000);
+    d.redraw();
+}
+
+/** El punto pulsado, pegado a la esquina más cercana si está a menos de 14 px en pantalla:
+ *  acertar a mano la esquina exacta de una sala es imposible, y fallarla por un píxel es
+ *  dejar el plano torcido esos centímetros. */
+function p2dCalSnap(d, p) {
+    let mm = Infinity;
+    const svg = typeof ssCanvasSvg === 'function' ? ssCanvasSvg(d.svg) : null;
+    const v = typeof ssCanvasWindow === 'function' ? ssCanvasWindow(d.svg) : null;
+    if (svg && v && svg.getBoundingClientRect) {
+        const r = svg.getBoundingClientRect();
+        if (r.width && r.height) mm = 14 / _ssFit(r, v).k / P2DBG.src.scale;
+    }
+    let mejor = null, dist = mm;
+    for (const a of p2dCalAnchors(P2DCAL.kind)) {
+        const dd = Math.hypot(a.x - p.x, a.y - p.y);
+        if (dd <= dist) { dist = dd; mejor = a; }
+    }
+    return mejor || p;
+}
+
+/** Escribir dónde cae la esquina del plano: el dibujo se mueve al teclear. */
+function p2dCalSetXY(eje, valor) {
+    const d = p2dCalTarget();
+    // A medio escribir —«-», vacío— no se mueve nada: saltaba a 0 antes de llegar al número.
+    if (!d || !Number.isFinite(parseFloat(valor))) return;
+    d.rec[eje === 'x' ? 'plan_x' : 'plan_y'] = Number(valor);
+    d.redraw();
+}
+
+// ── Encajar una planta contra otra ───────────────────────────────────────────
+//
+// En el edificio, cada planta se apila sobre las demás en las coordenadas de su plano. Si cada
+// una se coloca por su cuenta, nada hace que la escalera de la primera caiga encima de la de la
+// baja: se veían desplazadas. Se encaja contra otra planta como se encaja contra una sala: su
+// plano, ya colocado, se ve en transparencia y teñido, y un punto común a las dos —la escalera,
+// el ascensor, un patio— se lleva de un plano al otro.
+
+/** Elegir la planta de referencia, y traer su plano si no se tiene ya. */
+async function p2dCalSetRef(uid) {
+    P2DCAL.ref = uid || '';
+    P2DCAL.refImg = null;
+    P2DCAL.from = null;
+    if (uid) {
+        const f = p2dCalRefFloors().find(x => x.uid === uid);
+        const img = f ? await P2DBG.src.refImage(f) : null;
+        if (!P2DCAL || P2DCAL.ref !== uid) return;
+        P2DCAL.refImg = img;
+    }
+    const d = p2dCalTarget();
+    if (d) p2dCalFrameFit(d);
+    P2DBG.src.rerender();
+}
+
+/** El plano de la planta de referencia, en su sitio, translúcido y teñido de rojo: dos planos
+ *  de un mismo edificio se parecen demasiado para distinguirlos en gris sobre gris. */
+function p2dCalRefSvg() {
+    if (!P2DCAL || !P2DCAL.ref || !P2DCAL.refImg) return '';
+    const f = p2dCalRefFloors().find(x => x.uid === P2DCAL.ref);
+    if (!f) return '';
+    const b = P2DBG.src.refBox(f, P2DCAL.refImg), S = P2DBG.src.scale;
+    return `<defs><filter id="dcCalRefTint"><feColorMatrix type="matrix"
+            values="1 0 0 0 0  0 .25 0 0 0  0 0 .25 0 0  0 0 0 1 0"></feColorMatrix></filter></defs>
+        <image href="${escAttr(P2DCAL.refImg.data)}" x="${b.x * S}" y="${b.y * S}"
+               width="${b.w * S}" height="${b.h * S}" opacity=".5" filter="url(#dcCalRefTint)"
+               preserveAspectRatio="none" style="pointer-events:none"></image>`;
+}
+
+/** Saltar la escala, que ya está bien, y pasar a encajar el plano. */
+function p2dCalSkipScale() {
+    const d = p2dCalTarget();
+    if (!d || !(Number(d.rec.plan_mm) > 0)) return;
+    Object.assign(P2DCAL, {step: 'origin', a: null, b: null, from: null});
+    p2dCalFrameFit(d);
+    P2DBG.src.rerender();
+}
+
+/** Entrar a marcar el norte, o volver al paso 3 sin marcarlo. */
+function p2dCalNorth(entrar) {
+    P2DCAL.step = entrar ? 'north' : 'origin';
+    P2DCAL.n0 = null;
+    P2DCAL.from = null;
+    P2DBG.src.rerender();
+}
+
+function p2dCalToggleMove() {
+    P2DCAL.movePlan = !P2DCAL.movePlan;
+    P2DBG.src.rerender();
+}
+
+/** La escala, de la distancia escrita entre los dos puntos: el ancho que tiene que tener la
+ *  imagen entera para que ellos queden a esa distancia. Se aplica ya —el paso siguiente se
+ *  pulsa sobre el plano a su tamaño nuevo— y se guarda al final. */
+function p2dCalApply() {
+    const d = p2dCalTarget();
+    if (!d || !P2DCAL.a || !P2DCAL.b) return;
+    // En METROS, con decimales: una fachada se dice en metros, y el cuadro en milímetros hacía
+    // que «42» dejara el plano de 52 mm de ancho —un píxel—, que es «el plano desaparece».
+    const dist = Number(String(P2DCAL.dist).replace(',', '.')) * 1000;
+    const ratio = d.box.h / d.box.w;
+    const fraccion = Math.hypot(P2DCAL.b.u - P2DCAL.a.u, (P2DCAL.b.v - P2DCAL.a.v) * ratio);
+    if (!(dist > 0) || !(fraccion > 1e-4)) return showToast(t('plan2d_cal_bad'), 'warning');
+    const ancho = Math.round(dist / fraccion);
+    // Y un plano de menos de un metro o de más de cinco kilómetros es una unidad equivocada,
+    // no un edificio: se dice cuánto saldría en vez de aplicarlo.
+    if (ancho < P2D_CAL_MIN_MM || ancho > P2D_CAL_MAX_MM)
+        return showToast(tf('plan2d_cal_absurd', (ancho / 1000).toLocaleString()), 'warning');
+    d.rec.plan_mm = ancho;
+    P2DCAL.step = 'origin';
+    p2dCalFrameFit(d);
+    P2DBG.src.rerender();
+}
+
+//: Lo que puede medir de ancho un plano, en mm: por debajo o por encima, la distancia se
+//: escribió en otra unidad.
+const P2D_CAL_MIN_MM = 1000;
+const P2D_CAL_MAX_MM = 5000000;
+
+/** Para encajar hay que ver las dos cosas: el lienzo se encuadra sobre el plano Y lo dibujado
+ *  —sus esquinas—, con un margen. El encuadre general de la planta abarca al menos 20×15 m,
+ *  y un plano pequeño quedaba en una esquina, del tamaño de un sello. */
+function p2dCalFrameFit(d) {
+    // El tamaño de AHORA: el `box` de `d` es de antes de aplicar la escala.
+    const b = (p2dCalTarget() || d).box;
+    let x0 = b.x, y0 = b.y, x1 = b.x + b.w, y1 = b.y + b.h;
+    const puntos = p2dCalAnchors(P2DCAL.kind).slice();
+    // Y el plano de la planta de referencia, si se encaja contra una: hay que ver los dos.
+    const fr = P2DCAL.ref && P2DCAL.refImg && p2dCalRefFloors().find(x => x.uid === P2DCAL.ref);
+    if (fr) {
+        const rb = P2DBG.src.refBox(fr, P2DCAL.refImg);
+        puntos.push({x: rb.x, y: rb.y}, {x: rb.x + rb.w, y: rb.y + rb.h});
+    }
+    for (const a of puntos) {
+        x0 = Math.min(x0, a.x); y0 = Math.min(y0, a.y);
+        x1 = Math.max(x1, a.x); y1 = Math.max(y1, a.y);
+    }
+    const S = P2DBG.src.scale, m = Math.max(x1 - x0, y1 - y0) * 0.06;
+    _ssVB[d.svg] = {x: (x0 - m) * S, y: (y0 - m) * S, w: (x1 - x0 + m * 2) * S,
+                    h: (y1 - y0 + m * 2) * S};
+}
+
+/** Guardar lo calibrado: la escala siempre, y dónde cae si se llegó a decir. */
+async function p2dCalSave(conSitio) {
+    const d = p2dCalTarget();
+    const northSet = !!(P2DCAL && P2DCAL.northSet);
+    P2DCAL = null;
+    if (!d) return P2DBG.src.rerender();
+    const cuerpo = {plan_mm: d.rec.plan_mm};
+    if (conSitio) Object.assign(cuerpo, {plan_x: Number(d.rec.plan_x) || 0,
+                                         plan_y: Number(d.rec.plan_y) || 0});
+    if (northSet) cuerpo.north_deg = d.rec.north_deg;
+    const r = await P2DBG.src.save(d.url, cuerpo);
+    if (!r.ok) showToast(r.error || t('save_failed'), 'danger');
+    else showToast(t('plan2d_cal_done'), 'success');
+    p2dCalReframe(d);
+    P2DBG.src.rerender();
+}
+
+/** La franja de la calibración, encima del lienzo: qué hacer ahora, y cómo salir. */
+function p2dCalBar(kind) {
+    if (!P2DCAL || P2DCAL.kind !== kind) return '';
+    const salir = `<button type="button" class="btn btn-sm btn-secondary" onclick="p2dCalCancel()">
+        ${esc(t('cancel'))}</button>`;
+    let cuerpo;
+    if (P2DCAL.step === 'a' || P2DCAL.step === 'b') {
+        // Con la escala ya puesta, ir directo a encajar: un plano bien medido y mal colocado
+        // —dos plantas que no coinciden— obligaba a volver a medir para llegar al paso 3.
+        const dt = p2dCalTarget();
+        const conEscala = P2DCAL.step === 'a' && dt && Number(dt.rec.plan_mm) > 0;
+        cuerpo = `<span>${esc(t(P2DCAL.step === 'a' ? 'plan2d_cal_a' : 'plan2d_cal_b'))}</span>
+            ${conEscala ? `<button type="button" class="btn btn-sm btn-secondary" onclick="p2dCalSkipScale()">
+                <i class="bi bi-skip-forward me-1"></i>${esc(t('plan2d_cal_skip_scale'))}</button>` : ''}`;
+    } else if (P2DCAL.step === 'dist') {
+        cuerpo = `<label class="d-flex align-items-center gap-2 mb-0">${esc(t('plan2d_cal_dist'))}
+            <input type="number" min="0" step="0.01" class="form-control form-control-sm ss-tabular"
+                   style="width:8rem" value="${escAttr(String(P2DCAL.dist || ''))}" data-dccal-dist
+                   oninput="P2DCAL.dist=this.value"
+                   onkeydown="if(event.key==='Enter')p2dCalApply()"></label>
+            <button type="button" class="btn btn-sm btn-primary" onclick="p2dCalApply()">
+                ${esc(t('plan2d_cal_apply'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="p2dCalStart(${jsStr(kind)})">
+                ${esc(t('plan2d_cal_again'))}</button>`;
+    } else {
+        const d = p2dCalTarget();
+        const caja = (eje, valor) => `<input type="number" step="100"
+            class="form-control form-control-sm ss-tabular" style="width:7rem"
+            value="${escAttr(String(Math.round(Number(valor) || 0)))}" aria-label="${escAttr(eje)}"
+            oninput="p2dCalSetXY(${jsStr(eje)},this.value)">`;
+        // Sin nada dibujado no hay con qué encajarlo: se dice, y lo que procede es guardar la
+        // escala y colocar las salas encima del plano.
+        const vacio = !p2dCalAnchors(kind).length;
+        const otras = p2dCalRefFloors();
+        const ref = P2DCAL.ref ? otras.find(f => f.uid === P2DCAL.ref) : null;
+        const texto = ref ? (P2DCAL.from ? tf('plan2d_cal_fit_ref_to', ref.name || '')
+                                         : tf('plan2d_cal_fit_ref', ref.name || ''))
+                    : t(P2DCAL.from ? 'plan2d_cal_fit_to' : vacio ? 'plan2d_cal_fit_empty' : 'plan2d_cal_fit');
+        cuerpo = `<span>${esc(texto)}</span>
+            ${otras.length ? `<label class="d-inline-flex align-items-center gap-1 mb-0"
+                    title="${escAttr(t('plan2d_cal_ref_tt'))}">${esc(t('plan2d_cal_ref'))}
+                <select class="form-select form-select-sm w-auto" onchange="p2dCalSetRef(this.value)">
+                    <option value="">${esc(t('plan2d_cal_ref_none'))}</option>${otras.map(f =>
+                    `<option value="${escAttr(f.uid)}"${f.uid === P2DCAL.ref ? ' selected' : ''}>${
+                        esc(f.name || f.uid)}</option>`).join('')}
+                </select></label>` : ''}
+            <span class="d-inline-flex align-items-center gap-1"
+                  title="${escAttr(t('plan2d_bg_xy_tt'))}">${esc(t('plan2d_cal_corner'))}
+                X ${caja('x', d ? d.rec.plan_x : 0)} Y ${caja('y', d ? d.rec.plan_y : 0)} mm</span>
+            <label class="d-inline-flex align-items-center gap-1 mb-0" title="${escAttr(t('plan2d_cal_width_tt'))}">${
+                esc(t('plan2d_cal_width'))}
+                <input type="number" step="0.01" min="1" class="form-control form-control-sm ss-tabular"
+                       style="width:7rem" value="${escAttr(d ? (Number(d.rec.plan_mm) / 1000).toFixed(2) : '')}"
+                       oninput="p2dCalSetWidth(this.value)"></label>
+            <button type="button" class="btn btn-sm ${P2DCAL.movePlan ? 'btn-warning' : 'btn-secondary'}"
+                onclick="p2dCalToggleMove()" title="${escAttr(t('plan2d_cal_move_tt'))}">
+                <i class="bi bi-arrows-move me-1"></i>${esc(t('plan2d_cal_move'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="p2dCalNorth(true)"
+                title="${escAttr(t('plan2d_cal_north_tt'))}">
+                <i class="bi bi-compass me-1"></i>${esc(d && d.rec.north_deg !== null && d.rec.north_deg !== undefined
+                    ? tf('plan2d_cal_north_is', d.rec.north_deg) : t('plan2d_cal_north'))}</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="p2dCalSave(true)">
+                ${esc(t('save'))}</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="p2dCalSave(false)">
+                ${esc(t('plan2d_cal_skip'))}</button>`;
+    }
+    if (P2DCAL.step === 'north') {
+        cuerpo = `<span>${esc(t(P2DCAL.n0 ? 'plan2d_cal_north_tip' : 'plan2d_cal_north_tail'))}</span>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="p2dCalNorth(false)">
+                ${esc(t('plan2d_cal_north_back'))}</button>`;
+    }
+    const paso = {a: 1, b: 1, dist: 2, origin: 3, north: 3}[P2DCAL.step] || 1;
+    return `<div class="ss-warn-box mb-2 ss-fs-2 d-flex flex-wrap align-items-center gap-2">
+        <i class="bi bi-rulers"></i>
+        <span class="fw-semibold">${esc(tf('plan2d_cal_step', paso))}</span>
+        ${cuerpo}<span class="ms-auto">${salir}</span></div>`;
+}
+
+/** Los puntos ya marcados, encima del dibujo: sin verlos, el segundo se pulsa a ciegas. */
+function p2dCalMarks(kind) {
+    const d = (P2DCAL && P2DCAL.kind === kind) ? p2dCalTarget() : null;
+    if (!d) return '';
+    const S = P2DBG.src.scale;
+    const sitio = (q) => [(d.box.x + q.u * d.box.w) * S, (d.box.y + q.v * d.box.h) * S];
+    const punto = (q) => {
+        const [x, y] = sitio(q);
+        return `<circle cx="${x}" cy="${y}" r="2.2" fill="var(--bs-danger)" stroke="#fff"
+                    stroke-width="1.5" vector-effect="non-scaling-stroke"></circle>`;
+    };
+    let h = '';
+    if (P2DCAL.a && P2DCAL.b && P2DCAL.step === 'dist') {
+        const [x1, y1] = sitio(P2DCAL.a), [x2, y2] = sitio(P2DCAL.b);
+        h += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--bs-danger)"
+                    stroke-width="2" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"></line>`;
+    }
+    // El norte antes que los pasos 1 y 2: con la rama de «no es el paso 3» delante, la cola de
+    // la flecha no se dibujaba nunca y la punta se pulsaba a ciegas.
+    if (P2DCAL.step === 'north') {
+        if (P2DCAL.n0) h += `<circle cx="${P2DCAL.n0.x * S}" cy="${P2DCAL.n0.y * S}" r="2.2" fill="var(--bs-danger)"
+                  stroke="#fff" stroke-width="1.5" vector-effect="non-scaling-stroke"></circle>`;
+    } else if (P2DCAL.step !== 'origin') {
+        if (P2DCAL.a) h += punto(P2DCAL.a);
+        if (P2DCAL.b) h += punto(P2DCAL.b);
+    } else if (P2DCAL.from) {
+        // Las esquinas a las que se puede llevar, para que se vea dónde se pega.
+        for (const a of p2dCalAnchors(kind)) {
+            h += `<circle cx="${a.x * S}" cy="${a.y * S}" r="1.6" fill="none"
+                      stroke="var(--bs-warning)" stroke-width="1.5"
+                      vector-effect="non-scaling-stroke"></circle>`;
+        }
+        h += punto(P2DCAL.from);
+    }
+    return `<g style="pointer-events:none">${h}</g>${p2dCalHandles(kind)}`;
+}
+
+/** El norte de un plano, o `null` si nadie lo ha dicho. */
+function p2dNorthOf(rec) {
+    const v = (rec || {}).north_deg;
+    return (v === null || v === undefined || v === '') ? null : Number(v);
+}
+
+/** La rosa de los vientos, en una esquina del lienzo: una flecha que apunta al norte, girada
+ *  `deg` grados en el sentido del reloj. Nada si no se sabe dónde está: una rosa con el norte
+ *  arriba por defecto sería el dibujo afirmando algo que nadie ha dicho. */
+function p2dCompass(deg, id) {
+    if (deg === null || deg === undefined || !Number.isFinite(Number(deg))) return '';
+    return `<div class="ss-compass" ${id ? `id="${escAttr(id)}"` : ''}
+            title="${escAttr(tf('plan2d_cal_north_is', Math.round(Number(deg))))}">
+        <svg viewBox="-20 -20 40 40" width="40" height="40" aria-hidden="true">
+            <g ${id ? 'data-compass-needle' : ''} transform="rotate(${Number(deg)})">
+                <path d="M0 -15 L5 4 L0 1 L-5 4 Z" fill="var(--bs-danger)"></path>
+                <text x="0" y="-16.5" text-anchor="middle" font-size="8" font-weight="700"
+                      fill="currentColor">N</text>
+            </g>
+        </svg></div>`;
+}
+
+/** El botón de la barra, para quien edita y con un plano que calibrar. */
+function p2dCalButton(kind) {
+    return `<button class="btn btn-sm ${P2DCAL && P2DCAL.kind === kind ? 'btn-warning' : 'btn-secondary'}"
+        onclick="${P2DCAL ? 'p2dCalCancel()' : `p2dCalStart(${jsStr(kind)})`}"
+        title="${escAttr(t('plan2d_cal'))}" aria-label="${escAttr(t('plan2d_cal'))}">
+        <i class="bi bi-rulers"></i></button>`;
+}

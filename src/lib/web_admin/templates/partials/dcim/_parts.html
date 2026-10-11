@@ -113,8 +113,8 @@ function _dcRoleHint(item) {
     const sug = String(item.role_hint || '');
     if (!sug || item.role) return '';
     return `<span class="badge bg-body-secondary text-body-secondary border fw-normal"
-        title="${escAttr(t('dcim_role_' + sug))}">${
-        esc(tf('dcim_role_hint', t('dcim_role_' + sug)))}</span>`;
+        title="${escAttr(_dcRoleName(sug))}">${
+        esc(tf('dcim_role_hint', _dcRoleName(sug)))}</span>`;
 }
 
 /** Abrir la corrección desde una fila. La fila trae el uid y el formulario quiere la pieza

@@ -27,6 +27,9 @@ DCIM = os.path.join(TPL, 'partials', 'dcim')
 #: part of this section as the plans they draw and keep its conventions.
 VIEW3D = os.path.join(SRC, 'lib', 'core', 'view3d', 'web')
 _DCIM_3D = ('_look3d.html', '_rack3d.html', '_room3d.html', '_select3d.html', '_site3d.html')
+#: The 2D plan editor's package (`lib/core/plan2d`): the engine the room and floor plans run on —
+#: choosing, the snap, groups, the keys—, whose conventions are this section's too.
+PLAN2D = os.path.join(SRC, 'lib', 'core', 'plan2d', 'web')
 BUNDLE = os.path.join(TPL, 'partials', '_js_sections.html')
 SHELL = os.path.join(TPL, 'dashboard.html')
 CONSTANTS = os.path.join(SRC, 'lib', 'web_admin', 'constants.py')
@@ -62,7 +65,9 @@ def _section():
     mirar el día que ese fichero se divide, y lo hace **en silencio**: sigue pasando."""
     return '\n'.join([_read(os.path.join(DCIM, f))
                       for f in sorted(os.listdir(DCIM)) if f.endswith('.html')]
-                     + [_read(os.path.join(VIEW3D, f)) for f in _DCIM_3D])
+                     + [_read(os.path.join(VIEW3D, f)) for f in _DCIM_3D]
+                     + [_read(os.path.join(PLAN2D, f))
+                        for f in sorted(os.listdir(PLAN2D)) if f.endswith('.html')])
 
 
 def _viewer3d():
@@ -437,10 +442,12 @@ class TestElArrastreMideLoQueSeVe:
 
     def test_las_dos_ramas_pasan_por_el_mismo_sitio(self):
         cuerpo = _section().split('function _dcpMove(')[1].split(chr(10) + chr(125))[0]
-        # Tres ramas: un rack, una pieza y un equipo de sala (un PC, una roseta). Cada una pasa
-        # por `_dcpPlaceNear` —el imán a lo que hay al lado—, que se apoya en `_dcpPlace`, la
-        # que cuenta el giro.
-        assert cuerpo.count('_dcpPlaceNear(') == 3, 'una rama del arrastre no cuenta el giro'
+        # Un rack, una pieza o un equipo de sala —uno o varios— los arrastra el editor de planos
+        # (`p2dMove`), y la sala le dice cuánto se mueve lo que lleva la mano por `_dcpPlaceNear`
+        # —el imán a lo que hay al lado—, que se apoya en `_dcpPlace`, la que cuenta el giro.
+        assert 'p2dMove(_dcpP2d' in cuerpo
+        sala = _section().split('const _dcpP2d = p2dMake(')[1].split(chr(10) + '});')[0]
+        assert '_dcpPlaceNear(' in sala.split('dragDelta:')[1].split('primary:')[0], 'el arrastre no cuenta el giro'
         cerca = _section().split('function _dcpPlaceNear(')[1].split(chr(10) + chr(125))[0]
         assert '_dcpPlace(' in cerca and '_dcpEdgeOffset(' in cerca
 
@@ -457,12 +464,17 @@ class TestUnaPiezaSeManejaSinBuscarElAtajo:
     """
 
     def test_el_cuadro_tiene_con_que_cerrarse(self):
-        cuadro = _fn(_section(), '_dcpInspectorBody')
-        assert '_dcpDeselect()' in cuadro, 'la pieza del inspector no se puede soltar'
+        # La ficha de una pieza es la misma en la sala y en la planta: se cierra soltando lo
+        # elegido en el plano abierto, que en la sala es `_dcpDeselect()`.
+        cuadro = _fn(_section(), '_dcpFeaturePanelHtml')
+        assert '_dcPlanDeselect()' in cuadro, 'la pieza del inspector no se puede soltar'
+        assert '_dcpDeselect()' in _fn(_section(), '_dcPlanDeselect')
 
     def test_y_escape_cierra_por_el_mismo_sitio(self):
         """Dos formas de cerrar que hacen cosas distintas acaban cerrando cosas distintas."""
-        assert '_dcpDeselect()' in _fn(_section(), '_dcpKey')
+        # Las teclas son las del editor de planos, y su Escape suelta por `_dcpDeselect()`.
+        assert 'p2dKeyDown(' in _fn(_section(), '_dcpKey')
+        assert 'deselect: () => _dcpDeselect()' in _section()
 
     def test_cada_pieza_ensena_su_barra_al_pasar_por_encima(self):
         pieza = _fn(_section(), '_dcpFeature')
@@ -470,29 +482,33 @@ class TestUnaPiezaSeManejaSinBuscarElAtajo:
         assert 'onpointerleave="_dcpFloatLater()"' in pieza, 'la barra no se esconde nunca'
 
     def test_con_editar_duplicar_y_quitar(self):
-        barra = _fn(_section(), '_dcpFloatHtml')
-        for accion in ('_dcpEdit', '_dcpDuplicate', '_dcpDropFeature'):
-            assert "'%s'" % accion in barra, accion
+        # La barra es la del editor de planos; sus botones, los comunes de un objeto, y la sala
+        # dice qué hace «editar» (el inspector de la pieza) y deja lo demás a lo común.
+        botones = _fn(_section(), '_dcObjFloatButtons')
+        for act in ('edit', 'turn', 'dup', 'back', 'drop'):
+            assert "act: '%s'" % act in botones, act
+        hace = _fn(_section(), '_dcpFloatAct')
+        assert '_dcpEdit(m.uid)' in hace and '_dcObjFloatAct(' in hace
 
     def test_solo_para_quien_edita_y_nunca_mientras_se_arrastra(self):
-        mostrar = _fn(_section(), '_dcpFloatShow')
-        assert "_dcimMay('dcim_edit')" in mostrar, 'la barra sale a quien solo puede mirar'
-        assert '_dcpDrag' in mostrar
+        assert "_dcimMay('dcim_edit')" in _fn(_section(), '_dcObjFloatButtons'), 'la barra sale a quien solo puede mirar'
+        assert 'dragging: () => !!_dcpDrag' in _section()
+        assert 'p2dDraggingAny(P)' in _fn(_section(), 'p2dFloatPaint')
         assert '_dcpFloatHide()' in _fn(_section(), '_dcpDown'), 'arrastrar deja la barra encima'
 
     def test_la_barra_vive_fuera_del_dibujo(self):
-        """Dentro del `<svg>`, pulsar un botón de la barra sería también empezar un arrastre."""
         plano = _section().split('<svg ${ssCanvasAttrs(_DCP_SVG')[0]
-        assert 'id="dcpFloat"' in plano.split('ss-infra-canvas')[-1], (
+        assert 'p2dFloatBoxHtml(_dcpP2d)' in plano.split('ss-infra-canvas')[-1], (
             'la barra no está en el marco del dibujo, antes del <svg>')
+        assert "floatId: 'dcpFloat'" in _section()
 
     def test_las_flechas_topan_en_la_pared_que_se_ve(self):
         """El mismo fallo que el arrastre, por el teclado: un tope en cero sobre la esquina sin
         girar deja una puerta girada a 44 cm de la pared."""
-        teclas = _fn(_section(), '_dcpKey')
-        assert '_dcpEdgeOffset(' in teclas
-        assert 'Math.max(0, Number(f.pos_x)' not in teclas
-        assert 'Math.max(0, Number(f.pos_y)' not in teclas
+        # Las flechas mueven por `_dcpShift`, el desplazamiento de la sala en el editor de planos.
+        mover = _fn(_section(), '_dcpShift')
+        assert '_dcpEdgeOffset(' in mover and 'Math.max(-e.x' in mover
+        assert 'shift: (members, dx, dy) => _dcpShift(' in _section()
 
 
 class TestUnaPiezaSeEstiraArrastrando:
@@ -505,14 +521,17 @@ class TestUnaPiezaSeEstiraArrastrando:
             'las asas no salen, o salen a quien solo puede mirar')
 
     def test_dentro_de_la_pieza_para_que_giren_con_ella(self):
-        pieza = _fn(_section(), '_dcpFeature')
-        assert pieza.index('_dcpHandles(') < pieza.index('</g>'), 'el asa no gira con la pieza'
+        # La pieza se dibuja con `_dcThingSvg`, que pone las asas en el grupo que gira.
+        assert '_dcpHandles(' in _fn(_section(), '_dcpFeature')
+        dibujo = _fn(_section(), '_dcThingSvg')
+        giro = dibujo.index('rotate(${rot}')
+        assert giro < dibujo.index("${o.asas || ''}") < dibujo.index('${fuera}'), 'el asa no gira con la pieza'
 
     def test_el_asa_se_pregunta_antes_que_la_pieza(self):
         """El asa está dentro de la pieza: preguntar primero por la pieza convierte cada intento
         de estirarla en moverla."""
         abajo = _fn(_section(), '_dcpDown')
-        assert abajo.index('const asa = hit.asa') < abajo.index('const pieza =')
+        assert abajo.index('const asa = hit.asa') < abajo.index('p2dGrab(_dcpP2d')
         # Y el asa se busca entre TODO lo que hay bajo el dedo: la de una mesa seleccionada bajo
         # una bandeja también se coge.
         assert "closest('[data-dcph]')" in _fn(_section(), '_dcpHit')
@@ -535,11 +554,10 @@ class TestElPlanoEsUnEditor:
         return _fn(_section(), '_dcimPlanHtml')
 
     def test_la_paleta_flota_sobre_el_lienzo(self):
-        """Dentro del marco del lienzo y antes del `<svg>`: dentro de él, pulsar un botón sería
-        también empezar un arrastre."""
         lienzo = self._plano().split('ss-infra-canvas')[1].split('<svg ')[0]
         assert '_dcpPaletteHtml()' in lienzo, 'la paleta no flota sobre el lienzo'
-        assert 'ss-float-tools' in _fn(_section(), '_dcpPaletteHtml')
+        assert 'p2dPaletteHtml(_dcpP2d)' in _fn(_section(), '_dcpPaletteHtml')
+        assert 'ss-float-tools' in _fn(_section(), 'p2dPaletteHtml')
 
     def test_el_inspector_va_al_lado_y_no_encima(self):
         plano = self._plano()
@@ -552,10 +570,12 @@ class TestElPlanoEsUnEditor:
     def test_seleccionar_no_mueve_nada_de_sitio(self):
         """Una pulsación sin viaje solo repinta el inspector: la pantalla entera rehace el dibujo
         y lo que se estaba mirando."""
-        arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
-        tramo = arriba.split("drag.what === 'feature'")[1]
-        # Sin viaje: pasar a lo de debajo si se pulsó otra vez, o solo el inspector.
-        assert 'if (!drag.moved) return _dcpCycle(drag) || _dcpInspectorDraw();' in tramo
+        # Sin viaje: pasar a lo de debajo si se pulsó otra vez (`p2dCycle`), o lo que la sala
+        # haga al pulsar (`_dcpClicked`): el dibujo y el inspector, nunca la pantalla entera.
+        soltar = _fn(_section(), 'p2dUp')
+        assert soltar.index('p2dCycle(P, drag)') < soltar.index('P.ad.clicked(')
+        pulsar = _fn(_section(), '_dcpClicked')
+        assert '_dcpInspectorDraw()' in pulsar and 'renderDcim' not in pulsar
 
     def test_sin_nada_seleccionado_enseña_la_sala(self):
         """Las medidas y las filas de la sala, que eran dos franjas encima del plano."""
@@ -609,22 +629,19 @@ class TestUnRackSeManejaDesdeSuBarra:
         assert "_dcpFloatShow(${jsStr(rack.uid)},this,'rack')" in rack
         assert '_dcpFloatLater()' in rack
 
-    @staticmethod
-    def _barra_rack():
-        barra = _fn(_section(), '_dcpFloatHtml')
-        return barra.split("if (kind === 'rack') {")[1].split(chr(10) + '    }')[0]
-
     def test_con_abrir_editar_girar_duplicar_y_quitar(self):
-        barra = self._barra_rack()
-        for accion in ('_dcpRackOpen', '_dcpRackEdit', '_dcpTurn', '_dcpRackDuplicate',
-                       '_dcpRackDrop'):
-            assert "'%s'" % accion in barra, accion
+        botones = _fn(_section(), '_dcObjFloatButtons')
+        for act in ('open', 'edit', 'turn', 'dup', 'drop'):
+            assert "act: '%s'" % act in botones, act
+        hace = _fn(_section(), '_dcpFloatAct')
+        assert '_dcpRackOpen(m.uid)' in hace and '_dcpRackEdit(m.uid)' in hace
 
     def test_y_quien_solo_mira_solo_puede_abrirlo(self):
-        barra = self._barra_rack()
-        assert "edita ? boton('_dcpRackOpen'" not in barra, 'abrirlo se le niega a quien mira'
-        for accion in ('_dcpRackEdit', '_dcpTurn', '_dcpRackDuplicate', '_dcpRackDrop'):
-            assert "edita ? boton('%s'" % accion in barra, accion
+        botones = _fn(_section(), '_dcObjFloatButtons')
+        antes, despues = botones.split("if (!_dcimMay('dcim_edit')) return out;")
+        assert "act: 'open'" in antes, 'abrirlo se le niega a quien mira'
+        for act in ('edit', 'turn', 'dup', 'drop'):
+            assert "act: '%s'" % act in despues, act
 
     def test_pulsarlo_ya_no_lo_abre(self):
         arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
@@ -666,10 +683,10 @@ class TestLaBarraDeUnaPiezaTambienGira:
     """La barra del rack giraba y la de las piezas no. Reportado desde la pantalla."""
 
     def test_girar_esta_en_la_barra_de_la_pieza(self):
-        barra = _fn(_section(), '_dcpFloatHtml').split("if (kind === 'rack') {")[1]
-        barra = barra.split(chr(10) + '    }', 1)[1]
-        assert "boton('_dcpTurnFeature'" in barra
-
+        # Una sola lista de botones para un rack y una pieza: girar está para los dos.
+        botones = _fn(_section(), '_dcObjFloatButtons')
+        assert "act: 'turn'" in botones.split("if (!_dcimMay('dcim_edit')) return out;")[1]
+        assert '_dcObjTurn(' in _fn(_section(), '_dcObjFloatAct')
 
 class TestUnRackDePared:
     """Un rack de pared cuelga a una altura, y hasta ahora no había dónde decirla: el 3D lo
@@ -690,7 +707,8 @@ class TestUnRackDePared:
         # El rack de un fichero de plano se escribe en un sitio, para la sala y para la planta.
         assert '_dcPlanRackOut' in _fn(_section(), '_dcpExportJson')
         assert 'base_mm' in _fn(_section(), '_dcPlanRackOut')
-        assert "'base_mm'" in _fn(_section(), '_dcpRackDuplicate')
+        assert "_dcObjDuplicate('rack'" in _fn(_section(), '_dcpRackDuplicate')
+        assert "'base_mm'" in _fn(_section(), '_dcObjDuplicate')
 
 
 class TestEl3dSeAbreAPantallaCompleta:
@@ -721,11 +739,10 @@ class TestUnRackSeSeleccionaComoUnaPieza:
     su barra flotante. Reportado desde la pantalla."""
 
     def test_pulsarlo_lo_selecciona_y_el_inspector_habla_de_el(self):
-        arriba = _section().split('async function _dcpUp(')[1].split(chr(10) + chr(125))[0]
-        tramo = arriba.split("drag.what === 'resize'")[0].split('const rack =')[-1]
-        tramo = arriba[arriba.rindex('if (!drag.moved) {'):]
-        assert "_dcpSel = {kind: 'rack', uid: rack.uid}" in tramo
-        assert '_dcpInspectorDraw()' in tramo
+        # Pulsar un rack sin moverlo (`clicked`, de la sala): elegido, su ficha y su barra.
+        pulsar = _fn(_section(), '_dcpClicked')
+        assert "_dcpSel = {kind: 'rack', uid: m.uid}" in pulsar
+        assert '_dcpInspectorDraw()' in pulsar and '_dcpFloatShow(' in pulsar
 
     def test_el_inspector_tiene_sus_campos(self):
         cuerpo = _fn(_section(), '_dcpInspectorBody')
@@ -736,7 +753,9 @@ class TestUnRackSeSeleccionaComoUnaPieza:
 
     def test_lo_tecleado_llega_al_servidor_y_un_rechazo_lo_deshace(self):
         poner = _fn(_section(), '_dcpRackSet')
-        assert '_dcpQueue(' in poner and '_dcimOpenPlan' in poner
+        # Un rechazo vuelve a leer el plano abierto: el de la sala (`_dcimOpenPlan`) o la planta.
+        assert '_dcpQueue(' in poner and '_dcPlanReload' in poner
+        assert '_dcimOpenPlan' in _fn(_section(), '_dcPlanReload')
         assert "_dcimSend('PUT'" in _fn(_section(), '_dcpFlush')
 
     def test_se_ve_seleccionado_en_el_plano(self):
@@ -744,8 +763,8 @@ class TestUnRackSeSeleccionaComoUnaPieza:
 
     def test_y_escape_lo_suelta(self):
         """Escape se miraba después de «solo piezas», así que con un rack no hacía nada."""
-        teclas = _fn(_section(), '_dcpKey')
-        assert teclas.index("ev.key === 'Escape'") < teclas.index("_dcpSel.kind !== 'feature'")
+        teclas = _fn(_section(), 'p2dKeyDown')
+        assert teclas.index("ev.key === 'Escape'") < teclas.index('P.ad.turn(')
 
 
 class TestTodoSeAlcanzaDesdeLaLista:
@@ -853,7 +872,7 @@ class TestLaSedeTienePlantas:
         """Una referencia que se mueve con lo que se coloca encima no sirve para colocar."""
         # Lo que mide el plano sale de lo dicho, o de un tamaño fijo: ni de las salas ni del
         # marco del dibujo, que cambian al mover lo que hay encima.
-        for caja in ('_dcPlanBox', '_dcsPlanBox', '_dcpPlanBox'):
+        for caja in ('p2dPlanBox', '_dcsPlanBox', '_dcpPlanBox'):
             cuerpo = _fn(_section(), caja)
             assert '_dcsHere()' not in cuerpo and '_dcpExtent' not in cuerpo, caja
 
@@ -877,22 +896,28 @@ class TestLaSedeTienePlantas:
 
     def test_la_barra_vive_fuera_del_dibujo_y_se_esconde_al_arrastrar(self):
         plano = _fn(_section(), '_dcsHtml')
-        assert plano.index('id="dcsFloat"') < plano.index('<svg ')
+        assert plano.index('p2dFloatBoxHtml(_dcsP2d)') < plano.index('<svg ')
         assert '_dcsFloatHide()' in _fn(_section(), '_dcsDown')
 
     def test_ir_hacia_la_barra_de_un_rack_no_la_cambia_por_la_de_su_sala(self):
-        """El camino del rack a su barra cruza la sala que lo contiene: sin esperar, la barra
-        se cambiaba a mitad de camino y se pulsaba otro botón."""
-        mostrar = _fn(_section(), '_dcsFloatShow')
-        assert "kind === 'room' && _dcsFloatTimer" in mostrar
-        assert '_dcsFloatPending' in _fn(_section(), '_dcsFloatKeep')
+        mostrar = _fn(_section(), 'p2dFloatShow')
+        assert 'P.ad.floatWait(m.kind) && P.floatTimer' in mostrar
+        assert "floatWait: (kind) => kind === 'room'" in _section()
+        assert 'P.floatPending' in _fn(_section(), 'p2dFloatKeep')
 
     def test_quien_solo_mira_solo_abre(self):
-        barra = _fn(_section(), '_dcsFloatHtml')
-        assert "if (!edita) return" in barra and 'abrir' in barra.split('if (!edita) return')[1][:80]
+        # Lo de dentro de una sala: abrir, y lo demás solo para quien edita (`_dcObjFloatButtons`).
+        comunes = _fn(_section(), '_dcObjFloatButtons')
+        antes = comunes.split("if (!_dcimMay('dcim_edit')) return out;")[0]
+        assert "act: 'open'" in antes and "act: 'edit'" not in antes
+        # Una sala: abrir su plano; girarla y sacarla, solo para quien edita.
+        salas = _fn(_section(), '_dcsFloatButtons').split("if (m.kind === 'room') {")[1].split('return out;')[0]
+        assert salas.index("act: 'open'") < salas.index("_dcimMay('dcim_edit')") < salas.index("act: 'turn'")
 
     def test_duplicar_un_rack_no_copia_su_numero_de_activo(self):
-        dup = _fn(_section(), '_dcsItemDuplicate')
+        # Duplicar es uno solo para la sala y la planta (`_dcObjDuplicate`).
+        assert '_dcObjDuplicate(' in _fn(_section(), '_dcsItemDuplicate')
+        dup = _fn(_section(), '_dcObjDuplicate')
         assert "'asset'" not in dup and 'dcim_rack_copy_name' in dup
 
     def test_quitar_una_planta_pregunta_con_el_modal_del_panel(self):
@@ -1392,6 +1417,9 @@ class TestUnaColumnaQueNadiePuedeEscribir:
         # Dónde está un equipo de SALA (un PC, una roseta): no lo escribe la ficha del rack sino
         # el plano de la sala, como a una pieza (`PUT /room-items/<uid>`).
         'room_uid', 'pos_x', 'pos_y', 'rotation', 'base_mm', 'mount',
+        # Y la boca de una roseta o una toma de pared: la escribe su ficha en el plano
+        # (`_dcriJackHtml`), no la del rack.
+        'jacks', 'source_uid',
     }
 
     def _columnas(self):
@@ -3954,7 +3982,7 @@ class TestDeshacerEnLosPlanos:
 
     def test_todo_cambio_pasa_por_el_apunte(self):
         envio = _fn(_section(), '_dcimSend')
-        assert envio.index('_dcUndoBefore(') < envio.index('apiSend(') < envio.index('_dcUndoRecord(')
+        assert envio.index('p2duBefore(') < envio.index('apiSend(') < envio.index('p2duRecord(')
 
     def test_los_dos_planos_toman_la_foto_al_cargar(self):
         assert '_dcUndoPrime()' in _fn(_section(), '_dcimOpenPlan')
@@ -3962,8 +3990,8 @@ class TestDeshacerEnLosPlanos:
         assert '_dcUndoPrime()' in _fn(_section(), '_dcsGo')
 
     def test_y_llevan_los_botones(self):
-        assert '_dcUndoButtons()' in _fn(_section(), '_dcimPlanHtml')
-        assert '_dcUndoButtons()' in _fn(_section(), '_dcsHtml')
+        assert 'p2duButtons()' in _fn(_section(), '_dcimPlanHtml')
+        assert 'p2duButtons()' in _fn(_section(), '_dcsHtml')
 
 
 class TestElSueloDel3DNoSeCruza:
@@ -3987,15 +4015,17 @@ class TestCadaTipoDePiezaEstaCompleto:
         from lib.i18n.lang.es_ES import LANG as ES                   # noqa: PLC0415
         from lib.i18n.lang.en_EN import LANG as EN                   # noqa: PLC0415
         sec = _section()
-        bloque = lambda nombre: sec.split(nombre + ' = {')[1].split('};')[0]  # noqa: E731
-        for tabla in ('_DCP_LOOK', '_DCP_ICON', '_DC3_COLOR'):
-            claves = set(re.findall(r'\b(\w+):', bloque(tabla)))
-            faltan = [k for k in FEATURE_KINDS if k not in claves]
-            if tabla == '_DC3_COLOR':
-                faltan = [k for k in faltan if k != 'label']   # una etiqueta no se levanta
-            assert not faltan, f'{tabla}: {faltan}'
-        for k in FEATURE_KINDS:
-            assert 'dcim_kind_' + k in ES and 'dcim_kind_' + k in EN, k
+        # El dibujo, el icono y el nombre vienen del catálogo del editor de planos, con cada tipo
+        # (`lib/core/plan2d/kinds.py` y lo propio del inventario en `lib/core/dcim/plankinds.py`).
+        for k, spec in FEATURE_KINDS.items():
+            assert str(spec.get('icon', '')).startswith('bi-'), f'{k}: sin icono'
+            assert 'fill' in (spec.get('look') or {}), f'{k}: sin dibujo'
+            assert spec['label'] in ES and spec['label'] in EN, f'{k}: sin nombre ({spec["label"]})'
+        # Y el color en 3D, en el visor.
+        bloque = sec.split('_DC3_COLOR = {')[1].split('};')[0]
+        claves = set(re.findall(r'\b(\w+):', bloque))
+        faltan = [k for k in FEATURE_KINDS if k not in claves and k != 'label']   # una etiqueta no se levanta
+        assert not faltan, f'_DC3_COLOR: {faltan}'
 
     def test_el_armario_esta(self):
         from lib.core.dcim.store import FEATURE_KINDS                # noqa: PLC0415
@@ -4011,3 +4041,18 @@ class TestElRackSeDistingueDelMuro:
         gris = lambda clave: sum(float(v) for v in re.search(  # noqa: E731
             clave + r':\s*\[([\d.]+), ([\d.]+), ([\d.]+)', tabla).groups()) / 3
         assert gris('wallroom') - gris(r'\brack') > 0.25
+
+
+class TestElEditorDePlanosNoNombraElInventario:
+    """El editor de planos (`lib/core/plan2d/web`) es una herramienta: el motor, el deshacer y el
+    plano de fondo con su calibración. Lo que es del inventario —sus rutas, su estado, sus
+    permisos, sus textos— lo pone su fuente o su adaptador; si el motor lo nombra, otra pantalla
+    que lo use arrastra el inventario consigo, o falla donde él no está."""
+
+    def test_ningun_fichero_del_editor_nombra_el_inventario(self):
+        prohibido = re.compile(r"\b_dc\w*|\brenderDcim\b|api/v1/dcim|'dcim_|\b_DC\w*")
+        for f in sorted(os.listdir(PLAN2D)):
+            if f.endswith('.html'):
+                codigo = _strip_comments(_read(os.path.join(PLAN2D, f)))
+                hallado = sorted(set(prohibido.findall(codigo)))
+                assert not hallado, f'{f}: {hallado}'

@@ -91,7 +91,8 @@ class TestMaintenanceCard:
         assert {a['id'] for a in card['actions']} == {
             'db_optimize', 'db_compact',
             'history_clear_series', 'history_clear_all', 'syslog_clear', 'audit_clear_all',
-            'events_clear_log', 'ipban_clear_history', 'status_reset', 'db_orphans'}
+            'events_clear_log', 'ipban_clear_history', 'status_reset', 'db_orphans',
+            'dcim_demo_install', 'dcim_demo_remove'}
 
     def test_the_two_kinds_of_action_are_told_apart(self):
         """Reclaiming space and deleting data have opposite consequences, and the section
@@ -106,7 +107,9 @@ class TestMaintenanceCard:
         assert None not in by_group,             f'ungrouped maintenance actions: {by_group.get(None)}'
         assert by_group.get('cfg_actions_group_db') == {'db_optimize', 'db_compact'}, (
             'a group whose heading says it never deletes anything grew an action that does')
-        assert len(by_group.get('cfg_actions_group_wipe', ())) == 8
+        assert len(by_group.get('cfg_actions_group_wipe', ())) == 9
+        assert by_group.get('cfg_actions_group_demo') == {'dcim_demo_install'}, (
+            'installing the demo is not a wipe, and removing it is')
 
     def test_every_action_says_what_it_does(self):
         """A button caption fits a verb and a noun — enough to recognise an action you
@@ -275,6 +278,7 @@ class TestTheAuditEntrySaysWhereTheActionCameFrom:
         'events_clear_log': 'notification_log_cleared',
         'ipban_clear_history': 'ipban_history_cleared', 'status_reset': 'status_cleared',
         'db_orphans': 'db_orphans_purged',
+        'dcim_demo_install': 'dcim_demo_installed', 'dcim_demo_remove': 'dcim_demo_removed',
     }
 
     def _card(self):

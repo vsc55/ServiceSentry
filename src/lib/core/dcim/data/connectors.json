@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "_comment": "Los conectores que se ofrecen al decir por donde se enchufa algo. Sugerencias, no una lista cerrada: lo que se teclee se guarda igual. Los identificadores son los de netbox-community/devicetype-library, para que el mismo conector no se cuente dos veces segun quien lo teclee. Cada uno dice ademas que GENERACIONES caben en esa forma y que SENALES puede llevar: un USB-C 3.2 Gen 2 que ademas saca DisplayPort no es otro conector, es el mismo con dos datos mas que los dice el puerto.",
   "connectors": [
     {
@@ -33,7 +33,8 @@
       "name": "IEC C14",
       "group": "power-in",
       "families": [
-        "power-ports"
+        "power-ports",
+        "socket-jacks"
       ],
       "note": {
         "es_ES": "El de siempre: 10 A. Lo que lleva casi todo lo de rack.",
@@ -59,7 +60,8 @@
       "name": "IEC C20",
       "group": "power-in",
       "families": [
-        "power-ports"
+        "power-ports",
+        "socket-jacks"
       ],
       "note": {
         "es_ES": "20 A. El de las fuentes grandes: no entra en una C13.",
@@ -490,7 +492,8 @@
       "name": "IEC C13",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "note": {
         "es_ES": "La boca normal de una regleta de rack. Va con un C14.",
@@ -512,7 +515,8 @@
       "name": "IEC C19",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "note": {
         "es_ES": "20 A. Va con un C20, y no con un C14: son dos cosas distintas.",
@@ -532,9 +536,11 @@
     {
       "id": "iec-60309-p-n-e-4h-out",
       "name": "IEC 60309 P+N+E 4H",
+      "abbr": "CEE",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "shape": "round"
     },
@@ -543,7 +549,8 @@
       "name": "NEMA 1-15R",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "shape": "nema"
     },
@@ -552,7 +559,8 @@
       "name": "NEMA 5-15R",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "shape": "nema"
     },
@@ -561,7 +569,8 @@
       "name": "NEMA 5-20R",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "shape": "nema"
     },
@@ -570,16 +579,19 @@
       "name": "NEMA L6-30R",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "shape": "twist"
     },
     {
       "id": "cee-7-3",
       "name": "CEE 7/3",
+      "abbr": "SCH",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "note": {
         "es_ES": "La base schuko de pared.",
@@ -590,9 +602,11 @@
     {
       "id": "bs-1363-out",
       "name": "BS 1363",
+      "abbr": "UK",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "shape": "bs1363"
     },
@@ -602,6 +616,7 @@
         "es_ES": "Salida de continua",
         "en_EN": "DC output"
       },
+      "abbr": "DC",
       "group": "power-out",
       "families": [
         "power-outlets"
@@ -611,6 +626,7 @@
     {
       "id": "hdot-cx",
       "name": "HDOT Cx",
+      "abbr": "HDOT",
       "group": "power-out",
       "families": [
         "power-outlets"
@@ -620,6 +636,7 @@
     {
       "id": "saf-d-grid-out",
       "name": "Saf-D-Grid",
+      "abbr": "SAF",
       "group": "power-out",
       "families": [
         "power-outlets"
@@ -629,9 +646,11 @@
     {
       "id": "usb-a-out",
       "name": "USB-A",
+      "abbr": "USB",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "shape": "usb-a",
       "gens": [
@@ -664,9 +683,11 @@
     {
       "id": "usb-c-out",
       "name": "USB-C",
+      "abbr": "USB",
       "group": "power-out",
       "families": [
-        "power-outlets"
+        "power-outlets",
+        "socket-jacks"
       ],
       "shape": "usb-c",
       "gens": [
@@ -1174,7 +1195,8 @@
       "group": "video",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "dp",
       "gens": [
@@ -1246,7 +1268,8 @@
       "group": "video",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "hdmi",
       "gens": [
@@ -1362,7 +1385,8 @@
       "group": "video",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "dsub"
     },
@@ -1375,17 +1399,20 @@
       "group": "video",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "jack"
     },
     {
       "id": "8p8c",
-      "name": "8P8C",
+      "name": "RJ45 (8P8C)",
+      "abbr": "RJ45",
       "group": "copper",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "note": {
         "es_ES": "El conector del latiguillo de red. «RJ-45» es como se le llama.",
@@ -1424,22 +1451,74 @@
       "shape": "rj12"
     },
     {
-      "id": "gg45",
-      "name": "GG45",
+      "id": "6p6c",
+      "name": "RJ12 (6P6C)",
+      "abbr": "RJ12",
       "group": "copper",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
+      ],
+      "note": {
+        "es_ES": "La boca de teléfono ancha de seis contactos.",
+        "en_EN": "The six-contact telephone jack."
+      },
+      "shape": "rj12"
+    },
+    {
+      "id": "6p4c",
+      "name": "RJ11 (6P4C)",
+      "abbr": "RJ11",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports",
+        "outlet-jacks"
+      ],
+      "note": {
+        "es_ES": "La roseta de teléfono de siempre: dos líneas.",
+        "en_EN": "The usual telephone jack: two lines."
+      },
+      "shape": "rj12"
+    },
+    {
+      "id": "6p2c",
+      "name": "RJ11 (6P2C)",
+      "abbr": "RJ11",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports",
+        "outlet-jacks"
+      ],
+      "note": {
+        "es_ES": "La roseta de teléfono de una línea.",
+        "en_EN": "The single-line telephone jack."
+      },
+      "shape": "rj12"
+    },
+    {
+      "id": "gg45",
+      "name": "GG45",
+      "abbr": "GG45",
+      "group": "copper",
+      "families": [
+        "front-ports",
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "rj45"
     },
     {
       "id": "tera-4p",
       "name": "TERA 4P",
+      "abbr": "TERA",
       "group": "copper",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "rj45"
     },
@@ -1462,7 +1541,8 @@
       "group": "copper",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "coax"
     },
@@ -1472,10 +1552,12 @@
         "es_ES": "Conector F",
         "en_EN": "F connector"
       },
+      "abbr": "TV",
       "group": "copper",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "coax"
     },
@@ -1521,7 +1603,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "lc"
     },
@@ -1531,7 +1614,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "lc"
     },
@@ -1541,7 +1625,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "lc"
     },
@@ -1551,7 +1636,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "lc"
     },
@@ -1561,7 +1647,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "sc"
     },
@@ -1571,7 +1658,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "sc"
     },
@@ -1581,7 +1669,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "sc"
     },
@@ -1591,7 +1680,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "sc"
     },
@@ -1601,7 +1691,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "st"
     },
@@ -1611,7 +1702,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "st"
     },
@@ -1631,7 +1723,8 @@
       "group": "fibre",
       "families": [
         "front-ports",
-        "rear-ports"
+        "rear-ports",
+        "outlet-jacks"
       ],
       "shape": "mpo"
     },

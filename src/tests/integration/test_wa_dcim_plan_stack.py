@@ -75,22 +75,23 @@ __out.vuelta = _dcpSel && _dcpSel.uid;
 // ── Lo seleccionado se arrastra aunque esté tapado ──────────────────────────────
 _dcpSel = {kind: 'feature', uid: 'mesa'};
 _dcpDown(ev);
-__out.arrastraLaMesa = _dcpDrag && _dcpDrag.uid;
+// Lo coge el editor de planos (`p2dGrab`): su arrastre, con la mesa en la mano.
+__out.arrastraLaMesa = _dcpP2d.drag && _dcpP2d.drag.grab.uid;
 // …y si se movió, soltar no cambia de pieza.
-_dcpDrag.moved = true;
-_dcpSave = () => {};
+_dcpP2d.drag.moved = true;
+_dcimSend = () => Promise.resolve({ok: true});
 _dcpUp(ev);
 __out.movidaSigue = _dcpSel && _dcpSel.uid;
 
 // ── Enviar al fondo ─────────────────────────────────────────────────────────────
 _dcpSel = {kind: 'feature', uid: 'bandeja'};
 const ficha = String(_dcpInspectorBody());
-__out.botonEnFicha = ficha.includes('_dcpSendBack(&quot;feature&quot;,&quot;bandeja&quot;)');
+__out.botonEnFicha = ficha.includes('p2dSendBack(&quot;room&quot;,&quot;feature&quot;,&quot;&quot;,&quot;bandeja&quot;)');
 _dcpSendBack('feature', 'bandeja');
 __out.sueltaSeleccion = _dcpSel === null;
 __out.tenue = _dcpFeature(_dcpFeat.features[1]).includes('ss-dcp-back')
     && !_dcpFeature(_dcpFeat.features[0]).includes('ss-dcp-back');
-__out.chip = _dcpBackChip().includes('_dcpBringAll()') && _dcpBackChip().includes(tf('dcim_n_back', 1));
+__out.chip = _dcpBackChip().includes('p2dBringAll(&quot;room&quot;)') && _dcpBackChip().includes(tf('plan2d_n_back', 1));
 // Elegida desde la lista, vuelve al frente.
 _dcpPick('feature', 'bandeja');
 __out.listaLaTrae = !_dcpIsBack('feature', 'bandeja') && _dcpBackChip() === '';
@@ -101,8 +102,10 @@ _dcpBringAll();
 __out.traerTodo = _dcpBack.size === 0;
 
 // ── La barra flotante también lo envía al fondo ─────────────────────────────────
-__out.flotantePieza = _dcpFloatHtml('mesa', 'feature').includes('_dcpSendBackFeature(&quot;mesa&quot;)');
-__out.flotanteRack = _dcpFloatHtml('k1', 'rack').includes('_dcpSendBackRack(&quot;k1&quot;)');
+// La barra es la del editor de planos (`p2dFloatHtml`), con los botones comunes de un objeto.
+const barra = (kind, uid) => p2dFloatHtml(_dcpP2d, {kind, room: '', uid}, _dcObjFloatButtons(kind));
+__out.flotantePieza = barra('feature', 'mesa').includes('data-p2dact="back"');
+__out.flotanteRack = barra('rack', 'k1').includes('data-p2dact="back"');
 
 // ── El cursor de las asas gira con la pieza ─────────────────────────────────────
 __out.cursor0 = ['e', 'n', 'ne', 'nw'].map(a => _dcpHandleCursor(a, 0)).join(',');

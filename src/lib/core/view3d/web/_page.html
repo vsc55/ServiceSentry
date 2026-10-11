@@ -27,6 +27,8 @@ let _x3Real = (() => { try { return localStorage.getItem('ss.x3.real') === '1'; 
 const _X3_MAIN = 'x3-main';
 const _X3_CRUMBS = 'x3-crumbs';
 const _X3_Q_SITE = 'site', _X3_Q_FLOOR = 'floor', _X3_Q_MODE = 'mode';
+//: Y una sala o un rack a los que ir al abrir: los pone el botón «3D» de un plano o de un rack.
+const _X3_Q_ROOM = 'room', _X3_Q_RACK = 'rack';
 
 // ── Lo que en el panel lleva a la sección del inventario, aquí lleva a esta página ──────────
 
@@ -179,7 +181,8 @@ function _x3Floors() {
 function _x3Url(nueva) {
     try {
         const url = new URL(window.location.href);
-        [_X3_Q_SITE, _X3_Q_FLOOR, _X3_Q_MODE].forEach(k => url.searchParams.delete(k));
+        // La sala o el rack de la dirección son de la llegada: al moverse, dejan de ser donde se está.
+        [_X3_Q_SITE, _X3_Q_FLOOR, _X3_Q_MODE, _X3_Q_ROOM, _X3_Q_RACK].forEach(k => url.searchParams.delete(k));
         if (_x3View === 'site' && _dcsPlan) {
             url.searchParams.set(_X3_Q_SITE, _dcsPlan.site.uid);
             if (_dcsPlan.floor) url.searchParams.set(_X3_Q_FLOOR, _dcsPlan.floor);
@@ -209,7 +212,29 @@ async function _x3FromUrl() {
         if (_ds3Mode === 'building') _ds3LoadImages();
         return _x3Render();
     }
-    return _x3OpenSite(site, floor, mode, true);
+    const room = q.get(_X3_Q_ROOM) || '', rack = q.get(_X3_Q_RACK) || '';
+    await _x3OpenSite(site, floor, mode, true);
+    _x3Focus(room, rack);
+}
+
+/** Ir a la sala o al rack que pedía la dirección: la cámara vuela a la sala (su suelo, de la
+ *  escena: `salas`), o el rack se abre en su sitio y se mira de frente (`_dc3dOpenRack`). La
+ *  escena se arma después de abrir la sede, así que se espera a que esté —a lo sumo cinco
+ *  segundos—. */
+function _x3Focus(room, rack, intentos) {
+    if (!room && !rack) return;
+    const V = ss3dGet(_DC3D_BOX);
+    const e = V && V.escena;
+    if (!e || !(e.cajas || []).length) {
+        if ((intentos || 0) < 50) setTimeout(() => _x3Focus(room, rack, (intentos || 0) + 1), 100);
+        return;
+    }
+    if (rack) return _dc3dOpenRack(rack);
+    const s = (e.salas || []).find(x => String(x.uid) === String(room));
+    if (!s) return;
+    const f = s.frame;
+    ss3dFlyTo(V, {mira: [f.x + f.W / 2, (Number(s.y) || 0) + 1, f.z + f.D / 2],
+                  radio: Math.max(4, Math.max(f.W, f.D) * 1.4)});
 }
 
 // ── Pintar ───────────────────────────────────────────────────────────────────────────────

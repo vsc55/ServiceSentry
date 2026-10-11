@@ -31,7 +31,7 @@ Lo vigila `tests/meta/test_docs_db_schema.py::TestLaAuditoriaVaAlFinal`, sobre l
 
 ## Índice de tablas
 
-Hay **79 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
+Hay **80 tablas** core/servicio, más un mecanismo de tablas de módulo dinámicas
 (`mod_<módulo>_<nombre>`) que hoy **ningún watchful declara**.
 
 > Las dos de SNMP se llamaron `mod_snmp_*` mientras la biblioteca MIB era de un módulo.
@@ -50,6 +50,7 @@ Hay **79 tablas** core/servicio, más un mecanismo de tablas de módulo dinámic
 | Infraestructura | `net_evidence` (lo que cada dispositivo ha *visto*: tabla de reenvío y caché ARP) |
 | Empresas | `org` (las sociedades del grupo), `org_owner` (de quién es cada cosa, en cualquier ámbito que un paquete declare) |
 | Inventario físico (DCIM) | `dc_site`, `dc_floor` (una planta de la sede, con su plano), `dc_floor_wall` (los muros de una planta, leídos de su plano), `dc_room`, `dc_rack`, `dc_item` (lo que ocupa cada U), `dc_feature` (lo que hay en la sala que no es un rack), `dc_shelf_item` (lo que hay en cada estantería de un armario), `dc_pdu` y `dc_feed` (de qué se alimenta cada equipo), `dc_cable` (lo que alguien declaró enchufado, para contrastarlo con lo que los dispositivos ven), `dc_link` (lo que une dos sedes), `dc_brand` (las marcas: la raíz del catálogo), `dc_type` (catálogo de modelos importado), `dc_schema` (qué campos puede tener un modelo), `dc_rev` (qué decía una ficha antes, y quién la cambió), `dc_profile` (qué se pregunta de un componente de cada clase), `dc_file` (los adjuntos de una ficha: manuales, hojas, firmware), `dc_platform` (con qué sale un equipo: Debian, RouterOS, ESXi), `dc_build` y `dc_build_part` (las plantillas: lo que de verdad se compra, entre el catálogo y el inventario) |
+| Editor de planos | `plan2d_kind` (los objetos que alguien crea desde la pantalla de un plano: un palé, un fichador) |
 | Notificaciones | `webhooks`, `msteams_channels`, `msteams_bot_refs`, `health_alerts` |
 | Gestor de eventos | `event_rules`, `event_rules_notifications`, `event_cursor`, `event_cooldowns` |
 | fail2ban / ipban | `ip_bans`, `ip_ban_history`, `ip_offense_counters`, `ip_offense_log`, `ip_service_action`, `ip_whitelist` |
@@ -1308,6 +1309,8 @@ nunca borra un armario que tenga algo dentro.
 | base_mm | INTEGER | sí | — | a qué altura del suelo, en mm; vacío = la de su clase (`ROOM_ITEM_DEFAULTS`: un AP a 2950, una roseta a 300) |
 | mount | TEXT | no | `''` | cómo va montado: `desk`, `wall`, `ceiling` o `floor` (`MOUNTS`); vacío = el de su clase |
 | group_uid | TEXT | no | `''` | grupo con el que se mueve junto en el plano de la sala o la planta: un id opaco compartido (`g-` y letras); vacío = sin grupo. El servidor rechaza lo que no case con `^[A-Za-z0-9_-]{0,64}$` |
+| jacks | TEXT | no | `''` | una roseta o una toma de corriente de pared (`JACK_ROLES`): sus bocas, una lista en JSON `[{"connector": "8p8c", "n": 2}, …]` — cada una un id del catálogo de conectores de su clase (`connectors.jacks`: cobre, fibra y vídeo en una roseta; corriente en una toma) y cuántas, un entero desde 1 sin máximo. El mismo conector dos veces se junta en uno. Vacío = sin decir |
+| source_uid | TEXT | no | `''` | una toma de corriente: la fuente de la que cuelga → `dc_source.uid` (SAI, grupo, cuadro, acometida), de la misma sede que su sala. Borrar la fuente la deja vacía |
 | created_at | TEXT | no | `''` | auditoría |
 | updated_at | TEXT | no | `''` | auditoría |
 | updated_by | TEXT | no | `''` | auditoría |
@@ -1762,6 +1765,37 @@ formato tiene la tarjeta nueva casi nunca es quien toca el código.
 > **Un esquema no es una tabla.** Los campos que el panel sabe guardar en una columna van a su columna; el resto va a `dc_type.extra`. Un esquema capaz de crear columnas sería un esquema capaz de romper la base de datos desde un formulario — y el destino de cada campo lo decide el servidor, nunca la petición.
 
 > **De dónde salen.** `schema/devicetype.json`, `schema/moduletype.json` y `schema/racktype.json` de la biblioteca configurada, más `schema/generated_schema.json`, que es donde viven las listas de valores compartidas: sin seguir esos `$ref`, la unidad de peso se pediría como texto libre y alguien escribiría «kilos» donde el importador espera `kg`.
+
+### `plan2d_kind` — los objetos creados desde la pantalla de un plano
+
+[lib/core/plan2d/store.py](../src/lib/core/plan2d/store.py)
+
+Los objetos base y los de cada pantalla son código (`lib/core/plan2d/kinds.py`); éstos son los que
+alguien crea desde la pantalla de un plano —un palé, un fichador— y pertenecen solo a esa pantalla.
+No se puede borrar uno que esté colocado (409).
+
+| Columna | Tipo | Null | Default | Descripción |
+|---|---|---|---|---|
+| uid | TEXT | PK | — | |
+| screen | TEXT | no | `''` | la pantalla a la que pertenece (`register_screen`): hoy `dcim`; índice `idx_plan2d_kind_screen` |
+| kind_key | TEXT | no | `''` | lo que llevan las cosas colocadas: `u-` y diez letras. Se acuña al crear y **nunca cambia**, para que renombrar un objeto no deje huérfanas las cuarenta cosas ya colocadas. Único con `screen` (`idx_plan2d_kind_key`) |
+| name | TEXT | no | `''` | |
+| icon | TEXT | no | `'bi-square'` | de una lista cerrada (`ICONS`) |
+| device | INTEGER | no | `0` | 1 = es un equipo: se vincula a un dispositivo y se rastrea su cable; en DCIM va a `dc_item`, si no a `dc_feature` |
+| mount | TEXT | no | `'floor'` | cómo se monta |
+| w_mm | INTEGER | no | `600` | ancho habitual, en mm |
+| d_mm | INTEGER | no | `600` | fondo habitual, en mm |
+| h_mm | INTEGER | no | `1000` | alto habitual, en mm |
+| base_mm | INTEGER | no | `0` | altura sobre el suelo a la que empieza, en mm |
+| layer | TEXT | no | `'room'` | `floor` \| `room` \| `air` |
+| front | INTEGER | no | `0` | 1 = tiene un frente, que se marca en el plano |
+| fill | TEXT | no | `'#94a3b8'` | color de relleno (`#rrggbb`) |
+| line | TEXT | no | `''` | color del contorno (`#rrggbb`) |
+| dash | TEXT | no | `''` | trazo del contorno |
+| abbr | TEXT | no | `''` | las letras con que se dibuja, hasta 4 |
+| created_at | TEXT | no | `''` | auditoría |
+| updated_at | TEXT | no | `''` | auditoría |
+| updated_by | TEXT | no | `''` | auditoría |
 
 ### `webhooks` — webhooks salientes
 [lib/core/notify/webhook/store.py:28](../src/lib/core/notify/webhook/store.py#L28)

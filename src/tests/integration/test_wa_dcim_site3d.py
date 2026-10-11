@@ -26,7 +26,7 @@ import tempfile
 import pytest
 
 from tests.conftest import _login                                   # noqa: E402
-from tests.helpers import node_run, panel_bundle                    # noqa: E402
+from tests.helpers import node_run, panel_bundle, plan2d_catalog_js  # noqa: E402
 
 pytestmark = pytest.mark.skipif(shutil.which('node') is None,
                                 reason='sin node: no hay con qué ejecutar el guion')
@@ -276,7 +276,9 @@ def out():
     wa.app.config['TESTING'] = True
     c = wa.app.test_client()
     _login(c)
-    return node_run(panel_bundle(c), _PRUEBA)
+    # Con el catálogo de planos ya cargado, como lo está desde el primer plano que se abre:
+    # lo que se cuenta es lo que pide la SEDE.
+    return node_run(panel_bundle(c), plan2d_catalog_js(c) + _PRUEBA)
 
 
 class TestUnaPlantaEn3D:

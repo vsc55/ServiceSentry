@@ -90,7 +90,7 @@ a `editor` ni a `viewer` (sí a `admin`, que los tiene todos).
 | **Credenciales** | `credentials_view` `credentials_add` `credentials_edit` `credentials_delete` | CRUD de credenciales reutilizables: identidades SSH y registros de aplicación de Entra ID (`azure_app`, `m365_app`), tokens de API (Proxmox, NUT, HTTP, datastore). **Catálogo → Credenciales** |
 | **Configuración** | `config_view` | Leer configuración sin poder editarla |
 | | `config_edit` | Guardar cambios en configuración |
-| | `db_maintenance` | Optimizar y compactar la base de datos (Config › Mantenimiento). Flag propio y **sin rol por defecto**: compactar deja la base de datos bloqueada mientras se reescribe, y editar un ajuste no es la misma autoridad que congelar el panel |
+| | `db_maintenance` | Optimizar y compactar la base de datos, e instalar o borrar los datos de demostración del inventario físico (Config › Mantenimiento). Flag propio y **sin rol por defecto**: compactar deja la base de datos bloqueada mientras se reescribe, y editar un ajuste no es la misma autoridad que congelar el panel |
 | **Resumen** | `overview_view` | Ver el panel de Resumen |
 | | `overview_edit` | Guardar una disposición propia del Resumen. El servidor lo exige al guardarla; volver a la predeterminada queda abierto a todos |
 | | `overview_set_default` | Fijar el layout como default global |

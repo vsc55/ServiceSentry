@@ -173,7 +173,7 @@ class TestFireAndCables:
                 if r['name'] not in {w[k] for k in _RISK}:
                     continue
                 puertas = [f for f in store.features_of(r['uid'])
-                           if f['kind'] == 'door' and f['label'] in (w['door'], w['door_fire'])]
+                           if f['kind'] == 'door' and f['label'] in ('', w['door_fire'])]
                 assert puertas and all(f['label'] == w['door_fire'] for f in puertas), r['name']
 
     def test_data_and_power_in_separate_trays_along_the_corridor(self, building):

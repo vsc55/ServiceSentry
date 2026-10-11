@@ -21,7 +21,7 @@ let _dcimData = {sites: [], orgs: []};
 
 //: Los que no llevan nada que vigilar: la misma lista que `ROLES_MUDOS` (una guarda lo comprueba).
 //: Aquí y no en `_devices.html`: también la usa el 3D de un rack abierto, y `/3d` no incluye aquel.
-const _DC_QUIET_ROLES = ['patch_panel', 'fiber_panel', 'shelf', 'blank', 'outlet'];
+const _DC_QUIET_ROLES = ['patch_panel', 'fiber_panel', 'shelf', 'blank', 'outlet', 'power_outlet'];
 //: Las zonas horarias, pedidas una vez. `null` = todavía no; `[]` = no hay ninguna en ninguna
 //: de las dos fuentes, y entonces el campo vuelve a ser texto libre en vez de un desplegable
 //: vacío que no deja escribir nada.
@@ -93,7 +93,7 @@ async function dcimGoTo(kind, uid) {
     _dcimPlan = null;
     if (!(_dcimData.sites || []).length) {
         const [sites, orgs] = await Promise.all([
-            apiGet('/api/v1/dcim/sites'), apiGet('/api/v1/dcim/orgs')]);
+            apiGet('/api/v1/dcim/sites'), apiGet('/api/v1/dcim/orgs'), p2dEnsureKinds('dcim')]);
         _dcimData = {sites: (sites || {}).sites || [], orgs: (orgs || {}).orgs || []};
     }
     if (kind === 'room' && uid && _dcimFindRoom(uid)) return _dcimOpenPlan(uid);
@@ -115,11 +115,12 @@ function _dcimMay(flag) {
  *  un `const` se evalúa en su sitio — si este trozo entrara antes que `_api.html`, sería un
  *  ReferenceError al cargar la página entera. Así se resuelve al llamar. */
 async function _dcimSend(metodo, url, cuerpo) {
-    // Un cambio a algo del plano abierto se apunta para poder deshacerlo (`_undo.html`).
-    const antes = metodo === 'PUT' && typeof _dcUndoBefore === 'function'
-        ? _dcUndoBefore(url, cuerpo) : null;
+    // Un cambio a algo del plano abierto se apunta para poder deshacerlo (el historial del editor
+    // de planos, `p2duBefore`/`p2duRecord`, con la fuente del inventario de `_undo.html`).
+    const antes = metodo === 'PUT' && typeof p2duBefore === 'function'
+        ? p2duBefore(url, cuerpo) : null;
     const r = await apiSend(metodo, url, cuerpo);
-    if (antes && r && r.ok) _dcUndoRecord(url, antes, cuerpo);
+    if (antes && r && r.ok) p2duRecord(url, antes, cuerpo);
     return r;
 }
 
@@ -224,7 +225,7 @@ async function renderDcim() {
         _dcimBuildOpts = (d || {}).builds || [];
     }
     const [sites, orgs] = await Promise.all([
-        apiGet('/api/v1/dcim/sites'), apiGet('/api/v1/dcim/orgs')]);
+        apiGet('/api/v1/dcim/sites'), apiGet('/api/v1/dcim/orgs'), p2dEnsureKinds('dcim')]);
     _dcimData = {sites: (sites || {}).sites || [], orgs: (orgs || {}).orgs || []};
     // Tres vistas y un solo sitio donde se elige: el rack manda sobre el plano y el plano
     // sobre el árbol, porque es el orden en que se entra — nadie abre un rack sin haber pasado
@@ -403,9 +404,8 @@ function _dcimGo(donde) {
     // Al inventario se vuelve del todo: si se quedara el rack abierto, «Inventario» llevaría al
     // rack, que es donde ya se estaba. Con lo que se estaba mirando elegido.
     _dcimRemember();
-    _dcimRack = null;
-    _dcimPlan = null;
-    _dcsPlan = null;
+    _dcPlanLeave();
+    _dcimRack = _dcimPlan = _dcsPlan = null;
     // Y la URL con ellos: sin esto seguía diciendo `?room=…`, y un F5 en el inventario volvía a
     // abrir el plano de la sala de la que se acababa de salir.
     _dcimUrl();

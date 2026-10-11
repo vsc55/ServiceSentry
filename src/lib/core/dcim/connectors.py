@@ -66,7 +66,11 @@ SIGNALS_MAX = 16
 #: en el documento no crearía una casilla nueva —no hay pantalla que la dibuje— sería un conector
 #: que está escrito y no se ofrece en ninguna parte, sin que nada lo diga.
 FAMILIES = ('interfaces', 'power-ports', 'power-outlets', 'console-ports',
-            'console-server-ports', 'front-ports', 'rear-ports', 'module-bays', 'device-bays')
+            'console-server-ports', 'front-ports', 'rear-ports', 'module-bays', 'device-bays',
+            # Y las bocas de pared: lo que se ofrece en una roseta y en una toma de corriente
+            # (`jacks`). Son del catálogo y no de un equipo: no son una familia de puertos
+            # (`PORT_FAMILIES`), son en qué casillas se ofrece el conector.
+            'outlet-jacks', 'socket-jacks')
 
 _CACHE: dict | None = None
 #: Cómo estaba el fichero cuando se leyó: `(mtime, tamaño)`.
@@ -209,6 +213,9 @@ def normalise(doc) -> dict:
                 fila[campo] = str(v).strip()
         if str(c.get('speed') or '').strip():
             fila['speed'] = str(c['speed']).strip()
+        # Cómo se dice en pocas letras, donde no cabe el nombre: en el plano, «RJ45» y no «8P8C».
+        if str(c.get('abbr') or '').strip():
+            fila['abbr'] = str(c['abbr']).strip()
         # La imagen, si la tiene. Un conector que alguien añade no tiene dibujo —los que vienen
         # con el panel los trae `_conn_shapes.html`, y nadie va a escribir un SVG para su
         # regleta— así que puede traer una foto en su lugar.
@@ -413,6 +420,8 @@ def all(lang: str = '', store=None) -> list[dict]:          # noqa: A001
         # `10gbase-t` sí: inventarle una al primero sería afirmar algo que el conector no dice.
         if c.get('speed'):
             fila['speed'] = str(c['speed'])
+        if c.get('abbr'):
+            fila['abbr'] = str(c['abbr'])
         if c.get('note'):
             fila['note'] = _text(c.get('note'), lang)
         # Su foto, cuando la tiene. La pantalla la prefiere al dibujo: uno que alguien subió es
@@ -484,6 +493,47 @@ def name(ident: str, lang: str = '', store=None) -> str:
         if c['id'] == ident:
             return c['name']
     return ''
+
+
+#: En qué familia del catálogo busca sus bocas cada clase de pared. QUÉ conectores son bocas de
+#: roseta o de toma lo dice el catálogo —cada conector marca las familias en que se ofrece, y se
+#: cambia en su pantalla—, no una lista en el código: una lista aquí dejaba fuera la boca que
+#: alguien añadiera al catálogo, y metía las clavijas macho entre las tomas de pared.
+JACK_FAMILY = {'outlet': 'outlet-jacks', 'power_outlet': 'socket-jacks'}
+def _abbr_of(ident: str) -> str:
+    """Las letras de un conector que el catálogo no abrevia, sacadas de su identificador
+    (`lc-upc` → LC, `iec-60320-c13` → C13)."""
+    partes = [p for p in str(ident or '').lower().split('-') if p]
+    for p in partes:
+        if p[:1] == 'c' and p[1:].isdigit():         # iec-60320-c13 → C13
+            return p.upper()
+    return partes[0].upper()[:4] if partes else ''
+
+
+def jack_abbr(ident: str, store=None) -> str:
+    """Las letras de un conector en el plano: las que dice el catálogo en vigor (`abbr`: «RJ45» y
+    no «8P8C», que es como lo llama), y si no dice ninguna, las de su identificador. Del catálogo
+    y no de una tabla en el código: quien añade un conector, o guarda su versión del documento,
+    decide también cómo se lee."""
+    ident = str(ident or '').strip().lower()
+    if not ident:
+        return ''
+    for c in all('', store):
+        if c['id'].lower() == ident:
+            return c.get('abbr') or _abbr_of(ident)
+    return _abbr_of(ident)
+
+
+def jacks(role: str, lang: str = '', store=None) -> list[dict]:
+    """Los conectores que puede tener una boca de un equipo de pared de *role*: los del catálogo
+    en vigor marcados en su familia (`JACK_FAMILY`), en el orden del catálogo, cada uno
+    ``{id, name, abbr, shape}``. Nada para un rol que no tiene bocas."""
+    fam = JACK_FAMILY.get(str(role or ''))
+    if not fam:
+        return []
+    return [{'id': c['id'], 'name': c['name'], 'abbr': c.get('abbr') or _abbr_of(c['id']),
+             'shape': c['shape']}
+            for c in all(lang, store) if fam in c['families']]
 
 
 def count(store=None) -> int:

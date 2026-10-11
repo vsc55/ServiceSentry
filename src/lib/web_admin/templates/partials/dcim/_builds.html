@@ -156,7 +156,7 @@ let _dcbCurrentPage = [];
 function _dcbSortValue(b, key) {
     if (key === 'parts' || key === 'items') return Number(b[key] || 0);
     if (key === 'u') return Number(b.u_tenths || 0);
-    if (key === 'role') return String(b.role ? t('dcim_role_' + b.role) : '');
+    if (key === 'role') return String(b.role ? _dcRoleName(b.role) : '');
     if (key === 'platform') return _dcPlatName(b.platform_uid);
     if (key === 'base') return String(b.type_name || '');
     return String(b[key] || '');
@@ -173,7 +173,7 @@ function _dcbCell(b, id) {
     }
     if (id === 'base') return `<td>${_dcBuildBaseCell(b)}</td>`;
     if (id === 'role') {
-        return `<td class="ss-fs-2">${esc(b.role ? t('dcim_role_' + b.role) : '—')}</td>`;
+        return `<td class="ss-fs-2">${esc(b.role ? _dcRoleName(b.role) : '—')}</td>`;
     }
     if (id === 'platform') {
         const p = _dcPlatName(b.platform_uid);
@@ -238,7 +238,7 @@ createListTable({
             {key: 'role', label: () => t('dcim_role'), type: 'select', minWidth: '150px',
              options: () => [{value: '', label: t('all')}].concat(
                  (ctx.d.roles || []).filter(Boolean)
-                     .map(r => ({value: r, label: t('dcim_role_' + r)})))},
+                     .map(r => ({value: r, label: _dcRoleName(r)})))},
             // Las retiradas siguen en la lista —una plantilla retirada explica los equipos que
             // nacieron de ella— pero estorban al elegir con qué crear el siguiente.
             {key: 'vigente', label: () => t('dcim_build_state'), type: 'select',
@@ -1083,7 +1083,7 @@ function _dcBuildInfoHtml(b, d, eff) {
         _dcInfoRow(t('dcim_cat_desc'), esc(b.description || '')),
         eff.tenths ? _dcInfoRow(t('dcim_build_takes'), esc(_dcBuildTakes(eff))) : '',
         _dcInfoRow(t('dcim_build_platform'), esc(_dcPlatName(b.platform_uid) || '')),
-        _dcInfoRow(t('dcim_role'), esc(eff.role ? t('dcim_role_' + eff.role) : '')),
+        _dcInfoRow(t('dcim_role'), esc(eff.role ? _dcRoleName(eff.role) : '')),
         (b.valid_from || b.valid_to)
             ? _dcInfoRow(t('dcim_build_validity'),
                          esc([b.valid_from || '…', b.valid_to || '…'].join(' → '))) : '',
@@ -1446,7 +1446,7 @@ function _dcBuildBaseHtml(b, puede) {
                 ${eff.tenths ? dato(_dcBuildFootprint(eff)) : ''}
                 ${eff.deep === null ? '' : dato(t(eff.deep ? 'dcim_build_full_depth'
                                                            : 'dcim_build_half_depth'))}
-                ${eff.role ? dato(t('dcim_role_' + eff.role)) : ''}
+                ${eff.role ? dato(_dcRoleName(eff.role)) : ''}
                 ${b.airflow ? dato(_dcEnumName(b.airflow)) : ''}
                 ${b.power_type ? dato(_dcEnumName(b.power_type)) : ''}
             </div>
@@ -1493,7 +1493,7 @@ function _dcBuildMeasuresHtml(b, puede) {
                     <option value="">${esc(t('dcim_build_unset'))}</option>
                     ${roles.map(r => `<option value="${escAttr(r)}"${
                         b.role === r ? ' selected' : ''}>${
-                        esc(t('dcim_role_' + r))}</option>`).join('')}
+                        esc(_dcRoleName(r))}</option>`).join('')}
                 </select></label>
             <label class="ss-fs-2 text-muted">${_dcLabel('dcim_face')}
                 <select class="form-select form-select-sm" style="max-width:10rem"${dis}

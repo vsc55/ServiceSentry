@@ -9,50 +9,17 @@ from __future__ import annotations
 from lib.db.schema import Column, Index, TableSpec
 
 
-#: Lo que puede haber en una sala aparte de los racks, con lo que mide de fábrica —milímetros—
-#: y en qué capa se dibuja. Cerrado a propósito: un plano donde cada quien inventa su tipo deja
-#: de poder decirse en voz alta («la columna de la fila B») y deja de poder contarse.
+#: Lo que puede haber en una sala aparte de los racks, con lo que mide de fábrica —milímetros—,
+#: en qué capa se dibuja y cómo se ve. Sale del catálogo del editor de planos
+#: (`lib.core.plan2d.kinds`), donde el inventario dice qué objetos base usa y cuáles son solo
+#: suyos (`lib.core.dcim.plankinds`): una puerta mide lo mismo y se dibuja igual en cualquier plano.
+#: Los que se crean desde la pantalla los añade `plankinds.feature_kinds(wa)` a lo que se acepta.
 #:
 #: `front`: la pieza tiene un lado de DELANTE —por donde se abre un armario o un cuadro, por
-#: donde se sienta uno a una mesa—, y el dibujo lo marca. Es el lado de `pos_y`, el de arriba
-#: antes de girar, el mismo que el de un rack: girarla es cambiar hacia dónde mira.
-#: `layer` no es estética. Un pasillo confinado se pinta DEBAJO de los racks porque es el suelo
-#: entre ellos, y una bandeja portacables ENCIMA porque va por el aire: dibujarlas en el orden
-#: equivocado tapa lo que se venía a mirar.
-#: `h` es lo ALTO, y `base` a qué altura empieza. Una sala en planta no dice nada de lo alto que
-#: es nada, y en cuanto se levanta el dibujo la diferencia entre una bandeja a 2,7 m y una mesa
-#: de 0,75 es toda la sala. `base` solo lo usa lo que va colgado: una bandeja no está en el
-#: suelo, y dibujarla ahí la pone donde estorba en vez de donde va.
-FEATURE_KINDS = {
-    'aisle':     {'w': 4800, 'd': 1200, 'h': 2200, 'layer': 'floor'},   # pasillo confinado
-    'zone':      {'w': 2000, 'd': 2000, 'h': 20,   'layer': 'floor'},   # zona libre / reserva
-    'column':    {'w': 500,  'd': 500,  'h': 3000, 'layer': 'room'},    # del suelo al techo
-    'wall':      {'w': 4000, 'd': 100,  'h': 2700, 'layer': 'room'},    # mampara o tabique
-    'door':      {'w': 1000, 'd': 120,  'h': 2100, 'layer': 'room'},
-    'panel':     {'w': 900,  'd': 400,  'h': 2000, 'layer': 'room', 'front': True},  # cuadro eléctrico
-    'ups':       {'w': 1200, 'd': 900,  'h': 1900, 'layer': 'room', 'front': True},
-    'crac':      {'w': 600,  'd': 1000, 'h': 2000, 'layer': 'room', 'front': True},  # climatizador
-    'bench':     {'w': 1600, 'd': 800,  'h': 750,  'layer': 'room', 'front': True},  # mesa de trabajo
-    'cabinet':   {'w': 1000, 'd': 500,  'h': 2000, 'layer': 'room', 'front': True},  # armario: repuestos, material
-    'extinguisher': {'w': 300, 'd': 300, 'h': 900, 'layer': 'room'},
-    'tray':      {'w': 6000, 'd': 300,  'h': 140,  'base': 2720, 'layer': 'air'},
-    # El control de accesos. Un torno —trípode o de pasillo—, con su delante, que es el lado por
-    # el que se entra. Y lo que va en una pared: un lector de tarjetas, o la puerta de enlace a la
-    # que se conectan las cerraduras (el IQ de Salto KS), a la altura a la que se cuelga.
-    'turnstile': {'w': 1000, 'd': 1600, 'h': 1000, 'layer': 'room', 'front': True},
-    'reader':    {'w': 200,  'd': 80,   'h': 200,  'base': 1300, 'layer': 'room'},
-    # La seguridad del edificio, que también se dibuja y se cuenta: dónde está la boca de
-    # incendio más cercana es una pregunta de plano, no de inventario. Casi todo va en una
-    # PARED, a la altura a la que se cuelga, con su delante hacia la sala; el detector, en el
-    # techo.
-    'hose_reel':  {'w': 700, 'd': 250, 'h': 700, 'base': 900,  'layer': 'room', 'front': True},  # BIE
-    'fire_alarm': {'w': 120, 'd': 60,  'h': 120, 'base': 1400, 'layer': 'room', 'front': True},  # pulsador
-    'emergency_light': {'w': 350, 'd': 80, 'h': 120, 'base': 2200, 'layer': 'room', 'front': True},
-    'smoke_detector':  {'w': 120, 'd': 120, 'h': 60, 'base': 2940, 'layer': 'air'},
-    'first_aid':  {'w': 400, 'd': 150, 'h': 500, 'base': 1200, 'layer': 'room', 'front': True},  # botiquín
-    'aed':        {'w': 450, 'd': 200, 'h': 450, 'base': 1200, 'layer': 'room', 'front': True},  # desfibrilador
-    'label':     {'w': 1600, 'd': 400,  'h': 10,   'layer': 'air'},     # una nota sobre el plano
-}
+#: donde se sienta uno a una mesa—, y el dibujo lo marca. `layer` no es estética: un pasillo
+#: confinado se pinta DEBAJO de los racks y una bandeja ENCIMA. `h` es lo ALTO, y `base` a qué
+#: altura empieza: una bandeja no está en el suelo.
+from lib.core.dcim.plankinds import FEATURE_KINDS  # noqa: E402,F401
 
 #: Qué cerradura lleva una pieza del control de accesos. Un cilindro electrónico (el Neo de
 #: Salto) o un escudo en una puerta; una cerradura de taquilla (XS4 Locker) en un armario; un

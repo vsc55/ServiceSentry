@@ -8,6 +8,548 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.143] - 2026-10-11
+
+### Added
+
+- **What a plan can hold is a catalogue of the 2D plan editor, reusable by any screen.**
+  Asked for: the objects a plan places —doors, desks, cameras, printers, IP phones, PCs—
+  belong to the editor, not to the inventory. Each screen says which it uses and adds its own,
+  and more can be created from the screen itself.
+  - **Base objects** are in `lib/core/plan2d/kinds.py` (`BASE`), each with its name
+    (`plan2d_kind_<id>`), icon, usual size, layer, mount, whether it is equipment, and how it
+    is drawn.
+  - **A screen registers itself** (`register_screen`) with the base objects it uses, in its
+    palette's order, plus its own. It also names the permission that reads its catalogue and
+    the one that manages its objects, and says how many things use a given object.
+  - The inventory does so in `lib/core/dcim/plankinds.py`. It uses all the base objects and
+    adds a contained aisle, an electrical panel, a UPS, a cooling unit, a cable tray, a
+    turnstile and a reader. It reads with `dcim_view` and manages with `dcim_catalog_manage`.
+  - **Objects created from the screen** are rows of `plan2d_kind`, one list per screen. Their
+    key (`u-` and ten letters) is minted on creation and never changes, so renaming one does
+    not orphan what is placed.
+  - The editor sits in the plan's inspector, behind a button in the bar, for whoever may manage.
+    It sets name, icon (from a closed list), whether it is equipment and where it mounts, sizes,
+    layer, front, fill and outline colours, stroke and letters. It works the same on the room
+    plan and the floor plan.
+  - **Where a placed object is stored stays the screen's decision.** In the inventory,
+    equipment goes to `dc_item` (role = its key), linked to a device and traceable; the rest
+    goes to `dc_feature` (kind = its key). Neither can be placed as the other.
+  - An object placed somewhere cannot be deleted, nor switched between equipment and piece
+    (409).
+  - API: `GET/POST /api/v1/plan2d/<screen>/kinds` and `PUT/DELETE …/kinds/<uid>`. Creating and
+    deleting one is audited (`plan2d_kind_created`, `plan2d_kind_deleted`). The table is
+    declared in `lib/core/plan2d/manifest.py`.
+
+- **Wall power sockets, and the jack of an outlet.** Asked for: there was nowhere to say that a
+  socket is fed from the UPS or the generator, and a fibre outlet looked like a copper one.
+  - A new room item, the **power socket** (`power_outlet`), next to the outlet in a new palette
+    group, «Outlets» (`sockets`). It is a mute item, like the outlet: nothing to monitor.
+  - Both keep their **jacks**, a list: a plate is not of one kind (asked for: two RJ45, a fibre
+    and an HDMI; two Schuko and a C13). Each jack is a connector from the connector catalogue
+    (`connectors.jacks`) and how many, a whole number from 1 with no maximum.
+    - Which connectors are offered is said by the connector catalogue, not the code: two new
+      families, «Wall outlet jacks» (`outlet-jacks`) and «Power socket jacks» (`socket-jacks`),
+      ticked per connector in `connectors.json` and in the catalogue screen.
+      - Outlets: RJ45, RJ11/RJ12, GG45, TERA, coax, LC, SC, ST, FC, MPO, HDMI, DisplayPort, VGA,
+        audio.
+      - Sockets: Schuko, C13, C14, C19, C20, CEE, BS 1363, NEMA, USB.
+      - A plug such as the Schuko plug is not offered as a wall socket.
+      - Ticking one in a saved version offers it.
+    - The same connector twice is one jack with both counts. An empty list is «not said».
+    - The card has a row per kind (connector and count) and «Add a jack».
+    - On the plan it reads the letters of its first jack, with `+` for more kinds («RJ45+»).
+  - A socket chooses the **power source** of its site it hangs from (a UPS, a generator, a panel,
+    the mains), and with it inherits the whole chain. On the plan it reads «SAI» on orange or «GE»
+    on amber, never red, which on this panel is «down». Deleting the source leaves it unsaid.
+  - `dc_item` gains `jacks` (the list, as JSON) and `source_uid`. The room-item routes validate
+    them by role and site, and list the jacks with their letters, plus `jacks_abbr`,
+    `source_kind` and `source_name`. `GET /api/v1/dcim/room-items/jacks` says what each jack can
+    be.
+  - **The power view lists the sockets of each source** (`sockets` in `GET /api/v1/dcim/sources`),
+    with their room and their jacks («2×SCH 1×C13»), next to the strips. Each opens its room's plan
+    with the socket chosen.
+- **A connector says its abbreviation in the catalogue.** Asked: «are the connector types taken
+  from the catalogue?». The jacks offered were; their letters on the plan were a table in the
+  code. Each connector of `connectors.json` may now carry `abbr` («RJ45», «SCH»). It is kept whole
+  when the document is cleaned (no length cap) and editable in the catalogue screen, beside the
+  speed. The plan fits the letters to the drawn box instead. A saved version
+  of the document decides the letters too. Without one, they come from its id (`lc-upc` → LC).
+- **The connector catalogue, version 3.**
+  - Two new families for the wall jacks of outlets and sockets (see above). The catalogue
+    screen keeps them in the document's order, so ticking one no longer loses it.
+  - 8P8C is named «RJ45 (8P8C)».
+  - The six-position jacks a telephone outlet really has are added: «RJ11 (6P4C)», «RJ11 (6P2C)»
+    and «RJ12 (6P6C)».
+  - An 8P4C is no longer read as an RJ11.
+  - With no version saved in the database, it applies on update; a saved one at version 3 or
+    above keeps winning.
+
+- **The demo has power sockets, and its outlets say their jacks.** Asked for: sockets in the
+  demo, and at least two RJ45 in every outlet.
+  - Every outlet carries two RJ45, which are the jacks A and B its cabling uses. A meeting
+    room's display outlet carries two RJ45 and an HDMI.
+  - Every desk has a socket of two Schuko beside its outlet, on its floor's panel. The NOC's
+    desks are on the data centre's UPS.
+  - Two Schuko by each meeting room's display, and one by each printer.
+  - At the data centre's wall, four C13 on UPS-A and two Schuko on its panel.
+  - In the generator room, a CEE socket on the generator.
+  - The plan shows all three: «SAI», «GE» and mains.
+
+- **The demo data from Configuration › Maintenance.** Asked for: an option there to add or
+  delete the demo data, without the command line.
+  - «Install Demo Data», in a group of its own. If the demo is already there, it asks and
+    rebuilds it.
+  - «Delete Demo Data», with the other data wipes and their «Delete» button. It deletes only
+    the demo's sites.
+  - Both ask first, need `db_maintenance` and are audited (`dcim_demo_installed`,
+    `dcim_demo_removed`, «Maintenance: Demo Data Installed/Deleted»).
+  - They are the inventory's own `CONFIG_ACTIONS`, on `GET/POST/DELETE /api/v1/dcim/demo`,
+    which does what `main.py dcim demo` does.
+
+- **A «3D» button on the room plan, the floor plan and a rack.** Asked for: open that room,
+  floor or rack in 3D in another tab. It is a link to `/3d` with the site, the floor and floor
+  mode, and the room or rack. `/3d` takes `room` and `rack` in the address: the camera flies to
+  the room, or the rack opens in its place, seen from the front. A room with no floor opens
+  the whole building.
+
+- **Move an item to another rack, and a rack to another room.** Asked for: a server, a switch
+  or a router to another rack, of the same room or another; and a rack to another room.
+  - **An item:** «Move to another rack» in its menu. Choose the rack, grouped by site and room,
+    and the U. What is mounted on it goes with it, and it is unplugged from the old rack's
+    strips. A strip that IS the item goes with it. A UPS taken to another site stops being its
+    source's box. Its data cables stay unless «disconnect them» is ticked. A taken U refuses it
+    and nothing changes. The answer says what was unplugged and kept, and it is audited
+    (`dcim_moved`).
+  - **A rack:** «Move to another room», in the rack's bar and in its floating bar on both plans.
+    Only to another room of its site; another site is refused. It takes what it holds, leaves
+    its row and its group, which were the old room's, and comes in at the room's corner to be
+    placed on its plan. Audited.
+  - **Or by dragging it on the floor plan.** Asked for, with a confirmation first. A rack
+    dropped in another room, or in the general area, goes back to its place and asks «Move rack
+    R04 to «CPD-2»?». Confirmed, it moves to that room where it was dropped: its centre is put
+    in the new room's frame, and its turn corrected for the two rooms' turns. Several things
+    dragged at once, or a drop inside its own room, are saved as ever. The 2D plan editor has a
+    hook for this, `dropped`, which lets a screen keep a release instead of saving it.
+- **Deleting a rack that holds things.**
+  - **Before asking.** Reported: it asked «delete?» and only then said it was not empty, without
+    saying what it held. The panel now asks what a site, a room or a rack holds
+    (`GET …/holds`). A site or a room that is not empty says what it holds instead of
+    asking.
+  - **With everything.** A rack's question says what it holds and offers a tick to delete it
+    with everything: its items with their cables, power leads and components, and its strips
+    (`?contents=delete`).
+  - Another company's item in a shared rack stops it and nothing is deleted. A source that was
+    one of its items stays without one. What is around it in the room stays. Audited
+    (`dcim_rack_emptied`).
+  - The demo's own removal uses the same `empty_rack`.
+
+### Changed
+
+- **The room plan and the floor plan run on one 2D plan editor, `lib/core/plan2d/`.** Asked
+  for: one editor, each screen with its own things and properties. The two editors did the same
+  things each its own way: choosing several, the box, the snap to neighbours, groups, a second
+  press for what is underneath, «send to back», the keys and saving several things as one undo
+  step. Each fix had to be made twice (the box that did not show the first time was in one of
+  them only).
+  - The engine, `lib/core/plan2d/web/_plan2d.html` (`p2d*`), names no kind of thing. Each screen
+    registers an adapter (`p2dMake`) that says what is on it, where each thing is and how it
+    moves, where it is written, and what turning or removing it means.
+  - `partials/dcim/_plan2d_room.html` is the room's adapter: one frame, the tile magnet, and
+    the visible edge stopping at the wall.
+  - `partials/dcim/_plan2d_floor.html` is the floor's adapter: rooms that contain things and
+    turn, a room boxed only when wholly inside and never grouped, 10 cm steps, and Delete taking
+    a room off the floor. It also holds what only the floor has: its list, its rows and its
+    JSON file.
+  - They replace `_plangroup.html` and `_siteplangroup.html`. The room's pile under the
+    pointer, its cycling, «send to back» and its keys left `_pieces.html` for the engine; the
+    room keeps one-line names (`_dcpHit`, `_dcpCycle`, `_dcpSendBack`, `_dcpKey`…) where its
+    code calls them.
+  - The package is reached like `view3d`: by path (`core/plan2d/web/…`), from the panel and
+    from `/3d`. It owns no table, route or permission.
+  - Its words are `plan2d_*` (the pointer mode, choosing, groups, send to back); the
+    `dcim_*` ones they replace are gone. The pointer mode is remembered as `ss.plan2d.pointer`,
+    reading the old `ss.dcim.pointer` once.
+- **The inventory's pieces and room items come from the plan catalogue.**
+  - `FEATURE_KINDS` and `ROOM_ITEM_DEFAULTS` are derived from it, with the same sizes, layers
+    and order as before.
+  - The look, icon and name tables of the browser (`_DCP_LOOK`, `_DCP_ICON`, `_DCRI_LOOK`,
+    `_DCRI_ROLES`) are gone. The plans, the palettes, the lists and the 3D read the catalogue
+    (`p2dKindLook`, `p2dKindIcon`, `p2dKindName`). It is loaded once (`p2dEnsureKinds`), so
+    a site's 3D is still one request, and again when an object is created or changed.
+  - A created piece is drawn in 3D in its own fill colour.
+  - The routes accept created pieces and equipment (`plankinds.feature_kinds`,
+    `device_roles`), and measure them by their size (`device_defaults`).
+- **A plan object is the same in the room and on the floor (`partials/dcim/_planobj.html`).**
+  The two plans drew, showed and handled a rack, a piece or a room item each their own way.
+  - **One drawing.** `_dcThingSvg` draws the shape, the front band, the cross, the
+    access-control dot, a room item's letters and state, the selected outline and the handles.
+    The floor drew none of the dot, the letters or the state, and now it does. Each plan keeps
+    its attributes, its hover and its text rule: in a room the text turns with the thing and is
+    never upside down; on a floor it stays level.
+  - **One inspector.** The floor's was a name and four buttons. It now shows the room's panels
+    (a rack's fields, a piece's fields and shelves, a room item's card with tracing), with the
+    room it is in and a button to open it. The access-control section stays in the room's plan,
+    where its readers are known.
+  - The panels' fields write to whichever plan is open (`_dcObj`), and redraw and reload there
+    (`_dcPlanRedraw`, `_dcPlanReload`).
+  - **One turn, duplicate and drop** (`_dcObjTurn`, `_dcObjDuplicate`, `_dcObjDrop`). The
+    room's and the floor's buttons and keys call them.
+  - Duplicating used to differ by plan: a tile away diagonally with its label in the room, and
+    to the right without it on the floor. A copy now goes to the right, 20 cm away, from either
+    plan. It keeps its kind's measures, turn, height, shelves and label; it does not take its
+    asset number, its device or its group.
+  - Removing asks the same question from both plans, and a rack removed from the floor reloads
+    the floor.
+- **The floating bar and the palette are the 2D plan editor's.** Both plans built them on their
+  own: five functions and a timer for the room's bar, seven for the floor's, and a palette
+  assembled twice from the same catalogue.
+  - **The bar.** The engine shows, places and hides it (`p2dFloatShow`, `p2dFloatBoxHtml`). A
+    container's bar waits when the pointer comes from inside it. Each screen says which buttons
+    a thing has (`floatButtons`) and what each one does (`floatAct`).
+  - **One set of buttons for a thing** (`_dcObjFloatButtons`): open (a rack), then, for
+    whoever edits, edit, turn, duplicate, send to back and remove. The floor adds opening a
+    piece's room, and a room keeps its own buttons (open, turn, take off the floor). The
+    room's piece bar now also sends to back, and the floor's bar can now edit and send to back.
+  - **The palette** (`p2dPaletteHtml`) lists the screen's catalogue: pieces with their size,
+    then equipment. Each screen adds what goes before (a rack) and after (the floor's stairs and
+    lift). It is hidden while calibrating.
+  - **Adding** (`p2dAdd`) puts the thing in the centre of the view and selects it.
+    `_dcObjAdd` decides the route (rack, piece or room item); the floor first finds the room
+    under the centre, or its general area. Pieces and racks added in the room were not selected
+    before.
+- **The background plan is one for both plans.** The room and the floor each fetched, drew,
+  uploaded and removed it with their own copy.
+  - One fetch into a `data:` with its proportion (`p2dPlanFetch`), one `<image>`
+    (`p2dPlanImageSvg`), one set of toolbar buttons (`p2dPlanFileTools`), and one upload and
+    removal (`p2dPlanUpload`, `p2dPlanDrop`, then the inventory's `_dcPlanSet`) on
+    `/rooms/<uid>/plan` or `/floors/<uid>/plan`.
+  - A room's upload and remove buttons showed to whoever could only look (the server refused
+    anyway); like the floor's, they are now for whoever edits.
+  - Removing a general area's own plan now brings its floor's back at once; it needed opening
+    again.
+  - The floor's plan without a scale is drawn as faint as the room's (.45, it was .5).
+- **Dragging one thing is the 2D plan editor's too** (`p2dGrab`). The engine already dragged
+  several; one is the same drag with one member: the snap, the steps, what is saved on release
+  and how it is undone.
+  - The room had three branches in each of its down, move and up handlers (a piece, a room
+    item, a rack) that differed only in where the release was saved; the floor had two (a
+    thing in a room, a room). They are gone. The engine saves by each thing's route, turns a
+    floor move back with its room, and moves a room's contents with it.
+  - Each screen keeps what is its own: stretching by the handles, the room's wall view, the
+    floor's core and the walls review stay in their handlers.
+  - Each screen also keeps what a click does (`clicked`): in the room, a rack is selected on
+    release with its panel and bar, and a piece or a room item on press. On the floor, a
+    double click still opens.
+  - The room's readout (the tile, «B7») follows the hand through `moved`.
+- **One name per plan object.** The base objects' names live only in `plan2d_kind_*`. The
+  inventory's `dcim_kind_*` for the 14 building pieces and `dcim_role_*` for the 7 room-item
+  classes repeated the same text, so they are gone.
+  - Every screen that names a piece or a role goes through `_dcPieceName` / `_dcRoleName`:
+    templates, devices, cables, power, parts, the catalogue, the sources and the rack's 3D.
+  - Those helpers read the plan catalogue first, then `plan2d_kind_*` (so a screen that never
+    opened a plan still names a camera), then the inventory's own key (a rack role, a data
+    centre piece).
+  - The inventory now loads the catalogue with its sites, so an object created from the plan is
+    named on every screen.
+- **The demo no longer labels a thing with the name of its kind.** A plain door was labelled
+  «Puerta» and the first aid kit «Botiquín»; they are created without a label, and the plan and
+  the lists name them from the catalogue. A fire door keeps «Puerta EI2 45-C5», which says its
+  class. The demo words `door` and `first_aid` are gone, and the lock wiring finds a room's door
+  by its empty label or the fire door's.
+- **Undo, the background plan with its calibration, and reading walls are the 2D plan
+  editor's.** Asked for: whatever in the plan partials is not the inventory's goes to the
+  editor. Each one now lives in `lib/core/plan2d/web/` and asks its screen for what is the
+  screen's through a source, as the engine does through its adapter.
+  - **Undo** (`_plan2d_undo.html`, `p2du*`): the saved copy, merging, batches, whole
+    replacements, the buttons and Ctrl+Z / Ctrl+Y. The inventory's source
+    (`partials/dcim/_undo.html`) says what is on the open plan and by which route it is written,
+    how it is sent, what to redraw, a room item's box, a floor's walls, and when the keys are
+    the plan's. Its words are `plan2d_undo`, `plan2d_redo` and `plan2d_n_things`.
+  - **The background plan and its calibration** (`_plan2d_bg.html`): the box, fetching,
+    drawing, uploading and removing, and the three calibration steps with their handles, snap,
+    north and reference plan. The inventory's source (`_dcPlanSrc` in
+    `partials/dcim/_plancal.html`) gives the scale, permission, media and plan routes, what is
+    calibrated, the corners to snap to, the other floors to fit against and where the result is
+    saved. Its names are `p2dCal*`, `p2dPlan*`, `p2dNorthOf` and `p2dCompass`, and its words
+    `plan2d_cal_*` and `plan2d_bg_*`; the `dcim_cal_*` and `dcim_plan_*` they replace are gone.
+  - **Reading walls from the plan** (`_plan2d_walls.html`, `p2dWalls*`): the threshold, the
+    detector, double lines, hatching, mixed plans and the segment geometry (`p2dSegDist`,
+    `p2dSegInBox`, `p2dWallsCut`).
+  - **The walls review stays the floor's**, but chooses with the engine's picked set and box
+    (`_dcwP2d`) and undoes through the plan's history. Its own undo stack and its two buttons
+    are gone: the bar's undo buttons and Ctrl+Z walk its steps. Two things are new to the
+    engine for this. `p2duLocal` records a step that sends nothing. While a review is open
+    (`p2duLocalOpen`), undo walks only its steps, because undoing what lies underneath would
+    change what it is about to save; closing it (`p2duLocalClose`) drops them. An adapter can
+    also say what a box touches (`touches`): a diagonal wall's bounding box is mostly empty
+    floor.
+  - In the review, the choose mode of the pointer now boxes in empty space too, as in the rest
+    of the plan, with its cursor.
+- **The plan palette is grouped by what things are for, and can be seen two ways.** Asked for:
+  some thirty icons in one strip were told apart only by hovering each.
+  - Each object of the catalogue carries its group (`group`): structure, furniture, data centre
+    and power, safety, access control, equipment, and other, where objects created from the
+    screen go. `GROUPS` in `lib/core/plan2d/kinds.py` holds them in order with their icon, and
+    the catalogue's API returns them (`groups`). A screen's own object without a group goes to
+    other; one naming a group that does not exist is refused at registration.
+  - **One button per group** (the default): pressing it opens the group's objects beside it,
+    level with the button, by name; pressing it again, pressing outside or choosing one closes
+    it.
+  - **Everything in view**: every object under the title of its group, three to a row, and a
+    group can be folded.
+  - A button at the top of the palette switches between the two, with the panel's own icon to
+    expand and collapse (the double chevron of the plan's inspector). The choice and the folded
+    groups are remembered in the browser (`ss.plan2d.palette`, `ss.plan2d.paletteFolded`).
+    What a screen puts loose (the rack, the floor's stairs and lift) stays at the top in both,
+    with a title of its own in the second (`paletteTitle`: «Racks», «Racks y núcleo»).
+- **Choosing something in the palette waits for where to put it.** Asked for: it was put in the
+  middle of the view at once, and then had to be dragged to its place.
+  - Choosing an object or the rack leaves the plan waiting (`p2dPlaceStart`), with its button
+    lit and a «copy» cursor. The next click on the plan puts it there.
+  - A piece (a zone, a desk, a cabinet…) can instead be drawn by dragging its box. It is saved
+    with that size, in the middle of the box (`width_mm`, `depth_mm`). A device or a rack keeps
+    its own size and goes where it was pressed.
+  - Choosing it again or Escape lets it go. The middle button still moves the view. In a room,
+    it only works seen from above.
+  - On a floor, a box drawn across a room turned a quarter is measured the other way round in
+    that room.
+  - The group panel no longer shows sizes: drawing sets them. Its text is smaller and stays on
+    one line.
+- **Export and import of a plan are one group, and «save as» is one button.** Asked for.
+  - The room and the floor plan had export (a JSON-file icon) and import (an arrow) as two
+    loose buttons of different styles. They are one group of the 2D plan editor
+    (`p2dJsonTools`): download and upload, with import only for whoever edits. The room's
+    buttons now say what they export (`dcim_export_room`, `dcim_import_room`).
+  - Every canvas (the room and floor plans, the site map, a rack's elevation and the network
+    and link maps) had PNG and SVG as two buttons. They are one «Save as…» button with a menu
+    of both formats (`ssCanvasSaveMenu`).
+- **The room plan's keys reach every kind of thing.** R and Delete were for pieces only, and
+  the arrows moved a piece alone. Through the engine, R turns a rack, a piece or a room item,
+  Delete removes it with its own confirmation, and the arrows move everything chosen: 10 cm,
+  or a tile with Shift, the visible edge still stopping at the wall.
+
+### Fixed
+
+- **Latent bugs found by a review of this build's work**, each with a regression test.
+  - **The «what it holds» route shadowed an existing one.** Declared for `{kind}`, its sites
+    form was the existing `/sites/<uid>/contents`, and the site plan, its circuits and its walls
+    got the wrong answer. It is `…/holds` now.
+  - **The two move dialogs broke on real data.** They read `room.racks`, a count in the sites
+    list; the list is `rackList`.
+  - **Leaving a floor left things half-done.** Closing it, changing floor or opening another
+    site or room now ends them all (`_dcPlanLeave`):
+    - the walls review kept its keys and locked undo to its steps, and Save wrote the old
+      floor's walls onto the new one;
+    - a half-done calibration stayed applied in memory;
+    - place mode stayed armed for the next plan.
+    - The review also saves only onto its own floor, and the palette is off while it is open.
+  - **The plan editor:**
+    - arrow moves on two selections within 0.4 s saved only the second;
+    - a small box over a long wall missed it (21 samples; now a real segment–box test);
+    - the north arrow's tail was never marked;
+    - a change inside an undo batch could merge with one before it and escape the batch;
+    - a failed save after the room plan closed threw.
+  - **The server:**
+    - the generic item routes wrote a wall item's jacks and source unchecked;
+    - a role change left the old role's jacks and source;
+    - a room moved to another site kept its sockets' sources;
+    - `"disconnect": "false"` deleted cables;
+    - a strip carried to another site kept its source;
+    - emptying a rack left another rack's strip pointing at a deleted item;
+    - a real site named «Demo» was taken for the demo, and the Maintenance button would have
+      deleted it. The demo is now found by its name and its demo operator.
+  - **The room item card:**
+    - it showed the old mount and height after saving them;
+    - the jacks and sources lists were never asked again until a reload;
+    - adding a jack could duplicate a row the server then merged.
+- **A rack shows its front and its back on the plan.** Reported: one could not tell them apart.
+  The front was a thin band in the state's colour, grey on an unwatched rack, and the back was
+  not marked. It now shows them as every piece does: a blue band at the front and a dashed line
+  at the back. The state stays on its border, now thicker. The room's note says so.
+- **A room's list of elements names its room items.** Reported: a power socket did not show
+  in it. No room item did (no outlet, PC or camera); only racks and pieces were listed, while
+  the floor's list had them all. They are listed now by label or by their kind's name, with
+  their tile, and picking one opens its card.
+- **A floor's list of elements holds everything on its plan.** Asked for: the list shows all
+  that was put on the plan. It skipped an empty room, and it left out the floor's stairs or lift
+  and its walls.
+  - Each room is listed, empty or not, and its heading picks it. The general area only names its
+    contents.
+  - Then the core, and a «Walls (N)» line that opens the walls review for whoever edits.
+- **A name on the plan fits what it names.** Reported: a rack's name was drawn at a fixed size
+  (about 35 cm), wider than a 60 cm rack, and ran into the next rack's name. The name inside a
+  thing now fits its width and depth; a big piece keeps its usual size.
+  The letters on a room item (an outlet's «RJ45+», a PC's «PC») fit its width the same way.
+- **A floor opens centred on what is on it, using the whole window.** Reported: the plan always
+  opened stuck to the bottom with half the window empty.
+  - The frame always began at the origin (0, 0) and was at least 20 × 15 m, so a plan
+    calibrated 35 m from the origin had 35 m of nothing above it.
+  - It now spans what is there: the plan, the rooms and their contents, the walls and the core,
+    at least 10 m, centred. With nothing on the floor it keeps the 20 × 15 m from the origin.
+  - Re-reading a floor drew it before its plan and contents arrived, and the frame stayed on
+    what there was then. It is measured again once they arrive, and refitted unless somebody
+    has moved the view (`_dcsRefit`).
+  - The same in a room's plan for the floor's general area: a room with no size counts no
+    origin, so the floor's plan it carries is framed as it is. A room with a size is still
+    framed from its corner.
+
+### Tests
+
+- `tests/unit/test_plan2d_kinds.py` covers the catalogue's rules: every base object complete
+  and named in both languages, a screen's registration, what a created object may say, and the
+  inventory's pieces and room items keeping their measures.
+- `tests/integration/test_plan2d_kinds.py`:
+  - the inventory's catalogue and its order;
+  - the screen's read and manage permissions;
+  - validation, and a key that does not change;
+  - created pieces and equipment placed and measured as they say, and never as each other;
+  - deletion and changing what it is refused while in use;
+  - the editor and the drawing from the catalogue, in node.
+  - Each fails with its fix undone.
+- `tests/helpers.py::plan2d_catalog_js` loads the server's own catalogue into a node probe,
+  which fetches nothing. The floor-palette, room-item and site-3D probes use it.
+- `tests/integration/test_wa_dcim_planobj.py`, dragging one thing:
+  - a rack in the room moves to its tile and is handed to be saved;
+  - a click without moving selects the rack;
+  - a viewer grabs nothing;
+  - on the floor, a thing in a turned room moves turned back;
+  - a room moves while its contents keep their place inside it.
+  - The first four fail with their fix undone.
+- `tests/integration/test_wa_dcim_plan_stack.py`: the covered piece is dragged by the engine.
+- `tests/meta/test_wa_dcim_section.py`: the drag, the handle-first and click guards follow the
+  code into `p2dMove`, `p2dGrab`, `p2dUp` and `_dcpClicked`.
+- `tests/integration/test_wa_plan2d.py`: undo and the background plan work for a screen that
+  is not the inventory, with a source of its own. For the plan, that means its start, where the
+  scale is saved, its own upload buttons, scale and permission. The background test fails with
+  its save tied back to the inventory.
+- `tests/integration/test_wa_dcim_walls.py`: the review's undo steps go through the plan's
+  history. The box asks the wall, not its bounding box. While reviewing, undo walks only the
+  review's steps, and closing it drops them. Each fails with its fix undone.
+- The palette's groups. In `tests/unit/test_plan2d_kinds.py`: every base object has a group,
+  every group a name in both languages, the inventory's own objects are grouped, an own object
+  without a group goes to other while a bad one is refused, and a created object goes to other.
+  In `tests/integration/test_wa_dcim_planobj.py`: one button per group opens and closes its
+  panel, level with its button, and choosing closes it; everything in view lists every object under its title, folds
+  and titles what is loose. Placing: a click puts it there, a piece drawn with its box takes that
+  size and is saved with it, a device dragged goes where pressed, and choosing again or Escape
+  lets it go. Both plans take the click. Each fails with its fix undone.
+- `tests/integration/test_wa_dcim_jacks.py`:
+  - what each jack can be;
+  - a plate of several kinds (a socket's two, an outlet's copper, fibre and video), stored and
+    listed with its letters and source class;
+  - what does not fit refused: a connector of the other class in any row, a count that is not a
+    whole number from 1, a non-list, jacks on a PC, a source of another site;
+  - no maximum, the same connector added up, empty as «not said»;
+  - the power view's sockets per source, and the chip that opens its room;
+  - a deleted source leaving the socket unsaid;
+  - the drawing («SAI» on orange, never red; «RJ45+»), the card's rows, a viewer who cannot
+    change them, and editing that saves the whole list.
+  - It fails with the merge, the class check, the site check or the source look undone.
+- `tests/unit/test_dcim_connectors.py`:
+  - a connector's letters come from the catalogue and survive cleaning;
+  - without them, from its id;
+  - a saved version decides them;
+  - no table is left in the code.
+  - It fails with the catalogue's `abbr` ignored.
+- `tests/unit/test_dcim_connectors.py`: the wall jacks come from their family, a saved version
+  that ticks one offers it, and no list is left in the code.
+- `tests/integration/test_wa_dcim_jacks.py`: a wall family ticked in the catalogue screen stays
+  ticked. It fails with the old ordering.
+- `tests/integration/test_wa_dcim_latent.py` pins the review's findings on the server and in
+  `node`. Four of them were checked to fail with their fix undone. The move dialogs' test now
+  feeds the script the real `/api/v1/dcim/sites` answer instead of hand-made data.
+- `tests/integration/test_wa_dcim_rack_delete.py`:
+  - what a container holds is asked before deleting;
+  - not empty is refused unless asked;
+  - asked, the rack goes with what it holds and nothing else, its source is released, and it
+    is audited;
+  - another company's item stops it.
+  - It fails with the foreign check or the source release undone.
+- `tests/integration/test_wa_plan2d.py`: a rack dropped in another room goes back, asks, and
+  confirmed is sent to the new room at the dropped place; dropped in its own room or with
+  others, it is not taken. It fails with the going back undone.
+- `tests/integration/test_wa_dcim_move.py`:
+  - an item to another rack: unplugged, cables kept or disconnected, a taken U refused, its
+    strip taken along, a UPS released across sites;
+  - a rack to another room of its site only, leaving row and group;
+  - the dialogs' choices.
+  - It fails with the unplugging or the site check undone.
+- `tests/integration/test_wa_dcim_planobj.py`: a rack draws its front and back; the «3D» link
+  carries the site, floor, room or rack and opens in another tab, from all three screens.
+- `tests/integration/test_wa_dcim_explore3d.py`: `/3d` flies to the room or opens the rack it
+  is asked for. Each fails with its fix undone.
+- `tests/integration/test_wa_dcim_demo_admin.py`:
+  - the demo says whether it is there, installs, refuses twice unless rebuilding, rebuilds and
+    removes only the demo;
+  - both are audited;
+  - only `db_maintenance` may do it.
+  - It fails with the inventory's edit flag in its place.
+- `tests/unit/test_config_actions.py`: the Maintenance section's actions and audit events
+  include the demo's two, the install outside the wipes and the removal among them.
+- `tests/integration/test_dcim_demo_cabling.py`:
+  - every demo outlet has two RJ45 at least and only connectors it may;
+  - a meeting room's display outlet has its HDMI;
+  - a socket by every desk, each on a source of its own site, with the UPS, the generator and
+    the panels all used.
+  - It fails with one RJ45 per outlet or with the desk sockets left out.
+- `tests/integration/test_wa_plan2d.py`: the floor's list holds an empty room (its heading
+  picks it), the core and the walls. It fails with empty rooms skipped again.
+- `tests/integration/test_wa_dcim_jacks.py`: the room's list names its room items, and picking
+  one picks it. It fails with the items left out.
+- `tests/integration/test_wa_dcim_jacks.py`: an outlet's letters, however long, fit its drawn
+  width. It fails with the fit undone.
+- `tests/integration/test_wa_dcim_planobj.py`: a 60 cm rack's name fits its width, and an aisle's
+  label keeps its size. It fails with the fit undone.
+- `tests/integration/test_wa_plan2d.py`: export and import are one group, download and upload,
+  with the file control outside it and only export for a viewer, and both plans use it.
+  «Save as» is one button with a menu of PNG and SVG.
+- `tests/meta/test_wa_dcim_section.py`: no file of `lib/core/plan2d/web` names the
+  inventory (its functions, routes, state or words). It fails with one call put back.
+- `tests/integration/test_wa_dcim_planobj.py`, the background plan:
+  - the same tools on both plans, only for whoever edits;
+  - the same image;
+  - upload and removal on each one's route;
+  - the plan read again after a change.
+  - Each fails with its fix undone.
+- `tests/integration/test_wa_dcim_planobj.py`, the bar and the palette:
+  - the same buttons for a thing on both plans, and only opening for a viewer;
+  - a room's bar waits when coming from inside it;
+  - both palettes come from the same catalogue, with none while calibrating;
+  - adding lands in the centre, in the right room.
+  - Each fails with its fix undone.
+- `tests/meta/test_wa_dcim_section.py`: the bar and palette guards follow the code into the
+  engine and `_dcObjFloatButtons`.
+- `tests/integration/test_wa_dcim_planobj.py`:
+  - the floor draws a lock's dot and a room item's letters and state, with the room's shapes;
+  - the floor's inspector is the room's, and its fields write to the floor's rows;
+  - duplicating, turning and removing send and ask the same from both plans, and a copied rack
+    takes no asset number.
+  - Each fails with its fix undone.
+- `tests/meta/test_wa_dcim_section.py` follows the code to `_planobj.html`: the piece's panel
+  closes through `_dcPlanDeselect`, handles sit in `_dcThingSvg`'s turning group, and a rack is
+  duplicated by `_dcObjDuplicate` without its asset number.
+- `tests/unit/test_plan2d_kinds.py`: no base object keeps a second key with its name.
+- `tests/integration/test_plan2d_kinds.py`: without the catalogue loaded, a camera, a door, an
+  aisle and a rack role are still named. It fails without the fall-back to `plan2d_kind_*`.
+- `tests/integration/test_dcim_demo_floors.py`: a room's plain door has no label.
+- `tests/meta/test_wa_dcim_section.py`: every kind of piece is complete in the catalogue (icon,
+  drawing, name) and in the 3D colours.
+- `tests/integration/test_wa_plan2d.py` replaces `test_wa_dcim_plangroup.py`. The engine is
+  tested through it and each screen through its adapter. New:
+  - the room's arrows stop at the wall that is seen;
+  - R and Delete reach a rack and a room item;
+  - Escape lets go of anything;
+  - a floor, and its general area opened as a room, frame their plan and not the origin, and a
+    room with a size still frames from its corner. Each fails with the origin counted again.
+- `tests/integration/test_wa_dcim_plan_stack.py`: «send to back» and its chip under the
+  engine's names.
+- `tests/meta/test_wa_dcim_section.py` reads the engine's package as part of the section. The
+  keyboard guards now check that the room's keys are the engine's: Escape before the rest, and
+  the arrows stopping at the visible wall in `_dcpShift`.
+- `tests/meta/test_explore3d_includes.py` resolves any `core/<package>/web/` file, not only
+  `view3d`'s.
+
 ## [0.0.1+build.142] - 2026-10-11
 
 ### Added

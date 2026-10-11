@@ -95,6 +95,10 @@ python3 main.py dcim demo --replace
 python3 main.py dcim demo --remove
 ```
 
+Lo mismo se hace desde el panel, en **Configuración › Mantenimiento**: «Instalar Datos de
+Demostración» (si ya está, pregunta y la vuelve a crear) y «Borrar Datos de Demostración», con el
+permiso `db_maintenance`. Las dos quedan en la auditoría.
+
 La sede tiene:
 
 - **Cinco plantas** (sótano, baja, primera, segunda y tercera), cada una con su plano de fondo en

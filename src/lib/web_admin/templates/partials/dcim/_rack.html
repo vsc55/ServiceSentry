@@ -90,10 +90,13 @@ function _dcRackHeader(rack, items, free) {
             esc(tf('dcim_free', (free.front || []).length))}</span>
         <div class="ss-toolrow-tools">
             ${big('_dcimReloadRack()', 'bi-arrow-clockwise', 'refresh')}
+            ${(() => { const sala = _dcimFindRoom(rack.room_uid) || {};
+                       return _dc3dLinkHtml({site: sala.site_uid, floor: sala.floor_uid, rack: rack.uid}, true); })()}
             ${may ? `<button type="button" class="btn btn-primary"
                 onclick="_dcimOpen('new','item',${jsStr(rack.uid)},'')"><i class="bi bi-plus-lg me-1"></i>${
                 esc(t('dcim_new_item'))}</button>` : ''}
             ${may ? big(`_dcimOpen('edit','rack','',${jsStr(rack.uid)})`, 'bi-pencil', 'edit') : ''}
+            ${may ? big(`_dcMoveRack(${jsStr(rack.uid)})`, 'bi-arrows-move', 'dcim_move_rack') : ''}
             ${may && _dcimMay('orgs_edit') ? big(`_dcimOwnerAsk('rack',${jsStr(rack.uid)},${jsStr(name)})`,
                 'bi-building-check', 'dcim_owner') : ''}
             ${may ? big(`_dcimDelete('rack',${jsStr(rack.uid)},${jsStr(name)})`, 'bi-trash3', 'delete',

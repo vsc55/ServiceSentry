@@ -585,9 +585,9 @@ function _dcCatKindName(kind) {
     if (propio && propio !== 'dcim_cat_kind_' + k) return propio;
     // Las clases de un componente tienen su propio diccionario —son las de una PIEZA— y sin
     // mirarlo, «memory» salía en pantalla como la clave sin traducir.
-    const pieza = t('dcim_kind_' + k);
+    const pieza = _dcPieceName(k);
     if (pieza && pieza !== 'dcim_kind_' + k) return pieza;
-    return t('dcim_role_' + k);
+    return _dcRoleName(k);
 }
 
 /** Filtrar por clase. Va al servidor y vuelve a la primera página: la fila 400 de «todo» no es

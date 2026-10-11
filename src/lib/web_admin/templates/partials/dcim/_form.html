@@ -830,7 +830,7 @@ function _dcimItemName(item) {
     return i.label
         || (i.device_uid ? _dcimDeviceName(i.device_uid) : '')
         || String(i.type_name || '')
-        || (i.role ? t('dcim_role_' + i.role) : '')
+        || (i.role ? _dcRoleName(i.role) : '')
         || String(i.uid || '').slice(0, 8);
 }
 
@@ -965,19 +965,48 @@ async function _dcimSave() {
 }
 
 /** Delete, with the panel's own confirmation — never the browser's. */
-function _dcimDelete(kind, uid, name) {
+//: Cómo se cuenta lo que tiene dentro algo que se quiere borrar (`/contents`).
+const _DCIM_CONTAINS = {rooms: 'dcim_contains_rooms', racks: 'dcim_contains_racks',
+                        items: 'dcim_contains_items', pdus: 'dcim_contains_pdus',
+                        sources: 'dcim_contains_sources', links: 'dcim_contains_links'};
+
+/** Lo que tiene dentro, en palabras: «12 equipos, 2 regletas». */
+function _dcimContainsText(contains) {
+    return Object.keys(_DCIM_CONTAINS).filter(k => Number((contains || {})[k]) > 0)
+        .map(k => tf(_DCIM_CONTAINS[k], contains[k])).join(', ');
+}
+
+/** Borrar una sede, una sala, un rack o un equipo. Lo que tiene cosas dentro lo dice ANTES de
+ *  preguntar —reportado: se confirmaba y entonces se decía que no estaba vacío—; y un rack se
+ *  puede borrar con todo lo que tiene, marcándolo expresamente. */
+async function _dcimDelete(kind, uid, name) {
     const spec = _DCIM_KIND[kind];
-    showConfirmModal(tf('dcim_delete_confirm', name || uid), async () => {
-        const r = await _dcimSend('DELETE',
-                                  '/api/v1/dcim/' + spec.url + '/' + encodeURIComponent(uid));
-        if (r.ok) {
-            showToast(t('deleted'), 'success');
-            const rack = (_dcimRack || {}).rack;
-            if (kind === 'item' && rack) return _dcimLoadRack(rack.uid);
-            if (kind === 'rack' && rack && rack.uid === uid) { _dcimRack = null; _dcimUrl(); }
-            if (kind === 'rack' && _dcimPlan) return _dcimOpenPlan(_dcimPlan.room.uid);
-            return renderDcim();
+    if (['site', 'room', 'rack'].includes(kind)) {
+        const d = await apiGet(`/api/v1/dcim/${spec.url}/${encodeURIComponent(uid)}/holds`) || {};
+        const dentro = _dcimContainsText(d.contains);
+        if (dentro && kind !== 'rack')
+            return showToast(tf('dcim_not_empty_is', name || uid, dentro), 'warning');
+        if (dentro) {
+            return showConfirmModal(tf('dcim_rack_holds', name || uid, dentro), (todo) => {
+                if (!todo) return showToast(t('dcim_empty_first'), 'info');
+                return _dcimDeleteNow(kind, uid, true);
+            }, {check: {label: t('dcim_delete_with_contents'), checked: false}});
         }
-        showToast(r.error || t('delete_error'), 'danger');
-    });
+    }
+    showConfirmModal(tf('dcim_delete_confirm', name || uid), () => _dcimDeleteNow(kind, uid, false));
+}
+
+async function _dcimDeleteNow(kind, uid, conTodo) {
+    const spec = _DCIM_KIND[kind];
+    const r = await _dcimSend('DELETE', '/api/v1/dcim/' + spec.url + '/' + encodeURIComponent(uid)
+                                        + (conTodo ? '?contents=delete' : ''));
+    if (!r.ok) return showToast(r.error || t('delete_error'), 'danger');
+    showToast(t('deleted'), 'success');
+    const rack = (_dcimRack || {}).rack;
+    if (kind === 'item' && rack) return _dcimLoadRack(rack.uid);
+    if (kind === 'rack' && rack && rack.uid === uid) { _dcimRack = null; _dcimUrl(); }
+    if (kind === 'rack' && _dcimPlan) return _dcimOpenPlan(_dcimPlan.room.uid);
+    // Desde el plano de una planta: lo que dibuja es lo que se acaba de leer.
+    if (kind === 'rack' && typeof _dcsPlan !== 'undefined' && _dcsPlan) return _dcsReload();
+    return renderDcim();
 }

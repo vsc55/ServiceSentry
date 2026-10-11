@@ -24,7 +24,7 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 from tests.conftest import _login                                   # noqa: E402
-from tests.helpers import node_run, panel_bundle                    # noqa: E402
+from tests.helpers import node_run, panel_bundle, plan2d_catalog_js  # noqa: E402
 
 try:
     import flask                                                    # noqa: F401
@@ -224,7 +224,7 @@ class TestTheScreen:
         if shutil.which('node') is None:
             pytest.skip('no node: nothing to run the script with')
         _login(client)
-        out = node_run(panel_bundle(client), _PROBE)
+        out = node_run(panel_bundle(client), plan2d_catalog_js(client) + _PROBE)
         assert out['agarres'] == 2 and out['abreviatura'] and out['estado'] == 1
         assert out['pcLee'] == ['PC-01', 'item', 'error']
         x, y, z = out['punto']

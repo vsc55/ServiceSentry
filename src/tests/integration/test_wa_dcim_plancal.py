@@ -93,22 +93,22 @@ Object.assign(_dcimPlan.room, {plan_mm: 10000, plan_x: 0, plan_y: 0});
 // ── Calibrar una sala ───────────────────────────────────────────────────────────
 // La imagen mide ahora 10 × 5 m. Dos puntos a 2 m en la imagen que de verdad están a 4 m: la
 // imagen entera mide 20 m. El primero, (1, 1) m de la imagen, es la esquina (500, 0) de la sala.
-_dcCalStart('room');
-_dcCalClick(clic(1000, 1000));
-_dcCalClick(clic(3000, 1000));
-__out.pasoDistancia = _dcCal.step;
-_dcCal.dist = '4';
-_dcCalApply();
+p2dCalStart('room');
+p2dCalClick(clic(1000, 1000));
+p2dCalClick(clic(3000, 1000));
+__out.pasoDistancia = P2DCAL.step;
+P2DCAL.dist = '4';
+p2dCalApply();
 __out.escala = _dcimPlan.room.plan_mm;
-__out.pasoSitio = _dcCal.step;
+__out.pasoSitio = P2DCAL.step;
 // Paso 3, punto a punto: un punto del plano —(2, 2) m de la imagen a la escala nueva— y
 // después dónde cae: cerca de la esquina (0, 0) de la sala, a la que se pega.
-_dcCalClick(clic(2000, 2000));
-__out.desdeElegido = !!_dcCal.from;
-__out.esquinasVisibles = (_dcCalMarks('room').match(/var\(--bs-warning\)/g) || []).length;
-_dcCalClick(clic(30, -20));
+p2dCalClick(clic(2000, 2000));
+__out.desdeElegido = !!P2DCAL.from;
+__out.esquinasVisibles = (p2dCalMarks('room').match(/var\(--bs-warning\)/g) || []).length;
+p2dCalClick(clic(30, -20));
 __out.encajado = [_dcimPlan.room.plan_x, _dcimPlan.room.plan_y];
-__out.sinGuardarAun = enviados.length === 0 && _dcCal !== null;
+__out.sinGuardarAun = enviados.length === 0 && P2DCAL !== null;
 // El paso 3 se encuadra sobre el plano y lo dibujado.
 const ventana = _ssVB[_DCP_SVG];
 __out.encuadre = !!ventana && ventana.x <= 0 && ventana.y <= 0
@@ -116,105 +116,105 @@ __out.encuadre = !!ventana && ventana.x <= 0 && ventana.y <= 0
 // Arrastrar, sin «Mover el plano», desplaza la vista y deja el plano donde está.
 const raton = (x, y, mmx, mmy) => ({clientX: x, clientY: y, p: {x: mmx * S, y: mmy * S},
                                     type: 'pointerup', currentTarget: {style: {}, setPointerCapture() {}}});
-_dcCalDown(raton(100, 100, 3000, 3000));
-_dcCalMove(raton(150, 130, 4000, 3500));
-_dcCalUp(raton(150, 130, 4000, 3500));
+p2dCalDown(raton(100, 100, 3000, 3000));
+p2dCalMove(raton(150, 130, 4000, 3500));
+p2dCalUp(raton(150, 130, 4000, 3500));
 __out.arrastrarNoMueve = [_dcimPlan.room.plan_x, _dcimPlan.room.plan_y];
 // Teclear «-» no hace saltar el plano a 0.
-_dcCalSetXY('x', '-');
+p2dCalSetXY('x', '-');
 __out.menosNoSalta = _dcimPlan.room.plan_x;
 // Con «Mover el plano»: 1 m a la derecha y 0,5 m abajo.
-_dcCalToggleMove();
-_dcCalDown(raton(100, 100, 3000, 3000));
-_dcCalMove(raton(150, 130, 4000, 3500));
-_dcCalUp(raton(150, 130, 4000, 3500));
+p2dCalToggleMove();
+p2dCalDown(raton(100, 100, 3000, 3000));
+p2dCalMove(raton(150, 130, 4000, 3500));
+p2dCalUp(raton(150, 130, 4000, 3500));
 __out.arrastrado = [_dcimPlan.room.plan_x, _dcimPlan.room.plan_y];
-_dcCalSave(true);
+p2dCalSave(true);
 __out.guardado = enviados.slice(-1)[0];
-__out.terminada = _dcCal === null;
+__out.terminada = P2DCAL === null;
 
 // Solo la escala.
 enviados.length = 0;
 Object.assign(_dcimPlan.room, {plan_mm: 10000, plan_x: 0, plan_y: 0});
-_dcCalStart('room');
-_dcCalClick(clic(0, 0));
-_dcCalClick(clic(0, 2500));        // en vertical: medio alto, 2,5 m de 5
-_dcCal.dist = '5';
-_dcCalApply();
-_dcCalSave(false);
+p2dCalStart('room');
+p2dCalClick(clic(0, 0));
+p2dCalClick(clic(0, 2500));        // en vertical: medio alto, 2,5 m de 5
+P2DCAL.dist = '5';
+p2dCalApply();
+p2dCalSave(false);
 __out.soloEscala = enviados[0];
 
 // En metros, una fachada de 42 m da un plano de edificio; y una unidad equivocada se rechaza.
-_dcCalStart('room');
-_dcCalClick(clic(0, 0));
-_dcCalClick(clic(5000, 0));          // un cuarto de la imagen, que mide 20 m
-_dcCal.dist = '42';
-_dcCalApply();
+p2dCalStart('room');
+p2dCalClick(clic(0, 0));
+p2dCalClick(clic(5000, 0));          // un cuarto de la imagen, que mide 20 m
+P2DCAL.dist = '42';
+p2dCalApply();
 __out.metros = _dcimPlan.room.plan_mm;
-_dcCalCancel();
-_dcCalStart('room');
-_dcCalClick(clic(0, 0));
-_dcCalClick(clic(5000, 0));
-_dcCal.dist = '0.042';               // 42 «mm» escritos donde se piden metros
-_dcCalApply();
-__out.absurdo = [_dcimPlan.room.plan_mm, _dcCal.step];
-_dcCalCancel();
+p2dCalCancel();
+p2dCalStart('room');
+p2dCalClick(clic(0, 0));
+p2dCalClick(clic(5000, 0));
+P2DCAL.dist = '0.042';               // 42 «mm» escritos donde se piden metros
+p2dCalApply();
+__out.absurdo = [_dcimPlan.room.plan_mm, P2DCAL.step];
+p2dCalCancel();
 // Calibrar cierra el 3D, que empujaba el lienzo fuera de la pantalla.
 _dc3d = {on: true};
-_dcCalStart('room');
+p2dCalStart('room');
 __out.sin3d = _dc3d === null;
-_dcCalCancel();
+p2dCalCancel();
 
 // Una distancia imposible no cambia nada.
-_dcCalStart('room');
-_dcCalClick(clic(1000, 1000));
-_dcCalClick(clic(1000, 1000));
-_dcCal.dist = '3';
+p2dCalStart('room');
+p2dCalClick(clic(1000, 1000));
+p2dCalClick(clic(1000, 1000));
+P2DCAL.dist = '3';
 const escalaAntes = _dcimPlan.room.plan_mm;
-_dcCalApply();
-__out.imposible = _dcimPlan.room.plan_mm === escalaAntes && _dcCal.step === 'dist';
-_dcCalCancel();
+p2dCalApply();
+__out.imposible = _dcimPlan.room.plan_mm === escalaAntes && P2DCAL.step === 'dist';
+p2dCalCancel();
 
 // ── Calibrar una planta ─────────────────────────────────────────────────────────
 enviados.length = 0;
 _dcsPlan.floors[0].plan_mm = 0;
-_dcCalStart('floor');
-_dcCalClick(clic(0, 0));
-_dcCalClick(clic(10000, 0));       // 10 m de los 50 supuestos
-_dcCal.dist = '6';
-_dcCalApply();
+p2dCalStart('floor');
+p2dCalClick(clic(0, 0));
+p2dCalClick(clic(10000, 0));       // 10 m de los 50 supuestos
+P2DCAL.dist = '6';
+p2dCalApply();
 __out.plantaEscala = _dcsPlan.floors[0].plan_mm;
 // Una planta sin salas no tiene con qué encajarlo: lo dice, y se guarda donde está.
-__out.plantaVacia = _dcCalBar('floor').includes(t('dcim_cal_fit_empty'));
-_dcCalSave(true);
+__out.plantaVacia = p2dCalBar('floor').includes(t('plan2d_cal_fit_empty'));
+p2dCalSave(true);
 __out.plantaGuardada = enviados[0];
 
 // ── Cancelar deshace lo aplicado; la paleta no está mientras se calibra ─────────
 Object.assign(_dcimPlan.room, {plan_mm: 10000, plan_x: 0, plan_y: 0});
-_dcCalStart('room');
+p2dCalStart('room');
 __out.sinPaleta = _dcpPaletteHtml() === '';
-_dcCalClick(clic(0, 0));
-_dcCalClick(clic(2000, 0));
-_dcCal.dist = '8';
-_dcCalApply();
+p2dCalClick(clic(0, 0));
+p2dCalClick(clic(2000, 0));
+P2DCAL.dist = '8';
+p2dCalApply();
 const aplicada = _dcimPlan.room.plan_mm;
-_dcCalCancel();
+p2dCalCancel();
 __out.cancelarDeshace = [aplicada, _dcimPlan.room.plan_mm];
 __out.conPaleta = _dcpPaletteHtml() !== '';
 // «Volver a marcar» parte de lo de antes, no de lo ya aplicado.
-_dcCalStart('room');
-_dcCalClick(clic(0, 0));
-_dcCalClick(clic(2000, 0));
-_dcCal.dist = '8';
-_dcCalApply();
-_dcCalStart('room');
+p2dCalStart('room');
+p2dCalClick(clic(0, 0));
+p2dCalClick(clic(2000, 0));
+P2DCAL.dist = '8';
+p2dCalApply();
+p2dCalStart('room');
 __out.otraVez = _dcimPlan.room.plan_mm;
-_dcCalCancel();
+p2dCalCancel();
 
 // ── La franja dice en qué paso se está ──────────────────────────────────────────
-_dcCalStart('room');
-__out.franjaSala = _dcCalBar('room').includes(tf('dcim_cal_step', 1)) && _dcCalBar('floor') === '';
-_dcCalCancel();
+p2dCalStart('room');
+__out.franjaSala = p2dCalBar('room').includes(tf('plan2d_cal_step', 1)) && p2dCalBar('floor') === '';
+p2dCalCancel();
 
 // ── Encajar una planta contra otra ──────────────────────────────────────────────
 // La baja ya está colocada con su plano en (-2000, -1000); la primera se encaja contra ella
@@ -226,77 +226,77 @@ _dcsPlan = {site: {uid: 's', rooms: []}, floor: 'p1', content: {}, kinds: {},
             floors: [{uid: 'p0', name: 'Baja', plan: 'b.png', plan_mm: 20000, plan_x: -2000, plan_y: -1000},
                      {uid: 'p1', name: 'Primera', plan: 'p.png', plan_mm: 20000, plan_x: 0, plan_y: 0}]};
 // Las dos ya tienen escala: se salta directo a encajar, sin volver a medir.
-_dcCalStart('floor');
-__out.botonSaltar = _dcCalBar('floor').includes('_dcCalSkipScale()');
-_dcCalSkipScale();
-__out.saltado = [_dcCal.step, _dcsPlan.floors[1].plan_mm];
-__out.selectorRef = _dcCalBar('floor').includes('_dcCalSetRef(this.value)')
-    && _dcCalBar('floor').includes('value="p0"') && !_dcCalBar('floor').includes('value="p1"');
+p2dCalStart('floor');
+__out.botonSaltar = p2dCalBar('floor').includes('p2dCalSkipScale()');
+p2dCalSkipScale();
+__out.saltado = [P2DCAL.step, _dcsPlan.floors[1].plan_mm];
+__out.selectorRef = p2dCalBar('floor').includes('p2dCalSetRef(this.value)')
+    && p2dCalBar('floor').includes('value="p0"') && !p2dCalBar('floor').includes('value="p1"');
 // Las asas del plano: tirar de la de abajo a la derecha hasta el doble lo duplica, con la
 // esquina de arriba a la izquierda quieta; tirar de la de arriba a la izquierda deja quieta la
 // de abajo a la derecha.
-__out.asasPlano = (_dcCalMarks('floor').match(/data-dccalh=/g) || []).length;
+__out.asasPlano = (p2dCalMarks('floor').match(/data-dccalh=/g) || []).length;
 const planta1 = _dcsPlan.floors[1];
 const asaPlano = (lado) => ({closest: (sel) => (sel === '[data-dccalh]' ? {dataset: {dccalh: lado}} : null)});
 const tirar = (lado, desde, hasta) => {
-    _dcCalDown({target: asaPlano(lado), p: {x: desde[0] * S, y: desde[1] * S}, clientX: 0, clientY: 0,
+    p2dCalDown({target: asaPlano(lado), p: {x: desde[0] * S, y: desde[1] * S}, clientX: 0, clientY: 0,
                 currentTarget: {setPointerCapture() {}, style: {}}});
-    _dcCalMove({p: {x: hasta[0] * S, y: hasta[1] * S}, clientX: 50, clientY: 50});
-    _dcCalUp({type: 'pointerup', clientX: 50, clientY: 50, currentTarget: {style: {}}});
+    p2dCalMove({p: {x: hasta[0] * S, y: hasta[1] * S}, clientX: 50, clientY: 50});
+    p2dCalUp({type: 'pointerup', clientX: 50, clientY: 50, currentTarget: {style: {}}});
 };
 Object.assign(planta1, {plan_mm: 20000, plan_x: 0, plan_y: 0});
 tirar('se', [20000, 10000], [40000, 20000]);
 __out.estiradoSE = [planta1.plan_mm, planta1.plan_x, planta1.plan_y];
 tirar('nw', [0, 0], [20000, 10000]);
 __out.encogidoNW = [planta1.plan_mm, planta1.plan_x, planta1.plan_y];
-_dcCalSetWidth('30');
+p2dCalSetWidth('30');
 __out.anchoEscrito = planta1.plan_mm;
-_dcCalSetWidth('-');
+p2dCalSetWidth('-');
 __out.anchoMedio = planta1.plan_mm;
 Object.assign(planta1, {plan_mm: 20000, plan_x: 0, plan_y: 0});
-_dcCal.ref = 'p0';
-_dcCal.refImg = {data: 'data:image/png;base64,AAAA', ratio: 0.5};
-const refSvg = _dcCalRefSvg();
+P2DCAL.ref = 'p0';
+P2DCAL.refImg = {data: 'data:image/png;base64,AAAA', ratio: 0.5};
+const refSvg = p2dCalRefSvg();
 __out.refDibujada = refSvg.includes(`x="${-2000 * S}"`) && refSvg.includes('dcCalRefTint');
 __out.refEnElDibujo = _dcsContent().includes('dcCalRefTint');
-__out.textoRef = _dcCalBar('floor').includes(tf('dcim_cal_fit_ref', 'Baja'));
-_dcCalClick(clic(3000, 2000));          // la escalera, en este plano
-_dcCalClick(clic(1000, 1000));          // la misma, en el de la baja
+__out.textoRef = p2dCalBar('floor').includes(tf('plan2d_cal_fit_ref', 'Baja'));
+p2dCalClick(clic(3000, 2000));          // la escalera, en este plano
+p2dCalClick(clic(1000, 1000));          // la misma, en el de la baja
 __out.encajadaConLaBaja = [_dcsPlan.floors[1].plan_x, _dcsPlan.floors[1].plan_y];
-_dcCalCancel();
+p2dCalCancel();
 
 // ── El norte ────────────────────────────────────────────────────────────────────
 enviados.length = 0;
 Object.assign(_dcimPlan.room, {plan_mm: 10000, plan_x: 0, plan_y: 0, north_deg: null});
-_dcCalStart('room');
-_dcCalClick(clic(0, 0));
-_dcCalClick(clic(2000, 0));
-_dcCal.dist = '2';
-_dcCalApply();
-_dcCalNorth(true);
-__out.pasoNorte = _dcCal.step;
+p2dCalStart('room');
+p2dCalClick(clic(0, 0));
+p2dCalClick(clic(2000, 0));
+P2DCAL.dist = '2';
+p2dCalApply();
+p2dCalNorth(true);
+__out.pasoNorte = P2DCAL.step;
 // La flecha del norte del plano apunta a la derecha: el norte está al este del dibujo, 90°.
-_dcCalClick(clic(1000, 1000));
-_dcCalClick(clic(3000, 1000));
-__out.norte = [_dcimPlan.room.north_deg, _dcCal.step];
-_dcCalSave(true);
+p2dCalClick(clic(1000, 1000));
+p2dCalClick(clic(3000, 1000));
+__out.norte = [_dcimPlan.room.north_deg, P2DCAL.step];
+p2dCalSave(true);
 __out.norteGuardado = enviados[0].cuerpo.north_deg;
 // Cancelar devuelve el norte de antes.
 _dcimPlan.room.north_deg = null;
-_dcCalStart('room');
-_dcCalClick(clic(0, 0));
-_dcCalClick(clic(2000, 0));
-_dcCal.dist = '2';
-_dcCalApply();
-_dcCalNorth(true);
-_dcCalClick(clic(0, 1000));
-_dcCalClick(clic(0, 0));
+p2dCalStart('room');
+p2dCalClick(clic(0, 0));
+p2dCalClick(clic(2000, 0));
+P2DCAL.dist = '2';
+p2dCalApply();
+p2dCalNorth(true);
+p2dCalClick(clic(0, 1000));
+p2dCalClick(clic(0, 0));
 const norteArriba = _dcimPlan.room.north_deg;
-_dcCalCancel();
+p2dCalCancel();
 __out.norteCancelado = [norteArriba, _dcimPlan.room.north_deg];
 // La rosa: nada sin norte dicho; girada con él.
-__out.rosaSin = _dcCompass(null) === '' && _dcCompass(undefined) === '';
-__out.rosaCon = _dcCompass(90).includes('rotate(90)');
+__out.rosaSin = p2dCompass(null) === '' && p2dCompass(undefined) === '';
+__out.rosaCon = p2dCompass(90).includes('rotate(90)');
 // En el 3D gira con la cámara: mirando hacia arriba del plano, el norte (0°) arriba; mirando
 // al este, a la izquierda.
 __out.rosa3d = [Math.round(ss3dCompassAngle({theta: Math.PI / 2}, 0)),
@@ -315,9 +315,9 @@ __out.visible = _dcPlanBg && _dcpPlanImage([]).includes('<image')
     && _ds3FloorScene(_dcsPlan.floors[0], _dcsPlan.image).planos.length === 1;
 // Calibrar con el plano oculto lo enseña: no se calibra a ciegas.
 _dcPlanBg = false;
-_dcCalStart('room');
+p2dCalStart('room');
 __out.calibrarLoEnsena = _dcPlanBg === true;
-_dcCalCancel();
+p2dCalCancel();
 """
 
 

@@ -19,8 +19,9 @@ import re
 
 _SRC = os.path.abspath(__file__).split(os.sep + 'tests' + os.sep)[0]
 _TPL = os.path.join(_SRC, 'lib', 'web_admin', 'templates')
-#: Where `core/…` includes resolve: the 3D viewer lives in its own package
-#: (`lib/core/view3d/web/`), which the template loader reaches through `lib`.
+#: Where `core/…` includes resolve: the 3D viewer and the 2D plan editor live in their own
+#: packages (`lib/core/view3d/web/`, `lib/core/plan2d/web/`), which the template loader reaches
+#: through `lib`.
 _LIB = os.path.join(_SRC, 'lib')
 _PAGE = 'core/view3d/web/explore3d.html'
 
@@ -52,7 +53,7 @@ def test_nothing_it_runs_on_load_needs_a_file_it_does_not_include():
         definidos |= {a or b for a, b in _DECL.findall(_text(rel))}
     # Where each name of the panel is defined, to name the file that would be missing.
     donde = {}
-    for base, sub in ((_TPL, 'partials'), (_LIB, os.path.join('core', 'view3d', 'web'))):
+    for base, sub in ((_TPL, 'partials'), (_LIB, 'core')):
         for raiz, _dirs, ficheros in os.walk(os.path.join(base, sub)):
             for f in ficheros:
                 if f.endswith('.html'):
@@ -85,7 +86,7 @@ def test_no_constant_it_reads_lives_in_a_file_it_does_not_include():
     for rel in incluidos:
         definidos |= {a or b for a, b in _DECL.findall(_text(rel))}
     donde = {}
-    for base, sub in ((_TPL, 'partials'), (_LIB, os.path.join('core', 'view3d', 'web'))):
+    for base, sub in ((_TPL, 'partials'), (_LIB, 'core')):
         for raiz, _dirs, ficheros in os.walk(os.path.join(base, sub)):
             for f in ficheros:
                 if f.endswith('.html'):

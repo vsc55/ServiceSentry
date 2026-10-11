@@ -330,7 +330,7 @@ function _dcConnDetailOpen(i) {
  *  los ciento veintiocho tienen algo dentro. Sin él hay que abrirlos todos para saberlo. */
 function _dcConnMoreBtn(i, c) {
     const hay = (c.gens || []).length || (c.signals || []).length
-        || String(c.speed || '').trim() || _dcDocText(c.note).trim();
+        || String(c.speed || '').trim() || String(c.abbr || '').trim() || _dcDocText(c.note).trim();
     return `<button class="btn btn-sm btn-secondary py-0 px-1 ss-nowrap"
             title="${escAttr(t('dcim_conn_more'))}" onclick="_dcConnDetailOpen(${i})">
         ${hay ? '<i class="bi bi-circle-fill ss-fs-1 me-1"></i>' : ''}<i class="bi bi-chevron-${
@@ -354,6 +354,10 @@ function _dcConnDetailHtml(i, c, doc) {
                 <input class="form-control form-control-sm" style="max-width:8rem"
                        placeholder="10 Gbps" value="${escAttr(String(c.speed || ''))}"
                        oninput="_dcConnSet(${i},'speed',this.value)"></label>
+            <label class="ss-fs-2 text-muted" title="${escAttr(t('dcim_conn_abbr_tt'))}">${esc(t('dcim_conn_abbr'))}
+                <input class="form-control form-control-sm" style="max-width:6rem"
+                       placeholder="RJ45" value="${escAttr(String(c.abbr || ''))}" data-dcconn-abbr
+                       oninput="_dcConnSet(${i},'abbr',this.value)"></label>
             <div class="ss-fs-2 text-muted">${esc(t('dcim_signals'))}
                 ${_dcConnSigBox(i, c, doc)}</div>
         </div>
@@ -542,16 +546,20 @@ function _dcConnSet(i, campo, valor) {
  *  Con el icono de la familia y no su nombre: nueve palabras no entran en una celda y nueve
  *  iconos sí. El nombre sigue en el `title` y en el rótulo del lector de pantalla — lo que se
  *  ahorra es sitio, no la palabra. */
+//: Los iconos de las familias que no son de puertos de un equipo: las bocas de pared. Aparte del
+//: de los puertos (`_DC_PORT_ICON`), que también decide qué pestañas tiene un montaje.
+const _DC_WALL_FAM_ICON = {'outlet-jacks': 'bi-diagram-2', 'socket-jacks': 'bi-lightning-charge'};
+
 function _dcConnFamsBox(i, c, familias) {
     const puestas = c.families || [];
-    return `<div class="d-flex gap-1 flex-wrap" style="width:9.4rem">${familias.map(f => {
+    return `<div class="d-flex gap-1 flex-wrap" style="width:11.6rem">${familias.map(f => {
         const on = puestas.indexOf(f) >= 0;
         const nombre = _dcPortName(f);
         return `<label class="ss-conn-fam${on ? ' ss-on' : ''}"
                 title="${escAttr(nombre)}" aria-label="${escAttr(nombre)}">
             <input type="checkbox" class="d-none"${on ? ' checked' : ''}
                    onchange="_dcConnFamSet(${i},${jsStr(f)},this.checked)">
-            <i class="bi ${escAttr(_DC_PORT_ICON[f] || 'bi-ethernet')}"></i></label>`;
+            <i class="bi ${escAttr(_DC_PORT_ICON[f] || _DC_WALL_FAM_ICON[f] || 'bi-ethernet')}"></i></label>`;
     }).join('')}</div>`;
 }
 
@@ -561,7 +569,10 @@ function _dcConnFamSet(i, fam, on) {
     const fuera = (c.families || []).filter(f => f !== fam);
     // El orden es el del documento y no el de los clics: dos conectores con las mismas familias
     // tienen que decirlo igual, o el JSON cambia sin que cambie nada.
-    c.families = on ? _DCCAT_PORTS.filter(f => f === fam || fuera.indexOf(f) >= 0) : fuera;
+    // En el de las familias del documento, que son más que las de los puertos de un equipo: con
+    // las de un equipo, marcar una boca de pared la perdía.
+    const orden = (_dcConnDoc || {}).families || _DCCAT_PORTS;
+    c.families = on ? orden.filter(f => f === fam || fuera.indexOf(f) >= 0) : fuera;
     _dcConnDraw();
 }
 

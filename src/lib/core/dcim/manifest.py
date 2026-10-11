@@ -71,11 +71,35 @@ MODULE_PERMISSIONS = [{
 # their writers existed and `test_nothing_is_declared_that_nobody_emits` threw them straight
 # back out, which is exactly what it is for — nobody greps for a name that was never used. They
 # are back because `routes.py` now writes them.
+# Los datos de demostración, desde Configuración → Mantenimiento. Pedido: una opción para
+# añadirlos o eliminarlos sin la línea de órdenes. Instalar va en su propio grupo; borrar, con
+# los demás borrados de datos —es lo que hace—, que es lo que esa sección separa.
+CONFIG_ACTIONS = [
+    {'section': 'maintenance', 'id': 'dcim_demo_install',
+     'label_key': 'dcim_demo_install', 'tooltip_key': 'dcim_demo_install_tt',
+     'desc_key': 'dcim_demo_install_desc',
+     'icon': 'bi-building-add', 'variant': 'primary', 'order': 40,
+     'group_label_key': 'cfg_actions_group_demo', 'perm': 'db_maintenance',
+     'fn': '_dcimDemoInstall'},
+    {'section': 'maintenance', 'id': 'dcim_demo_remove',
+     'label_key': 'dcim_demo_remove', 'tooltip_key': 'dcim_demo_remove_tt',
+     'desc_key': 'dcim_demo_remove_desc',
+     'icon': 'bi-building-dash', 'variant': 'danger', 'order': 55,
+     'button_key': 'act_wipe', 'group_label_key': 'cfg_actions_group_wipe',
+     'perm': 'db_maintenance', 'fn': '_dcimDemoRemove'},
+]
+
 AUDIT_EVENTS = [
     # Where things are. Ordinary bookkeeping, and there is a lot of it while a room is being
     # entered for the first time.
     {'key': 'dcim_placed', 'severity': 'muted'},
     {'key': 'dcim_removed', 'severity': 'info'},
+    # A rack deleted WITH what it held: equipment, strips, their cables and power leads at once.
+    # Louder than one item: it is the line that answers «where did the forty servers go».
+    {'key': 'dcim_rack_emptied', 'severity': 'warning'},
+    # A server to another rack, a rack to another room: where things are is what this section
+    # keeps, and «who took it from R04» is the question the line answers.
+    {'key': 'dcim_moved', 'severity': 'info'},
     # Asking a GitHub library what it holds. Reading does not get audited, but this is not
     # reading: it is a request this server makes to somebody else's machine, and it can end in
     # "the hour's sixty requests are gone" or "that branch is not there". The line carries the
@@ -121,6 +145,9 @@ AUDIT_EVENTS = [
     # Y traerlos. Escribe filas que nadie ha tecleado aquí, así que de dónde salieron es
     # justo lo que no va a estar escrito en ninguna de ellas.
     {'key': 'dcim_import', 'severity': 'info'},
+    # Los datos de demostración, desde Mantenimiento: escriben y borran sedes enteras de una vez.
+    {'key': 'dcim_demo_installed', 'severity': 'info'},
+    {'key': 'dcim_demo_removed', 'severity': 'warning'},
 ]
 
 

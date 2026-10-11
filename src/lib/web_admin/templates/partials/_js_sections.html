@@ -230,18 +230,26 @@
 {% include "partials/dcim/_rackviews.html" %}
 {# The room from above. After the elevation, which it borrows `_dceClip` from — and after the
    canvas, which both draw on. #}
+{% include "partials/dcim/_planobj.html" %}
 {% include "partials/dcim/_plan.html" %}
-{# Juntar lo que va junto en el plano de la sala: el imán entre cosas, varios a la vez y grupos. #}
-{% include "partials/dcim/_plangroup.html" %}
+{# El editor de planos 2D —elegir varios, el imán, grupos, lo de debajo, el teclado— y el
+   plano de la sala sobre él. #}
+{% include "core/plan2d/web/_plan2d.html" %}
+{% include "core/plan2d/web/_plan2d_undo.html" %}
+{% include "core/plan2d/web/_plan2d_bg.html" %}
+{% include "core/plan2d/web/_plan2d_walls.html" %}
+{% include "partials/dcim/_plan2d_room.html" %}
 {% include "partials/dcim/_siteplan.html" %}
-{# Varios a la vez, grupos y la lista de lo que hay, en el plano de una planta. #}
-{% include "partials/dcim/_siteplangroup.html" %}
+{# El plano de una planta sobre el editor de planos, con su lista, sus filas y su fichero. #}
+{% include "partials/dcim/_plan2d_floor.html" %}
 {# A floor's walls read from its plan: detection, review, and the walls in 3D. #}
 {% include "partials/dcim/_walls.html" %}
 {% include "partials/dcim/_portmap.html" %}
 {% include "core/view3d/web/_site3d.html" %}
 {% include "partials/dcim/_plancal.html" %}
 {% include "partials/dcim/_undo.html" %}
+{% include "partials/dcim/_demo.html" %}
+{% include "partials/dcim/_move.html" %}
 {% include "partials/dcim/_shelves.html" %}
 {% include "partials/infra/_list.html" %}
 {# After _list.html: the grouping views read its cell renderer and column state. #}

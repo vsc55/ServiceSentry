@@ -110,6 +110,7 @@ from lib.core.orgs.routes import register as _orgs
 from lib.providers.freshservice.routes import register as _freshservice
 from lib.core.dcim.routes import register as _dcim
 from lib.core.view3d.routes import register as _view3d
+from lib.core.plan2d.routes import register as _plan2d
 from lib.core.jobs.routes import register as _jobs
 from lib.core.credentials.routes import register as _credentials
 from lib.core.history.routes import register as _history
@@ -144,6 +145,7 @@ def register_all(app, wa):
     _freshservice(app, wa)
     _dcim(app, wa)
     _view3d(app, wa)
+    _plan2d(app, wa)
     _jobs(app, wa)
     _credentials(app, wa)
     _telegram(app, wa)

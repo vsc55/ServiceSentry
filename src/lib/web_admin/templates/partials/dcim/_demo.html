@@ -1,0 +1,42 @@
+{# ================================================================
+   DCIM — los datos de demostración, desde Configuración → Mantenimiento.
+
+   Pedido: una opción en Mantenimiento para añadir o eliminar los datos de demostración. Las dos
+   acciones las declara el inventario (`lib/core/dcim/manifest.py`, `CONFIG_ACTIONS`) y el panel
+   pinta sus botones; éstas son las funciones que nombran. Lo mismo que `main.py dcim demo`
+   (`/api/v1/dcim/demo`): solo se tocan las sedes de la demo.
+   ================================================================ #}
+
+/** Instalar la demo, preguntando antes. Si ya está, la pregunta lo dice: se borra y se crea de
+ *  nuevo, y lo que alguien hubiera tocado en ella se pierde. */
+async function _dcimDemoInstall() {
+    const d = await apiGet('/api/v1/dcim/demo') || {};
+    const ya = !!d.installed;
+    showConfirmModal(t(ya ? 'dcim_demo_reinstall_q' : 'dcim_demo_install_q'), async () => {
+        showToast(t('dcim_demo_installing'), 'info');
+        const r = await _dcimSend('POST', '/api/v1/dcim/demo', {replace: ya});
+        if (!r.ok) { showToast(r.error || t('save_failed'), 'danger'); return; }
+        showToast(t('dcim_demo_installed_ok'), 'success');
+        _dcimDemoForget();
+    });
+}
+
+/** Borrar la demo, preguntando antes: sus sedes y todo lo que tienen, y nada más. */
+function _dcimDemoRemove() {
+    showConfirmModal(t('dcim_demo_remove_q'), async () => {
+        const r = await _dcimSend('DELETE', '/api/v1/dcim/demo');
+        if (!r.ok) { showToast(r.error || t('save_failed'), 'danger'); return; }
+        const quitadas = Number((r.data || {}).removed) || 0;
+        showToast(t(quitadas ? 'dcim_demo_removed_ok' : 'dcim_demo_none'), quitadas ? 'success' : 'info');
+        _dcimDemoForget();
+    });
+}
+
+/** Lo que el inventario tuviera abierto de la demo ya no existe, o es otro: se olvida. Las sedes
+ *  se vuelven a pedir al entrar en la sección. */
+function _dcimDemoForget() {
+    if (typeof _dcPlanLeave === 'function') _dcPlanLeave();
+    if (typeof _dcimPlan !== 'undefined') _dcimPlan = null;
+    if (typeof _dcsPlan !== 'undefined') _dcsPlan = null;
+    if (typeof _dcimRack !== 'undefined') _dcimRack = null;
+}
