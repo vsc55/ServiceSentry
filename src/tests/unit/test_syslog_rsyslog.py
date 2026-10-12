@@ -203,7 +203,7 @@ class TestEveryEngineReachesTheSameTable:
         my = object.__new__(MySQLConnector)
         col = Column('ProgramName', 'TEXT')
         assert my._column_type_clause(col, keyed=True) == 'VARCHAR(255)'
-        assert my._column_type_clause(col) == 'TEXT'
+        assert my._column_type_clause(col) == 'LONGTEXT'    # TEXT holds 64 KB on MySQL
 
     def test_the_reconcile_asks_for_the_keyed_type(self):
         """An index over a column added to an existing table: MySQL cannot index TEXT."""

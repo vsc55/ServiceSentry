@@ -432,7 +432,7 @@ function _dcCompSlotBox() {
         ? `<input class="form-control" value="${escAttr(String(d.slot || ''))}"
                   placeholder="${escAttr(cuantos > 1 ? t('dcim_bay_many_hint') : '')}"
                   oninput="_dcCompDraft.slot=this.value"
-                  onkeydown="if(event.key==='Enter')_dcCompSave()">`
+                  onkeydown="if(event.key==='Enter'&&!event.repeat)_dcCompSave()">`
         : `<input class="form-control ss-pointer" readonly
                   value="${escAttr(String(d.slot || ''))}"
                   placeholder="${escAttr(t('dcim_slot_none'))}"
@@ -627,7 +627,7 @@ function _dcCompBox(k, etiqueta, ancho, tipo) {
                type="${escAttr(tipo || 'text')}" ${tipo === 'number' ? 'min="1"' : ''}
                value="${escAttr(String(d[k] === undefined ? '' : d[k]))}"
                oninput="_dcCompDraft['${k}']=this.value"
-               onkeydown="if(event.key==='Enter')_dcCompSave()"></label>`;
+               onkeydown="if(event.key==='Enter'&&!event.repeat)_dcCompSave()"></label>`;
 }
 
 /** Guardar. El sitio decide la ruta y a qué se vuelve; lo que se manda es lo mismo — y cuando
@@ -635,42 +635,48 @@ function _dcCompBox(k, etiqueta, ancho, tipo) {
  *  resuelve el servidor: si los copiara cada pantalla, dos caminos escribirían dos cosas
  *  distintas de la misma pieza y el segundo tardaría meses en descubrirse. */
 async function _dcCompSave() {
-    const d = _dcCompDraft;
-    if (!d) return;
-    const cuerpo = {kind: d.kind || 'other', slot: d.slot || '', qty: Number(d.qty) || 1,
-                    mount: String(d.mount || ''),
-                    type_uid: d.type_uid || ''};
-    if (!d.type_uid) cuerpo.kit_qty = Math.max(1, Number(d.kit_qty) || 1);
-    if (!d.type_uid) {
-        cuerpo.brand = d.brand || '';
-        cuerpo.model = d.model || '';
-        cuerpo.size = d.size || '';
-    }
-    let r;
-    if (d.where === 'build') {
-        const b = ((_dcBuild || {}).build || {}).uid || '';
-        if (!b) return;
+    // Una petición a la vez: el botón seguía activo mientras se guardaba, y un doble clic
+    // o Intro mantenido creaba el registro dos veces.
+    if (_dcCompSave.busy) return;
+    _dcCompSave.busy = true;
+    try {
+        const d = _dcCompDraft;
+        if (!d) return;
+        const cuerpo = {kind: d.kind || 'other', slot: d.slot || '', qty: Number(d.qty) || 1,
+                        mount: String(d.mount || ''),
+                        type_uid: d.type_uid || ''};
+        if (!d.type_uid) cuerpo.kit_qty = Math.max(1, Number(d.kit_qty) || 1);
+        if (!d.type_uid) {
+            cuerpo.brand = d.brand || '';
+            cuerpo.model = d.model || '';
+            cuerpo.size = d.size || '';
+        }
+        let r;
+        if (d.where === 'build') {
+            const b = ((_dcBuild || {}).build || {}).uid || '';
+            if (!b) return;
+            r = d.uid
+                ? await _dcimSend('PUT',
+                    `/api/v1/dcim/build-parts/${encodeURIComponent(d.uid)}`, cuerpo)
+                : await _dcimSend('POST',
+                    `/api/v1/dcim/builds/${encodeURIComponent(b)}/parts`, cuerpo);
+            if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+            _dcCompDraft = null;
+            // Dejando la ficha donde estaba: releerla la devuelve a la primera pestaña, y quien
+            // acaba de añadir un adaptador en «Elementos externos» se encontraba en «Resumen» sin
+            // haber navegado, con la lista que venía de tocar fuera de la vista.
+            return _dcBuildReopen(b);
+        }
+        if (!_dcParts) return;
+        cuerpo.item_uid = _dcParts.item;
+        cuerpo.serial = d.serial || '';
         r = d.uid
-            ? await _dcimSend('PUT',
-                `/api/v1/dcim/build-parts/${encodeURIComponent(d.uid)}`, cuerpo)
-            : await _dcimSend('POST',
-                `/api/v1/dcim/builds/${encodeURIComponent(b)}/parts`, cuerpo);
+            ? await _dcimSend('PUT', `/api/v1/dcim/parts/${encodeURIComponent(d.uid)}`, cuerpo)
+            : await _dcimSend('POST', '/api/v1/dcim/parts', cuerpo);
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
         _dcCompDraft = null;
-        // Dejando la ficha donde estaba: releerla la devuelve a la primera pestaña, y quien
-        // acaba de añadir un adaptador en «Elementos externos» se encontraba en «Resumen» sin
-        // haber navegado, con la lista que venía de tocar fuera de la vista.
-        return _dcBuildReopen(b);
-    }
-    if (!_dcParts) return;
-    cuerpo.item_uid = _dcParts.item;
-    cuerpo.serial = d.serial || '';
-    r = d.uid
-        ? await _dcimSend('PUT', `/api/v1/dcim/parts/${encodeURIComponent(d.uid)}`, cuerpo)
-        : await _dcimSend('POST', '/api/v1/dcim/parts', cuerpo);
-    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    _dcCompDraft = null;
-    _dcPartsOpen(_dcParts.item);
+        _dcPartsOpen(_dcParts.item);
+    } finally { _dcCompSave.busy = false; }
 }
 
 function _dcPartDrop(uid, nombre) {

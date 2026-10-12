@@ -188,9 +188,15 @@ class _SessionsMixin:
         user_uid  = entry.get('user_uid', '')
         # Resolve uid → (username, user_record)
         uname, user_rec = self._uid_to_username(user_uid)
+        # By name only for an account that has no uid, whose session row holds its name
+        # instead (`_create_session`). A uid that no longer resolves is an account that is
+        # gone, and falling back to the name handed its session to whoever was created later
+        # under that name — an admin, possibly.
         if uname is None:
             uname = session.get('username', '')
             user_rec = self._users.get(uname)
+            if user_rec is not None and (user_rec.get('uid') or user_uid not in ('', uname)):
+                user_rec = None
         if user_rec is None or not user_rec.get('enabled', True):
             del self._sessions[token]
             self._sessions_store.delete(token)

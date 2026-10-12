@@ -659,11 +659,35 @@ function p2dArrow(P, ev) {
     return true;
 }
 
+/** Guardar ya lo movido con las flechas que aún esperaba su guardado, en todos los planos:
+ *  antes de deshacer y al dejar un plano (si no, se buscaba en el plano nuevo y se perdía). */
+function p2dFlushArrows() {
+    const hechos = [];
+    for (const P of Object.values(P2D)) {
+        if (!P.arrowTimer) continue;
+        clearTimeout(P.arrowTimer);
+        P.arrowTimer = null;
+        const movidos = P.arrowMoved || [];
+        P.arrowMoved = null;
+        if (movidos.length) hechos.push(p2dSavePositions(P, movidos));
+    }
+    return hechos.length ? Promise.all(hechos) : null;    // null: no había nada que guardar
+}
+
+/** Si hay un cuadro (modal) abierto: Bootstrap marca el `body` mientras dura. */
+function p2dModalOpen() {
+    const b = document.body;
+    return !!(b && b.classList && b.classList.contains('modal-open'));
+}
+
 /** Una tecla en un plano. Fuera de un campo de texto: Ctrl+G agrupa, Ctrl+Mayús+G desagrupa,
  *  Ctrl+A elige todo, Escape suelta lo elegido; con algo elegido, R gira, Supr quita y las
  *  flechas mueven. `true` si era de aquí —quien llama hace `preventDefault`—. */
 function p2dKeyDown(P, ev) {
-    if (/^(INPUT|SELECT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '')) return false;
+    const foco = document.activeElement || {};
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(foco.tagName || '') || foco.isContentEditable) return false;
+    // Con un cuadro abierto encima, las teclas son del cuadro.
+    if (p2dModalOpen()) return false;
     if (ev.key === 'Escape' && p2dPlaceCancel(P)) return true;
     const k = (ev.key || '').toLowerCase();
     if (ev.ctrlKey || ev.metaKey) {
@@ -989,7 +1013,7 @@ function p2dJsonTools(o) {
                accept=".json,application/json" onchange="${o.importFn}">
         <span class="btn-group btn-group-sm">${exp}
             <button type="button" class="btn btn-sm btn-secondary"
-                    onclick="document.getElementById('${escAttr(o.input)}').click()"
+                    onclick="document.getElementById(${jsStr(o.input)}).click()"
                     title="${escAttr(o.importTt)}" aria-label="${escAttr(o.importTt)}">
                 <i class="bi bi-upload"></i></button></span>`;
 }

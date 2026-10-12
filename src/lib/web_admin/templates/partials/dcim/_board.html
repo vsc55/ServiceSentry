@@ -288,13 +288,11 @@ function _dcimBoardOrgs(orgs) {
 
 /** Ir al armario donde está el problema — que es el punto entero de esta pantalla. */
 async function _dcimBoardGoRack(uid) {
-    const data = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(uid)}`);
-    if (!data || !data.rack) { showToast(t('dcim_not_found'), 'warning'); return; }
     _dcimMark('inventory');         // un rack es inventario, y la URL tiene que decirlo
     _dcimBoard = null;
-    _dcimRack = data;
-    _dcimUrl();
-    renderDcim();
+    // Por el cargador de siempre: es el único que olvida los cables, la corriente, las piezas y
+    // el historial del rack anterior. Puesto a mano, el rack B enseñaba los de A en sus pestañas.
+    return _dcimLoadRack(uid);
 }
 
 /** Y desde una tarjeta, a la sede: el árbol abierto por donde hay que mirar. */

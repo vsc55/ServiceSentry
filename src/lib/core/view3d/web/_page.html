@@ -118,9 +118,13 @@ async function _x3OpenSite(uid, floorUid, mode, desdeDireccion) {
     _ds3Mode = mode === 'floor' ? 'floor' : 'building';
     _x3View = 'site';
     _x3Busy = true;
+    // El paseo es de la sede de antes: seguía con sus coordenadas en la nueva.
+    if (typeof ss3dFpsStop === 'function') ss3dFpsStop();
     _x3Render();
     // `_dcsOpen` trae las plantas, el plano y lo que hay dentro, y cierra el visor anterior.
     await _dcsOpen(uid, floorUid);
+    // Otra sede pedida mientras tanto: esa termina lo suyo.
+    if (!_dcsPlan || _dcsPlan.site.uid !== uid) return;
     _x3Busy = false;
     _x3Start3d();
     _x3Url(!desdeDireccion);
@@ -453,11 +457,9 @@ async function _x3OpenRack(uid) {
         ss3dRebuild(_DC3D_BOX);
         return;
     }
-    const base = `/api/v1/dcim/racks/${encodeURIComponent(uid)}`;
-    const [data, cables, power] = await Promise.all([apiGet(base), apiGet(base + '/cables'),
-                                                     apiGet(base + '/power')]);
-    if (!data || data.error) return showToast((data || {}).error || t('dcim_not_found'), 'warning');
-    _dc3dOpenRacks.set(uid, {data, cables: cables || {}, power: power || {}});
+    const datos = await _dc3dRackFetch(uid);
+    if (!datos) return;
+    _dc3dOpenRacks.set(uid, datos);
     _dc3dSelOpening(uid);
     ss3dRebuild(_DC3D_BOX);
 }

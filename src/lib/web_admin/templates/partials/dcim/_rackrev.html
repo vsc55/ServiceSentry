@@ -23,6 +23,7 @@ async function _dcHistLoad() {
     _dcHist = {loading: true};
     renderDcim();
     const d = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}/history`);
+    if (((_dcimRack || {}).rack || {}).uid !== rack.uid) return;      // ya es otro rack
     _dcHist = {rows: (d || {}).history || []};
     renderDcim();
 }

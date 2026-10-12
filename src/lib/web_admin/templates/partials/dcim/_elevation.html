@@ -124,9 +124,14 @@ function _dceDown(ev) {
     if (!item || item.foreign) return;
     const p = ssCanvasPoint(_DCE_SVG, ev);
     if (!p) return;
+    const rack = (_dcimRack || {}).rack || {};
+    // Dónde se agarró, en U desde el pie del equipo: sin ello el equipo saltaba a poner su pie
+    // bajo el puntero, y un clic —o el doble clic que abre sus piezas— en la mitad de arriba de
+    // uno de 2U lo subía una U al soltar.
     _dceDrag = {uid: item.uid, u: Number(item.u_start || 1),
                 origen: Number(item.u_start || 1),
                 size: Math.max(1, Number(item.u_height || 1)),
+                agarre: _dceUAt(rack, p.y) - Number(item.u_start || 1),
                 from: p, moved: false};
     ev.currentTarget.setPointerCapture?.(ev.pointerId);
 }
@@ -139,7 +144,7 @@ function _dceMove(ev) {
     // A la U más cercana, ya: no hay medias U —un equipo va atornillado a un agujero o no va— y
     // redondear al soltar haría que lo que se ve durante el arrastre no fuese lo que se guarda.
     const u = Math.max(1, Math.min(Number(rack.u_height || 1) - _dceDrag.size + 1,
-                                   _dceUAt(rack, p.y)));
+                                   _dceUAt(rack, p.y) - (_dceDrag.agarre || 0)));
     if (u === _dceDrag.u) return;
     _dceDrag.u = u;
     _dceDrag.moved = true;
@@ -148,6 +153,15 @@ function _dceMove(ev) {
         item.u_start = u;
         _dceRedraw();
     }
+}
+
+/** Un gesto que el sistema cancela (un desplazamiento táctil) no es soltar: vuelve a su U. */
+function _dceCancel() {
+    const drag = _dceDrag;
+    _dceDrag = null;
+    if (!drag || !drag.moved) return;
+    const item = ((_dcimRack || {}).items || []).find(i => i.uid === drag.uid);
+    if (item) { item.u_start = drag.origen; _dceRedraw(); }
 }
 
 async function _dceUp(ev) {
@@ -349,7 +363,7 @@ function _dcimElevation(rack, items) {
         <svg ${ssCanvasAttrs(_DCE_SVG, L)}
              onwheel="ssCanvasWheel(${jsStr(_DCE_SVG)},event)"
              onpointerdown="_dceDown(event)" onpointermove="_dceMove(event)"
-             onpointerup="_dceUp(event)" onpointercancel="_dceUp(event)"
+             onpointerup="_dceUp(event)" onpointercancel="_dceCancel()"
              onpointerleave="_dceUp(event)"
              aria-label="${escAttr(t('dcim_elevation'))}">
             ${_dceContent(rack, items)}

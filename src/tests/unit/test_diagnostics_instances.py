@@ -284,7 +284,7 @@ class TestTheScreenKeepsTheVersionsApartToo:
         """One package can be on screen twice — this process's and another container's — and
         each has its own advisories. Opened by name it showed whichever row came first, under a
         heading naming the version that was clicked."""
-        assert "_dgShowVulns('${escAttr(x.name)}', '${escAttr(x.installed || '')}')" \
+        assert "_dgShowVulns(${jsStr(x.name)}, ${jsStr(x.installed || '')})" \
             in self._read('_deps.html')
 
     def test_the_handler_looks_the_pin_up_first(self):

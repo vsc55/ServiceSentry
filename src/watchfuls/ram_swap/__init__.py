@@ -26,7 +26,8 @@
 
 Device-centric: each check binds to a device (``device_uid``).  Memory stats are read
 on that device via :meth:`ModuleBase.device_exec` using an OS-appropriate command
-(``/proc/meminfo`` on Linux, ``wmic`` on Windows, ``vm_stat``/``sysctl`` on
+(``/proc/meminfo`` on Linux, PowerShell ``Get-CimInstance`` on Windows (``wmic``
+only where PowerShell is missing), ``vm_stat``/``sysctl`` on
 macOS, ``sysctl``/``swapinfo`` on FreeBSD) and compared with per-check
 thresholds.
 """
@@ -48,12 +49,22 @@ _SEP = '---SS---'
 # their outputs are joined here with _SEP.
 _MEM_CMDS = {
     'linux':   ['cat /proc/meminfo'],
-    'windows': ['wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value'],
+    # CIM through PowerShell: `wmic` is gone from Windows 11 24H2. No pipe: Format-List takes
+    # the object through -InputObject. No `$`, `'`, `;` or `|` inside the double-quoted
+    # -Command argument, so the line reads the same to cmd.exe and to PowerShell as the SSH
+    # shell. Format-List prints `FreePhysicalMemory     : 123` — names never localised.
+    'windows': ['powershell -NoProfile -NonInteractive -Command '
+                '"Format-List -InputObject (Get-CimInstance Win32_OperatingSystem '
+                '-Property FreePhysicalMemory,TotalVisibleMemorySize) '
+                '-Property FreePhysicalMemory,TotalVisibleMemorySize"'],
     'darwin':  ['sysctl -n hw.memsize', 'vm_stat', 'sysctl -n vm.swapusage'],
     'freebsd': ['sysctl -n hw.pagesize vm.stats.vm.v_page_count vm.stats.vm.v_free_count '
                 'vm.stats.vm.v_inactive_count vm.stats.vm.v_cache_count',
                 'swapinfo -k'],
 }
+
+# Only for a Windows host where PowerShell itself is missing or failed outright.
+_WIN_MEM_WMIC = 'wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value'
 
 
 class Watchful(ModuleBase):
@@ -100,6 +111,8 @@ class Watchful(ModuleBase):
         outs = []
         for cmd in _MEM_CMDS[os_]:
             out, err, code = self.device_exec(item, cmd, timeout=timeout)
+            if os_ == 'windows' and code != 0 and not (out or '').strip():
+                out, err, code = self.device_exec(item, _WIN_MEM_WMIC, timeout=timeout)
             if code != 0 and not out:
                 raise OSError((err or '').strip() or f'memory query exited {code}')
             outs.append(out)
@@ -172,10 +185,12 @@ class Watchful(ModuleBase):
 
     @staticmethod
     def _parse_windows(out):
+        """PowerShell ``Format-List`` (``Key : value``) or legacy wmic (``Key=value``)."""
         kv = {}
         for line in out.splitlines():
-            if '=' in line:
-                k, _, val = line.partition('=')
+            sep = '=' if '=' in line else ':'
+            if sep in line:
+                k, _, val = line.partition(sep)
                 val = val.strip()
                 if val.isdigit():
                     kv[k.strip()] = int(val)        # value in kB
@@ -235,14 +250,16 @@ class Watchful(ModuleBase):
             cache = nums[4] if len(nums) > 4 else 0
             avail = free_count + inactive + cache
             ram = (page_count - avail) / page_count * 100 if page_count else None
-        # swapinfo -k: last data line ".... <used%>" with a trailing "NN%".
+        # swapinfo -k: last data line ".... <used%>" with a trailing "NN%". The LAST one,
+        # not the first: with two swap devices swapinfo adds a "Total" line after them, and
+        # stopping at the first device reported that disk's usage as the machine's.
         swap = None
         for line in swap_s.splitlines():
             line = line.strip()
             if line.endswith('%'):
                 tok = line.split()[-1].rstrip('%')
                 try:
-                    swap = float(tok); break
+                    swap = float(tok)
                 except ValueError:
                     pass
         return ram, swap

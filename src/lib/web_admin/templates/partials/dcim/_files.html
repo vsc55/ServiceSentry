@@ -30,8 +30,20 @@ const _DCFILE_URL = {
 
 async function _dcFilesLoad(scope, uid, repintar) {
     const d = await apiGet(_DCFILE_URL[scope](uid)) || {};
-    _dcFiles = {scope, uid, rows: d.files || [], kinds: d.kinds || [], max: d.max_bytes || 0};
+    _dcFiles = {scope, uid, rows: d.files || [], kinds: d.kinds || [], max: d.max_bytes || 0,
+                repintar: repintar || null};
     (repintar || renderDcim)();
+}
+
+/** Volver a pedir la lista tras subir o quitar uno, y pintarla con quien la pintó.
+ *
+ *  Era `renderDcim()` a secas, y la ficha de un modelo del catálogo se dibuja con su propio
+ *  `_dcCatFormDraw`: el fichero se subía, el aviso decía «guardado» y la lista seguía sin él
+ *  hasta cerrar y volver a abrir la ficha. */
+function _dcFilesAgain() {
+    const repinta = (_dcFiles && _dcFiles.repintar) || renderDcim;
+    _dcFiles = null;
+    repinta();
 }
 
 /** La lista y el hueco para subir. *puede* es quien manda aquí: leerlos y colgarlos no piden lo
@@ -125,8 +137,7 @@ async function _dcFileUp(inp) {
     const d = await resp.json().catch(() => ({}));
     if (!resp.ok || d.error) return showToast(d.error || `HTTP ${resp.status}`, 'danger', 8000);
     showToast(t('saved'), 'success');
-    _dcFiles = null;
-    renderDcim();
+    _dcFilesAgain();
 }
 
 function _dcFileDrop(uid, nombre) {
@@ -134,7 +145,6 @@ function _dcFileDrop(uid, nombre) {
         const r = await _dcimSend('DELETE', `/api/v1/dcim/files/${encodeURIComponent(uid)}`);
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
         showToast(t('deleted'), 'success');
-        _dcFiles = null;
-        renderDcim();
+        _dcFilesAgain();
     });
 }

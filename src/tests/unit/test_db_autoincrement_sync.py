@@ -35,6 +35,10 @@ class _PgCapture(PostgreSQLConnector):
 
     def fetchone(self, sql, params=()):
         self.reads.append((sql, params))
+        if 'pg_get_serial_sequence' in sql:
+            return ('public.audit_id_seq',)
+        if 'is_called' in sql:
+            return (1, False)                 # a sequence nobody has drawn from yet
         return (1,)
 
 
@@ -50,15 +54,16 @@ class TestPostgreSQLMovesTheSequence:
     def test_each_serial_column_gets_a_setval_past_its_maximum(self):
         pg = _PgCapture(['id'])
         pg.sync_autoincrement('audit')
-        lookup, setval = pg.reads
+        lookup, seq, top, _cur, setval = pg.reads
         # The serial columns come from the catalog: default `nextval(…)` or an identity.
         assert 'information_schema.columns' in lookup[0]
         assert lookup[1] == ('audit', 'nextval(%')
         assert "is_identity = 'YES'" in lookup[0]
+        assert 'pg_get_serial_sequence(?, ?)' in seq[0] and seq[1] == ('"audit"', 'id')
+        assert 'COALESCE(MAX("id"), 0) FROM "audit"' in top[0]
         sql, params = setval
-        assert 'setval(pg_get_serial_sequence(?, ?)' in sql
-        assert 'COALESCE((SELECT MAX("id") FROM "audit"), 0) + 1, false' in sql
-        assert params == ('"audit"', 'id')
+        assert 'setval(' in sql and ', false)' in sql
+        assert params == ('public.audit_id_seq', 2)          # MAX (1) + 1
 
     def test_a_table_without_a_serial_column_emits_no_setval(self):
         pg = _PgCapture([])

@@ -66,12 +66,12 @@ function _clActionsHtml(row) {
     const uid = item.uid || key;
     const canEdit = _clCan(uid, 'edit'), canDelete = _clCan(uid, 'delete');
     return `${canEdit ? `<button class="btn btn-sm btn-info py-0 px-1 me-1" title="${escAttr(t('device_test'))}"
-            onclick="_clTestRow('${esc(mod)}','${esc(coll)}',${jsStr(key)})"><i class="bi bi-play-circle"></i></button>` : ''}
+            onclick="_clTestRow(${jsStr(mod)},${jsStr(coll)},${jsStr(key)})"><i class="bi bi-play-circle"></i></button>` : ''}
         <button class="btn btn-sm ${canEdit ? 'btn-primary' : 'btn-secondary'} py-0 px-1 me-1"
             title="${escAttr(canEdit ? t('edit') : (t('cl_view') || t('device_view')))}"
-            onclick="openClusterEdit('${esc(mod)}','${esc(coll)}',${jsStr(key)})"><i class="bi ${canEdit ? 'bi-pencil' : 'bi-eye'}"></i></button>
+            onclick="openClusterEdit(${jsStr(mod)},${jsStr(coll)},${jsStr(key)})"><i class="bi ${canEdit ? 'bi-pencil' : 'bi-eye'}"></i></button>
         ${canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
-            onclick="removeItem('modules','${esc(mod)}|${esc(coll)}',${jsStr(key)})"><i class="bi bi-trash3"></i></button>` : ''}`;
+            onclick="removeItem('modules',${jsStr(mod + '|' + coll)},${jsStr(key)})"><i class="bi bi-trash3"></i></button>` : ''}`;
 }
 
 /** A cluster with a single member is the case this section exists to prevent: one check,

@@ -81,6 +81,14 @@ class TestWebCheck:
         with patch.object(w, '_web_request', return_value=(500, 'HTTP 500')):
             assert w.check().list['example.com']['status'] is False
 
+    def test_check_missing_content_is_down(self):
+        """A 200 page without the required text is a failure: the check compared only the
+        HTTP code, so a maintenance page served with 200 read as UP."""
+        config = {'watchfuls.web': {'list': {'example.com': {'enabled': True}}}}
+        w = self.Watchful(create_mock_monitor(config))
+        with patch.object(w, '_web_request', return_value=(200, "Content not found: 'Welcome'")):
+            assert w.check().list['example.com']['status'] is False
+
     def test_check_url_custom_code(self):
         """URL con código esperado personalizado."""
         config = {'watchfuls.web': {'list': {

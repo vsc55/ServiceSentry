@@ -321,8 +321,11 @@ class DeviceBinding:
         # from module code/schema (never raw user input), so shell=True is safe.
         import subprocess  # noqa: PLC0415
         try:
+            # stdin=DEVNULL: `wmic` (cpu, filesystemusage on Windows) reads its console
+            # input until EOF, and with the service's stdin inherited it never got one —
+            # the check hung until the timeout killed it, on every cycle.
             res = subprocess.run(cmd, shell=True, capture_output=True,  # noqa: S602
-                                 text=True, timeout=timeout)
+                                 stdin=subprocess.DEVNULL, text=True, timeout=timeout)
             return (res.stdout or ''), (res.stderr or ''), res.returncode
         except Exception as exc:  # pylint: disable=broad-except
             return '', str(exc), -1

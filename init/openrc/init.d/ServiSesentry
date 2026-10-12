@@ -9,10 +9,38 @@
 command="${SS_PYTHON}"
 command_args="${SS_APP} ${SS_ARGS}"
 command_background=true
+# A backgrounded daemon's stdout/stderr go to /dev/null unless named here, which left
+# nothing to read when it would not start. SS_LOG (conf.d) picks the file; set it
+# empty to keep the old behaviour. Unbuffered, or the file lags minutes behind.
+# shellcheck disable=SC2154  # RC_SVCNAME is set by OpenRC at runtime
+: "${SS_LOG=/var/log/${RC_SVCNAME}.log}"
+if [ -n "${SS_LOG}" ]; then
+	output_log="${SS_LOG}"
+	error_log="${SS_LOG}"
+fi
+export PYTHONUNBUFFERED=1
+# Who runs it: SS_USER from conf.d, else the owner of the data dir. A fresh install hands
+# /var/lib/ServiSesentry to the `servicesentry` user; one that already existed keeps it as
+# root's, and so keeps running as root until `servicesentry-user enable` is run. Following
+# the owner (rather than a value written into this file or conf.d) is what lets that choice
+# survive upgrades without touching a file Portage protects.
+: "${SS_USER:=$(stat -c %U /var/lib/ServiSesentry 2>/dev/null)}"
+if [ -n "${SS_USER}" ] && [ "${SS_USER}" != "root" ]; then
+	command_user="${SS_USER}"
+	# ping's raw ICMP and syslog on :514 — ambient (^), so the Python process keeps them.
+	capabilities="^cap_net_raw,^cap_net_bind_service"
+fi
 # shellcheck disable=SC2154  # RC_SVCNAME is set by OpenRC at runtime
 pidfile="/var/run/${RC_SVCNAME}.pid"
 
 depend() {
 	use net
 	need localmount
+}
+
+start_pre() {
+	# The log is opened for the daemon's user, so it has to be that user's to write.
+	if [ -n "${SS_LOG}" ] && [ -n "${command_user}" ]; then
+		checkpath -f -m 0640 -o "${command_user}" "${SS_LOG}"
+	fi
 }

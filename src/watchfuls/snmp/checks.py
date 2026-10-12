@@ -22,7 +22,7 @@ from lib.debug import DebugLevel
 
 from lib.core.snmp import devices as _devices
 from lib.core.snmp.client import _HAS_PYSNMP
-from .defaults import _CHECK_DEFAULTS, _SERVER_DEFAULTS
+from .defaults import _CHECK_DEFAULTS, _SERVER_DEFAULTS, _cfg_int
 
 
 class SnmpChecks:
@@ -155,7 +155,7 @@ class SnmpChecks:
         version   = str(server.get('version',   _SERVER_DEFAULTS['version'])   or _SERVER_DEFAULTS['version']).strip()
         community = str(server.get('community', _SERVER_DEFAULTS['community']) or _SERVER_DEFAULTS['community']).strip()
         timeout   = max(1, int(server.get('timeout',  _SERVER_DEFAULTS['timeout'])  or _SERVER_DEFAULTS['timeout']))
-        retries   = max(0, int(server.get('retries',  _SERVER_DEFAULTS['retries'])  or _SERVER_DEFAULTS['retries']))
+        retries   = max(0, _cfg_int(server.get('retries'), _SERVER_DEFAULTS['retries']))
 
         # SNMPv3 credentials come from the server profile
         v3_username   = str(server.get('snmpv3_username',      '') or '')
@@ -169,7 +169,7 @@ class SnmpChecks:
         oid      = (cfg.get('oid') or '').strip() or _CHECK_DEFAULTS['oid']
         operator = str(cfg.get('operator') or 'any').strip()
         expected = str(cfg.get('value', '') or '').strip()
-        t_alert  = int(cfg.get('alert', _CHECK_DEFAULTS['alert']))
+        t_alert  = _cfg_int(cfg.get('alert'), _CHECK_DEFAULTS['alert'])
         label    = str(cfg.get('label', '') or key).strip() or key
 
         if not host:

@@ -112,6 +112,9 @@ _RSYSLOG_VARCHAR = 60
 _INFO_UNIT_SYSLOG = 1
 
 _DT_FMT = '%Y-%m-%d %H:%M:%S'
+
+#: Consecutive failed rows after which a batch's row-by-row retry gives up (see add_many).
+_RETRY_GIVE_UP = 3
 # "sshd[123]:" → ("sshd", "123"); "kernel:" → ("kernel", "").
 _TAG_RE = re.compile(r'^\s*([^\[:\s]+)(?:\[([^\]]*)\])?:?')
 # How long a time-zone setting is trusted before the store asks for it again.
@@ -309,7 +312,11 @@ class SyslogStore:
 
         If the batch fails, it is retried row by row so one bad record costs itself and
         not the up-to-500 messages around it. Returns how many rows were stored; raises
-        only when not one could be."""
+        only when not one could be.
+
+        The retry stops after ``_RETRY_GIVE_UP`` failures in a row: that is not a bad record
+        but a database that is down, and going on cost one connect timeout per row â€” five
+        hundred of them per batch, with the queue filling behind."""
         self._writable()
         if not recs:
             return 0
@@ -321,14 +328,18 @@ class SyslogStore:
         except Exception:  # pylint: disable=broad-except
             if len(recs) == 1:
                 raise
-        stored, last_exc = 0, None
+        stored, last_exc, in_a_row = 0, None, 0
         for rec in recs:
             try:
                 with self._db.transaction():
                     self._db.execute(_INSERT, self._row_values(rec))
                 stored += 1
+                in_a_row = 0
             except Exception as exc:  # pylint: disable=broad-except
                 last_exc = exc
+                in_a_row += 1
+                if in_a_row >= _RETRY_GIVE_UP:
+                    break
         if stored == 0 and last_exc is not None:
             raise last_exc
         return stored

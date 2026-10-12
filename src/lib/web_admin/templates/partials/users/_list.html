@@ -71,7 +71,8 @@ function _usersRowActions(uname, ctx) {
     return [
         ctx.canEdit   ? `<button class="btn btn-sm btn-primary py-0 px-1 me-1" onclick="openEditUserModal(${jsStr(uname)})" title="${escAttr(t('edit'))}"><i class="bi bi-pencil"></i></button>` : '',
         ctx.canClone  ? `<button class="btn btn-sm btn-secondary py-0 px-1 me-1" onclick="cloneUserModal(${jsStr(uname)})" title="${escAttr(t('clone'))}"><i class="bi bi-copy"></i></button>` : '',
-        ctx.canEdit   ? (isLocalUser
+        // Your own password is changed in your account, asking for the current one.
+        ctx.canEdit   ? (isLocalUser && !isSelf
             ? `<button class="btn btn-sm btn-warning py-0 px-1 me-1" onclick="openResetPasswordModal(${jsStr(uname)})" title="${escAttr(t('reset_password_tt'))}"><i class="bi bi-key"></i></button>`
             : `<button class="btn btn-sm btn-warning py-0 px-1 me-1" style="visibility:hidden" tabindex="-1" aria-hidden="true"><i class="bi bi-key"></i></button>`) : '',
         ctx.canDelete ? `<button class="btn btn-sm btn-danger py-0 px-1" onclick="deleteUser(${jsStr(uname)})" title="${escAttr(t('delete_tt'))}" ${isSelf?'disabled':''}><i class="bi bi-trash3"></i></button>` : '',

@@ -94,7 +94,7 @@ con el comando propio de cada SO (nunca `psutil` en el check).
 
 **Flujo:** `ModuleBase.device_exec(item, cmd)` (local o SSH) ejecuta el comando de CPU
 propio del SO (`_cpu_cmd`): `cat /proc/stat` en Linux, `sysctl -n kern.cp_time` en
-FreeBSD, `wmic cpu get loadpercentage /value` en Windows. En
+FreeBSD, `Get-CimInstance Win32_Processor` (PowerShell) en Windows —`wmic` solo si no hay PowerShell, porque Windows 11 24H2 lo retira—. En
 Linux/FreeBSD se toman **dos muestras** con la espera de `interval` en Python (el delta
 de ocupación); se parsea el uso en Python → compara con el umbral → alerta si supera
 `alert`. Un fallo duro (dispositivo inalcanzable, salida no parseable) se reporta como `down`.
@@ -381,7 +381,7 @@ Monitoriza el porcentaje de uso de particiones. Es **consciente del dispositivo*
 
 > **Formato legacy:** el valor de un ítem puede ser directamente un entero (`"/": 90`) — se interpreta como umbral de alerta para esa partición. La UI lo promueve automáticamente al formato dict al renderizarlo.
 
-**Flujo:** `ModuleBase.device_exec(item, cmd)` ejecuta `df -P -k` en Unix o `wmic logicaldisk get DeviceID,FreeSpace,Size /format:value` en Windows → parsea el % de uso de la partición → compara con el umbral. `psutil` **no** se usa en el check, solo en `discover()` local. Un fallo duro (`df` inalcanzable, punto de montaje inexistente) se reporta como `down`.
+**Flujo:** `ModuleBase.device_exec(item, cmd)` ejecuta `df -P -k` en Unix o `Get-CimInstance Win32_LogicalDisk` (PowerShell; `wmic` solo si no hay PowerShell) en Windows → parsea el % de uso de la partición → compara con el umbral. `psutil` **no** se usa en el check, solo en `discover()` local. Un fallo duro (`df` inalcanzable, punto de montaje inexistente) se reporta como `down`.
 
 > **Severidad:** superar el umbral emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 
@@ -775,7 +775,7 @@ Monitoriza el porcentaje de uso de RAM y SWAP. Es **consciente del dispositivo**
 
 > Cada ítem de `list` se mide en el **dispositivo vinculado** (`__device_profile__` de tipo `ssh`; sin vínculo = local). El check emite **dos resultados** por ítem: `<clave>_ram` y `<clave>_swap` (el SWAP solo si el SO lo reporta).
 
-**Flujo:** `ModuleBase.device_exec(item, cmd)` ejecuta el/los comando(s) de memoria propios del SO (`_MEM_CMDS`): `cat /proc/meminfo` en Linux, `wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value` en Windows, `sysctl`/`swapinfo -k` en FreeBSD → parsea el % de uso en Python → compara con los umbrales. Un SO no soportado o un fallo duro se reporta como problema (`down`/parse).
+**Flujo:** `ModuleBase.device_exec(item, cmd)` ejecuta el/los comando(s) de memoria propios del SO (`_MEM_CMDS`): `cat /proc/meminfo` en Linux, `Get-CimInstance Win32_OperatingSystem` (PowerShell; `wmic` solo si no hay PowerShell) en Windows, `sysctl`/`swapinfo -k` en FreeBSD → parsea el % de uso en Python → compara con los umbrales. Un SO no soportado o un fallo duro se reporta como problema (`down`/parse).
 
 > **Severidad:** superar el umbral de RAM/SWAP emite `severity='warning'` (ámbar, kind `warn`), no `down`. Ver [explica-notificaciones.md → Severidad warning](explica-notificaciones.md#severidad-warning).
 

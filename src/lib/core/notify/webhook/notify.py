@@ -132,10 +132,19 @@ def _dispatch(cfg: dict, *, kind: str = 'test', module: str = '',
         except _json.JSONDecodeError:
             return False, translate(lang, 'webhook_bad_headers')
 
+    # Redirects are not followed: the guard above judged THIS address, and a receiver that
+    # answers 302 to 169.254.169.254 would otherwise have the panel fetch it. A webhook that
+    # moved is reported as the 3xx it is.
     try:
         if method == 'GET':
             req_url = render_template(url, vals, _url_escape)
-            resp = _req.get(req_url, headers=extra_headers or None, timeout=timeout)
+            # The rendered address is the one requested, so it is the one checked: a
+            # placeholder in the host part is filled by the alert's text.
+            reason = validate_external_url(req_url)
+            if reason:
+                return False, translate(lang, 'webhook_url_rejected', reason)
+            resp = _req.get(req_url, headers=extra_headers or None, timeout=timeout,
+                            allow_redirects=False)
         else:
             tpl = (cfg.get('body_template') or '').strip() or _DEFAULT_BODY_TPL
             body = render_template(tpl, vals, _json_escape)
@@ -151,7 +160,8 @@ def _dispatch(cfg: dict, *, kind: str = 'test', module: str = '',
                 headers[secret_header] = f'sha256={sig}'
 
             req_fn = _req.put if method == 'PUT' else _req.post
-            resp = req_fn(url, data=body_bytes, headers=headers, timeout=timeout)
+            resp = req_fn(url, data=body_bytes, headers=headers, timeout=timeout,
+                          allow_redirects=False)
 
         if 200 <= resp.status_code < 300:
             return True, translate(lang, 'webhook_ok', resp.status_code)

@@ -24,12 +24,14 @@
 """Watchful to check filesystem usage on the bound device (local or over SSH).
 
 Device-centric: each check binds to a device (``device_uid``) and a mount point.  Disk
-usage is read on that device via :meth:`ModuleBase.device_exec` (``df`` on Unix,
-``wmic logicaldisk`` on Windows) and compared with a per-check threshold.
+usage is read on that device via :meth:`ModuleBase.device_exec` (``df`` on Unix, PowerShell
+``Get-CimInstance Win32_LogicalDisk`` on Windows, ``wmic logicaldisk`` only where PowerShell is
+missing) and compared with a per-check threshold.
 """
 
 import json
 import os
+import re
 
 import psutil
 
@@ -43,8 +45,19 @@ _DF_CMDS = {
     'darwin':  'df -P -k',
     'freebsd': 'df -P -k',
     'other':   'df -P -k',
-    'windows': 'wmic logicaldisk get DeviceID,FreeSpace,Size /format:value',
+    # CIM through PowerShell: `wmic` is gone from Windows 11 24H2. No pipe (the SSH
+    # allowlist rule, docs/caso-ssh-hardening.md): Format-List takes the disks through
+    # -InputObject. No `$`, `'`, `;` or `|` inside the double-quoted -Command argument, so the
+    # line reads the same to cmd.exe (local, or OpenSSH's default shell) and to PowerShell
+    # (an OpenSSH whose DefaultShell is PowerShell). Format-List prints the property NAMES,
+    # which are never localised: `DeviceID  : C:` per line, a blank line between disks.
+    'windows': ('powershell -NoProfile -NonInteractive -Command '
+                '"Format-List -InputObject @(Get-CimInstance Win32_LogicalDisk '
+                '-Property DeviceID,FreeSpace,Size) -Property DeviceID,FreeSpace,Size"'),
 }
+
+# Only for a Windows host where PowerShell itself is missing or failed outright.
+_WMIC_CMD = 'wmic logicaldisk get DeviceID,FreeSpace,Size /format:value'
 
 # Pseudo/virtual filesystems hidden in local discovery.
 _IGNORED_FSTYPES = frozenset({
@@ -52,6 +65,45 @@ _IGNORED_FSTYPES = frozenset({
     'devfs', 'cgroup', 'cgroup2', 'autofs', 'binfmt_misc',
 })
 
+
+
+def _windows_exec(exec_fn, cmd: str):
+    """Run the CIM command, and the legacy wmic one only when PowerShell gave nothing."""
+    out, err, code = exec_fn(cmd)
+    if cmd == _DF_CMDS['windows'] and code != 0 and not (out or '').strip():
+        out, err, code = exec_fn(_WMIC_CMD)
+    return out, err, code
+
+
+# `Key=Value` (wmic /format:value) or `Key   : Value` (PowerShell Format-List). The key is a
+# bare word, so the first separator after it is the right one even when the value has a
+# colon of its own (`DeviceID  : C:`).
+_KV_RE = re.compile(r'^(\w+)\s*[=:]\s?(.*)$')
+
+
+def _wmic_records(out: str) -> list:
+    """The records of a Windows disk answer, as dicts: PowerShell ``Format-List`` (CIM) or
+    the legacy ``wmic … /format:value``.
+
+    A record starts again when a field comes back that the current one already has. Splitting
+    on blank lines, as before, never worked on real output: wmic ends each line with CR CR LF,
+    which reads as a blank line after EVERY field — each field became a record of its own,
+    `Size` never sat beside `DeviceID`, and every Windows disk was «mount point not found».
+    An empty CD drive prints its Size blank, which reads as 0 below.
+    """
+    disks, cur = [], {}
+    for line in str(out or '').splitlines():
+        m = _KV_RE.match(line.strip())
+        if not m:
+            continue
+        k, v = m.group(1), m.group(2)
+        if k in cur:
+            disks.append(cur)
+            cur = {}
+        cur[k] = v.strip()
+    if cur:
+        disks.append(cur)
+    return disks
 
 class Watchful(ModuleBase):
     """Check filesystem usage per device + mount point against a threshold."""
@@ -84,8 +136,9 @@ class Watchful(ModuleBase):
         label = (item.get('label', '') or '').strip() or part
         os_ = self.device_os(item)
         cmd = self.device_cmd_for(item, _DF_CMDS, default_os='linux')
-        out, err, code = self.device_exec(
-            item, cmd, timeout=self.module_default('timeout', self._MODULE_DEFAULTS['timeout']))
+        timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
+        out, err, code = _windows_exec(
+            lambda c: self.device_exec(item, c, timeout=timeout), cmd)
         if code != 0 and not out:
             raise OSError((err or '').strip() or f'df exited {code}')
         used = self._parse(os_, out, part)
@@ -128,19 +181,8 @@ class Watchful(ModuleBase):
 
     @staticmethod
     def _parse_wmic(out, part):
-        """`wmic logicaldisk … /format:value` → used% for the matching DeviceID."""
-        disks, cur = [], {}
-        for line in out.splitlines():
-            line = line.strip()
-            if not line:
-                if cur:
-                    disks.append(cur); cur = {}
-                continue
-            if '=' in line:
-                k, _, v = line.partition('=')
-                cur[k.strip()] = v.strip()
-        if cur:
-            disks.append(cur)
+        """Windows logical disks (CIM Format-List or wmic) → used% for the matching DeviceID."""
+        disks = _wmic_records(out)
         want = part.rstrip('\\').upper()
         for d in disks:
             if d.get('DeviceID', '').rstrip('\\').upper() == want:
@@ -157,7 +199,8 @@ class Watchful(ModuleBase):
         if device_runner.is_remote(device):
             os_ = str(device.get('os') or 'linux')
             cmd = _DF_CMDS.get(os_) or _DF_CMDS['linux']
-            out, _err, code = device_runner.run(device, cmd, timeout=15)
+            out, _err, code = _windows_exec(
+                lambda c: device_runner.run(device, c, timeout=15), cmd)
             if code != 0 and not out:
                 return []
             return cls._discover_parse(os_, out)
@@ -181,19 +224,7 @@ class Watchful(ModuleBase):
     def _discover_parse(os_, out):
         items = []
         if os_ == 'windows':
-            disks, cur = [], {}
-            for line in out.splitlines():
-                line = line.strip()
-                if not line:
-                    if cur:
-                        disks.append(cur); cur = {}
-                    continue
-                if '=' in line:
-                    k, _, v = line.partition('=')
-                    cur[k.strip()] = v.strip()
-            if cur:
-                disks.append(cur)
-            for d in disks:
+            for d in _wmic_records(out):
                 dev = d.get('DeviceID', '')
                 if not dev:
                     continue

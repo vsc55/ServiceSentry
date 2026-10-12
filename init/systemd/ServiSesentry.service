@@ -5,6 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# Unbuffered: through a pipe Python block-buffers stdout, and the journal got the output
+# minutes late — and lost it altogether when the process was killed.
+Environment=PYTHONUNBUFFERED=1
 # Long-running monitoring service: ``--monitor`` runs the scheduler continuously
 # at the interval configured in the panel (monitoring → timer_check). No systemd
 # .timer is needed; the service loops on its own. (``--monitor -t 0`` would run a

@@ -92,7 +92,7 @@ function _dgInstVulns(inst) {
     const total = _dgInstAdvisories(inst).length;
     if (!total) return `<span class="text-muted">0</span>`;
     return `<button type="button" class="badge text-bg-danger border-0 ss-help"
-        onclick="_dgShowInstanceVulns('${escAttr(inst.service)}', '${escAttr(inst.host)}',
+        onclick="_dgShowInstanceVulns(${jsStr(inst.service)}, ${jsStr(inst.host)},
                                       ${Number(inst.pid) || 0})"
         title="${escAttr(t('diag_deps_vulns_open'))}">${total}</button>`;
 }
@@ -179,7 +179,7 @@ function _dgInstPackages(inst) {
         return `<span class="text-muted ss-help"
             title="${escAttr(t('diag_inst_unknown_tt'))}">—</span>`;
     }
-    const at = `'${escAttr(inst.service)}', '${escAttr(inst.host)}', ${Number(inst.pid) || 0}`;
+    const at = `${jsStr(inst.service)}, ${jsStr(inst.host)}, ${Number(inst.pid) || 0}`;
     if (inst.diff && inst.diff.same) {
         return `<button type="button" class="badge text-bg-secondary border-0 ss-help"
             onclick="_dgShowInstancePackages(${at})"

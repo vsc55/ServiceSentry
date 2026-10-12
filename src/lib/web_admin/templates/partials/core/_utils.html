@@ -473,9 +473,10 @@ function _latestFilterSelect(id, current, onchangeFn) {
     </select>`;
 }
 
-function esc(s) {
-    const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML;
-}
+// Quotes too: `esc` was used inside some thirty attribute values (`data-hkey="${esc(k)}"`,
+// `<option value="${esc(u)}">`), where a `"` in a check key or a typed username closed the
+// attribute and opened an event handler.
+function esc(s) { return escAttr(s); }
 function escAttr(s) {
     return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -748,7 +749,7 @@ function _viewSwitcher(views, cur, setter, ariaKey, arg) {
     const lead = (arg == null) ? '' : `${jsStr(arg)},`;
     const html = views.map(v => `
             <button type="button" class="btn ${v.id === cur ? 'btn-primary' : 'btn-secondary'}"
-                onclick="${setter}(${lead}'${escAttr(v.id)}')"
+                onclick="${setter}(${lead}${jsStr(v.id)})"
                 title="${escAttr(t(v.label_key))}" aria-pressed="${v.id === cur}">
                 <i class="bi ${escAttr(v.icon)}"></i>
             </button>`);

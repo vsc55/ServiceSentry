@@ -12,6 +12,7 @@ Routes registered by this file:
 from flask import jsonify
 
 from lib.core.brand import service as brand_svc
+from lib.security.stored_secret import stored_secret_for
 
 
 def register(app, wa):
@@ -60,6 +61,11 @@ def register(app, wa):
                 test_to = v or None
             elif v is not None:
                 cfg[k] = v
+        # The stored SMTP password only goes to the stored server and account: pointed at a
+        # host of one's own, the test handed it over in the AUTH exchange.
+        cfg['smtp_password'] = stored_secret_for(
+            data, full_cfg.get('email') or {}, 'smtp_password',
+            ('smtp_host', 'smtp_port', 'smtp_username'))
         lang = notify_lang(full_cfg)          # global notification language
         lang_key = lang or 'en_EN'
         str_overrides = (full_cfg.get('notif_templates') or {}).get(lang_key) or None

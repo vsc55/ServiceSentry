@@ -141,15 +141,38 @@ class ServiceCommandsStore:
                 f'SELECT {cols} FROM {_T} ORDER BY id DESC LIMIT ?', (int(limit),))
         return [self._row(r) for r in rows]
 
-    def prune(self, older_than_secs: float = 86400) -> int:
-        """Drop finished commands older than *older_than_secs*."""
+    def prune(self, older_than_secs: float = 86400, stale_claim_secs: float = 3600) -> int:
+        """Housekeeping: close what will never finish, then drop finished commands older
+        than *older_than_secs*.
+
+        - A command claimed more than *stale_claim_secs* ago and never acked belongs to an
+          instance that died running it: it is closed as failed (``abandoned``) instead of
+          showing as running for ever. It is not run again â€” a half-done action repeated
+          blindly is worse than one reported as lost.
+        - A command nobody claimed within *older_than_secs* is closed as ``expired``: the
+          service it was for is not running, and acting on it whenever it comes back would
+          be an action nobody asked for any more."""
         try:
-            cutoff = time.time() - max(0, older_than_secs)
+            now = time.time()
+            cutoff = now - max(0, older_than_secs)
+            stale = now - max(0, stale_claim_secs)
+            self._db.execute(
+                f'UPDATE {_T} SET done_at=?, ok=0, result=? '
+                'WHERE done_at IS NULL AND claimed_at IS NOT NULL AND claimed_at < ?',
+                (now, 'abandoned: the instance that claimed it never reported back', stale))
+            self._db.execute(
+                f'UPDATE {_T} SET claimed_at=?, claimed_by=?, done_at=?, ok=0, result=? '
+                'WHERE claimed_at IS NULL AND created_at < ?',
+                (now, '', now, 'expired: never claimed', cutoff))
             deleted = self._db.execute(
                 f'DELETE FROM {_T} WHERE done_at IS NOT NULL AND done_at < ?', (cutoff,))
             self._db.commit()
             return deleted
         except Exception:  # pylint: disable=broad-except
+            try:
+                self._db.rollback()
+            except Exception:  # pylint: disable=broad-except
+                pass
             return 0
 
 

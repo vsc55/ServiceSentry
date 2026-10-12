@@ -77,7 +77,20 @@ function _dcPlanReload() {
  *  en pantalla antes de guardarse, y el 3D y la detección de muros la usaban); la revisión de
  *  muros se cierra —si no, lo revisado en una planta se guardaba en la siguiente, su tecla seguía
  *  escuchando y el deshacer se quedaba en sus pasos—; y lo que se iba a poner se suelta. */
+/** Si las teclas de un plano son para el plano: la sección se está viendo y no hay un cuadro
+ *  encima. Con el plano abierto y otra sección delante, las flechas y la R movían y giraban el
+ *  rack elegido —y lo guardaban— sin que nadie lo viera; y con el rastreo abierto, bajar por el
+ *  cuadro con las flechas movía el equipo de detrás. */
+function _dcKeysHere() {
+    const pane = document.getElementById('dcim-container');
+    if (!pane || pane.offsetParent === null) return false;      // oculta: el navegador da null
+    return !p2dModalOpen();
+}
+
 function _dcPlanLeave() {
+    // Lo movido con las flechas que aún no se había guardado, ahora: al llegar el guardado ya se
+    // buscaba en el plano nuevo, no se encontraba y se perdía.
+    if (typeof p2dFlushArrows === 'function') p2dFlushArrows();
     if (typeof P2DCAL !== 'undefined' && P2DCAL) {
         const d = p2dCalTarget();
         if (d && P2DCAL.orig) Object.assign(d.rec, P2DCAL.orig);

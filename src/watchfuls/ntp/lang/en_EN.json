@@ -28,11 +28,13 @@
     "messages": {
         "ntp_error": "NTP: {} - Error: {} 💥",
         "ntp_ok":    "NTP: {} - offset {}s (max {}s) ✅",
-        "ntp_high":  "NTP: {} - offset {}s exceeds {}s ⚠️"
+        "ntp_high":  "NTP: {} - offset {}s exceeds {}s ⚠️",
+        "ntp_unsync": "NTP: {} - server not synchronised (LI={}, stratum {}) 💥"
     },
     "messages_vars": {
         "ntp_error": ["server", "error"],
         "ntp_ok": ["server", "offset (s)", "max (s)"],
-        "ntp_high": ["server", "offset (s)", "max (s)"]
+        "ntp_high": ["server", "offset (s)", "max (s)"],
+        "ntp_unsync": ["server", "leap indicator", "stratum"]
     }
 }

@@ -54,7 +54,7 @@ class ServiceDiscovery:
     # ── Remote discovery (over SSH) ──────────────────────────────────────────
     _DISCOVER_CMDS = {
         'linux':   'systemctl list-units --type=service --all --no-pager --no-legend --plain',
-        'windows': 'sc query state= all',
+        'windows': 'sc.exe query state= all',   # not `sc`: Set-Content in PowerShell
         'darwin':  'launchctl list',
         'freebsd': 'service -e',
     }

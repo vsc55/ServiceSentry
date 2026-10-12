@@ -93,11 +93,16 @@ __all__ = ['DcimStore', 'SCHEMAS', 'OWNER_SCOPES', 'FACES', 'ITEM_ROLES', 'JACK_
            'LINK_KINDS', 'PORT_FAMILIES', 'PORT_LIST_MAX', 'PORT_SIGNALS_MAX',
            'WATTS_MAX', 'clean_place', 'clean_port_list', 'like_esc', 'like_clause', 'Rows', 'rank']
 
-#: El carácter con el que se escapa un `%` o un `_` dentro de una búsqueda. Una barra invertida
-#: es lo que entienden los tres motores con `ESCAPE`, y hace falta: sin ella, teclear `_` en el
-#: buscador encuentra cualquier cosa y teclear `%` las encuentra todas — un buscador que ignora
-#: lo que se le pide es peor que uno que no encuentra nada, porque contesta.
-LIKE_ESC = '\\'
+#: El carácter con el que se escapa un `%` o un `_` dentro de una búsqueda, y hace falta: sin
+#: él, teclear `_` en el buscador encuentra cualquier cosa y teclear `%` las encuentra todas —
+#: un buscador que ignora lo que se le pide es peor que uno que no encuentra nada, porque
+#: contesta.
+#:
+#: `!` y no una barra invertida: en MySQL y MariaDB la barra escapa también dentro de un
+#: literal, así que `ESCAPE '\'` dejaba la cadena sin cerrar — error de sintaxis, y cada
+#: búsqueda del inventario y cada número de activo (`INV-?`) era un 500 en esos motores. `!`
+#: no significa nada dentro de un literal en ninguno de los tres.
+LIKE_ESC = '!'
 
 def like_esc(texto: str) -> str:
     """Un texto tecleado, listo para ir DENTRO de un patrón de `LIKE`.
@@ -435,6 +440,13 @@ class DcimStore:
         for row in self.shelf_items_of(uid):
             self.shelf_items.delete(row['uid'])
         self.features.delete(uid)
+        self.unlink_feature(uid)
+
+    def unlink_feature(self, uid: str) -> None:
+        """The sources that said they WERE this piece stop saying so. Left, a source named a
+        cabinet that is gone and the plan looked it up for ever."""
+        for row in self.sources.list('feature_uid = ?', (str(uid or ''),)):
+            self.sources.update(row['uid'], {'feature_uid': ''})
 
     def items_of(self, rack_uid: str) -> list[dict]:
         return self.items.list('rack_uid = ?', (str(rack_uid or ''),))

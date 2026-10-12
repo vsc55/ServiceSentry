@@ -400,7 +400,8 @@ por debajo de **3.11.3** activa dependencias condicionales que el lock no lleva 
 `async-timeout`). Debian 12 trae 3.11.2 y queda fuera; el postinstall lo detecta y lo dice.
 
 **Aplazado a propósito:** cubrirlo exigiría regenerar el lock con un Python más antiguo, lo que
-afecta también a la imagen Docker. Para esas máquinas: Docker o `install.sh`. Detalle en
+afecta también a la imagen Docker. Para esas máquinas: Docker (`install.sh` monta ahora el
+mismo venv desde el lock y aplica el mismo corte de 3.11.3). Detalle en
 [caso-despliegue.md](caso-despliegue.md).
 
 ### Los paquetes solo se han validado en CI

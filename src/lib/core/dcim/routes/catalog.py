@@ -884,8 +884,19 @@ def register(app, wa, C):
                           'model': fila.get('model'), 'file': etiqueta})
         return jsonify({'uid': nuevo, 'files': store.of(uid)})
 
+    #: The permission each kind of attachment asks, to read it and to remove it: a model's, the
+    #: catalogue's; a template's, the template's — what its list and its upload already ask.
+    #: Behind the catalogue's, whoever attached a file to a template could neither download nor
+    #: remove it, and a catalogue manager removed what belonged to the templates.
+    _FILE_PERMS = {'build': ('dcim_view', 'dcim_build_edit'),
+                   'type': ('dcim_catalog_view', 'dcim_catalog_manage')}
+
+    def _file_denied(fila, write: bool) -> bool:
+        pide = _FILE_PERMS.get(str(fila.get('scope') or 'type'), _FILE_PERMS['type'])
+        return pide[1 if write else 0] not in C.perms()
+
     @app.route('/api/v1/dcim/files/<uid>', methods=['GET'])
-    @C.catalog_view_req
+    @wa._perm_required('dcim_catalog_view', 'dcim_view')
     def api_dcim_file_get(uid):
         """Bajarse uno. **Siempre como descarga y con tipo genérico.**
 
@@ -897,6 +908,8 @@ def register(app, wa, C):
         fila = store.get(uid) if store else None
         if not fila:
             return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if _file_denied(fila, False):
+            return jsonify({'error': wa._t('access_denied')}), 403
         blob, err = dcim_media.read(wa._var_dir or '', str(fila.get('stored') or ''),
                                     C.media_dir(), dcim_files.MAX_BYTES)
         if err:
@@ -912,10 +925,15 @@ def register(app, wa, C):
         return resp
 
     @app.route('/api/v1/dcim/files/<uid>', methods=['DELETE'])
-    @C.catalog_manage_req
+    @wa._perm_required('dcim_catalog_manage', 'dcim_build_edit')
     def api_dcim_file_drop(uid):
         store = C.files()
-        fila = store.delete(uid) if store else None
+        fila = store.get(uid) if store else None
+        if not fila:
+            return jsonify({'error': wa._t('dcim_not_found')}), 404
+        if _file_denied(fila, True):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        fila = store.delete(uid)
         if not fila:
             return jsonify({'error': wa._t('dcim_not_found')}), 404
         dcim_media.forget(wa._var_dir or '', str(fila.get('stored') or ''), C.media_dir())

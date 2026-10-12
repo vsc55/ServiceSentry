@@ -25,7 +25,13 @@ KEYWORDS="~amd64 ~arm64"
 # The 41 pinned libraries are installed into a venv by pkg_postinst, from the lock this
 # package ships — same reason as the deb/rpm: mapping them to Portage atoms would either
 # lose the pins or name packages that do not exist.
+#
+# acct-user/acct-group come from this same overlay (packaging/gentoo/acct-*.ebuild.in): the
+# account always exists, but the services only RUN as it on a fresh install — see
+# pkg_postinst.
 RDEPEND="
+	acct-group/servicesentry
+	acct-user/servicesentry
 	dev-lang/python:3
 	dev-python/pip
 "
@@ -39,12 +45,27 @@ src_install() {
 	# OpenRC, which is what a Gentoo box runs by default.
 	doinitd init/openrc/init.d/ServiSesentry
 	doinitd init/openrc/init.d/ServiSesentry-web
-	doconfd init/openrc/conf.d/ServiSesentry
-	doconfd init/openrc/conf.d/ServiSesentry-web
+	# The conf.d files ship the system interpreter; this package runs the venv one. Written
+	# here rather than sed'd into /etc by pkg_postinst: an edited conf.d no longer matches
+	# what Portage recorded, so every upgrade queued a ._cfg file that, once merged, put the
+	# system interpreter back — and the services stopped starting.
+	local f
+	for f in ServiSesentry ServiSesentry-web; do
+		sed 's|^SS_PYTHON=.*|SS_PYTHON="/opt/ServiSesentry/venv/bin/python"|' \
+			"init/openrc/conf.d/${f}" > "${T}/${f}.confd" || die
+		grep -q '^SS_PYTHON="/opt/ServiSesentry/venv/bin/python"$' "${T}/${f}.confd" \
+			|| die "conf.d/${f} did not get the venv interpreter — did SS_PYTHON change?"
+		newconfd "${T}/${f}.confd" "${f}"
+	done
 
-	keepdir /etc/ServiSesentry
-	keepdir /var/lib/ServiSesentry
-	fperms 0750 /etc/ServiSesentry /var/lib/ServiSesentry
+	# Not keepdir'd: the owner of /var/lib/ServiSesentry is what the OpenRC scripts run the
+	# daemon as, and a directory in the image would carry root:root into every merge.
+	# pkg_postinst creates them when missing and leaves an existing one's owner alone.
+
+	# The run-as-user helper, and rotation for the SS_LOG files OpenRC writes.
+	newsbin packaging/scripts/servicesentry-user.sh servicesentry-user
+	insinto /etc/logrotate.d
+	newins init/logrotate/servicesentry servicesentry
 
 	dodoc README.md CHANGELOG.md
 }
@@ -59,11 +80,20 @@ pkg_postinst() {
 		-r /opt/ServiSesentry/requirements.lock \
 		|| die "could not install the Python dependencies (network? proxy?)"
 
-	# The conf.d files ship the system interpreter; point them at the venv one.
-	local f
-	for f in /etc/conf.d/ServiSesentry /etc/conf.d/ServiSesentry-web; do
-		[[ -f ${f} ]] && sed -i "s|^SS_PYTHON=.*|SS_PYTHON=\"${venv}/bin/python\"|" "${f}"
+	local d
+	for d in /etc/ServiSesentry /var/lib/ServiSesentry; do
+		[[ -d ${d} ]] || install -d -m 0750 "${d}" || die
 	done
+
+	# A fresh install runs the services as `servicesentry`; an upgrade keeps whoever they ran
+	# as (root, for an install that predates the user) until the operator opts in.
+	if [[ -z ${REPLACING_VERSIONS} ]]; then
+		sh /usr/sbin/servicesentry-user enable --no-restart \
+			|| ewarn "could not hand the data to servicesentry; the services run as root"
+	else
+		elog "The services keep running as the owner of /var/lib/ServiSesentry. To run them"
+		elog "as the dedicated user:  servicesentry-user enable"
+	fi
 
 	elog "Start it with:"
 	elog "    rc-update add ServiSesentry-web default && rc-service ServiSesentry-web start"
@@ -72,7 +102,10 @@ pkg_postinst() {
 
 pkg_postrm() {
 	# Built by pkg_postinst, so it is ours to remove; config and data are left alone.
-	if [[ -z ${REPLACING_VERSIONS} ]]; then
+	# REPLACED_BY_VERSION, not REPLACING_VERSIONS: this runs in the OLD package's postrm,
+	# where only the former is set. REPLACING_VERSIONS is always empty here, so every
+	# upgrade deleted the venv the running services use.
+	if [[ -z ${REPLACED_BY_VERSION} ]]; then
 		rm -rf /opt/ServiSesentry/venv
 	fi
 }

@@ -42,6 +42,23 @@ def _inflight_set(monitor) -> set:
         return cur
 
 
+def _save_lock_of(monitor) -> threading.Lock:
+    """The lock that serialises every write to *monitor*'s live status â€” one per MONITOR.
+
+    It was one per run, and a run is not the only writer: a module that overran the deadline
+    lands on its own thread during the NEXT cycle, which held a lock of its own. The two
+    processed and saved results into the same ``monitor.status`` at once, and the next cycle's
+    ``status.read()`` replaced the dict under the straggler's feet â€” its transition, and the
+    alert it carried, could vanish.
+    """
+    with _INFLIGHT_LOCK:
+        cur = getattr(monitor, '_status_save_lock', None)
+        if cur is None:
+            cur = threading.Lock()
+            monitor._status_save_lock = cur
+        return cur
+
+
 def run_checks(monitor, module_names, *, timeout: int, history=None,
                progress_cb=None, lang: str = '', only_device: str = '') -> tuple[dict, list]:
     """Run *module_names* on *monitor* concurrently and return ``(results, errors)``.
@@ -80,7 +97,7 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
 
     results: dict = {}
     errors: list[str] = []
-    _save_lock = threading.Lock()
+    _save_lock = _save_lock_of(monitor)
     _hist_lock = threading.Lock()
     _hist_records: list = []
     # Set once the buffered flush below has happened. After that a module that comes back
@@ -95,10 +112,29 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
     # what the worker has written since. It also decides whether a counter has a baseline:
     # a rate is the difference against the previous reading, and the previous reading is in
     # the table, not in this process's memory.
-    try:
-        monitor.status.read()
-    except Exception:  # pylint: disable=broad-except
-        pass          # a state that cannot be read is not a reason not to run the checks
+    #
+    # Except a module whose last save FAILED: what is stored for it is the state before the
+    # change, and reading it back made the same transition be found again — the same DOWN
+    # alert every cycle, for as long as the write kept failing. Its state in memory is the
+    # true one, and it stays until a save succeeds.
+    _unsaved = getattr(monitor, '_unsaved_modules', None)
+    if not isinstance(_unsaved, set):
+        _unsaved = set()
+        try:
+            monitor._unsaved_modules = _unsaved
+        except Exception:  # pylint: disable=broad-except
+            pass
+    # Under the monitor's save lock: a straggler from the previous cycle may be writing.
+    with _save_lock:
+        _keep = {m: (monitor.status.data or {}).get(m) for m in _unsaved
+                 if isinstance(getattr(monitor.status, 'data', None), dict)}
+        try:
+            monitor.status.read()
+        except Exception:  # pylint: disable=broad-except
+            pass      # a state that cannot be read is not a reason not to run the checks
+        for _m, _v in _keep.items():
+            if _v is not None and isinstance(getattr(monitor.status, 'data', None), dict):
+                monitor.status.data[_m] = _v
 
     def _has_items(mod_name: str) -> bool:
         """True if the module has at least one item configured in any collection."""
@@ -143,9 +179,13 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
                     # as having FAILED for the sole reason that it was saved.
                     _save = getattr(monitor.status, 'save_module', None)
                     if callable(_save):
-                        _save(result_name)
+                        _saved = _save(result_name)
                     else:
-                        monitor.status.save()
+                        _saved = monitor.status.save()
+                    if _saved is False:
+                        _unsaved.add(result_name)
+                    else:
+                        _unsaved.discard(result_name)
                 _recs = [(result_name, _key,
                           result_data.get_status(_key),
                           result_data.get_other_data(_key))
@@ -313,6 +353,15 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
             _tell('error', mod_name, err or name)
         else:
             _tell('ok', mod_name, f'{len(items)}')
+        # What it found is sent now. Its alerts landed in the notifier after the cycle's flush,
+        # and waited a whole interval for the next one — or for ever, once the monitor was
+        # disposed.
+        _straggler = getattr(monitor, '_notifier', None)
+        if _straggler is not None:
+            try:
+                _straggler.flush_later(public_url=getattr(monitor, '_PUBLIC_URL', ''))
+            except Exception:  # pylint: disable=broad-except
+                pass
         with _left_lock:
             _left['n'] -= 1
             last = _left['n'] <= 0
@@ -347,7 +396,8 @@ def run_checks(monitor, module_names, *, timeout: int, history=None,
     _notifier = getattr(monitor, '_notifier', None)
     if _notifier is not None:
         try:
-            _notifier.flush(public_url=getattr(monitor, '_PUBLIC_URL', ''))
+            # Off the cycle's thread: see `MonitorNotifier.flush_later`.
+            _notifier.flush_later(public_url=getattr(monitor, '_PUBLIC_URL', ''))
         except Exception:  # pylint: disable=broad-except
             pass
 

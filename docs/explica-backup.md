@@ -70,6 +70,15 @@ en vez de quedarse fuera en silencio.
 
 > Una copia que se salta lo que no reconoció es de esos fallos que se descubren una sola vez.
 
+La única excepción son las tablas **de ejecución** (`RUNTIME_TABLES`): `sessions`,
+`session_access`, `service_leader`, `service_instances` y `service_commands`. Son el estado
+vivo de este despliegue —quién tiene la sesión abierta, qué proceso es el líder—, no datos:
+copiarlas guardaba los tokens de sesión en claro, y restaurarlas devolvía sesiones ya
+revocadas y un líder que no existe. Ni se copian, ni se restauran, ni se ofrecen al
+restaurar; una copia antigua que las lleve las ignora, y en el destino se quedan como
+estaban (quien tenga la sesión abierta sigue dentro). Los **tokens de API** (`api_tokens`,
+`api_token_access`) **sí** viajan: son credenciales creadas a propósito, no estado.
+
 ### La primera carpeta del núcleo, y que se puede mover
 
 Las **23 tablas del inventario** (`dc_*`) entran por esa misma regla invertida: nadie las

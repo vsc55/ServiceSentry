@@ -406,7 +406,7 @@ function _dcimFieldHtml(fld, i, val, kind, row) {
                 ${fld.min ? `min="${fld.min}"` : ''}
                 ${fld.step ? `step="${escAttr(fld.step)}"` : ''}
                 value="${escAttr(String(val))}"
-                onkeydown="if(event.key==='Enter')_dcimSave();">`;
+                onkeydown="if(event.key==='Enter'&&!event.repeat)_dcimSave();">`;
 }
 
 /** La foto de una sede: lo que hay, y los dos botones.
@@ -643,23 +643,29 @@ async function _dcimSaidAsk(idx, rol) {
  *  configura— y se engancha en la casilla sin guardar el formulario: guardar sigue siendo cosa
  *  de quien lo está rellenando. */
 async function _dcimDeviceCreate(idx) {
-    _dcimFormSnap();
-    const f = _dcimForm;
-    if (!f) return;
-    const row = f.row || {};
-    if (String(row.device_uid || '').trim())
-        return showToast(t('dcim_device_create_has'), 'warning', 6000);
-    const nombre = String(row.label || '').trim();
-    if (!nombre) return showToast(t('dcim_device_create_name'), 'warning', 6000);
-    const r = await _dcimSend('POST', '/api/v1/devices', {name: nombre});
-    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    const uid = String((r.data || {}).uid || '');
-    if (!uid) return;
-    _dcimDevices = (_dcimDevices || []).concat([{uid, name: nombre, address: '', device_type: ''}])
-        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-    row.device_uid = uid;
-    showToast(tf('dcim_device_created', nombre), 'success');
-    _dcimFormDraw();
+    // Una petición a la vez: el botón seguía activo mientras se guardaba, y un doble clic
+    // o Intro mantenido creaba el registro dos veces.
+    if (_dcimDeviceCreate.busy) return;
+    _dcimDeviceCreate.busy = true;
+    try {
+        _dcimFormSnap();
+        const f = _dcimForm;
+        if (!f) return;
+        const row = f.row || {};
+        if (String(row.device_uid || '').trim())
+            return showToast(t('dcim_device_create_has'), 'warning', 6000);
+        const nombre = String(row.label || '').trim();
+        if (!nombre) return showToast(t('dcim_device_create_name'), 'warning', 6000);
+        const r = await _dcimSend('POST', '/api/v1/devices', {name: nombre});
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        const uid = String((r.data || {}).uid || '');
+        if (!uid) return;
+        _dcimDevices = (_dcimDevices || []).concat([{uid, name: nombre, address: '', device_type: ''}])
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+        row.device_uid = uid;
+        showToast(tf('dcim_device_created', nombre), 'success');
+        _dcimFormDraw();
+    } finally { _dcimDeviceCreate.busy = false; }
 }
 
 /** Lo que hay tecleado ahora mismo, guardado en el borrador.
@@ -885,83 +891,89 @@ function _dcAssetSaid(pedido, r) {
 }
 
 async function _dcimSave() {
-    if (!_dcimForm) return;
-    const mode = _dcimForm.mode, kind = _dcimForm.kind;
-    const parent = _dcimForm.parent, uid = _dcimForm.uid;
-    const spec = _DCIM_KIND[kind];
-    const body = {};
-    spec.fields.forEach((fld, i) => {
-        const el = document.getElementById('dcim-f-' + i);
-        if (!el) return;
-        const raw = String(el.value || '').trim();
-        // La foto no viaja aquí: se subió al elegirla, y mandar su nombre otra vez sería este
-        // formulario decidiendo sobre un fichero que no ha tocado.
-        if (fld.type === 'photo') return;
-        if (fld.type === 'number' || fld.type === 'coord') {
-            // An empty number is not zero — a site whose latitude nobody knows must not end up
-            // on the equator. Left out entirely, the column keeps whatever it had.
-            //
-            // Y una coordenada puede traer las DOS pegadas de un mapa: si la de al lado no se
-            // ha repartido ya al escribir, se reparte aquí. Guardar «41.5, 0.4» como número
-            // daría 41.5 y tiraría la otra mitad en silencio, que es el peor sitio donde
-            // perder un dato.
-            const par = fld.pairs ? _dcimCoordPair(raw) : null;
-            if (par) {
-                body[fld.name] = par[0];
-                body[fld.pairs] = par[1];
-            } else if (raw !== '') {
-                body[fld.name] = Number(String(raw).replace(',', '.'));
+    // Una petición a la vez: el botón seguía activo mientras se guardaba, y un doble clic
+    // o Intro mantenido creaba el registro dos veces.
+    if (_dcimSave.busy) return;
+    _dcimSave.busy = true;
+    try {
+        if (!_dcimForm) return;
+        const mode = _dcimForm.mode, kind = _dcimForm.kind;
+        const parent = _dcimForm.parent, uid = _dcimForm.uid;
+        const spec = _DCIM_KIND[kind];
+        const body = {};
+        spec.fields.forEach((fld, i) => {
+            const el = document.getElementById('dcim-f-' + i);
+            if (!el) return;
+            const raw = String(el.value || '').trim();
+            // La foto no viaja aquí: se subió al elegirla, y mandar su nombre otra vez sería este
+            // formulario decidiendo sobre un fichero que no ha tocado.
+            if (fld.type === 'photo') return;
+            if (fld.type === 'number' || fld.type === 'coord') {
+                // An empty number is not zero — a site whose latitude nobody knows must not end up
+                // on the equator. Left out entirely, the column keeps whatever it had.
+                //
+                // Y una coordenada puede traer las DOS pegadas de un mapa: si la de al lado no se
+                // ha repartido ya al escribir, se reparte aquí. Guardar «41.5, 0.4» como número
+                // daría 41.5 y tiraría la otra mitad en silencio, que es el peor sitio donde
+                // perder un dato.
+                const par = fld.pairs ? _dcimCoordPair(raw) : null;
+                if (par) {
+                    body[fld.name] = par[0];
+                    body[fld.pairs] = par[1];
+                } else if (raw !== '') {
+                    body[fld.name] = Number(String(raw).replace(',', '.'));
+                }
+            } else {
+                body[fld.name] = raw;
             }
-        } else {
-            body[fld.name] = raw;
+        });
+        // Lo que falta se DICE, y se dice CUÁL. Esto era `return` a secas sobre el primer campo
+        // del tipo, y en un equipo el primer campo es la etiqueta — que casi nunca se rellena el
+        // primer día: se colocaba una máquina con su serie, su plantilla y su fecha de compra, se
+        // pulsaba Guardar, y no pasaba nada. Ni error, ni fila, ni pista. Reportado desde la
+        // pantalla, y es el mismo fallo que esta sección lleva persiguiendo todo el mes: una guarda
+        // que se niega sin decirlo.
+        //
+        // Y **obligatorio lo es quien lo declara**, no quien salga primero en la lista: un equipo no
+        // tiene ningún campo obligatorio —una caja ciega que ocupa un U es un dato de pleno
+        // derecho— y una sede sin nombre no es una sede.
+        const falta = spec.fields.find((fld, i) => fld.req
+            && !String((document.getElementById('dcim-f-' + i) || {}).value || '').trim());
+        if (falta) {
+            showToast(tf('dcim_need_field', t(falta.label)), 'warning');
+            const caja = document.getElementById(
+                'dcim-f-' + spec.fields.findIndex(x => x.name === falta.name));
+            if (caja) caja.focus();
+            return;
         }
-    });
-    // Lo que falta se DICE, y se dice CUÁL. Esto era `return` a secas sobre el primer campo
-    // del tipo, y en un equipo el primer campo es la etiqueta — que casi nunca se rellena el
-    // primer día: se colocaba una máquina con su serie, su plantilla y su fecha de compra, se
-    // pulsaba Guardar, y no pasaba nada. Ni error, ni fila, ni pista. Reportado desde la
-    // pantalla, y es el mismo fallo que esta sección lleva persiguiendo todo el mes: una guarda
-    // que se niega sin decirlo.
-    //
-    // Y **obligatorio lo es quien lo declara**, no quien salga primero en la lista: un equipo no
-    // tiene ningún campo obligatorio —una caja ciega que ocupa un U es un dato de pleno
-    // derecho— y una sede sin nombre no es una sede.
-    const falta = spec.fields.find((fld, i) => fld.req
-        && !String((document.getElementById('dcim-f-' + i) || {}).value || '').trim());
-    if (falta) {
-        showToast(tf('dcim_need_field', t(falta.label)), 'warning');
-        const caja = document.getElementById(
-            'dcim-f-' + spec.fields.findIndex(x => x.name === falta.name));
-        if (caja) caja.focus();
-        return;
-    }
-    if (spec.parent && mode === 'new') body[spec.parent] = parent;
-    // `status === 200`, which is what every route in this panel answers. Reading it as `r.ok`
-    // — which `apiPost` does not return — announced a site that HAD been created as a failure,
-    // and only F5 said otherwise. Reported from the screen.
-    const r = mode === 'new'
-        ? await _dcimSend('POST', '/api/v1/dcim/' + spec.url, body)
-        : await _dcimSend('PUT', '/api/v1/dcim/' + spec.url + '/' + encodeURIComponent(uid),
-                          body);
-    if (r.ok) {
-        _dcimForm = null;
-        hideInfoModal();
-        // Cuántos componentes entraron con él. Sin decirlo, estampar quince piezas se ve
-        // exactamente igual que no estampar ninguna — y la primera vez que alguien lo prueba,
-        // esa es justo la duda.
-        const copiadas = Number((r.data || {}).parts || 0);
-        // El número minado gana al recuento de piezas: es lo que se acaba de pedir, y lo otro
-        // se ve en la ficha. Dos avisos a la vez se pisan y no se lee ninguno.
-        if (!_dcAssetSaid(body.asset, r))
-            showToast(copiadas ? tf('dcim_build_stamped', copiadas) : t('saved'), 'success');
-        const rack = (_dcimRack || {}).rack;
-        if (rack && (kind === 'item' || uid === rack.uid)) return _dcimLoadRack(rack.uid);
-        // Editado desde el plano: el plano lleva su propia copia de los racks, y sin volver a
-        // pedirla el rack seguiría con el nombre y la medida de antes de guardar.
-        if (kind === 'rack' && _dcimPlan) return _dcimOpenPlan(_dcimPlan.room.uid);
-        return renderDcim();
-    }
-    showToast(r.error || t('save_failed'), 'danger');
+        if (spec.parent && mode === 'new') body[spec.parent] = parent;
+        // `status === 200`, which is what every route in this panel answers. Reading it as `r.ok`
+        // — which `apiPost` does not return — announced a site that HAD been created as a failure,
+        // and only F5 said otherwise. Reported from the screen.
+        const r = mode === 'new'
+            ? await _dcimSend('POST', '/api/v1/dcim/' + spec.url, body)
+            : await _dcimSend('PUT', '/api/v1/dcim/' + spec.url + '/' + encodeURIComponent(uid),
+                              body);
+        if (r.ok) {
+            _dcimForm = null;
+            hideInfoModal();
+            // Cuántos componentes entraron con él. Sin decirlo, estampar quince piezas se ve
+            // exactamente igual que no estampar ninguna — y la primera vez que alguien lo prueba,
+            // esa es justo la duda.
+            const copiadas = Number((r.data || {}).parts || 0);
+            // El número minado gana al recuento de piezas: es lo que se acaba de pedir, y lo otro
+            // se ve en la ficha. Dos avisos a la vez se pisan y no se lee ninguno.
+            if (!_dcAssetSaid(body.asset, r))
+                showToast(copiadas ? tf('dcim_build_stamped', copiadas) : t('saved'), 'success');
+            const rack = (_dcimRack || {}).rack;
+            if (rack && (kind === 'item' || uid === rack.uid)) return _dcimLoadRack(rack.uid);
+            // Editado desde el plano: el plano lleva su propia copia de los racks, y sin volver a
+            // pedirla el rack seguiría con el nombre y la medida de antes de guardar.
+            if (kind === 'rack' && _dcimPlan) return _dcimOpenPlan(_dcimPlan.room.uid);
+            return renderDcim();
+        }
+        showToast(r.error || t('save_failed'), 'danger');
+    } finally { _dcimSave.busy = false; }
 }
 
 /** Delete, with the panel's own confirmation — never the browser's. */

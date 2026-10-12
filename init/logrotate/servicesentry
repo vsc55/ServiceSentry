@@ -1,0 +1,16 @@
+# Rotation of the OpenRC services' output (SS_LOG in /etc/conf.d/ServiSesentry*, by default
+# /var/log/<service>.log). Under systemd that output goes to the journal and these files do
+# not exist — hence missingok.
+#
+# copytruncate: start-stop-daemon holds the file open and the daemon has no signal that
+# reopens it, so the file is copied and emptied in place (a few lines written during the
+# copy can be lost — the price of not restarting the service every week).
+/var/log/ServiSesentry.log /var/log/ServiSesentry-web.log {
+	weekly
+	rotate 8
+	compress
+	delaycompress
+	missingok
+	notifempty
+	copytruncate
+}

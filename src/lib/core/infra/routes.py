@@ -234,7 +234,7 @@ def register(app, wa):
             return jsonify({'error': wa._t('device_not_found')}), 404
         if not _may_see(uid, set(wa._get_session_permissions() or [])):
             return jsonify({'error': wa._t('access_denied')}), 403
-        body = request.get_json(silent=True) or {}
+        body = wa._optional_json()
         module = str(body.get('module') or '').strip()
         row = str(body.get('row') or '').strip()
         if not module or not row:

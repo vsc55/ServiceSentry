@@ -63,15 +63,21 @@ class Watchful(ModuleBase):
             if not enabled:
                 continue
             host = (value.get('host', '') or '').strip() or key
-            port = int(value.get('port', 0) or 0) or 443
             # SNI / hostname to validate against — defaults to the address.  For
             # a reverse proxy serving several FQDNs on one address, set this to
             # the FQDN whose certificate you want to check.
             server_name = (value.get('server_name', '') or '').strip() or host
             verify = str(value.get('verify', True)).lower() not in ('false', '0', 'no', 'off', 'disable')
-            warning_days = int(value.get('warning_days', 0) or 0) or self.module_default('warning_days', self._MODULE_DEFAULTS['warning_days'])
-            timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
             label = (value.get('label', '') or '').strip() or server_name or host or key
+            try:
+                port = int(value.get('port', 0) or 0) or 443
+                warning_days = int(value.get('warning_days', 0) or 0) or self.module_default('warning_days', self._MODULE_DEFAULTS['warning_days'])
+                timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
+            except (TypeError, ValueError) as exc:
+                # A malformed number fails its OWN item: raised here, outside the per-item
+                # executor, it aborted the check of every certificate in the module.
+                self.dict_return.set(key, False, self._msg('ssl_error', label, exc), name=label)
+                continue
             self._debug(f"SSL Cert: {self.item_label(key)} - host={host}:{port} sni={server_name} verify={verify} warning_days={warning_days}", DebugLevel.info)
             list_items.append({
                 'key': key,

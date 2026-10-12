@@ -42,6 +42,7 @@ from lib.core.snmp import manifest as _manifest
 from lib.core.snmp.client import NoAnswer as _NoAnswer
 from lib.core.snmp.client import Truncated as _Truncated
 from lib.core.snmp.defaults import CONN_DEFAULTS as _SERVER_DEFAULTS
+from .defaults import _cfg_int
 
 def _skipped(metric: dict, text: str) -> bool:
     """Whether the profile said this reading is not an answer (`skip`).
@@ -800,8 +801,7 @@ class SnmpSampler:
                           or _SERVER_DEFAULTS['community']).strip(),
             timeout=max(1, int(server.get('timeout', _SERVER_DEFAULTS['timeout'])
                                or _SERVER_DEFAULTS['timeout'])),
-            retries=max(0, int(server.get('retries', _SERVER_DEFAULTS['retries'])
-                               or _SERVER_DEFAULTS['retries'])),
+            retries=max(0, _cfg_int(server.get('retries'), _SERVER_DEFAULTS['retries'])),
             v3_username=str(server.get('snmpv3_username', '') or ''),
             v3_auth_key=str(server.get('snmpv3_auth_key', '') or ''),
             v3_priv_key=str(server.get('snmpv3_priv_key', '') or ''),

@@ -24,12 +24,23 @@ import threading
 import time
 
 
+def _off(value) -> bool:
+    """An ``enabled`` flag that says no — as the ``ssl_cert`` check itself reads it."""
+    return value is False or str(value).strip().lower() in ('false', '0', 'no', 'off', 'disable')
+
+
 def enumerate_targets(modules_cfg: dict, *, device_address=lambda _uid: None,
                       default_warn: int = 21) -> list[dict]:
     """Cert targets from the ``ssl_cert`` module config → list of dicts with
     ``key/label/host/port/server_name/verify/warn_days``.  ``device_uid`` items resolve
-    their address via ``device_address(uid)``; disabled items are skipped."""
+    their address via ``device_address(uid)`` — the device's address wins over an inline
+    ``host``, as it does in the check (``resolve_device``); a disabled module yields
+    nothing and disabled items are skipped."""
     ssl_mod = (modules_cfg or {}).get('ssl_cert') or {}
+    # Absent means on (`enabled` defaults to True); switched off means the owner stopped
+    # watching these certificates, and the scanner kept announcing them.
+    if _off(ssl_mod.get('enabled', True)):
+        return []
     items = ssl_mod.get('list') or {}
     try:
         mod_warn = int(ssl_mod.get('warning_days') or 0) or default_warn
@@ -37,12 +48,14 @@ def enumerate_targets(modules_cfg: dict, *, device_address=lambda _uid: None,
         mod_warn = default_warn
     out: list[dict] = []
     for key, v in items.items():
-        if not isinstance(v, dict) or v.get('enabled') is False:
+        if not isinstance(v, dict) or _off(v.get('enabled', True)):
             continue
         host = (v.get('host') or '').strip()
         uid = (v.get('device_uid') or '').strip()
-        if not host and uid:
-            host = (device_address(uid) or '').strip()
+        if uid:
+            # A bound check reads its address from the device (the form hides the inline
+            # field, so a `host` left there is stale) — the scanner probed the old one.
+            host = (device_address(uid) or '').strip() or host
         host = host or str(key)
         try:
             port = int(v.get('port') or 0) or 443
@@ -127,7 +140,13 @@ class CertExpiryScanner(ScannerThread):
             days = self._days_fn(t)
             if days is None:
                 continue                              # unreachable/error → leave state as-is
-            if days > warn_days:
+            # The check's own window when it has one: `warning_days` set on a check (or on
+            # the module) is what its owner asked for, and the global one only fills the gap.
+            try:
+                limit = max(1, int(t.get('warn_days') or 0) or warn_days)
+            except (TypeError, ValueError):
+                limit = warn_days
+            if days > limit:
                 self._alerted.pop(t['key'], None)     # renewed/healthy → re-arm
                 continue
             sev = 'expired' if days <= 0 else 'expiring'

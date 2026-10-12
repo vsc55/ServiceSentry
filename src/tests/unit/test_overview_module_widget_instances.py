@@ -81,10 +81,9 @@ class TestEachInstanceKeepsItsOwnSettings:
         src = _strip_comments(_read(os.path.join(OV, '_layout.html')))
         listed = re.search(r'_DW_INSTANCE_KEYS\s*=\s*\[([^\]]*)\]', src).group(1)
         browser = set(re.findall(r"'([a-z]+)'", listed))
-        # The browser also carries settings of the CORE's own widgets (a severity filter, a
-        # table's own filters), which never reach a module widget's layout entry — so the
-        # server's list is the subset that does, and nothing in it may be missing here.
-        assert set(INSTANCE_KEYS) <= browser, set(INSTANCE_KEYS) - browser
+        # The core's own widgets' settings (a severity filter, a table's own filters) are in
+        # the published default too: a default layout is the whole dashboard.
+        assert set(INSTANCE_KEYS) == browser, set(INSTANCE_KEYS) ^ browser
 
     def test_a_saved_default_layout_keeps_them(self):
         """An admin publishing a default hands everyone the arrangement AND the
@@ -100,7 +99,7 @@ class TestEachInstanceKeepsItsOwnSettings:
         # …and a chart widget's own two: which measurement, over how long.
         assert out[0]['mwfig'] == 'if_total_in'
         assert out[0]['mwh'] == '168'
-        assert set(INSTANCE_KEYS) == {'mws', 'mwlvl', 'mwchart', 'mwfig', 'mwh'}
+        assert {'mws', 'mwlvl', 'mwchart', 'mwfig', 'mwh'} <= set(INSTANCE_KEYS)
 
     def test_absent_settings_are_not_invented(self):
         """A widget with no scope must not come back carrying an empty one — '' and absent

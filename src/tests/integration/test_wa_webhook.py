@@ -85,7 +85,7 @@ class TestWebhookArbitraryTest:
         })
         _login(client)
         captured_headers = {}
-        def fake_post(url, data, headers, timeout):
+        def fake_post(url, data, headers, timeout, **_kw):
             captured_headers.update(headers)
             return unittest.mock.Mock(status_code=200)
         with unittest.mock.patch('requests.post', side_effect=fake_post):

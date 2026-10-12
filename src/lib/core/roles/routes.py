@@ -19,6 +19,7 @@ from flask import jsonify, session
 from lib.core.constants import SYSTEM_USER
 from lib.core.roles import service as roles_svc
 from lib.core.roles.service import AdminOpError
+from lib.core.users.service import bad_json_field
 
 
 def register(app, wa):
@@ -52,6 +53,8 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
+        if bad := bad_json_field(data, strings=('name', 'description'), lists=('permissions',)):
+            return jsonify({'error': wa._t('invalid_json'), 'field': bad}), 400
         perms = roles_svc.filter_valid_permissions(data.get('permissions', []))
         if not wa._perms_grantable(perms):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
@@ -86,10 +89,17 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
+        if bad := bad_json_field(data, strings=('name', 'description'), lists=('permissions',)):
+            return jsonify({'error': wa._t('invalid_json'), 'field': bad}), 400
         # Escalation guard: applied here (it needs the request), defined with the
         # permissions domain.
-        if 'permissions' in data and not is_builtin:
-            if not wa._perms_grantable(roles_svc.filter_valid_permissions(data['permissions'])):
+        # Switching a role on is granting what it carries to everyone who holds it: checked
+        # as if its permissions were sent, or a disabled role assigned freely became an
+        # escalation the moment anyone with `roles_edit` enabled it.
+        if not is_builtin and ('permissions' in data or data.get('enabled')):
+            perms = (data['permissions'] if 'permissions' in data
+                     else wa._custom_roles[uid].get('permissions', []))
+            if not wa._perms_grantable(roles_svc.filter_valid_permissions(perms)):
                 return jsonify({'error': wa._t('insufficient_permissions')}), 403
         try:
             if is_builtin:

@@ -838,7 +838,7 @@ class TestLaSedeTienePlantas:
         """Y va DESPUÉS del plano de una sala: abrir una sala desde la sede y volver deja en la
         sede, que es de donde se venía."""
         js = _section()
-        cadena = js.split('pane.innerHTML = (')[1].split(');')[0]
+        cadena = js.split('_dcKeepRepaint(pane, (')[1].split('));')[0]
         assert cadena.index('_dcimPlan ? _dcimPlanHtml()') < cadena.index('_dcsPlan ? _dcsHtml()')
 
     def test_volver_al_arbol_cierra_la_sede(self):
@@ -3959,7 +3959,7 @@ class TestModelosYPlantillasSonDelCatalogo:
         """Volver al inventario con un modelo abierto pintaría el catálogo en el inventario."""
         dib = _fn(_section(), 'renderDcim')
         trozo = dib[dib.index("getElementById('dcim-container')"):]
-        assert trozo.index('_dcCat = null;') < trozo.index('pane.innerHTML')
+        assert trozo.index('_dcCat = null;') < trozo.index('_dcKeepRepaint(pane')
 
     def test_un_marcador_viejo_lleva_a_su_entrada(self):
         js = _section()

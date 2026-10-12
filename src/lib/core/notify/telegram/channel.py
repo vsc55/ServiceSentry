@@ -18,6 +18,7 @@ import html
 
 from lib.core.notify.formatting import ICON, notify_lang, plain
 from lib.core.notify.registry import Channel, register_channel
+from lib.core.notify.telegram.notify import clip
 
 _TG_LIMIT = 3800   # keep grouped messages under Telegram's 4096-char hard cap
 
@@ -38,7 +39,7 @@ def send(router, cfg, *, kind='', module='', item='', status='', message='',
 # ── grouped monitor flush (HTML) ─────────────────────────────────────────────
 def _tg_line(hostname: str, a: dict) -> str:
     return (f"{ICON.get(a['kind'], '❎')} 🖥 <b>{_esc(hostname)}</b>: "
-            f"{_esc(plain(a['message']))}")
+            f"{_esc(clip(plain(a['message'])))}")
 
 
 def _summary_line(hostname: str, n: int, public_url: str) -> str:
@@ -89,7 +90,9 @@ def _tg_sections(cfg, alerts) -> list:
             head = f"{ICON.get(a['kind'], '❎')} <b>{_esc(head)}</b>" if head \
                 else ICON.get(a['kind'], '❎')
             out.append('')   # blank line before each card
-            out.append(f"<blockquote>{head}\n{_esc(plain(a['message']))}</blockquote>")
+            # Clipped: a card is never split by _chunk, so one longer than Telegram's cap
+            # was a 400 for the whole message and every alert grouped with it.
+            out.append(f"<blockquote>{head}\n{_esc(clip(plain(a['message'])))}</blockquote>")
     return out
 
 

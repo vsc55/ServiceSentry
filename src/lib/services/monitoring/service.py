@@ -220,6 +220,12 @@ class MonitorService(_HeartbeatMixin, _StandaloneConfigMixin, _MonitoringMixin):
             except (ValueError, OSError):
                 pass                                     # not in main thread / unsupported
 
+        # The heartbeat first: it claims the leader lease before returning, and the
+        # scheduler's first pass asks for it. Started the other way round, that pass found no
+        # lease, skipped its cycle and waited a whole interval — five minutes without a check
+        # after every start.
+        self._control_server = start_control_server(self)
+        self.start_heartbeat()
         if self._monitoring_enabled():
             self._monitoring_start(run_now=True)
             self._dbg(f'> Monitor >> standalone scheduler running '
@@ -230,8 +236,6 @@ class MonitorService(_HeartbeatMixin, _StandaloneConfigMixin, _MonitoringMixin):
                       'to be enabled from the web UI (Ctrl+C to stop)', DebugLevel.warning)
         threading.Thread(target=self._watch_loop, name='monitor-config-watch',
                          daemon=True).start()
-        self._control_server = start_control_server(self)
-        self.start_heartbeat()
         self._dbg(f'> Monitor >> config watch every {_CONFIG_WATCH_EVERY}s', DebugLevel.info)
         self._stop.wait()
         self._monitoring_stop()

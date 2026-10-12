@@ -20,6 +20,7 @@ from __future__ import annotations
 import copy
 import os
 import threading
+import time
 
 from lib.security import secret_manager
 from lib.config.config_control import ConfigControl
@@ -167,6 +168,13 @@ def _decrypt_db_values(db_vals: dict, fernet) -> dict:
 class ConfigManager:
     """Single read/write/migrate facade for the application configuration."""
 
+    #: How long a probe of the ``config`` table's change stamp is trusted before asking
+    #: the database again.  Bounds how stale a cache can be when ANOTHER process (a second
+    #: web replica, the CLI, a standalone worker) wrote the config, while keeping the hot
+    #: read path at most one cheap query per this many seconds.  Our own writes are seen
+    #: at once (``invalidate`` drops the probe too).
+    STAMP_TTL = 1.5
+
     def __init__(self, store, config_path: str, *, fernet=None, secret_keys=None) -> None:
         self._store = store
         self._path = config_path
@@ -175,8 +183,9 @@ class ConfigManager:
         self.env_locked: frozenset[str] = frozenset()   # set by the web env layer
         self.file_locked: frozenset[str] = frozenset()  # computed by read()
         self._lock = threading.Lock()
-        self._eff_cache = None                            # (ver, mtime, effective, locked)
+        self._eff_cache = None                            # (key, mtime, effective, locked, db_vals)
         self._raw_cache = None                            # (mtime, data)
+        self._stamp_state = None                          # (db stamp, monotonic probe time)
 
     # ── raw file (bootstrap + internal) ──────────────────────────────────────
     def read_raw(self) -> dict:
@@ -206,28 +215,52 @@ class ConfigManager:
         return ok
 
     # ── the single read ──────────────────────────────────────────────────────
-    def read(self) -> dict:
-        """Effective config: editable DB values overlaid by the read-only file.
+    def _db_stamp(self):
+        """The ``config`` table's cross-process change stamp, probed at most once per
+        :attr:`STAMP_TTL`.  A failed probe (``None``) keeps the last answer: no answer is
+        not "it changed", and reloading against a database we cannot read helps nobody."""
+        now = time.monotonic()
+        state = self._stamp_state
+        if state is not None and (now - state[1]) < self.STAMP_TTL:
+            return state[0]
+        probe = getattr(self._store, 'stamp', None)
+        stamp = probe() if callable(probe) else None
+        if stamp is None and state is not None:
+            stamp = state[0]
+        self._stamp_state = (stamp, now)
+        return stamp
 
-        Env overrides are layered on top by the web layer (not here).  Cached by
-        ``(store version, file mtime)``; updates :attr:`file_locked`.
-        """
+    def _load(self):
+        """Resolve the effective config, cached.  Returns ``(effective, db_vals)`` —
+        the cached objects themselves, so callers copy before handing them out."""
         file_cfg = self.read_raw()
-        ver = self._store.version()
+        # Our own writes move the in-process version; another process's writes move the
+        # table stamp (throttled). Either one invalidates the cache.
+        key = (self._store.version(), self._db_stamp())
         try:
             mtime = os.path.getmtime(self._path)
         except OSError:
             mtime = None
         cache = self._eff_cache
-        if cache and cache[0] == ver and cache[1] == mtime:
+        if cache and cache[0] == key and cache[1] == mtime:
             self.file_locked = cache[3]
-            return copy.deepcopy(cache[2])
+            return cache[2], cache[4]
         db_vals = _decrypt_db_values(self._store.load_all(), self._fernet)
         effective, locked = resolve_config(db_vals, file_cfg, None, include_defaults=False)
         _strip_obsolete(effective)
         self.file_locked = frozenset(locked)
         with self._lock:
-            self._eff_cache = (ver, mtime, effective, self.file_locked)
+            self._eff_cache = (key, mtime, effective, self.file_locked, db_vals)
+        return effective, db_vals
+
+    def read(self) -> dict:
+        """Effective config: editable DB values overlaid by the read-only file.
+
+        Env overrides are layered on top by the web layer (not here).  Cached by
+        ``(store version, config table stamp, file mtime)`` — the stamp is what
+        lets one replica see another's writes; updates :attr:`file_locked`.
+        """
+        effective, _db_vals = self._load()
         return copy.deepcopy(effective)
 
     # ── the single write ─────────────────────────────────────────────────────
@@ -236,28 +269,42 @@ class ConfigManager:
 
         Editable ``section|field`` leaves → DB (secrets encrypted, single source);
         the bootstrap ``database`` section, first-run credentials and env/file-locked
-        overrides stay in ``config.json``.  Callers pass the full effective config,
-        so DB rows whose path is absent are reconciled away (deletions propagate).
+        overrides stay in ``config.json``.
+
+        The DB side is applied as a **patch** against the config this manager last
+        read (the caller's read → modify → write baseline), not as a replacement:
+
+        * only leaves whose value differs from that baseline are written;
+        * only rows present in that baseline and absent from *data* are deleted.
+
+        With several processes on one database (web replicas, the CLI) the baseline can
+        be older than the table.  Replacing the whole table from it — what this did
+        before — re-wrote every stale value and deleted every row another process had
+        added since, so one replica's save silently undid another's. As a patch, a key
+        the caller did not touch is left exactly as the database has it now.
         """
-        enc = data
-        if self._fernet:
-            enc = secret_manager.encrypt_sensitive(data, self._fernet, keys=self._secret_keys)
+        _effective, base = self._load_baseline()
         locked = set(self.env_locked) | set(self.file_locked)
-        leaves = file_leaves(enc)
-        to_db = {p: v for p, v in leaves.items()
-                 if p.partition('|')[0] not in FILE_ONLY_SECTIONS
-                 and p not in CRED_PATHS and p not in locked}
-        if to_db:
-            self._store.set_many(to_db, actor=actor)
-        present = set(leaves)
-        stale = [p for p in self._store.load_all()
-                 if p not in present
-                 and p.partition('|')[0] not in FILE_ONLY_SECTIONS
-                 and p not in CRED_PATHS and p not in locked]
-        if stale:
-            self._store.delete_many(stale)
+
+        def _editable(p):
+            return (p.partition('|')[0] not in FILE_ONLY_SECTIONS
+                    and p not in CRED_PATHS and p not in locked)
+
+        plain = file_leaves(data)
+        editable = {p for p in plain if _editable(p)}
+        changed = {p for p in editable if p not in base or base[p] != plain[p]}
+        if changed:
+            enc = data
+            if self._fernet:
+                enc = secret_manager.encrypt_sensitive(data, self._fernet,
+                                                       keys=self._secret_keys)
+            enc_leaves = file_leaves(enc)
+            self._store.set_many({p: enc_leaves[p] for p in changed}, actor=actor)
+        removed = [p for p in base if p not in plain and _editable(p)]
+        if removed:
+            self._store.delete_many(removed)
         file_data = copy.deepcopy(data)
-        for path in to_db:
+        for path in editable:
             section, _, field = path.partition('|')
             sec = file_data.get(section)
             if isinstance(sec, dict):
@@ -266,6 +313,16 @@ class ConfigManager:
                     file_data.pop(section, None)
         return self.save_raw(file_data)
 
+    def _load_baseline(self):
+        """The cached ``(effective, db_vals)`` the caller's data was derived from —
+        resolved now only when nothing was ever read (then it is simply the current DB)."""
+        cache = self._eff_cache
+        if cache is not None:
+            self.file_locked = cache[3]
+            return cache[2], cache[4]
+        return self._load()
+
     def invalidate(self) -> None:
         """Drop the cached effective config so the next read re-resolves it."""
         self._eff_cache = None
+        self._stamp_state = None

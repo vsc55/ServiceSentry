@@ -27,11 +27,14 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "servicesentry.serviceAccountName" . }}
+      {{- with include "servicesentry.rootRolePodSecurity" . }}{{ . | trim | nindent 6 }}{{- end }}
+      {{- with include "servicesentry.varOwnerInit" . }}{{ . | trim | nindent 6 }}{{- end }}
       containers:
         - name: worker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- include "servicesentry.netRaw" . | nindent 10 }}
+          {{- with include "servicesentry.rootRoleSecurity" (dict "ctx" $ "netRaw" true) }}{{ . | trim | nindent 10 }}{{- end }}
+          {{- with include "servicesentry.rootRoleContainer" . }}{{ . | trim | nindent 10 }}{{- end }}
           envFrom:
             {{- include "servicesentry.envFrom" . | nindent 12 }}
           env:
@@ -40,7 +43,7 @@ spec:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if .Values.control.enabled }}
+          {{- if include "servicesentry.controlListens" . }}
           ports:
             - { name: control, containerPort: {{ .Values.control.port }} }
           readinessProbe:
@@ -71,7 +74,7 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-{{- if .Values.control.enabled }}
+{{- if include "servicesentry.controlListens" . }}
 ---
 # Control Service: its name = SS_CONTROL_ADVERTISE so the web's poke
 # (POST /control/reconcile) resolves to these pods by cluster DNS.

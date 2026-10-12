@@ -349,11 +349,20 @@ class _HeartbeatMixin:
 
     def _heartbeat_prune(self) -> None:
         """Drop instance rows not seen for a while — pods that crashed without a
-        clean shutdown (a different host, so clear_others didn't catch them)."""
+        clean shutdown (a different host, so clear_others didn't catch them).
+
+        The command queue too: nothing else ever pruned it, so it grew for ever, and a
+        command claimed by an instance that died stayed "running" in the panel for good."""
         store = self._hb_store()
         if store is not None:
             try:
                 store.prune(self._HB_DEAD_AFTER)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        commands = self._hb_commands_store()
+        if commands is not None:
+            try:
+                commands.prune()
             except Exception:  # pylint: disable=broad-except
                 pass
 

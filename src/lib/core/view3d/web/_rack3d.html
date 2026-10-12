@@ -438,6 +438,20 @@ function _dcr3dHtml() {
                                                          file: 'rack-' + (r.name || r.uid || '')});
 }
 
+/** Leaving the DCIM section lets the rack viewer go.
+ *
+ *  `_dcr3dMount` lets it go on the next repaint of the section, and leaving for another section
+ *  repaints nothing: the viewer kept its WebGL context — a browser holds a handful and drops the
+ *  oldest — behind a hidden pane until somebody came back. Coming back repaints (the rack is
+ *  reloaded on `shown.bs.tab`), so a new canvas is mounted then. */
+function _dcr3dLeave(ev) {
+    const de = ev && ev.target && ev.target.getAttribute ? ev.target.getAttribute('data-bs-target') : '';
+    if (de !== '#tab-dcim') return;
+    if (ss3dGet(_DCR3D_BOX)) ss3dStop(_DCR3D_BOX);
+    if (typeof _DC3D_BOX !== 'undefined' && ss3dGet(_DC3D_BOX)) ss3dStop(_DC3D_BOX);
+}
+document.addEventListener('hidden.bs.tab', _dcr3dLeave);
+
 /** Montarlo tras pintar, o soltarlo si ya no se mira (otro armario, otra vista, otra pantalla). */
 function _dcr3dMount() {
     const visible = !!(_dcimRack && _dcimRack.rack && typeof _dcRackViewNow === 'function'

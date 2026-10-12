@@ -57,6 +57,35 @@ def _ok(msg: str) -> int:
     return 0
 
 
+def _ask_password(prompt: str):
+    """Prompt for a password, or ``None`` when there is nobody to ask.
+
+    Without a terminal (cron, a pipe, ``ssh host cmd``) ``getpass`` falls back to stdin and,
+    at its end, raises ``EOFError`` — which reached the user as a traceback instead of the
+    hint to pass ``--password``. Ctrl-C at the prompt is the same answer: no password."""
+    try:
+        return getpass.getpass(prompt)
+    except (EOFError, KeyboardInterrupt):
+        print(file=sys.stderr)
+        return None
+
+
+def _match_lang(raw):
+    """A supported language code for ``-l/--lang``, or ``None``.
+
+    Takes what main.py's banner takes: the exact code (``es_ES``), a two-letter prefix
+    (``es``) or a locale (``es-ES``, ``es_ES.UTF-8``). Assigning the raw value made ``-l es``
+    an unknown language, and every message silently fell back to English."""
+    from lib.i18n import SUPPORTED_LANGS  # noqa: PLC0415
+    if not raw:
+        return None
+    raw = str(raw).replace('-', '_').strip()
+    if raw in SUPPORTED_LANGS:
+        return raw
+    by_prefix = {code.split('_')[0].lower(): code for code in SUPPORTED_LANGS}
+    return by_prefix.get(raw.split('_')[0].lower()[:2])
+
+
 def _role_label(ctx, role_uid: str) -> str:
     """Human label for a role UID (built-in key or custom name)."""
     if role_uid in _BUILTIN_UID_TO_KEY:
@@ -83,7 +112,9 @@ def cmd_user_add(ctx, args) -> int:
 
     Returns 0 on success, 1 on a validation/lookup error (message on stderr).
     """
-    password = args.password or getpass.getpass('Password: ')
+    password = args.password or _ask_password('Password: ')
+    if password is None:
+        return _err("no password given and no terminal to ask for one (use --password)")
     try:
         gids = []
         for g in (args.group or []):
@@ -158,7 +189,9 @@ def cmd_user_passwd(ctx, args) -> int:
     resets a password. This is the command somebody runs when they believe the old password
     leaked — and a browser already signed in with it would otherwise stay signed in.
     """
-    password = args.password or getpass.getpass('New password: ')
+    password = args.password or _ask_password('New password: ')
+    if password is None:
+        return _err("no password given and no terminal to ask for one (use --password)")
     try:
         user = _require_user(ctx, args.username)
         users_svc.set_password(user, password, ctx.password_policy(), actor='cli')
@@ -420,6 +453,8 @@ def run(args, config_dir: str, var_dir: str) -> int:
     except Exception as exc:  # pylint: disable=broad-except
         return _err(f"could not open {APP_NAME} data ({config_dir}): {exc}")
     # `-l/--lang` (or SS_LANG) wins over the panel's setting, as it does for the services.
-    if getattr(args, 'lang', None):
-        ctx.lang = args.lang
+    # An unknown code keeps the panel's language rather than falling back to the default.
+    lang = _match_lang(getattr(args, 'lang', None))
+    if lang:
+        ctx.lang = lang
     return handler(ctx, args)

@@ -94,6 +94,38 @@ def empty_rack(store, rack_uid: str) -> dict:
     return hecho
 
 
+def room_item_links(store, items, visible=None) -> dict:
+    """What each room item is connected to: ``{uid: [{port, kind, item, label, role, port_far,
+    room, rack, hidden}]}`` — its port, the cable's kind (``power`` or data), and the far end.
+    Asked for: the demo's PCs were cabled to their outlet and the panel said so nowhere but in
+    the trace. One query for the room's cables, not one per item. The far end the reader may not
+    see (*visible*) is said to exist and named as hidden, as the trace does."""
+    visible = visible or (lambda _u: True)
+    uids = [str(i['uid']) for i in items]
+    out = {u: [] for u in uids}
+    if not uids:
+        return out
+    otros = {}
+    for c in store.cables_of(uids):
+        for mio, puerto, suyo, su_puerto in ((c.get('a_item'), c.get('a_port'), c.get('b_item'), c.get('b_port')),
+                                             (c.get('b_item'), c.get('b_port'), c.get('a_item'), c.get('a_port'))):
+            mio, suyo = str(mio or ''), str(suyo or '')
+            if mio not in out:
+                continue
+            if suyo not in otros:
+                otros[suyo] = store.items.get(suyo) or {}
+            o = otros[suyo]
+            ve = bool(o) and visible(suyo)
+            out[mio].append({'port': str(puerto or ''), 'kind': str(c.get('kind') or ''),
+                             'item': suyo if ve else '', 'hidden': not ve,
+                             'label': str(o.get('label') or '') if ve else '',
+                             'role': str(o.get('role') or '') if ve else '',
+                             'port_far': str(su_puerto or '') if ve else '',
+                             'room': str(o.get('room_uid') or '') if ve else '',
+                             'rack': str(o.get('rack_uid') or '') if ve else ''})
+    return out
+
+
 def jack_list(item) -> list:
     """Las bocas de una roseta o una toma, de su columna (`jacks`, JSON): ``[{connector, n}]``.
     Lo que no se lea como tal se ignora: una fila escrita a mano no tumba la ficha."""
@@ -1508,7 +1540,7 @@ def rows_roll(rows, racks) -> dict:
 # antes de que lo echen.
 
 
-def chain_up(sources, source_uid, *, honour_bypass=True) -> list:
+def chain_up(sources, source_uid, *, honour_bypass=True, fetch=None, may_see_site=None) -> list:
     """La cadena desde una fuente hacia arriba, hasta la acometida.
 
     *honour_bypass* falso recorre la instalación **como si ningún bypass estuviera echado**, que
@@ -1517,21 +1549,43 @@ def chain_up(sources, source_uid, *, honour_bypass=True) -> list:
 
     Un ciclo —alguien declaró que A cuelga de B y B de A— termina la cadena en vez de colgar el
     panel. Es un dato equivocado, no un estado imposible: se dibuja lo que se pueda y ya.
+
+    **Entre sedes.** Una cadena puede cruzar a otra sede —un edificio que se alimenta de la
+    subestación del campus de al lado—, y la lista que recibe es la de UNA sede. *fetch(uid)*
+    trae la fuente que no está en ella, y el nodo donde cambia la sede sale marcado con
+    ``_cross``: es la dependencia que más importa ver, porque si cae aquel edificio, éste se
+    queda sin corriente. Si *may_see_site(sede)* dice que no, el nodo sale **anónimo**
+    (``_hidden``, sin nombre ni sede) y la cadena se corta ahí: se sabe que depende de fuera,
+    no de qué.
     """
     por_uid = {str(s.get('uid') or ''): s for s in (sources or ())}
     salida, visto = [], set()
     uid = str(source_uid or '')
-    while uid and uid in por_uid and uid not in visto:
+    sede_previa = ''
+    while uid and uid not in visto:
+        if uid not in por_uid:
+            fila = fetch(uid) if fetch else None
+            if not fila:
+                break
+            por_uid[uid] = fila
         visto.add(uid)
         nodo = por_uid[uid]
+        sede = str(nodo.get('site_uid') or '')
+        cruza = bool(sede_previa and sede and sede != sede_previa)
+        if cruza and may_see_site is not None and not may_see_site(sede):
+            salida.append({'uid': '', 'name': '', 'kind': '', 'bypass': 0,
+                           '_cross': True, '_hidden': True})
+            break
+        if sede:
+            sede_previa = sede
         saltado = honour_bypass and bool(int(nodo.get('bypass') or 0))
         if not saltado:
-            salida.append(nodo)
+            salida.append(dict(nodo, _cross=True) if cruza else nodo)
         uid = str(nodo.get('upstream_uid') or '')
     return salida
 
 
-def power_path(sources, pdus) -> dict:
+def power_path(sources, pdus, *, fetch=None, may_see_site=None, site_name=None) -> dict:
     """De qué cuelga cada regleta, ahora y con los bypass quitados.
 
     ``{'paths': {pdu_uid: {...}}, 'warnings': [...]}``.
@@ -1545,8 +1599,26 @@ def power_path(sources, pdus) -> dict:
     * **las dos ramas colgando del mismo SAI**. Dos regletas, dos ramas, dos colores… y un solo
       punto de fallo tres metros más arriba. Es exactamente el error que la redundancia dentro
       del armario esconde.
+
+    *fetch*, *may_see_site* y *site_name* son los de :func:`chain_up`: un tramo que cruza de sede
+    sale con ``cross_site`` (y la sede, por su nombre, si se puede ver) o anónimo con ``hidden``.
     """
     caminos, avisos = {}, []
+    arriba = {'fetch': fetch, 'may_see_site': may_see_site}
+
+    def _nodo(n):
+        out = {'uid': n['uid'], 'name': n.get('name') or '', 'kind': n.get('kind'),
+               'bypass': bool(int(n.get('bypass') or 0))}
+        if n.get('_cross'):
+            out['cross_site'] = True
+            if n.get('_hidden'):
+                out['hidden'] = True
+            else:
+                sede = str(n.get('site_uid') or '')
+                out['site_uid'] = sede
+                out['site_name'] = (site_name(sede) if site_name else '') or ''
+        return out
+
     for pdu in (pdus or ()):
         uid = str(pdu.get('uid') or '')
         origen = str(pdu.get('source_uid') or '')
@@ -1555,14 +1627,13 @@ def power_path(sources, pdus) -> dict:
             # que nadie documentó, y decir que no tiene sería inventarse un hecho.
             caminos[uid] = {'known': False, 'now': [], 'clean': [], 'ups': []}
             continue
-        ahora = chain_up(sources, origen)
-        limpio = chain_up(sources, origen, honour_bypass=False)
+        ahora = chain_up(sources, origen, **arriba)
+        limpio = chain_up(sources, origen, honour_bypass=False, **arriba)
         sais = [n['uid'] for n in ahora if str(n.get('kind')) == 'ups']
         caminos[uid] = {
             'known': True,
-            'now': [{'uid': n['uid'], 'name': n.get('name') or '', 'kind': n.get('kind'),
-                     'bypass': bool(int(n.get('bypass') or 0))} for n in ahora],
-            'clean': [n['uid'] for n in limpio],
+            'now': [_nodo(n) for n in ahora],
+            'clean': [n['uid'] for n in limpio if n['uid']],
             'ups': sais,
         }
         if not sais and any(str(n.get('kind')) == 'ups' for n in limpio):

@@ -4,10 +4,49 @@
 
 import json
 import os
+import shutil
+import tempfile
 import unittest.mock
 import weakref
 
 import pytest
+
+# ── The suite's own temporary directories go when the session does ──────────────────────────
+#
+# Some forty test files make their app with `tempfile.mkdtemp(prefix='ss-cfg-')` /
+# `('ss-var-')` (module fixtures that predate `tmp_path_factory`), and the `node` harness
+# made `ss-node-` per probe. Nothing removed them: a run left hundreds of MB in the system
+# TEMP, and on 2026-10-12 fourteen thousand of them had filled the C: drive — the run itself
+# died of «No space left on device». Every `ss-` directory made through `mkdtemp` in this
+# process is noted and removed when the session ends (each xdist worker is a session).
+_SS_TMP: list = []
+_real_mkdtemp = tempfile.mkdtemp
+
+
+def _noted_mkdtemp(suffix=None, prefix=None, dir=None):           # noqa: A002 — stdlib's name
+    path = _real_mkdtemp(suffix, prefix, dir)
+    if prefix and str(prefix).startswith('ss-'):
+        _SS_TMP.append(path)
+    return path
+
+
+tempfile.mkdtemp = _noted_mkdtemp
+
+
+def pytest_sessionfinish(session, exitstatus):                       # noqa: ARG001
+    import gc                                                       # noqa: PLC0415
+    import sqlite3                                                  # noqa: PLC0415
+    gc.collect()
+    # A module fixture's app keeps its SQLite file open on Windows, and an open file cannot
+    # be removed. The session is over: nothing will use them again.
+    for obj in gc.get_objects():
+        if isinstance(obj, sqlite3.Connection):
+            try:
+                obj.close()
+            except Exception:                                       # pylint: disable=broad-except
+                pass
+    for path in _SS_TMP:
+        shutil.rmtree(path, ignore_errors=True)
 
 # Keep the background event worker out of the test harness: tests drive evaluation
 # directly (``_eval_event`` / ``_event_worker_tick``) so a polling thread never

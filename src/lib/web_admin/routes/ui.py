@@ -106,6 +106,11 @@ def register(app, wa):
             resp = Response(own[0], mimetype=own[1])
             resp.headers['X-Content-Type-Options'] = 'nosniff'
             resp.headers['Cache-Control'] = 'public, max-age=3600'
+            # As at /brand/favicon: an SVG opened on its own is a document of this origin,
+            # and with the panel's CSP a link inside it could run script.
+            if 'svg' in (own[1] or ''):
+                resp.headers['Content-Security-Policy'] = (
+                    "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox")
             return resp
         resp = send_from_directory(
             os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -131,18 +136,11 @@ def register(app, wa):
         ]
         # Landing page: the user's own choice ('' = inherit) + what "inherit" resolves to
         # (first group alphabetically with a value → global default), so the account
-        # settings modal can show a "Default (…)" option.
-        from ..constants import HOME_PAGES as _HOME_PAGES  # noqa: PLC0415
-        _hp_ids = {p['id'] for p in _HOME_PAGES}
-        _grp_land = sorted(
-            ((wa._uid_to_group_label(g) or g, wa._groups[g].get('landing_page', ''))
-             for g in raw_groups
-             if g in wa._groups and wa._groups[g].get('landing_page')),
-            key=lambda x: str(x[0]).lower())
-        _landing_default = (_grp_land[0][1] if _grp_land else '') \
-            or str(getattr(wa, '_LANDING_PAGE', '') or '')
-        if _landing_default not in _hp_ids:
-            _landing_default = 'admin'
+        # settings modal can show a "Default (…)" option. Resolved by the same code as the
+        # redirect: a copy here knew only the core pages, so a module section or view as the
+        # group's or global default read as "admin", and an invalid group value skipped the
+        # global default the redirect falls back to.
+        _landing_default = wa._landing_id(user_data, own=False)
         return jsonify({
             'username': uname_me,
             'display_name': session.get('display_name', ''),

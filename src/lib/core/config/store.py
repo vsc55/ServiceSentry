@@ -16,6 +16,7 @@ import json
 import uuid
 
 from lib.db import BaseConnector
+from lib.db.freshness import bump_version, ensure_version_row, table_stamp
 from lib.db.schema import Column, Index, TableSpec
 
 
@@ -57,11 +58,25 @@ class ConfigStore:
     # ── Schema ────────────────────────────────────────────────────────────────
     def _bootstrap(self) -> None:
         self._db.reconcile_table(_CONFIG_SCHEMA)
+        # Seed the cross-process change counter: every write bumps it inside its own
+        # transaction, so another process (a second web replica, the CLI, a standalone
+        # worker) holding a cached config can tell that it moved — see stamp().
+        ensure_version_row(self._db, _T)
 
     # ── Meta ──────────────────────────────────────────────────────────────────
     def version(self) -> int:
-        """Monotonic counter bumped on every write (cheap cache invalidation)."""
+        """In-process counter bumped on every write by THIS store (cheap cache
+        invalidation for our own writes).  Writes by another process are only
+        visible through :meth:`stamp`."""
         return self._version
+
+    def stamp(self):
+        """Cross-process "did the config table change?" probe (one cheap query).
+
+        ``(version, row_count, newest updated_at)`` — see :mod:`lib.db.freshness`.
+        ``None`` means "no answer": keep what is cached.
+        """
+        return table_stamp(self._db, _T)
 
     def is_empty(self) -> bool:
         """True when no config field has been stored yet."""
@@ -110,6 +125,8 @@ class ConfigStore:
                         f'INSERT INTO {_T} (uid, path, value, created_at, updated_at, updated_by) '
                         'VALUES (?,?,?,?,?,?)', (str(uuid.uuid4()), path, vj, now, now, actor))
                     wrote = True
+            if wrote:
+                bump_version(self._db, _T)              # same transaction as the rows
         if wrote:
             self._version += 1
 
@@ -125,6 +142,7 @@ class ConfigStore:
         with self._db.transaction():
             for path in paths:
                 self._db.execute(f'DELETE FROM {_T} WHERE path = ?', (path,))
+            bump_version(self._db, _T)                  # same transaction as the rows
         self._version += 1
 
     def delete(self, path: str) -> None:

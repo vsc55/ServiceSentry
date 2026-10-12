@@ -29,6 +29,7 @@ from flask import jsonify, request, session
 
 from lib.core.mfa import cose, webauthn
 from lib.core.mfa import service as mfa_service
+from lib.security.ratelimit import RateLimiter
 
 # How long a registration challenge is good for. Short on purpose: it is one round trip with a
 # person touching a key in the middle, and a challenge that outlives the page it was issued for
@@ -48,6 +49,38 @@ def register(app, wa):
         """`(username, user_uid)` for the signed-in account."""
         username = session.get('username', '')
         return username, wa._mfa_uid(username)
+
+    # The SAME per-account counter the sign-in step uses (`routes/auth.py`), so guesses made
+    # here and guesses made there add up. Without it these routes were a second, unthrottled
+    # oracle for the current code: the jail counts per ADDRESS, and a borrowed session works
+    # from any number of them.
+    if not hasattr(wa, '_mfa_ratelimit'):
+        wa._mfa_ratelimit = RateLimiter()
+
+    def _check_code(username, uid, code, stage):
+        """Verify a current code under the per-account limit; `None` when it holds, else
+        the response to send."""
+        mx = int(wa._LOCKOUT_MAX_ATTEMPTS or 0)
+        win = int(wa._LOCKOUT_DURATION_SECS or 0)
+        key = uid or str(username or '').strip().lower()
+        ok, retry = wa._mfa_ratelimit.peek(key, mx, win)
+        if not ok:
+            wa._audit('login_throttled', username, request.remote_addr,
+                      detail={'stage': f'mfa_{stage}', 'retry_after': retry})
+            wa._ipban_offense('login_throttled')
+            return jsonify({'ok': False, 'error': 'throttled', 'retry_after': retry}), 429
+        if not mfa_service.verify(wa._mfa_store, uid, code):
+            wa._mfa_ratelimit.hit(key, mx, win)
+            # `empty` and `bad_code` are one audit line apart and are two different stories: a
+            # form submitted with nothing in it is somebody in a hurry, and a run of wrong
+            # codes is somebody guessing. On the wire both stay `bad_code` — which of the two
+            # it was is not something to tell whoever is sending them.
+            wa._audit('mfa_failed', username, request.remote_addr,
+                      detail={'stage': stage, 'error': 'empty' if not code else 'bad_code'})
+            wa._ipban_offense('login_failed')
+            return jsonify({'ok': False, 'error': 'bad_code'}), 403
+        wa._mfa_ratelimit.reset(key)
+        return None
 
     @app.route('/api/v1/account/mfa', methods=['GET'])
     @login_required
@@ -101,7 +134,7 @@ def register(app, wa):
         believes they never finished.
         """
         username, uid = _me()
-        data = request.get_json(silent=True) or {}
+        data = wa._optional_json()
         out = mfa_service.enroll_confirm(wa._mfa_store, uid, str(data.get('code') or ''))
         if not out.get('ok'):
             wa._audit('mfa_failed', username, request.remote_addr,
@@ -121,17 +154,10 @@ def register(app, wa):
         would hand the attacker ten permanent ways back in.
         """
         username, uid = _me()
-        data = request.get_json(silent=True) or {}
-        code = str(data.get('code') or '')
-        if not mfa_service.verify(wa._mfa_store, uid, code):
-            # `empty` and `bad_code` are one audit line apart and are two different stories: a
-            # form submitted with nothing in it is somebody in a hurry, and a run of wrong
-            # codes is somebody guessing. On the wire both stay `bad_code` — which of the two
-            # it was is not something to tell whoever is sending them.
-            wa._audit('mfa_failed', username, request.remote_addr,
-                      detail={'stage': 'recovery', 'error': 'empty' if not code else 'bad_code'})
-            wa._ipban_offense('login_failed')
-            return jsonify({'ok': False, 'error': 'bad_code'}), 403
+        data = wa._optional_json()
+        refused = _check_code(username, uid, str(data.get('code') or ''), 'recovery')
+        if refused:
+            return refused
         out = mfa_service.recovery_regenerate(wa._mfa_store, uid)
         if not out.get('ok'):
             # This branch used to answer 400 and record NOTHING, which is the worst place to
@@ -158,17 +184,15 @@ def register(app, wa):
         account on a password they already know.
         """
         username, uid = _me()
-        data = request.get_json(silent=True) or {}
+        data = wa._optional_json()
         code = str(data.get('code') or '')
         if not wa._mfa_enrolled(username):
             wa._audit('mfa_failed', username, request.remote_addr,
                       detail={'stage': 'disable', 'error': 'not_enrolled'})
             return jsonify({'ok': False, 'error': 'not_enrolled'}), 400
-        if not mfa_service.verify(wa._mfa_store, uid, code):
-            wa._audit('mfa_failed', username, request.remote_addr,
-                      detail={'stage': 'disable', 'error': 'empty' if not code else 'bad_code'})
-            wa._ipban_offense('login_failed')
-            return jsonify({'ok': False, 'error': 'bad_code'}), 403
+        refused = _check_code(username, uid, code, 'disable')
+        if refused:
+            return refused
         wa._mfa_store.delete(uid)
         wa._audit('mfa_disabled', username, request.remote_addr)
         return jsonify({'ok': True})
@@ -201,13 +225,10 @@ def register(app, wa):
             return jsonify({'ok': False, 'error': scope.get('reason') or 'unavailable'}), 400
         proved = False
         if wa._mfa_enrolled(username):
-            code = str((request.get_json(silent=True) or {}).get('code') or '')
-            if not mfa_service.verify(wa._mfa_store, uid, code):
-                wa._audit('mfa_failed', username, request.remote_addr,
-                          detail={'stage': 'webauthn_begin',
-                                  'error': 'empty' if not code else 'bad_code'})
-                wa._ipban_offense('login_failed')
-                return jsonify({'ok': False, 'error': 'bad_code'}), 403
+            code = str(wa._optional_json().get('code') or '')
+            refused = _check_code(username, uid, code, 'webauthn_begin')
+            if refused:
+                return refused
             proved = True
         challenge = webauthn.new_challenge()
         session['webauthn_reg'] = {'challenge': challenge, 'proved': proved,
@@ -237,7 +258,7 @@ def register(app, wa):
         would be theatre.
         """
         username, uid = _me()
-        data = request.get_json(silent=True) or {}
+        data = wa._optional_json()
         held = session.pop('webauthn_reg', None) or {}   # one use, whatever the outcome
         if not held or float(held.get('expires') or 0) < time.time():
             return jsonify({'ok': False, 'error': 'no_challenge'}), 400
@@ -290,6 +311,6 @@ def register(app, wa):
         if not wa._is_admin_requester() and users_svc.user_is_admin(_rec or {}, wa._groups):
             return jsonify({'ok': False, 'error': 'insufficient_permissions'}), 403
         if not wa._mfa_reset(username, actor=session.get('username', ''),
-                             reason=str((request.get_json(silent=True) or {}).get('reason') or '')):
+                             reason=str(wa._optional_json().get('reason') or '')):
             return jsonify({'ok': False, 'error': 'not_enrolled'}), 400
         return jsonify({'ok': True})

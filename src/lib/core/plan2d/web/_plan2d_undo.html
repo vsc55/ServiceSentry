@@ -154,7 +154,24 @@ function p2duBatch(desde) {
 
 /** Deshacer (`dir` = 'undo') o rehacer ('redo') lo último. */
 async function p2du(dir) {
+    // Uno a la vez mientras haya una espera: Ctrl+Z mantenido lanzaba varios, y dos pasos de la
+    // misma cosa podían llegar al servidor en el otro orden. Un paso en memoria no espera a nada
+    // y no bloquea.
+    if (P2DU.running) return;
     const src = P2DU.src;
+    // Lo pendiente de escribir sale ANTES de mirar qué se deshace: las flechas guardan a los
+    // 400 ms y un campo al dejar de teclear. Mirando antes, se deshacía el paso anterior, lo
+    // pendiente se guardaba después —y vaciaba el rehacer—, y el deshacer se perdía.
+    // Solo si hay algo: sin nada pendiente, deshacer sigue siendo inmediato.
+    const flechas = p2dFlushArrows();
+    const pendiente = src && src.flush ? src.flush() : null;
+    if (flechas || pendiente) {
+        P2DU.running = true;
+        try {
+            if (flechas) await flechas;
+            if (pendiente) await pendiente;
+        } finally { P2DU.running = false; }
+    }
     const de = dir === 'redo' ? P2DU.redo : P2DU.stack;
     const a = dir === 'redo' ? P2DU.stack : P2DU.redo;
     const e = p2duTop(de);
@@ -167,12 +184,10 @@ async function p2du(dir) {
         a.push(e);
         return p2duPaint();
     }
-    if (!src) return;
+    if (!src || P2DU.running) return;
     de.pop();
-    // Lo pendiente de escribir sale antes: si no, llegaría DESPUÉS y desharía el deshacer.
-    if (src.flush) await src.flush();
     const valores = dir === 'redo' ? e.after : e.before;
-    P2DU.busy = true;
+    P2DU.busy = P2DU.running = true;
     let r;
     try {
         if (!e.batch) r = await src.send('PUT', e.url, valores);
@@ -184,7 +199,7 @@ async function p2du(dir) {
                 if (!r || !r.ok) break;
             }
         }
-    } finally { P2DU.busy = false; }
+    } finally { P2DU.busy = P2DU.running = false; }
     if (!r || !r.ok) {
         de.push(e);
         p2duPaint();

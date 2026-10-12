@@ -122,6 +122,8 @@ function _dcwCancel() {
 function _dcwKey(ev) {
     // Ctrl+Z y Ctrl+Y no son de aquí: los lleva el historial del plano (`_plan2d_undo.html`).
     if (!_dcw || ['INPUT', 'TEXTAREA', 'SELECT'].includes((ev.target || {}).tagName)) return;
+    // Solo con la sección delante: en otra, Ctrl+A no se puede secuestrar ni Supr borrar muros.
+    if (!_dcKeysHere()) return;
     if (ev.key === 'Escape') { _dcw.start = null; _dcwPaint(); }
     if ((ev.key === 'Delete' || ev.key === 'Backspace') && _dcwSels().length) { ev.preventDefault(); _dcwDelete(); }
     if ((ev.ctrlKey || ev.metaKey) && (ev.key || '').toLowerCase() === 'a') { ev.preventDefault(); _dcwSelAll(); }

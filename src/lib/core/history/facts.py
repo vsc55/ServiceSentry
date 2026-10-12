@@ -218,12 +218,18 @@ class FactStore:
 
     # ── Escribir ──────────────────────────────────────────────────────────────
 
-    def write(self, series_id: int, ts: float, medidas: dict | None) -> int:
+    def write(self, series_id: int, ts: float, medidas: dict | None, *,
+              strict: bool = False) -> int:
         """Las medidas de una muestra. Devuelve cuántos hechos escribió.
 
         Una muestra sin ninguna medida no escribe nada y **eso está bien**: 325 de las 4.026
         muestras reales sólo dicen si la cosa respondió. La fila de la muestra existe por sí
         misma en `history`; aquí no hace falta una fila vacía que lo represente.
+
+        *strict* lanza en vez de devolver 0 cuando una medida no se pudo escribir —o un campo
+        no se pudo dar de alta—. Es lo que pide quien escribe la muestra en la misma
+        transacción: tragado aquí, `record` confirmaba la fila de la muestra sin sus medidas,
+        un punto en la gráfica sin nada que dibujar.
         """
         hechos = V.encode_sample(medidas)
         if not hechos or not series_id:
@@ -231,6 +237,8 @@ class FactStore:
         ids = self.field_ids([h[0] for h in hechos])
         filas = [(int(series_id), float(ts), ids[campo], kind, num, txt)
                  for campo, kind, num, txt in hechos if campo in ids]
+        if strict and len(filas) != len(hechos):
+            raise RuntimeError('history facts: a field could not be registered')
         if not filas:
             return 0
         try:
@@ -238,6 +246,8 @@ class FactStore:
                 f'INSERT INTO {_H}(series_id, ts, field_id, kind, num, txt) '
                 'VALUES(?, ?, ?, ?, ?, ?)', filas)
         except Exception:  # pylint: disable=broad-except
+            if strict:
+                raise
             return 0
         return len(filas)
 

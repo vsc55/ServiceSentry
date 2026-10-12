@@ -247,7 +247,7 @@ async function renderDcim() {
     }
     // El cuadro manda sobre todo lo demás: se abre para ir a un sitio, y si hay uno abierto
     // es que todavía no se ha ido.
-    pane.innerHTML = (
+    _dcKeepRepaint(pane, (
                      _dcCat ? _dcCatHtml()
                    : _dcBuilds ? _dcBuildsHtml()
                    : _dcWire ? _dcWireHtml()
@@ -257,7 +257,7 @@ async function renderDcim() {
                    : _dcimRack ? _dcimRackHtml()
                    : _dcimPlan ? _dcimPlanHtml()
                    : _dcsPlan ? _dcsHtml()
-                   : _dcimTreeHtml());
+                   : _dcimTreeHtml()));
     // Las teselas y las chinchetas se dibujan DESPUÉS de que el navegador tenga el SVG
     // puesto: las dos necesitan saber cuántos píxeles mide en pantalla, y antes de estar en el
     // documento eso es cero — que da un mapa vacío sin ningún error que ver.

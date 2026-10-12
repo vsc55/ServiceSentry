@@ -155,7 +155,10 @@ def register(app, wa, C):
         estados = C.states()
         items = C.filtered(store.items_in_room(uid), store, said, allowed, 'item', reach)
         cajas = dcim_plankinds.device_defaults(wa)
-        return jsonify({'items': [_out(store, i, estados, cajas) for i in items],
+        enlaces = dcim_svc.room_item_links(store, items, lambda u: dcim_owners.may_see(
+            C.owner_of(store, said, 'item', u), allowed))
+        return jsonify({'items': [dict(_out(store, i, estados, cajas), links=enlaces.get(str(i['uid']), []))
+                                  for i in items],
                         'roles': list(ITEM_ROLES), 'mounts': list(MOUNTS)})
 
     @app.route('/api/v1/dcim/rooms/<uid>/items', methods=['POST'])
@@ -173,11 +176,16 @@ def register(app, wa, C):
         malo = _bad(store, data) or _bad_jack(store, data, None, uid)
         if malo:
             return jsonify({'error': wa._t(malo)}), 400
+        # El número de inventario, como el de cualquier equipo: `INV-?` resuelto y un repetido
+        # rechazado. Sin esto se guardaba el comodín tal cual, y dos PC podían decir el mismo.
+        err = C.asset('items', data)
+        if err:
+            return jsonify({'error': wa._t(err)}), 400
         data.update({'room_uid': uid, 'rack_uid': '', 'placement': 'room',
                      'u_start': 0, 'u_height': 0, 'face': 'full'})
         nuevo = store.items.create(data, actor=C.actor())
         wa._audit('dcim_placed', detail={'item': nuevo, 'room': uid})
-        return jsonify({'uid': nuevo})
+        return jsonify({'uid': nuevo, 'asset': str(data.get('asset') or '')})
 
     @app.route('/api/v1/dcim/room-items/<uid>', methods=['PUT'])
     @C.edit_req
@@ -204,8 +212,11 @@ def register(app, wa, C):
                 return jsonify({'error': wa._t('access_denied')}), 403
             if str(destino.get('site_uid') or '') != str(origen.get('site_uid') or ''):
                 return jsonify({'error': wa._t('dcim_room_other_site')}), 400
+        err = C.asset('items', data, uid)
+        if err:
+            return jsonify({'error': wa._t(err)}), 400
         store.items.update(uid, data, actor=C.actor())
-        return jsonify({'ok': True})
+        return jsonify({'ok': True, 'asset': str(data.get('asset') or '')})
 
     @app.route('/api/v1/dcim/items/<uid>/trace', methods=['GET'])
     @C.view_req

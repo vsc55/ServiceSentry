@@ -102,7 +102,8 @@ def register(app, wa):
         match is a local account (403, takeover guard) or the account is disabled.
         Returns JSON with the landing redirect on success."""
         data = wa._optional_json() or {}
-        token = (data.get('token') or '').strip()
+        token = data.get('token')
+        token = token.strip() if isinstance(token, str) else ''   # a number here was a 500
         if not token:
             return jsonify({'ok': False, 'error': wa._t('msteams_sso_no_token')}), 400
         if not tab_sso.available():

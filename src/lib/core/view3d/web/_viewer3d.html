@@ -576,12 +576,17 @@ function _ss3dQuadProgram(gl) {
 //: Images already turned into a canvas, by their `data:`: remounting a viewer — done on every
 //: repaint — has no reason to decode a plan of several megabytes again.
 const _SS3D_IMG = new Map();
+//: How many it keeps. Each key is a whole `data:` of a plan — megabytes — and its canvas another
+//: few: kept for ever, a session that walked through twenty rooms held twenty plans twice. The
+//: oldest goes first (a Map iterates in insertion order).
+const _SS3D_IMG_MAX = 8;
 
 /** An image as a canvas at most 2048 px wide, which any card takes as a texture. Going through
  *  a canvas is also what makes an SVG plan work: WebGL knows nothing of vectors, and the canvas
  *  rasterises it. `null` if the image cannot be read. */
 function _ss3dImageCanvas(data) {
     if (!_SS3D_IMG.has(data)) {
+        while (_SS3D_IMG.size >= _SS3D_IMG_MAX) _SS3D_IMG.delete(_SS3D_IMG.keys().next().value);
         _SS3D_IMG.set(data, new Promise(ok => {
             const img = new Image();
             img.onload = () => {

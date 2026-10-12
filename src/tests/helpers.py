@@ -141,8 +141,12 @@ try {
   vm.runInContext(fs.readFileSync(process.argv[3], 'utf8'), caja, {filename: 'prueba.js'});
 } catch (e) { salida.error = String(e && e.constructor && e.constructor.name || '') +
                              ': ' + String(e && e.message || e); }
-Object.assign(salida, caja.__out || {});
-console.log(JSON.stringify(salida));
+// Una prueba que tiene que ESPERAR (lo que llega tarde, lo que se guarda después de un await)
+// deja su promesa en `__wait`; la salida se escribe cuando acaba. Sin ella, lo de siempre.
+const fin = () => { Object.assign(salida, caja.__out || {}); console.log(JSON.stringify(salida)); };
+if (caja.__wait && typeof caja.__wait.then === 'function') {
+  caja.__wait.then(fin, (e) => { salida.error = 'async: ' + String(e && e.message || e); fin(); });
+} else fin();
 """
 
 
@@ -158,16 +162,19 @@ def node_run(bundle_js: str, probe_js: str) -> dict:
     import os                                                        # noqa: PLC0415
     import subprocess                                                # noqa: PLC0415
     import tempfile                                                  # noqa: PLC0415
-    tmp = tempfile.mkdtemp(prefix='ss-node-')
-    rutas = {}
-    for nombre, texto in (('panel.js', bundle_js), ('prueba.js', probe_js),
-                          ('arnes.js', NODE_ARNES % {
-                              'almacen': _ALMACEN_JS,
-                              'viejuno': json.dumps([list(x) for x in NODE_VIEJUNO])})):
-        rutas[nombre] = os.path.join(tmp, nombre)
-        io.open(rutas[nombre], 'w', encoding='utf-8').write(texto)
-    r = subprocess.run(['node', rutas['arnes.js'], rutas['panel.js'], rutas['prueba.js']],
-                       capture_output=True, text=True, encoding='utf-8', timeout=120)
+    # Removed when the probe ends: one per probe, a few MB each, and they were left behind —
+    # thousands of them filled the drive (see `tests/conftest.py`).
+    with tempfile.TemporaryDirectory(prefix='ss-node-', ignore_cleanup_errors=True) as tmp:
+        rutas = {}
+        for nombre, texto in (('panel.js', bundle_js), ('prueba.js', probe_js),
+                              ('arnes.js', NODE_ARNES % {
+                                  'almacen': _ALMACEN_JS,
+                                  'viejuno': json.dumps([list(x) for x in NODE_VIEJUNO])})):
+            rutas[nombre] = os.path.join(tmp, nombre)
+            with io.open(rutas[nombre], 'w', encoding='utf-8') as fh:
+                fh.write(texto)
+        r = subprocess.run(['node', rutas['arnes.js'], rutas['panel.js'], rutas['prueba.js']],
+                           capture_output=True, text=True, encoding='utf-8', timeout=120)
     assert r.returncode == 0, (r.stderr or '')[-2000:]
     out = json.loads([l for l in r.stdout.splitlines() if l.startswith('{')][-1])
     assert not out['error'], f'la prueba reventó: {out["error"]}'

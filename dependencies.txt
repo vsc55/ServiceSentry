@@ -1,6 +1,2 @@
-wget
-curl
 python3
-python3-requests
-python3-pymysql
-python3-paramiko
+python3-venv

@@ -310,7 +310,7 @@ createListTable({
             case 'members':    return `<td>${_clMembersHtml(item)}</td>`;
             case 'enabled':    return `<td class="text-center align-middle"><span class="form-switch d-inline-flex align-items-center m-0" style="padding-left:0;min-height:0;line-height:1" title="${escAttr(t('enabled'))}">
                     <input class="form-check-input m-0" type="checkbox" role="switch" style="margin-left:0;margin-top:0;float:none;vertical-align:middle;cursor:pointer" ${on ? 'checked' : ''} ${_clCan(_uid, 'edit') ? '' : 'disabled'}
-                        onchange="_clToggle('${esc(mod)}','${esc(coll)}',${jsStr(key)},this.checked,this)"></span></td>`;
+                        onchange="_clToggle(${jsStr(mod)},${jsStr(coll)},${jsStr(key)},this.checked,this)"></span></td>`;
             case 'summary':    return `<td>${_clStatusSummary(mod, key)}</td>`;
             default: {
                 const field = colId.startsWith('x_') ? colId.slice(2) : null;   // per-module extra column

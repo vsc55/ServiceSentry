@@ -8,7 +8,8 @@ office floors' in their IDF— and every workstation is wired back to it:
 
 * a **double outlet** on each desk (two RJ45), the PC on jack A and the IP phone on jack B, each
   by a 2 m patch cord, and a **power socket** beside it (two Schuko) on the floor's panel — the
-  NOC's desks on the data centre's UPS;
+  NOC's desks on the data centre's UPS —, the PC's power lead in its jack A; the printers and the
+  meeting rooms' displays plugged in the same way;
 * the **horizontal cable** (Cat 6A) from each jack's back (``A-R``) to the back of a port of a
   patch panel in the rack (``N-R``), its length the route along the ceiling trays;
 * the panel's **front** port to the access switch, port for port (`DcimStore` passes through
@@ -226,6 +227,10 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
         cuenta['sockets'] += 1
         return _room_item(b, room, 'power_outlet', label, x, y, rot, **extra)
 
+    def plug(item, toma):
+        """Its power lead into jack A of the socket beside it. The phones are fed by PoE."""
+        b.cable(item, 'psu', toma, 'A', kind='power', category='', color='black', length=1500)
+
     def patch(a, a_port, o, jack, color='grey'):
         b.cable(a, a_port, o, jack, category='cat6a', color=color, length=2000)
 
@@ -243,9 +248,10 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
                                 180)
                 o = outlet_for(fkey, room, 'R-TV-%s' % w['room_' + rk], W / 2 - 43, 60, 180,
                                mount='wall', jacks=[('8p8c', 2), ('hdmi', 1)])
-                socket_for(room, 'T-TV-%s' % w['room_' + rk], W / 2 + 100, 60, 180, panel_of(fkey),
+                toma = socket_for(room, 'T-TV-%s' % w['room_' + rk], W / 2 + 100, 60, 180, panel_of(fkey),
                            [('cee-7-3', 2)], mount='wall')
                 patch(tv, 'hdmi-lan', o, 'A')
+                plug(tv, toma)
                 cuenta['displays'] += 1
                 if mesa:
                     pw, pd = size('phone')
@@ -263,12 +269,13 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
                     o = outlet_for(fkey, room, nombre, x, y, rot)
                     tw_, td_ = size('power_outlet')
                     x, y = _on_desk(desk, 0.65, 0.95, tw_, td_)
-                    socket_for(room, 'T-%s' % nombre, x, y, rot,
-                               fuentes.get('a', '') if rk == 'noc' else panel_of(fkey), [('cee-7-3', 2)])
+                    toma = socket_for(room, 'T-%s' % nombre, x, y, rot,
+                                      fuentes.get('a', '') if rk == 'noc' else panel_of(fkey), [('cee-7-3', 2)])
                     pw, pd = size('pc')
                     x, y = _on_desk(desk, 0.2, 0.75, pw, pd)
                     pc = _room_item(b, room, 'pc', 'PC-%s' % nombre, x, y, rot)
                     patch(pc, 'eth0', o, 'A')
+                    plug(pc, toma)
                     cuenta['endpoints'] += 1
                     solo_pc = rk in _PC_ONLY and desk.get('label') != w['trainer']
                     if not solo_pc:
@@ -284,9 +291,10 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
                 y = float(zona['pos_y']) + (float(zona['depth_mm']) - idd) / 2
                 imp = _room_item(b, room, 'printer', 'IMP-%s' % lvl_tag, x, y)
                 o = outlet_for(fkey, room, 'R-IMP-%s' % lvl_tag, x + iw + 100, y, 0, mount='floor', base=0)
-                socket_for(room, 'T-IMP-%s' % lvl_tag, x + iw + 300, y, 0, panel_of(fkey),
+                toma = socket_for(room, 'T-IMP-%s' % lvl_tag, x + iw + 300, y, 0, panel_of(fkey),
                            [('cee-7-3', 1)], mount='floor', base=0)
                 patch(imp, 'eth0', o, 'A')
+                plug(imp, toma)
                 cuenta['printers'] += 1
             # An access point in the middle of the ceiling of every room big enough to need one.
             if rk not in _NO_AP and W * D >= 15e6:
@@ -324,7 +332,9 @@ def build(b, site: str, floors: dict, net: dict) -> dict:
                                  mount='ceiling', base_mm=2900)
                 wire(fkey, area, cam, 'eth0', x, y)
                 cuenta['cameras'] += 1
-    _cctv(b, floors, net, cuenta, wire, outlet_for, patch)
+    _cctv(b, floors, net, cuenta, wire, outlet_for, patch,
+          lambda fkey, room, label, x, y: socket_for(room, label, x, y, 0, panel_of(fkey), [('cee-7-3', 2)],
+                                                     mount='wall'), plug)
     _backbone(b, net, cab)
     return cuenta
 
@@ -350,7 +360,7 @@ _CAMERAS = (
 )
 
 
-def _cctv(b, floors, net, cuenta, wire, outlet_for, patch) -> None:
+def _cctv(b, floors, net, cuenta, wire, outlet_for, patch, socket_at, plug) -> None:
     """The video surveillance system (UNE-EN 62676): the cameras, PoE from the floor's access
     switch over their own horizontal run, as any outlet; the recorder in the data centre's
     second network rack, with its disks and a link to each core; a monitor in reception and a
@@ -385,6 +395,8 @@ def _cctv(b, floors, net, cuenta, wire, outlet_for, patch) -> None:
         pantalla = _room_item(b, room, 'display', label, x, D - 150, 0, mount='wall', base_mm=1400)
         o = outlet_for(fkey, room, 'R-' + label, x + 600, D - 150, 0, mount='wall')
         patch(pantalla, 'eth0', o, 'A')
+        # Y enchufada a la toma de al lado, como las de las salas de reuniones.
+        plug(pantalla, socket_at(fkey, room, 'T-' + label, x + 800, D - 150))
         cuenta['displays'] += 1
     # The signs, where one comes in.
     for fkey, rk, x, y in (('floor_ground', None, 12300, 18900), ('floor_basement', None, 1000, 11400),

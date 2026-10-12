@@ -16,6 +16,7 @@ import re
 from flask import g, has_request_context, session
 
 from lib.core.constants import BUILTIN_ROLE_UIDS, is_reserved_username
+from lib.core.apitokens import service as tok_svc
 from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS, filter_valid_permissions
 
 _UUID_RE = re.compile(
@@ -102,14 +103,21 @@ class _PermissionsMixin:
         Single source for the admin check; previously each route group defined
         its own variant and they had diverged (some missed the group-derived or
         legacy-name cases).
+
+        An API token is an admin only when it tracks its owner (`'*'`): a token scoped to a
+        few flags was taken for an administrator just because its owner was one, and every
+        "an admin may grant anything" shortcut let a `users_add` token mint a new admin.
         """
+        tok = getattr(g, 'api_token', None) if has_request_context() else None
+        if tok and tok_svc.decode_permissions(tok.get('permissions', '[]')) != tok_svc.ALL:
+            return False
         user = self._users.get(session.get('username', '')) or {}
         if self._is_admin_role(user.get('role', '')):
             return True
         for g_ref in user.get('groups', []):
-            g = self._groups.get(g_ref)
-            if g and g.get('enabled', True) and any(
-                    self._is_admin_role(r) for r in (g.get('roles') or [])):
+            grp = self._groups.get(g_ref)
+            if grp and grp.get('enabled', True) and any(
+                    self._is_admin_role(r) for r in (grp.get('roles') or [])):
                 return True
         return False
 
@@ -216,7 +224,11 @@ class _PermissionsMixin:
             return False
         if role_ref in set(BUILTIN_ROLE_UIDS.values()) or role_ref in BUILTIN_ROLE_PERMISSIONS:
             return True   # built-in editor/viewer — delegatable
-        return self._perms_grantable(self._get_role_permissions(role_ref))
+        # What the role WOULD grant, enabled or not: a disabled role grants nothing today, so
+        # it passed as within anyone's reach, and switching it on afterwards (a separate
+        # permission) handed its holders everything it carries.
+        custom = self._custom_roles.get(role_ref) or {}
+        return self._perms_grantable(filter_valid_permissions(custom.get('permissions', [])))
 
     def _groups_grantable(self, group_uids) -> bool:
         """Requester-context guard for assigning group MEMBERSHIP: a non-admin may only add a

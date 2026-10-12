@@ -149,7 +149,7 @@ function _svcActionsHtml(meta, compact) {
         const [act, cls, icon, key] = meta.running
             ? ['stop',  'warning', 'bi-stop-fill', 'svc_stop']
             : ['start', 'success', 'bi-play-fill', 'svc_start'];
-        primary = `<button class="btn btn-${cls} btn-sm" onclick="servicesControl('${escAttr(meta.key)}','${act}')"
+        primary = `<button class="btn btn-${cls} btn-sm" onclick="servicesControl(${jsStr(meta.key)},'${act}')"
             title="${escAttr(t(key))}"><i class="bi ${icon}${compact ? '' : ' me-1'}"></i>${compact ? '' : esc(t(key))}</button>`;
     }
     let cmdMenu = '';
@@ -157,7 +157,7 @@ function _svcActionsHtml(meta, compact) {
     if (cmds && canCtl) {
         const items = cmds.map(a =>
             `<li><button class="dropdown-item d-flex align-items-center gap-2"
-                onclick="servicesCommand('${escAttr(meta.key)}','${escAttr(a)}')">
+                onclick="servicesCommand(${jsStr(meta.key)},${jsStr(a)})">
                 <i class="bi ${escAttr(_SVC_CMD_ICON[a] || 'bi-play')}"></i>${esc(t('svc_cmd_' + a))}
             </button></li>`).join('');
         cmdMenu = `<div class="dropdown">

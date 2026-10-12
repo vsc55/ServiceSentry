@@ -725,7 +725,8 @@ function _ss3dFpsStep(ahora) {
     F.raf = 0;
     if (!F.on) return;
     const V = _SS3D.get(F.id);
-    if (!V || !V.escena) { F.raf = requestAnimationFrame(_ss3dFpsStep); return; }
+    // Sin visor no hay paseo: re-armarse aquí era un bucle de fotogramas para siempre.
+    if (!V || !V.escena) { ss3dFpsStop(); return; }
     // Up to a quarter of a second per frame: on a slow machine a frame takes long, and capping
     // it lower made walking slower than the speed it says.
     const dt = F.t ? Math.min(0.25, (ahora - F.t) / 1000) : 0;
@@ -779,6 +780,11 @@ window.addEventListener('keydown', (ev) => {
     const k = (ev.key || '').toLowerCase();
     if (k === 'escape') { ss3dFpsStop(); return; }
     if (!_SS3D_FPS_KEYS.has(k)) return;
+    // Lo que se teclea en un campo es del campo: sin el puntero capturado (el navegador lo niega
+    // un segundo tras un Esc) el paseo seguía y se comía las letras del buscador del 3D —y la «f»
+    // abría un rack—.
+    const destino = ev.target || {};
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(destino.tagName || '') || destino.isContentEditable) return;
     // Before the canvas's own keys, which would walk the orbit camera as well.
     ev.preventDefault();
     ev.stopPropagation();

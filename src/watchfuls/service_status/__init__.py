@@ -23,7 +23,7 @@
 
 Device-centric: each check binds to a device (``device_uid``).  The service state is
 read on that device via :meth:`ModuleBase.device_exec` — locally or over SSH — using
-an OS-appropriate command (``systemctl`` on Linux, ``sc`` on Windows,
+an OS-appropriate command (``systemctl`` on Linux, ``sc.exe`` on Windows,
 ``launchctl`` on macOS, ``service`` on FreeBSD).  Optional auto-remediation
 starts/stops the service to restore the expected state.  ``discover`` lists the
 services of the machine running the web admin (autocomplete helper).
@@ -52,14 +52,17 @@ def _win_quote(s: str) -> str:
 
 _STATUS_CMDS = {
     'linux':   'systemctl is-active {svc}',
-    'windows': 'sc query {svc}',
+    # `sc.exe`, never bare `sc`: over SSH a Windows device usually lands in PowerShell, where
+    # `sc` is the alias of Set-Content — the "query" wrote a file and the check never read a
+    # service. `sc.exe` is the same binary under cmd.exe.
+    'windows': 'sc.exe query {svc}',
     'darwin':  'launchctl list {svc}',
     'freebsd': 'service {svc} status',
 }
 # Per-OS start/stop command ({action} = start|stop).
 _ACTION_CMDS = {
     'linux':   'systemctl {action} {svc}',
-    'windows': 'sc {action} {svc}',
+    'windows': 'sc.exe {action} {svc}',
     'darwin':  'launchctl {action} {svc}',
     'freebsd': 'service {svc} {action}',
 }
@@ -115,6 +118,12 @@ class Watchful(ServiceDiscovery, ModuleBase):
             expected = 'running'
         remediation = bool(item.get('remediation', False))
         os_ = self.device_os(item)
+        if os_ == 'auto':
+            # A remote device left on `auto` that has not reported its platform: the
+            # monitor keeps the token for the consumer to settle, and every other OS module
+            # reads it as Linux (their per-OS tables fall back to it). Refusing it here made
+            # the same device work for cpu/raid/ram and fail as "unsupported" for services.
+            os_ = 'linux'
         if os_ not in _STATUS_CMDS:
             self.dict_return.set(key, False,
                                  self._msg('svc_unsupported_os', label, os_),

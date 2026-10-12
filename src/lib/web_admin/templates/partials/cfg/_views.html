@@ -492,7 +492,7 @@ function _cfgViewRail(c) {
             const title = (where['cfgcol_' + card.id] || {}).card || card.id;
             const active = !searching && card.id === _cfgRailCard;
             html += `<button type="button" class="ss-rail-item${active ? ' active' : ''}"
-                    onclick="setConfigRailCard('${escAttr(card.id)}')" title="${escAttr(title)}">
+                    onclick="setConfigRailCard(${jsStr(card.id)})" title="${escAttr(title)}">
                 <i class="bi ${escAttr(card.icon || 'bi-dot')} me-1"></i>
                 <span class="text-truncate">${esc(title)}</span>
                 ${n ? `<span class="badge ${badge} ms-auto">${n}</span>` : ''}

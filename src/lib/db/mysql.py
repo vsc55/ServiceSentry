@@ -42,7 +42,11 @@ class MySQLConnector(BaseConnector):
     KIND              = 'mysql'
     DDL_AUTOINCREMENT = 'INT AUTO_INCREMENT PRIMARY KEY'
     DDL_REAL          = 'DOUBLE'
-    DDL_TEXT          = 'TEXT'
+    # LONGTEXT, not TEXT: MySQL's TEXT holds 64 KB, and the panel keeps more than that in a
+    # text column — an HTML email template with its logo in `config.value`, a config diff in
+    # `audit.detail`, ten thousand log lines in `job_history.log`. In strict mode the write
+    # failed (the audit row lost, the job left `running`); otherwise it was cut short.
+    DDL_TEXT          = 'LONGTEXT'
     DDL_INTEGER       = 'INT'
     DDL_DATETIME      = 'DATETIME'
     NEEDS_THREAD_CLEANUP = True    # per-thread network connection → close on thread exit
@@ -133,14 +137,54 @@ class MySQLConnector(BaseConnector):
         self.execute_ddl(f'DROP TABLE IF EXISTS {q(bak)}')
         self.execute(create_table_ddl(spec, self._type_map, q, name=tmp, extra_columns=extras,
                                       text_default_parens=self.DDL_TEXT_DEFAULT_PARENS))
+        before_swap = after_swap = None
         if has_common:
             self.execute(f'INSERT INTO {q(tmp)} ({collist}) '
                          f'SELECT {select_list} FROM {q(spec.name)}')
+            plan = (spec, actual_cols, collist, select_list)
+            before_swap = self._rebuild_catch_up_sql(*plan, src=spec.name, dst=tmp, ignore=False)
+            after_swap = self._rebuild_catch_up_sql(*plan, src=bak, dst=spec.name, ignore=True)
         self.commit()
+        # Rows other sessions wrote to the old table while it was being copied are in neither
+        # the copy nor — after the swap — the live table: the rebuild lost them. PostgreSQL
+        # locks the table for the whole copy; here that is not available (`RENAME TABLE` is
+        # refused under `LOCK TABLES`, error 1192), so the late rows are copied across by
+        # primary key instead, in two passes:
+        #   1. before the swap, old → copy: catches everything written during the long copy;
+        #      a failure here leaves the original untouched, as any failure before the swap.
+        #   2. after the swap, backup → live: catches what landed in the short gap between
+        #      pass 1 and the RENAME. IGNORE, because the swap has happened and the backup is
+        #      about to go — a row that cannot be placed must not abort what is left.
+        # Limits, by design: only INSERTs are recovered (an UPDATE or DELETE made to a row
+        # already copied is not replayed), only on tables with a primary key, and a late row
+        # whose id was meanwhile handed to a new INSERT on the live table (possible only in
+        # the gap between the swap and pass 2) loses to it.
+        if before_swap:
+            self.execute(before_swap)
+            self.commit()
         # Atomic swap — if anything above failed, the original table is untouched.
         self.execute_ddl(f'RENAME TABLE {q(spec.name)} TO {q(bak)}, {q(tmp)} TO {q(spec.name)}')
+        if after_swap:
+            self.execute(after_swap)
+            self.commit()
         self._recreate_indexes_after_rebuild(spec, actual_indexes)
         self.execute_ddl(f'DROP TABLE IF EXISTS {q(bak)}')
+
+    def _rebuild_catch_up_sql(self, spec, actual_cols, collist, select_list, *,
+                              src: str, dst: str, ignore: bool) -> str | None:
+        """``INSERT [IGNORE] INTO dst (cols) SELECT … FROM src`` of the rows *src* has and
+        *dst* lacks, matched by primary key — both passes of :meth:`_apply_rebuild`.  ``None``
+        when there is no key to match on: a table without a primary key, or one whose key
+        columns the old table does not have yet."""
+        q = self.quote_ident
+        pk = list(spec.composite_pk) or [c.name for c in spec.columns if c.primary_key]
+        old = {c.name for c in actual_cols}
+        if not pk or any(c not in old for c in pk):
+            return None
+        match = ' AND '.join(f'd.{q(c)} = s.{q(c)}' for c in pk)
+        return (f'INSERT {"IGNORE " if ignore else ""}INTO {q(dst)} ({collist}) '
+                f'SELECT {select_list} FROM {q(src)} AS s '
+                f'WHERE NOT EXISTS (SELECT 1 FROM {q(dst)} AS d WHERE {match})')
 
     # ── Schema ────────────────────────────────────────────────────────────────
 
@@ -179,6 +223,37 @@ class MySQLConnector(BaseConnector):
                 (table,),
             )
             return {row[0] for row in cur.fetchall()}
+
+    def reconcile_table(self, spec):
+        diff = super().reconcile_table(spec)
+        self._widen_text(spec)
+        return diff
+
+    def _widen_text(self, spec) -> None:
+        """Turn this table's plain TEXT columns into LONGTEXT, in place.
+
+        A table created before `DDL_TEXT` became LONGTEXT keeps its TEXT columns, and the
+        schema diff calls both «TEXT», so nothing else would ever widen them. Only columns no
+        key covers (those are a bounded VARCHAR), and with their nullability and default as
+        declared, so the next reconcile sees nothing to change.
+        """
+        from .schema import _index_key_cols                              # noqa: PLC0415
+        from .schema import default_clause                               # noqa: PLC0415
+        keyed = {c for idx in spec.indexes for c in _index_key_cols(idx.columns)}
+        keyed |= set(spec.composite_pk or ())
+        actual = {c.name: c for c in self.describe_table(spec.name)}
+        q = self.quote_ident
+        for col in spec.columns:
+            if (col.type.upper() != 'TEXT' or col.primary_key or col.unique
+                    or col.name in keyed):
+                continue
+            got = actual.get(col.name)
+            if got is None or str(got.type).lower() not in ('text', 'tinytext', 'mediumtext'):
+                continue
+            clause = 'LONGTEXT' + ('' if col.nullable else ' NOT NULL')
+            if col.default is not None:
+                clause += ' ' + default_clause(col.default, 'LONGTEXT', self.DDL_TEXT_DEFAULT_PARENS)
+            self.execute_ddl(f'ALTER TABLE {q(spec.name)} MODIFY COLUMN {q(col.name)} {clause}')
 
     def describe_table(self, table: str) -> list[ColumnInfo]:
         """Introspect *table*'s columns from ``information_schema.columns`` (current
@@ -233,23 +308,58 @@ class MySQLConnector(BaseConnector):
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
+
+    # ── Transaction state ─────────────────────────────────────────────────────
+    #
+    # The driver opens a transaction at the first statement and keeps it until a commit. A
+    # thread that only READS —a service's config watch, a polling loop— never committed, so
+    # it held its table locks (PostgreSQL's AccessShareLock, MySQL's metadata lock) forever,
+    # and an upgrade's ALTER on that table waited for ever behind them, with every later query
+    # queued behind the ALTER. So a read that is not inside `begin()` and follows no
+    # uncommitted write ends its transaction at once — what SQLite, in autocommit, always did.
+
+    def _tx(self):
+        loc = self._local
+        if not hasattr(loc, 'pending'):
+            loc.pending = loc.explicit = False
+        return loc
+
+    def begin(self) -> None:
+        self._tx().explicit = True
+
+    def _settled(self) -> None:
+        loc = self._tx()
+        loc.pending = loc.explicit = False
+
+    def _end_read(self, conn) -> None:
+        loc = self._tx()
+        if not loc.pending and not loc.explicit and not self._config.get('autocommit'):
+            conn.commit()
+
     def fetchall(self, sql: str, params: tuple = ()) -> list[tuple]:
         self._trace_sql(sql)
-        with self._conn().cursor() as cur:
+        conn = self._conn()
+        with conn.cursor() as cur:
             cur.execute(self._adapt_sql(sql), params)
-            return cur.fetchall()
+            rows = cur.fetchall()
+        self._end_read(conn)
+        return rows
 
     def fetchone(self, sql: str, params: tuple = ()) -> tuple | None:
         self._trace_sql(sql)
-        with self._conn().cursor() as cur:
+        conn = self._conn()
+        with conn.cursor() as cur:
             cur.execute(self._adapt_sql(sql), params)
-            return cur.fetchone()
+            row = cur.fetchone()
+        self._end_read(conn)
+        return row
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def execute(self, sql: str, params: tuple = ()) -> int:
         self._trace_sql(sql)
         conn = self._conn()
+        self._tx().pending = True
         with conn.cursor() as cur:
             cur.execute(self._adapt_sql(sql), params)
             return cur.rowcount
@@ -257,15 +367,18 @@ class MySQLConnector(BaseConnector):
     def executemany(self, sql: str, params_list: list[tuple]) -> int:
         self._trace_sql(sql)
         conn = self._conn()
+        self._tx().pending = True
         with conn.cursor() as cur:
             cur.executemany(self._adapt_sql(sql), params_list)
             return cur.rowcount
 
     def commit(self) -> None:
         self._conn().commit()
+        self._settled()
 
     def rollback(self) -> None:
         self._conn().rollback()
+        self._settled()
 
     # ── Maintenance ───────────────────────────────────────────────────────────
 

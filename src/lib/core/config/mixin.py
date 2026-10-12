@@ -208,6 +208,19 @@ class _ConfigMixin:
         # fail2ban string fields + push into the live manager (it sets _IPBAN_DURATIONS /
         # _IPBAN_WHITELIST from wa_cfg itself, wiring in _IpBanMixin).
         self._apply_ipban_config(wa_cfg)
+        self._push_job_history_limits()
+
+    def _push_job_history_limits(self) -> None:
+        """Hand the job-history limits to :mod:`lib.core.jobs.record`, which holds its own
+        copy (a job finishes in a thread with no web admin to read them from). Taken once
+        when the stores were built — before the saved config and the environment applied —
+        so neither the Config screen nor `SS_JOBS_HISTORY_*` ever reached it."""
+        from lib.core.jobs import record as jobs_record  # noqa: PLC0415
+        jobs_record.set_limits({
+            'keep':  getattr(self, '_JOBS_HISTORY_KEEP', None),
+            'days':  getattr(self, '_JOBS_HISTORY_DAYS', None),
+            'lines': getattr(self, '_JOBS_HISTORY_LINES', None),
+        })
 
     def _apply_config_on_save(self, old_data: dict, new_data: dict, to_apply: dict) -> None:
         """Apply a just-saved config to the running instance: the shared runtime attributes
@@ -355,3 +368,4 @@ class _ConfigMixin:
 
         self._env_locked = frozenset(locked)
         self._env_override_values = overrides
+        self._push_job_history_limits()

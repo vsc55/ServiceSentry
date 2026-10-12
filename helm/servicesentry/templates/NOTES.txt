@@ -27,16 +27,27 @@ Roles:
 2. The distributed control poke is DISABLED (control.enabled=false): service control
    propagates via the periodic DB reconcile (no instant poke). Set control.token to
    enable it.
+{{- else if and (not .Values.control.token) .Values.existingSecret }}
+
+2. control.enabled=true with existingSecret and no control.token: the chart cannot tell
+   whether your Secret carries SS_CONTROL_TOKEN, so the control ports are not probed. Put
+   the token in that Secret (e.g. `openssl rand -hex 32`) for the instant poke.
 {{- else if not .Values.control.token }}
 
-2. WARNING: control.enabled=true but no control.token is set — the HTTP poke is OFF
-   (no token, no listener). Set control.token (e.g. `openssl rand -hex 32`) so the
-   web can poke the dedicated services for instant control.
+2. control.token was empty: a random one was generated into the release Secret and is kept
+   across upgrades.
 {{- end }}
 
 {{- if and (ne .Values.database.driver "sqlite") (not .Values.database.host) }}
 
 WARNING: database.host is empty. Point it at your MySQL/PostgreSQL.
+{{- end }}
+
+{{- if not .Values.persistence.enabled }}
+
+WARNING: persistence.enabled=false — /var/lib/ServiSesentry is an emptyDir. Backups, uploaded
+pictures, MIBs and SNMP profiles are lost whenever a pod is replaced and are not shared
+between pods. Set persistence.enabled=true (ReadWriteMany storage) or persistence.existingClaim.
 {{- end }}
 
 Docs: see docs/caso-kubernetes.md and docs/explica-arquitectura.md (distributed control plane).

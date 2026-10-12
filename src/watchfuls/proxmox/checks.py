@@ -26,9 +26,12 @@ def _is_security(upd: dict) -> bool:
 
 
 # Substrings in a Ceph error that mean "Ceph is simply not installed/initialised"
-# (so the check reports it as not-configured instead of failing).
-_CEPH_ABSENT = ('rados', 'not initialized', 'not installed', 'binary',
-                'no such file', 'command', 'unable to')
+# (so the check reports it as not-configured instead of failing). Kept narrow on purpose:
+# a broken Ceph also speaks through rados ("rados_connect failed - Connection timed out",
+# "got timeout"), and matching the bare word "rados" turned a dead cluster into an OK.
+# Proxmox without Ceph answers "rados_connect failed - No such file or directory" (no
+# ceph.conf), "binary not installed: ..." or "Ceph is not initialized".
+_CEPH_ABSENT = ('not initialized', 'not installed', 'no such file')
 
 
 class ClusterChecks:

@@ -219,9 +219,25 @@ class _AuthMixin:
         as a landing page, and reading only the core half meant choosing one and being sent to
         the admin panel anyway — the setting saved, the redirect ignored it, and nothing said
         so."""
+        by_id = self._landing_destinations()
+        entry = by_id.get(self._landing_id(user, by_id=by_id)) or by_id.get('admin')
+        return (entry.get('url') if entry else '/') or '/'
+
+    @staticmethod
+    def _landing_destinations() -> dict:
+        """Every landing id that resolves, to its page — core pages, module sections and
+        their views."""
         by_id = {p['id']: p for p in home_pages()}
         by_id.update({p['id']: p for p in landing_pages()})
-        cand = str(user.get('landing_page') or '').strip()
+        return by_id
+
+    def _landing_id(self, user: dict, *, own: bool = True, by_id: dict | None = None) -> str:
+        """The landing id :meth:`_landing_url` sends *user* to. With ``own=False``, what
+        "inherit" resolves to (groups → global), which is what the account settings show as
+        the default — one resolution for both, so the screen cannot name a page the redirect
+        then ignores."""
+        by_id = by_id if by_id is not None else self._landing_destinations()
+        cand = str(user.get('landing_page') or '').strip() if own else ''
         if cand not in by_id:
             glp = sorted(
                 ((self._uid_to_group_label(g) or g, self._groups[g].get('landing_page', ''))
@@ -231,8 +247,7 @@ class _AuthMixin:
             cand = glp[0][1] if glp else ''
         if cand not in by_id:
             cand = str(getattr(self, '_LANDING_PAGE', '') or '').strip()
-        entry = by_id.get(cand) or by_id.get('admin')
-        return (entry.get('url') if entry else '/') or '/'
+        return cand if cand in by_id else 'admin'
 
     def _auth_method_label(self, auth_source, lang: str = '', cfg: dict = None) -> str:
         """Friendly name for how a user authenticated ('local'/'ldap'/'oidc'/…), localised

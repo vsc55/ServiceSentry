@@ -81,6 +81,8 @@ async function _dcpLoadFeatures(roomUid) {
     // nombre de cada cosa (`p2dLoadKinds`).
     const [d] = await Promise.all([apiGet(`/api/v1/dcim/rooms/${encodeURIComponent(roomUid)}/features`),
                                    p2dEnsureKinds('dcim')]);
+    // De la sala que sigue abierta: las piezas de A no se pintan —ni se editan— en el plano de B.
+    if (!_dcimPlan || !_dcimPlan.room || _dcimPlan.room.uid !== roomUid) return;
     _dcpFeat = d && d.kinds ? d : {features: [], kinds: {}, layers: ['floor', 'room', 'air']};
 }
 
@@ -743,7 +745,7 @@ function _dcpRackDrop(uid) { return _dcObjDrop('rack', uid); }
  *  quita, las flechas mueven a 10 cm o a una baldosa con Mayús, Ctrl+G agrupa—, solo fuera de un
  *  campo de texto: una `r` escrita en el nombre de un rack no debe girar nada. */
 function _dcpKey(ev) {
-    if (!_dcimPlan) return;
+    if (!_dcimPlan || !_dcKeysHere()) return;
     if (p2dKeyDown(_dcpP2d, ev)) ev.preventDefault();
 }
 

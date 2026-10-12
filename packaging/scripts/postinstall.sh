@@ -51,13 +51,40 @@ fi
 
 chmod 0750 /etc/ServiSesentry /var/lib/ServiSesentry 2>/dev/null || true
 
+# Who the services run as. A FRESH install (deb: `configure` with no previous version;
+# rpm: $1 = 1) runs them as the dedicated `servicesentry` user: servicesentry-user creates
+# it, hands it /etc/ServiSesentry and /var/lib/ServiSesentry, and writes the systemd drop-in
+# (User=, AmbientCapabilities=CAP_NET_RAW CAP_NET_BIND_SERVICE). An UPGRADE changes nothing:
+# its config and database are root's, and the operator opts in with `servicesentry-user
+# enable`. The drop-in is not a packaged file, so the units stay what the package says.
+is_fresh_install() {
+    case "${1:-}" in
+        configure) [ -z "${2:-}" ] ;;
+        1)         true ;;
+        *)         false ;;
+    esac
+}
+if is_fresh_install "$@"; then
+    sh /usr/sbin/servicesentry-user enable --no-restart \
+        || echo "ServiceSentry: could not set up the servicesentry user; the services run as root." >&2
+fi
+
 # systemd only: on an OpenRC box (Gentoo installs through the ebuild) there is nothing to
 # reload, and failing here would abort an otherwise good install.
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
     systemctl daemon-reload || true
-    echo "ServiceSentry: installed. Start it with:"
-    echo "    systemctl enable --now ServiSesentry-web    # the admin panel (port 8080)"
-    echo "    systemctl enable --now ServiSesentry        # the monitoring scheduler"
+    # An upgrade (deb: `configure <old version>`; rpm: $1 >= 2): what was running runs the new
+    # version. try-restart touches only units that are active — never starts one nobody had.
+    if { [ "${1:-}" = "configure" ] && [ -n "${2:-}" ]; } || [ "${1:-0}" -ge 2 ] 2>/dev/null; then
+        for unit in ServiSesentry-web ServiSesentry; do
+            systemctl try-restart "${unit}" 2>/dev/null || true
+        done
+        echo "ServiceSentry: upgraded; running services restarted."
+    else
+        echo "ServiceSentry: installed. Start it with:"
+        echo "    systemctl enable --now ServiSesentry-web    # the admin panel (port 8080)"
+        echo "    systemctl enable --now ServiSesentry        # the monitoring scheduler"
+    fi
 else
     echo "ServiceSentry: installed (no systemd detected — start it however this system does)."
 fi

@@ -162,10 +162,24 @@ def origin_of(tiles: str) -> str:
     rara sería exactamente lo contrario de lo que hace esta función.
     """
     try:
+        import re                                                    # noqa: PLC0415
         from urllib.parse import urlsplit                            # noqa: PLC0415
         p = urlsplit(str(tiles or '').strip())
-        if p.scheme in ('http', 'https') and p.netloc:
-            return f'{p.scheme}://{p.netloc}'
+        if p.scheme not in ('http', 'https') or not p.netloc:
+            return ''
+        # Rebuilt from the host and the port, never the raw netloc: this string goes into the
+        # Content-Security-Policy header, and a template like `https://x; script-src *;/{z}`
+        # carried its own directives into it (and `user:pass@` its credentials).
+        host = p.hostname or ''
+        port = p.port                                # ValueError on a port that is not one
+        if ':' in host:
+            if not re.fullmatch(r'[0-9a-f:.]+', host):
+                return ''
+            host = f'[{host}]'
+        elif not re.fullmatch(r'[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*',
+                              host):
+            return ''
+        return f'{p.scheme}://{host}' + (f':{port}' if port is not None else '')
     except Exception:                                # pylint: disable=broad-except
         pass
     return ''

@@ -116,6 +116,9 @@ class Exec:
                 shlex.split(self.config.command),
                 capture_output=True,
                 text=True,
+                # One byte the locale cannot decode raised UnicodeDecodeError, swallowed
+                # below as an empty result: the check saw no output at all.
+                errors='replace',
                 timeout=self.config.timeout,
                 check=False
             )
@@ -162,8 +165,10 @@ class Exec:
                 self.config.command,
                 timeout=self.config.timeout
             )
-            read_out = stdout.read().decode() if stdout else ""
-            read_err = stderr.read().decode() if stderr else ""
+            # Lenient, for the same reason as the local run: one odd byte must not cost the
+            # whole output.
+            read_out = stdout.read().decode('utf-8', errors='replace') if stdout else ""
+            read_err = stderr.read().decode('utf-8', errors='replace') if stderr else ""
             exit_code = stdout.channel.recv_exit_status()
 
             return ExecResult(

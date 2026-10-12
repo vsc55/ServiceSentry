@@ -200,7 +200,7 @@ def register(app, wa, C):
                         C.owner_of(store, said, 'rack', rack['uid']), allowed)
                     if visible or dcim_svc.llega(reach, 'rack', rack['uid']):
                         pdus.extend(store.pdus_of(rack['uid']))
-        out = dcim_svc.power_path(fuentes, pdus)
+        out = dcim_svc.power_path(fuentes, pdus, **_across_sites(store, said, allowed))
         out['sources'] = fuentes
         out['kinds'] = list(SOURCE_KINDS)
         # Lo que cuelga de cada una, DIRECTAMENTE: la regleta y su armario, para poder ir a él.
@@ -304,6 +304,20 @@ def register(app, wa, C):
                             'source': ligado.get(it['uid'], '')})
         return out
 
+    def _across_sites(store, said, allowed) -> dict:
+        """What the chain needs to follow a source into another site, and what it may say there.
+
+        The list each view hands the chain is ONE site's sources; a hop to another site's is
+        fetched by uid. That site is shown by name to whoever may see it, and as an anonymous
+        "fed from another site" to whoever may not — the dependency is the thing worth seeing,
+        whose UPS it is is not this reader's to know."""
+        def may_see_site(sede):
+            return dcim_owners.may_see(C.owner_of(store, said, 'site', sede), allowed)
+
+        def site_name(sede):
+            return str((store.sites.get(sede) or {}).get('name') or '')
+        return {'fetch': store.sources.get, 'may_see_site': may_see_site, 'site_name': site_name}
+
     def _site_of_rack(store, rack_uid):
         rack = store.racks.get(str(rack_uid or '')) or {}
         room = store.rooms.get(str(rack.get('room_uid') or '')) or {}
@@ -385,6 +399,34 @@ def register(app, wa, C):
             return wa._t('dcim_upstream_loop')
         return ''
 
+    def _upstream_hidden(store, nuevo) -> bool:
+        """Whether *nuevo*, the source asked to hang from, is of a site this caller may not see.
+
+        Hanging from it names it, and the chain then draws it: the uid of another company's UPS
+        typed into a request was enough to put one's own panel under it."""
+        fila = store.sources.get(str(nuevo or '')) if nuevo else None
+        sede = str((fila or {}).get('site_uid') or '')
+        return bool(sede) and not dcim_owners.may_see(
+            C.owner_of(store, store.owners_map(), 'site', sede), C.seen())
+
+    def _upstream_denied(store, own_site, nuevo) -> bool:
+        """Whether this caller may NOT hang a source of *own_site* from *nuevo*.
+
+        A chain may cross sites — a building fed from the campus substation next door is real —
+        but hanging from another site's source draws your panel into THAT site's chain, which
+        its operators will read when they ask "what goes down if this trips". So a cross-site
+        hop asks to be able to WRITE the upstream's site, the same right it takes to declare a
+        source there. Same site keeps today's rule: seeing it is enough, because writing the
+        source being edited already means writing that site.
+        """
+        if _upstream_hidden(store, nuevo):
+            return True
+        fila = store.sources.get(str(nuevo or '')) if nuevo else None
+        sede = str((fila or {}).get('site_uid') or '')
+        if not sede or sede == str(own_site or ''):
+            return False
+        return not C.may_write(store, store.owners_map(), C.seen(), 'site', sede)
+
     def _source_writable(uid):
         """Una fuente cuelga de una SEDE: quien puede editar esa sede la declara.
 
@@ -423,6 +465,8 @@ def register(app, wa, C):
         malo = _upstream_bad(store, '', data.get('upstream_uid'))
         if malo:
             return jsonify({'error': malo}), 400
+        if _upstream_denied(store, sede, data.get('upstream_uid')):
+            return jsonify({'error': wa._t('access_denied')}), 403
         malo = (_source_item_bad(store, '', data.get('item_uid'), sede)
                 or _source_piece_bad(store, '', data.get('feature_uid'), sede))
         if malo:
@@ -447,6 +491,9 @@ def register(app, wa, C):
             malo = _upstream_bad(store, uid, data.get('upstream_uid'))
             if malo:
                 return jsonify({'error': malo}), 400
+            if _upstream_denied(store, str(row.get('site_uid') or ''),
+                                data.get('upstream_uid')):
+                return jsonify({'error': wa._t('access_denied')}), 403
         if 'item_uid' in data:
             malo = _source_item_bad(store, uid, data.get('item_uid'), str(row.get('site_uid') or ''))
             if malo:
@@ -488,6 +535,20 @@ def register(app, wa, C):
         hijos: dict = {}
         for f in store.sources.list():
             hijos.setdefault(str(f.get('upstream_uid') or ''), []).append(f)
+        # **Every row the copy would write, judged before the first one.** The copy keeps each
+        # row's site, and a chain may run into another site: being able to write the root's
+        # site wrote rows into sites this caller could not create one in.
+        said, allowed = store.owners_map(), C.seen()
+        sedes, pendientes, mirados = set(), [row], set()
+        while pendientes and len(mirados) < _CLONE_MAX:
+            fila = pendientes.pop()
+            if str(fila.get('uid') or '') in mirados:
+                continue
+            mirados.add(str(fila.get('uid') or ''))
+            sedes.add(str(fila.get('site_uid') or ''))
+            pendientes.extend(hijos.get(str(fila.get('uid') or ''), ()))
+        if any(s and not C.may_write(store, said, allowed, 'site', s) for s in sedes):
+            return jsonify({'error': wa._t('access_denied')}), 403
         sufijo = wa._t('dcim_cat_copy_suffix')
         hechas: list = []
         visto: set = set()
@@ -596,7 +657,8 @@ def register(app, wa, C):
         sede = _site_of_rack(store, uid)
         fuentes = [f for f in store.sources.list()
                    if str(f.get('site_uid') or '') in (sede, '')]
-        camino = dcim_svc.power_path(fuentes, pdus)
+        camino = dcim_svc.power_path(
+            fuentes, pdus, **_across_sites(store, store.owners_map(), C.seen()))
         por_uid = {str(p['uid']): p for p in pdus}
         for fila in out.get('pdus') or []:
             fila['source_uid'] = str((por_uid.get(str(fila['uid'])) or {}).get('source_uid') or '')
@@ -651,14 +713,24 @@ def register(app, wa, C):
                 # BOTH racks it joins. Unchecked, a cable could name an item that does not exist,
                 # or one in a rack this caller may not touch — and the answer told them it
                 # existed.
-                malo = _cable_end_bad(data.get('b_item'))
-                if malo:
-                    return jsonify({'error': wa._t(malo[0])}), malo[1]
+                # BOTH ends: the owner above is whichever end has a rack, so with the far end
+                # in a rack the near one was never looked at — a cable from another company's
+                # desk PC, or from an item that does not exist, was accepted.
+                for end in ('a_item', 'b_item'):
+                    malo = _cable_end_bad(data.get(end))
+                    if malo:
+                        return jsonify({'error': wa._t(malo[0])}), malo[1]
                 malo = _loop_bad(data.get('a_item'), data.get('b_item'),
                                  data.get('a_port'), data.get('b_port'))
                 if malo:
                     return jsonify({'error': malo}), 400
             if kind == 'feeds':
+                # What is plugged in, by the same rule as a cable's end: it exists and this
+                # caller may write it. Only the strip's rack was checked, so another company's
+                # server, or a uid that names nothing, could be plugged into one's own strip.
+                malo = _cable_end_bad(data.get('item_uid'))
+                if malo:
+                    return jsonify({'error': wa._t(malo[0])}), malo[1]
                 malo = _outlet_bad(data.get('pdu_uid'), data.get('outlet'))
                 if malo:
                     return jsonify({'error': malo}), 400

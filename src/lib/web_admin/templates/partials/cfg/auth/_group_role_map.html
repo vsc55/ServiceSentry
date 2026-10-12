@@ -48,8 +48,8 @@ function _renderGroupRoleMap(sec, rawValue) {
     const entries = Object.entries(mapObj);
     const tableId = `grm_${sec}`;
     const _rowOnChange = hasNames
-        ? `_grmRowIdChanged(this,'${escAttr(sec)}')`
-        : `_grmUpdate('${escAttr(sec)}')`;
+        ? `_grmRowIdChanged(this,${jsStr(sec)})`
+        : `_grmUpdate(${jsStr(sec)})`;
     let rows = '';
     let _needsAutoFetch = false;
     entries.forEach(([grp, role], i) => {
@@ -62,7 +62,7 @@ function _renderGroupRoleMap(sec, rawValue) {
                 <input type="text" class="form-control form-control-sm grm-group font-monospace"
                     value="${escAttr(grp)}" placeholder="${escAttr(t('grm_group'))}"
                     style="font-size:.8em"
-                    oninput="_grmUpdate('${escAttr(sec)}')"
+                    oninput="_grmUpdate(${jsStr(sec)})"
                     onchange="${_rowOnChange}">
             </td>
             ${hasNames ? `<td class="pe-2 grm-name-cell">
@@ -72,11 +72,11 @@ function _renderGroupRoleMap(sec, rawValue) {
             </td>` : ''}
             <td class="pe-2">
                 <select class="form-select form-select-sm grm-role"
-                    onchange="_grmUpdate('${escAttr(sec)}')">${_grmRoleOpts(role)}</select>
+                    onchange="_grmUpdate(${jsStr(sec)})">${_grmRoleOpts(role)}</select>
             </td>
             <td style="width:2rem">
                 <button type="button" class="btn btn-sm btn-danger py-0 px-1"
-                    onclick="_grmRemoveRow(this,'${escAttr(sec)}')"
+                    onclick="_grmRemoveRow(this,${jsStr(sec)})"
                     title="${escAttr(t('delete_tt'))}">
                     <i class="bi bi-trash3"></i>
                 </button>
@@ -112,15 +112,15 @@ function _renderGroupRoleMap(sec, rawValue) {
             ${emptyMsg}
             <div class="d-flex align-items-start gap-2 flex-wrap">
                 <button type="button" class="btn btn-sm btn-secondary"
-                    onclick="_grmAddRow('${escAttr(sec)}')">
+                    onclick="_grmAddRow(${jsStr(sec)})">
                     <i class="bi bi-plus-lg me-1"></i>${esc(t('grm_add'))}
                 </button>
                 ${_grmSrc ? `<button type="button" class="btn btn-sm btn-secondary"
-                    id="btnFetchGroups_${escAttr(sec)}" onclick="${escAttr(_grmSrc.fetch_fn)}('${escAttr(sec)}')">
+                    id="btnFetchGroups_${escAttr(sec)}" onclick="${escAttr(_grmSrc.fetch_fn)}(${jsStr(sec)})">
                     <i class="bi ${escAttr(_grmSrc.icon)} me-1"></i>${esc(t(_grmSrc.label_key))}
                 </button>` : ''}
                 ${hasNames && entries.length ? `<button type="button" class="btn btn-sm btn-secondary"
-                    id="btnRefreshGrmNames_${escAttr(sec)}" onclick="_grmFetchDisplayNames('${escAttr(sec)}',true)">
+                    id="btnRefreshGrmNames_${escAttr(sec)}" onclick="_grmFetchDisplayNames(${jsStr(sec)},true)">
                     <i class="bi bi-arrow-clockwise me-1"></i>${esc(t('grm_refresh_names'))}
                 </button>` : ''}
             </div>
@@ -337,15 +337,15 @@ function _grmAddRow(sec, prefill, label) {
     const _grmSrc = _grmGroupSource(sec);
     const hasNames = !!_grmSrc;
     const _inputOnChange = hasNames
-        ? `_grmRowIdChanged(this,'${escAttr(sec)}')`
-        : `_grmUpdate('${escAttr(sec)}')`;
+        ? `_grmRowIdChanged(this,${jsStr(sec)})`
+        : `_grmUpdate(${jsStr(sec)})`;
     tr.innerHTML = `
         <td class="pe-2">
             <input type="text" class="form-control form-control-sm grm-group${hasNames ? ' font-monospace' : ''}"
                 value="${escAttr(prefill)}"
                 placeholder="${escAttr(t('grm_group'))}"
                 ${hasNames ? 'style="font-size:.8em"' : ''}
-                oninput="_grmUpdate('${escAttr(sec)}')"
+                oninput="_grmUpdate(${jsStr(sec)})"
                 onchange="${_inputOnChange}">
         </td>
         ${hasNames ? `<td class="pe-2 grm-name-cell">
@@ -354,11 +354,11 @@ function _grmAddRow(sec, prefill, label) {
         </td>` : ''}
         <td class="pe-2">
             <select class="form-select form-select-sm grm-role"
-                onchange="_grmUpdate('${escAttr(sec)}')">${_grmRoleOpts('none')}</select>
+                onchange="_grmUpdate(${jsStr(sec)})">${_grmRoleOpts('none')}</select>
         </td>
         <td style="width:2rem">
             <button type="button" class="btn btn-sm btn-danger py-0 px-1"
-                onclick="_grmRemoveRow(this,'${escAttr(sec)}')"
+                onclick="_grmRemoveRow(this,${jsStr(sec)})"
                 title="${escAttr(t('delete_tt'))}">
                 <i class="bi bi-trash3"></i>
             </button>

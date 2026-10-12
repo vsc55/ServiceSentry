@@ -53,7 +53,9 @@ class TestTheDesks:
         for uid, it in items.items():
             if it['role'] not in _END:
                 continue
-            paths = dcim_svc.trace(store, uid)
+            # Its data paths: the power lead into its socket is a path too, and ends there.
+            paths = [p for p in dcim_svc.trace(store, uid)
+                     if (p[1].get('cable') or {}).get('kind') != 'power']
             if not paths or any(p[-1]['role'] != 'switch' for p in paths):
                 sin.append(it['label'])
         assert sin == []
@@ -119,6 +121,22 @@ class TestTheJacksAndTheSockets:
             if rj45 < 2 or any(b['connector'] not in puede for b in bocas):
                 malas.append((it['label'], bocas))
         assert malas == []
+
+    def test_every_pc_printer_and_display_is_plugged_into_a_socket(self, office):
+        """Reported: the demo's PCs showed no outlet and no socket. Each is cabled to its outlet
+        and its power lead goes into jack A of the socket beside it."""
+        store, items, _racked, cables = office
+        sin = []
+        for uid, it in items.items():
+            if it['role'] not in ('pc', 'printer', 'display'):
+                continue
+            mios = store.cables_of([uid])
+            corriente = [c for c in mios if c['kind'] == 'power'
+                         and items.get(c['b_item'] if c['a_item'] == uid else c['a_item'], {}).get('role') == 'power_outlet']
+            datos = [c for c in mios if c['kind'] != 'power']
+            if len(corriente) != 1 or not datos:
+                sin.append(it['label'])
+        assert sin == []
 
     def test_a_meeting_rooms_display_outlet_has_its_hdmi(self, office):
         tv = [it for it in office[1].values() if it['role'] == 'outlet' and str(it['label']).startswith('R-TV-')]

@@ -31,7 +31,9 @@ async function _dcCablesOpen() {
     _dcCables = {loading: true};
     renderDcim();
     const url = `/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}/cables`;
-    _dcCables = await apiGet(url) || {};
+    const primero = await apiGet(url) || {};
+    if (((_dcimRack || {}).rack || {}).uid !== rack.uid) return;      // ya es otro rack
+    _dcCables = primero;
     renderDcim();
     // Y el contraste DESPUÉS, en su propia petición. Lo declarado se lee de la base y está en
     // milisegundos; comprobarlo hay que armarlo recorriendo la flota entera, y esperarlo para
@@ -752,29 +754,42 @@ function _dcSplitDraw() {
  *  ninguna parte que nadie sabría que hay que arreglar. Al revés, un fallo deja un tramo de más
  *  que se ve, se entiende y se borra. */
 async function _dcSplitSave() {
-    const p = _dcSplit;
-    if (!p || !p.pick) return;
-    const c = _dcCableOf(p.uid);
-    if (!c) return;
-    // El tramo NUEVO es el del lado que NO se queda el cable existente, y el existente cambia
-    // la punta de ese mismo lado. Escritos así y no al revés: si el nuevo falla —una boca
-    // ocupada, un permiso— el cable de antes sigue entero, y lo que se ve es un error en vez de
-    // un enlace partido a la mitad.
-    const suelta = p.side === 'a' ? 'b' : 'a';
-    const nuevo = await _dcimSend('POST', '/api/v1/dcim/cables', suelta === 'b'
-        ? {a_item: p.pick.uid, a_port: p.port || '',
-           b_item: c.b_item, b_port: c.b_port || '', kind: c.kind || '', color: c.color || ''}
-        : {a_item: c.a_item, a_port: c.a_port || '',
-           b_item: p.pick.uid, b_port: p.port || '', kind: c.kind || '', color: c.color || ''});
-    if (!nuevo.ok) return showToast(nuevo.error || t('save_failed'), 'danger');
-    const movido = await _dcimSend('PUT', `/api/v1/dcim/cables/${encodeURIComponent(p.uid)}`,
-        suelta === 'b' ? {b_item: p.pick.uid, b_port: p.port || ''}
-                       : {a_item: p.pick.uid, a_port: p.port || ''});
-    if (!movido.ok) return showToast(movido.error || t('save_failed'), 'danger');
-    _dcSplit = null;
-    hideInfoModal();
-    if (_dcCableFrom === 'wire') return _dcWireReload();
-    _dcCablesOpen();
+    // Una petición a la vez: el botón seguía activo mientras se guardaba, y un doble clic
+    // o Intro mantenido creaba el registro dos veces.
+    if (_dcSplitSave.busy) return;
+    _dcSplitSave.busy = true;
+    try {
+        const p = _dcSplit;
+        if (!p || !p.pick) return;
+        const c = _dcCableOf(p.uid);
+        if (!c) return;
+        // El tramo NUEVO es el del lado que NO se queda el cable existente, y el existente cambia
+        // la punta de ese mismo lado. Escritos así y no al revés: si el nuevo falla —una boca
+        // ocupada, un permiso— el cable de antes sigue entero, y lo que se ve es un error en vez de
+        // un enlace partido a la mitad.
+        const suelta = p.side === 'a' ? 'b' : 'a';
+        // El tramo nuevo, UNA vez por punta elegida. Si se creó y lo que falló fue mover el viejo,
+        // el diálogo sigue abierto para reintentar, y reintentar creaba otro tramo igual: dos
+        // latiguillos donde hay uno.
+        const punta = `${p.pick.uid}|${p.port || ''}|${suelta}`;
+        if (p.hecho !== punta) {
+            const nuevo = await _dcimSend('POST', '/api/v1/dcim/cables', suelta === 'b'
+                ? {a_item: p.pick.uid, a_port: p.port || '',
+                   b_item: c.b_item, b_port: c.b_port || '', kind: c.kind || '', color: c.color || ''}
+                : {a_item: c.a_item, a_port: c.a_port || '',
+                   b_item: p.pick.uid, b_port: p.port || '', kind: c.kind || '', color: c.color || ''});
+            if (!nuevo.ok) return showToast(nuevo.error || t('save_failed'), 'danger');
+            p.hecho = punta;
+        }
+        const movido = await _dcimSend('PUT', `/api/v1/dcim/cables/${encodeURIComponent(p.uid)}`,
+            suelta === 'b' ? {b_item: p.pick.uid, b_port: p.port || ''}
+                           : {a_item: p.pick.uid, a_port: p.port || ''});
+        if (!movido.ok) return showToast(movido.error || t('save_failed'), 'danger');
+        _dcSplit = null;
+        hideInfoModal();
+        if (_dcCableFrom === 'wire') return _dcWireReload();
+        _dcCablesOpen();
+    } finally { _dcSplitSave.busy = false; }
 }
 
 /** El camino entero al que pertenece un tramo: **por qué panel pasa y por qué boca**.
@@ -1051,7 +1066,8 @@ function _dcCableFormHtml() {
     const opciones = (id) => `<select id="${id}" class="form-select form-select-sm"
             style="max-width:12rem">${items.map(i =>
         `<option value="${escAttr(i.uid)}">${esc(_dcimItemName(i))}</option>`).join('')}</select>`;
-    return `<div class="d-flex align-items-end gap-2 flex-wrap p-2 rounded bg-body-secondary mb-2">
+    return `<div class="d-flex align-items-end gap-2 flex-wrap p-2 rounded bg-body-secondary mb-2"
+                 data-dc-keep>
         <label class="ss-fs-2 text-muted">${esc(t('dcim_cable_from'))}${opciones('dcc-a')}</label>
         <label class="ss-fs-2 text-muted">${esc(t('dcim_port'))}
             <input id="dcc-ap" class="form-control form-control-sm ss-tabular"
@@ -1090,31 +1106,37 @@ function _dcCableFormHtml() {
 }
 
 async function _dcCableSave() {
-    const val = (id) => (document.getElementById(id) || {}).value || '';
-    // Un **puente** en el mismo equipo es un cable de verdad: un latiguillo corto de la boca 25
-    // a la 17 del mismo panel de parcheo es lo más normal del mundo, y esto lo rechazaba de
-    // plano con «un cable va de un equipo a OTRO» — cierto para dos servidores y falso para un
-    // panel, que es media sala. Lo que no puede ser es un cable de una boca a ella misma, ni uno
-    // que dice unir un equipo consigo mismo sin decir por dónde.
-    if (val('dcc-a') === val('dcc-b')
-            && (!val('dcc-ap') || !val('dcc-bp') || val('dcc-ap') === val('dcc-bp')))
-        return showToast(t('dcim_cable_same_item'), 'warning');
-    // Los metros se piden en METROS y se guardan en milímetros: nadie mide un latiguillo en
-    // milímetros y todo el mundo lo compra en metros. La conversión, en un sitio.
-    const mm = _dcMetresIn(val('dcc-m'));
-    if (mm === null) return showToast(t('dcim_cable_len_bad'), 'warning');
-    const r = await _dcimSend('POST', '/api/v1/dcim/cables', {
-        a_item: val('dcc-a'), a_port: val('dcc-ap'),
-        b_item: val('dcc-b'), b_port: val('dcc-bp'),
-        label: val('dcc-l'), asset: val('dcc-as'), color: val('dcc-c'),
-        kind: _dcCableKind, category: val('dcc-cat'),
-        length_mm: mm,
-        description: val('dcc-d'),
-    });
-    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    _dcAssetSaid(val('dcc-as'), r);
-    _dcNewCable = false;
-    _dcCablesOpen();
+    // Una petición a la vez: el botón seguía activo mientras se guardaba, y un doble clic
+    // o Intro mantenido creaba el registro dos veces.
+    if (_dcCableSave.busy) return;
+    _dcCableSave.busy = true;
+    try {
+        const val = (id) => (document.getElementById(id) || {}).value || '';
+        // Un **puente** en el mismo equipo es un cable de verdad: un latiguillo corto de la boca 25
+        // a la 17 del mismo panel de parcheo es lo más normal del mundo, y esto lo rechazaba de
+        // plano con «un cable va de un equipo a OTRO» — cierto para dos servidores y falso para un
+        // panel, que es media sala. Lo que no puede ser es un cable de una boca a ella misma, ni uno
+        // que dice unir un equipo consigo mismo sin decir por dónde.
+        if (val('dcc-a') === val('dcc-b')
+                && (!val('dcc-ap') || !val('dcc-bp') || val('dcc-ap') === val('dcc-bp')))
+            return showToast(t('dcim_cable_same_item'), 'warning');
+        // Los metros se piden en METROS y se guardan en milímetros: nadie mide un latiguillo en
+        // milímetros y todo el mundo lo compra en metros. La conversión, en un sitio.
+        const mm = _dcMetresIn(val('dcc-m'));
+        if (mm === null) return showToast(t('dcim_cable_len_bad'), 'warning');
+        const r = await _dcimSend('POST', '/api/v1/dcim/cables', {
+            a_item: val('dcc-a'), a_port: val('dcc-ap'),
+            b_item: val('dcc-b'), b_port: val('dcc-bp'),
+            label: val('dcc-l'), asset: val('dcc-as'), color: val('dcc-c'),
+            kind: _dcCableKind, category: val('dcc-cat'),
+            length_mm: mm,
+            description: val('dcc-d'),
+        });
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        _dcAssetSaid(val('dcc-as'), r);
+        _dcNewCable = false;
+        _dcCablesOpen();
+    } finally { _dcCableSave.busy = false; }
 }
 
 function _dcCableDrop(uid, label) {

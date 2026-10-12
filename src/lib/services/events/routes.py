@@ -51,7 +51,7 @@ def register(app, wa):
         if err:
             return err
         try:
-            rule = rules_logic.prepare_rule(store, data)
+            rule = rules_logic.prepare_rule(store, data, new=True)
         except AdminOpError as e:
             return jsonify({'error': wa._t(e.key, *e.args)}), 400
         rule['id'] = str(uuid.uuid4())

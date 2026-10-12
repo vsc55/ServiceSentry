@@ -22,7 +22,10 @@ async function _dcPowerOpen() {
     // se pulsó; no ver nada es creer que no.
     _dcPower = {loading: true};
     renderDcim();
-    _dcPower = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}/power`) || {};
+    const d = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(rack.uid)}/power`) || {};
+    // Del rack que se pidió: si entretanto se abrió otro, esto es de aquel.
+    if (((_dcimRack || {}).rack || {}).uid !== rack.uid) return;
+    _dcPower = d;
     renderDcim();
 }
 
@@ -87,7 +90,8 @@ function _dcPowerNewItem(pdus) {
             <i class="bi bi-plus-lg me-1"></i>${esc(t('dcim_new_item_fed'))}</button>`;
     if (!pdus.length)
         return `<div class="text-muted ss-fs-2 mb-2">${esc(t('dcim_no_pdus'))}</div>`;
-    return `<div class="d-flex align-items-end gap-2 flex-wrap p-2 rounded bg-body-secondary mb-2">
+    return `<div class="d-flex align-items-end gap-2 flex-wrap p-2 rounded bg-body-secondary mb-2"
+                 data-dc-keep>
         <label class="ss-fs-2 text-muted">${esc(t('dcim_label'))}
             <input class="form-control form-control-sm" id="dcni-label" style="max-width:12rem"
                    placeholder="${escAttr(t('dcim_item'))}"
@@ -502,7 +506,14 @@ function _dcPowerChain(p) {
             const saltados = fuentes.filter(f => f.bypass && f.kind === 'ups'
                 && !(camino.now || []).some(n => n.uid === f.uid)
                 && (camino.clean || []).includes(f.uid));
-            const nodos = (camino.now || []).map(n => `<span class="badge fw-normal ${
+            // A hop into another site is the dependency worth seeing: it is marked with that
+            // site's name, or —to whoever may not see that site— drawn anonymous, where it stops.
+            const nodos = (camino.now || []).map(n => n.hidden
+                ? `<span class="badge fw-normal text-bg-warning"><i class="bi bi-building me-1"></i>${
+                    esc(t('dcim_chain_hidden_site'))}</span>`
+                : `${n.cross_site ? `<span class="badge fw-normal text-bg-warning" title="${
+                    escAttr(t('dcim_chain_other_site'))}"><i class="bi bi-building me-1"></i>${
+                    esc(n.site_name || t('dcim_chain_other_site'))}</span> ` : ''}<span class="badge fw-normal ${
                 n.kind === 'ups' ? 'text-bg-success' : 'bg-body-secondary text-body-secondary border'}">${
                 esc(n.name)}</span>`);
             cadena = nodos.join(' <i class="bi bi-arrow-left text-muted"></i> ') + (saltados.length
@@ -934,14 +945,17 @@ function _dcFeedPduHtml(pdu, p) {
 }
 
 async function _dcFeedPut(pduUid, outlet) {
+    // Taken BEFORE the request: it was cleared after it, so a second click on a socket while
+    // the dialog faded out read the same pick and plugged the same cable in twice.
+    const p = _dcFeedPick;
+    if (!p) return;
+    _dcFeedPick = null;
     hideInfoModal();
-    const p = _dcFeedPick || {};
     const r = p.uid
         ? await _dcimSend('PUT', `/api/v1/dcim/feeds/${encodeURIComponent(p.uid)}`,
                           {outlet: outlet})
         : await _dcimSend('POST', '/api/v1/dcim/feeds',
                           {item_uid: p.item, pdu_uid: pduUid, outlet: outlet});
-    _dcFeedPick = null;
     // El error del servidor y no uno propio: «esa toma ya tiene un cable» lo sabe él, que es
     // quien mira los demás cables de la regleta, y repetir aquí esa comprobación sería una
     // segunda copia de la regla que un día dirá otra cosa.

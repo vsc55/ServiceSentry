@@ -210,6 +210,15 @@ class RaidMdstat:
                             cls.UpdateStatus.ok if disks[0] == disks[1]
                             else cls.UpdateStatus.error
                         )
+                    elif not token and md_list[md_actual]['type'] in ('raid0', 'linear'):
+                        # No redundancy, so mdstat prints no [n/m] counter for these — and
+                        # without one every RAID0/linear array came out "unknown" forever.
+                        # They cannot run degraded: a missing member stops the array, so
+                        # "active" is the whole answer.
+                        md_list[md_actual]['update'] = (
+                            cls.UpdateStatus.ok if md_list[md_actual]['status'] == 'active'
+                            else cls.UpdateStatus.error
+                        )
                 continue
 
         return md_list

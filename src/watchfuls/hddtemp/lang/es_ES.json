@@ -35,9 +35,14 @@
         "hdd_ok": "({}): {} ({}º{}) 🔼",
         "hdd_high": "({}): {} ({}º{}) 🔽",
         "hdd_bad": "({}): {} ({}) 🔥🔥",
+        "hdd_sleep": "({}): {} (en reposo) 💤",
         "hdd_query_error": "HddTemp: {} - Error: {} 🔽"
     },
     "messages_vars": {
+        "hdd_sleep": [
+            "host",
+            "disco"
+        ],
         "hdd_error": [
             "host",
             "error"

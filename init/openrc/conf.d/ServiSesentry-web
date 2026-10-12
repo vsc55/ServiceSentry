@@ -10,3 +10,13 @@ SS_APP="/opt/ServiSesentry/main.py"
 # Address and port the web admin panel listens on
 SS_WEB_HOST="0.0.0.0"
 SS_WEB_PORT="8080"
+
+# Where the daemon's stdout/stderr go (default /var/log/<service>.log). Empty =
+# discard them, as versions before this one did. The packages install a logrotate
+# rule for it (/etc/logrotate.d/servicesentry).
+#SS_LOG="/var/log/ServiSesentry-web.log"
+
+# User the daemon runs as. Empty (the default) = the owner of /var/lib/ServiSesentry:
+# `servicesentry` on a fresh install, root on one that predates it until
+# `servicesentry-user enable` is run. "root" forces root.
+#SS_USER=""

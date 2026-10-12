@@ -87,11 +87,14 @@ class ServiceLeaderStore:
                             'WHERE service_key=?', (service_key,))
                 holder, expires = (row or ('', 0.0))
                 if holder == instance_id:
-                    self._db.execute(
+                    # The rowcount decides, not the read above: on a server engine another
+                    # replica can claim an expired lease between that SELECT and this UPDATE,
+                    # and answering True then made two leaders for one beat.
+                    renewed = self._db.execute(
                         f'UPDATE {_T} SET renewed_at=?, expires_at=?, holder_host=? '
                         'WHERE service_key=? AND holder_instance_id=?',
                         (now, exp, host, service_key, instance_id))
-                    return True
+                    return bool(renewed)
                 if not holder or expires is None or expires < now:
                     # Conditional claim: only succeeds if nobody else grabbed it first.
                     claimed = self._db.execute(

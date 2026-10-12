@@ -208,7 +208,10 @@ def register(app, wa):
             # The account can have gone away — or been disabled — between the password and
             # the code. This is the second half of an authentication, so it re-reads rather
             # than trusting what the first half saw.
-            if not user or not user.get('enabled', True):
+            # `login_enabled` as well: an account turned into a service account between the
+            # two halves must not finish the sign-in the password started.
+            if (not user or not user.get('enabled', True)
+                    or not user.get('login_enabled', True)):
                 wa._mfa_clear()
                 _login_failed(username, 'account_disabled')
                 flash(wa._t('invalid_credentials'), 'danger')
@@ -292,7 +295,7 @@ def register(app, wa):
             wa._audit('login_throttled', username, _ip, detail={'stage': 'mfa_account'})
             wa._ipban_offense('login_throttled')
             return jsonify({'ok': False, 'error': 'throttled'}), 429
-        data = request.get_json(silent=True) or {}
+        data = wa._optional_json()
         scope = wa._webauthn_scope()
         out = mfa_service.webauthn_verify(
             wa._mfa_store, wa._mfa_uid(username),
@@ -312,7 +315,7 @@ def register(app, wa):
             wa._ipban_offense('login_failed')
             return jsonify({'ok': False, 'error': 'bad_assertion'}), 403
         user = wa._users.get(username) or {}
-        if not user or not user.get('enabled', True):
+        if not user or not user.get('enabled', True) or not user.get('login_enabled', True):
             wa._mfa_clear()
             _login_failed(username, 'account_disabled')
             return jsonify({'ok': False, 'error': 'invalid'}), 403
@@ -347,7 +350,7 @@ def register(app, wa):
         if wa._mfa_enrolled(username):
             return redirect(url_for('login_mfa'))
         user = wa._users.get(username) or {}
-        if not user or not user.get('enabled', True):
+        if not user or not user.get('enabled', True) or not user.get('login_enabled', True):
             wa._mfa_clear()
             return redirect(url_for('login'))
         uid = wa._mfa_uid(username)

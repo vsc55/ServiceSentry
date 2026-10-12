@@ -15,7 +15,8 @@ class TestNtpQuery:
     def _build_ntp_response(self, t2_s, t2_f, t3_s, t3_f):
         """Build a minimal 48-byte NTP response packet."""
         import struct
-        header = bytes(32)  # first 32 bytes (LI, VN, stratum, etc.)
+        # LI=0 VN=3 mode=4 (server), stratum 2 — a synchronised server; the rest zeroed.
+        header = bytes([0x1c, 2]) + bytes(30)
         t2 = struct.pack('!II', t2_s, t2_f)
         t3 = struct.pack('!II', t3_s, t3_f)
         return header + t2 + t3

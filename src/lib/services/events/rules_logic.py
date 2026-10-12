@@ -17,6 +17,12 @@ from lib.core.users.service import AdminOpError
 
 SOURCES = ('audit', 'syslog')
 CHANNELS = ('telegram', 'email', 'webhook', 'msteams')
+# The cooldown a NEW rule gets when its creator says nothing about one. The global default
+# (`events|cooldown`) is 0, so a rule created without a cooldown notified on every match — a
+# chatty syslog source turned into one message per line. Applied at CREATION only, and only
+# when the field is absent: rules already stored keep exactly what they had, a blank sent
+# on purpose still means "inherit the global", and an explicit 0 still means 0.
+NEW_RULE_COOLDOWN = 60
 MATCH_TYPES = ('any', 'equals', 'contains', 'not_contains', 'starts', 'ends', 'regex',
                'gt', 'gte', 'lt', 'lte')
 MATCH_FIELDS = ('message', 'host', 'app', 'severity')   # what a matcher targets
@@ -131,10 +137,17 @@ def validate_rule(rule: dict) -> None:
                     raise AdminOpError('event_invalid_regex') from exc
 
 
-def prepare_rule(store, data: dict, *, exclude_id: str | None = None) -> dict:
+def prepare_rule(store, data: dict, *, exclude_id: str | None = None,
+                 new: bool = False) -> dict:
     """Clean + validate a rule payload and enforce name uniqueness against *store*.
     Returns the stored-shape rule (without an ``id`` — the caller assigns it).  Raises
-    :class:`AdminOpError` on any violation."""
+    :class:`AdminOpError` on any violation.
+
+    *new* marks a creation: a payload with no ``cooldown`` key at all then gets
+    :data:`NEW_RULE_COOLDOWN`. An update never does — that would change a stored rule's
+    behaviour behind its owner's back."""
+    if new and 'cooldown' not in data:
+        data = {**data, 'cooldown': NEW_RULE_COOLDOWN}
     rule = clean_rule(data)
     validate_rule(rule)
     if store.name_taken(rule['name'], exclude_id=exclude_id):

@@ -38,3 +38,16 @@ _SERVER_DEFAULTS: dict = {
 # checks schema is nested inside servers as a sub_collection
 _CHECK_DEFAULTS: dict  = {k: v['default'] for k, v in _SCHEMA['servers']['checks'].items()
                           if isinstance(v, dict) and 'default' in v}
+
+
+def _cfg_int(value, default: int) -> int:
+    """An int setting read from a saved item: blank/None/garbage → *default*, an explicit 0
+    stays 0. ``int(cfg.get('alert', 3))`` turned a cleared field (``None``/``''``) into a
+    TypeError that failed the check on every cycle, and ``int(v or default)`` the other way
+    round made ``retries: 0`` impossible to ask for."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return int(default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)

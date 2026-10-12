@@ -64,6 +64,34 @@ function _dc3dPickThing(rayo, visor) {
 //: Los racks abiertos en el 3D de la sala o del edificio: `uid → {data, cables, power}`.
 const _dc3dOpenRacks = new Map();
 
+//: Los racks que se están pidiendo: un segundo clic mientras llega el primero no pide otra vez.
+const _dc3dRackAsked = new Set();
+
+/** Lo de dentro de un rack para abrirlo en el 3D, o `null`.
+ *
+ *  `null` también si entretanto se pasó a mirar otra cosa (otra sala, otra sede, el visor
+ *  cerrado): la clave del visor dice qué se mira, y un rack de la sala de antes metido en el
+ *  mapa de abiertos salía dibujado —o contado como abierto— en la siguiente. */
+async function _dc3dRackFetch(uid) {
+    if (_dc3dRackAsked.has(uid)) return null;
+    const antes = (ss3dGet(_DC3D_BOX) || {}).key;
+    _dc3dRackAsked.add(uid);
+    try {
+        const base = `/api/v1/dcim/racks/${encodeURIComponent(uid)}`;
+        const [data, cables, power] = await Promise.all([apiGet(base), apiGet(base + '/cables'),
+                                                         apiGet(base + '/power')]);
+        if (!data || data.error) {
+            showToast((data || {}).error || t('dcim_not_found'), 'warning');
+            return null;
+        }
+        const V = ss3dGet(_DC3D_BOX);
+        if (!V || V.key !== antes) return null;
+        return {data, cables: cables || {}, power: power || {}};
+    } finally {
+        _dc3dRackAsked.delete(uid);
+    }
+}
+
 /** Abrir un rack en el 3D en el que se está: traer lo que lleva dentro —el armario, sus cables y
  *  su alimentación— y dibujarlo en su sitio. Otra vez lo cierra. */
 async function _dc3dOpenRack(uid) {
@@ -74,11 +102,9 @@ async function _dc3dOpenRack(uid) {
         ss3dCard(_DC3D_BOX, '');
         return;
     }
-    const base = `/api/v1/dcim/racks/${encodeURIComponent(uid)}`;
-    const [data, cables, power] = await Promise.all([apiGet(base), apiGet(base + '/cables'),
-                                                     apiGet(base + '/power')]);
-    if (!data || data.error) return showToast((data || {}).error || t('dcim_not_found'), 'warning');
-    _dc3dOpenRacks.set(uid, {data, cables: cables || {}, power: power || {}});
+    const datos = await _dc3dRackFetch(uid);
+    if (!datos) return;
+    _dc3dOpenRacks.set(uid, datos);
     _dc3dSelOpening(uid);
     ss3dRebuild(_DC3D_BOX);
     ss3dCard(_DC3D_BOX, '');

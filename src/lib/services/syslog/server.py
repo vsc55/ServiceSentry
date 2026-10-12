@@ -39,6 +39,11 @@ _FLUSH_MAX = 500              # writer batch size cap
 _SOCK_TIMEOUT = 0.5            # so stop() is responsive
 _DROP_LOG_EVERY = 30.0        # min seconds between allowlist-drop logs per source
 _DROPS_MAX = 500              # cap distinct dropped sources tracked in memory
+#: Min seconds between two offences reported to the jail for one source. Each report is two
+#: database writes under the jail's lock, made on the receive thread: a flood of rejected
+#: datagrams from rotating spoofed sources turned every packet into those writes, the socket
+#: buffer overflowed and the kernel dropped the legitimate messages.
+_OFFENSE_EVERY = 5.0
 # Per-connection bounds (TCP/TLS).  Without them any reachable peer could open
 # silent connections, each pinning a thread for good.
 _TLS_HANDSHAKE_TIMEOUT = 10.0  # whole TLS handshake deadline (s)
@@ -132,6 +137,8 @@ class SyslogServer:
         self._is_banned = is_banned              # callable(ip) -> bool  (shared fail2ban)
         self._on_offense = on_offense            # callable(ip, category) — report abuse
         self._drops: dict = {}                  # ip -> {count, last_log, flushed}
+        self._drops_lock = threading.Lock()     # UDP and TCP threads both count drops
+        self._offended: dict = {}               # ip -> when its last offence was reported
         self._q: queue.Queue = queue.Queue(maxsize=200000)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -287,11 +294,20 @@ class SyslogServer:
         """Record an allowlist drop and report it to the shared fail2ban so a source
         that keeps violating the allowlist eventually gets jailed for every service."""
         self._note_drop(ip, transport)
-        if self._on_offense and ip:
-            try:
-                self._on_offense(ip, 'syslog_drop')
-            except Exception:  # pylint: disable=broad-except
-                pass
+        if not self._on_offense or not ip:
+            return
+        now = time.time()
+        with self._drops_lock:
+            if now - self._offended.get(ip, 0.0) < _OFFENSE_EVERY:
+                return
+            if len(self._offended) >= _DROPS_MAX:
+                self._offended = {k: t for k, t in self._offended.items()
+                                  if now - t < _OFFENSE_EVERY}
+            self._offended[ip] = now
+        try:
+            self._on_offense(ip, 'syslog_drop')
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     def _allowed(self, ip: str) -> bool:
         if not self._allow:
@@ -306,24 +322,32 @@ class SyslogServer:
         """Count an allowlist-rejected packet/connection.  At most once every
         ``_DROP_LOG_EVERY`` seconds per source (so a flood never spams) it logs a
         warning and flushes the new drops to the persistent tally via ``on_drop``."""
-        d = self._drops.get(ip)
-        if d is None:
-            if len(self._drops) >= _DROPS_MAX:   # cap distinct sources (spoof flood)
-                return
-            d = self._drops[ip] = {'count': 0, 'last_log': 0.0, 'flushed': 0}
-        d['count'] += 1
         now = time.time()
-        if now - d['last_log'] >= _DROP_LOG_EVERY:
+        with self._drops_lock:
+            d = self._drops.get(ip)
+            if d is None:
+                if len(self._drops) >= _DROPS_MAX:   # cap distinct sources (spoof flood)
+                    # …but not for ever: the sources quiet for an hour make room, or after
+                    # the first 500 no new source was ever counted or logged again.
+                    self._drops = {k: v for k, v in self._drops.items()
+                                   if now - v['last_log'] < 3600}
+                    if len(self._drops) >= _DROPS_MAX:
+                        return
+                d = self._drops[ip] = {'count': 0, 'last_log': 0.0, 'flushed': 0}
+            d['count'] += 1
+            if now - d['last_log'] < _DROP_LOG_EVERY:
+                return
             d['last_log'] = now
             delta = d['count'] - d['flushed']
             d['flushed'] = d['count']
-            self._dbg_warn(f'> Syslog >> dropped {transport} from {ip or "?"} '
-                           f'(not in allowed sources) — {d["count"]} dropped so far')
-            if self._on_drop and delta > 0:
-                try:
-                    self._on_drop(ip, transport, delta)
-                except Exception:               # pylint: disable=broad-except
-                    pass
+            count = d['count']
+        self._dbg_warn(f'> Syslog >> dropped {transport} from {ip or "?"} '
+                       f'(not in allowed sources) — {count} dropped so far')
+        if self._on_drop and delta > 0:
+            try:
+                self._on_drop(ip, transport, delta)
+            except Exception:               # pylint: disable=broad-except
+                pass
 
     def _udp_loop(self, sock: socket.socket) -> None:
         while not self._stop.is_set():

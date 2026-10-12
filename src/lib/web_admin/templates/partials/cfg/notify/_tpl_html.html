@@ -271,14 +271,14 @@ function _notifHtmlRefresh() {
         const items = g.entries.map(e => {
             const v = '{' + e.key + '}';
             return `<li><a class="dropdown-item font-monospace py-1 small" href="#"
-                onclick="event.preventDefault();_notifHtmlInsertVar('${escAttr(v)}')">${esc(v)}</a></li>`;
+                onclick="event.preventDefault();_notifHtmlInsertVar(${jsStr(v)})">${esc(v)}</a></li>`;
         }).join('');
         return `<li><h6 class="dropdown-header small">${esc(t(g.key))}</h6></li>${items}`;
     }).join('<li><hr class="dropdown-divider my-1"></li>');
 
     const runtimeBtns = runtimeVars.map(v =>
         `<button type="button" class="btn btn-sm btn-warning font-monospace lh-1 py-1 px-2 notif-tpl-btn"
-            onclick="_notifHtmlInsertVar('${escAttr(v)}')">${esc(v)}</button>`
+            onclick="_notifHtmlInsertVar(${jsStr(v)})">${esc(v)}</button>`
     ).join('');
 
     const isFs = document.getElementById('notifHtmlEditorWrap')?.classList.contains('notif-html-fs');

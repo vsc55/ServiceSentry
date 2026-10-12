@@ -99,12 +99,12 @@ class TestCheck:
         assert items['c']['status'] is False        # 75% >= 60%
         assert 'Excessive' in items['c']['message']
 
-    def test_windows_device_uses_wmic(self):
+    def test_windows_device_uses_cim(self):
         w = _watchful({'c': {'enabled': True, 'alert': 85, 'device_uid': 'h1'}},
                       devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec', return_value=(_WMIC, '', 0)) as he:
             items = w.check().list
-        assert 'wmic' in he.call_args.args[1]
+        assert 'Get-CimInstance' in he.call_args.args[1]
         assert items['c']['status'] is True and items['c']['other_data']['used'] == 42.0
 
     def test_disabled_item_skipped(self):

@@ -237,14 +237,22 @@ function _dcCatSearch() {
 /** Mirar cómo va la importación. Se pregunta al servidor cada dos segundos mientras dure: no hay
  *  total contra el que dividir —nadie sabe cuántos modelos tiene un archivo hasta leerlo— así que
  *  lo que se enseña es una cuenta y no una barra. */
-async function _dcCatWatch() {
-    if (!_dcCatJob) return;
+//: Si ya hay quien vigila la importación. Cada apertura del catálogo —cada búsqueda, página o
+//: pestaña— arrancaba otro bucle: diez búsquedas, diez peticiones por segundo y el aviso de
+//: «terminado» varias veces.
+let _dcCatWatching = false;
+
+async function _dcCatWatch(sigue) {
+    if (!_dcCatJob) { _dcCatWatching = false; return; }
+    if (_dcCatWatching && !sigue) return;
+    _dcCatWatching = true;
     const j = await apiGet(`/api/v1/dcim/catalog/import/${encodeURIComponent(_dcCatJob)}`);
-    if (!j || j.error) { _dcCatJob = ''; return; }
+    if (!j || j.error) { _dcCatJob = ''; _dcCatWatching = false; return; }
     if (_dcCat) _dcCat.job = j;
     renderDcim();
     if (j.done) {
         _dcCatJob = '';
+        _dcCatWatching = false;
         showToast(j.error ? (t(j.error) || j.error)
                           : tf('dcim_cat_done', j.count || 0),
                   j.error ? 'danger' : 'success');
@@ -253,7 +261,7 @@ async function _dcCatWatch() {
         _dcCatFresh();
         return;
     }
-    setTimeout(_dcCatWatch, 1000);
+    setTimeout(() => _dcCatWatch(true), 1000);
 }
 
 function _dcCatHtml() {
@@ -463,8 +471,8 @@ function _dcCatMakersHtml(d) {
     return `<div class="ss-fs-2 text-muted mb-2">${
             esc(tf('dcim_cat_makers_note', vs.length, cuantos))}</div>
         <div class="ss-piece-list">${vs.map(m => `<button
-            class="btn btn-secondary ss-piece" onclick="_dcCatPickMaker('${
-                escAttr(String(m.name || '').replace(/'/g, "\\'"))}')">
+            class="btn btn-secondary ss-piece" onclick="_dcCatPickMaker(${
+                jsStr(String(m.name || ''))})">
             <i class="bi bi-tag"></i>
             <span>${esc(m.name || '')}</span>
             <small class="ss-tabular">${esc(String(m.count || 0))}</small>
@@ -490,7 +498,7 @@ function _dcCatTable(rows) {
             <th></th>
         </tr></thead>
         <tbody>${rows.map(r => {
-        return `<tr class="ss-rowlink" onclick="_dcCatShow('${escAttr(r.uid || '')}')">
+        return `<tr class="ss-rowlink" onclick="_dcCatShow(${jsStr(r.uid || '')})">
             ${_dcimMay('dcim_catalog_manage') ? `<td onclick="event.stopPropagation()">
                 <input type="checkbox" data-uid="${escAttr(r.uid || '')}"
                        ${_dcCatSel.has(String(r.uid)) ? 'checked' : ''}
@@ -514,15 +522,15 @@ function _dcCatTable(rows) {
                 _dcimMay('dcim_catalog_manage') ? `<div class="btn-group btn-group-sm"
                     onclick="event.stopPropagation()">
                     <button class="btn btn-secondary py-0 px-1" title="${escAttr(t('edit'))}"
-                        onclick="_dcCatRowEdit('${escAttr(r.uid || '')}', false)">
+                        onclick="_dcCatRowEdit(${jsStr(r.uid || '')}, false)">
                         <i class="bi bi-pencil"></i></button>
                     <button class="btn btn-secondary py-0 px-1"
                         title="${escAttr(t('dcim_cat_clone'))}"
-                        onclick="_dcCatRowEdit('${escAttr(r.uid || '')}', true)">
+                        onclick="_dcCatRowEdit(${jsStr(r.uid || '')}, true)">
                         <i class="bi bi-files"></i></button>
                     <button class="btn btn-danger py-0 px-1" title="${escAttr(t('delete'))}"
-                        onclick="_dcCatDrop('${escAttr(r.uid || '')}',
-                             '${escAttr((r.manufacturer || '') + ' ' + (r.model || ''))}')">
+                        onclick="_dcCatDrop(${jsStr(r.uid || '')},
+                             ${jsStr((r.manufacturer || '') + ' ' + (r.model || ''))})">
                         <i class="bi bi-trash"></i></button>
                 </div>` : ''}</td>
         </tr>`;
@@ -620,7 +628,7 @@ function _dcCatTreesHtml(d) {
     const cuenta = (a) => ((d.tree_counts || []).find(x => x.name === a) || {}).count || 0;
     const boton = (valor, etiqueta, icono, n) => `<button class="btn ${
             _dcCatTree === valor ? 'btn-primary' : 'btn-secondary'}"
-            onclick="_dcCatSetTree('${escAttr(valor)}')">
+            onclick="_dcCatSetTree(${jsStr(valor)})">
         ${icono ? `<i class="bi ${escAttr(icono)} me-1"></i>` : ''}${esc(etiqueta)}
         <span class="ss-tabular ms-1">${esc(String(n))}</span></button>`;
     return `<div class="btn-group btn-group-sm mb-2" role="group">
@@ -2076,9 +2084,9 @@ function _dcCatImagesHtml(conFila) {
             <div class="d-flex gap-2 align-items-center flex-wrap">
                 <input type="file" accept="image/*" class="form-control form-control-sm"
                        style="max-width:14rem"
-                       onchange="_dcCatImgUp('${escAttr(face)}', this)">
+                       onchange="_dcCatImgUp(${jsStr(face)}, this)">
                 ${nombre ? `<button class="btn btn-sm btn-danger"
-                    onclick="_dcCatImgDrop('${escAttr(face)}')">
+                    onclick="_dcCatImgDrop(${jsStr(face)})">
                     <i class="bi bi-trash me-1"></i>${esc(t('delete'))}</button>` : ''}
             </div>
         </div>`;
@@ -2093,36 +2101,43 @@ function _dcCatImagesHtml(conFila) {
 
 async function _dcCatImgUp(face, inp) {
     const file = (inp && inp.files && inp.files[0]) || null;
-    if (!file || !_dcCatEditing) return;
+    const ficha = _dcCatEditing;
+    if (!file || !ficha) return;
     const fd = new FormData();
     fd.append('file', file);
     // `fetch` a pelo: lo que va aquí es un formulario con un fichero dentro, y el envoltorio de
     // JSON lo convertiría en la cadena "[object File]". El global sigue poniendo el CSRF.
     let resp;
     try {
-        resp = await fetch(`/api/v1/dcim/catalog/${encodeURIComponent(_dcCatEditing.uid)}` +
+        resp = await fetch(`/api/v1/dcim/catalog/${encodeURIComponent(ficha.uid)}` +
                            `/image/${encodeURIComponent(face)}`, {method: 'POST', body: fd});
     } catch (e) {
         return showToast(t('save_failed'), 'danger');
     }
     const d = await resp.json().catch(() => ({}));
     if (!resp.ok || d.error) return showToast(d.error || `HTTP ${resp.status}`, 'danger', 8000);
-    _dcCatEditing[face + '_image'] = d.image || '';
     showToast(t('saved'), 'success');
-    _dcCatFormDraw();
+    _dcCatImgLanded(ficha, face, d.image || '');
+}
+
+/** La foto ya está en el servidor: apuntarla en la ficha que la pidió, y repintar solo si sigue
+ *  siendo la abierta. Una subida tarda; si entretanto se abrió otro modelo, escribirla en
+ *  `_dcCatEditing` la ponía en la ficha de ése — y guardarla después la hacía suya. */
+function _dcCatImgLanded(ficha, face, imagen) {
+    ficha[face + '_image'] = imagen;
+    if (_dcCatEditing === ficha) _dcCatFormDraw();
     _dcCatOpen();
 }
 
 async function _dcCatImgDrop(face) {
-    if (!_dcCatEditing) return;
+    const ficha = _dcCatEditing;
+    if (!ficha) return;
     const r = await _dcimSend('DELETE',
-        `/api/v1/dcim/catalog/${encodeURIComponent(_dcCatEditing.uid)}` +
+        `/api/v1/dcim/catalog/${encodeURIComponent(ficha.uid)}` +
         `/image/${encodeURIComponent(face)}`);
     if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    _dcCatEditing[face + '_image'] = '';
     showToast(t('deleted'), 'success');
-    _dcCatFormDraw();
-    _dcCatOpen();
+    _dcCatImgLanded(ficha, face, '');
 }
 
 /** Lo que solo tiene un armario, tal como lo nombra `schema/racktype.json`.
@@ -2235,7 +2250,7 @@ function _dcCatKitBox() {
 /** Un desplegable de unidad, sin etiqueta propia: la lleva la magnitud a la que va pegado. */
 function _dcimUnitSelect(nombre, opciones, valor, donde) {
     return `<select class="form-select" style="max-width:5rem"
-            onchange="${donde || '_dcCatFormExtra'}['${escAttr(nombre)}']=this.value">
+            onchange="${donde || '_dcCatFormExtra'}[${jsStr(nombre)}]=this.value">
         <option value="">—</option>
         ${(opciones || []).map(u => `<option value="${escAttr(u)}"${
             String(valor || '') === String(u) ? ' selected' : ''}>${
@@ -2340,19 +2355,19 @@ function _dcCatCompField(c, unidad, sitio) {
             <div class="input-group input-group-sm" style="max-width:11rem">
                 <input class="form-control" type="number" step="any" min="0"
                        value="${escAttr(String(valor))}"
-                       oninput="${donde}['${escAttr(k)}']=this.value">
+                       oninput="${donde}[${jsStr(k)}]=this.value">
                 ${_dcimUnitSelect(unidad.name, unidad.enum || [], uValor, uDonde)}
             </div></label>`;
     }
     if (c.type === 'bool')
         return `<label class="ss-fs-2 text-muted d-flex align-items-center gap-1 mt-3">
             <input type="checkbox" ${valor ? 'checked' : ''}
-                   onchange="${donde}['${escAttr(k)}']=this.checked">${
+                   onchange="${donde}[${jsStr(k)}]=this.checked">${
             etiqueta}</label>`;
     if (c.type === 'enum')
         return `<label class="ss-fs-2 text-muted">${etiqueta}
             <select class="form-select form-select-sm" style="max-width:12rem"
-                    onchange="${donde}['${escAttr(k)}']=this.value">
+                    onchange="${donde}[${jsStr(k)}]=this.value">
                 <option value="">${esc(t('dcim_cat_unset'))}</option>
                 ${(c.enum || []).map(v => `<option value="${escAttr(v)}"${
                     String(valor) === String(v) ? ' selected' : ''}>${
@@ -2364,7 +2379,7 @@ function _dcCatCompField(c, unidad, sitio) {
                type="${c.type === 'number' ? 'number' : c.type === 'date' ? 'date' : 'text'}"
                ${c.type === 'number' ? 'step="any" min="0"' : ''}
                value="${escAttr(String(valor))}"
-               oninput="${donde}['${escAttr(k)}']=this.value"></label>`;
+               oninput="${donde}[${jsStr(k)}]=this.value"></label>`;
 }
 
 //: Las columnas de la ficha ya tenían nombre en el formulario. El historial enseña las mismas,
@@ -2676,7 +2691,7 @@ function _dcCatSchemaFields() {
         if ((c.enum || []).length) {
             return `<label class="ss-fs-2 text-muted">${esc(c.name)}
                 <select class="form-select form-select-sm" style="max-width:12rem"
-                        onchange="_dcCatFormExtra['${escAttr(c.name)}']=this.value">
+                        onchange="_dcCatFormExtra[${jsStr(c.name)}]=this.value">
                     <option value="">${esc(t('dcim_cat_unset'))}</option>
                     ${c.enum.map(o => `<option value="${escAttr(o)}"${
                         valor === o ? ' selected' : ''}>${esc(o)}</option>`).join('')}
@@ -2686,66 +2701,72 @@ function _dcCatSchemaFields() {
         if (c.type === 'boolean')
             return `<label class="ss-fs-2 text-muted d-flex align-items-center gap-1 mt-3">
                 <input type="checkbox" ${valor && valor !== 'false' ? 'checked' : ''}
-                       onchange="_dcCatFormExtra['${escAttr(c.name)}']=this.checked">
+                       onchange="_dcCatFormExtra[${jsStr(c.name)}]=this.checked">
                 ${esc(c.name)}</label>`;
         return `<label class="ss-fs-2 text-muted">${esc(c.name)}${
             c.required ? ' <span class="text-danger">*</span>' : ''}
             <input type="${tipo}" class="form-control form-control-sm" style="max-width:11rem"
                    value="${escAttr(valor)}"
-                   oninput="_dcCatFormExtra['${escAttr(c.name)}']=this.value"></label>`;
+                   oninput="_dcCatFormExtra[${jsStr(c.name)}]=this.value"></label>`;
     }).join('')}</div>`;
 }
 
 async function _dcCatEditSave() {
-    const f = _dcCatForm;
-    if (!String(f.manufacturer || '').trim() || !String(f.model || '').trim())
-        return showToast(t('dcim_catalog_need_name'), 'warning');
-    // Los puertos, de renglones a la forma que guarda la biblioteca: `{familia: {tipo: n}}`.
-    // Dos renglones de la misma familia y el mismo tipo se **suman** en vez de pisarse: quien
-    // escribe «2 c14» y luego «2 c14» más quiere cuatro, no dos.
-    const ports = {};
-    (_dcCatFormPorts || []).forEach(p => {
-        const v = Number(p.n || 0);
-        if (!(v > 0) || !p.fam) return;
-        const tipo = String(p.tipo || '').trim();
-        ports[p.fam] = ports[p.fam] || {};
-        ports[p.fam][tipo] = (ports[p.fam][tipo] || 0) + v;
-    });
-    // Y las medidas, sin los huecos que se dejaron vacíos: una medida en blanco no es un cero,
-    // es «no lo sé», y guardarla como cero diría que el armario mide nada de fondo.
-    const extra = {};
-    Object.entries(_dcCatFormExtra).forEach(([k, v]) => {
-        if (v === '' || v === null || v === undefined) return;
-        const n = Number(v);
-        extra[k] = (v !== true && v !== false && String(v).trim() !== '' && !isNaN(n)) ? n : v;
-    });
-    const cuerpo = {
-        manufacturer: f.manufacturer, model: f.model, slug: f.slug,
-        description: f.description, part_number: f.part_number,
-        tree: f.tree, kind: f.kind, size: f.size || '', url: f.url || '',
-        kit_qty: Number(f.kit_qty || 1) || 1, power_type: f.power_type || '',
-        u_height: f.tree === 'module-types' ? 0 : f.u,
-        is_powered: f.tree === 'rack-types' ? 0 : (f.is_powered ? 1 : 0),
-        full_depth: f.full_depth ? 1 : 0,
-        airflow: f.airflow, subdevice: f.subdevice,
-        ports: ports, extra: extra,
-    };
-    if (_dcCatCloneFrom) cuerpo.from = _dcCatCloneFrom;
-    const r = _dcCatEditing
-        ? await _dcimSend('PUT', `/api/v1/dcim/catalog/${
-            encodeURIComponent(_dcCatEditing.uid)}`, cuerpo)
-        : await _dcimSend('POST', '/api/v1/dcim/catalog', cuerpo);
-    if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-    // Y dónde están los puertos, si se tocaron en su pestaña: el mismo «Guardar».
-    if (_dcPm && _dcPm.embedded && _dcPm.dirty && _dcCatEditing && _dcCatEditing.uid) {
-        const pm = await _dcimSend('PUT', `/api/v1/dcim/catalog/${
-            encodeURIComponent(_dcCatEditing.uid)}/portmap`, {map: _dcPm.map});
-        if (!pm.ok) return showToast(pm.error || t('save_failed'), 'danger');
-    }
-    _dcPm = null;                      // antes de cerrar: si no, la guarda preguntaría
-    hideInfoModal();
-    showToast(t('saved'), 'success');
-    _dcCatEditing = null;
-    _dcCatCloneFrom = '';
-    _dcCatOpen();
+    // Una petición a la vez: el botón seguía activo mientras se guardaba, y un doble clic
+    // o Intro mantenido creaba el registro dos veces.
+    if (_dcCatEditSave.busy) return;
+    _dcCatEditSave.busy = true;
+    try {
+        const f = _dcCatForm;
+        if (!String(f.manufacturer || '').trim() || !String(f.model || '').trim())
+            return showToast(t('dcim_catalog_need_name'), 'warning');
+        // Los puertos, de renglones a la forma que guarda la biblioteca: `{familia: {tipo: n}}`.
+        // Dos renglones de la misma familia y el mismo tipo se **suman** en vez de pisarse: quien
+        // escribe «2 c14» y luego «2 c14» más quiere cuatro, no dos.
+        const ports = {};
+        (_dcCatFormPorts || []).forEach(p => {
+            const v = Number(p.n || 0);
+            if (!(v > 0) || !p.fam) return;
+            const tipo = String(p.tipo || '').trim();
+            ports[p.fam] = ports[p.fam] || {};
+            ports[p.fam][tipo] = (ports[p.fam][tipo] || 0) + v;
+        });
+        // Y las medidas, sin los huecos que se dejaron vacíos: una medida en blanco no es un cero,
+        // es «no lo sé», y guardarla como cero diría que el armario mide nada de fondo.
+        const extra = {};
+        Object.entries(_dcCatFormExtra).forEach(([k, v]) => {
+            if (v === '' || v === null || v === undefined) return;
+            const n = Number(v);
+            extra[k] = (v !== true && v !== false && String(v).trim() !== '' && !isNaN(n)) ? n : v;
+        });
+        const cuerpo = {
+            manufacturer: f.manufacturer, model: f.model, slug: f.slug,
+            description: f.description, part_number: f.part_number,
+            tree: f.tree, kind: f.kind, size: f.size || '', url: f.url || '',
+            kit_qty: Number(f.kit_qty || 1) || 1, power_type: f.power_type || '',
+            u_height: f.tree === 'module-types' ? 0 : f.u,
+            is_powered: f.tree === 'rack-types' ? 0 : (f.is_powered ? 1 : 0),
+            full_depth: f.full_depth ? 1 : 0,
+            airflow: f.airflow, subdevice: f.subdevice,
+            ports: ports, extra: extra,
+        };
+        if (_dcCatCloneFrom) cuerpo.from = _dcCatCloneFrom;
+        const r = _dcCatEditing
+            ? await _dcimSend('PUT', `/api/v1/dcim/catalog/${
+                encodeURIComponent(_dcCatEditing.uid)}`, cuerpo)
+            : await _dcimSend('POST', '/api/v1/dcim/catalog', cuerpo);
+        if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
+        // Y dónde están los puertos, si se tocaron en su pestaña: el mismo «Guardar».
+        if (_dcPm && _dcPm.embedded && _dcPm.dirty && _dcCatEditing && _dcCatEditing.uid) {
+            const pm = await _dcimSend('PUT', `/api/v1/dcim/catalog/${
+                encodeURIComponent(_dcCatEditing.uid)}/portmap`, {map: _dcPm.map});
+            if (!pm.ok) return showToast(pm.error || t('save_failed'), 'danger');
+        }
+        _dcPm = null;                      // antes de cerrar: si no, la guarda preguntaría
+        hideInfoModal();
+        showToast(t('saved'), 'success');
+        _dcCatEditing = null;
+        _dcCatCloneFrom = '';
+        _dcCatOpen();
+    } finally { _dcCatEditSave.busy = false; }
 }

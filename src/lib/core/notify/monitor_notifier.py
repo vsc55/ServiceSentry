@@ -11,15 +11,55 @@ Teams send one call per alert) — that logic lives in the channel's ``flush`` i
 knows nothing channel-specific.
 
 This replaces the monitor's old direct, threaded ``lib.providers.telegram.Telegram``
-client — there is no background sender thread; sending happens once, at flush time.
+client. The monitor's cycle cuts its batch and hands it to ONE sender thread
+(:meth:`MonitorNotifier.flush_later`), so a slow channel delays the alerts, not the checks.
 """
 
 from __future__ import annotations
 
+import queue
 import socket
+import threading
 
 from lib.core.notify import registry
 from lib.debug import DebugLevel
+
+
+#: The batches waiting to be sent, and the one thread that sends them, in order.
+_OUTBOX: queue.Queue = queue.Queue()
+_SENDER_LOCK = threading.Lock()
+_SENDER: list = []
+
+
+def _sender_loop() -> None:
+    while True:
+        notifier, alerts, public_url = _OUTBOX.get()
+        try:
+            notifier._send(alerts, public_url)
+        except Exception:  # pylint: disable=broad-except
+            pass
+        finally:
+            _OUTBOX.task_done()
+
+
+def drain(timeout: float = 30.0) -> bool:
+    """Wait until every handed-over batch has been sent; whether it emptied in *timeout*.
+    For whoever must know the alerts went out — a test, a shutdown."""
+    import time                                                   # noqa: PLC0415
+    end = time.monotonic() + timeout
+    while _OUTBOX.unfinished_tasks:
+        if time.monotonic() > end:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+def _ensure_sender() -> None:
+    with _SENDER_LOCK:
+        if not _SENDER or not _SENDER[0].is_alive():
+            t = threading.Thread(target=_sender_loop, name='notify-sender', daemon=True)
+            t.start()
+            _SENDER[:] = [t]
 
 
 class MonitorNotifier:
@@ -36,6 +76,10 @@ class MonitorNotifier:
         # the device's own surface so tests and any un-migrated caller keep working.
         self._wa = getattr(wa, '_notify', None) or wa
         self._alerts: list[dict] = []
+        # Alerts are added from the module threads â€” a straggler's among them, landing while
+        # the cycle cuts its batch â€” so the add and the cut must not interleave: an append to
+        # the list just handed over was an alert sent with the wrong batch or not at all.
+        self._alerts_lock = threading.Lock()
         # When set, the WHOLE flush routes as this one kind (``notifications|{channel}_on_
         # {route_kind}``) regardless of each alert's own kind — e.g. an on-demand "Run all"
         # routes as a single ``manual_run`` event, while its digest still shows the real
@@ -57,9 +101,10 @@ class MonitorNotifier:
         it would simply have stopped, which is the worst shape a notification bug takes.
         """
         if kind and message:
-            self._alerts.append({'kind': kind, 'module': module or '',
-                                 'item': item or '', 'message': message,
-                                 'also': str(also or '')})
+            with self._alerts_lock:
+                self._alerts.append({'kind': kind, 'module': module or '',
+                                     'item': item or '', 'message': message,
+                                     'also': str(also or '')})
 
     def has_pending(self) -> bool:
         return bool(self._alerts)
@@ -69,9 +114,31 @@ class MonitorNotifier:
 
         Returns ``{channel: (ok, info)}`` for each channel attempted (empty when there
         was nothing to send)."""
-        alerts, self._alerts = self._alerts, []
+        with self._alerts_lock:
+            alerts, self._alerts = self._alerts, []
         if not alerts:
             return {}
+        return self._send(alerts, public_url)
+
+    def flush_later(self, *, public_url: str = '') -> bool:
+        """Take the buffered alerts now and send them on the notifier's own thread.
+
+        The monitor flushed inline, at the end of its cycle and inside its cycle lock: one
+        webhook call per alert, ten seconds each when the receiver is down — which it often is
+        in the very outage being reported. Three hundred DOWN alerts held the lock for some
+        fifty minutes, with no check running and every «run now» answered «busy». The batch is
+        still cut here, so what one cycle found goes out together and in order.
+
+        Returns whether there was anything to send."""
+        with self._alerts_lock:
+            alerts, self._alerts = self._alerts, []
+        if not alerts:
+            return False
+        _ensure_sender()
+        _OUTBOX.put((self, alerts, public_url))
+        return True
+
+    def _send(self, alerts: list, public_url: str) -> dict:
         wa = self._wa
         try:
             cfg = wa._read_config_file(wa._CONFIG_FILE) or {}

@@ -371,7 +371,7 @@ function _dcSrcClone(uid, nombre) {
         const r = await _dcimSend('POST',
                                   `/api/v1/dcim/sources/${encodeURIComponent(uid)}/clone`, {});
         if (!r.ok) return showToast(r.error || t('save_failed'), 'danger');
-        showToast(tf('dcim_source_cloned', Number(r.n || 0)), 'success');
+        showToast(tf('dcim_source_cloned', Number((r.data || {}).n || 0)), 'success');
         _dcSrcOpen();
     });
 }

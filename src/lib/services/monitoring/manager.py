@@ -245,11 +245,23 @@ class _MonitoringMixin:
             # Don't overlap with the scheduler / an on-demand check.
             if not self._check_lock.acquire(blocking=False):
                 return False, 'busy'
+            # On a thread of its own, holding the lock until it ends. This runs on the
+            # heartbeat's loop, which also renews the lease: a cycle longer than the lease
+            # (30 s) let a standby take it and run cycles beside this one —every check and
+            # alert twice— and peers saw no heartbeat and announced the service down.
+            def _cycle():
+                try:
+                    self._monitoring_run_one_cycle()
+                except Exception:  # pylint: disable=broad-except
+                    pass
+                finally:
+                    self._check_lock.release()
             try:
-                results, errors = self._monitoring_run_one_cycle()
-                return True, f'{len(results)} ok, {len(errors)} error(s)'
-            finally:
+                threading.Thread(target=_cycle, name='monitor-run-now', daemon=True).start()
+            except Exception:  # pylint: disable=broad-except
                 self._check_lock.release()
+                raise
+            return True, 'started'
         if action == 'clear_status':
             try:
                 self._monitoring_get_monitor().clear_status()

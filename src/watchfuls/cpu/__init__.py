@@ -24,7 +24,8 @@
 Device-centric: each check binds to a device (``device_uid``).  CPU usage is sampled
 on that device via :meth:`ModuleBase.device_exec` using an OS-appropriate command
 (``/proc/stat`` on Linux, ``kern.cp_time`` on FreeBSD, ``top -l2`` on macOS,
-``wmic`` on Windows) and compared with a per-check threshold.
+PowerShell ``Get-CimInstance`` on Windows, ``wmic`` only where PowerShell is missing)
+and compared with a per-check threshold.
 
 Each command is a single binary with no shell chaining, so it fits a strict SSH
 command allowlist (see ``docs/caso-ssh-hardening.md``).  Linux/FreeBSD need a delta
@@ -41,13 +42,24 @@ from lib.modules import ModuleBase
 _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'), encoding='utf-8'))
 
 
+# Windows: CIM through PowerShell. `wmic` is gone from Windows 11 24H2 (and deprecated
+# before that), so it is only the fallback for a host without PowerShell. No pipe (the SSH
+# allowlist rule, docs/caso-ssh-hardening.md): member enumeration reads the property of
+# every processor. No `$`, `'`, `;` or `|` inside the double-quoted -Command argument, so the
+# line reads the same to cmd.exe (local, or OpenSSH's default shell) and to PowerShell (an
+# OpenSSH whose DefaultShell is PowerShell). It prints one bare number per processor.
+_WIN_CPU_CIM = ('powershell -NoProfile -NonInteractive -Command '
+                '"(Get-CimInstance Win32_Processor).LoadPercentage"')
+_WIN_CPU_WMIC = 'wmic cpu get loadpercentage /value'
+
+
 def _cpu_cmd(os_: str) -> str:
     """Single-sample command for *os_* (no shell loop/pipe/chaining)."""
     return {
         'linux':   'cat /proc/stat',
         'freebsd': 'sysctl -n kern.cp_time',
         'darwin':  'top -l 2 -n 0',
-        'windows': 'wmic cpu get loadpercentage /value',
+        'windows': _WIN_CPU_CIM,
     }.get(os_, 'cat /proc/stat')
 
 
@@ -84,6 +96,9 @@ class Watchful(ModuleBase):
 
         def _sample():
             out, err, code = self.device_exec(item, cmd, timeout=timeout)
+            if os_ == 'windows' and code != 0 and not (out or '').strip():
+                # No PowerShell (or it failed outright): the legacy wmic, where it still exists.
+                out, err, code = self.device_exec(item, _WIN_CPU_WMIC, timeout=timeout)
             if code != 0 and not out:
                 raise OSError((err or '').strip() or f'cpu query exited {code}')
             return out
@@ -135,7 +150,11 @@ class Watchful(ModuleBase):
             if parts and parts[0] == 'cpu':
                 nums = [int(x) for x in parts[1:] if x.lstrip('-').isdigit()]
                 if len(nums) >= 5:
-                    total = sum(nums)
+                    # Only the first eight columns (user nice system idle iowait irq
+                    # softirq steal): guest and guest_nice are already counted inside
+                    # user and nice, and adding them again inflated the total on a
+                    # hypervisor running guests.
+                    total = sum(nums[:8])
                     idle = nums[3] + nums[4]   # idle + iowait
                     samples.append((total, idle))
         if len(samples) < 2:
@@ -177,10 +196,19 @@ class Watchful(ModuleBase):
 
     @staticmethod
     def _parse_windows(out):
-        """`wmic cpu get loadpercentage /value` → average of LoadPercentage."""
+        """Average LoadPercentage over the processors (sockets) of a Windows host.
+
+        Reads both answers: the CIM one (``(Get-CimInstance …).LoadPercentage``), a bare
+        number per processor on its own line, and the legacy ``wmic … /value`` one,
+        ``LoadPercentage=N``. A processor whose LoadPercentage is null prints nothing and
+        simply does not count.
+        """
         vals = []
-        for line in out.splitlines():
-            if '=' in line:
+        for line in str(out or '').splitlines():
+            line = line.strip()
+            if line.isdigit():
+                vals.append(int(line))
+            elif '=' in line:
                 k, _, v = line.partition('=')
                 if k.strip().lower() == 'loadpercentage' and v.strip().isdigit():
                     vals.append(int(v.strip()))

@@ -85,6 +85,9 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
+        if bad := users_svc.bad_json_field(data, strings=('name', 'description'),
+                                           lists=('roles',)):
+            return jsonify({'error': wa._t('invalid_json'), 'field': bad}), 400
         roles_raw = data.get('roles', [])
         if not isinstance(roles_raw, list):
             return jsonify({'error': wa._t('invalid_roles', '')}), 400
@@ -125,6 +128,9 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
+        if bad := users_svc.bad_json_field(data, strings=('name', 'description'),
+                                           lists=('roles', 'members')):
+            return jsonify({'error': wa._t('invalid_json'), 'field': bad}), 400
         group = wa._groups[uid]
         # Decided on the role UID, not on a display name: `_uid_to_role_name` answers with a
         # CUSTOM role's own name, so this comparison used to be answerable by a role that
@@ -134,6 +140,12 @@ def register(app, wa):
         if not is_admin_req and not all(
                 wa._role_grantable(_normalize_role_uid(r) or r)
                 for r in (data.get('roles') or [])):
+            return jsonify({'error': wa._t('insufficient_permissions')}), 403
+        # Adding members, or switching the group on, grants its roles as they are: with only
+        # `groups_edit` anyone could join a group carrying permissions they lack.
+        if not is_admin_req and ('members' in data or data.get('enabled')) and not all(
+                wa._role_grantable(_normalize_role_uid(r) or r)
+                for r in (data.get('roles') if 'roles' in data else group.get('roles')) or []):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
         try:
             result = groups_svc.update_group(

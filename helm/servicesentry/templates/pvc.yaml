@@ -1,0 +1,29 @@
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+# The var dir, shared by every role (see persistence in values.yaml). Kept on
+# `helm uninstall`: it holds the backups, and deleting them with the release is the one
+# thing an uninstall must not do by surprise. Remove it by hand when it is truly unwanted.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "servicesentry.varClaimName" . }}
+  labels:
+    {{- include "servicesentry.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    {{- with .Values.persistence.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | quote }}
+  {{- if .Values.persistence.storageClass }}
+  {{- if eq "-" .Values.persistence.storageClass }}
+  storageClassName: ""
+  {{- else }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}

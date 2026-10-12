@@ -3,7 +3,9 @@ function openEventRuleModal(rid) {
     _eventDraft = found ? JSON.parse(JSON.stringify(found))
         : { id: null, name: '', description: '', enabled: true, source: 'audit', events: [],
             severity_max: '', host: '', app: '', log_source: '', match_groups: [], tags: [],
-            channels: [], webhook_ids: [], cooldown: null };
+            // A new rule starts at 60 s (rules_logic.NEW_RULE_COOLDOWN), visible and editable:
+            // clearing the field still means "inherit the global", and 0 still means 0.
+            channels: [], webhook_ids: [], cooldown: 60 };
     if (_eventDraft.log_source == null) _eventDraft.log_source = '';
     _evEnsureConditions(_eventDraft);
     _evLoadLogSources();
@@ -149,7 +151,7 @@ function _eventNotifyHtml() {
         const rows = dests.length
             ? dests.map(w => `<div class="form-check">
                 <input class="form-check-input" type="checkbox" id="evm-wh-${escAttr(w.id)}"${sel.has(w.id) ? ' checked' : ''}
-                    onchange="_eventToggleWebhookId('${escAttr(w.id)}',this.checked)">
+                    onchange="_eventToggleWebhookId(${jsStr(w.id)},this.checked)">
                 <label class="form-check-label small" for="evm-wh-${escAttr(w.id)}">${esc(w.name || w.id)}
                     <span class="text-muted">${esc(w.url || '')}</span></label></div>`).join('')
             : `<div class="text-muted small">${esc(t('event_wh_none'))}</div>`;

@@ -145,6 +145,19 @@ function _dcsRackDropped(drag) {
     return true;
 }
 
+/** Las conexiones del equipo de sala elegido en la planta, hasta lo que tiene conectado en ella. */
+function _dcsLinksSvg() {
+    const it = _dcsItem && _dcsItem.kind === 'ritem' ? _dcsRowOf('ritem', _dcsItem.room, _dcsItem.uid) : null;
+    const S = _DCP_SCALE;
+    return _dcriLinkLinesSvg(it, (uid) => {
+        const sala = _dcObjRoom('item', uid);
+        const x = sala ? _dcsRowOf('ritem', sala, uid) : null;
+        if (!x) return null;
+        const q = _dcsCornersOf('ritem', sala, x);
+        return {x: q.reduce((s, p) => s + p.x, 0) / 4 * S, y: q.reduce((s, p) => s + p.y, 0) / 4 * S};
+    });
+}
+
 function _dcsThingUrl(kind, uid) {
     return kind === 'room' ? `/api/v1/dcim/rooms/${encodeURIComponent(uid)}` : _dcsItemUrl(kind, uid);
 }
@@ -261,8 +274,7 @@ function _dcsNearDelta(movs, caja, dx, dy, libre) {
 /** Las teclas de la planta (las del motor), mientras está abierta y no se revisan sus muros. */
 document.addEventListener('keydown', (ev) => {
     if (!_dcsPlan || _dcimPlan || _dcimRack || (typeof _dcw !== 'undefined' && _dcw)) return;
-    const pane = document.getElementById('dcim-container');
-    if (!pane || !pane.offsetParent) return;
+    if (!_dcKeysHere()) return;
     if (p2dKeyDown(_dcsP2d, ev)) ev.preventDefault();
 });
 

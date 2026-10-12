@@ -28,6 +28,7 @@ Matching is best-effort and never raises into the caller's path.
 
 from __future__ import annotations
 
+import collections
 import json
 import re
 import threading
@@ -35,6 +36,29 @@ import time
 
 from lib.debug import DebugLevel
 
+
+
+#: How far behind its cursor the event worker looks again for rows committed late.
+_LATE_WINDOW = 200
+
+
+class _Seen:
+    """A bounded set of recent ids: membership, and the oldest forgotten first."""
+
+    def __init__(self, size: int = 4 * _LATE_WINDOW):
+        self._order = collections.deque(maxlen=size)
+        self._set: set = set()
+
+    def __contains__(self, rid) -> bool:
+        return rid in self._set
+
+    def add(self, rid) -> None:
+        if rid is None or rid in self._set:
+            return
+        if len(self._order) == self._order.maxlen:
+            self._set.discard(self._order[0])
+        self._order.append(rid)
+        self._set.add(rid)
 
 class _EventsMixin:
 
@@ -178,27 +202,68 @@ class _EventsMixin:
         for key, source, store, log_source in self._event_sources():
             try:
                 last = st.cursor(key)
-                if last is None:                 # first run → start at the tail (no replay)
-                    last = store.max_id()
+                tail = store.max_id()
+                # First run → start at the tail (no replay). And a cursor PAST the tail is a
+                # cursor of another table: a dedicated syslog database switched on, a source
+                # re-pointed, a restore that lowered the ids. Kept, every new row sat below it
+                # and no rule fired again, silently.
+                if last is None or (tail is not None and last > tail):
+                    last = tail
                     st.set_cursor(key, last)
+                    # The late window belonged to the old table: rebuild it from the new
+                    # cursor, as at start-up, or every row just behind it fires again.
+                    self.__dict__.get('_event_seen', {}).pop(key, None)
                 id_key = '_id' if source == 'audit' else 'id'
                 uid, name = log_source if log_source else ('', '')
+                seen = self._event_late_window(key, store, last, id_key)
+                desde = max(0, int(last or 0) - _LATE_WINDOW)
                 while True:
-                    rows = store.query_since(last, limit=500)
+                    rows = store.query_since(desde, limit=500)
                     if not rows:
                         break
                     for rec in rows:
+                        rid = rec.get(id_key)
+                        if rid in seen:
+                            continue
+                        seen.add(rid)
                         if uid:
                             rec['log_source'], rec['log_source_name'] = uid, name
                         self._eval_event(source, rec, log_source=uid)
                         processed += 1
-                    last = rows[-1].get(id_key, last)
-                    st.set_cursor(key, last)
+                    top = rows[-1].get(id_key, last)
+                    if top is not None and (last is None or top > last):
+                        last = top
+                        st.set_cursor(key, last)
+                    desde = rows[-1].get(id_key, desde)
                     if len(rows) < 500:
                         break
             except Exception as exc:  # pylint: disable=broad-except
                 self._dbg(f"> Events >> worker tick ({key}) failed: {exc}", DebugLevel.error)
         return processed
+
+    def _event_late_window(self, key, store, last, id_key) -> '_Seen':
+        """The ids already evaluated just behind the cursor of *key*.
+
+        On PostgreSQL and MySQL ids are handed out when a row is INSERTED, not when it is
+        committed: with several writers (web threads auditing, two syslog receivers, rsyslog's
+        workers) id 100 can become visible after 101 was read and the cursor moved past it — a
+        row no rule would ever see. So every tick re-reads a short window behind the cursor and
+        evaluates only what it has not evaluated yet. The first time, after a start, the window
+        is taken as done: it was, by the process before.
+        """
+        cache = self.__dict__.setdefault('_event_seen', {})
+        seen = cache.get(key)
+        if seen is None:
+            seen = cache[key] = _Seen()
+            try:
+                for rec in store.query_since(max(0, int(last or 0) - _LATE_WINDOW),
+                                             limit=_LATE_WINDOW + 1):
+                    rid = rec.get(id_key)
+                    if rid is not None and rid <= int(last or 0):    # only what it had passed
+                        seen.add(rid)
+            except Exception:  # pylint: disable=broad-except
+                pass
+        return seen
 
     def _event_worker_loop(self, stop_event, poll_secs: float = 2.0) -> None:
         """Run ticks every *poll_secs* seconds until *stop_event* is set."""

@@ -59,7 +59,7 @@ function _sldBody() {
     wrap.innerHTML = `<div class="table-responsive" style="max-height:220px;overflow:auto">
         <table class="table table-sm align-middle mb-0 ss-table" id="sl-drops-table" style="font-size:.78rem">
             <thead class="ss-thead"><tr>${thRow}${canDel ? `<th class="ss-th ss-th-actions text-center">${esc(t('col_actions'))}</th>` : ''}</tr></thead>
-            <tbody>${rows.map(x => `<tr>${ordered.map(col => _sldCell(x, col.id)).join('')}${canDel ? `<td class="text-center ss-td-actions"><button class="btn btn-sm btn-link text-danger p-0" title="${escAttr(t('remove'))}" onclick="_syslogDeleteDrop('${escAttr(x.uid)}')"><i class="bi bi-trash"></i></button></td>` : ''}</tr>`).join('')}</tbody>
+            <tbody>${rows.map(x => `<tr>${ordered.map(col => _sldCell(x, col.id)).join('')}${canDel ? `<td class="text-center ss-td-actions"><button class="btn btn-sm btn-link text-danger p-0" title="${escAttr(t('remove'))}" onclick="_syslogDeleteDrop(${jsStr(x.uid)})"><i class="bi bi-trash"></i></button></td>` : ''}</tr>`).join('')}</tbody>
         </table></div>`;
     setTimeout(() => _attachColFeatures('sl-drops-table',
         () => _sldColOrder, o => { _sldColOrder = o; }, _sldSaveColOrder, _sldBody,

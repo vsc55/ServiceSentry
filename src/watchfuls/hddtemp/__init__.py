@@ -104,6 +104,12 @@ class Watchful(ModuleBase):
                         status = hdd_alert >= hdd_temp
                         s_message = self._msg('hdd_ok' if status else 'hdd_high',
                                               hddtemp.label, hdd_dev, hdd_temp, hdd_unit)
+                    elif str(hdd_temp).upper() == 'SLP':
+                        # hddtemp answers SLP for a disk in standby rather than wake it up.
+                        # That is not a fault: read as one, a disk that spins down between
+                        # cycles flipped warning/OK all day and alerted on every flip.
+                        status = True
+                        s_message = self._msg('hdd_sleep', hddtemp.label, hdd_dev)
                     else:
                         status = False
                         s_message = self._msg('hdd_bad', hddtemp.label, hdd_dev, hdd_temp)

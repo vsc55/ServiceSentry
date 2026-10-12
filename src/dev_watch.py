@@ -21,17 +21,31 @@ class _SourceFilter(DefaultFilter):
     (.css needs no restart: it is served with a mtime ``?v=`` cache-buster.)"""
 
     allowed_extensions = ('.py', '.html', '.json')
-    _skip = {'.venv', '__pycache__', 'data', 'tests', '.vscode', '.git', '.pytest_cache'}
+    _skip = {'.venv', '__pycache__', 'tests', '.vscode', '.git', '.pytest_cache'}
+    # Runtime data only at the top (src/data). Matched anywhere it also swallowed source
+    # that lives in a folder called data — lib/core/dcim/data, the DCIM catalogues.
+    _skip_top = {'data'}
 
     def __call__(self, change, path):
-        parts = set(pathlib.Path(path).parts)
-        if parts & self._skip:
+        p = pathlib.Path(path)
+        if set(p.parts) & self._skip:
+            return False
+        try:
+            top = p.resolve().relative_to(ROOT.resolve()).parts[:1]
+        except ValueError:
+            top = ()
+        if set(top) & self._skip_top:
+            return False
+        # DefaultFilter never reads allowed_extensions (ExtensionFilter does): checked here,
+        # or a .css or a picture restarted the server too.
+        if not path.endswith(self.allowed_extensions):
             return False
         return super().__call__(change, path)
 
 
 def _start() -> subprocess.Popen:
-    kwargs: dict = {'cwd': str(ROOT), 'env': os.environ.copy()}
+    # Flask's interactive debugger (with --verbose): main.py allows it only here.
+    kwargs: dict = {'cwd': str(ROOT), 'env': dict(os.environ, SS_FLASK_DEBUG='1')}
     if sys.platform == 'win32':
         kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
     else:

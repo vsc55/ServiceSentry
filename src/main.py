@@ -148,6 +148,18 @@ def _log_level_choices():
     return list(getattr(Debug, 'CONFIG_LEVELS', ('off', 'debug', 'info', 'warning', 'error')))
 
 
+def _flask_debug(args) -> bool:
+    """Whether the web server runs Flask's debug mode — Werkzeug's interactive debugger, a
+    console that runs Python for whoever reaches a 500 and holds the PIN printed in the log.
+
+    `--verbose` (SS_VERBOSE) turned it on by itself, documented as "more output", so a
+    production install that asked for logs got the console. It is the development watcher's:
+    `--verbose` AND ``SS_FLASK_DEBUG=1``, which only `dev_watch.py` sets.
+    """
+    return (bool(getattr(args, 'verbose', False))
+            and os.environ.get('SS_FLASK_DEBUG', '').strip() == '1')
+
+
 def start_web(args):
     """Start the web administration server.
 
@@ -198,7 +210,7 @@ def start_web(args):
     print("  " + translate(blang, 'web_press_ctrlc'))
     print()
 
-    admin.run(host=str(host), port=int(port), debug=getattr(args, 'verbose', False))
+    admin.run(host=str(host), port=int(port), debug=_flask_debug(args))
 
 
 def _run_standalone(desc, args) -> int:

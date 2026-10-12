@@ -106,9 +106,16 @@ def _load_channels(wa) -> list[dict]:
 
 def _post_card(webhook_url: str, card: dict) -> tuple[bool, str]:
     """POST a MessageCard to a Teams Incoming Webhook (always POST/unsigned)."""
+    # Same SSRF guard as the generic webhook: no link-local / metadata target, and no
+    # redirects, which would let the receiver bounce the request past the check.
+    from lib.security.net_guard import validate_external_url  # noqa: PLC0415
+    reason = validate_external_url(webhook_url or '')
+    if reason:
+        return False, f'URL rejected: {reason}'
     try:
         resp = _req.post(webhook_url.strip(), json=card,
-                         headers={'Content-Type': 'application/json'}, timeout=15)
+                         headers={'Content-Type': 'application/json'}, timeout=15,
+                         allow_redirects=False)
         # Connector webhooks return 200 with body "1" on success.
         if 200 <= resp.status_code < 300:
             return True, f'delivered (HTTP {resp.status_code})'

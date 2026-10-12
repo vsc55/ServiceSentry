@@ -33,7 +33,8 @@ def bearer_token_ok(auth_header: str, token: str, min_len: int) -> bool:
         return False
     if not auth_header.startswith('Bearer '):
         return False
-    return hmac.compare_digest(auth_header[7:], token)
+    # Bytes: a non-ASCII str makes `compare_digest` raise (an unauthenticated 500).
+    return hmac.compare_digest(auth_header[7:].encode('utf-8'), token.encode('utf-8'))
 
 
 def parse_filter_eq(filter_str: str, attr: str):
@@ -192,8 +193,16 @@ class ScimService:
         return None, None
 
     def _set_member(self, user_uid, group_uid, add):
+        """Add or drop one membership — of an account SCIM provisioned, and no other.
+
+        The same rule as :meth:`deny_user_write`: a membership is part of the user record,
+        and a group's roles merge into its members' permissions. Without it the IdP could
+        put a LOCAL account (the local Administrator included) into a group it maps to a
+        role, or take an admin-added local member out of one."""
         for u in self.wa._users.values():
             if u.get('uid') == user_uid:
+                if not is_scim_managed(u):
+                    return False
                 gl = list(u.get('groups') or [])
                 if add and group_uid not in gl:
                     gl.append(group_uid)
@@ -431,6 +440,11 @@ class ScimService:
         if deny:
             return deny
         before = self._user_snap(u)
+        # Its sessions and its tokens go with it, as on the panel's delete: they outlived the
+        # account, and a later account of the same name inherited the sessions.
+        self.wa._revoke_user_sessions(username)
+        if u.get('uid') and getattr(self.wa, '_api_token_store', None) is not None:
+            self.wa._api_token_store.delete_for_user(u['uid'])
         self.wa._users.pop(username, None)
         self.wa._persist_users()
         self._audit_change('scim_user_deleted', {'username': username}, before=before)

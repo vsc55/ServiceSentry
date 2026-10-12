@@ -45,6 +45,7 @@ _STORE_TABLES = ('check_state', 'history', 'history_series', 'history_fact',
                  'event_cursor', 'event_cooldowns', 'service_leader',
                  'users', 'users_groups', 'roles', 'config', 'entity_versions',
                  'ss_deftest', '__ssreb_ss_deftest', '__ssbak_ss_deftest',
+                 'ss_dc_feature_live',
                  'ip_bans', 'syslog_drops', 'job_history',
                  'SystemEvents', 'SystemEventsProperties')
 
@@ -168,9 +169,13 @@ def test_groups_reserved_table(live_db):
 def test_a_room_piece_with_a_lock_roundtrips(live_db):
     """`dc_feature.lock` is reserved on MySQL/MariaDB (`LOCK TABLES`), and `Rows` wrote every
     column bare: a door with its cylinder could not be listed, created or changed there."""
+    import dataclasses
     from lib.core.dcim.store.features import _FEATURE
     from lib.db.rows import Rows
-    s = Rows(live_db, _FEATURE)
+    # Its OWN table, which the fixture drops before and after: `dc_feature` itself may already
+    # exist in the scratch database (a panel booted there, an earlier run), and `counts()` is
+    # table-wide — rows left by previous runs made it count six lockers instead of one.
+    s = Rows(live_db, dataclasses.replace(_FEATURE, name='ss_dc_feature_live'))
     s.bootstrap()
     uid = s.create({'room_uid': 'r1', 'kind': 'door', 'label': 'CPD', 'lock': 'cylinder'},
                    actor='test')
@@ -218,6 +223,194 @@ def test_schema_rebuild_preserves_data(live_db):
     live_db.execute(f'INSERT INTO {q} (a, b) VALUES (?, ?)', ('after', 8)); live_db.commit()
     ids = [int(r[0]) for r in live_db.fetchall(f'SELECT id FROM {q} ORDER BY id')]
     assert len(ids) == 2 and ids[1] > ids[0]
+
+
+def test_a_rebuild_keeps_the_rows_written_while_it_copied(live_db, monkeypatch):
+    """MySQL/MariaDB rebuild by copy + `RENAME TABLE` swap, and a row another session wrote
+    to the old table after the copy was in neither — the rebuild lost it. Two late rows are
+    planted: one just after the copy commits, one just before the swap (the second can only be
+    recovered from the backup table, after the swap). PostgreSQL closes this with a lock (it
+    is checked on its SQL in tests/unit/test_tanda5_db.py), so it is not exercised here."""
+    if live_db.KIND != 'mysql':
+        pytest.skip('the late-row recovery is the MySQL/MariaDB rebuild path')
+    from lib.db.schema import Column, TableSpec
+    t = 'ss_deftest'
+    q = live_db.quote_ident(t)
+    live_db.reconcile_table(TableSpec(name=t, columns=(
+        Column('id', 'AUTOINCREMENT', primary_key=True), Column('a', 'TEXT'))))
+    live_db.execute(f'INSERT INTO {q} (a) VALUES (?)', ('before',)); live_db.commit()
+
+    state = {'copied': False, 'planted': []}
+    real_execute, real_commit, real_ddl = live_db.execute, live_db.commit, live_db.execute_ddl
+
+    def _plant(label):
+        state['planted'].append(label)
+        real_execute(f'INSERT INTO {q} (a) VALUES (?)', (label,))
+        real_commit()
+
+    def execute(sql, params=()):
+        n = real_execute(sql, params)
+        if sql.startswith('INSERT INTO `__ssreb_') and 'NOT EXISTS' not in sql:
+            state['copied'] = True
+        return n
+
+    def commit():
+        real_commit()
+        if state['copied'] and not state['planted']:
+            _plant('during-copy')
+
+    def execute_ddl(ddl):
+        if ddl.startswith('RENAME TABLE'):
+            _plant('before-swap')
+        return real_ddl(ddl)
+
+    monkeypatch.setattr(live_db, 'execute', execute)
+    monkeypatch.setattr(live_db, 'commit', commit)
+    monkeypatch.setattr(live_db, 'execute_ddl', execute_ddl)
+    live_db.reconcile_table(TableSpec(name=t, columns=(
+        Column('id', 'AUTOINCREMENT', primary_key=True),
+        Column('a', 'TEXT', nullable=False, default="''"))))   # nullability → rebuild
+    monkeypatch.undo()
+
+    assert state['planted'] == ['during-copy', 'before-swap']
+    got = [r[0] for r in live_db.fetchall(f'SELECT a FROM {q} ORDER BY id')]
+    assert got == ['before', 'during-copy', 'before-swap']
+    assert not live_db.fetchall(
+        "SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() "
+        "AND table_name = '__ssbak_ss_deftest'")
+    live_db.execute(f'INSERT INTO {q} (a) VALUES (?)', ('after',)); live_db.commit()
+    assert len({r[0] for r in live_db.fetchall(f'SELECT id FROM {q}')}) == 4
+
+
+def _pg_only(live_db):
+    if live_db.KIND != 'postgresql':
+        pytest.skip('PostgreSQL-specific')
+
+
+def test_pg_a_rebuild_holds_off_other_writers_until_the_swap(live_db, monkeypatch):
+    """P9 on PostgreSQL: from the LOCK on, another session cannot write the table it copies."""
+    _pg_only(live_db)
+    from lib.db.schema import Column, TableSpec
+    t = 'ss_deftest'
+    q = live_db.quote_ident(t)
+    live_db.reconcile_table(TableSpec(name=t, columns=(
+        Column('id', 'AUTOINCREMENT', primary_key=True), Column('a', 'TEXT'))))
+    live_db.execute(f'INSERT INTO {q} (a) VALUES (?)', ('before',)); live_db.commit()
+    otra = get_connector(_pg_cfg())
+    visto = {}
+    real = live_db.execute
+
+    def execute(sql, params=()):
+        n = real(sql, params)
+        if sql.startswith('LOCK TABLE') and 'blocked' not in visto:
+            try:
+                otra.execute("SET lock_timeout = '300ms'")
+                otra.execute(f'INSERT INTO {q} (a) VALUES (?)', ('intruder',))
+                otra.commit()
+                visto['blocked'] = False
+            except Exception:  # pylint: disable=broad-except
+                otra.rollback()
+                visto['blocked'] = True
+        return n
+
+    monkeypatch.setattr(live_db, 'execute', execute)
+    live_db.reconcile_table(TableSpec(name=t, columns=(
+        Column('id', 'AUTOINCREMENT', primary_key=True),
+        Column('a', 'TEXT', nullable=False, default="''"))))     # nullability → rebuild
+    monkeypatch.undo()
+    assert visto.get('blocked') is True, 'another session wrote into the table being copied'
+    otra.execute(f'INSERT INTO {q} (a) VALUES (?)', ('after',)); otra.commit()
+    assert [r[0] for r in live_db.fetchall(f'SELECT a FROM {q} ORDER BY id')] == ['before', 'after']
+
+
+def test_pg_an_index_that_cannot_come_back_does_not_undo_the_rebuild(live_db, monkeypatch):
+    """On PostgreSQL a failed statement aborts the transaction; the tolerated one is fenced by
+    a SAVEPOINT, so the rebuild still lands. A rebuild keeps extra columns, so a real index
+    comes back fine; the one that cannot is planted in what the rebuild read beforehand — an
+    index over a column that does not exist, which PostgreSQL really refuses."""
+    _pg_only(live_db)
+    from lib.db.schema import Column, IndexInfo, TableSpec
+    t = 'ss_deftest'
+    q = live_db.quote_ident(t)
+    live_db.reconcile_table(TableSpec(name=t, columns=(
+        Column('id', 'AUTOINCREMENT', primary_key=True), Column('a', 'TEXT'))))
+    live_db.execute(f'INSERT INTO {q} (a) VALUES (?)', ('keep',)); live_db.commit()
+    real = live_db.list_indexes
+    monkeypatch.setattr(live_db, 'list_indexes', lambda table: list(real(table)) + [
+        IndexInfo(name='ss_cannot_return', columns=('no_such_column',), unique=False)])
+    live_db.reconcile_table(TableSpec(name=t, columns=(
+        Column('id', 'AUTOINCREMENT', primary_key=True),
+        Column('a', 'TEXT', nullable=False, default="''"))))     # nullability → rebuild
+    monkeypatch.undo()
+    assert {c.name: c for c in live_db.describe_table(t)}['a'].nullable is False,         'the rebuild was rolled back'
+    assert [r[0] for r in live_db.fetchall(f'SELECT a FROM {q}')] == ['keep']
+
+
+def test_pg_a_restore_does_not_move_the_sequence_back(live_db):
+    """P7: ids the events worker has passed must not be handed out again."""
+    _pg_only(live_db)
+    from lib.core.backup import restore as bk_restore
+    from lib.db.schema import Column, TableSpec
+    t = 'ss_deftest'
+    q = live_db.quote_ident(t)
+    live_db.reconcile_table(TableSpec(name=t, columns=(
+        Column('id', 'AUTOINCREMENT', primary_key=True), Column('a', 'TEXT'))))
+    for i in range(10):
+        live_db.execute(f'INSERT INTO {q} (a) VALUES (?)', (f'r{i}',))
+    live_db.commit()
+    with live_db.transaction():
+        live_db.execute(f'DELETE FROM {q}')
+        bk_restore._load_table(                       # pylint: disable=protected-access
+            live_db, t, {'columns': ['id', 'a'], 'rows': [[1, 'x'], [2, 'y'], [3, 'z']]})
+    live_db.execute(f'INSERT INTO {q} (a) VALUES (?)', ('new',)); live_db.commit()
+    assert int(live_db.fetchone(f"SELECT id FROM {q} WHERE a = 'new'")[0]) > 10
+
+
+def test_pg_rebuilds_do_not_pile_up_unique_indexes(live_db):
+    """P11: the index behind a UNIQUE constraint was recreated beside the new one each time."""
+    _pg_only(live_db)
+    from lib.db.schema import Column, TableSpec
+    t = 'ss_deftest'
+
+    def spec(nullable):
+        return TableSpec(name=t, columns=(
+            Column('id', 'AUTOINCREMENT', primary_key=True),
+            Column('code', 'TEXT', unique=True),
+            Column('a', 'TEXT', nullable=nullable, default="''")))
+    live_db.reconcile_table(spec(True))
+    live_db.reconcile_table(spec(False))
+    live_db.reconcile_table(spec(True))
+    defs = [r[0] for r in live_db.fetchall(
+        "SELECT indexdef FROM pg_indexes WHERE tablename = ?", (t,))]
+    assert len([d for d in defs if 'UNIQUE' in d.upper() and '(code)' in d]) == 1, defs
+
+
+def test_pg_an_offset_without_a_limit_pages(live_db):
+    """P12: `LIMIT -1` is SQLite's; PostgreSQL refused it."""
+    _pg_only(live_db)
+    from lib.db.rows import Rows
+    from lib.db.schema import Column, TableSpec
+    spec = TableSpec(name='ss_deftest', columns=(
+        Column('uid', 'TEXT', primary_key=True), Column('a', 'TEXT')))
+    live_db.reconcile_table(spec)
+    filas = Rows(live_db, spec)
+    for i in range(5):
+        live_db.execute('INSERT INTO "ss_deftest" (uid, a) VALUES (?, ?)', (f'u{i}', str(i)))
+    live_db.commit()
+    assert len(filas.list(offset=2)) == 3
+
+
+def test_pg_a_config_write_moves_its_stamp(live_db):
+    """P8 on PostgreSQL: the counter another replica reads moves with every real write."""
+    _pg_only(live_db)
+    from lib.core.config.store import ConfigStore
+    st = ConfigStore(live_db)
+    antes = st.stamp()
+    st.set_many({'web_admin|x_test': '1'})
+    despues = st.stamp()
+    assert antes is not None and despues is not None and despues != antes
+    st.set_many({'web_admin|x_test': '1'})                  # same value: no real change
+    assert st.stamp() == despues
 
 
 def test_restored_rows_leave_room_for_the_next_insert(live_db):

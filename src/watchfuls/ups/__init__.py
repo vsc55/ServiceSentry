@@ -45,8 +45,28 @@ def _to_float(value):
         return None
 
 
+def _nut_arg(value) -> str:
+    """One argument of a NUT command line, as upsd's tokenizer reads it.
+
+    upsd splits on spaces and honours double quotes with backslash escapes, so a password
+    with a space in it was sent as two arguments (rejected), and one holding a newline ended
+    the command early and started another of the caller's choosing. A line break cannot be
+    carried at all, so it is refused instead of being sent."""
+    s = str(value)
+    if '\n' in s or '\r' in s:
+        raise ValueError('NUT arguments cannot contain line breaks')
+    if s and not any(c in s for c in ' \t"\\'):
+        return s
+    return '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
 def _nut_query(host, port, ups_name, user, password, timeout):
     """Connect to NUT UPSD, authenticate if credentials given, query LIST VAR."""
+    # Validated before connecting: a value that cannot be sent should not open a session.
+    user_arg = _nut_arg(user) if user else ''
+    pass_arg = _nut_arg(password) if user else ''
+    if any(c in str(ups_name) for c in ' \t\r\n"'):
+        raise ValueError(f'invalid UPS name: {ups_name!r}')
     sock = socket.create_connection((host, port), timeout=timeout)
     sock.settimeout(timeout)
     f = sock.makefile('rw', encoding='utf-8', errors='replace')
@@ -60,11 +80,11 @@ def _nut_query(host, port, ups_name, user, password, timeout):
 
         # Authenticate if credentials provided
         if user:
-            _send(f'USERNAME {user}')
+            _send(f'USERNAME {user_arg}')
             r = _recv()
             if not r.startswith('OK'):
                 raise ConnectionError(f'USERNAME rejected: {r}')
-            _send(f'PASSWORD {password}')
+            _send(f'PASSWORD {pass_arg}')
             r = _recv()
             if not r.startswith('OK'):
                 raise ConnectionError(f'PASSWORD rejected: {r}')
@@ -134,11 +154,19 @@ class Watchful(ModuleBase):
             if not host:
                 self._debug(f"UPS: {self.item_label(key)} - host is empty, skipping.", DebugLevel.warning)
                 continue
-            port = int(value.get('port', 0) or 0) or 3493
             ups_name = (value.get('ups_name', '') or '').strip() or self._DEFAULTS['ups_name']
             user = (value.get('user', '') or '').strip()
             password = (value.get('password', '') or '').strip()
-            timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
+            try:
+                port = int(value.get('port', 0) or 0) or 3493
+                timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
+            except (TypeError, ValueError) as exc:
+                # A malformed number fails its OWN item: raised here, outside the per-item
+                # executor, it aborted the check of every UPS in the module.
+                _nm = (value.get('label', '') or '').strip() or ups_name or key
+                self.dict_return.set(key, False, self._msg('ups_error', _nm, exc),
+                                     other_data={'name': _nm}, name=_nm)
+                continue
             self._debug(f"UPS: {self.item_label(key)} - host={host}:{port} ups_name={ups_name}", DebugLevel.info)
 
             def _alert(field):

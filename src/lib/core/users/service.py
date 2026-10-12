@@ -37,6 +37,31 @@ class AdminOpError(Exception):
         self.args = args
 
 
+def bad_json_field(data: dict, *, strings=(), ids=(), lists=()) -> str | None:
+    """The first field of a request body whose JSON type the operation cannot take, or None.
+
+    Text fields (*strings*) must be a string; ``null`` reads as empty and is rewritten so in
+    *data*. References (*ids*, a role uid) must be a string or ``null`` and are left alone.
+    Lists (*lists*: groups, roles, members, permissions) must be a list of strings, or
+    ``null``. Every one of these used to reach a ``.strip()``, a set or a lookup as whatever
+    the body held, and a number or an object there was a 500 instead of a 400.
+    """
+    for k in strings:
+        if k in data:
+            if data[k] is None:
+                data[k] = ''
+            elif not isinstance(data[k], str):
+                return k
+    for k in ids:
+        if data.get(k) is not None and not isinstance(data[k], str):
+            return k
+    for k in lists:
+        v = data.get(k)
+        if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+            return k
+    return None
+
+
 @dataclass
 class PasswordPolicy:
     """Password rules — mirrors the ``web_admin|pw_*`` config (see WebAdmin)."""

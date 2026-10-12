@@ -161,6 +161,9 @@ async function _dc3dSearch(q, ctx) {
     const site = _dc3dSiteUid();
     if (ctx === 'rack' || !site) return ss3dSay(id, tf('dcim_3d_not_found', q));
     const d = await apiGet(`/api/v1/dcim/items?q=${encodeURIComponent(q)}&site=${encodeURIComponent(site)}&limit=20`);
+    // The viewer asked is still the one on screen: an answer landing after a repaint or another
+    // room flew a viewer already let go.
+    if (ss3dGet(id) !== V) return;
     const fila = ((d || {}).items || []).find(x => (V.escena.cajas || []).some(k => k.lee && k.lee.uid === x.rack_uid));
     if (!fila) return ss3dSay(id, tf('dcim_3d_not_found', q));
     _dc3dGoTo(V, id, fila.rack_uid, tf('dcim_3d_found_in', fila.label || q, fila.rack || '', fila.u_start || ''));
@@ -325,16 +328,28 @@ function _dc3dAddCircuits(escena) {
 // con la pestaña a la vista, se piden otra vez los estados de lo que se mira y se rehace la
 // escena —la cámara no se mueve—.
 const _DC3D_LIVE_MS = 30000;
-setInterval(async () => {
+//: Whether the box of a viewer is on screen. `document.hidden` only says the browser tab is,
+//: and the panel is one page: a rack viewer left behind by going to another section stayed
+//: "visible" to this, so it went on asking for the rack every half minute and rebuilding a
+//: scene in a pane nobody could see. `getClientRects` and not `offsetParent`, which is null
+//: for a box in full screen (`position: fixed`).
+function _dc3dOnScreen(id) {
+    const el = document.getElementById(id);
+    return !!(el && el.getClientRects && el.getClientRects().length);
+}
+async function _dc3dLiveTick() {
     if (document.hidden) return;
     try {
         if (_dcimRack && _dcimRack.rack && ss3dGet(_DCR3D_BOX)) {
+            if (!_dc3dOnScreen(_DCR3D_BOX)) return;
             const d = await apiGet(`/api/v1/dcim/racks/${encodeURIComponent(_dcimRack.rack.uid)}`);
             if (d && d.rack && _dcimRack && _dcimRack.rack && d.rack.uid === _dcimRack.rack.uid) {
                 _dcimRack.items = d.items;
                 _dcimRack.roll = d.roll;
                 ss3dRebuild(_DCR3D_BOX);
             }
+        } else if (!_dc3dOnScreen(_DC3D_BOX)) {
+            return;
         } else if (_dc3d && _dcsPlan && ss3dGet(_DC3D_BOX)) {
             await _dcsLoadContents();
             ss3dRebuild(_DC3D_BOX);
@@ -343,7 +358,8 @@ setInterval(async () => {
             if (d && d.racks && _dcimPlan) { _dcimPlan.racks = d.racks; ss3dRebuild(_DC3D_BOX); }
         }
     } catch (_) { /* el siguiente intento lo hará */ }
-}, _DC3D_LIVE_MS);
+}
+setInterval(_dc3dLiveTick, _DC3D_LIVE_MS);
 
 // ── La cámara en la dirección ────────────────────────────────────────────────
 
@@ -356,9 +372,15 @@ let _dc3dUrlMode = '';
 function _dc3dUrlTake(q) {
     _dc3dUrlMode = q.get('v3d') || '';
     const c = (q.get('cam') || '').split(',');
+    // Within what the mouse itself could reach (`ss3dWheel`, `ss3dMove`): an address is typed or
+    // pasted, and `radio=0`, a negative one or `phi=0` gave a camera inside the target or on the
+    // pole — a black or flipped picture with no way to say why.
+    const entre = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
     if (c.length >= 6 && c.slice(0, 6).every(v => Number.isFinite(Number(v))))
-        _dc3dPendingCam = {mira: c.slice(0, 3).map(Number), radio: Number(c[3]), theta: Number(c[4]),
-                           phi: Number(c[5]), orto: c[6] === 'o'};
+        _dc3dPendingCam = {mira: c.slice(0, 3).map(v => entre(Number(v), -1e5, 1e5)),
+                           radio: entre(Number(c[3]), 0.5, 1e4),
+                           theta: Number(c[4]) % (2 * Math.PI),
+                           phi: entre(Number(c[5]), 0.08, Math.PI - 0.15), orto: c[6] === 'o'};
     if (_dc3dUrlMode === 'rack') _dcRackView = '3d';
 }
 

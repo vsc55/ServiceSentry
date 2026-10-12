@@ -70,5 +70,7 @@ def register(app, wa):
             wa._audit('telegram_test_fail', detail={'error': desc})
             return jsonify({'error': desc}), 502
         except Exception as exc:
-            wa._audit('telegram_test_fail', detail={'error': str(exc)})
-            return jsonify({'error': str(exc)}), 502
+            from lib.providers.telegram import redact               # noqa: PLC0415
+            msg = redact(str(exc), token)                           # the token is in the URL
+            wa._audit('telegram_test_fail', detail={'error': msg})
+            return jsonify({'error': msg}), 502

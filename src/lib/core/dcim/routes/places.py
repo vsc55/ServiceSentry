@@ -313,6 +313,33 @@ def register(app, wa, C):
                 for toma in store.items_in_room(uid):
                     if toma.get('source_uid'):
                         store.items.update(toma['uid'], {'source_uid': ''}, actor=C.actor())
+                # Lo mismo las regletas de sus racks, y al revés: una fuente de la sede vieja
+                # que decía SER un SAI de estos racks o una pieza de esta sala deja de decirlo.
+                # Es lo que hace mover un rack a otra sede (`_follow_to_rack`), para la sala
+                # entera.
+                sede_n = str(data['site_uid'] or '')
+                fuentes = {s['uid']: s for s in store.sources.list()}
+
+                def _ajena(fuente) -> bool:
+                    return str((fuente or {}).get('site_uid') or '') not in ('', sede_n)
+
+                equipos = set()
+                for rack in store.racks_of(uid):
+                    for pdu in store.pdus_of(rack['uid']):
+                        if _ajena(fuentes.get(str(pdu.get('source_uid') or ''))):
+                            store.pdus.update(pdu['uid'], {'source_uid': ''}, actor=C.actor())
+                    equipos.update(i['uid'] for i in store.items_of(rack['uid']))
+                piezas = {f['uid'] for f in store.features_of(uid)}
+                for fuente in fuentes.values():
+                    if not _ajena(fuente):
+                        continue
+                    cambios = {}
+                    if str(fuente.get('item_uid') or '') in equipos:
+                        cambios['item_uid'] = ''
+                    if str(fuente.get('feature_uid') or '') in piezas:
+                        cambios['feature_uid'] = ''
+                    if cambios:
+                        store.sources.update(fuente['uid'], cambios, actor=C.actor())
             # Y su foto, si lo editado ES un armario: renombrarlo o cambiarle la altura mueve de
             # sitio a todo lo que hay dentro, y eso es parte de su historia. Aquí y no en cada
             # llamada porque este CRUD es uno para cuatro cosas — la condición es el precio de
@@ -384,10 +411,16 @@ def register(app, wa, C):
         out = set()
         for floor in store.floors_of(site_uid):
             area = str(floor.get('area_uid') or '')
-            if area and store.rooms.get(area) and not store.racks_of(area) \
-                    and not store.features_of(area) and not store.rows_of(area):
+            if area and store.rooms.get(area) and _area_empty(store, area):
                 out.add(area)
         return out
+
+    def _area_empty(store, area) -> bool:
+        """A floor's general area holds nothing: no rack, piece, row or room item. The room
+        items were missing, and an area holding only PCs and outlets went with its floor and
+        left them pointing at no room — owned by nobody, so anyone could read and edit them."""
+        return not (store.racks_of(area) or store.features_of(area) or store.rows_of(area)
+                    or store.items_in_room(area))
 
     def _contents(store, scope, uid) -> dict:
         """What a container still holds that is inventory, as ``{kind: count}``; empty if none."""
@@ -397,7 +430,10 @@ def register(app, wa, C):
                      'sources': len(store.sources_of(uid) or ()),
                      'links': len(store.links_of([uid]) or ())}
         elif scope == 'room':
-            found = {'racks': len(store.racks_of(uid) or ())}
+            # Its room items too (PCs, outlets, access points): they are inventory, and a
+            # room deleted around them left them without a room and without an owner.
+            found = {'racks': len(store.racks_of(uid) or ()),
+                     'items': len(store.items_in_room(uid) or ())}
         elif scope == 'rack':
             found = {'items': len(store.items_of(uid) or ()),
                      'pdus': len(store.pdus_of(uid) or ())}
@@ -784,7 +820,7 @@ def register(app, wa, C):
         # sostener lo suelto de esta planta, y sin planta ni nada dentro se quedaría en el árbol
         # como una sala «sin colocar» que nadie creó. Con algo dentro se queda, como las demás.
         area = str(floor.get('area_uid') or '')
-        if area and store.rooms.get(area) and not store.racks_of(area)                 and not store.features_of(area):
+        if area and store.rooms.get(area) and _area_empty(store, area):
             store.rooms.delete(area)
             store.forget_scope('room', area)
         for room in store.rooms.list('floor_uid = ?', (uid,)):
@@ -992,9 +1028,12 @@ def register(app, wa, C):
     def _room_items(store, room_uid, said, allowed, reach, estados) -> list:
         """A room's items (`placement = 'room'`) this reader may see, with their state and box."""
         cajas = dcim_plankinds.device_defaults(wa)
+        items = C.filtered(store.items_in_room(room_uid), store, said, allowed, 'item', reach)
+        enlaces = dcim_svc.room_item_links(store, items, lambda u: dcim_owners.may_see(
+            C.owner_of(store, said, 'item', u), allowed))
         return [dict(i, state=dcim_svc.item_state(i, estados), box=room_item_box(i, cajas),
-                     **dcim_svc.jack_brief(store, i, C.conns()))
-                for i in C.filtered(store.items_in_room(room_uid), store, said, allowed, 'item', reach)]
+                     links=enlaces.get(str(i['uid']), []), **dcim_svc.jack_brief(store, i, C.conns()))
+                for i in items]
 
     def _access_of(store, room, piezas) -> dict:
         """El control de accesos de una sala, puesto en sus piezas: el estado de cada una que lo
@@ -1402,6 +1441,10 @@ def register(app, wa, C):
                 if not store.features.get(old['uid']):
                     store.features.create(old, actor=old.get('updated_by') or actor)
             raise
+        # Only once the swap held: undone, the old pieces come back with their uids and their
+        # sources still name them. Done, the sources of the pieces that went name nothing.
+        for old in viejas:
+            store.unlink_feature(old['uid'])
 
     # ── Power ─────────────────────────────────────────────────────────────────
     #

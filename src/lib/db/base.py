@@ -494,6 +494,9 @@ class BaseConnector(ABC):
         q = self.quote_ident
         tmp, extras, collist, select_list, has_common = self._rebuild_copy_plan(spec, actual_cols)
         with self.transaction():
+            # Before the copy, not after: a row written to the old table between the
+            # INSERT…SELECT and the DROP was in neither the copy nor the table that survived.
+            self._lock_for_rebuild(spec.name)
             self.execute(create_table_ddl(
                 spec, self._type_map, q, name=tmp, extra_columns=extras,
                 text_default_parens=self.DDL_TEXT_DEFAULT_PARENS))
@@ -509,6 +512,25 @@ class BaseConnector(ABC):
             if has_common:
                 self.sync_autoincrement(spec.name)
 
+    def _lock_for_rebuild(self, table: str) -> None:
+        """Keep other sessions from writing *table* while the rebuild copies it.  Default:
+        no-op — SQLite's first write of the transaction (the CREATE of the copy) already takes
+        the database's write lock, so no other writer gets in until the swap commits.
+        PostgreSQL overrides it; MySQL rebuilds its own way (see its ``_apply_rebuild``)."""
+
+    def _execute_optional(self, sql: str) -> bool:
+        """Run a statement whose failure is expected and tolerated; ``True`` if it ran.
+
+        Default: try it and swallow the error.  PostgreSQL overrides it with a SAVEPOINT,
+        because there a failed statement aborts the whole transaction and swallowing the
+        error is not enough — every statement after it fails too, and the rebuild that only
+        meant to skip an index rolled back entirely."""
+        try:
+            self.execute(sql)
+            return True
+        except Exception:  # pylint: disable=broad-except
+            return False
+
     def _recreate_indexes_after_rebuild(
         self, spec: TableSpec, actual_indexes: list[IndexInfo],
     ) -> None:
@@ -516,18 +538,28 @@ class BaseConnector(ABC):
         indexes, so a rebuild does not silently drop manual indexes."""
         q = self.quote_ident
         spec_names = {i.name for i in spec.indexes}
+        # What the new table is already unique on by its own DDL or its declared indexes. An
+        # old index that only repeats one of these is not a manual index worth keeping: it is
+        # the old table's constraint index (PostgreSQL listed those) or a copy a previous
+        # rebuild made of it — recreating it added one more duplicate per rebuild.
+        lo = str.lower
+        unique_on = {tuple(map(lo, _index_key_cols(i.columns))) for i in spec.indexes if i.unique}
+        unique_on |= {(lo(c.name),) for c in spec.columns if c.unique}
+        unique_on |= {tuple(map(lo, u)) for u in spec.unique_constraints}
+        pk = tuple(lo(c.name) for c in spec.columns if c.primary_key)
+        if pk:
+            unique_on.add(pk)
         for idx in spec.indexes:
             self.execute(create_index_ddl(
                 idx.name, spec.name, idx.columns, idx.unique, q))
         for info in actual_indexes:
             if info.name in spec_names or not info.columns:
                 continue
-            try:
-                self.execute(create_index_ddl(
-                    info.name, spec.name, info.columns, info.unique, q))
-            except Exception:  # pylint: disable=broad-except
-                # Expression / partial indexes can't be round-tripped; skip.
-                pass
+            if info.unique and tuple(map(lo, _index_key_cols(info.columns))) in unique_on:
+                continue
+            # Expression / partial indexes can't be round-tripped; a failure skips that one.
+            self._execute_optional(create_index_ddl(
+                info.name, spec.name, info.columns, info.unique, q))
 
     # ── Maintenance ──────────────────────────────────────────────────────────
 

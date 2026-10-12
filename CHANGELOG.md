@@ -8,6 +8,443 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.144] - 2026-10-12
+
+### Added
+
+- **A room item says what it is connected to, and the demo plugs its equipment in.** Reported:
+  in the demo, a room's PCs showed no outlet and no socket. They were cabled to their outlet,
+  but only the trace said so, and nothing plugged them into a socket.
+  - The demo plugs each PC, printer and display into jack A of the socket beside it with a
+    power lead. That includes the meeting rooms' and the CCTV's displays; the phones run on PoE.
+  - The room's items carry their connections (`links`): port, cable kind and far end. The far
+    end the reader may not see is hidden, as in the trace. It is in the room's list and in the
+    floor's.
+  - The room item card lists them under «Connections». One on the same plan is pressable and
+    picks it there.
+  - On both plans, the chosen room item draws a line to each thing it is connected to, data and
+    power apart.
+
+### Changed
+
+- **Helm can persist the var dir.** `persistence.enabled` (off by default, so an upgrade changes
+  nothing) mounts one ReadWriteMany claim on every pod, created and kept on uninstall or given
+  by `existingClaim`; NOTES warns while backups, pictures, MIBs and SNMP profiles still live on
+  an emptyDir.
+- **New event rules start with a 60 s cooldown.** A rule created without a `cooldown` (form or
+  API) inherited the global 0 and notified on every match; it now starts at 60 s. Rules already
+  stored, a blank sent on purpose (inherit the global) and an explicit 0 behave as before.
+- **Fresh installs run the services as a dedicated `servicesentry` user.** deb (`configure` with
+  no previous version), rpm (`$1 = 1`), the Gentoo ebuild (empty `REPLACING_VERSIONS`) and
+  `install.sh` (no previous directories) call the new `servicesentry-user enable`, which writes
+  a systemd drop-in with `User=` and `AmbientCapabilities=CAP_NET_RAW CAP_NET_BIND_SERVICE`;
+  OpenRC runs the daemon as the owner of `/var/lib/ServiSesentry`. Existing installs keep root
+  until the operator runs `servicesentry-user enable`.
+- **Helm: with `persistence.enabled`, worker and syslog share the volume's group.** They stay
+  root for their capabilities but run with `runAsGroup`/`fsGroup` 1000 and `umask 0002`, and a
+  `var-owner` init container hands the claim to 1000:1000, so the web pods can write what they
+  create (`persistence.fixOwnership`, on by default; NFS needs `all_squash,anonuid=1000` or
+  `no_root_squash`).
+- **cpu, filesystemusage and ram_swap read Windows through `Get-CimInstance`.** `wmic` is gone
+  in Windows 11 24H2; the PowerShell commands are pipe-free so they fit an SSH allowlist, and
+  `wmic` is used only when PowerShell itself is missing.
+- **The power path shows a hop into another site.** The chain stopped silently at the edge of
+  the site it was given; it now follows the upstream source into the other site and marks that
+  hop with the site's name, or, for a reader who may not see that site, draws it as an anonymous
+  "fed from another site (no access)" and stops there (`cross_site`, `hidden` in the API).
+
+### Security
+
+A whole-code audit for latent bugs; this build closes its security findings, each with a
+regression test that fails with the fix undone.
+
+- **A scoped API token of an administrator counted as an administrator.** The admin check read
+  the owner's role and never the token, so a token minted with only `users_add` could create a
+  new admin, and one with `users_edit` could reset any admin's password. A token is an admin
+  only when it tracks its owner (`*`).
+- **Your own password could be changed without the current one.** `PUT /api/v1/users/<you>`
+  set it directly, so a hijacked session or any `users_edit` token could take the account.
+  Your own password now goes only through `/me/password`, and no token sets a password. The
+  users list no longer offers the reset key on your own row.
+- **`groups_edit` alone joined a powerful group.** Adding members, or switching a group on,
+  now requires being able to grant every role the group carries.
+- **A disabled role was an escalation in waiting.** It granted nothing, so anyone could assign
+  it, and switching it on later handed its holders everything. A role is judged by what it
+  would grant, enabled or not, and switching one on is checked like sending its permissions.
+- **A session outlived an account SCIM deleted.** A session whose account uid no longer exists
+  fell back to the username, so a later account created under that name inherited it (an admin,
+  possibly). It is revoked instead, and SCIM delete now revokes the account's sessions and
+  tokens as the panel's delete does.
+- **The LDAP and SMTP tests sent the stored password to any server.** With `config_edit` but no
+  right to the section, pointing the test at one's own listener received the bind password in
+  clear. The stored secret now goes only to the stored server, port and account
+  (`lib/security/stored_secret.py`).
+- **Stored XSS through names in inline handlers.** Some sixty `onclick`/`onchange` values put a
+  name inside a JS string with `escAttr`, which the HTML parser undoes before the handler runs:
+  a catalogue model, schema or field named `a');…//` ran script, and «O'Neil» broke the button.
+  All use `jsStr` now, and a backslash no longer escapes the manufacturer picker.
+- **`esc()` left quotes alone** although some thirty attribute values used it (history series
+  keys, audit usernames, cluster modules). It escapes `"` and `'` now.
+- **An uploaded SVG favicon could run script at `/favicon.ico`.** The filter matched raw bytes,
+  so `&#106;avascript:` passed, and that route lacked the sandbox CSP `/brand/favicon` sends.
+  The SVG is read as the browser reads it, and the route sends the sandbox.
+- **`--verbose` / `SS_VERBOSE` turned on Werkzeug's interactive debugger** (a console that runs
+  code) in production. It now also needs `SS_FLASK_DEBUG=1`, which only `dev_watch.py` sets.
+- **DCIM, across companies:**
+  - deleting a room, a floor or a site left its room items without a room and without an
+    owner, readable and editable by anyone. A room holding room items is not deleted (they
+    are counted in «what it holds»), and a floor's area holding them stays;
+  - the generic item route moved a room item into another company's room. Room items are
+    written only through `/room-items`;
+  - a new cable's near end was never checked, so another company's PC, or an item that does
+    not exist, could be cabled. Both ends are;
+  - a power feed's item was never checked. It must exist and be writable.
+- **The control listener drops idle connections.** It had no socket timeout, so a client that
+  connected and sent nothing held a thread for ever; connections now time out after 10 s.
+- **The webhook SSRF guard can no longer be bypassed with a redirect.** Requests no longer
+  follow redirects, so a receiver answering 302 to the metadata address is a failure; a GET URL
+  is also checked after its placeholders are filled in.
+- **The Teams channel has the webhook's SSRF guard.** It posted to the typed URL with no check
+  at all and followed redirects; it now refuses link-local and metadata targets and does not
+  follow redirects.
+- **A tile template can no longer inject Content-Security-Policy directives.** The map origin is
+  rebuilt from a validated host and port instead of copying the raw netloc into the header,
+  which also drops any `user:pass@`.
+- **Mounting on another company's tray is a write to it.** Creating an item with a `parent_uid`
+  checked only the rack; the parent item must now be writable too, as moving onto it already
+  required.
+- **A power source no longer hangs off one the caller cannot see, and a clone does not write
+  into sites the caller cannot write.** An `upstream_uid` naming another company's source is
+  refused with 403, and cloning a source checks the site of every row it would copy before
+  writing any.
+- **A template's attachments follow the template's permissions.** `/api/v1/dcim/files/<uid>`
+  asked for the catalogue's permissions for every file: whoever attached one to a template could
+  neither download nor remove it, and a catalogue manager could delete it.
+- **NUT credentials are quoted.** A password with a space failed authentication, and a line
+  break could inject a second upsd command; arguments are quoted and escaped, line breaks are
+  refused.
+- **A second factor checked after sign-in has a per-account limit.** Turning MFA off,
+  regenerating recovery codes and adding a security key verified the current code with only the
+  per-address jail, so a borrowed session could guess from many addresses; they now share the
+  sign-in step's per-account counter.
+- **A non-ASCII CSRF token, SCIM bearer, control-plane token, TOTP code or WebAuthn challenge is
+  refused, not a 500.** `hmac.compare_digest` raises on a non-ASCII str, which made a forged
+  value an anonymous 500 that skipped the audit and the jail; the comparisons are on bytes, and
+  TOTP codes must be ASCII digits.
+- **Companies are scoped by what the caller may see.** With `orgs_edit` and one company's scope,
+  any other company could be renamed, unlinked or deleted by uid, and things could be re-filed
+  to or from companies outside the caller's scope; those requests now answer 404/403.
+- **The second factor re-reads `login_enabled`.** An account switched to a service account
+  between password and code still got a session; the code, security-key and enrolment steps now
+  refuse it.
+- **SCIM only manages the memberships of accounts it provisioned.** A SCIM group push could put
+  a local account (the local Administrator included) into a group mapped to a role, or drop
+  members an admin added by hand.
+- **Backups no longer carry live sessions or service leadership.** The `core` part took every
+  unclaimed table, including `sessions` (session tokens in clear), `session_access` and
+  `service_leader`/`service_instances`/`service_commands`, and a restore replaced the target's
+  live logins and leader with the copy's. These runtime tables are neither copied, restored nor
+  offered in the restore form; an older archive that holds them has them ignored. `api_tokens`
+  and `api_token_access` are still backed up and restored.
+- **A power chain may cross sites only into a site the caller may write.** A source may hang
+  from another site's source when the caller has write rights on that upstream site; same-site
+  chains keep the visibility rule.
+- **A manual dispatch against a `v*` tag can no longer publish a GitHub Release.** The `release`
+  job now also requires `github.event_name == 'push'`; a tag push behaves as before.
+
+### Fixed
+
+The same audit's findings that stop a service or lose data.
+
+- **SQLite: «database is locked» at once.** A transaction that read before writing (saving the
+  config, a restore) failed without waiting when the monitor committed in between: a deferred
+  `BEGIN` in WAL gives SQLITE_BUSY_SNAPSHOT. Transactions begin `IMMEDIATE`.
+- **PostgreSQL/MySQL: a thread that only reads held its locks for ever.** The driver's implicit
+  transaction was never ended by a read-only loop (a service's config watch), so an upgrade's
+  `ALTER` waited behind it for ever, with every query queued behind the `ALTER`. A read outside
+  `begin()` that follows no uncommitted write now ends its transaction.
+- **PostgreSQL: one swallowed error killed the thread's connection.** A failed statement
+  aborts the transaction, and callers that expect a race (two processes creating the same
+  counter row on first boot, a history series created twice) never rolled back. Outside
+  `begin()` the connector rolls back itself.
+- **MySQL/MariaDB: every DCIM search and asset number was a 500.** `ESCAPE '\'` leaves the
+  literal open there. The `LIKE` escape is `!`.
+- **MySQL/MariaDB: text columns held only 64 KB.** An email template with its logo, a config
+  diff in the audit, a job's log failed to save or were cut. Text columns are `LONGTEXT`, and
+  existing tables are widened in place.
+- **MySQL/PostgreSQL backups always came out `partial` with syslog**: DATETIME and DECIMAL
+  values could not be written to JSON.
+- **SMTP had no timeout.** A server that accepted the connection and never answered stopped
+  monitoring for good (the alert flush runs inside the cycle) and the event worker with it.
+  It waits 20 s per step now.
+- **Alerts were sent inside the monitoring cycle.** One call per alert, 10 s each when the
+  receiver was down: 300 DOWN alerts held the checks for about 50 minutes. Each cycle's batch
+  now goes, in order, to the notifier's own thread, and a module that overran sends its alerts
+  when it lands instead of a whole interval later.
+- **A queued «run now» ran the cycle on the heartbeat thread**, which also renews the lease: a
+  cycle longer than 30 s let a standby take it — every check and alert twice — and peers
+  announced the service down. It runs on its own thread.
+- **The event worker missed rows.** On PostgreSQL/MySQL an id is handed out at insert, not at
+  commit, so a row could appear below the cursor after it moved on; and a cursor past the end
+  of its table (a dedicated syslog database, a restore) was never re-seeded, so no rule fired
+  again. It re-reads a short window behind the cursor and re-seeds a cursor past the end.
+- **The Telegram bot token leaked into the logs** and, for event rules, into the notification
+  log: the driver's error quotes the URL. It is cut out.
+- **A flood of rejected syslog datagrams** wrote two offence rows per packet under the jail's
+  lock, on the receive thread. Offences are reported once per 5 s per source, and the drop
+  tally makes room for new sources after the first 500.
+- **A state that failed to save re-alerted every cycle**: the next cycle read the old state
+  back. It is kept in memory until a save succeeds.
+- **Watchfuls:**
+  - `web`: the content check could never fail — a page without the text but with a 200 was UP;
+  - `filesystemusage` on Windows found no drive: `wmic` ends lines with CR CR LF, and the
+    parser split a record per field;
+  - a failure recorded under an item's bare key (SSH down: ram_swap, raid, hddtemp, keepalived,
+    proxmox) was followed by no recovery once the item answered again under its sub-keys.
+- **Helm: with the default values the worker, events and syslog pods restarted for ever.** They
+  were probed on a control port that opens only with a token, and the token was empty. The
+  chart generates one (kept across upgrades) and probes only when a listener can exist.
+- **Upgrading the `.deb`/`.rpm` left both services stopped.** The pre-remove stopped them on an
+  upgrade too and nothing started them. On an upgrade they keep running, and the post-install
+  restarts the ones that were.
+
+- **DCIM, plans and 3D in the browser:**
+  - a rack opened from the board (or «where it fits») showed the previous rack's cabling,
+    power and history; it goes through the one loader that resets them;
+  - answers arriving late were written into whatever was open by then: a rack opened after
+    another (or after closing it), its power, cables and history, a room's pieces (editable,
+    and written to the other room), a site's contents (its rooms empty, another site's walls),
+    a cabinet's shelves («Add» saved into the other cabinet), and /3d's site. Each is dropped
+    when it is no longer for what is on screen;
+  - a click or double click in the elevation moved an item one U (it was dragged by its foot,
+    not where it was grabbed), and a cancelled touch gesture saved instead of reverting;
+  - undo looked at its top before flushing what was waiting (arrow moves save after 400 ms, a
+    field when typing stops): it undid the step before, and the redo was lost. Holding Ctrl+Z
+    ran several at once. It flushes first and runs one at a time; leaving a plan saves the
+    arrow moves still waiting, and going back from a room to its floor gives the floor its
+    undo again;
+  - the plans' keys acted with a dialog open (scrolling the trace with the arrows moved the item
+    behind it) and with another section on screen (R and the arrows rotated and moved the chosen
+    rack unseen; the walls review took Ctrl+A and Delete everywhere);
+  - typing the room's width and then its depth saved only the depth;
+  - the save buttons (site, room, rack, item, device, component, catalogue model, cable, cable
+    split) sent twice on a double click or a held Enter, creating duplicates;
+  - every search in the catalogue during an import started another polling loop;
+  - a cancelled drag on the port map left its listeners behind;
+  - the 3D walk took letters typed in the search box (and «f» opened racks), kept walking into
+    another site, and its frame loop ran for ever without a viewer.
+- **The test suite filled the disk.** About forty test files and the `node` harness made
+  temporary directories (`ss-cfg-`, `ss-var-`, `ss-node-`) and never removed them; fourteen
+  thousand had filled C:. They are removed when the session ends, and `node_run` removes its
+  own.
+- **A module that overran its deadline no longer writes the status beside the next cycle.** The
+  save lock was created per run, so a straggler and the following cycle saved into the same live
+  status at once; it is one lock per monitor now, and the alert buffer is locked too.
+- **The dedicated monitor checks as soon as it starts.** The scheduler started before the
+  heartbeat had claimed the leader lease, so its first pass skipped the cycle and the first
+  check came a whole interval late.
+- **A lease renewal that updated nothing is not leadership.** Renewing ignored the UPDATE's
+  rowcount, so a replica that lost the lease between the read and the write still reported
+  itself leader for a beat.
+- **A syslog batch on a database that is down gives up quickly.** The row-by-row retry stops
+  after three failures in a row instead of paying a connection timeout for each of up to 500
+  rows.
+- **The service command queue is pruned.** Nothing ever cleaned it: finished commands are
+  dropped after a day, one claimed by an instance that died is closed as abandoned after an
+  hour, and one never claimed is closed as expired.
+- **A re-seeded event cursor does not replay the rows behind it.** The late-window cache of the
+  old table was kept, so up to 200 restored rows just behind the new cursor fired their rules
+  again; it is rebuilt from the new cursor, as at start-up.
+- **A Telegram alert with a very long message is no longer lost.** Free text is clipped to 3500
+  characters; a line or card over Telegram's 4096-character cap was rejected with a 400 together
+  with everything grouped with it.
+- **One undecodable byte no longer empties a command's output.** Local and SSH output is decoded
+  with replacement instead of raising and being swallowed as an empty result.
+- **Google Maps without network access no longer stalls every page.** A failed session request
+  is remembered for 60 s instead of costing a 10-second wait on each page that draws the map.
+- **`to_bytes` reads `inf` and `nan` as unset.** They raised, and the m365 storage check that
+  read the threshold failed.
+- **A PostgreSQL restore no longer moves an id sequence backwards.** Resynchronising a sequence
+  set it to the restored maximum, so new `audit`/syslog rows reused ids the events worker had
+  already passed; the sequence keeps its high-water mark, as SQLite and InnoDB do.
+- **A table rebuild on PostgreSQL no longer adds a duplicate unique index each time.** The index
+  behind a UNIQUE constraint was listed as a manual one and recreated beside the new table's
+  own; it is no longer listed, and duplicates already there go away at the next rebuild.
+- **Paging with an offset and no limit works on MySQL, MariaDB and PostgreSQL.** `Rows.list`
+  wrote `LIMIT -1`, which only SQLite accepts.
+- **A history sample is no longer stored without its measurements.** On SQLite each statement of
+  `record()` was committed on its own and a failed measurement write was swallowed; the sample,
+  the series counter and the measurements now commit or roll back together.
+- **Rack items and parts check their numbers and role.** `depth_mm: "abc"` was stored and every
+  view of the rack answered 500; a mounted item or a plain edit stored any role; a new part took
+  any `qty` and a raw `place`.
+- **Deleting an item or a plan piece, or importing a plan, leaves no reference behind.**
+  Sources, strips and site links that named the deleted item, and sources that named a replaced
+  or deleted piece, are cleared.
+- **Room items get asset numbers.** `INV-?` was stored literally and duplicates were accepted.
+- **A room moved to another site leaves the old site's power behind.** Its racks' strips no
+  longer hang from the old site's sources, and those sources stop claiming its UPS or its
+  pieces.
+- **A broken Ceph is no longer read as "Ceph not installed".** The proxmox check took any error
+  mentioning `rados`, `unable to` or `command` as Ceph being absent and reported OK.
+- **RAID0 and linear arrays get a state.** mdstat prints no `[n/m]` counter for arrays without
+  redundancy, so they stayed "unknown"; an active one now reads OK.
+- **A cleared SNMP `alert` no longer fails the check, and `retries: 0` is honoured.**
+  `int(None)` turned a blank threshold into a permanent DOWN, and `retries or default` turned an
+  explicit 0 into the default.
+- **Datastore checks respect device maintenance.** The module filtered on the raw item and kept
+  checking, and alerting on, a device in maintenance.
+- **Windows service checks call `sc.exe`, and a remote device on `os: auto` is checked.** In
+  PowerShell bare `sc` is Set-Content, and `auto` was refused as unsupported while every other
+  OS module reads it as Linux.
+- **A `timeout` or `threads` of 0 inherits instead of breaking every check.** `module_default`
+  returned the 0, and every subprocess and socket built from it gave up at once.
+- **An unsynchronised NTP server is reported down.** A reply with leap indicator 3, stratum 0 or
+  stratum 16+ comes from a free-running clock, and a small offset against it was shown as
+  healthy.
+- **CPU usage no longer counts guest time twice.** `/proc/stat`'s guest columns are already
+  inside user and nice.
+- **Ping works without root where the kernel allows it.** A pythonping `PermissionError` falls
+  back to the native socket, and SOCK_DGRAM replies match on sequence, since the kernel rewrites
+  the echo id.
+- **A sleeping disk is not a fault.** hddtemp's `SLP` for a disk in standby flipped the check
+  between warning and OK.
+- **Local temperature discovery finds the sensors.** The local runner has no shell, so the
+  `thermal_zone*` glob was never expanded; the zones are read directly.
+- **Local commands run with stdin closed.** `wmic` waits for console input and hung each check
+  until its timeout.
+- **Windows `nslookup` output is understood in any language.** The answer was read only after
+  English headers, TXT values on following lines came back empty and extra addresses were
+  dropped; MX now uses the `10 host` form of dig and dnspython.
+- **One malformed number no longer takes down a whole ntp, ssl_cert or ups module.** Item
+  numbers were parsed outside the per-item guard; the bad item now fails alone.
+- **FreeBSD swap usage reads the Total line.** With two swap devices the first disk's usage was
+  reported as the machine's.
+- **"Reset to factory" no longer always looks failed.** It read `r.ok` from `apiPost`, which
+  answers `{status, data}`; the layout was saved but kept marked as a draft.
+- **Overview tables end on the filter just chosen.** A fetch asked while another was in flight
+  was dropped, so the card kept the previous filter's rows; it re-runs once the first lands, and
+  the old rows are cleared on a filter change.
+- **One missed poll no longer loses an infrastructure collection.** A dropped connection or a
+  proxy 502 counted as "job gone"; five misses in a row are needed now.
+- **The asset version follows all of `static/`.** It was `web_admin.css`'s mtime alone, while
+  Bootstrap, its icons and the favicon share the same `?v=` and are cached for a year.
+- **`/status` keeps what the reader opened.** Every refresh re-folded the modules by the
+  server's rule.
+- **DCIM cable and power forms keep what was typed across a repaint.** Changing a new cable's
+  type, or saving anything else in the rack, cleared the half-filled form.
+- **Leaving DCIM lets the rack's 3D go.** It kept its WebGL context and its 30 s refresh behind
+  the hidden pane.
+- **Smaller DCIM panel fixes.** Cloning a power source says how many rows it wrote (it always
+  said 0); a catalogue model's file list refreshes after an upload or delete; a cut retried
+  after a failed move no longer adds a second leg; a socket clicked twice no longer plugs the
+  cable in twice; a model's picture lands in the model that asked for it.
+- **Smaller 3D fixes.** A rack opened in a room's 3D (and in `/3d`) no longer lands in the next
+  room nor loads twice on a double click; a late search answer no longer flies a replaced
+  viewer; the decoded-image cache holds 8 images instead of every plan of the session; a camera
+  from the address is clamped.
+- **Gentoo upgrades no longer delete the venv.** `pkg_postrm` tested `REPLACING_VERSIONS`, which
+  is never set in a postrm; it now tests `REPLACED_BY_VERSION`.
+- **Gentoo conf.d keeps the venv interpreter across upgrades.** The interpreter was sed'd into
+  `/etc/conf.d` after install, so each upgrade queued a `._cfg` file that put the system Python
+  back; the conf.d files are installed already pointing at the venv.
+- **The Gentoo overlay is a repository Portage accepts.** It had no `profiles/repo_name`, no
+  `metadata/layout.conf` and no `Manifest`; `packaging/gentoo/overlay.sh` writes all three,
+  hashing the release archive.
+- **The `build` tag installs the packages it builds.** `packages-install` had an implicit
+  `success()` that a skipped test suite fails; its condition now looks only at the `packages`
+  job.
+- **A manual workflow run no longer pushes images.** `build-image.yml` published on anything but
+  a pull request; only a `push` publishes now.
+- **Service output reaches the logs.** The systemd units run Python unbuffered, and the OpenRC
+  scripts write stdout/stderr to `SS_LOG` (default `/var/log/<service>.log`) instead of
+  discarding them.
+- **The CLI understands `-l es`, and `user add`/`user passwd` without a terminal fail cleanly.**
+  A two-letter code or a locale fell back to English; with no `--password` and no TTY, getpass's
+  `EOFError` was a traceback and is now an exit 1 with a hint.
+- **`dev_watch` restarts on DCIM catalogue edits.** `data` was skipped anywhere in a path, which
+  swallowed `lib/core/dcim/data`; it is skipped only at the top of `src/`, and the extension
+  filter it declared is now applied.
+- **Wrong JSON types are a 400, not a 500.** Numbers, objects or lists where users, roles,
+  groups, `/me/password`, companies, MFA, Teams SSO, the infra watch or the WebAuthn step
+  expected text or an object crashed the request.
+- **Publishing the default dashboard keeps the widgets' filters.** The core widgets' severity,
+  server/module and syslog-source filters (`sev`, `srvf`, `modf`, `slsrc`) were dropped from the
+  published layout, and a junk width crashed it.
+- **The certificate scanner follows the check.** It ignored a check's own `warning_days`, probed
+  a stale inline host instead of the bound device's address, and kept scanning a switched-off
+  `ssl_cert` module.
+- **`/api/v1/me` names the landing page the redirect really uses.** It knew only the core pages,
+  so a module section or view set as a default read as "admin", and an invalid group value
+  skipped the global default.
+- **Job-history limits are applied.** `web_admin|jobs_history_*` and `SS_JOBS_HISTORY_*` were
+  read before the saved config and environment were applied, so the recorder always used the
+  built-in 500/30/200.
+- **Web replicas no longer overwrite each other's configuration.** Every config write moves the
+  `config` table's change counter in the same transaction, so a replica's cached config is
+  checked against it at most every 1.5 s; `ConfigManager.write()` applies only what the caller
+  changed or removed relative to what it read, so one replica's save no longer rewrites stale
+  values or deletes rows another replica added.
+- **A table rebuild no longer loses rows written while it copies.** PostgreSQL locks the table
+  ACCESS EXCLUSIVE before the `INSERT … SELECT`, so readers and writers wait for the swap;
+  MySQL/MariaDB, where `RENAME TABLE` is refused under `LOCK TABLES`, copy the late rows across
+  by primary key once before the swap and once after it from the `__ssbak_` backup (inserts
+  only; updates and deletes during the copy are not replayed).
+- **On PostgreSQL an index the rebuild cannot recreate no longer rolls the whole rebuild back.**
+  The failure was swallowed, but the failed statement had aborted the transaction; each such
+  statement now runs under its own SAVEPOINT.
+- **Ping no longer marks every host DOWN when the process has no ICMP privilege.** With neither
+  a raw nor an unprivileged datagram socket, the check falls back to the system `ping` binary
+  (argument list, no shell, resolved IP only), decides from its exit code (Windows also needs a
+  `TTL=` reply) and reads the RTT from any locale; with no binary either, it says ICMP is not
+  permitted on the monitoring host.
+- **`install.sh` produced an install that never started.** It ran the system Python with distro
+  packages that do not include flask and never copied `requirements.lock`; it now builds
+  `/opt/ServiSesentry/venv` from the lock (`packaging/scripts/make-venv.sh`, same Python ≥
+  3.11.3 floor as the packages) and points the units and conf.d at it. `update.sh` keeps that
+  venv instead of deleting it, and `dependencies.txt` lists only `python3` and `python3-venv`.
+- **The OpenRC log files grew for ever.** The packages, the ebuild and the install scripts ship
+  `/etc/logrotate.d/servicesentry` (weekly, `copytruncate`) for the `SS_LOG` files.
+
+### Tests
+
+- `tests/integration/test_dcim_demo_cabling.py`: every demo PC, printer and display is plugged
+  into a socket, and only data paths must reach a switch. It fails with the desk plug undone.
+- `tests/integration/test_wa_dcim_jacks.py`: a room item's connections in both lists, the
+  card's rows and the plan's lines.
+- `tests/integration/test_wa_privilege_holes.py`: each identity and DCIM hole above.
+- `tests/unit/test_secret_and_debug_guards.py`: the stored-secret rule, the SVG filter and the
+  debugger gate.
+- `tests/meta/test_handler_js_escaping.py`: no `esc`/`escAttr` inside a JS string in an inline
+  handler, and `esc` escapes quotes.
+- Every test above was checked to fail with its fix undone.
+- `tests/unit/test_service_and_data_holes.py`, `tests/integration/test_wa_service_holes.py` and
+  `tests/meta/test_deploy_upgrade_guards.py`: the fixes under «Fixed», each checked to fail with
+  its fix undone; plus one test each in the `web` and `filesystemusage` watchfuls. The
+  PostgreSQL/MySQL connector changes and the LONGTEXT widening were run against MariaDB.
+- `tests/integration/test_wa_dcim_browser_holes.py` (and one in `test_wa_viewer3d_real.py`):
+  the panel fixes, in `node`. The harness learnt to wait for a probe that leaves a promise in
+  `__wait`, so what arrives late can be tested. Four older tests were brought up to the new
+  behaviour (the `LIKE` escape, `LONGTEXT`, a room that holds room items, a handler with
+  `jsStr`).
+- Fourth batch of the audit, each test checked to fail with its fix undone:
+  `tests/unit/test_tanda4_services.py`, `tests/unit/test_tanda4_identity.py`, `tests/integration/test_wa_tanda4_identity.py`, `tests/unit/test_tanda4_persistence.py`,
+  `tests/integration/test_wa_dcim_tanda4.py`, `tests/integration/test_wa_browser_tanda4.py` (in
+  `node`), `tests/meta/test_tanda4_distribution.py` (runs the overlay script and `helm template`
+  for real), `tests/unit/test_cli_prompt_and_lang.py`, `tests/unit/test_dev_watch_filter.py`,
+  `tests/unit/test_module_exec_defaults.py`, a `*_regressions.py` file in fourteen watchfuls,
+  and one more case in `tests/integration/test_wa_service_holes.py`.
+- Fifth batch, each test checked to fail with its fix undone: `tests/unit/test_tanda5_db.py`,
+  `tests/unit/test_tanda5_config_replicas.py` (two managers on one database),
+  `tests/unit/test_tanda5_app.py`, `tests/integration/test_wa_tanda5_app.py`,
+  `tests/meta/test_tanda5_distribution.py`, and `test_*_tanda5.py` in the ping, cpu,
+  filesystemusage and ram_swap watchfuls. `tests/e2e/test_db_portability_live.py` gains a
+  rebuild that has rows planted during its copy (run on MariaDB) and six PostgreSQL-only checks
+  run against PostgreSQL 18: the rebuild lock seen from a second session, a rejected index
+  fenced by its SAVEPOINT, the sequence after a restore, one unique index after three rebuilds,
+  offset without limit and the `config` stamp. Its lock round trip now uses a table of its own,
+  so rows left by earlier runs no longer break it.
+
 ## [0.0.1+build.143] - 2026-10-11
 
 ### Added

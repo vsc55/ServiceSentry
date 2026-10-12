@@ -890,6 +890,11 @@ de la información que habrá cuando toque.
       SAI» —que puede ser correcto— en «pasaría, si no fuera por el bypass»
 - [x] Las **dos ramas del mismo SAI**: dos regletas, dos colores, y un solo punto de fallo tres
       metros más arriba. Es el error que la redundancia dentro del armario esconde
+- [x] **La cadena puede cruzar de sede** —un edificio alimentado desde la subestación del
+      campus—, y colgar de una fuente de otra sede exige poder **escribir** en ella. El tramo
+      que cruza sale marcado con el nombre de esa sede (`cross_site`) para quien puede verla;
+      para quien no, como «alimentada desde otra sede (sin acceso)», sin nombre, y la cadena
+      se corta ahí. La dependencia es lo que importa ver; de quién es aquel SAI, no
 - [x] Echar o quitar un bypass **se audita** (`dcim_bypass`, severidad aviso): no es editar un
       campo, es una maniobra eléctrica, y quién la hizo y cuándo es lo primero que se pregunta
       cuando algo se apaga tres meses después

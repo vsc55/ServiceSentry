@@ -489,7 +489,10 @@ function _dwSetSource(sel) {
     if (!sel.value || sel.value === 'internal') delete dw.dataset[src.store];
     else dw.dataset[src.store] = sel.value;
     const kind = ((_DW_DEFS[dw.dataset.wid] || {}).view || {}).kind;
-    if (kind === 'table') _dwTableFetch(dw.dataset.wid); else _dwFetchContent(dw.dataset.wid);
+    if (kind === 'table') {
+        delete _dwTableRows[dw.dataset.wid];   // the other source's rows
+        _dwTableFetch(dw.dataset.wid);
+    } else _dwFetchContent(dw.dataset.wid);
     _dwSave();
 }
 
@@ -498,6 +501,7 @@ function _dwSetSyslogSev(sel) {
     const dw = sel.closest('.dw[data-wid]');
     if (!dw) return;
     if (sel.value === '') delete dw.dataset.sev; else dw.dataset.sev = sel.value;
+    delete _dwTableRows[dw.dataset.wid];   // the old filter's rows: a spinner until the new ones land
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwTableFetch(dw.dataset.wid);   // data-driven table: re-fetch rows at the new severity
@@ -627,6 +631,7 @@ function _dwSetTableFilter(sel) {
     const store = sel.dataset.fstore;
     if (!store) return;
     if (sel.value === '') delete dw.dataset[store]; else dw.dataset[store] = sel.value;
+    delete _dwTableRows[dw.dataset.wid];   // the old filter's rows: a spinner until the new ones land
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwTableFetch(dw.dataset.wid);   // data-driven table: re-fetch rows for the new filter
@@ -647,6 +652,7 @@ function _dwSetSevFilter(el) {
     if (opSel) opSel.style.display = isSev ? '' : 'none';   // operator only for a severity level
     const val = _dwSevEncode(level, isSev && opSel ? opSel.value : '', !!(maintEl && maintEl.checked));
     if (val === '') delete dw.dataset[store]; else dw.dataset[store] = val;
+    delete _dwTableRows[dw.dataset.wid];   // the old filter's rows: a spinner until the new ones land
     const content = dw.querySelector('.dw-content');
     if (content && _lastOverviewData) content.innerHTML = _dwContent(dw.dataset.wid, _lastOverviewData);
     _dwTableFetch(dw.dataset.wid);
@@ -829,11 +835,13 @@ async function _dwClearConfig() {
 async function _dwResetFactory() {
     const factory = _dwBuiltinLayout();
     localStorage.setItem(_dwKey(), JSON.stringify(factory));
+    // `apiPost` answers `{status, data}` — the server's `ok` is in `data`, not on `r`.
     const r = await apiPost('/api/v1/overview/reset-factory', { layout: factory });
-    if (r && r.ok && typeof currentUser === 'object' && currentUser) {
+    const ok = !!(r && r.status === 200 && r.data && r.data.ok);
+    if (ok && typeof currentUser === 'object' && currentUser) {
         currentUser.dashboard_layout = factory;
     }
-    _dwMarkDirty(!(r && r.ok));   // it only stopped being a draft if the account took it
+    _dwMarkDirty(!ok);   // it only stopped being a draft if the account took it
     _dwEditing = false;
     renderOverview();
 }

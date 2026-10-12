@@ -18,7 +18,8 @@ name: Docker
 #                     only claim it makes, and the tag name says so
 #   pull request    → BUILT but never pushed: proof the Dockerfile still builds, and the
 #                     one case where a fork could otherwise reach the registry
-#   manual dispatch → the same, on demand
+#   manual dispatch → the same, on demand: nothing it runs publishes — no image push and
+#                     no Release, even when it is dispatched against a `v*` tag
 #
 # Everything gets :sha-<commit> as well, which is the only tag that never moves — the one
 # to use when "it worked yesterday" needs to be pinned down.
@@ -161,9 +162,17 @@ jobs:
   # Building a package proves it was produced, not that it works: the postinstall builds a
   # venv from the lock, and that is exactly the step that fails on a distro nobody tried.
   # So each package is installed in its own distro container and the app is asked to run.
+  #
+  # The status check is spelled out for the same reason as on `packages`: an `if` without
+  # one is an implicit success(), and that looks at EVERY ancestor — `tests` included. On
+  # `build` the suite is skipped, so this job was skipped with it and the packages were
+  # built but never installed, which is the half of `build` its own comment promises.
   packages-install:
     needs: packages
-    if: startsWith(github.ref, 'refs/tags/')
+    if: >-
+      !cancelled()
+      && startsWith(github.ref, 'refs/tags/')
+      && needs.packages.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -209,7 +218,10 @@ jobs:
     # Everything green, not just the image: a release says "this is fit to install", and the
     # install matrix and the package matrix are the only jobs that check that claim.
     needs: [build-gated, install, changelog, packages-install]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # `push` as well as the ref: a manual dispatch run against a `v*` tag has that same ref,
+    # and reached this job — publishing a Release from a run that pushed no image (the
+    # image is pushed on `push` only), so the notes named a `:X.Y.Z` that did not exist.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write          # the only job that writes to the repo

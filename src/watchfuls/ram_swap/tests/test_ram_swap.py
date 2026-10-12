@@ -114,7 +114,7 @@ class TestCheck:
                       devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec', return_value=(_WMIC, '', 0)) as he:
             items = w.check().list
-        assert 'wmic' in he.call_args.args[1]
+        assert 'Get-CimInstance' in he.call_args.args[1]
         assert 'srv_ram' in items and 'srv_swap' not in items
 
     def test_unsupported_os(self):

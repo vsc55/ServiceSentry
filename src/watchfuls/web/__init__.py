@@ -22,6 +22,12 @@ _SCHEMA = json.load(
 )
 
 
+
+#: How `_web_request` says the page came back without the text it had to contain. The check
+#: compared only the HTTP code, so a maintenance or error page served with a 200 —the usual
+#: way they are served— read as UP: the content check could never fail a check.
+_CONTENT_MISSING = 'Content not found'
+
 class Watchful(ModuleBase):
     """Monitors HTTP/HTTPS endpoints: status code, optional content check, basic auth."""
 
@@ -137,7 +143,7 @@ class Watchful(ModuleBase):
             url, timeout, verify_ssl, scheme,
             method, check_content, content_contains, auth_user, auth_password,
         )
-        status = (code == code_exp)
+        status = (code == code_exp) and not detail.startswith(_CONTENT_MISSING)
 
         # Consecutive-failure threshold: suppress alert until 'alert' failures
         # accumulate.  Persisted via fail_streak (survives cycles/processes).
@@ -196,7 +202,7 @@ class Watchful(ModuleBase):
                 if check_content and content_contains and method.upper() != 'HEAD':
                     body = resp.read(131072).decode('utf-8', errors='replace')
                     if content_contains not in body:
-                        return code, f'Content not found: {content_contains!r}'
+                        return code, f'{_CONTENT_MISSING}: {content_contains!r}'
                 return code, f'HTTP {code}'
 
         except urllib.error.HTTPError as exc:
@@ -238,5 +244,5 @@ class Watchful(ModuleBase):
             auth_user        = str(config.get('auth_user') or '') if auth_enabled else '',
             auth_password    = str(config.get('auth_password') or '') if auth_enabled else '',
         )
-        ok = (code == code_exp)
+        ok = (code == code_exp) and not detail.startswith(_CONTENT_MISSING)
         return {'ok': ok, 'message': detail if not ok else f'{detail} (expected {code_exp})'}

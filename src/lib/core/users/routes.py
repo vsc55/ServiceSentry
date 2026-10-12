@@ -14,7 +14,7 @@ Routes registered by this file:
     PUT    /api/v1/users/me/password         change own password
 """
 
-from flask import jsonify, session
+from flask import g, jsonify, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from lib.core.constants import BUILTIN_ROLE_UIDS, SYSTEM_USER, is_reserved_username
@@ -150,6 +150,10 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
+        if bad := users_svc.bad_json_field(
+                data, strings=('username', 'password', 'display_name', 'email'),
+                ids=('role',), lists=('groups',)):
+            return jsonify({'error': wa._t('invalid_json'), 'field': bad}), 400
         uname = data.get('username', '').strip()
         role = data.get('role') or _default_role_uid()
         groups_raw = data.get('groups', [])
@@ -201,6 +205,10 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
+        if bad := users_svc.bad_json_field(
+                data, strings=('password', 'display_name', 'email'),
+                ids=('role',), lists=('groups',)):
+            return jsonify({'error': wa._t('invalid_json'), 'field': bad}), 400
         user      = wa._users[username]
 
         # Role-hierarchy guard: only admins may edit other admin accounts.
@@ -228,6 +236,12 @@ def register(app, wa):
         if (data.get('password') and not _is_sso
                 and not is_admin_requester and username != session.get('username')):
             return jsonify({'error': wa._t('insufficient_permissions')}), 403
+        # Your own password goes through /me/password, which asks for the current one: here
+        # it was set without it, so a hijacked session or any `users_edit` token could take
+        # the account. And no token sets a password at all — credentials are a person's act.
+        if 'password' in data and (username == session.get('username')
+                                   or getattr(g, 'api_token', None)):
+            return jsonify({'error': wa._t('user_password_not_here')}), 403
         # Can't-disable-self (requester-context; last-active-admin is a data guard).
         if ('enabled' in data and not bool(data['enabled'])
                 and username == session.get('username')):
@@ -426,6 +440,8 @@ def register(app, wa):
         data, err = wa._require_json()
         if err:
             return err
+        if bad := users_svc.bad_json_field(data, strings=('current_password', 'new_password')):
+            return jsonify({'error': wa._t('invalid_json'), 'field': bad}), 400
         current_pw = data.get('current_password', '')
         new_pw = data.get('new_password', '')
         if not new_pw:

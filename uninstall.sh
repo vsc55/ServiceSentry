@@ -57,6 +57,11 @@ case "${INIT_SYSTEM}" in
     rm -f "${SYSTEMD_DIR}/ServiSesentry.service"
     rm -f "${SYSTEMD_DIR}/ServiSesentry.timer"
     rm -f "${SYSTEMD_DIR}/ServiSesentry-web.service"
+    # The run-as-user drop-ins servicesentry-user wrote, if any.
+    rm -f /etc/systemd/system/ServiSesentry.service.d/10-servicesentry-user.conf
+    rm -f /etc/systemd/system/ServiSesentry-web.service.d/10-servicesentry-user.conf
+    rmdir /etc/systemd/system/ServiSesentry.service.d     2>/dev/null || true
+    rmdir /etc/systemd/system/ServiSesentry-web.service.d 2>/dev/null || true
 
     systemctl daemon-reload
     ;;
@@ -85,7 +90,9 @@ esac
 # which may hold the SQLite database) and configuration (/etc) are PRESERVED unless
 # --all is given, so an uninstall can never silently destroy the database.
 echo "Removing application files..."
-rm -rf /opt/ServiSesentry
+rm -rf /opt/ServiSesentry          # the venv with it
+rm -f /usr/sbin/servicesentry-user /etc/logrotate.d/servicesentry
+# The `servicesentry` user, if one was created, is left: files it owns may remain.
 
 if [[ "${CLEAR_ALL}" == "YES" ]]; then
     echo "Removing configuration and runtime data (--all)..."

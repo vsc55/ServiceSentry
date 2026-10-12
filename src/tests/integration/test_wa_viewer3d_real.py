@@ -142,6 +142,11 @@ __out.zoom = {fov: _SS3D_FPS.fov, enCamara: 0.24,
               rayoMasCerrado: Math.abs(cerrado[2]) < Math.abs(ancho[2])};
 _SS3D_FPS.fov = _SS3D_FOV;
 
+// Without a viewer the walk stops: its frame loop re-armed itself for ever (audit 2026-10-12).
+Object.assign(_SS3D_FPS, {id: 'nadie', on: true});
+_ss3dFpsStep(0);
+__out.sinVisor = ss3dFpsOn();
+
 __out.choques = {
     cuantos: solidos.length,
     rack: ss3dRealBlocked(solidos, puertas, 4.3, 1.0),
@@ -208,3 +213,8 @@ class TestTheArithmetic:
         assert c['cuantos'] == 2                            # the wall and the rack
         assert c['rack'] and c['muro']
         assert not c['porLaPuerta'] and not c['zona'] and not c['escalera']
+
+    def test_the_walk_stops_without_a_viewer(self, out):
+        """Found by the 2026-10-12 audit: with no viewer mounted, the walk's step asked for the
+        next frame for ever."""
+        assert out['sinVisor'] is False

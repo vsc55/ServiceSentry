@@ -19,6 +19,19 @@ from lib.i18n import translate
 from lib.providers.telegram import send_telegram
 
 
+#: The longest piece of free text put in one message. Telegram rejects a message over 4096
+#: characters (counted after the HTML is parsed) with a 400, and the alert is lost whole; the
+#: rest of the message â€”title, target, timestampâ€” fits in what is left.
+TEXT_MAX = 3500
+
+
+def clip(text, limit: int = TEXT_MAX) -> str:
+    """*text* cut to *limit* characters, marked when it was. Applied BEFORE escaping, so a
+    cut never splits an ``&amp;``."""
+    text = str(text or '')
+    return text if len(text) <= limit else text[:max(0, limit - 1)] + 'â€¦'
+
+
 def _esc(text) -> str:
     """HTML-escape a dynamic field for Telegram's HTML parse mode (& < > only)."""
     return html.escape(str(text or ''), quote=False)
@@ -37,7 +50,7 @@ def _format(kind: str, module: str, item: str, status: str,
     if status:
         lines.append(f"🏷 {_esc(status)}")
     if message:
-        lines.append(f"<blockquote>{_esc(message)}</blockquote>")
+        lines.append(f"<blockquote>{_esc(clip(message))}</blockquote>")
     if timestamp:
         lines.append(f"🕒 <i>{_esc(timestamp)}</i>")
     return '\n'.join(lines)

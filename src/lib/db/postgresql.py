@@ -77,6 +77,7 @@ class PostgreSQLConnector(BaseConnector):
             # transaction there holds a lock its owner's DDL would wait on.
             conn.autocommit = bool(self._config.get('autocommit'))
             self._local.conn = conn
+            self._settled()
         return conn
 
     def _adapt_sql(self, sql: str) -> str:
@@ -189,6 +190,12 @@ class PostgreSQLConnector(BaseConnector):
                 'JOIN pg_attribute a '
                 '  ON a.attrelid = tc.oid AND a.attnum = k.attnum '
                 'WHERE tc.relname = %s AND NOT ix.indisprimary '
+                # Nor the index behind a UNIQUE constraint: it belongs to the table's DDL, and
+                # a rebuild that took it for a manual one recreated it beside the constraint
+                # the new table already had — one more duplicate unique index per rebuild.
+                'AND NOT EXISTS (SELECT 1 FROM pg_constraint c '
+                "  WHERE c.conindid = ix.indexrelid AND c.conrelid = ix.indrelid "
+                "  AND c.contype IN ('p', 'u', 'x')) "
                 'AND tc.relnamespace = current_schema()::regnamespace '
                 'ORDER BY ic.relname, k.ord',
                 (table,),
@@ -221,46 +228,141 @@ class PostgreSQLConnector(BaseConnector):
             "AND (column_default LIKE ? OR is_identity = 'YES')",
             (table, 'nextval(%'))
         for (col,) in cols:
-            self.fetchone(
-                f'SELECT setval(pg_get_serial_sequence(?, ?), '
-                f'COALESCE((SELECT MAX({q(col)}) FROM {q(table)}), 0) + 1, false)',
-                (q(table), col))
+            seq = self.fetchone('SELECT pg_get_serial_sequence(?, ?)', (q(table), col))
+            seq = seq[0] if seq else None
+            if not seq:
+                continue
+            top = self.fetchone(f'SELECT COALESCE(MAX({q(col)}), 0) FROM {q(table)}')
+            nxt = int((top[0] if top else 0) or 0) + 1
+            # Never BACKWARDS. A restore that refills `audit` or the syslog tables with an
+            # older copy has a lower maximum than the ids already handed out; pulling the
+            # sequence down to it gave the next rows ids the events worker had already passed
+            # (and still remembered as evaluated), so no rule saw them. SQLite's AUTOINCREMENT
+            # and InnoDB's counter keep their high-water mark the same way. A rebuilt table's
+            # fresh sequence is unused (`is_called` false), so there MAX + 1 still wins.
+            # `seq` comes from the catalog already quoted and schema-qualified.
+            cur = self.fetchone(f'SELECT last_value, is_called FROM {seq}')
+            if cur and cur[1]:
+                nxt = max(nxt, int(cur[0] or 0) + 1)
+            self.fetchone('SELECT setval(CAST(? AS regclass), ?, false)', (seq, nxt))
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
-    def fetchall(self, sql: str, params: tuple = ()) -> list[tuple]:
+
+    # ── Transaction state ─────────────────────────────────────────────────────
+    #
+    # The driver opens a transaction at the first statement and keeps it until a commit. A
+    # thread that only READS —a service's config watch, a polling loop— never committed, so
+    # it held its table locks (PostgreSQL's AccessShareLock, MySQL's metadata lock) forever,
+    # and an upgrade's ALTER on that table waited for ever behind them, with every later query
+    # queued behind the ALTER. So a read that is not inside `begin()` and follows no
+    # uncommitted write ends its transaction at once — what SQLite, in autocommit, always did.
+
+    def _tx(self):
+        loc = self._local
+        if not hasattr(loc, 'pending'):
+            loc.pending = loc.explicit = False
+        return loc
+
+    def begin(self) -> None:
+        self._tx().explicit = True
+
+    def _settled(self) -> None:
+        loc = self._tx()
+        loc.pending = loc.explicit = False
+
+    def _end_read(self, conn) -> None:
+        loc = self._tx()
+        if not loc.pending and not loc.explicit and not self._config.get('autocommit'):
+            conn.commit()
+
+    def _failed(self, conn) -> None:
+        """A failed statement aborts PostgreSQL's transaction, and every later one on this
+        connection fails (`InFailedSqlTransaction`) until a rollback. The callers that swallow
+        an expected error —two processes inserting the same counter row on first boot, a
+        series created by two threads at once— never rolled back, and that thread's
+        connection was dead from then on. Outside `begin()` it is rolled back here; inside,
+        `transaction()` does it."""
+        if not self._tx().explicit:
+            try:
+                conn.rollback()
+            except Exception:  # pylint: disable=broad-except
+                pass
+            self._settled()
+
+    def _run(self, sql, params, how):
         self._trace_sql(sql)
-        with self._conn().cursor() as cur:
-            cur.execute(self._adapt_sql(sql), params)
-            return cur.fetchall()
+        conn = self._conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._adapt_sql(sql), params)
+                out = how(cur)
+        except psycopg2.Error:
+            self._failed(conn)
+            raise
+        return conn, out
+
+    def fetchall(self, sql: str, params: tuple = ()) -> list[tuple]:
+        conn, rows = self._run(sql, params, lambda cur: cur.fetchall())
+        self._end_read(conn)
+        return rows
 
     def fetchone(self, sql: str, params: tuple = ()) -> tuple | None:
-        self._trace_sql(sql)
-        with self._conn().cursor() as cur:
-            cur.execute(self._adapt_sql(sql), params)
-            return cur.fetchone()
+        conn, row = self._run(sql, params, lambda cur: cur.fetchone())
+        self._end_read(conn)
+        return row
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def execute(self, sql: str, params: tuple = ()) -> int:
-        self._trace_sql(sql)
-        conn = self._conn()
-        with conn.cursor() as cur:
-            cur.execute(self._adapt_sql(sql), params)
-            return cur.rowcount
+        _, n = self._run(sql, params, lambda cur: cur.rowcount)
+        self._tx().pending = True
+        return n
 
     def executemany(self, sql: str, params_list: list[tuple]) -> int:
         self._trace_sql(sql)
         conn = self._conn()
-        with conn.cursor() as cur:
-            psycopg2.extras.execute_batch(cur, self._adapt_sql(sql), params_list)
-            return cur.rowcount
+        try:
+            with conn.cursor() as cur:
+                psycopg2.extras.execute_batch(cur, self._adapt_sql(sql), params_list)
+                n = cur.rowcount
+        except psycopg2.Error:
+            self._failed(conn)
+            raise
+        self._tx().pending = True
+        return n
+
+    def _lock_for_rebuild(self, table: str) -> None:
+        """A rebuild copies the table with INSERT…SELECT, then drops it: under READ COMMITTED a
+        row another session committed after the copy's snapshot was in neither, and the
+        rebuild lost it. ACCESS EXCLUSIVE from the start of the transaction makes readers and
+        writers of that table wait until the swapped-in table commits — accepted: a rebuild
+        is a schema migration, and waiting is better than a lost row."""
+        self.execute(f'LOCK TABLE {self.quote_ident(table)} IN ACCESS EXCLUSIVE MODE')
+
+    def _execute_optional(self, sql: str) -> bool:
+        """Inside a transaction a failed statement aborts it here (`InFailedSqlTransaction`
+        on every statement after it), so the tolerated failure is fenced by a SAVEPOINT and
+        rolled back to it — the rest of the transaction carries on. Outside one, `_failed`
+        already rolls the lone statement back."""
+        if not self._tx().explicit:
+            return super()._execute_optional(sql)
+        self.execute('SAVEPOINT ss_optional')
+        try:
+            self.execute(sql)
+        except Exception:  # pylint: disable=broad-except
+            self.execute('ROLLBACK TO SAVEPOINT ss_optional')
+            return False
+        self.execute('RELEASE SAVEPOINT ss_optional')
+        return True
 
     def commit(self) -> None:
         self._conn().commit()
+        self._settled()
 
     def rollback(self) -> None:
         self._conn().rollback()
+        self._settled()
 
     # ── Maintenance ───────────────────────────────────────────────────────────
 

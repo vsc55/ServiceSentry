@@ -28,6 +28,7 @@ temperatures are read on that device from Linux ``/sys/class/thermal`` via
 :meth:`ModuleBase.device_exec` and compared with a per-check threshold.
 """
 
+import glob
 import json
 import os
 
@@ -132,13 +133,36 @@ class Watchful(ModuleBase):
             result.append((name, temp / 1000.0))
         return result
 
+    @staticmethod
+    def _read_thermal_local() -> str:
+        """This machine's thermal zones, in the same ``<path>:<value>`` form `grep -H .`
+        prints, so :meth:`_parse_thermal` reads both alike."""
+        lines = []
+        for leaf in ('type', 'temp'):
+            for path in sorted(glob.glob(f'/sys/class/thermal/thermal_zone*/{leaf}')):
+                try:
+                    with open(path, encoding='utf-8', errors='replace') as fh:
+                        val = fh.read().strip()
+                except OSError:
+                    continue
+                if val:
+                    lines.append(f'{path}:{val}')
+        return '\n'.join(lines)
+
     @classmethod
     def discover(cls, config=None) -> list:
         """Temperature sensors on the device (Linux thermal zones)."""
         from lib.core.devices import runner as device_runner  # noqa: PLC0415
         device = (config or {}).get('__device__') if isinstance(config, dict) else None
-        out, _err, code = device_runner.run(device, _THERMAL_CMD, timeout=15)
-        if code != 0 and not out:
-            return []
+        kind = str((device or {}).get('kind') or '').strip().lower() if isinstance(device, dict) else ''
+        if kind not in ('remote', 'none'):
+            # The runner's local branch runs WITHOUT a shell (argv split), so the
+            # `thermal_zone*` globs reached grep literally and matched nothing: local
+            # discovery always came back empty. Read the same files here instead.
+            out = cls._read_thermal_local()
+        else:
+            out, _err, code = device_runner.run(device, _THERMAL_CMD, timeout=15)
+            if code != 0 and not out:
+                return []
         return [{'name': name, 'display_name': name, 'status': f'{c:.1f}°C'}
                 for name, c in cls._parse_thermal(out)]

@@ -1,0 +1,21 @@
+# Copyright 2026 Javier Pastor
+# Distributed under the terms of the GNU General Public License v3
+
+# Copied into the overlay by packaging/gentoo/overlay.sh. Version 0, as ::gentoo's acct-*
+# packages: the account has no upstream version.
+
+EAPI=8
+
+inherit acct-user
+
+DESCRIPTION="User for app-admin/servicesentry"
+KEYWORDS="~amd64 ~arm64"
+
+# -1: allocated dynamically. A fixed id belongs to ::gentoo's registry, which an overlay
+# package is not in.
+ACCT_USER_ID=-1
+ACCT_USER_GROUPS=( servicesentry )
+# No ACCT_USER_HOME: the eclass would own the home directory and hand it to the user on
+# every merge — and /var/lib/ServiSesentry's owner is what decides who the services run as.
+
+acct-user_add_deps

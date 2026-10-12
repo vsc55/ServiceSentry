@@ -201,7 +201,7 @@ function _dgVulnCell(x) {
     // this process's and another container's — and each has its own advisories: opening by name
     // showed whichever row came first, under a heading naming the version that was clicked.
     return `<button type="button" class="badge text-bg-danger border-0 ss-help"
-        onclick="_dgShowVulns('${escAttr(x.name)}', '${escAttr(x.installed || '')}')"
+        onclick="_dgShowVulns(${jsStr(x.name)}, ${jsStr(x.installed || '')})"
         title="${escAttr(t('diag_deps_vulns_open'))}">${x.vuln_count}</button>`;
 }
 

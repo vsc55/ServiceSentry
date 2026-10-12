@@ -187,7 +187,7 @@ function _mpRender(pageId) {
     const counts = d.counts || { ok: 0, warn: 0, error: 0, total: 0 };
 
     const refreshBtn = st.spec.refresh ? `
-        <button class="btn btn-sm btn-primary" onclick="_mpRefresh('${escAttr(pageId)}')" ${st.busy ? 'disabled' : ''}>
+        <button class="btn btn-sm btn-primary" onclick="_mpRefresh(${jsStr(pageId)})" ${st.busy ? 'disabled' : ''}>
             ${st.busy
                 ? `<span class="spinner-border spinner-border-sm me-1"></span>${esc(t('page_refreshing'))}`
                 : `<i class="bi bi-arrow-clockwise me-1"></i>${esc(t('page_refresh_live'))}`}
@@ -295,7 +295,7 @@ function _mpBdFoot(id) {
     const rest = st.items.length - st.shown;
     const out = [];
     if (rest > 0) out.push(`<button class="btn btn-sm btn-secondary py-0 px-2 ss-fs-2 mt-1"
-            type="button" onclick="_mpBdMore('${escAttr(id)}')">
+            type="button" onclick="_mpBdMore(${jsStr(id)})">
         <i class="bi bi-chevron-down me-1"></i>${esc(tf('page_breakdown_show', Math.min(rest, st.page)))}
         <span class="badge bg-body-secondary text-body-secondary ms-1">${rest}</span></button>`);
     if (st.more) out.push(`<div class="text-muted ss-fs-2 px-1 pt-1">
@@ -350,7 +350,7 @@ function _mpGroupSelect(pageId, s) {
     if (!keys.length || (s.rows || []).length < 2) return '';
     const cur = (_mpState[pageId]?.groupBy || {})[s.id] || '';
     return `<select class="form-select form-select-sm w-auto ss-fs-2 me-2"
-                    onchange="_mpSetGroup('${escAttr(pageId)}','${escAttr(s.id)}',this.value)">
+                    onchange="_mpSetGroup(${jsStr(pageId)},${jsStr(s.id)},this.value)">
         <option value=""${cur ? '' : ' selected'}>${esc(t('page_group_none'))}</option>
         ${keys.map(k => `<option value="${escAttr(k)}"${cur === k ? ' selected' : ''}>${esc(k)}</option>`).join('')}
     </select>`;

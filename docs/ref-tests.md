@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~11.302 tests** (11.312 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-10-10). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~11.858 tests** (11.812 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-10-12). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -1984,6 +1984,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 |---|---|---|---|
 | `test_df_by_mount` | `_parse_df` calcula el % de uso por montaje y por dispositivo | Uso correcto; `None` si no aparece | Si el parseo falla |
 | `test_wmic` | `_parse_wmic` calcula el % de uso desde `FreeSpace`/`Size` (Windows) | Uso correcto para `C:`/`D:` | Si difiere |
+| `TestWmic::test_real_wmic_output_with_cr_cr_lf` | La salida real de `wmic`, con CR CR LF tras cada campo (antes cada campo era un registro) | 75 % en `C:` y `D:`; descubre las dos | Si no encuentra la unidad |
 
 ### `TestCheck` — Ejecución del check
 
@@ -1991,7 +1992,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 |---|---|---|---|
 | `test_ok_below_threshold` | Uso por debajo del umbral | `status = True`, `other_data.used == 75`, mount `/` | Si es `False` |
 | `test_alert_above_threshold` | Uso por encima del umbral (90 > 85) | `status = False`, mensaje con "Warning" | Si es `True` |
-| `test_windows_device_uses_wmic` | Dispositivo Windows usa `wmic` | Comando incluye `wmic`; `status = True`, `used == 75` | Si usa otro comando |
+| `test_windows_device_uses_cim` | Dispositivo Windows usa `Get-CimInstance` | Comando incluye `Get-CimInstance`; `status = True`, `used == 75` | Si usa otro comando |
 | `test_message_uses_label_to_identify_server` | El label identifica el servidor en el mensaje | "NS1 - /" aparece en el mensaje | Si no aparece |
 | `test_same_mount_distinct_items_do_not_collide` | Mismo mount en dos ítems distintos | Claves distintas (uid-a, uid-b), sin colisión | Si colisionan |
 | `test_partition_not_found_is_error` | Partición inexistente | `status = False`, mensaje con "Error" | Si es `True` |
@@ -2253,7 +2254,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 |---|---|---|---|
 | `test_normal_usage` | Uso normal | `srv_ram`/`srv_swap` `status = True`, used 75.0, nombres "srv - RAM"/"srv - SWAP" | Si difiere |
 | `test_high_ram_triggers_alert` | RAM sobre el umbral (75 ≥ 60) | `srv_ram` `status = False`, mensaje "Excessive" | Si es `True` |
-| `test_windows_reports_ram_only` | Windows | Comando con `wmic`; `srv_ram` presente, `srv_swap` ausente | Si difiere |
+| `test_windows_reports_ram_only` | Windows | Comando con `Get-CimInstance`; `srv_ram` presente, `srv_swap` ausente | Si difiere |
 | `test_unsupported_os` | SO no soportado | `device_exec` no invocado; `status = False`, mensaje "unsupported" | Si ejecuta |
 | `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `device_exec` no invocado | Si procesa |
 | `test_maintenance_device_skipped` | Dispositivo en mantenimiento | Sin ítems, `device_exec` no invocado | Si procesa |
@@ -2348,6 +2349,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | `test_check_disabled_url` | URL con `enabled: false` | Omitida del resultado | Si aparece |
 | `test_check_url_ok` | HTTP 200 simulado | `status = True` | Si es `False` |
 | `test_check_url_500` | HTTP 500 simulado | `status = False` | Si es `True` |
+| `test_check_missing_content_is_down` | Un 200 sin el texto exigido (antes salía UP) | `status = False` | Si es `True` |
 | `test_check_url_custom_code` | Código esperado personalizado (ej. 301) | `True` si coincide el código | Si no coincide |
 | `test_check_url_404` | HTTP 404 sin código personalizado | `status = False` | Si es `True` |
 | `test_check_multiple_urls` | Varias URLs | Cada una con su estado | Si se mezclan |
@@ -2439,7 +2441,7 @@ Cobertura de la matriz de acceso completa: para cada endpoint protegido por perm
 | --- | --- | --- | --- |
 | `test_below_threshold_ok` | Uso bajo el umbral | `status = True`, used 75.0 | Si es `False` |
 | `test_above_threshold_alert` | Uso sobre el umbral (75 ≥ 60) | `status = False`, mensaje "Excessive" | Si es `True` |
-| `test_windows_device_uses_wmic` | Dispositivo Windows | Comando `wmic`; `status = True`, used 42.0 | Si difiere |
+| `test_windows_device_uses_cim` | Dispositivo Windows | Comando `Get-CimInstance`; `status = True`, used 42.0 | Si difiere |
 | `test_disabled_item_skipped` | Ítem deshabilitado | Sin ítems, `device_exec` no invocado | Si procesa |
 | `test_maintenance_device_skipped` | Dispositivo en mantenimiento | Sin ítems, `device_exec` no invocado | Si procesa |
 | `test_command_failure_is_error` | Fallo del comando | `status = False`, mensaje "Error" | Si es `True` |
@@ -11552,7 +11554,7 @@ dice qué pieza del plano es (`dc_source.feature_uid`) y el 3D la dibuja ahí.
 
 ## 208. Integración — El 3D realista y el paseo como en un juego (prototipo en `/3d`)
 
-**Archivo:** `tests/integration/test_wa_viewer3d_real.py` — 10 tests
+**Archivo:** `tests/integration/test_wa_viewer3d_real.py` — 11 tests
 
 Se pidió un modo 3D realista «como en los juegos», con paseo en primera persona y puertas que se
 abren. Prototipo con el motor propio y solo en `/3d`: otro pintor para la misma escena
@@ -11616,10 +11618,10 @@ pintan el plano y el 3D.
 
 ## 210. Integración — El cableado estructurado de la demo
 
-**Archivo:** `tests/integration/test_dcim_demo_cabling.py` — 15 tests
+**Archivo:** `tests/integration/test_dcim_demo_cabling.py` — 16 tests
 
 Se pidió que la demo fuera una oficina real cableada como la dejaría un instalador: cada puesto con
-su roseta doble (PC en A, teléfono en B; cada roseta con dos RJ45 como poco, y la de la pantalla de una sala de reuniones con su HDMI) y su toma de corriente al lado (colgando de una fuente de su sede: el cuadro de su planta, el SAI en el NOC y en el CPD, el grupo en su sala), su tirada horizontal al panel de su repartidor, el panel
+su roseta doble (PC en A, teléfono en B; cada roseta con dos RJ45 como poco, y la de la pantalla de una sala de reuniones con su HDMI) y su toma de corriente al lado (colgando de una fuente de su sede: el cuadro de su planta, el SAI en el NOC y en el CPD, el grupo en su sala), con cada PC, impresora y pantalla enchufado a la suya por un cable de corriente, su tirada horizontal al panel de su repartidor, el panel
 al switch de acceso, el switch al núcleo, un anillo de fibra entre repartidores y una troncal de
 cobre entre los dos racks de red del CPD. Se comprueba que el cableado se sostiene.
 
@@ -11706,9 +11708,9 @@ El dibujo, la ficha y las acciones de un rack, una pieza o un equipo de sala son
 
 ## 216. Integración — Las bocas de una roseta y de una toma de corriente
 
-**Archivo:** `tests/integration/test_wa_dcim_jacks.py` — 16 tests
+**Archivo:** `tests/integration/test_wa_dcim_jacks.py` — 18 tests
 
-Una placa de pared no es de un solo tipo: la roseta y la toma de corriente guardan una lista de bocas, cada una con su conector (de los que el catálogo de conectores marca en la familia «Bocas de roseta» o «Bocas de toma de corriente») y cuántas (un entero desde 1, sin máximo); la toma, además, la fuente de su sede de la que cuelga. Por la API: lo que puede ser cada boca (con HDMI en una roseta y C14 en una toma), una toma con dos tipos guardada y devuelta con sus letras y la clase de su fuente (también en la ruta del plano), una roseta que mezcla cobre, fibra y vídeo, lo que se rechaza (un conector de otra clase en cualquier fila, 0, negativos, decimales o texto como cantidad, algo que no es una lista, bocas en un PC, una fuente de otra sede o en una roseta), que no hay máximo, que el mismo conector dos veces se junta y vaciar la lista es «sin decir», que la pantalla de Energía lista por fuente sus tomas con sus bocas, y que borrar la fuente deja la toma sin decir. En `node`: la toma de un SAI se dibuja «SAI» en naranja y la de un grupo «GE», nunca en rojo; la roseta, con las letras de su primera boca y `+`, ajustadas al ancho de la caja por largas que sean; la ficha, una fila por tipo con su conector y su cantidad (mínimo 1, sin máximo) y «Añadir boca», y quien solo mira no la cambia; añadir, cambiar y quitar guardan la lista entera; la pantalla de Energía enseña «2×SCH 1×C13» y abre la sala; la lista de elementos de la sala nombra sus equipos de sala (una toma, una roseta) y elegirlos los elige; y en la pantalla del catálogo, marcar una familia de pared en un conector se queda marcada.
+Una placa de pared no es de un solo tipo: la roseta y la toma de corriente guardan una lista de bocas, cada una con su conector (de los que el catálogo de conectores marca en la familia «Bocas de roseta» o «Bocas de toma de corriente») y cuántas (un entero desde 1, sin máximo); la toma, además, la fuente de su sede de la que cuelga. Por la API: lo que puede ser cada boca (con HDMI en una roseta y C14 en una toma), una toma con dos tipos guardada y devuelta con sus letras y la clase de su fuente (también en la ruta del plano), una roseta que mezcla cobre, fibra y vídeo, lo que se rechaza (un conector de otra clase en cualquier fila, 0, negativos, decimales o texto como cantidad, algo que no es una lista, bocas en un PC, una fuente de otra sede o en una roseta), que no hay máximo, que el mismo conector dos veces se junta y vaciar la lista es «sin decir», que la pantalla de Energía lista por fuente sus tomas con sus bocas, y que borrar la fuente deja la toma sin decir. En `node`: la toma de un SAI se dibuja «SAI» en naranja y la de un grupo «GE», nunca en rojo; la roseta, con las letras de su primera boca y `+`, ajustadas al ancho de la caja por largas que sean; la ficha, una fila por tipo con su conector y su cantidad (mínimo 1, sin máximo) y «Añadir boca», y quien solo mira no la cambia; añadir, cambiar y quitar guardan la lista entera; la pantalla de Energía enseña «2×SCH 1×C13» y abre la sala; cada equipo de sala dice a qué está conectado (sus cables de red y de corriente, con el otro extremo, en la ruta de la sala y en la del plano), su ficha lo lista y el plano dibuja una línea hasta cada uno; la lista de elementos de la sala nombra sus equipos de sala (una toma, una roseta) y elegirlos los elige; y en la pantalla del catálogo, marcar una familia de pared en un conector se queda marcada.
 
 ## 217. Integración — Los datos de demostración desde Mantenimiento
 
@@ -11733,3 +11735,143 @@ Se pidió mover un servidor, un switch o un router a otro rack —de la misma sa
 **Archivo:** `tests/integration/test_wa_dcim_latent.py` — 12 tests
 
 Una revisión del trabajo de esta versión encontró fallos que ninguna prueba veía; cada uno queda fijado. En el servidor: las rutas genéricas de un equipo escribían las bocas y la fuente sin comprobarlas; cambiar la clase de un equipo de sala dejaba las bocas y la fuente de la anterior; una sala llevada a otra sede conservaba la fuente de sus tomas; `"disconnect": "false"` borraba cables; una regleta llevada a otra sede conservaba su fuente; vaciar un rack dejaba la regleta de otro apuntando a un equipo borrado; y una sede de verdad llamada «Demo» se tomaba por la demo. En `node`: dejar la planta cierra la revisión de muros (su tecla, el bloqueo del deshacer, y sus muros ya no se guardan en otra planta), la calibración a medias y el modo de poner; las flechas sobre dos elecciones guardan las dos; un recuadro pequeño sobre un muro largo lo coge; y un cambio dentro de un lote del deshacer no se junta con uno de antes.
+
+## 221. Integración — Agujeros de privilegios (auditoría 2026-10-12)
+
+**Archivo:** `tests/integration/test_wa_privilege_holes.py` — 12 tests
+
+Cada agujero de la auditoría completa del 2026-10-12, fijado. Identidad: un token con alcance de una cuenta admin ya no cuenta como admin; la propia contraseña no se cambia sin la actual ni con un token; `groups_edit` no basta para entrar en un grupo con más permisos; un rol desactivado no se asigna ni se activa por quien no podría darlo; una sesión de una cuenta borrada (también por SCIM) no pasa a la cuenta recreada con el mismo nombre; y la prueba de LDAP no manda la contraseña guardada a otro servidor. DCIM: una sala con equipos de sala no se borra por debajo de ellos, la zona general de una planta con equipos se queda, la ruta genérica de equipos no mueve un equipo de sala, los dos extremos de un cable nuevo se comprueban y el equipo de un enchufe también.
+
+## 222. Unitarios — El secreto guardado, el filtro SVG y el depurador
+
+**Archivo:** `tests/unit/test_secret_and_debug_guards.py` — 7 tests
+
+Una prueba de conexión solo usa el secreto guardado contra el destino guardado (`lib/security/stored_secret.py`); el filtro de SVG lee como el navegador (`&#106;avascript:`, un tabulador dentro de la palabra, `&colon;`) y deja pasar un dibujo normal; y `--verbose` solo no enciende el depurador interactivo de Werkzeug: hace falta `SS_FLASK_DEBUG=1`, que pone `dev_watch.py`.
+
+## 223. Meta — Valores en cadenas JS de los manejadores en línea
+
+**Archivo:** `tests/meta/test_handler_js_escaping.py` — 2 tests
+
+Ningún `onclick="f('${escAttr(x)}')"` (ni con `esc`): el analizador de HTML deshace `&#39;` antes de que corra el manejador y el nombre sale de la cadena. Se pasa con `${jsStr(x)}`. Y `esc` escapa comillas, porque acabó dentro de atributos.
+
+## 224. Unitarios — Servicios y datos (auditoría 2026-10-12)
+
+**Archivo:** `tests/unit/test_service_and_data_holes.py` — 10 tests
+
+SQLite: una transacción que lee antes de escribir espera su turno en vez de fallar con «database is locked». Copias: fechas y decimales de MySQL/PostgreSQL pasan a JSON. DCIM: el escape de `LIKE` no es una barra invertida y los comodines tecleados son literales. Alertas: `flush_later` vuelve al momento y el hilo del notificador las manda en orden. Telegram: el token no sale en el error. Syslog: una ofensa por fuente cada 5 s, y la cuenta de descartes hace sitio a fuentes nuevas. Monitor: un error bajo la clave del ítem va seguido de su recuperación cuando vuelve bajo subclaves, y un estado que no se pudo guardar no se vuelve a alertar en cada ciclo.
+
+## 225. Integración — Servicios en segundo plano (auditoría 2026-10-12)
+
+**Archivo:** `tests/integration/test_wa_service_holes.py` — 4 tests
+
+El worker de eventos evalúa una fila que aparece por debajo del cursor (confirmada tarde) y solo una vez, y re-siembra un cursor que pasó del final de su tabla sin volver a disparar las filas que quedan justo detrás. «Ejecutar ahora» no retiene el hilo del latido, no se solapa y suelta el candado al acabar.
+
+## 226. Meta — Despliegue: Helm y actualización de paquetes
+
+**Archivo:** `tests/meta/test_deploy_upgrade_guards.py` — 6 tests
+
+Helm: las sondas del puerto de control solo cuando puede haber quien escuche, y un token vacío se genera y se conserva (renderizado con `helm` si está instalado). Paquetes: el pre-remove no para los servicios en una actualización y sí al desinstalar (ejecutado con un `systemctl` falso), y el post-install reinicia los que estaban en marcha.
+
+## 227. Integración — DCIM, planos y 3D en el navegador (auditoría 2026-10-12)
+
+**Archivo:** `tests/integration/test_wa_dcim_browser_holes.py` — 10 tests
+
+En `node`, con el arnés esperando a la promesa de la prueba (`__wait`). Un rack abierto desde el tablero olvida las pestañas del anterior; gana la última apertura de un rack; la corriente de un rack no se escribe en otro; las piezas de una sala y el contenido de una sede caen donde se pidieron; ancho y fondo tecleados seguidos se guardan los dos; deshacer vacía antes lo pendiente, va de uno en uno y guarda las flechas que esperaban; las teclas del plano no actúan con un cuadro abierto ni con la sección oculta; un clic en el alzado no mueve nada y un gesto cancelado vuelve; un guardado en curso no sale dos veces; y la importación del catálogo tiene un solo vigilante.
+
+## 228. Unidad — Servicios y utilidades (auditoría 2026-10-12, 4.ª tanda)
+
+**Archivo:** `tests/unit/test_tanda4_services.py` — 22 tests
+
+Un módulo rezagado y el ciclo siguiente comparten el candado de guardado; el monitor dedicado toma el liderazgo antes de arrancar el planificador; renovar el liderazgo sin filas afectadas no es liderazgo; el servidor de control corta conexiones ociosas y rechaza sin romperse un token no ASCII; un lote de syslog con la BD caída se rinde a los tres fallos; la cola de comandos se purga; el webhook y el canal de Teams no siguen redirecciones ni piden la dirección de metadatos; Telegram recorta el texto; la plantilla de teselas no inyecta CSP; un byte raro no vacía la salida; Google Maps sin red no espera en cada página; `to_bytes` con `inf`/`nan`.
+
+## 229. Unidad — Persistencia (auditoría 2026-10-12, 4.ª tanda)
+
+**Archivo:** `tests/unit/test_tanda4_persistence.py` — 10 tests
+
+Una secuencia de PostgreSQL no retrocede al restaurar; la reconstrucción no duplica el índice de una restricción UNIQUE; `offset` sin `limit` en todos los motores; una muestra de historial se guarda con sus medidas o no se guarda.
+
+## 230. Integración — DCIM en el servidor (auditoría 2026-10-12, 4.ª tanda)
+
+**Archivo:** `tests/integration/test_wa_dcim_tanda4.py` — 14 tests
+
+Números y rol de equipos y piezas, permiso de escritura sobre el equipo padre, referencias que no quedan colgando al borrar o importar, numeración de activos en equipos de sala, la energía de una sala que cambia de sede, fuentes aguas arriba y clonado entre sedes, y permisos de los ficheros de plantillas.
+
+## 231. Integración — Panel en el navegador (auditoría 2026-10-12, 4.ª tanda)
+
+**Archivo:** `tests/integration/test_wa_browser_tanda4.py` — 19 tests
+
+En `node`. Restablecer de fábrica, tablas del overview con el filtro elegido, recolección que sobrevive a un sondeo perdido, versión de los estáticos, `/status` que recuerda lo abierto, formularios de cable y energía que conservan lo escrito, el 3D del rack que se suelta al salir de DCIM y los menores de DCIM y 3D.
+
+## 232. Meta — Distribución (auditoría 2026-10-12, 4.ª tanda)
+
+**Archivo:** `tests/meta/test_tanda4_distribution.py` — 15 tests
+
+Helm con persistencia opcional (renderizado con `helm`), el overlay de Gentoo instalable (el script se ejecuta de verdad), el ebuild que no borra el venv al actualizar, la etiqueta `build` que instala sus paquetes, el lanzamiento manual que no publica y la salida de los servicios en los logs.
+
+## 233. Unidad — CLI y `dev_watch`
+
+**Archivo:** `tests/unit/test_cli_prompt_and_lang.py` — 4 tests
+**Archivo:** `tests/unit/test_dev_watch_filter.py` — 2 tests
+
+`-l es` y los locales se reconocen; sin terminal, `user add`/`user passwd` salen con un aviso en vez de una traza. `dev_watch` reinicia con `lib/core/dcim/data` y respeta su filtro de extensiones.
+
+## 234. Watchfuls — Regresiones (auditoría 2026-10-12, 4.ª tanda)
+
+**Archivo:** `tests/unit/test_module_exec_defaults.py` — 7 tests
+**Archivo:** `watchfuls/cpu/tests/test_cpu_regressions.py` — 2 tests
+**Archivo:** `watchfuls/datastore/tests/test_datastore_regressions.py` — 2 tests
+**Archivo:** `watchfuls/dns/tests/test_dns_regressions.py` — 6 tests
+**Archivo:** `watchfuls/hddtemp/tests/test_hddtemp_regressions.py` — 2 tests
+**Archivo:** `watchfuls/ntp/tests/test_ntp_regressions.py` — 4 tests
+**Archivo:** `watchfuls/ping/tests/test_ping_regressions.py` — 5 tests
+**Archivo:** `watchfuls/proxmox/tests/test_proxmox_regressions.py` — 2 tests
+**Archivo:** `watchfuls/raid/tests/test_raid_regressions.py` — 3 tests
+**Archivo:** `watchfuls/ram_swap/tests/test_ram_swap_regressions.py` — 2 tests
+**Archivo:** `watchfuls/service_status/tests/test_service_status_regressions.py` — 3 tests
+**Archivo:** `watchfuls/snmp/tests/test_snmp_regressions.py` — 4 tests
+**Archivo:** `watchfuls/ssl_cert/tests/test_ssl_cert_regressions.py` — 1 tests
+**Archivo:** `watchfuls/temperature/tests/test_temperature_regressions.py` — 4 tests
+**Archivo:** `watchfuls/ups/tests/test_ups_regressions.py` — 5 tests
+
+`timeout`/`threads` a 0 heredan; Ceph roto no es «ausente»; RAID0/lineal con estado; SNMP con `alert` vacío y `retries: 0`; mantenimiento en datastore; `sc.exe` y `os: auto` remoto; NTP sin sincronizar; CPU sin doble cuenta de guest; ping sin root; credenciales NUT entrecomilladas; discos dormidos; descubrimiento local de temperatura; `nslookup` en cualquier idioma; un número malo tumba solo su item; swap de FreeBSD por la línea Total.
+
+## 235. Identidad y panel (auditoría 2026-10-12, 4.ª tanda)
+
+**Archivo:** `tests/integration/test_wa_tanda4_identity.py` — 13 tests
+**Archivo:** `tests/unit/test_tanda4_identity.py` — 9 tests
+
+El segundo factor tras el login con límite por cuenta; tokens CSRF/SCIM, códigos TOTP y retos WebAuthn no ASCII rechazados sin 500; tipos JSON erróneos en usuarios, roles, grupos, empresas, MFA y SSO de Teams dan 400; las empresas acotadas por lo que se ve; el segundo factor vuelve a mirar `login_enabled`; SCIM solo toca miembros que aprovisionó; el panel publicado conserva los filtros de los widgets; el escáner de certificados sigue al check; `/api/v1/me` dice la página de inicio real; los límites del historial de trabajos se aplican.
+
+## 236. Unidad — Base de datos: reconstrucciones (auditoría 2026-10-12, 5.ª tanda)
+
+**Archivo:** `tests/unit/test_tanda5_db.py` — 7 tests
+
+Con un conector que graba el SQL: PostgreSQL bloquea la tabla antes de copiar y recrea cada índice bajo su SAVEPOINT (un índice que falla no deshace la reconstrucción); MySQL/MariaDB pasa las filas tardías por clave primaria antes y después del cambio de tabla. En vivo, `tests/e2e/test_db_portability_live.py` planta filas durante la copia sobre MariaDB y, sobre PostgreSQL, comprueba que otra sesión no puede escribir mientras se copia, que un índice que PostgreSQL rechaza no deshace la reconstrucción, que una restauración no hace retroceder la secuencia, que tres reconstrucciones dejan un solo índice único, que `offset` sin `limit` pagina y que el sello de `config` se mueve con cada escritura real.
+
+## 237. Unidad — Configuración con varias réplicas
+
+**Archivo:** `tests/unit/test_tanda5_config_replicas.py` — 8 tests
+
+Dos `ConfigManager` sobre la misma base: el cambio de una réplica sobrevive al guardado posterior de otra clave en la otra, se ve tras el intervalo del sello, un borrado propio se propaga y lo propio se ve al instante.
+
+## 238. Copias, reglas de eventos y energía entre sedes
+
+**Archivo:** `tests/unit/test_tanda5_app.py` — 12 tests
+**Archivo:** `tests/integration/test_wa_tanda5_app.py` — 9 tests
+
+Las tablas de ejecución (sesiones, líder, instancias, comandos) ni se copian ni se restauran ni se ofrecen, y los tokens de API sí hacen el viaje de ida y vuelta. Una regla nueva nace con 60 s de cooldown; un 0 explícito se respeta y una regla guardada no lo gana al editarla. Una cadena de energía entre sedes exige poder escribir en la sede de origen, y la ruta de energía marca el tramo que cruza: con el nombre de la sede para quien la ve, anónimo y cortado para quien no (también pintado, en `node`).
+
+## 239. Meta — Distribución (auditoría 2026-10-12, 5.ª tanda)
+
+**Archivo:** `tests/meta/test_tanda5_distribution.py` — 21 tests
+
+`install.sh`/`update.sh` con venv desde el lock (y `update.sh` que no lo borra), el usuario dedicado solo en instalaciones nuevas (deb, rpm, ebuild, `install.sh`) con `servicesentry-user` ejecutado con binarios falsos, logrotate en los paquetes, la release solo con `push`, y Helm con persistencia que alinea el grupo de worker y syslog (renderizado con `helm`).
+
+## 240. Watchfuls — Ping sin privilegios y Windows sin `wmic`
+
+**Archivo:** `watchfuls/ping/tests/test_ping_tanda5.py` — 14 tests
+**Archivo:** `watchfuls/cpu/tests/test_cpu_tanda5.py` — 8 tests
+**Archivo:** `watchfuls/filesystemusage/tests/test_filesystemusage_tanda5.py` — 9 tests
+**Archivo:** `watchfuls/ram_swap/tests/test_ram_swap_tanda5.py` — 3 tests
+
+El ping recurre al binario del sistema (salidas grabadas en inglés y español, Windows y Linux, `TTL=` en Windows) y, sin binario, dice que el ICMP no está permitido. cpu, filesystemusage y ram_swap leen Windows con `Get-CimInstance` sin tuberías y caen a `wmic` solo sin PowerShell.

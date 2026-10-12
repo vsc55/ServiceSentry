@@ -29,7 +29,7 @@ from enum import IntEnum
 from lib.debug import DebugLevel
 from lib.modules import ModuleBase
 
-from .client import IcmpClient
+from .client import IcmpClient, IcmpUnavailable
 
 # What is left here is the module itself: the class, the loop over items, one check and the
 # resolution of an item's settings. Speaking ICMP moved to client.py.
@@ -134,8 +134,17 @@ class Watchful(IcmpClient, ModuleBase):
         t_timeout = int(self.get_conf_in_list("timeout", name, 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout']))
         t_attempt = int(self.get_conf_in_list("attempt", name, 0) or self.module_default('attempt', self._MODULE_DEFAULTS['attempt']))
 
-        ping_ok, rtt_ms = self._ping_return(host, t_timeout, t_attempt)
-        other_data = {'latency_ms': round(rtt_ms, 2)} if rtt_ms is not None else {}
+        label = self.get_conf_in_list("label", name, "") or host or name
+        try:
+            ping_ok, rtt_ms = self._ping_return(host, t_timeout, t_attempt)
+        except IcmpUnavailable:
+            # This process cannot send ICMP at all. Saying "DOWN" would blame the host for
+            # the monitor's own configuration — name the real cause instead.
+            self._emit(name, False, self._msg('ping_no_icmp', label), {}, name=label)
+            return
+        # RTT_UNKNOWN (negative): the host answered through the system ping but its
+        # round-trip time could not be read — up, with no latency figure.
+        other_data = {'latency_ms': round(rtt_ms, 2)} if rtt_ms is not None and rtt_ms >= 0 else {}
 
         # ── Alert threshold: only declare KO after *alert* consecutive
         #    full-check failures.  The counter is persisted in the status store
@@ -143,7 +152,6 @@ class Watchful(IcmpClient, ModuleBase):
         streak = self.fail_streak(name, not ping_ok)
         status = ping_ok or streak < t_alert
 
-        label = self.get_conf_in_list("label", name, "") or host or name
         s_message = self._msg('ping_up' if status else 'ping_down', label)
 
         # name= keeps the label → host → key fallback: an unlabelled host must still be

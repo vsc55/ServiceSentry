@@ -1,5 +1,7 @@
 #!/bin/bash
-# Install the OS packages listed in dependencies.txt (Debian/apt).
+# Install the OS packages listed in dependencies.txt (Debian/apt): only the interpreter and
+# python3-venv. The Python libraries are NOT distro packages any more — make-venv.sh installs
+# the pinned ones from src/requirements.lock into /opt/ServiSesentry/venv.
 # Sourced by install.sh / update.sh. On systems without apt/dpkg it prints a
 # warning and does nothing (so a non-Debian install.sh under `set -e` is not aborted).
 if ! command -v dpkg-query >/dev/null 2>&1 || ! command -v apt >/dev/null 2>&1; then

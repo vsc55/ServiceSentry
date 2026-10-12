@@ -138,6 +138,25 @@ class TestAPlateOfSeveralKinds:
                                               'room_name': 'Oficina',
                                               'jacks': [{'connector': 'cee-7-3', 'n': 2, 'abbr': 'SCH'}]}]
 
+    def test_each_room_item_says_what_it_is_connected_to(self, client, sala):
+        """A PC cabled to its outlet and plugged into its socket: the room's items carry both
+        connections, each with its port, its kind and the far end, in the room's list and in
+        the plan's."""
+        c = client
+        base = f'/api/v1/dcim/rooms/{sala["room"]}/items'
+        pc = _uid(c.post(base, json={'role': 'pc', 'label': 'PC-1'}))
+        roseta = _uid(c.post(base, json={'role': 'outlet', 'label': 'R-1'}))
+        toma = _uid(c.post(base, json={'role': 'power_outlet', 'label': 'T-1'}))
+        assert c.post('/api/v1/dcim/cables', json={'a_item': pc, 'a_port': 'eth0', 'b_item': roseta,
+                                                   'b_port': 'A'}).status_code == 200
+        assert c.post('/api/v1/dcim/cables', json={'a_item': pc, 'a_port': 'psu', 'b_item': toma,
+                                                   'b_port': 'A', 'kind': 'power'}).status_code == 200
+        for url in (base, f'/api/v1/dcim/rooms/{sala["room"]}/features'):
+            items = {i['uid']: i for i in c.get(url).get_json()['items']}
+            enl = sorted((l['port'], l['kind'], l['label'], l['port_far']) for l in items[pc]['links'])
+            assert enl == [('eth0', 'copper', 'R-1', 'A'), ('psu', 'power', 'T-1', 'A')], url
+            assert [l['label'] for l in items[toma]['links']] == ['PC-1']
+
     def test_deleting_the_source_leaves_it_unsaid(self, client, admin, sala):
         c = client
         uid = _uid(c.post(f'/api/v1/dcim/rooms/{sala["room"]}/items',
@@ -194,6 +213,18 @@ _dcriJackEdit('t1', -1, 'add');
 _dcriJackEdit('t1', 0, 'n', '3');
 _dcriJackEdit('t1', 1, 'drop');
 __out.edita = guardados;
+// Its connections in the card, and lines to them on the plan.
+const pc = {uid: 'p1', role: 'pc', room_uid: 'r1', label: 'PC-1', box: {x: 0, y: 0, w: 200, d: 200},
+            links: [{port: 'eth0', kind: 'copper', item: 'o1', label: 'R-1', port_far: 'A', role: 'outlet'},
+                    {port: 'psu', kind: 'power', item: 't1', label: 'T-1', port_far: 'A', role: 'power_outlet'},
+                    {port: 'x', kind: 'copper', item: '', hidden: true}]};
+_dcObj = (k, uid) => (['o1', 't1'].includes(uid) ? {uid} : null);
+const fichaPc = _dcriPanelHtml(pc, '');
+__out.conexiones = {filas: (fichaPc.match(/data-dcri-link=/g) || []).length,
+                    pulsables: (fichaPc.match(/data-dcri-link="(o1|t1)"/g) || []).length,
+                    texto: fichaPc.includes('eth0 → R-1 · A') && fichaPc.includes('psu → T-1 · A')};
+const lineas = _dcriLinkLinesSvg(pc, (uid) => ({p1: {x: 0, y: 0}, o1: {x: 10, y: 0}, t1: {x: 0, y: 10}})[uid] || null);
+__out.lineas = [(lineas.match(/data-dcri-line="copper"/g) || []).length, (lineas.match(/data-dcri-line="power"/g) || []).length];
 // The power view: what hangs from a source, strips and wall sockets.
 _dcSrc = {hangs: {}, sockets: {u1: [{uid: 't1', label: 'T-01', room: 'r1', room_name: 'Oficina',
                                      jacks: [{connector: 'cee-7-3', n: 2, abbr: 'SCH'}, {connector: 'x', n: 1, abbr: 'C13'}]}]}};
@@ -283,6 +314,12 @@ class TestTheDrawingAndTheCard:
         the order of a device's port families, so ticking a wall one lost it."""
         assert out['familia'] == ['front-ports', 'outlet-jacks']
         assert out['casillas'] == 11
+
+    def test_the_card_lists_its_connections_and_the_plan_draws_them(self, out):
+        """Reported: a PC's outlet and socket were shown nowhere. The card has a row per cable,
+        the ones on this plan pressable; the plan draws a line to each, data and power apart."""
+        assert out['conexiones'] == {'filas': 3, 'pulsables': 2, 'texto': True}
+        assert out['lineas'] == [1, 1]
 
     def test_the_power_view_shows_each_socket_and_opens_its_room(self, out):
         h = out['cuelga']

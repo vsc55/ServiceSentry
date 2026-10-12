@@ -254,14 +254,28 @@ class ModuleBase(SchemaDiscovery, DeviceBinding, ObjectBase):
             return _int(schema_default, fallback)              # new / never saved
         v = mod_cfg.get(field)
         # Only a truly BLANK value (null / empty string) inherits the global —
-        # an explicit 0 is a real value, not "unset".
-        if v not in (None, ''):
+        # an explicit 0 is a real value, not "unset"…
+        if v not in (None, '') and not self._non_positive(field, v):
             return _int(v, schema_default)                     # explicit value (incl 0)
         cfg = getattr(self._monitor, 'config', None) if self.is_monitor_exist else None
         glob = cfg.get_conf(['modules', field], None) if cfg is not None else None
-        if glob in (None, ''):
+        if glob in (None, '') or self._non_positive(field, glob):
             return _int(schema_default, fallback)
         return _int(glob, schema_default)
+
+    #: Fields where 0 cannot mean "off": a timeout of 0 made every subprocess and socket
+    #: give up at once, so a module saved with `timeout: 0` failed ALL its checks each cycle.
+    #: For these a non-positive value reads as blank and inherits, like a cleared box.
+    _POSITIVE_ONLY_FIELDS = frozenset({'timeout', 'threads'})
+
+    @classmethod
+    def _non_positive(cls, field: str, value) -> bool:
+        if field not in cls._POSITIVE_ONLY_FIELDS:
+            return False
+        try:
+            return float(value) <= 0
+        except (TypeError, ValueError):
+            return False
 
     @property
     def is_probe(self) -> bool:

@@ -18,10 +18,14 @@ from __future__ import annotations
 #:
 #: A layout that dropped them would save the arrangement and lose the configuration, and an
 #: admin publishing a default would hand everyone the right boxes showing the wrong things.
+#: The core's own widgets carry theirs the same way: the minimum severity a list shows
+#: (``sev``), the server and module filters of a table (``srvf``, ``modf``) and the syslog
+#: source (``slsrc``). A default layout is the WHOLE dashboard, so those travel too.
+#:
 #: This list is the SERVER's half; the browser's is `_DW_INSTANCE_KEYS` in
 #: `partials/overview/_layout.html`, and a key added to one and not the other is a setting
 #: that survives a reload and vanishes on the next machine, with nothing said.
-INSTANCE_KEYS = ('mws', 'mwlvl', 'mwchart', 'mwfig', 'mwh')
+INSTANCE_KEYS = ('sev', 'srvf', 'modf', 'mws', 'mwlvl', 'mwchart', 'mwfig', 'mwh', 'slsrc')
 
 
 def normalize_layout(widgets) -> list:
@@ -33,9 +37,13 @@ def normalize_layout(widgets) -> list:
     for w in (widgets if isinstance(widgets, list) else []):
         if not (isinstance(w, dict) and w.get('id')):
             continue
+        try:
+            cols = int(w.get('cols') or 2)
+        except (TypeError, ValueError):
+            cols = 2        # a junk width is a default width, not a 500
         item = {
             'id':     str(w.get('id', '')),
-            'cols':   int(w.get('cols') or 2),
+            'cols':   cols,
             'h':      w.get('h', 'auto'),
             'hidden': bool(w.get('hidden')),
         }

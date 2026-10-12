@@ -47,7 +47,7 @@ spec:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if .Values.control.enabled }}
+          {{- if include "servicesentry.controlListens" . }}
           ports:
             - { name: control, containerPort: {{ .Values.control.port }} }
           readinessProbe:
@@ -78,7 +78,7 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-{{- if .Values.control.enabled }}
+{{- if include "servicesentry.controlListens" . }}
 ---
 apiVersion: v1
 kind: Service

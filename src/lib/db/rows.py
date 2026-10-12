@@ -25,6 +25,9 @@ from lib.db import BaseConnector
 from lib.db.schema import TableSpec
 from lib.db.store_base import BaseStore
 
+#: An OFFSET with no LIMIT, portably (see :meth:`Rows.list`).
+_NO_LIMIT = 2 ** 63 - 1
+
 
 def rank(cuenta: dict, limit: int = 0) -> list:
     """Los valores de ``{valor: cuántos}``, **del más usado al menos**.
@@ -131,7 +134,10 @@ class Rows(BaseStore):
             sql += f' WHERE {where}'
         if limit or offset:
             sql += ' ORDER BY uid'
-            sql += f' LIMIT {int(limit) if limit else -1} OFFSET {int(offset)}'
+            # "No limit" has no common spelling: `LIMIT -1` is SQLite's alone and a syntax error
+            # on MySQL/MariaDB/PostgreSQL, which also differ on omitting it. The largest signed
+            # 64-bit value is a limit all three accept and none can reach.
+            sql += f' LIMIT {int(limit) if limit else _NO_LIMIT} OFFSET {int(offset)}'
         return [self._row(r) for r in (self._db.fetchall(sql, params) or ())]
 
     def get(self, uid: str) -> dict | None:

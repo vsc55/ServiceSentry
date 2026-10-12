@@ -146,9 +146,15 @@ class SQLiteConnector(BaseConnector):
     def begin(self) -> None:
         # Autocommit mode (isolation_level=None) means no implicit transaction
         # is open, so an explicit BEGIN is needed to batch statements atomically.
+        #
+        # IMMEDIATE: the write lock is taken here, waiting out `busy_timeout` if another
+        # connection holds it. A deferred BEGIN took it at the first write, and a transaction
+        # that READ first (config's `set_many`, a restore) and found another connection had
+        # committed since got SQLITE_BUSY_SNAPSHOT at once — «database is locked» with no wait,
+        # whenever the monitor was writing history at the same moment.
         conn = self._conn()
         if not conn.in_transaction:
-            conn.execute('BEGIN')
+            conn.execute('BEGIN IMMEDIATE')
 
     def commit(self) -> None:
         self._conn().commit()

@@ -41,4 +41,7 @@ def is_valid(request, session) -> bool:
     """Constant-time check of the submitted token against the session token."""
     expected = session.get(SESSION_KEY, '')
     sent = request.headers.get(HEADER_NAME) or request.form.get(FORM_FIELD, '')
-    return bool(expected) and bool(sent) and hmac.compare_digest(str(sent), str(expected))
+    # Bytes, not str: `compare_digest` raises TypeError on a non-ASCII str, which turned a
+    # forged token into an anonymous 500 instead of a 403.
+    return bool(expected) and bool(sent) and hmac.compare_digest(
+        str(sent).encode('utf-8'), str(expected).encode('utf-8'))

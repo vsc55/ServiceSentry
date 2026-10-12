@@ -32,6 +32,7 @@ A check decides WHAT to look up and what the answer means. This decides how to a
 """
 
 import concurrent.futures
+import ipaddress
 import json
 import platform
 import shlex
@@ -246,27 +247,81 @@ def _parse_dig_short(record_type: str, out: str) -> list:
     return results
 
 
+def _is_ip(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+        return True
+    except ValueError:
+        return False
+
+
 def _parse_nslookup(record_type: str, out: str) -> list:
-    """Best-effort parse of Windows ``nslookup`` output (the first Address is the
-    queried server itself, so it is skipped)."""
+    """Best-effort parse of Windows ``nslookup`` output.
+
+    The first block (up to the first blank line) names the server that answered — its
+    ``Address:`` is the server itself, not an answer — so it is skipped by POSITION. It used
+    to be skipped until an English ``Name:`` or ``Non-authoritative answer:`` showed up, and
+    those headers are localised (``Nombre:``, ``Respuesta no autoritativa:``): on a Spanish
+    Windows nothing was ever read. The record lines themselves are not localised.
+
+    Two shapes need more than one line: several addresses continue on indented lines under
+    ``Addresses:``, and a TXT record prints ``text =`` with its strings on the lines after it
+    (a long record split into several quoted strings is joined, as dnspython does)."""
     rt = record_type.upper()
     results = []
     lines = (out or '').splitlines()
-    # Drop the server header block (up to the first blank line after "Server:").
-    started = False
-    for line in lines:
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    while i < len(lines) and lines[i].strip():
+        i += 1
+    in_addr = False
+    txt_buf = None          # list of strings of the TXT record being read, or None
+
+    def _flush_txt():
+        nonlocal txt_buf
+        if txt_buf:
+            results.append(''.join(txt_buf))
+        txt_buf = None
+
+    for line in lines[i:]:
         s = line.strip()
-        if s.lower().startswith('name:') or 'non-authoritative' in s.lower():
-            started = True
-        if not started:
-            continue
         low = s.lower()
-        if rt in ('A', 'AAAA') and (low.startswith('address:') or low.startswith('addresses:')):
-            results.append(s.split(':', 1)[1].strip())
+        if not s:
+            in_addr = False
+            continue
+        if rt in ('A', 'AAAA'):
+            head, sep, val = s.partition(':')
+            if sep and head.strip().lower() in ('address', 'addresses',
+                                                'dirección', 'direcciones'):
+                val = val.strip()
+                if _is_ip(val):
+                    results.append(val)
+                in_addr = True
+            elif in_addr and line[:1].isspace() and _is_ip(s):
+                results.append(s)
+            else:
+                in_addr = False
         elif rt == 'MX' and 'mail exchanger' in low:
-            results.append(s.split('=', 1)[1].strip().rstrip('.'))
+            # "MX preference = 10, mail exchanger = mx.example" → "10 mx.example", the form
+            # dig and dnspython give. Splitting on the FIRST "=" kept the whole tail.
+            pref = low.split('preference', 1)[1].split('=', 1)[1].split(',', 1)[0].strip() \
+                if 'preference' in low else ''
+            exch = s[low.index('mail exchanger'):].split('=', 1)[1].strip().rstrip('.')
+            results.append(f'{pref} {exch}'.strip())
         elif rt in ('CNAME', 'NS', 'PTR') and '=' in s and ('canonical' in low or 'nameserver' in low or 'name =' in low):
             results.append(s.split('=', 1)[1].strip().rstrip('.'))
-        elif rt == 'TXT' and 'text =' in low:
-            results.append(s.split('=', 1)[1].strip().strip('"'))
+        elif rt == 'TXT':
+            if 'text =' in low:
+                _flush_txt()
+                txt_buf = []
+                val = s.split('=', 1)[1].strip()
+                if val:
+                    txt_buf.append(val.strip('"'))
+            elif txt_buf is not None and s.startswith('"'):
+                txt_buf.append(s.strip('"'))
+            else:
+                _flush_txt()
+    if rt == 'TXT':
+        _flush_txt()
     return results

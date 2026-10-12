@@ -29,10 +29,14 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "servicesentry.serviceAccountName" . }}
+      {{- with include "servicesentry.rootRolePodSecurity" . }}{{ . | trim | nindent 6 }}{{- end }}
+      {{- with include "servicesentry.varOwnerInit" . }}{{ . | trim | nindent 6 }}{{- end }}
       containers:
         - name: syslog
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with include "servicesentry.rootRoleSecurity" (dict "ctx" $ "netRaw" false) }}{{ . | trim | nindent 10 }}{{- end }}
+          {{- with include "servicesentry.rootRoleContainer" . }}{{ . | trim | nindent 10 }}{{- end }}
           envFrom:
             {{- include "servicesentry.envFrom" . | nindent 12 }}
           env:
@@ -51,7 +55,7 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
           ports:
-            {{- if .Values.control.enabled }}
+            {{- if include "servicesentry.controlListens" . }}
             - { name: control, containerPort: {{ .Values.control.port }} }
             {{- end }}
             - { name: syslog-udp, containerPort: {{ .Values.syslog.ports.udp }}, protocol: UDP }
@@ -59,7 +63,7 @@ spec:
             {{- if .Values.syslog.ingress.tls }}
             - { name: syslog-tls, containerPort: {{ .Values.syslog.ports.tls }}, protocol: TCP }
             {{- end }}
-          {{- if .Values.control.enabled }}
+          {{- if include "servicesentry.controlListens" . }}
           readinessProbe:
             httpGet: { path: /control/health, port: control }
             initialDelaySeconds: 10
@@ -88,7 +92,7 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-{{- if .Values.control.enabled }}
+{{- if include "servicesentry.controlListens" . }}
 ---
 # Control Service (the web's poke target).
 apiVersion: v1

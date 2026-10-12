@@ -46,6 +46,12 @@ TIMEOUT = 10
 #: caduca por el camino deja media pantalla sin dibujar.
 MARGIN = 300
 
+#: How long a failed session request is remembered. Every page that draws the map asks for
+#: one, and with no way out to Google each ask was a TIMEOUT-long wait â€” ten seconds on every
+#: Overview load. A failure is answered from memory for this long; the config page's test
+#: button calls `forget()` first, so a fixed key is seen at once.
+FAIL_TTL = 60
+
 
 class MapKeyError(Exception):
     """No se ha podido conseguir una sesión. Lleva una clave de idioma y el detalle de quien
@@ -143,7 +149,16 @@ def session_for(key: str, *, lang: str = LANG, region: str = REGION,
             and _CACHE.get('session')
             and int(_CACHE.get('expiry') or 0) - MARGIN > ahora):
         return str(_CACHE['session'])
-    nueva = new_session(key, lang=lang, region=region, map_type=map_type)
+    fallo = _CACHE.get('failed') or {}
+    if fallo.get('key_hash') == firma and float(fallo.get('until') or 0) > time.time():
+        raise MapKeyError(fallo.get('key') or 'gmaps_err_session', fallo.get('detail') or '')
+    try:
+        nueva = new_session(key, lang=lang, region=region, map_type=map_type)
+    except MapKeyError as exc:
+        _CACHE['failed'] = {'key_hash': firma, 'until': time.time() + FAIL_TTL,
+                            'key': exc.key, 'detail': exc.detail}
+        raise
+    _CACHE.pop('failed', None)
     _CACHE.update(nueva, key_hash=firma)
     return str(nueva['session'])
 

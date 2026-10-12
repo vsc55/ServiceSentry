@@ -288,11 +288,12 @@ class TestIcmpNative:
         assert self.w._icmp_ping('host.invalid.test', 1) is None
 
     def test_icmp_ping_no_socket(self):
-        """If no socket can be created, returns None (native path)."""
+        """If no socket can be created, the system ping decides (here: no answer → None)."""
         with patch('watchfuls.ping.client._PYTHONPING_AVAILABLE', False):
             with patch.object(self.Watchful, '_create_icmp_socket',
-                              return_value=None):
+                              return_value=None),                  patch.object(self.Watchful, '_system_ping', return_value=None) as sp:
                 assert self.w._icmp_ping('127.0.0.1', 1) is None
+            sp.assert_called_once_with('127.0.0.1', 1)
 
     def test_icmp_ping_sendto_fails(self):
         """If sendto raises OSError, returns None (native path)."""

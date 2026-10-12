@@ -193,7 +193,7 @@ def _client_data(raw: bytes, want_type: str, challenge: str, origin: str) -> dic
     if str(data.get('type') or '') != want_type:
         raise CeremonyError('wrong ceremony type')
     got = str(data.get('challenge') or '')
-    if not challenge or not hmac.compare_digest(got, str(challenge)):
+    if not challenge or not hmac.compare_digest(got.encode('utf-8'), str(challenge).encode('utf-8')):
         raise CeremonyError('challenge does not match')
     if not origin or str(data.get('origin') or '') != origin:
         raise CeremonyError('origin does not match')

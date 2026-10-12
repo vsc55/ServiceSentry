@@ -49,6 +49,9 @@ helm install ss ./helm/servicesentry -n servicesentry --create-namespace -f mis-
 | `syslog.ingress.type` | `LoadBalancer` | Service de ingreso UDP/TCP |
 | `networkPolicy.enabled` | `false` | Restringe el puerto de control (`:8765`) a los pods `web` |
 | `netRaw` | `true` | Concede `CAP_NET_RAW` (módulo ping) |
+| `persistence.enabled` | `false` | Monta **un** PVC en `/var/lib/ServiSesentry` de todos los pods (copias, imágenes, MIB). Apagado = `emptyDir` |
+| `persistence.existingClaim` / `.storageClass` / `.accessModes` / `.size` | `""` / `""` / `[ReadWriteMany]` / `5Gi` | PVC propio, o el que crea el chart (se **conserva** al desinstalar) |
+| `persistence.fixOwnership` | `true` | Con persistencia: `worker`/`syslog` (root) comparten el grupo 1000 con `umask 0002` y un *init container* da el volumen a 1000:1000. Ver [caso-kubernetes.md](../../docs/caso-kubernetes.md#persistencia-del-directorio-var-helm) |
 
 Lista completa en [`values.yaml`](values.yaml).
 
@@ -73,7 +76,9 @@ Lista completa en [`values.yaml`](values.yaml).
   privilegiado 1000 (`podSecurityContext`/`securityContext` en `values.yaml`);
   `worker` (ping) y `syslog` (`:514`) siguen como root porque necesitan
   `CAP_NET_RAW` / `CAP_NET_BIND_SERVICE` ambientales, no concedibles a un contenedor
-  no-root por defecto.
+  no-root por defecto. Con `persistence.enabled` comparten con los demás el grupo del
+  volumen (`persistence.fixOwnership`); en NFS, exporta con
+  `all_squash,anonuid=1000,anongid=1000` o `no_root_squash`.
 
 ## Desinstalar
 

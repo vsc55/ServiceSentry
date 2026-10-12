@@ -106,7 +106,7 @@ class TestWebhookDispatch:
     def test_placeholder_substitution(self):
         cfg = {**_ENABLED_CFG, 'body_template': '{kind}:{item}:{status}'}
         captured = {}
-        def fake_post(url, data, headers, timeout):
+        def fake_post(url, data, headers, timeout, **_kw):
             captured['body'] = data
             return unittest.mock.Mock(status_code=200)
         with unittest.mock.patch('requests.post', side_effect=fake_post):
@@ -116,7 +116,7 @@ class TestWebhookDispatch:
     def test_default_body_template_used_when_empty(self):
         cfg = {**_ENABLED_CFG, 'body_template': ''}
         captured = {}
-        def fake_post(url, data, headers, timeout):
+        def fake_post(url, data, headers, timeout, **_kw):
             captured['body'] = data
             return unittest.mock.Mock(status_code=200)
         with unittest.mock.patch('requests.post', side_effect=fake_post):
@@ -132,7 +132,7 @@ class TestWebhookDispatch:
         captured_headers = {}
         body_tpl = '{"kind":"{kind}"}'
         cfg['body_template'] = body_tpl
-        def fake_post(url, data, headers, timeout):
+        def fake_post(url, data, headers, timeout, **_kw):
             captured_headers.update(headers)
             return unittest.mock.Mock(status_code=200)
         with unittest.mock.patch('requests.post', side_effect=fake_post):
@@ -149,7 +149,7 @@ class TestWebhookDispatch:
     def test_custom_headers_merged(self):
         cfg = {**_ENABLED_CFG, 'headers': '{"X-Custom": "value123"}'}
         captured_headers = {}
-        def fake_post(url, data, headers, timeout):
+        def fake_post(url, data, headers, timeout, **_kw):
             captured_headers.update(headers)
             return unittest.mock.Mock(status_code=200)
         with unittest.mock.patch('requests.post', side_effect=fake_post):
@@ -178,7 +178,7 @@ class TestWebhookValuesAreEscaped:
     def _body(self, **kw):
         captured = {}
 
-        def fake_post(url, data, headers, timeout):
+        def fake_post(url, data, headers, timeout, **_kw):
             captured['body'] = data
             return unittest.mock.Mock(status_code=200)
 

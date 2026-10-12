@@ -40,10 +40,15 @@ const _dcsSnap = (mm) => Math.round(mm / 100) * 100;
 
 /** Abrir el plano de una sede: en la planta pedida —un botón de planta del panel del mapa—,
  *  o en la de más abajo. */
+//: Cuál fue la última apertura de una sede (ver `_dcimRackSeq`).
+let _dcsOpenSeq = 0;
+
 async function _dcsOpen(siteUid, floorUid) {
     const site = (_dcimData.sites || []).find(s => s.uid === siteUid);
     if (!site) return;
+    const yo = ++_dcsOpenSeq;
     const d = await apiGet(`/api/v1/dcim/sites/${encodeURIComponent(siteUid)}/floors`) || {};
+    if (yo !== _dcsOpenSeq) return;
     if (_dc3d) _dc3dStop();
     _ds3Images = {};
     _dcPlanLeave();
@@ -55,6 +60,7 @@ async function _dcsOpen(siteUid, floorUid) {
     _dcsItem = null;
     ssCanvasReset(_DCS_SVG);
     await Promise.all([_dcsLoadImage(), _dcsLoadContents()]);
+    if (yo !== _dcsOpenSeq) return;
     _dcUndoPrime();
     _dcimUrl();
     renderDcim();
@@ -65,15 +71,19 @@ async function _dcsOpen(siteUid, floorUid) {
  *  recalculaba el estado del árbol entero; el edificio en 3D necesita además las de las otras
  *  plantas, que así ya están. */
 async function _dcsLoadContents() {
-    if (!_dcsPlan) return;
+    const plan = _dcsPlan;
+    if (!plan) return;
     // Con el catálogo de lo que se puede poner en el plano (`p2dLoadKinds`): el dibujo, el icono
     // y el nombre de cada cosa, aquí, en la sala y en el 3D.
     const [d0] = await Promise.all([
-        apiGet(`/api/v1/dcim/sites/${encodeURIComponent(_dcsPlan.site.uid)}/contents`), p2dEnsureKinds('dcim')]);
+        apiGet(`/api/v1/dcim/sites/${encodeURIComponent(plan.site.uid)}/contents`), p2dEnsureKinds('dcim')]);
+    // En el plano que lo pidió: es la petición lenta, y la de la sede A llegando con B abierta
+    // dejaba B con las salas vacías y los muros de A (o reventaba si se había cerrado).
+    if (_dcsPlan !== plan) return;
     const d = d0 || {};
-    _dcsPlan.content = d.rooms || {};
-    _dcsPlan.walls = d.walls || {};
-    if (d.kinds && !Object.keys(_dcsPlan.kinds).length) _dcsPlan.kinds = d.kinds;
+    plan.content = d.rooms || {};
+    plan.walls = d.walls || {};
+    if (d.kinds && !Object.keys(plan.kinds).length) plan.kinds = d.kinds;
 }
 
 /** La sala que es la zona general de esta planta, si ya existe. */
@@ -206,7 +216,7 @@ function _dcsContent() {
     if (area) h += _dcsInside(area);
     for (const r of salas) h += _dcsInside(r);
     // Lo elegido de más, el recuadro de elegir y las guías del imán (el editor de planos).
-    return h + _dcsCoreSvg() + p2dPickedSvg(_dcsP2d) + p2dGuidesSvg(_dcsP2d, _dcsDrag || _dcsP2d.drag)
+    return h + _dcsCoreSvg() + _dcsLinksSvg() + p2dPickedSvg(_dcsP2d) + p2dGuidesSvg(_dcsP2d, _dcsDrag || _dcsP2d.drag)
          + p2dCalMarks('floor') + (_dcw ? _dcwSvg() : '');
 }
 

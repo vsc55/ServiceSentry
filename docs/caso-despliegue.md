@@ -13,7 +13,8 @@ Este documento cubre todas las formas soportadas de desplegar ServiceSentry en p
 
 ## Requisitos previos
 
-- **Python 3.10+** — necesario en todos los métodos excepto Docker
+- **Python 3.11.3+** — necesario en todos los métodos excepto Docker (paquetes e
+  `install.sh` construyen un venv desde `requirements.lock`; más abajo, por qué ese corte)
 - Aplicación instalada en `/opt/ServiSesentry/` y configuración en `/etc/ServiSesentry/`
 - Token de bot de Telegram y chat ID si se quieren notificaciones de alertas
 - **RAM del receptor syslog**: si activas el servidor syslog y esperas muchas conexiones
@@ -58,6 +59,23 @@ sudo tar xzf servicesentry-1.2.3-gentoo-overlay.tar.gz -C /var/db/repos/services
 sudo emerge app-admin/servicesentry
 ```
 
+**El overlay de Gentoo se instala tal cual.** Lo genera `packaging/gentoo/overlay.sh` con
+todo lo que Portage exige a un repositorio: `profiles/repo_name`, `metadata/layout.conf`
+(`masters = gentoo`, *thin manifests*) y el `Manifest` con el tamaño y los hashes del
+archivo de la versión. Lleva tres paquetes: `app-admin/servicesentry` y las cuentas
+`acct-group/servicesentry` y `acct-user/servicesentry` (UID/GID asignados dinámicamente). El
+`repos.conf` no necesita más que esto:
+
+```ini
+# /etc/portage/repos.conf/servicesentry.conf
+[servicesentry]
+location = /var/db/repos/servicesentry
+```
+
+Para generar el overlay desde el repositorio: `bash packaging/gentoo/overlay.sh 1.2.3 /tmp/overlay`
+(descarga el archivo de la etiqueta `v1.2.3` para el `Manifest`; un tercer argumento hashea
+una copia local).
+
 **El paquete instala la aplicación; las dependencias se resuelven al instalar.** El
 postinstall crea un entorno virtual en `/opt/ServiSesentry/venv` y hace `pip install` desde
 el `requirements.lock` que viaja dentro. Consecuencias que conviene conocer:
@@ -74,7 +92,8 @@ no es la app sino el lock: sus hashes ponen a pip en modo `--require-hashes`, do
 dependencia transitiva que un intérprete viejo **activa por marcador** —`redis` pide
 `async-timeout` por debajo de 3.11.3— es un error duro, porque el lock no la lleva. Distros
 afectadas: **Debian 12 y anteriores** (traen 3.11.2). Debian 13, Ubuntu 24.04 y Fedora actual
-están por encima del corte. En un sistema antiguo, usa Docker o `install.sh`.
+están por encima del corte. En un sistema antiguo, usa Docker: `install.sh` construye el
+mismo venv desde el mismo lock y comprueba el mismo corte.
 
 Tras instalar:
 
@@ -87,7 +106,11 @@ Al desinstalar se borra el venv (lo creó el postinstall), pero **`/etc/ServiSes
 `/var/lib/ServiSesentry` se conservan**: configuración y base de datos sobreviven, que es lo
 que hace seguro reinstalar.
 
-> CI instala cada paquete en su distro (Debian 12, Ubuntu 24.04, Fedora 41) y comprueba que
+Los paquetes instalan también `/usr/sbin/servicesentry-user` (ver
+[Usuario dedicado](#usuario-dedicado-servicesentry)) y `/etc/logrotate.d/servicesentry`
+(ver [Logs de OpenRC y logrotate](#logs-de-openrc-y-logrotate)).
+
+> CI instala cada paquete en su distro (Debian 13, Ubuntu 24.04, Fedora actual) y comprueba que
 > el venv resultante importa de verdad `flask`, `cryptography` y `paramiko` — construir un
 > paquete demuestra que se generó, no que funcione. Si esa verificación falla, no hay release.
 
@@ -104,11 +127,24 @@ sudo bash install.sh
 
 **Qué hace:**
 
-1. Crea `/opt/ServiSesentry/`, `/etc/ServiSesentry/`, `/var/lib/ServiSesentry/`
-2. Copia los ficheros de la aplicación a `/opt/ServiSesentry/`
-3. Si hay ficheros `data/*.json`, los copia a `/etc/ServiSesentry/` (omite los que ya existan)
-4. Detecta el sistema de inicio e instala los scripts correspondientes
-5. Habilita e inicia el servicio de monitorización
+1. Instala con `apt` lo que lista `dependencies.txt`: solo `python3` y `python3-venv`. Las
+   librerías de Python **no** salen de la distro (fuera de Debian/Ubuntu, instala esos dos a mano)
+2. Crea `/opt/ServiSesentry/`, `/etc/ServiSesentry/`, `/var/lib/ServiSesentry/`
+3. Copia la aplicación a `/opt/ServiSesentry/` — el mismo árbol que llevan los paquetes,
+   `requirements.lock` incluido y sin `tests/` ni cachés
+4. Construye el venv `/opt/ServiSesentry/venv` desde ese lock con
+   `packaging/scripts/make-venv.sh`: el mismo paso que el postinstall de los paquetes, con la
+   misma comprobación de **Python ≥ 3.11.3**. Necesita red y tarda unos minutos
+5. Si hay ficheros `data/*.json`, los copia a `/etc/ServiSesentry/` (omite los que ya existan)
+6. Instala `/usr/sbin/servicesentry-user` y, si existe `/etc/logrotate.d`, la regla de rotación
+7. Detecta el sistema de inicio e instala los scripts correspondientes, apuntados al
+   intérprete del venv (`ExecStart` de las unidades, `SS_PYTHON` de los `conf.d`)
+8. En una instalación **nueva**, pasa los servicios al usuario `servicesentry`
+   (`SS_RUN_AS_ROOT=1 bash install.sh` los deja como root)
+9. Habilita e inicia el servicio de monitorización
+
+> Antes `install.sh` arrancaba los servicios con el `/usr/bin/python3` del sistema y unos
+> pocos paquetes `python3-*`, sin `flask` entre ellos: lo que instalaba **no arrancaba**.
 
 El panel web de administración **no** se inicia automáticamente — la salida de
 `install.sh` indica el comando para habilitarlo.
@@ -169,12 +205,75 @@ de inicio y los reinicia. Los ficheros de configuración en `/etc/ServiSesentry/
 que ya existan **nunca** se sobreescriben; los ficheros presentes en `data/` que
 aún no se hayan desplegado se copian.
 
+**El venv se conserva.** `update.sh` borra todo `/opt/ServiSesentry` **menos** `venv/`, copia
+la aplicación nueva y vuelve a pasar `make-venv.sh`: reutiliza el venv y le instala las
+versiones del lock nuevo, o lo reconstruye si su intérprete ya no arranca (porque se
+actualizó el Python del sistema). Si un `conf.d` de OpenRC aún dice
+`SS_PYTHON="/usr/bin/python3"` —el valor de las instalaciones antiguas, que no arrancaban—,
+lo cambia al del venv; cualquier otro valor es del operador y no se toca.
+
+`update.sh` **no cambia el usuario** con el que corren los servicios: una instalación de
+antes del usuario dedicado sigue como root hasta que se ejecute `servicesentry-user enable`.
+
 ### Desinstalación
 
 ```bash
 sudo bash uninstall.sh       # elimina la app, conserva la configuración en /etc/ServiSesentry
 sudo bash uninstall.sh -a    # elimina todo, incluida la configuración
 ```
+
+Borra también el venv, `/usr/sbin/servicesentry-user`, la regla de logrotate y los
+*drop-ins* de usuario de systemd. La cuenta `servicesentry`, si se creó, se deja: puede
+quedar algún fichero suyo.
+
+---
+
+## Usuario dedicado (`servicesentry`)
+
+En una **instalación nueva** los servicios ya no corren como root sino como el usuario de
+sistema `servicesentry`, con solo las dos capacidades que necesitan: `CAP_NET_RAW` (el ping
+por ICMP crudo) y `CAP_NET_BIND_SERVICE` (el receptor syslog en el puerto 514). Una
+instalación que **ya existía** sigue como root: su configuración y su base de datos son de
+root, y cambiar el usuario por debajo en una actualización es la forma de dejar un servicio
+que no arranca. En ese caso, el cambio lo decide el operador.
+
+**Cómo se distingue una instalación nueva de una actualización:**
+
+| Vía | Nueva | Actualización |
+| --- | ----- | ------------- |
+| `.deb` | `postinst configure` **sin** versión anterior (`$2` vacío) | `configure <versión anterior>` |
+| `.rpm` | `%post` con `$1 = 1` | `$1 ≥ 2` |
+| Gentoo | `pkg_postinst` con `REPLACING_VERSIONS` vacío | `REPLACING_VERSIONS` con la versión que sustituye |
+| `install.sh` | no existían ni `/etc/ServiSesentry` ni `/var/lib/ServiSesentry` | existía alguno (y `update.sh` nunca cambia el usuario) |
+
+Todas las vías llaman a la misma herramienta, `/usr/sbin/servicesentry-user`
+(fuente: `packaging/scripts/servicesentry-user.sh`):
+
+```bash
+sudo servicesentry-user status    # con qué usuario corren
+sudo servicesentry-user enable    # pasar a servicesentry
+sudo servicesentry-user disable   # volver a root
+```
+
+`enable` crea el grupo y el usuario de sistema si faltan (sin shell ni home propia), hace
+`chown -R servicesentry:servicesentry` de `/etc/ServiSesentry` y `/var/lib/ServiSesentry`
+(modo `0750`) y de los ficheros de log de OpenRC, y reinicia los servicios que estuvieran en
+marcha (`--no-restart` para no hacerlo). **Para pasar una instalación existente al usuario
+dedicado basta con `sudo servicesentry-user enable`**; `disable` lo deshace.
+
+Dónde queda guardada la elección, sin editar ningún fichero del paquete (que `rpm --verify`,
+los *conffiles* de dpkg y el `CONFIG_PROTECT` de Portage vigilan):
+
+- **systemd**: un *drop-in* `/etc/systemd/system/<unidad>.service.d/10-servicesentry-user.conf`
+  con `User=servicesentry`, `Group=servicesentry`,
+  `AmbientCapabilities=CAP_NET_RAW CAP_NET_BIND_SERVICE` y el mismo
+  `CapabilityBoundingSet`. Las unidades de `/lib/systemd/system` no cambian.
+- **OpenRC**: el script de inicio arranca el daemon como **el dueño de
+  `/var/lib/ServiSesentry`** (`command_user`, con las mismas capacidades como *ambient*:
+  `capabilities="^cap_net_raw,^cap_net_bind_service"`, OpenRC ≥ 0.45). `SS_USER` en el
+  `conf.d` lo fija a mano; `SS_USER="root"` fuerza root.
+
+> En `install.sh`, `SS_RUN_AS_ROOT=1` deja como root también una instalación nueva.
 
 ---
 
@@ -217,11 +316,19 @@ sudo systemctl enable --now ServiSesentry-web
 ```
 
 El panel arranca en el puerto `8080` escuchando en todas las interfaces. Para
-cambiar el puerto, edita la línea `ExecStart` en `ServiSesentry-web.service`:
+cambiar el puerto, sobrescribe `ExecStart` con un *drop-in*
+(`sudo systemctl edit ServiSesentry-web`) en vez de editar la unidad, que el paquete o
+`update.sh` reponen:
 
 ```ini
-ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py --web --web-host 0.0.0.0 --web-port 9090
+[Service]
+ExecStart=
+ExecStart=/opt/ServiSesentry/venv/bin/python /opt/ServiSesentry/main.py --web --web-host 0.0.0.0 --web-port 9090
 ```
+
+> Las unidades del repositorio dicen `/usr/bin/python3`; los paquetes, `install.sh` y
+> `update.sh` las instalan reescritas al intérprete del venv con el mismo `sed`
+> (`packaging/build.sh`). Copiarlas a mano exige ese mismo cambio.
 
 ### Gestión de servicios
 
@@ -307,6 +414,28 @@ sudo rc-service ServiSesentry restart
 sudo rc-service ServiSesentry-web restart
 ```
 
+Otras variables de los `conf.d`:
+
+| Variable | Por defecto | Qué hace |
+| -------- | ----------- | -------- |
+| `SS_PYTHON` | `/usr/bin/python3` en el repo; el venv (`/opt/ServiSesentry/venv/bin/python`) en lo que instalan el ebuild, `install.sh` y `update.sh` | Intérprete con el que arranca |
+| `SS_LOG` | `/var/log/<servicio>.log` | Fichero de stdout/stderr del daemon. **Vacío** (`SS_LOG=""`) = descartarlos, como antes |
+| `SS_USER` | el dueño de `/var/lib/ServiSesentry` | Usuario del daemon (ver [Usuario dedicado](#usuario-dedicado-servicesentry)) |
+
+### Logs de OpenRC y logrotate
+
+Un daemon en segundo plano de OpenRC tiraba su salida a `/dev/null`, y cuando no arrancaba no
+había nada que leer. Ahora va a `SS_LOG` —por defecto `/var/log/ServiSesentry.log` y
+`/var/log/ServiSesentry-web.log`—, sin búfer (`PYTHONUNBUFFERED=1`). Si el daemon corre como
+`servicesentry`, el script crea el fichero con ese dueño antes de arrancar (`checkpath`).
+
+Esos ficheros crecen, así que el ebuild, los paquetes, `install.sh` y `update.sh` instalan
+`/etc/logrotate.d/servicesentry` (fuente: `init/logrotate/servicesentry`): rotación semanal,
+8 copias comprimidas, `missingok` y **`copytruncate`** — `start-stop-daemon` mantiene el
+fichero abierto y el daemon no tiene una señal para reabrirlo, así que se copia y se vacía en
+su sitio (se pueden perder las líneas escritas justo durante la copia). Con systemd la salida
+va al journal y estos ficheros no existen; la regla no hace nada.
+
 ### Comandos de servicio
 
 ```bash
@@ -314,8 +443,8 @@ sudo rc-service ServiSesentry-web restart
 rc-service ServiSesentry status
 rc-service ServiSesentry-web status
 
-# Logs (OpenRC escribe en syslog)
-tail -f /var/log/messages | grep ServiSesentry
+# Logs (SS_LOG; por defecto /var/log/<servicio>.log)
+tail -f /var/log/ServiSesentry.log /var/log/ServiSesentry-web.log
 
 # Parar / eliminar del runlevel
 rc-service ServiSesentry stop

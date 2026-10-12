@@ -31,6 +31,13 @@ except ImportError:
     _HAS_REQUESTS = False
 
 
+
+#: Seconds an SMTP server gets to answer each step. There was none: a server (or a firewall)
+#: that accepted the connection and never greeted held the call for ever — and the monitor's
+#: alert flush runs it inside its cycle lock, so monitoring stopped for good, and the event
+#: worker with it.
+SMTP_TIMEOUT = 20
+
 def send(wa, subject: str, body_html: str,
          recipients: list[str] | None = None) -> tuple[bool, str]:
     """Send email using the stored (decrypted) config. Returns (ok, message)."""
@@ -127,12 +134,12 @@ def _send_smtp(cfg: dict, subject: str, body_html: str,
     try:
         ctx = ssl.create_default_context()
         if use_ssl:
-            with smtplib.SMTP_SSL(host, port, context=ctx) as srv:
+            with smtplib.SMTP_SSL(host, port, context=ctx, timeout=SMTP_TIMEOUT) as srv:
                 if username:
                     srv.login(username, password)
                 srv.sendmail(from_email, recipients, msg.as_string())
         else:
-            with smtplib.SMTP(host, port) as srv:
+            with smtplib.SMTP(host, port, timeout=SMTP_TIMEOUT) as srv:
                 if use_tls:
                     srv.starttls(context=ctx)
                 if username:

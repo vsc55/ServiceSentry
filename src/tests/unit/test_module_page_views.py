@@ -369,7 +369,11 @@ class TestAViewIsAPlaceYouCanLandOn:
         """The bug this class exists for: `_landing_url` read the core tuple, so every module
         destination it was offered fell through to the admin panel."""
         src = _read(os.path.join(SRC, 'lib', 'web_admin', 'mixins', 'auth.py'))
-        i = src.index('def _landing_url')
+        # The destinations are gathered once, in `_landing_destinations`, which both the
+        # redirect and `/api/v1/me` resolve through.
+        i = src.index('def _landing_destinations')
         body = src[i:src.index('\n    def ', i)]
         assert 'landing_pages()' in body and 'home_pages()' in body
+        j = src.index('def _landing_url')
+        assert '_landing_destinations()' in src[j:src.index('\n    def ', j)]
         assert 'HOME_PAGES' not in body, 'the core half only — module landings resolve to /admin'

@@ -147,6 +147,28 @@ syslog:
 networkPolicy:
   enabled: false
 
+# -- The var dir (/var/lib/ServiSesentry): backups, uploaded pictures, MIBs and SNMP
+#    profiles. Off by default — an emptyDir, as earlier versions of this chart had — and
+#    then those files are LOST whenever a pod is replaced and are not shared between pods
+#    (a backup made by one web replica is invisible to another). Turn it on for anything
+#    but a trial. Every role mounts the same claim, so with more than one pod, or pods on
+#    different nodes, it needs ReadWriteMany storage (NFS, CephFS, EFS, Azure Files…).
+persistence:
+  enabled: false
+  existingClaim: ""        # use this PVC instead of creating one
+  storageClass: ""         # "" = the cluster default; "-" = no class (static binding)
+  accessModes: ["ReadWriteMany"]
+  size: 5Gi
+  annotations: {}
+  # worker and syslog run as root (raw ICMP, :514); web and events as
+  # podSecurityContext.runAsUser. With a shared claim that mix left files the web pods
+  # could not write - fsGroup is ignored by NFS and most RWX drivers. When on (and only
+  # with persistence.enabled), the root roles share the non-root group with umask 0002
+  # and an init container hands the claim to that uid/gid at every start. On NFS export
+  # the share with all_squash,anonuid=1000,anongid=1000 (or no_root_squash): with
+  # root_squash root cannot write there at all. See docs/caso-kubernetes.md.
+  fixOwnership: true
+
 serviceAccount:
   create: false
   name: ""

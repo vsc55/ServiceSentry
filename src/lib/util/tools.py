@@ -23,6 +23,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """ Tools for the project. """
 
+import math
 import secrets as _secrets
 
 
@@ -111,6 +112,10 @@ def to_bytes(value, unit: str) -> int:
     try:
         v = float(value)
     except (TypeError, ValueError):
+        return 0
+    # float() accepts 'inf' and 'nan', and int() of either raises â€” which took down the
+    # whole check that read the threshold instead of reading it as unset.
+    if not math.isfinite(v):
         return 0
     return int(v * _UNITS.get(normalize_unit(unit) or 'GiB', _UNITS['GiB']))
 

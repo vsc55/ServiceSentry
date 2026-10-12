@@ -16,6 +16,8 @@ pointing back up from here would be a cycle through the one module that cannot a
 from __future__ import annotations
 
 import base64
+import datetime as _dt
+import decimal
 import hashlib
 import json
 import os
@@ -118,6 +120,16 @@ def clean_cell(value, keep_secrets: bool):
     if isinstance(value, (bytes, bytearray)):
         # Binary survives the round trip through base64 rather than a lossy decode.
         return {'__b64__': base64.b64encode(bytes(value)).decode('ascii')}
+    # What the server drivers hand back for DATETIME/DATE/TIME/DECIMAL: SQLite gives text and
+    # numbers, so nobody saw that `json.dumps` refuses these — and on MySQL and PostgreSQL every
+    # copy holding syslog (`SystemEvents.ReceivedAt`) came out `partial`. As the text both
+    # engines take back on restore.
+    if isinstance(value, (_dt.datetime, _dt.date, _dt.time)):
+        return value.isoformat(sep=' ') if isinstance(value, _dt.datetime) else value.isoformat()
+    if isinstance(value, _dt.timedelta):
+        return str(value)
+    if isinstance(value, decimal.Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
     if keep_secrets or not isinstance(value, str):
         return value
     if value.startswith(ENC_PREFIX):

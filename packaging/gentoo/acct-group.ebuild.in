@@ -1,0 +1,16 @@
+# Copyright 2026 Javier Pastor
+# Distributed under the terms of the GNU General Public License v3
+
+# Copied into the overlay by packaging/gentoo/overlay.sh. Version 0, as ::gentoo's acct-*
+# packages: the account has no upstream version.
+
+EAPI=8
+
+inherit acct-group
+
+DESCRIPTION="Group for app-admin/servicesentry"
+KEYWORDS="~amd64 ~arm64"
+
+# -1: allocated dynamically. A fixed id belongs to ::gentoo's registry, which an overlay
+# package is not in.
+ACCT_GROUP_ID=-1

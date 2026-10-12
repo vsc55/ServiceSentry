@@ -45,17 +45,25 @@ class _ContextMixin:
     """The template context — what every page is rendered with."""
 
     def _asset_version(self, app) -> int:
-        """Cache-buster for the stylesheet: its mtime.
+        """Cache-buster for everything under ``static/``: the newest mtime there.
 
         The dev watcher does not restart on a ``.css`` edit and the ``<link>`` is otherwise a
         plain cacheable URL, so without this an edited stylesheet reaches the browser whenever
-        the browser feels like it. Unreadable → 0, which is a cache-buster that busts nothing
-        rather than a page that fails to render.
+        the browser feels like it. It used to be ``web_admin.css``'s mtime alone, while the
+        same ``?v=`` is on Bootstrap, its icons, its script, the favicon and the brand logos —
+        and a versioned URL is cached for a YEAR (``hooks.py``), so an upgrade that touched
+        any of those but not the stylesheet kept serving the old one. Some fifty files: a
+        stat each per page render, not per API call. Unreadable → 0, which is a cache-buster
+        that busts nothing rather than a page that fails to render.
         """
-        try:
-            return int(os.path.getmtime(os.path.join(app.static_folder, 'css', 'web_admin.css')))
-        except OSError:
-            return 0
+        newest = 0
+        for root, _dirs, files in os.walk(app.static_folder or ''):
+            for name in files:
+                try:
+                    newest = max(newest, int(os.path.getmtime(os.path.join(root, name))))
+                except OSError:
+                    pass
+        return newest
 
     def _auth_provider_context(self) -> dict:
         """Which sign-in providers exist, are switched on, and what their buttons say.

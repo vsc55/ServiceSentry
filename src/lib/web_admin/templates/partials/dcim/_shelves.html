@@ -32,6 +32,9 @@ async function _dcShelfLoad(uid) {
     if (_dcShelfLoading === uid) return;
     _dcShelfLoading = uid;
     const d = await apiGet(`/api/v1/dcim/features/${encodeURIComponent(uid)}/shelf`);
+    // Solo la última pedida: con A y luego B, la respuesta de A llegando después dejaba el
+    // armario A abierto bajo B, y «Añadir» guardaba en A.
+    if (_dcShelfLoading !== uid) return;
     _dcShelfLoading = '';
     if (!d) return;
     const antes = _dcShelf && _dcShelf.uid === uid ? _dcShelf : null;

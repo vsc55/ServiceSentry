@@ -2046,7 +2046,8 @@ class TestBuscarEnLaBaseYNoEnMemoria:
         que se le pide es peor que uno que no encuentra nada, porque contesta."""
         from lib.core.dcim.store import like_clause
         _sql, params = like_clause(('label',), 'PP_1%')
-        assert params == ('%pp\\_1\\%%',)
+        # `!` and not a backslash, which MySQL/MariaDB read as an escape inside the literal.
+        assert params == ('%pp!_1!%%',)
 
     def test_sin_texto_no_hay_condicion(self):
         """Una condición vacía que se cuela en un `WHERE` es un error de sintaxis; una que dice

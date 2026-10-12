@@ -404,28 +404,35 @@ class HistoryStore(BaseStore):
         crudo = json.dumps(medidas, ensure_ascii=False)
         ident = (str(module or ''), str(key or ''))
         try:
-            if sid and self._touch_series(sid, ident, identidad, now, status, crudo) == 0:
-                # The id this process remembers is not this series any more: the web deleted
-                # it (or emptied the history, or a restore refilled the table) and only ITS
-                # cache was cleared. Writing on would file every new sample under a series
-                # that does not exist — invisible until a restart. So the caches go (field
-                # ids too: emptying the history empties the field dictionary with it) and
-                # the series is resolved again, which creates it afresh.
-                self._forget_series()
-                sid = self.series_id(module, key, item_uid=item_uid)
+            # A real transaction, not a trailing `commit()`: the connector runs in autocommit
+            # on SQLite, so each statement below was already durable on its own, and a failed
+            # measurement left the sample row (and the series' summary) committed without it.
+            with self._db.transaction():
+                if sid and self._touch_series(sid, ident, identidad, now, status, crudo) == 0:
+                    # The id this process remembers is not this series any more: the web
+                    # deleted it (or emptied the history, or a restore refilled the table) and
+                    # only ITS cache was cleared. Writing on would file every new sample under
+                    # a series that does not exist — invisible until a restart. So the caches
+                    # go (field ids too: emptying the history empties the field dictionary
+                    # with it) and the series is resolved again, which creates it afresh.
+                    self._forget_series()
+                    sid = self.series_id(module, key, item_uid=item_uid)
+                    # Creating it committed — nothing of this sample had been written yet —
+                    # and so closed this transaction: open it again for the rest.
+                    self._db.begin()
+                    if sid:
+                        self._touch_series(sid, ident, identidad, now, status, crudo)
+                self._db.execute(
+                    f'INSERT INTO {_T}(ts, item_uid, status, series_id) '
+                    'VALUES(?, ?, ?, ?)',
+                    (now, item_uid, 1 if status else 0, sid),
+                )
                 if sid:
-                    self._touch_series(sid, ident, identidad, now, status, crudo)
-            self._db.execute(
-                f'INSERT INTO {_T}(ts, item_uid, status, series_id) '
-                'VALUES(?, ?, ?, ?)',
-                (now, item_uid, 1 if status else 0, sid),
-            )
-            if sid:
-                # Las medidas, además, una fila por valor. En la MISMA transacción que la
-                # muestra: una muestra sin sus medidas sería un punto en la gráfica sin nada
-                # que dibujar, y las dos escrituras tienen que vivir o morir juntas.
-                self.facts.write(sid, now, medidas)
-            self._db.commit()
+                    # Las medidas, además, una fila por valor. En la MISMA transacción que la
+                    # muestra: una muestra sin sus medidas sería un punto en la gráfica sin
+                    # nada que dibujar, y las dos escrituras tienen que vivir o morir juntas.
+                    # `strict`: un fallo aquí deshace también la muestra.
+                    self.facts.write(sid, now, medidas, strict=True)
         except Exception as exc:  # pylint: disable=broad-except
             import sys  # noqa: PLC0415
             print(

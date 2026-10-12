@@ -43,6 +43,11 @@ from lib.services.heartbeat import app_version, hostname
 
 _DEFAULT_PORT = 8765
 
+#: Seconds a connection may sit idle (headers or body not arriving). The listener opens a
+#: thread per connection, so without it a client that connects and says nothing held a thread
+#: for ever â€” and enough of them exhausted the process.
+_SOCKET_TIMEOUT = 10
+
 
 def control_token() -> str | None:
     tok = os.environ.get('SS_CONTROL_TOKEN')
@@ -62,6 +67,10 @@ def control_advertise_url() -> str:
 
 
 class _Handler(BaseHTTPRequestHandler):
+    # StreamRequestHandler applies it to the connection's socket: a stalled read raises,
+    # handle() ends and the thread is freed.
+    timeout = _SOCKET_TIMEOUT
+
     # The owning ControlServer sets these on the server instance.
     @property
     def _service(self):
@@ -87,7 +96,9 @@ class _Handler(BaseHTTPRequestHandler):
         prefix = 'Bearer '
         if not hdr.startswith(prefix):
             return False
-        return hmac.compare_digest(hdr[len(prefix):].strip(), self._token or '')
+        # Bytes, not str: a non-ASCII str makes compare_digest raise instead of answer.
+        return hmac.compare_digest(hdr[len(prefix):].strip().encode('utf-8'),
+                                   (self._token or '').encode('utf-8'))
 
     def do_GET(self):  # noqa: N802
         path = self.path.rstrip('/')

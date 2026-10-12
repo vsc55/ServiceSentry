@@ -693,6 +693,11 @@ const _dwFetched = {};
 const _dwFetchBusy = {};
 const _dwTableRows = {};
 const _dwTableBusy = {};
+// Asked again while a request was in flight (a filter or source changed): the answer in flight
+// is for the old one, so it is dropped and the fetch runs once more when it lands. Turning the
+// second ask away left the table showing the previous filter's rows.
+const _dwFetchAgain = {};
+const _dwTableAgain = {};
 // Cell renderers: (row, col) => <td> HTML.  Generic types + a few reusable customs
 // (module_name/on_badge/checks use the frontend module catalog, so they stay here).
 const _DW_CELLS = {
@@ -908,7 +913,8 @@ function _dwRenderTable(id, view, item) {
 // Fetch a data-driven table's rows (filtered server-side), cache + fill its <tbody>.
 async function _dwTableFetch(id) {
     const view = (_DW_DEFS[id] || {}).view;
-    if (!view || view.kind !== 'table' || _dwTableBusy[id]) return;
+    if (!view || view.kind !== 'table') return;
+    if (_dwTableBusy[id]) { _dwTableAgain[id] = true; return; }
     const dw = document.querySelector(`.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
     if (!dw || dw.style.display === 'none') return;
     _dwTableBusy[id] = true;
@@ -916,6 +922,7 @@ async function _dwTableFetch(id) {
         const f = _dwViewFilter(id, view, null);
         const p = (view.filter && view.filter.param) || 'f';
         const data = await apiGet(`${view.data_url}?${p}=${encodeURIComponent(f)}${_dwSourceQS(id, '&')}`);
+        if (_dwTableAgain[id]) return;           // stale: the finally asks again
         _dwTableRows[id] = (data && data.rows) || [];
         const cur = document.querySelector(`.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
         const tb = cur && cur.querySelector('tbody');
@@ -924,20 +931,25 @@ async function _dwTableFetch(id) {
         // lists sessions is not in trouble for having rows.
         if (view.state_rows) _dwApplyState(cur, _dwTableRows[id].length ? view.state_rows : '');
     } catch (e) { /* leave the placeholder on error */ }
-    finally { _dwTableBusy[id] = false; }
+    finally {
+        _dwTableBusy[id] = false;
+        if (_dwTableAgain[id]) { _dwTableAgain[id] = false; _dwTableFetch(id); }
+    }
 }
 // Fetch a card's content (anything that is not a table), cache it + re-render its body.
 // Dibujado por su clase y no por «es una tarjeta de recuento»: así una clase nueva se sirve
 // sola en cuanto sabe dibujarse.
 async function _dwFetchContent(id) {
     const view = (_DW_DEFS[id] || {}).view;
-    if (!view || view.kind === 'table' || !view.data_url || _dwFetchBusy[id]) return;
+    if (!view || view.kind === 'table' || !view.data_url) return;
+    if (_dwFetchBusy[id]) { _dwFetchAgain[id] = true; return; }
     const sel = `.dw[data-wid="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`;
     const dw = document.querySelector(sel);
     if (!dw || dw.style.display === 'none') return;
     _dwFetchBusy[id] = true;
     try {
         const data = await apiGet(view.data_url + _dwSourceQS(id, '?'));
+        if (_dwFetchAgain[id]) return;           // stale: the finally asks again
         _dwFetched[id] = (data && data.content) || {};
         const cont = document.querySelector(`${sel} .dw-content`);
         if (cont) cont.innerHTML = _dwRenderView(id, view, _dwFetched[id], null);
@@ -946,7 +958,10 @@ async function _dwFetchContent(id) {
         _dwMapFitAll(cont);
         _dwApplyState(document.querySelector(sel), _dwFetched[id].state);
     } catch (e) { /* leave the placeholder on error */ }
-    finally { _dwFetchBusy[id] = false; }
+    finally {
+        _dwFetchBusy[id] = false;
+        if (_dwFetchAgain[id]) { _dwFetchAgain[id] = false; _dwFetchContent(id); }
+    }
 }
 // `view.source`: the source a card reads, as the query parameter its data request carries.
 // Nothing for the default one.

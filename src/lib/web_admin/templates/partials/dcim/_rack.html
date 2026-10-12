@@ -11,8 +11,14 @@
 
 // ── One rack ────────────────────────────────────────────────────────────────
 
+//: Cuál fue la última apertura de un rack: una respuesta que llega después de otra apertura —o
+//: de cerrarlo— no es la que se espera, y abría el rack anterior encima del elegido.
+let _dcimRackSeq = 0;
+
 async function _dcimLoadRack(uid) {
+    const yo = ++_dcimRackSeq;
     const data = await apiGet('/api/v1/dcim/racks/' + encodeURIComponent(uid));
+    if (yo !== _dcimRackSeq) return;
     if (!data || !data.rack) { _dcimRack = null; return renderDcim(); }
     // Lo cargado es de ESE armario. Abrir otro con el cableado del anterior puesto enseñaría los
     // cables de uno bajo el nombre del otro — y no lo diría, porque una tabla de cables no lleva
@@ -56,6 +62,7 @@ function _dcimReloadRack() {
 
 function _dcimCloseRack() {
     _dcimRemember();
+    _dcimRackSeq++;                 // lo que estuviera llegando ya no es para nadie
     _dcimRack = null;
     _dcimForm = null;
     _dcimUrl();

@@ -39,8 +39,22 @@ SUPPORTED_PLATFORMS = ('linux', 'darwin', 'win32')
 NTP_DELTA = 2208988800
 
 
+class NtpUnsynchronised(ValueError):
+    """The server answered, but says its own clock is not to be trusted."""
+
+    def __init__(self, leap: int, stratum: int):
+        super().__init__(f'server not synchronised (LI={leap}, stratum={stratum})')
+        self.leap = leap
+        self.stratum = stratum
+
+
 def _ntp_query(server: str, timeout: float, port: int = 123) -> tuple:
-    """Return (abs_offset_seconds, delay_seconds). Raises on error."""
+    """Return (abs_offset_seconds, delay_seconds). Raises on error.
+
+    A server that answers with leap indicator 3 (alarm: clock not synchronised), stratum 0
+    (a kiss-o'-death or "unspecified") or stratum 16+ (unsynchronised) raises
+    :class:`NtpUnsynchronised`: its timestamps are whatever its free-running clock says, so a
+    small offset against it proves nothing — and it was reported as a healthy time source."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(timeout)
     try:
@@ -51,6 +65,9 @@ def _ntp_query(server: str, timeout: float, port: int = 123) -> tuple:
         t4 = time.time()
         if len(data) < 48:
             raise ValueError(f"NTP response too short ({len(data)} bytes)")
+        leap, stratum = data[0] >> 6, data[1]
+        if leap == 3 or stratum == 0 or stratum >= 16:
+            raise NtpUnsynchronised(leap, stratum)
         # Receive timestamp T2 (bytes 32-39), Transmit timestamp T3 (bytes 40-47)
         t2_s, t2_f = struct.unpack('!II', data[32:40])
         t3_s, t3_f = struct.unpack('!II', data[40:48])
@@ -91,9 +108,15 @@ class Watchful(ModuleBase):
                 continue
             server = (value.get('server', '') or '').strip() or self._DEFAULTS['server']
             label = (value.get('label', '') or '').strip() or server or key
-            port = int(value.get('port', 0) or 0) or 123
-            max_offset = float(value.get('max_offset', 0) or 0) or self.module_default('max_offset', self._MODULE_DEFAULTS['max_offset'])
-            timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
+            try:
+                port = int(value.get('port', 0) or 0) or 123
+                max_offset = float(value.get('max_offset', 0) or 0) or self.module_default('max_offset', self._MODULE_DEFAULTS['max_offset'])
+                timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
+            except (TypeError, ValueError) as exc:
+                # One item with a malformed number fails ITSELF — raised here, outside the
+                # per-item executor, it took every other server of the module down with it.
+                self.dict_return.set(key, False, self._msg('ntp_error', label, exc), name=label)
+                continue
             self._debug(f"NTP: {self.item_label(key)} - server={server}:{port} max_offset={max_offset}", DebugLevel.info)
             list_items.append({
                 'key': key,
@@ -117,7 +140,10 @@ class Watchful(ModuleBase):
                 except Exception as exc:  # pylint: disable=broad-except
                     self._debug(f"NTP: {item['key']} - Exception: {exc}", DebugLevel.error)
                     _lbl = item.get('label') or item['key']
-                    message = self._msg('ntp_error', _lbl, exc)
+                    if isinstance(exc, NtpUnsynchronised):
+                        message = self._msg('ntp_unsync', _lbl, exc.leap, exc.stratum)
+                    else:
+                        message = self._msg('ntp_error', _lbl, exc)
                     self.dict_return.set(item['key'], False, message, name=_lbl)
 
         super().check()

@@ -22,6 +22,23 @@ import os
 # and writing SQLite's own statistics into a MySQL restore is at best noise.
 INTERNAL_TABLES = frozenset({'sqlite_sequence', 'sqlite_stat1', 'sqlite_stat4'})
 
+# The RUNNING state of an install, not its configuration. Never copied and never restored:
+# `sessions` holds every live login with its token in clear, so a copy carried them to
+# wherever the archive went — and a restore logged out everyone on the target and logged back
+# in whoever was signed in when the copy was taken. The service tables say who leads, who is
+# alive and what is queued, which describes the processes running NOW; putting back last
+# week's leader makes the live one defer to a process that does not exist.
+#
+# On restore the target's own rows are left exactly as they are, and an archive written
+# before this list existed simply has its copies of them ignored.
+#
+# `api_tokens` and `api_token_access` are deliberately NOT here: a token is something an
+# operator created and a script depends on, which is configuration — dropping them from a
+# restore would break every integration at once.
+RUNTIME_TABLES = frozenset({'sessions', 'session_access', 'service_leader',
+                            'service_instances', 'service_commands'})
+_RUNTIME_LOWER = frozenset(t.lower() for t in RUNTIME_TABLES)
+
 
 # ── What a copy can hold ─────────────────────────────────────────────────────
 #
@@ -77,7 +94,10 @@ def _pick(p: dict, names) -> list:
     """The tables of part *p* among *names* — a declared part's own, or (the core) every one
     no part claims. Without regard to case; the part's spelling wins where it has one."""
     if p['tables'] is None:
-        return [t for t in names if t.lower() not in _CLAIMED_LOWER]
+        # Runtime tables are excluded HERE, in the one rule both directions read, so the copy,
+        # the restore and the restore form's table list all leave them out alike.
+        return [t for t in names
+                if t.lower() not in _CLAIMED_LOWER and t.lower() not in _RUNTIME_LOWER]
     low = {t.lower() for t in names}
     return [t for t in p['tables'] if t.lower() in low]
 

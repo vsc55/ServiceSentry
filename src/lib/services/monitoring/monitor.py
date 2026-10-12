@@ -761,8 +761,28 @@ class Monitor(ObjectBase):
             elif str(k).split('/', 1)[0] not in live_prefixes:
                 orphans.append(k)                           # bookkeeping for a gone item
         for k in orphans:
+            self._recovered_by_parts(module_name, k, mod_status.get(k), result_data)
             del mod_status[k]
         return bool(orphans)
+
+    def _recovered_by_parts(self, module_name, key, entry, result_data) -> None:
+        """Announce the recovery of a failure that was recorded under the item's bare key.
+
+        A module that cannot reach its device (SSH down, API refused) reports ONE error under
+        the item's key; when it reaches it again it reports under sub-keys (`<key>_ram`,
+        `<key>/vip`, `<key>_sda`…). The bare key was pruned silently, and the sub-keys were
+        first records, whose recovery is suppressed — so a DOWN was sent and nothing ever said
+        it was over (ram_swap, raid, hddtemp, keepalived, proxmox)."""
+        if self._notifier is None or not isinstance(entry, dict) or entry.get('status') is not False:
+            return
+        partes = [c for c in result_data.keys() if str(c) != str(key) and str(c).startswith(str(key))]
+        # Reaching the device is the recovery: a part still failing (swap full, a disk hot)
+        # is a first record of its own, and as a failing one it is announced by itself.
+        if not partes:
+            return
+        texto = '; '.join(str(result_data.get_message(c) or '') for c in partes[:3]).strip('; ')
+        label = self._item_label(module_name, key)
+        self._notifier.add('recovery', module_name, label, texto or label)
 
     def report_progress(self, module_name: str, detail: str, *, step: str = '',
                         scope: str = '', n: int = 0, total: int = 0,

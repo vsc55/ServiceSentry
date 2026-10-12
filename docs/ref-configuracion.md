@@ -842,7 +842,10 @@ El modal de edición se organiza en tres pestañas:
 
 **Cooldown global.** `events.cooldown` define el *cooldown* por defecto (segundos)
 entre notificaciones de una misma regla; dejar el campo de la regla en blanco hace
-que **herede** el global (el placeholder muestra el valor heredado).
+que **herede** el global (el placeholder muestra el valor heredado). Una regla **nueva**
+nace con 60 s —desde el formulario y desde la API si no se manda `cooldown`—, porque el
+global es 0 y una regla recién creada avisaría en cada coincidencia; las reglas ya
+guardadas no cambian, y un 0 escrito a propósito sigue siendo 0.
 
 **Procesador de eventos (desacoplado).** La evaluación de las reglas **no** ocurre
 en línea con la recepción: un **worker** lee por cursor los mensajes syslog y los

@@ -148,7 +148,7 @@ function _mptEnsure(pageId, view, containerId) {
         showChooser: mode => mode === 'table',
         cardsBody: (rows, ctx, all) => _mptBody(key, rows, all),
         refreshButton: () => `<button class="btn btn-sm btn-secondary" ${st.busy ? 'disabled' : ''}
-                onclick="_mptLoad('${escAttr(pageId)}','${escAttr(view.slug)}','${escAttr(containerId)}')"
+                onclick="_mptLoad(${jsStr(pageId)},${jsStr(view.slug)},${jsStr(containerId)})"
                 title="${escAttr(t('refresh_tt') || '')}">
             ${st.busy ? `<span class="spinner-border spinner-border-sm me-1"></span>${esc(t('page_refreshing') || '')}`
                       : `<i class="bi bi-arrow-clockwise me-1"></i>${esc(t('refresh') || '')}`}</button>`,

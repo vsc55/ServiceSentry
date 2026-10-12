@@ -32,6 +32,7 @@ picked before.
 
 from __future__ import annotations
 
+import html
 import os
 import re
 import struct
@@ -132,10 +133,15 @@ _SVG_ACTIVE = (
 
 def svg_problem(data: bytes) -> str:
     """Why an SVG cannot be a brand picture, or ``''`` when it can."""
-    low = data.lower()
-    for rx, why in _SVG_ACTIVE:
-        if rx.search(low):
-            return why
+    # Read as the browser will: `&#106;avascript:` is `javascript:` once the attribute is
+    # parsed, and so is one with a tab or a newline inside the word. Matched on the raw bytes,
+    # both went through.
+    texto = html.unescape(data.decode('utf-8', 'replace')).lower()
+    for low in (texto, re.sub(r'[\x00-\x20]+', '', texto)):
+        low = low.encode('utf-8')
+        for rx, why in _SVG_ACTIVE:
+            if rx.search(low):
+                return why
     return ''
 
 

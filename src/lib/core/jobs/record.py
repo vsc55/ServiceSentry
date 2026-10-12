@@ -69,12 +69,7 @@ def bind(db, limits: dict | None = None, owner: str = '') -> None:
     global _DB, _OWNER                            # pylint: disable=global-statement
     _DB = db
     _OWNER = _identity(owner)
-    for key in _LIMITS:
-        if limits and limits.get(key) is not None:
-            try:
-                _LIMITS[key] = max(0, int(limits[key]))
-            except (TypeError, ValueError):
-                pass
+    set_limits(limits)
     st = store()
     if st is not None:
         st.reap(alive=_alive(db))
@@ -116,6 +111,21 @@ def _alive(db) -> set:
 def bound() -> bool:
     """Whether anything will be written. For the screen, so it can say so."""
     return _DB is not None
+
+
+def set_limits(limits: dict | None) -> None:
+    """Take the installation's limits — at bind, and again whenever they change.
+
+    Apart from :func:`bind` because bind runs while the stores are built, BEFORE the saved
+    config and the `SS_JOBS_HISTORY_*` variables are applied: limits read only there were
+    the class defaults for ever, whatever the screen or the environment said.
+    """
+    for key in _LIMITS:
+        if limits and limits.get(key) is not None:
+            try:
+                _LIMITS[key] = max(0, int(limits[key]))
+            except (TypeError, ValueError):
+                pass
 
 
 def limits() -> dict:

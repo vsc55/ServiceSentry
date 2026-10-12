@@ -42,6 +42,7 @@ overrides:
     depends:
       - python3
       - python3-pip
+      - shadow-utils       # useradd/groupadd, for the dedicated user on a fresh install
 
 contents:
   # The application, staged by build.sh: the same tree the Docker image runs, minus a
@@ -59,6 +60,21 @@ contents:
     dst: /lib/systemd/system/ServiSesentry.service
   - src: ../dist/staging/systemd/ServiSesentry-web.service
     dst: /lib/systemd/system/ServiSesentry-web.service
+
+  # Runs the services as the dedicated user — or as root again. The postinstall calls it on
+  # a fresh install; an existing install opts in by running it (docs/caso-despliegue.md).
+  - src: ./scripts/servicesentry-user.sh
+    dst: /usr/sbin/servicesentry-user
+    file_info:
+      mode: 0755
+
+  # Rotation of the OpenRC log files (SS_LOG). Harmless under systemd, where they do not
+  # exist; config|noreplace so a local edit survives an upgrade.
+  - src: ../init/logrotate/servicesentry
+    dst: /etc/logrotate.d/servicesentry
+    type: config|noreplace
+    file_info:
+      mode: 0644
 
   # Config and data live outside the package's file list on purpose: they are created by
   # the postinstall and must survive an uninstall.

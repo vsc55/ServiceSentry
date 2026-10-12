@@ -28,11 +28,13 @@
     "messages": {
         "ntp_error": "NTP: {} - Error: {} 💥",
         "ntp_ok":    "NTP: {} - desfase {}s (máx {}s) ✅",
-        "ntp_high":  "NTP: {} - desfase {}s supera {}s ⚠️"
+        "ntp_high":  "NTP: {} - desfase {}s supera {}s ⚠️",
+        "ntp_unsync": "NTP: {} - servidor sin sincronizar (LI={}, estrato {}) 💥"
     },
     "messages_vars": {
         "ntp_error": ["servidor", "error"],
         "ntp_ok": ["servidor", "desfase (s)", "máx (s)"],
-        "ntp_high": ["servidor", "desfase (s)", "máx (s)"]
+        "ntp_high": ["servidor", "desfase (s)", "máx (s)"],
+        "ntp_unsync": ["servidor", "indicador de salto", "estrato"]
     }
 }

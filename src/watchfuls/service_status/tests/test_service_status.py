@@ -116,7 +116,7 @@ class TestCheck:
                       devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec', return_value=(_SC_RUNNING, '', 0)) as he:
             items = w.check().list
-        assert he.call_args.args[1].startswith('sc query')
+        assert he.call_args.args[1].startswith('sc.exe query')
         assert items['svc']['status'] is True
 
     def _remediation_run(self, second_state):

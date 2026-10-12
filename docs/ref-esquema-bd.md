@@ -399,7 +399,7 @@ mandando basura.
 | name | TEXT | no | — | PK — la tabla vigilada |
 | version | INTEGER | no | `0` | se incrementa en cada escritura |
 
-Una fila por tabla vigilada (`users`, `groups`, `roles`) y una más, `module_config`, que usa el almacén de módulos como versión de la configuración para la comprobación `If-Match`. Cada escritor la incrementa
+Una fila por tabla vigilada (`users`, `groups`, `roles`, `config`) y una más, `module_config`, que usa el almacén de módulos como versión de la configuración para la comprobación `If-Match`. Cada escritor la incrementa
 **dentro de su misma transacción**, así que la versión y las filas que describe se hacen
 visibles a la vez: ningún lector puede ver una sin las otras.
 
@@ -417,7 +417,7 @@ Ver [explica-arquitectura.md](explica-arquitectura.md#más-de-un-proceso-sobre-l
 ## Configuración
 
 ### `config` — configuración editable (una fila por campo)
-[lib/core/config/store.py:33](../src/lib/core/config/store.py#L33)
+[lib/core/config/store.py:34](../src/lib/core/config/store.py#L34)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|

@@ -109,8 +109,15 @@ function _dcpListen(on) {
     if (on) document.addEventListener('keydown', _dcpKey);
 }
 
+//: Cuál fue la última apertura de un plano de sala (ver `_dcimRackSeq`).
+let _dcpOpenSeq = 0;
+
 async function _dcimOpenPlan(roomUid) {
+    const yo = ++_dcpOpenSeq;
     const data = await apiGet(`/api/v1/dcim/racks?room=${encodeURIComponent(roomUid)}`);
+    // Abrir A y luego B: si A contestaba el último, se abría A; y cerrar mientras llegaba lo
+    // volvía a abrir.
+    if (yo !== _dcpOpenSeq) return;
     const room = _dcimFindRoom(roomUid);
     if (!room) return;
     // Entrando desde el 3D de la sede: ese visor es de la sede, no de esta sala.
@@ -118,6 +125,7 @@ async function _dcimOpenPlan(roomUid) {
     if (!_dcimPlan || _dcimPlan.room.uid !== room.uid) { _dcpBack.clear(); _dcPlanLeave(); }
     _dcimPlan = {room, racks: (data || {}).racks || []};
     await Promise.all([_dcpLoadPlan(room), _dcpLoadFeatures(roomUid)]);
+    if (yo !== _dcpOpenSeq) return;
     _dcUndoPrime();
     _dcpListen(true);
     _dcimRack = null;
@@ -134,6 +142,7 @@ function _dcimFindRoom(uid) {
 
 function _dcimClosePlan() {
     _dcimRemember();
+    _dcpOpenSeq++;
     _dcpListen(false);
     if (typeof _dc3dStop === 'function') _dc3dStop();
     _dcimPlan = null;
@@ -141,6 +150,9 @@ function _dcimClosePlan() {
     _dcpSel = null;
     _dcpBack.clear();
     _dcPlanLeave();
+    // De vuelta en la planta, el deshacer es el de la planta: seguía siendo el de la sala, y lo
+    // que se movía en la planta no se apuntaba mientras Ctrl+Z deshacía cosas de la sala.
+    if (typeof _dcsPlan !== 'undefined' && _dcsPlan) _dcUndoPrime();
     _dcimUrl();
     renderDcim();
 }
@@ -232,19 +244,16 @@ function _dcpRowWarnings() {
 
 //: Las medidas de la sala se guardan cuando se para de teclear, como las de una pieza: en cada
 //: tecla serían cinco peticiones por «13000».
-let _dcpRoomTimer = null;
 
 function _dcpRoomSet(campo, valor) {
     const room = (_dcimPlan || {}).room;
     if (!room) return;
     room[campo] = Number(valor) || 0;
     _dcpRedraw();
-    clearTimeout(_dcpRoomTimer);
-    _dcpRoomTimer = setTimeout(async () => {
-        const r = await _dcimSend('PUT', `/api/v1/dcim/rooms/${encodeURIComponent(room.uid)}`,
-                                  {[campo]: room[campo]});
-        if (!r.ok) showToast(r.error || t('save_failed'), 'danger');
-    }, 500);
+    // Por la cola de las piezas, que JUNTA lo que se teclea: con un temporizador propio que
+    // mandaba solo su campo, el ancho tecleado y, sin parar, el fondo dejaba el ancho sin guardar.
+    // Y la cola la vacían el deshacer y el cambio de plano.
+    _dcpQueue(`/api/v1/dcim/rooms/${encodeURIComponent(room.uid)}`, {[campo]: room[campo]});
 }
 
 /** How big the picture is: whatever the racks cover, plus room to drag them outwards.
@@ -304,7 +313,7 @@ function _dcpContent(racks) {
          + _dcpFeaturesSvg('floor') + _dcpFeaturesSvg('room')
          + racks.map(_dcpRack).join('')
          // Lo que está en la sala y no en un rack: los puestos, las rosetas, los AP.
-         + _dcriSvg()
+         + _dcriSvg() + _dcriLinksSvg()
          + _dcpFeaturesSvg('air')
          // Lo elegido de más y las guías del imán entre cosas (el editor de planos).
          + p2dPickedSvg(_dcpP2d, _dcpView === 'top') + p2dGuidesSvg(_dcpP2d, _dcpDrag || _dcpP2d.drag)

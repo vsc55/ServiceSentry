@@ -48,6 +48,9 @@ class Watchful(DatastoreChecks, EngineDrivers, DatastoreActions, ModuleBase):
                  if (v if isinstance(v, bool) else
                      (v.get('enabled', self._DEFAULTS['enabled']) if isinstance(v, dict)
                       else self._DEFAULTS['enabled']))]
+        # A bound device in maintenance skips its checks (resolve_device marks it) — the
+        # filter above reads the RAW item, which never carries that mark.
+        items = [k for k in items if not self._resolved_item(k).get('_device_maintenance')]
         with concurrent.futures.ThreadPoolExecutor(
                 max_workers=max(1, self.module_default('threads', self._default_threads))) as ex:
             futures = {ex.submit(self._ds_check, key): key for key in items}

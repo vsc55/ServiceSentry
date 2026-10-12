@@ -64,7 +64,9 @@ class TestWhatItHolds:
         c = client
         assert c.get(f'/api/v1/dcim/racks/{lleno["rack"]}/holds').get_json() == {
             'contains': {'items': 3, 'pdus': 1}}
-        assert c.get(f'/api/v1/dcim/rooms/{lleno["room"]}/holds').get_json() == {'contains': {'racks': 1}}
+        # And its room items (the outlet): deleting the room around them left them ownerless.
+        assert c.get(f'/api/v1/dcim/rooms/{lleno["room"]}/holds').get_json() == {
+            'contains': {'racks': 1, 'items': 1}}
         assert c.get('/api/v1/dcim/racks/nope/holds').status_code == 404
 
 

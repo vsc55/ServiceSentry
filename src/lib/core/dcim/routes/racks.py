@@ -41,7 +41,20 @@ from lib.core.dcim import service as dcim_svc
 from lib.core.dcim import store as dcim_store
 from lib.core.dcim.store import (FACES, ITEM_ROLES, LINK_KINDS, PART_KINDS, PLACEMENTS,
                                  clean_place)
-from lib.core.dcim.routes._common import _fresh, _num, _without, scan_pages
+from lib.core.dcim.store.items import _ITEM
+from lib.core.dcim.store.parts import _PART
+from lib.core.dcim.routes._common import (_NUM_MAX, _fresh, _num, _without, numbers_bad,
+                                          scan_pages)
+
+
+def _numbers_bad(spec, data: dict) -> str:
+    """`numbers_bad` for a rack item or a part: a length in millimetres and a count are never
+    negative; the rest takes the generic range.
+
+    Stored unchecked, ``depth_mm: "abc"`` turned every view of the rack into a 500 —the depth
+    check does ``int()`` on it— until somebody fixed the row by hand."""
+    return numbers_bad(spec, data, {c.name: (0, _NUM_MAX) for c in spec.columns
+                                    if c.name.endswith('_mm') or c.name in ('qty', 'kit_qty')})
 
 
 def register(app, wa, C):
@@ -241,6 +254,12 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('dcim_not_found')}), 404
         if item is False:
             return jsonify({'error': wa._t('access_denied')}), 403
+        # Lo mismo que al editarla: los números y el sitio libre, comprobados en la puerta.
+        malo = _numbers_bad(_PART, data)
+        if malo:
+            return jsonify({'error': wa._t('dcim_bad_number'), 'field': malo}), 400
+        if 'place' in data:
+            data['place'] = clean_place(data.get('place'))
         return jsonify({'uid': store.parts.create(C.from_type(data), actor=C.actor())})
 
     @app.route('/api/v1/dcim/parts/<uid>', methods=['PUT'])
@@ -256,6 +275,9 @@ def register(app, wa, C):
         data = _without(request.get_json(silent=True) or {}, ('item_uid',))
         if 'kind' in data and str(data['kind']) not in PART_KINDS:
             return jsonify({'error': wa._t('dcim_part_kind_unknown')}), 400
+        malo = _numbers_bad(_PART, data)
+        if malo:
+            return jsonify({'error': wa._t('dcim_bad_number'), 'field': malo}), 400
         # Su sitio libre en una vista interior, limpio: un JSON llegado del navegador no se
         # guarda tal cual en una columna que luego se pinta.
         if 'place' in data:
@@ -596,6 +618,25 @@ def register(app, wa, C):
             if desde < b and a < hasta:
                 return True
         return False
+
+    def _item_bad(data):
+        """The 400 for a rack item's numbers or role, or ``None``.
+
+        Here and not only in `_place`: that one sees the role only of what is not mounted, and
+        only when something moves — a tray's guest, or a plain edit of the role, stored any
+        word. And the numbers nowhere."""
+        malo = _numbers_bad(_ITEM, data)
+        if malo:
+            return jsonify({'error': wa._t('dcim_bad_number'), 'field': malo}), 400
+        if str(data.get('role') or '') and str(data['role']) not in ITEM_ROLES:
+            return jsonify({'error': wa._t('dcim_role_unknown')}), 400
+        return None
+
+    def _room_item_said(data) -> bool:
+        """Whether a request to the rack item routes speaks of a room item: its placement or
+        its room. Those go through `/room-items`, which checks the room they land in."""
+        return isinstance(data, dict) and (str(data.get('placement') or '') == 'room'
+                                           or 'room_uid' in data)
 
     def _place(store, data, *, ignore='') -> tuple:
         """Validate a placement. Returns ``(rack_uid, error_key)``.
@@ -993,6 +1034,8 @@ def register(app, wa, C):
         # Las bocas y la fuente son de un equipo de pared y las escribe su ruta, que las comprueba
         # (`/room-items`): por aquí se guardaban sin mirar —una fuente de otra sede, un JSON roto—.
         data = _without(_fresh(request.get_json(silent=True) or {}), ('jacks', 'source_uid'))
+        if _room_item_said(data):
+            return jsonify({'error': wa._t('dcim_use_room_items')}), 400
         # Desde una plantilla: la altura, el fondo, la cara, el rol y el modelo salen puestos, y
         # lo que queda por teclear es solo lo que tiene ESA caja y ninguna otra. Antes de
         # `_place` a propósito: la altura decide si cabe donde se pidió, y aplicarla después
@@ -1010,10 +1053,19 @@ def register(app, wa, C):
         # tapa, una regleta, una bandeja. Cosas que no tienen estándar de compra y que hasta
         # ahora obligaban a inventarse una plantilla para poder colocarlas.
         data = C.from_type_item(data)
+        malo = _item_bad(data)
+        if malo:
+            return malo
         rack_uid, err = _place(store, data)
         if err:
             return jsonify({'error': wa._t(err)}), 400 if err != 'dcim_not_found' else 404
-        if not C.may_write(store, store.owners_map(), C.seen(), 'rack', rack_uid):
+        said, allowed = store.owners_map(), C.seen()
+        if not C.may_write(store, said, allowed, 'rack', rack_uid):
+            return jsonify({'error': wa._t('access_denied')}), 403
+        # Montarlo en otro es escribir en ése, como al moverlo encima (PUT): con solo el
+        # armario, una caja propia acababa colgada de la bandeja de otra empresa.
+        padre = str(data.get('parent_uid') or '')
+        if padre and not C.may_write(store, said, allowed, 'item', padre):
             return jsonify({'error': wa._t('access_denied')}), 403
         err = C.asset('items', data)
         if err:
@@ -1047,6 +1099,12 @@ def register(app, wa, C):
         # still touching somebody else's server.
         if not C.may_write(store, store.owners_map(), C.seen(), 'item', uid):
             return jsonify({'error': wa._t('access_denied')}), 403
+        # Un equipo de sala se edita por su ruta, que comprueba la sala de destino (escribible,
+        # de la misma sede): por aquí, `room_uid` se guardaba tal cual y un PC propio se llevaba
+        # a la sala de otra empresa.
+        if str(item.get('placement') or '') == 'room' or _room_item_said(
+                request.get_json(silent=True) or {}):
+            return jsonify({'error': wa._t('dcim_use_room_items')}), 400
         # `build_uid` no se edita: dice de qué plantilla NACIÓ, y eso ya ocurrió. Cambiarlo
         # sería reescribir el origen de una máquina sin tocar ni una de sus piezas — una fila
         # que afirma algo que no pasó, y encima difícil de descubrir.
@@ -1056,6 +1114,9 @@ def register(app, wa, C):
         # una columna.
         # Solo un `true` de verdad: con `bool()`, la cadena "false" desconectaba y borraba cables.
         desconectar = data.pop('disconnect', False) is True
+        malo = _item_bad(data)
+        if malo:
+            return malo
         # Cambiar CÓMO está puesto es moverlo: pasar de los mástiles al suelo es dejar de
         # ocupar una U, y sin contarlo entre lo que mueve, la comprobación no corría y el equipo
         # se quedaba con la U que tenía — un SAI al lado del armario listado en la U 1.
@@ -1198,6 +1259,15 @@ def register(app, wa, C):
             store.cables.delete(fila['uid'])
         for fila in store.parts_of([uid]):
             store.parts.delete(fila['uid'])
+        # And what said it WAS this item —a source (its UPS), a strip— stops saying so: left,
+        # the source named a box that is gone, and the board went on looking it up.
+        for fila in store.sources.list('item_uid = ?', (uid,)):
+            store.sources.update(fila['uid'], {'item_uid': ''}, actor=C.actor())
+        for fila in store.pdus.list('item_uid = ?', (uid,)):
+            store.pdus.update(fila['uid'], {'item_uid': ''}, actor=C.actor())
+        for punta in ('a_item', 'b_item'):
+            for fila in store.links.list(f'{punta} = ?', (uid,)):
+                store.links.update(fila['uid'], {punta: ''}, actor=C.actor())
         store.items.delete(uid)
         store.forget_scope('item', uid)
         wa._audit('dcim_removed', detail={'item': uid})

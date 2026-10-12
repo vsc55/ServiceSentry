@@ -256,6 +256,66 @@ y cuáles **En espera**.
 entre réplicas (cada paquete va a una sola), así que escala horizontalmente para
 ingesta — sube `replicas` sin más.
 
+## Persistencia del directorio var (Helm)
+
+El directorio var (`/var/lib/ServiSesentry`) guarda las **copias de seguridad**, las
+imágenes subidas, las MIB y los perfiles SNMP. Por defecto el chart lo deja en un
+`emptyDir`, como las versiones anteriores: se **pierde** cada vez que se sustituye un pod y
+no se comparte entre pods (una copia hecha por una réplica de `web` no la ve otra). Las
+notas de `helm install` lo avisan. Para cualquier cosa que no sea una prueba, actívalo:
+
+| Valor | Por defecto | Qué hace |
+| ----- | ----------- | -------- |
+| `persistence.enabled` | `false` | Monta **un mismo** PVC en `/var/lib/ServiSesentry` de todos los roles |
+| `persistence.existingClaim` | `""` | Usa ese PVC en vez de crear uno |
+| `persistence.storageClass` | `""` | `""` = la clase por defecto del cluster; `"-"` = sin clase (enlace estático) |
+| `persistence.accessModes` | `["ReadWriteMany"]` | Con más de un pod, o pods en nodos distintos, hace falta RWX (NFS, CephFS, EFS, Azure Files…) |
+| `persistence.size` | `5Gi` | Tamaño pedido |
+| `persistence.annotations` | `{}` | Anotaciones del PVC creado |
+| `persistence.fixOwnership` | `true` | Ver *Permisos* más abajo |
+
+```bash
+helm upgrade --install ss ./helm/servicesentry \
+  --set persistence.enabled=true --set persistence.storageClass=nfs-client
+```
+
+**Se conserva al desinstalar.** El PVC que crea el chart lleva
+`helm.sh/resource-policy: keep`: `helm uninstall` no lo borra, porque contiene las copias de
+seguridad. Si de verdad sobra, bórralo a mano
+(`kubectl delete pvc <release>-servicesentry-var`). Un `existingClaim` nunca lo toca el chart.
+
+### Permisos con varios pods (y NFS)
+
+Los roles no corren con el mismo usuario: `web` y `events` como el UID 1000
+(`podSecurityContext`), y `worker` y `syslog` como **root**, porque necesitan `CAP_NET_RAW`
+(ping) y `CAP_NET_BIND_SERVICE` (`:514`) y Kubernetes no se las da a un proceso no-root. Con
+un volumen compartido esa mezcla dejaba ficheros de root (`root:root`, `0755`: las MIB
+compiladas, el estado del monitor) en los que `web` no podía escribir. `fsGroup` no lo
+arregla en NFS ni en la mayoría de los drivers RWX, que lo ignoran.
+
+Con `persistence.enabled` y `persistence.fixOwnership: true` (el valor por defecto), el chart
+hace coherente el volumen sin quitar a `worker`/`syslog` sus capacidades:
+
+- `worker` y `syslog` corren con el **mismo grupo** que los demás (`runAsGroup: 1000`,
+  `fsGroup: 1000`) y `umask 0002`, así que lo que crean es escribible por el grupo;
+- un *init container* `var-owner` (root) hace `chown -R 1000:1000` y `chmod -R ug+rwX` del
+  volumen en cada arranque, lo que repara lo que dejaron versiones anteriores.
+
+**En NFS**, el servidor decide: con `root_squash` (el valor por defecto de casi todos los
+servidores) root **no puede escribir** en el recurso ni hacer `chown`; el *init container*
+avisa y deja arrancar el pod, pero `worker`/`syslog` fallarán al escribir. Exporta el
+recurso con una de estas dos opciones:
+
+```text
+/srv/servicesentry  10.0.0.0/8(rw,sync,all_squash,anonuid=1000,anongid=1000)   # todo es 1000 (recomendado)
+/srv/servicesentry  10.0.0.0/8(rw,sync,no_root_squash)                          # root sigue siendo root
+```
+
+Con `all_squash,anonuid=1000,anongid=1000` todo lo que escribe cualquier pod queda como
+1000:1000 en el servidor, que es justo lo que se busca. `persistence.fixOwnership: false`
+deja el comportamiento anterior (por ejemplo, si el almacenamiento ya da la propiedad
+correcta por su cuenta).
+
 ## Notas
 
 - **Sin token**: si omites `SS_CONTROL_TOKEN`, no levantes los Services de control

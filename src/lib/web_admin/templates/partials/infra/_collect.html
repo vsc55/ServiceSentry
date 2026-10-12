@@ -137,6 +137,9 @@ function _infraDeviceName(uid) {
     return (h && h.name) || (_infraDetail && _infraDetail.device && _infraDetail.device.name) || '';
 }
 
+//: Consecutive unanswered polls before the run is given up as gone (one a second).
+const _INFRA_COLLECT_MISSES = 5;
+
 /** Ask every second until it is done.
  *
  *  A second, and not less: the unit of progress is a whole module, and the fastest of them
@@ -144,16 +147,24 @@ function _infraDeviceName(uid) {
  *  one that outlives the thing it was watching when something goes wrong on the other side,
  *  and 2 h at one per second is far past any collection this panel can produce. */
 async function _infraCollectPoll(jobId) {
+    let misses = 0;
     for (let i = 0; i < 7200; i++) {
         const job = await apiGet(`/api/v1/infra/collect/${encodeURIComponent(jobId)}`);
         // Gone means gone: the jobs live in the panel's memory, so a null answer after a
-        // restart is not something more waiting will fix.
+        // restart is not something more waiting will fix. But `apiGet` also answers null for
+        // a dropped connection or a 502 from a proxy, and one of those in a five-minute run
+        // declared the collection lost while it went on: only a run of misses is "gone".
         if (!job) {
+            if (++misses < _INFRA_COLLECT_MISSES) {
+                await new Promise(r => setTimeout(r, 1000));
+                continue;
+            }
             _infraCollectJob = null;
             _infraCollectPaint();
             showToast(t('infra_collect_unknown_job'), 'warning');
             return;
         }
+        misses = 0;
         _infraCollectJob = job;
         _infraCollectPaint();
         if (job.done) return _infraCollectFinish(job);

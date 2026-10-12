@@ -108,7 +108,9 @@ def verify(secret: str, code: str, *, now: float | None = None, period: int = PE
     """
     key = secret_bytes(secret)
     got = ''.join(str(code or '').split())
-    if not key or not got.isdigit() or len(got) != int(digits):
+    # `isascii()` too: `isdigit()` accepts other scripts' digits, and a non-ASCII str makes
+    # `compare_digest` raise instead of answering no.
+    if not key or not got.isascii() or not got.isdigit() or len(got) != int(digits):
         return None
     here = current_step(now, period)
     found = None

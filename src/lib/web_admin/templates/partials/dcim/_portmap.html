@@ -304,9 +304,16 @@ function _dcPmBoxStart(ev) {
         caja.style.width = (Math.abs(b.x - a.x) * 100) + '%';
         caja.style.height = (Math.abs(b.y - a.y) * 100) + '%';
     };
+    const cancelar = () => {
+        document.removeEventListener('pointermove', mover);
+        document.removeEventListener('pointerup', soltar);
+        document.removeEventListener('pointercancel', cancelar);
+        if (caja) caja.remove();
+    };
     const soltar = (e) => {
         document.removeEventListener('pointermove', mover);
         document.removeEventListener('pointerup', soltar);
+        document.removeEventListener('pointercancel', cancelar);
         if (!caja) return;
         // El clic que sigue a soltar no sitúa nada: era el final de un recuadro.
         P.boxed = true;
@@ -318,6 +325,9 @@ function _dcPmBoxStart(ev) {
     };
     document.addEventListener('pointermove', mover);
     document.addEventListener('pointerup', soltar);
+    // Un gesto cancelado (táctil, el sistema) no es soltar: sin esto los oyentes se quedaban y el
+    // siguiente movimiento en cualquier parte seguía arrastrando.
+    document.addEventListener('pointercancel', cancelar);
 }
 
 /** Supr quita las seleccionadas, las flechas las mueven un poco (más con Mayúsculas) y Ctrl+A
@@ -475,10 +485,12 @@ function _dcPmGrab(ev, i) {
     const soltar = () => {
         document.removeEventListener('pointermove', mover);
         document.removeEventListener('pointerup', soltar);
+        document.removeEventListener('pointercancel', soltar);
         _dcPmDraw();
     };
     document.addEventListener('pointermove', mover);
     document.addEventListener('pointerup', soltar);
+    document.addEventListener('pointercancel', soltar);
 }
 
 async function _dcPmSave() {
@@ -820,14 +832,20 @@ function _dcPmInGrab(ev, uid, vid) {
         dot.style.left = (at.x * 100) + '%';
         dot.style.top = (at.y * 100) + '%';
     };
-    const soltar = () => {
+    const quitar = () => {
         document.removeEventListener('pointermove', mover);
         document.removeEventListener('pointerup', soltar);
+        document.removeEventListener('pointercancel', quitar);
+    };
+    const soltar = () => {
+        quitar();
         if (at) _dcPmInSave(uid, {place: JSON.stringify({v: vid, x: at.x, y: at.y})});
         else _dcPmInPick(uid);
     };
     document.addEventListener('pointermove', mover);
     document.addEventListener('pointerup', soltar);
+    // Cancelado: ni se guarda una posición a medias ni se quedan los oyentes.
+    document.addEventListener('pointercancel', quitar);
 }
 
 /** Sacar la pieza elegida de donde estaba: ni bahía ni sitio libre. */

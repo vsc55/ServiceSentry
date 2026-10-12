@@ -1,10 +1,17 @@
 #!/bin/bash
+# Update an install made by install.sh from this checkout: run from anywhere, as root.
+#
+# The application files are replaced; the venv (/opt/ServiSesentry/venv) is KEPT and brought
+# up to date from the new requirements.lock (packaging/scripts/make-venv.sh). The user the
+# services run as is never changed here — `servicesentry-user enable` does that.
 set -e
 
 if [ "$(id -u)" != "0" ]; then
     echo "Error: this script must be run as root." >&2
     exit 1
 fi
+
+cd "$(dirname "$0")"
 
 # shellcheck source=/dev/null
 source check_dependencies.sh
@@ -42,14 +49,25 @@ esac
 
 # ── Update application files ──────────────────────────────────────────────────
 echo "Updating application files..."
-rm -rf /opt/ServiSesentry
+# Everything but the venv: deleting the whole directory took the venv with it, and the
+# services were left with an interpreter that no longer existed.
 mkdir -p /opt/ServiSesentry
+find /opt/ServiSesentry -mindepth 1 -maxdepth 1 ! -name venv -exec rm -rf {} +
 mkdir -p /var/lib/ServiSesentry
 
-cp src/*.py /opt/ServiSesentry/
-for f in src/*/; do
-    cp -r "${f}" /opt/ServiSesentry/
-done
+# The same tree the packages stage (packaging/build.sh), requirements.lock included.
+tar -C src \
+    --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' --exclude='tests' \
+    -cf - . | tar -C /opt/ServiSesentry -xf -
+
+# Keep or rebuild the venv, then install the new pins into it.
+sh packaging/scripts/make-venv.sh /opt/ServiSesentry
+
+# The run-as-user helper and the log rotation travel with the update too.
+install -m 0755 packaging/scripts/servicesentry-user.sh /usr/sbin/servicesentry-user
+if [ -d /etc/logrotate.d ]; then
+    install -m 0644 init/logrotate/servicesentry /etc/logrotate.d/servicesentry
+fi
 
 # Remove stale status so the first check after update starts clean
 rm -f /etc/ServiSesentry/status.json
@@ -63,6 +81,8 @@ for f in data/*.json; do
     DEST="/etc/ServiSesentry/${NAMEFILE}"
     if [ ! -f "${DEST}" ]; then
         cp "${f}" "${DEST}"
+        # Owned like its directory: root's, or servicesentry's once that user was enabled.
+        chown --reference=/etc/ServiSesentry "${DEST}"
         echo "  [new] ${NAMEFILE}"
     else
         echo "  [keep] ${NAMEFILE}"
@@ -76,8 +96,12 @@ case "${INIT_SYSTEM}" in
   systemd)
     SYSTEMD_DIR=/lib/systemd/system
 
-    cp init/systemd/ServiSesentry.service     "${SYSTEMD_DIR}/"
-    cp init/systemd/ServiSesentry-web.service "${SYSTEMD_DIR}/"
+    # Rewritten to run the venv, with the same sed packaging/build.sh uses. A drop-in that
+    # servicesentry-user wrote lives in /etc/systemd/system and is not touched.
+    for unit in ServiSesentry ServiSesentry-web; do
+        sed 's|^ExecStart=/usr/bin/python3 |ExecStart=/opt/ServiSesentry/venv/bin/python |' \
+            "init/systemd/${unit}.service" > "${SYSTEMD_DIR}/${unit}.service"
+    done
 
     systemctl daemon-reload
     systemctl enable ServiSesentry.service
@@ -100,9 +124,18 @@ case "${INIT_SYSTEM}" in
     chmod +x /etc/init.d/ServiSesentry
     chmod +x /etc/init.d/ServiSesentry-web
 
-    # Only install conf.d files if not already present (user may have customised them)
-    [ -f /etc/conf.d/ServiSesentry ]     || cp init/openrc/conf.d/ServiSesentry     /etc/conf.d/ServiSesentry
-    [ -f /etc/conf.d/ServiSesentry-web ] || cp init/openrc/conf.d/ServiSesentry-web /etc/conf.d/ServiSesentry-web
+    # Only install conf.d files if not already present (user may have customised them).
+    # An existing one still naming the system interpreter — the old install.sh default,
+    # which has no flask — is pointed at the venv; any other value is the operator's.
+    for f in ServiSesentry ServiSesentry-web; do
+        if [ -f "/etc/conf.d/${f}" ]; then
+            sed -i 's|^SS_PYTHON="/usr/bin/python3"$|SS_PYTHON="/opt/ServiSesentry/venv/bin/python"|' \
+                "/etc/conf.d/${f}"
+        else
+            sed 's|^SS_PYTHON=.*|SS_PYTHON="/opt/ServiSesentry/venv/bin/python"|' \
+                "init/openrc/conf.d/${f}" > "/etc/conf.d/${f}"
+        fi
+    done
 
     rc-update add ServiSesentry default 2>/dev/null || true
     rc-service ServiSesentry start
@@ -124,3 +157,6 @@ case "${INIT_SYSTEM}" in
     ;;
 
 esac
+
+echo "Services run as: $(servicesentry-user status). To switch an install that predates the"
+echo "dedicated user: servicesentry-user enable"

@@ -61,8 +61,10 @@ def casa(client):
 class TestTheServer:
 
     def test_the_generic_item_route_does_not_write_jacks_or_source(self, client, admin, casa):
+        # A room item is not written through this route at all (the 2026-10-12 audit): it goes
+        # through /room-items, which checks its jacks, its source and its room.
         r = client.put(f'/api/v1/dcim/items/{casa["toma"]}', json={'source_uid': casa['src2'], 'jacks': 'roto{'})
-        assert r.status_code == 200
+        assert r.status_code == 400
         it = admin._dcim_store.items.get(casa['toma'])
         assert it['source_uid'] == casa['src1'] and json.loads(it['jacks'])[0]['connector'] == 'cee-7-3'
         nuevo = _uid(client.post('/api/v1/dcim/items', json={'rack_uid': casa['ra'], 'u_start': 1, 'u_height': 1,

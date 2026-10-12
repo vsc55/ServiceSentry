@@ -48,12 +48,9 @@ echo "==> deb + rpm (nfpm)"
 echo "==> Gentoo ebuild"
 # Gentoo installs from an ebuild, so what ships is the ebuild itself: users add it to a
 # local overlay. It is generated from the template so the version and the archive checksum
-# are never hand-edited out of step with the release.
-mkdir -p "${DIST}/gentoo/app-admin/servicesentry"
-sed "s/@VERSION@/${VERSION}/g" \
-    "${ROOT}/packaging/gentoo/servicesentry.ebuild.in" \
-    > "${DIST}/gentoo/app-admin/servicesentry/servicesentry-${VERSION}.ebuild"
-cp "${ROOT}/packaging/gentoo/metadata.xml" "${DIST}/gentoo/app-admin/servicesentry/"
+# are never hand-edited out of step with the release. overlay.sh also writes what makes it
+# an overlay Portage accepts: profiles/repo_name, metadata/layout.conf and the Manifest.
+bash "${ROOT}/packaging/gentoo/overlay.sh" "${VERSION}" "${DIST}/gentoo"
 ( cd "${DIST}/gentoo" && tar czf "${DIST}/servicesentry-${VERSION}-gentoo-overlay.tar.gz" . )
 
 rm -rf "${STAGING}"

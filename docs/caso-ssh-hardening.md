@@ -37,8 +37,8 @@ salvo la remediación de servicios:
 >
 > **BSD:** los comandos cambian (`sysctl -n …`, `swapinfo -k`…); añádelos a la
 > allowlist si monitorizas esos SO.
-> **Windows:** los hosts Windows usan otros comandos (`wmic`, `tasklist`,
-> `sc query`, `Get-*`) y **no** los cubre este envoltorio POSIX (`ssentry-wrap`);
+> **Windows:** los hosts Windows usan otros comandos (`powershell -NoProfile -NonInteractive -Command
+> "…Get-CimInstance…"`, sin tuberías; `wmic` solo de respaldo; `tasklist`, `sc.exe query`, `Get-*`) y **no** los cubre este envoltorio POSIX (`ssentry-wrap`);
 > para hosts Windows por SSH adapta la allowlist a esos comandos o usa una cuenta
 > de solo lectura sin wrapper.
 

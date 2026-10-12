@@ -109,7 +109,7 @@ function _dgSevBadge(a) {
     // not fit in a tooltip, and a tooltip cannot be read twice or copied.
     return `<button type="button"
         class="badge ${_DG_SEV_CLASS[a.severity] || 'text-bg-secondary'} border-0 ss-help"
-        onclick="_dgShowSeverity('${escAttr(a.id)}')"
+        onclick="_dgShowSeverity(${jsStr(a.id)})"
         title="${escAttr(t('diag_sev_open'))}"
         >${esc(t('diag_sev_' + a.severity))}${esc(score)}</button>`;
 }

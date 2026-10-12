@@ -1,0 +1,41 @@
+{# ================================================================
+   DCIM — lo escrito en un formulario a medias sobrevive al repintado de la sección.
+   `renderDcim` (en `_render.html`) repinta con `_dcKeepRepaint`; vive aparte para que
+   el armazón siga siendo fino.
+   ================================================================ #}
+/** Lo escrito en un formulario a medias, a salvo de un repintado.
+ *
+ *  La sección se dibuja entera cada vez —`pane.innerHTML`—, y un formulario de alta que
+ *  sigue abierto se vuelve a componer con sus valores de partida: cambiar el tipo de un cable
+ *  nuevo, o guardar cualquier otra cosa del armario mientras el alta estaba a medio rellenar,
+ *  borraba los puertos, la etiqueta y los metros ya tecleados. Lo que se quiere conservar se
+ *  marca con `data-dc-keep` en su contenedor; sus campos se leen por `id` justo antes de
+ *  repintar y se devuelven a los que vuelvan a estar ahí. Uno desactivado se deja como venga:
+ *  si la regleta se llenó entretanto, su casilla no debe volver marcada. */
+function _dcKeepTake(pane) {
+    const v = {};
+    let foco = '';
+    (pane.querySelectorAll ? pane.querySelectorAll('[data-dc-keep] [id]') : []).forEach(el => {
+        if (!('value' in el)) return;
+        v[el.id] = (el.type === 'checkbox' || el.type === 'radio') ? {c: el.checked} : {v: el.value};
+        if (el === document.activeElement) foco = el.id;
+    });
+    return {v, foco};
+}
+function _dcKeepPut(pane, guardado) {
+    if (!guardado || !pane.querySelectorAll) return;
+    pane.querySelectorAll('[data-dc-keep] [id]').forEach(el => {
+        const g = guardado.v[el.id];
+        if (!g || el.disabled) return;
+        if ('c' in g) el.checked = g.c;
+        else if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === g.v)) return;
+        else el.value = g.v;
+    });
+    const f = guardado.foco && document.getElementById(guardado.foco);
+    if (f && f.closest && f.closest('[data-dc-keep]')) f.focus();
+}
+function _dcKeepRepaint(pane, html) {
+    const guardado = _dcKeepTake(pane);
+    pane.innerHTML = html;
+    _dcKeepPut(pane, guardado);
+}

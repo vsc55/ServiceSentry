@@ -80,6 +80,7 @@ async function _stRefresh() {
         // so "not ok" is what unreachable looks like here, not a rejected fetch.
         if (!r.ok) throw new Error('http ' + r.status);
         document.getElementById('status-body').innerHTML = await r.text();
+        _stApplyOpen();         // the new markup comes folded by the server's rule, not the reader's
         // Reflect the new overall state on <body> (drives the ok/degraded theming).
         const ok = document.querySelector('#status-body .hero')?.dataset.overallOk === 'true';
         document.body.className = ok ? 'st-ok' : 'st-down';
@@ -119,17 +120,29 @@ window.addEventListener('online', _stRefresh);
 
 // Expand/collapse a module's per-item detail. Uses inline onclick in the markup, so it
 // keeps working after each AJAX refresh re-renders the cards.
-function toggleMod(name) {
-    const hdr  = document.querySelector('#mod-' + name + ' .mod-header');
+//
+// What the reader opened or closed is remembered here and put back after every refresh: the
+// fragment arrives folded by the server's rule (healthy modules closed), so a module opened to
+// read its items folded itself shut again every REFRESH_SECS.
+const _stOpen = {};
+function _stSetMod(name, open) {
+    const card = document.getElementById('mod-' + name);
+    const hdr  = card && card.querySelector('.mod-header');
     const body = document.getElementById('body-' + name);
-    if (!hdr || !body) return;
-    if (hdr.classList.contains('collapsed')) {
-        body.style.display = '';
-        hdr.classList.remove('collapsed');
-    } else {
-        body.style.display = 'none';
-        hdr.classList.add('collapsed');
-    }
+    if (!hdr || !body) return false;
+    body.style.display = open ? '' : 'none';
+    hdr.classList.toggle('collapsed', !open);
+    return true;
+}
+function _stApplyOpen() {
+    for (const [name, open] of Object.entries(_stOpen)) _stSetMod(name, open);
+}
+function toggleMod(name) {
+    const card = document.getElementById('mod-' + name);
+    const hdr  = card && card.querySelector('.mod-header');
+    if (!hdr) return;
+    const open = hdr.classList.contains('collapsed');
+    if (_stSetMod(name, open)) _stOpen[name] = open;
 }
 </script>
 </body>

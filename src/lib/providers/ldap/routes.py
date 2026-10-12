@@ -13,6 +13,7 @@ from flask import jsonify, request, session
 
 from lib.providers.ldap.entry import attr_value, attr_values, first_named
 from lib.config.spec import cfg_default
+from lib.security.stored_secret import stored_secret_for
 
 
 def register(app, wa):
@@ -41,9 +42,10 @@ def register(app, wa):
         timeout  = int(data.get('timeout') or stored_cfg.get('timeout') or cfg_default('ldap|timeout'))
         bind_dn  = (data.get('bind_dn') or stored_cfg.get('bind_dn') or '').strip()
 
-        raw_pw = data.get('bind_password')
-        # stored_cfg comes from _read_config_file which already decrypts sensitive values
-        bind_password = stored_cfg.get('bind_password') or '' if raw_pw is None else (raw_pw or '').strip()
+        # stored_cfg comes from _read_config_file which already decrypts sensitive values.
+        # The stored password only goes to the stored server and account (stored_secret).
+        bind_password = stored_secret_for(data, stored_cfg, 'bind_password',
+                                          ('server', 'port', 'bind_dn')).strip()
 
         if not server:
             return jsonify({'ok': False, 'message': wa._t('ldap_test_missing')}), 200
@@ -199,9 +201,10 @@ def register(app, wa):
         bind_dn = (data.get('bind_dn') or stored_cfg.get('bind_dn') or '').strip()
         base_dn = (data.get('base_dn') or stored_cfg.get('base_dn') or '').strip()
 
-        raw_pw = data.get('bind_password')
-        # stored_cfg comes from _read_config_file which already decrypts sensitive values
-        bind_password = stored_cfg.get('bind_password') or '' if raw_pw is None else (raw_pw or '').strip()
+        # stored_cfg comes from _read_config_file which already decrypts sensitive values.
+        # The stored password only goes to the stored server and account (stored_secret).
+        bind_password = stored_secret_for(data, stored_cfg, 'bind_password',
+                                          ('server', 'port', 'bind_dn')).strip()
 
         if not server:
             return jsonify({'ok': False, 'message': wa._t('ldap_test_missing')}), 200

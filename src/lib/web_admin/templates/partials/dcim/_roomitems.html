@@ -55,6 +55,71 @@ function _dcriItemSvg(i) {
         titulo: (i.label || '') + ' · ' + _dcRoleName(i.role), attrs: `data-dcpi="${escAttr(i.uid)}"`});
 }
 
+// ── Lo que tiene conectado ──────────────────────────────────────────────────
+//
+// Pedido: en la demo los PC estaban cableados a su roseta y enchufados a su toma, y el panel no
+// lo enseñaba en ninguna parte salvo en el rastreo. Cada equipo de sala trae sus conexiones
+// (`links`, del servidor): en su ficha, una fila por cable —de red o de corriente— con el otro
+// extremo; y en el plano, con el equipo elegido, una línea hasta lo que tiene conectado.
+
+//: El color de cada línea: de corriente, ámbar; de red, la de la información.
+const _DCRI_LINK_STROKE = {power: 'var(--bs-warning)', data: 'var(--bs-info)'};
+
+/** Ir al otro extremo de una conexión, si está en el plano abierto. */
+function _dcriGoTo(uid) {
+    if (typeof _dcimPlan !== 'undefined' && _dcimPlan && _dcri1(uid)) return _dcpPick('item', uid);
+    if (typeof _dcsPlan !== 'undefined' && _dcsPlan) {
+        const sala = _dcObjRoom('item', uid);
+        if (sala) return p2dPick('floor', 'ritem', sala, uid);
+    }
+}
+
+/** Las conexiones en la ficha. */
+function _dcriLinksHtml(i) {
+    const ls = i.links || [];
+    if (!ls.length) return '';
+    return `<div class="ss-fs-2 text-muted mt-2">${esc(t('dcim_ritem_links'))}</div>${ls.map(l => {
+        const icono = l.kind === 'power' ? 'bi-plug' : 'bi-ethernet';
+        const otro = l.hidden ? t('dcim_trace_hidden') : (l.label || _dcRoleName(l.role));
+        const texto = `${l.port || '?'} → ${otro}${l.port_far ? ' · ' + l.port_far : ''}`;
+        // Pulsable solo lo que está en este plano: un panel de parcheo está en su rack.
+        const aqui = !l.hidden && l.item && _dcObj('item', l.item);
+        return aqui
+            ? `<button type="button" class="btn btn-sm btn-secondary w-100 text-start d-flex align-items-center gap-2 mb-1"
+                    data-dcri-link="${escAttr(l.item)}" onclick="_dcriGoTo(${jsStr(l.item)})">
+                <i class="bi ${icono}"></i><span class="text-truncate">${esc(texto)}</span></button>`
+            : `<div class="border rounded px-2 py-1 ss-fs-2 d-flex align-items-center gap-2 mb-1" data-dcri-link="">
+                <i class="bi ${icono}"></i><span class="text-truncate">${esc(texto)}</span></div>`;
+    }).join('')}`;
+}
+
+/** Las líneas de un equipo elegido a lo que tiene conectado en el mismo plano. `centro(uid)`:
+ *  su centro en unidades del dibujo, o `null` si no está en el plano. */
+function _dcriLinkLinesSvg(i, centro) {
+    if (!i) return '';
+    const a = centro(i.uid);
+    if (!a) return '';
+    return (i.links || []).map(l => {
+        const b = !l.hidden && l.item ? centro(l.item) : null;
+        if (!b) return '';
+        return `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" data-dcri-line="${escAttr(l.kind || 'data')}"
+            stroke="${l.kind === 'power' ? _DCRI_LINK_STROKE.power : _DCRI_LINK_STROKE.data}" stroke-width="2"
+            stroke-dasharray="${l.kind === 'power' ? '2 2' : '6 3'}" vector-effect="non-scaling-stroke"
+            style="pointer-events:none"></line>`;
+    }).join('');
+}
+
+/** Las de la sala abierta, con su equipo elegido. */
+function _dcriLinksSvg() {
+    const sel = typeof _dcpSel !== 'undefined' && _dcpSel && _dcpSel.kind === 'item' ? _dcri1(_dcpSel.uid) : null;
+    const S = _DCP_SCALE;
+    return _dcriLinkLinesSvg(sel, (uid) => {
+        const b = (_dcri1(uid) || {}).box;
+        return b ? {x: ((Number(b.x) || 0) + (Number(b.w) || 0) / 2) * S,
+                    y: ((Number(b.y) || 0) + (Number(b.d) || 0) / 2) * S} : null;
+    });
+}
+
 function _dcriSvg() {
     return _dcriItems().map(_dcriItemSvg).join('');
 }
@@ -265,6 +330,7 @@ function _dcriPanelHtml(i, plegar) {
                        onchange="_dcriSet(${jsStr(i.uid)},'base_mm',this.value)"></label>
         </div>
         ${_dcriJackHtml(i, dis)}
+        ${_dcriLinksHtml(i)}
         <div class="d-flex flex-wrap gap-1 mt-2">
             <button type="button" class="btn btn-sm btn-primary" onclick="_dcriTrace(${jsStr(i.uid)})">
                 <i class="bi bi-signpost-split me-1"></i>${esc(t('dcim_trace'))}</button>

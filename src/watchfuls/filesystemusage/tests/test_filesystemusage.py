@@ -70,12 +70,12 @@ class TestCheck:
         assert items['data']['status'] is False        # 90 > 85
         assert 'Warning' in items['data']['message']
 
-    def test_windows_device_uses_wmic(self):
+    def test_windows_device_uses_cim(self):
         w = _watchful({'c': {'enabled': True, 'partition': 'C:', 'alert': 85, 'device_uid': 'h1'}},
                       devices={'h1': _device(os='windows')})
         with patch.object(w, 'device_exec', return_value=(_WMIC, '', 0)) as he:
             items = w.check().list
-        assert 'wmic' in he.call_args.args[1]
+        assert 'Get-CimInstance' in he.call_args.args[1]
         assert items['c']['status'] is True and items['c']['other_data']['used'] == 75
 
     def test_message_uses_label_to_identify_server(self):
@@ -132,3 +132,18 @@ class TestDiscover:
     def test_discover_local(self, _u, _p):
         out = _watchful({}).discover()
         assert out and out[0]['name'] == '/'
+
+
+class TestWmic:
+
+    def test_real_wmic_output_with_cr_cr_lf(self):
+        """wmic ends every line with CR CR LF, which reads as a blank line after each field:
+        split on blank lines, no record held both DeviceID and Size, and every Windows disk was
+        «mount point not found»."""
+        from watchfuls.filesystemusage import Watchful
+        cr = chr(13)
+        out = (cr + cr + chr(10)).join(['', '', 'DeviceID=C:', 'FreeSpace=25', 'Size=100', '', '',
+                                        'DeviceID=D:', 'FreeSpace=50', 'Size=200', '', ''])
+        assert Watchful._parse_wmic(out, 'C:') == 75
+        assert Watchful._parse_wmic(out.replace(cr, ''), 'D:') == 75
+        assert [d['name'] for d in Watchful._discover_parse('windows', out)] == ['C:', 'D:']

@@ -33,6 +33,12 @@ __all__ = ['send_telegram']
 _API_SEND = 'https://api.telegram.org/bot{token}/sendMessage'
 
 
+def redact(text: str, token: str) -> str:
+    """*text* with the bot *token* replaced by ``***``."""
+    text = str(text)
+    return text.replace(token, '***') if token else text
+
+
 def send_telegram(token, chat_id, text, *, parse_mode=None, timeout=10):
     """Low-level one-shot POST to the Telegram *sendMessage* API.
 
@@ -46,7 +52,14 @@ def send_telegram(token, chat_id, text, *, parse_mode=None, timeout=10):
     data = {'chat_id': chat_id, 'text': text}
     if parse_mode:
         data['parse_mode'] = parse_mode
-    result = requests.post(_API_SEND.format(token=token), data=data, timeout=timeout)
+    try:
+        result = requests.post(_API_SEND.format(token=token), data=data, timeout=timeout)
+    except requests.RequestException as exc:
+        # Raised again with the token cut out: the bot token is in the URL, and the driver's
+        # message quotes the URL («Max retries exceeded with url: /bot123:ABC/sendMessage»)
+        # — which went to the debug log and, for event rules, into the notification log
+        # shown in the panel.
+        raise type(exc)(redact(str(exc), token)) from None
     if result.status_code == 200:
         return True, 200, 'sent'
     try:

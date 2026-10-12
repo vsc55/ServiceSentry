@@ -16,7 +16,7 @@ a device, and whatever the next package learns to own — without this file nami
 
 from __future__ import annotations
 
-from flask import jsonify, request, session
+from flask import jsonify, session
 
 from lib.core.orgs import owners as org_owners
 from lib.core.orgs import scopes as org_scopes
@@ -36,6 +36,15 @@ def register(app, wa):
 
     def _seen():
         return org_owners.visible_orgs(set(wa._get_session_permissions() or []))
+
+    def _hidden(uid) -> bool:
+        """A company the caller may not see — answered as not found, like the list does.
+
+        `orgs_edit` is the authority to edit companies; WHICH companies is still the caller's
+        scope. Without this, somebody granted one company could rename, unlink or delete
+        every other one by uid."""
+        allowed = _seen()
+        return allowed is not None and str(uid or '') not in allowed
 
     @app.route('/api/v1/orgs', methods=['GET'])
     @view_req
@@ -102,7 +111,7 @@ def register(app, wa):
     @edit_req
     def api_org_create():
         store = _store()
-        data = request.get_json(silent=True) or {}
+        data = wa._optional_json()
         name = str(data.get('name') or '').strip()
         if not name:
             return jsonify({'error': wa._t('orgs_name_required')}), 400
@@ -130,9 +139,9 @@ def register(app, wa):
     def api_org_update(uid):
         store = _store()
         row = store.orgs.get(uid)
-        if not row:
+        if not row or _hidden(uid):
             return jsonify({'error': wa._t('orgs_not_found')}), 404
-        data = request.get_json(silent=True) or {}
+        data = wa._optional_json()
         # Lo que mantiene un origen no se corrige aquí: la siguiente importación lo pisaría, y un
         # campo que se puede escribir y se revierte solo es peor que uno que no se puede. La
         # pantalla ya lo enseña en solo lectura; esto es la guarda, porque una pantalla no lo es.
@@ -167,7 +176,7 @@ def register(app, wa):
         """
         store = _store()
         row = store.orgs.get(uid) or {}
-        if not row:
+        if not row or _hidden(uid):
             return jsonify({'error': wa._t('orgs_not_found')}), 404
         store.orgs.update(uid, {'source': '', 'external_id': ''}, actor=_actor())
         wa._audit('org_unlinked', detail={'uid': uid, 'name': str(row.get('name') or ''),
@@ -185,7 +194,7 @@ def register(app, wa):
         """
         store = _store()
         row = store.orgs.get(uid) or {}
-        if not row:
+        if not row or _hidden(uid):
             return jsonify({'error': wa._t('orgs_not_found')}), 404
         store.forget_org(uid)
         store.orgs.delete(uid)
@@ -202,14 +211,20 @@ def register(app, wa):
         """Say whose something is. An empty ``org_uid`` stops saying, which is back to
         inheriting — a different state from "owned by nobody"."""
         store = _store()
-        data = request.get_json(silent=True) or {}
+        data = wa._optional_json()
         scope = str(data.get('scope') or '')
         uid = str(data.get('uid') or '')
         if not uid or not org_scopes.known(scope):
             return jsonify({'error': wa._t('orgs_bad_scope')}), 400
         org = str(data.get('org_uid') or '')
-        if org and not store.orgs.get(org):
+        if org and (not store.orgs.get(org) or _hidden(org)):
             return jsonify({'error': wa._t('orgs_not_found')}), 404
+        # …and the thing must not be another company's now: re-filing it (or clearing it back
+        # to inheriting) is taking it from a company the caller was never granted.
+        allowed = _seen()
+        if allowed is not None and not org_owners.may_see(
+                org_scopes.owner_of(wa, store.said(), scope, uid), allowed):
+            return jsonify({'error': wa._t('access_denied')}), 403
         store.set_owner(scope, uid, org, actor=_actor())
         wa._audit('org_owner_set', detail={'scope': scope, 'uid': uid,
                                            'org': org, 'cleared': not org})

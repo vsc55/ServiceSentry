@@ -36,7 +36,9 @@ function _dcUndoItems() {
 const _dcUndoSrc = {
     items: () => _dcUndoItems(),
     send: (metodo, url, cuerpo) => _dcimSend(metodo, url, cuerpo),
-    flush: () => (typeof _dcpFlush === 'function' ? _dcpFlush() : undefined),
+    // Solo con algo pendiente: sin nada, deshacer no espera a nadie.
+    flush: () => (typeof _dcpFlush === 'function' && typeof _dcpPending !== 'undefined' && _dcpPending
+                  ? _dcpFlush() : undefined),
     rerender: () => renderDcim(),
     // Un equipo de sala se dibuja de su caja; los muros de una planta, de lo que tiene la planta.
     apply: (url, valores) => {
