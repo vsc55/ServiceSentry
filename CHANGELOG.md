@@ -8,6 +8,229 @@ All notable changes to **ServiceSentry** are documented in this file.
 > deliberately stays at `0.0.1`: the counter is build metadata, so it does not spend numbers
 > we will want for real releases. This changes once releases begin.
 
+## [0.0.1+build.145] - 2026-10-12
+
+A second audit of the whole code base, run after the first one closed in build.144: nine read-
+only reviews (identity, authorization across all 459 routes, network and file inputs,
+persistence on all three engines, services, watchfuls, the panel, DCIM, distribution). Six of
+its findings were build.144 fixes that were incomplete or had introduced a new fault.
+
+### Changed
+
+- **`/status` shows check detail only to who may read check results.** A signed-in account
+  without `checks_view`/`checks_run` sees what a guest sees: the module summary while the page
+  is public, a 404 when it is not; per-check rows are emptied on the server, not only hidden.
+- **Password changes and resets report the account's API tokens and offer to revoke them.** The
+  tokens keep working by design; the response carries `api_tokens` and the panel offers, in its
+  own modal, to revoke them all (new `DELETE /api/v1/account/tokens`, audited as
+  `api_tokens_revoked`).
+- **The panel listens where Configuration → External access says.** systemd, OpenRC and
+  `entrypoint.sh` no longer pass `--web-host 0.0.0.0`; the order is CLI >
+  `SS_WEB_HOST`/`SS_WEB_PORT` (then `SS_PORT`) > saved setting > default, and both variables are
+  in the config spec, so the fields show locked when set (the Docker image sets
+  `SS_WEB_HOST=0.0.0.0`).
+- **The Helm chart refuses to invent a secret key.** Without `secretKey`/`control.token` and
+  with nothing deployed, a render fails with a message unless `generateSecrets=true` is given
+  (see Security).
+- **The CLI run as root becomes the owner of the data directory.** Management commands no longer
+  leave root-owned `data.db` journals or pictures the `servicesentry` services cannot write;
+  when the switch fails the command refuses and names `runuser`.
+- **`make-venv.sh` ships beside the app and the launchers check the venv first.** A Python
+  upgrade that removes the venv's interpreter stops the unit with the fix in the journal instead
+  of "No such file or directory"; OpenRC `start_pre` does the same.
+- **CI installs run the venv as the dedicated user and rehearse an rpm upgrade.**
+  `install-tests.yml` drops the distro-package shortcut, and the rpm job installs a second,
+  newer build (never published) and checks the directories stay `servicesentry`'s.
+- **A rule stored with an unsafe regex says it is not evaluated.** Rules saved before
+  nested-repetition patterns were refused are never run, so they never fire; the rules list
+  marks them «Not evaluated» with the pattern, `GET /api/v1/event/rules` carries `unsafe_regex`,
+  and the worker logs a warning naming them when it loads the rules.
+- **The event rules' regex check imports the parser from `re` directly.** The `sre_parse`
+  fallback was for Python older than 3.11, which the project does not support (floor 3.11.3).
+- **The redirect ceiling of guarded fetches is a setting, 10 by default.** Map tiles, MIB
+  imports and the web check follow redirects hop by hop through the SSRF guard; the ceiling was
+  a hard-coded 5 for the first two and urllib's unsaid 10 for the web check. It is now
+  `web_admin|max_redirects` (Configuration › External access, admin-only, 0–30, 0 = never
+  follow; env `SS_MAX_REDIRECTS`), applied in the web process when the config loads or is saved
+  and in the worker every cycle.
+
+### Security
+
+- **Built-in editor and viewer roles are no longer free to delegate.** A non-admin may assign
+  them, directly or through a group, only while holding every permission they carry;
+  `users_edit` alone gave oneself editor, and a company-scoped delegate widened to every company
+  through viewer.
+- **SCIM settings are admin-only.** The `scim` section is refused to `config_edit`, since its
+  token provisions accounts into role-mapped groups (with the item above, `users_edit` reached
+  admin); SCIM can no longer delete or deactivate the last active administrator, and registering
+  the SCIM app in Entra, which pushes the stored token to the base URL the request names, is
+  admin-only too.
+- **The default bootstrap password must be changed on first sign-in.** An admin created with the
+  built-in default is marked `must_change_password`; until a new password passes the policy and
+  differs from the old one, every API call answers 403 `password_change_required` and every page
+  leads to the change screen.
+- **A WebAuthn sign-in challenge is single-use.** It is kept server-side and spent by one
+  compare-and-clear before the signature check, so a copied session cookie cannot replay a
+  passkey that keeps no counter.
+- **The per-account second-factor limit counts before it judges.** Codes sent in parallel can no
+  longer all read the same count and all pass.
+- **SNMP operations no longer aim stored secrets at a host the caller chooses.**
+  `/api/v1/snmp/<action>` confines its config like the watchful action route: an `snmp_view`
+  holder (the built-in viewer) could send any device's or check's community and any credential's
+  fields to an address of their own.
+- **An external syslog source's password and credential stay with their server.** A test or edit
+  that changes driver/host/port/database/user/file no longer carries the stored password along,
+  and choosing or moving a `cred_uid` needs `credentials_edit`.
+- **Testing a stored credential needs `credentials_edit`.** `/api/v1/credentials/test` is closed
+  to `credentials_view`; `credentials_add` may still test a draft it typed itself.
+- **Teams sign-in honours the identity an account is bound to.** A UPN or mail match onto an
+  account bound to another provider or another object id is refused, with the reason in the
+  audit log, as OIDC, SAML and LDAP already did.
+- **The LDAP test routes validate the server certificate, and turning TLS off is a new
+  destination.** test/groups/group_lookup open LDAPS with `CERT_REQUIRED` unless `ssl_verify` is
+  off; flipping `use_ssl`/`ssl_verify` (LDAP) or `smtp_use_tls`/`smtp_use_ssl` (SMTP) no longer
+  sends the stored password.
+- **Redirects are validated hop by hop.** The map-tile test refuses `file://` and link-local
+  addresses, the tile fetch and the MIB import from URL check every redirect, the GitHub archive
+  download refuses an archive whose redirects ended somewhere the guard blocks, and the web
+  check re-validates each `Location` and drops Basic credentials on another host.
+- **A DNS record type can no longer inject a command.** It was passed unquoted to
+  `Resolve-DnsName -Type` in a local PowerShell, so a module editor could run commands on a
+  Windows panel; it is checked against the module's known types before any command is built.
+- **The module save refuses values outside a field's options.** `PUT /api/v1/modules` checks
+  every field that declares a closed `options` list, for every module and core profile; a value
+  already stored still passes, so old configs can still be saved.
+- **Remote Windows commands no longer rely on cmd.exe quoting.** PowerShell expands `"$(...)"`
+  inside double quotes; Windows service names and the DNS host and nameserver are restricted to
+  characters neither shell interprets, and anything else is refused before it runs.
+- **A forged UDP source no longer jails the address it names.** A datagram from a source that is
+  not allowed is counted in the drop tally but not reported to the shared jail, which anyone
+  could use to lock the administrator out of the panel.
+- **A rule regex can no longer freeze the process.** Patterns that nest repetitions (`(a+)+`)
+  are refused on save, one saved before is never run, and every regex sees at most 4 KiB of the
+  field; a crafted syslog line held the GIL for minutes, and again after every restart.
+- **The syslog receiver queue has a byte budget.** 256 MiB besides the item bound, and the
+  message text is clipped to 8 KiB like `raw`; 64 KiB frames could pile up to 12 GiB.
+- **Werkzeug connections time out after 30 s idle.** An abandoned keep-alive or a half-sent
+  request held a thread and a file descriptor for ever, so about a thousand idle connections
+  stopped the panel.
+- **The Helm chart no longer generates a secret key per render.** Under `helm template`,
+  `--dry-run` or GitOps, `lookup` sees no live Secret, and a new key was minted on every sync,
+  making every stored secret undecryptable.
+- **The release workflow treats the tag as data.** The version reaches `build.sh` through `env:`
+  and is validated against `^[0-9A-Za-z.+-]+$`, nfpm's download is checked against its sha256,
+  and the workflow token is `contents: read` unless a job asks for more.
+- **A backup "without secrets" leaves out the configuration's secrets too.** Config values
+  stored as JSON strings (`"enc:…"`) are blanked like any other encrypted value.
+- **A scoped reader's DCIM lists no longer carry other companies' items.** Site circuits, a
+  source's sockets and a room's items reused the elevation filter, whose opaque rows keep a uid:
+  that exposed cables between another company's boxes, gave a 500 on the sources screen, and
+  drew foreign room items at (0,0).
+- **Cables and power leads answer to the boxes they join, not only the rack.** A shared rack's
+  owner could cable, re-cable, unplug and delete another company's boxes, and that company could
+  not cable its own; each end is now checked by its own owner.
+- **A room's plan, its import and the cable search no longer reveal other companies.**
+  `loose`/`rows` returned every rack in the room, the gateway list named readers in rooms the
+  reader cannot open, an import matched and moved a foreign rack by name, and `/cables?q=`
+  matched labels the caller cannot read.
+- **Overview Servers, Coverage and Servers-list widgets count only the devices the caller may
+  see, and module widgets honour the permission they declare.** A user confined to
+  `server.<uid>.view`, or holding only `overview_view`, read the whole fleet and every module
+  widget.
+
+### Fixed
+
+- **Alerts queued at exit are sent.** `--monitor -t 0`, a stop and the web process's shutdown
+  wait up to 30 s for the notifier's sender; the check state was already saved, so a lost alert
+  was never sent again (regression of build.144's V2).
+- **An external syslog source that is down no longer replays its whole table.** A table that
+  cannot be described reads as unavailable, not empty: the event worker keeps its cursor instead
+  of reseeding it to 0 (regression of build.144's V5).
+- **The jail notifies a ban after releasing its lock.** Every request and syslog datagram checks
+  the jail under that lock, so a channel that was down stalled the panel and the receiver.
+- **An unreadable check state is not an empty one.** A failed `check_state` read raises and the
+  monitor keeps what it held; read as empty, every DOWN re-alerted and every failure count went
+  back to 0.
+- **The events "run now" runs on its own thread, and a replica taking the events lease reloads
+  the cooldowns already fired.**
+- **Telegram waits out a 429 and a failure no longer ends the batch.** `retry_after` is honoured
+  (capped at 30 s, two retries).
+- **A failure reported only while it lasts now gets its recovery, and `srv1` no longer takes
+  `srv10`'s results.** m365 and azure emit a key only for failing entities; when it is pruned
+  under an ancestor reporting OK, or when the module settles it, the recovery is announced.
+  Parts must follow the item key after a separator.
+- **A table rsyslog created no longer breaks every boot on MySQL/MariaDB.** The `SystemEvents`
+  spec uses rsyslog's own `EventUser` (tables the panel made are renamed), and a rebuild
+  recreates undeclared columns from the engine's own definition instead of a bare `varchar`
+  refused with error 1064.
+- **Keys that differ only in case or accents stay apart on MySQL/MariaDB.** Key text columns are
+  `utf8mb4_bin` and existing ones are migrated once at boot, so history fields `Rx`/`rx` and
+  series `Intranet`/`intranet` are no longer merged.
+- **A rolled-back history sample no longer lends its field ids to the next one.**
+- **A config save no longer undoes changes made since its caller read.** The patch baseline is
+  what that caller's thread read, not the shared cache (completes build.144's P8).
+- **A swallowed MySQL error no longer leaves a transaction holding a lock, and MySQL never
+  reconnects in the middle of one.**
+- **Backups and restores stream instead of loading whole tables into memory.** Keyset pages by
+  primary key, a streaming cursor for keyless tables, batches on restore; older archives still
+  restore.
+- **Boot no longer signs out sessions another replica opened; setting an owner is atomic; DCIM
+  attachments record who uploaded them and when.**
+- **Watchfuls:** a web check expecting a 3xx can pass; remote devices on `os: auto` work for
+  ram_swap, raid and temperature; service_status falls back to `rc-service`/`service` without
+  systemd; keepalived and azure honour `alert`; UPS flags OVER (down) and RB/BYPASS/ALARM
+  (warning) no longer read as online; local device commands survive undecodable output;
+  datastore checks have read and statement timeouts; the process check names the process and its
+  device; the UPS password is no longer stripped; IPv6 works for proxmox and NTP; Windows
+  `nslookup` A/AAAA answers are read in any language.
+- **DCIM:** re-importing an exported room plan keeps lock, model, serial, gateway, device and
+  group, updates pieces in place by kind and label and reports what it cannot bring back;
+  nothing can be mounted on a room item; doors let go of a gateway that is deleted, re-kinded or
+  moved; a floor's general area cannot change site; a device linked to a room item shows its
+  location; lists or objects in text fields are a 400, a rack's row must be in its room,
+  imported measures are bounded.
+- **Panel:** the overview's syslog table no longer spins for ever (an undeclared name left by a
+  rename; a new guard parses the served scripts for undeclared names); a Save clicked twice no
+  longer creates two devices, webhooks or Teams channels; device and cluster logs and the Status
+  poll ignore stale answers; editing a token's permissions and saving the scheduler interval
+  read the right reply; «See history» and the overview's syslog links stay in the SPA; blocked
+  browser storage no longer aborts the whole panel script; history's series buttons are solid;
+  toasts no longer show escaped entities.
+- **Packaging:** an rpm upgrade no longer hands /etc and /var/lib back to root; the compose
+  worker writes files the other containers can use; `update.sh` builds the venv before stopping
+  anything and restarts what was running on failure; package scripts act only on remove/purge;
+  re-running `install.sh` clears retired files; the Docker image's comments describe the forced
+  first-login change.
+- **Two processes reconciling the same table at once both boot.** After an upgrade that adds a
+  column, every process sharing the database reconciles at boot; two that read the same diff
+  both ran `ADD COLUMN`/`CREATE INDEX` and the second failed its boot with a duplicate (15 of 15
+  rounds on MariaDB and PostgreSQL). Reconciliation now takes a per-table lock on the engine
+  (`pg_advisory_lock`, `GET_LOCK`), a duplicate column or index is taken as done, and PostgreSQL
+  rolls back the failed `ALTER` instead of leaving the connection aborted. Deferred since the
+  July audit.
+- **An instance that loses the race for the leader row answers at once.** It re-read the row
+  inside a transaction its failed INSERT had aborted on PostgreSQL; the outcome was right, the
+  path was not.
+
+### Tests
+
+- Each fix below was checked to fail with it undone:
+  `tests/integration/test_wa_tanda6_identity.py`, `test_wa_browser_tanda6_identity.py`,
+  `test_wa_tanda6_secrets.py`, `test_wa_tanda6_modules.py`, `test_wa_dcim_tanda6.py`,
+  `test_wa_tanda6_panel.py`; `tests/unit/test_tanda6_secrets.py`, `test_tanda6_services.py`,
+  `test_tanda6_db.py`, `test_tanda6_runtime.py`, `test_device_binding_tanda6.py`;
+  `tests/meta/test_tanda6_distribution.py`; a `test_*_tanda6.py` in fourteen watchfuls; and six more
+  live cases in `tests/e2e/test_db_portability_live.py`, one of them two processes reconciling the
+  same table at once, run on MariaDB and PostgreSQL.
+- A guard parses the served `/admin`, `/status` and `/login` scripts with acorn and eslint-scope
+  (skipped without them) and refuses undeclared names and unguarded load-time storage access;
+  the no-outline-button guard covers the whole panel.
+- **CI runs the Windows CIM commands on a real Windows.** A new `windows-cim` job in `tests.yml`
+  (Windows Server 2025) runs the exact `Get-CimInstance` commands of cpu, filesystemusage and
+  ram_swap through the local `device_exec` and parses the answers
+  (`tests/e2e/test_windows_cim_live.py`, opt-in with `SS_TEST_WINDOWS_CIM=1`), plus those
+  modules' tests; the parsers had only ever seen recorded output. A meta guard keeps the job.
+
 ## [0.0.1+build.144] - 2026-10-12
 
 ### Added

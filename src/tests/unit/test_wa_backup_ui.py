@@ -387,8 +387,10 @@ class TestTheCopiesTableSortsLikeTheOthers:
     def test_newest_first_by_default(self):
         """The copy you want is almost always the last one taken."""
         src = _ui()
-        assert "_bkSort = localStorage.getItem('ss_backup_sort') || 'mtime'" in src
-        assert "_bkSortDir = localStorage.getItem('ss_backup_sort_dir') || 'desc'" in src
+        # Read through ssLsGet: a bare localStorage at load time aborts the whole bundle when
+        # storage is blocked (test_wa_tanda6_panel).
+        assert "_bkSort = ssLsGet('ss_backup_sort') || 'mtime'" in src
+        assert "_bkSortDir = ssLsGet('ss_backup_sort_dir') || 'desc'" in src
 
 
 class TestRunningATaskShowsProgress:

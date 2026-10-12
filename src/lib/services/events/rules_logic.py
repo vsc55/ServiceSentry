@@ -27,6 +27,52 @@ MATCH_TYPES = ('any', 'equals', 'contains', 'not_contains', 'starts', 'ends', 'r
                'gt', 'gte', 'lt', 'lte')
 MATCH_FIELDS = ('message', 'host', 'app', 'severity')   # what a matcher targets
 
+# The regex parser, under `re` since Python 3.11 — the floor this project requires (3.11.3).
+from re import _parser as _sre_parse          # noqa: PLC2701
+from re import _constants as _sre_const       # noqa: PLC2701
+
+_REPEAT_OPS = (_sre_const.MAX_REPEAT, _sre_const.MIN_REPEAT)
+_ATOMIC_OPS = (_sre_const.ATOMIC_GROUP, _sre_const.POSSESSIVE_REPEAT)
+
+
+def _nested_repeat(items, under_unbounded: bool) -> bool:
+    for op, av in items:
+        if op in _ATOMIC_OPS:
+            # Possessive / atomic: what is inside never backtracks — the nesting is harmless.
+            continue
+        if op in _REPEAT_OPS:
+            _lo, hi, sub = av
+            if under_unbounded and hi > 1:
+                return True
+            if _nested_repeat(sub, under_unbounded or hi == _sre_const.MAXREPEAT):
+                return True
+            continue
+        for part in (av if isinstance(av, (list, tuple)) else (av,)):
+            if isinstance(part, _sre_parse.SubPattern):
+                if _nested_repeat(part, under_unbounded):
+                    return True
+            elif isinstance(part, (list, tuple)):          # a BRANCH's alternatives
+                for alt in part:
+                    if (isinstance(alt, _sre_parse.SubPattern)
+                            and _nested_repeat(alt, under_unbounded)):
+                        return True
+    return False
+
+
+def regex_is_unsafe(pattern: str) -> bool:
+    r"""Whether *pattern* repeats something that itself repeats, under an unbounded
+    quantifier — ``(a+)+``, ``(\w+\s?)*``, ``(x{1,3})+``: the shapes whose backtracking is
+    exponential on a near-miss. A rule evaluates against syslog text a sender writes, and a
+    match holds the GIL: one such line froze the whole process, and froze it again after a
+    restart, the row still being past the cursor. A pattern that does not compile is not
+    "unsafe" here — :func:`validate_rule` reports it as invalid.
+
+    Bounded nesting (``(\.\d{1,3}){3}``, an IPv4) and atomic/possessive forms pass."""
+    try:
+        return _nested_repeat(_sre_parse.parse(pattern), False)
+    except Exception:  # pylint: disable=broad-except
+        return False
+
 
 def clean_match_groups(data: dict) -> list:
     """Normalise the DNF match conditions: a list of groups (OR), each a list of
@@ -135,6 +181,23 @@ def validate_rule(rule: dict) -> None:
                     re.compile(m['text'])
                 except re.error as exc:
                     raise AdminOpError('event_invalid_regex') from exc
+                if regex_is_unsafe(m['text']):
+                    raise AdminOpError('event_unsafe_regex')
+
+
+def unsafe_patterns(rule: dict) -> list:
+    """The regexes of *rule* that the worker refuses to run (see :func:`regex_is_unsafe`).
+
+    Saving refuses them, but a rule stored before that check keeps its pattern: it is never
+    evaluated and so never fires. Said out loud — in the rules list and the log — so a rule
+    that looks active is not silently mute."""
+    out = []
+    for g in rule.get('match_groups') or []:
+        for m in g or []:
+            txt = m.get('text') if isinstance(m, dict) else None
+            if m.get('type') == 'regex' and txt and regex_is_unsafe(txt) and txt not in out:
+                out.append(txt)
+    return out
 
 
 def prepare_rule(store, data: dict, *, exclude_id: str | None = None,

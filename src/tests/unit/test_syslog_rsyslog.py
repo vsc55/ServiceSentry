@@ -202,7 +202,8 @@ class TestEveryEngineReachesTheSameTable:
     def test_mysql_adds_an_indexed_text_column_as_varchar(self):
         my = object.__new__(MySQLConnector)
         col = Column('ProgramName', 'TEXT')
-        assert my._column_type_clause(col, keyed=True) == 'VARCHAR(255)'
+        # Binary-collated: a key compared case-insensitively merges `Rx` and `rx`.
+        assert my._column_type_clause(col, keyed=True) ==             'VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin'
         assert my._column_type_clause(col) == 'LONGTEXT'    # TEXT holds 64 KB on MySQL
 
     def test_the_reconcile_asks_for_the_keyed_type(self):

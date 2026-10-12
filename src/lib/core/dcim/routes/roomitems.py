@@ -29,7 +29,8 @@ from flask import jsonify, request
 
 from lib.core.dcim import owners as dcim_owners
 from lib.core.dcim import service as dcim_svc
-from lib.core.dcim.routes._common import SERVER_COLS, _fresh, _without, group_bad
+from lib.core.dcim.routes._common import SERVER_COLS, _fresh, _without, group_bad, scalars_bad
+from lib.core.dcim.store.items import _ITEM
 from lib.core.dcim import plankinds as dcim_plankinds
 from lib.core.dcim import connectors as dcim_connectors
 import json
@@ -153,7 +154,7 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('access_denied')}), 403
         reach = dcim_svc.reachable(store, said, allowed)
         estados = C.states()
-        items = C.filtered(store.items_in_room(uid), store, said, allowed, 'item', reach)
+        items = C.readable(store.items_in_room(uid), store, said, allowed, 'item', reach)
         cajas = dcim_plankinds.device_defaults(wa)
         enlaces = dcim_svc.room_item_links(store, items, lambda u: dcim_owners.may_see(
             C.owner_of(store, said, 'item', u), allowed))
@@ -176,6 +177,9 @@ def register(app, wa, C):
         malo = _bad(store, data) or _bad_jack(store, data, None, uid)
         if malo:
             return jsonify({'error': wa._t(malo)}), 400
+        texto = scalars_bad(_ITEM, data)       # after the jacks, which become text above
+        if texto:
+            return jsonify({'error': wa._t('dcim_bad_text'), 'field': texto}), 400
         # El número de inventario, como el de cualquier equipo: `INV-?` resuelto y un repetido
         # rechazado. Sin esto se guardaba el comodín tal cual, y dos PC podían decir el mismo.
         err = C.asset('items', data)
@@ -200,6 +204,9 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('access_denied')}), 403
         data = {k: v for k, v in _without(request.get_json(silent=True) or {}, SERVER_COLS).items()
                 if k in _EDITABLE}
+        texto = scalars_bad(_ITEM, dict(data, jacks=''))     # the jacks are judged below
+        if texto:
+            return jsonify({'error': wa._t('dcim_bad_text'), 'field': texto}), 400
         malo = _bad(store, data) or _bad_jack(store, data, item, data.get('room_uid') or item.get('room_uid'))
         if malo:
             return jsonify({'error': wa._t(malo)}), 400

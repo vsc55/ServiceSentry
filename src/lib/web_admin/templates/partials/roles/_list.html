@@ -25,7 +25,7 @@ let _rolesColOrder = (() => {
 // One-time: surface the new "permissions count" column for users whose saved
 // column prefs predate it — visible by default and placed right before "created"
 // (they can still hide/reorder it afterwards).
-if (!localStorage.getItem('ss_roles_permcount_migr2')) {
+if (!ssLsGet('ss_roles_permcount_migr2')) {
     _rolesVisibleCols.add('perm_count');
     if (!_rolesColOrder.includes('perm_count')) {
         const _i = _rolesColOrder.indexOf('created_at');
@@ -35,7 +35,7 @@ if (!localStorage.getItem('ss_roles_permcount_migr2')) {
         localStorage.setItem('ss_roles_cols', JSON.stringify([..._rolesVisibleCols]));
         localStorage.setItem('ss_roles_col_order', JSON.stringify(_rolesColOrder));
     } catch(_){}
-    localStorage.setItem('ss_roles_permcount_migr2', '1');
+    ssLsSet('ss_roles_permcount_migr2', '1');
 }
 // Date formatting uses the shared _fmtDateTime (core/_utils.html).
 

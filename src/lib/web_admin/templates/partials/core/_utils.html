@@ -501,6 +501,18 @@ function deviceKind(v) {
     return DEVICE_KINDS.includes(k) ? k : 'none';
 }
 
+// ── Browser storage that may not be there ────────────────────────────────────
+// `localStorage` THROWS (SecurityError) when site data is blocked or in some private modes.
+// Read at the top level of the bundle — a remembered sort, a remembered view — one throw
+// aborts the WHOLE /admin script, and every section after it is never defined. Anything
+// read outside a function goes through these.
+function ssLsGet(key, def = null) {
+    try { const v = localStorage.getItem(key); return v === null ? def : v; } catch (_) { return def; }
+}
+function ssLsSet(key, value) {
+    try { localStorage.setItem(key, value); } catch (_) { /* a convenience, not state */ }
+}
+
 // ── List/card view toggle (createListTable tables that offer both views) ─────
 function _loadViewMode(key, def = 'table') { try { return localStorage.getItem(key) || def; } catch (_) { return def; } }
 // The list/card switch, placed via the table's headerLead. `setter` = the name of
@@ -535,6 +547,10 @@ function fitToViewportBottom(el, gap = 16) {
         el.style.minHeight = Math.max(240, left) + 'px';
     };
     apply();
+    // One listener per element: the same element fitted again (a re-render that kept it)
+    // replaces its listener instead of stacking a second one.
+    if (el._ssFitApply) window.removeEventListener('resize', el._ssFitApply);
+    el._ssFitApply = apply;
     window.addEventListener('resize', apply);
 }
 
@@ -569,6 +585,8 @@ function capToScrollBox(el, selector = '.ss-vscroll', gap = 12) {
         if (h > 0) el.style.maxHeight = Math.max(160, h - gap) + 'px';
     };
     apply();
+    if (el._ssCapApply) window.removeEventListener('resize', el._ssCapApply);   // one per element
+    el._ssCapApply = apply;
     window.addEventListener('resize', apply);
 }
 

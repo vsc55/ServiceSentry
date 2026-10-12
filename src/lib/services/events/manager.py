@@ -29,12 +29,22 @@ Matching is best-effort and never raises into the caller's path.
 from __future__ import annotations
 
 import collections
+import functools
 import json
 import re
 import threading
 import time
 
 from lib.debug import DebugLevel
+from lib.services.events.rules_logic import regex_is_unsafe
+
+#: How much of a field a rule's regex is run against (chars). Syslog text is the sender's.
+REGEX_MAX_TEXT = 4096
+
+
+@functools.lru_cache(maxsize=256)
+def _regex_unsafe(pattern: str) -> bool:
+    return regex_is_unsafe(pattern)
 
 
 
@@ -79,11 +89,34 @@ class _EventsMixin:
         except Exception:  # pylint: disable=broad-except
             pass
 
+    def _event_refresh_cooldowns(self) -> None:
+        """Merge the persisted cooldowns into the cache (the later fire wins). Best-effort:
+        a failed read keeps what is in memory."""
+        st = self._event_state
+        if st is None:
+            return
+        try:
+            persisted = st.cooldowns() or {}
+        except Exception:  # pylint: disable=broad-except
+            return
+        for uid, ts in persisted.items():
+            try:
+                if float(ts) > float(self._event_last.get(uid, 0) or 0):
+                    self._event_last[uid] = float(ts)
+            except (TypeError, ValueError):
+                continue
+
     # ── rule cache ──────────────────────────────────────────────────────────────
     def _events_reload(self) -> None:
         """Refresh the cached rule list (call after any rule CRUD)."""
         store = getattr(self, '_event_rules_store', None)
         self._event_rules_cache = store.list() if store is not None else []
+        from lib.services.events.rules_logic import unsafe_patterns  # noqa: PLC0415
+        for rule in self._event_rules_cache:
+            malos = unsafe_patterns(rule)
+            if malos and rule.get('enabled', True):
+                self._dbg(f"> Events >> rule {rule.get('name')!r} is NOT evaluated: unsafe regex "
+                          f"{malos!r} (nested repetition); edit the rule", DebugLevel.warning)
 
     def _events_rules(self) -> list:
         if self._event_rules_cache is None:
@@ -127,11 +160,32 @@ class _EventsMixin:
         """Execute a one-shot command from the service-command queue on the
         instance hosting the event worker (embedded here or a remote worker)."""
         if action == 'run_now':
+            # On a thread of its own, holding the tick lock until it ends — like the
+            # monitor's run-now. This runs on the heartbeat's loop, which also renews the
+            # lease: a long backlog drained here let the lease lapse, a standby took it and
+            # dispatched beside this one, and peers saw no heartbeat.
+            lock = getattr(self, '_event_tick_lock', None)
+            if lock is not None and not lock.acquire(blocking=False):
+                return False, 'busy'
+
+            def _tick():
+                try:
+                    self._event_worker_tick_impl()
+                except Exception as exc:  # pylint: disable=broad-except
+                    try:
+                        self._dbg(f"> Events >> run-now failed: {exc}", DebugLevel.error)
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+                finally:
+                    if lock is not None:
+                        lock.release()
             try:
-                n = self._event_worker_tick()
-                return True, f'{n} record(s) processed'
+                threading.Thread(target=_tick, name='events-run-now', daemon=True).start()
             except Exception as exc:  # pylint: disable=broad-except
+                if lock is not None:
+                    lock.release()
                 return False, str(exc)
+            return True, 'started'
         if action == 'reload':
             try:
                 mgr = getattr(self, '_config_mgr', None)
@@ -192,7 +246,14 @@ class _EventsMixin:
         # Hot standby: with leader gating, only the lease holder advances the cursor
         # and dispatches — other replicas idle, so notifications never double-fire.
         if hasattr(self, '_work_allowed') and not self._work_allowed():
+            self._event_leading = False
             return 0
+        if not self.__dict__.get('_event_leading'):
+            # Just took the work over (a start, or a standby that won the lease): the
+            # cooldowns in memory are the ones read at start-up, and the old leader has
+            # fired since. Without this the new leader fired every rule still in cooldown.
+            self._event_leading = True
+            self._event_refresh_cooldowns()
         # Desired-state stop: events|enabled=false idles the worker everywhere
         # (embedded and external) without killing it, so a Services-tab stop takes
         # effect on a dedicated container too.
@@ -203,6 +264,11 @@ class _EventsMixin:
             try:
                 last = st.cursor(key)
                 tail = store.max_id()
+                if tail is None:
+                    # The table could not be confirmed this tick (an external source whose
+                    # database is down). Not empty: reseeding here put the cursor at 0 and
+                    # the next tick replayed the whole table. Keep the cursor, try later.
+                    continue
                 # First run → start at the tail (no replay). And a cursor PAST the tail is a
                 # cursor of another table: a dedicated syslog database switched on, a source
                 # re-pointed, a restore that lowered the ids. Kept, every new row sat below it
@@ -430,8 +496,13 @@ class _EventsMixin:
         if match_type == 'ends':
             return text.endswith(needle)
         if match_type == 'regex':
+            # Rule regexes run on text a syslog sender writes, holding the GIL: a pattern
+            # that nests repetitions (saved before the editor refused them) is not run at
+            # all, and every other one sees a bounded slice of the text.
+            if _regex_unsafe(needle):
+                return False
             try:
-                return re.search(needle, text) is not None
+                return re.search(needle, text[:REGEX_MAX_TEXT]) is not None
             except re.error:
                 return False
         if match_type in ('gt', 'gte', 'lt', 'lte'):

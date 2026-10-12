@@ -8,7 +8,15 @@ Type=simple
 # Unbuffered: through a pipe Python block-buffers stdout, and the journal got the output
 # minutes late — and lost it altogether when the process was killed.
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py --web --web-host 0.0.0.0
+# The venv is bound to the python3.X it was built with: a distribution upgrade that
+# removes that interpreter leaves a venv that no longer runs, and the unit only said
+# "No such file or directory". Checked first, with the way out in the journal. A unit
+# without the venv (run from a checkout with the system python) skips the check.
+ExecStartPre=/bin/sh -c 'if [ -d /opt/ServiSesentry/venv ] && ! /opt/ServiSesentry/venv/bin/python -c "import sys" >/dev/null 2>&1; then echo "ServiceSentry: the Python environment in /opt/ServiSesentry/venv no longer runs (was Python upgraded?). Rebuild it as root: sh /opt/ServiSesentry/make-venv.sh" >&2; exit 1; fi'
+# No --web-host/--web-port: where the panel listens is its own setting (Configuration ->
+# External access), or SS_WEB_HOST / SS_WEB_PORT in a drop-in's Environment=. A flag
+# here overrode both, so the setting did nothing.
+ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py --web
 Restart=on-failure
 RestartSec=5
 

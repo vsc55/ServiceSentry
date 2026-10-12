@@ -55,12 +55,18 @@ def _ntp_query(server: str, timeout: float, port: int = 123) -> tuple:
     (a kiss-o'-death or "unspecified") or stratum 16+ (unsynchronised) raises
     :class:`NtpUnsynchronised`: its timestamps are whatever its free-running clock says, so a
     small offset against it proves nothing — and it was reported as a healthy time source."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # getaddrinfo, not a hard-wired AF_INET: an IPv6 server (or a name with only an AAAA
+    # record) failed with "address family not supported" before a packet was sent.
+    host = str(server or '').strip()
+    if host.startswith('[') and host.endswith(']'):
+        host = host[1:-1]
+    family, _t, _p, _c, sockaddr = socket.getaddrinfo(host, port, 0, socket.SOCK_DGRAM)[0]
+    sock = socket.socket(family, socket.SOCK_DGRAM)
     sock.settimeout(timeout)
     try:
         packet = b'\x1b' + 47 * b'\x00'  # LI=0, VN=3, Mode=3 (client)
         t1 = time.time()
-        sock.sendto(packet, (server, port))
+        sock.sendto(packet, sockaddr)
         data, _ = sock.recvfrom(1024)
         t4 = time.time()
         if len(data) < 48:

@@ -28,6 +28,50 @@ _SCHEMA = json.load(
 #: way they are served— read as UP: the content check could never fail a check.
 _CONTENT_MISSING = 'Content not found'
 
+
+class _BlockedRedirect(urllib.error.URLError):
+    """A redirect whose target the SSRF guard refuses."""
+
+
+class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to a URL the SSRF guard accepts, or not at all.
+
+    The guard used to look at the FIRST url only, and urllib followed whatever came back:
+    a 302 to the cloud metadata address was fetched (and ``content_contains`` turned the
+    result into an oracle). A check that EXPECTS a 3xx does not follow at all - following
+    made the 301 it was watching for impossible to ever see."""
+
+    def __init__(self, follow: bool):
+        super().__init__()
+        self._follow = follow
+        # The same ceiling as every other guarded fetch — `web_admin|max_redirects`, held by
+        # lib/security/net_guard.py — not urllib's own 10 inherited without saying so.
+        from lib.security.net_guard import max_redirects  # noqa: PLC0415
+        self.max_redirections = max_redirects()
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not self._follow:
+            return None          # urllib then raises HTTPError carrying the 3xx itself
+        from lib.security.net_guard import validate_external_url  # noqa: PLC0415
+        reason = validate_external_url(newurl)
+        if reason:
+            raise _BlockedRedirect(f'redirect to {newurl} ({reason})')
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None:
+            from urllib.parse import urlparse  # noqa: PLC0415
+            if urlparse(newurl).netloc.lower() != urlparse(req.full_url).netloc.lower():
+                # Basic-auth credentials are for the host they were configured for.
+                new.remove_header('Authorization')
+        return new
+
+def _open(req, *, timeout, follow_redirects=True, context=None):
+    """``urlopen`` with the guarded redirect handler (and *context* for HTTPS)."""
+    handlers: list = [_GuardedRedirect(follow_redirects)]
+    if context is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=context))
+    return urllib.request.build_opener(*handlers).open(req, timeout=timeout)
+
+
 class Watchful(ModuleBase):
     """Monitors HTTP/HTTPS endpoints: status code, optional content check, basic auth."""
 
@@ -142,6 +186,7 @@ class Watchful(ModuleBase):
         code, detail = self._web_request(
             url, timeout, verify_ssl, scheme,
             method, check_content, content_contains, auth_user, auth_password,
+            follow_redirects=not 300 <= code_exp < 400,
         )
         status = (code == code_exp) and not detail.startswith(_CONTENT_MISSING)
 
@@ -169,8 +214,12 @@ class Watchful(ModuleBase):
         content_contains: str  = '',
         auth_user:        str  = '',
         auth_password:    str  = '',
+        follow_redirects: bool = True,
     ) -> tuple[int, str]:
         """Perform an HTTP request. Returns (status_code, detail).
+
+        Redirects are followed only to targets the SSRF guard accepts, and not at all when
+        *follow_redirects* is false (a check that expects a 3xx).
 
         Returns code 0 on connection error (URLError / OSError).
         """
@@ -197,7 +246,7 @@ class Watchful(ModuleBase):
                 ctx.verify_mode = ssl.CERT_NONE
                 kwargs['context'] = ctx
 
-            with urllib.request.urlopen(req, timeout=timeout, **kwargs) as resp:
+            with _open(req, timeout=timeout, follow_redirects=follow_redirects, **kwargs) as resp:
                 code = resp.status
                 if check_content and content_contains and method.upper() != 'HEAD':
                     body = resp.read(131072).decode('utf-8', errors='replace')
@@ -205,6 +254,8 @@ class Watchful(ModuleBase):
                         return code, f'{_CONTENT_MISSING}: {content_contains!r}'
                 return code, f'HTTP {code}'
 
+        except _BlockedRedirect as exc:
+            return 0, f'Blocked: {exc.reason}'
         except urllib.error.HTTPError as exc:
             return exc.code, f'HTTP {exc.code}'
         except (urllib.error.URLError, OSError) as exc:
@@ -243,6 +294,7 @@ class Watchful(ModuleBase):
             content_contains = str(config.get('content_contains') or ''),
             auth_user        = str(config.get('auth_user') or '') if auth_enabled else '',
             auth_password    = str(config.get('auth_password') or '') if auth_enabled else '',
+            follow_redirects = not 300 <= code_exp < 400,
         )
         ok = (code == code_exp) and not detail.startswith(_CONTENT_MISSING)
         return {'ok': ok, 'message': detail if not ok else f'{detail} (expected {code_exp})'}

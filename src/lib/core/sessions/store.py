@@ -159,32 +159,68 @@ class SessionsStore(BaseStore):
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def save_all(self, sessions: dict) -> bool:
-        """Replace all sessions atomically.
+        """Make the table hold exactly *sessions* — row by row, never by emptying it first.
 
-        The activity of the sessions that did NOT survive goes with them. This is the path
-        that drops expired sessions at startup and the one behind "sign everybody out", so
-        without the prune the history of every session ever opened would pile up here keyed to
-        a uid nothing can name: invisible in the panel, which only shows the activity of
-        sessions that exist, and unbounded on disk, which is the one thing a ring is for.
+        This is the path behind "sign everybody out" (`{}`). It used to `DELETE` the whole
+        table and insert the survivors back; every process runs it, and a second replica that
+        booted while the first was serving signed out every session the first had opened since
+        its own read. So a row in *sessions* is updated in place (inserted when missing), and
+        only the rows NOT in it are deleted. Dropping a handful of expired sessions has its
+        own call, :meth:`delete_tokens`, which touches nothing else.
+
+        The activity of the sessions that did not survive goes with them (`_prune_access`).
         """
         try:
             with self._db.transaction():
-                self._db.execute(f'DELETE FROM {_T}')
                 for token, s in sessions.items():
-                    self._db.execute(
-                        f'INSERT INTO {_T}'
-                        '(token, uid, user_uid, created_at, last_seen, ip, user_agent,'
-                        ' remember) VALUES(?,?,?,?,?,?,?,?)',
-                        (token,
-                         s.get('uid', ''),        s.get('user_uid', ''),
-                         s.get('created_at', ''),    s.get('last_seen', ''),
-                         s.get('ip', ''),         s.get('user_agent', ''),
-                         1 if s.get('remember') else 0),
-                    )
+                    self._write_row(token, s)
+                keep = [str(t) for t in sessions]
+                if keep:
+                    marks = ','.join('?' * len(keep))
+                    self._db.execute(f'DELETE FROM {_T} WHERE token NOT IN ({marks})',
+                                     tuple(keep))
+                else:
+                    self._db.execute(f'DELETE FROM {_T}')
                 self._prune_access([s.get('uid', '') for s in sessions.values()])
             return True
         except Exception:  # pylint: disable=broad-except
             return False
+
+    def delete_tokens(self, tokens) -> int:
+        """Delete these sessions, and their activity, and nothing else. Returns how many.
+
+        What boot does with the sessions it found expired: rewriting the whole table for that
+        (`save_all`) also rewrote every OTHER row from this process's snapshot of it."""
+        tokens = [str(t) for t in (tokens or ()) if t]
+        if not tokens:
+            return 0
+        try:
+            with self._db.transaction():
+                marks = ','.join('?' * len(tokens))
+                uids = self._db.fetchall(
+                    f'SELECT uid FROM {_T} WHERE token IN ({marks})', tuple(tokens)) or ()
+                deleted = self._db.execute(
+                    f'DELETE FROM {_T} WHERE token IN ({marks})', tuple(tokens))
+                for r in uids:
+                    self._db.execute(f'DELETE FROM {_A} WHERE session_uid = ?', (r[0],))
+            return int(deleted or 0)
+        except Exception:  # pylint: disable=broad-except
+            return 0
+
+    def _write_row(self, token: str, s: dict) -> None:
+        """UPDATE the row in place, INSERT it when there is none — inside the caller's
+        transaction. (MySQL is connected with FOUND_ROWS, so an unchanged row still counts.)"""
+        vals = (s.get('uid', ''), s.get('user_uid', ''), s.get('created_at', ''),
+                s.get('last_seen', ''), s.get('ip', ''), s.get('user_agent', ''),
+                1 if s.get('remember') else 0)
+        n = self._db.execute(
+            f'UPDATE {_T} SET uid = ?, user_uid = ?, created_at = ?, last_seen = ?, ip = ?, '
+            'user_agent = ?, remember = ? WHERE token = ?', vals + (token,))
+        if not n:
+            self._db.execute(
+                f'INSERT INTO {_T}'
+                '(token, uid, user_uid, created_at, last_seen, ip, user_agent,'
+                ' remember) VALUES(?,?,?,?,?,?,?,?)', (token,) + vals)
 
     def upsert(self, token: str, session: dict) -> bool:
         """Insert or replace a single session row (portable delete-then-insert)."""

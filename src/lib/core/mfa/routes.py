@@ -63,14 +63,15 @@ def register(app, wa):
         mx = int(wa._LOCKOUT_MAX_ATTEMPTS or 0)
         win = int(wa._LOCKOUT_DURATION_SECS or 0)
         key = uid or str(username or '').strip().lower()
-        ok, retry = wa._mfa_ratelimit.peek(key, mx, win)
+        # Hit-then-check: the attempt is counted before it is judged, so codes sent in
+        # parallel cannot all read the same count and all pass (a success resets it below).
+        ok, retry = wa._mfa_ratelimit.hit(key, mx, win)
         if not ok:
             wa._audit('login_throttled', username, request.remote_addr,
                       detail={'stage': f'mfa_{stage}', 'retry_after': retry})
             wa._ipban_offense('login_throttled')
             return jsonify({'ok': False, 'error': 'throttled', 'retry_after': retry}), 429
         if not mfa_service.verify(wa._mfa_store, uid, code):
-            wa._mfa_ratelimit.hit(key, mx, win)
             # `empty` and `bad_code` are one audit line apart and are two different stories: a
             # form submitted with nothing in it is somebody in a hurry, and a run of wrong
             # codes is somebody guessing. On the wire both stay `bad_code` — which of the two

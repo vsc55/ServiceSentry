@@ -47,3 +47,39 @@ jobs:
         # -n auto uses the pytest-xdist installed above (otherwise it is dead weight);
         # the suite is ~13 min parallel vs. much longer serial.
         run: pytest -m "not integration" -n auto
+
+  # Windows, for real: cpu, filesystemusage and ram_swap read Windows through PowerShell
+  # `Get-CimInstance` (wmic is gone from Windows 11 24H2 and Server 2025), and their parsers
+  # were only ever fed recorded output. This runs the exact commands the modules send through
+  # the same local device_exec a check uses, plus those modules' own tests, on Windows Server
+  # 2025. SSH into a Windows host whose shell is PowerShell is not covered here.
+  windows-cim:
+    runs-on: windows-2025
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: src/requirements.lock
+
+      - name: Install dependencies
+        run: |
+          pip install -r src/requirements.lock
+          pip install -r src/requirements-dev.txt
+
+      - name: Is wmic there? (informative)
+        shell: pwsh
+        run: |
+          if (Get-Command wmic -ErrorAction SilentlyContinue) { "wmic: present" } else { "wmic: absent" }
+
+      - name: Run the CIM commands and the Windows modules' tests
+        working-directory: src
+        env:
+          SS_TEST_WINDOWS_CIM: "1"
+        run: >-
+          pytest -n0 -rs
+          tests/e2e/test_windows_cim_live.py
+          watchfuls/cpu watchfuls/filesystemusage watchfuls/ram_swap

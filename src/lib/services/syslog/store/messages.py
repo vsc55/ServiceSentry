@@ -50,7 +50,7 @@ _SCHEMA = TableSpec(
         Column('NTSeverity',         'INTEGER'),
         Column('Importance',         'INTEGER'),
         Column('EventSource',        'TEXT'),
-        Column('EventUserID',        'TEXT'),
+        Column('EventUser',          'TEXT'),        # rsyslog's name (was EventUserID)
         Column('EventCategory',      'INTEGER'),
         Column('EventID',            'INTEGER'),
         Column('EventBinaryData',    'TEXT'),
@@ -79,6 +79,10 @@ _SCHEMA = TableSpec(
         Index('idx_systemevents_program',  ('ProgramName', 'ReceivedAt')),
         Index('idx_systemevents_facility', ('Facility', 'ReceivedAt')),
     ),
+    # Spelled `EventUserID` at first, which is not what rsyslog's createDB.sql calls
+    # it: a table rsyslog made then read as missing a mid-order column (a rebuild on every
+    # boot), and one the panel made lacked the column rsyslog names.
+    renames={'EventUserID': 'EventUser'},
 )
 
 # rsyslog's companion table (createDB.sql): name/value pairs per event. Declared so the
@@ -179,17 +183,20 @@ class SyslogStore:
         if self._x_cache and (not self.read_only or now - self._x_cache[0] < _COLS_TTL):
             return self._x_cache[1]
         have = None
+        reachable = True
         if self.read_only:
             try:
                 have = {c.name.lower() for c in self._db.describe_table(_T)}
             except Exception:  # pylint: disable=broad-except
                 have = set()
+                reachable = False       # not "no table": nobody could say (see max_id)
 
         def c(name: str) -> str:
             return name if have is None or name.lower() in have else 'NULL'
 
         x = {
             'table': have is None or bool(have),
+            'reachable': reachable,
             'select': ', '.join(c(n) for n in _READ),
             # "Effective host": the parsed hostname, or the sender IP when none was parsed.
             # Used everywhere a host is shown/filtered (table, facet dropdown, chart, filter)
@@ -453,9 +460,19 @@ class SyslogStore:
             (int(last_id), max(1, min(5000, int(limit)))))
         return [self._to_dict(r) for r in rows]
 
-    def max_id(self) -> int:
-        """Highest row id (0 when empty) — used to seed the worker cursor at the tail."""
-        if not self._x()['table']:
+    def max_id(self) -> int | None:
+        """Highest row id (0 when empty) — used to seed the worker cursor at the tail.
+
+        ``None`` when the table could not be read at all (somebody else's table whose
+        description failed — the database is down, the connection refused). Unavailable is
+        not empty: read as 0, the event worker took it for a table that had been switched
+        and moved its cursor to 0, and the next tick that reached the database
+        re-evaluated the whole history. A table that is answered for and simply not there
+        is still empty (0)."""
+        x = self._x()
+        if not x.get('reachable', True):
+            return None
+        if not x['table']:
             return 0
         row = self._db.fetchone(f'SELECT MAX(ID) FROM {_T}')
         return int(row[0]) if row and row[0] is not None else 0

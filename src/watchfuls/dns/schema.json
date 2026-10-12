@@ -45,7 +45,7 @@
         "label":       {"type": "str",  "default": ""},
         "host":        {"type": "str",  "default": "", "group": "query"},
         "record_type": {"type": "str",  "default": "A",
-                        "options": ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SOA"], "group": "query"},
+                        "options": ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SOA", "SRV", "CAA"], "group": "query"},
         "nameserver":  {"type": "str",  "default": "", "placeholder": "system resolver", "placeholder_module": "nameserver", "group": "connection"},
         "expected":    {"type": "str",  "default": "", "group": "query"},
         "timeout":     {"type": "int",  "default": 0, "min": 0, "max": 30, "placeholder_module": "timeout", "group": "connection"}

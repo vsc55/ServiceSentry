@@ -209,3 +209,16 @@ async function apiSend(method, url, body) {
     const bad = raw.status !== undefined && raw.status !== 200;
     return {ok: !bad && !data.error, error: String(data.error || ''), data};
 }
+
+/** Run *fn* once at a time per *key*: a second call while the first is still in flight is
+ *  dropped (and answers `undefined`). A Save button clicked twice — or Enter pressed while the
+ *  POST is still on the wire — otherwise sends two creates, and the server, which only sees two
+ *  valid requests, makes two devices / webhooks / channels. The key is released however *fn*
+ *  ends, so a failed save can be retried. */
+const _ssInFlight = new Set();
+async function ssOnce(key, fn) {
+    if (_ssInFlight.has(key)) return undefined;
+    _ssInFlight.add(key);
+    try { return await fn(); }
+    finally { _ssInFlight.delete(key); }
+}

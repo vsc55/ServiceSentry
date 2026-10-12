@@ -212,6 +212,13 @@ sequenceDiagram
 
 ### Login SSO (OIDC / SAML2 / Teams)
 
+Una cuenta queda **ligada** al proveedor y al identificador con que entró la primera vez
+(`auth_source_id`). Los cuatro caminos —OIDC, SAML2, LDAP y Teams— rechazan que otra identidad
+caiga en ella por coincidir el nombre o el correo: en Teams, si el `oid` no coincide, el UPN o el
+correo solo valen para una cuenta sin vincular o ligada a `entraid` con ese mismo `oid`. Una cuenta
+ligada a OIDC/SAML/LDAP **no** entra por Teams; hay que desvincularla o ligarla a Entra ID. El
+rechazo queda en la auditoría con su motivo.
+
 ```mermaid
 sequenceDiagram
     autonumber

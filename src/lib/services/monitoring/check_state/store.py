@@ -172,27 +172,28 @@ class CheckStateStore(BaseStore):
         eleven to write one is the shape that made a collection slow.
         """
         out: dict = {}
-        try:
-            sql = (f'SELECT uid, module, {self._qk}, item_uid, metric, status, message, '
-                   f'other_data, fail_count, last_change_ts, severity, module_state '
-                   f'FROM {_T}')
-            rows = (self._db.fetchall(sql + ' WHERE module = ?', (module,)) if module
-                    else self._db.fetchall(sql))
-            for r in rows:
-                out[(r[1], r[2], r[4] or '')] = {
-                    'uid':            r[0],
-                    'item_uid':       r[3],
-                    'metric':         r[4] or '',
-                    'status':         bool(r[5]),
-                    'message':        r[6],
-                    'other_data':     _load_json(r[7]),
-                    'fail_count':     int(r[8] or 0),
-                    'last_change_ts': r[9],
-                    'severity':       r[10] or '',
-                    'module_state':   _load_json(r[11]),
-                }
-        except Exception:  # pylint: disable=broad-except
-            pass
+        # No try/except: an unreadable table is NOT an empty one. Read as {}, every check
+        # looked like its first result — every DOWN re-alerted, every fail_count back to
+        # 0 — and a save built on it lost each row's uid and last_change_ts. The caller
+        # decides: the monitor keeps the state it already holds, the panel shows nothing.
+        sql = (f'SELECT uid, module, {self._qk}, item_uid, metric, status, message, '
+               f'other_data, fail_count, last_change_ts, severity, module_state '
+               f'FROM {_T}')
+        rows = (self._db.fetchall(sql + ' WHERE module = ?', (module,)) if module
+                else self._db.fetchall(sql))
+        for r in rows:
+            out[(r[1], r[2], r[4] or '')] = {
+                'uid':            r[0],
+                'item_uid':       r[3],
+                'metric':         r[4] or '',
+                'status':         bool(r[5]),
+                'message':        r[6],
+                'other_data':     _load_json(r[7]),
+                'fail_count':     int(r[8] or 0),
+                'last_change_ts': r[9],
+                'severity':       r[10] or '',
+                'module_state':   _load_json(r[11]),
+            }
         return out
 
     def as_status_dict(self) -> dict:
@@ -285,9 +286,9 @@ class CheckStateStore(BaseStore):
         mod = str(module or '').strip()
         if not mod:
             return False
-        rows = self._rows_for(mod, checks if isinstance(checks, dict) else {},
-                              self.get_all(mod), item_uid_resolver)
         try:
+            rows = self._rows_for(mod, checks if isinstance(checks, dict) else {},
+                                  self.get_all(mod), item_uid_resolver)
             with self._db.transaction():
                 self._db.execute(f'DELETE FROM {_T} WHERE module = ?', (mod,))
                 if rows:
@@ -344,15 +345,15 @@ class CheckStateStore(BaseStore):
         *item_uid_resolver*), preserving each row's ``uid`` and ``last_change_ts``
         while the status is unchanged.
         """
-        existing = self.get_all()
         rows: dict = {}
-        # Snapshot to avoid "dict changed size during iteration" if a worker
-        # thread mutates the live status dict while we persist.
-        for module, checks in list(data.items()):
-            if not isinstance(checks, dict):
-                continue
-            rows.update(self._rows_for(module, checks, existing, item_uid_resolver))
         try:
+            existing = self.get_all()
+            # Snapshot to avoid "dict changed size during iteration" if a worker
+            # thread mutates the live status dict while we persist.
+            for module, checks in list(data.items()):
+                if not isinstance(checks, dict):
+                    continue
+                rows.update(self._rows_for(module, checks, existing, item_uid_resolver))
             with self._db.transaction():
                 self._db.execute(f'DELETE FROM {_T}')
                 if rows:

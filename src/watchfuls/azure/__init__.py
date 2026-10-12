@@ -155,13 +155,33 @@ class Watchful(HealthChecks, ComputeChecks, CostChecks, IdentityChecks,
                     token = self._get_token(tenant, client_id, secret, timeout,
                                             scope=ARM_SCOPE)
                 except AzureError as exc:
+                    # The schema's `alert` (consecutive failures) was offered and ignored: a
+                    # single token blip paged as an outage of every check. Debounced like
+                    # m365/proxmox, the streak persisted under the bare item key.
+                    alert = (int(it.get('alert') or 0)
+                             or int(self.module_default('alert', self._MODULE_DEFAULTS.get('alert', 3))))
+                    effective = self.fail_streak(key, True) < alert
                     for _t, sfx, _m in enabled:
                         if sfx != 'public':
-                            self._emit(f'{key}/{sfx}', False,
+                            self._emit(f'{key}/{sfx}', effective,
                                        self._msg('az_auth_fail', exc.msg), {'name': label})
+                            if effective:
+                                # Nothing is known about the entities this cycle: keep
+                                # their failures as they were rather than let them lapse.
+                                self.carry_forward(f'{key}/{sfx}')
                     enabled = [e for e in enabled if e[1] == 'public']
-        for _tog, _sfx, method in enabled:
+                else:
+                    self.fail_streak(key, False)
+        for _tog, sfx, method in enabled:
             getattr(self, method)(it, key, label, token, timeout)
+            roll_up = f'{key}/{sfx}'
+            # Most checks list only what is WRONG under <item>/<check>/<entity>; one that
+            # recovers stops being reported and its failure was pruned in silence. Settled
+            # here, once, unless the check itself failed (its roll-up is down: the upstream
+            # did not answer, so nothing is known about the entities).
+            if not (self.dict_return.is_exist(roll_up)
+                    and self.dict_return.get_status(roll_up) is False):
+                self.settle_cleared(roll_up, lambda name: self._msg('az_cleared', name))
 
     # ── Running one item on demand (page refresh, connection test) ────────
 

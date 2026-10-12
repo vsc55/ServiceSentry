@@ -45,6 +45,9 @@ EXPECTED = (
     # returns early for one, and it can only do that if this one has already run.
     '_hook_api_token',
     '_hook_csrf_protect',
+    # After authentication and CSRF: an account still on the built-in default password is
+    # sent to the change screen (pages) or answered 403 (API) — for every door in at once.
+    '_hook_must_change_password',
     '_hook_enforce_fqdn',
 )
 

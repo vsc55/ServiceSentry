@@ -46,6 +46,10 @@
     "rename_item_prompt": "Enter new UPS name or identifier:",
     "collections": {"list": "UPS Units"},
     "messages": {
+        "ups_reason_alarm": "alarm",
+        "ups_reason_bypass": "on bypass",
+        "ups_reason_overload": "OVERLOAD",
+        "ups_reason_replace": "replace battery",
         "ups_error":           "UPS: {} - Error: {} 💥",
         "ups_online":          "UPS: {} - Online ({}){} ✅",
         "ups_alert":           "UPS: {} - {} ({}) {}",

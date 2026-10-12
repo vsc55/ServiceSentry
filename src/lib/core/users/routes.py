@@ -15,7 +15,6 @@ Routes registered by this file:
 """
 
 from flask import g, jsonify, session
-from werkzeug.security import check_password_hash, generate_password_hash
 
 from lib.core.constants import BUILTIN_ROLE_UIDS, SYSTEM_USER, is_reserved_username
 from lib.core.users import service as users_svc
@@ -285,6 +284,10 @@ def register(app, wa):
                 session['lang'] = user_lang
             if 'dark_mode' in data:
                 session['dark_mode'] = user.get('dark_mode', wa._DEFAULT_DARK_MODE)
+        if result['password_reset']:
+            # The tokens stay (see the own-password route): say how many, so the screen
+            # that reset it can offer to revoke them too.
+            return jsonify({'ok': True, 'api_tokens': wa._live_api_token_count(username)})
         return jsonify({'ok': True})
 
     @app.route('/api/v1/users/<username>', methods=['DELETE'])
@@ -442,25 +445,18 @@ def register(app, wa):
             return err
         if bad := users_svc.bad_json_field(data, strings=('current_password', 'new_password')):
             return jsonify({'error': wa._t('invalid_json'), 'field': bad}), 400
-        current_pw = data.get('current_password', '')
-        new_pw = data.get('new_password', '')
-        if not new_pw:
-            return jsonify({'error': wa._t('new_password_required')}), 400
         uname = session.get('username', '')
-        user = wa._users.get(uname)
-        if not user:
-            return jsonify({'error': wa._t('user_not_found')}), 404
-        if user.get('auth_source', 'local') != 'local':
-            return jsonify({'error': wa._t('sso_user_no_password')}), 403
-        if not check_password_hash(user.get('password_hash', ''), current_pw):
-            return jsonify({'error': wa._t('wrong_current_password')}), 403
-        pw_err = wa._validate_password(new_pw)
-        if pw_err:
-            return jsonify({'error': wa._t(*pw_err)}), 400
-        user['password_hash'] = generate_password_hash(new_pw)
-        wa._persist_users()
+        was_forced = wa._must_change_password(uname)
+        refused = wa._change_own_password(uname, data.get('current_password', ''),
+                                          data.get('new_password', ''))
+        if refused:
+            status, *msg = refused
+            return jsonify({'error': wa._t(*msg)}), status
         # Invalidate this user's OTHER sessions (keep the current one so they stay
         # logged in here) — a changed password kicks out any stolen token.
         wa._revoke_user_sessions(uname, except_token=session.get('session_token'))
-        wa._audit('password_changed')
-        return jsonify({'ok': True})
+        wa._audit('password_changed', detail={'forced': True} if was_forced else '')
+        # API tokens are NOT revoked: they are credentials of their own, often held by an
+        # integration the owner does not want broken. The answer says how many still work so
+        # the page can offer to revoke them (DELETE /api/v1/account/tokens).
+        return jsonify({'ok': True, 'api_tokens': wa._live_api_token_count(uname)})

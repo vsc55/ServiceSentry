@@ -7,9 +7,11 @@ SS_PYTHON="/usr/bin/python3"
 # Application path
 SS_APP="/opt/ServiSesentry/main.py"
 
-# Address and port the web admin panel listens on
-SS_WEB_HOST="0.0.0.0"
-SS_WEB_PORT="8080"
+# Address and port the web admin panel listens on. Unset (the default) = the panel's
+# own setting, Configuration -> External access (0.0.0.0:8080 until changed there).
+# Set here they win over that setting, which then shows as locked.
+#SS_WEB_HOST="0.0.0.0"
+#SS_WEB_PORT="8080"
 
 # Where the daemon's stdout/stderr go (default /var/log/<service>.log). Empty =
 # discard them, as versions before this one did. The packages install a logrotate

@@ -200,8 +200,29 @@ class _ServerMixin:
             pass
         return out
 
-    @staticmethod
-    def _bind_web_servers(hosts, port: int, wsgi_app):
+    #: Seconds a connection may sit without sending (or reading) a byte before the server
+    #: drops it. Werkzeug's threaded server has no limit: an idle keep-alive connection, or a
+    #: client that opens a socket and never finishes its request, held a thread and a file
+    #: descriptor forever — enough of them and the panel stops accepting connections. It is
+    #: per socket operation, not per request: a long download that keeps moving is not cut.
+    WEB_REQUEST_TIMEOUT = 30
+
+    @classmethod
+    def _request_handler(cls):
+        """Werkzeug's request handler with a socket timeout (``WEB_REQUEST_TIMEOUT``).
+
+        ``StreamRequestHandler.setup()`` applies the class's ``timeout`` to the accepted
+        socket; ``BaseHTTPRequestHandler`` turns the resulting timeout into a closed
+        connection instead of an error."""
+        from werkzeug.serving import WSGIRequestHandler  # noqa: PLC0415
+
+        class _TimeoutRequestHandler(WSGIRequestHandler):
+            timeout = cls.WEB_REQUEST_TIMEOUT
+
+        return _TimeoutRequestHandler
+
+    @classmethod
+    def _bind_web_servers(cls, hosts, port: int, wsgi_app):
         """Try to bind *wsgi_app* on each host at *port*.
 
         Returns ``(servers, failed)`` where ``servers`` is a list of
@@ -222,7 +243,8 @@ class _ServerMixin:
                 # so only our own i18n message is shown — the OSError detail still
                 # reaches it via the exception.
                 with contextlib.redirect_stderr(io.StringIO()):
-                    srv = make_server(_h, port, wsgi_app, threaded=True)
+                    srv = make_server(_h, port, wsgi_app, threaded=True,
+                                      request_handler=cls._request_handler())
                 servers.append((_h, srv))
             except OSError as exc:
                 failed.append((_h, exc))

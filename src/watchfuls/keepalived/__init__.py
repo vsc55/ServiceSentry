@@ -96,7 +96,22 @@ class Watchful(ModuleBase):
         vip_ip = vip_raw.split('/')[0].strip()
         vrid = _to_int(it.get('router_id')) or None      # 0/blank → not set
         vip_extra = {'vip': vip_ip, **({'vrid': vrid} if vrid else {})}
-        timeout = self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
+        # The item's own timeout first (the schema offers it), then the module's.
+        timeout = (_to_int(it.get('timeout'))
+                   or self.module_default('timeout', self._MODULE_DEFAULTS['timeout']))
+        # Consecutive failures before a node/VIP failure counts (the schema offered `alert`
+        # and nothing read it: one lost SSH round trip paged as a failover).
+        alert = (_to_int(it.get('alert'))
+                 or _to_int(self.module_default('alert', self._MODULE_DEFAULTS['alert'])) or 1)
+
+        def _fail(k, msg, extra, severity=None):
+            counted = self.fail_streak(k, True) >= alert
+            self._emit(k, not counted, msg, extra, severity=severity if counted else None)
+
+        def _ok(k, msg, extra):
+            self.fail_streak(k, False)
+            self._emit(k, True, msg, extra)
+
         check_service = it.get('check_service', self._DEFAULTS['check_service'])
         check_vip = it.get('check_vip', self._DEFAULTS['check_vip'])
         check_priority = it.get('check_priority', self._DEFAULTS['check_priority'])
@@ -132,9 +147,9 @@ class Watchful(ModuleBase):
             priority = _to_int(mi.get('priority'))
             out, err, code = self.device_exec(mi, probe, timeout=timeout)
             if code != 0 and not (out or '').strip():
-                self._emit(f'{key}/node/{name}', False,
-                           self._msg('ka_host_unreachable', label, name,
-                                     (err or '').strip() or code), extra)
+                _fail(f'{key}/node/{name}',
+                      self._msg('ka_host_unreachable', label, name,
+                                (err or '').strip() or code), extra)
                 continue
 
             svc = _svc_state(out)
@@ -144,14 +159,14 @@ class Watchful(ModuleBase):
                 node_extra['priority'] = priority
 
             if check_service and svc != 'active':
-                self._emit(f'{key}/node/{name}', False,
-                           self._msg('ka_service', label, name, svc), node_extra)
+                _fail(f'{key}/node/{name}',
+                      self._msg('ka_service', label, name, svc), node_extra)
             else:
                 role = 'MASTER' if holds else 'BACKUP'
                 prio_txt = self._msg('ka_prio_suffix', priority) if priority is not None else ''
-                self._emit(f'{key}/node/{name}', True,
-                           self._msg('ka_node_ok', label, name, role, svc, prio_txt),
-                           node_extra)
+                _ok(f'{key}/node/{name}',
+                    self._msg('ka_node_ok', label, name, role, svc, prio_txt),
+                    node_extra)
                 if svc == 'active':
                     alive_prio.append((name, priority))
             if holds:
@@ -160,18 +175,18 @@ class Watchful(ModuleBase):
         # ── VIP roll-up: exactly one holder is healthy ────────────────────
         if check_vip and vip_ip:
             if len(holders) == 1:
-                self._emit(f'{key}/vip', True,
-                           self._msg('ka_vip_active', label, vip_ip, holders[0][0]),
-                           {**vip_extra, 'holder': holders[0][0], 'holders': 1})
+                _ok(f'{key}/vip',
+                    self._msg('ka_vip_active', label, vip_ip, holders[0][0]),
+                    {**vip_extra, 'holder': holders[0][0], 'holders': 1})
             elif not holders:
-                self._emit(f'{key}/vip', False,
-                           self._msg('ka_vip_none', label, vip_ip),
-                           {**vip_extra, 'holders': 0})
+                _fail(f'{key}/vip',
+                      self._msg('ka_vip_none', label, vip_ip),
+                      {**vip_extra, 'holders': 0})
             else:
                 names = ', '.join(h[0] for h in holders)
-                self._emit(f'{key}/vip', False,
-                           self._msg('ka_vip_split', label, vip_ip, names),
-                           {**vip_extra, 'holders': len(holders)}, severity='warning')
+                _fail(f'{key}/vip',
+                      self._msg('ka_vip_split', label, vip_ip, names),
+                      {**vip_extra, 'holders': len(holders)}, severity='warning')
 
         # ── Priority: the VIP should sit on the highest-priority alive node ─
         if check_priority and len(holders) == 1:

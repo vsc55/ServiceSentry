@@ -410,8 +410,10 @@ async function _atkSave(uid) {
     const done = ssBtnBusy(document.getElementById('btnAtkSave'));
     const res = await apiPut(`/api/v1/tokens/${encodeURIComponent(uid)}`, {permissions: perms});
     done();
-    if (!res || !(res.data || {}).ok) {
-        showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+    // `apiPut` answers the BODY itself — not `{status, data}` like `apiPost` — so `.data`
+    // was always undefined here and every save, successful or not, said "Save error".
+    if (!res || !res.ok) {
+        showToast((res && res.error) || t('save_error'), 'danger');
         return;
     }
     hideInfoModal();

@@ -4,11 +4,13 @@
 
 : "${SS_PYTHON:=/usr/bin/python3}"
 : "${SS_APP:=/opt/ServiSesentry/main.py}"
-: "${SS_WEB_HOST:=0.0.0.0}"
-: "${SS_WEB_PORT:=8080}"
-
 command="${SS_PYTHON}"
-command_args="${SS_APP} --web --web-host ${SS_WEB_HOST} --web-port ${SS_WEB_PORT}"
+# No --web-host/--web-port unless conf.d sets them: the panel's own setting
+# (Configuration -> External access) decides, and forcing 0.0.0.0 here made it do nothing.
+# Exported rather than passed, so the Config UI also shows the field as locked.
+command_args="${SS_APP} --web"
+if [ -n "${SS_WEB_HOST}" ]; then export SS_WEB_HOST; fi
+if [ -n "${SS_WEB_PORT}" ]; then export SS_WEB_PORT; fi
 command_background=true
 # A backgrounded daemon's stdout/stderr go to /dev/null unless named here, which left
 # nothing to read when it would not start. SS_LOG (conf.d) picks the file; set it
@@ -40,6 +42,13 @@ depend() {
 }
 
 start_pre() {
+	# The venv is bound to the python3.X it was built with; a Python upgrade that removed
+	# it leaves an interpreter that does not run. Say so, and how to fix it.
+	if ! "${SS_PYTHON}" -c "import sys" >/dev/null 2>&1; then
+		eerror "${SS_PYTHON} does not run (was Python upgraded?)."
+		eerror "Rebuild the environment as root: sh /opt/ServiSesentry/make-venv.sh"
+		return 1
+	fi
 	# The log is opened for the daemon's user, so it has to be that user's to write.
 	if [ -n "${SS_LOG}" ] && [ -n "${command_user}" ]; then
 		checkpath -f -m 0640 -o "${command_user}" "${SS_LOG}"

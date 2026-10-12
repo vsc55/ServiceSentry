@@ -11,6 +11,7 @@ Routes registered by this file:
 
 from flask import jsonify
 
+from lib.config.spec import cfg_default
 from lib.core.brand import service as brand_svc
 from lib.security.stored_secret import stored_secret_for
 
@@ -61,11 +62,17 @@ def register(app, wa):
                 test_to = v or None
             elif v is not None:
                 cfg[k] = v
-        # The stored SMTP password only goes to the stored server and account: pointed at a
-        # host of one's own, the test handed it over in the AUTH exchange.
+        # The stored SMTP password only goes to the stored server and account, the way it
+        # went: pointed at a host of one's own, the test handed it over in the AUTH exchange
+        # — and so did one that kept the host and switched TLS/STARTTLS off, which sends it
+        # in clear to whoever sits on the path.
+        _stored_email = dict(full_cfg.get('email') or {})
+        for _k in ('smtp_use_tls', 'smtp_use_ssl'):
+            if _stored_email.get(_k) is None:
+                _stored_email[_k] = cfg_default(f'email|{_k}')
         cfg['smtp_password'] = stored_secret_for(
-            data, full_cfg.get('email') or {}, 'smtp_password',
-            ('smtp_host', 'smtp_port', 'smtp_username'))
+            data, _stored_email, 'smtp_password',
+            ('smtp_host', 'smtp_port', 'smtp_username', 'smtp_use_tls', 'smtp_use_ssl'))
         lang = notify_lang(full_cfg)          # global notification language
         lang_key = lang or 'en_EN'
         str_overrides = (full_cfg.get('notif_templates') or {}).get(lang_key) or None

@@ -433,7 +433,12 @@ class HistoryStore(BaseStore):
                     # nada que dibujar, y las dos escrituras tienen que vivir o morir juntas.
                     # `strict`: un fallo aquí deshace también la muestra.
                     self.facts.write(sid, now, medidas, strict=True)
+            self.facts.settle(committed=True)
         except Exception as exc:  # pylint: disable=broad-except
+            # The field ids this sample registered went with the rollback; cached, the engine
+            # would hand the same ids to the next new fields and the cache would file their
+            # measurements under these names.
+            self.facts.settle(committed=False)
             import sys  # noqa: PLC0415
             print(
                 f'[history] record() FAILED {module}/{key}: '

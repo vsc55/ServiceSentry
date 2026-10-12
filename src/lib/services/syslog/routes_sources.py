@@ -18,17 +18,36 @@ Reading a source's messages is the ordinary syslog API with ``?src=<uid>``
 from flask import jsonify, request, session
 
 from lib.security import secret_manager
+from lib.security.stored_secret import stored_secret_for
 from lib.services.syslog import sources as _sources
 from lib.services.syslog.store.sources import DRIVERS, clean_conn
 
 _NETWORK = ('mysql', 'mariadb', 'postgresql')
+#: What decides WHERE a source connects. A stored password, or the credential a source
+#: names, goes only where it already went: a form that changes any of these is a new
+#: destination, and the secret is not carried along to it.
+_TARGET_KEYS = ('driver', 'host', 'port', 'name', 'user', 'path')
+#: Pointing a saved credential at a database is using that credential.
+_CRED_PERM = 'credentials_edit'
+
+
+def _same_target(conn: dict, stored_conn: dict) -> bool:
+    return all(str(conn.get(k) if conn.get(k) is not None else '').strip().lower()
+               == str(stored_conn.get(k) if stored_conn.get(k) is not None else '')
+               .strip().lower() for k in _TARGET_KEYS)
 
 
 def _payload(data: dict, stored: dict | None = None) -> dict:
-    """A request body as the store's shape; a null/absent password keeps *stored*'s."""
+    """A request body as the store's shape; a null/absent password keeps *stored*'s —
+    but only while the connection still goes where *stored*'s did. A body that names a new
+    host (or user, database, file…) and leaves the password blank used to receive the stored
+    one: whoever may edit the configuration but not read it pointed the test at a listener
+    of their own and was handed the password in clear."""
     conn = clean_conn(data.get('data'))
     if conn.get('password') in (None, '') and stored:
-        conn['password'] = (stored.get('data') or {}).get('password') or ''
+        conn['password'] = stored_secret_for(
+            {**conn, 'password': None}, clean_conn(stored.get('data')), 'password',
+            _TARGET_KEYS)
     return {
         'name': str(data.get('name') or '').strip()[:80],
         'enabled': data.get('enabled') is not False,
@@ -57,6 +76,20 @@ def _masked(row: dict, errors: dict) -> dict:
     out['data'] = secret_manager.mask_sensitive(dict(row.get('data') or {}))
     out['error'] = errors.get(row['uid'], '')
     return out
+
+
+def _cred_denied(wa, conn: dict, stored: dict | None) -> bool:
+    """True when *conn* aims a saved credential somewhere the caller may not send it.
+
+    A source that keeps the credential it already had, connecting where it already did,
+    is fine for anyone who may edit the configuration. Choosing a credential, or moving one
+    to another destination, sends that credential's secret to the destination — which is
+    using it, and needs the right to edit credentials."""
+    uid = str(conn.get('cred_uid') or '').strip()
+    if not uid or _CRED_PERM in wa._get_session_permissions():
+        return False
+    st = clean_conn((stored or {}).get('data')) if stored else None
+    return not (st and st.get('cred_uid') == uid and _same_target(conn, st))
 
 
 def register(app, wa):
@@ -106,6 +139,8 @@ def register(app, wa):
         bad = _invalid(p)
         if bad:
             return jsonify({'error': wa._t(bad)}), 400
+        if _cred_denied(wa, p['data'], None):
+            return jsonify({'error': wa._t('access_denied')}), 403
         uid = store.create(p, actor=session.get('username', ''))
         if not uid:
             return jsonify({'error': wa._t('syslog_source_name_taken')}), 409
@@ -128,6 +163,8 @@ def register(app, wa):
         bad = _invalid(p)
         if bad:
             return jsonify({'error': wa._t(bad)}), 400
+        if _cred_denied(wa, p['data'], stored):
+            return jsonify({'error': wa._t('access_denied')}), 403
         if not store.update(uid, p, actor=session.get('username', '')):
             return jsonify({'error': wa._t('syslog_source_name_taken')}), 409
         _registry().invalidate()
@@ -168,4 +205,6 @@ def register(app, wa):
         bad = _invalid({**p, 'name': p['name'] or '-'})
         if bad:
             return jsonify({'ok': False, 'error': wa._t(bad)}), 400
+        if _cred_denied(wa, p['data'], stored):
+            return jsonify({'ok': False, 'error': wa._t('access_denied')}), 403
         return jsonify(_sources.probe(p, getattr(_registry(), 'credentials', None)))

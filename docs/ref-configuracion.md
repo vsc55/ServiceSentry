@@ -368,10 +368,11 @@ Detalle de mecanismos, requisitos y seguridad en [explica-notificaciones.md](exp
 | `web_admin.pw_require_symbol` | bool | `false` | Exigir al menos un símbolo (`!`, `@`, `#`…) en la contraseña |
 | `web_admin.proxy_count` | int | `0` | Número de proxies inversos delante del servidor Flask (0–10). Activa `ProxyFix` de Werkzeug para leer correctamente la IP real del cliente. |
 | `web_admin.port` | int | `8080` | Puerto TCP del servidor web. Puede sobreescribirse con `--web-port`. |
-| `web_admin.host` | string | `"0.0.0.0"` | Dirección IP (IPv4/IPv6) donde escucha el servidor. Puede sobreescribirse con `--web-host`. Validada como IP. |
+| `web_admin.host` | string | `"0.0.0.0"` | Dirección IP (IPv4/IPv6) donde escucha el servidor. Puede sobreescribirse con `--web-host` o `SS_WEB_HOST` (que la deja bloqueada en la UI). Validada como IP. |
 | `web_admin.public_status_detail` | bool | `false` | Mostrar el detalle por ítem en la página pública `/status` |
 | `web_admin.public_url` | string | `""` | Host público (sin esquema) cuando se sirve tras un proxy; **override** de la URL base efectiva. Vacío → se **auto-detecta** de la petición (proxy-aware vía `ProxyFix`/`proxy_count`). Fuente única: `WebAdmin.public_base_url()`, inyectada al front como `SERVER_BASE_URL` y usada por `publicBaseUrl()` (redirect URIs OIDC, ACS SAML2, URL SCIM, deep links) |
 | `web_admin.force_https` | bool | `false` | Generar URLs `https://` (proxy con terminación TLS) |
+| `web_admin.max_redirects` | int | `10` | Redirecciones que sigue el panel al descargar por su cuenta (teselas del mapa, MIB desde una URL, check web), cada salto revalidado por la guarda SSRF. `0` = no seguir ninguna. Rango 0–30. Solo admin. Env: `SS_MAX_REDIRECTS` |
 | `web_admin.force_fqdn` | bool | `false` | Redirigir a `public_url` si se accede por IP u otro host (requiere `public_url`) |
 | `web_admin.frame_ancestors` | string | `""` | Orígenes que pueden embeber el panel en un iframe (CSP `frame-ancestors`), separados por espacios/comas (admite comodines `https://*.dominio`). Vacío = iframe bloqueado (anti-clickjacking). Con lista → se elimina `X-Frame-Options` (no admite lista) y manda la CSP |
 | `web_admin.embed_in_teams` | bool | `false` | Añade los orígenes de Microsoft Teams/Outlook/M365 a la lista anterior, para que la **pestaña personal de Teams** muestre ServiceSentry |
@@ -931,7 +932,9 @@ python3 main.py [opciones]
 | `--web-host HOST` | `SS_WEB_HOST` | IP/hostname donde escucha Flask (por defecto `0.0.0.0`) |
 | `--web-port PORT` | `SS_WEB_PORT` | Puerto TCP del panel web (por defecto `8080` o el valor de `config.json`) |
 
-> Los valores `--web-host` y `--web-port` tienen prioridad sobre `web_admin.host` y `web_admin.port` de `config.json`.
+> Precedencia: `--web-host`/`--web-port` > `SS_WEB_HOST`/`SS_WEB_PORT` > `SS_PORT` > lo guardado (`web_admin.host`/`web_admin.port`) > `0.0.0.0:8080`. `SS_WEB_HOST` y `SS_WEB_PORT` están además registradas en `lib/config/spec.py` (`SS_WEB_PORT` como alias de `SS_PORT` que gana sobre él), así que fijadas en el entorno los campos *Host* y *Puerto web* de **Configuración → Acceso externo** salen bloqueados. Las unidades systemd, los scripts OpenRC y `docker/entrypoint.sh` ya no pasan `--web-host 0.0.0.0`: lo hacían en cada arranque y el campo *Host* no tenía efecto.
+>
+> El servidor corta una conexión que pasa **30 s sin enviar ni leer nada** (`WEB_REQUEST_TIMEOUT` en `lib/web_admin/mixins/server.py`). El servidor con hilos de Werkzeug no tenía límite: cada conexión ociosa (un *keep-alive* abandonado, un cliente que abre el socket y no termina la petición) retenía un hilo y un descriptor para siempre. Es por operación de socket, no por petición: una descarga larga que avanza no se corta.
 
 ### Receptor syslog (`--syslog`)
 

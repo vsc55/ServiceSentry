@@ -83,6 +83,8 @@ class TestHelmPersistence:
         out = subprocess.run(
             [helm, 'template', 't', _HELM, '--set', 'auth.password=x',
              '--set', 'database.password=y', '--set', 'database.host=db',
+             # The key and the token are not what is under test (see test_tanda6_distribution).
+             '--set', 'generateSecrets=true',
              '--set', 'persistence.enabled=true'], capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out.stderr
         assert 'kind: PersistentVolumeClaim' in out.stdout

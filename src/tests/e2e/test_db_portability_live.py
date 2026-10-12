@@ -47,7 +47,9 @@ _STORE_TABLES = ('check_state', 'history', 'history_series', 'history_fact',
                  'ss_deftest', '__ssreb_ss_deftest', '__ssbak_ss_deftest',
                  'ss_dc_feature_live',
                  'ip_bans', 'syslog_drops', 'job_history',
-                 'SystemEvents', 'SystemEventsProperties')
+                 'SystemEvents', 'SystemEventsProperties',
+                 'ss_t6db_keys', 'ss_t6db_nokey', 'ss_t6db_cpk',
+                 '__ssreb_ss_t6db_keys', '__ssbak_ss_t6db_keys')
 
 
 def _mysql_family_cfg(prefix: str):
@@ -280,6 +282,42 @@ def test_a_rebuild_keeps_the_rows_written_while_it_copied(live_db, monkeypatch):
         "AND table_name = '__ssbak_ss_deftest'")
     live_db.execute(f'INSERT INTO {q} (a) VALUES (?)', ('after',)); live_db.commit()
     assert len({r[0] for r in live_db.fetchall(f'SELECT id FROM {q}')}) == 4
+
+
+def test_two_processes_reconciling_at_once_both_boot(live_db):
+    """After an upgrade that adds a column, every process sharing the database reconciles at
+    boot. Two reading the same diff both ran `ADD COLUMN` (and its unique index); the second
+    failed with «duplicate column» and its boot with it — on every engine. The table is now
+    reconciled one process at a time."""
+    import threading
+    from lib.db.schema import Column, Index, TableSpec
+    cfg = {'mysql': _mysql_cfg, 'mariadb': _mariadb_cfg, 'postgresql': _pg_cfg}[live_db._ss_engine]()
+    t = 'ss_deftest'
+    base = (Column('id', 'AUTOINCREMENT', primary_key=True), Column('a', 'TEXT'))
+    for ronda in range(5):
+        live_db.execute_ddl(f'DROP TABLE IF EXISTS {live_db.quote_ident(t)}')
+        live_db.reconcile_table(TableSpec(name=t, columns=base))
+        nuevo = TableSpec(name=t, columns=base + (
+            Column(f'b{ronda}', 'TEXT'), Column(f'c{ronda}', 'TEXT', unique=True)),
+            indexes=(Index(f'ix_{t}_b{ronda}', (f'b{ronda}',)),))
+        dbs = [get_connector(cfg), get_connector(cfg)]
+        barrera, errores = threading.Barrier(2), []
+
+        def boot(db):
+            try:
+                barrera.wait(10)
+                db.reconcile_table(nuevo)
+                db.fetchone('SELECT 1')         # and the connection still serves
+            except Exception as exc:  # pylint: disable=broad-except
+                errores.append(repr(exc))
+        hilos = [threading.Thread(target=boot, args=(d,)) for d in dbs]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join(60)
+        assert not errores, f'round {ronda}: {errores}'
+        cols = {c.name for c in live_db.describe_table(t)}
+        assert {f'b{ronda}', f'c{ronda}'} <= cols
 
 
 def _pg_only(live_db):
@@ -768,12 +806,12 @@ _RSYSLOG_COLS = """
         DeviceReportedTime {dt} NULL,
         Facility smallint NULL,
         Priority smallint NULL,
-        FromHost varchar(60) NULL,
+        FromHost varchar(63) NULL,
         Message text,
         NTSeverity int NULL,
         Importance int NULL,
         EventSource varchar(60),
-        EventUserID varchar(60) NULL,
+        EventUser varchar(60) NULL,
         EventCategory int NULL,
         EventID int NULL,
         EventBinaryData text NULL,
@@ -889,3 +927,149 @@ def test_an_external_source_never_blocks_its_owners_ddl(live_db):
     worker.join(15)
     store._db.close()
     assert done, "the owner's CREATE INDEX waited on the panel's idle read"
+
+
+# ── second audit of 2026-10-12: DB-1, DB-2, DB-6, DB-7 on the real engines ──
+
+def test_a_rebuild_carries_an_undeclared_varchar_column_whole(live_db):
+    """DB-1: a column the spec no longer declares is carried across a rebuild. MySQL/MariaDB
+    recreated it from `data_type` — `varchar` with no length, error 1064 — so the rebuild
+    failed on every boot; its default and NOT NULL must survive too."""
+    from lib.db.schema import Column, TableSpec
+    t = 'ss_t6db_keys'
+    q = live_db.quote_ident(t)
+    live_db.reconcile_table(TableSpec(name=t, columns=(
+        Column('uid', 'TEXT', primary_key=True), Column('n', 'INTEGER'))))
+    live_db.execute_ddl(f"ALTER TABLE {q} ADD COLUMN {live_db.quote_ident('tag')} "
+                        "VARCHAR(40) NOT NULL DEFAULT 'x'")
+    live_db.execute(f"INSERT INTO {q} (uid, n, tag) VALUES ('a', 1, 't')")
+    live_db.commit()
+    live_db.reconcile_table(TableSpec(name=t, columns=(        # n: INTEGER -> REAL, rebuild
+        Column('uid', 'TEXT', primary_key=True), Column('n', 'REAL'))))
+    cols = {c.name: c for c in live_db.describe_table(t)}
+    assert 'tag' in cols and cols['tag'].nullable is False
+    assert live_db.fetchone(f'SELECT tag FROM {q}')[0] == 't'
+    live_db.execute(f"INSERT INTO {q} (uid, n) VALUES ('b', 2)")
+    live_db.commit()
+    assert live_db.fetchone(f"SELECT tag FROM {q} WHERE uid = 'b'")[0] == 'x'
+
+
+def _mysql_only(live_db):
+    if live_db.KIND != 'mysql':
+        pytest.skip('MySQL/MariaDB-specific')
+
+
+def test_keys_that_differ_only_in_case_or_accent_stay_two(live_db):
+    """DB-2: the default collation is case- and accent-insensitive on MySQL/MariaDB, so a
+    unique key merged `Rx` and `rx` (the second history field's sample lost every cycle)."""
+    from lib.core.history.store import HistoryStore
+    h = HistoryStore(live_db)
+    h.record('snmp', 'host1/Gi0/1', True, {'Rx': 1, 'rx': 2, 'cafe': 3, 'café': 4})
+    h.record('web', 'Intranet', True, {'v': 1})
+    h.record('web', 'intranet', False, {'v': 2})
+    got = h.query('snmp', 'host1/Gi0/1', 0, time.time() + 5)
+    assert got and got[-1]['data'] == {'Rx': 1, 'rx': 2, 'cafe': 3, 'café': 4}
+    assert [p['data'] for p in h.query('web', 'Intranet', 0, time.time() + 5)] == [{'v': 1}]
+    assert [p['data'] for p in h.query('web', 'intranet', 0, time.time() + 5)] == [{'v': 2}]
+
+
+def test_an_existing_case_insensitive_unique_key_is_migrated(live_db):
+    """DB-2 on a table made before the fix: its unique TEXT key is converted in place to
+    `utf8mb4_bin` (length kept), and only then does `Rx` beside `rx` fit."""
+    _mysql_only(live_db)
+    from lib.db.schema import Column, Index, TableSpec
+    t = 'ss_t6db_keys'
+    live_db.execute_ddl(f'CREATE TABLE {t} (id INT AUTO_INCREMENT PRIMARY KEY, '
+                        'name VARCHAR(255) CHARACTER SET utf8mb4 '
+                        'COLLATE utf8mb4_general_ci NOT NULL)')
+    live_db.execute_ddl(f'CREATE UNIQUE INDEX ix_t6db_name ON {t} (name)')
+    live_db.execute(f"INSERT INTO {t} (name) VALUES ('Rx')")
+    live_db.commit()
+    spec = TableSpec(name=t, columns=(Column('id', 'AUTOINCREMENT', primary_key=True),
+                                      Column('name', 'TEXT', nullable=False)),
+                     indexes=(Index('ix_t6db_name', ('name',), unique=True),))
+    live_db.reconcile_table(spec)
+    col = {c.name: c for c in live_db.describe_table(t)}['name']
+    assert col.collation == 'utf8mb4_bin' and col.definition.startswith('varchar(255)')
+    live_db.execute(f"INSERT INTO {t} (name) VALUES ('rx')")
+    live_db.commit()
+    assert live_db.fetchone(f'SELECT COUNT(*) FROM {t}')[0] == 2
+    assert live_db.reconcile_table(spec).is_empty           # and the next boot: nothing
+
+
+def test_a_swallowed_error_does_not_leave_a_lock_behind(live_db):
+    """DB-6: MySQL keeps the transaction open after a failed statement. A caller that
+    swallowed the error and only read afterwards held the table's metadata lock for good,
+    and the owner's next ALTER waited behind an idle connection (1205)."""
+    _mysql_only(live_db)
+    import pymysql
+    t = 'ss_t6db_keys'
+    live_db.execute_ddl(f'CREATE TABLE {t} (k VARCHAR(10) PRIMARY KEY, v INT)')
+    live_db.execute(f"INSERT INTO {t} VALUES ('a', 1)")
+    live_db.commit()
+    with pytest.raises(pymysql.err.IntegrityError):
+        live_db.execute(f"INSERT INTO {t} VALUES ('a', 2)")     # the lost race, swallowed
+    for _ in range(3):
+        live_db.fetchall(f'SELECT v FROM {t}')                  # and only reads after it
+    cfg = live_db._config
+    other = pymysql.connect(host=cfg['host'], port=int(cfg['port']), user=cfg['user'],
+                            password=cfg['password'], db=cfg['name'])
+    try:
+        with other.cursor() as cur:
+            cur.execute('SET SESSION lock_wait_timeout = 3')
+            cur.execute(f'ALTER TABLE {t} ADD COLUMN w INT')    # raises 1205 when blocked
+    finally:
+        other.close()
+
+
+def test_a_copy_pages_by_key_and_streams_what_has_none(live_db):
+    """DB-7 on the real engines: keyset pages over a single and a composite key (row-value
+    comparison), the keyless table through the engine's streaming cursor (MySQL's SSCursor,
+    PostgreSQL's named cursor), and the batches restored back."""
+    import io
+    import zipfile
+    from lib.core.backup import archive as bk_archive
+    from lib.core.backup import create as bk_create
+    from lib.core.backup import restore as bk_restore
+    from lib.db.schema import Column, TableSpec
+    live_db.reconcile_table(TableSpec('ss_t6db_keys', (
+        Column('uid', 'TEXT', primary_key=True), Column('v', 'TEXT'))))
+    live_db.reconcile_table(TableSpec('ss_t6db_cpk', (
+        Column('a', 'INTEGER'), Column('b', 'TEXT'), Column('v', 'INTEGER')),
+        composite_pk=('a', 'b')))
+    live_db.reconcile_table(TableSpec('ss_t6db_nokey', (
+        Column('n', 'INTEGER'), Column('v', 'TEXT'))))
+    q = live_db.quote_ident
+    live_db.executemany(f"INSERT INTO {q('ss_t6db_keys')} (uid, v) VALUES (?, ?)",
+                        [(f'u{i:03d}', f'line\n{i}') for i in range(23)])
+    live_db.executemany(f"INSERT INTO {q('ss_t6db_cpk')} (a, b, v) VALUES (?, ?, ?)",
+                        [(a, f'b{b}', a * 10 + b) for a in range(4) for b in range(5)])
+    live_db.executemany(f"INSERT INTO {q('ss_t6db_nokey')} (n, v) VALUES (?, ?)",
+                        [(i % 3, f'x{i}') for i in range(17)])
+    live_db.commit()
+    buf = io.BytesIO()
+    counts = {}
+    with zipfile.ZipFile(buf, 'w') as zf:
+        for t in ('ss_t6db_keys', 'ss_t6db_cpk', 'ss_t6db_nokey'):
+            info = live_db.describe_table(t)
+            cols = [c.name for c in info]
+            pk = [c.name for c in sorted((c for c in info if c.pk), key=lambda c: c.pk)]
+            sizes = []
+
+            def batches(cols=cols, pk=pk, t=t, sizes=sizes):
+                for b in bk_create._table_batches(live_db, t, cols, pk, size=5):
+                    sizes.append(len(b))
+                    yield [[bk_archive.clean_cell(v, True) for v in r] for r in b]
+            counts[t], _sha = bk_archive.write_table_member(zf, f'db/{t}.json', cols,
+                                                            batches())
+            assert max(sizes) <= 5 and sum(sizes) == counts[t], (t, sizes)
+    assert counts == {'ss_t6db_keys': 23, 'ss_t6db_cpk': 20, 'ss_t6db_nokey': 17}
+    before = {t: sorted(map(tuple, live_db.fetchall(f'SELECT * FROM {q(t)}')))
+              for t in counts}
+    with zipfile.ZipFile(buf) as zf, live_db.transaction():
+        for t in counts:
+            cols, batches = bk_archive.iter_table_member(zf, f'db/{t}.json', size=4)
+            assert bk_restore._load_table(live_db, t, cols, batches) == (counts[t], [])
+    after = {t: sorted(map(tuple, live_db.fetchall(f'SELECT * FROM {q(t)}')))
+             for t in counts}
+    assert after == before

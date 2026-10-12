@@ -156,7 +156,9 @@ class Watchful(ModuleBase):
                 continue
             ups_name = (value.get('ups_name', '') or '').strip() or self._DEFAULTS['ups_name']
             user = (value.get('user', '') or '').strip()
-            password = (value.get('password', '') or '').strip()
+            # Never strip a secret: test_connection sends it as typed, and a password that
+            # really ends in a space worked in the test and failed in every check.
+            password = str(value.get('password', '') or '')
             try:
                 port = int(value.get('port', 0) or 0) or 3493
                 timeout = int(value.get('timeout', 0) or 0) or self.module_default('timeout', self._MODULE_DEFAULTS['timeout'])
@@ -265,6 +267,20 @@ class Watchful(ModuleBase):
             reasons.append(f'load {load:.0f}% > {item["alert_load"]}%')
         if not online and not on_battery:
             reasons.append(self._msg('ups_reason_status', status or 'unknown'))
+        # Flags NUT raises while the UPS is still on line, which read as a plain "Online":
+        # an overload trips the output (down); a battery due for replacement, running on
+        # bypass (no protection) or an alarm are warnings.
+        if 'OVER' in tokens:
+            reasons.append(self._msg('ups_reason_overload'))
+        warnings = []
+        if 'RB' in tokens:
+            warnings.append(self._msg('ups_reason_replace'))
+        if 'BYPASS' in tokens:
+            warnings.append(self._msg('ups_reason_bypass'))
+        if 'ALARM' in tokens:
+            warnings.append(self._msg('ups_reason_alarm'))
+        severity = None if reasons or not warnings else 'warning'
+        reasons += warnings
 
         ok = not reasons
         if ok:
@@ -291,7 +307,7 @@ class Watchful(ModuleBase):
             'runtime': runtime_min,           # minutes
             'load': load,
         }
-        self._emit(key, ok, message, other_data, name=name)
+        self._emit(key, ok, message, other_data, name=name, severity=severity)
 
     # ── Web UI — test_connection ──────────────────────────────────────
     @classmethod

@@ -684,8 +684,20 @@ de la información que habrá cuando toque.
       siendo el guardado —un plano en el escritorio de alguien es un plano que la siguiente
       persona no encuentra— pero esto resuelve lo que ella no: mandarle el diseño a alguien,
       guardar una versión antes de reorganizar, y montar una sala partiendo de otra. **La
-      importación no borra racks**: se emparejan por nombre y solo se mueven, y el que el
-      fichero no nombre se queda — dentro hay equipos
+      importación no borra racks**: se emparejan por nombre —solo entre los que quien importa
+      puede editar; el nombre de un rack ajeno crea uno nuevo, sin delatarlo— y solo se mueven,
+      y el que el fichero no nombre se queda — dentro hay equipos. Las **piezas** se emparejan
+      por tipo y etiqueta y se actualizan en su sitio (conservan su uid, sus fuentes y sus
+      puertas); el fichero lleva `ref`, cerradura, modelo, número de serie, pasarela,
+      dispositivo y grupo, y la respuesta cuenta en `lost` lo que no pudo volver, que el panel
+      avisa
+- [x] **Cada empresa ve y toca lo suyo dentro de lo compartido**: en un rack o una sala de
+      otra empresa, sus equipos aparecen solo como ocupación opaca en el alzado del rack; los
+      equipos de sala ajenos no salen en las listas de la sala, ni sus cables en los circuitos
+      de la sede. **Un cable lo autoriza el dueño de cada extremo**: cada empresa cablea sus
+      propios equipos aunque estén en el rack de otra, un cable entre dos empresas necesita a
+      alguien que pueda escribir en las dos, y enchufar a una regleta pide además su rack. Nada
+      se monta sobre un equipo de sala, y la zona general de una planta no cambia de sede
 - [x] **Visor 3D de la sala**, en WebGL del propio navegador y sin librería: el prototipo
       cargaba three.js de un CDN y aquí eso no carga —la política de contenido no ejecuta
       script de terceros y esto se despliega sin salida a internet—, y empotrarla habrían sido

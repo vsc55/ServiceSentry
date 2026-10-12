@@ -39,6 +39,13 @@ depend() {
 }
 
 start_pre() {
+	# The venv is bound to the python3.X it was built with; a Python upgrade that removed
+	# it leaves an interpreter that does not run. Say so, and how to fix it.
+	if ! "${SS_PYTHON}" -c "import sys" >/dev/null 2>&1; then
+		eerror "${SS_PYTHON} does not run (was Python upgraded?)."
+		eerror "Rebuild the environment as root: sh /opt/ServiSesentry/make-venv.sh"
+		return 1
+	fi
 	# The log is opened for the daemon's user, so it has to be that user's to write.
 	if [ -n "${SS_LOG}" ] && [ -n "${command_user}" ]; then
 		checkpath -f -m 0640 -o "${command_user}" "${SS_LOG}"

@@ -447,6 +447,16 @@ class DcimStore:
         cabinet that is gone and the plan looked it up for ever."""
         for row in self.sources.list('feature_uid = ?', (str(uid or ''),)):
             self.sources.update(row['uid'], {'feature_uid': ''})
+        self.unhook_reader(uid)
+
+    def unhook_reader(self, uid: str) -> None:
+        """The doors, cabinets and turnstiles that hung from reader *uid* stop saying so: it is
+        gone, or no longer a reader. Left, they named a gateway that does not exist, and the
+        plan asked for it for ever — the same debris `unlink_feature` clears from sources."""
+        if not str(uid or ''):
+            return
+        for row in self.features.list('hub_uid = ?', (str(uid),)):
+            self.features.update(row['uid'], {'hub_uid': ''})
 
     def items_of(self, rack_uid: str) -> list[dict]:
         return self.items.list('rack_uid = ?', (str(rack_uid or ''),))

@@ -174,13 +174,16 @@ class OrgsStore:
         scope, uid = str(scope or ''), str(uid or '')
         if not uid or not org_scopes.known(scope):
             return False
-        self._db.execute('DELETE FROM org_owner WHERE scope = ? AND uid = ?', (scope, uid))
-        if str(org_uid or ''):
-            self._db.execute(
-                'INSERT INTO org_owner (scope, uid, org_uid, set_at, set_by) '
-                'VALUES (?, ?, ?, ?, ?)',
-                (scope, uid, str(org_uid), BaseStore._now(), str(actor or '')))
-        self._db.commit()
+        # One transaction: on SQLite (autocommit) the DELETE was durable on its own, so an
+        # INSERT that failed after it left the thing un-owned — inheriting from its parent,
+        # visible to a company that was never meant to see it.
+        with self._db.transaction():
+            self._db.execute('DELETE FROM org_owner WHERE scope = ? AND uid = ?', (scope, uid))
+            if str(org_uid or ''):
+                self._db.execute(
+                    'INSERT INTO org_owner (scope, uid, org_uid, set_at, set_by) '
+                    'VALUES (?, ?, ?, ?, ?)',
+                    (scope, uid, str(org_uid), BaseStore._now(), str(actor or '')))
         self.owners._stamp()                    # noqa: SLF001  (its own table's stamp)
         return True
 

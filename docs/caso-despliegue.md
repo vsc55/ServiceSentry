@@ -315,20 +315,61 @@ no en el unit de systemd.
 sudo systemctl enable --now ServiSesentry-web
 ```
 
-El panel arranca en el puerto `8080` escuchando en todas las interfaces. Para
-cambiar el puerto, sobrescribe `ExecStart` con un *drop-in*
-(`sudo systemctl edit ServiSesentry-web`) en vez de editar la unidad, que el paquete o
-`update.sh` reponen:
+El panel escucha donde diga **Configuración → Acceso externo** (campos *Host* y *Puerto
+web*; `0.0.0.0:8080` hasta que se cambien). La unidad ya no pasa `--web-host`/`--web-port`:
+antes forzaba `--web-host 0.0.0.0` en cada arranque y el campo *Host* no hacía nada — quien
+lo ponía a `127.0.0.1` detrás de un proxy seguía escuchando en todas las interfaces. El
+cambio se aplica al reiniciar el servicio.
+
+Para fijarlo desde el sistema en vez de desde el panel, un *drop-in*
+(`sudo systemctl edit ServiSesentry-web`) con las variables de entorno — no edites la
+unidad, que el paquete o `update.sh` reponen. Fijado así, el campo sale **bloqueado** en el
+panel:
 
 ```ini
 [Service]
-ExecStart=
-ExecStart=/opt/ServiSesentry/venv/bin/python /opt/ServiSesentry/main.py --web --web-host 0.0.0.0 --web-port 9090
+Environment=SS_WEB_HOST=127.0.0.1
+Environment=SS_WEB_PORT=9090
+```
+
+Antes de arrancar, la unidad comprueba que el intérprete del venv **funciona**
+(`ExecStartPre`). El venv queda ligado al `python3.X` con el que se creó: una actualización
+de la distribución que retira esa versión lo deja inservible, y el servicio solo decía
+*No such file or directory*. Ahora el diario lo explica y da la salida — reconstruirlo como
+root:
+
+```bash
+sudo sh /opt/ServiSesentry/make-venv.sh
+sudo systemctl restart ServiSesentry ServiSesentry-web
 ```
 
 > Las unidades del repositorio dicen `/usr/bin/python3`; los paquetes, `install.sh` y
 > `update.sh` las instalan reescritas al intérprete del venv con el mismo `sed`
 > (`packaging/build.sh`). Copiarlas a mano exige ese mismo cambio.
+
+### Paquetes, `install.sh` y `update.sh`: lo que conviene saber
+
+- **`/etc/ServiSesentry` y `/var/lib/ServiSesentry` no son del paquete.** Los crea el
+  *postinstall* (`0750`) y sobreviven a una desinstalación. Antes el `.rpm` los declaraba
+  como directorios propios de `root`, y **cada actualización** les devolvía ese dueño: con
+  los servicios corriendo como `servicesentry`, el panel dejaba de poder leer su propia
+  configuración. Si una instalación ya pasó a usuario dedicado (existe el *drop-in*
+  `10-servicesentry-user.conf`), el *postinstall* devuelve los dos directorios a ese usuario
+  antes de reiniciar nada (solo los directorios, sin `-R`).
+- **Desinstalar solo actúa en una desinstalación de verdad** (`remove`/`purge` en deb, `0`
+  en rpm). Un `failed-upgrade` o `abort-upgrade` de dpkg ya no para los servicios ni borra
+  el venv de la versión que sigue instalada.
+- **`update.sh` prepara el venv antes de parar nada.** Es el paso que falla (sin red, un
+  proxy, una rueda que no existe), y con `set -e` dejaba los dos servicios parados. Ahora,
+  si falla, la instalación en marcha no se toca; y si algo falla después de parar, el script
+  vuelve a arrancar lo que estaba corriendo.
+- **`install.sh` encima de una instalación** borra antes el árbol de `/opt/ServiSesentry`
+  (menos el venv), como `update.sh`: copiar encima dejaba los ficheros que la versión nueva
+  ya no trae — un *watchful* retirado se seguía descubriendo y cargando.
+- **`/opt/ServiSesentry/make-venv.sh`** viaja con la aplicación (paquetes, ebuild,
+  `install.sh`, `update.sh`). Es lo que hay que ejecutar, como root, cuando una
+  actualización de Python deja el venv sin intérprete; las unidades y los scripts de OpenRC
+  lo nombran al negarse a arrancar.
 
 ### Gestión de servicios
 
@@ -395,17 +436,21 @@ Edita `/etc/conf.d/ServiSesentry` para cambiar las opciones de monitorización:
 SS_ARGS="-d -c -t 120"
 ```
 
-Edita `/etc/conf.d/ServiSesentry-web` para cambiar las opciones del panel web:
+Por defecto el panel escucha donde diga **Configuración → Acceso externo**. Para fijarlo
+desde el sistema, descomenta en `/etc/conf.d/ServiSesentry-web`:
 
 ```sh
 SS_WEB_HOST="127.0.0.1"   # solo localhost (detrás de un proxy inverso)
 SS_WEB_PORT="9090"
 ```
 
-> Estas variables `SS_*` las lee el CLI de forma nativa como valor por defecto de
-> los argumentos equivalentes (`--web-host`, `--web-port`, etc.), así que exportarlas
-> en el entorno funciona igual que pasarlas como flags. Lista completa en
+> El script las **exporta** solo si tienen valor (ya no pasa `--web-host 0.0.0.0` de
+> serie). El CLI las lee como valor por defecto de `--web-host`/`--web-port`, y el panel
+> muestra esos dos campos bloqueados. Lista completa en
 > [ref-configuracion.md](ref-configuracion.md#variables-de-entorno).
+>
+> `start_pre` comprueba antes que `SS_PYTHON` arranca: si una actualización de Python
+> rompió el venv, lo dice y pide `sh /opt/ServiSesentry/make-venv.sh` como root.
 
 Reinicia el servicio tras editar:
 
@@ -488,14 +533,16 @@ método de despliegue sin pasar por el panel:
 
 | Método | Cómo sobreescribir el puerto |
 | ------ | ---------------------------- |
-| **systemd** | Edita `ExecStart` en `ServiSesentry-web.service`: añade `--web-port 9090` |
+| **systemd** | *Drop-in* con `Environment=SS_WEB_PORT=9090` (`systemctl edit ServiSesentry-web`) |
 | **OpenRC** | Define `SS_WEB_PORT="9090"` en `/etc/conf.d/ServiSesentry-web` |
 | **Docker** | Variable de entorno `SS_WEB_PORT=9090` en `docker/.env` (o en tu fichero compose) |
 | **Manual** | Argumento `--web-port 9090` al lanzar `main.py` |
 
-> El argumento `--web-port` tiene prioridad sobre el valor guardado en
-> `config.json`, por lo que el campo del panel queda sin efecto si el script de
-> inicio define el puerto explícitamente.
+> Precedencia: `--web-host`/`--web-port` > `SS_WEB_HOST`/`SS_WEB_PORT` (y el antiguo
+> `SS_PORT`, por debajo de `SS_WEB_PORT`) > lo guardado en el panel > `0.0.0.0:8080`. Las
+> variables de entorno dejan el campo **bloqueado** en el panel, así que nunca queda un
+> campo editable que no hace nada. Los lanzadores del proyecto (unidades systemd, OpenRC,
+> `entrypoint.sh`) ya no pasan ningún flag de serie.
 
 ---
 

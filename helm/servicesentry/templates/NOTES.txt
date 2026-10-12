@@ -34,8 +34,18 @@ Roles:
    the token in that Secret (e.g. `openssl rand -hex 32`) for the instant poke.
 {{- else if not .Values.control.token }}
 
-2. control.token was empty: a random one was generated into the release Secret and is kept
-   across upgrades.
+2. control.token was empty: the deployed one was reused, or (generateSecrets=true) a random
+   one was generated into the release Secret and is kept across `helm upgrade`.
+{{- end }}
+
+{{- if and .Values.generateSecrets (or (not .Values.secretKey) (not .Values.control.token)) }}
+
+NOTE: generateSecrets=true — values left empty were generated or reused from the live Secrets.
+   That only holds with `helm install`/`helm upgrade`. Never render this release with
+   `helm template` or a GitOps tool: there every render generates a NEW secretKey, and the
+   secrets already stored in the database can no longer be decrypted. Copy the key out
+   (kubectl get secret {{ include "servicesentry.fullname" . }}-secretkey -o jsonpath='{.data.flask_secret}' | base64 -d)
+   and set it as secretKey before you do.
 {{- end }}
 
 {{- if and (ne .Values.database.driver "sqlite") (not .Values.database.host) }}

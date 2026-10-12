@@ -262,7 +262,12 @@ class DeviceBinding:
     def device_os(self, item: dict) -> str:
         """Canonical OS for an item: the bound device's OS, else this machine's."""
         if isinstance(item, dict) and item.get('device_os'):
-            return str(item['device_os']).strip().lower()
+            os_ = str(item['device_os']).strip().lower()
+            # A remote device on `auto` that never reported its platform keeps the token
+            # (see `resolve_os`). Every per-OS table falls back to Linux for it; answering
+            # `auto` here made ram_swap/raid/temperature refuse the same device as
+            # "unsupported" while cpu and the rest checked it.
+            return 'linux' if os_ == 'auto' else os_
         return os_detect.local_os()
 
     @staticmethod
@@ -325,7 +330,8 @@ class DeviceBinding:
             # input until EOF, and with the service's stdin inherited it never got one —
             # the check hung until the timeout killed it, on every cycle.
             res = subprocess.run(cmd, shell=True, capture_output=True,  # noqa: S602
-                                 stdin=subprocess.DEVNULL, text=True, timeout=timeout)
+                                 stdin=subprocess.DEVNULL, text=True, errors='replace',
+                                 timeout=timeout)
             return (res.stdout or ''), (res.stderr or ''), res.returncode
         except Exception as exc:  # pylint: disable=broad-except
             return '', str(exc), -1

@@ -581,7 +581,10 @@ async function _clLogsFetch() {
     if (st.q) qs.set('q', st.q);
     if (st.since) qs.set('since', st.since);
     if (st.until) qs.set('until', st.until);
+    // Only the newest request paints (an older answer arriving late would undo a filter).
+    const seq = st.seq = (st.seq || 0) + 1;
     const data = await apiGet('/api/v1/syslog?' + qs.toString());
+    if (_clLogsState !== st || st.seq !== seq) return;
     const msgs = (data && data.messages) || [];
     const total = (data && data.total) || 0;
     if (stateEl) {

@@ -117,6 +117,7 @@ erDiagram
 | dark_mode | INTEGER | sí | — | |
 | enabled | INTEGER | no | `1` | |
 | auth_source | TEXT | no | `'local'` | |
+| must_change_password | INTEGER | no | `0` | `1` = el próximo inicio de sesión exige cambiar la contraseña (admin inicial con la contraseña por defecto) |
 | extra | TEXT | no | `'{}'` | JSON (overflow: preferencias, `table_config`, `landing_page`…) |
 | created_at | TEXT | no | `''` | |
 | updated_at | TEXT | no | `''` | |
@@ -125,7 +126,7 @@ erDiagram
 Índices: `idx_users_role(role)`.
 
 ### `users_groups` — pertenencia usuario↔grupo (M:N)
-[lib/core/users/store.py:65](../src/lib/core/users/store.py#L65)
+[lib/core/users/store.py:68](../src/lib/core/users/store.py#L68)
 
 | Columna | Tipo | Null | Default | Clave |
 |---|---|---|---|---|
@@ -266,6 +267,7 @@ límite, que es justo lo que un anillo evita.
 | public_key | TEXT | no | `''` | **WebAuthn**: la clave COSE tal como la mandó el autenticador (base64url del CBOR) |
 | alg | INTEGER | no | `0` | **WebAuthn**: el algoritmo, grabado al **registrar** |
 | sign_count | INTEGER | no | `0` | **WebAuthn**: el contador del autenticador; 0 = no lleva |
+| challenge | TEXT | no | `''` | **WebAuthn**: SHA-256 del reto de inicio de sesión emitido; se **consume** (vuelve a `''`) con un solo `UPDATE` al verificar, así que una copia de la cookie no puede repetir la aserción |
 | created_at | TEXT | no | `''` | |
 | updated_at | TEXT | no | `''` | |
 
@@ -2057,12 +2059,12 @@ pusieran, el diff vería diferencias y reconstruiría la tabla.
 | DeviceReportedTime | DATETIME | sí | — | la hora del emisor; sin ella, la de llegada |
 | Facility | INTEGER | sí | — | 0–23 |
 | Priority | INTEGER | sí | — | la **severidad** 0–7 (`%syslogpriority%` en rsyslog) |
-| FromHost | TEXT | sí | — | el hostname del mensaje (máx. 60, el `varchar(60)` de rsyslog) |
+| FromHost | TEXT | sí | — | el hostname del mensaje (el panel lo recorta a 60; rsyslog lo crea `varchar(63)`) |
 | Message | TEXT | sí | — | |
 | NTSeverity | INTEGER | sí | — | de rsyslog (Windows); sin uso |
 | Importance | INTEGER | sí | — | de rsyslog; sin uso |
 | EventSource | TEXT | sí | — | de rsyslog (Windows); sin uso |
-| EventUserID | TEXT | sí | — | de rsyslog (Windows); sin uso |
+| EventUser | TEXT | sí | — | de rsyslog (Windows); sin uso. Se llamó `EventUserID`, que no es el nombre del `createDB.sql`: `renames` lo pasa a `EventUser` en las tablas que creó el panel |
 | EventCategory | INTEGER | sí | — | de rsyslog (Windows); sin uso |
 | EventID | INTEGER | sí | — | de rsyslog (Windows); sin uso |
 | EventBinaryData | TEXT | sí | — | de rsyslog; sin uso |
@@ -2085,6 +2087,13 @@ pusieran, el diff vería diferencias y reconstruiría la tabla.
 `idx_systemevents_host(FromHost, ReceivedAt)`, `idx_systemevents_program(ProgramName, ReceivedAt)`,
 `idx_systemevents_facility(Facility, ReceivedAt)`. rsyslog no crea ninguno: sobre una tabla
 suya llena, la primera vez que arranca el panel los crea, y puede tardar.
+
+Con el nombre `EventUserID` la tabla que crea rsyslog (que dice `EventUser`) parecía no tener
+una columna en mitad del orden: el diff pedía reconstruirla en cada arranque, y en MySQL/MariaDB
+la reconstrucción fallaba (error 1064) al recrear su `EventUser` sobrante como `varchar` sin
+longitud. Ahora el spec usa el nombre de rsyslog, y una columna que el spec no declara se recrea
+con la definición que da el propio motor (`SHOW CREATE TABLE`: longitud, `unsigned`, juego de
+caracteres, valor por defecto bien entrecomillado).
 
 La API sigue sacando las claves de siempre (`ts`, `received_at`, `source`, `hostname`, `app`,
 `procid`, `severity`, `facility`, `msgid`, `message`, `raw`). En una fila escrita con la
@@ -2301,7 +2310,7 @@ default, primary_key, unique) e `Index`, más `composite_pk`, `unique_constraint
   `ux_<tabla>_<col>`.
 - Índices cambiados se eliminan y recrean.
 
-### Camino de reconstrucción — `_apply_rebuild` ([base.py:368](../src/lib/db/base.py#L368))
+### Camino de reconstrucción — `_apply_rebuild` ([base.py:529](../src/lib/db/base.py#L529))
 
 Crear-copiar-borrar-renombrar en una transacción (SQLite/PostgreSQL, DDL transaccional).
 `COALESCE(col, default)` rellena columnas recién NOT NULL. MySQL lo sobreescribe
@@ -2317,12 +2326,26 @@ de reemplazo y hace un `RENAME TABLE` atómico.
 | `TEXT` | `TEXT` | `TEXT` | `TEXT` |
 | `INTEGER` | `INTEGER` | `INT` | `INTEGER` |
 | `DATETIME` | `DATETIME` | `DATETIME` | `TIMESTAMP` |
-| `TEXT_KEY` (TEXT indexado) | `TEXT` | `VARCHAR(255)` | `TEXT` |
+| `TEXT_KEY` (TEXT indexado) | `TEXT` | `VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin` | `TEXT` |
 
 `TEXT_KEY` es el tipo de columna clave/indexada: cualquier columna TEXT que sea PK, única o
 parte de un índice lo usa (MySQL no puede indexar TEXT sin límite → `VARCHAR(255)`). También
 al **añadir** una columna indexada a una tabla que ya existe: antes el `ADD COLUMN` la creaba
 como `TEXT` y el índice fallaba en MySQL.
+
+En MySQL/MariaDB la columna clave lleva además **colación binaria** (`utf8mb4_bin`). La colación
+por defecto del servidor (`utf8mb4_general_ci`, `utf8mb4_0900_ai_ci`, `uca1400_ai_ci` en
+MariaDB 11) no distingue mayúsculas ni acentos, así que una clave única fundía lo que SQLite y
+PostgreSQL mantienen aparte: el campo de histórico `Rx` y su hermano `rx` eran uno (la muestra
+del segundo se perdía en cada ciclo), y las series `Intranet` e `intranet`, una sola. Las tablas
+ya creadas se migran al arrancar (`MySQLConnector._bin_keys`): **solo** las columnas TEXT que
+cubre la PK o un índice/restricción **único** (ahí es donde se pierden filas); un índice normal
+—el `FromHost` de rsyslog— se deja como está, porque cambiarlo reconstruiría una tabla ajena sin
+salvar ninguna fila. El coste es un `ALTER TABLE … MODIFY COLUMN` por columna, que en InnoDB
+**copia la tabla** una vez (el siguiente arranque ya la encuentra binaria). La longitud se toma de
+la columna viva, así que el índice ocupa los mismos bytes que antes y sigue dentro del límite de
+3072 de InnoDB; si el motor lo rechaza (un formato de fila COMPACT antiguo, con su límite de 767),
+se avisa en el registro y el arranque sigue con la tabla como estaba.
 
 `DATETIME` (fecha y hora sin zona) solo lo usa `SystemEvents`, porque así la crea rsyslog.
 Todo lo nuestro sigue guardando instantes como `REAL` (unix).

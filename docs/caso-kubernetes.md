@@ -71,8 +71,8 @@ stringData:
   #   Genérala con:  python -c "import secrets; print(secrets.token_hex(32))"
   #   (64 caracteres hex; un valor mal formado detiene el arranque a propósito)
   # Guárdala fuera del clúster: perderla es perder todos los secretos almacenados.
-  # (Con el Helm chart NO hace falta: monta la clave compartida como fichero y la conserva
-  #  entre upgrades — ver `secretKey` en su values.yaml.)
+  # (Con el Helm chart se fija en `secretKey`: monta la clave compartida como fichero y la
+  #  conserva entre upgrades — ver «Clave de cifrado y token de control (Helm)».)
   SS_SECRET_KEY: replace-with-64-hex-characters
 ---
 apiVersion: v1
@@ -255,6 +255,37 @@ y cuáles **En espera**.
 `syslog` es **active-active**: detrás de su Service, el balanceo reparte los mensajes
 entre réplicas (cada paquete va a una sola), así que escala horizontalmente para
 ingesta — sube `replicas` sin más.
+
+## Clave de cifrado y token de control (Helm)
+
+`secretKey` (la clave de la que se deriva el cifrado de todo secreto guardado) y
+`control.token` (el del poke de control) se **fijan en los valores**:
+
+```bash
+helm upgrade --install ss ./helm/servicesentry \
+  --set secretKey="$(openssl rand -hex 32)" \
+  --set control.token="$(openssl rand -hex 32)" …
+```
+
+Si se dejan vacíos, el chart reutiliza los que ya estén desplegados (`lookup` sobre el
+Secret del release). Si no hay ninguno, **falla al renderizar** con un mensaje que dice qué
+poner — salvo con `generateSecrets: true`.
+
+La razón es `helm template`. `lookup` no ve el clúster ni con `helm template` ni con
+`--dry-run`, ni con las herramientas GitOps que renderizan así (Argo CD, Flux): antes el
+chart generaba entonces una clave **nueva en cada render**, y una clave nueva deja
+**indescifrables** todas las credenciales y tokens ya guardados en la BD (y un token nuevo
+reinicia todos los pods en cada sincronización).
+
+| Valor | Por defecto | Qué hace |
+| ----- | ----------- | -------- |
+| `secretKey` | `""` | Clave compartida (64 hex). Vacía: la desplegada; sin ninguna, falla |
+| `control.token` | `""` | Token del poke. Vacío: el desplegado; sin ninguno, falla (o `control.enabled: false`) |
+| `generateSecrets` | `false` | Permite generar los dos cuando faltan. **Solo** con `helm install`/`helm upgrade` |
+
+Con `generateSecrets: true`, las notas del release lo recuerdan y dan el comando para sacar
+la clave generada (`kubectl get secret <release>-servicesentry-secretkey …`): guárdala y
+pásala como `secretKey` antes de mover el release a GitOps.
 
 ## Persistencia del directorio var (Helm)
 

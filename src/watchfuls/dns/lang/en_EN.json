@@ -17,7 +17,7 @@
         "threads":     "Number of entries to check in parallel.",
         "timeout":     "Resolution timeout in seconds. Per-item value overrides the module-level default.",
         "host":        "Hostname to resolve. If empty, the item key is used.",
-        "record_type": "DNS record type to query: A (IPv4), AAAA (IPv6), CNAME, MX, TXT, NS, PTR or SOA. Types other than A/AAAA require dnspython.",
+        "record_type": "DNS record type to query: A (IPv4), AAAA (IPv6), CNAME, MX, TXT, NS, PTR, SOA, SRV or CAA. Types other than A/AAAA require dnspython.",
         "nameserver":  "DNS server to query (IP or hostname), e.g. 192.168.1.1. Leave empty to use the daemon's system resolver. Requires dnspython.",
         "expected":    "Optional value that must appear (case-insensitive substring match) in at least one resolved record. Leave empty to only check that the query returns results."
     },
@@ -30,7 +30,9 @@
             "TXT":  "TXT — Text record",
             "NS":   "NS — Name server",
             "PTR":  "PTR — Reverse lookup",
-            "SOA":  "SOA — Start of authority"
+            "SOA":  "SOA — Start of authority",
+            "SRV":  "SRV — Service locator",
+            "CAA":  "CAA — Certificate authority authorisation"
         }
     },
     "new_item_key_label": "Host name or identifier:",

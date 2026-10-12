@@ -63,6 +63,9 @@ def _decode(data) -> str:
 # where every other normalisation already happens.
 _MAX_HOSTNAME = 255
 _MAX_APP = 48
+# The text itself is bounded like ``raw`` (8 KiB): a TCP frame may carry 64 KiB, and the
+# message was stored, searched and run through every rule's regex whole.
+_MAX_MESSAGE = 8192
 
 
 def parse_message(data, source: str = '', received_at: str | None = None) -> dict:
@@ -78,6 +81,7 @@ def parse_message(data, source: str = '', received_at: str | None = None) -> dic
     rec = _parse(data, source, received_at)
     rec['hostname'] = rec['hostname'][:_MAX_HOSTNAME]
     rec['app'] = rec['app'][:_MAX_APP]
+    rec['message'] = rec['message'][:_MAX_MESSAGE]
     return rec
 
 
@@ -90,7 +94,7 @@ def _parse(data, source: str, received_at: str | None) -> dict:
         'severity': 5, 'severity_name': 'notice',
         'version': 0, 'timestamp': '', 'hostname': '', 'app': '', 'procid': '',
         'msgid': '', 'message': raw, 'source': source or '', 'received_at': received_at,
-        'raw': raw[:8192],
+        'raw': raw[:_MAX_MESSAGE],
     }
 
     m_pri = _PRI_RE.match(raw)

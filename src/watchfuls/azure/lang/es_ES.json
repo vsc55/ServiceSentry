@@ -79,6 +79,7 @@
         "list": "Suscripciones"
     },
     "messages": {
+        "az_cleared": "{} ya no aparece como afectado ✅",
         "az_no_creds": "se requieren tenant_id, client_id, client_secret y subscription_id",
         "az_auth_fail": "Falló la autenticación con Azure: {}",
         "az_health_fail": "No se pudo leer el Service Health: {}",
@@ -121,6 +122,7 @@
         "az_bud_forecast": "{} se prevé que llegue al {} % de su presupuesto ({} hasta ahora)"
     },
     "messages_vars": {
+        "az_cleared": ["nombre"],
         "az_auth_fail": [
             "error"
         ],

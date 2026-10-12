@@ -41,6 +41,9 @@ src_install() {
 	insinto /opt/ServiSesentry
 	doins -r src/.
 	fperms -R 0755 /opt/ServiSesentry
+	# The venv builder, named by the init scripts when a Python upgrade breaks the venv.
+	exeinto /opt/ServiSesentry
+	doexe packaging/scripts/make-venv.sh
 
 	# OpenRC, which is what a Gentoo box runs by default.
 	doinitd init/openrc/init.d/ServiSesentry

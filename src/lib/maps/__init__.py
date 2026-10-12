@@ -63,6 +63,19 @@ PROBE_Z, PROBE_X, PROBE_Y = 1, 0, 0
 PROBE_TIMEOUT = 10
 
 
+def _unsafe(url: str) -> str:
+    """Why *url* may not be fetched from here (``''`` when it may): see
+    :func:`lib.security.net_guard.validate_external_url`."""
+    from lib.security.net_guard import validate_external_url          # noqa: PLC0415
+    return validate_external_url(url) or ''
+
+
+def _opener():
+    """An opener that validates every redirect hop like the first URL."""
+    from lib.security.net_guard import guarded_opener                 # noqa: PLC0415
+    return guarded_opener()
+
+
 def probe_tile(template: str) -> dict:
     """Traerse UNA tesela desde este servidor y contar qué pasó.
 
@@ -76,12 +89,19 @@ def probe_tile(template: str) -> dict:
     url = (str(template or '').replace('{z}', str(PROBE_Z)).replace('{x}', str(PROBE_X))
            .replace('{y}', str(PROBE_Y)).replace('{s}', 'a'))
     fuera = {'ok': False, 'status': 0, 'type': '', 'bytes': 0, 'detail': ''}
+    # Only http/https, never the metadata range — and the same for every redirect. The
+    # template is whatever the form holds, so without this the button fetched `file://`
+    # (an oracle of which files exist on the panel) or an internal address on request.
+    motivo = _unsafe(url)
+    if motivo:
+        fuera['detail'] = motivo
+        return fuera
     try:
-        from urllib.request import Request, urlopen                  # noqa: PLC0415
+        from urllib.request import Request                           # noqa: PLC0415
         # Con un agente identificado: la política de uso de teselas de OpenStreetMap lo pide, y
         # un cliente que no dice quién es se lleva un 403 de varios servidores.
         req = Request(url, headers={'User-Agent': f'{APP_NAME} map check'})
-        with urlopen(req, timeout=PROBE_TIMEOUT) as r:               # noqa: S310
+        with _opener().open(req, timeout=PROBE_TIMEOUT) as r:
             datos = r.read(65536)
             fuera['status'] = int(getattr(r, 'status', 0) or 200)
             fuera['type'] = str(r.headers.get('Content-Type') or '')
@@ -107,12 +127,12 @@ def fetch_tile(template: str, z: int, x: int, y: int) -> tuple:
     """
     url = (str(template or '').replace('{z}', str(int(z))).replace('{x}', str(int(x)))
            .replace('{y}', str(int(y))).replace('{s}', 'a'))
-    if not url.startswith(('http://', 'https://')):
+    if not url.startswith(('http://', 'https://')) or _unsafe(url):
         return b'', ''
     try:
-        from urllib.request import Request, urlopen                  # noqa: PLC0415
+        from urllib.request import Request                           # noqa: PLC0415
         req = Request(url, headers={'User-Agent': f'{APP_NAME} map check'})
-        with urlopen(req, timeout=PROBE_TIMEOUT) as r:               # noqa: S310
+        with _opener().open(req, timeout=PROBE_TIMEOUT) as r:
             tipo = str(r.headers.get('Content-Type') or '')
             datos = r.read(TILE_MAX)
         # Sólo imágenes: hay servidores que contestan una página de error con un 200 encima, y

@@ -77,6 +77,11 @@ jobs:
 
           test -f /opt/ServiSesentry/main.py || fail "main.py not installed"
           test -d /var/lib/ServiSesentry    || fail "/var/lib/ServiSesentry not created"
+          test -x /opt/ServiSesentry/venv/bin/python || fail "the venv was not built"
+          test -x /opt/ServiSesentry/make-venv.sh    || fail "make-venv.sh not installed"
+          getent passwd servicesentry >/dev/null     || fail "a fresh install did not create servicesentry"
+          test "$(stat -c %U /var/lib/ServiSesentry)" = servicesentry \
+            || fail "/var/lib/ServiSesentry is not the dedicated user's"
 
           if [ "${{ matrix.init }}" = "systemd" ]; then
             test -f /lib/systemd/system/ServiSesentry.service     || fail "ServiSesentry.service not installed"
@@ -91,36 +96,17 @@ jobs:
           echo "OK: installation verified"
 
       # ── service startup tests ─────────────────────────────────────────────────
-
-      # Install only the packages needed to start the app.
-      # Heavy optional drivers (pymssql, pymongo…) are skipped; modules with
-      # empty target lists exit immediately without making real connections.
-      - name: Install Python dependencies
-        run: |
-          set -e
-          if [ "${{ matrix.init }}" = "systemd" ]; then
-            # Debian/Ubuntu: the system Python is externally managed (PEP 668),
-            # so install the dependencies as distro packages instead of via pip.
-            # (python3-flask pulls in python3-werkzeug.)
-            apt-get install -y --no-install-recommends \
-              python3-flask python3-werkzeug python3-cryptography \
-              python3-psutil python3-requests python3-paramiko
-          else
-            # Gentoo stage3 ships no pip and has no synced ebuild tree — bootstrap
-            # pip (ensurepip, else get-pip) and install with the PEP 668 override.
-            python3 -m ensurepip --upgrade 2>/dev/null \
-              || { wget -qO /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py \
-                   && python3 /tmp/get-pip.py --break-system-packages; }
-            python3 -m pip install --break-system-packages --quiet \
-              flask werkzeug cryptography psutil requests paramiko
-          fi
+      # Run the way the services run: the venv install.sh built from the lock, as the
+      # `servicesentry` user a fresh install sets up. The system python with a handful of
+      # distro packages, as root, proved neither the venv nor the permissions.
 
       - name: Test monitoring daemon (single check, no modules)
         run: |
           fail() { echo "FAIL: $1"; exit 1; }
           # `--monitor -t 0` runs one scheduler pass and exits. Bare `main.py` now starts
           # the web panel (the default mode) and would hang here forever.
-          python3 /opt/ServiSesentry/main.py --monitor -t 0 \
+          runuser -u servicesentry -- /opt/ServiSesentry/venv/bin/python \
+            /opt/ServiSesentry/main.py --monitor -t 0 \
             || fail "monitoring daemon exited with non-zero status"
           echo "OK: monitoring daemon single check passed"
 
@@ -133,13 +119,16 @@ jobs:
           # is not an invariant to assert here (and data/config.json is gitignored, so a
           # clean checkout has none to install).
           test -f /var/lib/ServiSesentry/data.db || fail "data.db not created on first run"
+          test "$(stat -c %U /var/lib/ServiSesentry/data.db)" = servicesentry \
+            || fail "data.db is not the dedicated user's"
           echo "OK: first-run database verified"
 
       - name: Test web service startup
         run: |
           fail() { echo "FAIL: $1"; exit 1; }
 
-          python3 /opt/ServiSesentry/main.py --web --web-host 127.0.0.1 --web-port 18080 &
+          runuser -u servicesentry -- /opt/ServiSesentry/venv/bin/python \
+            /opt/ServiSesentry/main.py --web --web-host 127.0.0.1 --web-port 18080 &
           WEB_PID=$!
 
           # Health-check with Python, which is present on all three images — curl is only
@@ -158,6 +147,8 @@ jobs:
 
           kill "$WEB_PID" 2>/dev/null || true
           wait "$WEB_PID" 2>/dev/null || true
+          test -z "$(find /var/lib/ServiSesentry /etc/ServiSesentry -user root)" \
+            || fail "the services left root-owned files in the dedicated user's directories"
           echo "OK: web service started and served /login"
 
       # ── update ───────────────────────────────────────────────────────────────
@@ -181,6 +172,13 @@ jobs:
           # Config files that already existed must not be overwritten.
           grep -q 'ci-preserve-marker' /etc/ServiSesentry/config.json \
             || fail "config.json was overwritten by update.sh"
+
+          # update.sh keeps the user and the venv.
+          test "$(stat -c %U /var/lib/ServiSesentry)" = servicesentry \
+            || fail "update.sh changed the owner of /var/lib/ServiSesentry"
+          runuser -u servicesentry -- /opt/ServiSesentry/venv/bin/python \
+            /opt/ServiSesentry/main.py --monitor -t 0 \
+            || fail "the updated install does not run as the dedicated user"
 
           echo "OK: update verified"
 

@@ -57,6 +57,7 @@ class HealthChecks:
         if not target:                       # blank filter and everything operational
             self._emit(f'{key}/health', True, self._msg('m3_health_ok_all', label, len(rows)),
                        {'name': f'{label} · Service health'})
+            self._settle_health(key, label)
             return
         for s in target:
             svc = str(s.get('service') or '').strip() or '?'
@@ -71,6 +72,13 @@ class HealthChecks:
                 # serviceInterruption = hard down; any other non-OK state = warning.
                 self._emit(f'{key}/health/{slug}', False, self._msg('m3_svc_bad', label, svc, state_txt),
                            extra, severity='' if state == 'serviceInterruption' else 'warning')
+        self._settle_health(key, label)
+
+    def _settle_health(self, key: str, label: str) -> None:
+        """Unfiltered, only the AFFECTED services are listed: one that recovers simply
+        stops appearing. Say so, instead of letting its stored failure be pruned unseen."""
+        self.settle_cleared(f'{key}/health',
+                            lambda name: self._msg('m3_cleared', label, name))
 
     def _check_announcements(self, it: dict, key: str, label: str, token: str,
                              timeout: int) -> None:

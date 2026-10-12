@@ -126,6 +126,13 @@ class ColumnInfo:
     nullable: bool
     default: str | None
     pk: int = 0  # 0 = not part of PK; >0 = 1-based position within the PK
+    # The column's whole definition as the engine itself would write it (MySQL's
+    # ``SHOW CREATE TABLE`` line: ``varchar(60) DEFAULT NULL``), when the connector can tell.
+    # A rebuild recreates a column the spec does not declare from this, verbatim: ``type``
+    # is the bare ``data_type`` (``varchar``), which MySQL refuses without its length.
+    definition: str | None = None
+    # The column's collation where the engine has one per column (MySQL); ``None`` elsewhere.
+    collation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -378,6 +385,8 @@ def _column_ddl(col: Column, type_map: dict, quote, keyed: bool = False,
 def _colinfo_ddl(info: ColumnInfo, quote) -> str:
     """Build a column definition from an introspected (extra) column, preserved
     verbatim during a rebuild so its data is never lost."""
+    if info.definition:
+        return f'{quote(info.name)} {info.definition}'
     parts = [f'{quote(info.name)} {info.type or "TEXT"}']
     if not info.nullable:
         parts.append('NOT NULL')

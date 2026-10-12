@@ -9,7 +9,12 @@ Install: ``pip install PyMySQL``
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import re
 import threading
+from contextlib import contextmanager
+from dataclasses import replace
 
 from lib.config.spec import cfg_get
 from .base import BaseConnector
@@ -22,6 +27,9 @@ try:
     _HAS_PYMYSQL = True
 except ImportError:  # pragma: no cover
     _HAS_PYMYSQL = False
+
+
+_log = logging.getLogger(__name__)
 
 
 def _timeouts(cfg: dict) -> dict:
@@ -40,6 +48,9 @@ class MySQLConnector(BaseConnector):
     """Thread-safe MySQL/MariaDB connector via PyMySQL."""
 
     KIND              = 'mysql'
+    #: Seconds a reconcile waits for another process reconciling the same table (a rebuild of
+    #: a big table can take minutes; past this it goes ahead and tolerates a duplicate).
+    RECONCILE_LOCK_WAIT = 300
     DDL_AUTOINCREMENT = 'INT AUTO_INCREMENT PRIMARY KEY'
     DDL_REAL          = 'DOUBLE'
     # LONGTEXT, not TEXT: MySQL's TEXT holds 64 KB, and the panel keeps more than that in a
@@ -53,7 +64,15 @@ class MySQLConnector(BaseConnector):
     # MySQL/MariaDB can't index a TEXT/BLOB column without a prefix length, so a
     # TEXT column that is a key/index gets a bounded VARCHAR instead (utf8mb4
     # VARCHAR(255) = 1020 bytes, within InnoDB's index-prefix limit).
-    DDL_TEXT_KEY      = 'VARCHAR(255)'
+    #
+    # And binary-collated. The server's default collation (`utf8mb4_general_ci`,
+    # `utf8mb4_0900_ai_ci`, `uca1400_ai_ci` on MariaDB 11) is case- AND accent-insensitive, so a
+    # key compared under it merges what every other engine keeps apart: a history field `Rx`
+    # and its sibling `rx` became one (the second sample lost every cycle), the series
+    # `Intranet` and `intranet` one series. `utf8mb4_bin` compares bytes, as SQLite and
+    # PostgreSQL do. It costs no index length (the bytes per character do not change).
+    DDL_TEXT_KEY      = 'VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin'
+    KEY_COLLATION     = 'utf8mb4_bin'
     # MySQL/MariaDB reject ``TEXT NOT NULL DEFAULT ''`` — a default on a TEXT/BLOB/JSON
     # column is only accepted as an expression (``DEFAULT ('')``, MySQL 8.0.13+ /
     # MariaDB 10.2+). Without this every table declaring one fails to CREATE.
@@ -111,12 +130,21 @@ class MySQLConnector(BaseConnector):
         if conn is None:
             conn = pymysql.connect(**self._connect_kwargs())
             self._local.conn = conn
-        else:
-            try:
-                conn.ping(reconnect=True)
-            except Exception:  # pylint: disable=broad-except
-                conn = pymysql.connect(**self._connect_kwargs())
-                self._local.conn = conn
+            self._settled()
+            return conn
+        loc = self._tx()
+        if loc.pending or loc.explicit:
+            # Mid-transaction: NO ping, and above all no silent reconnect. `ping(reconnect=True)`
+            # on a connection the server dropped opened a fresh one: the statements before the
+            # drop were gone with the old session, the ones after it went on, and the caller's
+            # `commit()` committed half a transaction as if it were whole. A dead connection
+            # here has to fail the statement, which the caller's rollback handles.
+            return conn
+        try:
+            conn.ping(reconnect=True)
+        except Exception:  # pylint: disable=broad-except
+            conn = pymysql.connect(**self._connect_kwargs())
+            self._local.conn = conn
         return conn
 
     def _adapt_sql(self, sql: str) -> str:
@@ -132,6 +160,9 @@ class MySQLConnector(BaseConnector):
         from .schema import create_table_ddl  # noqa: PLC0415
         q = self.quote_ident
         tmp, extras, collist, select_list, has_common = self._rebuild_copy_plan(spec, actual_cols)
+        if extras:
+            defs = self._column_definitions(spec.name)
+            extras = [replace(c, definition=defs.get(c.name) or c.definition) for c in extras]
         bak = f'__ssbak_{spec.name}'
         self.execute_ddl(f'DROP TABLE IF EXISTS {q(tmp)}')
         self.execute_ddl(f'DROP TABLE IF EXISTS {q(bak)}')
@@ -170,6 +201,30 @@ class MySQLConnector(BaseConnector):
         self._recreate_indexes_after_rebuild(spec, actual_indexes)
         self.execute_ddl(f'DROP TABLE IF EXISTS {q(bak)}')
 
+    # One column line of `SHOW CREATE TABLE`: "  `name` varchar(60) DEFAULT NULL,".
+    _CREATE_COL = re.compile(r'^\s*`((?:[^`]|``)+)`\s+(.+?),?\s*$')
+
+    def _column_definitions(self, table: str) -> dict[str, str]:
+        """``{column: definition}`` exactly as the engine prints them in ``SHOW CREATE TABLE``.
+
+        What a rebuild recreates a column the spec does not declare from. `information_schema`
+        cannot give it back whole: `data_type` is `varchar` without its length (MySQL refuses
+        it — error 1064, and a table rsyslog created could never be rebuilt), and MySQL 8
+        reports an expression default as `_utf8mb4\'x\'`, which is not SQL. The engine's own
+        rendering carries the length, `unsigned`, the charset and collation and a default
+        quoted the way the same engine reads it back. Empty when the statement cannot be read
+        (the caller falls back to `column_type`, without the default)."""
+        try:
+            row = self.fetchone(f'SHOW CREATE TABLE {self.quote_ident(table)}')
+        except Exception:  # pylint: disable=broad-except
+            return {}
+        out = {}
+        for line in str(row[1] if row else '').splitlines()[1:]:
+            m = self._CREATE_COL.match(line)
+            if m:
+                out[m.group(1).replace('``', '`')] = m.group(2)
+        return out
+
     def _rebuild_catch_up_sql(self, spec, actual_cols, collist, select_list, *,
                               src: str, dst: str, ignore: bool) -> str | None:
         """``INSERT [IGNORE] INTO dst (cols) SELECT … FROM src`` of the rows *src* has and
@@ -190,12 +245,19 @@ class MySQLConnector(BaseConnector):
 
     def execute_ddl(self, ddl: str) -> None:
         conn = self._conn()
-        with conn.cursor() as cur:
-            for stmt in ddl.split(';'):
-                stmt = stmt.strip()
-                if stmt:
-                    cur.execute(stmt)
+        try:
+            with conn.cursor() as cur:
+                for stmt in ddl.split(';'):
+                    stmt = stmt.strip()
+                    if stmt:
+                        cur.execute(stmt)
+        except pymysql.Error:
+            self._failed(conn)
+            raise
         conn.commit()
+        # DDL commits implicitly, and so did this: whatever was pending is settled. Left
+        # flagged, the next read would never end its transaction.
+        self._settled()
 
     def add_column_if_missing(
         self, table: str, column: str, col_type: str
@@ -209,10 +271,42 @@ class MySQLConnector(BaseConnector):
                 (table, column),
             )
             if cur.fetchone()[0] == 0:
-                cur.execute(
-                    f'ALTER TABLE `{table}` ADD COLUMN `{column}` {col_type}'
-                )
+                try:
+                    cur.execute(
+                        f'ALTER TABLE `{table}` ADD COLUMN `{column}` {col_type}'
+                    )
+                except pymysql.MySQLError as exc:
+                    # Another process added it between the check and the ALTER: done.
+                    if not self._is_duplicate_object(exc):
+                        raise
         conn.commit()
+
+    def _is_duplicate_object(self, exc: Exception) -> bool:
+        # 1060 duplicate column, 1061 duplicate key name.
+        return bool(getattr(exc, 'args', None)) and exc.args[0] in (1060, 1061)
+
+    @contextmanager
+    def _reconcile_lock(self, table: str):
+        """`GET_LOCK` — a named lock of the session, untouched by the DDL's implicit commits.
+        The name is hashed: MySQL caps it at 64 characters."""
+        name = 'ss_reconcile_' + hashlib.md5(str(table).encode('utf-8')).hexdigest()
+        got = False
+        try:
+            row = self.fetchone('SELECT GET_LOCK(?, ?)', (name, self.RECONCILE_LOCK_WAIT))
+            got = bool(row and row[0] == 1)
+            if not got:
+                _log.warning('reconcile %s: lock not obtained in %ss — going ahead; a '
+                             'concurrent duplicate is tolerated', table, self.RECONCILE_LOCK_WAIT)
+        except Exception as exc:  # pylint: disable=broad-except
+            _log.warning('reconcile %s: GET_LOCK failed (%s) — going ahead unlocked', table, exc)
+        try:
+            yield
+        finally:
+            if got:
+                try:
+                    self.fetchone('SELECT RELEASE_LOCK(?)', (name,))
+                except Exception as exc:  # pylint: disable=broad-except
+                    _log.warning('reconcile %s: RELEASE_LOCK failed: %s', table, exc)
 
     def list_columns(self, table: str) -> set[str]:
         conn = self._conn()
@@ -224,10 +318,61 @@ class MySQLConnector(BaseConnector):
             )
             return {row[0] for row in cur.fetchall()}
 
-    def reconcile_table(self, spec):
-        diff = super().reconcile_table(spec)
+    def _reconcile(self, spec):
+        diff = super()._reconcile(spec)
         self._widen_text(spec)
+        self._bin_keys(spec)
         return diff
+
+    def _bin_keys(self, spec) -> None:
+        """Give the text columns a UNIQUE key or the primary key covers a binary collation.
+
+        A table created before `DDL_TEXT_KEY` carried `COLLATE utf8mb4_bin` keeps the server's
+        case/accent-insensitive collation, and the diff compares types, not collations — so
+        nothing else would ever fix it. Only unique and primary keys: those are where the
+        collation merges two rows into one. A plain index (rsyslog's `FromHost`) is left as it
+        is; changing it would rebuild somebody else's table for no lost row.
+
+        Cost: `MODIFY COLUMN` with a new collation on an indexed column copies the table (once
+        — the next boot finds it binary). The length is kept from the live column, so the
+        index stays within InnoDB's 3072-byte limit exactly as before. A refusal (an old
+        COMPACT row format, a duplicate that only differed in case cannot exist under a
+        unique key) is logged and the boot carries on with the table as it was.
+        """
+        from .schema import default_clause                               # noqa: PLC0415
+        from .schema import _index_key_cols                              # noqa: PLC0415
+        unique = set(spec.pk_columns)
+        unique.update(c.name for c in spec.columns if c.unique)
+        for uc in spec.unique_constraints:
+            unique.update(uc)
+        for idx in spec.indexes:
+            if idx.unique:
+                unique.update(_index_key_cols(idx.columns))
+        if not unique:
+            return
+        actual = {c.name: c for c in self.describe_table(spec.name)}
+        q = self.quote_ident
+        for col in spec.columns:
+            got = actual.get(col.name)
+            if (col.name not in unique or col.type.upper() != 'TEXT' or got is None
+                    or not got.collation or got.collation == self.KEY_COLLATION):
+                continue
+            native = (got.definition or 'varchar(255)').replace(' NOT NULL', '')
+            if not native.lower().startswith(('varchar', 'char')):
+                continue
+            clause = f'{native} CHARACTER SET utf8mb4 COLLATE {self.KEY_COLLATION}'
+            if not col.nullable or col.primary_key or col.name in spec.composite_pk:
+                clause += ' NOT NULL'
+            if col.default is not None:
+                clause += ' ' + default_clause(col.default, native, self.DDL_TEXT_DEFAULT_PARENS)
+            try:
+                self.execute_ddl(
+                    f'ALTER TABLE {q(spec.name)} MODIFY COLUMN {q(col.name)} {clause}')
+            except Exception as exc:  # pylint: disable=broad-except
+                import logging  # noqa: PLC0415
+                logging.getLogger(__name__).warning(
+                    'Table %s: column %s kept its collation %s (%s)',
+                    spec.name, col.name, got.collation, exc)
 
     def _widen_text(self, spec) -> None:
         """Turn this table's plain TEXT columns into LONGTEXT, in place.
@@ -263,19 +408,25 @@ class MySQLConnector(BaseConnector):
         with conn.cursor() as cur:
             cur.execute(
                 'SELECT column_name, data_type, is_nullable, column_default, '
-                'column_key FROM information_schema.columns '
+                'column_key, column_type, collation_name FROM information_schema.columns '
                 'WHERE table_schema=DATABASE() AND table_name=%s '
                 'ORDER BY ordinal_position',
                 (table,),
             )
-            return [
-                ColumnInfo(
-                    name=r[0], type=r[1] or '',
-                    nullable=(str(r[2]).upper() == 'YES'),
-                    default=r[3], pk=(1 if r[4] == 'PRI' else 0),
-                )
-                for r in cur.fetchall()
-            ]
+            rows = cur.fetchall()
+        self._end_read(conn)
+        out = []
+        for r in rows:
+            nullable = str(r[2]).upper() == 'YES'
+            # The type with its length (`varchar(60)`, `int(10) unsigned`), for a rebuild that
+            # has to recreate this column without the spec's help. No default here: MySQL
+            # reports it in a form that is not always SQL (see `_column_definitions`).
+            out.append(ColumnInfo(
+                name=r[0], type=r[1] or '', nullable=nullable,
+                default=r[3], pk=(1 if r[4] == 'PRI' else 0),
+                definition=(f'{r[5]}{"" if nullable else " NOT NULL"}' if r[5] else None),
+                collation=r[6]))
+        return out
 
     def list_indexes(self, table: str) -> list[IndexInfo]:
         """List *table*'s secondary indexes from ``information_schema.statistics``
@@ -336,49 +487,91 @@ class MySQLConnector(BaseConnector):
         if not loc.pending and not loc.explicit and not self._config.get('autocommit'):
             conn.commit()
 
-    def fetchall(self, sql: str, params: tuple = ()) -> list[tuple]:
+    def _failed(self, conn) -> None:
+        """What PostgreSQL's connector does on a failed statement, for the same reason.
+
+        MySQL does not abort the transaction on an error: the statement fails and the
+        transaction stays open. So a caller that swallowed an expected error (a lost race on a
+        unique key) and went on reading left it open for good — `pending` stayed set, no read
+        ever ended it, and the metadata lock it held made the next `ALTER` on that table wait
+        (error 1205 after `lock_wait_timeout`) behind an idle connection. Outside `begin()` it
+        is rolled back here; inside, `transaction()` does it."""
+        if not self._tx().explicit:
+            try:
+                conn.rollback()
+            except Exception:  # pylint: disable=broad-except
+                pass
+            self._settled()
+
+    def _run(self, sql, params, how, *, write: bool = False, many: bool = False):
         self._trace_sql(sql)
         conn = self._conn()
-        with conn.cursor() as cur:
-            cur.execute(self._adapt_sql(sql), params)
-            rows = cur.fetchall()
+        if write:
+            self._tx().pending = True
+        try:
+            with conn.cursor() as cur:
+                if many:
+                    cur.executemany(self._adapt_sql(sql), params)
+                else:
+                    cur.execute(self._adapt_sql(sql), params)
+                out = how(cur)
+        except pymysql.Error:
+            self._failed(conn)
+            raise
+        return conn, out
+
+    def fetchall(self, sql: str, params: tuple = ()) -> list[tuple]:
+        conn, rows = self._run(sql, params, lambda cur: cur.fetchall())
         self._end_read(conn)
         return rows
 
     def fetchone(self, sql: str, params: tuple = ()) -> tuple | None:
-        self._trace_sql(sql)
-        conn = self._conn()
-        with conn.cursor() as cur:
-            cur.execute(self._adapt_sql(sql), params)
-            row = cur.fetchone()
+        conn, row = self._run(sql, params, lambda cur: cur.fetchone())
         self._end_read(conn)
         return row
+
+    def iter_query(self, sql: str, params: tuple = (), size: int = 5000):
+        """Stream a SELECT through an unbuffered cursor (``SSCursor``): PyMySQL's default
+        cursor reads the whole result into memory before the first row is handed over."""
+        self._trace_sql(sql)
+        conn = self._conn()
+        cur = conn.cursor(pymysql.cursors.SSCursor)
+        try:
+            cur.execute(self._adapt_sql(sql), params)
+            while True:
+                rows = cur.fetchmany(max(1, int(size)))
+                if not rows:
+                    break
+                yield list(rows)
+        except pymysql.Error:
+            self._failed(conn)
+            raise
+        finally:
+            try:
+                cur.close()            # drains what is left, or the connection is unusable
+            except Exception:  # pylint: disable=broad-except
+                pass
+        self._end_read(conn)
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def execute(self, sql: str, params: tuple = ()) -> int:
-        self._trace_sql(sql)
-        conn = self._conn()
-        self._tx().pending = True
-        with conn.cursor() as cur:
-            cur.execute(self._adapt_sql(sql), params)
-            return cur.rowcount
+        return self._run(sql, params, lambda cur: cur.rowcount, write=True)[1]
 
     def executemany(self, sql: str, params_list: list[tuple]) -> int:
-        self._trace_sql(sql)
-        conn = self._conn()
-        self._tx().pending = True
-        with conn.cursor() as cur:
-            cur.executemany(self._adapt_sql(sql), params_list)
-            return cur.rowcount
+        return self._run(sql, params_list, lambda cur: cur.rowcount, write=True, many=True)[1]
 
     def commit(self) -> None:
         self._conn().commit()
         self._settled()
 
     def rollback(self) -> None:
-        self._conn().rollback()
-        self._settled()
+        # Settled even when the driver raises (a connection the server dropped): left flagged,
+        # `_conn` would keep handing out the dead connection without the ping that replaces it.
+        try:
+            self._conn().rollback()
+        finally:
+            self._settled()
 
     # ── Maintenance ───────────────────────────────────────────────────────────
 
@@ -433,6 +626,7 @@ class MySQLConnector(BaseConnector):
             except Exception as exc:  # pylint: disable=broad-except
                 self._dbg_maintenance(table, statement, exc)
         conn.commit()
+        self._settled()
 
     @staticmethod
     def _dbg_maintenance(table: str, statement: str, exc: Exception) -> None:

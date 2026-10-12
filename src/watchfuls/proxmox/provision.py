@@ -16,7 +16,7 @@ creating is the one the API would have needed.
 import json
 import re
 
-from .client import _split_devices
+from .client import _split_devices, url_host
 
 # reads (cluster/ceph/ha status, nodes, network) need Sys.Audit; reading storage
 # status (/nodes/{node}/storage) needs Datastore.Audit. Still far tighter than the
@@ -123,7 +123,7 @@ class ProxmoxProvision:
         connected = False
         last_err = None
         for cand in candidates:
-            reason = validate_external_url(f'https://{cand}:{ssh_port}')
+            reason = validate_external_url(f'https://{url_host(cand)}:{ssh_port}')
             if reason:
                 last_err = f'{cand}: bloqueado ({reason})'
                 continue

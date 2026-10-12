@@ -80,8 +80,8 @@ function _historyRenderSeriesList() {
                 const checked   = _historyInCompare(s.module, s.key);
                 const disabled  = !mk || (activeMetric && mk !== activeMetric && !checked);
                 html += `
-<button class="btn btn-sm w-100 text-start d-flex align-items-center gap-1 mb-1 ${checked ? 'btn-primary' : 'btn-outline-secondary'}"
-        style="padding:.25rem .5rem .25rem 1.25rem;font-size:.8rem${disabled ? ';opacity:.4;pointer-events:none' : ''}"
+<button class="btn btn-sm w-100 text-start d-flex align-items-center gap-1 mb-1 ${checked ? 'btn-primary' : 'btn-secondary'}"
+        style="padding:.25rem .5rem .25rem 1.25rem;font-size:.8rem"${disabled ? ' disabled' : ''}
         data-hmod="${esc(s.module)}" data-hkey="${esc(s.key)}"
         onclick="_historyToggleCompareMember(this.dataset.hmod, this.dataset.hkey)"
         title="${escAttr(!mk ? t('history_compare_not_numeric') : (disabled ? t('history_compare_unit_mismatch') : ''))}">
@@ -92,7 +92,7 @@ function _historyRenderSeriesList() {
             } else {
                 const active = s.module === _historyMod && s.key === _historyKey;
                 html += `
-<button class="btn btn-sm w-100 text-start d-flex align-items-center gap-1 mb-1 ${active ? 'btn-primary' : 'btn-outline-secondary'}"
+<button class="btn btn-sm w-100 text-start d-flex align-items-center gap-1 mb-1 ${active ? 'btn-primary' : 'btn-secondary'}"
         style="padding:.25rem .5rem .25rem 1.25rem;font-size:.8rem"
         data-hmod="${esc(s.module)}" data-hkey="${esc(s.key)}"
         onclick="_historySelectSeries(this.dataset.hmod, this.dataset.hkey, event)">

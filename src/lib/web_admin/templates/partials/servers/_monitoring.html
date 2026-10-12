@@ -312,7 +312,11 @@ async function _deviceLogsFetch() {
                                      sort: st.sort || 'ts', order: st.order || 'desc' });
     for (const k of ['severity_max', 'q', 'since', 'until']) if (st[k] !== '' && st[k] != null) qs.set(k, st[k]);
     if (st.src && st.src !== 'internal') qs.set('src', st.src);
+    // Only the newest request paints: a filter, a page or another device asked while an older
+    // request was still on the wire must not be overwritten by that older answer.
+    const seq = st.seq = (st.seq || 0) + 1;
     const data = await apiGet('/api/v1/syslog?' + qs.toString());
+    if (_deviceLogsState !== st || st.seq !== seq) return;
     if (!data && st.src && st.src !== 'internal' && stateEl) {
         // The external source did not answer: say so instead of "no messages".
         st.rows = [];
@@ -411,8 +415,9 @@ function _goToHistory(mod, key) {
         localStorage.setItem('ss_history_key', key);
     } catch (e) { /* ignore */ }
     bootstrap.Modal.getInstance(document.getElementById('deviceModal'))?.hide();
-    window.location.href = '/history?module=' + encodeURIComponent(mod)
-                         + '&key=' + encodeURIComponent(key);
+    // In the same shell when the History pane is here (SPA); the stored series above is
+    // what it opens on. Elsewhere, the shareable URL.
+    _navUrl('/history?module=' + encodeURIComponent(mod) + '&key=' + encodeURIComponent(key));
 }
 
 async function testDeviceRow(uid) {

@@ -454,8 +454,10 @@ async function _accTokenSave(uid) {
     const res = await apiPut(`/api/v1/account/tokens/${encodeURIComponent(uid)}`,
                              {permissions: perms});
     done();
-    if (!res || !(res.data || {}).ok) {
-        showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+    // `apiPut` answers the BODY itself — not `{status, data}` like `apiPost` — so `.data`
+    // was always undefined here and every save, successful or not, said "Save error".
+    if (!res || !res.ok) {
+        showToast((res && res.error) || t('save_error'), 'danger');
         return;
     }
     // Only on success: a scope that was refused has to leave the picker on screen with the
@@ -561,5 +563,24 @@ function _accTokenRevoke(uid, name) {
         }
         showToast(t('api_token_revoked_ok'), 'success');
         _accTokensLoad();
+    });
+}
+
+/** After a password change or reset: the account's API tokens still work — say so, and offer
+ *  to revoke them all. Not done automatically on purpose: a token is often held by an
+ *  integration, and a password change must not break it behind its owner's back.
+ *  `url` is the revoke-all route (`/api/v1/account/tokens` for one's own, or
+ *  `/api/v1/users/<name>/tokens` for an administrator's reset). */
+function _offerRevokeTokens(count, url, onDone) {
+    const n = parseInt(count, 10) || 0;
+    if (n <= 0) return;
+    showConfirmModal(tf('api_tokens_live_msg', n), async () => {
+        const res = await apiDelete(url);
+        if (!res || !(res.data || {}).ok) {
+            showToast((res && res.data && res.data.error) || t('save_error'), 'danger');
+            return;
+        }
+        showToast(tf('api_tokens_revoked_n', (res.data || {}).revoked || 0), 'success');
+        if (typeof onDone === 'function') onDone();
     });
 }

@@ -11,7 +11,7 @@ never overlap.
 from __future__ import annotations
 
 from lib.services.embedded import _EmbeddedBase
-from lib.services.monitoring.manager import _MonitoringMixin
+from lib.services.monitoring.manager import ALERT_DRAIN_TIMEOUT, _MonitoringMixin
 from lib.core.users.service import AdminOpError
 
 
@@ -110,6 +110,12 @@ class EmbeddedMonitor(_EmbeddedBase, _MonitoringMixin):
     def on_shutdown(self) -> None:
         # Quiet: the scheduler is told to end, without the operator-stop audit/notification.
         self._monitoring_stop_event.set()
+        # The process is about to die and the sender thread with it: let the alerts the
+        # last cycle queued go out first (bounded — a dead channel must not hold the exit).
+        try:
+            self._monitoring_drain_alerts(ALERT_DRAIN_TIMEOUT)
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     @property
     def enabled(self) -> bool:

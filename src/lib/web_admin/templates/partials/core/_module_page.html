@@ -91,7 +91,7 @@ async function _mpRefresh(pageId, itemKey) {
     const d = r && r.data;
     st.busy = false;
     if (d && d.ok) st.data = { ...st.data, sections: d.sections, counts: d.counts, live: true };
-    else showToast(`${esc(t('page_refresh_error'))}: ${esc((d && d.message) || '')}`, 'danger');
+    else showToast(`${t('page_refresh_error')}: ${(d && d.message) || ''}`, 'danger');   // textContent: no esc()
     _mpRender(pageId);
 }
 

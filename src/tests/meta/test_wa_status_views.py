@@ -265,7 +265,8 @@ class TestOnlyProblemsIsHonest:
         """If that is how you work, you should not have to say so on every visit."""
         core = _core()
         assert '_ST_PROBLEMS_KEY' in core
-        assert re.search(r'let _stOnlyProblems = localStorage\.getItem\(_ST_PROBLEMS_KEY\)', core)
+        # Through ssLsGet: blocked storage must not abort the bundle (test_wa_tanda6_panel).
+        assert re.search(r'let _stOnlyProblems = ssLsGet\(_ST_PROBLEMS_KEY\)', core)
         assert '_ST_PROBLEMS_KEY' in _fn(core, '_stToggleProblems'), 'toggling does not store it'
 
     def test_the_totals_beside_it_still_report_everything(self):

@@ -7,7 +7,7 @@
 // ── State ─────────────────────────────────────────────────────────
 // Which layout is on screen. Persisted so the choice survives a reload while the
 // two are being compared.
-let _permView = localStorage.getItem('ss_perm_view') === 'split' ? 'split' : 'matrix';
+let _permView = ssLsGet('ss_perm_view') === 'split' ? 'split' : 'matrix';
 // uid -> Set(permissions). Only roles the user has TOUCHED get an entry; everything
 // else reads live from rolesData, so the 30 s access poll can refresh untouched roles
 // underneath without discarding an edit in progress.

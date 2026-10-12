@@ -2359,7 +2359,10 @@ class MibAdmin:
             return {'ok': False, 'message': 'Invalid filename derived from URL'}
 
         try:
-            resp = _requests.get(url, timeout=15)
+            # Every redirect hop validated like the URL above: followed blindly, a 302 from
+            # a server of one's own reached the metadata address the check had just refused.
+            from lib.security.net_guard import guarded_get  # noqa: PLC0415
+            resp = guarded_get(url, getter=_requests.get, timeout=15)
             resp.raise_for_status()
             content = resp.text
         except Exception as exc:  # noqa: BLE001

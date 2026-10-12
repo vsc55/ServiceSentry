@@ -26,17 +26,32 @@ dispatcher (:mod:`lib.core.notify.telegram`), the monitor's cycle notifier
 route.  There is no background/queued client — sending is synchronous.
 """
 
+import time
+
 import requests
 
 __all__ = ['send_telegram']
 
 _API_SEND = 'https://api.telegram.org/bot{token}/sendMessage'
+#: The longest a 429 is waited out (s) — Telegram's ``retry_after`` is honoured up to it.
+_RETRY_AFTER_MAX = 30
+#: How many times a 429 is retried before it is returned as the failure it is.
+_RETRY_429 = 2
 
 
 def redact(text: str, token: str) -> str:
     """*text* with the bot *token* replaced by ``***``."""
     text = str(text)
     return text.replace(token, '***') if token else text
+
+
+def _retry_after(result) -> float:
+    """Seconds Telegram asked to wait in a 429 (``parameters.retry_after``), capped."""
+    try:
+        wait = float(((result.json() or {}).get('parameters') or {}).get('retry_after') or 1)
+    except Exception:  # pylint: disable=broad-except
+        wait = 1.0
+    return max(0.0, min(float(_RETRY_AFTER_MAX), wait))
 
 
 def send_telegram(token, chat_id, text, *, parse_mode=None, timeout=10):
@@ -52,14 +67,23 @@ def send_telegram(token, chat_id, text, *, parse_mode=None, timeout=10):
     data = {'chat_id': chat_id, 'text': text}
     if parse_mode:
         data['parse_mode'] = parse_mode
-    try:
-        result = requests.post(_API_SEND.format(token=token), data=data, timeout=timeout)
-    except requests.RequestException as exc:
-        # Raised again with the token cut out: the bot token is in the URL, and the driver's
-        # message quotes the URL («Max retries exceeded with url: /bot123:ABC/sendMessage»)
-        # — which went to the debug log and, for event rules, into the notification log
-        # shown in the panel.
-        raise type(exc)(redact(str(exc), token)) from None
+    attempt = 0
+    while True:
+        try:
+            result = requests.post(_API_SEND.format(token=token), data=data, timeout=timeout)
+        except requests.RequestException as exc:
+            # Raised again with the token cut out: the bot token is in the URL, and the
+            # driver's message quotes the URL («Max retries exceeded with url:
+            # /bot123:ABC/sendMessage») — which went to the debug log and, for event rules,
+            # into the notification log shown in the panel.
+            raise type(exc)(redact(str(exc), token)) from None
+        # 429 is Telegram saying "not now, in N seconds" — a flood of alerts in one cycle
+        # (an outage) is exactly when it says it. Taken as a failure, the rest of the
+        # outage's messages were lost; it is waited out (capped) and the message re-sent.
+        if result.status_code != 429 or attempt >= _RETRY_429:
+            break
+        attempt += 1
+        time.sleep(_retry_after(result))
     if result.status_code == 200:
         return True, 200, 'sent'
     try:

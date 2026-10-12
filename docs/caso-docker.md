@@ -38,6 +38,16 @@ puertos syslog (los gestiona el contenedor `syslog`) y `SS_EVENTS_EMBEDDED=0` pa
 comparten los volúmenes con nombre y las bases de datos, por lo que leen y escriben
 el mismo estado.
 
+> **Permisos de los volúmenes compartidos.** `web`, `syslog` y `events` corren como
+> `ssentry` (uid/gid 1000); `worker` corre como **root** porque el ping necesita `NET_RAW`.
+> Antes lo hacía con el grupo de root y `umask 022`, así que lo que escribía en los volúmenes
+> (las MIB compiladas, el estado del monitor) quedaba `root:root` y los demás no podían
+> escribirlo. Ahora, como en el chart de Helm, `worker` corre como `user: "0:1000"` con
+> `umask 0002` (lo que crea es escribible por el grupo `ssentry`) y al arrancar hace
+> `chown -R 1000:1000` de `/var/lib/ServiSesentry`, que repara lo que dejaron versiones
+> anteriores. Sobre NFS con `root_squash` el `chown` falla: avisa y arranca igual (ver
+> [caso-kubernetes.md](caso-kubernetes.md#permisos-con-varios-pods-y-nfs)).
+
 > **Dimensionado del receptor syslog.** El listener es *thread-per-connection* (una hebra
 > por conexión TCP/TLS viva). Coste medido bajo carga (ver [ref-tests.md §49](ref-tests.md), test de
 > 1000 conexiones simultáneas): **≈47 KB de RAM por conexión persistente** (stack de hebra +
@@ -348,9 +358,13 @@ el panel web sobreviven a los reinicios del contenedor.
 | `SS_VERBOSE` | `false` | Activar salida detallada / debug (fuerza el nivel máximo, equivale a `--verbose`). Lo traduce el `entrypoint.sh`. Para un nivel concreto usa `SS_LOG_LEVEL` (ver [ref-configuracion.md](ref-configuracion.md#variables-de-entorno)) |
 | `NO_COLOR` | *(no definido)* | Si se define (cualquier valor), desactiva los colores ANSI del debug. Los logs de Docker no son un TTY, así que el color ya se desactiva solo |
 
-> **Nota:** las variables `SS_WEB_HOST`, `SS_WEB_PORT` y `SS_VERBOSE` las traduce el
-> `entrypoint.sh` a los flags `--web-host`/`--web-port`/`--verbose`.
-> Alternativamente, el CLI lee directamente variables `SS_*` (`SS_WEB`,
+> **Nota:** `SS_WEB_HOST` y `SS_WEB_PORT` ya **no** las traduce el `entrypoint.sh` a
+> flags: las lee `main.py` (antes el script pasaba `--web-host "${SS_WEB_HOST:-0.0.0.0}"`,
+> que se imponía al campo *Host* del panel aunque la variable no estuviera definida). La
+> imagen las fija a `0.0.0.0`/`8080` — dentro de un contenedor hay que escuchar en todas las
+> interfaces — y por eso salen bloqueadas en **Configuración → Acceso externo**.
+> `SS_VERBOSE` sí la traduce el `entrypoint.sh` a `--verbose`.
+> Además, el CLI lee directamente variables `SS_*` (`SS_WEB`,
 > `SS_WEB_PORT`, `SS_WEB_HOST`, `SS_VERBOSE`, `SS_NOCOLOR`, `SS_CONFIG_DIR`…)
 > sin pasar por el entrypoint — ver [ref-configuracion.md](ref-configuracion.md#variables-de-entorno).
 > Los campos de `config.json` (variables `SS_*` como `SS_LANG`, `SS_CHECK_INTERVAL`,

@@ -34,6 +34,9 @@ import time
 from lib.config.spec import cfg_get
 from lib.debug import DebugLevel
 
+#: How long a stopping monitor waits for its queued alerts to be sent (s).
+ALERT_DRAIN_TIMEOUT = 30.0
+
 
 class _MonitoringMixin:
     """Background check scheduler — embedded in the WebAdmin or run standalone."""
@@ -232,6 +235,20 @@ class _MonitoringMixin:
         self._monitoring_audit('daemon_stopped', {})
         self._monitoring_notify('scheduler_stopped')
         return True
+
+    def _monitoring_drain_alerts(self, timeout: float = ALERT_DRAIN_TIMEOUT) -> bool:
+        """Wait (at most *timeout* s) for the cycle in flight to end and for every alert
+        it handed to the notifier's sender thread to go out. Whether it all went.
+
+        The sender is a daemon thread: a process that returned right after its cycle
+        (``--monitor -t 0``) or after a stop lost every alert still queued — and the check
+        state was already saved, so the next run saw no change and never re-sent them."""
+        from lib.core.notify.monitor_notifier import drain  # noqa: PLC0415
+        end = time.monotonic() + max(0.0, float(timeout))
+        t = getattr(self, '_monitoring_thread', None)
+        if t is not None and t is not threading.current_thread() and t.is_alive():
+            t.join(max(0.0, end - time.monotonic()))
+        return drain(max(0.0, end - time.monotonic()))
 
     # ── Imperative commands (run-now / clear / reload) ─────────────────────────
     def _apply_command(self, action: str, args: dict | None = None) -> tuple[bool, str]:

@@ -10,7 +10,9 @@ Install: ``pip install psycopg2-binary``
 
 from __future__ import annotations
 
+import logging
 import threading
+from contextlib import contextmanager
 
 from lib.config.spec import cfg_get
 from .base import BaseConnector
@@ -22,6 +24,9 @@ try:
     _HAS_PSYCOPG2 = True
 except ImportError:  # pragma: no cover
     _HAS_PSYCOPG2 = False
+
+
+_log = logging.getLogger(__name__)
 
 
 class PostgreSQLConnector(BaseConnector):
@@ -105,12 +110,18 @@ class PostgreSQLConnector(BaseConnector):
 
     def execute_ddl(self, ddl: str) -> None:
         conn = self._conn()
-        with conn.cursor() as cur:
-            for stmt in ddl.split(';'):
-                stmt = stmt.strip()
-                if stmt:
-                    cur.execute(stmt)
+        try:
+            with conn.cursor() as cur:
+                for stmt in ddl.split(';'):
+                    stmt = stmt.strip()
+                    if stmt:
+                        cur.execute(stmt)
+        except psycopg2.Error:
+            self._failed(conn)
+            raise
         conn.commit()
+        # The commit ended whatever was pending; left flagged, the next read would not.
+        self._settled()
 
     def add_column_if_missing(
         self, table: str, column: str, col_type: str
@@ -124,10 +135,44 @@ class PostgreSQLConnector(BaseConnector):
                 (table, column),
             )
             if not cur.fetchone():
-                cur.execute(
-                    f'ALTER TABLE {table} ADD COLUMN {column} {col_type}'
-                )
+                try:
+                    cur.execute(
+                        f'ALTER TABLE {table} ADD COLUMN {column} {col_type}'
+                    )
+                except psycopg2.Error as exc:
+                    # The failed ALTER aborted the transaction: roll it back either way, or
+                    # the next statement on this thread fails with InFailedSqlTransaction.
+                    self._failed(conn)
+                    if self._is_duplicate_object(exc):
+                        return      # another process added it between the check and here
+                    raise
         conn.commit()
+
+    def _is_duplicate_object(self, exc: Exception) -> bool:
+        # 42701 duplicate_column, 42P07 duplicate_table (an index is a relation).
+        return getattr(exc, 'pgcode', None) in ('42701', '42P07')
+
+    @contextmanager
+    def _reconcile_lock(self, table: str):
+        """A session advisory lock keyed by the table: it outlives the commits the DDL makes,
+        and a second process reconciling the same table waits here, then reads it done."""
+        key = f'ss_reconcile:{self._fold(table)}'
+        got = False
+        try:
+            self.fetchone('SELECT pg_advisory_lock(hashtext(?))', (key,))
+            got = True
+        except Exception as exc:  # pylint: disable=broad-except
+            _log.warning('reconcile %s: advisory lock failed (%s) — going ahead unlocked',
+                         table, exc)
+        try:
+            yield
+        finally:
+            if got:
+                try:
+                    self._failed(self._conn())      # a failed reconcile left it aborted
+                    self.fetchone('SELECT pg_advisory_unlock(hashtext(?))', (key,))
+                except Exception as exc:  # pylint: disable=broad-except
+                    _log.warning('reconcile %s: advisory unlock failed: %s', table, exc)
 
     def list_columns(self, table: str) -> set[str]:
         table = self._fold(table)
@@ -312,6 +357,34 @@ class PostgreSQLConnector(BaseConnector):
         self._end_read(conn)
         return row
 
+    def iter_query(self, sql: str, params: tuple = (), size: int = 5000):
+        """Stream a SELECT through a server-side (named) cursor: psycopg2's default cursor
+        transfers the whole result to the client on `execute`."""
+        import uuid  # noqa: PLC0415
+        self._trace_sql(sql)
+        conn = self._conn()
+        if conn.autocommit:            # a named cursor needs a transaction to live in
+            yield from super().iter_query(sql, params, size)
+            return
+        cur = conn.cursor(name=f'ss_iter_{uuid.uuid4().hex[:12]}')
+        cur.itersize = max(1, int(size))
+        try:
+            cur.execute(self._adapt_sql(sql), params)
+            while True:
+                rows = cur.fetchmany(max(1, int(size)))
+                if not rows:
+                    break
+                yield rows
+        except psycopg2.Error:
+            self._failed(conn)
+            raise
+        finally:
+            try:
+                cur.close()
+            except Exception:  # pylint: disable=broad-except
+                pass
+        self._end_read(conn)
+
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def execute(self, sql: str, params: tuple = ()) -> int:
@@ -429,6 +502,7 @@ class PostgreSQLConnector(BaseConnector):
             conn.commit()          # no-op when nothing is open
         except Exception:          # pylint: disable=broad-except
             pass
+        self._settled()
         old_autocommit = conn.autocommit
         conn.autocommit = True
         try:

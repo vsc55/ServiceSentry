@@ -20,6 +20,9 @@ kind of access it just failed to cut off.
 AUDIT_EVENTS = [
     {'key': 'api_token_created', 'severity': 'warning'},
     {'key': 'api_token_revoked', 'severity': 'info'},
+    # All of one's own at once — what a password change offers. Louder than one: it is what
+    # somebody does when they think a credential leaked.
+    {'key': 'api_tokens_revoked', 'severity': 'warning'},
     {'key': 'api_token_rotated', 'severity': 'warning'},
     # Editing a scope is a grant, so it is logged like one — with what it was before,
     # since 'what changed' is the only question asked of an entry like this.

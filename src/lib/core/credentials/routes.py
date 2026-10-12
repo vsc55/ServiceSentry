@@ -205,12 +205,19 @@ def register(app, wa):
         # address, so restrict this to the credential-management circle: a plain
         # devices_edit holder must not be able to exfiltrate a secret it cannot see by
         # pointing the test at an attacker-controlled device.
+        # Seeing a credential is not using it: `credentials_view` (the viewer role) is shown
+        # the list with every secret masked, and a test that sends the stored secret to an
+        # address the caller chooses would hand it over anyway. A stored credential is
+        # tested by whoever may EDIT credentials; an inline draft — secrets the caller typed
+        # themselves — also by whoever may add one.
         perms = wa._get_session_permissions()
-        if not (perms & {'credentials_view', 'credentials_edit', 'credentials_add'}):
+        if not (perms & {'credentials_edit', 'credentials_add'}):
             return jsonify({'error': wa._t('access_denied')}), 403
         body, err = wa._require_json()
         if err:
             return err
+        if str(body.get('cred_uid') or '').strip() and 'credentials_edit' not in perms:
+            return jsonify({'error': wa._t('access_denied')}), 403
         store = _store()
         # Resolve the identity: a saved credential by uid, or an inline draft.
         data = body.get('data') if isinstance(body.get('data'), dict) else {}

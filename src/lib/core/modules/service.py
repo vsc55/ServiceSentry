@@ -53,6 +53,93 @@ def validate_modules_shape(data: dict) -> None:
         raise AdminOpError('invalid_modules_data')
 
 
+# ── closed-choice fields ─────────────────────────────────────────────────────────
+def _closed_options(meta) -> set | None:
+    """The accepted values of a field with a CLOSED list of options, or ``None``.
+
+    ``None`` — nothing to enforce — for a field without a static ``options`` list, or one
+    that declares it also takes free text (``allow_custom`` / ``free_text``), or whose list
+    holds something that is not a plain value (a dict without ``value``)."""
+    if not isinstance(meta, dict):
+        return None
+    opts = meta.get('options')
+    if not isinstance(opts, list) or not opts:
+        return None
+    if meta.get('allow_custom') or meta.get('free_text'):
+        return None
+    out = set()
+    for o in opts:
+        if isinstance(o, dict):
+            if 'value' not in o:
+                return None
+            out.add(str(o['value']))
+        elif isinstance(o, (str, int, float, bool)):
+            out.add(str(o))
+        else:
+            return None
+    return out
+
+
+def _check_fields(module: str, schema: dict, item: dict, old_item: dict) -> None:
+    for field, meta in (schema or {}).items():
+        if str(field).startswith('__') or field not in item:
+            continue
+        allowed = _closed_options(meta)
+        if allowed is None:
+            continue
+        value = item.get(field)
+        if value in (None, ''):
+            continue                    # blank = the default, as everywhere else
+        if isinstance(old_item, dict) and old_item.get(field) == value:
+            continue                    # stored before: a legacy value must not block saves
+        values = value if isinstance(value, list) else [value]
+        for v in values:
+            if isinstance(v, (dict, list)) or str(v) not in allowed:
+                raise AdminOpError('invalid_config_value', f'{module}.{field}', str(v)[:60])
+
+
+def validate_option_values(data: dict, old_data: dict, schemas: dict) -> None:
+    """Refuse a value outside a field's declared ``options`` — for every module.
+
+    A dropdown in the browser is a suggestion; the save took whatever the body carried, and
+    the value then reached code that trusted the schema to have bounded it (the DNS record
+    type went into a PowerShell command line unquoted). Checked per field from the schemas,
+    so no module is named here. A value that is ALREADY stored at the same place passes
+    unchanged — refusing it would make an old config unsaveable for a field nobody touched.
+    """
+    schemas = schemas or {}
+    old_data = old_data if isinstance(old_data, dict) else {}
+    for mod_key, cfg in (data or {}).items():
+        if not isinstance(cfg, dict):
+            continue
+        module = str(mod_key).split('.')[-1]
+        old_cfg = old_data.get(mod_key) if isinstance(old_data.get(mod_key), dict) else {}
+        _check_fields(module, schemas.get(f'{module}|__module__'), cfg, old_cfg)
+        for coll, items in cfg.items():
+            sch = schemas.get(f'{module}|{coll}')
+            if not isinstance(sch, dict) or not isinstance(items, dict):
+                continue
+            old_items = old_cfg.get(coll) if isinstance(old_cfg.get(coll), dict) else {}
+            subs = [k for k, m in sch.items()
+                    if isinstance(m, dict) and m.get('type') == 'sub_collection']
+            for ik, item in items.items():
+                if not isinstance(item, dict):
+                    continue
+                old_item = old_items.get(ik) if isinstance(old_items.get(ik), dict) else {}
+                _check_fields(module, sch, item, old_item)
+                for sub in subs:
+                    sub_sch = schemas.get(f'{module}|{coll}|{sub}')
+                    sub_items = item.get(sub)
+                    if not isinstance(sub_sch, dict) or not isinstance(sub_items, dict):
+                        continue
+                    old_subs = old_item.get(sub) if isinstance(old_item.get(sub), dict) else {}
+                    for sk, sub_item in sub_items.items():
+                        if isinstance(sub_item, dict):
+                            _check_fields(module, sub_sch, sub_item,
+                                          old_subs.get(sk) if isinstance(old_subs.get(sk), dict)
+                                          else {})
+
+
 # ── unit spellings ───────────────────────────────────────────────────────────────
 def normalize_unit_fields(data: dict) -> None:
     """Rewrite every ``*_unit`` value in place to the spelling the schemas offer now.
@@ -131,10 +218,15 @@ def _widget_items(cfg: dict) -> dict:
     return out
 
 
-def build_module_widgets(modules_dir: str, status_raw: dict, modules_raw: dict, lang: str) -> dict:
+def build_module_widgets(modules_dir: str, status_raw: dict, modules_raw: dict, lang: str,
+                         may_see=None) -> dict:
     """Generic Overview-widget data: for every module declaring ``__overview_widget__``,
     call its ``Watchful.overview_widget(items, status, lang)`` hook and collect the result.
-    The core stays module-agnostic — all domain logic/strings come from the module."""
+    The core stays module-agnostic — all domain logic/strings come from the module.
+
+    *may_see* — ``(module, catalog_entry) -> bool`` — leaves out a module the caller may
+    not see. Every widget declares the permission it needs (``perm``), and the endpoint
+    asked nothing of it: anyone with ``overview_view`` read every module's widget data."""
     out: dict = {}
     try:
         from lib.modules.discovery.overview_widgets import overview_widgets_catalog  # noqa: PLC0415
@@ -147,6 +239,8 @@ def build_module_widgets(modules_dir: str, status_raw: dict, modules_raw: dict, 
     if parent and parent not in sys.path:
         sys.path.insert(0, parent)
     for mod_name in catalog:
+        if may_see is not None and not may_see(mod_name, catalog[mod_name]):
+            continue
         try:
             status = next((status_raw[k] for k in (f'watchfuls.{mod_name}', mod_name)
                            if isinstance(status_raw.get(k), dict)), {})

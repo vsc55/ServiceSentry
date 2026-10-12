@@ -93,13 +93,29 @@ class Watchful(ModuleBase):
 
         count = self._count_matches(out, os_, name)
         ok = count >= min_count
-        message = (self._msg('proc_ok', key, count) if ok
-                   else self._msg('proc_low', key, count, min_count))
+        # The message said the item KEY (an opaque uid) and the alert just "nginx": with
+        # the same process watched on ten servers, nobody could tell which one fell.
+        device = self._device_name(raw)
+        display = f'{device} - {name}' if device else name
+        message = (self._msg('proc_ok', display, count) if ok
+                   else self._msg('proc_low', display, count, min_count))
 
         other_data = {'process': name, 'count': count, 'min_count': min_count}
-        # name= is the PROCESS name, not the item label — this module identifies a
-        # check by what it watches, so the alert says "nginx", not the item's uid.
-        self._emit(key, ok, message, other_data, name=name)
+        if device:
+            other_data['device'] = device
+        # name= is what the check WATCHES (on which device), never the item's uid.
+        self._emit(key, ok, message, other_data, name=display)
+
+    def _device_name(self, raw) -> str:
+        """The bound device's name, or '' for an inline check."""
+        uid = str((raw or {}).get('device_uid') or '').strip()
+        store = getattr(self._monitor, '_devices_store', None)
+        if not uid or store is None:
+            return ''
+        try:
+            return str((store.get(uid) or {}).get('name') or '').strip()
+        except Exception:  # pylint: disable=broad-except
+            return ''
 
     @staticmethod
     def _count_matches(out: str, os_: str, name: str) -> int:

@@ -12,6 +12,11 @@ Environment=PYTHONUNBUFFERED=1
 # at the interval configured in the panel (monitoring → timer_check). No systemd
 # .timer is needed; the service loops on its own. (``--monitor -t 0`` would run a
 # single pass and exit, but that mode is not used here.)
+# The venv is bound to the python3.X it was built with: a distribution upgrade that
+# removes that interpreter leaves a venv that no longer runs, and the unit only said
+# "No such file or directory". Checked first, with the way out in the journal. A unit
+# without the venv (run from a checkout with the system python) skips the check.
+ExecStartPre=/bin/sh -c 'if [ -d /opt/ServiSesentry/venv ] && ! /opt/ServiSesentry/venv/bin/python -c "import sys" >/dev/null 2>&1; then echo "ServiceSentry: the Python environment in /opt/ServiSesentry/venv no longer runs (was Python upgraded?). Rebuild it as root: sh /opt/ServiSesentry/make-venv.sh" >&2; exit 1; fi'
 ExecStart=/usr/bin/python3 /opt/ServiSesentry/main.py --monitor
 Restart=on-failure
 RestartSec=5

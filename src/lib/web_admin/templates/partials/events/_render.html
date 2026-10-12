@@ -96,7 +96,12 @@ function _evrCell(r, colId, canEdit, cw) {
     // column width comes from the resizable <th> and .text-truncate clips here).
     const _ell = (cls, txt) => `<td class="${cls} text-truncate" title="${escAttr(txt)}">${esc(txt)}</td>`;
     switch (colId) {
-        case 'name':       return `<td class="text-nowrap"><code>${esc(r.name || '')}</code></td>`;
+        // A rule stored before unsafe patterns were refused is never evaluated: said here, or
+        // it looks active and stays silent.
+        case 'name':       return `<td class="text-nowrap"><code>${esc(r.name || '')}</code>${
+            (r.unsafe_regex || []).length ? ` <span class="badge text-bg-warning ms-1" title="${
+                escAttr(t('event_rule_unsafe_hint') + ' ' + r.unsafe_regex.join(' · '))}"><i class="bi bi-exclamation-triangle me-1"></i>${
+                esc(t('event_rule_unsafe_badge'))}</span>` : ''}</td>`;
         case 'source':     return `<td><span class="badge bg-secondary">${esc(t('event_src_' + (r.source || 'audit')))}</span></td>`;
         case 'tags':       return `<td class="text-truncate" title="${escAttr((r.tags || []).join(', '))}">${(r.tags || []).length
             ? (r.tags || []).map(tg => `<span class="badge text-bg-secondary me-1 fw-normal">${esc(tg)}</span>`).join('')

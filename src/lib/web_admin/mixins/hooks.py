@@ -50,6 +50,8 @@ class _HooksMixin:
                                    # CSRF applies to it at all (a bearer call is not a browser
                                    # being tricked — no cross-site page can set that header)
         '_hook_csrf_protect',      # judged on the token, before any redirect can move it
+        '_hook_must_change_password',  # after auth + CSRF: an account still on the default
+                                   # password reaches the change screen and nothing else
         '_hook_enforce_fqdn',      # last: only a request that survived everything is bounced
     )
 

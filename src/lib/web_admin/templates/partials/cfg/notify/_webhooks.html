@@ -291,7 +291,9 @@ function _webhookFormData() {
     };
 }
 
-async function saveWebhook() {
+function saveWebhook() { return ssOnce('webhook-save', _saveWebhook); }   // no double create
+
+async function _saveWebhook() {
     if (!_webhookValidateModal()) return;
     const data = _webhookFormData();
     const url = _webhookEditId ? `/api/v1/notify/webhooks/${_webhookEditId}` : '/api/v1/notify/webhooks';

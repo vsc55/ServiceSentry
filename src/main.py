@@ -160,6 +160,28 @@ def _flask_debug(args) -> bool:
             and os.environ.get('SS_FLASK_DEBUG', '').strip() == '1')
 
 
+def resolve_web_bind(args, wa_cfg, env_overrides=None, default_host='0.0.0.0',
+                     default_port=8080):
+    """Where the panel listens: ``(host, port)``.
+
+    ``--web-host``/``--web-port`` first (``SS_WEB_HOST``/``SS_WEB_PORT`` are their env
+    fallbacks, so an env var stands where a flag would), then the env-locked config values
+    (``SS_WEB_HOST``, ``SS_PORT``/``SS_WEB_PORT`` — the same vars, as the Config UI sees them),
+    then the saved ``web_admin|host``/``port``, then the defaults.
+
+    The launchers used to pass ``--web-host 0.0.0.0`` on every start, which made the Host
+    field of Configuration → External access do nothing: an admin who set 127.0.0.1 behind a
+    proxy still listened on every interface. They pass nothing now, and the field decides.
+    """
+    ov = env_overrides or {}
+    wa_cfg = wa_cfg or {}
+    host = (getattr(args, 'web_host', None) or ov.get('web_admin|host')
+            or wa_cfg.get('host') or default_host)
+    port = (getattr(args, 'web_port', None) or ov.get('web_admin|port')
+            or wa_cfg.get('port') or default_port)
+    return str(host), int(port)
+
+
 def start_web(args):
     """Start the web administration server.
 
@@ -191,11 +213,10 @@ def start_web(args):
     if getattr(args, 'log_level', None):
         admin.debug.set_from_config(args.log_level)   # CLI overrides the config level
 
-    # Bind host/port from the effective config (the DB is the single source);
-    # CLI overrides win.
+    # Bind host/port: CLI > env > the effective config (the DB is the single source) > default.
     _wa_cfg = (admin._read_config_file(admin._CONFIG_FILE) or {}).get('web_admin') or {}
-    host = getattr(args, 'web_host', None) or _wa_cfg.get('host') or WebAdmin.DEFAULT_HOST
-    port = getattr(args, 'web_port', None) or _wa_cfg.get('port') or WebAdmin.DEFAULT_PORT
+    host, port = resolve_web_bind(args, _wa_cfg, getattr(admin, '_env_override_values', None),
+                                  WebAdmin.DEFAULT_HOST, WebAdmin.DEFAULT_PORT)
 
     # --lang (CLI/env) overrides the banner language; otherwise the web admin's
     # effective (DB-aware) language is used.
@@ -534,6 +555,48 @@ def args_init() -> argparse.Namespace:
                     help="do not download the makers' pictures of the catalogue basics")
     return ap.parse_args()
 
+def _cli_become_data_owner(var_dir: str, *, _os=os) -> 'str | None':
+    """Run a management command as the owner of *var_dir* when root starts it.
+
+    The services of a package install run as the dedicated `servicesentry` user. An admin who
+    ran ``main.py user …`` as root created ``data.db``'s journal, an uploaded picture or a new
+    database as root — files the services then could not write, and the panel went read-only
+    with nothing pointing at the CLI. So root becomes that owner (group list, gid, uid, in
+    that order: after setuid there is no way back to set the others), and when that is not
+    possible the command refuses instead of writing.
+
+    Returns the user name switched to, or ``None`` when nothing was done (not root, not POSIX,
+    no data directory yet, or it is root's). ``_os`` is for the tests.
+    """
+    if _os.name != 'posix' or not hasattr(_os, 'geteuid') or _os.geteuid() != 0:
+        return None
+    try:
+        st = _os.stat(var_dir)
+    except OSError:
+        return None                          # nothing there yet: nothing to protect
+    if st.st_uid == 0:
+        return None
+    try:
+        import pwd  # noqa: PLC0415 (POSIX only)
+        name = pwd.getpwuid(st.st_uid).pw_name
+    except (ImportError, KeyError):
+        name = str(st.st_uid)
+    try:
+        if hasattr(_os, 'initgroups') and not name.isdigit():
+            _os.initgroups(name, st.st_gid)
+        else:
+            _os.setgroups([st.st_gid])
+        _os.setgid(st.st_gid)
+        _os.setuid(st.st_uid)
+    except OSError as exc:
+        print(f"Refusing to run as root: {var_dir} belongs to '{name}', and switching to that "
+              f"user failed ({exc}). Run the command as that user instead, e.g.\n"
+              f"    runuser -u {name} -- {sys.executable} {' '.join(sys.argv)}",
+              file=sys.stderr)
+        sys.exit(1)
+    return name
+
+
 def _tolerant_output() -> None:
     """Make stdout/stderr replace what their encoding cannot carry instead of raising.
 
@@ -560,6 +623,7 @@ if __name__ == "__main__":
     # headless store context and exit, without starting the web panel or any daemon.
     if getattr(_args, 'cmd', None):
         _cfg_dir, _var_dir = _resolve_app_dirs(_args)
+        _cli_become_data_owner(_var_dir)
         from lib.cli import commands as _cli  # noqa: WPS433
         sys.exit(_cli.run(_args, _cfg_dir, _var_dir))
     # Standalone service modes (--monitor/--syslog/--events), discovered from the

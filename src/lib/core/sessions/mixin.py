@@ -132,7 +132,9 @@ class _SessionsMixin:
         for t in stale:
             del self._sessions[t]
         if stale:
-            self._persist_sessions()
+            # Only the expired ones: rewriting the table from this snapshot signed out every
+            # session another replica opened since it was read.
+            self._sessions_store.delete_tokens(stale)
 
     def _persist_sessions(self) -> bool:
         """Write sessions registry to the database (columnar sessions table)."""

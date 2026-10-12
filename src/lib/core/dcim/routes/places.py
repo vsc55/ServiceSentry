@@ -55,10 +55,11 @@ from lib.core.dcim.store import (ACCESS_KINDS, FEATURE_LAYERS, LOCK_KINDS, room_
                                  SHELVED_KINDS, SHELVES_MAX)
 from lib.core.dcim.store.features import _FEATURE, _SHELF_ITEM
 from lib.core.dcim.store.floors import WALL_KINDS, WALLS_MAX, _FLOOR
-from lib.core.dcim.store.racks import _RACK
+from lib.core.dcim.store.racks import _RACK, _ROW
 from lib.core.dcim.store.rooms import _ROOM
 from lib.core.dcim.store.sites import _SITE
-from lib.core.dcim.routes._common import _NUM_MAX, _fresh, _num, _without, group_bad, numbers_bad
+from lib.core.dcim.routes._common import (_NUM_MAX, _fresh, _num, _without, group_bad,
+                                          numbers_bad, scalars_bad)
 
 #: The tallest rack a request may declare. Real cabinets stop around 58U; a hundred leaves room
 #: for anything odd and still refuses the typo that would draw a rack three screens tall.
@@ -86,8 +87,28 @@ def _bounds(spec) -> dict:
     return out
 
 
+def _mm(v) -> int:
+    """A length from an imported file: whole millimetres, 0.._NUM_MAX. Unbounded, a `1e300`
+    reached the engine's INTEGER and the import was a 500."""
+    return int(min(_NUM_MAX, max(0, _num(v))))
+
+
+def _pos(v) -> float:
+    """A coordinate from an imported file, within ±_NUM_MAX like a form's."""
+    return max(-_NUM_MAX, min(_NUM_MAX, _num(v)))
+
+
+def _txt(v) -> str:
+    """A text field from an imported file: a scalar as text, anything structured as nothing."""
+    return str(v) if isinstance(v, (str, int, float)) and not isinstance(v, bool) else ''
+
+
 def _bad_number(wa, field):
     return jsonify({'error': wa._t('dcim_bad_number'), 'field': field}), 400
+
+
+def _bad_text(wa, field):
+    return jsonify({'error': wa._t('dcim_bad_text'), 'field': field}), 400
 
 
 def register(app, wa, C):
@@ -183,6 +204,14 @@ def register(app, wa, C):
             site = str((store.rooms.get(room_uid) or {}).get('site_uid') or '')
         return bool(floor) and str(floor.get('site_uid') or '') == site
 
+    def _rack_row_ok(store, data, room_uid) -> bool:
+        """A rack's row is one of ITS room's, or none. Unchecked, a rack took a row of another
+        room —of another site— and was counted in a row it is not standing in."""
+        if 'row_uid' not in data or not str(data.get('row_uid') or ''):
+            return True
+        fila = store.rows.get(str(data['row_uid']))
+        return bool(fila) and str(fila.get('room_uid') or '') == str(room_uid or '')
+
     def _crud(kind, part, scope, required, minted=(), parent=None):
         """The four verbs for one kind of container.
 
@@ -222,11 +251,16 @@ def register(app, wa, C):
             # hueco en la cuenta que nadie sabe explicar.
             # Numbers before the inventory number: a request refused for a bad height must not
             # spend one of the numbering.
+            texto = scalars_bad(_SPECS[part], data)
+            if texto:
+                return _bad_text(wa, texto)
             malo = numbers_bad(_SPECS[part], data, _bounds(_SPECS[part]))
             if malo:
                 return _bad_number(wa, malo)
             if part == 'racks' and group_bad(data):
                 return jsonify({'error': wa._t('dcim_group_bad')}), 400
+            if part == 'racks' and not _rack_row_ok(store, data, data.get('room_uid')):
+                return jsonify({'error': wa._t('dcim_row_other_room')}), 400
             err = C.asset(part, data)
             if err:
                 return jsonify({'error': wa._t(err)}), 400
@@ -260,6 +294,11 @@ def register(app, wa, C):
                         return jsonify({'error': wa._t('dcim_not_found')}), 404
                     if not C.may_write(store, store.owners_map(), C.seen(), p_scope, p_uid):
                         return jsonify({'error': wa._t('access_denied')}), 403
+                    # A floor's general area IS that floor's loose space: it does not go to
+                    # another building. Moved, the floor kept pointing at it and put whatever
+                    # was dropped on the floor into a room of another site.
+                    if part == 'rooms' and store.floors.list('area_uid = ?', (uid,)):
+                        return jsonify({'error': wa._t('dcim_area_other_site')}), 400
                     # A room that changes site leaves its floor behind: that floor is drawn in
                     # the other building.
                     if part == 'rooms' and 'floor_uid' not in data:
@@ -267,11 +306,17 @@ def register(app, wa, C):
             # The numbers, checked as on creation: stored unchecked, `u_height: "abc"` turned
             # every read of the site tree and of the rack into a 500 until somebody fixed the
             # row by hand.
+            texto = scalars_bad(_SPECS[part], data)
+            if texto:
+                return _bad_text(wa, texto)
             malo = numbers_bad(_SPECS[part], data, _bounds(_SPECS[part]))
             if malo:
                 return _bad_number(wa, malo)
             if part == 'racks' and group_bad(data):
                 return jsonify({'error': wa._t('dcim_group_bad')}), 400
+            if part == 'racks' and not _rack_row_ok(store, data,
+                                                    data.get('room_uid', row.get('room_uid'))):
+                return jsonify({'error': wa._t('dcim_row_other_room')}), 400
             # A rack is not made shorter than what is bolted into it. Shrunk under an item, the
             # item stayed at its U outside the cabinet: not drawn, not counted, and its U never
             # free again for anybody.
@@ -340,6 +385,14 @@ def register(app, wa, C):
                         cambios['feature_uid'] = ''
                     if cambios:
                         store.sources.update(fuente['uid'], cambios, actor=C.actor())
+                # Y el control de accesos: una puerta cuelga de un lector de SU sede. Las de esta
+                # sala que colgaban de un lector de fuera, y las de fuera que colgaban de uno de
+                # esta sala, dejan de decirlo — se quedaban apuntando a otro edificio.
+                lectores = {f['uid'] for f in store.features_of(uid) if f.get('kind') == 'reader'}
+                for f in store.features.list("hub_uid != ''"):
+                    dentro = str(f.get('room_uid') or '') == uid
+                    if dentro != (str(f.get('hub_uid') or '') in lectores):
+                        store.features.update(f['uid'], {'hub_uid': ''}, actor=C.actor())
             # Y su foto, si lo editado ES un armario: renombrarlo o cambiarle la altura mueve de
             # sitio a todo lo que hay dentro, y eso es parte de su historia. Aquí y no en cada
             # llamada porque este CRUD es uno para cuatro cosas — la condición es el precio de
@@ -711,11 +764,11 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('access_denied')}), 403
         rack_of_item, power, room_of_item, label_of = {}, [], {}, {}
         for room in store.rooms_of(uid):
-            for it in C.filtered(store.items_in_room(room['uid']), store, said, allowed, 'item', reach):
+            for it in C.readable(store.items_in_room(room['uid']), store, said, allowed, 'item', reach):
                 room_of_item[it['uid']] = room['uid']
                 label_of[it['uid']] = it.get('label') or ''
             for rack in C.filtered(store.racks_of(room['uid']), store, said, allowed, 'rack', reach):
-                for it in C.filtered(store.items_of(rack['uid']), store, said, allowed, 'item', reach):
+                for it in C.readable(store.items_of(rack['uid']), store, said, allowed, 'item', reach):
                     rack_of_item[it['uid']] = rack['uid']
                     label_of[it['uid']] = it.get('label') or ''
                 for p in store.pdus_of(rack['uid']):
@@ -777,6 +830,9 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('dcim_name_required')}), 400
         # `level` is an integer: `nan` or `inf` reached `int()` and answered 500.
         data.setdefault('level', 0)
+        texto = scalars_bad(_FLOOR, data)
+        if texto:
+            return _bad_text(wa, texto)
         malo = numbers_bad(_FLOOR, data, _bounds(_FLOOR))
         if malo:
             return _bad_number(wa, malo)
@@ -798,6 +854,9 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('dcim_name_required')}), 400
         if 'core_kind' in data and str(data.get('core_kind') or '') not in ('', 'stairs', 'lift'):
             return jsonify({'error': wa._t('dcim_core_bad')}), 400
+        texto = scalars_bad(_FLOOR, data)
+        if texto:
+            return _bad_text(wa, texto)
         malo = numbers_bad(_FLOOR, data, _bounds(_FLOOR))
         if malo:
             return _bad_number(wa, malo)
@@ -1013,12 +1072,17 @@ def register(app, wa, C):
         # verdad sobre lo que mide una puerta.
         # Las filas van con las piezas: es la misma pantalla y el mismo plano, y pedirlas
         # aparte sería una petición más para dibujar lo que ya se está dibujando.
-        filas = dcim_svc.rows_roll(store.rows_of(uid), store.racks_of(uid))
-        piezas = store.features_of(uid)
-        acceso = _access_of(store, room, piezas)
         said, allowed = store.owners_map(), C.seen()
-        equipos = _room_items(store, uid, said, allowed, dcim_svc.reachable(store, said, allowed),
-                              C.states())
+        reach = dcim_svc.reachable(store, said, allowed)
+        # The racks this reader may see, as the room's rack list gives them: `loose` returns the
+        # rows whole, so the room's every rack went out — another company's with its name and
+        # description — to anybody who could open the room.
+        filas = dcim_svc.rows_roll(store.rows_of(uid),
+                                   C.filtered(store.racks_of(uid), store, said, allowed,
+                                              'rack', reach))
+        piezas = store.features_of(uid)
+        acceso = _access_of(store, room, piezas, said, allowed)
+        equipos = _room_items(store, uid, said, allowed, reach, C.states())
         return jsonify(dict({'features': piezas, 'items': equipos,
                              'kinds': dcim_plankinds.feature_kinds(wa),
                              'layers': list(FEATURE_LAYERS),
@@ -1028,22 +1092,27 @@ def register(app, wa, C):
     def _room_items(store, room_uid, said, allowed, reach, estados) -> list:
         """A room's items (`placement = 'room'`) this reader may see, with their state and box."""
         cajas = dcim_plankinds.device_defaults(wa)
-        items = C.filtered(store.items_in_room(room_uid), store, said, allowed, 'item', reach)
+        items = C.readable(store.items_in_room(room_uid), store, said, allowed, 'item', reach)
         enlaces = dcim_svc.room_item_links(store, items, lambda u: dcim_owners.may_see(
             C.owner_of(store, said, 'item', u), allowed))
         return [dict(i, state=dcim_svc.item_state(i, estados), box=room_item_box(i, cajas),
                      links=enlaces.get(str(i['uid']), []), **dcim_svc.jack_brief(store, i, C.conns()))
                 for i in items]
 
-    def _access_of(store, room, piezas) -> dict:
+    def _access_of(store, room, piezas, said, allowed) -> dict:
         """El control de accesos de una sala, puesto en sus piezas: el estado de cada una que lo
         lleva —el de su dispositivo vigilado, o el de la demo—, y de cada lector o puerta de
         enlace, qué cuelga de él en TODA la sede, que es donde un IQ tiene sus cerraduras —una
         planta entera, no una sala—. Y los de la sede, para elegir a cuál se conecta una pieza."""
         estados = C.states()
         site = str(room.get('site_uid') or '')
-        de_sede = [f for r in store.rooms_of(site) for f in store.features_of(r['uid'])]
-        nombre_sala = {r['uid']: r.get('name') or '' for r in store.rooms_of(site)}
+        # Only the rooms of the site this reader may see: a reader in another company's room,
+        # and the doors hanging from it, came out with their labels and the room's name.
+        salas = [r for r in store.rooms_of(site)
+                 if r['uid'] == room.get('uid')
+                 or dcim_owners.may_see(C.owner_of(store, said, 'room', r['uid']), allowed)]
+        de_sede = [f for r in salas for f in store.features_of(r['uid'])]
+        nombre_sala = {r['uid']: r.get('name') or '' for r in salas}
         for f in piezas:
             if f.get('kind') in ACCESS_KINDS:
                 f['state'] = dcim_svc.item_state(f, estados)
@@ -1101,6 +1170,9 @@ def register(app, wa, C):
             return jsonify({'error': wa._t('dcim_not_found')}), 404
         if room is False:
             return jsonify({'error': wa._t('access_denied')}), 403
+        texto = scalars_bad(_ROW, data)
+        if texto:
+            return _bad_text(wa, texto)
         return jsonify({'uid': store.rows.create(data, actor=C.actor())})
 
     @app.route('/api/v1/dcim/rows/<uid>', methods=['PUT'])
@@ -1113,8 +1185,11 @@ def register(app, wa, C):
         _, room = _room_writable(row.get('room_uid'))
         if room is False or room is None:
             return jsonify({'error': wa._t('access_denied')}), 403
-        store.rows.update(uid, _without(request.get_json(silent=True) or {}, ('room_uid',)),
-                          actor=C.actor())
+        data = _without(_fresh(request.get_json(silent=True) or {}), ('room_uid',))
+        texto = scalars_bad(_ROW, data)
+        if texto:
+            return _bad_text(wa, texto)
+        store.rows.update(uid, data, actor=C.actor())
         return jsonify({'ok': True})
 
     @app.route('/api/v1/dcim/rows/<uid>', methods=['DELETE'])
@@ -1160,6 +1235,9 @@ def register(app, wa, C):
         if kind in SHELVED_KINDS:
             body.setdefault('shelves', 1)
         body.setdefault('depth_mm', spec['d'])
+        texto = scalars_bad(_FEATURE, body)
+        if texto:
+            return _bad_text(wa, texto)
         malo = numbers_bad(_FEATURE, body, _bounds(_FEATURE))
         if malo:
             return _bad_number(wa, malo)
@@ -1186,6 +1264,9 @@ def register(app, wa, C):
         malo_acceso = _access_bad(store, store.rooms.get(row.get('room_uid')) or {}, data)
         if malo_acceso:
             return jsonify({'error': wa._t(malo_acceso)}), 400
+        texto = scalars_bad(_FEATURE, data)
+        if texto:
+            return _bad_text(wa, texto)
         malo = numbers_bad(_FEATURE, data, _bounds(_FEATURE))
         if malo:
             return _bad_number(wa, malo)
@@ -1197,6 +1278,10 @@ def register(app, wa, C):
             if usadas and max(usadas) > int(data['shelves']):
                 return jsonify({'error': wa._t('dcim_shelves_in_use').format(max(usadas))}), 400
         store.features.update(uid, data, actor=C.actor())
+        # A reader that stops being one leaves the doors that hung from it pointing at a piece
+        # that is no gateway — `_access_bad` would refuse that very value on a write.
+        if row.get('kind') == 'reader' and 'kind' in data and str(data['kind']) != 'reader':
+            store.unhook_reader(uid)
         return jsonify({'ok': True})
 
     @app.route('/api/v1/dcim/features/<uid>', methods=['DELETE'])
@@ -1250,6 +1335,9 @@ def register(app, wa, C):
                 return None, (jsonify({'error': wa._t('dcim_name_required')}), 400)
         if 'notes' in body:
             body['notes'] = str(body.get('notes') or '')
+        texto = scalars_bad(_SHELF_ITEM, body)
+        if texto:
+            return None, _bad_text(wa, texto)
         malo = numbers_bad(_SHELF_ITEM, body, _bounds(_SHELF_ITEM))
         if malo:
             return None, _bad_number(wa, malo)
@@ -1312,8 +1400,15 @@ def register(app, wa, C):
         typing a plan by hand would write — and only their placement is taken from the file.
         What is inside them is never in the file to begin with.
 
-        The pieces ARE replaced wholesale: they hold nothing, and half an import mixed with what
-        was already there leaves a room that is neither the old one nor the file's.
+        The pieces end up exactly the file's: the room's pieces the file does not name go, and
+        the file's that the room lacks are created. One that IS in both —same kind, same label—
+        is updated **in place**, the way a rack is: it keeps its uid, so the source that says it
+        is that panel and the doors that hang from that reader still do. Rebuilt from scratch,
+        re-importing the plan just exported unlinked every one of them.
+
+        Lock, catalogue model, serial, gateway, device and group travel in the file and come
+        back. What cannot —a gateway that is no reader of this site, a model this catalogue does
+        not have— is counted in ``lost`` and the panel says so: never dropped in silence.
 
         What happened comes back in the answer, counted. An import that silently did less than
         it looked like is an import somebody trusts wrongly.
@@ -1340,56 +1435,106 @@ def register(app, wa, C):
 
         actor = C.actor()
         # Las medidas de la sala, si el fichero las trae. Un plano sin ellas no se puede usar
-        # para lo único que sirve un plano, así que si vienen se aplican.
-        medidas = {k: max(0, int(data['room'][k])) for k in ('width_mm', 'depth_mm', 'tile_mm')
+        # para lo único que sirve un plano, así que si vienen se aplican — dentro del rango que
+        # acepta el formulario: treinta nueves en un fichero no son una sala.
+        medidas = {k: min(_NUM_MAX, max(0, int(data['room'][k])))
+                   for k in ('width_mm', 'depth_mm', 'tile_mm')
                    if isinstance(data.get('room'), dict)
                    and str(data['room'].get(k, '')).lstrip('-').isdigit()}
         if medidas:
             store.rooms.update(uid, medidas, actor=actor)
 
-        # Las piezas, enteras: built first, swapped after — see `_replace_features`.
+        # Las piezas: built first, swapped after — see `_replace_features`.
         piezas = dcim_plankinds.feature_kinds(wa)
-        nuevas, saltadas = [], 0
+        cat = getattr(wa, '_dcim_catalog', None)
+        perdidos: dict = {}
+
+        def _perdido(campo):
+            perdidos[campo] = perdidos.get(campo, 0) + 1
+
+        nuevas, refs, saltadas = [], [], 0
         for row in (data.get('features') or []):
             kind = str(row.get('kind') or '')
             if kind not in piezas:
                 saltadas += 1                    # un tipo que esta versión no conoce
                 continue
             spec = piezas[kind]
-            nuevas.append({
+            fila = {
                 'room_uid': uid, 'kind': kind,
-                'label': str(row.get('label') or ''),
-                'pos_x': _num(row.get('pos_x')), 'pos_y': _num(row.get('pos_y')),
-                'width_mm': int(_num(row.get('width_mm')) or spec['w']),
-                'depth_mm': int(_num(row.get('depth_mm')) or spec['d']),
+                'label': _txt(row.get('label')),
+                'pos_x': _pos(row.get('pos_x')), 'pos_y': _pos(row.get('pos_y')),
+                'width_mm': _mm(row.get('width_mm')) or spec['w'],
+                'depth_mm': _mm(row.get('depth_mm')) or spec['d'],
                 'rotation': int(_num(row.get('rotation'))) % 360,
                 # Vacías si el fichero no las dice: las de su tipo, que es lo que eran.
-                'height_mm': (max(1, int(_num(row.get('height_mm'))))
+                'height_mm': (max(1, _mm(row.get('height_mm')))
                               if row.get('height_mm') not in (None, '') else None),
-                'base_mm': (max(0, int(_num(row.get('base_mm'))))
+                'base_mm': (_mm(row.get('base_mm'))
                             if row.get('base_mm') not in (None, '') else None),
                 'shelves': (min(SHELVES_MAX, max(1, int(_num(row.get('shelves')))))
                             if kind in SHELVED_KINDS and row.get('shelves') not in (None, '')
                             else None),
-            })
-        _replace_features(store, uid, nuevas, actor)
+                'model': _txt(row.get('model')), 'serial': _txt(row.get('serial')),
+                'device_uid': _txt(row.get('device_uid')),
+            }
+            # What the access control and the plan say of it, checked as a form would: a value
+            # this site or this catalogue cannot hold is counted as lost, not stored.
+            lock = _txt(row.get('lock'))
+            if lock and lock not in LOCK_KINDS:
+                _perdido('lock')
+                lock = ''
+            tipo = _txt(row.get('type_uid'))
+            if tipo and not (cat is not None and cat.get(tipo)):
+                _perdido('type_uid')
+                tipo = ''
+            grupo = row.get('group_uid') or ''
+            if group_bad({'group_uid': grupo}):
+                _perdido('group_uid')
+                grupo = ''
+            fila.update(lock=lock, type_uid=tipo, group_uid=grupo)
+            nuevas.append(fila)
+            refs.append((_txt(row.get('ref')), _txt(row.get('hub_uid'))))
+        hechas = _replace_features(store, uid, nuevas, actor)
         piezas = len(nuevas)
+        # The gateways, once every piece has its uid: a reader of the file is found by the `ref`
+        # it carried, and otherwise the gateway must be a reader of this site that is still
+        # there — what `_access_bad` would accept on a form. Anything else is lost, and said.
+        por_ref = {ref: nuevo for (ref, _h), nuevo in zip(refs, hechas) if ref}
+        for (_ref, hub), nuevo in zip(refs, hechas):
+            destino = por_ref.get(hub, hub) if hub else ''
+            if destino and _access_bad(store, room, {'hub_uid': destino}):
+                _perdido('hub_uid')
+                destino = ''
+            if str((store.features.get(nuevo) or {}).get('hub_uid') or '') != destino:
+                store.features.update(nuevo, {'hub_uid': destino}, actor=actor)
 
         # Y los racks, por nombre y sin borrar ninguno.
-        por_nombre = {str(r.get('name') or ''): r for r in store.racks_of(uid)}
+        # Only the racks this caller may write, which are the ones its plan shows. Matched among
+        # all of them, a file naming another company's rack moved it, and whether a name was
+        # «moved» or «new» told the caller which names the room hides. Somebody else's rack is
+        # not in this caller's room as far as the file is concerned: a name of theirs is a new
+        # rack, the same answer as a name nobody uses.
+        said_r, allowed_r = store.owners_map(), C.seen()
+        por_nombre = {str(r.get('name') or ''): r for r in store.racks_of(uid)
+                      if C.may_write(store, said_r, allowed_r, 'rack', r['uid'])}
         movidos = creados = 0
         filas_racks = data.get('racks') or []
         for row in filas_racks:
             nombre = str(row.get('name') or '').strip()
             if not nombre:
                 continue
-            sitio = {'pos_x': _num(row.get('pos_x')), 'pos_y': _num(row.get('pos_y')),
+            sitio = {'pos_x': _pos(row.get('pos_x')), 'pos_y': _pos(row.get('pos_y')),
                      'rotation': int(_num(row.get('rotation'))) % 360}
             # A qué altura cuelga es parte de dónde está. Solo si el fichero lo dice: uno
             # exportado antes de que existiera no sabe nada de ello, y leer su silencio como
             # «en el suelo» bajaría al suelo un rack que alguien había colgado.
             if 'base_mm' in row:
-                sitio['base_mm'] = max(0, int(_num(row.get('base_mm'))))
+                sitio['base_mm'] = _mm(row.get('base_mm'))
+            if 'group_uid' in row:
+                if group_bad({'group_uid': row.get('group_uid') or ''}):
+                    _perdido('group_uid')
+                else:
+                    sitio['group_uid'] = row.get('group_uid') or ''
             if nombre in por_nombre:
                 store.racks.update(por_nombre[nombre]['uid'], sitio, actor=actor)
                 movidos += 1
@@ -1398,53 +1543,71 @@ def register(app, wa, C):
                 alto = int(_num(row.get('u_height')) or 42)
                 store.racks.create(dict(sitio, room_uid=uid, name=nombre,
                                         u_height=max(1, min(RACK_U_MAX, alto)),
-                                        width_mm=max(0, int(_num(row.get('width_mm')) or 600)),
-                                        depth_mm=max(0, int(_num(row.get('depth_mm')) or 1000))),
+                                        width_mm=_mm(row.get('width_mm')) or 600,
+                                        depth_mm=_mm(row.get('depth_mm')) or 1000),
                                    actor=actor)
                 creados += 1
         nombrados = {str(r.get('name') or '').strip() for r in filas_racks}
         return jsonify({'features': piezas, 'skipped': saltadas,
                         'racks_moved': movidos, 'racks_new': creados,
-                        'racks_kept': len([n for n in por_nombre if n not in nombrados])})
+                        'racks_kept': len([n for n in por_nombre if n not in nombrados]),
+                        'lost': perdidos})
 
-    def _replace_features(store, room_uid, nuevas, actor) -> None:
-        """Swap a room's pieces for *nuevas*, putting the old ones back if writing fails.
+    def _replace_features(store, room_uid, nuevas, actor) -> list:
+        """Make a room's pieces *nuevas*, putting the old ones back if writing fails; returns the
+        uid each of *nuevas* ended up with, in order.
+
+        A piece already in the room with the same kind and label is UPDATED, not rebuilt: its uid
+        is what a source (`dc_power_source.feature_uid`) and a door (`hub_uid`) point at, and a
+        new uid unlinked them all. The rest of the old pieces go; the rest of the file's are new.
 
         Each row commits on its own (`Rows` has no batch), so one transaction around the swap
-        would not hold; what holds is that the list is complete before the first delete, and
-        that a failure half-way restores what was there instead of leaving the room bare.
+        would not hold; what holds is that the list is complete before the first write, and that
+        a failure half-way restores what was there instead of leaving the room half-imported.
         """
         # Un armario con material NO se borra: lo que guarda no está en el fichero, y borrarlo
-        # para crear otro igual perdería el material. Si el fichero trae un armario con su
-        # mismo nombre, se le ponen el sitio y la medida del fichero; si no, se queda.
-        con_material = {o['uid'] for o in store.features_of(room_uid)
-                        if str(o.get('kind') or '') in SHELVED_KINDS and store.shelf_items_of(o['uid'])}
-        viejas = [o for o in store.features_of(room_uid) if o['uid'] not in con_material]
-        guardados = {str(o.get('label') or ''): o['uid'] for o in store.features_of(room_uid)
-                     if o['uid'] in con_material}
-        hechas = []
+        # perdería el material. Si el fichero trae uno igual, se actualiza como cualquier otra
+        # pieza; si no, se queda.
+        antes = store.features_of(room_uid)
+        libres: dict = {}
+        for o in antes:
+            libres.setdefault((str(o.get('kind') or ''), str(o.get('label') or '')), []).append(o)
+        hechas, creadas, tocadas, viejas = [], [], [], []
         try:
+            for fila in nuevas:
+                igual = libres.get((fila['kind'], fila['label'])) or []
+                if igual:
+                    old = igual.pop(0)
+                    tocadas.append(old)
+                    store.features.update(old['uid'], {k: v for k, v in fila.items()
+                                                       if k != 'room_uid'}, actor=actor)
+                    hechas.append(old['uid'])
+                    continue
+                nuevo = store.features.create(fila, actor=actor)
+                creadas.append(nuevo)
+                hechas.append(nuevo)
+            usadas = {o['uid'] for o in tocadas}
+            viejas = [o for o in antes if o['uid'] not in usadas
+                      and not (str(o.get('kind') or '') in SHELVED_KINDS
+                               and store.shelf_items_of(o['uid']))]
             for old in viejas:
                 store.features.delete(old['uid'])
-            for fila in nuevas:
-                igual = (fila.get('kind') in SHELVED_KINDS
-                         and guardados.pop(str(fila.get('label') or ''), None))
-                if igual:
-                    store.features.update(igual, {k: v for k, v in fila.items() if k != 'room_uid'},
-                                          actor=actor)
-                    continue
-                hechas.append(store.features.create(fila, actor=actor))
         except Exception:
-            for uid in hechas:
-                store.features.delete(uid)
-            for old in viejas:
-                if not store.features.get(old['uid']):
+            for nuevo in creadas:
+                store.features.delete(nuevo)
+            for old in antes:
+                vuelta = {k: v for k, v in old.items() if k not in ('uid', 'room_uid')}
+                if store.features.get(old['uid']):
+                    store.features.update(old['uid'], vuelta, actor=old.get('updated_by') or actor)
+                else:
                     store.features.create(old, actor=old.get('updated_by') or actor)
             raise
-        # Only once the swap held: undone, the old pieces come back with their uids and their
-        # sources still name them. Done, the sources of the pieces that went name nothing.
+        # Only once the swap held: undone, the old pieces come back with their uids and what
+        # pointed at them still does. Done, the sources and the doors of the pieces that went
+        # name nothing.
         for old in viejas:
             store.unlink_feature(old['uid'])
+        return hechas
 
     # ── Power ─────────────────────────────────────────────────────────────────
     #

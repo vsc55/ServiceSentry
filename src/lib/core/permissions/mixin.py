@@ -210,9 +210,10 @@ class _PermissionsMixin:
 
         - An admin may grant anything.
         - The built-in ``admin`` role is never grantable by a non-admin.
-        - The other built-in roles (``editor``/``viewer``) ARE grantable — delegated user
-          management legitimately assigns the standard roles even though the actor may not
-          personally hold every ``*_view`` permission they carry.
+        - The other built-in roles (``editor``/``viewer``) are judged like any role: by what
+          they carry.  They used to be grantable unconditionally, so ``users_edit`` alone
+          handed oneself *editor* (``config_edit``, …) and a delegate scoped to one company
+          widened to every company through *viewer*'s ``orgs_all_view``.
         - A **custom** role is grantable only if its permissions are a subset of the
           requester's own effective permissions (blocks assigning a custom role that carries
           a permission the requester lacks — i.e. self-/other-escalation).
@@ -222,8 +223,11 @@ class _PermissionsMixin:
             return True
         if role_ref == BUILTIN_ROLE_UIDS.get('admin') or role_ref == 'admin':
             return False
-        if role_ref in set(BUILTIN_ROLE_UIDS.values()) or role_ref in BUILTIN_ROLE_PERMISSIONS:
-            return True   # built-in editor/viewer — delegatable
+        builtin = _BUILTIN_UID_TO_PERMS.get(role_ref)
+        if builtin is None:
+            builtin = BUILTIN_ROLE_PERMISSIONS.get(role_ref)
+        if builtin is not None:
+            return self._perms_grantable(builtin)
         # What the role WOULD grant, enabled or not: a disabled role grants nothing today, so
         # it passed as within anyone's reach, and switching it on afterwards (a separate
         # permission) handed its holders everything it carries.

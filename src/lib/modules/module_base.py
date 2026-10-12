@@ -647,6 +647,61 @@ class ModuleBase(SchemaDiscovery, DeviceBinding, ObjectBase):
         except Exception:  # pylint: disable=broad-except
             return cur
 
+    def settle_cleared(self, prefix: str, message_fn) -> list:
+        """Report OK for every ``<prefix>/<entity>`` that failed last cycle and is not
+        reported in this one.
+
+        For checks that list only what is WRONG (a service in trouble, a VM switched off)
+        under ``<item>/<check>/<entity>``: once the entity is fine it simply stops being
+        reported, its stored failure is pruned, and nobody is told it is over. Call this
+        after the check has emitted everything it has to say this cycle (and only when the
+        upstream answered); *message_fn(name)* builds the OK message from the entity's
+        stored display name. Returns the keys settled."""
+        if not self.is_monitor_exist:
+            return []
+        try:
+            stored = self._monitor.status.get_conf([self.name_module], {}) or {}
+            current = set(self.dict_return.keys())
+        except Exception:  # pylint: disable=broad-except
+            return []
+        pre = str(prefix).rstrip('/') + '/'
+        done = []
+        for k, entry in list(stored.items()):
+            if not str(k).startswith(pre) or k in current:
+                continue
+            if not isinstance(entry, dict) or entry.get('status') is not False:
+                continue
+            name = str((entry.get('other_data') or {}).get('name') or entry.get('name')
+                       or str(k)[len(pre):])
+            self._emit(k, True, message_fn(name), {'name': name})
+            done.append(k)
+        return done
+
+    def carry_forward(self, prefix: str) -> list:
+        """Re-record, unchanged and without notifying, every stored failure under
+        ``<prefix>/``.
+
+        For a cycle that learned NOTHING about the entities (a debounced auth blip): left
+        unreported they are pruned, and a pruned failure under an OK roll-up reads as a
+        recovery nobody had. Returns the keys carried."""
+        if not self.is_monitor_exist:
+            return []
+        try:
+            stored = self._monitor.status.get_conf([self.name_module], {}) or {}
+        except Exception:  # pylint: disable=broad-except
+            return []
+        pre = str(prefix).rstrip('/') + '/'
+        done = []
+        for k, entry in list(stored.items()):
+            if (str(k).startswith(pre) and isinstance(entry, dict)
+                    and entry.get('status') is False and not self.dict_return.is_exist(k)):
+                self.dict_return.set(k, False, entry.get('message', ''), False,
+                                     dict(entry.get('other_data') or {}),
+                                     entry.get('severity') or None,
+                                     name=entry.get('name', ''))
+                done.append(k)
+        return done
+
     def _debug(self, msg: str, level: DebugLevel = DebugLevel.debug):
         """ Helper de debug para plugins. """
         self.debug.print(f">> PlugIn >> {self.name_module} >> {msg}", level)

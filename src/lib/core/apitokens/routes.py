@@ -10,6 +10,7 @@ Routes registered by this file:
     POST   /api/v1/account/tokens/<uid>/rotate a new secret for the same setup
     PUT    /api/v1/account/tokens/<uid>        change what one of mine may do
     DELETE /api/v1/account/tokens/<uid>        revoke one of mine
+    DELETE /api/v1/account/tokens              revoke ALL of mine (offered after a password change)
     DELETE /api/v1/users/<username>/tokens     revoke ALL of somebody else's (sessions_revoke)
 
     GET    /api/v1/tokens                      every token in the installation (sessions_view)
@@ -371,6 +372,23 @@ def register(app, wa):
         wa._audit('api_token_revoked', detail={'name': (row or {}).get('name', ''),
                                                'token_id': (row or {}).get('token_id', '')})
         return jsonify({'ok': True})
+
+    @app.route('/api/v1/account/tokens', methods=['DELETE'])
+    @session_required
+    def api_account_tokens_revoke_all():
+        """Revoke every one of my own tokens — the offer a password change makes.
+
+        A changed password leaves the tokens working on purpose (an integration holding one
+        must not break behind its owner's back); this is the one-step answer for the owner who
+        changed it because something leaked. A session only, like every credential route.
+        """
+        username, my_uid = _me()
+        if not my_uid:
+            return jsonify({'error': wa._t('user_not_found')}), 404
+        n = wa._api_token_store.revoke_all_for(my_uid)
+        if n:
+            wa._audit('api_tokens_revoked', detail={'username': username, 'count': n})
+        return jsonify({'ok': True, 'revoked': n})
 
     @app.route('/api/v1/users/<username>/tokens', methods=['DELETE'])
     @session_required

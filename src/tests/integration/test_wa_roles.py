@@ -285,7 +285,11 @@ class TestGranularPermissions:
     # ── users_add ─────────────────────────────────────────────────
 
     def test_users_add_allows_create_user(self, admin):
-        self._make_user_with_perms(admin, "u_add", ["users_add"])
+        # The built-in viewer is judged by what it carries (IDN-1): a delegate may hand it out
+        # only while holding all of it, like any other role.
+        from lib.core.permissions import BUILTIN_ROLE_PERMISSIONS
+        self._make_user_with_perms(admin, "u_add",
+                                   ["users_add", *BUILTIN_ROLE_PERMISSIONS['viewer']])
         c = self._client_as(admin, "u_add")
         resp = c.post("/api/v1/users", json={"username": "newu", "password": "testpass", "role": "viewer"})
         assert resp.status_code == 201

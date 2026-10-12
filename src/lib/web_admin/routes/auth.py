@@ -12,6 +12,8 @@ Routes registered by this file:
                          not enrolled, which the moment a policy is switched on is everybody
     POST     /login/mfa/webauthn/begin   options for the security key of the parked sign-in
     POST     /login/mfa/webauthn/verify  the assertion; the same gate as the code
+    GET,POST /login/change-password  the forced change of the built-in default password —
+                         the only screen such an account reaches until it is done
     POST     /logout     end the current session
 """
 
@@ -46,14 +48,17 @@ def register(app, wa):
         return wa._mfa_uid(username) or _rl_tag(username)
 
     def _mfa_account_ok(username) -> bool:
-        ok, _retry = wa._mfa_ratelimit.peek(_mfa_key(username),
-                                            int(wa._LOCKOUT_MAX_ATTEMPTS or 0),
-                                            int(wa._LOCKOUT_DURATION_SECS or 0))
-        return ok
+        """Count this attempt against the account FIRST, then say whether it may proceed.
 
-    def _mfa_account_fail(username) -> None:
-        wa._mfa_ratelimit.hit(_mfa_key(username), int(wa._LOCKOUT_MAX_ATTEMPTS or 0),
-                              int(wa._LOCKOUT_DURATION_SECS or 0))
+        Hit-then-check, not peek-then-hit: with a look first and the count only after a wrong
+        code, N guesses sent at once all looked at the same count, all passed, and the limit
+        held only for whoever guessed one at a time. A success forgets the account's hits
+        (`_mfa_account_done`), so counting it costs the owner nothing.
+        """
+        ok, _retry = wa._mfa_ratelimit.hit(_mfa_key(username),
+                                           int(wa._LOCKOUT_MAX_ATTEMPTS or 0),
+                                           int(wa._LOCKOUT_DURATION_SECS or 0))
+        return ok
 
     def _mfa_account_done(username) -> None:
         wa._mfa_ratelimit.reset(_mfa_key(username))
@@ -196,7 +201,6 @@ def register(app, wa):
                 return redirect(url_for('login'))
             kind = wa._mfa_verify_pending(request.form.get('code', ''))
             if not kind:
-                _mfa_account_fail(username)
                 wa._dbg(f"> Auth/MFA >> second factor FAILED user={username!r} "
                         f"from {request.remote_addr}", DebugLevel.warning)
                 wa._audit('mfa_failed', username, request.remote_addr,
@@ -261,6 +265,10 @@ def register(app, wa):
             return jsonify({'ok': False,
                             'error': scope.get('reason') or 'not_enrolled'}), 400
         challenge = webauthn.new_challenge()
+        # Server-side as well as in the parked note: the note is a cookie, and a copy of it
+        # would otherwise answer the same challenge again (see `consume_challenge`).
+        if not wa._mfa_store.set_challenge(wa._mfa_uid(held.get('username', '')), challenge):
+            return jsonify({'ok': False, 'error': 'not_enrolled'}), 400
         held = dict(held)
         held['webauthn_challenge'] = challenge
         session['mfa_pending'] = held
@@ -297,16 +305,22 @@ def register(app, wa):
             return jsonify({'ok': False, 'error': 'throttled'}), 429
         data = wa._optional_json()
         scope = wa._webauthn_scope()
-        out = mfa_service.webauthn_verify(
-            wa._mfa_store, wa._mfa_uid(username),
-            auth_data=webauthn.b64u_decode(str(data.get('auth_data') or '')),
-            client_data_json=webauthn.b64u_decode(str(data.get('client_data_json') or '')),
-            signature=webauthn.b64u_decode(str(data.get('signature') or '')),
-            credential_id=str(data.get('credential_id') or ''),
-            challenge=str(held.get('webauthn_challenge') or ''),
-            rp_id=scope.get('rp_id', ''), origin=scope.get('origin', ''))
+        # One answer per challenge, spent BEFORE the signature is checked: compare-and-clear in
+        # the database, so a replayed copy of this cookie — or the same assertion sent twice at
+        # once — finds it gone. A passkey that keeps no counter gave every copy a session.
+        if not wa._mfa_store.consume_challenge(wa._mfa_uid(username),
+                                               str(held.get('webauthn_challenge') or '')):
+            out = {'ok': False, 'error': 'challenge_spent'}
+        else:
+            out = mfa_service.webauthn_verify(
+                wa._mfa_store, wa._mfa_uid(username),
+                auth_data=webauthn.b64u_decode(str(data.get('auth_data') or '')),
+                client_data_json=webauthn.b64u_decode(str(data.get('client_data_json') or '')),
+                signature=webauthn.b64u_decode(str(data.get('signature') or '')),
+                credential_id=str(data.get('credential_id') or ''),
+                challenge=str(held.get('webauthn_challenge') or ''),
+                rp_id=scope.get('rp_id', ''), origin=scope.get('origin', ''))
         if not out.get('ok'):
-            _mfa_account_fail(username)
             wa._dbg(f"> Auth/MFA >> security key FAILED user={username!r} "
                     f"from {request.remote_addr}", DebugLevel.warning)
             wa._audit('mfa_failed', username, request.remote_addr,
@@ -394,6 +408,38 @@ def register(app, wa):
             flash(wa._t('mfa_required_no_key'), 'danger')
             return redirect(url_for('login'))
         return render_template('login_mfa_enrol.html', recovery=None, **out)
+
+    @app.route('/login/change-password', methods=['GET', 'POST'])
+    def login_password_change():
+        """The forced password change: the one screen an account on the default password sees.
+
+        Signed in, but held here by ``_hook_must_change_password`` until the password is one
+        nobody else knows. A page of its own on the sign-in side rather than a panel pane: the
+        panel would load a dozen screens' worth of data the gate then refuses, and the person
+        has nothing to do in it before this is done. Once it is, the panel opens normally.
+        """
+        if not session.get('logged_in'):
+            return redirect(url_for('login'))
+        username = session.get('username', '')
+        if not wa._must_change_password(username):
+            return redirect(url_for('dashboard'))
+        if request.method == 'POST':
+            new_pw = request.form.get('new_password', '')
+            if new_pw != request.form.get('confirm_password', ''):
+                flash(wa._t('pwchg_mismatch'), 'danger')
+                return redirect(url_for('login_password_change'))
+            refused = wa._change_own_password(username, request.form.get('current_password', ''),
+                                              new_pw)
+            if refused:
+                _status, *msg = refused
+                if msg and msg[0] == 'wrong_current_password':
+                    wa._ipban_offense('login_failed')
+                flash(wa._t(*msg), 'danger')
+                return redirect(url_for('login_password_change'))
+            wa._revoke_user_sessions(username, except_token=session.get('session_token'))
+            wa._audit('password_changed', detail={'forced': True})
+            return redirect(wa._landing_url(wa._users.get(username) or {}))
+        return render_template('login_password_change.html', username=username)
 
     @app.route('/logout', methods=['POST'])
     def logout():

@@ -235,6 +235,19 @@ class BaseConnector(ABC):
     def fetchone(self, sql: str, params: tuple = ()) -> tuple | None:
         """Execute a SELECT and return the first matching row, or ``None``."""
 
+    def iter_query(self, sql: str, params: tuple = (), size: int = 5000):
+        """Yield the rows of a SELECT in lists of up to *size*, without holding them all.
+
+        For reading a table that does not fit in memory and has no key to page it by (a
+        backup of `history_fact`: tens of millions of rows, no primary key by design). Do not
+        run other statements on this connection while iterating: the server engines stream
+        the result through it. Default: one ``fetchall`` cut into pieces — correct, not lean;
+        every concrete connector overrides it with a cursor that really streams.
+        """
+        rows = self.fetchall(sql, params)
+        for i in range(0, len(rows), max(1, int(size))):
+            yield rows[i:i + size]
+
     # ── Write ────────────────────────────────────────────────────────────────
 
     @abstractmethod
@@ -318,6 +331,39 @@ class BaseConnector(ABC):
         }
 
     def reconcile_table(self, spec: TableSpec) -> SchemaDiff:
+        """Make the physical table match *spec* — one process at a time per table.
+
+        Several processes share a database (web, worker, syslog, events, replicas) and all of
+        them reconcile at boot: after an upgrade that adds a column, two of them read the same
+        diff and both ran the same `ADD COLUMN` / `CREATE INDEX`, and the second one failed its
+        boot with «duplicate column». The engine's own lock (:meth:`_reconcile_lock`) makes the
+        second wait and then read a table that is already right.
+        """
+        with self._reconcile_lock(spec.name):
+            return self._reconcile(spec)
+
+    @contextmanager
+    def _reconcile_lock(self, table: str):
+        """Serialise schema reconciliation of *table* across processes.  Default: none —
+        SQLite's single writer already serialises the DDL.  PostgreSQL and MySQL override it
+        with an advisory lock that lives on the connection, not in a transaction."""
+        yield
+
+    def _is_duplicate_object(self, exc: Exception) -> bool:  # pylint: disable=unused-argument
+        """Whether *exc* says the column or index being created already exists — what a
+        reconcile that lost a race (or ran without its lock) finds, and may take as done."""
+        return False
+
+    def _create_index(self, ddl: str) -> None:
+        """Create an index; one that is already there is what was wanted."""
+        try:
+            self.execute_ddl(ddl)
+        except Exception as exc:  # pylint: disable=broad-except
+            if not self._is_duplicate_object(exc):
+                raise
+            _log.info('Index already present (created concurrently): %s', ddl)
+
+    def _reconcile(self, spec: TableSpec) -> SchemaDiff:
         """Make the physical table match *spec*.
 
         A table declaring ``former_names`` and not present under its own name is renamed from
@@ -340,7 +386,7 @@ class BaseConnector(ABC):
                 spec, self._type_map, q,
                 text_default_parens=self.DDL_TEXT_DEFAULT_PARENS))
             for idx in spec.indexes:
-                self.execute_ddl(create_index_ddl(
+                self._create_index(create_index_ddl(
                     idx.name, spec.name, idx.columns, idx.unique, q))
             return SchemaDiff(table=spec.name)
 
@@ -448,12 +494,12 @@ class BaseConnector(ABC):
                 spec.name, col.name,
                 self._column_type_clause(col, keyed=col.name in indexed or col.unique))
             if col.unique:   # separate unique index (not inlined on ADD COLUMN)
-                self.execute_ddl(create_index_ddl(
+                self._create_index(create_index_ddl(
                     f'ux_{spec.name}_{col.name}', spec.name, [col.name], True, self.quote_ident))
         for idx in diff.changed_indexes:
             self._drop_index(idx.name, spec.name)
         for idx in list(diff.missing_indexes) + list(diff.changed_indexes):
-            self.execute_ddl(create_index_ddl(
+            self._create_index(create_index_ddl(
                 idx.name, spec.name, idx.columns, idx.unique, self.quote_ident))
 
     def _rebuild_copy_plan(self, spec: TableSpec, actual_cols: list[ColumnInfo]):

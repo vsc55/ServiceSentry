@@ -20,6 +20,25 @@ instancia en marcha, así que se pueden lanzar en caliente. Las opciones globale
 > aplican las rutas web; sí aplican las guardas de **datos** (política de contraseña, unicidad,
 > "debe quedar al menos un admin activo").
 
+## Como root, con el usuario dedicado
+
+Una instalación de paquete (o `install.sh` nueva) corre los servicios como `servicesentry`, y
+`/var/lib/ServiSesentry` es suyo. Un subcomando lanzado **como root** contra esos datos creaba
+ficheros de root (el diario de `data.db`, una imagen de la sede de demostración, una base
+nueva) que luego los servicios no podían escribir: el panel pasaba a solo-lectura sin nada
+que apuntara al CLI.
+
+Ahora, si lo lanza root y el directorio de datos es de otro usuario, el CLI **se convierte en
+ese usuario** (grupos, gid y uid) antes de abrir nada. Si no puede, **se niega** con un
+mensaje que dice cómo lanzarlo. La forma explícita, que funciona igual en cualquier caso:
+
+```bash
+sudo runuser -u servicesentry -- /opt/ServiSesentry/venv/bin/python /opt/ServiSesentry/main.py user mfa-status
+```
+
+Una instalación que sigue corriendo como root (anterior al usuario dedicado) no cambia nada:
+el directorio es de root y el CLI sigue como root.
+
 ---
 
 ## Gestión de usuarios (`user`)

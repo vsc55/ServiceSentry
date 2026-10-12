@@ -383,13 +383,31 @@ y al preparar una release. Un lock con hashes envejece en silencio — no avisa 
 
 De aquella ronda quedaron sin arreglar, clasificados como latentes o de borde:
 
-- **BD (severidad baja):** fallback de líder en PostgreSQL, introspección PG sin schema,
-  upsert de `event_cursor`/cooldowns en MySQL, `ADD COLUMN` idempotente.
+- **BD (severidad baja):** cerrados. Verificados en vivo el 2026-10-12 sobre MariaDB y
+  PostgreSQL: la introspección de PG ya filtraba por `current_schema()` y el upsert de
+  `event_cursor`/cooldowns ya iba con `FOUND_ROWS` (los dos desde el 2026-07-15); el `ADD
+  COLUMN` de dos procesos a la vez seguía fallando y se cerró en build.145 con un bloqueo por
+  tabla al reconciliar, y el líder que pierde la carrera del INSERT ya no relee la fila.
 - **Frontend (severidad baja):** los recogidos como *frontend-lows* en la misma ronda.
 
 **Riesgo aceptado explícitamente:** exfiltración vía `api_test_device_ssh`. El endpoint se
 endureció parcialmente (`api_test_credential` perdió `devices_edit`), pero el riesgo de fondo
 se asumió a conciencia — no lo "arregles" sin releer aquella decisión.
+Desde el 2026-10-12 `credentials/test` exige `credentials_edit` (antes bastaba `credentials_view`).
+
+### Pendientes de la segunda auditoría (2026-10-12)
+
+- **Descarga del archivo de GitHub** (`providers/github.py`): la URL la construye el servidor
+  (`codeload.github.com`) y se comprueba **después** dónde acabaron las redirecciones; si fue a
+  un destino que la guarda SSRF bloquea, se rechaza el archivo, pero la petición ya se hizo. Un
+  opener que valide salto a salto rompía los dobles de prueba del catálogo DCIM.
+- **Regex de reglas de eventos:** la detección de patrones peligrosos rechaza alguno inofensivo
+  (`((ab)+c)*`) y deja pasar casos polinómicos (`(.*a){20}`), acotados solo por el corte de 4 KiB.
+  Una regla guardada antes con un patrón peligroso no se evalúa hasta que se edita: la lista de
+  reglas la marca «No se evalúa» con el patrón y el log lo avisa al cargar las reglas.
+- **Sin probar en real:** rpm/deb/emerge (directorios, usuario dedicado, `ExecStartPre`; los
+  cubrirán los jobs de CI en el próximo push), SSH a Windows con PowerShell (los comandos CIM
+  en local sí: job `windows-cim`), hosts OpenRC/SysV, pgbouncer, Helm en un clúster con NFS.
 
 ## Empaquetado
 

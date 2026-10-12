@@ -70,6 +70,12 @@ _FACTORS = TableSpec(
         Column('alg',           'INTEGER', nullable=False, default='0'),
         # The authenticator's own counter. Zero means it keeps none, which is allowed.
         Column('sign_count',    'INTEGER', nullable=False, default='0'),
+        # The sign-in challenge last issued to this key, as a SHA-256 — and '' once answered.
+        # The challenge also rides in the parked sign-in (the cookie), and only there it could
+        # be answered again from a copy of that cookie: a passkey with no counter (sign_count
+        # 0) gave every copy its own session. Here it is consumed by one UPDATE, so exactly one
+        # answer wins, whichever replica it reaches.
+        Column('challenge',     'TEXT', nullable=False, default="''"),
         # `created_at` / `updated_at`, como el resto del esquema: `created` y `updated`
         # eran la misma idea con otro nombre.
         Column('created_at', 'TEXT', nullable=False, default="''"),
@@ -349,6 +355,40 @@ class MfaStore(BaseStore):
                     f'UPDATE {_F} SET sign_count = ?, updated_at = ?'
                     " WHERE user_uid = ? AND method = 'webauthn' AND sign_count < ?",
                     (int(count), self._now(), str(user_uid or ''), int(count)))
+            return changed > 0
+        except Exception:      # pylint: disable=broad-except
+            return False
+
+    @staticmethod
+    def _challenge_hash(challenge: str) -> str:
+        import hashlib   # noqa: PLC0415
+        return hashlib.sha256(str(challenge or '').encode('utf-8')).hexdigest()
+
+    def set_challenge(self, user_uid: str, challenge: str) -> bool:
+        """Remember the sign-in challenge just issued to this account's key (replacing any)."""
+        try:
+            with self._db.transaction():
+                changed = self._db.execute(
+                    f"UPDATE {_F} SET challenge = ? WHERE user_uid = ? AND method = 'webauthn'",
+                    (self._challenge_hash(challenge), str(user_uid or '')))
+            return changed > 0
+        except Exception:      # pylint: disable=broad-except
+            return False
+
+    def consume_challenge(self, user_uid: str, challenge: str) -> bool:
+        """Spend the issued challenge: True for the one caller that matched it, then never again.
+
+        A compare-and-clear in a single UPDATE, so two answers racing — the real browser and a
+        replayed copy of its cookie — cannot both see it unspent.
+        """
+        if not challenge:
+            return False
+        try:
+            with self._db.transaction():
+                changed = self._db.execute(
+                    f"UPDATE {_F} SET challenge = '' WHERE user_uid = ? AND method = 'webauthn'"
+                    " AND challenge = ? AND challenge <> ''",
+                    (str(user_uid or ''), self._challenge_hash(challenge)))
             return changed > 0
         except Exception:      # pylint: disable=broad-except
             return False

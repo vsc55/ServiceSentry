@@ -65,6 +65,8 @@ class Cfg:
     min: int | None = None            # int range (inclusive)
     max: int | None = None
     env: str | None = None            # environment-variable override
+    env_alias: tuple = ()             # more env vars for the same field; a later one wins
+                                      # over `env` (and over an earlier alias)
     admin_only: bool = False          # only admins may modify it
     flask_cfg: tuple | None = None    # (app.config key, transform) to sync Flask
     no_rule: bool = False             # exclude from the derived web_admin rule dicts
@@ -307,15 +309,23 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('web_admin|status_lang', str, '', attr='_STATUS_LANG',
         env='SS_STATUS_LANG'),
     # ── External Access card (order = host → port → public URL → proxy → HTTPS) ──
-    Cfg('web_admin|host', str, '0.0.0.0', no_rule=True, card='proxy'),  # bind addr
+    # Bind address and port. SS_WEB_HOST / SS_WEB_PORT are also the CLI's env fallbacks
+    # (--web-host / --web-port), so the same var both moves the listener and locks the field
+    # in the Config UI; SS_WEB_PORT beats the older SS_PORT (main.resolve_web_bind).
+    Cfg('web_admin|host', str, '0.0.0.0', no_rule=True, env='SS_WEB_HOST', card='proxy'),
     Cfg('web_admin|port', int, 8080, attr='_PORT',
-        min=1, max=65535, env='SS_PORT', card='proxy'),
+        min=1, max=65535, env='SS_PORT', env_alias=('SS_WEB_PORT',), card='proxy'),
     Cfg('web_admin|public_url', str, '', attr='_PUBLIC_URL',
         env='SS_PUBLIC_URL', admin_only=True, card='proxy'),
     Cfg('web_admin|proxy_count', int, 0, attr='_PROXY_COUNT',
         min=0, max=10, env='SS_PROXY_COUNT', admin_only=True, card='proxy'),
     Cfg('web_admin|force_https', bool, False, attr='_FORCE_HTTPS',
         env='SS_FORCE_HTTPS', admin_only=True, card='proxy'),
+    # How many redirects a guarded outbound fetch follows (map tiles, MIB imports, the web
+    # check), each hop re-validated by the SSRF guard. 10 is urllib's own ceiling, what the
+    # web check followed before; 0 = never follow (a redirect is then a failure).
+    Cfg('web_admin|max_redirects', int, 10, attr='_MAX_REDIRECTS',
+        min=0, max=30, env='SS_MAX_REDIRECTS', admin_only=True, card='proxy'),
     # Framing allowlist: origins permitted to embed the panel in an iframe (CSP
     # frame-ancestors). Empty = framing blocked (default). embed_in_teams adds the
     # Microsoft Teams/Outlook/M365 origins so the Teams personal tab can render.
@@ -680,12 +690,14 @@ CONFIG_FIELDS: tuple[Cfg, ...] = (
     Cfg('saml2|default_role', str, '', no_rule=True),
 
     # ══ SCIM 2.0 (aprovisionamiento proactivo desde el IdP) ═══════════════════
-    Cfg('scim|enabled', bool, False),
-    Cfg('scim|token', str, '', no_rule=True),          # bearer token que envía el IdP (cifrado)
-    Cfg('scim|default_role', str, '', no_rule=True),   # rol para usuarios aprovisionados (vacío = none)
-    Cfg('scim|auto_disable', bool, True),              # active=false del IdP → deshabilita el usuario
-    Cfg('scim|sp_app_id', str, '', no_rule=True),      # appId de la app SCIM en Entra (deep link)
-    Cfg('scim|sp_object_id', str, '', no_rule=True),   # objectId del SP (deep link a Provisioning)
+    # Admin-only, all of it: whoever holds the token provisions accounts into role-mapped
+    # groups, so config_edit on this section was a short road to admin.
+    Cfg('scim|enabled', bool, False, admin_only=True),
+    Cfg('scim|token', str, '', no_rule=True, admin_only=True),         # bearer token del IdP (cifrado)
+    Cfg('scim|default_role', str, '', no_rule=True, admin_only=True),  # rol aprovisionados (vacío = none)
+    Cfg('scim|auto_disable', bool, True, admin_only=True),             # active=false → deshabilita
+    Cfg('scim|sp_app_id', str, '', no_rule=True, admin_only=True),      # appId de la app SCIM en Entra (deep link)
+    Cfg('scim|sp_object_id', str, '', no_rule=True, admin_only=True),   # objectId del SP (deep link a Provisioning)
 
     # ══ Email ════════════════════════════════════════════════════════════════
     Cfg('email|enabled', bool, False),
@@ -1003,8 +1015,15 @@ def json_dict_fields() -> set:
 
 
 def env_field_specs() -> dict:
-    """``{ENV_VAR: (path, type)}`` for every env-overridable field."""
-    return {f.env: (f.path, f.type) for f in CONFIG_FIELDS if f.env}
+    """``{ENV_VAR: (path, type)}`` for every env-overridable field.
+
+    Aliases come after a field's own var, and every consumer walks this in order with the
+    last value winning — so an alias set beside the main var is the one that applies."""
+    out = {}
+    for f in CONFIG_FIELDS:
+        for name in ((f.env,) if f.env else ()) + tuple(f.env_alias):
+            out[name] = (f.path, f.type)
+    return out
 
 
 def admin_only_fields() -> set:

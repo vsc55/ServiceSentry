@@ -164,6 +164,23 @@ class ScimService:
             return self.err(403, 'Only SCIM-managed groups can be modified via SCIM', 'mutability')
         return None
 
+    def _drops_last_admin(self, u, *, removing: bool) -> bool:
+        """Would this change leave the installation without an active administrator?
+
+        The panel refuses to delete or disable the last one (``users/service.py``); SCIM
+        answered to no such rule, so an IdP that deprovisioned the one admin it happened to
+        own (a SCIM account placed in an admin-mapped group) locked everyone out.
+        *removing* says whether *u* is about to stop counting (deleted, or disabled)."""
+        from lib.core.users.service import count_admins, user_is_admin   # noqa: PLC0415
+        groups = getattr(self.wa, '_groups', None) or {}
+        if not removing or not u.get('enabled', True) or not user_is_admin(u, groups):
+            return False
+        return count_admins(self.wa._users, groups, active_only=True) <= 1
+
+    def _last_admin_err(self):
+        return self.err(403, 'Cannot remove or disable the last active administrator',
+                        'mutability')
+
     def deny_user_write(self, u):
         """SCIM may only mutate the users it provisioned — never local/LDAP/OIDC/SAML2
         accounts (e.g. the local Administrator). "Provisioned" is the ``provisioned_by``
@@ -380,6 +397,8 @@ class ScimService:
             return deny
         before = self._user_snap(u)
         email, name, active = scim_user_fields(body)
+        if not active and self._auto_disable() and self._drops_last_admin(u, removing=True):
+            return self._last_admin_err()
         u['display_name']   = name
         u['email']          = email
         u['enabled']        = active if self._auto_disable() or active else u.get('enabled', True)
@@ -407,6 +426,7 @@ class ScimService:
         if deny:
             return deny
         before = self._user_snap(u)
+        saved = dict(u)
         for op in (body.get('Operations') or [])[:100]:   # cap ops (parity w/ group PATCH)
             path = (op.get('path') or '').lower()
             val = op.get('value')
@@ -424,6 +444,16 @@ class ScimService:
                     u['email'] = (val[0] or {}).get('value', '') if isinstance(val[0], dict) else str(val[0])
                 elif val:
                     u['email'] = str(val)
+        if saved.get('enabled', True) and not u.get('enabled', True):
+            u['enabled'] = True                 # judged as it stood before this PATCH
+            refused = self._drops_last_admin(u, removing=True)
+            u['enabled'] = False
+        else:
+            refused = False
+        if refused:
+            u.clear()
+            u.update(saved)           # nothing of the PATCH lands: it is refused whole
+            return self._last_admin_err()
         self.wa._persist_users()
         after = self._user_snap(u)
         if after != before:
@@ -439,6 +469,8 @@ class ScimService:
         deny = self.deny_user_write(u)
         if deny:
             return deny
+        if self._drops_last_admin(u, removing=True):
+            return self._last_admin_err()
         before = self._user_snap(u)
         # Its sessions and its tokens go with it, as on the panel's delete: they outlived the
         # account, and a later account of the same name inherited the sessions.

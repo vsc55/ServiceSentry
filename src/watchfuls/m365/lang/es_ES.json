@@ -141,6 +141,7 @@
         "list": "Conexiones de Microsoft 365"
     },
     "messages": {
+        "m3_cleared": "M365: {} — {}: ya no está afectado ✅",
         "m3_no_creds": "M365: {} — faltan credenciales (tenant/client/secret) ⚠️",
         "m3_auth_fail": "M365: {} {} [auth: {}]",
         "m3_site_fail": "M365: {} 🔽 [SharePoint: {}]",
@@ -213,6 +214,7 @@
         "m3_od_from_api": "Nombres y tamaños leídos de la API de usuarios: los informes de este tenant ocultan los nombres. No incluye cuentas eliminadas, que sí cuentan en el total."
     },
     "messages_vars": {
+        "m3_cleared": ["conexión", "servicio"],
         "m3_no_creds": [
             "conexión"
         ],

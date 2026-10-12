@@ -52,6 +52,17 @@ __maintainer__ = 'Javier Pastor'
 __email__ = "python[at]cerebelum[dot]net"
 __status__ = "Development"
 
+#: What joins an item's key to the keys of its parts (`<key>_ram`, `<key>/vip`).
+_PART_SEPARATORS = ('/', '_')
+
+
+def _status_ok(result_data, key) -> bool:
+    """Whether *key* reports OK in *result_data* — False on any doubt."""
+    try:
+        return result_data.get_status(key) is True
+    except Exception:  # pylint: disable=broad-except
+        return False
+
 
 class Monitor(ObjectBase):
     # A real run: results are recorded, notifications go out, history grows. The probe
@@ -150,6 +161,13 @@ class Monitor(ObjectBase):
             self.config.data = mgr.read()
         except Exception:  # pylint: disable=broad-except
             return
+        # The redirect ceiling of guarded fetches (the web check runs here, not in the web).
+        try:
+            from lib.security import net_guard  # noqa: PLC0415
+            net_guard.set_max_redirects(net_guard.max_redirects_from(
+                self.config.get_conf(['web_admin'], {}) or {}))
+        except Exception:  # pylint: disable=broad-except
+            pass
         # Recompute the public URL from the now-effective config.
         _raw_url = normalize_url(self.config.get_conf(['web_admin', 'public_url'], ''))
         if _raw_url:
@@ -471,7 +489,12 @@ class Monitor(ObjectBase):
         if store is not None:
             from lib.services.monitoring.check_state import DbBackedStatus  # noqa: PLC0415
             self.status = DbBackedStatus(store, self._get_item_uid)
-            self.status.read()
+            try:
+                self.status.read()
+            except Exception as exc:  # pylint: disable=broad-except
+                # Unreadable now: start empty, the cycle re-reads it before any check.
+                self.debug.print(f"> Monitor >> check state unreadable: {exc}",
+                                 DebugLevel.warning)
         else:
             self.status = ConfigControl(None, {})
 
@@ -775,10 +798,26 @@ class Monitor(ObjectBase):
         it was over (ram_swap, raid, hddtemp, keepalived, proxmox)."""
         if self._notifier is None or not isinstance(entry, dict) or entry.get('status') is not False:
             return
-        partes = [c for c in result_data.keys() if str(c) != str(key) and str(c).startswith(str(key))]
+        key = str(key)
+        # A part is the key followed by a separator: `srv1_ram` is srv1's, `srv10_ram` is not.
+        partes = [c for c in result_data.keys()
+                  if any(str(c).startswith(key + sep) for sep in _PART_SEPARATORS)]
         # Reaching the device is the recovery: a part still failing (swap full, a disk hot)
         # is a first record of its own, and as a failing one it is announced by itself.
         if not partes:
+            # The other shape: a module that reports a sub-entity ONLY while it fails
+            # (`<item>/health/<service>`, `<item>/resources/<id>`) and drops the key once it
+            # is healthy. The failing key is pruned and has no parts — but an ANCESTOR that
+            # reports OK this cycle says the entity is no longer failing.
+            padres = [c for c in result_data.keys()
+                      if key.startswith(str(c) + '/') and _status_ok(result_data, c)]
+            if not padres:
+                return
+            padre = max(padres, key=lambda c: len(str(c)))     # the nearest ancestor
+            label = self._item_label(module_name, key)
+            texto = str(result_data.get_message(padre) or '').strip()
+            self._notifier.add('recovery', module_name, label,
+                               f'{key}: {texto}' if texto else label)
             return
         texto = '; '.join(str(result_data.get_message(c) or '') for c in partes[:3]).strip('; ')
         label = self._item_label(module_name, key)
@@ -900,7 +939,12 @@ class Monitor(ObjectBase):
         """Run all enabled checks."""
         self.debug.print(f"> Monitor > check >> Check Init: {time.strftime('%c')}", DebugLevel.info)
 
-        self.status.read()
+        try:
+            self.status.read()
+        except Exception as exc:  # pylint: disable=broad-except
+            # Keep the state already held: an unreadable table is not an empty one.
+            self.debug.print(f"> Monitor >> check state unreadable, keeping the last "
+                             f"one read: {exc}", DebugLevel.warning)
         self.purge_maintenance_states()
         list_modules = self._get_enabled_modules()
 

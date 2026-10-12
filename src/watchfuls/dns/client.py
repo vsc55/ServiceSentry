@@ -35,11 +35,13 @@ import concurrent.futures
 import ipaddress
 import json
 import platform
+import re
 import shlex
 import socket
 import subprocess
 
 from . import deps
+from . import tables
 
 _IS_WINDOWS = platform.system().lower().startswith('win')
 
@@ -187,8 +189,11 @@ def _parse_resolve_dnsname(record_type: str, records: list) -> list:
 def _resolve_win(host: str, record_type: str, nameserver: str, timeout: float) -> list:
     """Resolve via the Windows DNS Client (Resolve-DnsName) — works where direct
     dnspython queries from python.exe are firewall-blocked."""
+    # The type goes in UNQUOTED (it is an enum argument), so it is whitelisted first: a
+    # stored `A;<command>` used to run in this PowerShell, on the panel.
+    rt = tables.safe_record_type(record_type)
     ns = f' -Server {_psq(nameserver)}' if nameserver else ''
-    ps = (f"Resolve-DnsName -Name {_psq(host)} -Type {record_type.upper()}{ns} -DnsOnly -ErrorAction Stop "
+    ps = (f"Resolve-DnsName -Name {_psq(host)} -Type {rt}{ns} -DnsOnly -ErrorAction Stop "
           "| Select-Object Name,Type,NameExchange,Preference,NameHost,IPAddress,Strings,PrimaryServer,SerialNumber "
           "| ConvertTo-Json -Compress -Depth 4")
     try:
@@ -215,17 +220,33 @@ def _remote_dns_cmd(os_: str, host: str, record_type: str, nameserver: str, time
 
     Unix uses ``dig`` (clean, parseable); Windows uses ``nslookup``.  The
     nameserver, when given, directs the query at that server."""
+    record_type = tables.safe_record_type(record_type)
     if os_ == 'windows':
-        # cmd.exe (device_exec shell=True): double-quote to neutralise & | < > ^; strip
-        # embedded quotes so a config value can't break out and inject a command. (Does not
-        # stop %VAR% expansion — no RCE, value is admin/config-controlled.)
-        def _wq(s):
-            return '"' + str(s).replace('"', '') + '"'
-        ns = f' {_wq(nameserver)}' if nameserver else ''
-        return f'nslookup -type={_wq(record_type)} {_wq(host)}{ns}'
+        # The remote shell is cmd.exe OR PowerShell (Windows OpenSSH's DefaultShell), and no
+        # quoting is safe in both: cmd.exe double quotes leave PowerShell's "$(...)"
+        # live, and PowerShell single quotes are literal characters to cmd.exe. So the VALUES
+        # are restricted instead - a hostname or an IP has no character either shell
+        # interprets inside double quotes - and refused otherwise, before anything runs.
+        host_ = _safe_dns_name(host)
+        ns = f' "{_safe_dns_name(nameserver)}"' if nameserver else ''
+        return f'nslookup -type={record_type} "{host_}"{ns}'
     t = max(1, int(timeout))
     ns = (' @' + shlex.quote(nameserver)) if nameserver else ''
     return f'dig +short +time={t} +tries=1 {shlex.quote(record_type)} {shlex.quote(host)}{ns}'
+
+
+_DNS_NAME_RE = re.compile(r'^[A-Za-z0-9_.:\-]{1,253}$')
+
+
+def _safe_dns_name(value) -> str:
+    """*value* when it is a hostname or an IP literal, else ``ValueError``.
+
+    Letters, digits, ``_ . - :`` (``_`` for SRV-style labels, ``:`` for IPv6) and nothing
+    else: no quote, ``$``, backtick, ``%`` or separator either Windows shell would act on."""
+    v = str(value or '').strip()
+    if not _DNS_NAME_RE.match(v) or v.startswith('-'):
+        raise ValueError(f'invalid host name {v[:40]!r}')
+    return v
 
 
 def _parse_dig_short(record_type: str, out: str) -> list:
@@ -291,15 +312,18 @@ def _parse_nslookup(record_type: str, out: str) -> list:
             in_addr = False
             continue
         if rt in ('A', 'AAAA'):
+            # By SHAPE, not by the label: the label is localised (Address, Dirección,
+            # Adresse, Indirizzo...) and a list of words only ever covers the languages
+            # somebody thought of. Past the server block, "<word>: <ip>" is an answer and an
+            # indented bare IP continues a multi-address list.
             head, sep, val = s.partition(':')
-            if sep and head.strip().lower() in ('address', 'addresses',
-                                                'dirección', 'direcciones'):
-                val = val.strip()
-                if _is_ip(val):
-                    results.append(val)
-                in_addr = True
-            elif in_addr and line[:1].isspace() and _is_ip(s):
+            if in_addr and line[:1].isspace() and _is_ip(s):
                 results.append(s)
+            elif sep and not _is_ip(s) and _is_ip(val.strip()):
+                results.append(val.strip())
+                in_addr = True
+            elif sep and not _is_ip(s) and not val.strip():
+                in_addr = True          # "Addresses:" with every address on the next lines
             else:
                 in_addr = False
         elif rt == 'MX' and 'mail exchanger' in low:

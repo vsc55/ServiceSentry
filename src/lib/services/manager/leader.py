@@ -82,9 +82,10 @@ class ServiceLeaderStore:
                             (str(uuid.uuid4()), service_key, instance_id, host, now, now, exp))
                         return True
                     except Exception:  # pylint: disable=broad-except
-                        row = self._db.fetchone(
-                            f'SELECT holder_instance_id, expires_at FROM {_T} '
-                            'WHERE service_key=?', (service_key,))
+                        # Another instance inserted the row first: it holds the lease. Not
+                        # re-read here — on PostgreSQL the failed INSERT aborted the
+                        # transaction and any further statement in it would fail too.
+                        return False
                 holder, expires = (row or ('', 0.0))
                 if holder == instance_id:
                     # The rowcount decides, not the read above: on a server engine another

@@ -208,6 +208,10 @@ class MonitorService(_HeartbeatMixin, _StandaloneConfigMixin, _MonitoringMixin):
         if once:
             self._dbg('> Monitor >> single pass', DebugLevel.info)
             self._monitoring_run_one_cycle()
+            # The alerts go out on the notifier's daemon thread: returning now lost them.
+            if not self._monitoring_drain_alerts():
+                self._dbg('> Monitor >> some alerts were still unsent at exit',
+                          DebugLevel.warning)
             self._dbg('> Monitor >> single pass complete; exiting', DebugLevel.info)
             return 0
 
@@ -239,6 +243,8 @@ class MonitorService(_HeartbeatMixin, _StandaloneConfigMixin, _MonitoringMixin):
         self._dbg(f'> Monitor >> config watch every {_CONFIG_WATCH_EVERY}s', DebugLevel.info)
         self._stop.wait()
         self._monitoring_stop()
+        if not self._monitoring_drain_alerts():
+            self._dbg('> Monitor >> some alerts were still unsent at exit', DebugLevel.warning)
         self.stop_heartbeat()
         self._dbg('> Monitor >> scheduler stopped; exiting', DebugLevel.info)
         return 0

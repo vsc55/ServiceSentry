@@ -30,10 +30,39 @@ detect_init() {
 INIT_SYSTEM=$(detect_init)
 echo "Detected init system: ${INIT_SYSTEM}"
 
+# ── Python environment first, while the services still run ───────────────────
+# This is the step that fails — no network, a proxy, a platform with no wheel — and with
+# `set -e` a failure AFTER the stop left both services stopped. Built first, a failure
+# leaves the running install as it was. The new lock goes in beside the running app (it is
+# only read by make-venv); the rest of the tree is swapped after the stop.
+mkdir -p /opt/ServiSesentry
+install -m 0644 src/requirements.lock /opt/ServiSesentry/requirements.lock
+sh packaging/scripts/make-venv.sh /opt/ServiSesentry
+
 # ── Stop services ─────────────────────────────────────────────────────────────
+# What was running is remembered: if anything below fails, the trap starts it again
+# rather than leaving the panel down until somebody notices.
+STOPPED=""
+restart_on_failure() {
+    rc=$?
+    [ "${rc}" = 0 ] && return 0
+    [ -n "${STOPPED}" ] || return 0
+    echo "Update failed (exit ${rc}); starting again what was running:${STOPPED}" >&2
+    for unit in ${STOPPED}; do
+        case "${INIT_SYSTEM}" in
+          systemd) systemctl start "${unit}.service" || true ;;
+          openrc)  rc-service "${unit}" start || true ;;
+        esac
+    done
+}
+trap restart_on_failure EXIT
+
 echo "Stopping services..."
 case "${INIT_SYSTEM}" in
   systemd)
+    for unit in ServiSesentry ServiSesentry-web; do
+        if systemctl is-active --quiet "${unit}.service" 2>/dev/null; then STOPPED="${STOPPED} ${unit}"; fi
+    done
     systemctl stop ServiSesentry.service     2>/dev/null || true
     systemctl stop ServiSesentry-web.service 2>/dev/null || true
     # Legacy cleanup: older installs drove monitoring with a .timer.
@@ -42,6 +71,9 @@ case "${INIT_SYSTEM}" in
     rm -f /lib/systemd/system/ServiSesentry.timer
     ;;
   openrc)
+    for unit in ServiSesentry ServiSesentry-web; do
+        if rc-service "${unit}" status >/dev/null 2>&1; then STOPPED="${STOPPED} ${unit}"; fi
+    done
     rc-service ServiSesentry     stop 2>/dev/null || true
     rc-service ServiSesentry-web stop 2>/dev/null || true
     ;;
@@ -60,8 +92,9 @@ tar -C src \
     --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' --exclude='tests' \
     -cf - . | tar -C /opt/ServiSesentry -xf -
 
-# Keep or rebuild the venv, then install the new pins into it.
-sh packaging/scripts/make-venv.sh /opt/ServiSesentry
+# The venv was brought up to date before the stop. Its builder stays beside the app: the
+# units name it when a Python upgrade leaves the venv unable to run.
+install -m 0755 packaging/scripts/make-venv.sh /opt/ServiSesentry/make-venv.sh
 
 # The run-as-user helper and the log rotation travel with the update too.
 install -m 0755 packaging/scripts/servicesentry-user.sh /usr/sbin/servicesentry-user
@@ -158,5 +191,7 @@ case "${INIT_SYSTEM}" in
 
 esac
 
+# Done: whatever happened to the services above is the update's own doing, not a failure.
+STOPPED=""
 echo "Services run as: $(servicesentry-user status). To switch an install that predates the"
 echo "dedicated user: servicesentry-user enable"

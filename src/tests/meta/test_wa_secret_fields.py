@@ -39,6 +39,7 @@ def _read(path):
 # offering to remember them is doing its job.
 _REAL_LOGINS = (
     os.path.join('templates', 'login.html'),
+    os.path.join('templates', 'login_password_change.html'),   # forced change of the default
     os.path.join('account', '_page.html'),          # change my own password
     os.path.join('modals', '_items.html'),          # reset a user's password
     os.path.join('modals', '_user.html'),           # create a user

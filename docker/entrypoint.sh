@@ -12,9 +12,10 @@ set -e
 # database (data.db).
 case "${SS_SERVICE_ROLE}" in
   web)
-    set -- --web \
-           --web-host "${SS_WEB_HOST:-0.0.0.0}" \
-           --web-port "${SS_WEB_PORT:-8080}"
+    # No --web-host/--web-port: main.py reads SS_WEB_HOST / SS_WEB_PORT itself, and when
+    # they are unset the panel's own setting (Configuration -> External access) decides.
+    # Passing "${SS_WEB_HOST:-0.0.0.0}" here forced 0.0.0.0 over that setting.
+    set -- --web
     ;;
   worker)
     set -- --monitor

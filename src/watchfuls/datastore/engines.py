@@ -63,6 +63,9 @@ class EngineDrivers:
         try:
             kw = {'user': user, 'password': password, 'db': db,
                   'charset': 'utf8mb4', 'connect_timeout': timeout,
+                  # connect_timeout covers the handshake only: a server that accepts and
+                  # then stalls held the check thread forever on the first read.
+                  'read_timeout': timeout, 'write_timeout': timeout,
                   'cursorclass': pymysql.cursors.DictCursor}
             if unix_socket:
                 kw['unix_socket'] = unix_socket
@@ -124,6 +127,9 @@ class EngineDrivers:
             metrics = {}
             try:
                 cur = conn.cursor()
+                # connect_timeout covers the handshake only; bound the query too. A SET
+                # rather than the `options` startup parameter, which pgbouncer refuses.
+                cur.execute('SET statement_timeout = %s', (int(cls._to(cfg)) * 1000,))
                 cur.execute('SELECT (SELECT count(*) FROM pg_stat_activity), '
                             'EXTRACT(EPOCH FROM now() - pg_postmaster_start_time())::bigint')
                 row = cur.fetchone()

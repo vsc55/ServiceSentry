@@ -9,6 +9,11 @@ set -euo pipefail
 
 VERSION="${1:?usage: build.sh <version>}"
 VERSION="${VERSION#v}"
+# It lands in file names, a sed expression and nfpm's config: only what a version is made of.
+if ! [[ ${VERSION} =~ ^[0-9A-Za-z.+-]+$ ]]; then
+    echo "build.sh: not a version: ${VERSION}" >&2
+    exit 1
+fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="${ROOT}/dist"
 STAGING="${DIST}/staging"

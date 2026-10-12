@@ -158,7 +158,7 @@ class TestWebRequest:
     def test_successful_request(self):
         """200 response returns code 200."""
         w = self._make_watchful()
-        with patch('urllib.request.urlopen', return_value=self._resp(200)):
+        with patch('watchfuls.web._open', return_value=self._resp(200)):
             code, _ = w._web_request('example.com')
             assert code == 200
 
@@ -166,7 +166,7 @@ class TestWebRequest:
         """HTTPError returns the error status code."""
         import urllib.error
         w = self._make_watchful()
-        with patch('urllib.request.urlopen',
+        with patch('watchfuls.web._open',
                    side_effect=urllib.error.HTTPError(
                        'https://example.com', 503, 'Unavailable', {}, None)):
             code, _ = w._web_request('example.com')
@@ -176,7 +176,7 @@ class TestWebRequest:
         """URLError (DNS failure, etc.) returns 0."""
         import urllib.error
         w = self._make_watchful()
-        with patch('urllib.request.urlopen',
+        with patch('watchfuls.web._open',
                    side_effect=urllib.error.URLError('DNS failure')):
             code, _ = w._web_request('example.com')
             assert code == 0
@@ -186,7 +186,7 @@ class TestWebRequest:
         w = self._make_watchful()
         with patch('lib.security.net_guard.validate_external_url',
                    return_value='link-local / metadata address blocked'), \
-             patch('urllib.request.urlopen') as mock_open:
+             patch('watchfuls.web._open') as mock_open:
             code, detail = w._web_request('http://169.254.169.254/')
             assert code == 0
             assert 'Blocked' in detail
@@ -195,7 +195,7 @@ class TestWebRequest:
     def test_url_with_scheme_preserved(self):
         """URL with explicit scheme is used as-is."""
         w = self._make_watchful()
-        with patch('urllib.request.urlopen', return_value=self._resp()) as mock_open:
+        with patch('watchfuls.web._open', return_value=self._resp()) as mock_open:
             w._web_request('http://example.com')
             req = mock_open.call_args[0][0]
             assert req.full_url.startswith('http://')
@@ -203,7 +203,7 @@ class TestWebRequest:
     def test_url_without_scheme_gets_https(self):
         """URL without scheme gets https:// prepended."""
         w = self._make_watchful()
-        with patch('urllib.request.urlopen', return_value=self._resp()) as mock_open:
+        with patch('watchfuls.web._open', return_value=self._resp()) as mock_open:
             w._web_request('example.com')
             req = mock_open.call_args[0][0]
             assert req.full_url.startswith('https://')
@@ -333,21 +333,21 @@ class TestWebScheme:
     def test_scheme_http_prepended_when_no_scheme_in_url(self):
         """When scheme='http', URLs without scheme get http:// prepended."""
         w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
-        with patch('urllib.request.urlopen', return_value=self._resp()) as mock_open:
+        with patch('watchfuls.web._open', return_value=self._resp()) as mock_open:
             w._web_request('example.com', scheme='http')
             assert mock_open.call_args[0][0].full_url.startswith('http://')
 
     def test_scheme_default_is_https(self):
         """Without explicit scheme, URLs without :// get https://."""
         w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
-        with patch('urllib.request.urlopen', return_value=self._resp()) as mock_open:
+        with patch('watchfuls.web._open', return_value=self._resp()) as mock_open:
             w._web_request('example.com')
             assert mock_open.call_args[0][0].full_url.startswith('https://')
 
     def test_explicit_scheme_in_url_overrides_scheme_param(self):
         """A URL that already contains :// is used as-is regardless of scheme param."""
         w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
-        with patch('urllib.request.urlopen', return_value=self._resp()) as mock_open:
+        with patch('watchfuls.web._open', return_value=self._resp()) as mock_open:
             w._web_request('http://example.com', scheme='https')
             assert mock_open.call_args[0][0].full_url.startswith('http://')
 
@@ -355,7 +355,7 @@ class TestWebScheme:
         """verify_ssl=False passes an SSL context that skips verification."""
         import ssl as ssl_mod
         w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
-        with patch('urllib.request.urlopen', return_value=self._resp()) as mock_open:
+        with patch('watchfuls.web._open', return_value=self._resp()) as mock_open:
             w._web_request('https://example.com', verify_ssl=False)
             ctx = mock_open.call_args[1].get('context')
             assert isinstance(ctx, ssl_mod.SSLContext)
@@ -364,14 +364,14 @@ class TestWebScheme:
     def test_verify_ssl_true_does_not_pass_context(self):
         """verify_ssl=True (default) does not pass a custom SSL context."""
         w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
-        with patch('urllib.request.urlopen', return_value=self._resp()) as mock_open:
+        with patch('watchfuls.web._open', return_value=self._resp()) as mock_open:
             w._web_request('https://example.com', verify_ssl=True)
             assert 'context' not in mock_open.call_args[1]
 
     def test_verify_ssl_false_not_applied_to_http(self):
         """verify_ssl=False has no effect for plain http:// URLs."""
         w = self.Watchful(create_mock_monitor({'watchfuls.web': {}}))
-        with patch('urllib.request.urlopen', return_value=self._resp()) as mock_open:
+        with patch('watchfuls.web._open', return_value=self._resp()) as mock_open:
             w._web_request('http://example.com', verify_ssl=False)
             assert 'context' not in mock_open.call_args[1]
 

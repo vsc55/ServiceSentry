@@ -227,6 +227,16 @@ def download(url: str, max_bytes: int, on_progress=None, cache_dir: str = '',
         # request throws — and an unclosed handle on Windows is a file that cannot be
         # deleted, which is how a 304 (an exception, in urllib) left its empty `.part`.
         with os.fdopen(fd, 'wb') as out, urllib.request.urlopen(req, timeout=180) as r:
+            # Where the request ENDED, after whatever redirects urllib followed: an archive
+            # that came from somewhere the SSRF guard refuses is not one to unpack. Checked
+            # after the fact because the URL is built here (codeload.github.com), not typed.
+            _final = getattr(r, 'geturl', None)
+            _final = _final() if callable(_final) else url
+            if isinstance(_final, str) and _final != url:
+                from lib.security.net_guard import validate_external_url  # noqa: PLC0415
+                _why = validate_external_url(_final)
+                if _why:
+                    raise OSError(f'redirect blocked: {_why}')
             # Defensively: a response without headers is not a reason to lose the
             # download, it is a reason to have no total.
             try:

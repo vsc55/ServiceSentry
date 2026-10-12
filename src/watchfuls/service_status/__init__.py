@@ -32,6 +32,7 @@ services of the machine running the web admin (autocomplete helper).
 import json
 import os
 import platform
+import re
 import shlex
 
 from lib.modules import ModuleBase
@@ -42,12 +43,22 @@ _SCHEMA = json.load(open(os.path.join(os.path.dirname(__file__), 'schema.json'),
 
 # Per-OS command to read a service's state ({svc} substituted, shell-quoted).
 def _win_quote(s: str) -> str:
-    """Quote an argument for cmd.exe (device_exec runs with shell=True on Windows). Double
-    quotes neutralise the command separators (& | < > ^) and embedded quotes are stripped so
-    the value can't break out — the POSIX branches use shlex.quote instead. NB: this does
-    NOT stop ``%VAR%`` environment-variable expansion (no command execution, and the value
-    is admin/config-controlled), so it's not a full sandbox — just injection containment."""
+    """Quote a Windows service name that :func:`_win_name_ok` has already accepted.
+
+    The remote shell over SSH is cmd.exe OR PowerShell, and no quoting is safe in both:
+    PowerShell expands ``"$(...)"`` inside cmd.exe's double quotes, and cmd.exe takes
+    PowerShell's single quotes literally. So the NAME is restricted instead (letters, digits,
+    ``_ . - @ $`` and spaces) and only then double-quoted for the spaces. ``$`` is allowed
+    because SQL Server instances are called ``MSSQL$NAME``; with no ``(``, ``{``, ``:`` or
+    backtick after it PowerShell can expand a variable but never run anything."""
     return '"' + str(s).replace('"', '') + '"'
+
+
+_WIN_NAME_RE = re.compile(r'^[\w.\-@ $]{1,256}$')
+
+
+def _win_name_ok(name: str) -> bool:
+    return bool(_WIN_NAME_RE.match(str(name or ''))) and not str(name).startswith('-')
 
 
 _STATUS_CMDS = {
@@ -59,6 +70,12 @@ _STATUS_CMDS = {
     'darwin':  'launchctl list {svc}',
     'freebsd': 'service {svc} status',
 }
+# Linux without systemd (OpenRC on Alpine/Gentoo, SysV init): `systemctl` is not there and
+# every check came back as an error. Tried in order when the one before is missing.
+_LINUX_FALLBACK_CMDS = (
+    ('openrc', 'rc-service {svc} status', 'rc-service {svc} {action}'),
+    ('sysv',   'service {svc} status',    'service {svc} {action}'),
+)
 # Per-OS start/stop command ({action} = start|stop).
 _ACTION_CMDS = {
     'linux':   'systemctl {action} {svc}',
@@ -176,13 +193,41 @@ class Watchful(ServiceDiscovery, ModuleBase):
             return self._msg('svc_running_unexpected', display_name)
         return self._msg('svc_unsuccessful' if unsuccessful else 'svc_stop', display_name)
 
+    @staticmethod
+    def _cmd_missing(out, err, code) -> bool:
+        """The command itself is absent (exit 127, or the shell's "not found")."""
+        if code == 127:
+            return True
+        text = f'{err or ""} {out or ""}'.lower()
+        return code != 0 and ('command not found' in text or ': not found' in text)
+
     def _service_state(self, item, os_, service_name):
         """Return (running, error, detail) by running the per-OS status command."""
+        if os_ == 'windows' and not _win_name_ok(service_name):
+            return False, True, 'invalid service name'
         svc = _win_quote(service_name) if os_ == 'windows' else shlex.quote(service_name)
         cmd = _STATUS_CMDS[os_].format(svc=svc)
-        out, err, code = self.device_exec(
-            item, cmd, timeout=self.module_default('timeout', 15))
+        timeout = self.module_default('timeout', 15)
+        out, err, code = self.device_exec(item, cmd, timeout=timeout)
+        if os_ == 'linux' and self._cmd_missing(out, err, code):
+            for _init, status_cmd, _action in _LINUX_FALLBACK_CMDS:
+                out, err, code = self.device_exec(item, status_cmd.format(svc=svc), timeout=timeout)
+                if not self._cmd_missing(out, err, code):
+                    item['_svc_init'] = _init
+                    return self._parse_rc_state(out, err, code)
         return self._parse_state(os_, out, err, code)
+
+    @staticmethod
+    def _parse_rc_state(out, err, code):
+        """`rc-service <svc> status` / `service <svc> status`: exit 0 is running."""
+        combined = f'{out or ""}{err or ""}'.strip()
+        low = combined.lower()
+        if code == 0 and 'stopped' not in low and 'not running' not in low:
+            return True, False, 'running'
+        missing = any(w in low for w in ('does not exist', 'unrecognized service',
+                                          'not-found', 'could not be found', 'unknown'))
+        return False, missing or not combined, (combined.splitlines()[-1].strip()
+                                                if combined else 'stopped')
 
     @classmethod
     def _parse_state(cls, os_, out, err, code):
@@ -219,6 +264,12 @@ class Watchful(ServiceDiscovery, ModuleBase):
 
     def _service_remediation(self, item, os_, service_name, expected):
         action = 'stop' if expected == 'stopped' else 'start'
+        if os_ == 'windows' and not _win_name_ok(service_name):
+            return
         svc = _win_quote(service_name) if os_ == 'windows' else shlex.quote(service_name)
         cmd = _ACTION_CMDS[os_].format(action=action, svc=svc)
+        if os_ == 'linux' and item.get('_svc_init'):
+            # The state was read through rc-service/service: start it the same way.
+            cmd = next(a for i, _s, a in _LINUX_FALLBACK_CMDS
+                       if i == item['_svc_init']).format(action=action, svc=svc)
         self.device_exec(item, cmd, timeout=self.module_default('timeout', 15))

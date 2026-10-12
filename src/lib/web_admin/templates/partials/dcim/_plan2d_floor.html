@@ -436,7 +436,7 @@ function _dcsImport(input) {
 async function _dcsImportRun(datos) {
     const f = _dcsFloor();
     if (!f) return;
-    const cuenta = {rooms_new: 0, rooms_kept: 0, features: 0, racks: 0};
+    const cuenta = {rooms_new: 0, rooms_kept: 0, features: 0, racks: 0, lost: 0};
     for (const s of datos.rooms) {
         let uid = '';
         if (s.area) {
@@ -472,6 +472,7 @@ async function _dcsImportRun(datos) {
         const d = r.data || {};
         cuenta.features += Number(d.features) || 0;
         cuenta.racks += (Number(d.racks_moved) || 0) + (Number(d.racks_new) || 0);
+        cuenta.lost += Object.values(d.lost || {}).reduce((a, n) => a + (Number(n) || 0), 0);
     }
     // El núcleo de la planta, si el fichero lo dice.
     const pl = datos.floor || {};
@@ -482,6 +483,7 @@ async function _dcsImportRun(datos) {
     }
     showToast(tf('dcim_import_floor_done', cuenta.rooms_kept, cuenta.rooms_new, cuenta.features, cuenta.racks),
               'success');
+    if (cuenta.lost) showToast(tf('dcim_import_lost', cuenta.lost), 'warning');
     p2dPickClear(_dcsP2d);
     _dcsMakePrimary(null);
     _dcsReload();

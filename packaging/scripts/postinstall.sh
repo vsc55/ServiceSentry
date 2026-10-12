@@ -49,7 +49,32 @@ if ! "${VENV}/bin/python" -m pip install --no-cache-dir -r "${LOCK}"; then
     exit 1
 fi
 
-chmod 0750 /etc/ServiSesentry /var/lib/ServiSesentry 2>/dev/null || true
+# Config and data: created here, never shipped as package directories (a packaged directory
+# gets its owner re-applied by the package manager — see nfpm.yaml).
+CONF_DIR="${SS_CONFIG_DIR:-/etc/ServiSesentry}"
+VAR_DIR="${SS_VAR_DIR:-/var/lib/ServiSesentry}"
+SYSTEMD_ETC="${SS_SYSTEMD_ETC:-/etc/systemd/system}"
+mkdir -p "${CONF_DIR}" "${VAR_DIR}"
+chmod 0750 "${CONF_DIR}" "${VAR_DIR}" 2>/dev/null || true
+
+# An install switched to the dedicated user (servicesentry-user wrote its drop-in) gets the
+# two directories handed back to that user. Packages up to this one shipped them as
+# root-owned package directories, and every rpm upgrade reset them to root:root — the
+# services restarted below as `servicesentry` and could not read their own config. Only the
+# directories themselves (no -R): that is all the package manager touched.
+restore_dir_owner() {
+    dropin="${SYSTEMD_ETC}/ServiSesentry.service.d/10-servicesentry-user.conf"
+    [ -f "${dropin}" ] || dropin="${SYSTEMD_ETC}/ServiSesentry-web.service.d/10-servicesentry-user.conf"
+    [ -f "${dropin}" ] || return 0
+    u=$(sed -n 's/^User=//p' "${dropin}" | tail -n 1)
+    g=$(sed -n 's/^Group=//p' "${dropin}" | tail -n 1)
+    [ -n "${u}" ] || return 0
+    getent passwd "${u}" >/dev/null 2>&1 || return 0
+    chown "${u}${g:+:${g}}" "${CONF_DIR}" "${VAR_DIR}" \
+        || echo "ServiceSentry: could not hand ${CONF_DIR} and ${VAR_DIR} back to ${u}." >&2
+    return 0
+}
+restore_dir_owner
 
 # Who the services run as. A FRESH install (deb: `configure` with no previous version;
 # rpm: $1 = 1) runs them as the dedicated `servicesentry` user: servicesentry-user creates

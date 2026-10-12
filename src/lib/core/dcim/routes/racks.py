@@ -44,7 +44,7 @@ from lib.core.dcim.store import (FACES, ITEM_ROLES, LINK_KINDS, PART_KINDS, PLAC
 from lib.core.dcim.store.items import _ITEM
 from lib.core.dcim.store.parts import _PART
 from lib.core.dcim.routes._common import (_NUM_MAX, _fresh, _num, _without, numbers_bad,
-                                          scan_pages)
+                                          scalars_bad, scan_pages)
 
 
 def _numbers_bad(spec, data: dict) -> str:
@@ -389,7 +389,9 @@ def register(app, wa, C):
             if not visible:
                 continue
             rack = store.racks.get(item.get('rack_uid')) or {}
-            room = store.rooms.get(rack.get('room_uid')) or {}
+            # A room item (a PC on a desk) has no rack: its room is its own. Through the rack
+            # alone, a device linked to one had a place with no room, no floor and no site.
+            room = store.rooms.get(rack.get('room_uid') or item.get('room_uid')) or {}
             site = store.sites.get(room.get('site_uid')) or {}
             floor = store.floors.get(room.get('floor_uid')) if room.get('floor_uid') else None
             cables = []
@@ -625,6 +627,9 @@ def register(app, wa, C):
         Here and not only in `_place`: that one sees the role only of what is not mounted, and
         only when something moves — a tray's guest, or a plain edit of the role, stored any
         word. And the numbers nowhere."""
+        texto = scalars_bad(_ITEM, data)
+        if texto:
+            return jsonify({'error': wa._t('dcim_bad_text'), 'field': texto}), 400
         malo = _numbers_bad(_ITEM, data)
         if malo:
             return jsonify({'error': wa._t('dcim_bad_number'), 'field': malo}), 400
@@ -656,6 +661,12 @@ def register(app, wa, C):
                 return '', 'dcim_mount_nested'
             if str(padre['uid']) == str(ignore or ''):
                 return '', 'dcim_mount_self'
+            # Only on something IN a rack. A room item (a PC on a desk) has no rack to inherit:
+            # mounted on one, the child took `rack_uid = ''` and `placement = 'room'` with no
+            # room — no chain, no owner, visible and editable by every company.
+            if not str(padre.get('rack_uid') or '') \
+                    or str(padre.get('placement') or '') == 'room':
+                return '', 'dcim_mount_not_rack'
             # Hereda dónde está. Así el alzado, los listados y los recuentos siguen leyendo lo
             # mismo que siempre sin saber que esto va montado.
             # Y cómo está puesto: lo que va encima de una bandeja que está en el suelo al

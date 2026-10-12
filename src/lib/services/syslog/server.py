@@ -52,6 +52,9 @@ _MAX_CONNECTIONS = 2048        # concurrent TCP+TLS connections per listener: a 
                                # collector holds one per device; beyond it, refused
 _STOP_JOIN_SECS = 3.0          # total budget stop() spends joining threads
 _CAP_LOG_EVERY = 30.0          # min seconds between "connection cap reached" logs
+#: Bytes the receive queue may hold. Its 200 000-item bound alone let 64 KiB frames pile
+#: up to 12 GiB while the writer was slow (a database stall): the process died of memory.
+_QUEUE_MAX_BYTES = 256 * 1024 * 1024
 
 
 def build_server(cfg: dict, *, sink, on_message=None, dbg=None,
@@ -140,6 +143,9 @@ class SyslogServer:
         self._drops_lock = threading.Lock()     # UDP and TCP threads both count drops
         self._offended: dict = {}               # ip -> when its last offence was reported
         self._q: queue.Queue = queue.Queue(maxsize=200000)
+        self._q_bytes = 0                       # payload bytes now in _q
+        self._q_bytes_max = _QUEUE_MAX_BYTES
+        self._q_lock = threading.Lock()         # guards _q_bytes (receivers vs writer)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._socks: list[socket.socket] = []
@@ -365,7 +371,10 @@ class SyslogServer:
             elif self._allowed(ip):
                 self._enqueue(data, ip)
             else:
-                self._reject(ip, 'UDP')
+                # Counted, never reported to the jail: a UDP source address is whatever
+                # the sender wrote. Reported, anybody could jail any address — the
+                # administrator's own, for the panel too — with a few forged datagrams.
+                self._note_drop(ip, 'UDP')
 
     def _tcp_accept_loop(self, sock: socket.socket, tls_ctx) -> None:
         while not self._stop.is_set():
@@ -511,10 +520,17 @@ class SyslogServer:
 
     # ── queue → writer ──────────────────────────────────────────────────────────
     def _enqueue(self, data: bytes, ip: str) -> None:
+        size = len(data)
+        with self._q_lock:
+            if self._q_bytes + size > self._q_bytes_max:
+                return                           # byte budget spent: shed, like Full
+            self._q_bytes += size
         try:
             self._q.put_nowait((data, ip, time.time()))
         except queue.Full:
-            pass                                 # shed load rather than block receivers
+            with self._q_lock:
+                self._q_bytes -= size
+            # shed load rather than block receivers
 
     def _writer_loop(self) -> None:
         while not self._stop.is_set() or not self._q.empty():
@@ -527,6 +543,8 @@ class SyslogServer:
                     if self._stop.is_set():
                         break
                     continue
+                with self._q_lock:
+                    self._q_bytes -= len(data)
                 rec = parse_message(data, source=ip)
                 rec['ts'] = ts
                 batch.append(rec)

@@ -42,7 +42,10 @@ def register(app, wa):
     @app.route('/api/v1/event/rules', methods=['GET'])
     @events_view_req
     def api_list_event_rules():
-        return jsonify({'rules': store.list()})
+        rules = store.list()
+        for r in rules:
+            r['unsafe_regex'] = rules_logic.unsafe_patterns(r)
+        return jsonify({'rules': rules})
 
     @app.route('/api/v1/event/rules', methods=['POST'])
     @events_add_req

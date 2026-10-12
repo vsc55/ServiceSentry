@@ -131,6 +131,20 @@ class SQLiteConnector(BaseConnector):
         self._trace_sql(sql)
         return self._conn().execute(sql, params).fetchone()
 
+    def iter_query(self, sql: str, params: tuple = (), size: int = 5000):
+        """Stream a SELECT with ``fetchmany`` on a cursor of its own."""
+        self._trace_sql(sql)
+        cur = self._conn().cursor()
+        try:
+            cur.execute(sql, params)
+            while True:
+                rows = cur.fetchmany(max(1, int(size)))
+                if not rows:
+                    return
+                yield rows
+        finally:
+            cur.close()
+
     # ── Write ─────────────────────────────────────────────────────────────────
 
     def execute(self, sql: str, params: tuple = ()) -> int:

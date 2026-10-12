@@ -231,7 +231,9 @@ function _mstValidate() {
     return true;
 }
 
-async function saveMsTeamsChannel() {
+function saveMsTeamsChannel() { return ssOnce('msteams-save', _saveMsTeamsChannel); }   // no double create
+
+async function _saveMsTeamsChannel() {
     if (!_mstValidate()) return;
     const data = _mstFormData();
     const url = _msteamsEditId ? `/api/v1/notify/msteams/channels/${_msteamsEditId}` : '/api/v1/notify/msteams/channels';

@@ -337,6 +337,10 @@ def register(app, wa):
         wired to this server's ``/scim/v2`` endpoint. Requires a stored SCIM bearer
         token; uses the Graph CLI client (needs ``Synchronization.ReadWrite.All``).
         Returns the user code / verification URI and the SCIM base URL."""
+        # The stored SCIM token goes to whatever base URL this registers, and the scim
+        # section is admin-only: `config_edit` alone must not aim it at a URL of its own.
+        if not wa._is_admin_requester():
+            return jsonify({'error': wa._t('access_denied')}), 403
         body = wa._optional_json() or {}
         app_name = (body.get('app_name') or provisioning.SCIM_APP_NAME).strip() or provisioning.SCIM_APP_NAME
         # The bearer token is read from config only — it never travels in the request
@@ -367,6 +371,8 @@ def register(app, wa):
         ``error`` until sign-in completes; then either re-pushes the secrets to the
         existing app (re-sync mode) or provisions a new SCIM app + sync job. The
         bearer token is never echoed back to the client. Audited."""
+        if not wa._is_admin_requester():
+            return jsonify({'error': wa._t('access_denied')}), 403
         data, err = wa._require_json()
         if err:
             return err

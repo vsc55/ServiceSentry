@@ -16,7 +16,7 @@ data, lockout counters, …) go into a JSON ``extra`` column.
 Schema::
 
     users(uid PK, username UNIQUE, password_hash, role, display_name,
-          email, lang, dark_mode, enabled, auth_source, extra,
+          email, lang, dark_mode, enabled, auth_source, must_change_password, extra,
           created_at, updated_at, updated_by)
     users_groups(user_uid, group_uid, PRIMARY KEY(user_uid, group_uid))
 """
@@ -35,7 +35,7 @@ from lib.db.store_base import BaseStore
 # Fields stored as individual columns; everything else goes into ``extra``.
 _CORE = frozenset({
     'uid', 'password_hash', 'role', 'display_name', 'email',
-    'lang', 'dark_mode', 'enabled', 'auth_source',
+    'lang', 'dark_mode', 'enabled', 'auth_source', 'must_change_password',
     'created_at', 'updated_at', 'updated_by',
     # 'groups' is intentionally excluded — stored in users_groups table
 })
@@ -53,6 +53,10 @@ _USERS_SCHEMA = TableSpec(
         Column('dark_mode',     'INTEGER'),
         Column('enabled',       'INTEGER', nullable=False, default='1'),
         Column('auth_source',   'TEXT', nullable=False, default="'local'"),
+        # 1 = the next sign-in must set a new password before anything else (the bootstrap
+        # admin created with the built-in default one). A column, not `extra`: a gate the
+        # whole panel checks is not an overflow preference.
+        Column('must_change_password', 'INTEGER', nullable=False, default='0'),
         Column('extra',         'TEXT', nullable=False, default="'{}'"),
         Column('created_at',    'TEXT', nullable=False, default="''"),
         Column('updated_at',    'TEXT', nullable=False, default="''"),
@@ -120,9 +124,9 @@ class UsersStore(BaseStore):
         self._db.execute(
             f'INSERT INTO {_T_USERS}'
             '(username, uid, password_hash, role, display_name, email,'
-            ' lang, dark_mode, enabled, auth_source, extra,'
+            ' lang, dark_mode, enabled, auth_source, must_change_password, extra,'
             ' created_at, updated_at, updated_by)'
-            ' VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            ' VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (username, uid,
              data.get('password_hash', ''), data.get('role', ''),
              data.get('display_name', ''), data.get('email', ''),
@@ -130,6 +134,7 @@ class UsersStore(BaseStore):
              None if dm is None else (1 if dm else 0),
              1 if data.get('enabled', True) else 0,
              data.get('auth_source', 'local'),
+             1 if data.get('must_change_password') else 0,
              json.dumps(extra, ensure_ascii=False),
              data.get('created_at', ''),
              data.get('updated_at', ''),
@@ -146,11 +151,11 @@ class UsersStore(BaseStore):
 
         for row in self._db.fetchall(
             'SELECT username, uid, password_hash, role, display_name, email,'
-            ' lang, dark_mode, enabled, auth_source, extra,'
+            ' lang, dark_mode, enabled, auth_source, must_change_password, extra,'
             f' created_at, updated_at, updated_by FROM {_T_USERS}'
         ):
             (username, uid, pw_hash, role, display_name, email,
-             lang, dark_mode, enabled, auth_source, extra_raw,
+             lang, dark_mode, enabled, auth_source, must_change, extra_raw,
              created_at, updated_at, updated_by) = row
             try:
                 extra = json.loads(extra_raw) if extra_raw else {}
@@ -172,6 +177,12 @@ class UsersStore(BaseStore):
                 'groups':        [],
             }
             user.update(extra)
+            # Only when set: the dict of an ordinary account looks as it did before the
+            # column existed, and the change-tracking diff sees nothing new on it.
+            if must_change:
+                user['must_change_password'] = True
+            else:
+                user.pop('must_change_password', None)
             users[username] = user
             uid_to_name[uid] = username
 

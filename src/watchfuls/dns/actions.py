@@ -82,7 +82,8 @@ class DnsDiscovery:
     def _probe_types(cls) -> list:
         types = _SCHEMA.get('list', {}).get('__discovery_probe_types__')
         if isinstance(types, list) and types:
-            return [str(t).strip().upper() for t in types if str(t).strip()]
+            return [str(t).strip().upper() for t in types
+                    if str(t).strip().upper() in tables._KNOWN_TYPES]
         return list(tables._DEFAULT_PROBE_TYPES)
 
     @classmethod
@@ -130,6 +131,10 @@ class DnsDiscovery:
         os_ = str((device or {}).get('os') or 'linux').strip().lower()
         types = cls._probe_types()
         if os_ == 'windows':
+            try:
+                client._safe_dns_name(domain)   # nslookup runs in a shell; refuse, never quote
+            except ValueError:
+                return []
             out = []
             for rt in types:
                 res, _e, _c = device_runner.run(
@@ -184,6 +189,10 @@ class DnsDiscovery:
             fqdn = domain if rel in ('@', '') else f'{rel}.{domain}'
             for rdataset in node.rdatasets:
                 rtype = to_text(rdataset.rdtype)
+                # Only types a check can hold: the save refuses a record_type outside the
+                # schema's options, so offering RRSIG/NSEC/... would only fail later.
+                if rtype not in tables._KNOWN_TYPES:
+                    continue
                 values = [rd.to_text() for rd in rdataset]
                 value = ', '.join(values[:3]) + ('…' if len(values) > 3 else '')
                 out.append({

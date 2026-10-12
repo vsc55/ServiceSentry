@@ -9,6 +9,15 @@ from conftest import create_mock_monitor
 import watchfuls.ntp as ntp_module
 
 
+@pytest.fixture(autouse=True)
+def _no_dns():
+    """_ntp_query resolves the server with getaddrinfo (IPv6-capable): keep it off the network."""
+    import socket as _s
+    with patch('watchfuls.ntp.socket.getaddrinfo',
+               return_value=[(_s.AF_INET, _s.SOCK_DGRAM, 17, '', ('192.0.2.1', 123))]):
+        yield
+
+
 class TestNtpQuery:
     """Unit tests for the _ntp_query helper function."""
 

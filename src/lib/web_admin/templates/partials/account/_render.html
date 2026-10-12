@@ -226,6 +226,12 @@ async function saveAccountPreferences() {
         if (pwNew !== pwConf) { showToast(t('passwords_dont_match'),   'warning'); return; }
         const rp = await apiPut('/api/v1/users/me/password', { current_password: pwCur, new_password: pwNew });
         if (!rp || !rp.ok) { showToast(rp?.error || t('password_change_error'), 'danger'); return; }
+        // The tokens outlive the old password by design; the answer counts them so the
+        // owner can choose to cut them too.
+        if (rp.api_tokens > 0) {
+            _offerRevokeTokens(rp.api_tokens, '/api/v1/account/tokens',
+                               () => { if (typeof _accTokensLoad === 'function') _accTokensLoad(); });
+        }
     }
 
     // dark_mode is owned by the user-menu toggle; omit it here so the merging endpoint

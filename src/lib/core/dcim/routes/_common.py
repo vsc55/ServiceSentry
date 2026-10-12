@@ -86,6 +86,21 @@ def numbers_bad(spec, data: dict, bounds=None) -> str:
     return ''
 
 
+def scalars_bad(spec, data: dict) -> str:
+    """The first TEXT column of *spec* that *data* fills with a list or an object; ``''`` if none.
+
+    `numbers_bad`'s other half. The generic writers pass a column through as it arrives, so
+    ``label: [1]`` or ``name: {"a": 1}`` reached the driver — a 500 on the insert, or a value
+    stored that every `str()` afterwards printed as a Python repr. A text column takes text, a
+    number or nothing; structured values (a room item's jacks) are turned into text by their own
+    check BEFORE this one runs.
+    """
+    for col in spec.columns:
+        if col.name in data and col.type == 'TEXT' and isinstance(data[col.name], (list, dict)):
+            return col.name
+    return ''
+
+
 #: What a plan group's id may be: what the plan mints (`g-` and a few letters), with room to
 #: spare. Anything else —a list, a page of text— is refused rather than stored.
 _GROUP_RE = re.compile(r'^[A-Za-z0-9_-]{0,64}$')

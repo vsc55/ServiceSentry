@@ -24,6 +24,17 @@ import urllib.request
 from lib import APP_NAME
 
 
+def url_host(host: str) -> str:
+    """*host* as it goes in a URL: an IPv6 literal between brackets.
+
+    ``https://2001:db8::5:8006`` is not a URL anyone can connect to - and the SSRF guard
+    parsed its host as ``2001``, which does not resolve and so was let through."""
+    h = str(host or '').strip()
+    if ':' in h and not h.startswith('['):
+        return f'[{h}]'
+    return h
+
+
 class PveError(Exception):
     """Proxmox API error carrying the HTTP status code (0 = connection error)."""
 
@@ -85,10 +96,11 @@ class PveClient:
                  username: str, password: str) -> dict:
         """Build a connection context (base URL + auth headers). For password
         auth it logs in to obtain a ticket. Raises ``PveError`` on failure."""
-        base = f'https://{host}:{port}/api2/json'
+        hp = f'{url_host(host)}:{port}'
+        base = f'https://{hp}/api2/json'
         # SSRF guard (blocks link-local/metadata; private devices allowed) like web.
         from lib.security.net_guard import validate_external_url  # noqa: PLC0415
-        reason = validate_external_url(f'https://{host}:{port}')
+        reason = validate_external_url(f'https://{hp}')
         if reason:
             raise PveError(0, f'Bloqueado: {reason}')
 

@@ -287,6 +287,7 @@ class IpBanManager:
         now = _time.time()
         # ── shared DB backend: count in the DB so every process shares the tally ──
         if self._store is not None:
+            rec = None
             with self._lock:
                 self._gc(now)           # periodic DB prune (throttled internally)
                 if self.is_banned(ip)[0]:
@@ -296,10 +297,13 @@ class IpBanManager:
                 for _ in range(weight):
                     count = self._store.bump_offense(ip, track, now, window)
                 if count >= threshold:
-                    self._ban_locked(ip, category=category, reason=category,
-                                     by='system', detail=detail, offenses=count)
-                    return True
-            return False
+                    rec = self._ban_locked(ip, category=category, reason=category,
+                                           by='system', detail=detail, offenses=count)
+            if rec is None:
+                return False
+            self._notify_ban(rec)       # outside the lock: see _notify_ban
+            return True
+        rec = None
         with self._lock:
             self._gc(now)
             per = self._offenses.get(ip)
@@ -324,10 +328,12 @@ class IpBanManager:
             count = len(dq)
             if count >= threshold:
                 dq.clear()              # reset the window so we don't re-fire each hit
-                self._ban_locked(ip, category=category, reason=category,
-                                  by='system', detail=detail, offenses=count)
-                return True
-        return False
+                rec = self._ban_locked(ip, category=category, reason=category,
+                                       by='system', detail=detail, offenses=count)
+        if rec is None:
+            return False
+        self._notify_ban(rec)
+        return True
 
     # ── ban / unban ───────────────────────────────────────────────────────────────
     def ban(self, ip: str, *, duration_secs: int | None = None, reason: str = 'manual',
@@ -340,8 +346,10 @@ class IpBanManager:
         if not ip or self.is_whitelisted(ip):
             return None
         with self._lock:
-            return self._ban_locked(ip, category=reason, reason=reason, by=by,
-                                    forced_duration=duration_secs)
+            rec = self._ban_locked(ip, category=reason, reason=reason, by=by,
+                                   forced_duration=duration_secs)
+        self._notify_ban(rec)
+        return rec
 
     def _ban_locked(self, ip, *, category, reason, by, detail='', offenses=0,
                     forced_duration=None) -> dict:
@@ -384,13 +392,21 @@ class IpBanManager:
                     self._persist(ip, dict(rec))
                 except Exception:  # pylint: disable=broad-except
                     pass
-        if self._notify:
-            try:
-                action = 'ban_escalated' if level > 1 else 'banned'
-                self._notify(action, ip, dict(rec))
-            except Exception:  # pylint: disable=broad-except
-                pass
+        # No notification here: this runs under the jail's lock, which every is_banned()
+        # — each HTTP request, each syslog packet — also takes. The caller notifies once
+        # it has let go (_notify_ban), so a channel that is down costs the alert its
+        # timeout, not the whole panel and receiver.
         return dict(rec)
+
+    def _notify_ban(self, rec: dict) -> None:
+        """Announce a ban :meth:`_ban_locked` recorded. Call it OUTSIDE ``self._lock``."""
+        if not self._notify or not rec:
+            return
+        try:
+            action = 'ban_escalated' if int(rec.get('level') or 1) > 1 else 'banned'
+            self._notify(action, rec.get('ip', ''), dict(rec))
+        except Exception:  # pylint: disable=broad-except
+            pass
 
     def unban(self, ip: str, *, by: str = 'system', reason: str | None = None) -> bool:
         """Lift a ban and clear the IP's offense history.  Returns True if it was jailed.

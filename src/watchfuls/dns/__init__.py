@@ -156,6 +156,8 @@ class Watchful(DnsDiscovery, ModuleBase):
         error = None
         _t0 = time.monotonic()
         try:
+            # Before ANY branch: three of the four build a command line with the type in it.
+            tables.safe_record_type(record_type)
             if item.get('device_kind'):
                 # Bound to a device: run the query THERE via dig/nslookup — over SSH
                 # for a remote device, or as a local subprocess for a local device.

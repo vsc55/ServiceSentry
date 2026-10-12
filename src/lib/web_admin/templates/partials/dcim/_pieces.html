@@ -770,25 +770,33 @@ function _dcpExportJson() {
     };
 }
 
-/** Un rack en un fichero de plano: su nombre y dónde está, nada de lo que tiene dentro. */
+/** Un rack en un fichero de plano: su nombre y dónde está —con su grupo del plano—, nada de lo
+ *  que tiene dentro. */
 function _dcPlanRackOut(r) {
     return {
         name: r.name || '', pos_x: Number(r.pos_x) || 0, pos_y: Number(r.pos_y) || 0,
         rotation: Number(r.rotation) || 0, u_height: Number(r.u_height) || 42,
         base_mm: Number(r.base_mm) || 0,
         width_mm: Number(r.width_mm) || 600, depth_mm: Number(r.depth_mm) || 1000,
+        group_uid: r.group_uid || '',
     };
 }
 
-/** Una pieza en un fichero de plano. */
+/** Una pieza en un fichero de plano, con lo que la describe además de su sitio: la cerradura, el
+ *  modelo, el número de serie, el dispositivo y el grupo. `ref` es su identificador, para que
+ *  una puerta diga de qué lector del MISMO fichero cuelga (`hub_uid`): sin ellos, volver a
+ *  importar el plano recién exportado dejaba cada puerta sin su lector. */
 function _dcPlanFeatureOut(f) {
     return {
-        kind: f.kind, label: f.label || '',
+        ref: f.uid || '', kind: f.kind, label: f.label || '',
         pos_x: Number(f.pos_x) || 0, pos_y: Number(f.pos_y) || 0,
         width_mm: Number(f.width_mm) || 0, depth_mm: Number(f.depth_mm) || 0,
         rotation: Number(f.rotation) || 0,
         height_mm: f.height_mm ?? null, base_mm: f.base_mm ?? null,
         shelves: f.shelves ?? null,
+        lock: f.lock || '', type_uid: f.type_uid || '', model: f.model || '',
+        serial: f.serial || '', hub_uid: f.hub_uid || '', device_uid: f.device_uid || '',
+        group_uid: f.group_uid || '',
     };
 }
 
@@ -825,6 +833,10 @@ function _dcpImport(input) {
             const d = r.data || {};
             showToast(tf('dcim_import_done', d.features || 0, d.racks_moved || 0,
                          d.racks_new || 0, d.racks_kept || 0), 'success');
+            // Lo que el fichero traía y aquí no cabe —un lector que esta sede no tiene, un
+            // modelo que este catálogo no conoce— se dice, no se calla.
+            const perdidos = Object.values(d.lost || {}).reduce((a, n) => a + (Number(n) || 0), 0);
+            if (perdidos) showToast(tf('dcim_import_lost', perdidos), 'warning');
             _dcpSel = null;
             _dcimOpenPlan(room.uid);
         });

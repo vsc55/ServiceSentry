@@ -29,6 +29,10 @@ from lib.core.snmp.manifest import ACTIONS, READ_ONLY
 from lib.core.snmp.mibs.admin import MibAdmin
 
 
+#: The arguments of an operation, as opposed to the item it runs against.
+_ACTION_ARGS = ('oid', 'max_rows', 'sweep_max', 'job_id')
+
+
 class _Ops(MibAdmin, SnmpActions, SnmpClient):
     """Every operation the panel may invoke, in one namespace.
 
@@ -68,8 +72,22 @@ def register(app, wa):
         # Internal control fields are never client-settable.
         for _k in [k for k in config if k.startswith('__') and k.endswith('__')]:
             del config[_k]
-        modules_actions.fill_from_stored_item(wa, 'snmp', config)
-        modules_actions.restore_action_secrets(wa, 'snmp', config)
+        # Confine the config to what this caller may aim stored secrets with, exactly as the
+        # watchful action route does. `snmp_view` opens walk_oid / detect_profiles /
+        # test_profiles, and everything below fills in a community or a v3 key the client
+        # never sent while the client's own `host` wins: without this, a viewer pointed a
+        # stored item's, a device's or a credential's secret at an address of their own.
+        # What the operation is asked (which OID, how many rows, which job) is not part of
+        # the item and says nothing about where it connects: it survives the confinement,
+        # which otherwise rebuilds a viewer's config from the stored item alone.
+        _args = {k: config[k] for k in _ACTION_ARGS if k in config}
+        scope = modules_actions.confine_action_config(wa, 'snmp', config)
+        config.update(_args)
+        if scope['item_secrets']:
+            modules_actions.fill_from_stored_item(wa, 'snmp', config)
+        modules_actions.restore_action_secrets(
+            wa, 'snmp', config,
+            module_level=scope['module_secrets'], item_level=scope['item_secrets'])
         # The library's own settings, from the configuration and not from the client. They
         # used to arrive in the posted module config, which meant a browser could name the
         # directories to scan and hand over a token — and meant the token had to travel to

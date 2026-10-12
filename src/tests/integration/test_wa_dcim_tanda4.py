@@ -139,8 +139,12 @@ class TestDanglingReferences:
                                                                  'kind': 'panel'}))
         src = _uid(client.post('/api/v1/dcim/sources', json={'site_uid': dos['sa'], 'name': 'C',
                                                              'feature_uid': pieza}))
+        # Another label: a piece of the same kind AND label is updated in place since DC-8 of
+        # the second 2026-10-12 audit, keeping its link — only the one the file does not name
+        # goes.
         r = client.post(f'/api/v1/dcim/rooms/{dos["ra"]}/import',
-                        json={'features': [{'kind': 'panel', 'pos_x': 1, 'pos_y': 1}]})
+                        json={'features': [{'kind': 'panel', 'label': 'OTHER',
+                                            'pos_x': 1, 'pos_y': 1}]})
         assert r.status_code == 200, r.get_json()
         assert not st.features.get(pieza)
         assert st.sources.get(src)['feature_uid'] == ''

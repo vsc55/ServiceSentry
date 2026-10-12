@@ -22,7 +22,7 @@ from lib.db import freshness as _freshness
 from lib.debug.debug_level import DebugLevel
 
 from .archive import (archive_path, DB_DIR, FILES_DIR, _log, member_tables, PARTS_PREFIX,
-                      read_manifest, restore_cell, FORMAT, MANIFEST_NAME)
+                      read_manifest, restore_cell, FORMAT, MANIFEST_NAME, iter_table_member)
 from . import parts as _parts
 from .parts import conn_for, tables_in_archive_by_part, PARTS
 
@@ -180,13 +180,13 @@ def restore_backup(connector, var_dir: str, name: str, *, parts=None, tables=Non
                         steps.append(step)
                         for table in tabs:
                             _say(total, table)
-                            payload = json.loads(
-                                zf.read(f'{DB_DIR}/{table}.json').decode('utf-8'))
-                            rows, dropped = _load_table(target, table, payload)
+                            columns, batches = iter_table_member(
+                                zf, f'{DB_DIR}/{table}.json')
+                            rows, dropped = _load_table(target, table, columns, batches)
                             restored[table] = rows
                             step['rows'] += rows
                             if dropped is None:
-                                gone = len(payload.get('rows') or [])
+                                gone = sum(len(b) for b in batches)
                                 skipped[table] = {'missing': True, 'rows': gone}
                                 _fail(step, f'{table}: table no longer exists')
                                 _log(f'> Backup > restore >> {table}: table is gone, '
@@ -289,8 +289,11 @@ def _bump_versions(connector, tables) -> None:
         _freshness.bump_version(connector, table)
 
 
-def _load_table(connector, table: str, payload: dict):
-    """Empty *table* and refill it from *payload*.
+def _load_table(connector, table: str, columns, batches=None):
+    """Empty *table* and refill it from *batches* (lists of rows in *columns*' order).
+
+    *columns* may also be a whole ``{'columns', 'rows'}`` payload (and *batches* omitted):
+    the shape this took before it streamed.
 
     Returns ``(rows written, columns the live schema could not take)`` — or ``(0, None)`` when
     the table itself is gone, which is a different thing and reads as one at the call site.
@@ -302,27 +305,37 @@ def _load_table(connector, table: str, payload: dict):
     But what was dropped is REPORTED, because this is also what happens when a copy from a
     later build is restored onto an earlier one: the columns this schema does not have yet go
     silently, and silent is the part that makes it data loss instead of a decision.
+
+    A batch at a time — one ``executemany`` per batch the archive yields — so a table of tens
+    of millions of rows never sits in memory whole; it is still the caller's ONE transaction.
     """
+    if isinstance(columns, dict):
+        batches = [columns.get('rows') or []]
+        columns = columns.get('columns') or []
     if not connector.table_exists(table):
         return 0, None
     live = {c.name for c in connector.describe_table(table)}
-    want = payload.get('columns') or []
+    want = list(columns or [])
     cols = [c for c in want if c in live]
     dropped = [c for c in want if c not in live]
     if not cols:
         return 0, dropped
-    idx = [payload['columns'].index(c) for c in cols]
+    idx = [want.index(c) for c in cols]
     quoted = ', '.join(connector.quote_ident(c) for c in cols)
     marks = ', '.join(['?'] * len(cols))
+    insert = f'INSERT INTO {connector.quote_ident(table)} ({quoted}) VALUES ({marks})'
     connector.execute(f'DELETE FROM {connector.quote_ident(table)}')
-    rows = [tuple(restore_cell(r[i]) for i in idx) for r in (payload.get('rows') or [])]
-    if rows:
-        connector.executemany(
-            f'INSERT INTO {connector.quote_ident(table)} ({quoted}) VALUES ({marks})', rows)
+    total = 0
+    for batch in batches:
+        rows = [tuple(restore_cell(r[i]) for i in idx) for r in batch]
+        if rows:
+            connector.executemany(insert, rows)
+            total += len(rows)
+    if total:
         # The rows came back with their ids. PostgreSQL's sequence did not see them, and the
         # next audit entry or history sample would have been handed an id already taken.
         connector.sync_autoincrement(table)
-    return len(rows), dropped
+    return total, dropped
 
 
 def _extract_tree(zf: zipfile.ZipFile, names: set, prefix: str, dest_root: str) -> int:

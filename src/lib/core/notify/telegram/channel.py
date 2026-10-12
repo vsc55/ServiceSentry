@@ -111,13 +111,20 @@ def flush(router, cfg, alerts, hostname, public_url) -> tuple:
     else:
         # Ungrouped → one message per alert (arrival order), summary last.
         payloads = [_tg_line(hostname, a) for a in alerts] + [summary]
-    ok_all, info = True, 'sent'
+    ok_all, info, first_err = True, 'sent', ''
     for text in payloads:
         # HTML parse mode — every dynamic field is escaped by _esc, so module text with
         # _/*/<> renders safely; no tag spans a chunk boundary (each line is self-closed).
-        ok, _code, info = send_telegram(token, chat, text, parse_mode='HTML')
+        try:
+            ok, _code, info = send_telegram(token, chat, text, parse_mode='HTML')
+        except Exception as exc:  # pylint: disable=broad-except
+            # Per payload: one timeout used to end the loop, and every message after it —
+            # the rest of the batch, the summary — was never even tried.
+            ok, info = False, str(exc)
+        if not ok and ok_all:
+            first_err = info                 # the first failure is the one worth reporting
         ok_all = ok_all and ok
-    return (ok_all, info)
+    return (ok_all, info if ok_all else first_err)
 
 
 register_channel(Channel('telegram', send, flush))

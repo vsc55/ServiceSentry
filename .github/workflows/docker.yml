@@ -31,6 +31,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Read-only by default. A job that needs more asks for it by name: the image builds
+# (`packages: write`) and the release (`contents: write`). Without this line every job got
+# the repository's default token, which on many repos is read/write to everything.
+permissions:
+  contents: read
+
 # Pushing twice in a minute should not race two publishes onto the same tag: the older run
 # is cancelled, so :latest is whatever the newest commit produced and not a coin toss.
 concurrency:
@@ -136,17 +142,33 @@ jobs:
           else
             value="${GITHUB_REF_NAME#v}"
           fi
+          # Whoever can push a tag chooses this string, and it ends up in shell commands, a
+          # sed expression and file names. Only what a version is made of gets through.
+          if ! printf '%s' "${value}" | grep -Eq '^[0-9A-Za-z.+-]+$'; then
+            echo "not a version: ${value}" >&2
+            exit 1
+          fi
           echo "value=${value}" >> "$GITHUB_OUTPUT"
           echo "Building packages as ${value}"
 
       - name: Install nfpm
+        # Pinned by hash as well as by version: a release asset can be replaced, and this
+        # binary builds every package the release ships. The hash is the one in nfpm's own
+        # checksums.txt for v2.43.0; a version bump changes both lines together.
+        env:
+          NFPM_SHA256: 4a4402f8f9ea87c669d6a62b333f8e268439974754dd886a01731ecaf9fa6d66
         run: |
           curl -sSfL -o /tmp/nfpm.deb \
             https://github.com/goreleaser/nfpm/releases/download/v2.43.0/nfpm_2.43.0_amd64.deb
+          echo "${NFPM_SHA256}  /tmp/nfpm.deb" | sha256sum -c -
           sudo dpkg -i /tmp/nfpm.deb
 
       - name: Build deb + rpm + Gentoo overlay
-        run: bash packaging/build.sh "${{ steps.ver.outputs.value }}"
+        # Through `env:`, never `${{ }}` inside `run:`: an expression is pasted into the script
+        # before the shell sees it, so a crafted tag name would have been shell code.
+        env:
+          SS_PKG_VERSION: ${{ steps.ver.outputs.value }}
+        run: bash packaging/build.sh "${SS_PKG_VERSION}"
 
       - name: Upload for the release job
         uses: actions/upload-artifact@v5
@@ -156,6 +178,28 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*-gentoo-overlay.tar.gz
+          if-no-files-found: error
+
+      - name: Build a newer rpm, to rehearse an upgrade
+        # The same source as a later version, built into its own directory and uploaded under
+        # its own name: it is never attached to a Release (that job downloads `packages`
+        # only). It exists so the rpm job can install one version over another — the case in
+        # which rpm used to hand /etc and /var/lib back to root.
+        env:
+          SS_PKG_VERSION: ${{ steps.ver.outputs.value }}
+        run: |
+          mv dist dist-release
+          bash packaging/build.sh "${SS_PKG_VERSION}.1"
+          mkdir -p dist-next
+          mv dist/*.rpm dist-next/
+          rm -rf dist
+          mv dist-release dist
+
+      - name: Upload the upgrade rehearsal
+        uses: actions/upload-artifact@v5
+        with:
+          name: packages-next
+          path: dist-next/*.rpm
           if-no-files-found: error
 
   # ── Do the packages actually install? ───────────────────────────────────────────────
@@ -192,14 +236,20 @@ jobs:
       - uses: actions/download-artifact@v5
         with: { name: packages, path: dist }
 
+      - uses: actions/download-artifact@v5
+        if: matrix.kind == 'rpm'
+        with: { name: packages-next, path: /tmp/packages-next }
+
       - name: Install it the way a user would
+        env:
+          PKG_KIND: ${{ matrix.kind }}
         run: |
           set -eux
-          if [ "${{ matrix.kind }}" = "deb" ]; then
+          if [ "${PKG_KIND}" = "deb" ]; then
             apt-get update
             apt-get install -y ./dist/*.deb
           else
-            dnf install -y ./dist/*.rpm
+            dnf install -y ./dist/*.rpm util-linux
           fi
 
       - name: The installed app runs from its own venv
@@ -210,6 +260,36 @@ jobs:
           # a venv that exists but is missing flask would pass a file-existence check.
           /opt/ServiSesentry/venv/bin/python -c "import flask, cryptography, paramiko"
           grep -q '/opt/ServiSesentry/venv/bin/python' /lib/systemd/system/ServiSesentry-web.service
+          test -x /opt/ServiSesentry/make-venv.sh
+
+      - name: It runs as the dedicated user a fresh install sets up
+        # The way the services run it: the venv's python, as `servicesentry`, against the
+        # directories the postinstall handed over. As root, a run here would create files the
+        # dedicated user then cannot open — the opposite of what is being checked.
+        run: |
+          set -eux
+          getent passwd servicesentry
+          runuser -u servicesentry -- /opt/ServiSesentry/venv/bin/python \
+            /opt/ServiSesentry/main.py --monitor -t 0
+          test "$(stat -c %U /var/lib/ServiSesentry/data.db)" = servicesentry
+          # The CLI, run by root, must not leave root-owned files behind (it becomes the
+          # owner of the data directory).
+          /opt/ServiSesentry/venv/bin/python /opt/ServiSesentry/main.py status || true
+          test -z "$(find /var/lib/ServiSesentry /etc/ServiSesentry -user root)"
+
+      - name: An rpm upgrade keeps the directories the dedicated user's
+        if: matrix.kind == 'rpm'
+        run: |
+          set -eux
+          mkdir -p next
+          mv /tmp/packages-next/*.rpm next/
+          dnf install -y ./next/*.rpm
+          rpm -q servicesentry
+          for d in /etc/ServiSesentry /var/lib/ServiSesentry; do
+            test "$(stat -c %U:%G "$d")" = servicesentry:servicesentry
+          done
+          runuser -u servicesentry -- /opt/ServiSesentry/venv/bin/python \
+            /opt/ServiSesentry/main.py --monitor -t 0
 
   # ── Version tags only: publish the GitHub Release ───────────────────────────────────
   # `test` stops one job earlier, on purpose: it is the manual build tag, it moves, and a

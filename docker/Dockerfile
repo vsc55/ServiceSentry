@@ -14,13 +14,17 @@ ENV PYTHONUNBUFFERED=1
 
 # All runtime settings use the SS_ prefix.
 
-# Web server
+# Web server. Inside a container the panel must listen on every interface (the published
+# port is the access control), so the image pins both; they show as env-locked in
+# Configuration -> External access. Unset them to let that setting decide.
 ENV SS_WEB_HOST=0.0.0.0 \
     SS_WEB_PORT=8080
 
-# Web admin — credentials (no defaults: must be set explicitly)
+# Web admin — first-run credentials (not baked into the image; set them in the compose .env)
 # SS_USERNAME
 # SS_PASSWORD
+# Left unset, the first run creates admin/admin, and that account has to choose a new
+# password at its first login before it can do anything else.
 
 # Web admin — appearance / locale
 ENV SS_LANG=en_EN \

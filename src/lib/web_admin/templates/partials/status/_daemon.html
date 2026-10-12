@@ -195,9 +195,11 @@ function _daemonWaitStop() {
 async function _daemonPersistInterval(secs) {
     /** Save interval to server + sync all UI elements. Returns true on success. */
     if (isNaN(secs) || secs < 10) return false;
+    // `apiPut` answers with the body itself (`{ok}` or `{error}`), not `{status, data}`: read
+    // `res.data.ok` and a 400/403 slips through as a success.
     const res = await apiPut('/api/v1/monitoring/config', {timer_check: secs});
-    if (res?.data?.ok === false) {
-        showToast(res.data.error || 'Save failed', 'danger');
+    if (!res || !res.ok) {
+        showToast((res && res.error) || t('save_error') || 'Save failed', 'danger');
         return false;
     }
     // Sync in-memory configData
@@ -232,18 +234,24 @@ async function _daemonSaveInterval(val) {
 }
 
 // Start polling daemon status when the status tab is open
-async function _daemonStartPoll() {
+// Bumped on every stop: a start that was still awaiting when the reader left Status sees a
+// different number and does not create an interval nobody will ever clear.
+let _daemonPollGen = 0;
+async function _daemonStartPoll(gen = _daemonPollGen) {
+    if (gen !== _daemonPollGen) return;
     // Seed the module status snapshot so the first sync only highlights CHANGES
     const seed = await apiGet('/api/v1/modules/status');
     if (seed) {
         const data = seed.data ?? seed;
         _daemonLastModuleStatus = JSON.parse(JSON.stringify(data));
     }
+    if (gen !== _daemonPollGen) return;     // left Status while the seed was loading
     _daemonRefresh();
     if (!_daemonPollTimer)
         _daemonPollTimer = setInterval(_daemonRefresh, 5000);
 }
 function _daemonStopPoll() {
+    _daemonPollGen++;
     if (_daemonPollTimer) { clearInterval(_daemonPollTimer); _daemonPollTimer = null; }
     _daemonLastModuleStatus = {};
 }

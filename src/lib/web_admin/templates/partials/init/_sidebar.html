@@ -97,6 +97,23 @@ function _navTab(paneTarget) {
     const btn = document.querySelector(`[data-bs-target="${paneTarget}"]`);
     if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
 }
+/** Go to a section by its URL without leaving the SPA.
+ *
+ *  Every section URL is the same shell with a different pane open, so when this page holds
+ *  the section's pane, switching to it is all a link needs — a `location.href` here reloads
+ *  the whole panel (and drops whatever was being edited) for nothing. Only a page without that
+ *  pane navigates for real. A query string is NOT carried by a pane switch: a caller that needs
+ *  one stashes it where the section restores from first. Returns whether it stayed in place. */
+function _navUrl(url) {
+    const path = String(url || '').split('?')[0].split('#')[0];
+    const page = (window.SS_STANDALONE_PAGES || []).find(p => p.url === path);
+    if (page && document.querySelector(`[data-bs-target="#tab-${page.id}"]`)) {
+        _navTab('#tab-' + page.id);
+        return true;
+    }
+    window.location.href = url;
+    return false;
+}
 function _navSubtab(el, paneTarget, subTarget, storageKey, storageValue) {
     // Persist the chosen sub-tab under the SAME key that section's pane restores from, BEFORE
     // activating — so the highlight is deterministic (no racing the pane's own shown.bs.tab).

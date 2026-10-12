@@ -779,7 +779,7 @@ const _DW_CELLS = {
     },
     syslog_host: (r) => {
         const host = r.hostname || r.source || '';
-        return `<td class="small text-nowrap pe-4" style="width:1%;max-width:12em;overflow:hidden;text-overflow:ellipsis" title="${escAttr(device)}">${esc(device)}</td>`;
+        return `<td class="small text-nowrap pe-4" style="width:1%;max-width:12em;overflow:hidden;text-overflow:ellipsis" title="${escAttr(host)}">${esc(host)}</td>`;
     },
     message: (r) => `<td class="small text-break">${esc(r.message || '')}</td>`,
     ipban_reason: (r) => {

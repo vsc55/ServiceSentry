@@ -151,6 +151,10 @@ def register(app, wa):
             # Restore masked secrets BEFORE authorization so an unchanged item with a
             # masked secret is not seen as "modified" (which would over-require edit).
             secret_manager.restore_sensitive(data, old_data, keys=wa._secret_keys)
+            # A closed-choice field takes only one of its options (generic, schema-driven):
+            # the browser's dropdown bounds nothing, and modules build commands from these.
+            modules_svc.validate_option_values(
+                data, old_data, modules_items.item_schemas(wa._modules_dir))
             # Items bound to a credential keep no inline user/secret (cleared after
             # the restore above so a stale value can't be persisted/restored).
             modules_prov.strip_credential_fields(data, wa._modules_dir)
@@ -316,8 +320,19 @@ def register(app, wa):
         """
         status_raw = wa._read_check_status()
         modules_raw = wa._load_modules()
+        perms = wa._get_session_permissions()
+
+        def _may_see(mod_name, entry):
+            # A module's widgets are seen by whoever may view the module, or holds the
+            # permission one of its widgets declares (`perm`, `modules_view` by default).
+            if wa._has_module_permission(mod_name, 'view'):
+                return True
+            return any((w.get('perm') or 'modules_view') in perms
+                       for w in (entry or {}).get('widgets') or [])
+
         module_widgets = modules_svc.build_module_widgets(
-            wa._modules_dir, status_raw, modules_raw, session.get('lang', wa._DEFAULT_LANG))
+            wa._modules_dir, status_raw, modules_raw, session.get('lang', wa._DEFAULT_LANG),
+            may_see=_may_see)
         from lib.core.roles.overview_widget import role_meta  # noqa: PLC0415
         _resp = {'module_widgets': module_widgets}
         _resp.update(role_meta(wa))

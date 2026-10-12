@@ -186,6 +186,12 @@ class ConfigManager:
         self._eff_cache = None                            # (key, mtime, effective, locked, db_vals)
         self._raw_cache = None                            # (mtime, data)
         self._stamp_state = None                          # (db stamp, monotonic probe time)
+        # What THIS thread last read: `(db_vals, file_locked)`. The baseline its next write
+        # is diffed against (see `_load_baseline`). Per thread because a request reads and
+        # writes on its own thread, and the cache is shared: another thread's read refreshes
+        # it in between, and diffed against THAT the write took every change made since this
+        # caller's read for one of its own — and put the old value back.
+        self._reads = threading.local()
 
     # ── raw file (bootstrap + internal) ──────────────────────────────────────
     def read_raw(self) -> dict:
@@ -260,11 +266,13 @@ class ConfigManager:
         ``(store version, config table stamp, file mtime)`` — the stamp is what
         lets one replica see another's writes; updates :attr:`file_locked`.
         """
-        effective, _db_vals = self._load()
+        effective, db_vals = self._load()
+        # The cached objects are replaced, never mutated, so holding a reference is a snapshot.
+        self._reads.baseline = (db_vals, self.file_locked)
         return copy.deepcopy(effective)
 
     # ── the single write ─────────────────────────────────────────────────────
-    def write(self, data: dict, actor: str = '') -> bool:
+    def write(self, data: dict, actor: str = '', *, baseline: dict | None = None) -> bool:
         """Persist a full (effective-shaped) config dict to its homes.
 
         Editable ``section|field`` leaves → DB (secrets encrypted, single source);
@@ -282,8 +290,13 @@ class ConfigManager:
         before — re-wrote every stale value and deleted every row another process had
         added since, so one replica's save silently undid another's. As a patch, a key
         the caller did not touch is left exactly as the database has it now.
+
+        The baseline is the CALLER's: *baseline* (the ``section|field`` leaves it read) when
+        given, else what this thread last got from :meth:`read`, else the database as it is
+        now. Not the shared cache — another thread refreshing it between this caller's read
+        and its write made every change in between look like one of the caller's.
         """
-        _effective, base = self._load_baseline()
+        base = self._load_baseline(baseline)
         locked = set(self.env_locked) | set(self.file_locked)
 
         def _editable(p):
@@ -313,14 +326,18 @@ class ConfigManager:
                     file_data.pop(section, None)
         return self.save_raw(file_data)
 
-    def _load_baseline(self):
-        """The cached ``(effective, db_vals)`` the caller's data was derived from —
-        resolved now only when nothing was ever read (then it is simply the current DB)."""
-        cache = self._eff_cache
-        if cache is not None:
-            self.file_locked = cache[3]
-            return cache[2], cache[4]
-        return self._load()
+    def _load_baseline(self, explicit: dict | None = None) -> dict:
+        """The DB leaves the caller's data was derived from — *explicit*, or this thread's
+        last read (consumed: one read, one write), or the current database when this thread
+        never read."""
+        if explicit is not None:
+            return explicit
+        mine = getattr(self._reads, 'baseline', None)
+        self._reads.baseline = None
+        if mine is not None:
+            self.file_locked = mine[1]
+            return mine[0]
+        return self._load()[1]
 
     def invalidate(self) -> None:
         """Drop the cached effective config so the next read re-resolves it."""

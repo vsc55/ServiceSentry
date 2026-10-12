@@ -210,6 +210,20 @@ services:
       - config:/etc/ServiSesentry
       - vardata:/var/lib/ServiSesentry
     # Runs as root: the ping module uses pythonping (raw ICMP), which needs NET_RAW as an *ambient* capability — not grantable to a non-root user via cap_add. Grant ambient NET_RAW (or drop ping) to run this non-root.
+    # Root, but in the SAME group as the other containers (ssentry, gid 1000) and with
+    # umask 0002, the way the Helm chart runs its root roles: what the worker writes to the
+    # shared volumes (compiled MIBs, the monitor's state) is group-writable by web/events/
+    # syslog. As root:root 0644 under umask 022 the non-root containers could not write it.
+    # The chown repairs what earlier versions left on vardata; it is quick on a volume
+    # already right and, on an NFS export with root_squash, warns instead of failing.
+    user: "0:1000"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        chown -R 1000:1000 /var/lib/ServiSesentry && chmod -R ug+rwX /var/lib/ServiSesentry
+        || echo 'worker: could not hand /var/lib/ServiSesentry to 1000:1000' >&2;
+        umask 0002 && exec /entrypoint.sh
     cap_add:
       # Required by the ping watchful module (raw ICMP sockets).
       # Remove if not using ping monitoring.

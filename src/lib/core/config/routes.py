@@ -221,8 +221,11 @@ def register(app, wa):
 
 
     # Sections that contain external-service credentials (LDAP bind password,
-    # OIDC client secret, SMTP password, etc.).  Only admins may modify them.
-    _ADMIN_ONLY_SECTIONS = frozenset({'ldap', 'oidc', 'saml2', 'email', 'telegram', 'msteams'})
+    # OIDC client secret, SMTP password, etc.) or that decide who becomes what
+    # (SCIM: its token provisions accounts into role-mapped groups, so whoever
+    # sets it is one PATCH away from admin).  Only admins may modify them.
+    _ADMIN_ONLY_SECTIONS = frozenset({'ldap', 'oidc', 'saml2', 'scim', 'email', 'telegram',
+                                      'msteams'})
 
     # Individual security-relevant web_admin fields that, like the sensitive
     # sections above, must be admin-only — they govern account lockout, cookie

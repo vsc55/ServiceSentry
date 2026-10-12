@@ -33,7 +33,7 @@ from lib.core.dcim.store import (CABLE_CATEGORIES, CABLE_COLORS, CABLE_KINDS,
                                  SOURCE_PIECE_KINDS)
 from lib.core.dcim import store as dcim_store
 from lib.core.dcim.routes._common import (_NUM_MAX, _fresh, _num, _without, numbers_bad,
-                                          scan_pages)
+                                          scalars_bad, scan_pages)
 from lib.core.dcim.store.cabling import _CABLE, _LINK
 from lib.core.dcim.store.power import _PDU, _POWER, _SOURCE
 
@@ -54,6 +54,10 @@ def _bounds(spec) -> dict:
 
 def _bad_number(wa, field):
     return jsonify({'error': wa._t('dcim_bad_number'), 'field': field}), 400
+
+
+def _bad_text(wa, field):
+    return jsonify({'error': wa._t('dcim_bad_text'), 'field': field}), 400
 
 
 #: Cuántos colores ya usados se ofrecen. Una instalación tiene cinco o seis; un desplegable con
@@ -98,10 +102,14 @@ def register(app, wa, C):
             if not C.may_write(store, store.owners_map(), C.seen(), 'item', item['uid']):
                 return 'access_denied', 403
             return None
-        _, rack = _rack_writable(item.get('rack_uid'))
-        if rack is None:
+        # A rack's item, by ITS owner — which is the rack's unless somebody said otherwise. The
+        # rack alone let a shared rack's owner cable, re-cable and plug in another company's
+        # boxes, and left that company unable to cable its own. Symmetric now: each company
+        # cables what it may write, and a cable between two companies' boxes takes somebody who
+        # may write both.
+        if not store.racks.get(str(item.get('rack_uid') or '')):
             return 'dcim_not_found', 404
-        if rack is False:
+        if not C.may_write(store, store.owners_map(), C.seen(), 'item', item['uid']):
             return 'access_denied', 403
         return None
 
@@ -115,14 +123,23 @@ def register(app, wa, C):
         if not store:
             return None, None
         ends = [store.items.get(str((row or {}).get(k) or '')) for k in ('a_item', 'b_item')]
+        if not any(ends):
+            return store, None
+        # Every end that exists, by its own owner (`_cable_end_bad`'s rule): the rack of the near
+        # end alone let a shared rack's owner rename and delete a cable between two boxes of
+        # another company.
+        said, allowed = store.owners_map(), C.seen()
+        for it in ends:
+            if it and not C.may_write(store, said, allowed, 'item', it['uid']):
+                return store, False
         for it in ends:
             if it and it.get('rack_uid'):
-                return _rack_writable(it['rack_uid'])
-        it = ends[0]
-        if not it or not it.get('room_uid'):
+                rack = store.racks.get(str(it['rack_uid']))
+                return store, (rack or None)
+        it = next(e for e in ends if e)
+        if not it.get('room_uid'):
             return store, None
-        ok = C.may_write(store, store.owners_map(), C.seen(), 'item', it['uid'])
-        return store, (it if ok else False)
+        return store, it
 
     def _loop_bad(a_item, b_item, a_port, b_port):
         """Por qué ese cable NO puede ir de un equipo a sí mismo, o `''` si puede.
@@ -236,7 +253,7 @@ def register(app, wa, C):
         mias = {str(f['uid']) for f in fuentes}
         tomas = [i for i in store.items.list("source_uid != ''") if str(i.get('source_uid')) in mias]
         salas, out = {}, {}
-        for i in C.filtered(tomas, store, said, allowed, 'item', reach):
+        for i in C.readable(tomas, store, said, allowed, 'item', reach):
             ruid = str(i.get('room_uid') or '')
             if ruid not in salas:
                 salas[ruid] = store.rooms.get(ruid) or {}
@@ -451,6 +468,9 @@ def register(app, wa, C):
         data = _fresh(request.get_json(silent=True) or {})
         if str(data.get('kind') or 'panel') not in SOURCE_KINDS:
             return jsonify({'error': wa._t('dcim_source_kind_unknown')}), 400
+        texto = scalars_bad(_SOURCE, data)
+        if texto:
+            return _bad_text(wa, texto)
         malo = numbers_bad(_SOURCE, data, _bounds(_SOURCE))
         if malo:
             return _bad_number(wa, malo)
@@ -484,6 +504,9 @@ def register(app, wa, C):
         data = _without(request.get_json(silent=True) or {}, ('site_uid',))
         if 'kind' in data and str(data['kind']) not in SOURCE_KINDS:
             return jsonify({'error': wa._t('dcim_source_kind_unknown')}), 400
+        texto = scalars_bad(_SOURCE, data)
+        if texto:
+            return _bad_text(wa, texto)
         malo = numbers_bad(_SOURCE, data, _bounds(_SOURCE))
         if malo:
             return _bad_number(wa, malo)
@@ -672,6 +695,16 @@ def register(app, wa, C):
         out['ups_items'] = _ups_items(store, {uid})
         return jsonify(out)
 
+    def _feed_item_denied(store, kind, row) -> bool:
+        """Whether a power lead's ITEM is somebody else's: the strip's rack alone let a shared
+        rack's owner re-plug and unplug another company's server. An item that is gone denies
+        nothing — its lead is debris whoever owns the strip may clear."""
+        if kind != 'feeds':
+            return False
+        item = store.items.get(str((row or {}).get('item_uid') or ''))
+        return bool(item) and not C.may_write(store, store.owners_map(), C.seen(), 'item',
+                                              item['uid'])
+
     def _power_crud(kind, part, dueno, guard=None):
         """El CRUD de una regleta y el de un cable, que solo se diferencian en de quién cuelgan.
 
@@ -696,6 +729,9 @@ def register(app, wa, C):
                 return jsonify({'error': wa._t('dcim_not_found')}), 404
             if rack is False:
                 return jsonify({'error': wa._t('access_denied')}), 403
+            texto = scalars_bad(_SPECS[part], data)
+            if texto:
+                return _bad_text(wa, texto)
             malo = numbers_bad(_SPECS[part], data, _bounds(_SPECS[part]))
             if malo:
                 return _bad_number(wa, malo)
@@ -749,10 +785,13 @@ def register(app, wa, C):
             if not row:
                 return jsonify({'error': wa._t('dcim_not_found')}), 404
             _, rack = _cable_writable(row) if kind == 'cables' else _rack_writable(dueno(store, row))
-            if rack is False or rack is None:
+            if rack is False or rack is None or _feed_item_denied(store, kind, row):
                 return jsonify({'error': wa._t('access_denied')}), 403
             data = _without(request.get_json(silent=True) or {}, ('rack_uid', 'item_uid',
                                                                  'pdu_uid'))
+            texto = scalars_bad(_SPECS[part], data)
+            if texto:
+                return _bad_text(wa, texto)
             malo = numbers_bad(_SPECS[part], data, _bounds(_SPECS[part]))
             if malo:
                 return _bad_number(wa, malo)
@@ -802,7 +841,7 @@ def register(app, wa, C):
             if not row:
                 return jsonify({'error': wa._t('dcim_not_found')}), 404
             _, rack = _cable_writable(row) if kind == 'cables' else _rack_writable(dueno(store, row))
-            if rack is False or rack is None:
+            if rack is False or rack is None or _feed_item_denied(store, kind, row):
                 return jsonify({'error': wa._t('access_denied')}), 403
             if kind == 'pdus':
                 # Quitar la regleta se lleva sus cables. Dejarlos sería una lista de equipos
@@ -836,7 +875,15 @@ def register(app, wa, C):
     #: es una consulta, es otro problema.
     _NAMES_MAX = 500
 
-    def _items_matching(q: str) -> list:
+    def _racks_seen(store, racks: list) -> list:
+        """Of *racks* (uids), the ones this caller may see — or reach, as everywhere else."""
+        said, allowed = store.owners_map(), C.seen()
+        reach = dcim_svc.reachable(store, said, allowed)
+        return [r for r in racks
+                if dcim_owners.may_see(C.owner_of(store, said, 'rack', r), allowed)
+                or dcim_svc.llega(reach, 'rack', r)]
+
+    def _items_matching(q: str, puedo=None) -> list:
         """Los equipos cuya etiqueta —o el nombre de cuyo armario— contiene *q*.
 
         Buscar un cable por el nombre de lo que hay en sus puntas es lo normal —«el latiguillo de
@@ -847,12 +894,19 @@ def register(app, wa, C):
         store = C.store()
         if not q or not store:
             return []
+        # Only by the names this caller may READ (*puedo*): matched by any label, a cable from
+        # one's own switch to another company's server came back for that server's label and
+        # not for a made-up one — an oracle on the names the panel hides everywhere else.
+        puedo = puedo or (lambda _u: True)
         sql, params = dcim_store.like_clause(('label',), q)
-        uids = [r['uid'] for r in store.items.list(sql, params, limit=_NAMES_MAX)]
+        uids = [r['uid'] for r in store.items.list(sql, params, limit=_NAMES_MAX)
+                if puedo(r['uid'])]
         # Y por el nombre del ARMARIO, que es como se busca «los cables del RK-04». Los armarios
-        # son pocos: se resuelven a una lista y se pregunta por sus equipos.
+        # son pocos: se resuelven a una lista y se pregunta por sus equipos — de los armarios que
+        # este lector ve, por lo mismo: su nombre es lo que se busca, y uno que no ve no se nombra.
         rsql, rparams = dcim_store.like_clause(('name',), q)
-        racks = [r['uid'] for r in store.racks.list(rsql, rparams, limit=_NAMES_MAX)]
+        racks = _racks_seen(store, [r['uid'] for r in
+                                    store.racks.list(rsql, rparams, limit=_NAMES_MAX)])
         if racks and len(uids) < _NAMES_MAX:
             marcas = ', '.join('?' for _ in racks)
             uids += [r['uid'] for r in store.items.list(
@@ -866,9 +920,12 @@ def register(app, wa, C):
         if not q or not store:
             return []
         sql, params = dcim_store.like_clause(('name',), q)
-        uids = [r['uid'] for r in store.pdus.list(sql, params, limit=_NAMES_MAX)]
+        filas = store.pdus.list(sql, params, limit=_NAMES_MAX)
+        vistos = set(_racks_seen(store, list({str(r.get('rack_uid') or '') for r in filas})))
+        uids = [r['uid'] for r in filas if str(r.get('rack_uid') or '') in vistos]
         rsql, rparams = dcim_store.like_clause(('name',), q)
-        racks = [r['uid'] for r in store.racks.list(rsql, rparams, limit=_NAMES_MAX)]
+        racks = _racks_seen(store, [r['uid'] for r in
+                                    store.racks.list(rsql, rparams, limit=_NAMES_MAX)])
         if racks and len(uids) < _NAMES_MAX:
             marcas = ', '.join('?' for _ in racks)
             uids += [r['uid'] for r in store.pdus.list(
@@ -942,7 +999,7 @@ def register(app, wa, C):
         # mismo camino que la búsqueda de equipos por modelo—. Dejarlo para después obligaría a
         # traerse los cables de toda la instalación para mirarles el nombre a las puntas, que es
         # justo de lo que se venía huyendo.
-        tocan = _items_matching(q)
+        tocan = _items_matching(q, _puedo)
         regletas = _pdus_matching(q)
 
         def _o_extremos(sql_q, p_q, cols):
@@ -1282,6 +1339,9 @@ def register(app, wa, C):
         data = _fresh(request.get_json(silent=True) or {})
         if not store:
             return jsonify({'error': wa._t('dcim_not_found')}), 404
+        texto = scalars_bad(_LINK, data)
+        if texto:
+            return _bad_text(wa, texto)
         malo = numbers_bad(_LINK, data, _bounds(_LINK))
         if malo:
             return _bad_number(wa, malo)
@@ -1321,6 +1381,9 @@ def register(app, wa, C):
         data = _without(request.get_json(silent=True) or {}, ('a_site', 'b_site'))
         if 'kind' in data and str(data['kind']) not in LINK_KINDS:
             return jsonify({'error': wa._t('dcim_link_kind_unknown')}), 400
+        texto = scalars_bad(_LINK, data)
+        if texto:
+            return _bad_text(wa, texto)
         malo = numbers_bad(_LINK, data, _bounds(_LINK))
         if malo:
             return _bad_number(wa, malo)

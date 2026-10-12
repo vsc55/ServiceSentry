@@ -121,6 +121,13 @@ class FactStore:
         # medida. Se cachea porque leerlo son 211 filas y recomponer el resumen lo pide una vez
         # por serie: medido, 0,57 s de 1,05 en releer mil cuatrocientas veces la misma tabla.
         self._field_names: dict = {}
+        # Los nombres que ESTE proceso acaba de dar de alta en una transacción que aún no se ha
+        # confirmado. Su id está en la caché porque la misma conexión ya lo ve, pero si la
+        # transacción se deshace la fila desaparece y el id queda libre: SQLite se lo da al
+        # siguiente campo nuevo, y la caché seguía diciendo que era el del primero — medidas
+        # guardadas con el nombre de otro campo. Quien abre la transacción dice cómo acabó
+        # (`settle`); hasta entonces, estos ids son provisionales.
+        self._fresh: set = set()
 
     # ── Arranque ──────────────────────────────────────────────────────────────
 
@@ -133,6 +140,19 @@ class FactStore:
         apuntaría con ids a filas que ya no están."""
         self._field_ids.clear()
         self._field_names.clear()
+        self._fresh.clear()
+
+    def settle(self, committed: bool) -> None:
+        """Cómo acabó la transacción en la que se dieron de alta campos nuevos.
+
+        Confirmada: sus ids ya son de verdad y se quedan. Deshecha: se olvidan, porque las
+        filas que los respaldaban ya no existen y el motor puede volver a dar esos ids."""
+        if not committed:
+            for nombre in self._fresh:
+                self._field_ids.pop(nombre, None)
+            if self._fresh:
+                self._field_names.clear()
+        self._fresh.clear()
 
     # ── El diccionario de campos ──────────────────────────────────────────────
 
@@ -174,6 +194,7 @@ class FactStore:
                         f'SELECT id, name FROM {_F} WHERE name IN ({marcas})',
                         tuple(nuevos)) or ():
                     self._field_ids[str(nombre)] = int(fid)
+                    self._fresh.add(str(nombre))
         except Exception:  # pylint: disable=broad-except
             pass
         # Un tope, porque los nombres los inventan los perfiles y un perfil que los generase sin

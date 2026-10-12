@@ -58,7 +58,13 @@ def verify_backup(var_dir: str, name: str, backup_dir: str = '') -> dict:
         with zipfile.ZipFile(path) as zf:
             for member, want in expected.items():
                 try:
-                    got = hashlib.sha256(zf.read(member)).hexdigest()
+                    # In chunks: a member is a whole table, and reading it in one go to hash
+                    # it is the same out-of-memory the copy no longer risks.
+                    h = hashlib.sha256()
+                    with zf.open(member) as fh:
+                        for chunk in iter(lambda: fh.read(1 << 20), b''):
+                            h.update(chunk)
+                    got = h.hexdigest()
                 except KeyError:
                     out['bad'].append({'member': member, 'why': 'missing'})
                     continue

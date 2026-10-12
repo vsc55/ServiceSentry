@@ -22,6 +22,7 @@ from flask import jsonify, render_template, url_for
 from lib.core.constants import is_reserved_username
 from lib.debug import DebugLevel
 from lib.providers.entraid import tab_sso
+from lib.providers.identity import binding_conflict, note_refusal, refusal
 from lib.security.headers import _CSP_HEAD, _CSP_TAIL
 
 # Microsoft-hosted Teams JS SDK (self-hosting would need the bundled file; the office
@@ -57,13 +58,29 @@ def _resolve_user(wa, claims: dict):
            or claims.get('email') or claims.get('unique_name') or '').strip()
     if not upn:
         return None, None
+    found = None
     if upn in users:
-        return upn, users[upn]
-    low = upn.lower()
-    for uname, ud in users.items():
-        if isinstance(ud, dict) and (ud.get('email') or '').strip().lower() == low:
-            return uname, ud
-    return None, None
+        found = (upn, users[upn])
+    else:
+        low = upn.lower()
+        for uname, ud in users.items():
+            if isinstance(ud, dict) and (ud.get('email') or '').strip().lower() == low:
+                found = (uname, ud)
+                break
+    if found is None:
+        return None, None
+    # Found by a NAME, which the directory may rename and hand to somebody else. An account
+    # already bound to an identity is not this person's whatever the label says — the oid
+    # loop above would have found it if it were — so the same rule as the OIDC, SAML and
+    # LDAP doors applies (lib.providers.identity): an unbound account is matched, one bound
+    # to another provider or to another object id is refused. This door skipped it, and a
+    # second person who came to carry a UPN was signed into the first one's account.
+    conflict = binding_conflict(found[1] if isinstance(found[1], dict) else {},
+                                'entraid', oid, fold_case=True)
+    if conflict:
+        note_refusal(f'entraid_{conflict}')
+        return None, None
+    return found
 
 
 def register(app, wa):
@@ -120,7 +137,8 @@ def register(app, wa):
         username, user = _resolve_user(wa, claims)
         if user is None:
             wa._audit('msteams_sso_failed', detail={
-                'error': 'no matching user', 'upn': claims.get('preferred_username', '')})
+                'error': refusal('no matching user'),
+                'upn': claims.get('preferred_username', '')})
             return jsonify({'ok': False, 'error': wa._t('msteams_sso_no_user')}), 403
         # Never let a Teams token silently take over a LOCAL account (same guard as OIDC).
         if str(user.get('auth_source', 'local')) in ('', 'local'):

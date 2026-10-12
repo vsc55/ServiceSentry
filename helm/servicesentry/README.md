@@ -20,8 +20,13 @@ helm install ss ./helm/servicesentry \
   --namespace servicesentry --create-namespace \
   --set auth.password='cambia-esto' \
   --set database.host=mi-mysql --set database.password='db-pass' \
-  --set control.token="$(openssl rand -hex 32)"
+  --set secretKey="$(openssl rand -hex 32)"   --set control.token="$(openssl rand -hex 32)"
 ```
+
+`secretKey` y `control.token` son **obligatorios** salvo que ya estén desplegados (un
+`helm upgrade` los reutiliza) o que se pida `generateSecrets=true`. Con `helm template` o
+GitOps (Argo CD, Flux) **hay que fijarlos**: allí `lookup` no ve nada, cada render generaría
+una clave nueva y los secretos ya guardados en la BD dejarían de descifrarse.
 
 O con un fichero de valores:
 
@@ -36,7 +41,8 @@ helm install ss ./helm/servicesentry -n servicesentry --create-namespace -f mis-
 | `image.repository` / `image.tag` | `servicesentry` / `latest` | Imagen |
 | `auth.username` / `auth.password` | `admin` / *(requerido)* | Credenciales del panel |
 | `existingSecret` | `""` | Usa un Secret propio con las claves `SS_*` en vez de generarlo |
-| `secretKey` | *(auto)* | Clave de cifrado **compartida** (`.flask_secret`, 64 hex). Auto-generada y estable entre upgrades si se deja vacía |
+| `secretKey` | *(requerido)* | Clave de cifrado **compartida** (`.flask_secret`, 64 hex). Vacía: se reutiliza la desplegada; sin ninguna, el chart **falla** salvo con `generateSecrets=true` |
+| `generateSecrets` | `false` | Permite generar `secretKey` y `control.token` si faltan. Solo con `helm install`/`upgrade`, **nunca** con `helm template`/GitOps |
 | `database.driver/host/port/name/user/password` | `mysql` … | BD compartida (externa) |
 | `syslogDatabase.enabled` | `false` | BD dedicada para mensajes syslog |
 | `control.enabled` / `control.token` / `control.port` | `true` / `""` / `8765` | Plano de control: con token se habilita el **poke** instantáneo |

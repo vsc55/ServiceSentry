@@ -76,16 +76,18 @@ contents:
     file_info:
       mode: 0644
 
-  # Config and data live outside the package's file list on purpose: they are created by
-  # the postinstall and must survive an uninstall.
-  - dst: /etc/ServiSesentry
-    type: dir
+  # The venv builder, next to the app: the units and init scripts name it when the venv no
+  # longer runs (a Python upgrade removed the interpreter it was built with).
+  - src: ./scripts/make-venv.sh
+    dst: /opt/ServiSesentry/make-venv.sh
     file_info:
-      mode: 0750
-  - dst: /var/lib/ServiSesentry
-    type: dir
-    file_info:
-      mode: 0750
+      mode: 0755
+
+  # /etc/ServiSesentry and /var/lib/ServiSesentry are NOT listed — not even as `type: dir`.
+  # A directory in the package is a directory whose owner and mode the package manager
+  # re-applies: rpm did it on every upgrade, handing both back to root:root 0750, and the
+  # services running as `servicesentry` could no longer open their own config. The
+  # postinstall creates them, and they survive an uninstall because no package owns them.
 
 scripts:
   postinstall: ./scripts/postinstall.sh

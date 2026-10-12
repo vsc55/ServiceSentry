@@ -1,6 +1,6 @@
 # Documentación de Tests — ServiceSentry
 
-**Total: ~11.858 tests** (11.812 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-10-12). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
+**Total: ~12.128 tests** (12.082 recolectados entre `unit`, `meta` e `integration` —la parametrización recolecta más de los que se declaran—; los e2e piden motores o navegador aparte. Medido el 2026-10-12). Todos deben pasar con `pytest` para que el build sea válido. Los skips habituales: los tests de integridad Watchful que no aplican a un módulo (sin credencial / no enlazable a dispositivo), el arnés de portabilidad multi-motor (§81) sin sus variables de entorno o bajo `-n auto`, y algún test con `skipif` de plataforma (p. ej. rangos reservados de Windows en `test_wa_server.py`).
 
 > Los tests se ejecutan **en paralelo automáticamente** gracias a `-n auto` de `pytest-xdist` (configurado en `src/pytest.ini`). Tiempo típico ~2 min en una máquina con 8 cores. Para ejecutar en serie usa `-n 0`.
 
@@ -11875,3 +11875,87 @@ Las tablas de ejecución (sesiones, líder, instancias, comandos) ni se copian n
 **Archivo:** `watchfuls/ram_swap/tests/test_ram_swap_tanda5.py` — 3 tests
 
 El ping recurre al binario del sistema (salidas grabadas en inglés y español, Windows y Linux, `TTL=` en Windows) y, sin binario, dice que el ICMP no está permitido. cpu, filesystemusage y ram_swap leen Windows con `Get-CimInstance` sin tuberías y caen a `wmic` solo sin PowerShell.
+
+## 241. Identidad (segunda auditoría 2026-10-12)
+
+**Archivo:** `tests/integration/test_wa_tanda6_identity.py` — 27 tests
+**Archivo:** `tests/integration/test_wa_browser_tanda6_identity.py` — 5 tests
+
+Los roles integrados no se delegan sin tener sus permisos; SCIM solo para admin (y su registro en Entra), sin borrar al último administrador; cambio obligatorio de la contraseña por defecto en el primer acceso; el reto WebAuthn de un solo uso; el límite de MFA por cuenta sin carrera; al cambiar o resetear la contraseña se informa de los tokens y se ofrece revocarlos (pintado en `node`).
+
+## 242. Secretos hacia otros hosts y visibilidad
+
+**Archivo:** `tests/integration/test_wa_tanda6_secrets.py` — 26 tests
+**Archivo:** `tests/unit/test_tanda6_secrets.py` — 6 tests
+
+SNMP confinado para `snmp_view`; contraseña y credencial de una fuente syslog atadas a su servidor; probar una credencial guardada exige `credentials_edit`; SSO de Teams respeta el vínculo de la cuenta; LDAP valida el certificado y TLS cuenta como destino (también SMTP); widgets de servidores y de módulos con permisos; `/status` sin detalle para invitados ni para quien no tiene `checks_view`; teselas y MIB revalidan cada redirección.
+
+## 243. Servicios (segunda auditoría 2026-10-12)
+
+**Archivo:** `tests/unit/test_tanda6_services.py` — 32 tests
+
+Alertas en cola enviadas al salir, fuente syslog caída sin rebobinar el cursor, el jail notifica fuera de su candado, estado ilegible no es vacío, «ejecutar ahora» de eventos en su hilo, Telegram 429, separador en las partes, recuperación por antecesor, cooldowns al tomar el liderazgo, UDP falsificado sin cárcel, regex anidadas rechazadas y texto acotado, cola de syslog por bytes.
+
+## 244. Persistencia (segunda auditoría 2026-10-12)
+
+**Archivo:** `tests/unit/test_tanda6_db.py` — 32 tests
+
+Columnas no declaradas recreadas con su definición en MySQL, claves `utf8mb4_bin`, caché de campos tras un rollback, secretos de config en copias sin secretos, base de parche por llamada, transacciones de MySQL tras un error y sin reconexión a medias, copias y restauraciones por lotes (y las antiguas siguen restaurando), sesiones al arrancar, dueño atómico, autor y fecha de los adjuntos, y el líder que pierde la carrera del INSERT. En vivo, `tests/e2e/test_db_portability_live.py` añade seis casos sobre MariaDB y PostgreSQL, uno con dos procesos reconciliando la misma tabla a la vez.
+
+## 245. Módulos: validación de opciones y ejecución local
+
+**Archivo:** `tests/integration/test_wa_tanda6_modules.py` — 11 tests
+**Archivo:** `tests/unit/test_device_binding_tanda6.py` — 2 tests
+
+El guardado de módulos rechaza valores fuera de las `options` de un campo (salvo los ya guardados); `device_exec` local con bytes indecodificables y `os: auto` como Linux.
+
+## 246. Watchfuls (segunda auditoría 2026-10-12)
+
+**Archivo:** `watchfuls/dns/tests/test_dns_tanda6.py` — 16 tests
+**Archivo:** `watchfuls/service_status/tests/test_service_status_tanda6.py` — 9 tests
+**Archivo:** `watchfuls/ram_swap/tests/test_ram_swap_tanda6.py` — 3 tests
+**Archivo:** `watchfuls/raid/tests/test_raid_tanda6.py` — 3 tests
+**Archivo:** `watchfuls/temperature/tests/test_temperature_tanda6.py` — 3 tests
+**Archivo:** `watchfuls/web/tests/test_web_tanda6.py` — 7 tests
+**Archivo:** `watchfuls/keepalived/tests/test_keepalived_tanda6.py` — 6 tests
+**Archivo:** `watchfuls/azure/tests/test_azure_tanda6.py` — 6 tests
+**Archivo:** `watchfuls/m365/tests/test_m365_tanda6.py` — 4 tests
+**Archivo:** `watchfuls/ups/tests/test_ups_tanda6.py` — 6 tests
+**Archivo:** `watchfuls/datastore/tests/test_datastore_tanda6.py` — 2 tests
+**Archivo:** `watchfuls/process/tests/test_process_tanda6.py` — 3 tests
+**Archivo:** `watchfuls/proxmox/tests/test_proxmox_tanda6.py` — 4 tests
+**Archivo:** `watchfuls/ntp/tests/test_ntp_tanda6.py` — 3 tests
+
+Tipo DNS en lista blanca y comandos remotos de Windows sin caracteres que interprete el shell; check web con redirecciones revalidadas y 3xx esperados; service_status sin systemd; `alert` en keepalived y azure; recuperación de entidades en m365 y azure; banderas del SAI; timeouts de datastore; nombres en process; IPv6 en proxmox y NTP.
+
+## 247. DCIM (segunda auditoría 2026-10-12)
+
+**Archivo:** `tests/integration/test_wa_dcim_tanda6.py` — 24 tests
+
+Lo ajeno fuera de circuitos, enchufes y listas de sala; cada extremo de un cable por su dueño; racks y pasarelas ajenos fuera de las piezas de la sala; la importación sin mover racks ajenos y conservando lo que el plano lleva; nada montado sobre un equipo de sala; puertas sin pasarela colgando; zona general en su sede; ubicación de un equipo de sala; tipos de texto, fila de la misma sala y medidas acotadas; búsqueda de cables sin oráculo.
+
+## 248. Panel, arranque y distribución (segunda auditoría 2026-10-12)
+
+**Archivo:** `tests/integration/test_wa_tanda6_panel.py` — 15 tests
+**Archivo:** `tests/unit/test_tanda6_runtime.py` — 14 tests
+**Archivo:** `tests/meta/test_tanda6_distribution.py` — 38 tests
+
+En `node`: celda de syslog, doble guardado, respuestas viejas de logs y del sondeo de Estado, intervalo con 400, navegación SPA, almacenamiento bloqueado; y la guarda de nombres sin declarar sobre los guiones servidos. En ejecución: dónde escucha el panel, timeout del servidor web, la CLI como dueño de los datos. En distribución: directorios del rpm, scripts de paquete solo al desinstalar, `update.sh` e `install.sh`, compose, Helm sin generar claves, workflow y CI.
+
+## 249. Eventos — Reglas con una regex que no se evalúa
+
+**Archivo:** `tests/integration/test_wa_event_unsafe_rules.py` — 3 tests
+
+Una regla guardada antes de que se rechazaran las repeticiones anidadas no se ejecuta: la API de reglas nombra sus patrones en `unsafe_regex`, el procesador lo avisa en el log al cargar las reglas y la lista la marca «No se evalúa» (pintado en `node`).
+
+## 250. Windows real — `Get-CimInstance` de cpu, filesystemusage y ram_swap
+
+**Archivo:** `tests/e2e/test_windows_cim_live.py` — 5 tests
+
+Ejecuta en un Windows de verdad los comandos exactos que mandan los tres módulos (PowerShell `Get-CimInstance`, porque `wmic` ya no está en Windows 11 24H2 ni en Server 2025) por el mismo `device_exec` local que usa un check, y los pasa por sus parsers: carga de CPU, uso de la unidad del sistema y memoria. Solo corre en Windows con `SS_TEST_WINDOWS_CIM=1`, que pone el job `windows-cim` de `.github/workflows/tests.yml` (Windows Server 2025, junto con las pruebas de esos tres módulos); fuera de ahí se salta, porque la consulta de discos puede tardar en un equipo con unidades de red. Una guarda de `tests/meta/test_tanda6_distribution.py` impide quitar ese job.
+
+## 251. Redirecciones máximas configurables
+
+**Archivo:** `tests/integration/test_wa_max_redirects.py` — 6 tests
+
+`web_admin|max_redirects` vale 10 por defecto; una descarga protegida sigue exactamente ese número de saltos y falla con uno más; un valor inválido vuelve al defecto; en el worker gana `SS_MAX_REDIRECTS` si es válido; guardar el ajuste lo aplica y solo puede un admin; y el worker lo aplica en cada ciclo.

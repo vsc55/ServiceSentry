@@ -322,5 +322,5 @@ async function _mptLoad(pageId, slug, containerId) {
     if (!st.sort && columns.length) { st.sort = columns[columns.length - 1].id; st.sortDir = 'desc'; }
     _mptEnsure(pageId, view, containerId);
     window['_mptDraw_' + key]();
-    if (failed.length) showToast(esc(failed.join(' · ')), 'danger');
+    if (failed.length) showToast(failed.join(' · '), 'danger');   // showToast sets textContent
 }

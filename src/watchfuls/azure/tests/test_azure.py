@@ -96,7 +96,8 @@ class TestServiceHealth:
 
     def test_auth_failure_is_reported(self):
         from watchfuls.azure import AzureError
-        res = _run(_item(), token_exc=AzureError(401, 'bad secret'))
+        # alert=1: the first failure is already the one that counts (debounce: tanda6).
+        res = _run(_item(alert=1), token_exc=AzureError(401, 'bad secret'))
         assert res['a1/health']['status'] is False and 'bad secret' in res['a1/health']['message']
 
 

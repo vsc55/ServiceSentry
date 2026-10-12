@@ -35,6 +35,10 @@ fi
 mkdir -p "${CONF_DIR}" "${APP_DIR}" "${VAR_DIR}"
 
 # ── Application files ─────────────────────────────────────────────────────────
+# Re-run over an existing install, what is there goes first — everything but the venv, as
+# update.sh does: copying on top left behind whatever this version no longer ships (a
+# retired watchful kept being discovered and loaded).
+find "${APP_DIR}" -mindepth 1 -maxdepth 1 ! -name venv -exec rm -rf {} +
 # The same tree the packages stage (packaging/build.sh): requirements.lock included — the
 # venv is built from it — and without a developer's .venv, caches or the test suite.
 tar -C src \
@@ -43,6 +47,8 @@ tar -C src \
 
 # ── Python environment ────────────────────────────────────────────────────────
 sh packaging/scripts/make-venv.sh "${APP_DIR}"
+# Kept beside the app: the units name it when a Python upgrade leaves the venv unable to run.
+install -m 0755 packaging/scripts/make-venv.sh "${APP_DIR}/make-venv.sh"
 
 # ── Config files (skip if destination already exists and is identical) ────────
 for f in data/*.json; do

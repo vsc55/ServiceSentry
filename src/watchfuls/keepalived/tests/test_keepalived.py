@@ -55,7 +55,9 @@ def _run(item, members, exec_map, priorities=None):
 
 def _item(**over):
     base = {'enabled': True, 'label': 'web', 'vip': VIP,
-            'check_service': True, 'check_vip': True, 'check_priority': False}
+            'check_service': True, 'check_vip': True, 'check_priority': False,
+            # The first failure counts here; the debounce has its own tests (tanda6).
+            'alert': 1}
     base.update(over)
     return base
 

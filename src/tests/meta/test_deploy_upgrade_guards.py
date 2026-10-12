@@ -55,7 +55,10 @@ class TestHelmControl:
         out = subprocess.run(
             [helm, 'template', 't', os.path.join(_ROOT, 'helm', 'servicesentry'),
              '--set', 'auth.password=x', '--set', 'database.password=y',
-             '--set', 'database.host=db'], capture_output=True, text=True, timeout=120)
+             '--set', 'database.host=db',
+             # An empty token is generated only when asked to (helm template sees no live
+             # Secret: test_tanda6_distribution.TestHelmSecrets).
+             '--set', 'generateSecrets=true'], capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out.stderr
         assert out.stdout.count('/control/health') >= 2
         assert re.search(r'SS_CONTROL_TOKEN: "\S{20,}"', out.stdout)

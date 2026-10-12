@@ -137,7 +137,7 @@ flowchart TD
 | **Mantenimiento (borrado de datos)** | Config → General → **Mantenimiento** reúne los borrados destructivos: *Borrar Una Serie*, *Borrar Todo El Historial*, *Vaciar Mensajes De Syslog*, *Eliminar Todos Los Eventos De Auditoría*, *Borrar El Registro De Notificaciones De Eventos* y *Borrar El Historial De Baneos*. Antes vivían en la barra de la propia sección que vacían — páginas que se dejan abiertas todo el día. La tarjeta no tiene campos propios: cada dominio aporta su botón como `CONFIG_ACTION` sobre la sección `maintenance`, con el permiso (`history_delete`, `syslog_delete`, `audit_delete`, `events_notify_delete`, `ipban_history_delete`) que oculta el botón a quien no lo tenga. Elegir *qué* serie borrar abre un modal selector. Ver [explica-descubrimiento.md §7b](explica-descubrimiento.md#7b-acciones-de-config-y-ui-aportadas-por-un-paquete-config_actions--web) |
 | **Paginación configurable** | Tamaño de página por defecto (`default_page_size`) y lista de opciones (`page_sizes`) configurables desde la pestaña de configuración → sección Tablas |
 | **Tablas de listado unificadas** | Todos los listados (Users, Roles, Groups, Credentials, Servers, Clusters, Sessions, Audit, Events, Syslog) usan un componente común dirigido por esquema: paginación arriba/abajo, ordenación por columna, columnas reordenables (arrastrar), redimensionables (doble clic = auto-ajuste) u **ajustadas al contenido** (`resizable:false`), selector de mostrar/ocultar columnas y persistencia por usuario (columnas visibles, orden y ancho en `table_config`). Ver §[Tablas de Listado](#tablas-de-listado) |
-| **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, **auto-refresco por AJAX** (recarga solo el cuerpo vía `/status?fragment=1`, sin recargar la página → sin parpadeo, mantiene el scroll) con **overlay de "sin conexión"** si el servidor no responde; siempre visible para usuarios logueados |
+| **Página de estado pública** | `/status` sin autenticación (cuando `public_status=true`); tarjetas colapsables por módulo, **auto-refresco por AJAX** (recarga solo el cuerpo vía `/status?fragment=1`, sin recargar la página → sin parpadeo, mantiene el scroll) con **overlay de "sin conexión"** si el servidor no responde; el detalle de cada check solo con `checks_view`/`checks_run` |
 | **Páginas de error personalizadas** | 400/403/404/405/500 con tema dark/light heredado de la sesión; las rutas `/api/v1/*` devuelven JSON en lugar de HTML |
 | **Gestión de usuarios** | Crear, editar y eliminar usuarios; asignar roles y grupos; cambiar contraseña propia; activar/desactivar cuenta desde el modal. La validación + operaciones viven en una capa sin Flask (`lib/core/users/service.py`), compartida con el [CLI de gestión](ref-cli.md) (`user add/enable/disable/passwd/role/group-add/group-del`) |
 | **Roles y permisos** | Roles integrados (`admin`, `editor`, `viewer`) + rol especial `none` (sin permisos, por defecto en nuevos usuarios y grupos) + roles personalizados con 93 flags granulares; activar/desactivar desde el modal. Los permisos se editan en un solo sitio, la sub-sección **Acceso › Permisos**, que pone todos los roles a la vez frente a los integrados; el modal del rol edita su identidad y a quién se asigna |
@@ -358,7 +358,7 @@ El permiso requerido se indica entre paréntesis.
 
 | Método | Ruta | Permiso | Descripción |
 |--------|------|---------|-------------|
-| `GET` | `/status` | público* | Página de estado de los servicios. `?fragment=1` devuelve solo el cuerpo dinámico (para el auto-refresco AJAX, sin recargar la página). *Requiere `public_status=true` para acceso anónimo; los usuarios autenticados siempre pueden acceder. |
+| `GET` | `/status` | público* | Página de estado de los servicios. `?fragment=1` devuelve solo el cuerpo dinámico (para el auto-refresco AJAX, sin recargar la página). *Requiere `public_status=true` para acceso anónimo; el detalle de cada check exige `checks_view` o `checks_run` (ver «Comportamiento de acceso»). |
 
 ### Autenticación
 
@@ -1128,8 +1128,14 @@ La ruta `/status` muestra el estado actual de todos los módulos en una página 
 | Situación | Resultado |
 |-----------|-----------|
 | `public_status = false` + usuario anónimo | `404 Not Found` |
-| `public_status = false` + usuario logueado | `200 OK` |
-| `public_status = true` + cualquier visitante | `200 OK` |
+| `public_status = false` + logueado **sin** `checks_view`/`checks_run` | `404 Not Found` (igual que un invitado) |
+| `public_status = false` + logueado con `checks_view` o `checks_run` | `200 OK`, con el detalle de cada check |
+| `public_status = true` + anónimo, o logueado sin esos permisos | `200 OK`, **solo el resumen por módulo** |
+| `public_status = true` + logueado con `checks_view` o `checks_run` | `200 OK`, con el detalle |
+
+El detalle por check se vacía en el servidor, no solo se oculta en la plantilla. La opción
+`web_admin|public_status_detail` (solo admin, apagada por defecto) sigue permitiendo que un invitado
+vea el detalle si un administrador la activa.
 
 ### Características
 

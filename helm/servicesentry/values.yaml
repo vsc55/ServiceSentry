@@ -29,9 +29,18 @@ existingSecret: ""
 # -- Encryption key (.flask_secret) SHARED by every pod. ServiceSentry encrypts
 #    stored secrets (credentials, tokens) with a key derived from this; all roles
 #    MUST use the same one or they can't decrypt each other's data. 64 hex chars.
-#    Leave empty to auto-generate a stable one (reused across upgrades via lookup).
-#    Generate manually with:  openssl rand -hex 32
+#    Generate it with:  openssl rand -hex 32
+#    Left empty, the deployed key is reused (lookup) — and when none is deployed yet the
+#    chart FAILS unless generateSecrets=true (below).
 secretKey: ""
+
+# -- Let the chart generate secretKey and control.token when they are empty and none is
+#    deployed yet. Safe ONLY with a plain `helm install` / `helm upgrade`, where `lookup`
+#    sees the live Secret and keeps the generated values. Under `helm template`, `--dry-run`
+#    or GitOps (Argo CD, Flux) lookup sees nothing, every render would generate NEW values,
+#    and a new secretKey makes every secret already stored in the database undecryptable —
+#    so there, leave this false and set secretKey and control.token explicitly.
+generateSecrets: false
 
 # -- Shared database. External by default — point at a managed MySQL/PostgreSQL.
 #    (driver: sqlite is only meaningful for a single all-in-one pod, not this split.)
@@ -58,7 +67,8 @@ syslogDatabase:
 #    control still propagates via the periodic reconcile.
 control:
   enabled: true
-  token: ""                # set a long random token, e.g. `openssl rand -hex 32`
+  token: ""                # set a long random token, e.g. `openssl rand -hex 32` (empty:
+                           # the deployed one, else generateSecrets=true, else the chart fails)
   port: 8765
 
 # -- Non-secret app settings → ConfigMap (SS_*). Empty = leave the saved value.

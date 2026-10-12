@@ -50,7 +50,7 @@ async function renderBackups() {
 
 // What the pane is showing: the schedule, every copy, one task's copies, or the hand-made ones.
 const _BK_VIEW_KEY = 'ss_backup_view';
-let _backupView = localStorage.getItem(_BK_VIEW_KEY) || 'tasks';
+let _backupView = ssLsGet(_BK_VIEW_KEY) || 'tasks';
 
 /** The toolbar offers the action of the pane under it, and only if the user may take it.
  *  "Create a copy" over the schedule is the wrong verb next to the wrong list — and the one you
@@ -209,8 +209,8 @@ function _renderBackupPane(c) {
 }
 
 // Newest first by default: the copy you want is almost always the last one taken.
-let _bkSort = localStorage.getItem('ss_backup_sort') || 'mtime';
-let _bkSortDir = localStorage.getItem('ss_backup_sort_dir') || 'desc';
+let _bkSort = ssLsGet('ss_backup_sort') || 'mtime';
+let _bkSortDir = ssLsGet('ss_backup_sort_dir') || 'desc';
 
 function setBackupSort(col) {
     if (_bkSort === col) _bkSortDir = _bkSortDir === 'asc' ? 'desc' : 'asc';

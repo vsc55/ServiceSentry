@@ -71,8 +71,11 @@ if (e.key === 'Enter') { e.preventDefault(); _doRenameItem(); }
 // exist on a standalone section page (/overview, /history, /syslog), and an unguarded
 // access here throws at top level — aborting the whole script before the init runs.
 document.getElementById('btn-tab-status')?.addEventListener('shown.bs.tab', async () => {
+    // Taken BEFORE the await: leaving Status while it renders bumps it, and the poll then
+    // never starts (it used to start anyway and run forever behind another section).
+    const gen = _daemonPollGen;
     await renderStatus();   // wait for DOM so daemon widget exists before first poll
-    _daemonStartPoll();
+    _daemonStartPoll(gen);
 });
 document.getElementById('btn-tab-status')?.addEventListener('hide.bs.tab', _daemonStopPoll);
 let _accessPollTimer = null;

@@ -19,6 +19,7 @@ import base64
 import datetime as _dt
 import decimal
 import hashlib
+import io
 import json
 import os
 import re
@@ -134,11 +135,18 @@ def clean_cell(value, keep_secrets: bool):
         return value
     if value.startswith(ENC_PREFIX):
         return ''
-    if value[:1] in ('{', '['):
+    # `"…"` too: the config table keeps each value as JSON, so a secret setting is the JSON
+    # STRING `"enc:…"` — quoted, so the prefix test above never saw it, and a copy «without
+    # secrets» carried every SMTP password and client secret of the configuration.
+    if value[:1] in ('{', '[', '"'):
         try:
-            return json.dumps(_strip_secrets(json.loads(value)))
+            parsed = json.loads(value)
         except (ValueError, TypeError):
             return value
+        stripped = _strip_secrets(parsed)
+        # Untouched when there was nothing to strip: re-serialising would still change the
+        # bytes (key spacing, escaped accents) of every JSON cell in the copy.
+        return value if stripped == parsed else json.dumps(stripped, ensure_ascii=False)
     return value
 
 
@@ -150,6 +158,90 @@ def restore_cell(value):
         except (ValueError, TypeError):
             return b''
     return value
+
+
+# ── A table's member, streamed ───────────────────────────────────────────────
+#
+# Still ONE JSON document per table, `{"columns": [...], "rows": [[...], ...]}`, so every
+# reader that ever loaded it whole still can (an older install restoring a newer copy, a
+# person with `unzip -p … | jq`). What changed is the layout inside it: the header on the
+# first line and then ONE ROW PER LINE, which is what lets both sides stream it. The copy
+# wrote `json.dumps` of the whole table and the restore `json.loads` of the whole member — a
+# history of 27 million measurements is gigabytes of Python objects twice over, and the
+# process died of it (OOM) before the archive was closed. JSON never puts a raw newline
+# inside a value (`\n` is escaped), so a line is always exactly one row.
+
+_ROWS_OPEN = '"rows":['
+
+
+def write_table_member(zf: zipfile.ZipFile, member: str, columns, batches) -> tuple:
+    """Write one table as *member*, batch by batch. ``(rows written, sha256 of the member)``.
+
+    *batches* yields lists of rows already made JSON-safe (:func:`clean_cell`). Nothing is
+    held beyond one batch: the member is written through a zip stream and hashed as it goes.
+    """
+    digest = hashlib.sha256()
+    count = 0
+    dumps = json.JSONEncoder(ensure_ascii=False, separators=(',', ':')).encode
+
+    with zf.open(member, 'w', force_zip64=True) as out:
+        def put(text: str) -> None:
+            data = text.encode('utf-8')
+            digest.update(data)
+            out.write(data)
+
+        put('{"columns":' + dumps(list(columns)) + ',' + _ROWS_OPEN)
+        for batch in batches:
+            chunk = []
+            for row in batch:
+                chunk.append(('\n' if count == 0 else ',\n') + dumps(row))
+                count += 1
+            if chunk:
+                put(''.join(chunk))
+        put('\n]}')
+    return count, digest.hexdigest()
+
+
+def iter_table_member(zf: zipfile.ZipFile, member: str, size: int = 2000):
+    """``(columns, batches)`` of a table member — *batches* yields lists of up to *size* rows.
+
+    Reads both layouts: the streamed one (header line, a row per line) a row at a time, and
+    the single-line document every copy before it was written as, which can only be read
+    whole — that is what those copies are, and they must keep restoring.
+    """
+    fh = io.TextIOWrapper(zf.open(member), encoding='utf-8', newline='\n')
+    first = fh.readline()
+    head = first.rstrip('\n')
+    if head.endswith(_ROWS_OPEN):
+        columns = json.loads(head + ']}').get('columns') or []
+
+        def batches():
+            try:
+                chunk = []
+                for line in fh:
+                    line = line.strip()
+                    if not line or line == ']}':
+                        continue
+                    chunk.append(json.loads(line[:-1] if line.endswith(',') else line))
+                    if len(chunk) >= size:
+                        yield chunk
+                        chunk = []
+                if chunk:
+                    yield chunk
+            finally:
+                fh.close()
+        return columns, batches()
+
+    # The old layout: the whole document on that one line (or more, pretty-printed by hand).
+    rest = fh.read()
+    fh.close()
+    payload = json.loads(first + rest)
+    rows = payload.get('rows') or []
+
+    def old_batches():
+        for i in range(0, len(rows), size):
+            yield rows[i:i + size]
+    return payload.get('columns') or [], old_batches()
 
 
 def member_tables(names) -> list:

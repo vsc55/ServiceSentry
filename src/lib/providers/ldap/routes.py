@@ -15,6 +15,32 @@ from lib.providers.ldap.entry import attr_value, attr_values, first_named
 from lib.config.spec import cfg_default
 from lib.security.stored_secret import stored_secret_for
 
+#: Everything that decides where the bind password goes and how it travels. `use_ssl` and
+#: `ssl_verify` are part of it: a form that turns LDAPS off, or certificate checking off,
+#: would otherwise send the stored password in clear (or to whoever answers the TLS
+#: handshake) without naming a new server at all.
+_TARGET_KEYS = ('server', 'port', 'bind_dn', 'use_ssl', 'ssl_verify')
+
+
+def _with_defaults(stored_cfg: dict) -> dict:
+    """*stored_cfg* with the TLS flags it never saved read as their defaults, so a form that
+    sends the default value is not taken for a new destination."""
+    out = dict(stored_cfg or {})
+    for k in ('use_ssl', 'ssl_verify'):
+        if out.get(k) is None:
+            out[k] = cfg_default(f'ldap|{k}')
+    return out
+
+
+def _tls(use_ssl: bool, ssl_verify: bool):
+    """The ldap3 ``Tls`` the real sign-in uses (``ldap.auth``): without one, ldap3 opens
+    LDAPS with ``CERT_NONE`` — any certificate, so anyone in the path reads the bind."""
+    if not use_ssl:
+        return None
+    import ssl                                       # noqa: PLC0415
+    from ldap3 import Tls as _Tls                    # noqa: PLC0415
+    return _Tls(validate=ssl.CERT_REQUIRED if ssl_verify else ssl.CERT_NONE)
+
 
 def register(app, wa):
     """Register the ``/api/v1/auth/ldap/*`` config/test endpoints on *app*.
@@ -39,13 +65,16 @@ def register(app, wa):
         server   = (data.get('server') or stored_cfg.get('server') or '').strip()
         port     = int(data.get('port') or stored_cfg.get('port') or cfg_default('ldap|port'))
         use_ssl  = bool(data.get('use_ssl', stored_cfg.get('use_ssl', cfg_default('ldap|use_ssl'))))
+        ssl_verify = bool(data.get('ssl_verify', stored_cfg.get('ssl_verify',
+                                                                cfg_default('ldap|ssl_verify'))))
         timeout  = int(data.get('timeout') or stored_cfg.get('timeout') or cfg_default('ldap|timeout'))
         bind_dn  = (data.get('bind_dn') or stored_cfg.get('bind_dn') or '').strip()
 
         # stored_cfg comes from _read_config_file which already decrypts sensitive values.
-        # The stored password only goes to the stored server and account (stored_secret).
-        bind_password = stored_secret_for(data, stored_cfg, 'bind_password',
-                                          ('server', 'port', 'bind_dn')).strip()
+        # The stored password only goes to the stored server and account, the way it went
+        # (stored_secret).
+        bind_password = stored_secret_for(data, _with_defaults(stored_cfg), 'bind_password',
+                                          _TARGET_KEYS).strip()
 
         if not server:
             return jsonify({'ok': False, 'message': wa._t('ldap_test_missing')}), 200
@@ -55,7 +84,7 @@ def register(app, wa):
 
         try:
             from ldap3 import Server as _Srv, Connection as _Conn, ALL as _ALL, SUBTREE as _SUBTREE
-            srv  = _Srv(server, port=port, use_ssl=use_ssl, get_info=_ALL, connect_timeout=timeout)
+            srv  = _Srv(server, port=port, use_ssl=use_ssl, tls=_tls(use_ssl, ssl_verify), get_info=_ALL, connect_timeout=timeout)
             conn = _Conn(srv, user=bind_dn or None, password=bind_password or None,
                          auto_bind=True, receive_timeout=timeout)
             conn.unbind()
@@ -81,7 +110,7 @@ def register(app, wa):
         search_filter = user_filter.replace('{username}', ldap_auth._ldap_escape(test_username))
 
         try:
-            srv  = _Srv(server, port=port, use_ssl=use_ssl, get_info=_ALL, connect_timeout=timeout)
+            srv  = _Srv(server, port=port, use_ssl=use_ssl, tls=_tls(use_ssl, ssl_verify), get_info=_ALL, connect_timeout=timeout)
             conn = _Conn(srv, user=bind_dn or None, password=bind_password or None,
                          auto_bind=True, receive_timeout=timeout)
             conn.search(base_dn, search_filter, search_scope=_SUBTREE,
@@ -154,6 +183,7 @@ def register(app, wa):
         server  = stored_cfg.get('server', '').strip()
         port    = int(stored_cfg.get('port') or cfg_default('ldap|port'))
         use_ssl = bool(stored_cfg.get('use_ssl', cfg_default('ldap|use_ssl')))
+        ssl_verify = bool(stored_cfg.get('ssl_verify', cfg_default('ldap|ssl_verify')))
         timeout = int(stored_cfg.get('timeout') or cfg_default('ldap|timeout'))
         bind_dn = stored_cfg.get('bind_dn', '').strip()
         bind_password = stored_cfg.get('bind_password') or ''
@@ -166,7 +196,7 @@ def register(app, wa):
         import re
         try:
             from ldap3 import Server as _Srv, Connection as _Conn, NONE as _NONE, BASE as _BASE
-            srv  = _Srv(server, port=port, use_ssl=use_ssl, get_info=_NONE, connect_timeout=timeout)
+            srv  = _Srv(server, port=port, use_ssl=use_ssl, tls=_tls(use_ssl, ssl_verify), get_info=_NONE, connect_timeout=timeout)
             conn = _Conn(srv, user=bind_dn or None, password=bind_password or None,
                          auto_bind=True, receive_timeout=timeout)
             conn.search(dn, '(objectClass=*)', search_scope=_BASE, attributes=['cn', 'displayName'])
@@ -197,14 +227,17 @@ def register(app, wa):
         server  = (data.get('server') or stored_cfg.get('server') or '').strip()
         port    = int(data.get('port') or stored_cfg.get('port') or cfg_default('ldap|port'))
         use_ssl = bool(data.get('use_ssl', stored_cfg.get('use_ssl', cfg_default('ldap|use_ssl'))))
+        ssl_verify = bool(data.get('ssl_verify', stored_cfg.get('ssl_verify',
+                                                               cfg_default('ldap|ssl_verify'))))
         timeout = int(data.get('timeout') or stored_cfg.get('timeout') or cfg_default('ldap|timeout'))
         bind_dn = (data.get('bind_dn') or stored_cfg.get('bind_dn') or '').strip()
         base_dn = (data.get('base_dn') or stored_cfg.get('base_dn') or '').strip()
 
         # stored_cfg comes from _read_config_file which already decrypts sensitive values.
-        # The stored password only goes to the stored server and account (stored_secret).
-        bind_password = stored_secret_for(data, stored_cfg, 'bind_password',
-                                          ('server', 'port', 'bind_dn')).strip()
+        # The stored password only goes to the stored server and account, the way it went
+        # (stored_secret).
+        bind_password = stored_secret_for(data, _with_defaults(stored_cfg), 'bind_password',
+                                          _TARGET_KEYS).strip()
 
         if not server:
             return jsonify({'ok': False, 'message': wa._t('ldap_test_missing')}), 200
@@ -214,7 +247,7 @@ def register(app, wa):
             from ldap3 import Server as _Srv, Connection as _Conn, NONE as _NONE, SUBTREE as _SUBTREE
             # get_info=NONE skips client-side schema validation so objectClass=group
             # is sent to the server as-is rather than being rejected before the query.
-            srv  = _Srv(server, port=port, use_ssl=use_ssl, get_info=_NONE, connect_timeout=timeout)
+            srv  = _Srv(server, port=port, use_ssl=use_ssl, tls=_tls(use_ssl, ssl_verify), get_info=_NONE, connect_timeout=timeout)
             conn = _Conn(srv, user=bind_dn or None, password=bind_password or None,
                          auto_bind=True, receive_timeout=timeout)
             _gf = ('(|(objectClass=group)(objectClass=posixGroup)'

@@ -123,7 +123,9 @@ class FileStore(BaseStore):
             (uid, str(scope or 'type'), str(ref_uid),
              str(kind if kind in KINDS else 'other'),
              clean_label(label) or str(stored), str(stored), int(size or 0),
-             BaseStore._now(), str(actor or '')))
+             # In the columns' order: `created_by`, then `created_at`. They went the other way
+             # round, so every attachment said it was uploaded by a timestamp, at a username.
+             str(actor or ''), BaseStore._now()))
         self._db.commit()
         return uid
 

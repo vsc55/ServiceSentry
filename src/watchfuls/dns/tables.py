@@ -29,6 +29,21 @@ so they belong to none of the three.
 
 _SOCKET_TYPES = frozenset({'A', 'AAAA'})
 
+# Every record type this module will put into a query. A type reaches a command line
+# (`Resolve-DnsName -Type`, `nslookup -type=`, `dig`), so it is checked against this list
+# BEFORE any command is built - the schema offers a dropdown, but the stored value is
+# whatever the save carried, and an unquoted `A;calc` in a PowerShell `-Command` ran on the
+# panel. Superset of the schema's `options`, the discovery probe types and the categories.
+_KNOWN_TYPES = frozenset({'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'PTR', 'SOA', 'SRV', 'CAA'})
+
+
+def safe_record_type(record_type) -> str:
+    """The record type upper-cased, or ``ValueError`` when it is not one this module knows."""
+    rt = str(record_type or '').strip().upper()
+    if rt not in _KNOWN_TYPES:
+        raise ValueError(f'unsupported DNS record type {str(record_type)[:20]!r}')
+    return rt
+
 # Record types probed at the domain apex during discovery (overridable in the
 # schema via the "list" collection's __discovery_probe_types__).
 _DEFAULT_PROBE_TYPES = ('A', 'AAAA', 'MX', 'TXT', 'NS', 'SOA', 'CNAME', 'CAA', 'SRV')

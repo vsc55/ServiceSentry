@@ -209,6 +209,8 @@ class _ConfigMixin:
         # _IPBAN_WHITELIST from wa_cfg itself, wiring in _IpBanMixin).
         self._apply_ipban_config(wa_cfg)
         self._push_job_history_limits()
+        from lib.security import net_guard  # noqa: PLC0415
+        net_guard.set_max_redirects(getattr(self, '_MAX_REDIRECTS', None))
 
     def _push_job_history_limits(self) -> None:
         """Hand the job-history limits to :mod:`lib.core.jobs.record`, which holds its own
@@ -369,3 +371,5 @@ class _ConfigMixin:
         self._env_locked = frozenset(locked)
         self._env_override_values = overrides
         self._push_job_history_limits()
+        from lib.security import net_guard  # noqa: PLC0415
+        net_guard.set_max_redirects(getattr(self, '_MAX_REDIRECTS', None))

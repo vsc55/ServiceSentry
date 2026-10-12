@@ -22,21 +22,64 @@ from lib.debug.debug_level import DebugLevel
 from lib.util.tools import fmt_bytes
 
 from .archive import (PARTS_PREFIX, archive_path, clean_cell, DB_DIR, file_sha256,
-                      FILES_DIR, _log, backups_dir, FORMAT, MANIFEST_NAME, valid_name)
+                      FILES_DIR, _log, backups_dir, FORMAT, MANIFEST_NAME, valid_name,
+                      write_table_member)
 from . import parts as _parts
 from .parts import conn_for, part_ids, tables_by_part, PARTS
 
 
-def _dump_table(connector, table: str, keep_secrets: bool) -> dict:
-    cols = [c.name for c in connector.describe_table(table)]
-    if not cols:
-        return {'columns': [], 'rows': []}
-    quoted = ', '.join(connector.quote_ident(c) for c in cols)
-    rows = connector.fetchall(f'SELECT {quoted} FROM {connector.quote_ident(table)}')
-    return {
-        'columns': cols,
-        'rows': [[clean_cell(v, keep_secrets) for v in row] for row in rows],
-    }
+#: Rows per round trip when a table is read for a copy. Big enough that the round trips do not
+#: dominate, small enough that one batch of wide rows is megabytes, not gigabytes.
+DUMP_BATCH = 5000
+
+
+def _table_batches(connector, table: str, cols: list, pk: list, size: int | None = None):
+    """Every row of *table*, in lists of up to *size*, never the whole table at once.
+
+    By its primary key when it has one — keyset pagination (`WHERE pk > last ORDER BY pk
+    LIMIT n`): each page is an index range scan, the same cost on page 5,000 as on page 1,
+    and no cursor is held open between pages. A table with no key (`history_fact`, on
+    purpose) is streamed through the engine's own cursor instead (`iter_query`).
+    """
+    size = int(size or DUMP_BATCH)
+    q = connector.quote_ident
+    quoted = ', '.join(q(c) for c in cols)
+    src = q(table)
+    if not pk:
+        yield from connector.iter_query(f'SELECT {quoted} FROM {src}', (), size)
+        return
+    at = [cols.index(c) for c in pk]
+    order = ', '.join(q(c) for c in pk)
+    after = (f'{q(pk[0])} > ?' if len(pk) == 1
+             else f'({order}) > ({", ".join("?" * len(pk))})')
+    last = None
+    while True:
+        if last is None:
+            rows = connector.fetchall(
+                f'SELECT {quoted} FROM {src} ORDER BY {order} LIMIT {int(size)}')
+        else:
+            rows = connector.fetchall(
+                f'SELECT {quoted} FROM {src} WHERE {after} ORDER BY {order} LIMIT {int(size)}',
+                last)
+        if not rows:
+            return
+        yield rows
+        if len(rows) < size:
+            return
+        last = tuple(rows[-1][i] for i in at)
+
+
+def _dump_table(zf, member: str, connector, table: str, keep_secrets: bool) -> tuple:
+    """Write *table* into *zf* as *member*, batch by batch. ``(rows, sha256)``."""
+    info = connector.describe_table(table)
+    cols = [c.name for c in info]
+    # The key in the order the engine numbers it (SQLite: position in the key; the others
+    # flag membership only, and any fixed order pages correctly).
+    pk = [c.name for c in sorted((c for c in info if c.pk), key=lambda c: c.pk)]
+    batches = (
+        [[clean_cell(v, keep_secrets) for v in row] for row in rows]
+        for rows in (_table_batches(connector, table, cols, pk) if cols else ()))
+    return write_table_member(zf, member, cols, batches)
 
 
 def _add_tree(zf: zipfile.ZipFile, root: str, arc_prefix: str) -> int:
@@ -154,14 +197,11 @@ def create_backup(connector, name: str, *, var_dir: str, config_dir: str,
                         except Exception:      # pylint: disable=broad-except
                             pass               # a broken reporter must not lose the backup
                     try:
-                        data = _dump_table(src, table, include_secrets)
-                        blob = json.dumps(data, ensure_ascii=False,
-                                          separators=(',', ':')).encode('utf-8')
                         member = f'{DB_DIR}/{table}.json'
-                        zf.writestr(member, blob)
-                        digests[member] = hashlib.sha256(blob).hexdigest()
-                        counts[table] = len(data['rows'])
-                        step['rows'] += len(data['rows'])
+                        n, digests[member] = _dump_table(zf, member, src, table,
+                                                         include_secrets)
+                        counts[table] = n
+                        step['rows'] += n
                     except Exception as exc:      # pylint: disable=broad-except
                         # One unreadable table marks its PART and lets the rest continue: a
                         # backup holding nine of ten tables is worth having, and one that

@@ -91,6 +91,19 @@ def build(app, wa):
                 out.append(dcim_owners.opaque(row))
         return out
 
+    def _readable(rows, store, said, allowed, scope, reach=None):
+        """`_filtered` without the opaque rows: only what this caller may READ.
+
+        The opaque row is for one screen, the rack elevation, where a U being taken is the fact.
+        Everywhere else an item is listed to be named, cabled, placed or traced, and an opaque
+        row there is a uid to hang somebody else's cables on (the site circuits), a key the
+        answer then looks up and does not find (the sockets of a source: a 500), or a box with no
+        geometry drawn at (0, 0) and selectable (a room's items). One rule, here, so a route that
+        lists items to read them cannot get it half right.
+        """
+        return [r for r in _filtered(rows, store, said, allowed, scope, reach)
+                if not r.get('foreign')]
+
     def _may_write(store, said, allowed, scope, uid) -> bool:
         """Whether this caller may change one thing. Checked on what is being CHANGED."""
         return dcim_owners.may_see(_owner_of(store, said, scope, uid), allowed)
@@ -336,6 +349,7 @@ def build(app, wa):
         names=_names,
         owner_of=_owner_of,
         filtered=_filtered,
+        readable=_readable,
         may_write=_may_write,
         media_dir=_media_dir,
         from_type=_from_type,

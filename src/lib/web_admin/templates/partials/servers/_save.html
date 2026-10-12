@@ -448,7 +448,13 @@ function _setProfileField(proto, field, value) {
     }
 }
 
-async function saveDeviceModal(closeAfter = true) {
+// One save at a time: a double click on Save (or Save, then Save & close) while the POST of a
+// NEW device is still in flight would otherwise create it twice.
+function saveDeviceModal(closeAfter = true) {
+    return ssOnce('device-save', () => _saveDeviceModal(closeAfter));
+}
+
+async function _saveDeviceModal(closeAfter = true) {
     const errEl = document.getElementById('deviceModalError');
     if (errEl) errEl.textContent = '';
     const d = _deviceDraft;

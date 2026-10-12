@@ -85,15 +85,28 @@ def register(app, wa):
 
     @app.route('/status')
     def public_status():
-        """Public status page — always visible to logged-in users; only to guests when public_status=True."""
+        """Status page. Who sees what:
+
+        * a signed-in user (or API token) who may read check results (``checks_view`` /
+          ``checks_run``) — every check, by name, with its detail;
+        * anybody else — a guest, or a signed-in account without that permission — the
+          page only while it is public (``public_status``), and then the module-level
+          summary; the per-check breakdown only if the administrator also chose to show
+          it to guests (``public_status_detail``). Not public: 404, for both.
+
+        Being signed in used to be enough for the full detail: an account holding nothing
+        but, say, ``dcim_view`` read every check's label and message here — names of
+        machines and addresses the rest of the panel withholds from it."""
         logged_in = wa._check_session()
-        if not wa._PUBLIC_STATUS and not logged_in:
+        may_read = logged_in and bool(
+            wa._get_session_permissions() & {'checks_view', 'checks_run'})
+        if not wa._PUBLIC_STATUS and not may_read:
             abort(404)
 
-        # Per-item detail: always for logged-in users; for guests only when the
-        # "detail for guests" option is enabled. Otherwise show module-level
+        # Per-item detail: for whoever may read check results; for everyone else only
+        # when the "detail for guests" option is enabled. Otherwise show module-level
         # status only (no per-item breakdown).
-        show_detail = logged_in or bool(getattr(wa, '_PUBLIC_STATUS_DETAIL', False))
+        show_detail = may_read or bool(getattr(wa, '_PUBLIC_STATUS_DETAIL', False))
 
         # ── Language priority ──────────────────────────────────────────
         # 1. User preference (set in their session)
@@ -158,6 +171,12 @@ def register(app, wa):
                 'pct': round(100 * mod_ok / n) if n else 100,
                 'all_ok': mod_ok == n,
             })
+
+        if not show_detail:
+            # The template draws no per-check row without `show_detail`; nothing it does
+            # not draw should reach it either.
+            for _m in modules:
+                _m['checks'] = []
 
         overall_ok = total_all == 0 or total_ok == total_all
         overall_pct = round(100 * total_ok / total_all) if total_all else 100

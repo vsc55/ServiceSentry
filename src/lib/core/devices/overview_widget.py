@@ -38,6 +38,28 @@ def _device_checks(status_raw: dict, modules_raw: dict) -> dict:
     return out
 
 
+def _visible_devices(wa):
+    """The device uids the caller may see — ``None`` for all of them — by the rule the
+    device list applies (``api_get_devices``): ``devices_view`` sees every device, a
+    ``server.<uid>.view`` grant sees that one.
+
+    The three widgets built from these rows are open to anyone holding ANY ``server.*``
+    grant, and used to count, name and tally the whole fleet for them: a user confined to
+    one machine read every other one's name, status and checks off the Overview. Outside a
+    request (no session to ask) the caller is the server itself, and sees everything."""
+    try:
+        from flask import has_request_context  # noqa: PLC0415
+    except ImportError:                       # a Flask-less service process
+        return None
+    if not has_request_context():
+        return None
+    perms = wa._get_session_permissions()
+    if 'devices_view' in perms:
+        return None
+    return {p[len('server.'):-len('.view')] for p in perms
+            if p.startswith('server.') and p.endswith('.view')}
+
+
 def server_list_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> list:
     """Per-device rows for the servers_list table (name/status/checks/modules), sorted by
     name and filtered server-side by *f* (``''`` all, ``'error'``, ``'maint'``,
@@ -54,6 +76,9 @@ def server_list_rows(wa, f: str = '', *, status_raw=None, modules_raw=None) -> l
         if modules_raw is None:
             modules_raw = wa._load_modules() or {}
         devices = hstore.list(decrypt=False) or []
+        allowed = _visible_devices(wa)
+        if allowed is not None:
+            devices = [h for h in devices if h.get('uid') in allowed]
         hstatuses = _device_statuses(wa)
         hbound = _device_bound_modules(wa)
         hchecks = _device_checks(status_raw, modules_raw)

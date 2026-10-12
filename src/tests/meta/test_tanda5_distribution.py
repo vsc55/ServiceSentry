@@ -271,7 +271,8 @@ class TestHelmVarOwnership:
             pytest.skip('helm not installed')
         out = subprocess.run(
             [helm, 'template', 't', _HELM, '--set', 'auth.password=x',
-             '--set', 'database.password=y', '--set', 'database.host=db', *extra],
+             '--set', 'database.password=y', '--set', 'database.host=db',
+             '--set', 'generateSecrets=true', *extra],   # the key is not under test here
             capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out.stderr
         docs = out.stdout.split('\n---\n')
